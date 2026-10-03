@@ -85,15 +85,16 @@ export function keepSupportedSentences(
   }
   // A one-letter ticker ("A") cannot be told from the article, so it is never
   // recognized; sentences quoting its figures are dropped.
-  // The currency prefixes the figures are written with ("CHF ", "CN¥", "$"),
-  // so a label that is one ("CHF 3.1B") is told from a ticker before a figure
-  // ("NVDA 74.6%").
+  // The currency prefixes the figures are written with ("CHF ", "F CFA ", "$"),
+  // so a label inside one ("CHF 3.1B", "CFA" in "F CFA 3.1B") is told from a
+  // ticker before a figure ("NVDA 74.6%").
   const prefixes = new Set(attributedFigures.map((figure) => spaced(figure.value.match(/^[-−]?(\D*)/)![1])).filter(Boolean));
   const companies = [...new Set(attributedFigures.map((figure) => figure.company))]
     .filter((company) => company.length > 1);
 
   const removed: string[] = [];
-  const lines: string[] = [];
+  // null marks a line the guard dropped whole.
+  const lines: Array<string | null> = [];
   // Lines are boundaries too, so each bullet of a list is judged on its own.
   for (const line of text.trim().split(/\r?\n/)) {
     if (line.trim() === "") {
@@ -113,7 +114,9 @@ export function keepSupportedSentences(
       const numbers = allNumbers.filter((n) => !mentions.some((m) => within(n.index, m.index, m.company.length)));
       const named = mentions.filter((m) => !numbers.some((n) =>
         within(m.index, n.index, n.end - n.index) ||
-        (n.index >= m.index + m.company.length && prefixes.has(spaced(sentence.slice(m.index, n.index))))
+        (n.index >= m.index + m.company.length && [...prefixes].some((prefix) =>
+          n.index - prefix.length <= m.index && spaced(sentence.slice(0, n.index)).endsWith(prefix)
+        ))
       ));
       if (numbers.some(({ number }) => !supported.has(number) && !owners.has(number))) {
         removed.push(sentence);
@@ -170,21 +173,23 @@ export function keepSupportedSentences(
       if (!isSupported) removed.push(sentence);
       return isSupported;
     });
-    if (kept.length > 0) lines.push(lead + kept.join(" "));
+    lines.push(kept.length > 0 ? lead + kept.join(" ") : null);
   }
-  // A heading whose section lost everything goes too: nothing but blank lines
-  // and empty subheadings before the next heading at its level or above.
-  const level = (line: string) => HEADING.test(line) ? line.trim().match(/^#+/)?.[0].length ?? 7 : 0;
-  const hasContent = (i: number): boolean => {
+  // A heading whose section lost everything goes too: the guard dropped lines
+  // before the next heading at its level or above, and kept none of them.
+  // A bold sentence reads as a heading, so one that lost nothing stays.
+  const level = (line: string | null) => line !== null && HEADING.test(line) ? line.trim().match(/^#+/)?.[0].length ?? 7 : 0;
+  const keepHeading = (i: number): boolean => {
+    let lost = false;
     for (const line of lines.slice(i + 1)) {
-      if (line.trim() === "") continue;
-      const sub = level(line);
-      if (sub === 0) return true;
-      if (sub <= level(lines[i])) return false;
+      if (line === null) lost = true;
+      else if (line.trim() === "") continue;
+      else if (level(line) === 0) return true;
+      else if (level(line) <= level(lines[i])) break;
     }
-    return false;
+    return !lost;
   };
-  const shown = lines.filter((line, i) => level(line) === 0 || hasContent(i));
+  const shown = lines.filter((line, i): line is string => line !== null && (level(line) === 0 || keepHeading(i)));
   return { text: shown.join("\n").replace(/\n{3,}/g, "\n\n").trim(), removed };
 }
 

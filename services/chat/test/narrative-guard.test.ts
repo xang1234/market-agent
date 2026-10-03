@@ -67,6 +67,10 @@ test("a heading whose whole section was dropped goes with it; one with content s
     DISPLAYED,
   );
   assert.equal(nested.text, "## Analysis\n### Revenue\nRevenue reached $62.1B in Q4 2026.");
+  // A bold sentence the guard kept is no empty heading, last line or not.
+  for (const text of ["**Revenue reached $62.1B in Q4 2026.**", "**Revenue reached $62.1B in Q4 2026.**\n## Margins\nMargins held up."]) {
+    assert.deepEqual(keepSupportedSentences(text, DISPLAYED), { text, removed: [] });
+  }
 });
 
 test("keeps paragraph breaks between supported paragraphs", () => {
@@ -360,6 +364,10 @@ test("a ticker that is also a currency prefix does not break that currency's fig
   assert.equal(keepSupportedSentences("AMD's operating income was CHF 3.1B.", [], positive).removed.length, 1);
   // Written with a plain space by the model, it is still the prefix.
   assert.equal(keepSupportedSentences("AMD's operating income was CHF 3.1B.", [], positive).removed.length, 1);
+  // Nor a label that is a later word of a compound prefix ("CFA" in "F CFA 3.1B").
+  const compound = [{ company: "CFA", value: "F CFA 3.1B" }, { company: "AMD", value: "$4.2B" }];
+  assert.deepEqual(keepSupportedSentences("CFA's operating income was F CFA 3.1B.", [], compound).removed, []);
+  assert.equal(keepSupportedSentences("AMD's operating income was F CFA 3.1B.", [], compound).removed.length, 1);
 });
 
 test("a ticker written right before its figure still owns it (#144)", () => {
