@@ -21,7 +21,7 @@ test('windowedDailyQuery binds all five dimensions of the spec series query', ()
   const q = windowedDailyQuery(APPLE_LISTING_ID, 30, FIXED_END)
   assert.deepEqual(q.subject_refs, [{ kind: 'listing', id: APPLE_LISTING_ID }])
   assert.equal(q.interval, '1d')
-  assert.equal(q.basis, 'split_and_div_adjusted')
+  assert.equal(q.basis, 'split_adjusted')
   assert.equal(q.normalization, 'raw')
   assert.equal(q.range.end, FIXED_END)
 })
@@ -54,7 +54,7 @@ test('fetchSeries POSTs JSON, sends the binding query, and returns the GetSeries
             delay_class: 'delayed_15m',
             currency: 'USD',
             source_id: POLYGON_SOURCE_ID,
-            adjustment_basis: 'split_and_div_adjusted',
+            adjustment_basis: 'split_adjusted',
           },
         },
       },
@@ -140,7 +140,7 @@ test('dailySeriesQuery anchors the range end and binds the daily-bars contract',
   assert.ok(query !== null)
   assert.equal(query.range.end, '2026-06-12T00:00:00.000Z')
   assert.equal(query.interval, '1d')
-  assert.equal(query.basis, 'split_and_div_adjusted')
+  assert.equal(query.basis, 'split_adjusted')
   assert.equal(query.normalization, 'pct_return')
   assert.equal(
     (Date.parse(query.range.end) - Date.parse(query.range.start)) / (24 * 60 * 60 * 1000),

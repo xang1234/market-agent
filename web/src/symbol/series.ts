@@ -160,12 +160,13 @@ export function dailySeriesQuery(
       end: new Date(anchorMs).toISOString(),
     },
     interval: '1d',
-    basis: 'split_and_div_adjusted',
+    basis: 'split_adjusted',
     normalization,
   }
 }
 
-// split_and_div_adjusted is the only basis the market service emits today.
+// Price charts use split-adjusted prices (Polygon's aggregates, #191); dividend
+// adjustment would rewrite past prices.
 export function windowedDailyQuery(
   listingId: string,
   days: number,
@@ -177,7 +178,7 @@ export function windowedDailyQuery(
     subject_refs: [{ kind: 'listing', id: listingId }],
     range: { start: new Date(startMs).toISOString(), end: new Date(endMs).toISOString() },
     interval: '1d',
-    basis: 'split_and_div_adjusted',
+    basis: 'split_adjusted',
     normalization: 'raw',
   }
 }

@@ -130,7 +130,7 @@ test("normalized records carry the spec §6.2.1 required metadata fields", async
     assert.ok(quote[key] !== undefined && quote[key] !== "", `quote missing ${key}`);
   }
 
-  const barsOutcome = await polygon.getBars({
+  const barsOutcome = await polygon.getBars({ adjustment_basis: "split_adjusted",
     listing: aaplListing,
     interval: "1d",
     range: {

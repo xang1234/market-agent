@@ -167,6 +167,7 @@ function storedRow(r: SealedPriceRange) {
   return {
     bar_range_id: r.bar_range_id,
     listing_id: r.listing_id,
+    adjustment_basis: r.adjustment_basis,
     source_id: r.source_id,
     delay_class: r.delay_class,
     range_start: r.range_start,
@@ -215,4 +216,36 @@ test("each sealed series pins a digest of the stored bars, so a later refresh of
   for (const digest of digests(block)) assert.match(digest, /^[0-9a-f]{64}$/);
   assert.equal(digests(block)[0], digests(refreshed)[0]);
   assert.notEqual(digests(block)[1], digests(refreshed)[1]);
+});
+
+const LISTINGS = [{ id: NVDA.listing_id, label: "NVDA" }, { id: AMD.listing_id, label: "AMD" }];
+const asBasis = (r: SealedPriceRange, adjustment_basis: string) =>
+  ({ ...r, adjustment_basis, bar_range_id: `${r.bar_range_id.slice(0, -1)}${adjustment_basis.length % 10}` });
+
+test("prices on one basis are charted on it; split-adjusted returns say they exclude dividends (#191)", async () => {
+  const seen: string[] = [];
+  const rows = [NVDA, AMD].flatMap((r) => [storedRow(asBasis(r, "split_adjusted")), storedRow(asBasis(r, "split_and_div_adjusted"))]);
+  const db = { query: fakeQuery((text) => { seen.push(text); return { rows }; }) };
+  const [chart, disclosure] = await loadPerfComparisonBlocks(db, { listings: LISTINGS, snapshotId: SNAPSHOT_ID, asOf: AS_OF });
+  assert.equal(chart?.kind, "perf_comparison");
+  assert.equal(chart.basis, "split_adjusted", "split-adjusted first when every company has both");
+  assert.equal(chart.title, "Price return (split-adjusted, excluding dividends)");
+  const specs = chart.provenance_series_specs as Array<{ adjustment_basis: string }>;
+  assert.ok(specs.every((spec) => spec.adjustment_basis === "split_adjusted"));
+  assert.match((disclosure?.items as string[]).join(" "), /dividends are not included/);
+  // Polygon ranges stored under the old dividend-adjusted label are never read.
+  assert.match(seen[0], /not \(source_id = '00000000-0000-4000-a000-000000000009'::uuid and adjustment_basis = 'split_and_div_adjusted'\)/);
+});
+
+test("companies whose prices share no basis get a named gap instead of a chart (#191)", async () => {
+  const rows = [storedRow(asBasis(NVDA, "split_adjusted")), storedRow(asBasis(AMD, "split_and_div_adjusted"))];
+  const blocks = await loadPerfComparisonBlocks(
+    { query: fakeQuery(() => ({ rows })) },
+    { listings: LISTINGS, snapshotId: SNAPSHOT_ID, asOf: AS_OF },
+  );
+  assert.deepEqual(blocks.map((block) => block.kind), ["rich_text"]);
+  assert.equal(
+    (blocks[0].segments as Array<{ text: string }>)[0].text,
+    "Price performance is not shown: the stored prices are on different bases (NVDA's are split-adjusted only; AMD's are split- and dividend-adjusted), so their returns would not be comparable.",
+  );
 });

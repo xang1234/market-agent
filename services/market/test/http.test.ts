@@ -176,7 +176,7 @@ function validSeriesQuery(overrides: Partial<NormalizedSeriesQuery> = {}): Norma
     subject_refs: [{ kind: "listing", id: APPLE_LISTING_ID }],
     range: SERIES_RANGE,
     interval: "1d",
-    basis: "split_and_div_adjusted",
+    basis: "split_adjusted",
     normalization: "raw",
     ...overrides,
   };
@@ -211,7 +211,7 @@ test("POST /v1/market/series returns per-listing bars and echoes the binding que
   const bars = entry.outcome.data;
   assert.equal(bars.listing.id, APPLE_LISTING_ID);
   assert.equal(bars.interval, "1d");
-  assert.equal(bars.adjustment_basis, "split_and_div_adjusted");
+  assert.equal(bars.adjustment_basis, "split_adjusted");
   assert.equal(bars.currency, "USD");
   assert.equal(bars.source_id, DEV_POLYGON_SOURCE_ID);
   assert.ok(bars.bars.length > 0, "expected at least one bar in the dev range");
@@ -264,8 +264,8 @@ test("POST /v1/market/series surfaces missing_coverage for unknown listing witho
 
 test("POST /v1/market/series rejects mismatched basis as missing_coverage rather than relabeling bars", async (t) => {
   const url = await startServer(t, buildDeps());
-  // Polygon adapter only ever returns split_and_div_adjusted. Asking for any
-  // other basis is the "never silently swap" case from the bead contract.
+  // The fixture answers split-adjusted bars whatever is asked; asking for raw
+  // bars is the "never silently swap" case from the bead contract.
   const res = await postSeries(url, validSeriesQuery({ basis: "unadjusted" }));
 
   assert.equal(res.status, 200);
@@ -275,7 +275,7 @@ test("POST /v1/market/series rejects mismatched basis as missing_coverage rather
   if (outcome.outcome !== "unavailable") return;
   assert.equal(outcome.reason, "missing_coverage");
   assert.match(outcome.detail ?? "", /basis="unadjusted"/);
-  assert.match(outcome.detail ?? "", /split_and_div_adjusted/);
+  assert.match(outcome.detail ?? "", /"split_adjusted"/);
 });
 
 test("POST /v1/market/series rejects unsupported normalization at the request layer (400)", async (t) => {
@@ -405,7 +405,7 @@ test("GET /v1/market/cache-audit reports runtime series cache identity events", 
   assert.equal(body.dashboard.total, 1);
   assert.equal(body.dashboard.misses, 1);
   assert.equal(body.dashboard.byDimension.interval[0].value, "1d");
-  assert.equal(body.dashboard.byDimension.basis[0].value, "split_and_div_adjusted");
+  assert.equal(body.dashboard.byDimension.basis[0].value, "split_adjusted");
 });
 
 test("GET /v1/market/cache-audit reports hits only when the series response cache is reused", async (t) => {

@@ -65,7 +65,7 @@ export function createCachedMarketDataAdapter(
         listing: request.listing,
         interval: request.interval,
         range: request.range,
-        adjustment_basis: "split_and_div_adjusted",
+        adjustment_basis: request.adjustment_basis,
         now: nowIso,
       });
       if (fresh) return available(fresh.bars);
@@ -74,7 +74,7 @@ export function createCachedMarketDataAdapter(
         request.listing,
         request.interval,
         request.range,
-        "split_and_div_adjusted",
+        request.adjustment_basis,
       );
       const outcome = await provider.getBars(request);
       if (isAvailable(outcome)) {

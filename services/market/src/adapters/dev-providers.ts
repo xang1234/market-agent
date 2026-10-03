@@ -130,6 +130,7 @@ export function createDevProvidersMarketDataAdapter(
             ...sidecarListingBody(request.listing, ctx),
             interval: request.interval,
             range: request.range,
+            adjustment_basis: request.adjustment_basis,
           },
           fetchImpl,
           timeoutMs,

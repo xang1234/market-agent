@@ -89,7 +89,7 @@ test("dev providers market adapter returns adjusted daily bars for 1d requests",
     }), { status: 200, headers: { "content-type": "application/json" } }),
   });
 
-  const outcome = await adapter.getBars({ listing: aaplListing, interval: "1d", range: aaplBarRange });
+  const outcome = await adapter.getBars({ adjustment_basis: "split_and_div_adjusted", listing: aaplListing, interval: "1d", range: aaplBarRange });
 
   assert.equal(isAvailable(outcome), true);
   if (!isAvailable(outcome)) return;
@@ -116,7 +116,7 @@ test("dev providers market adapter does not call yfinance for intraday bars in s
     clock: () => new Date("2026-05-08T20:00:00.000Z"),
   });
 
-  const outcome = await adapter.getBars({ listing: aaplListing, interval: "1h", range: aaplBarRange });
+  const outcome = await adapter.getBars({ adjustment_basis: "split_and_div_adjusted", listing: aaplListing, interval: "1h", range: aaplBarRange });
 
   assert.equal(isUnavailable(outcome), true);
   if (!isUnavailable(outcome)) return;

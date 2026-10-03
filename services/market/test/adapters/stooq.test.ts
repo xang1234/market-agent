@@ -38,7 +38,7 @@ test("Stooq adapter parses CSV daily bars into normalized EOD market data", asyn
     clock: () => new Date("2026-05-10T12:00:00.000Z"),
   });
 
-  const outcome = await adapter.getBars({ listing: aaplListing, interval: "1d", range: dailyRange });
+  const outcome = await adapter.getBars({ adjustment_basis: "split_and_div_adjusted", listing: aaplListing, interval: "1d", range: dailyRange });
 
   assert.equal(isAvailable(outcome), true);
   if (!isAvailable(outcome)) return;
@@ -73,7 +73,7 @@ test("Stooq adapter returns unavailable for quotes and intraday bars", async () 
   });
 
   const quote = await adapter.getQuote({ listing: aaplListing });
-  const intraday = await adapter.getBars({ listing: aaplListing, interval: "15m", range: dailyRange });
+  const intraday = await adapter.getBars({ adjustment_basis: "split_and_div_adjusted", listing: aaplListing, interval: "15m", range: dailyRange });
 
   assert.equal(quote.outcome, "unavailable");
   assert.equal(quote.reason, "missing_coverage");
@@ -94,7 +94,7 @@ test("Stooq adapter handles empty, malformed, provider, and unsupported listing 
     clock: () => new Date("2026-05-10T12:00:00.000Z"),
   });
   assert.deepEqual(
-    await unsupported.getBars({ listing: aaplListing, interval: "1d", range: dailyRange }),
+    await unsupported.getBars({ adjustment_basis: "split_and_div_adjusted", listing: aaplListing, interval: "1d", range: dailyRange }),
     {
       outcome: "unavailable",
       reason: "missing_coverage",
@@ -113,7 +113,7 @@ test("Stooq adapter handles empty, malformed, provider, and unsupported listing 
     fetchImpl: async () => new Response("Date,Open,High,Low,Close,Volume\n"),
     clock: () => new Date("2026-05-10T12:00:00.000Z"),
   });
-  const emptyOutcome = await empty.getBars({ listing: aaplListing, interval: "1d", range: dailyRange });
+  const emptyOutcome = await empty.getBars({ adjustment_basis: "split_and_div_adjusted", listing: aaplListing, interval: "1d", range: dailyRange });
   assert.equal(emptyOutcome.outcome, "unavailable");
   assert.equal(emptyOutcome.reason, "missing_coverage");
   assert.equal(emptyOutcome.retryable, false);
@@ -125,7 +125,7 @@ test("Stooq adapter handles empty, malformed, provider, and unsupported listing 
     fetchImpl: async () => new Response("Date,Open,High,Low,Close,Volume\n2026-05-06,100,90,99,102,1000\n"),
     clock: () => new Date("2026-05-10T12:00:00.000Z"),
   });
-  const malformedOutcome = await malformed.getBars({ listing: aaplListing, interval: "1d", range: dailyRange });
+  const malformedOutcome = await malformed.getBars({ adjustment_basis: "split_and_div_adjusted", listing: aaplListing, interval: "1d", range: dailyRange });
   assert.equal(malformedOutcome.outcome, "unavailable");
   assert.equal(malformedOutcome.reason, "provider_error");
   assert.equal(malformedOutcome.retryable, false);
@@ -138,7 +138,7 @@ test("Stooq adapter handles empty, malformed, provider, and unsupported listing 
     fetchImpl: async () => new Response("slow down", { status: 429 }),
     clock: () => new Date("2026-05-10T12:00:00.000Z"),
   });
-  const rateLimitedOutcome = await rateLimited.getBars({ listing: aaplListing, interval: "1d", range: dailyRange });
+  const rateLimitedOutcome = await rateLimited.getBars({ adjustment_basis: "split_and_div_adjusted", listing: aaplListing, interval: "1d", range: dailyRange });
   assert.equal(rateLimitedOutcome.outcome, "unavailable");
   assert.equal(rateLimitedOutcome.reason, "rate_limited");
   assert.equal(rateLimitedOutcome.retryable, true);
@@ -150,7 +150,7 @@ test("Stooq adapter handles empty, malformed, provider, and unsupported listing 
     fetchImpl: async () => new Response("temporary outage", { status: 503 }),
     clock: () => new Date("2026-05-10T12:00:00.000Z"),
   });
-  const providerDownOutcome = await providerDown.getBars({ listing: aaplListing, interval: "1d", range: dailyRange });
+  const providerDownOutcome = await providerDown.getBars({ adjustment_basis: "split_and_div_adjusted", listing: aaplListing, interval: "1d", range: dailyRange });
   assert.equal(providerDownOutcome.outcome, "unavailable");
   assert.equal(providerDownOutcome.reason, "provider_error");
   assert.equal(providerDownOutcome.retryable, true);

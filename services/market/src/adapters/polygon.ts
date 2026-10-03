@@ -158,6 +158,18 @@ export function createPolygonAdapter(deps: PolygonAdapterDeps): MarketDataAdapte
       // masquerading as provider unavailability.
       assertListingRef(request.listing, "getBars.request.listing");
       assertBarRange(request.range, "getBars.request.range");
+      // Polygon's aggregates are split-adjusted (adjusted=true) or raw
+      // (adjusted=false); they are never dividend-adjusted (#191).
+      if (request.adjustment_basis === "split_and_div_adjusted") {
+        return unavailable({
+          reason: "missing_coverage",
+          listing: request.listing,
+          source_id: deps.sourceId,
+          as_of: clock().toISOString(),
+          retryable: false,
+          detail: "polygon: aggregates are split-adjusted only; dividend-adjusted bars are unsupported",
+        });
+      }
 
       try {
         const ctx = await resolveListing(deps, request.listing);
@@ -168,7 +180,7 @@ export function createPolygonAdapter(deps: PolygonAdapterDeps): MarketDataAdapte
         const path =
           `/v2/aggs/ticker/${encodeURIComponent(ctx.ticker)}/range/` +
           `${tspec.multiplier}/${tspec.timespan}/${startMs}/${endMs}` +
-          `?adjusted=true&sort=asc&limit=50000`;
+          `?adjusted=${request.adjustment_basis === "split_adjusted"}&sort=asc&limit=50000`;
         const pages = await fetchAggPages(deps.fetcher, path);
 
         const rawBars = pages.flatMap((page) => page.results ?? []);
@@ -409,12 +421,13 @@ function aggregateAdjustmentBasis(pages: PolygonAggsPayload[]): AdjustmentBasis 
     }
   }
   if (first === undefined) {
-    // We always send `?adjusted=true`, so a missing flag in the response means
+    // We always send `?adjusted=`, so a missing flag in the response means
     // we can't confirm whether values were adjusted. Surfacing as malformed
     // (vs. silently defaulting to "unadjusted") prevents misclassified series.
     throw new MalformedPayloadError("aggregate response missing adjusted flag");
   }
-  return first ? "split_and_div_adjusted" : "unadjusted";
+  // Split adjustment only: Polygon does not adjust aggregates for dividends (#191).
+  return first ? "split_adjusted" : "unadjusted";
 }
 
 // Polygon's `market_status` values: open, closed, early_hours, late_hours, extended-hours.

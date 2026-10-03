@@ -203,9 +203,10 @@ class YFinanceProvider:
         timezone: str,
         range_start: str,
         range_end: str,
+        dividend_adjusted: bool = True,
     ) -> list[dict[str, Any]]:
         symbol = yahoo_symbol_for_listing(ticker, mic)
-        frame = self._ticker_history(symbol, timezone, range_start, range_end)
+        frame = self._ticker_history(symbol, timezone, range_start, range_end, dividend_adjusted)
         return normalize_daily_bars(
             frame_rows(frame),
             timezone=timezone,
@@ -290,15 +291,18 @@ class YFinanceProvider:
             info = ticker.info
         return info if isinstance(info, dict) else {}
 
-    def _ticker_history(self, symbol: str, timezone: str, range_start: str, range_end: str) -> Any:
+    def _ticker_history(
+        self, symbol: str, timezone: str, range_start: str, range_end: str, dividend_adjusted: bool = True
+    ) -> Any:
         import yfinance as yf
 
         ticker = yf.Ticker(symbol)
+        # auto_adjust=False leaves Yahoo's OHLC split-adjusted only (Adj Close is unused).
         return ticker.history(
             start=_local_date_for_range(range_start, timezone).isoformat(),
             end=_local_date_for_range(range_end, timezone).isoformat(),
             interval="1d",
-            auto_adjust=True,
+            auto_adjust=dividend_adjusted,
         )
 
 

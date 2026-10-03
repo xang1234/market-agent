@@ -317,7 +317,8 @@ async function seedQuote(client: Client, company: GoldenCompany): Promise<void> 
 }
 
 // A deterministic walk back from prev_close to the quote price over BAR_DAYS
-// sessions; enough for a performance chart, not a market-data source.
+// sessions; enough for a performance chart, not a market-data source. Stored as
+// Polygon stores daily bars: split-adjusted only (#191).
 async function seedDailyBars(client: Client, company: GoldenCompany): Promise<void> {
   const end = new Date(GOLDEN_AS_OF);
   const start = new Date(end.getTime() - BAR_DAYS * 24 * 60 * 60 * 1000);
@@ -325,7 +326,7 @@ async function seedDailyBars(client: Client, company: GoldenCompany): Promise<vo
     `insert into market_bar_ranges
        (listing_id, source_id, provider, interval, adjustment_basis, range_start, range_end,
         as_of, delay_class, currency, fetched_at, expires_at)
-     values ($1::uuid, $2::uuid, 'golden_fixture', '1d', 'split_and_div_adjusted', $3::timestamptz,
+     values ($1::uuid, $2::uuid, 'golden_fixture', '1d', 'split_adjusted', $3::timestamptz,
              $4::timestamptz, $4::timestamptz, 'eod', 'USD', $4::timestamptz,
              $4::timestamptz + interval '100 years')
      returning bar_range_id::text as bar_range_id`,

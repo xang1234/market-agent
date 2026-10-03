@@ -351,6 +351,7 @@ async function fanOutOne(
       listing,
       interval: query.interval,
       range: canonicalizeProviderBarRange(query.range, query.interval, record.timezone),
+      adjustment_basis: query.basis,
     });
 
     if (isAvailable(outcome) && outcome.data.adjustment_basis !== query.basis) {

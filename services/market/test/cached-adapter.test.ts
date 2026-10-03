@@ -87,8 +87,8 @@ test("cached adapter stores and serves Stooq daily bars through the normal bars 
     clock: () => new Date("2026-05-08T20:05:00.000Z"),
   });
 
-  const first = await adapter.getBars({ listing: aaplListing, interval: "1d", range: aaplBarRange });
-  const second = await adapter.getBars({ listing: aaplListing, interval: "1d", range: aaplBarRange });
+  const first = await adapter.getBars({ adjustment_basis: "split_and_div_adjusted", listing: aaplListing, interval: "1d", range: aaplBarRange });
+  const second = await adapter.getBars({ adjustment_basis: "split_and_div_adjusted", listing: aaplListing, interval: "1d", range: aaplBarRange });
 
   assert.equal(isAvailable(first), true);
   assert.equal(isAvailable(second), true);

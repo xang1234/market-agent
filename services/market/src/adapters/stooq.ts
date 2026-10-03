@@ -65,6 +65,14 @@ export function createStooqMarketDataAdapter(
           `stooq: interval ${request.interval} is not supported; EOD daily bars only`,
         );
       }
+      if (request.adjustment_basis !== "split_and_div_adjusted") {
+        return unsupported(
+          request.listing,
+          options.sourceId,
+          clock,
+          `stooq: only split_and_div_adjusted bars; ${request.adjustment_basis} is not supported`,
+        );
+      }
 
       try {
         const ctx = await options.resolveListing(request.listing);

@@ -406,7 +406,7 @@ test("polygon adapter rejects malformed listing refs before resolving or fetchin
   assert.equal(fetched, false, "quote lookup should not fetch malformed listing refs");
 
   await assert.rejects(
-    adapter.getBars({
+    adapter.getBars({ adjustment_basis: "split_adjusted",
       listing: malformedListing,
       interval: "1d",
       range: aaplBarRange,
@@ -433,7 +433,7 @@ test("polygon adapter throws (does NOT wrap) when caller passes a malformed bar 
   // Caller bugs (bad range) intentionally throw so they don't masquerade as
   // provider unavailability — that would mask real consumer errors.
   await assert.rejects(
-    adapter.getBars({
+    adapter.getBars({ adjustment_basis: "split_adjusted",
       listing: aaplListing,
       interval: "1d",
       range: { start: "2026-04-22", end: "2026-04-23" },
@@ -443,7 +443,7 @@ test("polygon adapter throws (does NOT wrap) when caller passes a malformed bar 
   assert.equal(fetched, false, "no fetch should have been issued for a malformed range");
 
   await assert.rejects(
-    adapter.getBars({
+    adapter.getBars({ adjustment_basis: "split_adjusted",
       listing: aaplListing,
       interval: "1d",
       range: {
@@ -473,7 +473,7 @@ test("polygon adapter normalizes aggs into NormalizedBars and reports adjusted b
     resolveListing: async () => aaplCtx,
   });
 
-  const outcome = await adapter.getBars({
+  const outcome = await adapter.getBars({ adjustment_basis: "split_adjusted",
     listing: aaplListing,
     interval: "1d",
     range: {
@@ -486,12 +486,35 @@ test("polygon adapter normalizes aggs into NormalizedBars and reports adjusted b
   const bars = outcome.data;
 
   assert.equal(bars.bars.length, 2);
-  assert.equal(bars.adjustment_basis, "split_and_div_adjusted");
+  assert.equal(bars.adjustment_basis, "split_adjusted");
   assert.equal(bars.delay_class, POLYGON_DELAY_CLASS);
   assert.equal(bars.currency, "USD");
   assert.equal(bars.source_id, POLYGON_SOURCE_ID);
   assert.equal(bars.bars[0].open, 100);
   assert.equal(bars.bars[1].close, 101.7);
+});
+
+test("polygon serves split-adjusted or raw aggregates, and never claims dividend adjustment (#191)", async () => {
+  const paths: string[] = [];
+  const adapter = createPolygonAdapter({
+    sourceId: POLYGON_SOURCE_ID,
+    delayClass: POLYGON_DELAY_CLASS,
+    fetcher: async (path: string) => {
+      paths.push(path);
+      return { adjusted: false, results: [{ t: 1_700_006_400_000, o: 100, h: 101, l: 99, c: 100.5, v: 10_000 }] };
+    },
+    resolveListing: async () => aaplCtx,
+    clock: fixedClock,
+  });
+  const range = { start: new Date(1_700_006_400_000).toISOString(), end: new Date(1_700_179_200_000).toISOString() };
+
+  const raw = await adapter.getBars({ adjustment_basis: "unadjusted", listing: aaplListing, interval: "1d", range });
+  assert.equal(isAvailable(raw) && raw.data.adjustment_basis, "unadjusted");
+  assert.match(paths[0], /[?&]adjusted=false&/);
+
+  const dividends = await adapter.getBars({ adjustment_basis: "split_and_div_adjusted", listing: aaplListing, interval: "1d", range });
+  assert.equal(isUnavailable(dividends) && dividends.reason, "missing_coverage", "a fallback can serve it instead");
+  assert.equal(paths.length, 1, "nothing is fetched for a basis Polygon cannot produce");
 });
 
 test("polygon adapter filters provider aggregate bars outside the requested range", async () => {
@@ -516,7 +539,7 @@ test("polygon adapter filters provider aggregate bars outside the requested rang
     resolveListing: async () => aaplCtx,
   });
 
-  const outcome = await adapter.getBars({
+  const outcome = await adapter.getBars({ adjustment_basis: "split_adjusted",
     listing: aaplListing,
     interval: "1d",
     range: { start: requestStart, end: requestEnd },
@@ -554,7 +577,7 @@ test("polygon adapter follows aggregate next_url pages", async () => {
     resolveListing: async () => aaplCtx,
   });
 
-  const outcome = await adapter.getBars({
+  const outcome = await adapter.getBars({ adjustment_basis: "split_adjusted",
     listing: aaplListing,
     interval: "1d",
     range: {
@@ -583,7 +606,7 @@ test("polygon adapter reports unadjusted basis when provider response is unadjus
     resolveListing: async () => aaplCtx,
   });
 
-  const outcome = await adapter.getBars({
+  const outcome = await adapter.getBars({ adjustment_basis: "split_adjusted",
     listing: aaplListing,
     interval: "1d",
     range: {
@@ -643,7 +666,7 @@ test("polygon adapter classifies bar fetch failures (5xx) as unavailable", async
     clock: fixedClock,
   });
 
-  const outcome = await adapter.getBars({
+  const outcome = await adapter.getBars({ adjustment_basis: "split_adjusted",
     listing: aaplListing,
     interval: "1d",
     range: aaplBarRange,
@@ -670,7 +693,7 @@ test("polygon adapter classifies a response missing the adjusted flag as unavail
     clock: fixedClock,
   });
 
-  const outcome = await adapter.getBars({
+  const outcome = await adapter.getBars({ adjustment_basis: "split_adjusted",
     listing: aaplListing,
     interval: "1d",
     range: {
@@ -711,7 +734,7 @@ test("polygon adapter classifies an inconsistent multi-page adjusted flag as una
     clock: fixedClock,
   });
 
-  const outcome = await adapter.getBars({
+  const outcome = await adapter.getBars({ adjustment_basis: "split_adjusted",
     listing: aaplListing,
     interval: "1d",
     range: {

@@ -52,7 +52,7 @@ test("market cache repository stores bars by canonical interval, basis, and rang
     delay_class: "eod",
     currency: "USD",
     source_id: SOURCE_ID,
-    adjustment_basis: "split_and_div_adjusted",
+    adjustment_basis: "split_adjusted",
   });
 
   await repo.storeBars(bars, {
@@ -65,7 +65,7 @@ test("market cache repository stores bars by canonical interval, basis, and rang
     listing: LISTING,
     interval: "1d",
     range: bars.range,
-    adjustment_basis: "split_and_div_adjusted",
+    adjustment_basis: "split_adjusted",
     now: "2026-05-08T12:05:00.000Z",
   });
 
@@ -80,6 +80,34 @@ test("market cache repository stores bars by canonical interval, basis, and rang
     }),
     null,
   );
+});
+
+test("a Polygon range cached under the old dividend-adjusted label is never reused (#191)", async () => {
+  const repo = createInMemoryMarketCacheRepository();
+  const range = { start: "2026-05-06T00:00:00.000Z", end: "2026-05-08T00:00:00.000Z" };
+  const stored = (adjustment_basis: "split_adjusted" | "split_and_div_adjusted", close: number) =>
+    repo.storeBars(
+      normalizedBars({
+        listing: LISTING,
+        interval: "1d",
+        range,
+        bars: [{ ts: "2026-05-06T04:00:00.000Z", open: close, high: close, low: close, close, volume: 1000 }],
+        as_of: "2026-05-06T04:00:00.000Z",
+        delay_class: "eod",
+        currency: "USD",
+        source_id: SOURCE_ID,
+        adjustment_basis,
+      }),
+      { fetched_at: "2026-05-08T12:00:00.000Z", expires_at: "2026-05-11T00:00:00.000Z", provider: "polygon" },
+    );
+  const lookup = (adjustment_basis: "split_adjusted" | "split_and_div_adjusted") =>
+    repo.findFreshBars({ listing: LISTING, interval: "1d", range, adjustment_basis, now: "2026-05-08T12:05:00.000Z" });
+
+  await stored("split_and_div_adjusted", 1);
+  assert.equal(await lookup("split_and_div_adjusted"), null, "the mislabeled legacy range is not served");
+  assert.equal(await repo.findLatestBars(LISTING, "1d", range, "split_and_div_adjusted"), null);
+  await stored("split_adjusted", 2);
+  assert.equal((await lookup("split_adjusted"))?.bars.bars[0].close, 2, "the refetched, correctly labelled range is");
 });
 
 // ── listStaleActiveListings ───────────────────────────────────────────────────

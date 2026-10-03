@@ -1,6 +1,6 @@
 import type { ListingSubjectRef, UUID } from "./subject-ref.ts";
 import type { NormalizedQuote } from "./quote.ts";
-import type { BarInterval, BarRange, NormalizedBars } from "./bar.ts";
+import type { AdjustmentBasis, BarInterval, BarRange, NormalizedBars } from "./bar.ts";
 import type { MarketDataOutcome } from "./availability.ts";
 
 export {
@@ -61,6 +61,10 @@ export type BarsRequest = {
   listing: ListingSubjectRef;
   interval: BarInterval;
   range: BarRange;
+  // The basis the caller needs (#191). An adapter that cannot produce it answers
+  // missing_coverage, so a fallback chain moves on to one that can; bars are
+  // never returned under a basis other than the one they actually have.
+  adjustment_basis: AdjustmentBasis;
 };
 
 export type MarketDataAdapter = {

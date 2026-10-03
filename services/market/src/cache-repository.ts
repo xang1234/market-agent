@@ -6,6 +6,7 @@ import {
   type NormalizedBar,
   type NormalizedBars,
 } from "./bar.ts";
+import { POLYGON_MARKET_SOURCE_ID } from "./provider-sources.ts";
 import { normalizedQuote, type NormalizedQuote } from "./quote.ts";
 import type { ListingSubjectRef } from "./subject-ref.ts";
 
@@ -36,6 +37,17 @@ export type CachedBars = {
   fetched_at: string;
   expires_at: string;
 };
+
+// Polygon never adjusts aggregates for dividends, but ranges cached before #191
+// were stored as split_and_div_adjusted. They are never reused for a new read (a
+// refetch stores the correct basis beside them) and never rewritten, so a
+// snapshot sealed from one still verifies. Shared with chat's price chart.
+export const MISLABELED_POLYGON_RANGE_SQL =
+  `(source_id = '${POLYGON_MARKET_SOURCE_ID}'::uuid and adjustment_basis = 'split_and_div_adjusted')`;
+
+function isMislabeledPolygonRange(bars: NormalizedBars): boolean {
+  return bars.source_id === POLYGON_MARKET_SOURCE_ID && bars.adjustment_basis === "split_and_div_adjusted";
+}
 
 export type BarsCacheLookup = {
   listing: ListingSubjectRef;
@@ -102,11 +114,12 @@ export function createInMemoryMarketCacheRepository(): MarketCacheRepository {
     },
     async findFreshBars(lookup) {
       const cached = bars.get(barsKey(lookup.listing, lookup.interval, lookup.range, lookup.adjustment_basis));
-      if (!cached) return null;
+      if (!cached || isMislabeledPolygonRange(cached.bars)) return null;
       return Date.parse(cached.expires_at) > Date.parse(lookup.now) ? cached : null;
     },
     async findLatestBars(listing, interval, range, adjustment_basis) {
-      return bars.get(barsKey(listing, interval, range, adjustment_basis)) ?? null;
+      const cached = bars.get(barsKey(listing, interval, range, adjustment_basis));
+      return cached && !isMislabeledPolygonRange(cached.bars) ? cached : null;
     },
     async storeBars(value, metadata) {
       bars.set(
@@ -409,6 +422,7 @@ async function findBars(
         and adjustment_basis = $3
         and range_start = $4::timestamptz
         and range_end = $${endIndex}::timestamptz
+        and not ${MISLABELED_POLYGON_RANGE_SQL}
         ${expiryPredicate}
       order by fetched_at desc
       limit 1`,

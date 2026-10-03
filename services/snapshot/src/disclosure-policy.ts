@@ -65,7 +65,8 @@ export type DisclosureReasonCode =
   | "filing_time_basis"
   | "low_coverage"
   | "candidate_data"
-  | "fx_converted_values";
+  | "fx_converted_values"
+  | "split_adjusted_price_return";
 
 export type DisclosureSnapshotState = {
   subject_refs: ReadonlyArray<SnapshotSubjectRef>;
@@ -139,6 +140,8 @@ type DisclosureSeriesSignal = Omit<DisclosureSeriesState, "series_ref" | "source
   source_refs: ReadonlyArray<string>;
   // When the sealed series was current; a stale series is disclosed as of this.
   as_of?: string;
+  // A return drawn from split-adjusted prices: dividends are not in it (#191).
+  split_price_return?: boolean;
 };
 
 const UUID_V4 =
@@ -153,6 +156,7 @@ const DISCLOSURE_ORDER: ReadonlyArray<DisclosureReasonCode> = [
   "low_coverage",
   "candidate_data",
   "fx_converted_values",
+  "split_adjusted_price_return",
 ];
 
 const TIER_RANK: Record<DisclosureTier, number> = {
@@ -211,6 +215,15 @@ export function compileDisclosurePolicy(
     if (item.fx_converted === true) {
       accumulator.add("fx_converted_values", {
         tier: "estimate",
+        series_refs: nullableId(item.series_ref),
+        source_refs: item.source_refs,
+      });
+    }
+    if ("split_price_return" in item && item.split_price_return === true) {
+      // A basis note, not a freshness or quality grade: the lowest tier, so it
+      // never raises the block's tier.
+      accumulator.add("split_adjusted_price_return", {
+        tier: "real_time",
         series_refs: nullableId(item.series_ref),
         source_refs: item.source_refs,
       });
@@ -382,6 +395,8 @@ function disclosureText(code: DisclosureReasonCode, asOf: string): string {
       return "Some facts are candidate or disputed and have not been promoted to authoritative data.";
     case "fx_converted_values":
       return "Displayed values include explicit FX conversion or currency normalization; conversions must remain source-backed.";
+    case "split_adjusted_price_return":
+      return "Returns are split-adjusted price returns; dividends are not included, so they are not total returns.";
   }
 }
 
@@ -450,11 +465,14 @@ function freezeManifestSeriesSpecs(
       }
 
       const spec = value as Record<string, unknown>;
+      const splitPriceReturn = spec.adjustment_basis === "split_adjusted" &&
+        (spec.normalization === "pct_return" || spec.normalization === "index_100");
       const hasDisclosureSignal =
         spec.freshness_class !== undefined ||
         spec.delay_class !== undefined ||
         spec.coverage_level !== undefined ||
-        spec.fx_converted !== undefined;
+        spec.fx_converted !== undefined ||
+        splitPriceReturn;
 
       if (!hasDisclosureSignal) {
         return [];
@@ -527,6 +545,7 @@ function freezeManifestSeriesSpecs(
                   `compileDisclosurePolicy.manifest.series_specs[${index}].as_of`,
                 ),
               }),
+          ...(splitPriceReturn ? { split_price_return: true } : {}),
           source_refs: sourceRefs,
         }),
       ];
