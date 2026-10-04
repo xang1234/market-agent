@@ -73,13 +73,14 @@ const COUNT = String.raw`(?:one|two|three|four|five|six|seven|eight|nine|ten|ele
 const MAGNITUDE = new RegExp(
   String.raw`\b(?:(?:doubl|tripl|quadrupl)(?:ed|es|ing)|twice|halved|(?:more than|nearly|almost|roughly|about|over|less than|at least|close to) (?:double|triple|quadruple)|` +
     String.raw`${COUNT}[- ]?fold|one in ${COUNT}|half (?:as|the size)|(?:a|one|two|three)[- ](?:third|quarter|fifth|tenth|hundredth)s? (?:of|as)|` +
-    String.raw`orders? of magnitude|by half|(?:by )?a factor of (?:${COUNT}|several|a few|about|roughly|nearly|almost|over|more than))\b`,
+    String.raw`orders? of magnitude|by half|${COUNT}(?:[- ]${COUNT})? (?:(?:percentage|basis) points?|points? (?:higher|lower|above|below|ahead|behind|more|less|wider|narrower)|billion|million|trillion)|(?:by )?a factor of (?:${COUNT}|several|a few|about|roughly|nearly|almost|over|more than))\b`,
   "i",
 );
 // After a number word, "times" is a multiplier unless it ends the clause or
 // counts occurrences ("raised guidance three times this year"); after another
 // quantifier or digits, only before the thing compared ("several times AMD's",
-// "52.3 times AMD's scale", "many times larger"). So "volatile times the
+// "52.3 times AMD's scale", "many times larger"); a worded difference ("forty
+// percentage points", "twenty-one points") is a magnitude too. So "volatile times the
 // company" and a valuation basis ("52.3 times earnings") stay. A bare
 // "double"/"triple" is a magnitude only after a degree word ("nearly double")
 // or before the thing compared ("double AMD's"), not in "double taxation",
@@ -89,9 +90,9 @@ const MAGNITUDE = new RegExp(
 // fiscal 2026" stays.
 const COMPARED = String.raw`(?:as\b|the\b|that of\b|of [A-Z]|its\b|their\b|what\b|(?:larger|bigger|greater|higher|lower|smaller|more|less|faster|slower)\b|[A-Z]{2,}\b)`;
 const MULTIPLIER = new RegExp(
-  String.raw`\b${COUNT} times(?!\s*(?:[.,;:!?]|$)| (?:this|in|during|since|so far|each|per)\b| last (?:year|quarter|month)\b(?!['’]s)| a (?:year|quarter)\b)|` +
+  String.raw`\b${COUNT} times(?!\s*(?:[.,;:!?]|$)| (?:this|in|during|since|so far|each|per|over|within|across|throughout|before|after|between)\b| last (?:year|quarter|month)\b(?!['’]s)| a (?:year|quarter)\b)|` +
     String.raw`\b(?:several|many|a few|multiple|half|\d+(?:\.\d+)?) times ${COMPARED}|\b(?:double|triple|quadruple) ${COMPARED}|` +
-    String.raw`(?<!(?:[Ff]irst|[Ss]econd|[Bb]ack|[Ff]ront|1st|2nd) )\b[Hh]alf ${COMPARED}`,
+    String.raw`(?<!(?:[Ff]irst|[Ss]econd|[Bb]ack|[Ff]ront|[Ll]atter|[Ff]ormer|[Ll]ast|[Ll]ater|[Ee]arlier|1st|2nd) )\b[Hh]alf ${COMPARED}`,
 );
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
 // Between a figure and the company that owns it: its unit, then a preposition
@@ -159,7 +160,9 @@ export function keepSupportedSentences(
     // with whatever of its item is kept.
     const lead = line.match(LIST_MARKER)?.[0] ?? line.match(/^\s*/)![0];
     const kept = line.slice(lead.length).trim().split(SENTENCE_BREAK).filter((sentence) => {
-      if (MAGNITUDE.test(sentence) || MULTIPLIER.test(sentence)) {
+      // MULTIPLIER is case-sensitive after its quantifier; a sentence-initial
+      // quantifier ("Six times AMD's") is lowercased for it.
+      if (MAGNITUDE.test(sentence) || MULTIPLIER.test(sentence.charAt(0).toLowerCase() + sentence.slice(1))) {
         removed.push(sentence);
         return false;
       }
