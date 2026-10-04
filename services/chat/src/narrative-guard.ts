@@ -88,13 +88,13 @@ const MAGNITUDE = new RegExp(
 // or before the thing compared ("double AMD's"), not in "double taxation",
 // "double bottom" or "triple-net"; "doubled" always is. "half" needs only the thing compared
 // ("less than half NVDA's"), unless it is an ordinal half of a period ("first
-// half of NVDA's fiscal 2026"). What follows is case-sensitive, so "half of
-// fiscal 2026" stays.
+// half of NVDA's fiscal 2026"); any other "half of" is a fraction ("Half of
+// total revenue").
 const COMPARED = String.raw`(?:as\b|the\b|that of\b|of [A-Z]|its\b|their\b|what\b|(?:larger|bigger|greater|higher|lower|smaller|more|less|faster|slower)\b|[A-Z]{2,}\b)`;
 const MULTIPLIER = new RegExp(
-  String.raw`\b(?:${COUNT} times|twice)(?!\s*(?:[.,;:!?]|$)| (?:this|in|during|since|so far|each|per|over|within|across|throughout|before|after|between)\b| last (?:year|quarter|month)\b(?!['’]s)| a (?:year|quarter)\b)|` +
+  String.raw`\b(?:${COUNT} times|twice)(?!\s*(?:[.,;:!?]|$)| (?:this|in|during|since|so far|each|per|over|within|across|throughout|before|after|between)\b| last (?:year|quarter|month)\b(?!['’]s)| a (?:year|quarter|month|week|day)\b| (?:annually|yearly|quarterly|monthly|weekly|daily)\b)|` +
     String.raw`\b(?:several|many|a few|multiple|half|\d+(?:\.\d+)?) times ${COMPARED}|\b(?:double|triple|quadruple) ${COMPARED}|\b\d+(?:\.\d+)?(?:[x×]|[- ]?fold) ${COMPARED}|` +
-    String.raw`(?<!(?:[Ff]irst|[Ss]econd|[Bb]ack|[Ff]ront|[Ll]atter|[Ff]ormer|[Ll]ast|[Ll]ater|[Ee]arlier|1st|2nd) )\b[Hh]alf ${COMPARED}`,
+    String.raw`(?<!(?:[Ff]irst|[Ss]econd|[Bb]ack|[Ff]ront|[Ll]atter|[Ff]ormer|[Ll]ast|[Ll]ater|[Ee]arlier|1st|2nd) )\b[Hh]alf (?:of\b|${COMPARED})`,
 );
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
 // Between a figure and the company that owns it: its unit, then a preposition
