@@ -72,8 +72,8 @@ const POSSESSED = /^['’]s\s+(.+?)\s+of\s+(?:(?:[A-Z]{1,4}\.?(?:[ \u00a0\u202f]
 const COUNT = String.raw`(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|(?:a )?dozen)`;
 const MAGNITUDE = new RegExp(
   String.raw`\b(?:(?:doubl|tripl|quadrupl)(?:ed|es|ing)(?! down\b| as an?\b)|halved|` +
-    String.raw`${COUNT}[- ]?fold|one in ${COUNT}|${COUNT} out of (?:every )?${COUNT}|(?<!(?:first|second|back|front|latter|former|last|later|earlier|1st|2nd)[ -])half (?:as|the size)|(?:a|${COUNT})[- ](?:third|quarter|fifth|sixth|seventh|eighth|ninth|tenth|hundredth)s? (?:of|as)|` +
-    String.raw`orders? of magnitude|by half|than (?:its |their |the |[A-Z]{2,}['’]s )?(?:entire|whole|combined) (?:[^\s.,;]+ ){0,3}?(?:revenue|sales|income|profit|earnings|margin|cash flow|base|value|total)\b|${COUNT}(?:[- ]${COUNT})? (?:(?:percentage|basis) points?|percent|points? (?:higher|lower|above|below|ahead|behind|more|less|wider|narrower)|(?:billion|million|trillion)(?: dollars)? (?:higher|lower|above|below|ahead|behind|more|less))|by ${COUNT}(?:[- ]${COUNT})? (?:billion|million|trillion)|(?:a|one|two|three)[- ](?:third|quarter|fifth|tenth|half)s? (?:higher|lower|larger|smaller|bigger|greater|more|less)|(?:by )?a factor of (?:${COUNT}|several|a few|about|roughly|nearly|almost|over|more than))\b`,
+    String.raw`${COUNT}[- ]?fold|one in ${COUNT}|${COUNT} out of (?:every )?${COUNT}|(?<!(?:first|second|back|front|latter|former|last|later|earlier|1st|2nd)[ -])half (?:as|the size)|(?:a|${COUNT})[- ](?:third|quarter(?!s? (?:of|as) (?:results|data|history|figures|detail|segment|reported|financials|filings?)\b)|fifth|sixth|seventh|eighth|ninth|tenth|hundredth)s? (?:of|as)|` +
+    String.raw`orders? of magnitude|by half|than (?:its |their |the |[A-Z]{2,}['’]s )?(?:entire|whole|combined) (?:[^\s.,;]+ ){0,3}?(?:revenue|sales|income|profit|earnings|margin|cash flow|base|value|total)\b|${COUNT}(?:[- ]${COUNT})? (?:(?:percentage|basis) points?|percent|points? (?:higher|lower|above|below|ahead|behind|more|less|wider|narrower)|(?:billion|million|trillion)(?: dollars)? (?:higher|lower|above|below|ahead|behind|more|less))|by ${COUNT}(?:[- ]${COUNT})? (?:billion|million|trillion)|(?:a|${COUNT})[- ](?:half|third|quarter|fifth|sixth|seventh|eighth|ninth|tenth|hundredth)s? (?:higher|lower|larger|smaller|bigger|greater|more|less)|(?:by )?a factor of (?:${COUNT}|several|a few|about|roughly|nearly|almost|over|more than))\b`,
   "i",
 );
 // Which phrases count (each case has a test):
@@ -81,8 +81,9 @@ const MAGNITUDE = new RegExp(
 //   counts occurrences or frequency ("three times this year", "twice a month").
 // - after digits: unless a valuation basis follows ("52.3 times earnings"), so
 //   "52.3 times AMD's scale" and "52.3 times last year's level" go; a digit
-//   "x", "×" or "fold" only before the thing compared ("52.3x AMD's"), so a
-//   bare displayed "52.3×" stays.
+//   "x", "×" or "fold" before a word likewise, unless the word is a valuation
+//   basis, an occurrence or a connective ("52.3x is", "52.3x versus AMD's
+//   41.2x"), so a displayed "52.3×" stays.
 // - after "several", "many", "a few", "half": only before the thing compared
 //   ("several times AMD's", "many times larger"), so "volatile times" stays.
 // - a bare "double"/"triple" after a degree word that ends the clause or meets
@@ -102,7 +103,7 @@ const OCCURRENCE = String.raw`(?:(?:this|in|during|since|so far|each|per|over|wi
 const COMPARED = String.raw`(?:as\b|the\b|that of\b|of [A-Z]|its\b|their\b|what\b|(?:larger|bigger|greater|higher|lower|smaller|more|less|faster|slower)\b|[A-Z]{2,}\b)`;
 const MULTIPLIER = new RegExp(
   String.raw`\b(?:${COUNT} times|twice)(?!\s*(?:[.,;:!?]|$)| ${OCCURRENCE})|` +
-    String.raw`\b(?:several|many|a few|multiple|half) times ${COMPARED}|\b(?:double|triple|quadruple) ${COMPARED}|\b\d+(?:\.\d+)? times (?!(?:trailing |forward |TTM |NTM )?(?:earnings|sales|book|EBITDA|EBIT|revenue|cash flow|free cash flow|FCF|EPS)\b|${OCCURRENCE})[A-Za-z]|\b(?:more than|nearly|almost|roughly|about|over|less than|at least|close to) (?:double|triple|quadruple)(?=\s*(?:[.,;:!?)]|$)|\s+${COMPARED})|\b\d+(?:\.\d+)?(?:[x×]|[- ]?fold) ${COMPARED}|` +
+    String.raw`\b(?:several|many|a few|multiple|half) times ${COMPARED}|\b(?:double|triple|quadruple) ${COMPARED}|\b\d+(?:\.\d+)? times (?!(?:trailing |forward |TTM |NTM )?(?:earnings|sales|book|EBITDA|EBIT|revenue|cash flow|free cash flow|FCF|EPS)\b|${OCCURRENCE})[A-Za-z]|\b(?:more than|nearly|almost|roughly|about|over|less than|at least|close to) (?:double|triple|quadruple)(?=\s*(?:[.,;:!?)]|$)|\s+${COMPARED})|\b\d+(?:\.\d+)?(?:[x×]|[- ]?fold) (?!(?:trailing |forward |TTM |NTM )?(?:earnings|sales|book|EBITDA|EBIT|revenue|cash flow|free cash flow|FCF|EPS)\b|${OCCURRENCE}|(?:is|was|are|were|and|or|but|for|at|on|to|from|by|with|while|versus|vs)\b)[A-Za-z]|` +
     String.raw`(?<!(?:[Ff]irst|[Ss]econd|[Bb]ack|[Ff]ront|[Ll]atter|[Ff]ormer|[Ll]ast|[Ll]ater|[Ee]arlier|1st|2nd)[ -])\b[Hh]alf (?:of\b|${COMPARED})`,
 );
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
