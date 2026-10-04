@@ -572,6 +572,7 @@ test("a magnitude comparison in words goes unless the data states it (#228)", ()
     "Four-fifths of revenue came from Gaming.",
     "Revenue was four fifths of last year's level.",
     "Revenue doubled as demand surged.",
+    "**Six times AMD's revenue would approximate NVDA's.**",
   ]) {
     assert.deepEqual(keepSupportedSentences(dropped, [], GOLDEN).removed, [dropped], dropped);
   }
@@ -591,12 +592,14 @@ test("a magnitude comparison in words goes unless the data states it (#228)", ()
   assert.equal(keepSupportedSentences("NVDA is 13x AMD's scale.", [], GOLDEN).text, "");
   // Not even a claim licenses one: "AMD's revenue doubled" must not ground
   // "NVDA's revenue doubled" (#228 review). A displayed figure is quoted instead.
+  // A count in digits that a claim supports is an occurrence, like "three times" (#228 review).
+  assert.deepEqual(keepSupportedSentences("Management raised guidance 3 times this year.", ["Management raised guidance 3 times this year"]).removed, []);
   // A worded quantity that is not a difference is not a magnitude.
   assert.deepEqual(keepSupportedSentences("Management expects three million units next quarter.", ["Management expects three million units next quarter."]).removed, []);
   const claimed = "NVDA's revenue doubled.";
   assert.deepEqual(keepSupportedSentences(claimed, ["AMD's revenue doubled year over year"], GOLDEN).removed, [claimed]);
   // And "first half" or "a quarter" of the calendar are not fractions of figures.
-  for (const kept of ["Revenue rose in the first half of fiscal 2026.", "Margins fell for a quarter before recovering.", "At times the margin dipped.", "Management cited demand many times.", "Revenue rose in the first half of NVDA's fiscal 2026.", "The second half of AMD's fiscal 2025 was weaker.", "Demand was a key factor of the growth.", "During volatile times the company defended margins.", "At other times the margin dipped.", "Management raised guidance three times.", "Management raised guidance three times this year.", "Management raised guidance three times last year.", "Management raised guidance three times over the last year.", "Revenue improved in the latter half of NVDA's fiscal year.", "The CEO made two points about demand.", "Management doubled down on data-center investment.", "Management is doubling down on AI.", "Management raised guidance twice this year.", "Management raised guidance twice.", "Management reviews guidance twice annually.", "The board meets twice a month.", "Results are reported three times a year.", "Investors remain concerned over double taxation.", "The REIT expressed concern over triple-net leases.", "Cash doubles as a buffer during downturns.", "The installed base doubles as a distribution channel.", "Management highlighted the risk of double taxation.", "The chart formed a double bottom.", "The REIT uses triple-net leases."]) {
+  for (const kept of ["Revenue rose in the first half of fiscal 2026.", "Margins fell for a quarter before recovering.", "At times the margin dipped.", "Management cited demand many times.", "Revenue rose in the first half of NVDA's fiscal 2026.", "The second half of AMD's fiscal 2025 was weaker.", "Demand was a key factor of the growth.", "During volatile times the company defended margins.", "At other times the margin dipped.", "Management raised guidance three times.", "Management raised guidance three times this year.", "Management raised guidance three times last year.", "Management raised guidance three times over the last year.", "Revenue improved in the latter half of NVDA's fiscal year.", "The CEO made two points about demand.", "Management doubled down on data-center investment.", "Management is doubling down on AI.", "Management raised guidance twice this year.", "Management raised guidance twice.", "Management reviews guidance twice annually.", "The board meets twice a month.", "Results are reported three times a year.", "Investors remain concerned over double taxation.", "The REIT expressed concern over triple-net leases.", "Cash doubles as a buffer during downturns.", "The installed base doubles as a distribution channel.", "Revenue improved in the first half as demand recovered.", "Management highlighted the risk of double taxation.", "The chart formed a double bottom.", "The REIT uses triple-net leases."]) {
     assert.deepEqual(keepSupportedSentences(kept, ["fiscal 2026", "fiscal 2025"]).removed, [], kept);
   }
 });
