@@ -504,6 +504,10 @@ test("a fiscal year stays its company's when a chart's window shares the calenda
   // The window's years are the chart's, not any company's.
   const window = "NVDA's price return was 6.6% from December 2025 to August 2026.";
   assert.deepEqual(keepSupportedSentences(window, [], GOLDEN), { text: window, removed: [] });
+  // A fiscal year still ends the stretch of a figure another company is named for.
+  for (const kept of ["NVDA reported FY2026; AMD revenue was $34.7B.", "NVDA reported FY2026 while AMD's FY2025 net margin was 12.0%."]) {
+    assert.deepEqual(keepSupportedSentences(kept, [], GOLDEN), { text: kept, removed: [] });
+  }
   // A year no company owns is supported in either form.
   assert.deepEqual(keepSupportedSentences("Revenue rose in FY2025.", ["Q2 2025"]).removed, []);
   const shared = [{ company: "NVDA", value: "FY2025" }, { company: "AMD", value: "FY2025" }];

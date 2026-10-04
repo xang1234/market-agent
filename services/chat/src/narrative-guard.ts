@@ -144,9 +144,13 @@ export function keepSupportedSentences(
       // stretch starts past it.
       let usedUpTo = 0;
       const isSupported = attributed.every(({ number, index, end }, i) => {
-        // A fiscal year is part of the phrase naming the next figure ("AMD's
-        // FY2025 net margin of 12.0%"), so it does not end that figure's stretch.
-        const from = Math.max(attributed.slice(0, i).filter((n) => !n.number.startsWith("FY")).at(-1)?.end ?? 0, usedUpTo);
+        // A fiscal year with no company named between it and this figure is
+        // part of the phrase naming it ("AMD's FY2025 net margin of 12.0%"), so
+        // it does not end the stretch; "NVDA reported FY2026; AMD revenue..." does.
+        const boundary = attributed.slice(0, i).findLast((n) =>
+          !n.number.startsWith("FY") || named.some((mention) => mention.index >= n.end && mention.index < index)
+        );
+        const from = Math.max(boundary?.end ?? 0, usedUpTo);
         const to = i === attributed.length - 1 ? sentence.length : attributed[i + 1].index;
         const stretch = named.filter((mention) => mention.index >= from && mention.index < index);
         // A company introduced as a comparison is not the figure's owner
