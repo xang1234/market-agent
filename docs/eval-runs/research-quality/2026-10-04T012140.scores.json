@@ -61,9 +61,9 @@
       "comparable_periods": 2,
       "figures_match_sources": 2,
       "conclusions_justified": 2,
-      "counterarguments": 2,
+      "counterarguments": 0,
       "no_invented_numbers": 0,
-      "notes": "\"Roughly nine times\" the next segment; $55.2B / $4.3B is 12.8x (computed, written in words: #228)."
+      "notes": "\"Roughly nine times\" the next segment; $55.2B / $4.3B is 12.8x (computed, written in words: #228). The only counterpoint shown restates the concentration thesis; the real one was dropped by the guard (computed $6.9B)."
     },
     "missing-segments": {
       "correct_companies": 2,
