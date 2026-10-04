@@ -154,10 +154,11 @@ export const QUESTIONS: ReadonlyArray<EvalQuestion> = [
     kind: "conversation",
     turns: [
       { message: "Analyze NVDA." },
-      { message: "How does it compare with AMD?" },
+      // The golden conversation's turns (#194), so the browser-proven path is also scored.
+      { message: "Compare it with AMD YTD." },
       { message: "Explain the differences and show the evidence." },
     ],
-    expect: "Turn 2 keeps NVDA and adds AMD; turn 3 keeps both and cites facts from each. Scored on the last turn, with companies judged across all three.",
+    expect: "Turn 2 keeps NVDA, adds AMD, and charts the year to date (2025-12-31 close to 2026-08-31 close, split-adjusted); turn 3 keeps both and cites facts from each. Scored on the last turn, with companies and periods judged across all three.",
   },
   {
     id: "ticker-page-compare",
