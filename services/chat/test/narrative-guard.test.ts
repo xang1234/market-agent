@@ -445,6 +445,8 @@ const GOLDEN = [
   ["AMD", "$34.7B", "Revenue"], ["AMD", "49.9%", "Gross Margin"], ["AMD", "12.0%", "Net Margin"], ["AMD", "FY2025"],
   ["NVDA", "6.6%", "Price return"], ["NVDA", "YTD 2026: December 2025 close to August 2026 close"],
   ["AMD", "3.58%", "Price return"], ["AMD", "YTD 2026: December 2025 close to August 2026 close"],
+  ["NVDA", "60.9%", "Revenue Growth (YoY)"], ["AMD", "34.5%", "Revenue Growth (YoY)"],
+  ["NVDA", "52.3x", "P/E"], ["AMD", "41.2x", "P/E"],
 ].map(([company, value, metric]) => ({ company, value, metric }));
 
 test("a company owns the figure its possessive names through a noun phrase and \"of\" (#240)", () => {
@@ -453,6 +455,10 @@ test("a company owns the figure its possessive names through a noun phrase and \
     "Gross margin: NVDA's FY2026 gross margin was 70.8% versus AMD's FY2025 gross margin of 49.9%.",
     "Revenue: NVDA's FY2026 (ended January 2026) revenue was $209.9B versus AMD's FY2025 (ended December 2025) revenue of $34.7B.",
     "NVDA beat AMD's net margin of 12.0%.",
+    // The metric's label as displayed, punctuation and all.
+    "NVDA's revenue growth (YoY) was 60.9% versus AMD's revenue growth (YoY) of 34.5%.",
+    "NVDA's P/E was 52.3 versus AMD's P/E of 41.2.",
+    "AMD's revenue growth YoY of 34.5% trails.",
   ]) {
     assert.deepEqual(keepSupportedSentences(kept, [], GOLDEN), { text: kept, removed: [] });
   }

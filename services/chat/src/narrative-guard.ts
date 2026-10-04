@@ -224,9 +224,12 @@ export function keepSupportedSentences(
 function namesMetric(phrase: string, metrics: ReadonlyArray<string>): boolean {
   const words = phrase.replace(/\((?:ended|ending) [A-Z][a-z]+ \d{4}\)/g, " ").split(/\s+/).filter(Boolean);
   const named = words.filter((word) => !/^[A-Z]*\d+$/.test(word));
+  // Both split the same way, so a label repeated verbatim matches ("revenue
+  // growth (YoY)", "P/E"), and so does "YoY" without its parentheses.
+  const bare = (word: string) => word.toLowerCase().replace(/^\((.*)\)$/, "$1");
   return metrics.some((metric) => {
-    const vocabulary = new Set(metric.toLowerCase().match(/\p{L}+/gu) ?? []);
-    return named.every((word) => vocabulary.has(word.toLowerCase()));
+    const vocabulary = new Set(metric.split(/\s+/).map(bare));
+    return named.every((word) => vocabulary.has(bare(word)));
   });
 }
 
