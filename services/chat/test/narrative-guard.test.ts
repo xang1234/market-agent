@@ -530,7 +530,6 @@ test("a magnitude comparison in words goes unless the data states it (#228)", ()
     // Any count, unhyphenated or in digits, and fractions (#228 review).
     "NVDA is thirteen times AMD's scale.",
     "NVDA is sixfold AMD's scale.",
-    "NVDA is 13x AMD's scale.",
     "AMD is half as large as NVDA.",
     "AMD is about a third of NVDA's size.",
     "Gaming is two-thirds of the remainder.",
@@ -540,6 +539,8 @@ test("a magnitude comparison in words goes unless the data states it (#228)", ()
     "NVDA is two and a half times AMD's scale.",
     "NVDA's revenue is many times larger.",
     "Gaming is half of NVDA's remaining revenue.",
+    "NVDA is an order of magnitude larger than AMD.",
+    "AMD is a tenth of NVDA's size.",
   ]) {
     assert.deepEqual(keepSupportedSentences(dropped, [], GOLDEN).removed, [dropped], dropped);
   }
@@ -547,9 +548,15 @@ test("a magnitude comparison in words goes unless the data states it (#228)", ()
     // Direction without magnitude, and words that are not comparisons.
     "NVDA's net margin of 53.6% is higher than AMD's 12.0%.",
     "NVDA posted double-digit growth in the second half.",
+    // A displayed multiple in digits is a figure, checked by value (#228 review).
+    "NVDA's P/E was 52.3x.",
+    "NVDA trades at 52.3 times earnings.",
+    "NVDA trades at 52.3 times the sector's earnings.",
   ]) {
     assert.deepEqual(keepSupportedSentences(kept, [], GOLDEN).removed, [], kept);
   }
+  // A multiple in digits that is not displayed still goes, by the number check.
+  assert.equal(keepSupportedSentences("NVDA is 13x AMD's scale.", [], GOLDEN).text, "");
   // Not even a claim licenses one: "AMD's revenue doubled" must not ground
   // "NVDA's revenue doubled" (#228 review). A displayed figure is quoted instead.
   const claimed = "NVDA's revenue doubled.";
