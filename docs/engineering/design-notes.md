@@ -111,7 +111,8 @@ fixed rule, not a tool loop.
 - **Narrative guard** (`narrative-guard.ts`): when fact blocks are shown, the model is given the displayed figures
   and told not to compute new ones. Any sentence whose numbers don't appear in the displayed figures or in a cited
   claim is dropped. If nothing survives, a fixed pointer to the figures is shown instead. Numbers are compared by
-  value only, not unit (see the `ponytail:` note in the file).
+  value only, not unit (see the `ponytail:` note in the file). A magnitude comparison in words ("more than double",
+  "six times", "one in eight") is dropped too, unless a supporting text states the same words (#228).
 - The displayed figures reach the model as rows (`displayedFigures`, `fact-blocks.ts`): `{company, metric, value}`
   for comparison cells, `{metric, value}` / `{metric, period, value}` for single-company blocks. A comparison figure
   must also be credited to its company **in the same sentence**, even when a claim repeats the number; nothing carries

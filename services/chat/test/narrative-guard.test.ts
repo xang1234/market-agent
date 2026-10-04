@@ -516,3 +516,28 @@ test("a fiscal year stays its company's when a chart's window shares the calenda
   const shared = [{ company: "NVDA", value: "FY2025" }, { company: "AMD", value: "FY2025" }];
   assert.deepEqual(keepSupportedSentences("Both grew in 2025.", [], shared).removed, []);
 });
+
+test("a magnitude comparison in words goes unless the data states it (#228)", () => {
+  for (const dropped of [
+    // Every figure is shown and credited: only the magnitude is unsupported.
+    "NVDA's net margin of 53.6% is more than double AMD's 12.0%.",
+    "NVDA's net margin of 53.6% is more than four times AMD's 12.0%.",
+    "NVDA is roughly six times AMD's scale.",
+    "Data Center is nine-fold the next segment.",
+    "Revenue nearly doubled over the period.",
+    "Gaming is twice Automotive's size.",
+    "About one in eight dollars came from Gaming.",
+  ]) {
+    assert.deepEqual(keepSupportedSentences(dropped, [], GOLDEN).removed, [dropped], dropped);
+  }
+  for (const kept of [
+    // Direction without magnitude, and words that are not comparisons.
+    "NVDA's net margin of 53.6% is higher than AMD's 12.0%.",
+    "NVDA posted double-digit growth in the second half.",
+  ]) {
+    assert.deepEqual(keepSupportedSentences(kept, [], GOLDEN).removed, [], kept);
+  }
+  // A cited claim that states the magnitude itself.
+  const claimed = "Revenue doubled, the filing says.";
+  assert.deepEqual(keepSupportedSentences(claimed, ["Revenue doubled year over year"]).removed, []);
+});
