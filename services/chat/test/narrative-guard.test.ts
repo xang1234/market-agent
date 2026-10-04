@@ -541,6 +541,9 @@ test("a magnitude comparison in words goes unless the data states it (#228)", ()
     "Gaming is half of NVDA's remaining revenue.",
     "NVDA is an order of magnitude larger than AMD.",
     "AMD is a tenth of NVDA's size.",
+    "Revenue fell by half.",
+    "Half of NVDA's revenue came from Gaming.",
+    "NVDA's revenue is several times its prior level.",
   ]) {
     assert.deepEqual(keepSupportedSentences(dropped, [], GOLDEN).removed, [dropped], dropped);
   }
@@ -562,7 +565,7 @@ test("a magnitude comparison in words goes unless the data states it (#228)", ()
   const claimed = "NVDA's revenue doubled.";
   assert.deepEqual(keepSupportedSentences(claimed, ["AMD's revenue doubled year over year"], GOLDEN).removed, [claimed]);
   // And "first half" or "a quarter" of the calendar are not fractions of figures.
-  for (const kept of ["Revenue rose in the first half of fiscal 2026.", "Margins fell for a quarter before recovering.", "At times the margin dipped.", "Management cited demand many times."]) {
-    assert.deepEqual(keepSupportedSentences(kept, ["fiscal 2026"]).removed, [], kept);
+  for (const kept of ["Revenue rose in the first half of fiscal 2026.", "Margins fell for a quarter before recovering.", "At times the margin dipped.", "Management cited demand many times.", "Revenue rose in the first half of NVDA's fiscal 2026.", "The second half of AMD's fiscal 2025 was weaker."]) {
+    assert.deepEqual(keepSupportedSentences(kept, ["fiscal 2026", "fiscal 2025"]).removed, [], kept);
   }
 });
