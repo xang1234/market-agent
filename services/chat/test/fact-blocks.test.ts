@@ -240,9 +240,9 @@ test("a partially covered fact is not shown; its quarter falls back to a full fa
 
 test("the quarterly facts are loaded full-coverage only, so a full fact can stand in for a newer partial one (#239)", async () => {
   const texts: string[] = [];
-  const db = { query: async (text: string) => { texts.push(text); return { rows: [] }; } };
+  const query = fakeQuery((text) => { texts.push(text); return { rows: [] }; });
   const issuer = { kind: "issuer" as const, id: "60000000-0000-4000-8000-000000000001" };
-  await loadIssuerFactBlocks(db, { issuer, snapshotId: SNAPSHOT_ID, asOf: AS_OF });
+  await loadIssuerFactBlocks({ query } as never, { issuer, snapshotId: SNAPSHOT_ID, asOf: AS_OF });
   assert.match(texts[0], /f\.coverage_level = 'full'/);
 });
 
