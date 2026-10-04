@@ -482,6 +482,9 @@ test("a company owns the figure its possessive names through a noun phrase and \
     // A new subject with no article ("this competitor"), or another of the company's metrics.
     "Unlike AMD's results this competitor's net margin of 12.0% is stronger.",
     "NVDA's net margin was 53.6% versus AMD's FY2025 gross margin of 12.0%.",
+    // Part of a metric's name could be another metric: Revenue, or Gross Margin.
+    "NVDA grew faster versus AMD's revenue of 34.5%.",
+    "NVDA's net margin was 53.6% versus AMD's margin of 12.0%.",
   ]) {
     assert.equal(keepSupportedSentences(dropped, [], GOLDEN).text, "", dropped);
   }

@@ -219,17 +219,22 @@ export function keepSupportedSentences(
 // Whether the words between a possessive and "of" name one of the figure's
 // metrics: words of that metric ("net margin" for Net Margin), periods
 // ("FY2025", "Q4") and a period-end note ("(ended December 2025)"), nothing
-// else. So a new subject ("AMD's results this competitor's net margin of"), a
-// dash or another metric ("AMD's gross margin of" Net Margin's 12.0%) breaks it.
+// else, and all of the metric's name. So a new subject ("AMD's results this
+// competitor's net margin of"), a dash or another metric ("AMD's gross margin
+// of" Net Margin's 12.0%) breaks it.
 function namesMetric(phrase: string, metrics: ReadonlyArray<string>): boolean {
   const words = phrase.replace(/\((?:ended|ending) [A-Z][a-z]+ \d{4}\)/g, " ").split(/\s+/).filter(Boolean);
   const named = words.filter((word) => !/^[A-Z]*\d+$/.test(word));
   // Both split the same way, so a label repeated verbatim matches ("revenue
   // growth (YoY)", "P/E"), and so does "YoY" without its parentheses.
   const bare = (word: string) => word.toLowerCase().replace(/^\((.*)\)$/, "$1");
+  const used = new Set(named.map(bare));
   return metrics.some((metric) => {
-    const vocabulary = new Set(metric.split(/\s+/).map(bare));
-    return named.every((word) => vocabulary.has(bare(word)));
+    const vocabulary = metric.split(/\s+/).map(bare);
+    // The whole name but its parenthesized qualifier: part of it could be
+    // another metric ("revenue" for Revenue Growth (YoY), "margin").
+    const required = metric.replace(/\([^)]*\)/g, " ").split(/\s+/).filter(Boolean).map(bare);
+    return [...used].every((word) => vocabulary.includes(word)) && required.every((word) => used.has(word));
   });
 }
 
