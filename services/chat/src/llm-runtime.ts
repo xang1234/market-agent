@@ -141,9 +141,9 @@ export async function composeAnalystBlocksWithLlm(input: {
           "(e.g. NVDA), and never compute new figures such as growth rates,",
           "margins, differences, or ratios. A magnitude comparison between figures is a computation too, even in words",
           // Wrong comparisons in words the guard cannot see (#228): "nine times" for 12.8x.
-          "(\"roughly double\", \"six times\", \"larger than X's whole revenue\", \"one month old\"):",
-          "state one only if the data shows it, and otherwise say only the direction (\"higher\",",
-          "\"faster\", \"larger\") without how much.",
+          "(\"roughly double\", \"six times\", \"larger than X's whole revenue\"):",
+          "state one only when a displayed figure or cited claim states that magnitude itself (two figures side by side do not state one),",
+          "and otherwise say only the direction (\"higher\", \"faster\", \"larger\") without how much.",
           // Fiscal calendars differ (#180): the period and its end date come with each figure.
           "Name the fiscal period each figure is for (its period, and the month its period_end",
           "falls in; never the day), and a chart's window by month and year. When a comparison's title says the fiscal years end months",
