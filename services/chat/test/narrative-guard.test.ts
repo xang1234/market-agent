@@ -435,3 +435,38 @@ test("a company attached to a figure owns it though another is named earlier (#1
   // Attached to the other company, the figure is not credited to the subject.
   assert.equal(keepSupportedSentences("NVDA beat AAPL at 6.6%.", [], SCALE).text, "");
 });
+
+// Turn 3 of the golden conversation in the #194 eval run
+// (docs/eval-runs/research-quality/2026-10-04T012140.md): the comparison's
+// figures and fiscal years, and the YTD chart's returns, whose window years
+// every company shares.
+const GOLDEN = [
+  ["NVDA", "$209.9B"], ["NVDA", "70.8%"], ["NVDA", "53.6%"], ["NVDA", "FY2026"],
+  ["AMD", "$34.7B"], ["AMD", "49.9%"], ["AMD", "12.0%"], ["AMD", "FY2025"],
+  ["NVDA", "6.6%"], ["NVDA", "YTD 2026: December 2025 close to August 2026 close"],
+  ["AMD", "3.58%"], ["AMD", "YTD 2026: December 2025 close to August 2026 close"],
+].map(([company, value]) => ({ company, value }));
+
+test("a company owns the figure its possessive names through a noun phrase and \"of\" (#240)", () => {
+  for (const kept of [
+    "NVDA's FY2026 net margin was 53.6% versus AMD's FY2025 net margin of 12.0%.",
+    "Gross margin: NVDA's FY2026 gross margin was 70.8% versus AMD's FY2025 gross margin of 49.9%.",
+    "Revenue: NVDA's FY2026 (ended January 2026) revenue was $209.9B versus AMD's FY2025 (ended December 2025) revenue of $34.7B.",
+    "NVDA beat AMD's net margin of 12.0%.",
+  ]) {
+    assert.deepEqual(keepSupportedSentences(kept, [], GOLDEN), { text: kept, removed: [] });
+  }
+  // The wrong-company twins still go.
+  for (const dropped of [
+    "NVDA's FY2026 net margin was 12.0% versus AMD's FY2025 net margin of 53.6%.",
+    "Revenue: NVDA's FY2026 revenue was $34.7B versus AMD's FY2025 revenue of $209.9B.",
+    "NVDA beat AMD's net margin of 53.6%.",
+    // Not a noun phrase: an article starts a new subject, or another company is named.
+    "Unlike AMD's results the company's margin of 12.0% is high.",
+    "AMD's margin lags NVDA whose net margin of 12.0% leads.",
+    // A pronoun is not part of the company's noun phrase.
+    "Versus AMD's growth its net margin of 12.0% looks low.",
+  ]) {
+    assert.equal(keepSupportedSentences(dropped, [], GOLDEN).text, "", dropped);
+  }
+});

@@ -7,8 +7,9 @@
 // credited to that company in the same sentence, even when a claim or title
 // repeats the number. Nothing carries across sentences: "Its margin..." could
 // mean any company named earlier, so it is dropped. Within the sentence:
-// - a company directly attached to the figure owns it ("AMD's 49.2%", "AMD at
-//   49.2%", "NVDA's $209.9B"), whatever else is named before it;
+// - a company directly attached to the figure ("AMD's 49.2%", "AMD at 49.2%",
+//   "NVDA's $209.9B"), or naming it through its possessive ("AMD's FY2025 net
+//   margin of 12.0%"), owns it, whatever else is named before it;
 // - otherwise, the companies named between the previous such figure (or the sentence
 //   start) and this one must all own it ("NVDA's 74.6%, ahead of AMD at 49.2%");
 //   a company introduced as a comparison ("compared with", "unlike", "versus")
@@ -53,6 +54,12 @@ const COMPARED_WITH = /(?:compared (?:with|to)|unlike|versus|vs\.?|than|relative
 const ATTACHED = /^(?:['’]s)?\s*(?:(?:at|with)\s+)?(?:(?:[A-Z]{1,4}\.?(?:[ \u00a0\u202f][A-Z]{1,4})?\p{Sc}?|\p{Sc})[ \u00a0\u202f]?)?$/u;
 // The same without a currency prefix, for a label that is also a currency word.
 const ATTACHED_PLAIN = /^(?:['’]s)?\s*(?:(?:at|with)\s+)?$/i;
+// A possessive naming the figure through a noun phrase of up to six words and
+// "of" ("versus AMD's FY2025 net margin of 12.0%", "AMD's FY2025 (ended
+// December 2025) revenue of $34.7B"; #240). No clause punctuation, article or
+// pronoun, which would start another subject ("Unlike AMD's results the
+// company's margin of 49.2%"); no other company either (checked by the caller).
+const POSSESSED = /^['’]s\s+(?:(?!(?:a|an|the|its|it|their|they)\s)[^\s,;:]+\s+){1,6}of\s+(?:(?:[A-Z]{1,4}\.?(?:[   ][A-Z]{1,4})?\p{Sc}?|\p{Sc})[   ]?)?$/u;
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
 // Between a figure and the company that owns it: its unit, then a preposition
 // ("% for ", "B at ", " percent in "). No punctuation and no other words, so a
@@ -148,6 +155,7 @@ export function keepSupportedSentences(
         // the franc is unknowable.
         const attached = stretch.filter((mention) => {
           const between = sentence.slice(mention.index + mention.company.length, index);
+          if (POSSESSED.test(between) && !stretch.some((other) => other.index > mention.index)) return true;
           return currencyWords.has(mention.company)
             ? ATTACHED_PLAIN.test(between) && (between.trim() !== "" || comparisons.includes(mention))
             : ATTACHED.test(between);
