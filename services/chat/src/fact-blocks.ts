@@ -516,9 +516,11 @@ export async function loadIssuerFactBlocks(
       channel: "app",
       periodKind: "fiscal_q",
       metricKeys: METRIC_KEYS,
-      // Only what was known at the snapshot's moment (#159), and only figures.
+      // Only what was known at the snapshot's moment (#159), only figures, and
+      // only full quarters: an older full fact over a newer partial one (#239).
       cutoff: input.asOf,
       numericOnly: true,
+      fullCoverageOnly: true,
     });
     const verifierFacts = await loadVerifierFactsForRefs(db, { fact_refs: facts.map((fact) => fact.fact_id), cutoff: input.asOf, requireKnownByCutoff: true });
     const derived = await loadDerivedQuarterMetrics(db, input.issuer, facts, verifierFacts, input.asOf, input.wantsMarginTrend ?? false);
@@ -568,8 +570,11 @@ async function loadDerivedQuarterMetrics(
   }
 }
 
-// The facts the blocks may show: per metric and quarter, the first (newest) fact the
-// seal can load; and the last QUARTERS_SHOWN quarters of revenue, oldest first.
+// The facts the blocks may show: per metric and quarter, the first (newest) fully
+// covered fact the seal can load; and the last QUARTERS_SHOWN quarters of revenue,
+// oldest first. A partial or sparse value would be shown, and given to the model,
+// as if it covered the whole quarter, so it is left out, and margins and growth
+// are only computed from full inputs (#239), as for segments.
 function selectQuarters(
   facts: ReadonlyArray<IssuerFundamentalFact>,
   loadable: ReadonlyMap<string, VerifierFact>,
@@ -577,7 +582,7 @@ function selectQuarters(
   const byQuarter = new Map<string, IssuerFundamentalFact>();
   for (const fact of facts) {
     if (fact.value_num === null || fact.fiscal_year === null || !fact.fiscal_period) continue;
-    if (!loadable.has(fact.fact_id)) continue;
+    if (!loadable.has(fact.fact_id) || fact.coverage_level !== "full") continue;
     const key = quarterKey(fact.metric_key, fact.fiscal_year, fact.fiscal_period);
     if (!byQuarter.has(key)) byQuarter.set(key, fact);
   }

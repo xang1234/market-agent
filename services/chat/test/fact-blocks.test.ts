@@ -5,6 +5,7 @@ import type { IssuerFundamentalFact } from "../../fundamentals/src/issuer-fundam
 import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
 import {
   buildIssuerFactBlocks,
+  loadIssuerFactBlocks,
   comparisonTitle,
   displayedFigures,
   listingsForComparison,
@@ -217,6 +218,32 @@ test("facts the verifier cannot load are left out rather than rendered unbound",
   const loadable = verifierFacts(facts).filter((f) => f.fact_id !== facts[0].fact_id);
   const blocks = buildIssuerFactBlocks({ facts, verifierFacts: loadable, snapshotId: SNAPSHOT_ID, asOf: AS_OF });
   assert.equal(JSON.stringify(blocks).includes(facts[0].fact_id), false);
+});
+
+test("a partially covered fact is not shown; its quarter falls back to a full fact or goes (#239)", () => {
+  const facts = quarters(3);
+  const partial = (f: IssuerFundamentalFact, coverage_level: string) => Object.assign(f, { coverage_level });
+  // The latest quarter's revenue covers only part of it: that quarter is not shown.
+  const latestRevenue = partial(facts.find((f) => f.metric_key === "revenue" && f.fiscal_period === "Q3")!, "partial");
+  // An earlier quarter's net income is sparse, but a full restatement of it exists.
+  const sparse = partial(facts.find((f) => f.metric_key === "net_income" && f.fiscal_period === "Q2")!, "sparse");
+  const restated = fact("net_income", 2024, "Q2", 7e8);
+  const blocks = blocksFor([...facts.slice(0, facts.indexOf(sparse) + 1), restated, ...facts.slice(facts.indexOf(sparse) + 1)]);
+  const json = JSON.stringify(blocks);
+  assert.equal(json.includes(latestRevenue.fact_id), false);
+  assert.equal(json.includes(sparse.fact_id), false);
+  const [metricRow, bars] = blocks;
+  assert.match(String(metricRow.title), /Q2 2024/);
+  assert.ok((metricRow.items as Array<{ value_ref: string }>).some((item) => item.value_ref === restated.fact_id));
+  assert.deepEqual((bars.bars as Array<{ label: string }>).map((bar) => bar.label), ["Q1 2024", "Q2 2024"]);
+});
+
+test("the quarterly facts are loaded full-coverage only, so a full fact can stand in for a newer partial one (#239)", async () => {
+  const texts: string[] = [];
+  const query = fakeQuery((text) => { texts.push(text); return { rows: [] }; });
+  const issuer = { kind: "issuer" as const, id: "60000000-0000-4000-8000-000000000001" };
+  await loadIssuerFactBlocks({ query } as never, { issuer, snapshotId: SNAPSHOT_ID, asOf: AS_OF });
+  assert.match(texts[0], /f\.coverage_level = 'full'/);
 });
 
 test("a comparison charts the listing the user asked for, not an arbitrary one of the issuer's", () => {

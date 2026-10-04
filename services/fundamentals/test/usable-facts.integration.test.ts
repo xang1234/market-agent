@@ -181,6 +181,16 @@ test("loadUsableFacts applies every rule for facts that ground a sealed answer",
     assert.deepEqual(numeric.map((row) => row.value_num), [7]);
   });
 
+  await t.test("full-coverage callers keep an older full fact over a newer partial one (#239)", async () => {
+    await fact(2017, { value_num: 8, as_of: "2026-04-01T00:00:00.000Z", observed_at: "2026-04-01T00:00:00.000Z" });
+    await fact(2017, { value_num: 9, coverage_level: "partial", source_id: sourceB } as Partial<FactInput>);
+    const of2017 = async (fullCoverageOnly: boolean) =>
+      (await loadUsableFacts(client, { subjectKind: "issuer", subjectIds: [ISSUER_ID], fullCoverageOnly }))
+        .filter((row) => row.fiscal_year === 2017).map((row) => row.value_num);
+    assert.deepEqual(await of2017(true), [8]);
+    assert.deepEqual(await of2017(false), [9]);
+  });
+
   await t.test("canonical: one fact per period, the latest as_of winning", async () => {
     await fact(2009, { value_num: 1, as_of: "2026-04-01T00:00:00.000Z", observed_at: "2026-04-01T00:00:00.000Z" });
     await fact(2009, { value_num: 2, source_id: sourceB });

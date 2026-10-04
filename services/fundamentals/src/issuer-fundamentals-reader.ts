@@ -51,6 +51,9 @@ export type LoadRecentIssuerFundamentalsOptions = {
   // True for callers that show or compute figures: a newer text-only fact must
   // not displace an older numeric one. Default false keeps text for model context.
   numericOnly?: boolean;
+  // True for callers that show figures as covering their whole period: a newer
+  // partial fact must not displace an older full one (#239).
+  fullCoverageOnly?: boolean;
 };
 
 export async function loadRecentIssuerFundamentals(
@@ -64,6 +67,7 @@ export async function loadRecentIssuerFundamentals(
     subjectIds: [issuer.id],
     channel: options.channel ?? "app",
     numericOnly: options.numericOnly ?? false,
+    fullCoverageOnly: options.fullCoverageOnly ?? false,
     ...(options.cutoff === undefined ? {} : { cutoff: options.cutoff }),
     ...(options.periodKind === undefined ? {} : { periodKind: options.periodKind }),
     ...(options.metricKeys === undefined ? {} : { metricKeys: options.metricKeys }),
