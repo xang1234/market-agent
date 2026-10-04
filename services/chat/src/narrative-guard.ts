@@ -76,11 +76,11 @@ const POSSESSED = /^['’]s\s+(.+?)\s+of\s+(?:(?:[A-Z]{1,4}\.?(?:[ \u00a0\u202f]
 // ordinal half ("first half of NVDA's fiscal 2026") or "at times the" too; after
 // digits ("52.3 times the sector's") it is a displayed multiple, checked by value.
 // ponytail: a word list, not a parser; add a phrase when the eval shows one.
-const MULTIPLIER = /(?<![Aa]t |\d |(?:[Ff]irst|[Ss]econd|[Bb]ack|[Ff]ront|1st|2nd) )\b(?:[Tt]imes|[Hh]alf) (?:as\b|the\b|that of\b|of [A-Z]|its\b|their\b|(?:larger|bigger|greater|higher|lower|smaller|more|less|faster|slower)\b|[A-Z]{2,}\b)/;
+const MULTIPLIER = /(?<![Aa]t |\d |(?:[Ff]irst|[Ss]econd|[Bb]ack|[Ff]ront|1st|2nd) )\b(?:[Tt]imes|[Hh]alf) (?:as\b|the\b|that of\b|of [A-Z]|its\b|their\b|what\b|(?:larger|bigger|greater|higher|lower|smaller|more|less|faster|slower)\b|[A-Z]{2,}\b)/;
 const COUNT = String.raw`(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|(?:a )?dozen)`;
 const MAGNITUDE = new RegExp(
   String.raw`\b(?:doubl(?:e|ed|es|ing)(?![- ]digit)|twice|tripl(?:e|ed|es|ing)|quadrupl(?:e|ed|es|ing)|halved|` +
-    String.raw`${COUNT}(?:[- ]?fold|[- ]times)|one in ${COUNT}|half (?:as|the size)|(?:a|one|two|three)[- ](?:third|quarter|fifth|tenth|hundredth)s? (?:of|as)|orders? of magnitude|by half)\b`,
+    String.raw`${COUNT}(?:[- ]?fold|[- ]times)|one in ${COUNT}|half (?:as|the size)|(?:a|one|two|three)[- ](?:third|quarter|fifth|tenth|hundredth)s? (?:of|as)|orders? of magnitude|by half|(?:by )?a factor of (?:${COUNT}|several|a few|about|roughly|nearly|almost|over|more than))\b`,
   "i",
 );
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
