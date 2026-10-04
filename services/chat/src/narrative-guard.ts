@@ -7,8 +7,9 @@
 // credited to that company in the same sentence, even when a claim or title
 // repeats the number. Nothing carries across sentences: "Its margin..." could
 // mean any company named earlier, so it is dropped. Within the sentence:
-// - a company directly attached to the figure owns it ("AMD's 49.2%", "AMD at
-//   49.2%", "NVDA's $209.9B"), whatever else is named before it;
+// - a company directly attached to the figure ("AMD's 49.2%", "AMD at 49.2%",
+//   "NVDA's $209.9B"), or naming it by its metric through its possessive
+//   ("AMD's FY2025 net margin of 12.0%"), owns it, whatever else is named before it;
 // - otherwise, the companies named between the previous such figure (or the sentence
 //   start) and this one must all own it ("NVDA's 74.6%, ahead of AMD at 49.2%");
 //   a company introduced as a comparison ("compared with", "unlike", "versus")
@@ -53,6 +54,10 @@ const COMPARED_WITH = /(?:compared (?:with|to)|unlike|versus|vs\.?|than|relative
 const ATTACHED = /^(?:['’]s)?\s*(?:(?:at|with)\s+)?(?:(?:[A-Z]{1,4}\.?(?:[ \u00a0\u202f][A-Z]{1,4})?\p{Sc}?|\p{Sc})[ \u00a0\u202f]?)?$/u;
 // The same without a currency prefix, for a label that is also a currency word.
 const ATTACHED_PLAIN = /^(?:['’]s)?\s*(?:(?:at|with)\s+)?$/i;
+// A possessive naming the figure through its metric and "of" ("versus AMD's
+// FY2025 net margin of 12.0%", "AMD's FY2025 (ended December 2025) revenue of
+// $34.7B"; #240): group 1 is the phrase between, checked by `namesMetric`.
+const POSSESSED = /^['’]s\s+(.+?)\s+of\s+(?:(?:[A-Z]{1,4}\.?(?:[ \u00a0\u202f][A-Z]{1,4})?\p{Sc}?|\p{Sc})[ \u00a0\u202f]?)?$/u;
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
 // Between a figure and the company that owns it: its unit, then a preposition
 // ("% for ", "B at ", " percent in "). No punctuation and no other words, so a
@@ -60,7 +65,8 @@ const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
 // level") never reads as owner.
 const OWNED_BY = /^[^\s,;:]*\s*(?:(?:percent|billion|million|trillion|bn|mn)\s+)?(?:for|at|in)\s+$/i;
 
-export type AttributedFigure = { company: string; value: string };
+// The metric labels the figure where it is shown ("Net Margin").
+export type AttributedFigure = { company: string; value: string; metric?: string };
 
 export function keepSupportedSentences(
   text: string,
@@ -69,11 +75,17 @@ export function keepSupportedSentences(
 ): { text: string; removed: string[] } {
   const supported = new Set(supportingTexts.flatMap(numbersIn));
   const owners = new Map<string, Set<string>>();
+  // The metrics of each company's figure with that number ("AMD\u000012" -> ["Net Margin"]).
+  const metricsOf = new Map<string, string[]>();
   for (const figure of attributedFigures) {
     for (const number of numbersIn(figure.value)) {
       const companies = owners.get(number) ?? new Set<string>();
       companies.add(figure.company);
       owners.set(number, companies);
+      if (figure.metric) {
+        const key = `${figure.company}\u0000${number}`;
+        metricsOf.set(key, [...metricsOf.get(key) ?? [], figure.metric]);
+      }
     }
   }
   // A number every company owns (the fiscal year both report, "FY2025") is no
@@ -148,6 +160,10 @@ export function keepSupportedSentences(
         // the franc is unknowable.
         const attached = stretch.filter((mention) => {
           const between = sentence.slice(mention.index + mention.company.length, index);
+          // Another company in between ("AMD's NET margin of" with NET a ticker) breaks it.
+          const phrase = between.match(POSSESSED)?.[1];
+          if (phrase !== undefined && !stretch.some((other) => other.index > mention.index) &&
+              namesMetric(phrase, metricsOf.get(`${mention.company}\u0000${number}`) ?? [])) return true;
           return currencyWords.has(mention.company)
             ? ATTACHED_PLAIN.test(between) && (between.trim() !== "" || comparisons.includes(mention))
             : ATTACHED.test(between);
@@ -198,6 +214,28 @@ export function keepSupportedSentences(
   };
   const shown = lines.filter((line, i): line is string => line !== null && (level(line) === 0 || keepHeading(i)));
   return { text: shown.join("\n").replace(/\n{3,}/g, "\n\n").trim(), removed };
+}
+
+// Whether the words between a possessive and "of" name one of the figure's
+// metrics: words of that metric ("net margin" for Net Margin), periods
+// ("FY2025", "Q4") and a period-end note ("(ended December 2025)"), nothing
+// else, and all of the metric's name. So a new subject ("AMD's results this
+// competitor's net margin of"), a dash or another metric ("AMD's gross margin
+// of" Net Margin's 12.0%) breaks it.
+function namesMetric(phrase: string, metrics: ReadonlyArray<string>): boolean {
+  const words = phrase.replace(/\((?:ended|ending) [A-Z][a-z]+ \d{4}\)/g, " ").split(/\s+/).filter(Boolean);
+  const named = words.filter((word) => !/^[A-Z]*\d+$/.test(word));
+  // Both split the same way, so a label repeated verbatim matches ("revenue
+  // growth (YoY)", "P/E"), and so does "YoY" without its parentheses.
+  const bare = (word: string) => word.toLowerCase().replace(/^\((.*)\)$/, "$1");
+  const used = new Set(named.map(bare));
+  return metrics.some((metric) => {
+    const vocabulary = metric.split(/\s+/).map(bare);
+    // The whole name but its parenthesized qualifier: part of it could be
+    // another metric ("revenue" for Revenue Growth (YoY), "margin").
+    const required = metric.replace(/\([^)]*\)/g, " ").split(/\s+/).filter(Boolean).map(bare);
+    return [...used].every((word) => vocabulary.includes(word)) && required.every((word) => used.has(word));
+  });
 }
 
 function numbersIn(text: string): string[] {
