@@ -492,3 +492,20 @@ test("a company owns the figure its possessive names through a noun phrase and \
   const net = [...GOLDEN, { company: "NET", value: "11.0%", metric: "Net Margin" }];
   assert.equal(keepSupportedSentences("AMD's NET margin of 12.0% lags.", [], net).text, "");
 });
+
+test("a fiscal year stays its company's when a chart's window shares the calendar year (#244)", () => {
+  // Without the chart, the wrong year already goes (#180); with it, it must too.
+  for (const figures of [GOLDEN.filter((figure) => figure.metric !== "Price return" && !figure.value.startsWith("YTD")), GOLDEN]) {
+    assert.equal(keepSupportedSentences("AMD's FY2026 net margin was 12.0%.", [], figures).text, "");
+    assert.equal(keepSupportedSentences("In fiscal 2026, AMD's net margin was 12.0%.", [], figures).text, "");
+    const right = "AMD's FY2025 net margin was 12.0%.";
+    assert.deepEqual(keepSupportedSentences(right, [], figures), { text: right, removed: [] });
+  }
+  // The window's years are the chart's, not any company's.
+  const window = "NVDA's price return was 6.6% from December 2025 to August 2026.";
+  assert.deepEqual(keepSupportedSentences(window, [], GOLDEN), { text: window, removed: [] });
+  // A year no company owns is supported in either form.
+  assert.deepEqual(keepSupportedSentences("Revenue rose in FY2025.", ["Q2 2025"]).removed, []);
+  const shared = [{ company: "NVDA", value: "FY2025" }, { company: "AMD", value: "FY2025" }];
+  assert.deepEqual(keepSupportedSentences("Both grew in 2025.", [], shared).removed, []);
+});
