@@ -15,10 +15,10 @@
       "correct_companies": 2,
       "comparable_periods": 2,
       "figures_match_sources": 2,
-      "conclusions_justified": 2,
+      "conclusions_justified": 1,
       "counterarguments": 2,
       "no_invented_numbers": 2,
-      "notes": ""
+      "notes": "Calls Q2 2025 revenue flat vs the prior quarter, but the bars show $7.4B -> $7.7B."
     },
     "what-changed-gross-margin": {
       "correct_companies": 2,
@@ -62,8 +62,8 @@
       "figures_match_sources": 2,
       "conclusions_justified": 2,
       "counterarguments": 2,
-      "no_invented_numbers": 2,
-      "notes": ""
+      "no_invented_numbers": 0,
+      "notes": "\"Roughly nine times\" the next segment; $55.2B / $4.3B is 12.8x (computed, written in words: #228)."
     },
     "missing-segments": {
       "correct_companies": 2,
@@ -89,8 +89,8 @@
       "figures_match_sources": 2,
       "conclusions_justified": 2,
       "counterarguments": 2,
-      "no_invented_numbers": 2,
-      "notes": ""
+      "no_invented_numbers": 0,
+      "notes": "Turn 1 says January 2026 data is \"roughly one month old\" in early September 2026; it is about seven months."
     },
     "ticker-page-compare": {
       "correct_companies": 2,
