@@ -67,26 +67,30 @@ const POSSESSED = /^['’]s\s+(.+?)\s+of\s+(?:(?:[A-Z]{1,4}\.?(?:[ \u00a0\u202f]
 // six") is a computation the number check cannot see (#228): it always goes.
 // Not even a cited claim licenses one, since a claim's "AMD's revenue doubled"
 // must not ground "NVDA's revenue doubled"; the model quotes a displayed figure
-// (a growth rate) instead. Direction ("higher") and "double-digit" are not
-// magnitudes.
+// (a growth rate) instead. Direction ("higher") is not a magnitude.
 // ponytail: a word list, not a parser; add a phrase when the eval shows one.
 const COUNT = String.raw`(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|(?:a )?dozen)`;
 const MAGNITUDE = new RegExp(
-  String.raw`\b(?:doubl(?:e|ed|es|ing)(?![- ]digit)|twice|tripl(?:e|ed|es|ing)|quadrupl(?:e|ed|es|ing)|halved|` +
+  String.raw`\b(?:(?:doubl|tripl|quadrupl)(?:ed|es|ing)|twice|halved|(?:more than|nearly|almost|roughly|about|over|less than|at least|close to) (?:double|triple|quadruple)|` +
     String.raw`${COUNT}[- ]?fold|one in ${COUNT}|half (?:as|the size)|(?:a|one|two|three)[- ](?:third|quarter|fifth|tenth|hundredth)s? (?:of|as)|` +
     String.raw`orders? of magnitude|by half|(?:by )?a factor of (?:${COUNT}|several|a few|about|roughly|nearly|almost|over|more than))\b`,
   "i",
 );
-// "times" is a multiplier only between a quantifier and the thing compared
-// ("several times AMD's", "52.3 times AMD's scale", "many times larger"): so
-// "volatile times the company", "raised guidance three times" and a valuation
-// basis ("52.3 times earnings") stay. "half" needs only the thing compared
+// After a number word, "times" is a multiplier unless it ends the clause or
+// counts occurrences ("raised guidance three times this year"); after another
+// quantifier or digits, only before the thing compared ("several times AMD's",
+// "52.3 times AMD's scale", "many times larger"). So "volatile times the
+// company" and a valuation basis ("52.3 times earnings") stay. A bare
+// "double"/"triple" is a magnitude only after a degree word ("nearly double")
+// or before the thing compared ("double AMD's"), not in "double taxation",
+// "double bottom" or "triple-net"; "doubled" always is. "half" needs only the thing compared
 // ("less than half NVDA's"), unless it is an ordinal half of a period ("first
 // half of NVDA's fiscal 2026"). What follows is case-sensitive, so "half of
 // fiscal 2026" stays.
 const COMPARED = String.raw`(?:as\b|the\b|that of\b|of [A-Z]|its\b|their\b|what\b|(?:larger|bigger|greater|higher|lower|smaller|more|less|faster|slower)\b|[A-Z]{2,}\b)`;
 const MULTIPLIER = new RegExp(
-  String.raw`\b(?:${COUNT}|several|many|a few|multiple|half|\d+(?:\.\d+)?) times ${COMPARED}|` +
+  String.raw`\b${COUNT} times(?!\s*(?:[.,;:!?]|$)| (?:this|in|during|since|so far|each|per)\b| last (?:year|quarter|month)\b(?!['’]s)| a (?:year|quarter)\b)|` +
+    String.raw`\b(?:several|many|a few|multiple|half|\d+(?:\.\d+)?) times ${COMPARED}|\b(?:double|triple|quadruple) ${COMPARED}|` +
     String.raw`(?<!(?:[Ff]irst|[Ss]econd|[Bb]ack|[Ff]ront|1st|2nd) )\b[Hh]alf ${COMPARED}`,
 );
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
