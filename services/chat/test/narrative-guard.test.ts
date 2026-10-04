@@ -563,6 +563,11 @@ test("a magnitude comparison in words goes unless the data states it (#228)", ()
     "NVDA is 52.3-fold AMD's scale.",
     "NVDA is 52.3× AMD's scale.",
     "Half of total revenue came from Gaming.",
+    "NVDA's revenue was fifty percent higher than AMD's.",
+    "NVDA's revenue exceeded AMD's by fifty percent.",
+    "NVDA's margin is a third higher than AMD's.",
+    "NVDA's revenue was six billion dollars more than AMD's.",
+    "NVDA's revenue exceeded AMD's by six billion.",
   ]) {
     assert.deepEqual(keepSupportedSentences(dropped, [], GOLDEN).removed, [dropped], dropped);
   }
@@ -582,6 +587,8 @@ test("a magnitude comparison in words goes unless the data states it (#228)", ()
   assert.equal(keepSupportedSentences("NVDA is 13x AMD's scale.", [], GOLDEN).text, "");
   // Not even a claim licenses one: "AMD's revenue doubled" must not ground
   // "NVDA's revenue doubled" (#228 review). A displayed figure is quoted instead.
+  // A worded quantity that is not a difference is not a magnitude.
+  assert.deepEqual(keepSupportedSentences("Management expects three million units next quarter.", ["Management expects three million units next quarter."]).removed, []);
   const claimed = "NVDA's revenue doubled.";
   assert.deepEqual(keepSupportedSentences(claimed, ["AMD's revenue doubled year over year"], GOLDEN).removed, [claimed]);
   // And "first half" or "a quarter" of the calendar are not fractions of figures.
