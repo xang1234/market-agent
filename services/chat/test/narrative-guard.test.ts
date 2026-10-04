@@ -498,6 +498,9 @@ test("a fiscal year stays its company's when a chart's window shares the calenda
   for (const figures of [GOLDEN.filter((figure) => figure.metric !== "Price return" && !figure.value.startsWith("YTD")), GOLDEN]) {
     assert.equal(keepSupportedSentences("AMD's FY2026 net margin was 12.0%.", [], figures).text, "");
     assert.equal(keepSupportedSentences("In fiscal 2026, AMD's net margin was 12.0%.", [], figures).text, "");
+    for (const label of ["2026 fiscal year", "2026 fiscal-year", "fiscal-year 2026"]) {
+      assert.equal(keepSupportedSentences(`AMD's ${label} net margin was 12.0%.`, [], figures).text, "", label);
+    }
     const right = "AMD's FY2025 net margin was 12.0%.";
     assert.deepEqual(keepSupportedSentences(right, [], figures), { text: right, removed: [] });
   }

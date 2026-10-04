@@ -42,7 +42,10 @@ const NUMBER =
 // The formatter writes no dotted currency prefix (a dotted symbol becomes its
 // ISO code, #150), so every period before whitespace ends a sentence; the
 // all-currency test fails if one appears.
-const FISCAL = /(?:\bFY ?|\bfiscal (?:year )?)$/i;
+// Before a year ("FY2025", "fiscal 2025", "fiscal-year 2025") or after it
+// ("2025 fiscal year", "2025 fiscal-year").
+const FISCAL = /(?:\bFY ?|\bfiscal(?:[ -]year)? )$/i;
+const FISCAL_AFTER = /^ fiscal\b/i;
 const SENTENCE_BREAK = /(?<=[.!?])\s+/;
 // Markdown list markers ("- ", "* ", "1. ", "2) ") and headings ("## Margins",
 // a line that is only "**Margins**"; a bold sentence ending "." is prose).
@@ -252,13 +255,14 @@ function numbersIn(text: string): string[] {
   return numberMatches(text).map(({ number }) => number);
 }
 
-// A fiscal year ("FY2025", "fiscal 2025") is keyed apart from a calendar year
+// A fiscal year ("FY2025", "2025 fiscal year") is keyed apart from a calendar year
 // ("December 2025"): a company owns its fiscal year, while a chart's window
 // year belongs to every company, and matching by number alone let the window
 // make every fiscal year shared (#244).
 function numberMatches(text: string): Array<{ number: string; index: number; end: number }> {
   return [...text.matchAll(NUMBER)].map((match) => {
-    const fiscal = /^\d{4}$/.test(match[0]) && FISCAL.test(text.slice(0, match.index));
+    const fiscal = /^\d{4}$/.test(match[0]) &&
+      (FISCAL.test(text.slice(0, match.index)) || FISCAL_AFTER.test(text.slice(match.index + match[0].length)));
     return { number: (fiscal ? "FY" : "") + numberKey(match[0]), index: match.index, end: match.index + match[0].length };
   });
 }
