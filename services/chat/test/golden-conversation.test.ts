@@ -205,6 +205,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     // over the year-to-date window, each pinned to the bars it was drawn from.
     assert.equal(rows[0]?.basis, "split_adjusted");
     assert.ok((rows[0]?.series_specs ?? []).every((spec) => spec.adjustment_basis === "split_adjusted"));
+    assert.equal(rows[0]?.series_specs.length, 2, "one sealed series per company");
     for (const spec of rows[0]?.series_specs ?? []) {
       assert.deepEqual(spec.window, { kind: "ytd", year: 2026, baseline_date: "2025-12-31", end_date: "2026-08-31" });
       assert.match(spec.bars_sha256, /^[0-9a-f]{64}$/);
@@ -319,11 +320,20 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.ok(performance, `expected a perf_comparison; got [${answer.blocks.map((b) => b.kind).join(", ")}]`);
     assert.equal(performance.title, "Price return (split-adjusted, excluding dividends)");
     assert.doesNotMatch(String(performance.default_range), /YTD/);
-    const { rows } = await client.query<{ series_specs: Array<{ window?: unknown }> }>(
+    // A line per company, each drawn from a series the snapshot sealed.
+    const series = performance.series as Array<{ name: string; points: unknown[] }>;
+    assert.deepEqual(series.map((line) => line.name), ["NVDA", "AMD"]);
+    assert.ok(series.every((line) => line.points.length > 1), "each company needs a price line");
+    const { rows } = await client.query<{ series_specs: Array<{ series_ref: string; adjustment_basis: string; window?: unknown }> }>(
       `select series_specs from snapshots where snapshot_id = $1::uuid`,
       [answer.snapshot_id],
     );
-    assert.ok((rows[0]?.series_specs ?? []).every((spec) => spec.window === undefined), "no YTD window was asked for");
+    const specs = rows[0]?.series_specs ?? [];
+    assert.equal(specs.length, 2, "one sealed series per company");
+    assert.ok(specs.every((spec) => spec.adjustment_basis === "split_adjusted"));
+    assert.ok(specs.every((spec) => spec.window === undefined), "no YTD window was asked for");
+    const seriesRefs = (performance.data_ref as { params: { series_refs: string[] } }).params.series_refs;
+    assert.deepEqual([...seriesRefs].sort(), specs.map((spec) => spec.series_ref).sort());
   });
 
   function completedTurn(turnEvents: ParsedSseEvent[]): ParsedSseEvent {
