@@ -71,16 +71,18 @@ const POSSESSED = /^['’]s\s+(.+?)\s+of\s+(?:(?:[A-Z]{1,4}\.?(?:[ \u00a0\u202f]
 // ponytail: a word list, not a parser; add a phrase when the eval shows one.
 const COUNT = String.raw`(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|(?:a )?dozen)`;
 const MAGNITUDE = new RegExp(
-  String.raw`\b(?:(?:doubl|tripl|quadrupl)(?:ed|es|ing)|twice|halved|(?:more than|nearly|almost|roughly|about|over|less than|at least|close to) (?:double|triple|quadruple)|` +
+  String.raw`\b(?:(?:doubl|tripl|quadrupl)(?:ed|es|ing)(?! down\b)|twice|halved|(?:more than|nearly|almost|roughly|about|over|less than|at least|close to) (?:double|triple|quadruple)|` +
     String.raw`${COUNT}[- ]?fold|one in ${COUNT}|half (?:as|the size)|(?:a|one|two|three)[- ](?:third|quarter|fifth|tenth|hundredth)s? (?:of|as)|` +
-    String.raw`orders? of magnitude|by half|${COUNT}(?:[- ]${COUNT})? (?:(?:percentage|basis) points?|points? (?:higher|lower|above|below|ahead|behind|more|less|wider|narrower)|billion|million|trillion)|(?:by )?a factor of (?:${COUNT}|several|a few|about|roughly|nearly|almost|over|more than))\b`,
+    String.raw`orders? of magnitude|by half|than (?:its |their |the |[A-Z]{2,}['’]s )?(?:entire|whole|combined)\b|${COUNT}(?:[- ]${COUNT})? (?:(?:percentage|basis) points?|points? (?:higher|lower|above|below|ahead|behind|more|less|wider|narrower)|billion|million|trillion)|(?:by )?a factor of (?:${COUNT}|several|a few|about|roughly|nearly|almost|over|more than))\b`,
   "i",
 );
 // After a number word, "times" is a multiplier unless it ends the clause or
 // counts occurrences ("raised guidance three times this year"); after another
 // quantifier or digits, only before the thing compared ("several times AMD's",
 // "52.3 times AMD's scale", "many times larger"); a worded difference ("forty
-// percentage points", "twenty-one points") is a magnitude too. So "volatile times the
+// percentage points", "twenty-one points") is a magnitude too, as is "larger than
+// its entire revenue"; a digit multiple before the thing compared ("52.3x AMD's")
+// is a ratio, not the displayed P/E. So "volatile times the
 // company" and a valuation basis ("52.3 times earnings") stay. A bare
 // "double"/"triple" is a magnitude only after a degree word ("nearly double")
 // or before the thing compared ("double AMD's"), not in "double taxation",
@@ -91,7 +93,7 @@ const MAGNITUDE = new RegExp(
 const COMPARED = String.raw`(?:as\b|the\b|that of\b|of [A-Z]|its\b|their\b|what\b|(?:larger|bigger|greater|higher|lower|smaller|more|less|faster|slower)\b|[A-Z]{2,}\b)`;
 const MULTIPLIER = new RegExp(
   String.raw`\b${COUNT} times(?!\s*(?:[.,;:!?]|$)| (?:this|in|during|since|so far|each|per|over|within|across|throughout|before|after|between)\b| last (?:year|quarter|month)\b(?!['’]s)| a (?:year|quarter)\b)|` +
-    String.raw`\b(?:several|many|a few|multiple|half|\d+(?:\.\d+)?) times ${COMPARED}|\b(?:double|triple|quadruple) ${COMPARED}|` +
+    String.raw`\b(?:several|many|a few|multiple|half|\d+(?:\.\d+)?) times ${COMPARED}|\b(?:double|triple|quadruple) ${COMPARED}|\b\d+(?:\.\d+)?(?:x|[- ]?fold) ${COMPARED}|` +
     String.raw`(?<!(?:[Ff]irst|[Ss]econd|[Bb]ack|[Ff]ront|[Ll]atter|[Ff]ormer|[Ll]ast|[Ll]ater|[Ee]arlier|1st|2nd) )\b[Hh]alf ${COMPARED}`,
 );
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;

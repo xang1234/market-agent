@@ -558,6 +558,9 @@ test("a magnitude comparison in words goes unless the data states it (#228)", ()
     "Six times AMD's revenue would approximate NVDA's.",
     "Several times AMD's scale is still short of NVDA.",
     "Double AMD's revenue would still trail NVDA.",
+    "NVDA's gross margin of 70.8% was larger than its entire net margin of 53.6%.",
+    "NVDA is 52.3x AMD's scale.",
+    "NVDA is 52.3-fold AMD's scale.",
   ]) {
     assert.deepEqual(keepSupportedSentences(dropped, [], GOLDEN).removed, [dropped], dropped);
   }
@@ -579,7 +582,7 @@ test("a magnitude comparison in words goes unless the data states it (#228)", ()
   const claimed = "NVDA's revenue doubled.";
   assert.deepEqual(keepSupportedSentences(claimed, ["AMD's revenue doubled year over year"], GOLDEN).removed, [claimed]);
   // And "first half" or "a quarter" of the calendar are not fractions of figures.
-  for (const kept of ["Revenue rose in the first half of fiscal 2026.", "Margins fell for a quarter before recovering.", "At times the margin dipped.", "Management cited demand many times.", "Revenue rose in the first half of NVDA's fiscal 2026.", "The second half of AMD's fiscal 2025 was weaker.", "Demand was a key factor of the growth.", "During volatile times the company defended margins.", "At other times the margin dipped.", "Management raised guidance three times.", "Management raised guidance three times this year.", "Management raised guidance three times last year.", "Management raised guidance three times over the last year.", "Revenue improved in the latter half of NVDA's fiscal year.", "The CEO made two points about demand.", "Management highlighted the risk of double taxation.", "The chart formed a double bottom.", "The REIT uses triple-net leases."]) {
+  for (const kept of ["Revenue rose in the first half of fiscal 2026.", "Margins fell for a quarter before recovering.", "At times the margin dipped.", "Management cited demand many times.", "Revenue rose in the first half of NVDA's fiscal 2026.", "The second half of AMD's fiscal 2025 was weaker.", "Demand was a key factor of the growth.", "During volatile times the company defended margins.", "At other times the margin dipped.", "Management raised guidance three times.", "Management raised guidance three times this year.", "Management raised guidance three times last year.", "Management raised guidance three times over the last year.", "Revenue improved in the latter half of NVDA's fiscal year.", "The CEO made two points about demand.", "Management doubled down on data-center investment.", "Management is doubling down on AI.", "Management highlighted the risk of double taxation.", "The chart formed a double bottom.", "The REIT uses triple-net leases."]) {
     assert.deepEqual(keepSupportedSentences(kept, ["fiscal 2026", "fiscal 2025"]).removed, [], kept);
   }
 });
