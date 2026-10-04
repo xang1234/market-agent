@@ -72,8 +72,8 @@ const POSSESSED = /^['’]s\s+(.+?)\s+of\s+(?:(?:[A-Z]{1,4}\.?(?:[ \u00a0\u202f]
 const COUNT = String.raw`(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|(?:a )?dozen)`;
 const MAGNITUDE = new RegExp(
   String.raw`\b(?:(?:doubl|tripl|quadrupl)(?:ed|es|ing)(?! down\b| as an?\b)|halved|` +
-    String.raw`${COUNT}[- ]?fold|one in ${COUNT}|(?<!(?:first|second|back|front|latter|former|last|later|earlier|1st|2nd) )half (?:as|the size)|(?:a|${COUNT})[- ](?:third|quarter|fifth|sixth|seventh|eighth|ninth|tenth|hundredth)s? (?:of|as)|` +
-    String.raw`orders? of magnitude|by half|than (?:its |their |the |[A-Z]{2,}['’]s )?(?:entire|whole|combined)\b|${COUNT}(?:[- ]${COUNT})? (?:(?:percentage|basis) points?|percent|points? (?:higher|lower|above|below|ahead|behind|more|less|wider|narrower)|(?:billion|million|trillion)(?: dollars)? (?:higher|lower|above|below|ahead|behind|more|less))|by ${COUNT}(?:[- ]${COUNT})? (?:billion|million|trillion)|(?:a|one|two|three)[- ](?:third|quarter|fifth|tenth|half)s? (?:higher|lower|larger|smaller|bigger|greater|more|less)|(?:by )?a factor of (?:${COUNT}|several|a few|about|roughly|nearly|almost|over|more than))\b`,
+    String.raw`${COUNT}[- ]?fold|one in ${COUNT}|${COUNT} out of (?:every )?${COUNT}|(?<!(?:first|second|back|front|latter|former|last|later|earlier|1st|2nd)[ -])half (?:as|the size)|(?:a|${COUNT})[- ](?:third|quarter|fifth|sixth|seventh|eighth|ninth|tenth|hundredth)s? (?:of|as)|` +
+    String.raw`orders? of magnitude|by half|than (?:its |their |the |[A-Z]{2,}['’]s )?(?:entire|whole|combined) (?:[^\s.,;]+ ){0,3}?(?:revenue|sales|income|profit|earnings|margin|cash flow|base|value|total)\b|${COUNT}(?:[- ]${COUNT})? (?:(?:percentage|basis) points?|percent|points? (?:higher|lower|above|below|ahead|behind|more|less|wider|narrower)|(?:billion|million|trillion)(?: dollars)? (?:higher|lower|above|below|ahead|behind|more|less))|by ${COUNT}(?:[- ]${COUNT})? (?:billion|million|trillion)|(?:a|one|two|three)[- ](?:third|quarter|fifth|tenth|half)s? (?:higher|lower|larger|smaller|bigger|greater|more|less)|(?:by )?a factor of (?:${COUNT}|several|a few|about|roughly|nearly|almost|over|more than))\b`,
   "i",
 );
 // Which phrases count (each case has a test):
@@ -93,8 +93,9 @@ const MAGNITUDE = new RegExp(
 // - "half" before the thing compared or "of", unless an ordinal half of a
 //   period ("first half of NVDA's fiscal 2026").
 // - worded differences ("forty percentage points", "fifty percent", "six
-//   billion dollars more", "a third higher", "larger than its entire revenue"),
-//   though a quantity ("three million units") is not one.
+//   billion dollars more", "a third higher", "three out of four", "larger
+//   than its entire revenue"), though a quantity ("three million units") or a
+//   direction ("faster than the entire sector") is not one.
 // Occurrences and frequency after "N times" / "twice" ("three times this year",
 // "3 times a month", "twice annually"): event counts, not magnitudes.
 const OCCURRENCE = String.raw`(?:(?:this|in|during|since|so far|each|per|over|within|across|throughout|before|after|between|annually|yearly|quarterly|monthly|weekly|daily)\b|last (?:year|quarter|month)\b(?!['’]s)|a (?:year|quarter|month|week|day)\b)`;
@@ -102,7 +103,7 @@ const COMPARED = String.raw`(?:as\b|the\b|that of\b|of [A-Z]|its\b|their\b|what\
 const MULTIPLIER = new RegExp(
   String.raw`\b(?:${COUNT} times|twice)(?!\s*(?:[.,;:!?]|$)| ${OCCURRENCE})|` +
     String.raw`\b(?:several|many|a few|multiple|half) times ${COMPARED}|\b(?:double|triple|quadruple) ${COMPARED}|\b\d+(?:\.\d+)? times (?!(?:trailing |forward |TTM |NTM )?(?:earnings|sales|book|EBITDA|EBIT|revenue|cash flow|free cash flow|FCF|EPS)\b|${OCCURRENCE})[A-Za-z]|\b(?:more than|nearly|almost|roughly|about|over|less than|at least|close to) (?:double|triple|quadruple)(?=\s*(?:[.,;:!?)]|$)|\s+${COMPARED})|\b\d+(?:\.\d+)?(?:[x×]|[- ]?fold) ${COMPARED}|` +
-    String.raw`(?<!(?:[Ff]irst|[Ss]econd|[Bb]ack|[Ff]ront|[Ll]atter|[Ff]ormer|[Ll]ast|[Ll]ater|[Ee]arlier|1st|2nd) )\b[Hh]alf (?:of\b|${COMPARED})`,
+    String.raw`(?<!(?:[Ff]irst|[Ss]econd|[Bb]ack|[Ff]ront|[Ll]atter|[Ff]ormer|[Ll]ast|[Ll]ater|[Ee]arlier|1st|2nd)[ -])\b[Hh]alf (?:of\b|${COMPARED})`,
 );
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
 // Between a figure and the company that owns it: its unit, then a preposition
@@ -170,9 +171,10 @@ export function keepSupportedSentences(
     // with whatever of its item is kept.
     const lead = line.match(LIST_MARKER)?.[0] ?? line.match(/^\s*/)![0];
     const kept = line.slice(lead.length).trim().split(SENTENCE_BREAK).filter((sentence) => {
-      // MULTIPLIER is case-sensitive after its quantifier; a sentence-initial
-      // quantifier ("Six times AMD's", "**Six times…**") is lowercased for it.
-      if (MAGNITUDE.test(sentence) || MULTIPLIER.test(sentence.replace(/^([^A-Za-z]*)([A-Z])/, (_, lead, letter) => lead + letter.toLowerCase()))) {
+      // MULTIPLIER is case-sensitive, so tickers ("AMD") count as the thing
+      // compared; any Capitalized word is lowercased for it ("Six Times AMD's",
+      // "**Six times…**").
+      if (MAGNITUDE.test(sentence) || MULTIPLIER.test(sentence.replace(/\b([A-Z])(?=[a-z])/g, (letter) => letter.toLowerCase()))) {
         removed.push(sentence);
         return false;
       }
