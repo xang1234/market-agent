@@ -42,6 +42,7 @@ const NUMBER =
 // The formatter writes no dotted currency prefix (a dotted symbol becomes its
 // ISO code, #150), so every period before whitespace ends a sentence; the
 // all-currency test fails if one appears.
+const FISCAL = /(?:\bFY ?|\bfiscal (?:year )?)$/i;
 const SENTENCE_BREAK = /(?<=[.!?])\s+/;
 // Markdown list markers ("- ", "* ", "1. ", "2) ") and headings ("## Margins",
 // a line that is only "**Margins**"; a bold sentence ending "." is prose).
@@ -73,7 +74,10 @@ export function keepSupportedSentences(
   supportingTexts: ReadonlyArray<string>,
   attributedFigures: ReadonlyArray<AttributedFigure> = [],
 ): { text: string; removed: string[] } {
-  const supported = new Set(supportingTexts.flatMap(numbersIn));
+  // A year is supported in either form ("FY 2025 to FY 2026" shown supports
+  // "2025-2026"); only owning one tells them apart.
+  const bothForms = (number: string) => /^(?:FY)?\d{4}$/.test(number) ? [number.replace("FY", ""), `FY${number.replace("FY", "")}`] : [number];
+  const supported = new Set(supportingTexts.flatMap(numbersIn).flatMap(bothForms));
   const owners = new Map<string, Set<string>>();
   // The metrics of each company's figure with that number ("AMD\u000012" -> ["Net Margin"]).
   const metricsOf = new Map<string, string[]>();
@@ -94,7 +98,7 @@ export function keepSupportedSentences(
   for (const [number, companies] of owners) {
     if (everyone.size > 1 && companies.size === everyone.size) {
       owners.delete(number);
-      supported.add(number);
+      for (const form of bothForms(number)) supported.add(form);
     }
   }
   // A one-letter ticker ("A") cannot be told from the article, so it is never
@@ -140,7 +144,13 @@ export function keepSupportedSentences(
       // stretch starts past it.
       let usedUpTo = 0;
       const isSupported = attributed.every(({ number, index, end }, i) => {
-        const from = Math.max(i === 0 ? 0 : attributed[i - 1].end, usedUpTo);
+        // A fiscal year with no company named between it and this figure is
+        // part of the phrase naming it ("AMD's FY2025 net margin of 12.0%"), so
+        // it does not end the stretch; "NVDA reported FY2026; AMD revenue..." does.
+        const boundary = attributed.slice(0, i).findLast((n) =>
+          !n.number.startsWith("FY") || named.some((mention) => mention.index >= n.end && mention.index < index)
+        );
+        const from = Math.max(boundary?.end ?? 0, usedUpTo);
         const to = i === attributed.length - 1 ? sentence.length : attributed[i + 1].index;
         const stretch = named.filter((mention) => mention.index >= from && mention.index < index);
         // A company introduced as a comparison is not the figure's owner
@@ -242,12 +252,15 @@ function numbersIn(text: string): string[] {
   return numberMatches(text).map(({ number }) => number);
 }
 
+// A fiscal year ("FY2025", "fiscal 2025") is keyed apart from a calendar year
+// ("December 2025"): a company owns its fiscal year, while a chart's window
+// year belongs to every company, and matching by number alone let the window
+// make every fiscal year shared (#244).
 function numberMatches(text: string): Array<{ number: string; index: number; end: number }> {
-  return [...text.matchAll(NUMBER)].map((match) => ({
-    number: numberKey(match[0]),
-    index: match.index,
-    end: match.index + match[0].length,
-  }));
+  return [...text.matchAll(NUMBER)].map((match) => {
+    const fiscal = /^\d{4}$/.test(match[0]) && FISCAL.test(text.slice(0, match.index));
+    return { number: (fiscal ? "FY" : "") + numberKey(match[0]), index: match.index, end: match.index + match[0].length };
+  });
 }
 
 // Where each company label appears in the sentence, in order.

@@ -742,6 +742,19 @@ test("a fiscal year is credited to the company it belongs to, unless every compa
   assert.equal(await narrate(shared, opening), opening);
 });
 
+test("a chart's window does not make every company's fiscal year shared (#244)", async () => {
+  const latest = fiscalComparison({ year: 2026, end: "2026-01-25", revenue: "$209.9B" });
+  const chart = {
+    kind: "perf_comparison",
+    title: "Price return YTD 2026 (split-adjusted, excluding dividends)",
+    default_range: "YTD 2026: 2025-12-31 close to 2026-08-31 close",
+    series: [{ name: "NVDA", points: [{ y: 0 }, { y: 6.6 }] }, { name: "AAPL", points: [{ y: 0 }, { y: 6.05 }] }],
+  };
+  assert.equal(await narrate([...latest, chart], "NVDA's FY2025 revenue was $209.9B. NVDA is smaller."), "NVDA is smaller.");
+  const right = "NVDA's FY2026 revenue was $209.9B, and its price return was 6.6% from December 2025 to August 2026.";
+  assert.equal(await narrate([...latest, chart], right), right);
+});
+
 test("the guard gets each figure's metric, so a possessive can name it (#240)", async () => {
   // A shared year attaches no one: only the metric credits AAPL its revenue.
   const shared = fiscalComparison({ year: 2025, end: "2025-01-26", revenue: "$130.5B" });
