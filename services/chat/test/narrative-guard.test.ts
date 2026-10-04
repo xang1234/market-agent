@@ -527,6 +527,13 @@ test("a magnitude comparison in words goes unless the data states it (#228)", ()
     "Revenue nearly doubled over the period.",
     "Gaming is twice Automotive's size.",
     "About one in eight dollars came from Gaming.",
+    // Any count, unhyphenated or in digits, and fractions (#228 review).
+    "NVDA is thirteen times AMD's scale.",
+    "NVDA is sixfold AMD's scale.",
+    "NVDA is 13x AMD's scale.",
+    "AMD is half as large as NVDA.",
+    "AMD is about a third of NVDA's size.",
+    "Gaming is two-thirds of the remainder.",
   ]) {
     assert.deepEqual(keepSupportedSentences(dropped, [], GOLDEN).removed, [dropped], dropped);
   }
@@ -537,7 +544,12 @@ test("a magnitude comparison in words goes unless the data states it (#228)", ()
   ]) {
     assert.deepEqual(keepSupportedSentences(kept, [], GOLDEN).removed, [], kept);
   }
-  // A cited claim that states the magnitude itself.
-  const claimed = "Revenue doubled, the filing says.";
-  assert.deepEqual(keepSupportedSentences(claimed, ["Revenue doubled year over year"]).removed, []);
+  // Not even a claim licenses one: "AMD's revenue doubled" must not ground
+  // "NVDA's revenue doubled" (#228 review). A displayed figure is quoted instead.
+  const claimed = "NVDA's revenue doubled.";
+  assert.deepEqual(keepSupportedSentences(claimed, ["AMD's revenue doubled year over year"], GOLDEN).removed, [claimed]);
+  // And "first half" or "a quarter" of the calendar are not fractions of figures.
+  for (const kept of ["Revenue rose in the first half of fiscal 2026.", "Margins fell for a quarter before recovering."]) {
+    assert.deepEqual(keepSupportedSentences(kept, ["fiscal 2026"]).removed, [], kept);
+  }
 });

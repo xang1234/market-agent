@@ -62,12 +62,19 @@ const ATTACHED_PLAIN = /^(?:['’]s)?\s*(?:(?:at|with)\s+)?$/i;
 // FY2025 net margin of 12.0%", "AMD's FY2025 (ended December 2025) revenue of
 // $34.7B"; #240): group 1 is the phrase between, checked by `namesMetric`.
 const POSSESSED = /^['’]s\s+(.+?)\s+of\s+(?:(?:[A-Z]{1,4}\.?(?:[ \u00a0\u202f][A-Z]{1,4})?\p{Sc}?|\p{Sc})[ \u00a0\u202f]?)?$/u;
-// A magnitude comparison in words ("more than double", "six times", "nine-fold",
-// "one in eight") is a computation the number check cannot see (#228): it
-// goes unless a supporting text states the same words. Direction ("higher")
-// and "double-digit" are not magnitudes.
+// A magnitude comparison in words ("more than double", "thirteen times",
+// "sixfold", "one in eight", "half as large", "a third of") is a computation the
+// number check cannot see (#228): it always goes. Not even a cited claim licenses
+// one, since a claim's "AMD's revenue doubled" must not ground "NVDA's revenue
+// doubled"; the model quotes a displayed figure (a growth rate) instead.
+// Direction ("higher") and "double-digit" are not magnitudes.
 // ponytail: a word list, not a parser; add a phrase when the eval shows one.
-const MAGNITUDE = /\b(?:doubl(?:e|ed|es|ing)(?![- ]digit)|twice|tripl(?:e|ed|es|ing)|quadrupl(?:e|ed|es|ing)|halved|(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|a dozen)[- ](?:times|fold)|one in (?:two|three|four|five|six|seven|eight|nine|ten))\b/i;
+const COUNT = String.raw`(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|(?:a )?dozen)`;
+const MAGNITUDE = new RegExp(
+  String.raw`\b(?:doubl(?:e|ed|es|ing)(?![- ]digit)|twice|tripl(?:e|ed|es|ing)|quadrupl(?:e|ed|es|ing)|halved|` +
+    String.raw`${COUNT}(?:[- ]?fold|[- ]times|x)|one in ${COUNT}|half (?:as|the size)|(?:a|one|two|three)[- ](?:third|quarter|fifth)s? (?:of|as))\b`,
+  "i",
+);
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
 // Between a figure and the company that owns it: its unit, then a preposition
 // ("% for ", "B at ", " percent in "). No punctuation and no other words, so a
@@ -134,8 +141,7 @@ export function keepSupportedSentences(
     // with whatever of its item is kept.
     const lead = line.match(LIST_MARKER)?.[0] ?? line.match(/^\s*/)![0];
     const kept = line.slice(lead.length).trim().split(SENTENCE_BREAK).filter((sentence) => {
-      const magnitude = sentence.match(MAGNITUDE)?.[0].toLowerCase();
-      if (magnitude !== undefined && !supportingTexts.some((text) => text.toLowerCase().includes(magnitude))) {
+      if (MAGNITUDE.test(sentence)) {
         removed.push(sentence);
         return false;
       }
