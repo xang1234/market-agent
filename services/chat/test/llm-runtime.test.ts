@@ -742,6 +742,13 @@ test("a fiscal year is credited to the company it belongs to, unless every compa
   assert.equal(await narrate(shared, opening), opening);
 });
 
+test("the guard gets each figure's metric, so a possessive can name it (#240)", async () => {
+  // A shared year attaches no one: only the metric credits AAPL its revenue.
+  const shared = fiscalComparison({ year: 2025, end: "2025-01-26", revenue: "$130.5B" });
+  const kept = "NVDA's revenue was $130.5B versus AAPL's FY2025 revenue of $416.2B.";
+  assert.equal(await narrate(shared, kept), kept);
+});
+
 // A provider that accepts the request and never answers. Its open connection keeps
 // the event loop alive; a bare pending promise doesn't (AbortSignal.timeout's timer is
 // unref'd), so the interval stands in for it.

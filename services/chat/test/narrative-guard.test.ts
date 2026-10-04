@@ -441,11 +441,11 @@ test("a company attached to a figure owns it though another is named earlier (#1
 // figures and fiscal years, and the YTD chart's returns, whose window years
 // every company shares.
 const GOLDEN = [
-  ["NVDA", "$209.9B"], ["NVDA", "70.8%"], ["NVDA", "53.6%"], ["NVDA", "FY2026"],
-  ["AMD", "$34.7B"], ["AMD", "49.9%"], ["AMD", "12.0%"], ["AMD", "FY2025"],
-  ["NVDA", "6.6%"], ["NVDA", "YTD 2026: December 2025 close to August 2026 close"],
-  ["AMD", "3.58%"], ["AMD", "YTD 2026: December 2025 close to August 2026 close"],
-].map(([company, value]) => ({ company, value }));
+  ["NVDA", "$209.9B", "Revenue"], ["NVDA", "70.8%", "Gross Margin"], ["NVDA", "53.6%", "Net Margin"], ["NVDA", "FY2026"],
+  ["AMD", "$34.7B", "Revenue"], ["AMD", "49.9%", "Gross Margin"], ["AMD", "12.0%", "Net Margin"], ["AMD", "FY2025"],
+  ["NVDA", "6.6%", "Price return"], ["NVDA", "YTD 2026: December 2025 close to August 2026 close"],
+  ["AMD", "3.58%", "Price return"], ["AMD", "YTD 2026: December 2025 close to August 2026 close"],
+].map(([company, value, metric]) => ({ company, value, metric }));
 
 test("a company owns the figure its possessive names through a noun phrase and \"of\" (#240)", () => {
   for (const kept of [
@@ -473,7 +473,13 @@ test("a company owns the figure its possessive names through a noun phrase and \
     "NVDA outperformed AMD's results—competitor net margin of 12.0% was stronger.",
     "Unlike AMD's results The company's margin of 12.0% is high.",
     "Versus AMD's growth Its net margin of 12.0% looks low.",
+    // A new subject with no article ("this competitor"), or another of the company's metrics.
+    "Unlike AMD's results this competitor's net margin of 12.0% is stronger.",
+    "NVDA's net margin was 53.6% versus AMD's FY2025 gross margin of 12.0%.",
   ]) {
     assert.equal(keepSupportedSentences(dropped, [], GOLDEN).text, "", dropped);
   }
+  // A ticker that is also a metric word is another company, not part of the phrase.
+  const net = [...GOLDEN, { company: "NET", value: "11.0%", metric: "Net Margin" }];
+  assert.equal(keepSupportedSentences("AMD's NET margin of 12.0% lags.", [], net).text, "");
 });

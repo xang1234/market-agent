@@ -196,7 +196,7 @@ export async function composeAnalystBlocksWithLlm(input: {
     [...displayTextsForBlocks(input.factBlocks ?? []).map(withoutDays), ...claimTextsFromToolCalls(input.toolCalls)],
     shown.flatMap((figure) =>
       figure.company === undefined ? [] : [
-        { company: figure.company, value: figure.value },
+        { company: figure.company, value: figure.value, metric: figure.metric },
         // So is its fiscal year: the title shows every company's, so "NVDA's FY2025"
         // must not pass when NVDA's figures are FY2026 (#180). A year every company
         // shares is no one's in particular (narrative-guard.ts).
