@@ -71,8 +71,8 @@ const POSSESSED = /^['’]s\s+(.+?)\s+of\s+(?:(?:[A-Z]{1,4}\.?(?:[ \u00a0\u202f]
 // ponytail: a word list, not a parser; add a phrase when the eval shows one.
 const COUNT = String.raw`(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|(?:a )?dozen)`;
 const MAGNITUDE = new RegExp(
-  String.raw`\b(?:(?:doubl|tripl|quadrupl)(?:ed|es|ing)(?! down\b)|halved|` +
-    String.raw`${COUNT}[- ]?fold|one in ${COUNT}|half (?:as|the size)|(?:a|one|two|three)[- ](?:third|quarter|fifth|tenth|hundredth)s? (?:of|as)|` +
+  String.raw`\b(?:(?:doubl|tripl|quadrupl)(?:ed|es|ing)(?! down\b| as an?\b)|halved|` +
+    String.raw`${COUNT}[- ]?fold|one in ${COUNT}|half (?:as|the size)|(?:a|${COUNT})[- ](?:third|quarter|fifth|sixth|seventh|eighth|ninth|tenth|hundredth)s? (?:of|as)|` +
     String.raw`orders? of magnitude|by half|than (?:its |their |the |[A-Z]{2,}['’]s )?(?:entire|whole|combined)\b|${COUNT}(?:[- ]${COUNT})? (?:(?:percentage|basis) points?|percent|points? (?:higher|lower|above|below|ahead|behind|more|less|wider|narrower)|(?:billion|million|trillion)(?: dollars)? (?:higher|lower|above|below|ahead|behind|more|less))|by ${COUNT}(?:[- ]${COUNT})? (?:billion|million|trillion)|(?:a|one|two|three)[- ](?:third|quarter|fifth|tenth|half)s? (?:higher|lower|larger|smaller|bigger|greater|more|less)|(?:by )?a factor of (?:${COUNT}|several|a few|about|roughly|nearly|almost|over|more than))\b`,
   "i",
 );
@@ -89,7 +89,7 @@ const MAGNITUDE = new RegExp(
 //   the thing compared ("nearly double.", "more than double AMD's"), or right
 //   before the thing compared ("double AMD's"); not "double taxation",
 //   "concern over triple-net leases" or "double bottom". "doubled" always counts,
-//   except "doubled down".
+//   except "doubled down" and "doubles as a buffer".
 // - "half" before the thing compared or "of", unless an ordinal half of a
 //   period ("first half of NVDA's fiscal 2026").
 // - worded differences ("forty percentage points", "fifty percent", "six
