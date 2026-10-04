@@ -466,6 +466,13 @@ test("a company owns the figure its possessive names through a noun phrase and \
     "AMD's margin lags NVDA whose net margin of 12.0% leads.",
     // A pronoun is not part of the company's noun phrase.
     "Versus AMD's growth its net margin of 12.0% looks low.",
+    // Nor is a dash, which starts another clause, or a capitalized article or pronoun.
+    "NVDA outperformed AMD's results — competitor net margin of 12.0% was stronger.",
+    "NVDA outperformed AMD's results – competitor net margin of 12.0% was stronger.",
+    "NVDA outperformed AMD's results - competitor net margin of 12.0% was stronger.",
+    "NVDA outperformed AMD's results—competitor net margin of 12.0% was stronger.",
+    "Unlike AMD's results The company's margin of 12.0% is high.",
+    "Versus AMD's growth Its net margin of 12.0% looks low.",
   ]) {
     assert.equal(keepSupportedSentences(dropped, [], GOLDEN).text, "", dropped);
   }

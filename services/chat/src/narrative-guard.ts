@@ -56,10 +56,12 @@ const ATTACHED = /^(?:['’]s)?\s*(?:(?:at|with)\s+)?(?:(?:[A-Z]{1,4}\.?(?:[ \u0
 const ATTACHED_PLAIN = /^(?:['’]s)?\s*(?:(?:at|with)\s+)?$/i;
 // A possessive naming the figure through a noun phrase of up to six words and
 // "of" ("versus AMD's FY2025 net margin of 12.0%", "AMD's FY2025 (ended
-// December 2025) revenue of $34.7B"; #240). No clause punctuation, article or
-// pronoun, which would start another subject ("Unlike AMD's results the
-// company's margin of 49.2%"); no other company either (checked by the caller).
-const POSSESSED = /^['’]s\s+(?:(?!(?:a|an|the|its|it|their|they)\s)[^\s,;:]+\s+){1,6}of\s+(?:(?:[A-Z]{1,4}\.?(?:[   ][A-Z]{1,4})?\p{Sc}?|\p{Sc})[   ]?)?$/u;
+// December 2025) revenue of $34.7B"; #240). Each word starts with a letter or
+// digit (a parenthesis aside), so clause punctuation and dashes break it, and
+// none is an article or pronoun, which would start another subject ("Unlike
+// AMD's results the company's margin of 49.2%"); no other company either
+// (checked by the caller).
+const POSSESSED = /^['’]s\s+(?:(?!(?:[Aa]n?|[Tt]he|[Ii]ts?|[Tt]heirs?|[Tt]hey)\s)\(?[\p{L}\p{N}][\p{L}\p{N}&'’/-]*\)?\s+){1,6}of\s+(?:(?:[A-Z]{1,4}\.?(?:[   ][A-Z]{1,4})?\p{Sc}?|\p{Sc})[   ]?)?$/u;
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
 // Between a figure and the company that owns it: its unit, then a preposition
 // ("% for ", "B at ", " percent in "). No punctuation and no other words, so a
