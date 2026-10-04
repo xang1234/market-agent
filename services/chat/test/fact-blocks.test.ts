@@ -5,6 +5,7 @@ import type { IssuerFundamentalFact } from "../../fundamentals/src/issuer-fundam
 import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
 import {
   buildIssuerFactBlocks,
+  loadIssuerFactBlocks,
   comparisonTitle,
   displayedFigures,
   listingsForComparison,
@@ -235,6 +236,14 @@ test("a partially covered fact is not shown; its quarter falls back to a full fa
   assert.match(String(metricRow.title), /Q2 2024/);
   assert.ok((metricRow.items as Array<{ value_ref: string }>).some((item) => item.value_ref === restated.fact_id));
   assert.deepEqual((bars.bars as Array<{ label: string }>).map((bar) => bar.label), ["Q1 2024", "Q2 2024"]);
+});
+
+test("the quarterly facts are loaded full-coverage only, so a full fact can stand in for a newer partial one (#239)", async () => {
+  const texts: string[] = [];
+  const db = { query: async (text: string) => { texts.push(text); return { rows: [] }; } };
+  const issuer = { kind: "issuer" as const, id: "60000000-0000-4000-8000-000000000001" };
+  await loadIssuerFactBlocks(db, { issuer, snapshotId: SNAPSHOT_ID, asOf: AS_OF });
+  assert.match(texts[0], /f\.coverage_level = 'full'/);
 });
 
 test("a comparison charts the listing the user asked for, not an arbitrary one of the issuer's", () => {

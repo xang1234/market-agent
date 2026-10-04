@@ -87,3 +87,11 @@ test("loadRecentIssuerFundamentals passes numericOnly through for figure callers
   await loadRecentIssuerFundamentals(db, ISSUER, {});
   assert.doesNotMatch(calls[1].text, /f\.value_num is not null/);
 });
+
+test("loadRecentIssuerFundamentals passes fullCoverageOnly through for figure callers (#239)", async () => {
+  const { db, calls } = recordingDb([]);
+  await loadRecentIssuerFundamentals(db, ISSUER, { fullCoverageOnly: true });
+  assert.match(calls[0].text, /f\.coverage_level = 'full'/);
+  await loadRecentIssuerFundamentals(db, ISSUER, {});
+  assert.doesNotMatch(calls[1].text, /coverage_level = 'full'/);
+});

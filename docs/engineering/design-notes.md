@@ -135,6 +135,8 @@ figures goes through it, directly or via `loadRecentIssuerFundamentals`. Its rul
 - **numeric** values only (by default);
 - **dated:** a fiscal period has its year and period;
 - **currency:** a currency fact states its currency, never assumed;
+- **coverage** (`fullCoverageOnly`, opt-in): only fully covered facts, chosen before canonicalization so a newer partial
+  fact never displaces an older full one. Chat's quarterly blocks use it (#239);
 - **canonical:** one fact per subject, metric and period, the latest `as_of` winning;
 - **cutoff** (when given): `as_of`, `observed_at` and `reported_at` at or before it, so a snapshot never uses what wasn't
   yet known.

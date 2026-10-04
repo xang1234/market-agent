@@ -6,6 +6,7 @@
 // - dated: a fiscal period needs its year and period (point facts need neither);
 // - currency: a monetary fact (by its metric's unit_class, or a currency unit)
 //   states its currency, never assumed;
+// - coverage (opt-in): only fully covered facts, before canonicalization (#239);
 // - canonical: one fact per subject, metric and period, the latest as_of winning
 //   when sources overlap;
 // - cutoff (when given): as_of, observed_at and reported_at all at or before it,
@@ -36,6 +37,9 @@ export type UsableFactsQuery = {
   metricKeys?: ReadonlyArray<string>;
   // Default true. False keeps text-only facts (e.g. for model context).
   numericOnly?: boolean;
+  // Only fully covered facts, chosen before canonicalization so a newer partial
+  // fact does not displace an older full one (#239). Default false.
+  fullCoverageOnly?: boolean;
   // Row cap after canonicalization; omit for all.
   limit?: number;
 };
@@ -80,6 +84,9 @@ export async function loadUsableFacts(db: QueryExecutor, query: UsableFactsQuery
   // A figure is a finite number: numeric columns can also hold NaN/Infinity.
   if (query.numericOnly ?? true) {
     filters += `\n        and f.value_num is not null and f.value_num not in ('NaN', 'Infinity', '-Infinity')`;
+  }
+  if (query.fullCoverageOnly) {
+    filters += `\n        and f.coverage_level = 'full'`;
   }
   if (query.periodKind !== undefined) {
     params.push(query.periodKind);
