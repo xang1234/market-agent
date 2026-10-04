@@ -62,26 +62,32 @@ const ATTACHED_PLAIN = /^(?:['’]s)?\s*(?:(?:at|with)\s+)?$/i;
 // FY2025 net margin of 12.0%", "AMD's FY2025 (ended December 2025) revenue of
 // $34.7B"; #240): group 1 is the phrase between, checked by `namesMetric`.
 const POSSESSED = /^['’]s\s+(.+?)\s+of\s+(?:(?:[A-Z]{1,4}\.?(?:[ \u00a0\u202f][A-Z]{1,4})?\p{Sc}?|\p{Sc})[ \u00a0\u202f]?)?$/u;
-// A magnitude comparison in words ("more than double", "thirteen times",
-// "sixfold", "one in eight", "half as large", "a third of") is a computation the
-// number check cannot see (#228): it always goes. A multiple in digits
-// ("52.3x", "52.3 times earnings") is a figure, which the number check verifies. Not even a cited claim licenses
-// one, since a claim's "AMD's revenue doubled" must not ground "NVDA's revenue
-// doubled"; the model quotes a displayed figure (a growth rate) instead.
-// Direction ("higher") and "double-digit" are not magnitudes.
-// Any quantifier before "times" or "half" ("several", "two and a half", "less
-// than half") is caught by what follows: the thing compared, as a ticker, "as",
-// "the" or a comparative ("times AMD's", "half as large", "many times larger").
-// What follows is case-sensitive, so "half of fiscal 2026" stays, and an
-// ordinal half ("first half of NVDA's fiscal 2026") or "at times the" too; after
-// digits ("52.3 times the sector's") it is a displayed multiple, checked by value.
+// A magnitude comparison in words ("more than double", "thirteen times AMD's",
+// "sixfold", "one in eight", "half as large", "a third of", "by a factor of
+// six") is a computation the number check cannot see (#228): it always goes.
+// Not even a cited claim licenses one, since a claim's "AMD's revenue doubled"
+// must not ground "NVDA's revenue doubled"; the model quotes a displayed figure
+// (a growth rate) instead. Direction ("higher") and "double-digit" are not
+// magnitudes.
 // ponytail: a word list, not a parser; add a phrase when the eval shows one.
-const MULTIPLIER = /(?<![Aa]t |\d |(?:[Ff]irst|[Ss]econd|[Bb]ack|[Ff]ront|1st|2nd) )\b(?:[Tt]imes|[Hh]alf) (?:as\b|the\b|that of\b|of [A-Z]|its\b|their\b|what\b|(?:larger|bigger|greater|higher|lower|smaller|more|less|faster|slower)\b|[A-Z]{2,}\b)/;
 const COUNT = String.raw`(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|(?:a )?dozen)`;
 const MAGNITUDE = new RegExp(
   String.raw`\b(?:doubl(?:e|ed|es|ing)(?![- ]digit)|twice|tripl(?:e|ed|es|ing)|quadrupl(?:e|ed|es|ing)|halved|` +
-    String.raw`${COUNT}(?:[- ]?fold|[- ]times)|one in ${COUNT}|half (?:as|the size)|(?:a|one|two|three)[- ](?:third|quarter|fifth|tenth|hundredth)s? (?:of|as)|orders? of magnitude|by half|(?:by )?a factor of (?:${COUNT}|several|a few|about|roughly|nearly|almost|over|more than))\b`,
+    String.raw`${COUNT}[- ]?fold|one in ${COUNT}|half (?:as|the size)|(?:a|one|two|three)[- ](?:third|quarter|fifth|tenth|hundredth)s? (?:of|as)|` +
+    String.raw`orders? of magnitude|by half|(?:by )?a factor of (?:${COUNT}|several|a few|about|roughly|nearly|almost|over|more than))\b`,
   "i",
+);
+// "times" is a multiplier only between a quantifier and the thing compared
+// ("several times AMD's", "52.3 times AMD's scale", "many times larger"): so
+// "volatile times the company", "raised guidance three times" and a valuation
+// basis ("52.3 times earnings") stay. "half" needs only the thing compared
+// ("less than half NVDA's"), unless it is an ordinal half of a period ("first
+// half of NVDA's fiscal 2026"). What follows is case-sensitive, so "half of
+// fiscal 2026" stays.
+const COMPARED = String.raw`(?:as\b|the\b|that of\b|of [A-Z]|its\b|their\b|what\b|(?:larger|bigger|greater|higher|lower|smaller|more|less|faster|slower)\b|[A-Z]{2,}\b)`;
+const MULTIPLIER = new RegExp(
+  String.raw`\b(?:${COUNT}|several|many|a few|multiple|half|\d+(?:\.\d+)?) times ${COMPARED}|` +
+    String.raw`(?<!(?:[Ff]irst|[Ss]econd|[Bb]ack|[Ff]ront|1st|2nd) )\b[Hh]alf ${COMPARED}`,
 );
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
 // Between a figure and the company that owns it: its unit, then a preposition

@@ -546,6 +546,8 @@ test("a magnitude comparison in words goes unless the data states it (#228)", ()
     "NVDA's revenue is several times its prior level.",
     "NVDA's revenue exceeds AMD's by a factor of six.",
     "NVDA earned several times what AMD reported.",
+    // A displayed figure's value does not license a ratio (#228 review).
+    "NVDA is 52.3 times AMD's scale.",
   ]) {
     assert.deepEqual(keepSupportedSentences(dropped, [], GOLDEN).removed, [dropped], dropped);
   }
@@ -556,7 +558,7 @@ test("a magnitude comparison in words goes unless the data states it (#228)", ()
     // A displayed multiple in digits is a figure, checked by value (#228 review).
     "NVDA's P/E was 52.3x.",
     "NVDA trades at 52.3 times earnings.",
-    "NVDA trades at 52.3 times the sector's earnings.",
+    "NVDA trades at 52.3 times trailing earnings.",
   ]) {
     assert.deepEqual(keepSupportedSentences(kept, [], GOLDEN).removed, [], kept);
   }
@@ -567,7 +569,7 @@ test("a magnitude comparison in words goes unless the data states it (#228)", ()
   const claimed = "NVDA's revenue doubled.";
   assert.deepEqual(keepSupportedSentences(claimed, ["AMD's revenue doubled year over year"], GOLDEN).removed, [claimed]);
   // And "first half" or "a quarter" of the calendar are not fractions of figures.
-  for (const kept of ["Revenue rose in the first half of fiscal 2026.", "Margins fell for a quarter before recovering.", "At times the margin dipped.", "Management cited demand many times.", "Revenue rose in the first half of NVDA's fiscal 2026.", "The second half of AMD's fiscal 2025 was weaker.", "Demand was a key factor of the growth."]) {
+  for (const kept of ["Revenue rose in the first half of fiscal 2026.", "Margins fell for a quarter before recovering.", "At times the margin dipped.", "Management cited demand many times.", "Revenue rose in the first half of NVDA's fiscal 2026.", "The second half of AMD's fiscal 2025 was weaker.", "Demand was a key factor of the growth.", "During volatile times the company defended margins.", "At other times the margin dipped.", "Management raised guidance three times."]) {
     assert.deepEqual(keepSupportedSentences(kept, ["fiscal 2026", "fiscal 2025"]).removed, [], kept);
   }
 });
