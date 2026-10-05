@@ -702,7 +702,32 @@ test("a stated cause must be made of the answer's own data (#249)", () => {
     "NVDA's revenue growth was driven by Data Center.",
     "NVDA's gross margin of 70.8% reflects higher revenue.",
     "The table reflects the reported figures for each segment.",
+    // A cause hedged as unshown, in other words (#240 eval).
+    "The higher margins could reflect a narrower product mix, but the data shown does not identify the cause.",
+    "The gap reflects differences in expense structure, though the data does not break out what drives it.",
   ]) {
     assert.deepEqual(keepSupportedSentences(kept, shown, GOLDEN).removed, [], kept);
   }
+});
+
+test("a possessive may name the fiscal period in words: \"NVDA's fiscal 2025 revenue of\" (#240)", () => {
+  const fiscal = [
+    { company: "NVDA", value: "$130.5B", metric: "Revenue" }, { company: "NVDA", value: "FY2025" },
+    { company: "AAPL", value: "$416.2B", metric: "Revenue" }, { company: "AAPL", value: "FY2025" },
+  ];
+  const kept = "AAPL's fiscal 2025 revenue of $416.2B is higher than NVDA's fiscal 2025 revenue of $130.5B.";
+  assert.deepEqual(keepSupportedSentences(kept, [], fiscal), { text: kept, removed: [] });
+  // The wrong-company twin still goes.
+  const swapped = "AAPL's fiscal 2025 revenue of $130.5B is higher than NVDA's fiscal 2025 revenue of $416.2B.";
+  assert.equal(keepSupportedSentences(swapped, [], fiscal).text, "");
+});
+
+test("a displayed date may be written with its day; any other day still goes (#240)", () => {
+  const shown = ["YTD 2026: December 2025 close to August 2026 close"];
+  const dates = ["2025-12-31", "2026-08-31"];
+  const kept = "The YTD window runs from the December 31, 2025 close through the August 31, 2026 close.";
+  assert.deepEqual(keepSupportedSentences(kept, shown, [], dates), { text: kept, removed: [] });
+  // A day that is not displayed, and a displayed day used as a figure, still go.
+  assert.equal(keepSupportedSentences("The window starts from the December 30, 2025 close.", shown, [], dates).text, "");
+  assert.equal(keepSupportedSentences("Revenue rose 31% in December 2025.", shown, [], dates).text, "");
 });

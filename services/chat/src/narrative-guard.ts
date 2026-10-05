@@ -132,7 +132,7 @@ const MULTIPLIER = new RegExp(
 // ponytail: a vocabulary check, not a semantic one; an interpretation the data
 // cannot show ("pricing power") goes too, which is what the prompt asks.
 const CAUSAL = /\b(?:driven by|due to|because of|owing to|attributable to|as a result of|thanks to|on the back of|fuell?ed by|stemming from|caused by|result(?:s|ed)? from|reflect(?:s|ed|ing)?)\s+([^,;:.]+)/gi;
-const NO_CAUSE = /\b(?:does not|doesn['’]t|do not|don['’]t|cannot|can['’]t|is not|isn['’]t|are not|aren['’]t) (?:show|tell|explain|reveal|indicate|see|shown|visible|available|known)\b|\bwhether\b|\bno (?:cause|explanation)\b/i;
+const NO_CAUSE = /\b(?:does not|doesn['’]t|do not|don['’]t|cannot|can['’]t|is not|isn['’]t|are not|aren['’]t) (?:show|tell|explain|reveal|indicate|identify|isolate|pinpoint|attribute|break out|see|shown|visible|available|known)\b|\bwhether\b|\bno (?:cause|explanation)\b/i;
 const CAUSE_STOP = new Set([
   "the", "a", "an", "of", "and", "or", "in", "on", "its", "their", "that", "this", "these", "those", "to", "for",
   "with", "by", "from", "as", "at", "which", "both", "more", "less", "than", "over", "across", "into", "per", "each",
@@ -146,6 +146,8 @@ const CAUSE_DATA_WORDS = new Set([
   "quarterly", "year", "years", "annual", "period", "periods", "fiscal", "price", "prices", "return", "returns",
 ]);
 const causeWords = (text: string) => (text.toLowerCase().match(/[a-z][a-z0-9'’-]*/g) ?? []).map((word) => word.replace(/['’]s$/, ""));
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const DAY_DATE = new RegExp(`\\b(${MONTHS.join("|")}) (\\d{1,2}),? (\\d{4})\\b`, "g");
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
 // Between a figure and the company that owns it: its unit, then a preposition
 // ("% for ", "B at ", " percent in "). No punctuation and no other words, so a
@@ -160,6 +162,8 @@ export function keepSupportedSentences(
   text: string,
   supportingTexts: ReadonlyArray<string>,
   attributedFigures: ReadonlyArray<AttributedFigure> = [],
+  // Displayed dates ("2025-12-31"), which the narrative may write with their day.
+  displayedDates: ReadonlyArray<string> = [],
 ): { text: string; removed: string[] } {
   // A year is supported in either form ("FY 2025 to FY 2026" shown supports
   // "2025-2026"); only owning one tells them apart.
@@ -209,6 +213,12 @@ export function keepSupportedSentences(
     [...sentence.matchAll(CAUSAL)].every((match) =>
       causeWords(match[1]).every((word) => CAUSE_STOP.has(word) || CAUSE_DATA_WORDS.has(word) || vocabulary.has(word))
     );
+  const dates = new Set(displayedDates);
+  const withDisplayedDays = (sentence: string) =>
+    sentence.replace(DAY_DATE, (date, month: string, day: string, year: string) => {
+      const iso = `${year}-${String(MONTHS.indexOf(month) + 1).padStart(2, "0")}-${day.padStart(2, "0")}`;
+      return dates.has(iso) ? `${month} ${year}` : date;
+    });
   const removed: string[] = [];
   // null marks a line the guard dropped whole.
   const lines: Array<string | null> = [];
@@ -221,7 +231,10 @@ export function keepSupportedSentences(
     // A list marker ("1.", "-") is not a sentence: it is set aside, and stays
     // with whatever of its item is kept.
     const lead = line.match(LIST_MARKER)?.[0] ?? line.match(/^\s*/)![0];
-    const kept = line.slice(lead.length).trim().split(SENTENCE_BREAK).filter((sentence) => {
+    const kept = line.slice(lead.length).trim().split(SENTENCE_BREAK).filter((written) => {
+      // A displayed date written with its day ("December 31, 2025") is checked as
+      // its month and year, so the day is not a figure (#240); any other day is.
+      const sentence = withDisplayedDays(written);
       // Inline Markdown ("double **AMD's**") is ignored for both checks.
       const plain = sentence.replace(/[*_`]+/g, "");
       // MULTIPLIER is case-sensitive so that a ticker ("AMD") counts as the
@@ -232,7 +245,7 @@ export function keepSupportedSentences(
         plain.toLowerCase(),
       );
       if (MAGNITUDE.test(plain) || MULTIPLIER.test(normalized) || !groundedCause(plain)) {
-        removed.push(sentence);
+        removed.push(written);
         return false;
       }
       const allNumbers = numberMatches(sentence);
@@ -243,7 +256,7 @@ export function keepSupportedSentences(
       const numbers = allNumbers.filter((n) => !mentions.some((m) => within(n.index, m.index, m.company.length)));
       const named = mentions.filter((m) => !numbers.some((n) => within(m.index, n.index, n.end - n.index)));
       if (numbers.some(({ number }) => !supported.has(number) && !owners.has(number))) {
-        removed.push(sentence);
+        removed.push(written);
         return false;
       }
       // Figures that need a company (any comparison value, even one a claim or
@@ -311,7 +324,7 @@ export function keepSupportedSentences(
         carried = credited;
         return credited.length > 0 && credited.every((company) => owners.get(number)!.has(company));
       });
-      if (!isSupported) removed.push(sentence);
+      if (!isSupported) removed.push(written);
       return isSupported;
     });
     lines.push(kept.length > 0 ? lead + kept.join(" ") : null);
@@ -344,7 +357,8 @@ export function keepSupportedSentences(
 // of" Net Margin's 12.0%) breaks it.
 function namesMetric(phrase: string, metrics: ReadonlyArray<string>): boolean {
   const words = phrase.replace(/\((?:ended|ending) [A-Z][a-z]+ \d{4}\)/g, " ").split(/\s+/).filter(Boolean);
-  const named = words.filter((word) => !/^[A-Z]*\d+$/.test(word));
+  // Periods are not metric words: "FY2025", "Q4", and "fiscal (year) 2025" (#240).
+  const named = words.filter((word) => !/^[A-Z]*\d+$/.test(word) && !/^(?:fiscal|year)$/i.test(word));
   // Both split the same way, so a label repeated verbatim matches ("revenue
   // growth (YoY)", "P/E"), and so does "YoY" without its parentheses.
   const bare = (word: string) => word.toLowerCase().replace(/^\((.*)\)$/, "$1");

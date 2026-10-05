@@ -271,6 +271,9 @@ test("the answer is asked for an analyst's view: takeaway, trend, strengths, cou
   // Context comes from the data only, and the existing rules stay.
   assert.match(systemPrompt, /never add facts, numbers, or events that are not in the tool context/);
   assert.match(systemPrompt, /never compute new figures/);
+  // Each sentence with a figure names its company: the guard does not carry
+  // "Its" across sentences (#240, #142).
+  assert.match(systemPrompt, /never begin it with "Its" or "Their"/);
   // A magnitude comparison in words is a computation too, and a cause needs data (#228).
   assert.match(systemPrompt, /magnitude comparison between figures is a computation too, even in words/);
   assert.match(systemPrompt, /only the direction/);
@@ -760,6 +763,18 @@ test("a chart's window does not make every company's fiscal year shared (#244)",
   assert.equal(await narrate([...latest, chart], "NVDA's FY2025 revenue was $209.9B. NVDA is smaller."), "NVDA is smaller.");
   const right = "NVDA's FY2026 revenue was $209.9B, and its price return was 6.6% from December 2025 to August 2026.";
   assert.equal(await narrate([...latest, chart], right), right);
+});
+
+test("the chart window's dates reach the guard, so a narrative may write their day (#240)", async () => {
+  const latest = fiscalComparison({ year: 2026, end: "2026-01-25", revenue: "$209.9B" });
+  const chart = {
+    kind: "perf_comparison",
+    title: "Price return YTD 2026 (split-adjusted, excluding dividends)",
+    default_range: "YTD 2026: 2025-12-31 close to 2026-08-31 close",
+    series: [{ name: "NVDA", points: [{ y: 0 }, { y: 6.6 }] }, { name: "AAPL", points: [{ y: 0 }, { y: 6.05 }] }],
+  };
+  const window = "NVDA's price return was 6.6% from the December 31, 2025 close to the August 31, 2026 close.";
+  assert.equal(await narrate([...latest, chart], window), window);
 });
 
 test("the guard gets each figure's metric, so a possessive can name it (#240)", async () => {

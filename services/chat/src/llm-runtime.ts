@@ -138,7 +138,9 @@ export async function composeAnalystBlocksWithLlm(input: {
           "The figures shown to the user are listed in displayed_figures, each with the metric",
           "and, in a comparison, the company it belongs to. Quote a figure only exactly as it",
           "appears there, in a sentence that names its company exactly as given in company",
-          "(e.g. NVDA), and never compute new figures such as growth rates,",
+          // The guard credits a figure only within its sentence (#142), so "Its" drops (#240).
+          "(e.g. NVDA): name the company in every sentence that quotes a figure, and never begin it with \"Its\" or \"Their\",",
+          "and never compute new figures such as growth rates,",
           "margins, differences, or ratios. A magnitude comparison between figures is a computation too, even in words",
           // Wrong comparisons in words the guard cannot see (#228): "nine times" for 12.8x.
           "(\"roughly double\", \"six times\", \"larger than X's whole revenue\"):",
@@ -198,9 +200,10 @@ export async function composeAnalystBlocksWithLlm(input: {
     return rewriteFirstRichTextBlock(input.blocks, text);
   }
 
+  const displayTexts = displayTextsForBlocks(input.factBlocks ?? []);
   const guarded = keepSupportedSentences(
     text,
-    [...displayTextsForBlocks(input.factBlocks ?? []).map(withoutDays), ...claimTextsFromToolCalls(input.toolCalls)],
+    [...displayTexts.map(withoutDays), ...claimTextsFromToolCalls(input.toolCalls)],
     shown.flatMap((figure) =>
       figure.company === undefined ? [] : [
         { company: figure.company, value: figure.value, metric: figure.metric },
@@ -210,6 +213,8 @@ export async function composeAnalystBlocksWithLlm(input: {
         ...(figure.period ? [{ company: figure.company, value: withoutDays(figure.period) }] : []),
       ]
     ),
+    // A chart window's dates, which the narrative may write with their day (#240).
+    displayTexts.flatMap((text) => text.match(/\d{4}-\d{2}-\d{2}/g) ?? []),
   );
   if (guarded.removed.length > 0) {
     console.warn(`[chat] removed ${guarded.removed.length} narrative sentence(s) quoting figures not shown to the user`);
