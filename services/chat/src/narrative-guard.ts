@@ -139,13 +139,16 @@ const CAUSAL = /\b(?:driven by|due to|because of|owing to|attributable to|as a r
 const NOT = String.raw`(?:does not|doesn['’]t|do not|don['’]t|cannot|can['’]t|is not|isn['’]t|are not|aren['’]t|not)`;
 const DENIED_CAUSE = new RegExp(
   String.raw`\b${NOT} (?:show|tell|explain|reveal|indicate|identify|isolate|pinpoint|attribute|break out|see|say)\b[^.;]{0,20}?` +
-    String.raw`(?:\b(?:the|a|any|its|their) (?:causes?|drivers?|reasons?)(?=\s*(?:[.,;:!?)]|$)| (?:of|for|behind) (?:it|this|that|them|the (?:gap|difference|change|decline|increase|shift))\b)|\bwhy\b|\bwhat (?:drives|caused|causes|is driving) (?:it|this|that|them|the (?:gap|difference|change|decline|increase|shift))\b)|\bno (?:cause|explanation)\b`,
+    String.raw`(?:\b(?:the|a|any|its|their) (?:causes?|drivers?|reasons?)(?=\s*(?:[.,;:!?)]|$)| (?:of|for|behind) (?:it|this|that|them|the (?:gap|difference|change|decline|increase|shift))\b)|\bwhy(?=\s*(?:[.,;:!?)]|$)| (?:it|this|that|they|the (?:gap|difference|change|decline|increase|shift))\b)|\bwhat (?:drives|caused|causes|is driving) (?:it|this|that|them|the (?:gap|difference|change|decline|increase|shift))\b)|\bno (?:cause|explanation)\b`,
   "i",
 );
 // A denial or question that scopes the causal clause before it, with no clause
 // break in between ("cannot see whether … driven by", "does not show that …
 // driven by"); "does not identify the cause, so … reflects" scopes nothing.
-const SCOPED_CAUSE = new RegExp(String.raw`(?:\bwhether\b|\b${NOT} (?:show|indicate|prove|confirm|establish|say|tell us) that\b)[^,;:]*$`, "i");
+// A passive denial of a "That …" subject clause ("That NVDA's margins are driven
+// by pricing power is not shown by the data").
+const PASSIVE_DENIAL = /^\s*That\b[^,;:]*\b(?:is|are) not (?:shown|established|confirmed|supported|proven|evident|clear)\b/i;
+const SCOPED_CAUSE = new RegExp(String.raw`(?:\bwhether\b|\b${NOT} (?:show|reveal|demonstrate|indicate|prove|confirm|establish|say|tell us) that\b)[^,;:]*$`, "i");
 const CAUSE_STOP = new Set([
   "the", "a", "an", "of", "and", "or", "in", "on", "its", "their", "that", "this", "these", "those", "to", "for",
   "with", "by", "from", "as", "at", "which", "both", "more", "less", "than", "over", "across", "into", "per", "each",
@@ -226,6 +229,7 @@ export function keepSupportedSentences(
   const groundedCause = (sentence: string) =>
     [...sentence.matchAll(CAUSAL)].every((match) =>
       SCOPED_CAUSE.test(sentence.slice(0, match.index)) ||
+      (/^\s*That\b[^,;:]*$/i.test(sentence.slice(0, match.index)) && PASSIVE_DENIAL.test(sentence)) ||
       DENIED_CAUSE.test(sentence.slice(match.index + match[0].length)) ||
       causeWords(match[1]).every((word) => CAUSE_STOP.has(word) || CAUSE_DATA_WORDS.has(word) || vocabulary.has(word))
     );
