@@ -1,0 +1,105 @@
+{
+  "run": "2026-10-04T101418",
+  "model": "opencode-go/qwen3.8-max (fallbacks: opencode-go/kimi-k2.7-code)",
+  "scores": {
+    "single-latest-quarter": {
+      "correct_companies": null,
+      "comparable_periods": null,
+      "figures_match_sources": null,
+      "conclusions_justified": null,
+      "counterarguments": null,
+      "no_invented_numbers": null,
+      "notes": ""
+    },
+    "margin-trend-loss-quarter": {
+      "correct_companies": null,
+      "comparable_periods": null,
+      "figures_match_sources": null,
+      "conclusions_justified": null,
+      "counterarguments": null,
+      "no_invented_numbers": null,
+      "notes": ""
+    },
+    "what-changed-gross-margin": {
+      "correct_companies": null,
+      "comparable_periods": null,
+      "figures_match_sources": null,
+      "conclusions_justified": null,
+      "counterarguments": null,
+      "no_invented_numbers": null,
+      "notes": ""
+    },
+    "peer-two": {
+      "correct_companies": null,
+      "comparable_periods": null,
+      "figures_match_sources": null,
+      "conclusions_justified": null,
+      "counterarguments": null,
+      "no_invented_numbers": null,
+      "notes": ""
+    },
+    "peer-three": {
+      "correct_companies": null,
+      "comparable_periods": null,
+      "figures_match_sources": null,
+      "conclusions_justified": null,
+      "counterarguments": null,
+      "no_invented_numbers": null,
+      "notes": ""
+    },
+    "fiscal-year-trap": {
+      "correct_companies": null,
+      "comparable_periods": null,
+      "figures_match_sources": null,
+      "conclusions_justified": null,
+      "counterarguments": null,
+      "no_invented_numbers": null,
+      "notes": ""
+    },
+    "segment-drill-down": {
+      "correct_companies": null,
+      "comparable_periods": null,
+      "figures_match_sources": null,
+      "conclusions_justified": null,
+      "counterarguments": null,
+      "no_invented_numbers": null,
+      "notes": ""
+    },
+    "missing-segments": {
+      "correct_companies": null,
+      "comparable_periods": "n/a",
+      "figures_match_sources": "n/a",
+      "conclusions_justified": "n/a",
+      "counterarguments": "n/a",
+      "no_invented_numbers": null,
+      "notes": ""
+    },
+    "missing-cash-flow": {
+      "correct_companies": null,
+      "comparable_periods": "n/a",
+      "figures_match_sources": "n/a",
+      "conclusions_justified": "n/a",
+      "counterarguments": "n/a",
+      "no_invented_numbers": null,
+      "notes": ""
+    },
+    "follow-up-memory": {
+      "correct_companies": null,
+      "comparable_periods": null,
+      "figures_match_sources": null,
+      "conclusions_justified": null,
+      "counterarguments": null,
+      "no_invented_numbers": null,
+      "notes": ""
+    },
+    "ticker-page-compare": {
+      "correct_companies": null,
+      "comparable_periods": null,
+      "figures_match_sources": null,
+      "conclusions_justified": null,
+      "counterarguments": null,
+      "no_invented_numbers": null,
+      "notes": ""
+    }
+  }
+}

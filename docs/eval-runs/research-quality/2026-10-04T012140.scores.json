@@ -89,8 +89,8 @@
       "figures_match_sources": 2,
       "conclusions_justified": 1,
       "counterarguments": 2,
-      "no_invented_numbers": 0,
-      "notes": "Turn 1 says January 2026 data is \"roughly one month old\" in early September 2026; it is about seven months. Turn 1 calls Q4's 8.9% QoQ the slowest sequential pace shown; Q2 FY2026 was 5.9% ($44.1B -> $46.7B). The deceleration point still holds."
+      "no_invented_numbers": 2,
+      "notes": "\"Roughly one month old\" quotes fact_recency.age_days (facts are stamped as_of 2026-09-01; the run was on 2026-10-04), so it is from the data; an earlier rescoring to 0 measured from the period end by mistake. Turn 1 calls Q4's 8.9% QoQ the slowest sequential pace shown; Q2 FY2026 was 5.9% ($44.1B -> $46.7B). The deceleration point still holds."
     },
     "ticker-page-compare": {
       "correct_companies": 2,

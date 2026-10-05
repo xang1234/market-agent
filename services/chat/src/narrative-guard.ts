@@ -62,6 +62,67 @@ const ATTACHED_PLAIN = /^(?:['’]s)?\s*(?:(?:at|with)\s+)?$/i;
 // FY2025 net margin of 12.0%", "AMD's FY2025 (ended December 2025) revenue of
 // $34.7B"; #240): group 1 is the phrase between, checked by `namesMetric`.
 const POSSESSED = /^['’]s\s+(.+?)\s+of\s+(?:(?:[A-Z]{1,4}\.?(?:[ \u00a0\u202f][A-Z]{1,4})?\p{Sc}?|\p{Sc})[ \u00a0\u202f]?)?$/u;
+// A magnitude comparison in words ("more than double", "thirteen times AMD's",
+// "sixfold", "one in eight", "half as large", "a third of", "by a factor of
+// six") is a computation the number check cannot see (#228): it always goes.
+// Not even a cited claim licenses one, since a claim's "AMD's revenue doubled"
+// must not ground "NVDA's revenue doubled"; the model quotes a displayed figure
+// (a growth rate) instead. Direction ("higher") is not a magnitude.
+// ponytail: a word list, not a parser; add a phrase when the eval shows one.
+const COUNT = String.raw`(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|(?:a )?dozen)`;
+const MAGNITUDE = new RegExp(
+  String.raw`\b(?:(?:doubl|tripl|trebl|quadrupl|quintupl|sextupl|septupl|octupl)(?:ed(?! down\b| as an?\b)|(?:es|ing)(?! down\b| as\b))|halved|` +
+    String.raw`(?:${COUNT}|several|many|multiple|a few|a couple of)[- ]?fold|${COUNT}[ -](?:in|out[ -]of)[ -](?:every[ -])?${COUNT}|${COUNT}[ -]of[ -]every[ -]${COUNT}|(?:increas|ris|rose|grew|grow|jump|climb|expand|surg|soar|fell|fall|declin|dropp?|shr[ai]nk|gain|slid|slip)\w* ${COUNT}(?:[- ]${COUNT})? (?:per ?cent|(?:percentage|basis) points?|points?|bps|bp)\b|(?<!(?:first|second|back|front|latter|former|last|later|earlier|1st|2nd)[ -])half (?:as|the size)|(?:a|${COUNT})[- ](?:third|fourth|quarter(?!s? (?:of|as) (?:results|data|history|figures|detail|segment|reported|financials|filings?|fiscal|FY|calendar|\d{4})\b)|fifth|sixth|seventh|eighth|ninth|tenth|hundredth)s? (?:of|as|that of|what|the (?:size|amount|level|value|total|revenue|sales|income|profit|earnings|margins?))|` +
+    String.raw`orders? of magnitude|by half|(?:advantage|difference|gap|spread|lead|premium|discount|edge|deficit|shortfall)\b(?: [a-z]+){0,2}? (?:was|is|were|are|of|at|stood at|came to|reached|widened to|narrowed to|amounted to|totall?ed) (?:(?:${COUNT}(?:[- ]${COUNT})?|\d+(?:\.\d+)?) (?:(?:percentage|basis) points?|points?|per ?cent|bps|bp|dollars?|cents?|euros?|pounds?|yen|billion|million|trillion)\b|\d+(?:\.\d+)?%)|\d+(?:\.\d+)?[- ]?fold\b|${COUNT} and (?:an?|${COUNT})[- ](?:half|third|quarter|fourth|fifth)s? times\b|${COUNT}-times\b|${COUNT} (?:dollars?|cents?|euros?|pounds?|yen|yuan) (?:per|for each|for every) (?:${COUNT} )?(?:dollars?|cents?|euros?|pounds?|yen|yuan)\b|(?:${COUNT} times|twice) [^.,;:]*?\b(?:what|that of)\b|(?:increas|ris|rose|grew|grow|jump|climb|expand|surg|soar|fell|fall|declin|dropp?|shr[ai]nk|multipli)\w* (?:by )?\d+(?:\.\d+)?(?:[x×]|[- ]?fold)(?!\w)|(?:up|down) \d+(?:\.\d+)?(?:[x×]|[- ]?fold)(?!\w)|than (?:its |their |the |[A-Z]{2,}['’]s )?(?:entire|whole|combined) (?:[^\s.,;]+ ){0,3}?(?:revenue|sales|income|profit|earnings|margin|cash flow|base|value|total)\b|${COUNT}(?:[- ]${COUNT})? (?:points? (?:higher|lower|above|below|ahead|behind|more|less|wider|narrower)|(?:(?:billion|million|trillion)(?: dollars)?|dollars?|cents?|euros?|pounds?) (?:higher|lower|above|below|ahead|behind|more|less))|(?:exceed|beat|trail|lag|outpac|surpass|top|increas|rais|ris|rose|grew|grow|jump|climb|expand|surg|soar|fell|fall|declin|dropp?|shr[ai]nk|cut|lower|widen|narrow|boost)\w*(?: [A-Za-z'’]+){0,2}? by ${COUNT}(?:[- ]${COUNT})? (?:billion|million|trillion|dollars?|cents?|euros?|pounds?|yen|bps|bp|per ?cent|(?:percentage|basis) points?)|${COUNT}(?:[- ]${COUNT})? (?:(?:percentage|basis) points|points?|per ?cent|bps|bp|dollars?|cents?|euros?|pounds?|yen|yuan|rupees?|won|francs?) (?:higher|lower|above|below|ahead|behind|wider|narrower|more|less|greater|larger|smaller|bigger)\b|(?:${COUNT}|\d+(?:\.\d+)?)-to-${COUNT}|${COUNT}-to-\d+(?:\.\d+)?|(?:${COUNT}|\d+(?:\.\d+)?) to one\b|by (?:${COUNT}|several|many|a few|a couple of) times\b|${COUNT} (?:[a-z]+ )?for every ${COUNT}|(?:a|${COUNT})[- ](?:half|third|quarter|fourth|fifth|sixth|seventh|eighth|ninth|tenth|hundredth)s? (?:higher|lower|larger|smaller|bigger|greater|more|less)|(?:by )?a factor of (?:${COUNT}|several|a few|about|roughly|nearly|almost|over|more than))\b`,
+  "i",
+);
+// Which phrases count (each case has a test):
+// - "N times" after a number word or "twice": unless it ends the clause or
+//   counts occurrences or frequency ("three times this year", "twice a month").
+// - after digits: unless a valuation basis follows ("52.3 times earnings"), so
+//   "52.3 times AMD's scale" and "52.3 times last year's level" go; a digit
+//   "x", "×" or "fold" before a word likewise, unless the word is a valuation
+//   basis, an occurrence or a connective ("52.3x is", "52.3x versus AMD's
+//   41.2x"), so a displayed "52.3×" stays.
+// - after "several", "many", "a few", "half", "hundreds of": only before the thing compared
+//   ("several times AMD's", "many times larger"), so "volatile times" stays.
+// - a bare "double"/"triple" after a degree word that ends the clause or meets
+//   the thing compared ("nearly double.", "more than double AMD's"), or right
+//   before the thing compared ("double AMD's"); not "double taxation",
+//   "concern over triple-net leases" or "double bottom". "doubled" always counts,
+//   except "doubled down", "doubles as collateral" and "doubled as a hedge".
+// - "half" before the thing compared or "of", unless an ordinal half of a
+//   period ("first half of NVDA's fiscal 2026").
+// - worded differences ("forty percentage points", "fifty percent", "six
+//   billion dollars more", "six dollars higher", "six bps higher", "six-to-one", "six dollars for
+//   every one", "a third higher", "three out of four", "larger
+//   than its entire revenue", "the margin gap was fifty percentage points" or
+//   "53.6 percentage points", "six dollars per dollar", "a five-times
+//   increase", "grew fifty percent", "one-in-eight"; "per cent" as well as
+//   "percent"; "by <amount>" only after a
+//   change or comparison verb, so "funded by six million dollars" stays; a gap
+//   noun only with a measuring link, so "advantage stems from one million
+//   developers" stays),
+//   though a quantity ("three million units") or a direction ("faster than the
+//   entire sector") is not one.
+// - a digit percent against another company ("53.6% higher than AMD's"): a
+//   displayed growth rate compares with a prior period, not a company.
+// - "52.3x versus …" only stays before a second multiple ("versus AMD's
+//   41.2x"); "half the year" is a duration.
+// A valuation basis after a displayed multiple ("52.3 times earnings", "a
+// 52.3× P/E multiple"): the figure is the multiple itself, not a ratio.
+// Lowercase: MULTIPLIER sees the normalized (lowercased) sentence.
+const VALUATION = String.raw`(?:(?:trailing |forward |ttm |ntm )?(?:earnings|sales|book|ebitda|ebit|revenue|cash flow|free cash flow|fcf|eps|p\/e|pe|p\/s|p\/b|ev\/ebitda|ev\/sales|price[- ]to[- ][a-z]+|multiple)\b)`;
+// Occurrences and frequency after "N times" / "twice" ("three times this year",
+// "3 times a month", "twice annually", "three times and then", "three times to
+// discuss"): event counts.
+const OCCURRENCE = String.raw`(?:this (?:year|quarter|month|week|period)\b(?!['’]s)|(?:in|during|since|so far|each|per|over|within|across|throughout|before|after|between|annually|yearly|quarterly|monthly|weekly|daily|and|or|but|then|while|when|to)\b|last (?:year|quarter|month)\b(?!['’]s)|a (?:year|quarter|month|week|day)\b)`;
+const COMPARED = String.raw`(?:(?:the )?(?:last|prior|previous) (?:year|quarter|month|period)['’]s\b|year-ago\b|as\b|the\b|that of\b|of [A-Z]|its\b|their\b|what\b|(?:larger|bigger|greater|higher|lower|smaller|more|less|faster|slower)\b|[A-Z]{2,}\b)`;
+const MULTIPLIER = new RegExp(
+  String.raw`\b(?:${COUNT} times|twice)(?!\s*(?:[.,;:!?]|$)| ${OCCURRENCE})|` +
+    String.raw`\b(?:several|many|a few|a couple of|multiple|half|(?:tens|dozens|hundreds|thousands|millions|billions) of) times ${COMPARED}|\b(?:double|triple|quadruple) ${COMPARED}|\b\d+(?:\.\d+)? times (?!${VALUATION}|${OCCURRENCE})[A-Za-z]|\b(?:more than|nearly|almost|roughly|about|over|less than|at least|close to) (?:double|triple|quadruple)(?=\s*(?:[.,;:!?)]|$)|\s+${COMPARED})|\b\d+(?:\.\d+)?(?:[xX×]|[- ]?fold) (?!${VALUATION}|${OCCURRENCE}|(?:is|was|are|were|and|or|but|for|at|on|to|from|by|with|while)\b|(?:versus|vs\.?) (?:[A-Z]{2,}['’]s )?\d)[A-Za-z]|\b\d+(?:\.\d+)?(?:%| per ?cent| percentage points?| basis points?| points?| bps) (?:(?:higher|lower|more|less|greater|larger|smaller|bigger) than|above|below|ahead of|behind) [A-Z]{2,}\b|` +
+    String.raw`(?<!(?:[Ff]irst|[Ss]econd|[Bb]ack|[Ff]ront|[Ll]atter|[Ff]ormer|[Ll]ast|[Ll]ater|[Ee]arlier|1st|2nd)[ -])\b[Hh]alf (?!(?:of )?the (?:year|quarter|month|week|day|period|time|session|decade)\b)(?:of\b|${COMPARED})`,
+);
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
 // Between a figure and the company that owns it: its unit, then a preposition
 // ("% for ", "B at ", " percent in "). No punctuation and no other words, so a
@@ -128,6 +189,19 @@ export function keepSupportedSentences(
     // with whatever of its item is kept.
     const lead = line.match(LIST_MARKER)?.[0] ?? line.match(/^\s*/)![0];
     const kept = line.slice(lead.length).trim().split(SENTENCE_BREAK).filter((sentence) => {
+      // Inline Markdown ("double **AMD's**") is ignored for both checks.
+      const plain = sentence.replace(/[*_`]+/g, "");
+      // MULTIPLIER is case-sensitive so that a ticker ("AMD") counts as the
+      // thing compared: the sentence is lowercased, whatever its case ("Six
+      // Times AMD's", "SIX TIMES AMD'S"), and the companies' labels restored.
+      const normalized = companies.reduce(
+        (text, company) => text.replace(new RegExp(`(?<![a-z0-9])${escapeRegExp(company.toLowerCase())}(?![a-z0-9])`, "g"), company),
+        plain.toLowerCase(),
+      );
+      if (MAGNITUDE.test(plain) || MULTIPLIER.test(normalized)) {
+        removed.push(sentence);
+        return false;
+      }
       const allNumbers = numberMatches(sentence);
       const mentions = companyMentions(sentence, companies);
       // Digits inside a label ("issuer:12ab34cd") are not figures, and a label

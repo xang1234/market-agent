@@ -130,13 +130,20 @@ export async function composeAnalystBlocksWithLlm(input: {
           "not there), say so plainly and briefly instead, and do not analyze other figures",
           "in its place.",
           "Name context the data itself supports, such as revenue concentrated in one",
-          "segment, but never add facts, numbers, or events that are not in the tool context.",
+          "segment, but never add facts, numbers, or events that are not in the tool context,",
+          // Causes the answers asserted without data (#228): a one-time charge, supply constraints.
+          "and never state a cause the data does not show (a charge, supply constraints, heavy",
+          "spending): if the data shows no cause, say so.",
           "Use only the context provided; do not invent citations or data.",
           "The figures shown to the user are listed in displayed_figures, each with the metric",
           "and, in a comparison, the company it belongs to. Quote a figure only exactly as it",
           "appears there, in a sentence that names its company exactly as given in company",
           "(e.g. NVDA), and never compute new figures such as growth rates,",
-          "margins, or ratios; describe direction and comparison in words instead.",
+          "margins, differences, or ratios. A magnitude comparison between figures is a computation too, even in words",
+          // Wrong comparisons in words the guard cannot see (#228): "nine times" for 12.8x.
+          "(\"roughly double\", \"six times\", \"larger than X's whole revenue\"):",
+          "never state one in words; quote a displayed figure that gives the magnitude itself, such as a growth rate (two figures side by side do not state one),",
+          "and otherwise say only the direction (\"higher\", \"faster\", \"larger\") without how much.",
           // Fiscal calendars differ (#180): the period and its end date come with each figure.
           "Name the fiscal period each figure is for (its period, and the month its period_end",
           "falls in; never the day), and a chart's window by month and year. When a comparison's title says the fiscal years end months",

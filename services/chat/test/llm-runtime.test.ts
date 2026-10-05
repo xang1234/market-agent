@@ -271,6 +271,13 @@ test("the answer is asked for an analyst's view: takeaway, trend, strengths, cou
   // Context comes from the data only, and the existing rules stay.
   assert.match(systemPrompt, /never add facts, numbers, or events that are not in the tool context/);
   assert.match(systemPrompt, /never compute new figures/);
+  // A magnitude comparison in words is a computation too, and a cause needs data (#228).
+  assert.match(systemPrompt, /magnitude comparison between figures is a computation too, even in words/);
+  assert.match(systemPrompt, /only the direction/);
+  // Two figures side by side do not "show" their ratio (#228 review).
+  assert.match(systemPrompt, /two figures side by side do not state one/);
+  assert.match(systemPrompt, /never state one in words/);
+  assert.match(systemPrompt, /never state a cause the data does not show/);
   assert.match(systemPrompt, /stale/);
   // The no-keys golden replay matches on the opening sentence.
   assert.match(systemPrompt, /^Write a concise investment research answer/);

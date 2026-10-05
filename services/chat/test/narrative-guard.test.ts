@@ -516,3 +516,170 @@ test("a fiscal year stays its company's when a chart's window shares the calenda
   const shared = [{ company: "NVDA", value: "FY2025" }, { company: "AMD", value: "FY2025" }];
   assert.deepEqual(keepSupportedSentences("Both grew in 2025.", [], shared).removed, []);
 });
+
+test("a magnitude comparison in words goes unless the data states it (#228)", () => {
+  for (const dropped of [
+    // Every figure is shown and credited: only the magnitude is unsupported.
+    "NVDA's net margin of 53.6% is more than double AMD's 12.0%.",
+    "NVDA's net margin of 53.6% is more than four times AMD's 12.0%.",
+    "NVDA is roughly six times AMD's scale.",
+    "Data Center is nine-fold the next segment.",
+    "Revenue nearly doubled over the period.",
+    "Gaming is twice Automotive's size.",
+    "About one in eight dollars came from Gaming.",
+    // Any count, unhyphenated or in digits, and fractions (#228 review).
+    "NVDA is thirteen times AMD's scale.",
+    "NVDA is sixfold AMD's scale.",
+    "AMD is half as large as NVDA.",
+    "AMD is about a third of NVDA's size.",
+    "Gaming is two-thirds of the remainder.",
+    // Any quantifier: the multiplier's object gives it away (#228 review).
+    "AMD's revenue is less than half NVDA's.",
+    "NVDA is several times AMD's scale.",
+    "NVDA is two and a half times AMD's scale.",
+    "NVDA's revenue is many times larger.",
+    "Gaming is half of NVDA's remaining revenue.",
+    "NVDA is an order of magnitude larger than AMD.",
+    "AMD is a tenth of NVDA's size.",
+    "Revenue fell by half.",
+    "Half of NVDA's revenue came from Gaming.",
+    "NVDA's revenue is several times its prior level.",
+    "NVDA's revenue exceeds AMD's by a factor of six.",
+    "NVDA earned several times what AMD reported.",
+    // A displayed figure's value does not license a ratio (#228 review).
+    "NVDA is 52.3 times AMD's scale.",
+    "Revenue is six times last year's level.",
+    "Revenue is six times that reported by AMD.",
+    "NVDA's revenue is nearly double AMD's.",
+    "NVDA's margin is nearly double.",
+    "NVDA's revenue is double AMD's.",
+    "NVDA's margin was forty percentage points higher than AMD's.",
+    "NVDA's margin was twenty-one points above AMD's.",
+    "Six times AMD's revenue would approximate NVDA's.",
+    "Several times AMD's scale is still short of NVDA.",
+    "Double AMD's revenue would still trail NVDA.",
+    "NVDA's gross margin of 70.8% was larger than its entire net margin of 53.6%.",
+    "NVDA is 52.3x AMD's scale.",
+    "NVDA is 52.3-fold AMD's scale.",
+    "NVDA is 52.3× AMD's scale.",
+    "Half of total revenue came from Gaming.",
+    "NVDA's revenue was fifty percent higher than AMD's.",
+    "NVDA's revenue exceeded AMD's by fifty percent.",
+    "NVDA's margin is a third higher than AMD's.",
+    "NVDA's revenue was six billion dollars more than AMD's.",
+    "NVDA's revenue exceeded AMD's by six billion.",
+    "NVDA's revenue is 52.3 times last year's level.",
+    "Four-fifths of revenue came from Gaming.",
+    "Revenue was four fifths of last year's level.",
+    "Revenue doubled as demand surged.",
+    "**Six times AMD's revenue would approximate NVDA's.**",
+    "Scale: Six Times AMD's Revenue",
+    "Three out of four dollars came from Gaming.",
+    "NVDA's revenue is 52.3x last year's level.",
+    "NVDA's revenue is 52.3-fold last year's level.",
+    "NVDA's revenue is 52.3× last year's level.",
+    "NVDA's revenue was four-fifths higher than last year's.",
+    "NVDA's revenue was one-sixth higher than last year's.",
+    "Three in four dollars came from Gaming.",
+    "One in every eight dollars came from Gaming.",
+    "Two of every three dollars came from Gaming.",
+    "NVDA's revenue was double last year's level.",
+    "NVDA's revenue was roughly double last year's level.",
+    "AMD's revenue was half the prior quarter's level.",
+    "Revenue was three times this year's level.",
+    "Revenue was three times this quarter's level.",
+    "Revenue is a couple of times larger than AMD's.",
+    "Revenue was several-fold last year's level.",
+    "NVDA's revenue was six-to-one versus AMD's.",
+    "NVDA generated six dollars for every one dollar AMD generated.",
+    "NVDA's EPS was six dollars higher than AMD's.",
+    "NVDA's EPS exceeded AMD's by six dollars.",
+    "Revenue is roughly double **AMD's**.",
+    "Revenue is half **AMD's**.",
+    "Revenue was hundreds of times larger than AMD's.",
+    "Revenue was millions of times AMD's.",
+    "NVDA's EPS was six yen higher than AMD's.",
+    "NVDA's margin was six bps higher than AMD's.",
+    "NVDA's revenue is 52.3X last year's level.",
+    "NVDA's revenue was fifty percent greater than AMD's.",
+    "NVDA's revenue was a third the size of AMD's.",
+    "AMD's revenue was three quarters the amount NVDA reported.",
+    "SCALE: SIX TIMES AMD'S REVENUE",
+    "NVDA's revenue exceeded AMD's by six times.",
+    "NVDA's revenue was one tenth the revenue AMD reported.",
+    "AMD's revenue was two-thirds what NVDA reported.",
+    "NVDA's revenue was 52.3-to-one versus AMD's.",
+    "NVDA's revenue was three-fourths that of AMD's.",
+    "AMD's revenue was one-fourth of NVDA's.",
+    "NVDA's margin was one-fourth higher than AMD's.",
+    "NVDA's revenue increased by 52.3x.",
+    "NVDA's revenue increased 52.3-fold.",
+    "NVDA's revenue quintupled.",
+    "NVDA's revenue trebled.",
+    "NVDA's revenue was three times during the quarter what AMD's was.",
+    "NVDA's revenue was three times in 2025 what it was in 2024.",
+    "NVDA's premium was 52.3-fold.",
+    "NVDA's revenue was one and a quarter times AMD's.",
+    "NVDA's revenue was 53.6% higher than AMD's.",
+    "NVDA's revenue was 52.3x versus AMD's.",
+    "NVDA's margin advantage was fifty percentage points.",
+    "The margin difference was fifty percentage points.",
+    "NVDA's margin was 53.6 percentage points higher than AMD's.",
+    "NVDA's revenue was one and two thirds times AMD's.",
+    "NVDA's revenue was two and three quarters times AMD's.",
+    "NVDA's margin advantage was 53.6 percentage points.",
+    "NVDA's revenue was fifty per cent higher than AMD's.",
+    "NVDA generated six dollars per dollar AMD generated.",
+    "NVDA generated six dollars for each dollar AMD generated.",
+    "NVDA posted a five-times increase over AMD.",
+    "NVDA's revenue was six and two-thirds times AMD's.",
+    "NVDA's revenue grew fifty percent.",
+    "NVDA's revenue fell fifty per cent year over year.",
+    "One-in-eight dollars came from Gaming.",
+    "Three-out-of-four dollars came from Gaming.",
+  ]) {
+    assert.deepEqual(keepSupportedSentences(dropped, [], GOLDEN).removed, [dropped], dropped);
+  }
+  for (const kept of [
+    // Direction without magnitude, and words that are not comparisons.
+    "NVDA's net margin of 53.6% is higher than AMD's 12.0%.",
+    "NVDA posted double-digit growth in the second half.",
+    // A displayed multiple in digits is a figure, checked by value (#228 review).
+    "NVDA's P/E was 52.3x.",
+    "NVDA's P/E was 52.3×.",
+    "NVDA's P/E of 52.3x is well above AMD's.",
+    "NVDA's P/E of 52.3x versus AMD's 41.2x.",
+    "NVDA's net margin was 53.6%, higher than AMD's 12.0%.",
+    "NVDA trades at a 52.3× P/E multiple.",
+    "NVDA trades at 52.3 times earnings.",
+    "NVDA trades at 52.3 times trailing earnings.",
+  ]) {
+    assert.deepEqual(keepSupportedSentences(kept, [], GOLDEN).removed, [], kept);
+  }
+  // A multiple in digits that is not displayed still goes, by the number check.
+  assert.equal(keepSupportedSentences("NVDA is 13x AMD's scale.", [], GOLDEN).text, "");
+  // Not even a claim licenses one: "AMD's revenue doubled" must not ground
+  // "NVDA's revenue doubled" (#228 review). A displayed figure is quoted instead.
+  // A count in digits that a claim supports is an occurrence, like "three times" (#228 review).
+  assert.deepEqual(keepSupportedSentences("Management raised guidance 3 times this year.", ["Management raised guidance 3 times this year"]).removed, []);
+  assert.deepEqual(keepSupportedSentences("The board met 3 times to discuss strategy.", ["The board met 3 times to discuss strategy"]).removed, []);
+  // A displayed growth rate compares with a prior period, not another company.
+  assert.deepEqual(keepSupportedSentences("Revenue was 57.9% higher than a year earlier.", ["Revenue growth (YoY) 57.9%"]).removed, []);
+  // A worded quantity that is not a difference is not a magnitude.
+  assert.deepEqual(keepSupportedSentences("Management expects three million units next quarter.", ["Management expects three million units next quarter."]).removed, []);
+  // "by" introducing an agent is not a difference (#228 review).
+  const cut = "Management cut three billion dollars of costs.";
+  assert.deepEqual(keepSupportedSentences(cut, [cut]).removed, []);
+  const funded = "The launch was funded by six million dollars from investors.";
+  assert.deepEqual(keepSupportedSentences(funded, [funded]).removed, []);
+  // So is a worded percent that states a share, not a difference.
+  for (const share of ["Management expects fifty percent of sales overseas.", "The fund owns one percent of the company."]) {
+    assert.deepEqual(keepSupportedSentences(share, [share]).removed, [], share);
+  }
+  const claimed = "NVDA's revenue doubled.";
+  assert.deepEqual(keepSupportedSentences(claimed, ["AMD's revenue doubled year over year"], GOLDEN).removed, [claimed]);
+  // And "first half" or "a quarter" of the calendar are not fractions of figures.
+  for (const kept of ["Revenue rose in the first half of fiscal 2026.", "Margins fell for a quarter before recovering.", "At times the margin dipped.", "Management cited demand many times.", "Revenue rose in the first half of NVDA's fiscal 2026.", "The second half of AMD's fiscal 2025 was weaker.", "Demand was a key factor of the growth.", "During volatile times the company defended margins.", "At other times the margin dipped.", "Management raised guidance three times.", "Management raised guidance three times this year.", "Management raised guidance three times last year.", "Management raised guidance three times over the last year.", "Revenue improved in the latter half of NVDA's fiscal year.", "The CEO made two points about demand.", "Management doubled down on data-center investment.", "Management is doubling down on AI.", "Management raised guidance twice this year.", "Management raised guidance twice.", "Management reviews guidance twice annually.", "The board meets twice a month.", "Results are reported three times a year.", "Investors remain concerned over double taxation.", "The REIT expressed concern over triple-net leases.", "Cash doubles as a buffer during downturns.", "The installed base doubles as a distribution channel.", "Revenue improved in the first half as demand recovered.", "NVDA grew faster than the entire semiconductor sector.", "Revenue was lower than the entire market expected.", "Revenue rose in the first-half of fiscal 2026.", "Revenue improved in the latter-half of NVDA's fiscal year.", "Revenue improved in the first-half as demand recovered.", "The filing presents one quarter of results.", "Only one quarter of segment detail is shown.", "Management revised guidance three times and then cut its outlook.", "The board met three times to discuss strategy.", "Revenue rose in one quarter of fiscal 2026.", "Cash doubles as collateral during downturns.", "The board doubles as the audit committee.", "Management plans two to three product launches.", "Management needs one more quarter to finish the ramp.", "The launch was delayed by three months.", "One risk is higher interest rates.", "Three factors drove higher sales.", "The company has one business with higher margins.", "Revenue grew over the 2025-to-2026 period.", "Of the two, one had higher margins.", "A dozen had lower sales.", "One ranked higher than the other.", "Revenue rose in the fourth quarter of fiscal 2026.", "Management raised guidance three times this year, which is what investors wanted.", "Management spent half the year integrating the acquisition.", "Revenue grew for half of the year.", "NVDA's advantage stems from one million developers.", "The funding gap affects one million customers.", "Management holds three meetings per year.", "Management highlighted the risk of double taxation.", "The chart formed a double bottom.", "The REIT uses triple-net leases."]) {
+    assert.deepEqual(keepSupportedSentences(kept, ["fiscal 2026", "fiscal 2025"]).removed, [], kept);
+  }
+});
