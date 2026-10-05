@@ -131,7 +131,7 @@ const MULTIPLIER = new RegExp(
 // denies or questions ("cannot see whether", "does not identify the cause") stays.
 // ponytail: a vocabulary check, not a semantic one; an interpretation the data
 // cannot show ("pricing power") goes too, which is what the prompt asks.
-const CAUSAL = /\b(?:driven by|due to|because of|owing to|attributable to|as a result of|thanks to|on the back of|fuell?ed by|stemming from|caused by|result(?:s|ed)? from|reflect(?:s|ed|ing)?)\s+((?:(?!\b(?:although|though|but|while|whereas|yet|however)\b)[^,;:.])+)/gi;
+const CAUSAL = /\b(?:driven by|due to|because of|owing to|attributable to|as a result of|thanks to|on the back of|fuell?ed by|stemming from|caused by|result(?:s|ed)? from|reflect(?:s|ed|ing)?)\s+((?:(?!\b(?:although|though|but|while|whereas|yet|however|driven by|due to|because of|owing to|attributable to|as a result of|thanks to|on the back of|fuell?ed by|stemming from|caused by|result(?:s|ed)? from|reflect(?:s|ed|ing)?)\b)[^,;:.])+)/gi;
 // A cause the sentence itself denies: a denial after it whose object is the
 // cause ("…but the data does not identify the cause (of it)", "does not break out what
 // drives it", "cannot explain why"). A denial about something else ("does not
@@ -157,11 +157,13 @@ function scopedCause(before: string): boolean {
   const last = [...before.matchAll(SCOPE_START)].at(-1);
   if (last === undefined) return false;
   const span = before.slice(last.index + last[0].length);
-  // "and"/"or" join single words inside the scoped clause ("whether gross and net
-  // margins", "revenue and margins"); after more than one word they start a new
-  // clause ("whether AMD gains share depends on demand and NVDA's margin…").
+  // "and"/"or" join short noun phrases inside the scoped clause ("whether gross
+  // and net margins", "gross margin and net margin"); after a longer stretch they
+  // start a new clause ("whether AMD gains share depends on demand and NVDA's…").
+  // ponytail: a word count, not a parser; a two-word clause ("whether AMD gains
+  // and …") reads as a compound. Parse clauses if the eval shows that shape.
   return !CLAUSE_BREAK.test(span) &&
-    span.split(/\b(?:and|or)\b/i).slice(0, -1).every((part) => part.trim().split(/\s+/).filter(Boolean).length <= 1);
+    span.split(/\b(?:and|or)\b/i).slice(0, -1).every((part) => part.trim().split(/\s+/).filter(Boolean).length <= 2);
 }
 const CAUSE_STOP = new Set([
   "the", "a", "an", "of", "and", "or", "in", "on", "its", "their", "that", "this", "these", "those", "to", "for",
