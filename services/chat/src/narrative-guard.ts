@@ -180,24 +180,22 @@ function deniedAfter(after: string): boolean {
   const end = NEXT_CLAUSE.exec(clause)?.index ?? clause.length;
   return denial !== null && denial.index < end;
 }
-const SCOPE_PREDICATE = /\b(?:remains?|depends?|is|are|was|were|seems?|appears?|matters?|will|would|unknown|unclear|uncertain)\b/i;
+// "and"/"or" before a new subject ("… and NVDA's margin reflects", "… and the
+// margin reflects") starts a new clause; otherwise they join noun phrases
+// ("gross profit margin and net profit margin", "NVDA and AMD margins").
+const NEW_SUBJECT = /\b(?:and|or)\s+(?:[A-Z][\w.-]*['’]s\b|(?:the|its|their|this|that|these|those|a|an)\b)/;
 function scopedCause(before: string): boolean {
   // A passive denial right before the connective ("are not shown to be driven by").
   if (PASSIVE_SCOPE.test(before)) return true;
   const last = [...before.matchAll(SCOPE_START)].at(-1);
   if (last === undefined) return false;
   const span = before.slice(last.index + last[0].length);
-  // Without "that" ("does not show NVDA's margins are driven by"), an "and"
-  // before a new subject starts a new clause ("does not show margins and NVDA's
-  // margin reflects…", "… and the margin reflects…"); "gross and net margins" is one.
-  if (!/(?:whether|that)$/i.test(last[0]) && /\b(?:and|or)\s+(?:[A-Z]|(?:the|its|their|this|that|these|those|a|an)\b)/.test(span)) return false;
-  // "and"/"or" join noun phrases inside the scoped clause ("whether gross profit
-  // margin and net profit margin"); after a predicate they start a new clause
-  // ("whether AMD gains share depends on demand and NVDA's…").
-  // ponytail: a predicate word list, not a parser; an unlisted predicate
-  // ("whether X rose stays unknown and …") reads as a compound. Parse clauses if
-  // the eval shows that shape.
-  return !CLAUSE_BREAK.test(span) && !span.split(/\b(?:and|or)\b/i).slice(0, -1).some((part) => SCOPE_PREDICATE.test(part));
+  if (CLAUSE_BREAK.test(span)) return false;
+  if (!/\b(?:and|or)\b/i.test(span)) return true;
+  // A leading "Whether …" is a subject with its own predicate ("Whether AMD
+  // gains share warrants analysis"), so any "and" after it starts a new clause.
+  if (/^whether$/i.test(last[0]) && /(?:^|[,;:]|\b(?:but|and|so|yet|while)\b)\s*$/i.test(before.slice(0, last.index))) return false;
+  return !NEW_SUBJECT.test(span);
 }
 const CAUSE_STOP = new Set([
   "the", "a", "an", "of", "and", "or", "in", "on", "its", "their", "that", "this", "these", "those", "to", "for",
@@ -215,21 +213,18 @@ const causeWords = (text: string) => (text.toLowerCase().match(/[a-z][a-z0-9'’
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 // A day as written: "December 31, 2025", "31 December 2025" or "2025-12-31".
 const DATE = String.raw`(?:(?:${MONTHS.join("|")}) \d{1,2},? \d{4}|\d{1,2} (?:${MONTHS.join("|")}),? \d{4}|\d{4}-\d{2}-\d{2})`;
-// The chart window in words: a range of two days ("from … to …", "between …
-// and …") or one close ("the … close"). A lone "to August 31, 2026" is not one.
-// ponytail: a range whose two ends are both displayed still passes in any
-// clause naming the chart; tie dates to their block if one leaks through.
-const WINDOW_DAYS = new RegExp(String.raw`\b(?:from|between) (?:the )?(${DATE})(?: close)? (?:to|through|thru|until|and) (?:the )?(${DATE})(?: close)?|\bthe (${DATE}) close\b`, "g");
+// The chart window in words: the window's own range of two days ("window runs
+// from … to …", "range between … and …") or one close ("the … close"). A lone
+// "to August 31, 2026", or a range of something else ("NVDA's fiscal year runs
+// from …"), is not one.
+// ponytail: wording, not provenance; tie dates to their block if one leaks through.
+const WINDOW_DAYS = new RegExp(String.raw`(?<=\b(?:window|range|period)(?: (?:runs|covers|spans|goes|extends|stretches|is))? )(?:from|between) (?:the )?(${DATE})(?: close)? (?:to|through|thru|until|and) (?:the )?(${DATE})(?: close)?|\bthe (${DATE}) close\b`, "g");
 function isoDate(date: string): string {
   if (/^\d{4}-/.test(date)) return date;
   const [, first, second, year] = date.match(/^(\S+) (\S+?),? (\d{4})$/)!;
   const [month, day] = /^\d/.test(first) ? [second, first] : [first, second];
   return `${year}-${String(MONTHS.indexOf(month) + 1).padStart(2, "0")}-${day.padStart(2, "0")}`;
 }
-// A clause break, kept by split; "and" before a date joins the window's ends
-// ("between December 31, 2025 and August 31, 2026").
-const DATE_CLAUSE = new RegExp(String.raw`(;|\b(?:while|but|whereas|although|though|yet|and)\b(?!\s+(?:the )?(?:${MONTHS.join("|")}|\d)))`);
-const CHART_WINDOW = /\b(?:window|close|chart|range|YTD)\b/i;
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
 // Between a figure and the company that owns it: its unit, then a preposition
 // ("% for ", "B at ", " percent in "). No punctuation and no other words, so a
@@ -306,13 +301,12 @@ export function keepSupportedSentences(
   // A displayed day in the chart window's own words reads as its month
   // ("from the December 31, 2025 close" -> "from the December 2025 close"); a
   // displayed day dates nothing else ("NVDA's FY2026 ended December 31, 2025").
-  // Clause by clause: "the YTD window, while NVDA reported on August 31" dates nothing.
   const asMonth = (date: string) => `${MONTHS[Number(isoDate(date).slice(5, 7)) - 1]} ${isoDate(date).slice(0, 4)}`;
-  const withDisplayedDays = (sentence: string) => sentence.split(DATE_CLAUSE).map((clause) => !CHART_WINDOW.test(clause) ? clause :
-    clause.replace(WINDOW_DAYS, (window: string, from?: string, to?: string, close?: string) => {
+  const withDisplayedDays = (sentence: string) =>
+    sentence.replace(WINDOW_DAYS, (window: string, from?: string, to?: string, close?: string) => {
       const ends = [from, to, close].filter((date): date is string => date !== undefined);
       return ends.every((date) => dates.has(isoDate(date))) ? ends.reduce((text, date) => text.replace(date, asMonth(date)), window) : window;
-    })).join("");
+    });
   const removed: string[] = [];
   // null marks a line the guard dropped whole.
   const lines: Array<string | null> = [];
