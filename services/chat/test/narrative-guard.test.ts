@@ -601,6 +601,10 @@ test("a magnitude comparison in words goes unless the data states it (#228)", ()
     "NVDA's EPS was six yen higher than AMD's.",
     "NVDA's margin was six bps higher than AMD's.",
     "NVDA's revenue is 52.3X last year's level.",
+    "NVDA's revenue was fifty percent greater than AMD's.",
+    "NVDA's revenue was a third the size of AMD's.",
+    "AMD's revenue was three quarters the amount NVDA reported.",
+    "SCALE: SIX TIMES AMD'S REVENUE",
   ]) {
     assert.deepEqual(keepSupportedSentences(dropped, [], GOLDEN).removed, [dropped], dropped);
   }

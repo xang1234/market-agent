@@ -72,8 +72,8 @@ const POSSESSED = /^['’]s\s+(.+?)\s+of\s+(?:(?:[A-Z]{1,4}\.?(?:[ \u00a0\u202f]
 const COUNT = String.raw`(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|(?:a )?dozen)`;
 const MAGNITUDE = new RegExp(
   String.raw`\b(?:(?:doubl|tripl|quadrupl)(?:ed(?! down\b| as an?\b)|(?:es|ing)(?! down\b| as\b))|halved|` +
-    String.raw`(?:${COUNT}|several|many|multiple|a few|a couple of)[- ]?fold|${COUNT} (?:in|out of) (?:every )?${COUNT}|${COUNT} of every ${COUNT}|(?<!(?:first|second|back|front|latter|former|last|later|earlier|1st|2nd)[ -])half (?:as|the size)|(?:a|${COUNT})[- ](?:third|quarter(?!s? (?:of|as) (?:results|data|history|figures|detail|segment|reported|financials|filings?|fiscal|FY|calendar|\d{4})\b)|fifth|sixth|seventh|eighth|ninth|tenth|hundredth)s? (?:of|as)|` +
-    String.raw`orders? of magnitude|by half|than (?:its |their |the |[A-Z]{2,}['’]s )?(?:entire|whole|combined) (?:[^\s.,;]+ ){0,3}?(?:revenue|sales|income|profit|earnings|margin|cash flow|base|value|total)\b|${COUNT}(?:[- ]${COUNT})? (?:points? (?:higher|lower|above|below|ahead|behind|more|less|wider|narrower)|(?:(?:billion|million|trillion)(?: dollars)?|dollars?|cents?|euros?|pounds?) (?:higher|lower|above|below|ahead|behind|more|less))|by ${COUNT}(?:[- ]${COUNT})? (?:billion|million|trillion|dollars?|cents?|euros?|pounds?|yen|bps|bp|percent|(?:percentage|basis) points?)|${COUNT}(?:[- ]${COUNT})? (?:(?:percentage|basis) points|[a-z]+) (?:higher|lower|above|below|ahead|behind|wider|narrower|more|less)\b|${COUNT}-to-${COUNT}|${COUNT} to one\b|${COUNT} (?:[a-z]+ )?for every ${COUNT}|(?:a|${COUNT})[- ](?:half|third|quarter|fifth|sixth|seventh|eighth|ninth|tenth|hundredth)s? (?:higher|lower|larger|smaller|bigger|greater|more|less)|(?:by )?a factor of (?:${COUNT}|several|a few|about|roughly|nearly|almost|over|more than))\b`,
+    String.raw`(?:${COUNT}|several|many|multiple|a few|a couple of)[- ]?fold|${COUNT} (?:in|out of) (?:every )?${COUNT}|${COUNT} of every ${COUNT}|(?<!(?:first|second|back|front|latter|former|last|later|earlier|1st|2nd)[ -])half (?:as|the size)|(?:a|${COUNT})[- ](?:third|quarter(?!s? (?:of|as) (?:results|data|history|figures|detail|segment|reported|financials|filings?|fiscal|FY|calendar|\d{4})\b)|fifth|sixth|seventh|eighth|ninth|tenth|hundredth)s? (?:of|as|the (?:size|amount|level|value|total))|` +
+    String.raw`orders? of magnitude|by half|than (?:its |their |the |[A-Z]{2,}['’]s )?(?:entire|whole|combined) (?:[^\s.,;]+ ){0,3}?(?:revenue|sales|income|profit|earnings|margin|cash flow|base|value|total)\b|${COUNT}(?:[- ]${COUNT})? (?:points? (?:higher|lower|above|below|ahead|behind|more|less|wider|narrower)|(?:(?:billion|million|trillion)(?: dollars)?|dollars?|cents?|euros?|pounds?) (?:higher|lower|above|below|ahead|behind|more|less))|by ${COUNT}(?:[- ]${COUNT})? (?:billion|million|trillion|dollars?|cents?|euros?|pounds?|yen|bps|bp|percent|(?:percentage|basis) points?)|${COUNT}(?:[- ]${COUNT})? (?:(?:percentage|basis) points|[a-z]+) (?:higher|lower|above|below|ahead|behind|wider|narrower|more|less|greater|larger|smaller|bigger)\b|${COUNT}-to-${COUNT}|${COUNT} to one\b|${COUNT} (?:[a-z]+ )?for every ${COUNT}|(?:a|${COUNT})[- ](?:half|third|quarter|fifth|sixth|seventh|eighth|ninth|tenth|hundredth)s? (?:higher|lower|larger|smaller|bigger|greater|more|less)|(?:by )?a factor of (?:${COUNT}|several|a few|about|roughly|nearly|almost|over|more than))\b`,
   "i",
 );
 // Which phrases count (each case has a test):
@@ -100,7 +100,8 @@ const MAGNITUDE = new RegExp(
 //   direction ("faster than the entire sector") is not one.
 // A valuation basis after a displayed multiple ("52.3 times earnings", "a
 // 52.3× P/E multiple"): the figure is the multiple itself, not a ratio.
-const VALUATION = String.raw`(?:(?:trailing |forward |TTM |NTM )?(?:earnings|sales|book|EBITDA|EBIT|revenue|cash flow|free cash flow|FCF|EPS|P\/E|PE|P\/S|P\/B|EV\/EBITDA|EV\/sales|price[- ]to[- ][a-z]+|multiple)\b)`;
+// Lowercase: MULTIPLIER sees the normalized (lowercased) sentence.
+const VALUATION = String.raw`(?:(?:trailing |forward |ttm |ntm )?(?:earnings|sales|book|ebitda|ebit|revenue|cash flow|free cash flow|fcf|eps|p\/e|pe|p\/s|p\/b|ev\/ebitda|ev\/sales|price[- ]to[- ][a-z]+|multiple)\b)`;
 // Occurrences and frequency after "N times" / "twice" ("three times this year",
 // "3 times a month", "twice annually", "three times and then", "three times to
 // discuss"): event counts.
@@ -177,12 +178,16 @@ export function keepSupportedSentences(
     // with whatever of its item is kept.
     const lead = line.match(LIST_MARKER)?.[0] ?? line.match(/^\s*/)![0];
     const kept = line.slice(lead.length).trim().split(SENTENCE_BREAK).filter((sentence) => {
-      // MULTIPLIER is case-sensitive, so tickers ("AMD") count as the thing
-      // compared; any Capitalized word is lowercased for it ("Six Times AMD's",
-      // "**Six times…**").
       // Inline Markdown ("double **AMD's**") is ignored for both checks.
       const plain = sentence.replace(/[*_`]+/g, "");
-      if (MAGNITUDE.test(plain) || MULTIPLIER.test(plain.replace(/\b([A-Z])(?=[a-z])/g, (letter) => letter.toLowerCase()))) {
+      // MULTIPLIER is case-sensitive so that a ticker ("AMD") counts as the
+      // thing compared: the sentence is lowercased, whatever its case ("Six
+      // Times AMD's", "SIX TIMES AMD'S"), and the companies' labels restored.
+      const normalized = companies.reduce(
+        (text, company) => text.replace(new RegExp(`(?<![a-z0-9])${escapeRegExp(company.toLowerCase())}(?![a-z0-9])`, "g"), company),
+        plain.toLowerCase(),
+      );
+      if (MAGNITUDE.test(plain) || MULTIPLIER.test(normalized)) {
         removed.push(sentence);
         return false;
       }
