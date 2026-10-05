@@ -139,10 +139,12 @@ const CAUSAL = /\b(?:driven by|due to|because of|owing to|attributable to|as a r
 const NOT = String.raw`(?:does not|doesn['’]t|do not|don['’]t|cannot|can['’]t|is not|isn['’]t|are not|aren['’]t|not)`;
 // A passive denial ends its clause ("is not supported", "… by the data"); one
 // limited to something else ("is not supported for AMD's revenue") is not about the cause.
-const PASSIVE_END = String.raw`(?:\s+by (?:the )?(?:data|figures|numbers|filings?|table|chart))?(?=\s*(?:[.,;:!?)]|$))`;
+const PASSIVE_END = String.raw`(?:\s+(?:by|in|from) (?:the )?(?:data|figures|numbers|filings?|table|chart))?(?=\s*(?:[.,;:!?)]|$))`;
+// "is not shown", "isn't known", "was not available": a denial in the passive.
+const PASSIVE_NOT = String.raw`(?:(?:is|are|was|were) not|isn['’]t|aren['’]t|wasn['’]t|weren['’]t) (?:shown|established|confirmed|supported|proven|evident|clear|known|available|visible)`;
 const DENIED_CAUSE = new RegExp(
   String.raw`\b${NOT} (?:show|tell|explain|reveal|indicate|identify|isolate|pinpoint|attribute|break out|see|say)\b[^.;]{0,20}?` +
-    String.raw`(?:\b(?:the|a|any|its|their) (?:causes?|drivers?|reasons?)(?=\s*(?:[.,;:!?)]|$)| (?:of|for|behind) (?:(?:it|this|that|them)(?=\s*(?:[.,;:!?)]|$))|the (?:gap|difference|change|decline|increase|shift)(?!\s+(?:in|of|at|for|between|across)\b))\b)|\bwhy(?=\s*(?:[.,;:!?)]|$)| (?:it|they)\b| (?:this|that)\s*(?:[.,;:!?)]|$)| the (?:gap|difference|change|decline|increase|shift)(?!\s+(?:in|of|at|for|between|across)\b)\b)|\bwhat (?:drives|caused|causes|is driving) (?:(?:it|this|that|them)(?=\s*(?:[.,;:!?)]|$))|the (?:gap|difference|change|decline|increase|shift)(?!\s+(?:in|of|at|for|between|across)\b))\b)|\bno (?:cause|explanation)(?=\s*(?:[.,;:!?)]|$)| (?:is|was) (?:shown|given|identified)${PASSIVE_END}| (?:of|for) (?:it|this|that|them)\s*(?:[.,;:!?)]|$))|\b(?:that|this|the|its|their) (?:causes?|drivers?|reasons?|explanation|link) (?:is|are) not (?:shown|established|confirmed|supported|proven|evident|clear)${PASSIVE_END}`,
+    String.raw`(?:\b(?:the|a|any|its|their) (?:causes?|drivers?|reasons?)(?=\s*(?:[.,;:!?)]|$)| (?:of|for|behind) (?:(?:it|this|that|them)(?=\s*(?:[.,;:!?)]|$))|the (?:gap|difference|change|decline|increase|shift)(?!\s+(?:in|of|at|for|between|across)\b))\b)|\bwhy(?=\s*(?:[.,;:!?)]|$)| (?:it|they)\b| (?:this|that)\s*(?:[.,;:!?)]|$)| the (?:gap|difference|change|decline|increase|shift)(?!\s+(?:in|of|at|for|between|across)\b)\b)|\bwhat (?:drives|caused|causes|is driving) (?:(?:it|this|that|them)(?=\s*(?:[.,;:!?)]|$))|the (?:gap|difference|change|decline|increase|shift)(?!\s+(?:in|of|at|for|between|across)\b))\b)|\bno (?:cause|explanation)(?=\s*(?:[.,;:!?)]|$)| (?:is|was) (?:shown|given|identified)${PASSIVE_END}| (?:of|for) (?:it|this|that|them)\s*(?:[.,;:!?)]|$))|\b(?:that|this|the|its|their) (?:causes?|drivers?|reasons?|explanation|link) ${PASSIVE_NOT}${PASSIVE_END}`,
   "i",
 );
 // A denial or question that scopes the causal clause before it ("cannot see
@@ -154,8 +156,10 @@ const SCOPE_START = new RegExp(String.raw`\b(?:whether|${NOT} (?:show|reveal|dem
 const CLAUSE_BREAK = /[,;:]|\b(?:while|but|whereas|although|though|so|yet)\b/i;
 // "That <cause clause> is not shown by the data": the denial right after a short
 // cause noun phrase governs it; "That … reflects X explains the result and revenue
-// is not shown" denies something else.
-const PASSIVE_OF_CAUSE = new RegExp(String.raw`^\s*(?:\S+\s+){0,4}?(?:is|are) not (?:shown|established|confirmed|supported|proven|evident|clear)${PASSIVE_END}`, "i");
+// is not shown" or "… pricing power and revenue is not supported" denies something else.
+// ponytail: no "and"/"or" in the noun phrase, so a compound cause ("pricing and
+// mix is not shown") goes too; parse the That-clause if the eval shows that shape.
+const PASSIVE_OF_CAUSE = new RegExp(String.raw`^\s*(?:(?!(?:and|or)\b)\S+\s+){0,4}?${PASSIVE_NOT}${PASSIVE_END}`, "i");
 function scopedCause(before: string): boolean {
   // A passive denial right before the connective ("are not shown to be driven by").
   if (/\b(?:is|are|was|were) not (?:shown|proven|established|known|confirmed) to (?:be )?$/i.test(before)) return true;

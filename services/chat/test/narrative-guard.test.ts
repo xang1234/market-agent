@@ -720,6 +720,9 @@ test("a stated cause must be made of the answer's own data (#249)", () => {
     "NVDA's margin reflects pricing power, but that explanation is not supported for AMD's revenue.",
     "That NVDA's margin reflects pricing power is not supported for AMD's revenue.",
     "NVDA's margin reflects pricing power, but no cause is shown for AMD's revenue.",
+    // A passive predicate of a coordinated clause is not the That-clause's (#240 review).
+    "That margin reflects pricing power and revenue is not supported.",
+    "That margin reflects pricing power or revenue is not shown.",
   ]) {
     assert.deepEqual(keepSupportedSentences(dropped, shown, GOLDEN).removed, [dropped], dropped);
   }
@@ -749,6 +752,11 @@ test("a stated cause must be made of the answer's own data (#249)", () => {
     "NVDA's margin may reflect pricing power, but that explanation is not supported by the figures.",
     "That NVDA's margin reflects pricing power is not established.",
     "NVDA's margin may reflect pricing power, but no cause is shown by the data.",
+    // An unknown cause, in other words (#240 review).
+    "NVDA's margins may be driven by pricing power, but that cause is not known.",
+    "NVDA's margins may be driven by pricing power, but the explanation is not available.",
+    "NVDA's margins may be driven by pricing power, but that cause isn't visible in the data.",
+    "That NVDA's margin reflects pricing power is not known.",
   ]) {
     assert.deepEqual(keepSupportedSentences(kept, shown, GOLDEN).removed, [], kept);
   }
