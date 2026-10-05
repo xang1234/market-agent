@@ -731,6 +731,7 @@ test("a stated cause must be made of the answer's own data (#249)", () => {
     "The data does not show margins and NVDA's margin reflects pricing power.",
     // A short whether-subject with its own predicate is still a clause.
     "Whether revenue rose remains unknown and NVDA's margin reflects pricing power.",
+    "The data does not show margins and the margin reflects pricing power.",
   ]) {
     assert.deepEqual(keepSupportedSentences(dropped, shown, GOLDEN).removed, [dropped], dropped);
   }
@@ -776,6 +777,8 @@ test("a stated cause must be made of the answer's own data (#249)", () => {
     // "see" scopes too, and longer metric names join a compound (#240 review).
     "We cannot see that NVDA's higher margins are driven by pricing power.",
     "The data cannot show whether gross profit margin and net profit margin were driven by pricing power.",
+    // A compound subject with "that" omitted (#240 review).
+    "The data does not show gross and net margins are driven by pricing power.",
   ]) {
     assert.deepEqual(keepSupportedSentences(kept, shown, GOLDEN).removed, [], kept);
   }
@@ -817,6 +820,9 @@ test("a displayed date may be written with its day; any other day still goes (#2
   assert.equal(keepSupportedSentences("The chart covers the YTD window and NVDA reported results on August 31, 2026.", shown, [], dates).text, "");
   // The date must mark the window's end, not just share a clause with "chart".
   assert.equal(keepSupportedSentences("The chart shows NVDA reported results on August 31, 2026.", shown, [], dates).text, "");
+  // Only a range of displayed ends, or "the … close", is the window (#240 review).
+  assert.equal(keepSupportedSentences("The YTD chart shows NVDA's fiscal year runs to August 31, 2026.", shown, [], dates).text, "");
+  assert.equal(keepSupportedSentences("The YTD chart runs from December 31, 2025 to August 30, 2026.", shown, [], dates).text, "");
   // Mixed spellings: each pass reads the text as the last one left it.
   const mixed = "The YTD window runs from the 31 December 2025 close to 2026-08-31.";
   assert.deepEqual(keepSupportedSentences(mixed, shown, [], dates), { text: mixed, removed: [] });

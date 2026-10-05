@@ -187,9 +187,10 @@ function scopedCause(before: string): boolean {
   const last = [...before.matchAll(SCOPE_START)].at(-1);
   if (last === undefined) return false;
   const span = before.slice(last.index + last[0].length);
-  // Without "that" ("does not show NVDA's margins are driven by"), an "and" may
-  // start a new clause ("does not show margins and NVDA's margin reflects…").
-  if (!/(?:whether|that)$/i.test(last[0]) && /\b(?:and|or)\b/i.test(span)) return false;
+  // Without "that" ("does not show NVDA's margins are driven by"), an "and"
+  // before a new subject starts a new clause ("does not show margins and NVDA's
+  // margin reflects…", "… and the margin reflects…"); "gross and net margins" is one.
+  if (!/(?:whether|that)$/i.test(last[0]) && /\b(?:and|or)\s+(?:[A-Z]|(?:the|its|their|this|that|these|those|a|an)\b)/.test(span)) return false;
   // "and"/"or" join noun phrases inside the scoped clause ("whether gross profit
   // margin and net profit margin"); after a predicate they start a new clause
   // ("whether AMD gains share depends on demand and NVDA's…").
@@ -212,14 +213,23 @@ const CAUSE_DATA_WORDS = new Set([
 ]);
 const causeWords = (text: string) => (text.toLowerCase().match(/[a-z][a-z0-9'’-]*/g) ?? []).map((word) => word.replace(/['’]s$/, ""));
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-const DAY_DATE = new RegExp(`\\b(${MONTHS.join("|")}) (\\d{1,2}),? (\\d{4})\\b`, "g");
-const DAY_FIRST_DATE = new RegExp(`\\b(\\d{1,2}) (${MONTHS.join("|")}),? (\\d{4})\\b`, "g");
+// A day as written: "December 31, 2025", "31 December 2025" or "2025-12-31".
+const DATE = String.raw`(?:(?:${MONTHS.join("|")}) \d{1,2},? \d{4}|\d{1,2} (?:${MONTHS.join("|")}),? \d{4}|\d{4}-\d{2}-\d{2})`;
+// The chart window in words: a range of two days ("from … to …", "between …
+// and …") or one close ("the … close"). A lone "to August 31, 2026" is not one.
+// ponytail: a range whose two ends are both displayed still passes in any
+// clause naming the chart; tie dates to their block if one leaks through.
+const WINDOW_DAYS = new RegExp(String.raw`\b(?:from|between) (?:the )?(${DATE})(?: close)? (?:to|through|thru|until|and) (?:the )?(${DATE})(?: close)?|\bthe (${DATE}) close\b`, "g");
+function isoDate(date: string): string {
+  if (/^\d{4}-/.test(date)) return date;
+  const [, first, second, year] = date.match(/^(\S+) (\S+?),? (\d{4})$/)!;
+  const [month, day] = /^\d/.test(first) ? [second, first] : [first, second];
+  return `${year}-${String(MONTHS.indexOf(month) + 1).padStart(2, "0")}-${day.padStart(2, "0")}`;
+}
 // A clause break, kept by split; "and" before a date joins the window's ends
 // ("between December 31, 2025 and August 31, 2026").
 const DATE_CLAUSE = new RegExp(String.raw`(;|\b(?:while|but|whereas|although|though|yet|and)\b(?!\s+(?:the )?(?:${MONTHS.join("|")}|\d)))`);
-const WINDOW_BEFORE = /\b(?:from|through|thru|to|until|between|and|since|starting|ending)(?: the)?\s+$/i;
 const CHART_WINDOW = /\b(?:window|close|chart|range|YTD)\b/i;
-const ISO_DATE = /\b(\d{4})-(\d{2})-(\d{2})\b/g;
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
 // Between a figure and the company that owns it: its unit, then a preposition
 // ("% for ", "B at ", " percent in "). No punctuation and no other words, so a
@@ -293,24 +303,16 @@ export function keepSupportedSentences(
     );
   };
   const dates = new Set(displayedDates);
-  // "December 31, 2025", "31 December 2025" or "2025-12-31", when displayed, reads as "December 2025".
-  const shownDay = (date: string, year: string, month: number, day: string) =>
-    dates.has(`${year}-${String(month).padStart(2, "0")}-${day.padStart(2, "0")}`) ? `${MONTHS[month - 1]} ${year}` : date;
-  // Only prose about the chart window: a displayed day does not date anything
-  // else ("NVDA's FY2026 ended December 31, 2025").
-  // ponytail: a keyword check; tie dates to their block if one leaks through.
+  // A displayed day in the chart window's own words reads as its month
+  // ("from the December 31, 2025 close" -> "from the December 2025 close"); a
+  // displayed day dates nothing else ("NVDA's FY2026 ended December 31, 2025").
   // Clause by clause: "the YTD window, while NVDA reported on August 31" dates nothing.
-  // The date must mark an end of the window ("from …", "through …", "the … close"),
-  // so "the chart shows NVDA reported on August 31, 2026" dates nothing.
-  const windowEnd = (clause: string, at: number, date: string) =>
-    WINDOW_BEFORE.test(clause.slice(0, at)) || /^\s+close\b/i.test(clause.slice(at + date.length));
-  const withDisplayedDays = (sentence: string) => sentence.split(DATE_CLAUSE).map((clause) => !CHART_WINDOW.test(clause) ? clause : clause
-    .replace(DAY_DATE, (date, month: string, day: string, year: string, at: number, text: string) =>
-      windowEnd(text, at, date) ? shownDay(date, year, MONTHS.indexOf(month) + 1, day) : date)
-    .replace(DAY_FIRST_DATE, (date, day: string, month: string, year: string, at: number, text: string) =>
-      windowEnd(text, at, date) ? shownDay(date, year, MONTHS.indexOf(month) + 1, day) : date)
-    .replace(ISO_DATE, (date, year: string, month: string, day: string, at: number, text: string) =>
-      windowEnd(text, at, date) ? shownDay(date, year, Number(month), day) : date)).join("");
+  const asMonth = (date: string) => `${MONTHS[Number(isoDate(date).slice(5, 7)) - 1]} ${isoDate(date).slice(0, 4)}`;
+  const withDisplayedDays = (sentence: string) => sentence.split(DATE_CLAUSE).map((clause) => !CHART_WINDOW.test(clause) ? clause :
+    clause.replace(WINDOW_DAYS, (window: string, from?: string, to?: string, close?: string) => {
+      const ends = [from, to, close].filter((date): date is string => date !== undefined);
+      return ends.every((date) => dates.has(isoDate(date))) ? ends.reduce((text, date) => text.replace(date, asMonth(date)), window) : window;
+    })).join("");
   const removed: string[] = [];
   // null marks a line the guard dropped whole.
   const lines: Array<string | null> = [];
