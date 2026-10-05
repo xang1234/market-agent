@@ -683,3 +683,26 @@ test("a magnitude comparison in words goes unless the data states it (#228)", ()
     assert.deepEqual(keepSupportedSentences(kept, ["fiscal 2026", "fiscal 2025"]).removed, [], kept);
   }
 });
+
+test("a stated cause must be made of the answer's own data (#249)", () => {
+  // The turn shows these labels; a cause built from them is grounded.
+  const shown = ["Revenue by segment (Q4 2026)", "Data Center", "Gaming", "Side by side: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025)"];
+  for (const dropped of [
+    // The #228 eval's surviving cause, and the issue's examples.
+    "NVDA's revenue is larger, reflecting its broader installed base and diversified product mix.",
+    "NVDA's margins are higher, reflecting pricing power and operating leverage.",
+    "AMD's net margin of 12.0% was likely due to a one-time charge.",
+    "NVDA's gross margin of 70.8% is higher because of supply constraints.",
+  ]) {
+    assert.deepEqual(keepSupportedSentences(dropped, shown, GOLDEN).removed, [dropped], dropped);
+  }
+  for (const kept of [
+    "The data does not show a cause for the concentration; it simply reflects the reported mix.",
+    "We cannot see whether the improvement is driven by one business unit.",
+    "NVDA's revenue growth was driven by Data Center.",
+    "NVDA's gross margin of 70.8% reflects higher revenue.",
+    "The table reflects the reported figures for each segment.",
+  ]) {
+    assert.deepEqual(keepSupportedSentences(kept, shown, GOLDEN).removed, [], kept);
+  }
+});
