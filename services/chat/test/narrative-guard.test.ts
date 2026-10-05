@@ -612,6 +612,10 @@ test("a magnitude comparison in words goes unless the data states it (#228)", ()
     "NVDA's revenue was three-fourths that of AMD's.",
     "AMD's revenue was one-fourth of NVDA's.",
     "NVDA's margin was one-fourth higher than AMD's.",
+    "NVDA's revenue increased by 52.3x.",
+    "NVDA's revenue increased 52.3-fold.",
+    "NVDA's revenue quintupled.",
+    "NVDA's revenue trebled.",
   ]) {
     assert.deepEqual(keepSupportedSentences(dropped, [], GOLDEN).removed, [dropped], dropped);
   }
