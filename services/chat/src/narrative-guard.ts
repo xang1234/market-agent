@@ -73,7 +73,7 @@ const COUNT = String.raw`(?:one|two|three|four|five|six|seven|eight|nine|ten|ele
 const MAGNITUDE = new RegExp(
   String.raw`\b(?:(?:doubl|tripl|quadrupl)(?:ed(?! down\b| as an?\b)|(?:es|ing)(?! down\b| as\b))|halved|` +
     String.raw`(?:${COUNT}|several|many|multiple|a few|a couple of)[- ]?fold|${COUNT} (?:in|out of) (?:every )?${COUNT}|${COUNT} of every ${COUNT}|(?<!(?:first|second|back|front|latter|former|last|later|earlier|1st|2nd)[ -])half (?:as|the size)|(?:a|${COUNT})[- ](?:third|quarter(?!s? (?:of|as) (?:results|data|history|figures|detail|segment|reported|financials|filings?|fiscal|FY|calendar|\d{4})\b)|fifth|sixth|seventh|eighth|ninth|tenth|hundredth)s? (?:of|as)|` +
-    String.raw`orders? of magnitude|by half|than (?:its |their |the |[A-Z]{2,}['’]s )?(?:entire|whole|combined) (?:[^\s.,;]+ ){0,3}?(?:revenue|sales|income|profit|earnings|margin|cash flow|base|value|total)\b|${COUNT}(?:[- ]${COUNT})? (?:(?:percentage|basis) points?|percent|points? (?:higher|lower|above|below|ahead|behind|more|less|wider|narrower)|(?:(?:billion|million|trillion)(?: dollars)?|dollars?|cents?|euros?|pounds?) (?:higher|lower|above|below|ahead|behind|more|less))|by ${COUNT}(?:[- ]${COUNT})? (?:billion|million|trillion|dollars?|cents?|euros?|pounds?)|${COUNT}-to-${COUNT}|${COUNT} to one\b|${COUNT} (?:[a-z]+ )?for every ${COUNT}|(?:a|${COUNT})[- ](?:half|third|quarter|fifth|sixth|seventh|eighth|ninth|tenth|hundredth)s? (?:higher|lower|larger|smaller|bigger|greater|more|less)|(?:by )?a factor of (?:${COUNT}|several|a few|about|roughly|nearly|almost|over|more than))\b`,
+    String.raw`orders? of magnitude|by half|than (?:its |their |the |[A-Z]{2,}['’]s )?(?:entire|whole|combined) (?:[^\s.,;]+ ){0,3}?(?:revenue|sales|income|profit|earnings|margin|cash flow|base|value|total)\b|${COUNT}(?:[- ]${COUNT})? (?:(?:percentage|basis) points?|percent|points? (?:higher|lower|above|below|ahead|behind|more|less|wider|narrower)|(?:(?:billion|million|trillion)(?: dollars)?|dollars?|cents?|euros?|pounds?) (?:higher|lower|above|below|ahead|behind|more|less))|by ${COUNT}(?:[- ]${COUNT})? (?:billion|million|trillion|dollars?|cents?|euros?|pounds?|yen|bps|bp)|${COUNT}(?:[- ]${COUNT})? [a-z]+ (?:[a-z]+ )?(?:higher|lower|above|below|ahead|behind|wider|narrower)\b|${COUNT}-to-${COUNT}|${COUNT} to one\b|${COUNT} (?:[a-z]+ )?for every ${COUNT}|(?:a|${COUNT})[- ](?:half|third|quarter|fifth|sixth|seventh|eighth|ninth|tenth|hundredth)s? (?:higher|lower|larger|smaller|bigger|greater|more|less)|(?:by )?a factor of (?:${COUNT}|several|a few|about|roughly|nearly|almost|over|more than))\b`,
   "i",
 );
 // Which phrases count (each case has a test):
@@ -84,7 +84,7 @@ const MAGNITUDE = new RegExp(
 //   "x", "×" or "fold" before a word likewise, unless the word is a valuation
 //   basis, an occurrence or a connective ("52.3x is", "52.3x versus AMD's
 //   41.2x"), so a displayed "52.3×" stays.
-// - after "several", "many", "a few", "half": only before the thing compared
+// - after "several", "many", "a few", "half", "hundreds of": only before the thing compared
 //   ("several times AMD's", "many times larger"), so "volatile times" stays.
 // - a bare "double"/"triple" after a degree word that ends the clause or meets
 //   the thing compared ("nearly double.", "more than double AMD's"), or right
@@ -94,7 +94,7 @@ const MAGNITUDE = new RegExp(
 // - "half" before the thing compared or "of", unless an ordinal half of a
 //   period ("first half of NVDA's fiscal 2026").
 // - worded differences ("forty percentage points", "fifty percent", "six
-//   billion dollars more", "six dollars higher", "six-to-one", "six dollars for
+//   billion dollars more", "six dollars higher", "six bps higher", "six-to-one", "six dollars for
 //   every one", "a third higher", "three out of four", "larger
 //   than its entire revenue"), though a quantity ("three million units") or a
 //   direction ("faster than the entire sector") is not one.
@@ -108,7 +108,7 @@ const OCCURRENCE = String.raw`(?:this (?:year|quarter|month|week|period)\b(?!['�
 const COMPARED = String.raw`(?:(?:the )?(?:last|prior|previous) (?:year|quarter|month|period)['’]s\b|year-ago\b|as\b|the\b|that of\b|of [A-Z]|its\b|their\b|what\b|(?:larger|bigger|greater|higher|lower|smaller|more|less|faster|slower)\b|[A-Z]{2,}\b)`;
 const MULTIPLIER = new RegExp(
   String.raw`\b(?:${COUNT} times|twice)(?!\s*(?:[.,;:!?]|$)| ${OCCURRENCE})|` +
-    String.raw`\b(?:several|many|a few|a couple of|multiple|half) times ${COMPARED}|\b(?:double|triple|quadruple) ${COMPARED}|\b\d+(?:\.\d+)? times (?!${VALUATION}|${OCCURRENCE})[A-Za-z]|\b(?:more than|nearly|almost|roughly|about|over|less than|at least|close to) (?:double|triple|quadruple)(?=\s*(?:[.,;:!?)]|$)|\s+${COMPARED})|\b\d+(?:\.\d+)?(?:[x×]|[- ]?fold) (?!${VALUATION}|${OCCURRENCE}|(?:is|was|are|were|and|or|but|for|at|on|to|from|by|with|while|versus|vs)\b)[A-Za-z]|` +
+    String.raw`\b(?:several|many|a few|a couple of|multiple|half|(?:tens|dozens|hundreds|thousands|millions|billions) of) times ${COMPARED}|\b(?:double|triple|quadruple) ${COMPARED}|\b\d+(?:\.\d+)? times (?!${VALUATION}|${OCCURRENCE})[A-Za-z]|\b(?:more than|nearly|almost|roughly|about|over|less than|at least|close to) (?:double|triple|quadruple)(?=\s*(?:[.,;:!?)]|$)|\s+${COMPARED})|\b\d+(?:\.\d+)?(?:[x×]|[- ]?fold) (?!${VALUATION}|${OCCURRENCE}|(?:is|was|are|were|and|or|but|for|at|on|to|from|by|with|while|versus|vs)\b)[A-Za-z]|` +
     String.raw`(?<!(?:[Ff]irst|[Ss]econd|[Bb]ack|[Ff]ront|[Ll]atter|[Ff]ormer|[Ll]ast|[Ll]ater|[Ee]arlier|1st|2nd)[ -])\b[Hh]alf (?:of\b|${COMPARED})`,
 );
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
@@ -180,7 +180,9 @@ export function keepSupportedSentences(
       // MULTIPLIER is case-sensitive, so tickers ("AMD") count as the thing
       // compared; any Capitalized word is lowercased for it ("Six Times AMD's",
       // "**Six times…**").
-      if (MAGNITUDE.test(sentence) || MULTIPLIER.test(sentence.replace(/\b([A-Z])(?=[a-z])/g, (letter) => letter.toLowerCase()))) {
+      // Inline Markdown ("double **AMD's**") is ignored for both checks.
+      const plain = sentence.replace(/[*_`]+/g, "");
+      if (MAGNITUDE.test(plain) || MULTIPLIER.test(plain.replace(/\b([A-Z])(?=[a-z])/g, (letter) => letter.toLowerCase()))) {
         removed.push(sentence);
         return false;
       }
