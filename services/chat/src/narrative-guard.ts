@@ -154,6 +154,8 @@ const CLAUSE_BREAK = /[,;:]|\b(?:while|but|whereas|although|though|so|yet)\b/i;
 // is not shown" denies something else.
 const PASSIVE_OF_CAUSE = /^\s*(?:\S+\s+){0,4}?(?:is|are) not (?:shown|established|confirmed|supported|proven|evident|clear)\b/i;
 function scopedCause(before: string): boolean {
+  // A passive denial right before the connective ("are not shown to be driven by").
+  if (/\b(?:is|are|was|were) not (?:shown|proven|established|known|confirmed) to (?:be )?$/i.test(before)) return true;
   const last = [...before.matchAll(SCOPE_START)].at(-1);
   if (last === undefined) return false;
   const span = before.slice(last.index + last[0].length);
