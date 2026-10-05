@@ -137,9 +137,12 @@ const CAUSAL = /\b(?:driven by|due to|because of|owing to|attributable to|as a r
 // drives it", "cannot explain why"). A denial about something else ("does not
 // break out segment margins", "what drives revenue") clears nothing (#240 review).
 const NOT = String.raw`(?:does not|doesn['’]t|do not|don['’]t|cannot|can['’]t|is not|isn['’]t|are not|aren['’]t|not)`;
+// A passive denial ends its clause ("is not supported", "… by the data"); one
+// limited to something else ("is not supported for AMD's revenue") is not about the cause.
+const PASSIVE_END = String.raw`(?:\s+by (?:the )?(?:data|figures|numbers|filings?|table|chart))?(?=\s*(?:[.,;:!?)]|$))`;
 const DENIED_CAUSE = new RegExp(
   String.raw`\b${NOT} (?:show|tell|explain|reveal|indicate|identify|isolate|pinpoint|attribute|break out|see|say)\b[^.;]{0,20}?` +
-    String.raw`(?:\b(?:the|a|any|its|their) (?:causes?|drivers?|reasons?)(?=\s*(?:[.,;:!?)]|$)| (?:of|for|behind) (?:(?:it|this|that|them)(?=\s*(?:[.,;:!?)]|$))|the (?:gap|difference|change|decline|increase|shift)(?!\s+(?:in|of|at|for|between|across)\b))\b)|\bwhy(?=\s*(?:[.,;:!?)]|$)| (?:it|they)\b| (?:this|that)\s*(?:[.,;:!?)]|$)| the (?:gap|difference|change|decline|increase|shift)(?!\s+(?:in|of|at|for|between|across)\b)\b)|\bwhat (?:drives|caused|causes|is driving) (?:(?:it|this|that|them)(?=\s*(?:[.,;:!?)]|$))|the (?:gap|difference|change|decline|increase|shift)(?!\s+(?:in|of|at|for|between|across)\b))\b)|\bno (?:cause|explanation)(?=\s*(?:[.,;:!?)]|$)| (?:is|was) (?:shown|given|identified)\b| (?:of|for) (?:it|this|that|them)\s*(?:[.,;:!?)]|$))|\b(?:that|this|the|its|their) (?:causes?|drivers?|reasons?|explanation|link) (?:is|are) not (?:shown|established|confirmed|supported|proven|evident|clear)\b`,
+    String.raw`(?:\b(?:the|a|any|its|their) (?:causes?|drivers?|reasons?)(?=\s*(?:[.,;:!?)]|$)| (?:of|for|behind) (?:(?:it|this|that|them)(?=\s*(?:[.,;:!?)]|$))|the (?:gap|difference|change|decline|increase|shift)(?!\s+(?:in|of|at|for|between|across)\b))\b)|\bwhy(?=\s*(?:[.,;:!?)]|$)| (?:it|they)\b| (?:this|that)\s*(?:[.,;:!?)]|$)| the (?:gap|difference|change|decline|increase|shift)(?!\s+(?:in|of|at|for|between|across)\b)\b)|\bwhat (?:drives|caused|causes|is driving) (?:(?:it|this|that|them)(?=\s*(?:[.,;:!?)]|$))|the (?:gap|difference|change|decline|increase|shift)(?!\s+(?:in|of|at|for|between|across)\b))\b)|\bno (?:cause|explanation)(?=\s*(?:[.,;:!?)]|$)| (?:is|was) (?:shown|given|identified)${PASSIVE_END}| (?:of|for) (?:it|this|that|them)\s*(?:[.,;:!?)]|$))|\b(?:that|this|the|its|their) (?:causes?|drivers?|reasons?|explanation|link) (?:is|are) not (?:shown|established|confirmed|supported|proven|evident|clear)${PASSIVE_END}`,
   "i",
 );
 // A denial or question that scopes the causal clause before it ("cannot see
@@ -152,7 +155,7 @@ const CLAUSE_BREAK = /[,;:]|\b(?:while|but|whereas|although|though|so|yet)\b/i;
 // "That <cause clause> is not shown by the data": the denial right after a short
 // cause noun phrase governs it; "That … reflects X explains the result and revenue
 // is not shown" denies something else.
-const PASSIVE_OF_CAUSE = /^\s*(?:\S+\s+){0,4}?(?:is|are) not (?:shown|established|confirmed|supported|proven|evident|clear)\b/i;
+const PASSIVE_OF_CAUSE = new RegExp(String.raw`^\s*(?:\S+\s+){0,4}?(?:is|are) not (?:shown|established|confirmed|supported|proven|evident|clear)${PASSIVE_END}`, "i");
 function scopedCause(before: string): boolean {
   // A passive denial right before the connective ("are not shown to be driven by").
   if (/\b(?:is|are|was|were) not (?:shown|proven|established|known|confirmed) to (?:be )?$/i.test(before)) return true;
@@ -182,6 +185,8 @@ const CAUSE_DATA_WORDS = new Set([
 const causeWords = (text: string) => (text.toLowerCase().match(/[a-z][a-z0-9'’-]*/g) ?? []).map((word) => word.replace(/['’]s$/, ""));
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const DAY_DATE = new RegExp(`\\b(${MONTHS.join("|")}) (\\d{1,2}),? (\\d{4})\\b`, "g");
+const DAY_FIRST_DATE = new RegExp(`\\b(\\d{1,2}) (${MONTHS.join("|")}),? (\\d{4})\\b`, "g");
+const ISO_DATE = /\b(\d{4})-(\d{2})-(\d{2})\b/g;
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
 // Between a figure and the company that owns it: its unit, then a preposition
 // ("% for ", "B at ", " percent in "). No punctuation and no other words, so a
@@ -255,11 +260,13 @@ export function keepSupportedSentences(
     );
   };
   const dates = new Set(displayedDates);
-  const withDisplayedDays = (sentence: string) =>
-    sentence.replace(DAY_DATE, (date, month: string, day: string, year: string) => {
-      const iso = `${year}-${String(MONTHS.indexOf(month) + 1).padStart(2, "0")}-${day.padStart(2, "0")}`;
-      return dates.has(iso) ? `${month} ${year}` : date;
-    });
+  // "December 31, 2025", "31 December 2025" or "2025-12-31", when displayed, reads as "December 2025".
+  const shownDay = (date: string, year: string, month: number, day: string) =>
+    dates.has(`${year}-${String(month).padStart(2, "0")}-${day.padStart(2, "0")}`) ? `${MONTHS[month - 1]} ${year}` : date;
+  const withDisplayedDays = (sentence: string) => sentence
+    .replace(DAY_DATE, (date, month: string, day: string, year: string) => shownDay(date, year, MONTHS.indexOf(month) + 1, day))
+    .replace(DAY_FIRST_DATE, (date, day: string, month: string, year: string) => shownDay(date, year, MONTHS.indexOf(month) + 1, day))
+    .replace(ISO_DATE, (date, year: string, month: string, day: string) => shownDay(date, year, Number(month), day));
   const removed: string[] = [];
   // null marks a line the guard dropped whole.
   const lines: Array<string | null> = [];

@@ -716,6 +716,10 @@ test("a stated cause must be made of the answer's own data (#249)", () => {
     "That NVDA's margins reflect pricing power explains the result and revenue is not shown by the data.",
     "NVDA's margin reflects pricing power and AMD's revenue reflects higher sales, but the data does not identify the cause.",
     "NVDA's higher margins are shown to be driven by pricing power.",
+    // A passive denial limited to something else clears nothing (#240 review).
+    "NVDA's margin reflects pricing power, but that explanation is not supported for AMD's revenue.",
+    "That NVDA's margin reflects pricing power is not supported for AMD's revenue.",
+    "NVDA's margin reflects pricing power, but no cause is shown for AMD's revenue.",
   ]) {
     assert.deepEqual(keepSupportedSentences(dropped, shown, GOLDEN).removed, [dropped], dropped);
   }
@@ -741,6 +745,10 @@ test("a stated cause must be made of the answer's own data (#249)", () => {
     "The data cannot show whether revenue and margins were driven by pricing power.",
     "The data cannot show whether gross margin and net margin were driven by pricing power.",
     "NVDA's higher margins are not shown to be driven by pricing power.",
+    "NVDA's margin may reflect pricing power, but that explanation is not supported.",
+    "NVDA's margin may reflect pricing power, but that explanation is not supported by the figures.",
+    "That NVDA's margin reflects pricing power is not established.",
+    "NVDA's margin may reflect pricing power, but no cause is shown by the data.",
   ]) {
     assert.deepEqual(keepSupportedSentences(kept, shown, GOLDEN).removed, [], kept);
   }
@@ -765,6 +773,15 @@ test("a displayed date may be written with its day; any other day still goes (#2
   const dates = ["2025-12-31", "2026-08-31"];
   const kept = "The YTD window runs from the December 31, 2025 close through the August 31, 2026 close.";
   assert.deepEqual(keepSupportedSentences(kept, shown, [], dates), { text: kept, removed: [] });
+  // As displayed (ISO), or day first (#240 review).
+  for (const written of [
+    "The YTD window runs from 2025-12-31 to 2026-08-31.",
+    "The YTD window runs from the 31 December 2025 close through the 31 August 2026 close.",
+  ]) {
+    assert.deepEqual(keepSupportedSentences(written, shown, [], dates), { text: written, removed: [] }, written);
+  }
+  assert.equal(keepSupportedSentences("The window starts on 2025-12-30.", shown, [], dates).text, "");
+  assert.equal(keepSupportedSentences("The window starts on 30 December 2025.", shown, [], dates).text, "");
   // A day that is not displayed, and a displayed day used as a figure, still go.
   assert.equal(keepSupportedSentences("The window starts from the December 30, 2025 close.", shown, [], dates).text, "");
   assert.equal(keepSupportedSentences("Revenue rose 31% in December 2025.", shown, [], dates).text, "");
