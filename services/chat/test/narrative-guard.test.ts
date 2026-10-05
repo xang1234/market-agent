@@ -729,6 +729,8 @@ test("a stated cause must be made of the answer's own data (#249)", () => {
     "NVDA's margin reflects pricing power, but AMD's revenue fell and that cause is not known.",
     // A bare "does not show" scopes no clause joined by "and".
     "The data does not show margins and NVDA's margin reflects pricing power.",
+    // A short whether-subject with its own predicate is still a clause.
+    "Whether revenue rose remains unknown and NVDA's margin reflects pricing power.",
   ]) {
     assert.deepEqual(keepSupportedSentences(dropped, shown, GOLDEN).removed, [dropped], dropped);
   }
@@ -771,6 +773,9 @@ test("a stated cause must be made of the answer's own data (#249)", () => {
     // "that" omitted after the denial (#240 review).
     "The data does not show NVDA's higher margins are driven by pricing power.",
     "The figures do not indicate NVDA's margins reflect pricing power.",
+    // "see" scopes too, and longer metric names join a compound (#240 review).
+    "We cannot see that NVDA's higher margins are driven by pricing power.",
+    "The data cannot show whether gross profit margin and net profit margin were driven by pricing power.",
   ]) {
     assert.deepEqual(keepSupportedSentences(kept, shown, GOLDEN).removed, [], kept);
   }
@@ -810,6 +815,11 @@ test("a displayed date may be written with its day; any other day still goes (#2
   // Only in the clause about the window (#240 review).
   assert.equal(keepSupportedSentences("The chart covers the YTD window, while NVDA reported results on August 31, 2026.", shown, [], dates).text, "");
   assert.equal(keepSupportedSentences("The chart covers the YTD window and NVDA reported results on August 31, 2026.", shown, [], dates).text, "");
+  // The date must mark the window's end, not just share a clause with "chart".
+  assert.equal(keepSupportedSentences("The chart shows NVDA reported results on August 31, 2026.", shown, [], dates).text, "");
+  // Mixed spellings: each pass reads the text as the last one left it.
+  const mixed = "The YTD window runs from the 31 December 2025 close to 2026-08-31.";
+  assert.deepEqual(keepSupportedSentences(mixed, shown, [], dates), { text: mixed, removed: [] });
   const between = "The YTD window runs between December 31, 2025 and August 31, 2026.";
   assert.deepEqual(keepSupportedSentences(between, shown, [], dates), { text: between, removed: [] });
   // A day that is not displayed, and a displayed day used as a figure, still go.
