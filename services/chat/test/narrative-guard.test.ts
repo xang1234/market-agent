@@ -702,6 +702,7 @@ test("a stated cause must be made of the answer's own data (#249)", () => {
     // A denial about a different thing clears nothing (#240 review).
     "NVDA's higher margin reflects pricing power, but the data does not identify what drives revenue.",
     "The data does not show that margins rose, so NVDA's higher margin reflects pricing power.",
+    "NVDA's margin reflects pricing power, while the data does not identify the cause of AMD's revenue.",
   ]) {
     assert.deepEqual(keepSupportedSentences(dropped, shown, GOLDEN).removed, [dropped], dropped);
   }
@@ -716,6 +717,7 @@ test("a stated cause must be made of the answer's own data (#249)", () => {
     "The gap reflects differences in expense structure, though the data does not break out what drives it.",
     // A denial scoping the cause before it ("does not show that …").
     "The data does not show that NVDA's higher margins are driven by pricing power.",
+    "The gap reflects differences in expense structure, but the data does not identify the cause of it.",
   ]) {
     assert.deepEqual(keepSupportedSentences(kept, shown, GOLDEN).removed, [], kept);
   }
@@ -728,6 +730,8 @@ test("a possessive may name the fiscal period in words: \"NVDA's fiscal 2025 rev
   ];
   const kept = "AAPL's fiscal 2025 revenue of $416.2B is higher than NVDA's fiscal 2025 revenue of $130.5B.";
   assert.deepEqual(keepSupportedSentences(kept, [], fiscal), { text: kept, removed: [] });
+  const hyphenated = "AAPL's fiscal-year 2025 revenue of $416.2B is higher than NVDA's fiscal-year 2025 revenue of $130.5B.";
+  assert.deepEqual(keepSupportedSentences(hyphenated, [], fiscal), { text: hyphenated, removed: [] });
   // The wrong-company twin still goes.
   const swapped = "AAPL's fiscal 2025 revenue of $130.5B is higher than NVDA's fiscal 2025 revenue of $416.2B.";
   assert.equal(keepSupportedSentences(swapped, [], fiscal).text, "");

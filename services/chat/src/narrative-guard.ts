@@ -133,13 +133,13 @@ const MULTIPLIER = new RegExp(
 // cannot show ("pricing power") goes too, which is what the prompt asks.
 const CAUSAL = /\b(?:driven by|due to|because of|owing to|attributable to|as a result of|thanks to|on the back of|fuell?ed by|stemming from|caused by|result(?:s|ed)? from|reflect(?:s|ed|ing)?)\s+([^,;:.]+)/gi;
 // A cause the sentence itself denies: a denial after it whose object is the
-// cause ("…but the data does not identify the cause", "does not break out what
+// cause ("…but the data does not identify the cause (of it)", "does not break out what
 // drives it", "cannot explain why"). A denial about something else ("does not
 // break out segment margins", "what drives revenue") clears nothing (#240 review).
 const NOT = String.raw`(?:does not|doesn['’]t|do not|don['’]t|cannot|can['’]t|is not|isn['’]t|are not|aren['’]t|not)`;
 const DENIED_CAUSE = new RegExp(
   String.raw`\b${NOT} (?:show|tell|explain|reveal|indicate|identify|isolate|pinpoint|attribute|break out|see|say)\b[^.;]{0,20}?` +
-    String.raw`(?:\b(?:the|a|any|its|their) (?:causes?|drivers?|reasons?)\b|\bwhy\b|\bwhat (?:drives|caused|causes|is driving) (?:it|this|that|them|the (?:gap|difference|change|decline|increase|shift))\b)|\bno (?:cause|explanation)\b`,
+    String.raw`(?:\b(?:the|a|any|its|their) (?:causes?|drivers?|reasons?)(?=\s*(?:[.,;:!?)]|$)| (?:of|for|behind) (?:it|this|that|them|the (?:gap|difference|change|decline|increase|shift))\b)|\bwhy\b|\bwhat (?:drives|caused|causes|is driving) (?:it|this|that|them|the (?:gap|difference|change|decline|increase|shift))\b)|\bno (?:cause|explanation)\b`,
   "i",
 );
 // A denial or question that scopes the causal clause before it, with no clause
@@ -374,7 +374,7 @@ export function keepSupportedSentences(
 function namesMetric(phrase: string, metrics: ReadonlyArray<string>): boolean {
   const words = phrase.replace(/\((?:ended|ending) [A-Z][a-z]+ \d{4}\)/g, " ").split(/\s+/).filter(Boolean);
   // Periods are not metric words: "FY2025", "Q4", and "fiscal (year) 2025" (#240).
-  const named = words.filter((word) => !/^[A-Z]*\d+$/.test(word) && !/^(?:fiscal|year)$/i.test(word));
+  const named = words.filter((word) => !/^[A-Z]*\d+$/.test(word) && !/^(?:fiscal|year|fiscal-year)$/i.test(word));
   // Both split the same way, so a label repeated verbatim matches ("revenue
   // growth (YoY)", "P/E"), and so does "YoY" without its parentheses.
   const bare = (word: string) => word.toLowerCase().replace(/^\((.*)\)$/, "$1");
