@@ -72,7 +72,7 @@ const POSSESSED = /^['’]s\s+(.+?)\s+of\s+(?:(?:[A-Z]{1,4}\.?(?:[ \u00a0\u202f]
 const COUNT = String.raw`(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|(?:a )?dozen)`;
 const MAGNITUDE = new RegExp(
   String.raw`\b(?:(?:doubl|tripl|quadrupl)(?:ed|es|ing)(?! down\b| as an?\b)|halved|` +
-    String.raw`${COUNT}[- ]?fold|${COUNT} (?:in|out of) (?:every )?${COUNT}|${COUNT} of every ${COUNT}|(?<!(?:first|second|back|front|latter|former|last|later|earlier|1st|2nd)[ -])half (?:as|the size)|(?:a|${COUNT})[- ](?:third|quarter(?!s? (?:of|as) (?:results|data|history|figures|detail|segment|reported|financials|filings?)\b)|fifth|sixth|seventh|eighth|ninth|tenth|hundredth)s? (?:of|as)|` +
+    String.raw`(?:${COUNT}|several|many|multiple|a few|a couple of)[- ]?fold|${COUNT} (?:in|out of) (?:every )?${COUNT}|${COUNT} of every ${COUNT}|(?<!(?:first|second|back|front|latter|former|last|later|earlier|1st|2nd)[ -])half (?:as|the size)|(?:a|${COUNT})[- ](?:third|quarter(?!s? (?:of|as) (?:results|data|history|figures|detail|segment|reported|financials|filings?|fiscal|FY|calendar|\d{4})\b)|fifth|sixth|seventh|eighth|ninth|tenth|hundredth)s? (?:of|as)|` +
     String.raw`orders? of magnitude|by half|than (?:its |their |the |[A-Z]{2,}['’]s )?(?:entire|whole|combined) (?:[^\s.,;]+ ){0,3}?(?:revenue|sales|income|profit|earnings|margin|cash flow|base|value|total)\b|${COUNT}(?:[- ]${COUNT})? (?:(?:percentage|basis) points?|percent|points? (?:higher|lower|above|below|ahead|behind|more|less|wider|narrower)|(?:billion|million|trillion)(?: dollars)? (?:higher|lower|above|below|ahead|behind|more|less))|by ${COUNT}(?:[- ]${COUNT})? (?:billion|million|trillion)|(?:a|${COUNT})[- ](?:half|third|quarter|fifth|sixth|seventh|eighth|ninth|tenth|hundredth)s? (?:higher|lower|larger|smaller|bigger|greater|more|less)|(?:by )?a factor of (?:${COUNT}|several|a few|about|roughly|nearly|almost|over|more than))\b`,
   "i",
 );
@@ -103,11 +103,11 @@ const VALUATION = String.raw`(?:(?:trailing |forward |TTM |NTM )?(?:earnings|sal
 // Occurrences and frequency after "N times" / "twice" ("three times this year",
 // "3 times a month", "twice annually", "three times and then", "three times to
 // discuss"): event counts.
-const OCCURRENCE = String.raw`(?:(?:this|in|during|since|so far|each|per|over|within|across|throughout|before|after|between|annually|yearly|quarterly|monthly|weekly|daily|and|or|but|then|while|when|to)\b|last (?:year|quarter|month)\b(?!['’]s)|a (?:year|quarter|month|week|day)\b)`;
+const OCCURRENCE = String.raw`(?:this (?:year|quarter|month|week|period)\b(?!['’]s)|(?:in|during|since|so far|each|per|over|within|across|throughout|before|after|between|annually|yearly|quarterly|monthly|weekly|daily|and|or|but|then|while|when|to)\b|last (?:year|quarter|month)\b(?!['’]s)|a (?:year|quarter|month|week|day)\b)`;
 const COMPARED = String.raw`(?:(?:the )?(?:last|prior|previous) (?:year|quarter|month|period)['’]s\b|year-ago\b|as\b|the\b|that of\b|of [A-Z]|its\b|their\b|what\b|(?:larger|bigger|greater|higher|lower|smaller|more|less|faster|slower)\b|[A-Z]{2,}\b)`;
 const MULTIPLIER = new RegExp(
   String.raw`\b(?:${COUNT} times|twice)(?!\s*(?:[.,;:!?]|$)| ${OCCURRENCE})|` +
-    String.raw`\b(?:several|many|a few|multiple|half) times ${COMPARED}|\b(?:double|triple|quadruple) ${COMPARED}|\b\d+(?:\.\d+)? times (?!${VALUATION}|${OCCURRENCE})[A-Za-z]|\b(?:more than|nearly|almost|roughly|about|over|less than|at least|close to) (?:double|triple|quadruple)(?=\s*(?:[.,;:!?)]|$)|\s+${COMPARED})|\b\d+(?:\.\d+)?(?:[x×]|[- ]?fold) (?!${VALUATION}|${OCCURRENCE}|(?:is|was|are|were|and|or|but|for|at|on|to|from|by|with|while|versus|vs)\b)[A-Za-z]|` +
+    String.raw`\b(?:several|many|a few|a couple of|multiple|half) times ${COMPARED}|\b(?:double|triple|quadruple) ${COMPARED}|\b\d+(?:\.\d+)? times (?!${VALUATION}|${OCCURRENCE})[A-Za-z]|\b(?:more than|nearly|almost|roughly|about|over|less than|at least|close to) (?:double|triple|quadruple)(?=\s*(?:[.,;:!?)]|$)|\s+${COMPARED})|\b\d+(?:\.\d+)?(?:[x×]|[- ]?fold) (?!${VALUATION}|${OCCURRENCE}|(?:is|was|are|were|and|or|but|for|at|on|to|from|by|with|while|versus|vs)\b)[A-Za-z]|` +
     String.raw`(?<!(?:[Ff]irst|[Ss]econd|[Bb]ack|[Ff]ront|[Ll]atter|[Ff]ormer|[Ll]ast|[Ll]ater|[Ee]arlier|1st|2nd)[ -])\b[Hh]alf (?:of\b|${COMPARED})`,
 );
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
