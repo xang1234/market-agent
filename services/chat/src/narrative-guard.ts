@@ -180,11 +180,14 @@ function deniedAfter(after: string): boolean {
   const end = NEXT_CLAUSE.exec(clause)?.index ?? clause.length;
   return denial !== null && denial.index < end;
 }
-// "and"/"or" before a new subject ("… and NVDA's margin reflects", "… and the
-// margin reflects") starts a new clause; otherwise they join noun phrases
-// ("gross profit margin and net profit margin", "NVDA and AMD margins").
+// "and"/"or" join a compound of the answer's own words inside the scoped clause
+// ("whether gross and net margins", "NVDA and AMD margins"); before a new
+// subject ("… and NVDA's margin reflects", "… and the margin reflects") or among
+// other words ("margins and management believes", "AMD gains share warrants
+// analysis and …") they start a new clause.
+// ponytail: grounded vocabulary, as for the cause itself (#249), not a parser.
 const NEW_SUBJECT = /\b(?:and|or)\s+(?:[A-Z][\w.-]*['’]s\b|(?:the|its|their|this|that|these|those|a|an)\b)/;
-function scopedCause(before: string): boolean {
+function scopedCause(before: string, known: (word: string) => boolean): boolean {
   // A passive denial right before the connective ("are not shown to be driven by").
   if (PASSIVE_SCOPE.test(before)) return true;
   const last = [...before.matchAll(SCOPE_START)].at(-1);
@@ -192,10 +195,7 @@ function scopedCause(before: string): boolean {
   const span = before.slice(last.index + last[0].length);
   if (CLAUSE_BREAK.test(span)) return false;
   if (!/\b(?:and|or)\b/i.test(span)) return true;
-  // A leading "Whether …" is a subject with its own predicate ("Whether AMD
-  // gains share warrants analysis"), so any "and" after it starts a new clause.
-  if (/^whether$/i.test(last[0]) && /(?:^|[,;:]|\b(?:but|and|so|yet|while)\b)\s*$/i.test(before.slice(0, last.index))) return false;
-  return !NEW_SUBJECT.test(span);
+  return !NEW_SUBJECT.test(span) && causeWords(span).every(known);
 }
 const CAUSE_STOP = new Set([
   "the", "a", "an", "of", "and", "or", "in", "on", "its", "their", "that", "this", "these", "those", "to", "for",
@@ -214,11 +214,12 @@ const MONTHS = ["January", "February", "March", "April", "May", "June", "July", 
 // A day as written: "December 31, 2025", "31 December 2025" or "2025-12-31".
 const DATE = String.raw`(?:(?:${MONTHS.join("|")}) \d{1,2},? \d{4}|\d{1,2} (?:${MONTHS.join("|")}),? \d{4}|\d{4}-\d{2}-\d{2})`;
 // The chart window in words: the window's own range of two days ("window runs
-// from … to …", "range between … and …") or one close ("the … close"). A lone
-// "to August 31, 2026", or a range of something else ("NVDA's fiscal year runs
-// from …"), is not one.
+// from … to …", "range between … and …") or a range of two closes ("from the …
+// close to the … close"). A lone date ("to August 31, 2026", "after the August
+// 31, 2026 close") or a range of something else ("NVDA's fiscal year runs from
+// …") is not one.
 // ponytail: wording, not provenance; tie dates to their block if one leaks through.
-const WINDOW_DAYS = new RegExp(String.raw`(?<=\b(?:window|range|period)(?: (?:runs|covers|spans|goes|extends|stretches|is))? )(?:from|between) (?:the )?(${DATE})(?: close)? (?:to|through|thru|until|and) (?:the )?(${DATE})(?: close)?|\bthe (${DATE}) close\b`, "g");
+const WINDOW_DAYS = new RegExp(String.raw`(?<=\b(?:window|range|period)(?: (?:runs|covers|spans|goes|extends|stretches|is))? )(?:from|between) (?:the )?(${DATE})(?: close)? (?:to|through|thru|until|and) (?:the )?(${DATE})(?: close)?|\bfrom the (${DATE}) close (?:to|through|thru|until) the (${DATE}) close\b`, "g");
 function isoDate(date: string): string {
   if (/^\d{4}-/.test(date)) return date;
   const [, first, second, year] = date.match(/^(\S+) (\S+?),? (\d{4})$/)!;
@@ -287,14 +288,15 @@ export function keepSupportedSentences(
   ]);
   // Each causal clause on its own: grounded in the data, scoped by a denial or
   // question before it, or denied right after it.
+  const known = (word: string) => CAUSE_STOP.has(word) || CAUSE_DATA_WORDS.has(word) || vocabulary.has(word);
   const groundedCause = (sentence: string) => {
     const causes = [...sentence.matchAll(CAUSAL)];
     return causes.every((match, i) =>
-      scopedCause(sentence.slice(0, match.index)) ||
+      scopedCause(sentence.slice(0, match.index), known) ||
       (/^\s*That\b/.test(sentence) && PASSIVE_OF_CAUSE.test(match[1])) ||
       // A denial after it, before the next cause: it belongs to the nearest cause.
       deniedAfter(sentence.slice(match.index + match[0].length, causes[i + 1]?.index ?? sentence.length)) ||
-      causeWords(match[1]).every((word) => CAUSE_STOP.has(word) || CAUSE_DATA_WORDS.has(word) || vocabulary.has(word))
+      causeWords(match[1]).every(known)
     );
   };
   const dates = new Set(displayedDates);
@@ -303,9 +305,9 @@ export function keepSupportedSentences(
   // displayed day dates nothing else ("NVDA's FY2026 ended December 31, 2025").
   const asMonth = (date: string) => `${MONTHS[Number(isoDate(date).slice(5, 7)) - 1]} ${isoDate(date).slice(0, 4)}`;
   const withDisplayedDays = (sentence: string) =>
-    sentence.replace(WINDOW_DAYS, (window: string, from?: string, to?: string, close?: string) => {
-      const ends = [from, to, close].filter((date): date is string => date !== undefined);
-      return ends.every((date) => dates.has(isoDate(date))) ? ends.reduce((text, date) => text.replace(date, asMonth(date)), window) : window;
+    sentence.replace(WINDOW_DAYS, (window: string, ...ends: Array<string | undefined>) => {
+      const [from, to] = ends[0] !== undefined ? ends as [string, string] : [ends[2]!, ends[3]!];
+      return dates.has(isoDate(from)) && dates.has(isoDate(to)) ? window.replace(from, asMonth(from)).replace(to, asMonth(to)) : window;
     });
   const removed: string[] = [];
   // null marks a line the guard dropped whole.

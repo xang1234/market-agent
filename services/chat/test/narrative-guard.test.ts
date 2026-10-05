@@ -735,6 +735,9 @@ test("a stated cause must be made of the answer's own data (#249)", () => {
     // A leading "Whether …" has its own predicate, whatever it is (#240 review).
     "Whether AMD gains share warrants analysis and NVDA's margin reflects pricing power.",
     "Whether AMD gains share warrants analysis and margin reflects pricing power.",
+    // An "and" joins a compound only of the answer's own words (#240 review).
+    "The data does not show margins and management believes NVDA's margin reflects pricing power.",
+    "The data cannot show whether margins rose and investors think the margin reflects pricing power.",
   ]) {
     assert.deepEqual(keepSupportedSentences(dropped, shown, GOLDEN).removed, [dropped], dropped);
   }
@@ -783,6 +786,7 @@ test("a stated cause must be made of the answer's own data (#249)", () => {
     // A compound subject with "that" omitted (#240 review).
     "The data does not show gross and net margins are driven by pricing power.",
     "The data cannot show whether NVDA and AMD margins were driven by pricing power.",
+    "Whether gross and net margins were driven by pricing power remains unknown.",
   ]) {
     assert.deepEqual(keepSupportedSentences(kept, shown, GOLDEN).removed, [], kept);
   }
@@ -827,6 +831,9 @@ test("a displayed date may be written with its day; any other day still goes (#2
   // Only a range of displayed ends, or "the … close", is the window (#240 review).
   assert.equal(keepSupportedSentences("The YTD chart shows NVDA's fiscal year runs to August 31, 2026.", shown, [], dates).text, "");
   assert.equal(keepSupportedSentences("The YTD chart runs from December 31, 2025 to August 30, 2026.", shown, [], dates).text, "");
+  assert.equal(keepSupportedSentences("NVDA reported earnings after the August 31, 2026 close.", shown, [], dates).text, "");
+  const closes = "NVDA's price return was 6.6% from the December 31, 2025 close to the August 31, 2026 close.";
+  assert.deepEqual(keepSupportedSentences(closes, [...shown, "6.6%"], [], dates), { text: closes, removed: [] });
   // The range must be the window's own (#240 review).
   assert.equal(keepSupportedSentences("The YTD chart shows NVDA's fiscal year runs from December 31, 2025 to August 31, 2026.", shown, [], dates).text, "");
   // Mixed spellings: each pass reads the text as the last one left it.
