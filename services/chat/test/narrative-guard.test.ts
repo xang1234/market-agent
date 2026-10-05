@@ -699,6 +699,9 @@ test("a stated cause must be made of the answer's own data (#249)", () => {
     "NVDA's higher margin reflects pricing power, and the data does not break out segment margins.",
     // A denial before the cause it then asserts clears nothing either.
     "The data does not identify the cause, so NVDA's higher margin reflects pricing power.",
+    // A denial about a different thing clears nothing (#240 review).
+    "NVDA's higher margin reflects pricing power, but the data does not identify what drives revenue.",
+    "The data does not show that margins rose, so NVDA's higher margin reflects pricing power.",
   ]) {
     assert.deepEqual(keepSupportedSentences(dropped, shown, GOLDEN).removed, [dropped], dropped);
   }
@@ -711,6 +714,8 @@ test("a stated cause must be made of the answer's own data (#249)", () => {
     // A cause hedged as unshown, in other words (#240 eval).
     "The higher margins could reflect a narrower product mix, but the data shown does not identify the cause.",
     "The gap reflects differences in expense structure, though the data does not break out what drives it.",
+    // A denial scoping the cause before it ("does not show that …").
+    "The data does not show that NVDA's higher margins are driven by pricing power.",
   ]) {
     assert.deepEqual(keepSupportedSentences(kept, shown, GOLDEN).removed, [], kept);
   }

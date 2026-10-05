@@ -132,11 +132,20 @@ const MULTIPLIER = new RegExp(
 // ponytail: a vocabulary check, not a semantic one; an interpretation the data
 // cannot show ("pricing power") goes too, which is what the prompt asks.
 const CAUSAL = /\b(?:driven by|due to|because of|owing to|attributable to|as a result of|thanks to|on the back of|fuell?ed by|stemming from|caused by|result(?:s|ed)? from|reflect(?:s|ed|ing)?)\s+([^,;:.]+)/gi;
-// A cause the sentence itself denies: a denial after it that is about the
+// A cause the sentence itself denies: a denial after it whose object is the
 // cause ("…but the data does not identify the cause", "does not break out what
-// drives it", "cannot explain why"). An unrelated disclosure ("does not break
-// out segment margins") clears nothing (#240 review).
-const DENIED_CAUSE = /\b(?:does not|doesn['’]t|do not|don['’]t|cannot|can['’]t|is not|isn['’]t|are not|aren['’]t|not) (?:show|tell|explain|reveal|indicate|identify|isolate|pinpoint|attribute|break out|see|say)\b[^.;]{0,40}?\b(?:causes?|drivers?|drives?|driving|why|reasons?|what)\b|\bno (?:cause|explanation)\b/i;
+// drives it", "cannot explain why"). A denial about something else ("does not
+// break out segment margins", "what drives revenue") clears nothing (#240 review).
+const NOT = String.raw`(?:does not|doesn['’]t|do not|don['’]t|cannot|can['’]t|is not|isn['’]t|are not|aren['’]t|not)`;
+const DENIED_CAUSE = new RegExp(
+  String.raw`\b${NOT} (?:show|tell|explain|reveal|indicate|identify|isolate|pinpoint|attribute|break out|see|say)\b[^.;]{0,20}?` +
+    String.raw`(?:\b(?:the|a|any|its|their) (?:causes?|drivers?|reasons?)\b|\bwhy\b|\bwhat (?:drives|caused|causes|is driving) (?:it|this|that|them|the (?:gap|difference|change|decline|increase|shift))\b)|\bno (?:cause|explanation)\b`,
+  "i",
+);
+// A denial or question that scopes the causal clause before it, with no clause
+// break in between ("cannot see whether … driven by", "does not show that …
+// driven by"); "does not identify the cause, so … reflects" scopes nothing.
+const SCOPED_CAUSE = new RegExp(String.raw`(?:\bwhether\b|\b${NOT} (?:show|indicate|prove|confirm|establish|say|tell us) that\b)[^,;:]*$`, "i");
 const CAUSE_STOP = new Set([
   "the", "a", "an", "of", "and", "or", "in", "on", "its", "their", "that", "this", "these", "those", "to", "for",
   "with", "by", "from", "as", "at", "which", "both", "more", "less", "than", "over", "across", "into", "per", "each",
@@ -212,11 +221,11 @@ export function keepSupportedSentences(
     ...supportingTexts.flatMap(causeWords),
     ...attributedFigures.flatMap((figure) => causeWords(`${figure.company} ${figure.metric ?? ""}`)),
   ]);
-  // Each causal clause on its own: grounded in the data, inside a "whether"
-  // clause ("cannot see whether … driven by"), or denied right after it.
+  // Each causal clause on its own: grounded in the data, scoped by a denial or
+  // question before it, or denied right after it.
   const groundedCause = (sentence: string) =>
     [...sentence.matchAll(CAUSAL)].every((match) =>
-      /\bwhether\b/i.test(sentence.slice(0, match.index)) ||
+      SCOPED_CAUSE.test(sentence.slice(0, match.index)) ||
       DENIED_CAUSE.test(sentence.slice(match.index + match[0].length)) ||
       causeWords(match[1]).every((word) => CAUSE_STOP.has(word) || CAUSE_DATA_WORDS.has(word) || vocabulary.has(word))
     );
