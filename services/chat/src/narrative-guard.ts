@@ -127,12 +127,16 @@ const MULTIPLIER = new RegExp(
 // made of the answer's own data (#249): every content word after the causal
 // connective comes from a displayed text, a cited claim, a metric or a company,
 // or the short list of data words below. So "reflecting its broader installed
-// base" or "due to a one-time charge" goes, while a sentence saying the cause
-// is not shown ("does not show", "cannot see whether") stays.
+// base" or "due to a one-time charge" goes, while a cause the sentence itself
+// denies or questions ("cannot see whether", "does not identify the cause") stays.
 // ponytail: a vocabulary check, not a semantic one; an interpretation the data
 // cannot show ("pricing power") goes too, which is what the prompt asks.
 const CAUSAL = /\b(?:driven by|due to|because of|owing to|attributable to|as a result of|thanks to|on the back of|fuell?ed by|stemming from|caused by|result(?:s|ed)? from|reflect(?:s|ed|ing)?)\s+([^,;:.]+)/gi;
-const NO_CAUSE = /\b(?:does not|doesn['’]t|do not|don['’]t|cannot|can['’]t|is not|isn['’]t|are not|aren['’]t) (?:show|tell|explain|reveal|indicate|identify|isolate|pinpoint|attribute|break out|see|shown|visible|available|known)\b|\bwhether\b|\bno (?:cause|explanation)\b/i;
+// A cause the sentence itself denies: a denial after it that is about the
+// cause ("…but the data does not identify the cause", "does not break out what
+// drives it", "cannot explain why"). An unrelated disclosure ("does not break
+// out segment margins") clears nothing (#240 review).
+const DENIED_CAUSE = /\b(?:does not|doesn['’]t|do not|don['’]t|cannot|can['’]t|is not|isn['’]t|are not|aren['’]t|not) (?:show|tell|explain|reveal|indicate|identify|isolate|pinpoint|attribute|break out|see|say)\b[^.;]{0,40}?\b(?:causes?|drivers?|drives?|driving|why|reasons?|what)\b|\bno (?:cause|explanation)\b/i;
 const CAUSE_STOP = new Set([
   "the", "a", "an", "of", "and", "or", "in", "on", "its", "their", "that", "this", "these", "those", "to", "for",
   "with", "by", "from", "as", "at", "which", "both", "more", "less", "than", "over", "across", "into", "per", "each",
@@ -208,9 +212,12 @@ export function keepSupportedSentences(
     ...supportingTexts.flatMap(causeWords),
     ...attributedFigures.flatMap((figure) => causeWords(`${figure.company} ${figure.metric ?? ""}`)),
   ]);
+  // Each causal clause on its own: grounded in the data, inside a "whether"
+  // clause ("cannot see whether … driven by"), or denied right after it.
   const groundedCause = (sentence: string) =>
-    NO_CAUSE.test(sentence) ||
     [...sentence.matchAll(CAUSAL)].every((match) =>
+      /\bwhether\b/i.test(sentence.slice(0, match.index)) ||
+      DENIED_CAUSE.test(sentence.slice(match.index + match[0].length)) ||
       causeWords(match[1]).every((word) => CAUSE_STOP.has(word) || CAUSE_DATA_WORDS.has(word) || vocabulary.has(word))
     );
   const dates = new Set(displayedDates);

@@ -693,6 +693,12 @@ test("a stated cause must be made of the answer's own data (#249)", () => {
     "NVDA's margins are higher, reflecting pricing power and operating leverage.",
     "AMD's net margin of 12.0% was likely due to a one-time charge.",
     "NVDA's gross margin of 70.8% is higher because of supply constraints.",
+    // An unrelated disclosure does not clear a cause (#240 review).
+    "The data does not break out segment margins, so NVDA's higher margin reflects pricing power.",
+    "The data does not show segment margins, so NVDA's higher margin reflects pricing power.",
+    "NVDA's higher margin reflects pricing power, and the data does not break out segment margins.",
+    // A denial before the cause it then asserts clears nothing either.
+    "The data does not identify the cause, so NVDA's higher margin reflects pricing power.",
   ]) {
     assert.deepEqual(keepSupportedSentences(dropped, shown, GOLDEN).removed, [dropped], dropped);
   }
