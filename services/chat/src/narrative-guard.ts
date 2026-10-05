@@ -139,19 +139,33 @@ const CAUSAL = /\b(?:driven by|due to|because of|owing to|attributable to|as a r
 const NOT = String.raw`(?:does not|doesn['’]t|do not|don['’]t|cannot|can['’]t|is not|isn['’]t|are not|aren['’]t|not)`;
 const DENIED_CAUSE = new RegExp(
   String.raw`\b${NOT} (?:show|tell|explain|reveal|indicate|identify|isolate|pinpoint|attribute|break out|see|say)\b[^.;]{0,20}?` +
-    String.raw`(?:\b(?:the|a|any|its|their) (?:causes?|drivers?|reasons?)(?=\s*(?:[.,;:!?)]|$)| (?:of|for|behind) (?:(?:it|this|that|them)(?=\s*(?:[.,;:!?)]|$))|the (?:gap|difference|change|decline|increase|shift)(?!\s+(?:in|of|at|for|between|across)\b))\b)|\bwhy(?=\s*(?:[.,;:!?)]|$)| (?:it|they)\b| (?:this|that)\s*(?:[.,;:!?)]|$)| the (?:gap|difference|change|decline|increase|shift)(?!\s+(?:in|of|at|for|between|across)\b)\b)|\bwhat (?:drives|caused|causes|is driving) (?:(?:it|this|that|them)(?=\s*(?:[.,;:!?)]|$))|the (?:gap|difference|change|decline|increase|shift)(?!\s+(?:in|of|at|for|between|across)\b))\b)|\bno (?:cause|explanation)\b|\b(?:that|this|the|its|their) (?:causes?|drivers?|reasons?|explanation|link) (?:is|are) not (?:shown|established|confirmed|supported|proven|evident|clear)\b`,
+    String.raw`(?:\b(?:the|a|any|its|their) (?:causes?|drivers?|reasons?)(?=\s*(?:[.,;:!?)]|$)| (?:of|for|behind) (?:(?:it|this|that|them)(?=\s*(?:[.,;:!?)]|$))|the (?:gap|difference|change|decline|increase|shift)(?!\s+(?:in|of|at|for|between|across)\b))\b)|\bwhy(?=\s*(?:[.,;:!?)]|$)| (?:it|they)\b| (?:this|that)\s*(?:[.,;:!?)]|$)| the (?:gap|difference|change|decline|increase|shift)(?!\s+(?:in|of|at|for|between|across)\b)\b)|\bwhat (?:drives|caused|causes|is driving) (?:(?:it|this|that|them)(?=\s*(?:[.,;:!?)]|$))|the (?:gap|difference|change|decline|increase|shift)(?!\s+(?:in|of|at|for|between|across)\b))\b)|\bno (?:cause|explanation)(?=\s*(?:[.,;:!?)]|$)| (?:is|was) (?:shown|given|identified)\b| (?:of|for) (?:it|this|that|them)\s*(?:[.,;:!?)]|$))|\b(?:that|this|the|its|their) (?:causes?|drivers?|reasons?|explanation|link) (?:is|are) not (?:shown|established|confirmed|supported|proven|evident|clear)\b`,
   "i",
 );
-// A denial or question that scopes the causal clause before it, with no clause
-// break in between: punctuation, a coordinator (while, but, so…), or "and/or"
-// before a new subject ("…remains unknown and NVDA's margin reflects"), not
-// inside a compound ("whether gross and net margins were driven by"). Case-
-// sensitive, so a ticker after "and" is told from a lowercase word ("cannot see whether … driven by", "does not show that …
-// driven by"); "does not identify the cause, so … reflects" scopes nothing.
-// A passive denial of a "That …" subject clause ("That NVDA's margins are driven
-// by pricing power is not shown by the data").
+// A denial or question that scopes the causal clause before it ("cannot see
+// whether … driven by", "does not show that … driven by", "That … driven by …
+// is not shown by the data"), up to a clause break: punctuation, a coordinator
+// (while, but, so…), or "and"/"or" once the scoped clause has its verb
+// ("whether revenue rose remains unknown and the margin reflects …"), but not
+// inside a compound ("whether gross and net margins were driven by"). "does not
+// identify the cause, so … reflects" scopes nothing.
+const SCOPE_START = new RegExp(String.raw`\b(?:whether|${NOT} (?:show|reveal|demonstrate|indicate|prove|confirm|establish|say|tell us) that)\b`, "gi");
 const PASSIVE_DENIAL = /^\s*That\b[^,;:]*\b(?:is|are) not (?:shown|established|confirmed|supported|proven|evident|clear)\b/i;
-const SCOPED_CAUSE = new RegExp(String.raw`(?:\b[Ww]hether\b|\b${NOT} (?:show|reveal|demonstrate|indicate|prove|confirm|establish|say|tell us) that\b)(?:(?!\b(?:while|but|whereas|although|though|so|yet)\b|\b(?:and|or) (?:[A-Z]{2,}|its\b|their\b|the company\b))[^,;:])*$`);
+const CLAUSE_BREAK = /[,;:]|\b(?:while|but|whereas|although|though|so|yet)\b/i;
+const SCOPE_VERB = /\b(?:is|are|was|were|has|have|had|remains?|remained|rose|fell|grew|declined|increased|decreased|jumped|dropped|unknown|unclear|uncertain)\b/i;
+function scopedCause(before: string, sentence: string): boolean {
+  const last = [...before.matchAll(SCOPE_START)].at(-1);
+  const thatClause = /^\s*That\b/.exec(before);
+  const from = last !== undefined
+    ? last.index + last[0].length
+    : thatClause !== null && PASSIVE_DENIAL.test(sentence)
+    ? thatClause[0].length
+    : -1;
+  if (from < 0) return false;
+  const span = before.slice(from);
+  return !CLAUSE_BREAK.test(span) &&
+    [...span.matchAll(/\b(?:and|or)\b/gi)].every((coordinator) => !SCOPE_VERB.test(span.slice(0, coordinator.index)));
+}
 const CAUSE_STOP = new Set([
   "the", "a", "an", "of", "and", "or", "in", "on", "its", "their", "that", "this", "these", "those", "to", "for",
   "with", "by", "from", "as", "at", "which", "both", "more", "less", "than", "over", "across", "into", "per", "each",
@@ -231,8 +245,7 @@ export function keepSupportedSentences(
   // question before it, or denied right after it.
   const groundedCause = (sentence: string) =>
     [...sentence.matchAll(CAUSAL)].every((match) =>
-      SCOPED_CAUSE.test(sentence.slice(0, match.index)) ||
-      (/^\s*That\b(?:(?!\b(?:while|but|whereas|although|though|so|yet)\b|\b(?:and|or) (?:[A-Z]{2,}|its\b|their\b|the company\b))[^,;:])*$/.test(sentence.slice(0, match.index)) && PASSIVE_DENIAL.test(sentence)) ||
+      scopedCause(sentence.slice(0, match.index), sentence) ||
       DENIED_CAUSE.test(sentence.slice(match.index + match[0].length)) ||
       causeWords(match[1]).every((word) => CAUSE_STOP.has(word) || CAUSE_DATA_WORDS.has(word) || vocabulary.has(word))
     );

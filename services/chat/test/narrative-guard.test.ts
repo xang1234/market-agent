@@ -708,6 +708,8 @@ test("a stated cause must be made of the answer's own data (#249)", () => {
     "Whether AMD's revenue rose remains unknown while NVDA's margin reflects pricing power.",
     "NVDA's margin reflects pricing power, but the data does not identify the cause of that increase in AMD's revenue.",
     "Whether AMD's revenue rose remains unknown and NVDA's margin reflects pricing power.",
+    "NVDA's margin reflects pricing power, but there is no cause for concern.",
+    "Whether AMD's revenue rose remains unknown and the margin reflects pricing power.",
   ]) {
     assert.deepEqual(keepSupportedSentences(dropped, shown, GOLDEN).removed, [dropped], dropped);
   }
@@ -728,6 +730,7 @@ test("a stated cause must be made of the answer's own data (#249)", () => {
     "That NVDA's higher margins are driven by pricing power is not shown by the data.",
     "NVDA's higher margins may be driven by pricing power, but that cause is not shown by the data.",
     "The data cannot show whether gross and net margins were driven by pricing power.",
+    "NVDA's margin may reflect pricing power, but the data gives no explanation for it.",
   ]) {
     assert.deepEqual(keepSupportedSentences(kept, shown, GOLDEN).removed, [], kept);
   }
