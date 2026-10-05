@@ -243,12 +243,15 @@ export function keepSupportedSentences(
   ]);
   // Each causal clause on its own: grounded in the data, scoped by a denial or
   // question before it, or denied right after it.
-  const groundedCause = (sentence: string) =>
-    [...sentence.matchAll(CAUSAL)].every((match) =>
+  const groundedCause = (sentence: string) => {
+    const causes = [...sentence.matchAll(CAUSAL)];
+    return causes.every((match, i) =>
       scopedCause(sentence.slice(0, match.index), sentence) ||
-      DENIED_CAUSE.test(sentence.slice(match.index + match[0].length)) ||
+      // A denial after it, before the next cause: it belongs to the nearest cause.
+      DENIED_CAUSE.test(sentence.slice(match.index + match[0].length, causes[i + 1]?.index ?? sentence.length)) ||
       causeWords(match[1]).every((word) => CAUSE_STOP.has(word) || CAUSE_DATA_WORDS.has(word) || vocabulary.has(word))
     );
+  };
   const dates = new Set(displayedDates);
   const withDisplayedDays = (sentence: string) =>
     sentence.replace(DAY_DATE, (date, month: string, day: string, year: string) => {
