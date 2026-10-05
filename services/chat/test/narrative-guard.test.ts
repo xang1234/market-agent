@@ -723,6 +723,8 @@ test("a stated cause must be made of the answer's own data (#249)", () => {
     // A passive predicate of a coordinated clause is not the That-clause's (#240 review).
     "That margin reflects pricing power and revenue is not supported.",
     "That margin reflects pricing power or revenue is not shown.",
+    // An "and" that starts no denial still joins the cause (#240 review).
+    "NVDA's margins may be driven by pricing power and brand loyalty.",
   ]) {
     assert.deepEqual(keepSupportedSentences(dropped, shown, GOLDEN).removed, [dropped], dropped);
   }
@@ -757,6 +759,11 @@ test("a stated cause must be made of the answer's own data (#249)", () => {
     "NVDA's margins may be driven by pricing power, but the explanation is not available.",
     "NVDA's margins may be driven by pricing power, but that cause isn't visible in the data.",
     "That NVDA's margin reflects pricing power is not known.",
+    // A denial joined by "and"/"or", and contracted passive denials (#240 review).
+    "NVDA's margins may be driven by pricing power and that cause is not known.",
+    "NVDA's margins may be driven by pricing power and the data does not identify the cause.",
+    "NVDA's higher margins aren't shown to be driven by pricing power.",
+    "NVDA's higher margins weren't proven to be driven by pricing power.",
   ]) {
     assert.deepEqual(keepSupportedSentences(kept, shown, GOLDEN).removed, [], kept);
   }
@@ -790,6 +797,9 @@ test("a displayed date may be written with its day; any other day still goes (#2
   }
   assert.equal(keepSupportedSentences("The window starts on 2025-12-30.", shown, [], dates).text, "");
   assert.equal(keepSupportedSentences("The window starts on 30 December 2025.", shown, [], dates).text, "");
+  // A displayed day only dates the chart window, not a reporting date (#240 review).
+  assert.equal(keepSupportedSentences("NVDA's FY2026 ended December 31, 2025.", shown, [], dates).text, "");
+  assert.equal(keepSupportedSentences("NVDA reported results on 2026-08-31.", shown, [], dates).text, "");
   // A day that is not displayed, and a displayed day used as a figure, still go.
   assert.equal(keepSupportedSentences("The window starts from the December 30, 2025 close.", shown, [], dates).text, "");
   assert.equal(keepSupportedSentences("Revenue rose 31% in December 2025.", shown, [], dates).text, "");

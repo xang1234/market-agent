@@ -131,7 +131,6 @@ const MULTIPLIER = new RegExp(
 // denies or questions ("cannot see whether", "does not identify the cause") stays.
 // ponytail: a vocabulary check, not a semantic one; an interpretation the data
 // cannot show ("pricing power") goes too, which is what the prompt asks.
-const CAUSAL = /\b(?:driven by|due to|because of|owing to|attributable to|as a result of|thanks to|on the back of|fuell?ed by|stemming from|caused by|result(?:s|ed)? from|reflect(?:s|ed|ing)?)\s+((?:(?!\b(?:although|though|but|while|whereas|yet|however|driven by|due to|because of|owing to|attributable to|as a result of|thanks to|on the back of|fuell?ed by|stemming from|caused by|result(?:s|ed)? from|reflect(?:s|ed|ing)?)\b)[^,;:.])+)/gi;
 // A cause the sentence itself denies: a denial after it whose object is the
 // cause ("…but the data does not identify the cause (of it)", "does not break out what
 // drives it", "cannot explain why"). A denial about something else ("does not
@@ -141,11 +140,20 @@ const NOT = String.raw`(?:does not|doesn['’]t|do not|don['’]t|cannot|can['�
 // limited to something else ("is not supported for AMD's revenue") is not about the cause.
 const PASSIVE_END = String.raw`(?:\s+(?:by|in|from) (?:the )?(?:data|figures|numbers|filings?|table|chart))?(?=\s*(?:[.,;:!?)]|$))`;
 // "is not shown", "isn't known", "was not available": a denial in the passive.
-const PASSIVE_NOT = String.raw`(?:(?:is|are|was|were) not|isn['’]t|aren['’]t|wasn['’]t|weren['’]t) (?:shown|established|confirmed|supported|proven|evident|clear|known|available|visible)`;
+const PASSIVE_NEG = String.raw`(?:(?:is|are|was|were) not|isn['’]t|aren['’]t|wasn['’]t|weren['’]t)`;
+const PASSIVE_NOT = String.raw`${PASSIVE_NEG} (?:shown|established|confirmed|supported|proven|evident|clear|known|available|visible)`;
 const DENIED_CAUSE = new RegExp(
   String.raw`\b${NOT} (?:show|tell|explain|reveal|indicate|identify|isolate|pinpoint|attribute|break out|see|say)\b[^.;]{0,20}?` +
     String.raw`(?:\b(?:the|a|any|its|their) (?:causes?|drivers?|reasons?)(?=\s*(?:[.,;:!?)]|$)| (?:of|for|behind) (?:(?:it|this|that|them)(?=\s*(?:[.,;:!?)]|$))|the (?:gap|difference|change|decline|increase|shift)(?!\s+(?:in|of|at|for|between|across)\b))\b)|\bwhy(?=\s*(?:[.,;:!?)]|$)| (?:it|they)\b| (?:this|that)\s*(?:[.,;:!?)]|$)| the (?:gap|difference|change|decline|increase|shift)(?!\s+(?:in|of|at|for|between|across)\b)\b)|\bwhat (?:drives|caused|causes|is driving) (?:(?:it|this|that|them)(?=\s*(?:[.,;:!?)]|$))|the (?:gap|difference|change|decline|increase|shift)(?!\s+(?:in|of|at|for|between|across)\b))\b)|\bno (?:cause|explanation)(?=\s*(?:[.,;:!?)]|$)| (?:is|was) (?:shown|given|identified)${PASSIVE_END}| (?:of|for) (?:it|this|that|them)\s*(?:[.,;:!?)]|$))|\b(?:that|this|the|its|their) (?:causes?|drivers?|reasons?|explanation|link) ${PASSIVE_NOT}${PASSIVE_END}`,
   "i",
+);
+const CONNECTIVE = String.raw`(?:driven by|due to|because of|owing to|attributable to|as a result of|thanks to|on the back of|fuell?ed by|stemming from|caused by|result(?:s|ed)? from|reflect(?:s|ed|ing)?)`;
+// The cause runs to a clause break, or to an "and"/"or" that starts a denial of
+// it ("driven by pricing power and that cause is not known"); any other "and"
+// joins the cause ("pricing power and brand loyalty").
+const CAUSAL = new RegExp(
+  String.raw`\b${CONNECTIVE}\s+((?:(?!\b(?:although|though|but|while|whereas|yet|however|${CONNECTIVE})\b|\b(?:and|or)\s+(?=[^,;:.]*?${DENIED_CAUSE.source}))[^,;:.])+)`,
+  "gi",
 );
 // A denial or question that scopes the causal clause before it ("cannot see
 // whether … driven by", "does not show that … driven by", "That … driven by …
@@ -160,9 +168,10 @@ const CLAUSE_BREAK = /[,;:]|\b(?:while|but|whereas|although|though|so|yet)\b/i;
 // ponytail: no "and"/"or" in the noun phrase, so a compound cause ("pricing and
 // mix is not shown") goes too; parse the That-clause if the eval shows that shape.
 const PASSIVE_OF_CAUSE = new RegExp(String.raw`^\s*(?:(?!(?:and|or)\b)\S+\s+){0,4}?${PASSIVE_NOT}${PASSIVE_END}`, "i");
+const PASSIVE_SCOPE = new RegExp(String.raw`\b${PASSIVE_NEG} (?:shown|proven|established|known|confirmed) to (?:be )?$`, "i");
 function scopedCause(before: string): boolean {
   // A passive denial right before the connective ("are not shown to be driven by").
-  if (/\b(?:is|are|was|were) not (?:shown|proven|established|known|confirmed) to (?:be )?$/i.test(before)) return true;
+  if (PASSIVE_SCOPE.test(before)) return true;
   const last = [...before.matchAll(SCOPE_START)].at(-1);
   if (last === undefined) return false;
   const span = before.slice(last.index + last[0].length);
@@ -190,6 +199,7 @@ const causeWords = (text: string) => (text.toLowerCase().match(/[a-z][a-z0-9'’
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const DAY_DATE = new RegExp(`\\b(${MONTHS.join("|")}) (\\d{1,2}),? (\\d{4})\\b`, "g");
 const DAY_FIRST_DATE = new RegExp(`\\b(\\d{1,2}) (${MONTHS.join("|")}),? (\\d{4})\\b`, "g");
+const CHART_WINDOW = /\b(?:window|close|chart|range|YTD)\b/i;
 const ISO_DATE = /\b(\d{4})-(\d{2})-(\d{2})\b/g;
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
 // Between a figure and the company that owns it: its unit, then a preposition
@@ -267,7 +277,10 @@ export function keepSupportedSentences(
   // "December 31, 2025", "31 December 2025" or "2025-12-31", when displayed, reads as "December 2025".
   const shownDay = (date: string, year: string, month: number, day: string) =>
     dates.has(`${year}-${String(month).padStart(2, "0")}-${day.padStart(2, "0")}`) ? `${MONTHS[month - 1]} ${year}` : date;
-  const withDisplayedDays = (sentence: string) => sentence
+  // Only prose about the chart window: a displayed day does not date anything
+  // else ("NVDA's FY2026 ended December 31, 2025").
+  // ponytail: a keyword check; tie dates to their block if one leaks through.
+  const withDisplayedDays = (sentence: string) => !CHART_WINDOW.test(sentence) ? sentence : sentence
     .replace(DAY_DATE, (date, month: string, day: string, year: string) => shownDay(date, year, MONTHS.indexOf(month) + 1, day))
     .replace(DAY_FIRST_DATE, (date, day: string, month: string, year: string) => shownDay(date, year, MONTHS.indexOf(month) + 1, day))
     .replace(ISO_DATE, (date, year: string, month: string, day: string) => shownDay(date, year, Number(month), day));
