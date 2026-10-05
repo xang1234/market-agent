@@ -131,7 +131,7 @@ const MULTIPLIER = new RegExp(
 // denies or questions ("cannot see whether", "does not identify the cause") stays.
 // ponytail: a vocabulary check, not a semantic one; an interpretation the data
 // cannot show ("pricing power") goes too, which is what the prompt asks.
-const CAUSAL = /\b(?:driven by|due to|because of|owing to|attributable to|as a result of|thanks to|on the back of|fuell?ed by|stemming from|caused by|result(?:s|ed)? from|reflect(?:s|ed|ing)?)\s+([^,;:.]+)/gi;
+const CAUSAL = /\b(?:driven by|due to|because of|owing to|attributable to|as a result of|thanks to|on the back of|fuell?ed by|stemming from|caused by|result(?:s|ed)? from|reflect(?:s|ed|ing)?)\s+((?:(?!\b(?:although|though|but|while|whereas|yet|however)\b)[^,;:.])+)/gi;
 // A cause the sentence itself denies: a denial after it whose object is the
 // cause ("…but the data does not identify the cause (of it)", "does not break out what
 // drives it", "cannot explain why"). A denial about something else ("does not
@@ -145,26 +145,23 @@ const DENIED_CAUSE = new RegExp(
 // A denial or question that scopes the causal clause before it ("cannot see
 // whether … driven by", "does not show that … driven by", "That … driven by …
 // is not shown by the data"), up to a clause break: punctuation, a coordinator
-// (while, but, so…), or "and"/"or" once the scoped clause has its verb
-// ("whether revenue rose remains unknown and the margin reflects …"), but not
-// inside a compound ("whether gross and net margins were driven by"). "does not
-// identify the cause, so … reflects" scopes nothing.
+// (while, but, so…), or an "and"/"or" that starts a new clause (see below).
+// "does not identify the cause, so … reflects" scopes nothing.
 const SCOPE_START = new RegExp(String.raw`\b(?:whether|${NOT} (?:show|reveal|demonstrate|indicate|prove|confirm|establish|say|tell us) that)\b`, "gi");
-const PASSIVE_DENIAL = /^\s*That\b[^,;:]*\b(?:is|are) not (?:shown|established|confirmed|supported|proven|evident|clear)\b/i;
 const CLAUSE_BREAK = /[,;:]|\b(?:while|but|whereas|although|though|so|yet)\b/i;
-const SCOPE_VERB = /\b(?:is|are|was|were|has|have|had|remains?|remained|rose|fell|grew|declined|increased|decreased|jumped|dropped|unknown|unclear|uncertain)\b/i;
-function scopedCause(before: string, sentence: string): boolean {
+// "That <cause clause> is not shown by the data": the denial right after a short
+// cause noun phrase governs it; "That … reflects X explains the result and revenue
+// is not shown" denies something else.
+const PASSIVE_OF_CAUSE = /^\s*(?:\S+\s+){0,4}?(?:is|are) not (?:shown|established|confirmed|supported|proven|evident|clear)\b/i;
+function scopedCause(before: string): boolean {
   const last = [...before.matchAll(SCOPE_START)].at(-1);
-  const thatClause = /^\s*That\b/.exec(before);
-  const from = last !== undefined
-    ? last.index + last[0].length
-    : thatClause !== null && PASSIVE_DENIAL.test(sentence)
-    ? thatClause[0].length
-    : -1;
-  if (from < 0) return false;
-  const span = before.slice(from);
+  if (last === undefined) return false;
+  const span = before.slice(last.index + last[0].length);
+  // "and"/"or" join single words inside the scoped clause ("whether gross and net
+  // margins", "revenue and margins"); after more than one word they start a new
+  // clause ("whether AMD gains share depends on demand and NVDA's margin…").
   return !CLAUSE_BREAK.test(span) &&
-    [...span.matchAll(/\b(?:and|or)\b/gi)].every((coordinator) => !SCOPE_VERB.test(span.slice(0, coordinator.index)));
+    span.split(/\b(?:and|or)\b/i).slice(0, -1).every((part) => part.trim().split(/\s+/).filter(Boolean).length <= 1);
 }
 const CAUSE_STOP = new Set([
   "the", "a", "an", "of", "and", "or", "in", "on", "its", "their", "that", "this", "these", "those", "to", "for",
@@ -246,7 +243,8 @@ export function keepSupportedSentences(
   const groundedCause = (sentence: string) => {
     const causes = [...sentence.matchAll(CAUSAL)];
     return causes.every((match, i) =>
-      scopedCause(sentence.slice(0, match.index), sentence) ||
+      scopedCause(sentence.slice(0, match.index)) ||
+      (/^\s*That\b/.test(sentence) && PASSIVE_OF_CAUSE.test(match[1])) ||
       // A denial after it, before the next cause: it belongs to the nearest cause.
       DENIED_CAUSE.test(sentence.slice(match.index + match[0].length, causes[i + 1]?.index ?? sentence.length)) ||
       causeWords(match[1]).every((word) => CAUSE_STOP.has(word) || CAUSE_DATA_WORDS.has(word) || vocabulary.has(word))
