@@ -71,9 +71,9 @@ const POSSESSED = /^['’]s\s+(.+?)\s+of\s+(?:(?:[A-Z]{1,4}\.?(?:[ \u00a0\u202f]
 // ponytail: a word list, not a parser; add a phrase when the eval shows one.
 const COUNT = String.raw`(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|(?:a )?dozen)`;
 const MAGNITUDE = new RegExp(
-  String.raw`\b(?:(?:doubl|tripl|quadrupl)(?:ed|es|ing)(?! down\b| as an?\b)|halved|` +
+  String.raw`\b(?:(?:doubl|tripl|quadrupl)(?:ed(?! down\b| as an?\b)|(?:es|ing)(?! down\b| as\b))|halved|` +
     String.raw`(?:${COUNT}|several|many|multiple|a few|a couple of)[- ]?fold|${COUNT} (?:in|out of) (?:every )?${COUNT}|${COUNT} of every ${COUNT}|(?<!(?:first|second|back|front|latter|former|last|later|earlier|1st|2nd)[ -])half (?:as|the size)|(?:a|${COUNT})[- ](?:third|quarter(?!s? (?:of|as) (?:results|data|history|figures|detail|segment|reported|financials|filings?|fiscal|FY|calendar|\d{4})\b)|fifth|sixth|seventh|eighth|ninth|tenth|hundredth)s? (?:of|as)|` +
-    String.raw`orders? of magnitude|by half|than (?:its |their |the |[A-Z]{2,}['’]s )?(?:entire|whole|combined) (?:[^\s.,;]+ ){0,3}?(?:revenue|sales|income|profit|earnings|margin|cash flow|base|value|total)\b|${COUNT}(?:[- ]${COUNT})? (?:(?:percentage|basis) points?|percent|points? (?:higher|lower|above|below|ahead|behind|more|less|wider|narrower)|(?:billion|million|trillion)(?: dollars)? (?:higher|lower|above|below|ahead|behind|more|less))|by ${COUNT}(?:[- ]${COUNT})? (?:billion|million|trillion)|(?:a|${COUNT})[- ](?:half|third|quarter|fifth|sixth|seventh|eighth|ninth|tenth|hundredth)s? (?:higher|lower|larger|smaller|bigger|greater|more|less)|(?:by )?a factor of (?:${COUNT}|several|a few|about|roughly|nearly|almost|over|more than))\b`,
+    String.raw`orders? of magnitude|by half|than (?:its |their |the |[A-Z]{2,}['’]s )?(?:entire|whole|combined) (?:[^\s.,;]+ ){0,3}?(?:revenue|sales|income|profit|earnings|margin|cash flow|base|value|total)\b|${COUNT}(?:[- ]${COUNT})? (?:(?:percentage|basis) points?|percent|points? (?:higher|lower|above|below|ahead|behind|more|less|wider|narrower)|(?:(?:billion|million|trillion)(?: dollars)?|dollars?|cents?|euros?|pounds?) (?:higher|lower|above|below|ahead|behind|more|less))|by ${COUNT}(?:[- ]${COUNT})? (?:billion|million|trillion|dollars?|cents?|euros?|pounds?)|${COUNT}-to-${COUNT}|${COUNT} to one\b|${COUNT} (?:[a-z]+ )?for every ${COUNT}|(?:a|${COUNT})[- ](?:half|third|quarter|fifth|sixth|seventh|eighth|ninth|tenth|hundredth)s? (?:higher|lower|larger|smaller|bigger|greater|more|less)|(?:by )?a factor of (?:${COUNT}|several|a few|about|roughly|nearly|almost|over|more than))\b`,
   "i",
 );
 // Which phrases count (each case has a test):
@@ -90,11 +90,12 @@ const MAGNITUDE = new RegExp(
 //   the thing compared ("nearly double.", "more than double AMD's"), or right
 //   before the thing compared ("double AMD's"); not "double taxation",
 //   "concern over triple-net leases" or "double bottom". "doubled" always counts,
-//   except "doubled down" and "doubles as a buffer".
+//   except "doubled down", "doubles as collateral" and "doubled as a hedge".
 // - "half" before the thing compared or "of", unless an ordinal half of a
 //   period ("first half of NVDA's fiscal 2026").
 // - worded differences ("forty percentage points", "fifty percent", "six
-//   billion dollars more", "a third higher", "three out of four", "larger
+//   billion dollars more", "six dollars higher", "six-to-one", "six dollars for
+//   every one", "a third higher", "three out of four", "larger
 //   than its entire revenue"), though a quantity ("three million units") or a
 //   direction ("faster than the entire sector") is not one.
 // A valuation basis after a displayed multiple ("52.3 times earnings", "a
