@@ -633,6 +633,10 @@ test("a magnitude comparison in words goes unless the data states it (#228)", ()
     "NVDA generated six dollars for each dollar AMD generated.",
     "NVDA posted a five-times increase over AMD.",
     "NVDA's revenue was six and two-thirds times AMD's.",
+    "NVDA's revenue grew fifty percent.",
+    "NVDA's revenue fell fifty per cent year over year.",
+    "One-in-eight dollars came from Gaming.",
+    "Three-out-of-four dollars came from Gaming.",
   ]) {
     assert.deepEqual(keepSupportedSentences(dropped, [], GOLDEN).removed, [dropped], dropped);
   }
@@ -664,6 +668,8 @@ test("a magnitude comparison in words goes unless the data states it (#228)", ()
   // A worded quantity that is not a difference is not a magnitude.
   assert.deepEqual(keepSupportedSentences("Management expects three million units next quarter.", ["Management expects three million units next quarter."]).removed, []);
   // "by" introducing an agent is not a difference (#228 review).
+  const cut = "Management cut three billion dollars of costs.";
+  assert.deepEqual(keepSupportedSentences(cut, [cut]).removed, []);
   const funded = "The launch was funded by six million dollars from investors.";
   assert.deepEqual(keepSupportedSentences(funded, [funded]).removed, []);
   // So is a worded percent that states a share, not a difference.
