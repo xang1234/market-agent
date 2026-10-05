@@ -101,9 +101,10 @@ const MAGNITUDE = new RegExp(
 // 52.3× P/E multiple"): the figure is the multiple itself, not a ratio.
 const VALUATION = String.raw`(?:(?:trailing |forward |TTM |NTM )?(?:earnings|sales|book|EBITDA|EBIT|revenue|cash flow|free cash flow|FCF|EPS|P\/E|PE|P\/S|P\/B|EV\/EBITDA|EV\/sales|price[- ]to[- ][a-z]+|multiple)\b)`;
 // Occurrences and frequency after "N times" / "twice" ("three times this year",
-// "3 times a month", "twice annually", "three times and then"): event counts.
-const OCCURRENCE = String.raw`(?:(?:this|in|during|since|so far|each|per|over|within|across|throughout|before|after|between|annually|yearly|quarterly|monthly|weekly|daily|and|or|but|then|while|when)\b|last (?:year|quarter|month)\b(?!['’]s)|a (?:year|quarter|month|week|day)\b)`;
-const COMPARED = String.raw`(?:as\b|the\b|that of\b|of [A-Z]|its\b|their\b|what\b|(?:larger|bigger|greater|higher|lower|smaller|more|less|faster|slower)\b|[A-Z]{2,}\b)`;
+// "3 times a month", "twice annually", "three times and then", "three times to
+// discuss"): event counts.
+const OCCURRENCE = String.raw`(?:(?:this|in|during|since|so far|each|per|over|within|across|throughout|before|after|between|annually|yearly|quarterly|monthly|weekly|daily|and|or|but|then|while|when|to)\b|last (?:year|quarter|month)\b(?!['’]s)|a (?:year|quarter|month|week|day)\b)`;
+const COMPARED = String.raw`(?:(?:the )?(?:last|prior|previous) (?:year|quarter|month|period)['’]s\b|year-ago\b|as\b|the\b|that of\b|of [A-Z]|its\b|their\b|what\b|(?:larger|bigger|greater|higher|lower|smaller|more|less|faster|slower)\b|[A-Z]{2,}\b)`;
 const MULTIPLIER = new RegExp(
   String.raw`\b(?:${COUNT} times|twice)(?!\s*(?:[.,;:!?]|$)| ${OCCURRENCE})|` +
     String.raw`\b(?:several|many|a few|multiple|half) times ${COMPARED}|\b(?:double|triple|quadruple) ${COMPARED}|\b\d+(?:\.\d+)? times (?!${VALUATION}|${OCCURRENCE})[A-Za-z]|\b(?:more than|nearly|almost|roughly|about|over|less than|at least|close to) (?:double|triple|quadruple)(?=\s*(?:[.,;:!?)]|$)|\s+${COMPARED})|\b\d+(?:\.\d+)?(?:[x×]|[- ]?fold) (?!${VALUATION}|${OCCURRENCE}|(?:is|was|are|were|and|or|but|for|at|on|to|from|by|with|while|versus|vs)\b)[A-Za-z]|` +
