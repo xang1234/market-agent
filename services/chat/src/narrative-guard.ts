@@ -123,6 +123,29 @@ const MULTIPLIER = new RegExp(
     String.raw`\b(?:several|many|a few|a couple of|multiple|half|(?:tens|dozens|hundreds|thousands|millions|billions) of) times ${COMPARED}|\b(?:double|triple|quadruple) ${COMPARED}|\b\d+(?:\.\d+)? times (?!${VALUATION}|${OCCURRENCE})[A-Za-z]|\b(?:more than|nearly|almost|roughly|about|over|less than|at least|close to) (?:double|triple|quadruple)(?=\s*(?:[.,;:!?)]|$)|\s+${COMPARED})|\b\d+(?:\.\d+)?(?:[xX×]|[- ]?fold) (?!${VALUATION}|${OCCURRENCE}|(?:is|was|are|were|and|or|but|for|at|on|to|from|by|with|while)\b|(?:versus|vs\.?) (?:[A-Z]{2,}['’]s )?\d)[A-Za-z]|\b\d+(?:\.\d+)?(?:%| per ?cent| percentage points?| basis points?| points?| bps) (?:(?:higher|lower|more|less|greater|larger|smaller|bigger) than|above|below|ahead of|behind) [A-Z]{2,}\b|` +
     String.raw`(?<!(?:[Ff]irst|[Ss]econd|[Bb]ack|[Ff]ront|[Ll]atter|[Ff]ormer|[Ll]ast|[Ll]ater|[Ee]arlier|1st|2nd)[ -])\b[Hh]alf (?!(?:of )?the (?:year|quarter|month|week|day|period|time|session|decade)\b)(?:of\b|${COMPARED})`,
 );
+// A stated cause ("driven by Data Center", "reflecting higher revenue") must be
+// made of the answer's own data (#249): every content word after the causal
+// connective comes from a displayed text, a cited claim, a metric or a company,
+// or the short list of data words below. So "reflecting its broader installed
+// base" or "due to a one-time charge" goes, while a sentence saying the cause
+// is not shown ("does not show", "cannot see whether") stays.
+// ponytail: a vocabulary check, not a semantic one; an interpretation the data
+// cannot show ("pricing power") goes too, which is what the prompt asks.
+const CAUSAL = /\b(?:driven by|due to|because of|owing to|attributable to|as a result of|thanks to|on the back of|fuell?ed by|stemming from|caused by|result(?:s|ed)? from|reflect(?:s|ed|ing)?)\s+([^,;:.]+)/gi;
+const NO_CAUSE = /\b(?:does not|doesn['’]t|do not|don['’]t|cannot|can['’]t|is not|isn['’]t|are not|aren['’]t) (?:show|tell|explain|reveal|indicate|see|shown|visible|available|known)\b|\bwhether\b|\bno (?:cause|explanation)\b/i;
+const CAUSE_STOP = new Set([
+  "the", "a", "an", "of", "and", "or", "in", "on", "its", "their", "that", "this", "these", "those", "to", "for",
+  "with", "by", "from", "as", "at", "which", "both", "more", "less", "than", "over", "across", "into", "per", "each",
+  "also", "it", "they", "is", "was", "were", "are", "be", "been", "largely", "mostly", "partly", "primarily",
+  "mainly", "entirely", "company", "same",
+]);
+const CAUSE_DATA_WORDS = new Set([
+  "reported", "mix", "figures", "figure", "data", "shown", "displayed", "higher", "lower", "stronger", "weaker",
+  "rising", "falling", "larger", "smaller", "growth", "decline", "increase", "decrease", "revenue", "margin",
+  "margins", "sales", "income", "profit", "profits", "earnings", "segment", "segments", "quarter", "quarters",
+  "quarterly", "year", "years", "annual", "period", "periods", "fiscal", "price", "prices", "return", "returns",
+]);
+const causeWords = (text: string) => (text.toLowerCase().match(/[a-z][a-z0-9'’-]*/g) ?? []).map((word) => word.replace(/['’]s$/, ""));
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
 // Between a figure and the company that owns it: its unit, then a preposition
 // ("% for ", "B at ", " percent in "). No punctuation and no other words, so a
@@ -176,6 +199,16 @@ export function keepSupportedSentences(
   const companies = [...new Set(attributedFigures.map((figure) => figure.company))]
     .filter((company) => company.length > 1);
 
+  // The words a stated cause may use: the turn's own displayed and cited text.
+  const vocabulary = new Set([
+    ...supportingTexts.flatMap(causeWords),
+    ...attributedFigures.flatMap((figure) => causeWords(`${figure.company} ${figure.metric ?? ""}`)),
+  ]);
+  const groundedCause = (sentence: string) =>
+    NO_CAUSE.test(sentence) ||
+    [...sentence.matchAll(CAUSAL)].every((match) =>
+      causeWords(match[1]).every((word) => CAUSE_STOP.has(word) || CAUSE_DATA_WORDS.has(word) || vocabulary.has(word))
+    );
   const removed: string[] = [];
   // null marks a line the guard dropped whole.
   const lines: Array<string | null> = [];
@@ -198,7 +231,7 @@ export function keepSupportedSentences(
         (text, company) => text.replace(new RegExp(`(?<![a-z0-9])${escapeRegExp(company.toLowerCase())}(?![a-z0-9])`, "g"), company),
         plain.toLowerCase(),
       );
-      if (MAGNITUDE.test(plain) || MULTIPLIER.test(normalized)) {
+      if (MAGNITUDE.test(plain) || MULTIPLIER.test(normalized) || !groundedCause(plain)) {
         removed.push(sentence);
         return false;
       }
