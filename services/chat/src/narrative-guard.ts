@@ -160,7 +160,7 @@ const CAUSAL = new RegExp(
 // is not shown by the data"), up to a clause break: punctuation, a coordinator
 // (while, but, so…), or an "and"/"or" that starts a new clause (see below).
 // "does not identify the cause, so … reflects" scopes nothing.
-const SCOPE_START = new RegExp(String.raw`\b(?:whether|${NOT} (?:show|reveal|demonstrate|indicate|prove|confirm|establish|say|tell us) that)\b`, "gi");
+const SCOPE_START = new RegExp(String.raw`\b(?:whether|${NOT} (?:show|reveal|demonstrate|indicate|prove|confirm|establish|say|tell us)(?: that)?)\b`, "gi");
 const CLAUSE_BREAK = /[,;:]|\b(?:while|but|whereas|although|though|so|yet)\b/i;
 // "That <cause clause> is not shown by the data": the denial right after a short
 // cause noun phrase governs it; "That … reflects X explains the result and revenue
@@ -169,12 +169,26 @@ const CLAUSE_BREAK = /[,;:]|\b(?:while|but|whereas|although|though|so|yet)\b/i;
 // mix is not shown") goes too; parse the That-clause if the eval shows that shape.
 const PASSIVE_OF_CAUSE = new RegExp(String.raw`^\s*(?:(?!(?:and|or)\b)\S+\s+){0,4}?${PASSIVE_NOT}${PASSIVE_END}`, "i");
 const PASSIVE_SCOPE = new RegExp(String.raw`\b${PASSIVE_NEG} (?:shown|proven|established|known|confirmed) to (?:be )?$`, "i");
+// A denial after a cause clears it only in the clause right after it ("…, but
+// the data does not identify the cause", "… and that cause is not known"); one
+// after an intervening assertion ("…, but AMD's revenue fell and that cause is
+// not known") is that assertion's.
+const NEXT_CLAUSE = /[,;:]|\b(?:but|while|whereas|although|though|yet|so|and|or)\b/i;
+function deniedAfter(after: string): boolean {
+  const clause = after.replace(/^[\s,;:]*(?:(?:but|while|whereas|although|though|yet|so|and|or)\b)?/i, "");
+  const denial = DENIED_CAUSE.exec(clause);
+  const end = NEXT_CLAUSE.exec(clause)?.index ?? clause.length;
+  return denial !== null && denial.index < end;
+}
 function scopedCause(before: string): boolean {
   // A passive denial right before the connective ("are not shown to be driven by").
   if (PASSIVE_SCOPE.test(before)) return true;
   const last = [...before.matchAll(SCOPE_START)].at(-1);
   if (last === undefined) return false;
   const span = before.slice(last.index + last[0].length);
+  // Without "that" ("does not show NVDA's margins are driven by"), an "and" may
+  // start a new clause ("does not show margins and NVDA's margin reflects…").
+  if (!/(?:whether|that)$/i.test(last[0]) && /\b(?:and|or)\b/i.test(span)) return false;
   // "and"/"or" join short noun phrases inside the scoped clause ("whether gross
   // and net margins", "gross margin and net margin"); after a longer stretch they
   // start a new clause ("whether AMD gains share depends on demand and NVDA's…").
@@ -199,6 +213,9 @@ const causeWords = (text: string) => (text.toLowerCase().match(/[a-z][a-z0-9'’
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const DAY_DATE = new RegExp(`\\b(${MONTHS.join("|")}) (\\d{1,2}),? (\\d{4})\\b`, "g");
 const DAY_FIRST_DATE = new RegExp(`\\b(\\d{1,2}) (${MONTHS.join("|")}),? (\\d{4})\\b`, "g");
+// A clause break, kept by split; "and" before a date joins the window's ends
+// ("between December 31, 2025 and August 31, 2026").
+const DATE_CLAUSE = new RegExp(String.raw`(;|\b(?:while|but|whereas|although|though|yet|and)\b(?!\s+(?:the )?(?:${MONTHS.join("|")}|\d)))`);
 const CHART_WINDOW = /\b(?:window|close|chart|range|YTD)\b/i;
 const ISO_DATE = /\b(\d{4})-(\d{2})-(\d{2})\b/g;
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
@@ -269,7 +286,7 @@ export function keepSupportedSentences(
       scopedCause(sentence.slice(0, match.index)) ||
       (/^\s*That\b/.test(sentence) && PASSIVE_OF_CAUSE.test(match[1])) ||
       // A denial after it, before the next cause: it belongs to the nearest cause.
-      DENIED_CAUSE.test(sentence.slice(match.index + match[0].length, causes[i + 1]?.index ?? sentence.length)) ||
+      deniedAfter(sentence.slice(match.index + match[0].length, causes[i + 1]?.index ?? sentence.length)) ||
       causeWords(match[1]).every((word) => CAUSE_STOP.has(word) || CAUSE_DATA_WORDS.has(word) || vocabulary.has(word))
     );
   };
@@ -280,10 +297,11 @@ export function keepSupportedSentences(
   // Only prose about the chart window: a displayed day does not date anything
   // else ("NVDA's FY2026 ended December 31, 2025").
   // ponytail: a keyword check; tie dates to their block if one leaks through.
-  const withDisplayedDays = (sentence: string) => !CHART_WINDOW.test(sentence) ? sentence : sentence
+  // Clause by clause: "the YTD window, while NVDA reported on August 31" dates nothing.
+  const withDisplayedDays = (sentence: string) => sentence.split(DATE_CLAUSE).map((clause) => !CHART_WINDOW.test(clause) ? clause : clause
     .replace(DAY_DATE, (date, month: string, day: string, year: string) => shownDay(date, year, MONTHS.indexOf(month) + 1, day))
     .replace(DAY_FIRST_DATE, (date, day: string, month: string, year: string) => shownDay(date, year, MONTHS.indexOf(month) + 1, day))
-    .replace(ISO_DATE, (date, year: string, month: string, day: string) => shownDay(date, year, Number(month), day));
+    .replace(ISO_DATE, (date, year: string, month: string, day: string) => shownDay(date, year, Number(month), day))).join("");
   const removed: string[] = [];
   // null marks a line the guard dropped whole.
   const lines: Array<string | null> = [];
