@@ -693,6 +693,51 @@ test("a stated cause must be made of the answer's own data (#249)", () => {
     "NVDA's margins are higher, reflecting pricing power and operating leverage.",
     "AMD's net margin of 12.0% was likely due to a one-time charge.",
     "NVDA's gross margin of 70.8% is higher because of supply constraints.",
+    // An unrelated disclosure does not clear a cause (#240 review).
+    "The data does not break out segment margins, so NVDA's higher margin reflects pricing power.",
+    "The data does not show segment margins, so NVDA's higher margin reflects pricing power.",
+    "NVDA's higher margin reflects pricing power, and the data does not break out segment margins.",
+    // A denial before the cause it then asserts clears nothing either.
+    "The data does not identify the cause, so NVDA's higher margin reflects pricing power.",
+    // A denial about a different thing clears nothing (#240 review).
+    "NVDA's higher margin reflects pricing power, but the data does not identify what drives revenue.",
+    "The data does not show that margins rose, so NVDA's higher margin reflects pricing power.",
+    "NVDA's margin reflects pricing power, while the data does not identify the cause of AMD's revenue.",
+    "NVDA's margin reflects pricing power, but the data does not explain why AMD's revenue rose.",
+    "NVDA's margin reflects pricing power, but the data does not identify the cause of the increase in AMD's revenue.",
+    "Whether AMD's revenue rose remains unknown while NVDA's margin reflects pricing power.",
+    "NVDA's margin reflects pricing power, but the data does not identify the cause of that increase in AMD's revenue.",
+    "Whether AMD's revenue rose remains unknown and NVDA's margin reflects pricing power.",
+    "NVDA's margin reflects pricing power, but there is no cause for concern.",
+    "Whether AMD's revenue rose remains unknown and the margin reflects pricing power.",
+    // A denial belongs to the nearest cause, not every earlier one.
+    "NVDA's margin reflects pricing power, while AMD's revenue reflects higher sales, but the data does not identify the cause.",
+    "Whether AMD gains share depends on demand and NVDA's margin reflects pricing power.",
+    "That NVDA's margins reflect pricing power explains the result and revenue is not shown by the data.",
+    "NVDA's margin reflects pricing power and AMD's revenue reflects higher sales, but the data does not identify the cause.",
+    "NVDA's higher margins are shown to be driven by pricing power.",
+    // A passive denial limited to something else clears nothing (#240 review).
+    "NVDA's margin reflects pricing power, but that explanation is not supported for AMD's revenue.",
+    "That NVDA's margin reflects pricing power is not supported for AMD's revenue.",
+    "NVDA's margin reflects pricing power, but no cause is shown for AMD's revenue.",
+    // A passive predicate of a coordinated clause is not the That-clause's (#240 review).
+    "That margin reflects pricing power and revenue is not supported.",
+    "That margin reflects pricing power or revenue is not shown.",
+    // An "and" that starts no denial still joins the cause (#240 review).
+    "NVDA's margins may be driven by pricing power and brand loyalty.",
+    // A denial after an intervening assertion is that assertion's (#240 review).
+    "NVDA's margin reflects pricing power, but AMD's revenue fell and that cause is not known.",
+    // A bare "does not show" scopes no clause joined by "and".
+    "The data does not show margins and NVDA's margin reflects pricing power.",
+    // A short whether-subject with its own predicate is still a clause.
+    "Whether revenue rose remains unknown and NVDA's margin reflects pricing power.",
+    "The data does not show margins and the margin reflects pricing power.",
+    // A leading "Whether …" has its own predicate, whatever it is (#240 review).
+    "Whether AMD gains share warrants analysis and NVDA's margin reflects pricing power.",
+    "Whether AMD gains share warrants analysis and margin reflects pricing power.",
+    // An "and" joins a compound only of the answer's own words (#240 review).
+    "The data does not show margins and management believes NVDA's margin reflects pricing power.",
+    "The data cannot show whether margins rose and investors think the margin reflects pricing power.",
   ]) {
     assert.deepEqual(keepSupportedSentences(dropped, shown, GOLDEN).removed, [dropped], dropped);
   }
@@ -702,7 +747,101 @@ test("a stated cause must be made of the answer's own data (#249)", () => {
     "NVDA's revenue growth was driven by Data Center.",
     "NVDA's gross margin of 70.8% reflects higher revenue.",
     "The table reflects the reported figures for each segment.",
+    // A cause hedged as unshown, in other words (#240 eval).
+    "The higher margins could reflect a narrower product mix, but the data shown does not identify the cause.",
+    "The gap reflects differences in expense structure, though the data does not break out what drives it.",
+    // A denial scoping the cause before it ("does not show that …").
+    "The data does not show that NVDA's higher margins are driven by pricing power.",
+    "The gap reflects differences in expense structure, but the data does not identify the cause of it.",
+    "The gap reflects differences in expense structure, but the data cannot explain why.",
+    "The data does not reveal that NVDA's higher margins are driven by pricing power.",
+    "That NVDA's higher margins are driven by pricing power is not shown by the data.",
+    "NVDA's higher margins may be driven by pricing power, but that cause is not shown by the data.",
+    "The data cannot show whether gross and net margins were driven by pricing power.",
+    "NVDA's margin may reflect pricing power, but the data gives no explanation for it.",
+    "NVDA's margins could reflect pricing power although the data does not show the cause.",
+    "The data cannot show whether revenue and margins were driven by pricing power.",
+    "The data cannot show whether gross margin and net margin were driven by pricing power.",
+    "NVDA's higher margins are not shown to be driven by pricing power.",
+    "NVDA's margin may reflect pricing power, but that explanation is not supported.",
+    "NVDA's margin may reflect pricing power, but that explanation is not supported by the figures.",
+    "That NVDA's margin reflects pricing power is not established.",
+    "NVDA's margin may reflect pricing power, but no cause is shown by the data.",
+    // An unknown cause, in other words (#240 review).
+    "NVDA's margins may be driven by pricing power, but that cause is not known.",
+    "NVDA's margins may be driven by pricing power, but the explanation is not available.",
+    "NVDA's margins may be driven by pricing power, but that cause isn't visible in the data.",
+    "That NVDA's margin reflects pricing power is not known.",
+    // A denial joined by "and"/"or", and contracted passive denials (#240 review).
+    "NVDA's margins may be driven by pricing power and that cause is not known.",
+    "NVDA's margins may be driven by pricing power and the data does not identify the cause.",
+    "NVDA's higher margins aren't shown to be driven by pricing power.",
+    "NVDA's higher margins weren't proven to be driven by pricing power.",
+    // "that" omitted after the denial (#240 review).
+    "The data does not show NVDA's higher margins are driven by pricing power.",
+    "The figures do not indicate NVDA's margins reflect pricing power.",
+    // "see" scopes too, and longer metric names join a compound (#240 review).
+    "We cannot see that NVDA's higher margins are driven by pricing power.",
+    "The data cannot show whether gross profit margin and net profit margin were driven by pricing power.",
+    // A compound subject with "that" omitted (#240 review).
+    "The data does not show gross and net margins are driven by pricing power.",
+    "The data cannot show whether NVDA and AMD margins were driven by pricing power.",
+    "Whether gross and net margins were driven by pricing power remains unknown.",
   ]) {
     assert.deepEqual(keepSupportedSentences(kept, shown, GOLDEN).removed, [], kept);
   }
+});
+
+test("a possessive may name the fiscal period in words: \"NVDA's fiscal 2025 revenue of\" (#240)", () => {
+  const fiscal = [
+    { company: "NVDA", value: "$130.5B", metric: "Revenue" }, { company: "NVDA", value: "FY2025" },
+    { company: "AAPL", value: "$416.2B", metric: "Revenue" }, { company: "AAPL", value: "FY2025" },
+  ];
+  const kept = "AAPL's fiscal 2025 revenue of $416.2B is higher than NVDA's fiscal 2025 revenue of $130.5B.";
+  assert.deepEqual(keepSupportedSentences(kept, [], fiscal), { text: kept, removed: [] });
+  const hyphenated = "AAPL's fiscal-year 2025 revenue of $416.2B is higher than NVDA's fiscal-year 2025 revenue of $130.5B.";
+  assert.deepEqual(keepSupportedSentences(hyphenated, [], fiscal), { text: hyphenated, removed: [] });
+  // The wrong-company twin still goes.
+  const swapped = "AAPL's fiscal 2025 revenue of $130.5B is higher than NVDA's fiscal 2025 revenue of $416.2B.";
+  assert.equal(keepSupportedSentences(swapped, [], fiscal).text, "");
+});
+
+test("a displayed date may be written with its day; any other day still goes (#240)", () => {
+  const shown = ["YTD 2026: December 2025 close to August 2026 close"];
+  const dates = ["2025-12-31", "2026-08-31"];
+  const kept = "The YTD window runs from the December 31, 2025 close through the August 31, 2026 close.";
+  assert.deepEqual(keepSupportedSentences(kept, shown, [], dates), { text: kept, removed: [] });
+  // As displayed (ISO), or day first (#240 review).
+  for (const written of [
+    "The YTD window runs from 2025-12-31 to 2026-08-31.",
+    "The YTD window runs from the 31 December 2025 close through the 31 August 2026 close.",
+  ]) {
+    assert.deepEqual(keepSupportedSentences(written, shown, [], dates), { text: written, removed: [] }, written);
+  }
+  assert.equal(keepSupportedSentences("The window starts on 2025-12-30.", shown, [], dates).text, "");
+  assert.equal(keepSupportedSentences("The window starts on 30 December 2025.", shown, [], dates).text, "");
+  // A displayed day only dates the chart window, not a reporting date (#240 review).
+  assert.equal(keepSupportedSentences("NVDA's FY2026 ended December 31, 2025.", shown, [], dates).text, "");
+  assert.equal(keepSupportedSentences("NVDA reported results on 2026-08-31.", shown, [], dates).text, "");
+  // Only in the clause about the window (#240 review).
+  assert.equal(keepSupportedSentences("The chart covers the YTD window, while NVDA reported results on August 31, 2026.", shown, [], dates).text, "");
+  assert.equal(keepSupportedSentences("The chart covers the YTD window and NVDA reported results on August 31, 2026.", shown, [], dates).text, "");
+  // The date must mark the window's end, not just share a clause with "chart".
+  assert.equal(keepSupportedSentences("The chart shows NVDA reported results on August 31, 2026.", shown, [], dates).text, "");
+  // Only a range of displayed ends, or "the … close", is the window (#240 review).
+  assert.equal(keepSupportedSentences("The YTD chart shows NVDA's fiscal year runs to August 31, 2026.", shown, [], dates).text, "");
+  assert.equal(keepSupportedSentences("The YTD chart runs from December 31, 2025 to August 30, 2026.", shown, [], dates).text, "");
+  assert.equal(keepSupportedSentences("NVDA reported earnings after the August 31, 2026 close.", shown, [], dates).text, "");
+  const closes = "NVDA's price return was 6.6% from the December 31, 2025 close to the August 31, 2026 close.";
+  assert.deepEqual(keepSupportedSentences(closes, [...shown, "6.6%"], [], dates), { text: closes, removed: [] });
+  // The range must be the window's own (#240 review).
+  assert.equal(keepSupportedSentences("The YTD chart shows NVDA's fiscal year runs from December 31, 2025 to August 31, 2026.", shown, [], dates).text, "");
+  // Mixed spellings: each pass reads the text as the last one left it.
+  const mixed = "The YTD window runs from the 31 December 2025 close to 2026-08-31.";
+  assert.deepEqual(keepSupportedSentences(mixed, shown, [], dates), { text: mixed, removed: [] });
+  const between = "The YTD window runs between December 31, 2025 and August 31, 2026.";
+  assert.deepEqual(keepSupportedSentences(between, shown, [], dates), { text: between, removed: [] });
+  // A day that is not displayed, and a displayed day used as a figure, still go.
+  assert.equal(keepSupportedSentences("The window starts from the December 30, 2025 close.", shown, [], dates).text, "");
+  assert.equal(keepSupportedSentences("Revenue rose 31% in December 2025.", shown, [], dates).text, "");
 });
