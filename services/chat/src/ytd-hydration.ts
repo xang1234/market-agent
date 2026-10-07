@@ -5,24 +5,28 @@
 // year's last sessions to the last completed session, which fetches through the
 // cached adapter and persists the bars. The turn captures its cutoff only
 // afterwards, so the stored bars are inside it. Charting and its named gaps are
-// unchanged: if this fetch fails or times out, the chart says what is missing.
+// unchanged: if this fetch fails or times out, the chart says what is missing,
+// and a stored window that is no longer current is a gap too (#256).
 //
 // Frozen data modes (no-keys, analyst) never hydrate: the golden dataset
 // answers from seeded bars, and live bars must not mix into it.
 
-import { completedSessionsEnd, selectYtdWindow, sessionDate, type DailyClose } from "../../market/src/ytd-window.ts";
+import { completedSessionsEnd, isCurrentEnd, selectYtdWindow, type DailyClose } from "../../market/src/ytd-window.ts";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
-// How far before the last completed session a window may end and still count
-// as current: a long weekend. ponytail: stands in for an exchange calendar.
-const CURRENT_WITHIN_DAYS = 4;
 // The bases the chart can use, in its order of preference (perf-block.ts).
 const BASES = ["split_adjusted", "split_and_div_adjusted"] as const;
 
 export type HydrationListing = { id: string; timeZone: string };
 
+// The frozen data modes answer from the seeded golden dataset: nothing refreshes
+// its prices, so their YTD window is charted whatever its age (#256).
+export function frozenDataMode(env: NodeJS.ProcessEnv): boolean {
+  return env.DEV_NO_KEYS === "true" || env.DEV_MODE === "analyst";
+}
+
 export function marketHydrationOrigin(env: NodeJS.ProcessEnv): string | null {
-  if (env.DEV_NO_KEYS === "true" || env.DEV_MODE === "analyst") return null;
+  if (frozenDataMode(env)) return null;
   // The chat profile serves market in-process from the one-process app, on its
   // own host and port (services/app/src/dev.ts); MARKET_ORIGIN then names the
   // standalone market server, which is not running.
@@ -61,20 +65,11 @@ export async function hydrateYtdBars(input: {
         input.listings.map((listing) => ({ label: listing.id, timeZone: listing.timeZone, bars: bars.get(listing.id) ?? [] })),
         input.now,
       );
-      if (window.ok && window.endDate >= currentFrom(input.now, input.listings[0].timeZone)) return;
+      if (window.ok && input.listings.every((listing) => isCurrentEnd(window.endDate, input.now, listing.timeZone))) return;
     }
   } catch (reason) {
     console.warn("[chat] YTD price fetch failed; charting from the bars already stored", reason);
   }
-}
-
-// The earliest session date that still counts as current: the last completed
-// session's date, less the long-weekend allowance.
-function currentFrom(now: string, timeZone: string): string {
-  const lastCompleted = sessionDate(new Date(Date.parse(completedSessionsEnd(now, timeZone)) - 1).toISOString(), timeZone);
-  const date = new Date(`${lastCompleted}T00:00:00.000Z`);
-  date.setUTCDate(date.getUTCDate() - CURRENT_WITHIN_DAYS);
-  return date.toISOString().slice(0, 10);
 }
 
 // One series request per range: from Dec 20 of the prior year (no exchange is

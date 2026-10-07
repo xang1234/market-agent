@@ -71,6 +71,8 @@ export async function loadTurnFactBlocks(
     fiscalYear?: number;
     // The price window the question names (requestedPriceWindow).
     priceWindow?: PriceWindow;
+    // A frozen dataset's prices, charted whatever their age (perf-block.ts).
+    frozenPrices?: boolean;
   },
 ): Promise<ReadonlyArray<Block>> {
   const [primary] = input.issuers;
@@ -93,6 +95,7 @@ export async function loadTurnFactBlocks(
     requestedListings: input.requestedListings ?? new Map(),
     fiscalYear: input.fiscalYear,
     priceWindow: input.priceWindow,
+    frozenPrices: input.frozenPrices,
   });
 }
 
@@ -165,6 +168,7 @@ async function loadComparisonFactBlocks(
     requestedListings: ReadonlyMap<string, CompanyListing>;
     fiscalYear?: number;
     priceWindow?: PriceWindow;
+    frozenPrices?: boolean;
   },
 ): Promise<ReadonlyArray<Block>> {
   const issuerIds = input.companies.map((company) => company.id);
@@ -184,6 +188,7 @@ async function loadComparisonFactBlocks(
     snapshotId: input.snapshotId,
     asOf: input.asOf,
     window: input.priceWindow,
+    frozenPrices: input.frozenPrices,
   });
   return Object.freeze([...metrics, ...performance]);
 }

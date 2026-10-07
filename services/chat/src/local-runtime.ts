@@ -29,7 +29,7 @@ import {
   type ChatThreadTitleGenerator,
 } from "./coordinator.ts";
 import { loadTurnFactBlocks, priceListingsForTurn, requestedFiscalYear, requestedPriceWindow } from "./fact-blocks.ts";
-import { hydrateYtdBars, marketHydrationOrigin } from "./ytd-hydration.ts";
+import { frozenDataMode, hydrateYtdBars, marketHydrationOrigin } from "./ytd-hydration.ts";
 import { listingTimeZones } from "./perf-block.ts";
 import { loadPriorSubjects as loadThreadPriorSubjects, loadRecentConversation } from "./thread-context.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
@@ -167,6 +167,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
       requestedListings: requestedListingsOf(covered),
       fiscalYear: requestedFiscalYear(context.userIntent ?? ""),
       priceWindow: requestedPriceWindow(context.userIntent ?? ""),
+      frozenPrices: frozenDataMode(process.env),
       snapshotId: result.snapshot_id,
       asOf,
     }),

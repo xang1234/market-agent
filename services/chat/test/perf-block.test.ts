@@ -333,3 +333,55 @@ test("exchanges in different calendar years at the cutoff are a YTD gap before a
   );
   assert.ok(seen.every((query) => !query.text.includes("market_bar_ranges")));
 });
+
+// #256: cached ranges that stopped in May, stored on May 30.
+function staleYtdRows(basis = "split_adjusted") {
+  const stale = (r: SealedPriceRange, closes: [number, number]) => ({
+    ...ytdRow(r, [ytdBar("2025-12-31", closes[0]), ytdBar("2026-05-29", closes[1])]),
+    adjustment_basis: basis,
+    as_of: "2026-05-30T04:00:00.000Z",
+  });
+  return [stale(NVDA, [100, 120]), stale(AMD, [50, 60])];
+}
+const CURRENT_CUTOFF = "2026-10-06T16:00:00.000Z"; // Tuesday noon in New York
+
+test("a current YTD request whose cached prices stopped months ago is a named gap, not a chart (#256)", async () => {
+  const blocks = await loadPerfComparisonBlocks(ytdDb(staleYtdRows()), { listings: LISTINGS, snapshotId: SNAPSHOT_ID, asOf: CURRENT_CUTOFF, window: "ytd" });
+  assert.deepEqual(blocks.map((block) => block.kind), ["rich_text"], "no chart, so no stale return reaches the narrative");
+  assert.equal(
+    (blocks[0].segments as Array<{ text: string }>)[0].text,
+    "Year-to-date price performance is not shown: the latest close every company has is 2026-05-29, too old to be current at the 2026-10-06 cutoff.",
+  );
+});
+
+test("the same cached prices chart at a cutoff they are current for, not judged against today (#256)", async () => {
+  // Saturday May 30: Friday May 29 is the last completed session.
+  const [chart] = await loadPerfComparisonBlocks(ytdDb(staleYtdRows()), { listings: LISTINGS, snapshotId: SNAPSHOT_ID, asOf: "2026-05-30T16:00:00.000Z", window: "ytd" });
+  assert.equal(chart?.kind, "perf_comparison");
+  assert.equal(chart.default_range, "YTD 2026: 2025-12-31 close to 2026-05-29 close");
+});
+
+test("a window ending before a long weekend is still current (#256)", async () => {
+  // Tuesday after Labor Day (Monday Sep 7, 2026), before the close: Friday is the latest session.
+  const rows = [NVDA, AMD].map((r, i) => ytdRow(r, [ytdBar("2025-12-31", 100 + i), ytdBar("2026-09-04", 120 + i)]));
+  const [chart] = await loadPerfComparisonBlocks(ytdDb(rows), { listings: LISTINGS, snapshotId: SNAPSHOT_ID, asOf: "2026-09-08T14:00:00.000Z", window: "ytd" });
+  assert.equal(chart?.kind, "perf_comparison");
+  assert.equal(chart.default_range, "YTD 2026: 2025-12-31 close to 2026-09-04 close");
+});
+
+test("a stale basis gives way to a current one every company has (#256)", async () => {
+  const current = [NVDA, AMD].map((r, i) => ({
+    ...ytdRow(r, [ytdBar("2025-12-31", 100 + i), ytdBar("2026-10-05", 130 + i)]),
+    adjustment_basis: "split_and_div_adjusted",
+  }));
+  const [chart] = await loadPerfComparisonBlocks(ytdDb([...staleYtdRows(), ...current]), { listings: LISTINGS, snapshotId: SNAPSHOT_ID, asOf: CURRENT_CUTOFF, window: "ytd" });
+  assert.equal(chart?.kind, "perf_comparison");
+  assert.equal(chart.basis, "split_and_div_adjusted");
+  assert.equal(chart.default_range, "YTD 2026: 2025-12-31 close to 2026-10-05 close");
+});
+
+test("a frozen dataset charts its stored YTD window whatever its age (#256)", async () => {
+  const [chart] = await loadPerfComparisonBlocks(ytdDb(staleYtdRows()), { listings: LISTINGS, snapshotId: SNAPSHOT_ID, asOf: CURRENT_CUTOFF, window: "ytd", frozenPrices: true });
+  assert.equal(chart?.kind, "perf_comparison");
+  assert.equal(chart.default_range, "YTD 2026: 2025-12-31 close to 2026-05-29 close");
+});
