@@ -284,8 +284,9 @@ export function keepSupportedSentences(
     // invented premise ("after its inventory charge"), an unshown qualifier
     // ("subscription revenue") or another company ("at TSLA") is not (#265
     // review). A company is a compared one or the hypothesis's own subject,
-    // named before its basis, possessive or not.
-    const named = new Set([...companies, ...(sentence.slice(0, sentence.length - basis.length).match(/\b[A-Z][A-Z0-9.]{1,5}\b/g) ?? [])]);
+    // named by its possessive before the basis ("NVDA's revenue may …"); any
+    // other capitalized word ("AI demand") is not one (#265 review).
+    const named = new Set([...companies, ...(sentence.slice(0, sentence.length - basis.length).match(/\b[A-Z][A-Z0-9.]{1,5}(?=['’]s\b)/g) ?? [])]);
     const words = causeWords(basis.replace(/\b([A-Z][A-Z0-9.]{1,5})(?:['’]s)?\b/g, (mention, ticker: string) => named.has(ticker) ? " " : mention));
     const cites = (name: string) => ` ${words.join(" ")} `.includes(` ${name} `);
     return words.every((word) => known(word) || BASIS_WORDS.has(word)) &&

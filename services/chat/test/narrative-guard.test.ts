@@ -792,6 +792,8 @@ test("a labelled hypothesis may state a cause the data does not show, with its b
     ["NVDA's higher margins may reflect pricing power, given NVDA's gross margin of 70.8% after its inventory charge was reversed.", comparison, ["Gross margin"]],
     ["NVDA's growth may reflect demand, given subscription revenue of $44.1B in Q1 fiscal 2026.", [], ["Revenue"]],
     ["NVDA's growth may reflect stronger industry demand, given revenue of $44.1B at TSLA.", [], ["Revenue"]],
+    // An acronym in the explanation is no company: "AI revenue" is not the revenue shown (#265 review).
+    ["NVDA's revenue may reflect AI demand, given AI revenue of $44.1B.", [], ["Revenue"]],
   ] as const) {
     assert.equal(keepSupportedSentences(hypothesis("low", basis), bars, figures, [], metrics).text, "", basis);
   }
