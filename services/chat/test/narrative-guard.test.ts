@@ -745,6 +745,11 @@ test("a labelled hypothesis may state a cause the data does not show, with its b
   ]) {
     assert.equal(keepSupportedSentences(unlabelled, shown, GOLDEN).text, "", unlabelled);
   }
+  // Its basis must be the answer's own data, not an invented event (#262 review).
+  assert.equal(keepSupportedSentences(hypothesis("medium", "NVDA's margins may reflect pricing power, given the recent product launch."), shown, GOLDEN).text, "");
+  // One explanation per hypothesis: a second sentence on the line is checked as ordinary prose (#262 review).
+  const extra = "NVDA's margin was also driven by a secret acquisition, given its gross margin of 70.8%.";
+  assert.deepEqual(keepSupportedSentences(`${first} ${extra}`, shown, GOLDEN), { text: first, removed: [extra] });
   // A hypothesis still quotes only figures shown, credited to their company.
   assert.equal(keepSupportedSentences(hypothesis("high", "NVDA's margins may reflect pricing power, given its gross margin of 75.0%."), shown, GOLDEN).text, "");
   assert.equal(keepSupportedSentences(hypothesis("high", "AMD's margins may reflect pricing power, given its gross margin of 70.8%."), shown, GOLDEN).text, "");

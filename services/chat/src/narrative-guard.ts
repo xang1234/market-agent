@@ -138,10 +138,14 @@ const CAUSAL = new RegExp(
   "gi",
 );
 // A cause the data does not show is allowed only as a labelled hypothesis (#261):
-// a blockquote item with its confidence in words and the observation it rests on
-// ("> **Unverified hypothesis (medium confidence):** … may reflect …, given …").
-// Its numbers are still checked. #208's analyst_inference replaces this label.
-const HYPOTHESIS = /^\s*>\s*\*\*Unverified hypothesis \((?:low|medium|high) confidence\):\*\*\s+(?=.*\b(?:given|based on)\b)/i;
+// a blockquote item with its confidence in words and one explanation, resting on
+// an observation the answer shows ("> **Unverified hypothesis (medium
+// confidence):** … may reflect …, given its gross margin of 70.8% shown above").
+// The basis is held to the cause check, and the numbers to the number check;
+// any further sentence on the line is ordinary prose (#262 review). #208's
+// analyst_inference replaces this label.
+const HYPOTHESIS = /^\s*>\s*\*\*Unverified hypothesis \((?:low|medium|high) confidence\):\*\*\s+/i;
+const BASIS = /\b(?:given|based on)\b(.*)$/i;
 const MAX_HYPOTHESES = 2;
 const CAUSE_STOP = new Set([
   "the", "a", "an", "of", "and", "or", "in", "on", "its", "their", "that", "this", "these", "those", "to", "for",
@@ -154,6 +158,7 @@ const CAUSE_DATA_WORDS = new Set([
   "rising", "falling", "larger", "smaller", "growth", "decline", "increase", "decrease", "revenue", "margin",
   "margins", "sales", "income", "profit", "profits", "earnings", "segment", "segments", "quarter", "quarters",
   "quarterly", "year", "years", "annual", "period", "periods", "fiscal", "price", "prices", "return", "returns",
+  "above", "below",
 ]);
 const causeWords = (text: string) => (text.toLowerCase().match(/[a-z][a-z0-9'’-]*/g) ?? []).map((word) => word.replace(/['’]s$/, ""));
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -235,6 +240,11 @@ export function keepSupportedSentences(
   const known = (word: string) => CAUSE_STOP.has(word) || CAUSE_DATA_WORDS.has(word) || vocabulary.has(word);
   const groundedCause = (sentence: string) =>
     [...sentence.matchAll(CAUSAL)].every((match) => causeWords(match[1]).every(known));
+  // A hypothesis's one explanation, resting on a grounded observation.
+  const groundedBasis = (sentence: string) => {
+    const basis = sentence.match(BASIS)?.[1];
+    return basis !== undefined && causeWords(basis).every(known);
+  };
   let hypotheses = 0;
   const dates = new Set(displayedDates);
   // A displayed day in the chart window's own words reads as its month
@@ -260,7 +270,7 @@ export function keepSupportedSentences(
     const label = hypotheses < MAX_HYPOTHESES ? line.match(HYPOTHESIS)?.[0] : undefined;
     if (label !== undefined) hypotheses++;
     const lead = label ?? line.match(LIST_MARKER)?.[0] ?? line.match(/^\s*/)![0];
-    const kept = line.slice(lead.length).trim().split(SENTENCE_BREAK).filter((written) => {
+    const kept = line.slice(lead.length).trim().split(SENTENCE_BREAK).filter((written, sentenceIndex) => {
       // A displayed date written with its day ("December 31, 2025") is checked as
       // its month and year, so the day is not a figure (#240); any other day is.
       const sentence = withDisplayedDays(written);
@@ -273,7 +283,7 @@ export function keepSupportedSentences(
         (text, company) => text.replace(new RegExp(`(?<![a-z0-9])${escapeRegExp(company.toLowerCase())}(?![a-z0-9])`, "g"), company),
         plain.toLowerCase(),
       );
-      if (MAGNITUDE.test(plain) || MULTIPLIER.test(normalized) || (label === undefined && !groundedCause(plain))) {
+      if (MAGNITUDE.test(plain) || MULTIPLIER.test(normalized) || !(label !== undefined && sentenceIndex === 0 && groundedBasis(plain)) && !groundedCause(plain)) {
         removed.push(written);
         return false;
       }
