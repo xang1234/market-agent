@@ -755,6 +755,9 @@ test("a labelled hypothesis may state a cause the data does not show, with its b
   // A labelled line whose hypothesis goes takes the rest of the line with it.
   const malformed = hypothesis("medium", "NVDA's revenue may reflect brand loyalty. NVDA's gross margin of 70.8% is above AMD's 49.9%.");
   assert.equal(keepSupportedSentences(malformed, shown, GOLDEN).text, "");
+  // By position, not text: a repeated first sentence is no stand-in (#262 review).
+  const repeated = hypothesis("medium", "NVDA's revenue may reflect higher revenue. NVDA's revenue may reflect higher revenue.");
+  assert.equal(keepSupportedSentences(repeated, shown, GOLDEN).text, "");
   // A figure with a unit is a basis, and a cause, like any other.
   const scaled = hypothesis("low", "NVDA's revenue may reflect Data Center demand, given its revenue of $209.9B.");
   assert.equal(keepSupportedSentences(scaled, [...shown, "Data Center"], GOLDEN).text, scaled);

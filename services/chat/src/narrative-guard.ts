@@ -281,7 +281,7 @@ export function keepSupportedSentences(
     const withinCap = label !== undefined && ++hypotheses <= MAX_HYPOTHESES;
     const lead = label ?? line.match(LIST_MARKER)?.[0] ?? line.match(/^\s*/)![0];
     const sentences = line.slice(lead.length).trim().split(SENTENCE_BREAK);
-    const kept = sentences.filter((written, sentenceIndex) => {
+    const keeps = sentences.map((written, sentenceIndex) => {
       // A displayed date written with its day ("December 31, 2025") is checked as
       // its month and year, so the day is not a figure (#240); any other day is.
       const sentence = withDisplayedDays(written);
@@ -378,7 +378,8 @@ export function keepSupportedSentences(
       if (!isSupported) removed.push(written);
       return isSupported;
     });
-    if (label !== undefined && kept[0] !== sentences[0]) {
+    const kept = sentences.filter((_, index) => keeps[index]);
+    if (label !== undefined && !keeps[0]) {
       removed.push(...kept);
       lines.push(null);
       continue;
