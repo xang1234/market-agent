@@ -161,9 +161,10 @@ const CAUSE_DATA_WORDS = new Set([
   "above", "below",
 ]);
 // A figure is not a word: its unit ("B" in "$209.9B") is dropped with it; any
-// other digit-led term is ("5G" leaves "g", #262 review).
+// other digit-led term is ("5G" leaves "g"), and a fiscal year or quarter stays
+// whole ("FY2025's", "Q4's"; #262 review).
 const causeWords = (text: string) =>
-  (text.toLowerCase().replace(/\d[\d.,]*(?:bn|mn|tn|[bmktx])?\b/g, " ").match(/[a-z][a-z0-9'’-]*/g) ?? []).map((word) => word.replace(/['’]s$/, ""));
+  (text.toLowerCase().replace(/(?<![a-z0-9.,])\d[\d.,]*(?:bn|mn|tn|[bmktx])?\b/g, " ").match(/[a-z][a-z0-9'’-]*/g) ?? []).map((word) => word.replace(/['’]s$/, ""));
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 // A day as written: "December 31, 2025", "31 December 2025" or "2025-12-31".
 const DATE = String.raw`(?:(?:${MONTHS.join("|")}) \d{1,2},? \d{4}|\d{1,2} (?:${MONTHS.join("|")}),? \d{4}|\d{4}-\d{2}-\d{2})`;
@@ -245,8 +246,13 @@ export function keepSupportedSentences(
   ]);
   // Each displayed metric as a whole name, without its qualifier ("Revenue
   // growth (QoQ)" -> "revenue growth"): one word of it ("gross") is no basis.
+  const metricName = (metric: string) => causeWords(metric.replace(/\([^)]*\)/g, "")).join(" ");
   const metricNames = [...new Set([...attributedFigures.flatMap((figure) => figure.metric ?? []), ...displayedMetrics]
-    .map((metric) => causeWords(metric.replace(/\([^)]*\)/g, "")).join(" ")).filter(Boolean))];
+    .map(metricName).filter(Boolean))];
+  // In a comparison, the metrics each company has displayed: a basis naming a
+  // company cites one of its own ("given NVDA's gross margin" needs NVDA's).
+  const metricsOwned = (company: string) =>
+    attributedFigures.filter((figure) => figure.company === company && figure.metric).map((figure) => metricName(figure.metric!));
   const known = (word: string) => CAUSE_STOP.has(word) || CAUSE_DATA_WORDS.has(word) || vocabulary.has(word);
   const groundedCause = (sentence: string) =>
     [...sentence.matchAll(CAUSAL)].every((match) => causeWords(match[1]).every(known));
@@ -260,9 +266,11 @@ export function keepSupportedSentences(
   const groundedBasis = (sentence: string) => {
     const basis = sentence.match(BASIS)?.[1];
     if (basis === undefined || [...sentence.matchAll(CAUSAL)].length > 1) return false;
-    const words = causeWords(basis);
-    return words.every(known) &&
-      metricNames.some((name) => ` ${words.join(" ")} `.includes(` ${name} `));
+    // A company's possessive ("NVDA's") is no cause word, single company or not.
+    const words = causeWords(basis.replace(/\b[A-Z][A-Z0-9.]{1,5}['’]s\b/g, " "));
+    const cites = (name: string) => ` ${words.join(" ")} `.includes(` ${name} `);
+    return words.every(known) && metricNames.some(cites) &&
+      companyMentions(basis, companies).every(({ company }) => metricsOwned(company).some(cites));
   };
   let hypotheses = 0;
   const dates = new Set(displayedDates);
@@ -287,8 +295,16 @@ export function keepSupportedSentences(
     // A list marker ("1.", "-") is not a sentence: it is set aside, and stays
     // with whatever of its item is kept.
     // A labelled line is a hypothesis within the cap, or it goes whole (#262 review).
+    // Any line claiming to be one counts toward the cap; one not in exactly the
+    // labelled form (bold only, behind a list marker) goes whole.
     const label = line.match(HYPOTHESIS)?.[0];
-    const withinCap = label !== undefined && ++hypotheses <= MAX_HYPOTHESES;
+    const claimed = label !== undefined || /\bunverified hypothesis\b/i.test(line);
+    const withinCap = claimed && ++hypotheses <= MAX_HYPOTHESES;
+    if (claimed && label === undefined) {
+      removed.push(line.trim());
+      lines.push(null);
+      continue;
+    }
     const lead = label ?? line.match(LIST_MARKER)?.[0] ?? line.match(/^\s*/)![0];
     const sentences = line.slice(lead.length).trim().split(SENTENCE_BREAK);
     const keeps = sentences.map((written, sentenceIndex) => {

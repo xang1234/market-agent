@@ -398,6 +398,9 @@ test("a single-company answer may carry a labelled hypothesis resting on a displ
   ].join("\n");
   const { text, removed } = await composeWithReply(reply);
   assert.deepEqual({ text, removed }, { text: reply, removed: [] });
+  // Naming the company in its basis, as the prompt asks of every figure (#262 review).
+  const named = "> **Unverified hypothesis (low confidence):** NVDA's revenue may reflect pricing power, given NVDA's revenue of $62.1B.";
+  assert.deepEqual(await composeWithReply(named).then(({ text, removed }) => ({ text, removed })), { text: named, removed: [] });
 });
 
 test("a replayed reply quoting a figure the user is not shown has that sentence stripped", async () => {

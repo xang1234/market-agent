@@ -712,6 +712,10 @@ test("a stated cause must be the answer's own data or a cited attribution; a hed
   ]) {
     assert.deepEqual(keepSupportedSentences(dropped, shown, GOLDEN).removed, [dropped], dropped);
   }
+  // A fiscal year or quarter keeps its possessive (#262 review; kept on main).
+  for (const kept of ["The margin reflects FY2025's revenue mix.", "The decline reflects Q4's lower revenue."]) {
+    assert.deepEqual(keepSupportedSentences(kept, ["FY2025 revenue $62.1B", "Q4 revenue $62.1B"]).removed, [], kept);
+  }
   // A digit-led term is a word, not a figure's unit, even when its number is shown (#262 review).
   assert.equal(keepSupportedSentences("Revenue growth was driven by 5G.", ["Gross margin 5.0%"]).text, "");
   for (const kept of [
@@ -760,6 +764,13 @@ test("a labelled hypothesis may state a cause the data does not show, with its b
   // By position, not text: a repeated first sentence is no stand-in (#262 review).
   const repeated = hypothesis("medium", "NVDA's revenue may reflect higher revenue. NVDA's revenue may reflect higher revenue.");
   assert.equal(keepSupportedSentences(repeated, shown, GOLDEN).text, "");
+  // Behind a list marker, or malformed, a labelled line still counts and must be valid (#262 review).
+  const listed = "- " + hypothesis("low", "NVDA's revenue may reflect higher revenue, given its revenue of $209.9B.");
+  assert.deepEqual(keepSupportedSentences([answer, "", listed].join("\n"), shown, GOLDEN).text, answer);
+  const bold = "**Unverified hypothesis (medium confidence):** NVDA's revenue may reflect higher revenue, given its revenue of $209.9B.";
+  assert.equal(keepSupportedSentences(bold, shown, GOLDEN).text, "");
+  // A basis names a metric of a company that has it displayed (#262 review).
+  assert.equal(keepSupportedSentences(hypothesis("low", "AMD's revenue may reflect pricing power, given AMD's price return."), shown, GOLDEN.filter((figure) => !(figure.company === "AMD" && figure.metric === "Price return"))).text, "");
   // A figure with a unit is a basis, and a cause, like any other.
   const scaled = hypothesis("low", "NVDA's revenue may reflect Data Center demand, given its revenue of $209.9B.");
   assert.equal(keepSupportedSentences(scaled, [...shown, "Data Center"], GOLDEN).text, scaled);
