@@ -747,6 +747,12 @@ test("a labelled hypothesis may state a cause the data does not show, with its b
   }
   // Its basis must be the answer's own data, not an invented event (#262 review).
   assert.equal(keepSupportedSentences(hypothesis("medium", "NVDA's margins may reflect pricing power, given the recent product launch."), shown, GOLDEN).text, "");
+  // An empty or generic basis is none (#262 review).
+  for (const basis of ["given.", "given the data shown above."]) {
+    assert.equal(keepSupportedSentences(hypothesis("medium", `NVDA's margins may reflect pricing power, ${basis}`), shown, GOLDEN).text, "", basis);
+  }
+  // One causal clause per hypothesis (#262 review).
+  assert.equal(keepSupportedSentences(hypothesis("medium", "NVDA's margins may reflect pricing power and its revenue was driven by a secret acquisition, given its gross margin of 70.8% shown above."), shown, GOLDEN).text, "");
   // One explanation per hypothesis: a second sentence on the line is checked as ordinary prose (#262 review).
   const extra = "NVDA's margin was also driven by a secret acquisition, given its gross margin of 70.8%.";
   assert.deepEqual(keepSupportedSentences(`${first} ${extra}`, shown, GOLDEN), { text: first, removed: [extra] });

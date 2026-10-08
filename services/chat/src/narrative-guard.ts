@@ -240,10 +240,17 @@ export function keepSupportedSentences(
   const known = (word: string) => CAUSE_STOP.has(word) || CAUSE_DATA_WORDS.has(word) || vocabulary.has(word);
   const groundedCause = (sentence: string) =>
     [...sentence.matchAll(CAUSAL)].every((match) => causeWords(match[1]).every(known));
-  // A hypothesis's one explanation, resting on a grounded observation.
+  // A hypothesis's one explanation (a single causal clause), resting on an
+  // observation of the answer's own: a figure, or a word only its data supplies
+  // ("gross margin"), not just generic words ("given the data shown above").
+  // ponytail: an explanation without a connective ("and an acquisition lifted
+  // revenue") is not counted; #208's typed assertions bound that.
   const groundedBasis = (sentence: string) => {
     const basis = sentence.match(BASIS)?.[1];
-    return basis !== undefined && causeWords(basis).every(known);
+    if (basis === undefined || [...sentence.matchAll(CAUSAL)].length > 1) return false;
+    const words = causeWords(basis);
+    return words.every(known) &&
+      (/\d/.test(basis) || words.some((word) => vocabulary.has(word) && !CAUSE_STOP.has(word) && !CAUSE_DATA_WORDS.has(word)));
   };
   let hypotheses = 0;
   const dates = new Set(displayedDates);
