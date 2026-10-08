@@ -281,6 +281,9 @@ test("the answer is asked for an analyst's view: takeaway, trend, strengths, cou
   assert.match(systemPrompt, /two figures side by side do not state one/);
   assert.match(systemPrompt, /never state one in words/);
   assert.match(systemPrompt, /never state a cause the data does not show/);
+  // The allowed forms of a cause, and the hypothesis label the guard keeps (#261).
+  assert.match(systemPrompt, /management attribution from a cited claim/);
+  assert.match(systemPrompt, /> \*\*Unverified hypothesis \(low\|medium\|high confidence\):\*\* <one explanation>, given/);
   assert.match(systemPrompt, /stale/);
   // The no-keys golden replay matches on the opening sentence.
   assert.match(systemPrompt, /^Write a concise investment research answer/);
