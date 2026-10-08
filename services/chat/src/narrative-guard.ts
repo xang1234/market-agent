@@ -284,9 +284,10 @@ export function keepSupportedSentences(
     // invented premise ("after its inventory charge"), an unshown qualifier
     // ("subscription revenue") or another company ("at TSLA") is not (#265
     // review). A company is a compared one or the hypothesis's own subject,
-    // named by its possessive before the basis ("NVDA's revenue may …"); any
-    // other capitalized word ("AI demand") is not one (#265 review).
-    const named = new Set([...companies, ...(sentence.slice(0, sentence.length - basis.length).match(/\b[A-Z][A-Z0-9.]{1,5}(?=['’]s\b)/g) ?? [])]);
+    // the sentence's opening possessive ("NVDA's revenue may …"); another
+    // capitalized word ("AI demand", "TSLA's pricing") is not one (#265 review).
+    const subject = sentence.match(/^\s*([A-Z][A-Z0-9.]{1,5})['’]s\b/)?.[1];
+    const named = new Set([...companies, ...(subject === undefined ? [] : [subject])]);
     const words = causeWords(basis.replace(/\b([A-Z][A-Z0-9.]{1,5})(?:['’]s)?\b/g, (mention, ticker: string) => named.has(ticker) ? " " : mention));
     const cites = (name: string) => ` ${words.join(" ")} `.includes(` ${name} `);
     // A month only as the answer shows it, in full or abbreviated ("ended Jan

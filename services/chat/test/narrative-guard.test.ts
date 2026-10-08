@@ -794,6 +794,8 @@ test("a labelled hypothesis may state a cause the data does not show, with its b
     ["NVDA's growth may reflect stronger industry demand, given revenue of $44.1B at TSLA.", [], ["Revenue"]],
     // An acronym in the explanation is no company: "AI revenue" is not the revenue shown (#265 review).
     ["NVDA's revenue may reflect AI demand, given AI revenue of $44.1B.", [], ["Revenue"]],
+    // Only the subject's possessive, not another company's in the explanation (#265 review).
+    ["NVDA's revenue may reflect TSLA's pricing, given TSLA revenue of $44.1B.", [], ["Revenue"]],
   ] as const) {
     assert.equal(keepSupportedSentences(hypothesis("low", basis), bars, figures, [], metrics).text, "", basis);
   }
