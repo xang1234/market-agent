@@ -21,7 +21,9 @@
 // final close before January 1 to the latest completed session every company
 // has, the same for all (ytd-window.ts). It reads a stored range per company
 // that covers the year-end, and anything short of a full window is a named
-// gap, never a shorter window called YTD.
+// gap, never a shorter window called YTD. So is a full window that is no
+// longer current at the cutoff (#256): a failed refresh must not pass off a
+// months-old cached window as this year to date.
 //
 // ponytail: uses each listing's latest stored window and requires them to be
 // identical; a shared sub-window across different stored ranges is the upgrade.
@@ -31,7 +33,7 @@
 import { createHash } from "node:crypto";
 
 import { MISLABELED_POLYGON_RANGE_SQL } from "../../market/src/cache-repository.ts";
-import { selectYtdWindow, ytdReturns, ytdYear, type YtdWindow } from "../../market/src/ytd-window.ts";
+import { isCurrentEnd, selectYtdWindow, sessionDate, ytdReturns, ytdYear, type YtdWindow } from "../../market/src/ytd-window.ts";
 import { compileDisclosurePolicy } from "../../snapshot/src/disclosure-policy.ts";
 import type { SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
 import { stableUuid } from "./chat-ids.ts";
@@ -66,6 +68,9 @@ type PerfInput = {
   snapshotId: string;
   asOf: string;
   window?: PriceWindow;
+  // The frozen data modes' prices (frozenDataMode): their YTD window is charted
+  // whatever its age, since nothing can refresh it.
+  frozenPrices?: boolean;
 };
 
 export type SealedPriceRange = {
@@ -224,8 +229,8 @@ async function loadSealedRanges(
   return null;
 }
 
-// The YTD chart on the first basis every company has that gives a full window;
-// otherwise the reason there is none.
+// The YTD chart on the first basis every company has that gives a full,
+// current window; otherwise the reason there is none.
 function ytdBlock(
   input: PerfInput,
   shared: ReadonlyArray<ComparableBasis>,
@@ -239,8 +244,15 @@ function ytdBlock(
       input.listings.map((listing, index) => ({ label: listing.label, timeZone: zoneOf(listing.id), bars: sealed[index].bars })),
       input.asOf,
     );
-    if (window.ok) return buildYtdPerfBlock({ ranges: sealed, window, snapshotId: input.snapshotId });
-    gap ||= window.gap;
+    if (!window.ok) {
+      gap ||= window.gap;
+      continue;
+    }
+    const stale = input.frozenPrices
+      ? undefined
+      : input.listings.find((listing) => !isCurrentEnd(window.endDate, input.asOf, zoneOf(listing.id)));
+    if (stale === undefined) return buildYtdPerfBlock({ ranges: sealed, window, snapshotId: input.snapshotId });
+    gap ||= `the latest close every company has is ${window.endDate}, too old to be current at the ${sessionDate(input.asOf, zoneOf(stale.id))} cutoff`;
   }
   return ytdGapBlock(input, gap);
 }

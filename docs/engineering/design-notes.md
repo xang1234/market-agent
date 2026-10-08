@@ -209,6 +209,10 @@ normalized to percent return. The companies' windows must be identical, or there
     range can't change the window. Each series spec seals the window and a digest of exactly the bars drawn.
   - Anything short of a full window is a named gap, never a shorter window called YTD: a missing baseline, a listing
     after the year began, a zero baseline, mismatched sessions, a missing endpoint, or mixed bases.
+  - So is a full window that is not current at the turn's cutoff (#256): it must end within a week of the last
+    completed session (`isCurrentEnd`), judged at the cutoff, not today. This stops a failed or stale refresh from
+    passing off an old cached window as this year to date. Frozen data modes skip this check and chart the golden
+    window, which ends 2026-08-31.
   - The chart only reads stored bars. In live mode (#232), a YTD turn first asks the market service
     (`MARKET_ORIGIN`, `/v1/market/series`) for the window, from Dec 20 of the prior year to now. The request goes
     through the cached adapter, so the bars are fetched, stored and reused.

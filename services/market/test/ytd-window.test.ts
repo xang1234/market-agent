@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { completedSessionsEnd, isCompletedSession, selectYtdWindow, sessionDate, ytdReturns, type DailyClose } from "../src/ytd-window.ts";
+import { completedSessionsEnd, isCompletedSession, isCurrentEnd, selectYtdWindow, sessionDate, ytdReturns, type DailyClose } from "../src/ytd-window.ts";
 
 const NY = "America/New_York";
 // Bars are stamped at the start of their New York session date: 05:00Z in
@@ -120,4 +120,19 @@ test("completed sessions end where today's session begins until it closes, then 
   assert.equal(completedSessionsEnd("2026-08-31T15:00:00.000Z", NY), "2026-08-31T04:00:00.000Z"); // 11:00, trading
   assert.equal(completedSessionsEnd("2026-08-31T20:00:00.000Z", NY), "2026-09-01T04:00:00.000Z"); // 16:00, closed
   assert.equal(completedSessionsEnd("2026-12-31T22:00:00.000Z", NY), "2027-01-01T05:00:00.000Z"); // across the year
+});
+
+test("a window is current when it ends within a week of the last completed session, judged at the cutoff (#256)", () => {
+  // Tuesday Oct 6, 2026 at noon in New York: Monday Oct 5 is the last completed session.
+  const noon = "2026-10-06T16:00:00.000Z";
+  assert.equal(isCurrentEnd("2026-10-05", noon, NY), true);
+  assert.equal(isCurrentEnd("2026-09-28", noon, NY), true); // a week before
+  assert.equal(isCurrentEnd("2026-09-27", noon, NY), false); // eight days
+  assert.equal(isCurrentEnd("2026-05-29", noon, NY), false);
+  // After the close, Tuesday's session is the last completed one: the floor moves a day.
+  assert.equal(isCurrentEnd("2026-09-28", "2026-10-06T20:00:00.000Z", NY), false);
+  // The same May window at a May cutoff is current: no wall-clock today.
+  assert.equal(isCurrentEnd("2026-05-29", "2026-05-30T16:00:00.000Z", NY), true);
+  // Tokyo reopens Thursday May 7, 2026 after Golden Week (closed May 2-6): Friday May 1 is current.
+  assert.equal(isCurrentEnd("2026-05-01", "2026-05-07T01:00:00.000Z", "Asia/Tokyo"), true);
 });

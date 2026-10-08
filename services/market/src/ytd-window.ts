@@ -54,6 +54,22 @@ export function completedSessionsEnd(cutoff: string, timeZone: string): string {
   return zonedDateStartUtcIso(next.toISOString().slice(0, 10), timeZone);
 }
 
+// How far before the last completed session a window may end and still count
+// as current: a week, which covers long weekends, closures like Tokyo's Golden
+// Week, and a session the provider has not posted yet. ponytail: stands in for
+// an exchange calendar; a longer closure reads as stale until one is added.
+const CURRENT_WITHIN_DAYS = 7;
+
+// Whether a window ending on `endDate` is current at `cutoff` (#232, #256).
+// Judged at the cutoff, never at today, so a historical cutoff keeps its window.
+export function isCurrentEnd(endDate: string, cutoff: string, timeZone: string): boolean {
+  // The last completed session's date (a weekend or holiday when none ran).
+  const lastCompleted = sessionDate(new Date(Date.parse(completedSessionsEnd(cutoff, timeZone)) - 1).toISOString(), timeZone);
+  const from = new Date(`${lastCompleted}T00:00:00.000Z`);
+  from.setUTCDate(from.getUTCDate() - CURRENT_WITHIN_DAYS);
+  return endDate >= from.toISOString().slice(0, 10);
+}
+
 // The year a YTD window covers: the cutoff's year on the exchange's calendar.
 export function ytdYear(cutoff: string, timeZone: string): number {
   return Number(localParts(cutoff, timeZone).date.slice(0, 4));
