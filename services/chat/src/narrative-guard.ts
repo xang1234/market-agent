@@ -149,6 +149,15 @@ const HYPOTHESIS = /^\s*>\s*\*\*Unverified hypothesis \((?:low|medium|high) conf
 // quote or bold marker; prose that mentions one ("would be an unverified
 // hypothesis") claims nothing (#262 review).
 const HYPOTHESIS_CLAIM = /^\s*(?:(?:[-*+]|\d{1,2}[.)])\s+)?(?:>\s*)?[*_]*\s*unverified hypothesis\b/i;
+// Ordinary comparison and trend words a basis may use besides the answer's own.
+// ponytail: a word list from the 2026-10-08 eval's phrasing; extend it from eval
+// evidence, not invented sentences (#261).
+const BASIS_WORDS = new Set([
+  "versus", "vs", "compared", "relative", "while", "despite", "still", "even", "only", "after", "before", "since",
+  "grew", "grow", "growing", "rose", "fell", "declined", "dropped", "expanded", "contracted", "recovered",
+  "sequentially", "ending", "ended", "same", "prior", "previous", "following",
+  ...["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"],
+]);
 const BASIS = /\b(?:given|based on)\b(.*)$/i;
 const MAX_HYPOTHESES = 2;
 const CAUSE_STOP = new Set([
@@ -270,15 +279,16 @@ export function keepSupportedSentences(
   const groundedBasis = (sentence: string) => {
     const basis = sentence.match(BASIS)?.[1];
     if (basis === undefined || [...sentence.matchAll(CAUSAL)].length > 1) return false;
-    // A company's possessive in the basis is a compared company or the
-    // hypothesis's own subject, named before its basis ("given TSLA's revenue"
-    // in an NVDA answer is not, #262 review). Its other words are free prose
-    // ("versus", "grew sequentially", 2026-10-08 eval): the named metric and the
-    // number check carry the grounding.
-    const named = new Set([...companies, ...(sentence.slice(0, sentence.length - basis.length).match(/\b[A-Z][A-Z0-9.]{1,5}(?=['’]s\b)/g) ?? [])]);
-    const words = causeWords(basis);
+    // Its words are the answer's own, or ordinary comparison and trend words
+    // ("versus", "grew sequentially", "ending December", 2026-10-08 eval); an
+    // invented premise ("after its inventory charge"), an unshown qualifier
+    // ("subscription revenue") or another company ("at TSLA") is not (#265
+    // review). A company is a compared one or the hypothesis's own subject,
+    // named before its basis, possessive or not.
+    const named = new Set([...companies, ...(sentence.slice(0, sentence.length - basis.length).match(/\b[A-Z][A-Z0-9.]{1,5}\b/g) ?? [])]);
+    const words = causeWords(basis.replace(/\b([A-Z][A-Z0-9.]{1,5})(?:['’]s)?\b/g, (mention, ticker: string) => named.has(ticker) ? " " : mention));
     const cites = (name: string) => ` ${words.join(" ")} `.includes(` ${name} `);
-    return [...basis.matchAll(/\b([A-Z][A-Z0-9.]{1,5})['’]s\b/g)].every(([, ticker]) => named.has(ticker)) &&
+    return words.every((word) => known(word) || BASIS_WORDS.has(word)) &&
       metricNames.some(cites) &&
       companyMentions(basis, companies).every(({ company }) => metricsOwned(company).some(cites));
   };

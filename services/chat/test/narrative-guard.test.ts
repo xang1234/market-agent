@@ -785,6 +785,19 @@ test("a labelled hypothesis may state a cause the data does not show, with its b
   const bars = ["Quarterly revenue", "Q4 2025 $39.3B", "Q1 2026 $44.1B"];
   const sequential = hypothesis("low", "A shift in product or customer mix toward lower-margin offerings may have weighed on Q1 fiscal 2026, given that revenue of $44.1B in that quarter still grew sequentially from $39.3B in Q4 fiscal 2025.");
   assert.deepEqual(keepSupportedSentences(sequential, bars, [], [], ["Revenue"]).removed, []);
+  // Ordinary comparison words pass, but not an invented premise, an unshown
+  // qualifier of the metric, or another company (#265 review).
+  const comparison = [{ company: "NVDA", value: "70.8%", metric: "Gross margin" }, { company: "AMD", value: "49.9%", metric: "Gross margin" }];
+  for (const [basis, figures, metrics] of [
+    ["NVDA's higher margins may reflect pricing power, given NVDA's gross margin of 70.8% after its inventory charge was reversed.", comparison, ["Gross margin"]],
+    ["NVDA's growth may reflect demand, given subscription revenue of $44.1B in Q1 fiscal 2026.", [], ["Revenue"]],
+    ["NVDA's growth may reflect stronger industry demand, given revenue of $44.1B at TSLA.", [], ["Revenue"]],
+  ] as const) {
+    assert.equal(keepSupportedSentences(hypothesis("low", basis), bars, figures, [], metrics).text, "", basis);
+  }
+  // A fiscal period's possessive is a period, not a ticker (#265 review).
+  const quarter = hypothesis("low", "NVDA's revenue may reflect stronger demand, given Q4's revenue of $39.3B.");
+  assert.deepEqual(keepSupportedSentences(quarter, bars, [], [], ["Revenue"]).removed, []);
   // A basis naming no displayed metric is still none, however worded.
   assert.equal(keepSupportedSentences(hypothesis("low", "Margins may reflect a one-time charge, given that the margin recovered by Q2 fiscal 2026."), bars, [], [], ["Gross margin"]).text, "");
   // A figure with a unit is a basis, and a cause, like any other.
