@@ -140,7 +140,7 @@ const CAUSAL = new RegExp(
 // A cause the data does not show is allowed only as a labelled hypothesis (#261):
 // a blockquote item with its confidence in words and one explanation, resting on
 // an observation the answer shows ("> **Unverified hypothesis (medium
-// confidence):** … may reflect …, given its gross margin of 70.8% shown above").
+// confidence):** … may reflect …, given its gross margin of 70.8%").
 // The basis is held to the cause check, and the numbers to the number check;
 // any further sentence on the line is ordinary prose (#262 review). #208's
 // analyst_inference replaces this label.
@@ -245,9 +245,10 @@ export function keepSupportedSentences(
   const groundedCause = (sentence: string) =>
     [...sentence.matchAll(CAUSAL)].every((match) => causeWords(match[1]).every(known));
   // A hypothesis's one explanation (a single causal clause), resting on an
-  // observation of the answer's own: a figure, or a displayed metric ("gross
-  // margin"); not generic words ("given the data shown above"), a title's
-  // wrapper words ("the side shown") or a company alone ("given NVDA", #262 review).
+  // observation of the answer's own: it names a displayed metric ("given its
+  // gross margin of 70.8%"); not generic words ("given the data shown above"),
+  // a title's wrapper words ("the side shown"), a company or a year alone
+  // ("given NVDA", "based on 2026", #262 review).
   // ponytail: an explanation without a connective ("and an acquisition lifted
   // revenue") is not counted; #208's typed assertions bound that.
   const groundedBasis = (sentence: string) => {
@@ -255,7 +256,7 @@ export function keepSupportedSentences(
     if (basis === undefined || [...sentence.matchAll(CAUSAL)].length > 1) return false;
     const words = causeWords(basis);
     return words.every(known) &&
-      (/\d/.test(basis) || words.some((word) => metricWords.has(word)));
+      words.some((word) => metricWords.has(word));
   };
   let hypotheses = 0;
   const dates = new Set(displayedDates);

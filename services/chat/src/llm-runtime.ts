@@ -138,7 +138,7 @@ export async function composeAnalystBlocksWithLlm(input: {
           "that the data does not show why. A hedge (\"could reflect\") or a disclaimer after the",
           "cause does not make it allowed. A plausible explanation the data does not show may",
           "appear as at most two hypotheses, each on its own line in exactly this form:",
-          "> **Unverified hypothesis (low|medium|high confidence):** <one explanation>, given <the observation shown above it rests on>.",
+          "> **Unverified hypothesis (low|medium|high confidence):** <one explanation>, given <a figure or metric shown in this answer>.",
           "Use only the context provided; do not invent citations or data.",
           "The figures shown to the user are listed in displayed_figures, each with the metric",
           "and, in a comparison, the company it belongs to. Quote a figure only exactly as it",
