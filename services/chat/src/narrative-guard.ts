@@ -160,9 +160,10 @@ const CAUSE_DATA_WORDS = new Set([
   "quarterly", "year", "years", "annual", "period", "periods", "fiscal", "price", "prices", "return", "returns",
   "above", "below",
 ]);
-// A figure is not a word: its unit ("B" in "$209.9B") is dropped with it.
+// A figure is not a word: its unit ("B" in "$209.9B") is dropped with it; any
+// other digit-led term is ("5G" leaves "g", #262 review).
 const causeWords = (text: string) =>
-  (text.toLowerCase().replace(/\d[\d.,]*[a-z]{0,2}\b/g, " ").match(/[a-z][a-z0-9'’-]*/g) ?? []).map((word) => word.replace(/['’]s$/, ""));
+  (text.toLowerCase().replace(/\d[\d.,]*(?:bn|mn|tn|[bmktx])?\b/g, " ").match(/[a-z][a-z0-9'’-]*/g) ?? []).map((word) => word.replace(/['’]s$/, ""));
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 // A day as written: "December 31, 2025", "31 December 2025" or "2025-12-31".
 const DATE = String.raw`(?:(?:${MONTHS.join("|")}) \d{1,2},? \d{4}|\d{1,2} (?:${MONTHS.join("|")}),? \d{4}|\d{4}-\d{2}-\d{2})`;
@@ -242,8 +243,10 @@ export function keepSupportedSentences(
     ...supportingTexts.flatMap(causeWords),
     ...attributedFigures.flatMap((figure) => causeWords(`${figure.company} ${figure.metric ?? ""}`)),
   ]);
-  const metricWords = new Set([...attributedFigures.flatMap((figure) => figure.metric ?? []), ...displayedMetrics]
-    .flatMap(causeWords).filter((word) => !CAUSE_STOP.has(word)));
+  // Each displayed metric as a whole name, without its qualifier ("Revenue
+  // growth (QoQ)" -> "revenue growth"): one word of it ("gross") is no basis.
+  const metricNames = [...new Set([...attributedFigures.flatMap((figure) => figure.metric ?? []), ...displayedMetrics]
+    .map((metric) => causeWords(metric.replace(/\([^)]*\)/g, "")).join(" ")).filter(Boolean))];
   const known = (word: string) => CAUSE_STOP.has(word) || CAUSE_DATA_WORDS.has(word) || vocabulary.has(word);
   const groundedCause = (sentence: string) =>
     [...sentence.matchAll(CAUSAL)].every((match) => causeWords(match[1]).every(known));
@@ -259,7 +262,7 @@ export function keepSupportedSentences(
     if (basis === undefined || [...sentence.matchAll(CAUSAL)].length > 1) return false;
     const words = causeWords(basis);
     return words.every(known) &&
-      words.some((word) => metricWords.has(word));
+      metricNames.some((name) => ` ${words.join(" ")} `.includes(` ${name} `));
   };
   let hypotheses = 0;
   const dates = new Set(displayedDates);

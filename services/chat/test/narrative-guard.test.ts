@@ -712,6 +712,8 @@ test("a stated cause must be the answer's own data or a cited attribution; a hed
   ]) {
     assert.deepEqual(keepSupportedSentences(dropped, shown, GOLDEN).removed, [dropped], dropped);
   }
+  // A digit-led term is a word, not a figure's unit, even when its number is shown (#262 review).
+  assert.equal(keepSupportedSentences("Revenue growth was driven by 5G.", ["Gross margin 5.0%"]).text, "");
   for (const kept of [
     "The data does not show a cause for the concentration; it simply reflects the reported mix.",
     "NVDA's revenue growth was driven by Data Center.",
@@ -762,7 +764,7 @@ test("a labelled hypothesis may state a cause the data does not show, with its b
   const scaled = hypothesis("low", "NVDA's revenue may reflect Data Center demand, given its revenue of $209.9B.");
   assert.equal(keepSupportedSentences(scaled, [...shown, "Data Center"], GOLDEN).text, scaled);
   // An empty or generic basis is none (#262 review).
-  for (const basis of ["given.", "given the data shown above.", "given the side shown above.", "given NVDA.", "based on 2026."]) {
+  for (const basis of ["given.", "given the data shown above.", "given the side shown above.", "given NVDA.", "based on 2026.", "given gross.", "given margin."]) {
     assert.equal(keepSupportedSentences(hypothesis("medium", `NVDA's margins may reflect pricing power, ${basis}`), shown, GOLDEN).text, "", basis);
   }
   // One causal clause per hypothesis (#262 review).
