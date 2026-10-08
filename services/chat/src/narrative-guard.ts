@@ -149,6 +149,14 @@ const HYPOTHESIS = /^\s*>\s*\*\*Unverified hypothesis \((?:low|medium|high) conf
 // quote or bold marker; prose that mentions one ("would be an unverified
 // hypothesis") claims nothing (#262 review).
 const HYPOTHESIS_CLAIM = /^\s*(?:(?:[-*+]|\d{1,2}[.)])\s+)?(?:>\s*)?[*_]*\s*unverified hypothesis\b/i;
+// Ordinary comparison and trend words a basis may use besides the answer's own.
+// ponytail: a word list from the 2026-10-08 eval's phrasing; extend it from eval
+// evidence, not invented sentences (#261).
+const BASIS_WORDS = new Set([
+  "versus", "vs", "compared", "relative", "while", "despite", "still", "even", "only", "after", "before", "since",
+  "grew", "grow", "growing", "rose", "fell", "declined", "dropped", "expanded", "contracted", "recovered",
+  "sequentially", "ending", "ended", "same", "prior", "previous", "following",
+]);
 const BASIS = /\b(?:given|based on)\b(.*)$/i;
 const MAX_HYPOTHESES = 2;
 const CAUSE_STOP = new Set([
@@ -170,6 +178,7 @@ const CAUSE_DATA_WORDS = new Set([
 const causeWords = (text: string) =>
   (text.toLowerCase().replace(/(?<![a-z0-9.,])\d[\d.,]*(?:bn|mn|tn|[bmktx])?\b/g, " ").match(/[a-z][a-z0-9'’-]*/g) ?? []).map((word) => word.replace(/['’]s$/, ""));
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const MONTH_WORDS = new Set(MONTHS.map((month) => month.toLowerCase()));
 // A day as written: "December 31, 2025", "31 December 2025" or "2025-12-31".
 const DATE = String.raw`(?:(?:${MONTHS.join("|")}) \d{1,2},? \d{4}|\d{1,2} (?:${MONTHS.join("|")}),? \d{4}|\d{4}-\d{2}-\d{2})`;
 // The chart window in words: the window's own range of two days ("window runs
@@ -270,13 +279,22 @@ export function keepSupportedSentences(
   const groundedBasis = (sentence: string) => {
     const basis = sentence.match(BASIS)?.[1];
     if (basis === undefined || [...sentence.matchAll(CAUSAL)].length > 1) return false;
-    // A company's possessive ("NVDA's") is no cause word when it is a compared
-    // company or the hypothesis's own subject, named before its basis; another
-    // ("given TSLA's revenue") stays an unknown word (#262 review).
-    const named = new Set([...companies, ...(sentence.slice(0, sentence.length - basis.length).match(/\b[A-Z][A-Z0-9.]{1,5}(?=['’]s\b)/g) ?? [])]);
-    const words = causeWords(basis.replace(/\b([A-Z][A-Z0-9.]{1,5})['’]s\b/g, (possessive, ticker: string) => named.has(ticker) ? " " : possessive));
+    // Its words are the answer's own, or ordinary comparison and trend words
+    // ("versus", "grew sequentially", "ending December", 2026-10-08 eval); an
+    // invented premise ("after its inventory charge"), an unshown qualifier
+    // ("subscription revenue") or another company ("at TSLA") is not (#265
+    // review). A company is a compared one or the hypothesis's own subject,
+    // the sentence's opening possessive ("NVDA's revenue may …"); another
+    // capitalized word ("AI demand", "TSLA's pricing") is not one (#265 review).
+    const subject = sentence.match(/^\s*([A-Z][A-Z0-9.]{1,5})['’]s\b/)?.[1];
+    const named = new Set([...companies, ...(subject === undefined ? [] : [subject])]);
+    const words = causeWords(basis.replace(/\b([A-Z][A-Z0-9.]{1,5})(?:['’]s)?\b/g, (mention, ticker: string) => named.has(ticker) ? " " : mention));
     const cites = (name: string) => ` ${words.join(" ")} `.includes(` ${name} `);
-    return words.every(known) && metricNames.some(cites) &&
+    // A month only as the answer shows it, in full or abbreviated ("ended Jan
+    // 2026" allows "January", not "December", #265 review).
+    const shownMonth = (word: string) => MONTH_WORDS.has(word) && (vocabulary.has(word) || vocabulary.has(word.slice(0, 3)));
+    return words.every((word) => (MONTH_WORDS.has(word) ? shownMonth(word) : known(word) || BASIS_WORDS.has(word))) &&
+      metricNames.some(cites) &&
       companyMentions(basis, companies).every(({ company }) => metricsOwned(company).some(cites));
   };
   let hypotheses = 0;

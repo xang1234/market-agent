@@ -778,6 +778,37 @@ test("a labelled hypothesis may state a cause the data does not show, with its b
   const mention = "NVDA's gross margin of 70.8% is above AMD's 49.9%. The data does not establish a cause; any explanation would be an unverified hypothesis.";
   const mentioned = [mention, "", first, "", second].join("\n");
   assert.deepEqual(keepSupportedSentences(mentioned, shown, GOLDEN), { text: mentioned, removed: [] });
+  // The eval's own hypotheses: a basis in ordinary words passes once it names a
+  // displayed metric and quotes only shown figures (2026-10-08 eval).
+  const evalCase = hypothesis("medium", "AMD's lower net margin relative to its gross margin could reflect higher operating expenses as a share of revenue, given AMD's gross margin of 49.9% versus net margin of 12.0% for FY2025 (ending December 2025).");
+  assert.deepEqual(keepSupportedSentences(evalCase, shown, GOLDEN).removed, []);
+  const bars = ["Quarterly revenue", "Q4 2025 $39.3B", "Q1 2026 $44.1B"];
+  const sequential = hypothesis("low", "A shift in product or customer mix toward lower-margin offerings may have weighed on Q1 fiscal 2026, given that revenue of $44.1B in that quarter still grew sequentially from $39.3B in Q4 fiscal 2025.");
+  assert.deepEqual(keepSupportedSentences(sequential, bars, [], [], ["Revenue"]).removed, []);
+  // Ordinary comparison words pass, but not an invented premise, an unshown
+  // qualifier of the metric, or another company (#265 review).
+  const comparison = [{ company: "NVDA", value: "70.8%", metric: "Gross margin" }, { company: "AMD", value: "49.9%", metric: "Gross margin" }];
+  for (const [basis, figures, metrics] of [
+    ["NVDA's higher margins may reflect pricing power, given NVDA's gross margin of 70.8% after its inventory charge was reversed.", comparison, ["Gross margin"]],
+    ["NVDA's growth may reflect demand, given subscription revenue of $44.1B in Q1 fiscal 2026.", [], ["Revenue"]],
+    ["NVDA's growth may reflect stronger industry demand, given revenue of $44.1B at TSLA.", [], ["Revenue"]],
+    // An acronym in the explanation is no company: "AI revenue" is not the revenue shown (#265 review).
+    ["NVDA's revenue may reflect AI demand, given AI revenue of $44.1B.", [], ["Revenue"]],
+    // Only the subject's possessive, not another company's in the explanation (#265 review).
+    ["NVDA's revenue may reflect TSLA's pricing, given TSLA revenue of $44.1B.", [], ["Revenue"]],
+  ] as const) {
+    assert.equal(keepSupportedSentences(hypothesis("low", basis), bars, figures, [], metrics).text, "", basis);
+  }
+  // A month is one the answer shows, in full or abbreviated ("ended Jan 2026"), not any (#265 review).
+  const fiscal = ["NVDA FY2026 (ended Jan 2026)", "Revenue $209.9B"];
+  const month = (name: string) => hypothesis("low", `NVDA's revenue may reflect demand, given NVDA's revenue of $209.9B for FY2026 ending ${name} 2026.`);
+  assert.equal(keepSupportedSentences(month("December"), fiscal, [], [], ["Revenue"]).text, "");
+  assert.deepEqual(keepSupportedSentences(month("January"), fiscal, [], [], ["Revenue"]).removed, []);
+  // A fiscal period's possessive is a period, not a ticker (#265 review).
+  const quarter = hypothesis("low", "NVDA's revenue may reflect stronger demand, given Q4's revenue of $39.3B.");
+  assert.deepEqual(keepSupportedSentences(quarter, bars, [], [], ["Revenue"]).removed, []);
+  // A basis naming no displayed metric is still none, however worded.
+  assert.equal(keepSupportedSentences(hypothesis("low", "Margins may reflect a one-time charge, given that the margin recovered by Q2 fiscal 2026."), bars, [], [], ["Gross margin"]).text, "");
   // A figure with a unit is a basis, and a cause, like any other.
   const scaled = hypothesis("low", "NVDA's revenue may reflect Data Center demand, given its revenue of $209.9B.");
   assert.equal(keepSupportedSentences(scaled, [...shown, "Data Center"], GOLDEN).text, scaled);
