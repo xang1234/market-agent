@@ -736,7 +736,7 @@ test("a labelled hypothesis may state a cause the data does not show, with its b
   assert.deepEqual(keepSupportedSentences(answer, shown, GOLDEN), { text: answer, removed: [] });
   // A third hypothesis is one too many.
   const third = hypothesis("low", "NVDA's revenue may reflect brand loyalty, given its revenue of $209.9B.");
-  assert.deepEqual(keepSupportedSentences([answer, "", third].join("\n"), shown, GOLDEN).removed, [third]);
+  assert.deepEqual(keepSupportedSentences([answer, "", third].join("\n"), shown, GOLDEN).removed, [third.replace(/^> \*\*[^*]+\*\* /, "")]);
   for (const unlabelled of [
     // No stated basis, an unknown confidence, or no blockquote: an ordinary cause.
     hypothesis("medium", "NVDA's higher margins may reflect pricing power."),
@@ -747,6 +747,17 @@ test("a labelled hypothesis may state a cause the data does not show, with its b
   }
   // Its basis must be the answer's own data, not an invented event (#262 review).
   assert.equal(keepSupportedSentences(hypothesis("medium", "NVDA's margins may reflect pricing power, given the recent product launch."), shown, GOLDEN).text, "");
+  // A labelled line is a hypothesis or nothing: grounded prose under the label,
+  // without a basis or past the cap, goes whole (#262 review).
+  const groundedThird = hypothesis("low", "NVDA's revenue may reflect higher revenue, given its revenue of $209.9B.");
+  assert.deepEqual(keepSupportedSentences([answer, "", groundedThird].join("\n"), shown, GOLDEN).removed, [groundedThird.replace(/^> \*\*[^*]+\*\* /, "")]);
+  assert.equal(keepSupportedSentences(hypothesis("medium", "NVDA's revenue may reflect higher revenue."), shown, GOLDEN).text, "");
+  // A labelled line whose hypothesis goes takes the rest of the line with it.
+  const malformed = hypothesis("medium", "NVDA's revenue may reflect brand loyalty. NVDA's gross margin of 70.8% is above AMD's 49.9%.");
+  assert.equal(keepSupportedSentences(malformed, shown, GOLDEN).text, "");
+  // A figure with a unit is a basis, and a cause, like any other.
+  const scaled = hypothesis("low", "NVDA's revenue may reflect Data Center demand, given its revenue of $209.9B.");
+  assert.equal(keepSupportedSentences(scaled, [...shown, "Data Center"], GOLDEN).text, scaled);
   // An empty or generic basis is none (#262 review).
   for (const basis of ["given.", "given the data shown above."]) {
     assert.equal(keepSupportedSentences(hypothesis("medium", `NVDA's margins may reflect pricing power, ${basis}`), shown, GOLDEN).text, "", basis);

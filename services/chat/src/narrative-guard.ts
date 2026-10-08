@@ -160,7 +160,9 @@ const CAUSE_DATA_WORDS = new Set([
   "quarterly", "year", "years", "annual", "period", "periods", "fiscal", "price", "prices", "return", "returns",
   "above", "below",
 ]);
-const causeWords = (text: string) => (text.toLowerCase().match(/[a-z][a-z0-9'’-]*/g) ?? []).map((word) => word.replace(/['’]s$/, ""));
+// A figure is not a word: its unit ("B" in "$209.9B") is dropped with it.
+const causeWords = (text: string) =>
+  (text.toLowerCase().replace(/\d[\d.,]*[a-z]{0,2}\b/g, " ").match(/[a-z][a-z0-9'’-]*/g) ?? []).map((word) => word.replace(/['’]s$/, ""));
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 // A day as written: "December 31, 2025", "31 December 2025" or "2025-12-31".
 const DATE = String.raw`(?:(?:${MONTHS.join("|")}) \d{1,2},? \d{4}|\d{1,2} (?:${MONTHS.join("|")}),? \d{4}|\d{4}-\d{2}-\d{2})`;
@@ -274,10 +276,12 @@ export function keepSupportedSentences(
     }
     // A list marker ("1.", "-") is not a sentence: it is set aside, and stays
     // with whatever of its item is kept.
-    const label = hypotheses < MAX_HYPOTHESES ? line.match(HYPOTHESIS)?.[0] : undefined;
-    if (label !== undefined) hypotheses++;
+    // A labelled line is a hypothesis within the cap, or it goes whole (#262 review).
+    const label = line.match(HYPOTHESIS)?.[0];
+    const withinCap = label !== undefined && ++hypotheses <= MAX_HYPOTHESES;
     const lead = label ?? line.match(LIST_MARKER)?.[0] ?? line.match(/^\s*/)![0];
-    const kept = line.slice(lead.length).trim().split(SENTENCE_BREAK).filter((written, sentenceIndex) => {
+    const sentences = line.slice(lead.length).trim().split(SENTENCE_BREAK);
+    const kept = sentences.filter((written, sentenceIndex) => {
       // A displayed date written with its day ("December 31, 2025") is checked as
       // its month and year, so the day is not a figure (#240); any other day is.
       const sentence = withDisplayedDays(written);
@@ -290,7 +294,8 @@ export function keepSupportedSentences(
         (text, company) => text.replace(new RegExp(`(?<![a-z0-9])${escapeRegExp(company.toLowerCase())}(?![a-z0-9])`, "g"), company),
         plain.toLowerCase(),
       );
-      if (MAGNITUDE.test(plain) || MULTIPLIER.test(normalized) || !(label !== undefined && sentenceIndex === 0 && groundedBasis(plain)) && !groundedCause(plain)) {
+      if (MAGNITUDE.test(plain) || MULTIPLIER.test(normalized) ||
+        (label !== undefined && sentenceIndex === 0 ? !(withinCap && groundedBasis(plain)) : !groundedCause(plain))) {
         removed.push(written);
         return false;
       }
@@ -373,6 +378,11 @@ export function keepSupportedSentences(
       if (!isSupported) removed.push(written);
       return isSupported;
     });
+    if (label !== undefined && kept[0] !== sentences[0]) {
+      removed.push(...kept);
+      lines.push(null);
+      continue;
+    }
     lines.push(kept.length > 0 ? lead + kept.join(" ") : null);
   }
   // A heading whose section lost everything goes too: the guard dropped lines
