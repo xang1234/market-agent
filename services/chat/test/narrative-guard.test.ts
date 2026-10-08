@@ -762,7 +762,7 @@ test("a labelled hypothesis may state a cause the data does not show, with its b
   const scaled = hypothesis("low", "NVDA's revenue may reflect Data Center demand, given its revenue of $209.9B.");
   assert.equal(keepSupportedSentences(scaled, [...shown, "Data Center"], GOLDEN).text, scaled);
   // An empty or generic basis is none (#262 review).
-  for (const basis of ["given.", "given the data shown above."]) {
+  for (const basis of ["given.", "given the data shown above.", "given the side shown above.", "given NVDA."]) {
     assert.equal(keepSupportedSentences(hypothesis("medium", `NVDA's margins may reflect pricing power, ${basis}`), shown, GOLDEN).text, "", basis);
   }
   // One causal clause per hypothesis (#262 review).

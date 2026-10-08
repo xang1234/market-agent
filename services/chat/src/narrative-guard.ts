@@ -239,12 +239,15 @@ export function keepSupportedSentences(
     ...supportingTexts.flatMap(causeWords),
     ...attributedFigures.flatMap((figure) => causeWords(`${figure.company} ${figure.metric ?? ""}`)),
   ]);
+  const metricWords = new Set(attributedFigures.flatMap((figure) => causeWords(figure.metric ?? ""))
+    .filter((word) => !CAUSE_STOP.has(word)));
   const known = (word: string) => CAUSE_STOP.has(word) || CAUSE_DATA_WORDS.has(word) || vocabulary.has(word);
   const groundedCause = (sentence: string) =>
     [...sentence.matchAll(CAUSAL)].every((match) => causeWords(match[1]).every(known));
   // A hypothesis's one explanation (a single causal clause), resting on an
-  // observation of the answer's own: a figure, or a word only its data supplies
-  // ("gross margin"), not just generic words ("given the data shown above").
+  // observation of the answer's own: a figure, or a displayed metric ("gross
+  // margin"); not generic words ("given the data shown above"), a title's
+  // wrapper words ("the side shown") or a company alone ("given NVDA", #262 review).
   // ponytail: an explanation without a connective ("and an acquisition lifted
   // revenue") is not counted; #208's typed assertions bound that.
   const groundedBasis = (sentence: string) => {
@@ -252,7 +255,7 @@ export function keepSupportedSentences(
     if (basis === undefined || [...sentence.matchAll(CAUSAL)].length > 1) return false;
     const words = causeWords(basis);
     return words.every(known) &&
-      (/\d/.test(basis) || words.some((word) => vocabulary.has(word) && !CAUSE_STOP.has(word) && !CAUSE_DATA_WORDS.has(word)));
+      (/\d/.test(basis) || words.some((word) => metricWords.has(word)));
   };
   let hypotheses = 0;
   const dates = new Set(displayedDates);
