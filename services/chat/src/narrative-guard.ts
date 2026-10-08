@@ -145,6 +145,10 @@ const CAUSAL = new RegExp(
 // any further sentence on the line is ordinary prose (#262 review). #208's
 // analyst_inference replaces this label.
 const HYPOTHESIS = /^\s*>\s*\*\*Unverified hypothesis \((?:low|medium|high) confidence\):\*\*\s+/i;
+// A line claiming to be a hypothesis: the phrase at its start, behind any list,
+// quote or bold marker; prose that mentions one ("would be an unverified
+// hypothesis") claims nothing (#262 review).
+const HYPOTHESIS_CLAIM = /^\s*(?:(?:[-*+]|\d{1,2}[.)])\s+)?(?:>\s*)?[*_]*\s*unverified hypothesis\b/i;
 const BASIS = /\b(?:given|based on)\b(.*)$/i;
 const MAX_HYPOTHESES = 2;
 const CAUSE_STOP = new Set([
@@ -266,8 +270,11 @@ export function keepSupportedSentences(
   const groundedBasis = (sentence: string) => {
     const basis = sentence.match(BASIS)?.[1];
     if (basis === undefined || [...sentence.matchAll(CAUSAL)].length > 1) return false;
-    // A company's possessive ("NVDA's") is no cause word, single company or not.
-    const words = causeWords(basis.replace(/\b[A-Z][A-Z0-9.]{1,5}['’]s\b/g, " "));
+    // A company's possessive ("NVDA's") is no cause word when it is a compared
+    // company or the hypothesis's own subject, named before its basis; another
+    // ("given TSLA's revenue") stays an unknown word (#262 review).
+    const named = new Set([...companies, ...(sentence.slice(0, sentence.length - basis.length).match(/\b[A-Z][A-Z0-9.]{1,5}(?=['’]s\b)/g) ?? [])]);
+    const words = causeWords(basis.replace(/\b([A-Z][A-Z0-9.]{1,5})['’]s\b/g, (possessive, ticker: string) => named.has(ticker) ? " " : possessive));
     const cites = (name: string) => ` ${words.join(" ")} `.includes(` ${name} `);
     return words.every(known) && metricNames.some(cites) &&
       companyMentions(basis, companies).every(({ company }) => metricsOwned(company).some(cites));
@@ -298,7 +305,7 @@ export function keepSupportedSentences(
     // Any line claiming to be one counts toward the cap; one not in exactly the
     // labelled form (bold only, behind a list marker) goes whole.
     const label = line.match(HYPOTHESIS)?.[0];
-    const claimed = label !== undefined || /\bunverified hypothesis\b/i.test(line);
+    const claimed = label !== undefined || HYPOTHESIS_CLAIM.test(line);
     const withinCap = claimed && ++hypotheses <= MAX_HYPOTHESES;
     if (claimed && label === undefined) {
       removed.push(line.trim());

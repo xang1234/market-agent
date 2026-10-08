@@ -771,6 +771,13 @@ test("a labelled hypothesis may state a cause the data does not show, with its b
   assert.equal(keepSupportedSentences(bold, shown, GOLDEN).text, "");
   // A basis names a metric of a company that has it displayed (#262 review).
   assert.equal(keepSupportedSentences(hypothesis("low", "AMD's revenue may reflect pricing power, given AMD's price return."), shown, GOLDEN.filter((figure) => !(figure.company === "AMD" && figure.metric === "Price return"))).text, "");
+  // A basis may name only its own subject or a compared company, not another (#262 review).
+  assert.equal(keepSupportedSentences(hypothesis("low", "NVDA's revenue may reflect pricing power, given TSLA's revenue of $209.9B."), shown, GOLDEN).text, "");
+  // Only a label at the line's start claims a hypothesis: prose that mentions one
+  // stays, and takes none of the two slots (#262 review).
+  const mention = "NVDA's gross margin of 70.8% is above AMD's 49.9%. The data does not establish a cause; any explanation would be an unverified hypothesis.";
+  const mentioned = [mention, "", first, "", second].join("\n");
+  assert.deepEqual(keepSupportedSentences(mentioned, shown, GOLDEN), { text: mentioned, removed: [] });
   // A figure with a unit is a basis, and a cause, like any other.
   const scaled = hypothesis("low", "NVDA's revenue may reflect Data Center demand, given its revenue of $209.9B.");
   assert.equal(keepSupportedSentences(scaled, [...shown, "Data Center"], GOLDEN).text, scaled);
