@@ -797,6 +797,11 @@ test("a labelled hypothesis may state a cause the data does not show, with its b
   ] as const) {
     assert.equal(keepSupportedSentences(hypothesis("low", basis), bars, figures, [], metrics).text, "", basis);
   }
+  // A month is one the answer shows, in full or abbreviated ("ended Jan 2026"), not any (#265 review).
+  const fiscal = ["NVDA FY2026 (ended Jan 2026)", "Revenue $209.9B"];
+  const month = (name: string) => hypothesis("low", `NVDA's revenue may reflect demand, given NVDA's revenue of $209.9B for FY2026 ending ${name} 2026.`);
+  assert.equal(keepSupportedSentences(month("December"), fiscal, [], [], ["Revenue"]).text, "");
+  assert.deepEqual(keepSupportedSentences(month("January"), fiscal, [], [], ["Revenue"]).removed, []);
   // A fiscal period's possessive is a period, not a ticker (#265 review).
   const quarter = hypothesis("low", "NVDA's revenue may reflect stronger demand, given Q4's revenue of $39.3B.");
   assert.deepEqual(keepSupportedSentences(quarter, bars, [], [], ["Revenue"]).removed, []);

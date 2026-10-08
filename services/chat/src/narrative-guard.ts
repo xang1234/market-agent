@@ -156,7 +156,6 @@ const BASIS_WORDS = new Set([
   "versus", "vs", "compared", "relative", "while", "despite", "still", "even", "only", "after", "before", "since",
   "grew", "grow", "growing", "rose", "fell", "declined", "dropped", "expanded", "contracted", "recovered",
   "sequentially", "ending", "ended", "same", "prior", "previous", "following",
-  ...["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"],
 ]);
 const BASIS = /\b(?:given|based on)\b(.*)$/i;
 const MAX_HYPOTHESES = 2;
@@ -179,6 +178,7 @@ const CAUSE_DATA_WORDS = new Set([
 const causeWords = (text: string) =>
   (text.toLowerCase().replace(/(?<![a-z0-9.,])\d[\d.,]*(?:bn|mn|tn|[bmktx])?\b/g, " ").match(/[a-z][a-z0-9'’-]*/g) ?? []).map((word) => word.replace(/['’]s$/, ""));
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const MONTH_WORDS = new Set(MONTHS.map((month) => month.toLowerCase()));
 // A day as written: "December 31, 2025", "31 December 2025" or "2025-12-31".
 const DATE = String.raw`(?:(?:${MONTHS.join("|")}) \d{1,2},? \d{4}|\d{1,2} (?:${MONTHS.join("|")}),? \d{4}|\d{4}-\d{2}-\d{2})`;
 // The chart window in words: the window's own range of two days ("window runs
@@ -289,7 +289,10 @@ export function keepSupportedSentences(
     const named = new Set([...companies, ...(sentence.slice(0, sentence.length - basis.length).match(/\b[A-Z][A-Z0-9.]{1,5}(?=['’]s\b)/g) ?? [])]);
     const words = causeWords(basis.replace(/\b([A-Z][A-Z0-9.]{1,5})(?:['’]s)?\b/g, (mention, ticker: string) => named.has(ticker) ? " " : mention));
     const cites = (name: string) => ` ${words.join(" ")} `.includes(` ${name} `);
-    return words.every((word) => known(word) || BASIS_WORDS.has(word)) &&
+    // A month only as the answer shows it, in full or abbreviated ("ended Jan
+    // 2026" allows "January", not "December", #265 review).
+    const shownMonth = (word: string) => MONTH_WORDS.has(word) && (vocabulary.has(word) || vocabulary.has(word.slice(0, 3)));
+    return words.every((word) => (MONTH_WORDS.has(word) ? shownMonth(word) : known(word) || BASIS_WORDS.has(word))) &&
       metricNames.some(cites) &&
       companyMentions(basis, companies).every(({ company }) => metricsOwned(company).some(cites));
   };
