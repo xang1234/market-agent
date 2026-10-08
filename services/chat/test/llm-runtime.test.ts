@@ -390,6 +390,16 @@ async function composeWithReply(reply: string) {
   return { text, prompt, removed };
 }
 
+test("a single-company answer may carry a labelled hypothesis resting on a displayed metric (#262 review)", async () => {
+  const reply = [
+    "NVDA's revenue reached $62.1B in Q4 2026.",
+    "",
+    "> **Unverified hypothesis (medium confidence):** NVDA's revenue may reflect Data Center demand, given its revenue of $62.1B.",
+  ].join("\n");
+  const { text, removed } = await composeWithReply(reply);
+  assert.deepEqual({ text, removed }, { text: reply, removed: [] });
+});
+
 test("a replayed reply quoting a figure the user is not shown has that sentence stripped", async () => {
   const { text, prompt, removed } = await composeWithReply(
     "Revenue reached $62.1B in Q4 2026. That is 38% growth year over year.",

@@ -195,6 +195,9 @@ export function keepSupportedSentences(
   attributedFigures: ReadonlyArray<AttributedFigure> = [],
   // Displayed dates ("2025-12-31"), which the narrative may write with their day.
   displayedDates: ReadonlyArray<string> = [],
+  // Every displayed figure's metric ("Gross margin"), a single company's too:
+  // what a hypothesis's basis may name (#262 review).
+  displayedMetrics: ReadonlyArray<string> = [],
 ): { text: string; removed: string[] } {
   // A year is supported in either form ("FY 2025 to FY 2026" shown supports
   // "2025-2026"); only owning one tells them apart.
@@ -239,8 +242,8 @@ export function keepSupportedSentences(
     ...supportingTexts.flatMap(causeWords),
     ...attributedFigures.flatMap((figure) => causeWords(`${figure.company} ${figure.metric ?? ""}`)),
   ]);
-  const metricWords = new Set(attributedFigures.flatMap((figure) => causeWords(figure.metric ?? ""))
-    .filter((word) => !CAUSE_STOP.has(word)));
+  const metricWords = new Set([...attributedFigures.flatMap((figure) => figure.metric ?? []), ...displayedMetrics]
+    .flatMap(causeWords).filter((word) => !CAUSE_STOP.has(word)));
   const known = (word: string) => CAUSE_STOP.has(word) || CAUSE_DATA_WORDS.has(word) || vocabulary.has(word);
   const groundedCause = (sentence: string) =>
     [...sentence.matchAll(CAUSAL)].every((match) => causeWords(match[1]).every(known));

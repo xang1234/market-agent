@@ -220,6 +220,7 @@ export async function composeAnalystBlocksWithLlm(input: {
     ),
     // A chart window's dates, which the narrative may write with their day (#240).
     displayTexts.flatMap((text) => text.match(/\d{4}-\d{2}-\d{2}/g) ?? []),
+    shown.flatMap((figure) => figure.metric ?? []),
   );
   if (guarded.removed.length > 0) {
     console.warn(`[chat] removed ${guarded.removed.length} narrative sentence(s) quoting figures not shown to the user`);
