@@ -96,6 +96,13 @@ export function structuredRefsFromHandoff(handoff: HydratedSubjectHandoff): Stru
   return Object.freeze({ issuer: issuer && isIssuerRef(issuer) ? issuer : null, listings: Object.freeze(listings) });
 }
 
+// The tickers a subject is written by ("NVDA"), from its listing or, for an
+// issuer or instrument, its active listings; the narrative guard lets a
+// hypothesis name them (#268).
+export function subjectLabelsFromHandoff(handoff: HydratedSubjectHandoff): string[] {
+  return structuredRefsFromHandoff(handoff).listings.flatMap((listing) => listing.ticker ? [listing.ticker] : []);
+}
+
 function isIssuerRef(ref: SubjectRef): ref is SubjectRef & { kind: "issuer" } {
   return ref.kind === "issuer";
 }

@@ -10,6 +10,7 @@ import {
   quoteSummaryFromCachedQuote,
   STALE_FACT_AGE_DAYS,
   structuredEvidenceStatus,
+  subjectLabelsFromHandoff,
   structuredRefsFromHandoff,
   type IssuerFactSummary,
   type StructuredSubjectRefs,
@@ -368,4 +369,10 @@ test("loadStructuredSubjectContext reads facts as of the turn's timestamp (#159)
   assert.equal(factQueries.length, 1);
   assert.match(factQueries[0].text, /f\.observed_at <= /);
   assert.ok(factQueries[0].values.includes("2026-06-02T08:50:00.000Z"));
+});
+
+test("a subject's guard labels are its listing tickers, whether it resolved as a listing or an issuer (#268 review)", () => {
+  assert.deepEqual(subjectLabelsFromHandoff(handoffWithListing()), ["AAOI"]);
+  assert.deepEqual(subjectLabelsFromHandoff(handoffIssuerOnly()), ["AAOI"]);
+  assert.deepEqual(subjectLabelsFromHandoff(handoffIssuerNoListings()), []);
 });

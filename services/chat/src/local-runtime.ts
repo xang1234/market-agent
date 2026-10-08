@@ -43,6 +43,7 @@ import {
   NO_STRUCTURED_REFS,
   structuredEvidenceStatus,
   structuredRefsFromHandoff,
+  subjectLabelsFromHandoff,
 } from "./local-runtime-structured.ts";
 import { createChatFinancialRuntime, type ChatFinancialRuntime } from "./financial-runtime.ts";
 import { createChatMessagePersistence } from "./messages.ts";
@@ -182,7 +183,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     blocks: result.blocks,
     toolCalls,
     factBlocks,
-    subjectLabels: [...requestedListings.values()].map((listing) => listing.label),
+    subjectLabels: covered.flatMap((subject) => subjectLabelsFromHandoff(subject.handoff)),
     conversation,
     onAnswered: (deployment) => {
       answeredBy = deployment;

@@ -291,7 +291,9 @@ export function keepSupportedSentences(
     // the sentence's opening possessive ("NVDA's revenue may …"); another
     // capitalized word ("AI demand", "TSLA's pricing") is not one (#265 review).
     const subject = sentence.match(/^\s*([A-Z][A-Z0-9.]{1,5})['’]s\b/)?.[1];
-    const named = new Set([...companies, ...subjectLabels, ...(subject === undefined ? [] : [subject])]);
+    // The turn's subject labels only in a single-company answer, whose figures
+    // carry no company; a comparison names its own (#268 review).
+    const named = new Set([...companies, ...(companies.length === 0 ? subjectLabels : []), ...(subject === undefined ? [] : [subject])]);
     const words = causeWords(basis.replace(/\b([A-Z][A-Z0-9.]{1,5})(?:['’]s)?\b/g, (mention, ticker: string) => named.has(ticker) ? " " : mention));
     const cites = (name: string) => ` ${words.join(" ")} `.includes(` ${name} `);
     // A month only as the answer shows it, in full or abbreviated ("ended Jan
