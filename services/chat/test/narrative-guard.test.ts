@@ -684,112 +684,115 @@ test("a magnitude comparison in words goes unless the data states it (#228)", ()
   }
 });
 
-test("a stated cause must be made of the answer's own data (#249)", () => {
-  // The turn shows these labels; a cause built from them is grounded.
-  const shown = ["Revenue by segment (Q4 2026)", "Data Center", "Gaming", "Side by side: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025)"];
+test("a stated cause must be the answer's own data or a cited attribution; a hedge or disclaimer does not save it (#249, #261)", () => {
+  // The turn shows these labels and cites a management claim; a cause built from them is grounded.
+  const shown = [
+    "Revenue by segment (Q4 2026)", "Data Center", "Gaming", "Side by side: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025)",
+    "Management attributed the gross margin decline to lower Gaming pricing.",
+  ];
   for (const dropped of [
     // The #228 eval's surviving cause, and the issue's examples.
     "NVDA's revenue is larger, reflecting its broader installed base and diversified product mix.",
     "NVDA's margins are higher, reflecting pricing power and operating leverage.",
     "AMD's net margin of 12.0% was likely due to a one-time charge.",
     "NVDA's gross margin of 70.8% is higher because of supply constraints.",
-    // An unrelated disclosure does not clear a cause (#240 review).
-    "The data does not break out segment margins, so NVDA's higher margin reflects pricing power.",
-    "The data does not show segment margins, so NVDA's higher margin reflects pricing power.",
-    "NVDA's higher margin reflects pricing power, and the data does not break out segment margins.",
-    // A denial before the cause it then asserts clears nothing either.
+    // A hedge, a disclaimer or a denial does not withdraw a stated cause (#261).
+    "NVDA's margins could reflect pricing power although the data does not show the cause.",
+    "NVDA's higher margins may be driven by pricing power, but that cause is not shown by the data.",
+    "The higher margins could reflect a narrower product mix, but the data shown does not identify the cause.",
+    "The data does not show that NVDA's higher margins are driven by pricing power.",
+    "That NVDA's higher margins are driven by pricing power is not shown by the data.",
+    "We cannot see whether the improvement is driven by one business unit.",
     "The data does not identify the cause, so NVDA's higher margin reflects pricing power.",
-    // A denial about a different thing clears nothing (#240 review).
-    "NVDA's higher margin reflects pricing power, but the data does not identify what drives revenue.",
-    "The data does not show that margins rose, so NVDA's higher margin reflects pricing power.",
-    "NVDA's margin reflects pricing power, while the data does not identify the cause of AMD's revenue.",
-    "NVDA's margin reflects pricing power, but the data does not explain why AMD's revenue rose.",
-    "NVDA's margin reflects pricing power, but the data does not identify the cause of the increase in AMD's revenue.",
-    "Whether AMD's revenue rose remains unknown while NVDA's margin reflects pricing power.",
-    "NVDA's margin reflects pricing power, but the data does not identify the cause of that increase in AMD's revenue.",
-    "Whether AMD's revenue rose remains unknown and NVDA's margin reflects pricing power.",
-    "NVDA's margin reflects pricing power, but there is no cause for concern.",
-    "Whether AMD's revenue rose remains unknown and the margin reflects pricing power.",
-    // A denial belongs to the nearest cause, not every earlier one.
-    "NVDA's margin reflects pricing power, while AMD's revenue reflects higher sales, but the data does not identify the cause.",
-    "Whether AMD gains share depends on demand and NVDA's margin reflects pricing power.",
-    "That NVDA's margins reflect pricing power explains the result and revenue is not shown by the data.",
-    "NVDA's margin reflects pricing power and AMD's revenue reflects higher sales, but the data does not identify the cause.",
-    "NVDA's higher margins are shown to be driven by pricing power.",
-    // A passive denial limited to something else clears nothing (#240 review).
-    "NVDA's margin reflects pricing power, but that explanation is not supported for AMD's revenue.",
-    "That NVDA's margin reflects pricing power is not supported for AMD's revenue.",
-    "NVDA's margin reflects pricing power, but no cause is shown for AMD's revenue.",
-    // A passive predicate of a coordinated clause is not the That-clause's (#240 review).
-    "That margin reflects pricing power and revenue is not supported.",
-    "That margin reflects pricing power or revenue is not shown.",
-    // An "and" that starts no denial still joins the cause (#240 review).
-    "NVDA's margins may be driven by pricing power and brand loyalty.",
-    // A denial after an intervening assertion is that assertion's (#240 review).
-    "NVDA's margin reflects pricing power, but AMD's revenue fell and that cause is not known.",
-    // A bare "does not show" scopes no clause joined by "and".
-    "The data does not show margins and NVDA's margin reflects pricing power.",
-    // A short whether-subject with its own predicate is still a clause.
-    "Whether revenue rose remains unknown and NVDA's margin reflects pricing power.",
-    "The data does not show margins and the margin reflects pricing power.",
-    // A leading "Whether …" has its own predicate, whatever it is (#240 review).
-    "Whether AMD gains share warrants analysis and NVDA's margin reflects pricing power.",
-    "Whether AMD gains share warrants analysis and margin reflects pricing power.",
-    // An "and" joins a compound only of the answer's own words (#240 review).
-    "The data does not show margins and management believes NVDA's margin reflects pricing power.",
-    "The data cannot show whether margins rose and investors think the margin reflects pricing power.",
+    // The two #251 review cases, now intended drops (#260).
+    "The data does not prove margins and revenue reflects pricing power.",
+    "NVDA's margins may reflect pricing power and brand loyalty although the data does not show the cause.",
+    // A hypothesis outside its label is an unlabelled cause.
+    "Hypothesis: NVDA's margins reflect pricing power, given its gross margin of 70.8%.",
   ]) {
     assert.deepEqual(keepSupportedSentences(dropped, shown, GOLDEN).removed, [dropped], dropped);
   }
+  // A fiscal year or quarter keeps its possessive (#262 review; kept on main).
+  for (const kept of ["The margin reflects FY2025's revenue mix.", "The decline reflects Q4's lower revenue."]) {
+    assert.deepEqual(keepSupportedSentences(kept, ["FY2025 revenue $62.1B", "Q4 revenue $62.1B"]).removed, [], kept);
+  }
+  // A digit-led term is a word, not a figure's unit, even when its number is shown (#262 review).
+  assert.equal(keepSupportedSentences("Revenue growth was driven by 5G.", ["Gross margin 5.0%"]).text, "");
   for (const kept of [
     "The data does not show a cause for the concentration; it simply reflects the reported mix.",
-    "We cannot see whether the improvement is driven by one business unit.",
     "NVDA's revenue growth was driven by Data Center.",
     "NVDA's gross margin of 70.8% reflects higher revenue.",
     "The table reflects the reported figures for each segment.",
-    // A cause hedged as unshown, in other words (#240 eval).
-    "The higher margins could reflect a narrower product mix, but the data shown does not identify the cause.",
-    "The gap reflects differences in expense structure, though the data does not break out what drives it.",
-    // A denial scoping the cause before it ("does not show that …").
-    "The data does not show that NVDA's higher margins are driven by pricing power.",
-    "The gap reflects differences in expense structure, but the data does not identify the cause of it.",
-    "The gap reflects differences in expense structure, but the data cannot explain why.",
-    "The data does not reveal that NVDA's higher margins are driven by pricing power.",
-    "That NVDA's higher margins are driven by pricing power is not shown by the data.",
-    "NVDA's higher margins may be driven by pricing power, but that cause is not shown by the data.",
-    "The data cannot show whether gross and net margins were driven by pricing power.",
-    "NVDA's margin may reflect pricing power, but the data gives no explanation for it.",
-    "NVDA's margins could reflect pricing power although the data does not show the cause.",
-    "The data cannot show whether revenue and margins were driven by pricing power.",
-    "The data cannot show whether gross margin and net margin were driven by pricing power.",
-    "NVDA's higher margins are not shown to be driven by pricing power.",
-    "NVDA's margin may reflect pricing power, but that explanation is not supported.",
-    "NVDA's margin may reflect pricing power, but that explanation is not supported by the figures.",
-    "That NVDA's margin reflects pricing power is not established.",
-    "NVDA's margin may reflect pricing power, but no cause is shown by the data.",
-    // An unknown cause, in other words (#240 review).
-    "NVDA's margins may be driven by pricing power, but that cause is not known.",
-    "NVDA's margins may be driven by pricing power, but the explanation is not available.",
-    "NVDA's margins may be driven by pricing power, but that cause isn't visible in the data.",
-    "That NVDA's margin reflects pricing power is not known.",
-    // A denial joined by "and"/"or", and contracted passive denials (#240 review).
-    "NVDA's margins may be driven by pricing power and that cause is not known.",
-    "NVDA's margins may be driven by pricing power and the data does not identify the cause.",
-    "NVDA's higher margins aren't shown to be driven by pricing power.",
-    "NVDA's higher margins weren't proven to be driven by pricing power.",
-    // "that" omitted after the denial (#240 review).
-    "The data does not show NVDA's higher margins are driven by pricing power.",
-    "The figures do not indicate NVDA's margins reflect pricing power.",
-    // "see" scopes too, and longer metric names join a compound (#240 review).
-    "We cannot see that NVDA's higher margins are driven by pricing power.",
-    "The data cannot show whether gross profit margin and net profit margin were driven by pricing power.",
-    // A compound subject with "that" omitted (#240 review).
-    "The data does not show gross and net margins are driven by pricing power.",
-    "The data cannot show whether NVDA and AMD margins were driven by pricing power.",
-    "Whether gross and net margins were driven by pricing power remains unknown.",
+    // A management attribution the turn cites.
+    "NVDA's gross margin decline was due to lower Gaming pricing, as management attributed it.",
+    // An explicit gap names no cause.
+    "The data shown does not explain why NVDA's margins rose.",
+    "The data does not identify the cause of the margin decline.",
   ]) {
     assert.deepEqual(keepSupportedSentences(kept, shown, GOLDEN).removed, [], kept);
   }
+});
+
+test("a labelled hypothesis may state a cause the data does not show, with its basis and confidence, two at most (#261)", () => {
+  const shown = ["Side by side: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025)"];
+  const hypothesis = (confidence: string, body: string) => `> **Unverified hypothesis (${confidence} confidence):** ${body}`;
+  const first = hypothesis("medium", "NVDA's higher margins may reflect pricing power, given its gross margin of 70.8% shown above.");
+  const second = hypothesis("low", "AMD's lower net margin could be due to heavier spending, based on its net margin of 12.0%.");
+  const answer = ["NVDA's gross margin of 70.8% is above AMD's 49.9%.", "", first, "", second].join("\n");
+  assert.deepEqual(keepSupportedSentences(answer, shown, GOLDEN), { text: answer, removed: [] });
+  // A third hypothesis is one too many.
+  const third = hypothesis("low", "NVDA's revenue may reflect brand loyalty, given its revenue of $209.9B.");
+  assert.deepEqual(keepSupportedSentences([answer, "", third].join("\n"), shown, GOLDEN).removed, [third.replace(/^> \*\*[^*]+\*\* /, "")]);
+  for (const unlabelled of [
+    // No stated basis, an unknown confidence, or no blockquote: an ordinary cause.
+    hypothesis("medium", "NVDA's higher margins may reflect pricing power."),
+    hypothesis("certain", "NVDA's higher margins reflect pricing power, given its gross margin of 70.8%."),
+    "**Unverified hypothesis (medium confidence):** NVDA's higher margins may reflect pricing power, given its gross margin of 70.8%.",
+  ]) {
+    assert.equal(keepSupportedSentences(unlabelled, shown, GOLDEN).text, "", unlabelled);
+  }
+  // Its basis must be the answer's own data, not an invented event (#262 review).
+  assert.equal(keepSupportedSentences(hypothesis("medium", "NVDA's margins may reflect pricing power, given the recent product launch."), shown, GOLDEN).text, "");
+  // A labelled line is a hypothesis or nothing: grounded prose under the label,
+  // without a basis or past the cap, goes whole (#262 review).
+  const groundedThird = hypothesis("low", "NVDA's revenue may reflect higher revenue, given its revenue of $209.9B.");
+  assert.deepEqual(keepSupportedSentences([answer, "", groundedThird].join("\n"), shown, GOLDEN).removed, [groundedThird.replace(/^> \*\*[^*]+\*\* /, "")]);
+  assert.equal(keepSupportedSentences(hypothesis("medium", "NVDA's revenue may reflect higher revenue."), shown, GOLDEN).text, "");
+  // A labelled line whose hypothesis goes takes the rest of the line with it.
+  const malformed = hypothesis("medium", "NVDA's revenue may reflect brand loyalty. NVDA's gross margin of 70.8% is above AMD's 49.9%.");
+  assert.equal(keepSupportedSentences(malformed, shown, GOLDEN).text, "");
+  // By position, not text: a repeated first sentence is no stand-in (#262 review).
+  const repeated = hypothesis("medium", "NVDA's revenue may reflect higher revenue. NVDA's revenue may reflect higher revenue.");
+  assert.equal(keepSupportedSentences(repeated, shown, GOLDEN).text, "");
+  // Behind a list marker, or malformed, a labelled line still counts and must be valid (#262 review).
+  const listed = "- " + hypothesis("low", "NVDA's revenue may reflect higher revenue, given its revenue of $209.9B.");
+  assert.deepEqual(keepSupportedSentences([answer, "", listed].join("\n"), shown, GOLDEN).text, answer);
+  const bold = "**Unverified hypothesis (medium confidence):** NVDA's revenue may reflect higher revenue, given its revenue of $209.9B.";
+  assert.equal(keepSupportedSentences(bold, shown, GOLDEN).text, "");
+  // A basis names a metric of a company that has it displayed (#262 review).
+  assert.equal(keepSupportedSentences(hypothesis("low", "AMD's revenue may reflect pricing power, given AMD's price return."), shown, GOLDEN.filter((figure) => !(figure.company === "AMD" && figure.metric === "Price return"))).text, "");
+  // A basis may name only its own subject or a compared company, not another (#262 review).
+  assert.equal(keepSupportedSentences(hypothesis("low", "NVDA's revenue may reflect pricing power, given TSLA's revenue of $209.9B."), shown, GOLDEN).text, "");
+  // Only a label at the line's start claims a hypothesis: prose that mentions one
+  // stays, and takes none of the two slots (#262 review).
+  const mention = "NVDA's gross margin of 70.8% is above AMD's 49.9%. The data does not establish a cause; any explanation would be an unverified hypothesis.";
+  const mentioned = [mention, "", first, "", second].join("\n");
+  assert.deepEqual(keepSupportedSentences(mentioned, shown, GOLDEN), { text: mentioned, removed: [] });
+  // A figure with a unit is a basis, and a cause, like any other.
+  const scaled = hypothesis("low", "NVDA's revenue may reflect Data Center demand, given its revenue of $209.9B.");
+  assert.equal(keepSupportedSentences(scaled, [...shown, "Data Center"], GOLDEN).text, scaled);
+  // An empty or generic basis is none (#262 review).
+  for (const basis of ["given.", "given the data shown above.", "given the side shown above.", "given NVDA.", "based on 2026.", "given gross.", "given margin."]) {
+    assert.equal(keepSupportedSentences(hypothesis("medium", `NVDA's margins may reflect pricing power, ${basis}`), shown, GOLDEN).text, "", basis);
+  }
+  // One causal clause per hypothesis (#262 review).
+  assert.equal(keepSupportedSentences(hypothesis("medium", "NVDA's margins may reflect pricing power and its revenue was driven by a secret acquisition, given its gross margin of 70.8% shown above."), shown, GOLDEN).text, "");
+  // One explanation per hypothesis: a second sentence on the line is checked as ordinary prose (#262 review).
+  const extra = "NVDA's margin was also driven by a secret acquisition, given its gross margin of 70.8%.";
+  assert.deepEqual(keepSupportedSentences(`${first} ${extra}`, shown, GOLDEN), { text: first, removed: [extra] });
+  // A hypothesis still quotes only figures shown, credited to their company.
+  assert.equal(keepSupportedSentences(hypothesis("high", "NVDA's margins may reflect pricing power, given its gross margin of 75.0%."), shown, GOLDEN).text, "");
+  assert.equal(keepSupportedSentences(hypothesis("high", "AMD's margins may reflect pricing power, given its gross margin of 70.8%."), shown, GOLDEN).text, "");
 });
 
 test("a possessive may name the fiscal period in words: \"NVDA's fiscal 2025 revenue of\" (#240)", () => {

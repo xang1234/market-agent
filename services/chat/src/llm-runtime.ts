@@ -131,9 +131,14 @@ export async function composeAnalystBlocksWithLlm(input: {
           "in its place.",
           "Name context the data itself supports, such as revenue concentrated in one",
           "segment, but never add facts, numbers, or events that are not in the tool context,",
-          // Causes the answers asserted without data (#228): a one-time charge, supply constraints.
+          // Causes the answers asserted without data (#228); the four allowed forms (#261).
           "and never state a cause the data does not show (a charge, supply constraints, heavy",
-          "spending): if the data shows no cause, say so.",
+          "spending). A cause may be stated only as: a management attribution from a cited claim;",
+          "a figure's arithmetic share of a change; or, if the data shows none, a plain statement",
+          "that the data does not show why. A hedge (\"could reflect\") or a disclaimer after the",
+          "cause does not make it allowed. A plausible explanation the data does not show may",
+          "appear as at most two hypotheses, each on its own line in exactly this form:",
+          "> **Unverified hypothesis (low|medium|high confidence):** <one explanation>, given <a figure or metric shown in this answer>.",
           "Use only the context provided; do not invent citations or data.",
           "The figures shown to the user are listed in displayed_figures, each with the metric",
           "and, in a comparison, the company it belongs to. Quote a figure only exactly as it",
@@ -215,6 +220,7 @@ export async function composeAnalystBlocksWithLlm(input: {
     ),
     // A chart window's dates, which the narrative may write with their day (#240).
     displayTexts.flatMap((text) => text.match(/\d{4}-\d{2}-\d{2}/g) ?? []),
+    shown.flatMap((figure) => figure.metric ?? []),
   );
   if (guarded.removed.length > 0) {
     console.warn(`[chat] removed ${guarded.removed.length} narrative sentence(s) quoting figures not shown to the user`);

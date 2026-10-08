@@ -18,6 +18,8 @@ export function Markdown({ text }: { text: string }): ReactElement {
           ol: ({ children }) => <ol className="my-2 list-decimal pl-5">{children}</ol>,
           li: ({ children }) => <li className="my-0.5">{children}</li>,
           strong: ({ children }) => <strong className="font-semibold text-fg">{children}</strong>,
+          // An analyst's unverified hypothesis (#261), set apart for the reader to check.
+          blockquote: ({ children }) => <blockquote className="my-2 border-l-2 border-line pl-3 italic text-muted">{children}</blockquote>,
           a: ({ children, href }) => <a href={href} target="_blank" rel="noreferrer" className="text-accent underline">{children}</a>,
           // react-markdown v9 no longer passes an `inline` flag: fenced blocks
           // arrive here too (wrapped by `pre`, carrying a `language-*` class).

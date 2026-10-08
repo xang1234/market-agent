@@ -125,78 +125,32 @@ const MULTIPLIER = new RegExp(
 );
 // A stated cause ("driven by Data Center", "reflecting higher revenue") must be
 // made of the answer's own data (#249): every content word after the causal
-// connective comes from a displayed text, a cited claim, a metric or a company,
-// or the short list of data words below. So "reflecting its broader installed
-// base" or "due to a one-time charge" goes, while a cause the sentence itself
-// denies or questions ("cannot see whether", "does not identify the cause") stays.
+// connective comes from a displayed text, a cited claim (so a management
+// attribution the turn cites passes), a metric or a company, or the short list
+// of data words below. A hedge or disclaimer does not withdraw a cause ("could
+// reflect pricing power, but the data does not show the cause" goes, #261); an
+// explicit gap names none ("the data does not explain why margins rose").
 // ponytail: a vocabulary check, not a semantic one; an interpretation the data
-// cannot show ("pricing power") goes too, which is what the prompt asks.
-// A cause the sentence itself denies: a denial after it whose object is the
-// cause ("…but the data does not identify the cause (of it)", "does not break out what
-// drives it", "cannot explain why"). A denial about something else ("does not
-// break out segment margins", "what drives revenue") clears nothing (#240 review).
-const NOT = String.raw`(?:does not|doesn['’]t|do not|don['’]t|cannot|can['’]t|is not|isn['’]t|are not|aren['’]t|not)`;
-// A passive denial ends its clause ("is not supported", "… by the data"); one
-// limited to something else ("is not supported for AMD's revenue") is not about the cause.
-const PASSIVE_END = String.raw`(?:\s+(?:by|in|from) (?:the )?(?:data|figures|numbers|filings?|table|chart))?(?=\s*(?:[.,;:!?)]|$))`;
-// "is not shown", "isn't known", "was not available": a denial in the passive.
-const PASSIVE_NEG = String.raw`(?:(?:is|are|was|were) not|isn['’]t|aren['’]t|wasn['’]t|weren['’]t)`;
-const PASSIVE_NOT = String.raw`${PASSIVE_NEG} (?:shown|established|confirmed|supported|proven|evident|clear|known|available|visible)`;
-const DENIED_CAUSE = new RegExp(
-  String.raw`\b${NOT} (?:show|tell|explain|reveal|indicate|identify|isolate|pinpoint|attribute|break out|see|say)\b[^.;]{0,20}?` +
-    String.raw`(?:\b(?:the|a|any|its|their) (?:causes?|drivers?|reasons?)(?=\s*(?:[.,;:!?)]|$)| (?:of|for|behind) (?:(?:it|this|that|them)(?=\s*(?:[.,;:!?)]|$))|the (?:gap|difference|change|decline|increase|shift)(?!\s+(?:in|of|at|for|between|across)\b))\b)|\bwhy(?=\s*(?:[.,;:!?)]|$)| (?:it|they)\b| (?:this|that)\s*(?:[.,;:!?)]|$)| the (?:gap|difference|change|decline|increase|shift)(?!\s+(?:in|of|at|for|between|across)\b)\b)|\bwhat (?:drives|caused|causes|is driving) (?:(?:it|this|that|them)(?=\s*(?:[.,;:!?)]|$))|the (?:gap|difference|change|decline|increase|shift)(?!\s+(?:in|of|at|for|between|across)\b))\b)|\bno (?:cause|explanation)(?=\s*(?:[.,;:!?)]|$)| (?:is|was) (?:shown|given|identified)${PASSIVE_END}| (?:of|for) (?:it|this|that|them)\s*(?:[.,;:!?)]|$))|\b(?:that|this|the|its|their) (?:causes?|drivers?|reasons?|explanation|link) ${PASSIVE_NOT}${PASSIVE_END}`,
-  "i",
-);
+// cannot show ("pricing power") goes too, unless labelled as a hypothesis.
 const CONNECTIVE = String.raw`(?:driven by|due to|because of|owing to|attributable to|as a result of|thanks to|on the back of|fuell?ed by|stemming from|caused by|result(?:s|ed)? from|reflect(?:s|ed|ing)?)`;
-// The cause runs to a clause break, or to an "and"/"or" that starts a denial of
-// it ("driven by pricing power and that cause is not known"); any other "and"
-// joins the cause ("pricing power and brand loyalty").
 const CAUSAL = new RegExp(
-  String.raw`\b${CONNECTIVE}\s+((?:(?!\b(?:although|though|but|while|whereas|yet|however|${CONNECTIVE})\b|\b(?:and|or)\s+(?=[^,;:.]*?${DENIED_CAUSE.source}))[^,;:.])+)`,
+  String.raw`\b${CONNECTIVE}\s+((?:(?!\b(?:although|though|but|while|whereas|yet|however|${CONNECTIVE})\b)[^,;:.])+)`,
   "gi",
 );
-// A denial or question that scopes the causal clause before it ("cannot see
-// whether … driven by", "does not show that … driven by", "That … driven by …
-// is not shown by the data"), up to a clause break: punctuation, a coordinator
-// (while, but, so…), or an "and"/"or" that starts a new clause (see below).
-// "does not identify the cause, so … reflects" scopes nothing.
-const SCOPE_START = new RegExp(String.raw`\b(?:whether|${NOT} (?:show|see|reveal|demonstrate|indicate|prove|confirm|establish|say|tell us)(?: that)?)\b`, "gi");
-const CLAUSE_BREAK = /[,;:]|\b(?:while|but|whereas|although|though|so|yet)\b/i;
-// "That <cause clause> is not shown by the data": the denial right after a short
-// cause noun phrase governs it; "That … reflects X explains the result and revenue
-// is not shown" or "… pricing power and revenue is not supported" denies something else.
-// ponytail: no "and"/"or" in the noun phrase, so a compound cause ("pricing and
-// mix is not shown") goes too; parse the That-clause if the eval shows that shape.
-const PASSIVE_OF_CAUSE = new RegExp(String.raw`^\s*(?:(?!(?:and|or)\b)\S+\s+){0,4}?${PASSIVE_NOT}${PASSIVE_END}`, "i");
-const PASSIVE_SCOPE = new RegExp(String.raw`\b${PASSIVE_NEG} (?:shown|proven|established|known|confirmed) to (?:be )?$`, "i");
-// A denial after a cause clears it only in the clause right after it ("…, but
-// the data does not identify the cause", "… and that cause is not known"); one
-// after an intervening assertion ("…, but AMD's revenue fell and that cause is
-// not known") is that assertion's.
-const NEXT_CLAUSE = /[,;:]|\b(?:but|while|whereas|although|though|yet|so|and|or)\b/i;
-function deniedAfter(after: string): boolean {
-  const clause = after.replace(/^[\s,;:]*(?:(?:but|while|whereas|although|though|yet|so|and|or)\b)?/i, "");
-  const denial = DENIED_CAUSE.exec(clause);
-  const end = NEXT_CLAUSE.exec(clause)?.index ?? clause.length;
-  return denial !== null && denial.index < end;
-}
-// "and"/"or" join a compound of the answer's own words inside the scoped clause
-// ("whether gross and net margins", "NVDA and AMD margins"); before a new
-// subject ("… and NVDA's margin reflects", "… and the margin reflects") or among
-// other words ("margins and management believes", "AMD gains share warrants
-// analysis and …") they start a new clause.
-// ponytail: grounded vocabulary, as for the cause itself (#249), not a parser.
-const NEW_SUBJECT = /\b(?:and|or)\s+(?:[A-Z][\w.-]*['’]s\b|(?:the|its|their|this|that|these|those|a|an)\b)/;
-function scopedCause(before: string, known: (word: string) => boolean): boolean {
-  // A passive denial right before the connective ("are not shown to be driven by").
-  if (PASSIVE_SCOPE.test(before)) return true;
-  const last = [...before.matchAll(SCOPE_START)].at(-1);
-  if (last === undefined) return false;
-  const span = before.slice(last.index + last[0].length);
-  if (CLAUSE_BREAK.test(span)) return false;
-  if (!/\b(?:and|or)\b/i.test(span)) return true;
-  return !NEW_SUBJECT.test(span) && causeWords(span).every(known);
-}
+// A cause the data does not show is allowed only as a labelled hypothesis (#261):
+// a blockquote item with its confidence in words and one explanation, resting on
+// an observation the answer shows ("> **Unverified hypothesis (medium
+// confidence):** … may reflect …, given its gross margin of 70.8%").
+// The basis is held to the cause check, and the numbers to the number check;
+// any further sentence on the line is ordinary prose (#262 review). #208's
+// analyst_inference replaces this label.
+const HYPOTHESIS = /^\s*>\s*\*\*Unverified hypothesis \((?:low|medium|high) confidence\):\*\*\s+/i;
+// A line claiming to be a hypothesis: the phrase at its start, behind any list,
+// quote or bold marker; prose that mentions one ("would be an unverified
+// hypothesis") claims nothing (#262 review).
+const HYPOTHESIS_CLAIM = /^\s*(?:(?:[-*+]|\d{1,2}[.)])\s+)?(?:>\s*)?[*_]*\s*unverified hypothesis\b/i;
+const BASIS = /\b(?:given|based on)\b(.*)$/i;
+const MAX_HYPOTHESES = 2;
 const CAUSE_STOP = new Set([
   "the", "a", "an", "of", "and", "or", "in", "on", "its", "their", "that", "this", "these", "those", "to", "for",
   "with", "by", "from", "as", "at", "which", "both", "more", "less", "than", "over", "across", "into", "per", "each",
@@ -208,8 +162,13 @@ const CAUSE_DATA_WORDS = new Set([
   "rising", "falling", "larger", "smaller", "growth", "decline", "increase", "decrease", "revenue", "margin",
   "margins", "sales", "income", "profit", "profits", "earnings", "segment", "segments", "quarter", "quarters",
   "quarterly", "year", "years", "annual", "period", "periods", "fiscal", "price", "prices", "return", "returns",
+  "above", "below",
 ]);
-const causeWords = (text: string) => (text.toLowerCase().match(/[a-z][a-z0-9'’-]*/g) ?? []).map((word) => word.replace(/['’]s$/, ""));
+// A figure is not a word: its unit ("B" in "$209.9B") is dropped with it; any
+// other digit-led term is ("5G" leaves "g"), and a fiscal year or quarter stays
+// whole ("FY2025's", "Q4's"; #262 review).
+const causeWords = (text: string) =>
+  (text.toLowerCase().replace(/(?<![a-z0-9.,])\d[\d.,]*(?:bn|mn|tn|[bmktx])?\b/g, " ").match(/[a-z][a-z0-9'’-]*/g) ?? []).map((word) => word.replace(/['’]s$/, ""));
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 // A day as written: "December 31, 2025", "31 December 2025" or "2025-12-31".
 const DATE = String.raw`(?:(?:${MONTHS.join("|")}) \d{1,2},? \d{4}|\d{1,2} (?:${MONTHS.join("|")}),? \d{4}|\d{4}-\d{2}-\d{2})`;
@@ -242,6 +201,9 @@ export function keepSupportedSentences(
   attributedFigures: ReadonlyArray<AttributedFigure> = [],
   // Displayed dates ("2025-12-31"), which the narrative may write with their day.
   displayedDates: ReadonlyArray<string> = [],
+  // Every displayed figure's metric ("Gross margin"), a single company's too:
+  // what a hypothesis's basis may name (#262 review).
+  displayedMetrics: ReadonlyArray<string> = [],
 ): { text: string; removed: string[] } {
   // A year is supported in either form ("FY 2025 to FY 2026" shown supports
   // "2025-2026"); only owning one tells them apart.
@@ -286,19 +248,38 @@ export function keepSupportedSentences(
     ...supportingTexts.flatMap(causeWords),
     ...attributedFigures.flatMap((figure) => causeWords(`${figure.company} ${figure.metric ?? ""}`)),
   ]);
-  // Each causal clause on its own: grounded in the data, scoped by a denial or
-  // question before it, or denied right after it.
+  // Each displayed metric as a whole name, without its qualifier ("Revenue
+  // growth (QoQ)" -> "revenue growth"): one word of it ("gross") is no basis.
+  const metricName = (metric: string) => causeWords(metric.replace(/\([^)]*\)/g, "")).join(" ");
+  const metricNames = [...new Set([...attributedFigures.flatMap((figure) => figure.metric ?? []), ...displayedMetrics]
+    .map(metricName).filter(Boolean))];
+  // In a comparison, the metrics each company has displayed: a basis naming a
+  // company cites one of its own ("given NVDA's gross margin" needs NVDA's).
+  const metricsOwned = (company: string) =>
+    attributedFigures.filter((figure) => figure.company === company && figure.metric).map((figure) => metricName(figure.metric!));
   const known = (word: string) => CAUSE_STOP.has(word) || CAUSE_DATA_WORDS.has(word) || vocabulary.has(word);
-  const groundedCause = (sentence: string) => {
-    const causes = [...sentence.matchAll(CAUSAL)];
-    return causes.every((match, i) =>
-      scopedCause(sentence.slice(0, match.index), known) ||
-      (/^\s*That\b/.test(sentence) && PASSIVE_OF_CAUSE.test(match[1])) ||
-      // A denial after it, before the next cause: it belongs to the nearest cause.
-      deniedAfter(sentence.slice(match.index + match[0].length, causes[i + 1]?.index ?? sentence.length)) ||
-      causeWords(match[1]).every(known)
-    );
+  const groundedCause = (sentence: string) =>
+    [...sentence.matchAll(CAUSAL)].every((match) => causeWords(match[1]).every(known));
+  // A hypothesis's one explanation (a single causal clause), resting on an
+  // observation of the answer's own: it names a displayed metric ("given its
+  // gross margin of 70.8%"); not generic words ("given the data shown above"),
+  // a title's wrapper words ("the side shown"), a company or a year alone
+  // ("given NVDA", "based on 2026", #262 review).
+  // ponytail: an explanation without a connective ("and an acquisition lifted
+  // revenue") is not counted; #208's typed assertions bound that.
+  const groundedBasis = (sentence: string) => {
+    const basis = sentence.match(BASIS)?.[1];
+    if (basis === undefined || [...sentence.matchAll(CAUSAL)].length > 1) return false;
+    // A company's possessive ("NVDA's") is no cause word when it is a compared
+    // company or the hypothesis's own subject, named before its basis; another
+    // ("given TSLA's revenue") stays an unknown word (#262 review).
+    const named = new Set([...companies, ...(sentence.slice(0, sentence.length - basis.length).match(/\b[A-Z][A-Z0-9.]{1,5}(?=['’]s\b)/g) ?? [])]);
+    const words = causeWords(basis.replace(/\b([A-Z][A-Z0-9.]{1,5})['’]s\b/g, (possessive, ticker: string) => named.has(ticker) ? " " : possessive));
+    const cites = (name: string) => ` ${words.join(" ")} `.includes(` ${name} `);
+    return words.every(known) && metricNames.some(cites) &&
+      companyMentions(basis, companies).every(({ company }) => metricsOwned(company).some(cites));
   };
+  let hypotheses = 0;
   const dates = new Set(displayedDates);
   // A displayed day in the chart window's own words reads as its month
   // ("from the December 31, 2025 close" -> "from the December 2025 close"); a
@@ -320,8 +301,20 @@ export function keepSupportedSentences(
     }
     // A list marker ("1.", "-") is not a sentence: it is set aside, and stays
     // with whatever of its item is kept.
-    const lead = line.match(LIST_MARKER)?.[0] ?? line.match(/^\s*/)![0];
-    const kept = line.slice(lead.length).trim().split(SENTENCE_BREAK).filter((written) => {
+    // A labelled line is a hypothesis within the cap, or it goes whole (#262 review).
+    // Any line claiming to be one counts toward the cap; one not in exactly the
+    // labelled form (bold only, behind a list marker) goes whole.
+    const label = line.match(HYPOTHESIS)?.[0];
+    const claimed = label !== undefined || HYPOTHESIS_CLAIM.test(line);
+    const withinCap = claimed && ++hypotheses <= MAX_HYPOTHESES;
+    if (claimed && label === undefined) {
+      removed.push(line.trim());
+      lines.push(null);
+      continue;
+    }
+    const lead = label ?? line.match(LIST_MARKER)?.[0] ?? line.match(/^\s*/)![0];
+    const sentences = line.slice(lead.length).trim().split(SENTENCE_BREAK);
+    const keeps = sentences.map((written, sentenceIndex) => {
       // A displayed date written with its day ("December 31, 2025") is checked as
       // its month and year, so the day is not a figure (#240); any other day is.
       const sentence = withDisplayedDays(written);
@@ -334,7 +327,8 @@ export function keepSupportedSentences(
         (text, company) => text.replace(new RegExp(`(?<![a-z0-9])${escapeRegExp(company.toLowerCase())}(?![a-z0-9])`, "g"), company),
         plain.toLowerCase(),
       );
-      if (MAGNITUDE.test(plain) || MULTIPLIER.test(normalized) || !groundedCause(plain)) {
+      if (MAGNITUDE.test(plain) || MULTIPLIER.test(normalized) ||
+        (label !== undefined && sentenceIndex === 0 ? !(withinCap && groundedBasis(plain)) : !groundedCause(plain))) {
         removed.push(written);
         return false;
       }
@@ -417,6 +411,12 @@ export function keepSupportedSentences(
       if (!isSupported) removed.push(written);
       return isSupported;
     });
+    const kept = sentences.filter((_, index) => keeps[index]);
+    if (label !== undefined && !keeps[0]) {
+      removed.push(...kept);
+      lines.push(null);
+      continue;
+    }
     lines.push(kept.length > 0 ? lead + kept.join(" ") : null);
   }
   // A heading whose section lost everything goes too: the guard dropped lines

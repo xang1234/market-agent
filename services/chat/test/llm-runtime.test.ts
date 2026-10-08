@@ -281,6 +281,11 @@ test("the answer is asked for an analyst's view: takeaway, trend, strengths, cou
   assert.match(systemPrompt, /two figures side by side do not state one/);
   assert.match(systemPrompt, /never state one in words/);
   assert.match(systemPrompt, /never state a cause the data does not show/);
+  // The allowed forms of a cause, and the hypothesis label the guard keeps (#261).
+  assert.match(systemPrompt, /management attribution from a cited claim/);
+  assert.match(systemPrompt, /> \*\*Unverified hypothesis \(low\|medium\|high confidence\):\*\* <one explanation>, given <a figure or metric shown in this answer>/);
+  // The fact blocks render after the narrative, so nothing is "shown above" (#262 review).
+  assert.doesNotMatch(systemPrompt, /shown above/);
   assert.match(systemPrompt, /stale/);
   // The no-keys golden replay matches on the opening sentence.
   assert.match(systemPrompt, /^Write a concise investment research answer/);
@@ -384,6 +389,22 @@ async function composeWithReply(reply: string) {
   const text = (blocks[0].segments as Array<{ text: string }>)[0].text;
   return { text, prompt, removed };
 }
+
+test("a single-company answer may carry a labelled hypothesis resting on a displayed metric (#262 review)", async () => {
+  const reply = [
+    "NVDA's revenue reached $62.1B in Q4 2026.",
+    "",
+    "> **Unverified hypothesis (medium confidence):** NVDA's revenue may reflect Data Center demand, given its revenue of $62.1B.",
+  ].join("\n");
+  const { text, removed } = await composeWithReply(reply);
+  assert.deepEqual({ text, removed }, { text: reply, removed: [] });
+  // Naming the company in its basis, as the prompt asks of every figure (#262 review).
+  const named = "> **Unverified hypothesis (low confidence):** NVDA's revenue may reflect pricing power, given NVDA's revenue of $62.1B.";
+  assert.deepEqual(await composeWithReply(named).then(({ text, removed }) => ({ text, removed })), { text: named, removed: [] });
+  // Another company's figure is no basis, even when its number is shown.
+  const other = "> **Unverified hypothesis (low confidence):** NVDA's revenue may reflect pricing power, given TSLA's revenue of $62.1B.";
+  assert.deepEqual((await composeWithReply(other)).removed, ["NVDA's revenue may reflect pricing power, given TSLA's revenue of $62.1B."]);
+});
 
 test("a replayed reply quoting a figure the user is not shown has that sentence stripped", async () => {
   const { text, prompt, removed } = await composeWithReply(

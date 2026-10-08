@@ -83,3 +83,9 @@ test('Markdown does not apply inline-pill styling to fenced code blocks', async 
   assert.match(html, /<pre[^>]*><code class="language-sql">/)
   assert.doesNotMatch(html, /<code class="rounded bg-surface-2/)
 })
+
+test('Markdown sets an unverified hypothesis apart as a styled blockquote (#261)', async () => {
+  const html = await renderHtml(<Markdown text={"> **Unverified hypothesis (medium confidence):** Margins may reflect pricing power, given the 70.8% gross margin."} />)
+  assert.match(html, /<blockquote class="[^"]*border-l-2[^"]*">/)
+  assert.match(html, /<strong[^>]*>Unverified hypothesis \(medium confidence\):<\/strong>/)
+})
