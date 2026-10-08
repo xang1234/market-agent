@@ -270,13 +270,16 @@ export function keepSupportedSentences(
   const groundedBasis = (sentence: string) => {
     const basis = sentence.match(BASIS)?.[1];
     if (basis === undefined || [...sentence.matchAll(CAUSAL)].length > 1) return false;
-    // A company's possessive ("NVDA's") is no cause word when it is a compared
-    // company or the hypothesis's own subject, named before its basis; another
-    // ("given TSLA's revenue") stays an unknown word (#262 review).
+    // A company's possessive in the basis is a compared company or the
+    // hypothesis's own subject, named before its basis ("given TSLA's revenue"
+    // in an NVDA answer is not, #262 review). Its other words are free prose
+    // ("versus", "grew sequentially", 2026-10-08 eval): the named metric and the
+    // number check carry the grounding.
     const named = new Set([...companies, ...(sentence.slice(0, sentence.length - basis.length).match(/\b[A-Z][A-Z0-9.]{1,5}(?=['’]s\b)/g) ?? [])]);
-    const words = causeWords(basis.replace(/\b([A-Z][A-Z0-9.]{1,5})['’]s\b/g, (possessive, ticker: string) => named.has(ticker) ? " " : possessive));
+    const words = causeWords(basis);
     const cites = (name: string) => ` ${words.join(" ")} `.includes(` ${name} `);
-    return words.every(known) && metricNames.some(cites) &&
+    return [...basis.matchAll(/\b([A-Z][A-Z0-9.]{1,5})['’]s\b/g)].every(([, ticker]) => named.has(ticker)) &&
+      metricNames.some(cites) &&
       companyMentions(basis, companies).every(({ company }) => metricsOwned(company).some(cites));
   };
   let hypotheses = 0;

@@ -283,6 +283,8 @@ test("the answer is asked for an analyst's view: takeaway, trend, strengths, cou
   assert.match(systemPrompt, /never state a cause the data does not show/);
   // The allowed forms of a cause, and the hypothesis label the guard keeps (#261).
   assert.match(systemPrompt, /management attribution from a cited claim/);
+  // Candidate causes go in labelled hypotheses, not inside a gap sentence (2026-10-08 eval).
+  assert.match(systemPrompt, /never as\s+a list of candidate causes inside a sentence about what the data cannot tell/);
   assert.match(systemPrompt, /> \*\*Unverified hypothesis \(low\|medium\|high confidence\):\*\* <one explanation>, given <a figure or metric shown in this answer>/);
   // The fact blocks render after the narrative, so nothing is "shown above" (#262 review).
   assert.doesNotMatch(systemPrompt, /shown above/);

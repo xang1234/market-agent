@@ -778,6 +778,15 @@ test("a labelled hypothesis may state a cause the data does not show, with its b
   const mention = "NVDA's gross margin of 70.8% is above AMD's 49.9%. The data does not establish a cause; any explanation would be an unverified hypothesis.";
   const mentioned = [mention, "", first, "", second].join("\n");
   assert.deepEqual(keepSupportedSentences(mentioned, shown, GOLDEN), { text: mentioned, removed: [] });
+  // The eval's own hypotheses: a basis in ordinary words passes once it names a
+  // displayed metric and quotes only shown figures (2026-10-08 eval).
+  const evalCase = hypothesis("medium", "AMD's lower net margin relative to its gross margin could reflect higher operating expenses as a share of revenue, given AMD's gross margin of 49.9% versus net margin of 12.0% for FY2025 (ending December 2025).");
+  assert.deepEqual(keepSupportedSentences(evalCase, shown, GOLDEN).removed, []);
+  const bars = ["Quarterly revenue", "Q4 2025 $39.3B", "Q1 2026 $44.1B"];
+  const sequential = hypothesis("low", "A shift in product or customer mix toward lower-margin offerings may have weighed on Q1 fiscal 2026, given that revenue of $44.1B in that quarter still grew sequentially from $39.3B in Q4 fiscal 2025.");
+  assert.deepEqual(keepSupportedSentences(sequential, bars, [], [], ["Revenue"]).removed, []);
+  // A basis naming no displayed metric is still none, however worded.
+  assert.equal(keepSupportedSentences(hypothesis("low", "Margins may reflect a one-time charge, given that the margin recovered by Q2 fiscal 2026."), bars, [], [], ["Gross margin"]).text, "");
   // A figure with a unit is a basis, and a cause, like any other.
   const scaled = hypothesis("low", "NVDA's revenue may reflect Data Center demand, given its revenue of $209.9B.");
   assert.equal(keepSupportedSentences(scaled, [...shown, "Data Center"], GOLDEN).text, scaled);
