@@ -371,7 +371,7 @@ const FACT_BLOCKS = [{
   items: [{ label: "Revenue", value_ref: "fact-1", format: "$62.1B" }],
 }];
 
-async function composeWithReply(reply: string) {
+async function composeWithReply(reply: string, subjectLabels?: ReadonlyArray<string>) {
   let prompt = "";
   let removed: ReadonlyArray<string> = [];
   const blocks = await composeAnalystBlocksWithLlm({
@@ -380,6 +380,7 @@ async function composeWithReply(reply: string) {
     blocks: [NARRATIVE_BLOCK],
     toolCalls: [],
     factBlocks: FACT_BLOCKS,
+    ...(subjectLabels ? { subjectLabels } : {}),
     createClient: () => async (_deployment, request) => {
       prompt = request.messages.map((message) => message.content).join("\n");
       return { text: reply };
@@ -391,6 +392,14 @@ async function composeWithReply(reply: string) {
   const text = (blocks[0].segments as Array<{ text: string }>)[0].text;
   return { text, prompt, removed };
 }
+
+test("a single-company hypothesis's basis may name the answer's subject, however the hypothesis opens (2026-10-08 eval)", async () => {
+  const reply = "> **Unverified hypothesis (medium confidence):** A one-time charge may explain the dip, given NVDA's revenue of $62.1B.";
+  assert.deepEqual((await composeWithReply(reply, ["NVDA"])).removed, []);
+  // Without the subject, or naming another company, the basis is still unknown.
+  assert.equal((await composeWithReply(reply)).removed.length, 1);
+  assert.equal((await composeWithReply(reply.replace("NVDA's", "TSLA's"), ["NVDA"])).removed.length, 1);
+});
 
 test("a single-company answer may carry a labelled hypothesis resting on a displayed metric (#262 review)", async () => {
   const reply = [

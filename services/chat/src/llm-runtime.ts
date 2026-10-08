@@ -95,6 +95,8 @@ export async function composeAnalystBlocksWithLlm(input: {
   // Deterministic chart/table blocks shown with the answer. When present, the
   // prose may only quote figures they display (or that cited claims state).
   factBlocks?: ReadonlyArray<Record<string, unknown>>;
+  // The turn's subjects as labelled ("NVDA"), for the guard (2026-10-08 eval).
+  subjectLabels?: ReadonlyArray<string>;
   // Recent thread messages, oldest first, so the answer reads as a reply.
   conversation?: ReadonlyArray<{ role: string; text: string }>;
   createClient?: () => Promise<LlmChatClient> | LlmChatClient;
@@ -222,6 +224,7 @@ export async function composeAnalystBlocksWithLlm(input: {
     // A chart window's dates, which the narrative may write with their day (#240).
     displayTexts.flatMap((text) => text.match(/\d{4}-\d{2}-\d{2}/g) ?? []),
     shown.flatMap((figure) => figure.metric ?? []),
+    input.subjectLabels ?? [],
   );
   if (guarded.removed.length > 0) {
     console.warn(`[chat] removed ${guarded.removed.length} narrative sentence(s) quoting figures not shown to the user`);
