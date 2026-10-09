@@ -46,7 +46,8 @@ const NUMBER =
 // ("2025 fiscal year", "2025 fiscal-year").
 const FISCAL = /(?:\bFY ?|\bfiscal(?:[ -]year)? )$/i;
 const FISCAL_AFTER = /^ fiscal\b/i;
-const SENTENCE_BREAK = /(?<=[.!?])\s+/;
+// "vs." abbreviates, it does not end a sentence ("($44.1B vs. $39.3B)", 2026-10-08 eval).
+const SENTENCE_BREAK = /(?<=[.!?])(?<!\b[Vv]s\.)\s+/;
 // Markdown list markers ("- ", "* ", "1. ", "2) ") and headings ("## Margins",
 // a line that is only "**Margins**"; a bold sentence ending "." is prose).
 const LIST_MARKER = /^\s*(?:[-*+]|\d{1,2}[.)])\s+/;
@@ -155,7 +156,7 @@ const HYPOTHESIS_CLAIM = /^\s*(?:(?:[-*+]|\d{1,2}[.)])\s+)?(?:>\s*)?[*_]*\s*unve
 const BASIS_WORDS = new Set([
   "versus", "vs", "compared", "relative", "while", "despite", "still", "even", "only", "after", "before", "since",
   "grew", "grow", "growing", "rose", "fell", "declined", "dropped", "expanded", "contracted", "recovered",
-  "sequentially", "ending", "ended", "same", "prior", "previous", "following",
+  "sequentially", "ending", "ended", "same", "prior", "previous", "following", "alongside", "adjacent",
 ]);
 const BASIS = /\b(?:given|based on)\b(.*)$/i;
 const MAX_HYPOTHESES = 2;
@@ -213,6 +214,9 @@ export function keepSupportedSentences(
   // Every displayed figure's metric ("Gross margin"), a single company's too:
   // what a hypothesis's basis may name (#262 review).
   displayedMetrics: ReadonlyArray<string> = [],
+  // The answer's subjects ("NVDA"), which a single-company answer's figures do
+  // not carry: a hypothesis basis may name them (2026-10-08 eval). They own no figure.
+  subjectLabels: ReadonlyArray<string> = [],
 ): { text: string; removed: string[] } {
   // A year is supported in either form ("FY 2025 to FY 2026" shown supports
   // "2025-2026"); only owning one tells them apart.
@@ -287,7 +291,9 @@ export function keepSupportedSentences(
     // the sentence's opening possessive ("NVDA's revenue may …"); another
     // capitalized word ("AI demand", "TSLA's pricing") is not one (#265 review).
     const subject = sentence.match(/^\s*([A-Z][A-Z0-9.]{1,5})['’]s\b/)?.[1];
-    const named = new Set([...companies, ...(subject === undefined ? [] : [subject])]);
+    // The turn's subject labels only in a single-company answer, whose figures
+    // carry no company; a comparison names its own (#268 review).
+    const named = new Set([...companies, ...(companies.length === 0 ? subjectLabels : []), ...(subject === undefined ? [] : [subject])]);
     const words = causeWords(basis.replace(/\b([A-Z][A-Z0-9.]{1,5})(?:['’]s)?\b/g, (mention, ticker: string) => named.has(ticker) ? " " : mention));
     const cites = (name: string) => ` ${words.join(" ")} `.includes(` ${name} `);
     // A month only as the answer shows it, in full or abbreviated ("ended Jan

@@ -43,6 +43,7 @@ import {
   NO_STRUCTURED_REFS,
   structuredEvidenceStatus,
   structuredRefsFromHandoff,
+  subjectLabelsFromHandoff,
 } from "./local-runtime-structured.ts";
 import { createChatFinancialRuntime, type ChatFinancialRuntime } from "./financial-runtime.ts";
 import { createChatMessagePersistence } from "./messages.ts";
@@ -157,6 +158,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   const toolCallIds = toolCalls
     .filter((toolCall) => toolCall.status === "ok")
     .map((toolCall) => toolCall.tool_call_id);
+  const requestedListings = requestedListingsOf(covered);
   // Charts and tables come from facts, never from the model (see fact-blocks.ts).
   const [factBlocks, conversation] = await Promise.all([
     loadTurnFactBlocks(pool(), {
@@ -164,7 +166,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
       wantsPeers: WANTS_PEERS.test(context.userIntent ?? ""),
       wantsSegments: /\bsegments?\b/i.test(context.userIntent ?? ""),
       wantsMarginTrend: /\b(margins?|profitab\w*)\b/i.test(context.userIntent ?? ""),
-      requestedListings: requestedListingsOf(covered),
+      requestedListings,
       fiscalYear: requestedFiscalYear(context.userIntent ?? ""),
       priceWindow: requestedPriceWindow(context.userIntent ?? ""),
       frozenPrices: frozenDataMode(process.env),
@@ -181,6 +183,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     blocks: result.blocks,
     toolCalls,
     factBlocks,
+    subjectLabels: covered.flatMap((subject) => subjectLabelsFromHandoff(subject.handoff)),
     conversation,
     onAnswered: (deployment) => {
       answeredBy = deployment;

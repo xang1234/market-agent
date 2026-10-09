@@ -807,6 +807,14 @@ test("a labelled hypothesis may state a cause the data does not show, with its b
   // A fiscal period's possessive is a period, not a ticker (#265 review).
   const quarter = hypothesis("low", "NVDA's revenue may reflect stronger demand, given Q4's revenue of $39.3B.");
   assert.deepEqual(keepSupportedSentences(quarter, bars, [], [], ["Revenue"]).removed, []);
+  // "vs." does not end the hypothesis, and "alongside" is a comparison word (2026-10-08 eval).
+  const versus = hypothesis("low", "A product-mix shift ($44.1B vs. $39.3B in revenue) may have weighed on margins, given that revenue still grew sequentially in Q1 2026.");
+  assert.deepEqual(keepSupportedSentences(versus, bars, [], [], ["Revenue"]).removed, []);
+  const alongside = hypothesis("low", "Demand may explain it, given revenue of $44.1B alongside revenue of $39.3B.");
+  assert.deepEqual(keepSupportedSentences(alongside, bars, [], [], ["Revenue"]).removed, []);
+  // In a comparison, a requested subject with no figures is no exemption (#268 review).
+  const partial = hypothesis("low", "NVDA's revenue may reflect demand, given TSLA's revenue of $209.9B.");
+  assert.equal(keepSupportedSentences(partial, shown, GOLDEN, [], [], ["NVDA", "AMD", "TSLA"]).text, "");
   // A basis naming no displayed metric is still none, however worded.
   assert.equal(keepSupportedSentences(hypothesis("low", "Margins may reflect a one-time charge, given that the margin recovered by Q2 fiscal 2026."), bars, [], [], ["Gross margin"]).text, "");
   // A figure with a unit is a basis, and a cause, like any other.
