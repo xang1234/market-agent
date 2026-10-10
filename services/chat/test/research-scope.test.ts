@@ -286,3 +286,20 @@ test("a benchmark is a named gap the next turns keep until it is turned off", ()
   assert.equal(parseResearchScope(old)?.benchmark, false);
   assert.equal(parseResearchScope(JSON.parse(JSON.stringify(first)))?.benchmark, true);
 });
+
+test("a follow-up turns off every facet in a list, and stops at the next request", () => {
+  const prior = fresh("Compare NVDA with AMD segments and margin trends YTD against the S&P 500", [NVDA, AMD]);
+  const next = (question: string) =>
+    resolveResearchScope({ question, companies: [NVDA, AMD], prior, asOf: "2026-09-02T00:00:00.000Z" });
+  const both = next("Same, without segments and margins");
+  assert.equal(both.segments, false);
+  assert.equal(both.margin_trend, false);
+  const listed = next("Drop the benchmark, the segments and the YTD window");
+  assert.equal(listed.benchmark, false);
+  assert.equal(listed.segments, false);
+  assert.equal(listed.price_window, null);
+  // "and show ..." asks for something else: segments stay off, margins stay on.
+  const then = next("Drop the segments and show the margin trend");
+  assert.equal(then.segments, false);
+  assert.equal(then.margin_trend, true);
+});

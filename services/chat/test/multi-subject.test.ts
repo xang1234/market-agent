@@ -236,6 +236,13 @@ test("a follow-up that drops a company keeps the others", async () => {
   // A company named beside the one dropped is added.
   const swapped = await subjectsForTurn("Drop AMD and add TSLA", { loadPriorSubjects: priorOf("NVDA", "AMD", "AAPL") });
   assert.deepEqual(swapped.tickers, ["NVDA", "AAPL", "TSLA"]);
+  // Every company in a list is dropped; a request after it is not part of it.
+  for (const question of ["Drop AMD and AAPL", "Drop AMD, AAPL", "Remove AMD and AAPL from the table"]) {
+    const { tickers } = await subjectsForTurn(question, { loadPriorSubjects: priorOf("NVDA", "AMD", "AAPL") });
+    assert.deepEqual(tickers, ["NVDA"], question);
+  }
+  const dropThenAdd = await subjectsForTurn("Drop AMD, add TSLA", { loadPriorSubjects: priorOf("NVDA", "AMD", "AAPL") });
+  assert.deepEqual(dropThenAdd.tickers, ["NVDA", "AAPL", "TSLA"]);
   // Turning a facet off names no company, so the companies are kept.
   const { tickers } = await subjectsForTurn("Drop the segments", { loadPriorSubjects: priorOf("NVDA", "AMD") });
   assert.deepEqual(tickers, ["NVDA", "AMD"]);

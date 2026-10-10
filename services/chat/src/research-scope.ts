@@ -72,9 +72,15 @@ const PEERS = /\bpeers?\b/i;
 const BENCHMARK = /\b(?:benchmarks?|S&P(?:\s*500)?|Nasdaq(?:[- ]100| composite)?|Dow Jones|Russell \d{4}|(?:market |stock )?index(?:es)?)(?![\w&])/i;
 const WINDOW = /\b(?:ytd|year[- ]to[- ]date|(?:price )?window|(?:price )?returns?)\b/i;
 const FISCAL = /\b(?:FY\s?'?\d{2,4}|fiscal(?:\s+year)?(?:\s+\d{2,4})?|\d{4}\s+fiscal)\b/i;
-// What a follow-up turns off: the words after "without", "drop" and the like,
-// up to the end of the clause.
-const OFF = /\b(?:without|no|drop|remove|exclude|skip|forget|ignore|hide|leave out|take out|no longer (?:show|include)|stop (?:showing|including))\s+((?:the|any|its|their)\s+)?([^,.;:?!]+?)(?=\s+(?:and|but|then)\b|[,.;:?!]|$)/gi;
+// Where a list of things to remove ends: at the end of the sentence, or where
+// the next request starts ("drop AMD and AAPL, and add TSLA"). Commas and "and"
+// inside the list ("segments, margins and the window") are part of it.
+export const LIST_END = String.raw`(?=\s*[.;:?!]|,?\s+(?:(?:and|but|then)\s+)?(?:add|adding|bring|include|show|compare|keep|switch|also|now|instead)\b|$)`;
+// What a follow-up turns off: the words after "without", "drop" and the like.
+const OFF = new RegExp(
+  String.raw`\b(?:without|no|drop|remove|exclude|skip|forget|ignore|hide|leave out|take out|no longer (?:show|include)|stop (?:showing|including))\s+((?:the|any|its|their)\s+)?([^.;:?!]+?)` + LIST_END,
+  "gi",
+);
 const SEGMENTS = /\bsegments?\b/i;
 const MARGINS = /\b(margins?|profitab\w*)\b/i;
 // A margin asked about over time, not just its latest value.

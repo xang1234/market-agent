@@ -346,6 +346,22 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
       [peersThread.thread_id],
     );
     assert.deepEqual(rows[0]?.research_scope.companies.map((company) => company.issuer_id), [NVDA.issuer_id, AMD.issuer_id]);
+    // Turning peers off removes the auto-selected peer too: NVDA alone (#206).
+    completedTurn(await runTurn(base, peersThread.thread_id, "Drop the peers"));
+    const after = await client.query<{ research_scope: { route: string; peers: boolean; companies: Array<{ issuer_id: string }> } }>(
+      `select research_scope from chat_messages where thread_id = $1::uuid and role = 'assistant' order by created_at desc limit 1`,
+      [peersThread.thread_id],
+    );
+    assert.equal(after.rows[0]?.research_scope.peers, false);
+    assert.deepEqual(after.rows[0]?.research_scope.companies.map((company) => company.issuer_id), [NVDA.issuer_id]);
+    assert.notEqual(after.rows[0]?.research_scope.route, "comparison");
+    // ...and the next follow-up does not carry the peer back.
+    completedTurn(await runTurn(base, peersThread.thread_id, "Explain it"));
+    const next = await client.query<{ research_scope: { companies: Array<{ issuer_id: string }> } }>(
+      `select research_scope from chat_messages where thread_id = $1::uuid and role = 'assistant' order by created_at desc limit 1`,
+      [peersThread.thread_id],
+    );
+    assert.deepEqual(next.rows[0]?.research_scope.companies.map((company) => company.issuer_id), [NVDA.issuer_id]);
   });
 
   await t.test("'Break down NVDA's revenue by segment' shows each segment from cited facts (#157)", async () => {

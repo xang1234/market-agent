@@ -91,14 +91,21 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     ? context.subjectPreResolution
     : null;
   // Every company the turn covers (primary first); see resolveTurnSubjects.
-  const covered = context.subjectPreResolutions ?? (resolved ? [resolved] : []);
+  const carriedSubjects = context.subjectPreResolutions ?? (resolved ? [resolved] : []);
   // What the turn asks for, keeping a follow-up's unchanged scope (#206). A
   // window asked for now is cut off at the turn's asOf, which a follow-up keeps.
-  const scopeAt = await turnScope(context.threadId, context.userIntent ?? "", covered);
+  const scopeAt = await turnScope(context.threadId, context.userIntent ?? "", carriedSubjects);
   // A live YTD request fetches its prices first, so the cutoff below covers them (#232).
-  await hydrateYtdWindow(scopeAt(new Date().toISOString()), covered);
+  await hydrateYtdWindow(scopeAt(new Date().toISOString()), carriedSubjects);
   const asOf = new Date().toISOString();
   const scope = scopeAt(asOf);
+  // A carried-forward company the scope dropped (an auto-selected peer turned
+  // off) is not covered either, so the next follow-up does not bring it back.
+  const scoped = new Set(scope.companies.map((company) => company.issuer_id));
+  const covered = carriedSubjects.filter((subject) => {
+    const issuer = structuredRefsFromHandoff(subject.handoff).issuer;
+    return issuer === null || scoped.has(issuer.id);
+  });
   const subjectRefs = covered.length > 0
     ? covered.map((subject) => subject.subject_ref)
     : [{ kind: "screen" as const, id: context.threadId }];
@@ -247,8 +254,14 @@ async function turnScope(
   covered: ReadonlyArray<ChatResolvedSubjectPreResolution>,
   served = false,
 ): Promise<(cutoff: string) => ResearchScope> {
-  const named = companiesOf(covered);
-  const prior = await continuedScope(threadId, named);
+  const carried = companiesOf(covered);
+  const prior = await continuedScope(threadId, carried);
+  // Peers turned off: the previous answer's auto-selected peers (saved with no
+  // label) go with them, though the follow-up carried them forward.
+  const autoPeers = new Set(prior?.peers ? prior.companies.flatMap((company) => company.label === undefined ? [company.issuer_id] : []) : []);
+  const peersOff = autoPeers.size > 0 &&
+    !resolveResearchScope({ question, companies: carried, prior, asOf: new Date().toISOString(), served }).peers;
+  const named = peersOff ? carried.filter((company) => !autoPeers.has(company.issuer_id)) : carried;
   const resolve = (cutoff: string) => resolveResearchScope({ question, companies: named, prior, asOf: cutoff, served });
   const base = resolve(new Date().toISOString());
   // An evidence follow-up keeps the previous answer's companies as they were; a

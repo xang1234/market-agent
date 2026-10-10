@@ -30,7 +30,7 @@ import {
 import type { ChatClarificationAnswer, ChatFinancialRuntime } from "./financial-runtime.ts";
 import { ChatSnapshotSealError } from "./messages.ts";
 import { financialAwareRunner } from "./financial-turn.ts";
-import type { ResearchScope } from "./research-scope.ts";
+import { LIST_END, type ResearchScope } from "./research-scope.ts";
 
 export type ChatTurnInput = {
   threadId: string;
@@ -845,8 +845,8 @@ type TurnSubjects = {
 // naming a new company after a comparison ("what about AAPL?") could mean
 // either, so it asks; "just AAPL" or a full new question switches to it.
 const ADD = /\b(?:add|adding|bring (?:back|in))\b/i;
-// The words after a removal verb, up to the end of the clause.
-const REMOVE = /\b(?:drop|remove|exclude|without|leave out|take out|minus|except)\s+([^,.;:?!]+?)(?=\s+(?:and|but|then)\b|[,.;:?!]|$)/gi;
+// The companies after a removal verb, a whole list of them (LIST_END).
+const REMOVE = new RegExp(String.raw`\b(?:drop|remove|exclude|without|leave out|take out|minus|except)\s+([^.;:?!]+?)` + LIST_END, "gi");
 const CONTINUATION = /^\s*(?:and\s+)?(?:what|how)\s+about\b|^\s*and\s+\S/i;
 const ONLY = /\b(?:just|only|instead|switch to|alone)\b/i;
 
