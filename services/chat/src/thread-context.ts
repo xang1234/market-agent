@@ -48,8 +48,10 @@ export async function loadPriorSubjects(
   return subjects;
 }
 
-// The previous answer's research scope (research-scope.ts), for a follow-up to
-// keep what it does not change; null when that answer saved none.
+// The latest research scope an answer saved (research-scope.ts), for a
+// follow-up to keep what it does not change. Answers that save none (an
+// enforced financial answer, a clarification) leave it in place; null when no
+// answer saved one.
 export async function loadPriorScope(
   db: QueryExecutor,
   input: { threadId: string },
@@ -60,6 +62,7 @@ export async function loadPriorScope(
       where m.thread_id = $1::uuid
         and m.role = 'assistant'
         and m.snapshot_id is not null
+        and m.research_scope is not null
       order by m.created_at desc
       limit 1`,
     [input.threadId],
