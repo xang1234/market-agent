@@ -243,9 +243,27 @@ test("a follow-up that drops a company keeps the others", async () => {
   }
   const dropThenAdd = await subjectsForTurn("Drop AMD, add TSLA", { loadPriorSubjects: priorOf("NVDA", "AMD", "AAPL") });
   assert.deepEqual(dropThenAdd.tickers, ["NVDA", "AAPL", "TSLA"]);
+  // A company added beside a removal that cannot be found is named, not dropped silently.
+  const unfound = await subjectsForTurn("Drop AMD and add XYZQ", { loadPriorSubjects: priorOf("NVDA", "AMD", "AAPL") });
+  assert.deepEqual(unfound.tickers, ["NVDA", "AAPL"]);
+  assert.deepEqual(unfound.context?.unresolvedMentions, ["XYZQ"]);
   // Turning a facet off names no company, so the companies are kept.
   const { tickers } = await subjectsForTurn("Drop the segments", { loadPriorSubjects: priorOf("NVDA", "AMD") });
   assert.deepEqual(tickers, ["NVDA", "AMD"]);
+});
+
+test("an ambiguous company added beside a removal is asked about", async () => {
+  let ran = false;
+  const turn = createChatCoordinator({
+    preResolveSubject,
+    loadPriorSubjects: priorOf("NVDA", "AMD", "AAPL"),
+    runner: () => {
+      ran = true;
+    },
+  }).getOrCreateTurn({ threadId: "thread-1", runId: "run-1", userIntent: "Drop AMD and add GOOGL" });
+  await turn.completed;
+  assert.equal(ran, false);
+  assert.match(JSON.stringify(turn.events), /Which Alphabet share class do you mean\?/);
 });
 
 test("naming a new company after a comparison, without saying add or replace, asks which", async () => {

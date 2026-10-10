@@ -859,7 +859,7 @@ async function resolveTurnSubjects(
   const comparative = COMPARATIVE.test(text ?? "") || ADD.test(text ?? "");
   const named = text ? await resolveNamedSubjects(text, preResolve) : { resolved: [], unresolved: [] };
   const change = text && named.resolved.length > 0 && loadPriorSubjects !== undefined
-    ? await companyChange(context, text, named.resolved, preResolve, loadPriorSubjects)
+    ? await companyChange(context, text, named, preResolve, loadPriorSubjects)
     : null;
   if (change !== null) return change;
   // Outside comparisons an unresolved token is usually an acronym, not a company,
@@ -889,10 +889,11 @@ async function resolveTurnSubjects(
 async function companyChange(
   context: ChatTurnRunContext,
   text: string,
-  named: ReadonlyArray<ChatResolvedSubjectPreResolution>,
+  mentioned: Awaited<ReturnType<typeof resolveNamedSubjects>>,
   preResolve: ChatSubjectPreResolver,
   loadPriorSubjects: ChatPriorSubjectsLoader,
 ): Promise<TurnSubjects | null> {
+  const named = mentioned.resolved;
   const removal = [...text.matchAll(REMOVE)].map((match) => match[1]).join(", ");
   const ambiguous = CONTINUATION.test(text) && !COMPARATIVE.test(text) && !ADD.test(text) && !ONLY.test(text);
   if (removal === "" && !ambiguous) return null;
@@ -906,8 +907,15 @@ async function companyChange(
     // Only companies the previous answer covered can be dropped, and not all of
     // them; one named beside them ("drop AMD and add TSLA") is added.
     if (removed.size > 0 && [...removed].every((key) => priorKeys.has(key)) && kept.length > 0) {
+      // As in a comparison: an ambiguous company named beside it is asked
+      // about, and one not found is named in the answer.
+      const ambiguousMention = mentioned.unresolved.find((resolution) => resolution.status === "needs_clarification");
+      if (ambiguousMention) return { subjects: [], ambiguous: ambiguousMention, notFound: [] };
       const subjects = distinctCompanies([...kept, ...named.filter((subject) => !removed.has(companyKey(subject)))]);
-      return { subjects: subjects.slice(0, MAX_TURN_SUBJECTS), notFound: [] };
+      return {
+        subjects: subjects.slice(0, MAX_TURN_SUBJECTS),
+        notFound: mentioned.unresolved.map((resolution) => resolution.input_text),
+      };
     }
     return null;
   }

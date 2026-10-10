@@ -303,3 +303,13 @@ test("a follow-up turns off every facet in a list, and stops at the next request
   assert.equal(then.segments, false);
   assert.equal(then.margin_trend, true);
 });
+
+test("'no' turns a facet off only at the start of a clause", () => {
+  const prior = fresh("Compare NVDA with AMD segments and margin trends", [NVDA, AMD]);
+  const next = (question: string) =>
+    resolveResearchScope({ question, companies: [NVDA, AMD], prior, asOf: "2026-09-02T00:00:00.000Z" });
+  assert.equal(next("Why was there no change in margins over the last year?").margin_trend, true);
+  assert.equal(next("No segments this time").segments, false);
+  assert.equal(next("Same table, no segments").segments, false);
+  assert.equal(next("Keep the margins and no segments").segments, false);
+});
