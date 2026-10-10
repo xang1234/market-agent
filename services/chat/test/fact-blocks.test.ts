@@ -13,9 +13,11 @@ import {
   priceListingsForComparison,
   requestedFiscalYear,
   requestedPriceWindow,
+  scopeGapBlocks,
   segmentRevenueItems,
   type DerivedQuarterFact,
 } from "../src/fact-blocks.ts";
+import { resolveResearchScope } from "../src/research-scope.ts";
 import { deriveQuarterMetrics } from "../src/quarter-metrics.ts";
 import { fakeQuery } from "./fake-query.ts";
 
@@ -429,4 +431,22 @@ test("the model sees a price chart's return per company over its window (#181)",
     ["AMD", "Price return", "-4.25%", "YTD 2026: 2025-12-31 close to 2026-08-31 close"],
     ["AAPL", "Price return", "-0.04%", "YTD 2026: 2025-12-31 close to 2026-08-31 close"],
   ]);
+});
+
+test("what a turn asked for and cannot show is a note each, naming its companies (#206)", () => {
+  const AMD = { issuer_id: "60000000-0000-4000-8000-000000000002", label: "AMD" };
+  const scope = (question: string) => resolveResearchScope({ question, companies: [AMD], prior: null, asOf: "2026-09-01T00:00:00.000Z" });
+  const input = { snapshotId: "11111111-1111-4111-8111-111111111111", asOf: "2026-09-01T00:00:00.000Z" };
+  const text = (blocks: ReadonlyArray<Record<string, unknown>>) =>
+    blocks.map((block) => (block.segments as Array<{ text: string }>)[0]!.text);
+  assert.deepEqual(text(scopeGapBlocks(scope("What is AMD's free cash flow and EPS?"), [], input)), [
+    "Free cash flow is not available for AMD in this data, so no other figure is shown in its place.",
+    "Earnings per share is not available for AMD in this data, so no other figure is shown in its place.",
+  ]);
+  assert.deepEqual(text(scopeGapBlocks(scope("Break down AMD's revenue by segment"), [], input)), [
+    "Revenue by segment is not available for AMD in this data.",
+  ]);
+  // A segment breakdown that was shown, or a question with no gap, adds nothing.
+  assert.deepEqual(scopeGapBlocks(scope("Break down AMD's revenue by segment"), [{ kind: "metric_row" }], input), []);
+  assert.deepEqual(scopeGapBlocks(scope("Analyze AMD"), [], input), []);
 });

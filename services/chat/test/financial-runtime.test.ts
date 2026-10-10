@@ -55,6 +55,27 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.equal(block.financial.coverage.state, "partial", "two companies were asked about; the answer covers both");
   });
 
+  await t.test("a published answer saves the turn's research scope; one that cannot be resolved saves none (#206)", async () => {
+    const scope = {
+      route: "latest_quarter" as const,
+      companies: [{ issuer_id: IDS.issuerA, label: "AAA" }],
+      peers: false,
+      segments: false,
+      margin_trend: false,
+      metrics: [],
+      fiscal_year: 2024,
+      price_window: null,
+      inherited: [],
+    };
+    const savedScope = async (researchScope: NonNullable<Parameters<typeof chatHarness>[1]["researchScope"]>) => {
+      const { events } = await chatHarness(pool, { model: revenueModel(["AAA"]), researchScope }).run({ ...base, userIntent: "Revenue for AAA" });
+      return (await db.query(`select research_scope from chat_messages where message_id = $1`, [completed(events).message_id])).rows[0].research_scope;
+    };
+    assert.deepEqual(await savedScope(async () => scope), scope);
+    // The scope only informs follow-ups; failing to resolve it never fails the answer.
+    assert.equal(await savedScope(async () => { throw new Error("prior scope unavailable"); }), null);
+  });
+
   await t.test("an explicit subject is planned first, alongside the companies the message names (#138)", async () => {
     const model = revenueModel(["AAA", "BBB"]);
     const { events } = await chatHarness(pool, { model }).run({ ...base, subjectText: "AAA", userIntent: "Compare revenue with BBB" });

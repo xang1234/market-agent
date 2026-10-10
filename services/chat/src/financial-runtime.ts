@@ -37,6 +37,7 @@ import type { ChatTurnRunContext } from "./coordinator.ts";
 import { contentHashForText, stableUuid } from "./chat-ids.ts";
 import { COMPARATIVE, companyKey, extractSubjectMentions } from "./subject-extraction.ts";
 import type { ChatSubjectPreResolution } from "./subjects.ts";
+import type { ResearchScope } from "./research-scope.ts";
 
 export type ChatFinancialMode = FinancialMode;
 
@@ -67,6 +68,8 @@ export type ChatFinancialRuntimeDeps = Readonly<{
   planningModel: PlanningModel | null;
   resolveMention(mention: string): Promise<ChatSubjectPreResolution>;
   evidence: (executor: SqlExecutor) => FinancialEvidencePort;
+  /** The turn's research scope, saved with a published answer (#206); absent, none is saved. */
+  researchScope?: (context: ChatFinancialTurnContext) => Promise<ResearchScope>;
 }>;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -97,6 +100,11 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     const authority = chatAuthority(context.userId!, context.threadId, turnId, deps.mode);
 
     const messageId = financialMessageId(context.threadId, turnId);
+    // The scope only informs follow-ups: failing to resolve it never fails the answer.
+    const scope = await deps.researchScope?.(context).catch((reason) => {
+      console.warn("[chat] research scope unavailable; saving the financial answer without it", reason);
+      return null;
+    }) ?? null;
     // A retry of this turn resumes what the first attempt reserved; it never plans again.
     const outcome = await publishRequest(deps.pool, {
       authority,
@@ -107,7 +115,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       // pool acquire here could wait forever on a one-connection pool.
       plan: (db) => planTurn(deps, db, context, text, authority, new Date()),
       evidence: deps.evidence,
-      persistParent: persistAssistantMessage(context.threadId, messageId),
+      persistParent: persistAssistantMessage(context.threadId, messageId, scope),
     });
     switch (outcome.status) {
       case "planned":
@@ -287,15 +295,23 @@ export function financialMessageId(threadId: string, turnId: string): string {
 }
 
 /** Writes the assistant message inside the finalization transaction, under the thread's owner. */
-function persistAssistantMessage(threadId: string, messageId: string): PersistParentArtifact {
+function persistAssistantMessage(threadId: string, messageId: string, scope: ResearchScope | null): PersistParentArtifact {
   return async (tx, publication) => {
     const blocks = [publication.block];
     const inserted = await tx.client.query(
-      `insert into chat_messages (message_id, thread_id, role, snapshot_id, blocks, content_hash)
-       select $1::uuid, t.thread_id, 'assistant'::chat_role, $3::uuid, $4::jsonb, $5
+      `insert into chat_messages (message_id, thread_id, role, snapshot_id, blocks, content_hash, research_scope)
+       select $1::uuid, t.thread_id, 'assistant'::chat_role, $3::uuid, $4::jsonb, $5, $7::jsonb
          from chat_threads t where t.thread_id = $2::uuid and t.user_id = $6::uuid
        returning message_id`,
-      [messageId, threadId, publication.snapshot_id, JSON.stringify(blocks), contentHashForText(JSON.stringify(blocks)), tx.run.user_id],
+      [
+        messageId,
+        threadId,
+        publication.snapshot_id,
+        JSON.stringify(blocks),
+        contentHashForText(JSON.stringify(blocks)),
+        tx.run.user_id,
+        scope === null ? null : JSON.stringify(scope),
+      ],
     );
     if (inserted.rows.length === 0) throw new Error("the chat thread no longer belongs to the run's owner");
   };

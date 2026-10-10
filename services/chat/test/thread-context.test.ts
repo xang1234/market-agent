@@ -77,7 +77,8 @@ test("the prior scope is the previous answer's saved research scope; none when i
     }),
   });
   // What it inherited is that answer's business, not the next one's.
-  assert.deepEqual(await loadPriorScope(db(saved), { threadId: THREAD_ID }), { ...saved, inherited: [] });
+  // A scope saved before metrics were recorded reads back with none.
+  assert.deepEqual(await loadPriorScope(db(saved), { threadId: THREAD_ID }), { ...saved, metrics: [], inherited: [] });
   assert.match(queries[0], /role = 'assistant'/);
   // An answer that saved no scope is skipped, not read as an empty one.
   assert.match(queries[0], /research_scope is not null/);
