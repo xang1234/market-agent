@@ -449,7 +449,8 @@ export function keepSupportedSentences(
 // The cause check alone, for an answer that shows no figures (#263): with
 // nothing displayed there is no vocabulary to ground a cause in, so any stated
 // cause goes, hedged or not. A labelled hypothesis within the cap keeps its
-// first sentence when it gives one explanation and its basis ("given …"); any
+// first sentence when it gives one explanation and a basis with words in it
+// ("given …"); any
 // further sentence is ordinary prose. A line claiming to be one in any other
 // form goes whole, as in keepSupportedSentences. An explicit gap ("the data
 // does not show why") names no cause and stays. Numbers are not checked: there are none shown to check
@@ -477,7 +478,7 @@ export function keepUncausedSentences(text: string): { text: string; removed: st
       const sentence = written.replace(/[*_`]+/g, "");
       const causes = [...sentence.matchAll(CAUSAL)].length;
       const keep = label !== undefined && index === 0
-        ? withinCap && causes <= 1 && BASIS.test(sentence)
+        ? withinCap && causes <= 1 && /[a-z0-9]/i.test(sentence.match(BASIS)?.[1] ?? "")
         : causes === 0;
       if (!keep) removed.push(written);
       return keep;

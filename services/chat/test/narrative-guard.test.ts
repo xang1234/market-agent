@@ -932,4 +932,6 @@ test("with no figures shown, a hypothesis keeps one explanation and its basis; t
   // No basis, or two explanations: the line goes whole.
   assert.equal(check(`${label} Demand may reflect mix.`).text, "");
   assert.equal(check(`${label} Demand may reflect mix, driven by pricing, given revenue.`).text, "");
+  // A basis marker with nothing after it is no basis.
+  assert.equal(check(`${label} Margins may reflect a secret acquisition, given.`).text, "");
 });
