@@ -94,21 +94,26 @@ test("a message naming two companies resolves both, in the order written", async
 });
 
 test("a comparative follow-up keeps the previous answer's companies and adds the new one", async () => {
-  const { tickers, primary } = await subjectsForTurn("Compare it with AMD", { loadPriorSubjects: priorOf("NVDA") });
+  const { tickers, primary, context } = await subjectsForTurn("Compare it with AMD", { loadPriorSubjects: priorOf("NVDA") });
   assert.deepEqual(tickers, ["NVDA", "AMD"]);
   assert.equal(primary, "NVDA");
+  // It refers back, so it keeps the previous answer's research scope (#206).
+  assert.equal(context?.followUp, true);
 });
 
 test("a follow-up that names no company carries the previous companies forward", async () => {
-  const { tickers } = await subjectsForTurn("Explain the differences and show the evidence", {
+  const { tickers, context } = await subjectsForTurn("Explain the differences and show the evidence", {
     loadPriorSubjects: priorOf("NVDA", "AMD"),
   });
   assert.deepEqual(tickers, ["NVDA", "AMD"]);
+  assert.equal(context?.followUp, true);
 });
 
 test("naming a new company without comparing replaces the previous ones", async () => {
-  const { tickers } = await subjectsForTurn("Analyze AAPL and its margins", { loadPriorSubjects: priorOf("NVDA") });
+  const { tickers, context } = await subjectsForTurn("Analyze AAPL and its margins", { loadPriorSubjects: priorOf("NVDA") });
   assert.deepEqual(tickers, ["AAPL"]);
+  // A fresh question: nothing of the previous answer's scope carries over.
+  assert.equal(context?.followUp, false);
 });
 
 test("the same company named twice or also carried forward is covered once", async () => {

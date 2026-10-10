@@ -4,6 +4,7 @@
 
 import { hydrateSubjectRef, type HydratedSubjectHandoff } from "../../resolver/src/flow.ts";
 import type { SubjectRef } from "../../shared/src/subject-ref.ts";
+import { parseResearchScope, type ResearchScope } from "./research-scope.ts";
 import type { ChatResolvedSubjectPreResolution } from "./subjects.ts";
 
 type QueryExecutor = {
@@ -45,6 +46,25 @@ export async function loadPriorSubjects(
     }
   }
   return subjects;
+}
+
+// The previous answer's research scope (research-scope.ts), for a follow-up to
+// keep what it does not change; null when that answer saved none.
+export async function loadPriorScope(
+  db: QueryExecutor,
+  input: { threadId: string },
+): Promise<ResearchScope | null> {
+  const { rows } = await db.query<{ research_scope: unknown }>(
+    `select m.research_scope
+       from chat_messages m
+      where m.thread_id = $1::uuid
+        and m.role = 'assistant'
+        and m.snapshot_id is not null
+      order by m.created_at desc
+      limit 1`,
+    [input.threadId],
+  );
+  return parseResearchScope(rows[0]?.research_scope ?? null);
 }
 
 export type ConversationMessage = { role: string; text: string };

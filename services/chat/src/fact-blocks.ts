@@ -71,6 +71,9 @@ export async function loadTurnFactBlocks(
     fiscalYear?: number;
     // The price window the question names (requestedPriceWindow).
     priceWindow?: PriceWindow;
+    // The window's cutoff when an earlier answer charted it (research-scope.ts),
+    // so its baseline and end stay the ones already shown; else asOf.
+    priceAsOf?: string;
     // A frozen dataset's prices, charted whatever their age (perf-block.ts).
     frozenPrices?: boolean;
   },
@@ -95,6 +98,7 @@ export async function loadTurnFactBlocks(
     requestedListings: input.requestedListings ?? new Map(),
     fiscalYear: input.fiscalYear,
     priceWindow: input.priceWindow,
+    priceAsOf: input.priceAsOf,
     frozenPrices: input.frozenPrices,
   });
 }
@@ -168,6 +172,7 @@ async function loadComparisonFactBlocks(
     requestedListings: ReadonlyMap<string, CompanyListing>;
     fiscalYear?: number;
     priceWindow?: PriceWindow;
+    priceAsOf?: string;
     frozenPrices?: boolean;
   },
 ): Promise<ReadonlyArray<Block>> {
@@ -186,7 +191,7 @@ async function loadComparisonFactBlocks(
   const performance = await loadPerfComparisonBlocks(db, {
     listings: priceListingsForComparison(issuerIds, companies),
     snapshotId: input.snapshotId,
-    asOf: input.asOf,
+    asOf: input.priceAsOf ?? input.asOf,
     window: input.priceWindow,
     frozenPrices: input.frozenPrices,
   });

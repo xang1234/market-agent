@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { HydratedSubjectHandoff } from "../../resolver/src/flow.ts";
-import { loadPriorSubjects, loadRecentConversation } from "../src/thread-context.ts";
+import { loadPriorScope, loadPriorSubjects, loadRecentConversation } from "../src/thread-context.ts";
 import { fakeQuery } from "./fake-query.ts";
 
 const THREAD_ID = "11111111-1111-4111-a111-111111111111";
@@ -54,6 +54,31 @@ test("a company that no longer hydrates is dropped rather than failing the turn"
   };
   const subjects = await loadPriorSubjects(db, { threadId: THREAD_ID }, hydrate);
   assert.deepEqual(subjects.map((subject) => subject.input_text), ["NVDA"]);
+});
+
+test("the prior scope is the previous answer's saved research scope; none when it saved none", async () => {
+  const saved = {
+    route: "comparison",
+    companies: [{ issuer_id: NVDA.id, label: "NVDA" }],
+    peers: false,
+    segments: false,
+    margin_trend: false,
+    fiscal_year: null,
+    price_window: { kind: "ytd", cutoff: "2026-09-01T00:00:00.000Z" },
+    inherited: ["price_window"],
+  };
+  const queries: string[] = [];
+  const db = (scope: unknown) => ({
+    query: fakeQuery((text) => {
+      queries.push(text);
+      return { rows: scope === undefined ? [] : [{ research_scope: scope }] };
+    }),
+  });
+  // What it inherited is that answer's business, not the next one's.
+  assert.deepEqual(await loadPriorScope(db(saved), { threadId: THREAD_ID }), { ...saved, inherited: [] });
+  assert.match(queries[0], /role = 'assistant'/);
+  assert.equal(await loadPriorScope(db(null), { threadId: THREAD_ID }), null);
+  assert.equal(await loadPriorScope(db(undefined), { threadId: THREAD_ID }), null);
 });
 
 test("recent conversation is the last messages' text, oldest first", async () => {

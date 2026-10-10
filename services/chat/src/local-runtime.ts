@@ -28,10 +28,11 @@ import {
   type ChatPriorSubjectsLoader,
   type ChatThreadTitleGenerator,
 } from "./coordinator.ts";
-import { loadTurnFactBlocks, priceListingsForTurn, requestedFiscalYear, requestedPriceWindow } from "./fact-blocks.ts";
+import { loadTurnFactBlocks, priceListingsForTurn } from "./fact-blocks.ts";
+import { resolveResearchScope, type ResearchScope } from "./research-scope.ts";
 import { frozenDataMode, hydrateYtdBars, marketHydrationOrigin } from "./ytd-hydration.ts";
 import { listingTimeZones } from "./perf-block.ts";
-import { loadPriorSubjects as loadThreadPriorSubjects, loadRecentConversation } from "./thread-context.ts";
+import { loadPriorScope, loadPriorSubjects as loadThreadPriorSubjects, loadRecentConversation } from "./thread-context.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import {
   composeAnalystBlocksWithLlm,
@@ -91,9 +92,15 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     : null;
   // Every company the turn covers (primary first); see resolveTurnSubjects.
   const covered = context.subjectPreResolutions ?? (resolved ? [resolved] : []);
+  // What the turn asks for, keeping a follow-up's unchanged scope (#206). A
+  // window asked for now is cut off at the turn's asOf, which a follow-up keeps.
+  const prior = context.followUp ? await loadPriorScope(pool(), { threadId: context.threadId }) : null;
+  const scopeAt = (cutoff: string) =>
+    resolveResearchScope({ question: context.userIntent ?? "", companies: companiesOf(covered), prior, asOf: cutoff });
   // A live YTD request fetches its prices first, so the cutoff below covers them (#232).
-  await hydrateYtdWindow(context.userIntent ?? "", covered);
+  await hydrateYtdWindow(scopeAt(new Date().toISOString()), covered);
   const asOf = new Date().toISOString();
+  const scope = scopeAt(asOf);
   const subjectRefs = covered.length > 0
     ? covered.map((subject) => subject.subject_ref)
     : [{ kind: "screen" as const, id: context.threadId }];
@@ -163,12 +170,14 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   const [factBlocks, conversation] = await Promise.all([
     loadTurnFactBlocks(pool(), {
       issuers: issuersOf(covered),
-      wantsPeers: WANTS_PEERS.test(context.userIntent ?? ""),
-      wantsSegments: /\bsegments?\b/i.test(context.userIntent ?? ""),
-      wantsMarginTrend: /\b(margins?|profitab\w*)\b/i.test(context.userIntent ?? ""),
+      wantsPeers: scope.peers,
+      wantsSegments: scope.segments,
+      wantsMarginTrend: scope.margin_trend,
       requestedListings,
-      fiscalYear: requestedFiscalYear(context.userIntent ?? ""),
-      priceWindow: requestedPriceWindow(context.userIntent ?? ""),
+      fiscalYear: scope.fiscal_year ?? undefined,
+      priceWindow: scope.price_window?.kind,
+      // An inherited window keeps the cutoff it was charted at.
+      ...(scope.inherited.includes("price_window") ? { priceAsOf: scope.price_window!.cutoff } : {}),
       frozenPrices: frozenDataMode(process.env),
       snapshotId: result.snapshot_id,
       asOf,
@@ -214,26 +223,27 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     ...(narrativeRemoved.length > 0 ? { narrative_removed: narrativeRemoved } : {}),
     ...(answeredBy ? { answered_by: answeredBy } : {}),
     ...(answerUsage ? { answer_usage: answerUsage } : {}),
+    research_scope: scope,
   } satisfies ChatAnalystToolRuntimeResult;
 };
 
 const CONVERSATION_MESSAGES = 6;
-const WANTS_PEERS = /\bpeers?\b/i;
 
 // Live mode only (marketHydrationOrigin): fetches and stores the YTD window's
 // bars for the companies the chart will cover. Never throws; a failure leaves
-// the chart to name what is missing.
+// the chart to name what is missing. An inherited window was fetched when it
+// was first charted, and is read at that cutoff.
 async function hydrateYtdWindow(
-  userIntent: string,
+  scope: ResearchScope,
   covered: ReadonlyArray<ChatResolvedSubjectPreResolution>,
 ): Promise<void> {
   const origin = marketHydrationOrigin(process.env);
-  if (origin === null || requestedPriceWindow(userIntent) !== "ytd") return;
-  const now = new Date().toISOString();
+  if (origin === null || scope.price_window === null || scope.inherited.includes("price_window")) return;
+  const now = scope.price_window.cutoff;
   try {
     const listings = await priceListingsForTurn(pool(), {
       issuers: issuersOf(covered),
-      wantsPeers: WANTS_PEERS.test(userIntent),
+      wantsPeers: scope.peers,
       requestedListings: requestedListingsOf(covered),
       asOf: now,
     });
@@ -265,6 +275,17 @@ function requestedListingsOf(
     out.set(refs.issuer.id, { listing_id: listing.ref.id, label: listing.ticker ?? subject.display_label });
   }
   return out;
+}
+
+// The turn's canonical companies, primary first, as its scope records them.
+function companiesOf(subjects: ReadonlyArray<ChatResolvedSubjectPreResolution>): ResearchScope["companies"] {
+  const seen = new Set<string>();
+  return subjects.flatMap((subject) => {
+    const issuer = structuredRefsFromHandoff(subject.handoff).issuer;
+    if (issuer === null || seen.has(issuer.id)) return [];
+    seen.add(issuer.id);
+    return [{ issuer_id: issuer.id, label: subject.display_label }];
+  });
 }
 
 function issuersOf(subjects: ReadonlyArray<ChatResolvedSubjectPreResolution>): IssuerSubjectRef[] {

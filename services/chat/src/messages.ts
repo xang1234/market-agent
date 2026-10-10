@@ -81,6 +81,8 @@ export type PersistChatMessageAfterSnapshotSealInput = {
   blocks: JsonValue;
   content_hash: string;
   answered_by?: string;
+  // The research scope the message answered (research-scope.ts, #206).
+  research_scope?: JsonValue;
   sealSnapshot(): Promise<SnapshotSealResult>;
 };
 
@@ -164,6 +166,7 @@ export function createChatMessagePersistence(
       blocks: message.blocks as JsonValue,
       content_hash: message.content_hash,
       ...(message.answered_by ? { answered_by: message.answered_by } : {}),
+      ...(message.research_scope ? { research_scope: message.research_scope as JsonValue } : {}),
       sealSnapshot: () => input.sealSnapshot(message),
     });
 
@@ -506,8 +509,8 @@ async function persistSealedChatMessage(
   try {
     const { rows } = await db.query<ChatMessageRow>(
       `insert into chat_messages
-         (thread_id, role, snapshot_id, blocks, content_hash, answered_by)
-       values ($1::uuid, $2::chat_role, $3::uuid, $4::jsonb, $5, $6)
+         (thread_id, role, snapshot_id, blocks, content_hash, answered_by, research_scope)
+       values ($1::uuid, $2::chat_role, $3::uuid, $4::jsonb, $5, $6, $7::jsonb)
        returning
          message_id::text as message_id,
          thread_id::text as thread_id,
@@ -524,6 +527,7 @@ async function persistSealedChatMessage(
         serializeJsonValue(input.blocks),
         input.content_hash,
         input.answered_by ?? null,
+        input.research_scope === undefined ? null : serializeJsonValue(input.research_scope),
       ],
     );
     const message = rows[0];

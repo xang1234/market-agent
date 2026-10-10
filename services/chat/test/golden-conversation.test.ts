@@ -254,6 +254,18 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
       [NVDA.issuer_id, AMD.issuer_id].sort(),
       "the answer should display cited facts about both companies",
     );
+    // Turn 2's YTD window carries over at its cutoff, not the default history window (#206).
+    const performance = answer.blocks.find((block) => block.kind === "perf_comparison");
+    assert.equal(performance?.default_range, "YTD 2026: 2025-12-31 close to 2026-08-31 close");
+    const { rows: scopes } = await client.query<{ research_scope: { price_window: unknown; inherited: string[] } }>(
+      `select research_scope from chat_messages
+        where thread_id = $1::uuid and role = 'assistant'
+        order by created_at`,
+      [thread.thread_id],
+    );
+    const [, compared, explained] = scopes.map((row) => row.research_scope);
+    assert.deepEqual(explained?.price_window, compared?.price_window);
+    assert.deepEqual(explained?.inherited, ["price_window"]);
   });
 
   await t.test("a reload returns all three turns: questions, figures, chart points and sources", async () => {
