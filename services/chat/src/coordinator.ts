@@ -902,22 +902,39 @@ async function companyChange(
   );
   const priorKeys = new Set(prior.map(companyKey));
   if (removal !== "") {
-    const removed = new Set((await resolveNamedSubjects(removal, preResolve)).resolved.map(companyKey));
+    const removedSubjects = distinctCompanies((await resolveNamedSubjects(removal, preResolve)).resolved);
+    const removed = new Set(removedSubjects.map(companyKey));
     const kept = prior.filter((subject) => !removed.has(companyKey(subject)));
+    if (removed.size === 0) return null;
     // Only companies the previous answer covered can be dropped, and not all of
-    // them; one named beside them ("drop AMD and add TSLA") is added.
-    if (removed.size > 0 && [...removed].every((key) => priorKeys.has(key)) && kept.length > 0) {
-      // As in a comparison: an ambiguous company named beside it is asked
-      // about, and one not found is named in the answer.
-      const ambiguousMention = mentioned.unresolved.find((resolution) => resolution.status === "needs_clarification");
-      if (ambiguousMention) return { subjects: [], ambiguous: ambiguousMention, notFound: [] };
-      const subjects = distinctCompanies([...kept, ...named.filter((subject) => !removed.has(companyKey(subject)))]);
+    // them: otherwise ask, rather than answer about the company named.
+    const absent = removedSubjects.filter((subject) => !priorKeys.has(companyKey(subject)));
+    const compared = labelList(prior.map(tickerLabel));
+    if (absent.length > 0) {
+      const missing = labelList(absent.map(tickerLabel));
       return {
-        subjects: subjects.slice(0, MAX_TURN_SUBJECTS),
-        notFound: mentioned.unresolved.map((resolution) => resolution.input_text),
+        subjects: [],
+        notFound: [],
+        clarify: `${missing} ${absent.length > 1 ? "are" : "is"} not in the ${compared} comparison, so there is nothing to drop. Say "add ${missing}" to add ${absent.length > 1 ? "them" : "it"}, or "just ${missing}" to look at ${absent.length > 1 ? "them" : "it"} alone.`,
       };
     }
-    return null;
+    if (kept.length === 0) {
+      return { subjects: [], notFound: [], clarify: `Dropping ${compared} leaves no company to compare. Name the company to look at.` };
+    }
+    // As in a comparison: an ambiguous company named beside it is asked about,
+    // and one not found is named in the answer.
+    const ambiguousMention = mentioned.unresolved.find((resolution) => resolution.status === "needs_clarification");
+    if (ambiguousMention) return { subjects: [], ambiguous: ambiguousMention, notFound: [] };
+    // One named beside them ("drop AMD and add TSLA") is added, before the
+    // carried companies take the capped slots.
+    const keptKeys = new Set(kept.map(companyKey));
+    const additions = distinctCompanies(named)
+      .filter((subject) => !removed.has(companyKey(subject)) && !keptKeys.has(companyKey(subject)))
+      .slice(0, MAX_TURN_SUBJECTS);
+    return {
+      subjects: [...kept.slice(0, MAX_TURN_SUBJECTS - additions.length), ...additions],
+      notFound: mentioned.unresolved.map((resolution) => resolution.input_text),
+    };
   }
   const added = distinctCompanies(named).filter((subject) => !priorKeys.has(companyKey(subject)));
   if (prior.length < 2 || added.length === 0) return null;

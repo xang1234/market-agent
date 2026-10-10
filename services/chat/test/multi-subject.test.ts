@@ -17,6 +17,7 @@ const LISTING_IDS: Record<string, string> = {
   GOOG: "62000000-0000-4000-8000-000000000005",
   META: "62000000-0000-4000-8000-000000000006",
   TSLA: "62000000-0000-4000-8000-000000000007",
+  NOW: "62000000-0000-4000-8000-000000000008",
 };
 
 function resolved(ticker: string): ChatResolvedSubjectPreResolution {
@@ -247,6 +248,12 @@ test("a follow-up that drops a company keeps the others", async () => {
   const unfound = await subjectsForTurn("Drop AMD and add XYZQ", { loadPriorSubjects: priorOf("NVDA", "AMD", "AAPL") });
   assert.deepEqual(unfound.tickers, ["NVDA", "AAPL"]);
   assert.deepEqual(unfound.context?.unresolvedMentions, ["XYZQ"]);
+  // A ticker that is also a word ("NOW") is part of the list, not where it ends.
+  const tickerWord = await subjectsForTurn("Drop AMD and NOW", { loadPriorSubjects: priorOf("NVDA", "AMD", "NOW") });
+  assert.deepEqual(tickerWord.tickers, ["NVDA"]);
+  // An addition beside a removal gets a slot under the cap before carried companies.
+  const full = await subjectsForTurn("Drop AMD and add TSLA", { loadPriorSubjects: priorOf("NVDA", "AMD", "AAPL", "MSFT", "GOOG", "META") });
+  assert.deepEqual(full.tickers, ["NVDA", "AAPL", "MSFT", "GOOG", "TSLA"]);
   // Turning a facet off names no company, so the companies are kept.
   const { tickers } = await subjectsForTurn("Drop the segments", { loadPriorSubjects: priorOf("NVDA", "AMD") });
   assert.deepEqual(tickers, ["NVDA", "AMD"]);
@@ -321,4 +328,22 @@ test("the reply to that question, or a clear switch, is answered", async () => {
   assert.deepEqual((await subjectsForTurn("What about AAPL?", { loadPriorSubjects: priorOf("NVDA") })).tickers, ["AAPL"]);
   // A company already compared is not a new one.
   assert.deepEqual((await subjectsForTurn("And what about AMD?", { loadPriorSubjects: priorOf("NVDA", "AMD") })).tickers, ["AMD"]);
+});
+
+test("dropping a company the comparison does not have, or every company, is asked about", async () => {
+  const ask = async (userIntent: string) => {
+    let ran = false;
+    const turn = createChatCoordinator({
+      preResolveSubject,
+      loadPriorSubjects: priorOf("NVDA", "AMD"),
+      runner: () => {
+        ran = true;
+      },
+    }).getOrCreateTurn({ threadId: "thread-1", runId: "run-1", userIntent });
+    await turn.completed;
+    assert.equal(ran, false, userIntent);
+    return JSON.stringify(turn.events);
+  };
+  assert.match(await ask("drop AAPL"), /AAPL is not in the NVDA and AMD comparison/);
+  assert.match(await ask("Drop NVDA and AMD"), /Dropping NVDA and AMD leaves no company/);
 });

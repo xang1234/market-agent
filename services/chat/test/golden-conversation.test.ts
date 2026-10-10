@@ -346,7 +346,9 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
       [peersThread.thread_id],
     );
     assert.deepEqual(rows[0]?.research_scope.companies.map((company) => company.issuer_id), [NVDA.issuer_id, AMD.issuer_id]);
-    // Turning peers off removes the auto-selected peer too: NVDA alone (#206).
+    // Turning peers off removes the auto-selected peer too, even after an
+    // ordinary follow-up in between: NVDA alone (#206).
+    completedTurn(await runTurn(base, peersThread.thread_id, "Explain the differences"));
     completedTurn(await runTurn(base, peersThread.thread_id, "Drop the peers"));
     const after = await client.query<{ research_scope: { route: string; peers: boolean; companies: Array<{ issuer_id: string }> } }>(
       `select research_scope from chat_messages where thread_id = $1::uuid and role = 'assistant' order by created_at desc limit 1`,

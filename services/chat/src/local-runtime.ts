@@ -267,7 +267,13 @@ async function turnScope(
   // An evidence follow-up keeps the previous answer's companies as they were; a
   // financial answer covers exactly the companies its plan requested.
   const compared = base.route === "evidence_followup" || served ? base.companies : await comparedCompanies(named, base.peers);
-  return (cutoff) => ({ ...resolve(cutoff), companies: compared });
+  // An auto-selected peer stays one (no label) while peers stay on, however
+  // many turns later they are turned off, unless the question names it.
+  const words = new Set(question.split(/[^A-Za-z0-9.]+/));
+  const companies = compared.map((company) =>
+    autoPeers.has(company.issuer_id) && !(company.label !== undefined && words.has(company.label)) ? { issuer_id: company.issuer_id } : company
+  );
+  return (cutoff) => ({ ...resolve(cutoff), companies });
 }
 
 // The companies the answer compares: the ones the turn covers, or for a peers

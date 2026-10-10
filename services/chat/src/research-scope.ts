@@ -75,7 +75,8 @@ const FISCAL = /\b(?:FY\s?'?\d{2,4}|fiscal(?:\s+year)?(?:\s+\d{2,4})?|\d{4}\s+fi
 // Where a list of things to remove ends: at the end of the sentence, or where
 // the next request starts ("drop AMD and AAPL, and add TSLA"). Commas and "and"
 // inside the list ("segments, margins and the window") are part of it.
-export const LIST_END = String.raw`(?=\s*[.;:?!]|,?\s+(?:(?:and|but|then)\s+)?(?:add|adding|bring|include|show|compare|keep|switch|also|now|instead)\b|$)`;
+// A word in capitals is a ticker in the list ("drop AMD and NOW"), not a request.
+export const LIST_END = String.raw`(?=\s*[.;:?!]|,?\s+(?:(?:and|but|then)\s+)?(?-i:(?![A-Z]{2,}\b))(?:add|adding|bring|include|show|compare|keep|switch|also|now|instead)\b|$)`;
 // What a follow-up turns off: the words after "without", "drop" and the like,
 // or after "no" starting a clause ("No segments", "same, no margins"), never
 // "no" inside one ("why was there no change in margins?").
