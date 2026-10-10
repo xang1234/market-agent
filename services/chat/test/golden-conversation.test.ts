@@ -322,6 +322,12 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
       [NVDA.issuer_id, AMD.issuer_id],
     );
     assert.deepEqual(comparison.subject_labels, ["NVDA", "AMD"]);
+    // The saved scope covers the auto-selected peer, so a follow-up about AMD continues it (#206).
+    const { rows } = await client.query<{ research_scope: { companies: Array<{ issuer_id: string }> } }>(
+      `select research_scope from chat_messages where thread_id = $1::uuid and role = 'assistant'`,
+      [peersThread.thread_id],
+    );
+    assert.deepEqual(rows[0]?.research_scope.companies.map((company) => company.issuer_id), [NVDA.issuer_id, AMD.issuer_id]);
   });
 
   await t.test("'Break down NVDA's revenue by segment' shows each segment from cited facts (#157)", async () => {

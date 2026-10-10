@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { needsWindowFetch, parseResearchScope, resolveResearchScope, type ResearchScope } from "../src/research-scope.ts";
+import { needsWindowFetch, parseResearchScope, resolveResearchScope, withShownCompanies, type ResearchScope } from "../src/research-scope.ts";
 
 const NVDA = { issuer_id: "60000000-0000-4000-8000-000000000001", label: "NVDA" };
 const AMD = { issuer_id: "60000000-0000-4000-8000-000000000002", label: "AMD" };
@@ -84,6 +84,9 @@ test("a saved scope reads back; anything else starts fresh", () => {
     { ...saved, fiscal_year: 2025.5 },
     { ...saved, price_window: { kind: "ytd", cutoff: "not a date" } },
     { ...saved, price_window: { kind: "1y", cutoff: AS_OF } },
+    { ...saved, companies: [null] },
+    { ...saved, companies: [{ issuer_id: NVDA.issuer_id }] },
+    { ...saved, companies: "NVDA" },
   ]) {
     assert.equal(parseResearchScope(value), null, JSON.stringify(value));
   }
@@ -99,4 +102,14 @@ test("a live turn fetches a window asked for now, or an inherited one only for a
   assert.equal(needsWindowFetch(next("Explain the differences", [NVDA, AMD]), prior), false);
   assert.equal(needsWindowFetch(next("Add AAPL too", [NVDA, AMD, AAPL]), prior), true);
   assert.equal(needsWindowFetch(fresh("Compare NVDA with AMD", [NVDA, AMD]), null), false);
+});
+
+test("the saved scope adds the peers a comparison showed, once each", () => {
+  const scope = fresh("How does NVDA compare with its peers?");
+  const saved = withShownCompanies(scope, [
+    { kind: "rich_text" },
+    { kind: "metrics_comparison", subjects: [{ kind: "issuer", id: NVDA.issuer_id }, { kind: "issuer", id: AMD.issuer_id }], subject_labels: ["NVDA", "AMD"] },
+  ]);
+  assert.deepEqual(saved.companies, [NVDA, AMD]);
+  assert.equal(withShownCompanies(scope, []), scope);
 });

@@ -100,13 +100,14 @@ export function parseResearchScope(value: unknown): ResearchScope | null {
     typeof scope.segments !== "boolean" ||
     typeof scope.margin_trend !== "boolean" ||
     !(scope.fiscal_year === null || Number.isInteger(scope.fiscal_year)) ||
-    !validWindow
+    !validWindow ||
+    !(Array.isArray(scope.companies) && scope.companies.every(isCompany))
   ) {
     return null;
   }
   return {
     route: ROUTES.includes(scope.route as ResearchRoute) ? scope.route as ResearchRoute : "unknown",
-    companies: Array.isArray(scope.companies) ? scope.companies as ResearchScope["companies"] : [],
+    companies: scope.companies as ResearchScope["companies"],
     peers: scope.peers,
     segments: scope.segments,
     margin_trend: scope.margin_trend,
@@ -114,4 +115,26 @@ export function parseResearchScope(value: unknown): ResearchScope | null {
     price_window: window === null ? null : { kind: "ytd", cutoff: window!.cutoff as string },
     inherited: [],
   };
+}
+
+function isCompany(value: unknown): boolean {
+  const company = value as { issuer_id?: unknown; label?: unknown } | null;
+  return typeof company?.issuer_id === "string" && typeof company.label === "string";
+}
+
+// The scope as saved: its companies plus any the answer's comparison showed
+// besides (auto-selected peers), so a follow-up about one of them continues it.
+export function withShownCompanies(scope: ResearchScope, blocks: ReadonlyArray<Record<string, unknown>>): ResearchScope {
+  const companies = [...scope.companies];
+  const seen = new Set(companies.map((company) => company.issuer_id));
+  for (const block of blocks) {
+    if (block.kind !== "metrics_comparison" || !Array.isArray(block.subjects)) continue;
+    const labels = Array.isArray(block.subject_labels) ? block.subject_labels : [];
+    block.subjects.forEach((subject: { id?: unknown }, i: number) => {
+      if (typeof subject?.id !== "string" || seen.has(subject.id)) return;
+      seen.add(subject.id);
+      companies.push({ issuer_id: subject.id, label: typeof labels[i] === "string" ? labels[i] : subject.id });
+    });
+  }
+  return companies.length === scope.companies.length ? scope : { ...scope, companies };
 }

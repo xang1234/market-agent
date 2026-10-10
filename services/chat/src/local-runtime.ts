@@ -29,7 +29,7 @@ import {
   type ChatThreadTitleGenerator,
 } from "./coordinator.ts";
 import { loadTurnFactBlocks, priceListingsForTurn } from "./fact-blocks.ts";
-import { needsWindowFetch, resolveResearchScope, type ResearchScope } from "./research-scope.ts";
+import { needsWindowFetch, resolveResearchScope, withShownCompanies, type ResearchScope } from "./research-scope.ts";
 import { frozenDataMode, hydrateYtdBars, marketHydrationOrigin } from "./ytd-hydration.ts";
 import { listingTimeZones } from "./perf-block.ts";
 import { loadPriorScope, loadPriorSubjects as loadThreadPriorSubjects, loadRecentConversation } from "./thread-context.ts";
@@ -224,7 +224,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     ...(narrativeRemoved.length > 0 ? { narrative_removed: narrativeRemoved } : {}),
     ...(answeredBy ? { answered_by: answeredBy } : {}),
     ...(answerUsage ? { answer_usage: answerUsage } : {}),
-    research_scope: scope,
+    research_scope: withShownCompanies(scope, factBlocks),
   } satisfies ChatAnalystToolRuntimeResult;
 };
 
