@@ -28,8 +28,8 @@ import {
   type ChatPriorSubjectsLoader,
   type ChatThreadTitleGenerator,
 } from "./coordinator.ts";
-import { loadTurnFactBlocks, priceListingsForTurn } from "./fact-blocks.ts";
-import { needsWindowFetch, resolveResearchScope, withShownCompanies, type ResearchScope } from "./research-scope.ts";
+import { loadTurnFactBlocks, priceListingsForTurn, turnCompanies } from "./fact-blocks.ts";
+import { needsWindowFetch, resolveResearchScope, type ResearchScope } from "./research-scope.ts";
 import { frozenDataMode, hydrateYtdBars, marketHydrationOrigin } from "./ytd-hydration.ts";
 import { listingTimeZones } from "./perf-block.ts";
 import { loadPriorScope, loadPriorSubjects as loadThreadPriorSubjects, loadRecentConversation } from "./thread-context.ts";
@@ -94,10 +94,14 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   const covered = context.subjectPreResolutions ?? (resolved ? [resolved] : []);
   // What the turn asks for, keeping a follow-up's unchanged scope (#206). A
   // window asked for now is cut off at the turn's asOf, which a follow-up keeps.
-  const companies = companiesOf(covered);
-  const prior = await continuedScope(context.threadId, companies);
-  const scopeAt = (cutoff: string) =>
-    resolveResearchScope({ question: context.userIntent ?? "", companies, prior, asOf: cutoff });
+  const named = companiesOf(covered);
+  const prior = await continuedScope(context.threadId, named);
+  const resolve = (cutoff: string) =>
+    resolveResearchScope({ question: context.userIntent ?? "", companies: named, prior, asOf: cutoff });
+  // The scope records the companies the answer compares, auto-selected peers
+  // included, so the fetch below and a follow-up about a peer both see them.
+  const compared = await comparedCompanies(named, resolve(new Date().toISOString()).peers);
+  const scopeAt = (cutoff: string): ResearchScope => ({ ...resolve(cutoff), companies: compared });
   // A live YTD request fetches its prices first, so the cutoff below covers them (#232).
   await hydrateYtdWindow(scopeAt(new Date().toISOString()), covered, prior);
   const asOf = new Date().toISOString();
@@ -224,11 +228,23 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     ...(narrativeRemoved.length > 0 ? { narrative_removed: narrativeRemoved } : {}),
     ...(answeredBy ? { answered_by: answeredBy } : {}),
     ...(answerUsage ? { answer_usage: answerUsage } : {}),
-    research_scope: withShownCompanies(scope, factBlocks),
+    research_scope: scope,
   } satisfies ChatAnalystToolRuntimeResult;
 };
 
 const CONVERSATION_MESSAGES = 6;
+
+// The companies the answer compares: the ones the turn covers, or for a peers
+// request one company plus its auto-selected peers (turnCompanies, the set the
+// fact blocks chart).
+async function comparedCompanies(
+  named: ResearchScope["companies"],
+  peers: boolean,
+): Promise<ResearchScope["companies"]> {
+  if (!peers || named.length !== 1) return named;
+  const issuers = await turnCompanies(pool(), named.map((company) => ({ kind: "issuer" as const, id: company.issuer_id })), true);
+  return issuers.map((issuer) => named.find((company) => company.issuer_id === issuer.id) ?? { issuer_id: issuer.id });
+}
 
 // The previous answer's scope when this turn continues it: it covers one of
 // that answer's companies, however it named them (carried forward, named

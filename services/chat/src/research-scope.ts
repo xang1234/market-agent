@@ -20,8 +20,9 @@ export type ScopeField = "peers" | "segments" | "margin_trend" | "fiscal_year" |
 
 export type ResearchScope = {
   route: ResearchRoute;
-  // Canonical companies, primary first.
-  companies: ReadonlyArray<{ issuer_id: string; label: string }>;
+  // Canonical companies the answer compares, primary first: the ones the
+  // question covers, then any auto-selected peers (which carry no label).
+  companies: ReadonlyArray<{ issuer_id: string; label?: string }>;
   peers: boolean;
   segments: boolean;
   margin_trend: boolean;
@@ -119,22 +120,6 @@ export function parseResearchScope(value: unknown): ResearchScope | null {
 
 function isCompany(value: unknown): boolean {
   const company = value as { issuer_id?: unknown; label?: unknown } | null;
-  return typeof company?.issuer_id === "string" && typeof company.label === "string";
+  return typeof company?.issuer_id === "string" && (company.label === undefined || typeof company.label === "string");
 }
 
-// The scope as saved: its companies plus any the answer's comparison showed
-// besides (auto-selected peers), so a follow-up about one of them continues it.
-export function withShownCompanies(scope: ResearchScope, blocks: ReadonlyArray<Record<string, unknown>>): ResearchScope {
-  const companies = [...scope.companies];
-  const seen = new Set(companies.map((company) => company.issuer_id));
-  for (const block of blocks) {
-    if (block.kind !== "metrics_comparison" || !Array.isArray(block.subjects)) continue;
-    const labels = Array.isArray(block.subject_labels) ? block.subject_labels : [];
-    block.subjects.forEach((subject: { id?: unknown }, i: number) => {
-      if (typeof subject?.id !== "string" || seen.has(subject.id)) return;
-      seen.add(subject.id);
-      companies.push({ issuer_id: subject.id, label: typeof labels[i] === "string" ? labels[i] : subject.id });
-    });
-  }
-  return companies.length === scope.companies.length ? scope : { ...scope, companies };
-}

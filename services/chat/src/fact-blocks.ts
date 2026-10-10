@@ -104,7 +104,7 @@ export async function loadTurnFactBlocks(
 }
 
 // The companies a turn compares: the ones it names, or one plus its peers.
-async function turnCompanies(
+export async function turnCompanies(
   db: QueryExecutor,
   issuers: ReadonlyArray<IssuerSubjectRef>,
   wantsPeers: boolean,
