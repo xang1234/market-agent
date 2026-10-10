@@ -1,0 +1,105 @@
+{
+  "run": "2026-10-09T075057",
+  "model": "opencode-go/qwen3.8-max (fallbacks: opencode-go/kimi-k2.7-code)",
+  "scores": {
+    "single-latest-quarter": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 1,
+      "no_invented_numbers": 2,
+      "notes": "Calls Q4 FY2026's 8.9% QoQ the slowest sequential rate in the series; Q2 FY2026 was 6.1% ($44.1B -> $46.7B). The counterpoint claims no QoQ decline in margins, which this answer doesn't show."
+    },
+    "margin-trend-loss-quarter": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "Calls the starting level 'low-teens'; it was 10.6-11.4%. Guard dropped the fully correct eight-quarter trend sentence."
+    },
+    "what-changed-gross-margin": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "Guard dropped the correct FY2025 trend sentence, so the next paragraph ('The decline then accelerated...') starts mid-thought."
+    },
+    "peer-two": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 1,
+      "no_invented_numbers": 2,
+      "notes": "The counterpoint only restates AMD's 34.5% growth. Guard dropped the correct growth comparison and the better counterpoint (AMD sustaining its pace)."
+    },
+    "peer-three": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "No caveat that AAPL is in a different industry (consumer electronics). Takeaway says AMD 'trails both peers on margins', but AMD's gross margin (49.9%) beats AAPL's (46.9%); only net margin is lowest."
+    },
+    "fiscal-year-trap": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": ""
+    },
+    "segment-drill-down": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 1,
+      "no_invented_numbers": 2,
+      "notes": "Calls Q4 FY2026's 8.9% QoQ the slowest sequential rate in the series; Q2 FY2026 was 6.1% ($44.1B -> $46.7B). Also calls Data Center 'the clear driver of growth' from one quarter of segment data."
+    },
+    "missing-segments": {
+      "correct_companies": 2,
+      "comparable_periods": "n/a",
+      "figures_match_sources": "n/a",
+      "conclusions_justified": "n/a",
+      "counterarguments": "n/a",
+      "no_invented_numbers": 2,
+      "notes": ""
+    },
+    "missing-cash-flow": {
+      "correct_companies": 2,
+      "comparable_periods": "n/a",
+      "figures_match_sources": "n/a",
+      "conclusions_justified": "n/a",
+      "counterarguments": "n/a",
+      "no_invented_numbers": 2,
+      "notes": ""
+    },
+    "follow-up-memory": {
+      "correct_companies": 2,
+      "comparable_periods": 1,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 2,
+      "no_invented_numbers": 0,
+      "notes": "Turn 3 calls the Dec 1-Aug 31 return (6.6% / 3.58%) 'YTD'; YTD is 5.81% / 3.17%. Guard dropped turn 2's correct YTD figures sentence. Turn 3 says margins are higher 'at every level of the income statement' while saying operating margin isn't shown. Turn 1 repeats the 'slowest QoQ' error. The Dec 1-Aug 31 returns are presented as YTD, a figure passed off as a different period, so no_invented_numbers is 0. The regression test is #269's golden-conversation check that turn 3 keeps the YTD window."
+    },
+    "ticker-page-compare": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "Guard dropped the correct labelled counterpoint (AAPL's larger revenue); the 'market has not rewarded NVDA' line carries the counterpoint."
+    }
+  }
+}

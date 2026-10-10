@@ -1,0 +1,105 @@
+{
+  "run": "2026-10-10T103159",
+  "model": "opencode-go/qwen3.8-max (fallbacks: opencode-go/kimi-k2.7-code)",
+  "scores": {
+    "single-latest-quarter": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 1,
+      "no_invented_numbers": 2,
+      "notes": "Again calls Q4 FY2026's 8.9% QoQ the lowest sequential rate in the series, in both the strong/weak section and the counterpoint; Q2 FY2026 was 5.9% ($44.1B -> $46.7B). The guard dropped the one sentence repeating it as a cause, but the two that state it as fact survived."
+    },
+    "margin-trend-loss-quarter": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 1,
+      "no_invented_numbers": 2,
+      "notes": "Takeaway again says 'low-teens'; the start was 10.6-11.4%. The guard dropped the whole counterpoint, including the correct, data-grounded note that gross margin also fell to 39.8% in Q2 2025. That leaves 'If that factor recurs...' with nothing to refer to. It also dropped the correct sentence saying the 10-11% range was flat."
+    },
+    "what-changed-gross-margin": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "Says plainly that the cause isn't in the data; the hypothesis is labelled and grounded. The operating and net margin lows (49.1%, 42.6%) are right."
+    },
+    "peer-two": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 1,
+      "no_invented_numbers": 2,
+      "notes": "The counterpoint ('earlier in its growth curve') isn't supported by the data. The guard dropped the better counterpoint, about AMD sustaining its pace while NVDA decelerates. The price window is named (Dec 2025-Aug 2026); it isn't YTD and isn't presented as YTD."
+    },
+    "peer-three": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "Takeaway says AMD 'trails on every metric shown'. AMD beats AAPL on gross margin (49.9% vs 46.9%) and growth (34.5% vs 6.4%), and 'AMD is the weakest on margins' is only true of net margin. Still no caveat that AAPL is in a different industry."
+    },
+    "fiscal-year-trap": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "Eight-month mismatch stated; NVDA's missing YoY growth stated as a gap."
+    },
+    "segment-drill-down": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "Concentration in Data Center stated; specific counterpoint about dependence on it. The 'slowest QoQ' claim from the 10-09 run is gone because only segment data is shown (#270)."
+    },
+    "missing-segments": {
+      "correct_companies": 2,
+      "comparable_periods": "n/a",
+      "figures_match_sources": "n/a",
+      "conclusions_justified": "n/a",
+      "counterarguments": "n/a",
+      "no_invented_numbers": 2,
+      "notes": "The same sentence appears twice (the model's answer, then the #270 gap note)."
+    },
+    "missing-cash-flow": {
+      "correct_companies": 2,
+      "comparable_periods": "n/a",
+      "figures_match_sources": "n/a",
+      "conclusions_justified": "n/a",
+      "counterarguments": "n/a",
+      "no_invented_numbers": 2,
+      "notes": "No net income passed off as FCF. The same sentence appears twice (the answer, then the #270 gap note)."
+    },
+    "follow-up-memory": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "Fixed since 10-09: turns 2 and 3 both use the YTD window (Dec 31 2025-Aug 31 2026 close, 5.81% / 3.17%) (#269). Turn 1 drops the 'slowest QoQ' error. The guard dropped turn 3's correct YTD figures sentence, so 'The return gap is directionally aligned...' refers to figures that only appear in the chart. Turn 2 infers a 'lower valuation base' from revenue and margins, but no valuation data is shown."
+    },
+    "ticker-page-compare": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "The takeaway's 'investors are already pricing in... or discounting its sustainability' is an unlabelled market interpretation, not something the figures show. The guard dropped two correct summary sentences (AAPL's growth and margin ranges; NVDA's growth above 60%)."
+    }
+  }
+}
