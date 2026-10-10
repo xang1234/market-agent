@@ -55,23 +55,33 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.equal(block.financial.coverage.state, "partial", "two companies were asked about; the answer covers both");
   });
 
-  await t.test("a published answer saves the turn's research scope; one that cannot be resolved saves none (#206)", async () => {
-    const scope = {
-      route: "latest_quarter" as const,
-      companies: [{ issuer_id: IDS.issuerA, label: "AAA" }],
-      peers: false,
-      segments: false,
-      margin_trend: false,
-      metrics: [],
-      fiscal_year: 2024,
-      price_window: null,
-      inherited: [],
+  await t.test("a published answer saves its scope over the companies the plan requests; one that cannot be resolved saves none (#206)", async () => {
+    // This lane runs before the analyst path resolves the turn's companies, so
+    // the scope callback must be given the ones the message names.
+    const seen: string[][] = [];
+    const scopeOf = async (context: { subjectPreResolutions?: ReadonlyArray<{ subject_ref: { id: string } }> }) => {
+      const ids = (context.subjectPreResolutions ?? []).map((subject) => subject.subject_ref.id);
+      seen.push(ids);
+      return {
+        route: "comparison" as const,
+        reads: "comparison" as const,
+        companies: ids.map((issuer_id) => ({ issuer_id })),
+        peers: false,
+        segments: false,
+        margin_trend: false,
+        metrics: [],
+        fiscal_year: 2024,
+        price_window: null,
+        inherited: [],
+      };
     };
     const savedScope = async (researchScope: NonNullable<Parameters<typeof chatHarness>[1]["researchScope"]>) => {
-      const { events } = await chatHarness(pool, { model: revenueModel(["AAA"]), researchScope }).run({ ...base, userIntent: "Revenue for AAA" });
+      const { events } = await chatHarness(pool, { model: revenueModel(["AAA", "BBB"]), researchScope }).run({ ...base, userIntent: "Compare revenue for AAA and BBB" });
       return (await db.query(`select research_scope from chat_messages where message_id = $1`, [completed(events).message_id])).rows[0].research_scope;
     };
-    assert.deepEqual(await savedScope(async () => scope), scope);
+    const saved = await savedScope(scopeOf as never);
+    assert.deepEqual(seen, [[IDS.issuerA, IDS.issuerB]]);
+    assert.deepEqual(saved.companies, [{ issuer_id: IDS.issuerA }, { issuer_id: IDS.issuerB }]);
     // The scope only informs follow-ups; failing to resolve it never fails the answer.
     assert.equal(await savedScope(async () => { throw new Error("prior scope unavailable"); }), null);
   });

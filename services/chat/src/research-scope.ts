@@ -40,6 +40,9 @@ export type RequestedMetric = { metric_key: string; label: string; available: bo
 
 export type ResearchScope = {
   route: ResearchRoute;
+  // The route whose readers the answer used: the route itself, except that an
+  // evidence follow-up re-reads what the previous answer read.
+  reads: ResearchRoute;
   // Canonical companies the answer compares, primary first: the ones the
   // question covers, then any auto-selected peers (which carry no label).
   companies: ReadonlyArray<{ issuer_id: string; label?: string }>;
@@ -59,7 +62,13 @@ const PEERS = /\bpeers?\b/i;
 const SEGMENTS = /\bsegments?\b/i;
 const MARGINS = /\b(margins?|profitab\w*)\b/i;
 // A margin asked about over time, not just its latest value.
-const OVER_TIME = /\b(trend\w*|over (?:the )?(?:last|past)\b|histor\w*|chang\w*|since|evolv\w*|quarters|years)\b/i;
+const OVER_TIME =
+  /\b(trend\w*|over (?:the )?(?:last|past)\b|histor\w*|chang\w*|since|evolv\w*|quarters|years|qoq|yoy|quarter[- ]over[- ]quarter|year[- ]over[- ]year|(?:last|prior|previous) (?:quarter|year)|a year ago)\b/i;
+// Phrases that name a context, not a metric: "earnings" in "earnings call".
+const NOT_METRICS = /\bearnings (?:calls?|releases?|reports?|dates?|season)\b/gi;
+// Words that qualify a metric just named ("free cash flow growth") rather than
+// asking for another one.
+const QUALIFIER = String.raw`(?:\s+(?:growth|margins?|yields?|trends?|per share))?`;
 const EVIDENCE = /\b(evidence|sources?|cite|citations?|where (?:does|do|did) (?:this|that|these|those) come from)\b/i;
 
 // The metrics a question can name, most specific first: each match is removed
@@ -73,16 +82,19 @@ const METRICS: ReadonlyArray<RequestedMetric & { pattern: RegExp }> = [
   { metric_key: "ebitda", label: "EBITDA", available: false, pattern: /\bEBITDA\b/gi },
   { metric_key: "total_debt", label: "Debt", available: false, pattern: /\bdebt\b/gi },
   { metric_key: "dividends", label: "Dividends", available: false, pattern: /\bdividends?\b/gi },
-  { metric_key: "income_statement", label: "Revenue, profit and margins", available: true, pattern: /\b(revenue|sales|income|profits?|margins?|growth|earnings)\b/gi },
+  { metric_key: "income_statement", label: "Revenue, profit and margins", available: true, pattern: /\b(revenue|sales|income|profits?|profitab\w*|margins?|growth|earnings)\b/gi },
 ];
 
 export function requestedMetrics(question: string): RequestedMetric[] {
-  let rest = question;
+  let rest = question.replace(NOT_METRICS, " ");
   const out: RequestedMetric[] = [];
   for (const { pattern, ...metric } of METRICS) {
-    if (!new RegExp(pattern.source, "i").test(rest)) continue;
+    // An unavailable metric takes its qualifier with it, so "free cash flow
+    // growth" does not also ask for (available) growth.
+    const match = new RegExp(`(?:${pattern.source})${metric.available ? "" : QUALIFIER}`, "gi");
+    if (!new RegExp(match.source, "i").test(rest)) continue;
     out.push(metric);
-    rest = rest.replace(pattern, " ");
+    rest = rest.replace(match, " ");
   }
   return out;
 }
@@ -117,8 +129,17 @@ export function resolveResearchScope(input: {
   // same companies, so it reads that answer's scope again.
   const priorIds = new Set(prior?.companies.map((company) => company.issuer_id) ?? []);
   const evidence = prior !== null && EVIDENCE.test(question) && input.companies.every((company) => priorIds.has(company.issuer_id));
+  // Only metrics no reader serves (named now, or kept from the previous turn)
+  // and nothing else asked for now: a window, peers, segments or margins asked
+  // beside such a gap are still read, with the gap named.
+  const onlyUnavailable = metrics.length > 0 && metrics.every((metric) => !metric.available) &&
+    asked === null && !PEERS.test(question) && !SEGMENTS.test(question) && !marginAsked;
+  const reads = evidence && prior !== null
+    ? prior.reads
+    : routeOf(input.companies.length, { peers, segments, margin_trend, marginAsked, onlyUnavailable });
   return {
-    route: routeOf(input.companies.length, { peers, segments, margin_trend, marginAsked, metrics, evidence }),
+    route: evidence ? "evidence_followup" : reads,
+    reads,
     companies: input.companies,
     peers,
     segments,
@@ -137,13 +158,11 @@ function routeOf(
     segments: boolean;
     margin_trend: boolean;
     marginAsked: boolean;
-    metrics: ReadonlyArray<RequestedMetric>;
-    evidence: boolean;
+    onlyUnavailable: boolean;
   },
 ): ResearchRoute {
   if (companies === 0) return "unknown";
-  if (facets.metrics.length > 0 && facets.metrics.every((metric) => !metric.available)) return "unavailable_metric";
-  if (facets.evidence) return "evidence_followup";
+  if (facets.onlyUnavailable) return "unavailable_metric";
   if (companies > 1 || facets.peers) return "comparison";
   if (facets.segments) return "segments";
   if (facets.margin_trend) return "trend";
@@ -174,8 +193,11 @@ export function parseResearchScope(value: unknown): ResearchScope | null {
   ) {
     return null;
   }
+  const route = ROUTES.includes(scope.route as ResearchRoute) ? scope.route as ResearchRoute : "unknown";
   return {
-    route: ROUTES.includes(scope.route as ResearchRoute) ? scope.route as ResearchRoute : "unknown",
+    route,
+    // Absent on scopes saved before it was recorded: the route itself.
+    reads: ROUTES.includes(scope.reads as ResearchRoute) ? scope.reads as ResearchRoute : route,
     companies: scope.companies as ResearchScope["companies"],
     peers: scope.peers,
     segments: scope.segments,

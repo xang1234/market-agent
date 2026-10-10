@@ -447,6 +447,8 @@ test("what a turn asked for and cannot show is a note each, naming its companies
     "Revenue by segment is not available for AMD in this data.",
   ]);
   // A segment breakdown that was shown, or a question with no gap, adds nothing.
-  assert.deepEqual(scopeGapBlocks(scope("Break down AMD's revenue by segment"), [{ kind: "metric_row" }], input), []);
+  assert.deepEqual(scopeGapBlocks(scope("Break down AMD's revenue by segment"), [{ kind: "metric_row", title: "Revenue by segment (Q2 2026)" }], input), []);
+  // Other blocks shown beside it (a margin trend) do not count as the breakdown.
+  assert.equal(scopeGapBlocks(scope("Break down AMD's revenue by segment"), [{ kind: "metric_row", title: "Operating margin by quarter" }], input).length, 1);
   assert.deepEqual(scopeGapBlocks(scope("Analyze AMD"), [], input), []);
 });

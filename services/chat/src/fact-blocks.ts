@@ -745,7 +745,7 @@ export function scopeGapBlocks(
     `gap:${metric.metric_key}`,
     `${metric.label} is not available for ${names} in this data, so no other figure is shown in its place.`,
   ] as const);
-  if (scope.route === "segments" && shown.length === 0) {
+  if (scope.reads === "segments" && !shown.some(isSegmentBlock)) {
     notes.push(["gap:segments", `Revenue by segment is not available for ${names} in this data.`]);
   }
   return notes.map(([key, text]) => {
@@ -760,6 +760,10 @@ export function scopeGapBlocks(
       segments: [{ type: "text", text }],
     };
   });
+}
+
+function isSegmentBlock(block: Block): boolean {
+  return block.kind === "metric_row" && /by segment/.test(String(block.title));
 }
 
 function blockId(kind: string, snapshotId: string): string {

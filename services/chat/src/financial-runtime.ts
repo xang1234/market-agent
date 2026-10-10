@@ -36,7 +36,7 @@ import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier
 import type { ChatTurnRunContext } from "./coordinator.ts";
 import { contentHashForText, stableUuid } from "./chat-ids.ts";
 import { COMPARATIVE, companyKey, extractSubjectMentions } from "./subject-extraction.ts";
-import type { ChatSubjectPreResolution } from "./subjects.ts";
+import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "./subjects.ts";
 import type { ResearchScope } from "./research-scope.ts";
 
 export type ChatFinancialMode = FinancialMode;
@@ -101,7 +101,9 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
 
     const messageId = financialMessageId(context.threadId, turnId);
     // The scope only informs follow-ups: failing to resolve it never fails the answer.
-    const scope = await deps.researchScope?.(context).catch((reason) => {
+    // This lane runs before the analyst path resolves the turn's companies, so
+    // the scope gets the companies the plan requests (requestedMentions).
+    const scope = await (deps.researchScope ? scopeWithCompanies(deps, context, text) : Promise.resolve(null)).catch((reason) => {
       console.warn("[chat] research scope unavailable; saving the financial answer without it", reason);
       return null;
     }) ?? null;
@@ -142,6 +144,26 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
   return Object.freeze({ mode: deps.mode, answers, run, assertReady });
 }
 
+// The mentions a turn's plan requests: an explicit subject (a thread opened
+// from a ticker page) first; like the analyst path, the message's companies
+// join it only in a comparison ("Compare revenue with AMD" from the NVDA page
+// plans both, "Revenue for AMD" plans NVDA).
+function requestedMentions(context: ChatFinancialTurnContext, text: string): string[] {
+  const explicit = context.subjectText?.trim();
+  return explicit
+    ? [explicit, ...(COMPARATIVE.test(text) ? extractSubjectMentions(text) : [])]
+    : extractSubjectMentions(text);
+}
+
+// The turn's research scope over the companies its plan requests, resolved.
+// ponytail: a company picked in a clarification answer is not in it; the scope
+// then names the companies the message itself resolved.
+async function scopeWithCompanies(deps: ChatFinancialRuntimeDeps, context: ChatFinancialTurnContext, text: string): Promise<ResearchScope> {
+  const resolutions = await Promise.all(requestedMentions(context, text).map((mention) => deps.resolveMention(mention)));
+  const resolved = resolutions.filter((resolution): resolution is ChatResolvedSubjectPreResolution => resolution.status === "resolved");
+  return deps.researchScope!({ ...context, subjectPreResolution: resolved[0], subjectPreResolutions: resolved });
+}
+
 async function planTurn(
   deps: ChatFinancialRuntimeDeps,
   db: SqlExecutor,
@@ -150,14 +172,7 @@ async function planTurn(
   authority: FinancialRuntimeAuthority,
   cutoff: Date,
 ): Promise<PlanningResult> {
-  // An explicit subject (a thread opened from a ticker page) is requested first;
-  // like the analyst path, the message's companies join it only in a comparison
-  // ("Compare revenue with AMD" from the NVDA page plans both, "Revenue for AMD"
-  // plans NVDA).
-  const explicit = context.subjectText?.trim();
-  const mentions = explicit
-    ? [explicit, ...(COMPARATIVE.test(text) ? extractSubjectMentions(text) : [])]
-    : extractSubjectMentions(text);
+  const mentions = requestedMentions(context, text);
   const resolutions = await Promise.all(mentions.map(async (mention) => ({ mention, resolution: await deps.resolveMention(mention) })));
   // One entry per company: "NVIDIA" (the page) and "NVDA" (the message) are one.
   const seen = new Set<string>();

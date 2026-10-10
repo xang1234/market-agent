@@ -166,7 +166,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   const requestedListings = requestedListingsOf(covered);
   // Charts and tables come from facts, never from the model (see fact-blocks.ts).
   // A turn asking only for metrics no reader serves reads no other facts (#206).
-  const readsFacts = scope.route !== "unavailable_metric";
+  const readsFacts = scope.reads !== "unavailable_metric";
   const [shownBlocks, conversation] = await Promise.all([
     readsFacts ? loadTurnFactBlocks(pool(), {
       // The companies the scope records, peers already resolved (comparedCompanies),
@@ -175,7 +175,8 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
       wantsPeers: false,
       wantsSegments: scope.segments,
       wantsMarginTrend: scope.margin_trend,
-      segmentsOnly: scope.route === "segments",
+      // A request for segments alone; one also asking for a margin trend reads both.
+      segmentsOnly: scope.reads === "segments" && !scope.margin_trend,
       requestedListings,
       fiscalYear: scope.fiscal_year ?? undefined,
       priceWindow: scope.price_window?.kind,

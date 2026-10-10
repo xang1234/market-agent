@@ -16,6 +16,9 @@ test("each recurring question takes its own route", () => {
     ["How have NVDA's operating margins trended?", [NVDA], "trend"],
     ["What changed in NVDA's gross margin in Q1 fiscal 2026?", [NVDA], "trend"],
     ["What is NVDA's gross margin?", [NVDA], "derived_margin"],
+    // A comparison with an earlier period needs the margins over time.
+    ["Show AMD operating margins QoQ", [AMD], "trend"],
+    ["Compare AMD gross margin with last quarter", [AMD], "trend"],
     ["What is AMD's free cash flow?", [AMD], "unavailable_metric"],
     // A request that is partly available takes its usual route; the rest is a named gap.
     ["Compare NVDA and AMD revenue and free cash flow", [NVDA, AMD], "comparison"],
@@ -32,6 +35,7 @@ test("each recurring question takes its own route", () => {
 test("a fresh question records what it asks for and inherits nothing", () => {
   assert.deepEqual(fresh("Compare NVDA's and AMD's fiscal 2025 revenue YTD", [NVDA, AMD]), {
     route: "comparison",
+    reads: "comparison",
     companies: [NVDA, AMD],
     peers: false,
     segments: false,
@@ -131,6 +135,37 @@ test("asking for evidence about a company the previous answer did not cover is n
 test("a scope saved before metrics were recorded reads back with none; a malformed metric starts fresh", () => {
   const saved = JSON.parse(JSON.stringify(fresh("Compare NVDA with AMD", [NVDA, AMD])));
   delete saved.metrics;
+  delete saved.reads;
   assert.deepEqual(parseResearchScope(saved)?.metrics, []);
+  assert.equal(parseResearchScope(saved)?.reads, saved.route);
   assert.equal(parseResearchScope({ ...saved, metrics: [{ metric_key: "free_cash_flow" }] }), null);
+});
+
+test("a metric's context or qualifier is not another metric", () => {
+  const keys = (question: string) => requestedMetrics(question).map((metric) => metric.metric_key);
+  assert.deepEqual(keys("What did AMD say about free cash flow on its earnings call?"), ["free_cash_flow"]);
+  assert.deepEqual(keys("What is AMD's free cash flow growth?"), ["free_cash_flow"]);
+  assert.equal(fresh("What is AMD's free cash flow growth?", [AMD]).route, "unavailable_metric");
+  assert.deepEqual(keys("What is its profitability?"), ["income_statement"]);
+});
+
+test("an inherited gap, or one asked beside something it can show, does not stop the turn reading", () => {
+  const prior = fresh("What is AMD's free cash flow?", [AMD]);
+  const next = (question: string, companies: ResearchScope["companies"]) =>
+    resolveResearchScope({ question, companies, prior, asOf: AS_OF });
+  const ytd = next("Also compare its YTD stock performance with NVDA", [AMD, NVDA]);
+  assert.equal(ytd.route, "comparison");
+  // The gap stays named.
+  assert.deepEqual(ytd.metrics.map((metric) => metric.metric_key), ["free_cash_flow"]);
+  assert.equal(next("What is its profitability?", [AMD]).route, "derived_margin");
+  assert.equal(fresh("What is AMD's free cash flow YTD versus NVDA?", [AMD, NVDA]).route, "comparison");
+});
+
+test("an evidence follow-up re-reads what the previous answer read", () => {
+  const prior = fresh("Break down AMD's revenue by segment", [AMD]);
+  const scope = resolveResearchScope({ question: "Show the evidence", companies: [AMD], prior, asOf: AS_OF });
+  assert.equal(scope.route, "evidence_followup");
+  assert.equal(scope.reads, "segments");
+  const gapPrior = fresh("What is AMD's free cash flow?", [AMD]);
+  assert.equal(resolveResearchScope({ question: "Show the evidence", companies: [AMD], prior: gapPrior, asOf: AS_OF }).reads, "unavailable_metric");
 });

@@ -373,6 +373,19 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     // The breakdown is a named gap, with nothing else in its place (#206).
     assert.match(JSON.stringify(answer.blocks), /Revenue by segment is not available for AMD in this data\./);
     assert.equal(answer.blocks.some((block) => block.kind === "metric_row" || block.kind === "revenue_bars"), false);
+    // Asking for its evidence re-reads the same segment facts, keeping the gap.
+    completedTurn(await runTurn(base, amdThread.thread_id, "Show the evidence"));
+    const evidence = await latestAssistantMessage(base, amdThread.thread_id);
+    assert.match(JSON.stringify(evidence.blocks), /Revenue by segment is not available for AMD in this data\./);
+    assert.equal(evidence.blocks.some((block) => block.kind === "metric_row" || block.kind === "revenue_bars"), false);
+  });
+
+  await t.test("segments asked for with a margin trend read both (#206)", async () => {
+    const mixedThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Segments and margins" });
+    completedTurn(await runTurn(base, mixedThread.thread_id, "Break down NVDA's revenue by segment and show its operating margin trend"));
+    const answer = await latestAssistantMessage(base, mixedThread.thread_id);
+    assert.ok(answer.blocks.some((block) => /by segment/.test(String(block.title))), "expected the segment breakdown");
+    assert.ok(answer.blocks.some((block) => block.title === "Operating margin by quarter"), `expected the margin trend; got [${answer.blocks.map((b) => b.title).join(", ")}]`);
   });
 
   await t.test("'What is AMD's free cash flow?' is a named gap that reads no income-statement facts (#206)", async () => {
