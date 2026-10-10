@@ -443,10 +443,63 @@ export function keepSupportedSentences(
     }
     lines.push(kept.length > 0 ? lead + kept.join(" ") : null);
   }
-  // A heading whose section lost everything goes too: the guard dropped lines
-  // before the next heading at its level or above, and kept none of them.
-  // A heading with a figure in it ("## Revenue: $62.1B") is content: its
-  // figure passed the guard.
+  return { text: withoutEmptySections(lines), removed };
+}
+
+// The cause check alone, for an answer that shows no figures (#263): with
+// nothing displayed there is no vocabulary to ground a cause in, so any stated
+// cause goes, hedged or not. A labelled hypothesis within the cap keeps its
+// first sentence when it gives one explanation and a basis with words in it
+// ("given …"); any
+// further sentence is ordinary prose. A line claiming to be one in any other
+// form goes whole, as in keepSupportedSentences. An explicit gap ("the data
+// does not show why") names no cause and stays. Numbers are not checked: there are none shown to check
+// them against (#181).
+export function keepUncausedSentences(text: string): { text: string; removed: string[] } {
+  let hypotheses = 0;
+  const removed: string[] = [];
+  const lines: Array<string | null> = [];
+  for (const line of text.trim().split(/\r?\n/)) {
+    if (line.trim() === "") {
+      lines.push("");
+      continue;
+    }
+    const label = line.match(HYPOTHESIS)?.[0];
+    const claimed = label !== undefined || HYPOTHESIS_CLAIM.test(line);
+    const withinCap = claimed && ++hypotheses <= MAX_HYPOTHESES;
+    if (claimed && label === undefined) {
+      removed.push(line.trim());
+      lines.push(null);
+      continue;
+    }
+    const lead = label ?? line.match(LIST_MARKER)?.[0] ?? line.match(/^\s*/)![0];
+    const sentences = line.slice(lead.length).trim().split(SENTENCE_BREAK);
+    const keeps = sentences.map((written, index) => {
+      const sentence = written.replace(/[*_`]+/g, "");
+      const causes = [...sentence.matchAll(CAUSAL)].length;
+      const keep = label !== undefined && index === 0
+        ? withinCap && causes <= 1 && /[a-z0-9]/i.test(sentence.match(BASIS)?.[1] ?? "")
+        : causes === 0;
+      if (!keep) removed.push(written);
+      return keep;
+    });
+    const kept = sentences.filter((_, index) => keeps[index]);
+    // A hypothesis that fails goes whole, as in keepSupportedSentences.
+    if (label !== undefined && !keeps[0]) {
+      removed.push(...kept);
+      lines.push(null);
+      continue;
+    }
+    lines.push(kept.length > 0 ? lead + kept.join(" ") : null);
+  }
+  return { text: withoutEmptySections(lines), removed };
+}
+
+// The kept lines (null: dropped whole) as text. A heading whose section lost
+// everything goes too: the guard dropped lines before the next heading at its
+// level or above, and kept none of them. A heading with a figure in it
+// ("## Revenue: $62.1B") is content: its figure passed the guard.
+function withoutEmptySections(lines: ReadonlyArray<string | null>): string {
   const level = (line: string | null) =>
     line !== null && HEADING.test(line) && !/\d/.test(line) ? line.trim().match(/^#+/)?.[0].length ?? 7 : 0;
   const keepHeading = (i: number): boolean => {
@@ -460,7 +513,7 @@ export function keepSupportedSentences(
     return !lost;
   };
   const shown = lines.filter((line, i): line is string => line !== null && (level(line) === 0 || keepHeading(i)));
-  return { text: shown.join("\n").replace(/\n{3,}/g, "\n\n").trim(), removed };
+  return shown.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 // Whether the words between a possessive and "of" name one of the figure's

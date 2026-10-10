@@ -666,6 +666,39 @@ test("blocks that show no figures (a gap note) leave the answer unguarded, like 
   assert.equal((blocks[0].segments as Array<{ text: string }>)[0].text, "AAPL trades at $231.6 per the latest quote.");
 });
 
+test("with no figures shown, a stated cause still goes; figures and gaps stay (#263)", async () => {
+  let removed: ReadonlyArray<string> = [];
+  const blocks = await composeAnalystBlocksWithLlm({
+    env: BASE_ENV,
+    context: { userIntent: "How is AAPL doing?", bundleId: "single_subject_analysis" },
+    blocks: [NARRATIVE_BLOCK],
+    toolCalls: [],
+    createClient: () => async () => ({
+      text: "AAPL trades at $231.6. The move could reflect a one-time charge. The data does not show why.",
+    }),
+    onNarrativeRemoved: (sentences) => {
+      removed = sentences;
+    },
+  });
+  assert.equal((blocks[0].segments as Array<{ text: string }>)[0].text, "AAPL trades at $231.6. The data does not show why.");
+  assert.deepEqual(removed, ["The move could reflect a one-time charge."]);
+});
+
+test("the prompt asks for a missing period in words, not by its year (#264)", async () => {
+  let system = "";
+  await composeAnalystBlocksWithLlm({
+    env: BASE_ENV,
+    context: { userIntent: "Analyze NVDA", bundleId: "single_subject_analysis" },
+    blocks: [NARRATIVE_BLOCK],
+    toolCalls: [],
+    createClient: () => async (_deployment, request) => {
+      system = request.messages[0]!.content;
+      return { text: "NVDA grew." };
+    },
+  });
+  assert.match(system, /describe a missing period in words \("no prior-year revenue"\), never by its year or number/);
+});
+
 test("a turn showing only a price chart stays guarded against returns it does not show (#181)", async () => {
   const chart = {
     kind: "perf_comparison",
@@ -831,3 +864,16 @@ function hang(t: { after(fn: () => void): void }): Promise<never> {
   t.after(() => clearInterval(connection));
   return new Promise<never>(() => {});
 }
+
+test("an answer whose every sentence goes beside a gap note falls back without pointing to figures (#263)", async () => {
+  const gap = { kind: "rich_text", segments: [{ type: "text", text: "Free cash flow is not available for AMD in this data." }] };
+  const blocks = await composeAnalystBlocksWithLlm({
+    env: BASE_ENV,
+    context: { userIntent: "What is AMD's free cash flow?", bundleId: "single_subject_analysis" },
+    blocks: [NARRATIVE_BLOCK],
+    toolCalls: [],
+    factBlocks: [gap],
+    createClient: () => async () => ({ text: "It fell due to heavy spending." }),
+  });
+  assert.equal((blocks[0].segments as Array<{ text: string }>)[0].text, "No written answer is available for this question; try asking again.");
+});
