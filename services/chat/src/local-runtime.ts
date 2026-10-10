@@ -28,7 +28,7 @@ import {
   type ChatPriorSubjectsLoader,
   type ChatThreadTitleGenerator,
 } from "./coordinator.ts";
-import { loadTurnFactBlocks, mayOfferOtherFacts, priceListingsForTurn, scopeGapBlocks, turnCompanies } from "./fact-blocks.ts";
+import { companyListings, loadTurnFactBlocks, mayOfferOtherFacts, priceListingsForTurn, scopeGapBlocks, turnCompanies } from "./fact-blocks.ts";
 import { resolveResearchScope, type ResearchScope } from "./research-scope.ts";
 import { frozenDataMode, hydrateYtdBars, marketHydrationOrigin } from "./ytd-hydration.ts";
 import { listingTimeZones } from "./perf-block.ts";
@@ -209,7 +209,9 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     subjectLabels: covered.flatMap((subject) => subjectLabelsFromHandoff(subject.handoff)),
     conversation,
     availableData: mayOfferOtherFacts(scope, shownBlocks),
-    scope,
+    // Auto-selected peers named for the packet; the saved scope keeps them
+    // unlabelled, which is how a later turn knows they were auto-selected.
+    scope: await withCompanyLabels(scope, asOf),
     cutoff: asOf,
     onAnswered: (deployment) => {
       answeredBy = deployment;
@@ -245,6 +247,25 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
 };
 
 const CONVERSATION_MESSAGES = 6;
+
+// The scope with every company named by its ticker (else legal name), for the
+// evidence packet. Unchanged if the lookup fails: the packet then names an
+// unlabelled company by issuer.
+async function withCompanyLabels(scope: ResearchScope, asOf: string): Promise<ResearchScope> {
+  const unlabelled = scope.companies.filter((company) => company.label === undefined).map((company) => company.issuer_id);
+  if (unlabelled.length === 0) return scope;
+  const listings = await companyListings(pool(), unlabelled, asOf).catch((reason) => {
+    console.warn("[chat] company labels unavailable for the evidence packet", reason);
+    return new Map<string, { label: string }>();
+  });
+  return {
+    ...scope,
+    companies: scope.companies.map((company) => {
+      const label = company.label ?? listings.get(company.issuer_id)?.label;
+      return label === undefined ? company : { ...company, label };
+    }),
+  };
+}
 
 // The turn's research scope at a cutoff (research-scope.ts): what it asks for,
 // keeping the previous answer's scope where it continues it. The companies are

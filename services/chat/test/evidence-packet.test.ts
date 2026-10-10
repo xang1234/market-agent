@@ -96,3 +96,14 @@ test("the model's packet has short ids only, no fact or source ids (#207)", () =
   assert.match(model, /"id":"F1"/);
   for (const absent of ["fact_id", "f-rev", "source_ids", "s-10q", "block_id", "b-latest"]) assert.ok(!model.includes(absent), absent);
 });
+
+test("an auto-selected peer with no block is still covered, as not shown (#207)", () => {
+  // A peers request's auto-selected peer carries no label, and the comparison
+  // and price readers came back empty.
+  const peers = { ...scope("How does NVDA compare with its peers?"), companies: [NVDA, { issuer_id: AMD.issuer_id }] };
+  const packet = buildEvidencePacket({ scope: peers, factBlocks: [], cutoff: CUTOFF });
+  assert.deepEqual(packet.coverage, [
+    { company: "NVDA", status: "not_shown" },
+    { company: "issuer:60000000", status: "not_shown" },
+  ]);
+});

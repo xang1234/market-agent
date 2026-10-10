@@ -48,9 +48,20 @@ export function buildEvidencePacket(input: {
     ...(fact_id ? { fact_id } : {}),
     source_ids: (block_id && blockSources.get(block_id)) || [],
   }));
+  // Every company the scope covers, whether or not a block shows it. An
+  // auto-selected peer carries no label in the scope: the comparison names it,
+  // and without one it is still covered, by issuer.
+  const blockLabels = new Map(input.factBlocks.flatMap((block) => {
+    const subjects = Array.isArray(block.subjects) ? block.subjects : [];
+    const labels = Array.isArray(block.subject_labels) ? block.subject_labels : [];
+    return subjects.flatMap((subject, index) =>
+      isRecord(subject) && isString(subject.id) && isString(labels[index]) ? [[subject.id, labels[index]] as const] : []
+    );
+  }));
   const companies = unique([
-    ...(input.scope?.companies.flatMap((company) => company.label ?? []) ?? []),
-    // Auto-selected peers carry no label in the scope; the comparison names them.
+    ...(input.scope?.companies.map((company) =>
+      company.label ?? blockLabels.get(company.issuer_id) ?? `issuer:${company.issuer_id.slice(0, 8)}`
+    ) ?? []),
     ...input.factBlocks.flatMap((block) => Array.isArray(block.subject_labels) ? block.subject_labels.filter(isString) : []),
   ]);
   // A single company's figures name no company: they are all its own.
