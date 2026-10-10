@@ -289,6 +289,27 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.ok((chart?.series as Array<{ points: unknown[] }>).every((line) => line.points.length > 1), "the chart lost its points");
   });
 
+  // A turn continues the scope when it covers one of the previous answer's
+  // companies, however it names them; one about other companies starts fresh (#206).
+  await t.test("naming the same companies again keeps the scope; another company starts fresh", async () => {
+    const latestScope = async () =>
+      (await client.query<{ research_scope: { price_window: unknown; inherited: string[] } }>(
+        `select research_scope from chat_messages
+          where thread_id = $1::uuid and role = 'assistant'
+          order by created_at desc limit 1`,
+        [thread.thread_id],
+      )).rows[0]?.research_scope;
+    const established = await latestScope();
+    completedTurn(await runTurn(base, thread.thread_id, "Compare NVDA and AMD again"));
+    const again = await latestScope();
+    assert.deepEqual(again?.price_window, established?.price_window);
+    assert.deepEqual(again?.inherited, ["price_window"]);
+    completedTurn(await runTurn(base, thread.thread_id, "Analyze AAPL"));
+    const other = await latestScope();
+    assert.equal(other?.price_window, null);
+    assert.deepEqual(other?.inherited, []);
+  });
+
   await t.test("'How does NVDA compare with its peers?' brings in its industry peers", async () => {
     const peersThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Peers" });
     const turnEvents = await runTurn(base, peersThread.thread_id, "How does NVDA compare with its peers?");

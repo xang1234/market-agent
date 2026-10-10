@@ -29,7 +29,7 @@ import {
   type ChatThreadTitleGenerator,
 } from "./coordinator.ts";
 import { loadTurnFactBlocks, priceListingsForTurn } from "./fact-blocks.ts";
-import { resolveResearchScope, type ResearchScope } from "./research-scope.ts";
+import { needsWindowFetch, resolveResearchScope, type ResearchScope } from "./research-scope.ts";
 import { frozenDataMode, hydrateYtdBars, marketHydrationOrigin } from "./ytd-hydration.ts";
 import { listingTimeZones } from "./perf-block.ts";
 import { loadPriorScope, loadPriorSubjects as loadThreadPriorSubjects, loadRecentConversation } from "./thread-context.ts";
@@ -94,11 +94,12 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   const covered = context.subjectPreResolutions ?? (resolved ? [resolved] : []);
   // What the turn asks for, keeping a follow-up's unchanged scope (#206). A
   // window asked for now is cut off at the turn's asOf, which a follow-up keeps.
-  const prior = context.followUp ? await loadPriorScope(pool(), { threadId: context.threadId }) : null;
+  const companies = companiesOf(covered);
+  const prior = await continuedScope(context.threadId, companies);
   const scopeAt = (cutoff: string) =>
-    resolveResearchScope({ question: context.userIntent ?? "", companies: companiesOf(covered), prior, asOf: cutoff });
+    resolveResearchScope({ question: context.userIntent ?? "", companies, prior, asOf: cutoff });
   // A live YTD request fetches its prices first, so the cutoff below covers them (#232).
-  await hydrateYtdWindow(scopeAt(new Date().toISOString()), covered);
+  await hydrateYtdWindow(scopeAt(new Date().toISOString()), covered, prior);
   const asOf = new Date().toISOString();
   const scope = scopeAt(asOf);
   const subjectRefs = covered.length > 0
@@ -229,17 +230,36 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
 
 const CONVERSATION_MESSAGES = 6;
 
+// The previous answer's scope when this turn continues it: it covers one of
+// that answer's companies, however it named them (carried forward, named
+// again, or the ticker page's subject). A turn about other companies, or about
+// none, starts fresh.
+async function continuedScope(
+  threadId: string,
+  companies: ResearchScope["companies"],
+): Promise<ResearchScope | null> {
+  if (companies.length === 0) return null;
+  const prior = await loadPriorScope(pool(), { threadId });
+  const ids = new Set(companies.map((company) => company.issuer_id));
+  return prior !== null && prior.companies.some((company) => ids.has(company.issuer_id)) ? prior : null;
+}
+
 // Live mode only (marketHydrationOrigin): fetches and stores the YTD window's
 // bars for the companies the chart will cover. Never throws; a failure leaves
 // the chart to name what is missing. An inherited window was fetched when it
-// was first charted, and is read at that cutoff.
+// was first charted; it is fetched again, at its cutoff, only when the turn adds
+// a company that answer did not cover.
+// ponytail: the chart rereads stored bars at the inherited cutoff, so a provider
+// correction to them since shows corrected returns; reusing the earlier
+// snapshot's sealed observations is the upgrade if that matters.
 async function hydrateYtdWindow(
   scope: ResearchScope,
   covered: ReadonlyArray<ChatResolvedSubjectPreResolution>,
+  prior: ResearchScope | null,
 ): Promise<void> {
   const origin = marketHydrationOrigin(process.env);
-  if (origin === null || scope.price_window === null || scope.inherited.includes("price_window")) return;
-  const now = scope.price_window.cutoff;
+  if (origin === null || !needsWindowFetch(scope, prior)) return;
+  const now = scope.price_window!.cutoff;
   try {
     const listings = await priceListingsForTurn(pool(), {
       issuers: issuersOf(covered),

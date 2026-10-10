@@ -55,9 +55,6 @@ export type ChatTurnRunContext = ChatTurnInput & {
   subjectPreResolutions?: ReadonlyArray<ChatResolvedSubjectPreResolution>;
   // Companies a comparison named that could not be found; the answer says so.
   unresolvedMentions?: ReadonlyArray<string>;
-  // The turn refers back to the previous answer's companies, so it keeps that
-  // answer's research scope where it does not change it (research-scope.ts).
-  followUp?: boolean;
   // Analyst prompt-template bundle selected for this turn. Derived from the
   // resolved subject's kind via chooseBundleIdForSubjectKind; falls back to
   // DEFAULT_BUNDLE_ID when no subject was provided. Same routing function
@@ -818,7 +815,7 @@ function subjectAwareRunner(
         return;
       }
       if (turn.subjects.length > 0) {
-        await runResolvedSubjectTurn(runner, { ...context, unresolvedMentions: turn.notFound, followUp: turn.followUp }, turn.subjects);
+        await runResolvedSubjectTurn(runner, { ...context, unresolvedMentions: turn.notFound }, turn.subjects);
         return;
       }
     }
@@ -834,8 +831,6 @@ type TurnSubjects = {
   // Set only for comparisons: a named company to ask about, or ones not found.
   ambiguous?: Exclude<ChatSubjectPreResolution, ChatResolvedSubjectPreResolution>;
   notFound: ReadonlyArray<string>;
-  // Some companies were carried forward from the previous answer.
-  followUp?: boolean;
 };
 
 async function resolveTurnSubjects(
@@ -865,7 +860,7 @@ async function resolveTurnSubjects(
   const carried = distinctCompanies(prior)
     .filter((subject) => !namedKeys.has(companyKey(subject)))
     .slice(0, MAX_TURN_SUBJECTS - newlyNamed.length);
-  return { subjects: [...carried, ...newlyNamed], notFound, followUp: carried.length > 0 };
+  return { subjects: [...carried, ...newlyNamed], notFound };
 }
 
 async function resolveNamedSubjects(

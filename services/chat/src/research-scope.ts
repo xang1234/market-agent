@@ -71,6 +71,15 @@ export function resolveResearchScope(input: {
   };
 }
 
+// Whether a live turn fetches its YTD window's prices: one asked for now, or an
+// inherited one when the turn adds a company the earlier answer did not chart.
+export function needsWindowFetch(scope: ResearchScope, prior: ResearchScope | null): boolean {
+  if (scope.price_window === null) return false;
+  if (!scope.inherited.includes("price_window")) return true;
+  const charted = new Set(prior?.companies.map((company) => company.issuer_id) ?? []);
+  return scope.companies.some((company) => !charted.has(company.issuer_id));
+}
+
 function routeOf(companies: number, facets: { peers: boolean; segments: boolean; margin_trend: boolean }): ResearchRoute {
   if (companies === 0) return "unknown";
   if (companies > 1 || facets.peers) return "comparison";
