@@ -42,10 +42,10 @@
       "correct_companies": 2,
       "comparable_periods": 2,
       "figures_match_sources": 2,
-      "conclusions_justified": 2,
+      "conclusions_justified": 1,
       "counterarguments": 2,
       "no_invented_numbers": 2,
-      "notes": "No caveat that AAPL is in a different industry (consumer electronics)."
+      "notes": "No caveat that AAPL is in a different industry (consumer electronics). Takeaway says AMD 'trails both peers on margins', but AMD's gross margin (49.9%) beats AAPL's (46.9%); only net margin is lowest."
     },
     "fiscal-year-trap": {
       "correct_companies": 2,
@@ -96,10 +96,10 @@
       "correct_companies": 2,
       "comparable_periods": 2,
       "figures_match_sources": 2,
-      "conclusions_justified": 2,
+      "conclusions_justified": 1,
       "counterarguments": 2,
       "no_invented_numbers": 2,
-      "notes": ""
+      "notes": "The counterpoint infers the market 'may already be pricing in NVDA's growth trajectory or is discounting its sustainability', an unlabelled market interpretation the returns can't establish (no valuation or expectations data shown)."
     }
   }
 }
