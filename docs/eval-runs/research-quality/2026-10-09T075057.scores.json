@@ -89,8 +89,8 @@
       "figures_match_sources": 2,
       "conclusions_justified": 1,
       "counterarguments": 2,
-      "no_invented_numbers": 2,
-      "notes": "Turn 3 calls the Dec 1-Aug 31 return (6.6% / 3.58%) 'YTD'; YTD is 5.81% / 3.17%. Guard dropped turn 2's correct YTD figures sentence. Turn 3 says margins are higher 'at every level of the income statement' while saying operating margin isn't shown. Turn 1 repeats the 'slowest QoQ' error."
+      "no_invented_numbers": 0,
+      "notes": "Turn 3 calls the Dec 1-Aug 31 return (6.6% / 3.58%) 'YTD'; YTD is 5.81% / 3.17%. Guard dropped turn 2's correct YTD figures sentence. Turn 3 says margins are higher 'at every level of the income statement' while saying operating margin isn't shown. Turn 1 repeats the 'slowest QoQ' error. The Dec 1-Aug 31 returns are presented as YTD, a figure passed off as a different period, so no_invented_numbers is 0. The regression test is #269's golden-conversation check that turn 3 keeps the YTD window."
     },
     "ticker-page-compare": {
       "correct_companies": 2,

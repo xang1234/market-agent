@@ -89,8 +89,8 @@
       "figures_match_sources": 2,
       "conclusions_justified": 2,
       "counterarguments": 1,
-      "no_invented_numbers": 2,
-      "notes": "Turn 3 calls the Dec 1-Aug 31 return (6.6% / 3.58%) 'YTD'; the YTD figures in turn 2 were 5.81% / 3.17%. The turn 3 counterpoint only restates AMD positives."
+      "no_invented_numbers": 0,
+      "notes": "Turn 3 calls the Dec 1-Aug 31 return (6.6% / 3.58%) 'YTD'; the YTD figures in turn 2 were 5.81% / 3.17%. The turn 3 counterpoint only restates AMD positives. The Dec 1-Aug 31 returns are presented as YTD, a figure passed off as a different period, so no_invented_numbers is 0. The regression test is #269's golden-conversation check that turn 3 keeps the YTD window."
     },
     "ticker-page-compare": {
       "correct_companies": 2,
