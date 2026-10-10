@@ -16,10 +16,14 @@
 // is a named gap: it is never answered with another metric in its place, so a
 // question asking only for such metrics reads no income-statement facts at all.
 //
-// ponytail: a facet named once stays on for the rest of the thread; turning one
-// off, and clarifying an ambiguous change, are #206's last slice.
+// A follow-up can turn a facet off ("without segments", "drop the YTD
+// window"): it is cleared, not inherited, and stays off until asked for again.
+//
+// A benchmark index (the S&P 500) is a named gap no reader serves; it is kept
+// like any other facet, so a later turn still says it is missing.
 
 import { requestedFiscalYear, requestedPriceWindow } from "./fact-blocks.ts";
+import { BENCHMARK } from "./subject-extraction.ts";
 
 const ROUTES = [
   "latest_quarter",
@@ -36,7 +40,7 @@ const ROUTES = [
 ] as const;
 export type ResearchRoute = (typeof ROUTES)[number];
 
-export type ScopeField = "peers" | "segments" | "margin_trend" | "metrics" | "fiscal_year" | "price_window";
+export type ScopeField = "peers" | "segments" | "margin_trend" | "metrics" | "fiscal_year" | "price_window" | "benchmark";
 
 // A metric a question names: one this chat's readers show, or a named gap.
 export type RequestedMetric = { metric_key: string; label: string; available: boolean };
@@ -59,11 +63,38 @@ export type ResearchScope = {
   fiscal_year: number | null;
   // The window's cutoff is the answer that first charted it.
   price_window: { kind: "ytd"; cutoff: string } | null;
+  // A benchmark index asked for: never in this data, so always a named gap.
+  benchmark: boolean;
   // The fields carried from the previous answer rather than asked for now.
   inherited: ReadonlyArray<ScopeField>;
 };
 
 const PEERS = /\bpeers?\b/i;
+const WINDOW = /\b(?:ytd|year[- ]to[- ]date|(?:price )?window|(?:price )?returns?)\b/i;
+const FISCAL = /\b(?:FY\s?'?\d{2,4}|fiscal(?:\s+year)?(?:\s+\d{2,4})?|\d{4}\s+fiscal)\b/i;
+// Where a list of things to remove ends: at the end of the sentence, or where
+// the next request starts ("drop AMD and AAPL, and add TSLA"). Commas and "and"
+// inside the list ("segments, margins and the window") are part of it.
+// A word in capitals is a ticker in the list ("drop AMD and NOW"), not a
+// request, so these patterns match words in lower case or capitalised only
+// (words()), never in capitals, and take no "i" flag.
+// ponytail: spelled out per word because Node 22 has no inline (?-i:) modifier.
+export function words(list: ReadonlyArray<string>): string {
+  return list.map((word) => `[${word[0]}${word[0]!.toUpperCase()}]${word.slice(1)}`).join("|");
+}
+const CONJUNCTION = words(["and", "but", "then"]);
+export const LIST_END = String.raw`(?=\s*[.;:?!]|,?\s+(?:(?:${CONJUNCTION})\s+)?(?:${words(["add", "adding", "bring", "include", "show", "compare", "keep", "switch", "also", "now", "instead"])})\b|$)`;
+// What a follow-up turns off: the words after "without", "drop" and the like,
+// or after "no" starting a clause ("No segments", "same, no margins"), never
+// "no" inside one ("why was there no change in margins?").
+const OFF_VERBS = words([
+  "without", "drop", "remove", "exclude", "skip", "forget", "ignore", "hide", "leave out", "take out",
+  "no longer (?:show|include)", "stop (?:showing|including)",
+]);
+const OFF = new RegExp(
+  String.raw`(?:(?<=^\s*|[,;:]\s*|\b(?:${CONJUNCTION})\s+)${words(["no"])}|\b(?:${OFF_VERBS}))\s+((?:${words(["the", "any", "its", "their"])})\s+)?([^.;:?!]+?)` + LIST_END,
+  "g",
+);
 const SEGMENTS = /\bsegments?\b/i;
 const MARGINS = /\b(margins?|profitab\w*)\b/i;
 // A margin asked about over time, not just its latest value.
@@ -128,12 +159,19 @@ export function resolveResearchScope(input: {
   // The metrics were served by the financial engine, so none is a gap even if
   // no reader here serves it.
   served?: boolean;
+  // Every auto-selected peer was dropped by name: peers are off (local-runtime).
+  peersOff?: boolean;
 }): ResearchScope {
-  const { question, prior } = input;
+  const { prior } = input;
+  // What the turn turns off, and the question without those phrases, so a facet
+  // turned off is not also read as asked for.
+  const off = turnedOff(input.question);
+  if (input.peersOff) off.fields.add("peers");
+  const question = off.rest;
   const inherited: ScopeField[] = [];
   const pick = <T>(field: ScopeField, asked: T | null, kept: T | null | undefined): T | null => {
     if (asked !== null) return asked;
-    if (kept === null || kept === undefined) return null;
+    if (kept === null || kept === undefined || off.fields.has(field)) return null;
     inherited.push(field);
     return kept;
   };
@@ -141,13 +179,16 @@ export function resolveResearchScope(input: {
     pick(field, pattern.test(question) ? true : null, kept ? true : null) ?? false;
   const peers = flag("peers", PEERS, prior?.peers);
   const segments = flag("segments", SEGMENTS, prior?.segments);
+  const benchmark = flag("benchmark", BENCHMARK, prior?.benchmark);
   // Margins asked about in their own right, not as an unavailable metric's
   // qualifier ("free cash flow margin").
   const scanned = scanMetrics(question);
   const marginAsked = MARGINS.test(scanned.rest);
   const margin_trend = pick("margin_trend", marginAsked && OVER_TIME.test(scanned.rest) ? true : null, prior?.margin_trend ? true : null) ?? false;
   const named = scanned.metrics.map((metric) => (input.served ? { ...metric, available: true } : metric));
-  const metrics = pick("metrics", named.length > 0 ? named : null, prior && prior.metrics.length > 0 ? prior.metrics : null) ?? [];
+  // A metric turned off leaves the ones kept; none left keeps none.
+  const kept = prior?.metrics.filter((metric) => !off.metrics.has(metric.metric_key)) ?? [];
+  const metrics = pick("metrics", named.length > 0 ? named : null, kept.length > 0 ? kept : null) ?? [];
   const fiscal_year = pick("fiscal_year", requestedFiscalYear(question) ?? null, prior?.fiscal_year);
   const asked = requestedPriceWindow(question) === "ytd" ? { kind: "ytd" as const, cutoff: input.asOf } : null;
   const price_window = pick("price_window", asked, prior?.price_window);
@@ -179,8 +220,36 @@ export function resolveResearchScope(input: {
     metrics,
     fiscal_year,
     price_window,
+    benchmark,
     inherited,
   };
+}
+
+// Whether words name a facet or metric this scope tracks ("the FCF", "the
+// segments"), so they are not a company to drop.
+export function namesFacet(text: string): boolean {
+  return [SEGMENTS, PEERS, BENCHMARK, MARGINS, WINDOW, FISCAL].some((pattern) => pattern.test(text)) ||
+    scanMetrics(text).metrics.length > 0;
+}
+
+// The fields and metrics a question turns off, and the question without the
+// phrases that do it. A phrase naming nothing here ("without AMD", a company
+// the coordinator removes) turns nothing off.
+function turnedOff(question: string): { fields: Set<ScopeField>; metrics: Set<string>; rest: string } {
+  const fields = new Set<ScopeField>();
+  const metrics = new Set<string>();
+  const rest = question.replace(OFF, (phrase, _article: string | undefined, object: string) => {
+    const before = fields.size + metrics.size;
+    if (SEGMENTS.test(object)) fields.add("segments");
+    if (PEERS.test(object)) fields.add("peers");
+    if (BENCHMARK.test(object)) fields.add("benchmark");
+    if (MARGINS.test(object)) fields.add("margin_trend");
+    if (WINDOW.test(object)) fields.add("price_window");
+    if (FISCAL.test(object)) fields.add("fiscal_year");
+    for (const metric of scanMetrics(object).metrics) metrics.add(metric.metric_key);
+    return fields.size + metrics.size > before ? " " : phrase;
+  });
+  return { fields, metrics, rest };
 }
 
 function routeOf(
@@ -239,6 +308,8 @@ export function parseResearchScope(value: unknown): ResearchScope | null {
     metrics: (scope.metrics ?? []) as ResearchScope["metrics"],
     fiscal_year: scope.fiscal_year as number | null,
     price_window: window === null ? null : { kind: "ytd", cutoff: window!.cutoff as string },
+    // Absent on scopes saved before benchmarks were recorded.
+    benchmark: scope.benchmark === true,
     inherited: [],
   };
 }

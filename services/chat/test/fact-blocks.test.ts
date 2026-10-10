@@ -467,6 +467,22 @@ test("what a turn asked for and cannot show is a note each, naming its companies
   assert.match(text(scopeGapBlocks(evidence, [], input)).join(" "), /calculated and verified by the financial engine/);
 });
 
+test("a benchmark asked for, or kept from the previous turn, is named as not in the data (#206)", () => {
+  const NVDA = { issuer_id: "60000000-0000-4000-8000-000000000001", label: "NVDA" };
+  const AMD = { issuer_id: "60000000-0000-4000-8000-000000000002", label: "AMD" };
+  const input = { snapshotId: "11111111-1111-4111-8111-111111111111", asOf: "2026-09-01T00:00:00.000Z" };
+  const text = (blocks: ReadonlyArray<Record<string, unknown>>) =>
+    blocks.map((block) => (block.segments as Array<{ text: string }>)[0]!.text);
+  const asked = resolveResearchScope({ question: "Compare NVDA and AMD YTD against the S&P 500", companies: [NVDA, AMD], prior: null, asOf: input.asOf });
+  const note = "A benchmark index is not in this data, so the companies are compared only with each other.";
+  assert.deepEqual(text(scopeGapBlocks(asked, [{ kind: "metrics_comparison" }], input)), [note]);
+  const kept = resolveResearchScope({ question: "Show it as a table", companies: [NVDA, AMD], prior: asked, asOf: input.asOf });
+  assert.deepEqual(text(scopeGapBlocks(kept, [{ kind: "metrics_comparison" }], input)), [note]);
+  // One company: there is nothing to compare it with.
+  const single = resolveResearchScope({ question: "How has NVDA done against the S&P 500?", companies: [NVDA], prior: null, asOf: input.asOf });
+  assert.deepEqual(text(scopeGapBlocks(single, [], input)), ["A benchmark index is not in this data, so NVDA is not compared with one."]);
+});
+
 test("other facts are offered only when nothing the turn asked for is a named gap (#206)", () => {
   const AMD = { issuer_id: "60000000-0000-4000-8000-000000000002", label: "AMD" };
   const scope = (question: string) => resolveResearchScope({ question, companies: [AMD], prior: null, asOf: "2026-09-01T00:00:00.000Z" });

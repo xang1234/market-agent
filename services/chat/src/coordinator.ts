@@ -30,7 +30,7 @@ import {
 import type { ChatClarificationAnswer, ChatFinancialRuntime } from "./financial-runtime.ts";
 import { ChatSnapshotSealError } from "./messages.ts";
 import { financialAwareRunner } from "./financial-turn.ts";
-import type { ResearchScope } from "./research-scope.ts";
+import { LIST_END, namesFacet, words, type ResearchScope } from "./research-scope.ts";
 
 export type ChatTurnInput = {
   threadId: string;
@@ -814,6 +814,10 @@ function subjectAwareRunner(
         });
         return;
       }
+      if (turn.clarify) {
+        await emitClarificationTurn(context, turn.clarify, options.persistAssistantMessage);
+        return;
+      }
       if (turn.subjects.length > 0) {
         await runResolvedSubjectTurn(runner, { ...context, unresolvedMentions: turn.notFound }, turn.subjects);
         return;
@@ -831,7 +835,23 @@ type TurnSubjects = {
   // Set only for comparisons: a named company to ask about, or ones not found.
   ambiguous?: Exclude<ChatSubjectPreResolution, ChatResolvedSubjectPreResolution>;
   notFound: ReadonlyArray<string>;
+  // A follow-up whose change to the compared companies is unclear: the question
+  // to ask instead of answering (#206).
+  clarify?: string;
 };
+
+// A follow-up's change to the compared companies (#206): adding one keeps the
+// others, as a comparison does; dropping one keeps the rest. A short follow-up
+// naming a new company after a comparison ("what about AAPL?") could mean
+// either, so it asks; "just AAPL" or a full new question switches to it.
+const ADD = /\b(?:add|adding|bring (?:back|in))\b/i;
+// The companies after a removal verb, a whole list of them (LIST_END).
+const REMOVE = new RegExp(
+  String.raw`\b(?:${words(["drop", "remove", "exclude", "without", "leave out", "take out", "minus", "except"])})\s+([^.;:?!]+?)` + LIST_END,
+  "g",
+);
+const CONTINUATION = /^\s*(?:and\s+)?(?:what|how)\s+about\b|^\s*and\s+\S/i;
+const ONLY = /\b(?:just|only|instead|switch to|alone)\b/i;
 
 async function resolveTurnSubjects(
   context: ChatTurnRunContext,
@@ -839,8 +859,13 @@ async function resolveTurnSubjects(
   loadPriorSubjects: ChatPriorSubjectsLoader | undefined,
 ): Promise<TurnSubjects> {
   const text = nonEmptySubjectText(context.userIntent);
-  const comparative = COMPARATIVE.test(text ?? "");
+  const comparative = COMPARATIVE.test(text ?? "") || ADD.test(text ?? "");
   const named = text ? await resolveNamedSubjects(text, preResolve) : { resolved: [], unresolved: [] };
+  // A removal is handled even when what it names does not resolve ("drop XYZQ").
+  const change = text && loadPriorSubjects !== undefined && (named.resolved.length > 0 || new RegExp(REMOVE.source).test(text))
+    ? await companyChange(context, text, named, preResolve, loadPriorSubjects)
+    : null;
+  if (change !== null) return change;
   // Outside comparisons an unresolved token is usually an acronym, not a company,
   // so it is ignored as before.
   if (comparative) {
@@ -861,6 +886,92 @@ async function resolveTurnSubjects(
     .filter((subject) => !namedKeys.has(companyKey(subject)))
     .slice(0, MAX_TURN_SUBJECTS - newlyNamed.length);
   return { subjects: [...carried, ...newlyNamed], notFound };
+}
+
+// A follow-up that drops companies from the previous answer's, or names a new
+// one in a way that could mean adding or switching; null for any other turn.
+async function companyChange(
+  context: ChatTurnRunContext,
+  text: string,
+  mentioned: Awaited<ReturnType<typeof resolveNamedSubjects>>,
+  preResolve: ChatSubjectPreResolver,
+  loadPriorSubjects: ChatPriorSubjectsLoader,
+): Promise<TurnSubjects | null> {
+  const named = mentioned.resolved;
+  const removal = [...text.matchAll(REMOVE)].map((match) => match[1]).join(", ");
+  const ambiguous = CONTINUATION.test(text) && !COMPARATIVE.test(text) && !ADD.test(text) && !ONLY.test(text);
+  if (removal === "" && !ambiguous) return null;
+  const prior = distinctCompanies(
+    await loadPriorSubjects({ threadId: context.threadId, ...(context.userId ? { userId: context.userId } : {}) }),
+  );
+  const priorKeys = new Set(prior.map(companyKey));
+  if (removal !== "") {
+    const removing = await resolveNamedSubjects(removal, preResolve);
+    const removedSubjects = distinctCompanies(removing.resolved);
+    const removed = new Set(removedSubjects.map(companyKey));
+    const kept = prior.filter((subject) => !removed.has(companyKey(subject)));
+    // A company to drop that is ambiguous, or cannot be found, is asked about,
+    // unless the words name a facet or metric ("drop the FCF").
+    const unclear = namesFacet(removal) ? [] : removing.unresolved;
+    const ambiguousTarget = unclear.find((resolution) => resolution.status === "needs_clarification");
+    if (ambiguousTarget) return { subjects: [], ambiguous: ambiguousTarget, notFound: [] };
+    if (unclear.length > 0 && prior.length > 0) {
+      const missing = labelList(unclear.map((resolution) => resolution.input_text));
+      return {
+        subjects: [],
+        notFound: [],
+        clarify: `${missing} ${unclear.length > 1 ? "were" : "was"} not found, so nothing was dropped from the ${labelList(prior.map(tickerLabel))} comparison.`,
+      };
+    }
+    if (removed.size === 0) return null;
+    // Only companies the previous answer covered can be dropped, and not all of
+    // them: otherwise ask, rather than answer about the company named.
+    const absent = removedSubjects.filter((subject) => !priorKeys.has(companyKey(subject)));
+    const compared = labelList(prior.map(tickerLabel));
+    if (absent.length > 0) {
+      const missing = labelList(absent.map(tickerLabel));
+      return {
+        subjects: [],
+        notFound: [],
+        clarify: `${missing} ${absent.length > 1 ? "are" : "is"} not in the ${compared} comparison, so there is nothing to drop. Say "add ${missing}" to add ${absent.length > 1 ? "them" : "it"}, or "just ${missing}" to look at ${absent.length > 1 ? "them" : "it"} alone.`,
+      };
+    }
+    if (kept.length === 0) {
+      return { subjects: [], notFound: [], clarify: `Dropping ${compared} leaves no company to compare. Name the company to look at.` };
+    }
+    // As in a comparison: an ambiguous company named beside it is asked about,
+    // and one not found is named in the answer.
+    const ambiguousMention = mentioned.unresolved.find((resolution) => resolution.status === "needs_clarification");
+    if (ambiguousMention) return { subjects: [], ambiguous: ambiguousMention, notFound: [] };
+    // One named beside them ("drop AMD and add TSLA") is added, before the
+    // carried companies take the capped slots.
+    const keptKeys = new Set(kept.map(companyKey));
+    const additions = distinctCompanies(named)
+      .filter((subject) => !removed.has(companyKey(subject)) && !keptKeys.has(companyKey(subject)))
+      .slice(0, MAX_TURN_SUBJECTS);
+    return {
+      subjects: [...kept.slice(0, MAX_TURN_SUBJECTS - additions.length), ...additions],
+      notFound: mentioned.unresolved.map((resolution) => resolution.input_text),
+    };
+  }
+  const added = distinctCompanies(named).filter((subject) => !priorKeys.has(companyKey(subject)));
+  if (prior.length < 2 || added.length === 0) return null;
+  const adding = labelList(added.map(tickerLabel));
+  const compared = labelList(prior.map(tickerLabel));
+  return {
+    subjects: [],
+    notFound: [],
+    clarify: `Add ${adding} to the ${compared} comparison, or look at ${adding} alone? Say "add ${adding}" or "just ${adding}".`,
+  };
+}
+
+// A company as the user would type it: its ticker, as answers label it.
+function tickerLabel(subject: ChatResolvedSubjectPreResolution): string {
+  return subject.handoff.display_labels?.ticker ?? subject.display_label;
+}
+
+function labelList(labels: ReadonlyArray<string>): string {
+  return labels.length < 2 ? labels.join("") : `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
 }
 
 async function resolveNamedSubjects(
@@ -936,14 +1047,48 @@ async function emitSubjectClarificationTurn(
     turnId,
     preResolution,
   }, options.renderSubjectClarification);
+  await emitClarification(context, rendered, options.persistAssistantMessage);
+}
+
+// A question asked about the request rather than an answer to it (#206): one
+// text block, saved with no research scope, so the reply continues the
+// previous answer's.
+async function emitClarificationTurn(
+  context: ChatTurnRunContext,
+  text: string,
+  persistAssistantMessage: ChatAssistantMessagePersistence | undefined,
+) {
+  const turnId = context.turnId ?? context.runId;
+  const blockId = stableUuid(`scope-clarification:${context.threadId}:${turnId}`);
+  context.emit("turn.started", {});
+  await emitClarification(context, {
+    blocks: [createRichTextBlock({
+      id: blockId,
+      snapshotId: stableUuid(`scope-snapshot:${context.threadId}:${turnId}`),
+      text,
+      title: "Clarify request",
+    })],
+    content_hash: contentHashForText(text),
+    text,
+    block_id: blockId,
+  }, persistAssistantMessage);
+}
+
+async function emitClarification(
+  context: ChatTurnRunContext,
+  rendered: ChatSubjectClarificationRenderResult,
+  persistAssistantMessage: ChatAssistantMessagePersistence | undefined,
+) {
+  const { emit } = context;
+  const turnId = context.turnId ?? context.runId;
   const assistantBlocks = rendered.blocks;
   const contentHash = rendered.content_hash;
   const blockId = rendered.block_id ?? `subject-clarification-${turnId}`;
   let snapshotId = `subject-snapshot-${turnId}`;
   let messageId = `subject-message-${turnId}`;
 
-  if (options.persistAssistantMessage) {
-    const persisted = await options.persistAssistantMessage({
+  if (persistAssistantMessage) {
+    const persisted = await persistAssistantMessage({
       threadId: context.threadId,
       runId: context.runId,
       turnId,
@@ -1557,8 +1702,10 @@ function createRichTextBlock(input: {
     id: input.id,
     kind: "rich_text",
     snapshot_id: input.snapshotId,
+    // A saved answer's text block is bound to itself; the snapshot verifier
+    // rejects any other binding (a user message's "chat_turn" is never sealed).
     data_ref: Object.freeze({
-      kind: "chat_turn",
+      kind: "rich_text",
       id: input.id,
     }),
     source_refs: Object.freeze([]),

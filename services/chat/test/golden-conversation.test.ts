@@ -346,6 +346,38 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
       [peersThread.thread_id],
     );
     assert.deepEqual(rows[0]?.research_scope.companies.map((company) => company.issuer_id), [NVDA.issuer_id, AMD.issuer_id]);
+    // Turning peers off removes the auto-selected peer too, even after an
+    // ordinary follow-up in between: NVDA alone (#206).
+    completedTurn(await runTurn(base, peersThread.thread_id, "Explain the differences"));
+    completedTurn(await runTurn(base, peersThread.thread_id, "Drop the peers"));
+    const after = await client.query<{ research_scope: { route: string; peers: boolean; companies: Array<{ issuer_id: string }> } }>(
+      `select research_scope from chat_messages where thread_id = $1::uuid and role = 'assistant' order by created_at desc limit 1`,
+      [peersThread.thread_id],
+    );
+    assert.equal(after.rows[0]?.research_scope.peers, false);
+    assert.deepEqual(after.rows[0]?.research_scope.companies.map((company) => company.issuer_id), [NVDA.issuer_id]);
+    assert.notEqual(after.rows[0]?.research_scope.route, "comparison");
+    // ...and the next follow-up does not carry the peer back.
+    completedTurn(await runTurn(base, peersThread.thread_id, "Explain it"));
+    const next = await client.query<{ research_scope: { companies: Array<{ issuer_id: string }> } }>(
+      `select research_scope from chat_messages where thread_id = $1::uuid and role = 'assistant' order by created_at desc limit 1`,
+      [peersThread.thread_id],
+    );
+    assert.deepEqual(next.rows[0]?.research_scope.companies.map((company) => company.issuer_id), [NVDA.issuer_id]);
+  });
+
+  await t.test("dropping an auto-selected peer by name keeps it out (#206)", async () => {
+    const dropThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Drop a peer" });
+    completedTurn(await runTurn(base, dropThread.thread_id, "How does NVDA compare with its peers?"));
+    completedTurn(await runTurn(base, dropThread.thread_id, "Drop AMD"));
+    const { rows } = await client.query<{ research_scope: { route: string; peers: boolean; companies: Array<{ issuer_id: string }> } }>(
+      `select research_scope from chat_messages where thread_id = $1::uuid and role = 'assistant' order by created_at desc limit 1`,
+      [dropThread.thread_id],
+    );
+    // NVDA's only peer here is AMD: dropping it leaves NVDA alone, peers off.
+    assert.deepEqual(rows[0]?.research_scope.companies.map((company) => company.issuer_id), [NVDA.issuer_id]);
+    assert.equal(rows[0]?.research_scope.peers, false);
+    assert.notEqual(rows[0]?.research_scope.route, "comparison");
   });
 
   await t.test("'Break down NVDA's revenue by segment' shows each segment from cited facts (#157)", async () => {
@@ -404,6 +436,69 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
       [fcfThread.thread_id],
     );
     assert.equal(rows[0]?.research_scope.route, "unavailable_metric");
+  });
+
+  // #206: a three-company comparison with metrics, a YTD window and a benchmark,
+  // then a table, an explanation, a dropped company, an unclear new one, the
+  // company added back, and the benchmark turned off. Each turn keeps what it
+  // does not change, read back from the saved answer as a reload would.
+  await t.test("a research scope survives a table, an explanation, and companies dropped and added back", async () => {
+    const AAPL = GOLDEN_COMPANIES.find((company) => company.ticker === "AAPL")!;
+    const regressionThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Scope regression" });
+    type Saved = { route: string; companies: Array<{ issuer_id: string }>; metrics: Array<{ metric_key: string }>; price_window: { cutoff: string } | null; benchmark: boolean; inherited: string[] };
+    const saved = async (): Promise<Saved[]> =>
+      (await client.query<{ research_scope: Saved | null }>(
+        `select research_scope from chat_messages
+          where thread_id = $1::uuid and role = 'assistant' order by created_at`,
+        [regressionThread.thread_id],
+      )).rows.map((row) => row.research_scope!);
+    const turn = async (question: string) => {
+      completedTurn(await runTurn(base, regressionThread.thread_id, question));
+      return (await saved()).at(-1)!;
+    };
+    const issuers = (scope: Saved) => scope.companies.map((company) => company.issuer_id);
+    const benchmarkGap = /A benchmark index is not in this data, so the companies are compared only with each other\./;
+
+    const first = await turn("Compare NVDA, AMD and AAPL revenue and margins YTD against the S&P 500");
+    assert.deepEqual(issuers(first), [NVDA.issuer_id, AMD.issuer_id, AAPL.issuer_id]);
+    assert.ok(first.price_window, "the YTD window is recorded");
+    assert.equal(first.benchmark, true);
+    assert.deepEqual(first.metrics.map((metric) => metric.metric_key), ["income_statement"]);
+    const firstAnswer = await latestAssistantMessage(base, regressionThread.thread_id);
+    assert.match(JSON.stringify(firstAnswer.blocks), benchmarkGap);
+    // "S&P" is not two companies the answer could not find.
+    assert.doesNotMatch(JSON.stringify(firstAnswer.blocks), /could not find/);
+
+    const unchanged = (scope: Saved, companies: string[]) => {
+      assert.deepEqual(issuers(scope), companies);
+      assert.deepEqual(scope.price_window, first.price_window, "the window keeps its first cutoff");
+      assert.equal(scope.benchmark, true);
+      assert.deepEqual(scope.metrics, first.metrics);
+    };
+    const all = [NVDA.issuer_id, AMD.issuer_id, AAPL.issuer_id];
+    unchanged(await turn("Show it as a table"), all);
+    assert.match(JSON.stringify((await latestAssistantMessage(base, regressionThread.thread_id)).blocks), benchmarkGap);
+    unchanged(await turn("Explain the differences"), all);
+    unchanged(await turn("Drop AAPL"), [NVDA.issuer_id, AMD.issuer_id]);
+
+    // A new company named without "add" or "just": asked about, nothing answered.
+    const before = (await saved()).length;
+    const asked = await runTurn(base, regressionThread.thread_id, "What about AAPL?");
+    assert.equal(completedTurn(asked).data.clarification, true);
+    assert.match(JSON.stringify(asked), /Add AAPL to the NVDA and AMD comparison, or look at AAPL alone\?/);
+    assert.equal((await saved()).length, before + 1);
+    assert.equal((await saved()).at(-1), null, "the question is saved with no scope");
+
+    unchanged(await turn("add AAPL"), all);
+    const off = await turn("Same, without the benchmark");
+    assert.equal(off.benchmark, false);
+    assert.deepEqual(issuers(off), all);
+    assert.deepEqual(off.price_window, first.price_window);
+    assert.doesNotMatch(JSON.stringify((await latestAssistantMessage(base, regressionThread.thread_id)).blocks), benchmarkGap);
+
+    // A reload reads back every answer, the question included.
+    const { messages } = await api<{ messages: ChatMessage[] }>(base, "GET", `/v1/chat/threads/${regressionThread.thread_id}/messages`);
+    assert.equal(messages.filter((message) => message.role === "assistant").length, 7);
   });
 
   await t.test("'Compare NVDA with AMD' without a period charts the shared price history, not YTD", async () => {

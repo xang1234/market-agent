@@ -28,11 +28,17 @@ const NON_SUBJECT_TOKENS = new Set([
  */
 export function extractSubjectMentions(text: string | null | undefined): string[] {
   const mentions: string[] = [];
-  for (const token of (text ?? "").split(/[^A-Za-z]+/)) {
+  // A benchmark index is not a company: "S&P" would split into "S" and "P", and
+  // "DOW JONES" into Dow Inc. and "JONES" (#206).
+  for (const token of (text ?? "").replace(new RegExp(BENCHMARK.source, "gi"), " ").split(/[^A-Za-z]+/)) {
     if (TICKER_TOKEN.test(token) && !NON_SUBJECT_TOKENS.has(token) && !mentions.includes(token)) mentions.push(token);
   }
   return mentions;
 }
+
+// A benchmark index a question names (#206). Dow Inc. alone ("DOW") is a
+// company; only "Dow Jones" is the index.
+export const BENCHMARK = /\b(?:benchmarks?|S&P(?:\s*500)?|Nasdaq(?:[- ]100| composite)?|Dow Jones|Russell \d{4}|(?:market |stock )?index(?:es)?)(?![\w&])/i;
 
 // Words that ask to set companies side by side, so a follow-up that names a new
 // company keeps the previous ones ("compare it with AMD") instead of replacing

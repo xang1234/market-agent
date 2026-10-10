@@ -44,6 +44,7 @@ test("a fresh question records what it asks for and inherits nothing", () => {
     metrics: [{ metric_key: "income_statement", label: "Revenue, profit and margins", available: true }],
     fiscal_year: 2025,
     price_window: { kind: "ytd", cutoff: AS_OF },
+    benchmark: false,
     inherited: [],
   });
 });
@@ -229,4 +230,86 @@ test("a single company's YTD gap stays a gap: its answer has no price chart", ()
   assert.equal(fresh("What was AMD's free cash flow YTD?", [AMD]).route, "unavailable_metric");
   // A comparison does chart the window, so it is read beside the gap.
   assert.equal(fresh("What is AMD's free cash flow YTD versus NVDA?", [AMD, NVDA]).route, "comparison");
+});
+
+// #206: a follow-up can turn a facet off; it then stays off.
+test("a follow-up that turns a facet off clears it; the rest is kept", () => {
+  const prior = fresh("Compare NVDA with AMD segments, margin trends and free cash flow, fiscal 2025, YTD", [NVDA, AMD]);
+  const next = (question: string) =>
+    resolveResearchScope({ question, companies: [NVDA, AMD], prior, asOf: "2026-09-02T00:00:00.000Z" });
+
+  const noSegments = next("Same again without segments");
+  assert.equal(noSegments.segments, false);
+  assert.equal(noSegments.margin_trend, true);
+  assert.equal(noSegments.fiscal_year, 2025);
+  assert.ok(!noSegments.inherited.includes("segments"));
+
+  const noWindow = next("Drop the YTD window");
+  assert.equal(noWindow.price_window, null);
+  assert.ok(!noWindow.inherited.includes("price_window"));
+  assert.equal(noWindow.segments, true);
+
+  const noMargins = next("Remove the margins");
+  assert.equal(noMargins.margin_trend, false);
+  assert.equal(noMargins.margins, false);
+
+  const noYear = next("Forget fiscal 2025");
+  assert.equal(noYear.fiscal_year, null);
+
+  assert.deepEqual(next("Leave out free cash flow").metrics.map((metric) => metric.metric_key), ["income_statement"]);
+
+  // Turned off, it stays off on the turn after.
+  const after = resolveResearchScope({ question: "And now?", companies: [NVDA, AMD], prior: noSegments, asOf: "2026-09-03T00:00:00.000Z" });
+  assert.equal(after.segments, false);
+});
+
+test("a facet turned off is not also asked for", () => {
+  const prior = fresh("Break down NVDA's revenue by segment", [NVDA]);
+  const next = resolveResearchScope({ question: "Show NVDA without the segments", companies: [NVDA], prior, asOf: AS_OF });
+  assert.equal(next.segments, false);
+  assert.equal(next.route, "latest_quarter");
+});
+
+test("a benchmark is a named gap the next turns keep until it is turned off", () => {
+  const first = fresh("Compare NVDA and AMD YTD against the S&P 500", [NVDA, AMD]);
+  assert.equal(first.benchmark, true);
+  // The comparison is still read; only the benchmark is missing.
+  assert.equal(first.route, "comparison");
+  const table = resolveResearchScope({ question: "Show it as a table", companies: [NVDA, AMD], prior: first, asOf: AS_OF });
+  assert.equal(table.benchmark, true);
+  assert.ok(table.inherited.includes("benchmark"));
+  const off = resolveResearchScope({ question: "Drop the benchmark", companies: [NVDA, AMD], prior: table, asOf: AS_OF });
+  assert.equal(off.benchmark, false);
+  assert.equal(fresh("Analyze NVDA").benchmark, false);
+  // Saved before benchmarks were recorded: none.
+  const { benchmark: _benchmark, ...old } = JSON.parse(JSON.stringify(first));
+  assert.equal(parseResearchScope(old)?.benchmark, false);
+  assert.equal(parseResearchScope(JSON.parse(JSON.stringify(first)))?.benchmark, true);
+});
+
+test("a follow-up turns off every facet in a list, and stops at the next request", () => {
+  const prior = fresh("Compare NVDA with AMD segments and margin trends YTD against the S&P 500", [NVDA, AMD]);
+  const next = (question: string) =>
+    resolveResearchScope({ question, companies: [NVDA, AMD], prior, asOf: "2026-09-02T00:00:00.000Z" });
+  const both = next("Same, without segments and margins");
+  assert.equal(both.segments, false);
+  assert.equal(both.margin_trend, false);
+  const listed = next("Drop the benchmark, the segments and the YTD window");
+  assert.equal(listed.benchmark, false);
+  assert.equal(listed.segments, false);
+  assert.equal(listed.price_window, null);
+  // "and show ..." asks for something else: segments stay off, margins stay on.
+  const then = next("Drop the segments and show the margin trend");
+  assert.equal(then.segments, false);
+  assert.equal(then.margin_trend, true);
+});
+
+test("'no' turns a facet off only at the start of a clause", () => {
+  const prior = fresh("Compare NVDA with AMD segments and margin trends", [NVDA, AMD]);
+  const next = (question: string) =>
+    resolveResearchScope({ question, companies: [NVDA, AMD], prior, asOf: "2026-09-02T00:00:00.000Z" });
+  assert.equal(next("Why was there no change in margins over the last year?").margin_trend, true);
+  assert.equal(next("No segments this time").segments, false);
+  assert.equal(next("Same table, no segments").segments, false);
+  assert.equal(next("Keep the margins and no segments").segments, false);
 });

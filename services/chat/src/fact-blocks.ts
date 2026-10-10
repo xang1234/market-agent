@@ -733,8 +733,8 @@ function bindingFor(fact: VerifierFact): Record<string, unknown> {
 }
 
 // What a turn asked for and cannot show, each as a note (#206): a metric no
-// reader serves, and a segment breakdown with no segment facts. Nothing else is
-// shown in their place.
+// reader serves, a segment breakdown with no segment facts, and a benchmark.
+// Nothing else is shown in their place.
 export function scopeGapBlocks(
   scope: ResearchScope,
   shown: ReadonlyArray<Block>,
@@ -755,6 +755,11 @@ export function scopeGapBlocks(
     notes.push(scope.reads === "segments"
       ? ["gap:segments", `Revenue by segment is not available for ${names} in this data.`]
       : ["gap:segments", "Revenue by segment is not shown when comparing companies; ask about one company for its breakdown."]);
+  }
+  if (scope.benchmark) {
+    notes.push(["gap:benchmark", scope.companies.length > 1
+      ? "A benchmark index is not in this data, so the companies are compared only with each other."
+      : `A benchmark index is not in this data, so ${names} is not compared with one.`]);
   }
   return notes.map(([key, text]) => {
     const id = stableUuid(`block:${input.snapshotId}:${key}`);
