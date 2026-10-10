@@ -174,8 +174,10 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   // Charts and tables come from facts, never from the model (see fact-blocks.ts).
   const [factBlocks, conversation] = await Promise.all([
     loadTurnFactBlocks(pool(), {
-      issuers: issuersOf(covered),
-      wantsPeers: scope.peers,
+      // The companies the scope records, peers already resolved (comparedCompanies),
+      // so the blocks chart exactly the set the scope saves.
+      issuers: issuersOfScope(scope),
+      wantsPeers: false,
       wantsSegments: scope.segments,
       wantsMarginTrend: scope.margin_trend,
       requestedListings,
@@ -278,8 +280,8 @@ async function hydrateYtdWindow(
   const now = scope.price_window!.cutoff;
   try {
     const listings = await priceListingsForTurn(pool(), {
-      issuers: issuersOf(covered),
-      wantsPeers: scope.peers,
+      issuers: issuersOfScope(scope),
+      wantsPeers: false,
       requestedListings: requestedListingsOf(covered),
       asOf: now,
     });
@@ -324,14 +326,8 @@ function companiesOf(subjects: ReadonlyArray<ChatResolvedSubjectPreResolution>):
   });
 }
 
-function issuersOf(subjects: ReadonlyArray<ChatResolvedSubjectPreResolution>): IssuerSubjectRef[] {
-  const seen = new Set<string>();
-  return subjects.flatMap((subject) => {
-    const issuer = structuredRefsFromHandoff(subject.handoff).issuer;
-    if (issuer === null || seen.has(issuer.id)) return [];
-    seen.add(issuer.id);
-    return [{ kind: "issuer" as const, id: issuer.id }];
-  });
+function issuersOfScope(scope: ResearchScope): IssuerSubjectRef[] {
+  return scope.companies.map((company) => ({ kind: "issuer" as const, id: company.issuer_id }));
 }
 
 const NO_DEFAULT_REFS = Object.freeze({
