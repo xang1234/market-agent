@@ -209,6 +209,8 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     subjectLabels: covered.flatMap((subject) => subjectLabelsFromHandoff(subject.handoff)),
     conversation,
     availableData: mayOfferOtherFacts(scope, shownBlocks),
+    scope,
+    cutoff: asOf,
     onAnswered: (deployment) => {
       answeredBy = deployment;
     },

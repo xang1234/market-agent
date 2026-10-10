@@ -425,7 +425,7 @@ test("a replayed reply quoting a figure the user is not shown has that sentence 
   // The dropped sentence is reported, so an eval can count guarded drops (#144).
   assert.deepEqual(removed, ["That is 38% growth year over year."]);
   // The model is told which figures it may quote.
-  assert.match(prompt, /displayed_figures/);
+  assert.match(prompt, /evidence_packet/);
   assert.match(prompt, /\$62\.1B/);
 });
 
@@ -582,15 +582,18 @@ test("the answer model sees a compact context, not raw tool JSON (#181)", async 
     onUsage: (reported) => usage.push(reported),
   });
   const context = JSON.parse(prompt) as Record<string, unknown>;
-  assert.deepEqual(Object.keys(context).sort(), ["conversation", "cited_claims", "data_notes", "displayed_figures", "question", "staleness"].sort());
+  assert.deepEqual(Object.keys(context).sort(), ["conversation", "cited_claims", "evidence_packet", "question"].sort());
+  const packet = context.evidence_packet as Record<string, unknown>;
+  // The figures carry short packet ids; the facts behind them stay server-side (#207).
+  assert.deepEqual((packet.figures as Array<{ id: string }>).map((figure) => figure.id), ["F1", "F2", "F3", "F4"]);
   // Each claim keeps its dates, so a past claim is not read as current.
   assert.deepEqual(context.cited_claims, [{
     text: "NVIDIA guided data-center revenue higher.",
     effective_time: "2025-11-19T00:00:00.000Z",
     published_at: "2025-11-20T00:00:00.000Z",
   }]);
-  assert.deepEqual(context.data_notes, ["Year-to-date price performance is not shown: AMD has no prices from before 2026."]);
-  assert.deepEqual(context.staleness, {
+  assert.deepEqual(packet.gaps, ["Year-to-date price performance is not shown: AMD has no prices from before 2026."]);
+  assert.deepEqual(packet.staleness, {
     quote: [{ ticker: "NVDA", as_of: "2026-09-01T00:00:00.000Z", stale: true }],
     fact_recency: [{ latest_as_of: "2026-08-01T00:00:00.000Z", age_days: 31, stale: false }],
   });
@@ -634,7 +637,8 @@ test("with no figures shown, the model still gets the evidence, compactly, as av
     });
     return JSON.parse(prompt) as Record<string, unknown>;
   };
-  assert.deepEqual((await run()).available_data, {
+  const packetOf = (context: Record<string, unknown>) => context.evidence_packet as Record<string, unknown>;
+  assert.deepEqual(packetOf(await run()).available_data, {
     quotes: [{ ticker: "AAPL", price: 231.6, change: "+0.78%", currency: "USD", as_of: "2026-09-01T00:00:00.000Z", session_state: "closed", delay_class: "eod" }],
     facts: [
       { metric: "Revenue", value: 416161000000, unit: "currency", currency: "USD", period: "FY 2025", as_of: "2025-10-31T00:00:00.000Z" },
@@ -644,13 +648,13 @@ test("with no figures shown, the model still gets the evidence, compactly, as av
   });
   assert.ok(!prompt.includes("fact_id") && !prompt.includes('"source_id"'), "still compact: no ids");
   // With figures shown, only those may be quoted: no available_data.
-  assert.equal("available_data" in (await run(COMPARISON_BLOCKS)), false);
+  assert.equal("available_data" in packetOf(await run(COMPARISON_BLOCKS)), false);
   // A turn asking only for a metric no reader serves gets the named gap, not
   // other facts it could offer in that metric's place (#206).
   const gap = { kind: "rich_text", segments: [{ type: "text", text: "Free cash flow is not available for AAPL in this data, so no other figure is shown in its place." }] };
   const withheld = await run([gap], false);
-  assert.equal("available_data" in withheld, false);
-  assert.deepEqual(withheld.data_notes, [gap.segments[0]!.text]);
+  assert.equal("available_data" in packetOf(withheld), false);
+  assert.deepEqual(packetOf(withheld).gaps, [gap.segments[0]!.text]);
 });
 
 test("blocks that show no figures (a gap note) leave the answer unguarded, like no blocks (#181)", async () => {
@@ -770,7 +774,7 @@ test("a claim's date supports its month and year, never its day or time as a fig
 test("the model sees each comparison figure with the company and metric it belongs to", async () => {
   const { prompt } = await compareWithReply("NVDA leads.");
   assert.ok(
-    prompt.includes(JSON.stringify({ company: "AMD", metric: "Gross Margin", value: "49.2%", shown_in: "Side by side (latest fiscal year)" })),
+    prompt.includes(JSON.stringify({ id: "F4", company: "AMD", metric: "Gross Margin", value: "49.2%", shown_in: "Side by side (latest fiscal year)" })),
     prompt,
   );
 });

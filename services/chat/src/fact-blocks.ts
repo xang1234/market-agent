@@ -35,7 +35,7 @@ import { unavailableMetrics, type ResearchScope } from "./research-scope.ts";
 import { loadPerfComparisonBlocks, type PriceWindow } from "./perf-block.ts";
 import { deriveQuarterMetrics, GROWTH, MARGINS, type QuarterMetric } from "./quarter-metrics.ts";
 
-const QUARTERS_SHOWN = 8;
+export const QUARTERS_SHOWN = 8;
 const LATEST_QUARTER_METRICS = [
   ["revenue", "Revenue"],
   ["gross_profit", "Gross profit"],
@@ -820,11 +820,19 @@ export type DisplayedFigure = {
   period_end?: string;
   value: string;
   shown_in?: string;
+  // The fact the value cites and the block showing it, for the evidence packet
+  // (#207); never sent to the model.
+  fact_id?: string;
+  block_id?: string;
 };
 
 export function displayedFigures(blocks: ReadonlyArray<Block>): DisplayedFigure[] {
   return blocks.flatMap((block): DisplayedFigure[] => {
-    const shownIn = typeof block.title === "string" ? { shown_in: block.title } : {};
+    const shownIn = {
+      ...(typeof block.title === "string" ? { shown_in: block.title } : {}),
+      ...(typeof block.id === "string" ? { block_id: block.id } : {}),
+    };
+    const cites = (ref: string | undefined) => (ref ? { fact_id: ref } : {});
     if (block.kind === "metrics_comparison") {
       const labels = (block.subject_labels ?? []) as ReadonlyArray<string>;
       const metrics = (block.metrics ?? []) as ReadonlyArray<string>;
@@ -841,13 +849,13 @@ export function displayedFigures(blocks: ReadonlyArray<Block>): DisplayedFigure[
       return cells.flatMap((row, subjectIndex) =>
         row.flatMap((cell, metricIndex) =>
           cell?.format && labels[subjectIndex] && metrics[metricIndex]
-            ? [{ company: labels[subjectIndex], metric: metrics[metricIndex], ...periodOf(cell.value_ref), value: cell.format, ...shownIn }]
+            ? [{ company: labels[subjectIndex], metric: metrics[metricIndex], ...periodOf(cell.value_ref), value: cell.format, ...shownIn, ...cites(cell.value_ref) }]
             : []
         )
       );
     }
     if (block.kind === "metric_row") {
-      const items = (block.items ?? []) as ReadonlyArray<{ label?: string; format?: string }>;
+      const items = (block.items ?? []) as ReadonlyArray<{ label?: string; format?: string; value_ref?: string }>;
       // A margin-trend row: the metric is in the title and each cell is a quarter.
       const trendMetric = typeof block.title === "string" && block.title.endsWith(BY_QUARTER)
         ? block.title.slice(0, -BY_QUARTER.length)
@@ -855,13 +863,15 @@ export function displayedFigures(blocks: ReadonlyArray<Block>): DisplayedFigure[
       return items.flatMap((item) => {
         if (!item.label || !item.format) return [];
         return [trendMetric
-          ? { metric: trendMetric, period: item.label, value: item.format, ...shownIn }
-          : { metric: item.label, value: item.format, ...shownIn }];
+          ? { metric: trendMetric, period: item.label, value: item.format, ...shownIn, ...cites(item.value_ref) }
+          : { metric: item.label, value: item.format, ...shownIn, ...cites(item.value_ref) }];
       });
     }
     if (block.kind === "revenue_bars") {
-      const bars = (block.bars ?? []) as ReadonlyArray<{ label?: string; format?: string }>;
-      return bars.flatMap((bar) => bar.label && bar.format ? [{ metric: "Revenue", period: bar.label, value: bar.format }] : []);
+      const bars = (block.bars ?? []) as ReadonlyArray<{ label?: string; format?: string; value_ref?: string }>;
+      return bars.flatMap((bar) =>
+        bar.label && bar.format ? [{ metric: "Revenue", period: bar.label, value: bar.format, ...shownIn, ...cites(bar.value_ref) }] : []
+      );
     }
     if (block.kind === "perf_comparison") {
       // Each line's return over the window drawn (its last point), credited to

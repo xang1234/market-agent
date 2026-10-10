@@ -405,6 +405,8 @@ test("the model sees each comparison figure's period and end date (#180)", () =>
     period_end: "2025-01-26",
     value: "$130.5B",
     shown_in: "Side by side",
+    // The fact it cites, for the evidence packet (#207).
+    fact_id: "fact-1",
   });
 });
 
