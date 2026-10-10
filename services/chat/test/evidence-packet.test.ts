@@ -107,3 +107,25 @@ test("an auto-selected peer with no block is still covered, as not shown (#207)"
     { company: "issuer:60000000", status: "not_shown" },
   ]);
 });
+
+test("a single company's figures carry the period and end date their facts are bound to (#207)", () => {
+  const bound = (block: Record<string, unknown>, bindings: unknown[]) => ({ ...block, data_ref: { params: { fact_bindings: bindings } } });
+  const packet = buildEvidencePacket({
+    scope: scope("Analyze NVDA's latest quarter"),
+    factBlocks: [
+      bound(LATEST, [
+        { fact_id: "f-rev", fiscal_year: 2026, fiscal_period: "Q4", period_end: "2026-01-25" },
+        { fact_id: "f-gm", fiscal_year: 2026, fiscal_period: "Q4", period_end: "2026-01-25" },
+      ]),
+      bound(BARS, [{ fact_id: "f-q3", fiscal_year: 2026, fiscal_period: "Q3", period_end: "2025-10-26" }]),
+    ],
+    cutoff: CUTOFF,
+  });
+  assert.deepEqual(packet.figures.map((figure) => [figure.id, figure.period ?? null, figure.period_end ?? null]), [
+    ["F1", "Q42026", "2026-01-25"],
+    ["F2", "Q42026", "2026-01-25"],
+    // A bar keeps its quarter label and gains the end date of the fact it cites.
+    ["F3", "Q3 2026", "2025-10-26"],
+    ["F4", "Q4 2026", null],
+  ]);
+});
