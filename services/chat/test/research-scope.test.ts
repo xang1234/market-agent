@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { needsWindowFetch, parseResearchScope, resolveResearchScope, type ResearchScope } from "../src/research-scope.ts";
+import { parseResearchScope, resolveResearchScope, type ResearchScope } from "../src/research-scope.ts";
 
 const NVDA = { issuer_id: "60000000-0000-4000-8000-000000000001", label: "NVDA" };
 const AMD = { issuer_id: "60000000-0000-4000-8000-000000000002", label: "AMD" };
@@ -90,20 +90,5 @@ test("a saved scope reads back; anything else starts fresh", () => {
   ]) {
     assert.equal(parseResearchScope(value), null, JSON.stringify(value));
   }
-});
-
-test("a live turn fetches a window asked for now, or an inherited one only for an added company", () => {
-  const AAPL = { issuer_id: "60000000-0000-4000-8000-000000000003", label: "AAPL" };
-  const prior = fresh("Compare NVDA with AMD YTD", [NVDA, AMD]);
-  const later = "2026-09-02T00:00:00.000Z";
-  const next = (question: string, companies: ResearchScope["companies"]) =>
-    resolveResearchScope({ question, companies, prior, asOf: later });
-  assert.equal(needsWindowFetch(prior, null), true);
-  assert.equal(needsWindowFetch(next("Explain the differences", [NVDA, AMD]), prior), false);
-  assert.equal(needsWindowFetch(next("Add AAPL too", [NVDA, AMD, AAPL]), prior), true);
-  assert.equal(needsWindowFetch(fresh("Compare NVDA with AMD", [NVDA, AMD]), null), false);
-  // A peers follow-up whose peer set brings in a company the earlier answer did not chart.
-  const peersOfAmd = { ...next("Tell me more about AMD and its peers", [AMD]), companies: [AMD, NVDA, { issuer_id: "60000000-0000-4000-8000-000000000009" }] };
-  assert.equal(needsWindowFetch(peersOfAmd, prior), true);
 });
 

@@ -29,7 +29,7 @@ import {
   type ChatThreadTitleGenerator,
 } from "./coordinator.ts";
 import { loadTurnFactBlocks, priceListingsForTurn, turnCompanies } from "./fact-blocks.ts";
-import { needsWindowFetch, resolveResearchScope, type ResearchScope } from "./research-scope.ts";
+import { resolveResearchScope, type ResearchScope } from "./research-scope.ts";
 import { frozenDataMode, hydrateYtdBars, marketHydrationOrigin } from "./ytd-hydration.ts";
 import { listingTimeZones } from "./perf-block.ts";
 import { loadPriorScope, loadPriorSubjects as loadThreadPriorSubjects, loadRecentConversation } from "./thread-context.ts";
@@ -103,7 +103,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   const compared = await comparedCompanies(named, resolve(new Date().toISOString()).peers);
   const scopeAt = (cutoff: string): ResearchScope => ({ ...resolve(cutoff), companies: compared });
   // A live YTD request fetches its prices first, so the cutoff below covers them (#232).
-  await hydrateYtdWindow(scopeAt(new Date().toISOString()), covered, prior);
+  await hydrateYtdWindow(scopeAt(new Date().toISOString()), covered);
   const asOf = new Date().toISOString();
   const scope = scopeAt(asOf);
   const subjectRefs = covered.length > 0
@@ -264,20 +264,19 @@ async function continuedScope(
 
 // Live mode only (marketHydrationOrigin): fetches and stores the YTD window's
 // bars for the companies the chart will cover. Never throws; a failure leaves
-// the chart to name what is missing. An inherited window was fetched when it
-// was first charted; it is fetched again, at its cutoff, only when the turn adds
-// a company that answer did not cover.
+// the chart to name what is missing. An inherited window is fetched again at
+// its cutoff, so a company the turn adds gets its prices and an earlier failed
+// fetch is retried.
 // ponytail: the chart rereads stored bars at the inherited cutoff, so a provider
 // correction to them since shows corrected returns; reusing the earlier
 // snapshot's sealed observations is the upgrade if that matters.
 async function hydrateYtdWindow(
   scope: ResearchScope,
   covered: ReadonlyArray<ChatResolvedSubjectPreResolution>,
-  prior: ResearchScope | null,
 ): Promise<void> {
   const origin = marketHydrationOrigin(process.env);
-  if (origin === null || !needsWindowFetch(scope, prior)) return;
-  const now = scope.price_window!.cutoff;
+  if (origin === null || scope.price_window === null) return;
+  const now = scope.price_window.cutoff;
   try {
     const listings = await priceListingsForTurn(pool(), {
       issuers: issuersOfScope(scope),

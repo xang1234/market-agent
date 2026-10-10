@@ -4,6 +4,10 @@
 // by a model. Saved with the answer, so the next follow-up and a reload read
 // the same interpretation.
 //
+// The scope is what the thread is researching, not what one answer drew: a
+// field a turn's blocks cannot show (a single company's answer has no price
+// window) is still kept for the next turn, never erased by it.
+//
 // A follow-up keeps every field it does not change. An inherited YTD window
 // keeps its cutoff, so its baseline and end are the ones already charted, not
 // recomputed from the current date.
@@ -70,15 +74,6 @@ export function resolveResearchScope(input: {
     price_window,
     inherited,
   };
-}
-
-// Whether a live turn fetches its YTD window's prices: one asked for now, or an
-// inherited one when the turn adds a company the earlier answer did not chart.
-export function needsWindowFetch(scope: ResearchScope, prior: ResearchScope | null): boolean {
-  if (scope.price_window === null) return false;
-  if (!scope.inherited.includes("price_window")) return true;
-  const charted = new Set(prior?.companies.map((company) => company.issuer_id) ?? []);
-  return scope.companies.some((company) => !charted.has(company.issuer_id));
 }
 
 function routeOf(companies: number, facets: { peers: boolean; segments: boolean; margin_trend: boolean }): ResearchRoute {
