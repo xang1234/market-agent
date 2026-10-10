@@ -3,102 +3,102 @@
   "model": "opencode-go/qwen3.8-max (fallbacks: opencode-go/kimi-k2.7-code)",
   "scores": {
     "single-latest-quarter": {
-      "correct_companies": null,
-      "comparable_periods": null,
-      "figures_match_sources": null,
-      "conclusions_justified": null,
-      "counterarguments": null,
-      "no_invented_numbers": null,
-      "notes": ""
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 1,
+      "no_invented_numbers": 2,
+      "notes": "Calls Q4 FY2026's 8.9% QoQ the slowest sequential rate in the series; Q2 FY2026 was 6.1% ($44.1B -> $46.7B). The counterpoint rests on that claim."
     },
     "margin-trend-loss-quarter": {
-      "correct_companies": null,
-      "comparable_periods": null,
-      "figures_match_sources": null,
-      "conclusions_justified": null,
-      "counterarguments": null,
-      "no_invented_numbers": null,
-      "notes": ""
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "Calls the starting level 'low-teens'; it was 10.6-11.4%. Guard dropped a correct gap sentence ('14%+', #264)."
     },
     "what-changed-gross-margin": {
-      "correct_companies": null,
-      "comparable_periods": null,
-      "figures_match_sources": null,
-      "conclusions_justified": null,
-      "counterarguments": null,
-      "no_invented_numbers": null,
-      "notes": ""
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "Says Q4 FY2026's 74.4% beats every FY2025 quarter except Q1; Q2 (75.1%) and Q3 (74.6%) were higher. Guard dropped the 'what the data cannot tell' sentence; the takeaway still says the cause isn't shown."
     },
     "peer-two": {
-      "correct_companies": null,
-      "comparable_periods": null,
-      "figures_match_sources": null,
-      "conclusions_justified": null,
-      "counterarguments": null,
-      "no_invented_numbers": null,
-      "notes": ""
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 1,
+      "no_invented_numbers": 2,
+      "notes": "The counterpoint leans on outside benchmarks ('not weak by general semiconductor standards') and a speculative claim that the one-month fiscal offset flatters NVDA."
     },
     "peer-three": {
-      "correct_companies": null,
-      "comparable_periods": null,
-      "figures_match_sources": null,
-      "conclusions_justified": null,
-      "counterarguments": null,
-      "no_invented_numbers": null,
-      "notes": ""
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "No caveat that AAPL is in a different industry (consumer electronics)."
     },
     "fiscal-year-trap": {
-      "correct_companies": null,
-      "comparable_periods": null,
-      "figures_match_sources": null,
-      "conclusions_justified": null,
-      "counterarguments": null,
-      "no_invented_numbers": null,
-      "notes": ""
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 1,
+      "no_invented_numbers": 2,
+      "notes": "The counterpoint is just the fiscal-mismatch caveat restated. Guard dropped a correct gap sentence (FY2024 not shown, #264)."
     },
     "segment-drill-down": {
-      "correct_companies": null,
-      "comparable_periods": null,
-      "figures_match_sources": null,
-      "conclusions_justified": null,
-      "counterarguments": null,
-      "no_invented_numbers": null,
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
       "notes": ""
     },
     "missing-segments": {
-      "correct_companies": null,
+      "correct_companies": 2,
       "comparable_periods": "n/a",
       "figures_match_sources": "n/a",
       "conclusions_justified": "n/a",
       "counterarguments": "n/a",
-      "no_invented_numbers": null,
+      "no_invented_numbers": 2,
       "notes": ""
     },
     "missing-cash-flow": {
-      "correct_companies": null,
+      "correct_companies": 2,
       "comparable_periods": "n/a",
       "figures_match_sources": "n/a",
       "conclusions_justified": "n/a",
       "counterarguments": "n/a",
-      "no_invented_numbers": null,
+      "no_invented_numbers": 2,
       "notes": ""
     },
     "follow-up-memory": {
-      "correct_companies": null,
-      "comparable_periods": null,
-      "figures_match_sources": null,
-      "conclusions_justified": null,
-      "counterarguments": null,
-      "no_invented_numbers": null,
-      "notes": ""
+      "correct_companies": 2,
+      "comparable_periods": 1,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 1,
+      "no_invented_numbers": 2,
+      "notes": "Turn 3 calls the Dec 1-Aug 31 return (6.6% / 3.58%) 'YTD'; the YTD figures in turn 2 were 5.81% / 3.17%. The turn 3 counterpoint only restates AMD positives."
     },
     "ticker-page-compare": {
-      "correct_companies": null,
-      "comparable_periods": null,
-      "figures_match_sources": null,
-      "conclusions_justified": null,
-      "counterarguments": null,
-      "no_invented_numbers": null,
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
       "notes": ""
     }
   }
