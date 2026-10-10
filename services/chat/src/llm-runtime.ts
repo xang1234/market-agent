@@ -9,6 +9,8 @@ import type {
   ChatAnalystToolRuntimeToolCall,
 } from "./coordinator.ts";
 import { displayedFigures, displayTextsForBlocks } from "./fact-blocks.ts";
+import { buildEvidencePacket, packetForModel } from "./evidence-packet.ts";
+import type { ResearchScope } from "./research-scope.ts";
 import { keepSupportedSentences, keepUncausedSentences } from "./narrative-guard.ts";
 
 // Shown when the guard strips every sentence of the model's prose, or the model gave
@@ -102,6 +104,9 @@ export async function composeAnalystBlocksWithLlm(input: {
   // False when the turn asks only for metrics no reader serves (#206): the
   // model then sees the named gap, not other facts it could offer in its place.
   availableData?: boolean;
+  // The turn's research scope and cutoff, for the evidence packet (#207).
+  scope?: ResearchScope;
+  cutoff?: string;
   createClient?: () => Promise<LlmChatClient> | LlmChatClient;
   // Receives the sentences the narrative guard dropped, so evals can count them (#144).
   onNarrativeRemoved?: (sentences: ReadonlyArray<string>) => void;
@@ -148,7 +153,7 @@ export async function composeAnalystBlocksWithLlm(input: {
           "a list of candidate causes inside a sentence about what the data cannot tell):",
           "> **Unverified hypothesis (low|medium|high confidence):** <one explanation>, given <a figure or metric shown in this answer>.",
           "Use only the context provided; do not invent citations or data.",
-          "The figures shown to the user are listed in displayed_figures, each with the metric",
+          "The figures shown to the user are listed in evidence_packet.figures, each with the metric",
           "and, in a comparison, the company it belongs to. Quote a figure only exactly as it",
           "appears there, in a sentence that names its company exactly as given in company",
           // The guard credits a figure only within its sentence (#142), so "Its" drops (#240).
@@ -163,11 +168,12 @@ export async function composeAnalystBlocksWithLlm(input: {
           "Name the fiscal period each figure is for (its period, and the month its period_end",
           "falls in; never the day), and a chart's window by month and year. When a comparison's title says the fiscal years end months",
           "apart, say so: the same fiscal year covers different months for each company.",
-          "When displayed_figures is empty, available_data lists the reported values you may use instead;",
+          "When evidence_packet.figures is empty, evidence_packet.available_data lists the reported values you may use instead;",
           "a value with a coverage other than full covers only part of its period, so say so.",
           "Claims in cited_claims are sourced statements you may draw on, dated by effective_time",
-          "and published_at: say when a claim dates from, by month and year, if it is not recent. data_notes say what",
-          "could not be shown. If staleness flags data as stale (quote.stale, or",
+          "and published_at: say when a claim dates from, by month and year, if it is not recent. evidence_packet.gaps say what",
+          "could not be shown, evidence_packet.coverage which companies have no figures, and evidence_packet.query_bounds",
+          "which periods were looked at: never describe a period outside them as missing. If evidence_packet.staleness flags data as stale (quote.stale, or",
           "fact_recency.stale / a large fact_recency.age_days), explicitly note",
           "that the figure may be out of date and say how old it is.",
           "Return plain text suitable for a rich_text block.",
@@ -273,7 +279,8 @@ function monthYear(iso: string): string {
 
 export type AnswerUsage = { input_tokens: number; output_tokens: number; reasoning_tokens?: number };
 
-// What the answer model sees (#181): only what it can use. The figures shown to
+// What the answer model sees (#181): only what it can use, as an evidence
+// packet (#207, evidence-packet.ts) plus the question and conversation. The figures shown to
 // the user (the only ones it may quote, with company, period and period end),
 // cited claim text, what could not be shown, and staleness flags. Raw tool JSON,
 // the placeholder block, and the routing bundle are left out: the narrative
@@ -287,6 +294,8 @@ export function answerContext(input: {
   factBlocks?: ReadonlyArray<Record<string, unknown>>;
   conversation?: ReadonlyArray<{ role: string; text: string }>;
   availableData?: boolean;
+  scope?: ResearchScope;
+  cutoff?: string;
 }): Record<string, unknown> {
   const results = input.toolCalls.map((toolCall) => (isRecord(toolCall.result) ? toolCall.result : {}));
   const structured = results.map((result) => (isRecord(result.structured_context) ? result.structured_context : {}));
@@ -294,30 +303,33 @@ export function answerContext(input: {
     isRecord(context.quote) ? [{ ticker: context.quote.ticker, as_of: context.quote.as_of, stale: context.quote.stale }] : []
   );
   const factRecency = structured.flatMap((context) => (isRecord(context.fact_recency) ? [context.fact_recency] : []));
-  // Notes the fact blocks show instead of a chart (a named gap), and subjects with no evidence at all.
-  const dataNotes = [
-    ...(input.factBlocks ?? []).flatMap((block) =>
-      block.kind === "rich_text" && Array.isArray(block.segments)
-        ? block.segments.flatMap((segment) => (isRecord(segment) && typeof segment.text === "string" ? [segment.text] : []))
-        : []
-    ),
+  const packet = packetForModel(buildEvidencePacket({
+    ...(input.scope ? { scope: input.scope } : {}),
+    factBlocks: input.factBlocks ?? [],
+    cutoff: input.cutoff ?? new Date().toISOString(),
+  }));
+  // Subjects with no evidence at all are a gap too.
+  const gaps = [
+    ...((packet.gaps as string[] | undefined) ?? []),
     ...(results.some((result) => result.evidence_status === "insufficient_evidence")
       ? ["No research claims, reported facts, or quote are on file for this subject."]
       : []),
   ];
   const claims = citedClaims(input.toolCalls);
-  const displayed = displayedFigures(input.factBlocks ?? []);
-  const available = displayed.length === 0 && input.availableData !== false ? availableData(structured) : null;
+  const shown = (packet.figures as unknown[]).length > 0;
+  const available = !shown && input.availableData !== false ? availableData(structured) : null;
   return {
     question: input.context.userIntent ?? "Start a research thread",
     conversation: input.conversation ?? [],
-    displayed_figures: displayed,
-    ...(available ? { available_data: available } : {}),
+    evidence_packet: {
+      ...packet,
+      ...(gaps.length > 0 ? { gaps } : {}),
+      ...(available ? { available_data: available } : {}),
+      ...(quotes.length > 0 || factRecency.length > 0
+        ? { staleness: { ...(quotes.length > 0 ? { quote: quotes } : {}), ...(factRecency.length > 0 ? { fact_recency: factRecency } : {}) } }
+        : {}),
+    },
     ...(claims.length > 0 ? { cited_claims: claims } : {}),
-    ...(dataNotes.length > 0 ? { data_notes: dataNotes } : {}),
-    ...(quotes.length > 0 || factRecency.length > 0
-      ? { staleness: { ...(quotes.length > 0 ? { quote: quotes } : {}), ...(factRecency.length > 0 ? { fact_recency: factRecency } : {}) } }
-      : {}),
   };
 }
 

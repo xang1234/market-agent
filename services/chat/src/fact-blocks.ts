@@ -35,7 +35,7 @@ import { unavailableMetrics, type ResearchScope } from "./research-scope.ts";
 import { loadPerfComparisonBlocks, type PriceWindow } from "./perf-block.ts";
 import { deriveQuarterMetrics, GROWTH, MARGINS, type QuarterMetric } from "./quarter-metrics.ts";
 
-const QUARTERS_SHOWN = 8;
+export const QUARTERS_SHOWN = 8;
 const LATEST_QUARTER_METRICS = [
   ["revenue", "Revenue"],
   ["gross_profit", "Gross profit"],
@@ -820,34 +820,47 @@ export type DisplayedFigure = {
   period_end?: string;
   value: string;
   shown_in?: string;
+  // The fact the value cites and the block showing it, for the evidence packet
+  // (#207); never sent to the model.
+  fact_id?: string;
+  block_id?: string;
 };
 
 export function displayedFigures(blocks: ReadonlyArray<Block>): DisplayedFigure[] {
   return blocks.flatMap((block): DisplayedFigure[] => {
-    const shownIn = typeof block.title === "string" ? { shown_in: block.title } : {};
+    const shownIn = {
+      ...(typeof block.title === "string" ? { shown_in: block.title } : {}),
+      ...(typeof block.id === "string" ? { block_id: block.id } : {}),
+    };
+    const cites = (ref: string | undefined) => (ref ? { fact_id: ref } : {});
+    // Each value's period and end date, from the fact it cites (#180, #207).
+    const bindings = ((block.data_ref as { params?: { fact_bindings?: unknown } } | undefined)?.params?.fact_bindings ?? []) as
+      ReadonlyArray<Pick<VerifierFact, "fact_id" | "fiscal_year" | "fiscal_period" | "period_end">>;
+    const periodOf = (factId: string | undefined): { period?: string; period_end?: string } => {
+      const binding = bindings.find((candidate) => candidate.fact_id === factId);
+      return binding?.period_end && typeof binding.fiscal_year === "number"
+        ? { period: `${binding.fiscal_period ?? ""}${binding.fiscal_year}`, period_end: binding.period_end }
+        : {};
+    };
+    // A quarter already labelled ("Q3 2026") keeps its label and gains the end date.
+    const endOf = (factId: string | undefined) => {
+      const { period_end } = periodOf(factId);
+      return period_end ? { period_end } : {};
+    };
     if (block.kind === "metrics_comparison") {
       const labels = (block.subject_labels ?? []) as ReadonlyArray<string>;
       const metrics = (block.metrics ?? []) as ReadonlyArray<string>;
       const cells = (block.cells ?? []) as ReadonlyArray<ReadonlyArray<{ value_ref?: string; format?: string } | null>>;
-      // Each cell's period, from the fact it cites (#180).
-      const bindings = ((block.data_ref as { params?: { fact_bindings?: unknown } } | undefined)?.params?.fact_bindings ?? []) as
-        ReadonlyArray<Pick<VerifierFact, "fact_id" | "fiscal_year" | "fiscal_period" | "period_end">>;
-      const periodOf = (factId: string | undefined) => {
-        const binding = bindings.find((candidate) => candidate.fact_id === factId);
-        return binding?.period_end && typeof binding.fiscal_year === "number"
-          ? { period: `${binding.fiscal_period ?? ""}${binding.fiscal_year}`, period_end: binding.period_end }
-          : {};
-      };
       return cells.flatMap((row, subjectIndex) =>
         row.flatMap((cell, metricIndex) =>
           cell?.format && labels[subjectIndex] && metrics[metricIndex]
-            ? [{ company: labels[subjectIndex], metric: metrics[metricIndex], ...periodOf(cell.value_ref), value: cell.format, ...shownIn }]
+            ? [{ company: labels[subjectIndex], metric: metrics[metricIndex], ...periodOf(cell.value_ref), value: cell.format, ...shownIn, ...cites(cell.value_ref) }]
             : []
         )
       );
     }
     if (block.kind === "metric_row") {
-      const items = (block.items ?? []) as ReadonlyArray<{ label?: string; format?: string }>;
+      const items = (block.items ?? []) as ReadonlyArray<{ label?: string; format?: string; value_ref?: string }>;
       // A margin-trend row: the metric is in the title and each cell is a quarter.
       const trendMetric = typeof block.title === "string" && block.title.endsWith(BY_QUARTER)
         ? block.title.slice(0, -BY_QUARTER.length)
@@ -855,13 +868,17 @@ export function displayedFigures(blocks: ReadonlyArray<Block>): DisplayedFigure[
       return items.flatMap((item) => {
         if (!item.label || !item.format) return [];
         return [trendMetric
-          ? { metric: trendMetric, period: item.label, value: item.format, ...shownIn }
-          : { metric: item.label, value: item.format, ...shownIn }];
+          ? { metric: trendMetric, period: item.label, ...endOf(item.value_ref), value: item.format, ...shownIn, ...cites(item.value_ref) }
+          : { metric: item.label, ...periodOf(item.value_ref), value: item.format, ...shownIn, ...cites(item.value_ref) }];
       });
     }
     if (block.kind === "revenue_bars") {
-      const bars = (block.bars ?? []) as ReadonlyArray<{ label?: string; format?: string }>;
-      return bars.flatMap((bar) => bar.label && bar.format ? [{ metric: "Revenue", period: bar.label, value: bar.format }] : []);
+      const bars = (block.bars ?? []) as ReadonlyArray<{ label?: string; format?: string; value_ref?: string }>;
+      return bars.flatMap((bar) =>
+        bar.label && bar.format
+          ? [{ metric: "Revenue", period: bar.label, ...endOf(bar.value_ref), value: bar.format, ...shownIn, ...cites(bar.value_ref) }]
+          : []
+      );
     }
     if (block.kind === "perf_comparison") {
       // Each line's return over the window drawn (its last point), credited to
