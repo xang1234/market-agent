@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { formatCompactCurrency } from "../../analyze/src/block-format.ts";
-import { keepSupportedSentences } from "../src/narrative-guard.ts";
+import { keepSupportedSentences, keepUncausedSentences } from "../src/narrative-guard.ts";
 
 const DISPLAYED = ["Revenue", "$62.1B", "Q4 2026", "Quarterly revenue (Q1 2025 to Q4 2026)"];
 
@@ -886,4 +886,36 @@ test("a displayed date may be written with its day; any other day still goes (#2
   // A day that is not displayed, and a displayed day used as a figure, still go.
   assert.equal(keepSupportedSentences("The window starts from the December 30, 2025 close.", shown, [], dates).text, "");
   assert.equal(keepSupportedSentences("Revenue rose 31% in December 2025.", shown, [], dates).text, "");
+});
+
+test("with no figures shown, only causes are checked, and any stated cause goes (#263)", () => {
+  const hypothesis = (n: number) => `> **Unverified hypothesis (medium confidence):** Margins may reflect product mix ${n}, given the revenue shown.`;
+  const { text, removed } = keepUncausedSentences([
+    "## Takeaway",
+    "AMD earned $1.5B. The decline was due to a one-time charge. Revenue could reflect pricing power, but the data does not say.",
+    "The data does not show why margins fell.",
+    "## Drivers",
+    "- Driven by data center demand.",
+    hypothesis(1),
+    hypothesis(2),
+    hypothesis(3),
+    "**Unverified hypothesis:** Supply constraints.",
+  ].join("\n"));
+  assert.equal(text, [
+    "## Takeaway",
+    "AMD earned $1.5B.",
+    "The data does not show why margins fell.",
+    "## Drivers",
+    hypothesis(1),
+    hypothesis(2),
+  ].join("\n"));
+  assert.deepEqual(removed, [
+    "The decline was due to a one-time charge.",
+    "Revenue could reflect pricing power, but the data does not say.",
+    "Driven by data center demand.",
+    hypothesis(3),
+    "**Unverified hypothesis:** Supply constraints.",
+  ]);
+  // A section that loses everything loses its heading.
+  assert.equal(keepUncausedSentences("## Why\nIt rose due to demand.\n## Next\nAMD grew.").text, "## Next\nAMD grew.");
 });

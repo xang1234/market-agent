@@ -9,7 +9,7 @@ import type {
   ChatAnalystToolRuntimeToolCall,
 } from "./coordinator.ts";
 import { displayedFigures, displayTextsForBlocks } from "./fact-blocks.ts";
-import { keepSupportedSentences } from "./narrative-guard.ts";
+import { keepSupportedSentences, keepUncausedSentences } from "./narrative-guard.ts";
 
 // Shown when the guard strips every sentence of the model's prose, or the model gave
 // no usable answer (empty, or cut off at the token limit).
@@ -130,7 +130,9 @@ export async function composeAnalystBlocksWithLlm(input: {
           "(2) the trend across every period shown, not just the latest, in words;",
           "(3) what is strong or weak and why, judged against the other periods or companies shown;",
           "(4) one specific counterpoint grounded in the data that cuts against the takeaway;",
-          "(5) what the data shown cannot tell, such as periods or metrics that are missing.",
+          // A missing period named by its year reads as an unshown figure (#264).
+          "(5) what the data shown cannot tell, such as periods or metrics that are missing;",
+          "describe a missing period in words (\"no prior-year revenue\"), never by its year or number.",
           "If the data shown does not answer the question (the metric or period asked for is",
           "not there), say so plainly and briefly instead, and do not analyze other figures",
           "in its place.",
@@ -204,11 +206,20 @@ export async function composeAnalystBlocksWithLlm(input: {
   }
   // The guard limits prose to the figures shown; with none shown (no fact blocks,
   // or only a gap note or chart), the model answers from available_data
-  // instead, so nothing is guarded (#181). One condition decides both.
+  // instead, so no figure is guarded (#181), but no cause may be stated outside
+  // a labelled hypothesis either (#263). One condition decides both.
   const shown = displayedFigures(input.factBlocks ?? []);
   if (shown.length === 0) {
-    answered();
-    return rewriteFirstRichTextBlock(input.blocks, text);
+    const uncaused = keepUncausedSentences(text);
+    if (uncaused.removed.length > 0) {
+      console.warn(`[chat] removed ${uncaused.removed.length} narrative sentence(s) stating a cause with no figures shown`);
+      input.onNarrativeRemoved?.(uncaused.removed);
+    }
+    if (uncaused.text) answered();
+    return rewriteFirstRichTextBlock(
+      input.blocks,
+      uncaused.text || (input.factBlocks?.length ? FACT_BLOCKS_FALLBACK_TEXT : NO_ANSWER_FALLBACK_TEXT),
+    );
   }
 
   const displayTexts = displayTextsForBlocks(input.factBlocks ?? []);
