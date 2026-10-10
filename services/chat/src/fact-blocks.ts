@@ -748,8 +748,13 @@ export function scopeGapBlocks(
   if (scope.reads === "financial_answer") {
     notes.push(["gap:financial_answer", "The previous answer's figures were calculated and verified by the financial engine; each one links to its sources in that answer, and no other figure is shown in their place."]);
   }
-  if (scope.reads === "segments" && !shown.some(isSegmentBlock)) {
-    notes.push(["gap:segments", `Revenue by segment is not available for ${names} in this data.`]);
+  // Segments asked for now (or the segment route) and not shown: a single
+  // company has none in the data; a comparison shows company totals only.
+  const segmentsWanted = scope.reads === "segments" || (scope.segments && !scope.inherited.includes("segments"));
+  if (segmentsWanted && !showsSegments(shown)) {
+    notes.push(scope.reads === "segments"
+      ? ["gap:segments", `Revenue by segment is not available for ${names} in this data.`]
+      : ["gap:segments", "Revenue by segment is not shown when comparing companies; ask about one company for its breakdown."]);
   }
   return notes.map(([key, text]) => {
     const id = stableUuid(`block:${input.snapshotId}:${key}`);
@@ -765,8 +770,18 @@ export function scopeGapBlocks(
   });
 }
 
-function isSegmentBlock(block: Block): boolean {
-  return block.kind === "metric_row" && /by segment/.test(String(block.title));
+// Whether the answer model may see the turn's other facts (available_data)
+// when no figure is shown: not for a turn whose request is a named gap (only
+// unavailable metrics, a financial-engine answer re-read, or a segment
+// breakdown with none to show), so nothing stands in for what it asked.
+export function mayOfferOtherFacts(scope: ResearchScope, shown: ReadonlyArray<Block>): boolean {
+  if (scope.reads === "unavailable_metric" || scope.reads === "financial_answer") return false;
+  return !(scope.reads === "segments" && !showsSegments(shown));
+}
+
+// Whether the blocks include a segment breakdown.
+export function showsSegments(blocks: ReadonlyArray<Block>): boolean {
+  return blocks.some((block) => block.kind === "metric_row" && /by segment/.test(String(block.title)));
 }
 
 function blockId(kind: string, snapshotId: string): string {

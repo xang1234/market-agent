@@ -197,3 +197,9 @@ test("a company's sources of revenue are not a request for evidence", () => {
   assert.equal(ask("What are your sources?"), "evidence_followup");
   assert.equal(ask("Show the sources for this"), "evidence_followup");
 });
+
+test("an unavailable metric's margin is part of that metric, not a margin question", () => {
+  assert.equal(fresh("What is AMD's free cash flow margin?", [AMD]).route, "unavailable_metric");
+  assert.equal(fresh("What is AMD's free cash flow margin trend?", [AMD]).margin_trend, false);
+  assert.equal(fresh("What is AMD's free cash flow and gross margin?", [AMD]).route, "derived_margin");
+});

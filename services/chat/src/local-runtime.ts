@@ -28,7 +28,7 @@ import {
   type ChatPriorSubjectsLoader,
   type ChatThreadTitleGenerator,
 } from "./coordinator.ts";
-import { loadTurnFactBlocks, priceListingsForTurn, scopeGapBlocks, turnCompanies } from "./fact-blocks.ts";
+import { loadTurnFactBlocks, mayOfferOtherFacts, priceListingsForTurn, scopeGapBlocks, turnCompanies } from "./fact-blocks.ts";
 import { resolveResearchScope, type ResearchScope } from "./research-scope.ts";
 import { frozenDataMode, hydrateYtdBars, marketHydrationOrigin } from "./ytd-hydration.ts";
 import { listingTimeZones } from "./perf-block.ts";
@@ -200,7 +200,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     factBlocks,
     subjectLabels: covered.flatMap((subject) => subjectLabelsFromHandoff(subject.handoff)),
     conversation,
-    availableData: readsFacts,
+    availableData: mayOfferOtherFacts(scope, shownBlocks),
     onAnswered: (deployment) => {
       answeredBy = deployment;
     },

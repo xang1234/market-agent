@@ -92,17 +92,25 @@ const METRICS: ReadonlyArray<RequestedMetric & { pattern: RegExp }> = [
 ];
 
 export function requestedMetrics(question: string): RequestedMetric[] {
+  return scanMetrics(question).metrics;
+}
+
+// The metrics a question names, and the question without the unavailable ones
+// and their qualifiers: "free cash flow margin" asks for no (available) margin.
+function scanMetrics(question: string): { metrics: RequestedMetric[]; rest: string } {
   let rest = question.replace(NOT_METRICS, " ");
-  const out: RequestedMetric[] = [];
+  let withoutUnavailable = question;
+  const metrics: RequestedMetric[] = [];
   for (const { pattern, ...metric } of METRICS) {
     // An unavailable metric takes its qualifier with it, so "free cash flow
     // growth" does not also ask for (available) growth.
     const match = new RegExp(`(?:${pattern.source})${metric.available ? "" : QUALIFIER}`, "gi");
     if (!new RegExp(match.source, "i").test(rest)) continue;
-    out.push(metric);
+    metrics.push(metric);
     rest = rest.replace(match, " ");
+    if (!metric.available) withoutUnavailable = withoutUnavailable.replace(match, " ");
   }
-  return out;
+  return { metrics, rest: withoutUnavailable };
 }
 
 export function resolveResearchScope(input: {
@@ -127,9 +135,12 @@ export function resolveResearchScope(input: {
     pick(field, pattern.test(question) ? true : null, kept ? true : null) ?? false;
   const peers = flag("peers", PEERS, prior?.peers);
   const segments = flag("segments", SEGMENTS, prior?.segments);
-  const marginAsked = MARGINS.test(question);
-  const margin_trend = pick("margin_trend", marginAsked && OVER_TIME.test(question) ? true : null, prior?.margin_trend ? true : null) ?? false;
-  const named = requestedMetrics(question).map((metric) => (input.served ? { ...metric, available: true } : metric));
+  // Margins asked about in their own right, not as an unavailable metric's
+  // qualifier ("free cash flow margin").
+  const scanned = scanMetrics(question);
+  const marginAsked = MARGINS.test(scanned.rest);
+  const margin_trend = pick("margin_trend", marginAsked && OVER_TIME.test(scanned.rest) ? true : null, prior?.margin_trend ? true : null) ?? false;
+  const named = scanned.metrics.map((metric) => (input.served ? { ...metric, available: true } : metric));
   const metrics = pick("metrics", named.length > 0 ? named : null, prior && prior.metrics.length > 0 ? prior.metrics : null) ?? [];
   const fiscal_year = pick("fiscal_year", requestedFiscalYear(question) ?? null, prior?.fiscal_year);
   const asked = requestedPriceWindow(question) === "ytd" ? { kind: "ytd" as const, cutoff: input.asOf } : null;
