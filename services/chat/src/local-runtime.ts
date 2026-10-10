@@ -251,8 +251,9 @@ async function turnScope(
   const prior = await continuedScope(threadId, named);
   const resolve = (cutoff: string) => resolveResearchScope({ question, companies: named, prior, asOf: cutoff, served });
   const base = resolve(new Date().toISOString());
-  // An evidence follow-up keeps the previous answer's companies as they were.
-  const compared = base.route === "evidence_followup" ? base.companies : await comparedCompanies(named, base.peers);
+  // An evidence follow-up keeps the previous answer's companies as they were; a
+  // financial answer covers exactly the companies its plan requested.
+  const compared = base.route === "evidence_followup" || served ? base.companies : await comparedCompanies(named, base.peers);
   return (cutoff) => ({ ...resolve(cutoff), companies: compared });
 }
 

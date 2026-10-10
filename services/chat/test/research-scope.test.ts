@@ -197,6 +197,9 @@ test("a company's sources of revenue are not a request for evidence", () => {
   assert.notEqual(ask("What are NVDA's revenue sources?"), "evidence_followup");
   assert.equal(ask("What are your sources?"), "evidence_followup");
   assert.equal(ask("Show the sources for this"), "evidence_followup");
+  assert.equal(ask("What is your source?"), "evidence_followup");
+  assert.equal(ask("Show the source for this"), "evidence_followup");
+  assert.notEqual(ask("What are the sources of NVDA's revenue?"), "evidence_followup");
 });
 
 test("an unavailable metric's margin is part of that metric, not a margin question", () => {
@@ -220,4 +223,10 @@ test("segments asked with any margin record the margin, so both are read", () =>
   assert.equal(prior.margins, false);
   // An inherited segment facet with a margin asked now.
   assert.equal(resolveResearchScope({ question: "What is its gross margin?", companies: [AMD], prior, asOf: AS_OF }).margins, true);
+});
+
+test("a single company's YTD gap stays a gap: its answer has no price chart", () => {
+  assert.equal(fresh("What was AMD's free cash flow YTD?", [AMD]).route, "unavailable_metric");
+  // A comparison does chart the window, so it is read beside the gap.
+  assert.equal(fresh("What is AMD's free cash flow YTD versus NVDA?", [AMD, NVDA]).route, "comparison");
 });

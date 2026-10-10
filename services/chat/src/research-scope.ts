@@ -75,9 +75,10 @@ const NOT_METRICS = /\bearnings (?:calls?|releases?|reports?|dates?|season)\b/gi
 // asking for another one.
 const QUALIFIER = String.raw`(?:\s+(?:growth|margins?|yields?|trends?|per share))?`;
 // Asking for an answer's evidence, not about a company's sources of revenue:
-// "sources" counts only as the answer's ("show the sources", "your sources").
+// a source counts only as the answer's ("your source", "the sources for this"),
+// never one "of" something else ("the sources of NVDA's revenue").
 const EVIDENCE =
-  /\b(evidence|cite|citations?|(?:the|your|its) sources|sources (?:for|of) (?:this|that|these|those)|where (?:does|do|did) (?:this|that|these|those) come from)\b/i;
+  /\b(evidence|cite|citations?|(?:the|your|its) sources?(?!\s+of\b)|sources? (?:for|of) (?:this|that|these|those)|where (?:does|do|did) (?:this|that|these|those) come from)\b/i;
 
 // The metrics a question can name, most specific first: each match is removed
 // before the next is tried, so "free cash flow" is not also "cash flow" and
@@ -157,8 +158,10 @@ export function resolveResearchScope(input: {
   // Only metrics no reader serves (named now, or kept from the previous turn)
   // and nothing else asked for now: a window, peers, segments or margins asked
   // beside such a gap are still read, with the gap named.
+  // A price window counts only where it can be shown: a comparison charts it, a
+  // single company's answer does not.
   const onlyUnavailable = metrics.length > 0 && metrics.every((metric) => !metric.available) &&
-    asked === null && !PEERS.test(question) && !SEGMENTS.test(question) && !marginAsked;
+    (asked === null || input.companies.length < 2) && !PEERS.test(question) && !SEGMENTS.test(question) && !marginAsked;
   const reads = evidence && prior !== null
     ? prior.reads
     : input.served
