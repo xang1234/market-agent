@@ -173,10 +173,13 @@ test("an evidence follow-up re-reads what the previous answer read", () => {
 test("metrics the financial engine served are not gaps", () => {
   const scope = resolveResearchScope({ question: "What was NVDA's EPS?", companies: [NVDA], prior: null, asOf: AS_OF, served: true });
   assert.deepEqual(scope.metrics.map((metric) => metric.available), [true]);
-  assert.equal(scope.reads, "latest_quarter");
-  // So a follow-up asking for its evidence does not call it unavailable.
+  assert.equal(scope.reads, "financial_answer");
+  // A follow-up asking for its evidence re-reads that answer: neither a gap nor
+  // another reader's figures in its place.
   const evidence = resolveResearchScope({ question: "Show the evidence", companies: [NVDA], prior: scope, asOf: AS_OF });
-  assert.notEqual(evidence.reads, "unavailable_metric");
+  assert.equal(evidence.reads, "financial_answer");
+  // Any other follow-up reads its own route.
+  assert.equal(resolveResearchScope({ question: "Compare it with AMD", companies: [NVDA, AMD], prior: scope, asOf: AS_OF }).reads, "comparison");
 });
 
 test("an evidence follow-up about one compared company re-reads the whole comparison", () => {

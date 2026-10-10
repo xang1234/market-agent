@@ -745,6 +745,9 @@ export function scopeGapBlocks(
     `gap:${metric.metric_key}`,
     `${metric.label} is not available for ${names} in this data, so no other figure is shown in its place.`,
   ] as const);
+  if (scope.reads === "financial_answer") {
+    notes.push(["gap:financial_answer", "The previous answer's figures were calculated and verified by the financial engine; each one links to its sources in that answer, and no other figure is shown in their place."]);
+  }
   if (scope.reads === "segments" && !shown.some(isSegmentBlock)) {
     notes.push(["gap:segments", `Revenue by segment is not available for ${names} in this data.`]);
   }

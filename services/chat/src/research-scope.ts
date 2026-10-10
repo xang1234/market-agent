@@ -29,6 +29,9 @@ const ROUTES = [
   "comparison",
   "unavailable_metric",
   "evidence_followup",
+  // An answer the financial engine published: its figures and their sources
+  // are in that answer, and no reader here re-reads them.
+  "financial_answer",
   "unknown",
 ] as const;
 export type ResearchRoute = (typeof ROUTES)[number];
@@ -142,6 +145,8 @@ export function resolveResearchScope(input: {
     asked === null && !PEERS.test(question) && !SEGMENTS.test(question) && !marginAsked;
   const reads = evidence && prior !== null
     ? prior.reads
+    : input.served
+    ? "financial_answer"
     : routeOf(input.companies.length, { peers, segments, margin_trend, marginAsked, onlyUnavailable });
   return {
     route: evidence ? "evidence_followup" : reads,

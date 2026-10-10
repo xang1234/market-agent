@@ -451,4 +451,8 @@ test("what a turn asked for and cannot show is a note each, naming its companies
   // Other blocks shown beside it (a margin trend) do not count as the breakdown.
   assert.equal(scopeGapBlocks(scope("Break down AMD's revenue by segment"), [{ kind: "metric_row", title: "Operating margin by quarter" }], input).length, 1);
   assert.deepEqual(scopeGapBlocks(scope("Analyze AMD"), [], input), []);
+  // Re-reading a financial-engine answer points to that answer's sources.
+  const financial = resolveResearchScope({ question: "What was AMD's EPS?", companies: [AMD], prior: null, asOf: input.asOf, served: true });
+  const evidence = resolveResearchScope({ question: "Show the evidence", companies: [AMD], prior: financial, asOf: input.asOf });
+  assert.match(text(scopeGapBlocks(evidence, [], input)).join(" "), /calculated and verified by the financial engine/);
 });

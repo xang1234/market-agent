@@ -165,8 +165,9 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     .map((toolCall) => toolCall.tool_call_id);
   const requestedListings = requestedListingsOf(covered);
   // Charts and tables come from facts, never from the model (see fact-blocks.ts).
-  // A turn asking only for metrics no reader serves reads no other facts (#206).
-  const readsFacts = scope.reads !== "unavailable_metric";
+  // A turn asking only for metrics no reader serves reads no other facts, nor
+  // does one re-reading a financial-engine answer, whose evidence is in it (#206).
+  const readsFacts = scope.reads !== "unavailable_metric" && scope.reads !== "financial_answer";
   const [shownBlocks, conversation] = await Promise.all([
     readsFacts ? loadTurnFactBlocks(pool(), {
       // The companies the scope records, peers already resolved (comparedCompanies),
