@@ -30,6 +30,7 @@ import {
 import type { ChatClarificationAnswer, ChatFinancialRuntime } from "./financial-runtime.ts";
 import { ChatSnapshotSealError } from "./messages.ts";
 import { financialAwareRunner } from "./financial-turn.ts";
+import type { ResearchScope } from "./research-scope.ts";
 
 export type ChatTurnInput = {
   threadId: string;
@@ -94,6 +95,9 @@ export type ChatAnalystToolRuntimeResult = {
   // The deployment (channel/model) that wrote the narrative; absent when no
   // model answered (#183).
   answered_by?: string;
+  // The research scope the answer covered (research-scope.ts), saved with it so
+  // a follow-up keeps what it does not change (#206).
+  research_scope?: ResearchScope;
   // The answer call's token usage, reported on turn.completed so evals can
   // measure it (#181); not saved.
   answer_usage?: { input_tokens: number; output_tokens: number; reasoning_tokens?: number };
@@ -158,6 +162,7 @@ export type ChatAssistantMessagePersistenceInput = {
   blocks: ReadonlyArray<Record<string, unknown>>;
   content_hash: string;
   answered_by?: string;
+  research_scope?: ResearchScope;
 };
 
 export type ChatAssistantMessagePersistenceResult = {
@@ -1088,6 +1093,7 @@ async function toolBackedAnalystTurnRunner(
         blocks: assistantBlocks,
         content_hash: contentHash,
         ...answeredBy,
+        ...(result.research_scope ? { research_scope: result.research_scope } : {}),
       });
     } catch (error) {
       if (options.verificationMode === "display_unverified" && error instanceof ChatSnapshotSealError) {

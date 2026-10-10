@@ -28,10 +28,11 @@ import {
   type ChatPriorSubjectsLoader,
   type ChatThreadTitleGenerator,
 } from "./coordinator.ts";
-import { loadTurnFactBlocks, priceListingsForTurn, requestedFiscalYear, requestedPriceWindow } from "./fact-blocks.ts";
+import { loadTurnFactBlocks, priceListingsForTurn, turnCompanies } from "./fact-blocks.ts";
+import { resolveResearchScope, type ResearchScope } from "./research-scope.ts";
 import { frozenDataMode, hydrateYtdBars, marketHydrationOrigin } from "./ytd-hydration.ts";
 import { listingTimeZones } from "./perf-block.ts";
-import { loadPriorSubjects as loadThreadPriorSubjects, loadRecentConversation } from "./thread-context.ts";
+import { loadPriorScope, loadPriorSubjects as loadThreadPriorSubjects, loadRecentConversation } from "./thread-context.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import {
   composeAnalystBlocksWithLlm,
@@ -91,9 +92,20 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     : null;
   // Every company the turn covers (primary first); see resolveTurnSubjects.
   const covered = context.subjectPreResolutions ?? (resolved ? [resolved] : []);
+  // What the turn asks for, keeping a follow-up's unchanged scope (#206). A
+  // window asked for now is cut off at the turn's asOf, which a follow-up keeps.
+  const named = companiesOf(covered);
+  const prior = await continuedScope(context.threadId, named);
+  const resolve = (cutoff: string) =>
+    resolveResearchScope({ question: context.userIntent ?? "", companies: named, prior, asOf: cutoff });
+  // The scope records the companies the answer compares, auto-selected peers
+  // included, so the fetch below and a follow-up about a peer both see them.
+  const compared = await comparedCompanies(named, resolve(new Date().toISOString()).peers);
+  const scopeAt = (cutoff: string): ResearchScope => ({ ...resolve(cutoff), companies: compared });
   // A live YTD request fetches its prices first, so the cutoff below covers them (#232).
-  await hydrateYtdWindow(context.userIntent ?? "", covered);
+  await hydrateYtdWindow(scopeAt(new Date().toISOString()), covered);
   const asOf = new Date().toISOString();
+  const scope = scopeAt(asOf);
   const subjectRefs = covered.length > 0
     ? covered.map((subject) => subject.subject_ref)
     : [{ kind: "screen" as const, id: context.threadId }];
@@ -162,13 +174,17 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   // Charts and tables come from facts, never from the model (see fact-blocks.ts).
   const [factBlocks, conversation] = await Promise.all([
     loadTurnFactBlocks(pool(), {
-      issuers: issuersOf(covered),
-      wantsPeers: WANTS_PEERS.test(context.userIntent ?? ""),
-      wantsSegments: /\bsegments?\b/i.test(context.userIntent ?? ""),
-      wantsMarginTrend: /\b(margins?|profitab\w*)\b/i.test(context.userIntent ?? ""),
+      // The companies the scope records, peers already resolved (comparedCompanies),
+      // so the blocks chart exactly the set the scope saves.
+      issuers: issuersOfScope(scope),
+      wantsPeers: false,
+      wantsSegments: scope.segments,
+      wantsMarginTrend: scope.margin_trend,
       requestedListings,
-      fiscalYear: requestedFiscalYear(context.userIntent ?? ""),
-      priceWindow: requestedPriceWindow(context.userIntent ?? ""),
+      fiscalYear: scope.fiscal_year ?? undefined,
+      priceWindow: scope.price_window?.kind,
+      // An inherited window keeps the cutoff it was charted at.
+      ...(scope.inherited.includes("price_window") ? { priceAsOf: scope.price_window!.cutoff } : {}),
       frozenPrices: frozenDataMode(process.env),
       snapshotId: result.snapshot_id,
       asOf,
@@ -214,26 +230,57 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     ...(narrativeRemoved.length > 0 ? { narrative_removed: narrativeRemoved } : {}),
     ...(answeredBy ? { answered_by: answeredBy } : {}),
     ...(answerUsage ? { answer_usage: answerUsage } : {}),
+    research_scope: scope,
   } satisfies ChatAnalystToolRuntimeResult;
 };
 
 const CONVERSATION_MESSAGES = 6;
-const WANTS_PEERS = /\bpeers?\b/i;
+
+// The companies the answer compares: the ones the turn covers, or for a peers
+// request one company plus its auto-selected peers (turnCompanies, the set the
+// fact blocks chart).
+async function comparedCompanies(
+  named: ResearchScope["companies"],
+  peers: boolean,
+): Promise<ResearchScope["companies"]> {
+  if (!peers || named.length !== 1) return named;
+  const issuers = await turnCompanies(pool(), named.map((company) => ({ kind: "issuer" as const, id: company.issuer_id })), true);
+  return issuers.map((issuer) => named.find((company) => company.issuer_id === issuer.id) ?? { issuer_id: issuer.id });
+}
+
+// The previous answer's scope when this turn continues it: it covers one of
+// that answer's companies, however it named them (carried forward, named
+// again, or the ticker page's subject). A turn about other companies, or about
+// none, starts fresh.
+async function continuedScope(
+  threadId: string,
+  companies: ResearchScope["companies"],
+): Promise<ResearchScope | null> {
+  if (companies.length === 0) return null;
+  const prior = await loadPriorScope(pool(), { threadId });
+  const ids = new Set(companies.map((company) => company.issuer_id));
+  return prior !== null && prior.companies.some((company) => ids.has(company.issuer_id)) ? prior : null;
+}
 
 // Live mode only (marketHydrationOrigin): fetches and stores the YTD window's
 // bars for the companies the chart will cover. Never throws; a failure leaves
-// the chart to name what is missing.
+// the chart to name what is missing. An inherited window is fetched again at
+// its cutoff, so a company the turn adds gets its prices and an earlier failed
+// fetch is retried.
+// ponytail: the chart rereads stored bars at the inherited cutoff, so a provider
+// correction to them since shows corrected returns; reusing the earlier
+// snapshot's sealed observations is the upgrade if that matters.
 async function hydrateYtdWindow(
-  userIntent: string,
+  scope: ResearchScope,
   covered: ReadonlyArray<ChatResolvedSubjectPreResolution>,
 ): Promise<void> {
   const origin = marketHydrationOrigin(process.env);
-  if (origin === null || requestedPriceWindow(userIntent) !== "ytd") return;
-  const now = new Date().toISOString();
+  if (origin === null || scope.price_window === null) return;
+  const now = scope.price_window.cutoff;
   try {
     const listings = await priceListingsForTurn(pool(), {
-      issuers: issuersOf(covered),
-      wantsPeers: WANTS_PEERS.test(userIntent),
+      issuers: issuersOfScope(scope),
+      wantsPeers: false,
       requestedListings: requestedListingsOf(covered),
       asOf: now,
     });
@@ -267,14 +314,19 @@ function requestedListingsOf(
   return out;
 }
 
-function issuersOf(subjects: ReadonlyArray<ChatResolvedSubjectPreResolution>): IssuerSubjectRef[] {
+// The turn's canonical companies, primary first, as its scope records them.
+function companiesOf(subjects: ReadonlyArray<ChatResolvedSubjectPreResolution>): ResearchScope["companies"] {
   const seen = new Set<string>();
   return subjects.flatMap((subject) => {
     const issuer = structuredRefsFromHandoff(subject.handoff).issuer;
     if (issuer === null || seen.has(issuer.id)) return [];
     seen.add(issuer.id);
-    return [{ kind: "issuer" as const, id: issuer.id }];
+    return [{ issuer_id: issuer.id, label: subject.display_label }];
   });
+}
+
+function issuersOfScope(scope: ResearchScope): IssuerSubjectRef[] {
+  return scope.companies.map((company) => ({ kind: "issuer" as const, id: company.issuer_id }));
 }
 
 const NO_DEFAULT_REFS = Object.freeze({

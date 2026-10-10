@@ -4,6 +4,7 @@
 
 import { hydrateSubjectRef, type HydratedSubjectHandoff } from "../../resolver/src/flow.ts";
 import type { SubjectRef } from "../../shared/src/subject-ref.ts";
+import { parseResearchScope, type ResearchScope } from "./research-scope.ts";
 import type { ChatResolvedSubjectPreResolution } from "./subjects.ts";
 
 type QueryExecutor = {
@@ -29,6 +30,12 @@ export async function loadPriorSubjects(
        join snapshots s on s.snapshot_id = m.snapshot_id
       where m.thread_id = $1::uuid
         and m.role = 'assistant'
+        -- An answer about no company (a financial gap or clarification) leaves
+        -- the earlier companies in place, as it leaves the scope (loadPriorScope).
+        and exists (
+          select 1 from jsonb_array_elements(s.subject_refs) ref
+           where ref->>'kind' in ('issuer', 'instrument', 'listing')
+        )
       order by m.created_at desc
       limit 1`,
     [input.threadId],
@@ -45,6 +52,28 @@ export async function loadPriorSubjects(
     }
   }
   return subjects;
+}
+
+// The latest research scope an answer saved (research-scope.ts), for a
+// follow-up to keep what it does not change. Answers that save none (an
+// enforced financial answer, a clarification) leave it in place; null when no
+// answer saved one.
+export async function loadPriorScope(
+  db: QueryExecutor,
+  input: { threadId: string },
+): Promise<ResearchScope | null> {
+  const { rows } = await db.query<{ research_scope: unknown }>(
+    `select m.research_scope
+       from chat_messages m
+      where m.thread_id = $1::uuid
+        and m.role = 'assistant'
+        and m.snapshot_id is not null
+        and m.research_scope is not null
+      order by m.created_at desc
+      limit 1`,
+    [input.threadId],
+  );
+  return parseResearchScope(rows[0]?.research_scope ?? null);
 }
 
 export type ConversationMessage = { role: string; text: string };

@@ -254,6 +254,18 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
       [NVDA.issuer_id, AMD.issuer_id].sort(),
       "the answer should display cited facts about both companies",
     );
+    // Turn 2's YTD window carries over at its cutoff, not the default history window (#206).
+    const performance = answer.blocks.find((block) => block.kind === "perf_comparison");
+    assert.equal(performance?.default_range, "YTD 2026: 2025-12-31 close to 2026-08-31 close");
+    const { rows: scopes } = await client.query<{ research_scope: { price_window: unknown; inherited: string[] } }>(
+      `select research_scope from chat_messages
+        where thread_id = $1::uuid and role = 'assistant'
+        order by created_at`,
+      [thread.thread_id],
+    );
+    const [, compared, explained] = scopes.map((row) => row.research_scope);
+    assert.deepEqual(explained?.price_window, compared?.price_window);
+    assert.deepEqual(explained?.inherited, ["price_window"]);
   });
 
   await t.test("a reload returns all three turns: questions, figures, chart points and sources", async () => {
@@ -277,6 +289,43 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.ok((chart?.series as Array<{ points: unknown[] }>).every((line) => line.points.length > 1), "the chart lost its points");
   });
 
+  // A turn continues the scope when it covers one of the previous answer's
+  // companies, however it names them; one about other companies starts fresh (#206).
+  await t.test("naming the same companies again keeps the scope; another company starts fresh", async () => {
+    const latestScope = async () =>
+      (await client.query<{ research_scope: { price_window: unknown; inherited: string[] } }>(
+        `select research_scope from chat_messages
+          where thread_id = $1::uuid and role = 'assistant'
+          order by created_at desc limit 1`,
+        [thread.thread_id],
+      )).rows[0]?.research_scope;
+    const established = await latestScope();
+    completedTurn(await runTurn(base, thread.thread_id, "Compare NVDA and AMD again"));
+    const again = await latestScope();
+    assert.deepEqual(again?.price_window, established?.price_window);
+    assert.deepEqual(again?.inherited, ["price_window"]);
+    // An answer with no scope and no company (an enforced financial gap) erases
+    // neither: the next follow-up still carries both companies and the window.
+    const gap = await client.query<{ snapshot_id: string }>(
+      `insert into snapshots (subject_refs, as_of, basis, normalization, allowed_transforms)
+       values (jsonb_build_array(jsonb_build_object('kind', 'screen', 'id', $1::text)), now(), 'unadjusted', 'raw', '{}')
+       returning snapshot_id::text as snapshot_id`,
+      [thread.thread_id],
+    );
+    await client.query(
+      `insert into chat_messages (thread_id, role, snapshot_id, blocks, content_hash)
+       values ($1::uuid, 'assistant', $2::uuid, '[]'::jsonb, 'gap')`,
+      [thread.thread_id, gap.rows[0]!.snapshot_id],
+    );
+    const explained = await runTurn(base, thread.thread_id, "Explain the differences");
+    assert.deepEqual(completedTurn(explained).data.subject_refs, BOTH_LISTINGS);
+    assert.deepEqual((await latestScope())?.price_window, established?.price_window);
+    completedTurn(await runTurn(base, thread.thread_id, "Analyze AAPL"));
+    const other = await latestScope();
+    assert.equal(other?.price_window, null);
+    assert.deepEqual(other?.inherited, []);
+  });
+
   await t.test("'How does NVDA compare with its peers?' brings in its industry peers", async () => {
     const peersThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Peers" });
     const turnEvents = await runTurn(base, peersThread.thread_id, "How does NVDA compare with its peers?");
@@ -289,6 +338,12 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
       [NVDA.issuer_id, AMD.issuer_id],
     );
     assert.deepEqual(comparison.subject_labels, ["NVDA", "AMD"]);
+    // The saved scope covers the auto-selected peer, so a follow-up about AMD continues it (#206).
+    const { rows } = await client.query<{ research_scope: { companies: Array<{ issuer_id: string }> } }>(
+      `select research_scope from chat_messages where thread_id = $1::uuid and role = 'assistant'`,
+      [peersThread.thread_id],
+    );
+    assert.deepEqual(rows[0]?.research_scope.companies.map((company) => company.issuer_id), [NVDA.issuer_id, AMD.issuer_id]);
   });
 
   await t.test("'Break down NVDA's revenue by segment' shows each segment from cited facts (#157)", async () => {
