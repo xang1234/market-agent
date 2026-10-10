@@ -31,3 +31,8 @@ test("empty or whitespace input yields no mentions", () => {
   assert.deepEqual(extractSubjectMentions(null), []);
   assert.deepEqual(extractSubjectMentions(undefined), []);
 });
+
+test("a benchmark index is not a company mention (#206)", () => {
+  assert.deepEqual(extractSubjectMentions("Compare NVDA and AMD YTD against the S&P 500"), ["NVDA", "AMD"]);
+  assert.deepEqual(extractSubjectMentions("How did AAPL do vs the s&p?"), ["AAPL"]);
+});

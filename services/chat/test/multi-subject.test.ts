@@ -220,3 +220,80 @@ test("an explicit subject's comparison asks about an ambiguous company and names
   assert.deepEqual(tickers, ["NVDA"]);
   assert.deepEqual(context?.unresolvedMentions, ["XYZQ"]);
 });
+
+// #206: a follow-up changes the compared companies only as it says.
+test("a follow-up that adds a company keeps the previous ones", async () => {
+  const { tickers, primary } = await subjectsForTurn("Add AAPL", { loadPriorSubjects: priorOf("NVDA", "AMD") });
+  assert.deepEqual(tickers, ["NVDA", "AMD", "AAPL"]);
+  assert.equal(primary, "NVDA");
+});
+
+test("a follow-up that drops a company keeps the others", async () => {
+  for (const question of ["Drop AMD", "Remove AMD from the comparison", "Compare them without AMD", "Same table, but leave out AMD"]) {
+    const { tickers } = await subjectsForTurn(question, { loadPriorSubjects: priorOf("NVDA", "AMD", "AAPL") });
+    assert.deepEqual(tickers, ["NVDA", "AAPL"], question);
+  }
+  // A company named beside the one dropped is added.
+  const swapped = await subjectsForTurn("Drop AMD and add TSLA", { loadPriorSubjects: priorOf("NVDA", "AMD", "AAPL") });
+  assert.deepEqual(swapped.tickers, ["NVDA", "AAPL", "TSLA"]);
+  // Turning a facet off names no company, so the companies are kept.
+  const { tickers } = await subjectsForTurn("Drop the segments", { loadPriorSubjects: priorOf("NVDA", "AMD") });
+  assert.deepEqual(tickers, ["NVDA", "AMD"]);
+});
+
+test("naming a new company after a comparison, without saying add or replace, asks which", async () => {
+  let ran = false;
+  const persisted: Array<Record<string, unknown>> = [];
+  const turn = createChatCoordinator({
+    preResolveSubject,
+    loadPriorSubjects: priorOf("NVDA", "AMD"),
+    persistAssistantMessage: async (input) => {
+      persisted.push(input);
+      return { snapshot_id: "snapshot-1", message_id: "message-1" };
+    },
+    runner: () => {
+      ran = true;
+    },
+  }).getOrCreateTurn({ threadId: "thread-1", runId: "run-1", userIntent: "What about AAPL?" });
+  await turn.completed;
+
+  assert.equal(ran, false, "the analyst must not answer about AAPL alone or all three");
+  const completed = turn.events.find((event) => event.type === "turn.completed") as Record<string, unknown> | undefined;
+  assert.equal(completed?.clarification, true);
+  const text = JSON.stringify(turn.events);
+  assert.match(text, /Add AAPL to the NVDA and AMD comparison, or look at AAPL alone\?/);
+  assert.match(text, /add AAPL/);
+  assert.match(text, /just AAPL/);
+  // Saved with no research scope, so the reply continues the comparison.
+  assert.equal(persisted.length, 1);
+  assert.equal(persisted[0]!.research_scope, undefined);
+  // A saved answer's text block is bound to itself, as the snapshot verifier requires.
+  assert.deepEqual((persisted[0]!.blocks as Array<{ id: string; data_ref: unknown }>).map((block) => block.data_ref), [
+    { kind: "rich_text", id: (persisted[0]!.blocks as Array<{ id: string }>)[0]!.id },
+  ]);
+});
+
+test("an ambiguous company's question is saved as a text block the verifier accepts", async () => {
+  const persisted: Array<Record<string, unknown>> = [];
+  const turn = createChatCoordinator({
+    preResolveSubject,
+    persistAssistantMessage: async (input) => {
+      persisted.push(input);
+      return { snapshot_id: "snapshot-1", message_id: "message-1" };
+    },
+    runner: () => {},
+  }).getOrCreateTurn({ threadId: "thread-1", runId: "run-1", userIntent: "Compare GOOGL and NVDA" });
+  await turn.completed;
+  const block = (persisted[0]!.blocks as Array<{ id: string; data_ref: unknown }>)[0]!;
+  assert.deepEqual(block.data_ref, { kind: "rich_text", id: block.id });
+});
+
+test("the reply to that question, or a clear switch, is answered", async () => {
+  assert.deepEqual((await subjectsForTurn("add AAPL", { loadPriorSubjects: priorOf("NVDA", "AMD") })).tickers, ["NVDA", "AMD", "AAPL"]);
+  assert.deepEqual((await subjectsForTurn("just AAPL", { loadPriorSubjects: priorOf("NVDA", "AMD") })).tickers, ["AAPL"]);
+  assert.deepEqual((await subjectsForTurn("What about just AAPL?", { loadPriorSubjects: priorOf("NVDA", "AMD") })).tickers, ["AAPL"]);
+  // After one company there is no comparison to keep: the new one replaces it.
+  assert.deepEqual((await subjectsForTurn("What about AAPL?", { loadPriorSubjects: priorOf("NVDA") })).tickers, ["AAPL"]);
+  // A company already compared is not a new one.
+  assert.deepEqual((await subjectsForTurn("And what about AMD?", { loadPriorSubjects: priorOf("NVDA", "AMD") })).tickers, ["AMD"]);
+});

@@ -28,7 +28,8 @@ const NON_SUBJECT_TOKENS = new Set([
  */
 export function extractSubjectMentions(text: string | null | undefined): string[] {
   const mentions: string[] = [];
-  for (const token of (text ?? "").split(/[^A-Za-z]+/)) {
+  // A benchmark index is not a company: "S&P" would split into "S" and "P" (#206).
+  for (const token of (text ?? "").replace(/\bS&P\b/gi, " ").split(/[^A-Za-z]+/)) {
     if (TICKER_TOKEN.test(token) && !NON_SUBJECT_TOKENS.has(token) && !mentions.includes(token)) mentions.push(token);
   }
   return mentions;
