@@ -199,9 +199,10 @@ export async function composeAnalystBlocksWithLlm(input: {
   // Never show a sentence cut off mid-way, or the placeholder the turn started with.
   if (result.truncated || text.length === 0) {
     console.warn(`[chat] model answer was ${result.truncated ? "cut off at the token limit" : "empty"}; showing the fallback sentence`);
+    // Pointing to "the reported figures below" needs figures shown, not a gap note.
     return rewriteFirstRichTextBlock(
       input.blocks,
-      input.factBlocks?.length ? FACT_BLOCKS_FALLBACK_TEXT : NO_ANSWER_FALLBACK_TEXT,
+      displayedFigures(input.factBlocks ?? []).length > 0 ? FACT_BLOCKS_FALLBACK_TEXT : NO_ANSWER_FALLBACK_TEXT,
     );
   }
   // The guard limits prose to the figures shown; with none shown (no fact blocks,
@@ -216,10 +217,8 @@ export async function composeAnalystBlocksWithLlm(input: {
       input.onNarrativeRemoved?.(uncaused.removed);
     }
     if (uncaused.text) answered();
-    return rewriteFirstRichTextBlock(
-      input.blocks,
-      uncaused.text || (input.factBlocks?.length ? FACT_BLOCKS_FALLBACK_TEXT : NO_ANSWER_FALLBACK_TEXT),
-    );
+    // No figures are shown here, so the fallback points to none.
+    return rewriteFirstRichTextBlock(input.blocks, uncaused.text || NO_ANSWER_FALLBACK_TEXT);
   }
 
   const displayTexts = displayTextsForBlocks(input.factBlocks ?? []);

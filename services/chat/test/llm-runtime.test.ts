@@ -864,3 +864,16 @@ function hang(t: { after(fn: () => void): void }): Promise<never> {
   t.after(() => clearInterval(connection));
   return new Promise<never>(() => {});
 }
+
+test("an answer whose every sentence goes beside a gap note falls back without pointing to figures (#263)", async () => {
+  const gap = { kind: "rich_text", segments: [{ type: "text", text: "Free cash flow is not available for AMD in this data." }] };
+  const blocks = await composeAnalystBlocksWithLlm({
+    env: BASE_ENV,
+    context: { userIntent: "What is AMD's free cash flow?", bundleId: "single_subject_analysis" },
+    blocks: [NARRATIVE_BLOCK],
+    toolCalls: [],
+    factBlocks: [gap],
+    createClient: () => async () => ({ text: "It fell due to heavy spending." }),
+  });
+  assert.equal((blocks[0].segments as Array<{ text: string }>)[0].text, "No written answer is available for this question; try asking again.");
+});

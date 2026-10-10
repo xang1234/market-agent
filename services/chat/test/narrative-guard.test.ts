@@ -913,9 +913,23 @@ test("with no figures shown, only causes are checked, and any stated cause goes 
     "The decline was due to a one-time charge.",
     "Revenue could reflect pricing power, but the data does not say.",
     "Driven by data center demand.",
-    hypothesis(3),
+    // Past the cap: its sentence, as keepSupportedSentences reports it.
+    "Margins may reflect product mix 3, given the revenue shown.",
     "**Unverified hypothesis:** Supply constraints.",
   ]);
   // A section that loses everything loses its heading.
   assert.equal(keepUncausedSentences("## Why\nIt rose due to demand.\n## Next\nAMD grew.").text, "## Next\nAMD grew.");
+});
+
+test("with no figures shown, a hypothesis keeps one explanation and its basis; the rest of its line is prose (#263)", () => {
+  const label = "> **Unverified hypothesis (medium confidence):**";
+  const check = (line: string) => keepUncausedSentences(line);
+  // A further sentence stating a cause goes; the hypothesis stays.
+  assert.deepEqual(check(`${label} Demand may reflect mix, given revenue. Revenue was driven by an acquisition.`), {
+    text: `${label} Demand may reflect mix, given revenue.`,
+    removed: ["Revenue was driven by an acquisition."],
+  });
+  // No basis, or two explanations: the line goes whole.
+  assert.equal(check(`${label} Demand may reflect mix.`).text, "");
+  assert.equal(check(`${label} Demand may reflect mix, driven by pricing, given revenue.`).text, "");
 });
