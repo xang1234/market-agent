@@ -69,7 +69,10 @@ const NOT_METRICS = /\bearnings (?:calls?|releases?|reports?|dates?|season)\b/gi
 // Words that qualify a metric just named ("free cash flow growth") rather than
 // asking for another one.
 const QUALIFIER = String.raw`(?:\s+(?:growth|margins?|yields?|trends?|per share))?`;
-const EVIDENCE = /\b(evidence|sources?|cite|citations?|where (?:does|do|did) (?:this|that|these|those) come from)\b/i;
+// Asking for an answer's evidence, not about a company's sources of revenue:
+// "sources" counts only as the answer's ("show the sources", "your sources").
+const EVIDENCE =
+  /\b(evidence|cite|citations?|(?:the|your|its) sources|sources (?:for|of) (?:this|that|these|those)|where (?:does|do|did) (?:this|that|these|those) come from)\b/i;
 
 // The metrics a question can name, most specific first: each match is removed
 // before the next is tried, so "free cash flow" is not also "cash flow" and
@@ -105,6 +108,9 @@ export function resolveResearchScope(input: {
   // The previous answer's scope, for a follow-up; null for a fresh question.
   prior: ResearchScope | null;
   asOf: string;
+  // The metrics were served by the financial engine, so none is a gap even if
+  // no reader here serves it.
+  served?: boolean;
 }): ResearchScope {
   const { question, prior } = input;
   const inherited: ScopeField[] = [];
@@ -120,7 +126,7 @@ export function resolveResearchScope(input: {
   const segments = flag("segments", SEGMENTS, prior?.segments);
   const marginAsked = MARGINS.test(question);
   const margin_trend = pick("margin_trend", marginAsked && OVER_TIME.test(question) ? true : null, prior?.margin_trend ? true : null) ?? false;
-  const named = requestedMetrics(question);
+  const named = requestedMetrics(question).map((metric) => (input.served ? { ...metric, available: true } : metric));
   const metrics = pick("metrics", named.length > 0 ? named : null, prior && prior.metrics.length > 0 ? prior.metrics : null) ?? [];
   const fiscal_year = pick("fiscal_year", requestedFiscalYear(question) ?? null, prior?.fiscal_year);
   const asked = requestedPriceWindow(question) === "ytd" ? { kind: "ytd" as const, cutoff: input.asOf } : null;
@@ -140,7 +146,8 @@ export function resolveResearchScope(input: {
   return {
     route: evidence ? "evidence_followup" : reads,
     reads,
-    companies: input.companies,
+    // An evidence follow-up re-reads the previous answer, over all its companies.
+    companies: evidence && prior !== null ? prior.companies : input.companies,
     peers,
     segments,
     margin_trend,

@@ -169,3 +169,28 @@ test("an evidence follow-up re-reads what the previous answer read", () => {
   const gapPrior = fresh("What is AMD's free cash flow?", [AMD]);
   assert.equal(resolveResearchScope({ question: "Show the evidence", companies: [AMD], prior: gapPrior, asOf: AS_OF }).reads, "unavailable_metric");
 });
+
+test("metrics the financial engine served are not gaps", () => {
+  const scope = resolveResearchScope({ question: "What was NVDA's EPS?", companies: [NVDA], prior: null, asOf: AS_OF, served: true });
+  assert.deepEqual(scope.metrics.map((metric) => metric.available), [true]);
+  assert.equal(scope.reads, "latest_quarter");
+  // So a follow-up asking for its evidence does not call it unavailable.
+  const evidence = resolveResearchScope({ question: "Show the evidence", companies: [NVDA], prior: scope, asOf: AS_OF });
+  assert.notEqual(evidence.reads, "unavailable_metric");
+});
+
+test("an evidence follow-up about one compared company re-reads the whole comparison", () => {
+  const prior = fresh("Compare NVDA with AMD", [NVDA, AMD]);
+  const scope = resolveResearchScope({ question: "Show the evidence for NVDA", companies: [NVDA], prior, asOf: AS_OF });
+  assert.equal(scope.route, "evidence_followup");
+  assert.equal(scope.reads, "comparison");
+  assert.deepEqual(scope.companies, [NVDA, AMD]);
+});
+
+test("a company's sources of revenue are not a request for evidence", () => {
+  const prior = fresh("Analyze NVDA");
+  const ask = (question: string) => resolveResearchScope({ question, companies: [NVDA], prior, asOf: AS_OF }).route;
+  assert.notEqual(ask("What are NVDA's revenue sources?"), "evidence_followup");
+  assert.equal(ask("What are your sources?"), "evidence_followup");
+  assert.equal(ask("Show the sources for this"), "evidence_followup");
+});

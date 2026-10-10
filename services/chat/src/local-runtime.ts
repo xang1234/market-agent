@@ -243,11 +243,14 @@ async function turnScope(
   threadId: string,
   question: string,
   covered: ReadonlyArray<ChatResolvedSubjectPreResolution>,
+  served = false,
 ): Promise<(cutoff: string) => ResearchScope> {
   const named = companiesOf(covered);
   const prior = await continuedScope(threadId, named);
-  const resolve = (cutoff: string) => resolveResearchScope({ question, companies: named, prior, asOf: cutoff });
-  const compared = await comparedCompanies(named, resolve(new Date().toISOString()).peers);
+  const resolve = (cutoff: string) => resolveResearchScope({ question, companies: named, prior, asOf: cutoff, served });
+  const base = resolve(new Date().toISOString());
+  // An evidence follow-up keeps the previous answer's companies as they were.
+  const compared = base.route === "evidence_followup" ? base.companies : await comparedCompanies(named, base.peers);
   return (cutoff) => ({ ...resolve(cutoff), companies: compared });
 }
 
@@ -370,7 +373,8 @@ export const financialRuntime: ChatFinancialRuntime = createChatFinancialRuntime
   researchScope: async (context) => {
     const covered = context.subjectPreResolutions ??
       (context.subjectPreResolution?.status === "resolved" ? [context.subjectPreResolution] : []);
-    return (await turnScope(context.threadId, context.userIntent ?? "", covered))(new Date().toISOString());
+    // The engine answered the metrics it published, so they are not gaps.
+    return (await turnScope(context.threadId, context.userIntent ?? "", covered, true))(new Date().toISOString());
   },
 });
 
