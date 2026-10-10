@@ -72,7 +72,15 @@ export const forbiddenAnalyst: ChatAnalystToolRuntime = () => {
   throw new Error("the narrative composer was invoked for a financial turn");
 };
 
-export function chatHarness(pool: Pool, options: { model: PlanningModel | null; mode?: ChatFinancialMode; analyst?: ChatAnalystToolRuntime }) {
+export function chatHarness(
+  pool: Pool,
+  options: {
+    model: PlanningModel | null;
+    mode?: ChatFinancialMode;
+    analyst?: ChatAnalystToolRuntime;
+    researchScope?: Parameters<typeof createChatFinancialRuntime>[0]["researchScope"];
+  },
+) {
   const persisted: string[] = [];
   const coordinator = createChatCoordinator({
     analystToolRuntime: options.analyst ?? forbiddenAnalyst,
@@ -86,6 +94,7 @@ export function chatHarness(pool: Pool, options: { model: PlanningModel | null; 
       planningModel: options.model,
       resolveMention,
       evidence: createEvidenceFinancialPort,
+      ...(options.researchScope ? { researchScope: options.researchScope } : {}),
     }),
   });
   const run = async (input: Omit<ChatTurnInput, "runId" | "turnId"> & { turnId?: string }) => {

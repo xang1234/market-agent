@@ -28,7 +28,7 @@ import {
   type ChatPriorSubjectsLoader,
   type ChatThreadTitleGenerator,
 } from "./coordinator.ts";
-import { loadTurnFactBlocks, priceListingsForTurn, turnCompanies } from "./fact-blocks.ts";
+import { loadTurnFactBlocks, mayOfferOtherFacts, priceListingsForTurn, scopeGapBlocks, turnCompanies } from "./fact-blocks.ts";
 import { resolveResearchScope, type ResearchScope } from "./research-scope.ts";
 import { frozenDataMode, hydrateYtdBars, marketHydrationOrigin } from "./ytd-hydration.ts";
 import { listingTimeZones } from "./perf-block.ts";
@@ -94,14 +94,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   const covered = context.subjectPreResolutions ?? (resolved ? [resolved] : []);
   // What the turn asks for, keeping a follow-up's unchanged scope (#206). A
   // window asked for now is cut off at the turn's asOf, which a follow-up keeps.
-  const named = companiesOf(covered);
-  const prior = await continuedScope(context.threadId, named);
-  const resolve = (cutoff: string) =>
-    resolveResearchScope({ question: context.userIntent ?? "", companies: named, prior, asOf: cutoff });
-  // The scope records the companies the answer compares, auto-selected peers
-  // included, so the fetch below and a follow-up about a peer both see them.
-  const compared = await comparedCompanies(named, resolve(new Date().toISOString()).peers);
-  const scopeAt = (cutoff: string): ResearchScope => ({ ...resolve(cutoff), companies: compared });
+  const scopeAt = await turnScope(context.threadId, context.userIntent ?? "", covered);
   // A live YTD request fetches its prices first, so the cutoff below covers them (#232).
   await hydrateYtdWindow(scopeAt(new Date().toISOString()), covered);
   const asOf = new Date().toISOString();
@@ -172,14 +165,20 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     .map((toolCall) => toolCall.tool_call_id);
   const requestedListings = requestedListingsOf(covered);
   // Charts and tables come from facts, never from the model (see fact-blocks.ts).
-  const [factBlocks, conversation] = await Promise.all([
-    loadTurnFactBlocks(pool(), {
+  // A turn asking only for metrics no reader serves reads no other facts, nor
+  // does one re-reading a financial-engine answer, whose evidence is in it (#206).
+  const readsFacts = scope.reads !== "unavailable_metric" && scope.reads !== "financial_answer";
+  const [shownBlocks, conversation] = await Promise.all([
+    readsFacts ? loadTurnFactBlocks(pool(), {
       // The companies the scope records, peers already resolved (comparedCompanies),
       // so the blocks chart exactly the set the scope saves.
       issuers: issuersOfScope(scope),
       wantsPeers: false,
       wantsSegments: scope.segments,
       wantsMarginTrend: scope.margin_trend,
+      // A request for segments alone; one also asking for a margin (its latest
+      // value or its trend) reads both.
+      segmentsOnly: scope.reads === "segments" && !scope.margins,
       requestedListings,
       fiscalYear: scope.fiscal_year ?? undefined,
       priceWindow: scope.price_window?.kind,
@@ -188,9 +187,10 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
       frozenPrices: frozenDataMode(process.env),
       snapshotId: result.snapshot_id,
       asOf,
-    }),
+    }) : Promise.resolve([]),
     loadRecentConversation(pool(), { threadId: context.threadId, limit: CONVERSATION_MESSAGES }),
   ]);
+  const factBlocks = [...shownBlocks, ...scopeGapBlocks(scope, shownBlocks, { snapshotId: result.snapshot_id, asOf })];
   let narrativeRemoved: ReadonlyArray<string> = [];
   let answeredBy: string | undefined;
   let answerUsage: AnswerUsage | undefined;
@@ -201,6 +201,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     factBlocks,
     subjectLabels: covered.flatMap((subject) => subjectLabelsFromHandoff(subject.handoff)),
     conversation,
+    availableData: mayOfferOtherFacts(scope, shownBlocks),
     onAnswered: (deployment) => {
       answeredBy = deployment;
     },
@@ -235,6 +236,26 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
 };
 
 const CONVERSATION_MESSAGES = 6;
+
+// The turn's research scope at a cutoff (research-scope.ts): what it asks for,
+// keeping the previous answer's scope where it continues it. The companies are
+// the ones the answer compares, auto-selected peers included, so the price
+// fetch and a follow-up about a peer both see them.
+async function turnScope(
+  threadId: string,
+  question: string,
+  covered: ReadonlyArray<ChatResolvedSubjectPreResolution>,
+  served = false,
+): Promise<(cutoff: string) => ResearchScope> {
+  const named = companiesOf(covered);
+  const prior = await continuedScope(threadId, named);
+  const resolve = (cutoff: string) => resolveResearchScope({ question, companies: named, prior, asOf: cutoff, served });
+  const base = resolve(new Date().toISOString());
+  // An evidence follow-up keeps the previous answer's companies as they were; a
+  // financial answer covers exactly the companies its plan requested.
+  const compared = base.route === "evidence_followup" || served ? base.companies : await comparedCompanies(named, base.peers);
+  return (cutoff) => ({ ...resolve(cutoff), companies: compared });
+}
 
 // The companies the answer compares: the ones the turn covers, or for a peers
 // request one company plus its auto-selected peers (turnCompanies, the set the
@@ -321,7 +342,8 @@ function companiesOf(subjects: ReadonlyArray<ChatResolvedSubjectPreResolution>):
     const issuer = structuredRefsFromHandoff(subject.handoff).issuer;
     if (issuer === null || seen.has(issuer.id)) return [];
     seen.add(issuer.id);
-    return [{ issuer_id: issuer.id, label: subject.display_label }];
+    // The ticker, as answers name companies ("AMD"), else the display label.
+    return [{ issuer_id: issuer.id, label: subject.handoff.display_labels?.ticker ?? subject.display_label }];
   });
 }
 
@@ -349,6 +371,14 @@ export const financialRuntime: ChatFinancialRuntime = createChatFinancialRuntime
   },
   resolveMention: (mention) => preResolveSubject({ text: mention }),
   evidence: createEvidenceFinancialPort,
+  // A published financial answer saves its scope too, so a period it asks for
+  // carries into the next follow-up (#206).
+  researchScope: async (context) => {
+    const covered = context.subjectPreResolutions ??
+      (context.subjectPreResolution?.status === "resolved" ? [context.subjectPreResolution] : []);
+    // The engine answered the metrics it published, so they are not gaps.
+    return (await turnScope(context.threadId, context.userIntent ?? "", covered, true))(new Date().toISOString());
+  },
 });
 
 export const persistAssistantMessage: ChatAssistantMessagePersistence = async (message) =>

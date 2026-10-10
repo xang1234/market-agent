@@ -31,6 +31,7 @@ import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import { loadUsableFacts } from "../../fundamentals/src/usable-facts.ts";
 import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
 import { stableUuid } from "./chat-ids.ts";
+import { unavailableMetrics, type ResearchScope } from "./research-scope.ts";
 import { loadPerfComparisonBlocks, type PriceWindow } from "./perf-block.ts";
 import { deriveQuarterMetrics, GROWTH, MARGINS, type QuarterMetric } from "./quarter-metrics.ts";
 
@@ -63,6 +64,8 @@ export async function loadTurnFactBlocks(
     wantsSegments?: boolean;
     // ...and one about margins, each margin across the quarters shown (#178).
     wantsMarginTrend?: boolean;
+    // A segment request reads segment facts only (#206).
+    segmentsOnly?: boolean;
     snapshotId: string;
     asOf: string;
     // The listing the user asked for, per issuer (see listingsForComparison).
@@ -81,6 +84,9 @@ export async function loadTurnFactBlocks(
   const [primary] = input.issuers;
   if (primary === undefined) return [];
   const companies = await turnCompanies(db, input.issuers, input.wantsPeers);
+  if (companies.length === 1 && input.segmentsOnly) {
+    return loadSegmentBlocks(db, { issuer: primary, snapshotId: input.snapshotId, asOf: input.asOf });
+  }
   if (companies.length === 1) {
     const blocks = await loadIssuerFactBlocks(db, {
       issuer: primary,
@@ -724,6 +730,58 @@ function blockBase(
 function bindingFor(fact: VerifierFact): Record<string, unknown> {
   const { source_id: _sourceId, ...binding } = fact;
   return binding;
+}
+
+// What a turn asked for and cannot show, each as a note (#206): a metric no
+// reader serves, and a segment breakdown with no segment facts. Nothing else is
+// shown in their place.
+export function scopeGapBlocks(
+  scope: ResearchScope,
+  shown: ReadonlyArray<Block>,
+  input: { snapshotId: string; asOf: string },
+): ReadonlyArray<Block> {
+  const names = scope.companies.flatMap((company) => company.label ?? []).join(", ") || "these companies";
+  const notes: Array<readonly [string, string]> = unavailableMetrics(scope).map((metric) => [
+    `gap:${metric.metric_key}`,
+    `${metric.label} is not available for ${names} in this data, so no other figure is shown in its place.`,
+  ] as const);
+  if (scope.reads === "financial_answer") {
+    notes.push(["gap:financial_answer", "The previous answer's figures were calculated and verified by the financial engine; each one links to its sources in that answer, and no other figure is shown in their place."]);
+  }
+  // Segments asked for now (or the segment route) and not shown: a single
+  // company has none in the data; a comparison shows company totals only.
+  const segmentsWanted = scope.reads === "segments" || (scope.segments && !scope.inherited.includes("segments"));
+  if (segmentsWanted && !showsSegments(shown)) {
+    notes.push(scope.reads === "segments"
+      ? ["gap:segments", `Revenue by segment is not available for ${names} in this data.`]
+      : ["gap:segments", "Revenue by segment is not shown when comparing companies; ask about one company for its breakdown."]);
+  }
+  return notes.map(([key, text]) => {
+    const id = stableUuid(`block:${input.snapshotId}:${key}`);
+    return {
+      id,
+      kind: "rich_text",
+      snapshot_id: input.snapshotId,
+      data_ref: { kind: "rich_text", id },
+      source_refs: [],
+      as_of: input.asOf,
+      segments: [{ type: "text", text }],
+    };
+  });
+}
+
+// Whether the answer model may see the turn's other facts (available_data)
+// when no figure is shown: not for a turn whose request is a named gap (only
+// unavailable metrics, a financial-engine answer re-read, or a segment
+// breakdown with none to show), so nothing stands in for what it asked.
+export function mayOfferOtherFacts(scope: ResearchScope, shown: ReadonlyArray<Block>): boolean {
+  if (scope.reads === "unavailable_metric" || scope.reads === "financial_answer") return false;
+  return !(scope.reads === "segments" && !showsSegments(shown));
+}
+
+// Whether the blocks include a segment breakdown.
+export function showsSegments(blocks: ReadonlyArray<Block>): boolean {
+  return blocks.some((block) => block.kind === "metric_row" && /by segment/.test(String(block.title)));
 }
 
 function blockId(kind: string, snapshotId: string): string {

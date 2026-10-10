@@ -36,7 +36,8 @@ import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier
 import type { ChatTurnRunContext } from "./coordinator.ts";
 import { contentHashForText, stableUuid } from "./chat-ids.ts";
 import { COMPARATIVE, companyKey, extractSubjectMentions } from "./subject-extraction.ts";
-import type { ChatSubjectPreResolution } from "./subjects.ts";
+import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "./subjects.ts";
+import type { ResearchScope } from "./research-scope.ts";
 
 export type ChatFinancialMode = FinancialMode;
 
@@ -67,6 +68,8 @@ export type ChatFinancialRuntimeDeps = Readonly<{
   planningModel: PlanningModel | null;
   resolveMention(mention: string): Promise<ChatSubjectPreResolution>;
   evidence: (executor: SqlExecutor) => FinancialEvidencePort;
+  /** The turn's research scope, saved with a published answer (#206); absent, none is saved. */
+  researchScope?: (context: ChatFinancialTurnContext) => Promise<ResearchScope>;
 }>;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -97,6 +100,13 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     const authority = chatAuthority(context.userId!, context.threadId, turnId, deps.mode);
 
     const messageId = financialMessageId(context.threadId, turnId);
+    // The scope only informs follow-ups: failing to resolve it never fails the answer.
+    // This lane runs before the analyst path resolves the turn's companies, so
+    // the scope gets the companies the plan requests (requestedMentions).
+    const scope = await (deps.researchScope ? scopeWithCompanies(deps, context, text) : Promise.resolve(null)).catch((reason) => {
+      console.warn("[chat] research scope unavailable; saving the financial answer without it", reason);
+      return null;
+    }) ?? null;
     // A retry of this turn resumes what the first attempt reserved; it never plans again.
     const outcome = await publishRequest(deps.pool, {
       authority,
@@ -107,7 +117,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       // pool acquire here could wait forever on a one-connection pool.
       plan: (db) => planTurn(deps, db, context, text, authority, new Date()),
       evidence: deps.evidence,
-      persistParent: persistAssistantMessage(context.threadId, messageId),
+      persistParent: persistAssistantMessage(context.threadId, messageId, scope),
     });
     switch (outcome.status) {
       case "planned":
@@ -134,6 +144,26 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
   return Object.freeze({ mode: deps.mode, answers, run, assertReady });
 }
 
+// The mentions a turn's plan requests: an explicit subject (a thread opened
+// from a ticker page) first; like the analyst path, the message's companies
+// join it only in a comparison ("Compare revenue with AMD" from the NVDA page
+// plans both, "Revenue for AMD" plans NVDA).
+function requestedMentions(context: ChatFinancialTurnContext, text: string): string[] {
+  const explicit = context.subjectText?.trim();
+  return explicit
+    ? [explicit, ...(COMPARATIVE.test(text) ? extractSubjectMentions(text) : [])]
+    : extractSubjectMentions(text);
+}
+
+// The turn's research scope over the companies its plan requests, resolved.
+// ponytail: a company picked in a clarification answer is not in it; the scope
+// then names the companies the message itself resolved.
+async function scopeWithCompanies(deps: ChatFinancialRuntimeDeps, context: ChatFinancialTurnContext, text: string): Promise<ResearchScope> {
+  const resolutions = await Promise.all(requestedMentions(context, text).map((mention) => deps.resolveMention(mention)));
+  const resolved = resolutions.filter((resolution): resolution is ChatResolvedSubjectPreResolution => resolution.status === "resolved");
+  return deps.researchScope!({ ...context, subjectPreResolution: resolved[0], subjectPreResolutions: resolved });
+}
+
 async function planTurn(
   deps: ChatFinancialRuntimeDeps,
   db: SqlExecutor,
@@ -142,14 +172,7 @@ async function planTurn(
   authority: FinancialRuntimeAuthority,
   cutoff: Date,
 ): Promise<PlanningResult> {
-  // An explicit subject (a thread opened from a ticker page) is requested first;
-  // like the analyst path, the message's companies join it only in a comparison
-  // ("Compare revenue with AMD" from the NVDA page plans both, "Revenue for AMD"
-  // plans NVDA).
-  const explicit = context.subjectText?.trim();
-  const mentions = explicit
-    ? [explicit, ...(COMPARATIVE.test(text) ? extractSubjectMentions(text) : [])]
-    : extractSubjectMentions(text);
+  const mentions = requestedMentions(context, text);
   const resolutions = await Promise.all(mentions.map(async (mention) => ({ mention, resolution: await deps.resolveMention(mention) })));
   // One entry per company: "NVIDIA" (the page) and "NVDA" (the message) are one.
   const seen = new Set<string>();
@@ -287,15 +310,23 @@ export function financialMessageId(threadId: string, turnId: string): string {
 }
 
 /** Writes the assistant message inside the finalization transaction, under the thread's owner. */
-function persistAssistantMessage(threadId: string, messageId: string): PersistParentArtifact {
+function persistAssistantMessage(threadId: string, messageId: string, scope: ResearchScope | null): PersistParentArtifact {
   return async (tx, publication) => {
     const blocks = [publication.block];
     const inserted = await tx.client.query(
-      `insert into chat_messages (message_id, thread_id, role, snapshot_id, blocks, content_hash)
-       select $1::uuid, t.thread_id, 'assistant'::chat_role, $3::uuid, $4::jsonb, $5
+      `insert into chat_messages (message_id, thread_id, role, snapshot_id, blocks, content_hash, research_scope)
+       select $1::uuid, t.thread_id, 'assistant'::chat_role, $3::uuid, $4::jsonb, $5, $7::jsonb
          from chat_threads t where t.thread_id = $2::uuid and t.user_id = $6::uuid
        returning message_id`,
-      [messageId, threadId, publication.snapshot_id, JSON.stringify(blocks), contentHashForText(JSON.stringify(blocks)), tx.run.user_id],
+      [
+        messageId,
+        threadId,
+        publication.snapshot_id,
+        JSON.stringify(blocks),
+        contentHashForText(JSON.stringify(blocks)),
+        tx.run.user_id,
+        scope === null ? null : JSON.stringify(scope),
+      ],
     );
     if (inserted.rows.length === 0) throw new Error("the chat thread no longer belongs to the run's owner");
   };

@@ -13,9 +13,12 @@ import {
   priceListingsForComparison,
   requestedFiscalYear,
   requestedPriceWindow,
+  mayOfferOtherFacts,
+  scopeGapBlocks,
   segmentRevenueItems,
   type DerivedQuarterFact,
 } from "../src/fact-blocks.ts";
+import { resolveResearchScope } from "../src/research-scope.ts";
 import { deriveQuarterMetrics } from "../src/quarter-metrics.ts";
 import { fakeQuery } from "./fake-query.ts";
 
@@ -429,4 +432,46 @@ test("the model sees a price chart's return per company over its window (#181)",
     ["AMD", "Price return", "-4.25%", "YTD 2026: 2025-12-31 close to 2026-08-31 close"],
     ["AAPL", "Price return", "-0.04%", "YTD 2026: 2025-12-31 close to 2026-08-31 close"],
   ]);
+});
+
+test("what a turn asked for and cannot show is a note each, naming its companies (#206)", () => {
+  const AMD = { issuer_id: "60000000-0000-4000-8000-000000000002", label: "AMD" };
+  const scope = (question: string) => resolveResearchScope({ question, companies: [AMD], prior: null, asOf: "2026-09-01T00:00:00.000Z" });
+  const input = { snapshotId: "11111111-1111-4111-8111-111111111111", asOf: "2026-09-01T00:00:00.000Z" };
+  const text = (blocks: ReadonlyArray<Record<string, unknown>>) =>
+    blocks.map((block) => (block.segments as Array<{ text: string }>)[0]!.text);
+  assert.deepEqual(text(scopeGapBlocks(scope("What is AMD's free cash flow and EPS?"), [], input)), [
+    "Free cash flow is not available for AMD in this data, so no other figure is shown in its place.",
+    "Earnings per share is not available for AMD in this data, so no other figure is shown in its place.",
+  ]);
+  assert.deepEqual(text(scopeGapBlocks(scope("Break down AMD's revenue by segment"), [], input)), [
+    "Revenue by segment is not available for AMD in this data.",
+  ]);
+  // A segment breakdown that was shown, or a question with no gap, adds nothing.
+  assert.deepEqual(scopeGapBlocks(scope("Break down AMD's revenue by segment"), [{ kind: "metric_row", title: "Revenue by segment (Q2 2026)" }], input), []);
+  // Other blocks shown beside it (a margin trend) do not count as the breakdown.
+  assert.equal(scopeGapBlocks(scope("Break down AMD's revenue by segment"), [{ kind: "metric_row", title: "Operating margin by quarter" }], input).length, 1);
+  assert.deepEqual(scopeGapBlocks(scope("Analyze AMD"), [], input), []);
+  // Segments asked for in a comparison are named as not shown there.
+  const NVDA = { issuer_id: "60000000-0000-4000-8000-000000000001", label: "NVDA" };
+  const compared = resolveResearchScope({ question: "Compare NVDA and AMD revenue by segment", companies: [NVDA, AMD], prior: null, asOf: input.asOf });
+  assert.deepEqual(text(scopeGapBlocks(compared, [{ kind: "metrics_comparison" }], input)), [
+    "Revenue by segment is not shown when comparing companies; ask about one company for its breakdown.",
+  ]);
+  // A segment facet only inherited by a comparison is not named again.
+  const inherited = resolveResearchScope({ question: "Compare it with AMD", companies: [NVDA, AMD], prior: scope("Break down AMD's revenue by segment"), asOf: input.asOf });
+  assert.deepEqual(scopeGapBlocks(inherited, [{ kind: "metrics_comparison" }], input), []);
+  // Re-reading a financial-engine answer points to that answer's sources.
+  const financial = resolveResearchScope({ question: "What was AMD's EPS?", companies: [AMD], prior: null, asOf: input.asOf, served: true });
+  const evidence = resolveResearchScope({ question: "Show the evidence", companies: [AMD], prior: financial, asOf: input.asOf });
+  assert.match(text(scopeGapBlocks(evidence, [], input)).join(" "), /calculated and verified by the financial engine/);
+});
+
+test("other facts are offered only when nothing the turn asked for is a named gap (#206)", () => {
+  const AMD = { issuer_id: "60000000-0000-4000-8000-000000000002", label: "AMD" };
+  const scope = (question: string) => resolveResearchScope({ question, companies: [AMD], prior: null, asOf: "2026-09-01T00:00:00.000Z" });
+  assert.equal(mayOfferOtherFacts(scope("Analyze AMD"), []), true);
+  assert.equal(mayOfferOtherFacts(scope("What is AMD's free cash flow?"), []), false);
+  assert.equal(mayOfferOtherFacts(scope("Break down AMD's revenue by segment"), []), false);
+  assert.equal(mayOfferOtherFacts(scope("Break down AMD's revenue by segment"), [{ kind: "metric_row", title: "Revenue by segment (Q2 2026)" }]), true);
 });

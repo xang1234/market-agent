@@ -99,6 +99,9 @@ export async function composeAnalystBlocksWithLlm(input: {
   subjectLabels?: ReadonlyArray<string>;
   // Recent thread messages, oldest first, so the answer reads as a reply.
   conversation?: ReadonlyArray<{ role: string; text: string }>;
+  // False when the turn asks only for metrics no reader serves (#206): the
+  // model then sees the named gap, not other facts it could offer in its place.
+  availableData?: boolean;
   createClient?: () => Promise<LlmChatClient> | LlmChatClient;
   // Receives the sentences the narrative guard dropped, so evals can count them (#144).
   onNarrativeRemoved?: (sentences: ReadonlyArray<string>) => void;
@@ -273,6 +276,7 @@ export function answerContext(input: {
   toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>;
   factBlocks?: ReadonlyArray<Record<string, unknown>>;
   conversation?: ReadonlyArray<{ role: string; text: string }>;
+  availableData?: boolean;
 }): Record<string, unknown> {
   const results = input.toolCalls.map((toolCall) => (isRecord(toolCall.result) ? toolCall.result : {}));
   const structured = results.map((result) => (isRecord(result.structured_context) ? result.structured_context : {}));
@@ -293,7 +297,7 @@ export function answerContext(input: {
   ];
   const claims = citedClaims(input.toolCalls);
   const displayed = displayedFigures(input.factBlocks ?? []);
-  const available = displayed.length === 0 ? availableData(structured) : null;
+  const available = displayed.length === 0 && input.availableData !== false ? availableData(structured) : null;
   return {
     question: input.context.userIntent ?? "Start a research thread",
     conversation: input.conversation ?? [],

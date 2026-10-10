@@ -619,13 +619,14 @@ test("with no figures shown, the model still gets the evidence, compactly, as av
       },
     },
   } as never;
-  const run = async (factBlocks?: ReadonlyArray<Record<string, unknown>>) => {
+  const run = async (factBlocks?: ReadonlyArray<Record<string, unknown>>, availableData?: boolean) => {
     await composeAnalystBlocksWithLlm({
       env: BASE_ENV,
       context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
       blocks: [NARRATIVE_BLOCK],
       toolCalls: [toolCall],
       factBlocks,
+      ...(availableData === undefined ? {} : { availableData }),
       createClient: () => async (_deployment, request) => {
         prompt = request.messages.at(-1)!.content;
         return { text: "AAPL trades at $231.6." };
@@ -644,6 +645,12 @@ test("with no figures shown, the model still gets the evidence, compactly, as av
   assert.ok(!prompt.includes("fact_id") && !prompt.includes('"source_id"'), "still compact: no ids");
   // With figures shown, only those may be quoted: no available_data.
   assert.equal("available_data" in (await run(COMPARISON_BLOCKS)), false);
+  // A turn asking only for a metric no reader serves gets the named gap, not
+  // other facts it could offer in that metric's place (#206).
+  const gap = { kind: "rich_text", segments: [{ type: "text", text: "Free cash flow is not available for AAPL in this data, so no other figure is shown in its place." }] };
+  const withheld = await run([gap], false);
+  assert.equal("available_data" in withheld, false);
+  assert.deepEqual(withheld.data_notes, [gap.segments[0]!.text]);
 });
 
 test("blocks that show no figures (a gap note) leave the answer unguarded, like no blocks (#181)", async () => {

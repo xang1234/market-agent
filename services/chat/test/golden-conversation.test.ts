@@ -265,6 +265,8 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     );
     const [, compared, explained] = scopes.map((row) => row.research_scope);
     assert.deepEqual(explained?.price_window, compared?.price_window);
+    // Asking for the evidence of the previous answer is its own route (#206).
+    assert.equal((explained as { route?: string } | undefined)?.route, "evidence_followup");
     assert.deepEqual(explained?.inherited, ["price_window"]);
   });
 
@@ -359,6 +361,8 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.equal(items[0].format, "$55.2B");
     const cited = await citedFacts(answer);
     for (const ref of valueRefs(breakdown)) assert.ok(cited.has(ref), `segment value_ref ${ref} is not a cited fact`);
+    // A segment request reads segment facts only (#206).
+    assert.equal(answer.blocks.some((block) => block.kind === "revenue_bars"), false);
   });
 
   await t.test("a company with no segment facts gets no breakdown block", async () => {
@@ -366,6 +370,40 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     completedTurn(await runTurn(base, amdThread.thread_id, "Break down AMD's revenue by segment"));
     const answer = await latestAssistantMessage(base, amdThread.thread_id);
     assert.equal(answer.blocks.some((block) => /by segment/.test(String(block.title))), false);
+    // The breakdown is a named gap, with nothing else in its place (#206).
+    assert.match(JSON.stringify(answer.blocks), /Revenue by segment is not available for AMD in this data\./);
+    assert.equal(answer.blocks.some((block) => block.kind === "metric_row" || block.kind === "revenue_bars"), false);
+    // Asking for its evidence re-reads the same segment facts, keeping the gap.
+    completedTurn(await runTurn(base, amdThread.thread_id, "Show the evidence"));
+    const evidence = await latestAssistantMessage(base, amdThread.thread_id);
+    assert.match(JSON.stringify(evidence.blocks), /Revenue by segment is not available for AMD in this data\./);
+    assert.equal(evidence.blocks.some((block) => block.kind === "metric_row" || block.kind === "revenue_bars"), false);
+  });
+
+  await t.test("segments asked for with a margin trend read both (#206)", async () => {
+    const mixedThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Segments and margins" });
+    completedTurn(await runTurn(base, mixedThread.thread_id, "Break down NVDA's revenue by segment and show its operating margin trend"));
+    const answer = await latestAssistantMessage(base, mixedThread.thread_id);
+    assert.ok(answer.blocks.some((block) => /by segment/.test(String(block.title))), "expected the segment breakdown");
+    assert.ok(answer.blocks.some((block) => block.title === "Operating margin by quarter"), `expected the margin trend; got [${answer.blocks.map((b) => b.title).join(", ")}]`);
+    // ...and with a current margin, the latest quarter's margins.
+    completedTurn(await runTurn(base, mixedThread.thread_id, "Break down NVDA's revenue by segment and show its gross margin"));
+    const latest = await latestAssistantMessage(base, mixedThread.thread_id);
+    assert.ok(latest.blocks.some((block) => /by segment/.test(String(block.title))), "expected the segment breakdown");
+    assert.ok(latest.blocks.some((block) => /^Latest quarter/.test(String(block.title))), `expected the latest quarter's margins; got [${latest.blocks.map((b) => b.title).join(", ")}]`);
+  });
+
+  await t.test("'What is AMD's free cash flow?' is a named gap that reads no income-statement facts (#206)", async () => {
+    const fcfThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD FCF" });
+    completedTurn(await runTurn(base, fcfThread.thread_id, "What is AMD's free cash flow?"));
+    const answer = await latestAssistantMessage(base, fcfThread.thread_id);
+    assert.match(JSON.stringify(answer.blocks), /Free cash flow is not available for AMD in this data, so no other figure is shown in its place\./);
+    assert.equal(answer.blocks.some((block) => block.kind === "metric_row" || block.kind === "revenue_bars"), false);
+    const { rows } = await client.query<{ research_scope: { route: string } }>(
+      `select research_scope from chat_messages where thread_id = $1::uuid and role = 'assistant'`,
+      [fcfThread.thread_id],
+    );
+    assert.equal(rows[0]?.research_scope.route, "unavailable_metric");
   });
 
   await t.test("'Compare NVDA with AMD' without a period charts the shared price history, not YTD", async () => {
