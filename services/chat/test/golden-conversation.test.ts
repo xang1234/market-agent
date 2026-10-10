@@ -366,6 +366,20 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.deepEqual(next.rows[0]?.research_scope.companies.map((company) => company.issuer_id), [NVDA.issuer_id]);
   });
 
+  await t.test("dropping an auto-selected peer by name keeps it out (#206)", async () => {
+    const dropThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Drop a peer" });
+    completedTurn(await runTurn(base, dropThread.thread_id, "How does NVDA compare with its peers?"));
+    completedTurn(await runTurn(base, dropThread.thread_id, "Drop AMD"));
+    const { rows } = await client.query<{ research_scope: { route: string; peers: boolean; companies: Array<{ issuer_id: string }> } }>(
+      `select research_scope from chat_messages where thread_id = $1::uuid and role = 'assistant' order by created_at desc limit 1`,
+      [dropThread.thread_id],
+    );
+    // NVDA's only peer here is AMD: dropping it leaves NVDA alone, peers off.
+    assert.deepEqual(rows[0]?.research_scope.companies.map((company) => company.issuer_id), [NVDA.issuer_id]);
+    assert.equal(rows[0]?.research_scope.peers, false);
+    assert.notEqual(rows[0]?.research_scope.route, "comparison");
+  });
+
   await t.test("'Break down NVDA's revenue by segment' shows each segment from cited facts (#157)", async () => {
     const segmentsThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Segments" });
     completedTurn(await runTurn(base, segmentsThread.thread_id, "Break down NVDA's revenue by segment"));

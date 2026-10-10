@@ -259,14 +259,20 @@ async function turnScope(
   // Peers turned off: the previous answer's auto-selected peers (saved with no
   // label) go with them, though the follow-up carried them forward.
   const autoPeers = new Set(prior?.peers ? prior.companies.flatMap((company) => company.label === undefined ? [company.issuer_id] : []) : []);
-  const peersOff = autoPeers.size > 0 &&
-    !resolveResearchScope({ question, companies: carried, prior, asOf: new Date().toISOString(), served }).peers;
+  // An auto-selected peer the follow-up no longer carries was dropped by name
+  // ("drop AMD"): it is not selected again. With none left, peers are off.
+  const carriedIds = new Set(carried.map((company) => company.issuer_id));
+  const dropped = new Set([...autoPeers].filter((id) => !carriedIds.has(id)));
+  const allDropped = autoPeers.size > 0 && dropped.size === autoPeers.size;
+  const peersOff = autoPeers.size > 0 && (allDropped ||
+    !resolveResearchScope({ question, companies: carried, prior, asOf: new Date().toISOString(), served }).peers);
   const named = peersOff ? carried.filter((company) => !autoPeers.has(company.issuer_id)) : carried;
-  const resolve = (cutoff: string) => resolveResearchScope({ question, companies: named, prior, asOf: cutoff, served });
+  const resolve = (cutoff: string) => resolveResearchScope({ question, companies: named, prior, asOf: cutoff, served, peersOff: allDropped });
   const base = resolve(new Date().toISOString());
   // An evidence follow-up keeps the previous answer's companies as they were; a
   // financial answer covers exactly the companies its plan requested.
-  const compared = base.route === "evidence_followup" || served ? base.companies : await comparedCompanies(named, base.peers);
+  const compared = (base.route === "evidence_followup" || served ? base.companies : await comparedCompanies(named, base.peers))
+    .filter((company) => !dropped.has(company.issuer_id));
   // An auto-selected peer stays one (no label) while peers stay on, however
   // many turns later they are turned off, unless the question names it.
   const words = new Set(question.split(/[^A-Za-z0-9.]+/));

@@ -347,3 +347,26 @@ test("dropping a company the comparison does not have, or every company, is aske
   assert.match(await ask("drop AAPL"), /AAPL is not in the NVDA and AMD comparison/);
   assert.match(await ask("Drop NVDA and AMD"), /Dropping NVDA and AMD leaves no company/);
 });
+
+test("dropping a company that cannot be found, or is ambiguous, is asked about", async () => {
+  const run = async (userIntent: string) => {
+    let ran = false;
+    const turn = createChatCoordinator({
+      preResolveSubject,
+      loadPriorSubjects: priorOf("NVDA", "AMD"),
+      runner: () => {
+        ran = true;
+      },
+    }).getOrCreateTurn({ threadId: "thread-1", runId: "run-1", userIntent });
+    await turn.completed;
+    return { ran, events: JSON.stringify(turn.events) };
+  };
+  const unknown = await run("drop XYZQ");
+  assert.equal(unknown.ran, false);
+  assert.match(unknown.events, /XYZQ was not found, so nothing was dropped from the NVDA and AMD comparison/);
+  const ambiguous = await run("drop GOOGL");
+  assert.equal(ambiguous.ran, false);
+  assert.match(ambiguous.events, /Which Alphabet share class do you mean\?/);
+  // A metric or facet in capitals is not a company to drop.
+  assert.equal((await run("Drop the FCF")).ran, true);
+});

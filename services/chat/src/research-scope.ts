@@ -75,14 +75,25 @@ const FISCAL = /\b(?:FY\s?'?\d{2,4}|fiscal(?:\s+year)?(?:\s+\d{2,4})?|\d{4}\s+fi
 // Where a list of things to remove ends: at the end of the sentence, or where
 // the next request starts ("drop AMD and AAPL, and add TSLA"). Commas and "and"
 // inside the list ("segments, margins and the window") are part of it.
-// A word in capitals is a ticker in the list ("drop AMD and NOW"), not a request.
-export const LIST_END = String.raw`(?=\s*[.;:?!]|,?\s+(?:(?:and|but|then)\s+)?(?-i:(?![A-Z]{2,}\b))(?:add|adding|bring|include|show|compare|keep|switch|also|now|instead)\b|$)`;
+// A word in capitals is a ticker in the list ("drop AMD and NOW"), not a
+// request, so these patterns match words in lower case or capitalised only
+// (words()), never in capitals, and take no "i" flag.
+// ponytail: spelled out per word because Node 22 has no inline (?-i:) modifier.
+export function words(list: ReadonlyArray<string>): string {
+  return list.map((word) => `[${word[0]}${word[0]!.toUpperCase()}]${word.slice(1)}`).join("|");
+}
+const CONJUNCTION = words(["and", "but", "then"]);
+export const LIST_END = String.raw`(?=\s*[.;:?!]|,?\s+(?:(?:${CONJUNCTION})\s+)?(?:${words(["add", "adding", "bring", "include", "show", "compare", "keep", "switch", "also", "now", "instead"])})\b|$)`;
 // What a follow-up turns off: the words after "without", "drop" and the like,
 // or after "no" starting a clause ("No segments", "same, no margins"), never
 // "no" inside one ("why was there no change in margins?").
+const OFF_VERBS = words([
+  "without", "drop", "remove", "exclude", "skip", "forget", "ignore", "hide", "leave out", "take out",
+  "no longer (?:show|include)", "stop (?:showing|including)",
+]);
 const OFF = new RegExp(
-  String.raw`(?:(?<=^\s*|[,;:]\s*|\b(?:and|but|then)\s+)no|\b(?:without|drop|remove|exclude|skip|forget|ignore|hide|leave out|take out|no longer (?:show|include)|stop (?:showing|including)))\s+((?:the|any|its|their)\s+)?([^.;:?!]+?)` + LIST_END,
-  "gi",
+  String.raw`(?:(?<=^\s*|[,;:]\s*|\b(?:${CONJUNCTION})\s+)${words(["no"])}|\b(?:${OFF_VERBS}))\s+((?:${words(["the", "any", "its", "their"])})\s+)?([^.;:?!]+?)` + LIST_END,
+  "g",
 );
 const SEGMENTS = /\bsegments?\b/i;
 const MARGINS = /\b(margins?|profitab\w*)\b/i;
@@ -148,11 +159,14 @@ export function resolveResearchScope(input: {
   // The metrics were served by the financial engine, so none is a gap even if
   // no reader here serves it.
   served?: boolean;
+  // Every auto-selected peer was dropped by name: peers are off (local-runtime).
+  peersOff?: boolean;
 }): ResearchScope {
   const { prior } = input;
   // What the turn turns off, and the question without those phrases, so a facet
   // turned off is not also read as asked for.
   const off = turnedOff(input.question);
+  if (input.peersOff) off.fields.add("peers");
   const question = off.rest;
   const inherited: ScopeField[] = [];
   const pick = <T>(field: ScopeField, asked: T | null, kept: T | null | undefined): T | null => {
@@ -209,6 +223,13 @@ export function resolveResearchScope(input: {
     benchmark,
     inherited,
   };
+}
+
+// Whether words name a facet or metric this scope tracks ("the FCF", "the
+// segments"), so they are not a company to drop.
+export function namesFacet(text: string): boolean {
+  return [SEGMENTS, PEERS, BENCHMARK, MARGINS, WINDOW, FISCAL].some((pattern) => pattern.test(text)) ||
+    scanMetrics(text).metrics.length > 0;
 }
 
 // The fields and metrics a question turns off, and the question without the

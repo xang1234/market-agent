@@ -30,7 +30,7 @@ import {
 import type { ChatClarificationAnswer, ChatFinancialRuntime } from "./financial-runtime.ts";
 import { ChatSnapshotSealError } from "./messages.ts";
 import { financialAwareRunner } from "./financial-turn.ts";
-import { LIST_END, type ResearchScope } from "./research-scope.ts";
+import { LIST_END, namesFacet, words, type ResearchScope } from "./research-scope.ts";
 
 export type ChatTurnInput = {
   threadId: string;
@@ -846,7 +846,10 @@ type TurnSubjects = {
 // either, so it asks; "just AAPL" or a full new question switches to it.
 const ADD = /\b(?:add|adding|bring (?:back|in))\b/i;
 // The companies after a removal verb, a whole list of them (LIST_END).
-const REMOVE = new RegExp(String.raw`\b(?:drop|remove|exclude|without|leave out|take out|minus|except)\s+([^.;:?!]+?)` + LIST_END, "gi");
+const REMOVE = new RegExp(
+  String.raw`\b(?:${words(["drop", "remove", "exclude", "without", "leave out", "take out", "minus", "except"])})\s+([^.;:?!]+?)` + LIST_END,
+  "g",
+);
 const CONTINUATION = /^\s*(?:and\s+)?(?:what|how)\s+about\b|^\s*and\s+\S/i;
 const ONLY = /\b(?:just|only|instead|switch to|alone)\b/i;
 
@@ -858,7 +861,8 @@ async function resolveTurnSubjects(
   const text = nonEmptySubjectText(context.userIntent);
   const comparative = COMPARATIVE.test(text ?? "") || ADD.test(text ?? "");
   const named = text ? await resolveNamedSubjects(text, preResolve) : { resolved: [], unresolved: [] };
-  const change = text && named.resolved.length > 0 && loadPriorSubjects !== undefined
+  // A removal is handled even when what it names does not resolve ("drop XYZQ").
+  const change = text && loadPriorSubjects !== undefined && (named.resolved.length > 0 || new RegExp(REMOVE.source).test(text))
     ? await companyChange(context, text, named, preResolve, loadPriorSubjects)
     : null;
   if (change !== null) return change;
@@ -902,9 +906,23 @@ async function companyChange(
   );
   const priorKeys = new Set(prior.map(companyKey));
   if (removal !== "") {
-    const removedSubjects = distinctCompanies((await resolveNamedSubjects(removal, preResolve)).resolved);
+    const removing = await resolveNamedSubjects(removal, preResolve);
+    const removedSubjects = distinctCompanies(removing.resolved);
     const removed = new Set(removedSubjects.map(companyKey));
     const kept = prior.filter((subject) => !removed.has(companyKey(subject)));
+    // A company to drop that is ambiguous, or cannot be found, is asked about,
+    // unless the words name a facet or metric ("drop the FCF").
+    const unclear = namesFacet(removal) ? [] : removing.unresolved;
+    const ambiguousTarget = unclear.find((resolution) => resolution.status === "needs_clarification");
+    if (ambiguousTarget) return { subjects: [], ambiguous: ambiguousTarget, notFound: [] };
+    if (unclear.length > 0 && prior.length > 0) {
+      const missing = labelList(unclear.map((resolution) => resolution.input_text));
+      return {
+        subjects: [],
+        notFound: [],
+        clarify: `${missing} ${unclear.length > 1 ? "were" : "was"} not found, so nothing was dropped from the ${labelList(prior.map(tickerLabel))} comparison.`,
+      };
+    }
     if (removed.size === 0) return null;
     // Only companies the previous answer covered can be dropped, and not all of
     // them: otherwise ask, rather than answer about the company named.
