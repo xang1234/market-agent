@@ -386,6 +386,11 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const answer = await latestAssistantMessage(base, mixedThread.thread_id);
     assert.ok(answer.blocks.some((block) => /by segment/.test(String(block.title))), "expected the segment breakdown");
     assert.ok(answer.blocks.some((block) => block.title === "Operating margin by quarter"), `expected the margin trend; got [${answer.blocks.map((b) => b.title).join(", ")}]`);
+    // ...and with a current margin, the latest quarter's margins.
+    completedTurn(await runTurn(base, mixedThread.thread_id, "Break down NVDA's revenue by segment and show its gross margin"));
+    const latest = await latestAssistantMessage(base, mixedThread.thread_id);
+    assert.ok(latest.blocks.some((block) => /by segment/.test(String(block.title))), "expected the segment breakdown");
+    assert.ok(latest.blocks.some((block) => /^Latest quarter/.test(String(block.title))), `expected the latest quarter's margins; got [${latest.blocks.map((b) => b.title).join(", ")}]`);
   });
 
   await t.test("'What is AMD's free cash flow?' is a named gap that reads no income-statement facts (#206)", async () => {

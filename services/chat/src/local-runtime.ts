@@ -176,8 +176,9 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
       wantsPeers: false,
       wantsSegments: scope.segments,
       wantsMarginTrend: scope.margin_trend,
-      // A request for segments alone; one also asking for a margin trend reads both.
-      segmentsOnly: scope.reads === "segments" && !scope.margin_trend,
+      // A request for segments alone; one also asking for a margin (its latest
+      // value or its trend) reads both.
+      segmentsOnly: scope.reads === "segments" && !scope.margins,
       requestedListings,
       fiscalYear: scope.fiscal_year ?? undefined,
       priceWindow: scope.price_window?.kind,

@@ -40,6 +40,7 @@ test("a fresh question records what it asks for and inherits nothing", () => {
     peers: false,
     segments: false,
     margin_trend: false,
+    margins: false,
     metrics: [{ metric_key: "income_statement", label: "Revenue, profit and margins", available: true }],
     fiscal_year: 2025,
     price_window: { kind: "ytd", cutoff: AS_OF },
@@ -202,4 +203,21 @@ test("an unavailable metric's margin is part of that metric, not a margin questi
   assert.equal(fresh("What is AMD's free cash flow margin?", [AMD]).route, "unavailable_metric");
   assert.equal(fresh("What is AMD's free cash flow margin trend?", [AMD]).margin_trend, false);
   assert.equal(fresh("What is AMD's free cash flow and gross margin?", [AMD]).route, "derived_margin");
+});
+
+test("a cash-flow category is that category; unqualified cash flow is operating", () => {
+  const keys = (question: string) => requestedMetrics(question).map((metric) => metric.metric_key);
+  assert.deepEqual(keys("What was AMD's financing cash flow?"), ["financing_cash_flow"]);
+  assert.deepEqual(keys("And its investing cash flow?"), ["investing_cash_flow"]);
+  assert.deepEqual(keys("What is AMD's cash flow?"), ["operating_cash_flow"]);
+});
+
+test("segments asked with any margin record the margin, so both are read", () => {
+  const scope = fresh("Break down AMD's revenue by segment and show its gross margin", [AMD]);
+  assert.equal(scope.reads, "segments");
+  assert.equal(scope.margins, true);
+  const prior = fresh("Break down AMD's revenue by segment", [AMD]);
+  assert.equal(prior.margins, false);
+  // An inherited segment facet with a margin asked now.
+  assert.equal(resolveResearchScope({ question: "What is its gross margin?", companies: [AMD], prior, asOf: AS_OF }).margins, true);
 });

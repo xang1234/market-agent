@@ -69,6 +69,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
         peers: false,
         segments: false,
         margin_trend: false,
+        margins: false,
         metrics: [],
         fiscal_year: 2024,
         price_window: null,

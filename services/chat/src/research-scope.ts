@@ -52,6 +52,8 @@ export type ResearchScope = {
   peers: boolean;
   segments: boolean;
   margin_trend: boolean;
+  // Any margin asked for this turn, its latest value or its trend.
+  margins: boolean;
   // The metrics the question names (none: the route's usual figures).
   metrics: ReadonlyArray<RequestedMetric>;
   fiscal_year: number | null;
@@ -82,6 +84,9 @@ const EVIDENCE =
 // "earnings per share" is not also "earnings".
 const METRICS: ReadonlyArray<RequestedMetric & { pattern: RegExp }> = [
   { metric_key: "free_cash_flow", label: "Free cash flow", available: false, pattern: /\bfree[- ]cash[- ]flows?\b|\bFCF\b/gi },
+  { metric_key: "financing_cash_flow", label: "Financing cash flow", available: false, pattern: /\bfinancing cash[- ]flows?\b/gi },
+  { metric_key: "investing_cash_flow", label: "Investing cash flow", available: false, pattern: /\binvesting cash[- ]flows?\b/gi },
+  // Unqualified "cash flow" means operating cash flow.
   { metric_key: "operating_cash_flow", label: "Operating cash flow", available: false, pattern: /\b(?:operating )?cash[- ]flows?\b/gi },
   { metric_key: "capex", label: "Capital expenditures", available: false, pattern: /\bcapex\b|\bcapital expenditures?\b/gi },
   { metric_key: "eps_diluted", label: "Earnings per share", available: false, pattern: /\bEPS\b|\bearnings per share\b/gi },
@@ -167,6 +172,7 @@ export function resolveResearchScope(input: {
     peers,
     segments,
     margin_trend,
+    margins: marginAsked || margin_trend,
     metrics,
     fiscal_year,
     price_window,
@@ -225,6 +231,7 @@ export function parseResearchScope(value: unknown): ResearchScope | null {
     peers: scope.peers,
     segments: scope.segments,
     margin_trend: scope.margin_trend,
+    margins: scope.margins === true || scope.margin_trend,
     // Absent on scopes saved before metrics were recorded.
     metrics: (scope.metrics ?? []) as ResearchScope["metrics"],
     fiscal_year: scope.fiscal_year as number | null,
