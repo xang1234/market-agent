@@ -30,6 +30,12 @@ export async function loadPriorSubjects(
        join snapshots s on s.snapshot_id = m.snapshot_id
       where m.thread_id = $1::uuid
         and m.role = 'assistant'
+        -- An answer about no company (a financial gap or clarification) leaves
+        -- the earlier companies in place, as it leaves the scope (loadPriorScope).
+        and exists (
+          select 1 from jsonb_array_elements(s.subject_refs) ref
+           where ref->>'kind' in ('issuer', 'instrument', 'listing')
+        )
       order by m.created_at desc
       limit 1`,
     [input.threadId],

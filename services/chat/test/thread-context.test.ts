@@ -39,6 +39,8 @@ test("prior subjects are the previous answer's companies, re-hydrated, in order"
   assert.equal(subjects[0].status, "resolved");
   assert.deepEqual(subjects[0].subject_ref, NVDA);
   assert.match(queries[0], /role = 'assistant'/);
+  // Answers about no company are skipped, not read as having none.
+  assert.match(queries[0], /ref->>'kind' in \('issuer', 'instrument', 'listing'\)/);
 });
 
 test("a thread with no previous answer has no prior subjects", async () => {

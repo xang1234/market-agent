@@ -304,16 +304,21 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const again = await latestScope();
     assert.deepEqual(again?.price_window, established?.price_window);
     assert.deepEqual(again?.inherited, ["price_window"]);
-    // An answer that saves no scope (an enforced financial answer) does not erase it.
-    await client.query(
-      `insert into chat_messages (thread_id, role, snapshot_id, blocks, content_hash)
-       select thread_id, role, snapshot_id, blocks, content_hash
-         from chat_messages
-        where thread_id = $1::uuid and role = 'assistant'
-        order by created_at desc limit 1`,
+    // An answer with no scope and no company (an enforced financial gap) erases
+    // neither: the next follow-up still carries both companies and the window.
+    const gap = await client.query<{ snapshot_id: string }>(
+      `insert into snapshots (subject_refs, as_of, basis, normalization, allowed_transforms)
+       values (jsonb_build_array(jsonb_build_object('kind', 'screen', 'id', $1::text)), now(), 'unadjusted', 'raw', '{}')
+       returning snapshot_id::text as snapshot_id`,
       [thread.thread_id],
     );
-    completedTurn(await runTurn(base, thread.thread_id, "Explain the differences"));
+    await client.query(
+      `insert into chat_messages (thread_id, role, snapshot_id, blocks, content_hash)
+       values ($1::uuid, 'assistant', $2::uuid, '[]'::jsonb, 'gap')`,
+      [thread.thread_id, gap.rows[0]!.snapshot_id],
+    );
+    const explained = await runTurn(base, thread.thread_id, "Explain the differences");
+    assert.deepEqual(completedTurn(explained).data.subject_refs, BOTH_LISTINGS);
     assert.deepEqual((await latestScope())?.price_window, established?.price_window);
     completedTurn(await runTurn(base, thread.thread_id, "Analyze AAPL"));
     const other = await latestScope();
