@@ -89,8 +89,8 @@
       "figures_match_sources": 2,
       "conclusions_justified": 2,
       "counterarguments": 1,
-      "no_invented_numbers": 2,
-      "notes": "Turn 3 drops the YTD window asked for in turn 2 and uses Dec 1-Aug 31 (labelled correctly). The counterpoint restates AMD positives and says AMD is 'returning capital' (it's a price return)."
+      "no_invented_numbers": 0,
+      "notes": "Turn 3 drops the YTD window asked for in turn 2 and uses Dec 1-Aug 31 (labelled correctly). Turn 2 calls the 5.81% / 3.17% price returns 'total return', but the chart excludes dividends; turn 3 says AMD is 'returning capital' from a 3.58% price return. Both pass a figure off as a different metric, which scores 0 on no_invented_numbers."
     },
     "ticker-page-compare": {
       "correct_companies": 2,
