@@ -210,7 +210,14 @@ export function checkAssertions(
       }
       continue;
     }
-    // A support that failed its own check is dropped; the inference stands on the rest.
+    // An inference stands on every support it lists: its words may be about
+    // what a failed one said ("the recovery" beside a rejected trend, #310).
+    const failed = ((item.supports ?? []) as number[]).find((n) => n < 0 || n >= list.length || rejected.some((entry) => entry.index === n));
+    if (failed !== undefined) {
+      reject(index, item, `an inference rests on every support it lists; ${failed} is not accepted`);
+      continue;
+    }
+    // A management attribution may be listed beside them, unbound.
     const supports = ((item.supports ?? []) as number[]).filter((n) =>
       accepted.some((entry) => entry.index === n && (entry.kind === "observation" || entry.kind === "comparison"))
     );
@@ -351,7 +358,7 @@ function bindingError(kind: AssertionKind, text: string, cited: ReadonlyArray<st
 
 // The companies cited figures and claims are about; a figure with no company
 // is the only company's.
-export function companiesOf(cited: ReadonlyArray<string>, packet: EvidencePacket): Set<string | undefined> {
+function companiesOf(cited: ReadonlyArray<string>, packet: EvidencePacket): Set<string | undefined> {
   return new Set([
     ...packet.figures.filter((figure) => cited.includes(figure.id)).map((figure) => figure.company ?? packet.companies[0]),
     ...packet.claims.filter((claim) => cited.includes(claim.id)).map((claim) => claim.company),

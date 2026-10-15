@@ -371,18 +371,23 @@ test("a year inside a figure's window is a period of its evidence (#208)", () =>
   assert.deepEqual(checkAssertions([{ kind: "observation", text: "NVDA's YTD price return (Dec 2025 close to Aug 2026 close) was [[F1]].", evidence: ["F1"] }], packet).rejected, []);
 });
 
-test("a support that failed its check is dropped; an inference with none left is rejected (#301)", () => {
+test("an inference stands on every support it lists: one that failed or does not exist rejects it (#310)", () => {
   const report = check([
     { kind: "observation", text: "NVDA's gross margin was [[F1]] in FY2026.", evidence: ["F1"] },
     { kind: "observation", text: "NVDA's gross margin was 99% in FY2026.", evidence: ["F1"] },
     { kind: "analyst_inference", text: "The margin shows pricing power.", supports: [0, 1] },
     { kind: "analyst_inference", text: "The margin shows pricing power.", supports: [1, 9] },
   ]);
-  assert.deepEqual(report.accepted.map((entry) => [entry.index, entry.supports ?? null]), [[0, null], [2, [0]]]);
+  assert.deepEqual(report.accepted.map((entry) => [entry.index, entry.supports ?? null]), [[0, null]]);
   assert.deepEqual(report.rejected.map((entry) => [entry.index, entry.reason]), [
     [1, "types 99%; write its reference"],
-    [3, "an inference binds the accepted observations it rests on"],
+    [2, "an inference rests on every support it lists; 1 is not accepted"],
+    [3, "an inference rests on every support it lists; 1 is not accepted"],
   ]);
+  assert.deepEqual(check([
+    { kind: "observation", text: "NVDA's gross margin was [[F1]] in FY2026.", evidence: ["F1"] },
+    { kind: "analyst_inference", text: "The margin shows pricing power.", supports: [0, 9] },
+  ]).rejected.map((entry) => entry.reason), ["an inference rests on every support it lists; 9 is not accepted"]);
 });
 
 test("an evidence id listed twice is a duplicate reference (#221)", () => {
