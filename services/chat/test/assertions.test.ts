@@ -84,7 +84,7 @@ test("an inference rests on accepted observations and writes no figure, typed or
     [3, "an inference rests on its supports; it writes no figure"],
     [4, "an inference rests on its supports; it writes no figure"],
     [5, "an inference binds the accepted observations it rests on"],
-    [6, "an inference binds the accepted observations it rests on"],
+    [6, "an inference rests on every support it lists; 2 is not accepted"],
     [7, "an inference rests on its supports; it writes no figure"],
     [8, "an inference rests on its supports; it writes no figure"],
     [11, "an inference rests on its supports; it writes no figure"],
@@ -250,8 +250,8 @@ test("on the no-figures path, an inference must still rest on listed observation
     { kind: "analyst_inference", text: "ACME looks cheap.", evidence: [], supports: [1] },
   ], { ...PACKET, figures: [] });
   assert.deepEqual(report.rejected.map((entry) => [entry.index, entry.reason]), [
-    [2, "an inference binds the accepted observations it rests on"],
-    [3, "an inference binds the accepted observations it rests on"],
+    [2, "an inference rests on every support it lists; 99 is not accepted"],
+    [3, "an inference rests on every support it lists; 1 is not accepted"],
   ]);
   assert.equal(report.unchecked, 2);
 });
@@ -388,6 +388,30 @@ test("an inference stands on every support it lists: one that failed or does not
     { kind: "observation", text: "NVDA's gross margin was [[F1]] in FY2026.", evidence: ["F1"] },
     { kind: "analyst_inference", text: "The margin shows pricing power.", supports: [0, 9] },
   ]).rejected.map((entry) => entry.reason), ["an inference rests on every support it lists; 9 is not accepted"]);
+  // Another inference, or itself, is no checked support; nor is one past the cap (#310 review).
+  assert.deepEqual(check([
+    { kind: "observation", text: "NVDA's gross margin was [[F1]] in FY2026.", evidence: ["F1"] },
+    { kind: "analyst_inference", text: "The margin shows pricing power.", supports: [0, 2] },
+    { kind: "analyst_inference", text: "Pricing power lasts.", supports: [0, 2] },
+  ]).rejected.map((entry) => [entry.index, entry.reason]), [
+    [1, "an inference rests on every support it lists; 2 is not accepted"],
+    [2, "an inference rests on every support it lists; 2 is not accepted"],
+  ]);
+  const one = { kind: "observation", text: "NVDA's gross margin was [[F1]] in FY2026.", evidence: ["F1"] };
+  assert.deepEqual(check([{ kind: "analyst_inference", text: "The margin shows pricing power.", supports: [1, 12] }, ...Array.from({ length: 12 }, () => one)])
+    .rejected.map((entry) => [entry.index, entry.reason]), [
+    [0, "an inference rests on every support it lists; 12 is not accepted"],
+    [12, "more than 12 assertions"],
+  ]);
+  // With no figures shown, a failed support rejects it too.
+  assert.deepEqual(checkAssertions([
+    { kind: "observation", text: "Revenue grew.", evidence: [] },
+    { kind: "observation", text: "Margins held.", evidence: ["F99"] },
+    { kind: "analyst_inference", text: "Demand is broad.", supports: [0, 1] },
+  ], { ...PACKET, figures: [] }).rejected.map((entry) => [entry.index, entry.reason]), [
+    [1, 'unknown evidence id "F99"'],
+    [2, "an inference rests on every support it lists; 1 is not accepted"],
+  ]);
 });
 
 test("an evidence id listed twice is a duplicate reference (#221)", () => {
