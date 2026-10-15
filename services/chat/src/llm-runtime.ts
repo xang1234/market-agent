@@ -11,7 +11,7 @@ import type {
 } from "./coordinator.ts";
 import { displayedFigures, displayTextsForBlocks } from "./fact-blocks.ts";
 import { buildEvidencePacket, packetForModel, type ClaimEvidence, type ClaimRecord, type EvidencePacket } from "./evidence-packet.ts";
-import { checkAssertions, companiesOf, MAX_ASSERTIONS, splitAssertions, type AssertionKind, type AssertionReport } from "./assertions.ts";
+import { checkAssertions, MAX_ASSERTIONS, splitAssertions, type AssertionKind, type AssertionReport } from "./assertions.ts";
 import { calendarNote, gapText, plainText, renderAssertion } from "./render-assertions.ts";
 import { proseSegments, referenceTable, type ProseSegments } from "./prose-refs.ts";
 import type { ResearchScope } from "./research-scope.ts";
@@ -204,7 +204,7 @@ export async function composeAnalystBlocksWithLlm(input: {
           "After the answer, list what it asserts in a fenced block that opens with ```assertions on its own line:",
           `a JSON array of at most ${MAX_ASSERTIONS} objects {"kind", "text", "evidence"}. kind is "observation" (what figures`,
           "show; evidence lists their F ids only), \"comparison\" (a high or low, a ranking, or a trend of exactly one metric, so one",
-          "comparison per metric; a segment breakdown is one metric, revenue, across segments; evidence lists the F ids of every",
+          "comparison per metric; values that are about the same are an observation, not a comparison; a segment breakdown is one metric, revenue, across segments; evidence lists the F ids of every",
           "company, segment or period it covers; add \"op\": \"highest\", \"lowest\", \"order\" or \"trend\", and \"result\": the F id",
           "that is highest or lowest, the F ids highest first, or one of \"rose\", \"fell\", \"flat\", \"rose_throughout\",",
           "\"fell_throughout\", \"rebounded\" or \"pulled_back\"), \"management_attribution\" (what a claim says management stated;",
@@ -214,7 +214,7 @@ export async function composeAnalystBlocksWithLlm(input: {
           "names no company (the answer's own notes say whose data is missing);",
           "evidence is omitted, and no supports), or \"analyst_inference\" (what the observations and comparisons mean, in words; the figures are",
           "theirs, so it writes no digit, period label or reference (\"a year earlier\", not FY2025); evidence may be omitted; add \"supports\": the array indexes of the",
-          "observations and comparisons it rests on; add \"subject\": the company label the inference is about, one its evidence covers).",
+          "observations and comparisons it rests on, every one of which must pass its own check or the inference goes; add \"subject\": the company label the inference is about, one its evidence covers).",
           "When the answer covers more than one company, an analyst_inference's text names no company, not even in the counterpoint:",
           "who leads, trails, rose or fell is shown from the comparisons it rests on, so rest a ranking or direction on its comparison",
           "and say only what it means (\"the margin lead funds more research\", not \"NVDA leads AMD\"); the text refers to its",
@@ -294,27 +294,13 @@ export async function composeAnalystBlocksWithLlm(input: {
     }));
     // The guard reads each rendered assertion with its values as references,
     // so a template's own periods ("Q4 2026") pass and its values are the packet's.
-    // Inferences last: an inference's label states what its comparisons
-    // checked, so it is rebuilt from those still on the page before the guard
-    // reads it, and never names (or is dropped for) one the guard removed.
+    // An inference goes with any assertion it rests on, as in the check: its
+    // words, and its label, may be about what the removed one said.
     const guarded = new Set(rendered.filter((entry) => entry.kind !== "analyst_inference" && drops(entry.reference_text, entry.kind).length > 0).map((entry) => entry.index));
-    const surviving = report.accepted.filter((assertion) => !guarded.has(assertion.index));
-    for (const [i, entry] of rendered.entries()) {
-      if (entry.kind !== "analyst_inference") continue;
-      if (entry.supports.some((n) => guarded.has(n))) {
-        rendered[i] = { ...entry, ...renderAssertion(report.accepted.find((assertion) => assertion.index === entry.index)!, packet, factBlocks, surviving) };
-      }
-      if (drops(rendered[i]!.reference_text, entry.kind).length > 0) guarded.add(entry.index);
+    const orphaned = new Set(rendered.filter((entry) => entry.kind === "analyst_inference" && entry.supports.some((n) => guarded.has(n))).map((entry) => entry.index));
+    for (const entry of rendered) {
+      if (entry.kind === "analyst_inference" && !orphaned.has(entry.index) && drops(entry.reference_text, entry.kind).length > 0) guarded.add(entry.index);
     }
-    // An inference goes when the guard removed every assertion it rests on:
-    // none of its support is on the page. So does one whose subject only the
-    // removed ones covered, as its label would name a company nothing shown is about.
-    const uncovered = (assertion: (typeof report.accepted)[number]) => assertion.subject !== undefined &&
-      !companiesOf([...assertion.evidence, ...surviving.filter((entry) => assertion.supports?.includes(entry.index)).flatMap((entry) => entry.evidence)], packet).has(assertion.subject);
-    const orphaned = new Set(rendered.filter((entry) =>
-      entry.kind === "analyst_inference" && !guarded.has(entry.index) &&
-      (entry.supports.every((n) => guarded.has(n)) || uncovered(report.accepted.find((assertion) => assertion.index === entry.index)!))
-    ).map((entry) => entry.index));
     const kept = rendered.filter((entry) => !guarded.has(entry.index) && !orphaned.has(entry.index));
     renderRemovals = rendered.filter((entry) => !kept.includes(entry)).map((entry) => ({
       index: entry.index,

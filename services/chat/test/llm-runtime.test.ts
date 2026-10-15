@@ -1399,7 +1399,7 @@ test("across companies, an inference names none: its label states what its compa
   ]));
   assert.deepEqual((wrong.report.rejected as Array<{ index: number; reason: string }>).map((entry) => entry.reason), [
     "comparison: F2 (74.6%) is higher than F4 (49.2%)",
-    "an inference binds the accepted observations it rests on",
+    "an inference rests on every support it lists; 0 is not accepted",
   ]);
   assert.equal(wrong.report.rendered, undefined);
 });
@@ -1473,7 +1473,7 @@ test("a single company's checked trend and low render through the guard (#208)",
   ]);
 });
 
-test("an inference goes only when the guard removed every assertion it rests on (#301)", async () => {
+test("an inference goes when the guard removed any assertion it rests on (#310)", async () => {
   // A metric named as a magnitude ("halved"): the guard removes any sentence stating it.
   const blocks = [{ ...RENDER_BLOCKS[0]!, metrics: ["Revenue", "Margin, halved"] }];
   const reports: Array<Record<string, unknown>> = [];
@@ -1487,7 +1487,8 @@ test("an inference goes only when the guard removed every assertion it rests on 
       { kind: "observation", text: "NVDA's margin was [[F2]] and AMD's was [[F4]].", evidence: ["F2", "F4"] },
       { kind: "observation", text: "NVDA's revenue was [[F1]] and AMD's was [[F3]].", evidence: ["F1", "F3"] },
       { kind: "analyst_inference", text: "The margin shows pricing power.", evidence: [], supports: [0] },
-      { kind: "analyst_inference", text: "Scale leaves room to invest.", evidence: [], supports: [0, 1] },
+      { kind: "analyst_inference", text: "Scale leaves room to invest.", evidence: [], supports: [1] },
+      { kind: "analyst_inference", text: "Margin and scale both favor the leader.", evidence: [], supports: [0, 1] },
     ]) }),
     onAssertions: (report) => reports.push(report as unknown as Record<string, unknown>),
   });
@@ -1498,6 +1499,7 @@ test("an inference goes only when the guard removed every assertion it rests on 
   assert.deepEqual((reports[0]!.rejected as Array<{ index: number; reason: string }>).map((entry) => [entry.index, entry.reason]), [
     [0, "removed by the narrative guard"],
     [2, "rests on an observation the narrative guard removed"],
+    [4, "rests on an observation the narrative guard removed"],
   ]);
 });
 
@@ -1723,7 +1725,7 @@ test("on a named-gap turn a list marker left with no content goes too (#294 revi
   assert.equal((composed[0].segments as Array<{ text: string }>).map((segment) => segment.text).join(""), "No written answer is available for this question; try asking again.");
 });
 
-test("an inference resting on a comparison the guard removed keeps its other support, and its label names only that one (#306 review)", async () => {
+test("an inference resting on a comparison the guard removed goes with it, though its other support stays (#310)", async () => {
   const blocks = [{ ...RENDER_BLOCKS[0]!, metrics: ["Revenue halved", "Gross Margin"] }];
   const reports: Array<Record<string, unknown>> = [];
   const composed = await composeAnalystBlocksWithLlm({
@@ -1740,6 +1742,10 @@ test("an inference resting on a comparison the guard removed keeps its other sup
     onAssertions: (report) => reports.push(report as unknown as Record<string, unknown>),
   });
   const text = (composed[0].segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join("");
-  assert.match(text, /> \*\*Analyst inference\*\* \(NVDA highest on gross margin\): The leader keeps more of each sale\./);
-  assert.doesNotMatch(text, /halved/);
+  assert.equal(text, "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026, ended Jan 2026), AMD 49.2% (FY2025, ended Dec 2025)." +
+    "\n\nThe periods compared end at different times, so they do not line up: NVDA's FY2026 ended Jan 2026 and AMD's FY2025 ended Dec 2025.");
+  assert.deepEqual((reports[0]!.rejected as Array<{ index: number; reason: string }>).map((entry) => [entry.index, entry.reason]), [
+    [0, "removed by the narrative guard"],
+    [2, "rests on an observation the narrative guard removed"],
+  ]);
 });
