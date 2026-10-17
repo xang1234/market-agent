@@ -20,11 +20,8 @@ import {
   consecutive,
   HISTORY_T1,
   SEALED_TEXT,
-  TWO_THREADS,
-  T2_QUESTION,
   STILL_ANSWERING,
   UUID_PATTERN,
-  openThread,
   streamParams,
   threadRead,
   type Harness,
@@ -99,83 +96,6 @@ test("an own run listed in flight after another tab's answered run is attached, 
 
 // A's first connection stalls; the user leaves, comes back and sends B; A's
 // released stream then reaches the server, so A queues behind B.
-async function releasedBehindAnother(aDone: 'in_flight' | 'completed') {
-  const server = new FakeServer()
-  server.threads = TWO_THREADS
-  const runs: RunJson[] = []
-  const answers: ReturnType<typeof answerMessage>[] = []
-  server.history = (id) => (id === 'T2'
-    ? threadRead([T2_QUESTION])
-    : threadRead([...[...server.posted.values()].filter((m) => m.thread_id === id), ...answers], runs))
-  const h = await renderChat('/chat/T1', server)
-  await h.ask('First question')
-  const a = FakeEventSource.instances[0]
-  await openThread(h, 'T2')
-  await openThread(h, 'T1')
-  assert.equal(a.closed, false)
-  assert.equal(h.button('Send').disabled, false)
-
-  await h.ask('Second question')
-  const b = FakeEventSource.instances[1]
-  assert.equal(b.params.get('user_intent'), 'Second question')
-  runs.push({ ...runOf(b), status: 'in_flight' })
-  await act(async () => b.emit('turn.started', 1))
-  runs.push({ ...runOf(a), status: 'in_flight' })
-  await act(async () => a.open())
-  await h.flush()
-  assert.equal(a.closed, true)
-  assert.equal(FakeEventSource.instances.length, 2)
-
-  const bAnswer = answerMessage('T1', 'aB', 'Second answer')
-  answers.push(bAnswer)
-  runs[0] = { ...runOf(b), status: 'completed', message_id: 'aB' }
-  if (aDone === 'completed') {
-    answers.push(answerMessage('T1', 'aA', 'First answer'))
-    runs[1] = { ...runOf(a), status: 'completed', message_id: 'aA' }
-  }
-  await act(async () => b.emit('turn.completed', 2, { message_id: 'aB', message: bAnswer }))
-  await h.flush()
-  return { h, server, a, answers, runs }
-}
-
-test('a released run that reached the server behind the next question is attached by the load after that question completes', async () => {
-  const { h, server, a, answers, runs } = await releasedBehindAnother('in_flight')
-  try {
-    assert.equal(server.gets(HISTORY_T1), 3)
-    assert.equal(FakeEventSource.instances.length, 3)
-    const attached = FakeEventSource.instances[2]
-    assert.deepEqual(streamParams(attached), { ...runOf(a), user_id: USER_ID, attach: '1' })
-    assert.equal(h.button('Send').disabled, true)
-    assert.match(h.text(), STILL_ANSWERING)
-
-    const aAnswer = answerMessage('T1', 'aA', 'First answer')
-    answers.push(aAnswer)
-    runs[1] = { ...runOf(a), status: 'completed', message_id: 'aA' }
-    await act(async () => {
-      attached.emit('turn.started', 1)
-      attached.emit('turn.completed', 2, { message_id: 'aA', message: aAnswer })
-    })
-    await h.flush()
-    assert.deepEqual([occurrences(h.text(), 'First answer'), occurrences(h.text(), 'Second answer')], [1, 1])
-    assert.equal(h.button('Send').disabled, false)
-  } finally {
-    await h.cleanup()
-  }
-})
-
-test('a released run that completed behind the next question shows its saved answer once after that question completes', async () => {
-  const { h, server } = await releasedBehindAnother('completed')
-  try {
-    assert.equal(server.gets(HISTORY_T1), 3)
-    assert.equal(FakeEventSource.instances.length, 2)
-    assert.deepEqual([occurrences(h.text(), 'First answer'), occurrences(h.text(), 'Second answer')], [1, 1])
-    assert.equal(h.query('[data-testid="streaming-turn"]'), null)
-    assert.equal(h.button('Send').disabled, false)
-  } finally {
-    await h.cleanup()
-  }
-})
-
 test("Retry on a failed run starts the same question as a fresh run: a new run id, the same turn and question, no attach", async () => {
   const server = new FakeServer()
   const h = await renderChat('/chat/T1', server)

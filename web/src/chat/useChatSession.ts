@@ -64,8 +64,9 @@ const CONNECTING = 0
 // a new key releases the held stream and opens the wanted one. A stream that
 // hasn't reached the server may not have started its run, so a released one
 // without attach stays open until the server answers, and one that fails first
-// is opened again (up to MAX_REOPENS times) so its run starts. Either way the
-// session then hears released.reached, and its loads decide the rest.
+// is opened again (up to MAX_REOPENS times) so its run starts. One that reaches
+// the server tells the session released.reached, and its loads decide the rest;
+// one that never does is sent again when its thread is next loaded.
 function createRunStreams(store: SessionStore) {
   let held: { key: string; stream: RunStream } | null = null
   let unsubscribe: (() => void) | null = null
@@ -76,9 +77,6 @@ function createRunStreams(store: SessionStore) {
     const { threadId, run } = target
     const mode = target.attach ? { attach: true as const } : { userIntent: target.userIntent }
     const stream: RunStream = { source: null as unknown as EventSource, live, reached: false }
-    const reached = () => {
-      if (!disposed) store.dispatch({ type: 'released.reached', threadId, runId: run.runId })
-    }
     stream.source = openChatTurnStream({ threadId, runId: run.runId, turnId: run.turnId, userId, ...mode }, {
       onOpen: () => {
         stream.reached = true
@@ -87,7 +85,7 @@ function createRunStreams(store: SessionStore) {
           return
         }
         stream.source.close()
-        if (!target.attach) reached()
+        if (!target.attach && !disposed) store.dispatch({ type: 'released.reached', threadId, runId: run.runId })
       },
       onEvent: (event) => {
         stream.reached = true
@@ -98,9 +96,7 @@ function createRunStreams(store: SessionStore) {
           store.dispatch({ type: 'stream.dropped', threadId, runId: run.runId })
           return
         }
-        if (target.attach || stream.reached) return
-        if (starts < MAX_REOPENS) open(target, false, starts + 1)
-        else reached()
+        if (!target.attach && !stream.reached && starts < MAX_REOPENS) open(target, false, starts + 1)
       },
     })
     return stream

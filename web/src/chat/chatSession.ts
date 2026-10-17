@@ -34,8 +34,8 @@ export type StreamLink = Readonly<{
 }>
 
 // A run this session sent and left behind on switch-away, until a load of its
-// thread reconciles it. One whose stream hasn't reached the server yet stays
-// tracked while loads lack it, since its stream may still start it.
+// thread reconciles it. One whose stream hasn't reached the server yet is sent
+// again when that load lacks it.
 export type ReleasedRun = Readonly<{ threadId: string; run: RunRef; input: RunInput; reached: boolean }>
 
 // "handed_off" collapses into idle: once the sealed message is in history there
@@ -78,8 +78,8 @@ export type ChatSessionState = {
   // still reports it as active_run, and must not bring it back.
   endedRuns: ReadonlyArray<string>
   // Runs the last read listed in flight. The session follows one at a time,
-  // so when it ends the others still need a load to be seen.
-  inFlight: ReadonlyArray<string>
+  // and attaches to the next when it ends.
+  inFlight: ReadonlyArray<RunRef>
   // Across threads: survives thread.opened.
   released: ReadonlyArray<ReleasedRun>
   // Bumped by every thread.opened that changes the thread, but not by
@@ -95,7 +95,7 @@ export type ChatSessionAction =
   | { type: 'ask.failed'; error: string }
   // A send whose user had left its thread: its stream was opened only to start the run.
   | { type: 'run.released'; threadId: string; run: RunRef; input: RunInput }
-  // A released stream reached the server, or gave up trying.
+  // A released stream reached the server.
   | { type: 'released.reached'; threadId: string; runId: string }
   | { type: 'stream.opened'; threadId: string; runId: string }
   | { type: 'stream.event'; threadId: string; event: ChatSseEvent }
@@ -138,7 +138,7 @@ function openedSession(threadId: string | null, opens: number, released: Readonl
     turn: IDLE,
     sealedTurns: 0,
     endedRuns: [],
-  inFlight: [],
+    inFlight: [],
     released,
     opens,
   }
@@ -148,14 +148,14 @@ function releasedOnLeave(s: ChatSessionState): ReadonlyArray<ReleasedRun> {
   const { turn, threadId } = s
   if (threadId === null || turn.phase !== 'streaming' || turn.origin.kind !== 'own') return s.released
   const { link } = turn
-  const reached = link.kind !== 'open' || link.attach || link.reached
+  const reached = link.attach || link.reached
   return [...s.released, { threadId, run: turn.run, input: turn.origin.input, reached }]
 }
 
 const ASKABLE_PHASES: ReadonlySet<TurnState['phase']> = new Set(['idle', 'not_sent', 'failed', 'unverified'])
 
 const reachedHere = (s: ChatSessionState) => s.released.some((r) => r.threadId === s.threadId && r.reached)
-const waiting = (s: ChatSessionState) => reachedHere(s) || s.inFlight.some((id) => !s.endedRuns.includes(id))
+const waiting = (s: ChatSessionState) => reachedHere(s) || s.inFlight.some((run) => !s.endedRuns.includes(run.runId))
 const loadPending = (s: ChatSessionState) => s.history.requested > s.history.settled
 
 // Until the thread's first load lands, the server may have a run going on it;
@@ -164,10 +164,23 @@ function askable(s: ChatSessionState): boolean {
   return ASKABLE_PHASES.has(s.turn.phase) && s.history.loaded.kind !== 'loading' && !(waiting(s) && loadPending(s))
 }
 
-// Nothing follows a stream on this thread: a load reconciles the released runs that reached the server.
+// Nothing follows a stream on this thread: follow the next run the session knows
+// of there by its stream, so a failed load can't leave it running unfollowed,
+// and load the thread, whose last read may predate its question. A pending load
+// reconciles them itself.
 function followUp(s: ChatSessionState): ChatSessionState {
-  if (s.threadId === null || !ASKABLE_PHASES.has(s.turn.phase) || !waiting(s) || loadPending(s)) return s
-  return { ...s, history: requestHistory(s.history) }
+  if (s.threadId === null || !ASKABLE_PHASES.has(s.turn.phase) || loadPending(s)) return s
+  const released = s.released.find((r) => r.threadId === s.threadId)
+  const next = released ? undefined : s.inFlight.find((run) => !s.endedRuns.includes(run.runId))
+  const turn = released
+    ? following(released.run, { kind: 'own', input: released.input }, released.reached ? ATTACHED_LINK : FRESH_LINK)
+    : next && following(next, { kind: 'adopted' }, ATTACHED_LINK)
+  if (!turn) return s
+  return { ...s, history: requestHistory(s.history), released: s.released.filter((r) => r !== released), turn }
+}
+
+function following(run: RunRef, origin: RunOrigin, link: StreamLink): TurnState {
+  return { phase: 'streaming', run, origin, stream: INITIAL_STREAM_STATE, link }
 }
 
 export function reduceChatSession(s: ChatSessionState, a: ChatSessionAction): ChatSessionState {
@@ -204,7 +217,7 @@ export function reduceChatSession(s: ChatSessionState, a: ChatSessionAction): Ch
 
     case 'run.released':
       if (s.released.some((r) => r.run.runId === a.run.runId)) return s
-      return { ...s, released: [...s.released, { threadId: a.threadId, run: a.run, input: a.input, reached: false }] }
+      return followUp({ ...s, released: [...s.released, { threadId: a.threadId, run: a.run, input: a.input, reached: false }] })
 
     case 'released.reached': {
       const index = s.released.findIndex((r) => r.threadId === a.threadId && r.run.runId === a.runId && !r.reached)
@@ -274,14 +287,14 @@ export function reduceChatSession(s: ChatSessionState, a: ChatSessionAction): Ch
         local: s.history.local.filter((m) => !loadedIds.has(m.message_id)),
       }
       const read: Read = { ids: loadedIds, runs: a.runs }
-      const inFlight = a.runs.flatMap((entry) => (entry.status === 'in_flight' ? [entry.run.runId] : []))
+      const inFlight = a.runs.flatMap((entry) => (entry.status === 'in_flight' ? [entry.run] : []))
       return adopt(reconcileReleased(settled({ ...s, history, inFlight }, read), read), a.activeRun)
     }
 
     case 'history.failed': {
       if (a.threadId !== s.threadId || a.gen !== s.history.requested) return s
       const loaded: LoadedHistory = s.history.loaded.kind === 'ready' ? s.history.loaded : { kind: 'error', message: a.message }
-      return { ...s, history: { ...s.history, settled: a.gen, loaded }, turn: failedLoad(s.turn) }
+      return followUp({ ...s, history: { ...s.history, settled: a.gen, loaded }, turn: failedLoad(s.turn) })
     }
   }
 }
@@ -291,10 +304,15 @@ type Read = { ids: ReadonlySet<string>; runs: ReadonlyArray<RunStatus> }
 const statusOf = (read: Read, run: RunRef): RunStatus | undefined =>
   read.runs.find((entry) => entry.run.runId === run.runId && entry.run.turnId === run.turnId)
 
-// What a load decides for the turn that waits on it. Every such load was
-// requested after the turn's own stream ended or dropped.
+// What a load decides for the followed turn. Past the answer check, only a turn
+// waiting on the load, requested after its stream ended or dropped, is decided.
 function settled(s: ChatSessionState, read: Read): ChatSessionState {
   const { turn } = s
+  if (turn.phase === 'streaming') {
+    const status = statusOf(read, turn.run)
+    // The read holds the answer, which the stream may not have reached yet.
+    if (status?.status === 'completed' && status.messageId !== null && read.ids.has(status.messageId)) return { ...s, ...handOff(s, turn.run) }
+  }
   if (turn.phase === 'streaming' && turn.link.kind === 'reconnecting') {
     const { run, origin, stream, link } = turn
     const status = statusOf(read, run)
@@ -305,7 +323,6 @@ function settled(s: ChatSessionState, read: Read): ChatSessionState {
       case 'completed':
         // No saved message (display_unverified): only the replayed turn.completed carries the answer.
         if (status.messageId === null) return reattached
-        if (read.ids.has(status.messageId)) return { ...s, ...handOff(s, run) }
         // The read predates the answer's commit: one more load brings it.
         return {
           ...s,
@@ -345,21 +362,18 @@ function reconcileReleased(s: ChatSessionState, read: Read): ChatSessionState {
     }
     const status = statusOf(read, released.run)
     const own: OwnOrigin = { kind: 'own', input: released.input }
-    const follow = () => {
-      if (ASKABLE_PHASES.has(next.turn.phase)) {
-        next = { ...next, turn: { phase: 'streaming', run: released.run, origin: own, stream: INITIAL_STREAM_STATE, link: ATTACHED_LINK } }
-      } else {
-        kept.push({ ...released, reached: true })
-      }
+    const follow = (link: StreamLink) => {
+      if (ASKABLE_PHASES.has(next.turn.phase)) next = { ...next, turn: following(released.run, own, link) }
+      else kept.push(link.attach ? { ...released, reached: true } : released)
     }
     switch (status?.status) {
       case 'in_flight':
-        follow()
+        follow(ATTACHED_LINK)
         break
       case 'completed': {
         // No saved message (display_unverified): only the replayed turn.completed carries the answer.
         if (status.messageId === null) {
-          follow()
+          follow(ATTACHED_LINK)
           break
         }
         const shown = read.ids.has(status.messageId)
@@ -374,7 +388,7 @@ function reconcileReleased(s: ChatSessionState, read: Read): ChatSessionState {
         }
         break
       case undefined:
-        if (!released.reached) kept.push(released)
+        if (!released.reached) follow(FRESH_LINK)
         break
     }
   }
@@ -395,7 +409,7 @@ function adopt(s: ChatSessionState, activeRun: RunRef | null): ChatSessionState 
   const { turn } = s
   if (activeRun === null || !ASKABLE_PHASES.has(turn.phase)) return s
   if (s.endedRuns.includes(activeRun.runId) || s.released.some((r) => r.run.runId === activeRun.runId)) return s
-  return { ...s, turn: { phase: 'streaming', run: activeRun, origin: { kind: 'adopted' }, stream: INITIAL_STREAM_STATE, link: ATTACHED_LINK } }
+  return { ...s, turn: following(activeRun, { kind: 'adopted' }, ATTACHED_LINK) }
 }
 
 function failedLoad(turn: TurnState): TurnState {
