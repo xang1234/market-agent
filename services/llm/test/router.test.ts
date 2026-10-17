@@ -305,6 +305,29 @@ test("LLM router reports all deployments failed", async () => {
   );
 });
 
+test("an extraction router's first attempt goes to the extraction model", async () => {
+  const calls: string[] = [];
+  const client: LlmChatClient = async (deployment) => {
+    calls.push(`${deployment.channel}/${deployment.model}`);
+    return { text: "ok" };
+  };
+  const withExtraction = parseLlmEnv({
+    LLM_CHANNELS: "openai",
+    LLM_OPENAI_PROTOCOL: "openai",
+    LLM_OPENAI_MODELS: "gpt-4.1,o3",
+    LITELLM_MODEL: "openai/gpt-4.1",
+    EXTRACTION_LITELLM_MODEL: "openai/o3",
+  });
+
+  const extraction = await createLlmRouter({ settings: withExtraction, purpose: "extraction", client })
+    .complete({ messages: [{ role: "user", content: "hello" }] });
+  await createLlmRouter({ settings: withExtraction, client })
+    .complete({ messages: [{ role: "user", content: "hello" }] });
+
+  assert.deepEqual(extraction.deployment, { channel: "openai", model: "o3" });
+  assert.deepEqual(calls, ["openai/o3", "openai/gpt-4.1"]);
+});
+
 function settings() {
   return parseLlmEnv({
     LLM_CHANNELS: "openai,deepseek",

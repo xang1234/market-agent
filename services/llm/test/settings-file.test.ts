@@ -62,6 +62,36 @@ test("writeLlmSettingsEnvFile preserves masked secrets and unrelated env lines",
   assert.equal(written.version, versionForText(text));
 });
 
+test("a Settings save rewrites EXTRACTION_LITELLM_MODEL in place and reads it back", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "llm-settings-file-extraction-"));
+  const file = join(dir, ".env.dev");
+  await writeFile(file, [
+    "LLM_CHANNELS=anthropic",
+    "LLM_ANTHROPIC_PROTOCOL=anthropic",
+    "LLM_ANTHROPIC_API_KEY=sk-ant",
+    "LLM_ANTHROPIC_MODELS=claude-sonnet-5-5,claude-haiku-5-5",
+    "LITELLM_MODEL=anthropic/claude-sonnet-5-5",
+    "EXTRACTION_LITELLM_MODEL=anthropic/claude-sonnet-5-5",
+    "",
+  ].join("\n"));
+
+  const written = await writeLlmSettingsEnvFile(file, {
+    channels: [{
+      name: "anthropic",
+      protocol: "anthropic",
+      apiKeys: [MASKED_LLM_SECRET],
+      models: ["claude-sonnet-5-5", "claude-haiku-5-5"],
+    }],
+    primaryModel: "anthropic/claude-sonnet-5-5",
+    extractionModel: "anthropic/claude-haiku-5-5",
+  });
+
+  const text = await readFile(file, "utf8");
+  assert.deepEqual(text.match(/^EXTRACTION_LITELLM_MODEL=.*$/gmu), ["EXTRACTION_LITELLM_MODEL=anthropic/claude-haiku-5-5"]);
+  assert.equal(written.settings.extractionModel, "anthropic/claude-haiku-5-5");
+  assert.equal(written.settings.primaryModel, "anthropic/claude-sonnet-5-5");
+});
+
 test("writeLlmSettingsEnvFile rejects stale versions before writing", async () => {
   const dir = await mkdtemp(join(tmpdir(), "llm-settings-file-conflict-"));
   const file = join(dir, ".env.dev");

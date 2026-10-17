@@ -130,6 +130,19 @@ test("the model sees the catalog and only the question", async () => {
   for (const key of ["free_cash_flow", "eps_basic", "balance_sheet", "income_statement"]) assert.match(seen[0]!.content, new RegExp(`- ${key}:`));
 });
 
+test("the proposal runs on EXTRACTION_LITELLM_MODEL when one is set", async () => {
+  const models: string[] = [];
+  await proposeQuestionMetrics({
+    question: "What was NVDA's capex?",
+    env: { ...ENV, LLM_OPENAI_MODELS: "gpt-4.1,gpt-4.1-mini", EXTRACTION_LITELLM_MODEL: "openai/gpt-4.1-mini" },
+    createClient: () => async (deployment) => {
+      models.push(`${deployment.channel}/${deployment.model}`);
+      return { text: '{"metrics":[]}' };
+    },
+  });
+  assert.deepEqual(models, ["openai/gpt-4.1-mini"]);
+});
+
 test("a failure, a cut-off reply, no model, or recorded replies leave the metrics to the patterns", async (t) => {
   t.mock.method(console, "warn", () => {});
   const failing = () => async () => {

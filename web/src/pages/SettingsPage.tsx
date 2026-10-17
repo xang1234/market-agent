@@ -17,6 +17,7 @@ export type LlmEditableSettings = {
   primaryModel: string | null
   fallbackModels: string[]
   agentModel: string | null
+  extractionModel: string | null
   issues?: string[]
 }
 
@@ -243,7 +244,7 @@ export function SettingsView({
           </button>
         </section>
 
-        <section className="grid gap-3 md:grid-cols-3">
+        <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <label className={FIELD_LABEL}>
             Primary model
             <select className={INPUT_CLASS} value={settings.primaryModel ?? ''} onChange={(event) => onChange({ ...settings, primaryModel: event.target.value || null })}>
@@ -268,6 +269,13 @@ export function SettingsView({
           <label className={FIELD_LABEL}>
             Agent model
             <select className={INPUT_CLASS} value={settings.agentModel ?? ''} onChange={(event) => onChange({ ...settings, agentModel: event.target.value || null })}>
+              <option value="">Use primary</option>
+              {modelOptions.map((model) => <option key={model} value={model}>{model}</option>)}
+            </select>
+          </label>
+          <label className={FIELD_LABEL}>
+            Extraction model
+            <select className={INPUT_CLASS} value={settings.extractionModel ?? ''} onChange={(event) => onChange({ ...settings, extractionModel: event.target.value || null })}>
               <option value="">Use primary</option>
               {modelOptions.map((model) => <option key={model} value={model}>{model}</option>)}
             </select>
@@ -305,6 +313,7 @@ function normalizeSettings(settings: LlmEditableSettings): LlmEditableSettings {
     primaryModel: settings.primaryModel ?? null,
     fallbackModels: settings.fallbackModels ?? [],
     agentModel: settings.agentModel ?? null,
+    extractionModel: settings.extractionModel ?? null,
     issues: settings.issues ?? [],
   }
 }

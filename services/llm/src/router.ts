@@ -2,6 +2,7 @@ import {
   buildLlmDeploymentOrder,
   type LlmDeployment,
   type LlmModelRef,
+  type LlmPurpose,
   type LlmSettings,
 } from "./channel-config.ts";
 
@@ -123,12 +124,13 @@ export class LlmRouterError extends Error {
 
 export type CreateLlmRouterInput = {
   settings: LlmSettings;
+  purpose?: LlmPurpose;
   client: LlmChatClient;
   onCompletion?: (completion: LlmCompletion) => void;
 };
 
 export function createLlmRouter(input: CreateLlmRouterInput): ControlledRouter {
-  const deployments = buildLlmDeploymentOrder(input.settings);
+  const deployments = buildLlmDeploymentOrder(input.settings, input.purpose);
   // Telemetry must never change routing: a throwing hook or log sink can't turn a
   // (billed) success into a failure or stop a fallback.
   const report = (completion: LlmCompletion) => {

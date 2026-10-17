@@ -19,7 +19,7 @@ import { SecEdgarClient } from "./sec-edgar.ts";
 async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL is required");
-  const llm = await createLlmRouterFromEnv(process.env);
+  const llm = await createLlmRouterFromEnv(process.env, { purpose: "extraction" });
   if (!llm) {
     throw new Error(
       "no LLM deployment configured — set LLM_CHANNELS + the channel's " +

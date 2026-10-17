@@ -166,6 +166,58 @@ test("buildLlmDeploymentOrder emits primary then unique fallbacks", () => {
   ]);
 });
 
+const ANTHROPIC_ENV = {
+  LLM_CHANNELS: "anthropic,opencode",
+  LLM_ANTHROPIC_PROTOCOL: "anthropic",
+  LLM_ANTHROPIC_API_KEY: "sk-ant",
+  LLM_ANTHROPIC_MODELS: "claude-sonnet-5-5,claude-haiku-5-5",
+  LLM_OPENCODE_BASE_URL: "https://opencode.test/v1",
+  LLM_OPENCODE_MODELS: "qwen3.8-max",
+  LITELLM_MODEL: "anthropic/claude-sonnet-5-5",
+  LITELLM_FALLBACK_MODELS: "opencode/qwen3.8-max",
+};
+
+const orderOf = (deployments: ReturnType<typeof buildLlmDeploymentOrder>) =>
+  deployments.map((deployment) => `${deployment.channel}/${deployment.model}`);
+
+test("extraction calls lead with EXTRACTION_LITELLM_MODEL; every other call keeps LITELLM_MODEL", () => {
+  const settings = parseLlmEnv({ ...ANTHROPIC_ENV, EXTRACTION_LITELLM_MODEL: "anthropic/claude-haiku-5-5" });
+
+  assert.deepEqual(settings.issues, []);
+  assert.deepEqual(settings.extractionModel, { channel: "anthropic", model: "claude-haiku-5-5" });
+  assert.deepEqual(orderOf(buildLlmDeploymentOrder(settings, "extraction")), [
+    "anthropic/claude-haiku-5-5",
+    "opencode/qwen3.8-max",
+  ]);
+  assert.deepEqual(orderOf(buildLlmDeploymentOrder(settings)), [
+    "anthropic/claude-sonnet-5-5",
+    "opencode/qwen3.8-max",
+  ]);
+});
+
+test("without EXTRACTION_LITELLM_MODEL, extraction calls use the default order", () => {
+  const settings = parseLlmEnv(ANTHROPIC_ENV);
+
+  assert.equal(settings.extractionModel, null);
+  assert.deepEqual(orderOf(buildLlmDeploymentOrder(settings, "extraction")), [
+    "anthropic/claude-sonnet-5-5",
+    "opencode/qwen3.8-max",
+  ]);
+});
+
+test("an EXTRACTION_LITELLM_MODEL its channel doesn't list is an issue, and extraction falls back to the primary", () => {
+  const settings = parseLlmEnv({ ...ANTHROPIC_ENV, EXTRACTION_LITELLM_MODEL: "anthropic/claude-opus-5-5" });
+
+  assert.deepEqual(settings.issues, [
+    "EXTRACTION_LITELLM_MODEL: model 'claude-opus-5-5' is not listed for channel 'anthropic'",
+  ]);
+  assert.equal(settings.extractionModel, null);
+  assert.deepEqual(orderOf(buildLlmDeploymentOrder(settings, "extraction")), [
+    "anthropic/claude-sonnet-5-5",
+    "opencode/qwen3.8-max",
+  ]);
+});
+
 test("parseLlmEnvFileText reads dotenv-style LLM settings without shell state", () => {
   const settings = parseLlmEnv(parseLlmEnvFileText(`
     # Local model channels

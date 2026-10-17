@@ -24,6 +24,7 @@ export type EditableLlmSettings = {
   primaryModel: string | null;
   fallbackModels: ReadonlyArray<string>;
   agentModel: string | null;
+  extractionModel: string | null;
   issues: ReadonlyArray<string>;
 };
 
@@ -43,6 +44,7 @@ export type WritableLlmSettings = {
   primaryModel?: string | null;
   fallbackModels?: ReadonlyArray<string> | null;
   agentModel?: string | null;
+  extractionModel?: string | null;
 };
 
 export type LlmSettingsFileRead = {
@@ -87,6 +89,7 @@ export function editableLlmSettingsFromEnv(env: LlmEnv): EditableLlmSettings {
     primaryModel: modelRef(settings.primaryModel),
     fallbackModels: Object.freeze(settings.fallbackModels.map(modelRef).filter(isString)),
     agentModel: modelRef(settings.agentModel),
+    extractionModel: modelRef(settings.extractionModel),
     issues: settings.issues,
   });
 }
@@ -172,6 +175,9 @@ function renderLlmSettingsLines(settings: WritableLlmSettings, currentEnv: LlmEn
   if (nonEmpty(settings.agentModel) !== null) {
     lines.push(envLine("AGENT_LITELLM_MODEL", nonEmpty(settings.agentModel)!));
   }
+  if (nonEmpty(settings.extractionModel) !== null) {
+    lines.push(envLine("EXTRACTION_LITELLM_MODEL", nonEmpty(settings.extractionModel)!));
+  }
   return lines;
 }
 
@@ -223,7 +229,7 @@ function isManagedLlmEnvLine(line: string): boolean {
   const key = trimmed.slice(0, equalsIndex).trim();
   if (key === "") return false;
   if (key === "LLM_CHANNELS" || key === "LITELLM_MODEL" || key === "LITELLM_FALLBACK_MODELS") return true;
-  if (key === "AGENT_LITELLM_MODEL") return true;
+  if (key === "AGENT_LITELLM_MODEL" || key === "EXTRACTION_LITELLM_MODEL") return true;
   // Hand-edited, not in the Settings UI, so a save keeps it; without this its
   // _MODELS suffix would mark it managed and drop it. ponytail: a channel whose own
   // name ends in "_reasoning" would have its MODELS line kept too (and duplicated).

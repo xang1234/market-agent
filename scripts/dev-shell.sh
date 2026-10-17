@@ -371,7 +371,7 @@ configure_runtime_env() {
     # DEV_NO_KEYS=traces answers the answer-lab traces' questions as recorded
     # (services/chat/test/answer-lab/traces), written to .dev by up.
     export LLM_CHANNELS=fixture LLM_FIXTURE_PROTOCOL=openai LLM_FIXTURE_MODELS=recorded
-    export LITELLM_MODEL=fixture/recorded LITELLM_FALLBACK_MODELS="" AGENT_LITELLM_MODEL=""
+    export LITELLM_MODEL=fixture/recorded LITELLM_FALLBACK_MODELS="" AGENT_LITELLM_MODEL="" EXTRACTION_LITELLM_MODEL=""
     if [[ "$DEV_NO_KEYS" == "traces" ]]; then
       export LLM_REPLAY_FILE="$ROOT/.dev/trace-replies.json"
     else

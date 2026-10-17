@@ -32,8 +32,13 @@ export type LlmSettings = {
   primaryModel: LlmModelRef | null;
   fallbackModels: ReadonlyArray<LlmModelRef>;
   agentModel: LlmModelRef | null;
+  extractionModel: LlmModelRef | null;
   issues: ReadonlyArray<string>;
 };
+
+/** What a call is for. "extraction" leads with EXTRACTION_LITELLM_MODEL (a cheaper model
+ * for reading filings and picking from fixed lists) when set, else the primary model. */
+export type LlmPurpose = "default" | "extraction";
 
 export type LlmDeployment = {
   channel: string;
@@ -57,12 +62,19 @@ export function parseLlmEnv(env: LlmEnv): LlmSettings {
       return ref === null ? [] : [ref];
     });
   const agentModel = parseOptionalModelRef("AGENT_LITELLM_MODEL", env.AGENT_LITELLM_MODEL, channels, issues);
+  const extractionModel = parseOptionalModelRef(
+    "EXTRACTION_LITELLM_MODEL",
+    env.EXTRACTION_LITELLM_MODEL,
+    channels,
+    issues,
+  );
 
   return Object.freeze({
     channels: Object.freeze(channels),
     primaryModel,
     fallbackModels: Object.freeze(dedupeModelRefs(fallbackModels)),
     agentModel,
+    extractionModel,
     issues: Object.freeze(issues),
   });
 }
@@ -77,11 +89,15 @@ export function parseLlmEnvFileText(text: string): Record<string, string> {
   return env;
 }
 
-export function buildLlmDeploymentOrder(settings: LlmSettings): ReadonlyArray<LlmDeployment> {
+export function buildLlmDeploymentOrder(
+  settings: LlmSettings,
+  purpose: LlmPurpose = "default",
+): ReadonlyArray<LlmDeployment> {
   const channelsByName = new Map(settings.channels.map((channel) => [channel.name, channel]));
+  const lead = purpose === "extraction" ? settings.extractionModel ?? settings.primaryModel : settings.primaryModel;
   return Object.freeze(
     dedupeModelRefs([
-      ...(settings.primaryModel ? [settings.primaryModel] : []),
+      ...(lead ? [lead] : []),
       ...settings.fallbackModels,
     ]).flatMap((ref) => {
       const channel = channelsByName.get(ref.channel);

@@ -108,6 +108,31 @@ test('switching protocol drops another provider\'s stock base URL but keeps a cu
   assert.equal(await switchToAnthropic('https://llm-proxy.internal/v1'), 'https://llm-proxy.internal/v1')
 })
 
+test('SettingsView saves the chosen extraction model, and "Use primary" clears it', async () => {
+  const saved: LlmEditableSettings[] = []
+  const changes: LlmEditableSettings[] = []
+  const { document, cleanup } = renderIntoDom(
+    <SettingsView
+      state={{ kind: 'ready', version: 'sha256:test', settings: { ...settings(), extractionModel: 'openai/o3' } }}
+      onChange={(next) => changes.push(next)}
+      onSave={async (next) => {
+        saved.push(next)
+      }}
+    />,
+  )
+
+  try {
+    assert.equal(selectByLabel(document, 'Extraction model').value, 'openai/o3')
+    await click(buttonByText(document, 'Save'))
+    await change(selectByLabel(document, 'Extraction model'), '')
+
+    assert.equal(saved[0]?.extractionModel, 'openai/o3')
+    assert.equal(changes[0]?.extractionModel, null)
+  } finally {
+    cleanup()
+  }
+})
+
 test('SettingsView displays pending and failed diagnostics states', () => {
   const pending = renderToString(
     <SettingsView
@@ -161,6 +186,7 @@ function settings(): LlmEditableSettings {
     primaryModel: 'openai/gpt-4.1',
     fallbackModels: [],
     agentModel: null,
+    extractionModel: null,
     issues: [],
   }
 }

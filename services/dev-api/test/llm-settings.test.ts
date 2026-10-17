@@ -71,6 +71,7 @@ test("PUT /v1/dev/llm-settings preserves masked keys and detects version conflic
         primaryModel: "openai/o3",
         fallbackModels: ["openai/gpt-4.1"],
         agentModel: null,
+        extractionModel: "openai/gpt-4.1",
       },
     },
   });
@@ -78,6 +79,7 @@ test("PUT /v1/dev/llm-settings preserves masked keys and detects version conflic
   const text = await readFile(envFile, "utf8");
   assert.match(text, /LLM_OPENAI_API_KEY=sk-old/);
   assert.match(text, /LITELLM_MODEL=openai\/o3/);
+  assert.match(text, /^EXTRACTION_LITELLM_MODEL=openai\/gpt-4\.1$/mu);
 
   const conflict = await invoke("/v1/dev/llm-settings", {
     method: "PUT",

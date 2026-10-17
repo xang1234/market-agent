@@ -41,7 +41,7 @@ export async function proposeQuestionMetrics(input: {
   const env = input.env ?? (process.env as ProposalEnv);
   if (input.question.trim() === "" || !scopeProposalEnabled(env)) return null;
   try {
-    const router = await createLlmRouterFromEnv(env, { createClient: input.createClient });
+    const router = await createLlmRouterFromEnv(env, { createClient: input.createClient, purpose: "extraction" });
     if (!router) return null;
     const result = await router.complete({
       messages: [

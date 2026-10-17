@@ -43,6 +43,34 @@ test("loadLlmSettingsFromEnv merges shell env with LLM_SETTINGS_ENV_FILE overrid
   ]);
 });
 
+test("a model cleared from LLM_SETTINGS_ENV_FILE stays cleared though the shell exported it at startup", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "llm-settings-cleared-"));
+  const envFile = join(dir, ".env.dev");
+  await writeFile(envFile, [
+    "LLM_CHANNELS=openai",
+    "LLM_OPENAI_PROTOCOL=openai",
+    "LLM_OPENAI_MODELS=gpt-4.1,o3",
+    "LITELLM_MODEL=openai/gpt-4.1",
+    "",
+  ].join("\n"));
+
+  const settings = await loadLlmSettingsFromEnv({
+    LLM_SETTINGS_ENV_FILE: envFile,
+    LLM_CHANNELS: "openai",
+    LLM_OPENAI_PROTOCOL: "openai",
+    LLM_OPENAI_MODELS: "gpt-4.1,o3",
+    LITELLM_MODEL: "openai/gpt-4.1",
+    LITELLM_FALLBACK_MODELS: "openai/o3",
+    AGENT_LITELLM_MODEL: "openai/o3",
+    EXTRACTION_LITELLM_MODEL: "openai/o3",
+  });
+
+  assert.deepEqual(
+    { fallback: settings.fallbackModels, agent: settings.agentModel, extraction: settings.extractionModel },
+    { fallback: [], agent: null, extraction: null },
+  );
+});
+
 test("loadLlmSettingsFromEnv rereads the env file on every call", async () => {
   const dir = await mkdtemp(join(tmpdir(), "llm-settings-reload-"));
   const envFile = join(dir, ".env.dev");
