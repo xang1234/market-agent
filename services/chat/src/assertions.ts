@@ -197,6 +197,17 @@ export function checkAssertions(
       reject(index, item, `an ${kind === "observation" ? "observation" : "comparison"} states no cause: give it as a management attribution or an unknown cause`);
       continue;
     }
+    // An inference stands on every support it lists: its words may be about
+    // what a failed one said ("the recovery" beside a rejected trend, #310).
+    // Inferences are checked last, so one resting on another (still unchecked)
+    // rests on no checked support.
+    const failed = ((item.supports ?? []) as number[]).find((n) =>
+      n < 0 || n >= Math.min(list.length, MAX_ASSERTIONS) || kindOf(list[n]) === "analyst_inference" || rejected.some((entry) => entry.index === n)
+    );
+    if (failed !== undefined) {
+      reject(index, item, `an inference rests on every support it lists; ${failed} is not accepted`);
+      continue;
+    }
     // About figures when none were shown: nothing to bind, unless it cites a
     // claim where only figures may stand.
     if (packet.figures.length === 0 && kind !== "management_attribution") {
@@ -210,7 +221,7 @@ export function checkAssertions(
       }
       continue;
     }
-    // A support that failed its own check is dropped; the inference stands on the rest.
+    // A management attribution may be listed beside them, unbound.
     const supports = ((item.supports ?? []) as number[]).filter((n) =>
       accepted.some((entry) => entry.index === n && (entry.kind === "observation" || entry.kind === "comparison"))
     );
@@ -351,7 +362,7 @@ function bindingError(kind: AssertionKind, text: string, cited: ReadonlyArray<st
 
 // The companies cited figures and claims are about; a figure with no company
 // is the only company's.
-export function companiesOf(cited: ReadonlyArray<string>, packet: EvidencePacket): Set<string | undefined> {
+function companiesOf(cited: ReadonlyArray<string>, packet: EvidencePacket): Set<string | undefined> {
   return new Set([
     ...packet.figures.filter((figure) => cited.includes(figure.id)).map((figure) => figure.company ?? packet.companies[0]),
     ...packet.claims.filter((claim) => cited.includes(claim.id)).map((claim) => claim.company),
