@@ -1,5 +1,5 @@
 import type { JsonValue } from "../../shared/src/json.ts";
-import { type QueryExecutor } from "../../shared/src/http.ts";
+import type { QueryExecutor } from "../../shared/src/http.ts";
 
 export const NOTIFICATION_CHANNELS = [
   "email",

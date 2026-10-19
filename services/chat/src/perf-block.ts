@@ -36,7 +36,7 @@ import { isCurrentEnd, sessionDate, ytdYear, type YtdWindow } from "../../market
 import { compileDisclosurePolicy } from "../../snapshot/src/disclosure-policy.ts";
 import type { SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
 import { stableUuid } from "./chat-ids.ts";
-import { type QueryExecutor } from "../../shared/src/http.ts";
+import type { QueryExecutor } from "../../shared/src/http.ts";
 
 const INTERVAL = "1d";
 // In order of preference when every company has both.

@@ -6,7 +6,7 @@ import { hydrateSubjectRef, type HydratedSubjectHandoff } from "../../resolver/s
 import type { SubjectRef } from "../../shared/src/subject-ref.ts";
 import { parseResearchScope, type ResearchScope } from "./research-scope.ts";
 import type { ChatResolvedSubjectPreResolution } from "./subjects.ts";
-import { type QueryExecutor } from "../../shared/src/http.ts";
+import type { QueryExecutor } from "../../shared/src/http.ts";
 
 type Hydrate = (db: QueryExecutor, ref: SubjectRef) => Promise<HydratedSubjectHandoff>;
 
