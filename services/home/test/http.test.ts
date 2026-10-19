@@ -3,6 +3,7 @@ import test from "node:test";
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 
+import { signTrustedUserId } from "../../shared/src/request-auth.ts";
 import { createHomeServer } from "../src/http.ts";
 import type { HomeQuoteProvider, HomeSavedScreensProvider } from "../src/secondary-types.ts";
 import type { QueryExecutor } from "../src/types.ts";
@@ -82,7 +83,7 @@ test("GET /v1/home/summary rejects a user id that is not a v4 UUID", async () =>
   }
 });
 
-test("GET /v1/home/summary rejects an unsigned user id in trusted_proxy mode", async () => {
+test("GET /v1/home/summary in trusted_proxy mode accepts only a signed user id", async () => {
   const { port, close } = await startServer({
     auth: { env: { MA_AUTH_MODE: "trusted_proxy", MA_AUTH_PROXY_SECRET: "proxy-secret" } },
   });
@@ -94,6 +95,14 @@ test("GET /v1/home/summary rejects an unsigned user id in trusted_proxy mode", a
     assert.deepEqual(await res.json(), {
       error: "'x-authenticated-user-id and x-authenticated-user-signature' headers are required",
     });
+
+    const signed = await fetch(`http://127.0.0.1:${port}/v1/home/summary`, {
+      headers: {
+        "x-authenticated-user-id": USER_ID,
+        "x-authenticated-user-signature": signTrustedUserId(USER_ID, "proxy-secret"),
+      },
+    });
+    assert.equal(signed.status, 200);
   } finally {
     await close();
   }

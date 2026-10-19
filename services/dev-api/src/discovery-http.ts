@@ -8,15 +8,14 @@ import {
   type RequestAuthConfig,
 } from "../../shared/src/request-auth.ts";
 
-export type DevApiDiscoveryAdapter = { handle(req: IncomingMessage, res: ServerResponse): Promise<boolean> };
+export type DevApiDiscoveryAdapter = {
+  handle(req: IncomingMessage, res: ServerResponse, auth: RequestAuthConfig): Promise<boolean>;
+};
 
 /** Authenticates discovery before its service can reserve any provider work. */
-export function createDiscoveryDevApiAdapter(
-  service: DiscoveryService,
-  auth: RequestAuthConfig = {},
-): DevApiDiscoveryAdapter {
+export function createDiscoveryDevApiAdapter(service: DiscoveryService): DevApiDiscoveryAdapter {
   return Object.freeze({
-    async handle(req, res) {
+    async handle(req, res, auth) {
       const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
       if (pathname !== "/v1/discovery" && !pathname.startsWith("/v1/discovery/")) return false;
       const userId = readAuthenticatedUserId(req, auth);

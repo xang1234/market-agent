@@ -3,20 +3,16 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { FINANCIAL_HTTP_PREFIX, handleFinancialHttp, type FinancialPool } from "../../financial-engine/src/http.ts";
 import { readAuthenticatedUserId, type RequestAuthConfig } from "../../shared/src/request-auth.ts";
 
-export type FinancialAuthenticator = (req: IncomingMessage) => string | null;
+export type DevApiFinancialAdapter = {
+  handle(req: IncomingMessage, res: ServerResponse, auth: RequestAuthConfig): Promise<boolean>;
+};
 
-export type DevApiFinancialAdapter = { handle(req: IncomingMessage, res: ServerResponse): Promise<boolean> };
-
-export function requestAuthAuthenticator(auth: RequestAuthConfig = {}): FinancialAuthenticator {
-  return (req) => readAuthenticatedUserId(req, auth)?.toLowerCase() ?? null;
-}
-
-export function createFinancialDevApiAdapter(input: { db: FinancialPool; authenticate: FinancialAuthenticator }): DevApiFinancialAdapter {
+export function createFinancialDevApiAdapter(input: { db: FinancialPool }): DevApiFinancialAdapter {
   return Object.freeze({
-    async handle(req, res) {
+    async handle(req, res, auth) {
       const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
       if (!pathname.startsWith(FINANCIAL_HTTP_PREFIX)) return false;
-      const userId = input.authenticate(req);
+      const userId = readAuthenticatedUserId(req, auth)?.toLowerCase() ?? null;
       if (userId === null) {
         res.statusCode = 401;
         res.setHeader("content-type", "application/json");

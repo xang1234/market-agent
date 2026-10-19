@@ -25,6 +25,7 @@ import { readDevFlags } from "../../shared/src/devFlags.ts";
 import {
   authenticatedUserRequiredMessage,
   readAuthenticatedUserId,
+  resolveAuthMode,
   type RequestAuthConfig,
 } from "../../shared/src/request-auth.ts";
 import {
@@ -44,7 +45,6 @@ import type { DevApiDiscoveryAdapter } from "./discovery-http.ts";
 import { createDiscoveryDevApiAdapter } from "./discovery-http.ts";
 import {
   createFinancialDevApiAdapter,
-  requestAuthAuthenticator,
   type DevApiFinancialAdapter,
 } from "./financial-wiring.ts";
 import type { DiscoveryService } from "../../discovery/src/ports.ts";
@@ -199,7 +199,7 @@ export function createDevApiServer(
   const flags = readDevFlags(env);
   const adapters = options.adapters;
   const llmOptions = options.llm ?? {};
-  const auth: RequestAuthConfig = { env };
+  const auth: RequestAuthConfig = { env, mode: resolveAuthMode({ env }) };
 
   return createServer(async (req, res) => {
     try {
@@ -222,8 +222,8 @@ export function createDevApiServer(
 
     const url = new URL(req.url ?? "/", "http://localhost");
 
-    if (adapters?.discovery && await adapters.discovery.handle(req, res)) return;
-    if (adapters?.financial && await adapters.financial.handle(req, res)) return;
+    if (adapters?.discovery && await adapters.discovery.handle(req, res, auth)) return;
+    if (adapters?.financial && await adapters.financial.handle(req, res, auth)) return;
 
     const thesisMatch = url.pathname.match(/^\/v1\/agents\/([^/]+)\/thesis(\/draft)?$/);
     if (thesisMatch) {
@@ -663,7 +663,6 @@ export type DevApiServiceAdapterDeps = AnalyzeServiceDeps & {
   // The agent loop takes the same pool for its watermark transaction.
   db: AgentWatermarkClientPool;
   discovery?: DiscoveryService;
-  auth?: RequestAuthConfig;
   createAgentLoopStages?: DevApiAgentLoopStageFactory;
   inspectEvidence?(input: {
     userId: string;
@@ -674,8 +673,8 @@ export type DevApiServiceAdapterDeps = AnalyzeServiceDeps & {
 
 export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): DevApiAdapters {
   return {
-    ...(deps.discovery === undefined ? {} : { discovery: createDiscoveryDevApiAdapter(deps.discovery, deps.auth) }),
-    financial: createFinancialDevApiAdapter({ db: deps.db, authenticate: requestAuthAuthenticator(deps.auth) }),
+    ...(deps.discovery === undefined ? {} : { discovery: createDiscoveryDevApiAdapter(deps.discovery) }),
+    financial: createFinancialDevApiAdapter({ db: deps.db }),
     analyze: createServiceAnalyzeAdapter(deps),
     theses: createThesisAdapter(deps.db),
     agents: {

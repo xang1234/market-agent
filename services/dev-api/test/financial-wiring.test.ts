@@ -6,7 +6,7 @@ import test from "node:test";
 
 import type { FinancialPool } from "../../financial-engine/src/http.ts";
 import { signTrustedUserId } from "../../shared/src/request-auth.ts";
-import { createFinancialDevApiAdapter, requestAuthAuthenticator } from "../src/financial-wiring.ts";
+import { createFinancialDevApiAdapter } from "../src/financial-wiring.ts";
 
 function fakePool(queries: string[]): FinancialPool {
   const query = async (text: string) => {
@@ -17,9 +17,9 @@ function fakePool(queries: string[]): FinancialPool {
 }
 
 async function serve(queries: string[], env: Record<string, string> = {}) {
-  const adapter = createFinancialDevApiAdapter({ db: fakePool(queries), authenticate: requestAuthAuthenticator({ env }) });
+  const adapter = createFinancialDevApiAdapter({ db: fakePool(queries) });
   const server = createServer((req, res) => {
-    void adapter.handle(req, res).then((handled) => {
+    void adapter.handle(req, res, { env }).then((handled) => {
       if (!handled) { res.statusCode = 418; res.end(); }
     });
   });

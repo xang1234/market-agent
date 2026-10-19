@@ -7,6 +7,7 @@ import { createDiscoveryService } from "../src/service.ts";
 import { createDiscoveryDevApiAdapter } from "../../dev-api/src/discovery-adapter.ts";
 import { createDevApiServer, createFixtureDevApiAdapters } from "../../dev-api/src/http.ts";
 import { briefFixture } from "./fixtures.ts";
+import { signTrustedUserId } from "../../shared/src/request-auth.ts";
 
 const USER = "10000000-0000-4000-8000-000000000001";
 const CAMPAIGN = "20000000-0000-4000-8000-000000000001";
@@ -17,10 +18,10 @@ type TestContext = { after(callback: () => void | Promise<void>): void };
 async function startServer(
   t: TestContext,
   service = fixtureService(),
-  auth: Parameters<typeof createDiscoveryDevApiAdapter>[1] = {},
+  env: Record<string, string> = {},
 ): Promise<{ base: string; service: ReturnType<typeof fixtureService> }> {
-  const server = createDevApiServer({}, {
-    adapters: { ...createFixtureDevApiAdapters(), discovery: createDiscoveryDevApiAdapter(service as never, auth) },
+  const server = createDevApiServer(env, {
+    adapters: { ...createFixtureDevApiAdapters(), discovery: createDiscoveryDevApiAdapter(service as never) },
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
@@ -58,9 +59,10 @@ test("discovery HTTP rejects a user id that is not a UUID", async (t) => {
   assert.equal(service.calls.create, 0);
 });
 
-test("discovery HTTP rejects an unsigned user id in trusted_proxy mode", async (t) => {
+test("discovery HTTP in trusted_proxy mode accepts only a signed user id", async (t) => {
   const { base, service } = await startServer(t, fixtureService(), {
-    env: { MA_AUTH_MODE: "trusted_proxy", MA_AUTH_PROXY_SECRET: "proxy-secret" },
+    MA_AUTH_MODE: "trusted_proxy",
+    MA_AUTH_PROXY_SECRET: "proxy-secret",
   });
   const response = await request(base, "/v1/discovery/campaigns", {
     method: "POST",
@@ -72,6 +74,14 @@ test("discovery HTTP rejects an unsigned user id in trusted_proxy mode", async (
     error: "'x-authenticated-user-id and x-authenticated-user-signature' headers are required",
   });
   assert.equal(service.calls.create, 0);
+
+  const signed = await request(base, "/v1/discovery/campaigns", {
+    method: "POST",
+    headers: { "x-authenticated-user-id": USER, "x-authenticated-user-signature": signTrustedUserId(USER, "proxy-secret") },
+    body: JSON.stringify({ name: "Grid", question: "Which US-listed companies benefit from grid modernization spending?" }),
+  });
+  assert.equal(signed.status, 201);
+  assert.equal(service.calls.create, 1);
 });
 
 test("every discovery route authenticates before reading or mutating owned campaign data", async (t) => {

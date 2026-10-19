@@ -1533,6 +1533,10 @@ test("trusted_proxy mode rejects an unsigned user id on every user-scoped route"
   }
 });
 
+test("an unrecognized MA_AUTH_MODE fails when the server is built", () => {
+  assert.throws(() => createDevApiServer({ MA_AUTH_MODE: "prod" }), /unrecognized MA_AUTH_MODE 'prod'/);
+});
+
 test("trusted_proxy mode accepts a signed user id", async (t) => {
   const userId = "00000000-0000-4000-8000-000000000001";
   const base = await startServer(t, { MA_AUTH_MODE: "trusted_proxy", MA_AUTH_PROXY_SECRET: "proxy-secret" });

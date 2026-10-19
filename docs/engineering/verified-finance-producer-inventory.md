@@ -235,7 +235,7 @@ appear as declared gaps rather than numbers.
 | `web/src/blocks/renderers/FinancialAnswerBlock.tsx`, `BlockRenderer.tsx` | `web/src/blocks/FinancialAnswer.tsx` plus the `financialAnswer.ts` view helpers, registered through `registerCertifiedFinancialBlocks.ts`, following the existing flat renderer layout and `BlockView` registry. |
 | `services/dev-api/src/api.ts`; narrow `local-runtime.ts` wiring | Routes are composed in `services/dev-api/src/financial-wiring.ts` and dispatched from `http.ts`. `local-runtime.ts` is unchanged. The worker starts from `runtime.ts` through `financial-worker-bootstrap.ts` when `FINANCIAL_WORKER_ENABLED=true`. |
 | `db/test/schema-openapi-alignment.test.ts` | `scripts/openapi-contract.test.ts` checks that the `/v1/financial` operations reference `spec/financial_answer_http_schema.json`, that each reference resolves, and that the schema compiles. |
-| Trusted authentication for financial HTTP | The handler takes an already authenticated `userId`. The dev authenticator accepts only a UUID `x-user-id`, the same header the other dev routes use, and is documented as non-production. A deployment supplies its own authenticator. |
+| Trusted authentication for financial HTTP | The handler takes an already authenticated `userId`. The dev API reads it with the shared `services/shared/src/request-auth.ts` helpers, like its other routes: a UUID `x-user-id` in dev mode, and a signed `x-authenticated-user-id` in `trusted_proxy` mode. |
 | Replay execution | `POST …/replays` reserves a pending run with `replay_of_run_id` and the original's plan, cutoff, policies, and parent version. The supervised worker executes it through `executeReplay`, which never seals. |
 
 ### Wave 4 plan deviations
