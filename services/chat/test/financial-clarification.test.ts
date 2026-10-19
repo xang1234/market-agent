@@ -90,7 +90,7 @@ test("financial clarifications", { timeout: 300_000 }, async (t) => {
 });
 
 test("a clarification answer must name both the clarification and the choice", async () => {
-  const server = createChatServer({ allowSyntheticAnalystFallback: true });
+  const server = createChatServer();
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
     const { port } = server.address() as AddressInfo;

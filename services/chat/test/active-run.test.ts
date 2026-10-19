@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
 
-import { createChatCoordinator, type ChatCoordinator, type ChatTurnRunner } from "../src/coordinator.ts";
+import { createChatCoordinator, type ChatAnalystToolRuntime, type ChatCoordinator, type ChatTurnRunner } from "../src/coordinator.ts";
 import type { ChatReadMessage } from "../src/messages.ts";
 import { financialMessageId } from "../src/chat-ids.ts";
 import { deferred, parseSseEvents, startChatTestServer } from "./sse-helpers.ts";
@@ -44,6 +44,13 @@ function gatedCoordinator() {
 }
 
 const messages = (...ids: string[]) => ids.map((message_id) => ({ message_id }));
+
+// A verified answer, which the turn saves through the persistence hook.
+const answering: ChatAnalystToolRuntime = async () => ({
+  snapshot_id: "s-1",
+  verification: { ok: true, failures: [] },
+  blocks: [{ id: "block-1", kind: "rich_text", segments: [{ type: "text", text: "Answer." }] }],
+});
 
 async function settle(coordinator: ChatCoordinator, input: { threadId: string; runId: string; userId: string; turnId?: string }) {
   await coordinator.findTurn({ turnId: input.runId, ...input })!.completed;
@@ -182,7 +189,7 @@ test("readThread reports a run completed once the read holds its saved answer, b
   const commit = deferred<void>();
   const committed = deferred<void>();
   const coordinator = createChatCoordinator({
-    allowSyntheticAnalystFallback: true,
+    analystToolRuntime: answering,
     persistAssistantMessage: async (input) => {
       saved.push({ message_id: input.message_id });
       committed.resolve();
@@ -205,7 +212,6 @@ test("readThread reports a run completed once the read holds its saved answer, b
 test("a financial turn's in-progress notice is not saved under the id its published answer takes", async () => {
   const saved: string[] = [];
   const coordinator = createChatCoordinator({
-    allowSyntheticAnalystFallback: true,
     financialRuntime: {
       mode: "enforce",
       answers: () => true,
@@ -226,7 +232,7 @@ test("a financial turn's in-progress notice is not saved under the id its publis
 test("a retried run of a turn saves its answer under its own id", async () => {
   const saved: string[] = [];
   const coordinator = createChatCoordinator({
-    allowSyntheticAnalystFallback: true,
+    analystToolRuntime: answering,
     persistAssistantMessage: async (input) => {
       saved.push(input.message_id);
       return { message_id: input.message_id, thread_id: input.threadId, role: "assistant", snapshot_id: "s-1", blocks: [] } as unknown as ChatReadMessage;

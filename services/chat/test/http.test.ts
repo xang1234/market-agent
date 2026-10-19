@@ -73,11 +73,7 @@ const defaultTestRuntime: ChatAnalystToolRuntime = async (context) => {
 };
 
 function withDefaultTestRuntime(options: ChatServerOptions): ChatServerOptions {
-  if (
-    options.coordinator
-    || options.analystToolRuntime
-    || options.allowSyntheticAnalystFallback
-  ) {
+  if (options.coordinator || options.analystToolRuntime) {
     return options;
   }
   return { ...options, analystToolRuntime: defaultTestRuntime };

@@ -527,50 +527,6 @@ test("default turn runner fails closed when no analyst tool runtime is configure
   assert.equal(turn.events[1].error_code, "analyst_tool_runtime_not_configured");
 });
 
-test("analyst runtime takes precedence over explicit dev fallback", async () => {
-  let runtimeCalls = 0;
-  const coordinator = createChatCoordinator({
-    allowSyntheticAnalystFallback: true,
-    analystToolRuntime: async (context) => {
-      runtimeCalls += 1;
-      return {
-        snapshot_id: "11111111-1111-4111-a111-111111111111",
-        verification: { ok: true, failures: [] },
-        tool_calls: [
-          {
-            tool_call_id: "tool-backed-1",
-            tool_name: "get_quote",
-            status: "ok",
-            bundle_id: context.bundleId,
-          },
-        ],
-        blocks: [
-          {
-            id: "block-tool-backed-1",
-            kind: "rich_text",
-            snapshot_id: "11111111-1111-4111-a111-111111111111",
-            data_ref: { kind: "chat_turn", id: context.turnId ?? context.runId },
-            source_refs: [],
-            as_of: "2026-05-06T00:00:00.000Z",
-            segments: [{ type: "text", text: "Runtime generated analyst blocks." }],
-          },
-        ],
-      };
-    },
-  });
-
-  const turn = coordinator.getOrCreateTurn({
-    threadId: "thread-1",
-    runId: "run-1",
-    userIntent: "Review AAPL earnings quality",
-  });
-  await turn.completed;
-
-  assert.equal(runtimeCalls, 1);
-  assert.equal(turn.events.some((event) => event.stub === true), false);
-  assert.equal(turn.events[1].tool_call_id, "tool-backed-1");
-});
-
 test("default turn runner gates persistence on successful snapshot verification", async () => {
   let persistCalls = 0;
   const coordinator = createChatCoordinator({
@@ -675,10 +631,25 @@ test("registry-backed analyst runtime executes authorized read tools through the
   assert.match(JSON.stringify(result.tool_calls?.[0].result), /tool_result/);
 });
 
-test("explicit dev fallback emits synthetic strict Block[] analyst content", async () => {
+test("default turn runner saves the analyst runtime's strict Block[] content as composed", async () => {
   const persistedBlocks: unknown[] = [];
   const coordinator = createChatCoordinator({
-    allowSyntheticAnalystFallback: true,
+    analystToolRuntime: async (context) => ({
+      snapshot_id: "11111111-1111-4111-a111-111111111111",
+      verification: { ok: true, failures: [] },
+      blocks: [
+        {
+          id: "block-1",
+          kind: "rich_text",
+          snapshot_id: "11111111-1111-4111-a111-111111111111",
+          data_ref: { kind: "rich_text", id: "block-1" },
+          source_refs: [],
+          as_of: "2026-05-06T00:00:00.000Z",
+          title: "Research note",
+          segments: [{ type: "text", text: `${context.userIntent}.` }],
+        },
+      ],
+    }),
     persistAssistantMessage: async ({ blocks }) => {
       persistedBlocks.push(...blocks);
       return readMessage({ snapshot_id: "22222222-2222-4222-a222-222222222222", message_id: "33333333-3333-4333-a333-333333333333" });
@@ -716,7 +687,7 @@ test("explicit dev fallback emits synthetic strict Block[] analyst content", asy
 
 test("default turn runner emits turn.error when assistant message persistence fails", async () => {
   const coordinator = createChatCoordinator({
-    allowSyntheticAnalystFallback: true,
+    analystToolRuntime: successfulRuntime,
     persistAssistantMessage: async () => {
       throw new Error("snapshot seal failed");
     },

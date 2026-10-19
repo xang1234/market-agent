@@ -292,7 +292,6 @@ export type ChatCoordinatorOptions = {
   verificationMode?: ChatVerificationMode;
   financialRuntime?: ChatFinancialRuntime;
   analystToolRuntime?: ChatAnalystToolRuntime;
-  allowSyntheticAnalystFallback?: boolean;
   persistAssistantMessage?: ChatAssistantMessagePersistence;
   preResolveSubject?: ChatSubjectPreResolver;
   renderSubjectClarification?: ChatSubjectClarificationRenderer;
@@ -362,8 +361,6 @@ export function createChatCoordinator(
       runtime: analystToolRuntime,
       verificationMode: options.verificationMode ?? "strict",
     }))
-    : options.allowSyntheticAnalystFallback
-    ? ((context) => syntheticAnalystTurnRunner(context, persistAssistantMessage))
     : missingAnalystToolRuntimeRunner);
   const runner = threadTitleGenerationRunner(runActivityReportingRunner(financialAwareRunner(subjectAwareRunner(baseRunner, {
     persistAssistantMessage,
@@ -1521,95 +1518,6 @@ async function missingAnalystToolRuntimeRunner(context: ChatTurnRunContext) {
     error_code: "analyst_tool_runtime_not_configured",
     message: "analyst tool runtime is not configured",
   });
-}
-
-async function syntheticAnalystTurnRunner(
-  context: ChatTurnRunContext,
-  persistAssistantMessage?: ChatAssistantMessageCommit,
-) {
-  const { emit } = context;
-  const preResolution = context.subjectPreResolution ?? null;
-  const assistantText = defaultAnalystText(context, preResolution);
-  const snapshotSeed = stableUuid(`snapshot:${context.threadId}:${context.runId}:${context.turnId ?? context.runId}`);
-  const blockId = stableUuid(`block:${context.threadId}:${context.runId}:${assistantText}`);
-  const assistantBlocks = Object.freeze([
-    createRichTextBlock({
-      id: blockId,
-      snapshotId: snapshotSeed,
-      text: assistantText,
-      title: preResolution?.display_label ?? "Research note",
-    }),
-  ]);
-  const contentHash = contentHashForText(JSON.stringify(assistantBlocks));
-
-  if (!preResolution) {
-    emit("turn.started", { bundle_id: context.bundleId });
-    emit("tool.started", {
-      tool_call_id: "compose-analyst-blocks",
-      tool_name: "compose_analyst_blocks",
-    });
-    emit("tool.completed", {
-      tool_call_id: "compose-analyst-blocks",
-      tool_name: "compose_analyst_blocks",
-      status: "ok",
-      bundle_id: context.bundleId,
-    });
-  }
-
-  const persisted = persistAssistantMessage
-    ? await persistAssistantMessage({
-        threadId: context.threadId,
-        runId: context.runId,
-        turnId: context.turnId ?? context.runId,
-        role: "assistant",
-        blocks: assistantBlocks,
-        content_hash: contentHash,
-      })
-    : null;
-  const snapshotId = persisted?.snapshot_id ?? snapshotSeed;
-  emit("snapshot.staged", {
-    snapshot_id: snapshotId,
-    status: "staged",
-  });
-  emit("snapshot.sealed", {
-    snapshot_id: snapshotId,
-    status: "sealed",
-  });
-  emit("block.began", {
-    block_id: blockId,
-    kind: "rich_text",
-  });
-  emit("block.delta", {
-    block_id: blockId,
-    delta: {
-      segment: {
-        type: "text",
-        text: assistantText,
-      },
-    },
-  });
-  emit("block.completed", {
-    block_id: blockId,
-    content_hash: contentHash,
-  });
-  emit("turn.completed", {
-    ...sealedCompletion(persisted, stableUuid(`message:${context.threadId}:${context.runId}:${context.turnId ?? context.runId}`)),
-    bundle_id: context.bundleId,
-    ...(preResolution?.status === "resolved" ? { subject_ref: preResolution.subject_ref } : {}),
-    ...(preResolution !== null && preResolution.status !== "resolved" ? { clarification: true } : {}),
-  });
-}
-
-function defaultAnalystText(
-  context: ChatTurnRunContext,
-  preResolution: ChatResolvedSubjectPreResolution | null,
-): string {
-  const intent = context.userIntent?.trim();
-  const focus = intent && intent.length > 0 ? intent : "Start a research thread";
-  if (preResolution) {
-    return `${preResolution.display_label}: ${focus}. I will ground the memo in sealed snapshot blocks and cite structured facts, claims, and events as they are loaded.`;
-  }
-  return `${focus}. I will use the ${context.bundleId} bundle and return typed research blocks pinned to a snapshot.`;
 }
 
 export function createRegistryBackedAnalystToolRuntime(options: {

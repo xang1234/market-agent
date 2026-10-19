@@ -71,7 +71,6 @@ const persistSealed = async () => SEALED;
 const PERSISTED_PATHS: ReadonlyArray<[string, ChatCoordinatorOptions]> = [
   ["a verified answer", { analystToolRuntime: verifiedRuntime }],
   ["a subject clarification", { analystToolRuntime: verifiedRuntime, preResolveSubject: ambiguous }],
-  ["a synthetic answer", { allowSyntheticAnalystFallback: true }],
   ["a financial clarification", {
     analystToolRuntime: verifiedRuntime,
     financialRuntime: financialRuntime({
