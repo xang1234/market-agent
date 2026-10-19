@@ -27,7 +27,6 @@ async function createShellFixture(envOverrides: Record<string, string> = {}) {
 
   const env = {
     DEV_POSTGRES_PORT: "54329",
-    DEV_REDIS_PORT: "63791",
     WEB_PORT: "5173",
     CHAT_PORT: "4310",
     RESOLVER_PORT: "4311",
@@ -45,7 +44,6 @@ async function createShellFixture(envOverrides: Record<string, string> = {}) {
     DEV_POSTGRES_PASSWORD: "postgres",
     DEV_POSTGRES_DB: "market_agent",
     DATABASE_URL: "postgresql://wrong:wrong@127.0.0.1:9999/wrong",
-    REDIS_URL: "redis://127.0.0.1:9999",
     MA_FLAG_PLACEHOLDER_API: "true",
     MA_FLAG_SHOW_DEV_BANNER: "false",
     ...envOverrides,
@@ -875,7 +873,7 @@ test("DEV_PROFILE=chat starts only the golden-chat services and only the Postgre
   assert.deepEqual(lines("port:"), CHAT_SERVICES);
   assert.deepEqual(lines("start:"), CHAT_SERVICES, "parked services (and the discovery worker) are not started");
   assert.deepEqual(lines("ready:"), CHAT_SERVICES);
-  assert.deepEqual(lines("compose:"), ["stop redis minio", "up -d postgres"]);
+  assert.deepEqual(lines("compose:"), ["stop minio", "up -d postgres"]);
   // chat imports financial-core sources, which resolve ajv/decimal.js from its own node_modules.
   assert.ok(lines("install:").includes("services/financial-core"), "financial-core deps are installed");
 });
@@ -889,8 +887,27 @@ test("switching a running full stack to DEV_PROFILE=chat stops the separate proc
   assert.equal(result.code, 0, result.stderr);
   // web and chat now run inside app; their standalone processes would hold its ports.
   assert.deepEqual(lines("stop:"), ["chat", "discovery-worker", "watchlists", "web"]);
-  assert.deepEqual(lines("compose:"), ["stop redis minio", "up -d postgres"]);
+  assert.deepEqual(lines("compose:"), ["stop minio", "up -d postgres"]);
   assert.deepEqual(lines("start:"), ["app"]);
+});
+
+test("a failed full up takes down the containers when it started minio beside a running Postgres", async () => {
+  // The chat profile left Postgres up and parked minio.
+  const { result, lines } = await traceUp({}, [
+    'container_status(){ [[ "$1" == postgres ]] && printf running || printf stopped; }',
+    "wait_for_postgres(){ return 1; }",
+  ]);
+  assert.notEqual(result.code, 0);
+  assert.deepEqual(lines("compose:"), ["up -d", "down"]);
+});
+
+test("a failed full up leaves the containers alone when they were all already running", async () => {
+  const { result, lines } = await traceUp({}, [
+    "container_status(){ printf running; }",
+    "wait_for_postgres(){ return 1; }",
+  ]);
+  assert.notEqual(result.code, 0);
+  assert.deepEqual(lines("compose:"), ["up -d"]);
 });
 
 test("switching chat to full waits for the stopped app to free the shared web port before checking it", async () => {

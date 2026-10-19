@@ -333,10 +333,6 @@ build_database_url() {
     "$DEV_POSTGRES_DB"
 }
 
-build_redis_url() {
-  printf "redis://127.0.0.1:%s" "$DEV_REDIS_PORT"
-}
-
 # Recorded model replies in place of an LLM: true (the golden test's) or traces.
 no_keys() {
   [[ "$DEV_NO_KEYS" == "true" || "$DEV_NO_KEYS" == "traces" ]]
@@ -345,8 +341,6 @@ no_keys() {
 configure_runtime_env() {
   export DATABASE_URL
   DATABASE_URL="$(build_database_url)"
-  export REDIS_URL
-  REDIS_URL="$(build_redis_url)"
   export DEV_API_ANALYZE_SEAL_MODULE
   DEV_API_ANALYZE_SEAL_MODULE="${DEV_API_ANALYZE_SEAL_MODULE:-$ROOT/services/dev-api/src/local-runtime.ts}"
   export DEV_API_RUNTIME_MODULE
@@ -639,7 +633,7 @@ up_ui() {
 
 up() {
   local postgres_was_running=0
-  local redis_was_running=0
+  local minio_was_running=0
   local services name
   # Unquoted on use: empty means every compose service.
   local compose_services=""
@@ -676,7 +670,7 @@ up() {
   stop_parked_processes "$services"
   # The chat profile needs only postgres from docker-compose.dev.yml; park the others.
   if [[ -n "$compose_services" ]]; then
-    compose stop redis minio
+    compose stop minio
   fi
 
   for name in $services; do
@@ -687,10 +681,10 @@ up() {
     postgres_was_running=1
   fi
 
-  # The chat profile doesn't start redis, so only postgres decides whether this run
+  # The chat profile doesn't start minio, so only postgres decides whether this run
   # brought the containers up (and must take them down on failure).
-  if [[ "$(container_status redis)" == "running" || -n "$compose_services" ]]; then
-    redis_was_running=1
+  if [[ "$(container_status minio)" == "running" || -n "$compose_services" ]]; then
+    minio_was_running=1
   fi
 
   # shellcheck disable=SC2086
@@ -699,7 +693,7 @@ up() {
     return 1
   fi
 
-  if [[ "$postgres_was_running" -eq 0 || "$redis_was_running" -eq 0 ]]; then
+  if [[ "$postgres_was_running" -eq 0 || "$minio_was_running" -eq 0 ]]; then
     COMPOSE_STARTED=1
   fi
 
@@ -790,7 +784,6 @@ status() {
 
   printf "profile   %s\n" "$DEV_PROFILE"
   printf "postgres  %-8s 127.0.0.1:%s\n" "$(container_status postgres)" "$DEV_POSTGRES_PORT"
-  printf "redis     %-8s 127.0.0.1:%s\n" "$(container_status redis)" "$DEV_REDIS_PORT"
   for name in $CHAT_SERVICES $FULL_SERVICES $( [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]] && printf dev-providers ); do
     if [[ " $services " == *" $name "* ]]; then
       port="$(service_port "$name")"

@@ -9,7 +9,6 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![Node 22](https://img.shields.io/badge/Node-22.19%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![PostgreSQL 15](https://img.shields.io/badge/Postgres-15-336791?logo=postgresql&logoColor=white)](https://www.postgresql.org)
-[![Redis 7](https://img.shields.io/badge/Redis-7-dc382d?logo=redis&logoColor=white)](https://redis.io)
 [![MinIO / S3](https://img.shields.io/badge/Object%20Store-MinIO%20%2F%20S3-c72e49?logo=minio&logoColor=white)](https://min.io)
 [![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ed?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
 
@@ -89,7 +88,7 @@ On any number, claim, event, or source, open the inspector to see provenance row
 ### Prerequisites
 
 - **Node ≥ 22.19**
-- **Docker + Docker Compose** (runs Postgres, Redis, and MinIO for you)
+- **Docker + Docker Compose** (runs Postgres and MinIO for you)
 - ~3 GB free for images and dependencies
 - *(Optional)* Python ≥ 3.11 or `uv`, only if you enable the unofficial local-dev data fallback
 
@@ -220,7 +219,7 @@ market-agent/
 ├── db/                        schema pack, migrations, seeds
 ├── docs/                      screenshots + reference docs
 ├── scripts/                   dev-shell.sh + helpers
-├── docker-compose.dev.yml     Postgres 15 · Redis 7 · MinIO
+├── docker-compose.dev.yml     Postgres 15 · MinIO
 └── .env.dev.example           ports + flags
 ```
 
