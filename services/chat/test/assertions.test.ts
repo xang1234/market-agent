@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { assertionList, checkAssertions } from "../src/assertions.ts";
 import type { EvidencePacket } from "../src/evidence-packet.ts";
+import { plainText, renderAssertion } from "../src/render-assertions.ts";
 
 const PACKET: EvidencePacket = {
   route: "comparison",
@@ -421,12 +422,13 @@ test("each rejection names the check that failed, so binding and comparative fai
   ]);
 });
 
-test("a packet reference in the text is checked by membership, never read as a number (prose-refs)", () => {
-  const reasons = (text: string, evidence: string[]) => check([{ kind: "observation", text, evidence }]).rejected.map((entry) => entry.reason);
-  assert.deepEqual(reasons("AMD's fiscal 2025 revenue is [[F4]].", ["F4"]), []);
-  assert.deepEqual(reasons("AMD's fiscal 2025 revenue is [[F4]].", ["F3"]), ["[[F4]] is not in its evidence"]);
-  assert.deepEqual(reasons("AMD's fiscal 2025 revenue is [[F9]].", ["F4"]), ["unknown reference [[F9]]"]);
-  // An inference references no figure, not even its supports' (#301).
+test("an observation's text is never shown, so a reference it writes is not checked: it renders from its evidence", () => {
+  const report = check([{ kind: "observation", text: "NVDA's FY2026 gross margin was [[F9]].", evidence: ["F1"] }]);
+  assert.deepEqual(report.rejected, []);
+  assert.equal(plainText(renderAssertion(report.accepted[0]!, PACKET, []).segments), "NVDA's gross margin was 75.0% in FY2026.");
+});
+
+test("an inference that writes a reference is rejected: it writes no digit (#301)", () => {
   const report = check([
     { kind: "observation", text: "NVDA's FY2026 gross margin was [[F1]].", evidence: ["F1"] },
     { kind: "analyst_inference", text: "The margin leaves room to invest.", supports: [0] },
