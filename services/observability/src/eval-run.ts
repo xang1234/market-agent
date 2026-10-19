@@ -12,8 +12,6 @@ export type EvalRunResultRow = {
   created_at: Date;
 };
 
-// Writes a row to eval_run_results. PX.1 schedules these nightly per suite;
-// `model_version` + `prompt_version` let drift reports attribute regressions.
 export async function writeEvalRunResult(
   db: QueryExecutor,
   input: EvalRunResultInput,

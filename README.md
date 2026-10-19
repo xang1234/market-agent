@@ -213,7 +213,7 @@ market-agent/
 │   ├── notifications/         email · web push · digest delivery
 │   ├── chat/                  thread coordinator + analyst runtime
 │   ├── snapshot/              manifest staging + verification
-│   ├── observability/         drift monitoring (npm run drift:monitor)
+│   ├── observability/         tool-call · citation · verifier · eval · run logs
 │   ├── analyze/               Analyze tab memo workflow
 │   ├── artifact/              shared artifact model (add-to-chat)
 │   ├── themes/ summary/ portfolio/ watchlists/ tools/ shared/ dev-api/

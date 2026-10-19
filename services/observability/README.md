@@ -12,13 +12,6 @@ by the normative schema pack:
   per `(block_id, ref_kind, ref_id)`
 - `writeVerifierFailLog` → `verifier_fail_logs`
 - `writeEvalRunResult` → `eval_run_results`
-- `runGoldenEvalSuite` → evaluates loaded golden cases and persists a summarized
-  `eval_run_results` row
-- `readLatestGoldenEvalDriftReport` → compares the latest two eval runs for a
-  suite and flags category regressions
-- `runGoldenEvalDriftMonitor` → loads golden cases, runs the evaluator, writes
-  `eval_run_results`, computes the latest drift report, and returns a
-  pass/fail policy status
 - `startAgentRunLog` / `completeAgentRunLog` → `agent_run_logs` (operational
   audit per agent run; one row spans the run and is closed with a terminal
   status, outputs summary, and server-computed `duration_ms`)
@@ -33,31 +26,11 @@ unchanged) and returns the generated primary key plus `created_at`.
 - Preserve jsonb column semantics by validating JSON-compatible payloads
   before binding them to `$N::jsonb` parameters.
 
-## Drift Monitoring Loop
-
-Run the end-to-end drift monitor with:
-
-```bash
-DATABASE_URL=... \
-GOLDEN_EVAL_EVALUATOR_MODULE=file:///abs/path/to/evaluator.mjs \
-GOLDEN_EVAL_MODEL_VERSION=model-2026-05-08 \
-GOLDEN_EVAL_PROMPT_VERSION=analyst/v2 \
-npm run drift:monitor
-```
-
-The evaluator module must export `evaluateGoldenCase(testCase)` or a default
-function matching `GoldenEvalEvaluator`. The command loads cases from
-`GOLDEN_EVAL_CASES_DIR` or the default `evals/golden/cases`, persists the run,
-compares against the previous run for the same suite, prints the report JSON,
-and exits non-zero when `GOLDEN_EVAL_FAIL_ON_ALERT` is not `false` and drift
-regressed.
-
-Operational dashboard/query paths:
+## Operational queries
 
 ```sql
--- Latest golden eval runs and summaries
-select suite_name, model_version, prompt_version, created_at,
-       result_json->'summary' as summary
+-- Latest eval runs and summaries
+select suite_name, model_version, prompt_version, created_at, result_json
   from eval_run_results
  order by created_at desc
  limit 20;
@@ -90,8 +63,6 @@ select snapshot_id, count(*) as citation_refs
   here under `fra-hyz.1.1`; orchestration code that calls
   `start`/`completeAgentRunLog` around a run lives in the agent runtime, not in
   this package.
-- **Scheduler ownership** — the package now provides the runnable one-shot
-  monitor. Cron/GitHub Actions/worker scheduling decides when to invoke it.
 - **Status / reason-code taxonomies** — callers choose the vocabulary
   today; PX.1 formalizes it.
 
@@ -140,45 +111,6 @@ Duplicate refs inside one block are deduplicated before insert. Block
 `citation_logs.source_id` null unless a direct `writeCitationLog` caller
 supplies a per-ref source mapping. Block-derived citation rows are inserted with
 one SQL statement so a failed batch cannot partially persist.
-
-Golden evals:
-
-```ts
-import {
-  DEFAULT_GOLDEN_EVAL_CASES_DIR,
-  loadGoldenEvalCases,
-  runGoldenEvalSuite,
-} from "observability";
-
-const cases = loadGoldenEvalCases(DEFAULT_GOLDEN_EVAL_CASES_DIR);
-await runGoldenEvalSuite(db, {
-  suite_name: "golden-smoke",
-  model_version: "model-2026-04-29",
-  prompt_version: "analyst/v1",
-  cases,
-  evaluate: async (testCase) => evaluateGoldenCase(testCase),
-});
-```
-
-`runGoldenEvalSuite` requires coverage for the 14 categories listed in
-`stock-agent-v2.md`, records each case outcome, summarizes pass/fail counts by
-category, and writes the JSON summary to `eval_run_results`.
-
-`readLatestGoldenEvalDriftReport` loads the newest two rows for a suite and
-reports summary/category deltas. Any category with more failures or fewer passes
-sets `alert: true`, giving schedulers a deterministic regression signal.
-
-`runGoldenEvalDriftMonitor` composes that full loop for schedulers or CI:
-
-```ts
-await runGoldenEvalDriftMonitor(db, {
-  suite_name: "golden-nightly",
-  model_version: "model-2026-05-08",
-  prompt_version: "analyst/v2",
-  evaluate: async (testCase) => evaluateGoldenCase(testCase),
-  policy: { failOnAlert: true },
-});
-```
 
 ## Tests
 
