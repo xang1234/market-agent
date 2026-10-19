@@ -1,5 +1,3 @@
-// A request whose response keeps the raw status line, header pairs in wire
-// order, and body text, so a test can pin the exact bytes a service sends.
 import { request } from "node:http";
 
 export type RawResponse = { status: number; headers: string[]; body: string };

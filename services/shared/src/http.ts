@@ -1,5 +1,3 @@
-// Imports only Node built-ins: services import this file without installing
-// the shared package's dependencies.
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 export type QueryExecutor = {
