@@ -86,6 +86,7 @@ export async function createDevApiRuntimeFromEnv(
     inspectEvidence: module.inspectEvidence as DevApiServiceAdapterDeps["inspectEvidence"],
     analyzeFinancial: module.analyzeFinancial as DevApiServiceAdapterDeps["analyzeFinancial"],
     discovery,
+    auth: { env },
   });
   return { adapters, worker };
 }

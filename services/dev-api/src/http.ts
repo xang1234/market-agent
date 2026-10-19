@@ -1,6 +1,6 @@
 import { createThesisAdapter, assertLegacyThesisEditAllowed, type ThesisAdapter } from "./thesis-adapter.ts";
 import { withTransaction } from "../../evidence/src/transaction.ts";
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
 import { ANALYZE_PLAYBOOKS } from "../../analyze/src/index.ts";
 import {
@@ -23,6 +23,11 @@ import type { JsonObject, JsonValue } from "../../observability/src/types.ts";
 import { isSubjectRef, isUuid, type SubjectRef } from "../../shared/src/subject-ref.ts";
 import { readDevFlags } from "../../shared/src/devFlags.ts";
 import {
+  authenticatedUserRequiredMessage,
+  readAuthenticatedUserId,
+  type RequestAuthConfig,
+} from "../../shared/src/request-auth.ts";
+import {
   DevApiHttpError,
   nonEmptyString,
   readRequiredUuidValue,
@@ -39,7 +44,7 @@ import type { DevApiDiscoveryAdapter } from "./discovery-http.ts";
 import { createDiscoveryDevApiAdapter } from "./discovery-http.ts";
 import {
   createFinancialDevApiAdapter,
-  developmentHeaderAuthenticator,
+  requestAuthAuthenticator,
   type DevApiFinancialAdapter,
 } from "./financial-wiring.ts";
 import type { DiscoveryService } from "../../discovery/src/ports.ts";
@@ -194,6 +199,7 @@ export function createDevApiServer(
   const flags = readDevFlags(env);
   const adapters = options.adapters;
   const llmOptions = options.llm ?? {};
+  const auth: RequestAuthConfig = { env };
 
   return createServer(async (req, res) => {
     try {
@@ -222,8 +228,8 @@ export function createDevApiServer(
     const thesisMatch = url.pathname.match(/^\/v1\/agents\/([^/]+)\/thesis(\/draft)?$/);
     if (thesisMatch) {
       res.setHeader("cache-control", "no-store");
-      const userId = readUserIdHeader(req.headers["x-user-id"]);
-      if (!userId) { respondJson(res, 401, { error: "x-user-id header is required" }); return; }
+      const userId = requireUserId(req, res, auth);
+      if (userId === null) return;
       const agentId = decodeURIComponent(thesisMatch[1]);
       if (!isUuid(agentId)) { respondJson(res, 400, { error: "agent id must be a UUID" }); return; }
       if (!adapters?.theses) { respondJson(res, 503, { error: "thesis monitoring is unavailable" }); return; }
@@ -265,11 +271,8 @@ export function createDevApiServer(
 
     if (req.method === "POST" && url.pathname === "/v1/evidence/inspect") {
       res.setHeader("cache-control", "no-store");
-      const userId = readUserIdHeader(req.headers["x-user-id"]);
-      if (userId === null) {
-        respondJson(res, 401, { error: "x-user-id header is required" });
-        return;
-      }
+      const userId = requireUserId(req, res, auth);
+      if (userId === null) return;
       if (!adapters) {
         respondJson(res, 503, { error: "durable evidence adapter is not configured" });
         return;
@@ -296,21 +299,15 @@ export function createDevApiServer(
     }
 
     if (req.method === "GET" && url.pathname === "/v1/analyze/playbooks") {
-      const userId = readUserIdHeader(req.headers["x-user-id"]);
-      if (userId === null) {
-        respondJson(res, 401, { error: "x-user-id header is required" });
-        return;
-      }
+      const userId = requireUserId(req, res, auth);
+      if (userId === null) return;
       respondJson(res, 200, { playbooks: ANALYZE_PLAYBOOKS });
       return;
     }
 
     if (req.method === "GET" && url.pathname === "/v1/analyze/templates") {
-      const userId = readUserIdHeader(req.headers["x-user-id"]);
-      if (userId === null) {
-        respondJson(res, 401, { error: "x-user-id header is required" });
-        return;
-      }
+      const userId = requireUserId(req, res, auth);
+      if (userId === null) return;
       if (!adapters) {
         respondJson(res, 503, { error: "durable analyze adapter is not configured" });
         return;
@@ -320,11 +317,8 @@ export function createDevApiServer(
     }
 
     if (req.method === "POST" && url.pathname === "/v1/analyze/runs") {
-      const userId = readUserIdHeader(req.headers["x-user-id"]);
-      if (userId === null) {
-        respondJson(res, 401, { error: "x-user-id header is required" });
-        return;
-      }
+      const userId = requireUserId(req, res, auth);
+      if (userId === null) return;
       if (!adapters) {
         respondJson(res, 503, { error: "durable analyze adapter is not configured" });
         return;
@@ -340,11 +334,8 @@ export function createDevApiServer(
     }
 
     if (req.method === "GET" && url.pathname === "/v1/analyze/runs") {
-      const userId = readUserIdHeader(req.headers["x-user-id"]);
-      if (userId === null) {
-        respondJson(res, 401, { error: "x-user-id header is required" });
-        return;
-      }
+      const userId = requireUserId(req, res, auth);
+      if (userId === null) return;
       if (!adapters) {
         respondJson(res, 503, { error: "durable analyze adapter is not configured" });
         return;
@@ -358,11 +349,8 @@ export function createDevApiServer(
 
     const analyzeRunDetailMatch = url.pathname.match(/^\/v1\/analyze\/runs\/([^/]+)$/);
     if (req.method === "GET" && analyzeRunDetailMatch) {
-      const userId = readUserIdHeader(req.headers["x-user-id"]);
-      if (userId === null) {
-        respondJson(res, 401, { error: "x-user-id header is required" });
-        return;
-      }
+      const userId = requireUserId(req, res, auth);
+      if (userId === null) return;
       if (!adapters) {
         respondJson(res, 503, { error: "durable analyze adapter is not configured" });
         return;
@@ -374,11 +362,8 @@ export function createDevApiServer(
 
     const analyzeRerunMatch = url.pathname.match(/^\/v1\/analyze\/runs\/([^/]+)\/rerun$/);
     if (req.method === "POST" && analyzeRerunMatch) {
-      const userId = readUserIdHeader(req.headers["x-user-id"]);
-      if (userId === null) {
-        respondJson(res, 401, { error: "x-user-id header is required" });
-        return;
-      }
+      const userId = requireUserId(req, res, auth);
+      if (userId === null) return;
       if (!adapters) {
         respondJson(res, 503, { error: "durable analyze adapter is not configured" });
         return;
@@ -390,11 +375,8 @@ export function createDevApiServer(
 
     const analyzeShareMatch = url.pathname.match(/^\/v1\/analyze\/runs\/([^/]+)\/share-to-chat$/);
     if (req.method === "POST" && analyzeShareMatch) {
-      const userId = readUserIdHeader(req.headers["x-user-id"]);
-      if (userId === null) {
-        respondJson(res, 401, { error: "x-user-id header is required" });
-        return;
-      }
+      const userId = requireUserId(req, res, auth);
+      if (userId === null) return;
       const body = await readJson(req).catch(() => BAD_JSON);
       if (body === BAD_JSON) {
         respondJson(res, 400, { error: "request body must be valid JSON" });
@@ -414,11 +396,8 @@ export function createDevApiServer(
     }
 
     if (req.method === "GET" && url.pathname === "/v1/agents") {
-      const userId = readUserIdHeader(req.headers["x-user-id"]);
-      if (userId === null) {
-        respondJson(res, 401, { error: "x-user-id header is required" });
-        return;
-      }
+      const userId = requireUserId(req, res, auth);
+      if (userId === null) return;
       if (!adapters) {
         respondJson(res, 503, { error: "durable agents adapter is not configured" });
         return;
@@ -428,11 +407,8 @@ export function createDevApiServer(
     }
 
     if (req.method === "POST" && url.pathname === "/v1/agents") {
-      const userId = readUserIdHeader(req.headers["x-user-id"]);
-      if (userId === null) {
-        respondJson(res, 401, { error: "x-user-id header is required" });
-        return;
-      }
+      const userId = requireUserId(req, res, auth);
+      if (userId === null) return;
       const body = await readJson(req).catch(() => BAD_JSON);
       if (body === BAD_JSON) {
         respondJson(res, 400, { error: "request body must be valid JSON" });
@@ -449,11 +425,8 @@ export function createDevApiServer(
 
     const agentMatch = url.pathname.match(/^\/v1\/agents\/([^/]+)$/);
     if (agentMatch && req.method === "PATCH") {
-      const userId = readUserIdHeader(req.headers["x-user-id"]);
-      if (userId === null) {
-        respondJson(res, 401, { error: "x-user-id header is required" });
-        return;
-      }
+      const userId = requireUserId(req, res, auth);
+      if (userId === null) return;
       const agentId = decodeURIComponent(agentMatch[1]);
       const body = await readJson(req).catch(() => BAD_JSON);
       if (body === BAD_JSON) {
@@ -475,11 +448,8 @@ export function createDevApiServer(
     }
 
     if (agentMatch && req.method === "DELETE") {
-      const userId = readUserIdHeader(req.headers["x-user-id"]);
-      if (userId === null) {
-        respondJson(res, 401, { error: "x-user-id header is required" });
-        return;
-      }
+      const userId = requireUserId(req, res, auth);
+      if (userId === null) return;
       const agentId = decodeURIComponent(agentMatch[1]);
       if (!adapters) {
         respondJson(res, 503, { error: "durable agents adapter is not configured" });
@@ -497,11 +467,8 @@ export function createDevApiServer(
 
     const findingsMatch = url.pathname.match(/^\/v1\/agents\/([^/]+)\/findings$/);
     if (req.method === "GET" && findingsMatch) {
-      const userId = readUserIdHeader(req.headers["x-user-id"]);
-      if (userId === null) {
-        respondJson(res, 401, { error: "x-user-id header is required" });
-        return;
-      }
+      const userId = requireUserId(req, res, auth);
+      if (userId === null) return;
       const agentId = decodeURIComponent(findingsMatch[1]);
       if (!adapters) {
         respondJson(res, 503, { error: "durable agents adapter is not configured" });
@@ -518,11 +485,8 @@ export function createDevApiServer(
 
     const activityMatch = url.pathname.match(/^\/v1\/agents\/([^/]+)\/activity$/);
     if (req.method === "GET" && activityMatch) {
-      const userId = readUserIdHeader(req.headers["x-user-id"]);
-      if (userId === null) {
-        respondJson(res, 401, { error: "x-user-id header is required" });
-        return;
-      }
+      const userId = requireUserId(req, res, auth);
+      if (userId === null) return;
       const agentId = decodeURIComponent(activityMatch[1]);
       if (!adapters) {
         respondJson(res, 503, { error: "durable agents adapter is not configured" });
@@ -539,11 +503,8 @@ export function createDevApiServer(
 
     const runMatch = url.pathname.match(/^\/v1\/agents\/([^/]+)\/runs$/);
     if (req.method === "POST" && runMatch) {
-      const userId = readUserIdHeader(req.headers["x-user-id"]);
-      if (userId === null) {
-        respondJson(res, 401, { error: "x-user-id header is required" });
-        return;
-      }
+      const userId = requireUserId(req, res, auth);
+      if (userId === null) return;
       const agentId = decodeURIComponent(runMatch[1]);
       if (!adapters) {
         respondJson(res, 503, { error: "durable agents adapter is not configured" });
@@ -702,6 +663,7 @@ export type DevApiServiceAdapterDeps = AnalyzeServiceDeps & {
   // The agent loop takes the same pool for its watermark transaction.
   db: AgentWatermarkClientPool;
   discovery?: DiscoveryService;
+  auth?: RequestAuthConfig;
   createAgentLoopStages?: DevApiAgentLoopStageFactory;
   inspectEvidence?(input: {
     userId: string;
@@ -712,8 +674,8 @@ export type DevApiServiceAdapterDeps = AnalyzeServiceDeps & {
 
 export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): DevApiAdapters {
   return {
-    ...(deps.discovery === undefined ? {} : { discovery: createDiscoveryDevApiAdapter(deps.discovery) }),
-    financial: createFinancialDevApiAdapter({ db: deps.db, authenticate: developmentHeaderAuthenticator }),
+    ...(deps.discovery === undefined ? {} : { discovery: createDiscoveryDevApiAdapter(deps.discovery, deps.auth) }),
+    financial: createFinancialDevApiAdapter({ db: deps.db, authenticate: requestAuthAuthenticator(deps.auth) }),
     analyze: createServiceAnalyzeAdapter(deps),
     theses: createThesisAdapter(deps.db),
     agents: {
@@ -1116,9 +1078,10 @@ async function readJson(req: AsyncIterable<Uint8Array | string>): Promise<unknow
   return JSON.parse(text);
 }
 
-function readUserIdHeader(value: string | string[] | undefined): string | null {
-  if (typeof value !== "string") return null;
-  return nonEmptyString(value);
+function requireUserId(req: IncomingMessage, res: ServerResponse, auth: RequestAuthConfig): string | null {
+  const userId = readAuthenticatedUserId(req, auth);
+  if (userId === null) respondJson(res, 401, { error: authenticatedUserRequiredMessage(auth) });
+  return userId;
 }
 
 function serviceCatalog(env: Record<string, string | undefined>, hasAdapters: boolean) {
