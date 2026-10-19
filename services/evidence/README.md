@@ -158,7 +158,7 @@ import {
   getDocumentAncestors,
   getDocumentThread,
   getConversation,
-} from "evidence";
+} from "../../evidence/src/document-repo.ts";
 
 await getDocumentChildren(db, parentId);   // direct replies, ordered by published_at (excludes parent)
 await getDocumentAncestors(db, replyId);   // root → ... → replyId, inclusive (includes replyId)
@@ -239,7 +239,7 @@ interface against any S3-compatible API (Cloudflare R2, AWS S3, MinIO):
 
 ```ts
 import { S3Client } from "@aws-sdk/client-s3";
-import { S3ObjectStore } from "evidence";
+import { S3ObjectStore } from "../../evidence/src/s3-object-store.ts";
 
 const client = new S3Client({
   endpoint: process.env.S3_ENDPOINT,           // omit for AWS S3 default

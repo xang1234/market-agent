@@ -69,11 +69,8 @@ select snapshot_id, count(*) as citation_refs
 ## Usage
 
 ```ts
-import {
-  runLoggedToolCall,
-  writeCitationLogsForBlocks,
-  writeToolCallLog,
-} from "observability";
+import { writeCitationLogsForBlocks } from "../../observability/src/citation.ts";
+import { runLoggedToolCall, writeToolCallLog } from "../../observability/src/tool-call.ts";
 
 await writeToolCallLog(db, {
   tool_name: "resolver.resolveByTicker",
