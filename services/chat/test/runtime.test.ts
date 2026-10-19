@@ -1,40 +1,28 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
+import * as localRuntime from "../src/local-runtime.ts";
 import { loadChatServerOptionsFromEnv } from "../src/runtime.ts";
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-
-test("runtime config returns empty chat options when no database or modules are configured", async () => {
+test("runtime config returns empty chat options when no database is configured", async () => {
   assert.deepEqual(await loadChatServerOptionsFromEnv({}), {});
 });
 
-test("runtime config wires in-repo analyst runtime and persistence when DATABASE_URL is configured", async () => {
-  const options = await loadChatServerOptionsFromEnv({
-    DATABASE_URL: "postgres://example.invalid/market_agent",
+for (const variable of ["CHAT_DATABASE_URL", "DATABASE_URL"]) {
+  test(`runtime config wires the in-repo local runtime when ${variable} is configured`, async () => {
+    const options = await loadChatServerOptionsFromEnv({
+      [variable]: "postgres://example.invalid/market_agent",
+    });
+
+    assert.deepEqual(options, {
+      persistAssistantMessage: localRuntime.persistAssistantMessage,
+      preResolveSubject: localRuntime.preResolveSubject,
+      loadPriorSubjects: localRuntime.loadPriorSubjects,
+      generateThreadTitle: localRuntime.generateThreadTitle,
+      analystToolRuntime: localRuntime.analystToolRuntime,
+      financialRuntime: localRuntime.financialRuntime,
+    });
   });
-
-  assert.equal(typeof options.analystToolRuntime, "function");
-  assert.equal(typeof options.persistAssistantMessage, "function");
-  assert.equal(typeof options.generateThreadTitle, "function");
-  // The subject pre-resolver defaults to the in-repo runtime too, so the dev /
-  // default server grounds turns without a separately-configured
-  // CHAT_SUBJECT_RESOLVER_MODULE. Without this, no subject ever resolves and
-  // every chat answer falls back to the ungrounded screen bundle.
-  assert.equal(typeof options.preResolveSubject, "function");
-});
-
-test("runtime config resolves in-repo default runtime when loader cwd is the repo root", async () => {
-  const options = await loadChatServerOptionsFromEnv({
-    DATABASE_URL: "postgres://example.invalid/market_agent",
-  }, repoRoot);
-
-  assert.equal(typeof options.analystToolRuntime, "function");
-  assert.equal(typeof options.persistAssistantMessage, "function");
-});
+}
 
 test("in-repo chat runtime runs without the local stub tool executor mode", async () => {
   const previous = process.env.CHAT_LOCAL_TOOL_EXECUTOR;
@@ -42,7 +30,7 @@ test("in-repo chat runtime runs without the local stub tool executor mode", asyn
   try {
     const options = await loadChatServerOptionsFromEnv({
       DATABASE_URL: "postgres://example.invalid/market_agent",
-    }, repoRoot);
+    });
 
     await assert.rejects(
       async () =>
@@ -63,153 +51,4 @@ test("in-repo chat runtime runs without the local stub tool executor mode", asyn
       process.env.CHAT_LOCAL_TOOL_EXECUTOR = previous;
     }
   }
-});
-
-test("runtime config loads assistant persistence from configured module", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "chat-runtime-"));
-  const modulePath = join(dir, "persistence.mjs");
-  await writeFile(
-    modulePath,
-    "export async function persistAssistantMessage() { return { message_id: 'message-1', thread_id: 'thread-1', role: 'assistant', snapshot_id: 'snapshot-1', blocks: [], content_hash: 'sha256:test', created_at: '2026-05-06T00:00:00.000Z', answered_by: null, block_proofs: {} }; }",
-  );
-
-  const options = await loadChatServerOptionsFromEnv({
-    CHAT_PERSISTENCE_MODULE: pathToFileURL(modulePath).href,
-  });
-
-  assert.equal(typeof options.persistAssistantMessage, "function");
-  assert.deepEqual(await options.persistAssistantMessage!({
-    message_id: "44444444-4444-4444-a444-444444444444",
-    threadId: "thread-1",
-    runId: "run-1",
-    turnId: "turn-1",
-    role: "assistant",
-    blocks: [],
-    content_hash: "sha256:test",
-  }), {
-    message_id: "message-1",
-    thread_id: "thread-1",
-    role: "assistant",
-    snapshot_id: "snapshot-1",
-    blocks: [],
-    content_hash: "sha256:test",
-    created_at: "2026-05-06T00:00:00.000Z",
-    answered_by: null,
-    block_proofs: {},
-  });
-});
-
-test("runtime config resolves relative persistence modules from the process cwd", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "chat-runtime-relative-"));
-  await writeFile(
-    join(dir, "persistence.mjs"),
-    "export async function persistAssistantMessage() { return { message_id: 'relative-message', thread_id: 'thread-1', role: 'assistant', snapshot_id: 'relative-snapshot', blocks: [], content_hash: 'sha256:test', created_at: '2026-05-06T00:00:00.000Z', answered_by: null, block_proofs: {} }; }",
-  );
-
-  const options = await loadChatServerOptionsFromEnv({
-    CHAT_PERSISTENCE_MODULE: "./persistence.mjs",
-  }, dir);
-
-  assert.equal(typeof options.persistAssistantMessage, "function");
-  assert.deepEqual(await options.persistAssistantMessage!({
-    message_id: "44444444-4444-4444-a444-444444444444",
-    threadId: "thread-1",
-    runId: "run-1",
-    turnId: "turn-1",
-    role: "assistant",
-    blocks: [],
-    content_hash: "sha256:test",
-  }), {
-    message_id: "relative-message",
-    thread_id: "thread-1",
-    role: "assistant",
-    snapshot_id: "relative-snapshot",
-    blocks: [],
-    content_hash: "sha256:test",
-    created_at: "2026-05-06T00:00:00.000Z",
-    answered_by: null,
-    block_proofs: {},
-  });
-});
-
-test("runtime config loads subject pre-resolver from configured module", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "chat-runtime-subject-"));
-  const modulePath = join(dir, "subjects.mjs");
-  await writeFile(
-    modulePath,
-    `export async function preResolveSubject({ text }) {
-      return {
-        status: 'needs_clarification',
-        input_text: text,
-        normalized_input: text,
-        candidates: [],
-        message: 'Which subject did you mean?'
-      };
-    }
-    export function renderSubjectClarification({ preResolution }) {
-      return {
-        blocks: [{ type: 'text', text: preResolution.message }],
-        content_hash: 'sha256:clarification',
-        text: preResolution.message
-      };
-    }`,
-  );
-
-  const options = await loadChatServerOptionsFromEnv({
-    CHAT_SUBJECT_RESOLVER_MODULE: pathToFileURL(modulePath).href,
-  });
-
-  assert.equal(typeof options.preResolveSubject, "function");
-  assert.deepEqual(await options.preResolveSubject!({ text: "GOOG" }), {
-    status: "needs_clarification",
-    input_text: "GOOG",
-    normalized_input: "GOOG",
-    candidates: [],
-    message: "Which subject did you mean?",
-  });
-  assert.equal(typeof options.renderSubjectClarification, "function");
-  assert.deepEqual(await options.renderSubjectClarification!({
-    threadId: "thread-1",
-    runId: "run-1",
-    turnId: "turn-1",
-    preResolution: {
-      status: "needs_clarification",
-      input_text: "GOOG",
-      normalized_input: "GOOG",
-      candidates: [],
-      message: "Which subject did you mean?",
-    },
-  }), {
-    blocks: [{ type: "text", text: "Which subject did you mean?" }],
-    content_hash: "sha256:clarification",
-    text: "Which subject did you mean?",
-  });
-});
-
-test("runtime config loads thread title generator from configured module", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "chat-runtime-title-"));
-  const modulePath = join(dir, "title.mjs");
-  await writeFile(
-    modulePath,
-    "export async function generateThreadTitle(input) { globalThis.__titleInput = input; }",
-  );
-
-  const options = await loadChatServerOptionsFromEnv({
-    CHAT_THREAD_TITLE_MODULE: pathToFileURL(modulePath).href,
-  });
-
-  assert.equal(typeof options.generateThreadTitle, "function");
-  await options.generateThreadTitle!({
-    threadId: "thread-1",
-    runId: "run-1",
-    turnId: "turn-1",
-    assistantText: "Assistant text",
-  });
-  assert.deepEqual((globalThis as { __titleInput?: unknown }).__titleInput, {
-    threadId: "thread-1",
-    runId: "run-1",
-    turnId: "turn-1",
-    assistantText: "Assistant text",
-  });
-  delete (globalThis as { __titleInput?: unknown }).__titleInput;
 });

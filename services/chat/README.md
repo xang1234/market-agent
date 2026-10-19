@@ -16,8 +16,8 @@ Durable Object adapter.
 - resumes after `Last-Event-ID` by replaying only events with a higher sequence
 - emits periodic `heartbeat` control events
 - serializes turn execution per `thread_id`
-- can load a `persistAssistantMessage` hook from `CHAT_PERSISTENCE_MODULE`
-  so assistant messages are persisted only after snapshot sealing succeeds
+- with a database, persists assistant messages only after snapshot sealing
+  succeeds (see Persistence Hook)
 - in local durable mode, reloads `LLM_SETTINGS_ENV_FILE` for each LLM-backed
   chat/title call and routes through the shared `services/llm` pi adapter when
   `LITELLM_MODEL` has an enabled deployment
@@ -69,9 +69,14 @@ mounted and other handlers (e.g., the SSE stream) are unaffected.
 
 ## Persistence Hook
 
-`CHAT_PERSISTENCE_MODULE` may be a package specifier, absolute path, file URL,
-or path relative to the process working directory. The module must export
-`persistAssistantMessage(input)`. It saves the message under `input.message_id`,
+With `CHAT_DATABASE_URL` or `DATABASE_URL` set, the server takes its hooks from
+`src/local-runtime.ts`: `persistAssistantMessage`, the analyst runtime and its
+financial lane, the subject pre-resolver and prior-subject loader, and the
+thread title generator. Without a database it takes none of them, and a turn
+ends with
+`turn.error { error_code: "analyst_tool_runtime_not_configured" }`.
+
+`persistAssistantMessage(input)` saves the message under `input.message_id`,
 the turn's one answer id, so a messages read can tell the turn is answered
 before its stream ends. It resolves only after a snapshot has sealed
 and the chat message row has been committed, and it resolves to that message
@@ -82,19 +87,17 @@ that value as `message`. The message must be the assistant message saved in
 `turn.error { error_code: "ChatPersistenceContractError" }`. When the row
 committed but could not be read back, the hook throws `ChatMessageUnreadError`
 (from `src/messages.ts`) with the committed ids. The turn then completes with
-`message_id` and no `message`, and the client offers "Reload thread". When
-the variable is omitted, the dev server keeps the stub-only stream path.
+`message_id` and no `message`, and the client offers "Reload thread".
 
 ## Subject Pre-Resolution Hook
 
-`CHAT_SUBJECT_RESOLVER_MODULE` may be a package specifier, absolute path, file
-URL, or path relative to the process working directory. The module must export
-`preResolveSubject({ text, choice? })`, returning the `ChatSubjectPreResolution`
-shape used by the chat service. Modules that call the lower-level resolver can
-use `preResolveChatSubjectWithResolver(db, request)` from
-`services/chat/src/subjects.ts` to map resolver statuses such as `needs_choice`
-into chat statuses such as `needs_clarification`. The module may also export
-`renderSubjectClarification(input)` to customize the assistant clarification
+`preResolveSubject({ text, choice? })` returns the `ChatSubjectPreResolution`
+shape used by the chat service. The local runtime calls
+`preResolveChatSubjectWithResolver(db, request)` from
+`services/chat/src/subjects.ts`, which maps resolver statuses such as
+`needs_choice` into chat statuses such as `needs_clarification`. A caller of
+`createChatServer` may also pass `renderSubjectClarification(input)` to
+customize the assistant clarification
 blocks and content hash used when the chat pre-resolution returns
 `needs_clarification` or `not_found`. When a stream request
 includes `?subject=GOOG` and chat pre-resolution returns `needs_clarification`,

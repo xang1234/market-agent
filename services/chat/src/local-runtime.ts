@@ -67,10 +67,6 @@ import { createThreadTitleGenerationJob } from "./thread-title.ts";
 
 let localPool: Pool | null = null;
 
-// The default chat runtime resolves subjects in-process against the same pool,
-// so the dev/default server grounds turns without a separately-configured
-// CHAT_SUBJECT_RESOLVER_MODULE. Wired by loadChatServerOptionsFromEnv alongside
-// the analyst runtime and persistence.
 export function preResolveSubject(
   request: ChatSubjectPreResolveRequest,
 ): Promise<ChatSubjectPreResolution> {
