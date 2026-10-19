@@ -29,12 +29,12 @@ function emptyQuoteProvider(): HomeQuoteProvider {
 
 const emptySavedScreens: HomeSavedScreensProvider = async () => [];
 
-async function startServer() {
+async function startServer(options: Parameters<typeof createHomeServer>[2] = {}) {
   const server = createHomeServer(fakeDb(), {
     quoteProvider: emptyQuoteProvider(),
     listSavedScreens: emptySavedScreens,
     pulseSubjects: [],
-  });
+  }, options);
   server.listen(0);
   await once(server, "listening");
   const { port } = server.address() as AddressInfo;
@@ -64,6 +64,23 @@ test("GET /v1/home/summary rejects malformed x-user-id", async () => {
       headers: { "x-user-id": "not-a-uuid" },
     });
     assert.equal(res.status, 401);
+  } finally {
+    await close();
+  }
+});
+
+test("GET /v1/home/summary rejects an unsigned user id in trusted_proxy mode", async () => {
+  const { port, close } = await startServer({
+    auth: { env: { MA_AUTH_MODE: "trusted_proxy", MA_AUTH_PROXY_SECRET: "proxy-secret" } },
+  });
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/home/summary`, {
+      headers: { "x-user-id": USER_ID, "x-authenticated-user-id": USER_ID },
+    });
+    assert.equal(res.status, 401);
+    assert.deepEqual(await res.json(), {
+      error: "'x-authenticated-user-id and x-authenticated-user-signature' headers are required",
+    });
   } finally {
     await close();
   }

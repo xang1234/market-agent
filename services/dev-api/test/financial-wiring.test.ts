@@ -5,7 +5,8 @@ import type { AddressInfo } from "node:net";
 import test from "node:test";
 
 import type { FinancialPool } from "../../financial-engine/src/http.ts";
-import { createFinancialDevApiAdapter, developmentHeaderAuthenticator } from "../src/financial-wiring.ts";
+import { signTrustedUserId } from "../../shared/src/request-auth.ts";
+import { createFinancialDevApiAdapter, requestAuthAuthenticator } from "../src/financial-wiring.ts";
 
 function fakePool(queries: string[]): FinancialPool {
   const query = async (text: string) => {
@@ -15,8 +16,8 @@ function fakePool(queries: string[]): FinancialPool {
   return { query, connect: async () => ({ query, release() {} }) } as unknown as FinancialPool;
 }
 
-async function serve(queries: string[]) {
-  const adapter = createFinancialDevApiAdapter({ db: fakePool(queries), authenticate: developmentHeaderAuthenticator });
+async function serve(queries: string[], env: Record<string, string> = {}) {
+  const adapter = createFinancialDevApiAdapter({ db: fakePool(queries), authenticate: requestAuthAuthenticator({ env }) });
   const server = createServer((req, res) => {
     void adapter.handle(req, res).then((handled) => {
       if (!handled) { res.statusCode = 418; res.end(); }
@@ -44,6 +45,26 @@ test("financial routes require an identity before touching the database", async 
     assert.ok(queries.length > 0);
 
     assert.equal((await fetch(`${base}/v1/discovery/campaigns`)).status, 418, "other routes pass through");
+  } finally {
+    await close();
+  }
+});
+
+test("financial routes in trusted_proxy mode accept only a signed user id", async () => {
+  const queries: string[] = [];
+  const { base, close } = await serve(queries, { MA_AUTH_MODE: "trusted_proxy", MA_AUTH_PROXY_SECRET: "proxy-secret" });
+  try {
+    const userId = randomUUID();
+    const unsigned = await fetch(`${base}/v1/financial/runs/${randomUUID()}`, {
+      headers: { "x-user-id": userId, "x-authenticated-user-id": userId },
+    });
+    assert.equal(unsigned.status, 401);
+    assert.deepEqual(queries, []);
+
+    const signed = await fetch(`${base}/v1/financial/runs/${randomUUID()}`, {
+      headers: { "x-authenticated-user-id": userId, "x-authenticated-user-signature": signTrustedUserId(userId, "proxy-secret") },
+    });
+    assert.equal(signed.status, 404, "a signed caller reaches the owner-scoped handler");
   } finally {
     await close();
   }

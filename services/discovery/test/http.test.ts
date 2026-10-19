@@ -14,9 +14,13 @@ const RUN = "30000000-0000-4000-8000-000000000001";
 const REQUEST = "40000000-0000-4000-8000-000000000001";
 type TestContext = { after(callback: () => void | Promise<void>): void };
 
-async function startServer(t: TestContext, service = fixtureService()): Promise<{ base: string; service: ReturnType<typeof fixtureService> }> {
+async function startServer(
+  t: TestContext,
+  service = fixtureService(),
+  auth: Parameters<typeof createDiscoveryDevApiAdapter>[1] = {},
+): Promise<{ base: string; service: ReturnType<typeof fixtureService> }> {
   const server = createDevApiServer({}, {
-    adapters: { ...createFixtureDevApiAdapters(), discovery: createDiscoveryDevApiAdapter(service as never) },
+    adapters: { ...createFixtureDevApiAdapters(), discovery: createDiscoveryDevApiAdapter(service as never, auth) },
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
@@ -40,6 +44,34 @@ test("discovery HTTP rejects unauthenticated creation before a draft provider ca
   assert.equal(response.status, 401);
   assert.equal(service.calls.create, 0);
   assert.equal(service.calls.draft, 0);
+});
+
+test("discovery HTTP rejects a user id that is not a UUID", async (t) => {
+  const { base, service } = await startServer(t);
+  const response = await request(base, "/v1/discovery/campaigns", {
+    method: "POST",
+    headers: { "x-user-id": "not-a-uuid" },
+    body: JSON.stringify({ name: "Grid", question: "Which US-listed companies benefit from grid modernization spending?" }),
+  });
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { error: "'x-user-id' header is required" });
+  assert.equal(service.calls.create, 0);
+});
+
+test("discovery HTTP rejects an unsigned user id in trusted_proxy mode", async (t) => {
+  const { base, service } = await startServer(t, fixtureService(), {
+    env: { MA_AUTH_MODE: "trusted_proxy", MA_AUTH_PROXY_SECRET: "proxy-secret" },
+  });
+  const response = await request(base, "/v1/discovery/campaigns", {
+    method: "POST",
+    headers: { "x-authenticated-user-id": USER },
+    body: JSON.stringify({ name: "Grid", question: "Which US-listed companies benefit from grid modernization spending?" }),
+  });
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), {
+    error: "'x-authenticated-user-id and x-authenticated-user-signature' headers are required",
+  });
+  assert.equal(service.calls.create, 0);
 });
 
 test("every discovery route authenticates before reading or mutating owned campaign data", async (t) => {

@@ -11,6 +11,7 @@ import { EvidenceInspectionError } from "../../evidence/src/inspector.ts";
 import type { AgentLoopStages } from "../../agents/src/agent-loop.ts";
 import type { FindingRow } from "../../agents/src/finding-generator.ts";
 import type { JsonValue } from "../../shared/src/json.ts";
+import { signTrustedUserId } from "../../shared/src/request-auth.ts";
 import { fakePgQuery, sealedSnapshot } from "./fakes.ts";
 
 const EARNINGS_TEMPLATE_ID = "11111111-1111-4111-8111-111111111111";
@@ -1477,7 +1478,73 @@ test("GET /v1/agents requires an authenticated user", async (t) => {
   const body = await response.json() as Record<string, unknown>;
 
   assert.equal(response.status, 401);
-  assert.equal(body.error, "x-user-id header is required");
+  assert.equal(body.error, "'x-user-id' header is required");
+});
+
+const USER_SCOPED_ROUTES: Array<[string, string]> = [
+  ["GET", "/v1/agents/11111111-1111-4111-8111-111111111111/thesis"],
+  ["POST", "/v1/evidence/inspect"],
+  ["GET", "/v1/analyze/playbooks"],
+  ["GET", "/v1/analyze/templates"],
+  ["POST", "/v1/analyze/runs"],
+  ["GET", "/v1/analyze/runs"],
+  ["GET", "/v1/analyze/runs/11111111-1111-4111-8111-111111111111"],
+  ["POST", "/v1/analyze/runs/11111111-1111-4111-8111-111111111111/rerun"],
+  ["POST", "/v1/analyze/runs/11111111-1111-4111-8111-111111111111/share-to-chat"],
+  ["GET", "/v1/agents"],
+  ["POST", "/v1/agents"],
+  ["PATCH", "/v1/agents/11111111-1111-4111-8111-111111111111"],
+  ["DELETE", "/v1/agents/11111111-1111-4111-8111-111111111111"],
+  ["GET", "/v1/agents/11111111-1111-4111-8111-111111111111/findings"],
+  ["GET", "/v1/agents/11111111-1111-4111-8111-111111111111/activity"],
+  ["POST", "/v1/agents/11111111-1111-4111-8111-111111111111/runs"],
+];
+
+test("every user-scoped route rejects an x-user-id that is not a UUID", async (t) => {
+  const base = await startServer(t);
+
+  for (const [method, path] of USER_SCOPED_ROUTES) {
+    const response = await fetch(`${base}${path}`, {
+      method,
+      headers: { "content-type": "application/json", "x-user-id": "not-a-uuid" },
+      body: method === "GET" || method === "DELETE" ? undefined : "{}",
+    });
+    assert.equal(response.status, 401, `${method} ${path}`);
+    assert.deepEqual(await response.json(), { error: "'x-user-id' header is required" }, `${method} ${path}`);
+  }
+});
+
+test("trusted_proxy mode rejects an unsigned user id on every user-scoped route", async (t) => {
+  const userId = "00000000-0000-4000-8000-000000000001";
+  const base = await startServer(t, { MA_AUTH_MODE: "trusted_proxy", MA_AUTH_PROXY_SECRET: "proxy-secret" });
+
+  for (const [method, path] of USER_SCOPED_ROUTES) {
+    const response = await fetch(`${base}${path}`, {
+      method,
+      headers: { "content-type": "application/json", "x-user-id": userId, "x-authenticated-user-id": userId },
+      body: method === "GET" || method === "DELETE" ? undefined : "{}",
+    });
+    assert.equal(response.status, 401, `${method} ${path}`);
+    assert.deepEqual(
+      await response.json(),
+      { error: "'x-authenticated-user-id and x-authenticated-user-signature' headers are required" },
+      `${method} ${path}`,
+    );
+  }
+});
+
+test("trusted_proxy mode accepts a signed user id", async (t) => {
+  const userId = "00000000-0000-4000-8000-000000000001";
+  const base = await startServer(t, { MA_AUTH_MODE: "trusted_proxy", MA_AUTH_PROXY_SECRET: "proxy-secret" });
+
+  const response = await fetch(`${base}/v1/agents`, {
+    headers: {
+      "x-authenticated-user-id": userId,
+      "x-authenticated-user-signature": signTrustedUserId(userId, "proxy-secret"),
+    },
+  });
+
+  assert.equal(response.status, 200);
 });
 
 test("POST /v1/agents returns 400 for malformed JSON", async (t) => {
