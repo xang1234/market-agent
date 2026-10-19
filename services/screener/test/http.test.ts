@@ -9,6 +9,7 @@ import type { ScreenerQuery } from "../src/query.ts";
 import type { ScreenerResponse } from "../src/result.ts";
 import type { ScreenSubject } from "../src/screen-subject.ts";
 import { signTrustedUserId } from "../../shared/src/request-auth.ts";
+import { rawRequest } from "../../shared/test/raw-http.ts";
 
 const FIXED_NOW = new Date("2026-04-22T15:30:00.000Z");
 const USER_A = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
@@ -117,6 +118,41 @@ test("POST /v1/screener/search rejects non-JSON content-type", async () => {
       body: "hello",
     });
     assert.equal(r.status, 415);
+  });
+});
+
+test("POST /v1/screener/search sends exact 400, 413, and 415 bytes around the 64 KiB body limit", async () => {
+  await withServer({}, async (baseUrl) => {
+    const post = (body: string, contentType = "application/json") =>
+      rawRequest(`${baseUrl}/v1/screener/search`, { method: "POST", headers: { "content-type": contentType }, body });
+    let parseError = "";
+    try {
+      JSON.parse("x".repeat(64 * 1024));
+    } catch (error) {
+      parseError = (error as Error).message;
+    }
+    const invalidJson = JSON.stringify({ error: `invalid JSON: ${parseError}` });
+
+    assert.deepEqual(await post("x".repeat(64 * 1024)), {
+      status: 400,
+      headers: ["content-type", "application/json", "Date", "<date>", "Connection", "close", "Content-Length", String(invalidJson.length)],
+      body: invalidJson,
+    });
+    assert.deepEqual(await post("x".repeat(64 * 1024 + 1)), {
+      status: 413,
+      headers: ["content-type", "application/json", "Date", "<date>", "Connection", "close", "Content-Length", "44"],
+      body: '{"error":"request body exceeds 65536 bytes"}',
+    });
+    assert.deepEqual(await post(""), {
+      status: 400,
+      headers: ["content-type", "application/json", "Date", "<date>", "Connection", "close", "Content-Length", "33"],
+      body: '{"error":"request body is empty"}',
+    });
+    assert.deepEqual(await post("{}", "text/plain"), {
+      status: 415,
+      headers: ["content-type", "application/json", "Date", "<date>", "Connection", "close", "Content-Length", "49"],
+      body: '{"error":"content-type must be application/json"}',
+    });
   });
 });
 

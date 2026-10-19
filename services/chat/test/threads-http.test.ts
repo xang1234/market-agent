@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import type { ChatThreadsDb } from "../src/threads-repo.ts";
 import { signTrustedUserId, type RequestAuthConfig } from "../../shared/src/request-auth.ts";
+import { rawRequest } from "../../shared/test/raw-http.ts";
 import { startChatTestServer } from "./sse-helpers.ts";
 import {
   buildRow,
@@ -467,4 +468,28 @@ test("threads CRUD does not interfere with the SSE stream route", async (t) => {
   assert.equal(response.status, 400);
   const body = (await response.json()) as { error?: string };
   assert.equal(body.error, "'run_id' is required");
+});
+
+test("POST /v1/chat/threads sends exact 400 and 413 bytes around the 16 KiB body limit", async (t) => {
+  const { db } = fakeDb(() => {
+    throw new Error("query must not be called");
+  });
+  const base = await startServer(t, db);
+  const post = (body: string) =>
+    rawRequest(`${base}/v1/chat/threads`, {
+      method: "POST",
+      headers: { "x-user-id": USER_ID, "content-type": "application/json" },
+      body,
+    });
+
+  assert.deepEqual(await post("x".repeat(16 * 1024)), {
+    status: 400,
+    headers: ["content-type", "application/json", "Date", "<date>", "Connection", "close", "Content-Length", "43"],
+    body: '{"error":"request body must be valid JSON"}',
+  });
+  assert.deepEqual(await post("x".repeat(16 * 1024 + 1)), {
+    status: 413,
+    headers: ["connection", "close", "content-type", "application/json", "Date", "<date>", "Content-Length", "34"],
+    body: '{"error":"request body too large"}',
+  });
 });

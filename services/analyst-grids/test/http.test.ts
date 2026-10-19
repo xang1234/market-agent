@@ -5,6 +5,7 @@ import type { QueryResult } from "pg";
 
 import { createAnalystGridsServer } from "../src/http.ts";
 import type { QueryExecutor } from "../src/types.ts";
+import { rawRequest } from "../../shared/test/raw-http.ts";
 
 const USER_ID = "11111111-1111-4111-a111-111111111111";
 const GRID_ID = "22222222-2222-4222-a222-222222222222";
@@ -86,6 +87,33 @@ test("malformed JSON body returns 400 (not 500)", async () => {
       body: "{ not valid json",
     });
     assert.equal(res.status, 400);
+  } finally {
+    server.close();
+  }
+});
+
+test("POST /v1/analyst-grids sends exact 400 bytes around the 64 KiB body limit", async () => {
+  const { server, base } = await startServer(fakeDb(() => []));
+  try {
+    const post = (body: string) =>
+      rawRequest(`${base}/v1/analyst-grids`, {
+        method: "POST",
+        headers: { "x-user-id": USER_ID, "content-type": "application/json" },
+        body,
+      });
+    const headers = (length: number) =>
+      ["content-type", "application/json", "Date", "<date>", "Connection", "close", "Content-Length", String(length)];
+
+    assert.deepEqual(await post("x".repeat(64 * 1024)), {
+      status: 400,
+      headers: headers(43),
+      body: '{"error":"request body must be valid JSON"}',
+    });
+    assert.deepEqual(await post("x".repeat(64 * 1024 + 1)), {
+      status: 400,
+      headers: headers(34),
+      body: '{"error":"request body too large"}',
+    });
   } finally {
     server.close();
   }

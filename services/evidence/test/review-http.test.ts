@@ -5,6 +5,7 @@ import test, { type TestContext } from "node:test";
 import { createEvidenceReviewServer } from "../src/review-http.ts";
 import type { FactInput, FactPoolClient } from "../src/fact-repo.ts";
 import { fakePgQuery } from "./fakes.ts";
+import { rawRequest } from "../../shared/test/raw-http.ts";
 
 const REVIEW_ID = "66666666-6666-4666-8666-666666666666";
 const FACT_ID = "11111111-1111-4111-a111-111111111111";
@@ -229,6 +230,29 @@ test("POST approve returns 400 when review id is malformed", async (t) => {
 
   assert.equal(response.status, 400);
   assert.match(body.error, /review_id: must be a UUID v4/);
+});
+
+test("POST approve sends exact 400 and 413 bytes around the 128 KiB body limit", async (t) => {
+  const db = new FakeReviewDb();
+  const base = await startServer(t, db);
+  const post = (body: string) =>
+    rawRequest(`${base}/v1/evidence/fact-review-queue/${REVIEW_ID}/approve`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": REVIEWER_ID },
+      body,
+    });
+
+  assert.deepEqual(await post("x".repeat(128 * 1024)), {
+    status: 400,
+    headers: ["content-type", "application/json", "Date", "<date>", "Connection", "close", "Content-Length", "43"],
+    body: '{"error":"request body must be valid JSON"}',
+  });
+  assert.deepEqual(await post("x".repeat(128 * 1024 + 1)), {
+    status: 413,
+    headers: ["content-type", "application/json", "Date", "<date>", "Connection", "close", "Content-Length", "34"],
+    body: '{"error":"request body too large"}',
+  });
+  assert.equal(db.queries.length, 0);
 });
 
 function factInput(overrides: Partial<FactInput> = {}): FactInput {
