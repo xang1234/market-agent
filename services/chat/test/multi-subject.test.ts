@@ -402,3 +402,17 @@ test("a ticker inside a metric's name is the metric, unless the comparison cover
   const covered = { preResolveSubject: withCash, loadPriorSubjects: priorOf("NVDA", "NOW") };
   assert.deepEqual((await subjectsForTurn("Drop CASH", covered)).tickers, ["NVDA"]);
 });
+
+test("a company that cannot be found is asked about when the removal also names a facet (#275)", async () => {
+  let ran = false;
+  const turn = createChatCoordinator({
+    preResolveSubject,
+    loadPriorSubjects: priorOf("NVDA", "AMD", "AAPL"),
+    runner: () => {
+      ran = true;
+    },
+  }).getOrCreateTurn({ threadId: "thread-1", runId: "run-1", userIntent: "drop AMD, XYZQ, and margins" });
+  await turn.completed;
+  assert.equal(ran, false);
+  assert.match(JSON.stringify(turn.events), /XYZQ was not found, so nothing was dropped from the NVDA, AMD and AAPL comparison\./);
+});
