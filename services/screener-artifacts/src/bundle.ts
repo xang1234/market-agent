@@ -5,7 +5,7 @@ import {
   type UniverseEntry,
   type WeeklyReferenceBundle,
 } from "./types.ts";
-import { isRecord } from "../../shared/src/http.ts";
+import { errorMessage, isRecord } from "../../shared/src/http.ts";
 
 // Decodes a gzip-compressed weekly-reference bundle asset: gunzip → JSON.parse →
 // structural validation. Element-level (per-row) validation is deferred to the
@@ -16,13 +16,13 @@ export function decodeWeeklyBundle(gz: Uint8Array): WeeklyReferenceBundle {
   try {
     text = gunzipSync(gz).toString("utf8");
   } catch (error) {
-    throw new BundleParseError(`failed to gunzip bundle: ${messageOf(error)}`);
+    throw new BundleParseError(`failed to gunzip bundle: ${errorMessage(error)}`);
   }
   let raw: unknown;
   try {
     raw = JSON.parse(sanitizeNonFiniteNumbers(text));
   } catch (error) {
-    throw new BundleParseError(`bundle is not valid JSON: ${messageOf(error)}`);
+    throw new BundleParseError(`bundle is not valid JSON: ${errorMessage(error)}`);
   }
   return parseWeeklyBundle(raw);
 }
@@ -80,8 +80,4 @@ function requireString(raw: Record<string, unknown>, key: string): string {
     throw new BundleParseError(`bundle field ${key} must be a non-empty string`);
   }
   return value;
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

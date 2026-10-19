@@ -15,6 +15,7 @@ import type {
   WeeklyReferenceBundle,
   WeeklyReferenceManifest,
 } from "./types.ts";
+import { errorMessage } from "../../shared/src/http.ts";
 
 const WEEKLY_RELEASE_TAG = "weekly-reference-data";
 const SOURCE_KIND = "reference_data";
@@ -119,7 +120,7 @@ export async function runWeeklyReferenceEtl(
     } catch (error) {
       rowsSkipped++;
       if (errorSamples.length < ERROR_SAMPLE_CAP) {
-        errorSamples.push(`${entry.symbol ?? "?"}: ${messageOf(error)}`);
+        errorSamples.push(`${entry.symbol ?? "?"}: ${errorMessage(error)}`);
       }
     }
   }
@@ -188,8 +189,4 @@ function skipped(market: string, sha256: string, rowsTotal: number): EtlReport {
     ingestionBatchId: null,
     errorSamples: [],
   };
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
