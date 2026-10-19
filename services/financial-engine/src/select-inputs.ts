@@ -1,6 +1,6 @@
 // Deterministic public-information input selection for one reported-metric
-// slot (design §6.2). Pure: candidates arrive already authorized; nothing here
-// reads the clock, the database, or a model.
+// slot. Pure: candidates arrive already authorized; nothing here reads the
+// clock, the database, or a model.
 //
 // 1. Keep candidates for the exact metric and requested fiscal period.
 // 2. Eligibility, per candidate, in order: publicly available by the cutoff

@@ -1,6 +1,6 @@
 # Verified Finance — Baseline and Numerical Producer Inventory
 
-Task T00 of the verified financial-answer engine plan.
+Task T00 of the verified financial-answer engine plan, which now lives only in git history.
 This file records the executable starting point and every numerical producer
 reachable from the five integrated surfaces. It is a living record: later tasks
 update the "Disposition" and "Covered by" columns with actual tests, not
