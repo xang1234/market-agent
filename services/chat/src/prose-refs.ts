@@ -1,9 +1,3 @@
-// The answer model never types a figure. It writes a packet reference, [[F3]]
-// for a figure or [[C2]] for a claim, and the server renders the reference as
-// the packet's own value, sealed to its fact or claim where one can seal
-// (2026-10-14 review, idea 1). This module owns that grammar: the one regex
-// that reads a reference, and the sealing of a value or a claim into a segment.
-
 import { isUuid } from "./chat-ids.ts";
 import type { PacketClaim, PacketFigure } from "./evidence-packet.ts";
 
@@ -12,9 +6,6 @@ type Block = Record<string, unknown>;
 export type Segment =
   | { type: "text"; text: string }
   | { type: "ref"; ref_kind: "fact" | "claim" | "series"; ref_id: string; format: string };
-
-// The only syntax read out of the model's text: a packet id in double brackets.
-export const REFERENCE = /\[\[([FC]\d+)\]\]/g;
 
 export type Sealer = {
   // A figure's value: a fact ref when its fact can seal here (a UUID with the

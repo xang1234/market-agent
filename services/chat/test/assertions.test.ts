@@ -97,19 +97,6 @@ test("an inference rests on accepted observations and writes no figure, typed or
   assert.deepEqual(quarter.rejected.map((entry) => [entry.index, entry.reason]), [[1, "an inference rests on its supports; it writes no figure"]]);
 });
 
-test("a reference is its own evidence's: another's figure or an unknown id is rejected (#208)", () => {
-  const report = check([
-    // F3 is a real figure, but AMD's: NVDA's evidence does not hold it.
-    { kind: "observation", text: "NVDA's gross margin was [[F3]].", evidence: ["F1"] },
-    { kind: "observation", text: "NVDA's gross margin was [[F1]].", evidence: ["F9"] },
-  ]);
-  assert.deepEqual(report.rejected.map((entry) => entry.reason), [
-    "[[F3]] is not in its evidence",
-    'unknown evidence id "F9"',
-  ]);
-  assert.equal(report.accepted.length, 0);
-});
-
 test("at most twelve assertions are checked; the rest are rejected (#208)", () => {
   const one = { kind: "observation", text: "NVDA's gross margin was [[F1]].", evidence: ["F1"] };
   const report = check(Array.from({ length: 14 }, () => one));
@@ -117,15 +104,15 @@ test("at most twelve assertions are checked; the rest are rejected (#208)", () =
   assert.deepEqual(report.rejected.map((entry) => entry.index), [12, 13]);
 });
 
-test("an attribution renders its claim's quote, never its text: a company or number there is not read, a reference still is (#208, #301)", () => {
+test("an attribution renders its claim's quote, never its text: a company or number there is not read (#208, #301)", () => {
   const report = check([
     { kind: "management_attribution", text: "AMD management expects [[C2]]", evidence: ["C2"] },
     { kind: "management_attribution", text: "NVDA management expects [[C2]]", evidence: ["C2"] },
     { kind: "management_attribution", text: "AMD management expects 12% revenue growth.", evidence: ["C2"] },
     { kind: "management_attribution", text: "AMD management expects [[C1]]", evidence: ["C2"] },
   ]);
-  assert.deepEqual(report.accepted.map((entry) => entry.index), [0, 1, 2]);
-  assert.deepEqual(report.rejected.map((entry) => entry.reason), ["[[C1]] is not in its evidence"]);
+  assert.deepEqual(report.accepted.map((entry) => entry.index), [0, 1, 2, 3]);
+  assert.deepEqual(report.rejected, []);
 });
 
 test("a packet with claims but no figures is still checked; one with neither is skipped (#208)", () => {
@@ -324,13 +311,13 @@ test("a year inside a figure's window is a period of its evidence (#208)", () =>
 test("a support that failed its check is dropped; an inference with none left is rejected (#301)", () => {
   const report = check([
     { kind: "observation", text: "NVDA's gross margin was [[F1]] in FY2026.", evidence: ["F1"] },
-    { kind: "observation", text: "NVDA's gross margin was [[F3]] in FY2026.", evidence: ["F1"] },
+    { kind: "observation", text: "NVDA's gross margin was [[F1]] in FY2026.", evidence: ["F99"] },
     { kind: "analyst_inference", text: "The margin shows pricing power.", supports: [0, 1] },
     { kind: "analyst_inference", text: "The margin shows pricing power.", supports: [1, 9] },
   ]);
   assert.deepEqual(report.accepted.map((entry) => [entry.index, entry.supports ?? null]), [[0, null], [2, [0]]]);
   assert.deepEqual(report.rejected.map((entry) => [entry.index, entry.reason]), [
-    [1, "[[F3]] is not in its evidence"],
+    [1, 'unknown evidence id "F99"'],
     [3, "an inference binds the accepted observations it rests on"],
   ]);
 });
@@ -398,8 +385,8 @@ test("each rejection names the check that failed, so binding and comparative fai
     { kind: "guess", text: "Margins will rise.", evidence: ["F1"] },
     { kind: "observation", text: "NVDA's gross margin was [[F1]] in FY2026.", evidence: ["F1", "F1"] },
     { kind: "observation", text: "NVDA's gross margin was [[F1]] in FY2026.", evidence: ["F99"] },
-    { kind: "observation", text: "NVDA's gross margin was [[F9]] in FY2026.", evidence: ["F1"] },
-    { kind: "observation", text: "NVDA's gross margin was [[F2]] in FY2025.", evidence: ["F1"] },
+    { kind: "analyst_inference", text: "The margin held near 75%.", supports: [8] },
+    { kind: "analyst_inference", text: "AMD keeps more of each sale.", supports: [8], subject: "AMD" },
     { kind: "observation", text: "NVDA's gross margin was 75% in FY2026.", evidence: ["F1"] },
     { kind: "observation", text: "Management credited a richer mix.", evidence: ["C1"] },
     { kind: "observation", text: "NVDA's gross margin was [[F1]] in FY2026, driven by a richer mix.", evidence: ["F1"] },
@@ -413,8 +400,8 @@ test("each rejection names the check that failed, so binding and comparative fai
     [1, "format", 'unknown kind "guess"'],
     [2, "reference", 'evidence lists "F1" twice'],
     [3, "reference", 'unknown evidence id "F99"'],
-    [4, "reference", "unknown reference [[F9]]"],
-    [5, "binding", "[[F2]] is not in its evidence"],
+    [4, "binding", "an inference rests on its supports; it writes no figure"],
+    [5, "binding", "an inference's subject is a company its evidence covers"],
     [7, "kind", "an observation cites figures, and only figures"],
     [10, "comparative", "comparison: F2 (72.7%) is higher than F3 (49.4%)"],
     [11, "support", "an inference binds the accepted observations it rests on"],

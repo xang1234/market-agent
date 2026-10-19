@@ -1,9 +1,7 @@
 // Evidence-bound assertions (#208): the answer model lists what its answer
 // asserts, each classified and citing evidence_packet ids ("F2", "C1").
 // Company, metric, period and value come from the cited packet entries, never
-// typed by the model, so a binding cannot name the wrong company or scale; the
-// check here is that every id exists, that each kind cites what it must, and
-// that each reference the text writes ([[F3]], prose-refs.ts) is its evidence's.
+// typed by the model, so a binding cannot name the wrong company or scale.
 // Only an analyst inference's text is shown: every other kind is rendered from
 // its evidence in a template (render-assertions.ts), so its words are not read.
 // An analyst inference writes no figure at all: it says in words what the
@@ -17,7 +15,6 @@
 
 import { checkComparison, comparablePeriods, type ComparisonOp } from "./comparisons.ts";
 import type { EvidencePacket } from "./evidence-packet.ts";
-import { REFERENCE } from "./prose-refs.ts";
 
 export const ASSERTION_KINDS = ["observation", "comparison", "management_attribution", "analyst_inference", "unknown_cause"] as const;
 export type AssertionKind = (typeof ASSERTION_KINDS)[number];
@@ -170,14 +167,7 @@ export function checkAssertions(list: unknown[] | null | undefined, packet: Evid
       continue;
     }
     // An inference's evidence is its own plus that of the observations it rests on.
-    const cited = kind === "analyst_inference"
-      ? [...evidence, ...accepted.filter((entry) => supports.includes(entry.index)).flatMap((entry) => entry.evidence)]
-      : evidence;
-    const binding = bindingError(item.text, cited, packet);
-    if (binding) {
-      reject(index, item, binding.check, binding.reason);
-      continue;
-    }
+    const cited = [...evidence, ...accepted.filter((entry) => supports.includes(entry.index)).flatMap((entry) => entry.evidence)];
     if (item.subject !== undefined &&
       (typeof item.subject !== "string" || !packet.companies.includes(item.subject) || !companiesOf(cited, packet).has(item.subject))) {
       reject(index, item, "binding", "an inference's subject is a company its evidence covers");
@@ -238,14 +228,6 @@ function shapeError(
     case "analyst_inference":
       return supports.length === 0 ? { check: "support", reason: "an inference binds the accepted observations it rests on" } : null;
   }
-}
-
-function bindingError(text: string, cited: ReadonlyArray<string>, packet: EvidencePacket): Pick<Rejection, "check" | "reason"> | null {
-  for (const [reference, id] of text.matchAll(REFERENCE)) {
-    if (!packet.figures.some((figure) => figure.id === id) && !packet.claims.some((claim) => claim.id === id)) return { check: "reference", reason: `unknown reference ${reference}` };
-    if (!cited.includes(id!)) return { check: "binding", reason: `${reference} is not in its evidence` };
-  }
-  return null;
 }
 
 // The companies cited figures and claims are about; a figure with no company

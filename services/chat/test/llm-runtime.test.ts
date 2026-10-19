@@ -316,7 +316,6 @@ test("the answer is asked for an analyst's view: takeaway, trend, strengths, cou
   assert.match(systemPrompt, /never write the value, not even beside its\s+reference \("\$7\.7B \[\[F3\]\]" is wrong; "\[\[F3\]\]" is right\)/);
   assert.match(systemPrompt, /Write a cited claim's content as \[\[C2\]\], in\s+place of the claim's words, never a paraphrase with \[\[C2\]\] after it/);
   assert.match(systemPrompt, /Never write any other digit, except in a period label \(Q4, FY2026, fiscal\s+2026, a month and year\); a product named only in a claim \("MI308"\) appears by citing the claim; write\s+counts in words/);
-  // An assertion's text is checked for its references' membership (assertions.ts).
   assert.match(systemPrompt, /text restates the assertion in one sentence, written as the answer is: each figure or claim only as its\s+reference from the assertion's evidence/);
   assert.doesNotMatch(systemPrompt, /Quote a figure only exactly as it|never begin it with "Its"/);
   // A magnitude comparison in words is a computation too, and a cause needs data (#228).
@@ -696,14 +695,14 @@ test("with no figures shown, an assertion about an available value is checked ag
     cutoff: asOf,
     createClient: () => async () => ({ text: withList([
       { kind: "observation", text: "Net income was [[F4]].", evidence: ["F4"] },
-      { kind: "observation", text: "Revenue was [[F4]].", evidence: ["F3"] },
+      { kind: "observation", text: "Revenue was [[F9]].", evidence: ["F9"] },
     ]) }),
     onAssertions: (report) => reports.push(report),
   });
   assert.deepEqual(reports, [{
     status: "checked",
     accepted: [{ index: 0, kind: "observation", text: "Net income was [[F4]].", evidence: ["F4"] }],
-    rejected: [{ index: 1, text: "Revenue was [[F4]].", check: "binding", reason: "[[F4]] is not in its evidence" }],
+    rejected: [{ index: 1, text: "Revenue was [[F9]].", check: "reference", reason: 'unknown evidence id "F9"' }],
     rendered: true,
   }]);
   assert.equal((composed[0].segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join(""), "AAPL's net income was $25.0B in Q1 2026 (partial period).");
