@@ -1,5 +1,6 @@
 import { createServer, type Server } from "node:http";
 
+import { isUuidV4 } from "../../market/src/validators.ts";
 import {
   authenticatedUserRequiredMessage,
   readAuthenticatedUserId,
@@ -33,7 +34,7 @@ export function createHomeServer(
       }
 
       const userId = readAuthenticatedUserId(req, options.auth);
-      if (userId === null) {
+      if (userId === null || !isUuidV4(userId)) {
         respondJson(res, 401, { error: authenticatedUserRequiredMessage(options.auth) });
         return;
       }

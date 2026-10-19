@@ -69,6 +69,19 @@ test("GET /v1/home/summary rejects malformed x-user-id", async () => {
   }
 });
 
+test("GET /v1/home/summary rejects a user id that is not a v4 UUID", async () => {
+  const { port, close } = await startServer();
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/home/summary`, {
+      headers: { "x-user-id": "0195b46a-8e80-7000-8000-000000000001" },
+    });
+    assert.equal(res.status, 401);
+    assert.deepEqual(await res.json(), { error: "'x-user-id' header is required" });
+  } finally {
+    await close();
+  }
+});
+
 test("GET /v1/home/summary rejects an unsigned user id in trusted_proxy mode", async () => {
   const { port, close } = await startServer({
     auth: { env: { MA_AUTH_MODE: "trusted_proxy", MA_AUTH_PROXY_SECRET: "proxy-secret" } },
