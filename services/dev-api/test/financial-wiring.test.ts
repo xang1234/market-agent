@@ -7,6 +7,7 @@ import test from "node:test";
 import type { FinancialPool } from "../../financial-engine/src/http.ts";
 import { signTrustedUserId } from "../../shared/src/request-auth.ts";
 import { createFinancialDevApiAdapter } from "../src/financial-wiring.ts";
+import { createDevApiServer, createFixtureDevApiAdapters } from "../src/http.ts";
 
 function fakePool(queries: string[]): FinancialPool {
   const query = async (text: string) => {
@@ -16,10 +17,10 @@ function fakePool(queries: string[]): FinancialPool {
   return { query, connect: async () => ({ query, release() {} }) } as unknown as FinancialPool;
 }
 
-async function serve(queries: string[], env: Record<string, string> = {}) {
+async function serve(queries: string[]) {
   const adapter = createFinancialDevApiAdapter({ db: fakePool(queries) });
   const server = createServer((req, res) => {
-    void adapter.handle(req, res, { env }).then((handled) => {
+    void adapter.handle(req, res, { env: {} }).then((handled) => {
       if (!handled) { res.statusCode = 418; res.end(); }
     });
   });
@@ -50,9 +51,13 @@ test("financial routes require an identity before touching the database", async 
   }
 });
 
-test("financial routes in trusted_proxy mode accept only a signed user id", async () => {
+test("the dev API server applies its trusted_proxy mode to financial routes", async () => {
   const queries: string[] = [];
-  const { base, close } = await serve(queries, { MA_AUTH_MODE: "trusted_proxy", MA_AUTH_PROXY_SECRET: "proxy-secret" });
+  const server = createDevApiServer({ MA_AUTH_MODE: "trusted_proxy", MA_AUTH_PROXY_SECRET: "proxy-secret" }, {
+    adapters: { ...createFixtureDevApiAdapters(), financial: createFinancialDevApiAdapter({ db: fakePool(queries) }) },
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   try {
     const userId = randomUUID();
     const unsigned = await fetch(`${base}/v1/financial/runs/${randomUUID()}`, {
@@ -66,6 +71,6 @@ test("financial routes in trusted_proxy mode accept only a signed user id", asyn
     });
     assert.equal(signed.status, 404, "a signed caller reaches the owner-scoped handler");
   } finally {
-    await close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
