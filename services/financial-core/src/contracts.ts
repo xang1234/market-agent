@@ -248,7 +248,7 @@ export type ExecutionLimits = {
   max_concurrent_evidence_tasks: number;
 };
 
-/** Versioned design defaults (spec §10.1). Lower plan or parent limits win. */
+/** Versioned defaults. Lower plan or parent limits win. */
 export const DEFAULT_EXECUTION_LIMITS: Readonly<ExecutionLimits> = Object.freeze({
   max_subjects: 25,
   max_periods_per_subject: 20,
