@@ -45,8 +45,7 @@ function gatedCoordinator() {
 
 const messages = (...ids: string[]) => ids.map((message_id) => ({ message_id }));
 
-// A verified answer, which the turn saves through the persistence hook.
-const answering: ChatAnalystToolRuntime = async () => ({
+const verifiedRuntime: ChatAnalystToolRuntime = async () => ({
   snapshot_id: "s-1",
   verification: { ok: true, failures: [] },
   blocks: [{ id: "block-1", kind: "rich_text", segments: [{ type: "text", text: "Answer." }] }],
@@ -189,7 +188,7 @@ test("readThread reports a run completed once the read holds its saved answer, b
   const commit = deferred<void>();
   const committed = deferred<void>();
   const coordinator = createChatCoordinator({
-    analystToolRuntime: answering,
+    analystToolRuntime: verifiedRuntime,
     persistAssistantMessage: async (input) => {
       saved.push({ message_id: input.message_id });
       committed.resolve();
@@ -232,7 +231,7 @@ test("a financial turn's in-progress notice is not saved under the id its publis
 test("a retried run of a turn saves its answer under its own id", async () => {
   const saved: string[] = [];
   const coordinator = createChatCoordinator({
-    analystToolRuntime: answering,
+    analystToolRuntime: verifiedRuntime,
     persistAssistantMessage: async (input) => {
       saved.push(input.message_id);
       return { message_id: input.message_id, thread_id: input.threadId, role: "assistant", snapshot_id: "s-1", blocks: [] } as unknown as ChatReadMessage;

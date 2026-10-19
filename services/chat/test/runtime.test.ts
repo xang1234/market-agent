@@ -1,10 +1,24 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import test from "node:test";
+import { promisify } from "node:util";
 import * as localRuntime from "../src/local-runtime.ts";
 import { loadChatServerOptionsFromEnv } from "../src/runtime.ts";
 
 test("runtime config returns empty chat options when no database is configured", async () => {
   assert.deepEqual(await loadChatServerOptionsFromEnv({}), {});
+});
+
+test("runtime config without a database never loads the local runtime", async () => {
+  // local-runtime throws on an unknown CHAT_FINANCIAL_MODE as it loads.
+  const script = `const { loadChatServerOptionsFromEnv } = await import(${JSON.stringify(import.meta.resolve("../src/runtime.ts"))});
+    process.stdout.write(JSON.stringify(await loadChatServerOptionsFromEnv({})));`;
+  const { stdout } = await promisify(execFile)(
+    process.execPath,
+    ["--experimental-strip-types", "--input-type=module", "--eval", script],
+    { env: { ...process.env, CHAT_FINANCIAL_MODE: "unknown" } },
+  );
+  assert.equal(stdout, "{}");
 });
 
 for (const variable of ["CHAT_DATABASE_URL", "DATABASE_URL"]) {

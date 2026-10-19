@@ -18,7 +18,6 @@ export async function loadChatServerOptionsFromEnv(
     return options;
   }
 
-  // Imported only with a database: loading it pulls in the database and LLM code.
   const runtime = await import("./local-runtime.ts");
   // With the lane on, the server does not start until verified finance is ready.
   await runtime.financialRuntime.assertReady();
