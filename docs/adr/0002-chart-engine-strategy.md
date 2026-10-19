@@ -6,7 +6,7 @@ Accepted.
 
 ## Context
 
-`stock-agent-v2.md` originally listed TradingView Lightweight Charts for price/performance blocks, Recharts or Visx for smaller analytical blocks, and Motion for animation. The current implementation renders block charts with typed React components and small SVG renderers:
+The original product spec, `stock-agent-v2.md`, now lives only in git history. It listed TradingView Lightweight Charts for price/performance blocks, Recharts or Visx for smaller analytical blocks, and Motion for animation. The current implementation renders block charts with typed React components and small SVG renderers:
 
 - `SeriesChart` for `line_chart`, `sentiment_trend`, `mention_volume`, and `segment_trajectory`;
 - SVG/HTML renderers for `revenue_bars`, `perf_comparison`, segment, consensus, and related analytical blocks;

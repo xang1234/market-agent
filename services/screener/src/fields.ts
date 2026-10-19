@@ -33,7 +33,6 @@ export type FieldDefinition = {
   sortable: boolean;
 };
 
-// Asset types align with stock-agent-v2.md §6.1 Instrument.asset_type.
 export type AssetType =
   | "common_stock"
   | "adr"

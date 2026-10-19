@@ -6,7 +6,7 @@ Accepted.
 
 ## Context
 
-`stock-agent-v2.md` originally listed TanStack Query for server state and Zustand for local UI state. The implemented web client instead uses React state primitives (`useState`, `useReducer`) and focused React contexts for shell-wide concerns such as auth, theme, right rail content, watchlist membership, and protected-action resumption.
+The original product spec, `stock-agent-v2.md`, now lives only in git history. It listed TanStack Query for server state and Zustand for local UI state. The implemented web client instead uses React state primitives (`useState`, `useReducer`) and focused React contexts for shell-wide concerns such as auth, theme, right rail content, watchlist membership, and protected-action resumption.
 
 The current app is still small enough that most server state is page-local and request-scoped. Introducing a global server-state cache now would add cache invalidation and query-key policy before the product has enough shared read paths to justify it.
 

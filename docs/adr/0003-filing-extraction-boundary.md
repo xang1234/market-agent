@@ -6,7 +6,8 @@ Accepted.
 
 ## Context
 
-`stock-agent-v2.md` describes a filing extraction platform adjacent to Evidence:
+The original product spec, `stock-agent-v2.md`, now lives only in git history.
+It described a filing extraction platform adjacent to Evidence:
 filing retrieval, section segmentation, XBRL extension parsing, segment
 extraction, footnotes, management claims, event detection, and review queueing.
 

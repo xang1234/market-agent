@@ -6,7 +6,8 @@ Accepted.
 
 ## Context
 
-`stock-agent-v2.md` originally described the Session Coordinator as a Durable
+The original product spec, `stock-agent-v2.md`, now lives only in git history.
+It originally described the Session Coordinator as a Durable
 Object per chat thread, long-running Analyze run, or agent run. The current
 implementation runs Node HTTP services backed by Postgres, with an in-process
 chat coordinator and durable database rows for chat messages, agent runs,

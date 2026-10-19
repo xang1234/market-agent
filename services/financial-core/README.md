@@ -1,8 +1,6 @@
 # financial-core
 
-Pure semantics for the verified financial-answer engine
-([design](../../docs/superpowers/specs/2026-09-23-verified-financial-answer-engine-design.md),
-[plan](../../docs/superpowers/plans/2026-09-23-verified-financial-answer-engine.md)).
+Pure semantics for the verified financial-answer engine.
 No database, provider, model, network, wall-clock, global arithmetic
 configuration, or feature-service imports — `test/boundaries.test.ts` enforces this.
 

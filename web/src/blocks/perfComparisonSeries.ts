@@ -5,9 +5,9 @@
 //
 // The query is anchored at the block's pinned moment — interactive.range_end_max
 // when the analyst granted one, otherwise as_of — never "now". Range switching
-// is an approved transform over pinned history (stock-agent-v2 §sealed
-// snapshots): the same sealed block renders the same chart on any future day,
-// and anything fresher must go through the explicit refresh flow.
+// stays inside pinned history, so the same sealed block renders the same chart
+// on any future day, and anything fresher must go through the explicit refresh
+// flow.
 
 import { defineResource } from '../fetch/resource.ts'
 import type { AdjustmentBasis, GetSeriesResponse, NormalizedSeriesQuery } from '../symbol/series.ts'
