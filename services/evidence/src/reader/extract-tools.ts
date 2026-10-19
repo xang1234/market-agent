@@ -62,6 +62,7 @@ import {
 } from "./entity-linker.ts";
 import { extractNonGaapReconciliations } from "./non-gaap-reconciliation-extractor.ts";
 import { extractXbrlExtensionSegments } from "./xbrl-segment-extractor.ts";
+import { errorMessage } from "../../../shared/src/http.ts";
 
 // Every extraction tool shares one input/output shape.
 type ExtractionToolHandler = (input: ReaderExtractionToolInput) => Promise<ReaderExtractionToolOutput>;
@@ -396,10 +397,6 @@ function documentDefinitionAsOf(document: DocumentRow): string | undefined {
     return publishedAt.toISOString().slice(0, 10);
   }
   return String(publishedAt).slice(0, 10);
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function isDocumentResearchInputError(error: unknown): boolean {

@@ -8,6 +8,7 @@ import {
   assertOneOf,
   assertPositiveInteger,
 } from "../validators.ts";
+import { isRecord } from "../../../shared/src/http.ts";
 
 type FetchLike = (url: string, init?: { headers?: Record<string, string>; signal?: AbortSignal }) => Promise<Response>;
 
@@ -431,8 +432,4 @@ function sha256StableJson(value: Readonly<Record<string, string>>): string {
 
 function pad2(value: number): string {
   return String(value).padStart(2, "0");
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

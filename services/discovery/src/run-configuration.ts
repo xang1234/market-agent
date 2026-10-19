@@ -1,5 +1,6 @@
 import { DEFAULT_LIMITS } from "./policy.ts";
 import { DiscoveryError, type Limits, type ModelConfigSnapshot, type RunConfigurationSnapshot } from "./types.ts";
+import { isRecord } from "../../shared/src/http.ts";
 
 const roles = new Set<ModelConfigSnapshot["role"]>(["planner", "scout", "analyst", "skeptic", "summary"]);
 const resources = ["search", "document", "identity", "financial", "model"] as const;
@@ -33,7 +34,6 @@ function limitsFromValue(value: unknown): Limits {
 }
 
 function positiveInt(value: unknown, max = Number.POSITIVE_INFINITY): value is number { return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= max; }
-function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean { return Object.keys(value).length === keys.length && keys.every((key) => key in value); }
 function shortText(value: unknown): value is string { return typeof value === "string" && value.trim().length > 0 && value.length <= 200; }
 function isoTimestamp(value: unknown): value is string { return typeof value === "string" && Number.isFinite(Date.parse(value)); }

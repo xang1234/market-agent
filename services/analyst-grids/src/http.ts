@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type Server } from "node:http";
 import {
   authenticatedUserRequiredMessage,
   readAuthenticatedUserId,
@@ -17,26 +17,13 @@ import type { GridFinancialDeps } from "./financial-column.ts";
 import { validateUniverseSpec, type UniverseResolverDeps } from "./universe.ts";
 import type { SnapshotClientPool } from "../../snapshot/src/snapshot-sealer.ts";
 import type { ReaderColumnDeps } from "./column-catalog.ts";
+import { readBody, RequestBodyTooLargeError, respondJson } from "../../shared/src/http.ts";
 
 const MAX_BODY = 64 * 1024;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-function respond(res: ServerResponse, status: number, body: unknown): void {
-  const json = JSON.stringify(body);
-  res.statusCode = status;
-  res.setHeader("content-type", "application/json");
-  res.end(json);
-}
-
 async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of req) {
-    size += (chunk as Buffer).length;
-    if (size > MAX_BODY) throw new GridValidationError("request body too large");
-    chunks.push(chunk as Buffer);
-  }
-  const text = Buffer.concat(chunks).toString("utf8") || "{}";
+  const text = (await readBody(req, { maxBytes: MAX_BODY })) || "{}";
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -79,24 +66,24 @@ export function createAnalystGridsServer(deps: AnalystGridsServerDeps): Server {
 
       const userId = readAuthenticatedUserId(req, auth);
       if (!userId) {
-        respond(res, 401, { error: authenticatedUserRequiredMessage(auth) });
+        respondJson(res, 401, { error: authenticatedUserRequiredMessage(auth) });
         return;
       }
 
       if (method === "GET" && path === "/v1/analyst-grids/columns") {
-        respond(res, 200, { columns: listColumns() });
+        respondJson(res, 200, { columns: listColumns() });
         return;
       }
 
       if (method === "GET" && path === "/v1/analyst-grids") {
-        respond(res, 200, { grids: await listGrids(db, userId) });
+        respondJson(res, 200, { grids: await listGrids(db, userId) });
         return;
       }
 
       if (method === "POST" && path === "/v1/analyst-grids") {
         const input = parseCreateInput(await readJson(req));
         const grid = await createGrid(db, userId, input);
-        respond(res, 201, grid);
+        respondJson(res, 201, grid);
         return;
       }
 
@@ -105,7 +92,7 @@ export function createAnalystGridsServer(deps: AnalystGridsServerDeps): Server {
       if (method === "POST" && runStartMatch && UUID_RE.test(runStartMatch[1])) {
         const engineDeps: RunEngineDeps = { db, pool, universe, reader, financial };
         const result = await startGridRun(engineDeps, { gridId: runStartMatch[1], userId, asOf: new Date().toISOString() });
-        respond(res, 202, result);
+        respondJson(res, 202, result);
         return;
       }
 
@@ -114,32 +101,32 @@ export function createAnalystGridsServer(deps: AnalystGridsServerDeps): Server {
       if (method === "GET" && runGetMatch && UUID_RE.test(runGetMatch[1])) {
         const owned = await loadRunForUser(db, userId, runGetMatch[1]);
         if (!owned) {
-          respond(res, 404, { error: "grid run not found" });
+          respondJson(res, 404, { error: "grid run not found" });
           return;
         }
-        respond(res, 200, await getRunDetail(db, runGetMatch[1]));
+        respondJson(res, 200, await getRunDetail(db, runGetMatch[1]));
         return;
       }
 
       const gridMatch = path.match(/^\/v1\/analyst-grids\/([^/]+)$/);
       if (method === "GET" && gridMatch && UUID_RE.test(gridMatch[1])) {
         const grid = await getGrid(db, userId, gridMatch[1]);
-        respond(res, 200, grid);
+        respondJson(res, 200, grid);
         return;
       }
 
-      respond(res, 404, { error: "not found" });
+      respondJson(res, 404, { error: "not found" });
     } catch (error) {
-      if (error instanceof GridValidationError) {
-        respond(res, 400, { error: error.message });
+      if (error instanceof GridValidationError || error instanceof RequestBodyTooLargeError) {
+        respondJson(res, 400, { error: error.message });
         return;
       }
       if (error instanceof GridNotFoundError) {
-        respond(res, 404, { error: error.message });
+        respondJson(res, 404, { error: error.message });
         return;
       }
       console.error("analyst-grids request failed", error);
-      respond(res, 500, { error: "internal error" });
+      respondJson(res, 500, { error: "internal error" });
     }
   });
 }

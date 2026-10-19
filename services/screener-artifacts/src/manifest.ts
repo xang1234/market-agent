@@ -2,12 +2,13 @@ import {
   WEEKLY_MANIFEST_SCHEMA,
   type WeeklyReferenceManifest,
 } from "./types.ts";
+import { isRecord } from "../../shared/src/http.ts";
 
 // Parses + validates the `weekly-reference-latest-{market}.json` pointer. The
 // schema_version gate fails fast on an unrecognized shape so a drifted upstream
 // format never gets half-ingested (see the bundle parser for the same guard).
 export function parseWeeklyManifest(raw: unknown): WeeklyReferenceManifest {
-  if (!isObject(raw)) {
+  if (!isRecord(raw)) {
     throw new ManifestParseError("manifest is not a JSON object");
   }
   if (raw.schema_version !== WEEKLY_MANIFEST_SCHEMA) {
@@ -28,7 +29,7 @@ export function parseWeeklyManifest(raw: unknown): WeeklyReferenceManifest {
     bundle_asset_name,
     sha256,
     generated_at,
-    ...(isObject(raw.coverage) ? { coverage: coverageOf(raw.coverage) } : {}),
+    ...(isRecord(raw.coverage) ? { coverage: coverageOf(raw.coverage) } : {}),
   };
 }
 
@@ -57,8 +58,4 @@ function requireString(raw: Record<string, unknown>, key: string): string {
     throw new ManifestParseError(`manifest field ${key} must be a non-empty string`);
   }
   return value;
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

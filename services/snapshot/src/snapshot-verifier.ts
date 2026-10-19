@@ -4,7 +4,6 @@ import { returnLabel } from "../../market/src/perf-points.ts";
 import type {
   JsonObject,
   JsonValue,
-  QueryExecutor,
   SnapshotBasis,
   SnapshotNormalization,
   SnapshotSubjectKind,
@@ -24,6 +23,7 @@ import { validateSnapshotTransformManifest } from "./snapshot-transform.ts";
 import { verifyChartPoints, type DrawnChart } from "./chart-points.ts";
 import type { FinancialSealClaim } from "./financial-verifier-loader.ts";
 import type { FinancialVerification, FinancialVerifierReasonCode } from "./financial-verifier.ts";
+import { isRecord, type QueryExecutor } from "../../shared/src/http.ts";
 
 export type SnapshotVerifierManifest = {
   subject_refs: ReadonlyArray<{ kind: SnapshotSubjectKind; id: string }>;
@@ -1713,10 +1713,6 @@ function dedupeBlockRefs(refs: ReadonlyArray<ExtractedBlockRef>): ExtractedBlock
     result.push(ref);
   }
   return result;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function verifyDisclosures(

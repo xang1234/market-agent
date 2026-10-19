@@ -32,14 +32,9 @@ import {
   readAuthenticatedUserId,
   type RequestAuthConfig,
 } from "../../shared/src/request-auth.ts";
+import { errorMessageOr, readBody, RequestBodyTooLargeError, respondJson } from "../../shared/src/http.ts";
 
 const MAX_REQUEST_BODY_BYTES = 16 * 1024;
-
-class RequestBodyTooLargeError extends Error {
-  constructor() {
-    super("request body too large");
-  }
-}
 
 export type ListPortfoliosResponse = { portfolios: Portfolio[] };
 export type GetPortfolioResponse = { portfolio: Portfolio };
@@ -56,32 +51,32 @@ export function createPortfolioServer(
     try {
       const userId = readAuthenticatedUserId(req, options.auth);
       if (!userId) {
-        respond(res, 401, { error: authenticatedUserRequiredMessage(options.auth) });
+        respondJson(res, 401, { error: authenticatedUserRequiredMessage(options.auth) });
         return;
       }
 
       const route = matchRoute(req.method ?? "GET", req.url ?? "/");
       if (!route) {
-        respond(res, 404, { error: "not found" });
+        respondJson(res, 404, { error: "not found" });
         return;
       }
 
       switch (route.action) {
         case "list": {
           const portfolios = await listPortfolios(db, userId);
-          respond(res, 200, { portfolios } satisfies ListPortfoliosResponse);
+          respondJson(res, 200, { portfolios } satisfies ListPortfoliosResponse);
           return;
         }
         case "create": {
           const parsed = await parseAndAssert(req, res, assertPortfolioCreateInput, "invalid portfolio input");
           if (parsed === null) return;
           const portfolio = await createPortfolio(db, userId, parsed);
-          respond(res, 201, { portfolio } satisfies CreatePortfolioResponse);
+          respondJson(res, 201, { portfolio } satisfies CreatePortfolioResponse);
           return;
         }
         case "get": {
           const portfolio = await getPortfolio(db, userId, route.portfolio_id);
-          respond(res, 200, { portfolio } satisfies GetPortfolioResponse);
+          respondJson(res, 200, { portfolio } satisfies GetPortfolioResponse);
           return;
         }
         case "delete": {
@@ -93,7 +88,7 @@ export function createPortfolioServer(
         case "list_holdings": {
           await assertPortfolioOwned(db, userId, route.portfolio_id);
           const holdings = await listHoldings(db, route.portfolio_id);
-          respond(res, 200, { holdings } satisfies ListHoldingsResponse);
+          respondJson(res, 200, { holdings } satisfies ListHoldingsResponse);
           return;
         }
         case "create_holding": {
@@ -101,7 +96,7 @@ export function createPortfolioServer(
           const parsed = await parseAndAssert(req, res, assertPortfolioHoldingCreateInput, "invalid holding input");
           if (parsed === null) return;
           const holding = await createHolding(db, route.portfolio_id, parsed);
-          respond(res, 201, { holding } satisfies CreateHoldingResponse);
+          respondJson(res, 201, { holding } satisfies CreateHoldingResponse);
           return;
         }
         case "delete_holding": {
@@ -115,32 +110,32 @@ export function createPortfolioServer(
           const parsed = await parseAndAssert(req, res, assertOverlayInputsRequest, "invalid overlay input request");
           if (parsed === null) return;
           const overlays = await getOverlayInputs(db, userId, parsed.subject_refs);
-          respond(res, 200, { overlays } satisfies OverlayInputsResponse);
+          respondJson(res, 200, { overlays } satisfies OverlayInputsResponse);
           return;
         }
         default: {
           const _exhaustive: never = route;
           void _exhaustive;
-          respond(res, 500, { error: "unhandled route" });
+          respondJson(res, 500, { error: "unhandled route" });
           return;
         }
       }
     } catch (error) {
       if (error instanceof RequestBodyTooLargeError) {
-        if (!res.headersSent) respond(res, 413, { error: error.message });
+        if (!res.headersSent) respondJson(res, 413, { error: error.message });
         return;
       }
       if (error instanceof PortfolioNotFoundError) {
-        if (!res.headersSent) respond(res, 404, { error: error.message });
+        if (!res.headersSent) respondJson(res, 404, { error: error.message });
         return;
       }
       if (error instanceof HoldingNotFoundError) {
-        if (!res.headersSent) respond(res, 404, { error: error.message });
+        if (!res.headersSent) respondJson(res, 404, { error: error.message });
         return;
       }
 
       console.error("portfolio request failed", error);
-      if (!res.headersSent) respond(res, 500, { error: "internal portfolio error" });
+      if (!res.headersSent) respondJson(res, 500, { error: "internal portfolio error" });
     }
   });
 }
@@ -210,46 +205,21 @@ async function parseAndAssert<T>(
   assert: (raw: unknown) => asserts raw is T,
   fallback: string,
 ): Promise<T | null> {
-  const body = await readBody(req);
+  const body = await readBody(req, { maxBytes: MAX_REQUEST_BODY_BYTES });
   let parsed: unknown;
   try {
     parsed = JSON.parse(body);
   } catch {
-    respond(res, 400, { error: "request body must be valid JSON" });
+    respondJson(res, 400, { error: "request body must be valid JSON" });
     return null;
   }
   try {
     assert(parsed);
   } catch (err) {
-    respond(res, 400, { error: errorMessage(err, fallback) });
+    respondJson(res, 400, { error: errorMessageOr(err, fallback) });
     return null;
   }
   return parsed;
-}
-
-async function readBody(req: IncomingMessage): Promise<string> {
-  const chunks: Buffer[] = [];
-  let totalBytes = 0;
-  for await (const chunk of req) {
-    const buffer =
-      Buffer.isBuffer(chunk) ? chunk : chunk instanceof Uint8Array ? Buffer.from(chunk) : Buffer.from(String(chunk));
-    totalBytes += buffer.length;
-    if (totalBytes > MAX_REQUEST_BODY_BYTES) throw new RequestBodyTooLargeError();
-    chunks.push(buffer);
-  }
-  return Buffer.concat(chunks).toString("utf8");
-}
-
-function respond(res: ServerResponse, status: number, body: object) {
-  res.statusCode = status;
-  res.setHeader("content-type", "application/json");
-  res.end(JSON.stringify(body));
-}
-
-function errorMessage(err: unknown, fallback: string): string {
-  if (err instanceof Error && err.message.length > 0) return err.message;
-  if (typeof err === "string" && err.length > 0) return err;
-  return fallback;
 }
 
 // Holding routes guard parent ownership before touching any holding row: a

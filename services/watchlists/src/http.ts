@@ -25,15 +25,10 @@ import {
   readAuthenticatedUserId,
   type RequestAuthConfig,
 } from "../../shared/src/request-auth.ts";
+import { readBody, RequestBodyTooLargeError, respondJson } from "../../shared/src/http.ts";
 
 const MAX_REQUEST_BODY_BYTES = 16 * 1024;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-class RequestBodyTooLargeError extends Error {
-  constructor() {
-    super("request body too large");
-  }
-}
 
 export type ListMembersResponse = { members: WatchlistMember[] };
 export type AddMemberResponse = { status: "created" | "already_present"; member: WatchlistMember };
@@ -48,19 +43,19 @@ export function createWatchlistsServer(
     try {
       const userId = readAuthenticatedUserId(req, options.auth);
       if (!userId) {
-        respond(res, 401, { error: authenticatedUserRequiredMessage(options.auth) });
+        respondJson(res, 401, { error: authenticatedUserRequiredMessage(options.auth) });
         return;
       }
 
       const route = matchRoute(req.method ?? "GET", req.url ?? "/");
       if (!route) {
-        respond(res, 404, { error: "not found" });
+        respondJson(res, 404, { error: "not found" });
         return;
       }
 
       if (route.action === "list_watchlists") {
         const watchlists = await listWatchlists(db, userId);
-        respond(res, 200, {
+        respondJson(res, 200, {
           watchlists: watchlists.map(watchlistResponse),
         } satisfies ListWatchlistsResponse);
         return;
@@ -71,11 +66,11 @@ export function createWatchlistsServer(
         if (parsed === null) return;
         const input = extractWatchlistInput(parsed);
         if (!input) {
-          respond(res, 400, { error: "'name' and valid 'mode' are required" });
+          respondJson(res, 400, { error: "'name' and valid 'mode' are required" });
           return;
         }
         const watchlist = await createWatchlist(db, userId, input);
-        respond(res, 201, watchlistResponse(watchlist));
+        respondJson(res, 201, watchlistResponse(watchlist));
         return;
       }
 
@@ -84,11 +79,11 @@ export function createWatchlistsServer(
         if (parsed === null) return;
         const name = typeof parsed.name === "string" ? parsed.name : null;
         if (name === null) {
-          respond(res, 400, { error: "'name' is required" });
+          respondJson(res, 400, { error: "'name' is required" });
           return;
         }
         const watchlist = await renameWatchlist(db, userId, route.watchlist_id, name);
-        respond(res, 200, watchlistResponse(watchlist));
+        respondJson(res, 200, watchlistResponse(watchlist));
         return;
       }
 
@@ -103,7 +98,7 @@ export function createWatchlistsServer(
 
       if (route.action === "list") {
         const members = await listMembers(db, watchlistId);
-        respond(res, 200, { members } satisfies ListMembersResponse);
+        respondJson(res, 200, { members } satisfies ListMembersResponse);
         return;
       }
 
@@ -112,12 +107,12 @@ export function createWatchlistsServer(
         if (parsed === null) return;
         const subjectRef = extractSubjectRef(parsed);
         if (!subjectRef) {
-          respond(res, 400, { error: "'subject_ref' with kind and id is required" });
+          respondJson(res, 400, { error: "'subject_ref' with kind and id is required" });
           return;
         }
         const result = await addMember(db, watchlistId, subjectRef);
         const status = result.status === "created" ? 201 : 200;
-        respond(res, status, { status: result.status, member: result.member } satisfies AddMemberResponse);
+        respondJson(res, status, { status: result.status, member: result.member } satisfies AddMemberResponse);
         return;
       }
 
@@ -129,28 +124,28 @@ export function createWatchlistsServer(
       }
     } catch (error) {
       if (error instanceof RequestBodyTooLargeError) {
-        if (!res.headersSent) respond(res, 413, { error: error.message });
+        if (!res.headersSent) respondJson(res, 413, { error: error.message });
         return;
       }
       if (error instanceof WatchlistNotFoundError) {
-        if (!res.headersSent) respond(res, 404, { error: error.message });
+        if (!res.headersSent) respondJson(res, 404, { error: error.message });
         return;
       }
       if (error instanceof DefaultWatchlistDeleteError) {
-        if (!res.headersSent) respond(res, 409, { error: error.message });
+        if (!res.headersSent) respondJson(res, 409, { error: error.message });
         return;
       }
       if (error instanceof WatchlistValidationError) {
-        if (!res.headersSent) respond(res, 400, { error: error.message });
+        if (!res.headersSent) respondJson(res, 400, { error: error.message });
         return;
       }
       if (error instanceof MemberNotFoundError) {
-        if (!res.headersSent) respond(res, 404, { error: error.message });
+        if (!res.headersSent) respondJson(res, 404, { error: error.message });
         return;
       }
 
       console.error("watchlists request failed", error);
-      if (!res.headersSent) respond(res, 500, { error: "internal watchlists error" });
+      if (!res.headersSent) respondJson(res, 500, { error: "internal watchlists error" });
     }
   });
 }
@@ -250,36 +245,17 @@ async function readJsonObject(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<Record<string, unknown> | null> {
-  const body = await readBody(req);
+  const body = await readBody(req, { maxBytes: MAX_REQUEST_BODY_BYTES });
   let parsed: unknown;
   try {
     parsed = JSON.parse(body);
   } catch {
-    respond(res, 400, { error: "request body must be valid JSON" });
+    respondJson(res, 400, { error: "request body must be valid JSON" });
     return null;
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    respond(res, 400, { error: "request body must be a JSON object" });
+    respondJson(res, 400, { error: "request body must be a JSON object" });
     return null;
   }
   return parsed as Record<string, unknown>;
-}
-
-async function readBody(req: IncomingMessage): Promise<string> {
-  const chunks: Buffer[] = [];
-  let totalBytes = 0;
-  for await (const chunk of req) {
-    const buffer =
-      Buffer.isBuffer(chunk) ? chunk : chunk instanceof Uint8Array ? Buffer.from(chunk) : Buffer.from(String(chunk));
-    totalBytes += buffer.length;
-    if (totalBytes > MAX_REQUEST_BODY_BYTES) throw new RequestBodyTooLargeError();
-    chunks.push(buffer);
-  }
-  return Buffer.concat(chunks).toString("utf8");
-}
-
-function respond(res: ServerResponse, status: number, body: object) {
-  res.statusCode = status;
-  res.setHeader("content-type", "application/json");
-  res.end(JSON.stringify(body));
 }

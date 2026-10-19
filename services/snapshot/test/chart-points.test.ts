@@ -3,7 +3,8 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { compileDisclosurePolicy } from "../src/disclosure-policy.ts";
-import type { JsonValue, QueryExecutor } from "../src/manifest-staging.ts";
+import type { JsonValue } from "../src/manifest-staging.ts";
+import type { QueryExecutor } from "../../shared/src/http.ts";
 import { verifySnapshotSeal, type SnapshotVerificationInput, type VerifierBlock } from "../src/snapshot-verifier.ts";
 
 const snapshotId = "00000000-0000-4000-8000-000000000001";

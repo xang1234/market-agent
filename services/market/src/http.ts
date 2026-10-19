@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createServer, type Server } from "node:http";
 import { type MarketDataAdapter } from "./adapter.ts";
 import { isAvailable, unavailable, type MarketDataOutcome, type UnavailableEnvelope } from "./availability.ts";
 import type { NormalizedBars } from "./bar.ts";
@@ -17,6 +17,7 @@ import {
 } from "./series-query.ts";
 import type { ListingSubjectRef } from "./subject-ref.ts";
 import { isUuidV4 } from "./validators.ts";
+import { errorMessageOr, readJsonBody, respondJson } from "../../shared/src/http.ts";
 
 export type MarketServerDeps = {
   adapter: MarketDataAdapter;
@@ -85,30 +86,30 @@ export function createMarketServer(deps: MarketServerDeps): Server {
     try {
       const route = matchRoute(req.method ?? "GET", req.url ?? "/");
       if (!route) {
-        respond(res, 404, { error: "not found" });
+        respondJson(res, 404, { error: "not found" });
         return;
       }
 
       switch (route.action) {
         case "healthz":
-          respond(res, 200, { status: "ok", service: "market" });
+          respondJson(res, 200, { status: "ok", service: "market" });
           return;
         case "get_cache_audit":
-          respond(res, 200, {
+          respondJson(res, 200, {
             dashboard: buildSeriesCacheAuditDashboard(seriesCacheAuditEvents),
           } satisfies GetCacheAuditResponse);
           return;
         case "get_quote": {
           const record = await deps.listings.find(route.subject_id);
           if (!record) {
-            respond(res, 404, { error: `listing not found: ${route.subject_id}` });
+            respondJson(res, 404, { error: `listing not found: ${route.subject_id}` });
             return;
           }
           const quote = await deps.adapter.getQuote({
             listing: { kind: "listing", id: route.subject_id },
           });
           if (!isAvailable(quote)) {
-            respond(res, statusForUnavailable(quote), {
+            respondJson(res, statusForUnavailable(quote), {
               error: "market quote unavailable",
               unavailable: quote,
               listing_context: listingContext(record),
@@ -120,13 +121,13 @@ export function createMarketServer(deps: MarketServerDeps): Server {
             provenance: quoteProvenance(deps.adapter.providerName, quote.data),
             listing_context: listingContext(record),
           };
-          respond(res, 200, response);
+          respondJson(res, 200, response);
           return;
         }
         case "get_series": {
-          const body = await readJsonBody(req, MAX_SERIES_BODY_BYTES);
+          const body = await readJsonBody(req, { maxBytes: MAX_SERIES_BODY_BYTES });
           if (body.kind === "error") {
-            respond(res, body.status, { error: body.error });
+            respondJson(res, body.status, { error: body.error });
             return;
           }
           let query: NormalizedSeriesQuery;
@@ -134,11 +135,11 @@ export function createMarketServer(deps: MarketServerDeps): Server {
             assertSeriesQueryContract(body.value);
             query = body.value;
           } catch (err) {
-            respond(res, 400, { error: errorMessage(err, "invalid series query") });
+            respondJson(res, 400, { error: errorMessageOr(err, "invalid series query") });
             return;
           }
           if (query.normalization !== "raw") {
-            respond(res, 400, {
+            respondJson(res, 400, {
               error:
                 `unsupported normalization "${query.normalization}": only "raw" is wired in this service today. ` +
                 `The in-snapshot transform gate covers the others.`,
@@ -158,7 +159,7 @@ export function createMarketServer(deps: MarketServerDeps): Server {
               identity,
               observedAt,
             });
-            respond(res, 200, cachedResponse);
+            respondJson(res, 200, cachedResponse);
             return;
           }
 
@@ -178,7 +179,7 @@ export function createMarketServer(deps: MarketServerDeps): Server {
           if (!seriesResponseHasRetryableUnavailable(response)) {
             rememberSeriesResponse(seriesResponseCache, seriesCacheMaxEntries, cacheKey, response);
           }
-          respond(res, 200, response);
+          respondJson(res, 200, response);
           return;
         }
         default: {
@@ -186,17 +187,17 @@ export function createMarketServer(deps: MarketServerDeps): Server {
           // compile-time error here, not a silent hang at runtime.
           const _exhaustive: never = route;
           void _exhaustive;
-          respond(res, 500, { error: "unhandled route" });
+          respondJson(res, 500, { error: "unhandled route" });
           return;
         }
       }
     } catch (error) {
       if (error instanceof ListingNotFoundError) {
-        if (!res.headersSent) respond(res, 404, { error: error.message });
+        if (!res.headersSent) respondJson(res, 404, { error: error.message });
         return;
       }
       console.error("market request failed", error);
-      if (!res.headersSent) respond(res, 502, { error: "upstream market data unavailable" });
+      if (!res.headersSent) respondJson(res, 502, { error: "upstream market data unavailable" });
     }
   });
 }
@@ -308,12 +309,6 @@ function statusForUnavailable(unavailable: UnavailableEnvelope): number {
   }
 }
 
-function respond(res: ServerResponse, status: number, body: object) {
-  res.statusCode = status;
-  res.setHeader("content-type", "application/json");
-  res.end(JSON.stringify(body));
-}
-
 // One fan-out leg of the series request: validate listing identity against the
 // repo (so a typo yields `missing_coverage`, not a generic provider_error from
 // the adapter), call getBars, then enforce the basis-binding rule. A bars
@@ -380,50 +375,8 @@ async function fanOutOne(
         source_id: deps.adapter.sourceId,
         as_of: clock().toISOString(),
         retryable: reason === "provider_error",
-        detail: errorMessage(err, "fan-out leg failed"),
+        detail: errorMessageOr(err, "fan-out leg failed"),
       }),
     };
   }
-}
-
-type JsonBodyResult =
-  | { kind: "ok"; value: unknown }
-  | { kind: "error"; status: number; error: string };
-
-async function readJsonBody(
-  req: IncomingMessage,
-  maxBytes: number,
-): Promise<JsonBodyResult> {
-  const contentType = (req.headers["content-type"] ?? "").toString().toLowerCase();
-  if (!contentType.startsWith("application/json")) {
-    return { kind: "error", status: 415, error: "content-type must be application/json" };
-  }
-
-  let total = 0;
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    const buf = chunk instanceof Buffer ? chunk : Buffer.from(chunk as Uint8Array);
-    total += buf.byteLength;
-    if (total > maxBytes) {
-      return { kind: "error", status: 413, error: `request body exceeds ${maxBytes} bytes` };
-    }
-    chunks.push(buf);
-  }
-
-  if (total === 0) {
-    return { kind: "error", status: 400, error: "request body is empty" };
-  }
-
-  const text = Buffer.concat(chunks, total).toString("utf8");
-  try {
-    return { kind: "ok", value: JSON.parse(text) };
-  } catch (err) {
-    return { kind: "error", status: 400, error: `invalid JSON: ${errorMessage(err, "parse failed")}` };
-  }
-}
-
-function errorMessage(err: unknown, fallback: string): string {
-  if (err instanceof Error && err.message.length > 0) return err.message;
-  if (typeof err === "string" && err.length > 0) return err;
-  return fallback;
 }

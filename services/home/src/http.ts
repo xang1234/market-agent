@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type Server } from "node:http";
 
 import { isUuidV4 } from "../../market/src/validators.ts";
 
@@ -6,6 +6,7 @@ import { HomeFindingFeedError } from "./finding-feed-repo.ts";
 import type { HomeSectionsDeps } from "./secondary-types.ts";
 import { getHomeSummary } from "./summary.ts";
 import type { QueryExecutor } from "./types.ts";
+import { respondJson } from "../../shared/src/http.ts";
 
 const USER_ID_HEADER = "x-user-id";
 
@@ -16,30 +17,30 @@ export function createHomeServer(db: QueryExecutor, deps: HomeSectionsDeps): Ser
     try {
       const route = matchRoute(req.method ?? "GET", req.url ?? "/");
       if (route === null) {
-        respond(res, 404, { error: "not found" });
+        respondJson(res, 404, { error: "not found" });
         return;
       }
 
       if (route.kind === "healthz") {
-        respond(res, 200, { status: "ok", service: "home" });
+        respondJson(res, 200, { status: "ok", service: "home" });
         return;
       }
 
       const userId = readUserId(req);
       if (userId === null) {
-        respond(res, 401, { error: `'${USER_ID_HEADER}' header with a valid UUID is required` });
+        respondJson(res, 401, { error: `'${USER_ID_HEADER}' header with a valid UUID is required` });
         return;
       }
 
       const summary = await getHomeSummary(db, deps, { user_id: userId });
-      respond(res, 200, summary);
+      respondJson(res, 200, summary);
     } catch (error) {
       if (error instanceof HomeFindingFeedError) {
-        if (!res.headersSent) respond(res, 400, { error: error.message });
+        if (!res.headersSent) respondJson(res, 400, { error: error.message });
         return;
       }
       console.error("home request failed", error);
-      if (!res.headersSent) respond(res, 500, { error: "internal home error" });
+      if (!res.headersSent) respondJson(res, 500, { error: "internal home error" });
     }
   });
 }
@@ -58,10 +59,4 @@ function readUserId(req: IncomingMessage): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return isUuidV4(trimmed) ? trimmed : null;
-}
-
-function respond(res: ServerResponse, status: number, body: object) {
-  res.statusCode = status;
-  res.setHeader("content-type", "application/json");
-  res.end(JSON.stringify(body));
 }

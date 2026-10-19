@@ -12,6 +12,7 @@ import { assertBarRange, normalizedBars, type AdjustmentBasis, type BarInterval 
 import { DELAY_CLASSES, normalizedQuote, type DelayClass, type SessionState } from "../quote.ts";
 import { assertListingRef, type ListingSubjectRef, type UUID } from "../subject-ref.ts";
 import { assertOneOf } from "../validators.ts";
+import { errorMessageOr } from "../../../shared/src/http.ts";
 
 export type PolygonListingContext = {
   ticker: string;
@@ -327,7 +328,7 @@ class MalformedPayloadError extends Error {
 
 class ListingResolutionError extends Error {
   constructor(err: unknown) {
-    super(errorMessage(err, "listing context lookup failed"));
+    super(errorMessageOr(err, "listing context lookup failed"));
     this.name = "ListingResolutionError";
   }
 }
@@ -381,12 +382,6 @@ async function resolveListing(
 
 function polygonHttpDetail(status: number): string {
   return `polygon: HTTP ${status}`;
-}
-
-function errorMessage(err: unknown, fallback: string): string {
-  if (err instanceof Error && err.message.length > 0) return err.message;
-  if (typeof err === "string" && err.length > 0) return err;
-  return fallback;
 }
 
 async function fetchAggPages(fetcher: PolygonFetcher, firstPath: string): Promise<PolygonAggsPayload[]> {

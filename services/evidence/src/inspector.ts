@@ -4,6 +4,7 @@ import {
   storagePolicyForDocument,
 } from "./source-disclosure.ts";
 import { formatCompactCurrency, formatCurrency, formatPercent } from "../../analyze/src/block-format.ts";
+import { isRecord } from "../../shared/src/http.ts";
 
 export const EVIDENCE_INSPECTION_REF_KINDS = [
   "source",
@@ -809,10 +810,6 @@ function stringArray(value: unknown): ReadonlyArray<string> {
     }
   }
   return Object.freeze([]);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function isoString(value: Date | string): string {

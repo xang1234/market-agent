@@ -3,6 +3,7 @@ import {
   FundamentalsDataUnavailableError,
   type AvailabilityReason,
 } from "./availability.ts";
+import { errorMessage } from "../../shared/src/http.ts";
 
 export const DEFAULT_DEV_PROVIDER_TIMEOUT_MS = 5_000;
 
@@ -125,10 +126,6 @@ function isAvailabilityReason(value: unknown): value is AvailabilityReason {
 
 function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

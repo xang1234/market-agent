@@ -5,6 +5,7 @@ import {
   parseAnalyzeRunMetadata,
   type AnalyzeRunMetadataV1,
 } from "./runMetadata.ts";
+import { errorMessage } from "../../shared/src/http.ts";
 
 // Mirrors services/chat/src/messages.ts. The persistence layer is
 // snapshot-aware but does NOT itself stage manifests or seal — those are
@@ -560,8 +561,4 @@ function decodeRunCursor(value: string): { created_at: string; run_id: string } 
   } catch {
     throw new AnalyzeTemplateRunPersistenceError("cursor is invalid");
   }
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

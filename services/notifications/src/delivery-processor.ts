@@ -1,4 +1,5 @@
 import type { JsonValue } from "../../shared/src/json.ts";
+import { type QueryExecutor } from "../../shared/src/http.ts";
 
 export const NOTIFICATION_CHANNELS = [
   "email",
@@ -57,13 +58,6 @@ export type ProcessPendingNotificationsResult = {
   channel_receipts: ReadonlyArray<DeliveryChannelReceipt>;
 };
 
-
-type QueryExecutor = {
-  query<R extends Record<string, unknown> = Record<string, unknown>>(
-    text: string,
-    values?: unknown[],
-  ): Promise<{ rows: R[] }>;
-};
 
 export type NotificationQueryExecutor = QueryExecutor;
 

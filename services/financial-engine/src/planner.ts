@@ -31,6 +31,7 @@ import {
 } from "../../financial-core/src/index.ts";
 import { authorizePlan } from "./plan-authority.ts";
 import { interpretPlan } from "./plan-interpretation.ts";
+import { isRecord } from "../../shared/src/http.ts";
 
 export const PLANNER_ADAPTER_VERSION = "financial-planner.v1";
 export const PLANNER_PROMPT_VERSION = "financial-plan-prompt.v1";
@@ -394,10 +395,6 @@ function invalid(path: string, code: string, message: string): Attempt<never> {
 
 function isApprovedOperation(kind: unknown): kind is OperationKind {
   return typeof kind === "string" && Object.hasOwn(OPERATION_REGISTRY, kind);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function systemPrompt(): string {

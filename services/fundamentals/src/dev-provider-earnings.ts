@@ -20,7 +20,6 @@ import {
   sidecarUnavailableReason,
 } from "./dev-provider-sidecar.ts";
 import {
-  errorMessage,
   isRecord,
   issuerSidecarContext,
   nullableNumber,
@@ -29,6 +28,7 @@ import {
   type DevProvidersRepositoryOptions,
 } from "./dev-provider-shared.ts";
 import type { UUID } from "./subject-ref.ts";
+import { errorMessage } from "../../shared/src/http.ts";
 
 export type DevProvidersEarningsRepositoryOptions = DevProvidersRepositoryOptions;
 

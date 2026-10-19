@@ -42,6 +42,7 @@ import {
 import {
   assertNonEmptyString,
 } from "./validators.ts";
+import { errorMessage } from "../../shared/src/http.ts";
 
 export type IngestIssuerIrSourceDeps = DiscoverIssuerIrCandidatesConfig & {
   db: QueryExecutor;
@@ -342,8 +343,4 @@ function inferFiscalPeriod(title: string, fallbackDate: string): string {
 function validateInput(input: IngestIssuerIrSourceInput): void {
   assertNonEmptyString(input.issuerName, "issuerName");
   assertSubjectRef(input.subjectRef, "subjectRef");
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

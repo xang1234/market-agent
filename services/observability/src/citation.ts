@@ -1,4 +1,5 @@
 import type { QueryExecutor } from "./types.ts";
+import { isRecord } from "../../shared/src/http.ts";
 
 export type CitationRefKind = "fact" | "claim" | "event" | "document" | string;
 
@@ -245,8 +246,4 @@ function pushRef(
   ) {
     refs.push({ ref_kind, ref_id });
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

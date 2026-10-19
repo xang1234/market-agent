@@ -20,6 +20,7 @@
 
 import { dataRefSeriesRefs, extractBlockRefs, type VerifierBlock } from "./snapshot-verifier.ts";
 import type { JsonObject } from "./manifest-staging.ts";
+import { isRecord } from "../../shared/src/http.ts";
 
 export type BlockProof = {
   evidence: "linked" | "unknown";
@@ -125,8 +126,4 @@ function citedRefsAllSealed(block: Record<string, unknown>, snapshot: SealedSnap
       .flatMap((binding) => isRecord(binding) && typeof binding.fact_id === "string" ? [["fact", binding.fact_id] as const] : []),
   ];
   return cited.length > 0 && cited.every(([kind, id]) => manifest[kind]?.has(id) === true);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

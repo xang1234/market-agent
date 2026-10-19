@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createServer, type Server } from "node:http";
 import type { AnalystConsensusEnvelope } from "./analyst-consensus.ts";
 import {
   FundamentalsDataUnavailableError,
@@ -36,6 +36,7 @@ import {
 import type { StatsRepository } from "./stats-repository.ts";
 import type { IssuerSubjectRef, UUID } from "./subject-ref.ts";
 import { isUuidV4 } from "./validators.ts";
+import { readJsonBody, respondJson } from "../../shared/src/http.ts";
 
 export type FundamentalsServerDeps = {
   profiles: IssuerProfileRepository;
@@ -117,128 +118,128 @@ export function createFundamentalsServer(deps: FundamentalsServerDeps): Server {
     try {
       const route = matchRoute(req.method ?? "GET", req.url ?? "/");
       if (!route) {
-        respond(res, 404, { error: "not found" });
+        respondJson(res, 404, { error: "not found" });
         return;
       }
 
       switch (route.action) {
         case "healthz":
-          respond(res, 200, { status: "ok", service: "fundamentals" });
+          respondJson(res, 200, { status: "ok", service: "fundamentals" });
           return;
         case "get_profile": {
           const outcome = await fetchProfileOutcome(deps, clock, route.subject_id);
           if (!isAvailable(outcome)) {
-            respond(res, statusForUnavailable(outcome), {
+            respondJson(res, statusForUnavailable(outcome), {
               error: "fundamentals profile unavailable",
               unavailable: outcome,
             });
             return;
           }
           const response: GetProfileResponse = { profile: outcome.data };
-          respond(res, 200, response);
+          respondJson(res, 200, response);
           return;
         }
         case "get_stats": {
           const outcome = await fetchStatsOutcome(deps, clock, route.subject_id);
           if (!isAvailable(outcome)) {
-            respond(res, statusForUnavailable(outcome), {
+            respondJson(res, statusForUnavailable(outcome), {
               error: "fundamentals stats unavailable",
               unavailable: outcome,
             });
             return;
           }
           const response: GetStatsResponse = { stats: toPublicStatsEnvelope(outcome.data) };
-          respond(res, 200, response);
+          respondJson(res, 200, response);
           return;
         }
         case "get_statements": {
-          const body = await readJsonBody(req, MAX_REQUEST_BODY_BYTES);
+          const body = await readJsonBody(req, { maxBytes: MAX_REQUEST_BODY_BYTES });
           if (body.kind === "error") {
-            respond(res, body.status, { error: body.error });
+            respondJson(res, body.status, { error: body.error });
             return;
           }
           const validated = validateStatementsRequest(body.value);
           if (validated.kind === "error") {
-            respond(res, 400, { error: validated.error });
+            respondJson(res, 400, { error: validated.error });
             return;
           }
           const response = await fetchStatementsResponse(deps, clock, validated.request, validated.parsedPeriods);
-          respond(res, 200, response);
+          respondJson(res, 200, response);
           return;
         }
         case "get_consensus": {
           const outcome = await fetchConsensusOutcome(deps, clock, route.subject_id);
           if (!isAvailable(outcome)) {
-            respond(res, statusForUnavailable(outcome), {
+            respondJson(res, statusForUnavailable(outcome), {
               error: "fundamentals consensus unavailable",
               unavailable: outcome,
             });
             return;
           }
           const response: GetConsensusResponse = { consensus: outcome.data };
-          respond(res, 200, response);
+          respondJson(res, 200, response);
           return;
         }
         case "get_earnings": {
           const outcome = await fetchEarningsOutcome(deps, clock, route.subject_id);
           if (!isAvailable(outcome)) {
-            respond(res, statusForUnavailable(outcome), {
+            respondJson(res, statusForUnavailable(outcome), {
               error: "fundamentals earnings unavailable",
               unavailable: outcome,
             });
             return;
           }
           const response: GetEarningsResponse = { earnings: outcome.data };
-          respond(res, 200, response);
+          respondJson(res, 200, response);
           return;
         }
         case "get_holders": {
           const outcome = await fetchHoldersOutcome(deps, clock, route.subject_id, route.kind);
           if (!isAvailable(outcome)) {
-            respond(res, statusForUnavailable(outcome), {
+            respondJson(res, statusForUnavailable(outcome), {
               error: "fundamentals holders unavailable",
               unavailable: outcome,
             });
             return;
           }
           const response: GetHoldersResponse = { holders: outcome.data };
-          respond(res, 200, response);
+          respondJson(res, 200, response);
           return;
         }
         case "get_segments": {
-          const body = await readJsonBody(req, MAX_REQUEST_BODY_BYTES);
+          const body = await readJsonBody(req, { maxBytes: MAX_REQUEST_BODY_BYTES });
           if (body.kind === "error") {
-            respond(res, body.status, { error: body.error });
+            respondJson(res, body.status, { error: body.error });
             return;
           }
           const validated = validateSegmentsRequest(body.value);
           if (validated.kind === "error") {
-            respond(res, 400, { error: validated.error });
+            respondJson(res, 400, { error: validated.error });
             return;
           }
           const outcome = await fetchSegmentsOutcome(deps, clock, validated.request, validated.parsedPeriod);
           if (!isAvailable(outcome)) {
-            respond(res, statusForUnavailable(outcome), {
+            respondJson(res, statusForUnavailable(outcome), {
               error: "fundamentals segments unavailable",
               unavailable: outcome,
             });
             return;
           }
           const response: GetSegmentsResponse = { segments: outcome.data };
-          respond(res, 200, response);
+          respondJson(res, 200, response);
           return;
         }
         default: {
           const _exhaustive: never = route;
           void _exhaustive;
-          respond(res, 500, { error: "unhandled route" });
+          respondJson(res, 500, { error: "unhandled route" });
           return;
         }
       }
     } catch (error) {
       console.error("fundamentals request failed", error);
       if (!res.headersSent) {
-        respond(res, 502, { error: "upstream fundamentals data unavailable" });
+        respondJson(res, 502, { error: "upstream fundamentals data unavailable" });
       }
     }
   });
@@ -665,51 +666,5 @@ function statusForUnavailable(unavailable: UnavailableEnvelope): number {
       return 502;
     case "stale_data":
       return 503;
-  }
-}
-
-function respond(res: ServerResponse, status: number, body: object) {
-  res.statusCode = status;
-  res.setHeader("content-type", "application/json");
-  res.end(JSON.stringify(body));
-}
-
-type JsonBodyResult =
-  | { kind: "ok"; value: unknown }
-  | { kind: "error"; status: number; error: string };
-
-async function readJsonBody(
-  req: IncomingMessage,
-  maxBytes: number,
-): Promise<JsonBodyResult> {
-  const contentType = (req.headers["content-type"] ?? "").toString().toLowerCase();
-  if (!contentType.startsWith("application/json")) {
-    return { kind: "error", status: 415, error: "content-type must be application/json" };
-  }
-
-  let total = 0;
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    const buf = chunk instanceof Buffer ? chunk : Buffer.from(chunk as Uint8Array);
-    total += buf.byteLength;
-    if (total > maxBytes) {
-      return { kind: "error", status: 413, error: `request body exceeds ${maxBytes} bytes` };
-    }
-    chunks.push(buf);
-  }
-
-  if (total === 0) {
-    return { kind: "error", status: 400, error: "request body is empty" };
-  }
-
-  const text = Buffer.concat(chunks, total).toString("utf8");
-  try {
-    return { kind: "ok", value: JSON.parse(text) };
-  } catch (err) {
-    return {
-      kind: "error",
-      status: 400,
-      error: `invalid JSON: ${err instanceof Error ? err.message : "parse failed"}`,
-    };
   }
 }

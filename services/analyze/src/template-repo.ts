@@ -6,6 +6,7 @@ import {
 } from "../../observability/src/types.ts";
 import type { SubjectRef } from "../../shared/src/subject-ref.ts";
 import { assertSubjectRef } from "../../shared/src/subject-ref.ts";
+import { errorMessage } from "../../shared/src/http.ts";
 
 export class AnalyzeTemplateNotFoundError extends Error {
   constructor(message = "analyze template not found") {
@@ -343,10 +344,6 @@ function serializeNullableTemplateJson(value: JsonValue | null | undefined, labe
   } catch (error) {
     throw new AnalyzeTemplateValidationError(`${label}: ${errorMessage(error)}`);
   }
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function rowFromDb(row: AnalyzeTemplateDbRow | undefined): AnalyzeTemplateRow {

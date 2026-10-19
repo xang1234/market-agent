@@ -5,6 +5,7 @@ import {
   type UniverseEntry,
   type WeeklyReferenceBundle,
 } from "./types.ts";
+import { isRecord } from "../../shared/src/http.ts";
 
 // Decodes a gzip-compressed weekly-reference bundle asset: gunzip → JSON.parse →
 // structural validation. Element-level (per-row) validation is deferred to the
@@ -36,7 +37,7 @@ export function sanitizeNonFiniteNumbers(text: string): string {
 }
 
 export function parseWeeklyBundle(raw: unknown): WeeklyReferenceBundle {
-  if (!isObject(raw)) {
+  if (!isRecord(raw)) {
     throw new BundleParseError("bundle is not a JSON object");
   }
   if (raw.schema_version !== WEEKLY_BUNDLE_SCHEMA) {
@@ -47,7 +48,7 @@ export function parseWeeklyBundle(raw: unknown): WeeklyReferenceBundle {
   const market = requireString(raw, "market");
   const as_of_date = requireString(raw, "as_of_date");
   const snapshot = raw.snapshot;
-  if (!isObject(snapshot) || !Array.isArray(snapshot.rows)) {
+  if (!isRecord(snapshot) || !Array.isArray(snapshot.rows)) {
     throw new BundleParseError("bundle.snapshot.rows must be an array");
   }
   // universe is the authoritative identity source (carries MICs); a bundle missing
@@ -79,10 +80,6 @@ function requireString(raw: Record<string, unknown>, key: string): string {
     throw new BundleParseError(`bundle field ${key} must be a non-empty string`);
   }
   return value;
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function messageOf(error: unknown): string {

@@ -11,7 +11,8 @@ import { isDeepStrictEqual } from "node:util";
 
 import { PERF_POINTS, perfLines, type PerfLine } from "../../market/src/perf-points.ts";
 import { sessionDate, windowClosedAt, type DailyClose } from "../../market/src/ytd-window.ts";
-import type { JsonValue, QueryExecutor } from "./manifest-staging.ts";
+import type { JsonValue } from "./manifest-staging.ts";
+import { isRecord, type QueryExecutor } from "../../shared/src/http.ts";
 
 export type ChartPointsReason = "count" | "duplicate" | "subject" | "unverifiable" | "range" | "label" | "window" | "hash" | "points";
 
@@ -277,8 +278,4 @@ function sealedSeries(spec: Record<string, unknown>): SealedSeries | null {
     bars_sha256,
     window: { year: window.year, baseline_date: window.baseline_date, end_date: window.end_date },
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

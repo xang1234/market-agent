@@ -37,6 +37,7 @@ import {
   resolveAuthMode,
   type RequestAuthConfig,
 } from "../../shared/src/request-auth.ts";
+import { respondJson } from "../../shared/src/http.ts";
 
 const HEARTBEAT_INTERVAL_MS = 250;
 const MAX_PENDING_SSE_FRAMES = 100;
@@ -395,12 +396,6 @@ function readStreamAuthenticatedUserId(
   if (headerUserId !== null) return headerUserId;
   if (resolveAuthMode(auth) !== "dev_user_header") return null;
   return route.userId !== null && isUuid(route.userId) ? route.userId : null;
-}
-
-function respondJson(res: ServerResponse, status: number, body: object) {
-  res.statusCode = status;
-  res.setHeader("content-type", "application/json");
-  res.end(JSON.stringify(body));
 }
 
 function writeSseHeaders(res: ServerResponse) {

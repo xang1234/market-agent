@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import type { QueryExecutor } from "../../shared/src/http.ts";
 import type { JsonObject, JsonValue } from "../../shared/src/json.ts";
 
 export type { JsonObject, JsonValue };
@@ -8,13 +9,6 @@ export const STAGED_SNAPSHOT_MANIFEST: unique symbol = Symbol("snapshot.stagedMa
 // Marks a manifest built by a deterministic (non-LLM) producer. Such manifests
 // have no tool_call_ids by design and skip the tool-call provenance audit.
 export const DETERMINISTIC_SNAPSHOT_MANIFEST: unique symbol = Symbol("snapshot.deterministicManifest");
-
-export type QueryExecutor = {
-  query<R extends Record<string, unknown> = Record<string, unknown>>(
-    text: string,
-    values?: unknown[],
-  ): Promise<{ rows: R[] }>;
-};
 
 export const SNAPSHOT_SUBJECT_KINDS = [
   "issuer",

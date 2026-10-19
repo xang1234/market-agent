@@ -5,6 +5,7 @@ import {
   type DiscoveredListing,
 } from "./discovery.ts";
 import type { QueryExecutor } from "./lookup.ts";
+import { errorMessage } from "../../shared/src/http.ts";
 
 type LegacyIdentity = {
   ticker: string;
@@ -347,8 +348,4 @@ async function deleteLegacyIdentity(db: QueryExecutor, legacy: LegacyIdentity): 
         and not exists (select 1 from instruments i where i.issuer_id = iss.issuer_id)`,
     [legacy.issuerId],
   );
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

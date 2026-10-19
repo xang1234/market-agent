@@ -14,6 +14,7 @@
 
 import { displayedFigures, QUARTERS_SHOWN, readsNamedQuarter, type DisplayedFigure } from "./fact-blocks.ts";
 import type { ResearchScope } from "./research-scope.ts";
+import { isRecord } from "../../shared/src/http.ts";
 
 type Block = Record<string, unknown>;
 
@@ -422,8 +423,4 @@ function unique(values: ReadonlyArray<string>): string[] {
 
 function isString(value: unknown): value is string {
   return typeof value === "string";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

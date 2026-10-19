@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type Server } from "node:http";
 
 import {
   approveFactReviewWithPool,
@@ -19,6 +19,7 @@ import {
   readAuthenticatedUserId,
   type RequestAuthConfig,
 } from "../../shared/src/request-auth.ts";
+import { readBody, RequestBodyTooLargeError, respondJson } from "../../shared/src/http.ts";
 
 const MAX_REQUEST_BODY_BYTES = 128 * 1024;
 const DEFAULT_THROUGHPUT_LIMIT = Object.freeze({ max_actions: 60, window_seconds: 60 * 60 });
@@ -32,12 +33,6 @@ type Route =
   | { action: "approve"; review_id: string }
   | { action: "reject"; review_id: string }
   | { action: "edit"; review_id: string };
-
-class RequestBodyTooLargeError extends Error {
-  constructor() {
-    super("request body too large");
-  }
-}
 
 class ClientRequestError extends Error {
   constructor(message: string) {
@@ -56,12 +51,12 @@ export function createEvidenceReviewServer(
     try {
       const route = matchRoute(req.method ?? "GET", req.url ?? "/");
       if (route === null) {
-        respond(res, 404, { error: "not found" });
+        respondJson(res, 404, { error: "not found" });
         return;
       }
 
       if (route.action === "healthz") {
-        respond(res, 200, { status: "ok", service: "evidence-review" });
+        respondJson(res, 200, { status: "ok", service: "evidence-review" });
         return;
       }
 
@@ -70,13 +65,13 @@ export function createEvidenceReviewServer(
       // before the auth gate below.
       if (route.action === "issuer_news") {
         const items = await listIssuerNews(db, { issuerId: route.issuer_id, limit: route.limit });
-        respond(res, 200, { items });
+        respondJson(res, 200, { items });
         return;
       }
 
       const reviewerId = readAuthenticatedUserId(req, options.auth);
       if (reviewerId === null) {
-        respond(res, 401, { error: authenticatedUserRequiredMessage(options.auth) });
+        respondJson(res, 401, { error: authenticatedUserRequiredMessage(options.auth) });
         return;
       }
 
@@ -89,7 +84,7 @@ export function createEvidenceReviewServer(
                 stale_after_seconds: route.stale_after_seconds,
                 limit: route.limit,
               });
-        respond(res, 200, { items });
+        respondJson(res, 200, { items });
         return;
       }
 
@@ -104,7 +99,7 @@ export function createEvidenceReviewServer(
           candidate: optionalCandidate(body),
           throughput_limit: DEFAULT_THROUGHPUT_LIMIT,
         });
-        respond(res, 200, result);
+        respondJson(res, 200, result);
         return;
       }
 
@@ -115,7 +110,7 @@ export function createEvidenceReviewServer(
           notes,
           throughput_limit: DEFAULT_THROUGHPUT_LIMIT,
         });
-        respond(res, 200, { review });
+        respondJson(res, 200, { review });
         return;
       }
 
@@ -127,27 +122,27 @@ export function createEvidenceReviewServer(
         candidate,
         throughput_limit: DEFAULT_THROUGHPUT_LIMIT,
       } satisfies EditFactReviewCandidateInput);
-      respond(res, 200, { review });
+      respondJson(res, 200, { review });
     } catch (error) {
       if (error instanceof RequestBodyTooLargeError) {
-        if (!res.headersSent) respond(res, 413, { error: error.message });
+        if (!res.headersSent) respondJson(res, 413, { error: error.message });
         return;
       }
       if (error instanceof SyntaxError) {
-        if (!res.headersSent) respond(res, 400, { error: "request body must be valid JSON" });
+        if (!res.headersSent) respondJson(res, 400, { error: "request body must be valid JSON" });
         return;
       }
       if (error instanceof FactReviewThroughputExceededError) {
-        if (!res.headersSent) respond(res, 429, { error: error.message });
+        if (!res.headersSent) respondJson(res, 429, { error: error.message });
         return;
       }
       if (error instanceof Error && isClientError(error)) {
-        if (!res.headersSent) respond(res, 400, { error: error.message });
+        if (!res.headersSent) respondJson(res, 400, { error: error.message });
         return;
       }
 
       console.error("evidence review request failed", error);
-      if (!res.headersSent) respond(res, 500, { error: "internal evidence review error" });
+      if (!res.headersSent) respondJson(res, 500, { error: "internal evidence review error" });
     }
   });
 }
@@ -205,25 +200,12 @@ function optionalPositiveInteger(value: string | null, label: string): number | 
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
-  const raw = await readBody(req);
+  const raw = await readBody(req, { maxBytes: MAX_REQUEST_BODY_BYTES });
   const parsed = raw.trim().length === 0 ? {} : JSON.parse(raw);
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new ClientRequestError("request body must be a JSON object");
   }
   return parsed as Record<string, unknown>;
-}
-
-async function readBody(req: IncomingMessage): Promise<string> {
-  const chunks: Buffer[] = [];
-  let totalBytes = 0;
-  for await (const chunk of req) {
-    const buffer =
-      Buffer.isBuffer(chunk) ? chunk : chunk instanceof Uint8Array ? Buffer.from(chunk) : Buffer.from(String(chunk));
-    totalBytes += buffer.length;
-    if (totalBytes > MAX_REQUEST_BODY_BYTES) throw new RequestBodyTooLargeError();
-    chunks.push(buffer);
-  }
-  return Buffer.concat(chunks).toString("utf8");
 }
 
 function optionalNotes(body: Record<string, unknown>): string | null {
@@ -317,9 +299,3 @@ const FACT_INPUT_VALIDATION_MESSAGES = new Set([
   "fact value: value_num or value_text is required",
   "request body must be a JSON object",
 ]);
-
-function respond(res: ServerResponse, status: number, body: object) {
-  res.statusCode = status;
-  res.setHeader("content-type", "application/json");
-  res.end(JSON.stringify(body));
-}

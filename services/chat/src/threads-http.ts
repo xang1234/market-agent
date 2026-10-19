@@ -25,15 +25,10 @@ import {
   type RequestAuthConfig,
 } from "../../shared/src/request-auth.ts";
 import { isUuid } from "./chat-ids.ts";
+import { readBody, RequestBodyTooLargeError, respondJson } from "../../shared/src/http.ts";
 
 const MAX_REQUEST_BODY_BYTES = 16 * 1024;
 const ROUTE_PREFIX = "/v1/chat/threads";
-
-class RequestBodyTooLargeError extends Error {
-  constructor() {
-    super("request body too large");
-  }
-}
 
 export type ListThreadsResponse = { threads: ChatThread[] };
 
@@ -78,26 +73,26 @@ export async function tryHandleThreadsRequest(
   try {
     const userId = readAuthenticatedUserId(req, auth);
     if (!userId) {
-      respond(res, 401, { error: authenticatedUserRequiredMessage(auth) });
+      respondJson(res, 401, { error: authenticatedUserRequiredMessage(auth) });
       return true;
     }
 
     if (route.action === "list") {
       const threads = await listThreads(db, userId, { includeArchived: route.includeArchived });
-      respond(res, 200, { threads } satisfies ListThreadsResponse);
+      respondJson(res, 200, { threads } satisfies ListThreadsResponse);
       return true;
     }
 
     if (route.action === "create") {
       const body = await readJsonBody(req);
       if (body === BAD_JSON) {
-        respond(res, 400, { error: "request body must be valid JSON" });
+        respondJson(res, 400, { error: "request body must be valid JSON" });
         return true;
       }
       try {
         const input = parseCreateInput(body);
         const thread = await createThread(db, userId, input);
-        respond(res, 201, thread);
+        respondJson(res, 201, thread);
       } catch (error) {
         if (mapThreadError(res, error)) return true;
         throw error;
@@ -109,12 +104,12 @@ export async function tryHandleThreadsRequest(
       if (route.method === "POST") {
         const body = await readJsonBody(req);
         if (body === BAD_JSON || typeof body !== "object" || body === null) {
-          respond(res, 400, { error: "request body must be a JSON object" });
+          respondJson(res, 400, { error: "request body must be a JSON object" });
           return true;
         }
         const input = parseUserMessageInput(body);
         if (input.kind === "error") {
-          respond(res, 400, { error: input.message });
+          respondJson(res, 400, { error: input.message });
           return true;
         }
         let message;
@@ -128,25 +123,25 @@ export async function tryHandleThreadsRequest(
           });
         } catch (error) {
           if (error instanceof ChatMessageIdempotencyConflictError) {
-            respond(res, 409, { error: error.message });
+            respondJson(res, 409, { error: error.message });
             return true;
           }
           throw error;
         }
         if (message === null) {
-          respond(res, 404, { error: "chat thread not found" });
+          respondJson(res, 404, { error: "chat thread not found" });
           return true;
         }
-        respond(res, 201, { message });
+        respondJson(res, 201, { message });
         return true;
       }
       const result = await runs.readThread({ userId, threadId: route.threadId }, async () =>
         (await listChatMessagesForThread(db, { thread_id: route.threadId, user_id: userId }))?.messages ?? null);
       if (result === null) {
-        respond(res, 404, { error: "chat thread not found" });
+        respondJson(res, 404, { error: "chat thread not found" });
         return true;
       }
-      respond(res, 200, {
+      respondJson(res, 200, {
         messages: result.messages,
         active_run: activeRunJson(result.activeRun),
         runs: result.runs.map(runStatusJson),
@@ -157,22 +152,22 @@ export async function tryHandleThreadsRequest(
     if (route.action === "patch_title") {
       const body = await readJsonBody(req);
       if (body === BAD_JSON || typeof body !== "object" || body === null) {
-        respond(res, 400, { error: "request body must be a JSON object" });
+        respondJson(res, 400, { error: "request body must be a JSON object" });
         return true;
       }
       const obj = body as Record<string, unknown>;
       if (!("title" in obj)) {
-        respond(res, 400, { error: "'title' is required" });
+        respondJson(res, 400, { error: "'title' is required" });
         return true;
       }
       const titleField = obj.title;
       if (titleField !== null && typeof titleField !== "string") {
-        respond(res, 400, { error: "'title' must be a string or null" });
+        respondJson(res, 400, { error: "'title' must be a string or null" });
         return true;
       }
       try {
         const thread = await updateThreadTitle(db, userId, route.threadId, { title: titleField });
-        respond(res, 200, thread);
+        respondJson(res, 200, thread);
       } catch (error) {
         if (mapThreadError(res, error)) return true;
         throw error;
@@ -201,23 +196,23 @@ export async function tryHandleThreadsRequest(
       req.resume();
       if (!res.headersSent) {
         res.setHeader("connection", "close");
-        respond(res, 413, { error: error.message });
+        respondJson(res, 413, { error: error.message });
       }
       return true;
     }
     console.error("chat threads request failed", error);
-    if (!res.headersSent) respond(res, 500, { error: "internal chat threads error" });
+    if (!res.headersSent) respondJson(res, 500, { error: "internal chat threads error" });
     return true;
   }
 }
 
 function mapThreadError(res: ServerResponse, error: unknown): boolean {
   if (error instanceof ChatThreadValidationError) {
-    respond(res, 400, { error: error.message });
+    respondJson(res, 400, { error: error.message });
     return true;
   }
   if (error instanceof ChatThreadNotFoundError) {
-    respond(res, 404, { error: error.message });
+    respondJson(res, 404, { error: error.message });
     return true;
   }
   return false;
@@ -280,7 +275,7 @@ function parseIncludeArchived(url: URL): boolean {
 const BAD_JSON = Symbol("BAD_JSON");
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown | typeof BAD_JSON> {
-  const text = await readBody(req);
+  const text = await readBody(req, { maxBytes: MAX_REQUEST_BODY_BYTES });
   if (text === "") return null;
   try {
     return JSON.parse(text);
@@ -342,27 +337,4 @@ function parseOptionalUuid(value: unknown): { kind: "ok"; value?: string } | { k
   if (trimmed === "") return { kind: "ok" };
   if (!isUuid(trimmed)) return { kind: "error" };
   return { kind: "ok", value: trimmed };
-}
-
-async function readBody(req: IncomingMessage): Promise<string> {
-  const chunks: Buffer[] = [];
-  let totalBytes = 0;
-  for await (const chunk of req) {
-    const buffer =
-      Buffer.isBuffer(chunk)
-        ? chunk
-        : chunk instanceof Uint8Array
-          ? Buffer.from(chunk)
-          : Buffer.from(String(chunk));
-    totalBytes += buffer.length;
-    if (totalBytes > MAX_REQUEST_BODY_BYTES) throw new RequestBodyTooLargeError();
-    chunks.push(buffer);
-  }
-  return Buffer.concat(chunks).toString("utf8");
-}
-
-function respond(res: ServerResponse, status: number, body: object) {
-  res.statusCode = status;
-  res.setHeader("content-type", "application/json");
-  res.end(JSON.stringify(body));
 }

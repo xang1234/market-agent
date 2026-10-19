@@ -18,13 +18,7 @@ import { factActiveSql, factKnownAtSql } from "../../evidence/src/fact-activity.
 import { DISPLAYABLE_VERIFICATION_STATUSES } from "../../evidence/src/promotion-rules.ts";
 import type { FactEntitlementChannel, FactSubjectKind } from "../../evidence/src/fact-repo.ts";
 import type { PeriodKind } from "./statement.ts";
-
-type QueryExecutor = {
-  query<R extends Record<string, unknown> = Record<string, unknown>>(
-    text: string,
-    values?: unknown[],
-  ): Promise<{ rows: R[] }>;
-};
+import { type QueryExecutor } from "../../shared/src/http.ts";
 
 export type UsableFactsQuery = {
   subjectKind: FactSubjectKind;

@@ -1,6 +1,6 @@
 import { createThesisAdapter, assertLegacyThesisEditAllowed, type ThesisAdapter } from "./thesis-adapter.ts";
 import { withTransaction } from "../../evidence/src/transaction.ts";
-import { createServer, type Server, type ServerResponse } from "node:http";
+import { createServer, type Server } from "node:http";
 import { randomUUID } from "node:crypto";
 import { ANALYZE_PLAYBOOKS } from "../../analyze/src/index.ts";
 import {
@@ -24,7 +24,6 @@ import { isSubjectRef, isUuid, type SubjectRef } from "../../shared/src/subject-
 import { readDevFlags } from "../../shared/src/devFlags.ts";
 import {
   DevApiHttpError,
-  isObjectRecord,
   nonEmptyString,
   readRequiredUuidValue,
   stableUuid,
@@ -64,6 +63,7 @@ import {
   isLlmSettingsPath,
   type DevApiLlmSettingsOptions,
 } from "./llm-settings-http.ts";
+import { isRecord, respondJson } from "../../shared/src/http.ts";
 
 type DevAgent = {
   agent_id: string;
@@ -232,7 +232,7 @@ export function createDevApiServer(
       }
       if ((!thesisMatch[2] && req.method === "PUT") || (thesisMatch[2] && req.method === "POST")) {
         const body = await readJson(req).catch(() => BAD_JSON);
-        if (body === BAD_JSON || !isObjectRecord(body)) { respondJson(res, 400, { error: "request body must be a JSON object" }); return; }
+        if (body === BAD_JSON || !isRecord(body)) { respondJson(res, 400, { error: "request body must be a JSON object" }); return; }
         respondJson(res, 200, await (thesisMatch[2] ? adapters.theses.draft : adapters.theses.save)({ userId, agentId, body })); return;
       }
       respondJson(res, 405, { error: "method not allowed" }); return;
@@ -853,7 +853,7 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
 const EVIDENCE_INSPECTION_UNAVAILABLE_ERROR = "evidence is not available for this artifact";
 
 function readEvidenceInspectionBody(value: unknown): { snapshotId: string; ref: EvidenceInspectionRef } {
-  if (!isObjectRecord(value)) {
+  if (!isRecord(value)) {
     throw new DevApiHttpError(400, "request body must be an object");
   }
   return {
@@ -863,7 +863,7 @@ function readEvidenceInspectionBody(value: unknown): { snapshotId: string; ref: 
 }
 
 function readEvidenceInspectionRefValue(value: unknown): EvidenceInspectionRef {
-  if (!isObjectRecord(value)) {
+  if (!isRecord(value)) {
     throw new DevApiHttpError(400, "ref must be an object");
   }
   const kind = value.kind;
@@ -1102,12 +1102,6 @@ function toDevThemeMembershipRationale(row: ThemeMembershipRationaleRow): DevThe
     rationale_supported: row.rationale_supported,
     rationale_claim_ids: [...row.rationale_claim_ids],
   };
-}
-
-function respondJson(res: ServerResponse, status: number, body: object) {
-  res.statusCode = status;
-  res.setHeader("content-type", "application/json");
-  res.end(JSON.stringify(body));
 }
 
 const BAD_JSON = Symbol("BAD_JSON");

@@ -11,6 +11,7 @@ import {
   type LlmRouterAttempt,
   LlmRouterError,
 } from "../../llm/src/index.ts";
+import { respondJson } from "../../shared/src/http.ts";
 
 export type DevApiLlmSettingsOptions = {
   createClient?: () => Promise<LlmChatClient> | LlmChatClient;
@@ -298,12 +299,6 @@ async function readRequestJson(req: AsyncIterable<Uint8Array | string>): Promise
   } catch {
     throw new LlmSettingsHttpError(400, "request body must be valid JSON");
   }
-}
-
-function respondJson(res: ServerResponse, status: number, body: object) {
-  res.statusCode = status;
-  res.setHeader("content-type", "application/json");
-  res.end(JSON.stringify(body));
 }
 
 function isLocalDevRequest(req: IncomingMessage): boolean {

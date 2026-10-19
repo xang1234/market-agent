@@ -6,13 +6,7 @@ import { hydrateSubjectRef, type HydratedSubjectHandoff } from "../../resolver/s
 import type { SubjectRef } from "../../shared/src/subject-ref.ts";
 import { parseResearchScope, type ResearchScope } from "./research-scope.ts";
 import type { ChatResolvedSubjectPreResolution } from "./subjects.ts";
-
-type QueryExecutor = {
-  query<R extends Record<string, unknown> = Record<string, unknown>>(
-    text: string,
-    values?: unknown[],
-  ): Promise<{ rows: R[] }>;
-};
+import { type QueryExecutor } from "../../shared/src/http.ts";
 
 type Hydrate = (db: QueryExecutor, ref: SubjectRef) => Promise<HydratedSubjectHandoff>;
 

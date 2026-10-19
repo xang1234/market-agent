@@ -10,6 +10,7 @@ import { bindModelSnapshot } from "./model-snapshot.ts";
 import type { CampaignModel, Checkpoint, EvidencePacket, Lease, StoredCandidate, WorkerDeps } from "./ports.ts";
 import type { Coverage, RunStatus, SavedBrief } from "./types.ts";
 import { DiscoveryError } from "./types.ts";
+import { errorMessage } from "../../shared/src/http.ts";
 
 export type StageOutcome = Readonly<{ coverage: Coverage; status: Extract<RunStatus, "completed" | "partial" | "failed"> }>;
 
@@ -232,8 +233,6 @@ function failureCode(error: unknown): string {
   if (systemic !== null) return `systemic:${systemic}`;
   return "company_research_failed";
 }
-function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error); }
-
 /** Persist only errors whose provider or router family can disable every company. */
 function systemicFailureCode(error: unknown): string | null {
   if (error instanceof DiscoveryError && error.code === "unavailable") return "discovery_unavailable";

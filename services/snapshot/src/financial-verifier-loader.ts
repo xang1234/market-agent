@@ -6,7 +6,7 @@
 // and publication proofs it was bound with are still the current ones.
 // Snapshot reads these tables directly; it never imports the engine.
 
-import type { QueryExecutor } from "./manifest-staging.ts";
+import type { QueryExecutor } from "../../shared/src/http.ts";
 import { toSealFactRow, type FactRow } from "./seal-input.ts";
 
 export type FinancialSealClaim = Readonly<{ owner_user_id: string; run_id: string; unit_id: string }>;

@@ -3,6 +3,7 @@ import type {
   IrAssetKind,
   IrSourceRegistryRow,
 } from "../issuer-ir-registry.ts";
+import { errorMessage } from "../../../shared/src/http.ts";
 
 type FetchLike = (url: string, init?: { headers?: Record<string, string>; signal?: AbortSignal }) => Promise<Response>;
 
@@ -293,8 +294,4 @@ function decodeHtml(value: string): string {
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, "\"")
     .replace(/&#39;/g, "'");
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

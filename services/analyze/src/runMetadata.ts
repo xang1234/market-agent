@@ -1,3 +1,5 @@
+import { isRecord } from "../../shared/src/http.ts";
+
 export const ANALYZE_RUN_METADATA_SCHEMA_VERSION = 1;
 
 export type AnalyzeRunMetadataSubjectRef = {
@@ -158,8 +160,4 @@ function expectPositiveInteger(value: unknown, field: string): number {
 
 function nullablePositiveInteger(value: unknown, field: string): number | null {
   return value === null ? null : expectPositiveInteger(value, field);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

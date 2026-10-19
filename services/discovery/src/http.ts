@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import type { DiscoveryService } from "./ports.ts";
 import { DiscoveryError } from "./types.ts";
+import { respondJson } from "../../shared/src/http.ts";
 
 export async function handleDiscoveryHttp(
   req: IncomingMessage,
@@ -13,12 +14,12 @@ export async function handleDiscoveryHttp(
   res.setHeader("cache-control", "no-store");
   try {
     const result = await dispatch(url, req, input);
-    if (result === NOT_FOUND) { send(res, 404, { error: "not found" }); return true; }
+    if (result === NOT_FOUND) { respondJson(res, 404, { error: "not found" }); return true; }
     if (result === NO_CONTENT) { res.statusCode = 204; res.end(); return true; }
-    send(res, result.status, result.body);
+    respondJson(res, result.status, result.body);
   } catch (error) {
-    if (error instanceof DiscoveryError) send(res, error.status, { error: error.message, code: error.code });
-    else send(res, 500, { error: "internal server error" });
+    if (error instanceof DiscoveryError) respondJson(res, error.status, { error: error.message, code: error.code });
+    else respondJson(res, 500, { error: "internal server error" });
   }
   return true;
 }
@@ -120,5 +121,4 @@ function integer(value: unknown, label: string, minimum: number): number {
 function sha256(value: unknown): string { const hash = requireString(value, "brief_hash"); if (!/^sha256:[0-9a-f]{64}$/.test(hash)) throw new DiscoveryError("validation", "brief_hash must be a SHA-256 hash"); return hash; }
 function readLimit(value: string | null, fallback: number): number { return value === null ? fallback : integer(Number(value), "limit", 1); }
 function nullable(value: string | null): string | null { return value === null || value === "" ? null : value; }
-function send(res: ServerResponse, status: number, body: object): void { res.statusCode = status; res.setHeader("content-type", "application/json"); res.end(JSON.stringify(body)); }
 function isDiscoveryPath(pathname: string): boolean { return pathname === "/v1/discovery" || pathname.startsWith("/v1/discovery/"); }

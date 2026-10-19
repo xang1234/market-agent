@@ -9,9 +9,9 @@ import {
 } from "../src/snapshot-sealer.ts";
 import {
   stageSnapshotManifest,
-  type QueryExecutor,
   type SnapshotManifestDraft,
 } from "../src/manifest-staging.ts";
+import type { QueryExecutor } from "../../shared/src/http.ts";
 
 const snapshotId = "00000000-0000-4000-8000-000000000001";
 const listingId = "00000000-0000-4000-8000-000000000002";

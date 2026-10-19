@@ -1,6 +1,7 @@
 import type { FinancialProvider, FinancialReadResult, PacketFact } from "../ports.ts";
 import type { DecimalInput } from "../../../agents/src/exact-decimal.ts";
 import type { CompanyIdentity } from "../types.ts";
+import { type QueryExecutor } from "../../../shared/src/http.ts";
 
 export const SUPPORTED_FINANCIAL_METRIC_KEYS = Object.freeze([
   "revenue", "gross_profit", "operating_income", "net_income", "eps_diluted", "free_cash_flow",
@@ -20,10 +21,6 @@ export function createFinancialProvider(options: { reader: FinancialReader }): F
     },
   });
 }
-
-type QueryExecutor = {
-  query<R extends Record<string, unknown> = Record<string, unknown>>(text: string, values?: unknown[]): Promise<{ rows: R[] }>;
-};
 
 type FactRow = Omit<PacketFact, "value_num" | "scale" | "currency" | "period_start"> & {
   value_num: DecimalInput;

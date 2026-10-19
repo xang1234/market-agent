@@ -3,6 +3,7 @@ import type { QueryExecutor } from "./types.ts";
 import { assertUuidV4 } from "./validators.ts";
 import { deleteSnapshotIfUnreachable } from "./snapshot-reachability.ts";
 import { deleteUnreferencedCampaignExactQuoteClaims } from "./campaign-quote-lifecycle.ts";
+import { errorMessage } from "../../shared/src/http.ts";
 
 type DiscoveryLifecycleRows = { snapshot_ids: string[]; tool_call_ids: string[]; quote_claim_ids: string[] };
 
@@ -415,10 +416,6 @@ function assertNonNegativeInteger(value: unknown, label: string): asserts value 
   if (!Number.isInteger(value) || (value as number) < 0) {
     throw new Error(`${label}: must be a non-negative integer`);
   }
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function isPoolLike(db: QueryExecutor): boolean {

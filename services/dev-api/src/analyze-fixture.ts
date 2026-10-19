@@ -16,7 +16,6 @@ import type { SubjectRef } from "../../shared/src/subject-ref.ts";
 import type { QueryExecutor } from "../../agents/src/index.ts";
 import {
   DevApiHttpError,
-  isObjectRecord,
   nonEmptyString,
   stableUuid,
 } from "./dev-api-shared.ts";
@@ -30,6 +29,7 @@ import {
   type DevAnalyzeTemplate,
   type DevApiAnalyzeAdapter,
 } from "./analyze-adapter.ts";
+import { isRecord } from "../../shared/src/http.ts";
 
 export function createFixtureAnalyzeAdapter(): DevApiAnalyzeAdapter {
   const analyzeRuns: DevAnalyzeRun[] = [];
@@ -243,7 +243,7 @@ function cloneAnalyzeRunBlockForRerun(
 ): Record<string, unknown> {
   const id = stableUuid(`analyze-rerun-block:${rerunId}:${index}`);
   const dataRef = block.data_ref;
-  const dataRefRecord = isObjectRecord(dataRef) ? dataRef : { kind: "analyze_run" };
+  const dataRefRecord = isRecord(dataRef) ? dataRef : { kind: "analyze_run" };
   return {
     ...block,
     id,

@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createServer, type Server } from "node:http";
 
 import {
   normalizeSnapshotTransformRequest,
@@ -7,6 +7,7 @@ import {
   type SnapshotTransformRequest,
 } from "./snapshot-transform.ts";
 import type { JsonObject } from "./manifest-staging.ts";
+import { errorMessageOr, isRecord, readJsonBody, respondJson } from "../../shared/src/http.ts";
 
 export type SnapshotTransformHttpResponse = JsonObject;
 
@@ -31,17 +32,17 @@ export function createSnapshotServer(deps: SnapshotServerDeps): Server {
     try {
       const route = matchRoute(req.method ?? "GET", req.url ?? "/");
       if (route === null) {
-        respond(res, 404, { error: "not found" });
+        respondJson(res, 404, { error: "not found" });
         return;
       }
 
-      const body = await readJsonBody(req, MAX_TRANSFORM_BODY_BYTES);
+      const body = await readJsonBody(req, { maxBytes: MAX_TRANSFORM_BODY_BYTES });
       if (body.kind === "error") {
-        respond(res, body.status, { error: body.error });
+        respondJson(res, body.status, { error: body.error });
         return;
       }
       if (!isRecord(body.value) || !isRecord(body.value.transform)) {
-        respond(res, 400, { error: "'transform' is required and must be an object" });
+        respondJson(res, 400, { error: "'transform' is required and must be an object" });
         return;
       }
       let transformRequest: SnapshotTransformRequest;
@@ -50,13 +51,13 @@ export function createSnapshotServer(deps: SnapshotServerDeps): Server {
           body.value.transform as SnapshotTransformRequest,
         );
       } catch (err) {
-        respond(res, 400, { error: errorMessage(err, "invalid snapshot transform") });
+        respondJson(res, 400, { error: errorMessageOr(err, "invalid snapshot transform") });
         return;
       }
 
       const manifest = await deps.loadManifest(route.snapshot_id);
       if (manifest === null) {
-        respond(res, 404, { error: "snapshot not found" });
+        respondJson(res, 404, { error: "snapshot not found" });
         return;
       }
 
@@ -68,12 +69,12 @@ export function createSnapshotServer(deps: SnapshotServerDeps): Server {
         });
       } catch (err) {
         logger.error("invalid sealed snapshot manifest", err);
-        respond(res, 500, { error: "invalid sealed snapshot manifest" });
+        respondJson(res, 500, { error: "invalid sealed snapshot manifest" });
         return;
       }
 
       if (!boundary.allowed) {
-        respond(res, boundary.status, boundary.body);
+        respondJson(res, boundary.status, boundary.body);
         return;
       }
 
@@ -82,10 +83,10 @@ export function createSnapshotServer(deps: SnapshotServerDeps): Server {
         manifest,
         request: transformRequest,
       });
-      respond(res, 200, transformed);
+      respondJson(res, 200, transformed);
     } catch (error) {
       logger.error("snapshot transform request failed", error);
-      if (!res.headersSent) respond(res, 500, { error: "internal snapshot error" });
+      if (!res.headersSent) respondJson(res, 500, { error: "internal snapshot error" });
     }
   });
 }
@@ -109,58 +110,6 @@ function matchRoute(method: string, rawUrl: string): Route | null {
   }
   if (!isUuid(snapshot_id)) return null;
   return { snapshot_id };
-}
-
-type JsonBodyResult =
-  | { kind: "ok"; value: unknown }
-  | { kind: "error"; status: number; error: string };
-
-async function readJsonBody(
-  req: IncomingMessage,
-  maxBytes: number,
-): Promise<JsonBodyResult> {
-  const contentType = (req.headers["content-type"] ?? "").toString().toLowerCase();
-  if (!contentType.startsWith("application/json")) {
-    return { kind: "error", status: 415, error: "content-type must be application/json" };
-  }
-
-  let total = 0;
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    const buf = chunk instanceof Buffer ? chunk : Buffer.from(chunk as Uint8Array);
-    total += buf.byteLength;
-    if (total > maxBytes) {
-      return { kind: "error", status: 413, error: `request body exceeds ${maxBytes} bytes` };
-    }
-    chunks.push(buf);
-  }
-
-  if (total === 0) {
-    return { kind: "error", status: 400, error: "request body is empty" };
-  }
-
-  const text = Buffer.concat(chunks, total).toString("utf8");
-  try {
-    return { kind: "ok", value: JSON.parse(text) };
-  } catch (err) {
-    return { kind: "error", status: 400, error: `invalid JSON: ${errorMessage(err, "parse failed")}` };
-  }
-}
-
-function respond(res: ServerResponse, status: number, body: object) {
-  res.statusCode = status;
-  res.setHeader("content-type", "application/json");
-  res.end(JSON.stringify(body));
-}
-
-function errorMessage(err: unknown, fallback: string): string {
-  if (err instanceof Error && err.message.length > 0) return err.message;
-  if (typeof err === "string" && err.length > 0) return err;
-  return fallback;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function isUuid(value: string): boolean {

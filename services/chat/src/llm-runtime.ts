@@ -16,6 +16,7 @@ import { formatCompactCurrency, formatCurrency } from "../../analyze/src/block-f
 import { calendarNote, plainText, renderAssertion, type RenderedAssertion } from "./render-assertions.ts";
 import type { ResearchScope } from "./research-scope.ts";
 import type { ModelExchange } from "./answer-trace.ts";
+import { isRecord } from "../../shared/src/http.ts";
 
 // Shown when no assertion renders.
 const FACT_BLOCKS_FALLBACK_TEXT =
@@ -543,10 +544,6 @@ function factBinding(fact: Record<string, unknown>): { binding?: Record<string, 
     return { binding: { fact_id: fact.fact_id, unit: fact.unit, period_kind: "fiscal_q", fiscal_year: fact.fiscal_year, fiscal_period: fact.fiscal_period } };
   }
   return {};
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function withAnswer(blocks: ReadonlyArray<Record<string, unknown>>, answer: Answer, inferences: Inferences): ReadonlyArray<Record<string, unknown>> {

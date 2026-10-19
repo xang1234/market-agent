@@ -57,9 +57,9 @@ import type { SnapshotSealResult } from "../../snapshot/src/snapshot-sealer.ts";
 import type { QueryExecutor } from "../../agents/src/index.ts";
 import {
   DevApiHttpError,
-  isObjectRecord,
   nonEmptyString,
 } from "./dev-api-shared.ts";
+import { isRecord } from "../../shared/src/http.ts";
 
 export type DevAnalyzeRunSummary = {
   run_id: string;
@@ -625,9 +625,9 @@ export function enrichAnalyzeRunBlocks(
 ): unknown[] {
   // Non-object blocks pass through; shareArtifactToChat rejects them by shape.
   return blocks.map((block) => {
-    if (!isObjectRecord(block)) return block;
-    const dataRef = isObjectRecord(block.data_ref) ? block.data_ref : { kind: "analyze_run", id: run.run_id };
-    const params = isObjectRecord(dataRef.params) ? dataRef.params : {};
+    if (!isRecord(block)) return block;
+    const dataRef = isRecord(block.data_ref) ? block.data_ref : { kind: "analyze_run", id: run.run_id };
+    const params = isRecord(dataRef.params) ? dataRef.params : {};
     return {
       ...block,
       data_ref: {

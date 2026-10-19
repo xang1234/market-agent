@@ -1,5 +1,6 @@
 import type { LlmChatMessage } from "../../llm/src/router.ts";
 import type { Brief, Id, SearchHit } from "./types.ts";
+import { isRecord } from "../../shared/src/http.ts";
 
 export type ScoutSeedChoice = { seed_query: string; mechanism_id: Id };
 export type ScoutSelection = { hit_ids: Id[]; seeds: ScoutSeedChoice[]; rejected: number };
@@ -80,8 +81,4 @@ export function parseScoutSelection(
     seeds.push({ seed_query: seed.seed_query, mechanism_id: seed.mechanism_id });
   }
   return { hit_ids, seeds, rejected };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

@@ -1,8 +1,8 @@
 import {
   auditManifestToolCallLog,
-  type QueryExecutor,
   type SnapshotManifestDraft,
 } from "./manifest-staging.ts";
+import type { QueryExecutor } from "../../shared/src/http.ts";
 import {
   type SnapshotVerificationInput,
   type SnapshotVerificationResult,

@@ -31,6 +31,7 @@ import {
   assertNonEmptyString,
   assertOptionalNonEmptyString,
 } from "./validators.ts";
+import { errorMessage } from "../../shared/src/http.ts";
 
 export const GDELT_ROUTED_READER_TOOL_NAMES = Object.freeze([
   "extract_mentions",
@@ -641,8 +642,4 @@ function isoString(value: Date | string): string {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

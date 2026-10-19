@@ -40,7 +40,8 @@ import {
   type FinancialUnitRecords,
   type LoadedEvidence,
 } from "./financial-verifier-loader.ts";
-import type { JsonObject, QueryExecutor } from "./manifest-staging.ts";
+import type { JsonObject } from "./manifest-staging.ts";
+import type { QueryExecutor } from "../../shared/src/http.ts";
 
 export const FINANCIAL_VERIFIER_VERSION = "snapshot-financial-verifier.v1";
 export const FINANCIAL_PUBLICATION_SCHEMA_VERSION = "financial_publication.v1";

@@ -9,6 +9,7 @@ import {
   SNAPSHOT_NORMALIZATIONS,
   SNAPSHOT_SUBJECT_KINDS,
 } from "./manifest-staging.ts";
+import { isRecord } from "../../shared/src/http.ts";
 
 export type SnapshotTransformManifest = {
   subject_refs: ReadonlyArray<SnapshotSubjectRef>;
@@ -422,10 +423,6 @@ function assertOneOf<T extends string>(
     throw new Error(`${label}: must be one of ${allowed.join(", ")}`);
   }
   return value as T;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function deny(reason: SnapshotTransformRejectionReason): SnapshotTransformDecision {

@@ -26,6 +26,7 @@ import {
   readAuthenticatedUserId,
   type RequestAuthConfig,
 } from "../../shared/src/request-auth.ts";
+import { errorMessageOr, readJsonBody, respondJson } from "../../shared/src/http.ts";
 
 export type ScreenerServerDeps = {
   candidates: ScreenerCandidateRepository;
@@ -46,13 +47,13 @@ export function createScreenerServer(deps: ScreenerServerDeps): Server {
     try {
       const route = matchRoute(req.method ?? "GET", req.url ?? "/");
       if (!route) {
-        respond(res, 404, { error: "not found" });
+        respondJson(res, 404, { error: "not found" });
         return;
       }
 
       switch (route.action) {
         case "healthz":
-          respond(res, 200, { status: "ok", service: "screener" });
+          respondJson(res, 200, { status: "ok", service: "screener" });
           return;
         case "search":
           await handleSearch(req, res, deps, clock);
@@ -75,17 +76,17 @@ export function createScreenerServer(deps: ScreenerServerDeps): Server {
         default: {
           const _exhaustive: never = route;
           void _exhaustive;
-          respond(res, 500, { error: "unhandled route" });
+          respondJson(res, 500, { error: "unhandled route" });
           return;
         }
       }
     } catch (error) {
       if (error instanceof ScreenNotFoundError) {
-        if (!res.headersSent) respond(res, 404, { error: error.message });
+        if (!res.headersSent) respondJson(res, 404, { error: error.message });
         return;
       }
       console.error("screener request failed", error);
-      if (!res.headersSent) respond(res, 500, { error: "internal screener error" });
+      if (!res.headersSent) respondJson(res, 500, { error: "internal screener error" });
     }
   });
 }
@@ -130,9 +131,9 @@ async function handleSearch(
   deps: ScreenerServerDeps,
   clock: () => Date,
 ): Promise<void> {
-  const body = await readJsonBody(req, MAX_REQUEST_BODY_BYTES);
+  const body = await readJsonBody(req, { maxBytes: MAX_REQUEST_BODY_BYTES });
   if (body.kind === "error") {
-    respond(res, body.status, { error: body.error });
+    respondJson(res, body.status, { error: body.error });
     return;
   }
   let query: ScreenerQuery;
@@ -140,14 +141,14 @@ async function handleSearch(
     assertScreenerQueryContract(body.value);
     query = body.value;
   } catch (err) {
-    respond(res, 400, { error: errorMessage(err, "invalid screener query") });
+    respondJson(res, 400, { error: errorMessageOr(err, "invalid screener query") });
     return;
   }
   const response = await executeScreenerQuery(
     { candidates: deps.candidates, clock },
     query,
   );
-  respond(res, 200, response);
+  respondJson(res, 200, response);
 }
 
 async function handleSaveScreen(
@@ -158,17 +159,17 @@ async function handleSaveScreen(
 ): Promise<void> {
   const user_id = readAuthenticatedUserId(req, deps.auth);
   if (!user_id) {
-    respond(res, 401, { error: authenticatedUserRequiredMessage(deps.auth) });
+    respondJson(res, 401, { error: authenticatedUserRequiredMessage(deps.auth) });
     return;
   }
 
-  const body = await readJsonBody(req, MAX_REQUEST_BODY_BYTES);
+  const body = await readJsonBody(req, { maxBytes: MAX_REQUEST_BODY_BYTES });
   if (body.kind === "error") {
-    respond(res, body.status, { error: body.error });
+    respondJson(res, body.status, { error: body.error });
     return;
   }
   if (body.value === null || typeof body.value !== "object") {
-    respond(res, 400, { error: "request body must be an object" });
+    respondJson(res, 400, { error: "request body must be an object" });
     return;
   }
   const raw = body.value as Record<string, unknown>;
@@ -180,7 +181,7 @@ async function handleSaveScreen(
   // so neither can be spoofed by the client.
   const existing = isUuidV4(screen_id) ? await deps.screens.find(screen_id) : null;
   if (existing && existing.user_id !== user_id) {
-    respond(res, 404, { error: `screen not found: ${screen_id}` });
+    respondJson(res, 404, { error: `screen not found: ${screen_id}` });
     return;
   }
   const created_at = existing?.created_at ?? now;
@@ -197,12 +198,12 @@ async function handleSaveScreen(
       updated_at,
     });
   } catch (err) {
-    respond(res, 400, { error: errorMessage(err, "invalid screen subject") });
+    respondJson(res, 400, { error: errorMessageOr(err, "invalid screen subject") });
     return;
   }
 
   const result = await deps.screens.save(screen);
-  respond(res, result.status === "created" ? 201 : 200, {
+  respondJson(res, result.status === "created" ? 201 : 200, {
     status: result.status,
     screen: result.screen,
   });
@@ -215,11 +216,11 @@ async function handleListScreens(
 ): Promise<void> {
   const user_id = readAuthenticatedUserId(req, deps.auth);
   if (!user_id) {
-    respond(res, 401, { error: authenticatedUserRequiredMessage(deps.auth) });
+    respondJson(res, 401, { error: authenticatedUserRequiredMessage(deps.auth) });
     return;
   }
   const screens = await deps.screens.listForUser(user_id);
-  respond(res, 200, { screens });
+  respondJson(res, 200, { screens });
 }
 
 async function handleGetScreen(
@@ -230,7 +231,7 @@ async function handleGetScreen(
 ): Promise<void> {
   const screen = await loadScreenForUserOrThrow(req, res, deps, screen_id);
   if (!screen) return;
-  respond(res, 200, { screen });
+  respondJson(res, 200, { screen });
 }
 
 async function handleDeleteScreen(
@@ -259,7 +260,7 @@ async function handleReplayScreen(
     { candidates: deps.candidates, clock },
     replayScreen(screen),
   );
-  respond(res, 200, response);
+  respondJson(res, 200, response);
 }
 
 async function loadScreenForUserOrThrow(
@@ -270,7 +271,7 @@ async function loadScreenForUserOrThrow(
 ): Promise<ScreenSubject | null> {
   const user_id = readAuthenticatedUserId(req, deps.auth);
   if (!user_id) {
-    respond(res, 401, { error: authenticatedUserRequiredMessage(deps.auth) });
+    respondJson(res, 401, { error: authenticatedUserRequiredMessage(deps.auth) });
     return null;
   }
   const screen = await loadScreenOrThrow(deps, screen_id);
@@ -285,49 +286,4 @@ async function loadScreenOrThrow(
   const screen = await deps.screens.find(screen_id);
   if (!screen) throw new ScreenNotFoundError(screen_id);
   return screen;
-}
-
-function respond(res: ServerResponse, status: number, body: object) {
-  res.statusCode = status;
-  res.setHeader("content-type", "application/json");
-  res.end(JSON.stringify(body));
-}
-
-type JsonBodyResult =
-  | { kind: "ok"; value: unknown }
-  | { kind: "error"; status: number; error: string };
-
-async function readJsonBody(
-  req: IncomingMessage,
-  maxBytes: number,
-): Promise<JsonBodyResult> {
-  const contentType = (req.headers["content-type"] ?? "").toString().toLowerCase();
-  if (!contentType.startsWith("application/json")) {
-    return { kind: "error", status: 415, error: "content-type must be application/json" };
-  }
-  let total = 0;
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    const buf = chunk instanceof Buffer ? chunk : Buffer.from(chunk as Uint8Array);
-    total += buf.byteLength;
-    if (total > maxBytes) {
-      return { kind: "error", status: 413, error: `request body exceeds ${maxBytes} bytes` };
-    }
-    chunks.push(buf);
-  }
-  if (total === 0) {
-    return { kind: "error", status: 400, error: "request body is empty" };
-  }
-  const text = Buffer.concat(chunks, total).toString("utf8");
-  try {
-    return { kind: "ok", value: JSON.parse(text) };
-  } catch (err) {
-    return { kind: "error", status: 400, error: `invalid JSON: ${errorMessage(err, "parse failed")}` };
-  }
-}
-
-function errorMessage(err: unknown, fallback: string): string {
-  if (err instanceof Error && err.message.length > 0) return err.message;
-  if (typeof err === "string" && err.length > 0) return err;
-  return fallback;
 }

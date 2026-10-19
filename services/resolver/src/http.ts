@@ -1,4 +1,4 @@
-import { createServer, type Server, type ServerResponse } from "node:http";
+import { createServer, type Server } from "node:http";
 import {
   type ResolverCandidate,
 } from "./envelope.ts";
@@ -16,14 +16,9 @@ import {
 } from "./flow.ts";
 import type { QueryExecutor } from "./lookup.ts";
 import { SUBJECT_KINDS, isSubjectRef, type SubjectKind, type SubjectRef } from "./subject-ref.ts";
+import { readBody, RequestBodyTooLargeError, respondJson } from "../../shared/src/http.ts";
 
 const MAX_REQUEST_BODY_BYTES = 64 * 1024;
-
-class RequestBodyTooLargeError extends Error {
-  constructor() {
-    super("request body too large");
-  }
-}
 
 export type ResolveRequest = {
   text: string;
@@ -221,90 +216,69 @@ export function createResolverServer(
     try {
       const route = req.method === "POST" ? req.url : null;
       if (route !== "/v1/subjects/resolve" && route !== "/v1/subjects/hydrate") {
-        respond(res, 404, { error: "not found" });
+        respondJson(res, 404, { error: "not found" });
         return;
       }
 
-      const body = await readBody(req);
+      const body = await readBody(req, { maxBytes: MAX_REQUEST_BODY_BYTES });
 
       let parsed: unknown;
       try {
         parsed = JSON.parse(body);
       } catch {
-        respond(res, 400, { error: "request body must be valid JSON" });
+        respondJson(res, 400, { error: "request body must be valid JSON" });
         return;
       }
 
       if (route === "/v1/subjects/resolve") {
         const validation = validateResolveRequest(parsed);
         if (!validation.valid) {
-          respond(res, 400, { error: validation.error });
+          respondJson(res, 400, { error: validation.error });
           return;
         }
 
         const response = await handleResolveSubjects(db, validation.request, options);
-        respond(res, 200, response);
+        respondJson(res, 200, response);
         return;
       }
 
       const validation = validateHydrateSubjectRequest(parsed);
       if (!validation.valid) {
-        respond(res, 400, { error: validation.error });
+        respondJson(res, 400, { error: validation.error });
         return;
       }
 
       const response = await handleHydrateSubject(db, validation.request);
-      respond(res, 200, response);
+      respondJson(res, 200, response);
     } catch (error) {
       // Keep the server alive on unexpected errors — dropped sockets during
       // readBody, downstream query failures, etc. Headers may already be
       // sent for long-tail races; skip responding in that case.
       if (error instanceof RequestBodyTooLargeError) {
         if (!res.headersSent) {
-          respond(res, 413, { error: error.message });
+          respondJson(res, 413, { error: error.message });
         }
         return;
       }
 
       if (error instanceof InvalidChoiceError) {
         if (!res.headersSent) {
-          respond(res, 400, { error: error.message });
+          respondJson(res, 400, { error: error.message });
         }
         return;
       }
 
       if (error instanceof SubjectHydrationNotFoundError) {
         if (!res.headersSent) {
-          respond(res, 404, { error: error.message });
+          respondJson(res, 404, { error: error.message });
         }
         return;
       }
 
       console.error("resolver request failed", error);
       if (!res.headersSent) {
-        respond(res, 500, { error: "internal resolver error" });
+        respondJson(res, 500, { error: "internal resolver error" });
       }
     }
   });
-}
-
-async function readBody(req: NodeJS.ReadableStream): Promise<string> {
-  const chunks: Buffer[] = [];
-  let totalBytes = 0;
-  for await (const chunk of req) {
-    // Buffer.from copies a string or a non-Buffer Uint8Array alike.
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    totalBytes += buffer.length;
-    if (totalBytes > MAX_REQUEST_BODY_BYTES) {
-      throw new RequestBodyTooLargeError();
-    }
-    chunks.push(buffer);
-  }
-  return Buffer.concat(chunks).toString("utf8");
-}
-
-function respond(res: ServerResponse, status: number, body: object) {
-  res.statusCode = status;
-  res.setHeader("content-type", "application/json");
-  res.end(JSON.stringify(body));
 }
