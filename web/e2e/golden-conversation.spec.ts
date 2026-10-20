@@ -14,6 +14,9 @@ const EXPLAIN_NARRATIVE = "Of NVDA and AMD, NVDA's gross margin was highest"
 const QUESTIONS = ['Analyze NVDA', 'Compare it with AMD YTD', 'Explain the differences and show the evidence']
 const YTD_TITLE = 'Price return YTD 2026 (split-adjusted, excluding dividends)'
 const YTD_RANGE = 'YTD 2026: 2025-12-31 close to 2026-08-31 close'
+// Against a capturing stack (docs/development.md, UI mode), also open every evidence page
+// each answer offers, so the replays can show any of them.
+const CAPTURE = process.env.E2E_CAPTURE === '1'
 
 async function ask(page: Page, question: string) {
   // One turn at a time: Send stays disabled until the previous answer is sealed.
@@ -42,6 +45,7 @@ function apiRequests(page: Page, method: string, path: RegExp): string[] {
 }
 
 test('golden conversation renders charts, metrics and inspectable sources, and survives a reload', async ({ page }) => {
+  test.slow(CAPTURE, 'opens every evidence page')
   // From its first appearance, the first answer is on the page exactly once in every
   // mutation batch: the streamed copy hands off to the sealed one with no gap or duplicate.
   await page.addInitScript((narrative) => {
@@ -73,6 +77,7 @@ test('golden conversation renders charts, metrics and inspectable sources, and s
   await expect(page.getByText('Revenue', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('Quarterly revenue')).toBeVisible()
   await expectProportionalBars(page)
+  if (CAPTURE) await openEveryEvidencePage(page, answer(page, NVDA_NARRATIVE))
 
   await ask(page, QUESTIONS[1])
   await expect(page.getByText(COMPARE_NARRATIVE)).toBeVisible()
@@ -82,11 +87,13 @@ test('golden conversation renders charts, metrics and inspectable sources, and s
   const disclosure = answer(page, COMPARE_NARRATIVE).locator('[data-block-kind="disclosure"]')
   await expect(disclosure).toContainText('end-of-day')
   await expect(disclosure).toContainText('split-adjusted price returns; dividends are not included')
+  if (CAPTURE) await openEveryEvidencePage(page, answer(page, COMPARE_NARRATIVE))
 
   await ask(page, QUESTIONS[2])
   await expect(page.getByText(EXPLAIN_NARRATIVE)).toBeVisible()
   // The third answer keeps both companies and shows the figures it points to.
   await expectComparison(answer(page, EXPLAIN_NARRATIVE))
+  if (CAPTURE) await openEveryEvidencePage(page, answer(page, EXPLAIN_NARRATIVE))
 
   // The inspector opens a figure cited in the third answer and, through it, its filing.
   await inspectCitedFigure(page, answer(page, EXPLAIN_NARRATIVE))
@@ -147,6 +154,40 @@ async function inspectCitedFigure(page: Page, message: Locator) {
   await expect(inspector.getByRole('heading', { name: /^(sec_edgar|golden_fixture) filing$/ })).toBeVisible()
   await inspector.getByRole('button', { name: 'Close' }).click()
   await expect(inspector).toBeHidden()
+}
+
+// Every evidence page a visitor can reach from this answer, each opened once: the pages
+// each block's metadata lists and its figures open, then every ref those pages link to.
+async function openEveryEvidencePage(page: Page, message: Locator) {
+  const inspector = page.getByRole('complementary', { name: 'Evidence inspector' })
+  const opened = new Set<string>()
+  // False when the ref was already opened, so nothing changed.
+  async function inspect(control: Locator): Promise<boolean> {
+    const ref = `${await control.getAttribute('data-inspection-kind')} ${await control.getAttribute('data-inspection-id')}`
+    if (opened.has(ref)) return false
+    opened.add(ref)
+    const lookup = page.waitForResponse((response) => new URL(response.url()).pathname === '/v1/evidence/inspect')
+    await control.click()
+    expect((await lookup).status(), ref).toBe(200)
+    await expect(inspector.getByRole('status')).toHaveCount(0)
+    await inspectLinks()
+    return true
+  }
+  async function inspectLinks() {
+    for (const link of await inspector.locator('button[data-inspection-kind]').all()) {
+      if (await inspect(link)) await inspector.getByRole('button', { name: 'Back' }).click()
+    }
+  }
+  const close = () => inspector.getByRole('button', { name: 'Close' }).click()
+  for (const block of await message.locator('[data-testid^="block-shell-"]').all()) {
+    await block.hover()
+    await block.getByRole('button', { name: 'Inspect block metadata' }).first().click()
+    await inspectLinks()
+    await close()
+  }
+  for (const figure of await message.locator('button[data-inspection-kind]').all()) {
+    if (await inspect(figure)) await close()
+  }
 }
 
 // The revenue chart draws real bars (#187): the tallest fills most of the chart, and
