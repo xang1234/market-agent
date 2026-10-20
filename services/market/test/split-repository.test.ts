@@ -5,6 +5,7 @@ import { GOLDEN_ISSUER_IDS } from "../../shared/src/golden-issuers.ts";
 import { PolygonFetchError, type PolygonFetcher } from "../src/adapters/polygon.ts";
 import { POLYGON_MARKET_SOURCE_ID } from "../src/provider-sources.ts";
 import { loadListingSplits, syncListingSplits } from "../src/split-repository.ts";
+import { syncSplits } from "../src/split-sync-cli.ts";
 
 const SEC_EDGAR_FILING_SOURCE_ID = "00000000-0000-4000-a000-000000000001";
 const ISSUERS = {
@@ -34,7 +35,7 @@ function polygonSplits(byTicker: Record<string, PolygonRow[]>, fetched: string[]
 
 const at = (iso: string) => () => new Date(iso);
 
-test("listing splits sync", { timeout: 180_000 }, async (t) => {
+test("listing splits sync and the split sync CLI", { timeout: 180_000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for split repository coverage");
     return;
@@ -138,5 +139,31 @@ test("listing splits sync", { timeout: 180_000 }, async (t) => {
       source_id: POLYGON_MARKET_SOURCE_ID,
       splits: [],
     });
+  });
+
+  await t.test("the CLI syncs active listings with SEC facts, skips the golden dataset, and counts failures", async () => {
+    const fetched: string[] = [];
+    const lines: string[] = [];
+    const log = { log: (line: string) => lines.push(line), error: (line: string) => lines.push(line) };
+    const fetcher = polygonSplits(nvdaFeed, fetched);
+
+    assert.deepEqual(await syncSplits(db, fetcher, [], log), { failures: 1 });
+    assert.deepEqual(fetched, [
+      "/v3/reference/splits?ticker=BRKN&limit=1000",
+      "/v3/reference/splits?ticker=NVDA&limit=1000",
+    ]);
+    assert.deepEqual(lines, [
+      `BRKN (${LISTINGS.broken}): split sync failed: polygon: HTTP 404`,
+      `NVDA (${LISTINGS.nvda}): 2 split(s) recorded`,
+      "NVDG: skipped, it is the frozen golden dataset",
+    ]);
+
+    fetched.length = 0;
+    lines.length = 0;
+    const unknown = "37000000-0000-4000-8000-0000000000ff";
+    assert.deepEqual(await syncSplits(db, fetcher, [LISTINGS.golden, unknown], log), { failures: 1 });
+    assert.deepEqual(fetched, []);
+    assert.deepEqual(lines, [`${unknown}: no such listing`, "NVDG: skipped, it is the frozen golden dataset"]);
+    assert.deepEqual(await loadListingSplits(db, LISTINGS.golden), { checked_at: null });
   });
 });
