@@ -12,7 +12,9 @@ import { startFinancialWorkerFromEnv, type FinancialWorkerEnv } from "./financia
 import { activeFinancialSurfaces, loadFinancialModes, type FinancialEnv } from "./financial-env.ts";
 import { analyzeFinancialRecovery } from "../../analyze/src/financial-section.ts";
 import { gridFinancialRecovery } from "../../analyst-grids/src/financial-column.ts";
+import type { SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { requireFinancialReadiness } from "../../financial-engine/src/readiness.ts";
+import type { ParentRecovery } from "../../financial-engine/src/recovery.ts";
 import type { FinancialWorker } from "../../financial-engine/src/worker.ts";
 
 export type DevApiRuntimeEnv = FinancialWorkerEnv & FinancialEnv & {
@@ -69,11 +71,8 @@ export async function createDevApiRuntimeFromEnv(
   const pool = new Pool({ connectionString: databaseUrl });
   // Nothing financial starts, the worker included, until its schema and versions are in place.
   await requireFinancialReadiness(pool, activeFinancialSurfaces(financialModes));
-  // Parents whose verified units are resumable after a restart; others register as they adopt the engine.
-  const worker = startFinancialWorkerFromEnv(pool, env, {
-    ...(module.analyzeFinancial ? { analyze_memo_run: analyzeFinancialRecovery(pool) } : {}),
-    analyst_grid_run: gridFinancialRecovery(pool),
-  });
+  const worker = financialModes.worker ? startFinancialWorkerFromEnv(pool, env, recoveryParents(pool, module.analyzeFinancial)) : null;
+  if (!worker) console.warn("dev-api: FINANCIAL_WORKER_ENABLED=false, so interrupted financial runs, grid cells included, are not recovered");
   const discovery = module.createDiscoveryService === undefined
     ? undefined
     : await module.createDiscoveryService({ db: pool }) as DiscoveryService;
@@ -88,6 +87,14 @@ export async function createDevApiRuntimeFromEnv(
     discovery,
   });
   return { adapters, worker };
+}
+
+/** Parents whose verified units are resumable after a restart; others register as they adopt the engine. */
+export function recoveryParents(db: SqlExecutor, analyzeFinancial: unknown): Readonly<Record<string, ParentRecovery>> {
+  return {
+    ...(analyzeFinancial ? { analyze_memo_run: analyzeFinancialRecovery(db) } : {}),
+    analyst_grid_run: gridFinancialRecovery(db),
+  };
 }
 
 function moduleSpecifier(specifier: string, cwd: string): string {

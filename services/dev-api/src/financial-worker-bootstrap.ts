@@ -1,10 +1,8 @@
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import type { ParentRecovery } from "../../financial-engine/src/recovery.ts";
 import { createFinancialWorker, type FinancialWorker, type WorkerPool } from "../../financial-engine/src/worker.ts";
-import { financialWorkerEnabled } from "./financial-env.ts";
 
 export type FinancialWorkerEnv = {
-  FINANCIAL_WORKER_ENABLED?: string;
   FINANCIAL_WORKER_INTERVAL_MS?: string;
 };
 
@@ -12,8 +10,7 @@ export function startFinancialWorkerFromEnv(
   pool: WorkerPool,
   env: FinancialWorkerEnv,
   parents: Readonly<Partial<Record<string, ParentRecovery>>> = {},
-): FinancialWorker | null {
-  if (!financialWorkerEnabled(env)) return null;
+): FinancialWorker {
   const interval = Number(env.FINANCIAL_WORKER_INTERVAL_MS ?? 5_000);
   const worker = createFinancialWorker({
     pool,

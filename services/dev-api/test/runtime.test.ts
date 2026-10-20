@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { createDevApiRuntimeFromEnv } from "../src/runtime.ts";
+import { createDevApiRuntimeFromEnv, recoveryParents } from "../src/runtime.ts";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -27,6 +27,12 @@ test("dev-api default runtime module resolves when loader cwd is the repo root",
 
   assert.equal(typeof adapters?.analyze.createRun, "function");
   assert.equal(typeof adapters?.agents.run, "function");
+});
+
+test("the worker always recovers grid runs, and analyze runs only when the analyze lane is on", () => {
+  const db = { query: async () => assert.fail("building the parents runs no query") };
+  assert.deepEqual(Object.keys(recoveryParents(db, undefined)), ["analyst_grid_run"]);
+  assert.deepEqual(Object.keys(recoveryParents(db, { publish: () => undefined })), ["analyze_memo_run", "analyst_grid_run"]);
 });
 
 test("dev-api imports evidence inspector without evaluating evidence's optional object-store deps", () => {

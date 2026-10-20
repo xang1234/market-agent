@@ -21,7 +21,7 @@ export function activeFinancialSurfaces(modes: FinancialModes): string[] {
   ];
 }
 
-export function financialWorkerEnabled(env: Pick<FinancialEnv, "FINANCIAL_WORKER_ENABLED">): boolean {
+function financialWorkerEnabled(env: Pick<FinancialEnv, "FINANCIAL_WORKER_ENABLED">): boolean {
   const value = env.FINANCIAL_WORKER_ENABLED?.trim() ?? "";
   if (value === "" || value === "true") return true;
   if (value === "false") return false;
