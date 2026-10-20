@@ -65,7 +65,7 @@ The golden conversation has three turns. Ask them in a new thread, word for word
 
 ### UI mode
 
-The app serves the web UI and replays the golden conversation's recorded API traffic from `services/app/fixtures/golden-conversation.replay.json`. The replay covers threads, all three turns' streams, the reloaded messages, and the evidence lookups. It builds no services and starts no containers. Any request that was not recorded answers `404` and names the request, including evidence for a figure nobody opened during capture.
+The app serves the web UI and replays the golden conversation's recorded API traffic from `services/app/fixtures/golden-conversation.replay.json`. The replay covers threads, all three turns' streams, the reloaded messages, and the evidence for every figure and source the answers offer. It builds no services and starts no containers. Any request that was not recorded answers `404` and names the request.
 
 A new thread restarts the replay. Concurrent tabs share one replay session. Pages whose services are parked, such as Home, Screener, Analyst Grids, and Review, show no data in this mode.
 
@@ -75,9 +75,11 @@ To recapture after an API or block change, start on a fresh database and run the
 
 ```bash
 DEV_CAPTURE_FILE=$PWD/services/app/fixtures/golden-conversation.replay.json DEV_PROFILE=chat DEV_NO_KEYS=true ./scripts/dev-shell.sh up
-(cd web && npm run e2e)
+(cd web && E2E_CAPTURE=1 npm run e2e)
 ./scripts/dev-shell.sh down
 ```
+
+`E2E_CAPTURE=1` makes the browser test also open every evidence page each answer offers: each block's metadata page, each figure, and every ref those pages link to. `web/src/demo/demoBackend.test.ts` fails if a fixture misses one.
 
 ### No-keys mode
 
