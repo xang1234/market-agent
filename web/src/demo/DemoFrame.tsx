@@ -18,7 +18,7 @@ export function DemoFrame({ children }: { children: ReactNode }) {
         className="border-b border-warning bg-warning-soft px-4 py-2 text-sm text-warning"
       >
         Recorded demo: every answer replays one recorded conversation; nothing is generated live
-        and there is no backend. In Chat, ask in order:{' '}
+        and there is no backend, and New chat starts the recording over. In Chat, ask in order:{' '}
         {DEMO_QUESTIONS.map((q, i) => (
           <span key={q}>
             {i > 0 ? ' → ' : null}

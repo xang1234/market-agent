@@ -19,6 +19,8 @@ const YTD_RANGE = 'YTD 2026: 2025-12-31 close to 2026-08-31 close'
 const CAPTURE = process.env.E2E_CAPTURE === '1'
 // Against the static demo build (playwright.config.ts).
 const DEMO = process.env.E2E_DEMO === '1'
+// A capture records a real stack's responses; the demo answers in the page and has none.
+if (CAPTURE && DEMO) throw new Error('E2E_CAPTURE records a running stack; unset E2E_DEMO')
 
 async function ask(page: Page, question: string) {
   // One turn at a time: Send stays disabled until the previous answer is sealed.
