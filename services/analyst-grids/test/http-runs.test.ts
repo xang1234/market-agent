@@ -26,6 +26,7 @@ async function withServer(db: QueryExecutor, fn: (base: string) => Promise<void>
       resolvePeers: async () => [],
     },
     auth: { mode: "dev_user_header" },
+    financial: { pool: { query: async () => assert.fail("no run starts"), connect: async () => assert.fail("no run starts") }, evidence: () => assert.fail("no run starts") },
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   const { port } = server.address() as AddressInfo;

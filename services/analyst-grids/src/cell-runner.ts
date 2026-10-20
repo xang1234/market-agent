@@ -5,7 +5,7 @@ import {
 } from "../../snapshot/src/snapshot-sealer.ts";
 import type { SubjectRef } from "../../shared/src/subject-ref.ts";
 import { updateCellResult } from "./queries.ts";
-import type { ColumnCatalogEntry, GridCellResult, PeriodContext, ReaderColumnDeps } from "./column-catalog.ts";
+import type { GridCellResult, ReaderColumn, ReaderColumnDeps } from "./column-catalog.ts";
 import { EMPTY_DISPLAY } from "./types.ts";
 import type { CellResultStatus, CellWrite, QueryExecutor } from "./types.ts";
 import type { JsonValue } from "../../observability/src/types.ts";
@@ -13,12 +13,11 @@ import type { JsonValue } from "../../observability/src/types.ts";
 export type CellRunnerDeps = { db: QueryExecutor; pool: SnapshotClientPool; reader?: ReaderColumnDeps };
 
 export type ComputeCellInput = {
-  column: ColumnCatalogEntry;
+  column: ReaderColumn;
   columnInstanceId: string;
   params: JsonValue | null;
   gridRowId: string;
   subject: SubjectRef;
-  period: PeriodContext;
   asOf: string;
   userId: string;
 };
@@ -46,7 +45,7 @@ export async function computeAndPersistCell(
   try {
     result = await input.column.producer(
       { db: deps.db, reader: deps.reader },
-      { subject: input.subject, period: input.period, snapshotId, asOf: input.asOf, userId: input.userId, params: input.params },
+      { subject: input.subject, snapshotId, asOf: input.asOf, userId: input.userId, params: input.params },
     );
   } catch (error) {
     console.error(

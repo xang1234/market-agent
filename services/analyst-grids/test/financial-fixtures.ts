@@ -1,13 +1,8 @@
-// Shared harness for the grid financial-column tests: a real engine database,
-// a grid over the seeded issuers, and a run started through the production
-// run engine with the financial lane enforced.
-
 import type { TestContext } from "node:test";
 import type { Client, Pool } from "pg";
 import { connectedPool } from "../../../db/test/docker-pg.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { databaseUrl, engineDatabase, IDS } from "../../financial-engine/test/db-fixtures.ts";
-import type { GridFinancialMode } from "../src/financial-column.ts";
 import { createGrid, getRunDetail, type GridRunDetail } from "../src/queries.ts";
 import { startGridRun } from "../src/run-engine.ts";
 import type { ColumnSpec, QueryExecutor } from "../src/types.ts";
@@ -28,7 +23,7 @@ export const REVENUE_COLUMNS: ColumnSpec[] = [
   { column_key: "latest_market_cap" },
 ];
 
-export async function startRun(pool: Pool, input: { columns?: ColumnSpec[]; asOf?: string; mode?: GridFinancialMode } = {}) {
+export async function startRun(pool: Pool, input: { columns?: ColumnSpec[]; asOf?: string } = {}) {
   const db = pool as unknown as QueryExecutor;
   const grid = await createGrid(db, IDS.owner, {
     name: "Fixture grid",
@@ -41,7 +36,7 @@ export async function startRun(pool: Pool, input: { columns?: ColumnSpec[]; asOf
       db,
       pool,
       universe: createUniverseResolverDeps(db),
-      financial: { mode: input.mode ?? "enforce", pool, evidence: createEvidenceFinancialPort },
+      financial: { pool, evidence: createEvidenceFinancialPort },
     },
     { gridId: grid.grid_id, userId: IDS.owner, asOf: input.asOf ?? CUTOFF },
   );

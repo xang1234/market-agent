@@ -3,11 +3,10 @@ import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { IDS, seedCashResilience } from "../../financial-engine/test/db-fixtures.ts";
 import { validateColumnSpecs } from "../src/column-catalog.ts";
-import { isFinancialColumn, parseFinancialColumnParams } from "../src/financial-column.ts";
+import { parseFinancialColumnParams } from "../src/financial-column.ts";
 import { cellsByPosition, CUTOFF, gridDatabase, REVENUE_COLUMNS, settled, startRun, waitForRun } from "./financial-fixtures.ts";
 
 test("numerical columns take a period relative to the run's cutoff; anything else in params is rejected", () => {
-  assert.ok(isFinancialColumn("latest_revenue") && isFinancialColumn("latest_market_cap") && !isFinancialColumn("reader_question"));
   assert.deepEqual(parseFinancialColumnParams("latest_revenue", undefined), { period_type: "annual", offset: 0 });
   assert.deepEqual(parseFinancialColumnParams("latest_revenue", { period_type: "quarterly", offset: 3 }), { period_type: "quarterly", offset: 3 });
   for (const params of [{ offset: -1 }, { offset: 1.5 }, { offset: 20 }, { period_type: "monthly" }, { metric_key: "net_income" }, [1], "latest"]) {
@@ -102,20 +101,6 @@ test("grid financial columns", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(detail.rows.map((row) => row.subject_ref.id), [IDS.issuerA, IDS.issuerB]);
     assert.equal(detail.cells.length, 6);
     assert.ok(detail.cells.every((cell) => cell.column_key !== "latest_eps_diluted"));
-  });
-
-  await t.test("with the lane off, a certified-only column shows no value", async () => {
-    const { runId } = await startRun(pool, { mode: "off", asOf: CUTOFF, columns: [{ column_key: "latest_cash_conversion" }] });
-    const detail = await waitForRun(pool, runId, settled);
-    assert.deepEqual(detail.cells.map((cell) => [cell.status, cell.coverage_flag, cell.financial_block]), [["no_coverage", "certified_only", null], ["no_coverage", "certified_only", null]]);
-  });
-
-  await t.test("the lane off keeps the legacy producers and certifies nothing", async () => {
-    const { runId } = await startRun(pool, { mode: "off", asOf: CUTOFF, columns: [{ column_key: "latest_revenue" }] });
-    const detail = await waitForRun(pool, runId, settled);
-    assert.ok(detail.cells.every((cell) => cell.financial_block === null));
-    assert.equal(detail.run.financial_mode, null);
-    assert.equal((await db.query(`select count(*)::int as n from financial_runs where parent_id = $1`, [runId])).rows[0].n, 0);
   });
 
   await t.test("a run started in the deleted shadow mode reads as a run without the lane", async () => {

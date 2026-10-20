@@ -5,6 +5,7 @@ import { bootstrapDatabase, connectedPool } from "../../../db/test/docker-pg.ts"
 import { createGrid, getRunDetail } from "../src/queries.ts";
 import { startGridRun } from "../src/run-engine.ts";
 import { createUniverseResolverDeps } from "../src/universe-wiring.ts";
+import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import type { QueryExecutor } from "../src/types.ts";
 
 const USER = "11111111-1111-4111-a111-111111111111";
@@ -18,7 +19,7 @@ async function poll<T>(fn: () => Promise<T>, until: (v: T) => boolean, tries = 6
   throw new Error("poll timed out");
 }
 
-test("startGridRun runs a deterministic column end-to-end and seals an inspectable cell", async (t) => {
+test("a stored market-cap fact never reaches the grid: the cell is an explicit gap and the run is partial", async (t) => {
   const { databaseUrl } = await bootstrapDatabase(t, "grid-run-e2e");
   const pool = await connectedPool(t, databaseUrl);
   const db = pool as unknown as QueryExecutor;
@@ -40,12 +41,19 @@ test("startGridRun runs a deterministic column end-to-end and seals an inspectab
   });
 
   const universe = createUniverseResolverDeps(db);
-  const { runId } = await startGridRun({ db, pool, universe }, { gridId: grid.grid_id, userId: USER, asOf: new Date().toISOString() });
+  const { runId } = await startGridRun(
+    { db, pool, universe, financial: { pool, evidence: createEvidenceFinancialPort } },
+    { gridId: grid.grid_id, userId: USER, asOf: new Date().toISOString() },
+  );
 
   const detail = await poll(() => getRunDetail(db, runId), (d) => ["completed", "partial", "failed"].includes(d.run.status));
-  assert.equal(detail.run.status, "completed");
-  assert.equal(detail.run.cell_done, 1);
-  assert.equal(detail.cells[0].status, "ok");
-  assert.ok(detail.cells[0].snapshot_id, "cell should carry a sealed snapshot id");
-  assert.equal(detail.cells[0].primary_ref?.kind, "fact");
+  assert.deepEqual(
+    [detail.run.status, detail.run.cell_done, detail.run.financial_mode, detail.rows[0].status],
+    ["partial", 1, "enforce", "resolved"],
+  );
+  const [cell] = detail.cells;
+  assert.deepEqual(
+    [cell.status, cell.coverage_flag, cell.display, cell.snapshot_id, cell.primary_ref],
+    ["no_coverage", "market_cap_needs_price_share_timing_proof", { value: "—", tone: null }, null, null],
+  );
 });

@@ -9,7 +9,6 @@ import {
   loadRunForUser,
   setRunStatus,
   markRowResolved,
-  markRowFailed,
   bumpCellDone,
   getRunDetail,
 } from "../src/queries.ts";
@@ -47,7 +46,7 @@ test("run progress helpers advance run/row/cell state and read detail", async (t
   await insertPendingCell(db, { gridRowId: rowId, gridRunId: runId, columnKey: "latest_market_cap", columnInstanceId: "c0" });
 
   await setRunStatus(db, runId, "running");
-  await markRowResolved(db, rowId, { period_kind: "point", fiscal_year: null, fiscal_period: null, period_start: null, period_end: null, document_refs: [] });
+  await markRowResolved(db, rowId);
   await bumpCellDone(db, runId);
   await setRunStatus(db, runId, "completed", { completedAt: true });
 
@@ -57,11 +56,6 @@ test("run progress helpers advance run/row/cell state and read detail", async (t
   assert.equal(detail.rows.length, 1);
   assert.equal(detail.rows[0].status, "resolved");
   assert.equal(detail.rows[0].subject_label, "Acme Corp", "issuer rows carry the legal name for display");
-  assert.equal(detail.rows[0].period_context?.period_kind, "point");
   assert.equal(detail.cells.length, 1);
   assert.equal(detail.cells[0].column_key, "latest_market_cap");
-
-  await markRowFailed(db, rowId);
-  const after = await getRunDetail(db, runId);
-  assert.equal(after.rows[0].status, "failed");
 });

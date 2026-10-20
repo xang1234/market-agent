@@ -136,7 +136,6 @@ function happyDb() {
 function baseCtx(overrides: Partial<GridColumnContext> = {}): GridColumnContext {
   return {
     subject: { kind: "issuer", id: ISSUER_ID },
-    period: null,
     snapshotId: SNAPSHOT_ID,
     asOf: AS_OF,
     userId: USER_ID,

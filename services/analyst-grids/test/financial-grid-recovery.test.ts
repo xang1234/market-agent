@@ -76,7 +76,7 @@ test("grid financial recovery", { timeout: 300_000 }, async (t) => {
   }
 
   const retry = (runId: string, detail: GridRunDetail) =>
-    publishGridFinancialCells({ mode: "enforce", pool, evidence: createEvidenceFinancialPort }, {
+    publishGridFinancialCells({ pool, evidence: createEvidenceFinancialPort }, {
       user_id: IDS.owner,
       grid_run_id: runId,
       knowledge_cutoff: CUTOFF,

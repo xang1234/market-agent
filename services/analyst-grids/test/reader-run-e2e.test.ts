@@ -7,6 +7,7 @@ import { startGridRun } from "../src/run-engine.ts";
 import { createUniverseResolverDeps } from "../src/universe-wiring.ts";
 import type { QueryExecutor } from "../src/types.ts";
 import type { ReaderColumnDeps } from "../src/column-catalog.ts";
+import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 
 // ─── Shared polling helper (mirrors run-engine.test.ts) ──────────────────────
 async function poll<T>(fn: () => Promise<T>, until: (v: T) => boolean, tries = 120): Promise<T> {
@@ -113,7 +114,7 @@ test("Scenario A: reader_question column produces a sealed claim-backed cell", a
   // Drive startGridRun
   const universe = createUniverseResolverDeps(db);
   const { runId } = await startGridRun(
-    { db, pool, universe, reader: fakeReader },
+    { db, pool, universe, reader: fakeReader, financial: { pool, evidence: createEvidenceFinancialPort } },
     { gridId: grid.grid_id, userId, asOf: new Date().toISOString() },
   );
 
@@ -257,7 +258,7 @@ test("Scenario B: reader_question column returns no_coverage when issuer has no 
 
   const universe = createUniverseResolverDeps(db);
   const { runId } = await startGridRun(
-    { db, pool, universe, reader: fakeReader },
+    { db, pool, universe, reader: fakeReader, financial: { pool, evidence: createEvidenceFinancialPort } },
     { gridId: grid.grid_id, userId, asOf: new Date().toISOString() },
   );
 

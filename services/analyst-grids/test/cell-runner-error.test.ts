@@ -3,12 +3,8 @@ import assert from "node:assert/strict";
 import type { QueryResult } from "pg";
 
 import { computeAndPersistCell } from "../src/cell-runner.ts";
-import type { ColumnCatalogEntry } from "../src/column-catalog.ts";
+import type { ReaderColumn } from "../src/column-catalog.ts";
 import type { QueryExecutor } from "../src/types.ts";
-
-// Docker-free unit tests for the cell runner's failure paths. The real seal
-// round-trip is covered by cell-runner.test.ts (docker-pg); here we only need to
-// drive the error branches with fakes.
 
 type Captured = { text: string; values?: unknown[] };
 
@@ -24,8 +20,8 @@ function fakeDb(): { db: QueryExecutor; queries: Captured[] } {
   return { db, queries };
 }
 
-function column(producer: ColumnCatalogEntry["producer"]): ColumnCatalogEntry {
-  return { column_key: "latest_market_cap", label: "X", kind: "deterministic", producer };
+function column(producer: ReaderColumn["producer"]): ReaderColumn {
+  return { column_key: "reader_question", label: "X", kind: "reader", producer };
 }
 
 const INPUT = {
@@ -33,7 +29,6 @@ const INPUT = {
   columnInstanceId: "56565656-5656-4565-a565-565656565656",
   params: null,
   subject: { kind: "issuer" as const, id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa" },
-  period: null,
   asOf: "2026-06-09T00:00:00.000Z",
   userId: "ffffffff-ffff-4fff-afff-ffffffffffff",
 };

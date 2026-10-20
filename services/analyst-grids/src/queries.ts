@@ -104,14 +104,13 @@ export async function createRun(
     cellTotal: number;
     droppedRowCount: number;
     columnInstances: ReadonlyArray<ColumnInstance>;
-    financialMode?: "enforce" | null;
   },
 ): Promise<string> {
   const result = await db.query<{ grid_run_id: string }>(
     `insert into grid_runs (grid_id, user_id, status, as_of, cell_total, dropped_row_count, column_instances, financial_mode)
-     values ($1, $2, 'pending', $3, $4, $5, $6::jsonb, $7)
+     values ($1, $2, 'pending', $3, $4, $5, $6::jsonb, 'enforce')
      returning grid_run_id::text as grid_run_id`,
-    [input.gridId, input.userId, input.asOf, input.cellTotal, input.droppedRowCount, JSON.stringify(input.columnInstances), input.financialMode ?? null],
+    [input.gridId, input.userId, input.asOf, input.cellTotal, input.droppedRowCount, JSON.stringify(input.columnInstances)],
   );
   return result.rows[0].grid_run_id;
 }
@@ -326,19 +325,8 @@ export async function setRunStatus(
   );
 }
 
-export async function markRowResolved(
-  db: QueryExecutor,
-  gridRowId: string,
-  period: Record<string, unknown> | null,
-): Promise<void> {
-  await db.query(
-    `update grid_rows set status = 'resolved', period_context = $2::jsonb where grid_row_id = $1`,
-    [gridRowId, period === null ? null : JSON.stringify(period)],
-  );
-}
-
-export async function markRowFailed(db: QueryExecutor, gridRowId: string): Promise<void> {
-  await db.query(`update grid_rows set status = 'failed' where grid_row_id = $1`, [gridRowId]);
+export async function markRowResolved(db: QueryExecutor, gridRowId: string): Promise<void> {
+  await db.query(`update grid_rows set status = 'resolved' where grid_row_id = $1`, [gridRowId]);
 }
 
 // Atomic single-increment. The run engine bumps exactly once per cell, so the
@@ -355,7 +343,6 @@ export type GridRowDetail = {
   // The issuer's legal name for display; null for non-issuer rows or when the
   // issuer row is gone. The UI falls back to the raw id.
   subject_label: string | null;
-  period_context: Record<string, unknown> | null;
   status: RowStatus;
 };
 
@@ -382,7 +369,7 @@ export async function getRunDetail(db: QueryExecutor, runId: string): Promise<Gr
   const runRes = await db.query<GridRunDbRow>(`select ${RUN_COLUMNS} from grid_runs where grid_run_id = $1`, [runId]);
   if (!runRes.rows[0]) throw new GridNotFoundError("grid run not found");
   const rowsRes = await db.query(
-    `select gr.grid_row_id::text as grid_row_id, gr.row_number, gr.subject_ref, gr.period_context, gr.status,
+    `select gr.grid_row_id::text as grid_row_id, gr.row_number, gr.subject_ref, gr.status,
             i.legal_name as subject_label
        from grid_rows gr
        left join issuers i
@@ -417,7 +404,6 @@ export async function getRunDetail(db: QueryExecutor, runId: string): Promise<Gr
       row_number: Number(r.row_number),
       subject_ref: r.subject_ref as SubjectRef,
       subject_label: (r.subject_label as string | null) ?? null,
-      period_context: (r.period_context as Record<string, unknown> | null) ?? null,
       status: r.status as RowStatus,
     })),
     cells,

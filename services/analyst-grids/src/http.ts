@@ -53,7 +53,7 @@ export type AnalystGridsServerDeps = {
   universe: UniverseResolverDeps;
   reader?: ReaderColumnDeps;
   auth?: RequestAuthConfig;
-  financial?: GridFinancialDeps;
+  financial: GridFinancialDeps;
 };
 
 export function createAnalystGridsServer(deps: AnalystGridsServerDeps): Server {

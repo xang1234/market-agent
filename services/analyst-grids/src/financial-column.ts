@@ -25,57 +25,46 @@ import type { PersistParentArtifact } from "../../financial-engine/src/finalize.
 import { buildDeterministicPlan, type DeterministicUnits, type PlanningContext, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import type { ParentRecovery } from "../../financial-engine/src/recovery.ts";
-import { issuerLabels, publishRequest, type FinancialMode, type RequestGap, type RequestOutcome } from "../../financial-engine/src/request.ts";
+import { issuerLabels, publishRequest, type RequestGap, type RequestOutcome } from "../../financial-engine/src/request.ts";
 import type { RunRecord } from "../../financial-engine/src/run-record.ts";
 import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier.ts";
 import type { SubjectRef } from "../../shared/src/subject-ref.ts";
 import { writePendingCellOnce } from "./queries.ts";
 import { EMPTY_DISPLAY, GridValidationError, MAX_GRID_ROWS, type CellWrite, type ColumnInstance } from "./types.ts";
 
-export type GridFinancialMode = FinancialMode;
-
 export type GridFinancialDeps = Readonly<{
-  mode: GridFinancialMode;
   pool: FinancialPool;
   evidence: (executor: SqlExecutor) => FinancialEvidencePort;
 }>;
 
 /** A reported value, or an approved ratio computed over its two reported inputs in the cell's own plan. */
-type FinancialColumn =
+type FinancialColumn = Readonly<{ label: string }> & (
   | Readonly<{ metric_key: string; annual_only?: true }>
   | Readonly<{ ratio_key: string; numerator: string; denominator: string; annual_only: true }>
-  | Readonly<{ unsupported: string }>;
+  | Readonly<{ unsupported: string }>
+);
 
 const FINANCIAL_COLUMNS: Readonly<Record<string, FinancialColumn>> = {
-  latest_revenue: { metric_key: "revenue" },
-  latest_eps_diluted: { metric_key: "eps_diluted" },
-  latest_market_cap: { unsupported: "market_cap_needs_price_share_timing_proof" },
+  latest_revenue: { label: "Revenue (latest)", metric_key: "revenue" },
+  latest_eps_diluted: { label: "EPS diluted (latest)", metric_key: "eps_diluted" },
+  latest_market_cap: { label: "Market Cap (latest)", unsupported: "market_cap_needs_price_share_timing_proof" },
   // The annual cash-resilience view (#210).
-  latest_operating_cash_flow: { metric_key: "operating_cash_flow", annual_only: true },
-  latest_net_income: { metric_key: "net_income", annual_only: true },
-  latest_total_liabilities: { metric_key: "total_liabilities", annual_only: true },
-  latest_total_assets: { metric_key: "total_assets", annual_only: true },
-  latest_total_equity: { metric_key: "total_equity", annual_only: true },
-  latest_cash_conversion: { ratio_key: "operating_cash_flow_to_net_income", numerator: "operating_cash_flow", denominator: "net_income", annual_only: true },
-  latest_liabilities_to_assets: { ratio_key: "liabilities_to_assets", numerator: "total_liabilities", denominator: "total_assets", annual_only: true },
-  latest_liabilities_to_equity: { ratio_key: "liabilities_to_equity", numerator: "total_liabilities", denominator: "total_equity", annual_only: true },
+  latest_operating_cash_flow: { label: "Operating cash flow (latest FY)", metric_key: "operating_cash_flow", annual_only: true },
+  latest_net_income: { label: "Net income (latest FY)", metric_key: "net_income", annual_only: true },
+  latest_total_liabilities: { label: "Total liabilities (latest FY end)", metric_key: "total_liabilities", annual_only: true },
+  latest_total_assets: { label: "Total assets (latest FY end)", metric_key: "total_assets", annual_only: true },
+  latest_total_equity: { label: "Stockholders' equity (latest FY end)", metric_key: "total_equity", annual_only: true },
+  latest_cash_conversion: { label: "Cash conversion: OCF / net income (latest FY)", ratio_key: "operating_cash_flow_to_net_income", numerator: "operating_cash_flow", denominator: "net_income", annual_only: true },
+  latest_liabilities_to_assets: { label: "Liabilities / assets (latest FY end)", ratio_key: "liabilities_to_assets", numerator: "total_liabilities", denominator: "total_assets", annual_only: true },
+  latest_liabilities_to_equity: { label: "Liabilities / equity (latest FY end)", ratio_key: "liabilities_to_equity", numerator: "total_liabilities", denominator: "total_equity", annual_only: true },
 };
 
-/** Columns that only the engine answers: with the lane off they have no legacy value. */
-export const CERTIFIED_ONLY_COLUMNS: ReadonlyArray<string> = Object.keys(FINANCIAL_COLUMNS).filter((key) => {
-  const column = FINANCIAL_COLUMNS[key]!;
-  return "annual_only" in column;
-});
+export const FINANCIAL_COLUMN_LABELS: ReadonlyArray<readonly [string, string]> = Object.entries(FINANCIAL_COLUMNS).map(([key, column]) => [key, column.label]);
 
 export type FinancialColumnParams = Readonly<{ period_type: "annual" | "quarterly"; offset: number }>;
 
 const MAX_PERIOD_OFFSET = 19;
 const PARENT_VERSION = "grid-run.v1";
-
-/** Whether a column is numerical and so answered by the engine (or declared unsupported) when the lane is enforced. */
-export function isFinancialColumn(columnKey: string): boolean {
-  return Object.hasOwn(FINANCIAL_COLUMNS, columnKey);
-}
 
 /**
  * Validates a numerical column's params: which period, relative to the latest
