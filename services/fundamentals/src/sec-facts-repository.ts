@@ -104,8 +104,9 @@ export function createSecBackedStatementRepository(
   };
 }
 
-// Null when the issuer has no CIK, SEC has no such statement, or ingestion
-// fails for any reason but SEC being unavailable, which throws.
+// Null when the issuer has no usable CIK or SEC has no such statement (a 404,
+// or no us-gaap values for it); any other failure throws
+// FundamentalsDataUnavailableError.
 export async function hydrateSecIssuer(
   db: FundamentalsTransactionalQueryExecutor,
   input: {
@@ -798,8 +799,9 @@ function firstCurrency(lines: ReadonlyArray<StatementLine>): string | null {
 // transaction, so a fact never lands without its proof. Lines without a token
 // (legacy fixtures, derived fourth quarters) keep the legacy number and get no
 // precision proof, so strict financial binding treats them as gaps. A line
-// that conflicts with a stored fact equal to its token, whose precision is
-// unproven, revalidates that fact. Each token's fact, inserted or already stored, gets its financial context when
+// that conflicts with a stored fact whose value and dates equal its token,
+// and whose precision is unproven, revalidates that fact. Each token's fact,
+// inserted or already stored, gets its financial context when
 // recordSecOriginalContext certifies it.
 async function persistStatementFacts(
   db: FundamentalsQueryExecutor,
