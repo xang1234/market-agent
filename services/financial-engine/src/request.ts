@@ -42,11 +42,12 @@ export type FinancialRequest = Readonly<{
   evidence: (executor: SqlExecutor) => FinancialEvidencePort;
   persistParent: PersistParentArtifact;
   /**
-   * Awaited once the request has a plan, new or resumed, before its run is
-   * reserved: what the parent artifact needs from outside the database is
-   * ready before finalization opens its transaction. It must not reject.
+   * Awaited once this attempt holds the run's lease, before the run is
+   * driven: what the parent artifact needs from outside the database is ready
+   * before finalization opens its transaction. A rejection fails the request
+   * as publication_failed.
    */
-  beforeReserve?: () => Promise<unknown>;
+  beforeDrive?: () => Promise<unknown>;
 }>;
 
 export async function publishRequest(pool: FinancialPool, request: FinancialRequest): Promise<RequestOutcome> {
@@ -58,7 +59,6 @@ export async function publishRequest(pool: FinancialPool, request: FinancialRequ
       if (planned.status !== "planned") return planned;
       plan = planned.plan;
     }
-    await request.beforeReserve?.();
     try {
       return await reserveAndDrive(client, request, plan);
     } catch {
@@ -91,6 +91,7 @@ async function reserveAndDrive(client: SnapshotTransactionClient, request: Finan
   });
   if (acquired.status !== "acquired") return { status: "gap", reason: UNAVAILABLE[acquired.status] };
   try {
+    await request.beforeDrive?.();
     const report = await driveLeasedRun(client, acquired.lease, acquired.run, { ...request, parent_limits: {} });
     return { status: "driven", run_id: run.run_id, report };
   } finally {

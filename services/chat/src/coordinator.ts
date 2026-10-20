@@ -1138,7 +1138,7 @@ function tickerLabel(subject: ChatResolvedSubjectPreResolution): string {
   return subject.handoff.display_labels?.ticker ?? subject.display_label;
 }
 
-function labelList(labels: ReadonlyArray<string>): string {
+export function labelList(labels: ReadonlyArray<string>): string {
   return labels.length < 2 ? labels.join("") : `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
 }
 

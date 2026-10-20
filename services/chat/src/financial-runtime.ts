@@ -20,6 +20,7 @@ import {
   type FinancialPlanV1,
   type FinancialRuntimeAuthority,
   type FinancialSubjectRef,
+  type MarginNode,
   type OperationNode,
 } from "../../financial-core/src/index.ts";
 import { cashResilienceDraft, LATEST_FISCAL_YEAR, type CashResiliencePeriod } from "../../financial-engine/src/cash-resilience.ts";
@@ -38,7 +39,7 @@ import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../fi
 import { requireFinancialReadiness } from "../../financial-engine/src/readiness.ts";
 import { publishRequest, type RequestGap } from "../../financial-engine/src/request.ts";
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
-import type { ChatTurnRunContext } from "./coordinator.ts";
+import { labelList, type ChatTurnRunContext } from "./coordinator.ts";
 import { contentHashForText, financialMessageId } from "./chat-ids.ts";
 import { noteBlock } from "./fact-blocks.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
@@ -48,6 +49,7 @@ import {
   BALANCE_SHEET_ITEMS,
   PROPOSABLE_METRICS,
   proposedMetric,
+  readingAsks,
   type IncomeItem,
   type RequestedMetric,
   type ResearchScope,
@@ -120,17 +122,23 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     const authority = chatAuthority(context.userId!, context.threadId, turnId);
 
     const messageId = financialMessageId(context.threadId, turnId);
-    const requested = await requestedResolutions(deps, context, text);
-    if (requested.length === 0) return gap("no_company");
+    let requested: TurnSubjects;
+    try {
+      requested = await requestedSubjects(deps, context, text);
+    } catch (reason) {
+      console.warn("[chat] the turn's companies could not be resolved; nothing is planned", reason);
+      return gap("planning_unavailable");
+    }
+    if (requested.subjects.length === 0) return gap("no_company");
     const reading = (deps.readQuestion?.(text) ?? Promise.resolve(null)).catch((reason) => {
       console.warn("[chat] no reading of the question; the financial answer names no uncovered ask", reason);
       return null;
     });
     // This lane runs before the analyst path resolves the turn's companies, so
     // the scope gets the ones the plan requests. ponytail: a company picked in
-    // a clarification answer is not among them; the scope then names the
-    // companies the message itself resolved.
-    const resolved = requested.flatMap(({ resolution }) => resolution.status === "resolved" ? [resolution] : []);
+    // a clarification answer, or the one company two listings name, is not
+    // among them; the scope then names the companies the message resolved.
+    const { resolved } = requested;
     const scope = (deps.researchScope
       ? deps.researchScope({ ...context, subjectPreResolution: resolved[0], subjectPreResolutions: resolved }, reading)
       : Promise.resolve(null)).catch((reason) => {
@@ -141,15 +149,12 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     const outcome = await publishRequest(deps.pool, {
       authority,
       request_key: turnId,
-      // Planning runs on the client publishRequest has checked out; a second
-      // pool acquire here could wait forever on a one-connection pool.
-      plan: (db) => planTurn(deps, db, context, text, requested, authority, new Date()),
+      plan: () => planTurn(deps, context, text, requested.subjects, authority, new Date()),
       evidence: deps.evidence,
-      // The reading and the scope settle outside any transaction, on a new
-      // plan or a resumed one; the scope queued its reads before this
-      // request took its client.
-      beforeReserve: () => Promise.all([scope, reading]),
-      persistParent: persistAssistantMessage(context.threadId, messageId, scope, reading, { authority, request_key: turnId }),
+      // The reading and the scope settle outside any transaction; the scope
+      // queued its reads before this request took its client.
+      beforeDrive: () => Promise.all([scope, reading]),
+      persistParent: persistAssistantMessage(context.threadId, messageId, { scope, reading, carried: requested.carried }, { authority, request_key: turnId }),
     });
     switch (outcome.status) {
       case "clarification":
@@ -182,31 +187,47 @@ function requestedMentions(context: ChatFinancialTurnContext, text: string): str
     : extractSubjectMentions(text);
 }
 
-async function requestedResolutions(
-  deps: ChatFinancialRuntimeDeps,
-  context: ChatFinancialTurnContext,
-  text: string,
-): Promise<ReadonlyArray<Readonly<{ mention: string; resolution: ChatSubjectPreResolution }>>> {
-  const mentions = requestedMentions(context, text);
-  if (mentions.length > 0) return Promise.all(mentions.map(async (mention) => ({ mention, resolution: await deps.resolveMention(mention) })));
-  // As the analyst path does (coordinator.ts): a company the whole message
-  // names, else the previous answer's ("and its gross margin?").
-  const whole = await deps.resolveMention(text);
-  const subjects = whole.status === "resolved" ? [whole] : await deps.priorSubjects?.(context.threadId) ?? [];
-  return subjects.map((resolution) => ({ mention: resolution.handoff.display_labels?.ticker ?? resolution.display_label, resolution }));
+type TurnSubjects = Readonly<{
+  // One per company, primary first, as the planner takes them.
+  subjects: ReadonlyArray<RequestedSubject>;
+  resolved: ReadonlyArray<ChatResolvedSubjectPreResolution>;
+  // The labels of the companies carried from the previous answer that the question does not name.
+  carried: ReadonlyArray<string>;
+}>;
+
+// The companies a turn's plan requests, as the analyst path picks them
+// (coordinator.ts resolveTurnSubjects): the ones the question names, with the
+// previous answer's first in a comparison or when it names none. Outside a
+// comparison a token that matches no company is an acronym ("EBIT").
+async function requestedSubjects(deps: ChatFinancialRuntimeDeps, context: ChatFinancialTurnContext, text: string): Promise<TurnSubjects> {
+  const explicit = Boolean(context.subjectText?.trim());
+  const comparative = COMPARATIVE.test(text);
+  const mentioned = await Promise.all(requestedMentions(context, text).map(async (mention) => ({ mention, resolution: await deps.resolveMention(mention) })));
+  const named = explicit || comparative ? mentioned : mentioned.filter(({ resolution }) => resolution.status !== "not_found");
+  const prior = !explicit && (named.length === 0 || comparative) ? await deps.priorSubjects?.(context.threadId) ?? [] : [];
+  const all = [
+    ...prior.map((resolution) => ({ mention: resolution.handoff.display_labels?.ticker ?? resolution.display_label, resolution })),
+    ...named,
+  ];
+  const issuers = await issuersOf(deps.pool, all.map(({ resolution }) => resolution));
+  const requested = all.map(({ mention, resolution }): RequestedSubject => ({ mention, resolution: requestedResolution(resolution, issuers) }));
+  const namedKeys = new Set(requested.slice(prior.length).map(requestedKey));
+  return {
+    // One entry per company: "NVIDIA" (the page) and "NVDA" (the message) are one.
+    subjects: distinctRequested(requested),
+    resolved: all.flatMap(({ resolution }) => resolution.status === "resolved" ? [resolution] : []),
+    carried: [...new Set(requested.slice(0, prior.length).filter((subject) => !namedKeys.has(requestedKey(subject))).map((subject) => subject.mention))],
+  };
 }
 
 async function planTurn(
   deps: ChatFinancialRuntimeDeps,
-  db: SqlExecutor,
   context: ChatFinancialTurnContext,
   text: string,
-  resolutions: ReadonlyArray<Readonly<{ mention: string; resolution: ChatSubjectPreResolution }>>,
+  requested: ReadonlyArray<RequestedSubject>,
   authority: FinancialRuntimeAuthority,
   cutoff: Date,
 ): Promise<PlanningResult> {
-  const issuers = await issuersOf(db, resolutions.map(({ resolution }) => resolution));
-  const requested = resolutions.map(({ mention, resolution }): RequestedSubject => ({ mention, resolution: requestedResolution(resolution, issuers) }));
   const planningContext = (subjects: ReadonlyArray<RequestedSubject>): PlanningContext => ({
     plan_id: randomUUID(),
     origin: { kind: "chat_request", ref: `chat:${context.threadId}:${context.turnId ?? context.runId}` },
@@ -221,8 +242,7 @@ async function planTurn(
     publication_unit_kind: "chat_section",
   });
 
-  // One entry per company: "NVIDIA" (the page) and "NVDA" (the message) are one.
-  let subjects = distinctRequested(requested);
+  let subjects = requested;
   if (context.clarificationAnswer) {
     // The chosen company may already be requested (the explicit subject), so
     // de-duplicate again once the answer resolves the ambiguous mention.
@@ -336,13 +356,15 @@ async function issuersOf(db: SqlExecutor, resolutions: ReadonlyArray<ChatSubject
   };
 }
 
+const requestedKey = (subject: RequestedSubject) => subject.resolution.status === "resolved"
+  ? `${subject.resolution.subject_ref.kind}:${subject.resolution.subject_ref.id.toLowerCase()}`
+  : `mention:${subject.mention}`;
+
 // One entry per company, the earlier one kept.
 function distinctRequested(subjects: ReadonlyArray<RequestedSubject>): ReadonlyArray<RequestedSubject> {
   const seen = new Set<string>();
   return subjects.filter((subject) => {
-    const key = subject.resolution.status === "resolved"
-      ? `${subject.resolution.subject_ref.kind}:${subject.resolution.subject_ref.id.toLowerCase()}`
-      : `mention:${subject.mention}`;
+    const key = requestedKey(subject);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -370,22 +392,21 @@ function chatAuthority(userId: string, threadId: string, turnId: string): Financ
 function persistAssistantMessage(
   threadId: string,
   messageId: string,
-  pendingScope: Promise<ResearchScope | null>,
-  pendingReading: Promise<ScopeProposal | null>,
+  turn: Readonly<{ scope: Promise<ResearchScope | null>; reading: Promise<ScopeProposal | null>; carried: ReadonlyArray<string> }>,
   request: { authority: FinancialRuntimeAuthority; request_key: string },
 ): PersistParentArtifact {
   return async (tx, publication) => {
-    // Both settled before the run was reserved (beforeReserve).
-    const [scope, reading] = await Promise.all([pendingScope, pendingReading]);
+    // Both settled before the run was driven (beforeDrive).
+    const [scope, reading] = await Promise.all([turn.scope, turn.reading]);
     const plan = scope === null && reading === null ? null : await findPlanForRequest(tx.client, request);
     const missing = reading === null || plan === null ? [] : uncoveredAsks(reading, plan);
+    const note = [
+      ...(turn.carried.length === 0 ? [] : [`${labelList(turn.carried)} ${turn.carried.length > 1 ? "are" : "is"} carried from the previous answer.`]),
+      ...(missing.length === 0 ? [] : [`Not part of this calculation: ${missing.join("; ")}.`]),
+    ].join(" ");
     const blocks = [
       publication.block,
-      ...(missing.length === 0 ? [] : [noteBlock(
-        { snapshotId: publication.snapshot_id, asOf: publication.block.as_of },
-        "uncovered",
-        `Not part of this calculation: ${missing.join("; ")}.`,
-      )]),
+      ...(note === "" ? [] : [noteBlock({ snapshotId: publication.snapshot_id, asOf: publication.block.as_of }, "uncovered", note)]),
     ];
     // The scope names the figures the published plan computed, so a follow-up
     // ("why did it change?") reads them (#378 review).
@@ -434,16 +455,20 @@ export const SCOPE_METRICS: Readonly<Record<string, string | null>> = {
   shares_outstanding: null,
 };
 
-// The figures a plan's outputs show, as the chat scope names them: a change,
-// sum, ratio, threshold or ranking is of the figures it reads.
-function planMetrics(plan: FinancialPlanV1): RequestedMetric[] {
+const figureKey = (node: OperationNode) => node.operation === "reported_metric" ? node.metric_key : node.operation;
+
+// The figures a plan's outputs show: a change, sum, ratio, threshold or
+// ranking is of the figures it reads.
+function shownFigures(plan: FinancialPlanV1): OperationNode[] {
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
-  const figures = (node: OperationNode): string[] => {
-    const key = node.operation === "reported_metric" ? node.metric_key : node.operation;
-    if (Object.hasOwn(SCOPE_METRICS, key)) return SCOPE_METRICS[key] === null ? [] : [SCOPE_METRICS[key]!];
-    return operationDependencies(node).flatMap((id) => figures(nodes.get(id)!));
-  };
-  const keys = new Set(plan.outputs.flatMap((output) => figures(nodes.get(output.node_id)!)));
+  const figures = (node: OperationNode): OperationNode[] =>
+    Object.hasOwn(SCOPE_METRICS, figureKey(node)) ? [node] : operationDependencies(node).flatMap((id) => figures(nodes.get(id)!));
+  return plan.outputs.flatMap((output) => figures(nodes.get(output.node_id)!));
+}
+
+// The figures a plan shows, as the chat scope names them.
+function planMetrics(plan: FinancialPlanV1): RequestedMetric[] {
+  const keys = new Set(shownFigures(plan).flatMap((node) => SCOPE_METRICS[figureKey(node)] ?? []));
   return [...keys].map((key) => proposedMetric(key, null, null)!);
 }
 
@@ -472,24 +497,35 @@ const INCOME_ITEM_FIGURE: Readonly<Record<IncomeItem, string | null>> = {
  * qualifier on RequestedMetric to check it.
  */
 export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1): string[] {
-  const asks = new Set([...reading.asks].filter((facet) => !reading.turns_off.facets.has(facet)));
+  const { asks, offMetrics } = readingAsks(reading);
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
-  const figures = plan.operations.map((node) => node.operation === "reported_metric" ? node.metric_key : node.operation);
-  const read = new Set([...figures, ...figures.flatMap((key) => SCOPE_METRICS[key] ?? [])]);
-  const metrics = reading.metrics
-    .filter((metric) => CATALOG.has(metric.metric_key) && !reading.turns_off.metrics.has(metric.metric_key))
-    .flatMap((metric) => metric.metric_key === "balance_sheet" ? BALANCE_SHEET_ITEMS.map((key) => CATALOG.get(key)!) : [metric]);
+  const shown = shownFigures(plan);
+  const margins = shown.filter((node): node is MarginNode =>
+    node.operation === "gross_margin" || node.operation === "operating_margin" || node.operation === "net_margin");
+  const numerators = margins.flatMap((node) => {
+    const numerator = nodes.get(node.numerator);
+    return numerator?.operation === "reported_metric" ? [numerator.metric_key] : [];
+  });
+  // A margin shows the income figure it divides: an operating margin answers "operating income".
+  const read = new Set([...shown.flatMap((node) => [figureKey(node), SCOPE_METRICS[figureKey(node)] ?? []].flat()), ...numerators]);
   const periodOf = (id: string) => {
     const node = nodes.get(id);
     return node?.operation === "reported_metric" ? JSON.stringify(node.period) : id;
   };
-  const marginPeriods = new Set(plan.operations.flatMap((node) =>
-    node.operation === "gross_margin" || node.operation === "operating_margin" || node.operation === "net_margin" ? [periodOf(node.revenue)] : []));
+  const marginPeriods = new Set(margins.map((node) => periodOf(node.revenue)));
+  const metrics = [...new Map(reading.metrics
+    .filter((metric) => CATALOG.has(metric.metric_key))
+    .flatMap((metric) => metric.metric_key === "balance_sheet" ? BALANCE_SHEET_ITEMS.map((key) => CATALOG.get(key)!) : [metric])
+    .filter((metric) => !offMetrics.has(metric.metric_key))
+    .map((metric) => [metric.metric_key, metric])).values()];
+  const items = reading.income_items.filter((item) => !read.has(INCOME_ITEM_FIGURE[item] ?? "")).map((item) => item.replaceAll("_", " "));
   return [
-    ...metrics.filter((metric) => !read.has(metric.metric_key)).map((metric) => inSentence(metric.label)),
-    ...reading.income_items.filter((item) => !read.has(INCOME_ITEM_FIGURE[item] ?? "")).map((item) => item.replaceAll("_", " ")),
+    // The income items name its figures more closely than the whole statement does.
+    ...metrics.filter((metric) => !read.has(metric.metric_key) && !(metric.metric_key === "income_statement" && reading.income_items.length > 0))
+      .map((metric) => inSentence(metric.label)),
+    ...items,
     ...(asks.has("margin_trend") && marginPeriods.size < 2 ? ["a margin over several periods"]
-      : asks.has("margins") && marginPeriods.size === 0 ? ["a margin"]
+      : asks.has("margins") && marginPeriods.size === 0 && !items.includes("gross margin") ? ["a margin"]
       : []),
     ...Object.entries(NEVER_PLANNED).flatMap(([facet, item]) => asks.has(facet as ScopeFacet) ? [item] : []),
   ];

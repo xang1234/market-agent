@@ -143,8 +143,8 @@ test("an engine answer names what the reading of its question asks for and the p
     reported(`rev_${suffix}`, "revenue", period),
     { node_id: `om_${suffix}`, operation: "operating_margin", numerator: `oi_${suffix}`, revenue: `rev_${suffix}` },
   ];
-  const plan = (operations: object[]): FinancialPlanV1 => {
-    const outputs = operations.map((operation) => ({ output_id: `out_${(operation as { node_id: string }).node_id}`, node_id: (operation as { node_id: string }).node_id }));
+  const plan = (operations: object[], shown: string[] = operations.map((operation) => (operation as { node_id: string }).node_id)): FinancialPlanV1 => {
+    const outputs = shown.map((node_id) => ({ output_id: `out_${node_id}`, node_id }));
     const planned = buildDeterministicPlan(planningContext("NVDA"), { subjects: [{ slot_id: "a", mention: "NVDA" }], operations, outputs, thresholds: [] });
     assert.equal(planned.outcome, "ready", JSON.stringify(planned));
     return (planned as Extract<PlanningResult, { outcome: "ready" }>).plan;
@@ -166,4 +166,16 @@ test("an engine answer names what the reading of its question asks for and the p
   const assets = plan([reported("assets", "total_assets", quarter("Q4"))]);
   assert.deepEqual(uncoveredAsks(reading([], ["balance_sheet"]), assets), ["cash and equivalents", "total liabilities", "stockholders' equity"]);
   assert.deepEqual(uncoveredAsks(reading([], ["total_assets"]), assets), []);
+
+  const marginOnly = plan(margin("q4", quarter("Q4")), ["om_q4"]);
+  assert.deepEqual(uncoveredAsks(reading(["margins"], ["income_statement"], ["revenue", "operating_income"]), marginOnly), ["revenue"], "an input the answer does not show is not calculated; a margin's numerator is");
+  const turnsOff = (asks: string[], metrics: unknown[], facets: string[], offMetrics: unknown[]) =>
+    parseProposal(JSON.stringify({ metrics, asks, turns_off: { facets, metrics: offMetrics }, income_items: [] }))!;
+  assert.deepEqual(uncoveredAsks(turnsOff(["margins", "margin_trend"], [], ["margins"], []), revenue), [], "no margins is no trend");
+  assert.deepEqual(uncoveredAsks(turnsOff([], ["balance_sheet"], [], [{ metric: "cash_and_equivalents" }]), assets), ["total liabilities", "stockholders' equity"]);
+  assert.deepEqual(uncoveredAsks(turnsOff([], ["total_assets"], [], [{ metric: "balance_sheet" }]), revenue), []);
+  assert.deepEqual(uncoveredAsks(reading([], ["balance_sheet", "total_assets"]), revenue), ["cash and equivalents", "total assets", "total liabilities", "stockholders' equity"]);
+  const cashFlow = plan([reported("ocf", "operating_cash_flow", quarter("FY"))]);
+  assert.deepEqual(uncoveredAsks(reading([], ["income_statement"], ["revenue"]), cashFlow), ["revenue"]);
+  assert.deepEqual(uncoveredAsks(reading(["margins"], ["income_statement"], ["gross_margin"]), revenue), ["gross margin"]);
 });

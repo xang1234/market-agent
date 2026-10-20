@@ -12,9 +12,10 @@ for (const variable of ["CHAT_DATABASE_URL", "DATABASE_URL"]) {
     const previous = { CHAT_DATABASE_URL: process.env.CHAT_DATABASE_URL, DATABASE_URL: process.env.DATABASE_URL };
     delete process.env.CHAT_DATABASE_URL;
     delete process.env.DATABASE_URL;
-    process.env[variable] = "postgres://example.invalid/market_agent";
+    // Nothing listens on port 1, so the readiness check is refused at once.
+    process.env[variable] = "postgres://127.0.0.1:1/market_agent";
     try {
-      await assert.rejects(() => loadChatServerOptionsFromEnv(), /getaddrinfo ENOTFOUND example\.invalid/u);
+      await assert.rejects(() => loadChatServerOptionsFromEnv(), /ECONNREFUSED/u);
     } finally {
       for (const [name, value] of Object.entries(previous)) {
         if (value === undefined) delete process.env[name];

@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
-import { dockerAvailable } from "../../../db/test/docker-pg.ts";
+import { connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
-import { IDS, ORIGINAL_REVENUE } from "../../financial-engine/test/db-fixtures.ts";
+import { databaseUrl, IDS, ORIGINAL_REVENUE } from "../../financial-engine/test/db-fixtures.ts";
 import type { ChatAnalystToolRuntime } from "../src/coordinator.ts";
 import { createChatFinancialRuntime, isFinancialRequest, SCOPE_METRICS } from "../src/financial-runtime.ts";
 import { METRIC_CATALOG_V1, OPERATION_REGISTRY } from "../../financial-core/src/index.ts";
@@ -105,26 +105,34 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(events.filter((event) => event.type === "block.completed").map((event) => event.block_id), message.blocks.map((block: { id: string }) => block.id));
   });
 
-  await t.test("a metric question naming no company is planned on the thread's previous companies, or asks for one", async () => {
+  await t.test("a metric question naming no company is planned on the previous answer's, and says so; with none, it asks for one", async () => {
     const aaa = { ...(await resolveMention("AAA")), handoff: { display_labels: { ticker: "AAA" } } } as unknown as ChatResolvedSubjectPreResolution;
-    const followUp = await chatHarness(pool, { model: revenueModel(["AAA"]), priorSubjects: async () => [aaa] }).run({ ...base, userIntent: "And what about its revenue?" });
-    const message = (await db.query(`select blocks from chat_messages where message_id = $1`, [completed(followUp.events).message_id])).rows[0];
-    assert.deepEqual(
-      message.blocks[0].financial.results.map((result: { disposition: string; presented: { value?: string } }) => [result.disposition, result.presented.value]),
-      [["verified", ORIGINAL_REVENUE]],
-    );
-    const named = { ...(await resolveMention("BBB")), handoff: { display_labels: { ticker: "BBB" } } } as unknown as ChatResolvedSubjectPreResolution;
-    const byName = await chatHarness(pool, {
-      model: revenueModel(["BBB"]),
-      priorSubjects: async () => [aaa],
-      resolveMention: async (mention) => mention === "What was Beta's revenue?" ? named : resolveMention(mention),
-    }).run({ ...base, userIntent: "What was Beta's revenue?" });
-    const answer = (await db.query(`select blocks from chat_messages where message_id = $1`, [completed(byName.events).message_id])).rows[0];
-    assert.deepEqual(Object.values(answer.blocks[0].financial.labels as Record<string, { kind: string; text: string }>).filter((label) => label.kind === "subject").map((label) => label.text), ["Beta Holdings Corp."], "a company the message names, not the previous one");
+    const answer = async (userIntent: string, tickers: string[]) => {
+      const { events } = await chatHarness(pool, { model: revenueModel(tickers), priorSubjects: async () => [aaa] }).run({ ...base, userIntent });
+      const [block, ...notes] = (await db.query(`select blocks from chat_messages where message_id = $1`, [completed(events).message_id])).rows[0].blocks;
+      return {
+        companies: Object.values(block.financial.labels as Record<string, { kind: string; text: string }>).filter((label) => label.kind === "subject").map((label) => label.text),
+        notes: notes.map((note: { segments: Array<{ text: string }> }) => note.segments.map((segment) => segment.text).join("")),
+      };
+    };
+    // An uppercase metric acronym is not a company.
+    assert.deepEqual(await answer("What about its EBIT revenue?", ["AAA"]), { companies: ["Alpha Industries Inc."], notes: ["AAA is carried from the previous answer."] });
+    assert.deepEqual(await answer("Compare its revenue with BBB", ["AAA", "BBB"]), { companies: ["Alpha Industries Inc.", "Beta Holdings Corp."], notes: ["AAA is carried from the previous answer."] });
+    assert.deepEqual(await answer("Compare AAA and BBB revenue again", ["AAA", "BBB"]), { companies: ["Alpha Industries Inc.", "Beta Holdings Corp."], notes: [] }, "a company the question names is not carried");
     const model = revenueModel([]);
     const none = completed((await chatHarness(pool, { model, priorSubjects: async () => [] }).run({ ...base, userIntent: "And what about its revenue?" })).events);
     assert.deepEqual(none.financial_gap, { reason_code: "no_company" });
     assert.equal(model.calls, 0, "nothing is planned for no company");
+  });
+
+  await t.test("with one connection, the scope's reads never wait on the client the publication holds", { timeout: 60_000 }, async (st) => {
+    const single = await connectedPool(st, databaseUrl(db), { max: 1 });
+    const researchScope = async () => {
+      await single.query("select 1");
+      return null as never;
+    };
+    const { events } = await chatHarness(single, { model: revenueModel(["AAA"]), researchScope }).run({ ...base, userIntent: "Revenue for AAA" });
+    assert.ok(completed(events).message_id);
   });
 
   await t.test("an explicit subject is planned first, alongside the companies the message names (#138)", async () => {
@@ -234,8 +242,15 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
         return new Promise<null>((resolve) => { release = resolve; });
       },
     }).run(input);
-    while (!read) await new Promise((resolve) => setTimeout(resolve, 10));
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    // The retry holds the lease while the reading is out: it is past every
+    // step but the drive.
+    const leased = async () => (await db.query(
+      `select 1 from financial_runs where run_id = $1::uuid and lease_owner is not null and lease_expires_at > now()`, [reserved.run_id],
+    )).rows.length > 0;
+    for (let waited = 0; !(read && await leased()); waited += 20) {
+      assert.ok(waited < 30_000, "the retry never took the lease");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
     const probe = await pool.connect();
     try {
       await probe.query("begin");
