@@ -111,6 +111,13 @@ test("financial clarifications", { timeout: 300_000 }, async (t) => {
     );
   });
 
+  await t.test("a company offered beside one that no longer exists is still asked about", async () => {
+    const { events } = await chatHarness(pool, { model: revenueModel(["AMBG"]) }).run({ threadId, userId: IDS.owner, userIntent: "Revenue for AMBG" });
+    const done = completed(events);
+    assert.equal(done.clarification, true, JSON.stringify(done));
+    assert.deepEqual((done.financial_clarification as Offered).choices.map((choice) => choice.label), ["Beta Holdings Corp."]);
+  });
+
   await t.test("a stale or forged answer changes nothing: the same question is asked again", async () => {
     for (const answer of [
       { clarification_id: "0".repeat(64), choice_id: offered.choices[0]!.choice_id },

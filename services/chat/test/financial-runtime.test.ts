@@ -275,6 +275,17 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.ok(completed((await retry).events).message_id, "the retry publishes once the reading settles");
   });
 
+  await t.test("a retry of a committed turn returns its answer, whatever the thread holds since", async () => {
+    const carried = async (ticker: string) => ({ ...(await resolveMention(ticker)), handoff: { display_labels: { ticker } } }) as unknown as ChatResolvedSubjectPreResolution;
+    const [aaa, bbb] = [await carried("AAA"), await carried("BBB")];
+    const turn = { ...base, turnId: randomUUID(), userIntent: "Drop BBB and show revenue" };
+    const first = completed((await chatHarness(pool, { model: revenueModel(["AAA"]), priorSubjects: async () => [aaa, bbb] }).run(turn)).events);
+    // The thread's latest answer is now this turn's own, about AAA alone.
+    const model = revenueModel(["AAA"]);
+    const retried = completed((await chatHarness(pool, { model, priorSubjects: async () => [aaa] }).run(turn)).events);
+    assert.deepEqual([retried.message_id, retried.clarification, model.calls], [first.message_id, undefined, 0]);
+  });
+
   await t.test("a retried turn resumes its reserved run and publishes one message", async () => {
     const turnId = randomUUID();
     const first = revenueModel(["AAA"]);

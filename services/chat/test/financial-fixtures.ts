@@ -17,6 +17,8 @@ export const MISSING_ISSUER = "4f000000-0000-4000-8000-0000000000a9";
 // A listing of issuer A, as the resolver offers for a ticker (seeded by the tests that use AMBL).
 export const LISTING_A = "4f000000-0000-4000-8000-0000000000b1";
 export const INSTRUMENT_A = "4f000000-0000-4000-8000-0000000000c1";
+// A listing with no row.
+export const GONE_LISTING = "4f000000-0000-4000-8000-0000000000b9";
 // An issuer whose facts only SEC ingestion writes (seeded by the tests that use OPM).
 export const SEC_ISSUER = "4f000000-0000-4000-8000-0000000000d1";
 export const SEC_ISSUER_B = "4f000000-0000-4000-8000-0000000000d2";
@@ -25,7 +27,8 @@ export const SEC_ISSUER_D = "4f000000-0000-4000-8000-0000000000d4";
 
 /**
  * AAA and BBB resolve to the seeded issuers; AMB is ambiguous between them, and AMBL
- * between a listing of A, A itself and issuer B, AMBX between a listing of A and A itself; CCC
+ * between a listing of A, A itself and issuer B, AMBX between a listing of A and A itself, AMBG
+ * between a listing that no longer exists and issuer B; CCC
  * has no name or data; anything else is unknown.
  */
 export function resolveMention(mention: string): Promise<ChatSubjectPreResolution> {
@@ -45,6 +48,13 @@ export function resolveMention(mention: string): Promise<ChatSubjectPreResolutio
       status: "needs_clarification", input_text: mention, normalized_input: mention, message: "ambiguous",
       candidates: [
         { subject_ref: { kind: "issuer", id: IDS.issuerA }, display_name: "Alpha Industries Inc.", confidence: 0.5 },
+        { subject_ref: { kind: "issuer", id: IDS.issuerB }, display_name: "Beta Holdings Corp.", confidence: 0.5 },
+      ],
+    } as ChatSubjectPreResolution,
+    AMBG: {
+      status: "needs_clarification", input_text: mention, normalized_input: mention, message: "ambiguous",
+      candidates: [
+        { subject_ref: { kind: "listing", id: GONE_LISTING }, display_name: "Gone Corp. (XNAS)", confidence: 0.5 },
         { subject_ref: { kind: "issuer", id: IDS.issuerB }, display_name: "Beta Holdings Corp.", confidence: 0.5 },
       ],
     } as ChatSubjectPreResolution,

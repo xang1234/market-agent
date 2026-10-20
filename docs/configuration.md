@@ -65,7 +65,7 @@ Chat questions that name a metric, Analyze memos, thesis conditions and Discover
 
 The engine checks each SEC fact's proof. Facts stored before 2026-10-16 have none and show as gaps until you run the SEC proof backfill described in [Development](development.md#data-mode).
 
-For chat, only questions that name a metric reach the engine today. When the scope model reads the question, the answer adds a note for parts of it the plan did not calculate, such as a benchmark index; a qualified metric such as EPS growth is not checked. Other questions use the standard path until [#398](https://github.com/xang1234/market-agent/issues/398) lands. The financial columns in Analyst Grids (cash flow, net income, balance sheet, and ratios) show no coverage while `GRID_FINANCIAL_MODE` is `off`.
+For chat, only questions that name a metric reach the engine today. When the scope model reads the question, the answer adds a note for parts of it the plan did not calculate, such as a benchmark index; a qualified metric such as EPS growth is not checked. Other questions use the standard path until [#398](https://github.com/xang1234/market-agent/issues/398) lands.
 
 `FINANCIAL_WORKER_ENABLED=true` starts a worker in dev-api that recovers interrupted financial runs.
 

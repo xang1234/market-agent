@@ -124,9 +124,12 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     const authority = chatAuthority(context.userId!, context.threadId, turnId);
 
     const messageId = financialMessageId(context.threadId, turnId);
-    const requested = await requestedSubjects(deps, context, text);
+    // A retry resumes the plan an earlier attempt reserved, over the companies
+    // that attempt took: the thread may hold this turn's own answer by now.
+    const resumed = await findPlanForRequest(deps.pool, { authority, request_key: turnId }) !== null;
+    const requested = resumed ? RESUMED : await requestedSubjects(deps, context, text);
     if (requested.clarify) return { kind: "clarification", clarification: companyQuestion(requested.clarify) };
-    if (requested.subjects.length === 0) return gap("no_company");
+    if (!resumed && requested.subjects.length === 0) return gap("no_company");
     const reading = (deps.readQuestion?.(text) ?? Promise.resolve(null)).catch((reason) => {
       console.warn("[chat] no reading of the question; the financial answer names no uncovered ask", reason);
       return null;
@@ -223,6 +226,10 @@ async function requestedSubjects(deps: ChatFinancialRuntimeDeps, context: ChatFi
     notFound: turn?.notFound ?? [],
   };
 }
+
+// ponytail: a resumed turn's note and scope name no company, as the earlier
+// attempt's choice is in its plan only; save it with the plan if retries grow.
+const RESUMED: TurnCompanies = { subjects: [], resolved: [], carried: [], notFound: [] };
 
 // A question about the companies to compare, which only a new message answers.
 function companyQuestion(question: string): Clarification {
@@ -330,13 +337,14 @@ function requestedResolution(resolution: ChatSubjectPreResolution, issuers: Issu
   }
   if (resolution.status === "needs_clarification") {
     const offeredIssuers = new Set<string>();
-    const options = resolution.candidates.flatMap((candidate) => {
-      const ref = issuers(candidate.subject_ref);
+    const refs = resolution.candidates.map((candidate) => ({ candidate, ref: issuers(candidate.subject_ref) }));
+    const options = refs.flatMap(({ candidate, ref }) => {
       if (!ref || offeredIssuers.has(ref.id.toLowerCase())) return [];
       offeredIssuers.add(ref.id.toLowerCase());
       return [{ subject_ref: ref, label: candidate.display_name }];
     });
-    if (options.length === 1) return { status: "resolved", ...options[0]! };
+    // Candidates that are all one company need no question; one that maps to none still does.
+    if (options.length === 1 && refs.every(({ ref }) => ref !== null)) return { status: "resolved", ...options[0]! };
     return options.length > 0 ? { status: "ambiguous", options } : { status: "not_found" };
   }
   return { status: "not_found" };
