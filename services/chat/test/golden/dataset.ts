@@ -232,7 +232,10 @@ for (const fact of GOLDEN_ISSUER_FACTS) {
   if (!Number.isSafeInteger(fact.value_usd)) throw new Error(`golden dataset: ${fact.key} is not a whole number of USD, so its decimal text is not exact`);
 }
 
-const GOLDEN_SOURCE_VERSION = createHash("sha256").update(JSON.stringify(GOLDEN_COMPANIES)).digest("hex");
+export function goldenFixtureVersion(asOf: string): string {
+  return createHash("sha256").update(JSON.stringify({ GOLDEN_AS_OF: asOf, GOLDEN_COMPANIES })).digest("hex");
+}
+const GOLDEN_SOURCE_VERSION = goldenFixtureVersion(GOLDEN_AS_OF);
 
 // Daily bars from early December, so a year-to-date window has its baseline
 // (the last 2025 close) and runs to the session before GOLDEN_AS_OF (#192).

@@ -4,7 +4,7 @@ import test from "node:test";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { assertNoGoldenDataset, seedGoldenDevDatabase } from "../scripts/seed-golden-dev.ts";
 import { SEC_EDGAR_FILING_SOURCE_ID } from "../../fundamentals/src/provider-sources.ts";
-import { AMD_Q2_2025_RELEASE, GOLDEN_AS_OF, GOLDEN_COMPANIES, GOLDEN_SOURCE_ID } from "./golden/dataset.ts";
+import { AMD_Q2_2025_RELEASE, GOLDEN_AS_OF, GOLDEN_COMPANIES, GOLDEN_SOURCE_ID, goldenFixtureVersion } from "./golden/dataset.ts";
 
 test("seedGoldenDevDatabase seeds the frozen dataset once and is a no-op on rerun", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
   const { databaseUrl } = await bootstrapDatabase(t, "chat-golden-dev-seed");
@@ -169,6 +169,24 @@ test("a database proven for an earlier version of the dataset is told to reset, 
        (source_id, source_version_hash, available_no_later_than, timing_precision, source_timezone, proof_method, proof_ref, proof_hash, mapping_version)
      values ($1::uuid, $2, $3::timestamptz, 'instant', 'UTC', 'fixture_declaration', 'golden_fixture:dataset.ts', $2, 'golden-fixture-declaration.v1')`,
     [GOLDEN_SOURCE_ID, earlier, GOLDEN_AS_OF],
+  );
+
+  await assert.rejects(() => seedGoldenDevDatabase(databaseUrl), /holds an earlier version of the dataset.*down -v/s);
+});
+
+test("moving only the cutoff makes a dev database proven at the earlier cutoff get the reset hint", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "chat-golden-dev-cutoff");
+  const client = await connectedClient(t, databaseUrl);
+  assert.equal(await seedGoldenDevDatabase(databaseUrl), "seeded");
+  const earlierCutoff = "2026-08-01T00:00:00.000Z";
+  const stamped = goldenFixtureVersion(earlierCutoff);
+  await client.query(`delete from source_publication_attestations where source_id = $1::uuid`, [GOLDEN_SOURCE_ID]);
+  await client.query(`update sources set content_hash = $2 where source_id = $1::uuid`, [GOLDEN_SOURCE_ID, `sha256:${stamped}`]);
+  await client.query(
+    `insert into source_publication_attestations
+       (source_id, source_version_hash, available_no_later_than, timing_precision, source_timezone, proof_method, proof_ref, proof_hash, mapping_version)
+     values ($1::uuid, $2, $3::timestamptz, 'instant', 'UTC', 'fixture_declaration', 'golden_fixture:dataset.ts', $2, 'golden-fixture-declaration.v1')`,
+    [GOLDEN_SOURCE_ID, stamped, earlierCutoff],
   );
 
   await assert.rejects(() => seedGoldenDevDatabase(databaseUrl), /holds an earlier version of the dataset.*down -v/s);
