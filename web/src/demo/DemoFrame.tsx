@@ -4,10 +4,9 @@
 // own module.)
 import type { ReactNode } from 'react'
 import { StarterQuestionsContext } from '../chat/starterQuestions.ts'
-import { DEMO_QUESTIONS, installDemoBackend } from './demoBackend.ts'
+import { DEMO_QUESTIONS, installDemoBackend, tabStore } from './demoBackend.ts'
 
-// Per tab, and it survives a reload.
-installDemoBackend(sessionStorage)
+installDemoBackend(tabStore())
 
 /** The app under an always-visible note that every answer is recorded. */
 export function DemoFrame({ children }: { children: ReactNode }) {

@@ -5,7 +5,8 @@ import fixture from '../../../services/app/fixtures/golden-conversation.replay.j
 import { extractInspectableRefs, type InspectableBlockRef } from '../evidence/inspectableRefs.ts'
 import { fetchEvidenceInspection } from '../evidence/inspectionClient.ts'
 import { HttpJsonError } from '../http/authFetch.ts'
-import { eventDelays, installDemoBackend, parseSse } from './demoBackend.ts'
+import { createReplay, parseReplayFixture } from '../../../services/app/src/replayCore.ts'
+import { eventDelays, installDemoBackend, parseSse, tabStore } from './demoBackend.ts'
 
 test('parseSse reads events the way a browser does', () => {
   assert.deepEqual(parseSse('id: 1\nevent: a\ndata: {"x":1}\n\n: comment\ndata: one\ndata:two\n\nevent: unfinished'), [
@@ -29,6 +30,53 @@ test('eventDelays spreads content over the budget and gives heartbeats no time',
   const ev = (event: string) => ({ event, data: '{}', id: '' })
   assert.deepEqual(eventDelays([ev('a'), ev('heartbeat'), ev('heartbeat'), ev('b')]), [120, 120, 120, 240])
   assert.deepEqual(eventDelays(Array.from({ length: 50 }, () => ev('a'))).slice(0, 2), [50, 100])
+})
+
+// This process's sessionStorage reads through `get` while `run` runs.
+function withSessionStorage(get: () => Storage, run: () => void) {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage')
+  Object.defineProperty(globalThis, 'sessionStorage', { get, configurable: true })
+  try {
+    run()
+  } finally {
+    if (original) Object.defineProperty(globalThis, 'sessionStorage', original)
+    else delete (globalThis as { sessionStorage?: Storage }).sessionStorage
+  }
+}
+
+test('with site data blocked the replay keeps its session in memory, and other storage errors surface', () => {
+  withSessionStorage(() => {
+    throw new DOMException('Access is denied for this document.', 'SecurityError')
+  }, () => assert.equal(tabStore(), undefined))
+  withSessionStorage(() => {
+    throw new TypeError('not a storage failure')
+  }, () => assert.throws(tabStore, TypeError))
+})
+
+test('a save the tab has no room for drops the saved session, and the request still gets its answer', () => {
+  const items = new Map<string, string>()
+  let full = false
+  const storage = {
+    getItem: (key: string) => items.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      if (full) throw new DOMException('The quota has been exceeded.', 'QuotaExceededError')
+      items.set(key, value)
+    },
+    removeItem: (key: string) => void items.delete(key),
+  } as unknown as Storage
+  withSessionStorage(() => storage, () => {
+    const replay = createReplay(parseReplayFixture(fixture, 'golden-conversation.replay.json'), tabStore())
+    assert.equal(replay({ method: 'GET', path: '/v1/chat/threads', query: '', body: '' })?.status, 200)
+    assert.equal(items.size, 1)
+    full = true
+    assert.equal(replay({ method: 'POST', path: '/v1/chat/threads', query: '', body: '{"title":null}' })?.status, 201)
+    assert.equal(items.size, 0, 'a reload starts over instead of resuming a session older than the page')
+    full = false
+    assert.equal(replay({ method: 'GET', path: '/v1/chat/threads', query: '', body: '' })?.status, 200)
+    assert.equal(items.size, 1, 'a later save that fits is kept')
+  })
+  const broken = { setItem: () => { throw new TypeError('not a storage failure') } } as unknown as Storage
+  withSessionStorage(() => broken, () => assert.throws(() => tabStore()!.setItem('key', 'value'), TypeError))
 })
 
 const items = new Map<string, string>()

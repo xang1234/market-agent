@@ -32,10 +32,34 @@ export function eventDelays(events: readonly SseEvent[]): number[] {
 
 /** From here on the replay answers every /v1 fetch and EventSource in this page, and
  *  none reaches the network. Call once, before the app loads. */
-export function installDemoBackend(store: ReplayStore): void {
+export function installDemoBackend(store: ReplayStore | undefined): void {
   const replay = createReplay(fixture, store)
   installFetch(replay)
   installEventSource(replay)
+}
+
+/** This tab's sessionStorage, which outlives a reload; none when the browser blocks the
+ *  page's site data, so the replay keeps its session in memory for this page load. */
+export function tabStore(): ReplayStore | undefined {
+  let storage: Storage
+  try {
+    storage = sessionStorage
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'SecurityError') return undefined
+    throw error
+  }
+  return {
+    getItem: (key) => storage.getItem(key),
+    setItem: (key, value) => {
+      try {
+        storage.setItem(key, value)
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === 'QuotaExceededError')) throw error
+        // The session saved before is now behind the page; a reload must not resume it.
+        storage.removeItem(key)
+      }
+    },
+  }
 }
 
 function installFetch(replay: Replay): void {
