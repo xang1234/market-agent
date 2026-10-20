@@ -9,13 +9,17 @@ test("runtime config returns empty chat options when no database is configured",
 
 for (const variable of ["CHAT_DATABASE_URL", "DATABASE_URL"]) {
   test(`with ${variable} set, the server does not start until it has checked verified finance on that database`, async () => {
-    const previous = process.env[variable];
+    const previous = { CHAT_DATABASE_URL: process.env.CHAT_DATABASE_URL, DATABASE_URL: process.env.DATABASE_URL };
+    delete process.env.CHAT_DATABASE_URL;
+    delete process.env.DATABASE_URL;
     process.env[variable] = "postgres://example.invalid/market_agent";
     try {
-      await assert.rejects(() => loadChatServerOptionsFromEnv(), /ENOTFOUND|getaddrinfo|connect/i);
+      await assert.rejects(() => loadChatServerOptionsFromEnv(), /getaddrinfo ENOTFOUND example\.invalid/u);
     } finally {
-      if (previous === undefined) delete process.env[variable];
-      else process.env[variable] = previous;
+      for (const [name, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
       await localRuntime.closeLocalRuntimePoolForTests();
     }
   });

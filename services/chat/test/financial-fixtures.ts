@@ -25,7 +25,8 @@ export const SEC_ISSUER_D = "4f000000-0000-4000-8000-0000000000d4";
 
 /**
  * AAA and BBB resolve to the seeded issuers; AMB is ambiguous between them, and AMBL
- * between a listing of A, A itself and issuer B; CCC has no name or data; anything else is unknown.
+ * between a listing of A, A itself and issuer B, AMBX between a listing of A and A itself; CCC
+ * has no name or data; anything else is unknown.
  */
 export function resolveMention(mention: string): Promise<ChatSubjectPreResolution> {
   const resolved = (id: string, label: string) => ({ status: "resolved", subject_ref: { kind: "issuer", id }, display_label: label }) as unknown as ChatSubjectPreResolution;
@@ -44,6 +45,13 @@ export function resolveMention(mention: string): Promise<ChatSubjectPreResolutio
       candidates: [
         { subject_ref: { kind: "issuer", id: IDS.issuerA }, display_name: "Alpha Industries Inc.", confidence: 0.5 },
         { subject_ref: { kind: "issuer", id: IDS.issuerB }, display_name: "Beta Holdings Corp.", confidence: 0.5 },
+      ],
+    } as ChatSubjectPreResolution,
+    AMBX: {
+      status: "needs_clarification", input_text: mention, normalized_input: mention, message: "ambiguous",
+      candidates: [
+        { subject_ref: { kind: "listing", id: LISTING_A }, display_name: "Alpha Industries Inc. (XNAS)", confidence: 0.5 },
+        { subject_ref: { kind: "issuer", id: IDS.issuerA }, display_name: "Alpha Industries Inc.", confidence: 0.5 },
       ],
     } as ChatSubjectPreResolution,
     AMBL: {
@@ -89,6 +97,8 @@ export function chatHarness(
     model: PlanningModel | null;
     analyst?: ChatAnalystToolRuntime;
     researchScope?: Parameters<typeof createChatFinancialRuntime>[0]["researchScope"];
+    readQuestion?: Parameters<typeof createChatFinancialRuntime>[0]["readQuestion"];
+    priorSubjects?: Parameters<typeof createChatFinancialRuntime>[0]["priorSubjects"];
     resolveMention?: typeof resolveMention;
   },
 ) {
@@ -105,6 +115,8 @@ export function chatHarness(
       resolveMention: options.resolveMention ?? resolveMention,
       evidence: createEvidenceFinancialPort,
       ...(options.researchScope ? { researchScope: options.researchScope } : {}),
+      ...(options.readQuestion ? { readQuestion: options.readQuestion } : {}),
+      ...(options.priorSubjects ? { priorSubjects: options.priorSubjects } : {}),
     }),
   });
   const run = async (input: Omit<ChatTurnInput, "runId" | "turnId"> & { turnId?: string }) => {

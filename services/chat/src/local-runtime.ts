@@ -473,13 +473,14 @@ const NO_DEFAULT_REFS = Object.freeze({
 
 // A published financial answer saves its scope too, so a period it asks for
 // carries into the next follow-up (#206). Its metrics are the published plan's
-// (financial-runtime.ts); what the model reads the question to ask for is
-// compared with that plan, so the answer names what it does not cover.
-export async function financialResearchScope(context: ChatFinancialTurnContext): Promise<ResearchScope> {
+// (financial-runtime.ts).
+export async function financialResearchScope(
+  context: ChatFinancialTurnContext,
+  reading: Promise<ScopeProposal | null>,
+): Promise<ResearchScope> {
   const covered = context.subjectPreResolutions ??
     (context.subjectPreResolution?.status === "resolved" ? [context.subjectPreResolution] : []);
-  const question = context.userIntent ?? "";
-  return (await turnScope(context.threadId, question, covered, true, proposeScope({ question })))(turnNow(process.env));
+  return (await turnScope(context.threadId, context.userIntent ?? "", covered, true, reading))(turnNow(process.env));
 }
 
 export const financialRuntime: ChatFinancialRuntime = createChatFinancialRuntime({
@@ -490,7 +491,9 @@ export const financialRuntime: ChatFinancialRuntime = createChatFinancialRuntime
     return planningModelFromRouter(router)(request);
   },
   resolveMention: (mention) => preResolveSubject({ text: mention }),
+  priorSubjects: (threadId) => loadPriorSubjects({ threadId }),
   evidence: createEvidenceFinancialPort,
+  readQuestion: (question) => proposeScope({ question }),
   researchScope: financialResearchScope,
 });
 

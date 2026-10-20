@@ -48,9 +48,11 @@ import {
   BALANCE_SHEET_ITEMS,
   PROPOSABLE_METRICS,
   proposedMetric,
+  type IncomeItem,
   type RequestedMetric,
   type ResearchScope,
-  type ScopeField,
+  type ScopeFacet,
+  type ScopeProposal,
 } from "./research-scope.ts";
 
 /** The user's pick for a clarification this lane offered earlier. */
@@ -77,18 +79,26 @@ export type ChatFinancialRuntimeDeps = Readonly<{
   /** Null when no planning model is configured: financial turns then get a gap, never a guess. */
   planningModel: PlanningModel | null;
   resolveMention(mention: string): Promise<ChatSubjectPreResolution>;
+  /** The companies the thread's previous answer covered, for a question that names none. */
+  priorSubjects?: (threadId: string) => Promise<ReadonlyArray<ChatResolvedSubjectPreResolution>>;
   evidence: (executor: SqlExecutor) => FinancialEvidencePort;
+  /** What a model reads the question to ask for (scope-proposal.ts); null or absent, no ask is named as uncovered. */
+  readQuestion?: (question: string) => Promise<ScopeProposal | null>;
   /** The turn's research scope, saved with a published answer (#206); absent, none is saved. */
-  researchScope?: (context: ChatFinancialTurnContext) => Promise<ResearchScope>;
+  researchScope?: (context: ChatFinancialTurnContext, reading: Promise<ScopeProposal | null>) => Promise<ResearchScope>;
 }>;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const MAX_PLANNING_MODEL_CALLS = 2;
 
-/** A turn's gap: the engine's reason, or a unit the verifier refused. A failed commit is a turn error instead. */
-type ChatGap = Exclude<RequestGap, "publication_failed"> | "verification_failed";
+/**
+ * A turn's gap: the engine's reason, a unit the verifier refused, or a
+ * question that names no company. A failed commit is a turn error instead.
+ */
+type ChatGap = Exclude<RequestGap, "publication_failed"> | "verification_failed" | "no_company";
 
 const GAP_TEXT: Readonly<Record<ChatGap, string>> = {
+  no_company: "Name the company this calculation is for.",
   planning_unavailable: "I can't verify a calculation for this request right now, so I won't give an unverified number.",
   unsupported: "This request asks for a calculation outside the verified financial definitions I can compute.",
   configuration_needed: "This request needs a subject or definition I can't resolve to one verified meaning.",
@@ -110,11 +120,20 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     const authority = chatAuthority(context.userId!, context.threadId, turnId);
 
     const messageId = financialMessageId(context.threadId, turnId);
-    // The scope informs follow-ups and names what the plan does not cover:
-    // failing to resolve it never fails the answer. This lane runs before the
-    // analyst path resolves the turn's companies, so the scope gets the
-    // companies the plan requests (requestedMentions).
-    const scope = (deps.researchScope ? scopeWithCompanies(deps, context, text) : Promise.resolve(null)).catch((reason) => {
+    const requested = await requestedResolutions(deps, context, text);
+    if (requested.length === 0) return gap("no_company");
+    const reading = (deps.readQuestion?.(text) ?? Promise.resolve(null)).catch((reason) => {
+      console.warn("[chat] no reading of the question; the financial answer names no uncovered ask", reason);
+      return null;
+    });
+    // This lane runs before the analyst path resolves the turn's companies, so
+    // the scope gets the ones the plan requests. ponytail: a company picked in
+    // a clarification answer is not among them; the scope then names the
+    // companies the message itself resolved.
+    const resolved = requested.flatMap(({ resolution }) => resolution.status === "resolved" ? [resolution] : []);
+    const scope = (deps.researchScope
+      ? deps.researchScope({ ...context, subjectPreResolution: resolved[0], subjectPreResolutions: resolved }, reading)
+      : Promise.resolve(null)).catch((reason) => {
       console.warn("[chat] research scope unavailable; saving the financial answer without it", reason);
       return null;
     });
@@ -123,16 +142,14 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       authority,
       request_key: turnId,
       // Planning runs on the client publishRequest has checked out; a second
-      // pool acquire here could wait forever on a one-connection pool. A plan
-      // that will publish waits for the scope here, beside the model's
-      // planning and outside any transaction.
-      plan: async (db) => {
-        const planned = await planTurn(deps, db, context, text, authority, new Date());
-        if (planned.outcome === "ready") await scope;
-        return planned;
-      },
+      // pool acquire here could wait forever on a one-connection pool.
+      plan: (db) => planTurn(deps, db, context, text, requested, authority, new Date()),
       evidence: deps.evidence,
-      persistParent: persistAssistantMessage(context.threadId, messageId, scope, { authority, request_key: turnId }),
+      // The reading and the scope settle outside any transaction, on a new
+      // plan or a resumed one; the scope queued its reads before this
+      // request took its client.
+      beforeReserve: () => Promise.all([scope, reading]),
+      persistParent: persistAssistantMessage(context.threadId, messageId, scope, reading, { authority, request_key: turnId }),
     });
     switch (outcome.status) {
       case "clarification":
@@ -165,13 +182,18 @@ function requestedMentions(context: ChatFinancialTurnContext, text: string): str
     : extractSubjectMentions(text);
 }
 
-// The turn's research scope over the companies its plan requests, resolved.
-// ponytail: a company picked in a clarification answer is not in it; the scope
-// then names the companies the message itself resolved.
-async function scopeWithCompanies(deps: ChatFinancialRuntimeDeps, context: ChatFinancialTurnContext, text: string): Promise<ResearchScope> {
-  const resolutions = await Promise.all(requestedMentions(context, text).map((mention) => deps.resolveMention(mention)));
-  const resolved = resolutions.filter((resolution): resolution is ChatResolvedSubjectPreResolution => resolution.status === "resolved");
-  return deps.researchScope!({ ...context, subjectPreResolution: resolved[0], subjectPreResolutions: resolved });
+async function requestedResolutions(
+  deps: ChatFinancialRuntimeDeps,
+  context: ChatFinancialTurnContext,
+  text: string,
+): Promise<ReadonlyArray<Readonly<{ mention: string; resolution: ChatSubjectPreResolution }>>> {
+  const mentions = requestedMentions(context, text);
+  if (mentions.length > 0) return Promise.all(mentions.map(async (mention) => ({ mention, resolution: await deps.resolveMention(mention) })));
+  // As the analyst path does (coordinator.ts): a company the whole message
+  // names, else the previous answer's ("and its gross margin?").
+  const whole = await deps.resolveMention(text);
+  const subjects = whole.status === "resolved" ? [whole] : await deps.priorSubjects?.(context.threadId) ?? [];
+  return subjects.map((resolution) => ({ mention: resolution.handoff.display_labels?.ticker ?? resolution.display_label, resolution }));
 }
 
 async function planTurn(
@@ -179,11 +201,10 @@ async function planTurn(
   db: SqlExecutor,
   context: ChatFinancialTurnContext,
   text: string,
+  resolutions: ReadonlyArray<Readonly<{ mention: string; resolution: ChatSubjectPreResolution }>>,
   authority: FinancialRuntimeAuthority,
   cutoff: Date,
 ): Promise<PlanningResult> {
-  const mentions = requestedMentions(context, text);
-  const resolutions = await Promise.all(mentions.map(async (mention) => ({ mention, resolution: await deps.resolveMention(mention) })));
   const issuers = await issuersOf(db, resolutions.map(({ resolution }) => resolution));
   const requested = resolutions.map(({ mention, resolution }): RequestedSubject => ({ mention, resolution: requestedResolution(resolution, issuers) }));
   const planningContext = (subjects: ReadonlyArray<RequestedSubject>): PlanningContext => ({
@@ -279,14 +300,14 @@ function requestedResolution(resolution: ChatSubjectPreResolution, issuers: Issu
     return ref ? { status: "resolved", subject_ref: ref, label: resolution.display_label } : { status: "not_found" };
   }
   if (resolution.status === "needs_clarification") {
-    const seen = new Set<string>();
+    const offeredIssuers = new Set<string>();
     const options = resolution.candidates.flatMap((candidate) => {
       const ref = issuers(candidate.subject_ref);
-      // Two listings of one company are one choice.
-      if (!ref || seen.has(ref.id)) return [];
-      seen.add(ref.id);
+      if (!ref || offeredIssuers.has(ref.id.toLowerCase())) return [];
+      offeredIssuers.add(ref.id.toLowerCase());
       return [{ subject_ref: ref, label: candidate.display_name }];
     });
+    if (options.length === 1) return { status: "resolved", ...options[0]! };
     return options.length > 0 ? { status: "ambiguous", options } : { status: "not_found" };
   }
   return { status: "not_found" };
@@ -296,7 +317,7 @@ type IssuerOf = (ref: { kind: string; id: string }) => FinancialSubjectRef | nul
 
 // The engine reads a company's facts under its issuer, and the resolver
 // offers a listing for a ticker (#154): each listing is planned on its issuer,
-// so a clarification offers issuers too. Any other subject is not a company.
+// so a clarification offers issuers too.
 async function issuersOf(db: SqlExecutor, resolutions: ReadonlyArray<ChatSubjectPreResolution>): Promise<IssuerOf> {
   const refs = resolutions.flatMap((resolution) => resolution.status === "resolved"
     ? [resolution.subject_ref]
@@ -349,17 +370,15 @@ function chatAuthority(userId: string, threadId: string, turnId: string): Financ
 function persistAssistantMessage(
   threadId: string,
   messageId: string,
-  pending: Promise<ResearchScope | null>,
+  pendingScope: Promise<ResearchScope | null>,
+  pendingReading: Promise<ScopeProposal | null>,
   request: { authority: FinancialRuntimeAuthority; request_key: string },
 ): PersistParentArtifact {
   return async (tx, publication) => {
-    // Settled when this turn planned. ponytail: a retried turn, which resumes
-    // without planning, waits here inside the finalize transaction, for at
-    // most the scope model's deadline (SCOPE_DEADLINES); resolve the scope
-    // before reserving if retries become common.
-    const scope = await pending;
-    const plan = scope === null ? null : await findPlanForRequest(tx.client, request);
-    const missing = scope === null || plan === null ? [] : uncoveredAsks(scope, plan);
+    // Both settled before the run was reserved (beforeReserve).
+    const [scope, reading] = await Promise.all([pendingScope, pendingReading]);
+    const plan = scope === null && reading === null ? null : await findPlanForRequest(tx.client, request);
+    const missing = reading === null || plan === null ? [] : uncoveredAsks(reading, plan);
     const blocks = [
       publication.block,
       ...(missing.length === 0 ? [] : [noteBlock(
@@ -428,51 +447,57 @@ function planMetrics(plan: FinancialPlanV1): RequestedMetric[] {
   return [...keys].map((key) => proposedMetric(key, null, null)!);
 }
 
-// The facets a question can ask for that the engine never plans, each as the
-// answer names it.
-const NEVER_PLANNED: ReadonlyArray<readonly [ScopeField, (scope: ResearchScope) => boolean, string]> = [
-  ["segments", (scope) => scope.segments, "revenue by segment"],
-  ["peers", (scope) => scope.peers, "peers the question did not name"],
-  ["price_window", (scope) => scope.price_window !== null, "a stock price return over the year to date"],
-  ["benchmark", (scope) => scope.benchmark, "a comparison with a benchmark index"],
-  ["guidance", (scope) => scope.guidance === true, "company guidance"],
-  ["explains", (scope) => scope.explains === true, "the cause of these figures"],
-];
-const CATALOG_METRICS = new Set(PROPOSABLE_METRICS.map((metric) => metric.metric_key));
+const NEVER_PLANNED: Partial<Readonly<Record<ScopeFacet, string>>> = {
+  segments: "revenue by segment",
+  peers: "peers the question did not name",
+  price_window: "a stock price return",
+  benchmark: "a comparison with a benchmark index",
+  guidance: "company guidance",
+  explains: "the cause of these figures",
+};
+const CATALOG = new Map(PROPOSABLE_METRICS.map((metric) => [metric.metric_key, metric]));
+const INCOME_ITEM_FIGURE: Readonly<Record<IncomeItem, string | null>> = {
+  revenue: "revenue",
+  gross_margin: "gross_margin",
+  operating_expenses: null,
+  operating_income: "operating_income",
+  net_income: "net_income",
+};
 
 /**
- * What this turn asked for (the model's reading of the question, not an
- * earlier turn's) and its plan does not compute, so the answer names it
- * instead of leaving it out: a facet the engine never plans, a margin or a
- * margin trend the plan has none of, or a catalog metric it reads none of.
+ * What a question asks for, as the model read it, that its plan does not
+ * compute, so the answer names it instead of leaving it out.
  * ponytail: a qualified metric ("EPS growth", "adjusted EPS") is not checked,
  * as nothing records which qualifier the plan computed; record its base and
  * qualifier on RequestedMetric to check it.
  */
-export function uncoveredAsks(scope: ResearchScope, plan: FinancialPlanV1): string[] {
-  const asked = (field: ScopeField) => !scope.inherited.includes(field);
+export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1): string[] {
+  const asks = new Set([...reading.asks].filter((facet) => !reading.turns_off.facets.has(facet)));
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
-  // Every figure the plan computes, as the chat catalog keys it; a share count
-  // no chat reader serves keys as itself.
-  const read = new Set(plan.operations.flatMap((node) => {
-    const key = node.operation === "reported_metric" ? node.metric_key : node.operation;
-    return Object.hasOwn(SCOPE_METRICS, key) ? [SCOPE_METRICS[key] ?? key] : [];
-  }));
-  if (BALANCE_SHEET_ITEMS.some((key) => read.has(key))) read.add("balance_sheet");
+  const figures = plan.operations.map((node) => node.operation === "reported_metric" ? node.metric_key : node.operation);
+  const read = new Set([...figures, ...figures.flatMap((key) => SCOPE_METRICS[key] ?? [])]);
+  const metrics = reading.metrics
+    .filter((metric) => CATALOG.has(metric.metric_key) && !reading.turns_off.metrics.has(metric.metric_key))
+    .flatMap((metric) => metric.metric_key === "balance_sheet" ? BALANCE_SHEET_ITEMS.map((key) => CATALOG.get(key)!) : [metric]);
   const periodOf = (id: string) => {
     const node = nodes.get(id);
     return node?.operation === "reported_metric" ? JSON.stringify(node.period) : id;
   };
   const marginPeriods = new Set(plan.operations.flatMap((node) =>
     node.operation === "gross_margin" || node.operation === "operating_margin" || node.operation === "net_margin" ? [periodOf(node.revenue)] : []));
-  // A margin asked now: an inherited trend also marks margins.
-  const marginsAsked = scope.margins && asked("margin_trend");
   return [
-    ...(asked("metrics") ? scope.metrics.filter((metric) => CATALOG_METRICS.has(metric.metric_key) && !read.has(metric.metric_key)).map((metric) => metric.label) : []),
-    ...(marginsAsked && marginPeriods.size === 0 ? ["a margin"] : []),
-    ...(scope.margin_trend && asked("margin_trend") && marginPeriods.size === 1 ? ["a margin over several periods"] : []),
-    ...NEVER_PLANNED.flatMap(([field, wanted, item]) => wanted(scope) && asked(field) ? [item] : []),
+    ...metrics.filter((metric) => !read.has(metric.metric_key)).map((metric) => inSentence(metric.label)),
+    ...reading.income_items.filter((item) => !read.has(INCOME_ITEM_FIGURE[item] ?? "")).map((item) => item.replaceAll("_", " ")),
+    ...(asks.has("margin_trend") && marginPeriods.size < 2 ? ["a margin over several periods"]
+      : asks.has("margins") && marginPeriods.size === 0 ? ["a margin"]
+      : []),
+    ...Object.entries(NEVER_PLANNED).flatMap(([facet, item]) => asks.has(facet as ScopeFacet) ? [item] : []),
   ];
+}
+
+// A catalog label inside a sentence: "Free cash flow" reads "free cash flow", "EBITDA" stays.
+function inSentence(label: string): string {
+  return label.length > 1 && label[1] === label[1]!.toLowerCase() ? `${label[0]!.toLowerCase()}${label.slice(1)}` : label;
 }
 
 async function published(db: SqlExecutor, runId: string, threadId: string, messageId: string): Promise<ChatFinancialTurn> {

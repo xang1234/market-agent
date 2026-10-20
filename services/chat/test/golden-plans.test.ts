@@ -7,7 +7,6 @@ import { createRuntimeAuthority, operationDependencies, type FinancialPlanV1 } f
 import { buildDeterministicPlan, planFinancialRequest, type PlanningContext, type PlanningModel, type PlanningResult } from "../../financial-engine/src/planner.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
 import { isFinancialRequest, uncoveredAsks } from "../src/financial-runtime.ts";
-import { resolveResearchScope, type ResearchScope } from "../src/research-scope.ts";
 import { parseProposal, proposalQuestion } from "../src/scope-proposal.ts";
 import { extractSubjectMentions } from "../src/subject-extraction.ts";
 import { GOLDEN_AS_OF, GOLDEN_COMPANIES } from "./golden/dataset.ts";
@@ -115,15 +114,8 @@ test("each golden metric question plans from its own recorded reply on the first
   }
 });
 
-// The engine's turn scope, as local-runtime resolves it: the model's reading
-// of the question over the companies it names, its metrics served.
-function engineScope(question: string, proposal: ReturnType<typeof parseProposal>, prior: ResearchScope | null = null): ResearchScope {
-  const companies = extractSubjectMentions(question).map((mention) => ({ issuer_id: GOLDEN_COMPANIES.find((company) => company.ticker === mention)!.issuer_id }));
-  return resolveResearchScope({ question, companies, prior, asOf: GOLDEN_AS_OF, served: true, proposal });
-}
-
-const reading = (asks: string[], metrics: unknown[] = []) =>
-  parseProposal(JSON.stringify({ metrics, asks, turns_off: { facets: [], metrics: [] }, income_items: [] }));
+const reading = (asks: string[], metrics: unknown[] = [], income_items: string[] = [], turnsOff: string[] = []) =>
+  parseProposal(JSON.stringify({ metrics, asks, turns_off: { facets: turnsOff, metrics: [] }, income_items }))!;
 
 test("each golden answer names what its question asks for and its plan does not compute", async () => {
   const client = await createReplayLlmChatClient(REPLIES);
@@ -133,17 +125,17 @@ test("each golden answer names what its question asks for and its plan does not 
     "Why did AMD's operating margin turn negative in Q2 2025?": ["the cause of these figures"],
     "What was AMD's revenue in Q2 2019?": [],
     "What is AMD's free cash flow?": [],
-    "Compare NVDA, AMD and AAPL revenue and margins YTD against the S&P 500": ["a stock price return over the year to date", "a comparison with a benchmark index"],
+    "Compare NVDA, AMD and AAPL revenue and margins YTD against the S&P 500": ["a stock price return", "a comparison with a benchmark index"],
   };
   for (const [question, expected] of Object.entries(uncovered)) {
     const planned = await planFinancialRequest(planningContext(question), question, model);
     assert.equal(planned.outcome, "ready", question);
     if (planned.outcome !== "ready") continue;
-    assert.deepEqual(uncoveredAsks(engineScope(question, parseProposal(await reply(proposalQuestion(question)))), planned.plan), expected, question);
+    assert.deepEqual(uncoveredAsks(parseProposal(await reply(proposalQuestion(question)))!, planned.plan), expected, question);
   }
 });
 
-test("an engine answer names only what its own question asks for, against the figures the plan computes", () => {
+test("an engine answer names what the reading of its question asks for and the plan does not compute", () => {
   const quarter = (fiscal_period: string) => ({ kind: "fiscal_period", fiscal_year: 2026, fiscal_period });
   const reported = (node_id: string, metric_key: string, period: object) => ({ node_id, operation: "reported_metric", subject_slot: "a", metric_key, period });
   const margin = (suffix: string, period: object) => [
@@ -159,17 +151,19 @@ test("an engine answer names only what its own question asks for, against the fi
   };
   const revenue = plan([reported("rev", "revenue", quarter("Q4"))]);
 
-  const comparison = engineScope("Compare NVDA YTD against the S&P 500 and explain why", reading(["price_window", "benchmark", "explains"]));
-  assert.deepEqual(uncoveredAsks(comparison, revenue), ["a stock price return over the year to date", "a comparison with a benchmark index", "the cause of these figures"]);
-  // A follow-up keeps the window, the benchmark and the cause without asking for them again.
-  assert.deepEqual(uncoveredAsks(engineScope("What is NVDA's revenue?", reading([], ["income_statement"]), comparison), revenue), []);
+  assert.deepEqual(uncoveredAsks(reading(["price_window", "benchmark", "explains"]), revenue), ["a stock price return", "a comparison with a benchmark index", "the cause of these figures"]);
+  assert.deepEqual(uncoveredAsks(reading([], ["income_statement"], ["revenue"]), revenue), [], "revenue YTD asks for no stock price return");
+  assert.deepEqual(uncoveredAsks(reading(["benchmark"], [], [], ["benchmark"]), revenue), [], "a facet the question turns off is not asked for");
 
-  assert.deepEqual(uncoveredAsks(engineScope("What are NVDA's EBITDA and revenue?", reading([], ["ebitda", "income_statement"])), revenue), ["EBITDA"]);
-  const trend = engineScope("How has NVDA's operating margin trended?", reading(["margins", "margin_trend"]));
-  assert.deepEqual(uncoveredAsks(trend, revenue), ["a margin"]);
+  assert.deepEqual(uncoveredAsks(reading([], ["ebitda", "income_statement"]), revenue), ["EBITDA"]);
+  assert.deepEqual(uncoveredAsks(reading([], ["income_statement"], ["revenue", "net_income", "operating_expenses"]), revenue), ["net income", "operating expenses"]);
+  assert.deepEqual(uncoveredAsks(reading(["margins"], ["income_statement"]), revenue), ["a margin"]);
+  const trend = reading(["margins", "margin_trend"], ["income_statement"]);
+  assert.deepEqual(uncoveredAsks(trend, revenue), ["a margin over several periods"]);
   assert.deepEqual(uncoveredAsks(trend, plan(margin("q4", quarter("Q4")))), ["a margin over several periods"]);
   assert.deepEqual(uncoveredAsks(trend, plan([...margin("q3", quarter("Q3")), ...margin("q4", quarter("Q4"))])), []);
-  const balance = engineScope("Show NVDA's balance sheet", reading([], ["balance_sheet"]));
-  assert.deepEqual(uncoveredAsks(balance, plan([reported("assets", "total_assets", quarter("Q4"))])), []);
-  assert.deepEqual(uncoveredAsks(balance, revenue), ["Balance sheet"]);
+
+  const assets = plan([reported("assets", "total_assets", quarter("Q4"))]);
+  assert.deepEqual(uncoveredAsks(reading([], ["balance_sheet"]), assets), ["cash and equivalents", "total liabilities", "stockholders' equity"]);
+  assert.deepEqual(uncoveredAsks(reading([], ["total_assets"]), assets), []);
 });

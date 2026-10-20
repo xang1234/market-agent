@@ -8,10 +8,11 @@ import type { ChatAnalystToolRuntime } from "../src/coordinator.ts";
 import { createChatFinancialRuntime, isFinancialRequest, SCOPE_METRICS } from "../src/financial-runtime.ts";
 import { METRIC_CATALOG_V1, OPERATION_REGISTRY } from "../../financial-core/src/index.ts";
 import { proposedMetric } from "../src/research-scope.ts";
+import { parseProposal } from "../src/scope-proposal.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import type { FinancialPool } from "../../financial-engine/src/ports.ts";
 import { chatDatabase, chatHarness, completed, INSTRUMENT_A, LISTING_A, resolveMention, revenueModel } from "./financial-fixtures.ts";
-import type { ChatSubjectPreResolution } from "../src/subjects.ts";
+import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "../src/subjects.ts";
 
 test("financial intent is recognized from the definition catalog", () => {
   for (const text of ["Compare revenue for AAA and BBB", "What was AAA's gross margin?", "EPS for AAA", "net income trend"]) assert.ok(isFinancialRequest(text), text);
@@ -89,28 +90,41 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.equal(await savedScope(async () => { throw new Error("prior scope unavailable"); }), null);
   });
 
-  await t.test("the answer names, beside its figures, what the question asks for and the plan does not compute", async () => {
-    const asked = async () => ({
-      route: "financial_answer" as const,
-      reads: "financial_answer" as const,
-      companies: [{ issuer_id: IDS.issuerA }, { issuer_id: IDS.issuerB }],
-      peers: false,
-      segments: false,
-      margin_trend: false,
-      margins: false,
-      metrics: [proposedMetric("ebitda", null, null)!, proposedMetric("income_statement", null, null)!],
-      fiscal_year: null,
-      fiscal_quarter: null,
-      price_window: null,
-      benchmark: true,
-      inherited: [],
-    });
-    const { events } = await chatHarness(pool, { model: revenueModel(["AAA", "BBB"]), researchScope: asked }).run({ ...base, userIntent: "Compare revenue and EBITDA for AAA and BBB against the S&P 500" });
+  await t.test("the answer names, beside its figures, what the reading of the question asks for and the plan does not compute", async () => {
+    const readQuestion = async () => parseProposal(JSON.stringify({
+      metrics: [{ metric: "ebitda" }, { metric: "income_statement" }],
+      asks: ["benchmark"],
+      turns_off: { facets: [], metrics: [] },
+      income_items: ["revenue"],
+    }));
+    const { events } = await chatHarness(pool, { model: revenueModel(["AAA", "BBB"]), readQuestion }).run({ ...base, userIntent: "Compare revenue and EBITDA for AAA and BBB against the S&P 500" });
     const message = (await db.query(`select blocks from chat_messages where message_id = $1`, [completed(events).message_id])).rows[0];
     assert.deepEqual(message.blocks.map((block: { kind: string }) => block.kind), ["financial_answer", "rich_text"]);
     assert.deepEqual(message.blocks[1].segments, [{ type: "text", text: "Not part of this calculation: EBITDA; a comparison with a benchmark index." }]);
-    assert.equal(message.blocks[1].snapshot_id, message.blocks[0].snapshot_id, "the note is sealed with the answer it qualifies");
+    assert.equal(message.blocks[1].snapshot_id, message.blocks[0].snapshot_id, "the note shares the answer's snapshot");
     assert.deepEqual(events.filter((event) => event.type === "block.completed").map((event) => event.block_id), message.blocks.map((block: { id: string }) => block.id));
+  });
+
+  await t.test("a metric question naming no company is planned on the thread's previous companies, or asks for one", async () => {
+    const aaa = { ...(await resolveMention("AAA")), handoff: { display_labels: { ticker: "AAA" } } } as unknown as ChatResolvedSubjectPreResolution;
+    const followUp = await chatHarness(pool, { model: revenueModel(["AAA"]), priorSubjects: async () => [aaa] }).run({ ...base, userIntent: "And what about its revenue?" });
+    const message = (await db.query(`select blocks from chat_messages where message_id = $1`, [completed(followUp.events).message_id])).rows[0];
+    assert.deepEqual(
+      message.blocks[0].financial.results.map((result: { disposition: string; presented: { value?: string } }) => [result.disposition, result.presented.value]),
+      [["verified", ORIGINAL_REVENUE]],
+    );
+    const named = { ...(await resolveMention("BBB")), handoff: { display_labels: { ticker: "BBB" } } } as unknown as ChatResolvedSubjectPreResolution;
+    const byName = await chatHarness(pool, {
+      model: revenueModel(["BBB"]),
+      priorSubjects: async () => [aaa],
+      resolveMention: async (mention) => mention === "What was Beta's revenue?" ? named : resolveMention(mention),
+    }).run({ ...base, userIntent: "What was Beta's revenue?" });
+    const answer = (await db.query(`select blocks from chat_messages where message_id = $1`, [completed(byName.events).message_id])).rows[0];
+    assert.deepEqual(Object.values(answer.blocks[0].financial.labels as Record<string, { kind: string; text: string }>).filter((label) => label.kind === "subject").map((label) => label.text), ["Beta Holdings Corp."], "a company the message names, not the previous one");
+    const model = revenueModel([]);
+    const none = completed((await chatHarness(pool, { model, priorSubjects: async () => [] }).run({ ...base, userIntent: "And what about its revenue?" })).events);
+    assert.deepEqual(none.financial_gap, { reason_code: "no_company" });
+    assert.equal(model.calls, 0, "nothing is planned for no company");
   });
 
   await t.test("an explicit subject is planned first, alongside the companies the message names (#138)", async () => {
@@ -198,6 +212,40 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     const { events } = await chatHarness(pool, { model: revenueModel(["AAA"]), analyst }).run({ ...base, userIntent: "Revenue for AAA" });
     assert.equal(completed(events).bundle_id, "financial_answer");
     assert.equal(analystCalls, 1, "a metric question always reaches the engine, never the analyst");
+  });
+
+  await t.test("a retried turn settles the reading of its question before it reserves the run, never inside the publication", async () => {
+    const thread = randomUUID();
+    const turnId = randomUUID();
+    // The thread is another user's, so the first attempt reserves the run and cannot publish.
+    await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [thread, IDS.other]);
+    const input = { threadId: thread, userId: IDS.owner, turnId, userIntent: "Revenue for AAA" };
+    await chatHarness(pool, { model: revenueModel(["AAA"]) }).run(input);
+    const { rows: [reserved] } = await db.query<{ run_id: string }>(`select run_id::text as run_id from financial_runs where parent_id = $1`, [thread]);
+    assert.ok(reserved, "the first attempt reserved a run");
+    await db.query(`update chat_threads set user_id = $2 where thread_id = $1`, [thread, IDS.owner]);
+
+    let release!: (reading: null) => void;
+    let read = false;
+    const retry = chatHarness(pool, {
+      model: revenueModel(["AAA"]),
+      readQuestion: () => {
+        read = true;
+        return new Promise<null>((resolve) => { release = resolve; });
+      },
+    }).run(input);
+    while (!read) await new Promise((resolve) => setTimeout(resolve, 10));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const probe = await pool.connect();
+    try {
+      await probe.query("begin");
+      await probe.query(`select 1 from financial_runs where run_id = $1::uuid for update nowait`, [reserved.run_id]);
+      await probe.query("rollback");
+    } finally {
+      probe.release();
+      release(null);
+    }
+    assert.ok(completed((await retry).events).message_id, "the retry publishes once the reading settles");
   });
 
   await t.test("a retried turn resumes its reserved run and publishes one message", async () => {

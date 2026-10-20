@@ -98,7 +98,7 @@ The [user guide](docs/guide.md) covers every page, including Analyze memos, Anal
 4. The app seals a snapshot of every fact the answer used and checks each one against the logged tool calls. That snapshot is what the evidence inspector shows.
 5. A judge model checks each inference against the facts it rests on. An inference appears only once the judge accepts it.
 
-Questions that name a metric run through the financial engine, which computes with exact fractions and shows anything it cannot verify as a gap. The answer also says which parts of the question it did not calculate, such as a benchmark index. Other questions still use the standard path until [#398](https://github.com/xang1234/market-agent/issues/398) lands. [Architecture](docs/architecture.md) has the full flow and the service map.
+Questions that name a metric run through the financial engine, which computes with exact fractions and shows anything it cannot verify as a gap. The answer also notes parts of the question the engine did not calculate, such as a benchmark index. Other questions still use the standard path until [#398](https://github.com/xang1234/market-agent/issues/398) lands. [Architecture](docs/architecture.md) has the full flow and the service map.
 
 ## Documentation
 

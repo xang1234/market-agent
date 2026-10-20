@@ -350,7 +350,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     completedTurn(await runTurn(base, thread.thread_id, "Compare NVDA and AMD again"));
     const again = await latestScope();
     assert.deepEqual(again?.price_window, established?.price_window);
-    assert.deepEqual(again?.inherited, ["price_window", "explains"]);
+    assert.deepEqual(again?.inherited, ["price_window"]);
     // An answer with no scope and no company (an enforced financial gap) erases
     // neither: the next follow-up still carries both companies and the window.
     const gap = await client.query<{ snapshot_id: string }>(
@@ -425,8 +425,6 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.notEqual(rows[0]?.research_scope.route, "comparison");
   });
 
-  // A metric word sends a question to the financial engine (financial-runtime.ts),
-  // which has no segment definition: the recorded planner reply says so.
   await t.test("'Break down NVDA's revenue by segment' is a declared gap: the engine has no segment definition (#157)", async () => {
     const segmentsThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Segments" });
     const completed = completedTurn(await runTurn(base, segmentsThread.thread_id, "Break down NVDA's revenue by segment"));
@@ -435,7 +433,6 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
   });
 
   await t.test("'Why did AMD's operating margin turn negative in Q2 2025?' shows the certified margin and names the cause as not calculated, citing no claim (#282)", async () => {
-    // A claim published after the cutoff must never be used; no claim is.
     const amd = GOLDEN_COMPANIES.find((company) => company.ticker === "AMD")!;
     await seedLateClaim(client, amd.issuer_id);
     const thread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD margin" });
@@ -452,7 +449,6 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
   await t.test("a named past quarter is the quarter calculated; a quarter not on file is a declared gap (#290)", async () => {
     const thread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD Q2 2025" });
     completedTurn(await runTurn(base, thread.thread_id, "Why did AMD's operating margin turn negative in Q2 2025?"));
-    // Only the named quarter: the latest one is not shown in its place.
     assert.deepEqual(engineAnswer(await latestAssistantMessage(base, thread.thread_id)).results.map(([, period]) => period), ["Q2 FY2025"]);
 
     const missing = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD Q2 2019" });
@@ -468,7 +464,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const completed = completedTurn(await runTurn(base, amdThread.thread_id, "Break down AMD's revenue by segment"));
     assert.deepEqual(completed.data.financial_gap, { reason_code: "unsupported" });
     assert.deepEqual(answerText(await latestAssistantMessage(base, amdThread.thread_id)), [UNSUPPORTED]);
-    // The gap saves no company or scope, so its follow-up has nothing to re-read.
+    // The gap saves no company or scope (#425).
     completedTurn(await runTurn(base, amdThread.thread_id, "Show the evidence"));
     const evidence = await latestAssistantMessage(base, amdThread.thread_id);
     assert.deepEqual(evidence.blocks.map((block) => block.kind), ["rich_text"]);
@@ -483,8 +479,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     }
   });
 
-  // The frozen dataset has no cash flow facts: each input is a declared gap,
-  // and free cash flow is blocked on them, with no income figure in its place.
+  // The frozen dataset has no cash flow facts.
   await t.test("'What is AMD's free cash flow?' is calculated by the engine; its inputs are declared gaps (#206)", async () => {
     const fcfThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD FCF" });
     completedTurn(await runTurn(base, fcfThread.thread_id, "What is AMD's free cash flow?"));
@@ -524,9 +519,6 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const issuers = (scope: Saved) => scope.companies.map((company) => company.issuer_id);
     const benchmarkGap = /A benchmark index is not in this data, so the companies are compared only with each other\./;
 
-    // The engine calculates the revenue and margins it plans and names the
-    // window and the benchmark it does not; the follow-ups (no metric word)
-    // keep the scope it saved.
     const first = await turn("Compare NVDA, AMD and AAPL revenue and margins YTD against the S&P 500");
     assert.deepEqual(issuers(first), [NVDA.issuer_id, AMD.issuer_id, AAPL.issuer_id]);
     assert.ok(first.price_window, "the YTD window is recorded");
@@ -536,7 +528,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.equal(firstAnswer.results.length, 12);
     assert.ok(firstAnswer.results.every(([, , disposition]) => disposition === "verified"), JSON.stringify(firstAnswer.results));
     // "S&P" is not two companies the answer could not find.
-    assert.deepEqual(firstAnswer.notes, ["Not part of this calculation: a stock price return over the year to date; a comparison with a benchmark index."]);
+    assert.deepEqual(firstAnswer.notes, ["Not part of this calculation: a stock price return; a comparison with a benchmark index."]);
 
     const unchanged = (scope: Saved, companies: string[]) => {
       assert.deepEqual(issuers(scope), companies);
@@ -626,15 +618,12 @@ function streamedBlockIds(events: ParsedSseEvent[]): unknown[] {
 
 const UNSUPPORTED = "This request asks for a calculation outside the verified financial definitions I can compute.";
 
-// The text of each rich_text block, as the user reads it.
 function answerText(message: ChatMessage): string[] {
   return message.blocks.filter((block) => block.kind === "rich_text")
     .map((block) => (block.segments as Array<{ text?: string }>).map((segment) => segment.text ?? "").join(""));
 }
 
-// What an engine answer shows: each result as its measure, period,
-// disposition and presented text, then the notes beside it.
-function engineAnswer(message: ChatMessage): { results: string[][]; notes: string[] } {
+function engineAnswer(message: ChatMessage): { results: Array<[measure: string, period: string, disposition: string, text: string]>; notes: string[] } {
   const [block, ...notes] = message.blocks;
   assert.equal(block?.kind, "financial_answer", `expected an engine answer; got [${message.blocks.map((b) => b.kind).join(", ")}]`);
   const financial = block.financial as {

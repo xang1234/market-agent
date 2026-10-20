@@ -9,8 +9,7 @@
 // A question that names a metric reaches the financial engine, never the
 // analyst (financial-runtime.ts): its case records the planner's reply, and
 // declares the certified results, the note naming what the plan does not
-// cover, or the gap the user sees. Its mutations are analyst replies, which
-// never reach the page.
+// cover, or the gap the user sees.
 //
 // Expected values are written from the golden dataset (test/golden/dataset.ts)
 // by hand, not derived from the code under test. The suite is versioned: the
@@ -57,9 +56,8 @@ export type HoldoutCase = {
     shows?: { block_title: string; label: string; format: string };
     // The turn asks instead of answering, binding no company.
     clarification?: boolean;
-    // The engine's results, each as company, measure, period, disposition and
-    // the text shown, and the note beside them, if any.
-    financial?: ReadonlyArray<readonly [string, string, string, string, string]>;
+    financial?: ReadonlyArray<readonly [company: string, measure: string, period: string, disposition: string, text: string]>;
+    // The note naming what the plan does not cover.
     uncovered?: string;
     // The engine's gap for a request it cannot plan: its reason code.
     financial_gap?: string;
@@ -93,7 +91,6 @@ const obs = (text: string, evidence: string[]): Assertion => ({ kind: "observati
 const cmp = (op: string, result: unknown, evidence: string[], text = "x"): Assertion => ({ kind: "comparison", op, result, text, evidence });
 const inference = (text: string, supports: number[]): Assertion => ({ kind: "analyst_inference", text, supports });
 
-// Planner replies (financial-engine planner.ts), as a model drafts them.
 type Period = Readonly<Record<string, string | number>>;
 const latest = (period_type: "annual" | "quarterly", offset = 0): Period => ({ kind: "latest", period_type, offset });
 const fiscal = (fiscal_year: number, fiscal_period: string): Period => ({ kind: "fiscal_period", fiscal_year, fiscal_period });
@@ -106,7 +103,6 @@ const draft = (mentions: string[], operations: ReadonlyArray<Record<string, unkn
   outputs: outputs.map((node_id) => ({ output_id: `out_${node_id}`, node_id })),
   thresholds: [],
 });
-// A company's latest fiscal year: revenue and its three margins.
 const latestMargins = (slot: string) => [
   reported(slot, `${slot}_rev`, "revenue", latest("annual")),
   reported(slot, `${slot}_gp`, "gross_profit", latest("annual")),
@@ -159,7 +155,6 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
       ],
     },
     prose: "",
-    mutations: [{ name: "a figure credited to the wrong company", prose: "AMD's gross margin was 70.8% in FY2026.", never_shown: "AMD's gross margin was" }],
   },
   {
     id: "fiscal-period",
@@ -177,7 +172,6 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
       ],
     },
     prose: "",
-    mutations: [{ name: "a substituted fiscal year", prose: "NVDA's revenue was $209.9B in FY2026.", never_shown: "in FY2026" }],
   },
   {
     id: "unknown-cause",
@@ -203,7 +197,6 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
       ],
     },
     prose: "",
-    mutations: [{ name: "a stated cause", prose: "NVDA's gross margin fell to 60.5% in Q1 2026, driven by inventory charges.", never_shown: "inventory charges" }],
   },
   {
     id: "missing-cash-flow",
@@ -226,9 +219,6 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
       absent_kinds: ["metric_row", "revenue_bars"],
     },
     prose: "",
-    mutations: [
-      { name: "a number in the gap's place", prose: "AMD's free cash flow was $3.1B in fiscal 2025.", never_shown: "$3.1B" },
-    ],
   },
   {
     id: "restatement",
@@ -250,9 +240,6 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
     plan: { outcome: "unsupported", reason: "segment revenue has no approved definition" },
     expect: { companies: [], financial_gap: "unsupported", absent_kinds: ["metric_row", "financial_answer"] },
     prose: "",
-    mutations: [
-      { name: "obsolete segment definition", prose: "NVDA's Data Center revenue was $50.0B in Q4 2026.", never_shown: "$50.0B" },
-    ],
   },
   {
     id: "ambiguous-follow-up",
@@ -284,7 +271,6 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
       ],
     },
     prose: "",
-    mutations: [{ name: "a false every-quarter rise", prose: "AMD's operating margin rose in every quarter.", never_shown: "rose in every quarter" }],
   },
   {
     id: "comparison-follow-up-scope",
@@ -339,7 +325,6 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
       uncovered: "Not part of this calculation: the cause of these figures.",
     },
     prose: "",
-    mutations: [{ name: "the cause stated as an observation", prose: "AMD's revenue was $7.7B in Q2 2025, driven by export controls.", never_shown: "driven by export controls" }],
   },
 ];
 

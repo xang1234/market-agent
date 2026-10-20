@@ -879,7 +879,6 @@ export function scopeGapBlocks(
   return notes.map(([key, text]) => noteBlock(input, key, text));
 }
 
-// A note the answer states in words, with no figure: one per key and snapshot.
 export function noteBlock(input: { snapshotId: string; asOf: string }, key: string, text: string): Block {
   const id = stableUuid(`block:${input.snapshotId}:${key}`);
   return {
