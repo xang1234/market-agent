@@ -190,14 +190,14 @@ test("fixture smoke: paid misses can use open reference identity and Stooq EOD b
 });
 
 test("docs trace the open datasource verification path and disclosures", async () => {
-  const rootReadme = await readFile(join(REPO_ROOT, "README.md"), "utf8");
+  const configurationDoc = await readFile(join(REPO_ROOT, "docs/configuration.md"), "utf8");
   const resolverReadme = await readFile(join(REPO_ROOT, "services/resolver/README.md"), "utf8");
   const marketReadme = await readFile(join(REPO_ROOT, "services/market/README.md"), "utf8");
 
-  assert.match(rootReadme, /Open datasource coverage verification/i);
-  assert.match(rootReadme, /node --experimental-strip-types --test scripts\/open-datasource-coverage\.test\.ts/);
-  assert.match(rootReadme, /free reference enrichment/i);
-  assert.match(rootReadme, /Stooq EOD bars are not realtime\s+quotes/i);
+  assert.match(configurationDoc, /Open datasource coverage verification/i);
+  assert.match(configurationDoc, /node --experimental-strip-types --test scripts\/open-datasource-coverage\.test\.ts/);
+  assert.match(configurationDoc, /free reference enrichment/i);
+  assert.match(configurationDoc, /Stooq EOD bars are not realtime\s+quotes/i);
   assert.match(resolverReadme, /Verification/i);
   assert.match(resolverReadme, /Nasdaq Trader.*OpenFIGI.*GLEIF/is);
   assert.match(resolverReadme, /fill missing identity fields only/i);

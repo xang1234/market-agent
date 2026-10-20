@@ -37,11 +37,19 @@ JUDGE_LITELLM_MODEL=anthropic/claude-haiku-5-5
 | `EXTRACTION_LITELLM_MODEL` | SEC 8-K and earnings-release extraction, analyst-grid reader columns, and chat's metric scope proposal. Falls back to `LITELLM_MODEL`. |
 | `JUDGE_LITELLM_MODEL` | The judge that checks each analyst inference in a chat answer. It has no fallback. When it is unset, chat shows figures but no inferences. |
 
-Each model call writes one log line with its channel, model, latency, and token counts:
+With `LLM_USAGE_LOG=true`, which `DEV_MODE=analyst` sets, each model call writes one log line with its channel, model, latency, and token counts. The numbers here are an example:
 
 ```
 [llm] anthropic/claude-sonnet-5-5 2140ms tokens in=8123 out=912 (reasoning=388) total=9035
 ```
+
+### Chat tuning
+
+| Variable | Effect |
+|---|---|
+| `CHAT_SCOPE_PROPOSAL=off` | Skips the short model call that picks which metrics and facets a question asks for. A follow-up then keeps the previous scope, except for any period it names. |
+| `CHAT_TRACE_DIR` | Writes a trace of each answer turn, including the judge's verdicts, to this directory. Each judged turn also logs one `[chat] judge` line. |
+| `CHAT_VERIFICATION_MODE=display_unverified` | Shows answers that fail verification, labelled **Unverified** with the reasons, and never saves them. The default, `strict`, shows only an error. The chat server refuses this value when `NODE_ENV=production`. |
 
 ### Reasoning models
 
@@ -64,11 +72,20 @@ Each surface can take its numbers from the financial engine, which plans a calcu
 - `shadow` runs the engine privately beside the legacy answer.
 - `enforce` shows only certified calculations. Anything the engine cannot verify appears as a gap, never as prose.
 
+For chat, only questions that name a metric reach the engine today. Other questions use the standard path until [#398](https://github.com/xang1234/market-agent/issues/398) lands. Balance-sheet and cash-flow columns in Analyst Grids show no coverage while `GRID_FINANCIAL_MODE` is `off`.
+
+`FINANCIAL_WORKER_ENABLED=true` starts a worker in dev-api that recovers interrupted financial runs.
+
 With any surface on, a service refuses to start until the schema and version registry are ready. Any other value stops startup.
 
 ## Screener universe
 
-The screener's vendor universe holds about 10,000 US listings with fundamentals and technicals. It comes from the weekly reference bundle that [`xang1234/stock-screener`](https://github.com/xang1234/stock-screener) publishes. Import it on the host that runs the dev stack:
+`SCREENER_CANDIDATE_SOURCE` picks what the screener serves:
+
+- `reported`, the default, lists companies whose SEC facts the app has stored, with margins, P/E, and growth from reported annual figures.
+- `vendor` lists the US universe from a weekly reference import, about 10,000 listings. Vendor rows have no margins or P/E, and show a price only when a quote is stored.
+
+The vendor universe comes from the weekly reference bundle that [`xang1234/stock-screener`](https://github.com/xang1234/stock-screener) publishes. Import it on the host that runs the dev stack:
 
 ```bash
 ./scripts/dev-shell.sh reference-import            # import the latest bundle. An unchanged bundle is a no-op.
@@ -84,8 +101,6 @@ The bundle publishes on Saturdays around 08:10 ET. To schedule the import, add a
 
 The command exits non-zero with a clear message when Postgres is not running. Every run that reaches the bundle records a row in `artifact_ingestion_ledger`, keyed by the bundle's sha256, with status `succeeded`, `partial`, or `failed`. A download or connection failure shows only in the log and the exit code.
 
-`SCREENER_CANDIDATE_SOURCE` picks what the screener serves: `reported` (SEC margins and P/E, the default) or `vendor` (the imported universe).
-
 ## Free fallback data sources
 
 These sources fill gaps when the paid providers miss. They are off by default. Free public endpoints have tight quotas, so turn on only the ones you need.
@@ -95,10 +110,12 @@ These sources fill gaps when the paid providers miss. They are off by default. F
 | `NASDAQ_TRADER_REFERENCE_ENABLED=true` | Validates unknown US-listed tickers against the Nasdaq Trader symbol directories |
 | `OPENFIGI_REFERENCE_ENABLED=true` | FIGI and ISIN metadata. `OPENFIGI_API_KEY` is optional and raises the rate limit. |
 | `GLEIF_REFERENCE_ENABLED=true` | LEI and legal-entity metadata, when the legal-name match is unambiguous |
-| `STOOQ_MARKET_ENABLED=true` | Daily end-of-day bars for `1d` requests. Stooq has no realtime quotes and no intraday bars. |
-| `ENABLE_UNOFFICIAL_DEV_PROVIDERS=true` | A yfinance fallback for local development, through `services/dev-providers` |
+| `STOOQ_MARKET_ENABLED=true` | Daily end-of-day bars for `1d` requests |
+| `ENABLE_UNOFFICIAL_DEV_PROVIDERS=true` | A yfinance and Finviz fallback for local development, through `services/dev-providers` |
 
-The reference sources fill missing identity fields only. They never overwrite an SEC, Polygon, or local value.
+Nasdaq Trader, OpenFIGI, and GLEIF are free reference enrichment sources. They fill missing identity fields only and never overwrite an SEC, Polygon, or local value. Stooq EOD bars are not realtime quotes or intraday bars.
+
+### Open datasource coverage verification
 
 To check the whole fallback path without network calls, run the fixture smoke test:
 

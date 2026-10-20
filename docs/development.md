@@ -2,8 +2,9 @@
 
 ## Requirements
 
-- Node 22.19 or later (`.nvmrc` pins 22.19.0, the version CI uses)
-- Docker with Docker Compose, for Postgres 15 and MinIO
+- Node 22.19 or later with npm (`.nvmrc` pins 22.19.0, the version CI uses)
+- `lsof`, which macOS and most Linux distributions include
+- Docker with Docker Compose, for Postgres 15 and MinIO. UI mode does not need it.
 - About 3 GB of free disk for images and packages
 - Python 3.11 or later, or `uv`, only if you turn on `ENABLE_UNOFFICIAL_DEV_PROVIDERS`
 
@@ -23,12 +24,14 @@ In a fresh worktree, `./scripts/dev-shell.sh install` runs `npm ci` for every pa
 
 `DEV_PROFILE` picks which services run.
 
-- `full` (the default) runs every service as its own process.
+- `full` (the default) runs the 12 HTTP services as separate processes. Analyze and Agents run inside dev-api, and the other packages are libraries. The discovery worker runs only when `DISCOVERY_ENABLED=true`.
 - `chat` runs one process, `services/app`, that serves the web UI, chat, resolver, dev-api, market, and fundamentals on `WEB_PORT`, plus Postgres. The other services are parked. `status` lists them as `parked`, their API routes answer `503`, and their tabs do not load.
 
 ### Sign in
 
-The **Sign in** button in the top bar sets a stable mock user, so your watchlists, threads, and portfolios persist across runs. Chat, Agents, Review, Settings, and Discovery need it. Home, symbol pages, Screener, Analyze, and Analyst Grids open without it.
+dev-shell signs you in as a stable mock user, so your watchlists, threads, and portfolios persist across runs. After **Sign out**, the top bar shows **Sign in** to return. Set `VITE_MA_FLAG_DEV_AUTO_LOGIN=false` to start signed out.
+
+Signed out, Home, symbol pages, and Screener still work, without watchlist or save actions. Chat, Analyze, Analyst Grids, Agents, Review, Settings, Discovery, and the evidence inspector need a session.
 
 ### Stop the stack
 
@@ -64,7 +67,7 @@ The golden conversation has three turns. Ask them in a new thread, word for word
 
 The app serves the web UI and replays the golden conversation's recorded API traffic from `services/app/fixtures/golden-conversation.replay.json`. The replay covers threads, all three turns' streams, the reloaded messages, and the evidence lookups. It builds no services and starts no containers. Any request that was not recorded answers `404` and names the request, including evidence for a figure nobody opened during capture.
 
-A new thread restarts the replay. Concurrent tabs share one replay session.
+A new thread restarts the replay. Concurrent tabs share one replay session. Pages whose services are parked, such as Home, Screener, Analyst Grids, and Review, show no data in this mode.
 
 To recapture after an API or block change, start on a fresh database and run these from the repo root:
 
@@ -80,7 +83,7 @@ The golden conversation works offline. Other questions have no recorded reply an
 
 ### Traces mode
 
-Like no-keys mode, but the replies are the recorded answers to the 14 eval questions in `services/chat/test/answer-lab/traces`. `up` writes them to `.dev/trace-replies.json`. Ask a traced question word for word, or run all of them in a few seconds:
+Like no-keys mode, but the replies are the recorded answers to the eval's 12 questions (14 turns) in `services/chat/test/answer-lab/traces`. `up` writes them to `.dev/trace-replies.json`. Ask a traced question word for word, or run all of them in a few seconds:
 
 ```bash
 EVAL_MODEL=fixture/recorded node --experimental-strip-types scripts/research-quality-eval.ts run

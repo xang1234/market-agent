@@ -18,19 +18,19 @@ Type a ticker or company name into the top search to open its page. It has five 
 
 ## Chat
 
-Ask the analyst about a company, a comparison, or a theme. Answers stream in as charts, tables, and metric rows, each with citations. Click any figure to open its evidence. Threads persist, so you can return to one later.
+Ask the analyst about a company, a comparison, or a theme. Answers stream in as charts, tables, metric rows, and a short narrative. Threads persist, so you can return to one later.
 
-Chat answers from facts already stored in the app. It does not browse the web. A separate judge model checks each inference, and chat hides any inference the judge does not find supported. [Architecture](architecture.md#how-a-chat-answer-is-built) explains each step.
+Chat answers from facts already stored in the app. It does not browse the web. Code builds the charts and tables from those facts, and the model writes only the narrative. Each figure in the narrative and the metric rows links to its stored fact. Each block carries a label: **verified** for a certified calculation, **source-linked** when its values are the facts it cites, or **not verified**. A separate judge model checks each inference, and chat shows an inference only once the judge accepts it. [Architecture](architecture.md#how-a-chat-answer-is-built) explains each step.
 
 ## Evidence inspector
 
-Open the inspector on any number, claim, event, or source. It shows the provenance rows, quality badges, a link to the original document, and related evidence.
+Click a linked figure, claim, event, or source to open the inspector. It shows the provenance rows, quality badges, a link to the original document, and related evidence.
 
 ## Screener
 
 Filter the universe by asset type, sector, venue, price, change, and volume. Add fundamentals such as market cap, P/E, gross, operating, and net margin, and revenue growth. Sort, page through, and save a screen. A saved screen becomes a reusable universe for watchlists, agents, and Analyze.
 
-The screener reads about 10,000 US listings from a weekly reference import. See [Configuration](configuration.md#screener-universe).
+By default the screener lists companies whose SEC facts the app has stored. It can serve about 10,000 US listings from a weekly reference import instead, with fewer fundamentals. See [Configuration](configuration.md#screener-universe).
 
 ## Analyze
 
@@ -40,7 +40,7 @@ A finished single-company memo offers **Monitor this thesis**. It starts a new a
 
 ## Analyst Grids
 
-A grid puts companies in rows and research questions in columns. Pick a universe (manual tickers, a watchlist, a portfolio, or a saved screen), then add columns. Some columns read stored facts, such as market cap, revenue, and diluted EPS. A **Question** column has a model read each company's documents and answer one question. A grid takes up to three question columns.
+A grid puts companies in rows and metrics or a research question in columns. Pick a universe: manual tickers, a saved screen, a watchlist, a portfolio, or one company's peers. Then pick columns. Most read stored facts, such as market cap, revenue, and diluted EPS. A **Question** column has a model read each company's documents and answer one question. Balance-sheet and cash-flow columns need `GRID_FINANCIAL_MODE` turned on.
 
 ## Agents
 
@@ -58,7 +58,9 @@ A new supported or challenged state appears on Home and fires the agent's alert 
 
 Each save creates a thesis version, and the panel shows the latest 20 assessments and versions. If someone saves a newer version while you edit, your draft stays and **Load saved version** replaces it on request.
 
-Agents read up to 100 claims and 250 facts per run from evidence already stored in the app. They do not start a new web crawl. A numeric condition only uses a fact that matches its metric, unit, period, and maximum age. Age counts from the period end.
+Agents read evidence already stored in the app: up to 100 claims, and up to 50 authoritative facts for each tracked metric. They do not start a new web crawl. A numeric condition only uses a fact that matches its metric, unit, period, and maximum age. Age counts from the period end.
+
+An agent with no saved thesis conditions keeps the earlier workflow, including multi-company universes.
 
 ## Watchlists and portfolio
 
