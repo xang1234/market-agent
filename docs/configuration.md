@@ -61,16 +61,12 @@ An `anthropic` channel calls the Claude Messages API directly. It turns prompt c
 
 Each surface can take its numbers from the financial engine, which plans a calculation, binds it to stored facts, and computes it with exact fractions. The engine is off by default.
 
-| Variable | Values |
-|---|---|
-| `CHAT_FINANCIAL_MODE` | `off`, `shadow`, `enforce` |
-| `ANALYZE_FINANCIAL_MODE` | `off`, `shadow`, `enforce` |
-| `GRID_FINANCIAL_MODE` | `off`, `shadow`, `enforce` |
-| `THESIS_FINANCIAL_MODE` | `off`, `enforce` |
+Set each of `CHAT_FINANCIAL_MODE`, `ANALYZE_FINANCIAL_MODE`, `GRID_FINANCIAL_MODE`, and `THESIS_FINANCIAL_MODE` to one of two values:
 
 - `off` shows legacy numbers, labelled legacy.
-- `shadow` runs the engine privately beside the legacy answer.
 - `enforce` shows only certified calculations. Anything the engine cannot verify appears as a gap, never as prose.
+
+The engine checks each SEC fact's proof. Facts stored before 2026-10-16 have none and show as gaps until you run the SEC proof backfill described in [Development](development.md#data-mode).
 
 For chat, only questions that name a metric reach the engine today. Other questions use the standard path until [#398](https://github.com/xang1234/market-agent/issues/398) lands. The financial columns in Analyst Grids (cash flow, net income, balance sheet, and ratios) show no coverage while `GRID_FINANCIAL_MODE` is `off`.
 

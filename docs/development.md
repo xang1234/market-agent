@@ -109,6 +109,13 @@ cd services/chat && npm run golden:live [base URL]
 
 Chat reads persisted facts only, so the check first warms NVDA and AMD. It resolves each ticker through Polygon, then reads its key stats and eight quarterly income statements from SEC, which persists them. Reruns read the persisted data back. The check stops before any turn if a company cannot be warmed.
 
+SEC facts stored before 2026-10-16 lack the proofs the financial engine checks, and reads never fetch them again. Run the backfill once per database to re-fetch those filings, prove the facts they still state, and replace the income facts they contradict. It skips the frozen golden dataset.
+
+```bash
+cd services/fundamentals
+DATABASE_URL=... SEC_EDGAR_USER_AGENT=... npm run backfill:sec-statements
+```
+
 ### Keep frozen and live data apart
 
 Frozen modes need a database without provider-hydrated NVDA, AMD, or AAPL. Data mode refuses a database that a frozen mode seeded, because the frozen facts would let a live check pass without touching Polygon or SEC. Reset with `docker compose -f docker-compose.dev.yml --env-file .env.dev down -v` when you switch.
