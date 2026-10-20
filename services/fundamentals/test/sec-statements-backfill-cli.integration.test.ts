@@ -34,8 +34,8 @@ test("the SEC statements backfill never fetches for the frozen golden dataset", 
   const fetcher = secCompanyFetcher(() => ({ cik: 789019, entityName: "Live Corp", facts: {} }));
   const quiet = { log: () => {}, warn: () => {}, error: () => {} };
 
-  assert.equal(await backfillSecStatements(db, async (path) => (fetched.push(path), fetcher(path)), [], quiet), false);
-  assert.equal(await backfillSecStatements(db, async (path) => (fetched.push(path), fetcher(path)), goldenIds, quiet), false);
+  assert.deepEqual(await backfillSecStatements(db, async (path) => (fetched.push(path), fetcher(path)), [], quiet), { failures: 0 });
+  assert.deepEqual(await backfillSecStatements(db, async (path) => (fetched.push(path), fetcher(path)), goldenIds, quiet), { failures: 0 });
 
   assert.deepEqual(fetched, ["/api/xbrl/companyfacts/CIK0000789019.json"]);
   assert.deepEqual(await goldenFacts(), before);

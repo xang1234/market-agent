@@ -25,6 +25,7 @@ import { createFact } from "../../../evidence/src/fact-repo.ts";
 import { ephemeralRawBlobIdForSource } from "../../../evidence/src/object-store.ts";
 import { createSource } from "../../../evidence/src/source-repo.ts";
 import { FROZEN_AS_OF } from "../../src/ytd-hydration.ts";
+import { GOLDEN_ISSUER_IDS } from "../../../shared/src/golden-issuers.ts";
 
 const SEED_DIR = join(import.meta.dirname, "..", "..", "..", "..", "db", "seed");
 
@@ -94,7 +95,7 @@ export const GOLDEN_COMPANIES: ReadonlyArray<GoldenCompany> = Object.freeze([
     cik: "0001045810",
     sector: "Technology",
     industry: "Semiconductors",
-    issuer_id: "60000000-0000-4000-8000-000000000001",
+    issuer_id: GOLDEN_ISSUER_IDS.NVDA,
     instrument_id: "61000000-0000-4000-8000-000000000001",
     listing_id: "62000000-0000-4000-8000-000000000001",
     quote: { price: 178.4, prev_close: 176.1 },
@@ -130,7 +131,7 @@ export const GOLDEN_COMPANIES: ReadonlyArray<GoldenCompany> = Object.freeze([
     cik: "0000002488",
     sector: "Technology",
     industry: "Semiconductors",
-    issuer_id: "60000000-0000-4000-8000-000000000002",
+    issuer_id: GOLDEN_ISSUER_IDS.AMD,
     instrument_id: "61000000-0000-4000-8000-000000000002",
     listing_id: "62000000-0000-4000-8000-000000000002",
     quote: { price: 162.3, prev_close: 164.9 },
@@ -155,7 +156,7 @@ export const GOLDEN_COMPANIES: ReadonlyArray<GoldenCompany> = Object.freeze([
     cik: "0000320193",
     sector: "Technology",
     industry: "Consumer Electronics",
-    issuer_id: "60000000-0000-4000-8000-000000000003",
+    issuer_id: GOLDEN_ISSUER_IDS.AAPL,
     instrument_id: "61000000-0000-4000-8000-000000000003",
     listing_id: "62000000-0000-4000-8000-000000000003",
     quote: { price: 231.6, prev_close: 229.8 },
