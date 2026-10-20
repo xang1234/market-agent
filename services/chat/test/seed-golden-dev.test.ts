@@ -156,3 +156,20 @@ test("a database seeded before the golden source moves its facts there and prove
   assert.equal(await seedGoldenDevDatabase(databaseUrl), "already-seeded");
   assert.deepEqual(await counts(), declaredOnly, "and never proven twice");
 });
+
+test("a database proven for an earlier version of the dataset is told to reset, not reported seeded", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "chat-golden-dev-version");
+  const client = await connectedClient(t, databaseUrl);
+  assert.equal(await seedGoldenDevDatabase(databaseUrl), "seeded");
+  const earlier = "0".repeat(64);
+  await client.query(`delete from source_publication_attestations where source_id = $1::uuid`, [GOLDEN_SOURCE_ID]);
+  await client.query(`update sources set content_hash = $2 where source_id = $1::uuid`, [GOLDEN_SOURCE_ID, `sha256:${earlier}`]);
+  await client.query(
+    `insert into source_publication_attestations
+       (source_id, source_version_hash, available_no_later_than, timing_precision, source_timezone, proof_method, proof_ref, proof_hash, mapping_version)
+     values ($1::uuid, $2, $3::timestamptz, 'instant', 'UTC', 'fixture_declaration', 'golden_fixture:dataset.ts', $2, 'golden-fixture-declaration.v1')`,
+    [GOLDEN_SOURCE_ID, earlier, GOLDEN_AS_OF],
+  );
+
+  await assert.rejects(() => seedGoldenDevDatabase(databaseUrl), /holds an earlier version of the dataset.*down -v/s);
+});

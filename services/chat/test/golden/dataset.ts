@@ -328,8 +328,14 @@ async function insertGoldenSource(client: Client): Promise<void> {
 }
 
 export async function seedGoldenProofs(client: Client): Promise<void> {
-  const proven = await client.query(`select 1 from source_publication_attestations where source_id = $1::uuid`, [GOLDEN_SOURCE_ID]);
-  if (proven.rowCount) return;
+  const { rows: proofs } = await client.query<{ source_version_hash: string }>(
+    `select source_version_hash from current_source_publication_attestations where source_id = $1::uuid`,
+    [GOLDEN_SOURCE_ID],
+  );
+  if (proofs.some((proof) => proof.source_version_hash === GOLDEN_SOURCE_VERSION)) return;
+  if (proofs.length > 0) {
+    throw new GoldenFactMismatchError(`golden dataset: this database holds an earlier version of the dataset (${proofs[0]!.source_version_hash})`);
+  }
   await insertGoldenSource(client);
 
   for (const fact of GOLDEN_ISSUER_FACTS) {
