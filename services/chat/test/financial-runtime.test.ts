@@ -3,14 +3,15 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
-import { IDS } from "../../financial-engine/test/db-fixtures.ts";
+import { IDS, ORIGINAL_REVENUE } from "../../financial-engine/test/db-fixtures.ts";
 import type { ChatAnalystToolRuntime } from "../src/coordinator.ts";
 import { createChatFinancialRuntime, isFinancialRequest, SCOPE_METRICS } from "../src/financial-runtime.ts";
 import { METRIC_CATALOG_V1, OPERATION_REGISTRY } from "../../financial-core/src/index.ts";
 import { proposedMetric } from "../src/research-scope.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import type { FinancialPool } from "../../financial-engine/src/ports.ts";
-import { chatDatabase, chatHarness, completed, revenueModel } from "./financial-fixtures.ts";
+import { chatDatabase, chatHarness, completed, INSTRUMENT_A, LISTING_A, resolveMention, revenueModel } from "./financial-fixtures.ts";
+import type { ChatSubjectPreResolution } from "../src/subjects.ts";
 
 test("financial intent is recognized from the definition catalog", () => {
   for (const text of ["Compare revenue for AAA and BBB", "What was AAA's gross margin?", "EPS for AAA", "net income trend"]) assert.ok(isFinancialRequest(text), text);
@@ -114,6 +115,41 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     const message = (await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id])).rows[0];
     assert.ok(message, `expected a published answer; got ${JSON.stringify(done)}`);
     assert.deepEqual(message.blocks[0].financial.results.map((result: { disposition: string }) => result.disposition), ["verified", "missing"]);
+  });
+
+  await t.test("a ticker the resolver names as a listing is planned on its issuer's facts", async () => {
+    await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1::uuid, $2::uuid, 'common_stock')`, [INSTRUMENT_A, IDS.issuerA]);
+    await db.query(
+      `insert into listings (listing_id, instrument_id, mic, ticker, trading_currency, timezone)
+       values ($1::uuid, $2::uuid, 'XNAS', 'ALPX', 'USD', 'America/New_York')`,
+      [LISTING_A, INSTRUMENT_A],
+    );
+    const asListing = async (mention: string) => mention === "ALPX"
+      ? { status: "resolved", subject_ref: { kind: "listing", id: LISTING_A }, display_label: "Alpha Industries Inc. (XNAS)" } as unknown as ChatSubjectPreResolution
+      : resolveMention(mention);
+    const { events } = await chatHarness(pool, { model: revenueModel(["ALPX"]), resolveMention: asListing }).run({ ...base, userIntent: "Revenue for ALPX" });
+    const done = completed(events);
+    const message = (await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id])).rows[0];
+    assert.ok(message, `expected a published answer; got ${JSON.stringify(done)}`);
+    assert.deepEqual(
+      message.blocks[0].financial.results.map((result: { disposition: string; presented: { value?: string } }) => [result.disposition, result.presented.value]),
+      [["verified", ORIGINAL_REVENUE]],
+    );
+
+    const sameCompany = await chatHarness(pool, { model: revenueModel(["ALPHA"]), resolveMention: asListing }).run({ ...base, subjectText: "ALPHA", userIntent: "Compare revenue with ALPX" });
+    const once = (await db.query(`select blocks from chat_messages where message_id = $1`, [completed(sameCompany.events).message_id])).rows[0];
+    assert.ok(once, `expected a published answer; got ${JSON.stringify(completed(sameCompany.events))}`);
+    assert.deepEqual(once.blocks[0].financial.results.map((result: { disposition: string }) => result.disposition), ["verified"], "the explicit issuer and its listing are planned once");
+  });
+
+  await t.test("a listing that no longer exists is asked about, not answered as a gap", async () => {
+    const gone = async (mention: string) => ({ status: "resolved", subject_ref: { kind: "listing", id: randomUUID() }, display_label: `${mention} (XNAS)` }) as unknown as ChatSubjectPreResolution;
+    const model = revenueModel(["GONE"]);
+    const { events } = await chatHarness(pool, { model, resolveMention: gone }).run({ ...base, userIntent: "Revenue for GONE" });
+    const done = completed(events);
+    assert.equal(done.clarification, true);
+    assert.match((done.financial_clarification as { question: string }).question, /"GONE" did not match a known company/u);
+    assert.equal(model.calls, 0);
   });
 
   await t.test("a missing or failing planning model yields a gap, never the narrative composer", async () => {

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
-import { databaseUrl, IDS } from "../../financial-engine/test/db-fixtures.ts";
+import { databaseUrl, IDS, ORIGINAL_REVENUE } from "../../financial-engine/test/db-fixtures.ts";
 import { createChatServer } from "../src/http.ts";
 import { chatDatabase, chatHarness, completed, INSTRUMENT_A, LISTING_A, revenueModel } from "./financial-fixtures.ts";
 
@@ -74,6 +74,26 @@ test("financial clarifications", { timeout: 300_000 }, async (t) => {
     assert.ok(done.message_id && !done.clarification && !done.financial_gap, JSON.stringify(done));
     const [block] = (await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id])).rows[0].blocks;
     assert.equal(block.financial.results.length, 2);
+  });
+
+  await t.test("a listing chosen in a clarification is answered from its issuer's facts", async () => {
+    await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1::uuid, $2::uuid, 'common_stock') on conflict do nothing`, [INSTRUMENT_A, IDS.issuerA]);
+    await db.query(
+      `insert into listings (listing_id, instrument_id, mic, ticker, trading_currency, timezone)
+       values ($1::uuid, $2::uuid, 'XNAS', 'ALPX', 'USD', 'America/New_York') on conflict do nothing`,
+      [LISTING_A, INSTRUMENT_A],
+    );
+    const run = (clarificationAnswer?: { clarification_id: string; choice_id: string }) =>
+      chatHarness(pool, { model: revenueModel(["AMBL"]) }).run({ threadId, userId: IDS.owner, userIntent: "Revenue for AMBL", ...(clarificationAnswer ? { clarificationAnswer } : {}) });
+    const asked = completed((await run()).events).financial_clarification as Offered;
+    const listing = asked.choices.find((choice) => choice.label === "Alpha Industries Inc. (XNAS)")!;
+    const done = completed((await run({ clarification_id: asked.clarification_id, choice_id: listing.choice_id })).events);
+    assert.ok(done.message_id && !done.clarification, JSON.stringify(done));
+    const [block] = (await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id])).rows[0].blocks;
+    assert.deepEqual(
+      block.financial.results.map((result: { disposition: string; presented: { value?: string } }) => [result.disposition, result.presented.value]),
+      [["verified", ORIGINAL_REVENUE]],
+    );
   });
 
   await t.test("a stale or forged answer changes nothing: the same question is asked again", async () => {
