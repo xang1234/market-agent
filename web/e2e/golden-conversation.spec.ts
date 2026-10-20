@@ -187,7 +187,7 @@ async function inspectCitedFigure(page: Page, message: Locator) {
   const inspector = page.getByRole('complementary', { name: 'Evidence inspector' })
   await expect(inspector).toBeVisible()
   await inspector.locator('button[data-inspection-kind="source"]').first().click()
-  await expect(inspector.getByRole('heading', { name: /^(sec_edgar|golden_fixture) filing$/ })).toBeVisible()
+  await expect(inspector.getByRole('heading', { name: 'golden_fixture filing', exact: true })).toBeVisible()
   await inspector.getByRole('button', { name: 'Close' }).click()
   await expect(inspector).toBeHidden()
 }
