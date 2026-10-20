@@ -4,9 +4,10 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createRuntimeAuthority, operationDependencies, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
-import { planFinancialRequest, type PlanningContext, type PlanningModel, type PlanningResult } from "../../financial-engine/src/planner.ts";
+import { buildDeterministicPlan, planFinancialRequest, type PlanningContext, type PlanningModel, type PlanningResult } from "../../financial-engine/src/planner.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
-import { isFinancialRequest } from "../src/financial-runtime.ts";
+import { isFinancialRequest, uncoveredAsks } from "../src/financial-runtime.ts";
+import { parseProposal, proposalQuestion } from "../src/scope-proposal.ts";
 import { extractSubjectMentions } from "../src/subject-extraction.ts";
 import { GOLDEN_AS_OF, GOLDEN_COMPANIES } from "./golden/dataset.ts";
 
@@ -98,6 +99,7 @@ const EXPECTED: Record<string, ReturnType<typeof summary>> = {
     model_calls: 1,
     outputs: [...latestMargins("NVDA"), ...latestMargins("AMD"), ...latestMargins("AAPL")],
   },
+  "What drives AAPL's margins?": { outcome: "ready", model_calls: 1, outputs: latestMargins("AAPL").slice(1) },
 };
 
 test("each golden metric question plans from its own recorded reply on the first call", async () => {
@@ -111,4 +113,71 @@ test("each golden metric question plans from its own recorded reply on the first
   for (const question of questions) {
     assert.deepEqual(summary(await planFinancialRequest(planningContext(question), question, model)), EXPECTED[question], question);
   }
+});
+
+const reading = (asks: string[], metrics: unknown[] = [], income_items: string[] = [], turnsOff: string[] = []) =>
+  parseProposal(JSON.stringify({ metrics, asks, turns_off: { facets: turnsOff, metrics: [] }, income_items }))!;
+
+test("each golden answer names what its question asks for and its plan does not compute", async () => {
+  const client = await createReplayLlmChatClient(REPLIES);
+  const reply = async (content: string) => (await client({} as never, { messages: [{ role: "user", content }] })).text;
+  const model: PlanningModel = async ({ messages }) => ({ text: (await client({} as never, { messages })).text, model: "recorded" });
+  const uncovered: Record<string, string[]> = {
+    "Why did AMD's operating margin turn negative in Q2 2025?": ["the cause of these figures"],
+    "What was AMD's revenue in Q2 2019?": [],
+    "What is AMD's free cash flow?": [],
+    "Compare NVDA, AMD and AAPL revenue and margins YTD against the S&P 500": ["a stock price return", "a comparison with a benchmark index"],
+    "What drives AAPL's margins?": ["the cause of these figures"],
+  };
+  for (const [question, expected] of Object.entries(uncovered)) {
+    const planned = await planFinancialRequest(planningContext(question), question, model);
+    assert.equal(planned.outcome, "ready", question);
+    if (planned.outcome !== "ready") continue;
+    assert.deepEqual(uncoveredAsks(parseProposal(await reply(proposalQuestion(question)))!, planned.plan), expected, question);
+  }
+});
+
+test("an engine answer names what the reading of its question asks for and the plan does not compute", () => {
+  const quarter = (fiscal_period: string) => ({ kind: "fiscal_period", fiscal_year: 2026, fiscal_period });
+  const reported = (node_id: string, metric_key: string, period: object) => ({ node_id, operation: "reported_metric", subject_slot: "a", metric_key, period });
+  const margin = (suffix: string, period: object) => [
+    reported(`oi_${suffix}`, "operating_income", period),
+    reported(`rev_${suffix}`, "revenue", period),
+    { node_id: `om_${suffix}`, operation: "operating_margin", numerator: `oi_${suffix}`, revenue: `rev_${suffix}` },
+  ];
+  const plan = (operations: object[], shown: string[] = operations.map((operation) => (operation as { node_id: string }).node_id)): FinancialPlanV1 => {
+    const outputs = shown.map((node_id) => ({ output_id: `out_${node_id}`, node_id }));
+    const planned = buildDeterministicPlan(planningContext("NVDA"), { subjects: [{ slot_id: "a", mention: "NVDA" }], operations, outputs, thresholds: [] });
+    assert.equal(planned.outcome, "ready", JSON.stringify(planned));
+    return (planned as Extract<PlanningResult, { outcome: "ready" }>).plan;
+  };
+  const revenue = plan([reported("rev", "revenue", quarter("Q4"))]);
+
+  assert.deepEqual(uncoveredAsks(reading(["price_window", "benchmark", "explains"]), revenue), ["a stock price return", "a comparison with a benchmark index", "the cause of these figures"]);
+  assert.deepEqual(uncoveredAsks(reading([], ["income_statement"], ["revenue"]), revenue), [], "revenue YTD asks for no stock price return");
+  assert.deepEqual(uncoveredAsks(reading(["benchmark"], [], [], ["benchmark"]), revenue), [], "a facet the question turns off is not asked for");
+
+  assert.deepEqual(uncoveredAsks(reading([], ["ebitda", "income_statement"]), revenue), ["EBITDA"]);
+  assert.deepEqual(uncoveredAsks(reading([], ["income_statement"], ["revenue", "net_income", "operating_expenses"]), revenue), ["net income", "operating expenses"]);
+  assert.deepEqual(uncoveredAsks(reading(["margins"], ["income_statement"]), revenue), ["a margin"]);
+  const trend = reading(["margins", "margin_trend"], ["income_statement"]);
+  assert.deepEqual(uncoveredAsks(trend, revenue), ["a margin over several periods"]);
+  assert.deepEqual(uncoveredAsks(trend, plan(margin("q4", quarter("Q4")))), ["a margin over several periods"]);
+  assert.deepEqual(uncoveredAsks(trend, plan([...margin("q3", quarter("Q3")), ...margin("q4", quarter("Q4"))])), []);
+
+  const assets = plan([reported("assets", "total_assets", quarter("Q4"))]);
+  assert.deepEqual(uncoveredAsks(reading([], ["balance_sheet"]), assets), ["cash and equivalents", "total liabilities", "stockholders' equity"]);
+  assert.deepEqual(uncoveredAsks(reading([], ["total_assets"]), assets), []);
+
+  const marginOnly = plan(margin("q4", quarter("Q4")), ["om_q4"]);
+  assert.deepEqual(uncoveredAsks(reading(["margins"], ["income_statement"], ["revenue", "operating_income"]), marginOnly), ["revenue"], "an input the answer does not show is named; a margin's numerator is not");
+  const turnsOff = (asks: string[], metrics: unknown[], facets: string[], offMetrics: unknown[]) =>
+    parseProposal(JSON.stringify({ metrics, asks, turns_off: { facets, metrics: offMetrics }, income_items: [] }))!;
+  assert.deepEqual(uncoveredAsks(turnsOff(["margins", "margin_trend"], [], ["margins"], []), revenue), [], "no margins is no trend");
+  assert.deepEqual(uncoveredAsks(turnsOff([], ["balance_sheet"], [], [{ metric: "cash_and_equivalents" }]), assets), ["total liabilities", "stockholders' equity"]);
+  assert.deepEqual(uncoveredAsks(turnsOff([], ["total_assets"], [], [{ metric: "balance_sheet" }]), revenue), []);
+  assert.deepEqual(uncoveredAsks(reading([], ["balance_sheet", "total_assets"]), revenue), ["cash and equivalents", "total assets", "total liabilities", "stockholders' equity"]);
+  const cashFlow = plan([reported("ocf", "operating_cash_flow", quarter("FY"))]);
+  assert.deepEqual(uncoveredAsks(reading([], ["income_statement"], ["revenue"]), cashFlow), ["revenue"]);
+  assert.deepEqual(uncoveredAsks(reading(["margins"], ["income_statement"], ["gross_margin"]), revenue), ["gross margin"]);
 });

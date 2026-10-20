@@ -1,5 +1,5 @@
 // Whether this deployment may run verified finance at all. Every surface on the
-// engine (thesis, Discovery, and grids always; chat and analyze in enforce mode)
+// engine (thesis, Discovery, grids, analyze, and chat's metric questions)
 // needs the schema the engine writes through, the
 // evidence views its adapter reads, and a version registry that covers what
 // this build emits. A missing piece blocks startup with the reasons; it never

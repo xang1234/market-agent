@@ -59,20 +59,17 @@ An `anthropic` channel calls the Claude Messages API directly. It turns prompt c
 
 ## Verified financial answers
 
-Each surface can take its numbers from the financial engine, which plans a calculation, binds it to stored facts, and computes it with exact fractions. The engine is off by default.
+The financial engine plans a calculation, binds it to stored facts, and computes it with exact fractions. Anything it cannot verify appears as a gap, never as prose.
 
-Analyze memos, thesis conditions and Discovery criteria always use the engine, so dev-api checks readiness at startup. Set `CHAT_FINANCIAL_MODE` to one of two values:
-
-- `off` shows legacy numbers, labelled legacy.
-- `enforce` shows only certified calculations. Anything the engine cannot verify appears as a gap, never as prose.
+Chat questions that name a metric, Analyze memos, thesis conditions and Discovery criteria always use the engine, so chat and dev-api check readiness at startup.
 
 The engine checks each SEC fact's proof. Facts stored before 2026-10-16 have none and show as gaps until you run the SEC proof backfill described in [Development](development.md#data-mode).
 
-For chat, only questions that name a metric reach the engine today. Other questions use the standard path until [#398](https://github.com/xang1234/market-agent/issues/398) lands. The financial columns in Analyst Grids (cash flow, net income, balance sheet, and ratios) show no coverage while `GRID_FINANCIAL_MODE` is `off`.
+For chat, only questions that name a metric reach the engine today. When the scope model reads the question, the answer adds a note for parts of it the plan did not calculate, such as a benchmark index; a qualified metric such as EPS growth is not checked. Other questions use the standard path until [#398](https://github.com/xang1234/market-agent/issues/398) lands.
 
 `FINANCIAL_WORKER_ENABLED=true` starts a worker in dev-api that recovers interrupted financial runs.
 
-The dev API, the Discovery worker, and any service with a surface on refuse to start until the schema and version registry are ready. Any other value stops startup.
+Chat, the dev API, analyst grids and the Discovery worker refuse to start until the schema and version registry are ready.
 
 ## Screener universe
 

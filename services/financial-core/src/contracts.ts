@@ -139,7 +139,7 @@ export type FinancialUnit =
   | { kind: "currency" | "currency_per_share"; currency: string }
   | { kind: "shares" | "ratio" | "percent" | "percentage_points" | "basis_points" | "count" };
 
-export type FinancialSubjectRef = { kind: "issuer" | "listing"; id: UUID };
+export type FinancialSubjectRef = { kind: "issuer"; id: UUID };
 
 export type SubjectSlot = {
   slot_id: LocalId;

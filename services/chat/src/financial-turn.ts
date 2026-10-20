@@ -11,7 +11,7 @@ import type {
   ChatTurnRunner,
 } from "./coordinator.ts";
 import { contentHashForText, stableUuid } from "./chat-ids.ts";
-import { firstBlockId, sealedCompletion } from "./messages.ts";
+import { blockHeads, sealedCompletion } from "./messages.ts";
 import type { ChatFinancialRuntime, ChatFinancialTurn, ChatFinancialTurnContext } from "./financial-runtime.ts";
 
 export const FINANCIAL_BUNDLE_ID = "financial_answer";
@@ -46,10 +46,12 @@ async function emitFinancialTurn(
   const { emit } = context;
   if (turn.kind === "published") {
     const { message } = turn;
-    const blockId = (message && firstBlockId(message)) ?? `financial-answer-${turn.message_id}`;
+    const heads = message ? blockHeads(message) : [];
     if (message) emit("snapshot.sealed", { snapshot_id: message.snapshot_id, status: "sealed", verification: { ok: true } });
-    emit("block.began", { block_id: blockId, kind: "financial_answer" });
-    emit("block.completed", { block_id: blockId });
+    for (const head of heads.length > 0 ? heads : [{ id: `financial-answer-${turn.message_id}`, kind: "financial_answer" }]) {
+      emit("block.began", { block_id: head.id, kind: head.kind });
+      emit("block.completed", { block_id: head.id });
+    }
     emit("turn.completed", { ...sealedCompletion(turn, turn.message_id), bundle_id: FINANCIAL_BUNDLE_ID, financial: { run_id: turn.run_id } });
     return;
   }
