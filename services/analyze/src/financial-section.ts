@@ -134,8 +134,8 @@ export function latestYearsByIssuer(context: AnalyzeRunFinancialMetadata): Reado
   const years = new Map<string, number>();
   for (const operation of draft.operations) {
     if (operation.operation !== "reported_metric") continue;
-    const period = operation.period as { kind: string; offset: number };
-    if (period.kind !== "latest") throw new Error(`${operation.node_id}: hydration fetches only the latest fiscal years`);
+    const period = operation.period as { kind: string; period_type?: string; offset: number };
+    if (period.kind !== "latest" || period.period_type !== "annual") throw new Error(`${operation.node_id}: hydration fetches only the latest fiscal years`);
     const issuer = issuerBySlot.get(operation.subject_slot as string)!;
     years.set(issuer, Math.max(years.get(issuer) ?? 0, period.offset + 1));
   }

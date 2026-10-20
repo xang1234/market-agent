@@ -11,9 +11,11 @@ export type SecCompanyFactsHttpOptions = {
   baseUrl?: string;
   fetchImpl?: typeof fetch;
   clock?: () => Date;
-  // Aborts a request, body included, that takes longer. Default 30 seconds.
+  // Aborts a request, body included, that takes longer.
   timeoutMs?: number;
 };
+
+const SEC_FETCH_TIMEOUT_MS = 30_000;
 
 export function createSecCompanyFactsHttpFetcher(
   options: SecCompanyFactsHttpOptions,
@@ -34,7 +36,7 @@ export function createSecCompanyFactsHttpFetcher(
         "accept": "application/json",
         "user-agent": userAgent,
       },
-      signal: AbortSignal.timeout(options.timeoutMs ?? 30_000),
+      signal: AbortSignal.timeout(options.timeoutMs ?? SEC_FETCH_TIMEOUT_MS),
     });
 
     if (!response.ok) {

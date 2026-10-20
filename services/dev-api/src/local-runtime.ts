@@ -249,10 +249,12 @@ export async function hydrateAnalyzeIssuers(
   const results = await Promise.allSettled(issuers.map(([issuerId, years]) =>
     hydrateSecIssuerLatestYears(db, { issuerId, years, fetcher, sourceId: SEC_EDGAR_FILING_SOURCE_ID, logger })));
   for (const [index, result] of results.entries()) {
-    if (result.status === "fulfilled") continue;
-    if (!(result.reason instanceof FundamentalsDataUnavailableError)) throw result.reason;
-    logger.warn("analyze SEC hydration failed; the engine reports the gap", { issuer_id: issuers[index]![0], reason: result.reason.reason, error: result.reason.message });
+    if (result.status === "rejected" && result.reason instanceof FundamentalsDataUnavailableError) {
+      logger.warn("analyze SEC hydration failed; the engine reports the gap", { issuer_id: issuers[index]![0], reason: result.reason.reason, error: result.reason.message });
+    }
   }
+  const failure = results.find((result) => result.status === "rejected" && !(result.reason instanceof FundamentalsDataUnavailableError));
+  if (failure?.status === "rejected") throw failure.reason;
 }
 
 export const analyzeFinancial = {

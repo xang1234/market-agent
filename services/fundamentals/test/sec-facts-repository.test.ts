@@ -505,6 +505,54 @@ test("hydrating an issuer's latest years stores each of them from one download",
   assert.deepEqual(downloads.filter((path) => path.startsWith("/api/xbrl/companyfacts/")), ["/api/xbrl/companyfacts/CIK0000320193.json"]);
 });
 
+test("a prior year SEC cannot extract still lets the latest year be stored, then reports the failure", async () => {
+  const db = new FakeFundamentalsDb();
+  const facts = companyFacts();
+  facts.facts["us-gaap"].CostOfRevenue.units.USD[1]!.start = "2023-01-02";
+  await assert.rejects(
+    hydrateSecIssuerLatestYears(db, {
+      issuerId: ISSUER_ID,
+      years: 2,
+      fetcher: secCompanyFetcher(() => facts),
+      sourceId: SOURCE_ID,
+      clock: () => new Date("2026-05-08T00:00:00.000Z"),
+      logger: { warn() {} },
+    }),
+    (error) => error instanceof FundamentalsDataUnavailableError && /disagrees/u.test(error.message),
+  );
+  assert.deepEqual([...new Set(db.facts.map((fact) => fact.fiscal_year))], [2024]);
+});
+
+test("a year SEC has no statement for is skipped while the others are stored", async () => {
+  const db = new FakeFundamentalsDb();
+  await hydrateSecIssuerLatestYears(db, {
+    issuerId: ISSUER_ID,
+    years: 3,
+    fetcher: secCompanyFetcher(() => companyFacts()),
+    sourceId: SOURCE_ID,
+    clock: () => new Date("2026-05-08T00:00:00.000Z"),
+  });
+  assert.deepEqual([...new Set(db.facts.map((fact) => fact.fiscal_year))].sort(), [2023, 2024]);
+});
+
+test("an income line SEC tagged with a unit its metric cannot take is SEC's failure, not ours", async () => {
+  const db = new FakeFundamentalsDb();
+  const facts = companyFacts();
+  (facts.facts["us-gaap"] as Record<string, unknown>).WeightedAverageNumberOfSharesOutstandingBasic = annualUsd(100, 100);
+  await assert.rejects(
+    hydrateSecIssuer(db, {
+      issuerId: ISSUER_ID,
+      fiscal_year: 2024,
+      fiscal_period: "FY",
+      fetcher: secCompanyFetcher(() => facts),
+      sourceId: SOURCE_ID,
+      logger: { warn() {} },
+    }),
+    (error) => error instanceof FundamentalsDataUnavailableError && /not compatible/u.test(error.message),
+  );
+  assert.deepEqual(db.facts, []);
+});
+
 test("a frozen golden issuer is never repaired from live SEC", async () => {
   const touched: string[] = [];
   const db = { query: async (text: string) => { touched.push(text); return { rows: [] }; }, connect: async () => { throw new Error("no transaction expected"); } };

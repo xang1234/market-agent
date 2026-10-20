@@ -107,8 +107,9 @@ export function createSecBackedStatementRepository(
 
 // Null for a frozen golden issuer, whose illustrative figures live SEC data
 // must not repair; null when the issuer has no usable CIK or SEC has no such
-// statement (a 404, or no us-gaap values for it). A failure of SEC's download or data throws
-// FundamentalsDataUnavailableError; a failure storing it throws as it is.
+// statement (a 404, or no us-gaap values for it). A failure of SEC's download
+// or data throws FundamentalsDataUnavailableError; a failure storing it throws
+// as it is.
 export async function hydrateSecIssuer(
   db: FundamentalsTransactionalQueryExecutor,
   input: {
@@ -127,8 +128,8 @@ export async function hydrateSecIssuer(
 
 // Stores the issuer's annual statements for its latest `years` fiscal years
 // (from the latest year with a 10-K revenue value) from one companyfacts
-// download. A year SEC has no statement for is skipped; failures are thrown as
-// hydrateSecIssuer throws them.
+// download. A year SEC has no statement for is skipped; the years that extract
+// are stored before a failure is thrown as hydrateSecIssuer throws it.
 export async function hydrateSecIssuerLatestYears(
   db: FundamentalsTransactionalQueryExecutor,
   input: {
@@ -158,29 +159,42 @@ async function hydrateSecPeriods(
   const cik = Number(issuer?.cik);
   if (!Number.isInteger(cik) || cik <= 0) return [];
 
-  let filings: ExtractedFiling[];
+  // SEC's failures are held until what did extract is stored, so a bad
+  // year never costs the years beside it.
+  const filings: ExtractedFiling[] = [];
+  let secFailure: { error: unknown; fiscal_year?: number; fiscal_period?: FiscalPeriod } | null = null;
   try {
     const fetched = await fetchCompanyFacts(input.fetcher, cik);
-    filings = periodsOf(fetched.facts).flatMap((period) => {
+    for (const period of periodsOf(fetched.facts)) {
       try {
-        return [extractFiling({ fetched, cik, issuerId: input.issuerId, ...period, fallbackSourceId: input.sourceId, income: "require", logger })];
+        filings.push(extractFiling({ fetched, cik, issuerId: input.issuerId, ...period, fallbackSourceId: input.sourceId, income: "require", logger }));
       } catch (error) {
-        if (isMissingCoverage(error instanceof Error ? error.message : String(error))) return [];
-        throw error;
+        if (!isMissingCoverage(error instanceof Error ? error.message : String(error))) secFailure ??= { error, ...period };
       }
-    });
+    }
   } catch (error) {
-    const unavailable = classifySecIngestionError(error);
-    logger.warn("sec_edgar fundamentals ingestion failed", {
-      issuer_id: input.issuerId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    if (!unavailable) return [];
-    throw unavailable;
+    secFailure = { error };
   }
   const stored: Array<Awaited<ReturnType<typeof storeFiling>>> = [];
-  for (const filing of filings) stored.push(await storeFiling(db, filing, clock));
+  for (const filing of filings) {
+    try {
+      stored.push(await storeFiling(db, filing, clock));
+    } catch (error) {
+      if (!(error instanceof FundamentalsDataUnavailableError)) throw error;
+      secFailure ??= { error, fiscal_year: filing.target.fiscal_year, fiscal_period: filing.target.fiscal_period };
+    }
+  }
   await recordSecFilingAcceptances(db, input.fetcher, { cik, filings: stored.flatMap((entry) => (entry.filing ? [entry.filing] : [])), logger });
+  if (secFailure !== null) {
+    const { error, ...period } = secFailure;
+    logger.warn("sec_edgar fundamentals ingestion failed", {
+      issuer_id: input.issuerId,
+      ...period,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    const unavailable = classifySecIngestionError(error);
+    if (unavailable) throw unavailable;
+  }
   return stored.map((entry) => entry.statement);
 }
 
@@ -200,6 +214,7 @@ export async function backfillSecCompanionStatements(
     logger?: Pick<Console, "warn">;
   },
 ): Promise<{ periods: number }> {
+  if (FROZEN_ISSUER_IDS.has(input.issuerId)) return { periods: 0 };
   const issuer = await loadIssuer(db, input.issuerId);
   const cik = Number(issuer?.cik);
   if (!Number.isInteger(cik) || cik <= 0) return { periods: 0 };
@@ -222,7 +237,7 @@ export async function backfillSecCompanionStatements(
   const fetched = await fetchCompanyFacts(input.fetcher, cik);
   const filings: SecFilingRef[] = [];
   for (const period of rows) {
-    const { filing } = await ingestFiling(db, {
+    const extracted = extractFiling({
       fetched,
       cik,
       issuerId: input.issuerId,
@@ -230,9 +245,9 @@ export async function backfillSecCompanionStatements(
       fiscal_period: period.fiscal_period,
       fallbackSourceId: input.sourceId,
       income: "repair",
-      clock: input.clock ?? (() => new Date()),
       logger: input.logger ?? console,
     });
+    const { filing } = await storeFiling(db, extracted, input.clock ?? (() => new Date()));
     if (filing) filings.push(filing);
   }
   await recordSecFilingAcceptances(db, input.fetcher, { cik, filings, logger: input.logger ?? console });
@@ -265,21 +280,6 @@ type ExtractedFiling = Readonly<{
   companions: ReadonlyArray<Extracted>;
 }>;
 
-// Stores one filing's statements for a fiscal period from a companyfacts
-// download, in one transaction: the income statement, and the same filing's
-// cash flow and balance sheet beside it. Income is "require" (a lookup: it must
-// extract) or "repair" (a backfill: stored income facts that differ from the
-// filing are replaced; a period it cannot extract is left as it is). Returns
-// the income statement, or null without it, and the accession filing it stored
-// facts on. Every period of one download is dated by that download's
-// completion, never by when it was processed.
-async function ingestFiling(
-  db: FundamentalsTransactionalQueryExecutor,
-  input: IngestInput & { clock: () => Date },
-): Promise<{ statement: NormalizedStatement | null; filing: SecFilingRef | null }> {
-  return storeFiling(db, extractFiling(input), input.clock);
-}
-
 // Reads the filing's statements out of the download, without the database.
 // Throws when a required income statement cannot be extracted.
 function extractFiling(input: IngestInput): ExtractedFiling {
@@ -301,6 +301,14 @@ function extractFiling(input: IngestInput): ExtractedFiling {
   return { input, accessionNumber, sourceId, target, income, companions: statementsOf(target, COMPANION_FAMILIES, input.logger) };
 }
 
+// Stores one filing's statements for a fiscal period from a companyfacts
+// download, in one transaction: the income statement, and the same filing's
+// cash flow and balance sheet beside it. Income is "require" (a lookup: it must
+// extract) or "repair" (a backfill: stored income facts that differ from the
+// filing are replaced; a period it cannot extract is left as it is). Returns
+// the income statement, or null without it, and the accession filing it stored
+// facts on. Every period of one download is dated by that download's
+// completion, never by when it was processed.
 async function storeFiling(
   db: FundamentalsTransactionalQueryExecutor,
   { input, accessionNumber, sourceId, target, income, companions }: ExtractedFiling,
@@ -313,7 +321,7 @@ async function storeFiling(
     [...(income ? [income] : []), ...companions].flatMap((entry) => entry.statement.lines.map((line) => line.metric_key)),
   );
   const mapped = [
-    ...(income ? [{ ...income, mapped: mapStatement(registry, income.statement) }] : []),
+    ...(income ? [{ ...income, mapped: mapSecStatement(registry, income.statement) }] : []),
     ...mapCompanions(registry, companions, target, input.logger),
   ];
   if (mapped.length === 0) return { statement: income?.statement ?? null, filing: null };
@@ -356,6 +364,16 @@ async function storeFiling(
     }
   });
   return { statement: income?.statement ?? null, filing: accessionNumber ? { sourceId, accessionNumber } : null };
+}
+
+// A line SEC tagged with a unit its metric cannot take is SEC's data, so its
+// failure is classified like an extraction failure.
+function mapSecStatement(registry: MetricRegistry, statement: NormalizedStatement): MappedStatement {
+  try {
+    return mapStatement(registry, statement);
+  } catch (error) {
+    throw new FundamentalsDataUnavailableError("provider_error", error instanceof Error ? error.message : String(error), false);
+  }
 }
 
 // The stored, active SEC facts for a statement's period that the filing
