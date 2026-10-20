@@ -60,34 +60,32 @@ Chat answers only from facts already stored. Open a company's symbol page once, 
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/media/chat.png" alt="A chat answer with a chart, a comparison table, and citations"></td>
-    <td width="50%"><img src="docs/media/evidence.png" alt="The evidence inspector open on one figure"></td>
+    <td width="50%"><img src="docs/media/chat.png" alt="A chat answer comparing NVDA and AMD, with a linked narrative, a side-by-side table, and a price chart"></td>
+    <td width="50%"><img src="docs/media/evidence.png" alt="The evidence inspector open on NVDA's FY2026 revenue, showing the SEC EDGAR fact behind it"></td>
   </tr>
   <tr>
-    <td><b>Chat with an analyst.</b> Answers arrive as charts, tables, and metric rows with citations. Threads persist.</td>
-    <td><b>Check the numbers.</b> Click a figure to see its source document and how it was computed. Each chart, table, and metric row is labelled verified, source-linked, or not verified.</td>
+    <td><b>Chat with an analyst.</b> Answers arrive as charts, tables, metric rows, and a short narrative. Threads persist.</td>
+    <td><b>Check the numbers.</b> Click a figure to see the fact behind it and open the source filing. Each chart, table, and metric row is labelled verified, source-linked, or not verified.</td>
   </tr>
   <tr>
-    <td><img src="docs/media/symbol.png" alt="A symbol page showing financials"></td>
-    <td><img src="docs/media/screener.png" alt="The screener with filters applied"></td>
+    <td><img src="docs/media/symbol.png" alt="The NVDA symbol page with a one-year chart, key stats, analyst consensus, and price targets"></td>
+    <td><img src="docs/media/screener.png" alt="The screener with sector, revenue growth, forward P/E, and ROIC filters, and a saved screen"></td>
   </tr>
   <tr>
-    <td><b>Research a company.</b> Overview, financials, earnings, holders, and signals on one page.</td>
-    <td><b>Screen the market.</b> Filter by price, volume, margins, P/E, and growth. Save a screen and reuse it as a universe for agents and grids.</td>
+    <td><b>Research a company.</b> Price history, key stats, analyst consensus, and price targets, with financials, earnings, holders, and signals one tab away.</td>
+    <td><b>Screen the market.</b> Filter by sector, growth, valuation, returns, and technicals. Save a screen and reuse it as a universe for agents and grids.</td>
   </tr>
   <tr>
-    <td><img src="docs/media/analyze.png" alt="An Analyze memo"></td>
-    <td><img src="docs/media/agents.png" alt="An agent with assessed thesis conditions"></td>
+    <td><img src="docs/media/agents.png" alt="A thesis agent's assessment: two conditions supported by stored facts, one unresolved"></td>
+    <td><img src="docs/media/home.png" alt="Home with agent findings, market pulse, watchlist movers, and a pinned screen"></td>
   </tr>
   <tr>
-    <td><b>Write a memo.</b> Earnings quality, variant view, peer comparison, or a full investment memo, with the evidence behind it.</td>
-    <td><b>Watch a thesis.</b> Agents check your thesis conditions on a schedule and mark each one supported, challenged, or unresolved.</td>
-  </tr>
-  <tr>
-    <td><img src="docs/media/grids.png" alt="An analyst grid comparing several companies"></td>
-    <td valign="top"><b>Compare companies in a grid.</b> Put companies in rows and metrics or a research question in columns. A question column has the model read each company's documents.<br><br>The <a href="docs/guide.md">user guide</a> covers every page, including Home, watchlists, the review queue, and Settings.</td>
+    <td><b>Watch a thesis.</b> Agents check your thesis conditions on a schedule and mark each one supported, challenged, or unresolved, with a link to the evidence.</td>
+    <td><b>See what changed.</b> Home collects agent findings, market pulse, watchlist movers, and pinned screens.</td>
   </tr>
 </table>
+
+The [user guide](docs/guide.md) covers every page, including Analyze memos, Analyst Grids, watchlists, the review queue, and Settings.
 
 ## How it works
 
