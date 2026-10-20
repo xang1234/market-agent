@@ -7,6 +7,7 @@
 
 <p align="center">
   <a href="https://github.com/xang1234/market-agent/actions/workflows/ci.yml"><img src="https://github.com/xang1234/market-agent/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/TypeScript-3178c6?logo=typescript&logoColor=white" alt="TypeScript">
   <img src="https://img.shields.io/badge/React-19-149eca?logo=react&logoColor=white" alt="React 19">
   <img src="https://img.shields.io/badge/Node-22.19%2B-339933?logo=node.js&logoColor=white" alt="Node 22.19+">
@@ -118,7 +119,6 @@ Set `CHAT_FINANCIAL_MODE=enforce` and questions that name a metric run through t
 - [ ] Comparisons that disclose their basis, peers, and exclusions ([#209](https://github.com/xang1234/market-agent/issues/209)), and checked gap comparisons ([#288](https://github.com/xang1234/market-agent/issues/288))
 - [ ] A wider research-quality eval beyond NVDA, AMD, and AAPL, with a blinded review ([#283](https://github.com/xang1234/market-agent/issues/283), [#222](https://github.com/xang1234/market-agent/issues/222))
 - [ ] Discovery campaigns through their release review ([rollout plan](docs/discovery-campaigns-operations.md))
-- [ ] An open-source license ([#284](https://github.com/xang1234/market-agent/issues/284))
 
 The two epics, [#190](https://github.com/xang1234/market-agent/issues/190) and [#205](https://github.com/xang1234/market-agent/issues/205), track the rest.
 
@@ -129,3 +129,7 @@ Issues and pull requests are welcome. Work is tracked in [GitHub Issues](https:/
 ## Disclaimer
 
 market-agent is a research tool. It is not financial advice and it does not place trades. Check the sources before you act on anything it shows you.
+
+## License
+
+[MIT](LICENSE).
