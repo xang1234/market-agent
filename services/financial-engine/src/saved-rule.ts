@@ -12,11 +12,13 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  DEFAULT_EXECUTION_LIMITS,
   METRIC_CATALOG_V1,
   type Comparison,
   type DecimalInput,
   type FinancialRuntimeAuthority,
   type FinancialUnit,
+  type MetricDefinition,
   type PlanOrigin,
   type PublicationUnitKind,
   type ReportingBasis,
@@ -26,6 +28,7 @@ import type { PersistParentArtifact } from "./finalize.ts";
 import { buildDeterministicPlan } from "./planner.ts";
 import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "./ports.ts";
 import { issuerLabels, publishRequest } from "./request.ts";
+import { bindableAt } from "./select-inputs.ts";
 
 /** The saved shape; thesis conditions and Discovery criteria store exactly this. */
 export type SavedMetricRule = Readonly<{
@@ -87,16 +90,20 @@ type Translation = Readonly<{ ok: true; draft: Draft }> | Readonly<{ ok: false; 
 
 /**
  * Translates a saved rule into a plan draft, exactly as saved. The threshold's
- * currency comes from the subject's facts for the metric that the engine could
- * bind at `asOf`; anything the verified definitions cannot express is unsupported.
+ * currency comes from the subject's evidence that binding could use at the
+ * cutoff; anything the verified definitions cannot express is unsupported.
  */
-export async function translateSavedRule(db: SqlExecutor, subjectId: string, rule: SavedMetricRule, asOf: string): Promise<Translation> {
+export async function translateSavedRule(
+  deps: SavedRuleDeps,
+  request: Pick<SavedRuleRequest, "authority" | "subject" | "rule" | "as_of">,
+): Promise<Translation> {
+  const { rule } = request;
   const definition = METRIC_CATALOG_V1.get(rule.metric_key);
   if (!definition) return { ok: false, reason: "metric_has_no_verified_definition" };
   if (rule.period_kind === "point") return { ok: false, reason: "point_in_time_metric_not_certified" };
   if (rule.period_kind === "ttm" && definition.value_kind !== "flow") return { ok: false, reason: "trailing_sum_needs_a_flow_metric" };
-  const unit = await thresholdUnit(db, subjectId, rule, definition.unit_kind, asOf);
-  if (unit === null) return { ok: false, reason: "unit_does_not_match_definition" };
+  const unit = await thresholdUnit(deps, request, definition);
+  if (typeof unit === "string") return { ok: false, reason: unit };
   return { ok: true, draft: ruleDraft(rule, unit) };
 }
 
@@ -107,7 +114,7 @@ export async function translateSavedRule(db: SqlExecutor, subjectId: string, rul
  */
 export async function evaluateSavedRule(deps: SavedRuleDeps, request: SavedRuleRequest): Promise<SavedRuleOutcome> {
   // Deterministic: a rule that translated once translates the same way again, with or without an earlier run.
-  const translation = await translateSavedRule(deps.pool, request.subject.id, request.rule, request.as_of);
+  const translation = await translateSavedRule(deps, request);
   if (!translation.ok) return unresolved(translation.reason);
   const outcome = await publishRequest(deps.pool, {
     authority: request.authority,
@@ -169,22 +176,33 @@ function ruleDraft(rule: SavedMetricRule, unit: FinancialUnit) {
   };
 }
 
-async function thresholdUnit(db: SqlExecutor, subjectId: string, rule: SavedMetricRule, unitKind: FinancialUnit["kind"], asOf: string): Promise<FinancialUnit | null> {
-  if (unitKind !== "currency" && unitKind !== "currency_per_share") return rule.unit === unitKind ? { kind: unitKind } : null;
+/** The threshold's unit, or the reason it has none. */
+async function thresholdUnit(
+  deps: SavedRuleDeps,
+  request: Pick<SavedRuleRequest, "authority" | "subject" | "rule" | "as_of">,
+  definition: MetricDefinition,
+): Promise<FinancialUnit | string> {
+  const { rule } = request;
+  const unitKind = definition.unit_kind;
+  if (unitKind !== "currency" && unitKind !== "currency_per_share") return rule.unit === unitKind ? { kind: unitKind } : "unit_does_not_match_definition";
   // An ISO code saved as the unit names the currency; a generic currency unit takes the subject's own reporting currency.
   if (/^[A-Z]{3}$/u.test(rule.unit)) return { kind: unitKind, currency: rule.unit };
-  if (rule.unit !== unitKind) return null;
-  // Only facts the evidence adapter could bind decide it: public (its scope is public_information), active, eligible, and visible at the cutoff.
-  const currencies = (await db.query<{ currency: string }>(
-    `select distinct f.currency from facts f join metrics m on m.metric_id = f.metric_id join sources s on s.source_id = f.source_id
-      where f.subject_kind = 'issuer' and f.subject_id = $1::uuid and m.metric_key = $2 and f.currency is not null
-        and s.user_id is null and f.invalidated_at is null and f.value_num is not null
-        and f.method in ('reported', 'extracted', 'restated') and f.verification_status in ('authoritative', 'corroborated')
-        and f.entitlement_channels ? 'app'
-        and f.as_of <= $3::timestamptz and f.observed_at <= $3::timestamptz and (f.reported_at is null or f.reported_at <= $3::timestamptz)`,
-    [subjectId, rule.metric_key, asOf],
-  )).rows;
-  return currencies.length === 1 ? { kind: unitKind, currency: currencies[0]!.currency } : null;
+  if (rule.unit !== unitKind) return "unit_does_not_match_definition";
+  // Read as binding reads a latest period (every fiscal year), and count only what binding could use at the cutoff.
+  const page = await deps.evidence(deps.pool).listInputCandidates({
+    authority: request.authority,
+    subject: request.subject,
+    metric_key: definition.metric_key,
+    fiscal_year: null,
+    fiscal_period: null,
+    limit: DEFAULT_EXECUTION_LIMITS.max_input_candidates,
+  });
+  if (page.status === "error") return page.reason_code;
+  if (page.truncated) return "scope_limit_exceeded";
+  const cutoff = new Date(request.as_of).toISOString();
+  const currencies = new Set(page.candidates.flatMap((candidate) =>
+    candidate.unit !== null && "currency" in candidate.unit && bindableAt(candidate, cutoff) ? [candidate.unit.currency] : []));
+  return currencies.size === 1 ? { kind: unitKind, currency: [...currencies][0]! } : "unit_does_not_match_definition";
 }
 
 /** Reads the committed unit: the predicate's outcome, its result hash, the certificate, and the bound facts. */

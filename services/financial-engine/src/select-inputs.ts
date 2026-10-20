@@ -188,6 +188,12 @@ function inRequestedPeriod(candidate: InputCandidate, selector: PeriodSelector):
   return selector.period_type === "annual" ? candidate.period.fiscal_period === "FY" : candidate.period.fiscal_period !== "FY";
 }
 
+/** Whether binding could use the candidate at the cutoff: public by then, with proven precision, context, and unit, and an exact value. */
+export function bindableAt(candidate: InputCandidate, cutoff: IsoDateTime): boolean {
+  const verdict = eligibility(candidate, cutoff);
+  return "eligible" in verdict && verdict.eligible.numeric !== null;
+}
+
 function eligibility(candidate: InputCandidate, cutoff: IsoDateTime): { eligible: Eligible } | { reason: ReasonCode | null } {
   const publication = earliestPublicProof(candidate, cutoff);
   if (publication === "not_yet_public") return { reason: null };
