@@ -171,7 +171,7 @@ filing's cash flow and balance sheet are extracted from it and stored in the sam
   fact is stored, and the old one is `superseded_by` it, in the filing's transaction. A stored income fact whose metric
   the filing no longer yields for the period is invalidated too when its dates are another period's. A snapshot cut before the repair
   still reads the old fact (`factActiveSql` judges activity at the cutoff). A rerun keeps a matching fact's value, and
-  one with no proven precision gains a `revalidated_against_source` proof. It skips the frozen golden dataset's issuers.
+  one with no proven precision gains a `revalidated_against_source` proof. The CLI skips the frozen golden dataset's issuers.
   Lineage for derived income quarters stored before it existed is not rewritten.
 
 In chat, a single-company question naming cash flow, capex, free cash flow, the balance sheet or one of its items
