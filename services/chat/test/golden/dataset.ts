@@ -339,10 +339,15 @@ export async function seedGoldenProofs(client: Client): Promise<void> {
         where m.metric_id = f.metric_id and m.metric_key = $2
           and f.subject_kind = 'issuer' and f.subject_id = $3::uuid and f.period_kind = $4
           and f.fiscal_year = $5 and f.fiscal_period = $6 and f.value_num = $7::numeric
+          and f.period_start = $10::date and f.period_end = $11::date
+          and f.scale = 1 and f.unit = 'currency' and f.currency = 'USD' and f.method = 'reported'
           and f.as_of = $8::timestamptz and f.observed_at = $8::timestamptz
           and f.source_id in ($1::uuid, $9::uuid)
        returning f.fact_id::text as fact_id`,
-      [GOLDEN_SOURCE_ID, fact.metric_key, fact.issuer_id, fact.period_kind, fact.fiscal_year, fact.fiscal_period, fact.value_usd, GOLDEN_AS_OF, SEC_EDGAR_FILING_SOURCE_ID],
+      [
+        GOLDEN_SOURCE_ID, fact.metric_key, fact.issuer_id, fact.period_kind, fact.fiscal_year, fact.fiscal_period, fact.value_usd,
+        GOLDEN_AS_OF, SEC_EDGAR_FILING_SOURCE_ID, fact.period_start, fact.period_end,
+      ],
     );
     if (rows.length !== 1) throw new GoldenFactMismatchError(`golden dataset: expected one stored fact for ${fact.key}, found ${rows.length}`);
     const locator = `golden_fixture:dataset.ts#${fact.key}`;

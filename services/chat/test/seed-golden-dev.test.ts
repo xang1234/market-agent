@@ -112,6 +112,16 @@ test("a database seeded before the golden source moves its facts there and prove
   assert.deepEqual(await counts(), legacy, "a database whose facts differ is left as it was");
   await editRevenue(-1);
 
+  const setRevenueScale = (scale: number) => client.query(
+    `update facts f set scale = $2 from metrics m
+      where m.metric_id = f.metric_id and m.metric_key = 'revenue' and f.subject_id = $1::uuid and f.fiscal_year = 2026 and f.fiscal_period = 'FY'`,
+    [GOLDEN_COMPANIES[0]!.issuer_id, scale],
+  );
+  await setRevenueScale(1000);
+  await assert.rejects(() => seedGoldenDevDatabase(databaseUrl), /facts differ from the dataset \(golden dataset: expected one stored fact for NVDA\.2026\.FY\.revenue, found 0\)/);
+  assert.deepEqual(await counts(), legacy, "a fact with the dataset's value but another scale is not proven");
+  await setRevenueScale(1);
+
   await client.query(
     `insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at) values ($1::uuid, 'sec_edgar', 'filing', 'primary', 'public', now())`,
     [GOLDEN_SOURCE_ID],
