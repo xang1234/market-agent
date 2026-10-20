@@ -266,6 +266,7 @@ test("SEC ingestion binds source versions and their publication proofs", { timeo
     { issuerId: "33000000-0000-4000-8000-0000000000d1", cik: 320181, accession: "0000320181-24-000010", proof: null },
     { issuerId: "33000000-0000-4000-8000-0000000000d2", cik: 320182, accession: "0000320182-24-000010", proof: "legacy_unverified" },
     { issuerId: "33000000-0000-4000-8000-0000000000d3", cik: 320183, accession: "0000320183-24-000010", proof: null },
+    { issuerId: "33000000-0000-4000-8000-0000000000d4", cik: 320184, accession: "0000320184-24-000010", proof: null },
   ] as const;
   const refetch = (issuerId: string, cik: number, accession: string, facts: () => unknown = () => ({ ...companyFacts(accession), cik })) =>
     backfillSecCompanionStatements(db, {
@@ -278,10 +279,10 @@ test("SEC ingestion binds source versions and their publication proofs", { timeo
     `select precision_class, supersedes is not null as supersedes from fact_precision_attestations where fact_id = $1 order by attested_at`,
     [factId],
   )).rows;
-  const ingestThenStripProofs = async ({ issuerId, cik, accession }: (typeof legacyIssuers)[number]) => {
+  const ingestThenStripProofs = async ({ issuerId, cik, accession }: (typeof legacyIssuers)[number], revenue?: string) => {
     await db.query(`insert into issuers (issuer_id, legal_name, cik) values ($1, 'Legacy Corp', $2)`, [issuerId, String(cik)]);
     await createSecBackedStatementRepository(db, {
-      fetcher: secCompanyFetcher(() => ({ ...companyFacts(accession), cik }), { completed_at: FETCHED_AT }),
+      fetcher: secCompanyFetcher(() => ({ ...companyFacts(accession, revenue), cik }), { completed_at: FETCHED_AT }),
       sourceId: FALLBACK_SOURCE_ID,
       logger: { warn: () => {} },
     }).find({ ...FY2023, issuer_id: issuerId });
@@ -309,19 +310,21 @@ test("SEC ingestion binds source versions and their publication proofs", { timeo
   });
 
   await t.test("a re-fetch replaces a stored income fact that only rounds the token", async () => {
-    const legacy = legacyIssuers[2];
-    const rounded = await ingestThenStripProofs(legacy);
-    const token = "383285000000.123456789012345678";
-    await db.query(`update facts set value_num = $2::numeric where fact_id = $1`, [rounded, String(Number(token))]);
-    await refetch(legacy.issuerId, legacy.cik, legacy.accession);
-    const exact = (await db.query<{ fact_id: string }>(
-      `select fact_id::text from facts where source_id = $1 and invalidated_at is null and value_num = $2::numeric`,
-      [accessionSourceId(legacy.accession), token],
-    )).rows[0]!.fact_id;
-    assert.deepEqual(await precisionChain(exact), [{ precision_class: "source_token_preserved", supersedes: false }]);
-    assert.equal((await db.query(`select superseded_by::text from facts where fact_id = $1`, [rounded])).rows[0].superseded_by, exact);
-    const [publication] = await proofIdFor(legacy.accession);
-    assert.deepEqual(chosen(await selectRevenue(db, legacy.issuerId, REFETCHED_AT)), { fact_id: exact, attestation_id: publication, public_by: REFETCHED_AT });
+    // The second token's rounding expands past the decimal parser's token length.
+    for (const [legacy, token] of [[legacyIssuers[2], "383285000000.123456789012345678"], [legacyIssuers[3], "1.234567890123456789e-250"]] as const) {
+      const rounded = await ingestThenStripProofs(legacy, token);
+      await db.query(`update facts set value_num = $2::numeric where fact_id = $1`, [rounded, String(Number(token))]);
+      await refetch(legacy.issuerId, legacy.cik, legacy.accession, () => ({ ...companyFacts(legacy.accession, token), cik: legacy.cik }));
+      const exact = (await db.query<{ fact_id: string }>(
+        `select fact_id::text from facts where source_id = $1 and invalidated_at is null and value_num = $2::numeric`,
+        [accessionSourceId(legacy.accession), token],
+      )).rows[0]?.fact_id;
+      assert.ok(exact, token);
+      assert.deepEqual(await precisionChain(exact), [{ precision_class: "source_token_preserved", supersedes: false }]);
+      assert.equal((await db.query(`select superseded_by::text from facts where fact_id = $1`, [rounded])).rows[0].superseded_by, exact);
+      const [publication] = await proofIdFor(legacy.accession);
+      assert.deepEqual(chosen(await selectRevenue(db, legacy.issuerId, REFETCHED_AT)), { fact_id: exact, attestation_id: publication, public_by: REFETCHED_AT });
+    }
   });
 
   await t.test("a stored companion fact the filing contradicts gains no proof", async () => {

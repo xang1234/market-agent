@@ -24,7 +24,7 @@ import {
   type SecSourceToken,
 } from "./sec-edgar.ts";
 import { compareExactDecimals, parseFinancialDecimal } from "../../financial-core/src/exact-decimal.ts";
-import { recordFactPrecisionAttestation } from "../../evidence/src/financial-attestations.ts";
+import { checkTokenAgainstStoredValue, recordFactPrecisionAttestation } from "../../evidence/src/financial-attestations.ts";
 import { recordFactFinancialContext } from "../../evidence/src/financial-context.ts";
 import { withPinnedTransaction, type TransactionalQueryExecutor } from "./pinned-transaction.ts";
 import { recordSecFetchPublication, secAccessionVersionHash } from "./sec-publication-proof.ts";
@@ -104,6 +104,8 @@ export function createSecBackedStatementRepository(
   };
 }
 
+// Null when the issuer has no CIK, SEC has no such statement, or ingestion
+// fails for any reason but SEC being unavailable, which throws.
 export async function hydrateSecIssuer(
   db: FundamentalsTransactionalQueryExecutor,
   input: {
@@ -310,8 +312,8 @@ async function ingestFiling(
 // contradicts, their ids by metric_key: a metric the statement has, with another value
 // or dates; or one of its family the statement lacks, dated for another
 // period (the old selector's comparative, with nothing to replace it). A value
-// is compared exactly with its token, since one stored from a JS number may
-// round it.
+// is compared with its token as a precision proof compares them, since one
+// stored from a JS number may round it.
 async function staleStatementFacts(
   db: FundamentalsQueryExecutor,
   issuerId: UUID,
@@ -348,10 +350,10 @@ async function staleStatementFacts(
     const line = statement.lines.find((candidate) => candidate.metric_key === row.metric_key);
     const otherDates = row.period_start !== statement.period_start || row.period_end !== statement.period_end;
     const token = tokens.get(row.metric_key);
-    const otherValue = token && row.stored_value !== null
-      ? sameDecimal(row.stored_value, token.token) === false
+    const otherValue = token
+      ? checkTokenAgainstStoredValue(token.token, row.stored_value).status !== "match"
       : (row.stored_value === null ? null : Number(row.stored_value)) !== line?.value_num;
-    const contradicted = line ? otherDates || otherValue : otherDates;
+    const contradicted = otherDates || (line !== undefined && otherValue);
     if (contradicted) stale.set(row.metric_key, [...(stale.get(row.metric_key) ?? []), row.fact_id]);
   }
   return stale;
@@ -795,8 +797,9 @@ function firstCurrency(lines: ReadonlyArray<StatementLine>): string | null {
 // receive a source_token_preserved precision attestation in the same
 // transaction, so a fact never lands without its proof. Lines without a token
 // (legacy fixtures, derived fourth quarters) keep the legacy number and get no
-// precision proof, so strict financial binding treats them as gaps. Each
-// token's fact, inserted or already stored, gets its financial context when
+// precision proof, so strict financial binding treats them as gaps. A line
+// that conflicts with a stored fact equal to its token, whose precision is
+// unproven, revalidates that fact. Each token's fact, inserted or already stored, gets its financial context when
 // recordSecOriginalContext certifies it.
 async function persistStatementFacts(
   db: FundamentalsQueryExecutor,
@@ -873,6 +876,8 @@ async function persistStatementFacts(
   return insertedIds;
 }
 
+// The caller reads the fact's proof in a later statement, which sees a proof
+// a concurrent ingestion committed while this lock waited.
 async function lockStoredTokenFact(
   db: FundamentalsQueryExecutor,
   statement: MappedStatement,
