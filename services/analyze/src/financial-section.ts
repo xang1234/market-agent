@@ -22,13 +22,11 @@ import type { PersistParentArtifact } from "../../financial-engine/src/finalize.
 import { buildDeterministicPlan, type DeterministicUnits, type PlanningContext, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import type { ParentRecovery } from "../../financial-engine/src/recovery.ts";
-import { issuerLabels, publishRequest, type FinancialMode, type RequestGap } from "../../financial-engine/src/request.ts";
+import { issuerLabels, publishRequest, type RequestGap } from "../../financial-engine/src/request.ts";
 import type { RunRecord } from "../../financial-engine/src/run-record.ts";
 import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier.ts";
 import { ANALYZE_PLAYBOOKS, type AnalyzePlaybook } from "./playbook.ts";
 import { AnalyzeRunMetadataError, parseAnalyzeRunMetadata, type AnalyzeRunFinancialMetadata, type AnalyzeRunMetadataV1 } from "./runMetadata.ts";
-
-export type AnalyzeFinancialMode = FinancialMode;
 
 /** Why a declared section has no committed row: the engine's reason, or what committed state shows. */
 export type AnalyzeFinancialGapReason = RequestGap | "verification_failed" | "not_started";
@@ -105,22 +103,21 @@ export function financialSectionIds(playbook: AnalyzePlaybook): string[] {
   return playbook.sections.map((section) => section.section_id).filter((id) => Object.hasOwn(FINANCIAL_SECTIONS, id));
 }
 
-/** Freezes the memo's financial context, or null when the lane is off or the memo has nothing numerical to compute. */
+/** Freezes the memo's financial context, or null when the memo has nothing numerical to compute. */
 export function prepareAnalyzeFinancialContext(input: {
-  mode: AnalyzeFinancialMode;
   playbook: AnalyzePlaybook;
   primary: Readonly<{ kind: "issuer"; id: string }> | null;
   peers: ReadonlyArray<Readonly<{ kind: "issuer"; id: string }>>;
   knowledge_cutoff: string;
 }): AnalyzeRunFinancialMetadata | null {
-  if (input.mode === "off" || input.primary === null) return null;
+  if (input.primary === null) return null;
   const sections = financialSectionIds(input.playbook);
   if (sections.length === 0) return null;
   const peers = sections.includes("peer_table")
     ? input.peers.filter((peer, index, all) => peer.id !== input.primary!.id && all.findIndex((other) => other.id === peer.id) === index)
     : [];
   return Object.freeze({
-    mode: input.mode,
+    mode: "enforce",
     knowledge_cutoff: new Date(input.knowledge_cutoff).toISOString(),
     reporting_basis: "as_reported",
     catalog_version: CATALOG_VERSION,

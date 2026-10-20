@@ -32,7 +32,6 @@ import {
   loadAnalyzeFinancialSections,
   prepareAnalyzeFinancialContext,
   sectionsServedByEngine,
-  type AnalyzeFinancialMode,
   type AnalyzeFinancialRun,
   type AnalyzeFinancialSections,
 } from "../../analyze/src/financial-section.ts";
@@ -172,7 +171,6 @@ export type AnalyzeServiceDeps = {
 };
 
 export type AnalyzeFinancialComposition = {
-  mode: AnalyzeFinancialMode;
   resolvePeers(primaryIssuerId: string): Promise<ReadonlyArray<{ kind: "issuer"; id: string }>>;
   publish(run: AnalyzeFinancialRun): Promise<AnalyzeFinancialSections>;
 };
@@ -190,7 +188,6 @@ async function newFinancialContext(
   if (!primary) return null;
   const peers = financialSectionIds(playbook).includes("peer_table") ? await lane.resolvePeers(primary.id) : [];
   return prepareAnalyzeFinancialContext({
-    mode: lane.mode,
     playbook,
     primary: { kind: "issuer", id: primary.id },
     peers,

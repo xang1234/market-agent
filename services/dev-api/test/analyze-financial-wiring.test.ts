@@ -69,7 +69,6 @@ test("a memo run declares its frozen financial context and publishes it against 
       return { blocks: input.memoBlocks, sealSnapshot: async () => okSeal(input.snapshotId) };
     },
     analyzeFinancial: {
-      mode: "enforce",
       resolvePeers: async () => {
         throw new Error("earnings quality compares no peers");
       },

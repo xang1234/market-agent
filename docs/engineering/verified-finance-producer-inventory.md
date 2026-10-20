@@ -175,7 +175,7 @@ foundations are in place:
   | Surface | Flag | What is certified | Parent write in finalization |
   |---|---|---|---|
   | Chat | `CHAT_FINANCIAL_MODE` | Model-planned requests over resolved subjects | Assistant message |
-  | Analyze | `ANALYZE_FINANCIAL_MODE` | One deterministic plan per memo, one unit per numerical section | `analyze_run_financial_sections` row (0049) |
+  | Analyze | None: always on | One deterministic plan per memo, one unit per numerical section | `analyze_run_financial_sections` row (0049) |
   | Grids | None: always enforced | One plan per run, one unit per numerical cell | Cell write and progress count (0050) |
   | Thesis | None: always enforced | One plan per saved metric condition | Current-version check under the agent lock |
   | Discovery | None: always enforced (`createWorkerDeps`) | One plan per candidate × approved criterion | Campaign-fence check (live lease, running, same brief, candidate researching) |

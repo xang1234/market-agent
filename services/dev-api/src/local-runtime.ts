@@ -37,7 +37,6 @@ import { mergeSealInputs } from "../../analyze/src/seal-input-merge.ts";
 import { runDeterministicSections } from "../../analyze/src/section-runner.ts";
 import type { AnalyzePlaybook } from "../../analyze/src/playbook.ts";
 import { publishAnalyzeFinancialSections } from "../../analyze/src/financial-section.ts";
-import { loadFinancialModes } from "./financial-env.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { createSqlPeerSetResolver } from "../../fundamentals/src/peer-set-resolver.ts";
 import {
@@ -259,18 +258,13 @@ export async function buildAnalyzeRunSeals(input: {
 
 const ANALYZE_FINANCIAL_PEER_LIMIT = 5;
 
-const financialModes = loadFinancialModes(process.env);
-
-export const analyzeFinancial = financialModes.analyze === "off"
-  ? undefined
-  : {
-      mode: financialModes.analyze,
-      resolvePeers: async (primaryIssuerId: string) =>
-        (await createSqlPeerSetResolver(pool()).resolvePeers(primaryIssuerId, { limit: ANALYZE_FINANCIAL_PEER_LIMIT }))
-          .map((peer) => ({ kind: "issuer" as const, id: peer.id })),
-      publish: (run: Parameters<typeof publishAnalyzeFinancialSections>[1]) =>
-        publishAnalyzeFinancialSections({ pool: pool(), evidence: createEvidenceFinancialPort }, run),
-    };
+export const analyzeFinancial = {
+  resolvePeers: async (primaryIssuerId: string) =>
+    (await createSqlPeerSetResolver(pool()).resolvePeers(primaryIssuerId, { limit: ANALYZE_FINANCIAL_PEER_LIMIT }))
+      .map((peer) => ({ kind: "issuer" as const, id: peer.id })),
+  publish: (run: Parameters<typeof publishAnalyzeFinancialSections>[1]) =>
+    publishAnalyzeFinancialSections({ pool: pool(), evidence: createEvidenceFinancialPort }, run),
+};
 
 export async function inspectEvidence(
   input: Parameters<NonNullable<DevApiServiceAdapterDeps["inspectEvidence"]>>[0],

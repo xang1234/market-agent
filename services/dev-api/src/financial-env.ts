@@ -1,23 +1,15 @@
-import { parseFinancialMode, type FinancialMode } from "../../financial-engine/src/request.ts";
-
 export type FinancialEnv = {
-  ANALYZE_FINANCIAL_MODE?: string;
   FINANCIAL_WORKER_ENABLED?: string;
 };
 
 export type FinancialModes = Readonly<{
-  analyze: FinancialMode;
   /** The supervised recovery worker, which writes certificates too. */
   worker: boolean;
 }>;
 
-/** What must be ready before this process starts: analyze when not off, thesis (always on the engine), and the worker. */
+/** What must be ready before this process starts: analyze and thesis (always on the engine), and the worker. */
 export function activeFinancialSurfaces(modes: FinancialModes): string[] {
-  return [
-    ...(modes.analyze === "off" ? [] : ["analyze"]),
-    "thesis",
-    ...(modes.worker ? ["worker"] : []),
-  ];
+  return ["analyze", "thesis", ...(modes.worker ? ["worker"] : [])];
 }
 
 function financialWorkerEnabled(env: Pick<FinancialEnv, "FINANCIAL_WORKER_ENABLED">): boolean {
@@ -28,8 +20,5 @@ function financialWorkerEnabled(env: Pick<FinancialEnv, "FINANCIAL_WORKER_ENABLE
 }
 
 export function loadFinancialModes(env: FinancialEnv): FinancialModes {
-  return Object.freeze({
-    analyze: parseFinancialMode(env.ANALYZE_FINANCIAL_MODE, "ANALYZE_FINANCIAL_MODE"),
-    worker: financialWorkerEnabled(env),
-  });
+  return Object.freeze({ worker: financialWorkerEnabled(env) });
 }

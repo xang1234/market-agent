@@ -37,10 +37,9 @@ test("numerical sections are chosen per playbook; narrative sections stay with t
 test("the financial context freezes cutoff, basis, catalog, and the exact peers requested", () => {
   const base = { playbook: playbook("peer_comparison"), primary: { kind: "issuer" as const, id: IDS.issuerA }, knowledge_cutoff: "2024-03-01T05:00:00+05:00" };
   const peers = [IDS.issuerB, IDS.issuerA, IDS.issuerB].map((id) => ({ kind: "issuer" as const, id }));
-  assert.equal(prepareAnalyzeFinancialContext({ ...base, mode: "off", peers }), null, "the lane is off");
-  assert.equal(prepareAnalyzeFinancialContext({ ...base, mode: "enforce", primary: null, peers }), null, "no issuer to compute for");
-  assert.equal(prepareAnalyzeFinancialContext({ ...base, mode: "enforce", playbook: playbook("variant_view"), peers }), null, "nothing numerical");
-  const context = prepareAnalyzeFinancialContext({ ...base, mode: "enforce", peers })!;
+  assert.equal(prepareAnalyzeFinancialContext({ ...base, primary: null, peers }), null, "no issuer to compute for");
+  assert.equal(prepareAnalyzeFinancialContext({ ...base, playbook: playbook("variant_view"), peers }), null, "nothing numerical");
+  const context = prepareAnalyzeFinancialContext({ ...base, peers })!;
   assert.deepEqual(context, {
     mode: "enforce",
     knowledge_cutoff: "2024-03-01T00:00:00.000Z",
@@ -50,13 +49,13 @@ test("the financial context freezes cutoff, basis, catalog, and the exact peers 
     requested_peers: [{ kind: "issuer", id: IDS.issuerB }],
     sections: ["peer_table"],
   });
-  const withoutPeerTable = prepareAnalyzeFinancialContext({ ...base, mode: "enforce", playbook: playbook("earnings_quality"), peers })!;
+  const withoutPeerTable = prepareAnalyzeFinancialContext({ ...base, playbook: playbook("earnings_quality"), peers })!;
   assert.deepEqual(withoutPeerTable.requested_peers, [], "peers are requested only by a section that compares them");
 });
 
 test("sections the engine serves never run their legacy producers", async () => {
   const context = prepareAnalyzeFinancialContext({
-    mode: "enforce", playbook: playbook("peer_comparison"), primary: { kind: "issuer", id: IDS.issuerA }, peers: [], knowledge_cutoff: CUTOFF,
+    playbook: playbook("peer_comparison"), primary: { kind: "issuer", id: IDS.issuerA }, peers: [], knowledge_cutoff: CUTOFF,
   });
   const untouchable = new Proxy({}, { get: () => { throw new Error("a legacy producer ran for an engine-served section"); } });
   const seals = await runDeterministicSections(untouchable as never, {

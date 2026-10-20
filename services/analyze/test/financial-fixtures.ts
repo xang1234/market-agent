@@ -12,7 +12,6 @@ import type { SnapshotSealResult } from "../../snapshot/src/snapshot-sealer.ts";
 import {
   prepareAnalyzeFinancialContext,
   publishAnalyzeFinancialSections,
-  type AnalyzeFinancialMode,
 } from "../src/financial-section.ts";
 import { ANALYZE_PLAYBOOKS, type AnalyzePlaybook } from "../src/playbook.ts";
 import { serializeAnalyzeRunMetadataV1, type AnalyzeRunFinancialMetadata } from "../src/runMetadata.ts";
@@ -42,11 +41,10 @@ export async function memoDatabase(t: TestContext, prefix: string): Promise<{ db
 export async function createMemoRun(
   db: Client,
   pool: Pool,
-  input: { templateId: string; playbookId: string; peers?: string[]; mode?: AnalyzeFinancialMode; cutoff?: string; context?: AnalyzeRunFinancialMetadata },
+  input: { templateId: string; playbookId: string; peers?: string[]; cutoff?: string; context?: AnalyzeRunFinancialMetadata },
 ) {
   const book = playbook(input.playbookId);
   const context = input.context ?? prepareAnalyzeFinancialContext({
-    mode: input.mode ?? "enforce",
     playbook: book,
     primary: { kind: "issuer", id: IDS.issuerA },
     peers: (input.peers ?? []).map((id) => ({ kind: "issuer" as const, id })),
