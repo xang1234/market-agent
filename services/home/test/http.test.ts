@@ -48,6 +48,15 @@ async function startServer(options: Parameters<typeof createHomeServer>[2] = {})
   };
 }
 
+test("an unrecognized MA_AUTH_MODE fails when the home server is built", () => {
+  assert.throws(
+    () => createHomeServer(fakeDb(), { quoteProvider: emptyQuoteProvider(), listSavedScreens: emptySavedScreens, pulseSubjects: [] }, {
+      auth: { env: { MA_AUTH_MODE: "prod" } },
+    }),
+    /unrecognized MA_AUTH_MODE 'prod'/,
+  );
+});
+
 test("GET /v1/home/summary requires the x-user-id header", async () => {
   const { port, close } = await startServer();
   try {

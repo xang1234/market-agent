@@ -4,6 +4,7 @@ import { isUuidV4 } from "../../market/src/validators.ts";
 import {
   authenticatedUserRequiredMessage,
   readAuthenticatedUserId,
+  resolveAuthMode,
   type RequestAuthConfig,
 } from "../../shared/src/request-auth.ts";
 
@@ -20,6 +21,7 @@ export function createHomeServer(
   deps: HomeSectionsDeps,
   options: { auth?: RequestAuthConfig } = {},
 ): Server {
+  const auth: RequestAuthConfig = { ...options.auth, mode: resolveAuthMode(options.auth) };
   return createServer(async (req, res) => {
     try {
       const route = matchRoute(req.method ?? "GET", req.url ?? "/");
@@ -33,9 +35,9 @@ export function createHomeServer(
         return;
       }
 
-      const userId = readAuthenticatedUserId(req, options.auth);
+      const userId = readAuthenticatedUserId(req, auth);
       if (userId === null || !isUuidV4(userId)) {
-        respondJson(res, 401, { error: authenticatedUserRequiredMessage(options.auth) });
+        respondJson(res, 401, { error: authenticatedUserRequiredMessage(auth) });
         return;
       }
 
