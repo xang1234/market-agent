@@ -323,7 +323,7 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
   if (!drafted.ok) return { ok: false, kind: "invalid", issues: drafted.issues };
   const validated = validateFinancialPlan({ ...plan, outputs: withFreeCashFlowInputs(drafted.value) });
   if (!validated.ok) return { ok: false, kind: "invalid", issues: validated.issues };
-  const authorized = authorizePlan(validated.value, context.authority, context.parent_limits);
+  const authorized = authorizePlan(validated.value, context.parent_limits);
   if (!authorized.ok) {
     return { ok: false, kind: "unsupported", reason: authorized.issues.map((issue) => issue.code).join(", "), issues: authorized.issues };
   }

@@ -46,7 +46,7 @@ export async function executeRun(input: ExecuteRunInput): Promise<ExecutionRepor
   const { client, lease, plan } = input;
   // Limits are enforced before any evidence is acquired. Evidence reads run
   // sequentially on the run's pinned client: one evidence task in flight.
-  const authorized = authorizePlan(plan, input.authority, input.parent_limits);
+  const authorized = authorizePlan(plan, input.parent_limits);
   if (!authorized.ok) return fail(client, lease, authorized.reason_code);
   try {
     const { bindings } = await bindPlanInputs(input);

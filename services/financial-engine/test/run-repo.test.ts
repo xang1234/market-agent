@@ -70,7 +70,7 @@ test("financial run reservation", { timeout: 240_000 }, async (t) => {
   });
 
   await t.test("the run persists the server-selected mode and cutoff", async () => {
-    const enforce = authorityFor(IDS.owner, { mode: "enforce" });
+    const enforce = authorityFor(IDS.owner);
     const result = await reserveRun(db, { authority: enforce, request_key: "turn-mode", plan: revenuePlan() });
     assert.ok(result.status === "created");
     if (result.status !== "created") return;
