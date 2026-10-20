@@ -138,7 +138,7 @@ export function createSecBackedStatementRepository(
 // fetched again, so this is how they gain the families ingested since, and how
 // facts the old period selector got wrong (a 10-K's oldest comparative, a
 // framed prior-year quarter) are replaced. Rerunning is safe: a stored fact that
-// matches the filing is left as it is.
+// matches the filing keeps its value and gains only the proofs it lacks.
 export async function backfillSecCompanionStatements(
   db: FundamentalsTransactionalQueryExecutor,
   input: {
@@ -770,8 +770,9 @@ function firstCurrency(lines: ReadonlyArray<StatementLine>): string | null {
 // transaction, so a fact never lands without its proof. Lines without a token
 // (legacy fixtures, derived fourth quarters) keep the legacy number and get no
 // precision proof, so strict financial binding treats them as gaps. A line
-// that conflicts was written by another ingestion, which recorded its own
-// proof atomically; older legacy facts are proven only by the backfill. Each
+// that conflicts was stored earlier: when that fact equals the token and has
+// no proven precision (stored before ingestion recorded proofs), it is
+// revalidated against the token; a fact that differs gains nothing. Each
 // token's fact, inserted or already stored, gets its financial context when
 // recordSecOriginalContext certifies it.
 async function persistStatementFacts(
@@ -829,25 +830,64 @@ async function persistStatementFacts(
       ],
     );
     const factId = inserted.rows[0]?.fact_id;
-    if (!token) {
-      if (factId) insertedIds.set(line.metric_key, factId);
-      continue;
-    }
+    if (factId) insertedIds.set(line.metric_key, factId);
+    if (!token) continue;
+    const storedId = factId ?? await lockStoredTokenFact(db, statement, line, token);
+    if (!storedId) continue;
     const locator = `sec_edgar:companyfacts:CIK${String(provenance.cik).padStart(10, "0")}#${token.concept}|${token.unit}|${token.accn}|${token.start ?? ""}..${token.end}`;
-    if (factId) {
+    if (factId || !(await hasProvenPrecision(db, storedId))) {
       await recordFactPrecisionAttestation(db, {
-        fact_id: factId,
-        precision_class: "source_token_preserved",
+        fact_id: storedId,
+        precision_class: factId ? "source_token_preserved" : "revalidated_against_source",
         raw_token: token.token,
         token_proof_hash: secTokenProofHash(provenance.cik, token),
         source_locator: locator,
         validation_method: "sec_companyfacts_lossless_json.v1",
       });
-      insertedIds.set(line.metric_key, factId);
     }
-    await recordSecOriginalContext(db, statement, line, token, locator);
+    await recordSecOriginalContext(db, storedId, line, token, locator);
   }
   return insertedIds;
+}
+
+// The active fact an earlier ingestion stored for the line on this filing's
+// source, when its value and dates equal the token's. It is locked, so two
+// ingestions of one filing prove it once.
+async function lockStoredTokenFact(
+  db: FundamentalsQueryExecutor,
+  statement: MappedStatement,
+  line: MappedStatement["lines"][number],
+  token: SecSourceToken,
+): Promise<string | null> {
+  const { rows } = await db.query<{ fact_id: string }>(
+    `select f.fact_id::text as fact_id
+       from facts f
+      where f.subject_kind = 'issuer' and f.subject_id = $1 and f.metric_id = $2 and f.period_kind = $3
+        and f.fiscal_year = $4 and f.fiscal_period = $5 and f.source_id = $6 and f.method = 'reported'
+        and ${factActiveSql("f")}
+        and f.period_start is not distinct from $7::date and f.period_end = $8::date and f.value_num = $9::numeric
+      for update`,
+    [
+      statement.subject.id,
+      line.metric_id,
+      statement.period_kind,
+      statement.fiscal_year,
+      statement.fiscal_period,
+      statement.source_id,
+      statement.period_start,
+      statement.period_end,
+      token.token,
+    ],
+  );
+  return rows[0]?.fact_id ?? null;
+}
+
+async function hasProvenPrecision(db: FundamentalsQueryExecutor, factId: string): Promise<boolean> {
+  const { rows } = await db.query(
+    `select 1 from current_fact_precision_attestations where fact_id = $1 and precision_class <> 'legacy_unverified'`,
+    [factId],
+  );
+  return rows.length > 0;
 }
 
 // A split before a filing is issued restates its per-share values and share
@@ -876,13 +916,11 @@ const SEC_CERTIFIED_CONCEPTS: Readonly<Record<string, string>> = {
 // Selection takes every token from the filing whose own period it is, never
 // from a later filing's comparative, so the stored fact is that filing's
 // original disclosure. Companyfacts carries only undimensioned values, which
-// are consolidated. The active fact the line stored (here or by an earlier
-// ingestion) is locked before its context is checked, so two ingestions of
-// one filing record it once; a stored fact whose value or dates differ from
-// the token gets none.
+// are consolidated. The fact is the token's own, inserted here or locked by
+// lockStoredTokenFact, so two ingestions of one filing record it once.
 async function recordSecOriginalContext(
   db: FundamentalsQueryExecutor,
-  statement: MappedStatement,
+  factId: string,
   line: MappedStatement["lines"][number],
   token: SecSourceToken,
   locator: string,
@@ -893,28 +931,6 @@ async function recordSecOriginalContext(
   if (token.start === null && token.form !== "10-K") return;
   const certifiedConcept = SEC_CERTIFIED_CONCEPTS[line.metric_key];
   if (certifiedConcept !== undefined && token.concept !== certifiedConcept) return;
-  const { rows } = await db.query<{ fact_id: string }>(
-    `select f.fact_id::text as fact_id
-       from facts f
-      where f.subject_kind = 'issuer' and f.subject_id = $1 and f.metric_id = $2 and f.period_kind = $3
-        and f.fiscal_year = $4 and f.fiscal_period = $5 and f.source_id = $6 and f.method = 'reported'
-        and ${factActiveSql("f")}
-        and f.period_start is not distinct from $7::date and f.period_end = $8::date and f.value_num = $9::numeric
-      for update`,
-    [
-      statement.subject.id,
-      line.metric_id,
-      statement.period_kind,
-      statement.fiscal_year,
-      statement.fiscal_period,
-      statement.source_id,
-      statement.period_start,
-      statement.period_end,
-      token.token,
-    ],
-  );
-  const factId = rows[0]?.fact_id;
-  if (!factId) return;
   const existing = await db.query(`select 1 from fact_financial_contexts where fact_id = $1`, [factId]);
   if (existing.rows.length > 0) return;
   await recordFactFinancialContext(db, {
