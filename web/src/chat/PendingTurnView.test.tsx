@@ -1,13 +1,20 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { JSDOM } from 'jsdom'
+import { act } from 'react'
+import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 
+import { installDomGlobals } from '../analyst-grids/testDom.ts'
 import { BlockRegistryProvider, createDefaultBlockRegistry } from '../blocks/index.ts'
+import { EvidenceInspectorProvider } from '../evidence/EvidenceInspectorProvider.tsx'
+import { AuthContext } from '../shell/authTypes.ts'
+import type { ChatSseEvent } from './sseEventTypes.ts'
 import type { RunOrigin, StreamLink, TurnIds } from './chatSession.ts'
 import { AssistantBlocks } from './MessageItem.tsx'
 import { PendingTurnView } from './PendingTurnView.tsx'
-import type { StreamState } from './streamReducer.ts'
+import { INITIAL_STREAM_STATE, applyChatStreamEvent, type StreamState } from './streamReducer.ts'
 
 const TURN: TurnIds = { runId: 'run-1', messageId: 'u1', snapshotId: 'snap-1', text: 'Analyze NVDA' }
 const RUN = { runId: 'run-1', turnId: 'u1' }
@@ -206,5 +213,48 @@ test('a sealed answer shown while the judge reads its inferences renders as the 
     assert.match(html, /Source-linked narrative/)
     assert.match(html, /Checking an analyst inference against the figures it rests on/)
     assert.doesNotMatch(html, /Agent plan/)
+  }
+})
+
+test('a figure clicked while its answer streams asks the inspector for it in the sealed snapshot', async () => {
+  const sealedId = '72fe1508-c2ab-4176-83d7-6ffe178f7a8b'
+  const ids = { thread_id: 'thread-1', run_id: RUN.runId, turn_id: RUN.turnId }
+  const events: ChatSseEvent[] = [
+    { ...ids, type: 'turn.started', seq: 1 },
+    { ...ids, type: 'snapshot.sealed', seq: 2, snapshot_id: sealedId },
+    { ...ids, type: 'block.began', seq: 3, block_id: 'b1', kind: 'rich_text' },
+    { ...ids, type: 'block.delta', seq: 4, block_id: 'b1', delta: { segment: { type: 'text', text: 'Revenue was ' } } },
+    { ...ids, type: 'block.delta', seq: 5, block_id: 'b1', delta: { segment: { type: 'ref', ref_kind: 'fact', ref_id: 'f-1', format: '$62.1B' } } },
+  ]
+  const stream = events.reduce(applyChatStreamEvent, INITIAL_STREAM_STATE)
+
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restoreGlobals = installDomGlobals(dom.window as unknown as Window)
+  const originalFetch = globalThis.fetch
+  const bodies: unknown[] = []
+  try {
+    globalThis.fetch = async (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return new Response('{}', { status: 404, headers: { 'content-type': 'application/json' } })
+    }
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(
+        <AuthContext.Provider value={{ session: { userId: '00000000-0000-4000-8000-000000000001', displayName: 'Mock User' }, signIn: noop, signOut: noop }}>
+          <EvidenceInspectorProvider>
+            <PendingTurnView turn={{ phase: 'streaming', run: RUN, origin: OWN, stream, link: LINK }} {...handlers} />
+          </EvidenceInspectorProvider>
+        </AuthContext.Provider>,
+      )
+    })
+    await act(async () => {
+      dom.window.document.querySelector('button[data-inspection-kind="fact"]')!.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    })
+
+    assert.deepEqual(bodies, [{ snapshot_id: sealedId, ref: { kind: 'fact', id: 'f-1' } }])
+    await act(async () => root.unmount())
+  } finally {
+    globalThis.fetch = originalFetch
+    restoreGlobals()
   }
 })

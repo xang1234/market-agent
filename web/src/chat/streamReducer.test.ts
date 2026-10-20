@@ -432,6 +432,20 @@ test('tool and snapshot events update the streamed agent plan from real SSE payl
   assert.equal(state.plan_steps.find((step) => step.step_id === 'composer')?.status, 'done')
 })
 
+test('the sealed snapshot id outlives the deltas that follow it, and the next turn starts without one', () => {
+  let state: StreamState = applyChatStreamEvent(INITIAL_STREAM_STATE, event('turn.started', 1))
+  state = applyChatStreamEvent(state, event('snapshot.sealed', 2, { snapshot_id: '72fe1508-c2ab-4176-83d7-6ffe178f7a8b' }))
+  state = applyChatStreamEvent(state, event('block.began', 3, { block_id: 'b1', kind: 'rich_text' }))
+  state = applyChatStreamEvent(state, event('block.delta', 4, {
+    block_id: 'b1',
+    delta: { segment: { type: 'ref', ref_kind: 'fact', ref_id: 'f-1', format: '$62.1B' } },
+  }))
+  assert.equal(state.snapshot_id, '72fe1508-c2ab-4176-83d7-6ffe178f7a8b')
+
+  state = applyChatStreamEvent(state, event('turn.started', 5))
+  assert.equal(state.snapshot_id, null)
+})
+
 test('multi-block sequence preserves block_order and per-block segments through to block.completed', () => {
   let state: StreamState = INITIAL_STREAM_STATE
   state = applyChatStreamEvent(state, event('turn.started', 1))
