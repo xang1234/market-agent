@@ -227,8 +227,12 @@ foundations are in place:
 
 Known gap: since #199 (2026-10-16), SEC ingestion records a controlled-fetch
 publication proof, which shows a filing was public when the fetch completed.
-Facts stored before that, and the golden dataset, carry no proof and bind as
-`publication_time_unknown`. A cutoff earlier than the fetch needs an archive
+Facts stored before that carry no proof and bind as
+`publication_time_unknown`. The golden dataset's facts sit on their own
+`golden_fixture` source with a `fixture_declaration` publication proof, a
+precision proof and a context each, so they certify at the golden cutoff; a
+database trigger refuses that proof method on any other source (migration
+0063). A cutoff earlier than the fetch needs an archive
 proof, which no producer makes yet. Such units cannot be certified; with a lane
 enforced, those values appear as declared gaps rather than numbers.
 
