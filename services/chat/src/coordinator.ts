@@ -995,6 +995,11 @@ export type TurnSubjects = {
 // naming a new company after a comparison ("what about AAPL?") could mean
 // either, so it asks; "just AAPL" or a full new question switches to it.
 const ADD = /\b(?:add|adding|bring (?:back|in))\b/i;
+
+// A turn that compares companies or adds one, so the previous answer's are carried.
+export function comparativeTurn(text: string): boolean {
+  return COMPARATIVE.test(text) || ADD.test(text);
+}
 // Where a list of companies to remove ends: at the end of the sentence, or
 // where the next request starts ("drop AMD and AAPL, and add TSLA"). Commas and
 // "and" inside the list are part of it.
@@ -1020,7 +1025,7 @@ export async function resolveTurnSubjects(
   loadPriorSubjects: ChatPriorSubjectsLoader | undefined,
 ): Promise<TurnSubjects> {
   const text = nonEmptySubjectText(context.userIntent);
-  const comparative = COMPARATIVE.test(text ?? "") || ADD.test(text ?? "");
+  const comparative = comparativeTurn(text ?? "");
   const named = text ? await resolveNamedSubjects(text, preResolve) : { resolved: [], unresolved: [] };
   // A removal is handled even when what it names does not resolve ("drop XYZQ").
   const change = text && loadPriorSubjects !== undefined && (named.resolved.length > 0 || new RegExp(REMOVE.source).test(text))

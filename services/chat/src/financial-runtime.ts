@@ -41,7 +41,7 @@ import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../fi
 import { requireFinancialReadiness } from "../../financial-engine/src/readiness.ts";
 import { publishRequest, type RequestGap } from "../../financial-engine/src/request.ts";
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
-import { labelList, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
+import { comparativeTurn, labelList, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId } from "./chat-ids.ts";
 import { noteBlock } from "./fact-blocks.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
@@ -204,8 +204,17 @@ async function requestedSubjects(deps: ChatFinancialRuntimeDeps, context: ChatFi
   const mentioned = await Promise.all(requestedMentions(context, text).map(async (mention) => ({ mention, resolution: await deps.resolveMention(mention) })));
   let entries: ReadonlyArray<Readonly<{ mention: string; resolution: ChatSubjectPreResolution }>> = mentioned;
   let turn: TurnSubjects | null = null;
-  // An ambiguous company is asked about beside every company named, so the answer covers them all.
-  if (!context.subjectText?.trim() && !mentioned.some(({ resolution }) => resolution.status === "needs_clarification")) {
+  let carried: ReadonlyArray<ChatResolvedSubjectPreResolution> = [];
+  const explicit = Boolean(context.subjectText?.trim());
+  if (!explicit && mentioned.some(({ resolution }) => resolution.status === "needs_clarification")) {
+    // An ambiguous company is asked about beside every company named, and in a
+    // comparison beside the previous answer's, so the answer covers them all.
+    const namedKeys = new Set(mentioned.flatMap(({ resolution }) => resolution.status === "resolved" ? [companyKey(resolution)] : []));
+    const prior = comparativeTurn(text) ? await deps.priorSubjects?.(context.threadId) ?? [] : [];
+    carried = prior.filter((resolution, index) =>
+      !namedKeys.has(companyKey(resolution)) && prior.findIndex((other) => companyKey(other) === companyKey(resolution)) === index);
+    entries = [...carried.map((resolution) => ({ mention: label(resolution), resolution })), ...mentioned];
+  } else if (!explicit) {
     turn = await resolveTurnSubjects(
       context,
       (request) => deps.resolveMention(request.text),
@@ -222,7 +231,7 @@ async function requestedSubjects(deps: ChatFinancialRuntimeDeps, context: ChatFi
     // One entry per company: "NVIDIA" (the page) and "NVDA" (the message) are one.
     subjects: distinctRequested(requested),
     resolved: entries.flatMap(({ resolution }) => resolution.status === "resolved" ? [resolution] : []),
-    carried: (turn?.carried ?? []).map(label),
+    carried: (turn?.carried ?? carried).map(label),
     notFound: turn?.notFound ?? [],
   };
 }

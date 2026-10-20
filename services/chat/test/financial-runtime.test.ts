@@ -120,6 +120,26 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(await answer("Compare AAA and BBB revenue again", ["AAA", "BBB"]), { companies: ["Alpha Industries Inc.", "Beta Holdings Corp."], notes: [] }, "a company the question names is not carried");
     assert.deepEqual(await answer("Add BBB's revenue", ["AAA", "BBB"]), { companies: ["Alpha Industries Inc.", "Beta Holdings Corp."], notes: ["AAA is carried from the previous answer."] });
     assert.deepEqual(await answer("Drop BBB and show revenue", ["AAA"], [aaa, bbb]), { companies: ["Alpha Industries Inc."], notes: ["AAA is carried from the previous answer."] });
+    // A comparison naming an ambiguous company asks about it and still carries the previous answer's.
+    const compareAmbiguous = (clarificationAnswer?: { clarification_id: string; choice_id: string }) =>
+      chatHarness(pool, { model: revenueModel(["AAA", "AMBL"]), priorSubjects: async () => [aaa] })
+        .run({ ...base, userIntent: "Compare its revenue with AMBL", ...(clarificationAnswer ? { clarificationAnswer } : {}) });
+    const asked = completed((await compareAmbiguous()).events).financial_clarification as { clarification_id: string; choices: Array<{ choice_id: string; label: string }> };
+    const beta = asked.choices.find((choice) => choice.label === "Beta Holdings Corp.")!;
+    const picked = completed((await compareAmbiguous({ clarification_id: asked.clarification_id, choice_id: beta.choice_id })).events);
+    const [pickedBlock, ...pickedNotes] = (await db.query(`select blocks from chat_messages where message_id = $1`, [picked.message_id])).rows[0].blocks;
+    assert.deepEqual(
+      [Object.values(pickedBlock.financial.labels as Record<string, { kind: string; text: string }>).filter((label) => label.kind === "subject").map((label) => label.text), pickedNotes.map((note: { segments: Array<{ text: string }> }) => note.segments[0]!.text)],
+      [["Alpha Industries Inc.", "Beta Holdings Corp."], ["AAA is carried from the previous answer."]],
+    );
+    // Two listings of one company need no question, and the previous answer's company is still carried.
+    await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1::uuid, $2::uuid, 'common_stock') on conflict do nothing`, [INSTRUMENT_A, IDS.issuerA]);
+    await db.query(
+      `insert into listings (listing_id, instrument_id, mic, ticker, trading_currency, timezone)
+       values ($1::uuid, $2::uuid, 'XNAS', 'ALPX', 'USD', 'America/New_York') on conflict do nothing`,
+      [LISTING_A, INSTRUMENT_A],
+    );
+    assert.deepEqual(await answer("Compare its revenue with AMBX", ["BBB", "AMBX"], [bbb]), { companies: ["Beta Holdings Corp.", "Alpha Industries Inc."], notes: ["BBB is carried from the previous answer."] });
     const unclear = completed((await chatHarness(pool, { model: revenueModel([]), priorSubjects: async () => [aaa, bbb] }).run({ ...base, userIntent: "What about CCC's revenue?" })).events);
     assert.equal(unclear.clarification, true);
     assert.equal((unclear.financial_clarification as { question: string }).question, 'Add CCC to the AAA and BBB comparison, or look at CCC alone? Say "add CCC" or "just CCC".');
@@ -174,10 +194,10 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
   });
 
   await t.test("a ticker the resolver names as a listing is planned on its issuer's facts", async () => {
-    await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1::uuid, $2::uuid, 'common_stock')`, [INSTRUMENT_A, IDS.issuerA]);
+    await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1::uuid, $2::uuid, 'common_stock') on conflict do nothing`, [INSTRUMENT_A, IDS.issuerA]);
     await db.query(
       `insert into listings (listing_id, instrument_id, mic, ticker, trading_currency, timezone)
-       values ($1::uuid, $2::uuid, 'XNAS', 'ALPX', 'USD', 'America/New_York')`,
+       values ($1::uuid, $2::uuid, 'XNAS', 'ALPX', 'USD', 'America/New_York') on conflict do nothing`,
       [LISTING_A, INSTRUMENT_A],
     );
     const asListing = async (mention: string) => mention === "ALPX"
