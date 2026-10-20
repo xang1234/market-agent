@@ -199,8 +199,8 @@ listed above. The shared foundations are in place:
   Evidence deletion takes the finalization share locks, so it waits for an
   in-flight publication and then erases it.
 
-- **T29:** staged readiness. Each surface's mode is server-owned (`off`,
-  `shadow`, `enforce`). An unset flag is off, a malformed one stops startup,
+- **T29:** staged readiness. Each surface's mode is server-owned (`off` or
+  `enforce`). An unset flag is off, a malformed one stops startup,
   and model JSON cannot carry a mode. Each run records the mode it ran under.
   With any surface on (or the recovery worker enabled), a service refuses to
   start until `checkFinancialReadiness` passes. That check covers the tables,
@@ -221,11 +221,12 @@ listed above. The shared foundations are in place:
   - Plan fidelity on held-out questions: recorded in CI, `--live` when budgeted.
   - A machine-readable report that states what was not measured.
 
-Known gap: SEC ingestion records precision proofs but not yet source
-publication attestations, so SEC-ingested facts bind as
-`publication_time_unknown` until a reviewed acceptance-time mapping issues
-them. Such units cannot be certified; with a lane enforced, those values
-appear as declared gaps rather than numbers.
+Known gap: since #199 (2026-10-16), SEC ingestion records a controlled-fetch
+publication proof, which shows a filing was public when the fetch completed.
+Facts stored before that, and the golden dataset, carry no proof and bind as
+`publication_time_unknown`. A cutoff earlier than the fetch needs an archive
+proof, which no producer makes yet. Such units cannot be certified; with a lane
+enforced, those values appear as declared gaps rather than numbers.
 
 ### Wave 3 plan deviations
 
@@ -245,7 +246,7 @@ appear as declared gaps rather than numbers.
 | Chat: coordinator imports for stable ids | `services/chat/src/chat-ids.ts` holds `contentHashForText`/`stableUuid`, breaking a coordinator ↔ financial-turn import cycle. |
 | `services/analyze/src/section-seal.ts`, `memo-run.ts`, `run-metadata.ts` | Not present. The equivalents are `template-runner.ts` (optional pre-assigned `run_id`), `runMetadata.ts` (`financial` context), and the new `financial-section.ts`. |
 | Analyze: memo run saved in the finalization transaction | The narrative memo row commits first (its own snapshot). Each numerical section's snapshot, certificate, and `analyze_run_financial_sections` row then commit together. Coverage is derived from committed rows against the sections the metadata declares, so a failed section reads as a gap, never as complete. |
-| Analyze: derived emitters require certified lineage | With the lane enforced, engine-served sections skip their legacy producers (`runDeterministicSections` `servedByEngine`). The legacy metrics-comparison emitter itself is unchanged for the off/shadow lanes. |
+| Analyze: derived emitters require certified lineage | With the lane enforced, engine-served sections skip their legacy producers (`runDeterministicSections` `servedByEngine`). The legacy metrics-comparison emitter itself is unchanged for the off lane. |
 | Strict merge: owner/definitions/run provenance | `mergeSealInputs` requires equal snapshot, thread, `as_of`, basis, normalization, and coverage start. It rejects conflicting duplicate facts and repeated block ids, and refuses any certified input: certified units are sealed alone, so there is no definition or run provenance to reconcile. |
 | Grids: `fiscal-fact-column.ts`, `period-context.ts`, `cell-runner.ts` rework | Numerical columns route through `financial-column.ts` when enforced; legacy producers are untouched for the off lane. The row period header still uses the legacy resolver; each certified cell carries its own period labels. |
 | Grids: restart recovery for non-numerical cells | Only engine-backed cells are recoverable (`gridFinancialRecovery`, registered with the dev-api financial worker when `GRID_FINANCIAL_MODE=enforce`). Reader-question cells keep their existing behavior. |
