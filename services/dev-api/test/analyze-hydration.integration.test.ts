@@ -60,4 +60,12 @@ test("an issuer gains the fiscal years its memo reads, once; an issuer SEC canno
   const before = downloads.length;
   await hydrateAnalyzeIssuers(db, fetcher, new Map([[LISTED, new Map([["revenue", 2]])]]), { warn() {} });
   assert.deepEqual(downloads.slice(before), [], "years stored with their proofs are not downloaded again");
+
+  // A fact the engine would reject for its missing financial context is fetched again, which records the context.
+  await db.query(`delete from fact_financial_contexts c using facts f where c.fact_id = f.fact_id and f.subject_id = $1`, [LISTED]);
+  const repaired = downloads.length;
+  await hydrateAnalyzeIssuers(db, fetcher, new Map([[LISTED, new Map([["revenue", 2]])]]), { warn() {} });
+  assert.ok(downloads.length > repaired, "a fact without its financial context is downloaded again");
+  const contexts = await db.query(`select count(*)::int as n from fact_financial_contexts c join facts f on f.fact_id = c.fact_id where f.subject_id = $1`, [LISTED]);
+  assert.ok(Number(contexts.rows[0].n) > 0, "the download restores the context");
 });

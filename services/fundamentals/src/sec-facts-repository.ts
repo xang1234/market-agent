@@ -154,9 +154,10 @@ export async function hydrateSecIssuerLatestYears(
   });
 }
 
-// Whether every planned read is stored as SEC facts with the precision and
-// publication proofs the engine checks, for the latest fiscal year on file
-// and the years before it each metric needs. A latest year that ended more
+// Whether every planned read is stored as SEC facts the engine would accept:
+// a precision proof with its token, a financial context, and a publication
+// proof, for the latest fiscal year on file and the years before it each
+// metric needs. A latest year that ended more
 // than a filing cycle ago (15 months) does not count: a newer 10-K is due, so
 // the issuer is fetched again.
 async function storedProvenReads(db: FundamentalsQueryExecutor, issuerId: UUID, reads: ReadonlyMap<string, number>, now: Date): Promise<boolean> {
@@ -173,7 +174,9 @@ async function storedProvenReads(db: FundamentalsQueryExecutor, issuerId: UUID, 
         and s.provider = 'sec_edgar'
         and ${factActiveSql("f")}
         and exists (select 1 from current_fact_precision_attestations a
-                     where a.fact_id = f.fact_id and a.precision_class <> 'legacy_unverified')
+                     where a.fact_id = f.fact_id and a.precision_class <> 'legacy_unverified'
+                       and a.raw_token is not null and a.token_proof_hash is not null)
+        and exists (select 1 from fact_financial_contexts c where c.fact_id = f.fact_id)
         and exists (select 1 from current_source_publication_attestations p
                      where p.source_id = f.source_id and p.source_version_hash = normalized_content_hash(s.content_hash))`,
     [issuerId, [...reads.keys()]],
