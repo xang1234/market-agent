@@ -72,7 +72,7 @@ export async function createDevApiRuntimeFromEnv(
   // Parents whose verified units are resumable after a restart; others register as they adopt the engine.
   const worker = startFinancialWorkerFromEnv(pool, env, {
     ...(module.analyzeFinancial ? { analyze_memo_run: analyzeFinancialRecovery(pool) } : {}),
-    ...(financialModes.grid === "enforce" ? { analyst_grid_run: gridFinancialRecovery(pool) } : {}),
+    analyst_grid_run: gridFinancialRecovery(pool),
   });
   const discovery = module.createDiscoveryService === undefined
     ? undefined
