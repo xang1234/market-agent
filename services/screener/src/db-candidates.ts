@@ -19,7 +19,7 @@ const SCREENER_FUNDAMENTAL_METRICS = [
   "operating_income",
   "net_income",
   "eps_diluted",
-  "shares_outstanding_diluted",
+  "weighted_average_diluted_shares",
 ] as const;
 
 export type ScreenerCandidateQueryExecutor = {
@@ -121,7 +121,7 @@ export async function loadPostgresScreenerCandidates(
     const operatingIncome = latest.operating_income;
     const netIncome = latest.net_income;
     const epsDiluted = latest.eps_diluted;
-    const dilutedShares = latest.shares_outstanding_diluted;
+    const dilutedShares = latest.weighted_average_diluted_shares;
     const insiderNetShares90d = await loadInsiderNetShares90d(db, row.issuer_id, now);
 
     candidates.push({
