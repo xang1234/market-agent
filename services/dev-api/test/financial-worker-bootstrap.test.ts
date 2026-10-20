@@ -14,12 +14,12 @@ function fakePool(queries: string[]): WorkerPool {
   } as unknown as WorkerPool;
 }
 
-test("the financial worker starts only when enabled, and stops cleanly", async () => {
+test("the financial worker starts unless disabled, and stops cleanly", async () => {
   const queries: string[] = [];
-  assert.equal(startFinancialWorkerFromEnv(fakePool(queries), {}), null);
-  assert.equal(startFinancialWorkerFromEnv(fakePool(queries), { FINANCIAL_WORKER_ENABLED: "1" }), null);
+  assert.equal(startFinancialWorkerFromEnv(fakePool(queries), { FINANCIAL_WORKER_ENABLED: "false" }), null);
+  assert.throws(() => startFinancialWorkerFromEnv(fakePool(queries), { FINANCIAL_WORKER_ENABLED: "1" }), /FINANCIAL_WORKER_ENABLED must be true or false/u);
 
-  const worker = startFinancialWorkerFromEnv(fakePool(queries), { FINANCIAL_WORKER_ENABLED: "true", FINANCIAL_WORKER_INTERVAL_MS: "100" });
+  const worker = startFinancialWorkerFromEnv(fakePool(queries), { FINANCIAL_WORKER_INTERVAL_MS: "100" });
   assert.ok(worker);
   while (queries.length === 0) await new Promise((resolve) => setTimeout(resolve, 20));
   await worker.stop();

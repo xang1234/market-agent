@@ -11,9 +11,11 @@ const EVERY_FINANCE_FLAG = {
   FINANCIAL_WORKER_ENABLED: "true",
 };
 
-test("every surface is off unless the server's environment says otherwise", () => {
-  assert.deepEqual(loadFinancialModes({}), { analyze: "off", thesis: "off", worker: false });
-  assert.deepEqual(activeFinancialSurfaces(loadFinancialModes({})), []);
+test("every surface is off and the recovery worker on unless the server's environment says otherwise", () => {
+  assert.deepEqual(loadFinancialModes({}), { analyze: "off", thesis: "off", worker: true });
+  assert.deepEqual(activeFinancialSurfaces(loadFinancialModes({})), ["worker"]);
+  assert.deepEqual(loadFinancialModes({ FINANCIAL_WORKER_ENABLED: "false" }), { analyze: "off", thesis: "off", worker: false });
+  assert.deepEqual(activeFinancialSurfaces(loadFinancialModes({ FINANCIAL_WORKER_ENABLED: "false" })), []);
   assert.deepEqual(loadFinancialModes(EVERY_FINANCE_FLAG), { analyze: "enforce", thesis: "enforce", worker: true });
   assert.deepEqual(activeFinancialSurfaces(loadFinancialModes(EVERY_FINANCE_FLAG)), ["analyze", "thesis", "worker"]);
 });
@@ -21,6 +23,7 @@ test("every surface is off unless the server's environment says otherwise", () =
 test("a malformed mode stops startup rather than falling back to legacy numbers", () => {
   assert.throws(() => loadFinancialModes({ ANALYZE_FINANCIAL_MODE: "on" }), /ANALYZE_FINANCIAL_MODE must be off or enforce/u);
   assert.throws(() => loadFinancialModes({ THESIS_FINANCIAL_MODE: "shadow" }), /THESIS_FINANCIAL_MODE must be off or enforce/u);
+  assert.throws(() => loadFinancialModes({ FINANCIAL_WORKER_ENABLED: "1" }), /FINANCIAL_WORKER_ENABLED must be true or false/u);
 });
 
 test("enabling verified finance does not enable Discovery", async () => {

@@ -21,10 +21,17 @@ export function activeFinancialSurfaces(modes: FinancialModes): string[] {
   ];
 }
 
+export function financialWorkerEnabled(env: Pick<FinancialEnv, "FINANCIAL_WORKER_ENABLED">): boolean {
+  const value = env.FINANCIAL_WORKER_ENABLED?.trim() ?? "";
+  if (value === "" || value === "true") return true;
+  if (value === "false") return false;
+  throw new Error(`FINANCIAL_WORKER_ENABLED must be true or false (got ${JSON.stringify(env.FINANCIAL_WORKER_ENABLED)})`);
+}
+
 export function loadFinancialModes(env: FinancialEnv): FinancialModes {
   return Object.freeze({
     analyze: parseFinancialMode(env.ANALYZE_FINANCIAL_MODE, "ANALYZE_FINANCIAL_MODE"),
     thesis: parseFinancialMode(env.THESIS_FINANCIAL_MODE, "THESIS_FINANCIAL_MODE"),
-    worker: env.FINANCIAL_WORKER_ENABLED === "true",
+    worker: financialWorkerEnabled(env),
   });
 }
