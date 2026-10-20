@@ -33,7 +33,8 @@ export async function syncSplits(
       )
     : await db.query<ListingRow>(
         `${LISTING_SELECT}
-          where l.active_to is null
+          where (l.active_from is null or l.active_from <= now())
+            and (l.active_to is null or l.active_to > now())
             and exists (
               select 1 from facts f join sources s on s.source_id = f.source_id
                where f.subject_kind = 'issuer' and f.subject_id = i.issuer_id and s.provider = 'sec_edgar'
