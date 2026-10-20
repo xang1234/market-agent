@@ -412,10 +412,12 @@ export async function persistImportedArtifactMessage(
   );
   if (owner.rows.length === 0) return null;
 
+  // clock_timestamp, not the transaction's now(): messages imported together
+  // keep the order they were written in.
   const { rows } = await db.query<ChatMessageRow>(
     `insert into chat_messages
-       (thread_id, role, snapshot_id, blocks, content_hash)
-     values ($1::uuid, $2::chat_role, $3::uuid, $4::jsonb, $5)
+       (thread_id, role, snapshot_id, blocks, content_hash, created_at)
+     values ($1::uuid, $2::chat_role, $3::uuid, $4::jsonb, $5, clock_timestamp())
      returning
        message_id::text as message_id,
        thread_id::text as thread_id,

@@ -27,6 +27,11 @@ test("sharing a memo to chat copies each engine section under its own certificat
     [shared.thread.thread_id],
   )).rows.map((row) => [row.snapshot_id, row.kinds]));
   assert.deepEqual(await messages(), new Map([[memo.snapshotId, ["rich_text"]], [certificate, ["financial_answer"]]]));
+  const order = (await db.query<{ snapshot_id: string }>(
+    `select snapshot_id::text from chat_messages where thread_id = $1 order by created_at, message_id`,
+    [shared.thread.thread_id],
+  )).rows.map((row) => row.snapshot_id);
+  assert.deepEqual(order, [memo.snapshotId, certificate], "the narrative memo reads first, then its engine sections");
 
   await db.query(`delete from financial_runs where parent_id = $1`, [memo.runId]);
   assert.deepEqual(await messages(), new Map([[memo.snapshotId, ["rich_text"]]]), "erasing the run takes its chat copy");

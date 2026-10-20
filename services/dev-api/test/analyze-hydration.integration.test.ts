@@ -15,10 +15,13 @@ function annualRevenue(fy: number, val: string) {
   return { start: `${fy}-01-01`, end: `${fy}-12-31`, val: Number(val), val_token: val, accn: `0000320193-${String(fy + 1).slice(2)}-000006`, fy, fp: "FY", form: "10-K", filed: `${fy + 1}-01-10` };
 }
 
+// The latest fiscal year is last year, so the stored years stay inside a filing cycle whenever this runs.
+const LATEST = new Date().getUTCFullYear() - 1;
+
 const COMPANY_FACTS = {
   cik: 320193,
   entityName: "Example Corp",
-  facts: { "us-gaap": { Revenues: { label: "Revenues", description: "", units: { USD: [annualRevenue(2024, "391000000000"), annualRevenue(2025, "402000000000")] } } } },
+  facts: { "us-gaap": { Revenues: { label: "Revenues", description: "", units: { USD: [annualRevenue(LATEST - 1, "391000000000"), annualRevenue(LATEST, "402000000000")] } } } },
 };
 
 const downloads: string[] = [];
@@ -45,8 +48,8 @@ test("an issuer gains the fiscal years its memo reads, once; an issuer SEC canno
       where m.metric_key = 'revenue' and f.period_kind = 'fiscal_y' order by f.subject_id, f.fiscal_year`,
   );
   assert.deepEqual(rows, [
-    { subject_id: LISTED, fiscal_year: 2024, value: "391000000000" },
-    { subject_id: LISTED, fiscal_year: 2025, value: "402000000000" },
+    { subject_id: LISTED, fiscal_year: LATEST - 1, value: "391000000000" },
+    { subject_id: LISTED, fiscal_year: LATEST, value: "402000000000" },
   ]);
   assert.deepEqual(downloads.filter((path) => path.includes("320193")), [
     "/api/xbrl/companyfacts/CIK0000320193.json",
