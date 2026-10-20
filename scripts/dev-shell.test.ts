@@ -1029,7 +1029,7 @@ async function traceRecapture(envOverrides: Record<string, string> = {}, preambl
   await writeFile(committedFile, "committed\n");
   const result = await runBash(
     [
-      "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
+      "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh recapture",
       `TRACE_FILE="${traceFile}"`,
       "ensure_command(){ :; }",
       'compose(){ printf "compose:%s:%s\\n" "${COMPOSE_PROJECT_NAME:-<compose default>}" "$*" >> "$TRACE_FILE"; }',
@@ -1105,4 +1105,32 @@ test("recapture replaces the committed fixture only once the fixture checks pass
   assert.deepEqual(browserFailed.lines("checks:"), []);
   assert.equal(browserFailed.committed, "committed\n");
   assert.match(browserFailed.lines("compose:").at(-1) ?? "", /-recapture:down -v --remove-orphans$/);
+});
+
+test("recapture leaves another live recapture's stack alone, and takes over a dead one's lock", async () => {
+  // The lock a run holds while it works: this shell's own pid, so its owner is alive.
+  const held = 'mkdir -p "$(dirname "$(recapture_lock)")" && echo $$ > "$(recapture_lock)"';
+  const busy = await traceRecapture({}, [held]);
+  assert.notEqual(busy.result.code, 0);
+  assert.match(busy.result.stderr, /another recapture \(pid \d+\) is running/);
+  assert.deepEqual(busy.lines("compose:"), [], "its project is not torn down");
+  assert.deepEqual(busy.lines("up:"), []);
+  assert.equal(busy.committed, "committed\n");
+
+  const stale = await traceRecapture({}, [
+    'mkdir -p "$(dirname "$(recapture_lock)")" && echo 2147483646 > "$(recapture_lock)"',
+    'trap \'printf "lock-left:%s\\n" "$([[ -e "$(recapture_lock)" ]] && echo yes || echo no)" >> "$TRACE_FILE"\' EXIT',
+  ]);
+  assert.equal(stale.result.code, 0, stale.result.stderr);
+  assert.equal(stale.lines("up:").length, 1);
+  assert.deepEqual(stale.lines("lock-left:"), ["no"], "the lock is released when the run ends");
+});
+
+test("recapture never starts the optional dev-providers sidecar, whatever the env file says", async () => {
+  const { result, lines } = await traceRecapture({ ENABLE_UNOFFICIAL_DEV_PROVIDERS: "true" }, [
+    'up(){ printf "up:%s\\n" "$COMPOSE_PROJECT_NAME" >> "$TRACE_FILE"; printf "services:%s\\n" "$(active_services)" >> "$TRACE_FILE"; }',
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(lines("services:").length, 1);
+  assert.doesNotMatch(lines("services:")[0]!, /dev-providers/);
 });

@@ -7,18 +7,20 @@ if [[ ! -f "$ENV_FILE" ]]; then
   ENV_FILE="$ROOT/.env.dev.example"
 fi
 
-# recapture always records the no-keys chat stack, whatever the env file says.
+# recapture always records the no-keys chat stack, whatever the env file says, without
+# the optional dev-providers sidecar (Python, its own port).
 if [[ "${1:-}" == "recapture" ]]; then
-  export DEV_PROFILE=chat DEV_NO_KEYS=true DEV_MODE=
+  export DEV_PROFILE=chat DEV_NO_KEYS=true DEV_MODE= ENABLE_UNOFFICIAL_DEV_PROVIDERS=false
 fi
 
 # DEV_PROFILE, DEV_NO_KEYS and DEV_MODE are per-invocation switches
 # (DEV_PROFILE=chat DEV_NO_KEYS=true ./scripts/dev-shell.sh up), so a value the caller
 # set beats the env file's, even an empty one (DEV_MODE= returns to the default mode).
 # WEB_PORT and DEV_POSTGRES_PORT win too, so one run (a recapture beside a running dev
-# stack) can move off the dev ports without editing .env.dev.
+# stack) can move off the dev ports without editing .env.dev, and so does
+# ENABLE_UNOFFICIAL_DEV_PROVIDERS, so a recapture can turn the sidecar off.
 CALLER_SWITCHES=()
-for switch in DEV_PROFILE DEV_NO_KEYS DEV_MODE WEB_PORT DEV_POSTGRES_PORT; do
+for switch in DEV_PROFILE DEV_NO_KEYS DEV_MODE WEB_PORT DEV_POSTGRES_PORT ENABLE_UNOFFICIAL_DEV_PROVIDERS; do
   if [[ -n "${!switch+set}" ]]; then
     CALLER_SWITCHES+=("$switch=${!switch}")
   fi
@@ -845,6 +847,41 @@ fixture_checks() {
   (cd "$ROOT/services/app" && npm test) && (cd "$ROOT/web" && npm test)
 }
 
+# One recapture per checkout: a second one would tear down the first one's stack.
+recapture_lock() {
+  printf '%s/.dev/recapture.lock' "$ROOT"
+}
+
+# Takes the lock, holding this run's pid. A lock without a pid yet is being taken, so it
+# counts as held; only a dead owner's lock is taken over.
+# ponytail: two runs both taking over the same dead owner's lock can race between the
+# check and the remove; a pid-checked rename would close it if that ever happens.
+claim_recapture_lock() {
+  local lock owner
+  lock="$(recapture_lock)"
+  mkdir -p "${lock%/*}"
+  if [[ -e "$lock" ]]; then
+    owner="$(cat "$lock" 2>/dev/null || true)"
+    if [[ -z "$owner" ]] || kill -0 "$owner" 2>/dev/null; then
+      echo "another recapture (pid ${owner:-starting}) is running in this checkout; wait for it, or remove $lock if it is not" >&2
+      return 1
+    fi
+    rm -f "$lock"
+  fi
+  set -C
+  # sh's parent is this run's subshell; bash 3.2 has no BASHPID.
+  if ! sh -c 'echo "$PPID"' 2>/dev/null >"$lock"; then
+    set +C
+    echo "another recapture took the lock first; wait for it to finish" >&2
+    return 1
+  fi
+  set +C
+}
+
+release_recapture_lock() {
+  rm -f "$(recapture_lock)"
+}
+
 # Runs on every exit of recapture: puts the committed fixture back unless the new one
 # passed its checks, then removes the recapture stack, containers and volumes.
 recapture_cleanup() {
@@ -865,6 +902,7 @@ recapture_cleanup() {
     echo "could not remove Compose project $COMPOSE_PROJECT_NAME; run: COMPOSE_PROJECT_NAME=$COMPOSE_PROJECT_NAME docker compose -f $ROOT/docker-compose.dev.yml down -v" >&2
     status=1
   fi
+  release_recapture_lock
   if [[ "$status" -eq 0 ]]; then
     rm -rf "$RECAPTURE_DIR"
   else
@@ -883,6 +921,8 @@ recapture() (
   ensure_command npm
   export COMPOSE_PROJECT_NAME
   COMPOSE_PROJECT_NAME="$(recapture_project)"
+  claim_recapture_lock
+  trap release_recapture_lock EXIT
   # A run killed before its cleanup could run left its stack behind; start from nothing.
   compose down -v --remove-orphans
   # Against a port another stack holds, the browser run would record that stack.
