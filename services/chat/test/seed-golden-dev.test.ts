@@ -4,7 +4,7 @@ import test from "node:test";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { assertNoGoldenDataset, seedGoldenDevDatabase } from "../scripts/seed-golden-dev.ts";
 import { SEC_EDGAR_FILING_SOURCE_ID } from "../../fundamentals/src/provider-sources.ts";
-import { AMD_Q2_2025_RELEASE, GOLDEN_COMPANIES, GOLDEN_SOURCE_ID } from "./golden/dataset.ts";
+import { AMD_Q2_2025_RELEASE, GOLDEN_AS_OF, GOLDEN_COMPANIES, GOLDEN_SOURCE_ID } from "./golden/dataset.ts";
 
 test("seedGoldenDevDatabase seeds the frozen dataset once and is a no-op on rerun", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
   const { databaseUrl } = await bootstrapDatabase(t, "chat-golden-dev-seed");
@@ -134,8 +134,25 @@ test("a database seeded before the golden source moves its facts there and prove
   assert.deepEqual(await counts(), legacy, "and the database is left as it was");
   await client.query(`delete from sources where source_id = $1::uuid`, [GOLDEN_SOURCE_ID]);
 
+  const { rows: [undeclared] } = await client.query<{ fact_id: string }>(
+    `with segment as (
+       insert into segments (issuer_id, axis, name, definition_as_of) values ($1::uuid, 'business', 'Undeclared Segment', $2::timestamptz)
+       returning segment_id)
+     insert into facts (subject_kind, subject_id, metric_id, period_kind, period_start, period_end, fiscal_year, fiscal_period,
+                        value_num, unit, currency, scale, as_of, reported_at, observed_at, source_id, method, verification_status,
+                        freshness_class, coverage_level, confidence)
+     select 'segment', segment.segment_id, m.metric_id, 'fiscal_q', '2025-10-27', '2026-01-25', 2026, 'Q4', 1000000000, 'currency', 'USD', 1,
+            $2::timestamptz, $2::timestamptz, $2::timestamptz, $3::uuid, 'reported', 'authoritative', 'filing_time', 'full', 1
+       from segment, metrics m where m.metric_key = 'revenue'
+     returning fact_id::text`,
+    [GOLDEN_COMPANIES[0]!.issuer_id, GOLDEN_AS_OF, SEC_EDGAR_FILING_SOURCE_ID],
+  );
+  const declaredOnly = { ...proven, sec_facts: 1 };
+
   assert.equal(await seedGoldenDevDatabase(databaseUrl), "already-seeded");
-  assert.deepEqual(await counts(), proven, "the facts are moved and proven");
+  assert.deepEqual(await counts(), declaredOnly, "the declared facts are moved and proven");
+  const { rows: [kept] } = await client.query<{ source_id: string }>(`select source_id::text from facts where fact_id = $1::uuid`, [undeclared!.fact_id]);
+  assert.equal(kept!.source_id, SEC_EDGAR_FILING_SOURCE_ID, "a segment fact the dataset does not declare stays on its own source");
   assert.equal(await seedGoldenDevDatabase(databaseUrl), "already-seeded");
-  assert.deepEqual(await counts(), proven, "and never proven twice");
+  assert.deepEqual(await counts(), declaredOnly, "and never proven twice");
 });

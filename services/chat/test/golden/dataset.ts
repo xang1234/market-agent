@@ -375,13 +375,32 @@ export async function seedGoldenProofs(client: Client): Promise<void> {
     });
   }
 
-  await client.query(
-    `update facts set source_id = $1::uuid
-      where subject_kind = 'segment'
-        and subject_id in (select segment_id from segments where issuer_id = any($2::uuid[]))
-        and as_of = $3::timestamptz and observed_at = $3::timestamptz and source_id = $4::uuid`,
-    [GOLDEN_SOURCE_ID, GOLDEN_COMPANIES.map((company) => company.issuer_id), GOLDEN_AS_OF, SEC_EDGAR_FILING_SOURCE_ID],
-  );
+  for (const company of GOLDEN_COMPANIES) {
+    if (!company.segments) continue;
+    const { fiscal_year, fiscal_period, revenue } = company.segments;
+    const quarter = company.quarters.find((q) => q.fiscal_year === fiscal_year && q.fiscal_period === fiscal_period)!;
+    for (const [name, value] of revenue) {
+      const { rows } = await client.query(
+        `update facts f set source_id = $1::uuid
+           from segments s, metrics m
+          where s.segment_id = f.subject_id and m.metric_id = f.metric_id and m.metric_key = 'revenue'
+            and f.subject_kind = 'segment' and s.issuer_id = $2::uuid and s.axis = 'business' and s.name = $3
+            and s.definition_as_of = $4::timestamptz
+            and f.period_kind = 'fiscal_q' and f.fiscal_year = $5 and f.fiscal_period = $6
+            and f.period_start = $7::date and f.period_end = $8::date and f.value_num = $9::numeric
+            and f.scale = 1 and f.unit = 'currency' and f.currency = 'USD' and f.method = 'reported'
+            and f.as_of = $4::timestamptz and f.observed_at = $4::timestamptz
+            and f.source_id in ($1::uuid, $10::uuid)
+          returning f.fact_id`,
+        [
+          GOLDEN_SOURCE_ID, company.issuer_id, name, GOLDEN_AS_OF, fiscal_year, fiscal_period,
+          quarter.period_start, quarter.period_end, value * 1e6, SEC_EDGAR_FILING_SOURCE_ID,
+        ],
+      );
+      const key = `${company.ticker}.${fiscal_year}.${fiscal_period}.revenue.${name}`;
+      if (rows.length !== 1) throw new GoldenFactMismatchError(`golden dataset: expected one stored fact for ${key}, found ${rows.length}`);
+    }
+  }
 
   await recordSourcePublicationAttestation(client, {
     source_id: GOLDEN_SOURCE_ID,
