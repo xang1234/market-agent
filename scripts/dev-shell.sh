@@ -838,12 +838,11 @@ recapture_project() {
   printf '%s-recapture' "$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')"
 }
 
-# What a replay fixture must pass, read from its committed path: the golden reloads
-# (services/app/test/replay.test.ts) and every ref the demo can open (demoBackend.test.ts,
-# with web's own test runner flags from its package.json).
+# What a replay fixture must pass, read from its committed path: the app and web suites,
+# which hold every test that reads it (the golden reloads in replay.test.ts, every ref the
+# demo can open in demoBackend.test.ts, and the ids the chat tests take from it).
 fixture_checks() {
-  (cd "$ROOT/services/app" && npm test) &&
-    (cd "$ROOT/web" && TSX_TSCONFIG_PATH=tsconfig.app.json node --import tsx --test src/demo/demoBackend.test.ts)
+  (cd "$ROOT/services/app" && npm test) && (cd "$ROOT/web" && npm test)
 }
 
 # Runs on every exit of recapture: puts the committed fixture back unless the new one
