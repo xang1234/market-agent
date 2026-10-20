@@ -1,6 +1,7 @@
 import {
   createMetricRegistry,
   mapStatement,
+  resolveMetric,
   type MappedStatement,
   type MetricDefinition,
   type MetricRegistry,
@@ -21,6 +22,7 @@ import {
   type SecEdgarFetcher,
   type SecDerivation,
   type SecFetchEvidence,
+  type SecSource,
   type SecSourceToken,
 } from "./sec-edgar.ts";
 import { compareExactDecimals, parseFinancialDecimal } from "../../financial-core/src/exact-decimal.ts";
@@ -128,8 +130,9 @@ export async function hydrateSecIssuer(
 
 // Stores the issuer's annual statements for its latest `years` fiscal years
 // (from the latest year with a 10-K revenue value) from one companyfacts
-// download. A year SEC has no statement for is skipped; the years that extract
-// are stored before a failure is thrown as hydrateSecIssuer throws it.
+// download, unless they are already stored with their proofs. A year SEC has
+// no statement for is skipped; the years that extract are stored before a
+// failure is thrown as hydrateSecIssuer throws it.
 export async function hydrateSecIssuerLatestYears(
   db: FundamentalsTransactionalQueryExecutor,
   input: {
@@ -141,10 +144,44 @@ export async function hydrateSecIssuerLatestYears(
     logger?: Pick<Console, "warn">;
   },
 ): Promise<void> {
+  if (FROZEN_ISSUER_IDS.has(input.issuerId)) return;
+  if (await storedProvenYears(db, input.issuerId, input.years, (input.clock ?? (() => new Date()))())) return;
   await hydrateSecPeriods(db, input, (facts) => {
     const latest = latestAnnualRevenueYear(facts);
     return latest === null ? [] : Array.from({ length: input.years }, (_, offset) => ({ fiscal_year: latest - offset, fiscal_period: "FY" as const }));
   });
+}
+
+// Whether the issuer's latest `years` fiscal years of SEC revenue are stored
+// with the precision and publication proofs the engine checks. A latest year
+// that ended more than a filing cycle ago (15 months) does not count: a newer
+// 10-K is due, so the issuer is fetched again.
+async function storedProvenYears(db: FundamentalsQueryExecutor, issuerId: UUID, years: number, now: Date): Promise<boolean> {
+  const { rows } = await db.query<{ fiscal_year: number; period_end: string }>(
+    `select distinct f.fiscal_year, f.period_end::text as period_end
+       from facts f
+       join metrics m on m.metric_id = f.metric_id
+       join sources s on s.source_id = f.source_id
+      where f.subject_kind = 'issuer'
+        and f.subject_id = $1
+        and m.metric_key = 'revenue'
+        and f.period_kind = 'fiscal_y'
+        and f.fiscal_period = 'FY'
+        and s.provider = 'sec_edgar'
+        and ${factActiveSql("f")}
+        and exists (select 1 from current_fact_precision_attestations a
+                     where a.fact_id = f.fact_id and a.precision_class <> 'legacy_unverified')
+        and exists (select 1 from current_source_publication_attestations p
+                     where p.source_id = f.source_id and p.source_version_hash = normalized_content_hash(s.content_hash))
+      order by f.fiscal_year desc
+      limit $2`,
+    [issuerId, years],
+  );
+  const latest = rows[0];
+  if (latest === undefined || rows.length < years) return false;
+  const filingCycle = new Date(`${latest.period_end}T00:00:00.000Z`);
+  filingCycle.setUTCMonth(filingCycle.getUTCMonth() + 15);
+  return filingCycle > now && rows.every((row, offset) => Number(row.fiscal_year) === Number(latest.fiscal_year) - offset);
 }
 
 async function hydrateSecPeriods(
@@ -274,6 +311,7 @@ type IngestInput = {
 type ExtractedFiling = Readonly<{
   input: IngestInput;
   accessionNumber: string | null;
+  source: SecSource | null;
   sourceId: UUID;
   target: Omit<ExtractStatementInput, "family">;
   income: Extracted | null;
@@ -284,8 +322,8 @@ type ExtractedFiling = Readonly<{
 // Throws when a required income statement cannot be extracted.
 function extractFiling(input: IngestInput): ExtractedFiling {
   const accessionNumber = statementAccession(input.fetched.facts, input.fiscal_year, input.fiscal_period);
-  // The id upsertSecFilingSource stores for the accession, or it throws.
-  const sourceId = accessionNumber ? sourceIdForAccession(accessionNumber) : input.fallbackSourceId;
+  const source = accessionNumber ? secFilingSource(input.cik, accessionNumber, input.fetched.evidence.completed_at) : null;
+  const sourceId = source?.source_id ?? input.fallbackSourceId;
   const target = {
     subject: { kind: "issuer", id: input.issuerId },
     facts: input.fetched.facts,
@@ -298,7 +336,7 @@ function extractFiling(input: IngestInput): ExtractedFiling {
   const income: Extracted | null = input.income === "require"
     ? extracted(extractStatementWithTokens({ ...target, family: "income" }))
     : statementsOf(target, ["income"], input.logger)[0] ?? null;
-  return { input, accessionNumber, sourceId, target, income, companions: statementsOf(target, COMPANION_FAMILIES, input.logger) };
+  return { input, accessionNumber, source, sourceId, target, income, companions: statementsOf(target, COMPANION_FAMILIES, input.logger) };
 }
 
 // Stores one filing's statements for a fiscal period from a companyfacts
@@ -311,11 +349,11 @@ function extractFiling(input: IngestInput): ExtractedFiling {
 // completion, never by when it was processed.
 async function storeFiling(
   db: FundamentalsTransactionalQueryExecutor,
-  { input, accessionNumber, sourceId, target, income, companions }: ExtractedFiling,
+  { input, accessionNumber, source, sourceId, target, income, companions }: ExtractedFiling,
   clock: () => Date,
 ): Promise<{ statement: NormalizedStatement | null; filing: SecFilingRef | null }> {
   const asOf = input.fetched.evidence.completed_at;
-  if (accessionNumber) await upsertSecFilingSource(db, { cik: input.cik, accessionNumber, retrievedAt: asOf });
+  if (source) await upsertSecFilingSource(db, source);
   const registry = await loadMetricRegistry(
     db,
     [...(income ? [income] : []), ...companions].flatMap((entry) => entry.statement.lines.map((line) => line.metric_key)),
@@ -366,9 +404,11 @@ async function storeFiling(
   return { statement: income?.statement ?? null, filing: accessionNumber ? { sourceId, accessionNumber } : null };
 }
 
-// A line SEC tagged with a unit its metric cannot take is SEC's data, so its
-// failure is classified like an extraction failure.
+// A metric our registry lacks is ours and throws as it is. A line SEC tagged
+// with a unit its metric cannot take is SEC's data, so that failure is
+// classified like an extraction failure.
 function mapSecStatement(registry: MetricRegistry, statement: NormalizedStatement): MappedStatement {
+  for (const line of statement.lines) resolveMetric(registry, line.metric_key);
   try {
     return mapStatement(registry, statement);
   } catch (error) {
@@ -491,21 +531,19 @@ function isMissingCoverage(message: string): boolean {
     message.includes("no monetary lines extracted");
 }
 
-async function upsertSecFilingSource(
-  db: FundamentalsQueryExecutor,
-  input: {
-    cik: number;
-    accessionNumber: string;
-    retrievedAt: string;
-  },
-): Promise<UUID> {
-  const source = buildSecSource({
-    source_id: sourceIdForAccession(input.accessionNumber),
-    cik: input.cik,
-    accession_number: input.accessionNumber,
-    retrieved_at: input.retrievedAt,
-    content_hash: secAccessionVersionHash(input.accessionNumber),
+// The accession's source row, built from SEC's data: a malformed accession
+// throws here, before anything is stored.
+function secFilingSource(cik: number, accessionNumber: string, retrievedAt: string): SecSource {
+  return buildSecSource({
+    source_id: sourceIdForAccession(accessionNumber),
+    cik,
+    accession_number: accessionNumber,
+    retrieved_at: retrievedAt,
+    content_hash: secAccessionVersionHash(accessionNumber),
   });
+}
+
+async function upsertSecFilingSource(db: FundamentalsQueryExecutor, source: SecSource): Promise<UUID> {
   // The accession is the source version: a re-ingest refreshes retrieved_at
   // but never rewrites the hash that publication proofs are bound to.
   const result = await db.query<{ source_id: string }>(
@@ -530,7 +568,7 @@ async function upsertSecFilingSource(
   );
   const stored = result.rows[0]?.source_id;
   if (stored === undefined) {
-    throw new Error(`sec_edgar source ${source.source_id} for accession ${input.accessionNumber} has another content_hash; a source version never changes`);
+    throw new Error(`sec_edgar source ${source.source_id} (${source.canonical_url}) has another content_hash; a source version never changes`);
   }
   return stored as UUID;
 }
@@ -1055,7 +1093,7 @@ async function derivationLineage(
 ): Promise<Record<string, unknown>> {
   const sources = new Map<string, UUID>();
   for (const accn of new Set(derivation.inputs.map((input) => input.accn))) {
-    sources.set(accn, await upsertSecFilingSource(db, { cik, accessionNumber: accn, retrievedAt }));
+    sources.set(accn, await upsertSecFilingSource(db, secFilingSource(cik, accn, retrievedAt)));
   }
   return {
     kind: SEC_DERIVATION_KIND,
@@ -1134,7 +1172,7 @@ async function recordSecRestatements(
       const asOf = input.evidence.completed_at;
       let sourceId = sources.get(accessionNumber);
       if (sourceId === undefined) {
-        sourceId = await upsertSecFilingSource(db, { cik: input.cik, accessionNumber, retrievedAt: asOf });
+        sourceId = await upsertSecFilingSource(db, secFilingSource(input.cik, accessionNumber, asOf));
         sources.set(accessionNumber, sourceId);
       }
       const token: SecSourceToken = { token: presented, concept: concept!, unit: unit!, accn: accessionNumber, form: "10-K", start: original.period_start, end: original.period_end };

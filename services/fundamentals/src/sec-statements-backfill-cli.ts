@@ -68,7 +68,8 @@ async function main(): Promise<void> {
   if (!databaseUrl || !userAgent) throw new Error("DATABASE_URL and SEC_EDGAR_USER_AGENT are required");
   const pool = new Pool({ connectionString: databaseUrl });
   // Paced under SEC's fair-access rate, backing off on a 429.
-  const fetcher = withSecFairAccess(createSecCompanyFactsHttpFetcher({ userAgent, baseUrl: process.env.SEC_EDGAR_BASE_URL }));
+  // A bulk run downloads the largest companyfacts files, so it waits longer than a request does.
+  const fetcher = withSecFairAccess(createSecCompanyFactsHttpFetcher({ userAgent, baseUrl: process.env.SEC_EDGAR_BASE_URL, timeoutMs: 120_000 }));
   try {
     const { failures } = await backfillSecStatements(pool, fetcher, process.argv.slice(2));
     if (failures > 0) process.exitCode = 1;

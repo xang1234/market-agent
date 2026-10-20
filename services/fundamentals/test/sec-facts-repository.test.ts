@@ -505,6 +505,29 @@ test("hydrating an issuer's latest years stores each of them from one download",
   assert.deepEqual(downloads.filter((path) => path.startsWith("/api/xbrl/companyfacts/")), ["/api/xbrl/companyfacts/CIK0000320193.json"]);
 });
 
+test("an issuer whose latest years are stored with proofs is not downloaded again", async () => {
+  class ProvenYears extends FakeFundamentalsDb {
+    async query<R extends Record<string, unknown> = Record<string, unknown>>(text: string, values: unknown[] = []): Promise<{ rows: R[] }> {
+      if (text.includes("current_fact_precision_attestations a")) {
+        return { rows: [{ fiscal_year: 2025, period_end: "2025-12-31" }, { fiscal_year: 2024, period_end: "2024-12-31" }] as unknown as R[] };
+      }
+      return super.query<R>(text, values);
+    }
+  }
+  const downloads: string[] = [];
+  const hydrate = (db: FakeFundamentalsDb, now: string) => hydrateSecIssuerLatestYears(db, {
+    issuerId: ISSUER_ID,
+    years: 2,
+    fetcher: (path) => { downloads.push(path); return secCompanyFetcher(() => companyFacts())(path); },
+    sourceId: SOURCE_ID,
+    clock: () => new Date(now),
+  });
+  await hydrate(new ProvenYears(), "2026-10-20T00:00:00.000Z");
+  assert.deepEqual(downloads, [], "fresh proven years are read, not fetched");
+  await hydrate(new ProvenYears(), "2027-06-01T00:00:00.000Z");
+  assert.ok(downloads.length > 0, "a stored latest year older than a filing cycle is fetched again");
+});
+
 test("a prior year SEC cannot extract still lets the latest year be stored, then reports the failure", async () => {
   const db = new FakeFundamentalsDb();
   const facts = companyFacts();
@@ -551,6 +574,46 @@ test("an income line SEC tagged with a unit its metric cannot take is SEC's fail
     (error) => error instanceof FundamentalsDataUnavailableError && /not compatible/u.test(error.message),
   );
   assert.deepEqual(db.facts, []);
+});
+
+test("a metric our registry lacks is our failure, thrown as it is, not SEC's", async () => {
+  class EmptyRegistry extends FakeFundamentalsDb {
+    async query<R extends Record<string, unknown> = Record<string, unknown>>(text: string, values: unknown[] = []): Promise<{ rows: R[] }> {
+      if (text.toLowerCase().includes("from metrics")) return { rows: [] };
+      return super.query<R>(text, values);
+    }
+  }
+  await assert.rejects(
+    hydrateSecIssuer(new EmptyRegistry(), {
+      issuerId: ISSUER_ID,
+      fiscal_year: 2024,
+      fiscal_period: "FY",
+      fetcher: secCompanyFetcher(() => companyFacts()),
+      sourceId: SOURCE_ID,
+      logger: { warn() {} },
+    }),
+    (error) => !(error instanceof FundamentalsDataUnavailableError) && error instanceof Error && /not registered/u.test(error.message),
+  );
+});
+
+test("an accession SEC sent malformed is SEC's failure", async () => {
+  const db = new FakeFundamentalsDb();
+  const facts = companyFacts();
+  for (const concept of Object.values(facts.facts["us-gaap"])) {
+    for (const values of Object.values(concept.units) as SecConceptValue[][]) for (const value of values) value.accn = "not-an-accession";
+  }
+  await assert.rejects(
+    hydrateSecIssuer(db, {
+      issuerId: ISSUER_ID,
+      fiscal_year: 2024,
+      fiscal_period: "FY",
+      fetcher: secCompanyFetcher(() => facts),
+      sourceId: SOURCE_ID,
+      logger: { warn() {} },
+    }),
+    (error) => error instanceof FundamentalsDataUnavailableError && /accession_number/u.test(error.message),
+  );
+  assert.deepEqual(db.sources, []);
 });
 
 test("a frozen golden issuer is never repaired from live SEC", async () => {
@@ -776,6 +839,7 @@ class FakeFundamentalsDb {
     }
     // Restatement detection's stored originals: the fake records no financial contexts, so there are none.
     if (sql.includes("join fact_financial_contexts c on c.fact_id = f.fact_id")) return rows([]);
+    if (sql.includes("current_fact_precision_attestations a")) return rows([]);
     if (sql.includes("select max(f.fiscal_year)")) {
       const fiscalYears = this.facts
         .filter((fact) => metricKeyFor(this.metrics, fact.metric_id) === "revenue")

@@ -218,6 +218,21 @@ test("GET /v1/fundamentals/stats surfaces typed provider failures as unavailable
   assert.equal(body.unavailable.detail, "sec_edgar: HTTP 403");
 });
 
+test("GET /v1/fundamentals/stats answers a database failure as 502 without an unavailable envelope", async (t) => {
+  const deps: FundamentalsServerDeps = {
+    ...buildDeps(),
+    stats: {
+      async find() {
+        throw new Error("deadlock detected");
+      },
+    },
+  };
+  const url = await startServer(t, deps);
+  const res = await fetch(`${url}/v1/fundamentals/stats?subject_kind=issuer&subject_id=${APPLE_ISSUER_ID}`);
+  assert.equal(res.status, 502);
+  assert.deepEqual(await res.json(), { error: "upstream fundamentals data unavailable" });
+});
+
 test("response surfaces every issuer in DEV_ISSUER_PROFILES with its declared legal_name", async (t) => {
   const url = await startServer(t, buildDeps());
   for (const record of DEV_ISSUER_PROFILES) {

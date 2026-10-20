@@ -238,23 +238,38 @@ const secFetcher = process.env.SEC_EDGAR_USER_AGENT
     }))
   : null;
 
+const HYDRATION_BUDGET_MS = 15_000;
+
+// Every failure, SEC's or the store's, is logged and leaves the engine to
+// report the gap; the memo never fails for want of fresh facts. Hydration
+// past its budget keeps running, and the memo freezes its cutoff without it.
 export async function hydrateAnalyzeIssuers(
   db: Pool,
   fetcher: SecEdgarFetcher | null,
   latestYears: ReadonlyMap<string, number>,
   logger: Pick<Console, "warn"> = console,
+  budgetMs = HYDRATION_BUDGET_MS,
 ): Promise<void> {
   if (fetcher === null) return;
-  const issuers = [...latestYears];
-  const results = await Promise.allSettled(issuers.map(([issuerId, years]) =>
-    hydrateSecIssuerLatestYears(db, { issuerId, years, fetcher, sourceId: SEC_EDGAR_FILING_SOURCE_ID, logger })));
-  for (const [index, result] of results.entries()) {
-    if (result.status === "rejected" && result.reason instanceof FundamentalsDataUnavailableError) {
-      logger.warn("analyze SEC hydration failed; the engine reports the gap", { issuer_id: issuers[index]![0], reason: result.reason.reason, error: result.reason.message });
+  const settled = Promise.all([...latestYears].map(async ([issuerId, years]) => {
+    try {
+      await hydrateSecIssuerLatestYears(db, { issuerId, years, fetcher, sourceId: SEC_EDGAR_FILING_SOURCE_ID, logger });
+    } catch (error) {
+      logger.warn("analyze SEC hydration failed; the engine reports the gap", {
+        issuer_id: issuerId,
+        reason: error instanceof FundamentalsDataUnavailableError ? error.reason : "store_failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
+  }));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const overBudget = new Promise<true>((resolve) => {
+    timer = setTimeout(() => resolve(true), budgetMs);
+  });
+  if (await Promise.race([settled.then(() => false), overBudget])) {
+    logger.warn("analyze SEC hydration ran past its budget; the memo uses the facts stored so far", { budget_ms: budgetMs });
   }
-  const failure = results.find((result) => result.status === "rejected" && !(result.reason instanceof FundamentalsDataUnavailableError));
-  if (failure?.status === "rejected") throw failure.reason;
+  clearTimeout(timer);
 }
 
 export const analyzeFinancial = {

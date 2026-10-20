@@ -18,7 +18,7 @@ function annualRevenue(fy: number, val: string) {
 const COMPANY_FACTS = {
   cik: 320193,
   entityName: "Example Corp",
-  facts: { "us-gaap": { Revenues: { label: "Revenues", description: "", units: { USD: [annualRevenue(2023, "380000000000"), annualRevenue(2024, "391000000000")] } } } },
+  facts: { "us-gaap": { Revenues: { label: "Revenues", description: "", units: { USD: [annualRevenue(2024, "391000000000"), annualRevenue(2025, "402000000000")] } } } },
 };
 
 const downloads: string[] = [];
@@ -30,7 +30,7 @@ const fetcher = async (path: string) => {
     : secFetched({ filings: { recent: { accessionNumber: [], acceptanceDateTime: [] } } }, { url: `https://data.sec.gov${path}` });
 };
 
-test("a memo's issuers gain their latest two fiscal years; an issuer SEC cannot serve is logged, not fatal", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+test("an issuer gains the fiscal years its memo reads, once; an issuer SEC cannot serve is logged, not fatal", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
   const { databaseUrl } = await bootstrapDatabase(t, "dev-api-analyze-hydration");
   const db = await connectedPool(t, databaseUrl);
   await db.query(await readFile(join(workspaceRoot, "db", "seed", "metrics.sql"), "utf8"));
@@ -45,12 +45,16 @@ test("a memo's issuers gain their latest two fiscal years; an issuer SEC cannot 
       where m.metric_key = 'revenue' and f.period_kind = 'fiscal_y' order by f.subject_id, f.fiscal_year`,
   );
   assert.deepEqual(rows, [
-    { subject_id: LISTED, fiscal_year: 2023, value: "380000000000" },
     { subject_id: LISTED, fiscal_year: 2024, value: "391000000000" },
+    { subject_id: LISTED, fiscal_year: 2025, value: "402000000000" },
   ]);
   assert.deepEqual(downloads.filter((path) => path.includes("320193")), [
     "/api/xbrl/companyfacts/CIK0000320193.json",
     "/submissions/CIK0000320193.json",
   ], "one download serves both years");
   assert.deepEqual(warnings.at(-1), ["analyze SEC hydration failed; the engine reports the gap", { issuer_id: UNREACHABLE, reason: "provider_error", error: "sec_edgar: HTTP 503" }]);
+
+  const before = downloads.length;
+  await hydrateAnalyzeIssuers(db, fetcher, new Map([[LISTED, 2]]), { warn() {} });
+  assert.deepEqual(downloads.slice(before), [], "years stored with their proofs are not downloaded again");
 });
