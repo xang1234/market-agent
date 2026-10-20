@@ -22,13 +22,11 @@ import type { PersistParentArtifact } from "../../financial-engine/src/finalize.
 import { buildDeterministicPlan, type DeterministicUnits, type PlanningContext, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import type { ParentRecovery } from "../../financial-engine/src/recovery.ts";
-import { issuerLabels, publishRequest, type FinancialMode, type RequestGap } from "../../financial-engine/src/request.ts";
+import { issuerLabels, publishRequest, type RequestGap } from "../../financial-engine/src/request.ts";
 import type { RunRecord } from "../../financial-engine/src/run-record.ts";
 import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier.ts";
 import { ANALYZE_PLAYBOOKS, type AnalyzePlaybook } from "./playbook.ts";
 import { AnalyzeRunMetadataError, parseAnalyzeRunMetadata, type AnalyzeRunFinancialMetadata, type AnalyzeRunMetadataV1 } from "./runMetadata.ts";
-
-export type AnalyzeFinancialMode = FinancialMode;
 
 /** Why a declared section has no committed row: the engine's reason, or what committed state shows. */
 export type AnalyzeFinancialGapReason = RequestGap | "verification_failed" | "not_started";
@@ -105,22 +103,21 @@ export function financialSectionIds(playbook: AnalyzePlaybook): string[] {
   return playbook.sections.map((section) => section.section_id).filter((id) => Object.hasOwn(FINANCIAL_SECTIONS, id));
 }
 
-/** Freezes the memo's financial context, or null when the lane is off or the memo has nothing numerical to compute. */
+/** Freezes the memo's financial context, or null when the memo has nothing numerical to compute. */
 export function prepareAnalyzeFinancialContext(input: {
-  mode: AnalyzeFinancialMode;
   playbook: AnalyzePlaybook;
   primary: Readonly<{ kind: "issuer"; id: string }> | null;
   peers: ReadonlyArray<Readonly<{ kind: "issuer"; id: string }>>;
   knowledge_cutoff: string;
 }): AnalyzeRunFinancialMetadata | null {
-  if (input.mode === "off" || input.primary === null) return null;
+  if (input.primary === null) return null;
   const sections = financialSectionIds(input.playbook);
   if (sections.length === 0) return null;
   const peers = sections.includes("peer_table")
     ? input.peers.filter((peer, index, all) => peer.id !== input.primary!.id && all.findIndex((other) => other.id === peer.id) === index)
     : [];
   return Object.freeze({
-    mode: input.mode,
+    mode: "enforce",
     knowledge_cutoff: new Date(input.knowledge_cutoff).toISOString(),
     reporting_basis: "as_reported",
     catalog_version: CATALOG_VERSION,
@@ -130,9 +127,22 @@ export function prepareAnalyzeFinancialContext(input: {
   });
 }
 
-/** Sections the engine answers for this memo; legacy producers must not also emit them. */
-export function sectionsServedByEngine(context: AnalyzeRunFinancialMetadata | null): ReadonlySet<string> {
-  return new Set(context?.sections ?? []);
+/** Each issuer's planned reads: how many of its latest fiscal years each metric is read for, so hydration fetches exactly those. */
+export function latestReadsByIssuer(context: AnalyzeRunFinancialMetadata): ReadonlyMap<string, ReadonlyMap<string, number>> {
+  const { draft } = planShape(context);
+  const issuerBySlot = new Map(draft.subjects.map((subject) => [subject.slot_id, subject.mention]));
+  const reads = new Map<string, Map<string, number>>();
+  for (const operation of draft.operations) {
+    if (operation.operation !== "reported_metric") continue;
+    const period = operation.period as { kind: string; period_type?: string; offset: number };
+    if (period.kind !== "latest" || period.period_type !== "annual") throw new Error(`${operation.node_id}: hydration fetches only the latest fiscal years`);
+    const issuer = issuerBySlot.get(operation.subject_slot as string)!;
+    const metrics = reads.get(issuer) ?? new Map<string, number>();
+    const metric = operation.metric_key as string;
+    metrics.set(metric, Math.max(metrics.get(metric) ?? 0, period.offset + 1));
+    reads.set(issuer, metrics);
+  }
+  return reads;
 }
 
 export type AnalyzeFinancialRun = Readonly<{
@@ -208,8 +218,15 @@ function analyzeAuthority(userId: string, analyzeRunId: string, templateId: stri
   });
 }
 
+type PlanDraft = Readonly<{
+  subjects: ReadonlyArray<Readonly<{ slot_id: string; mention: string }>>;
+  operations: ReadonlyArray<Operation>;
+  outputs: ReadonlyArray<Readonly<{ output_id: string; node_id: string }>>;
+  thresholds: readonly [];
+}>;
+
 /** The memo's plan draft and its units (one per section), built in one pass over the requested sections. */
-function planShape(context: AnalyzeRunFinancialMetadata): { draft: object; units: DeterministicUnits } {
+function planShape(context: AnalyzeRunFinancialMetadata): { draft: PlanDraft; units: DeterministicUnits } {
   const slots = [PRIMARY_SLOT, ...context.requested_peers.map((_peer, index) => `s${index + 1}`)];
   const subjects = [context.primary, ...context.requested_peers];
   const operations = new Map<string, Operation>();

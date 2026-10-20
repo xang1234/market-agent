@@ -109,7 +109,7 @@ cd services/chat && npm run golden:live [base URL]
 
 Chat reads persisted facts only, so the check first warms NVDA and AMD. It resolves each ticker through Polygon, then reads its key stats and eight quarterly income statements from SEC, which persists them. Reruns read the persisted data back. The check stops before any turn if a company cannot be warmed.
 
-SEC facts stored before 2026-10-16 lack the proofs the financial engine checks, and reads never fetch them again. Run the backfill once per database to re-fetch those filings, prove the facts they still state, replace the income facts they contradict, and add the cash flow and balance sheet for each income period on file. It skips the frozen golden dataset.
+SEC facts stored before 2026-10-16 lack the proofs the financial engine checks, and reads never fetch them again. An Analyze memo is the exception: before it freezes its cutoff it fetches the fiscal years its plan reads for each issuer (the latest year, and the one before for a revenue trend), unless they are already stored with their proofs. Run the backfill once per database to re-fetch those filings, prove the facts they still state, replace the income facts they contradict, and add the cash flow and balance sheet for each income period on file. It skips the frozen golden dataset.
 
 ```bash
 cd services/fundamentals

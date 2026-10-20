@@ -641,10 +641,10 @@ test("persistImportedArtifactMessage inserts an add-only assistant message for a
         {
           message_id: "33333333-3333-4333-a333-333333333333",
           thread_id: values?.[0],
-          role: values?.[2],
-          snapshot_id: values?.[3],
-          blocks: JSON.parse(String(values?.[4])),
-          content_hash: values?.[5],
+          role: values?.[1],
+          snapshot_id: values?.[2],
+          blocks: JSON.parse(String(values?.[3])),
+          content_hash: values?.[4],
           created_at: "2026-05-06T00:00:00.000Z",
         },
       ];
@@ -671,6 +671,9 @@ test("persistImportedArtifactMessage inserts an add-only assistant message for a
     "11111111-1111-4111-a111-111111111111",
     "00000000-0000-4000-8000-000000000001",
   ]);
+  const insert = db.queries.find((query) => query.text.includes("insert into chat_messages"))!;
+  const placeholders = new Set([...insert.text.matchAll(/\$(\d+)/gu)].map((match) => Number(match[1])));
+  assert.equal(insert.values?.length, placeholders.size, "every parameter has a placeholder: Postgres cannot type an unused one");
 });
 
 test("persistImportedArtifactMessage returns null and does not insert for wrong-user threads", async () => {

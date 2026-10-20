@@ -29,10 +29,9 @@ import {
 } from "../../analyze/src/index.ts";
 import {
   financialSectionIds,
+  latestReadsByIssuer,
   loadAnalyzeFinancialSections,
   prepareAnalyzeFinancialContext,
-  sectionsServedByEngine,
-  type AnalyzeFinancialMode,
   type AnalyzeFinancialRun,
   type AnalyzeFinancialSections,
 } from "../../analyze/src/financial-section.ts";
@@ -40,6 +39,7 @@ import type { AnalyzePlaybook } from "../../analyze/src/playbook.ts";
 import {
   shareArtifactToChat,
   type ShareableArtifactBlock,
+  type ShareToChatResult,
 } from "../../artifact/src/index.ts";
 import {
   persistImportedArtifactMessage,
@@ -152,8 +152,9 @@ export type AnalyzeServiceDeps = {
     body: Record<string, unknown>;
     blocks: ReadonlyArray<Record<string, unknown>>;
   }): Promise<SnapshotSealResult>;
-  // Optional per-section run: merges deterministic section blocks (peer_table)
-  // into the run. When absent, createRun falls back to the narrative memo only.
+  // Optional per-section run: merges the vendor-estimate section blocks
+  // (analyst_overview, price_targets) into the run. When absent, createRun
+  // falls back to the narrative memo only.
   buildAnalyzeRunSeals?(input: {
     snapshotId: string;
     userId: string;
@@ -161,8 +162,6 @@ export type AnalyzeServiceDeps = {
     playbook: AnalyzePlaybook;
     subjectRefs: ReadonlyArray<{ kind: string; id: string }>;
     asOf: string;
-    // Sections the verified financial engine answers; their legacy producers must not run.
-    servedByEngine?: ReadonlySet<string>;
   }): Promise<{
     blocks: ReadonlyArray<Record<string, unknown>>;
     sealSnapshot: () => Promise<SnapshotSealResult>;
@@ -172,13 +171,15 @@ export type AnalyzeServiceDeps = {
 };
 
 export type AnalyzeFinancialComposition = {
-  mode: AnalyzeFinancialMode;
   resolvePeers(primaryIssuerId: string): Promise<ReadonlyArray<{ kind: "issuer"; id: string }>>;
+  // Stores each issuer's planned reads (metric → latest fiscal years) from SEC; a failure leaves a gap, never a failed memo.
+  hydrate(reads: ReadonlyMap<string, ReadonlyMap<string, number>>): Promise<void>;
   publish(run: AnalyzeFinancialRun): Promise<AnalyzeFinancialSections>;
 };
 
 // Freezes a new memo's numerical context (cutoff, basis, catalog, exact peers)
-// before any work, so every numerical section is computed under it.
+// before any work, so every numerical section is computed under it. The engine
+// never reads a fact stored after the cutoff, so it is taken after hydration.
 async function newFinancialContext(
   deps: AnalyzeServiceDeps,
   playbook: AnalyzePlaybook,
@@ -189,13 +190,16 @@ async function newFinancialContext(
   const primary = subjectRefs.find((ref) => ref.kind === "issuer");
   if (!primary) return null;
   const peers = financialSectionIds(playbook).includes("peer_table") ? await lane.resolvePeers(primary.id) : [];
-  return prepareAnalyzeFinancialContext({
-    mode: lane.mode,
+  const contextAt = (cutoff: Date) => prepareAnalyzeFinancialContext({
     playbook,
     primary: { kind: "issuer", id: primary.id },
     peers,
-    knowledge_cutoff: new Date().toISOString(),
+    knowledge_cutoff: cutoff.toISOString(),
   });
+  const planned = contextAt(new Date());
+  if (planned === null) return null;
+  await lane.hydrate(latestReadsByIssuer(planned));
+  return contextAt(new Date());
 }
 
 function requireNonEmpty(value: unknown, label: string): string {
@@ -219,11 +223,6 @@ export function contentHash(value: JsonValue): string {
   return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
 }
 
-// Shared persist+seal tail for both createRun and rerun. When the per-section
-// runner is wired AND the run has a playbook, it runs the deterministic section
-// producers (e.g. peer_table) and merges their blocks + seal; otherwise the run
-// is the narrative memo only. Seals with the snapshot-id mismatch guard and
-// persists the run row.
 async function persistAnalyzeRun(
   deps: AnalyzeServiceDeps,
   input: {
@@ -240,7 +239,8 @@ async function persistAnalyzeRun(
 ): Promise<DevAnalyzeRun> {
   const runAsOf = (input.memoBlocks[0]?.as_of as string | undefined) ?? new Date().toISOString();
   const runId = randomUUID();
-  const financial = deps.analyzeFinancial ? input.runMetadata.financial ?? null : null;
+  const lane = deps.analyzeFinancial;
+  const financial = lane ? input.runMetadata.financial ?? null : null;
   let blocks: ReadonlyArray<Record<string, unknown>>;
   let sealRun: () => Promise<SnapshotSealResult>;
   if (deps.buildAnalyzeRunSeals && input.playbook) {
@@ -251,7 +251,6 @@ async function persistAnalyzeRun(
       playbook: input.playbook,
       subjectRefs: input.subjectRefs,
       asOf: runAsOf,
-      servedByEngine: sectionsServedByEngine(financial),
     });
     blocks = Object.freeze(runSeals.blocks.map((block) => Object.freeze({ ...block })));
     sealRun = runSeals.sealSnapshot;
@@ -299,9 +298,9 @@ async function persistAnalyzeRun(
   if (!persisted.ok) {
     throw new DevApiHttpError(422, "snapshot seal failed");
   }
-  if (financial !== null) {
+  if (lane && financial !== null) {
     try {
-      await deps.analyzeFinancial!.publish({
+      await lane.publish({
         user_id: input.userId,
         analyze_run_id: persisted.run.run_id,
         template_id: input.template.template_id,
@@ -373,6 +372,9 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
         added: template.added_subject_refs,
       });
       const instructions = resolvedPlaybook.instructions;
+      if (!deps.runAnalyzeWorkflow) {
+        throw new DevApiHttpError(503, "durable analyze workflow is not configured");
+      }
       const financial = await newFinancialContext(deps, resolvedPlaybook.playbook, subjectRefs);
       const runMetadata = serializeAnalyzeRunMetadataV1({
         template_id: template.template_id,
@@ -384,9 +386,6 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
         subject_refs: subjectRefs,
         ...(financial ? { financial } : {}),
       });
-      if (!deps.runAnalyzeWorkflow) {
-        throw new DevApiHttpError(503, "durable analyze workflow is not configured");
-      }
       const rendered = await deps.runAnalyzeWorkflow({
         userId,
         template,
@@ -439,6 +438,7 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
           source_categories: metadata.source_categories,
         }).prompt
         : metadata.instructions;
+      const financial = metadata.financial ?? (playbook ? await newFinancialContext(deps, playbook, subjectRefs) : null);
       const rerunMetadata = serializeAnalyzeRunMetadataV1({
         template_id: template.template_id,
         template_version: template.version,
@@ -448,8 +448,7 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
         source_categories: sourceCategories,
         subject_refs: subjectRefs,
         rerun_of_run_id: original.run_id,
-        // A rerun keeps the original's numerical context (cutoff, basis, peers), so it reproduces, not re-asks.
-        ...(metadata.financial ? { financial: metadata.financial } : {}),
+        ...(financial ? { financial } : {}),
       });
       const snapshotId = randomUUID();
       const body = {
@@ -488,7 +487,7 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
       const run = await getAnalyzeTemplateRunForUser(deps.db, { userId, runId });
       if (run === null) throw new DevApiHttpError(404, "analyze run not found");
       const blocks = enrichAnalyzeRunBlocks(run.blocks, run);
-      const shared = await shareArtifactToChat({
+      const shared = acceptedShare(await shareArtifactToChat({
         sources: [
           {
             source_kind: "memo",
@@ -497,10 +496,18 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
           },
         ],
         egress: { db: deps.db },
-      });
-      if (!shared.ok) throw new DevApiHttpError(422, "artifact share rejected", shared.rejections);
+      }));
       const snapshotId = shared.origin_snapshot_ids[0];
       if (snapshotId === undefined) throw new DevApiHttpError(422, "artifact share rejected");
+      // Each engine section is sealed under its own certificate and shared
+      // under it, so erasing the financial run also erases the chat copy.
+      const sections = (await loadAnalyzeFinancialSections(deps.db, { userId, analyzeRunId: run.run_id }))?.sections ?? [];
+      const sectionShares = await Promise.all(sections.flatMap((section) => section.status === "published"
+        ? [shareArtifactToChat({
+            sources: [{ source_kind: "block", origin_snapshot_id: section.snapshot_id, blocks: [section.block] }],
+            egress: { db: deps.db },
+          }).then(acceptedShare)]
+        : []));
 
       const client = await deps.db.connect();
       try {
@@ -518,11 +525,21 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
           content_hash: contentHash(shared.blocks as JsonValue),
         });
         if (message === null) throw new DevApiHttpError(404, "chat thread not found");
+        for (const section of sectionShares) {
+          await persistImportedArtifactMessage(client, {
+            thread_id: thread.thread_id,
+            user_id: userId,
+            role: "assistant",
+            snapshot_id: section.origin_snapshot_ids[0]!,
+            blocks: section.blocks as JsonValue,
+            content_hash: contentHash(section.blocks as JsonValue),
+          });
+        }
         await client.query("commit");
         return {
           thread,
           message,
-          origin_snapshot_ids: shared.origin_snapshot_ids,
+          origin_snapshot_ids: [...shared.origin_snapshot_ids, ...sectionShares.flatMap((section) => section.origin_snapshot_ids)],
         };
       } catch (error) {
         try {
@@ -538,6 +555,11 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
       }
     },
   };
+}
+
+function acceptedShare(result: ShareToChatResult): Extract<ShareToChatResult, { ok: true }> {
+  if (!result.ok) throw new DevApiHttpError(422, "artifact share rejected", result.rejections);
+  return result;
 }
 
 const DEFAULT_ANALYZE_RUN_LIMIT = 25;

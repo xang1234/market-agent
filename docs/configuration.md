@@ -9,7 +9,7 @@ The app starts with no keys at all. Without keys, market surfaces show as unavai
 | Variable | Turns on | Without it |
 |---|---|---|
 | `POLYGON_API_KEY` | Ticker discovery, live quotes, and price bars | Unknown tickers resolve as not found. Market surfaces show as unavailable. |
-| `SEC_EDGAR_USER_AGENT` | On-demand SEC company-facts ingestion for statements and key stats | No new fundamentals are fetched. Use a string you control, for example `market-agent-dev you@example.com`. |
+| `SEC_EDGAR_USER_AGENT` | On-demand SEC company-facts ingestion for statements, key stats and Analyze memo issuers | No new fundamentals are fetched, and Analyze memos read only facts already stored. Use a string you control, for example `market-agent-dev you@example.com`. |
 
 ## Models
 
@@ -61,7 +61,7 @@ An `anthropic` channel calls the Claude Messages API directly. It turns prompt c
 
 Each surface can take its numbers from the financial engine, which plans a calculation, binds it to stored facts, and computes it with exact fractions. The engine is off by default.
 
-Thesis conditions and Discovery criteria always use the engine. Set each of `CHAT_FINANCIAL_MODE` and `ANALYZE_FINANCIAL_MODE` to one of two values:
+Analyze memos, thesis conditions and Discovery criteria always use the engine, so dev-api checks readiness at startup. Set `CHAT_FINANCIAL_MODE` to one of two values:
 
 - `off` shows legacy numbers, labelled legacy.
 - `enforce` shows only certified calculations. Anything the engine cannot verify appears as a gap, never as prose.

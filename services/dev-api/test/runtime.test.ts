@@ -31,7 +31,7 @@ test("dev-api wires the in-repo durable adapter runtime when only DATABASE_URL i
   assert.equal(typeof adapters?.agents.run, "function");
 });
 
-test("even with the worker off, startup checks financial readiness for thesis, so an unreachable database stops it", async () => {
+test("even with the worker off, startup checks financial readiness for analyze and thesis, so an unreachable database stops it", async () => {
   await assert.rejects(createDevApiRuntimeFromEnv({ DATABASE_URL: "postgres://postgres@127.0.0.1:1/market_agent", FINANCIAL_WORKER_ENABLED: "false" }), /ECONNREFUSED/u);
 });
 
@@ -42,10 +42,17 @@ test("dev-api default runtime module resolves when loader cwd is the repo root",
   assert.equal(typeof adapters?.agents.run, "function");
 });
 
-test("the worker always recovers grid runs, and analyze runs only when the analyze lane is on", () => {
+test("the worker recovers memo and grid runs", () => {
   const db = { query: async () => assert.fail("building the parents runs no query") };
-  assert.deepEqual(Object.keys(recoveryParents(db, undefined)), ["analyst_grid_run"]);
-  assert.deepEqual(Object.keys(recoveryParents(db, { publish: () => undefined })), ["analyze_memo_run", "analyst_grid_run"]);
+  assert.deepEqual(Object.keys(recoveryParents(db)), ["analyze_memo_run", "analyst_grid_run"]);
+});
+
+test("dev-api refuses a runtime module whose Analyze lane cannot hydrate", async () => {
+  const UNREACHABLE = { DATABASE_URL: "postgres://example.invalid/market_agent", FINANCIAL_WORKER_ENABLED: "false" };
+  await assert.rejects(
+    createDevApiRuntimeFromEnv({ ...UNREACHABLE, DEV_API_RUNTIME_MODULE: resolve(repoRoot, "services/dev-api/test/runtime-module-without-hydrate.ts") }),
+    /DEV_API_RUNTIME_MODULE must export analyzeFinancial with resolvePeers, hydrate and publish/u,
+  );
 });
 
 test("dev-api imports evidence inspector without evaluating evidence's optional object-store deps", () => {

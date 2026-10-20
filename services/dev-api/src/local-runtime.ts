@@ -37,19 +37,17 @@ import { mergeSealInputs } from "../../analyze/src/seal-input-merge.ts";
 import { runDeterministicSections } from "../../analyze/src/section-runner.ts";
 import type { AnalyzePlaybook } from "../../analyze/src/playbook.ts";
 import { publishAnalyzeFinancialSections } from "../../analyze/src/financial-section.ts";
-import { loadFinancialModes } from "./financial-env.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { createSqlPeerSetResolver } from "../../fundamentals/src/peer-set-resolver.ts";
-import {
-  createSecBackedStatementRepository,
-  createSecBackedStatsRepository,
-} from "../../fundamentals/src/sec-facts-repository.ts";
-import { createSecCompanyFactsHttpFetcher } from "../../fundamentals/src/sec-edgar-http.ts";
+import { FundamentalsDataUnavailableError } from "../../fundamentals/src/availability.ts";
+import { hydrateSecIssuerLatestYears } from "../../fundamentals/src/sec-facts-repository.ts";
+import type { SecEdgarFetcher } from "../../fundamentals/src/sec-edgar.ts";
+import { createSecCompanyFactsHttpFetcher, withSecFairAccess } from "../../fundamentals/src/sec-edgar-http.ts";
+import { SEC_EDGAR_FILING_SOURCE_ID } from "../../fundamentals/src/provider-sources.ts";
 import { consensusRepositoryFromEnv } from "../../fundamentals/src/dev-providers.ts";
 import { createPostgresIssuerProfileRepository } from "../../fundamentals/src/issuer-repository.ts";
 import { createPostgresMarketCacheRepository } from "../../market/src/cache-repository.ts";
 import { createCurrentPriceSource } from "../../analyze/src/current-price-source.ts";
-import { SEC_EDGAR_FILING_SOURCE_ID } from "../../fundamentals/src/provider-sources.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import type {
   DevApiAgentLoopStageFactory,
@@ -185,34 +183,13 @@ export async function sealAnalyzeSnapshot(
   return sealSnapshotWithPool(pool(), sealInput);
 }
 
-// SEC-backed stats + same-industry peers for the section producers, built from
-// the pool + SEC env exactly as services/fundamentals/src/dev.ts does. The stats
-// repo reads persisted facts; the optional fetcher only fires on a cache miss
-// when SEC_EDGAR_USER_AGENT is set.
 function analyzeSectionDeps() {
   const db = pool();
-  const secFetcher = process.env.SEC_EDGAR_USER_AGENT
-    ? createSecCompanyFactsHttpFetcher({
-        userAgent: process.env.SEC_EDGAR_USER_AGENT,
-        baseUrl: process.env.SEC_EDGAR_BASE_URL,
-      })
-    : null;
-  const statements = createSecBackedStatementRepository(db, {
-    fetcher: secFetcher,
-    sourceId: SEC_EDGAR_FILING_SOURCE_ID,
-  });
-  const stats = createSecBackedStatsRepository(db, { statements, fetcher: secFetcher });
   const price = createCurrentPriceSource(
     createPostgresIssuerProfileRepository(db),
     createPostgresMarketCacheRepository(db),
   );
-  return {
-    db,
-    peers: createSqlPeerSetResolver(db),
-    stats,
-    consensus: consensusRepositoryFromEnv(db),
-    price,
-  };
+  return { db, consensus: consensusRepositoryFromEnv(db), price };
 }
 
 export function primaryIssuerRef(
@@ -222,10 +199,6 @@ export function primaryIssuerRef(
   return issuer ? { kind: "issuer", id: issuer.id } : null;
 }
 
-// The per-section run: build the memo seal input, run the deterministic section
-// producers (peer_table → emitPeerComparisonBlock, writing derived facts to the
-// pool), merge into one seal input, and hand back the combined blocks (for the
-// persisted run row) plus a sealSnapshot closure that seals the merged input.
 export async function buildAnalyzeRunSeals(input: {
   snapshotId: string;
   userId: string;
@@ -233,7 +206,6 @@ export async function buildAnalyzeRunSeals(input: {
   playbook: AnalyzePlaybook;
   subjectRefs: ReadonlyArray<{ kind: string; id: string }>;
   asOf: string;
-  servedByEngine?: ReadonlySet<string>;
 }): Promise<{
   blocks: ReadonlyArray<Record<string, unknown>>;
   sealSnapshot: () => Promise<SnapshotSealResult>;
@@ -248,7 +220,6 @@ export async function buildAnalyzeRunSeals(input: {
     primary: primaryIssuerRef(input.subjectRefs),
     snapshotId: input.snapshotId,
     asOf: input.asOf,
-    servedByEngine: input.servedByEngine,
   });
   const merged = mergeSealInputs(memoSeal, sectionSeals);
   return {
@@ -259,18 +230,56 @@ export async function buildAnalyzeRunSeals(input: {
 
 const ANALYZE_FINANCIAL_PEER_LIMIT = 5;
 
-const financialModes = loadFinancialModes(process.env);
+// SEC's fair-access rate limits the client, not the memo, so every memo shares one limiter.
+const secFetcher = process.env.SEC_EDGAR_USER_AGENT
+  ? withSecFairAccess(createSecCompanyFactsHttpFetcher({
+      userAgent: process.env.SEC_EDGAR_USER_AGENT,
+      baseUrl: process.env.SEC_EDGAR_BASE_URL,
+    }))
+  : null;
 
-export const analyzeFinancial = financialModes.analyze === "off"
-  ? undefined
-  : {
-      mode: financialModes.analyze,
-      resolvePeers: async (primaryIssuerId: string) =>
-        (await createSqlPeerSetResolver(pool()).resolvePeers(primaryIssuerId, { limit: ANALYZE_FINANCIAL_PEER_LIMIT }))
-          .map((peer) => ({ kind: "issuer" as const, id: peer.id })),
-      publish: (run: Parameters<typeof publishAnalyzeFinancialSections>[1]) =>
-        publishAnalyzeFinancialSections({ pool: pool(), evidence: createEvidenceFinancialPort }, run),
-    };
+const HYDRATION_BUDGET_MS = 15_000;
+
+// Every failure, SEC's or the store's, is logged and leaves the engine to
+// report the gap; the memo never fails for want of fresh facts. Hydration
+// past its budget keeps running, and the memo freezes its cutoff without it.
+export async function hydrateAnalyzeIssuers(
+  db: Pool,
+  fetcher: SecEdgarFetcher | null,
+  reads: ReadonlyMap<string, ReadonlyMap<string, number>>,
+  logger: Pick<Console, "warn"> = console,
+  budgetMs = HYDRATION_BUDGET_MS,
+): Promise<void> {
+  if (fetcher === null) return;
+  const settled = Promise.all([...reads].map(async ([issuerId, issuerReads]) => {
+    try {
+      await hydrateSecIssuerLatestYears(db, { issuerId, reads: issuerReads, fetcher, sourceId: SEC_EDGAR_FILING_SOURCE_ID, logger });
+    } catch (error) {
+      logger.warn("analyze SEC hydration failed; the engine reports the gap", {
+        issuer_id: issuerId,
+        reason: error instanceof FundamentalsDataUnavailableError ? error.reason : "store_failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const overBudget = new Promise<true>((resolve) => {
+    timer = setTimeout(() => resolve(true), budgetMs);
+  });
+  if (await Promise.race([settled.then(() => false), overBudget])) {
+    logger.warn("analyze SEC hydration ran past its budget; the memo uses the facts stored so far", { budget_ms: budgetMs });
+  }
+  clearTimeout(timer);
+}
+
+export const analyzeFinancial = {
+  resolvePeers: async (primaryIssuerId: string) =>
+    (await createSqlPeerSetResolver(pool()).resolvePeers(primaryIssuerId, { limit: ANALYZE_FINANCIAL_PEER_LIMIT }))
+      .map((peer) => ({ kind: "issuer" as const, id: peer.id })),
+  hydrate: (reads: ReadonlyMap<string, ReadonlyMap<string, number>>) => hydrateAnalyzeIssuers(pool(), secFetcher, reads),
+  publish: (run: Parameters<typeof publishAnalyzeFinancialSections>[1]) =>
+    publishAnalyzeFinancialSections({ pool: pool(), evidence: createEvidenceFinancialPort }, run),
+};
 
 export async function inspectEvidence(
   input: Parameters<NonNullable<DevApiServiceAdapterDeps["inspectEvidence"]>>[0],

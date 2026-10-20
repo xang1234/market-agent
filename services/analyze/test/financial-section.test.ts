@@ -4,13 +4,12 @@ import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { IDS, ORIGINAL_REVENUE, seedCashResilience } from "../../financial-engine/test/db-fixtures.ts";
 import {
   financialSectionIds,
+  latestReadsByIssuer,
   loadAnalyzeFinancialSections,
   prepareAnalyzeFinancialContext,
-  sectionsServedByEngine,
   type AnalyzeFinancialSection,
 } from "../src/financial-section.ts";
 import { parseAnalyzeRunMetadata } from "../src/runMetadata.ts";
-import { runDeterministicSections } from "../src/section-runner.ts";
 import { committed, createMemoRun, CUTOFF, memoDatabase, playbook } from "./financial-fixtures.ts";
 
 type Published = Extract<AnalyzeFinancialSection, { status: "published" }>;
@@ -37,10 +36,9 @@ test("numerical sections are chosen per playbook; narrative sections stay with t
 test("the financial context freezes cutoff, basis, catalog, and the exact peers requested", () => {
   const base = { playbook: playbook("peer_comparison"), primary: { kind: "issuer" as const, id: IDS.issuerA }, knowledge_cutoff: "2024-03-01T05:00:00+05:00" };
   const peers = [IDS.issuerB, IDS.issuerA, IDS.issuerB].map((id) => ({ kind: "issuer" as const, id }));
-  assert.equal(prepareAnalyzeFinancialContext({ ...base, mode: "off", peers }), null, "the lane is off");
-  assert.equal(prepareAnalyzeFinancialContext({ ...base, mode: "enforce", primary: null, peers }), null, "no issuer to compute for");
-  assert.equal(prepareAnalyzeFinancialContext({ ...base, mode: "enforce", playbook: playbook("variant_view"), peers }), null, "nothing numerical");
-  const context = prepareAnalyzeFinancialContext({ ...base, mode: "enforce", peers })!;
+  assert.equal(prepareAnalyzeFinancialContext({ ...base, primary: null, peers }), null, "no issuer to compute for");
+  assert.equal(prepareAnalyzeFinancialContext({ ...base, playbook: playbook("variant_view"), peers }), null, "nothing numerical");
+  const context = prepareAnalyzeFinancialContext({ ...base, peers })!;
   assert.deepEqual(context, {
     mode: "enforce",
     knowledge_cutoff: "2024-03-01T00:00:00.000Z",
@@ -50,23 +48,20 @@ test("the financial context freezes cutoff, basis, catalog, and the exact peers 
     requested_peers: [{ kind: "issuer", id: IDS.issuerB }],
     sections: ["peer_table"],
   });
-  const withoutPeerTable = prepareAnalyzeFinancialContext({ ...base, mode: "enforce", playbook: playbook("earnings_quality"), peers })!;
+  const withoutPeerTable = prepareAnalyzeFinancialContext({ ...base, playbook: playbook("earnings_quality"), peers })!;
   assert.deepEqual(withoutPeerTable.requested_peers, [], "peers are requested only by a section that compares them");
 });
 
-test("sections the engine serves never run their legacy producers", async () => {
-  const context = prepareAnalyzeFinancialContext({
-    mode: "enforce", playbook: playbook("peer_comparison"), primary: { kind: "issuer", id: IDS.issuerA }, peers: [], knowledge_cutoff: CUTOFF,
-  });
-  const untouchable = new Proxy({}, { get: () => { throw new Error("a legacy producer ran for an engine-served section"); } });
-  const seals = await runDeterministicSections(untouchable as never, {
-    playbook: playbook("peer_comparison"),
-    primary: { kind: "issuer", id: IDS.issuerA },
-    snapshotId: "11111111-1111-4111-a111-111111111111",
-    asOf: CUTOFF,
-    servedByEngine: sectionsServedByEngine(context),
-  });
-  assert.deepEqual(seals, []);
+test("hydration reads each issuer's planned metrics and years from the memo's own plan", () => {
+  const context = (id: string, peers: string[] = []) => prepareAnalyzeFinancialContext({
+    playbook: playbook(id), primary: { kind: "issuer", id: IDS.issuerA }, peers: peers.map((peer) => ({ kind: "issuer" as const, id: peer })), knowledge_cutoff: CUTOFF,
+  })!;
+  const reads = (id: string, peers?: string[]) => [...latestReadsByIssuer(context(id, peers))].map(([issuer, metrics]) => [issuer, Object.fromEntries(metrics)]);
+  assert.deepEqual(reads("earnings_quality"), [[IDS.issuerA, { revenue: 2 }]], "revenue_trend compares the latest year with the one before");
+  assert.deepEqual(reads("investment_memo"), [[IDS.issuerA, {
+    revenue: 2, gross_profit: 1, operating_cash_flow: 1, net_income: 1, total_liabilities: 1, total_assets: 1, total_equity: 1,
+  }]]);
+  assert.deepEqual(reads("peer_comparison", [IDS.issuerB]), [[IDS.issuerA, { revenue: 1 }], [IDS.issuerB, { revenue: 1 }]], "peer_table reads only the latest year");
 });
 
 test("analyze financial sections", { timeout: 300_000 }, async (t) => {

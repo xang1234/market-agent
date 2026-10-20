@@ -4,6 +4,8 @@ import {
   backfillSecCompanionStatements,
   createSecBackedStatementRepository,
   createSecBackedStatsRepository,
+  hydrateSecIssuer,
+  hydrateSecIssuerLatestYears,
 } from "../src/sec-facts-repository.ts";
 import type { MetricDefinition } from "../src/metric-mapper.ts";
 import {
@@ -13,6 +15,7 @@ import {
 } from "../src/sec-edgar.ts";
 import { FundamentalsDataUnavailableError } from "../src/availability.ts";
 import { secCompanyFetcher } from "./fakes.ts";
+import { GOLDEN_ISSUER_IDS } from "../../shared/src/golden-issuers.ts";
 
 const ISSUER_ID = "11111111-1111-4111-8111-111111111111";
 const SOURCE_ID = "22222222-2222-4222-8222-222222222222";
@@ -486,6 +489,181 @@ test("SEC-backed stats can ingest latest annual companyfacts on demand", async (
   assert.equal(fetchCount > 0, true);
 });
 
+test("hydrating an issuer's latest years stores each of them from one download", async () => {
+  const db = new FakeFundamentalsDb();
+  const downloads: string[] = [];
+  const fetcher = secCompanyFetcher(() => companyFacts());
+  await hydrateSecIssuerLatestYears(db, {
+    issuerId: ISSUER_ID,
+    reads: new Map([["revenue", 2]]),
+    fetcher: (path) => { downloads.push(path); return fetcher(path); },
+    sourceId: SOURCE_ID,
+    clock: () => new Date("2026-05-08T00:00:00.000Z"),
+  });
+  assert.deepEqual([...new Set(db.facts.map((fact) => fact.fiscal_year))].sort(), [2023, 2024]);
+  assert.equal(db.facts.find((fact) => fact.fiscal_year === 2024 && metricKeyFor(db.metrics, fact.metric_id) === "revenue")?.value_num, 1000);
+  assert.deepEqual(downloads.filter((path) => path.startsWith("/api/xbrl/companyfacts/")), ["/api/xbrl/companyfacts/CIK0000320193.json"]);
+});
+
+test("an issuer whose planned reads are stored with proofs is not downloaded again", async () => {
+  const proven = (rows: Array<{ metric_key: string; fiscal_year: number; period_end: string }>) => class extends FakeFundamentalsDb {
+    async query<R extends Record<string, unknown> = Record<string, unknown>>(text: string, values: unknown[] = []): Promise<{ rows: R[] }> {
+      if (text.includes("current_fact_precision_attestations a")) return { rows: rows as unknown as R[] };
+      return super.query<R>(text, values);
+    }
+  };
+  const revenueOnly = proven([
+    { metric_key: "revenue", fiscal_year: 2025, period_end: "2025-12-31" },
+    { metric_key: "revenue", fiscal_year: 2024, period_end: "2024-12-31" },
+  ]);
+  const withGrossProfit = proven([
+    { metric_key: "revenue", fiscal_year: 2025, period_end: "2025-12-31" },
+    { metric_key: "revenue", fiscal_year: 2024, period_end: "2024-12-31" },
+    { metric_key: "gross_profit", fiscal_year: 2025, period_end: "2025-12-31" },
+  ]);
+  const downloads: string[] = [];
+  const hydrate = (db: FakeFundamentalsDb, now: string, reads: ReadonlyMap<string, number>) => hydrateSecIssuerLatestYears(db, {
+    issuerId: ISSUER_ID,
+    reads,
+    fetcher: (path) => { downloads.push(path); return secCompanyFetcher(() => companyFacts())(path); },
+    sourceId: SOURCE_ID,
+    clock: () => new Date(now),
+  });
+  const plan = new Map([["revenue", 2], ["gross_profit", 1]]);
+  await hydrate(new withGrossProfit(), "2026-10-20T00:00:00.000Z", plan);
+  assert.deepEqual(downloads, [], "fresh proven reads are read, not fetched");
+  await hydrate(new revenueOnly(), "2026-10-20T00:00:00.000Z", plan);
+  assert.ok(downloads.length > 0, "a planned metric without proven facts is fetched");
+  downloads.length = 0;
+  await hydrate(new withGrossProfit(), "2027-06-01T00:00:00.000Z", plan);
+  assert.ok(downloads.length > 0, "a stored latest year older than a filing cycle is fetched again");
+});
+
+test("a prior year SEC cannot extract still lets the latest year be stored, then reports the failure", async () => {
+  const db = new FakeFundamentalsDb();
+  const facts = companyFacts();
+  facts.facts["us-gaap"].CostOfRevenue.units.USD[1]!.start = "2023-01-02";
+  await assert.rejects(
+    hydrateSecIssuerLatestYears(db, {
+      issuerId: ISSUER_ID,
+      reads: new Map([["revenue", 2]]),
+      fetcher: secCompanyFetcher(() => facts),
+      sourceId: SOURCE_ID,
+      clock: () => new Date("2026-05-08T00:00:00.000Z"),
+      logger: { warn() {} },
+    }),
+    (error) => error instanceof FundamentalsDataUnavailableError && /disagrees/u.test(error.message),
+  );
+  assert.deepEqual([...new Set(db.facts.map((fact) => fact.fiscal_year))], [2024]);
+});
+
+test("a year SEC has no statement for is skipped while the others are stored", async () => {
+  const db = new FakeFundamentalsDb();
+  await hydrateSecIssuerLatestYears(db, {
+    issuerId: ISSUER_ID,
+    reads: new Map([["revenue", 3]]),
+    fetcher: secCompanyFetcher(() => companyFacts()),
+    sourceId: SOURCE_ID,
+    clock: () => new Date("2026-05-08T00:00:00.000Z"),
+  });
+  assert.deepEqual([...new Set(db.facts.map((fact) => fact.fiscal_year))].sort(), [2023, 2024]);
+});
+
+test("an income line SEC tagged with a unit its metric cannot take is SEC's failure, not ours", async () => {
+  const db = new FakeFundamentalsDb();
+  const facts = companyFacts();
+  (facts.facts["us-gaap"] as Record<string, unknown>).WeightedAverageNumberOfSharesOutstandingBasic = annualUsd(100, 100);
+  await assert.rejects(
+    hydrateSecIssuer(db, {
+      issuerId: ISSUER_ID,
+      fiscal_year: 2024,
+      fiscal_period: "FY",
+      fetcher: secCompanyFetcher(() => facts),
+      sourceId: SOURCE_ID,
+      logger: { warn() {} },
+    }),
+    (error) => error instanceof FundamentalsDataUnavailableError && /not compatible/u.test(error.message),
+  );
+  assert.deepEqual(db.facts, []);
+});
+
+test("a metric our registry lacks is our failure, thrown as it is, not SEC's", async () => {
+  class EmptyRegistry extends FakeFundamentalsDb {
+    async query<R extends Record<string, unknown> = Record<string, unknown>>(text: string, values: unknown[] = []): Promise<{ rows: R[] }> {
+      if (text.toLowerCase().includes("from metrics")) return { rows: [] };
+      return super.query<R>(text, values);
+    }
+  }
+  await assert.rejects(
+    hydrateSecIssuer(new EmptyRegistry(), {
+      issuerId: ISSUER_ID,
+      fiscal_year: 2024,
+      fiscal_period: "FY",
+      fetcher: secCompanyFetcher(() => companyFacts()),
+      sourceId: SOURCE_ID,
+      logger: { warn() {} },
+    }),
+    (error) => !(error instanceof FundamentalsDataUnavailableError) && error instanceof Error && /not registered/u.test(error.message),
+  );
+});
+
+test("an accession SEC sent malformed is SEC's failure", async () => {
+  const db = new FakeFundamentalsDb();
+  const facts = companyFacts();
+  for (const concept of Object.values(facts.facts["us-gaap"])) {
+    for (const values of Object.values(concept.units) as SecConceptValue[][]) for (const value of values) value.accn = "not-an-accession";
+  }
+  await assert.rejects(
+    hydrateSecIssuer(db, {
+      issuerId: ISSUER_ID,
+      fiscal_year: 2024,
+      fiscal_period: "FY",
+      fetcher: secCompanyFetcher(() => facts),
+      sourceId: SOURCE_ID,
+      logger: { warn() {} },
+    }),
+    (error) => error instanceof FundamentalsDataUnavailableError && /accession_number/u.test(error.message),
+  );
+  assert.deepEqual(db.sources, []);
+});
+
+test("a frozen golden issuer is never repaired from live SEC", async () => {
+  const touched: string[] = [];
+  const db = { query: async (text: string) => { touched.push(text); return { rows: [] }; }, connect: async () => { throw new Error("no transaction expected"); } };
+  const statement = await hydrateSecIssuer(db, {
+    issuerId: GOLDEN_ISSUER_IDS.NVDA,
+    fiscal_year: 2024,
+    fiscal_period: "FY",
+    fetcher: async (path) => { touched.push(path); throw new Error("no fetch expected"); },
+    sourceId: SOURCE_ID,
+  });
+  assert.equal(statement, null);
+  assert.deepEqual(touched, []);
+});
+
+test("a database failure while storing a fetched statement throws as it is, never as SEC's", async () => {
+  class FailingWrites extends FakeFundamentalsDb {
+    async connect() {
+      const query = async <R extends Record<string, unknown>>(text: string): Promise<{ rows: R[] }> => {
+        if (text === "begin" || text === "rollback") return { rows: [] };
+        throw new Error("deadlock detected");
+      };
+      return { query, release: () => {} };
+    }
+  }
+  await assert.rejects(
+    hydrateSecIssuer(new FailingWrites(), {
+      issuerId: ISSUER_ID,
+      fiscal_year: 2024,
+      fiscal_period: "FY",
+      fetcher: secCompanyFetcher(() => companyFacts()),
+      sourceId: SOURCE_ID,
+      logger: { warn() {} },
+    }),
+    (error) => !(error instanceof FundamentalsDataUnavailableError) && error instanceof Error && error.message === "deadlock detected",
+  );
+});
+
 test("SEC-backed statements propagate provider failures instead of returning missing coverage", async () => {
   const db = new FakeFundamentalsDb();
   const statements = createSecBackedStatementRepository(db, {
@@ -672,6 +850,7 @@ class FakeFundamentalsDb {
     }
     // Restatement detection's stored originals: the fake records no financial contexts, so there are none.
     if (sql.includes("join fact_financial_contexts c on c.fact_id = f.fact_id")) return rows([]);
+    if (sql.includes("current_fact_precision_attestations a")) return rows([]);
     if (sql.includes("select max(f.fiscal_year)")) {
       const fiscalYears = this.facts
         .filter((fact) => metricKeyFor(this.metrics, fact.metric_id) === "revenue")

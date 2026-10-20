@@ -81,8 +81,8 @@ committed values after enforcement.
 
 | Producer / transport | Location | Current numeric handling | Disposition | Task |
 |---|---|---|---|---|
-| Peer metrics comparison | `services/analyze/src/metrics-comparison-{emitter,materializer,block-builder,snapshot}.ts` | Materializes *derived facts* from key-stats; formats via `toFixed`; JS `number` | Engine (`peer_compare`, ratios) or unsupported; stop minting derived facts | T21 |
-| Revenue bars | `services/analyze/src/revenue-bars-{emitter,block-builder,snapshot}.ts` | `Number(value_num) * Number(scale)` | Engine (`reported_metric` series) | T21 |
+| Peer metrics comparison | `services/analyze/src/metrics-comparison-{materializer,block-builder}.ts` (the emitter and seal input are deleted) | Materializes *derived facts* from key-stats; formats via `toFixed`; JS `number` | Done: the engine (`peer_compare`) serves `peer_table`; the materializer and builder remain for chat | T21 |
+| Revenue bars | `services/analyze/src/revenue-bars-block-builder.ts` (the emitter and seal input are deleted) | `Number(value_num) * Number(scale)` | Done: the engine (`reported_metric`) serves `revenue_trend`; the builder remains for chat | T21 |
 | Price target range | `services/analyze/src/price-target-range-emitter.ts` | Vendor estimate facts | Unsupported in certified lane (estimates are not reported facts) → narrative/legacy | T21 |
 | Analyst consensus | `services/analyze/src/analyst-consensus-*.ts` | Vendor estimate facts | Unsupported in certified lane → narrative/legacy | T21 |
 | Price facts | `services/analyze/src/price-fact-materializer.ts`, `current-price-source.ts` | Current quote → fact | Unsupported until market adapter proves timing/basis | T21 |
@@ -175,7 +175,7 @@ foundations are in place:
   | Surface | Flag | What is certified | Parent write in finalization |
   |---|---|---|---|
   | Chat | `CHAT_FINANCIAL_MODE` | Model-planned requests over resolved subjects | Assistant message |
-  | Analyze | `ANALYZE_FINANCIAL_MODE` | One deterministic plan per memo, one unit per numerical section | `analyze_run_financial_sections` row (0049) |
+  | Analyze | None: always on | One deterministic plan per memo, one unit per numerical section | `analyze_run_financial_sections` row (0049) |
   | Grids | None: always enforced | One plan per run, one unit per numerical cell | Cell write and progress count (0050) |
   | Thesis | None: always enforced | One plan per saved metric condition | Current-version check under the agent lock |
   | Discovery | None: always enforced (`createWorkerDeps`) | One plan per candidate × approved criterion | Campaign-fence check (live lease, running, same brief, candidate researching) |
@@ -254,7 +254,7 @@ enforced, those values appear as declared gaps rather than numbers.
 | Chat: coordinator imports for stable ids | `services/chat/src/chat-ids.ts` holds `contentHashForText`/`stableUuid`, breaking a coordinator ↔ financial-turn import cycle. |
 | `services/analyze/src/section-seal.ts`, `memo-run.ts`, `run-metadata.ts` | Not present. The equivalents are `template-runner.ts` (optional pre-assigned `run_id`), `runMetadata.ts` (`financial` context), and the new `financial-section.ts`. |
 | Analyze: memo run saved in the finalization transaction | The narrative memo row commits first (its own snapshot). Each numerical section's snapshot, certificate, and `analyze_run_financial_sections` row then commit together. Coverage is derived from committed rows against the sections the metadata declares, so a failed section reads as a gap, never as complete. |
-| Analyze: derived emitters require certified lineage | With the lane enforced, engine-served sections skip their legacy producers (`runDeterministicSections` `servedByEngine`). The legacy metrics-comparison emitter itself is unchanged for the off lane. |
+| Analyze: derived emitters require certified lineage | The legacy peer-table and revenue-bars producers are deleted, so the engine is the only source of memo numbers. The analyst-overview and price-target producers stay because the engine does not plan vendor estimates. |
 | Strict merge: owner/definitions/run provenance | `mergeSealInputs` requires equal snapshot, thread, `as_of`, basis, normalization, and coverage start. It rejects conflicting duplicate facts and repeated block ids, and refuses any certified input: certified units are sealed alone, so there is no definition or run provenance to reconcile. |
 | Grids: `fiscal-fact-column.ts`, `period-context.ts`, `cell-runner.ts` rework | Numerical columns always route through `financial-column.ts`. The legacy producers and the row period resolver are deleted; each certified cell carries its own period labels. |
 | Grids: restart recovery for non-numerical cells | Only engine-backed cells are recoverable (`gridFinancialRecovery`, always registered with the dev-api financial worker). Reader-question cells keep their existing behavior. |

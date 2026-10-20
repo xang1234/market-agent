@@ -165,6 +165,28 @@ test('diffAnalyzeRuns returns drift summary separately from block rows', () => {
   })
 })
 
+test('diffAnalyzeRuns compares engine sections by what they present, not by their run or certificate', () => {
+  const withTrend = (runId: string, current: string) => ({
+    ...runDetail({ runId, snapshotId: runId === 'run-a' ? '11111111-1111-4111-8111-111111111111' : '22222222-2222-4222-8222-222222222222', blocks: [] }),
+    financial_sections: {
+      coverage: 'complete' as const,
+      sections: [{ section_id: 'revenue_trend', status: 'published' as const, run_id: `financial-${runId}`, snapshot_id: `certificate-${runId}`, block: {
+        id: `block-${runId}`, kind: 'financial_answer', snapshot_id: `certificate-${runId}`,
+        financial: {
+          run_id: `financial-${runId}`, knowledge_cutoff: `cutoff-${runId}`, coverage: { state: 'complete', requested: 1, verified: 1 },
+          results: [{ result_id: `result-${runId}`, output_id: 'revenue_trend_current', disposition: 'verified', presented: { kind: 'value', text: current }, result_hash: `hash-${runId}-${current}` }],
+        },
+      } }],
+    },
+  })
+  const same = diffAnalyzeRuns(withTrend('run-a', '$391.0B'), withTrend('run-b', '$391.0B'))
+  assert.deepEqual(same.rows.map((row) => `${row.status}:${row.title}`), ['unchanged:revenue trend'])
+  const changed = diffAnalyzeRuns(withTrend('run-a', '$391.0B'), withTrend('run-b', '$402.4B'))
+  assert.deepEqual(changed.rows.map((row) => `${row.status}:${row.title}`), ['changed:revenue trend'])
+  const added = diffAnalyzeRuns(runDetail({ runId: 'run-a', snapshotId: '11111111-1111-4111-8111-111111111111', blocks: [] }), withTrend('run-b', '$391.0B'))
+  assert.deepEqual(added.rows.map((row) => `${row.status}:${row.title}`), ['added:revenue trend'])
+})
+
 function block(input: {
   id: string
   kind?: string

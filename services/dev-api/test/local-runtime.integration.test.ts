@@ -23,6 +23,7 @@ import {
   registerLifoCleanup,
 } from "../../../db/test/docker-pg.ts";
 import {
+  analyzeFinancial,
   closeLocalRuntimePoolForTests,
   createAgentLoopStages,
   runAnalyzeWorkflow,
@@ -199,6 +200,7 @@ test(
       runAnalyzeWorkflow,
       sealAnalyzeSnapshot,
       createAgentLoopStages,
+      analyzeFinancial,
     }));
     const response = await fetch(`${base}/v1/analyze/runs`, {
       method: "POST",
@@ -213,10 +215,19 @@ test(
         subject_ref: { kind: "issuer", id: SUBJECT_ID },
       }),
     });
-    const body = await response.json() as { blocks?: Array<Record<string, unknown>>; snapshot_id?: string };
+    const body = await response.json() as {
+      blocks?: Array<Record<string, unknown>>;
+      snapshot_id?: string;
+      financial_sections?: { sections: Array<{ section_id: string; status: string }> };
+    };
     assert.equal(response.status, 201);
     assert.deepEqual(body.blocks?.[0]?.claim_refs, [seeded.claimId]);
     assert.equal(typeof body.snapshot_id, "string");
+    assert.deepEqual(
+      body.financial_sections?.sections.map(({ section_id, status }) => ({ section_id, status })),
+      [{ section_id: "revenue_trend", status: "gap" }],
+      "the memo declares its engine section, a gap for an issuer with no stored facts",
+    );
   },
 );
 

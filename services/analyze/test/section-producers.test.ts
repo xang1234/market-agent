@@ -1,20 +1,23 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { financialSectionIds } from "../src/financial-section.ts";
+import { ANALYZE_PLAYBOOKS } from "../src/playbook.ts";
 import { lookupSectionProducer, sectionBlockId } from "../src/section-producers.ts";
 
-test("lookupSectionProducer resolves the peer_table producer for peer_comparison", () => {
-  assert.equal(typeof lookupSectionProducer("peer_comparison", "peer_table"), "function");
+test("no numerical section has a legacy producer: the engine is its only source", () => {
+  const numerical = ANALYZE_PLAYBOOKS.flatMap((playbook) => financialSectionIds(playbook).map((id) => `${playbook.playbook_id}:${id}`));
+  assert.ok(numerical.length > 0);
+  for (const key of numerical) {
+    const [playbookId, sectionId] = key.split(":") as [string, string];
+    assert.equal(lookupSectionProducer(playbookId, sectionId), undefined, key);
+  }
 });
 
-test("lookupSectionProducer returns undefined for narrative sections and unknown playbooks", () => {
+test("lookupSectionProducer returns undefined for narrative and unknown sections", () => {
   assert.equal(lookupSectionProducer("peer_comparison", "summary"), undefined);
   assert.equal(lookupSectionProducer("earnings_quality", "margin_bridge"), undefined);
   assert.equal(lookupSectionProducer("nope", "peer_table"), undefined);
-});
-
-test("the earnings_quality revenue_trend section resolves to a producer", () => {
-  assert.notEqual(lookupSectionProducer("earnings_quality", "revenue_trend"), undefined);
 });
 
 test("the earnings_quality analyst_overview section resolves to a producer", () => {
