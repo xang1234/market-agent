@@ -380,10 +380,11 @@ test('a failed title refresh keeps the sidebar row and the header name', async (
 const GOLDEN = JSON.parse(readFileSync(new URL('../../../services/app/fixtures/golden-conversation.replay.json', import.meta.url), 'utf-8')) as {
   exchanges: Array<{ method: string; path: string; body: string }>
 }
-const GOLDEN_THREAD = 'c0f8aadd-3117-4446-be29-d78b9bf01b5a'
-const GOLDEN_RICH_TEXT = '55d64c37-8b10-46ad-8396-db4e21d839df'
+// Read from the recording, so a recapture's new ids need no edit here.
+const GOLDEN_THREAD = goldenCompletion().thread_id
+const GOLDEN_RICH_TEXT = goldenCompletion().message.blocks.find((block) => block.kind === 'rich_text')!.id
 
-function goldenCompletion(): { message_id: string; message: ChatMessage } {
+function goldenCompletion(): { thread_id: string; message_id: string; message: ChatMessage } {
   const stream = GOLDEN.exchanges.find((exchange) => exchange.path.endsWith('/stream'))!
   const frame = stream.body.split('\n\n').find((chunk) => chunk.includes('event: turn.completed'))!
   return JSON.parse(frame.split('\n').find((line) => line.startsWith('data: '))!.slice('data: '.length))
