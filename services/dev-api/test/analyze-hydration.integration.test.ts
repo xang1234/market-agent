@@ -21,7 +21,9 @@ const COMPANY_FACTS = {
   facts: { "us-gaap": { Revenues: { label: "Revenues", description: "", units: { USD: [annualRevenue(2023, "380000000000"), annualRevenue(2024, "391000000000")] } } } },
 };
 
+const downloads: string[] = [];
 const fetcher = async (path: string) => {
+  downloads.push(path);
   if (path.includes("320199")) throw new SecEdgarFetchError(503, "sec_edgar: HTTP 503");
   return path.startsWith("/api/xbrl/companyfacts/")
     ? secFetched(COMPANY_FACTS, { url: `https://data.sec.gov${path}` })
@@ -35,7 +37,7 @@ test("a memo's issuers gain their latest two fiscal years; an issuer SEC cannot 
   await db.query(`insert into issuers (issuer_id, legal_name, cik) values ($1, 'Example Corp', '320193'), ($2, 'Down Corp', '320199')`, [LISTED, UNREACHABLE]);
   const warnings: unknown[][] = [];
 
-  await hydrateAnalyzeIssuers(db, fetcher, [LISTED, UNREACHABLE], { warn: (...args: unknown[]) => warnings.push(args) });
+  await hydrateAnalyzeIssuers(db, fetcher, new Map([[LISTED, 2], [UNREACHABLE, 1]]), { warn: (...args: unknown[]) => warnings.push(args) });
 
   const { rows } = await db.query<{ subject_id: string; fiscal_year: number; value: string }>(
     `select f.subject_id::text, f.fiscal_year, f.value_num::text as value
@@ -46,5 +48,9 @@ test("a memo's issuers gain their latest two fiscal years; an issuer SEC cannot 
     { subject_id: LISTED, fiscal_year: 2023, value: "380000000000" },
     { subject_id: LISTED, fiscal_year: 2024, value: "391000000000" },
   ]);
-  assert.deepEqual(warnings.at(-1), ["analyze SEC hydration failed; the engine reports the gap", { issuer_id: UNREACHABLE, reason: "provider_error" }]);
+  assert.deepEqual(downloads.filter((path) => path.includes("320193")), [
+    "/api/xbrl/companyfacts/CIK0000320193.json",
+    "/submissions/CIK0000320193.json",
+  ], "one download serves both years");
+  assert.deepEqual(warnings.at(-1), ["analyze SEC hydration failed; the engine reports the gap", { issuer_id: UNREACHABLE, reason: "provider_error", error: "sec_edgar: HTTP 503" }]);
 });

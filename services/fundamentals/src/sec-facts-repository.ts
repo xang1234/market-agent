@@ -105,9 +105,9 @@ export function createSecBackedStatementRepository(
 }
 
 // Null when the issuer has no usable CIK or SEC has no such statement (a 404,
-// or no us-gaap values for it); any other failure throws
-// FundamentalsDataUnavailableError. A fiscal_year of "latest" is the latest
-// year with a 10-K revenue value in the download.
+// or no us-gaap values for it); a database failure throws as it is; any other
+// failure throws FundamentalsDataUnavailableError. A fiscal_year of "latest"
+// is the latest year with a 10-K revenue value in the download.
 export async function hydrateSecIssuer(
   db: FundamentalsTransactionalQueryExecutor,
   input: {
@@ -131,11 +131,13 @@ export async function hydrateSecIssuer(
     return null;
   }
 
+  const storeFailures = new WeakSet<object>();
+  const store = rememberingFailures(db, storeFailures);
   try {
     const fetched = await fetchCompanyFacts(input.fetcher, cikNumber);
     const fiscalYear = input.fiscal_year === "latest" ? latestAnnualRevenueYear(fetched.facts) : input.fiscal_year;
     if (fiscalYear === null) return null;
-    const ingested = await ingestFiling(db, {
+    const ingested = await ingestFiling(store, {
       fetched,
       cik: cikNumber,
       issuerId: input.issuerId,
@@ -146,9 +148,10 @@ export async function hydrateSecIssuer(
       clock: input.clock ?? (() => new Date()),
       logger,
     });
-    await recordSecFilingAcceptances(db, input.fetcher, { cik: cikNumber, filings: ingested.filing ? [ingested.filing] : [], logger });
+    await recordSecFilingAcceptances(store, input.fetcher, { cik: cikNumber, filings: ingested.filing ? [ingested.filing] : [], logger });
     return ingested.statement;
   } catch (error) {
+    if (typeof error === "object" && error !== null && storeFailures.has(error)) throw error;
     const unavailable = classifySecIngestionError(error);
     logger.warn("sec_edgar fundamentals ingestion failed", {
       issuer_id: input.issuerId,
@@ -159,6 +162,29 @@ export async function hydrateSecIssuer(
     if (!unavailable) return null;
     throw unavailable;
   }
+}
+
+// The executor, recording every error it raises, so ingestion can tell a
+// database failure from a failure of SEC's data.
+function rememberingFailures(db: FundamentalsTransactionalQueryExecutor, failures: WeakSet<object>): FundamentalsTransactionalQueryExecutor {
+  const remember = async <T>(work: Promise<T>): Promise<T> => {
+    try {
+      return await work;
+    } catch (error) {
+      if (typeof error === "object" && error !== null) failures.add(error);
+      throw error;
+    }
+  };
+  return {
+    query: <R extends Record<string, unknown>>(text: string, values?: unknown[]) => remember(db.query<R>(text, values)),
+    connect: async () => {
+      const client = await remember(db.connect());
+      return {
+        query: <R extends Record<string, unknown>>(text: string, values?: unknown[]) => remember(client.query<R>(text, values)),
+        release: () => client.release(),
+      };
+    },
+  };
 }
 
 // For every SEC income period already on file for an issuer, from one

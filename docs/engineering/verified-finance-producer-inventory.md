@@ -81,8 +81,8 @@ committed values after enforcement.
 
 | Producer / transport | Location | Current numeric handling | Disposition | Task |
 |---|---|---|---|---|
-| Peer metrics comparison | `services/analyze/src/metrics-comparison-{emitter,materializer,block-builder,snapshot}.ts` | Materializes *derived facts* from key-stats; formats via `toFixed`; JS `number` | Engine (`peer_compare`, ratios) or unsupported; stop minting derived facts | T21 |
-| Revenue bars | `services/analyze/src/revenue-bars-{emitter,block-builder,snapshot}.ts` | `Number(value_num) * Number(scale)` | Engine (`reported_metric` series) | T21 |
+| Peer metrics comparison | `services/analyze/src/metrics-comparison-{materializer,block-builder}.ts` (the emitter and seal input are deleted) | Materializes *derived facts* from key-stats; formats via `toFixed`; JS `number` | Done: the engine (`peer_compare`) serves `peer_table`; the materializer and builder remain for chat | T21 |
+| Revenue bars | `services/analyze/src/revenue-bars-block-builder.ts` (the emitter and seal input are deleted) | `Number(value_num) * Number(scale)` | Done: the engine (`reported_metric`) serves `revenue_trend`; the builder remains for chat | T21 |
 | Price target range | `services/analyze/src/price-target-range-emitter.ts` | Vendor estimate facts | Unsupported in certified lane (estimates are not reported facts) → narrative/legacy | T21 |
 | Analyst consensus | `services/analyze/src/analyst-consensus-*.ts` | Vendor estimate facts | Unsupported in certified lane → narrative/legacy | T21 |
 | Price facts | `services/analyze/src/price-fact-materializer.ts`, `current-price-source.ts` | Current quote → fact | Unsupported until market adapter proves timing/basis | T21 |

@@ -63,15 +63,16 @@ export async function createDevApiRuntimeFromEnv(
   if (module.createDiscoveryService !== undefined && typeof module.createDiscoveryService !== "function") {
     throw new Error("DEV_API_RUNTIME_MODULE createDiscoveryService export must be a function");
   }
-  if (module.analyzeFinancial !== undefined && typeof module.analyzeFinancial?.publish !== "function") {
-    throw new Error("DEV_API_RUNTIME_MODULE analyzeFinancial export must provide publish()");
+  const lane = module.analyzeFinancial;
+  if (typeof lane?.resolvePeers !== "function" || typeof lane.hydrate !== "function" || typeof lane.publish !== "function") {
+    throw new Error("DEV_API_RUNTIME_MODULE must export analyzeFinancial with resolvePeers, hydrate and publish");
   }
 
   const { Pool } = await import("pg");
   const pool = new Pool({ connectionString: databaseUrl });
   // Nothing financial starts, the worker included, until its schema and versions are in place.
   await requireFinancialReadiness(pool, activeFinancialSurfaces(financialModes));
-  const worker = financialModes.worker ? startFinancialWorkerFromEnv(pool, env, recoveryParents(pool, module.analyzeFinancial)) : null;
+  const worker = financialModes.worker ? startFinancialWorkerFromEnv(pool, env, recoveryParents(pool)) : null;
   if (!worker) console.warn("dev-api: FINANCIAL_WORKER_ENABLED=false, so interrupted financial runs, grid cells included, are not recovered");
   const discovery = module.createDiscoveryService === undefined
     ? undefined
@@ -83,18 +84,15 @@ export async function createDevApiRuntimeFromEnv(
     runAnalyzeWorkflow: module.runAnalyzeWorkflow as DevApiServiceAdapterDeps["runAnalyzeWorkflow"],
     createAgentLoopStages: module.createAgentLoopStages as DevApiServiceAdapterDeps["createAgentLoopStages"],
     inspectEvidence: module.inspectEvidence as DevApiServiceAdapterDeps["inspectEvidence"],
-    analyzeFinancial: module.analyzeFinancial as DevApiServiceAdapterDeps["analyzeFinancial"],
+    analyzeFinancial: lane as DevApiServiceAdapterDeps["analyzeFinancial"],
     discovery,
   });
   return { adapters, worker };
 }
 
 /** Parents whose verified units are resumable after a restart; others register as they adopt the engine. */
-export function recoveryParents(db: SqlExecutor, analyzeFinancial: unknown): Readonly<Record<string, ParentRecovery>> {
-  return {
-    ...(analyzeFinancial ? { analyze_memo_run: analyzeFinancialRecovery(db) } : {}),
-    analyst_grid_run: gridFinancialRecovery(db),
-  };
+export function recoveryParents(db: SqlExecutor): Readonly<Record<string, ParentRecovery>> {
+  return { analyze_memo_run: analyzeFinancialRecovery(db), analyst_grid_run: gridFinancialRecovery(db) };
 }
 
 function moduleSpecifier(specifier: string, cwd: string): string {

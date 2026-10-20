@@ -127,6 +127,20 @@ export function prepareAnalyzeFinancialContext(input: {
   });
 }
 
+/** How many of each subject's latest fiscal years the memo's plan reads, so hydration fetches exactly those. */
+export function latestFiscalYearsRead(context: AnalyzeRunFinancialMetadata): ReadonlyMap<string, number> {
+  const { draft } = planShape(context);
+  const issuerBySlot = new Map(draft.subjects.map((subject) => [subject.slot_id, subject.mention]));
+  const years = new Map<string, number>();
+  for (const operation of draft.operations) {
+    const period = operation.period as { kind?: string; offset?: number } | undefined;
+    const issuer = issuerBySlot.get(operation.subject_slot as string);
+    if (period?.kind !== "latest" || issuer === undefined) continue;
+    years.set(issuer, Math.max(years.get(issuer) ?? 0, (period.offset ?? 0) + 1));
+  }
+  return years;
+}
+
 export type AnalyzeFinancialRun = Readonly<{
   user_id: string;
   analyze_run_id: string;
@@ -200,8 +214,15 @@ function analyzeAuthority(userId: string, analyzeRunId: string, templateId: stri
   });
 }
 
+type PlanDraft = Readonly<{
+  subjects: ReadonlyArray<Readonly<{ slot_id: string; mention: string }>>;
+  operations: ReadonlyArray<Operation>;
+  outputs: ReadonlyArray<Readonly<{ output_id: string; node_id: string }>>;
+  thresholds: readonly [];
+}>;
+
 /** The memo's plan draft and its units (one per section), built in one pass over the requested sections. */
-function planShape(context: AnalyzeRunFinancialMetadata): { draft: object; units: DeterministicUnits } {
+function planShape(context: AnalyzeRunFinancialMetadata): { draft: PlanDraft; units: DeterministicUnits } {
   const slots = [PRIMARY_SLOT, ...context.requested_peers.map((_peer, index) => `s${index + 1}`)];
   const subjects = [context.primary, ...context.requested_peers];
   const operations = new Map<string, Operation>();

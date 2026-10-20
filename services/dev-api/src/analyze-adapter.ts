@@ -29,6 +29,7 @@ import {
 } from "../../analyze/src/index.ts";
 import {
   financialSectionIds,
+  latestFiscalYearsRead,
   loadAnalyzeFinancialSections,
   prepareAnalyzeFinancialContext,
   type AnalyzeFinancialRun,
@@ -170,13 +171,14 @@ export type AnalyzeServiceDeps = {
 
 export type AnalyzeFinancialComposition = {
   resolvePeers(primaryIssuerId: string): Promise<ReadonlyArray<{ kind: "issuer"; id: string }>>;
-  // Stores the issuers' latest SEC facts; a failed fetch leaves a gap, never a failed memo.
-  hydrate(issuerIds: ReadonlyArray<string>): Promise<void>;
+  // Stores each issuer's latest fiscal years from SEC; a failed fetch leaves a gap, never a failed memo.
+  hydrate(latestYears: ReadonlyMap<string, number>): Promise<void>;
   publish(run: AnalyzeFinancialRun): Promise<AnalyzeFinancialSections>;
 };
 
 // Freezes a new memo's numerical context (cutoff, basis, catalog, exact peers)
-// before any work, so every numerical section is computed under it.
+// before any work, so every numerical section is computed under it. The engine
+// never reads a fact stored after the cutoff, so it is taken after hydration.
 async function newFinancialContext(
   deps: AnalyzeServiceDeps,
   playbook: AnalyzePlaybook,
@@ -185,16 +187,18 @@ async function newFinancialContext(
   const lane = deps.analyzeFinancial;
   if (!lane) return null;
   const primary = subjectRefs.find((ref) => ref.kind === "issuer");
-  const sections = financialSectionIds(playbook);
-  if (!primary || sections.length === 0) return null;
-  const peers = sections.includes("peer_table") ? await lane.resolvePeers(primary.id) : [];
-  await lane.hydrate([...new Set([primary.id, ...peers.map((peer) => peer.id)])]);
-  return prepareAnalyzeFinancialContext({
+  if (!primary) return null;
+  const peers = financialSectionIds(playbook).includes("peer_table") ? await lane.resolvePeers(primary.id) : [];
+  const contextAt = (cutoff: Date) => prepareAnalyzeFinancialContext({
     playbook,
     primary: { kind: "issuer", id: primary.id },
     peers,
-    knowledge_cutoff: new Date().toISOString(),
+    knowledge_cutoff: cutoff.toISOString(),
   });
+  const planned = contextAt(new Date());
+  if (planned === null) return null;
+  await lane.hydrate(latestFiscalYearsRead(planned));
+  return contextAt(new Date());
 }
 
 function requireNonEmpty(value: unknown, label: string): string {
@@ -234,7 +238,8 @@ async function persistAnalyzeRun(
 ): Promise<DevAnalyzeRun> {
   const runAsOf = (input.memoBlocks[0]?.as_of as string | undefined) ?? new Date().toISOString();
   const runId = randomUUID();
-  const financial = deps.analyzeFinancial ? input.runMetadata.financial ?? null : null;
+  const lane = deps.analyzeFinancial;
+  const financial = lane ? input.runMetadata.financial ?? null : null;
   let blocks: ReadonlyArray<Record<string, unknown>>;
   let sealRun: () => Promise<SnapshotSealResult>;
   if (deps.buildAnalyzeRunSeals && input.playbook) {
@@ -292,9 +297,9 @@ async function persistAnalyzeRun(
   if (!persisted.ok) {
     throw new DevApiHttpError(422, "snapshot seal failed");
   }
-  if (financial !== null) {
+  if (lane && financial !== null) {
     try {
-      await deps.analyzeFinancial!.publish({
+      await lane.publish({
         user_id: input.userId,
         analyze_run_id: persisted.run.run_id,
         template_id: input.template.template_id,
@@ -366,6 +371,9 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
         added: template.added_subject_refs,
       });
       const instructions = resolvedPlaybook.instructions;
+      if (!deps.runAnalyzeWorkflow) {
+        throw new DevApiHttpError(503, "durable analyze workflow is not configured");
+      }
       const financial = await newFinancialContext(deps, resolvedPlaybook.playbook, subjectRefs);
       const runMetadata = serializeAnalyzeRunMetadataV1({
         template_id: template.template_id,
@@ -377,9 +385,6 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
         subject_refs: subjectRefs,
         ...(financial ? { financial } : {}),
       });
-      if (!deps.runAnalyzeWorkflow) {
-        throw new DevApiHttpError(503, "durable analyze workflow is not configured");
-      }
       const rendered = await deps.runAnalyzeWorkflow({
         userId,
         template,
