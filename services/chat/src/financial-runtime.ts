@@ -60,8 +60,7 @@ export type ChatFinancialTurnContext = ChatTurnRunContext & { clarificationAnswe
 export type ChatFinancialRuntime = Readonly<{
   /** Whether this lane takes the turn. Cheap and synchronous, so the stream can say so before any work. */
   answers(context: ChatFinancialTurnContext): boolean;
-  /** The lane's outcome; null when the lane does not take the turn. */
-  run(context: ChatFinancialTurnContext): Promise<ChatFinancialTurn | null>;
+  run(context: ChatFinancialTurnContext): Promise<ChatFinancialTurn>;
   /** Throws unless verified finance is ready; the server awaits it before serving turns with the lane on. */
   assertReady(): Promise<void>;
 }>;
@@ -98,8 +97,8 @@ const GAP_TEXT: Readonly<Record<ChatGap, string>> = {
 export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): ChatFinancialRuntime {
   const answers = (context: ChatFinancialTurnContext) =>
     deps.mode !== "off" && isFinancialRequest(context.userIntent ?? "") && Boolean(context.userId) && UUID.test(context.threadId);
-  const run = async (context: ChatFinancialTurnContext): Promise<ChatFinancialTurn | null> => {
-    if (!answers(context)) return null;
+  const run = async (context: ChatFinancialTurnContext): Promise<ChatFinancialTurn> => {
+    if (!answers(context)) throw new Error("the financial lane does not take this turn");
     const text = context.userIntent!;
     const turnId = context.turnId ?? context.runId;
     const authority = chatAuthority(context.userId!, context.threadId, turnId);

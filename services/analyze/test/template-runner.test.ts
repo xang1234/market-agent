@@ -422,6 +422,25 @@ test("listAnalyzeTemplateRunsByUser uses bounded cursor pagination without loadi
   assert.equal(queries[0].values?.at(-1), 2);
 });
 
+test("a memo saved in the deleted shadow mode still lists as rerunnable", async () => {
+  const financial = {
+    knowledge_cutoff: "2024-03-01T00:00:00.000Z",
+    reporting_basis: "as_reported",
+    catalog_version: "catalog.v1",
+    primary: { kind: "issuer", id: "22222222-2222-4222-8222-222222222222" },
+    requested_peers: [],
+    sections: ["revenue_trend"],
+  };
+  const listed = async (mode: string) => {
+    const { db } = fakeDb(() => [
+      runRow({ template_name: "Earnings quality", run_metadata: { ...sampleRunMetadata, financial: { ...financial, mode } } }),
+    ]);
+    return (await listAnalyzeTemplateRunsByUser(db, { userId: "55555555-5555-4555-8555-555555555555", limit: 1, cursor: null })).runs[0];
+  };
+  assert.equal((await listed("shadow")).can_rerun, true);
+  assert.equal((await listed("on")).can_rerun, false);
+});
+
 test("listAnalyzeTemplateRunsByTemplate rejects an empty template_id", async () => {
   const { db } = fakeDb(() => []);
   await assert.rejects(

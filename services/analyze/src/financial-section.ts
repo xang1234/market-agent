@@ -132,7 +132,7 @@ export function prepareAnalyzeFinancialContext(input: {
 
 /** Sections the engine answers for this memo; legacy producers must not also emit them. */
 export function sectionsServedByEngine(context: AnalyzeRunFinancialMetadata | null): ReadonlySet<string> {
-  return new Set(context?.mode === "enforce" ? context.sections : []);
+  return new Set(context?.sections ?? []);
 }
 
 export type AnalyzeFinancialRun = Readonly<{
@@ -177,7 +177,7 @@ export async function publishAnalyzeFinancialSections(deps: AnalyzeFinancialDeps
 export async function loadAnalyzeFinancialSections(db: SqlExecutor, input: { userId: string; analyzeRunId: string }): Promise<AnalyzeFinancialSections | null> {
   const memo = await loadMemoRun(db, input.analyzeRunId);
   if (!memo || memo.user_id !== input.userId) return null;
-  if (!memo.context || memo.context.mode !== "enforce") return { coverage: "none", sections: [] };
+  if (!memo.context) return { coverage: "none", sections: [] };
   return readSections(db, input.userId, input.analyzeRunId, memo.context, memo.optional_sections, null);
 }
 
@@ -186,7 +186,7 @@ export function analyzeFinancialRecovery(db: SqlExecutor): ParentRecovery {
   return {
     async authority(run: RunRecord) {
       const memo = await loadMemoRun(db, run.parent_id);
-      if (!memo || memo.user_id !== run.user_id || memo.context?.mode !== "enforce") return null;
+      if (!memo || memo.user_id !== run.user_id || !memo.context) return null;
       return analyzeAuthority(memo.user_id, run.parent_id, memo.template_id, memo.template_version);
     },
     persistParent: persistMemoSection,

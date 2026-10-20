@@ -674,7 +674,7 @@ async function toDevAnalyzeRun(
     toDevAnalyzeRunSummaryFields(row, templateName),
     row,
   );
-  const declaresFinancial = userId !== null && safeParseStoredAnalyzeRunMetadata(row.run_metadata)?.financial?.mode === "enforce";
+  const declaresFinancial = userId !== null && safeParseStoredAnalyzeRunMetadata(row.run_metadata)?.financial !== undefined;
   const financial = declaresFinancial ? await loadAnalyzeFinancialSections(db, { userId, analyzeRunId: row.run_id }) : null;
   return {
     ...summary,
