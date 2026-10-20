@@ -4,7 +4,7 @@ import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { IDS, ORIGINAL_REVENUE, seedCashResilience } from "../../financial-engine/test/db-fixtures.ts";
 import {
   financialSectionIds,
-  latestFiscalYearsRead,
+  latestYearsByIssuer,
   loadAnalyzeFinancialSections,
   prepareAnalyzeFinancialContext,
   type AnalyzeFinancialSection,
@@ -56,9 +56,9 @@ test("hydration reads each subject's latest fiscal years from the memo's own pla
   const context = (id: string, peers: string[] = []) => prepareAnalyzeFinancialContext({
     playbook: playbook(id), primary: { kind: "issuer", id: IDS.issuerA }, peers: peers.map((peer) => ({ kind: "issuer" as const, id: peer })), knowledge_cutoff: CUTOFF,
   })!;
-  assert.deepEqual([...latestFiscalYearsRead(context("earnings_quality"))], [[IDS.issuerA, 2]], "revenue_trend compares the latest year with the one before");
-  assert.deepEqual([...latestFiscalYearsRead(context("investment_memo"))], [[IDS.issuerA, 2]]);
-  assert.deepEqual([...latestFiscalYearsRead(context("peer_comparison", [IDS.issuerB]))], [[IDS.issuerA, 1], [IDS.issuerB, 1]], "peer_table reads only the latest year");
+  assert.deepEqual([...latestYearsByIssuer(context("earnings_quality"))], [[IDS.issuerA, 2]], "revenue_trend compares the latest year with the one before");
+  assert.deepEqual([...latestYearsByIssuer(context("investment_memo"))], [[IDS.issuerA, 2]]);
+  assert.deepEqual([...latestYearsByIssuer(context("peer_comparison", [IDS.issuerB]))], [[IDS.issuerA, 1], [IDS.issuerB, 1]], "peer_table reads only the latest year");
 });
 
 test("analyze financial sections", { timeout: 300_000 }, async (t) => {

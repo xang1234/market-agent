@@ -5,3 +5,5 @@ export const GOLDEN_ISSUER_IDS = Object.freeze({
   AMD: "60000000-0000-4000-8000-000000000002",
   AAPL: "60000000-0000-4000-8000-000000000003",
 } as const);
+
+export const FROZEN_ISSUER_IDS: ReadonlySet<string> = new Set(Object.values(GOLDEN_ISSUER_IDS));

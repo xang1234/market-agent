@@ -49,7 +49,7 @@ test("the worker recovers memo and grid runs", () => {
 
 test("dev-api refuses a runtime module whose Analyze lane cannot hydrate", async () => {
   await assert.rejects(
-    createDevApiRuntimeFromEnv({ ...UNREACHABLE, DEV_API_RUNTIME_MODULE: resolve(repoRoot, "services/dev-api/test/runtime-module-without-analyze-lane.ts") }),
+    createDevApiRuntimeFromEnv({ ...UNREACHABLE, DEV_API_RUNTIME_MODULE: resolve(repoRoot, "services/dev-api/test/runtime-module-without-hydrate.ts") }),
     /DEV_API_RUNTIME_MODULE must export analyzeFinancial with resolvePeers, hydrate and publish/u,
   );
 });

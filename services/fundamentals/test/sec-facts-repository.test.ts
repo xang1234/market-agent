@@ -5,6 +5,7 @@ import {
   createSecBackedStatementRepository,
   createSecBackedStatsRepository,
   hydrateSecIssuer,
+  hydrateSecIssuerLatestYears,
 } from "../src/sec-facts-repository.ts";
 import type { MetricDefinition } from "../src/metric-mapper.ts";
 import {
@@ -14,6 +15,7 @@ import {
 } from "../src/sec-edgar.ts";
 import { FundamentalsDataUnavailableError } from "../src/availability.ts";
 import { secCompanyFetcher } from "./fakes.ts";
+import { GOLDEN_ISSUER_IDS } from "../../shared/src/golden-issuers.ts";
 
 const ISSUER_ID = "11111111-1111-4111-8111-111111111111";
 const SOURCE_ID = "22222222-2222-4222-8222-222222222222";
@@ -487,19 +489,57 @@ test("SEC-backed stats can ingest latest annual companyfacts on demand", async (
   assert.equal(fetchCount > 0, true);
 });
 
-test("hydrating the latest fiscal year stores the latest 10-K year from the download", async () => {
+test("hydrating an issuer's latest years stores each of them from one download", async () => {
   const db = new FakeFundamentalsDb();
-  const statement = await hydrateSecIssuer(db, {
+  const downloads: string[] = [];
+  const fetcher = secCompanyFetcher(() => companyFacts());
+  await hydrateSecIssuerLatestYears(db, {
     issuerId: ISSUER_ID,
-    fiscal_year: "latest",
-    fiscal_period: "FY",
-    fetcher: secCompanyFetcher(() => companyFacts()),
+    years: 2,
+    fetcher: (path) => { downloads.push(path); return fetcher(path); },
     sourceId: SOURCE_ID,
     clock: () => new Date("2026-05-08T00:00:00.000Z"),
   });
-  assert.equal(statement?.fiscal_year, 2024);
-  assert.equal(statement?.lines.find((line) => line.metric_key === "revenue")?.value_num, 1000);
-  assert.deepEqual([...new Set(db.facts.map((fact) => fact.fiscal_year))], [2024]);
+  assert.deepEqual([...new Set(db.facts.map((fact) => fact.fiscal_year))].sort(), [2023, 2024]);
+  assert.equal(db.facts.find((fact) => fact.fiscal_year === 2024 && metricKeyFor(db.metrics, fact.metric_id) === "revenue")?.value_num, 1000);
+  assert.deepEqual(downloads.filter((path) => path.startsWith("/api/xbrl/companyfacts/")), ["/api/xbrl/companyfacts/CIK0000320193.json"]);
+});
+
+test("a frozen golden issuer is never repaired from live SEC", async () => {
+  const touched: string[] = [];
+  const db = { query: async (text: string) => { touched.push(text); return { rows: [] }; }, connect: async () => { throw new Error("no transaction expected"); } };
+  const statement = await hydrateSecIssuer(db, {
+    issuerId: GOLDEN_ISSUER_IDS.NVDA,
+    fiscal_year: 2024,
+    fiscal_period: "FY",
+    fetcher: async (path) => { touched.push(path); throw new Error("no fetch expected"); },
+    sourceId: SOURCE_ID,
+  });
+  assert.equal(statement, null);
+  assert.deepEqual(touched, []);
+});
+
+test("a database failure while storing a fetched statement throws as it is, never as SEC's", async () => {
+  class FailingWrites extends FakeFundamentalsDb {
+    async connect() {
+      const query = async <R extends Record<string, unknown>>(text: string): Promise<{ rows: R[] }> => {
+        if (text === "begin" || text === "rollback") return { rows: [] };
+        throw new Error("deadlock detected");
+      };
+      return { query, release: () => {} };
+    }
+  }
+  await assert.rejects(
+    hydrateSecIssuer(new FailingWrites(), {
+      issuerId: ISSUER_ID,
+      fiscal_year: 2024,
+      fiscal_period: "FY",
+      fetcher: secCompanyFetcher(() => companyFacts()),
+      sourceId: SOURCE_ID,
+      logger: { warn() {} },
+    }),
+    (error) => !(error instanceof FundamentalsDataUnavailableError) && error instanceof Error && error.message === "deadlock detected",
+  );
 });
 
 test("SEC-backed statements propagate provider failures instead of returning missing coverage", async () => {

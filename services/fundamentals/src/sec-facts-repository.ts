@@ -32,6 +32,7 @@ import { recordSecFilingAcceptances, type SecFilingRef } from "./sec-acceptance.
 import { createHash } from "node:crypto";
 import { factActiveSql, factKnownAtSql } from "../../evidence/src/fact-activity.ts";
 import { FundamentalsDataUnavailableError } from "./availability.ts";
+import { FROZEN_ISSUER_IDS } from "../../shared/src/golden-issuers.ts";
 import {
   normalizedStatement,
   type CoverageLevel,
@@ -104,15 +105,15 @@ export function createSecBackedStatementRepository(
   };
 }
 
-// Null when the issuer has no usable CIK or SEC has no such statement (a 404,
-// or no us-gaap values for it); a database failure throws as it is; any other
-// failure throws FundamentalsDataUnavailableError. A fiscal_year of "latest"
-// is the latest year with a 10-K revenue value in the download.
+// Null for a frozen golden issuer, whose illustrative figures live SEC data
+// must not repair; null when the issuer has no usable CIK or SEC has no such
+// statement (a 404, or no us-gaap values for it). A failure of SEC's download or data throws
+// FundamentalsDataUnavailableError; a failure storing it throws as it is.
 export async function hydrateSecIssuer(
   db: FundamentalsTransactionalQueryExecutor,
   input: {
     issuerId: UUID;
-    fiscal_year: number | "latest";
+    fiscal_year: number;
     fiscal_period: FiscalPeriod;
     fetcher: SecEdgarFetcher;
     sourceId: UUID;
@@ -120,71 +121,67 @@ export async function hydrateSecIssuer(
     logger?: Pick<Console, "warn">;
   },
 ): Promise<NormalizedStatement | null> {
+  const [statement] = await hydrateSecPeriods(db, input, () => [{ fiscal_year: input.fiscal_year, fiscal_period: input.fiscal_period }]);
+  return statement ?? null;
+}
+
+// Stores the issuer's annual statements for its latest `years` fiscal years
+// (from the latest year with a 10-K revenue value) from one companyfacts
+// download. A year SEC has no statement for is skipped; failures are thrown as
+// hydrateSecIssuer throws them.
+export async function hydrateSecIssuerLatestYears(
+  db: FundamentalsTransactionalQueryExecutor,
+  input: {
+    issuerId: UUID;
+    years: number;
+    fetcher: SecEdgarFetcher;
+    sourceId: UUID;
+    clock?: () => Date;
+    logger?: Pick<Console, "warn">;
+  },
+): Promise<void> {
+  await hydrateSecPeriods(db, input, (facts) => {
+    const latest = latestAnnualRevenueYear(facts);
+    return latest === null ? [] : Array.from({ length: input.years }, (_, offset) => ({ fiscal_year: latest - offset, fiscal_period: "FY" as const }));
+  });
+}
+
+async function hydrateSecPeriods(
+  db: FundamentalsTransactionalQueryExecutor,
+  input: { issuerId: UUID; fetcher: SecEdgarFetcher; sourceId: UUID; clock?: () => Date; logger?: Pick<Console, "warn"> },
+  periodsOf: (facts: SecCompanyFacts) => ReadonlyArray<{ fiscal_year: number; fiscal_period: FiscalPeriod }>,
+): Promise<Array<NormalizedStatement | null>> {
+  if (FROZEN_ISSUER_IDS.has(input.issuerId)) return [];
   const logger = input.logger ?? console;
+  const clock = input.clock ?? (() => new Date());
   const issuer = await loadIssuer(db, input.issuerId);
-  if (!issuer?.cik) {
-    return null;
-  }
+  const cik = Number(issuer?.cik);
+  if (!Number.isInteger(cik) || cik <= 0) return [];
 
-  const cikNumber = Number(issuer.cik);
-  if (!Number.isInteger(cikNumber) || cikNumber <= 0) {
-    return null;
-  }
-
-  const storeFailures = new WeakSet<object>();
-  const store = rememberingFailures(db, storeFailures);
+  let filings: ExtractedFiling[];
   try {
-    const fetched = await fetchCompanyFacts(input.fetcher, cikNumber);
-    const fiscalYear = input.fiscal_year === "latest" ? latestAnnualRevenueYear(fetched.facts) : input.fiscal_year;
-    if (fiscalYear === null) return null;
-    const ingested = await ingestFiling(store, {
-      fetched,
-      cik: cikNumber,
-      issuerId: input.issuerId,
-      fiscal_year: fiscalYear,
-      fiscal_period: input.fiscal_period,
-      fallbackSourceId: input.sourceId,
-      income: "require",
-      clock: input.clock ?? (() => new Date()),
-      logger,
+    const fetched = await fetchCompanyFacts(input.fetcher, cik);
+    filings = periodsOf(fetched.facts).flatMap((period) => {
+      try {
+        return [extractFiling({ fetched, cik, issuerId: input.issuerId, ...period, fallbackSourceId: input.sourceId, income: "require", logger })];
+      } catch (error) {
+        if (isMissingCoverage(error instanceof Error ? error.message : String(error))) return [];
+        throw error;
+      }
     });
-    await recordSecFilingAcceptances(store, input.fetcher, { cik: cikNumber, filings: ingested.filing ? [ingested.filing] : [], logger });
-    return ingested.statement;
   } catch (error) {
-    if (typeof error === "object" && error !== null && storeFailures.has(error)) throw error;
     const unavailable = classifySecIngestionError(error);
     logger.warn("sec_edgar fundamentals ingestion failed", {
       issuer_id: input.issuerId,
-      fiscal_year: input.fiscal_year,
-      fiscal_period: input.fiscal_period,
       error: error instanceof Error ? error.message : String(error),
     });
-    if (!unavailable) return null;
+    if (!unavailable) return [];
     throw unavailable;
   }
-}
-
-// The executor, recording every error it raises, so ingestion can tell a
-// database failure from a failure of SEC's data.
-function rememberingFailures(db: FundamentalsTransactionalQueryExecutor, failures: WeakSet<object>): FundamentalsTransactionalQueryExecutor {
-  const remember = async <T>(work: Promise<T>): Promise<T> => {
-    try {
-      return await work;
-    } catch (error) {
-      if (typeof error === "object" && error !== null) failures.add(error);
-      throw error;
-    }
-  };
-  return {
-    query: <R extends Record<string, unknown>>(text: string, values?: unknown[]) => remember(db.query<R>(text, values)),
-    connect: async () => {
-      const client = await remember(db.connect());
-      return {
-        query: <R extends Record<string, unknown>>(text: string, values?: unknown[]) => remember(client.query<R>(text, values)),
-        release: () => client.release(),
-      };
-    },
-  };
+  const stored: Array<Awaited<ReturnType<typeof storeFiling>>> = [];
+  for (const filing of filings) stored.push(await storeFiling(db, filing, clock));
+  await recordSecFilingAcceptances(db, input.fetcher, { cik, filings: stored.flatMap((entry) => (entry.filing ? [entry.filing] : [])), logger });
+  return stored.map((entry) => entry.statement);
 }
 
 // For every SEC income period already on file for an issuer, from one
@@ -248,6 +245,26 @@ type Extracted = {
   derivations: ReadonlyMap<string, SecDerivation>;
 };
 
+type IngestInput = {
+  fetched: SecCompanyFactsFetch;
+  cik: number;
+  issuerId: UUID;
+  fiscal_year: number;
+  fiscal_period: FiscalPeriod;
+  fallbackSourceId: UUID;
+  income: "require" | "repair";
+  logger: Pick<Console, "warn">;
+};
+
+type ExtractedFiling = Readonly<{
+  input: IngestInput;
+  accessionNumber: string | null;
+  sourceId: UUID;
+  target: Omit<ExtractStatementInput, "family">;
+  income: Extracted | null;
+  companions: ReadonlyArray<Extracted>;
+}>;
+
 // Stores one filing's statements for a fiscal period from a companyfacts
 // download, in one transaction: the income statement, and the same filing's
 // cash flow and balance sheet beside it. Income is "require" (a lookup: it must
@@ -258,23 +275,17 @@ type Extracted = {
 // completion, never by when it was processed.
 async function ingestFiling(
   db: FundamentalsTransactionalQueryExecutor,
-  input: {
-    fetched: SecCompanyFactsFetch;
-    cik: number;
-    issuerId: UUID;
-    fiscal_year: number;
-    fiscal_period: FiscalPeriod;
-    fallbackSourceId: UUID;
-    income: "require" | "repair";
-    clock: () => Date;
-    logger: Pick<Console, "warn">;
-  },
+  input: IngestInput & { clock: () => Date },
 ): Promise<{ statement: NormalizedStatement | null; filing: SecFilingRef | null }> {
-  const asOf = input.fetched.evidence.completed_at;
+  return storeFiling(db, extractFiling(input), input.clock);
+}
+
+// Reads the filing's statements out of the download, without the database.
+// Throws when a required income statement cannot be extracted.
+function extractFiling(input: IngestInput): ExtractedFiling {
   const accessionNumber = statementAccession(input.fetched.facts, input.fiscal_year, input.fiscal_period);
-  const sourceId = accessionNumber
-    ? await upsertSecFilingSource(db, { cik: input.cik, accessionNumber, retrievedAt: asOf })
-    : input.fallbackSourceId;
+  // The id upsertSecFilingSource stores for the accession, or it throws.
+  const sourceId = accessionNumber ? sourceIdForAccession(accessionNumber) : input.fallbackSourceId;
   const target = {
     subject: { kind: "issuer", id: input.issuerId },
     facts: input.fetched.facts,
@@ -282,12 +293,21 @@ async function ingestFiling(
     fiscal_period: input.fiscal_period,
     accession_number: accessionNumber ?? undefined,
     source_id: sourceId,
-    as_of: asOf,
+    as_of: input.fetched.evidence.completed_at,
   } as const;
   const income: Extracted | null = input.income === "require"
     ? extracted(extractStatementWithTokens({ ...target, family: "income" }))
     : statementsOf(target, ["income"], input.logger)[0] ?? null;
-  const companions = statementsOf(target, COMPANION_FAMILIES, input.logger);
+  return { input, accessionNumber, sourceId, target, income, companions: statementsOf(target, COMPANION_FAMILIES, input.logger) };
+}
+
+async function storeFiling(
+  db: FundamentalsTransactionalQueryExecutor,
+  { input, accessionNumber, sourceId, target, income, companions }: ExtractedFiling,
+  clock: () => Date,
+): Promise<{ statement: NormalizedStatement | null; filing: SecFilingRef | null }> {
+  const asOf = input.fetched.evidence.completed_at;
+  if (accessionNumber) await upsertSecFilingSource(db, { cik: input.cik, accessionNumber, retrievedAt: asOf });
   const registry = await loadMetricRegistry(
     db,
     [...(income ? [income] : []), ...companions].flatMap((entry) => entry.statement.lines.map((line) => line.metric_key)),
@@ -310,7 +330,7 @@ async function ingestFiling(
       );
     }
     for (const entry of mapped) {
-      const inserted = await persistStatementFacts(client, entry.mapped, input.clock, {
+      const inserted = await persistStatementFacts(client, entry.mapped, clock, {
         cik: input.cik,
         tokens: entry.tokens,
         derivations: entry.derivations,
@@ -329,7 +349,7 @@ async function ingestFiling(
       cik: input.cik,
       issuerId: input.issuerId,
       evidence: input.fetched.evidence,
-      clock: input.clock,
+      clock,
     });
     if (accessionNumber) {
       await recordSecFetchPublication(client, { sourceId, accessionNumber, evidence: input.fetched.evidence });

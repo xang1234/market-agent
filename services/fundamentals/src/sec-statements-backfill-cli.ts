@@ -12,13 +12,12 @@
 
 import { Pool } from "pg";
 
-import { GOLDEN_ISSUER_IDS } from "../../shared/src/golden-issuers.ts";
+import { FROZEN_ISSUER_IDS } from "../../shared/src/golden-issuers.ts";
 import { SEC_EDGAR_FILING_SOURCE_ID } from "./provider-sources.ts";
 import type { SecEdgarFetcher } from "./sec-edgar.ts";
 import { createSecCompanyFactsHttpFetcher, withSecFairAccess } from "./sec-edgar-http.ts";
 import { backfillSecCompanionStatements, type FundamentalsTransactionalQueryExecutor } from "./sec-facts-repository.ts";
 
-const FROZEN_ISSUER_IDS: ReadonlySet<string> = new Set(Object.values(GOLDEN_ISSUER_IDS));
 
 export async function backfillSecStatements(
   db: FundamentalsTransactionalQueryExecutor,

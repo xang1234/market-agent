@@ -127,16 +127,17 @@ export function prepareAnalyzeFinancialContext(input: {
   });
 }
 
-/** How many of each subject's latest fiscal years the memo's plan reads, so hydration fetches exactly those. */
-export function latestFiscalYearsRead(context: AnalyzeRunFinancialMetadata): ReadonlyMap<string, number> {
+/** How many of each issuer's latest fiscal years the memo's plan reads, so hydration fetches exactly those. */
+export function latestYearsByIssuer(context: AnalyzeRunFinancialMetadata): ReadonlyMap<string, number> {
   const { draft } = planShape(context);
   const issuerBySlot = new Map(draft.subjects.map((subject) => [subject.slot_id, subject.mention]));
   const years = new Map<string, number>();
   for (const operation of draft.operations) {
-    const period = operation.period as { kind?: string; offset?: number } | undefined;
-    const issuer = issuerBySlot.get(operation.subject_slot as string);
-    if (period?.kind !== "latest" || issuer === undefined) continue;
-    years.set(issuer, Math.max(years.get(issuer) ?? 0, (period.offset ?? 0) + 1));
+    if (operation.operation !== "reported_metric") continue;
+    const period = operation.period as { kind: string; offset: number };
+    if (period.kind !== "latest") throw new Error(`${operation.node_id}: hydration fetches only the latest fiscal years`);
+    const issuer = issuerBySlot.get(operation.subject_slot as string)!;
+    years.set(issuer, Math.max(years.get(issuer) ?? 0, period.offset + 1));
   }
   return years;
 }

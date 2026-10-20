@@ -29,7 +29,7 @@ import {
 } from "../../analyze/src/index.ts";
 import {
   financialSectionIds,
-  latestFiscalYearsRead,
+  latestYearsByIssuer,
   loadAnalyzeFinancialSections,
   prepareAnalyzeFinancialContext,
   type AnalyzeFinancialRun,
@@ -197,7 +197,7 @@ async function newFinancialContext(
   });
   const planned = contextAt(new Date());
   if (planned === null) return null;
-  await lane.hydrate(latestFiscalYearsRead(planned));
+  await lane.hydrate(latestYearsByIssuer(planned));
   return contextAt(new Date());
 }
 
