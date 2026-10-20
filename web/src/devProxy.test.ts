@@ -3,16 +3,16 @@ import test from 'node:test'
 
 import viteConfig from '../vite.config.ts'
 
+const { server } = viteConfig({ command: 'serve', mode: 'development' })
+
 test('Vite proxies local dev settings API to dev-api', () => {
-  const proxy = typeof viteConfig === 'object' && viteConfig !== null
-    ? viteConfig.server?.proxy
-    : undefined
+  const proxy = server?.proxy
 
   assert.ok(proxy && typeof proxy === 'object' && '/v1/dev' in proxy)
 })
 
 test('Vite proxies evidence inspection to dev-api, ahead of the /v1/evidence review server', () => {
-  const proxy = viteConfig.server?.proxy as Record<string, { target: string }>
+  const proxy = server?.proxy as Record<string, { target: string }>
   const keys = Object.keys(proxy)
   // Vite uses the first matching key, so the specific route must precede the prefix.
   assert.ok(keys.indexOf('/v1/evidence/inspect') !== -1, 'inspect route is proxied')

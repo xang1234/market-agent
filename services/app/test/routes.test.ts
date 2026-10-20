@@ -14,7 +14,7 @@ test("every /v1 path is an API path, registered prefix or not (never the SPA's H
 });
 
 test("every prefix the Vite dev proxy knows is either served in-process or parked", () => {
-  const prefixes = Object.keys(viteConfig.server?.proxy ?? {});
+  const prefixes = Object.keys(viteConfig({ command: "serve", mode: "development" }).server?.proxy ?? {});
   assert.ok(prefixes.length > 0);
   for (const prefix of prefixes) {
     assert.notEqual(routeFor(`${prefix}/x`).kind, "web", `${prefix} would fall through to the SPA`);
