@@ -2,8 +2,9 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 
 // The golden conversation (#118) in a real browser (#122, #194): Analyze NVDA -> Compare it
 // with AMD YTD -> Explain the differences and show the evidence -> inspect a cited figure ->
-// reload, on the no-keys stack (frozen dataset + recorded model replies) and against its UI
-// replay. The API-level golden test covers the data; this proves the UI renders and links it.
+// reload, on the no-keys stack (frozen dataset + recorded model replies), against its UI
+// replay, and in the static demo build. The API-level golden test covers the data; this
+// proves the UI renders and links it.
 
 // Each answer is rendered from its recorded reply's assertions, so neither the
 // placeholder nor the fallback sentence passes.
@@ -25,6 +26,21 @@ async function ask(page: Page, question: string) {
 const answer = (page: Page, narrative: string) =>
   page.locator('[data-role="assistant"]', { hasText: narrative })
 
+// The URLs of the /v1 requests the page makes from now on. The static demo answers them
+// in the page, so they never reach the network; there the evidence is the demo's own
+// `[demo replay]` log line for each (src/demo/demoBackend.ts), self-reported, not observed.
+function apiRequests(page: Page, method: string, path: RegExp): string[] {
+  const seen: string[] = []
+  page.on('request', (request) => {
+    if (request.method() === method && path.test(new URL(request.url()).pathname)) seen.push(request.url())
+  })
+  page.on('console', (message) => {
+    const logged = /^\[demo replay\] (\S+) (\S+) ->/.exec(message.text())
+    if (logged && logged[1] === method && path.test(logged[2]!)) seen.push(logged[2]!)
+  })
+  return seen
+}
+
 test('golden conversation renders charts, metrics and inspectable sources, and survives a reload', async ({ page }) => {
   // From its first appearance, the first answer is on the page exactly once in every
   // mutation batch: the streamed copy hands off to the sealed one with no gap or duplicate.
@@ -39,15 +55,11 @@ test('golden conversation renders charts, metrics and inspectable sources, and s
 
   // Each completion carries its sealed answer (#331), so no turn reads the thread back:
   // from the first question until the reload, the page never GETs the thread's messages.
-  const historyReads: string[] = []
-  page.on('request', (request) => {
-    if (request.method() === 'GET' && /\/v1\/chat\/threads\/[^/]+\/messages$/.test(new URL(request.url()).pathname)) {
-      historyReads.push(request.url())
-    }
-  })
+  const historyReads = apiRequests(page, 'GET', /\/v1\/chat\/threads\/[^/]+\/messages$/)
 
-  // Auto-login (VITE_MA_FLAG_DEV_AUTO_LOGIN) means no sign-in step.
-  await page.goto('/chat')
+  // Auto-login (VITE_MA_FLAG_DEV_AUTO_LOGIN, or the demo build) means no sign-in step.
+  // Relative, so it stays under a base path (the demo's /market-agent/).
+  await page.goto('chat')
   await ask(page, QUESTIONS[0])
   await expect(page).toHaveURL(/\/chat\/[0-9a-f-]{36}$/)
   await expect(page.getByTestId('thread-name')).not.toHaveText(/[0-9a-f]{8}-[0-9a-f]{4}-/)
@@ -83,10 +95,7 @@ test('golden conversation renders charts, metrics and inspectable sources, and s
 
   // Reload: all three questions and answers come back from the persisted thread, with
   // their figures, chart points and sources.
-  const streamsAfterReload: string[] = []
-  page.on('request', (request) => {
-    if (/\/v1\/chat\/threads\/[^/]+\/stream$/.test(new URL(request.url()).pathname)) streamsAfterReload.push(request.url())
-  })
+  const streamsAfterReload = apiRequests(page, 'GET', /\/v1\/chat\/threads\/[^/]+\/stream$/)
   await page.reload()
   for (const question of QUESTIONS) {
     await expect(page.locator('[data-role="user"]', { hasText: question })).toBeVisible()
