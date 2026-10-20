@@ -40,10 +40,18 @@ import { publishRequest, type FinancialMode, type RequestGap } from "../../finan
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import type { ChatTurnRunContext } from "./coordinator.ts";
 import { contentHashForText, financialMessageId } from "./chat-ids.ts";
+import { noteBlock } from "./fact-blocks.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { COMPARATIVE, extractSubjectMentions } from "./subject-extraction.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "./subjects.ts";
-import { proposedMetric, type RequestedMetric, type ResearchScope } from "./research-scope.ts";
+import {
+  BALANCE_SHEET_ITEMS,
+  PROPOSABLE_METRICS,
+  proposedMetric,
+  type RequestedMetric,
+  type ResearchScope,
+  type ScopeField,
+} from "./research-scope.ts";
 
 export type ChatFinancialMode = FinancialMode;
 
@@ -105,20 +113,27 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     const authority = chatAuthority(context.userId!, context.threadId, turnId);
 
     const messageId = financialMessageId(context.threadId, turnId);
-    // The scope only informs follow-ups: failing to resolve it never fails the answer.
-    // This lane runs before the analyst path resolves the turn's companies, so
-    // the scope gets the companies the plan requests (requestedMentions).
-    const scope = await (deps.researchScope ? scopeWithCompanies(deps, context, text) : Promise.resolve(null)).catch((reason) => {
+    // The scope informs follow-ups and names what the plan does not cover:
+    // failing to resolve it never fails the answer. This lane runs before the
+    // analyst path resolves the turn's companies, so the scope gets the
+    // companies the plan requests (requestedMentions).
+    const scope = (deps.researchScope ? scopeWithCompanies(deps, context, text) : Promise.resolve(null)).catch((reason) => {
       console.warn("[chat] research scope unavailable; saving the financial answer without it", reason);
       return null;
-    }) ?? null;
+    });
     // A retry of this turn resumes what the first attempt reserved; it never plans again.
     const outcome = await publishRequest(deps.pool, {
       authority,
       request_key: turnId,
       // Planning runs on the client publishRequest has checked out; a second
-      // pool acquire here could wait forever on a one-connection pool.
-      plan: (db) => planTurn(deps, db, context, text, authority, new Date()),
+      // pool acquire here could wait forever on a one-connection pool. A plan
+      // that will publish waits for the scope here, beside the model's
+      // planning and outside any transaction.
+      plan: async (db) => {
+        const planned = await planTurn(deps, db, context, text, authority, new Date());
+        if (planned.outcome === "ready") await scope;
+        return planned;
+      },
       evidence: deps.evidence,
       persistParent: persistAssistantMessage(context.threadId, messageId, scope, { authority, request_key: turnId }),
     });
@@ -337,14 +352,27 @@ function chatAuthority(userId: string, threadId: string, turnId: string): Financ
 function persistAssistantMessage(
   threadId: string,
   messageId: string,
-  scope: ResearchScope | null,
+  pending: Promise<ResearchScope | null>,
   request: { authority: FinancialRuntimeAuthority; request_key: string },
 ): PersistParentArtifact {
   return async (tx, publication) => {
-    const blocks = [publication.block];
+    // Settled when this turn planned. ponytail: a retried turn, which resumes
+    // without planning, waits here inside the finalize transaction, for at
+    // most the scope model's deadline (SCOPE_DEADLINES); resolve the scope
+    // before reserving if retries become common.
+    const scope = await pending;
+    const plan = scope === null ? null : await findPlanForRequest(tx.client, request);
+    const missing = scope === null || plan === null ? [] : uncoveredAsks(scope, plan);
+    const blocks = [
+      publication.block,
+      ...(missing.length === 0 ? [] : [noteBlock(
+        { snapshotId: publication.snapshot_id, asOf: publication.block.as_of },
+        "uncovered",
+        `Not part of this calculation: ${missing.join("; ")}.`,
+      )]),
+    ];
     // The scope names the figures the published plan computed, so a follow-up
     // ("why did it change?") reads them (#378 review).
-    const plan = scope === null ? null : await findPlanForRequest(tx.client, request);
     const saved = scope === null || plan === null ? scope : { ...scope, metrics: planMetrics(plan) };
     const inserted = await tx.client.query(
       `insert into chat_messages (message_id, thread_id, role, snapshot_id, blocks, content_hash, research_scope)
@@ -401,6 +429,53 @@ function planMetrics(plan: FinancialPlanV1): RequestedMetric[] {
   };
   const keys = new Set(plan.outputs.flatMap((output) => figures(nodes.get(output.node_id)!)));
   return [...keys].map((key) => proposedMetric(key, null, null)!);
+}
+
+// The facets a question can ask for that the engine never plans, each as the
+// answer names it.
+const NEVER_PLANNED: ReadonlyArray<readonly [ScopeField, (scope: ResearchScope) => boolean, string]> = [
+  ["segments", (scope) => scope.segments, "revenue by segment"],
+  ["peers", (scope) => scope.peers, "peers the question did not name"],
+  ["price_window", (scope) => scope.price_window !== null, "a stock price return over the year to date"],
+  ["benchmark", (scope) => scope.benchmark, "a comparison with a benchmark index"],
+  ["guidance", (scope) => scope.guidance === true, "company guidance"],
+  ["explains", (scope) => scope.explains === true, "the cause of these figures"],
+];
+const CATALOG_METRICS = new Set(PROPOSABLE_METRICS.map((metric) => metric.metric_key));
+
+/**
+ * What this turn asked for (the model's reading of the question, not an
+ * earlier turn's) and its plan does not compute, so the answer names it
+ * instead of leaving it out: a facet the engine never plans, a margin or a
+ * margin trend the plan has none of, or a catalog metric it reads none of.
+ * ponytail: a qualified metric ("EPS growth", "adjusted EPS") is not checked,
+ * as nothing records which qualifier the plan computed; record its base and
+ * qualifier on RequestedMetric to check it.
+ */
+export function uncoveredAsks(scope: ResearchScope, plan: FinancialPlanV1): string[] {
+  const asked = (field: ScopeField) => !scope.inherited.includes(field);
+  const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
+  // Every figure the plan computes, as the chat catalog keys it; a share count
+  // no chat reader serves keys as itself.
+  const read = new Set(plan.operations.flatMap((node) => {
+    const key = node.operation === "reported_metric" ? node.metric_key : node.operation;
+    return Object.hasOwn(SCOPE_METRICS, key) ? [SCOPE_METRICS[key] ?? key] : [];
+  }));
+  if (BALANCE_SHEET_ITEMS.some((key) => read.has(key))) read.add("balance_sheet");
+  const periodOf = (id: string) => {
+    const node = nodes.get(id);
+    return node?.operation === "reported_metric" ? JSON.stringify(node.period) : id;
+  };
+  const marginPeriods = new Set(plan.operations.flatMap((node) =>
+    node.operation === "gross_margin" || node.operation === "operating_margin" || node.operation === "net_margin" ? [periodOf(node.revenue)] : []));
+  // A margin asked now: an inherited trend also marks margins.
+  const marginsAsked = scope.margins && asked("margin_trend");
+  return [
+    ...(asked("metrics") ? scope.metrics.filter((metric) => CATALOG_METRICS.has(metric.metric_key) && !read.has(metric.metric_key)).map((metric) => metric.label) : []),
+    ...(marginsAsked && marginPeriods.size === 0 ? ["a margin"] : []),
+    ...(scope.margin_trend && asked("margin_trend") && marginPeriods.size === 1 ? ["a margin over several periods"] : []),
+    ...NEVER_PLANNED.flatMap(([field, wanted, item]) => wanted(scope) && asked(field) ? [item] : []),
+  ];
 }
 
 async function published(db: SqlExecutor, runId: string, threadId: string, messageId: string): Promise<ChatFinancialTurn> {

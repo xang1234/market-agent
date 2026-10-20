@@ -90,6 +90,30 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.equal(await savedScope(async () => { throw new Error("prior scope unavailable"); }), null);
   });
 
+  await t.test("the answer names, beside its figures, what the question asks for and the plan does not compute", async () => {
+    const asked = async () => ({
+      route: "financial_answer" as const,
+      reads: "financial_answer" as const,
+      companies: [{ issuer_id: IDS.issuerA }, { issuer_id: IDS.issuerB }],
+      peers: false,
+      segments: false,
+      margin_trend: false,
+      margins: false,
+      metrics: [proposedMetric("ebitda", null, null)!, proposedMetric("income_statement", null, null)!],
+      fiscal_year: null,
+      fiscal_quarter: null,
+      price_window: null,
+      benchmark: true,
+      inherited: [],
+    });
+    const { events } = await chatHarness(pool, { model: revenueModel(["AAA", "BBB"]), researchScope: asked }).run({ ...base, userIntent: "Compare revenue and EBITDA for AAA and BBB against the S&P 500" });
+    const message = (await db.query(`select blocks from chat_messages where message_id = $1`, [completed(events).message_id])).rows[0];
+    assert.deepEqual(message.blocks.map((block: { kind: string }) => block.kind), ["financial_answer", "rich_text"]);
+    assert.deepEqual(message.blocks[1].segments, [{ type: "text", text: "Not part of this calculation: EBITDA; a comparison with a benchmark index." }]);
+    assert.equal(message.blocks[1].snapshot_id, message.blocks[0].snapshot_id, "the note is sealed with the answer it qualifies");
+    assert.deepEqual(events.filter((event) => event.type === "block.completed").map((event) => event.block_id), message.blocks.map((block: { id: string }) => block.id));
+  });
+
   await t.test("an explicit subject is planned first, alongside the companies the message names (#138)", async () => {
     const model = revenueModel(["AAA", "BBB"]);
     const { events } = await chatHarness(pool, { model }).run({ ...base, subjectText: "AAA", userIntent: "Compare revenue with BBB" });

@@ -315,9 +315,12 @@ async function readMessages(db: ChatMessagePersistenceDb, where: string, values:
   return rows.map((row) => Object.freeze({ ...row, block_proofs: blockProofs(row, snapshots) }));
 }
 
-export function firstBlockId(message: Pick<ChatMessageRow, "blocks">): string | null {
-  const [block] = Array.isArray(message.blocks) ? message.blocks : [];
-  return block !== null && typeof block === "object" && !Array.isArray(block) && typeof block.id === "string" ? block.id : null;
+export function blockHeads(message: Pick<ChatMessageRow, "blocks">): Array<{ id: string; kind: string }> {
+  return (Array.isArray(message.blocks) ? message.blocks : []).flatMap((block) =>
+    block !== null && typeof block === "object" && !Array.isArray(block) && typeof block.id === "string" && typeof block.kind === "string"
+      ? [{ id: block.id, kind: block.kind }]
+      : []
+  );
 }
 
 function blockSnapshotIds(blocks: JsonValue): string[] {

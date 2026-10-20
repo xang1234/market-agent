@@ -260,7 +260,7 @@ test("with no proposal, a follow-up keeps the previous scope whole", () => {
   );
   assert.deepEqual(followUp("And then?", null, prior), {
     ...prior,
-    inherited: ["segments", "margin_trend", "metrics", "fiscal_year", "price_window"],
+    inherited: ["segments", "margin_trend", "metrics", "fiscal_year", "price_window", "guidance", "explains"],
   });
 });
 
@@ -300,7 +300,7 @@ test("with no proposal, a follow-up keeps the margins, and a company added route
   );
   // The items it named are kept with it, metrics or none.
   const why = fresh("What drove NVDA's revenue?", proposal({ asks: ["explains"], items: ["revenue"] }));
-  assert.deepEqual(followUp("And then?", null, why), { ...why, inherited: [] });
+  assert.deepEqual(followUp("And then?", null, why), { ...why, inherited: ["explains"] });
 });
 
 test("with no proposal, a fresh question gets the plain answer for its companies and period tokens", () => {

@@ -350,7 +350,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     completedTurn(await runTurn(base, thread.thread_id, "Compare NVDA and AMD again"));
     const again = await latestScope();
     assert.deepEqual(again?.price_window, established?.price_window);
-    assert.deepEqual(again?.inherited, ["price_window"]);
+    assert.deepEqual(again?.inherited, ["price_window", "explains"]);
     // An answer with no scope and no company (an enforced financial gap) erases
     // neither: the next follow-up still carries both companies and the window.
     const gap = await client.query<{ snapshot_id: string }>(

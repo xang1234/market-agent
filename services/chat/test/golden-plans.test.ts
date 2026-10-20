@@ -4,9 +4,11 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createRuntimeAuthority, operationDependencies, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
-import { planFinancialRequest, type PlanningContext, type PlanningModel, type PlanningResult } from "../../financial-engine/src/planner.ts";
+import { buildDeterministicPlan, planFinancialRequest, type PlanningContext, type PlanningModel, type PlanningResult } from "../../financial-engine/src/planner.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
-import { isFinancialRequest } from "../src/financial-runtime.ts";
+import { isFinancialRequest, uncoveredAsks } from "../src/financial-runtime.ts";
+import { resolveResearchScope, type ResearchScope } from "../src/research-scope.ts";
+import { parseProposal, proposalQuestion } from "../src/scope-proposal.ts";
 import { extractSubjectMentions } from "../src/subject-extraction.ts";
 import { GOLDEN_AS_OF, GOLDEN_COMPANIES } from "./golden/dataset.ts";
 
@@ -111,4 +113,63 @@ test("each golden metric question plans from its own recorded reply on the first
   for (const question of questions) {
     assert.deepEqual(summary(await planFinancialRequest(planningContext(question), question, model)), EXPECTED[question], question);
   }
+});
+
+// The engine's turn scope, as local-runtime resolves it: the model's reading
+// of the question over the companies it names, its metrics served.
+function engineScope(question: string, proposal: ReturnType<typeof parseProposal>, prior: ResearchScope | null = null): ResearchScope {
+  const companies = extractSubjectMentions(question).map((mention) => ({ issuer_id: GOLDEN_COMPANIES.find((company) => company.ticker === mention)!.issuer_id }));
+  return resolveResearchScope({ question, companies, prior, asOf: GOLDEN_AS_OF, served: true, proposal });
+}
+
+const reading = (asks: string[], metrics: unknown[] = []) =>
+  parseProposal(JSON.stringify({ metrics, asks, turns_off: { facets: [], metrics: [] }, income_items: [] }));
+
+test("each golden answer names what its question asks for and its plan does not compute", async () => {
+  const client = await createReplayLlmChatClient(REPLIES);
+  const reply = async (content: string) => (await client({} as never, { messages: [{ role: "user", content }] })).text;
+  const model: PlanningModel = async ({ messages }) => ({ text: (await client({} as never, { messages })).text, model: "recorded" });
+  const uncovered: Record<string, string[]> = {
+    "Why did AMD's operating margin turn negative in Q2 2025?": ["the cause of these figures"],
+    "What was AMD's revenue in Q2 2019?": [],
+    "What is AMD's free cash flow?": [],
+    "Compare NVDA, AMD and AAPL revenue and margins YTD against the S&P 500": ["a stock price return over the year to date", "a comparison with a benchmark index"],
+  };
+  for (const [question, expected] of Object.entries(uncovered)) {
+    const planned = await planFinancialRequest(planningContext(question), question, model);
+    assert.equal(planned.outcome, "ready", question);
+    if (planned.outcome !== "ready") continue;
+    assert.deepEqual(uncoveredAsks(engineScope(question, parseProposal(await reply(proposalQuestion(question)))), planned.plan), expected, question);
+  }
+});
+
+test("an engine answer names only what its own question asks for, against the figures the plan computes", () => {
+  const quarter = (fiscal_period: string) => ({ kind: "fiscal_period", fiscal_year: 2026, fiscal_period });
+  const reported = (node_id: string, metric_key: string, period: object) => ({ node_id, operation: "reported_metric", subject_slot: "a", metric_key, period });
+  const margin = (suffix: string, period: object) => [
+    reported(`oi_${suffix}`, "operating_income", period),
+    reported(`rev_${suffix}`, "revenue", period),
+    { node_id: `om_${suffix}`, operation: "operating_margin", numerator: `oi_${suffix}`, revenue: `rev_${suffix}` },
+  ];
+  const plan = (operations: object[]): FinancialPlanV1 => {
+    const outputs = operations.map((operation) => ({ output_id: `out_${(operation as { node_id: string }).node_id}`, node_id: (operation as { node_id: string }).node_id }));
+    const planned = buildDeterministicPlan(planningContext("NVDA"), { subjects: [{ slot_id: "a", mention: "NVDA" }], operations, outputs, thresholds: [] });
+    assert.equal(planned.outcome, "ready", JSON.stringify(planned));
+    return (planned as Extract<PlanningResult, { outcome: "ready" }>).plan;
+  };
+  const revenue = plan([reported("rev", "revenue", quarter("Q4"))]);
+
+  const comparison = engineScope("Compare NVDA YTD against the S&P 500 and explain why", reading(["price_window", "benchmark", "explains"]));
+  assert.deepEqual(uncoveredAsks(comparison, revenue), ["a stock price return over the year to date", "a comparison with a benchmark index", "the cause of these figures"]);
+  // A follow-up keeps the window, the benchmark and the cause without asking for them again.
+  assert.deepEqual(uncoveredAsks(engineScope("What is NVDA's revenue?", reading([], ["income_statement"]), comparison), revenue), []);
+
+  assert.deepEqual(uncoveredAsks(engineScope("What are NVDA's EBITDA and revenue?", reading([], ["ebitda", "income_statement"])), revenue), ["EBITDA"]);
+  const trend = engineScope("How has NVDA's operating margin trended?", reading(["margins", "margin_trend"]));
+  assert.deepEqual(uncoveredAsks(trend, revenue), ["a margin"]);
+  assert.deepEqual(uncoveredAsks(trend, plan(margin("q4", quarter("Q4")))), ["a margin over several periods"]);
+  assert.deepEqual(uncoveredAsks(trend, plan([...margin("q3", quarter("Q3")), ...margin("q4", quarter("Q4"))])), []);
+  const balance = engineScope("Show NVDA's balance sheet", reading([], ["balance_sheet"]));
+  assert.deepEqual(uncoveredAsks(balance, plan([reported("assets", "total_assets", quarter("Q4"))])), []);
+  assert.deepEqual(uncoveredAsks(balance, revenue), ["Balance sheet"]);
 });

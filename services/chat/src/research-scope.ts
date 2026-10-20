@@ -47,7 +47,7 @@ const ROUTES = [
 ] as const;
 export type ResearchRoute = (typeof ROUTES)[number];
 
-export type ScopeField = "peers" | "segments" | "margin_trend" | "metrics" | "fiscal_year" | "fiscal_quarter" | "price_window" | "benchmark";
+export type ScopeField = "peers" | "segments" | "margin_trend" | "metrics" | "fiscal_year" | "fiscal_quarter" | "price_window" | "benchmark" | "guidance" | "explains";
 
 // A metric a question names: one this chat's readers show, or a named gap.
 export type RequestedMetric = { metric_key: string; label: string; available: boolean };
@@ -184,7 +184,7 @@ export const STATEMENT_METRIC_LABELS: Readonly<Record<string, ReadonlyArray<stri
   eps_basic: ["EPS (basic)"],
 };
 
-const BALANCE_SHEET_ITEMS = ["cash_and_equivalents", "total_assets", "total_liabilities", "total_equity"];
+export const BALANCE_SHEET_ITEMS = ["cash_and_equivalents", "total_assets", "total_liabilities", "total_equity"];
 
 function metricByKey(key: string): RequestedMetric {
   return PROPOSABLE_METRICS.find((candidate) => candidate.metric_key === key)!;
@@ -386,8 +386,12 @@ export function resolveResearchScope(input: {
     : routeOf(input.companies.length, { peers, segments, margin_trend, margins, onlyUnavailable, onlyStatements });
   // Guidance and a cause are asked this turn, or kept from an earlier one as
   // the other facets are, unless this one turns them off.
-  const keeps = (facet: "guidance" | "explains", kept: true | undefined) =>
-    !offFacets.has(facet) && (asks.has(facet) || kept === true);
+  const keeps = (facet: "guidance" | "explains", kept: true | undefined) => {
+    if (offFacets.has(facet)) return false;
+    if (asks.has(facet)) return true;
+    if (kept === true) inherited.push(facet);
+    return kept === true;
+  };
   return {
     route: evidence ? "evidence_followup" : reread?.route ?? reads,
     reads,

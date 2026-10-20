@@ -876,18 +876,21 @@ export function scopeGapBlocks(
       ? "A benchmark index is not in this data, so the companies are compared only with each other."
       : `A benchmark index is not in this data, so ${names} is not compared with one.`]);
   }
-  return notes.map(([key, text]) => {
-    const id = stableUuid(`block:${input.snapshotId}:${key}`);
-    return {
-      id,
-      kind: "rich_text",
-      snapshot_id: input.snapshotId,
-      data_ref: { kind: "rich_text", id },
-      source_refs: [],
-      as_of: input.asOf,
-      segments: [{ type: "text", text }],
-    };
-  });
+  return notes.map(([key, text]) => noteBlock(input, key, text));
+}
+
+// A note the answer states in words, with no figure: one per key and snapshot.
+export function noteBlock(input: { snapshotId: string; asOf: string }, key: string, text: string): Block {
+  const id = stableUuid(`block:${input.snapshotId}:${key}`);
+  return {
+    id,
+    kind: "rich_text",
+    snapshot_id: input.snapshotId,
+    data_ref: { kind: "rich_text", id },
+    source_refs: [],
+    as_of: input.asOf,
+    segments: [{ type: "text", text }],
+  };
 }
 
 // Whether the answer model may see the turn's other facts (its packet figures, #302)
