@@ -1,242 +1,129 @@
-# market-agent
+<h1 align="center">market-agent</h1>
 
-> A finance-research terminal where you screen the market, dig into any company, put an AI analyst to work over the evidence, and let background agents watch your theses — and every number on screen traces back to a source you can click into.
+<p align="center">
+  <b>An AI stock analyst that cites every number.</b><br>
+  Ask about any US company. Get charts and tables where each figure links to the SEC filing or price bar it came from.
+</p>
 
-![Home — findings feed, market pulse, watchlist movers, agent summaries, saved screens](docs/screenshots/home.png)
+<p align="center">
+  <a href="https://github.com/xang1234/market-agent/actions/workflows/ci.yml"><img src="https://github.com/xang1234/market-agent/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/TypeScript-3178c6?logo=typescript&logoColor=white" alt="TypeScript">
+  <img src="https://img.shields.io/badge/React-19-149eca?logo=react&logoColor=white" alt="React 19">
+  <img src="https://img.shields.io/badge/Node-22.19%2B-339933?logo=node.js&logoColor=white" alt="Node 22.19+">
+  <img src="https://img.shields.io/badge/Postgres-15-336791?logo=postgresql&logoColor=white" alt="Postgres 15">
+</p>
 
-[![React 19](https://img.shields.io/badge/React-19-149eca?logo=react&logoColor=white)](https://react.dev)
-[![Vite](https://img.shields.io/badge/Vite-7-646cff?logo=vite&logoColor=white)](https://vite.dev)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![Node 22](https://img.shields.io/badge/Node-22.19%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org)
-[![PostgreSQL 15](https://img.shields.io/badge/Postgres-15-336791?logo=postgresql&logoColor=white)](https://www.postgresql.org)
-[![MinIO / S3](https://img.shields.io/badge/Object%20Store-MinIO%20%2F%20S3-c72e49?logo=minio&logoColor=white)](https://min.io)
-[![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ed?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
+<p align="center">
+  <img src="docs/media/hero.gif" width="92%" alt="Asking the analyst to compare NVDA and AMD, then opening the evidence behind one figure">
+</p>
 
----
+Ask a general-purpose chatbot for a company's gross margin and you get a confident number with no way to check it. market-agent answers only from facts it has stored: SEC company facts, filing extracts, and Polygon prices. Every figure in an answer opens to its source. A second model checks each inference before you see it, and chat hides any inference that fails.
 
-## What it is
+## Quickstart
 
-`market-agent` is a desktop-style research terminal for investors and analysts. You search a company, pull up its fundamentals and price history, screen the broader universe for ideas, and ask questions of an AI analyst — all in one workspace, without juggling a dozen tabs and spreadsheets.
+Try the analyst offline first. This needs only Node 22.19 or later: no Docker, no API keys.
 
-Three things you can do with it:
+```bash
+git clone https://github.com/xang1234/market-agent.git
+cd market-agent
+cp .env.dev.example .env.dev
+DEV_PROFILE=chat DEV_MODE=ui ./scripts/dev-shell.sh up
+```
 
-- **Explore markets and companies** on fast, deterministic surfaces — quotes, charts, SEC-normalized financials, earnings, holders, and signals.
-- **Ask an AI analyst** in a persistent chat workspace and get back structured, interactive answers — tables, charts, and metric rows with citations, not a wall of text.
-- **Run background agents** that monitor your investment theses around the clock, raise findings, and alert you when something changes.
+Open <http://localhost:5173>, click **Sign in**, and start a chat. Ask *Analyze NVDA*, then *Compare it with AMD YTD*, then *Explain the differences and show the evidence*. This mode replays a recorded conversation, so other questions have no answer.
 
-What sets it apart is the evidence promise: this is **not a chatbot with charts**. Every number you see — in a chart, a table, or a sentence of analysis — is pinned to a source you can click into and inspect. Open any figure and you get its provenance: where it came from, how it was computed, and the original document behind it.
+### Run it on live data
 
-![Chat — analyst replies stream as structured, interactive blocks with citations](docs/screenshots/chat-thread.png)
+The full stack needs Docker for Postgres and MinIO. Add your keys to `.env.dev`, then start it:
 
----
+```bash
+# in .env.dev
+POLYGON_API_KEY=...                                 # tickers, quotes, and bars
+SEC_EDGAR_USER_AGENT="market-agent you@example.com" # SEC fundamentals
+LLM_CHANNELS=anthropic                              # or any OpenAI-compatible endpoint
+LLM_ANTHROPIC_PROTOCOL=anthropic
+LLM_ANTHROPIC_API_KEY=...
+LLM_ANTHROPIC_MODELS=claude-sonnet-5-5,claude-haiku-5-5
+LITELLM_MODEL=anthropic/claude-sonnet-5-5
+JUDGE_LITELLM_MODEL=anthropic/claude-haiku-5-5
+```
+
+```bash
+./scripts/dev-shell.sh up                 # installs, migrates, seeds, and starts every service
+./scripts/dev-shell.sh reference-import   # loads about 10,000 US listings into the screener
+```
+
+[Configuration](docs/configuration.md) lists every key and model setting. [Development](docs/development.md) covers the other dev modes and tests.
 
 ## What you can do
 
-### Home
-Land on a findings-first feed that aggregates what your agents have surfaced (deduplicated so the same story doesn't repeat across agents), alongside a market-pulse strip, your watchlist movers, recent agent activity, and your saved screens. _(Pictured above.)_
+<table>
+  <tr>
+    <td width="50%"><img src="docs/media/chat.png" alt="A chat answer with a chart, a comparison table, and citations"></td>
+    <td width="50%"><img src="docs/media/evidence.png" alt="The evidence inspector open on one figure"></td>
+  </tr>
+  <tr>
+    <td><b>Chat with an analyst.</b> Answers arrive as charts, tables, and metric rows with citations. Threads persist.</td>
+    <td><b>Check any number.</b> Click a figure to see where it came from, how it was computed, and the original document.</td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/symbol.png" alt="A symbol page showing financials"></td>
+    <td><img src="docs/media/screener.png" alt="The screener with filters applied"></td>
+  </tr>
+  <tr>
+    <td><b>Research a company.</b> Overview, financials, earnings, holders, and signals on one page.</td>
+    <td><b>Screen the market.</b> Filter about 10,000 US listings by price, volume, margins, P/E, and growth. Save a screen as a universe.</td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/analyze.png" alt="An Analyze memo"></td>
+    <td><img src="docs/media/agents.png" alt="An agent with assessed thesis conditions"></td>
+  </tr>
+  <tr>
+    <td><b>Write a memo.</b> Earnings quality, variant view, peer comparison, or a full investment memo, with the evidence behind it.</td>
+    <td><b>Watch a thesis.</b> Agents check your thesis conditions on a schedule and mark each one supported, challenged, or unresolved.</td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/grids.png" alt="An analyst grid comparing several companies"></td>
+    <td valign="top"><b>Compare companies in a grid.</b> Put companies in rows and metrics or research questions in columns. A question column has the model read each company's filings.<br><br>The <a href="docs/guide.md">user guide</a> covers every page, including Home, watchlists, the review queue, and Settings.</td>
+  </tr>
+</table>
 
-### Symbol detail
-Type any ticker into the top search and land on a full company workspace with five tabs:
+## How it works
 
-- **Overview** — KPI tiles and a performance chart with source provenance.
-- **Financials** — income statement (as reported / as restated) and segment revenue share, pivotable by business or geography.
-- **Earnings** — the last eight quarters, analyst consensus, and price targets.
-- **Holders** — institutional holders and insider transactions.
-- **Signals** — sentiment trend, recent claim clusters, and theme rationale.
+1. The resolver turns each company you name into a canonical id. An ambiguous name gets a clarifying question, not a guess.
+2. The analyst reads only stored facts. It does not browse the web.
+3. A judge model checks each inference against the facts it rests on.
+4. Before saving an answer, the app seals a snapshot of every fact it used and checks each one against the logged tool calls. That snapshot is what the evidence inspector shows.
 
-| | |
+Turn on the financial engine (`CHAT_FINANCIAL_MODE=enforce`) and calculations such as margins and growth rates run on exact fractions instead of in the model. Anything the engine cannot verify shows as a gap. [Architecture](docs/architecture.md) has the full flow and the service map.
+
+## Documentation
+
+| Guide | For |
 |---|---|
-| ![Symbol / Overview](docs/screenshots/symbol-overview.png) **Overview** | ![Symbol / Financials](docs/screenshots/symbol-financials.png) **Financials** |
-| ![Symbol / Earnings](docs/screenshots/symbol-earnings.png) **Earnings** | ![Symbol / Signals](docs/screenshots/symbol-signals.png) **Signals** |
+| [User guide](docs/guide.md) | Every page in the app |
+| [Configuration](docs/configuration.md) | API keys, models, data sources, and the financial engine |
+| [Development](docs/development.md) | Dev modes, the golden conversation, and tests |
+| [Architecture](docs/architecture.md) | How an answer is built, and what each service owns |
+| [Discovery campaigns](docs/discovery-campaigns-operations.md) | Rolling out discovery campaigns safely |
+| [Design decisions](docs/adr/) | Architecture decision records |
 
-### Chat
-Open a research thread and ask the analyst anything about a company, a comparison, or a theme. Replies stream in as structured, interactive blocks — tables, charts, metric rows — with citations attached, never raw markdown. Click any figure to open its evidence. Threads persist, so you can pick up where you left off.
+## Roadmap
 
-### Screener
-![Screener — filter the universe and save screens](docs/screenshots/screener.png)
+- [ ] Route every company question through the verified financial engine ([#398](https://github.com/xang1234/market-agent/issues/398))
+- [ ] Live business-segment revenue in cited chat breakdowns ([#196](https://github.com/xang1234/market-agent/issues/196))
+- [ ] Valuation scenarios with explicit P/E assumptions and dated analyst estimates ([#201](https://github.com/xang1234/market-agent/issues/201), [#224](https://github.com/xang1234/market-agent/issues/224), [#225](https://github.com/xang1234/market-agent/issues/225))
+- [ ] Comparisons that state their basis, peers, and exclusions ([#209](https://github.com/xang1234/market-agent/issues/209), [#288](https://github.com/xang1234/market-agent/issues/288))
+- [ ] A wider research-quality eval beyond NVDA, AMD, and AAPL, with a blinded review ([#283](https://github.com/xang1234/market-agent/issues/283), [#222](https://github.com/xang1234/market-agent/issues/222))
+- [ ] Discovery campaigns through their release review ([rollout plan](docs/discovery-campaigns-operations.md))
+- [ ] An open-source license ([#284](https://github.com/xang1234/market-agent/issues/284))
 
-Filter the universe by asset type, sector, venue, price, change %, and volume, plus fundamentals like market cap, P/E, gross/operating/net margin, and revenue YoY. Sort, paginate, and save a screen — saved screens become reusable universes for watchlists, agents, and Analyze.
-
-### Analyze
-![Analyze — guided memo playbooks](docs/screenshots/analyze.png)
-
-Run guided memo playbooks such as *Earnings quality*, *Variant view*, or *Peer comparison*. Tune the instructions and the source categories, generate a memo, inspect the evidence behind it, rerun it, compare against earlier runs, and hand the result off into a chat thread. A completed single-company memo also offers **Monitor this thesis**, carrying its company and editable text into agent creation.
-
-### Agents
-![Agents — thesis agents with cadence, universe, and run history](docs/screenshots/agents.png)
-
-Create an agent with a name, thesis, cadence, and company or universe. For an agent tracking one company, open **Thesis conditions** and define one to five statements to monitor, what would disprove each, and its time horizon. Write them yourself or use **Suggest conditions** and edit the suggestions before saving.
-
-Each save creates a thesis version. A run assesses its conditions as **supported**, **challenged**, or **unresolved**, with evidence links, assessment method, and model provenance. Optional numeric conditions compare an available authoritative metric against your threshold; narrative conditions use the model configured in Settings. New supported or challenged states appear in Home and use the agent's existing alert rules. Repeated evidence stays quiet. Missing evidence produces an unresolved assessment; model failures leave the run failed without inventing a result.
-
-Assessment refreshes preserve your unsaved thesis edits. If a newer thesis version was saved elsewhere, the editor keeps your draft and offers **Load saved version** to replace it explicitly.
-
-Monitoring uses current, owner-visible evidence already stored in the project: up to 100 claims and 250 facts for configured metrics. It does not start a new web crawl. Numerical evidence must match the chosen metric, unit, period, and maximum age; period-based freshness uses the period end. The panel shows the latest 20 assessments and versions. Existing agents without saved thesis conditions keep their previous workflow, including multi-company universes.
-
-The assessment history also makes agent behavior inspectable: which conditions were checked, which evidence was used, whether a calculation or model made the assessment, and what changed between runs.
-
-### Watchlists & Portfolio
-Build manual watchlists, or dynamic ones that track a screen, theme, or portfolio. Keep research-scoped holdings (not a brokerage account) and see them overlaid across the surfaces above.
-
-### Evidence inspector
-On any number, claim, event, or source, open the inspector to see provenance rows, quality badges, links to the original source, and related evidence — the receipts behind everything on screen.
-
----
-
-## Getting started
-
-### Prerequisites
-
-- **Node ≥ 22.19**
-- **Docker + Docker Compose** (runs Postgres and MinIO for you)
-- ~3 GB free for images and dependencies
-- *(Optional)* Python ≥ 3.11 or `uv`, only if you enable the unofficial local-dev data fallback
-
-### Setup
-
-```bash
-cp .env.dev.example .env.dev      # safe defaults; ports + flags
-./scripts/dev-shell.sh up         # first run installs packages, pulls images, runs migrations + seeds
-./scripts/dev-shell.sh status     # confirm everything is running
-```
-
-When `up` completes, open **<http://localhost:5173>**.
-
-A fresh worktree: `./scripts/dev-shell.sh install` installs every package (`npm ci`, as CI does) without starting anything, so tests and scripts run at once.
-
-Working on chat only? `DEV_PROFILE=chat ./scripts/dev-shell.sh up` starts one process (`services/app`) that serves the web UI plus chat, resolver, dev-api, market and fundamentals on the same port, and Postgres. The other services are parked, not removed: `status` lists them as `parked`, their API routes answer `503`, and their tabs won't load. The default, `DEV_PROFILE=full`, runs every service as its own process.
-
-### Development modes
-
-Each mode reuses the golden conversation's fixtures (`services/chat/test/golden/`: the frozen NVDA/AMD/AAPL dataset and recorded model replies), so a loop only pulls in what it's testing. Frozen facts are seeded through the same validation as live ingestion (no verifier bypass).
-
-| Mode | Command | Model | Data | For |
-|---|---|---|---|---|
-| **UI** | `DEV_PROFILE=chat DEV_MODE=ui ./scripts/dev-shell.sh up` | none (replayed) | none (replayed) | block rendering and layout: no database, services, keys or network |
-| **No keys** | `DEV_PROFILE=chat DEV_NO_KEYS=true ./scripts/dev-shell.sh up` | recorded replies | frozen | offline work and the browser smoke test (CI) |
-| **Traces** | `DEV_PROFILE=chat DEV_NO_KEYS=traces ./scripts/dev-shell.sh up` | the answer-lab traces' replies | frozen | UI work on real answers, and the eval and inspector loop, with no model |
-| **Analyst** | `DEV_PROFILE=chat DEV_MODE=analyst ./scripts/dev-shell.sh up` | your live LLM (`.env.dev`) | frozen | tuning prompts, block rules and reasoning |
-| **Data** | `DEV_MODE=data ./scripts/dev-shell.sh up`, then `cd services/chat && npm run golden:live` | your live LLM | live providers | checking the golden conversation against live data |
-
-- **UI:** the app serves the web UI and replays the golden conversation's recorded API traffic (`services/app/fixtures/golden-conversation.replay.json`): threads, all three turns' streams (Analyze NVDA, Compare it with AMD YTD, Explain the differences and show the evidence), the reloaded messages and the evidence lookups. It builds no services and starts no containers. Ask the golden questions in a new thread; anything unrecorded answers `404` naming the request, including evidence for a figure that wasn't inspected during capture. **Recapture** after an API or block change (on a fresh database): `DEV_CAPTURE_FILE=$PWD/services/app/fixtures/golden-conversation.replay.json DEV_PROFILE=chat DEV_NO_KEYS=true ./scripts/dev-shell.sh up`, then `(cd web && npm run e2e)`, then `./scripts/dev-shell.sh down` (all from the repo root). One replay session per app: a new thread restarts the recording, but concurrent tabs share it.
-- **No keys:** the golden conversation works offline: *Analyze NVDA* → *Compare it with AMD* → *Explain the differences and show the evidence*. Other questions have no recorded reply and fail, and the LLM settings in `.env.dev` are ignored.
-- **Traces:** like no keys, but the replies are the 14 eval questions' recorded answers (`services/chat/test/answer-lab/traces`), written to `.dev/trace-replies.json` on `up`. Ask a traced question word for word, or run all of them: `EVAL_MODEL=fixture/recorded node --experimental-strip-types scripts/research-quality-eval.ts run` takes seconds. Then `cd web && node --experimental-strip-types scripts/inspect-threads.ts [--theme light|dark] <report.md>` screenshots each thread. The replies are as recorded, so they predate later prompt changes.
-- **Analyst:** the same frozen data, answered by the model configured in `.env.dev` (fails fast unless `LLM_CHANNELS`/`LITELLM_MODEL` yield a deployable model, printing why). Every model call logs one line to the chat/app log: `[llm] <channel>/<model> <latency>ms tokens in=… out=… (reasoning=…) total=…`, with the reasoning part when the provider reports it. Dollar cost isn't shown; it needs per-model prices, which aren't configured.
-- **Data:** live Polygon/SEC/model (fails fast without `POLYGON_API_KEY`, `SEC_EDGAR_USER_AGENT` and a deployable LLM). Test providers on their own with each service's `npm test`. `npm run golden:live [base URL]` then runs the three golden turns against the running stack and checks structure only (turns complete; the chart, metric row and comparison table appear), since live figures and wording vary. Chat reads persisted facts only, so the check first warms NVDA and AMD through the running stack: it resolves each ticker (Polygon discovery), then reads its key stats and 8 quarterly income statements from SEC, which persists them. Reruns read the persisted data back instead of fetching it again. It stops before any turn if a company can't be warmed, and it refuses a stack serving the frozen golden dataset: data mode needs its own fresh database.
-- **SEC proofs:** SEC facts stored before 2026-10-16 lack the proofs the financial engine checks, so it reports them as gaps, and reads never fetch them again. Run `npm run backfill:sec-statements` in `services/fundamentals` once per database, with `DATABASE_URL` and `SEC_EDGAR_USER_AGENT` set, to re-fetch those filings, prove the facts they still state and replace the income facts they contradict; it skips the frozen golden dataset.
-- Frozen and live data don't share a database. The frozen modes need one without provider-hydrated NVDA/AMD/AAPL, and data mode refuses one a frozen mode seeded, since the frozen facts would let a live check pass without touching Polygon or SEC. Either way, reset with `docker compose -f docker-compose.dev.yml --env-file .env.dev down -v`.
-
-**Browser smoke test** (`web/e2e/`): with the UI-mode or no-keys stack up, run `cd web && npx playwright install chromium && npm run e2e`. Set `E2E_BASE_URL` if `WEB_PORT` isn't 5173. CI runs it against both: UI mode (the committed fixture) and the real no-keys backend, which also catches a fixture that's gone stale.
-
-### Bring your own keys & models
-
-The terminal works out of the box, but a few keys unlock live data and the AI features. Add them to `.env.dev`:
-
-- **`POLYGON_API_KEY`** — stock ticker discovery and live quotes/bars. Without it, unknown tickers resolve as not-found and market surfaces show as unavailable.
-- **`SEC_EDGAR_USER_AGENT`** — on-demand SEC company-facts ingestion for statements and key stats (use a string you control, e.g. `market-agent-dev you@example.com`).
-- **LLM models** — used by Chat, Analyze, and narrative thesis assessments and suggestions. Numerical thesis checks do not require a model. Configure channels in the in-app **Settings** page, or via the `.env.dev` fields `LLM_CHANNELS`, `LLM_<NAME>_*`, `LITELLM_MODEL`, `LITELLM_FALLBACK_MODELS`, `AGENT_LITELLM_MODEL`, `EXTRACTION_LITELLM_MODEL`, and `JUDGE_LITELLM_MODEL`. Extraction calls (the SEC 8-K and earnings-release CLIs, analyst-grid reader columns, and chat's metric scope proposal) run on `EXTRACTION_LITELLM_MODEL` when it is set, and on `LITELLM_MODEL` otherwise. The judge checks each analyst inference in a chat answer against what it rests on, on `JUDGE_LITELLM_MODEL` alone, with no fallback. Chat shows an answer's figures as soon as it is composed and each inference only once the judge finds it entailed; with `JUDGE_LITELLM_MODEL` unset, chat shows no inferences. Each judged turn logs one `[chat] judge` line, and its trace under `CHAT_TRACE_DIR` keeps the judge's reply as `judge`. The answer lab's `--judge` follows chat; its `judge-mutations`, with `JUDGE_LITELLM_MODEL` unset, uses `LITELLM_MODEL` like every other call. Settings-page changes are picked up without restarting. Reasoning models are recognized from pi-ai's model catalog (matched by base URL and model id), and each call asks for an effort level: chat answers `low`, thread titles the lowest the model allows. A model newer than the catalog can be listed in `LLM_<NAME>_REASONING_MODELS` to get the same control. A channel with `LLM_<NAME>_PROTOCOL=anthropic` calls the Claude Messages API directly (base URL defaults to `https://api.anthropic.com`), with prompt caching on, no temperature for current Claude models, and effort sent through adaptive thinking; `.env.dev.example` has a worked example.
-- **`ENABLE_UNOFFICIAL_DEV_PROVIDERS=true`** — optional yfinance/Finviz fallback for local dev when the primary provider misses.
-- **Open datasource coverage** — optional fallback coverage when paid providers miss:
-  - `NASDAQ_TRADER_REFERENCE_ENABLED=true` validates unknown US-listed tickers from Nasdaq Trader symbol directories.
-  - `OPENFIGI_REFERENCE_ENABLED=true` enriches security identity with FIGI/ISIN metadata. `OPENFIGI_API_KEY` is optional but raises live rate limits.
-  - `GLEIF_REFERENCE_ENABLED=true` enriches LEI/legal-entity metadata when the legal-name match is unambiguous.
-  - `STOOQ_MARKET_ENABLED=true` enables Stooq daily EOD historical bars for eligible `1d` requests when paid market coverage is unavailable. Stooq is not a realtime quote or intraday source.
-
-Free public endpoints are quota-sensitive external references. Keep the gates off unless you intentionally want fallback coverage, prefer fixture tests over live checks for CI, and disclose that open reference sources fill missing identity fields without overwriting stronger SEC/Polygon/local values.
-
-### Open datasource coverage verification
-
-Run the fixture smoke test to verify the whole free-coverage path without live network calls:
-
-```bash
-node --experimental-strip-types --test scripts/open-datasource-coverage.test.ts
-```
-
-That smoke covers a paid reference miss falling through to Nasdaq/OpenFIGI/GLEIF enrichment, then a paid market-bars miss falling through to Stooq EOD bars. For broader coverage:
-
-```bash
-cd services/resolver && npm test
-cd services/market && npm test
-```
-
-Operator disclosure: Nasdaq Trader, OpenFIGI, and GLEIF are free reference enrichment sources for missing identity fields only; they are not stronger than existing SEC/Polygon/local identity. Stooq EOD bars are not realtime quotes or intraday bars.
-
-### Weekly reference import
-
-The screener's vendor universe (about 10,000 US listings with fundamentals and technicals) comes from the weekly `xang1234/stock-screener` reference bundle. Nothing is deployed, so the import runs on the host that runs the dev stack, against its Postgres:
-
-```bash
-./scripts/dev-shell.sh reference-import            # import the latest bundle; an unchanged bundle is a no-op
-./scripts/dev-shell.sh reference-import --status   # per market: the latest run (status, bundle, sha256, rows, finish time) and the last run that imported data
-./scripts/dev-shell.sh reference-import --force    # re-ingest an unchanged bundle
-```
-
-The upstream bundle publishes on Saturdays around 08:10 ET. To schedule the import, add a crontab line on the dev host, set to a time after that in the host's own time zone. The command fails with a clear message and a non-zero exit when Postgres is not running:
-
-```
-30 10 * * 6 cd /path/to/market-agent && ./scripts/dev-shell.sh reference-import >> .dev/logs/reference-import.log 2>&1
-```
-
-Every run that reaches the bundle records a row in `artifact_ingestion_ledger`, keyed by bundle sha256, with status `succeeded`, `partial`, or `failed`; `--status` reads it. A download or connection failure shows only in the log and the exit code.
-
-### Signing in (dev)
-
-The "Sign in" button in the top bar (and inside the auth panel) sets a stable mock user in development, so your watchlists, threads, and portfolios persist across runs. Protected surfaces — **Chat**, **Analyze**, and **Agents** — require it; Home, Symbol detail, and Screener are browsable without signing in.
-
-### Tear down
-
-```bash
-./scripts/dev-shell.sh down
-```
-
-This stops the services and containers while keeping your Postgres and MinIO volumes. To wipe all local dev state:
-
-```bash
-docker compose -f docker-compose.dev.yml --env-file .env.dev down -v
-```
-
----
-
-## Project structure
-
-```
-market-agent/
-├── web/                       React 19 + Vite frontend (the UI)
-├── services/
-│   ├── resolver/              identity (issuer / instrument / listing / theme)
-│   ├── market/                quotes, bars, normalized & adjusted series
-│   ├── fundamentals/          SEC company-facts ingestion + statement normalization
-│   ├── evidence/              docs · claims · events · facts · XBRL & non-GAAP extraction
-│   ├── screener/              filter / rank queries over the universe
-│   ├── home/                  findings dedupe + ranking + market pulse
-│   ├── agents/                CRUD · scheduling · alert eval · finding generation
-│   ├── notifications/         email · web push · digest delivery
-│   ├── chat/                  thread coordinator + analyst runtime
-│   ├── snapshot/              manifest staging + verification
-│   ├── observability/         tool-call · citation · verifier · eval · run logs
-│   ├── analyze/               Analyze tab memo workflow
-│   ├── artifact/              shared artifact model (add-to-chat)
-│   ├── themes/ summary/ portfolio/ watchlists/ tools/ shared/ dev-api/
-├── db/                        schema pack, migrations, seeds
-├── docs/                      screenshots + reference docs
-├── scripts/                   dev-shell.sh + helpers
-├── docker-compose.dev.yml     Postgres 15 · MinIO
-└── .env.dev.example           ports + flags
-```
-
----
-
-## What it isn't
-
-`market-agent` is a **research** system, not a trading platform. It deliberately does not:
-
-- execute brokerage orders or run any trading workflow
-- stream live market data inside an already-answered chat message
-- let the analyst browse the open web
-- treat tweets, Reddit posts, or news articles as authoritative facts
-
----
+The two epics, [#190](https://github.com/xang1234/market-agent/issues/190) and [#205](https://github.com/xang1234/market-agent/issues/205), track the rest.
 
 ## Contributing
 
-Conventions for AI-assisted contributions live in [`AGENTS.md`](AGENTS.md).
+Issues and pull requests are welcome. Work is tracked in [GitHub Issues](https://github.com/xang1234/market-agent/issues). Start with [Development](docs/development.md). If you use a coding agent, point it at [`AGENTS.md`](AGENTS.md).
+
+## Disclaimer
+
+market-agent is a research tool. It is not financial advice and it does not place trades. Check the sources before you act on anything it shows you.
