@@ -261,48 +261,72 @@ test("SEC ingestion binds source versions and their publication proofs", { timeo
     assert.deepEqual(chosen(await selectRevenue(db, SELECT_ISSUER, "2024-07-01T00:00:00Z", "as_reported")), { fact_id: original, attestation_id: archive, public_by: "2024-01-11T04:59:59.999Z" });
   });
 
-  await t.test("a re-fetch proves a stored fact the filing still states, once; a stored value it contradicts gains no proof", async () => {
-    const REFETCHED_AT = "2024-03-01T09:00:00.000Z";
-    const legacy = [
-      { issuerId: "33000000-0000-4000-8000-0000000000d1", cik: 320181, accession: "0000320181-24-000010", proof: null },
-      { issuerId: "33000000-0000-4000-8000-0000000000d2", cik: 320182, accession: "0000320182-24-000010", proof: "legacy_unverified" },
-    ] as const;
-    const refetch = (issuerId: string, cik: number, accession: string) => backfillSecCompanionStatements(db, {
+  const REFETCHED_AT = "2024-03-01T09:00:00.000Z";
+  const legacyIssuers = [
+    { issuerId: "33000000-0000-4000-8000-0000000000d1", cik: 320181, accession: "0000320181-24-000010", proof: null },
+    { issuerId: "33000000-0000-4000-8000-0000000000d2", cik: 320182, accession: "0000320182-24-000010", proof: "legacy_unverified" },
+    { issuerId: "33000000-0000-4000-8000-0000000000d3", cik: 320183, accession: "0000320183-24-000010", proof: null },
+  ] as const;
+  const refetch = (issuerId: string, cik: number, accession: string, facts: () => unknown = () => ({ ...companyFacts(accession), cik })) =>
+    backfillSecCompanionStatements(db, {
       issuerId,
-      fetcher: secCompanyFetcher(() => ({ ...companyFacts(accession), cik }), { completed_at: REFETCHED_AT }),
+      fetcher: secCompanyFetcher(facts, { completed_at: REFETCHED_AT }),
       sourceId: FALLBACK_SOURCE_ID,
       logger: { warn: () => {} },
     });
-    const precisionChain = async (factId: string) => (await db.query<{ precision_class: string; supersedes: boolean }>(
-      `select precision_class, supersedes is not null as supersedes from fact_precision_attestations where fact_id = $1 order by attested_at`,
-      [factId],
-    )).rows;
-    for (const { issuerId, cik, accession, proof } of legacy) {
-      await db.query(`insert into issuers (issuer_id, legal_name, cik) values ($1, 'Legacy Corp', $2)`, [issuerId, String(cik)]);
-      await createSecBackedStatementRepository(db, {
-        fetcher: secCompanyFetcher(() => ({ ...companyFacts(accession), cik }), { completed_at: FETCHED_AT }),
-        sourceId: FALLBACK_SOURCE_ID,
-        logger: { warn: () => {} },
-      }).find({ ...FY2023, issuer_id: issuerId });
-      const factId = await factOn(accession);
-      // Stored before ingestion recorded proofs.
-      await db.query(`delete from fact_precision_attestations where fact_id = $1`, [factId]);
-      await db.query(`delete from fact_financial_contexts where fact_id = $1`, [factId]);
-      await db.query(`delete from source_publication_attestations where source_id = $1`, [accessionSourceId(accession)]);
+  const precisionChain = async (factId: string) => (await db.query<{ precision_class: string; supersedes: boolean }>(
+    `select precision_class, supersedes is not null as supersedes from fact_precision_attestations where fact_id = $1 order by attested_at`,
+    [factId],
+  )).rows;
+  const ingestThenStripProofs = async ({ issuerId, cik, accession }: (typeof legacyIssuers)[number]) => {
+    await db.query(`insert into issuers (issuer_id, legal_name, cik) values ($1, 'Legacy Corp', $2)`, [issuerId, String(cik)]);
+    await createSecBackedStatementRepository(db, {
+      fetcher: secCompanyFetcher(() => ({ ...companyFacts(accession), cik }), { completed_at: FETCHED_AT }),
+      sourceId: FALLBACK_SOURCE_ID,
+      logger: { warn: () => {} },
+    }).find({ ...FY2023, issuer_id: issuerId });
+    const factId = await factOn(accession);
+    await db.query(`delete from fact_precision_attestations where fact_id = $1`, [factId]);
+    await db.query(`delete from fact_financial_contexts where fact_id = $1`, [factId]);
+    await db.query(`delete from source_publication_attestations where source_id = $1`, [accessionSourceId(accession)]);
+    return factId;
+  };
+
+  await t.test("concurrent re-fetches prove a stored fact the filing still states, once", async () => {
+    for (const legacy of legacyIssuers.slice(0, 2)) {
+      const { issuerId, cik, accession, proof } = legacy;
+      const factId = await ingestThenStripProofs(legacy);
       if (proof) await recordFactPrecisionAttestation(db, { fact_id: factId, precision_class: proof, validation_method: "no_retained_bytes" });
 
-      await refetch(issuerId, cik, accession);
+      await Promise.all([1, 2, 3, 4].map(() => refetch(issuerId, cik, accession)));
       const [publication] = await proofIdFor(accession);
       assert.deepEqual(chosen(await selectRevenue(db, issuerId, REFETCHED_AT)), { fact_id: factId, attestation_id: publication, public_by: REFETCHED_AT }, `proof ${proof}`);
       const proven = proof ? [{ precision_class: proof, supersedes: false }, { precision_class: "revalidated_against_source", supersedes: true }] : [{ precision_class: "revalidated_against_source", supersedes: false }];
       assert.deepEqual(await precisionChain(factId), proven);
       await refetch(issuerId, cik, accession);
-      assert.deepEqual(await precisionChain(factId), proven, "a second re-fetch adds no proof");
+      assert.deepEqual(await precisionChain(factId), proven, "a later re-fetch adds no proof");
     }
+  });
 
-    // The filing's companion line the stored fact contradicts: a repair replaces only income lines.
-    const [{ issuerId, cik, accession }] = legacy;
-    const withCashFlow = () => {
+  await t.test("a re-fetch replaces a stored income fact that only rounds the token", async () => {
+    const legacy = legacyIssuers[2];
+    const rounded = await ingestThenStripProofs(legacy);
+    const token = "383285000000.123456789012345678";
+    await db.query(`update facts set value_num = $2::numeric where fact_id = $1`, [rounded, String(Number(token))]);
+    await refetch(legacy.issuerId, legacy.cik, legacy.accession);
+    const exact = (await db.query<{ fact_id: string }>(
+      `select fact_id::text from facts where source_id = $1 and invalidated_at is null and value_num = $2::numeric`,
+      [accessionSourceId(legacy.accession), token],
+    )).rows[0]!.fact_id;
+    assert.deepEqual(await precisionChain(exact), [{ precision_class: "source_token_preserved", supersedes: false }]);
+    assert.equal((await db.query(`select superseded_by::text from facts where fact_id = $1`, [rounded])).rows[0].superseded_by, exact);
+    const [publication] = await proofIdFor(legacy.accession);
+    assert.deepEqual(chosen(await selectRevenue(db, legacy.issuerId, REFETCHED_AT)), { fact_id: exact, attestation_id: publication, public_by: REFETCHED_AT });
+  });
+
+  await t.test("a stored companion fact the filing contradicts gains no proof", async () => {
+    const { issuerId, cik, accession } = legacyIssuers[0];
+    const withCapex = () => {
       const facts = companyFacts(accession);
       const capex = { start: "2023-01-01", end: "2023-12-31", val: 1000, val_token: "1000", accn: accession, fy: 2023, fp: "FY", form: "10-K", filed: "2024-01-10" };
       return { ...facts, cik, facts: { "us-gaap": { ...facts.facts["us-gaap"], PaymentsToAcquirePropertyPlantAndEquipment: { label: "", description: "", units: { USD: [capex] } } } } };
@@ -315,12 +339,7 @@ test("SEC ingestion binds source versions and their publication proofs", { timeo
          from metrics where metric_key = 'capex'`,
       [issuerId, FETCHED_AT, accessionSourceId(accession)],
     );
-    await backfillSecCompanionStatements(db, {
-      issuerId,
-      fetcher: secCompanyFetcher(withCashFlow, { completed_at: REFETCHED_AT }),
-      sourceId: FALLBACK_SOURCE_ID,
-      logger: { warn: () => {} },
-    });
+    await refetch(issuerId, cik, accession, withCapex);
     assert.deepEqual(
       (await db.query(
         `select f.value_num::text as value, a.precision_class

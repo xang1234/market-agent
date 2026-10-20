@@ -104,10 +104,6 @@ export function createSecBackedStatementRepository(
   };
 }
 
-// Downloads the issuer's SEC company facts and stores the fiscal period's
-// income statement, with its filing's cash flow and balance sheet, and their
-// proofs. Returns the income statement, or null when the issuer has no CIK or
-// SEC has no such statement.
 export async function hydrateSecIssuer(
   db: FundamentalsTransactionalQueryExecutor,
   input: {
@@ -164,8 +160,7 @@ export async function hydrateSecIssuer(
 // the income statement. Those periods are otherwise read from facts and never
 // fetched again, so this is how they gain the families ingested since, and how
 // facts the old period selector got wrong (a 10-K's oldest comparative, a
-// framed prior-year quarter) are replaced. Rerunning is safe: a stored fact that
-// matches the filing keeps its value and gains only the proofs it lacks.
+// framed prior-year quarter) are replaced.
 export async function backfillSecCompanionStatements(
   db: FundamentalsTransactionalQueryExecutor,
   input: {
@@ -274,7 +269,7 @@ async function ingestFiling(
     // The repair retires stored income facts the filing contradicts, then
     // stores the filing's in their place (the active identity is unique).
     const stale = input.income === "repair" && income
-      ? await staleStatementFacts(client, input.issuerId, income.statement)
+      ? await staleStatementFacts(client, input.issuerId, income)
       : new Map<string, string[]>();
     if (stale.size > 0) {
       await client.query(
@@ -314,11 +309,13 @@ async function ingestFiling(
 // The stored, active SEC facts for a statement's period that the filing
 // contradicts, their ids by metric_key: a metric the statement has, with another value
 // or dates; or one of its family the statement lacks, dated for another
-// period (the old selector's comparative, with nothing to replace it).
+// period (the old selector's comparative, with nothing to replace it). A value
+// is compared exactly with its token, since one stored from a JS number may
+// round it.
 async function staleStatementFacts(
   db: FundamentalsQueryExecutor,
   issuerId: UUID,
-  statement: NormalizedStatement,
+  { statement, tokens }: Extracted,
 ): Promise<Map<string, string[]>> {
   const { rows } = await db.query<{
     fact_id: string;
@@ -350,9 +347,11 @@ async function staleStatementFacts(
   for (const row of rows) {
     const line = statement.lines.find((candidate) => candidate.metric_key === row.metric_key);
     const otherDates = row.period_start !== statement.period_start || row.period_end !== statement.period_end;
-    const contradicted = line
-      ? otherDates || (row.stored_value === null ? null : Number(row.stored_value)) !== line.value_num
-      : otherDates;
+    const token = tokens.get(row.metric_key);
+    const otherValue = token && row.stored_value !== null
+      ? sameDecimal(row.stored_value, token.token) === false
+      : (row.stored_value === null ? null : Number(row.stored_value)) !== line?.value_num;
+    const contradicted = line ? otherDates || otherValue : otherDates;
     if (contradicted) stale.set(row.metric_key, [...(stale.get(row.metric_key) ?? []), row.fact_id]);
   }
   return stale;
@@ -796,10 +795,7 @@ function firstCurrency(lines: ReadonlyArray<StatementLine>): string | null {
 // receive a source_token_preserved precision attestation in the same
 // transaction, so a fact never lands without its proof. Lines without a token
 // (legacy fixtures, derived fourth quarters) keep the legacy number and get no
-// precision proof, so strict financial binding treats them as gaps. A line
-// that conflicts was stored earlier: when that fact equals the token and has
-// no proven precision (stored before ingestion recorded proofs), it is
-// revalidated against the token; a fact that differs gains nothing. Each
+// precision proof, so strict financial binding treats them as gaps. Each
 // token's fact, inserted or already stored, gets its financial context when
 // recordSecOriginalContext certifies it.
 async function persistStatementFacts(
@@ -877,9 +873,6 @@ async function persistStatementFacts(
   return insertedIds;
 }
 
-// The active fact an earlier ingestion stored for the line on this filing's
-// source, when its value and dates equal the token's. It is locked, so two
-// ingestions of one filing prove it once.
 async function lockStoredTokenFact(
   db: FundamentalsQueryExecutor,
   statement: MappedStatement,
@@ -943,11 +936,10 @@ const SEC_CERTIFIED_CONCEPTS: Readonly<Record<string, string>> = {
 // Selection takes every token from the filing whose own period it is, never
 // from a later filing's comparative, so the stored fact is that filing's
 // original disclosure. Companyfacts carries only undimensioned values, which
-// are consolidated. The fact is the token's own, inserted here or locked by
-// lockStoredTokenFact, so two ingestions of one filing record it once.
+// are consolidated.
 async function recordSecOriginalContext(
   db: FundamentalsQueryExecutor,
-  factId: string,
+  tokenFactId: string,
   line: MappedStatement["lines"][number],
   token: SecSourceToken,
   locator: string,
@@ -958,10 +950,10 @@ async function recordSecOriginalContext(
   if (token.start === null && token.form !== "10-K") return;
   const certifiedConcept = SEC_CERTIFIED_CONCEPTS[line.metric_key];
   if (certifiedConcept !== undefined && token.concept !== certifiedConcept) return;
-  const existing = await db.query(`select 1 from fact_financial_contexts where fact_id = $1`, [factId]);
+  const existing = await db.query(`select 1 from fact_financial_contexts where fact_id = $1`, [tokenFactId]);
   if (existing.rows.length > 0) return;
   await recordFactFinancialContext(db, {
-    fact_id: factId,
+    fact_id: tokenFactId,
     context_version: SEC_CONTEXT_VERSION,
     period_type: token.start === null ? "instant" : "duration",
     dimension_scope: "consolidated",
