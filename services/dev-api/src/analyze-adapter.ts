@@ -176,8 +176,7 @@ export type AnalyzeFinancialComposition = {
 };
 
 // Freezes a new memo's numerical context (cutoff, basis, catalog, exact peers)
-// before any work, so every numerical section is computed under it. Facts are
-// fetched before the cutoff is taken: the engine never reads one stored after it.
+// before any work, so every numerical section is computed under it.
 async function newFinancialContext(
   deps: AnalyzeServiceDeps,
   playbook: AnalyzePlaybook,
@@ -219,11 +218,6 @@ export function contentHash(value: JsonValue): string {
   return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
 }
 
-// Shared persist+seal tail for both createRun and rerun. When the per-section
-// runner is wired AND the run has a playbook, it runs the vendor-estimate
-// section producers and merges their blocks + seal; otherwise the run is the
-// narrative memo only. Seals with the snapshot-id mismatch guard and persists
-// the run row.
 async function persistAnalyzeRun(
   deps: AnalyzeServiceDeps,
   input: {
@@ -438,8 +432,6 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
           source_categories: metadata.source_categories,
         }).prompt
         : metadata.instructions;
-      // A rerun keeps the original's numerical context (cutoff, basis, peers), so it reproduces, not re-asks.
-      // A memo saved without one gets a fresh context, so its rerun has engine sections.
       const financial = metadata.financial ?? (playbook ? await newFinancialContext(deps, playbook, subjectRefs) : null);
       const rerunMetadata = serializeAnalyzeRunMetadataV1({
         template_id: template.template_id,

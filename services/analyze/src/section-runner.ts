@@ -10,10 +10,6 @@ export type RunSectionsInput = {
   asOf: string;
 };
 
-// Walks the playbook's sections, invoking each registered deterministic producer
-// and collecting its non-null seal input (in section order). Every producer
-// needs an issuer primary, so none runs when `primary` is null. A producer
-// returning null (no estimates) is skipped; a producer that throws propagates.
 export async function runDeterministicSections(
   deps: SectionProducerDeps,
   input: RunSectionsInput,

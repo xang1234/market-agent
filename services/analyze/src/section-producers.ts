@@ -57,10 +57,7 @@ const PRICE_TARGET_RANGE_PRODUCER: SectionProducer = (deps, ctx) => {
   );
 };
 
-// Registry keyed by `${playbook_id}:${section_id}`: the vendor-estimate
-// sections, which the financial engine does not plan. Numerical sections come
-// from the engine (financial-section.ts); the rest are the narrative memo.
-const SECTION_PRODUCERS: ReadonlyMap<string, SectionProducer> = new Map([
+const VENDOR_ESTIMATE_PRODUCERS: ReadonlyMap<string, SectionProducer> = new Map([
   ["earnings_quality:analyst_overview", ANALYST_CONSENSUS_PRODUCER],
   ["earnings_quality:price_targets", PRICE_TARGET_RANGE_PRODUCER],
 ]);
@@ -69,5 +66,5 @@ export function lookupSectionProducer(
   playbookId: string,
   sectionId: string,
 ): SectionProducer | undefined {
-  return SECTION_PRODUCERS.get(`${playbookId}:${sectionId}`);
+  return VENDOR_ESTIMATE_PRODUCERS.get(`${playbookId}:${sectionId}`);
 }

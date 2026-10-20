@@ -9,7 +9,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { installDomGlobals } from '../analyst-grids/testDom.ts'
 import { EvidenceInspectorContext, type EvidenceInspectorContextValue } from '../evidence/evidenceInspectorContext.ts'
 import { MetricsComparison } from './MetricsComparison.tsx'
-import { emittedMetricsComparisonFixture, metricsComparisonFixture } from './fixtures.ts'
+import { boundMetricsComparisonFixture, metricsComparisonFixture } from './fixtures.ts'
 import { validateBlock } from './BlockValidator.ts'
 import type { MetricsComparisonBlock } from './types.ts'
 
@@ -77,17 +77,17 @@ test('MetricsComparison renders a null cell as a gap em-dash alongside present c
   assert.equal(html.split('—').length - 1, 1)
 })
 
-// --- E2E: an emitted-shape block round-trips through the web contract ---
+// --- A fact-bound block round-trips through the web contract ---
 
-test('the emitted metrics_comparison block passes the web BlockValidator (AJV/schema)', () => {
-  // Exercises the emitter's exact output shape: data_ref.params.fact_bindings,
+test('a fact-bound metrics_comparison block passes the web BlockValidator (AJV/schema)', () => {
+  // The shape chat's fact blocks produce: data_ref.params.fact_bindings,
   // a null gap cell, tones, and primary_subject_ref.
-  const result = validateBlock(emittedMetricsComparisonFixture)
+  const result = validateBlock(boundMetricsComparisonFixture)
   assert.equal(result.valid, true, result.valid ? '' : JSON.stringify(result.errors, null, 2))
 })
 
-test('the emitted metrics_comparison block renders cells, a tone, a gap, and an inspect affordance', () => {
-  const html = renderToStaticMarkup(<MetricsComparison block={emittedMetricsComparisonFixture} />)
+test('a fact-bound metrics_comparison block renders cells, a tone, a gap, and an inspect affordance', () => {
+  const html = renderToStaticMarkup(<MetricsComparison block={boundMetricsComparisonFixture} />)
 
   assert.match(html, /\$391\.0B/)
   assert.match(html, /29\.1×/)

@@ -247,27 +247,23 @@ export const metricsComparisonFixture: MetricsComparisonBlock = {
   ],
 }
 
-// Mirrors the shape chat's fact blocks produce (services/chat/src/fact-blocks.ts):
-// data_ref.params.fact_bindings for every cell fact, a null gap cell (a peer
-// lacking a metric), tones, and primary_subject_ref. Used by the test that
-// round-trips an emitted block through BlockValidator + renderer.
-const EMITTED_REV_AAPL = '55555555-5555-4555-9555-000000000001'
-const EMITTED_PE_AAPL = '55555555-5555-4555-9555-000000000002'
-const EMITTED_REV_MSFT = '55555555-5555-4555-9555-000000000003'
-const EMITTED_FY_BINDING = { period_kind: 'fiscal_y', fiscal_year: 2024, fiscal_period: 'FY' } as const
+const BOUND_REV_AAPL = '55555555-5555-4555-9555-000000000001'
+const BOUND_PE_AAPL = '55555555-5555-4555-9555-000000000002'
+const BOUND_REV_MSFT = '55555555-5555-4555-9555-000000000003'
+const BOUND_FY_BINDING = { period_kind: 'fiscal_y', fiscal_year: 2024, fiscal_period: 'FY' } as const
 
-export const emittedMetricsComparisonFixture: MetricsComparisonBlock = {
-  id: 'mc-emitted-1',
+export const boundMetricsComparisonFixture: MetricsComparisonBlock = {
+  id: 'mc-bound-1',
   kind: 'metrics_comparison',
   snapshot_id: FIXTURE_SNAPSHOT_ID,
   data_ref: {
     kind: 'metrics_comparison',
-    id: 'mc-emitted-1',
+    id: 'mc-bound-1',
     params: {
       fact_bindings: [
-        { fact_id: EMITTED_REV_AAPL, unit: 'currency', ...EMITTED_FY_BINDING },
-        { fact_id: EMITTED_PE_AAPL, unit: 'multiple', ...EMITTED_FY_BINDING },
-        { fact_id: EMITTED_REV_MSFT, unit: 'currency', ...EMITTED_FY_BINDING },
+        { fact_id: BOUND_REV_AAPL, unit: 'currency', ...BOUND_FY_BINDING },
+        { fact_id: BOUND_PE_AAPL, unit: 'multiple', ...BOUND_FY_BINDING },
+        { fact_id: BOUND_REV_MSFT, unit: 'currency', ...BOUND_FY_BINDING },
       ],
     },
   },
@@ -282,11 +278,11 @@ export const emittedMetricsComparisonFixture: MetricsComparisonBlock = {
   primary_subject_ref: { kind: 'issuer', id: ISSUER_AAPL },
   cells: [
     [
-      { value_ref: EMITTED_REV_AAPL, format: '$391.0B' },
-      { value_ref: EMITTED_PE_AAPL, format: '29.1×', tone: 'positive' },
+      { value_ref: BOUND_REV_AAPL, format: '$391.0B' },
+      { value_ref: BOUND_PE_AAPL, format: '29.1×', tone: 'positive' },
     ],
     // MSFT lacks a P/E here — a null gap cell.
-    [{ value_ref: EMITTED_REV_MSFT, format: '$245.1B' }, null],
+    [{ value_ref: BOUND_REV_MSFT, format: '$245.1B' }, null],
   ],
 }
 

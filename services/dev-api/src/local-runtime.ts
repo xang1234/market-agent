@@ -183,8 +183,6 @@ export async function sealAnalyzeSnapshot(
   return sealSnapshotWithPool(pool(), sealInput);
 }
 
-// Vendor estimates and the current price for the analyst_overview and
-// price_targets producers.
 function analyzeSectionDeps() {
   const db = pool();
   const price = createCurrentPriceSource(
@@ -201,10 +199,6 @@ export function primaryIssuerRef(
   return issuer ? { kind: "issuer", id: issuer.id } : null;
 }
 
-// The per-section run: build the memo seal input, run the vendor-estimate
-// section producers (writing their vendor facts to the pool), merge into one
-// seal input, and hand back the combined blocks (for the persisted run row)
-// plus a sealSnapshot closure that seals the merged input.
 export async function buildAnalyzeRunSeals(input: {
   snapshotId: string;
   userId: string;
@@ -237,8 +231,7 @@ export async function buildAnalyzeRunSeals(input: {
 const ANALYZE_FINANCIAL_PEER_LIMIT = 5;
 const SEC_FETCH_TIMEOUT_MS = 30_000;
 
-// One pacing limiter for every memo this process hydrates. A timeout bounds
-// how long a stalled SEC download can hold a memo.
+// SEC's fair-access rate limits the client, not the memo, so every memo shares one limiter.
 const secFetcher = process.env.SEC_EDGAR_USER_AGENT
   ? withSecFairAccess(createSecCompanyFactsHttpFetcher({
       userAgent: process.env.SEC_EDGAR_USER_AGENT,
@@ -247,10 +240,6 @@ const secFetcher = process.env.SEC_EDGAR_USER_AGENT
     }))
   : null;
 
-// The engine reads only stored facts, so a memo's issuers are fetched from SEC
-// first: the latest fiscal year and the year before it, which revenue_trend
-// compares. A failed fetch costs only that issuer's numbers, which the engine
-// then reports as gaps.
 export async function hydrateAnalyzeIssuers(
   db: Pool,
   fetcher: SecEdgarFetcher | null,

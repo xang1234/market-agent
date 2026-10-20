@@ -1,7 +1,3 @@
-// The dev API hydrates a memo's issuers and freezes its financial context
-// before any work, publishes against the committed memo run, and reports
-// declared sections from committed state.
-
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AnalyzeFinancialRun } from "../../analyze/src/financial-section.ts";
@@ -15,8 +11,7 @@ const RUN = "22222222-2222-4222-8222-222222222222";
 const ISSUER = "33333333-3333-4333-8333-333333333333";
 const ORIGINAL = "44444444-4444-4444-8444-444444444444";
 
-// A memo saved before Analyze always used the engine: no financial context.
-const ORIGINAL_RUN = {
+const MEMO_WITHOUT_FINANCIAL_CONTEXT = {
   run_id: ORIGINAL, template_id: TEMPLATE, template_version: 3, playbook_id: "earnings_quality", template_name: "Earnings quality",
   run_metadata: {
     schema_version: 1, template_id: TEMPLATE, template_version: 3, playbook_id: "earnings_quality", playbook_version: 1,
@@ -39,7 +34,7 @@ function fakeDb() {
           }],
         };
       }
-      if (text.includes("t.name as template_name")) return { rows: [ORIGINAL_RUN] };
+      if (text.includes("t.name as template_name")) return { rows: [MEMO_WITHOUT_FINANCIAL_CONTEXT] };
       // The memo run as the financial-section reader loads it.
       if (text.includes("from analyze_template_runs r join analyze_templates t")) {
         return { rows: [{ user_id: USER, template_id: TEMPLATE, template_version: 3, run_metadata: metadata }] };
