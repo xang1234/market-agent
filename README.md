@@ -21,7 +21,9 @@ Ask a general-purpose chatbot for a company's gross margin and you get a confide
 
 ## Quickstart
 
-Try the analyst offline first. This needs Node 22.19 or later and npm. No Docker, no API keys.
+**[Try the demo in your browser](https://xang1234.github.io/market-agent/)**, with nothing to install. It replays one recorded conversation, so ask its three questions in order and open any linked figure to see its source.
+
+To run it yourself, try the analyst offline first. This needs Node 22.19 or later and npm. No Docker, no API keys.
 
 ```bash
 git clone https://github.com/xang1234/market-agent.git

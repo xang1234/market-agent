@@ -266,3 +266,18 @@ test("CI runs the golden conversation against the static demo build", async () =
   assert.match(scripts["build:demo"] ?? "", /vite build --mode demo/u);
   assert.match(scripts["preview:demo"] ?? "", /vite preview --mode demo/u);
 });
+
+test("GitHub Pages publishes the static demo from main", async () => {
+  const workflow = await read(".github/workflows/pages.yml");
+  assert.match(workflow, /on:\s+push:\s+branches: \[main\]\s+workflow_dispatch:/u);
+  assert.match(workflow, /node-version-file: \.nvmrc/u);
+  assert.equal((await read(".nvmrc")).trim(), MIN_NODE_VERSION);
+  assert.ok(workflow.indexOf("run: npm run build:demo") > 0 && workflow.indexOf("run: npm run build:demo") < workflow.indexOf("uses: actions/upload-pages-artifact@"), "builds the demo before uploading it");
+  assert.match(workflow, /uses: actions\/upload-pages-artifact@v3\s+with:\s+path: web\/dist/u);
+  // Only the deploy job can write to Pages, and it needs the OIDC token deploy-pages uses.
+  const deploy = /\n  deploy:\n[\s\S]*$/u.exec(workflow)?.[0] ?? "";
+  assert.match(deploy, /pages: write/u);
+  assert.match(deploy, /id-token: write/u);
+  assert.match(deploy, /name: github-pages/u);
+  assert.doesNotMatch(workflow.slice(0, workflow.indexOf("\n  deploy:\n")), /pages: write|id-token: write/u);
+});
