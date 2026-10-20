@@ -52,7 +52,7 @@ export type MetricsComparisonBlock = {
   kind: "metrics_comparison";
   snapshot_id: UUID;
   // params is added at seal time (fact_bindings need the loaded facts' unit /
-  // period metadata — see metrics-comparison-snapshot.ts).
+  // period metadata — see services/chat/src/fact-blocks.ts).
   data_ref: { kind: string; id: string; params?: Readonly<Record<string, unknown>> };
   source_refs: ReadonlyArray<UUID>;
   as_of: string;

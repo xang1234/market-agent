@@ -31,7 +31,6 @@ import {
   financialSectionIds,
   loadAnalyzeFinancialSections,
   prepareAnalyzeFinancialContext,
-  sectionsServedByEngine,
   type AnalyzeFinancialRun,
   type AnalyzeFinancialSections,
 } from "../../analyze/src/financial-section.ts";
@@ -151,8 +150,9 @@ export type AnalyzeServiceDeps = {
     body: Record<string, unknown>;
     blocks: ReadonlyArray<Record<string, unknown>>;
   }): Promise<SnapshotSealResult>;
-  // Optional per-section run: merges deterministic section blocks (peer_table)
-  // into the run. When absent, createRun falls back to the narrative memo only.
+  // Optional per-section run: merges the vendor-estimate section blocks
+  // (analyst_overview, price_targets) into the run. When absent, createRun
+  // falls back to the narrative memo only.
   buildAnalyzeRunSeals?(input: {
     snapshotId: string;
     userId: string;
@@ -160,8 +160,6 @@ export type AnalyzeServiceDeps = {
     playbook: AnalyzePlaybook;
     subjectRefs: ReadonlyArray<{ kind: string; id: string }>;
     asOf: string;
-    // Sections the verified financial engine answers; their legacy producers must not run.
-    servedByEngine?: ReadonlySet<string>;
   }): Promise<{
     blocks: ReadonlyArray<Record<string, unknown>>;
     sealSnapshot: () => Promise<SnapshotSealResult>;
@@ -217,10 +215,10 @@ export function contentHash(value: JsonValue): string {
 }
 
 // Shared persist+seal tail for both createRun and rerun. When the per-section
-// runner is wired AND the run has a playbook, it runs the deterministic section
-// producers (e.g. peer_table) and merges their blocks + seal; otherwise the run
-// is the narrative memo only. Seals with the snapshot-id mismatch guard and
-// persists the run row.
+// runner is wired AND the run has a playbook, it runs the vendor-estimate
+// section producers and merges their blocks + seal; otherwise the run is the
+// narrative memo only. Seals with the snapshot-id mismatch guard and persists
+// the run row.
 async function persistAnalyzeRun(
   deps: AnalyzeServiceDeps,
   input: {
@@ -248,7 +246,6 @@ async function persistAnalyzeRun(
       playbook: input.playbook,
       subjectRefs: input.subjectRefs,
       asOf: runAsOf,
-      servedByEngine: sectionsServedByEngine(financial),
     });
     blocks = Object.freeze(runSeals.blocks.map((block) => Object.freeze({ ...block })));
     sealRun = runSeals.sealSnapshot;

@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 
 import { primaryIssuerRef } from "../src/local-runtime.ts";
 
-// The per-section run dispatches the peer_table producer only for an issuer
-// subject (spec: a listing/instrument run skips it). primaryIssuerRef is the
+// The per-section run dispatches the vendor-estimate producers only for an
+// issuer subject (a listing/instrument run skips them). primaryIssuerRef is the
 // mechanism — it yields the issuer ref or null (→ runDeterministicSections skips).
 
 test("primaryIssuerRef returns the issuer ref when the run has an issuer subject", () => {

@@ -39,16 +39,10 @@ import type { AnalyzePlaybook } from "../../analyze/src/playbook.ts";
 import { publishAnalyzeFinancialSections } from "../../analyze/src/financial-section.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { createSqlPeerSetResolver } from "../../fundamentals/src/peer-set-resolver.ts";
-import {
-  createSecBackedStatementRepository,
-  createSecBackedStatsRepository,
-} from "../../fundamentals/src/sec-facts-repository.ts";
-import { createSecCompanyFactsHttpFetcher } from "../../fundamentals/src/sec-edgar-http.ts";
 import { consensusRepositoryFromEnv } from "../../fundamentals/src/dev-providers.ts";
 import { createPostgresIssuerProfileRepository } from "../../fundamentals/src/issuer-repository.ts";
 import { createPostgresMarketCacheRepository } from "../../market/src/cache-repository.ts";
 import { createCurrentPriceSource } from "../../analyze/src/current-price-source.ts";
-import { SEC_EDGAR_FILING_SOURCE_ID } from "../../fundamentals/src/provider-sources.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import type {
   DevApiAgentLoopStageFactory,
@@ -184,34 +178,15 @@ export async function sealAnalyzeSnapshot(
   return sealSnapshotWithPool(pool(), sealInput);
 }
 
-// SEC-backed stats + same-industry peers for the section producers, built from
-// the pool + SEC env exactly as services/fundamentals/src/dev.ts does. The stats
-// repo reads persisted facts; the optional fetcher only fires on a cache miss
-// when SEC_EDGAR_USER_AGENT is set.
+// Vendor estimates and the current price for the analyst_overview and
+// price_targets producers.
 function analyzeSectionDeps() {
   const db = pool();
-  const secFetcher = process.env.SEC_EDGAR_USER_AGENT
-    ? createSecCompanyFactsHttpFetcher({
-        userAgent: process.env.SEC_EDGAR_USER_AGENT,
-        baseUrl: process.env.SEC_EDGAR_BASE_URL,
-      })
-    : null;
-  const statements = createSecBackedStatementRepository(db, {
-    fetcher: secFetcher,
-    sourceId: SEC_EDGAR_FILING_SOURCE_ID,
-  });
-  const stats = createSecBackedStatsRepository(db, { statements, fetcher: secFetcher });
   const price = createCurrentPriceSource(
     createPostgresIssuerProfileRepository(db),
     createPostgresMarketCacheRepository(db),
   );
-  return {
-    db,
-    peers: createSqlPeerSetResolver(db),
-    stats,
-    consensus: consensusRepositoryFromEnv(db),
-    price,
-  };
+  return { db, consensus: consensusRepositoryFromEnv(db), price };
 }
 
 export function primaryIssuerRef(
@@ -221,10 +196,10 @@ export function primaryIssuerRef(
   return issuer ? { kind: "issuer", id: issuer.id } : null;
 }
 
-// The per-section run: build the memo seal input, run the deterministic section
-// producers (peer_table → emitPeerComparisonBlock, writing derived facts to the
-// pool), merge into one seal input, and hand back the combined blocks (for the
-// persisted run row) plus a sealSnapshot closure that seals the merged input.
+// The per-section run: build the memo seal input, run the vendor-estimate
+// section producers (writing their vendor facts to the pool), merge into one
+// seal input, and hand back the combined blocks (for the persisted run row)
+// plus a sealSnapshot closure that seals the merged input.
 export async function buildAnalyzeRunSeals(input: {
   snapshotId: string;
   userId: string;
@@ -232,7 +207,6 @@ export async function buildAnalyzeRunSeals(input: {
   playbook: AnalyzePlaybook;
   subjectRefs: ReadonlyArray<{ kind: string; id: string }>;
   asOf: string;
-  servedByEngine?: ReadonlySet<string>;
 }): Promise<{
   blocks: ReadonlyArray<Record<string, unknown>>;
   sealSnapshot: () => Promise<SnapshotSealResult>;
@@ -247,7 +221,6 @@ export async function buildAnalyzeRunSeals(input: {
     primary: primaryIssuerRef(input.subjectRefs),
     snapshotId: input.snapshotId,
     asOf: input.asOf,
-    servedByEngine: input.servedByEngine,
   });
   const merged = mergeSealInputs(memoSeal, sectionSeals);
   return {

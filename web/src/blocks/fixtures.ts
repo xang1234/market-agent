@@ -247,10 +247,10 @@ export const metricsComparisonFixture: MetricsComparisonBlock = {
   ],
 }
 
-// Mirrors the shape the analyze emitter produces (metrics-comparison-emitter.ts):
+// Mirrors the shape chat's fact blocks produce (services/chat/src/fact-blocks.ts):
 // data_ref.params.fact_bindings for every cell fact, a null gap cell (a peer
-// lacking a metric), tones, and primary_subject_ref. Used by the services↔web
-// E2E test that round-trips an emitted block through BlockValidator + renderer.
+// lacking a metric), tones, and primary_subject_ref. Used by the test that
+// round-trips an emitted block through BlockValidator + renderer.
 const EMITTED_REV_AAPL = '55555555-5555-4555-9555-000000000001'
 const EMITTED_PE_AAPL = '55555555-5555-4555-9555-000000000002'
 const EMITTED_REV_MSFT = '55555555-5555-4555-9555-000000000003'

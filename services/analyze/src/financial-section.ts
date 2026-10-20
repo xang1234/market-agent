@@ -127,11 +127,6 @@ export function prepareAnalyzeFinancialContext(input: {
   });
 }
 
-/** Sections the engine answers for this memo; legacy producers must not also emit them. */
-export function sectionsServedByEngine(context: AnalyzeRunFinancialMetadata | null): ReadonlySet<string> {
-  return new Set(context?.sections ?? []);
-}
-
 export type AnalyzeFinancialRun = Readonly<{
   user_id: string;
   analyze_run_id: string;

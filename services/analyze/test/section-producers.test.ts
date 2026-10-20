@@ -3,18 +3,12 @@ import assert from "node:assert/strict";
 
 import { lookupSectionProducer, sectionBlockId } from "../src/section-producers.ts";
 
-test("lookupSectionProducer resolves the peer_table producer for peer_comparison", () => {
-  assert.equal(typeof lookupSectionProducer("peer_comparison", "peer_table"), "function");
-});
-
-test("lookupSectionProducer returns undefined for narrative sections and unknown playbooks", () => {
+test("lookupSectionProducer returns undefined for narrative, numerical, and unknown sections", () => {
   assert.equal(lookupSectionProducer("peer_comparison", "summary"), undefined);
+  assert.equal(lookupSectionProducer("peer_comparison", "peer_table"), undefined);
+  assert.equal(lookupSectionProducer("earnings_quality", "revenue_trend"), undefined);
   assert.equal(lookupSectionProducer("earnings_quality", "margin_bridge"), undefined);
   assert.equal(lookupSectionProducer("nope", "peer_table"), undefined);
-});
-
-test("the earnings_quality revenue_trend section resolves to a producer", () => {
-  assert.notEqual(lookupSectionProducer("earnings_quality", "revenue_trend"), undefined);
 });
 
 test("the earnings_quality analyst_overview section resolves to a producer", () => {

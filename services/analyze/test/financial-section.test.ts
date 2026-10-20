@@ -6,11 +6,9 @@ import {
   financialSectionIds,
   loadAnalyzeFinancialSections,
   prepareAnalyzeFinancialContext,
-  sectionsServedByEngine,
   type AnalyzeFinancialSection,
 } from "../src/financial-section.ts";
 import { parseAnalyzeRunMetadata } from "../src/runMetadata.ts";
-import { runDeterministicSections } from "../src/section-runner.ts";
 import { committed, createMemoRun, CUTOFF, memoDatabase, playbook } from "./financial-fixtures.ts";
 
 type Published = Extract<AnalyzeFinancialSection, { status: "published" }>;
@@ -51,21 +49,6 @@ test("the financial context freezes cutoff, basis, catalog, and the exact peers 
   });
   const withoutPeerTable = prepareAnalyzeFinancialContext({ ...base, playbook: playbook("earnings_quality"), peers })!;
   assert.deepEqual(withoutPeerTable.requested_peers, [], "peers are requested only by a section that compares them");
-});
-
-test("sections the engine serves never run their legacy producers", async () => {
-  const context = prepareAnalyzeFinancialContext({
-    playbook: playbook("peer_comparison"), primary: { kind: "issuer", id: IDS.issuerA }, peers: [], knowledge_cutoff: CUTOFF,
-  });
-  const untouchable = new Proxy({}, { get: () => { throw new Error("a legacy producer ran for an engine-served section"); } });
-  const seals = await runDeterministicSections(untouchable as never, {
-    playbook: playbook("peer_comparison"),
-    primary: { kind: "issuer", id: IDS.issuerA },
-    snapshotId: "11111111-1111-4111-a111-111111111111",
-    asOf: CUTOFF,
-    servedByEngine: sectionsServedByEngine(context),
-  });
-  assert.deepEqual(seals, []);
 });
 
 test("analyze financial sections", { timeout: 300_000 }, async (t) => {

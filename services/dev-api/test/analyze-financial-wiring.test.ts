@@ -1,6 +1,6 @@
-// The dev API freezes a memo's financial context before any work, keeps the
-// engine's sections away from legacy producers, publishes against the
-// committed memo run, and reports declared sections from committed state.
+// The dev API freezes a memo's financial context before any work, publishes
+// against the committed memo run, and reports declared sections from
+// committed state.
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -55,7 +55,6 @@ function okSeal(snapshotId: string): SnapshotSealResult {
 
 test("a memo run declares its frozen financial context and publishes it against the committed run", async () => {
   const published: AnalyzeFinancialRun[] = [];
-  let served: ReadonlySet<string> | undefined;
   const adapters = createServiceDevApiAdapters({
     db: fakeDb(),
     runAnalyzeWorkflow: (input) => ({
@@ -64,10 +63,7 @@ test("a memo run declares its frozen financial context and publishes it against 
     sealAnalyzeSnapshot: async () => {
       throw new Error("a playbook run seals through buildAnalyzeRunSeals");
     },
-    buildAnalyzeRunSeals: async (input) => {
-      served = input.servedByEngine;
-      return { blocks: input.memoBlocks, sealSnapshot: async () => okSeal(input.snapshotId) };
-    },
+    buildAnalyzeRunSeals: async (input) => ({ blocks: input.memoBlocks, sealSnapshot: async () => okSeal(input.snapshotId) }),
     analyzeFinancial: {
       resolvePeers: async () => {
         throw new Error("earnings quality compares no peers");
@@ -94,7 +90,6 @@ test("a memo run declares its frozen financial context and publishes it against 
     requested_peers: [],
     sections: ["revenue_trend"],
   });
-  assert.deepEqual([...served!], ["revenue_trend"], "the legacy revenue producer does not run beside the engine");
   assert.equal(published.length, 1);
   assert.deepEqual(published[0], { user_id: USER, analyze_run_id: RUN, template_id: TEMPLATE, template_version: 3, context: financial });
   assert.deepEqual(run.financial_sections, {
