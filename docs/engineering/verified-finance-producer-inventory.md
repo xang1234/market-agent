@@ -142,9 +142,10 @@ done; it is not counted as complete.
 
 ## 3. Status
 
-Every surface in section 2 now has a certified lane behind a per-surface
-flag. With a flag off (the default), that surface stays on the legacy path
-listed above. The shared foundations are in place:
+Every surface in section 2 now has a certified lane. Grids always use it.
+The other surfaces put it behind a per-surface flag, and with that flag off
+(the default) they stay on the legacy path listed above. The shared
+foundations are in place:
 
 - **T00–T04:** the pure financial core (contracts, exact arithmetic, reviewed
   operations, coverage).
@@ -261,7 +262,7 @@ enforced, those values appear as declared gaps rather than numbers.
 | Web: Chat stream consumer changes | None needed beyond T20. The stream carries references only, and the consumer refetches the committed message. |
 | Shared engine request path | Every surface calls `publishRequest` (`services/financial-engine/src/request.ts`). It resumes an earlier attempt's plan or plans anew, then reserves, leases, and publishes, and it owns the lease TTL and the one list of gap reasons (`RequestGap`). Surfaces supply their authority, planner, and parent write, and read back their own records. The deterministic planner can split outputs across publication units. |
 | Shared semantics for thesis and Discovery | `evaluateSavedRule` in `services/financial-engine/src/saved-rule.ts` is the one evaluation for saved numerical rules. Callers supply the authority, request key, threshold attribution (the planner now accepts one), and publication guard. |
-| Grid run completion | One rule for every run and mode: completed only when every cell is a value; any gap, unsupported, or error cell makes it partial. The write that finishes the last cell settles the run. Legacy runs whose cells lack coverage (for example a reader question with no documents) are now partial rather than completed. |
+| Grid run completion | One rule for every run: completed only when every cell is a value; any gap, unsupported, or error cell makes it partial. The write that finishes the last cell settles the run. Legacy runs whose cells lack coverage (for example a reader question with no documents) are now partial rather than completed. |
 
 ### Wave 5 plan deviations
 

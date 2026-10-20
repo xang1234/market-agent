@@ -19,6 +19,10 @@ test("dev-api wires the in-repo durable adapter runtime when only DATABASE_URL i
   assert.equal(typeof adapters?.agents.run, "function");
 });
 
+test("with the worker flag unset, startup checks financial readiness, so an unreachable database stops it", async () => {
+  await assert.rejects(createDevApiRuntimeFromEnv({ DATABASE_URL: "postgres://postgres@127.0.0.1:1/market_agent" }), /ECONNREFUSED/u);
+});
+
 test("dev-api default runtime module resolves when loader cwd is the repo root", async () => {
   const { adapters } = await createDevApiRuntimeFromEnv({
     DATABASE_URL: "postgres://example.invalid/market_agent",
