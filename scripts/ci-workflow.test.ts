@@ -3,6 +3,8 @@ import { readdir, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 
+import { load } from "../web/node_modules/js-yaml/dist/js-yaml.mjs";
+
 const REPO_ROOT = dirname(dirname(new URL(import.meta.url).pathname));
 const CI_WORKFLOW = join(REPO_ROOT, ".github", "workflows", "ci.yml");
 const MIN_NODE_VERSION = "22.19.0";
@@ -265,4 +267,35 @@ test("CI runs the golden conversation against the static demo build", async () =
   const scripts = (JSON.parse(await read("web/package.json")) as { scripts: Record<string, string> }).scripts;
   assert.match(scripts["build:demo"] ?? "", /vite build --mode demo/u);
   assert.match(scripts["preview:demo"] ?? "", /vite preview --mode demo/u);
+});
+
+test("GitHub Pages publishes the static demo from main", async () => {
+  type Step = { uses?: string; run?: string; with?: Record<string, string> };
+  type Job = { needs?: string; permissions?: Record<string, string>; environment?: { name?: string }; steps: Step[] };
+  const workflow = load(await read(".github/workflows/pages.yml")) as {
+    on: { push?: { branches?: string[] }; workflow_dispatch?: unknown };
+    permissions: unknown;
+    concurrency: unknown;
+    jobs: { build: Job; deploy: Job };
+  };
+  assert.deepEqual(workflow.on.push?.branches, ["main"]);
+  assert.ok("workflow_dispatch" in workflow.on, "can be run by hand");
+  assert.deepEqual(workflow.permissions, {});
+  // A deploy in flight is never cut off by a newer push.
+  assert.deepEqual(workflow.concurrency, { group: "pages", "cancel-in-progress": false });
+
+  const { build, deploy } = workflow.jobs;
+  assert.deepEqual(build.permissions, { contents: "read" });
+  assert.equal(build.steps.find((step) => step.uses?.startsWith("actions/setup-node@"))?.with?.["node-version-file"], ".nvmrc");
+  assert.equal((await read(".nvmrc")).trim(), MIN_NODE_VERSION);
+  const buildAt = build.steps.findIndex((step) => step.run === "npm run build:demo");
+  const uploadAt = build.steps.findIndex((step) => step.uses === "actions/upload-pages-artifact@v3");
+  assert.ok(buildAt >= 0 && buildAt < uploadAt, "builds the demo before uploading it");
+  assert.equal(build.steps[uploadAt]?.with?.path, "web/dist");
+
+  // Only the deploy job can write to Pages, with the OIDC token deploy-pages uses.
+  assert.equal(deploy.needs, "build");
+  assert.deepEqual(deploy.permissions, { pages: "write", "id-token": "write" });
+  assert.equal(deploy.environment?.name, "github-pages");
+  assert.ok(deploy.steps.some((step) => step.uses === "actions/deploy-pages@v4"), "deploys with deploy-pages");
 });
