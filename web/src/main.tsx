@@ -9,8 +9,8 @@ const root = createRoot(document.getElementById('root')!)
 const render = (app: ReactNode) => root.render(<StrictMode>{app}</StrictMode>)
 
 // A demo build has no backend: DemoFrame installs the in-page replay when it loads,
-// before the first render (no module requests /v1 when it is imported). Testing the
-// literal MODE lets every other build drop the demo and its fixture.
+// before the first render (the demo e2e fails if a /v1 request reaches the network).
+// Testing the literal MODE lets every other build drop the demo and its fixture.
 if (import.meta.env.MODE === 'demo') {
   const { DemoFrame } = await import('./demo/DemoFrame.tsx')
   render(<DemoFrame><App /></DemoFrame>)

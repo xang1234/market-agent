@@ -17,6 +17,8 @@ const YTD_RANGE = 'YTD 2026: 2025-12-31 close to 2026-08-31 close'
 // Against a capturing stack (docs/development.md, UI mode), also open every evidence page
 // each answer offers, so the replays can show any of them.
 const CAPTURE = process.env.E2E_CAPTURE === '1'
+// Against the static demo build (playwright.config.ts).
+const DEMO = process.env.E2E_DEMO === '1'
 
 async function ask(page: Page, question: string) {
   // One turn at a time: Send stays disabled until the previous answer is sealed.
@@ -60,6 +62,16 @@ test('golden conversation renders charts, metrics and inspectable sources, and s
   // Each completion carries its sealed answer (#331), so no turn reads the thread back:
   // from the first question until the reload, the page never GETs the thread's messages.
   const historyReads = apiRequests(page, 'GET', /\/v1\/chat\/threads\/[^/]+\/messages$/)
+
+  // The demo answers /v1 in the page, so a /v1 request on the network came from code that
+  // held fetch or EventSource before the replay replaced them.
+  const leakedToNetwork: string[] = []
+  if (DEMO) {
+    await page.route('**/v1/**', (route) => {
+      leakedToNetwork.push(`${route.request().method()} ${route.request().url()}`)
+      return route.abort()
+    })
+  }
 
   // Auto-login (VITE_MA_FLAG_DEV_AUTO_LOGIN, or the demo build) means no sign-in step.
   // Relative, so it stays under a base path (the demo's /market-agent/).
@@ -124,6 +136,7 @@ test('golden conversation renders charts, metrics and inspectable sources, and s
   expect(historyReads.length).toBeGreaterThanOrEqual(1)
   await expect(page.getByRole('button', { name: 'Send' })).toBeEnabled()
   expect(streamsAfterReload).toEqual([])
+  expect(leakedToNetwork).toEqual([])
 })
 
 // What a reload between turns reads, recorded so the replays show the thread as it stood
