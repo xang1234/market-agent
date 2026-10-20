@@ -20,6 +20,8 @@ const LISTINGS = {
   amd: "37000000-0000-4000-8000-000000000003",
   broken: "37000000-0000-4000-8000-000000000004",
   golden: "37000000-0000-4000-8000-000000000005",
+  nvdaEnding: "37000000-0000-4000-8000-000000000006",
+  nvdaUpcoming: "37000000-0000-4000-8000-000000000007",
 };
 
 type PolygonRow = { execution_date: string; split_from: number; split_to: number; id: string };
@@ -44,16 +46,16 @@ test("listing splits sync and the split sync CLI", { timeout: 180_000 }, async (
   const seed = run("npm", ["run", "seed", "--", "--database-url", databaseUrl], { cwd: dbRoot, env: { DATABASE_URL: databaseUrl } });
   assert.equal(seed.status, 0, seed.stderr || seed.stdout);
   const db = await connectedPool(t, databaseUrl);
-  const listing = async (key: keyof typeof LISTINGS, issuer: keyof typeof ISSUERS, ticker: string, activeTo: string | null = null) => {
+  const listing = async (key: keyof typeof LISTINGS, issuer: keyof typeof ISSUERS, ticker: string, activeTo: string | null = null, activeFrom: string | null = null) => {
     await db.query(`insert into issuers (issuer_id, legal_name) values ($1, $2) on conflict do nothing`, [ISSUERS[issuer], `${issuer} corp`]);
     await db.query(
       `insert into instruments (instrument_id, issuer_id, asset_type) values ($1, $2, 'common_stock')`,
       [LISTINGS[key], ISSUERS[issuer]],
     );
     await db.query(
-      `insert into listings (listing_id, instrument_id, mic, ticker, trading_currency, timezone, active_to)
-       values ($1, $1, 'XNAS', $2, 'USD', 'America/New_York', $3)`,
-      [LISTINGS[key], ticker, activeTo],
+      `insert into listings (listing_id, instrument_id, mic, ticker, trading_currency, timezone, active_to, active_from)
+       values ($1, $1, 'XNAS', $2, 'USD', 'America/New_York', $3, $4)`,
+      [LISTINGS[key], ticker, activeTo, activeFrom],
     );
   };
   await listing("nvda", "nvda", "NVDA");
@@ -61,6 +63,9 @@ test("listing splits sync and the split sync CLI", { timeout: 180_000 }, async (
   await listing("amd", "amd", "AMD");
   await listing("broken", "broken", "BRKN");
   await listing("golden", "golden", "NVDG");
+  // Active now until a listed end, and not active until a listed start.
+  await listing("nvdaEnding", "nvda", "NVDE", "2999-01-01T00:00:00Z");
+  await listing("nvdaUpcoming", "nvda", "NVDU", null, "2999-01-01T00:00:00Z");
   for (const issuer of [ISSUERS.nvda, ISSUERS.broken, ISSUERS.golden]) {
     await db.query(
       `insert into facts (subject_kind, subject_id, metric_id, period_kind, period_start, period_end, fiscal_year, fiscal_period,
@@ -145,16 +150,18 @@ test("listing splits sync and the split sync CLI", { timeout: 180_000 }, async (
     const fetched: string[] = [];
     const lines: string[] = [];
     const log = { log: (line: string) => lines.push(line), error: (line: string) => lines.push(line) };
-    const fetcher = polygonSplits(nvdaFeed, fetched);
+    const fetcher = polygonSplits({ ...nvdaFeed, NVDE: [] }, fetched);
 
     assert.deepEqual(await syncSplits(db, fetcher, [], log), { failures: 1 });
     assert.deepEqual(fetched, [
       "/v3/reference/splits?ticker=BRKN&limit=1000",
       "/v3/reference/splits?ticker=NVDA&limit=1000",
+      "/v3/reference/splits?ticker=NVDE&limit=1000",
     ]);
     assert.deepEqual(lines, [
       `BRKN (${LISTINGS.broken}): split sync failed: polygon: HTTP 404`,
       `NVDA (${LISTINGS.nvda}): 2 split(s) recorded`,
+      `NVDE (${LISTINGS.nvdaEnding}): 0 split(s) recorded`,
       "NVDG: skipped, it is the frozen golden dataset",
     ]);
 
