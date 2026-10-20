@@ -67,7 +67,9 @@ The engine checks each SEC fact's proof. Facts stored before 2026-10-16 have non
 
 For chat, only questions that name a metric reach the engine today. When the scope model reads the question, the answer adds a note for parts of it the plan did not calculate, such as a benchmark index; a qualified metric such as EPS growth is not checked. Other questions use the standard path until [#398](https://github.com/xang1234/market-agent/issues/398) lands.
 
-`FINANCIAL_WORKER_ENABLED=true` starts a worker in dev-api that recovers interrupted financial runs.
+dev-api runs a worker that recovers interrupted financial runs. It is on by default, and `FINANCIAL_WORKER_ENABLED=false` turns it off.
+
+The per-surface `*_FINANCIAL_MODE` variables are gone. A service that finds one still set logs a warning at startup and ignores it.
 
 Chat, the dev API, analyst grids and the Discovery worker refuse to start until the schema and version registry are ready.
 

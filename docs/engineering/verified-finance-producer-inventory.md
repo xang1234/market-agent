@@ -118,11 +118,11 @@ committed values after enforcement.
 
 ## 2.7 Final dispositions (T30)
 
-What each producer actually does with its surface's flag set to `enforce`,
-and the test that shows it. "Open" marks a planned disposition that is not
+What each producer does now that every surface runs on the engine, and the
+test that shows it. "Open" marks a planned disposition that is not
 done; it is not counted as complete.
 
-| Producer | Final disposition under enforcement | Evidence |
+| Producer | Final disposition | Evidence |
 |---|---|---|
 | SEC Company Facts / fact repo | Lossless tokens and precision proofs; no publication attestations yet, so SEC facts bind as `publication_time_unknown` (declared gaps) until a reviewed mapping issues them | `services/fundamentals` + `services/evidence` financial tests; known gap below |
 | Snapshot verifier / sealer | Recomputes every unit from ledger records; rejects every mutant in the release gate | `services/snapshot/test/financial-verifier*.test.ts`, `scripts/verified-finance-fixture.test.ts` |
@@ -142,11 +142,9 @@ done; it is not counted as complete.
 
 ## 3. Status
 
-Every surface in section 2 now has a certified lane. Grids, Thesis, and
-Discovery always use it, with no flag and no legacy path. Chat and Analyze put
-it behind a per-surface flag, and with that flag off (the default) they stay on
-the legacy path listed above. The shared
-foundations are in place:
+Every surface in section 2 has a certified lane and always uses it, with no
+flag. Chat sends only questions that name a metric to it; other questions stay
+on the narrative path until #398. The shared foundations are in place:
 
 - **T00–T04:** the pure financial core (contracts, exact arithmetic, reviewed
   operations, coverage).
@@ -172,13 +170,13 @@ foundations are in place:
   its parent artifact is written
   in the finalization transaction:
 
-  | Surface | Flag | What is certified | Parent write in finalization |
-  |---|---|---|---|
-  | Chat | None: always on for questions that name a metric | Model-planned requests over resolved subjects | Assistant message |
-  | Analyze | None: always on | One deterministic plan per memo, one unit per numerical section | `analyze_run_financial_sections` row (0049) |
-  | Grids | None: always enforced | One plan per run, one unit per numerical cell | Cell write and progress count (0050) |
-  | Thesis | None: always enforced | One plan per saved metric condition | Current-version check under the agent lock |
-  | Discovery | None: always enforced (`createWorkerDeps`) | One plan per candidate × approved criterion | Campaign-fence check (live lease, running, same brief, candidate researching) |
+  | Surface | What is certified | Parent write in finalization |
+  |---|---|---|
+  | Chat | Model-planned requests over resolved subjects, for questions that name a metric | Assistant message |
+  | Analyze | One deterministic plan per memo, one unit per numerical section | `analyze_run_financial_sections` row (0049) |
+  | Grids | One plan per run, one unit per numerical cell | Cell write and progress count (0050) |
+  | Thesis | One plan per saved metric condition | Current-version check under the agent lock |
+  | Discovery (`createWorkerDeps`) | One plan per candidate × approved criterion | Campaign-fence check (live lease, running, same brief, candidate researching) |
 
   The web shows every certified result through one inspector, with four
   labels: verified calculation, partial coverage, source-linked narrative,
@@ -201,13 +199,11 @@ foundations are in place:
   Evidence deletion takes the finalization share locks, so it waits for an
   in-flight publication and then erases it.
 
-- **T29:** staged readiness. Each surface's mode is server-owned (`off` or
-  `enforce`). An unset flag is off, a malformed one stops startup,
-  and model JSON cannot carry a mode. Each run records the mode it ran under.
-  With any surface on (or the recovery worker enabled), a service refuses to
-  start until `checkFinancialReadiness` passes. The dev API and the Discovery
-  worker always check, because thesis and Discovery always run on the engine.
-  That check covers the tables, columns, views, and functions the engine, its
+- **T29:** readiness. No surface has a mode flag, so chat, the dev API,
+  analyst grids, and the Discovery worker each refuse to start until
+  `checkFinancialReadiness` passes. A removed `*_FINANCIAL_MODE` variable that
+  is still set logs a startup warning (`removedModeFlagWarnings`). Each run
+  records `feature_mode`, which is always `enforce`. That check covers the tables, columns, views, and functions the engine, its
   evidence adapter, and erasure depend on, and a version registry covering
   everything this build emits.
   `createDevApiRuntimeFromEnv` returns the worker to its caller, and
