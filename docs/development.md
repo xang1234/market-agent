@@ -65,7 +65,7 @@ The golden conversation has three turns. Ask them in a new thread, word for word
 
 ### UI mode
 
-The app serves the web UI and replays the golden conversation's recorded API traffic from `services/app/fixtures/golden-conversation.replay.json`. The replay covers threads, all three turns' streams, the reloaded messages, and the evidence for every figure and source the answers offer. It builds no services and starts no containers. Any request that was not recorded answers `404` and names the request.
+The app serves the web UI and replays the golden conversation's recorded API traffic from `services/app/fixtures/golden-conversation.replay.json`. The replay covers threads, all three turns' streams, the thread's messages as a reload reads them after each turn, and the evidence for every figure and source the answers offer. It builds no services and starts no containers. Any request that was not recorded answers `404` and names the request.
 
 A new thread restarts the replay. Concurrent tabs share one replay session. Pages whose services are parked, such as Home, Screener, Analyst Grids, and Review, show no data in this mode.
 
@@ -79,7 +79,7 @@ DEV_CAPTURE_FILE=$PWD/services/app/fixtures/golden-conversation.replay.json DEV_
 ./scripts/dev-shell.sh down
 ```
 
-`E2E_CAPTURE=1` makes the browser test also open every evidence page each answer offers: each block's metadata page, each figure, and every ref those pages link to. `web/src/demo/demoBackend.test.ts` fails if a fixture misses one.
+`E2E_CAPTURE=1` makes the browser test also open every evidence page each answer offers: each block's metadata page, each figure, and every ref those pages link to. `web/src/demo/demoBackend.test.ts` fails if a fixture misses one. After the first and second answers it also loads the thread in a second tab, so a reload between turns shows only the turns asked so far. `services/app/test/replay.test.ts` fails if a fixture misses one of those loads.
 
 ### No-keys mode
 

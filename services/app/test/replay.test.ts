@@ -1,15 +1,23 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
+import { fileURLToPath } from "node:url";
 
-import { createCapture, createReplayHandler, type RecordedExchange, type ReplayFixture } from "../src/replay.ts";
-import { createReplay, type Replay } from "../src/replayCore.ts";
+import { createCapture, createReplayHandler, loadReplayFixture, type RecordedExchange, type ReplayFixture } from "../src/replay.ts";
+import { createReplay, type Replay, type ReplayStore } from "../src/replayCore.ts";
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => void;
+
+// sessionStorage's part a replay uses, in memory: each replay built on it is a reload.
+function memoryStore(): ReplayStore {
+  const items = new Map<string, string>();
+  return { getItem: (key) => items.get(key) ?? null, setItem: (key, value) => void items.set(key, value) };
+}
 
 async function serve(t: TestContext, handler: Handler): Promise<string> {
   const server = createServer(handler);
@@ -203,8 +211,7 @@ test("replay kept in a store picks up where it left off after a reload", () => {
       messages([USER_MSG, SECOND_MSG]),
     ],
   };
-  const items = new Map<string, string>();
-  const store = { getItem: (key: string) => items.get(key) ?? null, setItem: (key: string, value: string) => void items.set(key, value) };
+  const store = memoryStore();
   const ask = (replay: Replay, method: string, path: string, body?: unknown) =>
     replay({ method, path, query: "", body: body ? json(body) : "" });
   const myMsg = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -221,6 +228,37 @@ test("replay kept in a store picks up where it left off after a reload", () => {
   assert.deepEqual(JSON.parse(ask(reloaded, "GET", `/v1/chat/threads/${thread}/messages`)!.body), { messages: [myMsg] });
   assert.equal(ask(reloaded, "POST", `/v1/chat/threads/${thread}/messages`, { message_id: mySecond, content: "Compare AMD" })!.body, json({ message_id: mySecond }));
   assert.deepEqual(JSON.parse(ask(reloaded, "GET", `/v1/chat/threads/${thread}/messages`)!.body), { messages: [myMsg, mySecond] });
+});
+
+test("a reload between turns of the golden conversation shows the thread as it stood", async () => {
+  const fixture = await loadReplayFixture(fileURLToPath(new URL("../fixtures/golden-conversation.replay.json", import.meta.url)));
+  const store = memoryStore();
+  // What the web client sends: its own message, snapshot and run ids, then the stream.
+  const turn = (replay: Replay, thread: string, content: string) => {
+    const [message_id, snapshot_id, run_id] = [randomUUID(), randomUUID(), randomUUID()];
+    const posted = replay({ method: "POST", path: `/v1/chat/threads/${thread}/messages`, query: "", body: json({ message_id, snapshot_id, content }) });
+    const query = new URLSearchParams({ run_id, turn_id: message_id, user_intent: content, user_id: USER }).toString();
+    const stream = replay({ method: "GET", path: `/v1/chat/threads/${thread}/stream`, query, body: "" });
+    assert.equal(posted?.status, 201, content);
+    assert.match(stream?.body ?? "", new RegExp(`"turn_id":"${message_id}"[^]*event: turn.completed\\n`), content);
+    return message_id;
+  };
+  const reloadedHistory = (thread: string) => {
+    const reply = createReplay(fixture, store)({ method: "GET", path: `/v1/chat/threads/${thread}/messages`, query: "", body: "" });
+    const { messages } = JSON.parse(reply!.body) as { messages: { role: string; message_id: string }[] };
+    return messages.map(({ role, message_id }) => (role === "user" ? message_id : role));
+  };
+
+  const page = createReplay(fixture, store);
+  const thread = (JSON.parse(page({ method: "POST", path: "/v1/chat/threads", query: "", body: json({ title: null }) })!.body) as { thread_id: string }).thread_id;
+  const first = turn(page, thread, "Analyze NVDA");
+  assert.deepEqual(reloadedHistory(thread), [first, "assistant"]);
+
+  const second = turn(createReplay(fixture, store), thread, "Compare it with AMD YTD");
+  assert.deepEqual(reloadedHistory(thread), [first, "assistant", second, "assistant"]);
+
+  const third = turn(createReplay(fixture, store), thread, "Explain the differences and show the evidence");
+  assert.deepEqual(reloadedHistory(thread), [first, "assistant", second, "assistant", third, "assistant"]);
 });
 
 test("replay answers an unrecorded request with a clear 404, not a guess", async (t) => {

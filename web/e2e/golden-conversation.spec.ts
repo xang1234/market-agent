@@ -77,7 +77,10 @@ test('golden conversation renders charts, metrics and inspectable sources, and s
   await expect(page.getByText('Revenue', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('Quarterly revenue')).toBeVisible()
   await expectProportionalBars(page)
-  if (CAPTURE) await openEveryEvidencePage(page, answer(page, NVDA_NARRATIVE))
+  if (CAPTURE) {
+    await openEveryEvidencePage(page, answer(page, NVDA_NARRATIVE))
+    await loadThreadElsewhere(page, QUESTIONS.slice(0, 1))
+  }
 
   await ask(page, QUESTIONS[1])
   await expect(page.getByText(COMPARE_NARRATIVE)).toBeVisible()
@@ -87,7 +90,10 @@ test('golden conversation renders charts, metrics and inspectable sources, and s
   const disclosure = answer(page, COMPARE_NARRATIVE).locator('[data-block-kind="disclosure"]')
   await expect(disclosure).toContainText('end-of-day')
   await expect(disclosure).toContainText('split-adjusted price returns; dividends are not included')
-  if (CAPTURE) await openEveryEvidencePage(page, answer(page, COMPARE_NARRATIVE))
+  if (CAPTURE) {
+    await openEveryEvidencePage(page, answer(page, COMPARE_NARRATIVE))
+    await loadThreadElsewhere(page, QUESTIONS.slice(0, 2))
+  }
 
   await ask(page, QUESTIONS[2])
   await expect(page.getByText(EXPLAIN_NARRATIVE)).toBeVisible()
@@ -119,6 +125,18 @@ test('golden conversation renders charts, metrics and inspectable sources, and s
   await expect(page.getByRole('button', { name: 'Send' })).toBeEnabled()
   expect(streamsAfterReload).toEqual([])
 })
+
+// What a reload between turns reads, recorded so the replays show the thread as it stood
+// then: without it, the only history recorded is the final reload's, all three turns. A
+// second tab, so this page's request log stays what the visitor's page asked.
+async function loadThreadElsewhere(page: Page, asked: readonly string[]) {
+  const tab = await page.context().newPage()
+  await tab.goto(page.url())
+  await expect(tab.locator('[data-role="user"]')).toHaveCount(asked.length)
+  for (const question of asked) await expect(tab.locator('[data-role="user"]', { hasText: question })).toBeVisible()
+  await expect(tab.locator('[data-role="assistant"]')).toHaveCount(asked.length)
+  await tab.close()
+}
 
 // NVDA first, then AMD, each row with figures that open their evidence.
 async function expectComparison(message: Locator) {
