@@ -99,6 +99,7 @@ const EXPECTED: Record<string, ReturnType<typeof summary>> = {
     model_calls: 1,
     outputs: [...latestMargins("NVDA"), ...latestMargins("AMD"), ...latestMargins("AAPL")],
   },
+  "What drives AAPL's margins?": { outcome: "ready", model_calls: 1, outputs: latestMargins("AAPL").slice(1) },
 };
 
 test("each golden metric question plans from its own recorded reply on the first call", async () => {
@@ -126,6 +127,7 @@ test("each golden answer names what its question asks for and its plan does not 
     "What was AMD's revenue in Q2 2019?": [],
     "What is AMD's free cash flow?": [],
     "Compare NVDA, AMD and AAPL revenue and margins YTD against the S&P 500": ["a stock price return", "a comparison with a benchmark index"],
+    "What drives AAPL's margins?": ["the cause of these figures"],
   };
   for (const [question, expected] of Object.entries(uncovered)) {
     const planned = await planFinancialRequest(planningContext(question), question, model);

@@ -140,6 +140,13 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       [LISTING_A, INSTRUMENT_A],
     );
     assert.deepEqual(await answer("Compare its revenue with AMBX", ["BBB", "AMBX"], [bbb]), { companies: ["Beta Holdings Corp.", "Alpha Industries Inc."], notes: ["BBB is carried from the previous answer."] });
+    // A name the comparison gives that matches no company goes to the note, not to the question.
+    const compareUnknown = (clarificationAnswer?: { clarification_id: string; choice_id: string }) =>
+      chatHarness(pool, { model: revenueModel(["AAA", "AMBL"]) }).run({ ...base, userIntent: "Compare revenue for AAA, AMBL and ZZZ", ...(clarificationAnswer ? { clarificationAnswer } : {}) });
+    const offered = completed((await compareUnknown()).events).financial_clarification as { clarification_id: string; choices: Array<{ choice_id: string; label: string }> };
+    const pickedBeta = completed((await compareUnknown({ clarification_id: offered.clarification_id, choice_id: offered.choices.find((choice) => choice.label === "Beta Holdings Corp.")!.choice_id })).events);
+    const [, unknownNote] = (await db.query(`select blocks from chat_messages where message_id = $1`, [pickedBeta.message_id])).rows[0].blocks;
+    assert.deepEqual(unknownNote.segments, [{ type: "text", text: "No company matched ZZZ." }]);
     const unclear = completed((await chatHarness(pool, { model: revenueModel([]), priorSubjects: async () => [aaa, bbb] }).run({ ...base, userIntent: "What about CCC's revenue?" })).events);
     assert.equal(unclear.clarification, true);
     assert.equal((unclear.financial_clarification as { question: string }).question, 'Add CCC to the AAA and BBB comparison, or look at CCC alone? Say "add CCC" or "just CCC".');
@@ -174,6 +181,13 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.ok(message, `expected a published answer; got ${JSON.stringify(done)}`);
     const [block] = message.blocks;
     assert.deepEqual(block.financial.results.map((result: { disposition: string }) => result.disposition), ["verified", "missing"]);
+  });
+
+  await t.test("from a company's page, a compared name that matches no company is named in the answer", async () => {
+    const { events } = await chatHarness(pool, { model: revenueModel(["AAA"]) }).run({ ...base, subjectText: "AAA", userIntent: "Compare revenue with ZZZ" });
+    const [block, note] = (await db.query(`select blocks from chat_messages where message_id = $1`, [completed(events).message_id])).rows[0].blocks;
+    assert.deepEqual(block.financial.results.map((result: { disposition: string }) => result.disposition), ["verified"]);
+    assert.deepEqual(note.segments, [{ type: "text", text: "No company matched ZZZ." }]);
   });
 
   await t.test("an explicit subject with a non-comparative message plans that subject only", async () => {
@@ -304,6 +318,29 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     const model = revenueModel(["AAA"]);
     const retried = completed((await chatHarness(pool, { model, priorSubjects: async () => [aaa] }).run(turn)).events);
     assert.deepEqual([retried.message_id, retried.clarification, model.calls], [first.message_id, undefined, 0]);
+  });
+
+  await t.test("a turn resumed before its answer was saved saves the scope and notes its first attempt planned", async () => {
+    const aaa = { ...(await resolveMention("AAA")), handoff: { display_labels: { ticker: "AAA" } } } as unknown as ChatResolvedSubjectPreResolution;
+    const scopeOf = async (context: { subjectPreResolutions?: ReadonlyArray<{ subject_ref: { id: string } }> }) => ({
+      route: "financial_answer" as const,
+      reads: "financial_answer" as const,
+      companies: (context.subjectPreResolutions ?? []).map((subject) => ({ issuer_id: subject.subject_ref.id })),
+      peers: false, segments: false, margin_trend: false, margins: false, metrics: [], fiscal_year: null, fiscal_quarter: null, price_window: null, benchmark: false, inherited: [],
+    });
+    const thread = randomUUID();
+    // The thread is another user's, so the first attempt reserves the run and cannot publish.
+    await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [thread, IDS.other]);
+    const turn = { threadId: thread, userId: IDS.owner, turnId: randomUUID(), userIntent: "And what about its revenue?" };
+    const harness = () => chatHarness(pool, { model: revenueModel(["AAA"]), priorSubjects: async () => [aaa], researchScope: scopeOf as never });
+    await harness().run(turn);
+    await db.query(`update chat_threads set user_id = $2 where thread_id = $1`, [thread, IDS.owner]);
+    const { events } = await harness().run(turn);
+    const message = (await db.query(`select blocks, research_scope from chat_messages where message_id = $1`, [completed(events).message_id])).rows[0];
+    assert.deepEqual(
+      [message.research_scope.companies, message.blocks.slice(1).map((block: { segments: Array<{ text: string }> }) => block.segments[0]!.text)],
+      [[{ issuer_id: IDS.issuerA }], ["AAA is carried from the previous answer."]],
+    );
   });
 
   await t.test("a retried turn resumes its reserved run and publishes one message", async () => {

@@ -26,6 +26,8 @@ import { createChatServer } from "../src/http.ts";
 import { closeLocalRuntimePoolForTests } from "../src/local-runtime.ts";
 import { readChatMessage } from "../src/messages.ts";
 import { loadChatServerOptionsFromEnv } from "../src/runtime.ts";
+import { isFinancialRequest } from "../src/financial-runtime.ts";
+import { STARTER_QUESTIONS } from "../../../web/src/chat/starterQuestionList.ts";
 import { AMD_Q2_2025_RELEASE, GOLDEN_COMPANIES, seedGoldenDataset } from "./golden/dataset.ts";
 import { requireRecordedScopes } from "./golden/harness.ts";
 import type { Client } from "pg";
@@ -477,6 +479,21 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
       assert.deepEqual(completedTurn(await runTurn(base, mixedThread.thread_id, question)).data.financial_gap, { reason_code: "unsupported" }, question);
       assert.deepEqual(answerText(await latestAssistantMessage(base, mixedThread.thread_id)), [UNSUPPORTED], question);
     }
+  });
+
+  await t.test("each starter question that names a metric gets the engine's answer, not a request to name the company", async () => {
+    const metricStarters = STARTER_QUESTIONS.filter(isFinancialRequest);
+    assert.deepEqual(metricStarters, ["What drives AAPL's margins?"]);
+    const starterThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Starter" });
+    completedTurn(await runTurn(base, starterThread.thread_id, metricStarters[0]!));
+    assert.deepEqual(engineAnswer(await latestAssistantMessage(base, starterThread.thread_id)), {
+      results: [
+        ["Gross margin (gross profit / revenue)", "latest fiscal year", "verified", "46.91%"],
+        ["Operating margin (operating income / revenue)", "latest fiscal year", "verified", "31.97%"],
+        ["Net margin (net income / revenue)", "latest fiscal year", "verified", "26.92%"],
+      ],
+      notes: ["Not covered by this answer: the cause of these figures."],
+    });
   });
 
   // The frozen dataset has no cash flow facts.

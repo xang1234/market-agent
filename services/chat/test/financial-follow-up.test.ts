@@ -1,5 +1,5 @@
 // A follow-up to the engine's answer reads the figures it published (#378
-// review): the saved scope takes the plan's metrics, with no model call.
+// review): the saved scope takes the plan's metrics.
 
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";

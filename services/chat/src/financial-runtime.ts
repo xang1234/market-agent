@@ -124,12 +124,13 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     const authority = chatAuthority(context.userId!, context.threadId, turnId);
 
     const messageId = financialMessageId(context.threadId, turnId);
-    // A retry resumes the plan an earlier attempt reserved, over the companies
-    // that attempt took: the thread may hold this turn's own answer by now.
-    const resumed = await findPlanForRequest(deps.pool, { authority, request_key: turnId }) !== null;
-    const requested = resumed ? RESUMED : await requestedSubjects(deps, context, text);
+    // A retry of a turn whose answer is saved returns that answer: the thread
+    // holds it by now, so the turn's companies are not picked again. Before
+    // the answer is saved the thread is as the first attempt found it.
+    const answered = (await deps.pool.query(`select 1 from chat_messages where message_id = $1::uuid`, [messageId])).rows.length > 0;
+    const requested = answered ? ANSWERED : await requestedSubjects(deps, context, text);
     if (requested.clarify) return { kind: "clarification", clarification: companyQuestion(requested.clarify) };
-    if (!resumed && requested.subjects.length === 0) return gap("no_company");
+    if (!answered && requested.subjects.length === 0) return gap("no_company");
     const reading = (deps.readQuestion?.(text) ?? Promise.resolve(null)).catch((reason) => {
       console.warn("[chat] no reading of the question; the financial answer names no uncovered ask", reason);
       return null;
@@ -205,15 +206,26 @@ async function requestedSubjects(deps: ChatFinancialRuntimeDeps, context: ChatFi
   let entries: ReadonlyArray<Readonly<{ mention: string; resolution: ChatSubjectPreResolution }>> = mentioned;
   let turn: TurnSubjects | null = null;
   let carried: ReadonlyArray<ChatResolvedSubjectPreResolution> = [];
+  let notFound: ReadonlyArray<string> = [];
   const explicit = Boolean(context.subjectText?.trim());
-  if (!explicit && mentioned.some(({ resolution }) => resolution.status === "needs_clarification")) {
+  if (explicit) {
+    // The page's company first; a compared name that matches no company is named in the answer.
+    const [page, ...compared] = mentioned;
+    notFound = compared.filter(({ resolution }) => resolution.status === "not_found").map(({ mention }) => mention);
+    entries = [page!, ...compared.filter(({ resolution }) => resolution.status !== "not_found")];
+  } else if (mentioned.some(({ resolution }) => resolution.status === "needs_clarification")) {
     // An ambiguous company is asked about beside every company named, and in a
     // comparison beside the previous answer's, so the answer covers them all.
     const namedKeys = new Set(mentioned.flatMap(({ resolution }) => resolution.status === "resolved" ? [companyKey(resolution)] : []));
-    const prior = comparativeTurn(text) ? await deps.priorSubjects?.(context.threadId) ?? [] : [];
+    // As the analyst path does, a name that matches no company is named in a
+    // comparison's answer and ignored outside one.
+    const comparison = comparativeTurn(text);
+    const prior = comparison ? await deps.priorSubjects?.(context.threadId) ?? [] : [];
     carried = prior.filter((resolution, index) =>
       !namedKeys.has(companyKey(resolution)) && prior.findIndex((other) => companyKey(other) === companyKey(resolution)) === index);
-    entries = [...carried.map((resolution) => ({ mention: label(resolution), resolution })), ...mentioned];
+    const unmatched = mentioned.filter(({ resolution }) => resolution.status === "not_found");
+    notFound = comparison ? unmatched.map(({ mention }) => mention) : [];
+    entries = [...carried.map((resolution) => ({ mention: label(resolution), resolution })), ...mentioned.filter((entry) => !unmatched.includes(entry))];
   } else if (!explicit) {
     turn = await resolveTurnSubjects(
       context,
@@ -232,13 +244,11 @@ async function requestedSubjects(deps: ChatFinancialRuntimeDeps, context: ChatFi
     subjects: distinctRequested(requested),
     resolved: entries.flatMap(({ resolution }) => resolution.status === "resolved" ? [resolution] : []),
     carried: (turn?.carried ?? carried).map(label),
-    notFound: turn?.notFound ?? [],
+    notFound: turn?.notFound ?? notFound,
   };
 }
 
-// ponytail: a resumed turn's note and scope name no company, as the earlier
-// attempt's choice is in its plan only; save it with the plan if retries grow.
-const RESUMED: TurnCompanies = { subjects: [], resolved: [], carried: [], notFound: [] };
+const ANSWERED: TurnCompanies = { subjects: [], resolved: [], carried: [], notFound: [] };
 
 // A question about the companies to compare, which only a new message answers.
 function companyQuestion(question: string): Clarification {
