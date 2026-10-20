@@ -2,15 +2,18 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
-import type { SqlExecutor } from "../src/ports.ts";
-import { checkFinancialReadiness, requireFinancialReadiness } from "../src/readiness.ts";
+import { checkFinancialReadiness, removedModeFlagWarnings, requireFinancialReadiness } from "../src/readiness.ts";
 import { reserveRun } from "../src/run-repo.ts";
 import { FINANCIAL_VERSION_REGISTRY } from "../src/version-registry.ts";
 import { authorityFor, engineDatabase, marginPlan } from "./db-fixtures.ts";
 
-test("with nothing active, readiness is never consulted", async () => {
-  const untouched = { query: async () => assert.fail("no check runs while everything is off") } as unknown as SqlExecutor;
-  await requireFinancialReadiness(untouched, []);
+test("a removed mode flag that is still set gets one warning naming it", () => {
+  const env = { CHAT_FINANCIAL_MODE: "off", GRID_FINANCIAL_MODE: "", THESIS_FINANCIAL_MODE: "enforce" };
+  assert.deepEqual(removedModeFlagWarnings(env, ["CHAT_FINANCIAL_MODE", "ANALYZE_FINANCIAL_MODE", "GRID_FINANCIAL_MODE"]), [
+    "CHAT_FINANCIAL_MODE is set but no longer read: the financial engine is always on",
+    "GRID_FINANCIAL_MODE is set but no longer read: the financial engine is always on",
+  ]);
+  assert.deepEqual(removedModeFlagWarnings({}, ["CHAT_FINANCIAL_MODE", "ANALYZE_FINANCIAL_MODE", "GRID_FINANCIAL_MODE", "THESIS_FINANCIAL_MODE"]), []);
 });
 
 test("financial readiness", { skip: !dockerAvailable(), timeout: 300_000 }, async (t) => {
