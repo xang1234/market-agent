@@ -136,9 +136,8 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       return null;
     });
     // This lane runs before the analyst path resolves the turn's companies, so
-    // the scope gets the ones the plan requests. ponytail: a company picked in
-    // a clarification answer, or the one company two listings name, is not
-    // among them; the scope then names the companies the message resolved.
+    // the scope gets the ones the turn resolved; the answer saves the plan's
+    // own (persistAssistantMessage).
     const { resolved } = requested;
     const scope = (deps.researchScope
       ? deps.researchScope({ ...context, subjectPreResolution: resolved[0], subjectPreResolutions: resolved }, reading)
@@ -450,9 +449,10 @@ function persistAssistantMessage(
       publication.block,
       ...(note === "" ? [] : [noteBlock({ snapshotId: publication.snapshot_id, asOf: publication.block.as_of }, "uncovered", note)]),
     ];
-    // The scope names the figures the published plan computed, so a follow-up
-    // ("why did it change?") reads them (#378 review).
-    const saved = scope === null || plan === null ? scope : { ...scope, metrics: planMetrics(plan) };
+    // The scope names the companies and figures the published plan answered,
+    // so a follow-up ("why did it change?") continues them (#378 review): a
+    // company picked in a clarification, or named by several listings, too.
+    const saved = scope === null || plan === null ? scope : { ...scope, companies: planCompanies(plan, scope), metrics: planMetrics(plan) };
     const inserted = await tx.client.query(
       `insert into chat_messages (message_id, thread_id, role, snapshot_id, blocks, content_hash, research_scope)
        select $1::uuid, t.thread_id, 'assistant'::chat_role, $3::uuid, $4::jsonb, $5, $7::jsonb
@@ -506,6 +506,15 @@ function shownFigures(plan: FinancialPlanV1): OperationNode[] {
   const figures = (node: OperationNode): OperationNode[] =>
     Object.hasOwn(SCOPE_METRICS, figureKey(node)) ? [node] : operationDependencies(node).flatMap((id) => figures(nodes.get(id)!));
   return plan.outputs.flatMap((output) => figures(nodes.get(output.node_id)!));
+}
+
+// The companies a plan answered for, in its order, each with the label the scope gave it, if any.
+function planCompanies(plan: FinancialPlanV1, scope: ResearchScope): ResearchScope["companies"] {
+  const labels = new Map(scope.companies.flatMap((company) => company.label === undefined ? [] : [[company.issuer_id.toLowerCase(), company.label] as const]));
+  return [...plan.subjects.members].sort((left, right) => left.display_order - right.display_order).map((member) => {
+    const label = labels.get(member.subject_ref.id.toLowerCase());
+    return label === undefined ? { issuer_id: member.subject_ref.id } : { issuer_id: member.subject_ref.id, label };
+  });
 }
 
 // The figures a plan shows, as the chat scope names them.
