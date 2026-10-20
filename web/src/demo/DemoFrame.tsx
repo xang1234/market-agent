@@ -3,6 +3,7 @@
 // without the banner. (react-refresh/only-export-components keeps the backend in its
 // own module.)
 import type { ReactNode } from 'react'
+import { StarterQuestionsContext } from '../chat/starterQuestions.ts'
 import { DEMO_QUESTIONS, installDemoBackend } from './demoBackend.ts'
 
 // Per tab, and it survives a reload.
@@ -27,7 +28,10 @@ export function DemoFrame({ children }: { children: ReactNode }) {
         ))}
         .
       </aside>
-      <div className="min-h-0 flex-1">{children}</div>
+      <div className="min-h-0 flex-1">
+        {/* The replay answers its questions in order, so a new chat can start with the first only. */}
+        <StarterQuestionsContext.Provider value={DEMO_QUESTIONS.slice(0, 1)}>{children}</StarterQuestionsContext.Provider>
+      </div>
     </div>
   )
 }
