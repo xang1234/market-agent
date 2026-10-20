@@ -2,7 +2,7 @@
 
 <p align="center">
   <b>An AI stock analyst that doesn't make up numbers.</b><br>
-  Ask about any US company. Get charts, tables, and analysis built from SEC filings and market data, and open a figure to see where it came from.
+  Ask about any US company. Get charts, tables, and analysis built from SEC filings and market data, and open a linked figure to see where it came from.
 </p>
 
 <p align="center">
@@ -17,7 +17,7 @@
   <img src="docs/media/hero.gif" width="92%" alt="Asking the analyst to compare NVDA and AMD, then opening the evidence behind one figure">
 </p>
 
-Ask a general-purpose chatbot for a company's gross margin and you get a confident number with no way to check it. market-agent answers only from facts it has stored: SEC company facts, filing extracts, and Polygon prices. Code, not the model, builds the charts and tables. The model writes the narrative, and the figures in it come from stored facts you can open. A second model checks each inference before you see it.
+Ask a general-purpose chatbot for a company's gross margin and you get a confident number with no way to check it. market-agent answers only from facts it has stored: SEC company facts, filing extracts, and Polygon prices. Code, not the model, builds the charts and tables. The model writes the narrative, but its figures come from the evidence the app gathered, and linked figures open to their source. A second model checks each inference before you see it.
 
 ## Quickstart
 
@@ -65,7 +65,7 @@ Chat answers only from facts already stored. Open a company's symbol page once, 
   </tr>
   <tr>
     <td><b>Chat with an analyst.</b> Answers arrive as charts, tables, metric rows, and a short narrative. Threads persist.</td>
-    <td><b>Check the numbers.</b> Click a figure to see the fact behind it and open the source filing. Each chart, table, and metric row is labelled verified, source-linked, or not verified.</td>
+    <td><b>Check the numbers.</b> Click a linked figure to see the fact behind it and open the source filing. Each chart, table, and metric row is labelled verified, source-linked, or not verified.</td>
   </tr>
   <tr>
     <td><img src="docs/media/symbol.png" alt="The NVDA symbol page with a one-year chart, key stats, analyst consensus, and price targets"></td>
@@ -76,11 +76,11 @@ Chat answers only from facts already stored. Open a company's symbol page once, 
     <td><b>Screen the market.</b> Filter by sector, growth, valuation, returns, and technicals. Save a screen and reuse it as a universe for agents and grids.</td>
   </tr>
   <tr>
-    <td><img src="docs/media/agents.png" alt="A thesis agent's assessment: two conditions supported by stored facts, one unresolved"></td>
+    <td><img src="docs/media/agents.png" alt="A thesis agent's assessment: two numeric thresholds met, one narrative condition unresolved"></td>
     <td><img src="docs/media/home.png" alt="Home with agent findings, market pulse, watchlist movers, and a pinned screen"></td>
   </tr>
   <tr>
-    <td><b>Watch a thesis.</b> Agents check your thesis conditions on a schedule and mark each one supported, challenged, or unresolved, with a link to the evidence.</td>
+    <td><b>Watch a thesis.</b> Agents check your thesis conditions on a schedule, mark each one supported, challenged, or unresolved, and link to the evidence when there is some.</td>
     <td><b>See what changed.</b> Home collects agent findings, market pulse, watchlist movers, and pinned screens.</td>
   </tr>
 </table>

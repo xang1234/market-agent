@@ -28,7 +28,7 @@ Click a linked figure, claim, event, or source to open the inspector. It shows t
 
 ## Screener
 
-Filter the universe by asset type, sector, venue, price, change, and volume. Add fundamentals and technicals such as market cap, P/E, forward P/E, margins, revenue growth, ROIC, 3-month and 1-year performance, RSI, and distance from the 52-week high. Sort, page through, and save a screen. A saved screen becomes a reusable universe for watchlists, agents, and Analyze.
+Filter the universe by asset type, sector, venue, price, change, and volume. Add fundamentals such as market cap, P/E, margins, and revenue growth. With the weekly vendor universe turned on, you can also filter by forward P/E, ROIC, 3-month and 1-year performance, RSI, and distance from the 52-week high. Sort, page through, and save a screen. A saved screen becomes a reusable universe for watchlists, agents, and Analyze.
 
 By default the screener lists companies whose SEC facts the app has stored. It can serve about 10,000 US listings from a weekly reference import instead, with fewer fundamentals. See [Configuration](configuration.md#screener-universe).
 
