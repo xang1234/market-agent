@@ -3,7 +3,8 @@ import test from "node:test";
 
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { assertNoGoldenDataset, seedGoldenDevDatabase } from "../scripts/seed-golden-dev.ts";
-import { AMD_Q2_2025_RELEASE, GOLDEN_COMPANIES } from "./golden/dataset.ts";
+import { SEC_EDGAR_FILING_SOURCE_ID } from "../../fundamentals/src/provider-sources.ts";
+import { AMD_Q2_2025_RELEASE, GOLDEN_COMPANIES, GOLDEN_SOURCE_ID } from "./golden/dataset.ts";
 
 test("seedGoldenDevDatabase seeds the frozen dataset once and is a no-op on rerun", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
   const { databaseUrl } = await bootstrapDatabase(t, "chat-golden-dev-seed");
@@ -68,4 +69,63 @@ test("a database seeded before #282 gets the filed claim on the next run, once (
   assert.equal(await filed(), 1, "the filed claim is backfilled");
   await seedGoldenDevDatabase(databaseUrl);
   assert.equal(await filed(), 1, "and never duplicated");
+});
+
+test("a database seeded before the golden source moves its facts there and proves them, once", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "chat-golden-dev-proofs");
+  const client = await connectedClient(t, databaseUrl);
+  const issuerIds = GOLDEN_COMPANIES.map((company) => company.issuer_id);
+  const counts = async () => (await client.query(
+    `select (select count(*)::int from facts where source_id = $1::uuid) as golden_facts,
+            (select count(*)::int from facts
+              where source_id = $2::uuid
+                and ((subject_kind = 'issuer' and subject_id = any($3::uuid[]))
+                     or (subject_kind = 'segment' and subject_id in (select segment_id from segments where issuer_id = any($3::uuid[]))))) as sec_facts,
+            (select count(*)::int from current_fact_precision_attestations where precision_class = 'source_token_preserved') as precision_proofs,
+            (select count(*)::int from fact_financial_contexts) as contexts,
+            (select count(*)::int from source_publication_attestations where proof_method = 'fixture_declaration') as fixture_proofs`,
+    [GOLDEN_SOURCE_ID, SEC_EDGAR_FILING_SOURCE_ID, issuerIds],
+  )).rows[0];
+  const proven = { golden_facts: 125, sec_facts: 0, precision_proofs: 120, contexts: 120, fixture_proofs: 1 };
+
+  assert.equal(await seedGoldenDevDatabase(databaseUrl), "seeded");
+  assert.deepEqual(await counts(), proven, "a fresh seed proves the golden facts");
+  await client.query(`delete from source_publication_attestations where source_id = $1::uuid`, [GOLDEN_SOURCE_ID]);
+  await client.query(`delete from fact_precision_attestations where source_id = $1::uuid`, [GOLDEN_SOURCE_ID]);
+  await client.query(`delete from fact_financial_contexts where fact_id in (select fact_id from facts where source_id = $1::uuid)`, [GOLDEN_SOURCE_ID]);
+  await client.query(`update facts set source_id = $2::uuid where source_id = $1::uuid`, [GOLDEN_SOURCE_ID, SEC_EDGAR_FILING_SOURCE_ID]);
+  await client.query(`delete from sources where source_id = $1::uuid`, [GOLDEN_SOURCE_ID]);
+  const legacy = { golden_facts: 0, sec_facts: 125, precision_proofs: 0, contexts: 0, fixture_proofs: 0 };
+  assert.deepEqual(await counts(), legacy, "as a database seeded before the golden source");
+
+  const editRevenue = (delta: number) => client.query(
+    `update facts f set value_num = f.value_num + $2 from metrics m
+      where m.metric_id = f.metric_id and m.metric_key = 'revenue' and f.subject_id = $1::uuid and f.fiscal_year = 2026 and f.fiscal_period = 'FY'`,
+    [GOLDEN_COMPANIES[0]!.issuer_id, delta],
+  );
+  await editRevenue(1);
+  await assert.rejects(() => seedGoldenDevDatabase(databaseUrl), (error: Error) => {
+    assert.match(error.message, /facts differ from the dataset \(golden dataset: expected one stored fact for NVDA\.2026\.FY\.revenue, found 0\).*down -v/s);
+    assert.equal((error.cause as Error).name, "GoldenFactMismatchError");
+    return true;
+  });
+  assert.deepEqual(await counts(), legacy, "a database whose facts differ is left as it was");
+  await editRevenue(-1);
+
+  await client.query(
+    `insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at) values ($1::uuid, 'sec_edgar', 'filing', 'primary', 'public', now())`,
+    [GOLDEN_SOURCE_ID],
+  );
+  await assert.rejects(() => seedGoldenDevDatabase(databaseUrl), (error: Error) => {
+    assert.match(error.message, /source_version_hash does not identify the stored source version/);
+    assert.doesNotMatch(error.message, /down -v/, "an error that is not a fact mismatch is not relabelled as one");
+    return true;
+  });
+  assert.deepEqual(await counts(), legacy, "and the database is left as it was");
+  await client.query(`delete from sources where source_id = $1::uuid`, [GOLDEN_SOURCE_ID]);
+
+  assert.equal(await seedGoldenDevDatabase(databaseUrl), "already-seeded");
+  assert.deepEqual(await counts(), proven, "the facts are moved and proven");
+  assert.equal(await seedGoldenDevDatabase(databaseUrl), "already-seeded");
+  assert.deepEqual(await counts(), proven, "and never proven twice");
 });

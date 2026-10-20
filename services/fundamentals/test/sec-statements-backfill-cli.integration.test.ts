@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { bootstrapDatabase, connectedClient, connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
-import { GOLDEN_COMPANIES, SEC_FILING_SOURCE_ID, seedGoldenDataset } from "../../chat/test/golden/dataset.ts";
+import { GOLDEN_COMPANIES, seedGoldenDataset } from "../../chat/test/golden/dataset.ts";
+import { SEC_EDGAR_FILING_SOURCE_ID } from "../src/provider-sources.ts";
 import { backfillSecStatements } from "../src/sec-statements-backfill-cli.ts";
 import { secCompanyFetcher } from "./fakes.ts";
 
@@ -22,7 +23,7 @@ test("the SEC statements backfill never fetches for the frozen golden dataset", 
      select 'issuer', $1, metric_id, 'fiscal_y', '2023-07-01', '2024-06-30', 2024, 'FY', 245122000000, 'currency', 'USD', 1,
             '2024-08-01T00:00:00Z', '2024-08-01T00:00:00Z', $2, 'reported', 'authoritative', 'filing_time', 'full', 1
        from metrics where metric_key = 'revenue'`,
-    [LIVE_ISSUER_ID, SEC_FILING_SOURCE_ID],
+    [LIVE_ISSUER_ID, SEC_EDGAR_FILING_SOURCE_ID],
   );
   const goldenIds = GOLDEN_COMPANIES.map((company) => company.issuer_id);
   const goldenFacts = async () => (await db.query(

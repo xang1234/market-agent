@@ -4,9 +4,10 @@
 import { pathToFileURL } from "node:url";
 import { Client } from "pg";
 
-import { GOLDEN_COMPANIES, seedFiledClaims, seedGoldenDataset } from "../test/golden/dataset.ts";
+import { GOLDEN_COMPANIES, GoldenFactMismatchError, seedFiledClaims, seedGoldenDataset, seedGoldenProofs } from "../test/golden/dataset.ts";
 
 const RESET_COMMAND = "docker compose -f docker-compose.dev.yml --env-file .env.dev down -v";
+const UNIQUE_VIOLATION = "23505";
 
 // Data mode (DEV_MODE=data, #123) must run on live data only. A database left over from
 // a frozen mode still holds the authoritative golden facts and long-lived quote/bar
@@ -34,14 +35,19 @@ export async function seedGoldenDevDatabase(databaseUrl: string): Promise<"seede
     const marker = GOLDEN_COMPANIES[0]!;
     const { rowCount } = await client.query(`select 1 from issuers where issuer_id = $1::uuid`, [marker.issuer_id]);
     if (rowCount) {
-      // Seeded before the filed claim existed (#282): add it, once.
       await client.query("begin");
       try {
         await seedFiledClaims(client);
+        await seedGoldenProofs(client);
         await client.query("commit");
       } catch (error) {
         await client.query("rollback");
-        throw error;
+        if (!(error instanceof GoldenFactMismatchError)) throw error;
+        throw new Error(
+          `golden dataset (${GOLDEN_COMPANIES.map((c) => c.ticker).join(", ")}) is seeded, but its facts differ from ` +
+            `the dataset (${error.message}), so its proofs could not be added. Reset it: ${RESET_COMMAND}`,
+          { cause: error },
+        );
       }
       return "already-seeded";
     }
@@ -52,6 +58,7 @@ export async function seedGoldenDevDatabase(databaseUrl: string): Promise<"seede
       await client.query("commit");
     } catch (error) {
       await client.query("rollback");
+      if ((error as { code?: unknown }).code !== UNIQUE_VIOLATION) throw error;
       const tickers = GOLDEN_COMPANIES.map((c) => c.ticker).join(", ");
       throw new Error(
         `golden dataset (${tickers}) could not be seeded; this database already has conflicting ` +

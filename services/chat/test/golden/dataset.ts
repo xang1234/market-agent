@@ -12,6 +12,7 @@
 // segment, so a segment drill-down cites real facts. AMD and AAPL have none, so
 // asking for theirs exercises the honest "not available" answer.
 
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -22,16 +23,20 @@ import { createClaimEvidence } from "../../../evidence/src/claim-evidence-repo.t
 import { createClaim } from "../../../evidence/src/claim-repo.ts";
 import { createDocument } from "../../../evidence/src/document-repo.ts";
 import { createFact } from "../../../evidence/src/fact-repo.ts";
+import { recordFactPrecisionAttestation, recordSourcePublicationAttestation } from "../../../evidence/src/financial-attestations.ts";
+import { recordFactFinancialContext } from "../../../evidence/src/financial-context.ts";
 import { ephemeralRawBlobIdForSource } from "../../../evidence/src/object-store.ts";
 import { createSource } from "../../../evidence/src/source-repo.ts";
 import { FROZEN_AS_OF } from "../../src/ytd-hydration.ts";
 import { GOLDEN_ISSUER_IDS } from "../../../shared/src/golden-issuers.ts";
+import { SEC_EDGAR_FILING_SOURCE_ID } from "../../../fundamentals/src/provider-sources.ts";
 
 const SEED_DIR = join(import.meta.dirname, "..", "..", "..", "..", "db", "seed");
 
 // Fixed ids from db/seed/sources.sql.
-export const SEC_FILING_SOURCE_ID = "00000000-0000-4000-a000-000000000001";
 export const MARKET_SOURCE_ID = "00000000-0000-4000-a000-000000000009";
+
+export const GOLDEN_SOURCE_ID = "65000000-0000-4000-8000-000000000001";
 
 // The frozen modes answer at this cutoff (src/ytd-hydration.ts, #259).
 export const GOLDEN_AS_OF = FROZEN_AS_OF;
@@ -178,6 +183,57 @@ export const GOLDEN_COMPANIES: ReadonlyArray<GoldenCompany> = Object.freeze([
 ]);
 
 const INCOME_METRICS = ["revenue", "gross_profit", "operating_income", "net_income"] as const;
+
+type GoldenIssuerFact = Readonly<{
+  key: string;
+  issuer_id: string;
+  metric_key: (typeof INCOME_METRICS)[number];
+  period_kind: "fiscal_q" | "fiscal_y";
+  period_start: string;
+  period_end: string;
+  fiscal_year: number;
+  fiscal_period: Quarter["fiscal_period"] | "FY";
+  value_usd: number;
+}>;
+
+const GOLDEN_ISSUER_FACTS: ReadonlyArray<GoldenIssuerFact> = Object.freeze(
+  GOLDEN_COMPANIES.flatMap((company) => {
+    const periods = [
+      ...company.quarters.map((quarter) => ({
+        ...quarter,
+        period_kind: "fiscal_q" as const,
+        values: INCOME_METRICS.map((metricKey) => quarter[metricKey]),
+      })),
+      ...company.years.map(([fiscal_year, period_start, period_end, ...values]) => ({
+        fiscal_year,
+        fiscal_period: "FY" as const,
+        period_start,
+        period_end,
+        period_kind: "fiscal_y" as const,
+        values: values.map((value) => value * 1e6),
+      })),
+    ];
+    return periods.flatMap(({ period_kind, period_start, period_end, fiscal_year, fiscal_period, values }) =>
+      INCOME_METRICS.map((metric_key, index) => ({
+        key: `${company.ticker}.${fiscal_year}.${fiscal_period}.${metric_key}`,
+        issuer_id: company.issuer_id,
+        metric_key,
+        period_kind,
+        period_start,
+        period_end,
+        fiscal_year,
+        fiscal_period,
+        value_usd: values[index]!,
+      })),
+    );
+  }),
+);
+for (const fact of GOLDEN_ISSUER_FACTS) {
+  if (!Number.isSafeInteger(fact.value_usd)) throw new Error(`golden dataset: ${fact.key} is not a whole number of USD, so its decimal text is not exact`);
+}
+
+const GOLDEN_SOURCE_VERSION = createHash("sha256").update(JSON.stringify(GOLDEN_COMPANIES)).digest("hex");
+
 // Daily bars from early December, so a year-to-date window has its baseline
 // (the last 2025 close) and runs to the session before GOLDEN_AS_OF (#192).
 const BARS_FROM = "2025-12-01";
@@ -203,6 +259,7 @@ export async function seedGoldenDataset(client: Client): Promise<void> {
     await client.query(await readFile(join(SEED_DIR, file), "utf8"));
   }
   const metricIds = await loadMetricIds(client);
+  await insertGoldenSource(client);
 
   for (const company of GOLDEN_COMPANIES) {
     await client.query(
@@ -220,67 +277,120 @@ export async function seedGoldenDataset(client: Client): Promise<void> {
       [company.listing_id, company.instrument_id, company.ticker],
     );
 
-    for (const quarter of company.quarters) {
-      for (const metricKey of INCOME_METRICS) {
-        await createFact(client, {
-          subject_kind: "issuer",
-          subject_id: company.issuer_id,
-          metric_id: metricIds.get(metricKey)!,
-          period_kind: "fiscal_q",
-          period_start: quarter.period_start,
-          period_end: quarter.period_end,
-          fiscal_year: quarter.fiscal_year,
-          fiscal_period: quarter.fiscal_period,
-          value_num: quarter[metricKey],
-          unit: "currency",
-          currency: "USD",
-          as_of: GOLDEN_AS_OF,
-          reported_at: GOLDEN_AS_OF,
-          observed_at: GOLDEN_AS_OF,
-          source_id: SEC_FILING_SOURCE_ID,
-          method: "reported",
-          verification_status: "authoritative",
-          freshness_class: "filing_time",
-          coverage_level: "full",
-          entitlement_channels: ["app"],
-          confidence: 1,
-        });
-      }
-    }
-
-    for (const [fiscal_year, period_start, period_end, ...values] of company.years) {
-      for (const [index, metricKey] of INCOME_METRICS.entries()) {
-        await createFact(client, {
-          subject_kind: "issuer",
-          subject_id: company.issuer_id,
-          metric_id: metricIds.get(metricKey)!,
-          period_kind: "fiscal_y",
-          period_start,
-          period_end,
-          fiscal_year,
-          fiscal_period: "FY",
-          value_num: values[index] * 1e6,
-          unit: "currency",
-          currency: "USD",
-          as_of: GOLDEN_AS_OF,
-          reported_at: GOLDEN_AS_OF,
-          observed_at: GOLDEN_AS_OF,
-          source_id: SEC_FILING_SOURCE_ID,
-          method: "reported",
-          verification_status: "authoritative",
-          freshness_class: "filing_time",
-          coverage_level: "full",
-          entitlement_channels: ["app"],
-          confidence: 1,
-        });
-      }
+    for (const fact of GOLDEN_ISSUER_FACTS.filter((fact) => fact.issuer_id === company.issuer_id)) {
+      await createFact(client, {
+        subject_kind: "issuer",
+        subject_id: company.issuer_id,
+        metric_id: metricIds.get(fact.metric_key)!,
+        period_kind: fact.period_kind,
+        period_start: fact.period_start,
+        period_end: fact.period_end,
+        fiscal_year: fact.fiscal_year,
+        fiscal_period: fact.fiscal_period,
+        value_num: fact.value_usd,
+        unit: "currency",
+        currency: "USD",
+        as_of: GOLDEN_AS_OF,
+        reported_at: GOLDEN_AS_OF,
+        observed_at: GOLDEN_AS_OF,
+        source_id: GOLDEN_SOURCE_ID,
+        method: "reported",
+        verification_status: "authoritative",
+        freshness_class: "filing_time",
+        coverage_level: "full",
+        entitlement_channels: ["app"],
+        confidence: 1,
+      });
     }
 
     await seedSegments(client, company, metricIds.get("revenue")!);
     await seedQuote(client, company);
     await seedDailyBars(client, company);
   }
+  await seedGoldenProofs(client);
   await seedFiledClaims(client);
+}
+
+export class GoldenFactMismatchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GoldenFactMismatchError";
+  }
+}
+
+async function insertGoldenSource(client: Client): Promise<void> {
+  await client.query(
+    `insert into sources (source_id, provider, kind, canonical_url, trust_tier, license_class, retrieved_at, content_hash)
+     values ($1::uuid, 'golden_fixture', 'filing', null, 'primary', 'internal', $2::timestamptz, $3)
+     on conflict (source_id) do nothing`,
+    [GOLDEN_SOURCE_ID, GOLDEN_AS_OF, `sha256:${GOLDEN_SOURCE_VERSION}`],
+  );
+}
+
+export async function seedGoldenProofs(client: Client): Promise<void> {
+  const proven = await client.query(`select 1 from source_publication_attestations where source_id = $1::uuid`, [GOLDEN_SOURCE_ID]);
+  if (proven.rowCount) return;
+  await insertGoldenSource(client);
+
+  for (const fact of GOLDEN_ISSUER_FACTS) {
+    const { rows } = await client.query<{ fact_id: string }>(
+      `update facts f set source_id = $1::uuid
+         from metrics m
+        where m.metric_id = f.metric_id and m.metric_key = $2
+          and f.subject_kind = 'issuer' and f.subject_id = $3::uuid and f.period_kind = $4
+          and f.fiscal_year = $5 and f.fiscal_period = $6 and f.value_num = $7::numeric
+          and f.as_of = $8::timestamptz and f.observed_at = $8::timestamptz
+          and f.source_id in ($1::uuid, $9::uuid)
+       returning f.fact_id::text as fact_id`,
+      [GOLDEN_SOURCE_ID, fact.metric_key, fact.issuer_id, fact.period_kind, fact.fiscal_year, fact.fiscal_period, fact.value_usd, GOLDEN_AS_OF, SEC_EDGAR_FILING_SOURCE_ID],
+    );
+    if (rows.length !== 1) throw new GoldenFactMismatchError(`golden dataset: expected one stored fact for ${fact.key}, found ${rows.length}`);
+    const locator = `golden_fixture:dataset.ts#${fact.key}`;
+    const rawToken = String(fact.value_usd);
+    await recordFactPrecisionAttestation(client, {
+      fact_id: rows[0]!.fact_id,
+      precision_class: "source_token_preserved",
+      raw_token: rawToken,
+      token_proof_hash: createHash("sha256").update(`${locator}=${rawToken}`).digest("hex"),
+      source_locator: locator,
+      validation_method: "golden_fixture_declared_token.v1",
+    });
+    await recordFactFinancialContext(client, {
+      fact_id: rows[0]!.fact_id,
+      context_version: "golden_fixture_context.v1",
+      period_type: "duration",
+      dimension_scope: "consolidated",
+      dimension_members: [],
+      reporting_basis: "as_reported",
+      adjustment_basis: "unadjusted",
+      share_basis: "not_applicable",
+      fiscal_calendar_version: "golden_fixture_fiscal_year.v1",
+      disclosure_relation: "original",
+      source_context_ref: locator,
+    });
+  }
+
+  await client.query(
+    `update facts set source_id = $1::uuid
+      where subject_kind = 'segment'
+        and subject_id in (select segment_id from segments where issuer_id = any($2::uuid[]))
+        and as_of = $3::timestamptz and observed_at = $3::timestamptz and source_id = $4::uuid`,
+    [GOLDEN_SOURCE_ID, GOLDEN_COMPANIES.map((company) => company.issuer_id), GOLDEN_AS_OF, SEC_EDGAR_FILING_SOURCE_ID],
+  );
+
+  await recordSourcePublicationAttestation(client, {
+    source_id: GOLDEN_SOURCE_ID,
+    document_id: null,
+    source_version_hash: GOLDEN_SOURCE_VERSION,
+    available_not_before: null,
+    available_no_later_than: GOLDEN_AS_OF,
+    timing_precision: "instant",
+    source_timezone: "UTC",
+    proof_method: "fixture_declaration",
+    proof_ref: "golden_fixture:dataset.ts",
+    proof_hash: GOLDEN_SOURCE_VERSION,
+    mapping_version: "golden-fixture-declaration.v1",
+  });
 }
 
 // The filed claim, through the same repositories live ingestion uses. Once:
@@ -353,7 +463,7 @@ async function seedSegments(client: Client, company: GoldenCompany, revenueMetri
       as_of: GOLDEN_AS_OF,
       reported_at: GOLDEN_AS_OF,
       observed_at: GOLDEN_AS_OF,
-      source_id: SEC_FILING_SOURCE_ID,
+      source_id: GOLDEN_SOURCE_ID,
       method: "reported",
       verification_status: "authoritative",
       freshness_class: "filing_time",

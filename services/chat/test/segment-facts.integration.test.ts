@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { createFact } from "../../evidence/src/fact-repo.ts";
 import { loadTurnFactBlocks } from "../src/fact-blocks.ts";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
-import { GOLDEN_AS_OF, GOLDEN_COMPANIES, MARKET_SOURCE_ID, SEC_FILING_SOURCE_ID, seedGoldenDataset } from "./golden/dataset.ts";
+import { GOLDEN_AS_OF, GOLDEN_COMPANIES, GOLDEN_SOURCE_ID, MARKET_SOURCE_ID, seedGoldenDataset } from "./golden/dataset.ts";
 
 const NVDA = GOLDEN_COMPANIES.find((company) => company.ticker === "NVDA")!;
 // Another seeded source (db/seed/sources.sql).
@@ -46,7 +46,7 @@ test("a segment breakdown shows only eligible, numeric facts, one per segment", 
       as_of: GOLDEN_AS_OF,
       reported_at: GOLDEN_AS_OF,
       observed_at: GOLDEN_AS_OF,
-      source_id: SEC_FILING_SOURCE_ID,
+      source_id: GOLDEN_SOURCE_ID,
       method: "reported",
       verification_status: "authoritative",
       freshness_class: "filing_time",

@@ -21,7 +21,7 @@ import { proposalQuestion } from "../src/scope-proposal.ts";
 import {
   GOLDEN_AS_OF,
   GOLDEN_COMPANIES,
-  SEC_FILING_SOURCE_ID,
+  GOLDEN_SOURCE_ID,
   seedGoldenDataset,
 } from "./golden/dataset.ts";
 import {
@@ -248,7 +248,7 @@ async function seedObsoleteSegment(client: Client): Promise<void> {
     as_of: GOLDEN_AS_OF,
     reported_at: GOLDEN_AS_OF,
     observed_at: GOLDEN_AS_OF,
-    source_id: SEC_FILING_SOURCE_ID,
+    source_id: GOLDEN_SOURCE_ID,
     method: "reported",
     verification_status: "authoritative",
     freshness_class: "filing_time",
