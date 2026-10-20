@@ -163,6 +163,7 @@ export const PROPOSABLE_METRICS: ReadonlyArray<RequestedMetric> = Object.freeze(
   { metric_key: "total_debt", label: "Debt", available: false },
   { metric_key: "dividends", label: "Dividends", available: false },
   // Share counts the financial engine reports; no reader here does.
+  { metric_key: "weighted_average_basic_shares", label: "Weighted-average basic shares", available: false },
   { metric_key: "weighted_average_diluted_shares", label: "Weighted-average diluted shares", available: false },
   { metric_key: "shares_outstanding", label: "Shares outstanding", available: false },
   { metric_key: "income_statement", label: "Revenue, profit and margins", available: true },
