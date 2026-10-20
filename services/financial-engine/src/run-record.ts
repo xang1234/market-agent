@@ -14,7 +14,7 @@ export type RunRecord = Readonly<{
   request_key: string;
   request_hash: string;
   plan_id: string;
-  feature_mode: "off" | "shadow" | "enforce";
+  feature_mode: "off" | "enforce";
   knowledge_cutoff: string;
   execution_state: ExecutionState;
   coverage_state: "complete" | "partial" | "none" | null;

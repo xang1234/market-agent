@@ -16,8 +16,8 @@ import { snapshotTransactionClient, type SnapshotTransactionClient } from "../..
 
 const LEASE_TTL_MS = 120_000;
 
-/** A surface's financial lane: off, planning only beside the legacy answer, or the engine's answer alone. */
-export type FinancialMode = "off" | "shadow" | "enforce";
+/** A surface's financial lane: off, or the engine's answer alone. */
+export type FinancialMode = "off" | "enforce";
 
 /**
  * Reads a surface's server-owned mode flag: unset is off. A value that is not a
@@ -26,8 +26,8 @@ export type FinancialMode = "off" | "shadow" | "enforce";
 export function parseFinancialMode(value: string | undefined, name = "financial mode"): FinancialMode {
   const mode = value?.trim() ?? "";
   if (mode === "") return "off";
-  if (mode === "off" || mode === "shadow" || mode === "enforce") return mode;
-  throw new Error(`${name} must be off, shadow, or enforce (got ${JSON.stringify(value)})`);
+  if (mode === "off" || mode === "enforce") return mode;
+  throw new Error(`${name} must be off or enforce (got ${JSON.stringify(value)})`);
 }
 
 /** Why a request did not publish; surfaces word these, they never invent their own. */
@@ -46,14 +46,11 @@ export type RequestOutcome =
   /** The run was driven; `report` is null when an earlier attempt already completed it. */
   | Readonly<{ status: "driven"; run_id: string; report: DriveReport | null }>
   | Readonly<{ status: "clarification"; clarification: Clarification }>
-  /** Shadow mode: the request planned; nothing was reserved or published. */
-  | Readonly<{ status: "planned"; plan: FinancialPlanV1 }>
   | Readonly<{ status: "gap"; reason: RequestGap }>;
 
 export type FinancialRequest = Readonly<{
   authority: FinancialRuntimeAuthority;
   request_key: string;
-  mode: "shadow" | "enforce";
   /** Called only when no earlier attempt reserved a plan for this request. */
   plan: (db: SqlExecutor) => Promise<PlanningResult>;
   evidence: (executor: SqlExecutor) => FinancialEvidencePort;
@@ -69,7 +66,6 @@ export async function publishRequest(pool: FinancialPool, request: FinancialRequ
       if (planned.status !== "planned") return planned;
       plan = planned.plan;
     }
-    if (request.mode === "shadow") return { status: "planned", plan };
     try {
       return await reserveAndDrive(client, request, plan);
     } catch {
@@ -118,7 +114,7 @@ const UNAVAILABLE: Readonly<Record<Exclude<AcquireLeaseResult["status"], "acquir
   terminal: "run_failed",
 };
 
-async function planOrGap(db: SqlExecutor, request: FinancialRequest): Promise<RequestOutcome> {
+async function planOrGap(db: SqlExecutor, request: FinancialRequest): Promise<RequestOutcome | Readonly<{ status: "planned"; plan: FinancialPlanV1 }>> {
   let result: PlanningResult;
   try {
     result = await request.plan(db);

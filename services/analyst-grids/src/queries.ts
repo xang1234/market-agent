@@ -104,7 +104,7 @@ export async function createRun(
     cellTotal: number;
     droppedRowCount: number;
     columnInstances: ReadonlyArray<ColumnInstance>;
-    financialMode?: "shadow" | "enforce" | null;
+    financialMode?: "enforce" | null;
   },
 ): Promise<string> {
   const result = await db.query<{ grid_run_id: string }>(
@@ -253,7 +253,7 @@ export type GridRunRow = {
   completed_at: string | null;
   // Frozen at start; null for runs recorded before column instances existed.
   column_instances: ReadonlyArray<ColumnInstance> | null;
-  financial_mode: "shadow" | "enforce" | null;
+  financial_mode: "enforce" | null;
 };
 
 const RUN_COLUMNS = `grid_run_id::text as grid_run_id,
@@ -275,7 +275,7 @@ type GridRunDbRow = {
   started_at: Date | string;
   completed_at: Date | string | null;
   column_instances: ReadonlyArray<ColumnInstance> | null;
-  financial_mode: "shadow" | "enforce" | null;
+  financial_mode: string | null;
 };
 
 function runFromDb(row: GridRunDbRow): GridRunRow {
@@ -292,7 +292,7 @@ function runFromDb(row: GridRunDbRow): GridRunRow {
     started_at: iso(row.started_at),
     completed_at: row.completed_at == null ? null : iso(row.completed_at),
     column_instances: row.column_instances ?? null,
-    financial_mode: row.financial_mode ?? null,
+    financial_mode: row.financial_mode === "enforce" ? "enforce" : null,
   };
 }
 

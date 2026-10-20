@@ -67,7 +67,6 @@ test("sections the engine serves never run their legacy producers", async () => 
     servedByEngine: sectionsServedByEngine(context),
   });
   assert.deepEqual(seals, []);
-  assert.deepEqual([...sectionsServedByEngine({ ...context!, mode: "shadow" })], [], "shadow mode keeps the legacy producers");
 });
 
 test("analyze financial sections", { timeout: 300_000 }, async (t) => {
@@ -136,12 +135,6 @@ test("analyze financial sections", { timeout: 300_000 }, async (t) => {
       revenue_trend_prior: "missing",
       revenue_trend_growth: "blocked_dependency",
     }, "no value is published before its filing was public; the gaps are declared");
-  });
-
-  await t.test("shadow mode plans without publishing and declares no sections", async () => {
-    const memo = await createMemoRun(db, pool, { templateId, playbookId: "earnings_quality", mode: "shadow" });
-    assert.deepEqual(await memo.publish(), { coverage: "none", sections: [] });
-    assert.deepEqual(await committed(db, memo.runId), { sections: 0, certificates: 0, plans: 0 });
   });
 
   await t.test("another user cannot read a memo's sections", async () => {

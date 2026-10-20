@@ -2,11 +2,9 @@
 // planned deterministically, with no model, and sealed like any certified answer.
 
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { IDS, seedCashResilience } from "../../financial-engine/test/db-fixtures.ts";
-import type { ChatAnalystToolRuntime } from "../src/coordinator.ts";
 import { listChatMessagesForThread } from "../src/messages.ts";
 import { chatDatabase, chatHarness, completed } from "./financial-fixtures.ts";
 
@@ -17,8 +15,8 @@ test("chat cash resilience", { timeout: 300_000 }, async (t) => {
   }
   const { db, pool, threadId } = await chatDatabase(t, "chat-cash-res");
   await seedCashResilience(db);
-  const ask = async (userIntent: string, options: { mode?: "shadow"; analyst?: ChatAnalystToolRuntime } = {}) =>
-    (await chatHarness(pool, { model: null, ...options }).run({ threadId, userId: IDS.owner, userIntent })).events;
+  const ask = async (userIntent: string) =>
+    (await chatHarness(pool, { model: null }).run({ threadId, userId: IDS.owner, userIntent })).events;
   const answer = async (userIntent: string) => {
     const done = completed(await ask(userIntent));
     const read = await listChatMessagesForThread(pool, { thread_id: threadId, user_id: IDS.owner });
@@ -66,16 +64,6 @@ test("chat cash resilience", { timeout: 300_000 }, async (t) => {
 
   await t.test("an ambiguous company is asked about before anything is planned", async () => {
     assert.equal(completed(await ask("Cash resilience for AMB")).clarification, true);
-  });
-
-  await t.test("shadow mode leaves the turn to the analyst", async () => {
-    let analystCalls = 0;
-    const analyst: ChatAnalystToolRuntime = () => {
-      analystCalls += 1;
-      return { snapshot_id: randomUUID(), blocks: [], verification: { ok: true } };
-    };
-    await ask("Show AAA's cash resilience", { mode: "shadow", analyst });
-    assert.equal(analystCalls, 1);
   });
 
   await t.test("an input only filed for an older year is a named gap under the latest fiscal year, never the older balance (#344)", async () => {

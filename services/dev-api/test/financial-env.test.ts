@@ -17,11 +17,11 @@ test("every surface is off unless the server's environment says otherwise", () =
   assert.deepEqual(activeFinancialSurfaces(loadFinancialModes({})), []);
   assert.deepEqual(loadFinancialModes(EVERY_FINANCE_FLAG), { analyze: "enforce", grid: "enforce", thesis: "enforce", worker: true });
   assert.deepEqual(activeFinancialSurfaces(loadFinancialModes(EVERY_FINANCE_FLAG)), ["analyze", "grid", "thesis", "worker"]);
-  assert.equal(loadFinancialModes({ ANALYZE_FINANCIAL_MODE: "shadow" }).analyze, "shadow");
 });
 
 test("a malformed mode stops startup rather than falling back to legacy numbers", () => {
-  assert.throws(() => loadFinancialModes({ ANALYZE_FINANCIAL_MODE: "on" }), /ANALYZE_FINANCIAL_MODE must be off, shadow, or enforce/u);
+  assert.throws(() => loadFinancialModes({ ANALYZE_FINANCIAL_MODE: "on" }), /ANALYZE_FINANCIAL_MODE must be off or enforce/u);
+  assert.throws(() => loadFinancialModes({ GRID_FINANCIAL_MODE: "shadow" }), /GRID_FINANCIAL_MODE must be off or enforce/u);
   assert.throws(() => loadFinancialModes({ THESIS_FINANCIAL_MODE: "shadow" }), /THESIS_FINANCIAL_MODE must be off or enforce/u);
 });
 

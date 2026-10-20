@@ -94,7 +94,7 @@ export function authorityFixture(owner = OWNER_A): FinancialRuntimeAuthorityV1 {
     egress_channel: "chat",
     parent: { kind: "chat_thread", id: "44444444-4444-4444-8444-444444444444", version: "1" },
     allowed_source_classes: ["sec_filing"],
-    feature: { surface: "chat", capability: "financial-answer", mode: "shadow" },
+    feature: { surface: "chat", capability: "financial-answer", mode: "enforce" },
     approval_state: "not_required",
     lease: null,
   };

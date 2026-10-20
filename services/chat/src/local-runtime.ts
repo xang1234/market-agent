@@ -482,9 +482,6 @@ export async function financialResearchScope(context: ChatFinancialTurnContext):
   return (await turnScope(context.threadId, context.userIntent ?? "", covered, true))(turnNow(process.env));
 }
 
-// Financial requests go through the verified engine. Off unless
-// CHAT_FINANCIAL_MODE is "shadow" or "enforce"; without a configured LLM router,
-// financial turns in enforce mode get a structured gap instead of a guess.
 export const financialRuntime: ChatFinancialRuntime = createChatFinancialRuntime({
   mode: parseFinancialMode(process.env.CHAT_FINANCIAL_MODE, "CHAT_FINANCIAL_MODE"),
   pool: { query: (text, values) => pool().query(text, values), connect: () => pool().connect() },

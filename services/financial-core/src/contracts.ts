@@ -64,7 +64,7 @@ export type PublicationUnitKind = (typeof PUBLICATION_UNIT_KINDS)[number];
 export const SURFACES = ["chat", "analyze", "analyst_grid", "thesis", "discovery"] as const;
 export type Surface = (typeof SURFACES)[number];
 
-export const FEATURE_MODES = ["off", "shadow", "enforce"] as const;
+export const FEATURE_MODES = ["off", "enforce"] as const;
 export type FeatureMode = (typeof FEATURE_MODES)[number];
 
 export const PLANNING_OUTCOMES = ["ready", "needs_clarification", "unsupported"] as const;

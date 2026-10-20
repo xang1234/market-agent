@@ -10,7 +10,6 @@ import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { createSecBackedStatementRepository } from "../../fundamentals/src/sec-facts-repository.ts";
 import { secCompanyFetcher } from "../../fundamentals/test/fakes.ts";
-import type { ChatAnalystToolRuntime } from "../src/coordinator.ts";
 import { listChatMessagesForThread } from "../src/messages.ts";
 import { chatDatabase, chatHarness, completed, SEC_ISSUER } from "./financial-fixtures.ts";
 
@@ -72,8 +71,8 @@ test("a certified operating margin from SEC-ingested facts", { timeout: 300_000 
   for (const fiscal_period of ["FY", "Q2"] as const) {
     assert.ok(await statements.find({ issuer_id: SEC_ISSUER, family: "income", basis: "as_reported", fiscal_year: 2023, fiscal_period }));
   }
-  const ask = (fiscalPeriod: "FY" | "Q2", options: { fiscalYear?: number; mode?: "shadow"; analyst?: ChatAnalystToolRuntime } = {}) =>
-    chatHarness(pool, { model: operatingMarginModel(fiscalPeriod, options.fiscalYear), ...(options.mode ? { mode: options.mode } : {}), ...(options.analyst ? { analyst: options.analyst } : {}) })
+  const ask = (fiscalPeriod: "FY" | "Q2", options: { fiscalYear?: number } = {}) =>
+    chatHarness(pool, { model: operatingMarginModel(fiscalPeriod, options.fiscalYear) })
       .run({ threadId, userId: IDS.owner, userIntent: `What was OPM's operating margin for ${fiscalPeriod} ${options.fiscalYear ?? 2023}?` });
   const certified = async (messageId: unknown) => {
     const read = await listChatMessagesForThread(pool, { thread_id: threadId, user_id: IDS.owner });
@@ -119,17 +118,5 @@ test("a certified operating margin from SEC-ingested facts", { timeout: 300_000 
       { input_slot: "oi", gap_reason: "missing_input", fiscal_period: null, provider: null },
       { input_slot: "rev", gap_reason: "missing_input", fiscal_period: null, provider: null },
     ]);
-  });
-
-  await t.test("shadow mode plans the margin but the narrative analyst still answers", async () => {
-    let analystCalls = 0;
-    const analyst: ChatAnalystToolRuntime = () => {
-      analystCalls += 1;
-      return { snapshot_id: randomUUID(), blocks: [], verification: { ok: true } };
-    };
-    const before = (await db.query(`select count(*)::int as n from chat_messages where thread_id = $1`, [threadId])).rows[0].n;
-    await ask("FY", { mode: "shadow", analyst });
-    assert.equal(analystCalls, 1);
-    assert.equal((await db.query(`select count(*)::int as n from chat_messages where thread_id = $1`, [threadId])).rows[0].n, before, "no certified message is written in shadow mode");
   });
 });

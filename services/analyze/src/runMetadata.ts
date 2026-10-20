@@ -14,7 +14,7 @@ export type AnalyzeRunMetadataSubjectRef = {
  * read from committed financial records.
  */
 export type AnalyzeRunFinancialMetadata = {
-  mode: "shadow" | "enforce";
+  mode: "enforce";
   knowledge_cutoff: string;
   reporting_basis: "as_reported" | "as_restated";
   catalog_version: string;
@@ -80,7 +80,9 @@ export function parseAnalyzeRunMetadata(value: unknown): AnalyzeRunMetadataV1 {
     source_categories: expectStringArray(value.source_categories, "source_categories"),
     subject_refs: expectSubjectRefs(value.subject_refs),
     rerun_of_run_id: typeof value.rerun_of_run_id === "string" ? value.rerun_of_run_id : undefined,
-    financial: value.financial === undefined ? undefined : (value.financial as AnalyzeRunFinancialMetadata),
+    financial: value.financial === undefined || (isRecord(value.financial) && value.financial.mode === "shadow")
+      ? undefined
+      : (value.financial as AnalyzeRunFinancialMetadata),
   });
 }
 
@@ -93,7 +95,7 @@ export function withRerunOfRunId(metadata: AnalyzeRunMetadataV1, runId: string):
 
 function parseFinancialMetadata(value: unknown): AnalyzeRunFinancialMetadata {
   if (!isRecord(value)) throw new AnalyzeRunMetadataError("financial must be an object");
-  if (value.mode !== "shadow" && value.mode !== "enforce") throw new AnalyzeRunMetadataError("financial.mode is invalid");
+  if (value.mode !== "enforce") throw new AnalyzeRunMetadataError("financial.mode is invalid");
   if (value.reporting_basis !== "as_reported" && value.reporting_basis !== "as_restated") {
     throw new AnalyzeRunMetadataError("financial.reporting_basis is invalid");
   }

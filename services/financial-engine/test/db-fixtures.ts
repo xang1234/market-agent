@@ -257,13 +257,13 @@ export function marginPlan(options: Pick<PlanOptions, "cutoff"> = {}): Financial
   return validated.value;
 }
 
-export function authorityFor(owner: string = IDS.owner, overrides: { mode?: "off" | "shadow" | "enforce"; lease?: { epoch: number; fence_token: string } | null } = {}): FinancialRuntimeAuthority {
+export function authorityFor(owner: string = IDS.owner, overrides: { mode?: "off" | "enforce"; lease?: { epoch: number; fence_token: string } | null } = {}): FinancialRuntimeAuthority {
   return createRuntimeAuthority({
     owner_user_id: owner,
     egress_channel: "chat",
     parent: { kind: "chat_thread", id: IDS.parent, version: "1" },
     allowed_source_classes: ["sec_filing"],
-    feature: { surface: "chat", capability: "financial-answer", mode: overrides.mode ?? "shadow" },
+    feature: { surface: "chat", capability: "financial-answer", mode: overrides.mode ?? "enforce" },
     approval_state: "not_required",
     lease: overrides.lease ?? null,
   });

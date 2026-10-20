@@ -80,7 +80,6 @@ test("grid financial recovery", { timeout: 300_000 }, async (t) => {
       user_id: IDS.owner,
       grid_run_id: runId,
       knowledge_cutoff: CUTOFF,
-      mode: "enforce",
       rows: detail.rows.map((row) => ({ rowNumber: row.row_number, subject: row.subject_ref })),
       instances: detail.run.column_instances!,
     });

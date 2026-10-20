@@ -122,14 +122,13 @@ export type GridFinancialRun = Readonly<{
   grid_run_id: string;
   /** The run's pinned cutoff (grid_runs.as_of). */
   knowledge_cutoff: string;
-  mode: "shadow" | "enforce";
   rows: ReadonlyArray<Readonly<{ rowNumber: number; subject: SubjectRef }>>;
   /** The run's frozen numerical column instances. */
   instances: ReadonlyArray<ColumnInstance>;
 }>;
 
-/** The run was driven, shadow mode only planned it, or the engine's reason it did not publish. */
-export type GridFinancialOutcome = "published" | "planned" | RequestGap;
+/** The run was driven, or the engine's reason it did not publish. */
+export type GridFinancialOutcome = "published" | RequestGap;
 
 // Cells another worker or the recovery worker still owes stay pending for them.
 const STILL_OWED: ReadonlySet<GridFinancialOutcome> = new Set(["run_in_progress", "publication_failed"]);
@@ -151,7 +150,7 @@ export async function publishGridFinancialCells(deps: GridFinancialDeps, run: Gr
     if (!column) continue;
     for (const row of run.rows) {
       if ("unsupported" in column || row.subject.kind !== "issuer") {
-        if (run.mode === "enforce") await write(row.rowNumber, instance, unsupportedCell("unsupported" in column ? column.unsupported : "subject_not_an_issuer"));
+        await write(row.rowNumber, instance, unsupportedCell("unsupported" in column ? column.unsupported : "subject_not_an_issuer"));
         continue;
       }
       computed.push({ rowNumber: row.rowNumber, subject: { kind: "issuer", id: row.subject.id }, instance, column, params: parseFinancialColumnParams(instance.column_key, instance.params) });
@@ -159,11 +158,10 @@ export async function publishGridFinancialCells(deps: GridFinancialDeps, run: Gr
   }
   if (computed.length === 0) return "published";
 
-  const authority = gridAuthority(run.user_id, run.grid_run_id, run.mode);
+  const authority = gridAuthority(run.user_id, run.grid_run_id);
   const request = await publishRequest(deps.pool, {
     authority,
     request_key: run.grid_run_id,
-    mode: run.mode,
     plan: async (planDb) => {
       const shape = planShape(computed);
       return buildDeterministicPlan(await planningContext(planDb, run, authority, computed), shape.draft, shape.units);
@@ -172,7 +170,7 @@ export async function publishGridFinancialCells(deps: GridFinancialDeps, run: Gr
     persistParent: persistGridCell,
   });
   const outcome = gridOutcome(request);
-  if (outcome === "planned" || STILL_OWED.has(outcome)) return outcome;
+  if (STILL_OWED.has(outcome)) return outcome;
   // Whatever the engine did not publish is a declared gap; a driven run's unsealed cell was refused at finalization.
   for (const cell of computed) await write(cell.rowNumber, cell.instance, gapCell(outcome === "published" ? "verification_failed" : outcome));
   return outcome;
@@ -187,7 +185,7 @@ export function gridFinancialRecovery(db: SqlExecutor): ParentRecovery {
         [run.parent_id],
       )).rows[0];
       if (!grid || grid.user_id !== run.user_id || grid.financial_mode !== "enforce") return null;
-      return gridAuthority(grid.user_id, run.parent_id, "enforce");
+      return gridAuthority(grid.user_id, run.parent_id);
     },
     persistParent: persistGridCell,
   };
@@ -195,14 +193,14 @@ export function gridFinancialRecovery(db: SqlExecutor): ParentRecovery {
 
 // ---------------------------------------------------------------------------
 
-function gridAuthority(userId: string, gridRunId: string, mode: "shadow" | "enforce"): FinancialRuntimeAuthority {
+function gridAuthority(userId: string, gridRunId: string): FinancialRuntimeAuthority {
   return createRuntimeAuthority({
     owner_user_id: userId,
     egress_channel: "analyst_grid",
     // The run is the parent; its columns and rows were frozen when it started.
     parent: { kind: "analyst_grid_run", id: gridRunId, version: PARENT_VERSION },
     allowed_source_classes: ["sec_filing"],
-    feature: { surface: "analyst_grid", capability: "financial-column", mode },
+    feature: { surface: "analyst_grid", capability: "financial-column", mode: "enforce" },
     approval_state: "not_required",
     lease: null,
   });
@@ -309,8 +307,6 @@ function gridOutcome(request: RequestOutcome): GridFinancialOutcome {
   switch (request.status) {
     case "driven":
       return "published";
-    case "planned":
-      return "planned";
     case "gap":
       return request.reason;
     case "clarification":

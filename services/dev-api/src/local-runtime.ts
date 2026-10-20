@@ -257,9 +257,6 @@ export async function buildAnalyzeRunSeals(input: {
   };
 }
 
-// Verified numerical memo sections, enabled by ANALYZE_FINANCIAL_MODE
-// (off | shadow | enforce; default off). Peers are resolved once when the memo
-// starts and frozen in its metadata.
 const ANALYZE_FINANCIAL_PEER_LIMIT = 5;
 
 const financialModes = loadFinancialModes(process.env);

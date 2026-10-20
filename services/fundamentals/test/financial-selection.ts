@@ -58,7 +58,7 @@ function authority() {
     egress_channel: "chat",
     parent: { kind: "chat_thread", id: "34000000-0000-4000-8000-0000000000f1", version: "1" },
     allowed_source_classes: ["sec_filing"],
-    feature: { surface: "chat", capability: "financial-answer", mode: "shadow" },
+    feature: { surface: "chat", capability: "financial-answer", mode: "enforce" },
     approval_state: "not_required",
     lease: null,
   });

@@ -58,10 +58,9 @@ export type ChatFinancialTurn =
 export type ChatFinancialTurnContext = ChatTurnRunContext & { clarificationAnswer?: ChatClarificationAnswer };
 
 export type ChatFinancialRuntime = Readonly<{
-  mode: ChatFinancialMode;
   /** Whether this lane takes the turn. Cheap and synchronous, so the stream can say so before any work. */
   answers(context: ChatFinancialTurnContext): boolean;
-  /** The lane's outcome; null in shadow mode, where the narrative analyst still answers. */
+  /** The lane's outcome; null when the lane does not take the turn. */
   run(context: ChatFinancialTurnContext): Promise<ChatFinancialTurn | null>;
   /** Throws unless verified finance is ready; the server awaits it before serving turns with the lane on. */
   assertReady(): Promise<void>;
@@ -103,7 +102,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     if (!answers(context)) return null;
     const text = context.userIntent!;
     const turnId = context.turnId ?? context.runId;
-    const authority = chatAuthority(context.userId!, context.threadId, turnId, deps.mode);
+    const authority = chatAuthority(context.userId!, context.threadId, turnId);
 
     const messageId = financialMessageId(context.threadId, turnId);
     // The scope only informs follow-ups: failing to resolve it never fails the answer.
@@ -117,8 +116,6 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     const outcome = await publishRequest(deps.pool, {
       authority,
       request_key: turnId,
-      // Shadow mode validates that the request plans; the narrative analyst still answers it.
-      mode: deps.mode === "shadow" ? "shadow" : "enforce",
       // Planning runs on the client publishRequest has checked out; a second
       // pool acquire here could wait forever on a one-connection pool.
       plan: (db) => planTurn(deps, db, context, text, authority, new Date()),
@@ -126,8 +123,6 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       persistParent: persistAssistantMessage(context.threadId, messageId, scope, { authority, request_key: turnId }),
     });
     switch (outcome.status) {
-      case "planned":
-        return null;
       case "clarification":
         return { kind: "clarification", clarification: outcome.clarification };
       case "gap":
@@ -144,7 +139,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     }
   };
   const assertReady = () => requireFinancialReadiness(deps.pool, deps.mode === "off" ? [] : ["chat"]);
-  return Object.freeze({ mode: deps.mode, answers, run, assertReady });
+  return Object.freeze({ answers, run, assertReady });
 }
 
 // The mentions a turn's plan requests: an explicit subject (a thread opened
@@ -324,14 +319,14 @@ function sameRef(left: FinancialSubjectRef, right: FinancialSubjectRef): boolean
   return left.kind === right.kind && left.id === right.id;
 }
 
-function chatAuthority(userId: string, threadId: string, turnId: string, mode: ChatFinancialMode): FinancialRuntimeAuthority {
+function chatAuthority(userId: string, threadId: string, turnId: string): FinancialRuntimeAuthority {
   return createRuntimeAuthority({
     owner_user_id: userId,
     egress_channel: "chat",
     // Each turn is its own request; a later turn never edits an earlier answer.
     parent: { kind: "chat_thread", id: threadId, version: `turn:${turnId}` },
     allowed_source_classes: ["sec_filing"],
-    feature: { surface: "chat", capability: "financial-answer", mode },
+    feature: { surface: "chat", capability: "financial-answer", mode: "enforce" },
     approval_state: "not_required",
     lease: null,
   });

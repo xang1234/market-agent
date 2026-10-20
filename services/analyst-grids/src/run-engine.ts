@@ -146,17 +146,12 @@ export async function startGridRun(
   return { runId, status: "pending" };
 }
 
-/**
- * Which columns the run's producers compute and which the engine does, decided
- * once when the run starts. Enforced: numerical columns are the engine's alone.
- * Shadow: producers compute everything and the engine only plans the numerical
- * columns. Off: producers compute everything.
- */
 function routeColumns(columns: ReadonlyArray<RunColumn>, mode: GridFinancialMode): { producer: RunColumn[]; engine: ColumnInstance[] } {
+  if (mode === "off") return { producer: [...columns], engine: [] };
   const numerical = columns.filter((column) => isFinancialColumn(column.entry.column_key));
   return {
-    producer: mode === "enforce" ? columns.filter((column) => !numerical.includes(column)) : [...columns],
-    engine: mode === "off" ? [] : numerical.map((column) => column.instance),
+    producer: columns.filter((column) => !numerical.includes(column)),
+    engine: numerical.map((column) => column.instance),
   };
 }
 
@@ -198,7 +193,6 @@ async function runWorker(
         user_id: ctx.userId,
         grid_run_id: ctx.runId,
         knowledge_cutoff: ctx.asOf,
-        mode: deps.financial.mode,
         rows: ctx.rows.map(({ rowNumber, subject }) => ({ rowNumber, subject })),
         instances: route.engine,
       });

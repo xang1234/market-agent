@@ -112,7 +112,6 @@ export async function evaluateSavedRule(deps: SavedRuleDeps, request: SavedRuleR
   const outcome = await publishRequest(deps.pool, {
     authority: request.authority,
     request_key: request.request_key,
-    mode: "enforce",
     plan: async (db) => buildDeterministicPlan(
       {
         plan_id: randomUUID(),
@@ -143,8 +142,6 @@ export async function evaluateSavedRule(deps: SavedRuleDeps, request: SavedRuleR
     case "gap":
       return unresolved(outcome.reason);
     case "clarification":
-    case "planned":
-      // A deterministic enforce-mode plan never asks or stops at planning.
       return unresolved("configuration_needed");
   }
 }

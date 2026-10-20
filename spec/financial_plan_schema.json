@@ -485,7 +485,7 @@
           "properties": {
             "surface": { "$ref": "#/$defs/Surface" },
             "capability": { "$ref": "#/$defs/VersionTag" },
-            "mode": { "enum": ["off", "shadow", "enforce"] }
+            "mode": { "enum": ["off", "enforce"] }
           }
         },
         "approval_state": { "enum": ["approved", "not_required"] },

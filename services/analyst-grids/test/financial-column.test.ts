@@ -118,6 +118,13 @@ test("grid financial columns", { timeout: 300_000 }, async (t) => {
     assert.equal((await db.query(`select count(*)::int as n from financial_runs where parent_id = $1`, [runId])).rows[0].n, 0);
   });
 
+  await t.test("a run started in the deleted shadow mode reads as a run without the lane", async () => {
+    const { runId } = await startRun(pool, { asOf: CUTOFF, columns: [{ column_key: "latest_revenue" }] });
+    assert.equal((await waitForRun(pool, runId, settled)).run.financial_mode, "enforce");
+    await db.query(`update grid_runs set financial_mode = 'shadow' where grid_run_id = $1`, [runId]);
+    assert.equal((await waitForRun(pool, runId, settled)).run.financial_mode, null);
+  });
+
   await t.test("an erased run leaves its cells as explicit gaps with no value, and deleting the grid run erases its runs", async () => {
     const { runId } = await startRun(pool, { columns: [{ column_key: "latest_revenue" }] });
     await waitForRun(pool, runId, settled);

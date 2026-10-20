@@ -32,7 +32,7 @@ function context(overrides: Partial<PlanningContext> = {}): PlanningContext {
       egress_channel: "chat",
       parent: { kind: "chat_thread", id: "5ccccccc-cccc-4ccc-8ccc-cccccccccccc", version: "3" },
       allowed_source_classes: ["sec_filing"],
-      feature: { surface: "chat", capability: "financial-answer", mode: "shadow" },
+      feature: { surface: "chat", capability: "financial-answer", mode: "enforce" },
       approval_state: "not_required",
       lease: null,
     }),

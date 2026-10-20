@@ -18,7 +18,6 @@ const host = process.env.HOST ?? "127.0.0.1";
 const pool = new Pool({ connectionString: databaseUrl });
 const reader = await createReaderColumnDepsFromEnv();
 if (!reader) console.log("analyst-grids: reader columns disabled (LLM or S3 env not configured)");
-// Verified numerical columns: GRID_FINANCIAL_MODE = off (default) | shadow | enforce.
 const financialMode = parseFinancialMode(process.env.GRID_FINANCIAL_MODE, "GRID_FINANCIAL_MODE");
 // With the lane on, the server does not start until verified finance is ready.
 await requireFinancialReadiness(pool, financialMode === "off" ? [] : ["grid"]);

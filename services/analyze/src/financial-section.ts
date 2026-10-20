@@ -146,15 +146,14 @@ export type AnalyzeFinancialRun = Readonly<{
 /**
  * Plans, executes, and publishes the memo's numerical sections. Idempotent: a
  * retry resumes the saved plan and run; sections already sealed are reported
- * from their committed rows and never published twice. In shadow mode the plan
- * is only validated. The result is always read back from committed state.
+ * from their committed rows and never published twice. The result is always
+ * read back from committed state.
  */
 export async function publishAnalyzeFinancialSections(deps: AnalyzeFinancialDeps, run: AnalyzeFinancialRun): Promise<AnalyzeFinancialSections> {
-  const authority = analyzeAuthority(run.user_id, run.analyze_run_id, run.template_id, run.template_version, run.context.mode);
+  const authority = analyzeAuthority(run.user_id, run.analyze_run_id, run.template_id, run.template_version);
   const outcome = await publishRequest(deps.pool, {
     authority,
     request_key: run.analyze_run_id,
-    mode: run.context.mode,
     plan: async (db) => {
       const shape = planShape(run.context);
       return buildDeterministicPlan(await planningContext(db, run, authority), shape.draft, shape.units);
@@ -162,7 +161,6 @@ export async function publishAnalyzeFinancialSections(deps: AnalyzeFinancialDeps
     evidence: deps.evidence,
     persistParent: persistMemoSection,
   });
-  if (outcome.status === "planned") return { coverage: "none", sections: [] };
   const optional = (await loadMemoRun(deps.pool, run.analyze_run_id))?.optional_sections ?? new Set<string>();
   switch (outcome.status) {
     case "driven":
@@ -189,7 +187,7 @@ export function analyzeFinancialRecovery(db: SqlExecutor): ParentRecovery {
     async authority(run: RunRecord) {
       const memo = await loadMemoRun(db, run.parent_id);
       if (!memo || memo.user_id !== run.user_id || memo.context?.mode !== "enforce") return null;
-      return analyzeAuthority(memo.user_id, run.parent_id, memo.template_id, memo.template_version, "enforce");
+      return analyzeAuthority(memo.user_id, run.parent_id, memo.template_id, memo.template_version);
     },
     persistParent: persistMemoSection,
   };
@@ -197,14 +195,14 @@ export function analyzeFinancialRecovery(db: SqlExecutor): ParentRecovery {
 
 // ---------------------------------------------------------------------------
 
-function analyzeAuthority(userId: string, analyzeRunId: string, templateId: string, templateVersion: number, mode: "shadow" | "enforce"): FinancialRuntimeAuthority {
+function analyzeAuthority(userId: string, analyzeRunId: string, templateId: string, templateVersion: number): FinancialRuntimeAuthority {
   return createRuntimeAuthority({
     owner_user_id: userId,
     egress_channel: "analyze",
     // The memo run is the parent; its template version is pinned for the run's life.
     parent: { kind: "analyze_memo_run", id: analyzeRunId, version: `template:${templateId}:v${templateVersion}` },
     allowed_source_classes: ["sec_filing"],
-    feature: { surface: "analyze", capability: "financial-section", mode },
+    feature: { surface: "analyze", capability: "financial-section", mode: "enforce" },
     approval_state: "not_required",
     lease: null,
   });
