@@ -121,9 +121,11 @@ export function diffAnalyzeRuns(
   before: AnalyzeRunDetail,
   after: AnalyzeRunDetail,
 ): AnalyzeRunDiff {
-  const beforeRows = blockRows(before.blocks)
-  const afterRows = blockRows(after.blocks)
-  const keys = orderedBlockKeys(before.blocks, after.blocks)
+  const beforeBlocks = [...before.blocks, ...financialSectionBlocks(before.financial_sections)]
+  const afterBlocks = [...after.blocks, ...financialSectionBlocks(after.financial_sections)]
+  const beforeRows = blockRows(beforeBlocks)
+  const afterRows = blockRows(afterBlocks)
+  const keys = orderedBlockKeys(beforeBlocks, afterBlocks)
   return {
     summary: diffSummary(before, after),
     rows: keys.map((key) => {
@@ -182,6 +184,26 @@ function metadataRecord(metadata: AnalyzeRunDetail['run_metadata']): Record<stri
 
 function numberValue(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+// Each engine section compares as one block under its section id, by what it
+// presents: every run reseals it under a new run, certificate and cutoff.
+function financialSectionBlocks(sections: AnalyzeFinancialSections | undefined): ReadonlyArray<Record<string, unknown>> {
+  return (sections?.sections ?? []).map((section) => ({
+    kind: 'financial_section',
+    title: section.section_id.replaceAll('_', ' '),
+    data_ref: { params: { playbook_section_id: section.section_id } },
+    presented: section.status === 'published' ? presentedFinancialContent(section.block) : { gap: section.reason_code },
+  }))
+}
+
+function presentedFinancialContent(block: Record<string, unknown>): unknown {
+  const financial = isRecord(block.financial) ? block.financial : {}
+  const results = Array.isArray(financial.results) ? financial.results.filter(isRecord) : []
+  return {
+    coverage: isRecord(financial.coverage) ? financial.coverage.state : null,
+    results: results.map((result) => ({ output_id: result.output_id, disposition: result.disposition, presented: result.presented })),
+  }
 }
 
 type DiffBlockRow = {

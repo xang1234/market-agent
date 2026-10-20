@@ -39,6 +39,7 @@ import type { AnalyzePlaybook } from "../../analyze/src/playbook.ts";
 import {
   shareArtifactToChat,
   type ShareableArtifactBlock,
+  type ShareToChatResult,
 } from "../../artifact/src/index.ts";
 import {
   persistImportedArtifactMessage,
@@ -486,7 +487,7 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
       const run = await getAnalyzeTemplateRunForUser(deps.db, { userId, runId });
       if (run === null) throw new DevApiHttpError(404, "analyze run not found");
       const blocks = enrichAnalyzeRunBlocks(run.blocks, run);
-      const shared = await shareArtifactToChat({
+      const shared = acceptedShare(await shareArtifactToChat({
         sources: [
           {
             source_kind: "memo",
@@ -495,10 +496,18 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
           },
         ],
         egress: { db: deps.db },
-      });
-      if (!shared.ok) throw new DevApiHttpError(422, "artifact share rejected", shared.rejections);
+      }));
       const snapshotId = shared.origin_snapshot_ids[0];
       if (snapshotId === undefined) throw new DevApiHttpError(422, "artifact share rejected");
+      // Each engine section is sealed under its own certificate and shared
+      // under it, so erasing the financial run also erases the chat copy.
+      const sections = (await loadAnalyzeFinancialSections(deps.db, { userId, analyzeRunId: run.run_id }))?.sections ?? [];
+      const sectionShares = await Promise.all(sections.flatMap((section) => section.status === "published"
+        ? [shareArtifactToChat({
+            sources: [{ source_kind: "block", origin_snapshot_id: section.snapshot_id, blocks: [section.block] }],
+            egress: { db: deps.db },
+          }).then(acceptedShare)]
+        : []));
 
       const client = await deps.db.connect();
       try {
@@ -516,11 +525,21 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
           content_hash: contentHash(shared.blocks as JsonValue),
         });
         if (message === null) throw new DevApiHttpError(404, "chat thread not found");
+        for (const section of sectionShares) {
+          await persistImportedArtifactMessage(client, {
+            thread_id: thread.thread_id,
+            user_id: userId,
+            role: "assistant",
+            snapshot_id: section.origin_snapshot_ids[0]!,
+            blocks: section.blocks as JsonValue,
+            content_hash: contentHash(section.blocks as JsonValue),
+          });
+        }
         await client.query("commit");
         return {
           thread,
           message,
-          origin_snapshot_ids: shared.origin_snapshot_ids,
+          origin_snapshot_ids: [...shared.origin_snapshot_ids, ...sectionShares.flatMap((section) => section.origin_snapshot_ids)],
         };
       } catch (error) {
         try {
@@ -536,6 +555,11 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
       }
     },
   };
+}
+
+function acceptedShare(result: ShareToChatResult): Extract<ShareToChatResult, { ok: true }> {
+  if (!result.ok) throw new DevApiHttpError(422, "artifact share rejected", result.rejections);
+  return result;
 }
 
 const DEFAULT_ANALYZE_RUN_LIMIT = 25;
