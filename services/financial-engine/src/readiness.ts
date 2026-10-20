@@ -1,5 +1,6 @@
-// Whether this deployment may run verified finance at all. Every surface's
-// enforce mode needs the schema the engine writes through, the
+// Whether this deployment may run verified finance at all. Every surface on the
+// engine (thesis, Discovery, and grids always; chat and analyze in enforce mode)
+// needs the schema the engine writes through, the
 // evidence views its adapter reads, and a version registry that covers what
 // this build emits. A missing piece blocks startup with the reasons; it never
 // quietly leaves a surface on legacy numbers while it claims to be enforced.
@@ -60,7 +61,7 @@ export async function checkFinancialReadiness(db: SqlExecutor, registry: Financi
 }
 
 /**
- * Refuses to start the named surfaces (those in enforce mode, or a
+ * Refuses to start the named surfaces (those on the engine, or a
  * recovery worker) unless verified finance is ready. With none, nothing is checked.
  */
 export async function requireFinancialReadiness(
