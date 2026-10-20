@@ -1,6 +1,38 @@
 {
   "replies": [
     {
+      "match": "Request: Break down NVDA's revenue by segment\nRequested",
+      "text": "{\"outcome\":\"unsupported\",\"reason\":\"segment revenue has no approved definition\"}"
+    },
+    {
+      "match": "Request: Why did AMD's operating margin turn negative in Q2 2025?\nRequested",
+      "text": "{\"outcome\":\"ready\",\"subjects\":[{\"slot_id\":\"a\",\"mention\":\"AMD\"}],\"operations\":[{\"node_id\":\"a_oi\",\"operation\":\"reported_metric\",\"subject_slot\":\"a\",\"metric_key\":\"operating_income\",\"period\":{\"kind\":\"fiscal_period\",\"fiscal_year\":2025,\"fiscal_period\":\"Q2\"}},{\"node_id\":\"a_rev\",\"operation\":\"reported_metric\",\"subject_slot\":\"a\",\"metric_key\":\"revenue\",\"period\":{\"kind\":\"fiscal_period\",\"fiscal_year\":2025,\"fiscal_period\":\"Q2\"}},{\"node_id\":\"a_om\",\"operation\":\"operating_margin\",\"numerator\":\"a_oi\",\"revenue\":\"a_rev\"}],\"outputs\":[{\"output_id\":\"out_a_om\",\"node_id\":\"a_om\"}],\"thresholds\":[]}"
+    },
+    {
+      "match": "Request: What was AMD's revenue in Q2 2019?\nRequested",
+      "text": "{\"outcome\":\"ready\",\"subjects\":[{\"slot_id\":\"a\",\"mention\":\"AMD\"}],\"operations\":[{\"node_id\":\"a_rev\",\"operation\":\"reported_metric\",\"subject_slot\":\"a\",\"metric_key\":\"revenue\",\"period\":{\"kind\":\"fiscal_period\",\"fiscal_year\":2019,\"fiscal_period\":\"Q2\"}}],\"outputs\":[{\"output_id\":\"out_a_rev\",\"node_id\":\"a_rev\"}],\"thresholds\":[]}"
+    },
+    {
+      "match": "Request: Break down AMD's revenue by segment\nRequested",
+      "text": "{\"outcome\":\"unsupported\",\"reason\":\"segment revenue has no approved definition\"}"
+    },
+    {
+      "match": "Request: Break down NVDA's revenue by segment and show its operating margin trend\nRequested",
+      "text": "{\"outcome\":\"unsupported\",\"reason\":\"segment revenue has no approved definition\"}"
+    },
+    {
+      "match": "Request: Break down NVDA's revenue by segment and show its gross margin\nRequested",
+      "text": "{\"outcome\":\"unsupported\",\"reason\":\"segment revenue has no approved definition\"}"
+    },
+    {
+      "match": "Request: What is AMD's free cash flow?\nRequested",
+      "text": "{\"outcome\":\"ready\",\"subjects\":[{\"slot_id\":\"a\",\"mention\":\"AMD\"}],\"operations\":[{\"node_id\":\"a_ocf\",\"operation\":\"reported_metric\",\"subject_slot\":\"a\",\"metric_key\":\"operating_cash_flow\",\"period\":{\"kind\":\"latest\",\"period_type\":\"annual\",\"offset\":0}},{\"node_id\":\"a_capex\",\"operation\":\"reported_metric\",\"subject_slot\":\"a\",\"metric_key\":\"capex\",\"period\":{\"kind\":\"latest\",\"period_type\":\"annual\",\"offset\":0}},{\"node_id\":\"a_fcf\",\"operation\":\"free_cash_flow\",\"operating_cash_flow\":\"a_ocf\",\"capex\":\"a_capex\"}],\"outputs\":[{\"output_id\":\"out_a_fcf\",\"node_id\":\"a_fcf\"}],\"thresholds\":[]}"
+    },
+    {
+      "match": "Request: Compare NVDA, AMD and AAPL revenue and margins YTD against the S&P 500\nRequested",
+      "text": "{\"outcome\":\"ready\",\"subjects\":[{\"slot_id\":\"a\",\"mention\":\"NVDA\"},{\"slot_id\":\"b\",\"mention\":\"AMD\"},{\"slot_id\":\"c\",\"mention\":\"AAPL\"}],\"operations\":[{\"node_id\":\"a_rev\",\"operation\":\"reported_metric\",\"subject_slot\":\"a\",\"metric_key\":\"revenue\",\"period\":{\"kind\":\"latest\",\"period_type\":\"annual\",\"offset\":0}},{\"node_id\":\"a_gp\",\"operation\":\"reported_metric\",\"subject_slot\":\"a\",\"metric_key\":\"gross_profit\",\"period\":{\"kind\":\"latest\",\"period_type\":\"annual\",\"offset\":0}},{\"node_id\":\"a_oi\",\"operation\":\"reported_metric\",\"subject_slot\":\"a\",\"metric_key\":\"operating_income\",\"period\":{\"kind\":\"latest\",\"period_type\":\"annual\",\"offset\":0}},{\"node_id\":\"a_ni\",\"operation\":\"reported_metric\",\"subject_slot\":\"a\",\"metric_key\":\"net_income\",\"period\":{\"kind\":\"latest\",\"period_type\":\"annual\",\"offset\":0}},{\"node_id\":\"a_gm\",\"operation\":\"gross_margin\",\"numerator\":\"a_gp\",\"revenue\":\"a_rev\"},{\"node_id\":\"a_om\",\"operation\":\"operating_margin\",\"numerator\":\"a_oi\",\"revenue\":\"a_rev\"},{\"node_id\":\"a_nm\",\"operation\":\"net_margin\",\"numerator\":\"a_ni\",\"revenue\":\"a_rev\"},{\"node_id\":\"b_rev\",\"operation\":\"reported_metric\",\"subject_slot\":\"b\",\"metric_key\":\"revenue\",\"period\":{\"kind\":\"latest\",\"period_type\":\"annual\",\"offset\":0}},{\"node_id\":\"b_gp\",\"operation\":\"reported_metric\",\"subject_slot\":\"b\",\"metric_key\":\"gross_profit\",\"period\":{\"kind\":\"latest\",\"period_type\":\"annual\",\"offset\":0}},{\"node_id\":\"b_oi\",\"operation\":\"reported_metric\",\"subject_slot\":\"b\",\"metric_key\":\"operating_income\",\"period\":{\"kind\":\"latest\",\"period_type\":\"annual\",\"offset\":0}},{\"node_id\":\"b_ni\",\"operation\":\"reported_metric\",\"subject_slot\":\"b\",\"metric_key\":\"net_income\",\"period\":{\"kind\":\"latest\",\"period_type\":\"annual\",\"offset\":0}},{\"node_id\":\"b_gm\",\"operation\":\"gross_margin\",\"numerator\":\"b_gp\",\"revenue\":\"b_rev\"},{\"node_id\":\"b_om\",\"operation\":\"operating_margin\",\"numerator\":\"b_oi\",\"revenue\":\"b_rev\"},{\"node_id\":\"b_nm\",\"operation\":\"net_margin\",\"numerator\":\"b_ni\",\"revenue\":\"b_rev\"},{\"node_id\":\"c_rev\",\"operation\":\"reported_metric\",\"subject_slot\":\"c\",\"metric_key\":\"revenue\",\"period\":{\"kind\":\"latest\",\"period_type\":\"annual\",\"offset\":0}},{\"node_id\":\"c_gp\",\"operation\":\"reported_metric\",\"subject_slot\":\"c\",\"metric_key\":\"gross_profit\",\"period\":{\"kind\":\"latest\",\"period_type\":\"annual\",\"offset\":0}},{\"node_id\":\"c_oi\",\"operation\":\"reported_metric\",\"subject_slot\":\"c\",\"metric_key\":\"operating_income\",\"period\":{\"kind\":\"latest\",\"period_type\":\"annual\",\"offset\":0}},{\"node_id\":\"c_ni\",\"operation\":\"reported_metric\",\"subject_slot\":\"c\",\"metric_key\":\"net_income\",\"period\":{\"kind\":\"latest\",\"period_type\":\"annual\",\"offset\":0}},{\"node_id\":\"c_gm\",\"operation\":\"gross_margin\",\"numerator\":\"c_gp\",\"revenue\":\"c_rev\"},{\"node_id\":\"c_om\",\"operation\":\"operating_margin\",\"numerator\":\"c_oi\",\"revenue\":\"c_rev\"},{\"node_id\":\"c_nm\",\"operation\":\"net_margin\",\"numerator\":\"c_ni\",\"revenue\":\"c_rev\"}],\"outputs\":[{\"output_id\":\"out_a_rev\",\"node_id\":\"a_rev\"},{\"output_id\":\"out_a_gm\",\"node_id\":\"a_gm\"},{\"output_id\":\"out_a_om\",\"node_id\":\"a_om\"},{\"output_id\":\"out_a_nm\",\"node_id\":\"a_nm\"},{\"output_id\":\"out_b_rev\",\"node_id\":\"b_rev\"},{\"output_id\":\"out_b_gm\",\"node_id\":\"b_gm\"},{\"output_id\":\"out_b_om\",\"node_id\":\"b_om\"},{\"output_id\":\"out_b_nm\",\"node_id\":\"b_nm\"},{\"output_id\":\"out_c_rev\",\"node_id\":\"c_rev\"},{\"output_id\":\"out_c_gm\",\"node_id\":\"c_gm\"},{\"output_id\":\"out_c_om\",\"node_id\":\"c_om\"},{\"output_id\":\"out_c_nm\",\"node_id\":\"c_nm\"}],\"thresholds\":[]}"
+    },
+    {
       "match": "Question: \"Analyze NVDA\"",
       "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[]}"
     },
