@@ -1068,8 +1068,8 @@ test("recapture runs under its own Compose project, not the dev one, and removes
   const { result, lines, checkout } = await traceRecapture();
   assert.equal(result.code, 0, result.stderr);
   // Compose names a checkout's dev stack after its directory, lowercased.
-  const project = `${checkout.toLowerCase()}-recapture`;
-  assert.deepEqual(lines("up:"), [project]);
+  const [project] = lines("up:");
+  assert.match(project ?? "", new RegExp(`^${checkout.toLowerCase()}-recapture-\\d+$`));
   // A run killed before its cleanup left the project behind: the next one starts from nothing.
   assert.deepEqual(lines("compose:"), [`${project}:down -v --remove-orphans`, `${project}:down -v --remove-orphans`]);
   assert.deepEqual(lines("npm:"), ["web:run e2e"]);
@@ -1081,7 +1081,7 @@ test("recapture runs under its own Compose project, not the dev one, and removes
   assert.deepEqual(dev.lines("compose:"), ["<compose default>:stop minio", "<compose default>:up -d postgres"]);
 
   const named = await traceRecapture({ COMPOSE_PROJECT_NAME: "stack" });
-  assert.deepEqual(named.lines("up:"), ["stack-recapture"]);
+  assert.match(named.lines("up:")[0] ?? "", /^stack-recapture-\d+$/);
 });
 
 test("recapture replaces the committed fixture only once the fixture checks pass on the new one", async () => {
@@ -1098,13 +1098,13 @@ test("recapture replaces the committed fixture only once the fixture checks pass
   assert.deepEqual(rejected.lines("checks:"), [RECAPTURED]);
   assert.equal(rejected.committed, "committed\n", "the committed fixture is as it was");
   assert.match(rejected.result.stderr, /fixture checks failed/);
-  assert.match(rejected.lines("compose:").at(-1) ?? "", /-recapture:down -v --remove-orphans$/, "the stack is still removed");
+  assert.match(rejected.lines("compose:").at(-1) ?? "", /-recapture-\d+:down -v --remove-orphans$/, "the stack is still removed");
 
   const browserFailed = await traceRecapture({}, ["npm(){ return 1; }"]);
   assert.notEqual(browserFailed.result.code, 0);
   assert.deepEqual(browserFailed.lines("checks:"), []);
   assert.equal(browserFailed.committed, "committed\n");
-  assert.match(browserFailed.lines("compose:").at(-1) ?? "", /-recapture:down -v --remove-orphans$/);
+  assert.match(browserFailed.lines("compose:").at(-1) ?? "", /-recapture-\d+:down -v --remove-orphans$/);
 });
 
 test("recapture leaves another live recapture's stack alone, and takes over a dead one's lock", async () => {
@@ -1133,4 +1133,32 @@ test("recapture never starts the optional dev-providers sidecar, whatever the en
   assert.equal(result.code, 0, result.stderr);
   assert.equal(lines("services:").length, 1);
   assert.doesNotMatch(lines("services:")[0]!, /dev-providers/);
+});
+
+test("checkouts that share a directory name, or a COMPOSE_PROJECT_NAME, recapture under different projects", async () => {
+  const fixture = await createShellFixture();
+  const projects = async (preamble: string) => {
+    const result = await runBash(
+      [
+        "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh recapture",
+        preamble,
+        "ROOT=/one/market-agent; recapture_project; echo",
+        "ROOT=/two/market-agent; recapture_project; echo",
+        "ROOT=/one/market-agent; recapture_project; echo",
+      ].join("\n"),
+      fixture.root,
+    );
+    assert.equal(result.code, 0, result.stderr);
+    return result.stdout.trim().split("\n");
+  };
+  try {
+    const [one, two, again] = await projects("unset COMPOSE_PROJECT_NAME");
+    assert.match(one!, /^market-agent-recapture-\d+$/);
+    assert.notEqual(one, two, "a clone elsewhere gets its own project");
+    assert.equal(one, again, "the same checkout always gets the same project");
+    const [named, namedElsewhere] = await projects("COMPOSE_PROJECT_NAME=stack");
+    assert.notEqual(named, namedElsewhere);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
 });

@@ -837,7 +837,10 @@ GOLDEN_REPLAY_FILE="$ROOT/services/app/fixtures/golden-conversation.replay.json"
 # checkout directory's name as Compose normalizes it; the recapture stack is a sibling.
 recapture_project() {
   local name="${COMPOSE_PROJECT_NAME:-$(basename "$ROOT")}"
-  printf '%s-recapture' "$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')"
+  # The checkout's path, hashed: two clones named market-agent (or sharing a
+  # COMPOSE_PROJECT_NAME) must not share a project, since each holds only its own lock.
+  printf '%s-recapture-%s' "$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')" \
+    "$(printf '%s' "$ROOT" | cksum | cut -d' ' -f1)"
 }
 
 # What a replay fixture must pass, read from its committed path: the app and web suites,
