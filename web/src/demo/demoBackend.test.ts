@@ -33,7 +33,7 @@ test('eventDelays spreads content over the budget and gives heartbeats no time',
 })
 
 // This process's sessionStorage reads through `get` while `run` runs.
-function withSessionStorage(get: () => Storage, run: () => void) {
+function withSessionStorage(get: () => Storage | null, run: () => void) {
   const original = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage')
   Object.defineProperty(globalThis, 'sessionStorage', { get, configurable: true })
   try {
@@ -48,6 +48,7 @@ test('with site data blocked the replay keeps its session in memory, and other s
   withSessionStorage(() => {
     throw new DOMException('Access is denied for this document.', 'SecurityError')
   }, () => assert.equal(tabStore(), undefined))
+  withSessionStorage(() => null, () => assert.equal(tabStore(), undefined))
   withSessionStorage(() => {
     throw new TypeError('not a storage failure')
   }, () => assert.throws(tabStore, TypeError))

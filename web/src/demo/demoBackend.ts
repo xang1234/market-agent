@@ -41,22 +41,25 @@ export function installDemoBackend(store: ReplayStore | undefined): void {
 /** This tab's sessionStorage, which outlives a reload; none when the browser blocks the
  *  page's site data, so the replay keeps its session in memory for this page load. */
 export function tabStore(): ReplayStore | undefined {
-  let storage: Storage
+  let storage: Storage | null
   try {
     storage = sessionStorage
   } catch (error) {
     if (error instanceof DOMException && error.name === 'SecurityError') return undefined
     throw error
   }
+  // Firefox with storage disabled reads it as null instead of throwing.
+  if (storage === null) return undefined
+  const tab = storage
   return {
-    getItem: (key) => storage.getItem(key),
+    getItem: (key) => tab.getItem(key),
     setItem: (key, value) => {
       try {
-        storage.setItem(key, value)
+        tab.setItem(key, value)
       } catch (error) {
         if (!(error instanceof DOMException && error.name === 'QuotaExceededError')) throw error
         // The session saved before is now behind the page; a reload must not resume it.
-        storage.removeItem(key)
+        tab.removeItem(key)
       }
     },
   }

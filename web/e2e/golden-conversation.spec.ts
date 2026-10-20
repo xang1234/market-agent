@@ -67,8 +67,11 @@ test('golden conversation renders charts, metrics and inspectable sources, and s
   // held fetch or EventSource before the replay replaced them.
   const leakedToNetwork: string[] = []
   if (DEMO) {
-    await page.route('**/v1/**', (route) => {
-      leakedToNetwork.push(`${route.request().method()} ${route.request().url()}`)
+    await page.context().route('**/v1/**', (route) => {
+      const request = `${route.request().method()} ${route.request().url()}`
+      leakedToNetwork.push(request)
+      // Reported where it happens: the aborted request may break the page before the end.
+      expect.soft(request, 'a /v1 request reached the network').toBeUndefined()
       return route.abort()
     })
   }
