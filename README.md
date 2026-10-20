@@ -1,8 +1,8 @@
 <h1 align="center">market-agent</h1>
 
 <p align="center">
-  <b>An AI stock analyst that cites every number.</b><br>
-  Ask about any US company. Get charts, tables, and analysis built from SEC filings and market data, with each figure traced to its source.
+  <b>An AI stock analyst that doesn't make up numbers.</b><br>
+  Ask about any US company. Get charts, tables, and analysis built from SEC filings and market data, and open a figure to see where it came from.
 </p>
 
 <p align="center">
@@ -17,7 +17,7 @@
   <img src="docs/media/hero.gif" width="92%" alt="Asking the analyst to compare NVDA and AMD, then opening the evidence behind one figure">
 </p>
 
-Ask a general-purpose chatbot for a company's gross margin and you get a confident number with no way to check it. market-agent answers only from facts it has stored: SEC company facts, filing extracts, and Polygon prices. Code, not the model, builds the charts and tables. The model writes the narrative, and every figure in it comes from a stored fact you can open. A second model checks each inference before you see it.
+Ask a general-purpose chatbot for a company's gross margin and you get a confident number with no way to check it. market-agent answers only from facts it has stored: SEC company facts, filing extracts, and Polygon prices. Code, not the model, builds the charts and tables. The model writes the narrative, and the figures in it come from stored facts you can open. A second model checks each inference before you see it.
 
 ## Quickstart
 
@@ -65,7 +65,7 @@ Chat answers only from facts already stored. Open a company's symbol page once, 
   </tr>
   <tr>
     <td><b>Chat with an analyst.</b> Answers arrive as charts, tables, and metric rows with citations. Threads persist.</td>
-    <td><b>Check the numbers.</b> Click a figure to see its source document and how it was computed. Every block is labelled verified, source-linked, or not verified.</td>
+    <td><b>Check the numbers.</b> Click a figure to see its source document and how it was computed. Each chart, table, and metric row is labelled verified, source-linked, or not verified.</td>
   </tr>
   <tr>
     <td><img src="docs/media/symbol.png" alt="A symbol page showing financials"></td>
@@ -93,7 +93,7 @@ Chat answers only from facts already stored. Open a company's symbol page once, 
 
 1. The resolver turns each company you name into a canonical id. An ambiguous name gets a clarifying question, not a guess.
 2. Code builds the charts, tables, and metric rows from stored facts. The analyst does not browse the web.
-3. The model writes its narrative as structured assertions. A check rejects any assertion the facts do not support, and every figure in the prose comes from a template filled with a stored value.
+3. The model writes its narrative as structured assertions. A check rejects any assertion whose references or comparisons do not match the evidence. Every figure in the prose comes from a template filled with a value from the evidence.
 4. The app seals a snapshot of every fact the answer used and checks each one against the logged tool calls. That snapshot is what the evidence inspector shows.
 5. A judge model checks each inference against the facts it rests on. An inference appears only once the judge accepts it.
 

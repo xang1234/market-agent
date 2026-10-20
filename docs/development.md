@@ -24,14 +24,14 @@ In a fresh worktree, `./scripts/dev-shell.sh install` runs `npm ci` for every pa
 
 `DEV_PROFILE` picks which services run.
 
-- `full` (the default) runs the 12 HTTP services as separate processes. Analyze and Agents run inside dev-api, and the other packages are libraries. The discovery worker runs only when `DISCOVERY_ENABLED=true`.
+- `full` (the default) runs the web app and 11 services as separate HTTP processes. Analyze, Agents, and themes run inside dev-api. `dev-providers` starts only with `ENABLE_UNOFFICIAL_DEV_PROVIDERS=true`, and the discovery worker only with `DISCOVERY_ENABLED=true`. The other packages are libraries or command-line tools.
 - `chat` runs one process, `services/app`, that serves the web UI, chat, resolver, dev-api, market, and fundamentals on `WEB_PORT`, plus Postgres. The other services are parked. `status` lists them as `parked`, their API routes answer `503`, and their tabs do not load.
 
 ### Sign in
 
 dev-shell signs you in as a stable mock user, so your watchlists, threads, and portfolios persist across runs. After **Sign out**, the top bar shows **Sign in** to return. Set `VITE_MA_FLAG_DEV_AUTO_LOGIN=false` to start signed out.
 
-Signed out, Home, symbol pages, and Screener still work, without watchlist or save actions. Chat, Analyze, Analyst Grids, Agents, Review, Settings, Discovery, and the evidence inspector need a session.
+Signed out, symbol pages and Screener still load, without watchlist or save actions. Home, Chat, Analyze, Analyst Grids, Agents, Review, Settings, Discovery, and the evidence inspector need a session.
 
 ### Stop the stack
 

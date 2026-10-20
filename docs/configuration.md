@@ -72,7 +72,7 @@ Each surface can take its numbers from the financial engine, which plans a calcu
 - `shadow` runs the engine privately beside the legacy answer.
 - `enforce` shows only certified calculations. Anything the engine cannot verify appears as a gap, never as prose.
 
-For chat, only questions that name a metric reach the engine today. Other questions use the standard path until [#398](https://github.com/xang1234/market-agent/issues/398) lands. Balance-sheet and cash-flow columns in Analyst Grids show no coverage while `GRID_FINANCIAL_MODE` is `off`.
+For chat, only questions that name a metric reach the engine today. Other questions use the standard path until [#398](https://github.com/xang1234/market-agent/issues/398) lands. The financial columns in Analyst Grids (cash flow, net income, balance sheet, and ratios) show no coverage while `GRID_FINANCIAL_MODE` is `off`.
 
 `FINANCIAL_WORKER_ENABLED=true` starts a worker in dev-api that recovers interrupted financial runs.
 

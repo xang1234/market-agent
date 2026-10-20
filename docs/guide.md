@@ -20,7 +20,7 @@ Type a ticker or company name into the top search to open its page. It has five 
 
 Ask the analyst about a company, a comparison, or a theme. Answers stream in as charts, tables, metric rows, and a short narrative. Threads persist, so you can return to one later.
 
-Chat answers from facts already stored in the app. It does not browse the web. Code builds the charts and tables from those facts, and the model writes only the narrative. Each figure in the narrative and the metric rows links to its stored fact. Each block carries a label: **verified** for a certified calculation, **source-linked** when its values are the facts it cites, or **not verified**. A separate judge model checks each inference, and chat shows an inference only once the judge accepts it. [Architecture](architecture.md#how-a-chat-answer-is-built) explains each step.
+Chat answers from facts already stored in the app. It does not browse the web. Code builds the charts and tables from those facts, and the model writes only the narrative. Figures in the narrative and the metric rows link to their fact or price series where one can be sealed. The rest show as plain text. A block that makes a claim about its values carries a label: **verified** for a certified calculation, **source-linked** when its values are the facts it cites, or **not verified**. A separate judge model checks each inference, and chat shows an inference only once the judge accepts it. [Architecture](architecture.md#how-a-chat-answer-is-built) explains each step.
 
 ## Evidence inspector
 
@@ -40,7 +40,7 @@ A finished single-company memo offers **Monitor this thesis**. It starts a new a
 
 ## Analyst Grids
 
-A grid puts companies in rows and metrics or a research question in columns. Pick a universe: manual tickers, a saved screen, a watchlist, a portfolio, or one company's peers. Then pick columns. Most read stored facts, such as market cap, revenue, and diluted EPS. A **Question** column has a model read each company's documents and answer one question. Balance-sheet and cash-flow columns need `GRID_FINANCIAL_MODE` turned on.
+A grid puts companies in rows and metrics or a research question in columns. Pick a universe: manual tickers, a saved screen, a watchlist, a portfolio, or one company's peers. Then pick columns. Most read stored facts, such as market cap, revenue, and diluted EPS. A **Question** column has a model read each company's documents and answer one question. The financial columns (cash flow, net income, balance sheet, and ratios) need `GRID_FINANCIAL_MODE` turned on.
 
 ## Agents
 
@@ -58,7 +58,7 @@ A new supported or challenged state appears on Home and fires the agent's alert 
 
 Each save creates a thesis version, and the panel shows the latest 20 assessments and versions. If someone saves a newer version while you edit, your draft stays and **Load saved version** replaces it on request.
 
-Agents read evidence already stored in the app: up to 100 claims, and up to 50 authoritative facts for each tracked metric. They do not start a new web crawl. A numeric condition only uses a fact that matches its metric, unit, period, and maximum age. Age counts from the period end.
+Agents read evidence already stored in the app: up to 100 claims, and up to 50 authoritative facts for each tracked metric, unit, and period type. They do not start a new web crawl. A numeric condition only uses a fact that matches its metric, unit, period, and maximum age. Age counts from the period end.
 
 An agent with no saved thesis conditions keeps the earlier workflow, including multi-company universes.
 
