@@ -194,9 +194,6 @@ jobs:
     name: market (typecheck, tests)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: services/market
     steps:
       - uses: actions/checkout@v4
 
@@ -204,13 +201,26 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: services/market/package-lock.json
+          cache-dependency-path: |
+            db/package-lock.json
+            services/market/package-lock.json
 
-      - run: npm ci
+      # The split repository test imports the shared db/test Docker harness.
+      - name: Install db deps (needed by market integration harness)
+        working-directory: db
+        run: npm ci
 
-      - run: npm run typecheck
+      - name: Install market deps
+        working-directory: services/market
+        run: npm ci
 
-      - run: npm test
+      - name: Typecheck market
+        working-directory: services/market
+        run: npm run typecheck
+
+      - name: Run market tests
+        working-directory: services/market
+        run: npm test
 
   home:
     name: home (typecheck, tests)

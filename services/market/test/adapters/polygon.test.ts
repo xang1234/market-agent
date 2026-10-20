@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createPolygonAdapter, createPolygonHttpFetcher, PolygonFetchError } from "../../src/adapters/polygon.ts";
+import { createPolygonAdapter, createPolygonHttpFetcher, fetchPolygonSplits, PolygonFetchError } from "../../src/adapters/polygon.ts";
 import { quoteMove } from "../../src/quote.ts";
 import {
   assertUnavailableContract,
@@ -746,4 +746,71 @@ test("polygon adapter classifies an inconsistent multi-page adjusted flag as una
   if (!isUnavailable(outcome)) return;
   assert.equal(outcome.reason, "provider_error");
   assert.equal(outcome.retryable, false);
+});
+
+const NVDA_SPLITS_PATH = "/v3/reference/splits?ticker=NVDA&limit=1000";
+const NVDA_SPLITS_NEXT = "https://api.polygon.io/v3/reference/splits?cursor=YXA9Mg";
+
+function splitsFetcher(pages: Record<string, unknown>) {
+  const fetched: string[] = [];
+  const fetcher = async (path: string) => {
+    fetched.push(path);
+    if (!(path in pages)) throw new Error(`unexpected fetch: ${path}`);
+    return pages[path];
+  };
+  return { fetched, fetcher };
+}
+
+test("polygon splits follow next_url and come back oldest first", async () => {
+  const { fetched, fetcher } = splitsFetcher({
+    [NVDA_SPLITS_PATH]: {
+      status: "OK",
+      next_url: NVDA_SPLITS_NEXT,
+      results: [
+        { execution_date: "2024-06-10", id: "E-2024", split_from: 1, split_to: 10, ticker: "NVDA" },
+        { execution_date: "2021-07-20", id: "E-2021", split_from: 1, split_to: 4, ticker: "NVDA" },
+      ],
+    },
+    [NVDA_SPLITS_NEXT]: {
+      status: "OK",
+      results: [
+        { execution_date: "2021-07-20", id: "E-2021-dup", split_from: 1, split_to: 4, ticker: "NVDA" },
+        { execution_date: "2007-09-11", id: "E-2007", split_from: 2, split_to: 3, ticker: "NVDA" },
+      ],
+    },
+  });
+
+  assert.deepEqual(await fetchPolygonSplits(fetcher, "NVDA"), [
+    { execution_date: "2007-09-11", split_from: 2, split_to: 3, provider_ref: "E-2007" },
+    { execution_date: "2021-07-20", split_from: 1, split_to: 4, provider_ref: "E-2021" },
+    { execution_date: "2024-06-10", split_from: 1, split_to: 10, provider_ref: "E-2024" },
+  ]);
+  assert.deepEqual(fetched, [NVDA_SPLITS_PATH, NVDA_SPLITS_NEXT]);
+});
+
+test("polygon splits for a ticker that never split are an empty list", async () => {
+  const { fetcher } = splitsFetcher({
+    "/v3/reference/splits?ticker=META&limit=1000": { status: "OK", results: [] },
+  });
+  assert.deepEqual(await fetchPolygonSplits(fetcher, "META"), []);
+});
+
+test("polygon splits reject a malformed page or row instead of skipping it", async () => {
+  const split = { execution_date: "2024-06-10", id: "E-2024", split_from: 1, split_to: 10, ticker: "NVDA" };
+  const cases: Array<[unknown, RegExp]> = [
+    [{ status: "ERROR", results: [] }, /splits page for NVDA is not an OK page of results/],
+    [{ status: "OK" }, /splits page for NVDA is not an OK page of results/],
+    [{ status: "OK", results: [{ ...split, split_from: 0 }] }, /NVDA split 2024-06-10 split_from: must be a finite positive number; received 0/],
+    [{ status: "OK", results: [{ ...split, split_to: "10" }] }, /NVDA split 2024-06-10 split_to: must be a finite positive number; received 10/],
+    [{ status: "OK", results: [{ ...split, execution_date: "2024-02-30" }] }, /NVDA split has execution_date 2024-02-30/],
+    [{ status: "OK", results: [{ ...split, execution_date: "2024-13-01" }] }, /NVDA split has execution_date 2024-13-01/],
+    [{ status: "OK", results: [{ ...split, execution_date: "2024-06-10T00:00:00Z" }] }, /NVDA split has execution_date 2024-06-10T00:00:00Z/],
+    [{ status: "OK", results: [{ ...split, ticker: "NVDL" }] }, /splits for NVDA include a row for NVDL/],
+    [{ status: "OK", results: [{ ...split, id: "" }] }, /NVDA split 2024-06-10 has no id/],
+    [{ status: "OK", results: [split, { ...split, id: "E-other", split_to: 4 }] }, /conflicting NVDA splits on 2024-06-10/],
+  ];
+  for (const [page, message] of cases) {
+    const { fetcher } = splitsFetcher({ [NVDA_SPLITS_PATH]: page });
+    await assert.rejects(() => fetchPolygonSplits(fetcher, "NVDA"), message);
+  }
 });
