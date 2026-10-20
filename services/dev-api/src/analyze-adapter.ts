@@ -170,11 +170,14 @@ export type AnalyzeServiceDeps = {
 
 export type AnalyzeFinancialComposition = {
   resolvePeers(primaryIssuerId: string): Promise<ReadonlyArray<{ kind: "issuer"; id: string }>>;
+  // Stores the issuers' latest SEC facts; a failed fetch leaves a gap, never a failed memo.
+  hydrate(issuerIds: ReadonlyArray<string>): Promise<void>;
   publish(run: AnalyzeFinancialRun): Promise<AnalyzeFinancialSections>;
 };
 
 // Freezes a new memo's numerical context (cutoff, basis, catalog, exact peers)
-// before any work, so every numerical section is computed under it.
+// before any work, so every numerical section is computed under it. Facts are
+// fetched before the cutoff is taken: the engine never reads one stored after it.
 async function newFinancialContext(
   deps: AnalyzeServiceDeps,
   playbook: AnalyzePlaybook,
@@ -183,8 +186,10 @@ async function newFinancialContext(
   const lane = deps.analyzeFinancial;
   if (!lane) return null;
   const primary = subjectRefs.find((ref) => ref.kind === "issuer");
-  if (!primary) return null;
-  const peers = financialSectionIds(playbook).includes("peer_table") ? await lane.resolvePeers(primary.id) : [];
+  const sections = financialSectionIds(playbook);
+  if (!primary || sections.length === 0) return null;
+  const peers = sections.includes("peer_table") ? await lane.resolvePeers(primary.id) : [];
+  await lane.hydrate([...new Set([primary.id, ...peers.map((peer) => peer.id)])]);
   return prepareAnalyzeFinancialContext({
     playbook,
     primary: { kind: "issuer", id: primary.id },
@@ -433,6 +438,9 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
           source_categories: metadata.source_categories,
         }).prompt
         : metadata.instructions;
+      // A rerun keeps the original's numerical context (cutoff, basis, peers), so it reproduces, not re-asks.
+      // A memo saved without one gets a fresh context, so its rerun has engine sections.
+      const financial = metadata.financial ?? (playbook ? await newFinancialContext(deps, playbook, subjectRefs) : null);
       const rerunMetadata = serializeAnalyzeRunMetadataV1({
         template_id: template.template_id,
         template_version: template.version,
@@ -442,8 +450,7 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
         source_categories: sourceCategories,
         subject_refs: subjectRefs,
         rerun_of_run_id: original.run_id,
-        // A rerun keeps the original's numerical context (cutoff, basis, peers), so it reproduces, not re-asks.
-        ...(metadata.financial ? { financial: metadata.financial } : {}),
+        ...(financial ? { financial } : {}),
       });
       const snapshotId = randomUUID();
       const body = {

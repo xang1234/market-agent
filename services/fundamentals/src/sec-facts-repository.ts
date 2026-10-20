@@ -106,12 +106,13 @@ export function createSecBackedStatementRepository(
 
 // Null when the issuer has no usable CIK or SEC has no such statement (a 404,
 // or no us-gaap values for it); any other failure throws
-// FundamentalsDataUnavailableError.
+// FundamentalsDataUnavailableError. A fiscal_year of "latest" is the latest
+// year with a 10-K revenue value in the download.
 export async function hydrateSecIssuer(
   db: FundamentalsTransactionalQueryExecutor,
   input: {
     issuerId: UUID;
-    fiscal_year: number;
+    fiscal_year: number | "latest";
     fiscal_period: FiscalPeriod;
     fetcher: SecEdgarFetcher;
     sourceId: UUID;
@@ -132,11 +133,13 @@ export async function hydrateSecIssuer(
 
   try {
     const fetched = await fetchCompanyFacts(input.fetcher, cikNumber);
+    const fiscalYear = input.fiscal_year === "latest" ? latestAnnualRevenueYear(fetched.facts) : input.fiscal_year;
+    if (fiscalYear === null) return null;
     const ingested = await ingestFiling(db, {
       fetched,
       cik: cikNumber,
       issuerId: input.issuerId,
-      fiscal_year: input.fiscal_year,
+      fiscal_year: fiscalYear,
       fiscal_period: input.fiscal_period,
       fallbackSourceId: input.sourceId,
       income: "require",

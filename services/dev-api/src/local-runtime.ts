@@ -39,6 +39,11 @@ import type { AnalyzePlaybook } from "../../analyze/src/playbook.ts";
 import { publishAnalyzeFinancialSections } from "../../analyze/src/financial-section.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { createSqlPeerSetResolver } from "../../fundamentals/src/peer-set-resolver.ts";
+import { FundamentalsDataUnavailableError } from "../../fundamentals/src/availability.ts";
+import { hydrateSecIssuer } from "../../fundamentals/src/sec-facts-repository.ts";
+import type { SecEdgarFetcher } from "../../fundamentals/src/sec-edgar.ts";
+import { createSecCompanyFactsHttpFetcher, withSecFairAccess } from "../../fundamentals/src/sec-edgar-http.ts";
+import { SEC_EDGAR_FILING_SOURCE_ID } from "../../fundamentals/src/provider-sources.ts";
 import { consensusRepositoryFromEnv } from "../../fundamentals/src/dev-providers.ts";
 import { createPostgresIssuerProfileRepository } from "../../fundamentals/src/issuer-repository.ts";
 import { createPostgresMarketCacheRepository } from "../../market/src/cache-repository.ts";
@@ -230,11 +235,47 @@ export async function buildAnalyzeRunSeals(input: {
 }
 
 const ANALYZE_FINANCIAL_PEER_LIMIT = 5;
+const SEC_FETCH_TIMEOUT_MS = 30_000;
+
+// One pacing limiter for every memo this process hydrates. A timeout bounds
+// how long a stalled SEC download can hold a memo.
+const secFetcher = process.env.SEC_EDGAR_USER_AGENT
+  ? withSecFairAccess(createSecCompanyFactsHttpFetcher({
+      userAgent: process.env.SEC_EDGAR_USER_AGENT,
+      baseUrl: process.env.SEC_EDGAR_BASE_URL,
+      fetchImpl: (url, init) => fetch(url, { ...init, signal: AbortSignal.timeout(SEC_FETCH_TIMEOUT_MS) }),
+    }))
+  : null;
+
+// The engine reads only stored facts, so a memo's issuers are fetched from SEC
+// first: the latest fiscal year and the year before it, which revenue_trend
+// compares. A failed fetch costs only that issuer's numbers, which the engine
+// then reports as gaps.
+export async function hydrateAnalyzeIssuers(
+  db: Pool,
+  fetcher: SecEdgarFetcher | null,
+  issuerIds: ReadonlyArray<string>,
+  logger: Pick<Console, "warn"> = console,
+): Promise<void> {
+  if (fetcher === null) return;
+  await Promise.all(issuerIds.map(async (issuerId) => {
+    const hydrate = (fiscal_year: number | "latest") =>
+      hydrateSecIssuer(db, { issuerId, fiscal_year, fiscal_period: "FY", fetcher, sourceId: SEC_EDGAR_FILING_SOURCE_ID, logger });
+    try {
+      const latest = await hydrate("latest");
+      if (latest) await hydrate(latest.fiscal_year - 1);
+    } catch (error) {
+      if (!(error instanceof FundamentalsDataUnavailableError)) throw error;
+      logger.warn("analyze SEC hydration failed; the engine reports the gap", { issuer_id: issuerId, reason: error.reason });
+    }
+  }));
+}
 
 export const analyzeFinancial = {
   resolvePeers: async (primaryIssuerId: string) =>
     (await createSqlPeerSetResolver(pool()).resolvePeers(primaryIssuerId, { limit: ANALYZE_FINANCIAL_PEER_LIMIT }))
       .map((peer) => ({ kind: "issuer" as const, id: peer.id })),
+  hydrate: (issuerIds: ReadonlyArray<string>) => hydrateAnalyzeIssuers(pool(), secFetcher, issuerIds),
   publish: (run: Parameters<typeof publishAnalyzeFinancialSections>[1]) =>
     publishAnalyzeFinancialSections({ pool: pool(), evidence: createEvidenceFinancialPort }, run),
 };

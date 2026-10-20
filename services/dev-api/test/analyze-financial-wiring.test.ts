@@ -1,6 +1,6 @@
-// The dev API freezes a memo's financial context before any work, publishes
-// against the committed memo run, and reports declared sections from
-// committed state.
+// The dev API hydrates a memo's issuers and freezes its financial context
+// before any work, publishes against the committed memo run, and reports
+// declared sections from committed state.
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -13,6 +13,17 @@ const USER = "00000000-0000-4000-8000-000000000001";
 const TEMPLATE = "11111111-1111-4111-8111-111111111111";
 const RUN = "22222222-2222-4222-8222-222222222222";
 const ISSUER = "33333333-3333-4333-8333-333333333333";
+const ORIGINAL = "44444444-4444-4444-8444-444444444444";
+
+// A memo saved before Analyze always used the engine: no financial context.
+const ORIGINAL_RUN = {
+  run_id: ORIGINAL, template_id: TEMPLATE, template_version: 3, playbook_id: "earnings_quality", template_name: "Earnings quality",
+  run_metadata: {
+    schema_version: 1, template_id: TEMPLATE, template_version: 3, playbook_id: "earnings_quality", playbook_version: 1,
+    instructions: "Review", source_categories: ["filings"], subject_refs: [{ kind: "issuer", id: ISSUER }],
+  },
+  snapshot_id: "55555555-5555-4555-8555-555555555555", blocks: [], created_at: "2026-05-01T00:00:00.000Z",
+};
 
 function fakeDb() {
   let metadata: unknown = null;
@@ -28,6 +39,7 @@ function fakeDb() {
           }],
         };
       }
+      if (text.includes("t.name as template_name")) return { rows: [ORIGINAL_RUN] };
       // The memo run as the financial-section reader loads it.
       if (text.includes("from analyze_template_runs r join analyze_templates t")) {
         return { rows: [{ user_id: USER, template_id: TEMPLATE, template_version: 3, run_metadata: metadata }] };
@@ -53,9 +65,8 @@ function okSeal(snapshotId: string): SnapshotSealResult {
   return { ok: true, snapshot: sealedSnapshot(snapshotId), verification: { ok: true, failures: [] } };
 }
 
-test("a memo run declares its frozen financial context and publishes it against the committed run", async () => {
-  const published: AnalyzeFinancialRun[] = [];
-  const adapters = createServiceDevApiAdapters({
+function adaptersWith(published: AnalyzeFinancialRun[], hydrated: Array<{ issuerIds: ReadonlyArray<string>; at: string }>) {
+  return createServiceDevApiAdapters({
     db: fakeDb(),
     runAnalyzeWorkflow: (input) => ({
       blocks: [{ id: "memo-1", kind: "rich_text", snapshot_id: input.snapshotId, as_of: "2026-05-06T00:00:00.000Z", segments: [{ type: "text", text: "Narrative." }] }],
@@ -68,14 +79,22 @@ test("a memo run declares its frozen financial context and publishes it against 
       resolvePeers: async () => {
         throw new Error("earnings quality compares no peers");
       },
+      hydrate: async (issuerIds) => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        hydrated.push({ issuerIds, at: new Date().toISOString() });
+      },
       publish: async (run) => {
         published.push(run);
         return { coverage: "none", sections: [] };
       },
     },
   });
+}
 
-  const run = await adapters.analyze.createRun({
+test("a memo run hydrates its issuer, declares its frozen financial context, and publishes it against the committed run", async () => {
+  const published: AnalyzeFinancialRun[] = [];
+  const hydrated: Array<{ issuerIds: ReadonlyArray<string>; at: string }> = [];
+  const run = await adaptersWith(published, hydrated).analyze.createRun({
     userId: USER,
     body: { template_id: TEMPLATE, playbook_id: "earnings_quality", subject_ref: { kind: "issuer", id: ISSUER } },
   });
@@ -90,10 +109,26 @@ test("a memo run declares its frozen financial context and publishes it against 
     requested_peers: [],
     sections: ["revenue_trend"],
   });
+  assert.deepEqual(hydrated.map((call) => call.issuerIds), [[ISSUER]]);
+  assert.ok(String(financial.knowledge_cutoff) >= hydrated[0]!.at, "the cutoff is taken after the facts are fetched");
   assert.equal(published.length, 1);
   assert.deepEqual(published[0], { user_id: USER, analyze_run_id: RUN, template_id: TEMPLATE, template_version: 3, context: financial });
   assert.deepEqual(run.financial_sections, {
     coverage: "none",
     sections: [{ section_id: "revenue_trend", status: "gap", reason_code: "not_started" }],
   }, "declared sections are read from committed state, never assumed complete");
+});
+
+test("a rerun of a memo saved without a financial context hydrates and publishes a fresh one", async () => {
+  const published: AnalyzeFinancialRun[] = [];
+  const hydrated: Array<{ issuerIds: ReadonlyArray<string>; at: string }> = [];
+  const run = await adaptersWith(published, hydrated).analyze.rerun({ userId: USER, runId: ORIGINAL });
+
+  const metadata = run.run_metadata as { rerun_of_run_id: string; financial: Record<string, unknown> };
+  assert.equal(metadata.rerun_of_run_id, ORIGINAL);
+  assert.deepEqual(metadata.financial.sections, ["revenue_trend"]);
+  assert.deepEqual(metadata.financial.primary, { kind: "issuer", id: ISSUER });
+  assert.deepEqual(hydrated.map((call) => call.issuerIds), [[ISSUER]]);
+  assert.deepEqual(published.map((entry) => entry.context), [metadata.financial]);
+  assert.deepEqual(run.financial_sections?.sections, [{ section_id: "revenue_trend", status: "gap", reason_code: "not_started" }]);
 });

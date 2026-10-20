@@ -4,6 +4,7 @@ import {
   backfillSecCompanionStatements,
   createSecBackedStatementRepository,
   createSecBackedStatsRepository,
+  hydrateSecIssuer,
 } from "../src/sec-facts-repository.ts";
 import type { MetricDefinition } from "../src/metric-mapper.ts";
 import {
@@ -484,6 +485,21 @@ test("SEC-backed stats can ingest latest annual companyfacts on demand", async (
   assert.equal(db.facts.some((fact) => fact.fiscal_year === 2024), true);
   assert.equal(db.facts.some((fact) => fact.fiscal_year === 2023), true);
   assert.equal(fetchCount > 0, true);
+});
+
+test("hydrating the latest fiscal year stores the latest 10-K year from the download", async () => {
+  const db = new FakeFundamentalsDb();
+  const statement = await hydrateSecIssuer(db, {
+    issuerId: ISSUER_ID,
+    fiscal_year: "latest",
+    fiscal_period: "FY",
+    fetcher: secCompanyFetcher(() => companyFacts()),
+    sourceId: SOURCE_ID,
+    clock: () => new Date("2026-05-08T00:00:00.000Z"),
+  });
+  assert.equal(statement?.fiscal_year, 2024);
+  assert.equal(statement?.lines.find((line) => line.metric_key === "revenue")?.value_num, 1000);
+  assert.deepEqual([...new Set(db.facts.map((fact) => fact.fiscal_year))], [2024]);
 });
 
 test("SEC-backed statements propagate provider failures instead of returning missing coverage", async () => {
