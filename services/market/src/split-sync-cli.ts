@@ -11,8 +11,7 @@ import { Pool } from "pg";
 
 import { FROZEN_ISSUER_IDS } from "../../shared/src/golden-issuers.ts";
 import { createPolygonHttpFetcher, type PolygonFetcher } from "./adapters/polygon.ts";
-import type { ListingQueryExecutor } from "./listings.ts";
-import { syncListingSplits } from "./split-repository.ts";
+import { syncListingSplits, type SplitSyncExecutor } from "./split-repository.ts";
 
 type ListingRow = { listing_id: string; ticker: string; issuer_id: string };
 
@@ -21,7 +20,7 @@ const LISTING_SELECT = `
     from listings l join instruments i on i.instrument_id = l.instrument_id`;
 
 export async function syncSplits(
-  db: ListingQueryExecutor,
+  db: SplitSyncExecutor,
   fetcher: PolygonFetcher,
   requestedIds: ReadonlyArray<string>,
   log: Pick<Console, "log" | "error"> = console,

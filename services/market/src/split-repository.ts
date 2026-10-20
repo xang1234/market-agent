@@ -23,14 +23,41 @@ export type ListingSplitHistory =
 
 export type SplitSyncListing = Readonly<{ listing_id: UUID; ticker: string }>;
 
+export type SplitSyncExecutor = ListingQueryExecutor & {
+  connect(): Promise<ListingQueryExecutor & { release(): void }>;
+};
+
 export async function syncListingSplits(
-  db: ListingQueryExecutor,
+  db: SplitSyncExecutor,
   fetcher: PolygonFetcher,
   listing: SplitSyncListing,
   clock: () => Date = () => new Date(),
 ): Promise<ReadonlyArray<ListingSplit>> {
   const checkedAt = clock().toISOString();
   const splits = await fetchPolygonSplits(fetcher, listing.ticker);
+  const client = await db.connect();
+  try {
+    await client.query("begin");
+    // The replacement below sees only its own snapshot, so two syncs of one
+    // listing at once would both commit and keep the union of their lists.
+    await client.query("select pg_advisory_xact_lock(hashtextextended($1::text, 0))", [listing.listing_id]);
+    await replaceListingSplits(client, listing.listing_id, checkedAt, splits);
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+  return splits;
+}
+
+async function replaceListingSplits(
+  db: ListingQueryExecutor,
+  listingId: UUID,
+  checkedAt: string,
+  splits: ReadonlyArray<ListingSplit>,
+): Promise<void> {
   await db.query(
     `with incoming as (
        select * from unnest($4::date[], $5::numeric[], $6::numeric[], $7::text[])
@@ -52,7 +79,7 @@ export async function syncListingSplits(
      on conflict (listing_id) do update
         set checked_at = excluded.checked_at, source_id = excluded.source_id`,
     [
-      listing.listing_id,
+      listingId,
       POLYGON_MARKET_SOURCE_ID,
       checkedAt,
       splits.map((split) => split.execution_date),
@@ -61,7 +88,6 @@ export async function syncListingSplits(
       splits.map((split) => split.provider_ref),
     ],
   );
-  return splits;
 }
 
 type HistoryRow = {

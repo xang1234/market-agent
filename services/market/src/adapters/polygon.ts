@@ -449,9 +449,11 @@ async function fetchPages<Page extends { next_url?: unknown }>(fetcher: PolygonF
 
     const page = (await fetcher(nextPath)) as Page;
     pages.push(page);
-    nextPath = typeof page.next_url === "string" && page.next_url.length > 0
-      ? page.next_url
-      : undefined;
+    // A malformed next_url must not end the list early, as if it were complete.
+    if (page.next_url !== undefined && page.next_url !== null && typeof page.next_url !== "string") {
+      throw new MalformedPayloadError(`next_url is not a string: ${String(page.next_url)}`);
+    }
+    nextPath = page.next_url || undefined;
   }
 
   return pages;
