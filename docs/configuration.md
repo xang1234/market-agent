@@ -59,16 +59,13 @@ An `anthropic` channel calls the Claude Messages API directly. It turns prompt c
 
 ## Verified financial answers
 
-Each surface can take its numbers from the financial engine, which plans a calculation, binds it to stored facts, and computes it with exact fractions. The engine is off by default.
+The financial engine plans a calculation, binds it to stored facts, and computes it with exact fractions. Anything it cannot verify appears as a gap, never as prose.
 
-Analyze memos, thesis conditions and Discovery criteria always use the engine, so dev-api checks readiness at startup. Set `CHAT_FINANCIAL_MODE` to one of two values:
-
-- `off` shows legacy numbers, labelled legacy.
-- `enforce` shows only certified calculations. Anything the engine cannot verify appears as a gap, never as prose.
+Chat questions that name a metric, Analyze memos, thesis conditions and Discovery criteria always use the engine, so chat and dev-api check readiness at startup.
 
 The engine checks each SEC fact's proof. Facts stored before 2026-10-16 have none and show as gaps until you run the SEC proof backfill described in [Development](development.md#data-mode).
 
-For chat, only questions that name a metric reach the engine today. Other questions use the standard path until [#398](https://github.com/xang1234/market-agent/issues/398) lands. The financial columns in Analyst Grids (cash flow, net income, balance sheet, and ratios) show no coverage while `GRID_FINANCIAL_MODE` is `off`.
+For chat, only questions that name a metric reach the engine today, and the answer names any part of the question its plan did not calculate. Other questions use the standard path until [#398](https://github.com/xang1234/market-agent/issues/398) lands. The financial columns in Analyst Grids (cash flow, net income, balance sheet, and ratios) show no coverage while `GRID_FINANCIAL_MODE` is `off`.
 
 `FINANCIAL_WORKER_ENABLED=true` starts a worker in dev-api that recovers interrupted financial runs.
 

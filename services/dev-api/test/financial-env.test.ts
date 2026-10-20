@@ -5,7 +5,6 @@ import { runDiscoveryWorkerFromEnvironment } from "../../discovery/src/worker-cl
 import { activeFinancialSurfaces, loadFinancialModes } from "../src/financial-env.ts";
 
 const EVERY_FINANCE_FLAG = {
-  CHAT_FINANCIAL_MODE: "enforce",
   FINANCIAL_WORKER_ENABLED: "true",
 };
 

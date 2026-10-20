@@ -4,19 +4,9 @@ import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import type { SqlExecutor } from "../src/ports.ts";
 import { checkFinancialReadiness, requireFinancialReadiness } from "../src/readiness.ts";
-import { parseFinancialMode } from "../src/request.ts";
 import { reserveRun } from "../src/run-repo.ts";
 import { FINANCIAL_VERSION_REGISTRY } from "../src/version-registry.ts";
 import { authorityFor, engineDatabase, marginPlan } from "./db-fixtures.ts";
-
-test("a mode flag is off or enforce; anything else stops startup instead of meaning legacy", () => {
-  assert.equal(parseFinancialMode(undefined), "off");
-  assert.equal(parseFinancialMode(""), "off");
-  assert.equal(parseFinancialMode(" enforce "), "enforce");
-  for (const value of ["shadow", "on", "true", "ENFORCE", "enforced"]) {
-    assert.throws(() => parseFinancialMode(value, "CHAT_FINANCIAL_MODE"), /CHAT_FINANCIAL_MODE must be off or enforce/u, value);
-  }
-});
 
 test("with nothing active, readiness is never consulted", async () => {
   const untouched = { query: async () => assert.fail("no check runs while everything is off") } as unknown as SqlExecutor;

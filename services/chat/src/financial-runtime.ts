@@ -36,7 +36,7 @@ import {
 } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { requireFinancialReadiness } from "../../financial-engine/src/readiness.ts";
-import { publishRequest, type FinancialMode, type RequestGap } from "../../financial-engine/src/request.ts";
+import { publishRequest, type RequestGap } from "../../financial-engine/src/request.ts";
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import type { ChatTurnRunContext } from "./coordinator.ts";
 import { contentHashForText, financialMessageId } from "./chat-ids.ts";
@@ -53,8 +53,6 @@ import {
   type ScopeField,
 } from "./research-scope.ts";
 
-export type ChatFinancialMode = FinancialMode;
-
 /** The user's pick for a clarification this lane offered earlier. */
 export type ChatClarificationAnswer = Readonly<{ clarification_id: string; choice_id: string }>;
 
@@ -70,12 +68,11 @@ export type ChatFinancialRuntime = Readonly<{
   answers(context: ChatFinancialTurnContext): boolean;
   /** The lane's outcome. Call only after answers(context); it throws otherwise. */
   run(context: ChatFinancialTurnContext): Promise<ChatFinancialTurn>;
-  /** Throws unless verified finance is ready; the server awaits it before serving turns with the lane on. */
+  /** Throws unless verified finance is ready; the server awaits it before serving any turn. */
   assertReady(): Promise<void>;
 }>;
 
 export type ChatFinancialRuntimeDeps = Readonly<{
-  mode: ChatFinancialMode;
   pool: FinancialPool;
   /** Null when no planning model is configured: financial turns then get a gap, never a guess. */
   planningModel: PlanningModel | null;
@@ -105,7 +102,7 @@ const GAP_TEXT: Readonly<Record<ChatGap, string>> = {
 
 export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): ChatFinancialRuntime {
   const answers = (context: ChatFinancialTurnContext) =>
-    deps.mode !== "off" && isFinancialRequest(context.userIntent ?? "") && Boolean(context.userId) && UUID.test(context.threadId);
+    isFinancialRequest(context.userIntent ?? "") && Boolean(context.userId) && UUID.test(context.threadId);
   const run = async (context: ChatFinancialTurnContext): Promise<ChatFinancialTurn> => {
     if (!answers(context)) throw new Error("the financial lane does not take this turn");
     const text = context.userIntent!;
@@ -153,7 +150,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       }
     }
   };
-  const assertReady = () => requireFinancialReadiness(deps.pool, deps.mode === "off" ? [] : ["chat"]);
+  const assertReady = () => requireFinancialReadiness(deps.pool, ["chat"]);
   return Object.freeze({ answers, run, assertReady });
 }
 

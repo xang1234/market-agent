@@ -6,6 +6,12 @@
 // or never reach the page. No model, provider or credential is involved: replies
 // are recorded.
 //
+// A question that names a metric reaches the financial engine, never the
+// analyst (financial-runtime.ts): its case records the planner's reply, and
+// declares the certified results, the note naming what the plan does not
+// cover, or the gap the user sees. Its mutations are analyst replies, which
+// never reach the page.
+//
 // Expected values are written from the golden dataset (test/golden/dataset.ts)
 // by hand, not derived from the code under test. The suite is versioned: the
 // digest of these cases is pinned in holdout.integration.test.ts, so a change
@@ -20,7 +26,7 @@
 
 import type { RejectionCheck } from "../../src/assertions.ts";
 
-export const HOLDOUT_VERSION = 7;
+export const HOLDOUT_VERSION = 8;
 
 type Assertion = Record<string, unknown>;
 
@@ -32,6 +38,8 @@ export type HoldoutCase = {
   turns: ReadonlyArray<string>;
   // The scope model's recorded reply for each turn, in order (scope-proposal.ts).
   scopes: ReadonlyArray<ScopeReply>;
+  // The planner's recorded reply for a checked turn that names a metric.
+  plan?: Readonly<Record<string, unknown>>;
   expect: {
     // The companies the checked turn covers, primary first (research scope).
     companies: ReadonlyArray<string>;
@@ -49,6 +57,12 @@ export type HoldoutCase = {
     shows?: { block_title: string; label: string; format: string };
     // The turn asks instead of answering, binding no company.
     clarification?: boolean;
+    // The engine's results, each as company, measure, period, disposition and
+    // the text shown, and the note beside them, if any.
+    financial?: ReadonlyArray<readonly [string, string, string, string, string]>;
+    uncovered?: string;
+    // The engine's gap for a request it cannot plan: its reason code.
+    financial_gap?: string;
   };
   // The recorded answer for the checked turn: prose and, optionally, its
   // assertion list, which must pass in full. The judge's recorded reply finds
@@ -79,67 +93,139 @@ const obs = (text: string, evidence: string[]): Assertion => ({ kind: "observati
 const cmp = (op: string, result: unknown, evidence: string[], text = "x"): Assertion => ({ kind: "comparison", op, result, text, evidence });
 const inference = (text: string, supports: number[]): Assertion => ({ kind: "analyst_inference", text, supports });
 
-const AMD_OPERATING_MARGINS = ["F26", "F27", "F28", "F29", "F30", "F31", "F32", "F33"];
-const MI308 = "AMD said [[C1]]";
+// Planner replies (financial-engine planner.ts), as a model drafts them.
+type Period = Readonly<Record<string, string | number>>;
+const latest = (period_type: "annual" | "quarterly", offset = 0): Period => ({ kind: "latest", period_type, offset });
+const fiscal = (fiscal_year: number, fiscal_period: string): Period => ({ kind: "fiscal_period", fiscal_year, fiscal_period });
+const reported = (slot: string, node_id: string, metric_key: string, period: Period) => ({ node_id, operation: "reported_metric", subject_slot: slot, metric_key, period });
+const margin = (operation: string, node_id: string, numerator: string, revenue: string) => ({ node_id, operation, numerator, revenue });
+const draft = (mentions: string[], operations: ReadonlyArray<Record<string, unknown>>, outputs: string[]) => ({
+  outcome: "ready",
+  subjects: mentions.map((mention, index) => ({ slot_id: "abc"[index]!, mention })),
+  operations,
+  outputs: outputs.map((node_id) => ({ output_id: `out_${node_id}`, node_id })),
+  thresholds: [],
+});
+// A company's latest fiscal year: revenue and its three margins.
+const latestMargins = (slot: string) => [
+  reported(slot, `${slot}_rev`, "revenue", latest("annual")),
+  reported(slot, `${slot}_gp`, "gross_profit", latest("annual")),
+  reported(slot, `${slot}_oi`, "operating_income", latest("annual")),
+  reported(slot, `${slot}_ni`, "net_income", latest("annual")),
+  margin("gross_margin", `${slot}_gm`, `${slot}_gp`, `${slot}_rev`),
+  margin("operating_margin", `${slot}_om`, `${slot}_oi`, `${slot}_rev`),
+  margin("net_margin", `${slot}_nm`, `${slot}_ni`, `${slot}_rev`),
+];
+const amdOperatingMargin = (period: Period, suffix: string) => [
+  reported("a", `oi_${suffix}`, "operating_income", period),
+  reported("a", `rev_${suffix}`, "revenue", period),
+  margin("operating_margin", `om_${suffix}`, `oi_${suffix}`, `rev_${suffix}`),
+];
+
+const NVIDIA = "NVIDIA Corporation";
+const AMD = "Advanced Micro Devices, Inc.";
+const APPLE = "Apple Inc.";
+const REVENUE = "Revenue";
+const GROSS_MARGIN = "Gross margin (gross profit / revenue)";
+const OPERATING_MARGIN = "Operating margin (operating income / revenue)";
+const NET_MARGIN = "Net margin (net income / revenue)";
+const LATEST_YEAR = "latest fiscal year";
+const NOT_PUBLIC = "No eligible input was public before the knowledge cutoff.";
 
 export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
   {
     id: "three-company-order",
-    trap: "ordering three companies; a wrong winner, a dropped peer or a figure credited to the wrong company",
+    trap: "three companies on revenue and margins: a figure credited to the wrong company, or a company dropped",
     turns: ["Compare NVDA, AMD and AAPL on revenue and margins."],
     scopes: [scope(["margins"], INCOME, ["revenue"])],
-    expect: { companies: ["NVDA", "AMD", "AAPL"], route: "comparison", blocks: [{ kind: "metrics_comparison" }] },
-    prose: "AAPL has the largest revenue; AMD has the lowest net margin.",
-    good: [
-      cmp("highest", "F9", ["F1", "F5", "F9"]),
-      cmp("lowest", "F7", ["F3", "F7", "F11"]),
-      obs("NVDA's gross margin was [[F2]] in FY2026.", ["F2"]),
-    ],
-    mutations: [
-      { name: "wrong winner", list: [cmp("highest", "F1", ["F1", "F5", "F9"])], fails: { index: 0, check: "comparative" } },
-      { name: "dropped peer", list: [cmp("lowest", "F7", ["F3", "F7"])], fails: { index: 0, check: "comparative" } },
-      {
-        name: "wrong company",
-        list: [cmp("highest", "F9", ["F1", "F5", "F9"]), cmp("lowest", "F7", ["F3", "F7", "F11"]), obs("AMD's gross margin was [[F2]] in FY2026.", ["F2"])],
-        never_shown: "AMD's gross margin was",
-      },
-    ],
+    plan: draft(["NVDA", "AMD", "AAPL"], [...latestMargins("a"), ...latestMargins("b"), ...latestMargins("c")],
+      ["a", "b", "c"].flatMap((slot) => [`${slot}_rev`, `${slot}_gm`, `${slot}_om`, `${slot}_nm`])),
+    expect: {
+      companies: ["NVDA", "AMD", "AAPL"],
+      route: "financial_answer",
+      financial: [
+        [NVIDIA, REVENUE, LATEST_YEAR, "verified", "USD 209,911,000,000.00"],
+        [NVIDIA, GROSS_MARGIN, LATEST_YEAR, "verified", "70.78%"],
+        [NVIDIA, OPERATING_MARGIN, LATEST_YEAR, "verified", "60.21%"],
+        [NVIDIA, NET_MARGIN, LATEST_YEAR, "verified", "53.60%"],
+        [AMD, REVENUE, LATEST_YEAR, "verified", "USD 34,669,000,000.00"],
+        [AMD, GROSS_MARGIN, LATEST_YEAR, "verified", "49.92%"],
+        [AMD, OPERATING_MARGIN, LATEST_YEAR, "verified", "9.78%"],
+        [AMD, NET_MARGIN, LATEST_YEAR, "verified", "12.04%"],
+        [APPLE, REVENUE, LATEST_YEAR, "verified", "USD 416,161,000,000.00"],
+        [APPLE, GROSS_MARGIN, LATEST_YEAR, "verified", "46.91%"],
+        [APPLE, OPERATING_MARGIN, LATEST_YEAR, "verified", "31.97%"],
+        [APPLE, NET_MARGIN, LATEST_YEAR, "verified", "26.92%"],
+      ],
+    },
+    prose: "",
+    mutations: [{ name: "a figure credited to the wrong company", prose: "AMD's gross margin was 70.8% in FY2026.", never_shown: "AMD's gross margin was" }],
   },
   {
     id: "fiscal-period",
     trap: "the fiscal year asked for, whose calendars end eight months apart; a substituted year",
     turns: ["Compare NVDA's and AAPL's fiscal 2025 revenue."],
     scopes: [scope([], INCOME, ["revenue"])],
-    expect: { companies: ["NVDA", "AAPL"], route: "comparison", fiscal_year: 2025, blocks: [{ kind: "metrics_comparison", title: "Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart" }] },
-    prose: "NVDA's fiscal 2025 ended in January 2025, AAPL's in September 2025.",
-    good: [obs("NVDA's revenue was [[F1]] in FY2025.", ["F1"]), obs("AAPL's revenue was [[F5]] in FY2025.", ["F5"])],
-    mutations: [
-      { name: "wrong fiscal year", list: [obs("NVDA's revenue was [[F1]] in FY2026.", ["F1"]), obs("AAPL's revenue was [[F5]] in FY2025.", ["F5"])], never_shown: "in FY2026" },
-    ],
+    plan: draft(["NVDA", "AAPL"], [reported("a", "a_rev", "revenue", fiscal(2025, "FY")), reported("b", "b_rev", "revenue", fiscal(2025, "FY"))], ["a_rev", "b_rev"]),
+    expect: {
+      companies: ["NVDA", "AAPL"],
+      route: "financial_answer",
+      fiscal_year: 2025,
+      financial: [
+        [NVIDIA, REVENUE, "FY2025", "verified", "USD 130,497,000,000.00"],
+        [APPLE, REVENUE, "FY2025", "verified", "USD 416,161,000,000.00"],
+      ],
+    },
+    prose: "",
+    mutations: [{ name: "a substituted fiscal year", prose: "NVDA's revenue was $209.9B in FY2026.", never_shown: "in FY2026" }],
   },
   {
     id: "unknown-cause",
-    trap: "a margin drop with no cause in evidence; a stated cause, or a cause given as a management attribution without a claim",
+    trap: "a margin drop with no cause in evidence: the change is calculated, and no cause is stated",
     turns: ["What changed in NVDA's gross margin in Q1 fiscal 2026?"],
     scopes: [scope(["margins", "margin_trend"], INCOME, ["gross_margin"])],
-    expect: { companies: ["NVDA"], route: "trend", blocks: [{ kind: "metric_row", title: "Gross margin by quarter" }] },
-    prose: "NVDA's gross margin fell to 60.5% in Q1 2026; the data does not show why.",
-    good: [
-      obs("NVDA's gross margin was [[F21]] in Q4 2025 and [[F22]] in Q1 2026.", ["F21", "F22"]),
-      { kind: "unknown_cause", text: "The data does not show why NVDA's gross margin fell.", evidence: ["F22"] },
-    ],
-    mutations: [
-      { name: "stated cause", list: [obs("NVDA's gross margin fell to [[F22]] in Q1 2026, driven by inventory charges.", ["F22"])], never_shown: "inventory charges" },
-      { name: "attribution without a claim", list: [{ kind: "management_attribution", text: "Management blamed inventory charges.", evidence: ["F22"] }], fails: { index: 0, check: "kind" } },
-    ],
+    plan: draft(["NVDA"], [
+      reported("a", "gp_q4", "gross_profit", fiscal(2025, "Q4")),
+      reported("a", "rev_q4", "revenue", fiscal(2025, "Q4")),
+      margin("gross_margin", "gm_q4", "gp_q4", "rev_q4"),
+      reported("a", "gp_q1", "gross_profit", fiscal(2026, "Q1")),
+      reported("a", "rev_q1", "revenue", fiscal(2026, "Q1")),
+      margin("gross_margin", "gm_q1", "gp_q1", "rev_q1"),
+      { node_id: "gm_change", operation: "absolute_change", current: "gm_q1", prior: "gm_q4" },
+    ], ["gm_q4", "gm_q1", "gm_change"]),
+    expect: {
+      companies: ["NVDA"],
+      route: "financial_answer",
+      financial: [
+        [NVIDIA, GROSS_MARGIN, "Q4 FY2025", "verified", "73.03%"],
+        [NVIDIA, GROSS_MARGIN, "Q1 FY2026", "verified", "60.52%"],
+        [NVIDIA, `Change in ${GROSS_MARGIN}`, "Q1 FY2026 vs Q4 FY2025", "verified", "-12.51%"],
+      ],
+    },
+    prose: "",
+    mutations: [{ name: "a stated cause", prose: "NVDA's gross margin fell to 60.5% in Q1 2026, driven by inventory charges.", never_shown: "inventory charges" }],
   },
   {
     id: "missing-cash-flow",
-    trap: "free cash flow is not in the data: a named gap, never a number in its place",
+    trap: "free cash flow is not in the data: a declared gap, never a number in its place",
     turns: ["What is AMD's free cash flow?"],
     scopes: [scope([], ["free_cash_flow"])],
-    expect: { companies: ["AMD"], gap: "Free cash flow is not available for AMD in this data", absent_kinds: ["metric_row", "revenue_bars"] },
-    prose: "Free cash flow is not available for AMD in this data.",
+    plan: draft(["AMD"], [
+      reported("a", "a_ocf", "operating_cash_flow", latest("annual")),
+      reported("a", "a_capex", "capex", latest("annual")),
+      { node_id: "a_fcf", operation: "free_cash_flow", operating_cash_flow: "a_ocf", capex: "a_capex" },
+    ], ["a_fcf"]),
+    expect: {
+      companies: ["AMD"],
+      route: "financial_answer",
+      financial: [
+        [AMD, "Operating cash flow", LATEST_YEAR, "missing", NOT_PUBLIC],
+        [AMD, "Capital expenditures (PP&E cash payments)", LATEST_YEAR, "missing", NOT_PUBLIC],
+        [AMD, "Free cash flow (OCF less PP&E cash capex)", LATEST_YEAR, "blocked_dependency", "A required input or calculation is unavailable."],
+      ],
+      absent_kinds: ["metric_row", "revenue_bars"],
+    },
+    prose: "",
     mutations: [
       { name: "a number in the gap's place", prose: "AMD's free cash flow was $3.1B in fiscal 2025.", never_shown: "$3.1B" },
     ],
@@ -158,14 +244,14 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
   },
   {
     id: "segment-definition",
-    trap: "a redefined segment shows its current definition's revenue; the obsolete definition's is not a cited value",
+    trap: "a redefined segment: the engine has no segment definition, so neither definition's revenue is shown",
     turns: ["Break down NVDA's revenue by segment."],
     scopes: [scope(["segments"], INCOME, ["revenue"])],
-    expect: { companies: ["NVDA"], route: "segments", shows: { block_title: "Revenue by segment (Q4 2026)", label: "Data Center", format: "$55.2B" } },
-    prose: "Data Center is most of NVDA's revenue.",
-    good: [obs("NVDA's Data Center revenue was [[F1]] in Q4 2026.", ["F1"])],
+    plan: { outcome: "unsupported", reason: "segment revenue has no approved definition" },
+    expect: { companies: [], financial_gap: "unsupported", absent_kinds: ["metric_row", "financial_answer"] },
+    prose: "",
     mutations: [
-      { name: "obsolete segment definition", list: [obs("NVDA's Data Center revenue was $50.0B in Q4 2026.", ["F1"])], never_shown: "$50.0B" },
+      { name: "obsolete segment definition", prose: "NVDA's Data Center revenue was $50.0B in Q4 2026.", never_shown: "$50.0B" },
     ],
   },
   {
@@ -178,22 +264,27 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
   },
   {
     id: "interior-extremum-and-trend",
-    trap: "a low inside the window, a rebound and net rise; an endpoint passed off as the low, a dropped quarter, a false every-quarter rise, a reversed direction",
+    trap: "a low inside the window, a rebound and net rise: every quarter is calculated, the low among them",
     turns: ["How have AMD's operating margins trended over the last eight quarters?"],
     scopes: [scope(["margins", "margin_trend"], INCOME, ["operating_income"])],
-    expect: { companies: ["AMD"], route: "trend", blocks: [{ kind: "metric_row", title: "Operating margin by quarter" }] },
-    prose: "AMD's operating margin dipped into a loss in Q2 2025 and recovered.",
-    good: [
-      cmp("lowest", "F29", AMD_OPERATING_MARGINS),
-      cmp("trend", "rebounded", AMD_OPERATING_MARGINS),
-      cmp("trend", "rose", AMD_OPERATING_MARGINS),
-    ],
-    mutations: [
-      { name: "endpoint as the low", list: [cmp("lowest", "F26", AMD_OPERATING_MARGINS)], fails: { index: 0, check: "comparative" } },
-      { name: "dropped quarter", list: [cmp("lowest", "F26", AMD_OPERATING_MARGINS.filter((id) => id !== "F29"))], fails: { index: 0, check: "comparative" } },
-      { name: "false every-quarter rise", list: [cmp("trend", "rose_throughout", AMD_OPERATING_MARGINS)], fails: { index: 0, check: "comparative" } },
-      { name: "reversed direction", list: [cmp("trend", "fell", AMD_OPERATING_MARGINS)], fails: { index: 0, check: "comparative" } },
-    ],
+    plan: draft(["AMD"], [7, 6, 5, 4, 3, 2, 1, 0].flatMap((offset) => amdOperatingMargin(latest("quarterly", offset), `q${offset}`)),
+      [7, 6, 5, 4, 3, 2, 1, 0].map((offset) => `om_q${offset}`)),
+    expect: {
+      companies: ["AMD"],
+      route: "financial_answer",
+      financial: [
+        [AMD, OPERATING_MARGIN, "fiscal quarter 7 before latest", "verified", "10.62%"],
+        [AMD, OPERATING_MARGIN, "fiscal quarter 6 before latest", "verified", "11.37%"],
+        [AMD, OPERATING_MARGIN, "fiscal quarter 5 before latest", "verified", "10.84%"],
+        [AMD, OPERATING_MARGIN, "fiscal quarter 4 before latest", "verified", "-1.74%"],
+        [AMD, OPERATING_MARGIN, "fiscal quarter 3 before latest", "verified", "13.74%"],
+        [AMD, OPERATING_MARGIN, "fiscal quarter 2 before latest", "verified", "14.08%"],
+        [AMD, OPERATING_MARGIN, "fiscal quarter 1 before latest", "verified", "14.21%"],
+        [AMD, OPERATING_MARGIN, "latest fiscal quarter", "verified", "14.38%"],
+      ],
+    },
+    prose: "",
+    mutations: [{ name: "a false every-quarter rise", prose: "AMD's operating margin rose in every quarter.", never_shown: "rose in every quarter" }],
   },
   {
     id: "comparison-follow-up-scope",
@@ -237,17 +328,18 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
   },
   {
     id: "filed-cause",
-    trap: "a cause in evidence is a cited management attribution; a missing or duplicate claim reference, or the cause stated as an observation",
+    trap: "a cause asked for: the margin is calculated, and the answer says the cause is not",
     turns: ["Why did AMD's operating margin turn negative in Q2 2025?"],
     scopes: [scope(["explains", "margins"], INCOME, ["operating_income"])],
-    expect: { companies: ["AMD"] },
-    prose: "AMD's results were impacted by charges it attributed to the MI308 export control.",
-    good: [{ kind: "management_attribution", text: MI308, evidence: ["C1"] }],
-    mutations: [
-      { name: "missing claim reference", list: [{ kind: "management_attribution", text: MI308, evidence: [] }], fails: { index: 0, check: "kind" } },
-      { name: "duplicate claim reference", list: [{ kind: "management_attribution", text: MI308, evidence: ["C1", "C1"] }], fails: { index: 0, check: "reference" } },
-      { name: "cause as an observation", list: [obs("AMD's revenue was [[F1]] in Q2 2026, driven by export controls.", ["F1"])], never_shown: "driven by export controls" },
-    ],
+    plan: draft(["AMD"], amdOperatingMargin(fiscal(2025, "Q2"), "q2"), ["om_q2"]),
+    expect: {
+      companies: ["AMD"],
+      route: "financial_answer",
+      financial: [[AMD, OPERATING_MARGIN, "Q2 FY2025", "verified", "-1.74%"]],
+      uncovered: "Not part of this calculation: the cause of these figures.",
+    },
+    prose: "",
+    mutations: [{ name: "the cause stated as an observation", prose: "AMD's revenue was $7.7B in Q2 2025, driven by export controls.", never_shown: "driven by export controls" }],
   },
 ];
 

@@ -40,7 +40,7 @@ import { HOLDOUT_CASES, HOLDOUT_VERSION, SYNTHETIC_CASES, SYNTHETIC_FIGURES, typ
 
 // The suite's identity: its version and the digest of every case, pinned so a
 // changed case is a new version, not a quiet edit (#221).
-const HOLDOUT_DIGEST = "sha256:3dcbfdbba7affe45db13e0093f4510608cee4fde1cd1b00da9fdd43f99966b10";
+const HOLDOUT_DIGEST = "sha256:2e4ef892e5e2ca0cfc4df26e6fb6a59f50446119963cd3dad8aa1f158954d6c4";
 
 test("the held-out suite is a fixed, versioned set of 10-12 cases (#221)", () => {
   assert.ok(HOLDOUT_CASES.length + 1 >= 10 && HOLDOUT_CASES.length + 1 <= 12, "10-12 cases, the synthetic set counted as one");
@@ -93,11 +93,13 @@ test("held-out research traps on the frozen dataset (#221)", { skip: !dockerAvai
     const verdicts = list.flatMap((assertion, index) =>
       assertion.kind === "analyst_inference" ? [{ id: index, verdict: judged[index] ?? "entailed", ...(judged[index] ? { reason: "recorded verdict" } : {}) }] : []
     );
-    // Each turn's scope first, matched by its quoted question alone. Then the
-    // judge's reply: its request quotes the inferences, not the question. Then
-    // the checked turn's: a later turn's request holds the earlier questions
-    // too, and the first match answers.
+    // The planner's reply first, matched by its request line; then each turn's
+    // scope, matched by its quoted question alone. Then the judge's reply: its
+    // request quotes the inferences, not the question. Then the checked
+    // turn's: a later turn's request holds the earlier questions too, and the
+    // first match answers.
     const recorded = [
+      ...(holdout.plan ? [{ match: `Request: ${holdout.turns.at(-1)!}\nRequested`, text: JSON.stringify(holdout.plan) }] : []),
       ...holdout.turns.map((turn, index) => ({ match: proposalQuestion(turn), text: JSON.stringify(holdout.scopes[index]) })),
       { match: "You check the analyst inferences", text: JSON.stringify({ verdicts }) },
       { match: holdout.turns.at(-1)!, text: reply },
@@ -155,6 +157,9 @@ function checkExpectations(holdout: HoldoutCase, completed: Record<string, unkno
     // ...and binds no company: no scope saved, or one covering none.
     const bound = (scope?.companies as unknown[] | undefined) ?? [];
     assert.deepEqual(bound, expect.companies, "a clarification binds no company");
+  } else if (expect.financial_gap) {
+    assert.deepEqual(completed.financial_gap, { reason_code: expect.financial_gap });
+    assert.equal(scope, null, "a gap saves no scope");
   } else {
     assert.ok(scope, "the answer saves its research scope");
     const labels = (scope.companies as Array<{ label?: string; issuer_id: string }>).map((company) =>
@@ -169,6 +174,21 @@ function checkExpectations(holdout: HoldoutCase, completed: Record<string, unkno
   }
   for (const kind of expect.absent_kinds ?? []) assert.equal(answer.blocks.some((block) => block.kind === kind), false, `no ${kind} is shown`);
   if (expect.gap) assert.ok(JSON.stringify(answer.blocks).includes(expect.gap), `the named gap: ${expect.gap}`);
+  if (expect.financial) {
+    const [block, ...notes] = answer.blocks;
+    assert.equal(block?.kind, "financial_answer", `expected the engine's answer; got [${answer.blocks.map((b) => b.kind).join(", ")}]`);
+    const financial = block.financial as {
+      labels: Record<string, { text: string }>;
+      results: Array<{ subject_label_id: string; measure_label_id: string; period_label_id: string; disposition: string; presented: { text: string } }>;
+    };
+    const label = (id: string) => financial.labels[id]!.text;
+    assert.deepEqual(
+      financial.results.map((result) => [label(result.subject_label_id), label(result.measure_label_id), label(result.period_label_id), result.disposition, result.presented.text]),
+      expect.financial,
+    );
+    const text = notes.map((note) => (note.segments as Array<{ text?: string }>).map((segment) => segment.text ?? "").join(""));
+    assert.deepEqual(text, expect.uncovered ? [expect.uncovered] : [], "the note naming what the plan does not cover");
+  }
   if (expect.ytd_range) {
     const chart = answer.blocks.find((block) => block.kind === "perf_comparison");
     assert.equal(chart?.default_range, expect.ytd_range);

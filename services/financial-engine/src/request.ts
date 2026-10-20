@@ -16,20 +16,6 @@ import { snapshotTransactionClient, type SnapshotTransactionClient } from "../..
 
 const LEASE_TTL_MS = 120_000;
 
-/** A surface's financial lane: off, or the engine's answer alone. */
-export type FinancialMode = "off" | "enforce";
-
-/**
- * Reads a surface's server-owned mode flag: unset is off. A value that is not a
- * mode is a configuration error, never a silent fallback to legacy numbers.
- */
-export function parseFinancialMode(value: string | undefined, name = "financial mode"): FinancialMode {
-  const mode = value?.trim() ?? "";
-  if (mode === "") return "off";
-  if (mode === "off" || mode === "enforce") return mode;
-  throw new Error(`${name} must be off or enforce (got ${JSON.stringify(value)})`);
-}
-
 /** Why a request did not publish; surfaces word these, they never invent their own. */
 export type RequestGap =
   | "planning_unavailable"

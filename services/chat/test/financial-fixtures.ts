@@ -9,7 +9,7 @@ import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { databaseUrl, engineDatabase, IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { createChatCoordinator, type ChatAnalystToolRuntime, type ChatTurnInput } from "../src/coordinator.ts";
-import { createChatFinancialRuntime, type ChatFinancialMode } from "../src/financial-runtime.ts";
+import { createChatFinancialRuntime } from "../src/financial-runtime.ts";
 import type { ChatSubjectPreResolution } from "../src/subjects.ts";
 import { readMessage } from "./read-message-fixture.ts";
 
@@ -87,7 +87,6 @@ export function chatHarness(
   pool: Pool,
   options: {
     model: PlanningModel | null;
-    mode?: ChatFinancialMode;
     analyst?: ChatAnalystToolRuntime;
     researchScope?: Parameters<typeof createChatFinancialRuntime>[0]["researchScope"];
     resolveMention?: typeof resolveMention;
@@ -101,7 +100,6 @@ export function chatHarness(
       return readMessage({ snapshot_id: randomUUID(), message_id: randomUUID(), thread_id: message.threadId });
     },
     financialRuntime: createChatFinancialRuntime({
-      mode: options.mode ?? "enforce",
       pool,
       planningModel: options.model,
       resolveMention: options.resolveMention ?? resolveMention,

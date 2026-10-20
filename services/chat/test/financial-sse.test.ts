@@ -22,7 +22,7 @@ test("financial answers over SSE", { timeout: 300_000 }, async (t) => {
   const coordinator = () => createChatCoordinator({
     analystToolRuntime: forbiddenAnalyst,
     persistAssistantMessage: async ({ threadId }) => readMessage({ snapshot_id: randomUUID(), message_id: randomUUID(), thread_id: threadId }),
-    financialRuntime: createChatFinancialRuntime({ mode: "enforce", pool, planningModel: model, resolveMention, evidence: createEvidenceFinancialPort }),
+    financialRuntime: createChatFinancialRuntime({ pool, planningModel: model, resolveMention, evidence: createEvidenceFinancialPort }),
   });
   const base = await startChatTestServer(t, { coordinator: coordinator() });
   /** Reads the stream until the turn ends (the server keeps it open with heartbeats), keeping only turn events. */
@@ -115,7 +115,7 @@ test("financial answers over SSE", { timeout: 300_000 }, async (t) => {
     const server = await startChatTestServer(t, {
       coordinator: createChatCoordinator({
         analystToolRuntime: forbiddenAnalyst,
-        financialRuntime: createChatFinancialRuntime({ mode: "enforce", pool: failingReads, planningModel: model, resolveMention, evidence: createEvidenceFinancialPort }),
+        financialRuntime: createChatFinancialRuntime({ pool: failingReads, planningModel: model, resolveMention, evidence: createEvidenceFinancialPort }),
       }),
     });
     const { events } = await stream(randomUUID(), {}, server);

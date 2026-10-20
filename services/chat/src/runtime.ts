@@ -19,7 +19,8 @@ export async function loadChatServerOptionsFromEnv(
   }
 
   const runtime = await import("./local-runtime.ts");
-  // With the lane on, the server does not start until verified finance is ready.
+  // Metric questions are answered only by the engine, so the server does not
+  // start until verified finance is ready.
   await runtime.financialRuntime.assertReady();
   return {
     ...options,

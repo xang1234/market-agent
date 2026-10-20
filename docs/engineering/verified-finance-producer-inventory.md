@@ -174,7 +174,7 @@ foundations are in place:
 
   | Surface | Flag | What is certified | Parent write in finalization |
   |---|---|---|---|
-  | Chat | `CHAT_FINANCIAL_MODE` | Model-planned requests over resolved subjects | Assistant message |
+  | Chat | None: always on for questions that name a metric | Model-planned requests over resolved subjects | Assistant message |
   | Analyze | None: always on | One deterministic plan per memo, one unit per numerical section | `analyze_run_financial_sections` row (0049) |
   | Grids | None: always enforced | One plan per run, one unit per numerical cell | Cell write and progress count (0050) |
   | Thesis | None: always enforced | One plan per saved metric condition | Current-version check under the agent lock |
@@ -281,7 +281,7 @@ enforced, those values appear as declared gaps rather than numbers.
 | Reauthorization on every read and replay | Already in place since T17/T18 (`inspection.ts`, `read-model.ts`, `replay.ts`). T28 adds erased results, which read as unavailable. |
 | Safe logs | Run events carry only counts, lease epochs, digests, coverage states, and reason codes. The engine writes no console output. |
 | `services/dev-api/src/main.ts` | The entry point is `services/dev-api/src/dev.ts`. The readiness gate is in `runtime.ts` (`createDevApiRuntimeFromEnv`), before any lane or the worker starts. Chat (`runtime.ts` via `ChatFinancialRuntime.assertReady`) and analyst-grids (`dev.ts`) gate their own startup. |
-| `services/dev-api/src/financial-env.ts` scope | It holds the dev API's surfaces (analyze, worker). Thesis has no flag: its numerical conditions always run on the engine, so startup readiness always includes it. Chat reads `CHAT_FINANCIAL_MODE` in its own service with the same strict parser. Grids have no flag. Discovery has no finance flag: its numerical criteria always run on the engine, and only `DISCOVERY_ENABLED` starts it. |
+| `services/dev-api/src/financial-env.ts` scope | It holds the dev API's surfaces (analyze, worker). Thesis has no flag: its numerical conditions always run on the engine, so startup readiness always includes it. Chat has no flag: its metric questions always run on the engine, and it checks readiness in its own service. Grids have no flag. Discovery has no finance flag: its numerical criteria always run on the engine, and only `DISCOVERY_ENABLED` starts it. |
 | `db/test/schema-openapi-alignment.test.ts` | Covered by `scripts/openapi-contract.test.ts` (Wave 3), which now runs in CI in the new `scripts` job. |
 | Readiness: definition catalog in the database | `financial_definition_versions` is not populated by any writer; definitions are compiled in. Readiness checks the compiled registry against everything the build emits. |
 | T30 file layout | Held-out questions and their recorded drafts live in `scripts/verified-finance-fixtures.ts` beside the golden cases and mutants, so one fixture revision hash covers all of them. |

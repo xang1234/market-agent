@@ -18,12 +18,11 @@ test("financial intent is recognized from the definition catalog", () => {
   for (const text of ["tell me about AAA", "what is the latest news", "who is the CEO"]) assert.ok(!isFinancialRequest(text), text);
 });
 
-test("with the lane on, an unready engine stops the server instead of leaving turns on legacy numbers", async () => {
+test("an unready engine stops the server instead of leaving metric questions on legacy numbers", async () => {
   // A database missing every financial table: every readiness check reports absent.
   const unready = { query: async () => ({ rows: [{ kind: "relation", name: "financial_runs", present: false }] }), connect: async () => assert.fail("no turn runs") } as unknown as FinancialPool;
-  const lane = (mode: "off" | "enforce") => createChatFinancialRuntime({ mode, pool: unready, planningModel: null, resolveMention: async () => assert.fail("no turn runs"), evidence: createEvidenceFinancialPort });
-  await assert.rejects(() => lane("enforce").assertReady(), /verified finance is not ready for chat: schema: relation financial_runs is missing/u);
-  await lane("off").assertReady();
+  const lane = createChatFinancialRuntime({ pool: unready, planningModel: null, resolveMention: async () => assert.fail("no turn runs"), evidence: createEvidenceFinancialPort });
+  await assert.rejects(() => lane.assertReady(), /verified finance is not ready for chat: schema: relation financial_runs is missing/u);
 });
 
 test("chat financial lane", { timeout: 300_000 }, async (t) => {
@@ -196,9 +195,9 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     };
     await chatHarness(pool, { model: revenueModel([]), analyst }).run({ ...base, userIntent: "tell me about AAA" });
     assert.equal(analystCalls, 1);
-    const off = chatHarness(pool, { model: revenueModel(["AAA"]), mode: "off", analyst });
-    await off.run({ ...base, userIntent: "Revenue for AAA" });
-    assert.equal(analystCalls, 2, "the lane is off: financial requests stay on the existing path");
+    const { events } = await chatHarness(pool, { model: revenueModel(["AAA"]), analyst }).run({ ...base, userIntent: "Revenue for AAA" });
+    assert.equal(completed(events).bundle_id, "financial_answer");
+    assert.equal(analystCalls, 1, "a metric question always reaches the engine, never the analyst");
   });
 
   await t.test("a retried turn resumes its reserved run and publishes one message", async () => {

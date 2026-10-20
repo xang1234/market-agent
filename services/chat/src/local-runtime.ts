@@ -16,7 +16,6 @@ import { STAGED_SNAPSHOT_MANIFEST } from "../../snapshot/src/manifest-staging.ts
 import { sealSnapshotWithPool } from "../../snapshot/src/snapshot-sealer.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { planningModelFromRouter } from "../../financial-engine/src/planner.ts";
-import { parseFinancialMode } from "../../financial-engine/src/request.ts";
 import { createLlmRouterFromEnv } from "../../llm/src/index.ts";
 import {
   createRegistryBackedAnalystToolRuntime,
@@ -484,7 +483,6 @@ export async function financialResearchScope(context: ChatFinancialTurnContext):
 }
 
 export const financialRuntime: ChatFinancialRuntime = createChatFinancialRuntime({
-  mode: parseFinancialMode(process.env.CHAT_FINANCIAL_MODE, "CHAT_FINANCIAL_MODE"),
   pool: { query: (text, values) => pool().query(text, values), connect: () => pool().connect() },
   planningModel: async (request) => {
     const router = await createLlmRouterFromEnv(process.env);
