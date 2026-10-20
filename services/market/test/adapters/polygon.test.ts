@@ -808,6 +808,8 @@ test("polygon splits reject a malformed page or row instead of skipping it", asy
     [{ status: "OK", results: [{ ...split, ticker: "NVDL" }] }, /splits for NVDA include a row for NVDL/],
     [{ status: "OK", results: [{ ...split, id: "" }] }, /NVDA split 2024-06-10 has no id/],
     [{ status: "OK", results: [split, { ...split, id: "E-other", split_to: 4 }] }, /conflicting NVDA splits on 2024-06-10/],
+    // A next_url that is not a URL would otherwise end the list early, as complete.
+    [{ status: "OK", results: [split], next_url: 42 }, /next_url is not a string: 42/],
   ];
   for (const [page, message] of cases) {
     const { fetcher } = splitsFetcher({ [NVDA_SPLITS_PATH]: page });

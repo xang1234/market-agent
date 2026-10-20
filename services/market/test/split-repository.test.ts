@@ -137,6 +137,26 @@ test("listing splits sync and the split sync CLI", { timeout: 180_000 }, async (
     assert.deepEqual(await loadListingSplits(db, LISTINGS.nvda), before);
   });
 
+  await t.test("a sync waits for another sync of the same listing to commit", async () => {
+    // Each sync replaces the rows its own snapshot sees, so two at once would keep both lists.
+    const holder = await db.connect();
+    try {
+      await holder.query("begin");
+      await holder.query("select pg_advisory_xact_lock(hashtextextended($1::text, 0))", [LISTINGS.amd]);
+      let done = false;
+      const sync = syncListingSplits(db, polygonSplits({ AMD: [] }), { listing_id: LISTINGS.amd, ticker: "AMD" }).then(() => {
+        done = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal(done, false, "the sync waited for the listing's lock");
+      await holder.query("commit");
+      await sync;
+      assert.equal(done, true);
+    } finally {
+      holder.release();
+    }
+  });
+
   await t.test("a listing checked with no splits reads as checked and split-free", async () => {
     await syncListingSplits(db, polygonSplits({ AMD: [] }), { listing_id: LISTINGS.amd, ticker: "AMD" }, at("2026-10-05T12:00:00.000Z"));
     assert.deepEqual(await loadListingSplits(db, LISTINGS.amd), {
