@@ -17,14 +17,17 @@ test("the SEC statements backfill never fetches for the frozen golden dataset", 
   const db = await connectedPool(t, databaseUrl);
   await seedGoldenDataset(await connectedClient(t, databaseUrl));
   await db.query(`insert into issuers (issuer_id, legal_name, cik) values ($1, 'Live Corp', '789019')`, [LIVE_ISSUER_ID]);
-  await db.query(
-    `insert into facts (subject_kind, subject_id, metric_id, period_kind, period_start, period_end, fiscal_year, fiscal_period,
-                        value_num, unit, currency, scale, as_of, observed_at, source_id, method, verification_status, freshness_class, coverage_level, confidence)
-     select 'issuer', $1, metric_id, 'fiscal_y', '2023-07-01', '2024-06-30', 2024, 'FY', 245122000000, 'currency', 'USD', 1,
-            '2024-08-01T00:00:00Z', '2024-08-01T00:00:00Z', $2, 'reported', 'authoritative', 'filing_time', 'full', 1
-       from metrics where metric_key = 'revenue'`,
-    [LIVE_ISSUER_ID, SEC_EDGAR_FILING_SOURCE_ID],
-  );
+  // A live SEC fact for a golden issuer too, so only the frozen-issuer guard keeps its CIK from being fetched.
+  for (const issuerId of [LIVE_ISSUER_ID, GOLDEN_COMPANIES[0]!.issuer_id]) {
+    await db.query(
+      `insert into facts (subject_kind, subject_id, metric_id, period_kind, period_start, period_end, fiscal_year, fiscal_period,
+                          value_num, unit, currency, scale, as_of, observed_at, source_id, method, verification_status, freshness_class, coverage_level, confidence)
+       select 'issuer', $1, metric_id, 'fiscal_y', '2023-07-01', '2024-06-30', 2024, 'FY', 245122000000, 'currency', 'USD', 1,
+              '2024-08-01T00:00:00Z', '2024-08-01T00:00:00Z', $2, 'reported', 'authoritative', 'filing_time', 'full', 1
+         from metrics where metric_key = 'revenue'`,
+      [issuerId, SEC_EDGAR_FILING_SOURCE_ID],
+    );
+  }
   const goldenIds = GOLDEN_COMPANIES.map((company) => company.issuer_id);
   const goldenFacts = async () => (await db.query(
     `select fact_id::text, value_num::text, invalidated_at from facts where subject_id = any($1::uuid[]) order by fact_id`,
