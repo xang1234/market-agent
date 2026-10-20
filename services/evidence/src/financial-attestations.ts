@@ -24,6 +24,7 @@ export const PUBLICATION_PROOF_METHODS = Object.freeze([
   "controlled_public_fetch",
   "provider_publication_mapping",
   "accession_bound_archive",
+  "fixture_declaration",
 ] as const);
 export type PublicationProofMethod = (typeof PUBLICATION_PROOF_METHODS)[number];
 

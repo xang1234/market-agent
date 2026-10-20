@@ -50,6 +50,26 @@ test("financial attestation writers", { timeout: 180_000 }, async (t) => {
     await assert.rejects(() => recordSourcePublicationAttestation(db, publicationInput({ proof_hash: "short" })), /proof_hash/);
   });
 
+  await t.test("a fixture_declaration proof attests only a golden fixture source", async () => {
+    await assert.rejects(
+      () => recordSourcePublicationAttestation(db, publicationInput({ proof_method: "fixture_declaration" })),
+      /a fixture_declaration proof may only attest a golden_fixture source/,
+    );
+    const fixtureSource = "1f000000-0000-4000-8000-0000000000c4";
+    const fixtureHash = "6".repeat(64);
+    await db.query(
+      `insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at, content_hash)
+       values ($1, 'golden_fixture', 'filing', 'primary', 'internal', '2024-02-01T00:00:00Z', $2)`,
+      [fixtureSource, `sha256:${fixtureHash}`],
+    );
+    const accepted = await recordSourcePublicationAttestation(
+      db,
+      publicationInput({ proof_method: "fixture_declaration", source_id: fixtureSource, source_version_hash: fixtureHash }),
+    );
+    const stored = (await db.query(`select proof_method from source_publication_attestations where attestation_id = $1`, [accepted.attestation_id])).rows[0];
+    assert.equal(stored.proof_method, "fixture_declaration");
+  });
+
   await t.test("corrections supersede the same source version and leave the original intact", async () => {
     const original = await recordSourcePublicationAttestation(db, publicationInput({ proof_ref: "original" }));
     const corrected = await supersedeSourcePublicationAttestation(

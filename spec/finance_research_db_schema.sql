@@ -1286,7 +1286,7 @@ create table source_publication_attestations (
   available_no_later_than timestamptz not null,
   timing_precision text not null check (timing_precision in ('instant', 'date', 'observed_public')),
   source_timezone text not null check (length(btrim(source_timezone)) > 0),
-  proof_method text not null check (proof_method in ('controlled_public_fetch', 'provider_publication_mapping', 'accession_bound_archive')),
+  proof_method text not null check (proof_method in ('controlled_public_fetch', 'provider_publication_mapping', 'accession_bound_archive', 'fixture_declaration')),
   proof_ref text not null check (length(btrim(proof_ref)) > 0),
   proof_hash text not null check (proof_hash ~ '^[0-9a-f]{64}$'),
   mapping_version text not null check (length(btrim(mapping_version)) > 0),
@@ -1301,6 +1301,20 @@ create index source_publication_attestations_version_idx on source_publication_a
 create trigger source_publication_attestations_append_only
 before update on source_publication_attestations
 for each row execute function prevent_financial_record_update();
+create function require_fixture_source_for_fixture_proof() returns trigger
+language plpgsql
+as $$
+begin
+  if new.proof_method = 'fixture_declaration'
+     and not exists (select 1 from sources where source_id = new.source_id and provider = 'golden_fixture') then
+    raise exception 'a fixture_declaration proof may only attest a golden_fixture source';
+  end if;
+  return new;
+end;
+$$;
+create trigger source_publication_attestations_fixture_source
+before insert on source_publication_attestations
+for each row execute function require_fixture_source_for_fixture_proof();
 
 create table fact_precision_attestations (
   precision_attestation_id uuid primary key default gen_random_uuid(),
