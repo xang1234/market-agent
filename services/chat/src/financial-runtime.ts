@@ -60,6 +60,7 @@ export type ChatFinancialTurnContext = ChatTurnRunContext & { clarificationAnswe
 export type ChatFinancialRuntime = Readonly<{
   /** Whether this lane takes the turn. Cheap and synchronous, so the stream can say so before any work. */
   answers(context: ChatFinancialTurnContext): boolean;
+  /** The lane's outcome. Call only after answers(context); it throws otherwise. */
   run(context: ChatFinancialTurnContext): Promise<ChatFinancialTurn>;
   /** Throws unless verified finance is ready; the server awaits it before serving turns with the lane on. */
   assertReady(): Promise<void>;
