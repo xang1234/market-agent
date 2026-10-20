@@ -7,18 +7,21 @@ import { isStreamingRichText, type StreamingBlock } from './streamReducer.ts'
 
 type StreamingBlockViewProps = {
   block: StreamingBlock
+  // Null when the turn streams without a seal. Of those, only display_unverified
+  // answers (development only) hold figures, and those inspect nothing.
+  snapshotId: string | null
 }
 
 // Skeleton until content arrives, then progressive rendering for rich_text
 // (the only kind that streams via deltas; other kinds hold the skeleton
 // until block.completed lands and the canonical block arrives via the
 // message channel).
-function StreamingBlockViewInner({ block }: StreamingBlockViewProps): ReactElement {
+function StreamingBlockViewInner({ block, snapshotId }: StreamingBlockViewProps): ReactElement {
   if (isStreamingRichText(block)) {
     if (block.segments.length === 0) {
       return <BlockSkeleton blockId={block.block_id} kind="rich_text" />
     }
-    return <StreamingRichTextBlock blockId={block.block_id} segments={block.segments} status={block.status} />
+    return <StreamingRichTextBlock blockId={block.block_id} snapshotId={snapshotId ?? ''} segments={block.segments} status={block.status} />
   }
   return <BlockSkeleton blockId={block.block_id} kind={block.kind} />
 }
@@ -31,6 +34,7 @@ export const StreamingBlockView = memo(StreamingBlockViewInner)
 
 type StreamingRichTextBlockProps = {
   blockId: string
+  snapshotId: string
   segments: RichTextBlock['segments']
   status: string
 }
@@ -39,19 +43,18 @@ type StreamingRichTextBlockProps = {
 // reference across renders that don't change segments — pairs with the memo
 // on StreamingBlockView to keep RichText off the hot path during deltas to
 // other blocks.
-function StreamingRichTextBlock({ blockId, segments, status }: StreamingRichTextBlockProps): ReactElement {
+function StreamingRichTextBlock({ blockId, snapshotId, segments, status }: StreamingRichTextBlockProps): ReactElement {
   const richTextBlock = useMemo<RichTextBlock>(
     () => ({
       id: blockId,
       kind: 'rich_text',
-      // No snapshot exists yet, so these hold stream-marker values.
-      snapshot_id: '',
+      snapshot_id: snapshotId,
       data_ref: { kind: STREAMING_DATA_REF_KIND, id: blockId },
       source_refs: [],
       as_of: '',
       segments,
     }),
-    [blockId, segments],
+    [blockId, snapshotId, segments],
   )
   return (
     <div data-testid={`streaming-block-${blockId}`} data-block-status={status}>

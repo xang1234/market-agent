@@ -59,6 +59,7 @@ test('PendingTurnView renders the agent plan panel above streamed blocks', () =>
         status: 'waiting',
       },
     ],
+    snapshot_id: null,
     error: null,
   }
 
@@ -88,6 +89,7 @@ test('PendingTurnView shows an unverified turn with a per-block label and collap
     blocks_by_id: new Map(),
     block_order: [],
     plan_steps: [],
+    snapshot_id: null,
     error: null,
     unverified: {
       failures: [{ reason_code: 'missing_fact_ref', details: { fact_id: 'f-1' } }],
@@ -118,6 +120,7 @@ const STREAMED: StreamState = {
   block_order: ['b1'],
   plan_steps: [],
   message_id: 'a1',
+  snapshot_id: null,
   error: 'turn.completed carried no valid sealed message',
 }
 
@@ -192,6 +195,7 @@ test('a sealed answer shown while the judge reads its inferences renders as the 
     blocks_by_id: new Map(),
     block_order: [],
     plan_steps: [{ step_id: 'planner', label: 'Planner', detail: 'Planning.', status: 'done' }],
+    snapshot_id: null,
     error: null,
     shown: { message_id: 'a1', snapshot_id: '22222222-2222-4222-a222-222222222222', blocks: [answer], block_proofs: proofs },
   }
