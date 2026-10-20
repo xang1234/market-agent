@@ -172,7 +172,8 @@ async function planTurn(
 ): Promise<PlanningResult> {
   const mentions = requestedMentions(context, text);
   const resolutions = await Promise.all(mentions.map(async (mention) => ({ mention, resolution: await deps.resolveMention(mention) })));
-  const requested = resolutions.map(({ mention, resolution }): RequestedSubject => ({ mention, resolution: requestedResolution(resolution) }));
+  const issuers = await issuersOf(db, resolutions.map(({ resolution }) => resolution));
+  const requested = resolutions.map(({ mention, resolution }): RequestedSubject => ({ mention, resolution: requestedResolution(resolution, issuers) }));
   const planningContext = (subjects: ReadonlyArray<RequestedSubject>): PlanningContext => ({
     plan_id: randomUUID(),
     origin: { kind: "chat_request", ref: `chat:${context.threadId}:${context.turnId ?? context.runId}` },
@@ -188,11 +189,11 @@ async function planTurn(
   });
 
   // One entry per company: "NVIDIA" (the page) and "NVDA" (the message) are one.
-  let subjects = distinctRequested(await asIssuers(db, requested));
+  let subjects = distinctRequested(requested);
   if (context.clarificationAnswer) {
     // The chosen company may already be requested (the explicit subject), so
     // de-duplicate again once the answer resolves the ambiguous mention.
-    subjects = distinctRequested(await asIssuers(db, await applyAnswer(subjects, context.clarificationAnswer, planningContext, text)));
+    subjects = distinctRequested(await applyAnswer(subjects, context.clarificationAnswer, planningContext, text));
   }
   if (CASH_RESILIENCE.test(text)) return planCashResilience(planningContext(subjects), text);
   // A failing or unreachable model is a planning gap (publishRequest); the narrative composer is never a fallback for numbers.
@@ -260,47 +261,46 @@ const noModel: PlanningModel = async () => {
   throw new Error("no planning model is configured");
 };
 
-function requestedResolution(resolution: ChatSubjectPreResolution): RequestedSubject["resolution"] {
+function requestedResolution(resolution: ChatSubjectPreResolution, issuers: IssuerOf): RequestedSubject["resolution"] {
   if (resolution.status === "resolved") {
-    const ref = financialRef(resolution.subject_ref);
+    const ref = issuers(resolution.subject_ref);
     return ref ? { status: "resolved", subject_ref: ref, label: resolution.display_label } : { status: "not_found" };
   }
   if (resolution.status === "needs_clarification") {
+    const seen = new Set<string>();
     const options = resolution.candidates.flatMap((candidate) => {
-      const ref = financialRef(candidate.subject_ref);
-      return ref ? [{ subject_ref: ref, label: candidate.display_name }] : [];
+      const ref = issuers(candidate.subject_ref);
+      // Two listings of one company are one choice.
+      if (!ref || seen.has(ref.id)) return [];
+      seen.add(ref.id);
+      return [{ subject_ref: ref, label: candidate.display_name }];
     });
     return options.length > 0 ? { status: "ambiguous", options } : { status: "not_found" };
   }
   return { status: "not_found" };
 }
 
-function financialRef(ref: { kind: string; id: string }): FinancialSubjectRef | null {
-  return ref.kind === "issuer" || ref.kind === "listing" ? { kind: ref.kind, id: ref.id } : null;
-}
+type IssuerOf = (ref: { kind: string; id: string }) => FinancialSubjectRef | null;
 
 // The engine reads a company's facts under its issuer, and the resolver
-// offers a listing for a ticker; a clarification choice is a bare ref with no
-// handoff (#154).
-async function asIssuers(db: SqlExecutor, subjects: ReadonlyArray<RequestedSubject>): Promise<ReadonlyArray<RequestedSubject>> {
-  const listingIds = subjects.flatMap((subject) =>
-    subject.resolution.status === "resolved" && subject.resolution.subject_ref.kind === "listing" ? [subject.resolution.subject_ref.id] : []);
-  if (listingIds.length === 0) return subjects;
-  const { rows } = await db.query<{ listing_id: string; issuer_id: string }>(
+// offers a listing for a ticker (#154): each listing is planned on its issuer,
+// so a clarification offers issuers too. Any other subject is not a company.
+async function issuersOf(db: SqlExecutor, resolutions: ReadonlyArray<ChatSubjectPreResolution>): Promise<IssuerOf> {
+  const refs = resolutions.flatMap((resolution) => resolution.status === "resolved"
+    ? [resolution.subject_ref]
+    : resolution.status === "needs_clarification" ? resolution.candidates.map((candidate) => candidate.subject_ref) : []);
+  const listingIds = refs.flatMap((ref) => ref.kind === "listing" ? [ref.id] : []);
+  const { rows } = listingIds.length === 0 ? { rows: [] } : await db.query<{ listing_id: string; issuer_id: string }>(
     `select l.listing_id::text as listing_id, i.issuer_id::text as issuer_id
        from listings l join instruments i on i.instrument_id = l.instrument_id
       where l.listing_id = any($1::uuid[])`,
     [listingIds],
   );
   const issuerOf = new Map(rows.map((row) => [row.listing_id, row.issuer_id]));
-  return subjects.map((subject): RequestedSubject => {
-    if (subject.resolution.status !== "resolved" || subject.resolution.subject_ref.kind !== "listing") return subject;
-    const issuerId = issuerOf.get(subject.resolution.subject_ref.id.toLowerCase());
-    return {
-      mention: subject.mention,
-      resolution: issuerId ? { ...subject.resolution, subject_ref: { kind: "issuer", id: issuerId } } : { status: "not_found" },
-    };
-  });
+  return (ref) => {
+    const id = ref.kind === "issuer" ? ref.id : ref.kind === "listing" ? issuerOf.get(ref.id.toLowerCase()) : undefined;
+    return id === undefined ? null : { kind: "issuer", id };
+  };
 }
 
 // One entry per company, the earlier one kept.

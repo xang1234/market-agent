@@ -86,6 +86,11 @@ test("financial clarifications", { timeout: 300_000 }, async (t) => {
     const run = (clarificationAnswer?: { clarification_id: string; choice_id: string }) =>
       chatHarness(pool, { model: revenueModel(["AMBL"]) }).run({ threadId, userId: IDS.owner, userIntent: "Revenue for AMBL", ...(clarificationAnswer ? { clarificationAnswer } : {}) });
     const asked = completed((await run()).events).financial_clarification as Offered;
+    // The listing is offered as its issuer, once, though the resolver names the company twice.
+    assert.deepEqual(asked.choices.map((choice) => [choice.choice_id, choice.label]), [
+      [`issuer:${IDS.issuerA}`, "Alpha Industries Inc. (XNAS)"],
+      [`issuer:${IDS.issuerB}`, "Beta Holdings Corp."],
+    ]);
     const listing = asked.choices.find((choice) => choice.label === "Alpha Industries Inc. (XNAS)")!;
     const done = completed((await run({ clarification_id: asked.clarification_id, choice_id: listing.choice_id })).events);
     assert.ok(done.message_id && !done.clarification, JSON.stringify(done));

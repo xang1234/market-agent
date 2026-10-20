@@ -80,7 +80,7 @@
       "additionalProperties": false,
       "required": ["kind", "id"],
       "properties": {
-        "kind": { "enum": ["issuer", "listing"] },
+        "kind": { "const": "issuer" },
         "id": { "$ref": "#/$defs/UUID" }
       }
     },
