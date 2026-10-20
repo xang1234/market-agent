@@ -14,9 +14,9 @@ import { createReplay, type Replay, type ReplayStore } from "../src/replayCore.t
 type Handler = (req: IncomingMessage, res: ServerResponse) => void;
 
 // sessionStorage's part a replay uses, in memory: each replay built on it is a reload.
-function memoryStore(): ReplayStore {
+function memoryStore(): ReplayStore & { items: Map<string, string> } {
   const items = new Map<string, string>();
-  return { getItem: (key) => items.get(key) ?? null, setItem: (key, value) => void items.set(key, value) };
+  return { items, getItem: (key) => items.get(key) ?? null, setItem: (key, value) => void items.set(key, value) };
 }
 
 async function serve(t: TestContext, handler: Handler): Promise<string> {
@@ -228,6 +228,49 @@ test("replay kept in a store picks up where it left off after a reload", () => {
   assert.deepEqual(JSON.parse(ask(reloaded, "GET", `/v1/chat/threads/${thread}/messages`)!.body), { messages: [myMsg] });
   assert.equal(ask(reloaded, "POST", `/v1/chat/threads/${thread}/messages`, { message_id: mySecond, content: "Compare AMD" })!.body, json({ message_id: mySecond }));
   assert.deepEqual(JSON.parse(ask(reloaded, "GET", `/v1/chat/threads/${thread}/messages`)!.body), { messages: [myMsg, mySecond] });
+});
+
+// FIXTURE's turn, played on a page whose replay keeps its session in `store`.
+function playTurn(store: ReplayStore) {
+  const page = createReplay(FIXTURE, store);
+  page({ method: "POST", path: "/v1/chat/threads", query: "", body: json({ title: "" }) });
+  page({ method: "POST", path: `/v1/chat/threads/${THREAD}/messages`, query: "", body: json({ message_id: USER_MSG, snapshot_id: USER_SNAP, content: intent }) });
+  page({ method: "GET", path: `/v1/chat/threads/${THREAD}/stream`, query: streamQuery, body: "" });
+}
+
+// The message ids a reloaded page reads for `thread`.
+const reloadedMessageIds = (fixture: ReplayFixture, store: ReplayStore, thread = THREAD) =>
+  (JSON.parse(createReplay(fixture, store)({ method: "GET", path: `/v1/chat/threads/${thread}/messages`, query: "", body: "" })!.body) as {
+    messages: { message_id: string }[];
+  }).messages.map(({ message_id }) => message_id);
+
+test("a session saved against another recording of the same length is ignored", () => {
+  const store = memoryStore();
+  playTurn(store);
+  assert.deepEqual(reloadedMessageIds(FIXTURE, store), [USER_MSG, ANSWER]);
+
+  // The same conversation captured again: the server issued another thread id.
+  const RECAPTURED = "12121212-1212-4212-8212-121212121212";
+  const recaptured = JSON.parse(json(FIXTURE).replaceAll(THREAD, RECAPTURED)) as ReplayFixture;
+  assert.deepEqual(reloadedMessageIds(recaptured, store, RECAPTURED), [], "the recapture starts over");
+});
+
+test("a saved session that doesn't parse, or isn't one this replay saved, counts as none", () => {
+  const store = memoryStore();
+  playTurn(store);
+  const [[key, saved]] = [...store.items];
+  for (const stored of [
+    "{",
+    "null",
+    // The shape before sessions had a version.
+    json({ fixtureSize: FIXTURE.exchanges.length, cursor: 3, used: [0, 2, 3], aliases: [] }),
+    json({ ...JSON.parse(saved!), aliases: null }),
+  ]) {
+    store.items.set(key!, stored);
+    assert.deepEqual(reloadedMessageIds(FIXTURE, store), [], stored);
+  }
+  store.items.set(key!, saved!);
+  assert.deepEqual(reloadedMessageIds(FIXTURE, store), [USER_MSG, ANSWER], "the session as saved still counts");
 });
 
 test("a reload between turns of the golden conversation shows the thread as it stood", async () => {

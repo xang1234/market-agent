@@ -35,16 +35,36 @@ export type ReplayStore = {
   setItem(key: string, value: string): void;
 };
 
-// `aliases` logs each (recorded id, actual id) pair in the order the replay learned or
-// issued it. Both lookup maps are rebuilt from it, so they can't disagree after a reload.
+// `recording` names the fixture the indices point into. `aliases` logs each (recorded id,
+// actual id) pair in the order the replay learned or issued it. Both lookup maps are
+// rebuilt from it, so they can't disagree after a reload.
 type Session = {
-  fixtureSize: number;
+  version: typeof SESSION_VERSION;
+  recording: string;
   cursor: number;
   used: number[];
   aliases: [recorded: string, actual: string][];
 };
 
 const SESSION_KEY = "market-agent.replay-session";
+const SESSION_VERSION = 2;
+
+// The store outlives this code and can hold anything: a saved session counts only if it
+// parses and this version of the replay saved it against this recording.
+function readSession(saved: string | null, recording: string): Session | undefined {
+  let session: Partial<Session> | null;
+  try {
+    session = JSON.parse(saved ?? "null") as Partial<Session> | null;
+  } catch (error) {
+    if (error instanceof SyntaxError) return undefined;
+    throw error;
+  }
+  const isIndex = (value: unknown) => Number.isInteger(value) && (value as number) >= -1;
+  const isAlias = (pair: unknown) => Array.isArray(pair) && pair.length === 2 && pair.every((id) => typeof id === "string");
+  const valid = session?.version === SESSION_VERSION && session.recording === recording && isIndex(session.cursor) &&
+    Array.isArray(session.used) && session.used.every(isIndex) && Array.isArray(session.aliases) && session.aliases.every(isAlias);
+  return valid ? (session as Session) : undefined;
+}
 
 export function parseReplayFixture(json: unknown, source: string): ReplayFixture {
   const fixture = json as Partial<ReplayFixture> | null;
@@ -89,9 +109,10 @@ const issuedThreadId = (e: RecordedExchange) =>
 // picked up by the next replay built on that store.
 export function createReplay(fixture: ReplayFixture, store?: ReplayStore): Replay {
   const exchanges = fixture.exchanges;
-  const saved = JSON.parse(store?.getItem(SESSION_KEY) ?? "null") as Session | null;
-  // A session saved against another recording would point at the wrong exchanges.
-  const session = saved?.fixtureSize === exchanges.length ? saved : { cursor: -1, used: [], aliases: [] };
+  // Every capture's new thread gets a fresh server id, so a recapture of the same length
+  // still differs, and a session saved against it is not resumed here.
+  const recording = `${exchanges.map(issuedThreadId).find(Boolean) ?? ""}/${exchanges.length}`;
+  const session = readSession(store?.getItem(SESSION_KEY) ?? null, recording) ?? { cursor: -1, used: [], aliases: [] };
   const recordedToActual = new Map<string, string>();
   const actualToRecorded = new Map<string, string>();
   const aliases: Session["aliases"] = [];
@@ -105,7 +126,7 @@ export function createReplay(fixture: ReplayFixture, store?: ReplayStore): Repla
   const used = new Set<number>(session.used);
   let cursor = session.cursor;
   const save = () => {
-    const next: Session = { fixtureSize: exchanges.length, cursor, used: [...used], aliases };
+    const next: Session = { version: SESSION_VERSION, recording, cursor, used: [...used], aliases };
     store?.setItem(SESSION_KEY, JSON.stringify(next));
   };
 
