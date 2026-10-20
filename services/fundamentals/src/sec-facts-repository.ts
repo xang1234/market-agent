@@ -91,45 +91,72 @@ export function createSecBackedStatementRepository(
       if (!options.fetcher) {
         return null;
       }
-
-      const issuer = await loadIssuer(db, lookup.issuer_id);
-      if (!issuer?.cik) {
-        return null;
-      }
-
-      const cikNumber = Number(issuer.cik);
-      if (!Number.isInteger(cikNumber) || cikNumber <= 0) {
-        return null;
-      }
-
-      try {
-        const fetched = await fetchCompanyFacts(options.fetcher, cikNumber);
-        const ingested = await ingestFiling(db, {
-          fetched,
-          cik: cikNumber,
-          issuerId: lookup.issuer_id,
-          fiscal_year: lookup.fiscal_year,
-          fiscal_period: lookup.fiscal_period,
-          fallbackSourceId: options.sourceId,
-          income: "require",
-          clock,
-          logger,
-        });
-        await recordSecFilingAcceptances(db, options.fetcher, { cik: cikNumber, filings: ingested.filing ? [ingested.filing] : [], logger });
-        return ingested.statement;
-      } catch (error) {
-        const unavailable = classifySecIngestionError(error);
-        logger.warn("sec_edgar fundamentals ingestion failed", {
-          issuer_id: lookup.issuer_id,
-          fiscal_year: lookup.fiscal_year,
-          fiscal_period: lookup.fiscal_period,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        if (!unavailable) return null;
-        throw unavailable;
-      }
+      return hydrateSecIssuer(db, {
+        issuerId: lookup.issuer_id,
+        fiscal_year: lookup.fiscal_year,
+        fiscal_period: lookup.fiscal_period,
+        fetcher: options.fetcher,
+        sourceId: options.sourceId,
+        clock,
+        logger,
+      });
     },
   };
+}
+
+// Downloads the issuer's SEC company facts and stores the fiscal period's
+// income statement, with its filing's cash flow and balance sheet, and their
+// proofs. Returns the income statement, or null when the issuer has no CIK or
+// SEC has no such statement.
+export async function hydrateSecIssuer(
+  db: FundamentalsTransactionalQueryExecutor,
+  input: {
+    issuerId: UUID;
+    fiscal_year: number;
+    fiscal_period: FiscalPeriod;
+    fetcher: SecEdgarFetcher;
+    sourceId: UUID;
+    clock?: () => Date;
+    logger?: Pick<Console, "warn">;
+  },
+): Promise<NormalizedStatement | null> {
+  const logger = input.logger ?? console;
+  const issuer = await loadIssuer(db, input.issuerId);
+  if (!issuer?.cik) {
+    return null;
+  }
+
+  const cikNumber = Number(issuer.cik);
+  if (!Number.isInteger(cikNumber) || cikNumber <= 0) {
+    return null;
+  }
+
+  try {
+    const fetched = await fetchCompanyFacts(input.fetcher, cikNumber);
+    const ingested = await ingestFiling(db, {
+      fetched,
+      cik: cikNumber,
+      issuerId: input.issuerId,
+      fiscal_year: input.fiscal_year,
+      fiscal_period: input.fiscal_period,
+      fallbackSourceId: input.sourceId,
+      income: "require",
+      clock: input.clock ?? (() => new Date()),
+      logger,
+    });
+    await recordSecFilingAcceptances(db, input.fetcher, { cik: cikNumber, filings: ingested.filing ? [ingested.filing] : [], logger });
+    return ingested.statement;
+  } catch (error) {
+    const unavailable = classifySecIngestionError(error);
+    logger.warn("sec_edgar fundamentals ingestion failed", {
+      issuer_id: input.issuerId,
+      fiscal_year: input.fiscal_year,
+      fiscal_period: input.fiscal_period,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    if (!unavailable) return null;
+    throw unavailable;
+  }
 }
 
 // For every SEC income period already on file for an issuer, from one
