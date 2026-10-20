@@ -1162,3 +1162,27 @@ test("checkouts that share a directory name, or a COMPOSE_PROJECT_NAME, recaptur
     await rm(fixture.root, { recursive: true, force: true });
   }
 });
+
+test("a recapture that died during its fixture checks is undone by the next one, before anything else", async () => {
+  // The backup a run keeps while its checks run. If the run was killed outright, the
+  // unchecked capture is still at the fixture's path ("committed" here).
+  const leftBehind = await traceRecapture({}, [
+    'mkdir -p "$ROOT/.dev" && printf "before-crash" > "$(recapture_backup)"',
+    "npm(){ return 1; }",
+    'trap \'printf "backup-left:%s\\n" "$([[ -e "$(recapture_backup)" ]] && echo yes || echo no)" >> "$TRACE_FILE"\' EXIT',
+  ]);
+  assert.equal(leftBehind.committed, "before-crash");
+  assert.match(leftBehind.result.stderr, /stopped during its fixture checks/);
+  assert.deepEqual(leftBehind.lines("backup-left:"), ["no"]);
+
+  const keptAside = 'trap \'printf "backup-left:%s\\n" "$([[ -e "$(recapture_backup)" ]] && echo yes || echo no)" >> "$TRACE_FILE"\' EXIT';
+  const passed = await traceRecapture({}, [keptAside]);
+  assert.equal(passed.result.code, 0, passed.result.stderr);
+  assert.deepEqual(passed.lines("backup-left:"), ["no"], "a run that passed leaves no backup behind");
+  const rejected = await traceRecapture({}, [
+    keptAside,
+    'fixture_checks(){ return 1; }',
+  ]);
+  assert.equal(rejected.committed, "committed\n");
+  assert.deepEqual(rejected.lines("backup-left:"), ["no"], "nor does one whose checks failed");
+});

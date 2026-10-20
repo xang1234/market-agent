@@ -885,6 +885,12 @@ release_recapture_lock() {
   rm -f "$(recapture_lock)"
 }
 
+# The committed fixture, kept while a new capture's checks run at the fixture's path.
+# Outside the temp dir, so a run killed outright (no cleanup) leaves it for the next one.
+recapture_backup() {
+  printf '%s/.dev/recapture.committed.json' "$ROOT"
+}
+
 # Runs on every exit of recapture: puts the committed fixture back unless the new one
 # passed its checks, then removes the recapture stack, containers and volumes.
 recapture_cleanup() {
@@ -892,11 +898,14 @@ recapture_cleanup() {
   # Every step runs whatever an earlier one did.
   set +e
   if [[ "$RECAPTURE_PENDING" == 1 ]]; then
-    if cp "$RECAPTURE_DIR/committed.json" "$GOLDEN_REPLAY_FILE"; then
+    if cp "$(recapture_backup)" "$GOLDEN_REPLAY_FILE"; then
       echo "fixture checks failed on the new capture; ${GOLDEN_REPLAY_FILE#"$ROOT"/} is unchanged" >&2
+      rm -f "$(recapture_backup)"
     else
-      echo "could not restore ${GOLDEN_REPLAY_FILE#"$ROOT"/}; the committed one is $RECAPTURE_DIR/committed.json" >&2
+      echo "could not restore ${GOLDEN_REPLAY_FILE#"$ROOT"/}; the committed one is $(recapture_backup)" >&2
     fi
+  else
+    rm -f "$(recapture_backup)"
   fi
   stop_processes
   if compose down -v --remove-orphans; then
@@ -926,6 +935,12 @@ recapture() (
   COMPOSE_PROJECT_NAME="$(recapture_project)"
   claim_recapture_lock
   trap release_recapture_lock EXIT
+  # A run killed during its fixture checks left an unchecked capture at the fixture's path.
+  if [[ -e "$(recapture_backup)" ]]; then
+    cp "$(recapture_backup)" "$GOLDEN_REPLAY_FILE"
+    rm -f "$(recapture_backup)"
+    echo "restored ${GOLDEN_REPLAY_FILE#"$ROOT"/} from a recapture that stopped during its fixture checks" >&2
+  fi
   # A run killed before its cleanup could run left its stack behind; start from nothing.
   compose down -v --remove-orphans
   # Against a port another stack holds, the browser run would record that stack.
@@ -951,11 +966,14 @@ recapture() (
   wait_for_port_free "$APP_PORT"
 
   before="$(wc -c <"$GOLDEN_REPLAY_FILE" | tr -d ' ')"
-  cp "$GOLDEN_REPLAY_FILE" "$RECAPTURE_DIR/committed.json"
+  # Whole before it counts: a run killed mid-copy must not leave a partial backup.
+  cp "$GOLDEN_REPLAY_FILE" "$(recapture_backup).partial"
+  mv "$(recapture_backup).partial" "$(recapture_backup)"
   RECAPTURE_PENDING=1
   cp "$DEV_CAPTURE_FILE" "$GOLDEN_REPLAY_FILE"
   fixture_checks
   RECAPTURE_PENDING=0
+  rm -f "$(recapture_backup)"
   printf '%s: %s exchanges, %s -> %s bytes\n' \
     "${GOLDEN_REPLAY_FILE#"$ROOT"/}" \
     "$(node -e 'console.log(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).exchanges.length)' "$GOLDEN_REPLAY_FILE")" \
