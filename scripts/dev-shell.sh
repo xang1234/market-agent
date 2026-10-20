@@ -7,11 +7,18 @@ if [[ ! -f "$ENV_FILE" ]]; then
   ENV_FILE="$ROOT/.env.dev.example"
 fi
 
+# recapture always records the no-keys chat stack, whatever the env file says.
+if [[ "${1:-}" == "recapture" ]]; then
+  export DEV_PROFILE=chat DEV_NO_KEYS=true DEV_MODE=
+fi
+
 # DEV_PROFILE, DEV_NO_KEYS and DEV_MODE are per-invocation switches
 # (DEV_PROFILE=chat DEV_NO_KEYS=true ./scripts/dev-shell.sh up), so a value the caller
 # set beats the env file's, even an empty one (DEV_MODE= returns to the default mode).
+# WEB_PORT and DEV_POSTGRES_PORT win too, so one run (a recapture beside a running dev
+# stack) can move off the dev ports without editing .env.dev.
 CALLER_SWITCHES=()
-for switch in DEV_PROFILE DEV_NO_KEYS DEV_MODE; do
+for switch in DEV_PROFILE DEV_NO_KEYS DEV_MODE WEB_PORT DEV_POSTGRES_PORT; do
   if [[ -n "${!switch+set}" ]]; then
     CALLER_SWITCHES+=("$switch=${!switch}")
   fi
@@ -822,6 +829,98 @@ reference_import() {
     npm run --silent job:weekly-reference -- "$@")
 }
 
+GOLDEN_REPLAY_FILE="$ROOT/services/app/fixtures/golden-conversation.replay.json"
+
+# This checkout's dev stack is the Compose project COMPOSE_PROJECT_NAME, else the
+# checkout directory's name as Compose normalizes it; the recapture stack is a sibling.
+recapture_project() {
+  local name="${COMPOSE_PROJECT_NAME:-$(basename "$ROOT")}"
+  printf '%s-recapture' "$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')"
+}
+
+# What a replay fixture must pass, read from its committed path: the golden reloads
+# (services/app/test/replay.test.ts) and every ref the demo can open (demoBackend.test.ts,
+# with web's own test runner flags from its package.json).
+fixture_checks() {
+  (cd "$ROOT/services/app" && npm test) &&
+    (cd "$ROOT/web" && TSX_TSCONFIG_PATH=tsconfig.app.json node --import tsx --test src/demo/demoBackend.test.ts)
+}
+
+# Runs on every exit of recapture: puts the committed fixture back unless the new one
+# passed its checks, then removes the recapture stack, containers and volumes.
+recapture_cleanup() {
+  local status=$?
+  # Every step runs whatever an earlier one did.
+  set +e
+  if [[ "$RECAPTURE_PENDING" == 1 ]]; then
+    if cp "$RECAPTURE_DIR/committed.json" "$GOLDEN_REPLAY_FILE"; then
+      echo "fixture checks failed on the new capture; ${GOLDEN_REPLAY_FILE#"$ROOT"/} is unchanged" >&2
+    else
+      echo "could not restore ${GOLDEN_REPLAY_FILE#"$ROOT"/}; the committed one is $RECAPTURE_DIR/committed.json" >&2
+    fi
+  fi
+  stop_processes
+  if compose down -v --remove-orphans; then
+    echo "removed the recapture stack (Compose project $COMPOSE_PROJECT_NAME, containers and volumes)"
+  else
+    echo "could not remove Compose project $COMPOSE_PROJECT_NAME; run: COMPOSE_PROJECT_NAME=$COMPOSE_PROJECT_NAME docker compose -f $ROOT/docker-compose.dev.yml down -v" >&2
+    status=1
+  fi
+  if [[ "$status" -eq 0 ]]; then
+    rm -rf "$RECAPTURE_DIR"
+  else
+    echo "recapture failed; its capture and logs are in $RECAPTURE_DIR" >&2
+  fi
+  exit "$status"
+}
+
+# Records the golden conversation into services/app/fixtures (docs/development.md, UI
+# mode) on a throwaway no-keys stack: its own Compose project, database and process
+# state, so the developer's dev stack and data are never touched.
+recapture() (
+  local var before
+  ensure_command docker
+  ensure_command lsof
+  ensure_command npm
+  export COMPOSE_PROJECT_NAME
+  COMPOSE_PROJECT_NAME="$(recapture_project)"
+  # A run killed before its cleanup could run left its stack behind; start from nothing.
+  compose down -v --remove-orphans
+  # Against a port another stack holds, the browser run would record that stack.
+  for var in WEB_PORT DEV_POSTGRES_PORT; do
+    if port_listening "${!var}"; then
+      echo "recapture needs 127.0.0.1:${!var} ($var), which is in use; stop what holds it, or run on a free port: $var=<port> ./scripts/dev-shell.sh recapture" >&2
+      return 1
+    fi
+  done
+
+  RECAPTURE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/recapture.XXXXXX")"
+  RECAPTURE_PENDING=0
+  PID_DIR="$RECAPTURE_DIR/pids"
+  LOG_DIR="$RECAPTURE_DIR/logs"
+  mkdir -p "$PID_DIR" "$LOG_DIR"
+  export APP_PORT="$WEB_PORT" DEV_CAPTURE_FILE="$RECAPTURE_DIR/capture.json"
+  trap recapture_cleanup EXIT
+
+  up
+  (cd "$ROOT/web" && E2E_CAPTURE=1 E2E_BASE_URL="http://127.0.0.1:$APP_PORT" npm run e2e)
+  # The app writes each exchange as its connection closes; stopped, it writes no more.
+  stop_process app
+  wait_for_port_free "$APP_PORT"
+
+  before="$(wc -c <"$GOLDEN_REPLAY_FILE" | tr -d ' ')"
+  cp "$GOLDEN_REPLAY_FILE" "$RECAPTURE_DIR/committed.json"
+  RECAPTURE_PENDING=1
+  cp "$DEV_CAPTURE_FILE" "$GOLDEN_REPLAY_FILE"
+  fixture_checks
+  RECAPTURE_PENDING=0
+  printf '%s: %s exchanges, %s -> %s bytes\n' \
+    "${GOLDEN_REPLAY_FILE#"$ROOT"/}" \
+    "$(node -e 'console.log(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).exchanges.length)' "$GOLDEN_REPLAY_FILE")" \
+    "$before" \
+    "$(wc -c <"$GOLDEN_REPLAY_FILE" | tr -d ' ')"
+)
+
 configure_runtime_env
 
 if [[ "${MARKET_AGENT_DEV_SHELL_SOURCE_ONLY:-0}" == "1" ]]; then
@@ -834,9 +933,11 @@ case "${1:-}" in
   # A fresh worktree's packages, for running tests and scripts without a stack.
   install) install_node_packages ;;
   status) status ;;
+  # Re-records services/app/fixtures/golden-conversation.replay.json (docs/development.md).
+  recapture) recapture ;;
   reference-import) shift; reference_import "$@" ;;
   *)
-    echo "Usage: [DEV_PROFILE=chat|full] ./scripts/dev-shell.sh <up|down|status|install|reference-import [--force|--status]>" >&2
+    echo "Usage: [DEV_PROFILE=chat|full] ./scripts/dev-shell.sh <up|down|status|install|recapture|reference-import [--force|--status]>" >&2
     exit 1
     ;;
 esac

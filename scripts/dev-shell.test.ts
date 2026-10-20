@@ -985,3 +985,109 @@ test("install covers every package with a lockfile", async () => {
   );
   assert.deepEqual(result.stdout.trim().split("\n").sort(), packages.sort());
 });
+
+test("usage lists recapture", async () => {
+  const fixture = await createShellFixture();
+  const result = await runBash("./scripts/dev-shell.sh", fixture.root);
+  await rm(fixture.root, { recursive: true, force: true });
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /^Usage: .*<up\|down\|status\|install\|recapture\|reference-import/m);
+});
+
+// A port nothing listens on right now.
+const freePort = () => withListener(async (port) => port);
+
+const RECAPTURED = '{"version":1,"exchanges":[{},{}]}';
+
+// Runs `recapture` with Docker, the stack and the fixture checks stubbed: the browser run
+// records RECAPTURED. Returns the trace and the committed fixture it left behind.
+async function traceRecapture(envOverrides: Record<string, string> = {}, preamble: string[] = []) {
+  const fixture = await createShellFixture({
+    WEB_PORT: String(await freePort()),
+    DEV_POSTGRES_PORT: String(await freePort()),
+    ...envOverrides,
+  });
+  const traceFile = join(fixture.root, "trace.log");
+  const committedFile = join(fixture.root, "services", "app", "fixtures", "golden-conversation.replay.json");
+  await mkdir(dirname(committedFile), { recursive: true });
+  await mkdir(join(fixture.root, "web"));
+  await writeFile(committedFile, "committed\n");
+  const result = await runBash(
+    [
+      "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
+      `TRACE_FILE="${traceFile}"`,
+      "ensure_command(){ :; }",
+      'compose(){ printf "compose:%s:%s\\n" "${COMPOSE_PROJECT_NAME:-<compose default>}" "$*" >> "$TRACE_FILE"; }',
+      'up(){ printf "up:%s\\n" "$COMPOSE_PROJECT_NAME" >> "$TRACE_FILE"; }',
+      `npm(){ printf "npm:%s:%s\\n" "\${PWD##*/}" "$*" >> "$TRACE_FILE"; printf '%s\\n' '${RECAPTURED}' > "$DEV_CAPTURE_FILE"; }`,
+      'fixture_checks(){ printf "checks:%s\\n" "$(cat "$GOLDEN_REPLAY_FILE")" >> "$TRACE_FILE"; }',
+      ...preamble,
+      "recapture",
+    ].join("\n"),
+    fixture.root,
+  );
+  const trace = await readFile(traceFile, "utf8").catch(() => "");
+  const committed = await readFile(committedFile, "utf8");
+  const checkout = fixture.root.split("/").at(-1)!;
+  await rm(fixture.root, { recursive: true, force: true });
+  const lines = (prefix: string) =>
+    trace.split("\n").filter((l) => l.startsWith(prefix)).map((l) => l.slice(prefix.length));
+  return { result, lines, committed, checkout };
+}
+
+test("recapture refuses a busy port it needs before starting anything, naming the port and its override", async () => {
+  for (const variable of ["WEB_PORT", "DEV_POSTGRES_PORT"]) {
+    await withListener(async (port) => {
+      const { result, lines, committed } = await traceRecapture({ [variable]: String(port) });
+      assert.notEqual(result.code, 0, variable);
+      assert.match(result.stderr, new RegExp(`127\\.0\\.0\\.1:${port} \\(${variable}\\)`), variable);
+      assert.match(result.stderr, new RegExp(`${variable}=<port> \\./scripts/dev-shell\\.sh recapture`), variable);
+      assert.deepEqual(lines("up:"), [], `${variable}: no stack started`);
+      assert.deepEqual(lines("npm:"), [], `${variable}: no browser run`);
+      assert.equal(committed, "committed\n");
+    });
+  }
+});
+
+test("recapture runs under its own Compose project, not the dev one, and removes its containers and volumes", async () => {
+  const { result, lines, checkout } = await traceRecapture();
+  assert.equal(result.code, 0, result.stderr);
+  // Compose names a checkout's dev stack after its directory, lowercased.
+  const project = `${checkout.toLowerCase()}-recapture`;
+  assert.deepEqual(lines("up:"), [project]);
+  // A run killed before its cleanup left the project behind: the next one starts from nothing.
+  assert.deepEqual(lines("compose:"), [`${project}:down -v --remove-orphans`, `${project}:down -v --remove-orphans`]);
+  assert.deepEqual(lines("npm:"), ["web:run e2e"]);
+
+  const dev = await traceUp({ DEV_PROFILE: "chat" }, [
+    'compose(){ printf "compose:%s:%s\\n" "${COMPOSE_PROJECT_NAME:-<compose default>}" "$*" >> "$TRACE_FILE"; }',
+  ]);
+  assert.equal(dev.result.code, 0, dev.result.stderr);
+  assert.deepEqual(dev.lines("compose:"), ["<compose default>:stop minio", "<compose default>:up -d postgres"]);
+
+  const named = await traceRecapture({ COMPOSE_PROJECT_NAME: "stack" });
+  assert.deepEqual(named.lines("up:"), ["stack-recapture"]);
+});
+
+test("recapture replaces the committed fixture only once the fixture checks pass on the new one", async () => {
+  const passed = await traceRecapture();
+  assert.equal(passed.result.code, 0, passed.result.stderr);
+  assert.deepEqual(passed.lines("checks:"), [RECAPTURED], "checked at the committed path");
+  assert.equal(passed.committed, `${RECAPTURED}\n`);
+  assert.match(passed.result.stdout, /services\/app\/fixtures\/golden-conversation\.replay\.json: 2 exchanges, 10 -> 34 bytes/);
+
+  const rejected = await traceRecapture({}, [
+    'fixture_checks(){ printf "checks:%s\\n" "$(cat "$GOLDEN_REPLAY_FILE")" >> "$TRACE_FILE"; return 1; }',
+  ]);
+  assert.notEqual(rejected.result.code, 0);
+  assert.deepEqual(rejected.lines("checks:"), [RECAPTURED]);
+  assert.equal(rejected.committed, "committed\n", "the committed fixture is as it was");
+  assert.match(rejected.result.stderr, /fixture checks failed/);
+  assert.match(rejected.lines("compose:").at(-1) ?? "", /-recapture:down -v --remove-orphans$/, "the stack is still removed");
+
+  const browserFailed = await traceRecapture({}, ["npm(){ return 1; }"]);
+  assert.notEqual(browserFailed.result.code, 0);
+  assert.deepEqual(browserFailed.lines("checks:"), []);
+  assert.equal(browserFailed.committed, "committed\n");
+  assert.match(browserFailed.lines("compose:").at(-1) ?? "", /-recapture:down -v --remove-orphans$/);
+});
