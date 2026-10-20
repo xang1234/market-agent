@@ -53,10 +53,13 @@ const protDiscovery: RouteHandle = { scope: 'protected', label: 'Discover' }
 // createBrowserRouter is the v7 data-router API, required for useMatches()
 // (which RouteScopeGate depends on). createRoutesFromElements preserves the
 // readable JSX route tree.
+//
+// The demo has recordings only for Chat, so it lands there.
+const landing = webDevFlags.demo ? '/chat' : '/home'
 const router = createBrowserRouter(
   createRoutesFromElements(
     <Route element={<WorkspaceShell />}>
-      <Route index element={<Navigate to="/home" replace />} />
+      <Route index element={<Navigate to={landing} replace />} />
       <Route path="home" handle={publicHandle} element={<HomePage />} />
       <Route path="agents" handle={protAgents} element={<AgentsPage />} />
       <Route path="review" handle={protReview} element={<ReviewPage />} />
@@ -78,9 +81,10 @@ const router = createBrowserRouter(
         <Route path="holders" element={<HoldersSection />} />
         <Route path="signals" element={<SignalsSection />} />
       </Route>
-      <Route path="*" element={<Navigate to="/home" replace />} />
+      <Route path="*" element={<Navigate to={landing} replace />} />
     </Route>,
   ),
+  { basename: import.meta.env.BASE_URL },
 )
 
 // Module scope: stable registry identity across <App /> re-renders.
