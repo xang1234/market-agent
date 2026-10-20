@@ -5,7 +5,7 @@ import fixture from '../../../services/app/fixtures/golden-conversation.replay.j
 import { extractInspectableRefs, type InspectableBlockRef } from '../evidence/inspectableRefs.ts'
 import { fetchEvidenceInspection } from '../evidence/inspectionClient.ts'
 import { HttpJsonError } from '../http/authFetch.ts'
-import { installDemoBackend, parseSse } from './demoBackend.ts'
+import { eventDelays, installDemoBackend, parseSse } from './demoBackend.ts'
 
 test('parseSse reads events the way a browser does', () => {
   assert.deepEqual(parseSse('id: 1\nevent: a\ndata: {"x":1}\n\n: comment\ndata: one\ndata:two\n\nevent: unfinished'), [
@@ -23,6 +23,12 @@ test('parseSse yields every event of every recorded stream, in order, each with 
     assert.equal(events.filter((e) => e.event === 'turn.completed').length, 1)
     for (const { data } of events) JSON.parse(data)
   }
+})
+
+test('eventDelays spreads content over the budget and gives heartbeats no time', () => {
+  const ev = (event: string) => ({ event, data: '{}', id: '' })
+  assert.deepEqual(eventDelays([ev('a'), ev('heartbeat'), ev('heartbeat'), ev('b')]), [120, 120, 120, 240])
+  assert.deepEqual(eventDelays(Array.from({ length: 50 }, () => ev('a'))).slice(0, 2), [50, 100])
 })
 
 const items = new Map<string, string>()

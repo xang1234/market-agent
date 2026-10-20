@@ -20,7 +20,15 @@ export const DEMO_QUESTIONS: readonly string[] = recordedQuestions(fixture)
 // ponytail: the capture has no timings, so every answer streams over about the same
 // time whatever its length. Record timings if the pacing ever has to look real.
 const STREAM_BUDGET_MS = 2_500
-const eventGap = (events: number) => Math.min(120, Math.max(10, STREAM_BUDGET_MS / events))
+
+/** When each event fires, in ms after open. Heartbeats take no time of their own: how
+ *  many a capture holds depends on how slowly the recording machine answered. */
+export function eventDelays(events: readonly SseEvent[]): number[] {
+  const paced = events.filter(({ event }) => event !== 'heartbeat').length
+  const gap = Math.min(120, Math.max(10, STREAM_BUDGET_MS / Math.max(1, paced)))
+  let at = 0
+  return events.map(({ event }) => (event === 'heartbeat' ? at : (at += gap)))
+}
 
 /** From here on the replay answers every /v1 fetch and EventSource in this page, and
  *  none reaches the network. Call once, before the app loads. */
@@ -83,16 +91,16 @@ function installEventSource(replay: Replay): void {
         return
       }
       const events = parseSse(reply.body)
-      const gap = eventGap(events.length)
+      const delays = eventDelays(events)
       this.at(0, () => {
         this.readyState = OPEN
         this.emit(new Event('open'))
       })
       events.forEach(({ event, data, id }, i) =>
-        this.at((i + 1) * gap, () => this.emit(new MessageEvent(event, { data, lastEventId: id }))))
+        this.at(delays[i]!, () => this.emit(new MessageEvent(event, { data, lastEventId: id }))))
       // The recorded server then ended the stream, which a native EventSource reports as
       // an error. The app closes on turn.completed first, which cancels this.
-      this.at((events.length + 1) * gap, () => this.fail())
+      this.at((delays.at(-1) ?? 0) + 120, () => this.fail())
     }
 
     close(): void {
