@@ -60,7 +60,7 @@ function okSeal(snapshotId: string): SnapshotSealResult {
   return { ok: true, snapshot: sealedSnapshot(snapshotId), verification: { ok: true, failures: [] } };
 }
 
-type Hydration = { years: Array<[string, number]>; at: string };
+type Hydration = { reads: Array<[string, Record<string, number>]>; at: string };
 
 function adaptersWith(published: AnalyzeFinancialRun[], hydrated: Hydration[], workflow = true) {
   return createServiceDevApiAdapters({
@@ -76,9 +76,9 @@ function adaptersWith(published: AnalyzeFinancialRun[], hydrated: Hydration[], w
       resolvePeers: async () => {
         throw new Error("earnings quality compares no peers");
       },
-      hydrate: async (years) => {
+      hydrate: async (reads) => {
         await new Promise((resolve) => setTimeout(resolve, 5));
-        hydrated.push({ years: [...years], at: new Date().toISOString() });
+        hydrated.push({ reads: [...reads].map(([issuer, metrics]) => [issuer, Object.fromEntries(metrics)]), at: new Date().toISOString() });
       },
       publish: async (run) => {
         published.push(run);
@@ -106,7 +106,7 @@ test("a memo run hydrates its issuer, declares its frozen financial context, and
     requested_peers: [],
     sections: ["revenue_trend"],
   });
-  assert.deepEqual(hydrated.map((call) => call.years), [[[ISSUER, 2]]], "revenue_trend reads the latest two years");
+  assert.deepEqual(hydrated.map((call) => call.reads), [[[ISSUER, { revenue: 2 }]]], "revenue_trend reads revenue for the latest two years");
   assert.ok(String(financial.knowledge_cutoff) >= hydrated[0]!.at, "the cutoff is taken after the facts are fetched");
   assert.equal(published.length, 1);
   assert.deepEqual(published[0], { user_id: USER, analyze_run_id: RUN, template_id: TEMPLATE, template_version: 3, context: financial });
@@ -125,7 +125,7 @@ test("a rerun of a memo saved without a financial context hydrates and publishes
   assert.equal(metadata.rerun_of_run_id, ORIGINAL);
   assert.deepEqual(metadata.financial.sections, ["revenue_trend"]);
   assert.deepEqual(metadata.financial.primary, { kind: "issuer", id: ISSUER });
-  assert.deepEqual(hydrated.map((call) => call.years), [[[ISSUER, 2]]]);
+  assert.deepEqual(hydrated.map((call) => call.reads), [[[ISSUER, { revenue: 2 }]]]);
   assert.deepEqual(published.map((entry) => entry.context), [metadata.financial]);
   assert.deepEqual(run.financial_sections?.sections, [{ section_id: "revenue_trend", status: "gap", reason_code: "not_started" }]);
 });

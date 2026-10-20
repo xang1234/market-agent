@@ -4,7 +4,7 @@ import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { IDS, ORIGINAL_REVENUE, seedCashResilience } from "../../financial-engine/test/db-fixtures.ts";
 import {
   financialSectionIds,
-  latestYearsByIssuer,
+  latestReadsByIssuer,
   loadAnalyzeFinancialSections,
   prepareAnalyzeFinancialContext,
   type AnalyzeFinancialSection,
@@ -52,13 +52,16 @@ test("the financial context freezes cutoff, basis, catalog, and the exact peers 
   assert.deepEqual(withoutPeerTable.requested_peers, [], "peers are requested only by a section that compares them");
 });
 
-test("hydration reads each subject's latest fiscal years from the memo's own plan", () => {
+test("hydration reads each issuer's planned metrics and years from the memo's own plan", () => {
   const context = (id: string, peers: string[] = []) => prepareAnalyzeFinancialContext({
     playbook: playbook(id), primary: { kind: "issuer", id: IDS.issuerA }, peers: peers.map((peer) => ({ kind: "issuer" as const, id: peer })), knowledge_cutoff: CUTOFF,
   })!;
-  assert.deepEqual([...latestYearsByIssuer(context("earnings_quality"))], [[IDS.issuerA, 2]], "revenue_trend compares the latest year with the one before");
-  assert.deepEqual([...latestYearsByIssuer(context("investment_memo"))], [[IDS.issuerA, 2]]);
-  assert.deepEqual([...latestYearsByIssuer(context("peer_comparison", [IDS.issuerB]))], [[IDS.issuerA, 1], [IDS.issuerB, 1]], "peer_table reads only the latest year");
+  const reads = (id: string, peers?: string[]) => [...latestReadsByIssuer(context(id, peers))].map(([issuer, metrics]) => [issuer, Object.fromEntries(metrics)]);
+  assert.deepEqual(reads("earnings_quality"), [[IDS.issuerA, { revenue: 2 }]], "revenue_trend compares the latest year with the one before");
+  assert.deepEqual(reads("investment_memo"), [[IDS.issuerA, {
+    revenue: 2, gross_profit: 1, operating_cash_flow: 1, net_income: 1, total_liabilities: 1, total_assets: 1, total_equity: 1,
+  }]]);
+  assert.deepEqual(reads("peer_comparison", [IDS.issuerB]), [[IDS.issuerA, { revenue: 1 }], [IDS.issuerB, { revenue: 1 }]], "peer_table reads only the latest year");
 });
 
 test("analyze financial sections", { timeout: 300_000 }, async (t) => {

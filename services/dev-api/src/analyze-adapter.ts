@@ -29,7 +29,7 @@ import {
 } from "../../analyze/src/index.ts";
 import {
   financialSectionIds,
-  latestYearsByIssuer,
+  latestReadsByIssuer,
   loadAnalyzeFinancialSections,
   prepareAnalyzeFinancialContext,
   type AnalyzeFinancialRun,
@@ -172,8 +172,8 @@ export type AnalyzeServiceDeps = {
 
 export type AnalyzeFinancialComposition = {
   resolvePeers(primaryIssuerId: string): Promise<ReadonlyArray<{ kind: "issuer"; id: string }>>;
-  // Stores each issuer's latest fiscal years from SEC; a failed fetch leaves a gap, never a failed memo.
-  hydrate(latestYears: ReadonlyMap<string, number>): Promise<void>;
+  // Stores each issuer's planned reads (metric → latest fiscal years) from SEC; a failure leaves a gap, never a failed memo.
+  hydrate(reads: ReadonlyMap<string, ReadonlyMap<string, number>>): Promise<void>;
   publish(run: AnalyzeFinancialRun): Promise<AnalyzeFinancialSections>;
 };
 
@@ -198,7 +198,7 @@ async function newFinancialContext(
   });
   const planned = contextAt(new Date());
   if (planned === null) return null;
-  await lane.hydrate(latestYearsByIssuer(planned));
+  await lane.hydrate(latestReadsByIssuer(planned));
   return contextAt(new Date());
 }
 

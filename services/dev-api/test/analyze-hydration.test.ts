@@ -16,7 +16,7 @@ const issuerOnly = { query: async (text: string) => ({ rows: text.includes("from
 
 test("a failed SEC fetch is logged and leaves the memo to the engine's gap", async () => {
   const warnings: unknown[][] = [];
-  await hydrateAnalyzeIssuers(issuerOnly, unavailable, new Map([[ISSUER, 1]]), { warn: (...args: unknown[]) => warnings.push(args) });
+  await hydrateAnalyzeIssuers(issuerOnly, unavailable, new Map([[ISSUER, new Map([["revenue", 1]])]]), { warn: (...args: unknown[]) => warnings.push(args) });
   assert.deepEqual(warnings.at(-1), [
     "analyze SEC hydration failed; the engine reports the gap",
     { issuer_id: ISSUER, reason: "provider_error", error: "sec_edgar: HTTP 503" },
@@ -34,7 +34,7 @@ test("a database failure while hydrating is logged and leaves the memo to the en
     },
   } as unknown as Pool;
   const warnings: unknown[][] = [];
-  await hydrateAnalyzeIssuers(failingStore, fetcher, new Map([[ISSUER, 1]]), { warn: (...args: unknown[]) => warnings.push(args) });
+  await hydrateAnalyzeIssuers(failingStore, fetcher, new Map([[ISSUER, new Map([["revenue", 1]])]]), { warn: (...args: unknown[]) => warnings.push(args) });
   assert.deepEqual(warnings.at(-1), [
     "analyze SEC hydration failed; the engine reports the gap",
     { issuer_id: ISSUER, reason: "store_failed", error: "deadlock detected" },
@@ -45,7 +45,7 @@ test("hydration past its budget is logged and the memo goes on", async () => {
   const hung = () => new Promise<never>(() => {});
   const warnings: unknown[][] = [];
   const started = Date.now();
-  await hydrateAnalyzeIssuers(issuerOnly, hung, new Map([[ISSUER, 1]]), { warn: (...args: unknown[]) => warnings.push(args) }, 50);
+  await hydrateAnalyzeIssuers(issuerOnly, hung, new Map([[ISSUER, new Map([["revenue", 1]])]]), { warn: (...args: unknown[]) => warnings.push(args) }, 50);
   assert.ok(Date.now() - started < 5_000);
   assert.deepEqual(warnings.at(-1), ["analyze SEC hydration ran past its budget; the memo uses the facts stored so far", { budget_ms: 50 }]);
 });
@@ -54,6 +54,6 @@ test("the frozen golden issuers are never repaired from live SEC", async () => {
   const touched: string[] = [];
   const db = { query: async (text: string) => { touched.push(text); return { rows: [] }; } } as unknown as Pool;
   const fetcher = async (path: string) => { touched.push(path); throw new Error("no fetch expected"); };
-  await hydrateAnalyzeIssuers(db, fetcher, new Map(Object.values(GOLDEN_ISSUER_IDS).map((id) => [id, 2])), { warn() {} });
+  await hydrateAnalyzeIssuers(db, fetcher, new Map(Object.values(GOLDEN_ISSUER_IDS).map((id) => [id, new Map([["revenue", 2]])])), { warn() {} });
   assert.deepEqual(touched, []);
 });

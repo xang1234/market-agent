@@ -37,7 +37,7 @@ test("an issuer gains the fiscal years its memo reads, once; an issuer SEC canno
   await db.query(`insert into issuers (issuer_id, legal_name, cik) values ($1, 'Example Corp', '320193'), ($2, 'Down Corp', '320199')`, [LISTED, UNREACHABLE]);
   const warnings: unknown[][] = [];
 
-  await hydrateAnalyzeIssuers(db, fetcher, new Map([[LISTED, 2], [UNREACHABLE, 1]]), { warn: (...args: unknown[]) => warnings.push(args) });
+  await hydrateAnalyzeIssuers(db, fetcher, new Map([[LISTED, new Map([["revenue", 2]])], [UNREACHABLE, new Map([["revenue", 1]])]]), { warn: (...args: unknown[]) => warnings.push(args) });
 
   const { rows } = await db.query<{ subject_id: string; fiscal_year: number; value: string }>(
     `select f.subject_id::text, f.fiscal_year, f.value_num::text as value
@@ -55,6 +55,6 @@ test("an issuer gains the fiscal years its memo reads, once; an issuer SEC canno
   assert.deepEqual(warnings.at(-1), ["analyze SEC hydration failed; the engine reports the gap", { issuer_id: UNREACHABLE, reason: "provider_error", error: "sec_edgar: HTTP 503" }]);
 
   const before = downloads.length;
-  await hydrateAnalyzeIssuers(db, fetcher, new Map([[LISTED, 2]]), { warn() {} });
+  await hydrateAnalyzeIssuers(db, fetcher, new Map([[LISTED, new Map([["revenue", 2]])]]), { warn() {} });
   assert.deepEqual(downloads.slice(before), [], "years stored with their proofs are not downloaded again");
 });

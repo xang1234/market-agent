@@ -128,16 +128,17 @@ export async function hydrateSecIssuer(
   return statement ?? null;
 }
 
-// Stores the issuer's annual statements for its latest `years` fiscal years
-// (from the latest year with a 10-K revenue value) from one companyfacts
-// download, unless they are already stored with their proofs. A year SEC has
-// no statement for is skipped; the years that extract are stored before a
-// failure is thrown as hydrateSecIssuer throws it.
+// Stores the issuer's annual statements for the latest fiscal years its
+// planned reads need (from the latest year with a 10-K revenue value) from one
+// companyfacts download, unless every read is already stored with its proofs.
+// `reads` is how many of the latest fiscal years each metric is read for. A
+// year SEC has no statement for is skipped; the years that extract are stored
+// before a failure is thrown as hydrateSecIssuer throws it.
 export async function hydrateSecIssuerLatestYears(
   db: FundamentalsTransactionalQueryExecutor,
   input: {
     issuerId: UUID;
-    years: number;
+    reads: ReadonlyMap<string, number>;
     fetcher: SecEdgarFetcher;
     sourceId: UUID;
     clock?: () => Date;
@@ -145,26 +146,28 @@ export async function hydrateSecIssuerLatestYears(
   },
 ): Promise<void> {
   if (FROZEN_ISSUER_IDS.has(input.issuerId)) return;
-  if (await storedProvenYears(db, input.issuerId, input.years, (input.clock ?? (() => new Date()))())) return;
+  if (await storedProvenReads(db, input.issuerId, input.reads, (input.clock ?? (() => new Date()))())) return;
+  const years = Math.max(0, ...input.reads.values());
   await hydrateSecPeriods(db, input, (facts) => {
     const latest = latestAnnualRevenueYear(facts);
-    return latest === null ? [] : Array.from({ length: input.years }, (_, offset) => ({ fiscal_year: latest - offset, fiscal_period: "FY" as const }));
+    return latest === null ? [] : Array.from({ length: years }, (_, offset) => ({ fiscal_year: latest - offset, fiscal_period: "FY" as const }));
   });
 }
 
-// Whether the issuer's latest `years` fiscal years of SEC revenue are stored
-// with the precision and publication proofs the engine checks. A latest year
-// that ended more than a filing cycle ago (15 months) does not count: a newer
-// 10-K is due, so the issuer is fetched again.
-async function storedProvenYears(db: FundamentalsQueryExecutor, issuerId: UUID, years: number, now: Date): Promise<boolean> {
-  const { rows } = await db.query<{ fiscal_year: number; period_end: string }>(
-    `select distinct f.fiscal_year, f.period_end::text as period_end
+// Whether every planned read is stored as SEC facts with the precision and
+// publication proofs the engine checks, for the latest fiscal year on file
+// and the years before it each metric needs. A latest year that ended more
+// than a filing cycle ago (15 months) does not count: a newer 10-K is due, so
+// the issuer is fetched again.
+async function storedProvenReads(db: FundamentalsQueryExecutor, issuerId: UUID, reads: ReadonlyMap<string, number>, now: Date): Promise<boolean> {
+  const { rows } = await db.query<{ metric_key: string; fiscal_year: number; period_end: string }>(
+    `select distinct m.metric_key, f.fiscal_year, f.period_end::text as period_end
        from facts f
        join metrics m on m.metric_id = f.metric_id
        join sources s on s.source_id = f.source_id
       where f.subject_kind = 'issuer'
         and f.subject_id = $1
-        and m.metric_key = 'revenue'
+        and m.metric_key = any($2::text[])
         and f.period_kind = 'fiscal_y'
         and f.fiscal_period = 'FY'
         and s.provider = 'sec_edgar'
@@ -172,16 +175,17 @@ async function storedProvenYears(db: FundamentalsQueryExecutor, issuerId: UUID, 
         and exists (select 1 from current_fact_precision_attestations a
                      where a.fact_id = f.fact_id and a.precision_class <> 'legacy_unverified')
         and exists (select 1 from current_source_publication_attestations p
-                     where p.source_id = f.source_id and p.source_version_hash = normalized_content_hash(s.content_hash))
-      order by f.fiscal_year desc
-      limit $2`,
-    [issuerId, years],
+                     where p.source_id = f.source_id and p.source_version_hash = normalized_content_hash(s.content_hash))`,
+    [issuerId, [...reads.keys()]],
   );
-  const latest = rows[0];
-  if (latest === undefined || rows.length < years) return false;
+  const latest = rows.reduce<(typeof rows)[number] | null>((best, row) => (best === null || Number(row.fiscal_year) > Number(best.fiscal_year) ? row : best), null);
+  if (latest === null) return false;
   const filingCycle = new Date(`${latest.period_end}T00:00:00.000Z`);
   filingCycle.setUTCMonth(filingCycle.getUTCMonth() + 15);
-  return filingCycle > now && rows.every((row, offset) => Number(row.fiscal_year) === Number(latest.fiscal_year) - offset);
+  if (!(filingCycle > now)) return false;
+  const proven = new Set(rows.map((row) => `${row.metric_key}:${Number(row.fiscal_year)}`));
+  return [...reads].every(([metric, years]) =>
+    Array.from({ length: years }, (_, offset) => proven.has(`${metric}:${Number(latest.fiscal_year) - offset}`)).every(Boolean));
 }
 
 async function hydrateSecPeriods(

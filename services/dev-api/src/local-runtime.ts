@@ -246,14 +246,14 @@ const HYDRATION_BUDGET_MS = 15_000;
 export async function hydrateAnalyzeIssuers(
   db: Pool,
   fetcher: SecEdgarFetcher | null,
-  latestYears: ReadonlyMap<string, number>,
+  reads: ReadonlyMap<string, ReadonlyMap<string, number>>,
   logger: Pick<Console, "warn"> = console,
   budgetMs = HYDRATION_BUDGET_MS,
 ): Promise<void> {
   if (fetcher === null) return;
-  const settled = Promise.all([...latestYears].map(async ([issuerId, years]) => {
+  const settled = Promise.all([...reads].map(async ([issuerId, issuerReads]) => {
     try {
-      await hydrateSecIssuerLatestYears(db, { issuerId, years, fetcher, sourceId: SEC_EDGAR_FILING_SOURCE_ID, logger });
+      await hydrateSecIssuerLatestYears(db, { issuerId, reads: issuerReads, fetcher, sourceId: SEC_EDGAR_FILING_SOURCE_ID, logger });
     } catch (error) {
       logger.warn("analyze SEC hydration failed; the engine reports the gap", {
         issuer_id: issuerId,
@@ -276,7 +276,7 @@ export const analyzeFinancial = {
   resolvePeers: async (primaryIssuerId: string) =>
     (await createSqlPeerSetResolver(pool()).resolvePeers(primaryIssuerId, { limit: ANALYZE_FINANCIAL_PEER_LIMIT }))
       .map((peer) => ({ kind: "issuer" as const, id: peer.id })),
-  hydrate: (latestYears: ReadonlyMap<string, number>) => hydrateAnalyzeIssuers(pool(), secFetcher, latestYears),
+  hydrate: (reads: ReadonlyMap<string, ReadonlyMap<string, number>>) => hydrateAnalyzeIssuers(pool(), secFetcher, reads),
   publish: (run: Parameters<typeof publishAnalyzeFinancialSections>[1]) =>
     publishAnalyzeFinancialSections({ pool: pool(), evidence: createEvidenceFinancialPort }, run),
 };

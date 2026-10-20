@@ -495,7 +495,7 @@ test("hydrating an issuer's latest years stores each of them from one download",
   const fetcher = secCompanyFetcher(() => companyFacts());
   await hydrateSecIssuerLatestYears(db, {
     issuerId: ISSUER_ID,
-    years: 2,
+    reads: new Map([["revenue", 2]]),
     fetcher: (path) => { downloads.push(path); return fetcher(path); },
     sourceId: SOURCE_ID,
     clock: () => new Date("2026-05-08T00:00:00.000Z"),
@@ -505,26 +505,37 @@ test("hydrating an issuer's latest years stores each of them from one download",
   assert.deepEqual(downloads.filter((path) => path.startsWith("/api/xbrl/companyfacts/")), ["/api/xbrl/companyfacts/CIK0000320193.json"]);
 });
 
-test("an issuer whose latest years are stored with proofs is not downloaded again", async () => {
-  class ProvenYears extends FakeFundamentalsDb {
+test("an issuer whose planned reads are stored with proofs is not downloaded again", async () => {
+  const proven = (rows: Array<{ metric_key: string; fiscal_year: number; period_end: string }>) => class extends FakeFundamentalsDb {
     async query<R extends Record<string, unknown> = Record<string, unknown>>(text: string, values: unknown[] = []): Promise<{ rows: R[] }> {
-      if (text.includes("current_fact_precision_attestations a")) {
-        return { rows: [{ fiscal_year: 2025, period_end: "2025-12-31" }, { fiscal_year: 2024, period_end: "2024-12-31" }] as unknown as R[] };
-      }
+      if (text.includes("current_fact_precision_attestations a")) return { rows: rows as unknown as R[] };
       return super.query<R>(text, values);
     }
-  }
+  };
+  const revenueOnly = proven([
+    { metric_key: "revenue", fiscal_year: 2025, period_end: "2025-12-31" },
+    { metric_key: "revenue", fiscal_year: 2024, period_end: "2024-12-31" },
+  ]);
+  const withGrossProfit = proven([
+    { metric_key: "revenue", fiscal_year: 2025, period_end: "2025-12-31" },
+    { metric_key: "revenue", fiscal_year: 2024, period_end: "2024-12-31" },
+    { metric_key: "gross_profit", fiscal_year: 2025, period_end: "2025-12-31" },
+  ]);
   const downloads: string[] = [];
-  const hydrate = (db: FakeFundamentalsDb, now: string) => hydrateSecIssuerLatestYears(db, {
+  const hydrate = (db: FakeFundamentalsDb, now: string, reads: ReadonlyMap<string, number>) => hydrateSecIssuerLatestYears(db, {
     issuerId: ISSUER_ID,
-    years: 2,
+    reads,
     fetcher: (path) => { downloads.push(path); return secCompanyFetcher(() => companyFacts())(path); },
     sourceId: SOURCE_ID,
     clock: () => new Date(now),
   });
-  await hydrate(new ProvenYears(), "2026-10-20T00:00:00.000Z");
-  assert.deepEqual(downloads, [], "fresh proven years are read, not fetched");
-  await hydrate(new ProvenYears(), "2027-06-01T00:00:00.000Z");
+  const plan = new Map([["revenue", 2], ["gross_profit", 1]]);
+  await hydrate(new withGrossProfit(), "2026-10-20T00:00:00.000Z", plan);
+  assert.deepEqual(downloads, [], "fresh proven reads are read, not fetched");
+  await hydrate(new revenueOnly(), "2026-10-20T00:00:00.000Z", plan);
+  assert.ok(downloads.length > 0, "a planned metric without proven facts is fetched");
+  downloads.length = 0;
+  await hydrate(new withGrossProfit(), "2027-06-01T00:00:00.000Z", plan);
   assert.ok(downloads.length > 0, "a stored latest year older than a filing cycle is fetched again");
 });
 
@@ -535,7 +546,7 @@ test("a prior year SEC cannot extract still lets the latest year be stored, then
   await assert.rejects(
     hydrateSecIssuerLatestYears(db, {
       issuerId: ISSUER_ID,
-      years: 2,
+      reads: new Map([["revenue", 2]]),
       fetcher: secCompanyFetcher(() => facts),
       sourceId: SOURCE_ID,
       clock: () => new Date("2026-05-08T00:00:00.000Z"),
@@ -550,7 +561,7 @@ test("a year SEC has no statement for is skipped while the others are stored", a
   const db = new FakeFundamentalsDb();
   await hydrateSecIssuerLatestYears(db, {
     issuerId: ISSUER_ID,
-    years: 3,
+    reads: new Map([["revenue", 3]]),
     fetcher: secCompanyFetcher(() => companyFacts()),
     sourceId: SOURCE_ID,
     clock: () => new Date("2026-05-08T00:00:00.000Z"),
