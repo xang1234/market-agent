@@ -2,8 +2,9 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 
 // The golden conversation (#118) in a real browser (#122, #194): Analyze NVDA -> Compare it
 // with AMD YTD -> Explain the differences and show the evidence -> inspect a cited figure ->
-// reload, on the no-keys stack (frozen dataset + recorded model replies) and against its UI
-// replay. The API-level golden test covers the data; this proves the UI renders and links it.
+// reload, on the no-keys stack (frozen dataset + recorded model replies), against its UI
+// replay, and in the static demo build. The API-level golden test covers the data; this
+// proves the UI renders and links it.
 
 // Each answer is rendered from its recorded reply's assertions, so neither the
 // placeholder nor the fallback sentence passes.
@@ -13,6 +14,13 @@ const EXPLAIN_NARRATIVE = "Of NVDA and AMD, NVDA's gross margin was highest"
 const QUESTIONS = ['Analyze NVDA', 'Compare it with AMD YTD', 'Explain the differences and show the evidence']
 const YTD_TITLE = 'Price return YTD 2026 (split-adjusted, excluding dividends)'
 const YTD_RANGE = 'YTD 2026: 2025-12-31 close to 2026-08-31 close'
+// Against a capturing stack (docs/development.md, UI mode), also open every evidence page
+// each answer offers, so the replays can show any of them.
+const CAPTURE = process.env.E2E_CAPTURE === '1'
+// Against the static demo build (playwright.config.ts).
+const DEMO = process.env.E2E_DEMO === '1'
+// A capture records a real stack's responses; the demo answers in the page and has none.
+if (CAPTURE && DEMO) throw new Error('E2E_CAPTURE records a running stack; unset E2E_DEMO')
 
 async function ask(page: Page, question: string) {
   // One turn at a time: Send stays disabled until the previous answer is sealed.
@@ -25,7 +33,23 @@ async function ask(page: Page, question: string) {
 const answer = (page: Page, narrative: string) =>
   page.locator('[data-role="assistant"]', { hasText: narrative })
 
+// The URLs of the /v1 requests the page makes from now on. The static demo answers them
+// in the page, so they never reach the network; there the evidence is the demo's own
+// `[demo replay]` log line for each (src/demo/demoBackend.ts), self-reported, not observed.
+function apiRequests(page: Page, method: string, path: RegExp): string[] {
+  const seen: string[] = []
+  page.on('request', (request) => {
+    if (request.method() === method && path.test(new URL(request.url()).pathname)) seen.push(request.url())
+  })
+  page.on('console', (message) => {
+    const logged = /^\[demo replay\] (\S+) (\S+) ->/.exec(message.text())
+    if (logged && logged[1] === method && path.test(logged[2]!)) seen.push(logged[2]!)
+  })
+  return seen
+}
+
 test('golden conversation renders charts, metrics and inspectable sources, and survives a reload', async ({ page }) => {
+  test.slow(CAPTURE, 'opens every evidence page')
   // From its first appearance, the first answer is on the page exactly once in every
   // mutation batch: the streamed copy hands off to the sealed one with no gap or duplicate.
   await page.addInitScript((narrative) => {
@@ -39,15 +63,24 @@ test('golden conversation renders charts, metrics and inspectable sources, and s
 
   // Each completion carries its sealed answer (#331), so no turn reads the thread back:
   // from the first question until the reload, the page never GETs the thread's messages.
-  const historyReads: string[] = []
-  page.on('request', (request) => {
-    if (request.method() === 'GET' && /\/v1\/chat\/threads\/[^/]+\/messages$/.test(new URL(request.url()).pathname)) {
-      historyReads.push(request.url())
-    }
-  })
+  const historyReads = apiRequests(page, 'GET', /\/v1\/chat\/threads\/[^/]+\/messages$/)
 
-  // Auto-login (VITE_MA_FLAG_DEV_AUTO_LOGIN) means no sign-in step.
-  await page.goto('/chat')
+  // The demo answers /v1 in the page, so a /v1 request on the network came from code that
+  // held fetch or EventSource before the replay replaced them.
+  const leakedToNetwork: string[] = []
+  if (DEMO) {
+    await page.context().route('**/v1/**', (route) => {
+      const request = `${route.request().method()} ${route.request().url()}`
+      leakedToNetwork.push(request)
+      // Reported where it happens: the aborted request may break the page before the end.
+      expect.soft(request, 'a /v1 request reached the network').toBeUndefined()
+      return route.abort()
+    })
+  }
+
+  // Auto-login (VITE_MA_FLAG_DEV_AUTO_LOGIN, or the demo build) means no sign-in step.
+  // Relative, so it stays under a base path (the demo's /market-agent/).
+  await page.goto('chat')
   await ask(page, QUESTIONS[0])
   await expect(page).toHaveURL(/\/chat\/[0-9a-f-]{36}$/)
   await expect(page.getByTestId('thread-name')).not.toHaveText(/[0-9a-f]{8}-[0-9a-f]{4}-/)
@@ -61,6 +94,10 @@ test('golden conversation renders charts, metrics and inspectable sources, and s
   await expect(page.getByText('Revenue', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('Quarterly revenue')).toBeVisible()
   await expectProportionalBars(page)
+  if (CAPTURE) {
+    await openEveryEvidencePage(page, answer(page, NVDA_NARRATIVE))
+    await loadThreadElsewhere(page, QUESTIONS.slice(0, 1))
+  }
 
   await ask(page, QUESTIONS[1])
   await expect(page.getByText(COMPARE_NARRATIVE)).toBeVisible()
@@ -70,11 +107,16 @@ test('golden conversation renders charts, metrics and inspectable sources, and s
   const disclosure = answer(page, COMPARE_NARRATIVE).locator('[data-block-kind="disclosure"]')
   await expect(disclosure).toContainText('end-of-day')
   await expect(disclosure).toContainText('split-adjusted price returns; dividends are not included')
+  if (CAPTURE) {
+    await openEveryEvidencePage(page, answer(page, COMPARE_NARRATIVE))
+    await loadThreadElsewhere(page, QUESTIONS.slice(0, 2))
+  }
 
   await ask(page, QUESTIONS[2])
   await expect(page.getByText(EXPLAIN_NARRATIVE)).toBeVisible()
   // The third answer keeps both companies and shows the figures it points to.
   await expectComparison(answer(page, EXPLAIN_NARRATIVE))
+  if (CAPTURE) await openEveryEvidencePage(page, answer(page, EXPLAIN_NARRATIVE))
 
   // The inspector opens a figure cited in the third answer and, through it, its filing.
   await inspectCitedFigure(page, answer(page, EXPLAIN_NARRATIVE))
@@ -83,10 +125,7 @@ test('golden conversation renders charts, metrics and inspectable sources, and s
 
   // Reload: all three questions and answers come back from the persisted thread, with
   // their figures, chart points and sources.
-  const streamsAfterReload: string[] = []
-  page.on('request', (request) => {
-    if (/\/v1\/chat\/threads\/[^/]+\/stream$/.test(new URL(request.url()).pathname)) streamsAfterReload.push(request.url())
-  })
+  const streamsAfterReload = apiRequests(page, 'GET', /\/v1\/chat\/threads\/[^/]+\/stream$/)
   await page.reload()
   for (const question of QUESTIONS) {
     await expect(page.locator('[data-role="user"]', { hasText: question })).toBeVisible()
@@ -102,7 +141,20 @@ test('golden conversation renders charts, metrics and inspectable sources, and s
   expect(historyReads.length).toBeGreaterThanOrEqual(1)
   await expect(page.getByRole('button', { name: 'Send' })).toBeEnabled()
   expect(streamsAfterReload).toEqual([])
+  expect(leakedToNetwork).toEqual([])
 })
+
+// What a reload between turns reads, recorded so the replays show the thread as it stood
+// then: without it, the only history recorded is the final reload's, all three turns. A
+// second tab, so this page's request log stays what the visitor's page asked.
+async function loadThreadElsewhere(page: Page, asked: readonly string[]) {
+  const tab = await page.context().newPage()
+  await tab.goto(page.url())
+  await expect(tab.locator('[data-role="user"]')).toHaveCount(asked.length)
+  for (const question of asked) await expect(tab.locator('[data-role="user"]', { hasText: question })).toBeVisible()
+  await expect(tab.locator('[data-role="assistant"]')).toHaveCount(asked.length)
+  await tab.close()
+}
 
 // NVDA first, then AMD, each row with figures that open their evidence.
 async function expectComparison(message: Locator) {
@@ -138,6 +190,40 @@ async function inspectCitedFigure(page: Page, message: Locator) {
   await expect(inspector.getByRole('heading', { name: /^(sec_edgar|golden_fixture) filing$/ })).toBeVisible()
   await inspector.getByRole('button', { name: 'Close' }).click()
   await expect(inspector).toBeHidden()
+}
+
+// Every evidence page a visitor can reach from this answer, each opened once: the pages
+// each block's metadata lists and its figures open, then every ref those pages link to.
+async function openEveryEvidencePage(page: Page, message: Locator) {
+  const inspector = page.getByRole('complementary', { name: 'Evidence inspector' })
+  const opened = new Set<string>()
+  // False when the ref was already opened, so nothing changed.
+  async function inspect(control: Locator): Promise<boolean> {
+    const ref = `${await control.getAttribute('data-inspection-kind')} ${await control.getAttribute('data-inspection-id')}`
+    if (opened.has(ref)) return false
+    opened.add(ref)
+    const lookup = page.waitForResponse((response) => new URL(response.url()).pathname === '/v1/evidence/inspect')
+    await control.click()
+    expect((await lookup).status(), ref).toBe(200)
+    await expect(inspector.getByRole('status')).toHaveCount(0)
+    await inspectLinks()
+    return true
+  }
+  async function inspectLinks() {
+    for (const link of await inspector.locator('button[data-inspection-kind]').all()) {
+      if (await inspect(link)) await inspector.getByRole('button', { name: 'Back' }).click()
+    }
+  }
+  const close = () => inspector.getByRole('button', { name: 'Close' }).click()
+  for (const block of await message.locator('[data-testid^="block-shell-"]').all()) {
+    await block.hover()
+    await block.getByRole('button', { name: 'Inspect block metadata' }).first().click()
+    await inspectLinks()
+    await close()
+  }
+  for (const figure of await message.locator('button[data-inspection-kind]').all()) {
+    if (await inspect(figure)) await close()
+  }
 }
 
 // The revenue chart draws real bars (#187): the tallest fills most of the chart, and

@@ -123,6 +123,53 @@ jobs:
         if: always()
         run: ./scripts/dev-shell.sh down
 
+  golden-e2e-demo:
+    name: golden conversation (Playwright, static demo)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+
+      # The demo's replay, fixture and auto-login exist only in the demo build.
+      - name: A normal build ships no demo code
+        run: npm run build && ! grep -rlF '[demo replay]' dist
+
+      # The GitHub Pages build: no backend, the page replays the committed golden
+      # fixture (services/app/fixtures) itself.
+      - run: npm run build:demo
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      # Playwright serves the build under its Pages base path (playwright.config.ts).
+      - name: Run the golden conversation against the static demo
+        run: npm run e2e
+        env:
+          E2E_DEMO: '1'
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-e2e-demo-debug
+          path: |
+            web/playwright-report
+            web/test-results
+          retention-days: 7
+
   db:
     name: db (integration tests)
     runs-on: ubuntu-latest

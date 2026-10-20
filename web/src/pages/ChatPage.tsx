@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useContext, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { Link, useMatch, useNavigate } from 'react-router-dom'
 import { Trash2 } from 'lucide-react'
 
@@ -11,11 +11,11 @@ import { FailureNotice } from '../ui/FailureNotice.tsx'
 import { Skeleton } from '../ui/Skeleton.tsx'
 import { useAuth } from '../shell/useAuth.ts'
 import { cancelThreadDelete, startThreadDelete, useThreadDeletes } from '../chat/threadDeletes.ts'
+import { StarterQuestionsContext } from '../chat/starterQuestions.ts'
 import { threadDisplayName } from '../chat/threadName.ts'
 import { useChatSession, type ChatSession } from '../chat/useChatSession.ts'
 import { useThreadList, useTitleFollowUp, type ThreadListState } from '../chat/useThreadList.ts'
 
-const STARTER_QUESTIONS = ['Analyze NVDA', 'Compare NVDA with AMD year to date', "What drives Apple's margins?"] as const
 
 export function ChatLayout() {
   const { session } = useAuth()
@@ -74,6 +74,7 @@ export function ChatLayout() {
 }
 
 function ChatEmptyState({ chat }: { chat: ChatSession }) {
+  const starterQuestions = useContext(StarterQuestionsContext)
   return (
     <div data-testid="chat-empty" className="flex flex-1 flex-col gap-6 p-8">
       <section className="rounded-md border border-line bg-surface p-6">
@@ -83,7 +84,7 @@ function ChatEmptyState({ chat }: { chat: ChatSession }) {
           sealed snapshot.
         </p>
         <div className="mt-5 flex flex-wrap gap-2">
-          {STARTER_QUESTIONS.map((question) => (
+          {starterQuestions.map((question) => (
             <button
               key={question}
               type="button"

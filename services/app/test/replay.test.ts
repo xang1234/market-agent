@@ -1,14 +1,23 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
+import { fileURLToPath } from "node:url";
 
-import { createCapture, createReplayHandler, type RecordedExchange, type ReplayFixture } from "../src/replay.ts";
+import { createCapture, createReplayHandler, loadReplayFixture, type RecordedExchange, type ReplayFixture } from "../src/replay.ts";
+import { createReplay, type Replay, type ReplayStore } from "../src/replayCore.ts";
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => void;
+
+// sessionStorage's part a replay uses, in memory: each replay built on it is a reload.
+function memoryStore(): ReplayStore & { items: Map<string, string> } {
+  const items = new Map<string, string>();
+  return { items, getItem: (key) => items.get(key) ?? null, setItem: (key, value) => void items.set(key, value) };
+}
 
 async function serve(t: TestContext, handler: Handler): Promise<string> {
   const server = createServer(handler);
@@ -184,6 +193,115 @@ test("replay reaches reads recorded after an evidence lookup (a lookup isn't a w
   await call("POST", `/v1/chat/threads/${THREAD}/messages`, { message_id: USER_MSG, snapshot_id: USER_SNAP, content: intent });
   // The sidebar after the turn lists the new thread, not the empty list from before it.
   assert.deepEqual(JSON.parse(await call("GET", "/v1/chat/threads")).threads, [THREAD]);
+});
+
+test("replay kept in a store picks up where it left off after a reload", () => {
+  const SECOND_MSG = "99999999-9999-4999-8999-999999999990";
+  const messages = (ids: string[]): RecordedExchange => ({
+    method: "GET", path: `/v1/chat/threads/${THREAD}/messages`, query: "", requestBody: "", status: 200, contentType: "application/json", body: json({ messages: ids }),
+  });
+  const fixture: ReplayFixture = {
+    version: 1,
+    exchanges: [
+      FIXTURE.exchanges[0]!,
+      messages([]),
+      FIXTURE.exchanges[2]!,
+      messages([USER_MSG]),
+      { method: "POST", path: `/v1/chat/threads/${THREAD}/messages`, query: "", requestBody: json({ message_id: SECOND_MSG, content: "Compare AMD" }), status: 201, contentType: "application/json", body: json({ message_id: SECOND_MSG }) },
+      messages([USER_MSG, SECOND_MSG]),
+    ],
+  };
+  const store = memoryStore();
+  const ask = (replay: Replay, method: string, path: string, body?: unknown) =>
+    replay({ method, path, query: "", body: body ? json(body) : "" });
+  const myMsg = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const mySecond = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+
+  const page = createReplay(fixture, store);
+  ask(page, "POST", "/v1/chat/threads", { title: "" });
+  // A second new thread gets an id only the replay's session knows.
+  const thread = JSON.parse(ask(page, "POST", "/v1/chat/threads", { title: "" })!.body).thread_id as string;
+  assert.notEqual(thread, THREAD);
+  ask(page, "POST", `/v1/chat/threads/${thread}/messages`, { message_id: myMsg, snapshot_id: USER_SNAP, content: intent });
+
+  const reloaded = createReplay(fixture, store);
+  assert.deepEqual(JSON.parse(ask(reloaded, "GET", `/v1/chat/threads/${thread}/messages`)!.body), { messages: [myMsg] });
+  assert.equal(ask(reloaded, "POST", `/v1/chat/threads/${thread}/messages`, { message_id: mySecond, content: "Compare AMD" })!.body, json({ message_id: mySecond }));
+  assert.deepEqual(JSON.parse(ask(reloaded, "GET", `/v1/chat/threads/${thread}/messages`)!.body), { messages: [myMsg, mySecond] });
+});
+
+// FIXTURE's turn, played on a page whose replay keeps its session in `store`.
+function playTurn(store: ReplayStore) {
+  const page = createReplay(FIXTURE, store);
+  page({ method: "POST", path: "/v1/chat/threads", query: "", body: json({ title: "" }) });
+  page({ method: "POST", path: `/v1/chat/threads/${THREAD}/messages`, query: "", body: json({ message_id: USER_MSG, snapshot_id: USER_SNAP, content: intent }) });
+  page({ method: "GET", path: `/v1/chat/threads/${THREAD}/stream`, query: streamQuery, body: "" });
+}
+
+// The message ids a reloaded page reads for `thread`.
+const reloadedMessageIds = (fixture: ReplayFixture, store: ReplayStore, thread = THREAD) =>
+  (JSON.parse(createReplay(fixture, store)({ method: "GET", path: `/v1/chat/threads/${thread}/messages`, query: "", body: "" })!.body) as {
+    messages: { message_id: string }[];
+  }).messages.map(({ message_id }) => message_id);
+
+test("a session saved against another recording of the same length is ignored", () => {
+  const store = memoryStore();
+  playTurn(store);
+  assert.deepEqual(reloadedMessageIds(FIXTURE, store), [USER_MSG, ANSWER]);
+
+  // The same conversation captured again: the server issued another thread id.
+  const RECAPTURED = "12121212-1212-4212-8212-121212121212";
+  const recaptured = JSON.parse(json(FIXTURE).replaceAll(THREAD, RECAPTURED)) as ReplayFixture;
+  assert.deepEqual(reloadedMessageIds(recaptured, store, RECAPTURED), [], "the recapture starts over");
+});
+
+test("a saved session that doesn't parse, or isn't one this replay saved, counts as none", () => {
+  const store = memoryStore();
+  playTurn(store);
+  const [[key, saved]] = [...store.items];
+  for (const stored of [
+    "{",
+    "null",
+    // The shape before sessions had a version.
+    json({ fixtureSize: FIXTURE.exchanges.length, cursor: 3, used: [0, 2, 3], aliases: [] }),
+    json({ ...JSON.parse(saved!), aliases: null }),
+  ]) {
+    store.items.set(key!, stored);
+    assert.deepEqual(reloadedMessageIds(FIXTURE, store), [], stored);
+  }
+  store.items.set(key!, saved!);
+  assert.deepEqual(reloadedMessageIds(FIXTURE, store), [USER_MSG, ANSWER], "the session as saved still counts");
+});
+
+test("a reload between turns of the golden conversation shows the thread as it stood", async () => {
+  const fixture = await loadReplayFixture(fileURLToPath(new URL("../fixtures/golden-conversation.replay.json", import.meta.url)));
+  const store = memoryStore();
+  // What the web client sends: its own message, snapshot and run ids, then the stream.
+  const turn = (replay: Replay, thread: string, content: string) => {
+    const [message_id, snapshot_id, run_id] = [randomUUID(), randomUUID(), randomUUID()];
+    const posted = replay({ method: "POST", path: `/v1/chat/threads/${thread}/messages`, query: "", body: json({ message_id, snapshot_id, content }) });
+    const query = new URLSearchParams({ run_id, turn_id: message_id, user_intent: content, user_id: USER }).toString();
+    const stream = replay({ method: "GET", path: `/v1/chat/threads/${thread}/stream`, query, body: "" });
+    assert.equal(posted?.status, 201, content);
+    assert.match(stream?.body ?? "", new RegExp(`"turn_id":"${message_id}"[^]*event: turn.completed\\n`), content);
+    return message_id;
+  };
+  const reloadedHistory = (thread: string) => {
+    const reply = createReplay(fixture, store)({ method: "GET", path: `/v1/chat/threads/${thread}/messages`, query: "", body: "" });
+    const { messages } = JSON.parse(reply!.body) as { messages: { role: string; message_id: string }[] };
+    return messages.map(({ role, message_id }) => (role === "user" ? message_id : role));
+  };
+
+  const page = createReplay(fixture, store);
+  const thread = (JSON.parse(page({ method: "POST", path: "/v1/chat/threads", query: "", body: json({ title: null }) })!.body) as { thread_id: string }).thread_id;
+  const first = turn(page, thread, "Analyze NVDA");
+  assert.deepEqual(reloadedHistory(thread), [first, "assistant"]);
+
+  const second = turn(createReplay(fixture, store), thread, "Compare it with AMD YTD");
+  assert.deepEqual(reloadedHistory(thread), [first, "assistant", second, "assistant"]);
+
+  const third = turn(createReplay(fixture, store), thread, "Explain the differences and show the evidence");
+  assert.deepEqual(reloadedHistory(thread), [first, "assistant", second, "assistant", third, "assistant"]);
 });
 
 test("replay answers an unrecorded request with a clear 404, not a guess", async (t) => {

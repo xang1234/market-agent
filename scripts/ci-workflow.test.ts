@@ -250,3 +250,19 @@ test("CI runs Docker-backed suites instead of skipping them, and runs these cont
   assert.match(await read("db/test/docker-pg.ts"), /env\.REQUIRE_DOCKER === "1"/u);
   assert.match(workflow, /\n  scripts:\n[\s\S]*?--test "scripts\/\*\.test\.ts"/u);
 });
+
+test("CI runs the golden conversation against the static demo build", async () => {
+  const workflow = await read(".github/workflows/ci.yml");
+  const job = /\n  golden-e2e-demo:\n[\s\S]*?(?=\n  [a-z][a-z0-9-]*:\n|$)/u.exec(workflow)?.[0] ?? "";
+  assert.match(job, /working-directory: web/u);
+  assert.match(job, /run: npm run e2e\s+env:\s+E2E_DEMO: '1'/u);
+  assert.ok(job.includes("run: npm run build:demo") && job.indexOf("npm run build:demo") < job.indexOf("npm run e2e"), "builds the demo before testing it");
+  // The demo's replay, fixture and auto-login must stay out of every other build.
+  assert.match(job, /run: npm run build && ! grep -rlF '\[demo replay\]' dist/u);
+  assert.ok(job.indexOf("npm run build &&") < job.indexOf("npm run build:demo"), "checks the normal build before the demo build replaces dist");
+  // E2E_DEMO makes Playwright serve that build itself.
+  assert.match(await read("web/playwright.config.ts"), /process\.env\.E2E_DEMO === '1'[\s\S]*command: 'npm run preview:demo'/u);
+  const scripts = (JSON.parse(await read("web/package.json")) as { scripts: Record<string, string> }).scripts;
+  assert.match(scripts["build:demo"] ?? "", /vite build --mode demo/u);
+  assert.match(scripts["preview:demo"] ?? "", /vite preview --mode demo/u);
+});

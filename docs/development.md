@@ -65,17 +65,21 @@ The golden conversation has three turns. Ask them in a new thread, word for word
 
 ### UI mode
 
-The app serves the web UI and replays the golden conversation's recorded API traffic from `services/app/fixtures/golden-conversation.replay.json`. The replay covers threads, all three turns' streams, the reloaded messages, and the evidence lookups. It builds no services and starts no containers. Any request that was not recorded answers `404` and names the request, including evidence for a figure nobody opened during capture.
+The app serves the web UI and replays the golden conversation's recorded API traffic from `services/app/fixtures/golden-conversation.replay.json`. The replay covers threads, all three turns' streams, the thread's messages as a reload reads them after each turn, and the evidence for every figure and source the answers offer. It builds no services and starts no containers. Any request that was not recorded answers `404` and names the request.
 
 A new thread restarts the replay. Concurrent tabs share one replay session. Pages whose services are parked, such as Home, Screener, Analyst Grids, and Review, show no data in this mode.
+
+The static demo runs the same replay in the browser. `npm run build:demo` in `web/` builds the app for GitHub Pages under `/market-agent/`, and `npm run preview:demo` serves it at `http://127.0.0.1:4173/market-agent/`. The page answers its own API requests from the fixture, keeps one replay session per tab in `sessionStorage` so a reload keeps the thread, and starts signed in. A banner lists the recorded questions.
 
 To recapture after an API or block change, start on a fresh database and run these from the repo root:
 
 ```bash
 DEV_CAPTURE_FILE=$PWD/services/app/fixtures/golden-conversation.replay.json DEV_PROFILE=chat DEV_NO_KEYS=true ./scripts/dev-shell.sh up
-(cd web && npm run e2e)
+(cd web && E2E_CAPTURE=1 npm run e2e)
 ./scripts/dev-shell.sh down
 ```
+
+`E2E_CAPTURE=1` makes the browser test also open every evidence page each answer offers: each block's metadata page, each figure, and every ref those pages link to. `web/src/demo/demoBackend.test.ts` fails if a fixture misses one. After the first and second answers it also loads the thread in a second tab, so a reload between turns shows only the turns asked so far. `services/app/test/replay.test.ts` fails if a fixture misses one of those loads.
 
 ### No-keys mode
 
@@ -130,13 +134,14 @@ cd services/chat && npm test && npm run typecheck
 
 `npm test` does not type-check. CI does, so also run `npm run typecheck` in each package you change.
 
-The browser smoke test in `web/e2e/` runs against a UI-mode or no-keys stack:
+The browser smoke test in `web/e2e/` runs against a UI-mode or no-keys stack, or against the static demo:
 
 ```bash
 cd web && npx playwright install chromium && npm run e2e
+cd web && npm run build:demo && E2E_DEMO=1 npm run e2e
 ```
 
-Set `E2E_BASE_URL` if `WEB_PORT` is not 5173. CI runs it against both stacks: UI mode with the committed fixture, and the real no-keys backend, which also catches a stale fixture.
+Set `E2E_BASE_URL` if `WEB_PORT` is not 5173. With `E2E_DEMO=1`, Playwright serves the demo build itself. CI runs it against all three: UI mode with the committed fixture, the static demo, and the real no-keys backend, which also catches a stale fixture.
 
 ## Where things live
 

@@ -10,11 +10,13 @@
     "dev": "vite",
     "typecheck": "tsc -b",
     "build": "tsc -b && vite build",
+    "build:demo": "tsc -b && vite build --mode demo && node -e \"require('node:fs').copyFileSync('dist/index.html', 'dist/404.html')\"",
     "lint": "eslint .",
     "sync:schema": "node -e \"require('node:fs').copyFileSync('../spec/finance_research_block_schema.json', 'src/blocks/blockSchema.json')\"",
     "test": "TSX_TSCONFIG_PATH=tsconfig.app.json node --import tsx --test 'src/**/*.test.ts' 'src/**/*.test.tsx'",
     "e2e": "playwright test",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "preview:demo": "vite preview --mode demo --host 127.0.0.1 --port 4173 --strictPort"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",
