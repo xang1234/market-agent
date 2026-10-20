@@ -136,7 +136,7 @@ export async function publishGridFinancialCells(deps: GridFinancialDeps, run: Gr
   const computed: ComputedCell[] = [];
   for (const instance of run.instances) {
     const column = FINANCIAL_COLUMNS[instance.column_key];
-    if (!column) continue;
+    if (!column) throw new Error(`${instance.column_key} is not a numerical column`);
     for (const row of run.rows) {
       if ("unsupported" in column || row.subject.kind !== "issuer") {
         await write(row.rowNumber, instance, unsupportedCell("unsupported" in column ? column.unsupported : "subject_not_an_issuer"));

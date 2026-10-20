@@ -8,7 +8,6 @@ import {
   insertPendingCell,
   loadRunForUser,
   setRunStatus,
-  markRowResolved,
   bumpCellDone,
   getRunDetail,
 } from "../src/queries.ts";
@@ -46,7 +45,6 @@ test("run progress helpers advance run/row/cell state and read detail", async (t
   await insertPendingCell(db, { gridRowId: rowId, gridRunId: runId, columnKey: "latest_market_cap", columnInstanceId: "c0" });
 
   await setRunStatus(db, runId, "running");
-  await markRowResolved(db, rowId);
   await bumpCellDone(db, runId);
   await setRunStatus(db, runId, "completed", { completedAt: true });
 

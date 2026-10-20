@@ -103,6 +103,18 @@ test("grid financial columns", { timeout: 300_000 }, async (t) => {
     assert.ok(detail.cells.every((cell) => cell.column_key !== "latest_eps_diluted"));
   });
 
+  await t.test("numerical cells publish before question cells, so recovery covers them while the reader runs", async () => {
+    const reader = { llm: { complete: async () => assert.fail("no documents, so no model call") }, loadDocumentText: async () => null };
+    const { runId } = await startRun(pool, { columns: [{ column_key: "reader_question", params: { prompt: "Any tariff exposure?" } }, { column_key: "latest_revenue" }], reader });
+    const detail = await waitForRun(pool, runId, settled);
+    assert.deepEqual([detail.run.status, detail.run.cell_done, detail.run.cell_total], ["partial", 4, 4]);
+    const written = await db.query(`select column_key, status, coverage_flag from grid_cells where grid_run_id = $1 order by computed_at, column_key`, [runId]);
+    assert.deepEqual(written.rows.map((cell) => [cell.column_key, cell.status, cell.coverage_flag]), [
+      ["latest_revenue", "ok", null], ["latest_revenue", "missing_data", "missing_input"],
+      ["reader_question", "no_coverage", "no_documents"], ["reader_question", "no_coverage", "no_documents"],
+    ]);
+  });
+
   await t.test("a run started in the deleted shadow mode reads as a run without the lane", async () => {
     const { runId } = await startRun(pool, { asOf: CUTOFF, columns: [{ column_key: "latest_revenue" }] });
     assert.equal((await waitForRun(pool, runId, settled)).run.financial_mode, "enforce");

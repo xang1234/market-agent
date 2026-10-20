@@ -121,7 +121,7 @@ export async function insertRow(
 ): Promise<string> {
   const result = await db.query<{ grid_row_id: string }>(
     `insert into grid_rows (grid_run_id, row_number, subject_ref, status)
-     values ($1, $2, $3::jsonb, 'pending')
+     values ($1, $2, $3::jsonb, 'resolved')
      returning grid_row_id::text as grid_row_id`,
     [input.gridRunId, input.rowNumber, JSON.stringify(input.subjectRef)],
   );
@@ -323,10 +323,6 @@ export async function setRunStatus(
       where grid_run_id = $1`,
     [runId, status, opts.completedAt === true, opts.errorMessage ?? null],
   );
-}
-
-export async function markRowResolved(db: QueryExecutor, gridRowId: string): Promise<void> {
-  await db.query(`update grid_rows set status = 'resolved' where grid_row_id = $1`, [gridRowId]);
 }
 
 // Atomic single-increment. The run engine bumps exactly once per cell, so the

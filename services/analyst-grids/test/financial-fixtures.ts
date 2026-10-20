@@ -3,6 +3,7 @@ import type { Client, Pool } from "pg";
 import { connectedPool } from "../../../db/test/docker-pg.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { databaseUrl, engineDatabase, IDS } from "../../financial-engine/test/db-fixtures.ts";
+import type { ReaderColumnDeps } from "../src/column-catalog.ts";
 import { createGrid, getRunDetail, type GridRunDetail } from "../src/queries.ts";
 import { startGridRun } from "../src/run-engine.ts";
 import type { ColumnSpec, QueryExecutor } from "../src/types.ts";
@@ -23,7 +24,7 @@ export const REVENUE_COLUMNS: ColumnSpec[] = [
   { column_key: "latest_market_cap" },
 ];
 
-export async function startRun(pool: Pool, input: { columns?: ColumnSpec[]; asOf?: string } = {}) {
+export async function startRun(pool: Pool, input: { columns?: ColumnSpec[]; asOf?: string; reader?: ReaderColumnDeps } = {}) {
   const db = pool as unknown as QueryExecutor;
   const grid = await createGrid(db, IDS.owner, {
     name: "Fixture grid",
@@ -36,6 +37,7 @@ export async function startRun(pool: Pool, input: { columns?: ColumnSpec[]; asOf
       db,
       pool,
       universe: createUniverseResolverDeps(db),
+      reader: input.reader,
       financial: { pool, evidence: createEvidenceFinancialPort },
     },
     { gridId: grid.grid_id, userId: IDS.owner, asOf: input.asOf ?? CUTOFF },

@@ -6,7 +6,6 @@ import {
   insertRow,
   insertPendingCell,
   setRunStatus,
-  markRowResolved,
   bumpCellDone,
   settleRunIfDone,
 } from "./queries.ts";
@@ -158,8 +157,17 @@ async function runWorker(
   const route = routeColumns(ctx.columns);
   try {
     await setRunStatus(deps.db, ctx.runId, "running");
+    // Numerical cells go first: once the engine reserves the run, the recovery worker can finish them after a crash.
+    if (route.engine.length > 0) {
+      await publishGridFinancialCells(deps.financial, {
+        user_id: ctx.userId,
+        grid_run_id: ctx.runId,
+        knowledge_cutoff: ctx.asOf,
+        rows: ctx.rows.map(({ rowNumber, subject }) => ({ rowNumber, subject })),
+        instances: route.engine,
+      });
+    }
     await runWithConcurrency(ctx.rows, ROW_CONCURRENCY, async ({ gridRowId, subject }) => {
-      await markRowResolved(deps.db, gridRowId);
       for (const column of route.producer) {
         await computeAndPersistCell(
           { db: deps.db, pool: deps.pool, reader: deps.reader },
@@ -176,15 +184,6 @@ async function runWorker(
         await bumpCellDone(deps.db, ctx.runId);
       }
     });
-    if (route.engine.length > 0) {
-      await publishGridFinancialCells(deps.financial, {
-        user_id: ctx.userId,
-        grid_run_id: ctx.runId,
-        knowledge_cutoff: ctx.asOf,
-        rows: ctx.rows.map(({ rowNumber, subject }) => ({ rowNumber, subject })),
-        instances: route.engine,
-      });
-    }
     // One completion rule for every run: completed only when every cell is a value; any gap,
     // unsupported, or error cell makes it partial. A cell still owed by another worker or by
     // recovery keeps the run open until the write that finishes it settles the run.
