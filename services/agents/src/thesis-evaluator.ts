@@ -10,7 +10,6 @@ import {
   type ThesisCondition,
   type ThesisVersion,
 } from "./thesis-types.ts";
-import { compareExactDecimals, multiplyExactDecimals, parseExactDecimal, type DecimalInput, type ExactDecimal } from "./exact-decimal.ts";
 
 export const THESIS_PROMPT_VERSION = "living-thesis-v1";
 
@@ -22,18 +21,6 @@ export type ThesisLlm = {
   }): Promise<{ text: string; deployment?: { channel: string; model: string } }>;
 };
 
-export type ThesisFact = {
-  fact_id: string;
-  metric_key: string;
-  value_num: DecimalInput;
-  scale: DecimalInput;
-  unit: string;
-  period_kind: string;
-  period_end: string | null;
-  as_of: string;
-  source_id: string;
-};
-
 export type ThesisClaim = {
   claim_id: string;
   text_canonical: string;
@@ -42,19 +29,13 @@ export type ThesisClaim = {
 export async function evaluateThesis(input: {
   thesis: ThesisVersion;
   claims: ReadonlyArray<ThesisClaim>;
-  facts: ReadonlyArray<ThesisFact>;
   as_of: string;
   llm: ThesisLlm | null;
-  /** Metric conditions already assessed by the verified financial engine; they replace the stored-fact checks. */
-  metric_results?: ReadonlyArray<ConditionAssessment>;
-  /** The clock as_of must not be ahead of (epoch ms); defaults to the host's. */
-  now?: number;
+  metric_results: ReadonlyArray<ConditionAssessment>;
 }): Promise<{ results: ConditionAssessment[]; model_version: string | null }> {
   const thesisText = parseThesisText(input.thesis.thesis);
   const conditions = parseThesisConditions(input.thesis.conditions);
-  const metricResults = new Map(
-    (input.metric_results ?? evaluateThesisMetrics(conditions, input.facts, input.as_of, input.now)).map(result => [result.condition_id, result]),
-  );
+  const metricResults = new Map(input.metric_results.map(result => [result.condition_id, result]));
   const narrativeConditions = conditions.filter(condition => condition.metric === undefined);
 
   let modelVersion: string | null = null;
@@ -156,100 +137,6 @@ export async function draftThesisConditions(
   }));
 }
 
-// The runtime uses the same deterministic results to invalidate cached assessments
-// when a fact crosses its freshness boundary, even if the evidence packet is unchanged.
-export function evaluateThesisMetrics(
-  conditions: ReadonlyArray<ThesisCondition>,
-  facts: ReadonlyArray<ThesisFact>,
-  asOf: string,
-  // The clock as_of must not be ahead of. The host's by default; a caller whose
-  // as_of comes from a trusted clock (the thesis runtime's database cutoff,
-  // which may run ahead of the host) passes that clock instead.
-  now: number = Date.now(),
-): ConditionAssessment[] {
-  const assessmentTime = parseAssessmentTime(asOf, now);
-  return parseThesisConditions(conditions).flatMap(condition => condition.metric === undefined
-    ? []
-    : [evaluateMetricCondition(condition, condition.metric, facts, assessmentTime)]);
-}
-
-function evaluateMetricCondition(
-  condition: ThesisCondition,
-  metric: NonNullable<ThesisCondition["metric"]>,
-  facts: ReadonlyArray<ThesisFact>,
-  assessmentTime: number,
-): ConditionAssessment {
-  const maxAgeMs = metric.max_age_days * 24 * 60 * 60 * 1_000;
-  const threshold = parseExactDecimal(metric.threshold);
-  const eligible = facts
-    .map((fact) => ({ fact, time: metricFactTime(fact, metric.period_kind, assessmentTime), value: exactFactValue(fact) }))
-    .filter(({ fact, time, value }) =>
-      fact.metric_key === metric.metric_key &&
-      fact.unit === metric.unit &&
-      fact.period_kind === metric.period_kind &&
-      threshold !== null &&
-      value !== null &&
-      time !== null &&
-      assessmentTime - time <= maxAgeMs
-    )
-    .sort((left, right) =>
-      (right.time ?? 0) - (left.time ?? 0) ||
-      Date.parse(right.fact.as_of) - Date.parse(left.fact.as_of) ||
-      left.fact.fact_id.localeCompare(right.fact.fact_id)
-    );
-
-  const selected = eligible[0];
-  if (selected === undefined || selected.value === null || threshold === null) {
-    return {
-      condition_id: condition.condition_id,
-      status: "unresolved",
-      reason: "No eligible metric evidence was available.",
-      claim_refs: [],
-      fact_refs: [],
-      method: "no_evidence",
-    };
-  }
-
-  const comparison = compareExactDecimals(selected.value, threshold);
-  const meetsThreshold = metric.operator === "eq"
-    ? comparison === 0
-    : metric.operator === "lt"
-      ? comparison < 0
-      : metric.operator === "lte"
-        ? comparison <= 0
-        : metric.operator === "gt"
-          ? comparison > 0
-          : comparison >= 0;
-  return {
-    condition_id: condition.condition_id,
-    status: meetsThreshold ? "supported" : "challenged",
-    reason: meetsThreshold
-      ? "The latest eligible metric evidence meets the configured threshold."
-      : "The latest eligible metric evidence does not meet the configured threshold.",
-    claim_refs: [],
-    fact_refs: [selected.fact.fact_id],
-    method: "metric",
-  };
-}
-
-function exactFactValue(fact: ThesisFact): ExactDecimal | null {
-  const value = parseExactDecimal(fact.value_num);
-  const scale = parseExactDecimal(fact.scale);
-  return value === null || scale === null ? null : multiplyExactDecimals(value, scale);
-}
-
-function metricFactTime(
-  fact: ThesisFact,
-  periodKind: NonNullable<ThesisCondition["metric"]>["period_kind"],
-  assessmentTime: number,
-): number | null {
-  const observationTime = parseFiniteDate(fact.as_of);
-  if (observationTime === null || observationTime > assessmentTime) return null;
-  const anchor = periodKind === "point" ? observationTime : parseFiniteDate(fact.period_end);
-  if (anchor === null || anchor > assessmentTime) return null;
-  return anchor;
-}
-
 function parseNarrativeResults(
   text: string,
   conditions: ReadonlyArray<ThesisCondition>,
@@ -313,44 +200,6 @@ function noNarrativeEvidence(conditionId: string): ConditionAssessment {
     fact_refs: [],
     method: "no_evidence",
   };
-}
-
-function parseAssessmentTime(value: string, now: number): number {
-  const time = parseFiniteDate(value);
-  if (time === null || time > now) {
-    throw new ThesisValidationError("as_of must be a valid date that is not in the future");
-  }
-  return time;
-}
-
-function parseFiniteDate(value: unknown): number | null {
-  if (typeof value !== "string" || value.trim().length === 0) return null;
-  const calendar = /^(\d{4})-(\d{2})-(\d{2})(?:$|[T ])/.exec(value);
-  if (calendar === null) return null;
-  const year = Number(calendar[1]);
-  const month = Number(calendar[2]);
-  const day = Number(calendar[3]);
-  const daysInMonth = [
-    31,
-    isLeapYear(year) ? 29 : 28,
-    31,
-    30,
-    31,
-    30,
-    31,
-    31,
-    30,
-    31,
-    30,
-    31,
-  ];
-  if (month < 1 || month > 12 || day < 1 || day > (daysInMonth[month - 1] ?? 0)) return null;
-  const time = Date.parse(value);
-  return Number.isFinite(time) ? time : null;
-}
-
-function isLeapYear(year: number): boolean {
-  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
 }
 
 function parseJsonObject(text: string, label: string): Record<string, unknown> {

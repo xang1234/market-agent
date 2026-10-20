@@ -6,6 +6,8 @@ import { bindModelSnapshot } from "../src/model-snapshot.ts";
 import type { DiscoveryRepository, Lease, OperationRunner, Providers } from "../src/ports.ts";
 import type { ModelConfigSnapshot } from "../src/types.ts";
 
+const FAKE_POOL = { query: async () => ({ rows: [] }), connect: async () => { throw new Error("unused"); } };
+
 test("worker dependencies construct every provider and model with the leased user", () => {
   const seen: string[] = [];
   const providers = Object.freeze({
@@ -27,6 +29,7 @@ test("worker dependencies construct every provider and model with the leased use
     loadExisting: async () => [],
     persistQuotes: async () => new Map(),
     commitAssessment: async () => ({ decision: {} as never, snapshot_id: "00000000-0000-4000-8000-000000000001" }),
+    pool: FAKE_POOL,
   });
   const lease: Lease = { run_id: "00000000-0000-4000-8000-000000000001", user_id: "00000000-0000-4000-8000-000000000002", worker_id: "fixture", epoch: 1, expires_at: new Date().toISOString() };
   assert.equal(deps.providers(lease).financials, providers.financials);
@@ -51,9 +54,22 @@ test("worker models are bound to the run snapshot and reject drifted deployments
     loadExisting: async () => [],
     persistQuotes: async () => new Map(),
     commitAssessment: async () => ({ decision: {} as never, snapshot_id: "00000000-0000-4000-8000-000000000001" }),
+    pool: FAKE_POOL,
   });
   const lease: Lease = { run_id: "00000000-0000-4000-8000-000000000001", user_id: "00000000-0000-4000-8000-000000000002", worker_id: "fixture", epoch: 1, expires_at: new Date().toISOString() };
   const model = bindModelSnapshot(deps.model(lease, {} as OperationRunner, snapshot), snapshot);
   assert.deepEqual(received, snapshot);
   await assert.rejects(model.complete({ operation_key: "key", request_hash: "hash", role: "scout", phase: "discovery", messages: [] }), { code: "unavailable" });
+});
+
+test("worker dependencies refuse to start without the financial engine's pool", () => {
+  assert.throws(() => createWorkerDeps({
+    repo: {} as DiscoveryRepository,
+    clock: () => new Date(),
+    providerFactory: {} as never,
+    modelFactory: () => { throw new Error("unused"); },
+    loadExisting: async () => [],
+    persistQuotes: async () => new Map(),
+    commitAssessment: async () => { throw new Error("unused"); },
+  } as unknown as Parameters<typeof createWorkerDeps>[0]), /createWorkerDeps needs the financial engine's pool/);
 });

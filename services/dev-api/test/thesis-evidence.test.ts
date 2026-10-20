@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { QueryExecutor } from "../../agents/src/agent-repo.ts";
-import { evaluateThesisMetrics } from "../../agents/src/thesis-evaluator.ts";
 import type { ThesisVersion } from "../../agents/src/thesis-types.ts";
 import { loadThesisPacket } from "../src/thesis-evidence.ts";
 
@@ -10,16 +9,13 @@ const ISSUER = "20000000-0000-4000-8000-000000000001";
 const HIGH_PRECISION_FACT = "30000000-0000-4000-8000-000000000001";
 const UNSAFE_INTEGER_FACT = "30000000-0000-4000-8000-000000000002";
 
-test("loadThesisPacket preserves PostgreSQL numeric text through exact metric evaluation", async () => {
+test("loadThesisPacket preserves PostgreSQL numeric text for the sealed packet", async () => {
   const statements: string[] = [];
   const db: QueryExecutor = {
     async query(text) {
       statements.push(text);
       if (!text.includes("jsonb_to_recordset($2::jsonb) requested")) return { rows: [] } as never;
 
-      // Faithfully emulate the existing PostgreSQL projection: numeric::float8
-      // truncates the boundary fact and rounds the unsafe integer before it
-      // reaches the shared evaluator. The text projection must retain both.
       const exactTextProjection = text.includes("f.value_num::text as value_num")
         && text.includes("f.scale::text as scale");
       return {
@@ -48,9 +44,6 @@ test("loadThesisPacket preserves PostgreSQL numeric text through exact metric ev
     userId: "10000000-0000-4000-8000-000000000001",
     asOf: "2026-09-22T00:00:00.000Z",
   });
-  const results = evaluateThesisMetrics(thesisVersion().conditions, packet.facts, "2026-09-22T00:00:00.000Z");
-
-  assert.deepEqual(results.map((result) => result.status), ["challenged", "supported"]);
   assert.deepEqual(packet.facts.map((row) => [row.value_num, row.scale]), [
     ["0.1000000000000000000001", "3"],
     ["9007199254740993", "1"],

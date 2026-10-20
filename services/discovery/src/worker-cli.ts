@@ -30,7 +30,12 @@ export async function runDiscoveryWorkerFromEnvironment(env = process.env): Prom
   if (typeof runtime.createDiscoveryWorkerDeps !== "function") throw new Error("DISCOVERY_WORKER_MODULE must export createDiscoveryWorkerDeps()");
   const pollMs = Number(env.DISCOVERY_WORKER_POLL_MS ?? "1000");
   if (!Number.isInteger(pollMs) || pollMs < 1 || pollMs > 60_000) throw new Error("DISCOVERY_WORKER_POLL_MS must be an integer between 1 and 60000");
-  await runDiscoveryWorkerCli(await runtime.createDiscoveryWorkerDeps(), pollMs);
+  const deps = await runtime.createDiscoveryWorkerDeps();
+  if (typeof deps?.financialCriteria !== "function" || typeof deps.financialReadiness !== "function") {
+    throw new Error("createDiscoveryWorkerDeps() must return deps with financialCriteria and financialReadiness; createWorkerDeps provides both");
+  }
+  await deps.financialReadiness();
+  await runDiscoveryWorkerCli(deps, pollMs);
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {

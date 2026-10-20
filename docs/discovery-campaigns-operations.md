@@ -44,7 +44,7 @@ fixtures, reports, logs intended for sharing, or this document.
 | Setting | Purpose |
 | --- | --- |
 | `DISCOVERY_ENABLED` | Explicit feature and worker gate. It defaults to `false`. |
-| `DISCOVERY_WORKER_MODULE` | Absolute path to the deployment-owned module exporting `createDiscoveryWorkerDeps()`. It constructs the user-scoped Brave search, identity, evidence, financial, and model adapters. |
+| `DISCOVERY_WORKER_MODULE` | Absolute path to the deployment-owned module exporting `createDiscoveryWorkerDeps()`. It constructs the user-scoped Brave search, identity, evidence, financial, and model adapters, and passes the database pool to `createWorkerDeps`, which always calculates numerical criteria through the financial engine. The worker starts only once that database passes the verified-finance readiness check. |
 | `DISCOVERY_WORKER_POLL_MS` | Worker poll period; default `1000`, accepted range `1` through `60000`. |
 | `DISCOVERY_SEARCH_API_KEY` | Credential for the configured Brave search adapter. |
 | `LLM_CHANNELS` or the existing `LITELLM_*` / `LLM_*` settings | Existing model provider and model-routing configuration. |

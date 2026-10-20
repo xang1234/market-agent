@@ -34,7 +34,7 @@ test("assessment validates both independent role results before deciding", async
   const packet = packetFixture();
 
   const result = await assessCompany({
-    run_id: "70000000-0000-4000-8000-000000000001",
+    run_id: "70000000-0000-4000-8000-000000000001", metric_outcomes: new Map(),
     brief: briefFixture(),
     packet,
     model,
@@ -62,7 +62,7 @@ test("assessment repairs one malformed cached role output using the original req
   };
 
   await assessCompany({
-    run_id: "70000000-0000-4000-8000-000000000001", brief: briefFixture(), packet: packetFixture(), model,
+    run_id: "70000000-0000-4000-8000-000000000001", metric_outcomes: new Map(), brief: briefFixture(), packet: packetFixture(), model,
     as_of: "2026-09-10T12:00:00Z", persistQuotes: async () => new Map(), reloadPacket: async () => packetFixture(), saveValidatedRole: async () => undefined, loadValidatedRoles: async () => ({ analyst: null, skeptic: null }),
   });
 
@@ -83,7 +83,7 @@ test("an invalid repair stops after the explicit second attempt", async () => {
 
   await assert.rejects(
     assessCompany({
-      run_id: "70000000-0000-4000-8000-000000000001", brief: briefFixture(), packet: packetFixture(), model,
+      run_id: "70000000-0000-4000-8000-000000000001", metric_outcomes: new Map(), brief: briefFixture(), packet: packetFixture(), model,
       as_of: "2026-09-10T12:00:00Z", persistQuotes: async () => new Map(), reloadPacket: async () => packetFixture(), saveValidatedRole: async () => undefined, loadValidatedRoles: async () => ({ analyst: null, skeptic: null }),
     }),
     /not valid JSON/i,
@@ -104,7 +104,7 @@ test("control errors propagate without repair or fallback", async () => {
 
   await assert.rejects(
     assessCompany({
-      run_id: "70000000-0000-4000-8000-000000000001", brief: briefFixture(), packet: packetFixture(), model,
+      run_id: "70000000-0000-4000-8000-000000000001", metric_outcomes: new Map(), brief: briefFixture(), packet: packetFixture(), model,
       as_of: "2026-09-10T12:00:00Z", persistQuotes: async () => new Map(), reloadPacket: async () => packetFixture(), saveValidatedRole: async () => undefined, loadValidatedRoles: async () => ({ analyst: null, skeptic: null }),
     }),
     { code: "operation_in_progress" },
@@ -124,7 +124,7 @@ test("reloaded evidence is revalidated before saving normalized role checkpoints
 
   await assert.rejects(
     assessCompany({
-      run_id: "70000000-0000-4000-8000-000000000001", brief: briefFixture(), packet, model,
+      run_id: "70000000-0000-4000-8000-000000000001", metric_outcomes: new Map(), brief: briefFixture(), packet, model,
       as_of: "2026-09-10T12:00:00Z", persistQuotes: async () => { persisted += 1; return new Map(); },
       reloadPacket: async () => ({ ...packet, claims: [] }), saveValidatedRole: async () => { saved += 1; }, loadValidatedRoles: async () => ({ analyst: null, skeptic: null }),
     }),
@@ -154,7 +154,7 @@ test("a persisted Analyst checkpoint resumes the missing Skeptic with its origin
 
   await assert.rejects(
     assessCompany({
-      run_id: "70000000-0000-4000-8000-000000000001", brief: briefFixture(), packet, model: initialModel,
+      run_id: "70000000-0000-4000-8000-000000000001", metric_outcomes: new Map(), brief: briefFixture(), packet, model: initialModel,
       as_of: "2026-09-10T12:00:00Z",
       persistQuotes: async (_raw, _visiblePacket, request) => {
         persisted.push(request);
@@ -193,7 +193,7 @@ test("a persisted Analyst checkpoint resumes the missing Skeptic with its origin
     },
   };
   const result = await assessCompany({
-    run_id: "70000000-0000-4000-8000-000000000001", brief: briefFixture(), packet, model: resumedModel,
+    run_id: "70000000-0000-4000-8000-000000000001", metric_outcomes: new Map(), brief: briefFixture(), packet, model: resumedModel,
     as_of: "2026-09-10T12:00:00Z", persistQuotes: async () => new Map(), reloadPacket: async () => reloadedPacket,
     saveValidatedRole: async (checkpoint) => { saved.push(checkpoint); },
     loadValidatedRoles: async () => ({ analyst: analystCheckpoint as never, skeptic: null }),
@@ -217,7 +217,7 @@ test("a resumed checkpoint cannot authorize a claim that fresh evidence revoked"
   };
   await assert.rejects(
     assessCompany({
-      run_id: "70000000-0000-4000-8000-000000000001", brief: briefFixture(), packet, model: initialModel,
+      run_id: "70000000-0000-4000-8000-000000000001", metric_outcomes: new Map(), brief: briefFixture(), packet, model: initialModel,
       as_of: "2026-09-10T12:00:00Z", persistQuotes: async () => new Map(), reloadPacket: async () => packet,
       saveValidatedRole: async (checkpoint) => { saved.push(checkpoint); }, loadValidatedRoles: async () => ({ analyst: null, skeptic: null }),
     }),
@@ -226,7 +226,7 @@ test("a resumed checkpoint cannot authorize a claim that fresh evidence revoked"
   const calls: Parameters<CampaignModel["complete"]>[0][] = [];
   await assert.rejects(
     assessCompany({
-      run_id: "70000000-0000-4000-8000-000000000001", brief: briefFixture(), packet,
+      run_id: "70000000-0000-4000-8000-000000000001", metric_outcomes: new Map(), brief: briefFixture(), packet,
       model: { async complete(input) { calls.push(input); return { text: JSON.stringify(skepticFixture()), deployment: { channel: "test", model: "structured" } }; } },
       as_of: "2026-09-10T12:00:00Z", persistQuotes: async () => new Map(), reloadPacket: async () => ({ ...packet, claims: [] }),
       saveValidatedRole: async () => undefined,

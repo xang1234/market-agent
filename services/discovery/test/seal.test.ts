@@ -24,7 +24,7 @@ test("sealing verifies cited claim documents and tool provenance before returnin
     },
   };
   const packet = packetFixture();
-  const decision = decideCandidate(briefFixture(), packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z");
+  const decision = decideCandidate(briefFixture(), packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z", new Map());
 
   const snapshotId = await sealCandidateAssessment(snapshotTransactionClient(tx), {
     snapshot_id: SNAPSHOT_ID,
@@ -53,7 +53,7 @@ test("sealing includes the document source when it differs from a cited claim re
   };
   const packet = packetFixture();
   packet.claims[0] = { ...packet.claims[0]!, source_id: REPORTING_SOURCE };
-  const decision = decideCandidate(briefFixture(), packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z");
+  const decision = decideCandidate(briefFixture(), packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z", new Map());
 
   await sealCandidateAssessment(snapshotTransactionClient(tx), {
     snapshot_id: SNAPSHOT_ID,
@@ -76,7 +76,7 @@ test("sealing refuses unverifiable tool provenance", async () => {
     async query<R extends Record<string, unknown>>() { return result([] as R[]); },
   };
   const packet = packetFixture();
-  const decision = decideCandidate(briefFixture(), packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z");
+  const decision = decideCandidate(briefFixture(), packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z", new Map());
 
   await assert.rejects(
     () => sealCandidateAssessment(snapshotTransactionClient(tx), { snapshot_id: SNAPSHOT_ID, packet, decision, as_of: "2026-09-10T12:00:00Z", tool_calls: [{ tool_call_id: TOOL_CALL_ID, result_hash: TOOL_HASH }] }),
@@ -98,7 +98,7 @@ test("an evidence-backed exclusion is sealed rather than discarded", async () =>
   const skeptic = skepticFixture();
   analyst.criteria[0] = { ...analyst.criteria[0]!, outcome: "fail" };
   skeptic.criteria[0] = { ...skeptic.criteria[0]!, outcome: "fail" };
-  const decision = decideCandidate(briefFixture(), packetFixture(), analyst, skeptic, "2026-09-10T12:00:00Z");
+  const decision = decideCandidate(briefFixture(), packetFixture(), analyst, skeptic, "2026-09-10T12:00:00Z", new Map());
   assert.equal(decision.state, "excluded");
 
   const snapshotId = await sealCandidateAssessment(snapshotTransactionClient(tx), {

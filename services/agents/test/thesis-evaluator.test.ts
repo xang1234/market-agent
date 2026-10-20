@@ -1,14 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  draftThesisConditions,
-  evaluateThesis,
-  evaluateThesisMetrics,
-  type ThesisFact,
-  type ThesisLlm,
-} from "../src/thesis-evaluator.ts";
-import { ThesisValidationError, type ThesisCondition, type ThesisVersion } from "../src/thesis-types.ts";
+import { draftThesisConditions, evaluateThesis, type ThesisLlm } from "../src/thesis-evaluator.ts";
+import { ThesisValidationError, type ConditionAssessment, type ThesisCondition, type ThesisVersion } from "../src/thesis-types.ts";
 
 const ISSUER_ID = "11111111-1111-4111-8111-111111111111";
 const VERSION_ID = "22222222-2222-4222-8222-222222222222";
@@ -17,7 +11,6 @@ const BEAR_ID = "44444444-4444-4444-8444-444444444444";
 const METRIC_ID = "55555555-5555-4555-8555-555555555555";
 const CLAIM_ID = "66666666-6666-4666-8666-666666666666";
 const FACT_ID = "77777777-7777-4777-8777-777777777777";
-const SOURCE_ID = "88888888-8888-4888-8888-888888888888";
 const AS_OF = "2026-09-08T00:00:00.000Z";
 
 function condition(
@@ -50,21 +43,6 @@ function llmResponse(value: unknown, deployment?: { channel: string; model: stri
     async complete() {
       return { text: JSON.stringify(value), ...(deployment ? { deployment } : {}) };
     },
-  };
-}
-
-function fact(overrides: Partial<ThesisFact> = {}): ThesisFact {
-  return {
-    fact_id: FACT_ID,
-    metric_key: "revenue",
-    value_num: 10,
-    scale: 100,
-    unit: "USDm",
-    period_kind: "fiscal_q",
-    period_end: "2026-08-31",
-    as_of: "2026-09-07T00:00:00.000Z",
-    source_id: SOURCE_ID,
-    ...overrides,
   };
 }
 
@@ -101,7 +79,7 @@ test("evaluateThesis lets evidence support and challenge opposing narrative cond
       }),
     ]),
     claims: [{ claim_id: CLAIM_ID, text_canonical: "Enterprise growth slowed to 8 percent." }],
-    facts: [],
+    metric_results: [],
     as_of: AS_OF,
     llm: guardedLlm,
   });
@@ -124,7 +102,7 @@ test("evaluateThesis returns unresolved narrative conditions without invoking a 
   const result = await evaluateThesis({
     thesis: thesis([condition(BULL_ID)]),
     claims: [],
-    facts: [],
+    metric_results: [],
     as_of: AS_OF,
     llm,
   });
@@ -147,7 +125,7 @@ test("evaluateThesis requires a model when narrative claims are available", asyn
     evaluateThesis({
       thesis: thesis([condition(BULL_ID)]),
       claims: [{ claim_id: CLAIM_ID, text_canonical: "Demand slowed." }],
-      facts: [],
+      metric_results: [],
       as_of: AS_OF,
       llm: null,
     }),
@@ -171,7 +149,7 @@ test("evaluateThesis rejects foreign citations, missing rows, duplicate rows, an
       evaluateThesis({
         thesis: thesis([condition(BULL_ID)]),
         claims: [{ claim_id: CLAIM_ID, text_canonical: "Demand slowed." }],
-        facts: [],
+        metric_results: [],
         as_of: AS_OF,
         llm: llmResponse(response),
       }),
@@ -181,142 +159,23 @@ test("evaluateThesis rejects foreign citations, missing rows, duplicate rows, an
   }
 });
 
-test("evaluateThesis compares scaled metric values at the exact threshold", async () => {
-  const metricCondition = condition(METRIC_ID, {
-    metric: {
-      metric_key: "revenue",
-      unit: "USDm",
-      period_kind: "fiscal_q",
-      operator: "gte",
-      threshold: 1_000,
-      max_age_days: 30,
-    },
+test("evaluateThesis takes each metric condition's result from the engine verbatim and requires one", async () => {
+  const metric = condition(METRIC_ID, {
+    metric: { metric_key: "revenue", unit: "currency", period_kind: "fiscal_y", operator: "gt", threshold: "1", max_age_days: 730 },
   });
-  const result = await evaluateThesis({
-    thesis: thesis([metricCondition]),
-    claims: [],
-    facts: [fact()],
-    as_of: AS_OF,
-    llm: null,
-  });
-
-  assert.equal(result.results[0]?.status, "supported");
-  assert.equal(result.results[0]?.method, "metric");
-  assert.deepEqual(result.results[0]?.fact_refs, [FACT_ID]);
-  assert.doesNotMatch(result.results[0]?.reason ?? "", /\d/);
-});
-
-test("evaluateThesis compares scaled decimal facts exactly across every threshold operator", async () => {
-  const cases = [
-    { operator: "eq", value_num: "0.1", scale: "3", threshold: "0.3", status: "supported" },
-    { operator: "lte", value_num: "0.1000000000000000000001", scale: "3", threshold: "0.3", status: "challenged" },
-    { operator: "lt", value_num: "0.0999999999999999999999", scale: "3", threshold: "0.3", status: "supported" },
-    { operator: "gt", value_num: "0.1000000000000000000001", scale: "3", threshold: "0.3", status: "supported" },
-    { operator: "gte", value_num: "0.1", scale: "3", threshold: "0.3", status: "supported" },
-  ] as const;
-
-  for (const item of cases) {
-    const result = await evaluateThesis({
-      thesis: thesis([condition(METRIC_ID, {
-        metric: { metric_key: "revenue", unit: "USDm", period_kind: "fiscal_q", operator: item.operator, threshold: item.threshold, max_age_days: 30 },
-      })]),
-      claims: [],
-      facts: [fact({ value_num: item.value_num, scale: item.scale })],
-      as_of: AS_OF,
-      llm: null,
-    });
-    assert.equal(result.results[0]?.status, item.status, item.operator);
-  }
-});
-
-test("evaluateThesis preserves bounded high-precision PostgreSQL numerics and fails closed for lossy facts", async () => {
-  const metric = (threshold: string) => condition(METRIC_ID, {
-    metric: { metric_key: "revenue", unit: "USDm", period_kind: "fiscal_q", operator: "eq", threshold, max_age_days: 30 },
-  });
-  const highPrecision = "12345678901234567890.12345678901234567890";
-  const exact = await evaluateThesis({ thesis: thesis([metric(highPrecision)]), claims: [], facts: [fact({ value_num: highPrecision, scale: "1" })], as_of: AS_OF, llm: null });
-  assert.equal(exact.results[0]?.status, "supported");
-
-  for (const invalidFact of [
-    fact({ value_num: Number.MAX_SAFE_INTEGER + 2, scale: 1 }),
-    fact({ value_num: "not-a-number", scale: "1" }),
-    fact({ value_num: `1.${"1".repeat(101)}`, scale: "1" }),
-    fact({ value_num: "1", scale: `1.${"1".repeat(101)}` }),
-  ]) {
-    const result = await evaluateThesis({ thesis: thesis([metric("1")]), claims: [], facts: [invalidFact], as_of: AS_OF, llm: null });
-    assert.deepEqual(result.results[0], {
-      condition_id: METRIC_ID,
-      status: "unresolved",
-      reason: "No eligible metric evidence was available.",
-      claim_refs: [],
-      fact_refs: [],
-      method: "no_evidence",
-    });
-  }
-});
-
-test("evaluateThesis ignores stale, wrong-unit, wrong-period, nonfinite, future, and invalid-date metric facts", async () => {
-  const metricCondition = condition(METRIC_ID, {
-    metric: {
-      metric_key: "revenue",
-      unit: "USDm",
-      period_kind: "fiscal_y",
-      operator: "gte",
-      threshold: 1,
-      max_age_days: 90,
-    },
-  });
-  const result = await evaluateThesis({
-    thesis: thesis([metricCondition]),
-    claims: [],
-    facts: [
-      fact({ period_kind: "fiscal_y", period_end: "2024-12-31", as_of: "2026-09-08T00:00:00.000Z" }),
-      fact({ unit: "USD", period_kind: "fiscal_y", period_end: "2026-08-31" }),
-      fact({ period_kind: "ttm", period_end: "2026-08-31" }),
-      fact({ period_kind: "fiscal_y", period_end: "2026-08-31", value_num: Number.NaN }),
-      fact({ period_kind: "fiscal_y", period_end: "2026-09-09" }),
-      fact({ period_kind: "fiscal_y", period_end: "not-a-date" }),
-    ],
-    as_of: AS_OF,
-    llm: null,
-  });
-
-  assert.deepEqual(result.results[0], {
-    condition_id: METRIC_ID,
-    status: "unresolved",
-    reason: "No eligible metric evidence was available.",
-    claim_refs: [],
-    fact_refs: [],
-    method: "no_evidence",
-  });
-});
-
-test("evaluateThesis chooses the latest eligible exact metric fact", async () => {
-  const newestId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-  const result = await evaluateThesis({
-    thesis: thesis([condition(METRIC_ID, {
-      metric: { metric_key: "revenue", unit: "USDm", period_kind: "point", operator: "lte", threshold: 500, max_age_days: 30 },
-    })]),
-    claims: [],
-    facts: [
-      fact({ period_kind: "point", period_end: null, as_of: "2026-09-01T00:00:00.000Z", value_num: 1, scale: 1 }),
-      fact({ fact_id: newestId, period_kind: "point", period_end: null, as_of: "2026-09-07T00:00:00.000Z", value_num: 6, scale: 100 }),
-    ],
-    as_of: AS_OF,
-    llm: null,
-  });
-
-  assert.equal(result.results[0]?.status, "challenged");
-  assert.deepEqual(result.results[0]?.fact_refs, [newestId]);
-});
-
-test("evaluateThesis rejects invalid or future assessment dates", async () => {
-  for (const asOf of ["not-a-date", "2026-02-30T00:00:00.000Z", "2999-01-01T00:00:00.000Z"]) {
-    await assert.rejects(
-      evaluateThesis({ thesis: thesis([condition(BULL_ID)]), claims: [], facts: [], as_of: asOf, llm: null }),
-      /as_of/i,
-    );
-  }
+  const engine: ConditionAssessment = {
+    condition_id: METRIC_ID, status: "supported", reason: "The verified calculation at the assessment cutoff meets the saved threshold.",
+    claim_refs: [], fact_refs: [FACT_ID], method: "metric",
+  };
+  const result = await evaluateThesis({ thesis: thesis([metric, condition(BULL_ID)]), claims: [], as_of: AS_OF, llm: null, metric_results: [engine] });
+  assert.deepEqual(result.results, [
+    engine,
+    { condition_id: BULL_ID, status: "unresolved", reason: "No eligible narrative evidence was available.", claim_refs: [], fact_refs: [], method: "no_evidence" },
+  ]);
+  await assert.rejects(
+    evaluateThesis({ thesis: thesis([metric]), claims: [], as_of: AS_OF, llm: null, metric_results: [] }),
+    new ThesisValidationError(`assessment is missing condition ${METRIC_ID}`),
+  );
 });
 
 test('draftThesisConditions rejects out-of-bounds text before calling a model', async () => {
@@ -330,7 +189,7 @@ test('evaluateThesis rejects an invalid stored thesis before calling a model', a
   const llm: ThesisLlm = { async complete() { throw new Error('invalid stored thesis reached the model'); } };
   await assert.rejects(evaluateThesis({
     thesis: { ...thesis([condition(BULL_ID)]), thesis: 'x'.repeat(4001) },
-    claims: [{ claim_id: CLAIM_ID, text_canonical: 'Demand slowed.' }], facts: [], as_of: AS_OF, llm,
+    claims: [{ claim_id: CLAIM_ID, text_canonical: 'Demand slowed.' }], metric_results: [], as_of: AS_OF, llm,
   }), ThesisValidationError);
 });
 
@@ -361,17 +220,6 @@ test("draftThesisConditions rejects responses that do not contain exactly three 
   );
 });
 
-test('same-period metric updates prefer the newer observation regardless of input order', async () => {
-  const saved = thesis([condition(METRIC_ID, {metric:{metric_key:'revenue',unit:'USDm',period_kind:'fiscal_q',operator:'gte',threshold:100,max_age_days:30}})]);
-  const older = fact({value_num:120,scale:1,as_of:'2026-09-05T00:00:00.000Z'});
-  const newer = fact({fact_id:CLAIM_ID,value_num:80,scale:1,as_of:'2026-09-07T00:00:00.000Z'});
-  for (const facts of [[older,newer],[newer,older]]) {
-    const result = await evaluateThesis({thesis:saved,claims:[],facts,as_of:AS_OF,llm:null});
-    assert.equal(result.results[0].status,'challenged');
-    assert.deepEqual(result.results[0].fact_refs,[newer.fact_id]);
-  }
-});
-
 test('relative narrative horizons retain the saved version date across later assessments', async () => {
   const saved = thesis([condition(BULL_ID,{horizon:'Next quarter'})]);
   const llm:ThesisLlm = {async complete(request) {
@@ -381,23 +229,14 @@ test('relative narrative horizons retain the saved version date across later ass
     return {text:JSON.stringify({results:[{condition_id:BULL_ID,status:'unresolved',reason:'The horizon has not been established by evidence.',claim_refs:[]}]})};
   }};
   for (const as_of of ['2026-09-06T00:00:00.000Z',AS_OF]) {
-    await evaluateThesis({thesis:saved,claims:[{claim_id:CLAIM_ID,text_canonical:'Demand slowed.'}],facts:[],as_of,llm});
+    await evaluateThesis({thesis:saved,claims:[{claim_id:CLAIM_ID,text_canonical:'Demand slowed.'}],metric_results:[],as_of,llm});
   }
 });
 
 test('narrative reasons normalize whitespace and reject values that cannot be persisted', async () => {
-  const input={thesis:thesis([condition(BULL_ID)]),claims:[{claim_id:CLAIM_ID,text_canonical:'Demand slowed.'}],facts:[],as_of:AS_OF};
+  const input={thesis:thesis([condition(BULL_ID)]),claims:[{claim_id:CLAIM_ID,text_canonical:'Demand slowed.'}],metric_results:[],as_of:AS_OF};
   const response=(reason:string)=>llmResponse({results:[{condition_id:BULL_ID,status:'challenged',reason,claim_refs:[CLAIM_ID]}]});
   const normalized=await evaluateThesis({...input,llm:response('  Demand slowed.  ')});
   assert.equal(normalized.results[0].reason,'Demand slowed.');
   await assert.rejects(evaluateThesis({...input,llm:response('x'.repeat(2001))}),ThesisValidationError);
-});
-
-test("evaluateThesisMetrics judges 'not in the future' against the caller's clock", () => {
-  const ahead = new Date(Date.now() + 3_600_000).toISOString();
-  // Default: the host clock, so a future as_of is rejected.
-  const narrative = [condition(BULL_ID)];
-  assert.throws(() => evaluateThesisMetrics(narrative, [], ahead), /not in the future/);
-  // A trusted clock (the thesis runtime's database cutoff) may run ahead of the host.
-  assert.deepEqual(evaluateThesisMetrics(narrative, [], ahead, Date.parse(ahead)), []);
 });

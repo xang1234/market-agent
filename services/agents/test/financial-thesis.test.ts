@@ -32,7 +32,7 @@ test("thesis conditions through the financial engine", { timeout: 300_000 }, asy
       [restated.condition_id, "supported", "metric"],
     ], "narrative conditions are left to the narrative method");
     for (const result of results.slice(0, 3)) assert.deepEqual(result.fact_refs, [IDS.grossProfit2023]);
-    assert.deepEqual(results[3]!.fact_refs, [IDS.restated], "a saved rule reads the latest disclosure public by the cutoff, as the stored-fact check read active facts");
+    assert.deepEqual(results[3]!.fact_refs, [IDS.restated], "a saved rule reads the latest disclosure public by the cutoff");
     for (const result of results) assert.ok(result.financial?.certificate_digest && result.financial.snapshot_id && result.financial.result_hash);
     const plans = (await db.query(`select plan->'thresholds'->0 as threshold from financial_plans p join financial_runs r on r.plan_id = p.plan_id where r.parent_id = $1 order by r.created_at`, [thesis.thesis_version_id])).rows;
     assert.deepEqual(plans[0].threshold.attribution, { kind: "saved_thesis_condition", ref: below.condition_id });

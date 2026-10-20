@@ -1,5 +1,3 @@
-import { evaluateThesisMetrics } from "../../agents/src/thesis-evaluator.ts";
-import type { ThesisCondition } from "../../agents/src/thesis-types.ts";
 import type { EvidencePacket } from "./ports.ts";
 import { buildAssessmentMessages } from "./assessment-prompts.ts";
 import { normalizeRoleCitations, validateAnalystOutput, validateSkepticOutput } from "./assessment-validation.ts";
@@ -138,15 +136,15 @@ export function decideCandidate(
   analyst: AnalystOutput,
   skeptic: SkepticOutput,
   asOf: string,
-  metricOutcomes?: ReadonlyMap<string, CriterionOutcome<Citation>>,
+  metricOutcomes: ReadonlyMap<string, CriterionOutcome<Citation>>,
 ): CandidateDecision {
   const analystCriteria = criterionMap(analyst.criteria, brief);
   const skepticCriteria = criterionMap(skeptic.criteria, brief);
-  if (metricOutcomes !== undefined) assertCertifiedOutcomes(numericalCriteria(brief), metricOutcomes);
+  assertCertifiedOutcomes(numericalCriteria(brief), metricOutcomes);
   // Numerical criteria are decided by calculation alone; the roles' view of them is never consulted.
   const criteria = brief.criteria.map((criterion) => criterion.metric === undefined
     ? combineNarrativeCriterion(criterion.criterion_id, analystCriteria.get(criterion.criterion_id)!, skepticCriteria.get(criterion.criterion_id)!)
-    : metricOutcomes?.get(criterion.criterion_id) ?? deterministicMetricCriterion(criterion, packet, asOf));
+    : metricOutcomes.get(criterion.criterion_id)!);
   const exposure = conservativeDimension(analyst.exposure, skeptic.exposure);
   const quality = conservativeDimension(analyst.business_quality, skeptic.business_quality);
   const valuation = conservativeDimension(analyst.valuation_context, skeptic.valuation_context);
@@ -208,25 +206,6 @@ function combineNarrativeCriterion(id: string, analyst: CriterionOutcome<RawCita
     outcome,
     explanation: outcome === "unknown" ? "Independent narrative assessments did not confirm this criterion." : analyst.explanation,
     citations: outcome === "unknown" ? [] : uniqueCitations([...analyst.citations, ...skeptic.citations]),
-  });
-}
-
-function deterministicMetricCriterion(criterion: Brief["criteria"][number], packet: EvidencePacket, asOf: string): CriterionOutcome<Citation> {
-  const condition: ThesisCondition = {
-    condition_id: criterion.criterion_id,
-    statement: criterion.statement,
-    falsifier: criterion.falsifier,
-    horizon: "campaign horizon",
-    metric: criterion.metric,
-  };
-  const facts = packet.facts.filter((fact) => fact.currency === packet.identity.currency);
-  const result = evaluateThesisMetrics([condition], facts, asOf)[0];
-  if (result === undefined) throw new Error("metric criterion evaluation did not return a result");
-  return Object.freeze({
-    criterion_id: criterion.criterion_id,
-    outcome: result.status === "supported" ? "pass" : result.status === "challenged" ? "fail" : "unknown",
-    explanation: result.reason,
-    citations: result.fact_refs.map((id): Citation => ({ kind: "fact", id })),
   });
 }
 

@@ -115,9 +115,7 @@ async function researchCompany(
   if (original === undefined) throw new Error("durable research packet was not saved");
   await assertRunnable(deps, lease, signal);
   // Numerical criteria are calculated under this worker's campaign fence before any role runs; a retry reuses them.
-  const certified = deps.financialCriteria
-    ? await deps.financialCriteria(lease, { brief: savedBrief, candidate_id: candidate.candidate_id, identity: candidate.identity, as_of: observationTime })
-    : null;
+  const certified = await deps.financialCriteria(lease, { brief: savedBrief, candidate_id: candidate.candidate_id, identity: candidate.identity, as_of: observationTime });
   await assertRunnable(deps, lease, signal);
   const decision = await assessCompany({
     run_id: lease.run_id,
@@ -129,7 +127,7 @@ async function researchCompany(
     reloadPacket: () => deps.repo.refreshResearchPacket(lease, original),
     saveValidatedRole: (role) => deps.repo.saveValidatedRole(lease, candidate.candidate_id, role),
     loadValidatedRoles: () => deps.repo.loadValidatedRoles(lease, candidate.candidate_id),
-    ...(certified ? { metric_outcomes: certified } : {}),
+    metric_outcomes: certified,
   });
   await assertRunnable(deps, lease, signal);
   // The original packet remains the immutable model request. A fresh packet

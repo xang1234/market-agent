@@ -21,6 +21,7 @@ test('a thesis run takes its cutoff from the database clock, not the host clock'
     runId: '00000000-0000-4000-8000-000000000002',
     agent: { agent_id: '00000000-0000-4000-8000-000000000003' } as never,
     thesis: { thesis_version_id: '00000000-0000-4000-8000-000000000004' } as never,
+    financial: {} as never,
   });
   const deltas = await stages.readDeltas({ current_watermarks: null } as never);
   assert.equal(deltas.as_of, dbNow);

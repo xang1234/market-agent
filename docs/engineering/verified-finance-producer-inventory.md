@@ -142,9 +142,10 @@ done; it is not counted as complete.
 
 ## 3. Status
 
-Every surface in section 2 now has a certified lane. Grids always use it.
-The other surfaces put it behind a per-surface flag, and with that flag off
-(the default) they stay on the legacy path listed above. The shared
+Every surface in section 2 now has a certified lane. Grids, Thesis, and
+Discovery always use it, with no flag and no legacy path. Chat and Analyze put
+it behind a per-surface flag, and with that flag off (the default) they stay on
+the legacy path listed above. The shared
 foundations are in place:
 
 - **T00–T04:** the pure financial core (contracts, exact arithmetic, reviewed
@@ -176,8 +177,8 @@ foundations are in place:
   | Chat | `CHAT_FINANCIAL_MODE` | Model-planned requests over resolved subjects | Assistant message |
   | Analyze | `ANALYZE_FINANCIAL_MODE` | One deterministic plan per memo, one unit per numerical section | `analyze_run_financial_sections` row (0049) |
   | Grids | None: always enforced | One plan per run, one unit per numerical cell | Cell write and progress count (0050) |
-  | Thesis | `THESIS_FINANCIAL_MODE=enforce` | One plan per saved metric condition | Current-version check under the agent lock |
-  | Discovery | `WorkerDeps.financialCriteria` | One plan per candidate × approved criterion | Campaign-fence check (live lease, running, same brief, candidate researching) |
+  | Thesis | None: always enforced | One plan per saved metric condition | Current-version check under the agent lock |
+  | Discovery | None: always enforced (`createWorkerDeps`) | One plan per candidate × approved criterion | Campaign-fence check (live lease, running, same brief, candidate researching) |
 
   The web shows every certified result through one inspector, with four
   labels: verified calculation, partial coverage, source-linked narrative,
@@ -204,9 +205,11 @@ foundations are in place:
   `enforce`). An unset flag is off, a malformed one stops startup,
   and model JSON cannot carry a mode. Each run records the mode it ran under.
   With any surface on (or the recovery worker enabled), a service refuses to
-  start until `checkFinancialReadiness` passes. That check covers the tables,
-  columns, views, and functions the engine, its evidence adapter, and erasure
-  depend on, and a version registry covering everything this build emits.
+  start until `checkFinancialReadiness` passes. The dev API and the Discovery
+  worker always check, because thesis and Discovery always run on the engine.
+  That check covers the tables, columns, views, and functions the engine, its
+  evidence adapter, and erasure depend on, and a version registry covering
+  everything this build emits.
   `createDevApiRuntimeFromEnv` returns the worker to its caller, and
   `worker.stop({ timeoutMs })` bounds shutdown. CI sets `REQUIRE_DOCKER=1`, so
   Docker-backed suites fail rather than skip, and runs the `scripts/` contract
@@ -252,11 +255,11 @@ enforced, those values appear as declared gaps rather than numbers.
 | Grids: `fiscal-fact-column.ts`, `period-context.ts`, `cell-runner.ts` rework | Numerical columns always route through `financial-column.ts`. The legacy producers and the row period resolver are deleted; each certified cell carries its own period labels. |
 | Grids: restart recovery for non-numerical cells | Only engine-backed cells are recoverable (`gridFinancialRecovery`, always registered with the dev-api financial worker). Reader-question cells keep their existing behavior. |
 | Thesis: `thesis-repo.ts`, `thesis-seal-input.ts`, `thesis-finding-generator.ts` | Not present or unchanged. Certified references ride on `ConditionAssessment.financial`. Findings cite the engine-bound facts that are still current (loaded into the sealed packet); a verified transition whose inputs cannot be sealed keeps its certificate but issues no alert. Dedup is unchanged. |
-| Thesis and Discovery reporting basis | Saved monitoring rules plan with `as_restated`: the latest disclosure public by the cutoff, matching the stored-fact checks, which always read active facts. Chat, memo sections, and grid cells stay `as_reported`. |
+| Thesis and Discovery reporting basis | Saved monitoring rules plan with `as_restated`: the latest disclosure public by the cutoff, as the stored-fact checks they replaced read active facts. Chat, memo sections, and grid cells stay `as_reported`. |
 | Thesis: freshness and reuse | Engine freshness is plan-wide, so each condition is its own plan. The reuse key compares status, cited facts, and result hashes (never run, snapshot, or certificate ids). |
 | Discovery: versioned numerical criterion union | Brief schema v1 already carries `Criterion.metric` (`ThesisMetricCheck`), versioned with the brief and approved at run start. No new union was added; prose criteria stay narrative. |
 | Discovery: certified facts in the sealed packet | The certified-result reference is the citation (`CriterionOutcome.certified`). Bound facts are not re-cited as current facts, because an as-reported original may since have been restated and the legacy fact verifier rejects superseded facts. The commit transaction re-checks the reference and input visibility. |
-| `services/dev-api/src/discovery-wiring.ts`; worker composition | Not present. Production worker deps come from `DISCOVERY_WORKER_MODULE`. `createWorkerDeps` accepts an optional `financialCriteria` from `createFinancialCriteriaEvaluator({ pool, evidence, clock })`. |
+| `services/dev-api/src/discovery-wiring.ts`; worker composition | Not present. Production worker deps come from `DISCOVERY_WORKER_MODULE`. `createWorkerDeps` requires the engine's pool and always composes `financialCriteria` from `createFinancialCriteriaEvaluator({ pool, evidence, clock })`. The worker refuses to start when the module's deps lack it, and waits for verified-finance readiness before it starts. |
 | `scripts/discovery-fixture.test.ts`, `scripts/discovery-eval.test.ts` | Not present in the repository; Discovery coverage is the service suite plus the new `financial-*.test.ts` files. |
 | Discovery: `financial-packet.ts` / `financial-packet.test.ts` | The module is `financial-outcomes.ts` (it holds certified-outcome rules, not packet data). Coverage is in `financial-assessment-validation.test.ts` (decision rules, hidden inputs) and `financial-finalization.test.ts` (commit-time reference and visibility checks). |
 | Web: Chat stream consumer changes | None needed beyond T20. The stream carries references only, and the consumer refetches the committed message. |
@@ -274,7 +277,7 @@ enforced, those values appear as declared gaps rather than numbers.
 | Reauthorization on every read and replay | Already in place since T17/T18 (`inspection.ts`, `read-model.ts`, `replay.ts`). T28 adds erased results, which read as unavailable. |
 | Safe logs | Run events carry only counts, lease epochs, digests, coverage states, and reason codes. The engine writes no console output. |
 | `services/dev-api/src/main.ts` | The entry point is `services/dev-api/src/dev.ts`. The readiness gate is in `runtime.ts` (`createDevApiRuntimeFromEnv`), before any lane or the worker starts. Chat (`runtime.ts` via `ChatFinancialRuntime.assertReady`) and analyst-grids (`dev.ts`) gate their own startup. |
-| `services/dev-api/src/financial-env.ts` scope | It holds the dev API's surfaces (analyze, thesis, worker). Chat reads `CHAT_FINANCIAL_MODE` in its own service with the same strict parser. Grids have no flag. Discovery has no finance flag: its criteria are composed by `DISCOVERY_WORKER_MODULE`, and only `DISCOVERY_ENABLED` starts it. |
+| `services/dev-api/src/financial-env.ts` scope | It holds the dev API's surfaces (analyze, worker). Thesis has no flag: its numerical conditions always run on the engine, so startup readiness always includes it. Chat reads `CHAT_FINANCIAL_MODE` in its own service with the same strict parser. Grids have no flag. Discovery has no finance flag: its numerical criteria always run on the engine, and only `DISCOVERY_ENABLED` starts it. |
 | `db/test/schema-openapi-alignment.test.ts` | Covered by `scripts/openapi-contract.test.ts` (Wave 3), which now runs in CI in the new `scripts` job. |
 | Readiness: definition catalog in the database | `financial_definition_versions` is not populated by any writer; definitions are compiled in. Readiness checks the compiled registry against everything the build emits. |
 | T30 file layout | Held-out questions and their recorded drafts live in `scripts/verified-finance-fixtures.ts` beside the golden cases and mutants, so one fixture revision hash covers all of them. |

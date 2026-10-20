@@ -1,3 +1,7 @@
+import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
+import type { FinancialPool } from "../../financial-engine/src/ports.ts";
+import { requireFinancialReadiness } from "../../financial-engine/src/readiness.ts";
+import { createFinancialCriteriaEvaluator } from "./financial-execution.ts";
 import type * as D from "./types.ts";
 import type {
   AssessmentQuoteRequest, CampaignModel, DiscoveryRepository, EvidencePacket, Lease, OperationRunner,
@@ -25,8 +29,9 @@ export function createWorkerDeps(input: {
   loadExisting: (userId: D.Id, brief: D.Brief) => Promise<D.ExistingCandidate[]>;
   persistQuotes: (lease: Lease, packet: EvidencePacket, raw: D.AnalystOutput | D.SkepticOutput, request: AssessmentQuoteRequest) => Promise<Map<string, D.Citation>>;
   commitAssessment: WorkerDeps["commitAssessment"];
-  financialCriteria?: WorkerDeps["financialCriteria"];
+  pool: FinancialPool;
 }): WorkerDeps {
+  if (typeof input.pool?.connect !== "function") throw new Error("createWorkerDeps needs the financial engine's pool");
   return Object.freeze({
     repo: input.repo,
     clock: input.clock,
@@ -40,6 +45,7 @@ export function createWorkerDeps(input: {
     loadExisting: (lease, brief) => input.loadExisting(lease.user_id, brief),
     persistQuotes: input.persistQuotes,
     commitAssessment: input.commitAssessment,
-    ...(input.financialCriteria ? { financialCriteria: input.financialCriteria } : {}),
+    financialCriteria: createFinancialCriteriaEvaluator({ pool: input.pool, evidence: createEvidenceFinancialPort, clock: input.clock }),
+    financialReadiness: () => requireFinancialReadiness(input.pool, ["discovery"]),
   });
 }

@@ -1,13 +1,21 @@
 import { randomUUID } from 'node:crypto';
 import type { QueryExecutor } from '../../agents/src/agent-repo.ts';
 import type { ThesisVersion, ConditionAssessment } from '../../agents/src/thesis-types.ts';
-import type { ThesisFact } from '../../agents/src/thesis-evaluator.ts';
 import { loadLocalRuntimeEvidence, type LocalRuntimeClaimEvidence } from '../../evidence/src/local-runtime-evidence.ts';
 import { buildClaimBackedSealInput, buildFactBackedSealInput, toSealFactRow, type ClaimSealDocument } from '../../snapshot/src/seal-input.ts';
 import { sealSnapshotInTransaction, snapshotTransactionClient } from '../../snapshot/src/snapshot-sealer.ts';
 import { mergeSealInputs } from '../../analyze/src/seal-input-merge.ts';
 import { writeToolCallLog } from '../../observability/src/tool-call.ts';
-type PacketFact = ThesisFact & {
+type PacketFact = {
+  fact_id: string;
+  metric_key: string;
+  value_num: string;
+  scale: string;
+  unit: string;
+  period_kind: string;
+  period_end: string | null;
+  as_of: string;
+  source_id: string;
   confidence: number;
   trust_tier: string;
   fiscal_year: number | null;

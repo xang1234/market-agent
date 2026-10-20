@@ -50,7 +50,7 @@ For an agent that tracks one company, open **Thesis conditions** and write one t
 
 Each run marks every condition **supported**, **challenged**, or **unresolved**, with evidence links, the assessment method, and model provenance.
 
-- A numeric condition compares a stored metric against your threshold, with no model.
+- A numeric condition compares a calculation that the financial engine verifies against your threshold, with no model. A condition on a metric without a verified definition, on a point-in-time value, or on a unit or period that the definition does not support stays unresolved and raises no alert.
 - A narrative condition uses the model set in Settings.
 - Missing evidence gives an unresolved result. A model failure fails the run instead of inventing a result.
 
@@ -58,7 +58,7 @@ A new supported or challenged state appears on Home and fires the agent's alert 
 
 Each save creates a thesis version, and the panel shows the latest 20 assessments and versions. If someone saves a newer version while you edit, your draft stays and **Load saved version** replaces it on request.
 
-Agents read evidence already stored in the app: up to 100 claims, and up to 50 authoritative facts for each tracked metric, unit, and period type. They do not start a new web crawl. A numeric condition only uses a fact that matches its metric, unit, period, and maximum age. Age counts from the period end.
+Agents read evidence already stored in the app: up to 100 claims, and up to 50 authoritative facts for each tracked metric, unit, and period type. They do not start a new web crawl. A numeric condition reads the latest fiscal period public at the run's cutoff, and stays unresolved when that period ended more than the maximum age before the cutoff.
 
 An agent with no saved thesis conditions keeps the earlier workflow, including multi-company universes.
 

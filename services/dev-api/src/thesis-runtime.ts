@@ -1,7 +1,7 @@
 import type { AgentRow, QueryExecutor } from '../../agents/src/agent-repo.ts';
 import type { AgentLoopStages } from '../../agents/src/agent-loop.ts';
 import { getCurrentThesis, getLatestThesisAssessment, recordThesisAssessment } from '../../agents/src/thesis-repo.ts';
-import { evaluateThesis, evaluateThesisMetrics, THESIS_PROMPT_VERSION, type ThesisLlm } from '../../agents/src/thesis-evaluator.ts';
+import { evaluateThesis, THESIS_PROMPT_VERSION, type ThesisLlm } from '../../agents/src/thesis-evaluator.ts';
 import { ThesisConflictError, type ThesisVersion, type ConditionAssessment } from '../../agents/src/thesis-types.ts';
 import { generateThesisFinding } from './thesis-finding.ts';
 import type { FindingRow } from '../../agents/src/finding-generator.ts';
@@ -22,8 +22,7 @@ export type ThesisRuntimeInput = {
   agent: AgentRow;
   thesis: ThesisVersion;
   getModel?: () => Promise<Model>;
-  /** Verified numerical conditions (THESIS_FINANCIAL_MODE=enforce); absent, metric conditions use the stored-fact checks. */
-  financial?: SavedRuleDeps;
+  financial: SavedRuleDeps;
   /** The run's cutoff clock. Defaults to the database's now(), the clock that stamps facts and assessments. */
   now?: () => string | Promise<string>;
 };
@@ -59,20 +58,13 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
     async analyze({ deltas, evidence }) {
       const needsModel = evidence.claims.length > 0 && input.thesis.conditions.some(c => !c.metric);
       const model = needsModel ? await (input.getModel ?? configuredModel)() : { llm: null, identity: 'deterministic' };
-      // Verified conditions are computed at this run's pinned cutoff; a retry of the run resumes them.
-      const metricResults = input.financial
-        ? await evaluateFinancialThesisConditions(input.financial, { user_id: input.userId, thesis: input.thesis, run_key: input.runId, as_of: deltas.as_of })
-        // The cutoff is the run's own (database) clock, so it is the reference
-        // for "not in the future", not the host's, which may lag it.
-        : evaluateThesisMetrics(input.thesis.conditions, evidence.facts, deltas.as_of, Date.parse(deltas.as_of));
+      const metricResults = await evaluateFinancialThesisConditions(input.financial, { user_id: input.userId, thesis: input.thesis, run_key: input.runId, as_of: deltas.as_of });
       // The reuse key compares definitions, inputs, and outcomes — never run or snapshot identities.
-      const metricKey = input.financial ? thesisReuseProjection(metricResults) : metricResults;
-      const packetHash = hashJsonValue({ metricResults: metricKey, version: input.thesis.thesis_version_id, packet: evidence, day: deltas.as_of.slice(0, 10), model: model.identity, prompt: THESIS_PROMPT_VERSION });
+      const packetHash = hashJsonValue({ metricResults: thesisReuseProjection(metricResults), version: input.thesis.thesis_version_id, packet: evidence, day: deltas.as_of.slice(0, 10), model: model.identity, prompt: THESIS_PROMPT_VERSION });
       const previous = await getLatestThesisAssessment(input.db, input.thesis.thesis_version_id);
       const reused = previous?.input_hash.split('/')[0] === packetHash;
       const evaluation = reused && previous ? previous : await evaluateThesis({
-        thesis: input.thesis, claims: evidence.claims, facts: evidence.facts, as_of: deltas.as_of, now: Date.parse(deltas.as_of), llm: model.llm,
-        ...(input.financial ? { metric_results: metricResults } : {}),
+        thesis: input.thesis, claims: evidence.claims, as_of: deltas.as_of, llm: model.llm, metric_results: metricResults,
       });
       const packetFacts = new Set(evidence.facts.map(fact => fact.fact_id));
       const citedFacts = await loadThesisFactsById(input.db, {
@@ -135,8 +127,8 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
           thesis: input.thesis, result, packet: evidence, agentName: input.agent.name, snapshot,
         }));
       }
-      await activity(tx, input, 'reading', `Considered ${evidence.claims.length} current claims and ${evidence.facts.length} stored facts for the configured metrics.`);
-      await activity(tx, input, 'investigating', `Assessed ${analysis.results.length} saved conditions using ${analysis.model_version ?? 'deterministic checks / missing-evidence handling'}.`);
+      await activity(tx, input, 'reading', `Considered ${evidence.claims.length} current claims and sealed ${evidence.facts.length} stored facts for the configured metrics.`);
+      await activity(tx, input, 'investigating', `Assessed ${analysis.results.length} saved conditions using ${analysis.model_version ?? 'the financial engine and missing-evidence handling'}.`);
       await activity(tx, input, findings.length ? 'found' : 'dismissed', findings.length ? `Recorded ${findings.length} thesis condition changes.` : 'Recorded the assessment; no new supported or challenged states.');
       return { findings: findings.length, assessments: 1, reused: false };
     },

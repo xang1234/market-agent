@@ -5,7 +5,9 @@ import { persistCampaignQuotes } from "../../evidence/src/campaign-claims.ts";
 import { hashJsonValue } from "../../observability/src/tool-call.ts";
 import { parseLlmEnv } from "../../llm/src/channel-config.ts";
 import { createLlmRouter } from "../../llm/src/router.ts";
+import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { createAssessmentCommitter } from "../src/assessment-repo.ts";
+import { createFinancialCriteriaEvaluator } from "../src/financial-execution.ts";
 import { createCampaignModel } from "../src/model.ts";
 import { ProviderRequestError } from "../src/providers/errors.ts";
 import { canonicalCampaignQuotes } from "../src/quote-claims.ts";
@@ -166,6 +168,8 @@ export async function createRunnerHarness(t: TestContext, options: Options = {})
       }
       return committed;
     },
+    financialCriteria: createFinancialCriteriaEvaluator({ pool: db as never, evidence: createEvidenceFinancialPort, clock: clock.now }),
+    financialReadiness: async () => {},
   };
   let oldLease: Awaited<ReturnType<typeof baseRepo.claimNextRun>> = null;
   async function executeLease(lease: NonNullable<Awaited<ReturnType<typeof baseRepo.claimNextRun>>>) {

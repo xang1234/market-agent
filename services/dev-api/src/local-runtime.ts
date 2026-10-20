@@ -290,8 +290,7 @@ export const createAgentLoopStages: DevApiAgentLoopStageFactory = async (input) 
         ...input,
         db: pool(),
         thesis,
-        // THESIS_FINANCIAL_MODE=enforce verifies numerical conditions through the financial engine.
-        ...(financialModes.thesis === "enforce" ? { financial: { pool: pool(), evidence: createEvidenceFinancialPort } } : {}),
+        financial: { pool: pool(), evidence: createEvidenceFinancialPort },
       })
     : createLegacyAgentLoopStages(input);
 };

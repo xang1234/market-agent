@@ -45,6 +45,7 @@ test("every numerical criterion needs its certified outcome", () => {
   const partial = certified("pass", "pass");
   partial.delete(MARGIN_ID);
   assert.throws(() => decideCandidate(brief, packetFixture(), analyst, skeptic, "2026-09-10T12:00:00Z", partial), /exactly one certified outcome/u);
+  assert.throws(() => decideCandidate(brief, packetFixture(), analyst, skeptic, "2026-09-10T12:00:00Z", new Map()), /exactly one certified outcome/u, "no stored-fact check stands in for the engine");
 });
 
 test("a calculation whose inputs are no longer visible hides its criterion", () => {

@@ -15,7 +15,7 @@ const TOOL_HASH = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccc
 test("assessment commit seals before atomically persisting an eligible candidate result", async () => {
   const queries: string[] = [];
   const packet = packetFixture();
-  const decision = decideCandidate(briefFixture(), packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z");
+  const decision = decideCandidate(briefFixture(), packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z", new Map());
   const db = {
     release() {},
     async query<R extends Record<string, unknown>>(text: string) {
@@ -49,7 +49,7 @@ test("assessment commit seals before atomically persisting an eligible candidate
 test("assessment commit rejects a cited claim that no longer has its exact current row", async () => {
   const queries: string[] = [];
   const packet = packetFixture();
-  const decision = decideCandidate(briefFixture(), packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z");
+  const decision = decideCandidate(briefFixture(), packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z", new Map());
   const db = {
     release() {},
     async query<R extends Record<string, unknown>>(text: string) {
@@ -85,7 +85,7 @@ test("assessment commit rejects a cited claim that no longer has its exact curre
 test("source revocation prevents a stale assessment packet from sealing or changing the candidate", async () => {
   const queries: string[] = [];
   const packet = packetFixture();
-  const decision = decideCandidate(briefFixture(), packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z");
+  const decision = decideCandidate(briefFixture(), packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z", new Map());
   const db = {
     release() {},
     async query<R extends Record<string, unknown>>(text: string) {
@@ -112,7 +112,7 @@ test("source revocation prevents a stale assessment packet from sealing or chang
 test("a repeated matching completion returns its sealed assessment without a second snapshot", async () => {
   const queries: string[] = [];
   const packet = packetFixture();
-  const decision = decideCandidate(briefFixture(), packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z");
+  const decision = decideCandidate(briefFixture(), packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z", new Map());
   const db = {
     release() {},
     async query<R extends Record<string, unknown>>(text: string) {

@@ -4,7 +4,6 @@ import test from "node:test";
 import { decideCandidate } from "../src/assessment.ts";
 import { validateAnalystOutput, validateSkepticOutput } from "../src/assessment-validation.ts";
 import { analystFixture, briefFixture, packetFixture, skepticFixture } from "./fixtures.ts";
-import type { Brief } from "../src/types.ts";
 import type { PacketFact } from "../src/ports.ts";
 
 test("primary evidence is required and missing financials stay unknown", () => {
@@ -16,6 +15,7 @@ test("primary evidence is required and missing financials stay unknown", () => {
     analystFixture(),
     skepticFixture(),
     "2026-09-10T12:00:00Z",
+    new Map(),
   );
 
   assert.equal(result.state, "needs_evidence");
@@ -35,7 +35,7 @@ test("narrative disagreement leaves a required criterion unknown", () => {
   const skeptic = skepticFixture();
   skeptic.criteria[0] = { ...skeptic.criteria[0]!, outcome: "fail" };
 
-  const result = decideCandidate(briefFixture(), packetFixture(), analyst, skeptic, "2026-09-10T12:00:00Z");
+  const result = decideCandidate(briefFixture(), packetFixture(), analyst, skeptic, "2026-09-10T12:00:00Z", new Map());
 
   assert.equal(result.criteria[0]!.outcome, "unknown");
   assert.equal(result.state, "needs_evidence");
@@ -48,7 +48,7 @@ test("two evidence-backed required failures exclude a candidate", () => {
   analyst.criteria[0] = { ...analyst.criteria[0]!, outcome: "fail" };
   skeptic.criteria[0] = { ...skeptic.criteria[0]!, outcome: "fail" };
 
-  const result = decideCandidate(briefFixture(), packetFixture(), analyst, skeptic, "2026-09-10T12:00:00Z");
+  const result = decideCandidate(briefFixture(), packetFixture(), analyst, skeptic, "2026-09-10T12:00:00Z", new Map());
 
   assert.equal(result.criteria[0]!.outcome, "fail");
   assert.equal(result.state, "excluded");
@@ -82,7 +82,7 @@ test("a second current substantive document family strengthens evidence without 
   const skeptic = skepticFixture();
   skeptic.counterarguments[0] = { text: "Independent reporting confirms current grid equipment demand.", citations: [{ kind: "claim", id: "b0000000-0000-4000-8000-000000000003" }] };
 
-  const result = decideCandidate(briefFixture(), packet, analystFixture(), skeptic, "2026-09-10T12:00:00Z");
+  const result = decideCandidate(briefFixture(), packet, analystFixture(), skeptic, "2026-09-10T12:00:00Z", new Map());
 
   assert.equal(result.dimensions.evidence_strength.level, "strong");
 });
@@ -91,7 +91,7 @@ test("a syndicated copy in the primary family does not inflate evidence strength
   const packet = packetFixture();
   packet.excerpts[1] = { ...packet.excerpts[1]!, family_key: "candidate-primary" };
 
-  const result = decideCandidate(briefFixture(), packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z");
+  const result = decideCandidate(briefFixture(), packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z", new Map());
 
   assert.equal(result.dimensions.evidence_strength.level, "mixed");
 });
@@ -103,7 +103,7 @@ test("stale or undated primary evidence cannot satisfy the primary gate", () => 
   ]) {
     const packet = packetFixture();
     packet.excerpts[0] = { ...packet.excerpts[0]!, ...changes };
-    const result = decideCandidate(briefFixture(), packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z");
+    const result = decideCandidate(briefFixture(), packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z", new Map());
     assert.equal(result.state, "needs_evidence");
     assert.ok(result.reason_codes.includes("primary_exposure_missing"));
   }
@@ -112,13 +112,13 @@ test("stale or undated primary evidence cannot satisfy the primary gate", () => 
 test("a completed counter-search and primary exposure from both independent roles are required", () => {
   const missingCounterSearch = packetFixture();
   missingCounterSearch.counter_search_completed = false;
-  const counterSearchResult = decideCandidate(briefFixture(), missingCounterSearch, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z");
+  const counterSearchResult = decideCandidate(briefFixture(), missingCounterSearch, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z", new Map());
   assert.equal(counterSearchResult.state, "needs_evidence");
   assert.ok(counterSearchResult.reason_codes.includes("counter_search_incomplete"));
 
   const skeptic = skepticFixture();
   skeptic.exposure = { level: "unknown", explanation: "Primary exposure is not independently confirmed.", citations: [] };
-  const skepticResult = decideCandidate(briefFixture(), packetFixture(), analystFixture(), skeptic, "2026-09-10T12:00:00Z");
+  const skepticResult = decideCandidate(briefFixture(), packetFixture(), analystFixture(), skeptic, "2026-09-10T12:00:00Z", new Map());
   assert.equal(skepticResult.state, "needs_evidence");
   assert.ok(skepticResult.reason_codes.includes("primary_exposure_missing"));
 });
@@ -139,51 +139,6 @@ test("strict role validation rejects fake quotes, unsupported prose numbers, and
   const missing = analystFixture();
   missing.criteria = [];
   assert.throws(() => validateAnalystOutput(missing, briefFixture(), packet), /criterion/i);
-});
-
-test("metric criteria use only canonical finite facts with the exact unit, scale, period, currency, and freshness", () => {
-  const brief = metricBrief();
-  const packet = packetFixture();
-  const valid = metricFact();
-  packet.facts = [valid];
-  const supported = decideCandidate(brief, packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z");
-  assert.equal(supported.criteria[0]!.outcome, "pass");
-  assert.deepEqual(supported.criteria[0]!.citations, [{ kind: "fact", id: valid.fact_id }]);
-
-  for (const invalid of [
-    { ...valid, currency: "EUR" },
-    { ...valid, unit: "ratio" },
-    { ...valid, scale: Number.POSITIVE_INFINITY },
-    { ...valid, value_num: Number.NaN },
-    { ...valid, period_kind: "fiscal_q" },
-    { ...valid, period_end: null },
-    { ...valid, period_end: "2025-01-01T00:00:00.000Z" },
-  ]) {
-    const invalidPacket = packetFixture();
-    invalidPacket.facts = [invalid];
-    const result = decideCandidate(brief, invalidPacket, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z");
-    assert.equal(result.criteria[0]!.outcome, "unknown");
-    assert.equal(result.state, "needs_evidence");
-  }
-});
-
-test("an exact decimal required metric criterion stays eligible at its mathematical boundary", () => {
-  const brief = metricBrief();
-  brief.criteria[0]!.metric = {
-    metric_key: "revenue",
-    unit: "USD",
-    period_kind: "fiscal_y",
-    operator: "lte",
-    threshold: "0.3",
-    max_age_days: 90,
-  };
-  const packet = packetFixture();
-  packet.facts = [metricFact({ value_num: "0.1", scale: "3" })];
-
-  const result = decideCandidate(brief, packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z");
-
-  assert.equal(result.criteria[0]?.outcome, "pass");
-  assert.equal(result.state, "eligible_not_shortlisted");
 });
 
 test("numerical prose may refer to the cited fact's canonical period and observation dates", () => {
@@ -340,15 +295,6 @@ test("numeric prose rejects malformed numeric runs before fragments can be cited
     assert.throws(() => validateAnalystOutput(raw, briefFixture(), packet), /numerical/i);
   }
 });
-
-function metricBrief(): Brief {
-  const brief = briefFixture();
-  brief.criteria[0] = {
-    ...brief.criteria[0]!,
-    metric: { metric_key: "revenue", unit: "USD", period_kind: "fiscal_y", operator: "gte", threshold: 1_000, max_age_days: 90 },
-  };
-  return brief;
-}
 
 function metricFact(overrides: Partial<PacketFact> = {}): PacketFact {
   return {

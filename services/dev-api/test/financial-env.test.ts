@@ -7,22 +7,20 @@ import { activeFinancialSurfaces, loadFinancialModes } from "../src/financial-en
 const EVERY_FINANCE_FLAG = {
   CHAT_FINANCIAL_MODE: "enforce",
   ANALYZE_FINANCIAL_MODE: "enforce",
-  THESIS_FINANCIAL_MODE: "enforce",
   FINANCIAL_WORKER_ENABLED: "true",
 };
 
-test("every surface is off and the recovery worker on unless the server's environment says otherwise", () => {
-  assert.deepEqual(loadFinancialModes({}), { analyze: "off", thesis: "off", worker: true });
-  assert.deepEqual(activeFinancialSurfaces(loadFinancialModes({})), ["worker"]);
-  assert.deepEqual(loadFinancialModes({ FINANCIAL_WORKER_ENABLED: "false" }), { analyze: "off", thesis: "off", worker: false });
-  assert.deepEqual(activeFinancialSurfaces(loadFinancialModes({ FINANCIAL_WORKER_ENABLED: "false" })), []);
-  assert.deepEqual(loadFinancialModes(EVERY_FINANCE_FLAG), { analyze: "enforce", thesis: "enforce", worker: true });
+test("analyze is off and the recovery worker on unless the server's environment says otherwise; thesis always needs readiness", () => {
+  assert.deepEqual(loadFinancialModes({}), { analyze: "off", worker: true });
+  assert.deepEqual(activeFinancialSurfaces(loadFinancialModes({})), ["thesis", "worker"]);
+  assert.deepEqual(loadFinancialModes({ FINANCIAL_WORKER_ENABLED: "false" }), { analyze: "off", worker: false });
+  assert.deepEqual(activeFinancialSurfaces(loadFinancialModes({ FINANCIAL_WORKER_ENABLED: "false" })), ["thesis"]);
+  assert.deepEqual(loadFinancialModes(EVERY_FINANCE_FLAG), { analyze: "enforce", worker: true });
   assert.deepEqual(activeFinancialSurfaces(loadFinancialModes(EVERY_FINANCE_FLAG)), ["analyze", "thesis", "worker"]);
 });
 
 test("a malformed mode stops startup rather than falling back to legacy numbers", () => {
   assert.throws(() => loadFinancialModes({ ANALYZE_FINANCIAL_MODE: "on" }), /ANALYZE_FINANCIAL_MODE must be off or enforce/u);
-  assert.throws(() => loadFinancialModes({ THESIS_FINANCIAL_MODE: "shadow" }), /THESIS_FINANCIAL_MODE must be off or enforce/u);
   assert.throws(() => loadFinancialModes({ FINANCIAL_WORKER_ENABLED: "1" }), /FINANCIAL_WORKER_ENABLED must be true or false/u);
 });
 

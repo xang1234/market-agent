@@ -6,11 +6,10 @@ import { randomUUID } from "node:crypto";
 import type { TestContext } from "node:test";
 import { connectedPool } from "../../../db/test/docker-pg.ts";
 import type { ThesisMetricCheck } from "../../agents/src/thesis-types.ts";
-import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { databaseUrl, engineDatabase, IDS } from "../../financial-engine/test/db-fixtures.ts";
-import { createFinancialCriteriaEvaluator } from "../src/financial-execution.ts";
 import type { Lease } from "../src/ports.ts";
 import { createDiscoveryRepository } from "../src/repository.ts";
+import { createWorkerDeps } from "../src/worker-deps.ts";
 import type { Brief, CompanyIdentity, Criterion } from "../src/types.ts";
 import { briefFixture } from "./fixtures.ts";
 
@@ -66,8 +65,11 @@ export async function setupFinancialCampaign<P>(db: Queryable, pool: P) {
     first_seen: [0, 0], lead_hit_ids: [], reason_codes: [],
   });
   await repo.commitCohort(lease, [candidateId], {} as never);
-  const evaluate = (asLease: Lease = lease) =>
-    createFinancialCriteriaEvaluator({ pool: pool as never, evidence: createEvidenceFinancialPort })(asLease, { brief, candidate_id: candidateId, identity: ALPHA, as_of: CUTOFF });
+  const { financialCriteria } = createWorkerDeps({
+    repo, clock: () => new Date(), pool: pool as never, providerFactory: {} as never, modelFactory: {} as never,
+    loadExisting: async () => [], persistQuotes: async () => new Map(), commitAssessment: {} as never,
+  });
+  const evaluate = (asLease: Lease = lease) => financialCriteria(asLease, { brief, candidate_id: candidateId, identity: ALPHA, as_of: CUTOFF });
   const certificates = async () =>
     Number((await db.query(`select count(*)::int as n from snapshot_financial_runs c join financial_runs r on r.run_id = c.run_id where r.parent_id = $1`, [lease.run_id])).rows[0].n);
   return { db, pool, repo, campaign, brief, lease, candidateId, evaluate, certificates };

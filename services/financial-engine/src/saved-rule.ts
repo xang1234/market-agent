@@ -69,7 +69,7 @@ export type SavedRuleRequest = Readonly<{
   as_of: string;
   /**
    * Saved monitoring rules read the latest disclosure public by the cutoff
-   * (`as_restated`), as their stored-fact checks always did with active facts.
+   * (`as_restated`).
    */
   reporting_basis: ReportingBasis;
   origin: PlanOrigin;

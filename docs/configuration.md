@@ -61,7 +61,7 @@ An `anthropic` channel calls the Claude Messages API directly. It turns prompt c
 
 Each surface can take its numbers from the financial engine, which plans a calculation, binds it to stored facts, and computes it with exact fractions. The engine is off by default.
 
-Set each of `CHAT_FINANCIAL_MODE`, `ANALYZE_FINANCIAL_MODE`, `GRID_FINANCIAL_MODE`, and `THESIS_FINANCIAL_MODE` to one of two values:
+Thesis conditions and Discovery criteria always use the engine. Set each of `CHAT_FINANCIAL_MODE` and `ANALYZE_FINANCIAL_MODE` to one of two values:
 
 - `off` shows legacy numbers, labelled legacy.
 - `enforce` shows only certified calculations. Anything the engine cannot verify appears as a gap, never as prose.
@@ -72,7 +72,7 @@ For chat, only questions that name a metric reach the engine today. Other questi
 
 `FINANCIAL_WORKER_ENABLED=true` starts a worker in dev-api that recovers interrupted financial runs.
 
-With any surface on, a service refuses to start until the schema and version registry are ready. Any other value stops startup.
+The dev API, the Discovery worker, and any service with a surface on refuse to start until the schema and version registry are ready. Any other value stops startup.
 
 ## Screener universe
 

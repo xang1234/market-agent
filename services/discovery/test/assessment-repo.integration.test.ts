@@ -35,7 +35,7 @@ test("assessment sealing verifies real snapshot provenance and rolls back an inv
   });
   await repo.commitCohort(lease, [packet.candidate_id], {} as never);
   await seedEvidence(db, packet, run.campaign_id, run.run_id, false);
-  const decision = decideCandidate(briefFixture(), packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z");
+  const decision = decideCandidate(briefFixture(), packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z", new Map());
   const commit = createAssessmentCommitter({ db, clock: clock.now });
 
   await assert.rejects(() => commit(lease, packet, decision), /snapshot verification failed/i);
@@ -159,7 +159,7 @@ async function prepareClaimCommit(t: Parameters<typeof withCampaignDb>[0]) {
     db,
     lease,
     packet,
-    decision: decideCandidate(briefFixture(), packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z"),
+    decision: decideCandidate(briefFixture(), packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z", new Map()),
     commit: createAssessmentCommitter({ db, clock: clock.now }),
   };
 }
@@ -254,7 +254,7 @@ function packetWithFact(): ReturnType<typeof packetFixture> {
 }
 
 function decisionCitingFact(packet: ReturnType<typeof packetFixture>): CandidateDecision {
-  const decision = structuredClone(decideCandidate(briefFixture(), packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z"));
+  const decision = structuredClone(decideCandidate(briefFixture(), packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z", new Map()));
   decision.criteria[0]!.citations.push({ kind: "fact", id: FACT_ID });
   return decision;
 }

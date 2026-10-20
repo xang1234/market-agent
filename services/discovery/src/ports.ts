@@ -1,13 +1,13 @@
 import type { QueryExecutor } from "../../agents/src/agent-repo.ts";
 import type { LlmChatMessage, LlmRouterResult } from "../../llm/src/router.ts";
-import type { ThesisFact } from "../../agents/src/thesis-evaluator.ts";
+import type { DecimalInput } from "../../agents/src/exact-decimal.ts";
 import type * as D from "./types.ts";
 
 export type Lease = { run_id: D.Id; user_id: D.Id; worker_id: string; epoch: number; expires_at: string };
 export type DraftScope = { campaign_id: D.Id; user_id: D.Id; draft_token: D.Id };
 export type Checkpoint = { version: 1; stage: D.Stage; cohort: D.Id[]; next_company: number; completed_operation_keys: string[] };
 export type Excerpt = { excerpt_id: D.Id; document_id: D.Id; source_id: D.Id; family_key: string; title: string; url: string; published_at: string | null; retrieved_at: string; document_hash: string; normalized_start: number; text: string; primary: boolean; primary_eligible: boolean };
-export type PacketFact = ThesisFact & { currency: string | null; fiscal_year: number | null; fiscal_period: string | null; period_start: string | null };
+export type PacketFact = { fact_id: string; metric_key: string; value_num: DecimalInput; scale: DecimalInput; unit: string; period_kind: string; period_end: string | null; as_of: string; source_id: string; currency: string | null; fiscal_year: number | null; fiscal_period: string | null; period_start: string | null };
 export type EvidencePacket = { candidate_id: D.Id; identity: D.CompanyIdentity; excerpts: Excerpt[]; claims: { claim_id: D.Id; document_id: D.Id; source_id: D.Id; text_canonical: string }[]; facts: PacketFact[]; counter_search_completed: boolean; coverage_gaps: string[] };
 export type FinancialReadResult = { facts: PacketFact[]; missing_fields: string[]; coverage_gaps: string[] };
 export type OperationContext = { signal: AbortSignal; attempt_number: 1 | 2 };
@@ -73,8 +73,7 @@ export type AssessmentContext = {
   reloadPacket: () => Promise<EvidencePacket>;
   saveValidatedRole: (checkpoint: ValidatedRoleCheckpoint) => Promise<void>;
   loadValidatedRoles: () => Promise<AssessmentRoleProgress>;
-  /** Certified numerical criterion outcomes; when present they replace the stored-fact checks and cannot be overridden. */
-  metric_outcomes?: ReadonlyMap<D.Id, D.CriterionOutcome<D.Citation>>;
+  metric_outcomes: ReadonlyMap<D.Id, D.CriterionOutcome<D.Citation>>;
 };
 export type AttemptReservation = { attempt_id: D.Id; attempt_number: 1 | 2; state: "dispatch" | "cached" | "exhausted" | "in_progress"; result: unknown };
 export type StoredCandidate = D.DiscoveredCandidate & { state: D.CandidateState; ordinal: number | null; assessment: D.CandidateDecision | null; snapshot_id: D.Id | null; rank: number | null };
@@ -125,8 +124,9 @@ export type WorkerDeps = {
   loadExisting: (lease: Lease, brief: D.Brief) => Promise<D.ExistingCandidate[]>;
   persistQuotes: (lease: Lease, packet: EvidencePacket, raw: D.AnalystOutput | D.SkepticOutput, request: AssessmentQuoteRequest) => Promise<Map<string, D.Citation>>;
   commitAssessment: (lease: Lease, packet: EvidencePacket, decision: D.CandidateDecision) => Promise<D.AssessedCandidate>;
-  /** Verified numerical criteria (financial-execution.ts); absent, numerical criteria use the stored-fact checks. */
-  financialCriteria?: import("./financial-execution.ts").FinancialCriteriaEvaluator;
+  financialCriteria: import("./financial-execution.ts").FinancialCriteriaEvaluator;
+  /** Settles before the worker starts; rejects while the financial schema or version registry is not ready. */
+  financialReadiness: () => Promise<void>;
 };
 export type DiscoveryService = {
   createCampaign(userId: D.Id, input: { name: string; question: string }): Promise<D.Campaign>;

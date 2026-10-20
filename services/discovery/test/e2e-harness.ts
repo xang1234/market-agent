@@ -11,7 +11,9 @@ import type { QueryExecutor } from "../../observability/src/types.ts";
 import { verifySnapshotSeal } from "../../snapshot/src/snapshot-verifier.ts";
 import { createDiscoveryDevApiAdapter } from "../../dev-api/src/discovery-adapter.ts";
 import { createDevApiServer, createFixtureDevApiAdapters } from "../../dev-api/src/http.ts";
+import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { createAssessmentCommitter } from "../src/assessment-repo.ts";
+import { createFinancialCriteriaEvaluator } from "../src/financial-execution.ts";
 import { createDiscoveryReadModel } from "../src/read-model.ts";
 import { createDiscoveryRepository } from "../src/repository.ts";
 import { createDiscoveryService } from "../src/service.ts";
@@ -125,6 +127,8 @@ export async function createCampaignE2eHarness(t: TestContext, name: FixtureName
       quotes: canonicalCampaignQuotes(raw, packet),
     }),
     commitAssessment: createAssessmentCommitter({ db, clock: clock.now }),
+    financialCriteria: createFinancialCriteriaEvaluator({ pool: db as never, evidence: createEvidenceFinancialPort, clock: clock.now }),
+    financialReadiness: async () => {},
   };
 
   async function api(path: string, init: RequestInit = {}, user = USER): Promise<Response> {
