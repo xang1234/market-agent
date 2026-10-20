@@ -939,6 +939,21 @@ test("DEV_PROFILE from the command line wins over the env file", async () => {
   assert.equal(result.stdout.trim(), "chat");
 });
 
+test("WEB_PORT and DEV_POSTGRES_PORT from the command line win over the env file", async () => {
+  const fixture = await createShellFixture();
+  const result = await runBash(
+    [
+      "export WEB_PORT=5174 DEV_POSTGRES_PORT=54330",
+      "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
+      'printf "%s %s %s" "$APP_PORT" "$DEV_POSTGRES_PORT" "$DATABASE_URL"',
+    ].join("\n"),
+    fixture.root,
+  );
+  await rm(fixture.root, { recursive: true, force: true });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.stdout.trim(), "5174 54330 postgresql://postgres:postgres@127.0.0.1:54330/market_agent");
+});
+
 test("an unknown DEV_PROFILE fails before starting anything", async () => {
   const { result, trace } = await traceUp({ DEV_PROFILE: "everything" });
   assert.notEqual(result.code, 0);
