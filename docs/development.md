@@ -69,6 +69,8 @@ The app serves the web UI and replays the golden conversation's recorded API tra
 
 A new thread restarts the replay. Concurrent tabs share one replay session. Pages whose services are parked, such as Home, Screener, Analyst Grids, and Review, show no data in this mode.
 
+The static demo runs the same replay in the browser. `npm run build:demo` in `web/` builds the app for GitHub Pages under `/market-agent/`, and `npm run preview:demo` serves it at `http://127.0.0.1:4173/market-agent/`. The page answers its own API requests from the fixture, keeps one replay session per tab in `sessionStorage` so a reload keeps the thread, and starts signed in. A banner lists the recorded questions.
+
 To recapture after an API or block change, start on a fresh database and run these from the repo root:
 
 ```bash
@@ -130,13 +132,14 @@ cd services/chat && npm test && npm run typecheck
 
 `npm test` does not type-check. CI does, so also run `npm run typecheck` in each package you change.
 
-The browser smoke test in `web/e2e/` runs against a UI-mode or no-keys stack:
+The browser smoke test in `web/e2e/` runs against a UI-mode or no-keys stack, or against the static demo:
 
 ```bash
 cd web && npx playwright install chromium && npm run e2e
+cd web && npm run build:demo && E2E_DEMO=1 npm run e2e
 ```
 
-Set `E2E_BASE_URL` if `WEB_PORT` is not 5173. CI runs it against both stacks: UI mode with the committed fixture, and the real no-keys backend, which also catches a stale fixture.
+Set `E2E_BASE_URL` if `WEB_PORT` is not 5173. With `E2E_DEMO=1`, Playwright serves the demo build itself. CI runs it against all three: UI mode with the committed fixture, the static demo, and the real no-keys backend, which also catches a stale fixture.
 
 ## Where things live
 
