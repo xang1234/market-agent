@@ -440,7 +440,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const answer = await latestAssistantMessage(base, thread.thread_id);
     assert.deepEqual(engineAnswer(answer), {
       results: [["Operating margin (operating income / revenue)", "Q2 FY2025", "verified", "-1.74%"]],
-      notes: ["Not part of this calculation: the cause of these figures."],
+      notes: ["Not covered by this answer: the cause of these figures."],
     });
     const { rows } = await client.query<{ claim_refs: string[] }>(`select claim_refs from snapshots where snapshot_id = $1::uuid`, [answer.snapshot_id]);
     assert.deepEqual(rows[0]?.claim_refs, []);
@@ -528,7 +528,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.equal(firstAnswer.results.length, 12);
     assert.ok(firstAnswer.results.every(([, , disposition]) => disposition === "verified"), JSON.stringify(firstAnswer.results));
     // "S&P" is not two companies the answer could not find.
-    assert.deepEqual(firstAnswer.notes, ["Not part of this calculation: a stock price return; a comparison with a benchmark index."]);
+    assert.deepEqual(firstAnswer.notes, ["Not covered by this answer: a stock price return; a comparison with a benchmark index."]);
 
     const unchanged = (scope: Saved, companies: string[]) => {
       assert.deepEqual(issuers(scope), companies);

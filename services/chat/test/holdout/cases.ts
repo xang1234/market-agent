@@ -322,7 +322,7 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
       companies: ["AMD"],
       route: "financial_answer",
       financial: [[AMD, OPERATING_MARGIN, "Q2 FY2025", "verified", "-1.74%"]],
-      uncovered: "Not part of this calculation: the cause of these figures.",
+      uncovered: "Not covered by this answer: the cause of these figures.",
     },
     prose: "",
   },

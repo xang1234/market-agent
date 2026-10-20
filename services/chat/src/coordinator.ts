@@ -978,8 +978,10 @@ function subjectAwareRunner(
 
 const MAX_TURN_SUBJECTS = 5;
 
-type TurnSubjects = {
+export type TurnSubjects = {
   subjects: ReadonlyArray<ChatResolvedSubjectPreResolution>;
+  // Those carried from the previous answer that the turn does not name.
+  carried?: ReadonlyArray<ChatResolvedSubjectPreResolution>;
   // Set only for comparisons: a named company to ask about, or ones not found.
   ambiguous?: Exclude<ChatSubjectPreResolution, ChatResolvedSubjectPreResolution>;
   notFound: ReadonlyArray<string>;
@@ -1012,7 +1014,7 @@ const REMOVE = new RegExp(
 const CONTINUATION = /^\s*(?:and\s+)?(?:what|how)\s+about\b|^\s*and\s+\S/i;
 const ONLY = /\b(?:just|only|instead|switch to|alone)\b/i;
 
-async function resolveTurnSubjects(
+export async function resolveTurnSubjects(
   context: ChatTurnRunContext,
   preResolve: ChatSubjectPreResolver,
   loadPriorSubjects: ChatPriorSubjectsLoader | undefined,
@@ -1044,7 +1046,7 @@ async function resolveTurnSubjects(
   const carried = distinctCompanies(prior)
     .filter((subject) => !namedKeys.has(companyKey(subject)))
     .slice(0, MAX_TURN_SUBJECTS - newlyNamed.length);
-  return { subjects: [...carried, ...newlyNamed], notFound };
+  return { subjects: [...carried, ...newlyNamed], carried, notFound };
 }
 
 // A follow-up that drops companies from the previous answer's, or names a new
@@ -1117,8 +1119,10 @@ async function companyChange(
     const additions = distinctCompanies(named.filter((subject) => !inScope(subject)))
       .filter((subject) => !removed.has(companyKey(subject)) && !keptKeys.has(companyKey(subject)))
       .slice(0, MAX_TURN_SUBJECTS);
+    const keptSlots = kept.slice(0, MAX_TURN_SUBJECTS - additions.length);
     return {
-      subjects: [...kept.slice(0, MAX_TURN_SUBJECTS - additions.length), ...additions],
+      subjects: [...keptSlots, ...additions],
+      carried: keptSlots,
       notFound: unresolved.map((resolution) => resolution.input_text),
     };
   }

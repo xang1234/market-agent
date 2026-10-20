@@ -6,14 +6,16 @@
 // free-text composer: when a calculation cannot be planned or verified, the
 // turn gets a structured gap, never a model-written number.
 //
-// Every company the request names is either resolved, asked about, or kept as
-// an explicit gap in the answer; none is dropped to reach a conclusion about
-// fewer companies than were asked about.
+// A turn's companies are the ones the analyst path would take for it
+// (coordinator.ts resolveTurnSubjects): each is resolved, asked about, or
+// named in the answer as not found, and one carried from the previous answer
+// is named as carried.
 
 import { randomUUID } from "node:crypto";
 
 import {
   createRuntimeAuthority,
+  hashCanonical,
   METRIC_CATALOG_V1,
   operationDependencies,
   RATIO_CATALOG_V1,
@@ -39,11 +41,11 @@ import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../fi
 import { requireFinancialReadiness } from "../../financial-engine/src/readiness.ts";
 import { publishRequest, type RequestGap } from "../../financial-engine/src/request.ts";
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
-import { labelList, type ChatTurnRunContext } from "./coordinator.ts";
+import { labelList, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId } from "./chat-ids.ts";
 import { noteBlock } from "./fact-blocks.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
-import { COMPARATIVE, extractSubjectMentions } from "./subject-extraction.ts";
+import { COMPARATIVE, companyKey, extractSubjectMentions } from "./subject-extraction.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "./subjects.ts";
 import {
   BALANCE_SHEET_ITEMS,
@@ -122,13 +124,8 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     const authority = chatAuthority(context.userId!, context.threadId, turnId);
 
     const messageId = financialMessageId(context.threadId, turnId);
-    let requested: TurnSubjects;
-    try {
-      requested = await requestedSubjects(deps, context, text);
-    } catch (reason) {
-      console.warn("[chat] the turn's companies could not be resolved; nothing is planned", reason);
-      return gap("planning_unavailable");
-    }
+    const requested = await requestedSubjects(deps, context, text);
+    if (requested.clarify) return { kind: "clarification", clarification: companyQuestion(requested.clarify) };
     if (requested.subjects.length === 0) return gap("no_company");
     const reading = (deps.readQuestion?.(text) ?? Promise.resolve(null)).catch((reason) => {
       console.warn("[chat] no reading of the question; the financial answer names no uncovered ask", reason);
@@ -154,7 +151,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       // The reading and the scope settle outside any transaction; the scope
       // queued its reads before this request took its client.
       beforeDrive: () => Promise.all([scope, reading]),
-      persistParent: persistAssistantMessage(context.threadId, messageId, { scope, reading, carried: requested.carried }, { authority, request_key: turnId }),
+      persistParent: persistAssistantMessage(context.threadId, messageId, { scope, reading, carried: requested.carried, notFound: requested.notFound }, { authority, request_key: turnId }),
     });
     switch (outcome.status) {
       case "clarification":
@@ -187,37 +184,49 @@ function requestedMentions(context: ChatFinancialTurnContext, text: string): str
     : extractSubjectMentions(text);
 }
 
-type TurnSubjects = Readonly<{
+type TurnCompanies = Readonly<{
   // One per company, primary first, as the planner takes them.
   subjects: ReadonlyArray<RequestedSubject>;
   resolved: ReadonlyArray<ChatResolvedSubjectPreResolution>;
-  // The labels of the companies carried from the previous answer that the question does not name.
+  // Labels of the companies carried from the previous answer.
   carried: ReadonlyArray<string>;
+  // Names a comparison gave that match no company.
+  notFound: ReadonlyArray<string>;
+  // A change to the compared companies too unclear to plan: the question to ask.
+  clarify?: string;
 }>;
 
-// The companies a turn's plan requests, as the analyst path picks them
-// (coordinator.ts resolveTurnSubjects): the ones the question names, with the
-// previous answer's first in a comparison or when it names none. Outside a
-// comparison a token that matches no company is an acronym ("EBIT").
-async function requestedSubjects(deps: ChatFinancialRuntimeDeps, context: ChatFinancialTurnContext, text: string): Promise<TurnSubjects> {
-  const explicit = Boolean(context.subjectText?.trim());
-  const comparative = COMPARATIVE.test(text);
+async function requestedSubjects(deps: ChatFinancialRuntimeDeps, context: ChatFinancialTurnContext, text: string): Promise<TurnCompanies> {
+  const label = (resolution: ChatResolvedSubjectPreResolution) => resolution.handoff?.display_labels?.ticker ?? resolution.display_label;
   const mentioned = await Promise.all(requestedMentions(context, text).map(async (mention) => ({ mention, resolution: await deps.resolveMention(mention) })));
-  const named = explicit || comparative ? mentioned : mentioned.filter(({ resolution }) => resolution.status !== "not_found");
-  const prior = !explicit && (named.length === 0 || comparative) ? await deps.priorSubjects?.(context.threadId) ?? [] : [];
-  const all = [
-    ...prior.map((resolution) => ({ mention: resolution.handoff.display_labels?.ticker ?? resolution.display_label, resolution })),
-    ...named,
-  ];
-  const issuers = await issuersOf(deps.pool, all.map(({ resolution }) => resolution));
-  const requested = all.map(({ mention, resolution }): RequestedSubject => ({ mention, resolution: requestedResolution(resolution, issuers) }));
-  const namedKeys = new Set(requested.slice(prior.length).map(requestedKey));
+  let entries: ReadonlyArray<Readonly<{ mention: string; resolution: ChatSubjectPreResolution }>> = mentioned;
+  let turn: TurnSubjects | null = null;
+  // An ambiguous company is asked about beside every company named, so the answer covers them all.
+  if (!context.subjectText?.trim() && !mentioned.some(({ resolution }) => resolution.status === "needs_clarification")) {
+    turn = await resolveTurnSubjects(
+      context,
+      (request) => deps.resolveMention(request.text),
+      deps.priorSubjects && ((input) => deps.priorSubjects!(input.threadId)),
+    );
+    if (turn.clarify) return { subjects: [], resolved: [], carried: [], notFound: [], clarify: turn.clarify };
+    // A company keeps the mention that named it; one carried takes its ticker.
+    const mentionOf = new Map(mentioned.flatMap(({ mention, resolution }) => resolution.status === "resolved" ? [[companyKey(resolution), mention] as const] : []));
+    entries = turn.subjects.map((resolution) => ({ mention: mentionOf.get(companyKey(resolution)) ?? label(resolution), resolution }));
+  }
+  const issuers = await issuersOf(deps.pool, entries.map(({ resolution }) => resolution));
+  const requested = entries.map(({ mention, resolution }): RequestedSubject => ({ mention, resolution: requestedResolution(resolution, issuers) }));
   return {
     // One entry per company: "NVIDIA" (the page) and "NVDA" (the message) are one.
     subjects: distinctRequested(requested),
-    resolved: all.flatMap(({ resolution }) => resolution.status === "resolved" ? [resolution] : []),
-    carried: [...new Set(requested.slice(0, prior.length).filter((subject) => !namedKeys.has(requestedKey(subject))).map((subject) => subject.mention))],
+    resolved: entries.flatMap(({ resolution }) => resolution.status === "resolved" ? [resolution] : []),
+    carried: (turn?.carried ?? []).map(label),
+    notFound: turn?.notFound ?? [],
   };
+}
+
+// A question about the companies to compare, which only a new message answers.
+function companyQuestion(question: string): Clarification {
+  return { clarification_id: hashCanonical("clarification", { kind: "request", question, choices: [] }), kind: "request", question, choices: [] };
 }
 
 async function planTurn(
@@ -392,7 +401,12 @@ function chatAuthority(userId: string, threadId: string, turnId: string): Financ
 function persistAssistantMessage(
   threadId: string,
   messageId: string,
-  turn: Readonly<{ scope: Promise<ResearchScope | null>; reading: Promise<ScopeProposal | null>; carried: ReadonlyArray<string> }>,
+  turn: Readonly<{
+    scope: Promise<ResearchScope | null>;
+    reading: Promise<ScopeProposal | null>;
+    carried: ReadonlyArray<string>;
+    notFound: ReadonlyArray<string>;
+  }>,
   request: { authority: FinancialRuntimeAuthority; request_key: string },
 ): PersistParentArtifact {
   return async (tx, publication) => {
@@ -401,8 +415,9 @@ function persistAssistantMessage(
     const plan = scope === null && reading === null ? null : await findPlanForRequest(tx.client, request);
     const missing = reading === null || plan === null ? [] : uncoveredAsks(reading, plan);
     const note = [
+      ...(turn.notFound.length === 0 ? [] : [`No company matched ${labelList(turn.notFound)}.`]),
       ...(turn.carried.length === 0 ? [] : [`${labelList(turn.carried)} ${turn.carried.length > 1 ? "are" : "is"} carried from the previous answer.`]),
-      ...(missing.length === 0 ? [] : [`Not part of this calculation: ${missing.join("; ")}.`]),
+      ...(missing.length === 0 ? [] : [`Not covered by this answer: ${missing.join("; ")}.`]),
     ].join(" ");
     const blocks = [
       publication.block,
@@ -506,7 +521,10 @@ export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1): st
     const numerator = nodes.get(node.numerator);
     return numerator?.operation === "reported_metric" ? [numerator.metric_key] : [];
   });
-  // A margin shows the income figure it divides: an operating margin answers "operating income".
+  // ponytail: a margin also answers the income item it divides, because the
+  // reading has no operating or net margin item and names operating income for
+  // an operating margin; a request for operating income answered by its margin
+  // alone is not named (#425). Add the margin items to INCOME_ITEMS to drop this.
   const read = new Set([...shown.flatMap((node) => [figureKey(node), SCOPE_METRICS[figureKey(node)] ?? []].flat()), ...numerators]);
   const periodOf = (id: string) => {
     const node = nodes.get(id);

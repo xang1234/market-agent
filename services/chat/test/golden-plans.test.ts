@@ -168,7 +168,7 @@ test("an engine answer names what the reading of its question asks for and the p
   assert.deepEqual(uncoveredAsks(reading([], ["total_assets"]), assets), []);
 
   const marginOnly = plan(margin("q4", quarter("Q4")), ["om_q4"]);
-  assert.deepEqual(uncoveredAsks(reading(["margins"], ["income_statement"], ["revenue", "operating_income"]), marginOnly), ["revenue"], "an input the answer does not show is not calculated; a margin's numerator is");
+  assert.deepEqual(uncoveredAsks(reading(["margins"], ["income_statement"], ["revenue", "operating_income"]), marginOnly), ["revenue"], "an input the answer does not show is named; a margin's numerator is not");
   const turnsOff = (asks: string[], metrics: unknown[], facets: string[], offMetrics: unknown[]) =>
     parseProposal(JSON.stringify({ metrics, asks, turns_off: { facets, metrics: offMetrics }, income_items: [] }))!;
   assert.deepEqual(uncoveredAsks(turnsOff(["margins", "margin_trend"], [], ["margins"], []), revenue), [], "no margins is no trend");
