@@ -169,7 +169,8 @@ async function storedProvenReads(db: FundamentalsQueryExecutor, issuerId: UUID, 
       where f.subject_kind = 'issuer'
         and f.subject_id = $1
         and m.metric_key = any($2::text[])
-        and f.period_kind = 'fiscal_y'
+        -- A year's flows are fiscal_y facts; its year-end balances are point facts.
+        and f.period_kind in ('fiscal_y', 'point')
         and f.fiscal_period = 'FY'
         and s.provider = 'sec_edgar'
         and ${factActiveSql("f")}
