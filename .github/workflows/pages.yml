@@ -1,8 +1,8 @@
 name: pages
 
 # Publishes the static demo (web `npm run build:demo`) to
-# https://xang1234.github.io/market-agent/. Needs Pages enabled with
-# "GitHub Actions" as its source (Settings > Pages); until then the deploy job fails.
+# https://xang1234.github.io/market-agent/, with Pages' source set to GitHub Actions
+# (Settings > Pages).
 on:
   push:
     branches: [main]
