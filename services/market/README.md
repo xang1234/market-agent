@@ -12,6 +12,7 @@ The market data service: provider-neutral quote and bar contracts (spec
 cd services/market
 npm test         # contract + adapter + http tests
 npm run dev      # starts http server on $MARKET_PORT (defaults to 4321)
+npm run sync:splits [-- <listing_uuid> ...]  # records Polygon splits per listing (DATABASE_URL, POLYGON_API_KEY)
 ```
 
 ## Dev wiring
