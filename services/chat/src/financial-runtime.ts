@@ -119,10 +119,21 @@ const GAP_TEXT: Readonly<Record<ChatGap, string>> = {
   parent_authority_required: "This calculation could not be run for this conversation.",
 };
 
-// The gaps that answer a turn by declining it. The others are notices about
-// its run (already running, answered, cancelled, not this thread's), and a
-// newer notice must not hide the turn's answer from the next follow-up.
-const DECLINED: ReadonlySet<ChatGap> = new Set(["unsupported", "configuration_needed", "planning_unavailable", "verification_failed", "run_failed"]);
+// Whether a request's gap answers the turn by declining it (its planning
+// did), or is a notice about its run: running, finished by another attempt (a
+// terminal lease reads as run_failed), answered otherwise, cancelled, or not
+// this thread's. A newer notice must not hide the turn's answer from the next
+// follow-up. A unit this attempt drove and could not publish declines too.
+const DECLINES: Readonly<Record<Exclude<RequestGap, "publication_failed">, boolean>> = {
+  planning_unavailable: true,
+  unsupported: true,
+  configuration_needed: true,
+  run_failed: false,
+  run_in_progress: false,
+  run_cancelled: false,
+  request_conflict: false,
+  parent_authority_required: false,
+};
 
 export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): ChatFinancialRuntime {
   const answers = (context: ChatFinancialTurnContext) =>
@@ -159,12 +170,12 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     // What planning settled, for a gap: the companies it was asked about,
     // a clarification pick included, and the planner's result.
     let planned: Readonly<{ subjects: ReadonlyArray<RequestedSubject>; result: PlanningResult }> | null = null;
-    const turnGap = async (reason: ChatGap) => {
+    const turnGap = async (reason: ChatGap, declines: boolean) => {
       // ponytail: a retry that resumes a reserved run does not plan, so its
       // gap names the companies the message resolved, without a pick.
       const asked = (planned?.subjects ?? requested.subjects).flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref] : []);
-      // One about no company leaves the previous answer's companies and scope.
-      if (!DECLINED.has(reason) || asked.length === 0) return gap(reason, planned?.result);
+      // A notice, or a decline about no company, leaves the previous answer's companies and scope.
+      if (!declines || asked.length === 0) return gap(reason, planned?.result);
       const saved = await scope;
       return {
         ...gap(reason, planned?.result),
@@ -207,13 +218,13 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       case "gap":
         // A commit that failed is an error of this turn, not an answer; the retry publishes it.
         if (outcome.reason === "publication_failed") throw new Error("the financial answer could not be committed");
-        return turnGap(outcome.reason);
+        return turnGap(outcome.reason, DECLINES[outcome.reason]);
       case "driven": {
         const [unit] = outcome.report?.finalized ?? [];
         const committed = outcome.report === null || unit?.result.status === "published" || unit?.result.status === "existing" ||
           (!unit && outcome.report.existing > 0);
         if (committed) return published(deps.pool, outcome.run_id, context.threadId, messageId);
-        return turnGap(unit?.result.status === "rejected" ? "verification_failed" : "run_failed");
+        return turnGap(unit?.result.status === "rejected" ? "verification_failed" : "run_failed", true);
       }
     }
   };
@@ -273,10 +284,11 @@ async function requestedSubjects(deps: ChatFinancialRuntimeDeps, context: ChatFi
     const prior = comparison ? await deps.priorSubjects?.(context.threadId) ?? [] : [];
     const unmatched = mentioned.filter(({ resolution }) => resolution.status === "not_found");
     const named = mentioned.filter((entry) => !unmatched.includes(entry));
+    const namedCompanies = distinctBy(named, ({ mention, resolution }) => resolution.status === "resolved" ? companyKey(resolution) : `mention:${mention}`).length;
     // The companies named take the capped slots first; carried ones fill the rest, listed first.
     carried = prior.filter((resolution, index) =>
       !namedKeys.has(companyKey(resolution)) && prior.findIndex((other) => companyKey(other) === companyKey(resolution)) === index)
-      .slice(0, Math.max(0, MAX_TURN_SUBJECTS - named.length));
+      .slice(0, Math.max(0, MAX_TURN_SUBJECTS - namedCompanies));
     notFound = comparison ? unmatched.map(({ mention }) => mention) : [];
     entries = [...carried.map((resolution) => ({ mention: label(resolution), resolution })), ...named];
   } else if (!explicit) {
@@ -291,11 +303,12 @@ async function requestedSubjects(deps: ChatFinancialRuntimeDeps, context: ChatFi
     entries = turn.subjects.map((resolution) => ({ mention: mentionOf.get(companyKey(resolution)) ?? label(resolution), resolution }));
   }
   const issuers = await issuersOf(deps.pool, entries.map(({ resolution }) => resolution));
-  const requested = entries.map(({ mention, resolution }): RequestedSubject => ({ mention, resolution: requestedResolution(resolution, issuers) }));
   // One entry per company ("NVIDIA" the page and "NVDA" the message are one),
   // as many as the analyst path takes (resolveTurnSubjects caps its own).
-  const kept = distinctBy(entries.map((entry, index) => ({ entry, subject: requested[index]! })), ({ subject }) => requestedKey(subject))
-    .slice(0, MAX_TURN_SUBJECTS);
+  const kept = distinctBy(
+    entries.map((entry) => ({ entry, subject: { mention: entry.mention, resolution: requestedResolution(entry.resolution, issuers) } satisfies RequestedSubject })),
+    ({ subject }) => requestedKey(subject),
+  ).slice(0, MAX_TURN_SUBJECTS);
   return {
     subjects: kept.map(({ subject }) => subject),
     resolved: kept.flatMap(({ entry }) => entry.resolution.status === "resolved" ? [entry.resolution] : []),
@@ -564,8 +577,8 @@ function answeredCompanies(issuerIds: ReadonlyArray<string>, scope: ResearchScop
   const kept = new Map(scope.companies.map((company) => [company.issuer_id.toLowerCase(), company]));
   return issuerIds.flatMap((id) => {
     const company = kept.get(id.toLowerCase());
-    const label = labels.get(id.toLowerCase());
-    return company ? [company] : label === undefined ? [] : [{ issuer_id: id, label }];
+    const labelled = labels.get(id.toLowerCase());
+    return company ? [company] : labelled === undefined ? [] : [{ issuer_id: id, label: labelled }];
   });
 }
 

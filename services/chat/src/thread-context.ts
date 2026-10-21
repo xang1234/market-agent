@@ -50,8 +50,8 @@ export async function loadPriorSubjects(
 }
 
 // An engine answer seals its companies as issuers, which hydrate with no
-// ticker; each takes its active listings' first ticker (companyListings'
-// rule), as answers name companies (#425).
+// ticker; each takes its smallest active ticker, as answers name companies
+// (#425).
 function withListingTicker(handoff: HydratedSubjectHandoff): HydratedSubjectHandoff {
   const [ticker] = (handoff.context.active_listings ?? []).map((listing) => listing.ticker).sort();
   return handoff.display_labels.ticker !== undefined || ticker === undefined
@@ -61,8 +61,8 @@ function withListingTicker(handoff: HydratedSubjectHandoff): HydratedSubjectHand
 
 // The latest research scope an answer saved (research-scope.ts), for a
 // follow-up to keep what it does not change. Answers that save none (a
-// clarification, or a gap that names no company) leave it in place; null when
-// no answer saved one.
+// clarification, a notice, a gap that names no company, or an answer whose
+// scope could not be read) leave it in place; null when no answer saved one.
 export async function loadPriorScope(
   db: QueryExecutor,
   input: { threadId: string },
