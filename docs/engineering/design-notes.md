@@ -362,7 +362,9 @@ an operator command certifies the universe ahead of time, and each screen reads 
 - **Read model:** the transaction that seals a figure, or the gap sealed instead, writes it to
   `screener_certified_valuations`, keyed by issuer and figure. A null keeps its root reason: a figure blocked by an
   input records the input's own reason, such as `split_listing_unresolved` for an issuer with two common-stock
-  listings. A run that finishes late, a recovered one say, never replaces a figure certified at a later cutoff.
+  listings. A run that finishes late, a recovered one say, never replaces a figure certified at a later cutoff, and a
+  gap never replaces a value in the value's own session, so a price that goes missing mid-session leaves the figure.
+  A gap replaces a value once a later session closes, when the value would read as null anyway.
 - **Screens:** a screen reads every candidate issuer's figures in one query (`loadCertifiedValuations`,
   `services/screener/src/db-candidates.ts`) and does no engine work. Every listing of an issuer shows the issuer's
   figure, so a second listing never counts the shares again. A row carries `market_cap_currency`, the currency the
@@ -370,8 +372,13 @@ an operator command certifies the universe ahead of time, and each screen reads 
 - **Freshness:** a figure shows while it certifies the last regular session closed by now, in its listing's zone
   (`lastRegularSessionDate`). Once a later session closes it reads as null until the batch runs again, so the screener
   never shows a stale figure. If the batch stops running, every figure reads as null after the next close.
+  `lastRegularSessionDate` skips weekends only, so on a market holiday every figure reads as null from the holiday's
+  close until the batch certifies the next real close, about a day.
 - **Retries:** rerunning a cutoff resumes its runs. They are created up front under an advisory lock, so two attempts
-  never value an issuer twice, and the engine never publishes a unit twice. The supervised worker resumes an
+  never value an issuer twice, and the engine never publishes a unit twice. A run whose execution failed or was
+  cancelled, an integrity failure in one issuer's inputs say, sealed nothing: the batch reports its issuers and exits
+  1, and a rerun at the cutoff values them in new runs. They go 25 to a run again, so an issuer that fails every time
+  takes its new run's other issuers with it. The supervised worker resumes an
   interrupted run (`screenerUniverseRecovery`, registered in `services/dev-api/src/runtime.ts`).
 - **Erasure:** deleting a run's `screener_valuation_runs` row erases the run, and a figure goes with its certificate.
   Deleting a fact erases every run that bound it, so the other issuers in that run show null until the next batch.
@@ -379,7 +386,9 @@ an operator command certifies the universe ahead of time, and each screen reads 
   (`services/screener/src/dev.ts`), so a response never mixes certified and vendor figures. The vendor path is
   unchanged.
 - **Limits:** each refresh adds a run per 25 issuers and a sealed snapshot per figure, and nothing prunes older
-  refreshes yet.
+  refreshes yet. Coverage excludes an issuer with several common-stock listings, such as Alphabet's GOOGL and GOOG:
+  its figures are `split_listing_unresolved` gaps. An issuer listed only through ADRs has no common-stock listing, so
+  the batch never values it, and both read as null.
 
 ## Source classes at binding (#444)
 
