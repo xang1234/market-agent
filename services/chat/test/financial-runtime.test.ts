@@ -5,13 +5,14 @@ import { connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { databaseUrl, IDS, ORIGINAL_REVENUE } from "../../financial-engine/test/db-fixtures.ts";
 import type { ChatAnalystToolRuntime } from "../src/coordinator.ts";
+import { financialMessageId } from "../src/chat-ids.ts";
 import { createChatFinancialRuntime, isFinancialRequest, SCOPE_METRICS } from "../src/financial-runtime.ts";
 import { METRIC_CATALOG_V1, OPERATION_REGISTRY } from "../../financial-core/src/index.ts";
 import { proposedMetric } from "../src/research-scope.ts";
 import { parseProposal } from "../src/scope-proposal.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import type { FinancialPool } from "../../financial-engine/src/ports.ts";
-import { chatDatabase, chatHarness, completed, INSTRUMENT_A, LISTING_A, resolveMention, revenueModel } from "./financial-fixtures.ts";
+import { chatDatabase, chatHarness, completed, INSTRUMENT_A, LISTING_A, MISSING_ISSUER, resolveMention, revenueModel } from "./financial-fixtures.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "../src/subjects.ts";
 
 test("financial intent is recognized from the definition catalog", () => {
@@ -156,6 +157,138 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.equal(model.calls, 0, "nothing is planned for no company");
   });
 
+  // The scope financialResearchScope saves, over the companies it is given.
+  const scopeOver = async (context: { subjectPreResolutions?: ReadonlyArray<ChatResolvedSubjectPreResolution> }) => ({
+    route: "financial_answer" as const,
+    reads: "financial_answer" as const,
+    companies: (context.subjectPreResolutions ?? []).map((subject) => ({ issuer_id: subject.subject_ref.id, label: subject.handoff?.display_labels?.ticker ?? subject.display_label })),
+    peers: false, segments: false, margin_trend: false, margins: false, metrics: [], fiscal_year: null, fiscal_quarter: null, price_window: null, benchmark: false, inherited: [],
+  });
+  const turnWithPick = async (harness: ReturnType<typeof chatHarness>, userIntent: string, pick?: string) => {
+    const { events } = await harness.run({ ...base, userIntent });
+    if (pick === undefined) return completed(events);
+    const offered = completed(events).financial_clarification as { clarification_id: string; choices: Array<{ choice_id: string; label: string }> };
+    const choice = offered.choices.find((candidate) => candidate.label === pick)!;
+    return completed((await harness.run({ ...base, userIntent, clarificationAnswer: { clarification_id: offered.clarification_id, choice_id: choice.choice_id } })).events);
+  };
+
+  await t.test("an engine gap names the planner's reason and saves the companies it was asked about, with its scope (#425)", async () => {
+    const segments = async (userIntent: string, reason: string, pick?: string) => {
+      const model = (async () => ({ model: "stub-model", text: JSON.stringify({ outcome: "unsupported", reason }) })) as unknown as PlanningModel;
+      const harness = chatHarness(pool, { model, researchScope: scopeOver as never });
+      const done = await turnWithPick(harness, userIntent, pick);
+      const [block] = harness.persisted.at(-1)!.blocks as ReadonlyArray<{ segments: Array<{ text: string }>; subject_refs?: unknown }>;
+      const scope = harness.persisted.at(-1)!.research_scope as { route: string; reads: string; companies: unknown; metrics: unknown } | undefined;
+      return { gap: done.financial_gap, text: block!.segments[0]!.text, subject_refs: block!.subject_refs, scope: scope && [scope.route, scope.reads, scope.companies, scope.metrics] };
+    };
+    assert.deepEqual(await segments("Break down AAA's revenue by segment", "segment revenue has no approved definition"), {
+      gap: { reason_code: "unsupported" },
+      text: "This request asks for a calculation outside the verified financial definitions I can compute: segment revenue has no approved definition.",
+      subject_refs: [{ kind: "issuer", id: IDS.issuerA }],
+      scope: ["financial_gap", "financial_gap", [{ issuer_id: IDS.issuerA, label: "AAA" }], []],
+    });
+    // A gap about no resolved company saves no scope, so the previous one stays.
+    assert.deepEqual(await segments("Show AMB's cash resilience score", "not used"), {
+      gap: { reason_code: "unsupported" },
+      text: "This request asks for a calculation outside the verified financial definitions I can compute: cash resilience is an annual view without scores, peer ranks, or cash and debt measures.",
+      subject_refs: undefined,
+      scope: undefined,
+    });
+    // A company picked in a clarification is saved too, labelled. A reason with a figure in it is not shown.
+    assert.deepEqual(await segments("Break down AMB's revenue by segment", "only 3 segments are reported", "Beta Holdings Corp."), {
+      gap: { reason_code: "unsupported" },
+      text: "This request asks for a calculation outside the verified financial definitions I can compute.",
+      subject_refs: [{ kind: "issuer", id: IDS.issuerB }],
+      scope: ["financial_gap", "financial_gap", [{ issuer_id: IDS.issuerB, label: "Beta Holdings Corp." }], []],
+    });
+  });
+
+  await t.test("an engine answer saves, labelled, a company picked in a clarification and one two listings name (#425)", async () => {
+    await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1::uuid, $2::uuid, 'common_stock') on conflict do nothing`, [INSTRUMENT_A, IDS.issuerA]);
+    await db.query(
+      `insert into listings (listing_id, instrument_id, mic, ticker, trading_currency, timezone)
+       values ($1::uuid, $2::uuid, 'XNAS', 'ALPX', 'USD', 'America/New_York') on conflict do nothing`,
+      [LISTING_A, INSTRUMENT_A],
+    );
+    const savedCompanies = async (userIntent: string, mentions: string[], pick?: string) => {
+      const done = await turnWithPick(chatHarness(pool, { model: revenueModel(mentions), researchScope: scopeOver as never }), userIntent, pick);
+      return (await db.query(`select research_scope from chat_messages where message_id = $1`, [done.message_id])).rows[0]?.research_scope.companies;
+    };
+    assert.deepEqual(await savedCompanies("Revenue for AMB", ["AMB"], "Beta Holdings Corp."), [{ issuer_id: IDS.issuerB, label: "Beta Holdings Corp." }]);
+    assert.deepEqual(await savedCompanies("Revenue for AMBX", ["AMBX"]), [{ issuer_id: IDS.issuerA, label: "ALPX" }]);
+  });
+
+  await t.test("a turn plans at most five companies, from a company's page or beside an ambiguous one, as the analyst path does (#425)", async () => {
+    const seen: string[] = [];
+    const model = (async (request: { messages: Array<{ content: string }> }) => {
+      seen.push(/Requested companies \(mentions\): (.*)$/mu.exec(request.messages[1]!.content)![1]!);
+      return { model: "stub-model", text: JSON.stringify({ outcome: "unsupported", reason: "not needed here" }) };
+    }) as unknown as PlanningModel;
+    await chatHarness(pool, { model }).run({ ...base, subjectText: "AAA", userIntent: "Compare revenue with BBB, CCC, OPM, PAX, COX and QTR" });
+    await turnWithPick(chatHarness(pool, { model }), "Compare revenue for AMB, BBB, CCC, OPM, PAX, COX and QTR", "Alpha Industries Inc.");
+    // The page's company named again in the message takes one slot.
+    await chatHarness(pool, { model }).run({ ...base, subjectText: "ALPHA", userIntent: "Compare revenue for AAA with BBB, CCC, OPM, PAX and COX" });
+    // Carried companies fill the slots the named ones leave.
+    const carried = async (ticker: string) => ({ ...(await resolveMention(ticker)), handoff: { display_labels: { ticker } } }) as unknown as ChatResolvedSubjectPreResolution;
+    const prior = [await carried("AAA"), await carried("QTR")];
+    await turnWithPick(chatHarness(pool, { model, priorSubjects: async () => prior }), "Compare its revenue with AMB, OPM, PAX and COX", "Beta Holdings Corp.");
+    // A company named twice takes one of the slots the carried ones fill.
+    const three = [await carried("QTR"), await carried("COX"), await carried("CCC")];
+    await turnWithPick(chatHarness(pool, { model, priorSubjects: async () => three }), "Compare its revenue with AMB, AAA and ALPHA", "Beta Holdings Corp.");
+    // An ambiguous name past the cap is still asked about; a resolved company gives up its slot.
+    const offered = completed((await chatHarness(pool, { model }).run({ ...base, userIntent: "Compare revenue for BBB, CCC, OPM, PAX, COX and AMB" })).events);
+    assert.equal(offered.clarification, true, "the ambiguous company is asked about");
+    await turnWithPick(chatHarness(pool, { model }), "Compare revenue for BBB, CCC, OPM, PAX, COX and AMB", "Alpha Industries Inc.");
+    // A carried company named by the ticker the message gives another one is named to the planner by its legal name.
+    const alphaAsAmb = { ...(await resolveMention("AAA")), handoff: { display_labels: { ticker: "AMB" } } } as unknown as ChatResolvedSubjectPreResolution;
+    await turnWithPick(chatHarness(pool, { model, priorSubjects: async () => [alphaAsAmb] }), "Compare its revenue with the other AMB", "Beta Holdings Corp.");
+    assert.deepEqual(seen, [
+      "AAA; BBB; CCC; OPM; PAX",
+      "AMB; BBB; CCC; OPM; PAX",
+      "ALPHA; BBB; CCC; OPM; PAX",
+      "AAA; AMB; OPM; PAX; COX",
+      "QTR; COX; CCC; AMB; AAA",
+      "BBB; CCC; OPM; PAX; AMB",
+      "Alpha Industries Inc.; AMB",
+    ]);
+  });
+
+  await t.test("a planning model that fails after a clarification pick still saves the picked company (#425 review)", async () => {
+    const harness = chatHarness(pool, { model: (async () => { throw new Error("provider down"); }) as PlanningModel, researchScope: scopeOver as never });
+    const done = await turnWithPick(harness, "Compare revenue for AAA and AMB", "Beta Holdings Corp.");
+    assert.deepEqual(done.financial_gap, { reason_code: "planning_unavailable" });
+    assert.deepEqual((harness.persisted.at(-1)!.research_scope as { companies: unknown }).companies, [
+      { issuer_id: IDS.issuerA, label: "AAA" },
+      { issuer_id: IDS.issuerB, label: "Beta Holdings Corp." },
+    ]);
+  });
+
+  await t.test("each name a turn gives is resolved once (#425)", async () => {
+    const counts: Record<string, number> = {};
+    const counting = async (mention: string) => {
+      counts[mention] = (counts[mention] ?? 0) + 1;
+      return resolveMention(mention);
+    };
+    completed((await chatHarness(pool, { model: revenueModel(["AAA", "BBB"]), resolveMention: counting }).run({ ...base, userIntent: "Compare revenue for AAA and BBB" })).events);
+    assert.deepEqual(counts, { "Compare revenue for AAA and BBB": 1, AAA: 1, BBB: 1 });
+  });
+
+  await t.test("a retry of a saved answer reads neither the question nor its scope again (#425)", async () => {
+    const turn = { ...base, turnId: randomUUID(), userIntent: "Revenue for AAA" };
+    const first = completed((await chatHarness(pool, { model: revenueModel(["AAA"]) }).run(turn)).events);
+    let reads = 0;
+    const readQuestion = async () => {
+      reads += 1;
+      return null;
+    };
+    const researchScope = async () => {
+      reads += 1;
+      return null as never;
+    };
+    const retried = completed((await chatHarness(pool, { model: revenueModel(["AAA"]), readQuestion, researchScope }).run(turn)).events);
+    assert.deepEqual([retried.message_id, reads], [first.message_id, 0], "the retry returns the saved answer, reading nothing");
+  });
+
   await t.test("a resolver that fails fails the turn, with nothing planned", async () => {
     const model = revenueModel(["AAA"]);
     const { events } = await chatHarness(pool, { model, resolveMention: async () => { throw new Error("resolver unavailable"); } }).run({ ...base, userIntent: "Revenue for AAA" });
@@ -245,14 +378,59 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
 
   await t.test("a missing or failing planning model yields a gap, never the narrative composer", async () => {
     for (const model of [null, (async () => { throw new Error("provider down"); }) as PlanningModel]) {
-      const { events } = await chatHarness(pool, { model }).run({ ...base, userIntent: "Compare revenue for AAA and BBB" });
+      const harness = chatHarness(pool, { model, researchScope: scopeOver as never });
+      const { events } = await harness.run({ ...base, userIntent: "Compare revenue for AAA and BBB" });
       assert.deepEqual(completed(events).financial_gap, { reason_code: "planning_unavailable" });
+      const scope = harness.persisted.at(-1)!.research_scope as { reads: string; companies: unknown };
+      assert.deepEqual([scope.reads, scope.companies], ["financial_gap", [{ issuer_id: IDS.issuerA, label: "AAA" }, { issuer_id: IDS.issuerB, label: "BBB" }]]);
     }
   });
 
   await t.test("a calculation that fails verification is a gap, never the narrative composer", async () => {
-    const { events } = await chatHarness(pool, { model: revenueModel(["CCC"]) }).run({ ...base, userIntent: "Revenue for CCC" });
-    assert.deepEqual(completed(events).financial_gap, { reason_code: "verification_failed" });
+    const harness = chatHarness(pool, { model: revenueModel(["CCC"]), researchScope: scopeOver as never });
+    assert.deepEqual(completed((await harness.run({ ...base, userIntent: "Revenue for CCC" })).events).financial_gap, { reason_code: "verification_failed" });
+    assert.deepEqual((harness.persisted.at(-1)!.research_scope as { companies: unknown }).companies, [{ issuer_id: MISSING_ISSUER, label: "CCC" }]);
+  });
+
+  await t.test("a retry that finds its run failed declines with its companies, unless another attempt answered the turn meanwhile (#425)", async () => {
+    // The thread is another user's, so the first attempt reserves the run and cannot publish; the run then fails.
+    const failedTurn = async () => {
+      const input = { threadId: randomUUID(), userId: IDS.owner, turnId: randomUUID(), userIntent: "Revenue for AAA" };
+      await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [input.threadId, IDS.other]);
+      await chatHarness(pool, { model: revenueModel(["AAA"]) }).run(input);
+      await db.query(`update financial_runs set execution_state = 'failed', failure_code = 'internal_error' where parent_id = $1`, [input.threadId]);
+      await db.query(`update chat_threads set user_id = $2 where thread_id = $1`, [input.threadId, IDS.owner]);
+      return input;
+    };
+    const retry = async (input: Awaited<ReturnType<typeof failedTurn>>, through: unknown = pool) => {
+      const harness = chatHarness(through as never, { model: revenueModel(["AAA"]), researchScope: scopeOver as never });
+      const done = completed((await harness.run(input)).events);
+      return [done.financial_gap, (harness.persisted.at(-1)!.research_scope as { companies: unknown } | undefined)?.companies];
+    };
+    assert.deepEqual(await retry(await failedTurn()), [{ reason_code: "run_failed" }, [{ issuer_id: IDS.issuerA, label: "AAA" }]]);
+    // The answer lands after this attempt checked for it, as when another attempt finishes the run it waits on.
+    const raced = await failedTurn();
+    const { rows: [snapshot] } = await db.query<{ snapshot_id: string }>(
+      `insert into snapshots (subject_refs, as_of, basis, normalization, allowed_transforms)
+       values (jsonb_build_array(jsonb_build_object('kind', 'issuer', 'id', $1::text)), now(), 'unadjusted', 'raw', '{}')
+       returning snapshot_id::text as snapshot_id`,
+      [IDS.issuerA],
+    );
+    let checked = false;
+    const racing = {
+      query: (text: string, values?: unknown[]) => {
+        if (!checked && text.startsWith("select 1 from chat_messages")) {
+          checked = true;
+          return db.query(
+            `insert into chat_messages (message_id, thread_id, role, snapshot_id, blocks, content_hash) values ($1::uuid, $2::uuid, 'assistant', $3::uuid, '[]'::jsonb, 'answer')`,
+            [financialMessageId(raced.threadId, raced.turnId), raced.threadId, snapshot!.snapshot_id],
+          ).then(() => ({ rows: [] }));
+        }
+        return pool.query(text, values);
+      },
+      connect: () => pool.connect(),
+    };
+    assert.deepEqual(await retry(raced, racing), [{ reason_code: "run_failed" }, undefined]);
   });
 
   await t.test("narrative turns keep the analyst path", async () => {

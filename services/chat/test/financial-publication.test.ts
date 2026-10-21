@@ -76,8 +76,16 @@ test("chat financial publication", { timeout: 300_000 }, async (t) => {
     }
     const run = (await db.query(`select run_id::text from financial_runs where parent_id = $1 and request_key = $2`, [threadId, turnId])).rows[0];
     await requestCancellation(db, IDS.owner, run.run_id);
-    const retried = completed((await ask(turnId)).events);
+    const scope = {
+      route: "financial_answer", reads: "financial_answer", companies: [{ issuer_id: IDS.issuerA, label: "AAA" }],
+      peers: false, segments: false, margin_trend: false, margins: false, metrics: [], fiscal_year: null, fiscal_quarter: null, price_window: null, benchmark: false, inherited: [],
+    };
+    const harness = chatHarness(pool, { model: revenueModel(["AAA"]), researchScope: async () => scope as never });
+    const retried = completed((await harness.run({ threadId, userId: IDS.owner, turnId, userIntent: "Revenue for AAA" })).events);
     assert.deepEqual(retried.financial_gap, { reason_code: "run_cancelled" });
     assert.deepEqual(await published(db, threadId), { messages: 1, certificates: 1 }, "only the earlier answer exists");
+    // A notice is not an answer to continue, so it saves no company or scope (#425).
+    const notice = harness.persisted.at(-1)!;
+    assert.deepEqual([notice.research_scope, (notice.blocks[0] as { subject_refs?: unknown }).subject_refs], [undefined, undefined]);
   });
 });
