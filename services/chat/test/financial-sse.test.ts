@@ -121,6 +121,7 @@ test("financial answers over SSE", { timeout: 300_000 }, async (t) => {
     const { events } = await stream(randomUUID(), {}, server);
     assert.deepEqual(events.map((event) => event.event), ["turn.started", "block.began", "block.completed", "turn.completed"]);
     const done = events.at(-1)!.data;
+    assert.deepEqual([events[1]!.data.block_id, events[1]!.data.kind], [`financial-answer-${done.message_id}`, "financial_answer"]);
     assert.equal("message" in done, false);
     const stored = await listed(done.message_id);
     assert.equal((stored?.blocks as Array<{ kind: string }> | undefined)?.[0]?.kind, "financial_answer");

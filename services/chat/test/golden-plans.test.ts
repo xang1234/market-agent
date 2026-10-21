@@ -214,6 +214,29 @@ test("an engine answer names what it leaves out for each company it covers (#425
   assert.deepEqual(uncoveredAsks(reading(["margins"], ["income_statement"], ["revenue", "operating_margin"]), plan, labels), ["operating margin for AMD"]);
   assert.deepEqual(uncoveredAsks(reading(["margins"], ["income_statement"]), plan, labels), ["a margin for AMD"]);
   assert.deepEqual(uncoveredAsks(reading(["benchmark"], ["income_statement"], ["net_income"]), plan, labels), ["net income", "a comparison with a benchmark index"], "an ask no company's figures answer names no company");
+
+  // A qualified metric is checked on each company's own figures too.
+  const fy = (fiscal_year: number) => ({ kind: "fiscal_period", fiscal_year, fiscal_period: "FY" });
+  const eps = (node_id: string, subject_slot: string, fiscal_year: number) => ({ node_id, operation: "reported_metric", subject_slot, metric_key: "eps_diluted", period: fy(fiscal_year) });
+  const change = (slot: string) => ({ node_id: `${slot}_g`, operation: "percent_change_positive_base", current: `${slot}_e26`, prior: `${slot}_e25` });
+  const epsPlan = (operations: object[], shown: string[]) => {
+    const drafted = buildDeterministicPlan(planningContext("NVDA and AMD"), {
+      subjects: [{ slot_id: "a", mention: "NVDA" }, { slot_id: "b", mention: "AMD" }],
+      operations,
+      outputs: shown.map((node_id) => ({ output_id: `out_${node_id}`, node_id })),
+      thresholds: [],
+    });
+    assert.equal(drafted.outcome, "ready", JSON.stringify(drafted));
+    return (drafted as Extract<PlanningResult, { outcome: "ready" }>).plan;
+  };
+  const years = (slot: string) => [eps(`${slot}_e25`, slot, 2025), eps(`${slot}_e26`, slot, 2026)];
+  const growthForNvda = epsPlan([...years("a"), change("a"), eps("b_e26", "b", 2026)], ["a_g", "b_e26"]);
+  const growthForBoth = epsPlan([...years("a"), change("a"), ...years("b"), change("b")], ["a_g", "b_g"]);
+  const trendForNvda = epsPlan([...years("a"), eps("b_e26", "b", 2026)], ["a_e25", "a_e26", "b_e26"]);
+  const asked = (qualifier: string) => reading([], [{ metric: "eps_diluted", qualifier }]);
+  assert.deepEqual(uncoveredAsks(asked("growth"), growthForNvda, labels), ["earnings per share growth for AMD"]);
+  assert.deepEqual(uncoveredAsks(asked("growth"), growthForBoth, labels), []);
+  assert.deepEqual(uncoveredAsks(asked("trend"), trendForNvda, labels), ["earnings per share trend for AMD"]);
 });
 
 test("an engine answer checks a qualified metric against what its plan computes (#425)", () => {

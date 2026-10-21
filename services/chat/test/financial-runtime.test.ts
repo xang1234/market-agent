@@ -95,6 +95,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(saved.companies, [{ issuer_id: IDS.issuerA }, { issuer_id: IDS.issuerB }]);
     // The scope only informs follow-ups; failing to resolve it never fails the answer.
     assert.equal(await savedScope(async () => { throw new Error("prior scope unavailable"); }), null);
+    assert.equal(await savedScope((() => { throw new Error("no scope builder"); }) as never), null, "one that throws before it answers");
   });
 
   await t.test("the answer names, beside its figures, what the reading of the question asks for and the plan does not compute", async () => {
@@ -467,8 +468,11 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       query: (text: string, values?: unknown[]) => text.includes("from chat_messages m") ? Promise.reject(new Error("Connection terminated unexpectedly")) : pool.query(text, values),
       connect: () => pool.connect(),
     };
-    const unread = completed((await chatHarness(failingReads as never, { model, persistAssistantMessage }).run({ ...turn, runId: randomUUID() })).events);
+    const { events: unreadEvents } = await chatHarness(failingReads as never, { model, persistAssistantMessage }).run({ ...turn, runId: randomUUID() });
+    const unread = completed(unreadEvents);
     assert.deepEqual([unread.message_id, "message" in unread, model.calls], [first.message_id, false, 1]);
+    const began = unreadEvents.find((event) => event.type === "block.began")!;
+    assert.deepEqual([began.block_id, began.kind], [`financial-gap-${first.message_id}`, "rich_text"], "a gap's block, never an answer's");
     const { rows } = await db.query(`select count(*)::int as n from chat_messages where thread_id = $1 and research_scope->>'reads' = 'financial_gap'`, [threadId]);
     assert.equal(rows[0].n, 0, "no scope was given, so none is saved");
     assert.equal((await db.query(`select count(*)::int as n from chat_messages where message_id = $1`, [first.message_id])).rows[0].n, 1);
