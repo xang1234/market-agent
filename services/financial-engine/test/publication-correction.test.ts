@@ -13,6 +13,7 @@ import { authorityFor, completedRun, databaseUrl, engineDatabase, HASH, IDS, pin
 const noEvidence = (): FinancialEvidencePort => ({
   listInputCandidates: async () => assert.fail("a replay must never select evidence"),
   readSplitHistory: async () => assert.fail("a replay must never select evidence"),
+  readPriceObservations: async () => assert.fail("a replay must never select evidence"),
 });
 
 test("a publication proof correction", { timeout: 300_000 }, async (t) => {

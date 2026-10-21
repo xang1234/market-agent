@@ -24,11 +24,11 @@ const RELATIONS = [
   "financial_results", "snapshot_financial_runs", "analyze_run_financial_sections",
   "source_publication_attestations", "fact_precision_attestations", "fact_financial_contexts",
   "current_source_publication_attestations", "current_fact_precision_attestations",
-  "listing_splits", "listing_split_coverage",
+  "listing_splits", "listing_split_coverage", "price_observations",
 ];
 const COLUMNS: ReadonlyArray<readonly [string, string]> = [
   ["computations", "financial_run_id"], ["grid_runs", "financial_mode"], ["grid_cells", "financial_block"],
-  ["fact_financial_contexts", "as_filed_on"],
+  ["fact_financial_contexts", "as_filed_on"], ["financial_run_inputs", "price_observation_id"],
 ];
 const FUNCTIONS = [
   "normalized_content_hash", "erase_financial_run_dependents", "erase_orphaned_financial_plan",

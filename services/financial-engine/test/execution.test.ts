@@ -156,6 +156,7 @@ test("bounded financial graph execution", { timeout: 240_000 }, async (t) => {
     const untouchable = () => ({
       listInputCandidates: async () => assert.fail("evidence must not be read over budget"),
       readSplitHistory: async () => assert.fail("evidence must not be read over budget"),
+      readPriceObservations: async () => assert.fail("evidence must not be read over budget"),
     });
     const report = await executeRun({ client: db, lease, plan, authority, evidence: untouchable, parent_limits: { max_outputs: 4 } });
     assert.deepEqual(report, { run_id: runId, outcome: "failed", failure_code: "scope_limit_exceeded" });
@@ -186,6 +187,7 @@ test("bounded financial graph execution", { timeout: 240_000 }, async (t) => {
     const broken = () => ({
       listInputCandidates: async () => { throw new Error("adapter bug"); },
       readSplitHistory: async () => { throw new Error("adapter bug"); },
+      readPriceObservations: async () => { throw new Error("adapter bug"); },
     });
     await assert.rejects(() => executeRun({ client: db, lease, plan, authority, evidence: broken, parent_limits: {} }), /adapter bug/);
     assert.deepEqual(await runRow(db, runId), { execution_state: "failed", coverage_state: null, failure_code: "internal_error", lease_owner: null });

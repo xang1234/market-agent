@@ -13,6 +13,7 @@ cd services/market
 npm test         # contract + adapter + http tests
 npm run dev      # starts http server on $MARKET_PORT (defaults to 4321)
 npm run sync:splits [-- <listing_uuid> ...]  # records Polygon splits per listing (DATABASE_URL, POLYGON_API_KEY)
+npm run capture:price -- <listing_uuid> ...  # records Polygon share prices per listing as exact observations (DATABASE_URL, POLYGON_API_KEY)
 ```
 
 ## Dev wiring

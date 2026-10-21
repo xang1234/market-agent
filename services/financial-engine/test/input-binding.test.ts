@@ -10,8 +10,8 @@ import { createEvidenceFinancialPort } from "../src/evidence-adapter.ts";
 import { authorityFor, engineDatabase, IDS, leasedRun, ORIGINAL_REVENUE, revenuePlan, seedReportedFact } from "./db-fixtures.ts";
 
 function bound(binding: InputBinding | undefined) {
-  assert.equal(binding?.status, "bound", JSON.stringify(binding));
-  return binding as Extract<InputBinding, { status: "bound" }>;
+  assert.ok(binding?.status === "bound" && "precision_attestation_id" in binding, JSON.stringify(binding));
+  return binding;
 }
 
 /** Total assets and total liabilities per subject, both "latest fiscal year" at `offset`. */
