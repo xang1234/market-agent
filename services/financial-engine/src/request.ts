@@ -1,14 +1,16 @@
 // One request from a parent feature to the engine: resume the plan an earlier
 // attempt reserved or plan anew, then reserve, lease, execute, and publish —
 // every surface the same way, with one list of reasons a request did not
-// publish. Surfaces supply only their authority, how to plan, and how to write
-// their artifact in the finalization transaction; they read back their own
-// committed records afterwards.
+// publish. A defect is not one of those reasons: it is logged with the request
+// it hit and rethrown, so the surface reports a failure. Surfaces supply only
+// their authority, how to plan, and how to write their artifact in the
+// finalization transaction; they read back their own committed records
+// afterwards.
 
 import type { FinancialPlanV1, FinancialRuntimeAuthority } from "../../financial-core/src/index.ts";
-import type { PersistParentArtifact } from "./finalize.ts";
-import { acquireLease, releaseLease, type AcquireLeaseResult } from "./lease.ts";
-import type { Clarification, PlanningResult } from "./planner.ts";
+import { ParentRefusedError, type PersistParentArtifact } from "./finalize.ts";
+import { acquireLease, releaseLease, StaleLeaseError, type AcquireLeaseResult } from "./lease.ts";
+import { PlanningModelError, type Clarification, type PlanningResult } from "./planner.ts";
 import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "./ports.ts";
 import { driveLeasedRun, type DriveReport } from "./publish.ts";
 import { findPlanForRequest, reserveRun } from "./run-repo.ts";
@@ -44,8 +46,7 @@ export type FinancialRequest = Readonly<{
   /**
    * Awaited once this attempt holds the run's lease, before the run is
    * driven: what the parent artifact needs from outside the database is ready
-   * before finalization opens its transaction. A rejection fails the request
-   * as publication_failed.
+   * before finalization opens its transaction.
    */
   beforeDrive?: () => Promise<unknown>;
 }>;
@@ -61,9 +62,13 @@ export async function publishRequest(pool: FinancialPool, request: FinancialRequ
     }
     try {
       return await reserveAndDrive(client, request, plan);
-    } catch {
+    } catch (error) {
       // A finalization that rolled back leaves units computed and the run checkpointed: a retry or recovery finishes it.
-      return { status: "gap", reason: "publication_failed" };
+      if (error instanceof StaleLeaseError || error instanceof ParentRefusedError || isTransientDatabaseError(error)) {
+        return { status: "gap", reason: "publication_failed" };
+      }
+      logDefect(request, "publication", error);
+      throw error;
     }
   } finally {
     client.release();
@@ -112,9 +117,10 @@ async function planOrGap(db: SqlExecutor, request: FinancialRequest): Promise<Re
   let result: PlanningResult;
   try {
     result = await request.plan(db);
-  } catch {
-    // An unreachable or failing planner is a gap; no surface falls back to an unverified number.
-    return { status: "gap", reason: "planning_unavailable" };
+  } catch (error) {
+    if (error instanceof PlanningModelError) return { status: "gap", reason: "planning_unavailable" };
+    logDefect(request, "planning", error);
+    throw error;
   }
   switch (result.outcome) {
     case "ready":
@@ -126,6 +132,21 @@ async function planOrGap(db: SqlExecutor, request: FinancialRequest): Promise<Re
     case "unsupported":
       return { status: "gap", reason: result.issues.some((issue) => issue.code === "no_model_budget") ? "planning_unavailable" : "unsupported" };
   }
+}
+
+/**
+ * A database failure a retry gets past: a lost connection (SQLSTATE class 08),
+ * a serialization or deadlock rollback (40), exhausted resources (53), an
+ * operator's intervention or a statement timeout (57), a storage fault (58),
+ * a lock timeout (55P03), or a socket error (ECONN*, ETIMEDOUT).
+ */
+function isTransientDatabaseError(error: unknown): boolean {
+  const code = typeof error === "object" && error !== null && "code" in error ? String(error.code) : "";
+  return /^(?:08|40|53|57|58)[0-9A-Z]{3}$/u.test(code) || code === "55P03" || code.startsWith("ECONN") || code === "ETIMEDOUT";
+}
+
+function logDefect(request: FinancialRequest, stage: "planning" | "publication", error: unknown): void {
+  console.error(`[financial-engine] ${stage} failed for ${request.authority.feature.surface} request ${request.request_key}`, error);
 }
 
 /** Legal names for issuer subjects, for plan labels; an absent issuer is simply absent from the map. */

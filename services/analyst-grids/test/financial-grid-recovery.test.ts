@@ -29,7 +29,7 @@ test("grid financial recovery", { timeout: 300_000 }, async (t) => {
     begin
       if new.financial_run_id is not null and new.column_instance_id = 'c1'
          and (select row_number from grid_rows where grid_row_id = new.grid_row_id) = 0 then
-        raise exception 'cell store unavailable';
+        raise exception 'cell store unavailable' using errcode = '58030';
       end if;
       return new;
     end $$;
