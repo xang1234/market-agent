@@ -488,6 +488,7 @@ export const SCOPE_METRICS: Readonly<Record<string, string | null>> = {
   capex: "capex",
   eps_basic: "eps_basic",
   eps_diluted: "eps_diluted",
+  cash_and_equivalents: "cash_and_equivalents",
   total_assets: "total_assets",
   total_liabilities: "total_liabilities",
   total_equity: "total_equity",

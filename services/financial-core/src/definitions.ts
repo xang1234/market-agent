@@ -58,6 +58,9 @@ export const METRIC_CATALOG_V1: ReadonlyMap<MetricKey, MetricDefinition> = new M
     metric("eps_diluted", "EPS (diluted)", "per_share", "currency_per_share", "diluted"),
     metric("weighted_average_basic_shares", "Weighted-average basic shares", "share_count_average", "shares", "basic"),
     metric("weighted_average_diluted_shares", "Weighted-average diluted shares", "share_count_average", "shares", "diluted"),
+    // Excluding restricted cash and short-term investments (SEC ingestion
+    // certifies only CashAndCashEquivalentsAtCarryingValue).
+    metric("cash_and_equivalents", "Cash and equivalents", "balance", "currency"),
     metric("total_assets", "Total assets", "balance", "currency"),
     metric("total_liabilities", "Total liabilities", "balance", "currency"),
     // Keyed as stored: SEC ingestion maps us-gaap StockholdersEquity (parent
