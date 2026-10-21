@@ -8,10 +8,11 @@ import { randomUUID } from "node:crypto";
 import type { ExecutionLimits, FinancialPlanV1, FinancialRuntimeAuthority, LocalId } from "../../financial-core/src/index.ts";
 import type { SnapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
 import { executeRun, type ExecutionReport } from "./execute.ts";
-import { finalizeUnit, type FinalizationResult, type PersistParentArtifact } from "./finalize.ts";
-import type { RunLease } from "./lease.ts";
+import { finalizeUnit, ParentRefusedError, type FinalizationResult, type PersistParentArtifact } from "./finalize.ts";
+import { StaleLeaseError, type RunLease } from "./lease.ts";
 import type { FinancialEvidencePort, SqlExecutor } from "./ports.ts";
 import type { RunRecord } from "./run-record.ts";
+import { isTransientDatabaseError } from "./transaction.ts";
 
 export type PublishingDeps = Readonly<{
   authority: FinancialRuntimeAuthority;
@@ -27,6 +28,18 @@ export type DriveReport = Readonly<{
   finalized: ReadonlyArray<Readonly<{ unit_id: LocalId; result: FinalizationResult }>>;
   existing: number;
 }>;
+
+/**
+ * Whether a drive that threw left the run for a retry or recovery: the lease
+ * lapsed, the parent refused, the database had a transient fault, or the
+ * connection is gone. pg reports a lost connection without a code, and the
+ * rollback on the dead client replaces the original error, so the client is
+ * asked directly.
+ */
+export async function isRoutinePublicationFailure(client: SqlExecutor, error: unknown): Promise<boolean> {
+  if (error instanceof StaleLeaseError || error instanceof ParentRefusedError || isTransientDatabaseError(error)) return true;
+  return client.query("select 1").then(() => false, () => true);
+}
 
 /** Drives a leased run to its end: execute unless already computed, then finalize every computed unit. */
 export async function driveLeasedRun(
