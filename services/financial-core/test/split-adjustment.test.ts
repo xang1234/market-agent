@@ -6,6 +6,7 @@ import { absoluteChange, FinancialIntegrityError, operandFromBoundInput, type Op
 import { rationalFromDecimal, type ExactRational } from "../src/rational.ts";
 import { explainedBySplits, restateToReference, splitHistoryCovers, splitReferenceDate, type RecordedSplit } from "../src/split-adjustment.ts";
 import { boundInput, operand, REFERENCE_DATE, SLOTS, type InputSpec } from "./operand-fixtures.ts";
+import { validateBoundInput } from "../src/validate.ts";
 
 const LISTING = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const NEW_YORK = "America/New_York";
@@ -79,6 +80,17 @@ test("splits never restate a value they do not move, and a ratio must be positiv
   assert.deepEqual(revenue, { ok: false, reason: "incompatible_basis" });
   const zero = restateToReference({ native: exact("1"), value_kind: "per_share", as_filed_on: "2024-02-21", reference_date: "2025-01-01", listing_id: LISTING, listing_timezone: NEW_YORK, splits: [{ execution_date: "2024-06-10", split_from: "0", split_to: "10" }] });
   assert.deepEqual(zero, { ok: false, reason: "incompatible_basis" });
+});
+
+test("a history with more splits than a bound adjustment holds is a numeric limit, not an invalid bound input", () => {
+  const daily = (count: number): RecordedSplit[] => Array.from({ length: count }, (_, day) => ({
+    execution_date: new Date(Date.UTC(2024, 2, 1 + day)).toISOString().slice(0, 10), split_from: "1", split_to: "2",
+  }));
+  const most = restated({ native: "11.93", value_kind: "per_share", as_filed_on: "2024-02-21", reference_date: "2025-01-01", splits: daily(64) });
+  const validated = validateBoundInput(boundInput({ ...EPS, split_adjustment: most }));
+  assert.deepEqual([most.splits.length, validated.ok || validated.issues], [64, true]);
+  const tooMany = restateToReference({ native: exact("11.93"), value_kind: "per_share", as_filed_on: "2024-02-21", reference_date: "2025-01-01", listing_id: LISTING, listing_timezone: NEW_YORK, splits: daily(65) });
+  assert.deepEqual(tooMany, { ok: false, reason: "numeric_limit_exceeded" });
 });
 
 test("a listing's reference date is the cutoff's date in its zone, and coverage counts from that day there", () => {
