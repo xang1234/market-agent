@@ -10,9 +10,9 @@ import { dockerAvailable, registerLifoCleanup } from "../../../db/test/docker-pg
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { databaseUrl, IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { analystTurnScope, closeLocalRuntimePoolForTests, financialResearchScope } from "../src/local-runtime.ts";
-import { proposalQuestion } from "../src/scope-proposal.ts";
+import { parseProposal, proposalQuestion } from "../src/scope-proposal.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "../src/subjects.ts";
-import { chatDatabase, chatHarness, completed, resolveMention } from "./financial-fixtures.ts";
+import { chatDatabase, chatHarness, completed, resolveMention, revenueModel } from "./financial-fixtures.ts";
 
 const QUESTION = "Why did it change?";
 
@@ -98,4 +98,49 @@ test("a follow-up to the engine's revenue and share count keeps the revenue and 
     saved: ["financial_answer", [{ metric_key: "income_statement", label: "Revenue, profit and margins", available: true }]],
     followUp: { route: "latest_quarter", reads: "latest_quarter", metrics: ["income_statement"], explains: true },
   });
+});
+
+// #432 round 4 saved a company the planner got from a clarification without a
+// label, and a follow-up read it as an auto-selected peer: turning peers off
+// then left no company (#425).
+test("a company picked in a clarification is saved labelled, so follow-ups with peers on and then off keep it (#425)", { timeout: 300_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for the financial follow-up");
+    return;
+  }
+  const { db, pool, threadId } = await chatDatabase(t, "chat-fin-follow-up-pick");
+  const replies = join(mkdtempSync(join(tmpdir(), "fin-follow-up-")), "replies.json");
+  const reading = (turnsOff: string[]) => JSON.stringify({ metrics: [], asks: ["explains"], turns_off: { facets: turnsOff, metrics: [] }, income_items: [] });
+  writeFileSync(replies, JSON.stringify({
+    replies: [
+      { match: proposalQuestion(QUESTION), text: reading([]) },
+      { match: proposalQuestion("Without the peers, why did it change?"), text: reading(["peers"]) },
+    ],
+  }));
+  Object.assign(process.env, {
+    CHAT_DATABASE_URL: databaseUrl(db),
+    LLM_CHANNELS: "fixture",
+    LLM_FIXTURE_PROTOCOL: "openai",
+    LLM_FIXTURE_MODELS: "recorded",
+    LITELLM_MODEL: "fixture/recorded",
+    LLM_REPLAY_FILE: replies,
+  });
+  registerLifoCleanup(t, () => closeLocalRuntimePoolForTests());
+
+  const question = "How does AMB's FY2023 revenue compare with its peers?";
+  const readQuestion = async () => parseProposal(JSON.stringify({ metrics: [{ metric: "income_statement" }], asks: ["peers"], turns_off: { facets: [], metrics: [] }, income_items: ["revenue"] }));
+  const harness = chatHarness(pool, { model: revenueModel(["AMB"]), researchScope: financialResearchScope, readQuestion, resolveMention: withHandoff });
+  const offered = completed((await harness.run({ threadId, userId: IDS.owner, userIntent: question })).events).financial_clarification as { clarification_id: string; choices: Array<{ choice_id: string; label: string }> };
+  const alpha = offered.choices.find((choice) => choice.label === "Alpha Industries Inc.")!;
+  const answer = completed((await harness.run({ threadId, userId: IDS.owner, userIntent: question, clarificationAnswer: { clarification_id: offered.clarification_id, choice_id: alpha.choice_id } })).events);
+  const saved = (await db.query(`select research_scope from chat_messages where message_id = $1`, [answer.message_id])).rows[0]?.research_scope;
+  assert.deepEqual([saved?.companies, saved?.peers, saved?.fiscal_year], [[{ issuer_id: IDS.issuerA, label: "Alpha Industries Inc." }], true, 2023]);
+
+  const aaa = await withHandoff("AAA") as ChatResolvedSubjectPreResolution;
+  const followUp = async (text: string) => {
+    const scope = (await analystTurnScope(threadId, text, [aaa]))("2026-09-01T00:00:00.000Z");
+    return { companies: scope.companies, peers: scope.peers, fiscal_year: scope.fiscal_year };
+  };
+  assert.deepEqual(await followUp(QUESTION), { companies: [{ issuer_id: IDS.issuerA, label: "AAA" }], peers: true, fiscal_year: 2023 });
+  assert.deepEqual(await followUp("Without the peers, why did it change?"), { companies: [{ issuer_id: IDS.issuerA, label: "AAA" }], peers: false, fiscal_year: 2023 });
 });

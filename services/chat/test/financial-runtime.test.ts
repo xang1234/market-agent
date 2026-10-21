@@ -156,6 +156,97 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.equal(model.calls, 0, "nothing is planned for no company");
   });
 
+  // The scope financialResearchScope saves, over the companies it is given.
+  const scopeOver = async (context: { subjectPreResolutions?: ReadonlyArray<ChatResolvedSubjectPreResolution> }) => ({
+    route: "financial_answer" as const,
+    reads: "financial_answer" as const,
+    companies: (context.subjectPreResolutions ?? []).map((subject) => ({ issuer_id: subject.subject_ref.id, label: subject.handoff?.display_labels?.ticker ?? subject.display_label })),
+    peers: false, segments: false, margin_trend: false, margins: false, metrics: [], fiscal_year: null, fiscal_quarter: null, price_window: null, benchmark: false, inherited: [],
+  });
+  // A turn, and then, when it asks which company, the same turn answered with `pick`.
+  const turnWithPick = async (harness: ReturnType<typeof chatHarness>, userIntent: string, pick?: string) => {
+    const { events } = await harness.run({ ...base, userIntent });
+    if (pick === undefined) return completed(events);
+    const offered = completed(events).financial_clarification as { clarification_id: string; choices: Array<{ choice_id: string; label: string }> };
+    const choice = offered.choices.find((candidate) => candidate.label === pick)!;
+    return completed((await harness.run({ ...base, userIntent, clarificationAnswer: { clarification_id: offered.clarification_id, choice_id: choice.choice_id } })).events);
+  };
+
+  await t.test("an engine gap names the planner's reason and saves the companies it was asked about, with its scope (#425)", async () => {
+    const segments = async (userIntent: string, reason: string, pick?: string) => {
+      const model = (async () => ({ model: "stub-model", text: JSON.stringify({ outcome: "unsupported", reason }) })) as unknown as PlanningModel;
+      const harness = chatHarness(pool, { model, researchScope: scopeOver as never });
+      const done = await turnWithPick(harness, userIntent, pick);
+      const [block] = harness.persisted.at(-1)!.blocks as ReadonlyArray<{ segments: Array<{ text: string }>; subject_refs?: unknown }>;
+      return { gap: done.financial_gap, text: block!.segments[0]!.text, subject_refs: block!.subject_refs, companies: (harness.persisted.at(-1)!.research_scope as { companies: unknown } | undefined)?.companies };
+    };
+    assert.deepEqual(await segments("Break down AAA's revenue by segment", "segment revenue has no approved definition"), {
+      gap: { reason_code: "unsupported" },
+      text: "This request asks for a calculation outside the verified financial definitions I can compute: segment revenue has no approved definition.",
+      subject_refs: [{ kind: "issuer", id: IDS.issuerA }],
+      companies: [{ issuer_id: IDS.issuerA, label: "AAA" }],
+    });
+    // A company picked in a clarification is saved too, labelled. A reason with a figure in it is not shown.
+    assert.deepEqual(await segments("Break down AMB's revenue by segment", "only 3 segments are reported", "Beta Holdings Corp."), {
+      gap: { reason_code: "unsupported" },
+      text: "This request asks for a calculation outside the verified financial definitions I can compute.",
+      subject_refs: [{ kind: "issuer", id: IDS.issuerB }],
+      companies: [{ issuer_id: IDS.issuerB, label: "Beta Holdings Corp." }],
+    });
+  });
+
+  await t.test("an engine answer saves, labelled, a company picked in a clarification and one two listings name (#425)", async () => {
+    await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1::uuid, $2::uuid, 'common_stock') on conflict do nothing`, [INSTRUMENT_A, IDS.issuerA]);
+    await db.query(
+      `insert into listings (listing_id, instrument_id, mic, ticker, trading_currency, timezone)
+       values ($1::uuid, $2::uuid, 'XNAS', 'ALPX', 'USD', 'America/New_York') on conflict do nothing`,
+      [LISTING_A, INSTRUMENT_A],
+    );
+    const savedCompanies = async (userIntent: string, mentions: string[], pick?: string) => {
+      const done = await turnWithPick(chatHarness(pool, { model: revenueModel(mentions), researchScope: scopeOver as never }), userIntent, pick);
+      return (await db.query(`select research_scope from chat_messages where message_id = $1`, [done.message_id])).rows[0]?.research_scope.companies;
+    };
+    assert.deepEqual(await savedCompanies("Revenue for AMB", ["AMB"], "Beta Holdings Corp."), [{ issuer_id: IDS.issuerB, label: "Beta Holdings Corp." }]);
+    assert.deepEqual(await savedCompanies("Revenue for AMBX", ["AMBX"]), [{ issuer_id: IDS.issuerA, label: "ALPX" }]);
+  });
+
+  await t.test("a turn plans at most five companies, from a company's page or beside an ambiguous one, as the analyst path does (#425)", async () => {
+    const seen: string[] = [];
+    const model = (async (request: { messages: Array<{ content: string }> }) => {
+      seen.push(/Requested companies \(mentions\): (.*)$/mu.exec(request.messages[1]!.content)![1]!);
+      return { model: "stub-model", text: JSON.stringify({ outcome: "unsupported", reason: "not needed here" }) };
+    }) as unknown as PlanningModel;
+    await chatHarness(pool, { model }).run({ ...base, subjectText: "AAA", userIntent: "Compare revenue with BBB, CCC, OPM, PAX, COX and QTR" });
+    await turnWithPick(chatHarness(pool, { model }), "Compare revenue for AMB, BBB, CCC, OPM, PAX, COX and QTR", "Alpha Industries Inc.");
+    assert.deepEqual(seen, ["AAA; BBB; CCC; OPM; PAX", "AMB; BBB; CCC; OPM; PAX"]);
+  });
+
+  await t.test("each name a turn gives is resolved once (#425)", async () => {
+    const counts: Record<string, number> = {};
+    const counting = async (mention: string) => {
+      counts[mention] = (counts[mention] ?? 0) + 1;
+      return resolveMention(mention);
+    };
+    completed((await chatHarness(pool, { model: revenueModel(["AAA", "BBB"]), resolveMention: counting }).run({ ...base, userIntent: "Compare revenue for AAA and BBB" })).events);
+    assert.deepEqual(counts, { "Compare revenue for AAA and BBB": 1, AAA: 1, BBB: 1 });
+  });
+
+  await t.test("a retry of a saved answer reads neither the question nor its scope again (#425)", async () => {
+    const turn = { ...base, turnId: randomUUID(), userIntent: "Revenue for AAA" };
+    completed((await chatHarness(pool, { model: revenueModel(["AAA"]) }).run(turn)).events);
+    let reads = 0;
+    const readQuestion = async () => {
+      reads += 1;
+      return null;
+    };
+    const researchScope = async () => {
+      reads += 1;
+      return null as never;
+    };
+    completed((await chatHarness(pool, { model: revenueModel(["AAA"]), readQuestion, researchScope }).run(turn)).events);
+    assert.equal(reads, 0);
+  });
+
   await t.test("a resolver that fails fails the turn, with nothing planned", async () => {
     const model = revenueModel(["AAA"]);
     const { events } = await chatHarness(pool, { model, resolveMention: async () => { throw new Error("resolver unavailable"); } }).run({ ...base, userIntent: "Revenue for AAA" });

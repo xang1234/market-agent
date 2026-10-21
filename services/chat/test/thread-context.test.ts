@@ -43,6 +43,27 @@ test("prior subjects are the previous answer's companies, re-hydrated, in order"
   assert.match(queries[0], /ref->>'kind' in \('issuer', 'instrument', 'listing'\)/);
 });
 
+test("an issuer an engine answer sealed is named by its listing's ticker, not its legal name (#425)", async () => {
+  const issuer = { kind: "issuer" as const, id: "62000000-0000-4000-8000-0000000000a1" };
+  const db = {
+    query: fakeQuery((text) => text.includes("from chat_messages")
+      ? { rows: [{ subject_refs: [issuer] }] }
+      : { rows: [{ issuer_id: issuer.id, listing_id: NVDA.id, ticker: "NVDA", legal_name: "NVIDIA Corporation" }] }),
+  };
+  const hydrate = async (): Promise<HydratedSubjectHandoff> => ({
+    subject_ref: issuer,
+    identity_level: "issuer",
+    display_label: "NVIDIA Corporation",
+    display_labels: { primary: "NVIDIA Corporation", legal_name: "NVIDIA Corporation" },
+    normalized_input: `issuer:${issuer.id}`,
+    resolution_path: "direct_ref",
+    confidence: 1,
+    context: {},
+  });
+  const [subject] = await loadPriorSubjects(db, { threadId: THREAD_ID }, hydrate);
+  assert.deepEqual([subject!.input_text, subject!.handoff.display_labels.ticker, subject!.subject_ref], ["NVDA", "NVDA", issuer]);
+});
+
 test("a thread with no previous answer has no prior subjects", async () => {
   const db = { query: fakeQuery(() => ({ rows: [] })) };
   assert.deepEqual(await loadPriorSubjects(db, { threadId: THREAD_ID }, async () => { throw new Error("unused"); }), []);
