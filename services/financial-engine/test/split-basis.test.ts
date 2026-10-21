@@ -107,3 +107,38 @@ test("an unadjusted value binds as stored; a split-adjusted one, which names no 
   const splitAdjusted = eps({ adjustment_basis: "split_adjusted", as_filed_on: undefined });
   assert.deepEqual(basisAt("2025-01-01T12:00:00.000Z", NVDA_HISTORY, splitAdjusted), { status: "gap", reason_code: "context_unverified" });
 });
+
+/** The FY2025 10-K's statement of FY2024 diluted EPS, as filed on 2025-02-26 and public that day. */
+function laterDisclosure(value: string, relation: "economic_restatement" | "unverified_restatement"): InputCandidate {
+  const original = eps();
+  return {
+    ...eps({ disclosure_relation: relation, as_filed_on: "2025-02-26" }),
+    fact_id: "00000000-0000-4000-8000-000000000002",
+    value_text: value,
+    reported_at: "2025-02-26T00:00:00.000Z",
+    supersedes: original.fact_id,
+    precision: { ...original.precision!, raw_token: value },
+    publication: [{
+      attestation_id: "a-2",
+      timing: { available_not_before: null, available_no_later_than: "2025-02-26T00:00:00-05:00", timing_precision: "date", source_timezone: "America/New_York" },
+    }],
+  };
+}
+
+test("under as_restated, a later disclosure whose split basis is unverified is a gap; as_reported binds the original", () => {
+  const choose = (reporting_basis: "as_reported" | "as_restated") => {
+    const selection = selectInput(EPS_FY2024, [eps(), laterDisclosure("1.19", "unverified_restatement")], { knowledge_cutoff: "2026-10-02T00:00:00.000Z", reporting_basis, max_age_days: null });
+    return selection.status === "selected" ? selection.input.candidate.value_text : selection.reason_code;
+  };
+  assert.deepEqual([choose("as_reported"), choose("as_restated")], ["11.93", "restatement_unverified"]);
+});
+
+test("an as-filed restatement binds restated from the restating filing's date", () => {
+  const cutoff = "2026-10-02T00:00:00.000Z";
+  const selection = selectInput(EPS_FY2024, [eps(), laterDisclosure("1.08", "economic_restatement")], { knowledge_cutoff: cutoff, reporting_basis: "as_restated", max_age_days: null });
+  if (selection.status !== "selected") return assert.fail(selection.reason_code);
+  const basis = boundBasis(selection.input, NVDA_HISTORY, cutoff);
+  assert.deepEqual(basis.status === "restated" && [basis.split_adjustment.as_filed_on, basis.split_adjustment.splits, basis.split_adjustment.adjusted_native_value], [
+    "2025-02-26", [], { numerator: "27", denominator: "25" },
+  ]);
+});

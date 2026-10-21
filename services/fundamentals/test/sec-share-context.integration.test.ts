@@ -7,10 +7,12 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { bootstrapDatabase, connectedPool, dockerAvailable, workspaceRoot } from "../../../db/test/docker-pg.ts";
+import { POLYGON_MARKET_SOURCE_ID } from "../../market/src/provider-sources.ts";
 import { backfillSecCompanionStatements, createSecBackedStatementRepository } from "../src/sec-facts-repository.ts";
 import { secCompanyFetcher } from "./fakes.ts";
 
 const ISSUER = "35000000-0000-4000-8000-0000000003a1";
+const LISTING = "35000000-0000-4000-8000-0000000003b1";
 const FALLBACK_SOURCE_ID = "35000000-0000-4000-8000-0000000003a9";
 const SHARE_KEYS = ["eps_basic", "eps_diluted", "weighted_average_basic_shares", "weighted_average_diluted_shares"];
 
@@ -66,6 +68,18 @@ test("SEC EPS and share counts are certified as filed", { timeout: 300_000 }, as
   const db = await connectedPool(t, databaseUrl);
   await db.query(await readFile(join(workspaceRoot, "db", "seed", "metrics.sql"), "utf8"));
   await db.query(`insert into issuers (issuer_id, legal_name, cik) values ($1, 'Split Corp', '1045810')`, [ISSUER]);
+  // The listing's 10-for-1 split, as `npm run sync:splits` stores it after both 10-Ks were filed.
+  await db.query(
+    `insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at) values ($1, 'polygon_market', 'market_data', 'primary', 'licensed', now())`,
+    [POLYGON_MARKET_SOURCE_ID],
+  );
+  await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1, $1, 'common_stock')`, [ISSUER]);
+  await db.query(
+    `insert into listings (listing_id, instrument_id, mic, ticker, trading_currency, timezone) values ($1, $2, 'XNAS', 'SPLT', 'USD', 'America/New_York')`,
+    [LISTING, ISSUER],
+  );
+  await db.query(`insert into listing_splits (listing_id, execution_date, split_from, split_to, source_id) values ($1, '2024-06-10', 1, 10, $2)`, [LISTING, POLYGON_MARKET_SOURCE_ID]);
+  await db.query(`insert into listing_split_coverage (listing_id, checked_at, source_id) values ($1, '2026-10-01T12:00:00Z', $2)`, [LISTING, POLYGON_MARKET_SOURCE_ID]);
   const fetcher = secCompanyFetcher(splitCorpFacts, { completed_at: "2026-10-01T15:00:00.000Z" });
   const ingest = (fiscalYear: number, fiscalPeriod: "FY" | "Q1") =>
     createSecBackedStatementRepository(db, { fetcher, sourceId: FALLBACK_SOURCE_ID, logger: { warn: () => {} } })
