@@ -4,17 +4,19 @@
 // runtime, and the pure core never imports the engine.
 
 import type {
-  AdjustmentBasis,
+  AdjustmentContext,
   DimensionScope,
   DisclosureRelation,
   FinancialRuntimeAuthority,
   FinancialSubjectRef,
   FinancialUnit,
   FiscalPeriod,
+  IsoDateTime,
   MetricKey,
   PeriodType,
   PrecisionClass,
   PublicationTiming,
+  RecordedSplit,
   ShareBasis,
 } from "../../financial-core/src/index.ts";
 
@@ -44,15 +46,14 @@ export type InputCandidate = Readonly<{
   observed_at: string;
   supersedes: string | null;
   superseded_by: string | null;
-  context: Readonly<{
+  context: (Readonly<{
     period_type: PeriodType;
     dimension_scope: DimensionScope;
     dimension_members: ReadonlyArray<Readonly<{ axis: string; member: string }>>;
-    adjustment_basis: AdjustmentBasis;
     share_basis: ShareBasis;
     fiscal_calendar_version: string;
     disclosure_relation: DisclosureRelation;
-  }> | null;
+  }> & AdjustmentContext) | null;
   precision: Readonly<{
     precision_attestation_id: string;
     precision_class: PrecisionClass;
@@ -76,6 +77,13 @@ export type CandidatePage =
   | Readonly<{ status: "ok"; candidates: ReadonlyArray<InputCandidate>; truncated: boolean }>
   | Readonly<{ status: "error"; reason_code: "database_error" | "provider_error" }>;
 
+export type SplitHistoryRequest = Readonly<{ subject: FinancialSubjectRef; as_of: IsoDateTime }>;
+
+/** The splits of the one listing whose splits apply to a subject, as last fetched in full. */
+export type SplitHistory =
+  | Readonly<{ status: "ok"; listing_id: string; checked_at: IsoDateTime; splits: ReadonlyArray<RecordedSplit> }>
+  | Readonly<{ status: "gap"; reason_code: "split_listing_unresolved" | "split_history_missing" | "database_error" }>;
+
 /**
  * Authorized evidence access. Implementations apply owner, channel, source
  * deletion/entitlement, invalidation, and promotion rules before returning
@@ -83,4 +91,6 @@ export type CandidatePage =
  */
 export interface FinancialEvidencePort {
   listInputCandidates(request: CandidateRequest): Promise<CandidatePage>;
+  /** A subject's split history: its one common-stock listing active at `as_of` decides. */
+  readSplitHistory(request: SplitHistoryRequest): Promise<SplitHistory>;
 }

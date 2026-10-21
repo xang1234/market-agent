@@ -3,7 +3,8 @@
 // arrays: every plan, binding, computation, and result comes from the ledger,
 // and every bound fact is joined with its *current* evidence state — source
 // access, invalidation, the exact source version, and whether the precision
-// and publication proofs it was bound with are still the current ones.
+// and publication proofs it was bound with are still the current ones — as is
+// every listing an input was restated with, for its current splits.
 // Snapshot reads these tables directly; it never imports the engine.
 
 import type { QueryExecutor } from "../../shared/src/http.ts";
@@ -64,9 +65,17 @@ export type LoadedEvidence = Readonly<{
     period_type: string;
     dimension_scope: string;
     adjustment_basis: string;
+    as_filed_on: string | null;
     share_basis: string;
     fiscal_calendar_version: string;
   }> | null;
+}>;
+
+/** The current split history of a listing a bound input was restated with. */
+export type LoadedSplitHistory = Readonly<{
+  listing_id: string;
+  checked_at: string | null;
+  splits: ReadonlyArray<Readonly<{ execution_date: string; split_from: string; split_to: string }>>;
 }>;
 
 export type LoadedComputation = Readonly<{
@@ -102,6 +111,7 @@ export type FinancialUnitRecords = Readonly<{
   unit: LoadedUnit | null;
   bindings: ReadonlyArray<LoadedBinding>;
   evidence: ReadonlyArray<LoadedEvidence>;
+  split_histories: ReadonlyArray<LoadedSplitHistory>;
   computations: ReadonlyArray<LoadedComputation>;
   results: ReadonlyArray<LoadedResult>;
   subject_names: ReadonlyArray<LoadedSubjectName>;
@@ -147,7 +157,7 @@ export async function loadFinancialUnitRecords(db: QueryExecutor, claim: Financi
             prec.precision_attestation_id is not null as precision_current,
             case when c.fact_id is null then null else jsonb_build_object(
               'period_type', c.period_type, 'dimension_scope', c.dimension_scope, 'adjustment_basis', c.adjustment_basis,
-              'share_basis', c.share_basis, 'fiscal_calendar_version', c.fiscal_calendar_version) end as context
+              'as_filed_on', c.as_filed_on::text, 'share_basis', c.share_basis, 'fiscal_calendar_version', c.fiscal_calendar_version) end as context
        from financial_run_inputs i
        join facts f on f.fact_id = i.fact_id
        join sources s on s.source_id = f.source_id
@@ -158,6 +168,24 @@ export async function loadFinancialUnitRecords(db: QueryExecutor, claim: Financi
        left join fact_financial_contexts c on c.fact_id = f.fact_id
       where i.run_id = $1 and i.binding_status = 'bound'
       order by f.fact_id`,
+    [claim.run_id],
+  )).rows;
+
+  // Listing ids are compared as text: a bound payload is checked, never trusted to be a valid uuid.
+  const split_histories = (await db.query<LoadedSplitHistory>(
+    `with restated as (
+       select distinct i.bound_payload->'split_adjustment'->>'listing_id' as listing_id
+         from financial_run_inputs i
+        where i.run_id = $1 and i.binding_status = 'bound' and i.bound_payload ? 'split_adjustment'
+     )
+     select r.listing_id,
+            to_char(c.checked_at at time zone 'UTC', ${ISO_UTC}) as checked_at,
+            coalesce((select jsonb_agg(jsonb_build_object('execution_date', s.execution_date::text, 'split_from', s.split_from::text,
+                                                          'split_to', s.split_to::text) order by s.execution_date)
+                        from listing_splits s where s.listing_id::text = r.listing_id), '[]'::jsonb) as splits
+       from restated r
+       left join listing_split_coverage c on c.listing_id::text = r.listing_id
+      order by r.listing_id`,
     [claim.run_id],
   )).rows;
 
@@ -175,7 +203,7 @@ export async function loadFinancialUnitRecords(db: QueryExecutor, claim: Financi
 
   const subject_names = await loadSubjectNames(db, planSubjectRefs(plan));
 
-  return { run: runRow, plan: { plan, semantic_hash }, unit, bindings, evidence, computations, results, subject_names };
+  return { run: runRow, plan: { plan, semantic_hash }, unit, bindings, evidence, split_histories, computations, results, subject_names };
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;

@@ -10,7 +10,10 @@ import { reserveReplayRun } from "../src/run-repo.ts";
 import { createFinancialWorker } from "../src/worker.ts";
 import { authorityFor, completedRun, databaseUrl, engineDatabase, HASH, IDS, pinnedClients, readyRun, revenuePlan } from "./db-fixtures.ts";
 
-const noEvidence = (): FinancialEvidencePort => ({ listInputCandidates: async () => assert.fail("a replay must never select evidence") });
+const noEvidence = (): FinancialEvidencePort => ({
+  listInputCandidates: async () => assert.fail("a replay must never select evidence"),
+  readSplitHistory: async () => assert.fail("a replay must never select evidence"),
+});
 
 test("a publication proof correction", { timeout: 300_000 }, async (t) => {
   if (!dockerAvailable()) {

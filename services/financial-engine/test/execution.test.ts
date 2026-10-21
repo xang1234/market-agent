@@ -36,6 +36,7 @@ function failingEvidence(metric: string, fiscalYear: number) {
   return (executor: SqlExecutor): FinancialEvidencePort => {
     const real = createEvidenceFinancialPort(executor);
     return {
+      ...real,
       listInputCandidates: async (request) => {
         if (request.metric_key !== metric || request.fiscal_year !== fiscalYear) return real.listInputCandidates(request);
         try {
@@ -152,7 +153,10 @@ test("bounded financial graph execution", { timeout: 240_000 }, async (t) => {
   await t.test("limits are enforced before any evidence is acquired", async () => {
     const plan = marginPlan();
     const { runId, lease } = await leasedRun(db, plan);
-    const untouchable = () => ({ listInputCandidates: async () => assert.fail("evidence must not be read over budget") });
+    const untouchable = () => ({
+      listInputCandidates: async () => assert.fail("evidence must not be read over budget"),
+      readSplitHistory: async () => assert.fail("evidence must not be read over budget"),
+    });
     const report = await executeRun({ client: db, lease, plan, authority, evidence: untouchable, parent_limits: { max_outputs: 4 } });
     assert.deepEqual(report, { run_id: runId, outcome: "failed", failure_code: "scope_limit_exceeded" });
     assert.equal((await db.query(`select count(*)::int as n from financial_run_inputs where run_id = $1`, [runId])).rows[0].n, 0);
@@ -179,7 +183,10 @@ test("bounded financial graph execution", { timeout: 240_000 }, async (t) => {
   await t.test("an unexpected error fails the run and propagates; it is never partial success", async () => {
     const plan = revenuePlan();
     const { runId, lease } = await leasedRun(db, plan);
-    const broken = () => ({ listInputCandidates: async () => { throw new Error("adapter bug"); } });
+    const broken = () => ({
+      listInputCandidates: async () => { throw new Error("adapter bug"); },
+      readSplitHistory: async () => { throw new Error("adapter bug"); },
+    });
     await assert.rejects(() => executeRun({ client: db, lease, plan, authority, evidence: broken, parent_limits: {} }), /adapter bug/);
     assert.deepEqual(await runRow(db, runId), { execution_state: "failed", coverage_state: null, failure_code: "internal_error", lease_owner: null });
     assert.equal((await db.query(`select count(*)::int as n from financial_run_inputs where run_id = $1`, [runId])).rows[0].n, 0);

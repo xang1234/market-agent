@@ -17,10 +17,15 @@ import {
   hashCanonical,
   nodeLineageHashes,
   NUMERIC_POLICY,
+  parseDerivedDecimalText,
   planSemanticHash,
   presentationHash,
   presentFinancialUnit,
   publicAtCutoff,
+  rationalFromDecimal,
+  resolveMetricDefinition,
+  restateToReference,
+  splitHistoryCovers,
   unitClosures,
   unitPublication,
   validateBoundInput,
@@ -33,12 +38,14 @@ import {
   type ReasonCode,
   type Sha256Hex,
   type SlotBinding,
+  type SplitAdjustmentV1,
 } from "../../financial-core/src/index.ts";
 import {
   loadFinancialUnitRecords,
   type FinancialSealClaim,
   type FinancialUnitRecords,
   type LoadedEvidence,
+  type LoadedSplitHistory,
 } from "./financial-verifier-loader.ts";
 import type { JsonObject } from "./manifest-staging.ts";
 import type { QueryExecutor } from "../../shared/src/http.ts";
@@ -173,10 +180,11 @@ export function verifyFinancialUnit(records: FinancialUnitRecords, unitId: Local
 
   const closureNodes = new Set(closure.node_ids);
   const evidence = new Map(records.evidence.map((row) => [row.fact_id, row]));
+  const splitHistories = new Map(records.split_histories.map((row) => [row.listing_id, row]));
   const failures: FinancialVerifierFailure[] = [];
   for (const [slot, binding] of bindings.value) {
     if (!closureNodes.has(slot) || binding.status !== "bound") continue;
-    const problem = ineligibility(binding.input, evidence.get(binding.input.fact_id), plan);
+    const problem = ineligibility(binding.input, evidence.get(binding.input.fact_id), splitHistories, plan);
     if (problem) failures.push(failure("financial_input_ineligible", { run_id: run.run_id, input_slot: slot, reason: problem }));
   }
   if (failures.length > 0) return { ok: false, failures };
@@ -351,7 +359,12 @@ function bindingsFor(plan: FinancialPlanV1, records: FinancialUnitRecords): Bind
 }
 
 /** Why a bound input may no longer be published, judged on its current evidence. */
-function ineligibility(input: BoundFinancialInputV1, evidence: LoadedEvidence | undefined, plan: FinancialPlanV1): string | null {
+function ineligibility(
+  input: BoundFinancialInputV1,
+  evidence: LoadedEvidence | undefined,
+  splitHistories: ReadonlyMap<string, LoadedSplitHistory>,
+  plan: FinancialPlanV1,
+): string | null {
   if (!evidence) return "fact_unavailable";
   if (evidence.invalidated) return "fact_invalidated";
   if (evidence.method !== "reported" && evidence.method !== "extracted" && evidence.method !== "restated") return "fact_not_reported";
@@ -364,12 +377,35 @@ function ineligibility(input: BoundFinancialInputV1, evidence: LoadedEvidence | 
   if (Date.parse(input.publication.available_no_later_than) > Date.parse(plan.time.knowledge_cutoff)) return "not_public_at_cutoff";
   const context = evidence.context;
   if (!context) return "context_unavailable";
+  const adjustment = input.split_adjustment;
+  const sameAdjustment = adjustment === undefined
+    ? context.adjustment_basis === input.basis.adjustment
+    : context.adjustment_basis === "as_filed" && context.as_filed_on === adjustment.as_filed_on;
   if (context.period_type !== input.period.kind || context.dimension_scope !== input.dimensions.scope
-    || context.adjustment_basis !== input.basis.adjustment || context.share_basis !== input.basis.share_basis
+    || !sameAdjustment || context.share_basis !== input.basis.share_basis
     || context.fiscal_calendar_version !== input.period.calendar_version) {
     return "context_changed";
   }
+  if (adjustment !== undefined && !restatedAsBound(input, adjustment, splitHistories.get(adjustment.listing_id), plan)) return "splits_changed";
   return null;
+}
+
+/** Whether the listing's current split history still restates the input exactly as it was bound. */
+function restatedAsBound(input: BoundFinancialInputV1, adjustment: SplitAdjustmentV1, history: LoadedSplitHistory | undefined, plan: FinancialPlanV1): boolean {
+  if (history?.checked_at == null || !splitHistoryCovers(history.checked_at, plan.time)) return false;
+  const definition = resolveMetricDefinition(input.metric.metric_key);
+  const native = parseDerivedDecimalText(input.numeric.native_value);
+  const nativeValue = native.ok ? rationalFromDecimal(native.value) : null;
+  if (definition === null || nativeValue === null) return false;
+  const current = restateToReference({
+    native: nativeValue,
+    value_kind: definition.value_kind,
+    as_filed_on: adjustment.as_filed_on,
+    reference_date: adjustment.reference_date,
+    listing_id: adjustment.listing_id,
+    splits: history.splits,
+  });
+  return current.ok && canonicallyEqual(current.adjustment, adjustment);
 }
 
 function failure(reason_code: FinancialVerifierReasonCode, details: JsonObject): FinancialVerifierFailure {

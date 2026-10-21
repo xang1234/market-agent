@@ -18,6 +18,8 @@
 // 6. Equal values tie-break by fact id; differing values are a conflict —
 //    identifier order never chooses financial truth.
 // 7. Freshness is measured to the cutoff.
+// 8. An as-filed value binds restated to the plan's reference date from its
+//    listing's split history, or is a gap when that history is unknown.
 //
 // A selection is a proven input: the chosen candidate with its proofs and
 // context narrowed to non-null, and its numerics parsed exactly once.
@@ -32,6 +34,10 @@ import {
   publicAtCutoff,
   rationalFromDecimal,
   rationalToValue,
+  resolveMetricDefinition,
+  restateToReference,
+  splitHistoryCovers,
+  splitReferenceDate,
   type DecimalString,
   type ExactRational,
   type FinancialUnit,
@@ -42,10 +48,12 @@ import {
   type ReasonCode,
   type ReportedMetricNode,
   type ReportingBasis,
+  type SplitAdjustmentV1,
+  type TimeContext,
 } from "../../financial-core/src/index.ts";
-import type { InputCandidate } from "./ports.ts";
+import type { InputCandidate, SplitHistory } from "./ports.ts";
 
-export const SELECTION_POLICY_VERSION = "public-information-selection.v2";
+export const SELECTION_POLICY_VERSION = "public-information-selection.v3";
 
 export type SelectionPolicy = {
   knowledge_cutoff: IsoDateTime;
@@ -186,6 +194,37 @@ function inRequestedPeriod(candidate: InputCandidate, selector: PeriodSelector):
     return candidate.period.fiscal_year === selector.fiscal_year && candidate.period.fiscal_period === selector.fiscal_period;
   }
   return selector.period_type === "annual" ? candidate.period.fiscal_period === "FY" : candidate.period.fiscal_period !== "FY";
+}
+
+/** How a selected input binds: unadjusted, restated from as filed, or not at all. */
+export type BoundBasis =
+  | Readonly<{ status: "unadjusted" }>
+  | Readonly<{ status: "restated"; split_adjustment: SplitAdjustmentV1 }>
+  | Readonly<{ status: "gap"; reason_code: ReasonCode }>;
+
+export function boundBasis(selected: SelectedInput, history: SplitHistory | undefined, time: Pick<TimeContext, "knowledge_cutoff" | "cutoff_timezone">): BoundBasis {
+  const { context, metric_key: metricKey } = selected.candidate;
+  // A split-adjusted context names no reference date, so no basis to compare it on.
+  if (context.adjustment_basis !== "as_filed") {
+    return context.adjustment_basis === "unadjusted" ? { status: "unadjusted" } : { status: "gap", reason_code: "context_unverified" };
+  }
+  if (history === undefined) return { status: "gap", reason_code: "split_history_missing" };
+  if (history.status === "gap") return { status: "gap", reason_code: history.reason_code };
+  if (!splitHistoryCovers(history.checked_at, time)) return { status: "gap", reason_code: "split_history_stale" };
+  const referenceDate = splitReferenceDate(time);
+  // A value filed after the reference date would have to be restated backward.
+  if (context.as_filed_on > referenceDate) return { status: "gap", reason_code: "incompatible_basis" };
+  const definition = resolveMetricDefinition(metricKey);
+  if (definition === null) return { status: "gap", reason_code: "unsupported_metric" };
+  const restated = restateToReference({
+    native: selected.numeric.native,
+    value_kind: definition.value_kind,
+    as_filed_on: context.as_filed_on,
+    reference_date: referenceDate,
+    listing_id: history.listing_id,
+    splits: history.splits,
+  });
+  return restated.ok ? { status: "restated", split_adjustment: restated.adjustment } : { status: "gap", reason_code: restated.reason };
 }
 
 /** Whether binding could use the candidate at the cutoff: public by then, with proven precision, context, and unit, and an exact value. */

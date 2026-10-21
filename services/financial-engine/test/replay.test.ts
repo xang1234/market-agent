@@ -12,7 +12,10 @@ import { createFinancialWorker, type WorkerPool } from "../src/worker.ts";
 import { completedRun, databaseUrl, engineDatabase, IDS, pinnedClients } from "./db-fixtures.ts";
 
 /** Evidence that fails the test if a replay ever asks for it. */
-const noEvidence = (): FinancialEvidencePort => ({ listInputCandidates: async () => assert.fail("a replay must never select evidence") });
+const noEvidence = (): FinancialEvidencePort => ({
+  listInputCandidates: async () => assert.fail("a replay must never select evidence"),
+  readSplitHistory: async () => assert.fail("a replay must never select evidence"),
+});
 
 async function bypass(db: Client, sql: string, params: unknown[]): Promise<void> {
   await db.query("begin");

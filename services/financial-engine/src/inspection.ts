@@ -7,7 +7,7 @@
 // about it can be enumerated. A certificate or operation version this build
 // does not support is reported as unavailable, never reinterpreted.
 
-import { dependencyClosure, type BoundFinancialInputV1, type LocalId } from "../../financial-core/src/index.ts";
+import { dependencyClosure, type BoundFinancialInputV1, type LocalId, type SplitAdjustmentV1 } from "../../financial-core/src/index.ts";
 import type { SqlExecutor } from "./ports.ts";
 import { readClosureInputs, readCommittedResult } from "./read-model.ts";
 import { supportedPublication, unsupportedPlanVersion } from "./version-registry.ts";
@@ -21,7 +21,9 @@ export type InspectedInput = Readonly<
       fact_id: string;
       source: Readonly<{ source_id: string; document_id: string | null; source_version_hash: string; locator: string | null }>;
       metric: Readonly<{ metric_key: string; definition_version: string }>;
+      /** As filed; a restated input's computed value comes from its split adjustment. */
       value: string;
+      split_adjustment: SplitAdjustmentV1 | null;
       unit: unknown;
       period: Readonly<{ kind: string; start: string | null; end: string; fiscal_year: number; fiscal_period: string }>;
       precision_status: string;
@@ -109,6 +111,7 @@ export async function inspectCommittedResult(db: SqlExecutor, ownerUserId: strin
         source: { source_id: bound.source.source_id, document_id: bound.source.document_id, source_version_hash: bound.source.source_version_hash, locator: bound.source.locator },
         metric: bound.metric,
         value: bound.numeric.value,
+        split_adjustment: bound.split_adjustment ?? null,
         unit: bound.unit,
         period: { kind: bound.period.kind, start: bound.period.start, end: bound.period.end, fiscal_year: bound.period.fiscal_year, fiscal_period: bound.period.fiscal_period },
         precision_status: bound.precision_status,

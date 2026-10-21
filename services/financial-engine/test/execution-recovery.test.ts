@@ -27,7 +27,7 @@ test("execution recovery after a worker crash", { timeout: 240_000 }, async (t) 
   let evidenceReads = 0;
   const counting = (executor: SqlExecutor): FinancialEvidencePort => {
     const real = createEvidenceFinancialPort(executor);
-    return { listInputCandidates: (request) => { evidenceReads += 1; return real.listInputCandidates(request); } };
+    return { ...real, listInputCandidates: (request) => { evidenceReads += 1; return real.listInputCandidates(request); } };
   };
   const { bindings } = await bindPlanInputs({ client: db, lease: crashed, plan, authority, evidence: counting });
   assert.equal(evidenceReads, 4);
@@ -44,7 +44,10 @@ test("execution recovery after a worker crash", { timeout: 240_000 }, async (t) 
   assert.ok(acquired.status === "acquired");
   const resumed = (acquired as { lease: RunLease }).lease;
   assert.equal(resumed.epoch, 2);
-  const noEvidence = () => ({ listInputCandidates: async () => assert.fail("a resumed run must reuse its bindings, never reselect evidence") });
+  const noEvidence = () => ({
+    listInputCandidates: async () => assert.fail("a resumed run must reuse its bindings, never reselect evidence"),
+    readSplitHistory: async () => assert.fail("a resumed run must reuse its bindings, never reselect evidence"),
+  });
   const report = await executeRun({ client: db, lease: resumed, plan, authority, evidence: noEvidence, parent_limits: {} });
   assert.equal(report.outcome, "ready_to_seal");
 
