@@ -121,7 +121,7 @@ test("screener certification", { timeout: 600_000 }, async (t) => {
 
   await t.test("every issuer the screener can show is valued at the cutoff, and every null keeps its reason", async () => {
     const outcomes = await certifyScreenerUniverse(deps, NVDA.cutoff);
-    assert.deepEqual(outcomes.map((chunk) => [chunk.issuers, chunk.outcome, chunk.rejected_units]), [[3, "published", 0]]);
+    assert.deepEqual(outcomes.map((chunk) => [chunk.issuers, chunk.outcome, chunk.rejected_units]), [[[NVDA.issuer, LOSS.issuer, DUAL.issuer], "published", 0]]);
     const at = { session_date: "2024-06-07", knowledge_cutoff: NVDA.cutoff };
     assert.deepEqual(await valuations(db), [
       { legal_name: "Dual Listed Co", valuation: "market_cap", value: null, currency: null, reason_code: "split_listing_unresolved", ...at },

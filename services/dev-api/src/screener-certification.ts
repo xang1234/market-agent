@@ -9,7 +9,9 @@
 // user. The finalization transaction that seals a figure, or the gap sealed
 // instead, also writes it to screener_certified_valuations, which every screen
 // request reads. Rerunning a cutoff resumes its runs and publishes nothing
-// twice, and the supervised worker resumes an interrupted run on its own.
+// twice, and the supervised worker resumes an interrupted run on its own. A run
+// that failed or was cancelled sealed nothing, so a rerun values its issuers
+// in new runs.
 
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
@@ -21,7 +23,8 @@ import { buildDeterministicPlan, type DeterministicUnits, type PlanningContext }
 import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { requireFinancialReadiness } from "../../financial-engine/src/readiness.ts";
 import type { ParentRecovery } from "../../financial-engine/src/recovery.ts";
-import { issuerLabels, publishRequest, type RequestGap } from "../../financial-engine/src/request.ts";
+import type { DriveReport } from "../../financial-engine/src/publish.ts";
+import { issuerLabels, publishRequest, type RequestGap, type RequestOutcome } from "../../financial-engine/src/request.ts";
 import { withPinnedClient, withTransaction } from "../../financial-engine/src/transaction.ts";
 import { valuationOperations, valuationOutputs, type Valuation } from "../../financial-engine/src/valuation-plan.ts";
 import { lastRegularSessionDate } from "../../market/src/ytd-window.ts";
@@ -42,8 +45,8 @@ export type ScreenerCertificationDeps = Readonly<{
   evidence: (executor: SqlExecutor) => FinancialEvidencePort;
 }>;
 
-/** One run's outcome: published, or the engine's reason it did not publish; and how many of its units finalization rejected. */
-export type ChunkOutcome = Readonly<{ screener_valuation_run_id: string; issuers: number; outcome: "published" | RequestGap; rejected_units: number }>;
+/** One run's issuers and outcome: published, or the engine's reason it did not publish; and how many of its units finalization rejected. */
+export type ChunkOutcome = Readonly<{ screener_valuation_run_id: string; issuers: ReadonlyArray<string>; outcome: "published" | RequestGap; rejected_units: number }>;
 
 export async function certifyScreenerUniverse(deps: ScreenerCertificationDeps, asOf: string): Promise<ChunkOutcome[]> {
   const outcomes: ChunkOutcome[] = [];
@@ -64,13 +67,27 @@ export function screenerUniverseRecovery(db: SqlExecutor): ParentRecovery {
 
 // ---------------------------------------------------------------------------
 
-/** The cutoff's runs: those an earlier attempt created, then new ones for every issuer they leave out. */
+/**
+ * The cutoff's runs: those an earlier attempt created, then new ones for every
+ * issuer they leave out. A run that failed or was cancelled leaves its issuers
+ * out. ponytail: they go 25 to a run again, so an issuer that fails every run
+ * fails its new run's other issuers too; give them a run each if that happens.
+ */
 async function chunksFor(pool: FinancialPool, asOf: string): Promise<Chunk[]> {
   return withPinnedClient(pool, (client) => withTransaction(client, async () => {
     // One planner at a time, so two attempts at a cutoff never value an issuer twice.
     await client.query(`select pg_advisory_xact_lock(hashtext('screener_valuation_runs'))`);
     const existing = (await client.query<Chunk>(
-      `select screener_valuation_run_id::text, subjects from screener_valuation_runs where as_of = $1 order by created_at, screener_valuation_run_id`,
+      `select s.screener_valuation_run_id::text, s.subjects
+         from screener_valuation_runs s
+        where s.as_of = $1
+          and not exists (
+            select 1 from financial_runs r
+             where r.parent_kind = 'screener_valuation_run' and r.parent_id = s.screener_valuation_run_id
+               and r.request_key = s.screener_valuation_run_id::text
+               and r.execution_state in ('failed', 'cancelled')
+               and not exists (select 1 from financial_run_units u where u.run_id = r.run_id and u.state = 'sealed'))
+        order by s.created_at, s.screener_valuation_run_id`,
       [asOf],
     )).rows;
     const covered = new Set(existing.flatMap((chunk) => chunk.subjects.map((subject) => subject.issuer_id)));
@@ -124,10 +141,24 @@ async function certifyChunk(deps: ScreenerCertificationDeps, asOf: string, chunk
     persistParent: persistScreenerValuation,
   });
   const rejected = request.status === "driven" ? request.report?.finalized.filter((unit) => unit.result.status === "rejected").length ?? 0 : 0;
-  // A deterministic plan never asks; treat a question as a configuration the run cannot compute.
-  const outcome = request.status === "driven" ? "published" : request.status === "gap" ? request.reason : "configuration_needed";
-  return { screener_valuation_run_id: chunk.screener_valuation_run_id, issuers: chunk.subjects.length, outcome, rejected_units: rejected };
+  const issuers = chunk.subjects.map((subject) => subject.issuer_id);
+  return { screener_valuation_run_id: chunk.screener_valuation_run_id, issuers, outcome: outcomeOf(request), rejected_units: rejected };
 }
+
+function outcomeOf(request: RequestOutcome): ChunkOutcome["outcome"] {
+  if (request.status === "gap") return request.reason;
+  // A deterministic plan never asks; treat a question as a configuration the run cannot compute.
+  if (request.status === "clarification") return "configuration_needed";
+  return request.report === null ? "published" : DRIVEN[request.report.execution];
+}
+
+/** A drive whose execution failed or was cancelled finalized nothing. */
+const DRIVEN: Readonly<Record<DriveReport["execution"], ChunkOutcome["outcome"]>> = {
+  ready_to_seal: "published",
+  skipped: "published",
+  failed: "run_failed",
+  cancelled: "run_cancelled",
+};
 
 function screenerAuthority(chunkId: string): FinancialRuntimeAuthority {
   return createRuntimeAuthority({
@@ -216,6 +247,19 @@ function sealedFigure(block: FinancialAnswerBlock, unitId: string): { value: str
   return { value: null, currency: null, reason_code: reasons.find((reason) => reason !== "blocked_by_dependency") ?? reasons[0] ?? "no_result" };
 }
 
+/** What the operator reads: each run and the total, and the issuers of every run that did not publish every figure. */
+export function certificationReport(outcomes: ReadonlyArray<ChunkOutcome>, asOf: string): { lines: string[]; unfinished: string | null } {
+  const lines = outcomes.map((chunk) => {
+    const rejected = chunk.rejected_units > 0 ? `, ${chunk.rejected_units} unit(s) rejected` : "";
+    return `${chunk.screener_valuation_run_id}: ${chunk.issuers.length} issuer(s), ${chunk.outcome}${rejected}`;
+  });
+  lines.push(`${outcomes.reduce((total, chunk) => total + chunk.issuers.length, 0)} issuer(s) in ${outcomes.length} run(s)`);
+  const unfinished = outcomes.filter((chunk) => chunk.outcome !== "published" || chunk.rejected_units > 0);
+  if (unfinished.length === 0) return { lines, unfinished: null };
+  const issuers = unfinished.flatMap((chunk) => chunk.issuers).join(", ");
+  return { lines, unfinished: `${unfinished.length} run(s) did not publish every figure, for issuer(s) ${issuers}; rerun with --as-of ${asOf} to resume them` };
+}
+
 /** The cutoff the operator pinned with `--as-of`, else now. A cutoff in the future is refused. */
 export function parseAsOf(args: ReadonlyArray<string>, now: Date): string {
   if (args.length === 0) return now.toISOString();
@@ -234,14 +278,10 @@ async function main(): Promise<void> {
     await requireFinancialReadiness(pool, ["screener"]);
     console.log(`certifying the screener universe as of ${asOf}`);
     const outcomes = await certifyScreenerUniverse({ pool, evidence: createEvidenceFinancialPort }, asOf);
-    for (const chunk of outcomes) {
-      const rejected = chunk.rejected_units > 0 ? `, ${chunk.rejected_units} unit(s) rejected` : "";
-      console.log(`${chunk.screener_valuation_run_id}: ${chunk.issuers} issuer(s), ${chunk.outcome}${rejected}`);
-    }
-    const unfinished = outcomes.filter((chunk) => chunk.outcome !== "published" || chunk.rejected_units > 0).length;
-    console.log(`${outcomes.reduce((total, chunk) => total + chunk.issuers, 0)} issuer(s) in ${outcomes.length} run(s)`);
-    if (unfinished > 0) {
-      console.error(`${unfinished} run(s) did not publish every figure; rerun with --as-of ${asOf} to resume them`);
+    const { lines, unfinished } = certificationReport(outcomes, asOf);
+    for (const line of lines) console.log(line);
+    if (unfinished) {
+      console.error(unfinished);
       process.exitCode = 1;
     }
   } finally {
