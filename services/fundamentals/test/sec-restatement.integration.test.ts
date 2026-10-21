@@ -169,6 +169,14 @@ test("SEC restatements", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(await issuer.storedRows(), before);
   });
 
+  await t.test("an original whose stored text is longer than a source token may be is still compared (#401)", async () => {
+    const issuer = await restatingIssuer(["1.234567890123456789e-250", "95", "95"]);
+    await issuer.ingestYear(2023, 1, "2024-02-01T15:00:00.000Z");
+    await issuer.ingestYear(2024, 2, "2025-02-01T15:00:00.000Z");
+    assert.deepEqual(await issuer.restatedRevenue(), [{ value: "95", restates: `reported:0.${"0".repeat(249)}1234567890123456789` }]);
+    assert.equal(await issuer.asRestated("2025-03-01T00:00:00Z"), "95");
+  });
+
   await t.test("a download that finished earlier still proves a restatement another ingest stored first (#338)", async () => {
     const issuer = await restatingIssuer(["100", "95", "93"]);
     await issuer.ingestYear(2023, 1, "2024-02-01T15:00:00.000Z");

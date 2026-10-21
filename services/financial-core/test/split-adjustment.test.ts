@@ -147,3 +147,11 @@ test("a later 10-K's figure is the earlier one restated by the splits between th
   assert.deepEqual([explained("11.93", "11.93", "per_share", "2024-05-29"), explained("11.93", "1.19", "per_share", "2024-05-29")], [true, false]);
   assert.equal(explained("100", "100", "flow"), null);
 });
+
+test("an earlier figure as stored is read whole, though its text is longer than a source token may be (#401)", () => {
+  const explained = (earlier: string, later: string) =>
+    explainedBySplits({ earlier: { value: earlier, as_filed_on: "2024-02-21" }, later: { value: later, as_filed_on: "2025-02-26" }, value_kind: "per_share", splits: NVDA_SPLITS });
+  // How Postgres prints a numeric stored from the token 1.234567890123456789e-250: 270 characters.
+  const stored = `0.${"0".repeat(249)}1234567890123456789`;
+  assert.deepEqual([explained(stored, "1.08"), explained(stored, "1.234567890123456789e-251")], [false, true]);
+});
