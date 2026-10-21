@@ -263,6 +263,39 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     ]);
   });
 
+  await t.test("a turn that ends in a clarification or a gap before planning never reads its question (#425)", async () => {
+    let reads = 0;
+    const readQuestion = async () => {
+      reads += 1;
+      return parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [] }));
+    };
+    // As financialResearchScope does, the scope waits for the reading.
+    const researchScope = async (context: Parameters<typeof scopeOver>[0], reading: Promise<unknown>) => {
+      await reading;
+      return scopeOver(context);
+    };
+    const ask = async (model: PlanningModel | null, userIntent: string) => {
+      reads = 0;
+      const done = completed((await chatHarness(pool, { model, readQuestion, researchScope: researchScope as never }).run({ ...base, userIntent })).events);
+      return [done.clarification === true ? "clarification" : (done.financial_gap as { reason_code: string } | undefined)?.reason_code ?? "answer", reads];
+    };
+    assert.deepEqual(await ask(revenueModel(["AAA", "AMB"]), "Compare revenue for AAA and AMB"), ["clarification", 0], "the planner asks which company before any model call");
+    assert.deepEqual(await ask(null, "Compare revenue for AAA and BBB"), ["planning_unavailable", 0], "no model plans it");
+    assert.deepEqual(await ask(revenueModel(["AAA"]), "Revenue for AAA"), ["answer", 1]);
+  });
+
+  await t.test("an answer with no reading of its question says its coverage was not checked, and its scope records it (#425)", async () => {
+    const answer = async (readQuestion: () => Promise<ReturnType<typeof parseProposal>>) => {
+      const { events } = await chatHarness(pool, { model: revenueModel(["AAA"]), readQuestion, researchScope: scopeOver as never }).run({ ...base, userIntent: "Revenue for AAA" });
+      const message = (await db.query(`select blocks, research_scope from chat_messages where message_id = $1`, [completed(events).message_id])).rows[0];
+      return [message.blocks.slice(1).map((block: { segments: Array<{ text: string }> }) => block.segments[0]!.text), message.research_scope.coverage_unchecked];
+    };
+    const unchecked = [["It was not checked whether this answer covers everything the question asks for."], true];
+    assert.deepEqual(await answer(async () => null), unchecked, "no reading");
+    assert.deepEqual(await answer(async () => { throw new Error("scope model down"); }), unchecked, "a failed reading");
+    assert.deepEqual(await answer(async () => parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [] }))), [[], undefined]);
+  });
+
   await t.test("each name a turn gives is resolved once (#425)", async () => {
     const counts: Record<string, number> = {};
     const counting = async (mention: string) => {
