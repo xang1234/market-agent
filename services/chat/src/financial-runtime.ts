@@ -527,12 +527,10 @@ function persistAssistantMessage(
 }
 
 /**
- * The companies a turn answered for, in its order. Each keeps the entry the
- * scope gave it, so an auto-selected peer stays unlabelled while peers stay
- * on. One the scope lacks (a clarification pick, the company two listings
- * name) is labelled by its ticker, else its legal name, else the mention that
- * named it: an unlabelled company would read as an auto-selected peer
- * (local-runtime.ts turnScope), and turning peers off would drop it.
+ * The companies a turn answered for, in its order. A missing label marks an
+ * auto-selected peer (local-runtime.ts turnScope), so each keeps the scope's
+ * entry, and one the scope lacks (a clarification pick, the company two
+ * listings name) is given a label.
  */
 async function answeredCompanies(
   db: SqlExecutor,
@@ -551,7 +549,6 @@ async function answeredCompanies(
   });
 }
 
-// The mention that named each resolved company, by issuer.
 function mentionsOf(subjects: ReadonlyArray<RequestedSubject>): Map<string, string> {
   return new Map(subjects.flatMap((subject) => subject.resolution.status === "resolved" ? [[subject.resolution.subject_ref.id.toLowerCase(), subject.mention] as const] : []));
 }

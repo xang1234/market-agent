@@ -100,9 +100,6 @@ test("a follow-up to the engine's revenue and share count keeps the revenue and 
   });
 });
 
-// #432 round 4 saved a company the planner got from a clarification without a
-// label, and a follow-up read it as an auto-selected peer: turning peers off
-// then left no company (#425).
 test("a company picked in a clarification is saved labelled, so follow-ups with peers on and then off keep it (#425)", { timeout: 300_000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for the financial follow-up");

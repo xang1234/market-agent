@@ -163,7 +163,6 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     companies: (context.subjectPreResolutions ?? []).map((subject) => ({ issuer_id: subject.subject_ref.id, label: subject.handoff?.display_labels?.ticker ?? subject.display_label })),
     peers: false, segments: false, margin_trend: false, margins: false, metrics: [], fiscal_year: null, fiscal_quarter: null, price_window: null, benchmark: false, inherited: [],
   });
-  // A turn, and then, when it asks which company, the same turn answered with `pick`.
   const turnWithPick = async (harness: ReturnType<typeof chatHarness>, userIntent: string, pick?: string) => {
     const { events } = await harness.run({ ...base, userIntent });
     if (pick === undefined) return completed(events);
@@ -185,7 +184,6 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       gap: { reason_code: "unsupported" },
       text: "This request asks for a calculation outside the verified financial definitions I can compute: segment revenue has no approved definition.",
       subject_refs: [{ kind: "issuer", id: IDS.issuerA }],
-      // It computed no figure, so it names none, and no reader re-reads it.
       scope: ["financial_gap", "financial_gap", [{ issuer_id: IDS.issuerA, label: "AAA" }], []],
     });
     // A company picked in a clarification is saved too, labelled. A reason with a figure in it is not shown.

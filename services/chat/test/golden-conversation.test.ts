@@ -466,7 +466,6 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const completed = completedTurn(await runTurn(base, amdThread.thread_id, "Break down AMD's revenue by segment"));
     assert.deepEqual(completed.data.financial_gap, { reason_code: "unsupported" });
     assert.deepEqual(answerText(await latestAssistantMessage(base, amdThread.thread_id)), [UNSUPPORTED]);
-    // The gap saves AMD and its scope, so the follow-up is about AMD.
     const evidence = completedTurn(await runTurn(base, amdThread.thread_id, "Show the evidence"));
     assert.deepEqual(evidence.data.subject_refs, [{ kind: "issuer", id: AMD.issuer_id }]);
     assert.deepEqual(answerText(await latestAssistantMessage(base, amdThread.thread_id)), [
@@ -616,9 +615,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
   });
 
   // Two listings under one ticker are one company, so the engine plans it
-  // without asking. Its answer saves that company labelled, so the next turn
-  // keeps its peers on, and turning them off keeps the company (#425). Last,
-  // as the listings it adds stay.
+  // without asking. Last, as the listings it adds stay.
   await t.test("a company two listings name keeps its peers after its engine answer, and keeps itself when they are turned off (#425)", async () => {
     await client.query(
       `insert into listings (listing_id, instrument_id, mic, ticker, trading_currency, timezone)
