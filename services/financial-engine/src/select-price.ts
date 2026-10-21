@@ -5,6 +5,8 @@
 // 1. The listing's latest observations known by the cutoff: the newest trade
 //    time, and among its observations the latest known. None is missing_input,
 //    or publication_time_unknown when one traded by then has no known time.
+//    Only those from a source class the authority allows are evidence; when
+//    none is, the gap is source_class_not_allowed, never an older price.
 // 2. Their tokens must be exact decimals within the numeric policy and agree;
 //    equal values tie-break by observation id, differing ones conflict.
 // 3. A price from before the last regular session the cutoff has closed is
@@ -24,12 +26,12 @@ import {
   splitReferenceDate,
   type DecimalString,
   type ExactRational,
-  type IsoDateTime,
   type ReasonCode,
   type SplitAdjustmentV2,
 } from "../../financial-core/src/index.ts";
 import { lastRegularSessionDate } from "../../market/src/ytd-window.ts";
 import type { PriceObservation, PriceObservationPage, SplitHistory } from "./ports.ts";
+import { sourceAllowed, type SelectionPolicy } from "./select-inputs.ts";
 
 export const PRICE_SELECTION_POLICY_VERSION = "price-at-cutoff-selection.v1";
 
@@ -40,11 +42,13 @@ export type PriceSelection =
 export function selectPrice(
   page: Extract<PriceObservationPage, { status: "ok" }>,
   history: Extract<SplitHistory, { status: "ok" }>,
-  knowledgeCutoff: IsoDateTime,
+  policy: Pick<SelectionPolicy, "knowledge_cutoff" | "allowed_source_classes">,
 ): PriceSelection {
   if (page.latest.length === 0) return gap(page.unknown_publication ? "publication_time_unknown" : "missing_input");
+  const allowed = page.latest.filter((observation) => sourceAllowed(observation.source_class, policy));
+  if (allowed.length === 0) return gap("source_class_not_allowed");
   const priced: Array<{ observation: PriceObservation; value: ExactRational; text: DecimalString }> = [];
-  for (const observation of page.latest) {
+  for (const observation of allowed) {
     const parsed = parseFinancialDecimal(observation.price_text);
     const value = parsed.ok ? rationalFromDecimal(parsed.value) : null;
     if (!parsed.ok || value === null) return gap("precision_unverified");
@@ -55,8 +59,8 @@ export function selectPrice(
 
   const zone = history.timezone;
   const tradeDate = localDateOf(Date.parse(chosen.observation.observed_at), zone);
-  if (tradeDate < lastRegularSessionDate(knowledgeCutoff, zone)) return gap("stale_input");
-  const referenceDate = splitReferenceDate(knowledgeCutoff, zone);
+  if (tradeDate < lastRegularSessionDate(policy.knowledge_cutoff, zone)) return gap("stale_input");
+  const referenceDate = splitReferenceDate(policy.knowledge_cutoff, zone);
   if (!splitHistoryCovers(history.checked_at, referenceDate, zone)) return gap("split_history_stale");
   const restated = restateToReference({
     native: chosen.value,

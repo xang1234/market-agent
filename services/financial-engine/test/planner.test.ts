@@ -300,3 +300,41 @@ test("OCF published in another unit is still published beside free cash flow in 
     ["fcf_out", "fcf", "fcf_section"],
   ]);
 });
+
+/** One company's market cap and P/E: its price at the cutoff, its latest cover count, and its latest fiscal year's diluted EPS. */
+function valuationDraft(operations = 5, extraOutputs: Array<{ output_id: string; node_id: string }> = []) {
+  const reported = (node_id: string, metric_key: string, period: Record<string, unknown>) => ({ node_id, operation: "reported_metric", subject_slot: "a", metric_key, period });
+  return {
+    subjects: [{ slot_id: "a", mention: NAMES[0] }],
+    operations: [
+      reported("px", "share_price", { kind: "at_cutoff" }),
+      reported("shares", "shares_outstanding", { kind: "latest", period_type: "quarterly", offset: 0 }),
+      reported("eps", "eps_diluted", { kind: "latest", period_type: "annual", offset: 0 }),
+      { node_id: "cap", operation: "market_cap", price: "px", shares: "shares" },
+      { node_id: "pe", operation: "pe_ratio", price: "px", earnings: "eps" },
+    ].slice(0, operations),
+    outputs: [...(operations === 5 ? [{ output_id: "out_cap", node_id: "cap" }, { output_id: "out_pe", node_id: "pe" }] : []), ...extraOutputs],
+    thresholds: [],
+  };
+}
+
+test("a deterministic plan asks for market cap and P/E, reading a share price only as their price (#444)", () => {
+  const planned = buildDeterministicPlan(context({ requested_subjects: [resolved(0)] }), valuationDraft());
+  assert.ok(planned.outcome === "ready", JSON.stringify(planned));
+  assert.deepEqual(planned.plan.operations.flatMap((node) => (node.operation === "reported_metric" ? [] : [[node.node_id, node.operation_version]])), [["cap", "market_cap.v1"], ["pe", "pe_ratio.v1"]]);
+  assert.deepEqual(planned.plan.outputs, [{ output_id: "out_cap", node_id: "cap", unit_id: "answer" }, { output_id: "out_pe", node_id: "pe", unit_id: "answer" }]);
+  assert.equal(planned.plan.interpretation?.text, [
+    "Subjects: Apple Inc. (issuer:51111111-1111-4111-8111-111111111111); 1 requested subject.",
+    "Metrics: share_price (share_price.v1), shares_outstanding (shares_outstanding.v1), eps_diluted (eps_diluted.v1).",
+    "Periods: latest known at the cutoff, latest fiscal quarter at the cutoff, latest fiscal year at the cutoff; as originally reported.",
+    "Information public by 2024-03-01T23:59:59.999-05:00 (America/New_York).",
+    "Calculations: market capitalization (share price × shares outstanding), P/E ratio (share price / latest fiscal year diluted EPS).",
+  ].join(" "));
+  // The price may be shown beside the figures it feeds, never alone.
+  const shown = buildDeterministicPlan(context({ requested_subjects: [resolved(0)] }), valuationDraft(5, [{ output_id: "out_px", node_id: "px" }]));
+  assert.deepEqual(shown.outcome === "ready" && shown.plan.outputs.map((output) => output.output_id), ["out_cap", "out_pe", "out_px"]);
+  const alone = buildDeterministicPlan(context({ requested_subjects: [resolved(0)] }), valuationDraft(1, [{ output_id: "out_px", node_id: "px" }]));
+  assert.deepEqual(alone.outcome === "unsupported" && alone.issues.map((issue) => [issue.code, issue.message]), [
+    ["price_without_valuation", "px reads a share price, which is planned only as the price of market_cap or pe_ratio"],
+  ]);
+});

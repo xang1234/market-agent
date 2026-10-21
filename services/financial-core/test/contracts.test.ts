@@ -14,6 +14,7 @@ import {
   SURFACES,
   UNIT_KINDS,
 } from "../src/contracts.ts";
+import { SOURCE_CLASSES } from "../src/evidence-vocabulary.ts";
 import {
   FinancialContractError,
   createRuntimeAuthority,
@@ -333,6 +334,7 @@ test("schema enums agree with TypeScript discriminated unions", () => {
     enumAt(plan, "FinancialRuntimeAuthorityV1", "properties", "feature", "properties", "mode"),
     [...FEATURE_MODES],
   );
+  assert.deepEqual(enumAt(plan, "FinancialRuntimeAuthorityV1", "properties", "allowed_source_classes", "items"), [...SOURCE_CLASSES]);
   const units = plan.$defs.FinancialUnit.oneOf.flatMap((branch: any) => branch.properties.kind.enum);
   assert.deepEqual([...units].sort(), [...UNIT_KINDS].sort());
   assert.deepEqual(enumAt(result, "GapDisposition"), [...GAP_DISPOSITIONS]);

@@ -280,7 +280,7 @@ const FY2023_NODE: ReportedMetricNode = {
 
 function disclosure(id: string, input: { value: string; published: string; precision?: "date" | "instant"; relation?: "original" | "economic_restatement"; supersedes?: string; superseded_by?: string }): InputCandidate {
   return {
-    fact_id: id, source_id: "11111111-1111-4111-8111-111111111111", source_version_hash: HASH, metric_key: "revenue",
+    fact_id: id, source_id: "11111111-1111-4111-8111-111111111111", source_class: "sec_filing", source_version_hash: HASH, metric_key: "revenue",
     period: { start: "2023-01-01", end: "2023-12-31", fiscal_year: 2023, fiscal_period: "FY" },
     value_text: input.value, scale_text: "1", unit: { kind: "currency", currency: "USD" }, method: "reported", verification_status: "authoritative",
     // Ingested well after publication: public time, not ingestion time, decides eligibility.
@@ -309,7 +309,7 @@ const originalAndRestated = () => [
   disclosure(ORIGINAL, { value: "100", published: "2024-01-10T00:00:00-05:00", superseded_by: RESTATED }),
   disclosure(RESTATED, { value: "104", published: "2024-06-10T00:00:00-04:00", relation: "economic_restatement", supersedes: ORIGINAL }),
 ];
-const policy = (cutoff: string, basis: SelectionPolicy["reporting_basis"] = "as_reported"): SelectionPolicy => ({ knowledge_cutoff: cutoff, reporting_basis: basis, max_age_days: null });
+const policy = (cutoff: string, basis: SelectionPolicy["reporting_basis"] = "as_reported"): SelectionPolicy => ({ knowledge_cutoff: cutoff, reporting_basis: basis, max_age_days: null, allowed_source_classes: ["sec_filing"] });
 
 export const SELECTION_CASES: ReadonlyArray<SelectionCase> = [
   {

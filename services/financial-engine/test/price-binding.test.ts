@@ -72,7 +72,7 @@ test("share price binding", { timeout: 300_000 }, async (t) => {
     return;
   }
   const db = await engineDatabase(t, "fin-price-binding");
-  const authority = authorityFor();
+  const authority = authorityFor(IDS.owner, { allowed_source_classes: ["sec_filing", "market_data"] });
   const friday = await seedPrices(db);
 
   await t.test("Friday's 1200.00 close binds restated after Monday's split and computes as 120", async () => {
@@ -133,6 +133,16 @@ test("share price binding", { timeout: 300_000 }, async (t) => {
     // Friday's close was known at 16:15 in New York; ten minutes earlier nothing was.
     assert.equal(await gapOf(pricePlan(PRICE_IDS.nvda, "2024-06-07T20:05:00.000Z")), "missing_input");
     assert.equal(await gapOf(pricePlan(PRICE_IDS.nvda, MONDAY_MORNING, { kind: "fiscal_period", fiscal_year: 2024, fiscal_period: "FY" })), "unsupported_period");
+  });
+
+  await t.test("a price never binds for an authority that does not allow market data", async () => {
+    const plan = pricePlan(PRICE_IDS.nvda, MONDAY_MORNING);
+    const filingsOnly = authorityFor();
+    const { runId, lease } = await leasedRun(db, plan, filingsOnly);
+    const binding = (await bindPlanInputs({ client: db, lease, plan, authority: filingsOnly, evidence: createEvidenceFinancialPort })).bindings.get("px");
+    assert.deepEqual(binding?.status === "gap" && binding.reason_code, "source_class_not_allowed");
+    const row = (await db.query(`select binding_status, gap_reason, price_observation_id from financial_run_inputs where run_id = $1`, [runId])).rows[0]!;
+    assert.deepEqual([row.binding_status, row.gap_reason, row.price_observation_id], ["gap", "source_class_not_allowed", null]);
   });
 
   await t.test("a seal withholds the price when its subject's listing or that listing's splits changed since binding", async () => {

@@ -4,8 +4,9 @@
 //
 // 1. Keep candidates for the exact metric and requested fiscal period.
 // 2. Eligibility, per candidate, in order: publicly available by the cutoff
-//    (conservative, source-version-bound proof), proven precision, explicit
-//    financial context, contract-expressible unit.
+//    (conservative, source-version-bound proof), from a source class the
+//    authority allows, proven precision, explicit financial context,
+//    contract-expressible unit.
 // 3. "Latest" names one period per subject in a plan: the offset-th newest
 //    period in which any of the subject's latest nodes of that period type has
 //    an eligible candidate. A node without a candidate there is a gap; an
@@ -66,6 +67,7 @@ import {
   type RecordedSplit,
   type ReportedMetricNode,
   type ReportingBasis,
+  type SourceClass,
   type SplitAdjustmentV2,
 } from "../../financial-core/src/index.ts";
 import type { InputCandidate, SplitHistory } from "./ports.ts";
@@ -87,7 +89,14 @@ export type SelectionPolicy = {
   knowledge_cutoff: IsoDateTime;
   reporting_basis: ReportingBasis;
   max_age_days: number | null;
+  /** The runtime authority's classes; evidence from any other source is ineligible. */
+  allowed_source_classes: ReadonlyArray<SourceClass>;
 };
+
+/** Whether the policy allows evidence from this source class. A source no class covers is never allowed. */
+export function sourceAllowed(sourceClass: SourceClass | null, policy: Pick<SelectionPolicy, "allowed_source_classes">): boolean {
+  return sourceClass !== null && policy.allowed_source_classes.includes(sourceClass);
+}
 
 export type SelectedPublication = {
   attestation_id: string;
@@ -119,8 +128,9 @@ export type SlotSelection = { status: "selected"; input: SelectedInput } | { sta
 
 type Eligible = { candidate: ProvenCandidate; publication: SelectedPublication; numeric: ExactNumeric | null };
 
-// When nothing is eligible, report the reason closest to eligibility.
-const EXCLUSION_PRIORITY: ReadonlyArray<ReasonCode> = ["precision_unverified", "context_unverified", "incompatible_unit", "publication_time_unknown"];
+// When nothing is eligible, report the reason closest to eligibility. No
+// later evidence makes a disallowed source eligible, so it comes last.
+const EXCLUSION_PRIORITY: ReadonlyArray<ReasonCode> = ["precision_unverified", "context_unverified", "incompatible_unit", "publication_time_unknown", "source_class_not_allowed"];
 
 /** One reported period, as `end|fiscal_period|fiscal_year`; a descending sort is newest first. */
 export type PeriodKey = string & { readonly __brand: "PeriodKey" };
@@ -149,7 +159,7 @@ export function sharedLatestPeriods(slots: ReadonlyArray<LatestSlot>, policy: Se
     if (incomplete !== undefined && !incompleteGroups.has(group)) incompleteGroups.set(group, incomplete);
     const keys = keysByGroup.get(group) ?? new Set();
     for (const candidate of requestedCandidates(node, candidates)) {
-      if ("eligible" in eligibility(candidate, policy.knowledge_cutoff)) keys.add(periodKey(candidate));
+      if ("eligible" in eligibility(candidate, policy)) keys.add(periodKey(candidate));
     }
     keysByGroup.set(group, keys);
   }
@@ -192,7 +202,7 @@ export function selectInput(
   const period = shared;
   const inPeriod = period === null ? requested : requested.filter((candidate) => periodKey(candidate) === period);
 
-  const eligible = eligibleAmong(inPeriod, policy.knowledge_cutoff);
+  const eligible = eligibleAmong(inPeriod, policy);
   if (typeof eligible === "string") return gap(eligible);
   if (node.period.kind === "latest" && period === null) return gap("missing_input");
   return chooseAmong(eligible, requested, policy);
@@ -214,7 +224,7 @@ function selectShareCount(node: ReportedMetricNode, candidates: ReadonlyArray<In
     Date.parse(candidate.reported_at!) === latestFiled && (node.period.kind !== "latest" || node.period.offset === 0));
   if (latest.length === 0) return gap(requested.length > 0 ? "stale_input" : "missing_input");
   if (latest.some((candidate) => candidate.coverage_level !== "full")) return gap("incompatible_scope");
-  const eligible = eligibleAmong(latest, policy.knowledge_cutoff);
+  const eligible = eligibleAmong(latest, policy);
   if (typeof eligible === "string") return gap(eligible);
   const selection = chooseAmong(eligible, candidates, policy);
   if (selection.status === "selected" && freshnessAt(selection.input.candidate.period.end, policy.knowledge_cutoff, SHARE_COUNT_MAX_AGE_DAYS) === "stale") {
@@ -224,11 +234,11 @@ function selectShareCount(node: ReportedMetricNode, candidates: ReadonlyArray<In
 }
 
 /** The candidates eligible at the cutoff, or, when none is, the reason closest to eligibility. */
-function eligibleAmong(candidates: ReadonlyArray<InputCandidate>, cutoff: IsoDateTime): Eligible[] | ReasonCode {
+function eligibleAmong(candidates: ReadonlyArray<InputCandidate>, policy: EligibilityPolicy): Eligible[] | ReasonCode {
   const eligible: Eligible[] = [];
   const exclusions = new Set<ReasonCode>();
   for (const candidate of candidates) {
-    const verdict = eligibility(candidate, cutoff);
+    const verdict = eligibility(candidate, policy);
     if ("eligible" in verdict) eligible.push(verdict.eligible);
     else if (verdict.reason !== null) exclusions.add(verdict.reason);
   }
@@ -316,16 +326,19 @@ function splitNearCount(countDate: IsoDate, reportedAt: string | null, splits: R
   return splits.some((split) => dayNumber(split.execution_date) >= from && dayNumber(split.execution_date) <= to);
 }
 
-/** Whether binding could use the candidate at the cutoff: public by then, with proven precision, context, and unit, and an exact value. */
-export function bindableAt(candidate: InputCandidate, cutoff: IsoDateTime): boolean {
-  const verdict = eligibility(candidate, cutoff);
+type EligibilityPolicy = Pick<SelectionPolicy, "knowledge_cutoff" | "allowed_source_classes">;
+
+/** Whether binding could use the candidate at the cutoff: public by then, from an allowed source, with proven precision, context, and unit, and an exact value. */
+export function bindableAt(candidate: InputCandidate, policy: EligibilityPolicy): boolean {
+  const verdict = eligibility(candidate, policy);
   return "eligible" in verdict && verdict.eligible.numeric !== null;
 }
 
-function eligibility(candidate: InputCandidate, cutoff: IsoDateTime): { eligible: Eligible } | { reason: ReasonCode | null } {
-  const publication = earliestPublicProof(candidate, cutoff);
+function eligibility(candidate: InputCandidate, policy: EligibilityPolicy): { eligible: Eligible } | { reason: ReasonCode | null } {
+  const publication = earliestPublicProof(candidate, policy.knowledge_cutoff);
   if (publication === "not_yet_public") return { reason: null };
   if (publication === "unknown") return { reason: "publication_time_unknown" };
+  if (!sourceAllowed(candidate.source_class, policy)) return { reason: "source_class_not_allowed" };
   const { precision, context, unit } = candidate;
   if (precision === null || precision.precision_class === "legacy_unverified" || precision.raw_token === null || precision.token_proof_hash === null) {
     return { reason: "precision_unverified" };

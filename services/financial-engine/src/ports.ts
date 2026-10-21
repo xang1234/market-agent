@@ -19,6 +19,7 @@ import type {
   PublicationTiming,
   RecordedSplit,
   ShareBasis,
+  SourceClass,
 } from "../../financial-core/src/index.ts";
 
 /** Minimal SQL executor; hosts pass a pinned transaction client where atomicity matters. */
@@ -40,6 +41,8 @@ export type PooledClient = SqlExecutor & {
 export type InputCandidate = Readonly<{
   fact_id: string;
   source_id: string;
+  /** Null for a source no class covers, which no authority allows. */
+  source_class: SourceClass | null;
   source_version_hash: string | null;
   metric_key: MetricKey;
   period: Readonly<{ start: string | null; end: string; fiscal_year: number; fiscal_period: FiscalPeriod }>;
@@ -99,6 +102,7 @@ export type PriceObservation = Readonly<{
   observation_id: string;
   listing_id: string;
   source_id: string;
+  source_class: SourceClass | null;
   kind: PriceObservationKind;
   price_text: string;
   currency: string;

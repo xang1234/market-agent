@@ -8,6 +8,8 @@ import {
   absoluteChange,
   freeCashFlow,
   margin,
+  marketCap,
+  peRatio,
   percentChangePositiveBase,
   ratio,
   trailingSum,
@@ -107,6 +109,21 @@ export const OPERATION_REGISTRY: { readonly [K in OperationKind]: OperationSpec<
     produces: "predicate",
     tolerates_missing_operands: true,
     evaluate: (node, operands) => peerCompare(node, operands),
+  },
+  market_cap: {
+    ...VALUE_OPERATION,
+    operation_version: "market_cap.v1",
+    interpretation: "Share price × shares outstanding, both restated to the reference date of the company's one listing; the count must be positive.",
+    evaluate: (node, operands) => marketCap(node, required(node, operands, 0), required(node, operands, 1)),
+  },
+  pe_ratio: {
+    ...VALUE_OPERATION,
+    operation_version: "pe_ratio.v1",
+    interpretation: "Share price / diluted EPS of the latest fiscal year, both restated to the reference date of the company's one listing; EPS must be positive.",
+    evaluate: (node, operands, context) => {
+      const earnings = context.plan.operations.find((entry) => entry.node_id === node.earnings);
+      return peRatio(node, required(node, operands, 0), required(node, operands, 1), earnings?.operation === "reported_metric" ? earnings.period : null);
+    },
   },
 });
 

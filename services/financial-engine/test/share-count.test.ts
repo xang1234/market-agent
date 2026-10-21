@@ -22,6 +22,7 @@ function cover(filing: Filing, overrides: Partial<InputCandidate> = {}): InputCa
   return {
     fact_id: `00000000-0000-4000-8000-00000000000${filing.serial}`,
     source_id: `11111111-1111-4111-8111-11111111111${filing.serial}`,
+    source_class: "sec_filing",
     source_version_hash: HASH,
     metric_key: "shares_outstanding",
     period: { start: null, end: filing.count_date, fiscal_year: filing.fiscal_year, fiscal_period: filing.fiscal_period },
@@ -74,7 +75,7 @@ const history = (splits: RecordedSplit[]): SplitHistory =>
 
 /** The bound count's restatement, or the slot's gap. */
 function bound(cutoff: string, candidates: InputCandidate[], options: { at?: ReportedMetricNode; splits?: RecordedSplit[] } = {}) {
-  const selection = selectInput(options.at ?? LATEST, candidates, { knowledge_cutoff: cutoff, reporting_basis: "as_reported", max_age_days: null });
+  const selection = selectInput(options.at ?? LATEST, candidates, { knowledge_cutoff: cutoff, reporting_basis: "as_reported", max_age_days: null, allowed_source_classes: ["sec_filing"] });
   if (selection.status === "gap") return selection.reason_code;
   const basis = boundBasis(selection.input, history(options.splits ?? NVDA_SPLITS), cutoff);
   if (basis.status !== "restated") return basis.status === "gap" ? basis.reason_code : basis.status;
@@ -85,7 +86,7 @@ function bound(cutoff: string, candidates: InputCandidate[], options: { at?: Rep
 const Q1_BOUND = (shares: string, splits: string[]) => ({ fact_id: cover(Q1).fact_id, as_filed_on: "2024-05-24", splits, shares });
 
 test("a count dated before the 2024-06-10 split binds after it multiplied by 10, restated from its own date", () => {
-  const selection = selectInput(LATEST, [cover(K24), cover(Q1)], { knowledge_cutoff: "2024-07-01T16:00:00.000Z", reporting_basis: "as_reported", max_age_days: null });
+  const selection = selectInput(LATEST, [cover(K24), cover(Q1)], { knowledge_cutoff: "2024-07-01T16:00:00.000Z", reporting_basis: "as_reported", max_age_days: null, allowed_source_classes: ["sec_filing"] });
   assert.equal(selection.status, "selected");
   assert.deepEqual(selection.status === "selected" && boundBasis(selection.input, history(NVDA_SPLITS), "2024-07-01T16:00:00.000Z"), {
     status: "restated",
@@ -143,6 +144,8 @@ test("the latest filing's count that cannot bind is a gap, never an older filing
   // Filed by the cutoff, but proven public only by a fetch after it.
   const fetchedLater = cover(Q2, { publication: [{ attestation_id: "a-3", timing: { available_not_before: null, available_no_later_than: "2026-10-01T15:00:00.000Z", timing_precision: "instant", source_timezone: "UTC" } }] });
   assert.equal(bound(cutoff, [...counts, fetchedLater]), "missing_input");
+  // From a source the authority does not allow (#444).
+  assert.equal(bound(cutoff, [...counts, cover(Q2, { source_class: null })]), "source_class_not_allowed");
 });
 
 test("a share count resolves its latest filing apart from the plan's statement periods", () => {
@@ -156,7 +159,7 @@ test("a share count resolves its latest filing apart from the plan's statement p
     value_text: "11.93",
     unit: { kind: "currency_per_share", currency: "USD" },
   };
-  const policy = { knowledge_cutoff: "2024-03-01T16:00:00.000Z", reporting_basis: "as_reported" as const, max_age_days: null };
+  const policy = { knowledge_cutoff: "2024-03-01T16:00:00.000Z", reporting_basis: "as_reported" as const, max_age_days: null, allowed_source_classes: ["sec_filing" as const] };
   assert.deepEqual([...sharedLatestPeriods([{ node: eps, candidates: [fy2024Eps] }, { node: shares, candidates: [cover(K24)] }], policy)], [
     ["eps", "2024-01-28|FY|2024"],
   ]);

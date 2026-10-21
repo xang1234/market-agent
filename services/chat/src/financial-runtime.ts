@@ -496,8 +496,10 @@ export const SCOPE_METRICS: Readonly<Record<string, string | null>> = {
   weighted_average_basic_shares: null,
   weighted_average_diluted_shares: null,
   shares_outstanding: null,
-  // Not planned yet (PLANNABLE_METRICS).
+  // Not planned by chat until #444 step 4 (PLANNABLE_METRICS).
   share_price: null,
+  market_cap: null,
+  pe_ratio: null,
 };
 
 const figureKey = (node: OperationNode) => node.operation === "reported_metric" ? node.metric_key : node.operation;

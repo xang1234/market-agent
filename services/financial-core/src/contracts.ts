@@ -9,6 +9,7 @@ import type {
   ProvenPrecisionClass,
   PublicationTimingPrecision,
   ShareBasis,
+  SourceClass,
 } from "./evidence-vocabulary.ts";
 
 export type UUID = string;
@@ -41,6 +42,8 @@ export const OPERATION_KINDS = [
   "trailing_sum",
   "threshold",
   "peer_compare",
+  "market_cap",
+  "pe_ratio",
 ] as const;
 export type OperationKind = (typeof OPERATION_KINDS)[number];
 
@@ -125,6 +128,7 @@ export const REASON_CODES = [
   "split_history_missing",
   "split_history_stale",
   "restatement_unverified",
+  "source_class_not_allowed",
 ] as const;
 export type ReasonCode = (typeof REASON_CODES)[number];
 
@@ -221,6 +225,10 @@ export type PeerCompareNode = NodeBase & {
   members: LocalId[];
   direction: "highest" | "lowest";
 };
+/** A share price times the subject's shares outstanding, both restated to its listing's reference date (#444). */
+export type MarketCapNode = NodeBase & { operation: "market_cap"; price: LocalId; shares: LocalId };
+/** A share price over the latest fiscal year's diluted EPS, both restated to its listing's reference date (#444). */
+export type PeRatioNode = NodeBase & { operation: "pe_ratio"; price: LocalId; earnings: LocalId };
 
 export type OperationNode =
   | ReportedMetricNode
@@ -230,7 +238,9 @@ export type OperationNode =
   | RatioNode
   | TrailingSumNode
   | ThresholdNode
-  | PeerCompareNode;
+  | PeerCompareNode
+  | MarketCapNode
+  | PeRatioNode;
 
 export type RequestedOutput = { output_id: LocalId; node_id: LocalId; unit_id: LocalId };
 export type PublicationUnit = { unit_id: LocalId; kind: PublicationUnitKind };
@@ -310,7 +320,8 @@ export type FinancialRuntimeAuthorityV1 = {
     id: UUID;
     version: string;
   };
-  allowed_source_classes: Array<"sec_filing" | "issuer_disclosure" | "licensed_fundamentals" | "market_data">;
+  /** Binding uses evidence from these classes only (sourceClassOf); anything else is `source_class_not_allowed`. */
+  allowed_source_classes: SourceClass[];
   feature: { surface: Surface; capability: VersionTag; mode: FeatureMode };
   approval_state: "approved" | "not_required";
   lease: { epoch: number; fence_token: string } | null;
@@ -504,5 +515,9 @@ export function operationDependencies(node: OperationNode): LocalId[] {
       return [node.subject];
     case "peer_compare":
       return [...node.members];
+    case "market_cap":
+      return [node.price, node.shares];
+    case "pe_ratio":
+      return [node.price, node.earnings];
   }
 }

@@ -262,14 +262,13 @@ filing date D (dei `EntityCommonStockSharesOutstanding`). SEC ingestion stores i
   rule keeps those out of a current plan, but not out of a historical one.
 - **No restatement:** a later filing states a later date's count, never an earlier one's, so restatement detection
   compares us-gaap figures only.
-- **Not yet consumed:** chat still marks `shares_outstanding` unavailable (#444 step 4). A 10-Q's count is stored only
-  when that quarter is ingested.
+- **Not yet in chat:** `market_cap` reads the count, but chat still marks `shares_outstanding` unavailable (#444 step
+  4). A 10-Q's count is stored only when that quarter is ingested.
 
 ## Share prices as engine inputs (#444)
 
 A share price binds into a financial plan the way a fact does, but it is market data and never becomes a fact. It has
-its own stored observation and its own bound-input variant. No operation reads it yet: `market_cap` and `pe_ratio` come
-with step 3 of #444.
+its own stored observation and its own bound-input variant. `market_cap` and `pe_ratio` read it (next section).
 
 - **Stored as stated:** `npm run capture:price -- <listing_uuid>` (in `services/market`) records Polygon's unadjusted
   session closes of the last week and, when the key is entitled to snapshots, the last trade. Rows go to the
@@ -294,18 +293,69 @@ with step 3 of #444.
 - **Selection** (`services/financial-engine/src/select-price.ts`): the subject's one common-stock listing at the cutoff
   decides, as for EPS. Its observations with the newest trade time known by the cutoff are read, and among them the
   latest known. Gaps: `missing_input` (none known by then), `publication_time_unknown` (only ones without a known
-  time), `precision_unverified` (a token outside the numeric policy), `conflicting_evidence` (the latest prices
-  disagree), and `stale_input`, then the split gaps of #387. A price is stale when it traded before the last regular
-  session the cutoff has closed (`lastRegularSessionDate`, `services/market/src/ytd-window.ts`): weekdays, closing at
-  16:00 exchange time (`SESSION_CLOSE_MINUTES`).
+  time), `source_class_not_allowed` (the authority does not allow market data), `precision_unverified` (a token
+  outside the numeric policy), `conflicting_evidence` (the latest prices disagree), and `stale_input`, then the split
+  gaps of #387. A price is stale when it traded before the last regular session the cutoff has closed
+  (`lastRegularSessionDate`, `services/market/src/ytd-window.ts`): weekdays, closing at 16:00 exchange time
+  (`SESSION_CLOSE_MINUTES`). A Friday close is current until Monday's session closes.
 - **Seal:** the snapshot verifier reloads the observation. A missing one fails the input
   (`price_observation_unavailable`), and so does one whose token, times, listing, response, or currency no longer
   match (`price_observation_changed`). The verifier resolves the subject's listing again (`listing_changed`) and
   rebuilds the restatement from that listing's current splits (`splits_changed`), as for EPS. The seal cites the
   price's source.
 - **Limits:** weekdays stand in for an exchange calendar, so until the session after a market holiday closes, the
-  price before the holiday reads as stale. Planners and chat do not offer `share_price` (`PLANNABLE_METRICS`) until
-  an operation reads it.
+  price before the holiday reads as stale.
+
+## Market cap and P/E (#444)
+
+Two operations read a share price (`services/financial-core/src/operations.ts`). `market_cap.v1` multiplies it by
+shares outstanding, in the price's currency. `pe_ratio.v1` divides it by diluted EPS and is dimensionless, rounded
+like every other division (`numeric-policy.v1`). `ratio` cannot express either: market cap is a product, and P/E
+divides an instant price by a duration's EPS.
+
+- **One reference date:** every operand is restated to its listing's reference date R. An operand records the
+  listing and R it was restated to (`FinancialOperand.restated_to`). An operand that was never restated, such as a
+  count stored before #387, gaps `incompatible_basis`. Two restatements of one subject on different listings or dates
+  contradict its bindings, since a subject resolves to one listing per run, so they fail the unit's integrity
+  (`split_reference_mismatch`). The selectors already bind the price and the count from the subject's one
+  common-stock listing. The operation checks that they did.
+- **Which EPS:** the latest fiscal year's diluted EPS, as the screener uses (`services/screener/src/db-candidates.ts`).
+  The earnings node must select `{ "kind": "latest", "period_type": "annual", "offset": 0 }`, or P/E gaps
+  `unsupported_period`, so "P/E" always means the year that was latest at the cutoff. Trailing-twelve-month EPS
+  cannot be expressed: `trailing_sum` adds only flows, and a fourth quarter's EPS is never derived. Basic EPS never
+  stands in (`incompatible_definition`).
+- **Gaps:** EPS of zero or less is `non_positive_denominator`, and a share count of zero or less `non_positive_base`.
+  A price and EPS in different currencies are `incompatible_currency`: v1 converts no currency. An input's gap blocks
+  the figures that read it (`blocked_by_dependency`), and its own output names the reason.
+- **Planning:** a deterministic plan asks for both like any approved operation. The planner rejects a `share_price`
+  node that is not the price of a valuation (`price_without_valuation`). The price may be published beside the
+  figures it feeds, but never alone. The model planner's prompt does not list the valuations, so chat, its only
+  caller, plans as before until #444 step 4.
+- **Presentation:** a valuation is dated by its price ("latest known at the cutoff"), since its other operand is
+  restated to the same R. P/E reads as a multiple, as an approved ratio does.
+- **Seal:** the snapshot verifier recomputes both through the operation registry and checks each input as it does
+  for any price or fact.
+
+## Source classes at binding (#444)
+
+Every runtime authority declares `allowed_source_classes`. Binding uses evidence only from those classes
+(`services/financial-engine/src/select-inputs.ts`).
+
+- **Class:** a source's class follows its `sources.kind` (`sourceClassOf`,
+  `services/financial-core/src/evidence-vocabulary.ts`). A filing is `sec_filing`, since every filing this system
+  ingests comes from EDGAR. A price observation's source is `market_data`. No other kind has a class yet, so no
+  authority admits an article, a press release, or an upload.
+- **Eligibility:** a candidate from a class the authority does not allow is ineligible, with the reason
+  `source_class_not_allowed`. That reason is reported only when nothing closer to eligibility exists. A disallowed
+  candidate never wins a tie, never raises a conflict, and never names a latest period. A share count still finds the
+  newest filing among every filed count before eligibility, so a disallowed newest count gaps rather than letting an
+  older one stand in. A not-yet-public candidate stays invisible, so its class leaks nothing about the future.
+- **Prices:** of the newest trade's observations, only allowed ones bind. When none is allowed, the slot gaps
+  `source_class_not_allowed`, never an older price.
+- **Grants:** every surface allows `sec_filing` only. Surfaces grant `market_data` in #444 step 4. Tests that bind a
+  price pass it explicitly.
+- **Limits:** the run does not record its authority's classes, so the seal cannot re-check them, and a retry reuses
+  the first attempt's bindings.
 
 ## Which facts may ground an answer
 

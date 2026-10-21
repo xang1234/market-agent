@@ -225,7 +225,9 @@
         { "$ref": "#/$defs/RatioNode" },
         { "$ref": "#/$defs/TrailingSumNode" },
         { "$ref": "#/$defs/ThresholdNode" },
-        { "$ref": "#/$defs/PeerCompareNode" }
+        { "$ref": "#/$defs/PeerCompareNode" },
+        { "$ref": "#/$defs/MarketCapNode" },
+        { "$ref": "#/$defs/PeRatioNode" }
       ]
     },
     "ReportedMetricNode": {
@@ -334,6 +336,30 @@
           "items": { "$ref": "#/$defs/LocalId" }
         },
         "direction": { "enum": ["highest", "lowest"] }
+      }
+    },
+    "MarketCapNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_id", "operation", "operation_version", "price", "shares"],
+      "properties": {
+        "node_id": { "$ref": "#/$defs/LocalId" },
+        "operation": { "const": "market_cap" },
+        "operation_version": { "$ref": "#/$defs/VersionTag" },
+        "price": { "$ref": "#/$defs/LocalId" },
+        "shares": { "$ref": "#/$defs/LocalId" }
+      }
+    },
+    "PeRatioNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_id", "operation", "operation_version", "price", "earnings"],
+      "properties": {
+        "node_id": { "$ref": "#/$defs/LocalId" },
+        "operation": { "const": "pe_ratio" },
+        "operation_version": { "$ref": "#/$defs/VersionTag" },
+        "price": { "$ref": "#/$defs/LocalId" },
+        "earnings": { "$ref": "#/$defs/LocalId" }
       }
     },
     "RequestedOutput": {

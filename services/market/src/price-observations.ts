@@ -42,8 +42,8 @@ export async function recordPriceObservations(db: ListingQueryExecutor, prices: 
 }
 
 export type LatestPriceObservations = Readonly<{
-  /** The observations with the newest trade time known by the cutoff, at the latest time any of them was known. */
-  latest: ReadonlyArray<PriceObservation & Readonly<{ known_at: string }>>;
+  /** The observations with the newest trade time known by the cutoff, at the latest time any of them was known, with their source's `sources.kind`. */
+  latest: ReadonlyArray<PriceObservation & Readonly<{ known_at: string; source_kind: string }>>;
   /** Whether an observation traded by the cutoff has no provable publication time. */
   unknown_publication: boolean;
 }>;
@@ -52,13 +52,13 @@ const ISO_UTC = `'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'`;
 const ROW = `o.observation_id::text, o.listing_id::text, o.source_id::text, o.kind, o.price_text, o.currency,
              to_char(o.observed_at at time zone 'UTC', ${ISO_UTC}) as observed_at,
              to_char(o.known_at at time zone 'UTC', ${ISO_UTC}) as known_at,
-             to_char(o.fetched_at at time zone 'UTC', ${ISO_UTC}) as fetched_at, o.body_sha256`;
+             to_char(o.fetched_at at time zone 'UTC', ${ISO_UTC}) as fetched_at, o.body_sha256, s.kind::text as source_kind`;
 // Public information only: a source a user uploaded never grounds a certified figure.
 const PUBLIC = `price_observations o join sources s on s.source_id = o.source_id and s.user_id is null`;
 
 /** The listing's latest public price observations known by `asOf`. */
 export async function loadLatestPriceObservations(db: ListingQueryExecutor, listingId: UUID, asOf: string): Promise<LatestPriceObservations> {
-  const { rows } = await db.query<PriceObservation & { known_at: string }>(
+  const { rows } = await db.query<PriceObservation & { known_at: string; source_kind: string }>(
     `select ${ROW} from ${PUBLIC}
       where o.listing_id = $1::uuid and o.known_at <= $2::timestamptz
         and (o.observed_at, o.known_at) = (

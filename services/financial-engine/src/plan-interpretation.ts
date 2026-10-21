@@ -17,6 +17,8 @@ const OPERATION_PHRASES: Record<Exclude<OperationNode["operation"], "reported_me
   trailing_sum: "trailing four-quarter sum",
   threshold: "threshold check",
   peer_compare: "peer ranking",
+  market_cap: "market capitalization (share price × shares outstanding)",
+  pe_ratio: "P/E ratio (share price / latest fiscal year diluted EPS)",
 };
 
 /** `labels` maps subject slot ids to display names resolved by the server. */

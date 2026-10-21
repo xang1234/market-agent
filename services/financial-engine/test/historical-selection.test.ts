@@ -31,6 +31,7 @@ function candidate(spec: CandidateSpec = {}): InputCandidate {
   return {
     fact_id: id,
     source_id: "11111111-1111-4111-8111-111111111111",
+    source_class: "sec_filing",
     source_version_hash: HASH,
     metric_key: "revenue",
     period: { start: spec.start ?? `${year}-01-01`, end: spec.end ?? `${year}-12-31`, fiscal_year: year, fiscal_period: spec.period ?? "FY" },
@@ -84,7 +85,7 @@ const FY2023: ReportedMetricNode = {
 };
 
 function policy(overrides: Partial<SelectionPolicy> = {}): SelectionPolicy {
-  return { knowledge_cutoff: "2024-01-15T23:59:59.999-05:00", reporting_basis: "as_reported", max_age_days: null, ...overrides };
+  return { knowledge_cutoff: "2024-01-15T23:59:59.999-05:00", reporting_basis: "as_reported", max_age_days: null, allowed_source_classes: ["sec_filing"], ...overrides };
 }
 
 function selectedId(result: ReturnType<typeof selectInput>): string {
@@ -257,4 +258,24 @@ test("selection reports the conservative publication bound it relied on", () => 
     timing_precision: "date",
     source_timezone: "America/New_York",
   });
+});
+
+test("evidence from a source class the authority does not allow is never bound (#444)", () => {
+  const disallowed = (spec: CandidateSpec): InputCandidate => ({ ...candidate(spec), source_class: "issuer_disclosure" });
+  const release = disallowed({ value: "100" });
+  const filing = candidate({ value: "100" });
+  assert.equal(gapReason(selectInput(FY2023, [release], policy())), "source_class_not_allowed");
+  assert.equal(selectedId(selectInput(FY2023, [release], policy({ allowed_source_classes: ["issuer_disclosure"] }))), release.fact_id);
+  // A source no class covers is allowed by no authority.
+  const every = policy({ allowed_source_classes: ["sec_filing", "issuer_disclosure", "licensed_fundamentals", "market_data"] });
+  assert.equal(gapReason(selectInput(FY2023, [{ ...candidate(), source_class: null }], every)), "source_class_not_allowed");
+  // Beside an allowed value it never wins the tie its lower id would, and a different value is no conflict.
+  assert.equal(selectedId(selectInput(FY2023, [release, filing], policy())), filing.fact_id);
+  assert.equal(selectedId(selectInput(FY2023, [disallowed({ value: "90" }), filing], policy())), filing.fact_id);
+  // An allowed value that lacks a proof is the closer reason.
+  assert.equal(gapReason(selectInput(FY2023, [disallowed({}), candidate({ precision: null })], policy())), "precision_unverified");
+  // Its newer period is not the latest one this authority can bind.
+  const latest: ReportedMetricNode = { ...FY2023, period: { kind: "latest", period_type: "annual", offset: 0 } };
+  const fy2024 = disallowed({ year: 2024, publishedLocalDate: "2025-01-10" });
+  assert.equal(selectedId(selectInput(latest, [filing, fy2024], policy({ knowledge_cutoff: "2025-06-01T00:00:00Z" }))), filing.fact_id);
 });

@@ -43,12 +43,13 @@ test("financial input candidates", { timeout: 180_000 }, async (t) => {
     assert.equal(original.scale_text, "1");
     assert.equal(original.superseded_by, IDS.restated);
     assert.equal(original.source_version_hash, H.v1);
+    assert.equal(original.source_kind, "filing");
     assert.equal(original.reported_at, "2024-01-10T00:00:00.000Z");
   });
 
   await t.test("private facts need owner-visible scope and the owner's identity", async () => {
     const owner = await listFinancialInputCandidates(db, request({ scope: "owner_visible" }));
-    assert.ok(owner.candidates.some((candidate) => candidate.fact_id === IDS.privateFact));
+    assert.equal(owner.candidates.find((candidate) => candidate.fact_id === IDS.privateFact)?.source_kind, "upload");
     const other = await listFinancialInputCandidates(db, request({ scope: "owner_visible", user_id: IDS.other }));
     assert.ok(!other.candidates.some((candidate) => candidate.fact_id === IDS.privateFact));
   });
