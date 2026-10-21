@@ -187,6 +187,30 @@ test("an engine answer names what the reading of its question asks for and the p
   assert.deepEqual(uncoveredAsks(reading(["margins"], ["income_statement"], ["gross_margin"]), revenue), ["gross margin"]);
 });
 
+test("an engine answer names what it leaves out for each company it covers (#425)", () => {
+  const q4 = { kind: "fiscal_period", fiscal_year: 2026, fiscal_period: "Q4" };
+  const reported = (node_id: string, subject_slot: string, metric_key: string) => ({ node_id, operation: "reported_metric", subject_slot, metric_key, period: q4 });
+  const planned = buildDeterministicPlan(planningContext("NVDA and AMD"), {
+    subjects: [{ slot_id: "a", mention: "NVDA" }, { slot_id: "b", mention: "AMD" }],
+    operations: [
+      reported("a_oi", "a", "operating_income"),
+      reported("a_rev", "a", "revenue"),
+      { node_id: "a_om", operation: "operating_margin", numerator: "a_oi", revenue: "a_rev" },
+      reported("b_rev", "b", "revenue"),
+    ],
+    outputs: ["a_rev", "a_om", "b_rev"].map((node_id) => ({ output_id: `out_${node_id}`, node_id })),
+    thresholds: [],
+  });
+  assert.equal(planned.outcome, "ready", JSON.stringify(planned));
+  const plan = (planned as Extract<PlanningResult, { outcome: "ready" }>).plan;
+  const ticker = (symbol: string) => GOLDEN_COMPANIES.find((company) => company.ticker === symbol)!.issuer_id;
+  const labels = new Map([[ticker("NVDA"), "NVDA"], [ticker("AMD"), "AMD"]]);
+
+  assert.deepEqual(uncoveredAsks(reading(["margins"], ["income_statement"], ["revenue", "operating_margin"]), plan, labels), ["operating margin for AMD"]);
+  assert.deepEqual(uncoveredAsks(reading(["margins"], ["income_statement"]), plan, labels), ["a margin for AMD"]);
+  assert.deepEqual(uncoveredAsks(reading(["benchmark"], ["income_statement"], ["net_income"]), plan, labels), ["net income", "a comparison with a benchmark index"], "an ask no company's figures answer names no company");
+});
+
 test("an engine answer checks a qualified metric against what its plan computes (#425)", () => {
   const year = (fiscal_year: number) => ({ kind: "fiscal_period", fiscal_year, fiscal_period: "FY" });
   const eps = (node_id: string, fiscal_year: number) => ({ node_id, operation: "reported_metric", subject_slot: "a", metric_key: "eps_diluted", period: year(fiscal_year) });
