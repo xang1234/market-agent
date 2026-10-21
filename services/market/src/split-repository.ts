@@ -41,7 +41,12 @@ export async function syncListingSplits(
     // The replacement below sees only its own snapshot, so two syncs of one
     // listing at once would both commit and keep the union of their lists.
     await client.query("select pg_advisory_xact_lock(hashtextextended($1::text, 0))", [listing.listing_id]);
-    await replaceListingSplits(client, listing.listing_id, checkedAt, splits);
+    // A sync that fetched before the stored one leaves the newer list in place.
+    const { rows } = await client.query(
+      `select 1 from listing_split_coverage where listing_id = $1::uuid and checked_at > $2::timestamptz`,
+      [listing.listing_id, checkedAt],
+    );
+    if (rows.length === 0) await replaceListingSplits(client, listing.listing_id, checkedAt, splits);
     await client.query("commit");
   } catch (error) {
     await client.query("rollback").catch(() => {});
