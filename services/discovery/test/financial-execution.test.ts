@@ -53,6 +53,23 @@ test("discovery numerical criteria execution", { timeout: 300_000 }, async (t) =
     assert.deepEqual([outcome.status, outcome.reason_code], ["unresolved", "parent_authority_required"]);
   });
 
+  await t.test("a criterion on EPS is unresolved until a saved rule carries its own split basis date", async () => {
+    const outcome = await evaluateSavedRule({ pool, evidence: createEvidenceFinancialPort }, {
+      authority: createRuntimeAuthority({
+        owner_user_id: IDS.owner, egress_channel: "discovery",
+        parent: { kind: "discovery_run", id: lease.run_id, version: "brief:eps" },
+        allowed_source_classes: ["sec_filing"], feature: { surface: "discovery", capability: "financial-criterion", mode: "enforce" },
+        approval_state: "approved", lease: null,
+      }),
+      request_key: "eps", subject: { kind: "issuer", id: IDS.issuerA },
+      rule: { metric_key: "eps_diluted", unit: "USD", period_kind: "fiscal_y", operator: "gte", threshold: "5", max_age_days: 400 },
+      as_of: CUTOFF, reporting_basis: "as_restated",
+      origin: { kind: "discovery_criterion", ref: "eps" }, threshold_attribution: { kind: "approved_discovery_brief", ref: "eps" },
+      publication_unit_kind: "discovery_assessment", persistParent: async () => {},
+    });
+    assert.deepEqual([outcome.status, outcome.reason_code, outcome.certified], ["unresolved", "threshold_has_no_split_basis", null]);
+  });
+
   await t.test("the recovery supervisor never resumes a campaign's calculations", async () => {
     // Every campaign calculation above released its lease, so each would otherwise be eligible.
     const recoverable = await listRecoverableRuns(db, { parent_kinds: ["discovery_run"], limit: 50 });
