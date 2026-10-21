@@ -174,19 +174,16 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     // either (a question about a company, a gap no model planned) reads
     // nothing. The scope waits on the reading, so each use of them decides
     // first whether to read (prepared). The saved answer has both already.
-    let settle: (reading: Promise<ScopeProposal | null> | null) => void = () => {};
+    let decideReading = (_read: boolean): void => {};
     const reading = answered ? Promise.resolve(null) : new Promise<ScopeProposal | null>((resolve) => {
-      settle = resolve;
+      decideReading = (read) => {
+        decideReading = () => {};
+        resolve(read ? Promise.resolve().then(() => deps.readQuestion?.(text) ?? null).catch((reason) => {
+          console.warn("[chat] no reading of the question; the financial answer says its coverage was not checked", reason);
+          return null;
+        }) : null);
+      };
     });
-    let decided = false;
-    const decideReading = (read: boolean) => {
-      if (decided) return;
-      decided = true;
-      settle(read ? Promise.resolve().then(() => deps.readQuestion?.(text) ?? null).catch((reason) => {
-        console.warn("[chat] no reading of the question; the financial answer says its coverage was not checked", reason);
-        return null;
-      }) : null);
-    };
     const { planningModel: model } = deps;
     const planningModel: PlanningModel | null = model && ((request) => {
       decideReading(true);
@@ -795,26 +792,25 @@ function inSentence(label: string): string {
   return /\p{Ll}/u.test(label[1] ?? "") ? `${label[0]!.toLowerCase()}${label.slice(1)}` : label;
 }
 
-// A gap an earlier attempt of the turn saved. One that cannot be read back is
-// returned without its message, as a published answer is.
-async function savedGap(db: SqlExecutor, threadId: string, messageId: string): Promise<ChatFinancialTurn> {
+// A saved message as the thread reads it; undefined when it cannot be read
+// back, so the turn completes without it.
+async function readBack(db: SqlExecutor, threadId: string, messageId: string): Promise<ChatReadMessage | null | undefined> {
   try {
-    return { kind: "saved", message_id: messageId, message: await readChatMessage(db, { thread_id: threadId, message_id: messageId }) };
+    return await readChatMessage(db, { thread_id: threadId, message_id: messageId });
   } catch (error) {
     logUnreadMessage(messageId, error);
-    return { kind: "saved", message_id: messageId, message: null };
+    return undefined;
   }
 }
 
+// A gap an earlier attempt of the turn saved.
+async function savedGap(db: SqlExecutor, threadId: string, messageId: string): Promise<ChatFinancialTurn> {
+  return { kind: "saved", message_id: messageId, message: (await readBack(db, threadId, messageId)) ?? null };
+}
+
 async function published(db: SqlExecutor, runId: string, threadId: string, messageId: string): Promise<ChatFinancialTurn> {
-  let message: ChatReadMessage | null;
-  try {
-    message = await readChatMessage(db, { thread_id: threadId, message_id: messageId });
-  } catch (error) {
-    logUnreadMessage(messageId, error);
-    return { kind: "published", run_id: runId, message_id: messageId, message: null };
-  }
-  return message ? { kind: "published", run_id: runId, message_id: messageId, message } : gap("run_failed");
+  const message = await readBack(db, threadId, messageId);
+  return message === null ? gap("run_failed") : { kind: "published", run_id: runId, message_id: messageId, message: message ?? null };
 }
 
 // What an unsupported request asks for, by the planner's reason (its closed
