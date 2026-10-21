@@ -196,7 +196,6 @@ function inRequestedPeriod(candidate: InputCandidate, selector: PeriodSelector):
   return selector.period_type === "annual" ? candidate.period.fiscal_period === "FY" : candidate.period.fiscal_period !== "FY";
 }
 
-/** How a selected input binds: unadjusted, restated from as filed, or not at all. */
 export type BoundBasis =
   | Readonly<{ status: "unadjusted" }>
   | Readonly<{ status: "restated"; split_adjustment: SplitAdjustmentV1 }>

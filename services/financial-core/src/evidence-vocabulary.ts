@@ -26,7 +26,6 @@ export const ADJUSTMENT_BASES = ["unadjusted", "split_adjusted", "as_filed"] as 
 export type AdjustmentBasis = (typeof ADJUSTMENT_BASES)[number];
 /** An as-filed value binds only once restated to the plan's reference date. */
 export type BoundAdjustmentBasis = Exclude<AdjustmentBasis, "as_filed">;
-/** A stored value's adjustment basis; an as-filed one names its filing date. */
 export type AdjustmentContext =
   | Readonly<{ adjustment_basis: BoundAdjustmentBasis; as_filed_on?: never }>
   | Readonly<{ adjustment_basis: "as_filed"; as_filed_on: string }>;

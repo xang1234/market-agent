@@ -22,7 +22,6 @@ export { DISCLOSURE_RELATIONS };
 
 const REPORTING_BASES = ["as_reported", "as_restated"] as const;
 
-/** A context as stored, without the fact it belongs to. */
 export type FinancialContextFields = Readonly<{
   context_version: string;
   period_type: PeriodType;
