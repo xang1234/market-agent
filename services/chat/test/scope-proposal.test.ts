@@ -29,8 +29,8 @@ test("a full reply is read into the proposal, each metric built from the catalog
     income_items: ["revenue", "operating_income", "revenue"],
   })), {
     metrics: [
-      { metric_key: "eps_diluted_adjusted", label: "Adjusted earnings per share", available: false },
-      { metric_key: "free_cash_flow_growth", label: "Free cash flow growth", available: false },
+      { metric_key: "eps_diluted_adjusted", label: "Adjusted earnings per share", available: false, base: "eps_diluted", adjustment: "adjusted" },
+      { metric_key: "free_cash_flow_growth", label: "Free cash flow growth", available: false, base: "free_cash_flow", qualifier: "growth" },
       { metric_key: "income_statement", label: "Revenue, profit and margins", available: true },
     ],
     asks: new Set(["guidance", "explains"]),
@@ -77,7 +77,7 @@ test("an adjusted income figure is the non-GAAP gap; an unavailable metric stays
     { metric_key: "ebitda", label: "EBITDA", available: false },
   ]);
   assert.deepEqual(parseProposal(reply({ metrics: [{ metric: "free_cash_flow", qualifier: "ytd" }] }))?.metrics, [
-    { metric_key: "free_cash_flow_ytd", label: "Free cash flow year to date", available: false },
+    { metric_key: "free_cash_flow_ytd", label: "Free cash flow year to date", available: false, base: "free_cash_flow", qualifier: "ytd" },
   ]);
 });
 
