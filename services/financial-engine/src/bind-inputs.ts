@@ -97,6 +97,7 @@ export async function bindPlanInputs(input: {
       knowledge_cutoff: plan.time.knowledge_cutoff,
       reporting_basis: plan.policies.reporting_basis,
       max_age_days: plan.policies.freshness.max_age_days,
+      allowed_source_classes: authority.allowed_source_classes,
     };
     const latest = sharedLatestPeriods(reads.map((read) => read.status === "gap"
       ? { node: read.node, candidates: [], incomplete: read.reason_code }
@@ -109,7 +110,7 @@ export async function bindPlanInputs(input: {
       bindings.set(read.node.node_id, outcome.binding);
     }
     for (const node of priceNodes) {
-      const outcome = await bindPriceSlot(tx, node, plan, histories.get(node.subject_slot), evidence);
+      const outcome = await bindPriceSlot(tx, node, plan, policy, histories.get(node.subject_slot), evidence);
       await persistBinding(tx.client, runId, outcome);
       bindings.set(node.node_id, outcome.binding);
     }
@@ -210,6 +211,7 @@ async function bindPriceSlot(
   { client }: FencedTx,
   node: ReportedMetricNode,
   plan: FinancialPlanV1,
+  policy: SelectionPolicy,
   history: SplitHistory | undefined,
   evidence: FinancialEvidencePort,
 ): Promise<SlotOutcome> {
@@ -224,7 +226,7 @@ async function bindPriceSlot(
   const page = await evidence.readPriceObservations({ listing_id: history.listing_id, as_of: plan.time.knowledge_cutoff });
   await client.query(page.status === "error" ? "rollback to savepoint price_read" : "release savepoint price_read");
   if (page.status === "error") return gap(page.reason_code);
-  const selection = selectPrice(page, history, plan.time.knowledge_cutoff);
+  const selection = selectPrice(page, history, policy);
   const digest = priceCandidateSetDigest(node.node_id, page.latest);
   if (selection.status === "gap") return gap(selection.reason_code, page.latest);
   return outcome(boundPriceBinding(node, subjectSlot(plan, node), plan, selection, digest), page.latest);

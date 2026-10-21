@@ -13,6 +13,7 @@ import {
   validateFinancialPlan,
   type FinancialPlanV1,
   type FinancialRuntimeAuthority,
+  type SourceClass,
 } from "../../financial-core/src/index.ts";
 import { snapshotTransactionClient, type SnapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
 import { createEvidenceFinancialPort } from "../src/evidence-adapter.ts";
@@ -257,12 +258,15 @@ export function marginPlan(options: Pick<PlanOptions, "cutoff"> = {}): Financial
   return validated.value;
 }
 
-export function authorityFor(owner: string = IDS.owner, overrides: { lease?: { epoch: number; fence_token: string } | null } = {}): FinancialRuntimeAuthority {
+export function authorityFor(
+  owner: string = IDS.owner,
+  overrides: { lease?: { epoch: number; fence_token: string } | null; allowed_source_classes?: SourceClass[] } = {},
+): FinancialRuntimeAuthority {
   return createRuntimeAuthority({
     owner_user_id: owner,
     egress_channel: "chat",
     parent: { kind: "chat_thread", id: IDS.parent, version: "1" },
-    allowed_source_classes: ["sec_filing"],
+    allowed_source_classes: overrides.allowed_source_classes ?? ["sec_filing"],
     feature: { surface: "chat", capability: "financial-answer", mode: "enforce" },
     approval_state: "not_required",
     lease: overrides.lease ?? null,

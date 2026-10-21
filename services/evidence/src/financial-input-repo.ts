@@ -73,6 +73,8 @@ export type FinancialInputCandidate = Readonly<{
   supersedes: string | null;
   superseded_by: string | null;
   source_id: string;
+  /** The source's `sources.kind`, which decides its class (sourceClassOf). */
+  source_kind: string;
   source_version_hash: string | null;
   context: FinancialContextFields | null;
   precision: PrecisionProof | null;
@@ -106,7 +108,7 @@ export async function listFinancialInputCandidates(db: RowQueryExecutor, request
             f.coverage_level::text,
             to_char(f.reported_at at time zone 'UTC', ${ISO_UTC}) as reported_at,
             to_char(f.observed_at at time zone 'UTC', ${ISO_UTC}) as observed_at,
-            f.supersedes::text, f.superseded_by::text, f.source_id::text,
+            f.supersedes::text, f.superseded_by::text, f.source_id::text, s.kind::text as source_kind,
             normalized_content_hash(s.content_hash) as source_version_hash,
             ctx.context, prec.precision, coalesce(pub.publication, '[]'::jsonb) as publication
        from facts f
@@ -192,6 +194,7 @@ function toCandidate(row: Record<string, unknown>): FinancialInputCandidate {
     supersedes: row.supersedes as string | null,
     superseded_by: row.superseded_by as string | null,
     source_id: row.source_id as string,
+    source_kind: row.source_kind as string,
     source_version_hash: row.source_version_hash as string | null,
     context: (row.context ?? null) as FinancialInputCandidate["context"],
     precision: (row.precision ?? null) as PrecisionProof | null,

@@ -9,6 +9,7 @@ import type {
   ProvenPrecisionClass,
   PublicationTimingPrecision,
   ShareBasis,
+  SourceClass,
 } from "./evidence-vocabulary.ts";
 
 export type UUID = string;
@@ -127,6 +128,7 @@ export const REASON_CODES = [
   "split_history_missing",
   "split_history_stale",
   "restatement_unverified",
+  "source_class_not_allowed",
 ] as const;
 export type ReasonCode = (typeof REASON_CODES)[number];
 
@@ -318,7 +320,8 @@ export type FinancialRuntimeAuthorityV1 = {
     id: UUID;
     version: string;
   };
-  allowed_source_classes: Array<"sec_filing" | "issuer_disclosure" | "licensed_fundamentals" | "market_data">;
+  /** Binding uses evidence from these classes only (sourceClassOf); anything else is `source_class_not_allowed`. */
+  allowed_source_classes: SourceClass[];
   feature: { surface: Surface; capability: VersionTag; mode: FeatureMode };
   approval_state: "approved" | "not_required";
   lease: { epoch: number; fence_token: string } | null;

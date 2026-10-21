@@ -20,6 +20,7 @@ function eps(context: Partial<NonNullable<InputCandidate["context"]>> = {}): Inp
   return {
     fact_id: "00000000-0000-4000-8000-000000000001",
     source_id: "11111111-1111-4111-8111-111111111111",
+    source_class: "sec_filing",
     source_version_hash: HASH,
     metric_key: "eps_diluted",
     period: { start: "2023-01-30", end: "2024-01-28", fiscal_year: 2024, fiscal_period: "FY" },
@@ -65,7 +66,7 @@ const NVDA_HISTORY: SplitHistory = {
 };
 
 function selected(candidate: InputCandidate, cutoff: string): SelectedInput {
-  const selection = selectInput(EPS_FY2024, [candidate], { knowledge_cutoff: cutoff, reporting_basis: "as_reported", max_age_days: null });
+  const selection = selectInput(EPS_FY2024, [candidate], { knowledge_cutoff: cutoff, reporting_basis: "as_reported", max_age_days: null, allowed_source_classes: ["sec_filing"] });
   if (selection.status !== "selected") return assert.fail(selection.reason_code);
   return selection.input;
 }
@@ -128,7 +129,7 @@ function laterDisclosure(value: string, relation: "economic_restatement" | "unve
 
 test("under as_restated, a later disclosure whose split basis is unverified is a gap; as_reported binds the original", () => {
   const choose = (reporting_basis: "as_reported" | "as_restated") => {
-    const selection = selectInput(EPS_FY2024, [eps(), laterDisclosure("1.19", "unverified_restatement")], { knowledge_cutoff: "2026-10-02T00:00:00.000Z", reporting_basis, max_age_days: null });
+    const selection = selectInput(EPS_FY2024, [eps(), laterDisclosure("1.19", "unverified_restatement")], { knowledge_cutoff: "2026-10-02T00:00:00.000Z", reporting_basis, max_age_days: null, allowed_source_classes: ["sec_filing"] });
     return selection.status === "selected" ? selection.input.candidate.value_text : selection.reason_code;
   };
   assert.deepEqual([choose("as_reported"), choose("as_restated")], ["11.93", "restatement_unverified"]);
@@ -136,7 +137,7 @@ test("under as_restated, a later disclosure whose split basis is unverified is a
 
 test("an as-filed restatement binds restated from the restating filing's date", () => {
   const cutoff = "2026-10-02T00:00:00.000Z";
-  const selection = selectInput(EPS_FY2024, [eps(), laterDisclosure("1.08", "economic_restatement")], { knowledge_cutoff: cutoff, reporting_basis: "as_restated", max_age_days: null });
+  const selection = selectInput(EPS_FY2024, [eps(), laterDisclosure("1.08", "economic_restatement")], { knowledge_cutoff: cutoff, reporting_basis: "as_restated", max_age_days: null, allowed_source_classes: ["sec_filing"] });
   if (selection.status !== "selected") return assert.fail(selection.reason_code);
   const basis = boundBasis(selection.input, NVDA_HISTORY, cutoff);
   assert.deepEqual(basis.status === "restated" && [basis.split_adjustment.as_filed_on, basis.split_adjustment.splits, basis.split_adjustment.adjusted_native_value], [

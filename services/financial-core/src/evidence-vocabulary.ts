@@ -35,3 +35,17 @@ export type AdjustmentContext =
 
 export const SHARE_BASES = ["basic", "diluted", "not_applicable"] as const;
 export type ShareBasis = (typeof SHARE_BASES)[number];
+
+/** The classes of evidence a runtime authority allows a run to bind (#444). */
+export const SOURCE_CLASSES = ["sec_filing", "issuer_disclosure", "licensed_fundamentals", "market_data"] as const;
+export type SourceClass = (typeof SOURCE_CLASSES)[number];
+
+/**
+ * The class of a source, by its `sources.kind`. Every filing this system
+ * ingests is an SEC filing, and every price observation is market data. No
+ * other kind has a class yet, so no authority admits an article, a press
+ * release, or an upload.
+ */
+export function sourceClassOf(kind: string): SourceClass | null {
+  return kind === "filing" ? "sec_filing" : kind === "market_data" ? "market_data" : null;
+}

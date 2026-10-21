@@ -165,7 +165,7 @@ test("a filing's cover count is stored as filed on its own date", { timeout: 300
     const latest = { node_id: "shares", operation: "reported_metric", operation_version: "reported_metric.v1", subject_slot: "a", metric_key: "shares_outstanding", period: { kind: "latest", period_type: "quarterly", offset: 0 } } as const;
     // After the download that stored it: the Q2 10-Q is the latest filing, and the Q1 10-Q's count is superseded.
     assert.deepEqual(
-      selectInput(latest, page.status === "ok" ? page.candidates : [], { knowledge_cutoff: "2026-10-02T00:00:00.000Z", reporting_basis: "as_reported", max_age_days: null }),
+      selectInput(latest, page.status === "ok" ? page.candidates : [], { knowledge_cutoff: "2026-10-02T00:00:00.000Z", reporting_basis: "as_reported", max_age_days: null, allowed_source_classes: ["sec_filing"] }),
       { status: "gap", reason_code: "incompatible_scope" },
     );
   });

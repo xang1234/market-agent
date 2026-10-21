@@ -41,7 +41,7 @@ export async function selectFiscalYear(
     metric_key: slot.metricKey,
     period: { kind: "fiscal_period" as const, fiscal_year: slot.fiscalYear, fiscal_period: "FY" as const },
   };
-  return selectInput(node, page.status === "ok" ? page.candidates : [], { knowledge_cutoff: cutoff, reporting_basis: basis, max_age_days: null });
+  return selectInput(node, page.status === "ok" ? page.candidates : [], { knowledge_cutoff: cutoff, reporting_basis: basis, max_age_days: null, allowed_source_classes: ["sec_filing"] });
 }
 
 export function originalContext(factId: string, relation: "original" | "economic_restatement" = "original") {

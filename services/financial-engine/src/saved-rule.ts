@@ -206,8 +206,9 @@ async function thresholdUnit(
   if (page.status === "error") return page.reason_code;
   if (page.truncated) return "scope_limit_exceeded";
   const cutoff = new Date(request.as_of).toISOString();
+  const policy = { knowledge_cutoff: cutoff, allowed_source_classes: request.authority.allowed_source_classes };
   const currencies = new Set(page.candidates.flatMap((candidate) =>
-    candidate.unit !== null && "currency" in candidate.unit && bindableAt(candidate, cutoff) ? [candidate.unit.currency] : []));
+    candidate.unit !== null && "currency" in candidate.unit && bindableAt(candidate, policy) ? [candidate.unit.currency] : []));
   return currencies.size === 1 ? { kind: unitKind, currency: [...currencies][0]! } : "unit_does_not_match_definition";
 }
 

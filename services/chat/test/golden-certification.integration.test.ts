@@ -51,7 +51,7 @@ test("golden facts certify at the golden cutoff and an undeclared fact does not"
       limit: 100,
     });
     assert(page.status === "ok", `candidates unreadable: ${JSON.stringify(page)}`);
-    return selectInput(revenueNode(fiscalYear), page.candidates, { knowledge_cutoff: cutoff, reporting_basis: "as_reported", max_age_days: null }, page);
+    return selectInput(revenueNode(fiscalYear), page.candidates, { knowledge_cutoff: cutoff, reporting_basis: "as_reported", max_age_days: null, allowed_source_classes: ["sec_filing"] }, page);
   };
 
   const atCutoff = await select(2026, GOLDEN_AS_OF);
