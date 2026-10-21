@@ -8,7 +8,6 @@ import { connectedPool } from "../../../db/test/docker-pg.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { databaseUrl, engineDatabase, IDS } from "../../financial-engine/test/db-fixtures.ts";
-import type { TestContext } from "node:test";
 import {
   createChatCoordinator,
   type ChatAnalystToolRuntime,
@@ -151,19 +150,6 @@ export function chatHarness(
     return { turnId, events: handle.events };
   };
   return { run, persisted };
-}
-
-/** The chat server's own message persistence (local-runtime.ts) on this database, so a test reads what a thread saves. */
-export async function savingMessages(t: TestContext, url: string): Promise<ChatAssistantMessagePersistence> {
-  const previous = process.env.CHAT_DATABASE_URL;
-  process.env.CHAT_DATABASE_URL = url;
-  const runtime = await import("../src/local-runtime.ts");
-  t.after(async () => {
-    await runtime.closeLocalRuntimePoolForTests();
-    if (previous === undefined) delete process.env.CHAT_DATABASE_URL;
-    else process.env.CHAT_DATABASE_URL = previous;
-  });
-  return runtime.persistAssistantMessage;
 }
 
 export async function chatDatabase(t: Parameters<typeof engineDatabase>[0], prefix: string): Promise<{ db: Client; pool: Pool; threadId: string }> {

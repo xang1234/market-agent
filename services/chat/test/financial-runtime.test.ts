@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { databaseUrl, IDS, ORIGINAL_REVENUE } from "../../financial-engine/test/db-fixtures.ts";
-import type { ChatAnalystToolRuntime } from "../src/coordinator.ts";
+import type { ChatAnalystToolRuntime, ChatAssistantMessagePersistence } from "../src/coordinator.ts";
 import { financialMessageId } from "../src/chat-ids.ts";
 import { createChatFinancialRuntime, isFinancialRequest, SCOPE_METRICS } from "../src/financial-runtime.ts";
 import { METRIC_CATALOG_V1, OPERATION_REGISTRY } from "../../financial-core/src/index.ts";
@@ -12,7 +12,7 @@ import { proposedMetric } from "../src/research-scope.ts";
 import { parseProposal } from "../src/scope-proposal.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import type { FinancialPool } from "../../financial-engine/src/ports.ts";
-import { chatDatabase, chatHarness, completed, INSTRUMENT_A, LISTING_A, MISSING_ISSUER, resolveMention, revenueModel, savingMessages } from "./financial-fixtures.ts";
+import { chatDatabase, chatHarness, completed, INSTRUMENT_A, LISTING_A, MISSING_ISSUER, resolveMention, revenueModel } from "./financial-fixtures.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "../src/subjects.ts";
 
 test("financial intent is recognized from the definition catalog", () => {
@@ -26,6 +26,21 @@ test("an unready engine stops the server instead of leaving metric questions on 
   const lane = createChatFinancialRuntime({ pool: unready, planningModel: null, resolveMention: async () => assert.fail("no turn runs"), evidence: createEvidenceFinancialPort });
   await assert.rejects(() => lane.assertReady(), /verified finance is not ready for chat: schema: relation financial_runs is missing/u);
 });
+
+// The chat server's own message persistence (local-runtime.ts) on this
+// database, so a test reads what a thread saves. Imported here, not in
+// financial-fixtures.ts, which the engine's typecheck reaches without llm.
+async function savingMessages(t: TestContext, url: string): Promise<ChatAssistantMessagePersistence> {
+  const previous = process.env.CHAT_DATABASE_URL;
+  process.env.CHAT_DATABASE_URL = url;
+  const runtime = await import("../src/local-runtime.ts");
+  t.after(async () => {
+    await runtime.closeLocalRuntimePoolForTests();
+    if (previous === undefined) delete process.env.CHAT_DATABASE_URL;
+    else process.env.CHAT_DATABASE_URL = previous;
+  });
+  return runtime.persistAssistantMessage;
+}
 
 function declining(reason: string): PlanningModel & { calls: number } {
   const model = (async () => {
