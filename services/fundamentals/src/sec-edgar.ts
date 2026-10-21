@@ -303,6 +303,19 @@ export type SecSourceToken = Readonly<{
   end: string;
 }>;
 
+export const SEC_COVER_COUNT_CONCEPT = "EntityCommonStockSharesOutstanding";
+
+/**
+ * The cover-page counts of the registrant's common shares outstanding that an
+ * accession's 10-K or 10-Q lists (dei), each as of its own date. Companyfacts
+ * carries undimensioned values only, so a registrant that tags one count per
+ * share class lists none of them.
+ */
+export function secCoverCountValues(facts: SecCompanyFacts, accessionNumber: string): SecConceptValue[] {
+  return (facts.facts.dei?.[SEC_COVER_COUNT_CONCEPT]?.units?.shares ?? [])
+    .filter((value) => value.accn === accessionNumber && (value.form === "10-K" || value.form === "10-Q"));
+}
+
 export function extractStatement(input: ExtractStatementInput): NormalizedStatementInput {
   return extractStatementWithTokens(input).statement;
 }

@@ -236,6 +236,35 @@ split executed on or before that date is already reflected. SEC ingestion certif
   originals again, so a backfill rerun after a sync decides each unverified restatement whose listing's splits now
   cover its filing date, and a second rerun changes nothing.
 
+## Shares outstanding from the cover page (#444)
+
+A 10-K or 10-Q cover page states the registrant's common shares outstanding as of its own date S, days before the
+filing date D (dei `EntityCommonStockSharesOutstanding`). SEC ingestion stores it as the engine's `shares_outstanding`
+(`secCoverCount`, `services/fundamentals/src/sec-facts-repository.ts`).
+
+- **Fact:** a point at S with the filing's fiscal year, fiscal period and accession, filed on D (`reported_at`), with
+  the lossless token and publication proof every SEC token fact gets.
+- **Anchored at S, not D:** the count is a literal count at S. A split after S is not in it, though the same filing's
+  statements reflect every split by D. Its context is `as_filed` on S with the definition's share basis
+  (`not_applicable`), so binding restates it by the splits after S.
+- **Latest filing only** (`selectShareCount`, `services/financial-engine/src/select-inputs.ts`): a node binds the count
+  of the newest filing filed by the cutoff, apart from the plan's statement periods. Any other count is `stale_input`,
+  as is one dated more than `SHARE_COUNT_MAX_AGE_DAYS` (130) before the cutoff, since a large accelerated filer's
+  filings are due about 112 days apart at most. When the latest filing's count cannot bind, the node is a gap, never
+  an older count.
+- **Near a split:** a split within `SHARE_COUNT_SPLIT_WINDOW_DAYS` (7) of S, or after S and on or before D, is
+  `incompatible_basis`. A split's shares are distributed days before its ex-date, the date a listing's splits carry,
+  and a filing made after a split may state its count on either basis.
+- **Several counts:** companyfacts lists undimensioned values only. A multi-class issuer tags one count per class, so
+  it lists none: Alphabet, Meta, Snap and Under Armour have no values (checked 2026-10-21). A filing that does list two
+  stores one as partial coverage with no context, and binding gaps with `incompatible_scope`. Some older filings of
+  multi-class issuers list a single value, such as Berkshire Hathaway's 2009 to 2011 filings, one of them 0. The age
+  rule keeps those out of a current plan, but not out of a historical one.
+- **No restatement:** a later filing states a later date's count, never an earlier one's, so restatement detection
+  compares us-gaap figures only.
+- **Not yet consumed:** chat still marks `shares_outstanding` unavailable (#444 step 4). A 10-Q's count is stored only
+  when that quarter is ingested.
+
 ## Share prices as engine inputs (#444)
 
 A share price binds into a financial plan the way a fact does, but it is market data and never becomes a fact. It has

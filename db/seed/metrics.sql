@@ -17,6 +17,7 @@ insert into metrics (metric_key, display_name, unit_class, aggregation, interpre
   ('eps_diluted',           'EPS (Diluted)',              'currency', 'derived',      'higher_is_better', 'gaap',    1, 'Net income per diluted share.'),
   ('weighted_average_basic_shares',   'Weighted-average basic shares', 'count', 'avg',           'neutral',     'gaap',    1, 'Basic weighted-average shares outstanding.'),
   ('weighted_average_diluted_shares', 'Weighted-average diluted shares', 'count', 'avg',           'neutral',     'gaap',    1, 'Diluted weighted-average shares outstanding.'),
+  ('shares_outstanding',    'Shares outstanding',         'count',    'point_in_time', 'neutral',         'gaap',    1, 'Common shares outstanding as of a filing''s cover-page date (dei EntityCommonStockSharesOutstanding).'),
   ('ifrs.revenue',         'IFRS Revenue',              'currency', 'sum',          'higher_is_better', 'ifrs',    1, 'Revenue recognized under IFRS; kept distinct from GAAP revenue.'),
   ('ifrs.profit_loss',     'IFRS Profit/Loss',          'currency', 'sum',          'higher_is_better', 'ifrs',    1, 'Profit or loss for the period under IFRS; kept distinct from GAAP net income.'),
   ('ifrs.eps_basic',       'IFRS EPS (Basic)',          'currency', 'derived',      'higher_is_better', 'ifrs',    1, 'Basic earnings per share under IFRS.'),

@@ -9,7 +9,7 @@
 // and numerics are projected as text; no value passes through Number.
 
 import type { PrecisionClass, PublicationTimingPrecision } from "../../financial-core/src/evidence-vocabulary.ts";
-import type { FactEntitlementChannel } from "./fact-repo.ts";
+import type { CoverageLevel, FactEntitlementChannel } from "./fact-repo.ts";
 import type { FinancialContextFields } from "./financial-context.ts";
 import type { RowQueryExecutor } from "./types.ts";
 import { assertNonEmptyString, assertOneOf, assertUuidV4 } from "./validators.ts";
@@ -67,6 +67,7 @@ export type FinancialInputCandidate = Readonly<{
   currency: string | null;
   method: "reported" | "extracted" | "restated";
   verification_status: "authoritative" | "corroborated";
+  coverage_level: CoverageLevel;
   reported_at: string | null;
   observed_at: string;
   supersedes: string | null;
@@ -102,6 +103,7 @@ export async function listFinancialInputCandidates(db: RowQueryExecutor, request
   const result = await db.query<Record<string, unknown>>(
     `select f.fact_id::text, m.metric_key, f.period_kind, f.period_start::text, f.period_end::text, f.fiscal_year, f.fiscal_period,
             f.value_num::text as value_text, f.scale::text as scale_text, f.unit, f.currency, f.method::text, f.verification_status::text,
+            f.coverage_level::text,
             to_char(f.reported_at at time zone 'UTC', ${ISO_UTC}) as reported_at,
             to_char(f.observed_at at time zone 'UTC', ${ISO_UTC}) as observed_at,
             f.supersedes::text, f.superseded_by::text, f.source_id::text,
@@ -184,6 +186,7 @@ function toCandidate(row: Record<string, unknown>): FinancialInputCandidate {
     currency: row.currency as string | null,
     method: row.method as FinancialInputCandidate["method"],
     verification_status: row.verification_status as FinancialInputCandidate["verification_status"],
+    coverage_level: row.coverage_level as CoverageLevel,
     reported_at: row.reported_at as string | null,
     observed_at: row.observed_at as string,
     supersedes: row.supersedes as string | null,

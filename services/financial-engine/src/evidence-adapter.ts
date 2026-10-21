@@ -86,6 +86,7 @@ function toInputCandidate(row: FinancialInputCandidate): InputCandidate[] {
       unit: financialUnit(row.unit, row.currency),
       method: row.method,
       verification_status: row.verification_status,
+      coverage_level: row.coverage_level,
       reported_at: row.reported_at,
       observed_at: row.observed_at,
       supersedes: row.supersedes,

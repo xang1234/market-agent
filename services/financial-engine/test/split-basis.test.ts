@@ -28,6 +28,7 @@ function eps(context: Partial<NonNullable<InputCandidate["context"]>> = {}): Inp
     unit: { kind: "currency_per_share", currency: "USD" },
     method: "reported",
     verification_status: "authoritative",
+    coverage_level: "full",
     reported_at: null,
     observed_at: "2026-10-01T00:00:00.000Z",
     supersedes: null,
