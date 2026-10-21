@@ -4,8 +4,8 @@
 //
 // 1. Each source's latest observations of the listing known by the cutoff.
 //    None is missing_input, or publication_time_unknown when one traded by
-//    then has no known time. Only those from a source class the authority
-//    allows are evidence, filtered before the newest is picked, so a newer
+//    then has no known time. Only those from a source class the run was
+//    granted are evidence, filtered before the newest is picked, so a newer
 //    price from another source never hides an allowed one; when none is
 //    allowed, the gap is source_class_not_allowed. Of the allowed, the newest
 //    trade time, and among its observations the latest known.
