@@ -114,8 +114,9 @@ export type ScopeFacet = (typeof SCOPE_FACETS)[number];
 // The periods a question can turn off beside its facets.
 export const PERIOD_FIELDS = ["fiscal_year", "fiscal_quarter"] as const;
 // The income-statement items, in earnings-release terms
-// (sec-earnings-release-extraction.ts).
-export const INCOME_ITEMS = ["revenue", "gross_margin", "operating_expenses", "operating_income", "net_income"] as const;
+// (sec-earnings-release-extraction.ts), and the operating and net margins,
+// which a release explains by their income (evidence-packet.ts).
+export const INCOME_ITEMS = ["revenue", "gross_margin", "operating_expenses", "operating_income", "operating_margin", "net_income", "net_margin"] as const;
 export type IncomeItem = (typeof INCOME_ITEMS)[number];
 
 // A model's reading of what a question asks for and turns off, every entry

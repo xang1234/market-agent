@@ -157,6 +157,8 @@ const PROPOSAL_INSTRUCTIONS = [
   '- A margin of another metric ("free cash flow margin", "EBITDA margin") is that metric\'s qualifier, not margins;',
   '  an income margin ("gross margin", "operating margin", "profitability") asks margins, and margin_trend too',
   '  when the question is about its change ("how did the gross margin change").',
+  "- An operating or net margin is its own item, operating_margin or net_margin, never the operating_income or",
+  "  net_income it divides.",
   '- A result set against expectations asks why, not for guidance: "lower than expected", "as expected", "missed',
   '  its forecast", "below target", "beat guidance" ask explains. "Current guidance versus prior guidance" asks guidance.',
   '- A company\'s "sources of revenue" are not evidence; "your sources" or "where does this come from" are.',

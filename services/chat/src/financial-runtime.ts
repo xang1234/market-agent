@@ -663,7 +663,9 @@ const INCOME_ITEM_FIGURE: Readonly<Record<IncomeItem, string | null>> = {
   gross_margin: "gross_margin",
   operating_expenses: null,
   operating_income: "operating_income",
+  operating_margin: "operating_margin",
   net_income: "net_income",
+  net_margin: "net_margin",
 };
 
 /**
@@ -679,15 +681,7 @@ export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1): st
   const shown = shownFigures(plan);
   const margins = shown.filter((node): node is MarginNode =>
     node.operation === "gross_margin" || node.operation === "operating_margin" || node.operation === "net_margin");
-  const numerators = margins.flatMap((node) => {
-    const numerator = nodes.get(node.numerator);
-    return numerator?.operation === "reported_metric" ? [numerator.metric_key] : [];
-  });
-  // ponytail: a margin also answers the income item it divides, because the
-  // reading has no operating or net margin item and names operating income for
-  // an operating margin; a request for operating income answered by its margin
-  // alone is not named (#425). Add the margin items to INCOME_ITEMS to drop this.
-  const read = new Set([...shown.flatMap((node) => [figureKey(node), SCOPE_METRICS[figureKey(node)] ?? []].flat()), ...numerators]);
+  const read = new Set(shown.flatMap((node) => [figureKey(node), SCOPE_METRICS[figureKey(node)] ?? []].flat()));
   const periodOf = (id: string) => {
     const node = nodes.get(id);
     return node?.operation === "reported_metric" ? JSON.stringify(node.period) : id;
@@ -705,7 +699,7 @@ export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1): st
       .map((metric) => inSentence(metric.label)),
     ...items,
     ...(asks.has("margin_trend") && marginPeriods.size < 2 ? ["a margin over several periods"]
-      : asks.has("margins") && marginPeriods.size === 0 && !items.includes("gross margin") ? ["a margin"]
+      : asks.has("margins") && marginPeriods.size === 0 && !items.some((item) => item.endsWith("margin")) ? ["a margin"]
       : []),
     ...Object.entries(NEVER_PLANNED).flatMap(([facet, item]) => asks.has(facet as ScopeFacet) ? [item] : []),
   ];

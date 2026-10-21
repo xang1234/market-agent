@@ -185,13 +185,16 @@ const EXPLAINED_BY: Readonly<Record<string, ReadonlyArray<string | ReadonlyArray
   income_statement: [["revenue", "gross_margin", "operating_expenses", "operating_income", "net_income"]],
 };
 
+// A release explains an operating or net margin by the income it divides.
+const MARGIN_INCOME: Readonly<Record<string, string>> = { operating_margin: "operating_income", net_margin: "net_income" };
+
 function explainedMetrics(scope: ResearchScope): Array<string | ReadonlyArray<string>> {
   const margins = scope.margins || scope.reads === "derived_margin";
   // What the question asks about shares the top priority, so none crowds out
   // another: the income-statement items it names and each metric's own
   // explanations. Then what stands in for them: the margins, a metric's
   // components, and the rest of the income statement.
-  const named = scope.income_items ?? [];
+  const named = (scope.income_items ?? []).map((item) => MARGIN_INCOME[item] ?? item);
   const top: string[] = [...named];
   const after: Array<string | ReadonlyArray<string>> = margins ? [["gross_margin", "operating_income", "net_income"]] : [];
   for (const requested of scope.metrics) {
