@@ -31,14 +31,17 @@ test("financial readiness", { skip: !dockerAvailable(), timeout: 300_000 }, asyn
   });
 
   // Last: removes part of the schema.
-  await t.test("a schema without the engine's pieces (here, a run's grant and erasure) prevents startup", async () => {
+  await t.test("a schema without the engine's pieces (here, the screener's tables, a run's grant and erasure) prevents startup", async () => {
+    await db.query(`drop table screener_certified_valuations, screener_valuation_runs`);
     await db.query(`alter table financial_runs drop column allowed_source_classes cascade`);
     await db.query(`drop function erase_financial_runs_referencing() cascade`);
     const readiness = await checkFinancialReadiness(db);
     assert.deepEqual(readiness.problems, [
+      "schema: relation screener_valuation_runs is missing",
+      "schema: relation screener_certified_valuations is missing",
       "schema: column financial_runs.allowed_source_classes is missing",
       "schema: function erase_financial_runs_referencing is missing",
     ]);
-    await assert.rejects(() => requireFinancialReadiness(db, ["chat"]), /not ready for chat: schema: column financial_runs\.allowed_source_classes is missing; schema: function/u);
+    await assert.rejects(() => requireFinancialReadiness(db, ["chat"]), /not ready for chat: schema: relation screener_valuation_runs is missing; schema: relation screener_certified_valuations/u);
   });
 });

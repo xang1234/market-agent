@@ -62,11 +62,16 @@ export const PUBLICATION_UNIT_KINDS = [
   "grid_cell",
   "thesis_condition",
   "discovery_assessment",
+  "screener_valuation",
 ] as const;
 export type PublicationUnitKind = (typeof PUBLICATION_UNIT_KINDS)[number];
 
-export const SURFACES = ["chat", "analyze", "analyst_grid", "thesis", "discovery"] as const;
+export const SURFACES = ["chat", "analyze", "analyst_grid", "thesis", "discovery", "screener"] as const;
 export type Surface = (typeof SURFACES)[number];
+
+/** What owns a run: the parent feature artifact whose deletion erases it. */
+export const PARENT_KINDS = ["chat_thread", "analyze_memo_run", "analyst_grid_run", "thesis_version", "discovery_run", "screener_valuation_run"] as const;
+export type ParentKind = (typeof PARENT_KINDS)[number];
 
 export const FEATURE_MODES = ["enforce"] as const;
 export type FeatureMode = (typeof FEATURE_MODES)[number];
@@ -316,7 +321,7 @@ export type FinancialRuntimeAuthorityV1 = {
   owner_user_id: UUID;
   egress_channel: Surface | "api";
   parent: {
-    kind: "chat_thread" | "analyze_memo_run" | "analyst_grid_run" | "thesis_version" | "discovery_run";
+    kind: ParentKind;
     id: UUID;
     version: string;
   };
