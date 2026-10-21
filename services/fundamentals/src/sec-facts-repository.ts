@@ -1,6 +1,7 @@
 import {
   createMetricRegistry,
   mapStatement,
+  mapStatementLine,
   resolveMetric,
   type MappedStatement,
   type MetricDefinition,
@@ -11,9 +12,11 @@ import {
   fetchCompanyFacts,
   extractStatementWithTokens,
   SecEdgarFetchError,
+  SEC_COVER_COUNT_CONCEPT,
   SEC_INCOME_METRIC_KEYS,
   SEC_METRIC_KEYS_BY_FAMILY,
   US_GAAP_TO_METRIC_KEY,
+  secCoverCountValues,
   secFiscalYearWindow,
   selectSecConceptValue,
   type ExtractStatementInput,
@@ -27,7 +30,7 @@ import {
 } from "./sec-edgar.ts";
 import { resolveMetricDefinition } from "../../financial-core/src/definitions.ts";
 import type { ShareBasis } from "../../financial-core/src/evidence-vocabulary.ts";
-import { explainedBySplits, splitHistoryCovers } from "../../financial-core/src/split-adjustment.ts";
+import { explainedBySplits, splitHistoryCovers, splitsRestate } from "../../financial-core/src/split-adjustment.ts";
 import { loadSubjectSplitHistory, type SubjectSplitHistory } from "../../market/src/split-history.ts";
 import { checkTokenAgainstStoredValue, recordFactPrecisionAttestation } from "../../evidence/src/financial-attestations.ts";
 import { recordFactFinancialContext } from "../../evidence/src/financial-context.ts";
@@ -39,6 +42,7 @@ import { factActiveSql, factKnownAtSql } from "../../evidence/src/fact-activity.
 import { FundamentalsDataUnavailableError } from "./availability.ts";
 import { FROZEN_ISSUER_IDS } from "../../shared/src/golden-issuers.ts";
 import {
+  FISCAL_PERIODS,
   normalizedStatement,
   type CoverageLevel,
   type FiscalPeriod,
@@ -327,7 +331,43 @@ type ExtractedFiling = Readonly<{
   target: Omit<ExtractStatementInput, "family">;
   income: Extracted | null;
   companions: ReadonlyArray<Extracted>;
+  coverCount: CoverCount | null;
 }>;
+
+/**
+ * A filing's cover-page count of its common shares (#444): a point at the
+ * count's own date S, labeled with the filing's fiscal year and period and
+ * filed on D. It is certified only when the filing lists one count. With
+ * several, which one is the registrant's is unknown, so the first is stored
+ * with its token but no context: binding gaps on it, never on an older
+ * filing's count. A count without its lossless token is not stored.
+ */
+type CoverCount = Readonly<{ period: Omit<FactBatch, "lines">; line: StatementLine; token: SecSourceToken; certified: boolean }>;
+
+const SEC_COVER_COUNT_METRIC_KEY = "shares_outstanding";
+
+function secCoverCount(input: IngestInput, accessionNumber: string, sourceId: UUID): CoverCount | null {
+  const [value, ...others] = secCoverCountValues(input.fetched.facts, accessionNumber).sort((left, right) => right.end.localeCompare(left.end));
+  const fiscalPeriod = FISCAL_PERIODS.find((period) => period === value?.fp);
+  if (value?.val_token === undefined || fiscalPeriod === undefined) return null;
+  return {
+    period: {
+      subject: { kind: "issuer", id: input.issuerId },
+      period_kind: "point",
+      period_start: null,
+      period_end: value.end,
+      fiscal_year: value.fy,
+      fiscal_period: fiscalPeriod,
+      as_of: input.fetched.evidence.completed_at,
+      // Midnight UTC, so the stored instant's date is the filing date wherever it is read.
+      reported_at: `${value.filed}T00:00:00.000Z`,
+      source_id: sourceId,
+    },
+    line: { metric_key: SEC_COVER_COUNT_METRIC_KEY, value_num: value.val, unit: "shares", scale: 1, coverage_level: "full" },
+    token: { token: value.val_token, concept: SEC_COVER_COUNT_CONCEPT, unit: "shares", accn: value.accn, form: value.form, filed: value.filed, start: null, end: value.end },
+    certified: others.length === 0,
+  };
+}
 
 // Reads the filing's statements out of the download, without the database.
 // Throws when a required income statement cannot be extracted.
@@ -347,7 +387,16 @@ function extractFiling(input: IngestInput): ExtractedFiling {
   const income: Extracted | null = input.income === "require"
     ? extracted(extractStatementWithTokens({ ...target, family: "income" }))
     : statementsOf(target, ["income"], input.logger)[0] ?? null;
-  return { input, accessionNumber, source, sourceId, target, income, companions: statementsOf(target, COMPANION_FAMILIES, input.logger) };
+  return {
+    input,
+    accessionNumber,
+    source,
+    sourceId,
+    target,
+    income,
+    companions: statementsOf(target, COMPANION_FAMILIES, input.logger),
+    coverCount: accessionNumber ? secCoverCount(input, accessionNumber, sourceId) : null,
+  };
 }
 
 // Stores one filing's statements for a fiscal period from a companyfacts
@@ -360,20 +409,21 @@ function extractFiling(input: IngestInput): ExtractedFiling {
 // completion, never by when it was processed.
 async function storeFiling(
   db: FundamentalsTransactionalQueryExecutor,
-  { input, accessionNumber, source, sourceId, target, income, companions }: ExtractedFiling,
+  { input, accessionNumber, source, sourceId, target, income, companions, coverCount }: ExtractedFiling,
   clock: () => Date,
 ): Promise<{ statement: NormalizedStatement | null; filing: SecFilingRef | null }> {
   const asOf = input.fetched.evidence.completed_at;
   if (source) await upsertSecFilingSource(db, source);
-  const registry = await loadMetricRegistry(
-    db,
-    [...(income ? [income] : []), ...companions].flatMap((entry) => entry.statement.lines.map((line) => line.metric_key)),
-  );
+  const registry = await loadMetricRegistry(db, [
+    ...[...(income ? [income] : []), ...companions].flatMap((entry) => entry.statement.lines.map((line) => line.metric_key)),
+    ...(coverCount ? [coverCount.line.metric_key] : []),
+  ]);
   const mapped = [
     ...(income ? [{ ...income, mapped: mapSecStatement(registry, income.statement) }] : []),
     ...mapCompanions(registry, companions, target, input.logger),
   ];
-  if (mapped.length === 0) return { statement: income?.statement ?? null, filing: null };
+  const cover = coverCount && mapCoverCount(registry, coverCount, target, input.logger);
+  if (mapped.length === 0 && !cover) return { statement: income?.statement ?? null, filing: null };
   await withPinnedTransaction(db, async (client) => {
     // The repair retires stored income facts the filing contradicts, then
     // stores the filing's in their place (the active identity is unique).
@@ -400,6 +450,14 @@ async function storeFiling(
           await client.query(`update facts set superseded_by = $2, updated_at = now() where fact_id = any($1::uuid[])`, [oldIds, newId]);
         }
       }
+    }
+    if (cover) {
+      await persistStatementFacts(client, cover.facts, clock, {
+        cik: input.cik,
+        tokens: new Map([[SEC_COVER_COUNT_METRIC_KEY, cover.token]]),
+        retrievedAt: asOf,
+        certify: cover.certified,
+      });
     }
     await recordSecRestatements(client, {
       facts: input.fetched.facts,
@@ -534,6 +592,26 @@ function mapCompanions(
       return [];
     }
   });
+}
+
+// Like a companion, a cover count whose metric the registry lacks is logged
+// and left out, so it cannot cost the statements.
+function mapCoverCount(
+  registry: MetricRegistry,
+  coverCount: CoverCount,
+  target: Omit<ExtractStatementInput, "family">,
+  logger: Pick<Console, "warn">,
+): (CoverCount & { facts: FactBatch }) | null {
+  try {
+    return { ...coverCount, facts: { ...coverCount.period, lines: [mapStatementLine(registry, coverCount.line)] } };
+  } catch (error) {
+    logger.warn("sec_edgar cover count mapping failed", {
+      issuer_id: target.subject.id,
+      accession_number: coverCount.token.accn,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
 }
 
 function isMissingCoverage(message: string): boolean {
@@ -918,16 +996,17 @@ function firstCurrency(lines: ReadonlyArray<StatementLine>): string | null {
 // that conflicts with a stored fact whose value and dates equal its token,
 // and whose precision is unproven, revalidates that fact. Each token's fact,
 // inserted or already stored, gets its financial context when
-// recordSecOriginalContext certifies it.
+// recordSecOriginalContext certifies it, unless `certify` is false.
 async function persistStatementFacts(
   db: FundamentalsQueryExecutor,
-  statement: MappedStatement,
+  statement: FactBatch,
   clock: () => Date,
   provenance: {
     cik: number;
     tokens: ReadonlyMap<string, SecSourceToken>;
     derivations?: ReadonlyMap<string, SecDerivation>;
     retrievedAt?: string;
+    certify?: boolean;
   },
 ): Promise<Map<string, string>> {
   // The facts this call inserted, by metric_key (a conflicting line inserts none).
@@ -989,16 +1068,22 @@ async function persistStatementFacts(
         validation_method: "sec_companyfacts_lossless_json.v1",
       });
     }
-    await recordSecOriginalContext(db, storedId, line, token, locator);
+    if (provenance.certify !== false) await recordSecOriginalContext(db, storedId, line, token, locator);
   }
   return insertedIds;
 }
+
+/** What facts are stored from: a statement's period, or a cover count's, and its lines. */
+type FactBatch = Pick<
+  MappedStatement,
+  "subject" | "period_kind" | "period_start" | "period_end" | "fiscal_year" | "fiscal_period" | "as_of" | "reported_at" | "source_id" | "lines"
+>;
 
 // The caller reads the fact's proof in a later statement, which sees a proof
 // a concurrent ingestion committed while this lock waited.
 async function lockStoredTokenFact(
   db: FundamentalsQueryExecutor,
-  statement: MappedStatement,
+  statement: FactBatch,
   line: MappedStatement["lines"][number],
   token: SecSourceToken,
 ): Promise<string | null> {
@@ -1033,15 +1118,22 @@ async function hasProvenPrecision(db: FundamentalsQueryExecutor, factId: string)
   return rows.length > 0;
 }
 
-// A split before a filing is issued restates its per-share values and share
-// counts, its own period's included: they are on the split basis of the
-// filing's date, which binding restates to an analysis's reference date.
-const SEC_SHARE_BASES: Readonly<Record<string, "basic" | "diluted">> = {
-  eps_basic: "basic",
-  eps_diluted: "diluted",
-  weighted_average_basic_shares: "basic",
-  weighted_average_diluted_shares: "diluted",
-};
+// A split restates per-share values and share counts. A filing states its own
+// period's EPS and weighted-average counts on the split basis of its filing
+// date, every split before it included. Its cover-page count is a count as of
+// the count's own date (#444): a split after that date is not in it, though the
+// filing's statements reflect it. Each is as filed on that date, and binding
+// restates it to an analysis's reference date. The share basis is the engine
+// definition's.
+function secSplitBasis(metricKey: string, token: SecSourceToken) {
+  const definition = resolveMetricDefinition(metricKey);
+  if (definition === null || !splitsRestate(definition.value_kind)) return { adjustment_basis: "unadjusted", share_basis: "not_applicable" } as const;
+  return {
+    adjustment_basis: "as_filed",
+    as_filed_on: definition.value_kind === "share_count" ? token.end : token.filed,
+    share_basis: definition.share_basis,
+  } as const;
+}
 
 const SEC_CONTEXT_VERSION = "sec_companyfacts_context.v1";
 
@@ -1068,13 +1160,13 @@ async function recordSecOriginalContext(
   locator: string,
 ): Promise<void> {
   // The statement contract labels every balance FY of its fiscal year, so a
-  // certified 10-Q balance would be read as the year's closing one.
-  if (token.start === null && token.form !== "10-K") return;
+  // certified 10-Q balance would be read as the year's closing one. A cover
+  // count keeps its filing's own fiscal period.
+  if (token.start === null && token.form !== "10-K" && token.concept !== SEC_COVER_COUNT_CONCEPT) return;
   const certifiedConcept = SEC_CERTIFIED_CONCEPTS[line.metric_key];
   if (certifiedConcept !== undefined && token.concept !== certifiedConcept) return;
   const existing = await db.query(`select 1 from fact_financial_contexts where fact_id = $1`, [tokenFactId]);
   if (existing.rows.length > 0) return;
-  const shareBasis = SEC_SHARE_BASES[line.metric_key];
   await recordFactFinancialContext(db, {
     fact_id: tokenFactId,
     context_version: SEC_CONTEXT_VERSION,
@@ -1082,9 +1174,7 @@ async function recordSecOriginalContext(
     dimension_scope: "consolidated",
     dimension_members: [],
     reporting_basis: "as_reported",
-    ...(shareBasis === undefined
-      ? { adjustment_basis: "unadjusted", share_basis: "not_applicable" }
-      : { adjustment_basis: "as_filed", as_filed_on: token.filed, share_basis: shareBasis }),
+    ...secSplitBasis(line.metric_key, token),
     fiscal_calendar_version: "sec_filer_fiscal_year.v1",
     disclosure_relation: "original",
     source_context_ref: locator,
@@ -1126,6 +1216,8 @@ async function derivationLineage(
 // value adds nothing. A filing giving two different values, or a value without
 // its lossless token, is skipped; an original with no recorded concept is left
 // as it is. A restated fact's method keeps it out of every as-reported reader.
+// Only us-gaap concepts are compared: a cover count (dei) is a count as of its
+// own date, and a later filing states a later date's count, never that one's.
 //
 // An as-filed EPS or share count is on the split basis of its filing date
 // (#387), so a later 10-K states it on its own. When the listing's splits
