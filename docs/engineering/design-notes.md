@@ -212,8 +212,9 @@ split executed on or before that date is already reflected. SEC ingestion certif
   inputs always compare. Core rebuilds the adjustment from its own splits and fails the input's integrity on any
   difference.
 - **Gaps:** no single common-stock listing active at the cutoff (`split_listing_unresolved`), splits never fetched
-  (`split_history_missing`), or last fetched before the reference date's day (`split_history_stale`). A fetch on that
-  day is complete because an issuer announces a split at least ten days before its record date (SEC Rule 10b-17).
+  (`split_history_missing`), or last fetched before the reference date's day (`split_history_stale`). The check proves
+  only that the list was fetched on or after that day. Such a list holds every split executed by the reference date
+  only if the provider lists each split before or on its execution date.
 - **A split recast is no restatement:** restatement detection compares only unadjusted originals, since a later 10-K
   states the same period on its own split basis.
 - **Seal:** the snapshot verifier rebuilds the adjustment from the listing's current splits and withholds the seal when

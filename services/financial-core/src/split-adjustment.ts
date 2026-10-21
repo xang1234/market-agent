@@ -36,10 +36,10 @@ export function splitReferenceDate(time: PlanTime): IsoDate {
 }
 
 /**
- * Whether a split history fetched at `checkedAt` lists every split executed
- * by the plan's reference date. An issuer announces a split at least ten days
- * before its record date (SEC Rule 10b-17), so a history fetched on the
- * reference date already lists every split executed that day.
+ * Whether a split history fetched at `checkedAt` was fetched on or after the
+ * plan's reference date. The check proves no more than that. The history
+ * lists every split executed by the reference date only if the provider lists
+ * each split before or on its execution date.
  */
 export function splitHistoryCovers(checkedAt: IsoDateTime, time: PlanTime): boolean {
   return localDateOf(Date.parse(checkedAt), time.cutoff_timezone) >= splitReferenceDate(time);
