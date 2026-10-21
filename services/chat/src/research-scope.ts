@@ -103,6 +103,9 @@ export type ResearchScope = {
   // the whole statement: their claims come first. This turn's, or the answer
   // an evidence follow-up re-reads. Absent when none.
   income_items?: ReadonlyArray<string>;
+  // An engine answer whose question had no reading (#425): what it asks for
+  // beyond the answer's figures was not checked. Absent when it was.
+  coverage_unchecked?: true;
   // The fields carried from the previous answer rather than asked for now.
   inherited: ReadonlyArray<ScopeField>;
 };

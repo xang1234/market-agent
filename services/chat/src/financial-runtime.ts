@@ -152,10 +152,26 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     const requested = answered ? ANSWERED : await requestedSubjects(deps, context, text);
     if (requested.clarify) return { kind: "clarification", clarification: companyQuestion(requested.clarify) };
     if (!answered && requested.subjects.length === 0) return gap("no_company");
-    // The saved answer has its reading and scope already.
-    const reading = answered ? Promise.resolve(null) : (deps.readQuestion?.(text) ?? Promise.resolve(null)).catch((reason) => {
-      console.warn("[chat] no reading of the question; the financial answer names no uncovered ask", reason);
-      return null;
+    // The reading of the question is a model call, so it starts beside the
+    // planner's model call, or once a plan is driven: a turn that ends before
+    // either (a question about a company, a gap no model planned) reads
+    // nothing. The saved answer has its reading and scope already.
+    let settle: (reading: Promise<ScopeProposal | null> | null) => void = () => {};
+    const reading = answered ? Promise.resolve(null) : new Promise<ScopeProposal | null>((resolve) => {
+      settle = resolve;
+    });
+    let settled = false;
+    const settleReading = (read: boolean) => {
+      if (settled) return;
+      settled = true;
+      settle(!read ? null : (deps.readQuestion?.(text) ?? Promise.resolve(null)).catch((reason) => {
+        console.warn("[chat] no reading of the question; the financial answer says its coverage was not checked", reason);
+        return null;
+      }));
+    };
+    const planningModel: PlanningModel | null = deps.planningModel && ((request) => {
+      settleReading(true);
+      return deps.planningModel!(request);
     });
     // This lane runs before the analyst path resolves the turn's companies, so
     // the scope gets the ones the message resolved; the answer saves the ones
@@ -180,6 +196,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       // and so does one whose turn another attempt answered meanwhile: a run
       // that attempt finished reads here as run_failed.
       if (refs.length === 0 || await isAnswered()) return gap(reason, planned);
+      settleReading(false);
       const saved = await scope;
       return {
         ...gap(reason, planned),
@@ -201,7 +218,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       authority,
       request_key: turnId,
       plan: async () => {
-        planned = await planTurn(deps, context, text, requested.subjects, authority, deps.clock?.() ?? new Date(), (subjects) => {
+        planned = await planTurn(planningModel, context, text, requested.subjects, authority, deps.clock?.() ?? new Date(), (subjects) => {
           asked = subjects;
         });
         return planned;
@@ -209,7 +226,10 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       evidence: deps.evidence,
       // The reading and the scope settle outside any transaction; the scope
       // queued its reads before this request took its client.
-      beforeDrive: () => Promise.all([scope, reading]),
+      beforeDrive: () => {
+        settleReading(true);
+        return Promise.all([scope, reading]);
+      },
       persistParent: persistAssistantMessage(context.threadId, messageId, {
         scope,
         reading,
@@ -361,7 +381,7 @@ function companyQuestion(question: string): Clarification {
 }
 
 async function planTurn(
-  deps: ChatFinancialRuntimeDeps,
+  model: PlanningModel | null,
   context: ChatFinancialTurnContext,
   text: string,
   requested: ReadonlyArray<RequestedSubject>,
@@ -379,7 +399,7 @@ async function planTurn(
     freshness_max_age_days: null,
     authority,
     parent_limits: {},
-    max_model_calls: deps.planningModel ? MAX_PLANNING_MODEL_CALLS : 0,
+    max_model_calls: model ? MAX_PLANNING_MODEL_CALLS : 0,
     requested_subjects: subjects,
     publication_unit_kind: "chat_section",
   });
@@ -393,7 +413,7 @@ async function planTurn(
   onSubjects(subjects);
   if (CASH_RESILIENCE.test(text)) return planCashResilience(planningContext(subjects), text);
   // A failing or unreachable model is a planning gap (publishRequest); the narrative composer is never a fallback for numbers.
-  return planFinancialRequest(planningContext(subjects), text, deps.planningModel ?? noModel);
+  return planFinancialRequest(planningContext(subjects), text, model ?? noModel);
 }
 
 const CASH_RESILIENCE = /\bcash[- ]resilience\b/iu;
@@ -533,6 +553,8 @@ function chatAuthority(userId: string, threadId: string, turnId: string): Financ
   });
 }
 
+const UNCHECKED = "It was not checked whether this answer covers everything the question asks for.";
+
 /** Writes the assistant message inside the finalization transaction, under the thread's owner. */
 function persistAssistantMessage(
   threadId: string,
@@ -554,7 +576,8 @@ function persistAssistantMessage(
     const note = [
       ...(turn.notFound.length === 0 ? [] : [`No company matched ${labelList(turn.notFound)}.`]),
       ...(turn.carried.length === 0 ? [] : [`${labelList(turn.carried)} ${turn.carried.length > 1 ? "are" : "is"} carried from the previous answer.`]),
-      ...(missing.length === 0 ? [] : [`Not covered by this answer: ${missing.join("; ")}.`]),
+      // With no reading, nothing tells what else the question asks for.
+      ...(reading === null ? [UNCHECKED] : missing.length === 0 ? [] : [`Not covered by this answer: ${missing.join("; ")}.`]),
     ].join(" ");
     const blocks = [
       publication.block,
@@ -568,6 +591,7 @@ function persistAssistantMessage(
       reads: "financial_answer" as const,
       companies: answeredCompanies(plan.subjects.members.map((member) => member.subject_ref.id), scope, turn.labels),
       metrics: planMetrics(plan),
+      ...(reading === null ? { coverage_unchecked: true as const } : {}),
     };
     const inserted = await tx.client.query(
       `insert into chat_messages (message_id, thread_id, role, snapshot_id, blocks, content_hash, research_scope)

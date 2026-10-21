@@ -78,7 +78,8 @@ export function resolveMention(mention: string): Promise<ChatSubjectPreResolutio
   return Promise.resolve(table[mention] ?? ({ status: "not_found", input_text: mention, normalized_input: mention, message: "not found" } as ChatSubjectPreResolution));
 }
 
-const NO_ASKS: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [] };
+// A reading of a question that asks for nothing beyond the figures.
+export const NO_ASKS: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [] };
 
 /** A planning model that answers every call with a revenue draft for the given slots, and counts calls. */
 export function revenueModel(mentions: ReadonlyArray<string>): PlanningModel & { calls: number } {
@@ -131,7 +132,6 @@ export function chatHarness(
       resolveMention: options.resolveMention ?? resolveMention,
       evidence: createEvidenceFinancialPort,
       ...(options.researchScope ? { researchScope: options.researchScope } : {}),
-      // A reading that asks for nothing beyond the figures, unless the test gives one.
       readQuestion: options.readQuestion ?? (async () => NO_ASKS),
       ...(options.priorSubjects ? { priorSubjects: options.priorSubjects } : {}),
       ...(options.clock ? { clock: options.clock } : {}),
