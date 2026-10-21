@@ -550,7 +550,7 @@ function persistAssistantMessage(
     // Both settled before the run was driven (beforeDrive).
     const [scope, reading] = await Promise.all([turn.scope, turn.reading]);
     const plan = scope === null && reading === null ? null : await findPlanForRequest(tx.client, request);
-    const missing = reading === null || plan === null ? [] : uncoveredAsks(reading, plan);
+    const missing = reading === null || plan === null ? [] : uncoveredAsks(reading, plan, turn.labels);
     const note = [
       ...(turn.notFound.length === 0 ? [] : [`No company matched ${labelList(turn.notFound)}.`]),
       ...(turn.carried.length === 0 ? [] : [`${labelList(turn.carried)} ${turn.carried.length > 1 ? "are" : "is"} carried from the previous answer.`]),
@@ -677,50 +677,67 @@ const INCOME_ITEM_FIGURE: Readonly<Record<IncomeItem, string | null>> = {
 
 /**
  * What a question asks for, as the model read it, that its plan does not
- * compute, so the answer names it instead of leaving it out.
+ * compute, so the answer names it instead of leaving it out. Each company is
+ * checked on its own figures: what some companies' figures answer is named
+ * for the others, by the label `labels` gives each issuer.
  */
-export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1): string[] {
+export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1, labels: ReadonlyMap<string, string> = new Map()): string[] {
   const { asks, offMetrics } = readingAsks(reading);
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
   const figures = figuresOf(plan);
-  const shown = shownFigures(plan);
-  const reached = [...dependencyClosure(plan, plan.outputs.map((output) => output.node_id))].map((id) => nodes.get(id)!);
-  const margins = shown.filter((node): node is MarginNode =>
-    node.operation === "gross_margin" || node.operation === "operating_margin" || node.operation === "net_margin");
-  const read = new Set(shown.flatMap((node) => [figureKey(node), SCOPE_METRICS[figureKey(node)] ?? []].flat()));
-  // A figure's period is its reported inputs'.
-  const periodOf = (node: OperationNode): string =>
-    node.operation === "reported_metric" ? JSON.stringify(node.period) : periodOf(nodes.get(operationDependencies(node)[0]!)!);
-  const marginPeriods = new Set(margins.map(periodOf));
-  // An engine figure is as reported, so a qualified metric is computed only as
-  // its base's growth (a change of it) or its trend (it over several periods).
-  const computes = (metric: RequestedMetric) => {
-    const ofBase = (node: OperationNode) => SCOPE_METRICS[figureKey(node)] === metric.base;
-    if (metric.adjustment !== undefined) return false;
-    if (metric.qualifier === "growth") {
-      return reached.some((node) => (node.operation === "percent_change_positive_base" || node.operation === "absolute_change") &&
-        figures(nodes.get(node.current)!).some(ofBase));
-    }
-    return metric.qualifier === "trend" && new Set(shown.filter(ofBase).map(periodOf)).size > 1;
-  };
-  const qualified = reading.metrics.filter((metric) => metric.base !== undefined && !offMetrics.has(metric.metric_key) && !computes(metric));
+  // A figure's period and company are those of its reported inputs.
+  const input = (node: OperationNode) => nodes.get(operationDependencies(node)[0]!)!;
+  const periodOf = (node: OperationNode): string => node.operation === "reported_metric" ? JSON.stringify(node.period) : periodOf(input(node));
+  const slotOf = (node: OperationNode): string => node.operation === "reported_metric" ? node.subject_slot : slotOf(input(node));
   const metrics = [...new Map(reading.metrics
     .filter((metric) => CATALOG.has(metric.metric_key))
     .flatMap((metric) => metric.metric_key === "balance_sheet" ? BALANCE_SHEET_ITEMS.map((key) => CATALOG.get(key)!) : [metric])
     .filter((metric) => !offMetrics.has(metric.metric_key))
     .map((metric) => [metric.metric_key, metric])).values()];
-  const items = reading.income_items.filter((item) => !read.has(INCOME_ITEM_FIGURE[item] ?? "")).map((item) => item.replaceAll("_", " "));
-  return [
-    // The income items name its figures more closely than the whole statement does.
-    ...metrics.filter((metric) => !read.has(metric.metric_key) && !(metric.metric_key === "income_statement" && reading.income_items.length > 0))
-      .map((metric) => inSentence(metric.label)),
-    ...qualified.map((metric) => inSentence(metric.label)),
-    ...items,
-    ...(asks.has("margin_trend") && marginPeriods.size < 2 ? ["a margin over several periods"]
-      : asks.has("margins") && marginPeriods.size === 0 && !items.some((item) => item.endsWith("margin")) ? ["a margin"]
-      : []),
-    ...Object.entries(NEVER_PLANNED).flatMap(([facet, item]) => asks.has(facet as ScopeFacet) ? [item] : []),
-  ];
+  const qualified = reading.metrics.filter((metric) => metric.base !== undefined && !offMetrics.has(metric.metric_key));
+  // What a company's figures (shown) and the operations over them (reached) leave out.
+  const missing = (shown: ReadonlyArray<OperationNode>, reached: ReadonlyArray<OperationNode>): string[] => {
+    const margins = shown.filter((node): node is MarginNode =>
+      node.operation === "gross_margin" || node.operation === "operating_margin" || node.operation === "net_margin");
+    const read = new Set(shown.flatMap((node) => [figureKey(node), SCOPE_METRICS[figureKey(node)] ?? []].flat()));
+    const marginPeriods = new Set(margins.map(periodOf));
+    // An engine figure is as reported, so a qualified metric is computed only as
+    // its base's growth (a change of it) or its trend (it over several periods).
+    const computes = (metric: RequestedMetric) => {
+      const ofBase = (node: OperationNode) => SCOPE_METRICS[figureKey(node)] === metric.base;
+      if (metric.adjustment !== undefined) return false;
+      if (metric.qualifier === "growth") {
+        return reached.some((node) => (node.operation === "percent_change_positive_base" || node.operation === "absolute_change") &&
+          figures(nodes.get(node.current)!).some(ofBase));
+      }
+      return metric.qualifier === "trend" && new Set(shown.filter(ofBase).map(periodOf)).size > 1;
+    };
+    const items = reading.income_items.filter((item) => !read.has(INCOME_ITEM_FIGURE[item] ?? "")).map((item) => item.replaceAll("_", " "));
+    return [
+      // The income items name its figures more closely than the whole statement does.
+      ...metrics.filter((metric) => !read.has(metric.metric_key) && !(metric.metric_key === "income_statement" && reading.income_items.length > 0))
+        .map((metric) => inSentence(metric.label)),
+      ...qualified.filter((metric) => !computes(metric)).map((metric) => inSentence(metric.label)),
+      ...items,
+      ...(asks.has("margin_trend") && marginPeriods.size < 2 ? ["a margin over several periods"]
+        : asks.has("margins") && marginPeriods.size === 0 && !items.some((item) => item.endsWith("margin")) ? ["a margin"]
+        : []),
+    ];
+  };
+  const shown = shownFigures(plan);
+  const reached = [...dependencyClosure(plan, plan.outputs.map((output) => output.node_id))].map((id) => nodes.get(id)!);
+  const companies = plan.subjects.members.map((member) => ({
+    label: labels.get(member.subject_ref.id.toLowerCase()),
+    missing: missing(shown.filter((node) => slotOf(node) === member.slot_id), reached.filter((node) => slotOf(node) === member.slot_id)),
+  }));
+  // In the order the question asks for them (all missing from no figures).
+  const perCompany = missing([], []).flatMap((ask) => {
+    const lacking = companies.filter((company) => company.missing.includes(ask));
+    const labelled = lacking.flatMap((company) => company.label ?? []);
+    if (lacking.length === 0) return [];
+    return [lacking.length < companies.length && labelled.length === lacking.length ? `${ask} for ${labelList(labelled)}` : ask];
+  });
+  return [...perCompany, ...Object.entries(NEVER_PLANNED).flatMap(([facet, item]) => asks.has(facet as ScopeFacet) ? [item] : [])];
 }
 
 // A catalog label inside a sentence: "Free cash flow" reads "free cash flow", "EBITDA" and "P/E ratio" stay.
