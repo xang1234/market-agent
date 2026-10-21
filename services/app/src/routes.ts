@@ -3,7 +3,7 @@
 // services are served in-process; the rest are parked (#117) and answer 503 rather than
 // falling through to the SPA's index.html.
 
-export type DevService = "chat" | "resolver" | "dev-api" | "market" | "fundamentals";
+export type DevService = "chat" | "resolver" | "dev-api" | "watchlists" | "market" | "fundamentals";
 
 export type Route =
   | { kind: "service"; service: DevService }
@@ -19,12 +19,12 @@ const SERVED: Record<string, DevService> = {
   "/v1/dev": "dev-api",
   "/v1/themes": "dev-api",
   "/v1/evidence/inspect": "dev-api",
+  "/v1/watchlists": "watchlists",
   "/v1/market": "market",
   "/v1/fundamentals": "fundamentals",
 };
 
 const PARKED = [
-  "/v1/watchlists",
   "/v1/screener",
   "/v1/portfolios",
   "/v1/home",

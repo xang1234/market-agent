@@ -853,7 +853,7 @@ const FULL_SERVICES = [
   "screener", "portfolio", "home", "evidence", "analyst-grids",
 ];
 // DEV_PROFILE=chat runs one process (services/app) serving web, chat, resolver,
-// dev-api, market and fundamentals on the web port (#122).
+// dev-api, watchlists, market and fundamentals on the web port (#122).
 const CHAT_SERVICES = ["app"];
 
 test("DEV_PROFILE defaults to full: every service is checked, started and awaited, with all containers", async () => {

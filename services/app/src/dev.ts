@@ -1,6 +1,7 @@
 // One-process dev app for DEV_PROFILE=chat (#122): the web UI (Vite in middleware
-// mode) plus the chat, resolver, dev-api, market and fundamentals request handlers,
-// on one port. Each service's own dev.ts still runs it standalone (DEV_PROFILE=full).
+// mode) plus the chat, resolver, dev-api, watchlists, market and fundamentals request
+// handlers, on one port. Each service's own dev.ts still runs it standalone
+// (DEV_PROFILE=full).
 //
 // UI mode (DEV_MODE=ui, #123) builds no services: /v1 is served from a recorded fixture
 // (DEV_REPLAY_FILE), so there is no database and no network. DEV_CAPTURE_FILE records
@@ -44,10 +45,12 @@ if (uiMode) {
   const { buildFundamentalsDevServer } = await import("../../fundamentals/src/dev-server.ts");
   const { buildMarketDevServer } = await import("../../market/src/dev-server.ts");
   const { buildResolverDevServer } = await import("../../resolver/src/dev-server.ts");
+  const { buildWatchlistsDevServer } = await import("../../watchlists/src/dev-server.ts");
   services = {
     chat: await buildChatDevServer(process.env),
     resolver: await buildResolverDevServer(process.env),
     "dev-api": await buildDevApiDevServer(process.env),
+    watchlists: await buildWatchlistsDevServer(process.env),
     market: await buildMarketDevServer(process.env),
     fundamentals: await buildFundamentalsDevServer(process.env),
   };
