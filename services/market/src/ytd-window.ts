@@ -54,6 +54,19 @@ export function completedSessionsEnd(cutoff: string, timeZone: string): string {
   return zonedDateStartUtcIso(next.toISOString().slice(0, 10), timeZone);
 }
 
+// The date of the last regular session closed by `cutoff` on the exchange's
+// calendar: today's once it has closed, else the weekday before. A price from
+// before it is stale (#444).
+// ponytail: weekdays stand in for an exchange calendar, so until the session
+// after a market holiday closes, the price before the holiday reads as stale.
+export function lastRegularSessionDate(cutoff: string, timeZone: string): string {
+  const now = localParts(cutoff, timeZone);
+  const date = new Date(`${now.date}T00:00:00.000Z`);
+  if (now.minutes < SESSION_CLOSE_MINUTES) date.setUTCDate(date.getUTCDate() - 1);
+  while (date.getUTCDay() === 0 || date.getUTCDay() === 6) date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
 // How far before the last completed session a window may end and still count
 // as current: a week, which covers long weekends, closures like Tokyo's Golden
 // Week, and a session the provider has not posted yet. ponytail: stands in for

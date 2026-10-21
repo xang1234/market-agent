@@ -100,11 +100,33 @@ const INTERVAL_TO_POLYGON: Record<BarInterval, { multiplier: number; timespan: s
 const DEFAULT_POLYGON_BASE_URL = "https://api.polygon.io";
 
 export function createPolygonHttpFetcher(options: PolygonHttpFetcherOptions): PolygonFetcher {
+  const request = polygonRequester(options);
+  return async (path: string): Promise<unknown> => (await request(path)).json();
+}
+
+/** A response's exact bytes, and when the last of them arrived. */
+export type PolygonCapture = Readonly<{ body: Uint8Array; completed_at: string }>;
+
+export type PolygonCaptureFetcher = (path: string) => Promise<PolygonCapture>;
+
+// For evidence (#444): the caller hashes and parses the bytes losslessly.
+export function createPolygonCaptureFetcher(options: PolygonHttpFetcherOptions & { clock?: () => Date }): PolygonCaptureFetcher {
+  const request = polygonRequester(options);
+  const clock = options.clock ?? (() => new Date());
+  return async (path: string): Promise<PolygonCapture> => {
+    const body = new Uint8Array(await (await request(path)).arrayBuffer());
+    // Taken after the whole body has arrived: the fetch proves its content
+    // was public by this instant, never by an earlier one.
+    return { body, completed_at: clock().toISOString() };
+  };
+}
+
+function polygonRequester(options: PolygonHttpFetcherOptions): (path: string) => Promise<Response> {
   const apiKey = options.apiKey.trim();
   const baseUrl = options.baseUrl ?? DEFAULT_POLYGON_BASE_URL;
   const fetchImpl = options.fetchImpl ?? fetch;
 
-  return async (path: string): Promise<unknown> => {
+  return async (path: string): Promise<Response> => {
     const url = new URL(path, baseUrl);
     if (!url.searchParams.has("apiKey")) {
       url.searchParams.set("apiKey", apiKey);
@@ -113,7 +135,7 @@ export function createPolygonHttpFetcher(options: PolygonHttpFetcherOptions): Po
     if (!response.ok) {
       throw new PolygonFetchError(response.status, `polygon: HTTP ${response.status}`);
     }
-    return response.json();
+    return response;
   };
 }
 
