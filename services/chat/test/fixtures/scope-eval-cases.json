@@ -312,7 +312,7 @@
     "companies": ["AMD"],
     "prior": null,
     "expected": {"route":"derived_margin","reads":"derived_margin","peers":false,"segments":false,"margin_trend":false,"margins":true,"metrics":["ebitda","income_statement"],"guidance":false,"explains":false,"income_items":["gross_margin"],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false},
-    "accept": {"metrics":{"value":["ebitda"],"reason":"The live model names no income statement beside another metric, on main's prompt too (2026-10-21)."}}
+    "accept": {"metrics":{"value":["ebitda"],"reason":"The live model names no income statement beside another metric, on main's prompt too (2026-10-21, #465)."}}
   },
   {
     "id": 45,
@@ -419,7 +419,7 @@
     "companies": ["NVDA"],
     "prior": null,
     "expected": {"route":"trend","reads":"trend","peers":false,"segments":false,"margin_trend":true,"margins":true,"metrics":["free_cash_flow_margin","income_statement"],"guidance":false,"explains":false,"income_items":["gross_margin"],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false},
-    "accept": {"metrics":{"value":["free_cash_flow_margin"],"reason":"The live model names no income statement beside another metric, on main's prompt too (2026-10-21)."}}
+    "accept": {"metrics":{"value":["free_cash_flow_margin"],"reason":"The live model names no income statement beside another metric, on main's prompt too (2026-10-21, #465)."}}
   },
   {
     "id": 60,
