@@ -144,7 +144,7 @@ test("listing splits sync and the split sync CLI", { timeout: 180_000 }, async (
       await holder.query("begin");
       await holder.query("select pg_advisory_xact_lock(hashtextextended($1::text, 0))", [LISTINGS.amd]);
       let done = false;
-      const sync = syncListingSplits(db, polygonSplits({ AMD: [] }), { listing_id: LISTINGS.amd, ticker: "AMD" }).then(() => {
+      const sync = syncListingSplits(db, polygonSplits({ AMD: [] }), { listing_id: LISTINGS.amd, ticker: "AMD" }, at("2026-09-30T12:00:00.000Z")).then(() => {
         done = true;
       });
       await new Promise((resolve) => setTimeout(resolve, 300));
@@ -155,6 +155,13 @@ test("listing splits sync and the split sync CLI", { timeout: 180_000 }, async (
     } finally {
       holder.release();
     }
+  });
+
+  await t.test("a sync fetched before the stored one does not replace it", async () => {
+    const newer = await loadListingSplits(db, LISTINGS.nvda);
+    assert.notEqual(newer.checked_at, null);
+    await syncListingSplits(db, polygonSplits({ NVDA: [] }), nvda, at("2026-09-01T12:00:00.000Z"));
+    assert.deepEqual(await loadListingSplits(db, LISTINGS.nvda), newer);
   });
 
   await t.test("a listing checked with no splits reads as checked and split-free", async () => {
