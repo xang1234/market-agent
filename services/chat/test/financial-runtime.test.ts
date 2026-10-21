@@ -551,6 +551,12 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     const done = completed((await chatHarness(racing as never, { model: revenueModel(["AAA"]) }).run(turn)).events);
     const { rows } = await db.query(`select blocks->0->>'kind' as kind from chat_messages where message_id = $1`, [id]);
     assert.deepEqual([done.message_id, rows], [id, [{ kind: "financial_answer" }]]);
+    // The thread points at the answer's snapshot, not the gap's it replaced.
+    const { rows: [pointers] } = await db.query(
+      `select t.latest_snapshot_id::text as thread, m.snapshot_id::text as answer from chat_threads t join chat_messages m on m.thread_id = t.thread_id where m.message_id = $1`,
+      [id],
+    );
+    assert.equal(pointers.thread, pointers.answer);
   });
 
   await t.test("narrative turns keep the analyst path", async () => {
