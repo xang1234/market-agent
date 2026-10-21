@@ -22,12 +22,16 @@ import { acquireLease, type AcquireLeaseResult, type LeaseClaimant, type RunLeas
 import type { FinancialEvidencePort, SqlExecutor } from "./ports.ts";
 import { executeReplay, replayClaimant, type ReplayOutcome } from "./replay.ts";
 import { RUN_COLUMNS, toRun, type RunRecord } from "./run-record.ts";
-import { requestCancellation } from "./run-repo.ts";
+import { grantsRecordedClasses, requestCancellation } from "./run-repo.ts";
 import type { FinancialVersionRegistry } from "./version-registry.ts";
 
 /** How a parent feature lets a supervisor resume its runs. */
 export type ParentRecovery = Readonly<{
-  /** The run's current authority, or null when the parent no longer authorizes it (deleted, edited, disabled). */
+  /**
+   * The run's current authority, or null when the parent no longer authorizes
+   * it (deleted, edited, disabled). One that does not grant every source class
+   * the run recorded no longer authorizes it either.
+   */
   authority(run: RunRecord): Promise<FinancialRuntimeAuthority | null>;
   persistParent: PersistParentArtifact;
   parentLimits?: Partial<ExecutionLimits>;
@@ -78,7 +82,7 @@ export async function recoverRun(client: SnapshotTransactionClient, run: RunReco
   const parent = deps.parents[run.parent_kind];
   if (!parent) return { run_id: run.run_id, status: "skipped", reason: "parent_not_registered" };
   const authority = await parent.authority(run);
-  if (!authority) return { run_id: run.run_id, status: "skipped", reason: "parent_withdrew" };
+  if (!authority || !grantsRecordedClasses(authority, run)) return { run_id: run.run_id, status: "skipped", reason: "parent_withdrew" };
   const lease = await leaseFor(client, run, authority, deps);
   if (!("epoch" in lease)) return lease;
 

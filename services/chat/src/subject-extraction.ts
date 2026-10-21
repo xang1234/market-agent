@@ -18,7 +18,7 @@ const TICKER_TOKEN = /^[A-Z]{1,5}$/;
 // company in a financial request ("EPS for AAPL in FY2023").
 const NON_SUBJECT_TOKENS = new Set([
   "A", "I", "H", "Q", "AND", "OR", "VS", "FY", "TTM", "LTM", "YTD", "YOY", "QOQ",
-  "EPS", "USD", "GAAP", "SEC", "CEO", "CFO", "IPO", "ETF",
+  "EPS", "USD", "GAAP", "SEC", "CEO", "CFO", "IPO", "ETF", "PE",
 ]);
 
 /**
@@ -29,8 +29,8 @@ const NON_SUBJECT_TOKENS = new Set([
 export function extractSubjectMentions(text: string | null | undefined): string[] {
   const mentions: string[] = [];
   // A benchmark index is not a company: "S&P" would split into "S" and "P", and
-  // "DOW JONES" into Dow Inc. and "JONES" (#206).
-  for (const token of (text ?? "").replace(new RegExp(BENCHMARK.source, "gi"), " ").split(/[^A-Za-z]+/)) {
+  // "DOW JONES" into Dow Inc. and "JONES" (#206). Nor is "P/E" two (#444).
+  for (const token of (text ?? "").replace(new RegExp(BENCHMARK.source, "gi"), " ").replace(/\bP\/E\b/giu, " ").split(/[^A-Za-z]+/)) {
     if (TICKER_TOKEN.test(token) && !NON_SUBJECT_TOKENS.has(token) && !mentions.includes(token)) mentions.push(token);
   }
   return mentions;

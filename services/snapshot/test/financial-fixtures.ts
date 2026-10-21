@@ -125,6 +125,7 @@ function evidence(factId: string): LoadedEvidence {
   return {
     fact_id: factId,
     source_id: F.source,
+    source_kind: "filing",
     invalidated: false,
     method: "reported",
     source_user_id: null,
@@ -171,6 +172,7 @@ export function validRecords(
       request_hash: planSemanticHash(plan),
       execution_state: "ready_to_seal",
       knowledge_cutoff: F.cutoff,
+      allowed_source_classes: ["sec_filing"],
     },
     plan: { plan: JSON.parse(JSON.stringify(plan)), semantic_hash: planSemanticHash(plan) },
     unit: {

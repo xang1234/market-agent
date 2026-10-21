@@ -42,8 +42,13 @@ export async function recordPriceObservations(db: ListingQueryExecutor, prices: 
 }
 
 export type LatestPriceObservations = Readonly<{
-  /** The observations with the newest trade time known by the cutoff, at the latest time any of them was known, with their source's `sources.kind`. */
-  latest: ReadonlyArray<PriceObservation & Readonly<{ known_at: string; source_kind: string }>>;
+  /**
+   * Each source's observations with its newest trade time known by the cutoff,
+   * at the latest time any of them was known, with the source's `sources.kind`.
+   * Per source, so a newer price from a source a run may not use never hides
+   * an older one from a source it may.
+   */
+  latest_by_source: ReadonlyArray<PriceObservation & Readonly<{ known_at: string; source_kind: string }>>;
   /** Whether an observation traded by the cutoff has no provable publication time. */
   unknown_publication: boolean;
 }>;
@@ -56,15 +61,15 @@ const ROW = `o.observation_id::text, o.listing_id::text, o.source_id::text, o.ki
 // Public information only: a source a user uploaded never grounds a certified figure.
 const PUBLIC = `price_observations o join sources s on s.source_id = o.source_id and s.user_id is null`;
 
-/** The listing's latest public price observations known by `asOf`. */
+/** Each public source's latest price observations of the listing known by `asOf`. */
 export async function loadLatestPriceObservations(db: ListingQueryExecutor, listingId: UUID, asOf: string): Promise<LatestPriceObservations> {
   const { rows } = await db.query<PriceObservation & { known_at: string; source_kind: string }>(
     `select ${ROW} from ${PUBLIC}
       where o.listing_id = $1::uuid and o.known_at <= $2::timestamptz
         and (o.observed_at, o.known_at) = (
-          select o.observed_at, o.known_at from ${PUBLIC}
-           where o.listing_id = $1::uuid and o.known_at <= $2::timestamptz
-           order by o.observed_at desc, o.known_at desc limit 1)
+          select newest.observed_at, newest.known_at from price_observations newest
+           where newest.listing_id = o.listing_id and newest.source_id = o.source_id and newest.known_at <= $2::timestamptz
+           order by newest.observed_at desc, newest.known_at desc limit 1)
       order by o.observation_id`,
     [listingId, asOf],
   );
@@ -72,5 +77,5 @@ export async function loadLatestPriceObservations(db: ListingQueryExecutor, list
     `select exists (select 1 from ${PUBLIC} where o.listing_id = $1::uuid and o.known_at is null and o.observed_at <= $2::timestamptz) as unknown`,
     [listingId, asOf],
   );
-  return { latest: rows, unknown_publication: unknown.rows[0]!.unknown };
+  return { latest_by_source: rows, unknown_publication: unknown.rows[0]!.unknown };
 }

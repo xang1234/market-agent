@@ -73,7 +73,7 @@ export type FinancialInputCandidate = Readonly<{
   supersedes: string | null;
   superseded_by: string | null;
   source_id: string;
-  /** The source's `sources.kind`, which decides its class (sourceClassOf). */
+  /** The source's `sources.kind`, which with its id decides its class (sourceClassOf). */
   source_kind: string;
   source_version_hash: string | null;
   context: FinancialContextFields | null;

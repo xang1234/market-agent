@@ -7,11 +7,10 @@
 // writes the cell and counts it done, so a retry, a restart, or a second
 // worker can neither duplicate a computation nor double-count progress.
 //
-// Every direct numerical column goes through the engine or an explicit
-// unsupported outcome. Market capitalization needs market price, share count,
-// and timing proof the engine does not certify yet, so it is unsupported rather
-// than silently taken from the latest active fact. Reader-question prose stays
-// on its own, non-certified path.
+// Every direct numerical column goes through the engine, market cap and P/E
+// included (#444): the run's grant admits Polygon's prices, and a valuation is
+// never taken from a stored fact. Reader-question prose stays on its own,
+// non-certified path.
 
 import { randomUUID } from "node:crypto";
 
@@ -37,17 +36,32 @@ export type GridFinancialDeps = Readonly<{
   evidence: (executor: SqlExecutor) => FinancialEvidencePort;
 }>;
 
-/** A reported value, or an approved ratio computed over its two reported inputs in the cell's own plan. */
+/**
+ * A reported value, an approved ratio computed over its two reported inputs,
+ * or a valuation over the share price at the run's cutoff, in the cell's own plan.
+ */
 type FinancialColumn = Readonly<{ label: string }> & (
   | Readonly<{ metric_key: string; annual_only?: true }>
   | Readonly<{ ratio_key: string; numerator: string; denominator: string; annual_only: true }>
-  | Readonly<{ unsupported: string }>
+  | Readonly<{ valuation: Valuation }>
 );
+
+type Valuation = "market_cap" | "pe_ratio";
+
+/**
+ * What each valuation reads beside the price: the latest filing's share count,
+ * or the latest fiscal year's diluted EPS, the only EPS pe_ratio.v1 accepts.
+ */
+const VALUATION_OPERANDS: Readonly<Record<Valuation, Readonly<{ operand: "shares" | "earnings"; metric_key: string; period: Readonly<Record<string, unknown>> }>>> = {
+  market_cap: { operand: "shares", metric_key: "shares_outstanding", period: { kind: "latest", period_type: "quarterly", offset: 0 } },
+  pe_ratio: { operand: "earnings", metric_key: "eps_diluted", period: { kind: "latest", period_type: "annual", offset: 0 } },
+};
 
 const FINANCIAL_COLUMNS: Readonly<Record<string, FinancialColumn>> = {
   latest_revenue: { label: "Revenue (latest)", metric_key: "revenue" },
   latest_eps_diluted: { label: "EPS diluted (latest)", metric_key: "eps_diluted" },
-  latest_market_cap: { label: "Market Cap (latest)", unsupported: "market_cap_needs_price_share_timing_proof" },
+  latest_market_cap: { label: "Market Cap (latest)", valuation: "market_cap" },
+  latest_pe_ratio: { label: "P/E (latest FY diluted EPS)", valuation: "pe_ratio" },
   // The annual cash-resilience view (#210).
   latest_operating_cash_flow: { label: "Operating cash flow (latest FY)", metric_key: "operating_cash_flow", annual_only: true },
   latest_net_income: { label: "Net income (latest FY)", metric_key: "net_income", annual_only: true },
@@ -85,6 +99,9 @@ export function parseFinancialColumnParams(columnKey: string, params: unknown): 
   if (typeof offset !== "number" || !Number.isInteger(offset) || offset < 0 || offset > MAX_PERIOD_OFFSET) {
     throw new GridValidationError(`${columnKey} offset must be an integer from 0 to ${MAX_PERIOD_OFFSET}`);
   }
+  if (column !== undefined && "valuation" in column && (periodType !== "annual" || offset !== 0)) {
+    throw new GridValidationError(`${columnKey} is valued at the run's cutoff and takes no period`);
+  }
   return { period_type: periodType, offset };
 }
 
@@ -94,10 +111,10 @@ export function parseFinancialColumnParams(columnKey: string, params: unknown): 
  * created, rather than gapping every numerical cell of each run (#346).
  */
 export function validateFinancialPlanFit(specs: ReadonlyArray<Readonly<{ column_key: string; params?: unknown }>>): void {
-  // A metric cell is one node; a ratio cell plans its two inputs and the ratio (cellOperations).
+  // A metric cell is one node; a ratio or valuation cell plans its two inputs and itself (cellOperations).
   const perRow = specs.reduce((total, spec) => {
     const column = FINANCIAL_COLUMNS[spec.column_key];
-    if (column === undefined || "unsupported" in column) return total;
+    if (column === undefined) return total;
     return total + ("metric_key" in column ? 1 : 3);
   }, 0);
   const operations = perRow * MAX_GRID_ROWS;
@@ -123,10 +140,10 @@ export type GridFinancialOutcome = "published" | RequestGap;
 const STILL_OWED: ReadonlySet<GridFinancialOutcome> = new Set(["run_in_progress", "publication_failed"]);
 
 /**
- * Computes and publishes a run's numerical cells. Unsupported columns and
- * non-issuer rows are written as explicit unsupported cells. Cells the engine
- * will not publish are written as gaps with their reason; cells still owed by
- * another worker or by recovery stay pending. Idempotent across retries.
+ * Computes and publishes a run's numerical cells. Non-issuer rows are written
+ * as explicit unsupported cells. Cells the engine will not publish are written
+ * as gaps with their reason; cells still owed by another worker or by recovery
+ * stay pending. Idempotent across retries.
  */
 export async function publishGridFinancialCells(deps: GridFinancialDeps, run: GridFinancialRun): Promise<GridFinancialOutcome> {
   const db = deps.pool;
@@ -138,8 +155,8 @@ export async function publishGridFinancialCells(deps: GridFinancialDeps, run: Gr
     const column = FINANCIAL_COLUMNS[instance.column_key];
     if (!column) throw new Error(`${instance.column_key} is not a numerical column`);
     for (const row of run.rows) {
-      if ("unsupported" in column || row.subject.kind !== "issuer") {
-        await write(row.rowNumber, instance, unsupportedCell("unsupported" in column ? column.unsupported : "subject_not_an_issuer"));
+      if (row.subject.kind !== "issuer") {
+        await write(row.rowNumber, instance, unsupportedCell("subject_not_an_issuer"));
         continue;
       }
       computed.push({ rowNumber: row.rowNumber, subject: { kind: "issuer", id: row.subject.id }, instance, column, params: parseFinancialColumnParams(instance.column_key, instance.params) });
@@ -188,44 +205,63 @@ function gridAuthority(userId: string, gridRunId: string): FinancialRuntimeAutho
     egress_channel: "analyst_grid",
     // The run is the parent; its columns and rows were frozen when it started.
     parent: { kind: "analyst_grid_run", id: gridRunId, version: PARENT_VERSION },
-    allowed_source_classes: ["sec_filing"],
+    // Market data is Polygon's prices only (sourceClassOf), for market cap and P/E (#444).
+    allowed_source_classes: ["sec_filing", "market_data"],
     feature: { surface: "analyst_grid", capability: "financial-column", mode: "enforce" },
     approval_state: "not_required",
     lease: null,
   });
 }
 
-type ComputedColumn = Exclude<FinancialColumn, { unsupported: string }>;
-type ComputedCell = Readonly<{ rowNumber: number; subject: FinancialSubjectRef; instance: ColumnInstance; column: ComputedColumn; params: FinancialColumnParams }>;
+type ComputedCell = Readonly<{ rowNumber: number; subject: FinancialSubjectRef; instance: ColumnInstance; column: FinancialColumn; params: FinancialColumnParams }>;
 
 const slotOf = (rowNumber: number) => `r${rowNumber}`;
 const unitOf = (cell: ComputedCell) => `${cell.instance.column_instance_id}_r${cell.rowNumber}`;
 const UNIT_ID = /^(c\d+)_r(\d+)$/u;
 
-/** The run's plan draft and its units: one output and unit per numerical cell, over that cell's own nodes. */
+/** The run's plan draft and its units: one unit per numerical cell, over that cell's own nodes. */
 function planShape(cells: ReadonlyArray<ComputedCell>): { draft: object; units: DeterministicUnits } {
   const rows = [...new Set(cells.map((cell) => cell.rowNumber))].sort((left, right) => left - right);
   return {
     draft: {
       subjects: rows.map((rowNumber) => ({ slot_id: slotOf(rowNumber), mention: `row ${rowNumber}` })),
       operations: cells.flatMap(cellOperations),
-      outputs: cells.map((cell) => ({ output_id: `o_${unitOf(cell)}`, node_id: unitOf(cell) })),
+      outputs: cells.flatMap((cell) => cellOutputs(cell).map((nodeId) => ({ output_id: `o_${nodeId}`, node_id: nodeId }))),
       thresholds: [],
     },
-    units: cells.map((cell) => ({ unit_id: unitOf(cell), output_ids: [`o_${unitOf(cell)}`] })),
+    units: cells.map((cell) => ({ unit_id: unitOf(cell), output_ids: cellOutputs(cell).map((nodeId) => `o_${nodeId}`) })),
   };
 }
 
+/**
+ * A cell's published nodes, its own figure first: that is the result the cell
+ * shows. A valuation always publishes its price and operand beside it
+ * (planner), so they are listed after the figure rather than added before it.
+ */
+function cellOutputs(cell: ComputedCell): string[] {
+  const { column } = cell;
+  if (!("valuation" in column)) return [unitOf(cell)];
+  return [unitOf(cell), `${unitOf(cell)}_px`, `${unitOf(cell)}_${VALUATION_OPERANDS[column.valuation].operand}`];
+}
+
 function cellOperations(cell: ComputedCell): Array<Record<string, unknown>> {
-  const reported = (nodeId: string, metricKey: string) => ({
+  const reported = (nodeId: string, metricKey: string, period: Readonly<Record<string, unknown>> = { kind: "latest", period_type: cell.params.period_type, offset: cell.params.offset }) => ({
     node_id: nodeId,
     operation: "reported_metric",
     subject_slot: slotOf(cell.rowNumber),
     metric_key: metricKey,
-    period: { kind: "latest", period_type: cell.params.period_type, offset: cell.params.offset },
+    period,
   });
   const { column } = cell;
   if ("metric_key" in column) return [reported(unitOf(cell), column.metric_key)];
+  if ("valuation" in column) {
+    const { operand, metric_key, period } = VALUATION_OPERANDS[column.valuation];
+    return [
+      reported(`${unitOf(cell)}_px`, "share_price", { kind: "at_cutoff" }),
+      reported(`${unitOf(cell)}_${operand}`, metric_key, period),
+      { node_id: unitOf(cell), operation: column.valuation, price: `${unitOf(cell)}_px`, [operand]: `${unitOf(cell)}_${operand}` },
+    ];
+  }
   return [
     reported(`${unitOf(cell)}_num`, column.numerator),
     reported(`${unitOf(cell)}_den`, column.denominator),

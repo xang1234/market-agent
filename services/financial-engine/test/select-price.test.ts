@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { sourceClassOf } from "../../financial-core/src/index.ts";
+import { SEC_EDGAR_FILING_SOURCE_ID } from "../../fundamentals/src/provider-sources.ts";
+import { POLYGON_MARKET_SOURCE_ID, STOOQ_MARKET_SOURCE_ID, YAHOO_FINANCE_DEV_MARKET_SOURCE_ID } from "../../market/src/provider-sources.ts";
 import type { PriceObservation, SplitHistory } from "../src/ports.ts";
 import { selectPrice } from "../src/select-price.ts";
 
@@ -34,7 +37,7 @@ function observation(price: string, observedAt: string, overrides: Partial<Price
   };
 }
 
-const page = (latest: PriceObservation[], unknown_publication = false) => ({ status: "ok" as const, latest, unknown_publication });
+const page = (latest_by_source: PriceObservation[], unknown_publication = false) => ({ status: "ok" as const, latest_by_source, unknown_publication });
 const reason = (selection: ReturnType<typeof selectPrice>) => (selection.status === "gap" ? selection.reason_code : "selected");
 
 test("Friday's 1200.00 close binds as 120 on Monday, after the split, with its lineage", () => {
@@ -84,6 +87,19 @@ test("each reason a price cannot bind is a named gap", () => {
   assert.equal(reason(selectPrice(page([observation("1200", "2024-06-07T20:00:00.000Z")]), { ...HISTORY, splits: twoOnOneDay }, POLICY)), "incompatible_basis");
 });
 
+test("a price is market data only from an approved provider, and a fact is an SEC filing only from a filing (#444)", () => {
+  const price = (source_id: string, kind = "market_data") => sourceClassOf({ kind, source_id }, "price");
+  const fact = (source_id: string, kind: string) => sourceClassOf({ kind, source_id }, "fact");
+  assert.deepEqual(
+    [price(POLYGON_MARKET_SOURCE_ID), price(STOOQ_MARKET_SOURCE_ID), price(YAHOO_FINANCE_DEV_MARKET_SOURCE_ID), price("00000000-0000-4000-a000-000000000013")],
+    ["market_data", null, null, null],
+  );
+  assert.deepEqual(
+    [fact(SEC_EDGAR_FILING_SOURCE_ID, "filing"), price(SEC_EDGAR_FILING_SOURCE_ID, "filing"), fact(POLYGON_MARKET_SOURCE_ID, "market_data")],
+    ["sec_filing", null, null],
+  );
+});
+
 test("a price binds only from a source class the authority allows (#444)", () => {
   const unclassed = observation("1200.00", "2024-06-07T20:00:00.000Z", { source_class: null });
   const friday = observation("1200.00", "2024-06-07T20:00:00.000Z");
@@ -92,4 +108,14 @@ test("a price binds only from a source class the authority allows (#444)", () =>
   // Of the newest trade's observations, only an allowed one binds, though the other has the lower id.
   const selection = selectPrice(page([unclassed, friday]), HISTORY, POLICY);
   assert.equal(selection.status === "selected" && selection.observation.observation_id, friday.observation_id);
+});
+
+test("classes are filtered before the newest is picked: another source's newer price never hides an allowed one (#444)", () => {
+  const friday = observation("1200.00", "2024-06-07T20:00:00.000Z", { known_at: "2024-06-07T20:15:00.000Z" });
+  const mondayUnclassed = observation("121.00", "2024-06-10T13:45:00.000Z", { kind: "last_trade", source_class: null });
+  const fridayLater = observation("1201.00", "2024-06-07T20:00:00.000Z", { known_at: "2024-06-07T21:00:00.000Z", source_id: "4f000000-0000-4000-8000-0000000004cc" });
+  const value = (selection: ReturnType<typeof selectPrice>) => (selection.status === "selected" ? selection.value : selection.reason_code);
+  assert.equal(value(selectPrice(page([mondayUnclassed, friday]), HISTORY, POLICY)), "1200");
+  // Of two allowed sources, the later-known statement of the same trade binds rather than conflicting.
+  assert.equal(value(selectPrice(page([friday, fridayLater]), HISTORY, POLICY)), "1201");
 });

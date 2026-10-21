@@ -322,7 +322,9 @@ test("a deterministic plan asks for market cap and P/E, reading a share price on
   const planned = buildDeterministicPlan(context({ requested_subjects: [resolved(0)] }), valuationDraft());
   assert.ok(planned.outcome === "ready", JSON.stringify(planned));
   assert.deepEqual(planned.plan.operations.flatMap((node) => (node.operation === "reported_metric" ? [] : [[node.node_id, node.operation_version]])), [["cap", "market_cap.v1"], ["pe", "pe_ratio.v1"]]);
-  assert.deepEqual(planned.plan.outputs, [{ output_id: "out_cap", node_id: "cap", unit_id: "answer" }, { output_id: "out_pe", node_id: "pe", unit_id: "answer" }]);
+  assert.deepEqual(outputRows(planned), [
+    ["px_input", "px", "answer"], ["shares_input", "shares", "answer"], ["out_cap", "cap", "answer"], ["eps_input", "eps", "answer"], ["out_pe", "pe", "answer"],
+  ]);
   assert.equal(planned.plan.interpretation?.text, [
     "Subjects: Apple Inc. (issuer:51111111-1111-4111-8111-111111111111); 1 requested subject.",
     "Metrics: share_price (share_price.v1), shares_outstanding (shares_outstanding.v1), eps_diluted (eps_diluted.v1).",
@@ -330,11 +332,22 @@ test("a deterministic plan asks for market cap and P/E, reading a share price on
     "Information public by 2024-03-01T23:59:59.999-05:00 (America/New_York).",
     "Calculations: market capitalization (share price × shares outstanding), P/E ratio (share price / latest fiscal year diluted EPS).",
   ].join(" "));
-  // The price may be shown beside the figures it feeds, never alone.
+  // The price may be shown beside the figures it feeds, never alone; one the draft publishes is not added again.
   const shown = buildDeterministicPlan(context({ requested_subjects: [resolved(0)] }), valuationDraft(5, [{ output_id: "out_px", node_id: "px" }]));
-  assert.deepEqual(shown.outcome === "ready" && shown.plan.outputs.map((output) => output.output_id), ["out_cap", "out_pe", "out_px"]);
+  assert.deepEqual(shown.outcome === "ready" && shown.plan.outputs.map((output) => output.output_id), ["shares_input", "out_cap", "eps_input", "out_pe", "out_px"]);
   const alone = buildDeterministicPlan(context({ requested_subjects: [resolved(0)] }), valuationDraft(1, [{ output_id: "out_px", node_id: "px" }]));
   assert.deepEqual(alone.outcome === "unsupported" && alone.issues.map((issue) => [issue.code, issue.message]), [
     ["price_without_valuation", "px reads a share price, which is planned only as the price of market_cap or pe_ratio"],
   ]);
+});
+
+test("a market cap or P/E answer always publishes the price and the count or EPS it reads, before the result (#444)", async () => {
+  const draft = valuationDraft();
+  const model = scripted({ outcome: "ready", ...draft, outputs: [{ output_id: "out_cap", node_id: "cap" }] });
+  const result = await planFinancialRequest(context({ requested_subjects: [resolved(0)] }), "Apple's market cap", model);
+  assert.equal(result.outcome, "ready", JSON.stringify(result));
+  assert.deepEqual(
+    result.outcome === "ready" && result.plan.outputs.map((output) => [output.output_id, output.node_id, output.unit_id]),
+    [["px_input", "px", "answer"], ["shares_input", "shares", "answer"], ["out_cap", "cap", "answer"]],
+  );
 });

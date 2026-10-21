@@ -262,8 +262,9 @@ filing date D (dei `EntityCommonStockSharesOutstanding`). SEC ingestion stores i
   rule keeps those out of a current plan, but not out of a historical one.
 - **No restatement:** a later filing states a later date's count, never an earlier one's, so restatement detection
   compares us-gaap figures only.
-- **Not yet in chat:** `market_cap` reads the count, but chat still marks `shares_outstanding` unavailable (#444 step
-  4). A 10-Q's count is stored only when that quarter is ingested.
+- **In chat:** a market cap answer shows the count it read beside the figure (next sections). Chat's research scope
+  still marks `shares_outstanding` unavailable, since no chat reader shows a count, so a follow-up does not re-read it.
+  A 10-Q's count is stored only when that quarter is ingested.
 
 ## Share prices as engine inputs (#444)
 
@@ -290,19 +291,21 @@ its own stored observation and its own bound-input variant. `market_cap` and `pe
   split basis of its own trade date, so it is divided by the splits after that date and on or before R. Core checks
   the token against the value, the adjustment against its own splits and anchor, and that the price was known between
   its trade and the cutoff.
-- **Selection** (`services/financial-engine/src/select-price.ts`): the subject's one common-stock listing at the cutoff
-  decides, as for EPS. Its observations with the newest trade time known by the cutoff are read, and among them the
-  latest known. Gaps: `missing_input` (none known by then), `publication_time_unknown` (only ones without a known
-  time), `source_class_not_allowed` (the authority does not allow market data), `precision_unverified` (a token
-  outside the numeric policy), `conflicting_evidence` (the latest prices disagree), and `stale_input`, then the split
-  gaps of #387. A price is stale when it traded before the last regular session the cutoff has closed
+- **Selection** (`services/financial-engine/src/select-price.ts`, `price-at-cutoff-selection.v2`): the subject's one
+  common-stock listing at the cutoff decides, as for EPS. Each source's observations with its newest trade time known
+  by the cutoff are read. Only those whose class the run was granted are evidence, and they are filtered before the
+  newest is picked, so a newer price from another source never hides an allowed one. Of those, the newest trade time
+  binds, and among its observations the latest known. Gaps: `missing_input` (none known by then),
+  `publication_time_unknown` (only ones without a known time), `source_class_not_allowed` (none from a granted
+  class), `precision_unverified` (a token outside the numeric policy), `conflicting_evidence` (the latest prices
+  disagree), and `stale_input`, then the split gaps of #387. A price is stale when it traded before the last regular session the cutoff has closed
   (`lastRegularSessionDate`, `services/market/src/ytd-window.ts`): weekdays, closing at 16:00 exchange time
   (`SESSION_CLOSE_MINUTES`). A Friday close is current until Monday's session closes.
 - **Seal:** the snapshot verifier reloads the observation. A missing one fails the input
   (`price_observation_unavailable`), and so does one whose token, times, listing, response, or currency no longer
   match (`price_observation_changed`). The verifier resolves the subject's listing again (`listing_changed`) and
-  rebuilds the restatement from that listing's current splits (`splits_changed`), as for EPS. The seal cites the
-  price's source.
+  rebuilds the restatement from that listing's current splits (`splits_changed`), as for EPS. It re-checks the price's
+  class against the run's grant, as for every input (below). The seal cites the price's source.
 - **Limits:** weekdays stand in for an exchange calendar, so until the session after a market holiday closes, the
   price before the holiday reads as stale.
 
@@ -327,10 +330,18 @@ divides an instant price by a duration's EPS.
 - **Gaps:** EPS of zero or less is `non_positive_denominator`, and a share count of zero or less `non_positive_base`.
   A price and EPS in different currencies are `incompatible_currency`: v1 converts no currency. An input's gap blocks
   the figures that read it (`blocked_by_dependency`), and its own output names the reason.
-- **Planning:** a deterministic plan asks for both like any approved operation. The planner rejects a `share_price`
-  node that is not the price of a valuation (`price_without_valuation`). The price may be published beside the
-  figures it feeds, but never alone. The model planner's prompt does not list the valuations, so chat, its only
-  caller, plans as before until #444 step 4.
+- **Planning:** a plan asks for both like any approved operation, and the model planner's prompt names each with the
+  operands it reads (`financial-plan-prompt.v2`). The planner rejects a `share_price` node that is not the price of a
+  valuation (`price_without_valuation`). An answer resting on a valuation always shows its price and its share count
+  or EPS, as one resting on free cash flow shows its OCF and capex (`shownOperands`, `planner.ts`). They are
+  published before the figure unless its unit already publishes them.
+- **Surfaces:** grids offer `latest_market_cap` and `latest_pe_ratio`, labelled "P/E (latest FY diluted EPS)"
+  (`services/analyst-grids/src/financial-column.ts`). Both are valued at the run's cutoff, so they take no period
+  params. A cell lists its own figure first and its price and operand after it, so the cell shows the valuation and
+  its sealed block carries the inputs. Chat routes a market cap or P/E question to the engine (`isFinancialRequest`),
+  and its scope names `market_cap` and `pe_ratio`, so a follow-up reads them (`SCOPE_METRICS`). The answer shows the
+  figure beside the inputs it read, and each one's inspector shows its date: the price's trade, the count's cover
+  date, and the EPS's fiscal year. The screener moves to these figures in #444 step 5.
 - **Presentation:** a valuation is dated by its price ("latest known at the cutoff"), since its other operand is
   restated to the same R. P/E reads as a multiple, as an approved ratio does.
 - **Seal:** the snapshot verifier recomputes both through the operation registry and checks each input as it does
@@ -341,21 +352,30 @@ divides an instant price by a duration's EPS.
 Every runtime authority declares `allowed_source_classes`. Binding uses evidence only from those classes
 (`services/financial-engine/src/select-inputs.ts`).
 
-- **Class:** a source's class follows its `sources.kind` (`sourceClassOf`,
-  `services/financial-core/src/evidence-vocabulary.ts`). A filing is `sec_filing`, since every filing this system
-  ingests comes from EDGAR. A price observation's source is `market_data`. No other kind has a class yet, so no
-  authority admits an article, a press release, or an upload.
+- **Class:** `sourceClassOf` (`services/financial-core/src/evidence-vocabulary.ts`) is a table of which sources ground
+  which evidence. A fact is `sec_filing` when its source is a filing, since every filing this system ingests comes
+  from EDGAR. A price is `market_data` only from an approved provider, Polygon's source (`POLYGON_MARKET_SOURCE_ID`).
+  The Stooq, Yahoo and stock-screener feeds are `market_data` sources too, but they serve development, so their
+  prices have no class. No other source has a class yet, so no authority admits an article, a press release, an
+  upload, or a development feed. The approved providers live in the class mapping rather than in price selection
+  because binding and the seal read the same mapping, so a provider outside it fails both.
 - **Eligibility:** a candidate from a class the authority does not allow is ineligible, with the reason
   `source_class_not_allowed`. That reason is reported only when nothing closer to eligibility exists. A disallowed
   candidate never wins a tie, never raises a conflict, and never names a latest period. A share count still finds the
   newest filing among every filed count before eligibility, so a disallowed newest count gaps rather than letting an
   older one stand in. A not-yet-public candidate stays invisible, so its class leaks nothing about the future.
-- **Prices:** of the newest trade's observations, only allowed ones bind. When none is allowed, the slot gaps
-  `source_class_not_allowed`, never an older price.
-- **Grants:** every surface allows `sec_filing` only. Surfaces grant `market_data` in #444 step 4. Tests that bind a
-  price pass it explicitly.
-- **Limits:** the run does not record its authority's classes, so the seal cannot re-check them, and a retry reuses
-  the first attempt's bindings.
+- **Prices:** each source's newest observations are read, and only allowed ones are evidence before the newest is
+  picked. When none is allowed, the slot gaps `source_class_not_allowed`.
+- **Grants:** chat and grids allow `sec_filing` and `market_data`. The operator approved figures derived from
+  Polygon's prices there, since users bring their own key and data. Analyze, Discovery and the thesis adapter allow
+  `sec_filing` only, and the screener follows in #444 step 5.
+- **Recorded grant:** a run records its authority's classes as a sorted set (`financial_runs.allowed_source_classes`,
+  migration 0070), immutable like its plan. Binding uses that grant on every attempt, and the seal re-checks each bound
+  input's class against it (`financial_input_ineligible`, `source_class_not_allowed`). A retry whose authority grants
+  every recorded class resumes the run under the grant it recorded: a wider grant cannot change bindings already
+  made, just as later evidence needs a new run. A retry that lacks a recorded class is a conflict
+  (`source_classes_not_granted`), since the run's bindings may use it, and recovery skips such a run
+  (`parent_withdrew`). Runs reserved before 0070 were granted `sec_filing`, the only class any surface allowed.
 
 ## Which facts may ground an answer
 

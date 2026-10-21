@@ -56,11 +56,11 @@ export function createEvidenceFinancialPort(db: SqlExecutor): FinancialEvidenceP
 
     async readPriceObservations({ listing_id, as_of }: PriceObservationRequest): Promise<PriceObservationPage> {
       try {
-        const { latest, unknown_publication } = await loadLatestPriceObservations(db, listing_id, as_of);
+        const { latest_by_source, unknown_publication } = await loadLatestPriceObservations(db, listing_id, as_of);
         return {
           status: "ok",
-          latest: latest.map(({ observation_id, listing_id, source_id, source_kind, kind, price_text, currency, observed_at, known_at, body_sha256 }) =>
-            ({ observation_id, listing_id, source_id, source_class: sourceClassOf(source_kind), kind, price_text, currency, observed_at, known_at, body_sha256 })),
+          latest_by_source: latest_by_source.map(({ observation_id, listing_id, source_id, source_kind, kind, price_text, currency, observed_at, known_at, body_sha256 }) =>
+            ({ observation_id, listing_id, source_id, source_class: sourceClassOf({ kind: source_kind, source_id }, "price"), kind, price_text, currency, observed_at, known_at, body_sha256 })),
           unknown_publication,
         };
       } catch (error) {
@@ -78,7 +78,7 @@ function toInputCandidate(row: FinancialInputCandidate): InputCandidate[] {
     {
       fact_id: row.fact_id,
       source_id: row.source_id,
-      source_class: sourceClassOf(row.source_kind),
+      source_class: sourceClassOf({ kind: row.source_kind, source_id: row.source_id }, "fact"),
       source_version_hash: row.source_version_hash,
       metric_key: row.metric_key,
       period: { start: row.period_start, end: row.period_end, fiscal_year: row.fiscal_year, fiscal_period: row.fiscal_period },

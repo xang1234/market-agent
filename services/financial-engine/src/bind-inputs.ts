@@ -1,9 +1,10 @@
 // Binds every reported-metric slot of a run's plan to immutable evidence in
 // one consistent read (REPEATABLE READ, under the run's lease fence) and
 // persists the bindings — bound payloads or explicit gaps — with the
-// authorized candidate-set digest. A retry reuses the persisted bindings;
-// evidence that arrives later requires an explicit recalculation (a new run),
-// never substitution.
+// authorized candidate-set digest. Only sources of the classes the run
+// recorded when it was reserved are evidence, whichever attempt binds. A
+// retry reuses the persisted bindings; evidence that arrives later requires an
+// explicit recalculation (a new run), never substitution.
 
 import {
   BOUND_INPUT_SCHEMA_VERSION,
@@ -97,7 +98,7 @@ export async function bindPlanInputs(input: {
       knowledge_cutoff: plan.time.knowledge_cutoff,
       reporting_basis: plan.policies.reporting_basis,
       max_age_days: plan.policies.freshness.max_age_days,
-      allowed_source_classes: authority.allowed_source_classes,
+      allowed_source_classes: tx.run.allowed_source_classes,
     };
     const latest = sharedLatestPeriods(reads.map((read) => read.status === "gap"
       ? { node: read.node, candidates: [], incomplete: read.reason_code }
@@ -227,9 +228,9 @@ async function bindPriceSlot(
   await client.query(page.status === "error" ? "rollback to savepoint price_read" : "release savepoint price_read");
   if (page.status === "error") return gap(page.reason_code);
   const selection = selectPrice(page, history, policy);
-  const digest = priceCandidateSetDigest(node.node_id, page.latest);
-  if (selection.status === "gap") return gap(selection.reason_code, page.latest);
-  return outcome(boundPriceBinding(node, subjectSlot(plan, node), plan, selection, digest), page.latest);
+  const digest = priceCandidateSetDigest(node.node_id, page.latest_by_source);
+  if (selection.status === "gap") return gap(selection.reason_code, page.latest_by_source);
+  return outcome(boundPriceBinding(node, subjectSlot(plan, node), plan, selection, digest), page.latest_by_source);
 }
 
 /** Digest of the price observations seen for a slot. */

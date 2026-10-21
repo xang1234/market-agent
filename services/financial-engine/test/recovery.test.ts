@@ -147,6 +147,13 @@ test("supervised recovery after worker restarts", { timeout: 300_000 }, async (t
     assert.equal((await tickFor(orphan.runId))?.status, "resumed", "the registered supervisor picks it up");
   });
 
+  await t.test("a run whose parent no longer grants a class the run recorded is not resumed under the narrower grant", async () => {
+    const { runId } = await leasedRun(db, marginPlan(), authorityFor(IDS.owner, { allowed_source_classes: ["sec_filing", "market_data"] }));
+    await expire(db, runId);
+    assert.deepEqual(await tickFor(runId), { run_id: runId, status: "skipped", reason: "parent_withdrew" });
+    assert.equal((await readRunStatus(db, IDS.owner, runId))?.execution_state, "running");
+  });
+
   await t.test("a cancellation the dead worker never honoured is completed; a new epoch fences the old worker", async () => {
     const { runId, lease } = await leasedRun(db, marginPlan());
     await requestCancellation(db, IDS.owner, runId);

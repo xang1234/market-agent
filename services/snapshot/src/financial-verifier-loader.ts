@@ -5,7 +5,9 @@
 // access, invalidation, the exact source version, and whether the precision
 // and publication proofs it was bound with are still the current ones — as is
 // every bound price observation as stored now, and the listing each restated
-// input's subject resolves to now, with its splits and zone.
+// input's subject resolves to now, with its splits and zone. Each bound
+// input's source comes with its kind, and the run with the source classes it
+// was granted, so the seal re-checks each input's class.
 // Snapshot reads these tables directly; it never imports the engine.
 
 import { loadSubjectSplitHistory, type SubjectSplitHistory } from "../../market/src/split-history.ts";
@@ -23,6 +25,8 @@ export type LoadedRun = Readonly<{
   request_hash: string;
   execution_state: string;
   knowledge_cutoff: string;
+  /** The source classes the run's authority allowed when it was reserved. */
+  allowed_source_classes: ReadonlyArray<string>;
 }>;
 
 export type LoadedUnit = Readonly<{
@@ -51,6 +55,8 @@ export type LoadedBinding = Readonly<{
 export type LoadedEvidence = Readonly<{
   fact_id: string;
   source_id: string;
+  /** The source's `sources.kind`, which with its id decides its class. */
+  source_kind: string;
   invalidated: boolean;
   method: string;
   source_user_id: string | null;
@@ -79,6 +85,7 @@ export type LoadedPriceObservation = Readonly<{
   observation_id: string;
   listing_id: string;
   source_id: string;
+  source_kind: string;
   source_user_id: string | null;
   kind: string;
   price_text: string;
@@ -137,7 +144,7 @@ const ISO_UTC = `'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'`;
 export async function loadFinancialUnitRecords(db: QueryExecutor, claim: FinancialSealClaim): Promise<FinancialUnitRecords | null> {
   const run = (await db.query<LoadedRun & { plan: unknown; semantic_hash: string }>(
     `select r.run_id::text, r.plan_id::text, r.parent_kind, r.parent_id::text, r.parent_version, r.request_hash, r.execution_state,
-            to_char(r.knowledge_cutoff at time zone 'UTC', ${ISO_UTC}) as knowledge_cutoff, p.plan, p.semantic_hash
+            to_char(r.knowledge_cutoff at time zone 'UTC', ${ISO_UTC}) as knowledge_cutoff, r.allowed_source_classes, p.plan, p.semantic_hash
        from financial_runs r
        join financial_plans p on p.plan_id = r.plan_id and p.user_id = r.user_id
       where r.run_id = $1 and r.user_id = $2`,
@@ -160,7 +167,7 @@ export async function loadFinancialUnitRecords(db: QueryExecutor, claim: Financi
   )).rows;
 
   const evidence = (await db.query<LoadedEvidence>(
-    `select f.fact_id::text, f.source_id::text, f.invalidated_at is not null as invalidated, f.method::text,
+    `select f.fact_id::text, f.source_id::text, s.kind::text as source_kind, f.invalidated_at is not null as invalidated, f.method::text,
             s.user_id::text as source_user_id, normalized_content_hash(s.content_hash) as source_version_hash,
             case when pub.attestation_id is null then null else jsonb_build_object(
               'attestation_id', pub.attestation_id::text,
@@ -186,7 +193,7 @@ export async function loadFinancialUnitRecords(db: QueryExecutor, claim: Financi
   )).rows;
 
   const price_observations = (await db.query<LoadedPriceObservation>(
-    `select o.observation_id::text, o.listing_id::text, o.source_id::text, s.user_id::text as source_user_id, o.kind, o.price_text, o.currency,
+    `select o.observation_id::text, o.listing_id::text, o.source_id::text, s.kind::text as source_kind, s.user_id::text as source_user_id, o.kind, o.price_text, o.currency,
             to_char(o.observed_at at time zone 'UTC', ${ISO_UTC}) as observed_at,
             to_char(o.known_at at time zone 'UTC', ${ISO_UTC}) as known_at, o.body_sha256
        from financial_run_inputs i

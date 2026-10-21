@@ -90,7 +90,7 @@ function priceRecords(): FinancialUnitRecords {
   const publication = unitPublication(plan, evaluation, nodeLineageHashes(plan, evaluation, bindings), "price_unit");
   const closure = unitClosures(plan).get("price_unit")!;
   return {
-    run: { run_id: F.run, plan_id: F.plan, parent_kind: "chat_thread", parent_id: F.parent, parent_version: "1", request_hash: planSemanticHash(plan), execution_state: "ready_to_seal", knowledge_cutoff: CUTOFF },
+    run: { run_id: F.run, plan_id: F.plan, parent_kind: "chat_thread", parent_id: F.parent, parent_version: "1", request_hash: planSemanticHash(plan), execution_state: "ready_to_seal", knowledge_cutoff: CUTOFF, allowed_source_classes: ["market_data", "sec_filing"] },
     plan: { plan: JSON.parse(JSON.stringify(plan)), semantic_hash: planSemanticHash(plan) },
     unit: {
       unit_id: "price_unit", state: "computed", coverage_state: publication.coverage, output_ids: [...closure.output_ids], closure_node_ids: [...closure.node_ids],
@@ -102,7 +102,7 @@ function priceRecords(): FinancialUnitRecords {
     }],
     evidence: [],
     price_observations: [{
-      observation_id: OBSERVATION, listing_id: LISTING, source_id: POLYGON, source_user_id: null, kind: "session_close", price_text: "1200.00", currency: "USD",
+      observation_id: OBSERVATION, listing_id: LISTING, source_id: POLYGON, source_kind: "market_data", source_user_id: null, kind: "session_close", price_text: "1200.00", currency: "USD",
       observed_at: "2024-06-07T20:00:00.000Z", known_at: "2024-06-07T20:15:00.000Z", body_sha256: "d".repeat(64),
     }],
     split_histories: [{

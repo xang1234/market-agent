@@ -26,6 +26,7 @@ import {
   rationalFromDecimal,
   resolveMetricDefinition,
   restateToReference,
+  sourceClassOf,
   splitHistoryCovers,
   splitReferenceDate,
   unitClosures,
@@ -42,6 +43,7 @@ import {
   type ReasonCode,
   type Sha256Hex,
   type SlotBinding,
+  type SourceClass,
   type SplitAdjustmentV2,
 } from "../../financial-core/src/index.ts";
 import {
@@ -193,8 +195,8 @@ export function verifyFinancialUnit(records: FinancialUnitRecords, unitId: Local
     if (!closureNodes.has(slot) || binding.status !== "bound") continue;
     const { input } = binding;
     const problem = input.schema_version === BOUND_PRICE_INPUT_SCHEMA_VERSION
-      ? priceIneligibility(input, observations.get(input.observation_id), splitHistories, plan)
-      : ineligibility(input, evidence.get(input.fact_id), splitHistories, plan);
+      ? priceIneligibility(input, observations.get(input.observation_id), splitHistories, plan, run.allowed_source_classes)
+      : ineligibility(input, evidence.get(input.fact_id), splitHistories, plan, run.allowed_source_classes);
     if (problem) failures.push(failure("financial_input_ineligible", { run_id: run.run_id, input_slot: slot, reason: problem }));
   }
   if (failures.length > 0) return { ok: false, failures };
@@ -377,17 +379,24 @@ function evidenceMismatch(input: BoundFinancialInputV1, row: LoadedBinding): str
     : null;
 }
 
-/** Why a bound input may no longer be published, judged on its current evidence. */
+/** Whether the run's recorded grant admits a source's class; a source of no class is never admitted. */
+function granted(grant: ReadonlyArray<string>, sourceClass: SourceClass | null): boolean {
+  return sourceClass !== null && grant.includes(sourceClass);
+}
+
+/** Why a bound input may no longer be published, judged on its current evidence and the run's grant. */
 function ineligibility(
   input: BoundFactInputV1,
   evidence: LoadedEvidence | undefined,
   splitHistories: ReadonlyMap<string, SubjectSplitHistory>,
   plan: FinancialPlanV1,
+  grant: ReadonlyArray<string>,
 ): string | null {
   if (!evidence) return "fact_unavailable";
   if (evidence.invalidated) return "fact_invalidated";
   if (evidence.method !== "reported" && evidence.method !== "extracted" && evidence.method !== "restated") return "fact_not_reported";
   if (evidence.source_id !== input.source.source_id) return "source_changed";
+  if (!granted(grant, sourceClassOf({ kind: evidence.source_kind, source_id: evidence.source_id }, "fact"))) return "source_class_not_allowed";
   if (plan.time.time_mode === "public_information" && evidence.source_user_id !== null) return "source_not_public";
   if (evidence.source_version_hash !== input.source.source_version_hash) return "source_version_changed";
   if (!evidence.precision_current) return "precision_proof_superseded";
@@ -412,13 +421,15 @@ function ineligibility(
 /**
  * Why a bound price may no longer be published, judged on its observation as
  * stored now: the token, times, listing, and response it was bound from must be
- * unchanged, and its subject must resolve to the same listing with the same splits.
+ * unchanged, its source's class granted to the run, and its subject must
+ * resolve to the same listing with the same splits.
  */
 function priceIneligibility(
   input: BoundPriceInputV1,
   observation: LoadedPriceObservation | undefined,
   splitHistories: ReadonlyMap<string, SubjectSplitHistory>,
   plan: FinancialPlanV1,
+  grant: ReadonlyArray<string>,
 ): string | null {
   if (!observation) return "price_observation_unavailable";
   if (plan.time.time_mode === "public_information" && observation.source_user_id !== null) return "source_not_public";
@@ -429,6 +440,7 @@ function priceIneligibility(
     || observation.known_at === null || Date.parse(observation.known_at) !== Date.parse(input.known_at)) {
     return "price_observation_changed";
   }
+  if (!granted(grant, sourceClassOf({ kind: observation.source_kind, source_id: observation.source_id }, "price"))) return "source_class_not_allowed";
   if (Date.parse(input.known_at) > Date.parse(plan.time.knowledge_cutoff)) return "not_public_at_cutoff";
   return splitBasisChange(subjectKey(input.subject_ref), input.metric.metric_key, input.numeric.value, input.split_adjustment, splitHistories, plan);
 }

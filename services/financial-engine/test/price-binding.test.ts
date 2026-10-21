@@ -14,22 +14,48 @@ import { bindPlanInputs } from "../src/bind-inputs.ts";
 import { createEvidenceFinancialPort } from "../src/evidence-adapter.ts";
 import { finalizeUnit } from "../src/finalize.ts";
 import { inspectCommittedResult } from "../src/inspection.ts";
+import { POLYGON_MARKET_SOURCE_ID, STOOQ_MARKET_SOURCE_ID, YAHOO_FINANCE_DEV_MARKET_SOURCE_ID } from "../../market/src/provider-sources.ts";
 import { authorityFor, engineDatabase, IDS, leasedRun, pinnedClients, readyRun, revenuePlan } from "./db-fixtures.ts";
 
 const PRICE_IDS = {
-  polygon: "4f000000-0000-4000-8000-0000000004c2",
+  polygon: POLYGON_MARKET_SOURCE_ID,
   nvda: "4f000000-0000-4000-8000-0000000004a1",
   unlisted: "4f000000-0000-4000-8000-0000000004a2",
   unsynced: "4f000000-0000-4000-8000-0000000004a3",
+  devFeeds: "4f000000-0000-4000-8000-0000000004a4",
+  mixed: "4f000000-0000-4000-8000-0000000004a5",
 } as const;
 const listingOf = (issuer: string) => `${issuer.slice(0, -3)}e${issuer.slice(-2)}`;
 // 10:00 on Monday 2024-06-10 in New York: NVDA's split has executed, Monday's session has not closed.
 const MONDAY_MORNING = "2024-06-10T14:00:00.000Z";
 
-/** NVDA's listing with its 2024-06-10 split synced on Monday, and Friday's 1200.00 close. */
+/** One price observation for the listing, as `source` stated it. */
+async function observe(db: Client, listing: string, source: string, price: { text: string; kind: string; observed_at: string; known_at: string }): Promise<string> {
+  return (await db.query<{ observation_id: string }>(
+    `insert into price_observations (listing_id, source_id, kind, price_text, currency, observed_at, known_at, fetched_at, body_sha256)
+     values ($1, $2, $3, $4, 'USD', $5, $6, $6, $7)
+     returning observation_id::text`,
+    [listing, source, price.kind, price.text, price.observed_at, price.known_at, "d".repeat(64)],
+  )).rows[0]!.observation_id;
+}
+
+const FRIDAY_CLOSE = { kind: "session_close", observed_at: "2024-06-07T20:00:00Z", known_at: "2024-06-07T20:15:00Z" } as const;
+
+/**
+ * NVDA's listing with its 2024-06-10 split synced on Monday, and Friday's
+ * 1200.00 close from Polygon; a listing whose only closes come from the Yahoo
+ * and Stooq development feeds; and one with Polygon's Friday close and a newer
+ * Yahoo trade on Monday morning.
+ */
 async function seedPrices(db: Client): Promise<string> {
-  await db.query(`insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at) values ($1, 'polygon_market', 'market_data', 'primary', 'licensed', now())`, [PRICE_IDS.polygon]);
-  for (const issuer of [PRICE_IDS.nvda, PRICE_IDS.unlisted, PRICE_IDS.unsynced]) {
+  await db.query(
+    `insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at) values
+       ($1, 'polygon_market', 'market_data', 'primary', 'licensed', now()),
+       ($2, 'yahoo_finance_dev_market', 'market_data', 'tertiary', 'free_dev', now()),
+       ($3, 'stooq_market', 'market_data', 'tertiary', 'free', now())`,
+    [PRICE_IDS.polygon, YAHOO_FINANCE_DEV_MARKET_SOURCE_ID, STOOQ_MARKET_SOURCE_ID],
+  );
+  for (const issuer of [PRICE_IDS.nvda, PRICE_IDS.unlisted, PRICE_IDS.unsynced, PRICE_IDS.devFeeds, PRICE_IDS.mixed]) {
     await db.query(`insert into issuers (issuer_id, legal_name) values ($1, $2)`, [issuer, `Issuer ${issuer.slice(-3)}`]);
     await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1, $1, 'common_stock')`, [issuer]);
     if (issuer === PRICE_IDS.unlisted) continue;
@@ -39,14 +65,17 @@ async function seedPrices(db: Client): Promise<string> {
     );
   }
   const nvda = listingOf(PRICE_IDS.nvda);
+  const devFeeds = listingOf(PRICE_IDS.devFeeds);
+  const mixed = listingOf(PRICE_IDS.mixed);
+  for (const listing of [nvda, devFeeds, mixed]) {
+    await db.query(`insert into listing_split_coverage (listing_id, checked_at, source_id) values ($1, '2024-06-10T12:00:00Z', $2)`, [listing, PRICE_IDS.polygon]);
+  }
   await db.query(`insert into listing_splits (listing_id, execution_date, split_from, split_to, source_id) values ($1, '2024-06-10', 1, 10, $2)`, [nvda, PRICE_IDS.polygon]);
-  await db.query(`insert into listing_split_coverage (listing_id, checked_at, source_id) values ($1, '2024-06-10T12:00:00Z', $2)`, [nvda, PRICE_IDS.polygon]);
-  return (await db.query<{ observation_id: string }>(
-    `insert into price_observations (listing_id, source_id, kind, price_text, currency, observed_at, known_at, fetched_at, body_sha256)
-     values ($1, $2, 'session_close', '1200.00', 'USD', '2024-06-07T20:00:00Z', '2024-06-07T20:15:00Z', '2024-06-07T20:15:00Z', $3)
-     returning observation_id::text`,
-    [nvda, PRICE_IDS.polygon, "d".repeat(64)],
-  )).rows[0]!.observation_id;
+  await observe(db, devFeeds, YAHOO_FINANCE_DEV_MARKET_SOURCE_ID, { text: "98.10", ...FRIDAY_CLOSE });
+  await observe(db, devFeeds, STOOQ_MARKET_SOURCE_ID, { text: "98.10", ...FRIDAY_CLOSE });
+  await observe(db, mixed, PRICE_IDS.polygon, { text: "75.00", ...FRIDAY_CLOSE });
+  await observe(db, mixed, YAHOO_FINANCE_DEV_MARKET_SOURCE_ID, { text: "75.40", kind: "last_trade", observed_at: "2024-06-10T13:45:00Z", known_at: "2024-06-10T13:46:00Z" });
+  return observe(db, nvda, PRICE_IDS.polygon, { text: "1200.00", ...FRIDAY_CLOSE });
 }
 
 /** The issuer's share price at the cutoff, alone in one unit. */
@@ -81,7 +110,7 @@ test("share price binding", { timeout: 300_000 }, async (t) => {
       `select price_observation_id::text, fact_id, selection_policy_version, candidate_count, bound_payload from financial_run_inputs where run_id = $1`,
       [runId],
     )).rows[0]!;
-    assert.deepEqual([row.price_observation_id, row.fact_id, row.selection_policy_version, row.candidate_count], [friday, null, "price-at-cutoff-selection.v1", 1]);
+    assert.deepEqual([row.price_observation_id, row.fact_id, row.selection_policy_version, row.candidate_count], [friday, null, "price-at-cutoff-selection.v2", 1]);
     const payload = row.bound_payload;
     assert.deepEqual(
       [payload.schema_version, payload.observation_id, payload.numeric, payload.observed_at, payload.known_at, payload.unit],
@@ -133,6 +162,25 @@ test("share price binding", { timeout: 300_000 }, async (t) => {
     // Friday's close was known at 16:15 in New York; ten minutes earlier nothing was.
     assert.equal(await gapOf(pricePlan(PRICE_IDS.nvda, "2024-06-07T20:05:00.000Z")), "missing_input");
     assert.equal(await gapOf(pricePlan(PRICE_IDS.nvda, MONDAY_MORNING, { kind: "fiscal_period", fiscal_year: 2024, fiscal_period: "FY" })), "unsupported_period");
+  });
+
+  await t.test("a close from the Yahoo or Stooq development feed never binds, even where market data is allowed", async () => {
+    const plan = pricePlan(PRICE_IDS.devFeeds, MONDAY_MORNING);
+    const { runId, lease } = await leasedRun(db, plan, authority);
+    const binding = (await bindPlanInputs({ client: db, lease, plan, authority, evidence: createEvidenceFinancialPort })).bindings.get("px");
+    assert.deepEqual(binding?.status === "gap" && binding.reason_code, "source_class_not_allowed");
+    const row = (await db.query(`select binding_status, price_observation_id, candidate_count from financial_run_inputs where run_id = $1`, [runId])).rows[0]!;
+    assert.deepEqual([row.binding_status, row.price_observation_id, row.candidate_count], ["gap", null, 2]);
+  });
+
+  await t.test("a newer trade from a development feed does not hide the approved provider's close", async () => {
+    const { runId } = await readyRun(db, pricePlan(PRICE_IDS.mixed, MONDAY_MORNING), authority);
+    const row = (await db.query(
+      `select i.binding_status, o.price_text, i.candidate_count, i.selection_policy_version
+         from financial_run_inputs i left join price_observations o on o.observation_id = i.price_observation_id where i.run_id = $1`,
+      [runId],
+    )).rows[0]!;
+    assert.deepEqual([row.binding_status, row.price_text, row.candidate_count, row.selection_policy_version], ["bound", "75.00", 2, "price-at-cutoff-selection.v2"]);
   });
 
   await t.test("a price never binds for an authority that does not allow market data", async () => {

@@ -19,7 +19,7 @@ async function poll<T>(fn: () => Promise<T>, until: (v: T) => boolean, tries = 6
   throw new Error("poll timed out");
 }
 
-test("a stored market-cap fact never reaches the grid: the cell is an explicit gap and the run is partial", async (t) => {
+test("a stored market-cap fact never reaches the grid: the cell is the engine's certified gap and the run is partial", async (t) => {
   const { databaseUrl } = await bootstrapDatabase(t, "grid-run-e2e");
   const pool = await connectedPool(t, databaseUrl);
   const db = pool as unknown as QueryExecutor;
@@ -52,8 +52,10 @@ test("a stored market-cap fact never reaches the grid: the cell is an explicit g
     ["partial", 1, "enforce", "resolved"],
   );
   const [cell] = detail.cells;
+  // Market cap is the share price times the share count, and Acme has no listing to price.
+  const block = cell.financial_block as { snapshot_id: string; financial: { results: Array<{ presented: { reason_code?: string } }> } };
   assert.deepEqual(
-    [cell.status, cell.coverage_flag, cell.display, cell.snapshot_id, cell.primary_ref],
-    ["no_coverage", "market_cap_needs_price_share_timing_proof", { value: "—", tone: null }, null, null],
+    [cell.status, cell.coverage_flag, cell.display, block.snapshot_id === cell.snapshot_id, cell.primary_ref, block.financial.results.map((result) => result.presented.reason_code)],
+    ["missing_data", "blocked_by_dependency", { value: "—", tone: null }, true, null, ["blocked_by_dependency", "split_listing_unresolved", "missing_input"]],
   );
 });

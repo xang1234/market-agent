@@ -23,7 +23,9 @@ import {
   type FinancialPlanV1,
   type FinancialRuntimeAuthority,
   type FinancialSubjectRef,
+  type LocalId,
   type OperationKind,
+  type OperationNode,
   type PlanOrigin,
   type PublicationUnitKind,
   type ReportingBasis,
@@ -36,7 +38,7 @@ import { interpretPlan } from "./plan-interpretation.ts";
 import { isRecord } from "../../shared/src/http.ts";
 
 export const PLANNER_ADAPTER_VERSION = "financial-planner.v1";
-export const PLANNER_PROMPT_VERSION = "financial-plan-prompt.v1";
+export const PLANNER_PROMPT_VERSION = "financial-plan-prompt.v2";
 export const DETERMINISTIC_ADAPTER_VERSION = "financial-deterministic-planner.v1";
 
 /** Adapter over the existing model router (router.complete). */
@@ -343,7 +345,7 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
   };
   const drafted = validateFinancialPlan(plan);
   if (!drafted.ok) return { ok: false, kind: "invalid", issues: drafted.issues };
-  const validated = validateFinancialPlan({ ...plan, outputs: withFreeCashFlowInputs(drafted.value) });
+  const validated = validateFinancialPlan({ ...plan, outputs: withShownOperands(drafted.value) });
   if (!validated.ok) return { ok: false, kind: "invalid", issues: validated.issues };
   const withinLimits = checkPlanLimits(validated.value, context.parent_limits);
   if (!withinLimits.ok) {
@@ -355,18 +357,32 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
 }
 
 /**
- * The plan's outputs, each preceded by the OCF and capex of every free cash
- * flow it depends on that its unit does not already publish: an answer that
- * rests on free cash flow always shows the two values it subtracts.
+ * The reported operands an answer resting on a figure always shows beside it:
+ * free cash flow's OCF and capex (#324), and a valuation's price and the share
+ * count or EPS it reads (#444).
  */
-function withFreeCashFlowInputs(plan: FinancialPlanV1): RequestedOutput[] {
+function shownOperands(node: OperationNode): LocalId[] {
+  switch (node.operation) {
+    case "free_cash_flow":
+      return [node.operating_cash_flow, node.capex];
+    case "market_cap":
+      return [node.price, node.shares];
+    case "pe_ratio":
+      return [node.price, node.earnings];
+    default:
+      return [];
+  }
+}
+
+/** The plan's outputs, each preceded by the shown operands of every figure it depends on that its unit does not already publish. */
+function withShownOperands(plan: FinancialPlanV1): RequestedOutput[] {
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
   const published = new Set(plan.outputs.map((output) => `${output.unit_id}/${output.node_id}`));
   const ids = new Set(plan.outputs.map((output) => output.output_id));
   return plan.outputs.flatMap((output) => {
     const inputs = [...dependencyClosure(plan, [output.node_id])].flatMap((nodeId) => {
       const node = nodes.get(nodeId);
-      return node?.operation === "free_cash_flow" ? [node.operating_cash_flow, node.capex] : [];
+      return node ? shownOperands(node) : [];
     });
     const added = inputs.flatMap((input) => {
       if (published.has(`${output.unit_id}/${input}`)) return [];
@@ -423,13 +439,13 @@ const VALUATIONS: ReadonlySet<string> = new Set<OperationKind>(["market_cap", "p
 
 function systemPrompt(): string {
   const metrics = PLANNABLE_METRICS.map((definition) => definition.metric_key).join(", ");
-  // ponytail: chat, the only model planner, is offered valuations with their operands in #444 step 4.
-  const operations = Object.keys(OPERATION_REGISTRY).filter((kind) => !VALUATIONS.has(kind)).join(", ");
+  const operations = Object.keys(OPERATION_REGISTRY).join(", ");
   return [
     "You translate a financial research request into a JSON plan draft. Reply with one JSON object only.",
     `Approved metric keys: ${metrics}. Approved operations: ${operations}.`,
     'Ready drafts: {"outcome":"ready","subjects":[{"slot_id","mention"}],"operations":[...],"outputs":[{"output_id","node_id"}],"thresholds":[{"threshold_id","value","unit"}]}.',
-    'Operations: reported_metric {node_id, operation, subject_slot, metric_key, period:{kind:"fiscal_period",fiscal_year,fiscal_period} or {kind:"latest",period_type,offset}}; absolute_change/percent_change_positive_base {current, prior}; gross_margin/operating_margin/net_margin {numerator, revenue}; free_cash_flow {operating_cash_flow, capex} (annual only); ratio {ratio_key, numerator, denominator}; trailing_sum {quarters:[4 node ids]}; threshold {subject, threshold_id, comparison}; peer_compare {members, direction}.',
+    'Operations: reported_metric {node_id, operation, subject_slot, metric_key, period:{kind:"fiscal_period",fiscal_year,fiscal_period} or {kind:"latest",period_type,offset}}; absolute_change/percent_change_positive_base {current, prior}; gross_margin/operating_margin/net_margin {numerator, revenue}; free_cash_flow {operating_cash_flow, capex} (annual only); ratio {ratio_key, numerator, denominator}; trailing_sum {quarters:[4 node ids]}; threshold {subject, threshold_id, comparison}; peer_compare {members, direction}; market_cap {price, shares}; pe_ratio {price, earnings}.',
+    'A valuation\'s price is a reported_metric of share_price with period {kind:"at_cutoff"}, planned only as the price of market_cap or pe_ratio. market_cap\'s shares are shares_outstanding with period {kind:"latest",period_type:"quarterly",offset:0}. pe_ratio\'s earnings are eps_diluted with period {kind:"latest",period_type:"annual",offset:0}: P/E uses the latest fiscal year\'s diluted EPS.',
     "Plan every requested company. Threshold values are decimal strings. Never invent metric definitions, identifiers, owners, budgets, modes, or verification fields.",
     'If a definition is ambiguous reply {"outcome":"needs_clarification","question","choices"}; if it cannot be expressed reply {"outcome":"unsupported","reason"}.',
   ].join("\n");

@@ -29,6 +29,7 @@ const RELATIONS = [
 const COLUMNS: ReadonlyArray<readonly [string, string]> = [
   ["computations", "financial_run_id"], ["grid_runs", "financial_mode"], ["grid_cells", "financial_block"],
   ["fact_financial_contexts", "as_filed_on"], ["financial_run_inputs", "price_observation_id"],
+  ["financial_runs", "allowed_source_classes"],
 ];
 const FUNCTIONS = [
   "normalized_content_hash", "erase_financial_run_dependents", "erase_orphaned_financial_plan",

@@ -24,12 +24,13 @@ export const REVENUE_COLUMNS: ColumnSpec[] = [
   { column_key: "latest_market_cap" },
 ];
 
-export async function startRun(pool: Pool, input: { columns?: ColumnSpec[]; asOf?: string; reader?: ReaderColumnDeps } = {}) {
+export async function startRun(pool: Pool, input: { columns?: ColumnSpec[]; asOf?: string; reader?: ReaderColumnDeps; issuers?: string[] } = {}) {
   const db = pool as unknown as QueryExecutor;
+  const issuers = input.issuers ?? [IDS.issuerA, IDS.issuerB];
   const grid = await createGrid(db, IDS.owner, {
     name: "Fixture grid",
     description: null,
-    universe_spec: { source: "manual", subject_refs: [{ kind: "issuer", id: IDS.issuerA }, { kind: "issuer", id: IDS.issuerB }] },
+    universe_spec: { source: "manual", subject_refs: issuers.map((id) => ({ kind: "issuer", id })) },
     column_specs: input.columns ?? REVENUE_COLUMNS,
   });
   const { runId } = await startGridRun(

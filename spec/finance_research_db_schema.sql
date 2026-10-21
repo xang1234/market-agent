@@ -1452,6 +1452,14 @@ create table financial_runs (
   feature_mode text not null check (feature_mode in ('off', 'shadow', 'enforce')),
   knowledge_cutoff timestamptz not null,
   policies jsonb not null check (jsonb_typeof(policies) = 'object'),
+  -- The source classes the run's authority allowed when it was reserved (#444):
+  -- binding uses them on every attempt, and the seal re-checks them. A run that
+  -- states none was granted SEC filings only, as every surface was before.
+  allowed_source_classes text[] not null default '{sec_filing}'
+    constraint financial_runs_allowed_source_classes check (
+      cardinality(allowed_source_classes) > 0
+      and allowed_source_classes <@ array['sec_filing', 'issuer_disclosure', 'licensed_fundamentals', 'market_data']::text[]
+    ),
   replay_of_run_id uuid references financial_runs(run_id),
   execution_state text not null default 'pending'
     check (execution_state in ('pending', 'running', 'ready_to_seal', 'completed', 'failed', 'cancelled')),
@@ -1478,10 +1486,10 @@ language plpgsql
 as $$
 begin
   if (new.user_id, new.parent_kind, new.parent_id, new.parent_version, new.request_key, new.request_hash,
-      new.plan_id, new.feature_mode, new.knowledge_cutoff, new.policies, new.replay_of_run_id, new.created_at)
+      new.plan_id, new.feature_mode, new.knowledge_cutoff, new.policies, new.allowed_source_classes, new.replay_of_run_id, new.created_at)
      is distinct from
      (old.user_id, old.parent_kind, old.parent_id, old.parent_version, old.request_key, old.request_hash,
-      old.plan_id, old.feature_mode, old.knowledge_cutoff, old.policies, old.replay_of_run_id, old.created_at) then
+      old.plan_id, old.feature_mode, old.knowledge_cutoff, old.policies, old.allowed_source_classes, old.replay_of_run_id, old.created_at) then
     raise exception 'financial_runs identity, plan, and policy columns are immutable';
   end if;
   if old.execution_state in ('completed', 'failed', 'cancelled') and new.execution_state is distinct from old.execution_state then

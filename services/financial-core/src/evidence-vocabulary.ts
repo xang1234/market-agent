@@ -40,12 +40,25 @@ export type ShareBasis = (typeof SHARE_BASES)[number];
 export const SOURCE_CLASSES = ["sec_filing", "issuer_disclosure", "licensed_fundamentals", "market_data"] as const;
 export type SourceClass = (typeof SOURCE_CLASSES)[number];
 
+/** What a source grounds in a run: a reported fact, or a share price. */
+export type GroundedEvidence = "fact" | "price";
+
 /**
- * The class of a source, by its `sources.kind`. Every filing this system
- * ingests is an SEC filing, and every price observation is market data. No
- * other kind has a class yet, so no authority admits an article, a press
- * release, or an upload.
+ * Which sources ground which evidence, and as which class: every source of a
+ * `sources.kind`, or only the approved sources of it. Every filing this system
+ * ingests comes from EDGAR. A price is market data only from an approved
+ * provider, Polygon's source (POLYGON_MARKET_SOURCE_ID, db/seed/sources.sql):
+ * the Stooq, Yahoo and stock-screener feeds are `market_data` too, but they
+ * serve development. A source no rule covers has no class, so no authority
+ * admits it: an article, a press release, an upload, or a development feed.
  */
-export function sourceClassOf(kind: string): SourceClass | null {
-  return kind === "filing" ? "sec_filing" : kind === "market_data" ? "market_data" : null;
+const SOURCE_CLASS_RULES: ReadonlyArray<Readonly<{ class: SourceClass; grounds: GroundedEvidence; kind: string; source_ids?: ReadonlyArray<string> }>> = [
+  { class: "sec_filing", grounds: "fact", kind: "filing" },
+  { class: "market_data", grounds: "price", kind: "market_data", source_ids: ["00000000-0000-4000-a000-000000000009"] },
+];
+
+/** The class of a source's evidence (#444), read at binding and again at the seal. */
+export function sourceClassOf(source: Readonly<{ kind: string; source_id: string }>, grounds: GroundedEvidence): SourceClass | null {
+  const id = source.source_id.toLowerCase();
+  return SOURCE_CLASS_RULES.find((rule) => rule.grounds === grounds && rule.kind === source.kind && (rule.source_ids?.includes(id) ?? true))?.class ?? null;
 }

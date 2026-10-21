@@ -2,11 +2,13 @@
 // knowledge cutoff (#444). Pure: the observations arrive already read, public
 // only; nothing here reads the clock or the database.
 //
-// 1. The listing's latest observations known by the cutoff: the newest trade
-//    time, and among its observations the latest known. None is missing_input,
-//    or publication_time_unknown when one traded by then has no known time.
-//    Only those from a source class the authority allows are evidence; when
-//    none is, the gap is source_class_not_allowed, never an older price.
+// 1. Each source's latest observations of the listing known by the cutoff.
+//    None is missing_input, or publication_time_unknown when one traded by
+//    then has no known time. Only those from a source class the run was
+//    granted are evidence, filtered before the newest is picked, so a newer
+//    price from another source never hides an allowed one; when none is
+//    allowed, the gap is source_class_not_allowed. Of the allowed, the newest
+//    trade time, and among its observations the latest known.
 // 2. Their tokens must be exact decimals within the numeric policy and agree;
 //    equal values tie-break by observation id, differing ones conflict.
 // 3. A price from before the last regular session the cutoff has closed is
@@ -33,7 +35,7 @@ import { lastRegularSessionDate } from "../../market/src/ytd-window.ts";
 import type { PriceObservation, PriceObservationPage, SplitHistory } from "./ports.ts";
 import { sourceAllowed, type SelectionPolicy } from "./select-inputs.ts";
 
-export const PRICE_SELECTION_POLICY_VERSION = "price-at-cutoff-selection.v1";
+export const PRICE_SELECTION_POLICY_VERSION = "price-at-cutoff-selection.v2";
 
 export type PriceSelection =
   | Readonly<{ status: "selected"; observation: PriceObservation; value: DecimalString; split_adjustment: SplitAdjustmentV2 }>
@@ -44,11 +46,13 @@ export function selectPrice(
   history: Extract<SplitHistory, { status: "ok" }>,
   policy: Pick<SelectionPolicy, "knowledge_cutoff" | "allowed_source_classes">,
 ): PriceSelection {
-  if (page.latest.length === 0) return gap(page.unknown_publication ? "publication_time_unknown" : "missing_input");
-  const allowed = page.latest.filter((observation) => sourceAllowed(observation.source_class, policy));
+  if (page.latest_by_source.length === 0) return gap(page.unknown_publication ? "publication_time_unknown" : "missing_input");
+  const allowed = page.latest_by_source.filter((observation) => sourceAllowed(observation.source_class, policy));
   if (allowed.length === 0) return gap("source_class_not_allowed");
+  const newest = allowed.reduce((best, observation) => (laterObservation(observation, best) ? observation : best));
+  const latest = allowed.filter((observation) => !laterObservation(newest, observation));
   const priced: Array<{ observation: PriceObservation; value: ExactRational; text: DecimalString }> = [];
-  for (const observation of allowed) {
+  for (const observation of latest) {
     const parsed = parseFinancialDecimal(observation.price_text);
     const value = parsed.ok ? rationalFromDecimal(parsed.value) : null;
     if (!parsed.ok || value === null) return gap("precision_unverified");
@@ -73,6 +77,12 @@ export function selectPrice(
   });
   if (!restated.ok) return gap(restated.reason);
   return { status: "selected", observation: chosen.observation, value: chosen.text, split_adjustment: restated.adjustment };
+}
+
+/** Whether `left` traded later than `right`, or at the same time and was known later. */
+function laterObservation(left: PriceObservation, right: PriceObservation): boolean {
+  const traded = Date.parse(left.observed_at) - Date.parse(right.observed_at);
+  return traded > 0 || (traded === 0 && Date.parse(left.known_at) > Date.parse(right.known_at));
 }
 
 function gap(reason_code: ReasonCode): PriceSelection {

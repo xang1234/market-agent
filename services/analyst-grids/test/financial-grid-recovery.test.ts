@@ -15,7 +15,10 @@ import { snapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts
 import { gridFinancialRecovery, publishGridFinancialCells } from "../src/financial-column.ts";
 import { getRunDetail, type GridRunDetail } from "../src/queries.ts";
 import type { QueryExecutor } from "../src/types.ts";
-import { cellsByPosition, CUTOFF, gridDatabase, settled, startRun, waitForRun } from "./financial-fixtures.ts";
+import { cellsByPosition, CUTOFF, gridDatabase, REVENUE_COLUMNS, settled, startRun, waitForRun } from "./financial-fixtures.ts";
+
+// The latest and prior year's revenue for two companies: four cells, finalized in unit order.
+const COLUMNS = REVENUE_COLUMNS.filter((column) => column.column_key === "latest_revenue");
 
 test("grid financial recovery", { timeout: 300_000 }, async (t) => {
   if (!dockerAvailable()) {
@@ -46,8 +49,8 @@ test("grid financial recovery", { timeout: 300_000 }, async (t) => {
   async function interruptedRun(): Promise<{ runId: string; detail: GridRunDetail }> {
     await failCell();
     try {
-      const { runId } = await startRun(pool);
-      await waitForRun(pool, runId, (detail) => detail.run.cell_done >= 4);
+      const { runId } = await startRun(pool, { columns: COLUMNS });
+      await waitForRun(pool, runId, (detail) => detail.run.cell_done >= 2);
       for (;;) {
         const run = await financialRun(runId);
         if (run?.released) break;
@@ -88,7 +91,7 @@ test("grid financial recovery", { timeout: 300_000 }, async (t) => {
     const { runId, detail } = await interruptedRun();
     const cells = cellsByPosition(detail);
     assert.equal(detail.run.status, "running");
-    assert.equal(detail.run.cell_done, 4, "two certified cells and two unsupported cells");
+    assert.equal(detail.run.cell_done, 2, "the two certified cells before the failure");
     assert.deepEqual(["0:c0", "1:c0", "0:c1", "1:c1"].map((key) => cells[key]!.status), ["ok", "missing_data", "pending", "pending"]);
     assert.equal(await certificates(runId), 2, "the failed cell left no certificate");
   });
@@ -100,8 +103,8 @@ test("grid financial recovery", { timeout: 300_000 }, async (t) => {
     assert.deepEqual([outcome.status, outcome.status === "resumed" && outcome.execution, outcome.status === "resumed" && outcome.published], ["resumed", "skipped", 2]);
     const detail = await waitForRun(pool, runId, settled);
     assert.equal(detail.run.status, "partial");
-    assert.equal(detail.run.cell_done, 6);
-    assert.deepEqual(detail.counts, { requested: 6, verified: 2, ok: 2, gap: 4, error: 0, pending: 0 });
+    assert.equal(detail.run.cell_done, 4);
+    assert.deepEqual(detail.counts, { requested: 4, verified: 2, ok: 2, gap: 2, error: 0, pending: 0 });
     assert.equal(await certificates(runId), 4);
     assert.equal(await computations(runId), computed, "no calculation ran twice");
   });
@@ -111,7 +114,7 @@ test("grid financial recovery", { timeout: 300_000 }, async (t) => {
     assert.equal(await retry(runId, detail), "published");
     assert.equal(await retry(runId, detail), "published");
     const done = await getRunDetail(pool as unknown as QueryExecutor, runId);
-    assert.deepEqual([done.run.status, done.run.cell_done, await certificates(runId)], ["partial", 6, 4]);
+    assert.deepEqual([done.run.status, done.run.cell_done, await certificates(runId)], ["partial", 4, 4]);
   });
 
   await t.test("a cancelled calculation writes its unpublished cells as declared gaps", async () => {
@@ -121,7 +124,7 @@ test("grid financial recovery", { timeout: 300_000 }, async (t) => {
     const cells = cellsByPosition(await getRunDetail(pool as unknown as QueryExecutor, runId));
     assert.deepEqual(["0:c1", "1:c1"].map((key) => [cells[key]!.status, cells[key]!.coverage_flag]), [["error", "run_cancelled"], ["error", "run_cancelled"]]);
     const done = await getRunDetail(pool as unknown as QueryExecutor, runId);
-    assert.deepEqual([done.run.status, done.run.cell_done, await certificates(runId)], ["partial", 6, 2]);
+    assert.deepEqual([done.run.status, done.run.cell_done, await certificates(runId)], ["partial", 4, 2]);
   });
 
   await t.test("recovery stands down when the run no longer belongs to the calculation's owner", async () => {
