@@ -17,9 +17,17 @@ export type ListingSplit = Readonly<{
   provider_ref: string | null;
 }>;
 
+/** A split as stored: its ratios are the exact text of their numeric columns. */
+export type RecordedListingSplit = Readonly<{
+  execution_date: string;
+  split_from: string;
+  split_to: string;
+  provider_ref: string | null;
+}>;
+
 export type ListingSplitHistory =
   | Readonly<{ checked_at: null }>
-  | Readonly<{ checked_at: string; source_id: UUID; splits: ReadonlyArray<ListingSplit> }>;
+  | Readonly<{ checked_at: string; source_id: UUID; splits: ReadonlyArray<RecordedListingSplit> }>;
 
 export type SplitSyncListing = Readonly<{ listing_id: UUID; ticker: string }>;
 
@@ -99,15 +107,15 @@ type HistoryRow = {
   checked_at: Date;
   source_id: string;
   execution_date: string | null;
-  split_from: number;
-  split_to: number;
+  split_from: string;
+  split_to: string;
   provider_ref: string | null;
 };
 
 export async function loadListingSplits(db: ListingQueryExecutor, listingId: UUID): Promise<ListingSplitHistory> {
   const { rows } = await db.query<HistoryRow>(
     `select c.checked_at, c.source_id::text as source_id, s.execution_date::text as execution_date,
-            s.split_from::float8 as split_from, s.split_to::float8 as split_to, s.provider_ref
+            s.split_from::text as split_from, s.split_to::text as split_to, s.provider_ref
        from listing_split_coverage c
        left join listing_splits s on s.listing_id = c.listing_id
       where c.listing_id = $1::uuid

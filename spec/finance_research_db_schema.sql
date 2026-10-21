@@ -1371,13 +1371,16 @@ create table fact_financial_contexts (
   dimension_scope text not null check (dimension_scope in ('consolidated', 'segment')),
   dimension_members jsonb not null default '[]'::jsonb check (jsonb_typeof(dimension_members) = 'array'),
   reporting_basis text not null check (reporting_basis in ('as_reported', 'as_restated')),
-  adjustment_basis text not null check (adjustment_basis in ('unadjusted', 'split_adjusted')),
+  adjustment_basis text not null check (adjustment_basis in ('unadjusted', 'split_adjusted', 'as_filed')),
+  -- An as-filed EPS or share count is on the split basis of this filing date.
+  as_filed_on date,
   share_basis text not null check (share_basis in ('basic', 'diluted', 'not_applicable')),
   fiscal_calendar_version text not null check (length(btrim(fiscal_calendar_version)) > 0),
   disclosure_relation text not null check (disclosure_relation in ('original', 'economic_restatement', 'extraction_correction')),
   source_context_ref text,
   created_at timestamptz not null default now(),
-  constraint fact_financial_contexts_dimensions check ((dimension_scope = 'segment') = (jsonb_array_length(dimension_members) > 0))
+  constraint fact_financial_contexts_dimensions check ((dimension_scope = 'segment') = (jsonb_array_length(dimension_members) > 0)),
+  constraint fact_financial_contexts_as_filed check ((adjustment_basis = 'as_filed') = (as_filed_on is not null))
 );
 create trigger fact_financial_contexts_append_only
 before update on fact_financial_contexts

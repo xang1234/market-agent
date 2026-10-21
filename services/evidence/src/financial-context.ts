@@ -9,32 +9,33 @@ import {
   DISCLOSURE_RELATIONS,
   PERIOD_TYPES,
   SHARE_BASES,
-  type AdjustmentBasis,
+  type AdjustmentContext,
   type DimensionScope,
   type DisclosureRelation,
   type PeriodType,
   type ShareBasis,
 } from "../../financial-core/src/evidence-vocabulary.ts";
 import type { RowQueryExecutor } from "./types.ts";
-import { assertNonEmptyString, assertOneOf, assertUuidV4 } from "./validators.ts";
+import { assertIsoDate, assertNonEmptyString, assertOneOf, assertUuidV4 } from "./validators.ts";
 
 export { DISCLOSURE_RELATIONS };
 
 const REPORTING_BASES = ["as_reported", "as_restated"] as const;
 
-export type FactFinancialContext = Readonly<{
-  fact_id: string;
+/** A context as stored, without the fact it belongs to. */
+export type FinancialContextFields = Readonly<{
   context_version: string;
   period_type: PeriodType;
   dimension_scope: DimensionScope;
   dimension_members: ReadonlyArray<Readonly<{ axis: string; member: string }>>;
   reporting_basis: (typeof REPORTING_BASES)[number];
-  adjustment_basis: AdjustmentBasis;
   share_basis: ShareBasis;
   fiscal_calendar_version: string;
   disclosure_relation: DisclosureRelation;
   source_context_ref: string | null;
-}>;
+}> & AdjustmentContext;
+
+export type FactFinancialContext = Readonly<{ fact_id: string }> & FinancialContextFields;
 
 export async function recordFactFinancialContext(db: RowQueryExecutor, context: FactFinancialContext): Promise<FactFinancialContext> {
   assertUuidV4(context.fact_id, "fact_id");
@@ -43,6 +44,8 @@ export async function recordFactFinancialContext(db: RowQueryExecutor, context: 
   assertOneOf(context.dimension_scope, DIMENSION_SCOPES, "dimension_scope");
   assertOneOf(context.reporting_basis, REPORTING_BASES, "reporting_basis");
   assertOneOf(context.adjustment_basis, ADJUSTMENT_BASES, "adjustment_basis");
+  if (context.adjustment_basis === "as_filed") assertIsoDate(context.as_filed_on, "as_filed_on");
+  else if (context.as_filed_on !== undefined) throw new Error("as_filed_on names the filing date of an as-filed value only");
   assertOneOf(context.share_basis, SHARE_BASES, "share_basis");
   assertOneOf(context.disclosure_relation, DISCLOSURE_RELATIONS, "disclosure_relation");
   assertNonEmptyString(context.fiscal_calendar_version, "fiscal_calendar_version");
@@ -53,8 +56,8 @@ export async function recordFactFinancialContext(db: RowQueryExecutor, context: 
   await db.query(
     `insert into fact_financial_contexts
        (fact_id, context_version, period_type, dimension_scope, dimension_members, reporting_basis, adjustment_basis,
-        share_basis, fiscal_calendar_version, disclosure_relation, source_context_ref)
-     values ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11)`,
+        as_filed_on, share_basis, fiscal_calendar_version, disclosure_relation, source_context_ref)
+     values ($1, $2, $3, $4, $5::jsonb, $6, $7, $8::date, $9, $10, $11, $12)`,
     [
       context.fact_id,
       context.context_version,
@@ -63,6 +66,7 @@ export async function recordFactFinancialContext(db: RowQueryExecutor, context: 
       JSON.stringify(context.dimension_members),
       context.reporting_basis,
       context.adjustment_basis,
+      context.as_filed_on ?? null,
       context.share_basis,
       context.fiscal_calendar_version,
       context.disclosure_relation,

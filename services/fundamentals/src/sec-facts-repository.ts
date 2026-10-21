@@ -1031,14 +1031,14 @@ async function hasProvenPrecision(db: FundamentalsQueryExecutor, factId: string)
 }
 
 // A split before a filing is issued restates its per-share values and share
-// counts, its own period's included, and companyfacts does not say whether
-// one did: their adjustment basis is unknown, so they get no context.
-const SEC_SHARE_METRIC_KEYS: ReadonlySet<string> = new Set([
-  "eps_basic",
-  "eps_diluted",
-  "weighted_average_basic_shares",
-  "weighted_average_diluted_shares",
-]);
+// counts, its own period's included: they are on the split basis of the
+// filing's date, which binding restates to an analysis's reference date.
+const SEC_SHARE_BASES: Readonly<Record<string, "basic" | "diluted">> = {
+  eps_basic: "basic",
+  eps_diluted: "diluted",
+  weighted_average_basic_shares: "basic",
+  weighted_average_diluted_shares: "diluted",
+};
 
 const SEC_CONTEXT_VERSION = "sec_companyfacts_context.v1";
 
@@ -1064,7 +1064,6 @@ async function recordSecOriginalContext(
   token: SecSourceToken,
   locator: string,
 ): Promise<void> {
-  if (SEC_SHARE_METRIC_KEYS.has(line.metric_key)) return;
   // The statement contract labels every balance FY of its fiscal year, so a
   // certified 10-Q balance would be read as the year's closing one.
   if (token.start === null && token.form !== "10-K") return;
@@ -1072,6 +1071,7 @@ async function recordSecOriginalContext(
   if (certifiedConcept !== undefined && token.concept !== certifiedConcept) return;
   const existing = await db.query(`select 1 from fact_financial_contexts where fact_id = $1`, [tokenFactId]);
   if (existing.rows.length > 0) return;
+  const shareBasis = SEC_SHARE_BASES[line.metric_key];
   await recordFactFinancialContext(db, {
     fact_id: tokenFactId,
     context_version: SEC_CONTEXT_VERSION,
@@ -1079,8 +1079,9 @@ async function recordSecOriginalContext(
     dimension_scope: "consolidated",
     dimension_members: [],
     reporting_basis: "as_reported",
-    adjustment_basis: "unadjusted",
-    share_basis: "not_applicable",
+    ...(shareBasis === undefined
+      ? { adjustment_basis: "unadjusted", share_basis: "not_applicable" }
+      : { adjustment_basis: "as_filed", as_filed_on: token.filed, share_basis: shareBasis }),
     fiscal_calendar_version: "sec_filer_fiscal_year.v1",
     disclosure_relation: "original",
     source_context_ref: locator,
@@ -1122,6 +1123,8 @@ async function derivationLineage(
 // value adds nothing. A filing giving two different values, or a value without
 // its lossless token, is skipped; an original with no recorded concept is left
 // as it is. A restated fact's method keeps it out of every as-reported reader.
+// An as-filed original is not compared: a later filing states it on its own
+// split basis, so a split alone would read as a restatement.
 async function recordSecRestatements(
   db: FundamentalsQueryExecutor,
   input: {
@@ -1152,7 +1155,7 @@ async function recordSecRestatements(
        join fact_financial_contexts c on c.fact_id = f.fact_id
       where f.subject_kind = 'issuer' and f.subject_id = $1 and f.method = 'reported' and f.fiscal_period = 'FY'
         and ${factActiveSql("f")}
-        and c.context_version = $2 and c.disclosure_relation = 'original'`,
+        and c.context_version = $2 and c.disclosure_relation = 'original' and c.adjustment_basis = 'unadjusted'`,
     [input.issuerId, SEC_CONTEXT_VERSION],
   );
   const usGaap = input.facts.facts["us-gaap"] ?? {};
@@ -1183,7 +1186,7 @@ async function recordSecRestatements(
         sourceId = await upsertSecFilingSource(db, secFilingSource(input.cik, accessionNumber, asOf));
         sources.set(accessionNumber, sourceId);
       }
-      const token: SecSourceToken = { token: presented, concept: concept!, unit: unit!, accn: accessionNumber, form: "10-K", start: original.period_start, end: original.period_end };
+      const token: SecSourceToken = { token: presented, concept: concept!, unit: unit!, accn: accessionNumber, form: "10-K", filed, start: original.period_start, end: original.period_end };
       const inserted = await db.query<{ fact_id: string }>(
         `insert into facts (
            subject_kind, subject_id, metric_id, period_kind, period_start, period_end, fiscal_year, fiscal_period,

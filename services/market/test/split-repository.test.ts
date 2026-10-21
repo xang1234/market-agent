@@ -98,8 +98,8 @@ test("listing splits sync and the split sync CLI", { timeout: 180_000 }, async (
       checked_at: "2026-10-01T12:00:00.000Z",
       source_id: POLYGON_MARKET_SOURCE_ID,
       splits: [
-        { execution_date: "2021-07-20", split_from: 1, split_to: 4, provider_ref: "E-2021" },
-        { execution_date: "2024-06-10", split_from: 1, split_to: 10, provider_ref: "E-2024" },
+        { execution_date: "2021-07-20", split_from: "1", split_to: "4", provider_ref: "E-2021" },
+        { execution_date: "2024-06-10", split_from: "1", split_to: "10", provider_ref: "E-2024" },
       ],
     };
     assert.deepEqual(await loadListingSplits(db, LISTINGS.nvda), expected);
@@ -122,8 +122,8 @@ test("listing splits sync and the split sync CLI", { timeout: 180_000 }, async (
       checked_at: "2026-10-03T12:00:00.000Z",
       source_id: POLYGON_MARKET_SOURCE_ID,
       splits: [
-        { execution_date: "2021-07-21", split_from: 1, split_to: 4, provider_ref: "E-2021-moved" },
-        { execution_date: "2024-06-10", split_from: 2, split_to: 15, provider_ref: "E-2024-fixed" },
+        { execution_date: "2021-07-21", split_from: "1", split_to: "4", provider_ref: "E-2021-moved" },
+        { execution_date: "2024-06-10", split_from: "2", split_to: "15", provider_ref: "E-2024-fixed" },
       ],
     });
   });
