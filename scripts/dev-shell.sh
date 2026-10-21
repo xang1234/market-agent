@@ -60,7 +60,7 @@ export HOME_PORT EVIDENCE_PORT DEV_PROVIDERS_PORT ANALYST_GRIDS_PORT HOME_PULSE_
 # The rest are parked (not started), never deleted.
 FULL_SERVICES="web chat resolver dev-api watchlists market fundamentals screener portfolio home evidence analyst-grids"
 CHAT_SERVICES="app"
-APP_SERVES="web chat resolver dev-api market fundamentals"
+APP_SERVES="web chat resolver dev-api watchlists market fundamentals"
 
 DEV_DIR="$ROOT/.dev"
 LOG_DIR="$DEV_DIR/logs"

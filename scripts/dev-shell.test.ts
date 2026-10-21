@@ -853,7 +853,7 @@ const FULL_SERVICES = [
   "screener", "portfolio", "home", "evidence", "analyst-grids",
 ];
 // DEV_PROFILE=chat runs one process (services/app) serving web, chat, resolver,
-// dev-api, market and fundamentals on the web port (#122).
+// dev-api, watchlists, market and fundamentals on the web port (#122).
 const CHAT_SERVICES = ["app"];
 
 test("DEV_PROFILE defaults to full: every service is checked, started and awaited, with all containers", async () => {
@@ -976,10 +976,10 @@ test("status shows the one app process, the services it hosts, and parked servic
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /^profile\s+chat$/m);
   assert.match(result.stdout, /^app\s+stopped\s+http:\/\/127\.0\.0\.1:59173/m, "app serves on the web port");
-  for (const hosted of ["web", "chat", "resolver", "dev-api", "market", "fundamentals"]) {
+  for (const hosted of ["web", "chat", "resolver", "dev-api", "watchlists", "market", "fundamentals"]) {
     assert.match(result.stdout, new RegExp(`^${hosted}\\s+in app`, "m"), hosted);
   }
-  for (const parked of ["watchlists", "screener", "portfolio", "home", "evidence", "analyst-grids", "discovery"]) {
+  for (const parked of ["screener", "portfolio", "home", "evidence", "analyst-grids", "discovery"]) {
     assert.match(result.stdout, new RegExp(`^${parked}\\s+parked`, "m"), parked);
   }
 });

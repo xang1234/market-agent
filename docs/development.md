@@ -25,7 +25,7 @@ In a fresh worktree, `./scripts/dev-shell.sh install` runs `npm ci` for every pa
 `DEV_PROFILE` picks which services run.
 
 - `full` (the default) runs the web app and 11 services as separate HTTP processes. Analyze, Agents, and themes run inside dev-api. `dev-providers` starts only with `ENABLE_UNOFFICIAL_DEV_PROVIDERS=true`, and the discovery worker only with `DISCOVERY_ENABLED=true`. The other packages are libraries or command-line tools.
-- `chat` runs one process, `services/app`, that serves the web UI, chat, resolver, dev-api, market, and fundamentals on `WEB_PORT`, plus Postgres. The other services are parked. `status` lists them as `parked`, their API routes answer `503`, and their tabs do not load.
+- `chat` runs one process, `services/app`, that serves the web UI, chat, resolver, dev-api, watchlists, market, and fundamentals on `WEB_PORT`, plus Postgres. The other services are parked. `status` lists them as `parked`, their API routes answer `503`, and their tabs do not load.
 
 ### Sign in
 
