@@ -4,12 +4,20 @@
 // instead, to the issuer-keyed read model screens read.
 
 import assert from "node:assert/strict";
+import type { AddressInfo } from "node:net";
 import test from "node:test";
 import type { Client } from "pg";
 import { connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { listRecoverableRuns, recoverRun } from "../../financial-engine/src/recovery.ts";
-import { databaseUrl, engineDatabase, NVDA, seedNvda, seedValuedIssuer, type ValuedIssuer } from "../../financial-engine/test/db-fixtures.ts";
+import { databaseUrl, engineDatabase, IDS, NVDA, seedNvda, seedValuedIssuer, type ValuedIssuer } from "../../financial-engine/test/db-fixtures.ts";
+import { POLYGON_MARKET_SOURCE_ID } from "../../market/src/provider-sources.ts";
+import { createPostgresCandidateRepository, type ScreenerCandidateQueryExecutor } from "../../screener/src/db-candidates.ts";
+import { executeScreenerQuery } from "../../screener/src/executor.ts";
+import { createScreenerServer } from "../../screener/src/http.ts";
+import type { ScreenerQuery } from "../../screener/src/query.ts";
+import type { ScreenerResponse } from "../../screener/src/result.ts";
+import { createPostgresScreenRepository } from "../../screener/src/screen-repository.ts";
 import { snapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
 import { recoveryParents } from "../src/runtime.ts";
 import { certifyScreenerUniverse, parseAsOf } from "../src/screener-certification.ts";
@@ -22,6 +30,10 @@ const DUAL: ValuedIssuer = { issuer: id("621"), listing: id("622"), tenK: id("62
 const DUAL_SECOND_LISTING = id("625");
 /** No sector, so the screener never shows it. */
 const BARE: ValuedIssuer = { issuer: id("631"), listing: id("632"), tenK: id("633"), tenQ: id("634"), ticker: "BARE", name: "Unclassified Co", close: "10.00", eps: "1.00", shares: "100000000" };
+/** NVDA's Frankfurt line, a depositary receipt quoted in euros. */
+const NVDA_FRANKFURT = { instrument: id("641"), listing: id("642") };
+/** 11:00 on Monday 2024-06-10 in New York: Friday's session is the last one closed. */
+const MONDAY_MORNING = "2024-06-10T15:00:00.000Z";
 
 /** NVDA, LOSS and DUAL as the screener shows them, and BARE, which it cannot. */
 async function seedScreenerUniverse(db: Client): Promise<void> {
@@ -37,6 +49,33 @@ const valuations = async (db: Client) => (await db.query(
      from screener_certified_valuations v join issuers i on i.issuer_id = v.issuer_id
     order by i.legal_name, v.valuation`,
 )).rows;
+
+/** A quote for every listing the screener lists, so each shows; NVDA trades at 120.00 after its split. */
+async function quoteListings(db: Client): Promise<void> {
+  await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1, $2, 'adr')`, [NVDA_FRANKFURT.instrument, NVDA.issuer]);
+  await db.query(`insert into listings (listing_id, instrument_id, mic, ticker, trading_currency, timezone) values ($1, $2, 'XFRA', 'NVD', 'EUR', 'Europe/Berlin')`, [NVDA_FRANKFURT.listing, NVDA_FRANKFURT.instrument]);
+  for (const [listing, price, currency] of [[NVDA.listing, "120.00", "USD"], [NVDA_FRANKFURT.listing, "110.00", "EUR"], [LOSS.listing, "20.00", "USD"], [DUAL.listing, "50.00", "USD"], [DUAL_SECOND_LISTING, "50.00", "USD"]]) {
+    await db.query(
+      `insert into market_quote_snapshots (listing_id, source_id, provider, price, prev_close, session_state, as_of, delay_class, currency, fetched_at, expires_at)
+       values ($1, $2, 'polygon', $3, $3, 'regular', '2024-06-10T14:55:00Z', 'delayed_15m', $4, '2024-06-10T14:55:00Z', '2100-01-01T00:00:00Z')`,
+      [listing, POLYGON_MARKET_SOURCE_ID, price, currency],
+    );
+  }
+}
+
+function screenQuery(query: Partial<ScreenerQuery> = {}): ScreenerQuery {
+  return { universe: [], market: [], fundamentals: [], sort: [{ field: "market_cap", direction: "desc" }], page: { limit: 50 }, ...query };
+}
+
+function screen(db: ScreenerCandidateQueryExecutor, now: string, query: Partial<ScreenerQuery> = {}): Promise<ScreenerResponse> {
+  const clock = () => new Date(now);
+  return executeScreenerQuery({ candidates: createPostgresCandidateRepository(db, clock), clock }, screenQuery(query));
+}
+
+/** Each row as a reader sees it, in ticker order: listing, quote currency, market cap and its currency, P/E. */
+const shown = (response: ScreenerResponse) => response.rows
+  .map((row) => [`${row.display.ticker} ${row.display.mic}`, row.quote.currency, row.fundamentals.market_cap, row.fundamentals.market_cap_currency, row.fundamentals.pe_ratio])
+  .sort(([left], [right]) => String(left).localeCompare(String(right)));
 
 const ledger = async (db: Client) => (await db.query(
   `select (select count(*)::int from screener_valuation_runs) as runs,
@@ -78,6 +117,66 @@ test("screener certification", { timeout: 600_000 }, async (t) => {
     ]);
     const owners = (await db.query(`select distinct user_id::text from financial_runs where parent_kind = 'screener_valuation_run'`)).rows;
     assert.deepEqual(owners, [{ user_id: "00000000-0000-4000-8000-0000000005ee" }]);
+  });
+
+  await t.test("a screen shows each issuer's certified figures on every listing, in the currency they were priced in", async () => {
+    await quoteListings(db);
+    const response = await screen(pool, MONDAY_MORNING);
+    assert.deepEqual(shown(response), [
+      ["DUAL XNAS", "USD", null, null, null],
+      ["DUAL XNYS", "USD", null, null, null],
+      ["LOSS XNAS", "USD", 20_000_000_000, "USD", null],
+      ["NVD XFRA", "EUR", 2_956_800_000_000, "USD", 100.58675607711652],
+      ["NVDA XNAS", "USD", 2_956_800_000_000, "USD", 100.58675607711652],
+    ]);
+    // The deleted arithmetic divided the quote by FY2024 diluted EPS as filed before the split, 11.93: a split ratio off.
+    const nvda = response.rows.find((row) => row.display.ticker === "NVDA")!;
+    assert.equal(Math.round(nvda.fundamentals.pe_ratio! / (nvda.quote.last_price! / 11.93)), 10);
+  });
+
+  await t.test("a P/E ceiling keeps NVDA's listings and drops the loss maker and the dual-listed issuer", async () => {
+    const response = await screen(pool, MONDAY_MORNING, { fundamentals: [{ field: "pe_ratio", max: 150 }] });
+    assert.deepEqual(shown(response).map(([listing]) => listing), ["NVD XFRA", "NVDA XNAS"]);
+  });
+
+  await t.test("a saved market-cap screen replays over the certified figures", async () => {
+    const clock = () => new Date(MONDAY_MORNING);
+    const server = createScreenerServer({ candidates: createPostgresCandidateRepository(pool, clock), screens: createPostgresScreenRepository(pool), clock });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/screener/screens`;
+      const headers = { "x-user-id": IDS.owner, "content-type": "application/json" };
+      const definition = screenQuery({ fundamentals: [{ field: "market_cap", min: 1_000_000_000_000 }] });
+      const saved = await (await fetch(base, { method: "POST", headers, body: JSON.stringify({ name: "Over a trillion", definition }) })).json() as { screen: { screen_id: string } };
+      const replayed = await (await fetch(`${base}/${saved.screen.screen_id}/replay`, { method: "POST", headers })).json() as ScreenerResponse;
+      assert.deepEqual(shown(replayed).map(([listing, , cap]) => [listing, cap]), [["NVD XFRA", 2_956_800_000_000], ["NVDA XNAS", 2_956_800_000_000]]);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  await t.test("a screen reads the certified figures in one statement and does no engine work", async () => {
+    const statements: string[] = [];
+    const recording = {
+      query: (text: string, values?: unknown[]) => {
+        statements.push(text);
+        return pool.query(text, values);
+      },
+    } as ScreenerCandidateQueryExecutor;
+    assert.equal((await screen(recording, MONDAY_MORNING)).rows.length, 5);
+    assert.equal(statements.filter((text) => text.includes("screener_certified_valuations")).length, 1);
+    assert.deepEqual(statements.filter((text) => /\bfinancial_(plans|runs|run_units|run_inputs|results)\b/u.test(text)), []);
+  });
+
+  await t.test("once Monday's session closes, every figure reads as absent until the batch certifies it", async () => {
+    const response = await screen(pool, "2024-06-10T20:30:00.000Z");
+    assert.deepEqual(shown(response).map(([listing, , cap, currency, pe]) => [listing, cap, currency, pe]), [
+      ["DUAL XNAS", null, null, null],
+      ["DUAL XNYS", null, null, null],
+      ["LOSS XNAS", null, null, null],
+      ["NVD XFRA", null, null, null],
+      ["NVDA XNAS", null, null, null],
+    ]);
   });
 
   await t.test("rerunning the cutoff resumes its run and publishes nothing twice", async () => {
@@ -135,6 +234,9 @@ test("screener certification", { timeout: 600_000 }, async (t) => {
     )).rows[0].fact_id;
     await db.query(`delete from facts where fact_id = $1`, [eps]);
     assert.deepEqual(await valuations(db), [], "every run valued NVDA's P/E, so every figure goes, not only NVDA's");
+    assert.deepEqual(shown(await screen(pool, "2024-06-10T15:30:00.000Z")).map(([listing, , cap]) => [listing, cap]), [
+      ["DUAL XNAS", null], ["DUAL XNYS", null], ["LOSS XNAS", null], ["NVD XFRA", null], ["NVDA XNAS", null],
+    ]);
     assert.deepEqual(await ledger(db), { runs: 3, financial_runs: 0, certificates: 0 });
   });
 });

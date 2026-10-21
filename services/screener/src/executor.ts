@@ -20,7 +20,7 @@ import type {
 } from "./query.ts";
 import {
   normalizedScreenerResponse,
-  type ScreenerFundamentalsSummary,
+  type ScreenerFundamentalField,
   type ScreenerQuoteSummary,
   type ScreenerResponse,
   type ScreenerResultRow,
@@ -127,7 +127,7 @@ function candidateMarketValue(c: ScreenerCandidate, field: string): string | num
 }
 
 function candidateFundamentalsValue(c: ScreenerCandidate, field: string): number | null {
-  return c.fundamentals[field as keyof ScreenerFundamentalsSummary];
+  return c.fundamentals[field as ScreenerFundamentalField];
 }
 
 function sortableValueFor(c: ScreenerCandidate, def: FieldDefinition): number | null {
@@ -135,7 +135,7 @@ function sortableValueFor(c: ScreenerCandidate, def: FieldDefinition): number | 
     return c.quote[def.field as keyof ScreenerQuoteSummary] as number | null;
   }
   if (def.dimension === "fundamentals") {
-    return c.fundamentals[def.field as keyof ScreenerFundamentalsSummary];
+    return c.fundamentals[def.field as ScreenerFundamentalField];
   }
   return null;
 }

@@ -53,11 +53,15 @@ export type ScreenerQuoteSummary = {
   as_of: string;
 };
 
-// Compact fundamentals snapshot — keys mirror the FUNDAMENTALS dimension
-// in `fields.ts`. All values nullable to express "data not available
-// for this subject" without inventing a sentinel.
+// Compact fundamentals snapshot — numeric keys mirror the FUNDAMENTALS
+// dimension in `fields.ts`. All values nullable to express "data not
+// available for this subject" without inventing a sentinel.
 export type ScreenerFundamentalsSummary = {
   market_cap: number | null;
+  // The currency market_cap was priced in, which a secondary listing's quote
+  // may not share (#444). Null-defaulted: a source that does not state it
+  // leaves the quote's currency as the label.
+  market_cap_currency: string | null;
   pe_ratio: number | null;
   gross_margin: number | null;
   operating_margin: number | null;
@@ -77,6 +81,9 @@ export type ScreenerFundamentalsSummary = {
   // the vendor fields so existing candidate inputs stay valid.
   insider_net_shares_90d: number | null;
 };
+
+/** The fundamentals a screen filters and sorts on: every one but the label of market_cap. */
+export type ScreenerFundamentalField = Exclude<keyof ScreenerFundamentalsSummary, "market_cap_currency">;
 
 // Display identity — `primary` is the headline label and is always
 // present. The other fields are optional because they only make sense
@@ -357,6 +364,8 @@ export function freezeFundamentalsSummary(
   // signed (margins, growth, P/E can all be negative).
   const market_cap = raw.market_cap;
   assertNullableFiniteNonNegative(market_cap, `${label}.market_cap`);
+  const market_cap_currency = raw.market_cap_currency ?? null;
+  if (market_cap_currency !== null) assertCurrency(market_cap_currency, `${label}.market_cap_currency`);
   const pe_ratio = raw.pe_ratio;
   assertNullableFiniteNumber(pe_ratio, `${label}.pe_ratio`);
   const gross_margin = raw.gross_margin;
@@ -389,6 +398,7 @@ export function freezeFundamentalsSummary(
 
   return Object.freeze({
     market_cap,
+    market_cap_currency,
     pe_ratio,
     gross_margin,
     operating_margin,
