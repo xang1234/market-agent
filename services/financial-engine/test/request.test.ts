@@ -152,6 +152,27 @@ test("publication failures", { skip: !dockerAvailable(), timeout: 300_000 }, asy
     });
   }
 
+  // A retry that finds the lease held gets run_in_progress; one that publishes found it released.
+  await t.test("a beforeDrive that rejects routinely: publication_failed, warned, and its lease released for a retry (#425)", async (t) => {
+    const errors = t.mock.method(console, "error", () => {});
+    const warnings = t.mock.method(console, "warn", () => {});
+    const key = randomUUID();
+    const lost = sqlError("40001");
+    assert.deepEqual(await publishRequest(pool, request({ request_key: key, beforeDrive: async () => { throw lost; } })), { status: "gap", reason: "publication_failed" });
+    assert.equal(errors.mock.callCount(), 0);
+    assert.deepEqual(warnings.mock.calls.map((call) => call.arguments), [[`[financial-engine] publication stopped for chat request ${key}`, lost]]);
+    assert.equal(published(await publishRequest(pool, request({ request_key: key }))), "published");
+  });
+
+  await t.test("a beforeDrive that rejects with a defect: logged, reaches the caller, and its lease released for a retry (#425)", async (t) => {
+    const errors = t.mock.method(console, "error", () => {});
+    const key = randomUUID();
+    const defect = new TypeError("the scope is not a function");
+    await assert.rejects(publishRequest(pool, request({ request_key: key, beforeDrive: async () => { throw defect; } })), (error) => error === defect);
+    assert.deepEqual(errors.mock.calls.map((call) => call.arguments), [[`[financial-engine] publication failed for chat request ${key}`, defect]]);
+    assert.equal(published(await publishRequest(pool, request({ request_key: key }))), "published");
+  });
+
   await t.test("a lease that lapses before the drive: publication_failed, nothing logged, and a retry publishes", async (t) => {
     const errors = t.mock.method(console, "error", () => {});
     t.mock.method(console, "warn", () => {});
