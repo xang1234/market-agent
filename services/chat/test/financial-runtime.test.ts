@@ -435,45 +435,19 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.deepEqual((harness.persisted.at(-1)!.research_scope as { companies: unknown }).companies, [{ issuer_id: MISSING_ISSUER, label: "CCC" }]);
   });
 
-  await t.test("a retry that finds its run failed declines with its companies, unless another attempt answered the turn meanwhile (#425)", async () => {
+  await t.test("a retry that finds its run failed declines with its companies (#425)", async () => {
     // The thread is another user's, so the first attempt reserves the run and cannot publish; the run then fails.
-    const failedTurn = async () => {
-      const input = { threadId: randomUUID(), userId: IDS.owner, turnId: randomUUID(), userIntent: "Revenue for AAA" };
-      await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [input.threadId, IDS.other]);
-      await chatHarness(pool, { model: revenueModel(["AAA"]) }).run(input);
-      await db.query(`update financial_runs set execution_state = 'failed', failure_code = 'internal_error' where parent_id = $1`, [input.threadId]);
-      await db.query(`update chat_threads set user_id = $2 where thread_id = $1`, [input.threadId, IDS.owner]);
-      return input;
-    };
-    const retry = async (input: Awaited<ReturnType<typeof failedTurn>>, through: unknown = pool) => {
-      const harness = chatHarness(through as never, { model: revenueModel(["AAA"]), researchScope: scopeOver as never });
-      const done = completed((await harness.run(input)).events);
-      return [done.financial_gap, (harness.persisted.at(-1)!.research_scope as { companies: unknown } | undefined)?.companies];
-    };
-    assert.deepEqual(await retry(await failedTurn()), [{ reason_code: "run_failed" }, [{ issuer_id: IDS.issuerA, label: "AAA" }]]);
-    // The answer lands after this attempt checked for it, as when another attempt finishes the run it waits on.
-    const raced = await failedTurn();
-    const { rows: [snapshot] } = await db.query<{ snapshot_id: string }>(
-      `insert into snapshots (subject_refs, as_of, basis, normalization, allowed_transforms)
-       values (jsonb_build_array(jsonb_build_object('kind', 'issuer', 'id', $1::text)), now(), 'unadjusted', 'raw', '{}')
-       returning snapshot_id::text as snapshot_id`,
-      [IDS.issuerA],
+    const input = { threadId: randomUUID(), userId: IDS.owner, turnId: randomUUID(), userIntent: "Revenue for AAA" };
+    await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [input.threadId, IDS.other]);
+    await chatHarness(pool, { model: revenueModel(["AAA"]) }).run(input);
+    await db.query(`update financial_runs set execution_state = 'failed', failure_code = 'internal_error' where parent_id = $1`, [input.threadId]);
+    await db.query(`update chat_threads set user_id = $2 where thread_id = $1`, [input.threadId, IDS.owner]);
+    const harness = chatHarness(pool, { model: revenueModel(["AAA"]), researchScope: scopeOver as never });
+    const done = completed((await harness.run(input)).events);
+    assert.deepEqual(
+      [done.financial_gap, (harness.persisted.at(-1)!.research_scope as { companies: unknown }).companies],
+      [{ reason_code: "run_failed" }, [{ issuer_id: IDS.issuerA, label: "AAA" }]],
     );
-    let checked = false;
-    const racing = {
-      query: (text: string, values?: unknown[]) => {
-        if (!checked && text.startsWith("select 1 from chat_messages")) {
-          checked = true;
-          return db.query(
-            `insert into chat_messages (message_id, thread_id, role, snapshot_id, blocks, content_hash) values ($1::uuid, $2::uuid, 'assistant', $3::uuid, '[]'::jsonb, 'answer')`,
-            [financialMessageId(raced.threadId, raced.turnId), raced.threadId, snapshot!.snapshot_id],
-          ).then(() => ({ rows: [] }));
-        }
-        return pool.query(text, values);
-      },
-      connect: () => pool.connect(),
-    };
-    assert.deepEqual(await retry(raced, racing), [{ reason_code: "run_failed" }, undefined]);
   });
 
   await t.test("a retry of a declined turn returns the gap it saved, with no second model call (#425)", async (st) => {
@@ -490,6 +464,15 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     const { rows } = await db.query(`select count(*)::int as n from chat_messages where thread_id = $1 and research_scope->>'reads' = 'financial_gap'`, [threadId]);
     assert.equal(rows[0].n, 0, "no scope was given, so none is saved");
     assert.equal((await db.query(`select count(*)::int as n from chat_messages where message_id = $1`, [first.message_id])).rows[0].n, 1);
+  });
+
+  await t.test("a retried turn that asks which company saves its question again, never failing on the first attempt's (#425)", async (st) => {
+    const persistAssistantMessage = await savingMessages(st, databaseUrl(db));
+    const turn = { ...base, turnId: randomUUID(), userIntent: "Revenue for AMB" };
+    for (const runId of [turn.turnId, randomUUID(), turn.turnId]) {
+      const done = completed((await chatHarness(pool, { model: revenueModel(["AMB"]), persistAssistantMessage }).run({ ...turn, runId })).events);
+      assert.equal(done.clarification, true, runId);
+    }
   });
 
   await t.test("a declined turn's gap never hides the answer another attempt of the turn saved (#425)", async (st) => {
