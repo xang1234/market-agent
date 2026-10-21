@@ -12,7 +12,7 @@ import { proposedMetric } from "../src/research-scope.ts";
 import { parseProposal } from "../src/scope-proposal.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import type { FinancialPool } from "../../financial-engine/src/ports.ts";
-import { chatDatabase, chatHarness, completed, INSTRUMENT_A, LISTING_A, MISSING_ISSUER, resolveMention, revenueModel } from "./financial-fixtures.ts";
+import { chatDatabase, chatHarness, completed, INSTRUMENT_A, LISTING_A, MISSING_ISSUER, resolveMention, revenueModel, savingMessages } from "./financial-fixtures.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "../src/subjects.ts";
 
 test("financial intent is recognized from the definition catalog", () => {
@@ -26,6 +26,16 @@ test("an unready engine stops the server instead of leaving metric questions on 
   const lane = createChatFinancialRuntime({ pool: unready, planningModel: null, resolveMention: async () => assert.fail("no turn runs"), evidence: createEvidenceFinancialPort });
   await assert.rejects(() => lane.assertReady(), /verified finance is not ready for chat: schema: relation financial_runs is missing/u);
 });
+
+/** A planning model that declines every request with `reason`, and counts calls. */
+function declining(reason: string): PlanningModel & { calls: number } {
+  const model = (async () => {
+    model.calls += 1;
+    return { model: "stub-model", text: JSON.stringify({ outcome: "unsupported", reason }) };
+  }) as unknown as PlanningModel & { calls: number };
+  model.calls = 0;
+  return model;
+}
 
 test("chat financial lane", { timeout: 300_000 }, async (t) => {
   if (!dockerAvailable()) {
@@ -464,6 +474,73 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       connect: () => pool.connect(),
     };
     assert.deepEqual(await retry(raced, racing), [{ reason_code: "run_failed" }, undefined]);
+  });
+
+  await t.test("a retry of a declined turn returns the gap it saved, with no second model call (#425)", async (st) => {
+    const persistAssistantMessage = await savingMessages(st, databaseUrl(db));
+    const model = declining("segments");
+    const harness = () => chatHarness(pool, { model, persistAssistantMessage });
+    const turn = { ...base, turnId: randomUUID(), userIntent: "Break down AAA's revenue by segment" };
+    const first = completed((await harness().run(turn)).events);
+    // A retry comes on a new run; one after a restart comes on the same.
+    for (const runId of [randomUUID(), turn.turnId]) {
+      const retried = completed((await harness().run({ ...turn, runId })).events);
+      assert.deepEqual([retried.message_id, model.calls], [first.message_id, 1], runId);
+    }
+    const { rows } = await db.query(`select count(*)::int as n from chat_messages where thread_id = $1 and research_scope->>'reads' = 'financial_gap'`, [threadId]);
+    assert.equal(rows[0].n, 0, "no scope was given, so none is saved");
+    assert.equal((await db.query(`select count(*)::int as n from chat_messages where message_id = $1`, [first.message_id])).rows[0].n, 1);
+  });
+
+  await t.test("a declined turn's gap never hides the answer another attempt of the turn saved (#425)", async (st) => {
+    const persist = await savingMessages(st, databaseUrl(db));
+    const raced = { threadId: randomUUID(), userId: IDS.owner, turnId: randomUUID(), userIntent: "Break down AAA's revenue by segment" };
+    await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [raced.threadId, IDS.owner]);
+    const { rows: [snapshot] } = await db.query<{ snapshot_id: string }>(
+      `insert into snapshots (subject_refs, as_of, basis, normalization, allowed_transforms)
+       values (jsonb_build_array(jsonb_build_object('kind', 'issuer', 'id', $1::text)), now(), 'unadjusted', 'raw', '{}')
+       returning snapshot_id::text as snapshot_id`,
+      [IDS.issuerA],
+    );
+    const answerId = financialMessageId(raced.threadId, raced.turnId);
+    // The other attempt commits its answer after this one planned its gap, before the gap is saved.
+    const persistAssistantMessage: typeof persist = async (message) => {
+      await db.query(
+        `insert into chat_messages (message_id, thread_id, role, snapshot_id, blocks, content_hash) values ($1::uuid, $2::uuid, 'assistant', $3::uuid, '[{"kind":"financial_answer"}]'::jsonb, 'answer')`,
+        [answerId, raced.threadId, snapshot!.snapshot_id],
+      );
+      return persist(message);
+    };
+    const done = completed((await chatHarness(pool, { model: declining("segments"), researchScope: scopeOver as never, persistAssistantMessage }).run(raced)).events);
+    const { rows } = await db.query(`select message_id::text as message_id, research_scope from chat_messages where thread_id = $1 and role = 'assistant'`, [raced.threadId]);
+    assert.deepEqual([done.message_id, rows], [answerId, [{ message_id: answerId, research_scope: null }]]);
+  });
+
+  await t.test("a turn's answer replaces the gap another attempt of the turn saved (#425)", async () => {
+    const turn = { ...base, turnId: randomUUID(), userIntent: "Revenue for AAA" };
+    const id = financialMessageId(threadId, turn.turnId);
+    const { rows: [snapshot] } = await db.query<{ snapshot_id: string }>(
+      `insert into snapshots (subject_refs, as_of, basis, normalization, allowed_transforms) values ('[]'::jsonb, now(), 'unadjusted', 'raw', '{}') returning snapshot_id::text as snapshot_id`,
+    );
+    // The other attempt saves its gap just after this one looked for the turn's outcome.
+    let saved = false;
+    const racing = {
+      query: async (text: string, values?: unknown[]) => {
+        const result = await pool.query(text, values);
+        if (!saved && text.includes("from chat_messages where message_id")) {
+          saved = true;
+          await db.query(
+            `insert into chat_messages (message_id, thread_id, role, snapshot_id, blocks, content_hash) values ($1::uuid, $2::uuid, 'assistant', $3::uuid, '[{"kind":"rich_text"}]'::jsonb, 'gap')`,
+            [id, threadId, snapshot!.snapshot_id],
+          );
+        }
+        return result;
+      },
+      connect: () => pool.connect(),
+    };
+    const done = completed((await chatHarness(racing as never, { model: revenueModel(["AAA"]) }).run(turn)).events);
+    const { rows } = await db.query(`select blocks->0->>'kind' as kind from chat_messages where message_id = $1`, [id]);
+    assert.deepEqual([done.message_id, rows], [id, [{ kind: "financial_answer" }]]);
   });
 
   await t.test("narrative turns keep the analyst path", async () => {

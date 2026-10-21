@@ -8,7 +8,14 @@ import { connectedPool } from "../../../db/test/docker-pg.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { databaseUrl, engineDatabase, IDS } from "../../financial-engine/test/db-fixtures.ts";
-import { createChatCoordinator, type ChatAnalystToolRuntime, type ChatAssistantMessageCommit, type ChatTurnInput } from "../src/coordinator.ts";
+import type { TestContext } from "node:test";
+import {
+  createChatCoordinator,
+  type ChatAnalystToolRuntime,
+  type ChatAssistantMessageCommit,
+  type ChatAssistantMessagePersistence,
+  type ChatTurnInput,
+} from "../src/coordinator.ts";
 import { createChatFinancialRuntime } from "../src/financial-runtime.ts";
 import type { ScopeProposal } from "../src/research-scope.ts";
 import type { ChatSubjectPreResolution } from "../src/subjects.ts";
@@ -116,6 +123,8 @@ export function chatHarness(
     priorSubjects?: Parameters<typeof createChatFinancialRuntime>[0]["priorSubjects"];
     resolveMention?: typeof resolveMention;
     clock?: () => Date;
+    // Saves the narrative messages in the database (savingMessages); absent, they are only recorded.
+    persistAssistantMessage?: ChatAssistantMessagePersistence;
   },
 ) {
   // The narrative messages the turns saved: clarifications and gaps.
@@ -124,7 +133,7 @@ export function chatHarness(
     analystToolRuntime: options.analyst ?? forbiddenAnalyst,
     persistAssistantMessage: async (message) => {
       persisted.push(message);
-      return readMessage({ snapshot_id: randomUUID(), message_id: randomUUID(), thread_id: message.threadId });
+      return options.persistAssistantMessage?.(message) ?? readMessage({ snapshot_id: randomUUID(), message_id: randomUUID(), thread_id: message.threadId });
     },
     financialRuntime: createChatFinancialRuntime({
       pool,
@@ -137,13 +146,26 @@ export function chatHarness(
       ...(options.clock ? { clock: options.clock } : {}),
     }),
   });
-  const run = async (input: Omit<ChatTurnInput, "runId" | "turnId"> & { turnId?: string }) => {
+  const run = async (input: Omit<ChatTurnInput, "runId" | "turnId"> & { turnId?: string; runId?: string }) => {
     const turnId = input.turnId ?? randomUUID();
-    const handle = coordinator.getOrCreateTurn({ ...input, runId: turnId, turnId });
+    const handle = coordinator.getOrCreateTurn({ ...input, runId: input.runId ?? turnId, turnId });
     await handle.completed;
     return { turnId, events: handle.events };
   };
   return { run, persisted };
+}
+
+/** The chat server's own message persistence (local-runtime.ts) on this database, so a test reads what a thread saves. */
+export async function savingMessages(t: TestContext, url: string): Promise<ChatAssistantMessagePersistence> {
+  const previous = process.env.CHAT_DATABASE_URL;
+  process.env.CHAT_DATABASE_URL = url;
+  const runtime = await import("../src/local-runtime.ts");
+  t.after(async () => {
+    await runtime.closeLocalRuntimePoolForTests();
+    if (previous === undefined) delete process.env.CHAT_DATABASE_URL;
+    else process.env.CHAT_DATABASE_URL = previous;
+  });
+  return runtime.persistAssistantMessage;
 }
 
 export async function chatDatabase(t: Parameters<typeof engineDatabase>[0], prefix: string): Promise<{ db: Client; pool: Pool; threadId: string }> {
