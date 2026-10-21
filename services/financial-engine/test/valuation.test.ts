@@ -9,11 +9,8 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import type { Client } from "pg";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
-import { recordFactPrecisionAttestation, recordSourcePublicationAttestation } from "../../evidence/src/financial-attestations.ts";
-import { recordFactFinancialContext } from "../../evidence/src/financial-context.ts";
 import Ajv2020 from "../../financial-core/node_modules/ajv/dist/2020.js";
 import type { FinancialPlanV1, FinancialRuntimeAuthority } from "../../financial-core/src/index.ts";
-import { POLYGON_MARKET_SOURCE_ID } from "../../market/src/provider-sources.ts";
 import { createEvidenceFinancialPort } from "../src/evidence-adapter.ts";
 import { executeRun } from "../src/execute.ts";
 import { finalizeUnit } from "../src/finalize.ts";
@@ -21,86 +18,7 @@ import { acquireLease } from "../src/lease.ts";
 import { reserveRun } from "../src/run-repo.ts";
 import { inspectCommittedResult } from "../src/inspection.ts";
 import { buildDeterministicPlan } from "../src/planner.ts";
-import { authorityFor, engineDatabase, HASH, IDS as FIXTURE_IDS, pinnedClients, readyRun } from "./db-fixtures.ts";
-
-const IDS = {
-  nvda: "4f000000-0000-4000-8000-0000000005a1",
-  listing: "4f000000-0000-4000-8000-0000000005e1",
-  tenK: "4f000000-0000-4000-8000-0000000005c1",
-  tenQ: "4f000000-0000-4000-8000-0000000005c2",
-  polygon: POLYGON_MARKET_SOURCE_ID,
-} as const;
-// 10:00 on Monday 2024-06-10 in New York: the split has executed, and Friday's session is the last one closed.
-const MONDAY_MORNING = "2024-06-10T14:00:00.000Z";
-
-async function seedFiling(db: Client, sourceId: string, contentHash: string, publicBy: string): Promise<void> {
-  await db.query(
-    `insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at, content_hash) values ($1, 'sec_edgar', 'filing', 'primary', 'public', '2026-10-01T00:00:00Z', $2)`,
-    [sourceId, contentHash],
-  );
-  await recordSourcePublicationAttestation(db, {
-    source_id: sourceId, document_id: null, source_version_hash: contentHash, available_not_before: null,
-    available_no_later_than: publicBy, timing_precision: "date", source_timezone: "America/New_York",
-    proof_method: "accession_bound_archive", proof_ref: `proof:${sourceId}`, proof_hash: HASH.proof, mapping_version: "test-accession-archive.v1",
-  });
-}
-
-/** One SEC value certified as filed on `asFiledOn`. */
-async function seedAsFiled(db: Client, fact: {
-  metric: string; unit: "currency_per_share" | "shares"; value: string; source: string; asFiledOn: string; reportedAt: string;
-  period: { kind: "fiscal_y" | "point"; start: string | null; end: string; fiscal_year: number; fiscal_period: string };
-}): Promise<void> {
-  const metricId = (await db.query<{ metric_id: string }>(
-    `insert into metrics (metric_id, metric_key, display_name, unit_class, aggregation, interpretation, canonical_source_class)
-     values (gen_random_uuid(), $1, $1, $2, 'point_in_time', 'neutral', 'gaap')
-     on conflict (metric_key) do update set metric_key = excluded.metric_key
-     returning metric_id::text`,
-    [fact.metric, fact.unit === "shares" ? "count" : "currency"],
-  )).rows[0]!.metric_id;
-  const factId = (await db.query<{ fact_id: string }>(
-    `insert into facts (subject_kind, subject_id, metric_id, period_kind, period_start, period_end, fiscal_year, fiscal_period,
-                        value_num, unit, currency, scale, as_of, reported_at, observed_at, source_id, method, verification_status,
-                        freshness_class, coverage_level, confidence)
-     values ('issuer', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 1, '2026-10-01T00:00:00Z', $11, '2026-10-01T00:00:00Z', $12,
-             'reported', 'authoritative', 'filing_time', 'full', 1)
-     returning fact_id::text`,
-    [IDS.nvda, metricId, fact.period.kind, fact.period.start, fact.period.end, fact.period.fiscal_year, fact.period.fiscal_period,
-      fact.value, fact.unit, fact.unit === "shares" ? null : "USD", fact.reportedAt, fact.source],
-  )).rows[0]!.fact_id;
-  await recordFactPrecisionAttestation(db, {
-    fact_id: factId, precision_class: "source_token_preserved", raw_token: fact.value, token_proof_hash: HASH.proof, source_locator: `locator:${factId}`, validation_method: "fixture",
-  });
-  await recordFactFinancialContext(db, {
-    fact_id: factId, context_version: "context.v1", period_type: fact.period.start === null ? "instant" : "duration", dimension_scope: "consolidated", dimension_members: [],
-    reporting_basis: "as_reported", adjustment_basis: "as_filed", as_filed_on: fact.asFiledOn, share_basis: fact.unit === "shares" ? "not_applicable" : "diluted",
-    fiscal_calendar_version: "fiscal-calendar.v1", disclosure_relation: "original", source_context_ref: null,
-  });
-}
-
-/** NVDA: its listing with the 2024-06-10 split synced that morning, Friday's 1200.00 close, the FY2024 10-K's diluted EPS, and the Q1 FY2025 10-Q's cover count. */
-async function seedNvda(db: Client): Promise<void> {
-  await db.query(`insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at) values ($1, 'polygon_market', 'market_data', 'primary', 'licensed', now())`, [IDS.polygon]);
-  await seedFiling(db, IDS.tenK, "4".repeat(64), "2024-02-21T23:59:59.999-05:00");
-  await seedFiling(db, IDS.tenQ, "5".repeat(64), "2024-05-29T23:59:59.999-04:00");
-  await db.query(`insert into issuers (issuer_id, legal_name) values ($1, 'NVIDIA Corporation')`, [IDS.nvda]);
-  await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1, $1, 'common_stock')`, [IDS.nvda]);
-  await db.query(`insert into listings (listing_id, instrument_id, mic, ticker, trading_currency, timezone) values ($1, $2, 'XNAS', 'NVDA', 'USD', 'America/New_York')`, [IDS.listing, IDS.nvda]);
-  await db.query(`insert into listing_splits (listing_id, execution_date, split_from, split_to, source_id) values ($1, '2024-06-10', 1, 10, $2)`, [IDS.listing, IDS.polygon]);
-  await db.query(`insert into listing_split_coverage (listing_id, checked_at, source_id) values ($1, '2024-06-10T12:00:00Z', $2)`, [IDS.listing, IDS.polygon]);
-  await db.query(
-    `insert into price_observations (listing_id, source_id, kind, price_text, currency, observed_at, known_at, fetched_at, body_sha256)
-     values ($1, $2, 'session_close', '1200.00', 'USD', '2024-06-07T20:00:00Z', '2024-06-07T20:15:00Z', '2024-06-07T20:15:00Z', $3)`,
-    [IDS.listing, IDS.polygon, "d".repeat(64)],
-  );
-  await seedAsFiled(db, {
-    metric: "eps_diluted", unit: "currency_per_share", value: "11.93", source: IDS.tenK, asFiledOn: "2024-02-21", reportedAt: "2024-02-21T00:00:00Z",
-    period: { kind: "fiscal_y", start: "2023-01-30", end: "2024-01-28", fiscal_year: 2024, fiscal_period: "FY" },
-  });
-  await seedAsFiled(db, {
-    metric: "shares_outstanding", unit: "shares", value: "2464000000", source: IDS.tenQ, asFiledOn: "2024-05-17", reportedAt: "2024-05-29T00:00:00Z",
-    period: { kind: "point", start: null, end: "2024-05-17", fiscal_year: 2025, fiscal_period: "Q1" },
-  });
-}
+import { authorityFor, engineDatabase, IDS as FIXTURE_IDS, NVDA, pinnedClients, readyRun, seedNvda } from "./db-fixtures.ts";
 
 /** The deterministic plan a surface builds for NVDA's market cap and P/E, publishing their inputs beside them. */
 function valuationPlan(authority: FinancialRuntimeAuthority): FinancialPlanV1 {
@@ -108,14 +26,14 @@ function valuationPlan(authority: FinancialRuntimeAuthority): FinancialPlanV1 {
   const planned = buildDeterministicPlan({
     plan_id: randomUUID(),
     origin: { kind: "chat_request", ref: "chat:turn:valuation" },
-    knowledge_cutoff: MONDAY_MORNING,
+    knowledge_cutoff: NVDA.cutoff,
     cutoff_timezone: "America/New_York",
     reporting_basis: "as_reported",
     freshness_max_age_days: null,
     authority,
     parent_limits: {},
     max_model_calls: 0,
-    requested_subjects: [{ mention: "NVDA", resolution: { status: "resolved", subject_ref: { kind: "issuer", id: IDS.nvda }, label: "NVIDIA Corporation" } }],
+    requested_subjects: [{ mention: "NVDA", resolution: { status: "resolved", subject_ref: { kind: "issuer", id: NVDA.issuer }, label: "NVIDIA Corporation" } }],
     publication_unit_kind: "chat_section",
   }, {
     subjects: [{ slot_id: "a", mention: "NVDA" }],

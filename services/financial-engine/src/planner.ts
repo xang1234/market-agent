@@ -23,7 +23,9 @@ import {
   type FinancialPlanV1,
   type FinancialRuntimeAuthority,
   type FinancialSubjectRef,
+  type LocalId,
   type OperationKind,
+  type OperationNode,
   type PlanOrigin,
   type PublicationUnitKind,
   type ReportingBasis,
@@ -343,7 +345,7 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
   };
   const drafted = validateFinancialPlan(plan);
   if (!drafted.ok) return { ok: false, kind: "invalid", issues: drafted.issues };
-  const validated = validateFinancialPlan({ ...plan, outputs: withFreeCashFlowInputs(drafted.value) });
+  const validated = validateFinancialPlan({ ...plan, outputs: withShownOperands(drafted.value) });
   if (!validated.ok) return { ok: false, kind: "invalid", issues: validated.issues };
   const withinLimits = checkPlanLimits(validated.value, context.parent_limits);
   if (!withinLimits.ok) {
@@ -355,18 +357,32 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
 }
 
 /**
- * The plan's outputs, each preceded by the OCF and capex of every free cash
- * flow it depends on that its unit does not already publish: an answer that
- * rests on free cash flow always shows the two values it subtracts.
+ * The reported operands an answer resting on a figure always shows beside it:
+ * free cash flow's OCF and capex (#324), and a valuation's price and the share
+ * count or EPS it reads (#444).
  */
-function withFreeCashFlowInputs(plan: FinancialPlanV1): RequestedOutput[] {
+function shownOperands(node: OperationNode): LocalId[] {
+  switch (node.operation) {
+    case "free_cash_flow":
+      return [node.operating_cash_flow, node.capex];
+    case "market_cap":
+      return [node.price, node.shares];
+    case "pe_ratio":
+      return [node.price, node.earnings];
+    default:
+      return [];
+  }
+}
+
+/** The plan's outputs, each preceded by the shown operands of every figure it depends on that its unit does not already publish. */
+function withShownOperands(plan: FinancialPlanV1): RequestedOutput[] {
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
   const published = new Set(plan.outputs.map((output) => `${output.unit_id}/${output.node_id}`));
   const ids = new Set(plan.outputs.map((output) => output.output_id));
   return plan.outputs.flatMap((output) => {
     const inputs = [...dependencyClosure(plan, [output.node_id])].flatMap((nodeId) => {
       const node = nodes.get(nodeId);
-      return node?.operation === "free_cash_flow" ? [node.operating_cash_flow, node.capex] : [];
+      return node ? shownOperands(node) : [];
     });
     const added = inputs.flatMap((input) => {
       if (published.has(`${output.unit_id}/${input}`)) return [];
