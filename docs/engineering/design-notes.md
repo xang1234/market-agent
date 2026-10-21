@@ -228,6 +228,9 @@ split executed on or before that date is already reflected. SEC ingestion certif
   binds the original.
 - **Seal:** the snapshot verifier rebuilds the adjustment from the listing's current splits and time zone and withholds
   the seal when either changed (`splits_changed`).
+- **Saved rules:** a thesis condition or Discovery criterion on a per-share value or share count is unresolved
+  (`threshold_has_no_split_basis`, `services/financial-engine/src/saved-rule.ts`). Its threshold names no split basis
+  date, so compared with a value restated to the evaluation date it would flip on a split's date.
 - **Operators:** `npm run backfill:sec-statements` records the context of a share fact stored before #387, and
   `npm run sync:splits` (in `services/market`) has to have run on the analysis's day. Every ingest compares the stored
   originals again, so a backfill rerun after a sync decides each unverified restatement whose listing's splits now

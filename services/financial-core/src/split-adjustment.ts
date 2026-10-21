@@ -146,6 +146,11 @@ export function checkSplitAdjustment(
   return { ok: true, value: recomputed.value };
 }
 
+/** Whether a stock split restates this kind of value: per-share values and share counts. */
+export function splitsRestate(valueKind: MetricValueKind): boolean {
+  return DIRECTIONS[valueKind] !== null;
+}
+
 type SplitFactor =
   | Readonly<{ ok: true; splits: SplitAdjustmentV2["splits"]; factor: ExactRational; restate: (value: ExactRational) => ExactRational | null }>
   | Readonly<{ ok: false; reason: "incompatible_basis" | "numeric_limit_exceeded" }>;
