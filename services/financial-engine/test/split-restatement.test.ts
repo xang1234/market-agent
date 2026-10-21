@@ -24,6 +24,7 @@ const IDS = {
   uncovered: "4f000000-0000-4000-8000-0000000003a2",
   stale: "4f000000-0000-4000-8000-0000000003a3",
   twoListings: "4f000000-0000-4000-8000-0000000003a4",
+  fetchedTheEveningBefore: "4f000000-0000-4000-8000-0000000003a5",
 } as const;
 /** The issuer's index-th listing: its id with the last three digits "e<issuer digit><index>". */
 const listingOf = (issuer: string, index = 1) => `${issuer.slice(0, -3)}e${issuer.slice(-1)}${index}`;
@@ -130,9 +131,11 @@ test("as-filed share figures bound on a split basis", { timeout: 300_000 }, asyn
   await seedIssuer(db, IDS.uncovered, { checked_at: null });
   await seedIssuer(db, IDS.stale, { checked_at: "2024-12-31T12:00:00Z", splits: [["2024-06-10", "1", "10"]] });
   await seedIssuer(db, IDS.twoListings, { listings: 2, checked_at: "2026-10-01T12:00:00Z" });
+  // Fetched at 22:00 in New York on 2024-06-09, the evening before NVDA's split executed there.
+  await seedIssuer(db, IDS.fetchedTheEveningBefore, { checked_at: "2024-06-10T02:00:00Z", splits: [["2024-06-10", "1", "10"]] });
   const eps = await seedAsFiled(db, IDS.nvda, "eps_diluted", "11.93");
   await seedAsFiled(db, IDS.nvda, "weighted_average_diluted_shares", "2494000000");
-  for (const issuer of [IDS.uncovered, IDS.stale, IDS.twoListings]) await seedAsFiled(db, issuer, "eps_diluted", "11.93");
+  for (const issuer of [IDS.uncovered, IDS.stale, IDS.twoListings, IDS.fetchedTheEveningBefore]) await seedAsFiled(db, issuer, "eps_diluted", "11.93");
 
   await t.test("after the split, NVDA's FY2024 diluted EPS and shares bind restated, and the unit seals", async () => {
     const plan = sharePlan(IDS.nvda, "2025-01-01T12:00:00.000Z");
@@ -184,6 +187,33 @@ test("as-filed share figures bound on a split basis", { timeout: 300_000 }, asyn
     assert.equal(await gapOf(IDS.uncovered), "split_history_missing");
     assert.equal(await gapOf(IDS.stale), "split_history_stale");
     assert.equal(await gapOf(IDS.twoListings), "split_listing_unresolved");
+  });
+
+  await t.test("a split counts from its execution date in the listing's market, not the cutoff's UTC date", async () => {
+    // 02:00 UTC on 2024-06-10 is 22:00 on 2024-06-09 in New York, before NVDA's split executed there.
+    const plan = sharePlan(IDS.nvda, "2024-06-10T02:00:00.000Z");
+    const { runId, lease } = await readyRun(db, plan, authority);
+    const payload = (await db.query(`select bound_payload from financial_run_inputs where run_id = $1 and input_slot = 'eps'`, [runId])).rows[0]!.bound_payload;
+    assert.deepEqual(payload.split_adjustment, {
+      version: "split_adjustment.v2",
+      as_filed_on: "2024-02-21",
+      reference_date: "2024-06-09",
+      listing_id: listingOf(IDS.nvda),
+      listing_timezone: "America/New_York",
+      splits: [],
+      factor: { numerator: "1", denominator: "1" },
+      adjusted_native_value: { numerator: "1193", denominator: "100" },
+    });
+    assert.deepEqual(await resultValues(db, runId), { out_eps: "11.93", out_shares: "2494000000" });
+    const [client] = await pinnedClients(t, db, 1);
+    const sealed = await finalizeUnit({ client: client!, lease, authority, unit_id: "share_unit", snapshot_id: randomUUID(), persistParent: async () => {} });
+    assert.equal(sealed.status, "published", JSON.stringify(sealed));
+
+    // 12:00 UTC on 2024-06-10 is the split's own day in New York, and the list was fetched the evening before.
+    const late = sharePlan(IDS.fetchedTheEveningBefore, "2024-06-10T12:00:00.000Z");
+    const { lease: lateLease } = await leasedRun(db, late, authority);
+    const binding = (await bindPlanInputs({ client: db, lease: lateLease, plan: late, authority, evidence: createEvidenceFinancialPort })).bindings.get("eps");
+    assert.equal(binding?.status === "gap" ? binding.reason_code : binding?.status, "split_history_stale");
   });
 
   await t.test("a split re-dated after binding withholds the seal", async () => {
