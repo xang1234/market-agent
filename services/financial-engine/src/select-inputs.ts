@@ -23,6 +23,15 @@
 // 8. An as-filed value binds restated to its listing's reference date, the
 //    cutoff dated in the listing's time zone, from the listing's split
 //    history, or is a gap when that history is unknown.
+// 9. An instant share count is a filing's count as of its own date, not a
+//    statement period's figure (#444). It is current only while it is the
+//    latest filing's: a node takes the newest filing filed by the cutoff,
+//    whatever its form, apart from the plan's statement periods, and any
+//    other count it names is stale, as is one dated more than
+//    SHARE_COUNT_MAX_AGE_DAYS before the cutoff.
+// 10. A split near an instant share count's date leaves its basis unknown,
+//    so it is a gap: one within SHARE_COUNT_SPLIT_WINDOW_DAYS of that date,
+//    or after it and on or before the filing date.
 //
 // A selection is a proven input: the chosen candidate with its proofs and
 // context narrowed to non-null, and its numerics parsed exactly once.
@@ -31,6 +40,7 @@ import {
   canonicalDecimalString,
   compareRationals,
   conservativeAvailability,
+  dayNumber,
   freshnessAt,
   multiplyRationals,
   parseDerivedDecimalText,
@@ -44,18 +54,40 @@ import {
   type DecimalString,
   type ExactRational,
   type FinancialUnit,
+  type IsoDate,
   type IsoDateTime,
   type LocalId,
+  type MetricKey,
   type ProvenPrecisionClass,
   type PeriodSelector,
   type ReasonCode,
+  type RecordedSplit,
   type ReportedMetricNode,
   type ReportingBasis,
   type SplitAdjustmentV2,
 } from "../../financial-core/src/index.ts";
 import type { InputCandidate, SplitHistory } from "./ports.ts";
 
-export const SELECTION_POLICY_VERSION = "public-information-selection.v3";
+export const SELECTION_POLICY_VERSION = "public-information-selection.v4";
+
+/**
+ * A large accelerated filer files at most 111 days apart (a 10-Q 40 days
+ * after its third quarter, its 10-K 60 days after the year), so a share count
+ * dated more than this before the cutoff is superseded or late.
+ */
+export const SHARE_COUNT_MAX_AGE_DAYS = 130;
+
+/**
+ * A split's record and distribution dates fall days before its ex-date, which
+ * is how a listing's splits are dated, so a count this near one may be on
+ * either basis.
+ */
+export const SHARE_COUNT_SPLIT_WINDOW_DAYS = 7;
+
+/** Whether the metric is an instant share count, dated by its own date (rule 9). */
+export function isShareCount(metricKey: MetricKey): boolean {
+  return resolveMetricDefinition(metricKey)?.value_kind === "share_count";
+}
 
 export type SelectionPolicy = {
   knowledge_cutoff: IsoDateTime;
@@ -109,13 +141,15 @@ type LatestSlot = Readonly<{ node: ReportedMetricNode; candidates: ReadonlyArray
 /**
  * The period each latest node resolves to, shared per subject and period type:
  * the offset-th newest period with an eligible candidate in any of the slots.
- * Null when there is no such period; unresolved when any slot of the group is incomplete.
+ * Null when there is no such period; unresolved when any slot of the group is
+ * incomplete. An instant share count resolves alone (rule 9).
  */
 export function sharedLatestPeriods(slots: ReadonlyArray<LatestSlot>, policy: SelectionPolicy): ReadonlyMap<LocalId, LatestPeriod> {
   const groupOf = (node: ReportedMetricNode, periodType: string) => JSON.stringify([node.subject_slot, periodType]);
   const keysByGroup = new Map<string, Set<PeriodKey>>();
   const incompleteGroups = new Map<string, ReasonCode>();
-  for (const { node, candidates, incomplete } of slots) {
+  const shared = slots.filter(({ node }) => node.period.kind === "latest" && !isShareCount(node.metric_key));
+  for (const { node, candidates, incomplete } of shared) {
     if (node.period.kind !== "latest") continue;
     const group = groupOf(node, node.period.period_type);
     if (incomplete !== undefined && !incompleteGroups.has(group)) incompleteGroups.set(group, incomplete);
@@ -126,7 +160,7 @@ export function sharedLatestPeriods(slots: ReadonlyArray<LatestSlot>, policy: Se
     keysByGroup.set(group, keys);
   }
   const resolved = new Map<LocalId, LatestPeriod>();
-  for (const { node } of slots) {
+  for (const { node } of shared) {
     if (node.period.kind !== "latest") continue;
     const group = groupOf(node, node.period.period_type);
     const incomplete = incompleteGroups.get(group);
@@ -153,6 +187,7 @@ export function selectInput(
   latestPeriod?: LatestPeriod,
 ): SlotSelection {
   if (page.truncated) return gap("scope_limit_exceeded");
+  if (isShareCount(node.metric_key)) return selectShareCount(node, candidates, policy);
   const requested = requestedCandidates(node, candidates);
   const shared = node.period.kind !== "latest" ? null
     : latestPeriod !== undefined ? latestPeriod
@@ -161,16 +196,49 @@ export function selectInput(
   const period = shared;
   const inPeriod = period === null ? requested : requested.filter((candidate) => periodKey(candidate) === period);
 
+  const eligible = eligibleAmong(inPeriod, policy.knowledge_cutoff);
+  if (typeof eligible === "string") return gap(eligible);
+  if (node.period.kind === "latest" && period === null) return gap("missing_input");
+  return chooseAmong(eligible, requested, policy);
+}
+
+/**
+ * An instant share count (rule 9): the count of the newest filing filed by
+ * the cutoff, when the node's period names that filing. Its filing date is
+ * the candidate's reported_at.
+ */
+function selectShareCount(node: ReportedMetricNode, candidates: ReadonlyArray<InputCandidate>, policy: SelectionPolicy): SlotSelection {
+  const cutoff = Date.parse(policy.knowledge_cutoff);
+  const filed = candidates.filter((candidate) =>
+    candidate.metric_key === node.metric_key && candidate.reported_at !== null && Date.parse(candidate.reported_at) <= cutoff);
+  const requested = filed.filter((candidate) => node.period.kind === "latest" || inRequestedPeriod(candidate, node.period));
+  const latestFiled = Math.max(...filed.map((candidate) => Date.parse(candidate.reported_at!)));
+  const latest = requested.filter((candidate) =>
+    Date.parse(candidate.reported_at!) === latestFiled && (node.period.kind !== "latest" || node.period.offset === 0));
+  if (latest.length === 0) return gap(requested.length > 0 ? "stale_input" : "missing_input");
+  const eligible = eligibleAmong(latest, policy.knowledge_cutoff);
+  if (typeof eligible === "string") return gap(eligible);
+  const selection = chooseAmong(eligible, candidates, policy);
+  if (selection.status === "selected" && freshnessAt(selection.input.candidate.period.end, policy.knowledge_cutoff, SHARE_COUNT_MAX_AGE_DAYS) === "stale") {
+    return gap("stale_input");
+  }
+  return selection;
+}
+
+/** The candidates eligible at the cutoff, or, when none is, the reason closest to eligibility. */
+function eligibleAmong(candidates: ReadonlyArray<InputCandidate>, cutoff: IsoDateTime): Eligible[] | ReasonCode {
   const eligible: Eligible[] = [];
   const exclusions = new Set<ReasonCode>();
-  for (const candidate of inPeriod) {
-    const verdict = eligibility(candidate, policy.knowledge_cutoff);
+  for (const candidate of candidates) {
+    const verdict = eligibility(candidate, cutoff);
     if ("eligible" in verdict) eligible.push(verdict.eligible);
     else if (verdict.reason !== null) exclusions.add(verdict.reason);
   }
-  if (eligible.length === 0) return gap(EXCLUSION_PRIORITY.find((reason) => exclusions.has(reason)) ?? "missing_input");
-  if (node.period.kind === "latest" && period === null) return gap("missing_input");
+  return eligible.length > 0 ? eligible : EXCLUSION_PRIORITY.find((reason) => exclusions.has(reason)) ?? "missing_input";
+}
 
+/** Rules 4 to 7 over a slot's eligible candidates; `requested` resolves what a correction corrects. */
+function chooseAmong(eligible: ReadonlyArray<Eligible>, requested: ReadonlyArray<InputCandidate>, policy: SelectionPolicy): SlotSelection {
   const current = withoutCorrected(eligible);
   if (policy.reporting_basis === "as_restated" && current.some((entry) => disclosureLevel(entry.candidate, requested) === "unverified")) {
     return gap("restatement_unverified");
@@ -221,6 +289,9 @@ export function boundBasis(selected: SelectedInput, history: SplitHistory | unde
   if (context.as_filed_on > referenceDate) return { status: "gap", reason_code: "incompatible_basis" };
   const definition = resolveMetricDefinition(metricKey);
   if (definition === null) return { status: "gap", reason_code: "unsupported_metric" };
+  if (definition.value_kind === "share_count" && splitNearCount(context.as_filed_on, selected.candidate.reported_at, history.splits)) {
+    return { status: "gap", reason_code: "incompatible_basis" };
+  }
   const restated = restateToReference({
     native: selected.numeric.native,
     value_kind: definition.value_kind,
@@ -231,6 +302,19 @@ export function boundBasis(selected: SelectedInput, history: SplitHistory | unde
     splits: history.splits,
   });
   return restated.ok ? { status: "restated", split_adjustment: restated.adjustment } : { status: "gap", reason_code: restated.reason };
+}
+
+/**
+ * Whether a split leaves the basis of a share count dated `countDate` unknown
+ * (rule 10): one within SHARE_COUNT_SPLIT_WINDOW_DAYS of it, or after it and
+ * on or before the filing date, which the filing's statements reflect and the
+ * count does not. A count with no filing date cannot rule that out.
+ */
+function splitNearCount(countDate: IsoDate, reportedAt: string | null, splits: ReadonlyArray<RecordedSplit>): boolean {
+  if (reportedAt === null) return true;
+  const from = dayNumber(countDate) - SHARE_COUNT_SPLIT_WINDOW_DAYS;
+  const to = Math.max(dayNumber(countDate) + SHARE_COUNT_SPLIT_WINDOW_DAYS, dayNumber(reportedAt.slice(0, 10)));
+  return splits.some((split) => dayNumber(split.execution_date) >= from && dayNumber(split.execution_date) <= to);
 }
 
 /** Whether binding could use the candidate at the cutoff: public by then, with proven precision, context, and unit, and an exact value. */

@@ -23,6 +23,7 @@ import { fencedTransaction, type FencedTx, type RunLease } from "./lease.ts";
 import type { FinancialEvidencePort, InputCandidate, SplitHistory, SqlExecutor } from "./ports.ts";
 import {
   boundBasis,
+  isShareCount,
   SELECTION_POLICY_VERSION,
   selectInput,
   sharedLatestPeriods,
@@ -115,13 +116,15 @@ async function readSlot(
 ): Promise<SlotRead> {
   if (context.candidate_budget <= 0) return { node, status: "gap", reason_code: "scope_limit_exceeded" };
   const slot = subjectSlot(context.plan, node);
+  // A share count is current only while it is the latest filing's, so every filing's is read.
+  const period = node.period.kind === "fiscal_period" && !isShareCount(node.metric_key) ? node.period : null;
   await client.query("savepoint evidence_read");
   const page = await context.evidence.listInputCandidates({
     authority: context.authority,
     subject: slot.subject_ref,
     metric_key: node.metric_key,
-    fiscal_year: node.period.kind === "fiscal_period" ? node.period.fiscal_year : null,
-    fiscal_period: node.period.kind === "fiscal_period" ? node.period.fiscal_period : null,
+    fiscal_year: period?.fiscal_year ?? null,
+    fiscal_period: period?.fiscal_period ?? null,
     limit: context.candidate_budget,
   });
   if (page.status === "error") {
