@@ -1,7 +1,4 @@
 import { buildDevApiDevServer } from "./dev-server.ts";
-import { removedModeFlagWarnings } from "../../financial-engine/src/readiness.ts";
-
-for (const warning of removedModeFlagWarnings(process.env, ["CHAT_FINANCIAL_MODE", "ANALYZE_FINANCIAL_MODE", "GRID_FINANCIAL_MODE", "THESIS_FINANCIAL_MODE"])) console.warn(`dev-api: ${warning}`);
 
 const host = process.env.DEV_API_HOST ?? "127.0.0.1";
 const port = Number(process.env.DEV_API_PORT ?? "4312");

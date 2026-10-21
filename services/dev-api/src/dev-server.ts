@@ -2,6 +2,7 @@ import type { Server } from "node:http";
 import { fileURLToPath } from "node:url";
 import { createDevApiServer } from "./http.ts";
 import { createDevApiRuntimeFromEnv } from "./runtime.ts";
+import { removedModeFlagWarnings } from "../../financial-engine/src/readiness.ts";
 
 const SERVICE_DIR = fileURLToPath(new URL("..", import.meta.url));
 
@@ -10,6 +11,7 @@ const SERVICE_DIR = fileURLToPath(new URL("..", import.meta.url));
 export async function buildDevApiDevServer(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<{ server: Server; close: () => Promise<void> }> {
+  for (const warning of removedModeFlagWarnings(env, ["ANALYZE_FINANCIAL_MODE", "GRID_FINANCIAL_MODE", "THESIS_FINANCIAL_MODE"])) console.warn(`dev-api: ${warning}`);
   // Relative DEV_API_*_MODULE settings resolve from services/dev-api, as they do
   // standalone, even when the one-process app (cwd services/app) builds this server.
   const { adapters, worker } = await createDevApiRuntimeFromEnv(env, SERVICE_DIR);
