@@ -4,6 +4,7 @@
 
 import { hydrateSubjectRef, type HydratedSubjectHandoff } from "../../resolver/src/flow.ts";
 import type { SubjectRef } from "../../shared/src/subject-ref.ts";
+import { companyListings } from "./fact-blocks.ts";
 import { parseResearchScope, type ResearchScope } from "./research-scope.ts";
 import type { ChatResolvedSubjectPreResolution } from "./subjects.ts";
 import type { QueryExecutor } from "../../shared/src/http.ts";
@@ -35,17 +36,28 @@ export async function loadPriorSubjects(
     [input.threadId],
   );
   const refs = Array.isArray(rows[0]?.subject_refs) ? rows[0].subject_refs : [];
-  const subjects: ChatResolvedSubjectPreResolution[] = [];
+  const handoffs: HydratedSubjectHandoff[] = [];
   for (const ref of refs) {
     if (!isCompanyRef(ref)) continue;
     try {
-      subjects.push(resolutionFromHandoff(await hydrate(db, ref)));
+      handoffs.push(await hydrate(db, ref));
     } catch (reason) {
       // A company that no longer hydrates is dropped; the turn still answers.
       console.warn("[chat] could not carry a previous subject forward", reason);
     }
   }
-  return subjects;
+  return (await withListingTickers(db, handoffs)).map(resolutionFromHandoff);
+}
+
+// An engine answer seals its companies as issuers, which hydrate with no
+// ticker; each takes its listing's, as answers name companies (#425).
+async function withListingTickers(db: QueryExecutor, handoffs: ReadonlyArray<HydratedSubjectHandoff>): Promise<HydratedSubjectHandoff[]> {
+  const issuerIds = handoffs.flatMap((handoff) => handoff.subject_ref.kind === "issuer" && handoff.display_labels.ticker === undefined ? [handoff.subject_ref.id] : []);
+  const listings = issuerIds.length === 0 ? new Map() : await companyListings(db, issuerIds, new Date().toISOString());
+  return handoffs.map((handoff) => {
+    const listing = handoff.subject_ref.kind === "issuer" ? listings.get(handoff.subject_ref.id) : undefined;
+    return listing?.listing_id ? { ...handoff, display_labels: { ...handoff.display_labels, ticker: listing.label } } : handoff;
+  });
 }
 
 // The latest research scope an answer saved (research-scope.ts), for a
