@@ -46,8 +46,20 @@ export type ParentPublication = Readonly<{
   block: FinancialAnswerBlock;
 }>;
 
-/** Persists the parent's artifact inside the finalization transaction, through `tx.client` only. */
+/**
+ * Persists the parent's artifact inside the finalization transaction, through
+ * `tx.client` only. A parent that no longer takes the publication throws
+ * ParentRefusedError.
+ */
 export type PersistParentArtifact = (tx: FencedTx, publication: ParentPublication) => Promise<void>;
+
+/** The parent moved on (it changed, changed owner, or lost its fence) and refuses this publication; the finalization rolls back. */
+export class ParentRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ParentRefusedError";
+  }
+}
 
 export type FinalizationRejection = "parent_version_mismatch" | "unit_not_ready" | "evidence_unavailable" | "verification_failed";
 

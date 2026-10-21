@@ -26,7 +26,14 @@ export type SqlExecutor = {
 };
 
 /** A pool that can also hand out one client for a transaction. */
-export type FinancialPool = SqlExecutor & { connect(): Promise<SqlExecutor & { release(): void }> };
+export type FinancialPool = SqlExecutor & { connect(): Promise<PooledClient> };
+
+/** A checked-out client; pg's reports a lost connection as an "error" event. Released with that error, the pool drops it. */
+export type PooledClient = SqlExecutor & {
+  release(error?: Error): void;
+  on?(event: "error", listener: (error: Error) => void): unknown;
+  off?(event: "error", listener: (error: Error) => void): unknown;
+};
 
 /** One authorized evidence candidate, as the engine sees it (numerics as exact text). */
 export type InputCandidate = Readonly<{

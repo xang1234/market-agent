@@ -25,7 +25,7 @@ test("analyze memo financial publication", { timeout: 300_000 }, async (t) => {
   const failSection = async (sectionId: string) => db.query(`
     create function fail_memo_section() returns trigger language plpgsql as $$
     begin
-      if new.section_id = '${sectionId}' then raise exception 'memo store unavailable'; end if;
+      if new.section_id = '${sectionId}' then raise exception 'memo store unavailable' using errcode = '58030'; end if;
       return new;
     end $$;
     create trigger fail_memo_section before insert on analyze_run_financial_sections for each row execute function fail_memo_section();`);

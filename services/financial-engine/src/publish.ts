@@ -8,10 +8,11 @@ import { randomUUID } from "node:crypto";
 import type { ExecutionLimits, FinancialPlanV1, FinancialRuntimeAuthority, LocalId } from "../../financial-core/src/index.ts";
 import type { SnapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
 import { executeRun, type ExecutionReport } from "./execute.ts";
-import { finalizeUnit, type FinalizationResult, type PersistParentArtifact } from "./finalize.ts";
-import type { RunLease } from "./lease.ts";
+import { finalizeUnit, ParentRefusedError, type FinalizationResult, type PersistParentArtifact } from "./finalize.ts";
+import { StaleLeaseError, type RunLease } from "./lease.ts";
 import type { FinancialEvidencePort, SqlExecutor } from "./ports.ts";
 import type { RunRecord } from "./run-record.ts";
+import { isTransientDatabaseError } from "./transaction.ts";
 
 export type PublishingDeps = Readonly<{
   authority: FinancialRuntimeAuthority;
@@ -27,6 +28,16 @@ export type DriveReport = Readonly<{
   finalized: ReadonlyArray<Readonly<{ unit_id: LocalId; result: FinalizationResult }>>;
   existing: number;
 }>;
+
+/**
+ * Whether a drive failed for a routine reason rather than a defect: the
+ * connection was lost (`lost`, as withPinnedClient heard it; pg reports it
+ * without a code), the lease lapsed, the parent refused, or the database had a
+ * transient fault. Each leaves nothing committed that a retry would repeat.
+ */
+export function isRoutinePublicationFailure(error: unknown, lost: Error | null): boolean {
+  return lost !== null || error instanceof StaleLeaseError || error instanceof ParentRefusedError || isTransientDatabaseError(error);
+}
 
 /** Drives a leased run to its end: execute unless already computed, then finalize every computed unit. */
 export async function driveLeasedRun(

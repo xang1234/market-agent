@@ -27,7 +27,7 @@ test("chat financial publication", { timeout: 300_000 }, async (t) => {
   const { db, pool, threadId } = await chatDatabase(t, "chat-fin-publish");
   const ask = (turnId: string) => chatHarness(pool, { model: revenueModel(["AAA"]) }).run({ threadId, userId: IDS.owner, turnId, userIntent: "Revenue for AAA" });
   const failMessageInsert = async () => db.query(`
-    create function fail_chat_message() returns trigger language plpgsql as $$ begin raise exception 'message store unavailable'; end $$;
+    create function fail_chat_message() returns trigger language plpgsql as $$ begin raise exception 'message store unavailable' using errcode = '58030'; end $$;
     create trigger fail_chat_message before insert on chat_messages for each row execute function fail_chat_message();`);
   const restoreMessageInsert = async () => db.query(`drop trigger fail_chat_message on chat_messages; drop function fail_chat_message();`);
 

@@ -10,7 +10,7 @@
 // evidence, never permission for extra network work or budget.
 
 import { createRuntimeAuthority, type FinancialRuntimeAuthority } from "../../financial-core/src/index.ts";
-import type { PersistParentArtifact } from "../../financial-engine/src/finalize.ts";
+import { ParentRefusedError, type PersistParentArtifact } from "../../financial-engine/src/finalize.ts";
 import { evaluateSavedRule, type SavedRuleDeps } from "../../financial-engine/src/saved-rule.ts";
 import { assertApprovedBrief, briefAuthorityVersion, numericalCriteria } from "./financial-criteria.ts";
 import { certifiedCriterionOutcome, hideOutcomes, outcomesWithHiddenInputs } from "./financial-outcomes.ts";
@@ -75,10 +75,10 @@ function requireLiveCampaign(lease: Lease, briefId: Id, candidateId: Id, clock: 
       [lease.run_id, lease.user_id, candidateId, clock().toISOString()],
     )).rows[0];
     if (!row || row.live !== true || Number(row.lease_epoch) !== lease.epoch || row.lease_owner !== lease.worker_id) {
-      throw new Error("the campaign lease is no longer current");
+      throw new ParentRefusedError("the campaign lease is no longer current");
     }
-    if (row.cancel_requested_at !== null || row.status !== "running") throw new Error("the campaign run is no longer running");
-    if (row.brief_id !== briefId) throw new Error("the campaign's approved brief changed");
-    if (row.state !== "researching") throw new Error("the candidate is no longer being researched");
+    if (row.cancel_requested_at !== null || row.status !== "running") throw new ParentRefusedError("the campaign run is no longer running");
+    if (row.brief_id !== briefId) throw new ParentRefusedError("the campaign's approved brief changed");
+    if (row.state !== "researching") throw new ParentRefusedError("the candidate is no longer being researched");
   };
 }
