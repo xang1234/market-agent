@@ -113,9 +113,9 @@ export type PriceObservation = Readonly<{
 
 export type PriceObservationRequest = Readonly<{ listing_id: string; as_of: IsoDateTime }>;
 
-/** The listing's observations with the newest trade time known by `as_of`, at the latest time any was known. */
+/** Each source's observations of the listing with its newest trade time known by `as_of`, at the latest time any was known. */
 export type PriceObservationPage =
-  | Readonly<{ status: "ok"; latest: ReadonlyArray<PriceObservation>; unknown_publication: boolean }>
+  | Readonly<{ status: "ok"; latest_by_source: ReadonlyArray<PriceObservation>; unknown_publication: boolean }>
   | Readonly<{ status: "error"; reason_code: "database_error" }>;
 
 /**
@@ -127,6 +127,6 @@ export interface FinancialEvidencePort {
   listInputCandidates(request: CandidateRequest): Promise<CandidatePage>;
   /** A subject's split history: its one common-stock listing active at `as_of` decides. */
   readSplitHistory(request: SplitHistoryRequest): Promise<SplitHistory>;
-  /** A listing's latest public share prices known by `as_of`, and whether one traded by then has no known time. */
+  /** Each public source's latest share prices of a listing known by `as_of`, and whether one traded by then has no known time. */
   readPriceObservations(request: PriceObservationRequest): Promise<PriceObservationPage>;
 }

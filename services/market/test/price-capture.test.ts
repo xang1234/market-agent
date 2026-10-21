@@ -102,16 +102,16 @@ test("price capture records exact tokens once and reads the latest known by a cu
   assert.deepEqual(await stored(), first);
 
   const latest = await loadLatestPriceObservations(db, LISTING.listing_id, "2024-06-11T15:00:00.000Z");
-  assert.deepEqual([latest.latest.map((row) => [row.price_text, row.observed_at]), latest.unknown_publication], [[["142.0700", "2024-06-10T20:00:00.000Z"]], false]);
-  assert.deepEqual((await loadLatestPriceObservations(db, LISTING.listing_id, "2024-06-11T14:59:59.999Z")).latest, []);
+  assert.deepEqual([latest.latest_by_source.map((row) => [row.price_text, row.observed_at]), latest.unknown_publication], [[["142.0700", "2024-06-10T20:00:00.000Z"]], false]);
+  assert.deepEqual((await loadLatestPriceObservations(db, LISTING.listing_id, "2024-06-11T14:59:59.999Z")).latest_by_source, []);
 
   // A revised close is a new row known later; a cutoff between the two reads the original.
   const revised = [bars[0]!, { start: "2024-06-10T04:00:00.000Z", c: "142.08" }];
   await capturePrices(db, fetcher(barsBody(revised, "r3"), "2024-06-11T16:00:00.000Z", snapshotBody("142.1", "1718136000000000000")), [LISTING.listing_id], { log: quiet, clock });
-  assert.deepEqual((await loadLatestPriceObservations(db, LISTING.listing_id, "2024-06-11T15:30:00.000Z")).latest.map((row) => row.price_text), ["142.0700"]);
+  assert.deepEqual((await loadLatestPriceObservations(db, LISTING.listing_id, "2024-06-11T15:30:00.000Z")).latest_by_source.map((row) => row.price_text), ["142.0700"]);
   // The snapshot's trade at 20:00Z was stamped after its response arrived at 16:00Z, so it has no known time.
   const later = await loadLatestPriceObservations(db, LISTING.listing_id, "2024-06-11T21:00:00.000Z");
-  assert.deepEqual([later.latest.map((row) => row.price_text), later.unknown_publication], [["142.08"], true]);
+  assert.deepEqual([later.latest_by_source.map((row) => row.price_text), later.unknown_publication], [["142.08"], true]);
 
   assert.deepEqual(await capturePrices(db, fetcher(barsBody(bars), "2024-06-11T15:00:00.000Z"), ["38000000-0000-4000-8000-00000000ffff"], { log: quiet, clock }), { failures: 1 });
 });

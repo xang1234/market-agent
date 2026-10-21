@@ -227,9 +227,9 @@ async function bindPriceSlot(
   await client.query(page.status === "error" ? "rollback to savepoint price_read" : "release savepoint price_read");
   if (page.status === "error") return gap(page.reason_code);
   const selection = selectPrice(page, history, policy);
-  const digest = priceCandidateSetDigest(node.node_id, page.latest);
-  if (selection.status === "gap") return gap(selection.reason_code, page.latest);
-  return outcome(boundPriceBinding(node, subjectSlot(plan, node), plan, selection, digest), page.latest);
+  const digest = priceCandidateSetDigest(node.node_id, page.latest_by_source);
+  if (selection.status === "gap") return gap(selection.reason_code, page.latest_by_source);
+  return outcome(boundPriceBinding(node, subjectSlot(plan, node), plan, selection, digest), page.latest_by_source);
 }
 
 /** Digest of the price observations seen for a slot. */

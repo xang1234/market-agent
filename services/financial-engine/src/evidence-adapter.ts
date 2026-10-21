@@ -56,10 +56,10 @@ export function createEvidenceFinancialPort(db: SqlExecutor): FinancialEvidenceP
 
     async readPriceObservations({ listing_id, as_of }: PriceObservationRequest): Promise<PriceObservationPage> {
       try {
-        const { latest, unknown_publication } = await loadLatestPriceObservations(db, listing_id, as_of);
+        const { latest_by_source, unknown_publication } = await loadLatestPriceObservations(db, listing_id, as_of);
         return {
           status: "ok",
-          latest: latest.map(({ observation_id, listing_id, source_id, source_kind, kind, price_text, currency, observed_at, known_at, body_sha256 }) =>
+          latest_by_source: latest_by_source.map(({ observation_id, listing_id, source_id, source_kind, kind, price_text, currency, observed_at, known_at, body_sha256 }) =>
             ({ observation_id, listing_id, source_id, source_class: sourceClassOf({ kind: source_kind, source_id }, "price"), kind, price_text, currency, observed_at, known_at, body_sha256 })),
           unknown_publication,
         };
