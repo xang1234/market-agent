@@ -9,6 +9,7 @@ test("the catalog offers every numerical column as deterministic and the questio
     { column_key: "latest_revenue", label: "Revenue (latest)", kind: "deterministic" },
     { column_key: "latest_eps_diluted", label: "EPS diluted (latest)", kind: "deterministic" },
     { column_key: "latest_market_cap", label: "Market Cap (latest)", kind: "deterministic" },
+    { column_key: "latest_pe_ratio", label: "P/E (latest FY diluted EPS)", kind: "deterministic" },
     { column_key: "latest_operating_cash_flow", label: "Operating cash flow (latest FY)", kind: "deterministic" },
     { column_key: "latest_net_income", label: "Net income (latest FY)", kind: "deterministic" },
     { column_key: "latest_total_liabilities", label: "Total liabilities (latest FY end)", kind: "deterministic" },

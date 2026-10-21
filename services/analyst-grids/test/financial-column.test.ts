@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
-import { IDS, seedCashResilience } from "../../financial-engine/test/db-fixtures.ts";
+import { IDS, NVDA, seedCashResilience, seedNvda } from "../../financial-engine/test/db-fixtures.ts";
+import { YAHOO_FINANCE_DEV_MARKET_SOURCE_ID } from "../../market/src/provider-sources.ts";
 import { validateColumnSpecs } from "../src/column-catalog.ts";
 import { parseFinancialColumnParams } from "../src/financial-column.ts";
 import { cellsByPosition, CUTOFF, gridDatabase, REVENUE_COLUMNS, settled, startRun, waitForRun } from "./financial-fixtures.ts";
@@ -11,6 +12,15 @@ test("numerical columns take a period relative to the run's cutoff; anything els
   assert.deepEqual(parseFinancialColumnParams("latest_revenue", { period_type: "quarterly", offset: 3 }), { period_type: "quarterly", offset: 3 });
   for (const params of [{ offset: -1 }, { offset: 1.5 }, { offset: 20 }, { period_type: "monthly" }, { metric_key: "net_income" }, [1], "latest"]) {
     assert.throws(() => validateColumnSpecs([{ column_key: "latest_revenue", params }]), /latest_revenue/u, JSON.stringify(params));
+  }
+});
+
+test("market cap and P/E are valued at the run's cutoff and take no period (#444)", () => {
+  assert.deepEqual(parseFinancialColumnParams("latest_pe_ratio", undefined), { period_type: "annual", offset: 0 });
+  for (const params of [{ offset: 1 }, { period_type: "quarterly" }]) {
+    for (const column_key of ["latest_market_cap", "latest_pe_ratio"]) {
+      assert.throws(() => validateColumnSpecs([{ column_key, params }]), /valued at the run's cutoff and takes no period/u, `${column_key} ${JSON.stringify(params)}`);
+    }
   }
 });
 
@@ -60,8 +70,13 @@ test("grid financial columns", { timeout: 300_000 }, async (t) => {
       assert.equal(cells[key]!.status, "missing_data", "a company without eligible data is an explicit gap");
       assert.ok(cells[key]!.financial_block, "the gap is certified like a value");
     }
+    // A company with no listing has no price: its market cap is a certified gap, never a stored figure.
     for (const key of ["0:c2", "1:c2"]) {
-      assert.deepEqual([cells[key]!.status, cells[key]!.coverage_flag, cells[key]!.snapshot_id], ["no_coverage", "market_cap_needs_price_share_timing_proof", null]);
+      const block = cells[key]!.financial_block as { snapshot_id: string; financial: { results: Array<{ presented: { reason_code?: string } }> } };
+      assert.deepEqual(
+        [cells[key]!.status, cells[key]!.coverage_flag, block.snapshot_id === cells[key]!.snapshot_id, block.financial.results.map((result) => result.presented.reason_code)],
+        ["missing_data", "blocked_by_dependency", true, ["blocked_by_dependency", "split_listing_unresolved", "missing_input"]],
+      );
     }
     assert.equal(detail.run.status, "partial", "gaps make the run partial, not only thrown errors");
     assert.deepEqual(detail.counts, { requested: 6, verified: 2, ok: 2, gap: 4, error: 0, pending: 0 });
@@ -81,6 +96,48 @@ test("grid financial columns", { timeout: 300_000 }, async (t) => {
     ]);
     assert.deepEqual(row(1).map((cell) => cell.coverage_flag), [...Array(5).fill("missing_input"), ...Array(3).fill("blocked_by_dependency")]);
     assert.ok(row(0).every((cell) => cell.financial_block && cell.snapshot_id === (cell.financial_block as { snapshot_id: string }).snapshot_id), "each cell is sealed and reloadable");
+  });
+
+  await t.test("NVDA's market cap and P/E cells seal the certified figures, and a Yahoo close never prices a cell (#444)", async () => {
+    await seedNvda(db);
+    // A company whose only price is a close from the Yahoo development feed.
+    const devFeed = { issuer: "4f000000-0000-4000-8000-0000000006a1", listing: "4f000000-0000-4000-8000-0000000006e1" };
+    await db.query(
+      `insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at) values ($1, 'yahoo_finance_dev_market', 'market_data', 'tertiary', 'free_dev', now())`,
+      [YAHOO_FINANCE_DEV_MARKET_SOURCE_ID],
+    );
+    await db.query(`insert into issuers (issuer_id, legal_name) values ($1, 'Dev Feed Corp')`, [devFeed.issuer]);
+    await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1, $1, 'common_stock')`, [devFeed.issuer]);
+    await db.query(`insert into listings (listing_id, instrument_id, mic, ticker, trading_currency, timezone) values ($1, $2, 'XNAS', 'DEVF', 'USD', 'America/New_York')`, [devFeed.listing, devFeed.issuer]);
+    await db.query(`insert into listing_split_coverage (listing_id, checked_at, source_id) values ($1, '2024-06-10T12:00:00Z', $2)`, [devFeed.listing, YAHOO_FINANCE_DEV_MARKET_SOURCE_ID]);
+    await db.query(
+      `insert into price_observations (listing_id, source_id, kind, price_text, currency, observed_at, known_at, fetched_at, body_sha256)
+       values ($1, $2, 'session_close', '98.10', 'USD', '2024-06-07T20:00:00Z', '2024-06-07T20:15:00Z', '2024-06-07T20:15:00Z', $3)`,
+      [devFeed.listing, YAHOO_FINANCE_DEV_MARKET_SOURCE_ID, "d".repeat(64)],
+    );
+
+    const { runId } = await startRun(pool, {
+      asOf: NVDA.cutoff,
+      issuers: [NVDA.issuer, devFeed.issuer],
+      columns: [{ column_key: "latest_market_cap" }, { column_key: "latest_pe_ratio" }],
+    });
+    const cells = cellsByPosition(await waitForRun(pool, runId, settled));
+    type Block = { snapshot_id: string; financial: { labels: Record<string, { text: string }>; results: Array<{ measure_label_id: string; presented: { value?: string; reason_code?: string } }> } };
+    const shown = (cell: (typeof cells)[string]) => {
+      const block = cell.financial_block as Block;
+      assert.equal(block.snapshot_id, cell.snapshot_id, "the cell is sealed under its own certificate");
+      return [cell.status, cell.display?.value, block.financial.results.map((result) =>
+        [block.financial.labels[result.measure_label_id]!.text, result.presented.value ?? result.presented.reason_code])];
+    };
+    assert.deepEqual(shown(cells["0:c0"]!), ["ok", "USD 2,956,800,000,000.00", [
+      ["Market capitalization (share price × shares outstanding)", "2956800000000"], ["Share price", "120"], ["Shares outstanding", "24640000000"],
+    ]]);
+    assert.deepEqual(shown(cells["0:c1"]!), ["ok", "100.59x", [
+      ["P/E ratio (share price / latest fiscal year diluted EPS)", "100.58675607711651299245599329421626152556580050293"], ["Share price", "120"], ["EPS (diluted)", "1.193"],
+    ]]);
+    assert.deepEqual(shown(cells["1:c0"]!), ["missing_data", "—", [
+      ["Market capitalization (share price × shares outstanding)", "blocked_by_dependency"], ["Share price", "source_class_not_allowed"], ["Shares outstanding", "missing_input"],
+    ]]);
   });
 
   await t.test("latest-period columns honor the pinned cutoff", async () => {
