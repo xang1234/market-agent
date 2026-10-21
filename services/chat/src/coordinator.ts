@@ -195,7 +195,6 @@ export type ChatAssistantMessagePersistence = (
   input: ChatAssistantMessagePersistenceInput,
 ) => Promise<ChatReadMessage>;
 
-// The message is saved under the turn's answer id unless the input gives its own.
 export type ChatAssistantMessageCommit = (
   input: Omit<ChatAssistantMessagePersistenceInput, "message_id"> & { message_id?: string },
 ) => Promise<ChatCommittedMessage>;

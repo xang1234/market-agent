@@ -27,7 +27,6 @@ test("an unready engine stops the server instead of leaving metric questions on 
   await assert.rejects(() => lane.assertReady(), /verified finance is not ready for chat: schema: relation financial_runs is missing/u);
 });
 
-/** A planning model that declines every request with `reason`, and counts calls. */
 function declining(reason: string): PlanningModel & { calls: number } {
   const model = (async () => {
     model.calls += 1;

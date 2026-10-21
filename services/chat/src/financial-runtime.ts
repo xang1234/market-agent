@@ -598,7 +598,6 @@ function persistAssistantMessage(
     const note = [
       ...(turn.notFound.length === 0 ? [] : [`No company matched ${labelList(turn.notFound)}.`]),
       ...(turn.carried.length === 0 ? [] : [`${labelList(turn.carried)} ${turn.carried.length > 1 ? "are" : "is"} carried from the previous answer.`]),
-      // With no reading, nothing tells what else the question asks for.
       ...(reading === null ? [UNCHECKED] : missing.length === 0 ? [] : [`Not covered by this answer: ${missing.join("; ")}.`]),
     ].join(" ");
     const blocks = [
@@ -692,7 +691,6 @@ function figuresOf(nodes: ReadonlyMap<string, OperationNode>): (node: OperationN
   return figures;
 }
 
-// The figures a plan's outputs show.
 function shownFigures(plan: FinancialPlanV1): OperationNode[] {
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
   const figures = figuresOf(nodes);
@@ -744,7 +742,6 @@ export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1, lab
     .filter((metric) => !offMetrics.has(metric.metric_key))
     .map((metric) => [metric.metric_key, metric])).values()];
   const qualified = reading.metrics.filter((metric) => metric.base !== undefined && !offMetrics.has(metric.metric_key));
-  // What a company's figures (shown) and the operations over them (reached) leave out.
   const missing = (shown: ReadonlyArray<OperationNode>, reached: ReadonlyArray<OperationNode>): string[] => {
     const margins = shown.filter((node): node is MarginNode =>
       node.operation === "gross_margin" || node.operation === "operating_margin" || node.operation === "net_margin");
