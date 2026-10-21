@@ -35,16 +35,16 @@ function request(overrides: Partial<FinancialRequest> & Pick<FinancialRequest, "
   return { authority: authorityFor(), plan: ready, evidence: createEvidenceFinancialPort, persistParent: async () => {}, ...overrides };
 }
 
-/** A pool whose client finds no earlier run, then fails `error` on the reservation; a dead client fails every later query too. */
-function failingReservation(error: unknown, connection: "alive" | "dead"): FinancialPool {
-  let calls = 0;
-  const query = async () => {
-    calls += 1;
-    if (calls === 2) throw error;
-    if (calls > 2 && connection === "dead") throw new Error("Client has encountered a connection error and is not queryable");
-    return { rows: [] };
+/** A pool whose client finds no earlier run and fails `error` when the reservation begins; a lost connection is also reported as pg reports it. */
+function failingReservation(error: unknown, connection: "alive" | "lost"): FinancialPool {
+  let onError: ((error: Error) => void) | undefined;
+  const query = async (text: string) => {
+    if (text !== "begin") return { rows: [] };
+    if (connection === "lost") onError?.(new Error("Connection terminated unexpectedly"));
+    throw error;
   };
-  return { query, connect: async () => ({ query, release() {} }) };
+  const client = { query, release() {}, on: (_event: "error", listener: (error: Error) => void) => { onError = listener; }, off: () => { onError = undefined; } };
+  return { query, connect: async () => client };
 }
 
 const sqlError = (code: string) => Object.assign(new Error(`sqlstate ${code}`), { code });
@@ -76,19 +76,21 @@ test("planning failures", async (t) => {
 });
 
 test("which database faults are routine", async (t) => {
-  const routine: ReadonlyArray<readonly [string, unknown, "alive" | "dead"]> = [
+  const routine: ReadonlyArray<readonly [string, unknown, "alive" | "lost"]> = [
     ["a serialization failure", sqlError("40001"), "alive"],
     ["a deadlock", sqlError("40P01"), "alive"],
     ["a lock timeout", sqlError("55P03"), "alive"],
-    ["too many connections", sqlError("53300"), "alive"],
+    ["a full disk", sqlError("53100"), "alive"],
     ["a storage fault", sqlError("58030"), "alive"],
-    ["a lost connection, reported without a code", new Error("Connection terminated unexpectedly"), "dead"],
+    ["a lost connection, reported without a code", new Error("Client has encountered a connection error and is not queryable"), "lost"],
   ];
   for (const [name, error, connection] of routine) {
-    await t.test(`${name} is publication_failed, and nothing is logged`, async (t) => {
+    await t.test(`${name} is publication_failed with a warning, and no error is logged`, async (t) => {
       const errors = t.mock.method(console, "error", () => {});
+      const warnings = t.mock.method(console, "warn", () => {});
       assert.deepEqual(await publishRequest(failingReservation(error, connection), request({ request_key: "grid-1" })), { status: "gap", reason: "publication_failed" });
       assert.equal(errors.mock.callCount(), 0);
+      assert.deepEqual(warnings.mock.calls.map((call) => call.arguments), [["[financial-engine] publication stopped for chat request grid-1; a retry or recovery finishes it", error]]);
     });
   }
   const defects: ReadonlyArray<readonly [string, unknown]> = [
@@ -97,6 +99,7 @@ test("which database faults are routine", async (t) => {
     ["a missing file", sqlError("58P01")],
     ["an undefined column", sqlError("42703")],
     ["an exception a trigger raised", sqlError("P0001")],
+    ["an uncoded error on a live connection", new Error("unexpected row shape")],
   ];
   for (const [name, error] of defects) {
     await t.test(`${name} is logged and reaches the caller`, async (t) => {
@@ -107,7 +110,7 @@ test("which database faults are routine", async (t) => {
   }
 });
 
-test("publication failures", { skip: !dockerAvailable(), timeout: 240_000 }, async (t) => {
+test("publication failures", { skip: !dockerAvailable(), timeout: 300_000 }, async (t) => {
   const db = await engineDatabase(t, "fin-request");
   const pool = await connectedPool(t, databaseUrl(db), { max: 4 });
   const sql = (statement: string): PersistParentArtifact => async (tx) => { await tx.client.query(statement); };
@@ -167,22 +170,31 @@ test("publication failures", { skip: !dockerAvailable(), timeout: 240_000 }, asy
     assert.equal(published(await publishRequest(pool, request({ request_key: key }))), "published");
   });
 
-  await t.test("a connection that dies during finalization: publication_failed, nothing logged, and recovery after the lease lapses publishes", async (t) => {
+  const killBackend = `perform pg_terminate_backend(pg_backend_pid())`;
+  await t.test("a connection that dies during finalization: publication_failed, no error logged, and a retry publishes", async (t) => {
     const errors = t.mock.method(console, "error", () => {});
+    t.mock.method(console, "warn", () => {});
     const key = randomUUID();
-    const ended: unknown[] = [];
-    const watched: FinancialPool = {
-      query: (text, values) => pool.query(text, values),
-      connect: async () => {
-        const client = await pool.connect();
-        client.on("error", (error) => ended.push(error));
-        return client;
-      },
-    };
-    assert.deepEqual(await publishRequest(watched, request({ request_key: key, persistParent: sql(`select pg_terminate_backend(pg_backend_pid())`) })), { status: "gap", reason: "publication_failed" });
-    assert.equal(ended.length, 1, "the backend ended the connection");
+    assert.deepEqual(await publishRequest(pool, request({ request_key: key, persistParent: sql(`do $$ begin ${killBackend}; end $$`) })), { status: "gap", reason: "publication_failed" });
     assert.equal(errors.mock.callCount(), 0);
-    await db.query(`update financial_runs set lease_expires_at = now() - interval '1 second' where request_key = $1`, [key]);
+    assert.equal(published(await publishRequest(pool, request({ request_key: key }))), "published");
+  });
+
+  await t.test("a connection that dies while the run executes: publication_failed, no error logged, and a retry publishes", async (t) => {
+    const errors = t.mock.method(console, "error", () => {});
+    t.mock.method(console, "warn", () => {});
+    const key = randomUUID();
+    await db.query(`
+      create function kill_unit_backend() returns trigger language plpgsql as $$ begin ${killBackend}; return new; end $$;
+      create trigger kill_unit_backend before insert on financial_run_units for each row execute function kill_unit_backend();`);
+    let outcome;
+    try {
+      outcome = await publishRequest(pool, request({ request_key: key }));
+    } finally {
+      await db.query(`drop trigger kill_unit_backend on financial_run_units; drop function kill_unit_backend();`);
+    }
+    assert.deepEqual(outcome, { status: "gap", reason: "publication_failed" });
+    assert.equal(errors.mock.callCount(), 0);
     assert.equal(published(await publishRequest(pool, request({ request_key: key }))), "published");
   });
 
@@ -201,23 +213,34 @@ test("publication failures", { skip: !dockerAvailable(), timeout: 240_000 }, asy
     });
   }
 
-  await t.test("the recovery worker logs a defect it hits again, with the parent kind and run", async (t) => {
-    const errors = t.mock.method(console, "error", () => {});
-    const key = randomUUID();
-    const defect = new TypeError("Cannot read properties of null (reading 'blocks')");
-    await publishRequest(pool, request({ request_key: key, persistParent: async () => { throw defect; } })).catch(() => {});
-    const runId = (await db.query(`select run_id::text from financial_runs where request_key = $1`, [key])).rows[0].run_id;
-    const worker = createFinancialWorker({
-      pool,
-      worker_id: "recovery-1",
-      ttl_ms: 60_000,
-      evidence: createEvidenceFinancialPort,
-      parents: { chat_thread: { authority: async () => authorityFor(), persistParent: async () => { throw defect; } } },
-      interval_ms: 1_000,
-      max_runs_per_tick: 10,
+  const recoveryFailure = [
+    ["a defect it hits again is logged as an error", new TypeError("Cannot read properties of null (reading 'blocks')"), "error"],
+    ["a parent's refusal is logged as a warning", new ParentRefusedError("the chat thread no longer belongs to the run's owner"), "warn"],
+  ] as const;
+  for (const [name, failure, level] of recoveryFailure) {
+    await t.test(`the recovery worker: ${name}, with the parent kind and run`, async (t) => {
+      const logged = { error: t.mock.method(console, "error", () => {}), warn: t.mock.method(console, "warn", () => {}) };
+      const key = randomUUID();
+      const persistParent = async () => { throw failure; };
+      await publishRequest(pool, request({ request_key: key, persistParent })).catch(() => {});
+      const runId = (await db.query(`select run_id::text from financial_runs where request_key = $1`, [key])).rows[0].run_id;
+      const worker = createFinancialWorker({
+        pool,
+        worker_id: "recovery-1",
+        ttl_ms: 60_000,
+        evidence: createEvidenceFinancialPort,
+        parents: { chat_thread: { authority: async () => authorityFor(), persistParent } },
+        interval_ms: 1_000,
+        max_runs_per_tick: 10,
+      });
+      logged.error.mock.resetCalls();
+      logged.warn.mock.resetCalls();
+      assert.deepEqual((await worker.tick()).filter((entry) => entry.run_id === runId), [{ run_id: runId, status: "error", reason: failure.name }]);
+      const about = (calls: typeof logged.error.mock.calls) => calls.filter((call) => String(call.arguments[0]).includes(runId)).map((call) => call.arguments);
+      const message = level === "error"
+        ? `[financial-engine] recovery failed for chat_thread run ${runId}`
+        : `[financial-engine] recovery stopped for chat_thread run ${runId}; a later tick retries it`;
+      assert.deepEqual({ error: about(logged.error.mock.calls), warn: about(logged.warn.mock.calls) }, { error: level === "error" ? [[message, failure]] : [], warn: level === "warn" ? [[message, failure]] : [] });
     });
-    errors.mock.resetCalls();
-    assert.deepEqual((await worker.tick()).filter((entry) => entry.run_id === runId), [{ run_id: runId, status: "error", reason: "TypeError" }]);
-    assert.deepEqual(errors.mock.calls.map((call) => call.arguments), [[`[financial-engine] recovery failed for chat_thread run ${runId}`, defect]]);
-  });
+  }
 });
