@@ -89,7 +89,7 @@ export type LoadedPriceObservation = Readonly<{
 }>;
 
 /** A restated input's subject, resolved to its one listing at the cutoff the way binding resolved it. */
-export type LoadedSplitHistory = Readonly<{ subject_id: string; history: SubjectSplitHistory }>;
+export type LoadedSplitHistory = Readonly<{ subject_ref: Readonly<{ kind: "issuer" | "listing"; id: string }>; history: SubjectSplitHistory }>;
 
 export type LoadedComputation = Readonly<{
   computation_id: string;
@@ -198,16 +198,20 @@ export async function loadFinancialUnitRecords(db: QueryExecutor, claim: Financi
   )).rows;
 
   // A bound payload is checked, never trusted: a subject id that is not a uuid resolves to nothing.
-  const restatedSubjects = (await db.query<{ subject_id: string | null }>(
-    `select distinct i.bound_payload->'subject_ref'->>'id' as subject_id
+  // Each subject resolves as the kind it was bound as, as binding resolved it.
+  const restatedSubjects = (await db.query<{ subject_kind: string | null; subject_id: string | null }>(
+    `select distinct i.bound_payload->'subject_ref'->>'kind' as subject_kind, i.bound_payload->'subject_ref'->>'id' as subject_id
        from financial_run_inputs i
       where i.run_id = $1 and i.binding_status = 'bound' and i.bound_payload ? 'split_adjustment'
-      order by 1`,
+      order by 1, 2`,
     [claim.run_id],
-  )).rows.flatMap(({ subject_id }) => (subject_id !== null && UUID.test(subject_id) ? [subject_id] : []));
+  )).rows.flatMap(({ subject_kind, subject_id }) =>
+    (subject_kind === "issuer" || subject_kind === "listing") && subject_id !== null && UUID.test(subject_id)
+      ? [{ kind: subject_kind, id: subject_id } as const]
+      : []);
   const split_histories: LoadedSplitHistory[] = [];
-  for (const subject_id of restatedSubjects) {
-    split_histories.push({ subject_id, history: await loadSubjectSplitHistory(db, { kind: "issuer", id: subject_id }, runRow.knowledge_cutoff) });
+  for (const subject_ref of restatedSubjects) {
+    split_histories.push({ subject_ref, history: await loadSubjectSplitHistory(db, subject_ref, runRow.knowledge_cutoff) });
   }
 
   const computations = (await db.query<LoadedComputation>(

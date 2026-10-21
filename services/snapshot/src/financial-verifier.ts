@@ -187,7 +187,7 @@ export function verifyFinancialUnit(records: FinancialUnitRecords, unitId: Local
   const closureNodes = new Set(closure.node_ids);
   const evidence = new Map(records.evidence.map((row) => [row.fact_id, row]));
   const observations = new Map(records.price_observations.map((row) => [row.observation_id, row]));
-  const splitHistories = new Map(records.split_histories.map((row) => [row.subject_id, row.history]));
+  const splitHistories = new Map(records.split_histories.map((row) => [subjectKey(row.subject_ref), row.history]));
   const failures: FinancialVerifierFailure[] = [];
   for (const [slot, binding] of bindings.value) {
     if (!closureNodes.has(slot) || binding.status !== "bound") continue;
@@ -406,7 +406,7 @@ function ineligibility(
     return "context_changed";
   }
   if (adjustment === undefined) return null;
-  return splitBasisChange(input.subject_ref.id, input.metric.metric_key, input.numeric.native_value, adjustment, splitHistories, plan);
+  return splitBasisChange(subjectKey(input.subject_ref), input.metric.metric_key, input.numeric.native_value, adjustment, splitHistories, plan);
 }
 
 /**
@@ -430,22 +430,26 @@ function priceIneligibility(
     return "price_observation_changed";
   }
   if (Date.parse(input.known_at) > Date.parse(plan.time.knowledge_cutoff)) return "not_public_at_cutoff";
-  return splitBasisChange(input.subject_ref.id, input.metric.metric_key, input.numeric.value, input.split_adjustment, splitHistories, plan);
+  return splitBasisChange(subjectKey(input.subject_ref), input.metric.metric_key, input.numeric.value, input.split_adjustment, splitHistories, plan);
 }
 
 /**
  * Whether the listing the subject resolves to at the cutoff, with its current
  * splits and zone, still restates the bound value exactly as it was bound.
  */
+function subjectKey(subject: Readonly<{ kind: string; id: string }>): string {
+  return `${subject.kind}:${subject.id}`;
+}
+
 function splitBasisChange(
-  subjectId: string,
+  subject: string,
   metricKey: string,
   native: string,
   adjustment: SplitAdjustmentV2,
   splitHistories: ReadonlyMap<string, SubjectSplitHistory>,
   plan: FinancialPlanV1,
 ): "listing_changed" | "splits_changed" | null {
-  const history = splitHistories.get(subjectId);
+  const history = splitHistories.get(subject);
   if (history?.status === "gap" && history.reason_code === "split_history_missing") return "splits_changed";
   if (history?.status !== "ok" || history.listing_id !== adjustment.listing_id) return "listing_changed";
   const referenceDate = splitReferenceDate(plan.time.knowledge_cutoff, history.timezone);
