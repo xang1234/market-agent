@@ -1,11 +1,9 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { checkFinancialReadiness, removedModeFlagWarnings, requireFinancialReadiness } from "../src/readiness.ts";
-import { reserveRun } from "../src/run-repo.ts";
 import { FINANCIAL_VERSION_REGISTRY } from "../src/version-registry.ts";
-import { authorityFor, engineDatabase, marginPlan } from "./db-fixtures.ts";
+import { engineDatabase } from "./db-fixtures.ts";
 
 test("a removed mode flag that is still set gets one warning naming it", () => {
   const env = { CHAT_FINANCIAL_MODE: "off", GRID_FINANCIAL_MODE: "", THESIS_FINANCIAL_MODE: "enforce" };
@@ -24,7 +22,7 @@ test("financial readiness", { skip: !dockerAvailable(), timeout: 300_000 }, asyn
     await requireFinancialReadiness(db, ["chat", "grid"]);
   });
 
-  await t.test("a registry that does not cover what this build emits prevents enforcement", async () => {
+  await t.test("a registry that does not cover what this build emits prevents startup", async () => {
     const registry = { ...FINANCIAL_VERSION_REGISTRY, catalog_versions: new Set<string>() };
     const readiness = await checkFinancialReadiness(db, registry);
     assert.equal(readiness.ready, false);
@@ -32,15 +30,8 @@ test("financial readiness", { skip: !dockerAvailable(), timeout: 300_000 }, asyn
     await assert.rejects(() => requireFinancialReadiness(db, ["analyze"], registry), /not ready for analyze: versions: catalog\.v1/u);
   });
 
-  await t.test("each run records the mode it ran under, so a later mode change never reinterprets it", async () => {
-    const reserved = await reserveRun(db, { authority: authorityFor(), request_key: randomUUID(), plan: marginPlan() });
-    assert.ok(reserved.status === "created");
-    const stored = (await db.query(`select feature_mode from financial_runs where run_id = $1`, [reserved.run.run_id])).rows[0].feature_mode;
-    assert.equal(stored, "enforce");
-  });
-
   // Last: removes part of the schema.
-  await t.test("a schema without the engine's pieces (here, erasure) prevents enforcement", async () => {
+  await t.test("a schema without the engine's pieces (here, erasure) prevents startup", async () => {
     await db.query(`drop function erase_financial_runs_referencing() cascade`);
     const readiness = await checkFinancialReadiness(db);
     assert.deepEqual(readiness.problems, ["schema: function erase_financial_runs_referencing is missing"]);

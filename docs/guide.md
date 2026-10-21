@@ -40,7 +40,7 @@ A finished single-company memo offers **Monitor this thesis**. It starts a new a
 
 ## Analyst Grids
 
-A grid puts companies in rows and metrics or a research question in columns. Pick a universe: manual tickers, a saved screen, a watchlist, a portfolio, or one company's peers. Then pick columns. The numerical columns (revenue, diluted EPS, cash flow, net income, balance sheet, and ratios) come from the financial engine, and a cell it cannot verify shows as a gap. Market cap is always a gap for now. A **Question** column has a model read each company's documents and answer one question.
+A grid puts companies in rows and metrics or a research question in columns. Pick a universe: manual tickers, a saved screen, a watchlist, a portfolio, or one company's peers. Then pick columns. The numerical columns (revenue, diluted EPS, cash flow, net income, balance sheet, and ratios) come from the financial engine. A cell it cannot fully verify shows a dash, and one it refuses shows **error**. Market cap always shows a dash for now. A **Question** column has a model read each company's documents and answer one question.
 
 ## Agents
 

@@ -51,9 +51,9 @@ dependency-free and pass the web compiler options.
 ## 2. Numerical producer inventory
 
 Legend for **Disposition**: *engine* — migrate to the verified engine; *unsupported* —
-under enforcement returns an explicit unsupported gap until the engine covers it;
+returns an explicit unsupported gap until the engine covers it;
 *narrative* — stays non-certified and visibly labelled; *transport* — must carry only
-committed values after enforcement.
+committed values.
 
 ### 2.1 Shared inputs and publication
 
@@ -64,7 +64,7 @@ committed values after enforcement.
 | Evidence fact repo | `services/evidence/src/fact-repo.ts` | Fact writes/reads | Strict input repo + attestations | T08 |
 | Snapshot verifier | `services/snapshot/src/snapshot-verifier.ts` | Verifies refs/metadata; no numeric values or operands | Add DB-backed financial recomputation | T14 |
 | Snapshot sealer / manifest staging / seal input | `services/snapshot/src/{snapshot-sealer,manifest-staging,seal-input}.ts` | Seals manifests | Certificate insertion in same transaction | T14, T15 |
-| Block schema + web renderers | `spec/finance_research_block_schema.json`, `web/src/blocks/*` (`MetricRow`, `MetricsComparison`, `RevenueBars`, `Table`, `LabelValueCell`, `SeriesChart`, `LineChart`, `PriceTargetRange`, `AnalystConsensus`, `EpsSurprise`, `PerfComparison`) | Render model/fact values as provided | Add `financial_answer`; legacy blocks labelled legacy under enforcement | T16, T27 |
+| Block schema + web renderers | `spec/finance_research_block_schema.json`, `web/src/blocks/*` (`MetricRow`, `MetricsComparison`, `RevenueBars`, `Table`, `LabelValueCell`, `SeriesChart`, `LineChart`, `PriceTargetRange`, `AnalystConsensus`, `EpsSurprise`, `PerfComparison`) | Render model/fact values as provided | Add `financial_answer`; legacy blocks labelled legacy | T16, T27 |
 
 ### 2.2 Chat
 
@@ -202,10 +202,10 @@ on the narrative path until #398. The shared foundations are in place:
 - **T29:** readiness. No surface has a mode flag, so chat, the dev API,
   analyst grids, and the Discovery worker each refuse to start until
   `checkFinancialReadiness` passes. A removed `*_FINANCIAL_MODE` variable that
-  is still set logs a startup warning (`removedModeFlagWarnings`). Each run
-  records `feature_mode`, which is always `enforce`. That check covers the tables, columns, views, and functions the engine, its
-  evidence adapter, and erasure depend on, and a version registry covering
-  everything this build emits.
+  is still set logs a startup warning (`removedModeFlagWarnings`). New runs
+  record `feature_mode` as `enforce`. That check covers the tables, columns,
+  views, and functions the engine, its evidence adapter, and erasure depend
+  on, and a version registry covering everything this build emits.
   `createDevApiRuntimeFromEnv` returns the worker to its caller, and
   `worker.stop({ timeoutMs })` bounds shutdown. CI sets `REQUIRE_DOCKER=1`, so
   Docker-backed suites fail rather than skip, and runs the `scripts/` contract
@@ -229,8 +229,8 @@ Facts stored before that carry no proof and bind as
 precision proof and a context each, so they certify at the golden cutoff; a
 database trigger refuses that proof method on any other source (migration
 0063). A cutoff earlier than the fetch needs an archive
-proof, which no producer makes yet. Such units cannot be certified; with a lane
-enforced, those values appear as declared gaps rather than numbers.
+proof, which no producer makes yet. Such units cannot be certified, so those values
+appear as declared gaps rather than numbers.
 
 ### Wave 3 plan deviations
 

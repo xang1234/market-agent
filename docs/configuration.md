@@ -61,7 +61,7 @@ An `anthropic` channel calls the Claude Messages API directly. It turns prompt c
 
 The financial engine plans a calculation, binds it to stored facts, and computes it with exact fractions. Anything it cannot verify appears as a gap, never as prose.
 
-Chat questions that name a metric, Analyze memos, thesis conditions and Discovery criteria always use the engine, so chat and dev-api check readiness at startup.
+Chat questions that name a metric, Analyze memos, grid columns, thesis conditions and Discovery criteria always use the engine.
 
 The engine checks each SEC fact's proof. Facts stored before 2026-10-16 have none and show as gaps until you run the SEC proof backfill described in [Development](development.md#data-mode).
 
