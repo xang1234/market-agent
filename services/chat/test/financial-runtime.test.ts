@@ -5,6 +5,7 @@ import { connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { databaseUrl, IDS, ORIGINAL_REVENUE } from "../../financial-engine/test/db-fixtures.ts";
 import type { ChatAnalystToolRuntime } from "../src/coordinator.ts";
+import { financialMessageId } from "../src/chat-ids.ts";
 import { createChatFinancialRuntime, isFinancialRequest, SCOPE_METRICS } from "../src/financial-runtime.ts";
 import { METRIC_CATALOG_V1, OPERATION_REGISTRY } from "../../financial-core/src/index.ts";
 import { proposedMetric } from "../src/research-scope.ts";
@@ -364,6 +365,47 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     const harness = chatHarness(pool, { model: revenueModel(["CCC"]), researchScope: scopeOver as never });
     assert.deepEqual(completed((await harness.run({ ...base, userIntent: "Revenue for CCC" })).events).financial_gap, { reason_code: "verification_failed" });
     assert.deepEqual((harness.persisted.at(-1)!.research_scope as { companies: unknown }).companies, [{ issuer_id: MISSING_ISSUER, label: "CCC" }]);
+  });
+
+  await t.test("a retry that finds its run failed declines with its companies, unless another attempt answered the turn meanwhile (#425)", async () => {
+    // The thread is another user's, so the first attempt reserves the run and cannot publish; the run then fails.
+    const failedTurn = async () => {
+      const input = { threadId: randomUUID(), userId: IDS.owner, turnId: randomUUID(), userIntent: "Revenue for AAA" };
+      await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [input.threadId, IDS.other]);
+      await chatHarness(pool, { model: revenueModel(["AAA"]) }).run(input);
+      await db.query(`update financial_runs set execution_state = 'failed', failure_code = 'internal_error' where parent_id = $1`, [input.threadId]);
+      await db.query(`update chat_threads set user_id = $2 where thread_id = $1`, [input.threadId, IDS.owner]);
+      return input;
+    };
+    const retry = async (input: Awaited<ReturnType<typeof failedTurn>>, through: unknown = pool) => {
+      const harness = chatHarness(through as never, { model: revenueModel(["AAA"]), researchScope: scopeOver as never });
+      const done = completed((await harness.run(input)).events);
+      return [done.financial_gap, (harness.persisted.at(-1)!.research_scope as { companies: unknown } | undefined)?.companies];
+    };
+    assert.deepEqual(await retry(await failedTurn()), [{ reason_code: "run_failed" }, [{ issuer_id: IDS.issuerA, label: "AAA" }]]);
+    // The answer lands after this attempt checked for it, as when another attempt finishes the run it waits on.
+    const raced = await failedTurn();
+    const { rows: [snapshot] } = await db.query<{ snapshot_id: string }>(
+      `insert into snapshots (subject_refs, as_of, basis, normalization, allowed_transforms)
+       values (jsonb_build_array(jsonb_build_object('kind', 'issuer', 'id', $1::text)), now(), 'unadjusted', 'raw', '{}')
+       returning snapshot_id::text as snapshot_id`,
+      [IDS.issuerA],
+    );
+    let checked = false;
+    const racing = {
+      query: (text: string, values?: unknown[]) => {
+        if (!checked && text.startsWith("select 1 from chat_messages")) {
+          checked = true;
+          return db.query(
+            `insert into chat_messages (message_id, thread_id, role, snapshot_id, blocks, content_hash) values ($1::uuid, $2::uuid, 'assistant', $3::uuid, '[]'::jsonb, 'answer')`,
+            [financialMessageId(raced.threadId, raced.turnId), raced.threadId, snapshot!.snapshot_id],
+          ).then(() => ({ rows: [] }));
+        }
+        return pool.query(text, values);
+      },
+      connect: () => pool.connect(),
+    };
+    assert.deepEqual(await retry(raced, racing), [{ reason_code: "run_failed" }, undefined]);
   });
 
   await t.test("narrative turns keep the analyst path", async () => {
