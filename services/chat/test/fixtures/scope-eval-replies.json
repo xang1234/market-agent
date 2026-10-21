@@ -8,7 +8,7 @@
     },
     {
       "match": "Question: \"How have NVDA's operating margins trended?\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":\"margin\"}],\"asks\":[\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_income\"]}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":\"margin\"}],\"asks\":[\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_margin\"]}"
     },
     {
       "match": "Question: \"What changed in NVDA's gross margin in Q1 fiscal 2026?\"",
@@ -20,7 +20,7 @@
     },
     {
       "match": "Question: \"Show AMD operating margins QoQ\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":\"margin\"}],\"asks\":[\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_income\"]}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":\"margin\"}],\"asks\":[\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_margin\"]}"
     },
     {
       "match": "Question: \"Compare AMD gross margin with last quarter\"",
@@ -228,7 +228,7 @@
     },
     {
       "match": "Question: \"Why did AMD's operating margin turn negative in Q2 2025?\"",
-      "text": "{\"metrics\":[],\"asks\":[\"explains\",\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_income\"]}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":\"margin\"}],\"asks\":[\"explains\",\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_margin\"]}"
     },
     {
       "match": "Question: \"Compare AMD and NVDA revenue in Q2 2025\"",

@@ -11,8 +11,7 @@
     "question": "How have NVDA's operating margins trended?",
     "companies": ["NVDA"],
     "prior": null,
-    "expected": {"route":"trend","reads":"trend","peers":false,"segments":false,"margin_trend":true,"margins":true,"metrics":["income_statement"],"guidance":false,"explains":false,"income_items":["operating_margin"],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false},
-    "accept": {"income_items":{"value":["operating_income"],"reason":"Recorded before operating_margin was an item (#425): re-record with npm run scope:eval."}}
+    "expected": {"route":"trend","reads":"trend","peers":false,"segments":false,"margin_trend":true,"margins":true,"metrics":["income_statement"],"guidance":false,"explains":false,"income_items":["operating_margin"],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false}
   },
   {
     "id": 3,
@@ -33,8 +32,7 @@
     "question": "Show AMD operating margins QoQ",
     "companies": ["AMD"],
     "prior": null,
-    "expected": {"route":"trend","reads":"trend","peers":false,"segments":false,"margin_trend":true,"margins":true,"metrics":["income_statement"],"guidance":false,"explains":false,"income_items":["operating_margin"],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false},
-    "accept": {"income_items":{"value":["operating_income"],"reason":"Recorded before operating_margin was an item (#425): re-record with npm run scope:eval."}}
+    "expected": {"route":"trend","reads":"trend","peers":false,"segments":false,"margin_trend":true,"margins":true,"metrics":["income_statement"],"guidance":false,"explains":false,"income_items":["operating_margin"],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false}
   },
   {
     "id": 6,
@@ -405,8 +403,7 @@
     "question": "Why did AMD's operating margin turn negative in Q2 2025?",
     "companies": ["AMD"],
     "prior": null,
-    "expected": {"route":"derived_margin","reads":"derived_margin","peers":false,"segments":false,"margin_trend":false,"margins":true,"metrics":["income_statement"],"guidance":false,"explains":true,"income_items":["operating_margin"],"fiscal_year":2025,"fiscal_quarter":"Q2 2025","price_window":null,"benchmark":false},
-    "accept": {"income_items":{"value":["operating_income"],"reason":"Recorded before operating_margin was an item (#425): re-record with npm run scope:eval."}}
+    "expected": {"route":"derived_margin","reads":"derived_margin","peers":false,"segments":false,"margin_trend":false,"margins":true,"metrics":["income_statement"],"guidance":false,"explains":true,"income_items":["operating_margin"],"fiscal_year":2025,"fiscal_quarter":"Q2 2025","price_window":null,"benchmark":false}
   },
   {
     "id": 58,
