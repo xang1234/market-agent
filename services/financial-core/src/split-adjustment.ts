@@ -94,8 +94,9 @@ export function restateToReference(input: {
  * rounded, as NVDA's FY2025 10-K presents FY2024 diluted EPS of 11.93 as 1.19
  * after the 10-for-1 split, so the restated earlier figure must round to the
  * later one at the finer of their decimal places, a whole number to the unit.
- * A value half way between rounds either way. Null when either figure is not
- * a decimal or splits cannot restate this kind of value.
+ * A value half way between rounds either way. The earlier figure may be a
+ * stored value's text, which can run longer than a source token may. Null when
+ * either figure is not a decimal or splits cannot restate this kind of value.
  */
 export function explainedBySplits(input: {
   earlier: Readonly<{ value: string; as_filed_on: IsoDate }>;
@@ -103,7 +104,7 @@ export function explainedBySplits(input: {
   value_kind: MetricValueKind;
   splits: ReadonlyArray<RecordedSplit>;
 }): boolean | null {
-  const earlier = parseFinancialDecimal(input.earlier.value);
+  const earlier = parseDerivedDecimalText(input.earlier.value);
   const later = parseFinancialDecimal(input.later.value);
   const split = splitFactor(input.value_kind, input.earlier.as_filed_on, input.later.as_filed_on, input.splits);
   if (!earlier.ok || !later.ok || !split.ok) return null;

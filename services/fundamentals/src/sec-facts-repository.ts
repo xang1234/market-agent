@@ -27,7 +27,6 @@ import {
 } from "./sec-edgar.ts";
 import { resolveMetricDefinition } from "../../financial-core/src/definitions.ts";
 import type { ShareBasis } from "../../financial-core/src/evidence-vocabulary.ts";
-import { compareExactDecimals, parseFinancialDecimal } from "../../financial-core/src/exact-decimal.ts";
 import { explainedBySplits, splitHistoryCovers } from "../../financial-core/src/split-adjustment.ts";
 import { loadSubjectSplitHistory, type SubjectSplitHistory } from "../../market/src/split-history.ts";
 import { checkTokenAgainstStoredValue, recordFactPrecisionAttestation } from "../../evidence/src/financial-attestations.ts";
@@ -1244,7 +1243,7 @@ async function laterRelation(
   splitsOn: (date: string) => Promise<SubjectSplitHistory>,
 ): Promise<LaterRelation | null> {
   if (previous.as_filed_on === null || later.as_filed_on === null) {
-    return sameDecimal(later.value, previous.value) === false ? "economic_restatement" : null;
+    return checkTokenAgainstStoredValue(later.value, previous.value).status === "value_mismatch" ? "economic_restatement" : null;
   }
   const history = await splitsOn(later.as_filed_on);
   if (history.status !== "ok" || !splitHistoryCovers(history.checked_at, later.as_filed_on, history.timezone)) return "unverified_restatement";
@@ -1334,13 +1333,6 @@ async function storeLaterStatement(
     disclosure_relation: relation,
     source_context_ref: locator,
   });
-}
-
-/** Numeric equality of two decimal texts, or null when either is not one. */
-function sameDecimal(left: string, right: string): boolean | null {
-  const a = parseFinancialDecimal(left);
-  const b = parseFinancialDecimal(right);
-  return a.ok && b.ok ? compareExactDecimals(a.value, b.value) === 0 : null;
 }
 
 /** Binds the exact token to its location in the SEC response. */
