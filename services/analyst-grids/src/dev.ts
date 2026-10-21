@@ -3,7 +3,9 @@ import { createAnalystGridsServer } from "./http.ts";
 import { createUniverseResolverDeps } from "./universe-wiring.ts";
 import { createReaderColumnDepsFromEnv } from "./reader-wiring.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
-import { requireFinancialReadiness } from "../../financial-engine/src/readiness.ts";
+import { removedModeFlagWarnings, requireFinancialReadiness } from "../../financial-engine/src/readiness.ts";
+
+for (const warning of removedModeFlagWarnings(process.env, ["GRID_FINANCIAL_MODE"])) console.warn(`analyst-grids: ${warning}`);
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL is required");

@@ -163,17 +163,10 @@ test("the schema repair stays within the parent's model budget", async () => {
   assert.equal(none.outcome, "unsupported");
 });
 
-test("parent limits and feature mode are enforced from server authority", async () => {
+test("parent limits are enforced from server authority", async () => {
   const tooMany = await planFinancialRequest(context({ parent_limits: { max_subjects: 2 } }), "Compare revenue", scripted(revenueProposal([0, 1, 2, 3])));
   assert.equal(tooMany.outcome, "unsupported");
   assert.match(tooMany.outcome === "unsupported" ? tooMany.reason : "", /scope_limit_exceeded/u);
-  const off = context();
-  const disabled = await planFinancialRequest(
-    { ...off, authority: createRuntimeAuthority({ ...off.authority, feature: { ...off.authority.feature, mode: "off" } }) },
-    "Compare revenue",
-    scripted(revenueProposal([0, 1, 2, 3])),
-  );
-  assert.equal(disabled.outcome, "unsupported");
 });
 
 test("deterministic plans need no model and match an equivalent model plan semantically", async () => {

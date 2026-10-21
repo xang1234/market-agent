@@ -23,7 +23,7 @@ import {
 import { bindPlanInputs } from "./bind-inputs.ts";
 import { buildUnitCheckpoint, checkpointUnit } from "./checkpoints.ts";
 import { fencedTransaction, StaleLeaseError, type RunLease } from "./lease.ts";
-import { authorizePlan } from "./plan-authority.ts";
+import { checkPlanLimits } from "./plan-limits.ts";
 import type { FinancialEvidencePort, SqlExecutor } from "./ports.ts";
 import { transitionRun } from "./run-repo.ts";
 import { declareUnits } from "./unit-repo.ts";
@@ -46,8 +46,8 @@ export async function executeRun(input: ExecuteRunInput): Promise<ExecutionRepor
   const { client, lease, plan } = input;
   // Limits are enforced before any evidence is acquired. Evidence reads run
   // sequentially on the run's pinned client: one evidence task in flight.
-  const authorized = authorizePlan(plan, input.authority, input.parent_limits);
-  if (!authorized.ok) return fail(client, lease, authorized.reason_code);
+  const withinLimits = checkPlanLimits(plan, input.parent_limits);
+  if (!withinLimits.ok) return fail(client, lease, withinLimits.reason_code);
   try {
     const { bindings } = await bindPlanInputs(input);
     await fencedTransaction(client, lease, (tx) => declareUnits(tx, plan));
