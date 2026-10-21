@@ -4,9 +4,10 @@
 // and every bound fact is joined with its *current* evidence state — source
 // access, invalidation, the exact source version, and whether the precision
 // and publication proofs it was bound with are still the current ones — as is
-// every listing an input was restated with, for its current splits and zone.
+// the listing each restated input's subject resolves to now, with its splits and zone.
 // Snapshot reads these tables directly; it never imports the engine.
 
+import { loadSubjectSplitHistory, type SubjectSplitHistory } from "../../market/src/split-history.ts";
 import type { QueryExecutor } from "../../shared/src/http.ts";
 import { toSealFactRow, type FactRow } from "./seal-input.ts";
 
@@ -71,13 +72,8 @@ export type LoadedEvidence = Readonly<{
   }> | null;
 }>;
 
-/** The current split history and time zone of a listing a bound input was restated with. */
-export type LoadedSplitHistory = Readonly<{
-  listing_id: string;
-  timezone: string | null;
-  checked_at: string | null;
-  splits: ReadonlyArray<Readonly<{ execution_date: string; split_from: string; split_to: string }>>;
-}>;
+/** A restated input's subject, resolved to its one listing at the cutoff the way binding resolved it. */
+export type LoadedSplitHistory = Readonly<{ subject_id: string; history: SubjectSplitHistory }>;
 
 export type LoadedComputation = Readonly<{
   computation_id: string;
@@ -172,24 +168,18 @@ export async function loadFinancialUnitRecords(db: QueryExecutor, claim: Financi
     [claim.run_id],
   )).rows;
 
-  // Listing ids are compared as text: a bound payload is checked, never trusted to be a valid uuid.
-  const split_histories = (await db.query<LoadedSplitHistory>(
-    `with restated as (
-       select distinct i.bound_payload->'split_adjustment'->>'listing_id' as listing_id
-         from financial_run_inputs i
-        where i.run_id = $1 and i.binding_status = 'bound' and i.bound_payload ? 'split_adjustment'
-     )
-     select r.listing_id, l.timezone,
-            to_char(c.checked_at at time zone 'UTC', ${ISO_UTC}) as checked_at,
-            coalesce((select jsonb_agg(jsonb_build_object('execution_date', s.execution_date::text, 'split_from', s.split_from::text,
-                                                          'split_to', s.split_to::text) order by s.execution_date)
-                        from listing_splits s where s.listing_id::text = r.listing_id), '[]'::jsonb) as splits
-       from restated r
-       left join listings l on l.listing_id::text = r.listing_id
-       left join listing_split_coverage c on c.listing_id::text = r.listing_id
-      order by r.listing_id`,
+  // A bound payload is checked, never trusted: a subject id that is not a uuid resolves to nothing.
+  const restatedSubjects = (await db.query<{ subject_id: string | null }>(
+    `select distinct i.bound_payload->'subject_ref'->>'id' as subject_id
+       from financial_run_inputs i
+      where i.run_id = $1 and i.binding_status = 'bound' and i.bound_payload ? 'split_adjustment'
+      order by 1`,
     [claim.run_id],
-  )).rows;
+  )).rows.flatMap(({ subject_id }) => (subject_id !== null && UUID.test(subject_id) ? [subject_id] : []));
+  const split_histories: LoadedSplitHistory[] = [];
+  for (const subject_id of restatedSubjects) {
+    split_histories.push({ subject_id, history: await loadSubjectSplitHistory(db, { kind: "issuer", id: subject_id }, runRow.knowledge_cutoff) });
+  }
 
   const computations = (await db.query<LoadedComputation>(
     `select computation_id::text, node_id, formula_id, operation_version, numeric_policy_version, definition_versions, input_refs, output_hash

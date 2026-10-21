@@ -249,4 +249,37 @@ test("as-filed share figures bound on a split basis", { timeout: 300_000 }, asyn
       await db.query(`update listings set timezone = 'America/New_York' where listing_id = $1`, [listingOf(IDS.nvda)]);
     }
   });
+
+  await t.test("a listing the issuer no longer resolves to at the cutoff withholds the seal", async () => {
+    const sealAfter = async (change: () => Promise<unknown>) => {
+      const plan = sharePlan(IDS.nvda, "2025-01-01T12:00:00.000Z");
+      const { lease } = await readyRun(db, plan, authority);
+      await change();
+      const [client] = await pinnedClients(t, db, 1);
+      const sealed = await finalizeUnit({ client: client!, lease, authority, unit_id: "share_unit", snapshot_id: randomUUID(), persistParent: async () => {} });
+      return sealed.status === "rejected" && sealed.failures.map((failure) => [failure.reason_code, failure.details.reason]);
+    };
+    const changed = [["financial_input_ineligible", "listing_changed"], ["financial_input_ineligible", "listing_changed"]];
+    const second = listingOf(IDS.nvda, 2);
+    const addSecond = () => db.query(
+      `insert into listings (listing_id, instrument_id, mic, ticker, trading_currency, timezone) values ($1, $2, 'XNYS', 'NVD2', 'USD', 'America/New_York')`,
+      [second, IDS.nvda],
+    );
+    const restore = async () => {
+      await db.query(`delete from listing_split_coverage where listing_id = $1`, [second]);
+      await db.query(`delete from listings where listing_id = $1`, [second]);
+      await db.query(`update listings set active_to = null where listing_id = $1`, [listingOf(IDS.nvda)]);
+    };
+    try {
+      assert.deepEqual(await sealAfter(addSecond), changed, "a second common-stock listing makes the listing unresolved");
+      await restore();
+      assert.deepEqual(await sealAfter(async () => {
+        await addSecond();
+        await db.query(`insert into listing_split_coverage (listing_id, checked_at, source_id) values ($1, '2026-10-01T12:00:00Z', $2)`, [second, IDS.polygon]);
+        await db.query(`update listings set active_to = '2024-12-01T00:00:00Z' where listing_id = $1`, [listingOf(IDS.nvda)]);
+      }), changed, "the issuer's one listing at the cutoff is now another one");
+    } finally {
+      await restore();
+    }
+  });
 });
