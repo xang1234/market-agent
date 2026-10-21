@@ -46,8 +46,8 @@ import {
   type FinancialSealClaim,
   type FinancialUnitRecords,
   type LoadedEvidence,
-  type LoadedSplitHistory,
 } from "./financial-verifier-loader.ts";
+import type { SubjectSplitHistory } from "../../market/src/split-history.ts";
 import type { JsonObject } from "./manifest-staging.ts";
 import type { QueryExecutor } from "../../shared/src/http.ts";
 
@@ -181,7 +181,7 @@ export function verifyFinancialUnit(records: FinancialUnitRecords, unitId: Local
 
   const closureNodes = new Set(closure.node_ids);
   const evidence = new Map(records.evidence.map((row) => [row.fact_id, row]));
-  const splitHistories = new Map(records.split_histories.map((row) => [row.listing_id, row]));
+  const splitHistories = new Map(records.split_histories.map((row) => [row.subject_id, row.history]));
   const failures: FinancialVerifierFailure[] = [];
   for (const [slot, binding] of bindings.value) {
     if (!closureNodes.has(slot) || binding.status !== "bound") continue;
@@ -363,7 +363,7 @@ function bindingsFor(plan: FinancialPlanV1, records: FinancialUnitRecords): Bind
 function ineligibility(
   input: BoundFinancialInputV1,
   evidence: LoadedEvidence | undefined,
-  splitHistories: ReadonlyMap<string, LoadedSplitHistory>,
+  splitHistories: ReadonlyMap<string, SubjectSplitHistory>,
   plan: FinancialPlanV1,
 ): string | null {
   if (!evidence) return "fact_unavailable";
@@ -387,13 +387,20 @@ function ineligibility(
     || context.fiscal_calendar_version !== input.period.calendar_version) {
     return "context_changed";
   }
-  if (adjustment !== undefined && !restatedAsBound(input, adjustment, splitHistories.get(adjustment.listing_id), plan)) return "splits_changed";
-  return null;
+  if (adjustment === undefined) return null;
+  const history = splitHistories.get(input.subject_ref.id);
+  if (history?.status === "gap" && history.reason_code === "split_history_missing") return "splits_changed";
+  if (history?.status !== "ok" || history.listing_id !== adjustment.listing_id) return "listing_changed";
+  return restatedAsBound(input, adjustment, history, plan) ? null : "splits_changed";
 }
 
 /** Whether the listing's current split history and zone still restate the input exactly as it was bound. */
-function restatedAsBound(input: BoundFinancialInputV1, adjustment: SplitAdjustmentV2, history: LoadedSplitHistory | undefined, plan: FinancialPlanV1): boolean {
-  if (history?.checked_at == null || history.timezone === null) return false;
+function restatedAsBound(
+  input: BoundFinancialInputV1,
+  adjustment: SplitAdjustmentV2,
+  history: Extract<SubjectSplitHistory, { status: "ok" }>,
+  plan: FinancialPlanV1,
+): boolean {
   const referenceDate = splitReferenceDate(plan.time.knowledge_cutoff, history.timezone);
   if (!splitHistoryCovers(history.checked_at, referenceDate, history.timezone)) return false;
   const definition = resolveMetricDefinition(input.metric.metric_key);
