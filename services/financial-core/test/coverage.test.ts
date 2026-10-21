@@ -90,7 +90,7 @@ function reportedEvaluator(plan: FinancialPlanV1, overrides: Record<string, Beha
     const slot = plan.subjects.members.find((member) => member.slot_id === node.subject_slot)!;
     const spec: InputSpec = { metric: node.metric_key, value: behavior.value, ...FY2023 };
     const input = { ...boundInput(spec), subject_ref: slot.subject_ref };
-    return operandFromBoundInput(input, node, { slot, definition_version: `${node.metric_key}.v1`, knowledge_cutoff: KNOWLEDGE_CUTOFF });
+    return operandFromBoundInput(input, node, { slot, definition_version: `${node.metric_key}.v1`, knowledge_cutoff: KNOWLEDGE_CUTOFF, reporting_basis: "as_reported" });
   };
   return { evaluator, calls };
 }

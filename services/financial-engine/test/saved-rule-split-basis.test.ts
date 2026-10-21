@@ -12,7 +12,7 @@ const unused = async (): Promise<never> => {
   throw new Error("a rejected rule reads no evidence");
 };
 const pool: FinancialPool = { query: unused, connect: unused };
-const evidence = (): FinancialEvidencePort => ({ listInputCandidates: unused, readSplitHistory: unused });
+const evidence = (): FinancialEvidencePort => ({ listInputCandidates: unused, readSplitHistory: unused, readPriceObservations: unused });
 
 async function translated(rule: Pick<SavedMetricRule, "metric_key" | "unit" | "period_kind">): Promise<string> {
   const translation = await translateSavedRule(

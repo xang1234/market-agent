@@ -203,11 +203,17 @@ jobs:
           cache: npm
           cache-dependency-path: |
             db/package-lock.json
+            services/fundamentals/package-lock.json
             services/market/package-lock.json
 
       # The split repository test imports the shared db/test Docker harness.
       - name: Install db deps (needed by market integration harness)
         working-directory: db
+        run: npm ci
+
+      # Price capture parses Polygon's responses with the fundamentals lossless JSON parser.
+      - name: Install fundamentals deps (needed by price capture)
+        working-directory: services/fundamentals
         run: npm ci
 
       - name: Install market deps

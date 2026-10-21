@@ -1,13 +1,25 @@
 // Evidence-backed FinancialEvidencePort. Authorization happens in the
 // Evidence repository's SQL; this adapter only maps its rows into the engine's
 // candidate shape and classifies database failures as execution errors. Split
-// histories are public market data, read from the market service's tables.
+// histories and share prices are public market data, read from the market
+// service's tables.
 
 import type { FinancialUnit, FiscalPeriod } from "../../financial-core/src/index.ts";
 import { FISCAL_PERIODS } from "../../financial-core/src/index.ts";
 import { listFinancialInputCandidates, type FinancialInputCandidate } from "../../evidence/src/financial-input-repo.ts";
+import { loadLatestPriceObservations } from "../../market/src/price-observations.ts";
 import { loadSubjectSplitHistory } from "../../market/src/split-history.ts";
-import type { CandidatePage, CandidateRequest, FinancialEvidencePort, InputCandidate, SplitHistory, SplitHistoryRequest, SqlExecutor } from "./ports.ts";
+import type {
+  CandidatePage,
+  CandidateRequest,
+  FinancialEvidencePort,
+  InputCandidate,
+  PriceObservationPage,
+  PriceObservationRequest,
+  SplitHistory,
+  SplitHistoryRequest,
+  SqlExecutor,
+} from "./ports.ts";
 
 export function createEvidenceFinancialPort(db: SqlExecutor): FinancialEvidencePort {
   return {
@@ -38,6 +50,21 @@ export function createEvidenceFinancialPort(db: SqlExecutor): FinancialEvidenceP
         return { ...history, splits: history.splits.map(({ execution_date, split_from, split_to }) => ({ execution_date, split_from, split_to })) };
       } catch (error) {
         if (isDatabaseError(error)) return { status: "gap", reason_code: "database_error" };
+        throw error;
+      }
+    },
+
+    async readPriceObservations({ listing_id, as_of }: PriceObservationRequest): Promise<PriceObservationPage> {
+      try {
+        const { latest, unknown_publication } = await loadLatestPriceObservations(db, listing_id, as_of);
+        return {
+          status: "ok",
+          latest: latest.map(({ observation_id, listing_id, source_id, kind, price_text, currency, observed_at, known_at, body_sha256 }) =>
+            ({ observation_id, listing_id, source_id, kind, price_text, currency, observed_at, known_at, body_sha256 })),
+          unknown_publication,
+        };
+      } catch (error) {
+        if (isDatabaseError(error)) return { status: "error", reason_code: "database_error" };
         throw error;
       }
     },

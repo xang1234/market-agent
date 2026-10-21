@@ -27,7 +27,7 @@ import {
   type LocalId,
 } from "../../financial-core/src/index.ts";
 import { lockEvidenceForPublication } from "../../evidence/src/financial-access-lock.ts";
-import { loadUnitBoundFacts } from "../../snapshot/src/financial-verifier-loader.ts";
+import { loadUnitBoundFacts, loadUnitBoundPriceSources } from "../../snapshot/src/financial-verifier-loader.ts";
 import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier.ts";
 import { buildFinancialSealInput } from "../../snapshot/src/seal-input.ts";
 import { sealSnapshotInTransaction, type SnapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
@@ -95,8 +95,9 @@ export async function finalizeUnit(input: {
     if (unit.state !== "computed") return rejected("unit_not_ready");
 
     const facts = await loadUnitBoundFacts(tx.client, run.run_id, unitId);
+    const priceSources = await loadUnitBoundPriceSources(tx.client, run.run_id, unitId);
     const locked = await lockEvidenceForPublication(tx.client, {
-      source_ids: facts.map((fact) => fact.source_id),
+      source_ids: [...facts.map((fact) => fact.source_id), ...priceSources],
       fact_ids: facts.map((fact) => fact.fact_id),
     });
     if (locked.missing_source_ids.length > 0 || locked.missing_fact_ids.length > 0) return rejected("evidence_unavailable");
@@ -108,6 +109,7 @@ export async function finalizeUnit(input: {
       knowledgeCutoff: run.knowledge_cutoff,
       subjectRefs: plan.subjects.members.map((member) => member.subject_ref),
       boundFacts: facts,
+      boundPriceSources: priceSources,
     }));
     if (!sealed.ok) return rejected("verification_failed", sealed.verification.failures);
     const financial = sealed.verification.financial;

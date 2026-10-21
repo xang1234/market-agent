@@ -115,14 +115,15 @@ export type ClosureInput = Readonly<{
   binding_status: "bound" | "gap";
   bound_payload: unknown;
   gap_reason: string | null;
-  /** Whether the fact, its source, and its publication document are still available to the owner. */
+  /** Whether the fact, its source, and its publication document, or the price and its source, are still available to the owner. */
   available: boolean;
 }>;
 
 /**
  * The bound inputs of the given slots with their current availability. A fact
  * that was invalidated or deleted, a source the owner can no longer read, or a
- * publication document that was erased makes the input unavailable.
+ * publication document that was erased makes the input unavailable; so does a
+ * price whose source the owner can no longer read.
  */
 export async function readClosureInputs(db: SqlExecutor, ownerUserId: string, runId: string, slots: ReadonlyArray<LocalId>): Promise<ReadonlyArray<ClosureInput>> {
   return (await db.query<ClosureInput>(
@@ -133,10 +134,14 @@ export async function readClosureInputs(db: SqlExecutor, ownerUserId: string, ru
               and not exists (
                 select 1 from source_publication_attestations pa join documents d on d.document_id = pa.document_id
                  where pa.attestation_id = i.publication_attestation_id and d.deleted_at is not null)
+            ) or (
+              po.observation_id is not null and (ps.user_id is null or ps.user_id = $3)
             ) as available
        from financial_run_inputs i
        left join facts f on f.fact_id = i.fact_id
        left join sources s on s.source_id = f.source_id
+       left join price_observations po on po.observation_id = i.price_observation_id
+       left join sources ps on ps.source_id = po.source_id
       where i.run_id = $1 and i.input_slot = any($2::text[])
       order by i.input_slot`,
     [runId, [...slots], ownerUserId],

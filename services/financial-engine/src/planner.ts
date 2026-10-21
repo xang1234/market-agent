@@ -16,6 +16,7 @@ import {
   hashCanonical,
   METRIC_CATALOG_V1,
   OPERATION_REGISTRY,
+  PLANNABLE_METRICS,
   validateFinancialPlan,
   type ExecutionLimits,
   type FinancialPlanV1,
@@ -272,7 +273,7 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
       clarification: clarification(
         "metric",
         question,
-        [...METRIC_CATALOG_V1.values()].map((definition) => ({ choice_id: definition.metric_key, label: `${definition.label} (${definition.definition_version})` })),
+        PLANNABLE_METRICS.map((definition) => ({ choice_id: definition.metric_key, label: `${definition.label} (${definition.definition_version})` })),
       ),
     };
   }
@@ -411,7 +412,7 @@ function isApprovedOperation(kind: unknown): kind is OperationKind {
 }
 
 function systemPrompt(): string {
-  const metrics = [...METRIC_CATALOG_V1.keys()].join(", ");
+  const metrics = PLANNABLE_METRICS.map((definition) => definition.metric_key).join(", ");
   const operations = Object.keys(OPERATION_REGISTRY).join(", ");
   return [
     "You translate a financial research request into a JSON plan draft. Reply with one JSON object only.",

@@ -15,6 +15,7 @@ import type {
   MetricKey,
   PeriodType,
   PrecisionClass,
+  PriceObservationKind,
   PublicationTiming,
   RecordedSplit,
   ShareBasis,
@@ -91,6 +92,26 @@ export type SplitHistory =
   | Readonly<{ status: "ok"; listing_id: string; timezone: string; checked_at: IsoDateTime; splits: ReadonlyArray<RecordedSplit> }>
   | Readonly<{ status: "gap"; reason_code: "split_listing_unresolved" | "split_history_missing" | "database_error" }>;
 
+/** A stored share price as a provider response stated it: its exact token, and when it traded and was known. */
+export type PriceObservation = Readonly<{
+  observation_id: string;
+  listing_id: string;
+  source_id: string;
+  kind: PriceObservationKind;
+  price_text: string;
+  currency: string;
+  observed_at: IsoDateTime;
+  known_at: IsoDateTime;
+  body_sha256: string;
+}>;
+
+export type PriceObservationRequest = Readonly<{ listing_id: string; as_of: IsoDateTime }>;
+
+/** The listing's observations with the newest trade time known by `as_of`, at the latest time any was known. */
+export type PriceObservationPage =
+  | Readonly<{ status: "ok"; latest: ReadonlyArray<PriceObservation>; unknown_publication: boolean }>
+  | Readonly<{ status: "error"; reason_code: "database_error" }>;
+
 /**
  * Authorized evidence access. Implementations apply owner, channel, source
  * deletion/entitlement, invalidation, and promotion rules before returning
@@ -100,4 +121,6 @@ export interface FinancialEvidencePort {
   listInputCandidates(request: CandidateRequest): Promise<CandidatePage>;
   /** A subject's split history: its one common-stock listing active at `as_of` decides. */
   readSplitHistory(request: SplitHistoryRequest): Promise<SplitHistory>;
+  /** A listing's latest public share prices known by `as_of`, and whether one traded by then has no known time. */
+  readPriceObservations(request: PriceObservationRequest): Promise<PriceObservationPage>;
 }

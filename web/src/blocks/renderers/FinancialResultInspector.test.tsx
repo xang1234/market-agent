@@ -55,6 +55,26 @@ test('the inspector shows what the certificate covers, with every number exactly
   assert.ok(!/<a\b/u.test(html), 'no link is built from a source locator or id')
 })
 
+test('a bound share price shows the observation it came from and the split restating it', () => {
+  const price = inspection({
+    payload: { kind: 'value', value: '120', unit: { kind: 'currency_per_share', currency: 'USD' }, exact: true, rounding: null },
+    definitions: [{ metric_key: 'share_price', definition_version: 'share_price.v1' }],
+    inputs: [{
+      input_slot: 'px', status: 'bound', observation_id: 'o0000000-0000-4000-8000-000000000001', listing_id: 'l0000000-0000-4000-8000-000000000001',
+      source: { source_id: 'src-polygon', body_sha256: 'd'.repeat(64) }, metric: { metric_key: 'share_price', definition_version: 'share_price.v1' },
+      value: '1200', split_adjustment: { reference_date: '2024-06-10', factor: { numerator: '10', denominator: '1' } }, unit: { kind: 'currency_per_share', currency: 'USD' },
+      observation: { kind: 'session_close', observed_at: '2024-06-07T20:00:00.000Z', known_at: '2024-06-07T20:15:00.000Z' },
+    }],
+  })
+  const html = renderToStaticMarkup(<FinancialResultInspector load={{ kind: 'ready', inspection: price }} />)
+  for (const expected of [
+    '>1200<', 'currency per share (USD)', 'share_price share_price.v1', 'session close at 2024-06-07T20:00:00.000Z', '2024-06-07T20:15:00.000Z',
+    '÷ 10/1 to 2024-06-10', `src-polygon · body ${'d'.repeat(64)} · listing l0000000-0000-4000-8000-000000000001 · observation o0000000-0000-4000-8000-000000000001`,
+  ]) {
+    assert.ok(html.includes(expected), `missing ${expected}`)
+  }
+})
+
 test('tiny decimals and derived results keep their canonical text', () => {
   const small = inspection({ payload: { kind: 'value', value: SMALL, unit: { kind: 'ratio' }, exact: true, rounding: null }, formula: { operation: 'gross_margin', operation_version: 'gross_margin.v1', numeric_policy_version: 'numeric.v1' } })
   const html = renderToStaticMarkup(<FinancialResultInspector load={{ kind: 'ready', inspection: small }} />)

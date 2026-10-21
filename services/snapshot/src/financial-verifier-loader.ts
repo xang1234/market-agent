@@ -4,7 +4,8 @@
 // and every bound fact is joined with its *current* evidence state — source
 // access, invalidation, the exact source version, and whether the precision
 // and publication proofs it was bound with are still the current ones — as is
-// the listing each restated input's subject resolves to now, with its splits and zone.
+// every bound price observation as stored now, and the listing each restated
+// input's subject resolves to now, with its splits and zone.
 // Snapshot reads these tables directly; it never imports the engine.
 
 import { loadSubjectSplitHistory, type SubjectSplitHistory } from "../../market/src/split-history.ts";
@@ -39,6 +40,7 @@ export type LoadedBinding = Readonly<{
   fact_id: string | null;
   publication_attestation_id: string | null;
   precision_attestation_id: string | null;
+  price_observation_id: string | null;
   bound_payload: unknown;
   payload_hash: string | null;
   gap_reason: string | null;
@@ -72,8 +74,22 @@ export type LoadedEvidence = Readonly<{
   }> | null;
 }>;
 
+/** A bound price observation as stored now, and whether its source is a user's. */
+export type LoadedPriceObservation = Readonly<{
+  observation_id: string;
+  listing_id: string;
+  source_id: string;
+  source_user_id: string | null;
+  kind: string;
+  price_text: string;
+  currency: string;
+  observed_at: string;
+  known_at: string | null;
+  body_sha256: string;
+}>;
+
 /** A restated input's subject, resolved to its one listing at the cutoff the way binding resolved it. */
-export type LoadedSplitHistory = Readonly<{ subject_id: string; history: SubjectSplitHistory }>;
+export type LoadedSplitHistory = Readonly<{ subject_ref: Readonly<{ kind: "issuer" | "listing"; id: string }>; history: SubjectSplitHistory }>;
 
 export type LoadedComputation = Readonly<{
   computation_id: string;
@@ -108,6 +124,7 @@ export type FinancialUnitRecords = Readonly<{
   unit: LoadedUnit | null;
   bindings: ReadonlyArray<LoadedBinding>;
   evidence: ReadonlyArray<LoadedEvidence>;
+  price_observations: ReadonlyArray<LoadedPriceObservation>;
   split_histories: ReadonlyArray<LoadedSplitHistory>;
   computations: ReadonlyArray<LoadedComputation>;
   results: ReadonlyArray<LoadedResult>;
@@ -137,7 +154,7 @@ export async function loadFinancialUnitRecords(db: QueryExecutor, claim: Financi
 
   const bindings = (await db.query<LoadedBinding>(
     `select input_slot, binding_status, fact_id::text, publication_attestation_id::text, precision_attestation_id::text,
-            bound_payload, payload_hash, gap_reason, candidate_set_digest
+            price_observation_id::text, bound_payload, payload_hash, gap_reason, candidate_set_digest
        from financial_run_inputs where run_id = $1 order by input_slot`,
     [claim.run_id],
   )).rows;
@@ -168,17 +185,33 @@ export async function loadFinancialUnitRecords(db: QueryExecutor, claim: Financi
     [claim.run_id],
   )).rows;
 
+  const price_observations = (await db.query<LoadedPriceObservation>(
+    `select o.observation_id::text, o.listing_id::text, o.source_id::text, s.user_id::text as source_user_id, o.kind, o.price_text, o.currency,
+            to_char(o.observed_at at time zone 'UTC', ${ISO_UTC}) as observed_at,
+            to_char(o.known_at at time zone 'UTC', ${ISO_UTC}) as known_at, o.body_sha256
+       from financial_run_inputs i
+       join price_observations o on o.observation_id = i.price_observation_id
+       join sources s on s.source_id = o.source_id
+      where i.run_id = $1 and i.binding_status = 'bound'
+      order by o.observation_id`,
+    [claim.run_id],
+  )).rows;
+
   // A bound payload is checked, never trusted: a subject id that is not a uuid resolves to nothing.
-  const restatedSubjects = (await db.query<{ subject_id: string | null }>(
-    `select distinct i.bound_payload->'subject_ref'->>'id' as subject_id
+  // Each subject resolves as the kind it was bound as, as binding resolved it.
+  const restatedSubjects = (await db.query<{ subject_kind: string | null; subject_id: string | null }>(
+    `select distinct i.bound_payload->'subject_ref'->>'kind' as subject_kind, i.bound_payload->'subject_ref'->>'id' as subject_id
        from financial_run_inputs i
       where i.run_id = $1 and i.binding_status = 'bound' and i.bound_payload ? 'split_adjustment'
-      order by 1`,
+      order by 1, 2`,
     [claim.run_id],
-  )).rows.flatMap(({ subject_id }) => (subject_id !== null && UUID.test(subject_id) ? [subject_id] : []));
+  )).rows.flatMap(({ subject_kind, subject_id }) =>
+    (subject_kind === "issuer" || subject_kind === "listing") && subject_id !== null && UUID.test(subject_id)
+      ? [{ kind: subject_kind, id: subject_id } as const]
+      : []);
   const split_histories: LoadedSplitHistory[] = [];
-  for (const subject_id of restatedSubjects) {
-    split_histories.push({ subject_id, history: await loadSubjectSplitHistory(db, { kind: "issuer", id: subject_id }, runRow.knowledge_cutoff) });
+  for (const subject_ref of restatedSubjects) {
+    split_histories.push({ subject_ref, history: await loadSubjectSplitHistory(db, subject_ref, runRow.knowledge_cutoff) });
   }
 
   const computations = (await db.query<LoadedComputation>(
@@ -195,7 +228,7 @@ export async function loadFinancialUnitRecords(db: QueryExecutor, claim: Financi
 
   const subject_names = await loadSubjectNames(db, planSubjectRefs(plan));
 
-  return { run: runRow, plan: { plan, semantic_hash }, unit, bindings, evidence, split_histories, computations, results, subject_names };
+  return { run: runRow, plan: { plan, semantic_hash }, unit, bindings, evidence, price_observations, split_histories, computations, results, subject_names };
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
@@ -222,6 +255,19 @@ export async function loadSubjectNames(
      order by kind, id`,
     [ids("issuer"), ids("listing")],
   )).rows;
+}
+
+/** The sources of the prices a unit's closure bound, in id order: a seal cites them beside its facts' sources. */
+export async function loadUnitBoundPriceSources(db: QueryExecutor, runId: string, unitId: string): Promise<string[]> {
+  return (await db.query<{ source_id: string }>(
+    `select distinct o.source_id::text as source_id
+       from financial_run_units u
+       join financial_run_inputs i on i.run_id = u.run_id and u.closure_node_ids ? i.input_slot and i.binding_status = 'bound'
+       join price_observations o on o.observation_id = i.price_observation_id
+      where u.run_id = $1 and u.unit_id = $2
+      order by 1`,
+    [runId, unitId],
+  )).rows.map((row) => row.source_id);
 }
 
 /** The facts a unit's closure bound, as seal fact rows, in fact-id order: what its seal must cite. */

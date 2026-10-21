@@ -236,6 +236,48 @@ split executed on or before that date is already reflected. SEC ingestion certif
   originals again, so a backfill rerun after a sync decides each unverified restatement whose listing's splits now
   cover its filing date, and a second rerun changes nothing.
 
+## Share prices as engine inputs (#444)
+
+A share price binds into a financial plan the way a fact does, but it is market data and never becomes a fact. It has
+its own stored observation and its own bound-input variant. No operation reads it yet: `market_cap` and `pe_ratio` come
+with step 3 of #444.
+
+- **Stored as stated:** `npm run capture:price -- <listing_uuid>` (in `services/market`) records Polygon's unadjusted
+  session closes of the last week and, when the key is entitled to snapshots, the last trade. Rows go to the
+  insert-only `price_observations` table (migration 0069). `price_text` is Polygon's exact token, parsed losslessly,
+  and `body_sha256` hashes the whole response. Capturing the same statement again is the same row: the key is the
+  listing, source, kind, trade time, and token. A revised close is a new row, known later.
+- **Known at the fetch:** a price is known when its response finished arriving, the earliest instant the fetch proves.
+  Polygon states no delay to subtract. The adapter's `delay_class` is configuration (`services/market/src/stack.ts`),
+  and the `status` field states no delay either. For the same bar and key it said `DELAYED` on the capture's range,
+  which reaches into the current day, and `OK` on `/prev` and on a range that ends the day before. A last
+  trade stamped after its response arrived has no known time, so it never binds, and when no other price is known by
+  the cutoff the gap is `publication_time_unknown`. A session close
+  is observed at 16:00 exchange time on its date, and a bar whose session had not closed is not captured.
+- **Bound on the analysis's basis:** a `share_price` node takes the period `{ "kind": "at_cutoff" }` and binds a
+  `BoundPriceInputV1` (`services/financial-core/src/contracts.ts`). It carries the observation id, the exact token
+  beside its canonical value, the trade and known times, the listing, currency, source, and body hash. The token and the hash of the response it
+  came in are its precision proof, as a fact's token and token proof hash are. Its
+  `split_adjustment.v2` runs from the trade's date in the listing's zone to the reference date R: a price is on the
+  split basis of its own trade date, so it is divided by the splits after that date and on or before R. Core checks
+  the token against the value, the adjustment against its own splits and anchor, and that the price was known between
+  its trade and the cutoff.
+- **Selection** (`services/financial-engine/src/select-price.ts`): the subject's one common-stock listing at the cutoff
+  decides, as for EPS. Its observations with the newest trade time known by the cutoff are read, and among them the
+  latest known. Gaps: `missing_input` (none known by then), `publication_time_unknown` (only ones without a known
+  time), `precision_unverified` (a token outside the numeric policy), `conflicting_evidence` (the latest prices
+  disagree), and `stale_input`, then the split gaps of #387. A price is stale when it traded before the last regular
+  session the cutoff has closed (`lastRegularSessionDate`, `services/market/src/ytd-window.ts`): weekdays, closing at
+  16:00 exchange time (`SESSION_CLOSE_MINUTES`).
+- **Seal:** the snapshot verifier reloads the observation. A missing one fails the input
+  (`price_observation_unavailable`), and so does one whose token, times, listing, response, or currency no longer
+  match (`price_observation_changed`). The verifier resolves the subject's listing again (`listing_changed`) and
+  rebuilds the restatement from that listing's current splits (`splits_changed`), as for EPS. The seal cites the
+  price's source.
+- **Limits:** weekdays stand in for an exchange calendar, so until the session after a market holiday closes, the
+  price before the holiday reads as stale. Planners and chat do not offer `share_price` (`PLANNABLE_METRICS`) until
+  an operation reads it.
+
 ## Which facts may ground an answer
 
 `loadUsableFacts` (`services/fundamentals/src/usable-facts.ts`) is the one definition (#159). Every reader that shows

@@ -312,6 +312,111 @@
           "additionalProperties": false
         },
         {
+          "description": "A share price bound from a stored price observation; its computed value comes from its split adjustment.",
+          "type": "object",
+          "required": [
+            "input_slot",
+            "status",
+            "observation_id",
+            "listing_id",
+            "source",
+            "metric",
+            "value",
+            "split_adjustment",
+            "unit",
+            "observation"
+          ],
+          "properties": {
+            "input_slot": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]{0,63}$"
+            },
+            "status": {
+              "const": "bound"
+            },
+            "observation_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "listing_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "source": {
+              "type": "object",
+              "required": [
+                "source_id",
+                "body_sha256"
+              ],
+              "properties": {
+                "source_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "body_sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "additionalProperties": false
+            },
+            "metric": {
+              "type": "object",
+              "required": [
+                "metric_key",
+                "definition_version"
+              ],
+              "properties": {
+                "metric_key": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_]{0,63}$"
+                },
+                "definition_version": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "value": {
+              "description": "The price as observed, on the split basis of its trade date.",
+              "type": "string",
+              "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+            },
+            "split_adjustment": {
+              "$ref": "./financial_result_schema.json#/$defs/SplitAdjustmentV2"
+            },
+            "unit": {
+              "$ref": "./finance_research_block_schema.json#/$defs/FinancialUnit"
+            },
+            "observation": {
+              "type": "object",
+              "required": [
+                "kind",
+                "observed_at",
+                "known_at"
+              ],
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "last_trade",
+                    "session_close"
+                  ]
+                },
+                "observed_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "known_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
           "type": "object",
           "required": [
             "input_slot",

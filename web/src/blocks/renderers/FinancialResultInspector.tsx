@@ -104,6 +104,20 @@ function InputView({ input }: { input: FinancialInspectedInput }): ReactElement 
   if (input.status === 'gap') {
     return <p className="text-sm text-muted italic">No eligible input ({input.reason_code ?? 'unknown reason'})</p>
   }
+  if ('observation_id' in input) {
+    const { factor } = input.split_adjustment
+    return (
+      <dl className="grid gap-1 text-xs">
+        <Row label="Price"><span className="num break-all text-sm text-fg">{input.value}</span></Row>
+        <Row label="Unit">{unitText(input.unit)}</Row>
+        <Row label="Metric">{`${input.metric.metric_key} ${input.metric.definition_version}`}</Row>
+        <Row label="Observed">{`${input.observation.kind.replaceAll('_', ' ')} at ${input.observation.observed_at}`}</Row>
+        <Row label="Public by">{input.observation.known_at}</Row>
+        <Row label="Split basis">{`÷ ${factor.numerator}/${factor.denominator} to ${input.split_adjustment.reference_date}`}</Row>
+        <Row label="Source">{`${input.source.source_id} · body ${input.source.body_sha256} · listing ${input.listing_id} · observation ${input.observation_id}`}</Row>
+      </dl>
+    )
+  }
   return (
     <dl className="grid gap-1 text-xs">
       <Row label="Value"><span className="num break-all text-sm text-fg">{input.value}</span></Row>

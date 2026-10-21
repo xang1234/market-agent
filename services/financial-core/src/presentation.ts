@@ -438,6 +438,7 @@ function selectorText(selector: PeriodSelector): string {
   if (selector.kind === "fiscal_period") {
     return selector.fiscal_period === "FY" ? `FY${selector.fiscal_year}` : `${selector.fiscal_period} FY${selector.fiscal_year}`;
   }
+  if (selector.kind === "at_cutoff") return "latest known at the cutoff";
   const unit = selector.period_type === "annual" ? "fiscal year" : "fiscal quarter";
   return selector.offset === 0 ? `latest ${unit}` : `${unit} ${selector.offset} before latest`;
 }

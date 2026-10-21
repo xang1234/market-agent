@@ -69,7 +69,7 @@ test("a 2-for-3 split restates to exact fractions", () => {
   const shares = restated({ native: "2494000000", value_kind: "share_count_average", as_filed_on: "2024-02-21", reference_date: "2025-01-01", splits });
   assert.deepEqual(shares.adjusted_native_value, { numerator: "4988000000", denominator: "3" });
   const operandOutcome = operandFromBoundInput(boundInput({ ...SHARES, split_adjustment: shares }), reported(SHARES), {
-    slot: SLOTS.a, definition_version: "weighted_average_diluted_shares.v1", knowledge_cutoff: "2025-01-01T12:00:00.000Z",
+    slot: SLOTS.a, definition_version: "weighted_average_diluted_shares.v1", knowledge_cutoff: "2025-01-01T12:00:00.000Z", reporting_basis: "as_reported",
   });
   assert.ok(operandOutcome.ok);
   assert.deepEqual([operandOutcome.payload.value, operandOutcome.payload.exact], ["1662666666.6666666666666666666666666666666666666667", false]);
@@ -105,13 +105,13 @@ test("a restated input binds the as-filed token over the split factor", () => {
   const adjustment = restated({ native: "11.93", value_kind: "per_share", as_filed_on: "2024-02-21", reference_date: "2025-01-01" });
   const input = boundInput({ ...EPS, split_adjustment: adjustment });
   assert.deepEqual([input.numeric.raw_token, input.numeric.native_value, input.basis.adjustment], ["11.93", "11.93", "split_adjusted"]);
-  const expected = { slot: SLOTS.a, definition_version: "eps_diluted.v1", knowledge_cutoff: "2025-01-01T12:00:00.000Z" };
+  const expected = { slot: SLOTS.a, definition_version: "eps_diluted.v1", knowledge_cutoff: "2025-01-01T12:00:00.000Z", reporting_basis: "as_reported" as const };
   assert.equal(payloadValue(operandFromBoundInput(input, reported(EPS), expected)), "1.193");
 });
 
 test("a tampered or misdated restatement fails the input's integrity", () => {
   const adjustment = restated({ native: "11.93", value_kind: "per_share", as_filed_on: "2024-02-21", reference_date: "2025-01-01" });
-  const expected = { slot: SLOTS.a, definition_version: "eps_diluted.v1", knowledge_cutoff: "2025-01-01T12:00:00.000Z" };
+  const expected = { slot: SLOTS.a, definition_version: "eps_diluted.v1", knowledge_cutoff: "2025-01-01T12:00:00.000Z", reporting_basis: "as_reported" as const };
   const failure = (input: ReturnType<typeof boundInput>, reference = expected) => {
     try {
       operandFromBoundInput(input, reported(EPS), reference);
