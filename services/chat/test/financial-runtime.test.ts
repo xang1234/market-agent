@@ -11,7 +11,7 @@ import { proposedMetric } from "../src/research-scope.ts";
 import { parseProposal } from "../src/scope-proposal.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import type { FinancialPool } from "../../financial-engine/src/ports.ts";
-import { chatDatabase, chatHarness, completed, INSTRUMENT_A, LISTING_A, resolveMention, revenueModel } from "./financial-fixtures.ts";
+import { chatDatabase, chatHarness, completed, INSTRUMENT_A, LISTING_A, MISSING_ISSUER, resolveMention, revenueModel } from "./financial-fixtures.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "../src/subjects.ts";
 
 test("financial intent is recognized from the definition catalog", () => {
@@ -186,6 +186,13 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       subject_refs: [{ kind: "issuer", id: IDS.issuerA }],
       scope: ["financial_gap", "financial_gap", [{ issuer_id: IDS.issuerA, label: "AAA" }], []],
     });
+    // A gap about no resolved company saves no scope, so the previous one stays.
+    assert.deepEqual(await segments("Show AMB's cash resilience score", "not used"), {
+      gap: { reason_code: "unsupported" },
+      text: "This request asks for a calculation outside the verified financial definitions I can compute: cash resilience is an annual view without scores, peer ranks, or cash and debt measures.",
+      subject_refs: undefined,
+      scope: undefined,
+    });
     // A company picked in a clarification is saved too, labelled. A reason with a figure in it is not shown.
     assert.deepEqual(await segments("Break down AMB's revenue by segment", "only 3 segments are reported", "Beta Holdings Corp."), {
       gap: { reason_code: "unsupported" },
@@ -218,7 +225,13 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     }) as unknown as PlanningModel;
     await chatHarness(pool, { model }).run({ ...base, subjectText: "AAA", userIntent: "Compare revenue with BBB, CCC, OPM, PAX, COX and QTR" });
     await turnWithPick(chatHarness(pool, { model }), "Compare revenue for AMB, BBB, CCC, OPM, PAX, COX and QTR", "Alpha Industries Inc.");
-    assert.deepEqual(seen, ["AAA; BBB; CCC; OPM; PAX", "AMB; BBB; CCC; OPM; PAX"]);
+    // The page's company named again in the message takes one slot.
+    await chatHarness(pool, { model }).run({ ...base, subjectText: "ALPHA", userIntent: "Compare revenue for AAA with BBB, CCC, OPM, PAX and COX" });
+    // Carried companies fill the slots the named ones leave.
+    const carried = async (ticker: string) => ({ ...(await resolveMention(ticker)), handoff: { display_labels: { ticker } } }) as unknown as ChatResolvedSubjectPreResolution;
+    const prior = [await carried("AAA"), await carried("QTR")];
+    await turnWithPick(chatHarness(pool, { model, priorSubjects: async () => prior }), "Compare its revenue with AMB, OPM, PAX and COX", "Beta Holdings Corp.");
+    assert.deepEqual(seen, ["AAA; BBB; CCC; OPM; PAX", "AMB; BBB; CCC; OPM; PAX", "ALPHA; BBB; CCC; OPM; PAX", "AAA; AMB; OPM; PAX; COX"]);
   });
 
   await t.test("each name a turn gives is resolved once (#425)", async () => {
@@ -342,8 +355,10 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
   });
 
   await t.test("a calculation that fails verification is a gap, never the narrative composer", async () => {
-    const { events } = await chatHarness(pool, { model: revenueModel(["CCC"]) }).run({ ...base, userIntent: "Revenue for CCC" });
+    const harness = chatHarness(pool, { model: revenueModel(["CCC"]), researchScope: scopeOver as never });
+    const { events } = await harness.run({ ...base, userIntent: "Revenue for CCC" });
     assert.deepEqual(completed(events).financial_gap, { reason_code: "verification_failed" });
+    assert.deepEqual((harness.persisted.at(-1)!.research_scope as { companies: unknown }).companies, [{ issuer_id: MISSING_ISSUER, label: "CCC" }]);
   });
 
   await t.test("narrative turns keep the analyst path", async () => {

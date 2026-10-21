@@ -61,7 +61,7 @@ export function resolveMention(mention: string): Promise<ChatSubjectPreResolutio
     AMBX: {
       status: "needs_clarification", input_text: mention, normalized_input: mention, message: "ambiguous",
       candidates: [
-        { subject_ref: { kind: "listing", id: LISTING_A }, display_name: "Alpha Industries Inc. (XNAS)", confidence: 0.5 },
+        { subject_ref: { kind: "listing", id: LISTING_A }, display_name: "Alpha Industries Inc. (XNAS)", display_labels: { primary: "ALPX · XNAS", ticker: "ALPX" }, confidence: 0.5 },
         { subject_ref: { kind: "issuer", id: IDS.issuerA }, display_name: "Alpha Industries Inc.", confidence: 0.5 },
       ],
     } as ChatSubjectPreResolution,

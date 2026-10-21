@@ -45,11 +45,16 @@ test("prior subjects are the previous answer's companies, re-hydrated, in order"
 
 test("an issuer an engine answer sealed is named by its listing's ticker, not its legal name (#425)", async () => {
   const issuer = { kind: "issuer" as const, id: "62000000-0000-4000-8000-0000000000a1" };
-  const db = {
-    query: fakeQuery((text) => text.includes("from chat_messages")
-      ? { rows: [{ subject_refs: [issuer] }] }
-      : { rows: [{ issuer_id: issuer.id, listing_id: NVDA.id, ticker: "NVDA", legal_name: "NVIDIA Corporation" }] }),
-  };
+  const db = { query: fakeQuery(() => ({ rows: [{ subject_refs: [issuer] }] })) };
+  const listing = (ticker: string, mic: string) => ({
+    subject_ref: { kind: "listing" as const, id: NVDA.id },
+    instrument_ref: { kind: "instrument" as const, id: NVDA.id },
+    issuer_ref: issuer,
+    mic,
+    ticker,
+    trading_currency: "USD",
+    timezone: "America/New_York",
+  });
   const hydrate = async (): Promise<HydratedSubjectHandoff> => ({
     subject_ref: issuer,
     identity_level: "issuer",
@@ -58,7 +63,8 @@ test("an issuer an engine answer sealed is named by its listing's ticker, not it
     normalized_input: `issuer:${issuer.id}`,
     resolution_path: "direct_ref",
     confidence: 1,
-    context: {},
+    // Ordered by market, as the resolver loads them; the company is named by its first ticker.
+    context: { active_listings: [listing("NVDX", "XETR"), listing("NVDA", "XNAS")] },
   });
   const [subject] = await loadPriorSubjects(db, { threadId: THREAD_ID }, hydrate);
   assert.deepEqual([subject!.input_text, subject!.handoff.display_labels.ticker, subject!.subject_ref], ["NVDA", "NVDA", issuer]);
