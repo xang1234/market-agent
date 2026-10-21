@@ -64,7 +64,7 @@ function summary(result: PlanningResult) {
   return { outcome: result.outcome, model_calls: result.model_calls };
 }
 
-const SEGMENTS = { outcome: "unsupported", model_calls: 1, reason: "segment revenue has no approved definition" } as const;
+const SEGMENTS = { outcome: "unsupported", model_calls: 1, reason: "segments" } as const;
 const latestMargins = (ticker: string) => {
   const metric = (key: string) => `${ticker} ${key} latest annual[0]`;
   return [

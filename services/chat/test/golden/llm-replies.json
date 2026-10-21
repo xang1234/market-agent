@@ -2,7 +2,7 @@
   "replies": [
     {
       "match": "Request: Break down NVDA's revenue by segment\nRequested",
-      "text": "{\"outcome\":\"unsupported\",\"reason\":\"segment revenue has no approved definition\"}"
+      "text": "{\"outcome\":\"unsupported\",\"reason\":\"segments\"}"
     },
     {
       "match": "Request: Why did AMD's operating margin turn negative in Q2 2025?\nRequested",
@@ -14,15 +14,15 @@
     },
     {
       "match": "Request: Break down AMD's revenue by segment\nRequested",
-      "text": "{\"outcome\":\"unsupported\",\"reason\":\"segment revenue has no approved definition\"}"
+      "text": "{\"outcome\":\"unsupported\",\"reason\":\"segments\"}"
     },
     {
       "match": "Request: Break down NVDA's revenue by segment and show its operating margin trend\nRequested",
-      "text": "{\"outcome\":\"unsupported\",\"reason\":\"segment revenue has no approved definition\"}"
+      "text": "{\"outcome\":\"unsupported\",\"reason\":\"segments\"}"
     },
     {
       "match": "Request: Break down NVDA's revenue by segment and show its gross margin\nRequested",
-      "text": "{\"outcome\":\"unsupported\",\"reason\":\"segment revenue has no approved definition\"}"
+      "text": "{\"outcome\":\"unsupported\",\"reason\":\"segments\"}"
     },
     {
       "match": "Request: What is AMD's free cash flow?\nRequested",

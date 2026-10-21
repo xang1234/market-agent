@@ -237,7 +237,7 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
     trap: "a redefined segment: the engine has no segment definition, so neither definition's revenue is shown",
     turns: ["Break down NVDA's revenue by segment."],
     scopes: [scope(["segments"], INCOME, ["revenue"])],
-    plan: { outcome: "unsupported", reason: "segment revenue has no approved definition" },
+    plan: { outcome: "unsupported", reason: "segments" },
     expect: { companies: ["NVDA"], financial_gap: "unsupported", absent_kinds: ["metric_row", "financial_answer"] },
     prose: "",
   },

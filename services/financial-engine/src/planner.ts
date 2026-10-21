@@ -38,8 +38,22 @@ import { interpretPlan } from "./plan-interpretation.ts";
 import { isRecord } from "../../shared/src/http.ts";
 
 export const PLANNER_ADAPTER_VERSION = "financial-planner.v1";
-export const PLANNER_PROMPT_VERSION = "financial-plan-prompt.v2";
+export const PLANNER_PROMPT_VERSION = "financial-plan-prompt.v3";
 export const DETERMINISTIC_ADAPTER_VERSION = "financial-deterministic-planner.v1";
+
+/**
+ * Why a model may decline a request, each with what it means. A surface words
+ * these and never shows the model's text; any other reason is "other".
+ */
+export const UNSUPPORTED_REASONS = ["segments", "forecast", "adjusted", "undefined_metric", "other"] as const;
+export type UnsupportedReason = (typeof UNSUPPORTED_REASONS)[number];
+const UNSUPPORTED_MEANINGS: Readonly<Record<UnsupportedReason, string>> = {
+  segments: "revenue or results by business segment",
+  forecast: "guidance, estimates or forecasts",
+  adjusted: "an adjusted or non-GAAP figure",
+  undefined_metric: "a metric with no approved definition",
+  other: "anything else",
+};
 
 /** Adapter over the existing model router (router.complete). */
 export type PlanningModel = (request: { messages: ReadonlyArray<{ role: "system" | "user" | "assistant"; content: string }> }) => Promise<{ text: string; model: string }>;
@@ -207,7 +221,8 @@ function parseDraft(text: string): Attempt<Draft> {
     return invalid("$", "invalid_json", "the response was not a JSON object");
   }
   if (isRecord(value) && value.outcome === "unsupported") {
-    return { ok: false, kind: "unsupported", reason: typeof value.reason === "string" ? value.reason.slice(0, 200) : "the model reported the request as unsupported", issues: [] };
+    const reason: UnsupportedReason = (UNSUPPORTED_REASONS as ReadonlyArray<unknown>).includes(value.reason) ? value.reason as UnsupportedReason : "other";
+    return { ok: false, kind: "unsupported", reason, issues: [] };
   }
   if (isRecord(value) && value.outcome === "needs_clarification") {
     const question = typeof value.question === "string" ? value.question.slice(0, 500) : "Please clarify the request.";
@@ -448,6 +463,7 @@ function systemPrompt(): string {
     'A valuation\'s price is a reported_metric of share_price with period {kind:"at_cutoff"}, planned only as the price of market_cap or pe_ratio. market_cap\'s shares are shares_outstanding with period {kind:"latest",period_type:"quarterly",offset:0}. pe_ratio\'s earnings are eps_diluted with period {kind:"latest",period_type:"annual",offset:0}: P/E uses the latest fiscal year\'s diluted EPS.',
     "Plan every requested company. Threshold values are decimal strings. Never invent metric definitions, identifiers, owners, budgets, modes, or verification fields.",
     'If a definition is ambiguous reply {"outcome":"needs_clarification","question","choices"}; if it cannot be expressed reply {"outcome":"unsupported","reason"}.',
+    `An unsupported reason is one of these keys (key: what the request asks for): ${UNSUPPORTED_REASONS.map((reason) => `${reason}: ${UNSUPPORTED_MEANINGS[reason]}`).join("; ")}.`,
   ].join("\n");
 }
 

@@ -37,6 +37,7 @@ import {
   type PlanningModel,
   type PlanningResult,
   type RequestedSubject,
+  type UnsupportedReason,
 } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { requireFinancialReadiness } from "../../financial-engine/src/readiness.ts";
@@ -417,6 +418,7 @@ async function planTurn(
 }
 
 const CASH_RESILIENCE = /\bcash[- ]resilience\b/iu;
+const CASH_RESILIENCE_VIEW = "cash_resilience_view";
 // The view is annual and has no score, rank, or cash/debt measure; a request
 // for one is unsupported rather than answered with the annual view.
 const OUTSIDE_CASH_RESILIENCE = /\b(?:quarters?|quarterly|Q[1-4]|TTM|LTM|trailing|scores?|scoring|rank|ranks|ranking|peers?|debt|net cash)\b/iu;
@@ -430,7 +432,7 @@ const FISCAL_YEAR = /\b(?:FY\s?)?(20\d{2})\b/u;
  */
 async function planCashResilience(context: PlanningContext, text: string): Promise<PlanningResult> {
   if (OUTSIDE_CASH_RESILIENCE.test(text)) {
-    return { outcome: "unsupported", reason: "cash resilience is an annual view without scores, peer ranks, or cash and debt measures", issues: [], model_calls: 0 };
+    return { outcome: "unsupported", reason: CASH_RESILIENCE_VIEW, issues: [], model_calls: 0 };
   }
   if (context.requested_subjects.some((subject) => subject.resolution.status !== "resolved")) return planFinancialRequest(context, text, noModel);
   const year = FISCAL_YEAR.exec(text)?.[1];
@@ -780,14 +782,22 @@ async function published(db: SqlExecutor, runId: string, threadId: string, messa
   return message ? { kind: "published", run_id: runId, message_id: messageId, message } : gap("run_failed");
 }
 
-// The planner's own reason for an unsupported request is shown when it gave
-// one in words. One with a numeral is not, as the lane shows no figure a
-// model wrote; a number spelled out still passes.
+// What an unsupported request asks for, by the planner's reason (its closed
+// list) or the cash-resilience view's; any other reason gets the plain text,
+// so no model-written words reach the gap.
+const UNSUPPORTED_REASONS: Readonly<Record<Exclude<UnsupportedReason, "other"> | typeof CASH_RESILIENCE_VIEW, string>> = {
+  segments: "revenue or results by business segment",
+  forecast: "guidance, estimates or forecasts",
+  adjusted: "adjusted or non-GAAP figures",
+  undefined_metric: "a metric with no verified definition",
+  cash_resilience_view: "cash resilience is an annual view without scores, peer ranks, or cash and debt measures",
+};
+
 function gap(reason_code: ChatGap, planned?: PlanningResult): Extract<ChatFinancialTurn, { kind: "gap" }> {
-  const reason = reason_code === "unsupported" && planned?.outcome === "unsupported" && planned.issues.length === 0
-    ? planned.reason.trim().replace(/[.\s]+$/u, "")
-    : "";
-  return { kind: "gap", reason_code, text: reason === "" || /\p{N}/u.test(reason) ? GAP_TEXT[reason_code] : `${UNSUPPORTED}: ${reason}.` };
+  const reason = reason_code === "unsupported" && planned?.outcome === "unsupported" && Object.hasOwn(UNSUPPORTED_REASONS, planned.reason)
+    ? UNSUPPORTED_REASONS[planned.reason as keyof typeof UNSUPPORTED_REASONS]
+    : null;
+  return { kind: "gap", reason_code, text: reason === null ? GAP_TEXT[reason_code] : `${UNSUPPORTED}: ${reason}.` };
 }
 
 const FINANCIAL_TERMS = new RegExp(
