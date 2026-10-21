@@ -4,7 +4,6 @@
 
 import { hydrateSubjectRef, type HydratedSubjectHandoff } from "../../resolver/src/flow.ts";
 import type { SubjectRef } from "../../shared/src/subject-ref.ts";
-import { companyListings } from "./fact-blocks.ts";
 import { parseResearchScope, type ResearchScope } from "./research-scope.ts";
 import type { ChatResolvedSubjectPreResolution } from "./subjects.ts";
 import type { QueryExecutor } from "../../shared/src/http.ts";
@@ -25,8 +24,9 @@ export async function loadPriorSubjects(
        join snapshots s on s.snapshot_id = m.snapshot_id
       where m.thread_id = $1::uuid
         and m.role = 'assistant'
-        -- An answer about no company (a financial gap or clarification) leaves
-        -- the earlier companies in place, as it leaves the scope (loadPriorScope).
+        -- An answer about no company (a clarification, or a gap that names
+        -- none) leaves the earlier companies in place, as it leaves the scope
+        -- (loadPriorScope).
         and exists (
           select 1 from jsonb_array_elements(s.subject_refs) ref
            where ref->>'kind' in ('issuer', 'instrument', 'listing')
@@ -40,30 +40,29 @@ export async function loadPriorSubjects(
   for (const ref of refs) {
     if (!isCompanyRef(ref)) continue;
     try {
-      handoffs.push(await hydrate(db, ref));
+      handoffs.push(withListingTicker(await hydrate(db, ref)));
     } catch (reason) {
       // A company that no longer hydrates is dropped; the turn still answers.
       console.warn("[chat] could not carry a previous subject forward", reason);
     }
   }
-  return (await withListingTickers(db, handoffs)).map(resolutionFromHandoff);
+  return handoffs.map(resolutionFromHandoff);
 }
 
 // An engine answer seals its companies as issuers, which hydrate with no
-// ticker; each takes its listing's, as answers name companies (#425).
-async function withListingTickers(db: QueryExecutor, handoffs: ReadonlyArray<HydratedSubjectHandoff>): Promise<HydratedSubjectHandoff[]> {
-  const issuerIds = handoffs.flatMap((handoff) => handoff.subject_ref.kind === "issuer" && handoff.display_labels.ticker === undefined ? [handoff.subject_ref.id] : []);
-  const listings = issuerIds.length === 0 ? new Map() : await companyListings(db, issuerIds, new Date().toISOString());
-  return handoffs.map((handoff) => {
-    const listing = handoff.subject_ref.kind === "issuer" ? listings.get(handoff.subject_ref.id) : undefined;
-    return listing?.listing_id ? { ...handoff, display_labels: { ...handoff.display_labels, ticker: listing.label } } : handoff;
-  });
+// ticker; each takes its active listings' first ticker (companyListings'
+// rule), as answers name companies (#425).
+function withListingTicker(handoff: HydratedSubjectHandoff): HydratedSubjectHandoff {
+  const [ticker] = (handoff.context.active_listings ?? []).map((listing) => listing.ticker).sort();
+  return handoff.display_labels.ticker !== undefined || ticker === undefined
+    ? handoff
+    : { ...handoff, display_labels: { ...handoff.display_labels, ticker } };
 }
 
 // The latest research scope an answer saved (research-scope.ts), for a
-// follow-up to keep what it does not change. Answers that save none (an
-// enforced financial answer, a clarification) leave it in place; null when no
-// answer saved one.
+// follow-up to keep what it does not change. Answers that save none (a
+// clarification, or a gap that names no company) leave it in place; null when
+// no answer saved one.
 export async function loadPriorScope(
   db: QueryExecutor,
   input: { threadId: string },

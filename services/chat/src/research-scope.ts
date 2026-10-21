@@ -50,6 +50,11 @@ const ROUTES = [
 ] as const;
 export type ResearchRoute = (typeof ROUTES)[number];
 
+// The financial engine's answer or declined request, which no reader here re-reads.
+export function readsEngine(reads: ResearchRoute): boolean {
+  return reads === "financial_answer" || reads === "financial_gap";
+}
+
 export type ScopeField = "peers" | "segments" | "margin_trend" | "metrics" | "fiscal_year" | "fiscal_quarter" | "price_window" | "benchmark";
 
 // A metric a question names: one this chat's readers show, or a named gap.
@@ -388,7 +393,7 @@ export function resolveResearchScope(input: {
   // Unchanged, it reads what the previous answer read: not the engine's
   // answer, which no reader here re-reads, nor one that compared where this
   // turn covers one company, or the reverse. Those are routed by what they keep.
-  const reread = unchanged !== null && unchanged.reads !== "financial_answer" && unchanged.reads !== "financial_gap" &&
+  const reread = unchanged !== null && !readsEngine(unchanged.reads) &&
       comparing === (unchanged.companies.length > 1 || unchanged.peers)
     ? unchanged
     : null;

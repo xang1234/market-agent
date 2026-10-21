@@ -40,7 +40,7 @@ import {
   turnCompanies,
   withDerivationSources,
 } from "./fact-blocks.ts";
-import { resolveResearchScope, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
+import { readsEngine, resolveResearchScope, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
 import { proposeScope } from "./scope-proposal.ts";
 import { loadStatementBlocks, statementFacets, wantsStatements } from "./statement-blocks.ts";
 import { frozenDataMode, hydrateYtdBars, marketHydrationOrigin, turnNow } from "./ytd-hydration.ts";
@@ -184,7 +184,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   // A turn asking only for metrics no reader serves reads no other facts, nor
   // does one re-reading a financial-engine answer, whose evidence is in it
   // (#206), or a request the engine declined (#425).
-  const readsFacts = scope.reads !== "unavailable_metric" && scope.reads !== "financial_answer" && scope.reads !== "financial_gap";
+  const readsFacts = scope.reads !== "unavailable_metric" && !readsEngine(scope.reads);
   // Cash flow, balance sheet and EPS for one company; a statement-only request
   // reads them alone, as a segment request reads segments alone.
   const [statementIssuer] = issuersOfScope(scope);

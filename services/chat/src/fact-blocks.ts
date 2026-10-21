@@ -32,9 +32,8 @@ import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import { loadUsableFacts } from "../../fundamentals/src/usable-facts.ts";
 import { returnLabel } from "../../market/src/perf-points.ts";
 import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
-import type { QueryExecutor as RowQuery } from "../../shared/src/http.ts";
 import { stableUuid } from "./chat-ids.ts";
-import { STATEMENT_METRIC_LABELS, statementMetrics, unavailableMetrics, type ResearchScope } from "./research-scope.ts";
+import { readsEngine, STATEMENT_METRIC_LABELS, statementMetrics, unavailableMetrics, type ResearchScope } from "./research-scope.ts";
 import { loadPerfComparisonBlocks, type PriceWindow } from "./perf-block.ts";
 import { deriveQuarterMetrics, GROWTH, MARGINS, type QuarterMetric } from "./quarter-metrics.ts";
 
@@ -503,7 +502,7 @@ export function listingsForComparison(
 // Each company's active listing (for prices) and display label: its ticker,
 // else its legal name.
 export async function companyListings(
-  db: RowQuery,
+  db: Pick<QueryExecutor, "query">,
   issuerIds: ReadonlyArray<string>,
   asOf: string,
 ): Promise<Map<string, CompanyListing>> {
@@ -901,7 +900,7 @@ export function noteBlock(input: { snapshotId: string; asOf: string }, key: stri
 // unavailable metrics, a financial-engine answer or gap re-read, or a segment
 // breakdown with none to show), so nothing stands in for what it asked.
 export function mayOfferOtherFacts(scope: ResearchScope, shown: ReadonlyArray<Block>): boolean {
-  return scope.reads !== "financial_answer" && scope.reads !== "financial_gap" && !requestIsNamedGap(scope, shown);
+  return !readsEngine(scope.reads) && !requestIsNamedGap(scope, shown);
 }
 
 // Whether what the turn asks for is not in the data, so its gap notes say what
