@@ -47,7 +47,6 @@ export function selectPrice(
   if (page.latest.length === 0) return gap(page.unknown_publication ? "publication_time_unknown" : "missing_input");
   const allowed = page.latest.filter((observation) => sourceAllowed(observation.source_class, policy));
   if (allowed.length === 0) return gap("source_class_not_allowed");
-  const knowledgeCutoff = policy.knowledge_cutoff;
   const priced: Array<{ observation: PriceObservation; value: ExactRational; text: DecimalString }> = [];
   for (const observation of allowed) {
     const parsed = parseFinancialDecimal(observation.price_text);
@@ -60,8 +59,8 @@ export function selectPrice(
 
   const zone = history.timezone;
   const tradeDate = localDateOf(Date.parse(chosen.observation.observed_at), zone);
-  if (tradeDate < lastRegularSessionDate(knowledgeCutoff, zone)) return gap("stale_input");
-  const referenceDate = splitReferenceDate(knowledgeCutoff, zone);
+  if (tradeDate < lastRegularSessionDate(policy.knowledge_cutoff, zone)) return gap("stale_input");
+  const referenceDate = splitReferenceDate(policy.knowledge_cutoff, zone);
   if (!splitHistoryCovers(history.checked_at, referenceDate, zone)) return gap("split_history_stale");
   const restated = restateToReference({
     native: chosen.value,
