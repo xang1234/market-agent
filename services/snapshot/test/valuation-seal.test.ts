@@ -25,6 +25,7 @@ import {
 } from "../../financial-core/src/index.ts";
 import type { FinancialUnitRecords, LoadedEvidence } from "../src/financial-verifier-loader.ts";
 import { verifyFinancialUnit, type FinancialSealContext, type FinancialVerification } from "../src/financial-verifier.ts";
+import { YAHOO_FINANCE_DEV_MARKET_SOURCE_ID } from "../../market/src/provider-sources.ts";
 import { F, mutable } from "./financial-fixtures.ts";
 
 const POLYGON = "00000000-0000-4000-a000-000000000009";
@@ -121,7 +122,7 @@ function filed(slot: string, factId: string, source: string, metric: string, val
 function evidence(input: BoundFinancialInputV1): LoadedEvidence {
   assert.ok(input.schema_version === "financial_bound_input.v1" && input.split_adjustment);
   return {
-    fact_id: input.fact_id, source_id: input.source.source_id, invalidated: false, method: "reported", source_user_id: null,
+    fact_id: input.fact_id, source_id: input.source.source_id, source_kind: "filing", invalidated: false, method: "reported", source_user_id: null,
     source_version_hash: input.source.source_version_hash,
     publication: { attestation_id: input.publication.attestation_id, available_not_before: null, available_no_later_than: input.publication.available_no_later_than, timing_precision: "date", source_timezone: "America/New_York" },
     precision_current: true,
@@ -161,7 +162,7 @@ function valuationRecords(): FinancialUnitRecords {
   const closure = unitClosures(plan).get("valuation")!;
   const computationIds = new Map(publication.computations.map((computation, index) => [computation.node_id, `5f000000-0000-4000-8000-00000000050${index}`]));
   return {
-    run: { run_id: F.run, plan_id: F.plan, parent_kind: "chat_thread", parent_id: F.parent, parent_version: "1", request_hash: planSemanticHash(plan), execution_state: "ready_to_seal", knowledge_cutoff: CUTOFF },
+    run: { run_id: F.run, plan_id: F.plan, parent_kind: "chat_thread", parent_id: F.parent, parent_version: "1", request_hash: planSemanticHash(plan), execution_state: "ready_to_seal", knowledge_cutoff: CUTOFF, allowed_source_classes: ["market_data", "sec_filing"] },
     plan: { plan: JSON.parse(JSON.stringify(plan)), semantic_hash: planSemanticHash(plan) },
     unit: {
       unit_id: "valuation", state: "computed", coverage_state: publication.coverage, output_ids: [...closure.output_ids], closure_node_ids: [...closure.node_ids],
@@ -177,7 +178,7 @@ function valuationRecords(): FinancialUnitRecords {
     })),
     evidence: [evidence(shares), evidence(eps)],
     price_observations: [{
-      observation_id: OBSERVATION, listing_id: LISTING, source_id: POLYGON, source_user_id: null, kind: "session_close", price_text: "1200.00", currency: "USD",
+      observation_id: OBSERVATION, listing_id: LISTING, source_id: POLYGON, source_kind: "market_data", source_user_id: null, kind: "session_close", price_text: "1200.00", currency: "USD",
       observed_at: "2024-06-07T20:00:00.000Z", known_at: "2024-06-07T20:15:00.000Z", body_sha256: "d".repeat(64),
     }],
     split_histories: [{
@@ -238,4 +239,23 @@ test("a tampered price or share count fails the seal", () => {
   const edited = mutable(valuationRecords());
   edited.bindings[1].bound_payload.numeric.value = "2464000001";
   assert.deepEqual(reasons(verifyFinancialUnit(edited, "valuation", CONTEXT)), ["financial_binding_mismatch:payload_hash"]);
+});
+
+test("the seal re-checks each bound input's class against the grant its run recorded (#444)", () => {
+  const filingsOnly = mutable(valuationRecords());
+  filingsOnly.run.allowed_source_classes = ["sec_filing"];
+  assert.deepEqual(reasons(verifyFinancialUnit(filingsOnly, "valuation", CONTEXT)), ["financial_input_ineligible:source_class_not_allowed"]);
+
+  // A development feed's price has no class, whatever the run was granted.
+  const yahoo = mutable(valuationRecords());
+  const price = yahoo.bindings.find((row: { input_slot: string }) => row.input_slot === "px");
+  price.bound_payload.source.source_id = YAHOO_FINANCE_DEV_MARKET_SOURCE_ID;
+  price.payload_hash = hashCanonical("bound_input", price.bound_payload);
+  yahoo.price_observations[0].source_id = YAHOO_FINANCE_DEV_MARKET_SOURCE_ID;
+  assert.deepEqual(reasons(verifyFinancialUnit(yahoo, "valuation", CONTEXT)), ["financial_input_ineligible:source_class_not_allowed"]);
+
+  // A fact whose source is no filing is no SEC filing.
+  const article = mutable(valuationRecords());
+  article.evidence[0].source_kind = "article";
+  assert.deepEqual(reasons(verifyFinancialUnit(article, "valuation", CONTEXT)), ["financial_input_ineligible:source_class_not_allowed"]);
 });
