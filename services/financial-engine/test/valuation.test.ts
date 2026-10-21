@@ -13,6 +13,7 @@ import { recordFactPrecisionAttestation, recordSourcePublicationAttestation } fr
 import { recordFactFinancialContext } from "../../evidence/src/financial-context.ts";
 import Ajv2020 from "../../financial-core/node_modules/ajv/dist/2020.js";
 import type { FinancialPlanV1, FinancialRuntimeAuthority } from "../../financial-core/src/index.ts";
+import { POLYGON_MARKET_SOURCE_ID } from "../../market/src/provider-sources.ts";
 import { finalizeUnit } from "../src/finalize.ts";
 import { inspectCommittedResult } from "../src/inspection.ts";
 import { buildDeterministicPlan } from "../src/planner.ts";
@@ -23,7 +24,7 @@ const IDS = {
   listing: "4f000000-0000-4000-8000-0000000005e1",
   tenK: "4f000000-0000-4000-8000-0000000005c1",
   tenQ: "4f000000-0000-4000-8000-0000000005c2",
-  polygon: "4f000000-0000-4000-8000-0000000005c3",
+  polygon: POLYGON_MARKET_SOURCE_ID,
 } as const;
 // 10:00 on Monday 2024-06-10 in New York: the split has executed, and Friday's session is the last one closed.
 const MONDAY_MORNING = "2024-06-10T14:00:00.000Z";

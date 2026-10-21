@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { sourceClassOf } from "../../financial-core/src/index.ts";
+import { SEC_EDGAR_FILING_SOURCE_ID } from "../../fundamentals/src/provider-sources.ts";
+import { POLYGON_MARKET_SOURCE_ID, STOOQ_MARKET_SOURCE_ID, YAHOO_FINANCE_DEV_MARKET_SOURCE_ID } from "../../market/src/provider-sources.ts";
 import type { PriceObservation, SplitHistory } from "../src/ports.ts";
 import { selectPrice } from "../src/select-price.ts";
 
@@ -82,6 +85,19 @@ test("each reason a price cannot bind is a named gap", () => {
   assert.equal(reason(selectPrice(page([observation("1200", "2024-06-07T20:00:00.000Z")]), { ...HISTORY, checked_at: "2024-06-09T16:00:00.000Z" }, POLICY)), "split_history_stale");
   const twoOnOneDay = [...HISTORY.splits, { execution_date: "2024-06-10", split_from: "1", split_to: "2" }];
   assert.equal(reason(selectPrice(page([observation("1200", "2024-06-07T20:00:00.000Z")]), { ...HISTORY, splits: twoOnOneDay }, POLICY)), "incompatible_basis");
+});
+
+test("a price is market data only from an approved provider, and a fact is an SEC filing only from a filing (#444)", () => {
+  const price = (source_id: string, kind = "market_data") => sourceClassOf({ kind, source_id }, "price");
+  const fact = (source_id: string, kind: string) => sourceClassOf({ kind, source_id }, "fact");
+  assert.deepEqual(
+    [price(POLYGON_MARKET_SOURCE_ID), price(STOOQ_MARKET_SOURCE_ID), price(YAHOO_FINANCE_DEV_MARKET_SOURCE_ID), price("00000000-0000-4000-a000-000000000013")],
+    ["market_data", null, null, null],
+  );
+  assert.deepEqual(
+    [fact(SEC_EDGAR_FILING_SOURCE_ID, "filing"), price(SEC_EDGAR_FILING_SOURCE_ID, "filing"), fact(POLYGON_MARKET_SOURCE_ID, "market_data")],
+    ["sec_filing", null, null],
+  );
 });
 
 test("a price binds only from a source class the authority allows (#444)", () => {
