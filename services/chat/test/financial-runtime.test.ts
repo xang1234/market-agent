@@ -231,7 +231,10 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     const carried = async (ticker: string) => ({ ...(await resolveMention(ticker)), handoff: { display_labels: { ticker } } }) as unknown as ChatResolvedSubjectPreResolution;
     const prior = [await carried("AAA"), await carried("QTR")];
     await turnWithPick(chatHarness(pool, { model, priorSubjects: async () => prior }), "Compare its revenue with AMB, OPM, PAX and COX", "Beta Holdings Corp.");
-    assert.deepEqual(seen, ["AAA; BBB; CCC; OPM; PAX", "AMB; BBB; CCC; OPM; PAX", "ALPHA; BBB; CCC; OPM; PAX", "AAA; AMB; OPM; PAX; COX"]);
+    // A company named twice takes one of the slots the carried ones fill.
+    const three = [await carried("QTR"), await carried("COX"), await carried("CCC")];
+    await turnWithPick(chatHarness(pool, { model, priorSubjects: async () => three }), "Compare its revenue with AMB, AAA and ALPHA", "Beta Holdings Corp.");
+    assert.deepEqual(seen, ["AAA; BBB; CCC; OPM; PAX", "AMB; BBB; CCC; OPM; PAX", "ALPHA; BBB; CCC; OPM; PAX", "AAA; AMB; OPM; PAX; COX", "QTR; COX; CCC; AMB; AAA"]);
   });
 
   await t.test("each name a turn gives is resolved once (#425)", async () => {
@@ -349,15 +352,17 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
 
   await t.test("a missing or failing planning model yields a gap, never the narrative composer", async () => {
     for (const model of [null, (async () => { throw new Error("provider down"); }) as PlanningModel]) {
-      const { events } = await chatHarness(pool, { model }).run({ ...base, userIntent: "Compare revenue for AAA and BBB" });
+      const harness = chatHarness(pool, { model, researchScope: scopeOver as never });
+      const { events } = await harness.run({ ...base, userIntent: "Compare revenue for AAA and BBB" });
       assert.deepEqual(completed(events).financial_gap, { reason_code: "planning_unavailable" });
+      const scope = harness.persisted.at(-1)!.research_scope as { reads: string; companies: unknown };
+      assert.deepEqual([scope.reads, scope.companies], ["financial_gap", [{ issuer_id: IDS.issuerA, label: "AAA" }, { issuer_id: IDS.issuerB, label: "BBB" }]]);
     }
   });
 
   await t.test("a calculation that fails verification is a gap, never the narrative composer", async () => {
     const harness = chatHarness(pool, { model: revenueModel(["CCC"]), researchScope: scopeOver as never });
-    const { events } = await harness.run({ ...base, userIntent: "Revenue for CCC" });
-    assert.deepEqual(completed(events).financial_gap, { reason_code: "verification_failed" });
+    assert.deepEqual(completed((await harness.run({ ...base, userIntent: "Revenue for CCC" })).events).financial_gap, { reason_code: "verification_failed" });
     assert.deepEqual((harness.persisted.at(-1)!.research_scope as { companies: unknown }).companies, [{ issuer_id: MISSING_ISSUER, label: "CCC" }]);
   });
 
