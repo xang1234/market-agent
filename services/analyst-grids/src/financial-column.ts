@@ -21,7 +21,7 @@ import {
   type FinancialRuntimeAuthority,
   type FinancialSubjectRef,
 } from "../../financial-core/src/index.ts";
-import type { PersistParentArtifact } from "../../financial-engine/src/finalize.ts";
+import { ParentRefusedError, type PersistParentArtifact } from "../../financial-engine/src/finalize.ts";
 import { buildDeterministicPlan, type DeterministicUnits, type PlanningContext, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import type { ParentRecovery } from "../../financial-engine/src/recovery.ts";
@@ -269,7 +269,7 @@ const persistGridCell: PersistParentArtifact = async (tx, publication) => {
     snapshotId: publication.snapshot_id,
     certified: { financialRunId: publication.run_id, financialUnitId: publication.unit_id, certificateDigest: publication.certificate_digest, block: publication.block },
   });
-  if (!written) throw new Error("the grid cell is no longer pending under the run's owner");
+  if (!written) throw new ParentRefusedError("the grid cell is no longer pending under the run's owner");
 };
 
 function certifiedCell(block: FinancialAnswerBlock): CellWrite {
