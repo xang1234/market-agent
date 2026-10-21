@@ -10,8 +10,9 @@ import type {
 import { available, unavailable, type AvailabilityReason } from "../availability.ts";
 import { assertBarRange, normalizedBars, type AdjustmentBasis, type BarInterval } from "../bar.ts";
 import { DELAY_CLASSES, normalizedQuote, type DelayClass, type SessionState } from "../quote.ts";
+import type { ListingSplit } from "../split-repository.ts";
 import { assertListingRef, type ListingSubjectRef, type UUID } from "../subject-ref.ts";
-import { assertOneOf } from "../validators.ts";
+import { assertFinitePositive, assertOneOf } from "../validators.ts";
 import { errorMessageOr } from "../../../shared/src/http.ts";
 
 export type PolygonListingContext = {
@@ -80,6 +81,12 @@ type PolygonAggsPayload = {
   resultsCount?: number;
   adjusted?: boolean;
   next_url?: string;
+};
+
+type PolygonSplitsPayload = {
+  status?: unknown;
+  results?: unknown;
+  next_url?: unknown;
 };
 
 const INTERVAL_TO_POLYGON: Record<BarInterval, { multiplier: number; timespan: string }> = {
@@ -182,7 +189,7 @@ export function createPolygonAdapter(deps: PolygonAdapterDeps): MarketDataAdapte
           `/v2/aggs/ticker/${encodeURIComponent(ctx.ticker)}/range/` +
           `${tspec.multiplier}/${tspec.timespan}/${startMs}/${endMs}` +
           `?adjusted=${request.adjustment_basis === "split_adjusted"}&sort=asc&limit=50000`;
-        const pages = await fetchAggPages(deps.fetcher, path);
+        const pages = await fetchPages<PolygonAggsPayload>(deps.fetcher, path);
 
         const rawBars = pages.flatMap((page) => page.results ?? []);
         const bars: NormalizedBar[] = rawBars
@@ -281,7 +288,7 @@ async function getAggregateQuoteFallback(
   const path =
     `/v2/aggs/ticker/${encodeURIComponent(ctx.ticker)}/range/` +
     `1/day/${startMs}/${endMs}?adjusted=true&sort=asc&limit=50000`;
-  const pages = await fetchAggPages(deps.fetcher, path);
+  const pages = await fetchPages<PolygonAggsPayload>(deps.fetcher, path);
   const rows = pages.flatMap((page) => page.results ?? [])
     .filter((row) =>
       typeof row.t === "number" &&
@@ -384,22 +391,69 @@ function polygonHttpDetail(status: number): string {
   return `polygon: HTTP ${status}`;
 }
 
-async function fetchAggPages(fetcher: PolygonFetcher, firstPath: string): Promise<PolygonAggsPayload[]> {
-  const pages: PolygonAggsPayload[] = [];
+// Polygon also lists announced splits dated in the future, and they are kept.
+export async function fetchPolygonSplits(fetcher: PolygonFetcher, ticker: string): Promise<ListingSplit[]> {
+  const pages = await fetchPages<PolygonSplitsPayload>(
+    fetcher,
+    `/v3/reference/splits?ticker=${encodeURIComponent(ticker)}&limit=1000`,
+  );
+  const byDate = new Map<string, ListingSplit>();
+  for (const page of pages) {
+    if (page.status !== "OK" || !Array.isArray(page.results)) {
+      throw new MalformedPayloadError(`splits page for ${ticker} is not an OK page of results`);
+    }
+    for (const row of page.results) {
+      const split = parsePolygonSplit(row, ticker);
+      const seen = byDate.get(split.execution_date);
+      if (seen && (seen.split_from !== split.split_from || seen.split_to !== split.split_to)) {
+        throw new MalformedPayloadError(`conflicting ${ticker} splits on ${split.execution_date}`);
+      }
+      byDate.set(split.execution_date, seen ?? split);
+    }
+  }
+  return [...byDate.values()].sort((a, b) => a.execution_date.localeCompare(b.execution_date));
+}
+
+function parsePolygonSplit(row: unknown, ticker: string): ListingSplit {
+  const { execution_date, split_from, split_to, id, ticker: rowTicker } = (row ?? {}) as Record<string, unknown>;
+  const label = `polygon: ${ticker} split ${String(execution_date)}`;
+  if (rowTicker !== ticker) {
+    throw new MalformedPayloadError(`splits for ${ticker} include a row for ${String(rowTicker)}`);
+  }
+  if (typeof execution_date !== "string" || !isCalendarDate(execution_date)) {
+    throw new MalformedPayloadError(`${ticker} split has execution_date ${String(execution_date)}`);
+  }
+  assertFinitePositive(split_from, `${label} split_from`);
+  assertFinitePositive(split_to, `${label} split_to`);
+  if (typeof id !== "string" || id.length === 0) {
+    throw new MalformedPayloadError(`${ticker} split ${execution_date} has no id`);
+  }
+  return Object.freeze({ execution_date, split_from, split_to, provider_ref: id });
+}
+
+function isCalendarDate(value: string): boolean {
+  const ms = Date.parse(`${value}T00:00:00Z`);
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(ms) && new Date(ms).toISOString().startsWith(value);
+}
+
+async function fetchPages<Page extends { next_url?: unknown }>(fetcher: PolygonFetcher, firstPath: string): Promise<Page[]> {
+  const pages: Page[] = [];
   const seen = new Set<string>();
   let nextPath: string | undefined = firstPath;
 
   while (nextPath) {
     if (seen.has(nextPath)) {
-      throw new MalformedPayloadError(`aggregate pagination loop detected for ${nextPath}`);
+      throw new MalformedPayloadError(`pagination loop detected for ${nextPath}`);
     }
     seen.add(nextPath);
 
-    const page = (await fetcher(nextPath)) as PolygonAggsPayload;
+    const page = (await fetcher(nextPath)) as Page;
     pages.push(page);
-    nextPath = typeof page.next_url === "string" && page.next_url.length > 0
-      ? page.next_url
-      : undefined;
+    // A malformed next_url must not end the list early, as if it were complete.
+    if (page.next_url !== undefined && page.next_url !== null && typeof page.next_url !== "string") {
+      throw new MalformedPayloadError(`next_url is not a string: ${String(page.next_url)}`);
+    }
+    nextPath = page.next_url || undefined;
   }
 
   return pages;

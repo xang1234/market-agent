@@ -15,6 +15,7 @@ const DB_HARNESS_SERVICE_DIRS = [
   "services/dev-api",
   "services/discovery",
   "services/evidence",
+  "services/market",
   "services/observability",
   "services/portfolio",
   "services/resolver",
@@ -74,7 +75,7 @@ test("ci workflow includes services/market coverage", async () => {
 
   assert.match(workflow, /\bmarket\b/);
   assert.match(workflow, /working-directory:\s*services\/market/);
-  assert.match(workflow, /cache-dependency-path:\s*services\/market\/package-lock\.json/);
+  assert.match(jobSection(workflow, "services/market"), /cache-dependency-path:[\s\S]*services\/market\/package-lock\.json/);
 });
 
 test("ci workflow runs discovery through synthetic fixtures with its real database dependencies", async () => {
