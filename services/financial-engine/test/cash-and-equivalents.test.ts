@@ -1,7 +1,3 @@
-// Cash and cash equivalents from facts SEC ingestion wrote (#398): a filer
-// whose 10-K tags CashAndCashEquivalentsAtCarryingValue, and one whose 10-K
-// does not.
-
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
@@ -14,7 +10,7 @@ import { completedRun, databaseUrl, engineDatabase, IDS, pinnedClients, revenueP
 
 const USD = { kind: "currency", currency: "USD" };
 const FILERS = [
-  { slot: "cash", issuerId: randomUUID(), cik: 320193, balances: { Assets: "600", CashAndCashEquivalentsAtCarryingValue: "29943000000" } },
+  { slot: "cash", issuerId: randomUUID(), cik: 320193, balances: { Assets: "364980000000", CashAndCashEquivalentsAtCarryingValue: "29943000000" } },
   { slot: "none", issuerId: randomUUID(), cik: 320194, balances: { Assets: "600" } },
 ] as const;
 
@@ -41,23 +37,26 @@ function cashPlan() {
       omitted_count: 0,
       members: FILERS.map((filer, index) => ({ slot_id: filer.slot, subject_ref: { kind: "issuer", id: filer.issuerId }, display_order: index, role: index === 0 ? "primary" : "peer" })),
     },
-    metric_definitions: [{ metric_key: "cash_and_equivalents", definition_version: "cash_and_equivalents.v1" }],
-    operations: FILERS.map((filer) => ({
-      node_id: filer.slot,
+    metric_definitions: [
+      { metric_key: "cash_and_equivalents", definition_version: "cash_and_equivalents.v1" },
+      { metric_key: "total_assets", definition_version: "total_assets.v1" },
+    ],
+    operations: FILERS.flatMap((filer) => [[filer.slot, "cash_and_equivalents"], [`${filer.slot}_assets`, "total_assets"]].map(([nodeId, metricKey]) => ({
+      node_id: nodeId,
       operation: "reported_metric",
       operation_version: "reported_metric.v1",
       subject_slot: filer.slot,
-      metric_key: "cash_and_equivalents",
+      metric_key: metricKey,
       period: { kind: "fiscal_period", fiscal_year: 2024, fiscal_period: "FY" },
-    })),
-    outputs: FILERS.map((filer) => ({ output_id: filer.slot, node_id: filer.slot, unit_id: filer.slot })),
+    }))),
+    outputs: FILERS.flatMap((filer) => [filer.slot, `${filer.slot}_assets`].map((nodeId) => ({ output_id: nodeId, node_id: nodeId, unit_id: filer.slot }))),
     publication_units: FILERS.map((filer) => ({ unit_id: filer.slot, kind: "chat_section" })),
   });
   assert.ok(validated.ok, JSON.stringify(!validated.ok && validated.issues));
   return validated.value;
 }
 
-test("cash and equivalents certifies from an SEC 10-K, and is a gap without one", { timeout: 300_000 }, async (t) => {
+test("cash and equivalents certifies from a 10-K that tags it, and is a missing_input gap from a 10-K that does not", { timeout: 300_000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for engine coverage");
     return;
@@ -103,8 +102,14 @@ test("cash and equivalents certifies from an SEC 10-K, and is a gap without one"
     ],
   );
 
+  for (const [outputId, value] of [["cash_assets", "364980000000"], ["none_assets", "600"]]) {
+    const assets = await inspect(outputId!);
+    assert.ok(assets.availability === "available");
+    assert.deepEqual([assets.disposition, assets.payload], ["verified", { kind: "value", unit: USD, exact: true, value, rounding: null }], `${outputId}: both balance sheets certify`);
+  }
+
   const none = await inspect("none");
   assert.ok(none.availability === "available");
-  assert.deepEqual([none.disposition, none.payload, none.coverage_state], ["missing", { kind: "gap", explanation: "No eligible input was public before the knowledge cutoff.", reason_code: "missing_input" }, "none"]);
+  assert.deepEqual([none.disposition, none.payload, none.coverage_state], ["missing", { kind: "gap", explanation: "No eligible input was public before the knowledge cutoff.", reason_code: "missing_input" }, "partial"]);
   assert.deepEqual(none.inputs, [{ input_slot: "none", status: "gap", reason_code: "missing_input" }]);
 });
