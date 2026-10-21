@@ -166,6 +166,7 @@
             "source",
             "metric",
             "value",
+            "split_adjustment",
             "unit",
             "period",
             "precision_status",
@@ -234,8 +235,15 @@
               "additionalProperties": false
             },
             "value": {
+              "description": "The value as filed; a restated input computes with its split adjustment's value.",
               "type": "string",
               "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+            },
+            "split_adjustment": {
+              "oneOf": [
+                { "type": "null" },
+                { "$ref": "./financial_result_schema.json#/$defs/SplitAdjustmentV1" }
+              ]
             },
             "unit": {
               "$ref": "./finance_research_block_schema.json#/$defs/FinancialUnit"

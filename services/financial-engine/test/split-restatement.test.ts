@@ -3,16 +3,19 @@
 
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import type { Client } from "pg";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { recordFactPrecisionAttestation, recordSourcePublicationAttestation } from "../../evidence/src/financial-attestations.ts";
 import { recordFactFinancialContext } from "../../evidence/src/financial-context.ts";
+import Ajv2020 from "../../financial-core/node_modules/ajv/dist/2020.js";
 import { validateFinancialPlan, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
 import { bindPlanInputs } from "../src/bind-inputs.ts";
 import { createEvidenceFinancialPort } from "../src/evidence-adapter.ts";
 import { finalizeUnit } from "../src/finalize.ts";
-import { authorityFor, engineDatabase, HASH, leasedRun, pinnedClients, readyRun, revenuePlan } from "./db-fixtures.ts";
+import { inspectCommittedResult } from "../src/inspection.ts";
+import { authorityFor, engineDatabase, HASH, IDS as FIXTURE_IDS, leasedRun, pinnedClients, readyRun, revenuePlan } from "./db-fixtures.ts";
 
 const IDS = {
   tenK: "4f000000-0000-4000-8000-0000000003c1",
@@ -149,6 +152,19 @@ test("as-filed share figures bound on a split basis", { timeout: 300_000 }, asyn
     const [client] = await pinnedClients(t, db, 1);
     const sealed = await finalizeUnit({ client: client!, lease, authority, unit_id: "share_unit", snapshot_id: randomUUID(), persistParent: async () => {} });
     assert.equal(sealed.status, "published", JSON.stringify(sealed));
+
+    const resultId = (await db.query(`select result_id::text from financial_results where run_id = $1 and output_id = 'out_eps'`, [runId])).rows[0]!.result_id;
+    const inspection = await inspectCommittedResult(db, FIXTURE_IDS.owner, resultId);
+    const ajv = new Ajv2020({ strict: false, validateFormats: false });
+    for (const file of ["finance_research_block_schema.json", "financial_plan_schema.json", "financial_result_schema.json", "financial_answer_http_schema.json"]) {
+      ajv.addSchema(JSON.parse(readFileSync(new URL(`../../../spec/${file}`, import.meta.url), "utf8")));
+    }
+    const valid = ajv.getSchema("https://example.com/schemas/financial_answer_http_schema.json#/$defs/FinancialResultInspection")!;
+    assert.ok(valid(inspection), JSON.stringify(valid.errors));
+    const [input] = inspection?.availability === "available" ? inspection.inputs : [];
+    assert.deepEqual(input?.status === "bound" && [input.value, input.split_adjustment?.factor, input.split_adjustment?.adjusted_native_value], [
+      "11.93", { numerator: "10", denominator: "1" }, { numerator: "1193", denominator: "1000" },
+    ], "the inspected input is the value as filed, with the adjustment that restates it");
   });
 
   await t.test("before the split, they bind as filed: factor one, no split", async () => {
