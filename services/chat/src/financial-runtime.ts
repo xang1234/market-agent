@@ -15,6 +15,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   createRuntimeAuthority,
+  dependencyClosure,
   hashCanonical,
   operationDependencies,
   PLANNABLE_METRICS,
@@ -634,13 +635,19 @@ export const SCOPE_METRICS: Readonly<Record<string, string | null>> = {
 
 const figureKey = (node: OperationNode) => node.operation === "reported_metric" ? node.metric_key : node.operation;
 
-// The figures a plan's outputs show: a change, sum, ratio, threshold or
-// ranking is of the figures it reads.
-function shownFigures(plan: FinancialPlanV1): OperationNode[] {
+// The figures a node shows: a change, sum, ratio, threshold or ranking is of
+// the figures it reads.
+function figuresOf(plan: FinancialPlanV1): (node: OperationNode) => OperationNode[] {
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
   const figures = (node: OperationNode): OperationNode[] =>
     Object.hasOwn(SCOPE_METRICS, figureKey(node)) ? [node] : operationDependencies(node).flatMap((id) => figures(nodes.get(id)!));
-  return plan.outputs.flatMap((output) => figures(nodes.get(output.node_id)!));
+  return figures;
+}
+
+// The figures a plan's outputs show.
+function shownFigures(plan: FinancialPlanV1): OperationNode[] {
+  const figures = figuresOf(plan);
+  return plan.outputs.flatMap((output) => figures(plan.operations.find((node) => node.node_id === output.node_id)!));
 }
 
 // The figures a plan shows, as the chat scope names them.
@@ -671,22 +678,32 @@ const INCOME_ITEM_FIGURE: Readonly<Record<IncomeItem, string | null>> = {
 /**
  * What a question asks for, as the model read it, that its plan does not
  * compute, so the answer names it instead of leaving it out.
- * ponytail: a qualified metric ("EPS growth", "adjusted EPS") is not checked,
- * as nothing records which qualifier the plan computed; record its base and
- * qualifier on RequestedMetric to check it.
  */
 export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1): string[] {
   const { asks, offMetrics } = readingAsks(reading);
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
+  const figures = figuresOf(plan);
   const shown = shownFigures(plan);
+  const reached = [...dependencyClosure(plan, plan.outputs.map((output) => output.node_id))].map((id) => nodes.get(id)!);
   const margins = shown.filter((node): node is MarginNode =>
     node.operation === "gross_margin" || node.operation === "operating_margin" || node.operation === "net_margin");
   const read = new Set(shown.flatMap((node) => [figureKey(node), SCOPE_METRICS[figureKey(node)] ?? []].flat()));
-  const periodOf = (id: string) => {
-    const node = nodes.get(id);
-    return node?.operation === "reported_metric" ? JSON.stringify(node.period) : id;
+  // A figure's period is its reported inputs'.
+  const periodOf = (node: OperationNode): string =>
+    node.operation === "reported_metric" ? JSON.stringify(node.period) : periodOf(nodes.get(operationDependencies(node)[0]!)!);
+  const marginPeriods = new Set(margins.map(periodOf));
+  // An engine figure is as reported, so a qualified metric is computed only as
+  // its base's growth (a change of it) or its trend (it over several periods).
+  const computes = (metric: RequestedMetric) => {
+    const ofBase = (node: OperationNode) => SCOPE_METRICS[figureKey(node)] === metric.base;
+    if (metric.adjustment !== undefined) return false;
+    if (metric.qualifier === "growth") {
+      return reached.some((node) => (node.operation === "percent_change_positive_base" || node.operation === "absolute_change") &&
+        figures(nodes.get(node.current)!).some(ofBase));
+    }
+    return metric.qualifier === "trend" && new Set(shown.filter(ofBase).map(periodOf)).size > 1;
   };
-  const marginPeriods = new Set(margins.map((node) => periodOf(node.revenue)));
+  const qualified = reading.metrics.filter((metric) => metric.base !== undefined && !offMetrics.has(metric.metric_key) && !computes(metric));
   const metrics = [...new Map(reading.metrics
     .filter((metric) => CATALOG.has(metric.metric_key))
     .flatMap((metric) => metric.metric_key === "balance_sheet" ? BALANCE_SHEET_ITEMS.map((key) => CATALOG.get(key)!) : [metric])
@@ -697,6 +714,7 @@ export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1): st
     // The income items name its figures more closely than the whole statement does.
     ...metrics.filter((metric) => !read.has(metric.metric_key) && !(metric.metric_key === "income_statement" && reading.income_items.length > 0))
       .map((metric) => inSentence(metric.label)),
+    ...qualified.map((metric) => inSentence(metric.label)),
     ...items,
     ...(asks.has("margin_trend") && marginPeriods.size < 2 ? ["a margin over several periods"]
       : asks.has("margins") && marginPeriods.size === 0 && !items.some((item) => item.endsWith("margin")) ? ["a margin"]

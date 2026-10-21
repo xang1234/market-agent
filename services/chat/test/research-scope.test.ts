@@ -352,7 +352,7 @@ test("an inherited gap, or one asked beside something it can show, does not stop
 test("a statement metric asked year to date is a named gap; a comparison still charts the window", () => {
   const ytdCashFlow = proposal({ metrics: [{ metric: "free_cash_flow", qualifier: "ytd" }] });
   const single = fresh("What is NVDA's free cash flow YTD?", ytdCashFlow);
-  assert.deepEqual([single.route, single.metrics], ["unavailable_metric", [{ metric_key: "free_cash_flow_ytd", label: "Free cash flow year to date", available: false }]]);
+  assert.deepEqual([single.route, single.metrics], ["unavailable_metric", [{ metric_key: "free_cash_flow_ytd", label: "Free cash flow year to date", available: false, base: "free_cash_flow", qualifier: "ytd" }]]);
   assert.equal(fresh("Compare NVDA and AMD free cash flow YTD", ytdCashFlow, [NVDA, AMD]).route, "comparison");
   // A YTD that qualifies something else leaves the statement metric as asked.
   assert.equal(fresh("Show NVDA EPS and YTD stock return", proposal({ metrics: ["eps_diluted"] })).route, "statements");

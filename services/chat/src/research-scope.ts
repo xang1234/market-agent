@@ -57,8 +57,18 @@ export function readsEngine(reads: ResearchRoute): boolean {
 
 export type ScopeField = "peers" | "segments" | "margin_trend" | "metrics" | "fiscal_year" | "fiscal_quarter" | "price_window" | "benchmark";
 
-// A metric a question names: one this chat's readers show, or a named gap.
-export type RequestedMetric = { metric_key: string; label: string; available: boolean };
+// A metric a question names: one this chat's readers show, or a named gap. A
+// statement metric with an adjustment or a qualifier ("adjusted EPS", "EPS
+// growth") records the catalog metric it qualifies as its base, so an engine
+// answer can tell whether it computed it (financial-runtime.ts uncoveredAsks).
+export type RequestedMetric = {
+  metric_key: string;
+  label: string;
+  available: boolean;
+  base?: string;
+  adjustment?: Adjustment;
+  qualifier?: Qualifier;
+};
 
 export type ResearchScope = {
   route: ResearchRoute;
@@ -213,8 +223,8 @@ export function statementMetrics(scope: ResearchScope): ReadonlyArray<RequestedM
 // ("free cash flow margin", "growth in EPS").
 export const PROPOSABLE_ADJUSTMENTS = ["adjusted", "non_gaap", "pro_forma", "core", "normalized", "levered", "unlevered"] as const;
 export const PROPOSABLE_QUALIFIERS = ["growth", "margin", "yield", "trend", "per_share", "ytd"] as const;
-type Adjustment = (typeof PROPOSABLE_ADJUSTMENTS)[number];
-type Qualifier = (typeof PROPOSABLE_QUALIFIERS)[number];
+export type Adjustment = (typeof PROPOSABLE_ADJUSTMENTS)[number];
+export type Qualifier = (typeof PROPOSABLE_QUALIFIERS)[number];
 const ADJUSTMENT_LABELS: Readonly<Record<Adjustment, string>> = {
   adjusted: "Adjusted",
   non_gaap: "Non-GAAP",
@@ -240,6 +250,9 @@ function qualifiedMetric(metric: RequestedMetric, adjustment: Adjustment | null,
     metric_key: [metric.metric_key, adjustment, qualifier].filter(Boolean).join("_"),
     label: [name, qualifier === "ytd" ? "year to date" : qualifier?.replaceAll("_", " ")].filter(Boolean).join(" "),
     available: false,
+    base: metric.metric_key,
+    ...(adjustment === null ? {} : { adjustment }),
+    ...(qualifier === null ? {} : { qualifier }),
   };
 }
 
