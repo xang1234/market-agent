@@ -64,7 +64,7 @@ export type PublicationUnitKind = (typeof PUBLICATION_UNIT_KINDS)[number];
 export const SURFACES = ["chat", "analyze", "analyst_grid", "thesis", "discovery"] as const;
 export type Surface = (typeof SURFACES)[number];
 
-export const FEATURE_MODES = ["off", "enforce"] as const;
+export const FEATURE_MODES = ["enforce"] as const;
 export type FeatureMode = (typeof FEATURE_MODES)[number];
 
 export const PLANNING_OUTCOMES = ["ready", "needs_clarification", "unsupported"] as const;
@@ -143,7 +143,7 @@ export type FinancialUnit =
   | { kind: "currency" | "currency_per_share"; currency: string }
   | { kind: "shares" | "ratio" | "percent" | "percentage_points" | "basis_points" | "count" };
 
-export type FinancialSubjectRef = { kind: "issuer" | "listing"; id: UUID };
+export type FinancialSubjectRef = { kind: "issuer"; id: UUID };
 
 export type SubjectSlot = {
   slot_id: LocalId;

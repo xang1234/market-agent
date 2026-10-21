@@ -28,6 +28,7 @@ test("routeFor sends chat-profile prefixes to their service", () => {
   assert.deepEqual(routeFor("/v1/dev/llm-settings"), { kind: "service", service: "dev-api" });
   assert.deepEqual(routeFor("/v1/market/quotes"), { kind: "service", service: "market" });
   assert.deepEqual(routeFor("/v1/fundamentals/profile"), { kind: "service", service: "fundamentals" });
+  assert.deepEqual(routeFor("/v1/watchlists/default/members"), { kind: "service", service: "watchlists" });
 });
 
 test("routeFor prefers the longest prefix: evidence inspect is dev-api, the rest is parked", () => {
@@ -36,7 +37,7 @@ test("routeFor prefers the longest prefix: evidence inspect is dev-api, the rest
 });
 
 test("routeFor parks services outside the chat profile and leaves the rest to the web app", () => {
-  assert.deepEqual(routeFor("/v1/watchlists/default/members"), { kind: "parked", prefix: "/v1/watchlists" });
+  assert.deepEqual(routeFor("/v1/screener/search"), { kind: "parked", prefix: "/v1/screener" });
   assert.deepEqual(routeFor("/chat"), { kind: "web" });
   assert.deepEqual(routeFor("/src/main.tsx"), { kind: "web" });
   // Whole path segments only: /v1/chatter is not /v1/chat.

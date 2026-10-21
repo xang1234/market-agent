@@ -9,7 +9,7 @@ import {
 } from "./http.ts";
 import type { DiscoveryService } from "../../discovery/src/ports.ts";
 import { startFinancialWorkerFromEnv, type FinancialWorkerEnv } from "./financial-worker-bootstrap.ts";
-import { activeFinancialSurfaces, loadFinancialModes, type FinancialEnv } from "./financial-env.ts";
+import { activeFinancialSurfaces, loadFinancialConfig, type FinancialEnv } from "./financial-env.ts";
 import { analyzeFinancialRecovery } from "../../analyze/src/financial-section.ts";
 import { gridFinancialRecovery } from "../../analyst-grids/src/financial-column.ts";
 import type { SqlExecutor } from "../../financial-engine/src/ports.ts";
@@ -42,7 +42,7 @@ export async function createDevApiRuntimeFromEnv(
     env.DEV_API_ANALYZE_SEAL_MODULE?.trim() ||
     DEFAULT_DEV_API_RUNTIME_MODULE;
   if (!databaseUrl) return { adapters: undefined, worker: null };
-  const financialModes = loadFinancialModes(env);
+  const financialConfig = loadFinancialConfig(env);
 
   const module = await import(moduleSpecifier(sealModulePath, cwd));
   if (typeof module.sealAnalyzeSnapshot !== "function") {
@@ -71,8 +71,8 @@ export async function createDevApiRuntimeFromEnv(
   const { Pool } = await import("pg");
   const pool = new Pool({ connectionString: databaseUrl });
   // Nothing financial starts, the worker included, until its schema and versions are in place.
-  await requireFinancialReadiness(pool, activeFinancialSurfaces(financialModes));
-  const worker = financialModes.worker ? startFinancialWorkerFromEnv(pool, env, recoveryParents(pool)) : null;
+  await requireFinancialReadiness(pool, activeFinancialSurfaces(financialConfig));
+  const worker = financialConfig.worker ? startFinancialWorkerFromEnv(pool, env, recoveryParents(pool)) : null;
   if (!worker) console.warn("dev-api: FINANCIAL_WORKER_ENABLED=false, so interrupted financial runs, grid cells included, are not recovered");
   const discovery = module.createDiscoveryService === undefined
     ? undefined
@@ -90,7 +90,7 @@ export async function createDevApiRuntimeFromEnv(
   return { adapters, worker };
 }
 
-/** Parents whose verified units are resumable after a restart; others register as they adopt the engine. */
+/** Parents whose verified units are resumable after a restart. Discovery-owned runs are never resumed here, only under the Discovery worker's fence. */
 export function recoveryParents(db: SqlExecutor): Readonly<Record<string, ParentRecovery>> {
   return { analyze_memo_run: analyzeFinancialRecovery(db), analyst_grid_run: gridFinancialRecovery(db) };
 }

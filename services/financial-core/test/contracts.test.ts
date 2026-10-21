@@ -193,6 +193,10 @@ test("runtime authority is constructed only from validated server input", () => 
   escalated.feature.mode = "god";
   assert.throws(() => createRuntimeAuthority(escalated), FinancialContractError);
 
+  const disabled = mutable(authorityFixture());
+  disabled.feature.mode = "off";
+  assert.throws(() => createRuntimeAuthority(disabled), FinancialContractError, "the engine has no off mode");
+
   const extra = mutable(authorityFixture());
   extra.verified = true;
   assert.throws(() => createRuntimeAuthority(extra), FinancialContractError);

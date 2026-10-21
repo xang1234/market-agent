@@ -16,7 +16,6 @@ import { STAGED_SNAPSHOT_MANIFEST } from "../../snapshot/src/manifest-staging.ts
 import { sealSnapshotWithPool } from "../../snapshot/src/snapshot-sealer.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { planningModelFromRouter } from "../../financial-engine/src/planner.ts";
-import { parseFinancialMode } from "../../financial-engine/src/request.ts";
 import { createLlmRouterFromEnv } from "../../llm/src/index.ts";
 import {
   createRegistryBackedAnalystToolRuntime,
@@ -337,11 +336,10 @@ async function turnScope(
   threadId: string,
   question: string,
   covered: ReadonlyArray<ChatResolvedSubjectPreResolution>,
-  served = false,
+  served: boolean,
   // The model's reading of the question, awaited beside the previous scope;
-  // null asks for nothing new (a financial answer's scope takes none, so the
-  // engine's answer waits on no extra model call).
-  proposal: Promise<ScopeProposal | null> = Promise.resolve(null),
+  // null asks for nothing new.
+  proposal: Promise<ScopeProposal | null>,
 ): Promise<(cutoff: string) => ResearchScope> {
   const carried = companiesOf(covered);
   const [prior, read] = await Promise.all([continuedScope(threadId, carried), proposal]);
@@ -475,15 +473,17 @@ const NO_DEFAULT_REFS = Object.freeze({
 
 // A published financial answer saves its scope too, so a period it asks for
 // carries into the next follow-up (#206). Its metrics are the published plan's
-// (financial-runtime.ts), so the engine's answer waits on no model call.
-export async function financialResearchScope(context: ChatFinancialTurnContext): Promise<ResearchScope> {
+// (financial-runtime.ts).
+export async function financialResearchScope(
+  context: ChatFinancialTurnContext,
+  reading: Promise<ScopeProposal | null>,
+): Promise<ResearchScope> {
   const covered = context.subjectPreResolutions ??
     (context.subjectPreResolution?.status === "resolved" ? [context.subjectPreResolution] : []);
-  return (await turnScope(context.threadId, context.userIntent ?? "", covered, true))(turnNow(process.env));
+  return (await turnScope(context.threadId, context.userIntent ?? "", covered, true, reading))(turnNow(process.env));
 }
 
 export const financialRuntime: ChatFinancialRuntime = createChatFinancialRuntime({
-  mode: parseFinancialMode(process.env.CHAT_FINANCIAL_MODE, "CHAT_FINANCIAL_MODE"),
   pool: { query: (text, values) => pool().query(text, values), connect: () => pool().connect() },
   planningModel: async (request) => {
     const router = await createLlmRouterFromEnv(process.env);
@@ -491,7 +491,9 @@ export const financialRuntime: ChatFinancialRuntime = createChatFinancialRuntime
     return planningModelFromRouter(router)(request);
   },
   resolveMention: (mention) => preResolveSubject({ text: mention }),
+  priorSubjects: (threadId) => loadPriorSubjects({ threadId }),
   evidence: createEvidenceFinancialPort,
+  readQuestion: (question) => proposeScope({ question }),
   researchScope: financialResearchScope,
 });
 

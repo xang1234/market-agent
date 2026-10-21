@@ -978,8 +978,10 @@ function subjectAwareRunner(
 
 const MAX_TURN_SUBJECTS = 5;
 
-type TurnSubjects = {
+export type TurnSubjects = {
   subjects: ReadonlyArray<ChatResolvedSubjectPreResolution>;
+  // Those carried from the previous answer that the turn does not name.
+  carried?: ReadonlyArray<ChatResolvedSubjectPreResolution>;
   // Set only for comparisons: a named company to ask about, or ones not found.
   ambiguous?: Exclude<ChatSubjectPreResolution, ChatResolvedSubjectPreResolution>;
   notFound: ReadonlyArray<string>;
@@ -993,6 +995,11 @@ type TurnSubjects = {
 // naming a new company after a comparison ("what about AAPL?") could mean
 // either, so it asks; "just AAPL" or a full new question switches to it.
 const ADD = /\b(?:add|adding|bring (?:back|in))\b/i;
+
+// A turn that compares companies or adds one, so the previous answer's are carried.
+export function comparativeTurn(text: string): boolean {
+  return COMPARATIVE.test(text) || ADD.test(text);
+}
 // Where a list of companies to remove ends: at the end of the sentence, or
 // where the next request starts ("drop AMD and AAPL, and add TSLA"). Commas and
 // "and" inside the list are part of it.
@@ -1012,13 +1019,13 @@ const REMOVE = new RegExp(
 const CONTINUATION = /^\s*(?:and\s+)?(?:what|how)\s+about\b|^\s*and\s+\S/i;
 const ONLY = /\b(?:just|only|instead|switch to|alone)\b/i;
 
-async function resolveTurnSubjects(
+export async function resolveTurnSubjects(
   context: ChatTurnRunContext,
   preResolve: ChatSubjectPreResolver,
   loadPriorSubjects: ChatPriorSubjectsLoader | undefined,
 ): Promise<TurnSubjects> {
   const text = nonEmptySubjectText(context.userIntent);
-  const comparative = COMPARATIVE.test(text ?? "") || ADD.test(text ?? "");
+  const comparative = comparativeTurn(text ?? "");
   const named = text ? await resolveNamedSubjects(text, preResolve) : { resolved: [], unresolved: [] };
   // A removal is handled even when what it names does not resolve ("drop XYZQ").
   const change = text && loadPriorSubjects !== undefined && (named.resolved.length > 0 || new RegExp(REMOVE.source).test(text))
@@ -1044,7 +1051,7 @@ async function resolveTurnSubjects(
   const carried = distinctCompanies(prior)
     .filter((subject) => !namedKeys.has(companyKey(subject)))
     .slice(0, MAX_TURN_SUBJECTS - newlyNamed.length);
-  return { subjects: [...carried, ...newlyNamed], notFound };
+  return { subjects: [...carried, ...newlyNamed], carried, notFound };
 }
 
 // A follow-up that drops companies from the previous answer's, or names a new
@@ -1117,8 +1124,10 @@ async function companyChange(
     const additions = distinctCompanies(named.filter((subject) => !inScope(subject)))
       .filter((subject) => !removed.has(companyKey(subject)) && !keptKeys.has(companyKey(subject)))
       .slice(0, MAX_TURN_SUBJECTS);
+    const keptSlots = kept.slice(0, MAX_TURN_SUBJECTS - additions.length);
     return {
-      subjects: [...kept.slice(0, MAX_TURN_SUBJECTS - additions.length), ...additions],
+      subjects: [...keptSlots, ...additions],
+      carried: keptSlots,
       notFound: unresolved.map((resolution) => resolution.input_text),
     };
   }
@@ -1138,7 +1147,7 @@ function tickerLabel(subject: ChatResolvedSubjectPreResolution): string {
   return subject.handoff.display_labels?.ticker ?? subject.display_label;
 }
 
-function labelList(labels: ReadonlyArray<string>): string {
+export function labelList(labels: ReadonlyArray<string>): string {
   return labels.length < 2 ? labels.join("") : `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
 }
 

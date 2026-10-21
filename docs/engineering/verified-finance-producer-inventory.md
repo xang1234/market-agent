@@ -51,9 +51,9 @@ dependency-free and pass the web compiler options.
 ## 2. Numerical producer inventory
 
 Legend for **Disposition**: *engine* — migrate to the verified engine; *unsupported* —
-under enforcement returns an explicit unsupported gap until the engine covers it;
+returns an explicit unsupported gap until the engine covers it;
 *narrative* — stays non-certified and visibly labelled; *transport* — must carry only
-committed values after enforcement.
+committed values.
 
 ### 2.1 Shared inputs and publication
 
@@ -64,7 +64,7 @@ committed values after enforcement.
 | Evidence fact repo | `services/evidence/src/fact-repo.ts` | Fact writes/reads | Strict input repo + attestations | T08 |
 | Snapshot verifier | `services/snapshot/src/snapshot-verifier.ts` | Verifies refs/metadata; no numeric values or operands | Add DB-backed financial recomputation | T14 |
 | Snapshot sealer / manifest staging / seal input | `services/snapshot/src/{snapshot-sealer,manifest-staging,seal-input}.ts` | Seals manifests | Certificate insertion in same transaction | T14, T15 |
-| Block schema + web renderers | `spec/finance_research_block_schema.json`, `web/src/blocks/*` (`MetricRow`, `MetricsComparison`, `RevenueBars`, `Table`, `LabelValueCell`, `SeriesChart`, `LineChart`, `PriceTargetRange`, `AnalystConsensus`, `EpsSurprise`, `PerfComparison`) | Render model/fact values as provided | Add `financial_answer`; legacy blocks labelled legacy under enforcement | T16, T27 |
+| Block schema + web renderers | `spec/finance_research_block_schema.json`, `web/src/blocks/*` (`MetricRow`, `MetricsComparison`, `RevenueBars`, `Table`, `LabelValueCell`, `SeriesChart`, `LineChart`, `PriceTargetRange`, `AnalystConsensus`, `EpsSurprise`, `PerfComparison`) | Render model/fact values as provided | Add `financial_answer`; legacy blocks labelled legacy | T16, T27 |
 
 ### 2.2 Chat
 
@@ -118,11 +118,11 @@ committed values after enforcement.
 
 ## 2.7 Final dispositions (T30)
 
-What each producer actually does with its surface's flag set to `enforce`,
-and the test that shows it. "Open" marks a planned disposition that is not
+What each producer does now that every surface runs on the engine, and the
+test that shows it. "Open" marks a planned disposition that is not
 done; it is not counted as complete.
 
-| Producer | Final disposition under enforcement | Evidence |
+| Producer | Final disposition | Evidence |
 |---|---|---|
 | SEC Company Facts / fact repo | Lossless tokens and precision proofs; no publication attestations yet, so SEC facts bind as `publication_time_unknown` (declared gaps) until a reviewed mapping issues them | `services/fundamentals` + `services/evidence` financial tests; known gap below |
 | Snapshot verifier / sealer | Recomputes every unit from ledger records; rejects every mutant in the release gate | `services/snapshot/test/financial-verifier*.test.ts`, `scripts/verified-finance-fixture.test.ts` |
@@ -142,11 +142,9 @@ done; it is not counted as complete.
 
 ## 3. Status
 
-Every surface in section 2 now has a certified lane. Grids, Thesis, and
-Discovery always use it, with no flag and no legacy path. Chat and Analyze put
-it behind a per-surface flag, and with that flag off (the default) they stay on
-the legacy path listed above. The shared
-foundations are in place:
+Every surface in section 2 has a certified lane and always uses it, with no
+flag. Chat sends only questions that name a metric to it; other questions stay
+on the narrative path until #398. The shared foundations are in place:
 
 - **T00–T04:** the pure financial core (contracts, exact arithmetic, reviewed
   operations, coverage).
@@ -172,13 +170,13 @@ foundations are in place:
   its parent artifact is written
   in the finalization transaction:
 
-  | Surface | Flag | What is certified | Parent write in finalization |
-  |---|---|---|---|
-  | Chat | `CHAT_FINANCIAL_MODE` | Model-planned requests over resolved subjects | Assistant message |
-  | Analyze | None: always on | One deterministic plan per memo, one unit per numerical section | `analyze_run_financial_sections` row (0049) |
-  | Grids | None: always enforced | One plan per run, one unit per numerical cell | Cell write and progress count (0050) |
-  | Thesis | None: always enforced | One plan per saved metric condition | Current-version check under the agent lock |
-  | Discovery | None: always enforced (`createWorkerDeps`) | One plan per candidate × approved criterion | Campaign-fence check (live lease, running, same brief, candidate researching) |
+  | Surface | What is certified | Parent write in finalization |
+  |---|---|---|
+  | Chat | Model-planned requests over resolved subjects, for questions that name a metric | Assistant message |
+  | Analyze | One deterministic plan per memo, one unit per numerical section | `analyze_run_financial_sections` row (0049) |
+  | Grids | One plan per run, one unit per numerical cell | Cell write and progress count (0050) |
+  | Thesis | One plan per saved metric condition | Current-version check under the agent lock |
+  | Discovery (`createWorkerDeps`) | One plan per candidate × approved criterion | Campaign-fence check (live lease, running, same brief, candidate researching) |
 
   The web shows every certified result through one inspector, with four
   labels: verified calculation, partial coverage, source-linked narrative,
@@ -201,15 +199,13 @@ foundations are in place:
   Evidence deletion takes the finalization share locks, so it waits for an
   in-flight publication and then erases it.
 
-- **T29:** staged readiness. Each surface's mode is server-owned (`off` or
-  `enforce`). An unset flag is off, a malformed one stops startup,
-  and model JSON cannot carry a mode. Each run records the mode it ran under.
-  With any surface on (or the recovery worker enabled), a service refuses to
-  start until `checkFinancialReadiness` passes. The dev API and the Discovery
-  worker always check, because thesis and Discovery always run on the engine.
-  That check covers the tables, columns, views, and functions the engine, its
-  evidence adapter, and erasure depend on, and a version registry covering
-  everything this build emits.
+- **T29:** readiness. No surface has a mode flag, so chat, the dev API,
+  analyst grids, and the Discovery worker each refuse to start until
+  `checkFinancialReadiness` passes. A removed `*_FINANCIAL_MODE` variable that
+  is still set logs a startup warning (`removedModeFlagWarnings`). New runs
+  record `feature_mode` as `enforce`. That check covers the tables, columns,
+  views, and functions the engine, its evidence adapter, and erasure depend
+  on, and a version registry covering everything this build emits.
   `createDevApiRuntimeFromEnv` returns the worker to its caller, and
   `worker.stop({ timeoutMs })` bounds shutdown. CI sets `REQUIRE_DOCKER=1`, so
   Docker-backed suites fail rather than skip, and runs the `scripts/` contract
@@ -233,8 +229,8 @@ Facts stored before that carry no proof and bind as
 precision proof and a context each, so they certify at the golden cutoff; a
 database trigger refuses that proof method on any other source (migration
 0063). A cutoff earlier than the fetch needs an archive
-proof, which no producer makes yet. Such units cannot be certified; with a lane
-enforced, those values appear as declared gaps rather than numbers.
+proof, which no producer makes yet. Such units cannot be certified, so those values
+appear as declared gaps rather than numbers.
 
 ### Wave 3 plan deviations
 
@@ -281,7 +277,7 @@ enforced, those values appear as declared gaps rather than numbers.
 | Reauthorization on every read and replay | Already in place since T17/T18 (`inspection.ts`, `read-model.ts`, `replay.ts`). T28 adds erased results, which read as unavailable. |
 | Safe logs | Run events carry only counts, lease epochs, digests, coverage states, and reason codes. The engine writes no console output. |
 | `services/dev-api/src/main.ts` | The entry point is `services/dev-api/src/dev.ts`. The readiness gate is in `runtime.ts` (`createDevApiRuntimeFromEnv`), before any lane or the worker starts. Chat (`runtime.ts` via `ChatFinancialRuntime.assertReady`) and analyst-grids (`dev.ts`) gate their own startup. |
-| `services/dev-api/src/financial-env.ts` scope | It holds the dev API's surfaces (analyze, worker). Thesis has no flag: its numerical conditions always run on the engine, so startup readiness always includes it. Chat reads `CHAT_FINANCIAL_MODE` in its own service with the same strict parser. Grids have no flag. Discovery has no finance flag: its numerical criteria always run on the engine, and only `DISCOVERY_ENABLED` starts it. |
+| `services/dev-api/src/financial-env.ts` scope | It holds the dev API's surfaces (analyze, worker). Thesis has no flag: its numerical conditions always run on the engine, so startup readiness always includes it. Chat has no flag: its metric questions always run on the engine, and it checks readiness in its own service. Grids have no flag. Discovery has no finance flag: its numerical criteria always run on the engine, and only `DISCOVERY_ENABLED` starts it. |
 | `db/test/schema-openapi-alignment.test.ts` | Covered by `scripts/openapi-contract.test.ts` (Wave 3), which now runs in CI in the new `scripts` job. |
 | Readiness: definition catalog in the database | `financial_definition_versions` is not populated by any writer; definitions are compiled in. Readiness checks the compiled registry against everything the build emits. |
 | T30 file layout | Held-out questions and their recorded drafts live in `scripts/verified-finance-fixtures.ts` beside the golden cases and mutants, so one fixture revision hash covers all of them. |

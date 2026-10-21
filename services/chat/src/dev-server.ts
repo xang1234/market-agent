@@ -3,6 +3,7 @@ import { Pool } from "pg";
 import { createChatServer } from "./http.ts";
 import { loadChatServerOptionsFromEnv } from "./runtime.ts";
 import { createThreadTitleGenerationJob } from "./thread-title.ts";
+import { removedModeFlagWarnings } from "../../financial-engine/src/readiness.ts";
 import {
   createLiveRunActivity,
   createRunActivityHub,
@@ -14,6 +15,7 @@ import {
 export async function buildChatDevServer(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<{ server: Server; close: () => Promise<void>; describe: () => string }> {
+  for (const warning of removedModeFlagWarnings(env, ["CHAT_FINANCIAL_MODE"])) console.warn(`chat: ${warning}`);
   const databaseUrl = env.CHAT_DATABASE_URL ?? env.DATABASE_URL;
   const runActivityAgentId = env.CHAT_RUN_ACTIVITY_AGENT_ID;
   const threadTitleModelModule = env.CHAT_THREAD_TITLE_MODEL_MODULE;

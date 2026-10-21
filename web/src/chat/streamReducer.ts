@@ -48,6 +48,8 @@ export type StreamState = {
   blocks_by_id: ReadonlyMap<string, StreamingBlock>
   block_order: ReadonlyArray<string>
   plan_steps: ReadonlyArray<StreamPlanStep>
+  // From snapshot.sealed, which the server sends before the first block.
+  snapshot_id: string | null
   // Captured from turn.error.
   error: string | null
   unverified?: UnverifiedTurn | null
@@ -68,6 +70,7 @@ export const INITIAL_STREAM_STATE: StreamState = Object.freeze({
   blocks_by_id: new Map<string, StreamingBlock>(),
   block_order: [],
   plan_steps: [],
+  snapshot_id: null,
   error: null,
 })
 
@@ -82,6 +85,7 @@ export function applyChatStreamEvent(state: StreamState, event: ChatSseEvent): S
         blocks_by_id: new Map(),
         block_order: [],
         plan_steps: planStepsForTurnStarted(event),
+        snapshot_id: null,
         error: null,
         unverified: null,
         shown: null,
@@ -138,8 +142,11 @@ export function applyChatStreamEvent(state: StreamState, event: ChatSseEvent): S
     case 'snapshot.staged':
       return withPlanSteps(state, planStepsForSnapshotStaged(state.plan_steps, event))
 
-    case 'snapshot.sealed':
-      return withPlanSteps(state, planStepsForSnapshotSealed(state.plan_steps, event))
+    case 'snapshot.sealed': {
+      const snapshot_id = readString(event.snapshot_id)
+      if (snapshot_id === null) return state
+      return { ...state, snapshot_id, plan_steps: planStepsForSnapshotSealed(state.plan_steps, event) }
+    }
 
     case 'block.began':
       return applyBlockBegan(state, event)

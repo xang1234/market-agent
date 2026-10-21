@@ -25,7 +25,7 @@ In a fresh worktree, `./scripts/dev-shell.sh install` runs `npm ci` for every pa
 `DEV_PROFILE` picks which services run.
 
 - `full` (the default) runs the web app and 11 services as separate HTTP processes. Analyze, Agents, and themes run inside dev-api. `dev-providers` starts only with `ENABLE_UNOFFICIAL_DEV_PROVIDERS=true`, and the discovery worker only with `DISCOVERY_ENABLED=true`. The other packages are libraries or command-line tools.
-- `chat` runs one process, `services/app`, that serves the web UI, chat, resolver, dev-api, market, and fundamentals on `WEB_PORT`, plus Postgres. The other services are parked. `status` lists them as `parked`, their API routes answer `503`, and their tabs do not load.
+- `chat` runs one process, `services/app`, that serves the web UI, chat, resolver, dev-api, watchlists, market, and fundamentals on `WEB_PORT`, plus Postgres. The other services are parked. `status` lists them as `parked`, their API routes answer `503`, and their tabs do not load.
 
 ### Sign in
 
@@ -71,13 +71,13 @@ A new thread restarts the replay. Concurrent tabs share one replay session. Page
 
 The static demo runs the same replay in the browser. `npm run build:demo` in `web/` builds the app for GitHub Pages under `/market-agent/`, and `npm run preview:demo` serves it at `http://127.0.0.1:4173/market-agent/`. The page answers its own API requests from the fixture, keeps one replay session per tab in `sessionStorage` so a reload keeps the thread, and starts signed in. A banner lists the recorded questions.
 
-To recapture after an API or block change, start on a fresh database and run these from the repo root:
+To recapture after an API or block change, run this from the repo root:
 
 ```bash
-DEV_CAPTURE_FILE=$PWD/services/app/fixtures/golden-conversation.replay.json DEV_PROFILE=chat DEV_NO_KEYS=true ./scripts/dev-shell.sh up
-(cd web && E2E_CAPTURE=1 npm run e2e)
-./scripts/dev-shell.sh down
+./scripts/dev-shell.sh recapture
 ```
+
+It uses its own throwaway database, so your dev data is never touched. It starts a no-keys chat stack under a separate Compose project (`<checkout directory>-recapture-<hash of the checkout path>`, so clones in other directories never share it), records the browser test against it with `E2E_CAPTURE=1`, and removes that project's containers and volumes on every exit, pass, fail or Ctrl-C. A run killed outright leaves them for the next recapture to remove. The new capture replaces the fixture only if the `services/app` and `web` test suites pass on it. Otherwise the committed fixture stays as it was. If a run is killed outright while those suites run, the next recapture puts the committed fixture back before it starts. The stack needs `WEB_PORT` and `DEV_POSTGRES_PORT`. If either is taken, the command stops and names it. Stop your dev stack first, or move the recapture off those ports with `WEB_PORT=5174 DEV_POSTGRES_PORT=54330 ./scripts/dev-shell.sh recapture`.
 
 `E2E_CAPTURE=1` makes the browser test also open every evidence page each answer offers: each block's metadata page, each figure, and every ref those pages link to. `web/src/demo/demoBackend.test.ts` fails if a fixture misses one. After the first and second answers it also loads the thread in a second tab, so a reload between turns shows only the turns asked so far. `services/app/test/replay.test.ts` fails if a fixture misses one of those loads.
 

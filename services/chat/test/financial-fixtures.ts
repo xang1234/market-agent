@@ -9,7 +9,7 @@ import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { databaseUrl, engineDatabase, IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { createChatCoordinator, type ChatAnalystToolRuntime, type ChatTurnInput } from "../src/coordinator.ts";
-import { createChatFinancialRuntime, type ChatFinancialMode } from "../src/financial-runtime.ts";
+import { createChatFinancialRuntime } from "../src/financial-runtime.ts";
 import type { ChatSubjectPreResolution } from "../src/subjects.ts";
 import { readMessage } from "./read-message-fixture.ts";
 
@@ -17,6 +17,8 @@ export const MISSING_ISSUER = "4f000000-0000-4000-8000-0000000000a9";
 // A listing of issuer A, as the resolver offers for a ticker (seeded by the tests that use AMBL).
 export const LISTING_A = "4f000000-0000-4000-8000-0000000000b1";
 export const INSTRUMENT_A = "4f000000-0000-4000-8000-0000000000c1";
+// A listing with no row.
+export const GONE_LISTING = "4f000000-0000-4000-8000-0000000000b9";
 // An issuer whose facts only SEC ingestion writes (seeded by the tests that use OPM).
 export const SEC_ISSUER = "4f000000-0000-4000-8000-0000000000d1";
 export const SEC_ISSUER_B = "4f000000-0000-4000-8000-0000000000d2";
@@ -25,10 +27,13 @@ export const SEC_ISSUER_D = "4f000000-0000-4000-8000-0000000000d4";
 
 /**
  * AAA and BBB resolve to the seeded issuers; AMB is ambiguous between them, and AMBL
- * between a listing of A and issuer B; CCC has no name or data; anything else is unknown.
+ * between a listing of A, A itself and issuer B, AMBX between a listing of A and A itself, AMBG
+ * between a listing that no longer exists and issuer B; CCC
+ * has no name or data; anything else is unknown.
  */
 export function resolveMention(mention: string): Promise<ChatSubjectPreResolution> {
-  const resolved = (id: string, label: string) => ({ status: "resolved", subject_ref: { kind: "issuer", id }, display_label: label }) as unknown as ChatSubjectPreResolution;
+  const resolved = (id: string, label: string) =>
+    ({ status: "resolved", subject_ref: { kind: "issuer", id }, display_label: label, handoff: { display_labels: { ticker: mention } } }) as unknown as ChatSubjectPreResolution;
   const table: Record<string, ChatSubjectPreResolution> = {
     AAA: resolved(IDS.issuerA, "Alpha Industries Inc."),
     // Another name for the same company as AAA.
@@ -46,10 +51,25 @@ export function resolveMention(mention: string): Promise<ChatSubjectPreResolutio
         { subject_ref: { kind: "issuer", id: IDS.issuerB }, display_name: "Beta Holdings Corp.", confidence: 0.5 },
       ],
     } as ChatSubjectPreResolution,
+    AMBG: {
+      status: "needs_clarification", input_text: mention, normalized_input: mention, message: "ambiguous",
+      candidates: [
+        { subject_ref: { kind: "listing", id: GONE_LISTING }, display_name: "Gone Corp. (XNAS)", confidence: 0.5 },
+        { subject_ref: { kind: "issuer", id: IDS.issuerB }, display_name: "Beta Holdings Corp.", confidence: 0.5 },
+      ],
+    } as ChatSubjectPreResolution,
+    AMBX: {
+      status: "needs_clarification", input_text: mention, normalized_input: mention, message: "ambiguous",
+      candidates: [
+        { subject_ref: { kind: "listing", id: LISTING_A }, display_name: "Alpha Industries Inc. (XNAS)", confidence: 0.5 },
+        { subject_ref: { kind: "issuer", id: IDS.issuerA }, display_name: "Alpha Industries Inc.", confidence: 0.5 },
+      ],
+    } as ChatSubjectPreResolution,
     AMBL: {
       status: "needs_clarification", input_text: mention, normalized_input: mention, message: "ambiguous",
       candidates: [
         { subject_ref: { kind: "listing", id: LISTING_A }, display_name: "Alpha Industries Inc. (XNAS)", confidence: 0.5 },
+        { subject_ref: { kind: "issuer", id: IDS.issuerA }, display_name: "Alpha Industries Inc.", confidence: 0.4 },
         { subject_ref: { kind: "issuer", id: IDS.issuerB }, display_name: "Beta Holdings Corp.", confidence: 0.5 },
       ],
     } as ChatSubjectPreResolution,
@@ -86,9 +106,10 @@ export function chatHarness(
   pool: Pool,
   options: {
     model: PlanningModel | null;
-    mode?: ChatFinancialMode;
     analyst?: ChatAnalystToolRuntime;
     researchScope?: Parameters<typeof createChatFinancialRuntime>[0]["researchScope"];
+    readQuestion?: Parameters<typeof createChatFinancialRuntime>[0]["readQuestion"];
+    priorSubjects?: Parameters<typeof createChatFinancialRuntime>[0]["priorSubjects"];
     resolveMention?: typeof resolveMention;
   },
 ) {
@@ -100,12 +121,13 @@ export function chatHarness(
       return readMessage({ snapshot_id: randomUUID(), message_id: randomUUID(), thread_id: message.threadId });
     },
     financialRuntime: createChatFinancialRuntime({
-      mode: options.mode ?? "enforce",
       pool,
       planningModel: options.model,
       resolveMention: options.resolveMention ?? resolveMention,
       evidence: createEvidenceFinancialPort,
       ...(options.researchScope ? { researchScope: options.researchScope } : {}),
+      ...(options.readQuestion ? { readQuestion: options.readQuestion } : {}),
+      ...(options.priorSubjects ? { priorSubjects: options.priorSubjects } : {}),
     }),
   });
   const run = async (input: Omit<ChatTurnInput, "runId" | "turnId"> & { turnId?: string }) => {

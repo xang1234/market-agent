@@ -16,20 +16,6 @@ import { snapshotTransactionClient, type SnapshotTransactionClient } from "../..
 
 const LEASE_TTL_MS = 120_000;
 
-/** A surface's financial lane: off, or the engine's answer alone. */
-export type FinancialMode = "off" | "enforce";
-
-/**
- * Reads a surface's server-owned mode flag: unset is off. A value that is not a
- * mode is a configuration error, never a silent fallback to legacy numbers.
- */
-export function parseFinancialMode(value: string | undefined, name = "financial mode"): FinancialMode {
-  const mode = value?.trim() ?? "";
-  if (mode === "") return "off";
-  if (mode === "off" || mode === "enforce") return mode;
-  throw new Error(`${name} must be off or enforce (got ${JSON.stringify(value)})`);
-}
-
 /** Why a request did not publish; surfaces word these, they never invent their own. */
 export type RequestGap =
   | "planning_unavailable"
@@ -55,6 +41,13 @@ export type FinancialRequest = Readonly<{
   plan: (db: SqlExecutor) => Promise<PlanningResult>;
   evidence: (executor: SqlExecutor) => FinancialEvidencePort;
   persistParent: PersistParentArtifact;
+  /**
+   * Awaited once this attempt holds the run's lease, before the run is
+   * driven: what the parent artifact needs from outside the database is ready
+   * before finalization opens its transaction. A rejection fails the request
+   * as publication_failed.
+   */
+  beforeDrive?: () => Promise<unknown>;
 }>;
 
 export async function publishRequest(pool: FinancialPool, request: FinancialRequest): Promise<RequestOutcome> {
@@ -98,6 +91,7 @@ async function reserveAndDrive(client: SnapshotTransactionClient, request: Finan
   });
   if (acquired.status !== "acquired") return { status: "gap", reason: UNAVAILABLE[acquired.status] };
   try {
+    await request.beforeDrive?.();
     const report = await driveLeasedRun(client, acquired.lease, acquired.run, { ...request, parent_limits: {} });
     return { status: "driven", run_id: run.run_id, report };
   } finally {

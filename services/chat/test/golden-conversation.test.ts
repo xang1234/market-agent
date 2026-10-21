@@ -26,6 +26,8 @@ import { createChatServer } from "../src/http.ts";
 import { closeLocalRuntimePoolForTests } from "../src/local-runtime.ts";
 import { readChatMessage } from "../src/messages.ts";
 import { loadChatServerOptionsFromEnv } from "../src/runtime.ts";
+import { isFinancialRequest } from "../src/financial-runtime.ts";
+import { STARTER_QUESTIONS } from "../../../web/src/chat/starterQuestionList.ts";
 import { AMD_Q2_2025_RELEASE, GOLDEN_COMPANIES, seedGoldenDataset } from "./golden/dataset.ts";
 import { requireRecordedScopes } from "./golden/harness.ts";
 import type { Client } from "pg";
@@ -425,112 +427,92 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.notEqual(rows[0]?.research_scope.route, "comparison");
   });
 
-  await t.test("'Break down NVDA's revenue by segment' shows each segment from cited facts (#157)", async () => {
+  await t.test("'Break down NVDA's revenue by segment' is a declared gap: the engine has no segment definition (#157)", async () => {
     const segmentsThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Segments" });
-    completedTurn(await runTurn(base, segmentsThread.thread_id, "Break down NVDA's revenue by segment"));
-
-    const answer = await latestAssistantMessage(base, segmentsThread.thread_id);
-    const breakdown = answer.blocks.find((block) => block.kind === "metric_row" && /by segment/.test(String(block.title)));
-    assert.ok(breakdown, `expected a segment breakdown; got [${answer.blocks.map((b) => `${b.kind}:${b.title}`).join(", ")}]`);
-    assert.equal(breakdown.title, "Revenue by segment (Q4 2026)");
-    const items = breakdown.items as Array<{ label: string; format: string }>;
-    assert.deepEqual(items.map((item) => item.label), ["Data Center", "Gaming", "OEM & Other", "Professional Visualization", "Automotive"]);
-    assert.equal(items[0].format, "$55.2B");
-    const cited = await citedFacts(answer);
-    for (const ref of valueRefs(breakdown)) assert.ok(cited.has(ref), `segment value_ref ${ref} is not a cited fact`);
-    // A segment request reads segment facts only (#206).
-    assert.equal(answer.blocks.some((block) => block.kind === "revenue_bars"), false);
+    const completed = completedTurn(await runTurn(base, segmentsThread.thread_id, "Break down NVDA's revenue by segment"));
+    assert.deepEqual(completed.data.financial_gap, { reason_code: "unsupported" });
+    assert.deepEqual(answerText(await latestAssistantMessage(base, segmentsThread.thread_id)), [UNSUPPORTED]);
   });
 
-  await t.test("'Why did AMD's operating margin turn negative in Q2 2025?' cites AMD's filed explanation, not a later one (#282)", async () => {
-    // A claim published after the cutoff must never be used.
+  await t.test("'Why did AMD's operating margin turn negative in Q2 2025?' shows the certified margin and names the cause as not calculated, citing no claim (#282)", async () => {
     const amd = GOLDEN_COMPANIES.find((company) => company.ticker === "AMD")!;
-    const late = await seedLateClaim(client, amd.issuer_id);
+    await seedLateClaim(client, amd.issuer_id);
     const thread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD margin" });
-    const completed = completedTurn(await runTurn(base, thread.thread_id, "Why did AMD's operating margin turn negative in Q2 2025?"));
-    // The cause is the claim's, attributed to management (#208's kind), not the model's.
-    const report = completed.data.assertion_report as { accepted: Array<{ kind: string; evidence: string[] }> };
-    assert.deepEqual(report.accepted.map((entry) => entry.kind), ["management_attribution"]);
-
-    const answer = await latestAssistantMessage(base, thread.thread_id);
-    const { rows: filed } = await client.query<{ claim_id: string }>(
-      `select claim_id::text from claims where text_canonical = $1`, [AMD_Q2_2025_RELEASE.text],
-    );
-    const { rows } = await client.query<{ claim_refs: string[] }>(`select claim_refs from snapshots where snapshot_id = $1::uuid`, [answer.snapshot_id]);
-    const cited = rows[0]?.claim_refs ?? [];
-    assert.ok(cited.includes(filed[0]!.claim_id), `the filed claim is not cited; claim_refs ${JSON.stringify(cited)}; filed ${JSON.stringify(filed)}; blocks ${JSON.stringify(answer.blocks.map((b) => [b.kind, b.title, b.kind === "rich_text" ? JSON.stringify(b.segments).slice(0, 400) : ""]))}`);
-    assert.equal(cited.includes(late), false, "a claim published after the cutoff was cited");
-    const prose = JSON.stringify(answer.blocks.filter((block) => block.kind === "rich_text"));
-    assert.match(prose, /MI308/);
-    assert.match(prose, /\$800 million in inventory and related charges/);
-  });
-
-  await t.test("a named past quarter is the quarter shown, with its margins; a missing one is a named gap (#290)", async () => {
-    const thread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD Q2 2025" });
     completedTurn(await runTurn(base, thread.thread_id, "Why did AMD's operating margin turn negative in Q2 2025?"));
     const answer = await latestAssistantMessage(base, thread.thread_id);
-    const row = answer.blocks.find((block) => block.kind === "metric_row" && block.title === "Fiscal Q2 2025");
-    assert.ok(row, `expected the named quarter; got [${answer.blocks.map((b) => `${b.kind}:${b.title}`).join(", ")}]`);
-    const items = new Map((row.items as Array<{ label: string; format: string }>).map((item) => [item.label, item.format]));
-    assert.equal(items.get("Operating margin"), "-1.7%");
-    assert.equal(items.get("Gross margin"), "39.8%");
-    // Growth is the named quarter's, though the margin trend's window runs past it (#292 review).
-    assert.equal(items.get("Revenue growth (QoQ)"), "3.3%");
-    // The margins across the quarters around it, the named quarter among them.
-    const trend = answer.blocks.find((block) => block.title === "Operating margin by quarter");
-    assert.ok((trend?.items as Array<{ label: string }> | undefined)?.some((item) => item.label === "Q2 2025"));
-    const cited = await citedFacts(answer);
-    for (const ref of valueRefs(row)) assert.ok(cited.has(ref), `${ref} is not a cited fact`);
-    assert.equal(answer.blocks.some((block) => /^Latest quarter/.test(String(block.title))), false, "the latest quarter is not shown in its place");
+    assert.deepEqual(engineAnswer(answer), {
+      results: [["Operating margin (operating income / revenue)", "Q2 FY2025", "verified", "-1.74%"]],
+      notes: ["Not covered by this answer: the cause of these figures."],
+    });
+    const { rows } = await client.query<{ claim_refs: string[] }>(`select claim_refs from snapshots where snapshot_id = $1::uuid`, [answer.snapshot_id]);
+    assert.deepEqual(rows[0]?.claim_refs, []);
+  });
+
+  await t.test("a named past quarter is the quarter calculated; a quarter not on file is a declared gap (#290)", async () => {
+    const thread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD Q2 2025" });
+    completedTurn(await runTurn(base, thread.thread_id, "Why did AMD's operating margin turn negative in Q2 2025?"));
+    assert.deepEqual(engineAnswer(await latestAssistantMessage(base, thread.thread_id)).results.map(([, period]) => period), ["Q2 FY2025"]);
 
     const missing = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD Q2 2019" });
     completedTurn(await runTurn(base, missing.thread_id, "What was AMD's revenue in Q2 2019?"));
-    const gap = await latestAssistantMessage(base, missing.thread_id);
-    assert.equal(gap.blocks.some((block) => block.kind === "metric_row" || block.kind === "revenue_bars"), false);
-    assert.match(JSON.stringify(gap.blocks), /No figures for fiscal Q2 2019 are on file for AMD/);
+    assert.deepEqual(engineAnswer(await latestAssistantMessage(base, missing.thread_id)), {
+      results: [["Revenue", "Q2 FY2019", "missing", "No eligible input was public before the knowledge cutoff."]],
+      notes: [],
+    });
   });
 
-  await t.test("a company with no segment facts gets no breakdown block", async () => {
+  await t.test("a segment breakdown is a declared gap, and asking for its evidence shows no figure in its place", async () => {
     const amdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD segments" });
-    completedTurn(await runTurn(base, amdThread.thread_id, "Break down AMD's revenue by segment"));
-    const answer = await latestAssistantMessage(base, amdThread.thread_id);
-    assert.equal(answer.blocks.some((block) => /by segment/.test(String(block.title))), false);
-    // The breakdown is a named gap, with nothing else in its place (#206).
-    assert.match(JSON.stringify(answer.blocks), /Revenue by segment is not available for AMD in this data\./);
-    assert.equal(answer.blocks.some((block) => block.kind === "metric_row" || block.kind === "revenue_bars"), false);
-    // Asking for its evidence re-reads the same segment facts, keeping the gap.
+    const completed = completedTurn(await runTurn(base, amdThread.thread_id, "Break down AMD's revenue by segment"));
+    assert.deepEqual(completed.data.financial_gap, { reason_code: "unsupported" });
+    assert.deepEqual(answerText(await latestAssistantMessage(base, amdThread.thread_id)), [UNSUPPORTED]);
+    // The gap saves no company or scope (#425).
     completedTurn(await runTurn(base, amdThread.thread_id, "Show the evidence"));
     const evidence = await latestAssistantMessage(base, amdThread.thread_id);
-    assert.match(JSON.stringify(evidence.blocks), /Revenue by segment is not available for AMD in this data\./);
-    assert.equal(evidence.blocks.some((block) => block.kind === "metric_row" || block.kind === "revenue_bars"), false);
+    assert.deepEqual(evidence.blocks.map((block) => block.kind), ["rich_text"]);
+    assert.deepEqual(answerText(evidence), ["No written answer is available for this question; try asking again."]);
   });
 
-  await t.test("segments asked for with a margin trend read both (#206)", async () => {
+  await t.test("segments asked for with a margin trend, or with a margin, are one declared gap: no segment definition (#206)", async () => {
     const mixedThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Segments and margins" });
-    completedTurn(await runTurn(base, mixedThread.thread_id, "Break down NVDA's revenue by segment and show its operating margin trend"));
-    const answer = await latestAssistantMessage(base, mixedThread.thread_id);
-    assert.ok(answer.blocks.some((block) => /by segment/.test(String(block.title))), "expected the segment breakdown");
-    assert.ok(answer.blocks.some((block) => block.title === "Operating margin by quarter"), `expected the margin trend; got [${answer.blocks.map((b) => b.title).join(", ")}]`);
-    // ...and with a current margin, the latest quarter's margins.
-    completedTurn(await runTurn(base, mixedThread.thread_id, "Break down NVDA's revenue by segment and show its gross margin"));
-    const latest = await latestAssistantMessage(base, mixedThread.thread_id);
-    assert.ok(latest.blocks.some((block) => /by segment/.test(String(block.title))), "expected the segment breakdown");
-    assert.ok(latest.blocks.some((block) => /^Latest quarter/.test(String(block.title))), `expected the latest quarter's margins; got [${latest.blocks.map((b) => b.title).join(", ")}]`);
+    for (const question of ["Break down NVDA's revenue by segment and show its operating margin trend", "Break down NVDA's revenue by segment and show its gross margin"]) {
+      assert.deepEqual(completedTurn(await runTurn(base, mixedThread.thread_id, question)).data.financial_gap, { reason_code: "unsupported" }, question);
+      assert.deepEqual(answerText(await latestAssistantMessage(base, mixedThread.thread_id)), [UNSUPPORTED], question);
+    }
   });
 
-  // The frozen dataset has no cash flow facts: the statement route reads none
-  // and names the gap, with no income figures in its place.
-  await t.test("'What is AMD's free cash flow?' is a named gap that reads no income-statement facts (#206)", async () => {
+  await t.test("each starter question that names a metric gets the engine's answer, not a request to name the company", async () => {
+    const metricStarters = STARTER_QUESTIONS.filter(isFinancialRequest);
+    assert.deepEqual(metricStarters, ["What drives AAPL's margins?"]);
+    const starterThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Starter" });
+    completedTurn(await runTurn(base, starterThread.thread_id, metricStarters[0]!));
+    assert.deepEqual(engineAnswer(await latestAssistantMessage(base, starterThread.thread_id)), {
+      results: [
+        ["Gross margin (gross profit / revenue)", "latest fiscal year", "verified", "46.91%"],
+        ["Operating margin (operating income / revenue)", "latest fiscal year", "verified", "31.97%"],
+        ["Net margin (net income / revenue)", "latest fiscal year", "verified", "26.92%"],
+      ],
+      notes: ["Not covered by this answer: the cause of these figures."],
+    });
+  });
+
+  // The frozen dataset has no cash flow facts.
+  await t.test("'What is AMD's free cash flow?' is calculated by the engine; its inputs are declared gaps (#206)", async () => {
     const fcfThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD FCF" });
     completedTurn(await runTurn(base, fcfThread.thread_id, "What is AMD's free cash flow?"));
-    const answer = await latestAssistantMessage(base, fcfThread.thread_id);
-    assert.match(JSON.stringify(answer.blocks), /Free cash flow is not available for AMD in this data, so no other figure is shown in its place\./);
-    assert.equal(answer.blocks.some((block) => block.kind === "metric_row" || block.kind === "revenue_bars"), false);
+    assert.deepEqual(engineAnswer(await latestAssistantMessage(base, fcfThread.thread_id)), {
+      results: [
+        ["Operating cash flow", "latest fiscal year", "missing", "No eligible input was public before the knowledge cutoff."],
+        ["Capital expenditures (PP&E cash payments)", "latest fiscal year", "missing", "No eligible input was public before the knowledge cutoff."],
+        ["Free cash flow (OCF less PP&E cash capex)", "latest fiscal year", "blocked_dependency", "A required input or calculation is unavailable."],
+      ],
+      notes: [],
+    });
     const { rows } = await client.query<{ research_scope: { route: string } }>(
       `select research_scope from chat_messages where thread_id = $1::uuid and role = 'assistant'`,
       [fcfThread.thread_id],
     );
-    assert.equal(rows[0]?.research_scope.route, "statements");
+    assert.equal(rows[0]?.research_scope.route, "financial_answer");
   });
 
   // #206: a three-company comparison with metrics, a YTD window and a benchmark,
@@ -559,10 +541,11 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.ok(first.price_window, "the YTD window is recorded");
     assert.equal(first.benchmark, true);
     assert.deepEqual(first.metrics.map((metric) => metric.metric_key), ["income_statement"]);
-    const firstAnswer = await latestAssistantMessage(base, regressionThread.thread_id);
-    assert.match(JSON.stringify(firstAnswer.blocks), benchmarkGap);
+    const firstAnswer = engineAnswer(await latestAssistantMessage(base, regressionThread.thread_id));
+    assert.equal(firstAnswer.results.length, 12);
+    assert.ok(firstAnswer.results.every(([, , disposition]) => disposition === "verified"), JSON.stringify(firstAnswer.results));
     // "S&P" is not two companies the answer could not find.
-    assert.doesNotMatch(JSON.stringify(firstAnswer.blocks), /could not find/);
+    assert.deepEqual(firstAnswer.notes, ["Not covered by this answer: a stock price return; a comparison with a benchmark index."]);
 
     const unchanged = (scope: Saved, companies: string[]) => {
       assert.deepEqual(issuers(scope), companies);
@@ -580,7 +563,8 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const before = (await saved()).length;
     const asked = await runTurn(base, regressionThread.thread_id, "What about AAPL?");
     assert.equal(completedTurn(asked).data.clarification, true);
-    assert.match(JSON.stringify(asked), /Add AAPL to the NVDA and AMD comparison, or look at AAPL alone\?/);
+    // The engine's answer seals its companies as issuers, so they carry forward by legal name.
+    assert.match(JSON.stringify(asked), /Add AAPL to the NVIDIA Corporation and Advanced Micro Devices, Inc\. comparison, or look at AAPL alone\?/);
     assert.equal((await saved()).length, before + 1);
     assert.equal((await saved()).at(-1), null, "the question is saved with no scope");
 
@@ -647,6 +631,27 @@ async function latestAssistantMessage(base: string, threadId: string): Promise<C
 
 function streamedBlockIds(events: ParsedSseEvent[]): unknown[] {
   return events.filter((event) => event.event === "block.completed").map((event) => event.data.block_id);
+}
+
+const UNSUPPORTED = "This request asks for a calculation outside the verified financial definitions I can compute.";
+
+function answerText(message: ChatMessage): string[] {
+  return message.blocks.filter((block) => block.kind === "rich_text")
+    .map((block) => (block.segments as Array<{ text?: string }>).map((segment) => segment.text ?? "").join(""));
+}
+
+function engineAnswer(message: ChatMessage): { results: Array<[measure: string, period: string, disposition: string, text: string]>; notes: string[] } {
+  const [block, ...notes] = message.blocks;
+  assert.equal(block?.kind, "financial_answer", `expected an engine answer; got [${message.blocks.map((b) => b.kind).join(", ")}]`);
+  const financial = block.financial as {
+    labels: Record<string, { text: string }>;
+    results: Array<{ measure_label_id: string; period_label_id: string; disposition: string; presented: { text: string } }>;
+  };
+  return {
+    results: financial.results.map((result) =>
+      [financial.labels[result.measure_label_id]!.text, financial.labels[result.period_label_id]!.text, result.disposition, result.presented.text]),
+    notes: answerText({ ...message, blocks: notes }),
+  };
 }
 
 function comparisonBlock(message: ChatMessage): Block {

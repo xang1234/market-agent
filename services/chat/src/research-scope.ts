@@ -185,7 +185,7 @@ export const STATEMENT_METRIC_LABELS: Readonly<Record<string, ReadonlyArray<stri
   eps_basic: ["EPS (basic)"],
 };
 
-const BALANCE_SHEET_ITEMS = ["cash_and_equivalents", "total_assets", "total_liabilities", "total_equity"];
+export const BALANCE_SHEET_ITEMS = ["cash_and_equivalents", "total_assets", "total_liabilities", "total_equity"];
 
 function metricByKey(key: string): RequestedMetric {
   return PROPOSABLE_METRICS.find((candidate) => candidate.metric_key === key)!;
@@ -250,6 +250,23 @@ export function proposedMetric(
   return qualifiedMetric(metric, adjustment, qualifier);
 }
 
+// What a reading asks for once its turn-offs apply. A facet turned off is not
+// asked for, though the model may also have read it as asked ("Show NVDA
+// without the segments"), and no margins is no trend. A metric turned off
+// ("drop capex") is not asked for either; the whole balance sheet takes its
+// items with it, however they were kept.
+export function readingAsks(proposal: ScopeProposal): {
+  asks: ReadonlySet<ScopeFacet>;
+  offFacets: ReadonlySet<ScopeFacet | (typeof PERIOD_FIELDS)[number]>;
+  offMetrics: ReadonlySet<string>;
+} {
+  const offFacets = new Set(proposal.turns_off.facets);
+  if (offFacets.has("margins")) offFacets.add("margin_trend");
+  const offMetrics = new Set(proposal.turns_off.metrics);
+  if (offMetrics.has("balance_sheet")) for (const key of BALANCE_SHEET_ITEMS) offMetrics.add(key);
+  return { asks: new Set([...proposal.asks].filter((facet) => !offFacets.has(facet))), offFacets, offMetrics };
+}
+
 export function resolveResearchScope(input: {
   question: string;
   companies: ResearchScope["companies"];
@@ -267,12 +284,8 @@ export function resolveResearchScope(input: {
   proposal: ScopeProposal | null;
 }): ResearchScope {
   const { prior, question } = input;
-  const { metrics: proposed, turns_off: turnsOff, income_items: namedItems } = input.proposal ?? NO_PROPOSAL;
-  // A facet turned off is not asked for, though the model may also have read
-  // it as asked ("Show NVDA without the segments"). No margins is no trend.
-  const offFacets = new Set(turnsOff.facets);
-  if (offFacets.has("margins")) offFacets.add("margin_trend");
-  const asks = new Set([...(input.proposal ?? NO_PROPOSAL).asks].filter((facet) => !offFacets.has(facet)));
+  const { metrics: proposed, income_items: namedItems } = input.proposal ?? NO_PROPOSAL;
+  const { asks, offFacets, offMetrics } = readingAsks(input.proposal ?? NO_PROPOSAL);
   const off = new Set([...offFacets].flatMap((facet) => CLEARS[facet] ?? []));
   if (input.peersOff) off.add("peers");
   const inherited: ScopeField[] = [];
@@ -296,11 +309,6 @@ export function resolveResearchScope(input: {
   const unchanged = input.proposal === null && !input.served ? prior : null;
   const margins = unchanged?.margins ?? marginAsked;
   const margin_trend = flag("margin_trend", prior?.margin_trend);
-  // A metric the turn turns off ("drop capex") is not asked for, even if the
-  // model also named it. The whole balance sheet takes its items with it,
-  // however they were kept.
-  const offMetrics = new Set(turnsOff.metrics);
-  if (offMetrics.has("balance_sheet")) for (const key of BALANCE_SHEET_ITEMS) offMetrics.add(key);
   const named = proposed
     .filter((metric) => !offMetrics.has(metric.metric_key))
     .map((metric) => (input.served ? { ...metric, available: true } : metric));
