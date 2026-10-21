@@ -976,7 +976,7 @@ function subjectAwareRunner(
   };
 }
 
-const MAX_TURN_SUBJECTS = 5;
+export const MAX_TURN_SUBJECTS = 5;
 
 export type TurnSubjects = {
   subjects: ReadonlyArray<ChatResolvedSubjectPreResolution>;

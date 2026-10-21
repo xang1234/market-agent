@@ -32,6 +32,7 @@ import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import { loadUsableFacts } from "../../fundamentals/src/usable-facts.ts";
 import { returnLabel } from "../../market/src/perf-points.ts";
 import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
+import type { QueryExecutor as RowQuery } from "../../shared/src/http.ts";
 import { stableUuid } from "./chat-ids.ts";
 import { STATEMENT_METRIC_LABELS, statementMetrics, unavailableMetrics, type ResearchScope } from "./research-scope.ts";
 import { loadPerfComparisonBlocks, type PriceWindow } from "./perf-block.ts";
@@ -502,7 +503,7 @@ export function listingsForComparison(
 // Each company's active listing (for prices) and display label: its ticker,
 // else its legal name.
 export async function companyListings(
-  db: Pick<QueryExecutor, "query">,
+  db: RowQuery,
   issuerIds: ReadonlyArray<string>,
   asOf: string,
 ): Promise<Map<string, CompanyListing>> {
