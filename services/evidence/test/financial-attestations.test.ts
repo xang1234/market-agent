@@ -138,4 +138,27 @@ test("financial attestation writers", { timeout: 180_000 }, async (t) => {
     await assert.rejects(() => recordFactFinancialContext(db, context), /duplicate key/);
     await assert.rejects(() => recordFactFinancialContext(db, { ...context, fact_id: IDS.original, reporting_basis: "guessed" as "as_reported" }), /reporting_basis/);
   });
+
+  await t.test("an as-filed context names a real filing date, and no other context names one", async () => {
+    const asFiled = {
+      fact_id: IDS.original,
+      context_version: "context.v1",
+      period_type: "duration" as const,
+      dimension_scope: "consolidated" as const,
+      dimension_members: [],
+      reporting_basis: "as_reported" as const,
+      adjustment_basis: "as_filed" as const,
+      as_filed_on: "2024-02-21",
+      share_basis: "diluted" as const,
+      fiscal_calendar_version: "fiscal-calendar.v1",
+      disclosure_relation: "original" as const,
+      source_context_ref: null,
+    };
+    await assert.rejects(() => recordFactFinancialContext(db, { ...asFiled, as_filed_on: "2024-02-30" }), /as_filed_on/);
+    // A caller outside the type system can still pair a date with another basis.
+    await assert.rejects(() => recordFactFinancialContext(db, { ...asFiled, adjustment_basis: "unadjusted" } as never), /as_filed_on/);
+    await recordFactFinancialContext(db, asFiled);
+    const stored = (await db.query(`select adjustment_basis, as_filed_on::text as as_filed_on, share_basis from fact_financial_contexts where fact_id = $1`, [IDS.original])).rows[0];
+    assert.deepEqual(stored, { adjustment_basis: "as_filed", as_filed_on: "2024-02-21", share_basis: "diluted" });
+  });
 });
