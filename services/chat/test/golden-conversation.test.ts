@@ -461,16 +461,26 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     });
   });
 
-  await t.test("a segment breakdown is a declared gap, and asking for its evidence shows no figure in its place", async () => {
+  await t.test("a segment breakdown is a declared gap; asking for its evidence continues AMD and shows no figure in its place (#425)", async () => {
     const amdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD segments" });
     const completed = completedTurn(await runTurn(base, amdThread.thread_id, "Break down AMD's revenue by segment"));
     assert.deepEqual(completed.data.financial_gap, { reason_code: "unsupported" });
     assert.deepEqual(answerText(await latestAssistantMessage(base, amdThread.thread_id)), [UNSUPPORTED]);
-    // The gap saves no company or scope (#425).
-    completedTurn(await runTurn(base, amdThread.thread_id, "Show the evidence"));
-    const evidence = await latestAssistantMessage(base, amdThread.thread_id);
-    assert.deepEqual(evidence.blocks.map((block) => block.kind), ["rich_text"]);
-    assert.deepEqual(answerText(evidence), ["No written answer is available for this question; try asking again."]);
+    // The gap saves AMD and its scope, so the follow-up is about AMD.
+    const evidence = completedTurn(await runTurn(base, amdThread.thread_id, "Show the evidence"));
+    assert.deepEqual(evidence.data.subject_refs, [{ kind: "issuer", id: AMD.issuer_id }]);
+    assert.deepEqual(answerText(await latestAssistantMessage(base, amdThread.thread_id)), [
+      "The data here does not answer this question; the note below says what is missing.",
+      "The previous answer showed no figure, so there is no evidence to show; no other figure is shown in its place.",
+    ]);
+    const { rows } = await client.query<{ research_scope: { route: string; reads: string; companies: unknown; metrics: unknown[] } }>(
+      `select research_scope from chat_messages where thread_id = $1::uuid and role = 'assistant' order by created_at`,
+      [amdThread.thread_id],
+    );
+    assert.deepEqual(rows.map(({ research_scope: scope }) => [scope.route, scope.reads, scope.companies, scope.metrics]), [
+      ["financial_gap", "financial_gap", [{ issuer_id: AMD.issuer_id, label: "AMD" }], []],
+      ["evidence_followup", "financial_gap", [{ issuer_id: AMD.issuer_id, label: "AMD" }], []],
+    ]);
   });
 
   await t.test("segments asked for with a margin trend, or with a margin, are one declared gap: no segment definition (#206)", async () => {
@@ -564,7 +574,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const asked = await runTurn(base, regressionThread.thread_id, "What about AAPL?");
     assert.equal(completedTurn(asked).data.clarification, true);
     // The engine's answer seals its companies as issuers, so they carry forward by legal name.
-    assert.match(JSON.stringify(asked), /Add AAPL to the NVIDIA Corporation and Advanced Micro Devices, Inc\. comparison, or look at AAPL alone\?/);
+    assert.match(JSON.stringify(asked), /Add AAPL to the NVDA and AMD comparison, or look at AAPL alone\?/);
     assert.equal((await saved()).length, before + 1);
     assert.equal((await saved()).at(-1), null, "the question is saved with no scope");
 
@@ -605,6 +615,37 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.deepEqual([...seriesRefs].sort(), specs.map((spec) => spec.series_ref).sort());
   });
 
+  // Two listings under one ticker are one company, so the engine plans it
+  // without asking. Its answer saves that company labelled, so the next turn
+  // keeps its peers on, and turning them off keeps the company (#425). Last,
+  // as the listings it adds stay.
+  await t.test("a company two listings name keeps its peers after its engine answer, and keeps itself when they are turned off (#425)", async () => {
+    await client.query(
+      `insert into listings (listing_id, instrument_id, mic, ticker, trading_currency, timezone)
+       values (gen_random_uuid(), $1::uuid, 'XNAS', 'AMDX', 'USD', 'America/New_York'),
+              (gen_random_uuid(), $1::uuid, 'XETR', 'AMDX', 'EUR', 'Europe/Berlin')`,
+      [AMD.instrument_id],
+    );
+    const peersThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMDX peers" });
+    const scope = async () => {
+      const { rows } = await client.query<{ research_scope: { companies: unknown; peers: boolean } }>(
+        `select research_scope from chat_messages where thread_id = $1::uuid and role = 'assistant' order by created_at desc limit 1`,
+        [peersThread.thread_id],
+      );
+      return { companies: rows[0]?.research_scope.companies, peers: rows[0]?.research_scope.peers };
+    };
+    const amd = { issuer_id: AMD.issuer_id, label: "AMD" };
+
+    completedTurn(await runTurn(base, peersThread.thread_id, "How does AMDX's Q2 2025 revenue compare with its peers?"));
+    assert.deepEqual(engineAnswer(await latestAssistantMessage(base, peersThread.thread_id)).results.map(([measure, period, disposition]) => [measure, period, disposition]), [["Revenue", "Q2 FY2025", "verified"]]);
+    assert.deepEqual(await scope(), { companies: [amd], peers: true });
+    completedTurn(await runTurn(base, peersThread.thread_id, "Explain it"));
+    // AMD's industry peer is auto-selected, so it carries no label.
+    assert.deepEqual(await scope(), { companies: [amd, { issuer_id: NVDA.issuer_id }], peers: true });
+    completedTurn(await runTurn(base, peersThread.thread_id, "Drop the peers"));
+    assert.deepEqual(await scope(), { companies: [amd], peers: false });
+  });
+
   function completedTurn(turnEvents: ParsedSseEvent[]): ParsedSseEvent {
     const error = turnEvents.find((event) => event.event === "turn.error");
     assert.equal(error, undefined, `turn.error: ${JSON.stringify(error?.data)}`);
@@ -633,7 +674,8 @@ function streamedBlockIds(events: ParsedSseEvent[]): unknown[] {
   return events.filter((event) => event.event === "block.completed").map((event) => event.data.block_id);
 }
 
-const UNSUPPORTED = "This request asks for a calculation outside the verified financial definitions I can compute.";
+// The planner's recorded reason for a segment request, in the gap's text (#425).
+const UNSUPPORTED = "This request asks for a calculation outside the verified financial definitions I can compute: segment revenue has no approved definition.";
 
 function answerText(message: ChatMessage): string[] {
   return message.blocks.filter((block) => block.kind === "rich_text")

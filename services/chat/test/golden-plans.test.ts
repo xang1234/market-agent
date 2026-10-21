@@ -35,7 +35,8 @@ function planningContext(question: string): PlanningContext {
     parent_limits: {},
     max_model_calls: 2,
     requested_subjects: extractSubjectMentions(question).map((mention) => {
-      const company = GOLDEN_COMPANIES.find((candidate) => candidate.ticker === mention)!;
+      // AMDX names two more AMD listings (golden-conversation.test.ts).
+      const company = GOLDEN_COMPANIES.find((candidate) => candidate.ticker === (mention === "AMDX" ? "AMD" : mention))!;
       return { mention, resolution: { status: "resolved", subject_ref: { kind: "issuer", id: company.issuer_id }, label: company.legal_name } };
     }),
     publication_unit_kind: "chat_section",
@@ -100,6 +101,7 @@ const EXPECTED: Record<string, ReturnType<typeof summary>> = {
     outputs: [...latestMargins("NVDA"), ...latestMargins("AMD"), ...latestMargins("AAPL")],
   },
   "What drives AAPL's margins?": { outcome: "ready", model_calls: 1, outputs: latestMargins("AAPL").slice(1) },
+  "How does AMDX's Q2 2025 revenue compare with its peers?": { outcome: "ready", model_calls: 1, outputs: ["AMD revenue Q2 2025"] },
 };
 
 test("each golden metric question plans from its own recorded reply on the first call", async () => {
@@ -128,6 +130,7 @@ test("each golden answer names what its question asks for and its plan does not 
     "What is AMD's free cash flow?": [],
     "Compare NVDA, AMD and AAPL revenue and margins YTD against the S&P 500": ["a stock price return", "a comparison with a benchmark index"],
     "What drives AAPL's margins?": ["the cause of these figures"],
+    "How does AMDX's Q2 2025 revenue compare with its peers?": ["peers the question did not name"],
   };
   for (const [question, expected] of Object.entries(uncovered)) {
     const planned = await planFinancialRequest(planningContext(question), question, model);
