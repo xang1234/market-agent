@@ -195,8 +195,9 @@ export type ChatAssistantMessagePersistence = (
   input: ChatAssistantMessagePersistenceInput,
 ) => Promise<ChatReadMessage>;
 
+// The message is saved under the turn's answer id unless the input gives its own.
 export type ChatAssistantMessageCommit = (
-  input: Omit<ChatAssistantMessagePersistenceInput, "message_id">,
+  input: Omit<ChatAssistantMessagePersistenceInput, "message_id"> & { message_id?: string },
 ) => Promise<ChatCommittedMessage>;
 
 export class ChatPersistenceContractError extends Error {
@@ -210,7 +211,7 @@ function committing(persist: ChatAssistantMessagePersistence): ChatAssistantMess
   return async (input) => {
     let message: ChatReadMessage;
     try {
-      message = await persist({ ...input, message_id: answerMessageId(input.threadId, input.runId, input.turnId) });
+      message = await persist({ ...input, message_id: input.message_id ?? answerMessageId(input.threadId, input.runId, input.turnId) });
     } catch (error) {
       if (!(error instanceof ChatMessageUnreadError)) throw error;
       logUnreadMessage(error.message_id, error.cause);

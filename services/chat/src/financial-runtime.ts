@@ -66,9 +66,21 @@ export type ChatClarificationAnswer = Readonly<{ clarification_id: string; choic
 
 export type ChatFinancialTurn =
   | Readonly<{ kind: "clarification"; clarification: Clarification }>
-  // The companies the turn was asked about and its scope, saved with the gap so a follow-up continues them (#425).
-  | Readonly<{ kind: "gap"; reason_code: string; text: string; subject_refs?: ReadonlyArray<FinancialSubjectRef>; research_scope?: ResearchScope }>
-  | Readonly<{ kind: "published"; run_id: string; message_id: string; message: ChatReadMessage | null }>;
+  // A gap the turn declined with names the companies it was asked about and
+  // saves its scope, so a follow-up continues them (#425). It is saved under
+  // the id the turn's answer takes (message_id): an answer saved first keeps
+  // it, and an answer saved later replaces it.
+  | Readonly<{
+    kind: "gap";
+    reason_code: string;
+    text: string;
+    message_id?: string;
+    subject_refs?: ReadonlyArray<FinancialSubjectRef>;
+    research_scope?: ResearchScope;
+  }>
+  | Readonly<{ kind: "published"; run_id: string; message_id: string; message: ChatReadMessage | null }>
+  // A gap an earlier attempt of the turn saved, as a retry returns it.
+  | Readonly<{ kind: "saved"; message_id: string; message: ChatReadMessage | null }>;
 
 export type ChatFinancialTurnContext = ChatTurnRunContext & { clarificationAnswer?: ChatClarificationAnswer };
 
@@ -147,9 +159,16 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     const messageId = financialMessageId(context.threadId, turnId);
     // A retry of a turn whose answer is saved returns that answer: the thread
     // holds it by now, so the turn's companies are not picked again. Before
-    // the answer is saved the thread is as the first attempt found it.
-    const isAnswered = async () => (await deps.pool.query(`select 1 from chat_messages where message_id = $1::uuid`, [messageId])).rows.length > 0;
-    const answered = await isAnswered();
+    // the answer is saved the thread is as the first attempt found it. A gap
+    // the turn declined with is returned as saved, with nothing planned again.
+    const { rows: [saved] } = await deps.pool.query<{ kind: string | null }>(
+      `select blocks->0->>'kind' as kind from chat_messages where message_id = $1::uuid`,
+      [messageId],
+    );
+    if (saved && saved.kind !== "financial_answer") {
+      return { kind: "saved", message_id: messageId, message: await readChatMessage(deps.pool, { thread_id: context.threadId, message_id: messageId }) };
+    }
+    const answered = saved !== undefined;
     const requested = answered ? ANSWERED : await requestedSubjects(deps, context, text);
     if (requested.clarify) return { kind: "clarification", clarification: companyQuestion(requested.clarify) };
     if (!answered && requested.subjects.length === 0) return gap("no_company");
@@ -193,14 +212,15 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       // ponytail: a retry that resumes a reserved run does not plan, so its
       // gap names the companies the message resolved, without a pick.
       const refs = asked.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref] : []);
-      // One about no company leaves the previous answer's companies and scope,
-      // and so does one whose turn another attempt answered meanwhile: a run
-      // that attempt finished reads here as run_failed.
-      if (refs.length === 0 || await isAnswered()) return gap(reason, planned);
+      // One about no company leaves the previous answer's companies and scope.
+      if (refs.length === 0) return gap(reason, planned);
       settleReading(false);
       const saved = await scope;
       return {
         ...gap(reason, planned),
+        // Another attempt may answer the turn meanwhile (a run it finished
+        // reads here as run_failed): the gap never replaces that answer.
+        message_id: messageId,
         subject_refs: refs,
         // It computed no figure, so it names none, and no reader re-reads it.
         ...(saved === null ? {} : {
@@ -595,10 +615,13 @@ function persistAssistantMessage(
       metrics: planMetrics(plan),
       ...(reading === null ? { coverage_unchecked: true as const } : {}),
     };
+    // It replaces a gap another attempt of the turn saved under its id.
     const inserted = await tx.client.query(
       `insert into chat_messages (message_id, thread_id, role, snapshot_id, blocks, content_hash, research_scope)
        select $1::uuid, t.thread_id, 'assistant'::chat_role, $3::uuid, $4::jsonb, $5, $7::jsonb
          from chat_threads t where t.thread_id = $2::uuid and t.user_id = $6::uuid
+       on conflict (message_id) do update
+         set snapshot_id = excluded.snapshot_id, blocks = excluded.blocks, content_hash = excluded.content_hash, research_scope = excluded.research_scope
        returning message_id`,
       [
         messageId,
