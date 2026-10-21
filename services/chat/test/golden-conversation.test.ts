@@ -631,12 +631,12 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
       );
       return { companies: rows[0]?.research_scope.companies, peers: rows[0]?.research_scope.peers };
     };
-    const amd = { issuer_id: AMD.issuer_id, label: "AMD" };
+    // Named by the ticker it was asked by, in every turn.
+    const amd = { issuer_id: AMD.issuer_id, label: "AMDX" };
 
     completedTurn(await runTurn(base, peersThread.thread_id, "How does AMDX's Q2 2025 revenue compare with its peers?"));
     assert.deepEqual(engineAnswer(await latestAssistantMessage(base, peersThread.thread_id)).results.map(([measure, period, disposition]) => [measure, period, disposition]), [["Revenue", "Q2 FY2025", "verified"]]);
-    // Saved under the ticker it was asked by; carried forward, under its first listing's.
-    assert.deepEqual(await scope(), { companies: [{ ...amd, label: "AMDX" }], peers: true });
+    assert.deepEqual(await scope(), { companies: [amd], peers: true });
     completedTurn(await runTurn(base, peersThread.thread_id, "Explain it"));
     // AMD's industry peer is auto-selected, so it carries no label.
     assert.deepEqual(await scope(), { companies: [amd, { issuer_id: NVDA.issuer_id }], peers: true });

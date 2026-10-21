@@ -18,8 +18,8 @@ export async function loadPriorSubjects(
   input: { threadId: string },
   hydrate: Hydrate = hydrateSubjectRef as Hydrate,
 ): Promise<ReadonlyArray<ChatResolvedSubjectPreResolution>> {
-  const { rows } = await db.query<{ subject_refs: unknown }>(
-    `select s.subject_refs
+  const { rows } = await db.query<{ subject_refs: unknown; research_scope: unknown }>(
+    `select s.subject_refs, m.research_scope
        from chat_messages m
        join snapshots s on s.snapshot_id = m.snapshot_id
       where m.thread_id = $1::uuid
@@ -36,11 +36,14 @@ export async function loadPriorSubjects(
     [input.threadId],
   );
   const refs = Array.isArray(rows[0]?.subject_refs) ? rows[0].subject_refs : [];
+  // The labels that answer's scope gave its companies, by issuer.
+  const labels = new Map((parseResearchScope(rows[0]?.research_scope ?? null)?.companies ?? [])
+    .flatMap((company) => company.label === undefined ? [] : [[company.issuer_id.toLowerCase(), company.label] as const]));
   const handoffs: HydratedSubjectHandoff[] = [];
   for (const ref of refs) {
     if (!isCompanyRef(ref)) continue;
     try {
-      handoffs.push(withListingTicker(await hydrate(db, ref)));
+      handoffs.push(withListingTicker(await hydrate(db, ref), labels));
     } catch (reason) {
       // A company that no longer hydrates is dropped; the turn still answers.
       console.warn("[chat] could not carry a previous subject forward", reason);
@@ -50,10 +53,12 @@ export async function loadPriorSubjects(
 }
 
 // An engine answer seals its companies as issuers, which hydrate with no
-// ticker; each takes its smallest active ticker, as answers name companies
-// (#425).
-function withListingTicker(handoff: HydratedSubjectHandoff): HydratedSubjectHandoff {
-  const [ticker] = (handoff.context.active_listings ?? []).map((listing) => listing.ticker).sort();
+// ticker; each takes an active ticker, as answers name companies (#425): the
+// one its answer named (GOOGL, not GOOG), else its smallest.
+function withListingTicker(handoff: HydratedSubjectHandoff, labels: ReadonlyMap<string, string>): HydratedSubjectHandoff {
+  const tickers = (handoff.context.active_listings ?? []).map((listing) => listing.ticker).sort();
+  const named = labels.get(handoff.subject_ref.id.toLowerCase());
+  const ticker = named !== undefined && tickers.includes(named) ? named : tickers[0];
   return handoff.display_labels.ticker !== undefined || ticker === undefined
     ? handoff
     : { ...handoff, display_labels: { ...handoff.display_labels, ticker } };
