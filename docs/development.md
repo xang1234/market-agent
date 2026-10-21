@@ -120,6 +120,13 @@ cd services/fundamentals
 DATABASE_URL=... SEC_EDGAR_USER_AGENT=... npm run backfill:sec-statements
 ```
 
+The engine binds EPS and weighted-average share counts restated to the analysis's date, from the listing's stock splits. The backfill also certifies those facts when they were stored before #387. Sync the splits on the day of the analyses that read them. An analysis dated after the last sync reports `split_history_stale` instead of a value.
+
+```bash
+cd services/market
+DATABASE_URL=... POLYGON_API_KEY=... npm run sync:splits
+```
+
 ### Keep frozen and live data apart
 
 Frozen modes need a database without provider-hydrated NVDA, AMD, or AAPL. Data mode refuses a database that a frozen mode seeded, because the frozen facts would let a live check pass without touching Polygon or SEC. Reset with `docker compose -f docker-compose.dev.yml --env-file .env.dev down -v` when you switch.

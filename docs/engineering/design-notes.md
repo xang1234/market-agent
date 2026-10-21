@@ -196,6 +196,31 @@ route and reads nothing else.
 - The blocks are ordinary fact-bound `metric_row`s, so they read "Source-linked". Like every other chat figure they are
   not "Verified calculation": that label still needs the financial engine's certificate (#200, #211).
 
+## EPS and share counts on a split basis (#387)
+
+A filing states its own period's EPS and weighted-average share counts on the split basis of its filing date: every
+split executed on or before that date is already reflected. SEC ingestion certifies them that way
+(`recordSecOriginalContext`, `services/fundamentals/src/sec-facts-repository.ts`).
+
+- **Stored as filed:** the context's adjustment basis is `as_filed`, with the filing date companyfacts lists beside the
+  value (`as_filed_on`, migration 0066) and the basic or diluted share basis. Publication proofs cannot date the filing,
+  since they prove only when a fetch saw it.
+- **Bound on the plan's basis:** an as-filed input binds `split_adjusted` with a `split_adjustment`
+  (`services/financial-core/src/split-adjustment.ts`). It names the listing's splits after the filing date and on or
+  before the plan's reference date, their factor, and the restated value, as exact fractions. The token and its proof
+  stay as filed. The reference date is the cutoff's date in the plan's time zone, one per plan, so a plan's restated
+  inputs always compare. Core rebuilds the adjustment from its own splits and fails the input's integrity on any
+  difference.
+- **Gaps:** no single common-stock listing active at the cutoff (`split_listing_unresolved`), splits never fetched
+  (`split_history_missing`), or last fetched before the reference date's day (`split_history_stale`). A fetch on that
+  day is complete because an issuer announces a split at least ten days before its record date (SEC Rule 10b-17).
+- **A split recast is no restatement:** restatement detection compares only unadjusted originals, since a later 10-K
+  states the same period on its own split basis.
+- **Seal:** the snapshot verifier rebuilds the adjustment from the listing's current splits and withholds the seal when
+  they changed (`splits_changed`).
+- **Operators:** `npm run backfill:sec-statements` records the context of a share fact stored before #387, and
+  `npm run sync:splits` (in `services/market`) has to have run on the analysis's day.
+
 ## Which facts may ground an answer
 
 `loadUsableFacts` (`services/fundamentals/src/usable-facts.ts`) is the one definition (#159). Every reader that shows
