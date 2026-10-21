@@ -193,9 +193,12 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     // the scope gets the ones the message resolved; the answer saves the ones
     // it answered for (answeredCompanies).
     const { resolved } = requested;
-    const scope = (deps.researchScope && !answered
-      ? deps.researchScope({ ...context, subjectPreResolution: resolved[0], subjectPreResolutions: resolved }, reading)
-      : Promise.resolve(null)).catch((reason) => {
+    // Called at once, so the scope queues its reads before the request takes
+    // its client; one that throws before it answers is no scope.
+    const { researchScope } = deps;
+    const scope = (async () => researchScope && !answered
+      ? researchScope({ ...context, subjectPreResolution: resolved[0], subjectPreResolutions: resolved }, reading)
+      : null)().catch((reason) => {
       console.warn("[chat] research scope unavailable; saving the financial answer without it", reason);
       return null;
     });
@@ -248,7 +251,8 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       // queued its reads before this request took its client.
       beforeDrive: () => prepared(true),
       persistParent: persistAssistantMessage(context.threadId, messageId, {
-        prepared: () => prepared(true),
+        // Decided before the drive; never a model call inside the transaction.
+        prepared: () => prepared(false),
         carried: requested.carried,
         notFound: requested.notFound,
         labels: requested.labels,
