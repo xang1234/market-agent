@@ -752,13 +752,13 @@ export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1, lab
   });
   type Company = (typeof companies)[number];
   // An engine figure is as reported, so a qualified metric is computed only as
-  // its base's growth (a change of it) or its trend (it over several periods).
+  // its base's growth (a change from it to it) or its trend (it over several periods).
   const computes = (metric: RequestedMetric, company: Company) => {
     const ofBase = (node: OperationNode) => SCOPE_METRICS[figureKey(node)] === metric.base;
     if (metric.adjustment !== undefined) return false;
     if (metric.qualifier === "growth") {
       return company.reached.some((node) => (node.operation === "percent_change_positive_base" || node.operation === "absolute_change") &&
-        figures(nodes.get(node.current)!).some(ofBase));
+        figures(nodes.get(node.current)!).some(ofBase) && figures(nodes.get(node.prior)!).some(ofBase));
     }
     return metric.qualifier === "trend" && new Set(company.shown.filter(ofBase).map(periodOf)).size > 1;
   };
