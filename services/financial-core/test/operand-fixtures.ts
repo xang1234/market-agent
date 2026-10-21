@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
-import type { BoundFactInputV1, FinancialUnit, FiscalPeriod, SplitAdjustmentV2, SubjectSlot } from "../src/contracts.ts";
+import type { BoundFactInputV1, BoundPriceInputV1, FinancialUnit, FiscalPeriod, SplitAdjustmentV2, SubjectSlot } from "../src/contracts.ts";
+import type { MetricValueKind } from "../src/definitions.ts";
+import { parseFinancialDecimal } from "../src/exact-decimal.ts";
 import { operandFromBoundInput, type FinancialOperand } from "../src/operations.ts";
+import { rationalFromDecimal } from "../src/rational.ts";
+import { restateToReference, type RecordedSplit } from "../src/split-adjustment.ts";
+import { validateBoundInput } from "../src/validate.ts";
 import { ISSUER_A, ISSUER_B } from "./fixtures.ts";
 
 const HASH = "c".repeat(64);
@@ -105,6 +110,48 @@ export function operand(nodeId: string, spec: InputSpec): FinancialOperand {
 /** The cutoff operands are evaluated at, and the reference date it is in New York, where their listings trade. */
 export const KNOWLEDGE_CUTOFF = "2025-03-01T12:00:00.000Z";
 export const REFERENCE_DATE = "2025-03-01";
+
+export const LISTING = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+// NVDA's 2024-06-10 split as Polygon lists it: each share became ten.
+export const NVDA_SPLITS: RecordedSplit[] = [{ execution_date: "2024-06-10", split_from: "1", split_to: "10" }];
+/** A cutoff whose reference date R is 2024-06-11 in New York, after NVDA's split. */
+export const SPLIT_CUTOFF = "2024-06-11T20:30:00.000Z";
+
+/** `value`, on the split basis of `asFiledOn`, restated by NVDA's split to 2024-06-11 on `listing`. */
+export function splitAdjustment(value: string, valueKind: MetricValueKind, asFiledOn: string, listing = LISTING): SplitAdjustmentV2 {
+  const parsed = parseFinancialDecimal(value);
+  assert.ok(parsed.ok);
+  const outcome = restateToReference({
+    native: rationalFromDecimal(parsed.value)!, value_kind: valueKind, as_filed_on: asFiledOn, reference_date: "2024-06-11",
+    listing_id: listing, listing_timezone: "America/New_York", splits: NVDA_SPLITS,
+  });
+  if (!outcome.ok) return assert.fail(outcome.reason);
+  return outcome.adjustment;
+}
+
+/** Subject a's session close of `tradeDate`, observed at 16:00 New York time and known a quarter hour later. */
+export function priceInput(token: string, value: string, tradeDate: string, overrides: Partial<BoundPriceInputV1> = {}): BoundPriceInputV1 {
+  const validated = validateBoundInput({
+    schema_version: "financial_bound_price_input.v1",
+    input_slot: "px",
+    observation_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    subject_ref: SLOTS.a.subject_ref,
+    metric: { metric_key: "share_price", definition_version: "share_price.v1" },
+    listing_id: LISTING,
+    source: { source_id: "00000000-0000-4000-a000-000000000009", body_sha256: "d".repeat(64) },
+    observation_kind: "session_close",
+    numeric: { raw_token: token, value },
+    unit: { kind: "currency_per_share", currency: "USD" },
+    observed_at: `${tradeDate}T20:00:00.000Z`,
+    known_at: `${tradeDate}T20:15:00.000Z`,
+    split_adjustment: splitAdjustment(value, "price", tradeDate),
+    eligibility: { selection_policy_version: "price-at-cutoff-selection.v1", candidate_set_digest: "e".repeat(64) },
+    ...overrides,
+  });
+  if (!validated.ok) return assert.fail(JSON.stringify(validated.issues));
+  assert.ok(validated.value.schema_version === "financial_bound_price_input.v1");
+  return validated.value;
+}
 
 /** FY2023 calendar-year duration. */
 export const FY2023 = { start: "2023-01-01", end: "2023-12-31", fiscal_year: 2023, fiscal_period: "FY" as const };

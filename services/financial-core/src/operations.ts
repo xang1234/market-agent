@@ -11,12 +11,17 @@ import {
   type BoundFinancialInputV1,
   type BoundPriceInputV1,
   type ChangeNode,
+  type FinancialUnit,
   type FreeCashFlowNode,
   type GapDisposition,
+  type IsoDate,
   type IsoDateTime,
   type LocalId,
   type MarginNode,
+  type MarketCapNode,
   type OperationKind,
+  type PeRatioNode,
+  type PeriodSelector,
   type PredicatePayload,
   type RankingPayload,
   type RatioNode,
@@ -25,11 +30,12 @@ import {
   type ReportingBasis,
   type SubjectSlot,
   type TrailingSumNode,
+  type UUID,
   type ValuePayload,
   type VersionTag,
 } from "./contracts.ts";
 import { MARGIN_NUMERATORS, resolveMetricDefinition, resolveRatioDefinition, type MetricDefinition, type MetricValueKind } from "./definitions.ts";
-import { measurementIncompatibility, type Measurement, type MeasurementReason } from "./dimensions.ts";
+import { measurementIncompatibility, unitIncompatibility, type Measurement, type MeasurementReason } from "./dimensions.ts";
 import { canonicalDecimalString, parseDerivedDecimalText, parseFinancialDecimal } from "./exact-decimal.ts";
 import { classifyDuration, comparePeriodEnds, dayNumber, periodsContiguous, periodsIdentical, periodsOverlap, type PeriodIdentity } from "./periods.ts";
 import { localDateOf } from "./public-time.ts";
@@ -65,6 +71,8 @@ export type FinancialOperand = {
   value_kind: MetricValueKind | "derived";
   period: PeriodIdentity;
   measurement: Measurement;
+  /** The listing and reference date a reported value was restated to; null when it was not restated, and for every derived value. */
+  restated_to: Readonly<{ listing_id: UUID; reference_date: IsoDate }> | null;
 };
 
 export type OperationGap = { ok: false; disposition: GapDisposition; reason_code: ReasonCode; explanation: string };
@@ -197,6 +205,7 @@ function factOperand(input: BoundFactInputV1, node: ReportedMetricNode, definiti
       dimensions: { scope: input.dimensions.scope, members: input.dimensions.members.map((member) => ({ ...member })) },
       basis: { ...input.basis },
     },
+    restated_to: adjustment === undefined ? null : { listing_id: adjustment.listing_id, reference_date: adjustment.reference_date },
   });
 }
 
@@ -235,6 +244,7 @@ function priceOperand(input: BoundPriceInputV1, node: ReportedMetricNode, defini
       dimensions: { scope: "consolidated", members: [] },
       basis: { reporting: expected.reporting_basis, adjustment: "split_adjusted", share_basis: "not_applicable" },
     },
+    restated_to: { listing_id: adjustment.listing_id, reference_date: adjustment.reference_date },
   });
 }
 
@@ -290,6 +300,7 @@ export function freeCashFlow(node: FreeCashFlowNode, operatingCashFlow: Financia
     value_kind: "derived",
     period: operatingCashFlow.period,
     measurement: operatingCashFlow.measurement,
+    restated_to: null,
   });
 }
 
@@ -346,6 +357,86 @@ export function trailingSum(node: TrailingSumNode, quarters: ReadonlyArray<Finan
       calendar_version: last.calendar_version,
     },
   });
+}
+
+/**
+ * A share price times shares outstanding (#444). The price is on the split
+ * basis of its trade date and the cover count on that of its cover date, so
+ * both must be restated to one reference date. In the price's currency.
+ */
+export function marketCap(node: MarketCapNode, price: FinancialOperand, shares: FinancialOperand): OperandOutcome {
+  if (!isReported(price, "share_price", "price") || !isReported(shares, "shares_outstanding", "share_count")) {
+    return operationGap("incompatible_definition", "Market cap multiplies a share price by shares outstanding.");
+  }
+  const unit = price.measurement.unit;
+  if (unit.kind !== "currency_per_share" || shares.measurement.unit.kind !== "shares") {
+    return operationGap("incompatible_unit", "Market cap needs a price per share and a count of shares.");
+  }
+  const incompatible = subjectMismatch(price, shares) ?? referenceMismatch(node, price, shares);
+  if (incompatible) return incompatible;
+  if (rationalSign(shares.value) <= 0) return operationGap("non_positive_base", "Market cap requires a positive share count.");
+  const value = multiplyRationals(price.value, shares.value);
+  if (value === null) return operationGap("numeric_limit_exceeded", "Market cap exceeds supported numeric limits.");
+  return success(valuation(node, price, value, { kind: "currency", currency: unit.currency }));
+}
+
+/**
+ * A share price over diluted EPS of the latest fiscal year known at the
+ * cutoff (#444), both restated to one reference date. Selection decides which
+ * year is latest, so the earnings node must select it. Dimensionless.
+ */
+export function peRatio(node: PeRatioNode, price: FinancialOperand, earnings: FinancialOperand, earningsPeriod: PeriodSelector | null): OperandOutcome {
+  if (!isReported(price, "share_price", "price") || !isReported(earnings, "eps_diluted", "per_share")) {
+    return operationGap("incompatible_definition", "P/E divides a share price by diluted EPS.");
+  }
+  const latestYear = earningsPeriod?.kind === "latest" && earningsPeriod.period_type === "annual" && earningsPeriod.offset === 0;
+  if (!latestYear || earnings.period.fiscal_period !== "FY" || classifyDuration(earnings.period) !== "annual") {
+    return operationGap("unsupported_period", "P/E v1 divides by the latest fiscal year's diluted EPS.");
+  }
+  const incompatible = subjectMismatch(price, earnings) ?? referenceMismatch(node, price, earnings) ?? unitMismatch(price, earnings);
+  if (incompatible) return incompatible;
+  if (rationalSign(earnings.value) <= 0) return operationGap("non_positive_denominator", "P/E requires positive diluted EPS.");
+  const value = divideRationals(price.value, earnings.value);
+  if (value === null) return operationGap("numeric_limit_exceeded", "P/E exceeds supported numeric limits.");
+  return success(valuation(node, price, value, { kind: "ratio" }));
+}
+
+function isReported(operand: FinancialOperand, metricKey: string, valueKind: MetricValueKind): boolean {
+  return operand.value_kind === valueKind && operand.measure.metric_key === metricKey;
+}
+
+/**
+ * Both values restated on one listing to one reference date. A value never
+ * restated may be on another split basis. One subject resolves to one listing
+ * at the cutoff, so two different restatements contradict its bindings.
+ */
+function referenceMismatch(node: MarketCapNode | PeRatioNode, left: FinancialOperand, right: FinancialOperand): OperationGap | null {
+  const [a, b] = [left.restated_to, right.restated_to];
+  if (a === null || b === null) return operationGap("incompatible_basis", "Both values must be restated to the reference date of the company's listing.");
+  if (a.listing_id !== b.listing_id || a.reference_date !== b.reference_date) {
+    throw new FinancialIntegrityError("split_reference_mismatch", `the operands of ${node.node_id} are restated on different listings or dates`);
+  }
+  return null;
+}
+
+/** No currency conversion in v1: a price and a per-share value in different currencies do not divide. */
+function unitMismatch(left: FinancialOperand, right: FinancialOperand): OperationGap | null {
+  const reason = unitIncompatibility(left.measurement.unit, right.measurement.unit);
+  return reason === null ? null : operationGap(reason, MEASUREMENT_EXPLANATIONS[reason]);
+}
+
+/** A valuation of the price's subject, dated by the price; splits do not move it. */
+function valuation(node: MarketCapNode | PeRatioNode, price: FinancialOperand, value: ExactRational, unit: FinancialUnit): FinancialOperand {
+  return {
+    node_id: node.node_id,
+    value,
+    subject_slot: price.subject_slot,
+    measure: { metric_key: node.operation, definition_version: node.operation_version, derivations: [] },
+    value_kind: "derived",
+    period: price.period,
+    measurement: { ...price.measurement, unit },
+    restated_to: null,
+  };
 }
 
 // --- compatibility checks, composed per operation with `??` ---------------
@@ -408,6 +499,7 @@ function quotient(nodeId: LocalId, measure: MeasureIdentity, numerator: Financia
     value_kind: "derived",
     period: numerator.period,
     measurement: { ...numerator.measurement, unit: { kind: "ratio" } },
+    restated_to: null,
   });
 }
 
@@ -429,6 +521,7 @@ function derived(
     value_kind: "derived",
     period: source.period,
     measurement,
+    restated_to: null,
   };
 }
 

@@ -1,57 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { BoundPriceInputV1, ReportedMetricNode, SplitAdjustmentV2 } from "../src/contracts.ts";
-import { parseFinancialDecimal } from "../src/exact-decimal.ts";
+import type { ReportedMetricNode, SplitAdjustmentV2 } from "../src/contracts.ts";
 import { FinancialIntegrityError, operandFromBoundInput } from "../src/operations.ts";
-import { rationalFromDecimal } from "../src/rational.ts";
-import { restateToReference, type RecordedSplit } from "../src/split-adjustment.ts";
-import { validateBoundInput } from "../src/validate.ts";
-import { boundInput, SLOTS } from "./operand-fixtures.ts";
+import { boundInput, LISTING, priceInput, SLOTS, SPLIT_CUTOFF, splitAdjustment } from "./operand-fixtures.ts";
 
-const LISTING = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const NEW_YORK = "America/New_York";
-// NVDA's 2024-06-10 split as Polygon lists it: each share became ten.
-const SPLITS: RecordedSplit[] = [{ execution_date: "2024-06-10", split_from: "1", split_to: "10" }];
-// The reference date R is 2024-06-11 in New York, after the split.
-const CUTOFF = "2024-06-11T20:30:00.000Z";
+const CUTOFF = SPLIT_CUTOFF;
 const NODE: ReportedMetricNode = {
   node_id: "px", operation: "reported_metric", operation_version: "reported_metric.v1", subject_slot: "a", metric_key: "share_price", period: { kind: "at_cutoff" },
 };
 const EXPECTED = { slot: SLOTS.a, definition_version: "share_price.v1", knowledge_cutoff: CUTOFF, reporting_basis: "as_reported" as const };
 
 function adjustment(price: string, tradeDate: string): SplitAdjustmentV2 {
-  const parsed = parseFinancialDecimal(price);
-  assert.ok(parsed.ok);
-  const outcome = restateToReference({
-    native: rationalFromDecimal(parsed.value)!, value_kind: "price", as_filed_on: tradeDate, reference_date: "2024-06-11",
-    listing_id: LISTING, listing_timezone: NEW_YORK, splits: SPLITS,
-  });
-  if (!outcome.ok) return assert.fail(outcome.reason);
-  return outcome.adjustment;
-}
-
-/** A session close of `tradeDate`, observed at 16:00 New York time and known a quarter hour later. */
-function priceInput(token: string, value: string, tradeDate: string, overrides: Partial<BoundPriceInputV1> = {}): BoundPriceInputV1 {
-  const validated = validateBoundInput({
-    schema_version: "financial_bound_price_input.v1",
-    input_slot: "px",
-    observation_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-    subject_ref: SLOTS.a.subject_ref,
-    metric: { metric_key: "share_price", definition_version: "share_price.v1" },
-    listing_id: LISTING,
-    source: { source_id: "00000000-0000-4000-a000-000000000009", body_sha256: "d".repeat(64) },
-    observation_kind: "session_close",
-    numeric: { raw_token: token, value },
-    unit: { kind: "currency_per_share", currency: "USD" },
-    observed_at: `${tradeDate}T20:00:00.000Z`,
-    known_at: `${tradeDate}T20:15:00.000Z`,
-    split_adjustment: adjustment(value, tradeDate),
-    eligibility: { selection_policy_version: "price-at-cutoff-selection.v1", candidate_set_digest: "e".repeat(64) },
-    ...overrides,
-  });
-  if (!validated.ok) return assert.fail(JSON.stringify(validated.issues));
-  assert.ok(validated.value.schema_version === "financial_bound_price_input.v1");
-  return validated.value;
+  return splitAdjustment(price, "price", tradeDate);
 }
 
 function integrityCode(run: () => unknown): string {

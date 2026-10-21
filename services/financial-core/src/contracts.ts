@@ -41,6 +41,8 @@ export const OPERATION_KINDS = [
   "trailing_sum",
   "threshold",
   "peer_compare",
+  "market_cap",
+  "pe_ratio",
 ] as const;
 export type OperationKind = (typeof OPERATION_KINDS)[number];
 
@@ -221,6 +223,10 @@ export type PeerCompareNode = NodeBase & {
   members: LocalId[];
   direction: "highest" | "lowest";
 };
+/** A share price times the subject's shares outstanding, both restated to its listing's reference date (#444). */
+export type MarketCapNode = NodeBase & { operation: "market_cap"; price: LocalId; shares: LocalId };
+/** A share price over the latest fiscal year's diluted EPS, both restated to its listing's reference date (#444). */
+export type PeRatioNode = NodeBase & { operation: "pe_ratio"; price: LocalId; earnings: LocalId };
 
 export type OperationNode =
   | ReportedMetricNode
@@ -230,7 +236,9 @@ export type OperationNode =
   | RatioNode
   | TrailingSumNode
   | ThresholdNode
-  | PeerCompareNode;
+  | PeerCompareNode
+  | MarketCapNode
+  | PeRatioNode;
 
 export type RequestedOutput = { output_id: LocalId; node_id: LocalId; unit_id: LocalId };
 export type PublicationUnit = { unit_id: LocalId; kind: PublicationUnitKind };
@@ -504,5 +512,9 @@ export function operationDependencies(node: OperationNode): LocalId[] {
       return [node.subject];
     case "peer_compare":
       return [...node.members];
+    case "market_cap":
+      return [node.price, node.shares];
+    case "pe_ratio":
+      return [node.price, node.earnings];
   }
 }

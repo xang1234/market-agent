@@ -280,9 +280,9 @@ function presentPayload(plan: FinancialPlanV1, node: OperationNode, payload: unk
 
 const COMPARISON_TEXT: Readonly<Record<Comparison, string>> = { gt: "above", gte: "at or above", lt: "below", lte: "at or below", eq: "equal to" };
 
-// An approved ratio (leverage, cash conversion) reads as a multiple; margins and changes stay percentages.
+// An approved ratio (leverage, cash conversion) and P/E read as multiples; margins and changes stay percentages.
 function formatNodeValue(node: OperationNode, value: ExactDecimal, unit: FinancialUnit): { text: string; full_text: string } {
-  return node.operation === "ratio" && unit.kind === "ratio"
+  return (node.operation === "ratio" || node.operation === "pe_ratio") && unit.kind === "ratio"
     ? { text: `${fixed(value, 2)}x`, full_text: `${canonicalDecimalString(value)}x` }
     : formatValue(value, unit);
 }
@@ -380,6 +380,10 @@ function measureText(plan: FinancialPlanV1, node: OperationNode): string {
       return `${of(node.subject)} threshold check`;
     case "peer_compare":
       return `${of(node.members[0]!)} ranking`;
+    case "market_cap":
+      return "Market capitalization (share price × shares outstanding)";
+    case "pe_ratio":
+      return "P/E ratio (share price / latest fiscal year diluted EPS)";
   }
 }
 
@@ -395,6 +399,8 @@ function measureKey(plan: FinancialPlanV1, node: OperationNode): string {
     case "operating_margin":
     case "net_margin":
     case "free_cash_flow":
+    case "market_cap":
+    case "pe_ratio":
       return node.operation;
     case "absolute_change":
     case "percent_change_positive_base":
@@ -408,11 +414,15 @@ function measureKey(plan: FinancialPlanV1, node: OperationNode): string {
   }
 }
 
-/** The distinct periods a node reads, in operand order (current before prior). */
+/**
+ * The distinct periods a node reads, in operand order (current before prior).
+ * A valuation is dated by its price: its other operand is restated to the same reference date.
+ */
 function periodSelectors(plan: FinancialPlanV1, node: OperationNode): PeriodSelector[] {
-  const all = (entry: OperationNode): PeriodSelector[] => entry.operation === "reported_metric"
-    ? [entry.period]
-    : operationDependencies(entry).flatMap((id) => all(plan.operations.find((candidate) => candidate.node_id === id)!));
+  const of = (id: LocalId) => plan.operations.find((candidate) => candidate.node_id === id)!;
+  const all = (entry: OperationNode): PeriodSelector[] => entry.operation === "reported_metric" ? [entry.period]
+    : entry.operation === "market_cap" || entry.operation === "pe_ratio" ? all(of(entry.price))
+    : operationDependencies(entry).flatMap((id) => all(of(id)));
   const distinct = new Map<string, PeriodSelector>();
   for (const selector of all(node)) if (!distinct.has(JSON.stringify(selector))) distinct.set(JSON.stringify(selector), selector);
   return [...distinct.values()];
