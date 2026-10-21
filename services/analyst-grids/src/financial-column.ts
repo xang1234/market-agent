@@ -26,6 +26,7 @@ import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../fi
 import type { ParentRecovery } from "../../financial-engine/src/recovery.ts";
 import { issuerLabels, publishRequest, type RequestGap, type RequestOutcome } from "../../financial-engine/src/request.ts";
 import type { RunRecord } from "../../financial-engine/src/run-record.ts";
+import { valuationOperations, valuationOutputs, type Valuation } from "../../financial-engine/src/valuation-plan.ts";
 import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier.ts";
 import type { SubjectRef } from "../../shared/src/subject-ref.ts";
 import { writePendingCellOnce } from "./queries.ts";
@@ -45,17 +46,6 @@ type FinancialColumn = Readonly<{ label: string }> & (
   | Readonly<{ ratio_key: string; numerator: string; denominator: string; annual_only: true }>
   | Readonly<{ valuation: Valuation }>
 );
-
-type Valuation = "market_cap" | "pe_ratio";
-
-/**
- * What each valuation reads beside the price: the latest filing's share count,
- * or the latest fiscal year's diluted EPS, the only EPS pe_ratio.v1 accepts.
- */
-const VALUATION_OPERANDS: Readonly<Record<Valuation, Readonly<{ operand: "shares" | "earnings"; metric_key: string; period: Readonly<Record<string, unknown>> }>>> = {
-  market_cap: { operand: "shares", metric_key: "shares_outstanding", period: { kind: "latest", period_type: "quarterly", offset: 0 } },
-  pe_ratio: { operand: "earnings", metric_key: "eps_diluted", period: { kind: "latest", period_type: "annual", offset: 0 } },
-};
 
 const FINANCIAL_COLUMNS: Readonly<Record<string, FinancialColumn>> = {
   latest_revenue: { label: "Revenue (latest)", metric_key: "revenue" },
@@ -233,35 +223,23 @@ function planShape(cells: ReadonlyArray<ComputedCell>): { draft: object; units: 
   };
 }
 
-/**
- * A cell's published nodes, its own figure first: that is the result the cell
- * shows. A valuation always publishes its price and operand beside it
- * (planner), so they are listed after the figure rather than added before it.
- */
+/** A cell's published nodes, its own figure first: that is the result the cell shows. */
 function cellOutputs(cell: ComputedCell): string[] {
   const { column } = cell;
-  if (!("valuation" in column)) return [unitOf(cell)];
-  return [unitOf(cell), `${unitOf(cell)}_px`, `${unitOf(cell)}_${VALUATION_OPERANDS[column.valuation].operand}`];
+  return "valuation" in column ? valuationOutputs(unitOf(cell), column.valuation) : [unitOf(cell)];
 }
 
 function cellOperations(cell: ComputedCell): Array<Record<string, unknown>> {
-  const reported = (nodeId: string, metricKey: string, period: Readonly<Record<string, unknown>> = { kind: "latest", period_type: cell.params.period_type, offset: cell.params.offset }) => ({
+  const reported = (nodeId: string, metricKey: string) => ({
     node_id: nodeId,
     operation: "reported_metric",
     subject_slot: slotOf(cell.rowNumber),
     metric_key: metricKey,
-    period,
+    period: { kind: "latest", period_type: cell.params.period_type, offset: cell.params.offset },
   });
   const { column } = cell;
   if ("metric_key" in column) return [reported(unitOf(cell), column.metric_key)];
-  if ("valuation" in column) {
-    const { operand, metric_key, period } = VALUATION_OPERANDS[column.valuation];
-    return [
-      reported(`${unitOf(cell)}_px`, "share_price", { kind: "at_cutoff" }),
-      reported(`${unitOf(cell)}_${operand}`, metric_key, period),
-      { node_id: unitOf(cell), operation: column.valuation, price: `${unitOf(cell)}_px`, [operand]: `${unitOf(cell)}_${operand}` },
-    ];
-  }
+  if ("valuation" in column) return valuationOperations(unitOf(cell), slotOf(cell.rowNumber), column.valuation);
   return [
     reported(`${unitOf(cell)}_num`, column.numerator),
     reported(`${unitOf(cell)}_den`, column.denominator),
