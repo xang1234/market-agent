@@ -12,7 +12,7 @@ import {
   unitPublication,
   validateBoundInput,
   validateFinancialPlan,
-  type BoundFinancialInputV1,
+  type BoundFactInputV1,
   type FinancialPlanV1,
   type SlotBinding,
 } from "../../financial-core/src/index.ts";
@@ -98,7 +98,7 @@ export function marginPlan(calculation: FixtureCalculation = GROSS_MARGIN): Fina
   return validated.value;
 }
 
-function boundInput(slot: string, factId: string, metric: string, value: string): BoundFinancialInputV1 {
+function boundInput(slot: string, factId: string, metric: string, value: string): BoundFactInputV1 {
   const validated = validateBoundInput({
     schema_version: "financial_bound_input.v1",
     input_slot: slot,
@@ -117,6 +117,7 @@ function boundInput(slot: string, factId: string, metric: string, value: string)
     eligibility: { selection_policy_version: "public-information-selection.v1", promotion_status: "authoritative", candidate_set_digest: F.digest },
   });
   assert.ok(validated.ok, JSON.stringify(!validated.ok && validated.issues));
+  assert.ok(validated.value.schema_version === "financial_bound_input.v1");
   return validated.value;
 }
 
@@ -186,12 +187,14 @@ export function validRecords(
       fact_id: input.fact_id,
       publication_attestation_id: F.pubAttestation,
       precision_attestation_id: input.input_slot === "a_rev" ? F.precRevenue : F.precGrossProfit,
+      price_observation_id: null,
       bound_payload: JSON.parse(JSON.stringify(input)),
       payload_hash: hashCanonical("bound_input", input),
       gap_reason: null,
       candidate_set_digest: F.digest,
     })),
     evidence: [evidence(F.revenueFact), evidence(F.grossProfitFact)],
+    price_observations: [],
     split_histories: [],
     computations: publication.computations.map((computation) => ({
       computation_id: computationIds.get(computation.node_id)!,

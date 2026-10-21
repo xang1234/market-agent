@@ -152,7 +152,7 @@ export function checkSplitAdjustment(
   return { ok: true, value: recomputed.value };
 }
 
-/** Whether a stock split restates this kind of value: per-share values and share counts. */
+/** Whether a stock split restates this kind of value: per-share values, prices, and share counts. */
 export function splitsRestate(valueKind: MetricValueKind): boolean {
   return DIRECTIONS[valueKind] !== null;
 }
@@ -192,6 +192,7 @@ function splitFactor(valueKind: MetricValueKind, after: IsoDate, onOrBefore: Iso
 
 const DIRECTIONS: Readonly<Record<MetricValueKind, "multiply" | "divide" | null>> = {
   per_share: "divide",
+  price: "divide",
   share_count: "multiply",
   share_count_average: "multiply",
   flow: null,

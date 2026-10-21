@@ -5,29 +5,34 @@
 // Binding contradictions (wrong subject/metric, value x scale != native) are
 // integrity failures and throw; graph evaluation decides their blast radius.
 
-import type {
-  BoundFinancialInputV1,
-  ChangeNode,
-  FreeCashFlowNode,
-  GapDisposition,
-  IsoDateTime,
-  LocalId,
-  MarginNode,
-  OperationKind,
-  PredicatePayload,
-  RankingPayload,
-  RatioNode,
-  ReasonCode,
-  ReportedMetricNode,
-  SubjectSlot,
-  TrailingSumNode,
-  ValuePayload,
-  VersionTag,
+import {
+  BOUND_PRICE_INPUT_SCHEMA_VERSION,
+  type BoundFactInputV1,
+  type BoundFinancialInputV1,
+  type BoundPriceInputV1,
+  type ChangeNode,
+  type FreeCashFlowNode,
+  type GapDisposition,
+  type IsoDateTime,
+  type LocalId,
+  type MarginNode,
+  type OperationKind,
+  type PredicatePayload,
+  type RankingPayload,
+  type RatioNode,
+  type ReasonCode,
+  type ReportedMetricNode,
+  type ReportingBasis,
+  type SubjectSlot,
+  type TrailingSumNode,
+  type ValuePayload,
+  type VersionTag,
 } from "./contracts.ts";
-import { MARGIN_NUMERATORS, resolveMetricDefinition, resolveRatioDefinition, type MetricValueKind } from "./definitions.ts";
+import { MARGIN_NUMERATORS, resolveMetricDefinition, resolveRatioDefinition, type MetricDefinition, type MetricValueKind } from "./definitions.ts";
 import { measurementIncompatibility, type Measurement, type MeasurementReason } from "./dimensions.ts";
 import { canonicalDecimalString, parseDerivedDecimalText, parseFinancialDecimal } from "./exact-decimal.ts";
 import { classifyDuration, comparePeriodEnds, dayNumber, periodsContiguous, periodsIdentical, periodsOverlap, type PeriodIdentity } from "./periods.ts";
+import { localDateOf } from "./public-time.ts";
 import {
   addRationals,
   compareRationals,
@@ -120,11 +125,9 @@ export function operationGap(reason: ReasonCode, explanation: string): Operation
 
 const DURATION_KINDS: ReadonlySet<MetricValueKind> = new Set(["flow", "per_share", "share_count_average"]);
 
-export function operandFromBoundInput(
-  input: BoundFinancialInputV1,
-  node: ReportedMetricNode,
-  expected: { slot: SubjectSlot; definition_version: VersionTag; knowledge_cutoff: IsoDateTime },
-): OperandOutcome {
+type BindingExpectation = { slot: SubjectSlot; definition_version: VersionTag; knowledge_cutoff: IsoDateTime; reporting_basis: ReportingBasis };
+
+export function operandFromBoundInput(input: BoundFinancialInputV1, node: ReportedMetricNode, expected: BindingExpectation): OperandOutcome {
   if (
     node.subject_slot !== expected.slot.slot_id ||
     input.subject_ref.kind !== expected.slot.subject_ref.kind ||
@@ -140,6 +143,16 @@ export function operandFromBoundInput(
   if (input.metric.definition_version !== expected.definition_version || expected.definition_version !== definition.definition_version) {
     return operationGap("incompatible_definition", "The input uses a different metric definition version.");
   }
+  // A share price binds only from a price observation, and a fact never binds to it.
+  if ((input.schema_version === BOUND_PRICE_INPUT_SCHEMA_VERSION) !== (definition.value_kind === "price")) {
+    throw new FinancialIntegrityError("binding_variant_mismatch", `input bound to ${node.node_id} is not the kind of evidence its metric binds`);
+  }
+  return input.schema_version === BOUND_PRICE_INPUT_SCHEMA_VERSION
+    ? priceOperand(input, node, definition, expected)
+    : factOperand(input, node, definition, expected);
+}
+
+function factOperand(input: BoundFactInputV1, node: ReportedMetricNode, definition: MetricDefinition, expected: BindingExpectation): OperandOutcome {
   if (input.unit.kind !== definition.unit_kind) return operationGap("incompatible_unit", "The input unit does not match the metric definition.");
   const wantsDuration = DURATION_KINDS.has(definition.value_kind);
   if ((input.period.kind === "duration") !== wantsDuration || (wantsDuration && input.period.start === null)) {
@@ -183,6 +196,44 @@ export function operandFromBoundInput(
       unit: input.unit,
       dimensions: { scope: input.dimensions.scope, members: input.dimensions.members.map((member) => ({ ...member })) },
       basis: { ...input.basis },
+    },
+  });
+}
+
+/**
+ * A price is the provider's token exactly, on the split basis of its trade
+ * date in the listing's time zone, restated to the plan's reference date.
+ */
+function priceOperand(input: BoundPriceInputV1, node: ReportedMetricNode, definition: MetricDefinition, expected: BindingExpectation): OperandOutcome {
+  const value = boundRational(input.numeric.value, "value");
+  const token = parseFinancialDecimal(input.numeric.raw_token);
+  const tokenValue = token.ok ? rationalFromDecimal(token.value) : null;
+  if (tokenValue === null || !sameRational(tokenValue, value)) {
+    throw new FinancialIntegrityError("token_value_mismatch", `source token for ${node.node_id} does not equal the bound value`);
+  }
+  const observedAt = Date.parse(input.observed_at);
+  if (!(observedAt <= Date.parse(input.known_at) && Date.parse(input.known_at) <= Date.parse(expected.knowledge_cutoff))) {
+    throw new FinancialIntegrityError("price_not_known_at_cutoff", `price bound to ${node.node_id} was not known between its trade and the knowledge cutoff`);
+  }
+  const adjustment = input.split_adjustment;
+  const restated = checkSplitAdjustment(adjustment, value, definition.value_kind, expected.knowledge_cutoff);
+  if (!restated.ok) {
+    throw new FinancialIntegrityError(restated.code, `split adjustment of ${node.node_id} does not restate its value to its listing's reference date`);
+  }
+  if (adjustment.listing_id !== input.listing_id || adjustment.as_filed_on !== localDateOf(observedAt, adjustment.listing_timezone)) {
+    throw new FinancialIntegrityError("split_anchor_mismatch", `split adjustment of ${node.node_id} is not anchored at its trade date on its listing`);
+  }
+  return success({
+    node_id: node.node_id,
+    value: restated.value,
+    subject_slot: expected.slot.slot_id,
+    measure: { metric_key: definition.metric_key, definition_version: definition.definition_version, derivations: [] },
+    value_kind: definition.value_kind,
+    period: { kind: "instant", start: null, end: adjustment.as_filed_on, fiscal_year: null, fiscal_period: null, calendar_version: null },
+    measurement: {
+      unit: input.unit,
+      dimensions: { scope: "consolidated", members: [] },
+      basis: { reporting: expected.reporting_basis, adjustment: "split_adjusted", share_basis: "not_applicable" },
     },
   });
 }

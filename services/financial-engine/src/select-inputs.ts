@@ -181,6 +181,8 @@ export function selectInput(
   latestPeriod?: LatestPeriod,
 ): SlotSelection {
   if (page.truncated) return gap("scope_limit_exceeded");
+  // A fact has a fiscal period; only a price is selected as of the cutoff.
+  if (node.period.kind === "at_cutoff") return gap("unsupported_period");
   if (isShareCount(node.metric_key)) return selectShareCount(node, candidates, policy);
   const requested = requestedCandidates(node, candidates);
   const shared = node.period.kind !== "latest" ? null
@@ -263,6 +265,7 @@ function inRequestedPeriod(candidate: InputCandidate, selector: PeriodSelector):
   if (selector.kind === "fiscal_period") {
     return candidate.period.fiscal_year === selector.fiscal_year && candidate.period.fiscal_period === selector.fiscal_period;
   }
+  if (selector.kind === "at_cutoff") return false;
   return selector.period_type === "annual" ? candidate.period.fiscal_period === "FY" : candidate.period.fiscal_period !== "FY";
 }
 

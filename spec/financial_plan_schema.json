@@ -204,6 +204,15 @@
             "period_type": { "enum": ["annual", "quarterly"] },
             "offset": { "type": "integer", "minimum": 0, "maximum": 19 }
           }
+        },
+        {
+          "description": "The latest value known at the knowledge cutoff: a share price, which has no fiscal period.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": { "const": "at_cutoff" }
+          }
         }
       ]
     },

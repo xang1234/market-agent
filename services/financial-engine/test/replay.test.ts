@@ -15,6 +15,7 @@ import { completedRun, databaseUrl, engineDatabase, IDS, pinnedClients } from ".
 const noEvidence = (): FinancialEvidencePort => ({
   listInputCandidates: async () => assert.fail("a replay must never select evidence"),
   readSplitHistory: async () => assert.fail("a replay must never select evidence"),
+  readPriceObservations: async () => assert.fail("a replay must never select evidence"),
 });
 
 async function bypass(db: Client, sql: string, params: unknown[]): Promise<void> {

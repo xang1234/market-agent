@@ -2,12 +2,12 @@
 // incompatible inputs produce a named reason, and the only conversions are the
 // exact, typed dimensionless rescalings below. Currency conversion is outside v1.
 
-import type { BoundFinancialInputV1, FinancialUnit } from "./contracts.ts";
+import type { BoundFactInputV1, FinancialUnit } from "./contracts.ts";
 import { parseFinancialDecimal } from "./exact-decimal.ts";
 import { multiplyRationals, rationalFromDecimal, type ExactRational } from "./rational.ts";
 
-export type DimensionalScope = BoundFinancialInputV1["dimensions"];
-export type FinancialBasis = BoundFinancialInputV1["basis"];
+export type DimensionalScope = BoundFactInputV1["dimensions"];
+export type FinancialBasis = BoundFactInputV1["basis"];
 export type DimensionlessUnit = "ratio" | "percent" | "basis_points";
 
 export type MeasurementReason = "incompatible_unit" | "incompatible_currency" | "incompatible_scope" | "incompatible_basis";

@@ -156,6 +156,7 @@ test("atomic financial finalization", { timeout: 300_000 }, async (t) => {
       knowledgeCutoff: new Date(plan.time.knowledge_cutoff).toISOString(),
       subjectRefs: [{ kind: "issuer", id: IDS.issuerA }],
       boundFacts: await loadUnitBoundFacts(db, runId, "rev_unit"),
+      boundPriceSources: [],
     });
     await assert.rejects(() => sealSnapshot(client, seal), /does not match a sealed unit/);
     assert.deepEqual(await counts(db, runId), { certificates: 0, parents: 0, sealed: 0, finalized: 0, snapshots: 0 });

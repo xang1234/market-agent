@@ -7,7 +7,7 @@
 // version it was computed for is still the agent's current one.
 
 import { createRuntimeAuthority, type FinancialRuntimeAuthority } from "../../financial-core/src/index.ts";
-import type { PersistParentArtifact } from "../../financial-engine/src/finalize.ts";
+import { ParentRefusedError, type PersistParentArtifact } from "../../financial-engine/src/finalize.ts";
 import { evaluateSavedRule, type SavedRuleDeps } from "../../financial-engine/src/saved-rule.ts";
 import type { ConditionAssessment, ThesisVersion } from "./thesis-types.ts";
 
@@ -89,6 +89,6 @@ function requireCurrentThesis(thesisVersionId: string): PersistParentArtifact {
         for update of a`,
       [thesisVersionId, tx.run.user_id],
     );
-    if (current.rows[0]?.current !== true) throw new Error("the thesis changed during assessment");
+    if (current.rows[0]?.current !== true) throw new ParentRefusedError("the thesis changed during assessment");
   };
 }

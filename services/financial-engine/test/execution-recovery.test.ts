@@ -47,6 +47,7 @@ test("execution recovery after a worker crash", { timeout: 240_000 }, async (t) 
   const noEvidence = () => ({
     listInputCandidates: async () => assert.fail("a resumed run must reuse its bindings, never reselect evidence"),
     readSplitHistory: async () => assert.fail("a resumed run must reuse its bindings, never reselect evidence"),
+    readPriceObservations: async () => assert.fail("a resumed run must reuse its bindings, never reselect evidence"),
   });
   const report = await executeRun({ client: db, lease: resumed, plan, authority, evidence: noEvidence, parent_limits: {} });
   assert.equal(report.outcome, "ready_to_seal");

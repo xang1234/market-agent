@@ -16,8 +16,8 @@ import { randomUUID } from "node:crypto";
 import {
   createRuntimeAuthority,
   hashCanonical,
-  METRIC_CATALOG_V1,
   operationDependencies,
+  PLANNABLE_METRICS,
   RATIO_CATALOG_V1,
   type FinancialPlanV1,
   type FinancialRuntimeAuthority,
@@ -26,7 +26,7 @@ import {
   type OperationNode,
 } from "../../financial-core/src/index.ts";
 import { cashResilienceDraft, LATEST_FISCAL_YEAR, type CashResiliencePeriod } from "../../financial-engine/src/cash-resilience.ts";
-import type { PersistParentArtifact } from "../../financial-engine/src/finalize.ts";
+import { ParentRefusedError, type PersistParentArtifact } from "../../financial-engine/src/finalize.ts";
 import {
   buildDeterministicPlan,
   planFinancialRequest,
@@ -468,7 +468,7 @@ function persistAssistantMessage(
         saved === null ? null : JSON.stringify(saved),
       ],
     );
-    if (inserted.rows.length === 0) throw new Error("the chat thread no longer belongs to the run's owner");
+    if (inserted.rows.length === 0) throw new ParentRefusedError("the chat thread no longer belongs to the run's owner");
   };
 }
 
@@ -496,6 +496,8 @@ export const SCOPE_METRICS: Readonly<Record<string, string | null>> = {
   weighted_average_basic_shares: null,
   weighted_average_diluted_shares: null,
   shares_outstanding: null,
+  // Not planned yet (PLANNABLE_METRICS).
+  share_price: null,
 };
 
 const figureKey = (node: OperationNode) => node.operation === "reported_metric" ? node.metric_key : node.operation;
@@ -600,7 +602,7 @@ function gap(reason_code: ChatGap): Extract<ChatFinancialTurn, { kind: "gap" }> 
 const FINANCIAL_TERMS = new RegExp(
   `\\b(${[
     // Catalog labels without qualifiers: "EPS (basic)" is asked about as "EPS".
-    ...[...METRIC_CATALOG_V1.values(), ...RATIO_CATALOG_V1.values()].map((definition) => definition.label.replace(/\s*\(.*\)$/u, "")),
+    ...[...PLANNABLE_METRICS, ...RATIO_CATALOG_V1.values()].map((definition) => definition.label.replace(/\s*\(.*\)$/u, "")),
     "sales", "margin", "margins", "earnings per share", "EPS", "profit", "cash flow", "free cash flow", "capex", "cash resilience", "net income", "operating income",
   ].map((term) => term.replace(/[.*+?^${}()|[\]\\/]/gu, "\\$&")).join("|")})\\b`,
   "iu",

@@ -88,6 +88,7 @@ export function evaluateBoundPlan(plan: FinancialPlanV1, bindings: ReadonlyMap<L
       slot: slots.get(node.subject_slot)!,
       definition_version: definitions.get(node.metric_key)!,
       knowledge_cutoff: plan.time.knowledge_cutoff,
+      reporting_basis: plan.policies.reporting_basis,
     });
   });
 }

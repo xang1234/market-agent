@@ -51,7 +51,7 @@ function outputLabels(plan: FinancialPlanV1): string[] {
   const describe = (nodeId: string): string => {
     const node = nodes.get(nodeId)!;
     if (node.operation !== "reported_metric") return `${node.operation}(${operationDependencies(node).map(describe).join(", ")})`;
-    const period = node.period.kind === "fiscal_period" ? `${node.period.fiscal_period} ${node.period.fiscal_year}` : `latest ${node.period.period_type}[${node.period.offset}]`;
+    const period = node.period.kind === "fiscal_period" ? `${node.period.fiscal_period} ${node.period.fiscal_year}` : node.period.kind === "latest" ? `latest ${node.period.period_type}[${node.period.offset}]` : node.period.kind;
     return `${ticker(node.subject_slot)} ${node.metric_key} ${period}`;
   };
   return plan.outputs.map((output) => describe(output.node_id));

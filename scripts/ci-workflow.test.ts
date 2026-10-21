@@ -102,6 +102,18 @@ test("ci workflow installs evidence before analyst-grids imports its S3 object s
   );
 });
 
+test("ci workflow installs fundamentals before market parses prices with its lossless parser", async () => {
+  const workflow = await readFile(CI_WORKFLOW, "utf8");
+  const section = jobSection(workflow, "services/market");
+
+  assert.match(section, /services\/fundamentals\/package-lock\.json/);
+  assert.match(section, /working-directory:\s*services\/fundamentals\s*\n\s*run:\s*npm ci/);
+  assert.ok(
+    section.indexOf("working-directory: services/fundamentals") < section.indexOf("run: npm run typecheck"),
+    "market must install fundamentals dependencies before its typecheck reaches price-capture-cli",
+  );
+});
+
 test("ci workflow covers every package with a test script", async () => {
   const workflow = await readFile(CI_WORKFLOW, "utf8");
   const packageDirs = await testedPackageDirs();

@@ -4,13 +4,14 @@
 
 import type { FiscalPeriod, IsoDate, VersionTag } from "./contracts.ts";
 
+/** A share price has a trade date and no fiscal period: its fiscal fields are null. */
 export type PeriodIdentity = {
   kind: "duration" | "instant";
   start: IsoDate | null;
   end: IsoDate;
-  fiscal_year: number;
-  fiscal_period: FiscalPeriod | "TTM";
-  calendar_version: VersionTag;
+  fiscal_year: number | null;
+  fiscal_period: FiscalPeriod | "TTM" | null;
+  calendar_version: VersionTag | null;
 };
 
 // 13-week (91 day) and 14-week (98 day) fiscal quarters and 89–92 day calendar

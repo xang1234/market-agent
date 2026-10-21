@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import type { BoundFinancialInputV1, FinancialUnit, FiscalPeriod, SplitAdjustmentV2, SubjectSlot } from "../src/contracts.ts";
+import type { BoundFactInputV1, FinancialUnit, FiscalPeriod, SplitAdjustmentV2, SubjectSlot } from "../src/contracts.ts";
 import { operandFromBoundInput, type FinancialOperand } from "../src/operations.ts";
 import { ISSUER_A, ISSUER_B } from "./fixtures.ts";
 
@@ -37,7 +37,7 @@ export type InputSpec = {
 
 const USD: FinancialUnit = { kind: "currency", currency: "USD" };
 
-export function boundInput(spec: InputSpec): BoundFinancialInputV1 {
+export function boundInput(spec: InputSpec): BoundFactInputV1 {
   factCounter += 1;
   const slot = SLOTS[spec.slot ?? "a"];
   const suffix = String(factCounter).padStart(12, "0");
@@ -96,7 +96,7 @@ export function operand(nodeId: string, spec: InputSpec): FinancialOperand {
       metric_key: spec.metric,
       period: { kind: "fiscal_period", fiscal_year: input.period.fiscal_year, fiscal_period: input.period.fiscal_period },
     },
-    { slot: SLOTS[spec.slot ?? "a"], definition_version: `${spec.metric}.v1`, knowledge_cutoff: KNOWLEDGE_CUTOFF },
+    { slot: SLOTS[spec.slot ?? "a"], definition_version: `${spec.metric}.v1`, knowledge_cutoff: KNOWLEDGE_CUTOFF, reporting_basis: "as_reported" },
   );
   assert.ok(outcome.ok, `operand ${nodeId}: ${JSON.stringify(!outcome.ok && outcome)}`);
   return (outcome as { operand: FinancialOperand }).operand;

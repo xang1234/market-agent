@@ -1,18 +1,21 @@
 // One request from a parent feature to the engine: resume the plan an earlier
 // attempt reserved or plan anew, then reserve, lease, execute, and publish —
 // every surface the same way, with one list of reasons a request did not
-// publish. Surfaces supply only their authority, how to plan, and how to write
-// their artifact in the finalization transaction; they read back their own
-// committed records afterwards.
+// publish. A defect is not one of those reasons: it is logged with the request
+// it hit and rethrown, so the surface reports a failure. Surfaces supply only
+// their authority, how to plan, and how to write their artifact in the
+// finalization transaction; they read back their own committed records
+// afterwards.
 
 import type { FinancialPlanV1, FinancialRuntimeAuthority } from "../../financial-core/src/index.ts";
 import type { PersistParentArtifact } from "./finalize.ts";
 import { acquireLease, releaseLease, type AcquireLeaseResult } from "./lease.ts";
-import type { Clarification, PlanningResult } from "./planner.ts";
+import { PlanningModelError, type Clarification, type PlanningResult } from "./planner.ts";
 import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "./ports.ts";
-import { driveLeasedRun, type DriveReport } from "./publish.ts";
+import { driveLeasedRun, isRoutinePublicationFailure, type DriveReport } from "./publish.ts";
 import { findPlanForRequest, reserveRun } from "./run-repo.ts";
-import { snapshotTransactionClient, type SnapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
+import { withPinnedClient } from "./transaction.ts";
+import type { SnapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
 
 const LEASE_TTL_MS = 120_000;
 
@@ -44,15 +47,13 @@ export type FinancialRequest = Readonly<{
   /**
    * Awaited once this attempt holds the run's lease, before the run is
    * driven: what the parent artifact needs from outside the database is ready
-   * before finalization opens its transaction. A rejection fails the request
-   * as publication_failed.
+   * before finalization opens its transaction. A rejection is a defect.
    */
   beforeDrive?: () => Promise<unknown>;
 }>;
 
 export async function publishRequest(pool: FinancialPool, request: FinancialRequest): Promise<RequestOutcome> {
-  const client = snapshotTransactionClient(await pool.connect());
-  try {
+  return withPinnedClient(pool, async (client, lost) => {
     let plan = await findPlanForRequest(client, request);
     if (!plan) {
       const planned = await planOrGap(client, request);
@@ -61,13 +62,16 @@ export async function publishRequest(pool: FinancialPool, request: FinancialRequ
     }
     try {
       return await reserveAndDrive(client, request, plan);
-    } catch {
+    } catch (error) {
       // A finalization that rolled back leaves units computed and the run checkpointed: a retry or recovery finishes it.
-      return { status: "gap", reason: "publication_failed" };
+      if (isRoutinePublicationFailure(error, lost())) {
+        console.warn(`[financial-engine] publication stopped for ${requestName(request)}`, lost() ?? error);
+        return { status: "gap", reason: "publication_failed" };
+      }
+      console.error(`[financial-engine] publication failed for ${requestName(request)}`, error);
+      throw error;
     }
-  } finally {
-    client.release();
-  }
+  });
 }
 
 /**
@@ -112,9 +116,13 @@ async function planOrGap(db: SqlExecutor, request: FinancialRequest): Promise<Re
   let result: PlanningResult;
   try {
     result = await request.plan(db);
-  } catch {
-    // An unreachable or failing planner is a gap; no surface falls back to an unverified number.
-    return { status: "gap", reason: "planning_unavailable" };
+  } catch (error) {
+    if (error instanceof PlanningModelError) {
+      console.warn(`[financial-engine] the planning model did not answer for ${requestName(request)}`, error.cause);
+      return { status: "gap", reason: "planning_unavailable" };
+    }
+    console.error(`[financial-engine] planning failed for ${requestName(request)}`, error);
+    throw error;
   }
   switch (result.outcome) {
     case "ready":
@@ -126,6 +134,10 @@ async function planOrGap(db: SqlExecutor, request: FinancialRequest): Promise<Re
     case "unsupported":
       return { status: "gap", reason: result.issues.some((issue) => issue.code === "no_model_budget") ? "planning_unavailable" : "unsupported" };
   }
+}
+
+function requestName(request: FinancialRequest): string {
+  return `${request.authority.feature.surface} request ${request.request_key}`;
 }
 
 /** Legal names for issuer subjects, for plan labels; an absent issuer is simply absent from the map. */

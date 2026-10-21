@@ -27,7 +27,7 @@ import {
   type LocalId,
 } from "../../financial-core/src/index.ts";
 import { lockEvidenceForPublication } from "../../evidence/src/financial-access-lock.ts";
-import { loadUnitBoundFacts } from "../../snapshot/src/financial-verifier-loader.ts";
+import { loadUnitBoundFacts, loadUnitBoundPriceSources } from "../../snapshot/src/financial-verifier-loader.ts";
 import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier.ts";
 import { buildFinancialSealInput } from "../../snapshot/src/seal-input.ts";
 import { sealSnapshotInTransaction, type SnapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
@@ -46,8 +46,20 @@ export type ParentPublication = Readonly<{
   block: FinancialAnswerBlock;
 }>;
 
-/** Persists the parent's artifact inside the finalization transaction, through `tx.client` only. */
+/**
+ * Persists the parent's artifact inside the finalization transaction, through
+ * `tx.client` only. A parent that no longer takes the publication throws
+ * ParentRefusedError.
+ */
 export type PersistParentArtifact = (tx: FencedTx, publication: ParentPublication) => Promise<void>;
+
+/** The parent moved on (it changed, changed owner, or lost its fence) and refuses this publication; the finalization rolls back. */
+export class ParentRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ParentRefusedError";
+  }
+}
 
 export type FinalizationRejection = "parent_version_mismatch" | "unit_not_ready" | "evidence_unavailable" | "verification_failed";
 
@@ -83,8 +95,9 @@ export async function finalizeUnit(input: {
     if (unit.state !== "computed") return rejected("unit_not_ready");
 
     const facts = await loadUnitBoundFacts(tx.client, run.run_id, unitId);
+    const priceSources = await loadUnitBoundPriceSources(tx.client, run.run_id, unitId);
     const locked = await lockEvidenceForPublication(tx.client, {
-      source_ids: facts.map((fact) => fact.source_id),
+      source_ids: [...facts.map((fact) => fact.source_id), ...priceSources],
       fact_ids: facts.map((fact) => fact.fact_id),
     });
     if (locked.missing_source_ids.length > 0 || locked.missing_fact_ids.length > 0) return rejected("evidence_unavailable");
@@ -96,6 +109,7 @@ export async function finalizeUnit(input: {
       knowledgeCutoff: run.knowledge_cutoff,
       subjectRefs: plan.subjects.members.map((member) => member.subject_ref),
       boundFacts: facts,
+      boundPriceSources: priceSources,
     }));
     if (!sealed.ok) return rejected("verification_failed", sealed.verification.failures);
     const financial = sealed.verification.financial;

@@ -89,7 +89,7 @@ test("cash and equivalents certifies from a 10-K that tags it, and is a missing_
   assert.deepEqual([cash.disposition, cash.payload, cash.coverage_state], ["verified", { kind: "value", unit: USD, exact: true, value: "29943000000", rounding: null }, "complete"]);
   assert.deepEqual(cash.definitions, [{ metric_key: "cash_and_equivalents", definition_version: "cash_and_equivalents.v1" }]);
   const [input] = cash.inputs;
-  assert.ok(input?.status === "bound");
+  assert.ok(input?.status === "bound" && "fact_id" in input);
   assert.deepEqual(
     [input.value, input.unit, input.period, input.precision_status, input.publication.available_no_later_than, input.source.locator],
     [

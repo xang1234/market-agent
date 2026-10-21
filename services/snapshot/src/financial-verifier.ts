@@ -10,6 +10,7 @@
 // payloads, and source content never appear in diagnostics.
 
 import {
+  BOUND_PRICE_INPUT_SCHEMA_VERSION,
   canonicallyEqual,
   ExecutionIntegrityError,
   evaluateBoundPlan,
@@ -31,7 +32,9 @@ import {
   unitPublication,
   validateBoundInput,
   validateFinancialPlan,
+  type BoundFactInputV1,
   type BoundFinancialInputV1,
+  type BoundPriceInputV1,
   type CommittedResult,
   type FinancialAnswerContent,
   type FinancialPlanV1,
@@ -45,7 +48,9 @@ import {
   loadFinancialUnitRecords,
   type FinancialSealClaim,
   type FinancialUnitRecords,
+  type LoadedBinding,
   type LoadedEvidence,
+  type LoadedPriceObservation,
 } from "./financial-verifier-loader.ts";
 import type { SubjectSplitHistory } from "../../market/src/split-history.ts";
 import type { JsonObject } from "./manifest-staging.ts";
@@ -181,11 +186,15 @@ export function verifyFinancialUnit(records: FinancialUnitRecords, unitId: Local
 
   const closureNodes = new Set(closure.node_ids);
   const evidence = new Map(records.evidence.map((row) => [row.fact_id, row]));
-  const splitHistories = new Map(records.split_histories.map((row) => [row.subject_id, row.history]));
+  const observations = new Map(records.price_observations.map((row) => [row.observation_id, row]));
+  const splitHistories = new Map(records.split_histories.map((row) => [subjectKey(row.subject_ref), row.history]));
   const failures: FinancialVerifierFailure[] = [];
   for (const [slot, binding] of bindings.value) {
     if (!closureNodes.has(slot) || binding.status !== "bound") continue;
-    const problem = ineligibility(binding.input, evidence.get(binding.input.fact_id), splitHistories, plan);
+    const { input } = binding;
+    const problem = input.schema_version === BOUND_PRICE_INPUT_SCHEMA_VERSION
+      ? priceIneligibility(input, observations.get(input.observation_id), splitHistories, plan)
+      : ineligibility(input, evidence.get(input.fact_id), splitHistories, plan);
     if (problem) failures.push(failure("financial_input_ineligible", { run_id: run.run_id, input_slot: slot, reason: problem }));
   }
   if (failures.length > 0) return { ok: false, failures };
@@ -255,7 +264,9 @@ export function verifyFinancialUnit(records: FinancialUnitRecords, unitId: Local
   }
   for (const [slot, binding] of bindings.value) {
     if (!closureNodes.has(slot) || binding.status !== "bound") continue;
-    if (!factRefs.has(binding.input.fact_id)) failures.push(failure("financial_manifest_mismatch", { run_id: run.run_id, input_slot: slot, field: "fact_refs" }));
+    if (binding.input.schema_version !== BOUND_PRICE_INPUT_SCHEMA_VERSION && !factRefs.has(binding.input.fact_id)) {
+      failures.push(failure("financial_manifest_mismatch", { run_id: run.run_id, input_slot: slot, field: "fact_refs" }));
+    }
     if (!sourceIds.has(binding.input.source.source_id)) failures.push(failure("financial_manifest_mismatch", { run_id: run.run_id, input_slot: slot, field: "source_ids" }));
   }
   if (failures.length > 0) return { ok: false, failures };
@@ -281,7 +292,7 @@ export function verifyFinancialUnit(records: FinancialUnitRecords, unitId: Local
       const binding = bindings.value.get(nodeId);
       if (!binding) return [];
       return [binding.status === "bound"
-        ? { input_slot: nodeId, status: "bound" as const, fact_id: binding.input.fact_id, payload_hash: binding.payload_hash, reason_code: null, candidate_set_digest: binding.candidate_set_digest }
+        ? { input_slot: nodeId, status: "bound" as const, fact_id: binding.input.schema_version === BOUND_PRICE_INPUT_SCHEMA_VERSION ? null : binding.input.fact_id, payload_hash: binding.payload_hash, reason_code: null, candidate_set_digest: binding.candidate_set_digest }
         : { input_slot: nodeId, status: "gap" as const, fact_id: null, payload_hash: null, reason_code: binding.reason_code, candidate_set_digest: binding.candidate_set_digest }];
     }),
     definitions: [...plan.metric_definitions].sort((left, right) => left.metric_key.localeCompare(right.metric_key)),
@@ -347,21 +358,28 @@ function bindingsFor(plan: FinancialPlanV1, records: FinancialUnitRecords): Bind
     const field =
       hashCanonical("bound_input", input) !== row.payload_hash ? "payload_hash"
       : input.input_slot !== node.node_id ? "input_slot"
-      : input.fact_id !== row.fact_id ? "fact_id"
-      : input.publication.attestation_id !== row.publication_attestation_id ? "publication_attestation_id"
-      : input.metric.metric_key !== node.metric_key ? "metric"
-      : input.subject_ref.kind !== subject.kind || input.subject_ref.id.toLowerCase() !== subject.id.toLowerCase() ? "subject"
-      : input.eligibility.candidate_set_digest !== row.candidate_set_digest ? "candidate_set_digest"
-      : null;
+      : evidenceMismatch(input, row)
+        ?? (input.metric.metric_key !== node.metric_key ? "metric"
+          : input.subject_ref.kind !== subject.kind || input.subject_ref.id.toLowerCase() !== subject.id.toLowerCase() ? "subject"
+          : input.eligibility.candidate_set_digest !== row.candidate_set_digest ? "candidate_set_digest"
+          : null);
     if (field) return { ok: false, input_slot: node.node_id, field };
     value.set(node.node_id, { status: "bound", input, payload_hash: row.payload_hash!, candidate_set_digest: row.candidate_set_digest });
   }
   return { ok: true, value };
 }
 
+/** The ledger column that names other evidence than the bound payload does, if any. */
+function evidenceMismatch(input: BoundFinancialInputV1, row: LoadedBinding): string | null {
+  if (input.schema_version === BOUND_PRICE_INPUT_SCHEMA_VERSION) return input.observation_id !== row.price_observation_id || row.fact_id !== null ? "observation_id" : null;
+  return input.fact_id !== row.fact_id ? "fact_id"
+    : input.publication.attestation_id !== row.publication_attestation_id ? "publication_attestation_id"
+    : null;
+}
+
 /** Why a bound input may no longer be published, judged on its current evidence. */
 function ineligibility(
-  input: BoundFinancialInputV1,
+  input: BoundFactInputV1,
   evidence: LoadedEvidence | undefined,
   splitHistories: ReadonlyMap<string, SubjectSplitHistory>,
   plan: FinancialPlanV1,
@@ -388,25 +406,58 @@ function ineligibility(
     return "context_changed";
   }
   if (adjustment === undefined) return null;
-  const history = splitHistories.get(input.subject_ref.id);
-  if (history?.status === "gap" && history.reason_code === "split_history_missing") return "splits_changed";
-  if (history?.status !== "ok" || history.listing_id !== adjustment.listing_id) return "listing_changed";
-  return restatedAsBound(input, adjustment, history, plan) ? null : "splits_changed";
+  return splitBasisChange(subjectKey(input.subject_ref), input.metric.metric_key, input.numeric.native_value, adjustment, splitHistories, plan);
 }
 
-/** Whether the listing's current split history and zone still restate the input exactly as it was bound. */
-function restatedAsBound(
-  input: BoundFinancialInputV1,
-  adjustment: SplitAdjustmentV2,
-  history: Extract<SubjectSplitHistory, { status: "ok" }>,
+/**
+ * Why a bound price may no longer be published, judged on its observation as
+ * stored now: the token, times, listing, and response it was bound from must be
+ * unchanged, and its subject must resolve to the same listing with the same splits.
+ */
+function priceIneligibility(
+  input: BoundPriceInputV1,
+  observation: LoadedPriceObservation | undefined,
+  splitHistories: ReadonlyMap<string, SubjectSplitHistory>,
   plan: FinancialPlanV1,
-): boolean {
+): string | null {
+  if (!observation) return "price_observation_unavailable";
+  if (plan.time.time_mode === "public_information" && observation.source_user_id !== null) return "source_not_public";
+  if (observation.price_text !== input.numeric.raw_token || observation.listing_id !== input.listing_id
+    || observation.source_id !== input.source.source_id || observation.body_sha256 !== input.source.body_sha256
+    || observation.kind !== input.observation_kind || observation.currency !== input.unit.currency
+    || Date.parse(observation.observed_at) !== Date.parse(input.observed_at)
+    || observation.known_at === null || Date.parse(observation.known_at) !== Date.parse(input.known_at)) {
+    return "price_observation_changed";
+  }
+  if (Date.parse(input.known_at) > Date.parse(plan.time.knowledge_cutoff)) return "not_public_at_cutoff";
+  return splitBasisChange(subjectKey(input.subject_ref), input.metric.metric_key, input.numeric.value, input.split_adjustment, splitHistories, plan);
+}
+
+/**
+ * Whether the listing the subject resolves to at the cutoff, with its current
+ * splits and zone, still restates the bound value exactly as it was bound.
+ */
+function subjectKey(subject: Readonly<{ kind: string; id: string }>): string {
+  return `${subject.kind}:${subject.id}`;
+}
+
+function splitBasisChange(
+  subject: string,
+  metricKey: string,
+  native: string,
+  adjustment: SplitAdjustmentV2,
+  splitHistories: ReadonlyMap<string, SubjectSplitHistory>,
+  plan: FinancialPlanV1,
+): "listing_changed" | "splits_changed" | null {
+  const history = splitHistories.get(subject);
+  if (history?.status === "gap" && history.reason_code === "split_history_missing") return "splits_changed";
+  if (history?.status !== "ok" || history.listing_id !== adjustment.listing_id) return "listing_changed";
   const referenceDate = splitReferenceDate(plan.time.knowledge_cutoff, history.timezone);
-  if (!splitHistoryCovers(history.checked_at, referenceDate, history.timezone)) return false;
-  const definition = resolveMetricDefinition(input.metric.metric_key);
-  const native = parseDerivedDecimalText(input.numeric.native_value);
-  const nativeValue = native.ok ? rationalFromDecimal(native.value) : null;
-  if (definition === null || nativeValue === null) return false;
+  if (!splitHistoryCovers(history.checked_at, referenceDate, history.timezone)) return "splits_changed";
+  const definition = resolveMetricDefinition(metricKey);
+  const parsed = parseDerivedDecimalText(native);
+  const nativeValue = parsed.ok ? rationalFromDecimal(parsed.value) : null;
+  if (definition === null || nativeValue === null) return "splits_changed";
   const current = restateToReference({
     native: nativeValue,
     value_kind: definition.value_kind,
@@ -416,7 +467,7 @@ function restatedAsBound(
     listing_timezone: history.timezone,
     splits: history.splits,
   });
-  return current.ok && canonicallyEqual(current.adjustment, adjustment);
+  return current.ok && canonicallyEqual(current.adjustment, adjustment) ? null : "splits_changed";
 }
 
 function failure(reason_code: FinancialVerifierReasonCode, details: JsonObject): FinancialVerifierFailure {
