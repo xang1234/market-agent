@@ -1,9 +1,9 @@
 // Per spec §6.2.1: bar retrieval owns "basic corporate-action-aware bar
 // shaping needed to produce one stable internal series shape." This module
 // owns the in-memory shape of CA events and the transform that walks raw
-// (unadjusted) bars to a target AdjustmentBasis. The persistence layer (the
-// `events` table with `event_type in ('split','dividend',...)`) is a separate
-// concern; this module operates on whatever CA list a caller hands it.
+// (unadjusted) bars to a target AdjustmentBasis. Splits persist in the
+// `listing_splits` table (split-repository.ts), a separate concern; this module
+// operates on whatever CA list a caller hands it.
 //
 // Adjustment policy by basis (matches AdjustmentBasis in bar.ts):
 //   "unadjusted":             raw provider data; no CA applied

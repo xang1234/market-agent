@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "node --experimental-strip-types src/dev.ts",
     "refresh": "node --experimental-strip-types src/refresh-worker.ts",
+    "sync:splits": "node --experimental-strip-types src/split-sync-cli.ts",
     "test": "node --experimental-strip-types --test \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit"
   },
