@@ -53,7 +53,7 @@ test("0070 financial run source classes", { timeout: 300_000 }, async (t) => {
     assert.deepEqual((await db.query(`select allowed_source_classes from financial_runs where run_id = $1`, [runId])).rows, [{ allowed_source_classes: ["sec_filing"] }]);
   });
 
-  await t.test("a run states its grant, from the class vocabulary, and never changes it", async () => {
+  await t.test("a run's grant comes from the class vocabulary, SEC filings when it states none, and never changes", async () => {
     const runId = await insertRun(db, "granted", "{market_data,sec_filing}");
     assert.deepEqual((await db.query(`select allowed_source_classes from financial_runs where run_id = $1`, [runId])).rows, [{ allowed_source_classes: ["market_data", "sec_filing"] }]);
     await expectRejected(db, `update financial_runs set allowed_source_classes = '{sec_filing}' where run_id = $1`, /immutable/, [runId]);
@@ -62,9 +62,9 @@ test("0070 financial run source classes", { timeout: 300_000 }, async (t) => {
                                 values ($1, 'analyst_grid_run', $2, 'grid-run.v1', $3, $4, '${PLAN}', 'enforce', now(), '{}', $5::text[])`,
         /financial_runs_allowed_source_classes/, [IDS.owner, PARENT, key, HASH, classes]);
     }
-    await expectRejected(db, `insert into financial_runs (user_id, parent_kind, parent_id, parent_version, request_key, request_hash, plan_id, feature_mode, knowledge_cutoff, policies)
-                              values ($1, 'analyst_grid_run', $2, 'grid-run.v1', 'ungranted', $3, '${PLAN}', 'enforce', now(), '{}')`,
-      /allowed_source_classes/, [IDS.owner, PARENT, HASH]);
+    // An app that predates the grant states none, and its runs bind SEC filings only, as they always did.
+    const ungranted = await insertRun(db, "ungranted", null);
+    assert.deepEqual((await db.query(`select allowed_source_classes from financial_runs where run_id = $1`, [ungranted])).rows, [{ allowed_source_classes: ["sec_filing"] }]);
   });
 
   await t.test("down refuses while a run recorded a grant beyond SEC filings", async () => {

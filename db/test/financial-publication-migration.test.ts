@@ -31,8 +31,8 @@ async function seedLegacyPublication(db: Client): Promise<void> {
 
 async function newRun(db: Client, requestKey: string): Promise<string> {
   const runId = (await db.query(
-    `insert into financial_runs (user_id, parent_kind, parent_id, parent_version, request_key, request_hash, plan_id, feature_mode, knowledge_cutoff, policies, allowed_source_classes)
-     values ($1, 'chat_thread', $2, '1', $3, $4, $5, 'shadow', '2024-01-15T00:00:00Z', '{}', '{sec_filing}') returning run_id`,
+    `insert into financial_runs (user_id, parent_kind, parent_id, parent_version, request_key, request_hash, plan_id, feature_mode, knowledge_cutoff, policies)
+     values ($1, 'chat_thread', $2, '1', $3, $4, $5, 'shadow', '2024-01-15T00:00:00Z', '{}') returning run_id`,
     [IDS.owner, "0f000000-0000-4000-8000-0000000000f1", requestKey, HASH, PLAN_ID],
   )).rows[0].run_id;
   await db.query(

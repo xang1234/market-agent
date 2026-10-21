@@ -1,14 +1,14 @@
 -- A financial run records the source classes its authority allowed when it was
 -- reserved (#444). Binding uses that grant on every attempt, and the seal
 -- re-checks each bound input's class against it. Every surface allowed SEC
--- filings only until #444 step 4, so a run reserved before this migration was
--- granted exactly that. The grant is immutable like the run's plan and policies.
+-- filings only until #444 step 4, so a run that states no grant, reserved
+-- before this migration or by an app that predates it, was granted exactly
+-- that. The grant is immutable like the run's plan and policies.
 alter table financial_runs add column allowed_source_classes text[] not null default '{sec_filing}'
   constraint financial_runs_allowed_source_classes check (
     cardinality(allowed_source_classes) > 0
     and allowed_source_classes <@ array['sec_filing', 'issuer_disclosure', 'licensed_fundamentals', 'market_data']::text[]
   );
-alter table financial_runs alter column allowed_source_classes drop default;
 
 create or replace function guard_financial_run_update() returns trigger
 language plpgsql

@@ -27,8 +27,8 @@ async function insertRun(db: Client): Promise<string> {
     [PLAN, IDS.owner, JSON.stringify({ plan_id: PLAN, schema_version: "financial_plan.v1" }), HASH],
   );
   return (await db.query<{ run_id: string }>(
-    `insert into financial_runs (user_id, parent_kind, parent_id, parent_version, request_key, request_hash, plan_id, feature_mode, knowledge_cutoff, policies, allowed_source_classes)
-     values ($1, 'chat_thread', $2, '1', 'turn-1', $3, $2, 'shadow', '2024-06-11T20:30:00Z', '{"reporting_basis":"as_reported"}', '{market_data,sec_filing}') returning run_id::text`,
+    `insert into financial_runs (user_id, parent_kind, parent_id, parent_version, request_key, request_hash, plan_id, feature_mode, knowledge_cutoff, policies)
+     values ($1, 'chat_thread', $2, '1', 'turn-1', $3, $2, 'shadow', '2024-06-11T20:30:00Z', '{"reporting_basis":"as_reported"}') returning run_id::text`,
     [IDS.owner, PLAN, HASH],
   )).rows[0]!.run_id;
 }

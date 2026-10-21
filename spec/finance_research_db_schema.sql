@@ -1453,8 +1453,9 @@ create table financial_runs (
   knowledge_cutoff timestamptz not null,
   policies jsonb not null check (jsonb_typeof(policies) = 'object'),
   -- The source classes the run's authority allowed when it was reserved (#444):
-  -- binding uses them on every attempt, and the seal re-checks them.
-  allowed_source_classes text[] not null
+  -- binding uses them on every attempt, and the seal re-checks them. A run that
+  -- states none was granted SEC filings only, as every surface was before.
+  allowed_source_classes text[] not null default '{sec_filing}'
     constraint financial_runs_allowed_source_classes check (
       cardinality(allowed_source_classes) > 0
       and allowed_source_classes <@ array['sec_filing', 'issuer_disclosure', 'licensed_fundamentals', 'market_data']::text[]
