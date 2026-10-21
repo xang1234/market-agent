@@ -13,6 +13,12 @@ export type ScreenerSummary = {
   peDistribution: Distribution
 }
 
+// A row's market cap is in the currency it was priced in, which a secondary
+// listing's quote may not share; a row that states none uses its quote's.
+export function marketCapCurrencyOf(row: ScreenerResultRow): string {
+  return row.fundamentals.market_cap_currency ?? row.quote.currency
+}
+
 // Summary over the *loaded* result rows (the current page) — the shape of
 // what's on screen. The full match count is `total_count`, surfaced separately;
 // aggregates over the entire match set beyond the page would need a backend
@@ -26,7 +32,7 @@ export function screenerSummary(rows: ReadonlyArray<ScreenerResultRow>): Screene
   const capRows = rows.filter(
     (r) => typeof r.fundamentals.market_cap === 'number' && Number.isFinite(r.fundamentals.market_cap),
   )
-  const currencies = new Set(capRows.map((r) => r.quote.currency))
+  const currencies = new Set(capRows.map(marketCapCurrencyOf))
   const marketCapCurrency = currencies.size === 1 ? [...currencies][0] : null
   return {
     shown: rows.length,

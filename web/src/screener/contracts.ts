@@ -85,6 +85,8 @@ export type ScreenerQuoteSummary = {
 
 export type ScreenerFundamentalsSummary = {
   market_cap: number | null
+  // The currency market_cap was priced in, which a secondary listing's quote may not share.
+  market_cap_currency?: string | null
   pe_ratio: number | null
   gross_margin: number | null
   operating_margin: number | null

@@ -53,6 +53,7 @@ import {
   type ScreenSubject,
 } from './savedScreens.ts'
 import { ScreenerFetchError } from './screenerFetch.ts'
+import { marketCapCurrencyOf } from './screenerSummary.ts'
 import { searchScreener } from './searchScreener.ts'
 
 type Status = 'loading' | 'error' | 'ready'
@@ -833,7 +834,7 @@ function formatRowCells(row: ScreenerResultRow): { row: ScreenerResultRow; cells
   const marketCap =
     row.fundamentals.market_cap === null
       ? '—'
-      : formatCompactCurrency(row.fundamentals.market_cap, row.quote.currency)
+      : formatCompactCurrency(row.fundamentals.market_cap, marketCapCurrencyOf(row))
   const peRatio =
     row.fundamentals.pe_ratio === null ? '—' : row.fundamentals.pe_ratio.toFixed(1)
   // perf_year is already in percent units (e.g. 20.67 = 20.67%), so the pill shows
