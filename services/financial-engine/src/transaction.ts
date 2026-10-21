@@ -1,7 +1,32 @@
 // The engine's one way to run SQL atomically. Callers pass a pinned client;
 // the action's writes commit together or not at all.
 
-import type { SqlExecutor } from "./ports.ts";
+import { snapshotTransactionClient, type SnapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
+import type { FinancialPool, SqlExecutor } from "./ports.ts";
+
+/**
+ * Lends one pool client to `action`. pg reports a lost connection as an
+ * "error" event on the client as well as by failing the query, and an unheard
+ * event throws out of the process, so the client is heard while it is held;
+ * `lost()` returns the first error heard.
+ */
+export async function withPinnedClient<T>(
+  pool: FinancialPool,
+  action: (client: SnapshotTransactionClient, lost: () => Error | null) => Promise<T>,
+): Promise<T> {
+  const connection = await pool.connect();
+  let heard: Error | null = null;
+  const onError = (error: Error) => {
+    heard ??= error;
+  };
+  connection.on?.("error", onError);
+  try {
+    return await action(snapshotTransactionClient(connection), () => heard);
+  } finally {
+    connection.off?.("error", onError);
+    connection.release(heard ?? undefined);
+  }
+}
 
 export async function withTransaction<T>(
   client: SqlExecutor,

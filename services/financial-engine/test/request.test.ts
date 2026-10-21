@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
 import test from "node:test";
 import { connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { createEvidenceFinancialPort } from "../src/evidence-adapter.ts";
@@ -12,7 +13,7 @@ import { authorityFor, databaseUrl, engineDatabase, IDS, revenuePlan } from "./d
 
 const noRuns: FinancialPool = {
   query: async () => ({ rows: [] }),
-  connect: async () => ({ query: async () => ({ rows: [] }), release() {} }),
+  connect: async () => Object.assign(new EventEmitter(), { query: async () => ({ rows: [] }), release() {} }),
 };
 
 const planningContext: PlanningContext = {
@@ -35,16 +36,18 @@ function request(overrides: Partial<FinancialRequest> & Pick<FinancialRequest, "
   return { authority: authorityFor(), plan: ready, evidence: createEvidenceFinancialPort, persistParent: async () => {}, ...overrides };
 }
 
-/** A pool whose client finds no earlier run and fails `error` when the reservation begins; a lost connection is also reported as pg reports it. */
-function failingReservation(error: unknown, connection: "alive" | "lost"): FinancialPool {
-  let onError: ((error: Error) => void) | undefined;
-  const query = async (text: string) => {
-    if (text !== "begin") return { rows: [] };
-    if (connection === "lost") onError?.(new Error("Connection terminated unexpectedly"));
-    throw error;
-  };
-  const client = { query, release() {}, on: (_event: "error", listener: (error: Error) => void) => { onError = listener; }, off: () => { onError = undefined; } };
-  return { query, connect: async () => client };
+/** A pool whose client finds no earlier run and fails `error` when the reservation begins, after emitting `heard` as pg reports a lost connection. */
+function failingReservation(error: unknown, heard: Error | null) {
+  const client = Object.assign(new EventEmitter(), {
+    query: async (text: string) => {
+      if (text !== "begin") return { rows: [] };
+      if (heard) client.emit("error", heard);
+      throw error;
+    },
+    release() {},
+  });
+  const pool: FinancialPool = { query: client.query, connect: async () => client };
+  return { pool, client };
 }
 
 const sqlError = (code: string) => Object.assign(new Error(`sqlstate ${code}`), { code });
@@ -76,21 +79,24 @@ test("planning failures", async (t) => {
 });
 
 test("which database faults are routine", async (t) => {
-  const routine: ReadonlyArray<readonly [string, unknown, "alive" | "lost"]> = [
-    ["a serialization failure", sqlError("40001"), "alive"],
-    ["a deadlock", sqlError("40P01"), "alive"],
-    ["a lock timeout", sqlError("55P03"), "alive"],
-    ["a full disk", sqlError("53100"), "alive"],
-    ["a storage fault", sqlError("58030"), "alive"],
-    ["a lost connection, reported without a code", new Error("Client has encountered a connection error and is not queryable"), "lost"],
+  const lostConnection = new Error("Connection terminated unexpectedly");
+  const routine: ReadonlyArray<readonly [string, unknown, Error | null]> = [
+    ["a serialization failure", sqlError("40001"), null],
+    ["a deadlock", sqlError("40P01"), null],
+    ["a lock timeout", sqlError("55P03"), null],
+    ["a full disk", sqlError("53100"), null],
+    ["a storage fault", sqlError("58030"), null],
+    ["a lost connection, reported without a code", new Error("Client has encountered a connection error and is not queryable"), lostConnection],
   ];
-  for (const [name, error, connection] of routine) {
-    await t.test(`${name} is publication_failed with a warning, and no error is logged`, async (t) => {
+  for (const [name, error, heard] of routine) {
+    await t.test(`${name} is publication_failed, warned with its cause, and the client is released unheard`, async (t) => {
       const errors = t.mock.method(console, "error", () => {});
       const warnings = t.mock.method(console, "warn", () => {});
-      assert.deepEqual(await publishRequest(failingReservation(error, connection), request({ request_key: "grid-1" })), { status: "gap", reason: "publication_failed" });
+      const { pool, client } = failingReservation(error, heard);
+      assert.deepEqual(await publishRequest(pool, request({ request_key: "grid-1" })), { status: "gap", reason: "publication_failed" });
       assert.equal(errors.mock.callCount(), 0);
-      assert.deepEqual(warnings.mock.calls.map((call) => call.arguments), [["[financial-engine] publication stopped for chat request grid-1; a retry or recovery finishes it", error]]);
+      assert.deepEqual(warnings.mock.calls.map((call) => call.arguments), [["[financial-engine] publication stopped for chat request grid-1", heard ?? error]]);
+      assert.equal(client.listenerCount("error"), 0);
     });
   }
   const defects: ReadonlyArray<readonly [string, unknown]> = [
@@ -104,8 +110,10 @@ test("which database faults are routine", async (t) => {
   for (const [name, error] of defects) {
     await t.test(`${name} is logged and reaches the caller`, async (t) => {
       const errors = t.mock.method(console, "error", () => {});
-      await assert.rejects(publishRequest(failingReservation(error, "alive"), request({ request_key: "grid-2" })), (thrown) => thrown === error);
+      const { pool, client } = failingReservation(error, null);
+      await assert.rejects(publishRequest(pool, request({ request_key: "grid-2" })), (thrown) => thrown === error);
       assert.deepEqual(errors.mock.calls.map((call) => call.arguments), [["[financial-engine] publication failed for chat request grid-2", error]]);
+      assert.equal(client.listenerCount("error"), 0);
     });
   }
 });
@@ -146,6 +154,7 @@ test("publication failures", { skip: !dockerAvailable(), timeout: 300_000 }, asy
 
   await t.test("a lease that lapses before the drive: publication_failed, nothing logged, and a retry publishes", async (t) => {
     const errors = t.mock.method(console, "error", () => {});
+    t.mock.method(console, "warn", () => {});
     const key = randomUUID();
     const lapse = async () => db.query(`update financial_runs set lease_expires_at = now() - interval '1 second' where request_key = $1`, [key]);
     assert.deepEqual(await publishRequest(pool, request({ request_key: key, beforeDrive: lapse })), { status: "gap", reason: "publication_failed" });
@@ -171,16 +180,19 @@ test("publication failures", { skip: !dockerAvailable(), timeout: 300_000 }, asy
   });
 
   const killBackend = `perform pg_terminate_backend(pg_backend_pid())`;
-  await t.test("a connection that dies during finalization: publication_failed, no error logged, and a retry publishes", async (t) => {
+  // A dead connection cannot release its lease; recovery takes the run once the lease lapses.
+  const lapse = (key: string) => db.query(`update financial_runs set lease_expires_at = now() - interval '1 second' where request_key = $1`, [key]);
+  await t.test("a connection that dies during finalization: publication_failed, no error logged, and a retry after the lease lapses publishes", async (t) => {
     const errors = t.mock.method(console, "error", () => {});
     t.mock.method(console, "warn", () => {});
     const key = randomUUID();
     assert.deepEqual(await publishRequest(pool, request({ request_key: key, persistParent: sql(`do $$ begin ${killBackend}; end $$`) })), { status: "gap", reason: "publication_failed" });
     assert.equal(errors.mock.callCount(), 0);
+    await lapse(key);
     assert.equal(published(await publishRequest(pool, request({ request_key: key }))), "published");
   });
 
-  await t.test("a connection that dies while the run executes: publication_failed, no error logged, and a retry publishes", async (t) => {
+  await t.test("a connection that dies while the run executes: publication_failed, no error logged, and a retry after the lease lapses publishes", async (t) => {
     const errors = t.mock.method(console, "error", () => {});
     t.mock.method(console, "warn", () => {});
     const key = randomUUID();
@@ -195,6 +207,7 @@ test("publication failures", { skip: !dockerAvailable(), timeout: 300_000 }, asy
     }
     assert.deepEqual(outcome, { status: "gap", reason: "publication_failed" });
     assert.equal(errors.mock.callCount(), 0);
+    await lapse(key);
     assert.equal(published(await publishRequest(pool, request({ request_key: key }))), "published");
   });
 
@@ -221,7 +234,7 @@ test("publication failures", { skip: !dockerAvailable(), timeout: 300_000 }, asy
     await t.test(`the recovery worker: ${name}, with the parent kind and run`, async (t) => {
       const logged = { error: t.mock.method(console, "error", () => {}), warn: t.mock.method(console, "warn", () => {}) };
       const key = randomUUID();
-      const persistParent = async () => { throw failure; };
+      const persistParent: PersistParentArtifact = async () => { throw failure; };
       await publishRequest(pool, request({ request_key: key, persistParent })).catch(() => {});
       const runId = (await db.query(`select run_id::text from financial_runs where request_key = $1`, [key])).rows[0].run_id;
       const worker = createFinancialWorker({
@@ -239,8 +252,31 @@ test("publication failures", { skip: !dockerAvailable(), timeout: 300_000 }, asy
       const about = (calls: typeof logged.error.mock.calls) => calls.filter((call) => String(call.arguments[0]).includes(runId)).map((call) => call.arguments);
       const message = level === "error"
         ? `[financial-engine] recovery failed for chat_thread run ${runId}`
-        : `[financial-engine] recovery stopped for chat_thread run ${runId}; a later tick retries it`;
+        : `[financial-engine] recovery stopped for chat_thread run ${runId}`;
       assert.deepEqual({ error: about(logged.error.mock.calls), warn: about(logged.warn.mock.calls) }, { error: level === "error" ? [[message, failure]] : [], warn: level === "warn" ? [[message, failure]] : [] });
     });
   }
+
+  await t.test("the recovery worker: a connection that dies mid-recovery is a warning, and the process lives on", async (t) => {
+    const logged = { error: t.mock.method(console, "error", () => {}), warn: t.mock.method(console, "warn", () => {}) };
+    const key = randomUUID();
+    const persistParent = sql(`do $$ begin ${killBackend}; end $$`);
+    assert.deepEqual(await publishRequest(pool, request({ request_key: key, persistParent })), { status: "gap", reason: "publication_failed" });
+    await lapse(key);
+    const runId = (await db.query(`select run_id::text from financial_runs where request_key = $1`, [key])).rows[0].run_id;
+    const worker = createFinancialWorker({
+      pool,
+      worker_id: "recovery-2",
+      ttl_ms: 60_000,
+      evidence: createEvidenceFinancialPort,
+      parents: { chat_thread: { authority: async () => authorityFor(), persistParent } },
+      interval_ms: 1_000,
+      max_runs_per_tick: 10,
+    });
+    logged.error.mock.resetCalls();
+    logged.warn.mock.resetCalls();
+    assert.deepEqual((await worker.tick()).filter((entry) => entry.run_id === runId).map((entry) => entry.status), ["error"]);
+    const about = (calls: typeof logged.error.mock.calls) => calls.filter((call) => String(call.arguments[0]).includes(runId)).map((call) => call.arguments[0]);
+    assert.deepEqual({ error: about(logged.error.mock.calls), warn: about(logged.warn.mock.calls) }, { error: [], warn: [`[financial-engine] recovery stopped for chat_thread run ${runId}`] });
+  });
 });

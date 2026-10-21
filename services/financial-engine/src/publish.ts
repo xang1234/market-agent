@@ -30,13 +30,13 @@ export type DriveReport = Readonly<{
 }>;
 
 /**
- * Whether a drive that threw left the run for a retry or recovery: the lease
- * lapsed, the parent refused, or the database had a transient fault. A lost
- * connection is routine too, but pg reports it without a code, so the caller
- * holding the client hears it (watchConnection).
+ * Whether a drive failed for a routine reason rather than a defect: the
+ * connection was lost (`lost`, as withPinnedClient heard it; pg reports it
+ * without a code), the lease lapsed, the parent refused, or the database had a
+ * transient fault. Each leaves nothing committed that a retry would repeat.
  */
-export function isRoutinePublicationFailure(error: unknown): boolean {
-  return error instanceof StaleLeaseError || error instanceof ParentRefusedError || isTransientDatabaseError(error);
+export function isRoutinePublicationFailure(error: unknown, lost: Error | null): boolean {
+  return lost !== null || error instanceof StaleLeaseError || error instanceof ParentRefusedError || isTransientDatabaseError(error);
 }
 
 /** Drives a leased run to its end: execute unless already computed, then finalize every computed unit. */

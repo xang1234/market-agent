@@ -11,6 +11,7 @@ import { inspectCommittedResult } from "./inspection.ts";
 import type { FinancialPool, SqlExecutor } from "./ports.ts";
 import { readRunStatus } from "./read-model.ts";
 import { reserveReplayRun } from "./run-repo.ts";
+import { withPinnedClient } from "./transaction.ts";
 
 /** Reads go through the pool; the one transactional write (replay reservation) pins a connection. */
 export type { FinancialPool } from "./ports.ts";
@@ -66,13 +67,7 @@ async function dispatch(pathname: string, req: IncomingMessage, deps: FinancialH
     if (req.method !== "POST") return methodNotAllowed();
     const sourceRunId = uuid(replay[1]);
     const requestKey = await replayRequestKey(req);
-    const client = await deps.db.connect();
-    let outcome;
-    try {
-      outcome = await reserveReplayRun(client, { owner_user_id: deps.userId, source_run_id: sourceRunId, request_key: requestKey });
-    } finally {
-      client.release();
-    }
+    const outcome = await withPinnedClient(deps.db, (client) => reserveReplayRun(client, { owner_user_id: deps.userId, source_run_id: sourceRunId, request_key: requestKey }));
     if (outcome.status === "not_found") return NOT_FOUND;
     if (outcome.status === "conflict") {
       return { status: 409, body: { error: outcome.reason === "source_not_final" ? "only a completed run can be replayed" : "request_key was used for a different replay", code: outcome.reason } };
