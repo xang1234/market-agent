@@ -504,6 +504,8 @@ function persistAssistantMessage(
     const members = plan === null ? [] : [...plan.subjects.members].sort((left, right) => left.display_order - right.display_order);
     const saved = scope === null || plan === null ? scope : {
       ...scope,
+      // Its figures are in this answer, whatever an evidence follow-up re-read.
+      reads: "financial_answer" as const,
       companies: await answeredCompanies(tx.client, members.map((member) => member.subject_ref.id), scope, turn.mentions),
       metrics: planMetrics(plan),
     };
