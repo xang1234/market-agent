@@ -31,6 +31,9 @@ import {
   type ExactRational,
 } from "./rational.ts";
 
+/** SplitAdjustmentV2.splits maxItems in financial_result_schema.json. */
+const MAX_ADJUSTMENT_SPLITS = 64;
+
 export type RecordedSplit = Readonly<{ execution_date: IsoDate; split_from: DecimalString; split_to: DecimalString }>;
 
 export type SplitRestatement =
@@ -57,7 +60,8 @@ export function splitHistoryCovers(checkedAt: IsoDateTime, referenceDate: IsoDat
  * `reference_date`, from the listing's split history: only the splits after
  * the filing date and on or before the reference date apply. The basis is
  * incompatible when splits do not move this kind of value, a ratio is not
- * positive, or two splits share a date.
+ * positive, or two splits share a date. More splits than a bound adjustment
+ * may list exceed the numeric limits.
  */
 export function restateToReference(input: {
   native: ExactRational;
@@ -70,6 +74,7 @@ export function restateToReference(input: {
 }): SplitRestatement {
   const split = splitFactor(input.value_kind, input.as_filed_on, input.reference_date, input.splits);
   if (!split.ok) return split;
+  if (split.splits.length > MAX_ADJUSTMENT_SPLITS) return { ok: false, reason: "numeric_limit_exceeded" };
   const value = split.restate(input.native);
   if (value === null) return { ok: false, reason: "numeric_limit_exceeded" };
   return {
