@@ -4,7 +4,7 @@ import type { ChangeNode, ReportedMetricNode, SplitAdjustmentV2 } from "../src/c
 import { parseFinancialDecimal } from "../src/exact-decimal.ts";
 import { absoluteChange, FinancialIntegrityError, operandFromBoundInput, type OperandOutcome } from "../src/operations.ts";
 import { rationalFromDecimal, type ExactRational } from "../src/rational.ts";
-import { restateToReference, splitHistoryCovers, splitReferenceDate, type RecordedSplit } from "../src/split-adjustment.ts";
+import { explainedBySplits, restateToReference, splitHistoryCovers, splitReferenceDate, type RecordedSplit } from "../src/split-adjustment.ts";
 import { boundInput, operand, REFERENCE_DATE, SLOTS, type InputSpec } from "./operand-fixtures.ts";
 
 const LISTING = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -133,4 +133,17 @@ test("EPS a year apart, with a split between their filings, changes on one basis
   });
   const change: ChangeNode = { node_id: "chg", operation: "absolute_change", operation_version: "absolute_change.v1", current: "current", prior: "prior" };
   assert.equal(payloadValue(absoluteChange(change, current, prior)), "1.747");
+});
+
+test("a later 10-K's figure is the earlier one restated by the splits between their filings, at the finer decimal place", () => {
+  const explained = (earlier: string, later: string, valueKind: "per_share" | "share_count_average" | "flow" = "per_share", laterFiled = "2025-02-26") =>
+    explainedBySplits({ earlier: { value: earlier, as_filed_on: "2024-02-21" }, later: { value: later, as_filed_on: laterFiled }, value_kind: valueKind, splits: NVDA_SPLITS });
+  // 11.93 / 10 is 1.193, presented as 1.19. 12.05 / 10 is 1.205, half way, so 1.20 and 1.21 both state it.
+  assert.deepEqual([explained("11.93", "1.19"), explained("12.05", "1.21"), explained("12.05", "1.20")], [true, true, true]);
+  // 1.2 is read at the finer place, as 1.20.
+  assert.deepEqual([explained("11.93", "1.08"), explained("11.93", "1.20"), explained("11.93", "1.2")], [false, false, false]);
+  assert.deepEqual([explained("2494000000", "24940000000", "share_count_average"), explained("2494000000", "24944000000", "share_count_average")], [true, false]);
+  // No split falls between the 10-K and a 10-Q filed before 2024-06-10.
+  assert.deepEqual([explained("11.93", "11.93", "per_share", "2024-05-29"), explained("11.93", "1.19", "per_share", "2024-05-29")], [true, false]);
+  assert.equal(explained("100", "100", "flow"), null);
 });

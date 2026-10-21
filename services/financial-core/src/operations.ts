@@ -111,6 +111,7 @@ const REASON_DISPOSITIONS: Readonly<Record<ReasonCode, GapDisposition>> = {
   split_listing_unresolved: "missing",
   split_history_missing: "missing",
   split_history_stale: "missing",
+  restatement_unverified: "missing",
 };
 
 export function operationGap(reason: ReasonCode, explanation: string): OperationGap {

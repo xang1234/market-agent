@@ -1376,7 +1376,7 @@ create table fact_financial_contexts (
   as_filed_on date,
   share_basis text not null check (share_basis in ('basic', 'diluted', 'not_applicable')),
   fiscal_calendar_version text not null check (length(btrim(fiscal_calendar_version)) > 0),
-  disclosure_relation text not null check (disclosure_relation in ('original', 'economic_restatement', 'extraction_correction')),
+  disclosure_relation text not null check (disclosure_relation in ('original', 'economic_restatement', 'extraction_correction', 'unverified_restatement')),
   source_context_ref text,
   created_at timestamptz not null default now(),
   constraint fact_financial_contexts_dimensions check ((dimension_scope = 'segment') = (jsonb_array_length(dimension_members) > 0)),

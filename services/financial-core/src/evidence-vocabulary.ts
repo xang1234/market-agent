@@ -11,7 +11,10 @@ export type ProvenPrecisionClass = Exclude<PrecisionClass, "legacy_unverified">;
 export const PUBLICATION_TIMING_PRECISIONS = ["instant", "date", "observed_public"] as const;
 export type PublicationTimingPrecision = (typeof PUBLICATION_TIMING_PRECISIONS)[number];
 
-export const DISCLOSURE_RELATIONS = ["original", "economic_restatement", "extraction_correction"] as const;
+// A later filing's statement of an as-filed figure whose splits since the
+// original could not be checked when it was stored is an unverified
+// restatement: it may be a split recast or a real restatement.
+export const DISCLOSURE_RELATIONS = ["original", "economic_restatement", "extraction_correction", "unverified_restatement"] as const;
 export type DisclosureRelation = (typeof DISCLOSURE_RELATIONS)[number];
 
 export const PERIOD_TYPES = ["duration", "instant"] as const;

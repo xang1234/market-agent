@@ -105,8 +105,9 @@ npm test         # contract + AAPL FY2024 income statement verification
   path (`facts.supersedes` / `superseded_by`) keeps the original visible.
 - SEC ingestion records a financial context (`fact_financial_contexts`)
   for every fact taken from a source token: `as_reported`, `original`,
-  consolidated, unadjusted. EPS and share counts get none, since a stock
-  split can restate them and companyfacts does not say so. Capex is
+  consolidated, unadjusted. EPS and weighted-average share counts are
+  `as_filed` instead, on the split basis of the filing date companyfacts
+  lists beside them (#387). Capex is
   certified only from `PaymentsToAcquirePropertyPlantAndEquipment`;
   capex mapped from `PaymentsToAcquireProductiveAssets` still appears in
   statements but gets no context, since that concept adds purchased
@@ -131,6 +132,14 @@ npm test         # contract + AAPL FY2024 income statement verification
   restatement; only certified selection
   with `as_restated` picks it, taking the restatement filed last among
   those public at the cutoff.
+- An as-filed EPS or share count is compared after restating the previous
+  filing's figure by the listing's splits between the two filing dates. A
+  comparative those splits explain adds nothing, and one they do not is a
+  restatement as filed on its 10-K's date. A comparative stored while the
+  listing's splits through its filing date are not on file is an
+  `unverified_restatement`. Selection with `as_restated` reports
+  `restatement_unverified` for it until a rerun after
+  `npm run sync:splits` decides it.
 - Period selection, fiscal labels, scale, and unit are part of the
   contract, not caller-side cleanup. `value_num × scale` resolves to the
   native unit (e.g. millions × 1_000_000 = native USD).

@@ -39,7 +39,8 @@
         "replay_version_unavailable",
         "split_listing_unresolved",
         "split_history_missing",
-        "split_history_stale"
+        "split_history_stale",
+        "restatement_unverified"
       ]
     },
     "GapDisposition": {

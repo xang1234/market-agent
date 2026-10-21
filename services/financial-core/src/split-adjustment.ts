@@ -19,9 +19,17 @@ import {
   type UUID,
 } from "./contracts.ts";
 import type { MetricValueKind } from "./definitions.ts";
-import { canonicalDecimalString, parseDerivedDecimalText } from "./exact-decimal.ts";
+import { canonicalDecimalString, parseDerivedDecimalText, parseFinancialDecimal } from "./exact-decimal.ts";
 import { isKnownTimeZone, localDateOf } from "./public-time.ts";
-import { divideRationals, multiplyRationals, rationalFromDecimal, rationalSign, type ExactRational } from "./rational.ts";
+import {
+  addRationals,
+  divideRationals,
+  multiplyRationals,
+  rationalFromDecimal,
+  rationalSign,
+  subtractRationals,
+  type ExactRational,
+} from "./rational.ts";
 
 export type RecordedSplit = Readonly<{ execution_date: IsoDate; split_from: DecimalString; split_to: DecimalString }>;
 
@@ -60,25 +68,10 @@ export function restateToReference(input: {
   listing_timezone: string;
   splits: ReadonlyArray<RecordedSplit>;
 }): SplitRestatement {
-  const direction = DIRECTIONS[input.value_kind];
-  const applied = input.splits
-    .filter((split) => split.execution_date > input.as_filed_on && split.execution_date <= input.reference_date)
-    .sort((left, right) => left.execution_date.localeCompare(right.execution_date));
-  if (direction === null || applied.some((split, index) => index > 0 && split.execution_date === applied[index - 1]!.execution_date)) {
-    return { ok: false, reason: "incompatible_basis" };
-  }
-  let factor = rationalFromDecimal({ coefficient: 1n, scale: 0 });
-  const splits: SplitAdjustmentV2["splits"] = [];
-  for (const split of applied) {
-    const from = positiveDecimal(split.split_from);
-    const to = positiveDecimal(split.split_to);
-    if (from === null || to === null) return { ok: false, reason: "incompatible_basis" };
-    const ratio = divideRationals(to.value, from.value);
-    factor = factor === null || ratio === null ? null : multiplyRationals(factor, ratio);
-    splits.push({ execution_date: split.execution_date, split_from: from.text, split_to: to.text });
-  }
-  const value = factor === null ? null : direction === "multiply" ? multiplyRationals(input.native, factor) : divideRationals(input.native, factor);
-  if (factor === null || value === null) return { ok: false, reason: "numeric_limit_exceeded" };
+  const split = splitFactor(input.value_kind, input.as_filed_on, input.reference_date, input.splits);
+  if (!split.ok) return split;
+  const value = split.restate(input.native);
+  if (value === null) return { ok: false, reason: "numeric_limit_exceeded" };
   return {
     ok: true,
     adjustment: {
@@ -87,12 +80,43 @@ export function restateToReference(input: {
       reference_date: input.reference_date,
       listing_id: input.listing_id,
       listing_timezone: input.listing_timezone,
-      splits,
-      factor: fraction(factor),
+      splits: split.splits,
+      factor: fraction(split.factor),
       adjusted_native_value: fraction(value),
     },
     value,
   };
+}
+
+/**
+ * Whether a later filing's figure is an earlier filing's, restated by the
+ * listing's splits between their filing dates. A filing presents a figure
+ * rounded, as NVDA's FY2025 10-K presents FY2024 diluted EPS of 11.93 as 1.19
+ * after the 10-for-1 split, so the restated earlier figure must round to the
+ * later one at the finer of their decimal places, a whole number to the unit.
+ * A value half way between rounds either way. Null when either figure is not
+ * a decimal or splits cannot restate this kind of value.
+ */
+export function explainedBySplits(input: {
+  earlier: Readonly<{ value: string; as_filed_on: IsoDate }>;
+  later: Readonly<{ value: string; as_filed_on: IsoDate }>;
+  value_kind: MetricValueKind;
+  splits: ReadonlyArray<RecordedSplit>;
+}): boolean | null {
+  const earlier = parseFinancialDecimal(input.earlier.value);
+  const later = parseFinancialDecimal(input.later.value);
+  const split = splitFactor(input.value_kind, input.earlier.as_filed_on, input.later.as_filed_on, input.splits);
+  if (!earlier.ok || !later.ok || !split.ok) return null;
+  const from = rationalFromDecimal(earlier.value);
+  const to = rationalFromDecimal(later.value);
+  const half = rationalFromDecimal({ coefficient: 5n, scale: Math.max(0, earlier.value.scale, later.value.scale) + 1 });
+  const restated = from === null ? null : split.restate(from);
+  const difference = restated === null || to === null ? null : subtractRationals(restated, to);
+  if (difference === null || half === null) return null;
+  // Within half a unit either way: half - difference and half + difference are both nonnegative.
+  const under = subtractRationals(half, difference);
+  const over = addRationals(half, difference);
+  return under === null || over === null ? null : rationalSign(under) >= 0 && rationalSign(over) >= 0;
 }
 
 /**
@@ -120,6 +144,39 @@ export function checkSplitAdjustment(
   });
   if (!recomputed.ok || canonicalJson(recomputed.adjustment) !== canonicalJson(adjustment)) return { ok: false, code: "split_adjustment_mismatch" };
   return { ok: true, value: recomputed.value };
+}
+
+type SplitFactor =
+  | Readonly<{ ok: true; splits: SplitAdjustmentV2["splits"]; factor: ExactRational; restate: (value: ExactRational) => ExactRational | null }>
+  | Readonly<{ ok: false; reason: "incompatible_basis" | "numeric_limit_exceeded" }>;
+
+/**
+ * The splits after `after` and on or before `onOrBefore`, in date order, and
+ * the product of their split_to / split_from. The basis is incompatible when
+ * splits do not move this kind of value, a ratio is not positive, or two
+ * splits share a date.
+ */
+function splitFactor(valueKind: MetricValueKind, after: IsoDate, onOrBefore: IsoDate, recorded: ReadonlyArray<RecordedSplit>): SplitFactor {
+  const direction = DIRECTIONS[valueKind];
+  const applied = recorded
+    .filter((split) => split.execution_date > after && split.execution_date <= onOrBefore)
+    .sort((left, right) => left.execution_date.localeCompare(right.execution_date));
+  if (direction === null || applied.some((split, index) => index > 0 && split.execution_date === applied[index - 1]!.execution_date)) {
+    return { ok: false, reason: "incompatible_basis" };
+  }
+  let factor = rationalFromDecimal({ coefficient: 1n, scale: 0 });
+  const splits: SplitAdjustmentV2["splits"] = [];
+  for (const split of applied) {
+    const from = positiveDecimal(split.split_from);
+    const to = positiveDecimal(split.split_to);
+    if (from === null || to === null) return { ok: false, reason: "incompatible_basis" };
+    const ratio = divideRationals(to.value, from.value);
+    factor = factor === null || ratio === null ? null : multiplyRationals(factor, ratio);
+    splits.push({ execution_date: split.execution_date, split_from: from.text, split_to: to.text });
+  }
+  if (factor === null) return { ok: false, reason: "numeric_limit_exceeded" };
+  const by = factor;
+  return { ok: true, splits, factor: by, restate: (value) => (direction === "multiply" ? multiplyRationals(value, by) : divideRationals(value, by)) };
 }
 
 const DIRECTIONS: Readonly<Record<MetricValueKind, "multiply" | "divide" | null>> = {

@@ -13,8 +13,10 @@
 // 4. An eligible extraction correction replaces the fact it corrects.
 // 5. as_reported takes the original disclosure; as_restated takes, among the
 //    economic restatements public by the cutoff, the one filed last, else the
-//    original. Publication proof only gates eligibility: an SEC proof is when
-//    a download saw the filing, so an older 10-K ingested later proves later.
+//    original. An unverified restatement public by the cutoff is a gap for
+//    as_restated: it may restate the original or only recast it for a split.
+//    Publication proof only gates eligibility: an SEC proof is when a download
+//    saw the filing, so an older 10-K ingested later proves later.
 // 6. Equal values tie-break by fact id; differing values are a conflict —
 //    identifier order never chooses financial truth.
 // 7. Freshness is measured to the cutoff.
@@ -169,7 +171,11 @@ export function selectInput(
   if (eligible.length === 0) return gap(EXCLUSION_PRIORITY.find((reason) => exclusions.has(reason)) ?? "missing_input");
   if (node.period.kind === "latest" && period === null) return gap("missing_input");
 
-  const disclosures = chooseDisclosure(withoutCorrected(eligible), requested, policy.reporting_basis);
+  const current = withoutCorrected(eligible);
+  if (policy.reporting_basis === "as_restated" && current.some((entry) => disclosureLevel(entry.candidate, requested) === "unverified")) {
+    return gap("restatement_unverified");
+  }
+  const disclosures = chooseDisclosure(current, requested, policy.reporting_basis);
   if (disclosures.length === 0) return gap("missing_input");
 
   const parsed = disclosures.flatMap(({ numeric, ...rest }) => (numeric === null ? [] : [{ ...rest, numeric }]));
@@ -285,12 +291,14 @@ function withoutCorrected(entries: ReadonlyArray<Eligible>): Eligible[] {
 
 /**
  * Disclosure level of a candidate: economic restatements are "restated";
- * originals are "original"; an extraction correction inherits the level of
- * the fact it corrects (an invisible target is treated as an original).
+ * unverified restatements "unverified"; originals are "original"; an
+ * extraction correction inherits the level of the fact it corrects (an
+ * invisible target is treated as an original).
  */
-function disclosureLevel(candidate: InputCandidate, all: ReadonlyArray<InputCandidate>, seen = new Set<string>()): "original" | "restated" {
+function disclosureLevel(candidate: InputCandidate, all: ReadonlyArray<InputCandidate>, seen = new Set<string>()): "original" | "restated" | "unverified" {
   const relation = candidate.context?.disclosure_relation ?? "original";
   if (relation === "economic_restatement") return "restated";
+  if (relation === "unverified_restatement") return "unverified";
   if (relation === "original" || candidate.supersedes === null || seen.has(candidate.fact_id)) return "original";
   const target = all.find((other) => other.fact_id === candidate.supersedes);
   return target ? disclosureLevel(target, all, new Set([...seen, candidate.fact_id])) : "original";

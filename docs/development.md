@@ -120,7 +120,7 @@ cd services/fundamentals
 DATABASE_URL=... SEC_EDGAR_USER_AGENT=... npm run backfill:sec-statements
 ```
 
-The engine binds EPS and weighted-average share counts restated to the analysis's date, from the listing's stock splits. The backfill also certifies those facts when they were stored before #387. Sync the splits on the day of the analyses that read them. An analysis dated after the last sync reports `split_history_stale` instead of a value.
+The engine binds EPS and weighted-average share counts restated to the analysis's date, from the listing's stock splits. The backfill also certifies those facts when they were stored before #387. Sync the splits on the day of the analyses that read them. An analysis dated after the last sync reports `split_history_stale` instead of a value. A later 10-K's EPS or share count stored before its listing's splits were synced is unverified, and an analysis on restated figures reports `restatement_unverified` for it. Run the backfill again after the sync to decide it.
 
 ```bash
 cd services/market

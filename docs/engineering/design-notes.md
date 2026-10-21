@@ -217,12 +217,21 @@ split executed on or before that date is already reflected. SEC ingestion certif
   (`split_history_missing`), or last fetched before the reference date in the listing's zone (`split_history_stale`).
   The check proves only that the list was fetched on or after that day. Such a list holds every split executed by the
   reference date only if the provider lists each split before or on its execution date.
-- **A split recast is no restatement:** restatement detection compares only unadjusted originals, since a later 10-K
-  states the same period on its own split basis.
+- **A split recast is no restatement:** a later 10-K states an earlier year's as-filed figure on its own split basis.
+  Restatement detection restates the previous filing's figure by the listing's splits between the two filing dates
+  (`explainedBySplits`). When that rounds to the later figure at the finer of their decimal places, the later figure is
+  the same one, and nothing is stored. NVDA's FY2024 diluted EPS of 11.93 is 1.193 after the 10-for-1 split, and the
+  FY2025 10-K presents it as 1.19. Otherwise the later figure is an economic restatement as filed on its 10-K's date,
+  so binding restates it from there. When the listing's splits are not on file through the later filing's date (no
+  single listing on that date, never synced, or synced before it), the figure is stored as an `unverified_restatement`
+  (migration 0067). An `as_restated` plan gaps on it with `restatement_unverified`, and an `as_reported` plan still
+  binds the original.
 - **Seal:** the snapshot verifier rebuilds the adjustment from the listing's current splits and time zone and withholds
   the seal when either changed (`splits_changed`).
 - **Operators:** `npm run backfill:sec-statements` records the context of a share fact stored before #387, and
-  `npm run sync:splits` (in `services/market`) has to have run on the analysis's day.
+  `npm run sync:splits` (in `services/market`) has to have run on the analysis's day. Every ingest compares the stored
+  originals again, so a backfill rerun after a sync decides each unverified restatement whose listing's splits now
+  cover its filing date, and a second rerun changes nothing.
 
 ## Which facts may ground an answer
 

@@ -123,6 +123,7 @@ export const REASON_CODES = [
   "split_listing_unresolved",
   "split_history_missing",
   "split_history_stale",
+  "restatement_unverified",
 ] as const;
 export type ReasonCode = (typeof REASON_CODES)[number];
 

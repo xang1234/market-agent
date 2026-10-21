@@ -25,7 +25,11 @@ import {
   type SecSource,
   type SecSourceToken,
 } from "./sec-edgar.ts";
+import { resolveMetricDefinition } from "../../financial-core/src/definitions.ts";
+import type { ShareBasis } from "../../financial-core/src/evidence-vocabulary.ts";
 import { compareExactDecimals, parseFinancialDecimal } from "../../financial-core/src/exact-decimal.ts";
+import { explainedBySplits, splitHistoryCovers } from "../../financial-core/src/split-adjustment.ts";
+import { loadSubjectSplitHistory, type SubjectSplitHistory } from "../../market/src/split-history.ts";
 import { checkTokenAgainstStoredValue, recordFactPrecisionAttestation } from "../../evidence/src/financial-attestations.ts";
 import { recordFactFinancialContext } from "../../evidence/src/financial-context.ts";
 import { withPinnedTransaction, type TransactionalQueryExecutor } from "./pinned-transaction.ts";
@@ -1123,44 +1127,51 @@ async function derivationLineage(
 // value adds nothing. A filing giving two different values, or a value without
 // its lossless token, is skipped; an original with no recorded concept is left
 // as it is. A restated fact's method keeps it out of every as-reported reader.
-// An as-filed original is not compared: a later filing states it on its own
-// split basis, so a split alone would read as a restatement.
-async function recordSecRestatements(
-  db: FundamentalsQueryExecutor,
-  input: {
-    facts: SecCompanyFacts;
-    cik: number;
-    issuerId: UUID;
-    evidence: SecFetchEvidence;
-    clock: () => Date;
-  },
-): Promise<void> {
-  const { rows: originals } = await db.query<{
-    fact_id: string;
-    metric_id: string;
-    period_kind: string;
-    period_start: string | null;
-    period_end: string;
-    fiscal_year: number;
-    value: string;
-    unit: string;
-    currency: string | null;
-    scale: string;
-    source_context_ref: string | null;
-  }>(
-    `select f.fact_id::text as fact_id, f.metric_id::text as metric_id, f.period_kind::text as period_kind,
+//
+// An as-filed EPS or share count is on the split basis of its filing date
+// (#387), so a later 10-K states it on its own. When the listing's splits
+// between the two filing dates explain the change, it is the same figure;
+// otherwise it is a restatement, as filed on the later 10-K's date. Without
+// those splits on file it is stored as an unverified restatement, and the
+// year's later filings wait for it. A later filing's stored statement
+// converges to the verdict under the splits on file, so a rerun after
+// `npm run sync:splits` decides an unverified one and a second rerun changes
+// nothing.
+async function recordSecRestatements(db: FundamentalsQueryExecutor, input: RestatementInput): Promise<void> {
+  const { rows: originals } = await db.query<SecOriginal>(
+    `select f.fact_id::text as fact_id, f.metric_id::text as metric_id, m.metric_key, f.period_kind::text as period_kind,
             f.period_start::text as period_start, f.period_end::text as period_end, f.fiscal_year,
-            f.value_num::text as value, f.unit, f.currency, f.scale::text as scale, c.source_context_ref
+            f.value_num::text as value, f.unit, f.currency, f.scale::text as scale, c.source_context_ref,
+            c.as_filed_on::text as as_filed_on, c.share_basis
        from facts f
+       join metrics m on m.metric_id = f.metric_id
        join fact_financial_contexts c on c.fact_id = f.fact_id
       where f.subject_kind = 'issuer' and f.subject_id = $1 and f.method = 'reported' and f.fiscal_period = 'FY'
         and ${factActiveSql("f")}
-        and c.context_version = $2 and c.disclosure_relation = 'original' and c.adjustment_basis = 'unadjusted'`,
+        and c.context_version = $2 and c.disclosure_relation = 'original'`,
     [input.issuerId, SEC_CONTEXT_VERSION],
   );
+  if (originals.length === 0) return;
+  const { rows: stated } = await db.query<{ fact_id: string; supersedes: string; source_id: string; disclosure_relation: string | null }>(
+    `select f.fact_id::text as fact_id, f.supersedes::text as supersedes, f.source_id::text as source_id, c.disclosure_relation
+       from facts f
+       left join fact_financial_contexts c on c.fact_id = f.fact_id
+      where f.subject_kind = 'issuer' and f.subject_id = $1 and f.method = 'restated' and ${factActiveSql("f")}`,
+    [input.issuerId],
+  );
+  const storedLater = new Map(stated.map((row) => [`${row.supersedes}|${row.source_id}`, row]));
+  const splitHistories = new Map<string, SubjectSplitHistory>();
+  // The listing active on the later filing's date: noon UTC falls on that
+  // date in every market from UTC-11 to UTC+11.
+  const splitsOn = async (date: string) => {
+    const known = splitHistories.get(date);
+    if (known) return known;
+    const history = await loadSubjectSplitHistory(db, { kind: "issuer", id: input.issuerId }, `${date}T12:00:00.000Z`);
+    splitHistories.set(date, history);
+    return history;
+  };
   const usGaap = input.facts.facts["us-gaap"] ?? {};
-  const sources = new Map<string, UUID>();
-  const published = new Set<string>();
+  const memo = { sources: new Map<string, UUID>(), published: new Set<string>() };
   for (const original of originals) {
     const located = /#([^|]+)\|([^|]+)\|([^|]+)\|/u.exec(original.source_context_ref ?? "");
     if (!located) continue;
@@ -1173,70 +1184,156 @@ async function recordSecRestatements(
       byFiling.set(value.accn, filing);
     }
     const filings = [...byFiling].sort(([leftAccn, left], [rightAccn, right]) => left.filed.localeCompare(right.filed) || leftAccn.localeCompare(rightAccn));
-    let previous = original.value;
+    let previous: StatedFigure = { value: original.value, as_filed_on: original.as_filed_on };
     for (const [accessionNumber, { filed, tokens }] of filings) {
       const [presented, ...others] = tokens;
       if (others.length > 0 || presented === null || presented === undefined) continue;
-      const unchanged = sameDecimal(presented, previous);
-      previous = presented;
-      if (unchanged !== false) continue;
-      const asOf = input.evidence.completed_at;
-      let sourceId = sources.get(accessionNumber);
-      if (sourceId === undefined) {
-        sourceId = await upsertSecFilingSource(db, secFilingSource(input.cik, accessionNumber, asOf));
-        sources.set(accessionNumber, sourceId);
+      const later: StatedFigure = { value: presented, as_filed_on: original.as_filed_on === null ? null : filed };
+      const relation = await laterRelation(original.metric_key, previous, later, splitsOn);
+      previous = later;
+      const current = storedLater.get(`${original.fact_id}|${sourceIdForAccession(accessionNumber)}`);
+      if (current !== undefined && current.disclosure_relation !== relation) {
+        await db.query(`update facts set invalidated_at = now(), updated_at = now() where fact_id = $1`, [current.fact_id]);
       }
-      const token: SecSourceToken = { token: presented, concept: concept!, unit: unit!, accn: accessionNumber, form: "10-K", filed, start: original.period_start, end: original.period_end };
-      const inserted = await db.query<{ fact_id: string }>(
-        `insert into facts (
-           subject_kind, subject_id, metric_id, period_kind, period_start, period_end, fiscal_year, fiscal_period,
-           value_num, unit, currency, scale, as_of, reported_at, observed_at, source_id, method, definition_version,
-           verification_status, freshness_class, coverage_level, confidence, supersedes
-         ) values (
-           'issuer', $1, $2, $3, $4, $5, $6, 'FY', $7, $8, $9, $10, $11, $15, $12, $13, 'restated', 1,
-           'authoritative', 'filing_time', 'full', 1, $14
-         )
-         on conflict do nothing
-         returning fact_id::text as fact_id`,
-        [
-          input.issuerId, original.metric_id, original.period_kind, original.period_start, original.period_end, original.fiscal_year,
-          token.token, original.unit, original.currency, original.scale, asOf, input.clock().toISOString(), sourceId, original.fact_id,
-          filed,
-        ],
-      );
-      // The restating filing need not be the one this ingest is for; this
-      // download listing it proves it was public by the download's completion,
-      // and an earlier download may be the tighter proof of a row already stored.
-      if (!published.has(accessionNumber)) {
-        await recordSecFetchPublication(db, { sourceId, accessionNumber, evidence: input.evidence });
-        published.add(accessionNumber);
-      }
-      const factId = inserted.rows[0]?.fact_id;
-      if (!factId) continue;
-      const locator = `sec_edgar:companyfacts:CIK${String(input.cik).padStart(10, "0")}#${token.concept}|${token.unit}|${token.accn}|${token.start ?? ""}..${token.end}`;
-      await recordFactPrecisionAttestation(db, {
-        fact_id: factId,
-        precision_class: "source_token_preserved",
-        raw_token: token.token,
-        token_proof_hash: secTokenProofHash(input.cik, token),
-        source_locator: locator,
-        validation_method: "sec_companyfacts_lossless_json.v1",
-      });
-      await recordFactFinancialContext(db, {
-        fact_id: factId,
-        context_version: SEC_CONTEXT_VERSION,
-        period_type: original.period_start === null ? "instant" : "duration",
-        dimension_scope: "consolidated",
-        dimension_members: [],
-        reporting_basis: "as_restated",
-        adjustment_basis: "unadjusted",
-        share_basis: "not_applicable",
-        fiscal_calendar_version: "sec_filer_fiscal_year.v1",
-        disclosure_relation: "economic_restatement",
-        source_context_ref: locator,
-      });
+      if (relation === null) continue;
+      await storeLaterStatement(db, input, memo, original, { accession: accessionNumber, filed, token: presented, concept: concept!, unit: unit! }, relation);
+      if (relation === "unverified_restatement") break;
     }
   }
+}
+
+type RestatementInput = Readonly<{
+  facts: SecCompanyFacts;
+  cik: number;
+  issuerId: UUID;
+  evidence: SecFetchEvidence;
+  clock: () => Date;
+}>;
+
+type SecOriginal = {
+  fact_id: string;
+  metric_id: string;
+  metric_key: string;
+  period_kind: string;
+  period_start: string | null;
+  period_end: string;
+  fiscal_year: number;
+  value: string;
+  unit: string;
+  currency: string | null;
+  scale: string;
+  source_context_ref: string | null;
+  as_filed_on: string | null;
+  share_basis: ShareBasis;
+};
+
+/** A figure as a filing states it, and the filing date whose split basis it is on: null for a value splits do not move. */
+type StatedFigure = Readonly<{ value: string; as_filed_on: string | null }>;
+
+type LaterRelation = "economic_restatement" | "unverified_restatement";
+
+/**
+ * How a later 10-K's figure for a year relates to the previous filing's, null
+ * when it is the same figure. An as-filed figure is compared on the listing's
+ * splits between the two filing dates; without them on file it is unverified.
+ */
+async function laterRelation(
+  metricKey: string,
+  previous: StatedFigure,
+  later: StatedFigure,
+  splitsOn: (date: string) => Promise<SubjectSplitHistory>,
+): Promise<LaterRelation | null> {
+  if (previous.as_filed_on === null || later.as_filed_on === null) {
+    return sameDecimal(later.value, previous.value) === false ? "economic_restatement" : null;
+  }
+  const history = await splitsOn(later.as_filed_on);
+  if (history.status !== "ok" || !splitHistoryCovers(history.checked_at, later.as_filed_on, history.timezone)) return "unverified_restatement";
+  const definition = resolveMetricDefinition(metricKey);
+  const explained = definition === null ? null : explainedBySplits({
+    earlier: { value: previous.value, as_filed_on: previous.as_filed_on },
+    later: { value: later.value, as_filed_on: later.as_filed_on },
+    value_kind: definition.value_kind,
+    splits: history.splits,
+  });
+  return explained === true ? null : explained === false ? "economic_restatement" : "unverified_restatement";
+}
+
+/**
+ * Stores a later 10-K's statement of an original's year on the restating
+ * filing's source, unless that filing's statement is already stored.
+ */
+async function storeLaterStatement(
+  db: FundamentalsQueryExecutor,
+  input: RestatementInput,
+  memo: { sources: Map<string, UUID>; published: Set<string> },
+  original: SecOriginal,
+  later: Readonly<{ accession: string; filed: string; token: string; concept: string; unit: string }>,
+  relation: LaterRelation,
+): Promise<void> {
+  const asOf = input.evidence.completed_at;
+  let sourceId = memo.sources.get(later.accession);
+  if (sourceId === undefined) {
+    sourceId = await upsertSecFilingSource(db, secFilingSource(input.cik, later.accession, asOf));
+    memo.sources.set(later.accession, sourceId);
+  }
+  const token: SecSourceToken = {
+    token: later.token,
+    concept: later.concept,
+    unit: later.unit,
+    accn: later.accession,
+    form: "10-K",
+    filed: later.filed,
+    start: original.period_start,
+    end: original.period_end,
+  };
+  const inserted = await db.query<{ fact_id: string }>(
+    `insert into facts (
+       subject_kind, subject_id, metric_id, period_kind, period_start, period_end, fiscal_year, fiscal_period,
+       value_num, unit, currency, scale, as_of, reported_at, observed_at, source_id, method, definition_version,
+       verification_status, freshness_class, coverage_level, confidence, supersedes
+     ) values (
+       'issuer', $1, $2, $3, $4, $5, $6, 'FY', $7, $8, $9, $10, $11, $15, $12, $13, 'restated', 1,
+       'authoritative', 'filing_time', 'full', 1, $14
+     )
+     on conflict do nothing
+     returning fact_id::text as fact_id`,
+    [
+      input.issuerId, original.metric_id, original.period_kind, original.period_start, original.period_end, original.fiscal_year,
+      token.token, original.unit, original.currency, original.scale, asOf, input.clock().toISOString(), sourceId, original.fact_id,
+      later.filed,
+    ],
+  );
+  // The restating filing need not be the one this ingest is for; this
+  // download listing it proves it was public by the download's completion,
+  // and an earlier download may be the tighter proof of a row already stored.
+  if (!memo.published.has(later.accession)) {
+    await recordSecFetchPublication(db, { sourceId, accessionNumber: later.accession, evidence: input.evidence });
+    memo.published.add(later.accession);
+  }
+  const factId = inserted.rows[0]?.fact_id;
+  if (!factId) return;
+  const locator = `sec_edgar:companyfacts:CIK${String(input.cik).padStart(10, "0")}#${token.concept}|${token.unit}|${token.accn}|${token.start ?? ""}..${token.end}`;
+  await recordFactPrecisionAttestation(db, {
+    fact_id: factId,
+    precision_class: "source_token_preserved",
+    raw_token: token.token,
+    token_proof_hash: secTokenProofHash(input.cik, token),
+    source_locator: locator,
+    validation_method: "sec_companyfacts_lossless_json.v1",
+  });
+  await recordFactFinancialContext(db, {
+    fact_id: factId,
+    context_version: SEC_CONTEXT_VERSION,
+    period_type: original.period_start === null ? "instant" : "duration",
+    dimension_scope: "consolidated",
+    dimension_members: [],
+    reporting_basis: "as_restated",
+    ...(original.as_filed_on === null ? { adjustment_basis: "unadjusted" } : { adjustment_basis: "as_filed", as_filed_on: later.filed }),
+    share_basis: original.share_basis,
+    fiscal_calendar_version: "sec_filer_fiscal_year.v1",
+    disclosure_relation: relation,
+    source_context_ref: locator,
+  });
 }
 
 /** Numeric equality of two decimal texts, or null when either is not one. */

@@ -224,6 +224,8 @@ function bindingGapExplanation(reason: ReasonCode): string {
       return "The listing's stock splits were never fetched, so this figure's split basis is unknown.";
     case "split_history_stale":
       return "The listing's stock splits were last fetched before the analysis date, so a later split may be missing.";
+    case "restatement_unverified":
+      return "A later filing states this figure again, and the stock splits that tell a restatement from a split adjustment were not fetched when it was stored.";
     default:
       return "No eligible input was public before the knowledge cutoff.";
   }
