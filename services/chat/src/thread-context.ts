@@ -24,9 +24,9 @@ export async function loadPriorSubjects(
        join snapshots s on s.snapshot_id = m.snapshot_id
       where m.thread_id = $1::uuid
         and m.role = 'assistant'
-        -- An answer about no company (a clarification, or a gap that names
-        -- none) leaves the earlier companies in place, as it leaves the scope
-        -- (loadPriorScope).
+        -- An answer about no company (a clarification, a notice, or a gap
+        -- that names none) leaves the earlier companies in place, as it
+        -- leaves the scope (loadPriorScope).
         and exists (
           select 1 from jsonb_array_elements(s.subject_refs) ref
            where ref->>'kind' in ('issuer', 'instrument', 'listing')
@@ -62,7 +62,8 @@ function withListingTicker(handoff: HydratedSubjectHandoff): HydratedSubjectHand
 // The latest research scope an answer saved (research-scope.ts), for a
 // follow-up to keep what it does not change. Answers that save none (a
 // clarification, a notice, a gap that names no company, or an answer whose
-// scope could not be read) leave it in place; null when no answer saved one.
+// scope was unavailable when it was saved) leave it in place; null when no
+// answer saved one.
 export async function loadPriorScope(
   db: QueryExecutor,
   input: { threadId: string },
