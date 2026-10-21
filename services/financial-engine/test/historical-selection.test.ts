@@ -39,6 +39,7 @@ function candidate(spec: CandidateSpec = {}): InputCandidate {
     unit: { kind: "currency", currency: "USD" },
     method: "reported",
     verification_status: "authoritative",
+    coverage_level: "full",
     reported_at: spec.filed === undefined ? `${spec.publishedLocalDate ?? `${year + 1}-01-10`}T00:00:00.000Z` : spec.filed,
     observed_at: "2024-02-01T00:00:00.000Z",
     supersedes: spec.supersedes ?? null,

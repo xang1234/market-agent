@@ -41,6 +41,8 @@ export type InputCandidate = Readonly<{
   unit: FinancialUnit | null;
   method: "reported" | "extracted" | "restated";
   verification_status: "authoritative" | "corroborated";
+  /** How much of its metric the value covers: a cover count is partial when its filing lists several. */
+  coverage_level: "full" | "partial" | "sparse" | "unavailable";
   /** When the disclosing filing was filed (SEC `filed`); not proof of publication. */
   reported_at: string | null;
   observed_at: string;

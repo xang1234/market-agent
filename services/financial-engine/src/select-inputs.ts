@@ -28,7 +28,9 @@
 //    latest filing's: a node takes the newest filing filed by the cutoff,
 //    whatever its form, apart from the plan's statement periods, and any
 //    other count it names is stale, as is one dated more than
-//    SHARE_COUNT_MAX_AGE_DAYS before the cutoff.
+//    SHARE_COUNT_MAX_AGE_DAYS before the cutoff. A count that covers part of
+//    the registrant's shares, one of several its filing lists, has an
+//    incompatible scope.
 // 10. A split near an instant share count's date leaves its basis unknown,
 //    so it is a gap: one within SHARE_COUNT_SPLIT_WINDOW_DAYS of that date,
 //    or after it and on or before the filing date.
@@ -70,18 +72,10 @@ import type { InputCandidate, SplitHistory } from "./ports.ts";
 
 export const SELECTION_POLICY_VERSION = "public-information-selection.v4";
 
-/**
- * A large accelerated filer files at most 111 days apart (a 10-Q 40 days
- * after its third quarter, its 10-K 60 days after the year), so a share count
- * dated more than this before the cutoff is superseded or late.
- */
+/** A large accelerated filer's filings are due about 112 days apart at most, so an older count is likely superseded. */
 export const SHARE_COUNT_MAX_AGE_DAYS = 130;
 
-/**
- * A split's record and distribution dates fall days before its ex-date, which
- * is how a listing's splits are dated, so a count this near one may be on
- * either basis.
- */
+/** A split's shares are distributed days before its ex-date, the date a listing's splits carry, so a count this near one may be on either basis. */
 export const SHARE_COUNT_SPLIT_WINDOW_DAYS = 7;
 
 /** Whether the metric is an instant share count, dated by its own date (rule 9). */
@@ -205,7 +199,8 @@ export function selectInput(
 /**
  * An instant share count (rule 9): the count of the newest filing filed by
  * the cutoff, when the node's period names that filing. Its filing date is
- * the candidate's reported_at.
+ * the candidate's reported_at. A filing's count that is not public by the
+ * cutoff leaves nothing to bind: an older filing's is superseded.
  */
 function selectShareCount(node: ReportedMetricNode, candidates: ReadonlyArray<InputCandidate>, policy: SelectionPolicy): SlotSelection {
   const cutoff = Date.parse(policy.knowledge_cutoff);
@@ -216,6 +211,7 @@ function selectShareCount(node: ReportedMetricNode, candidates: ReadonlyArray<In
   const latest = requested.filter((candidate) =>
     Date.parse(candidate.reported_at!) === latestFiled && (node.period.kind !== "latest" || node.period.offset === 0));
   if (latest.length === 0) return gap(requested.length > 0 ? "stale_input" : "missing_input");
+  if (latest.some((candidate) => candidate.coverage_level !== "full")) return gap("incompatible_scope");
   const eligible = eligibleAmong(latest, policy.knowledge_cutoff);
   if (typeof eligible === "string") return gap(eligible);
   const selection = chooseAmong(eligible, candidates, policy);

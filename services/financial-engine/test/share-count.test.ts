@@ -30,6 +30,7 @@ function cover(filing: Filing, overrides: Partial<InputCandidate> = {}): InputCa
     unit: { kind: "shares" },
     method: "reported",
     verification_status: "authoritative",
+    coverage_level: "full",
     reported_at: `${filing.filed}T00:00:00.000Z`,
     observed_at: "2026-10-01T00:00:00.000Z",
     supersedes: null,
@@ -137,8 +138,8 @@ test("the latest filing's count that cannot bind is a gap, never an older filing
   const cutoff = "2024-09-15T16:00:00.000Z";
   const counts = [cover(K24), cover(Q1)];
   assert.deepEqual(bound(cutoff, counts), Q1_BOUND("24600000000", ["2024-06-10"]));
-  // A filing listing two counts is stored with no context.
-  assert.equal(bound(cutoff, [...counts, cover(Q2, { context: null })]), "context_unverified");
+  // A filing listing two counts stores one, as partial coverage with no context.
+  assert.equal(bound(cutoff, [...counts, cover(Q2, { coverage_level: "partial", context: null })]), "incompatible_scope");
   // Filed by the cutoff, but proven public only by a fetch after it.
   const fetchedLater = cover(Q2, { publication: [{ attestation_id: "a-3", timing: { available_not_before: null, available_no_later_than: "2026-10-01T15:00:00.000Z", timing_precision: "instant", source_timezone: "UTC" } }] });
   assert.equal(bound(cutoff, [...counts, fetchedLater]), "missing_input");

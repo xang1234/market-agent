@@ -338,9 +338,10 @@ type ExtractedFiling = Readonly<{
  * A filing's cover-page count of its common shares (#444): a point at the
  * count's own date S, labeled with the filing's fiscal year and period and
  * filed on D. It is certified only when the filing lists one count. With
- * several, which one is the registrant's is unknown, so the first is stored
- * with its token but no context: binding gaps on it, never on an older
- * filing's count. A count without its lossless token is not stored.
+ * several, each covers part of the registrant's shares, so the newest is
+ * stored with its token as partial coverage and no context: binding gaps on
+ * its scope, never on an older filing's count. A count without its lossless
+ * token is not stored.
  */
 type CoverCount = Readonly<{ period: Omit<FactBatch, "lines">; line: StatementLine; token: SecSourceToken; certified: boolean }>;
 
@@ -363,7 +364,7 @@ function secCoverCount(input: IngestInput, accessionNumber: string, sourceId: UU
       reported_at: `${value.filed}T00:00:00.000Z`,
       source_id: sourceId,
     },
-    line: { metric_key: SEC_COVER_COUNT_METRIC_KEY, value_num: value.val, unit: "shares", scale: 1, coverage_level: "full" },
+    line: { metric_key: SEC_COVER_COUNT_METRIC_KEY, value_num: value.val, unit: "shares", scale: 1, coverage_level: others.length === 0 ? "full" : "partial" },
     token: { token: value.val_token, concept: SEC_COVER_COUNT_CONCEPT, unit: "shares", accn: value.accn, form: value.form, filed: value.filed, start: null, end: value.end },
     certified: others.length === 0,
   };

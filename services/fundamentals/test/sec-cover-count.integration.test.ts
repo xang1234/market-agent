@@ -8,11 +8,15 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { bootstrapDatabase, connectedPool, dockerAvailable, workspaceRoot } from "../../../db/test/docker-pg.ts";
+import { createRuntimeAuthority } from "../../financial-core/src/index.ts";
+import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
+import { selectInput } from "../../financial-engine/src/select-inputs.ts";
 import { backfillSecCompanionStatements, createSecBackedStatementRepository } from "../src/sec-facts-repository.ts";
 import { secCompanyFetcher } from "./fakes.ts";
 
 const ISSUER = "37000000-0000-4000-8000-0000000003a1";
 const FALLBACK_SOURCE_ID = "37000000-0000-4000-8000-0000000003a9";
+const OWNER = "37000000-0000-4000-8000-0000000003b1";
 
 type Filing = { accn: string; fy: number; fp: string; form: string; filed: string };
 const value = (filing: Filing, start: string | null, end: string, token: string) =>
@@ -83,6 +87,7 @@ test("a filing's cover count is stored as filed on its own date", { timeout: 300
   const counts = async () => (await db.query(
     `select f.period_kind::text as period_kind, f.period_start::text as period_start, f.period_end::text as period_end,
             f.fiscal_year, f.fiscal_period::text as fiscal_period, f.method::text as method, f.value_num::text as value,
+            f.coverage_level::text as coverage_level,
             to_char(f.reported_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as reported_at, s.canonical_url,
             a.precision_class, a.raw_token, a.source_locator,
             c.period_type, c.dimension_scope, c.reporting_basis, c.adjustment_basis, c.as_filed_on::text as as_filed_on,
@@ -105,6 +110,7 @@ test("a filing's cover count is stored as filed on its own date", { timeout: 300
     fiscal_period: period.fp,
     method: "reported",
     value: token,
+    coverage_level: "full",
     reported_at: `${period.filed}T00:00:00Z`,
     canonical_url: `https://www.sec.gov/Archives/edgar/data/1045810/${period.accn.replace(/-/g, "")}/${period.accn}-index.htm`,
     precision_class: "source_token_preserved",
@@ -120,7 +126,7 @@ test("a filing's cover count is stored as filed on its own date", { timeout: 300
     published: true,
   });
 
-  await t.test("the 10-K's cover count is a point at its date S, as filed on S and published on its filing date", async () => {
+  await t.test("the 10-K's cover count is a point at its date S, as filed on S and filed on D", async () => {
     assert.ok(await ingest(2024, "FY"));
     assert.deepEqual(await counts(), [certified(K24, "2024-02-16", "2500000000")]);
   });
@@ -133,12 +139,35 @@ test("a filing's cover count is stored as filed on its own date", { timeout: 300
     ]);
   });
 
-  await t.test("a filing listing two counts stores one with its token and no context", async () => {
+  await t.test("a filing listing two counts stores one with its token as partial coverage, and binding gaps on its scope", async () => {
     assert.ok(await ingest(2025, "Q2"));
     const q2 = (await counts()).filter((row) => row.fiscal_period === "Q2");
-    assert.deepEqual(q2.map((row) => [row.value, row.precision_class, row.raw_token, row.adjustment_basis]), [
-      ["24530000000", "source_token_preserved", "24530000000", null],
+    assert.deepEqual(q2.map((row) => [row.value, row.coverage_level, row.precision_class, row.raw_token, row.adjustment_basis]), [
+      ["24530000000", "partial", "source_token_preserved", "24530000000", null],
     ]);
+    const page = await createEvidenceFinancialPort(db).listInputCandidates({
+      authority: createRuntimeAuthority({
+        owner_user_id: OWNER,
+        egress_channel: "chat",
+        parent: { kind: "chat_thread", id: OWNER, version: "1" },
+        allowed_source_classes: ["sec_filing"],
+        feature: { surface: "chat", capability: "financial-answer", mode: "enforce" },
+        approval_state: "not_required",
+        lease: null,
+      }),
+      subject: { kind: "issuer", id: ISSUER },
+      metric_key: "shares_outstanding",
+      fiscal_year: null,
+      fiscal_period: null,
+      limit: 100,
+    });
+    assert.equal(page.status, "ok");
+    const latest = { node_id: "shares", operation: "reported_metric", operation_version: "reported_metric.v1", subject_slot: "a", metric_key: "shares_outstanding", period: { kind: "latest", period_type: "quarterly", offset: 0 } } as const;
+    // After the download that stored it: the Q2 10-Q is the latest filing, and the Q1 10-Q's count is superseded.
+    assert.deepEqual(
+      selectInput(latest, page.status === "ok" ? page.candidates : [], { knowledge_cutoff: "2026-10-02T00:00:00.000Z", reporting_basis: "as_reported", max_age_days: null }),
+      { status: "gap", reason_code: "incompatible_scope" },
+    );
   });
 
   await t.test("a later 10-K adds its own count and restates none, and a rerun changes nothing", async () => {
