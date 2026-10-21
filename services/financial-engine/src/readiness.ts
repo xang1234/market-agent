@@ -1,6 +1,6 @@
 // Whether this deployment may run verified finance at all. Every surface on the
-// engine (thesis, Discovery, grids, analyze, and chat's metric questions)
-// needs the schema the engine writes through, the
+// engine (thesis, Discovery, grids, analyze, chat's metric questions, and the
+// screener's valuations) needs the schema the engine writes through, the
 // evidence views its adapter reads, and a version registry that covers what
 // this build emits. A missing piece blocks startup with the reasons; it never
 // quietly leaves a surface on legacy numbers while it claims to be enforced.
@@ -25,6 +25,7 @@ const RELATIONS = [
   "source_publication_attestations", "fact_precision_attestations", "fact_financial_contexts",
   "current_source_publication_attestations", "current_fact_precision_attestations",
   "listing_splits", "listing_split_coverage", "price_observations",
+  "screener_valuation_runs", "screener_certified_valuations",
 ];
 const COLUMNS: ReadonlyArray<readonly [string, string]> = [
   ["computations", "financial_run_id"], ["grid_runs", "financial_mode"], ["grid_cells", "financial_block"],

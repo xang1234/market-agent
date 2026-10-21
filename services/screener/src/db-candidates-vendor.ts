@@ -1,7 +1,8 @@
 // Vendor-backed screener candidate repository (screener-artifacts feed).
 //
-// Unlike createPostgresCandidateRepository (which derives margins/PE from six
-// reported SEC facts, one per-issuer read per candidate), this repository serves
+// Unlike createPostgresCandidateRepository (which derives margins from reported
+// SEC facts, one per-issuer read per candidate, and reads certified market cap
+// and P/E), this repository serves
 // the bulk vendor universe ingested by services/screener-artifacts. Two deliberate
 // differences:
 //   1. Set-based — ONE query pivots the latest method='vendor' point facts for the
@@ -216,6 +217,8 @@ function quoteFromRow(row: VendorCandidateRow, nowIso: string): ScreenerQuoteSum
 function fundamentalsFromRow(row: VendorCandidateRow): ScreenerFundamentalsSummary {
   return {
     market_cap: numOrNull(row.market_cap),
+    // The feed states none, so the quote's currency labels market_cap, as before.
+    market_cap_currency: null,
     pe_ratio: numOrNull(row.pe_ratio),
     gross_margin: numOrNull(row.gross_margin),
     operating_margin: numOrNull(row.operating_margin),

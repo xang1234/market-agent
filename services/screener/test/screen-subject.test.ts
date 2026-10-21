@@ -327,6 +327,7 @@ test("persistScreen does not mutate caller objects", () => {
 
 // The vendor and insider fundamentals a reported-only row leaves null.
 const NO_VENDOR_FUNDAMENTALS = {
+  market_cap_currency: null,
   forward_pe: null,
   roic: null,
   perf_quarter: null,

@@ -94,7 +94,7 @@ committed values.
 
 | Producer / transport | Location | Current numeric handling | Disposition | Task |
 |---|---|---|---|---|
-| `latest_market_cap` column | `services/analyst-grids/src/financial-column.ts` | Explicit unsupported gap; the latest-fact producer is deleted | Unsupported until market/share/timing proof | T22 |
+| `latest_market_cap`, `latest_pe_ratio` columns | `services/analyst-grids/src/financial-column.ts` | Engine only; the latest-fact producer is deleted | Engine (`market_cap.v1`, `pe_ratio.v1` at the run's cutoff) | #444 |
 | `latest_revenue`, `latest_eps_diluted` | `services/analyst-grids/src/financial-column.ts` | Engine only; the latest-fact producer is deleted | Engine (`reported_metric` at pinned cutoff) | T22 |
 | Reader question column | `services/analyst-grids/src/reader-question-column.ts`, `reader-llm.ts` | Model prose over documents | Narrative (non-certified) | T22 |
 | Progress counters | `services/analyst-grids/src/queries.ts`, `run-engine.ts` | Integer counts | Transport; requested/verified/gap/error counts | T22 |
@@ -133,7 +133,8 @@ done; it is not counted as complete.
 | Analyze numerical sections (`revenue_trend`, `peer_table`, `financial_health`) | Engine sections; their legacy producers do not run | `services/analyze/test/financial-*.test.ts`, parity |
 | Analyze price targets / analyst consensus / price facts | Legacy producers (estimates are not reported facts); their blocks render as "Legacy output" | `financial-surface-contracts.test.tsx` |
 | Grid `latest_revenue`, `latest_eps_diluted` | Engine cells at the run's pinned cutoff | `services/analyst-grids/test/financial-*.test.ts`, parity |
-| Grid `latest_market_cap` | Explicit unsupported gap | `financial-column.test.ts` |
+| Grid `latest_market_cap`, `latest_pe_ratio` | Engine cells at the run's cutoff | `financial-column.test.ts` |
+| Screener `market_cap`, `pe_ratio` | Engine figures a batch certifies per issuer; a screen only reads them, and the legacy arithmetic is deleted | `services/dev-api/test/screener-certification.test.ts`, `services/screener/test/db-candidates.test.ts` |
 | Grid reader questions | Narrative, unchanged | — |
 | Thesis metric conditions | Engine saved rule (`as_restated`), certified reference on the assessment | `services/agents/test/financial-thesis*.test.ts`, parity |
 | Discovery numerical criteria | Engine saved rule; certified outcome is authoritative over model roles | `services/discovery/test/financial-*.test.ts`, parity |

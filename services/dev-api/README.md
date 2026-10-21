@@ -19,4 +19,5 @@ models from `{baseUrl}/models`.
 cd services/dev-api
 npm test
 npm run dev
+npm run certify:screener-universe [-- --as-of <iso>]  # certifies the screener's market cap and P/E (DATABASE_URL)
 ```

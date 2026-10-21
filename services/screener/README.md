@@ -34,6 +34,12 @@ Postgres at request time. The executor still must not fan out N×K HTTP calls
 to `services/market` and `services/fundamentals` per query; upstream provider
 hydration writes to Postgres first, then the screener reads those rows.
 
+Market cap and P/E are certified figures from the financial engine. The
+certification batch in `services/dev-api` (`npm run certify:screener-universe`)
+writes each issuer's figures to `screener_certified_valuations`, and a screen
+reads them in one query. A figure not certified for the last closed session is
+`null`, and so is every figure the batch has not reached.
+
 Two semantics worth flagging because they are easy to get wrong:
 
 1. **Numeric clauses on `null` fields exclude the candidate.** Otherwise

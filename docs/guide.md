@@ -30,7 +30,7 @@ Click a linked figure, claim, event, or source to open the inspector. It shows t
 
 Filter the universe by asset type, sector, venue, price, change, and volume. Add fundamentals such as market cap, P/E, margins, and revenue growth. With the weekly vendor universe turned on, you can also filter by forward P/E, ROIC, 3-month and 1-year performance, RSI, and distance from the 52-week high. Sort, page through, and save a screen. A saved screen becomes a reusable universe for watchlists, agents, and Analyze.
 
-By default the screener lists companies whose SEC facts the app has stored. It can serve about 10,000 US listings from a weekly reference import instead, with fewer fundamentals. See [Configuration](configuration.md#screener-universe).
+By default the screener lists companies whose SEC facts the app has stored. Its market cap and P/E are the financial engine's figures for the last closed session, so a company the engine has not valued for that session shows a dash. It can serve about 10,000 US listings from a weekly reference import instead, with fewer fundamentals. See [Configuration](configuration.md#screener-universe).
 
 ## Analyze
 
@@ -40,7 +40,7 @@ A finished single-company memo offers **Monitor this thesis**. It starts a new a
 
 ## Analyst Grids
 
-A grid puts companies in rows and metrics or a research question in columns. Pick a universe: manual tickers, a saved screen, a watchlist, a portfolio, or one company's peers. Then pick columns. The numerical columns (revenue, diluted EPS, cash flow, net income, balance sheet, and ratios) come from the financial engine. A cell it cannot fully verify shows a dash, and one it refuses shows **error**. Market cap always shows a dash for now. A **Question** column has a model read each company's documents and answer one question.
+A grid puts companies in rows and metrics or a research question in columns. Pick a universe: manual tickers, a saved screen, a watchlist, a portfolio, or one company's peers. Then pick columns. The numerical columns (revenue, diluted EPS, cash flow, net income, balance sheet, and ratios) come from the financial engine. A cell it cannot fully verify shows a dash, and one it refuses shows **error**. Market cap and P/E are valued at the run's cutoff. A **Question** column has a model read each company's documents and answer one question.
 
 ## Agents
 

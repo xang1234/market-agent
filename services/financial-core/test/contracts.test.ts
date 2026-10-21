@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import planSchema from "../../../spec/financial_plan_schema.json" with { type: "json" };
 import resultSchema from "../../../spec/financial_result_schema.json" with { type: "json" };
@@ -8,6 +9,7 @@ import {
   FISCAL_PERIODS,
   GAP_DISPOSITIONS,
   OPERATION_KINDS,
+  PARENT_KINDS,
   PUBLICATION_UNIT_KINDS,
   REASON_CODES,
   REPORTING_BASES,
@@ -329,6 +331,8 @@ test("schema enums agree with TypeScript discriminated unions", () => {
   assert.deepEqual(enumAt(plan, "ReportingBasis"), [...REPORTING_BASES]);
   assert.deepEqual(enumAt(plan, "FiscalPeriod"), [...FISCAL_PERIODS]);
   assert.deepEqual(enumAt(plan, "Surface"), [...SURFACES]);
+  assert.deepEqual(enumAt(plan, "FinancialRuntimeAuthorityV1", "properties", "egress_channel"), [...SURFACES, "api"]);
+  assert.deepEqual(enumAt(plan, "FinancialRuntimeAuthorityV1", "properties", "parent", "properties", "kind"), [...PARENT_KINDS]);
   assert.deepEqual(enumAt(plan, "PublicationUnit", "properties", "kind"), [...PUBLICATION_UNIT_KINDS]);
   assert.deepEqual(
     enumAt(plan, "FinancialRuntimeAuthorityV1", "properties", "feature", "properties", "mode"),
@@ -339,4 +343,15 @@ test("schema enums agree with TypeScript discriminated unions", () => {
   assert.deepEqual([...units].sort(), [...UNIT_KINDS].sort());
   assert.deepEqual(enumAt(result, "GapDisposition"), [...GAP_DISPOSITIONS]);
   assert.deepEqual(enumAt(result, "ReasonCode"), [...REASON_CODES]);
+});
+
+test("the database admits exactly the engine's parent kinds and publication unit kinds", async () => {
+  const schema = await readFile(new URL("../../../spec/finance_research_db_schema.sql", import.meta.url), "utf8");
+  const admitted = (column: string) => {
+    const list = new RegExp(`${column} text not null check \\(${column} in \\(([^)]*)\\)\\)`, "u").exec(schema)?.[1];
+    assert.ok(list, `the schema declares ${column}'s check`);
+    return list.split(",").map((value) => value.trim().replace(/^'|'$/gu, ""));
+  };
+  assert.deepEqual(admitted("parent_kind"), [...PARENT_KINDS]);
+  assert.deepEqual(admitted("unit_kind"), [...PUBLICATION_UNIT_KINDS]);
 });

@@ -9,17 +9,17 @@ import {
   loadRecentIssuerFundamentals,
   type IssuerFundamentalFact,
 } from "../../fundamentals/src/issuer-fundamentals-reader.ts";
+import { lastRegularSessionDate } from "../../market/src/ytd-window.ts";
 
-// The six annual reported metrics the screener derives ratios from. This is the
-// single source of truth: it bounds the reader query and shapes the empty fact
-// buckets (see emptyFacts).
+// The four annual reported metrics the screener derives margins and growth
+// from. This is the single source of truth: it bounds the reader query and
+// shapes the empty fact buckets (see emptyFacts). Market cap and P/E are
+// certified engine figures instead (loadCertifiedValuations).
 const SCREENER_FUNDAMENTAL_METRICS = [
   "revenue",
   "gross_profit",
   "operating_income",
   "net_income",
-  "eps_diluted",
-  "weighted_average_diluted_shares",
 ] as const;
 
 export type ScreenerCandidateQueryExecutor = {
@@ -94,6 +94,7 @@ export async function loadPostgresScreenerCandidates(
       order by l.ticker, l.mic, l.listing_id`,
     [now.toISOString()],
   );
+  const certified = await loadCertifiedValuations(db, rows.rows.map((row) => row.issuer_id), now);
 
   const candidates: ScreenerCandidate[] = [];
   for (const row of rows.rows) {
@@ -120,8 +121,7 @@ export async function loadPostgresScreenerCandidates(
     const grossProfit = latest.gross_profit;
     const operatingIncome = latest.operating_income;
     const netIncome = latest.net_income;
-    const epsDiluted = latest.eps_diluted;
-    const dilutedShares = latest.weighted_average_diluted_shares;
+    const valuation = certified.get(row.issuer_id);
     const insiderNetShares90d = await loadInsiderNetShares90d(db, row.issuer_id, now);
 
     candidates.push({
@@ -138,8 +138,10 @@ export async function loadPostgresScreenerCandidates(
         as_of: isoString(row.as_of),
       },
       fundamentals: {
-        market_cap: dilutedShares === null ? null : dilutedShares * price,
-        pe_ratio: epsDiluted === null || epsDiluted === 0 ? null : price / epsDiluted,
+        // The issuer's certified figures, so every listing of it shows the same ones (#444).
+        market_cap: valuation?.market_cap ?? null,
+        market_cap_currency: valuation?.market_cap_currency ?? null,
+        pe_ratio: valuation?.pe_ratio ?? null,
         gross_margin: ratio(grossProfit, revenue),
         operating_margin: ratio(operatingIncome, revenue),
         net_margin: ratio(netIncome, revenue),
@@ -160,6 +162,55 @@ export async function loadPostgresScreenerCandidates(
   }
 
   return Object.freeze(candidates);
+}
+
+type CertifiedValuation = { market_cap: number | null; market_cap_currency: string | null; pe_ratio: number | null };
+
+/**
+ * Each issuer's certified market cap and P/E, as the certification batch wrote
+ * them (services/dev-api/src/screener-certification.ts), in one query. A figure
+ * counts while it certifies the last regular session closed by `now`, in the
+ * zone of the listing it was priced on. An older one reads as absent, so the
+ * screener shows no value rather than a stale one until the batch runs again.
+ */
+async function loadCertifiedValuations(
+  db: ScreenerCandidateQueryExecutor,
+  issuerIds: ReadonlyArray<string>,
+  now: Date,
+): Promise<Map<string, CertifiedValuation>> {
+  const { rows } = await db.query<{
+    issuer_id: string;
+    valuation: "market_cap" | "pe_ratio";
+    value: string;
+    currency: string | null;
+    session_date: string;
+    timezone: string;
+  }>(
+    `select v.issuer_id::text as issuer_id, v.valuation, v.value::text as value, v.currency,
+            v.session_date::text as session_date, l.timezone
+       from screener_certified_valuations v
+       join listings l on l.listing_id = v.listing_id
+      where v.issuer_id = any($1::uuid[]) and v.value is not null`,
+    [issuerIds],
+  );
+  const floors = new Map<string, string>();
+  const floor = (timezone: string) => {
+    if (!floors.has(timezone)) floors.set(timezone, lastRegularSessionDate(now.toISOString(), timezone));
+    return floors.get(timezone)!;
+  };
+  const valuations = new Map<string, CertifiedValuation>();
+  for (const row of rows) {
+    if (row.session_date < floor(row.timezone)) continue;
+    const valuation = valuations.get(row.issuer_id) ?? { market_cap: null, market_cap_currency: null, pe_ratio: null };
+    if (row.valuation === "market_cap") {
+      valuation.market_cap = Number(row.value);
+      valuation.market_cap_currency = row.currency;
+    } else {
+      valuation.pe_ratio = Number(row.value);
+    }
+    valuations.set(row.issuer_id, valuation);
+  }
+  return valuations;
 }
 
 // Net shares acquired by insiders over the trailing 90 days (acquired minus

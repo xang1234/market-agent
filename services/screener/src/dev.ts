@@ -14,7 +14,8 @@ if (!databaseUrl) {
 
 const pool = new Pool({ connectionString: databaseUrl });
 // 'vendor' serves the bulk screener-artifacts universe (set-based, quote-optional);
-// 'reported' (default) keeps the SEC-reported margins/PE path. Validate up front so
+// 'reported' (default) keeps SEC-reported margins and certified market cap and
+// P/E. Validate up front so
 // a typo'd value fails loudly instead of silently falling back to reported.
 const candidateSource = (process.env.SCREENER_CANDIDATE_SOURCE ?? "reported").trim().toLowerCase();
 if (candidateSource !== "reported" && candidateSource !== "vendor") {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { screenerSummary } from './screenerSummary.ts'
+import { marketCapCurrencyOf, screenerSummary } from './screenerSummary.ts'
 import type { ScreenerResultRow } from './contracts.ts'
 
 // median + numericDistribution behaviour is covered by symbol/distribution.test.ts.
@@ -9,6 +9,7 @@ import type { ScreenerResultRow } from './contracts.ts'
 function row(over: {
   pe?: number | null
   cap?: number | null
+  capCurrency?: string | null
   change?: number | null
   currency?: string
 }): ScreenerResultRow {
@@ -27,6 +28,7 @@ function row(over: {
     },
     fundamentals: {
       market_cap: over.cap ?? null,
+      market_cap_currency: over.capCurrency,
       pe_ratio: over.pe ?? null,
       gross_margin: null,
       operating_margin: null,
@@ -66,6 +68,15 @@ test('screenerSummary withholds median cap when cap rows span multiple currencie
   ])
   assert.equal(s.medianMarketCap, null)
   assert.equal(s.marketCapCurrency, null)
+})
+
+test('a market cap is labelled by the currency it was priced in, not by a secondary listing’s quote', () => {
+  const frankfurt = row({ cap: 100e9, capCurrency: 'USD', currency: 'EUR' })
+  assert.equal(marketCapCurrencyOf(frankfurt), 'USD')
+  assert.equal(marketCapCurrencyOf(row({ cap: 100e9, currency: 'EUR' })), 'EUR', 'a row that states none keeps its quote’s')
+  const s = screenerSummary([frankfurt, row({ cap: 300e9, capCurrency: 'USD', currency: 'USD' })])
+  assert.equal(s.medianMarketCap, 200e9)
+  assert.equal(s.marketCapCurrency, 'USD')
 })
 
 test('screenerSummary keeps median cap for a single-currency set', () => {

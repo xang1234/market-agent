@@ -16,6 +16,7 @@ import type { SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { requireFinancialReadiness } from "../../financial-engine/src/readiness.ts";
 import type { ParentRecovery } from "../../financial-engine/src/recovery.ts";
 import type { FinancialWorker } from "../../financial-engine/src/worker.ts";
+import { screenerUniverseRecovery } from "./screener-certification.ts";
 
 export type DevApiRuntimeEnv = FinancialWorkerEnv & FinancialEnv & {
   MA_DEV_API_FIXTURE_ADAPTER?: string;
@@ -92,7 +93,11 @@ export async function createDevApiRuntimeFromEnv(
 
 /** Parents whose verified units are resumable after a restart. Discovery-owned runs are never resumed here, only under the Discovery worker's fence. */
 export function recoveryParents(db: SqlExecutor): Readonly<Record<string, ParentRecovery>> {
-  return { analyze_memo_run: analyzeFinancialRecovery(db), analyst_grid_run: gridFinancialRecovery(db) };
+  return {
+    analyze_memo_run: analyzeFinancialRecovery(db),
+    analyst_grid_run: gridFinancialRecovery(db),
+    screener_valuation_run: screenerUniverseRecovery(db),
+  };
 }
 
 function moduleSpecifier(specifier: string, cwd: string): string {

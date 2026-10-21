@@ -378,7 +378,7 @@
       "required": ["unit_id", "kind"],
       "properties": {
         "unit_id": { "$ref": "#/$defs/LocalId" },
-        "kind": { "enum": ["chat_section", "analyze_section", "grid_cell", "thesis_condition", "discovery_assessment"] }
+        "kind": { "enum": ["chat_section", "analyze_section", "grid_cell", "thesis_condition", "discovery_assessment", "screener_valuation"] }
       }
     },
     "Threshold": {
@@ -486,7 +486,7 @@
       }
     },
     "Surface": {
-      "enum": ["chat", "analyze", "analyst_grid", "thesis", "discovery"]
+      "enum": ["chat", "analyze", "analyst_grid", "thesis", "discovery", "screener"]
     },
     "FinancialRuntimeAuthorityV1": {
       "description": "Server-owned authority. Constructed only by trusted server code, never parsed from model output.",
@@ -495,13 +495,13 @@
       "required": ["owner_user_id", "egress_channel", "parent", "allowed_source_classes", "feature", "approval_state", "lease"],
       "properties": {
         "owner_user_id": { "$ref": "#/$defs/UUID" },
-        "egress_channel": { "enum": ["chat", "analyze", "analyst_grid", "thesis", "discovery", "api"] },
+        "egress_channel": { "enum": ["chat", "analyze", "analyst_grid", "thesis", "discovery", "screener", "api"] },
         "parent": {
           "type": "object",
           "additionalProperties": false,
           "required": ["kind", "id", "version"],
           "properties": {
-            "kind": { "enum": ["chat_thread", "analyze_memo_run", "analyst_grid_run", "thesis_version", "discovery_run"] },
+            "kind": { "enum": ["chat_thread", "analyze_memo_run", "analyst_grid_run", "thesis_version", "discovery_run", "screener_valuation_run"] },
             "id": { "$ref": "#/$defs/UUID" },
             "version": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9:._-]+$" }
           }

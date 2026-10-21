@@ -47,6 +47,7 @@ function fundamentalsSummary(
 ): ScreenerFundamentalsSummary {
   return {
     market_cap: 2_900_000_000_000,
+    market_cap_currency: null,
     pe_ratio: 28.4,
     gross_margin: 0.45,
     operating_margin: 0.30,

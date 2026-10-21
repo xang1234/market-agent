@@ -1443,7 +1443,7 @@ for each row execute function prevent_financial_record_update();
 create table financial_runs (
   run_id uuid primary key default gen_random_uuid(),
   user_id uuid not null references users(user_id) on delete cascade,
-  parent_kind text not null check (parent_kind in ('chat_thread', 'analyze_memo_run', 'analyst_grid_run', 'thesis_version', 'discovery_run')),
+  parent_kind text not null check (parent_kind in ('chat_thread', 'analyze_memo_run', 'analyst_grid_run', 'thesis_version', 'discovery_run', 'screener_valuation_run')),
   parent_id uuid not null,
   parent_version text not null check (length(btrim(parent_version)) > 0),
   request_key text not null check (length(request_key) between 1 and 200),
@@ -1508,7 +1508,7 @@ for each row execute function guard_financial_run_update();
 create table financial_run_units (
   run_id uuid not null references financial_runs(run_id) on delete cascade,
   unit_id text not null check (unit_id ~ '^[a-z][a-z0-9_]{0,63}$'),
-  unit_kind text not null check (unit_kind in ('chat_section', 'analyze_section', 'grid_cell', 'thesis_condition', 'discovery_assessment')),
+  unit_kind text not null check (unit_kind in ('chat_section', 'analyze_section', 'grid_cell', 'thesis_condition', 'discovery_assessment', 'screener_valuation')),
   output_ids jsonb not null check (jsonb_typeof(output_ids) = 'array' and jsonb_array_length(output_ids) > 0),
   closure_node_ids jsonb not null check (jsonb_typeof(closure_node_ids) = 'array' and jsonb_array_length(closure_node_ids) > 0),
   closure_hash text not null check (closure_hash ~ '^[0-9a-f]{64}$'),
@@ -1900,6 +1900,59 @@ for each row execute function erase_financial_runs_referencing($$run_id in (sele
 create trigger source_publication_attestations_erase_financial_runs
 before delete on source_publication_attestations
 for each row execute function erase_financial_runs_referencing($$run_id in (select run_id from financial_run_inputs where publication_attestation_id = $1)$$, 'attestation_id');
+
+-- The screener's market cap and P/E (0071, #444). A batch certifies the
+-- screener universe in runs of at most 25 issuers, each under its own
+-- screener_valuation_runs row. One service user owns every such run:
+-- financial_runs.user_id is required, and these runs belong to no person.
+insert into users (user_id, email, display_name)
+values ('00000000-0000-4000-8000-0000000005ee', 'screener-certification@system.invalid', 'Screener certification')
+on conflict (user_id) do nothing;
+
+-- One certification run: its cutoff, and the issuer each plan row values. A
+-- unit id cannot hold a UUID, so a sealed figure finds its issuer here.
+-- Deleting the row erases its financial run.
+create table screener_valuation_runs (
+  screener_valuation_run_id uuid primary key default gen_random_uuid(),
+  as_of timestamptz not null,
+  -- [{"row": 0, "issuer_id": "...", "listing_id": "..." or null, "timezone": "America/New_York"}]
+  subjects jsonb not null check (jsonb_typeof(subjects) = 'array' and jsonb_array_length(subjects) between 1 and 25),
+  created_at timestamptz not null default now()
+);
+create index screener_valuation_runs_as_of_idx on screener_valuation_runs(as_of);
+create trigger screener_valuation_runs_erase_financial_runs
+after delete on screener_valuation_runs
+for each row execute function erase_financial_runs_referencing($$parent_kind = 'screener_valuation_run' and parent_id = $1$$, 'screener_valuation_run_id');
+
+-- An issuer's latest certified market cap or P/E, or the gap the engine
+-- sealed instead, written by the finalization transaction that seals it.
+-- A refresh replaces the row, never with an older cutoff, and never a value
+-- with a gap in the value's own session. The row goes with its certificate,
+-- so erased evidence takes the value with it.
+create table screener_certified_valuations (
+  issuer_id uuid not null references issuers(issuer_id) on delete cascade,
+  valuation text not null check (valuation in ('market_cap', 'pe_ratio')),
+  knowledge_cutoff timestamptz not null,
+  -- The last regular session the cutoff had closed, in the listing's zone.
+  -- The screener shows the value until a later session closes.
+  session_date date not null,
+  value numeric,
+  -- The price's currency; a P/E has none.
+  currency text check (currency ~ '^[A-Z]{3}$'),
+  reason_code text,
+  -- The one active common-stock listing the figure is priced on; null when
+  -- the issuer had several.
+  listing_id uuid references listings(listing_id) on delete cascade,
+  snapshot_id uuid not null,
+  financial_run_id uuid not null,
+  financial_unit_id text not null,
+  primary key (issuer_id, valuation),
+  unique (financial_run_id, financial_unit_id),
+  constraint screener_certified_valuations_value check ((value is null) <> (reason_code is null)),
+  constraint screener_certified_valuations_currency check ((currency is not null) = (valuation = 'market_cap' and value is not null)),
+  constraint screener_certified_valuations_market_cap check (valuation <> 'market_cap' or value >= 0),
+  foreign key (snapshot_id, financial_run_id, financial_unit_id) references snapshot_financial_runs(snapshot_id, run_id, unit_id) on delete cascade
+);
 
 -- A business or geographic segment of an issuer: the subject of segment facts
 -- (subject_kind = 'segment', subject_id = segment_id), so consolidated readers
