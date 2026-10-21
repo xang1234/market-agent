@@ -254,8 +254,8 @@ const FACT_COLUMNS = `fact_id,
                subject_id,
                metric_id,
                period_kind,
-               period_start,
-               period_end,
+               period_start::text as period_start,
+               period_end::text as period_end,
                fiscal_year,
                fiscal_period,
                value_num,
@@ -938,8 +938,8 @@ function assertFactIdentityMatches(existing: FactRow, input: NormalizedFactInput
     existing.subject_id === input.subject_id &&
     existing.metric_id === input.metric_id &&
     existing.period_kind === input.period_kind &&
-    sameNullableText(existing.period_start, input.period_start) &&
-    sameNullableText(existing.period_end, input.period_end) &&
+    existing.period_start === input.period_start &&
+    existing.period_end === input.period_end &&
     existing.fiscal_year === input.fiscal_year &&
     existing.fiscal_period === input.fiscal_period &&
     existing.unit === input.unit &&
@@ -991,16 +991,6 @@ function reviewProvenanceFlag(input: {
     reviewer_id: input.reviewer_id,
     reviewed_at: input.reviewed_at,
   });
-}
-
-function sameNullableText(left: string | Date | null, right: string | null): boolean {
-  return nullableIsoDateText(left) === right;
-}
-
-function nullableIsoDateText(value: string | Date | null): string | null {
-  if (value == null) return null;
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
-  return value;
 }
 
 function normalizeFactInput(input: FactInput): NormalizedFactInput {
