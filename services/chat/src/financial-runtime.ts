@@ -101,7 +101,7 @@ export type ChatFinancialRuntimeDeps = Readonly<{
   /** The companies the thread's previous answer covered, for a question that names none. */
   priorSubjects?: (threadId: string) => Promise<ReadonlyArray<ChatResolvedSubjectPreResolution>>;
   evidence: (executor: SqlExecutor) => FinancialEvidencePort;
-  /** What a model reads the question to ask for (scope-proposal.ts); null or absent, no ask is named as uncovered. */
+  /** What a model reads the question to ask for (scope-proposal.ts); null or absent, the answer says its coverage was not checked. */
   readQuestion?: (question: string) => Promise<ScopeProposal | null>;
   /** The turn's research scope, saved with a published answer (#206); absent, none is saved. */
   researchScope?: (context: ChatFinancialTurnContext, reading: Promise<ScopeProposal | null>) => Promise<ResearchScope>;
@@ -161,14 +161,14 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     // holds it by now, so the turn's companies are not picked again. Before
     // the answer is saved the thread is as the first attempt found it. A gap
     // the turn declined with is returned as saved, with nothing planned again.
-    const { rows: [saved] } = await deps.pool.query<{ kind: string | null }>(
+    const { rows: [existing] } = await deps.pool.query<{ kind: string | null }>(
       `select blocks->0->>'kind' as kind from chat_messages where message_id = $1::uuid`,
       [messageId],
     );
-    if (saved && saved.kind !== "financial_answer") {
+    if (existing && existing.kind !== "financial_answer") {
       return { kind: "saved", message_id: messageId, message: await readChatMessage(deps.pool, { thread_id: context.threadId, message_id: messageId }) };
     }
-    const answered = saved !== undefined;
+    const answered = existing !== undefined;
     const requested = answered ? ANSWERED : await requestedSubjects(deps, context, text);
     if (requested.clarify) return { kind: "clarification", clarification: companyQuestion(requested.clarify) };
     if (!answered && requested.subjects.length === 0) return gap("no_company");
@@ -184,10 +184,10 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     const settleReading = (read: boolean) => {
       if (settled) return;
       settled = true;
-      settle(!read ? null : (deps.readQuestion?.(text) ?? Promise.resolve(null)).catch((reason) => {
+      settle(read ? (deps.readQuestion?.(text) ?? Promise.resolve(null)).catch((reason) => {
         console.warn("[chat] no reading of the question; the financial answer says its coverage was not checked", reason);
         return null;
-      }));
+      }) : null);
     };
     const planningModel: PlanningModel | null = deps.planningModel && ((request) => {
       settleReading(true);
@@ -686,8 +686,7 @@ const figureKey = (node: OperationNode) => node.operation === "reported_metric" 
 
 // The figures a node shows: a change, sum, ratio, threshold or ranking is of
 // the figures it reads.
-function figuresOf(plan: FinancialPlanV1): (node: OperationNode) => OperationNode[] {
-  const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
+function figuresOf(nodes: ReadonlyMap<string, OperationNode>): (node: OperationNode) => OperationNode[] {
   const figures = (node: OperationNode): OperationNode[] =>
     Object.hasOwn(SCOPE_METRICS, figureKey(node)) ? [node] : operationDependencies(node).flatMap((id) => figures(nodes.get(id)!));
   return figures;
@@ -695,8 +694,9 @@ function figuresOf(plan: FinancialPlanV1): (node: OperationNode) => OperationNod
 
 // The figures a plan's outputs show.
 function shownFigures(plan: FinancialPlanV1): OperationNode[] {
-  const figures = figuresOf(plan);
-  return plan.outputs.flatMap((output) => figures(plan.operations.find((node) => node.node_id === output.node_id)!));
+  const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
+  const figures = figuresOf(nodes);
+  return plan.outputs.flatMap((output) => figures(nodes.get(output.node_id)!));
 }
 
 // The figures a plan shows, as the chat scope names them.
@@ -733,7 +733,7 @@ const INCOME_ITEM_FIGURE: Readonly<Record<IncomeItem, string | null>> = {
 export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1, labels: ReadonlyMap<string, string> = new Map()): string[] {
   const { asks, offMetrics } = readingAsks(reading);
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
-  const figures = figuresOf(plan);
+  const figures = figuresOf(nodes);
   // A figure's period and company are those of its reported inputs.
   const input = (node: OperationNode) => nodes.get(operationDependencies(node)[0]!)!;
   const periodOf = (node: OperationNode): string => node.operation === "reported_metric" ? JSON.stringify(node.period) : periodOf(input(node));
@@ -782,8 +782,8 @@ export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1, lab
   // In the order the question asks for them (all missing from no figures).
   const perCompany = missing([], []).flatMap((ask) => {
     const lacking = companies.filter((company) => company.missing.includes(ask));
-    const labelled = lacking.flatMap((company) => company.label ?? []);
     if (lacking.length === 0) return [];
+    const labelled = lacking.flatMap((company) => company.label ?? []);
     return [lacking.length < companies.length && labelled.length === lacking.length ? `${ask} for ${labelList(labelled)}` : ask];
   });
   return [...perCompany, ...Object.entries(NEVER_PLANNED).flatMap(([facet, item]) => asks.has(facet as ScopeFacet) ? [item] : [])];
@@ -808,7 +808,7 @@ async function published(db: SqlExecutor, runId: string, threadId: string, messa
 // What an unsupported request asks for, by the planner's reason (its closed
 // list) or the cash-resilience view's; any other reason gets the plain text,
 // so no model-written words reach the gap.
-const UNSUPPORTED_REASONS: Readonly<Record<Exclude<UnsupportedReason, "other"> | typeof CASH_RESILIENCE_VIEW, string>> = {
+const REASON_TEXT: Readonly<Record<Exclude<UnsupportedReason, "other"> | typeof CASH_RESILIENCE_VIEW, string>> = {
   segments: "revenue or results by business segment",
   forecast: "guidance, estimates or forecasts",
   adjusted: "adjusted or non-GAAP figures",
@@ -817,8 +817,8 @@ const UNSUPPORTED_REASONS: Readonly<Record<Exclude<UnsupportedReason, "other"> |
 };
 
 function gap(reason_code: ChatGap, planned?: PlanningResult): Extract<ChatFinancialTurn, { kind: "gap" }> {
-  const reason = reason_code === "unsupported" && planned?.outcome === "unsupported" && Object.hasOwn(UNSUPPORTED_REASONS, planned.reason)
-    ? UNSUPPORTED_REASONS[planned.reason as keyof typeof UNSUPPORTED_REASONS]
+  const reason = reason_code === "unsupported" && planned?.outcome === "unsupported" && Object.hasOwn(REASON_TEXT, planned.reason)
+    ? REASON_TEXT[planned.reason as keyof typeof REASON_TEXT]
     : null;
   return { kind: "gap", reason_code, text: reason === null ? GAP_TEXT[reason_code] : `${UNSUPPORTED}: ${reason}.` };
 }

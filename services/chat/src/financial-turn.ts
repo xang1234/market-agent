@@ -5,13 +5,13 @@
 // committed, and its turn.completed carries that committed message. Clarifications
 // and gaps are ordinary narrative messages with no numbers.
 
+import { randomUUID } from "node:crypto";
+
 import type {
   ChatAssistantMessageCommit,
   ChatTurnRunContext,
   ChatTurnRunner,
 } from "./coordinator.ts";
-import { randomUUID } from "node:crypto";
-
 import { contentHashForText, stableUuid } from "./chat-ids.ts";
 import { blockHeads, sealedCompletion } from "./messages.ts";
 import type { ChatFinancialRuntime, ChatFinancialTurn, ChatFinancialTurnContext } from "./financial-runtime.ts";
