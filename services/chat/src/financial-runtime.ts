@@ -631,6 +631,8 @@ function persistAssistantMessage(
       ],
     );
     if (inserted.rows.length === 0) throw new ParentRefusedError("the chat thread no longer belongs to the run's owner");
+    // As any saved message does, so the thread never points at a replaced gap's snapshot.
+    await tx.client.query(`update chat_threads set latest_snapshot_id = $2::uuid, updated_at = now() where thread_id = $1::uuid`, [threadId, publication.snapshot_id]);
   };
 }
 
