@@ -117,6 +117,7 @@ function boundInput(slot: string, factId: string, metric: string, value: string)
     eligibility: { selection_policy_version: "public-information-selection.v1", promotion_status: "authoritative", candidate_set_digest: F.digest },
   });
   assert.ok(validated.ok, JSON.stringify(!validated.ok && validated.issues));
+  assert.ok(validated.value.schema_version === "financial_bound_input.v1");
   return validated.value;
 }
 

@@ -211,13 +211,16 @@ function priceOperand(input: BoundPriceInputV1, node: ReportedMetricNode, defini
   if (tokenValue === null || !sameRational(tokenValue, value)) {
     throw new FinancialIntegrityError("token_value_mismatch", `source token for ${node.node_id} does not equal the bound value`);
   }
+  const observedAt = Date.parse(input.observed_at);
+  if (!(observedAt <= Date.parse(input.known_at) && Date.parse(input.known_at) <= Date.parse(expected.knowledge_cutoff))) {
+    throw new FinancialIntegrityError("price_not_known_at_cutoff", `price bound to ${node.node_id} was not known between its trade and the knowledge cutoff`);
+  }
   const adjustment = input.split_adjustment;
   const restated = checkSplitAdjustment(adjustment, value, definition.value_kind, expected.knowledge_cutoff);
   if (!restated.ok) {
     throw new FinancialIntegrityError(restated.code, `split adjustment of ${node.node_id} does not restate its value to its listing's reference date`);
   }
-  const observedAt = Date.parse(input.observed_at);
-  if (adjustment.listing_id !== input.listing_id || Number.isNaN(observedAt) || adjustment.as_filed_on !== localDateOf(observedAt, adjustment.listing_timezone)) {
+  if (adjustment.listing_id !== input.listing_id || adjustment.as_filed_on !== localDateOf(observedAt, adjustment.listing_timezone)) {
     throw new FinancialIntegrityError("split_anchor_mismatch", `split adjustment of ${node.node_id} is not anchored at its trade date on its listing`);
   }
   return success({
