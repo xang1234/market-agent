@@ -10,6 +10,8 @@ export type ChatRuntimeEnv = {
 
 export async function loadChatServerOptionsFromEnv(
   env: ChatRuntimeEnv = process.env,
+  // The in-repo runtime; a test gives its own to check the wiring without a database.
+  loadRuntime: () => Promise<typeof import("./local-runtime.ts")> = () => import("./local-runtime.ts"),
 ): Promise<ChatServerOptions> {
   // Validated even when unset; only a non-default mode is passed on (the coordinator defaults to strict).
   const verificationMode = readChatVerificationMode(env);
@@ -18,7 +20,7 @@ export async function loadChatServerOptionsFromEnv(
     return options;
   }
 
-  const runtime = await import("./local-runtime.ts");
+  const runtime = await loadRuntime();
   await runtime.financialRuntime.assertReady();
   return {
     ...options,
