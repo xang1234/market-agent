@@ -60,7 +60,6 @@ export async function checkFinancialReadiness(db: SqlExecutor, registry: Financi
   return { ready: problems.length === 0, problems };
 }
 
-/** Refuses to start the named surfaces (those on the engine, or a recovery worker) unless verified finance is ready. */
 export async function requireFinancialReadiness(
   db: SqlExecutor,
   active: readonly [string, ...string[]],
@@ -74,7 +73,6 @@ export async function requireFinancialReadiness(
 
 export type RemovedModeFlag = "CHAT_FINANCIAL_MODE" | "ANALYZE_FINANCIAL_MODE" | "GRID_FINANCIAL_MODE" | "THESIS_FINANCIAL_MODE";
 
-/** One startup warning per removed mode flag a service used to read that is still set, so an old `off` is never silently ignored. */
 export function removedModeFlagWarnings(env: Readonly<Record<string, string | undefined>>, flags: ReadonlyArray<RemovedModeFlag>): string[] {
   return flags.filter((flag) => env[flag] !== undefined).map((flag) => `${flag} is set but no longer read: the financial engine is always on`);
 }

@@ -29,7 +29,7 @@ import {
   type ThresholdAttribution,
   type ValidationIssue,
 } from "../../financial-core/src/index.ts";
-import { authorizePlan } from "./plan-authority.ts";
+import { checkPlanLimits } from "./plan-limits.ts";
 import { interpretPlan } from "./plan-interpretation.ts";
 import { isRecord } from "../../shared/src/http.ts";
 
@@ -323,9 +323,9 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
   if (!drafted.ok) return { ok: false, kind: "invalid", issues: drafted.issues };
   const validated = validateFinancialPlan({ ...plan, outputs: withFreeCashFlowInputs(drafted.value) });
   if (!validated.ok) return { ok: false, kind: "invalid", issues: validated.issues };
-  const authorized = authorizePlan(validated.value, context.parent_limits);
-  if (!authorized.ok) {
-    return { ok: false, kind: "unsupported", reason: authorized.issues.map((issue) => issue.code).join(", "), issues: authorized.issues };
+  const withinLimits = checkPlanLimits(validated.value, context.parent_limits);
+  if (!withinLimits.ok) {
+    return { ok: false, kind: "unsupported", reason: withinLimits.issues.map((issue) => issue.code).join(", "), issues: withinLimits.issues };
   }
   const labels = new Map(members.map((member) => [member.slot_id, resolved.find((entry) => entry.ref.id === member.subject_ref.id)!.label]));
   const withInterpretation = validateFinancialPlan({ ...validated.value, interpretation: interpretPlan(validated.value, labels) });
