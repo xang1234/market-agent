@@ -17,10 +17,6 @@ export type ListingSplit = Readonly<{
   provider_ref: string | null;
 }>;
 
-export type ListingSplitHistory =
-  | Readonly<{ checked_at: null }>
-  | Readonly<{ checked_at: string; source_id: UUID; splits: ReadonlyArray<ListingSplit> }>;
-
 export type SplitSyncListing = Readonly<{ listing_id: UUID; ticker: string }>;
 
 export type SplitSyncExecutor = ListingQueryExecutor & {
@@ -93,35 +89,4 @@ async function replaceListingSplits(
       splits.map((split) => split.provider_ref),
     ],
   );
-}
-
-type HistoryRow = {
-  checked_at: Date;
-  source_id: string;
-  execution_date: string | null;
-  split_from: number;
-  split_to: number;
-  provider_ref: string | null;
-};
-
-export async function loadListingSplits(db: ListingQueryExecutor, listingId: UUID): Promise<ListingSplitHistory> {
-  const { rows } = await db.query<HistoryRow>(
-    `select c.checked_at, c.source_id::text as source_id, s.execution_date::text as execution_date,
-            s.split_from::float8 as split_from, s.split_to::float8 as split_to, s.provider_ref
-       from listing_split_coverage c
-       left join listing_splits s on s.listing_id = c.listing_id
-      where c.listing_id = $1::uuid
-      order by s.execution_date`,
-    [listingId],
-  );
-  if (rows.length === 0) return Object.freeze({ checked_at: null });
-  return Object.freeze({
-    checked_at: rows[0].checked_at.toISOString(),
-    source_id: rows[0].source_id,
-    splits: Object.freeze(
-      rows.flatMap(({ execution_date, split_from, split_to, provider_ref }) =>
-        execution_date === null ? [] : [Object.freeze({ execution_date, split_from, split_to, provider_ref })],
-      ),
-    ),
-  });
 }

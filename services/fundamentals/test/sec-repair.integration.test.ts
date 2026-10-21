@@ -72,19 +72,20 @@ test("the backfill replaces an income fact the old selector got wrong, keeping h
     logger: { warn: () => {} },
   });
   await backfill();
-  const contexts = async () => (await db.query<{ metric_key: string; disclosure_relation: string }>(
-    `select m.metric_key, c.disclosure_relation
+  const contexts = async () => (await db.query(
+    `select m.metric_key, c.disclosure_relation, c.adjustment_basis, c.as_filed_on::text as as_filed_on, c.share_basis
        from fact_financial_contexts c join facts f on f.fact_id = c.fact_id join metrics m on m.metric_id = f.metric_id
       where f.subject_id = $1 and f.invalidated_at is null order by m.metric_key`,
     [ISSUER_ID],
   )).rows;
-  // A split before the filing restates per-share values, and companyfacts cannot tell: EPS stays a gap.
+  // EPS is on the split basis of the 10-K's filing date.
   assert.deepEqual(await contexts(), [
-    { metric_key: "net_income", disclosure_relation: "original" },
-    { metric_key: "revenue", disclosure_relation: "original" },
+    { metric_key: "eps_diluted", disclosure_relation: "original", adjustment_basis: "as_filed", as_filed_on: "2024-11-01", share_basis: "diluted" },
+    { metric_key: "net_income", disclosure_relation: "original", adjustment_basis: "unadjusted", as_filed_on: null, share_basis: "not_applicable" },
+    { metric_key: "revenue", disclosure_relation: "original", adjustment_basis: "unadjusted", as_filed_on: null, share_basis: "not_applicable" },
   ]);
   await backfill();
-  assert.deepEqual((await contexts()).length, 2, "a second backfill records no context twice");
+  assert.deepEqual((await contexts()).length, 3, "a second backfill records no context twice");
 
   const revenue = await factOf("revenue");
   assert.equal(revenue.length, 2);

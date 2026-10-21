@@ -131,4 +131,26 @@ test("financial input candidates", { timeout: 180_000 }, async (t) => {
     assert.equal(restated.precision, null);
     assert.equal(restated.context, null);
   });
+
+  await t.test("an as-filed context carries its filing date, and no other context names one", async () => {
+    await recordFactFinancialContext(db, {
+      fact_id: IDS.fy2022,
+      context_version: "context.v1",
+      period_type: "duration",
+      dimension_scope: "consolidated",
+      dimension_members: [],
+      reporting_basis: "as_reported",
+      adjustment_basis: "as_filed",
+      as_filed_on: "2024-02-21",
+      share_basis: "diluted",
+      fiscal_calendar_version: "fiscal-calendar.v1",
+      disclosure_relation: "original",
+      source_context_ref: null,
+    });
+    const candidates = (await listFinancialInputCandidates(db, request())).candidates;
+    const asFiled = candidates.find((candidate) => candidate.fact_id === IDS.fy2022)!.context;
+    assert.deepEqual([asFiled?.adjustment_basis, asFiled?.as_filed_on, asFiled?.share_basis], ["as_filed", "2024-02-21", "diluted"]);
+    const unadjusted = candidates.find((candidate) => candidate.fact_id === IDS.original)!.context!;
+    assert.deepEqual([unadjusted.adjustment_basis, "as_filed_on" in unadjusted], ["unadjusted", false]);
+  });
 });

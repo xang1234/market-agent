@@ -36,7 +36,11 @@
         "provider_error",
         "database_error",
         "integrity_failure",
-        "replay_version_unavailable"
+        "replay_version_unavailable",
+        "split_listing_unresolved",
+        "split_history_missing",
+        "split_history_stale",
+        "restatement_unverified"
       ]
     },
     "GapDisposition": {
@@ -328,6 +332,7 @@
             "share_basis": { "enum": ["basic", "diluted", "not_applicable"] }
           }
         },
+        "split_adjustment": { "$ref": "#/$defs/SplitAdjustmentV2" },
         "publication": {
           "type": "object",
           "additionalProperties": false,
@@ -351,6 +356,44 @@
             "candidate_set_digest": { "$ref": "financial_plan_schema.json#/$defs/Sha256Hex" }
           }
         }
+      }
+    },
+    "ExactFraction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["numerator", "denominator"],
+      "properties": {
+        "numerator": { "$ref": "financial_plan_schema.json#/$defs/DecimalString" },
+        "denominator": { "$ref": "financial_plan_schema.json#/$defs/DecimalString" }
+      }
+    },
+    "SplitAdjustmentV2": {
+      "description": "An as-filed value restated to the split basis as of its listing's reference date, the plan's knowledge cutoff dated in the listing's time zone. The bound numeric stays the value as filed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "as_filed_on", "reference_date", "listing_id", "listing_timezone", "splits", "factor", "adjusted_native_value"],
+      "properties": {
+        "version": { "const": "split_adjustment.v2" },
+        "as_filed_on": { "$ref": "financial_plan_schema.json#/$defs/IsoDate" },
+        "reference_date": { "$ref": "financial_plan_schema.json#/$defs/IsoDate" },
+        "listing_id": { "$ref": "financial_plan_schema.json#/$defs/UUID" },
+        "listing_timezone": { "$ref": "financial_plan_schema.json#/$defs/TimeZoneName" },
+        "splits": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["execution_date", "split_from", "split_to"],
+            "properties": {
+              "execution_date": { "$ref": "financial_plan_schema.json#/$defs/IsoDate" },
+              "split_from": { "$ref": "financial_plan_schema.json#/$defs/DecimalString" },
+              "split_to": { "$ref": "financial_plan_schema.json#/$defs/DecimalString" }
+            }
+          }
+        },
+        "factor": { "$ref": "#/$defs/ExactFraction" },
+        "adjusted_native_value": { "$ref": "#/$defs/ExactFraction" }
       }
     }
   }

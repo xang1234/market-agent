@@ -136,7 +136,7 @@ function evidence(factId: string): LoadedEvidence {
       source_timezone: "America/New_York",
     },
     precision_current: true,
-    context: { period_type: "duration", dimension_scope: "consolidated", adjustment_basis: "unadjusted", share_basis: "not_applicable", fiscal_calendar_version: "fiscal-calendar.v1" },
+    context: { period_type: "duration", dimension_scope: "consolidated", adjustment_basis: "unadjusted", as_filed_on: null, share_basis: "not_applicable", fiscal_calendar_version: "fiscal-calendar.v1" },
   };
 }
 
@@ -192,6 +192,7 @@ export function validRecords(
       candidate_set_digest: F.digest,
     })),
     evidence: [evidence(F.revenueFact), evidence(F.grossProfitFact)],
+    split_histories: [],
     computations: publication.computations.map((computation) => ({
       computation_id: computationIds.get(computation.node_id)!,
       node_id: computation.node_id,

@@ -11,7 +11,10 @@ export type ProvenPrecisionClass = Exclude<PrecisionClass, "legacy_unverified">;
 export const PUBLICATION_TIMING_PRECISIONS = ["instant", "date", "observed_public"] as const;
 export type PublicationTimingPrecision = (typeof PUBLICATION_TIMING_PRECISIONS)[number];
 
-export const DISCLOSURE_RELATIONS = ["original", "economic_restatement", "extraction_correction"] as const;
+// A later filing's statement of an as-filed figure whose splits since the
+// original could not be checked when it was stored is an unverified
+// restatement: it may be a split recast or a real restatement.
+export const DISCLOSURE_RELATIONS = ["original", "economic_restatement", "extraction_correction", "unverified_restatement"] as const;
 export type DisclosureRelation = (typeof DISCLOSURE_RELATIONS)[number];
 
 export const PERIOD_TYPES = ["duration", "instant"] as const;
@@ -20,8 +23,15 @@ export type PeriodType = (typeof PERIOD_TYPES)[number];
 export const DIMENSION_SCOPES = ["consolidated", "segment"] as const;
 export type DimensionScope = (typeof DIMENSION_SCOPES)[number];
 
-export const ADJUSTMENT_BASES = ["unadjusted", "split_adjusted"] as const;
+// A filing restates its own per-share values and share counts for every split
+// before it was filed, so such a value is on the split basis of its filing date.
+export const ADJUSTMENT_BASES = ["unadjusted", "split_adjusted", "as_filed"] as const;
 export type AdjustmentBasis = (typeof ADJUSTMENT_BASES)[number];
+/** An as-filed value binds only once restated to the plan's reference date. */
+export type BoundAdjustmentBasis = Exclude<AdjustmentBasis, "as_filed">;
+export type AdjustmentContext =
+  | Readonly<{ adjustment_basis: BoundAdjustmentBasis; as_filed_on?: never }>
+  | Readonly<{ adjustment_basis: "as_filed"; as_filed_on: string }>;
 
 export const SHARE_BASES = ["basic", "diluted", "not_applicable"] as const;
 export type ShareBasis = (typeof SHARE_BASES)[number];

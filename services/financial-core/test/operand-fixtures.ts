@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import type { BoundFinancialInputV1, FinancialUnit, FiscalPeriod, SubjectSlot } from "../src/contracts.ts";
+import type { BoundFinancialInputV1, FinancialUnit, FiscalPeriod, SplitAdjustmentV2, SubjectSlot } from "../src/contracts.ts";
 import { operandFromBoundInput, type FinancialOperand } from "../src/operations.ts";
 import { ISSUER_A, ISSUER_B } from "./fixtures.ts";
 
@@ -28,6 +28,8 @@ export type InputSpec = {
   members?: Array<{ axis: string; member: string }>;
   reporting?: "as_reported" | "as_restated";
   adjustment?: "unadjusted" | "split_adjusted";
+  /** Binds the input split-adjusted with this adjustment. */
+  split_adjustment?: SplitAdjustmentV2;
   share_basis?: "basic" | "diluted" | "not_applicable";
   calendar_version?: string;
   definition_version?: string;
@@ -65,9 +67,10 @@ export function boundInput(spec: InputSpec): BoundFinancialInputV1 {
     dimensions: { scope: spec.scope ?? "consolidated", members: spec.members ?? [] },
     basis: {
       reporting: spec.reporting ?? "as_reported",
-      adjustment: spec.adjustment ?? "unadjusted",
+      adjustment: spec.split_adjustment ? "split_adjusted" : (spec.adjustment ?? "unadjusted"),
       share_basis: spec.share_basis ?? "not_applicable",
     },
+    ...(spec.split_adjustment ? { split_adjustment: spec.split_adjustment } : {}),
     publication: {
       attestation_id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
       available_no_later_than: "2024-01-10T23:59:59.999-05:00",
@@ -93,11 +96,15 @@ export function operand(nodeId: string, spec: InputSpec): FinancialOperand {
       metric_key: spec.metric,
       period: { kind: "fiscal_period", fiscal_year: input.period.fiscal_year, fiscal_period: input.period.fiscal_period },
     },
-    { slot: SLOTS[spec.slot ?? "a"], definition_version: `${spec.metric}.v1` },
+    { slot: SLOTS[spec.slot ?? "a"], definition_version: `${spec.metric}.v1`, knowledge_cutoff: KNOWLEDGE_CUTOFF },
   );
   assert.ok(outcome.ok, `operand ${nodeId}: ${JSON.stringify(!outcome.ok && outcome)}`);
   return (outcome as { operand: FinancialOperand }).operand;
 }
+
+/** The cutoff operands are evaluated at, and the reference date it is in New York, where their listings trade. */
+export const KNOWLEDGE_CUTOFF = "2025-03-01T12:00:00.000Z";
+export const REFERENCE_DATE = "2025-03-01";
 
 /** FY2023 calendar-year duration. */
 export const FY2023 = { start: "2023-01-01", end: "2023-12-31", fiscal_year: 2023, fiscal_period: "FY" as const };

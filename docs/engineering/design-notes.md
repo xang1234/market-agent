@@ -196,6 +196,46 @@ route and reads nothing else.
 - The blocks are ordinary fact-bound `metric_row`s, so they read "Source-linked". Like every other chat figure they are
   not "Verified calculation": that label still needs the financial engine's certificate (#200, #211).
 
+## EPS and share counts on a split basis (#387)
+
+A filing states its own period's EPS and weighted-average share counts on the split basis of its filing date: every
+split executed on or before that date is already reflected. SEC ingestion certifies them that way
+(`recordSecOriginalContext`, `services/fundamentals/src/sec-facts-repository.ts`).
+
+- **Stored as filed:** the context's adjustment basis is `as_filed`, with the filing date companyfacts lists beside the
+  value (`as_filed_on`, migration 0066) and the basic or diluted share basis. Publication proofs cannot date the filing,
+  since they prove only when a fetch saw it.
+- **Bound on the analysis's basis:** an as-filed input binds `split_adjusted` with a `split_adjustment.v2`
+  (`services/financial-core/src/split-adjustment.ts`). It names the listing and its time zone, the listing's splits
+  after the filing date and on or before the reference date, their factor, and the restated value, as exact fractions.
+  The token and its proof stay as filed. Polygon dates a split by the trading day in the listing's market, so the
+  reference date is the plan cutoff's date in the listing's time zone (`listings.timezone`), not in the plan's
+  `cutoff_timezone`. A plan has one cutoff instant and each listing one reference date, so a company's restated inputs
+  always compare. Core derives the date from the plan's cutoff and the recorded zone, rebuilds the adjustment from its
+  own splits, and fails the input's integrity on any difference.
+- **Gaps:** no single common-stock listing active at the cutoff (`split_listing_unresolved`), splits never fetched
+  (`split_history_missing`), or last fetched before the reference date in the listing's zone (`split_history_stale`).
+  The check proves only that the list was fetched on or after that day. Such a list holds every split executed by the
+  reference date only if the provider lists each split before or on its execution date.
+- **A split recast is no restatement:** a later 10-K states an earlier year's as-filed figure on its own split basis.
+  Restatement detection restates the previous filing's figure by the listing's splits between the two filing dates
+  (`explainedBySplits`). When that rounds to the later figure at the finer of their decimal places, the later figure is
+  the same one, and nothing is stored. NVDA's FY2024 diluted EPS of 11.93 is 1.193 after the 10-for-1 split, and the
+  FY2025 10-K presents it as 1.19. Otherwise the later figure is an economic restatement as filed on its 10-K's date,
+  so binding restates it from there. When the listing's splits are not on file through the later filing's date (no
+  single listing on that date, never synced, or synced before it), the figure is stored as an `unverified_restatement`
+  (migration 0067). An `as_restated` plan gaps on it with `restatement_unverified`, and an `as_reported` plan still
+  binds the original.
+- **Seal:** the snapshot verifier rebuilds the adjustment from the listing's current splits and time zone and withholds
+  the seal when either changed (`splits_changed`).
+- **Saved rules:** a thesis condition or Discovery criterion on a per-share value or share count is unresolved
+  (`threshold_has_no_split_basis`, `services/financial-engine/src/saved-rule.ts`). Its threshold names no split basis
+  date, so compared with a value restated to the evaluation date it would flip on a split's date.
+- **Operators:** `npm run backfill:sec-statements` records the context of a share fact stored before #387, and
+  `npm run sync:splits` (in `services/market`) has to have run on the analysis's day. Every ingest compares the stored
+  originals again, so a backfill rerun after a sync decides each unverified restatement whose listing's splits now
+  cover its filing date, and a second rerun changes nothing.
+
 ## Which facts may ground an answer
 
 `loadUsableFacts` (`services/fundamentals/src/usable-facts.ts`) is the one definition (#159). Every reader that shows

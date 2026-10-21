@@ -20,8 +20,17 @@ import {
 } from "../../financial-core/src/index.ts";
 import { appendRunEvent } from "./events-repo.ts";
 import { fencedTransaction, type FencedTx, type RunLease } from "./lease.ts";
-import type { FinancialEvidencePort, InputCandidate, SqlExecutor } from "./ports.ts";
-import { SELECTION_POLICY_VERSION, selectInput, sharedLatestPeriods, type LatestPeriod, type SelectedInput, type SelectionPolicy } from "./select-inputs.ts";
+import type { FinancialEvidencePort, InputCandidate, SplitHistory, SqlExecutor } from "./ports.ts";
+import {
+  boundBasis,
+  SELECTION_POLICY_VERSION,
+  selectInput,
+  sharedLatestPeriods,
+  type BoundBasis,
+  type LatestPeriod,
+  type SelectedInput,
+  type SelectionPolicy,
+} from "./select-inputs.ts";
 
 export type InputBinding =
   | {
@@ -80,9 +89,10 @@ export async function bindPlanInputs(input: {
     const latest = sharedLatestPeriods(reads.map((read) => read.status === "gap"
       ? { node: read.node, candidates: [], incomplete: read.reason_code }
       : { node: read.node, candidates: read.candidates, ...(read.truncated ? { incomplete: "scope_limit_exceeded" as const } : {}) }), policy);
+    const histories = await readSplitHistories(tx, plan, reads, evidence);
     const bindings = new Map<LocalId, InputBinding>();
     for (const read of reads) {
-      const outcome = selectSlot(read, plan, policy, latest.get(read.node.node_id) ?? null);
+      const outcome = selectSlot(read, plan, policy, latest.get(read.node.node_id) ?? null, histories.get(read.node.subject_slot));
       await persistBinding(tx.client, runId, outcome);
       bindings.set(read.node.node_id, outcome.binding);
     }
@@ -122,7 +132,31 @@ async function readSlot(
   return { node, status: "read", candidates: page.candidates, truncated: page.truncated };
 }
 
-function selectSlot(read: SlotRead, plan: FinancialPlanV1, policy: SelectionPolicy, latestPeriod: LatestPeriod): SlotOutcome {
+/**
+ * The split history of each subject with an as-filed candidate, read once.
+ * Like a candidate read, a failed read is that subject's execution-error gap.
+ */
+async function readSplitHistories(
+  { client }: FencedTx,
+  plan: FinancialPlanV1,
+  reads: ReadonlyArray<SlotRead>,
+  evidence: FinancialEvidencePort,
+): Promise<ReadonlyMap<LocalId, SplitHistory>> {
+  const asFiled = new Set(reads.flatMap((read) =>
+    read.status === "read" && read.candidates.some((candidate) => candidate.context?.adjustment_basis === "as_filed") ? [read.node.subject_slot] : []));
+  const histories = new Map<LocalId, SplitHistory>();
+  for (const member of plan.subjects.members) {
+    if (!asFiled.has(member.slot_id)) continue;
+    await client.query("savepoint split_history_read");
+    const history = await evidence.readSplitHistory({ subject: member.subject_ref, as_of: plan.time.knowledge_cutoff });
+    const failed = history.status === "gap" && history.reason_code === "database_error";
+    await client.query(failed ? "rollback to savepoint split_history_read" : "release savepoint split_history_read");
+    histories.set(member.slot_id, history);
+  }
+  return histories;
+}
+
+function selectSlot(read: SlotRead, plan: FinancialPlanV1, policy: SelectionPolicy, latestPeriod: LatestPeriod, history: SplitHistory | undefined): SlotOutcome {
   const { node } = read;
   if (read.status === "gap") {
     return {
@@ -133,13 +167,11 @@ function selectSlot(read: SlotRead, plan: FinancialPlanV1, policy: SelectionPoli
   }
   const selection = selectInput(node, read.candidates, policy, { truncated: read.truncated }, latestPeriod);
   const digest = candidateSetDigest(node.node_id, read.candidates, read.truncated);
-  return {
-    binding: selection.status === "selected"
-      ? boundBinding(node, subjectSlot(plan, node), plan, selection.input, digest)
-      : { slot: node.node_id, status: "gap", reason_code: selection.reason_code, candidate_set_digest: digest },
-    candidate_count: read.candidates.length,
-    truncated: read.truncated,
-  };
+  const outcome = (binding: InputBinding): SlotOutcome => ({ binding, candidate_count: read.candidates.length, truncated: read.truncated });
+  const gap = (reason_code: ReasonCode): InputBinding => ({ slot: node.node_id, status: "gap", reason_code, candidate_set_digest: digest });
+  if (selection.status === "gap") return outcome(gap(selection.reason_code));
+  const basis = boundBasis(selection.input, history, plan.time.knowledge_cutoff);
+  return outcome(basis.status === "gap" ? gap(basis.reason_code) : boundBinding(node, subjectSlot(plan, node), plan, selection.input, basis, digest));
 }
 
 function subjectSlot(plan: FinancialPlanV1, node: ReportedMetricNode): SubjectSlot {
@@ -161,7 +193,14 @@ export function candidateSetDigest(slot: LocalId, candidates: ReadonlyArray<Inpu
   });
 }
 
-function boundBinding(node: ReportedMetricNode, slot: SubjectSlot, plan: FinancialPlanV1, selected: SelectedInput, digest: Sha256Hex): InputBinding {
+function boundBinding(
+  node: ReportedMetricNode,
+  slot: SubjectSlot,
+  plan: FinancialPlanV1,
+  selected: SelectedInput,
+  basis: Exclude<BoundBasis, { status: "gap" }>,
+  digest: Sha256Hex,
+): InputBinding {
   const { candidate, publication, numeric } = selected;
   const { context, precision } = candidate;
   const definition = plan.metric_definitions.find((entry) => entry.metric_key === node.metric_key)!;
@@ -183,7 +222,12 @@ function boundBinding(node: ReportedMetricNode, slot: SubjectSlot, plan: Financi
       calendar_version: context.fiscal_calendar_version,
     },
     dimensions: { scope: context.dimension_scope, members: context.dimension_members.map((member) => ({ ...member })) },
-    basis: { reporting: plan.policies.reporting_basis, adjustment: context.adjustment_basis, share_basis: context.share_basis },
+    basis: {
+      reporting: plan.policies.reporting_basis,
+      adjustment: basis.status === "unadjusted" ? "unadjusted" : "split_adjusted",
+      share_basis: context.share_basis,
+    },
+    ...(basis.status === "restated" ? { split_adjustment: basis.split_adjustment } : {}),
     publication: {
       attestation_id: publication.attestation_id,
       available_no_later_than: publication.available_no_later_than,

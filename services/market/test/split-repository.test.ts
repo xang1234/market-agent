@@ -4,7 +4,8 @@ import { bootstrapDatabase, connectedPool, dbRoot, dockerAvailable, run } from "
 import { GOLDEN_ISSUER_IDS } from "../../shared/src/golden-issuers.ts";
 import { PolygonFetchError, type PolygonFetcher } from "../src/adapters/polygon.ts";
 import { POLYGON_MARKET_SOURCE_ID } from "../src/provider-sources.ts";
-import { loadListingSplits, syncListingSplits } from "../src/split-repository.ts";
+import { loadListingSplits } from "../src/split-history.ts";
+import { syncListingSplits } from "../src/split-repository.ts";
 import { syncSplits } from "../src/split-sync-cli.ts";
 
 const SEC_EDGAR_FILING_SOURCE_ID = "00000000-0000-4000-a000-000000000001";
@@ -22,6 +23,7 @@ const LISTINGS = {
   golden: "37000000-0000-4000-8000-000000000005",
   nvdaEnding: "37000000-0000-4000-8000-000000000006",
   nvdaUpcoming: "37000000-0000-4000-8000-000000000007",
+  fractional: "37000000-0000-4000-8000-000000000008",
 };
 
 type PolygonRow = { execution_date: string; split_from: number; split_to: number; id: string };
@@ -66,6 +68,7 @@ test("listing splits sync and the split sync CLI", { timeout: 180_000 }, async (
   // Active now until a listed end, and not active until a listed start.
   await listing("nvdaEnding", "nvda", "NVDE", "2999-01-01T00:00:00Z");
   await listing("nvdaUpcoming", "nvda", "NVDU", null, "2999-01-01T00:00:00Z");
+  await listing("fractional", "amd", "FRAC");
   for (const issuer of [ISSUERS.nvda, ISSUERS.broken, ISSUERS.golden]) {
     await db.query(
       `insert into facts (subject_kind, subject_id, metric_id, period_kind, period_start, period_end, fiscal_year, fiscal_period,
@@ -98,8 +101,8 @@ test("listing splits sync and the split sync CLI", { timeout: 180_000 }, async (
       checked_at: "2026-10-01T12:00:00.000Z",
       source_id: POLYGON_MARKET_SOURCE_ID,
       splits: [
-        { execution_date: "2021-07-20", split_from: 1, split_to: 4, provider_ref: "E-2021" },
-        { execution_date: "2024-06-10", split_from: 1, split_to: 10, provider_ref: "E-2024" },
+        { execution_date: "2021-07-20", split_from: "1", split_to: "4", provider_ref: "E-2021" },
+        { execution_date: "2024-06-10", split_from: "1", split_to: "10", provider_ref: "E-2024" },
       ],
     };
     assert.deepEqual(await loadListingSplits(db, LISTINGS.nvda), expected);
@@ -122,8 +125,26 @@ test("listing splits sync and the split sync CLI", { timeout: 180_000 }, async (
       checked_at: "2026-10-03T12:00:00.000Z",
       source_id: POLYGON_MARKET_SOURCE_ID,
       splits: [
-        { execution_date: "2021-07-21", split_from: 1, split_to: 4, provider_ref: "E-2021-moved" },
-        { execution_date: "2024-06-10", split_from: 2, split_to: 15, provider_ref: "E-2024-fixed" },
+        { execution_date: "2021-07-21", split_from: "1", split_to: "4", provider_ref: "E-2021-moved" },
+        { execution_date: "2024-06-10", split_from: "2", split_to: "15", provider_ref: "E-2024-fixed" },
+      ],
+    });
+  });
+
+  await t.test("a ratio reads back as its exact decimal text", async () => {
+    const feed = {
+      FRAC: [
+        { execution_date: "2023-05-01", split_from: 3, split_to: 2, id: "E-REVERSE" },
+        { execution_date: "2024-05-01", split_from: 1, split_to: 1.5, id: "E-FRACTION" },
+      ],
+    };
+    await syncListingSplits(db, polygonSplits(feed), { listing_id: LISTINGS.fractional, ticker: "FRAC" }, at("2026-10-06T12:00:00.000Z"));
+    assert.deepEqual(await loadListingSplits(db, LISTINGS.fractional), {
+      checked_at: "2026-10-06T12:00:00.000Z",
+      source_id: POLYGON_MARKET_SOURCE_ID,
+      splits: [
+        { execution_date: "2023-05-01", split_from: "3", split_to: "2", provider_ref: "E-REVERSE" },
+        { execution_date: "2024-05-01", split_from: "1", split_to: "1.5", provider_ref: "E-FRACTION" },
       ],
     });
   });

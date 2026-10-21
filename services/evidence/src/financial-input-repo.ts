@@ -10,7 +10,7 @@
 
 import type { PrecisionClass, PublicationTimingPrecision } from "../../financial-core/src/evidence-vocabulary.ts";
 import type { FactEntitlementChannel } from "./fact-repo.ts";
-import type { FactFinancialContext } from "./financial-context.ts";
+import type { FinancialContextFields } from "./financial-context.ts";
 import type { RowQueryExecutor } from "./types.ts";
 import { assertNonEmptyString, assertOneOf, assertUuidV4 } from "./validators.ts";
 
@@ -73,7 +73,7 @@ export type FinancialInputCandidate = Readonly<{
   superseded_by: string | null;
   source_id: string;
   source_version_hash: string | null;
-  context: Omit<FactFinancialContext, "fact_id"> | null;
+  context: FinancialContextFields | null;
   precision: PrecisionProof | null;
   /** Current (non-superseded) proofs for this exact source version only. */
   publication: ReadonlyArray<PublicationProof>;
@@ -115,7 +115,8 @@ export async function listFinancialInputCandidates(db: RowQueryExecutor, request
                   'context_version', c.context_version, 'period_type', c.period_type, 'dimension_scope', c.dimension_scope,
                   'dimension_members', c.dimension_members, 'reporting_basis', c.reporting_basis, 'adjustment_basis', c.adjustment_basis,
                   'share_basis', c.share_basis, 'fiscal_calendar_version', c.fiscal_calendar_version,
-                  'disclosure_relation', c.disclosure_relation, 'source_context_ref', c.source_context_ref) as context
+                  'disclosure_relation', c.disclosure_relation, 'source_context_ref', c.source_context_ref)
+                || case when c.as_filed_on is null then '{}'::jsonb else jsonb_build_object('as_filed_on', c.as_filed_on::text) end as context
            from fact_financial_contexts c where c.fact_id = f.fact_id
        ) ctx on true
        left join lateral (

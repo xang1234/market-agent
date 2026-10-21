@@ -3,9 +3,11 @@
 // arrays: every plan, binding, computation, and result comes from the ledger,
 // and every bound fact is joined with its *current* evidence state — source
 // access, invalidation, the exact source version, and whether the precision
-// and publication proofs it was bound with are still the current ones.
+// and publication proofs it was bound with are still the current ones — as is
+// the listing each restated input's subject resolves to now, with its splits and zone.
 // Snapshot reads these tables directly; it never imports the engine.
 
+import { loadSubjectSplitHistory, type SubjectSplitHistory } from "../../market/src/split-history.ts";
 import type { QueryExecutor } from "../../shared/src/http.ts";
 import { toSealFactRow, type FactRow } from "./seal-input.ts";
 
@@ -64,10 +66,14 @@ export type LoadedEvidence = Readonly<{
     period_type: string;
     dimension_scope: string;
     adjustment_basis: string;
+    as_filed_on: string | null;
     share_basis: string;
     fiscal_calendar_version: string;
   }> | null;
 }>;
+
+/** A restated input's subject, resolved to its one listing at the cutoff the way binding resolved it. */
+export type LoadedSplitHistory = Readonly<{ subject_id: string; history: SubjectSplitHistory }>;
 
 export type LoadedComputation = Readonly<{
   computation_id: string;
@@ -102,6 +108,7 @@ export type FinancialUnitRecords = Readonly<{
   unit: LoadedUnit | null;
   bindings: ReadonlyArray<LoadedBinding>;
   evidence: ReadonlyArray<LoadedEvidence>;
+  split_histories: ReadonlyArray<LoadedSplitHistory>;
   computations: ReadonlyArray<LoadedComputation>;
   results: ReadonlyArray<LoadedResult>;
   subject_names: ReadonlyArray<LoadedSubjectName>;
@@ -147,7 +154,7 @@ export async function loadFinancialUnitRecords(db: QueryExecutor, claim: Financi
             prec.precision_attestation_id is not null as precision_current,
             case when c.fact_id is null then null else jsonb_build_object(
               'period_type', c.period_type, 'dimension_scope', c.dimension_scope, 'adjustment_basis', c.adjustment_basis,
-              'share_basis', c.share_basis, 'fiscal_calendar_version', c.fiscal_calendar_version) end as context
+              'as_filed_on', c.as_filed_on::text, 'share_basis', c.share_basis, 'fiscal_calendar_version', c.fiscal_calendar_version) end as context
        from financial_run_inputs i
        join facts f on f.fact_id = i.fact_id
        join sources s on s.source_id = f.source_id
@@ -160,6 +167,19 @@ export async function loadFinancialUnitRecords(db: QueryExecutor, claim: Financi
       order by f.fact_id`,
     [claim.run_id],
   )).rows;
+
+  // A bound payload is checked, never trusted: a subject id that is not a uuid resolves to nothing.
+  const restatedSubjects = (await db.query<{ subject_id: string | null }>(
+    `select distinct i.bound_payload->'subject_ref'->>'id' as subject_id
+       from financial_run_inputs i
+      where i.run_id = $1 and i.binding_status = 'bound' and i.bound_payload ? 'split_adjustment'
+      order by 1`,
+    [claim.run_id],
+  )).rows.flatMap(({ subject_id }) => (subject_id !== null && UUID.test(subject_id) ? [subject_id] : []));
+  const split_histories: LoadedSplitHistory[] = [];
+  for (const subject_id of restatedSubjects) {
+    split_histories.push({ subject_id, history: await loadSubjectSplitHistory(db, { kind: "issuer", id: subject_id }, runRow.knowledge_cutoff) });
+  }
 
   const computations = (await db.query<LoadedComputation>(
     `select computation_id::text, node_id, formula_id, operation_version, numeric_policy_version, definition_versions, input_refs, output_hash
@@ -175,7 +195,7 @@ export async function loadFinancialUnitRecords(db: QueryExecutor, claim: Financi
 
   const subject_names = await loadSubjectNames(db, planSubjectRefs(plan));
 
-  return { run: runRow, plan: { plan, semantic_hash }, unit, bindings, evidence, computations, results, subject_names };
+  return { run: runRow, plan: { plan, semantic_hash }, unit, bindings, evidence, split_histories, computations, results, subject_names };
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;

@@ -297,6 +297,8 @@ export type SecSourceToken = Readonly<{
   accn: string;
   /** The filing's form: the value's own, never an amendment (selection takes only 10-K and 10-Q). */
   form: string;
+  /** The filing's date as SEC lists it with the value. */
+  filed: string;
   start: string | null;
   end: string;
 }>;
@@ -392,6 +394,7 @@ export function extractStatementWithTokens(input: ExtractStatementInput): {
           unit: unitCode,
           accn: match.accn,
           form: match.form,
+          filed: match.filed,
           start: match.start ?? null,
           end: match.end,
         });

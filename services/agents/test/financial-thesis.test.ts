@@ -47,6 +47,7 @@ test("thesis conditions through the financial engine", { timeout: 300_000 }, asy
       [{ metric_key: "revenue", unit: "currency", period_kind: "point", operator: "gt", threshold: "1", max_age_days: 30 }, "point_in_time_metric_not_certified"],
       [{ metric_key: "revenue", unit: "shares", period_kind: "fiscal_y", operator: "gt", threshold: "1", max_age_days: 30 }, "unit_does_not_match_definition"],
       [{ metric_key: "total_assets", unit: "currency", period_kind: "ttm", operator: "gt", threshold: "1", max_age_days: 30 }, "trailing_sum_needs_a_flow_metric"],
+      [{ metric_key: "eps_diluted", unit: "USD", period_kind: "fiscal_y", operator: "gte", threshold: "5", max_age_days: 400 }, "threshold_has_no_split_basis"],
     ] as const) {
       const translation = await translateSavedRule(
         { pool, evidence: createEvidenceFinancialPort },

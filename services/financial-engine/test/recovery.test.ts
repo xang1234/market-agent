@@ -43,7 +43,7 @@ test("supervised recovery after worker restarts", { timeout: 300_000 }, async (t
   let evidenceReads = 0;
   const counting = (executor: SqlExecutor): FinancialEvidencePort => {
     const real = createEvidenceFinancialPort(executor);
-    return { listInputCandidates: (request) => { evidenceReads += 1; return real.listInputCandidates(request); } };
+    return { ...real, listInputCandidates: (request) => { evidenceReads += 1; return real.listInputCandidates(request); } };
   };
   let parentCalls = 0;
   const persistParent: PersistParentArtifact = async (tx, publication) => {

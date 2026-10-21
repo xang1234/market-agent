@@ -52,7 +52,7 @@ export function freshnessAt(periodEnd: IsoDate, cutoff: IsoDateTime, maxAgeDays:
   return dayNumber(cutoffDate) - dayNumber(periodEnd) <= maxAgeDays ? "fresh" : "stale";
 }
 
-function localDateOf(instant: number, timeZone: string): IsoDate {
+export function localDateOf(instant: number, timeZone: string): IsoDate {
   const local = new Date(instant + offsetMs(instant, timeZone));
   return local.toISOString().slice(0, 10);
 }
@@ -78,7 +78,7 @@ function offsetMs(instant: number, timeZone: string): number {
   return Math.round((localAsUtc - wholeSecondInstant) / MINUTE_MS) * MINUTE_MS;
 }
 
-function isKnownTimeZone(zone: string): boolean {
+export function isKnownTimeZone(zone: string): boolean {
   if (typeof zone !== "string" || zone.trim() === "") return false;
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: zone });

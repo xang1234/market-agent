@@ -1,11 +1,13 @@
 // Evidence-backed FinancialEvidencePort. Authorization happens in the
 // Evidence repository's SQL; this adapter only maps its rows into the engine's
-// candidate shape and classifies database failures as execution errors.
+// candidate shape and classifies database failures as execution errors. Split
+// histories are public market data, read from the market service's tables.
 
 import type { FinancialUnit, FiscalPeriod } from "../../financial-core/src/index.ts";
 import { FISCAL_PERIODS } from "../../financial-core/src/index.ts";
 import { listFinancialInputCandidates, type FinancialInputCandidate } from "../../evidence/src/financial-input-repo.ts";
-import type { CandidatePage, CandidateRequest, FinancialEvidencePort, InputCandidate, SqlExecutor } from "./ports.ts";
+import { loadSubjectSplitHistory } from "../../market/src/split-history.ts";
+import type { CandidatePage, CandidateRequest, FinancialEvidencePort, InputCandidate, SplitHistory, SplitHistoryRequest, SqlExecutor } from "./ports.ts";
 
 export function createEvidenceFinancialPort(db: SqlExecutor): FinancialEvidencePort {
   return {
@@ -27,6 +29,17 @@ export function createEvidenceFinancialPort(db: SqlExecutor): FinancialEvidenceP
         throw error;
       }
       return { status: "ok", candidates: page.candidates.flatMap(toInputCandidate), truncated: page.truncated };
+    },
+
+    async readSplitHistory({ subject, as_of }: SplitHistoryRequest): Promise<SplitHistory> {
+      try {
+        const history = await loadSubjectSplitHistory(db, subject, as_of);
+        if (history.status === "gap") return history;
+        return { ...history, splits: history.splits.map(({ execution_date, split_from, split_to }) => ({ execution_date, split_from, split_to })) };
+      } catch (error) {
+        if (isDatabaseError(error)) return { status: "gap", reason_code: "database_error" };
+        throw error;
+      }
     },
   };
 }

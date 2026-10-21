@@ -3,7 +3,7 @@
 // these types mirror them (test/contracts.test.ts keeps the enums in sync).
 
 import type {
-  AdjustmentBasis,
+  BoundAdjustmentBasis,
   DimensionScope,
   PeriodType,
   ProvenPrecisionClass,
@@ -120,6 +120,10 @@ export const REASON_CODES = [
   "database_error",
   "integrity_failure",
   "replay_version_unavailable",
+  "split_listing_unresolved",
+  "split_history_missing",
+  "split_history_stale",
+  "restatement_unverified",
 ] as const;
 export type ReasonCode = (typeof REASON_CODES)[number];
 
@@ -365,6 +369,29 @@ export type FinalizedFinancialResultV1 = ResultIdentity & { state: "finalized"; 
 // ---------------------------------------------------------------------------
 // Bound inputs
 
+export const SPLIT_ADJUSTMENT_VERSION = "split_adjustment.v2";
+
+/** An exact fraction in lowest terms, with a positive denominator. */
+export type ExactFraction = { numerator: DecimalString; denominator: DecimalString };
+
+/**
+ * An as-filed value restated to the split basis as of its listing's reference
+ * date, the plan's knowledge cutoff dated in `listing_timezone`: every split
+ * of the listing after the filing date and on or before the reference date,
+ * in date order. The factor is the product of their split_to / split_from; a
+ * share count is multiplied by it, a per-share value divided.
+ */
+export type SplitAdjustmentV2 = {
+  version: typeof SPLIT_ADJUSTMENT_VERSION;
+  as_filed_on: IsoDate;
+  reference_date: IsoDate;
+  listing_id: UUID;
+  listing_timezone: string;
+  splits: Array<{ execution_date: IsoDate; split_from: DecimalString; split_to: DecimalString }>;
+  factor: ExactFraction;
+  adjusted_native_value: ExactFraction;
+};
+
 export type BoundFinancialInputV1 = {
   schema_version: typeof BOUND_INPUT_SCHEMA_VERSION;
   input_slot: LocalId;
@@ -399,9 +426,12 @@ export type BoundFinancialInputV1 = {
   };
   basis: {
     reporting: ReportingBasis;
-    adjustment: AdjustmentBasis;
+    /** split_adjusted exactly when `split_adjustment` is present. */
+    adjustment: BoundAdjustmentBasis;
     share_basis: ShareBasis;
   };
+  /** Absent for a value that splits do not move; `numeric` stays the value as filed. */
+  split_adjustment?: SplitAdjustmentV2;
   publication: {
     attestation_id: UUID;
     available_no_later_than: IsoDateTime;

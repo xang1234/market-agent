@@ -152,6 +152,7 @@ test("historical input binding", { timeout: 240_000 }, async (t) => {
     const failingLiabilities = (client: Parameters<typeof createEvidenceFinancialPort>[0]) => {
       const port = createEvidenceFinancialPort(client);
       return {
+        ...port,
         listInputCandidates: (request: Parameters<typeof port.listInputCandidates>[0]) =>
           request.metric_key === "total_liabilities" && request.subject.id === IDS.issuerA
             ? Promise.resolve({ status: "error" as const, reason_code: "database_error" as const })

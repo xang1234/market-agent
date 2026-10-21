@@ -8,12 +8,17 @@
 // met by the saved comparison; any gap — no eligible value, a value older than
 // the saved maximum age, an unsupported definition — is unresolved. Parents
 // supply their authority, request key, attribution, and publication guard.
+//
+// A saved threshold names no split basis date, and a per-share value or share
+// count binds restated to the evaluation date, so a rule on one would flip on
+// a split's date. Such a rule is unsupported until it carries its own basis.
 
 import { randomUUID } from "node:crypto";
 
 import {
   DEFAULT_EXECUTION_LIMITS,
   METRIC_CATALOG_V1,
+  splitsRestate,
   type Comparison,
   type DecimalInput,
   type FinancialRuntimeAuthority,
@@ -100,6 +105,7 @@ export async function translateSavedRule(
   const { rule } = request;
   const definition = METRIC_CATALOG_V1.get(rule.metric_key);
   if (!definition) return { ok: false, reason: "metric_has_no_verified_definition" };
+  if (splitsRestate(definition.value_kind)) return { ok: false, reason: "threshold_has_no_split_basis" };
   if (rule.period_kind === "point") return { ok: false, reason: "point_in_time_metric_not_certified" };
   if (rule.period_kind === "ttm" && definition.value_kind !== "flow") return { ok: false, reason: "trailing_sum_needs_a_flow_metric" };
   const unit = await thresholdUnit(deps, request, definition);
@@ -244,6 +250,7 @@ const UNRESOLVED_REASONS: Readonly<Record<string, string>> = {
   stale_input: "The latest eligible value is older than the saved maximum age at the assessment cutoff.",
   missing_input: "No eligible value was public at the assessment cutoff.",
   blocked_by_dependency: "No eligible value was public at the assessment cutoff.",
+  threshold_has_no_split_basis: "A stock split changes this figure's basis, and the saved threshold names no basis date to compare it on.",
 };
 
 function unresolved(reasonCode: string): SavedRuleOutcome {

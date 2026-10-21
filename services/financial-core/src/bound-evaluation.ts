@@ -84,7 +84,11 @@ export function evaluateBoundPlan(plan: FinancialPlanV1, bindings: ReadonlyMap<L
     const binding = bindings.get(node.node_id);
     if (!binding) throw new ExecutionIntegrityError(`reported node ${node.node_id} has no binding`);
     if (binding.status === "gap") return operationGap(binding.reason_code, bindingGapExplanation(binding.reason_code));
-    return operandFromBoundInput(binding.input, node, { slot: slots.get(node.subject_slot)!, definition_version: definitions.get(node.metric_key)! });
+    return operandFromBoundInput(binding.input, node, {
+      slot: slots.get(node.subject_slot)!,
+      definition_version: definitions.get(node.metric_key)!,
+      knowledge_cutoff: plan.time.knowledge_cutoff,
+    });
   });
 }
 
@@ -214,6 +218,14 @@ function bindingGapExplanation(reason: ReasonCode): string {
       return "The evidence search exceeded the request's limits.";
     case "conflicting_evidence":
       return "Eligible sources disagree on this value.";
+    case "split_listing_unresolved":
+      return "The company has no single listing whose stock splits apply, so this figure's split basis is unknown.";
+    case "split_history_missing":
+      return "The listing's stock splits were never fetched, so this figure's split basis is unknown.";
+    case "split_history_stale":
+      return "The listing's stock splits were last fetched before the analysis date, so a later split may be missing.";
+    case "restatement_unverified":
+      return "A later filing states this figure again, and the stock splits that tell a restatement from a split adjustment were not fetched when it was stored.";
     default:
       return "No eligible input was public before the knowledge cutoff.";
   }

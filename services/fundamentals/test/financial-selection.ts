@@ -1,4 +1,4 @@
-// Public-information selection of an issuer's FY2023 revenue, through the
+// Public-information selection of an issuer's fiscal-year figure, through the
 // Evidence port and the engine's selector exactly as a financial run reads it.
 
 import assert from "node:assert/strict";
@@ -15,26 +15,34 @@ export async function selectRevenue(
   cutoff: string,
   basis: "as_reported" | "as_restated" = "as_reported",
 ): Promise<SlotSelection> {
+  return selectFiscalYear(db, { issuerId, metricKey: "revenue", fiscalYear: 2023 }, cutoff, basis);
+}
+
+export async function selectFiscalYear(
+  db: FundamentalsQueryExecutor,
+  slot: { issuerId: string; metricKey: string; fiscalYear: number },
+  cutoff: string,
+  basis: "as_reported" | "as_restated" = "as_reported",
+): Promise<SlotSelection> {
   const page = await createEvidenceFinancialPort(db).listInputCandidates({
     authority: authority(),
-    subject: { kind: "issuer", id: issuerId },
-    metric_key: "revenue",
-    fiscal_year: 2023,
+    subject: { kind: "issuer", id: slot.issuerId },
+    metric_key: slot.metricKey,
+    fiscal_year: slot.fiscalYear,
     fiscal_period: "FY",
     limit: 100,
   });
   assert.equal(page.status, "ok");
-  return selectInput(FY2023_REVENUE, page.status === "ok" ? page.candidates : [], { knowledge_cutoff: cutoff, reporting_basis: basis, max_age_days: null });
+  const node = {
+    node_id: "slot",
+    operation: "reported_metric" as const,
+    operation_version: "reported_metric.v1",
+    subject_slot: "a",
+    metric_key: slot.metricKey,
+    period: { kind: "fiscal_period" as const, fiscal_year: slot.fiscalYear, fiscal_period: "FY" as const },
+  };
+  return selectInput(node, page.status === "ok" ? page.candidates : [], { knowledge_cutoff: cutoff, reporting_basis: basis, max_age_days: null });
 }
-
-const FY2023_REVENUE = {
-  node_id: "rev",
-  operation: "reported_metric" as const,
-  operation_version: "reported_metric.v1",
-  subject_slot: "a",
-  metric_key: "revenue",
-  period: { kind: "fiscal_period" as const, fiscal_year: 2023, fiscal_period: "FY" as const },
-};
 
 export function originalContext(factId: string, relation: "original" | "economic_restatement" = "original") {
   return {
