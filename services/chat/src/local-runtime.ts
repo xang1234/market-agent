@@ -182,8 +182,9 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   const requestedListings = requestedListingsOf(covered);
   // Charts and tables come from facts, never from the model (see fact-blocks.ts).
   // A turn asking only for metrics no reader serves reads no other facts, nor
-  // does one re-reading a financial-engine answer, whose evidence is in it (#206).
-  const readsFacts = scope.reads !== "unavailable_metric" && scope.reads !== "financial_answer";
+  // does one re-reading a financial-engine answer, whose evidence is in it
+  // (#206), or a request the engine declined (#425).
+  const readsFacts = scope.reads !== "unavailable_metric" && scope.reads !== "financial_answer" && scope.reads !== "financial_gap";
   // Cash flow, balance sheet and EPS for one company; a statement-only request
   // reads them alone, as a segment request reads segments alone.
   const [statementIssuer] = issuersOfScope(scope);

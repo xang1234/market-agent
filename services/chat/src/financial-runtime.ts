@@ -161,7 +161,16 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       return {
         ...gap(reason, planned?.result),
         subject_refs: asked,
-        ...(saved === null ? {} : { research_scope: { ...saved, companies: await answeredCompanies(deps.pool, asked.map((ref) => ref.id), saved, mentionsOf(subjects)) } }),
+        // It computed no figure, so it names none, and no reader re-reads it.
+        ...(saved === null ? {} : {
+          research_scope: {
+            ...saved,
+            route: "financial_gap" as const,
+            reads: "financial_gap" as const,
+            companies: await answeredCompanies(deps.pool, asked.map((ref) => ref.id), saved, mentionsOf(subjects)),
+            metrics: [],
+          },
+        }),
       };
     };
     // A retry of this turn resumes what the first attempt reserved; it never plans again.

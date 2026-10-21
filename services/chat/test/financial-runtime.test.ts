@@ -178,20 +178,22 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       const harness = chatHarness(pool, { model, researchScope: scopeOver as never });
       const done = await turnWithPick(harness, userIntent, pick);
       const [block] = harness.persisted.at(-1)!.blocks as ReadonlyArray<{ segments: Array<{ text: string }>; subject_refs?: unknown }>;
-      return { gap: done.financial_gap, text: block!.segments[0]!.text, subject_refs: block!.subject_refs, companies: (harness.persisted.at(-1)!.research_scope as { companies: unknown } | undefined)?.companies };
+      const scope = harness.persisted.at(-1)!.research_scope as { route: string; reads: string; companies: unknown; metrics: unknown } | undefined;
+      return { gap: done.financial_gap, text: block!.segments[0]!.text, subject_refs: block!.subject_refs, scope: scope && [scope.route, scope.reads, scope.companies, scope.metrics] };
     };
     assert.deepEqual(await segments("Break down AAA's revenue by segment", "segment revenue has no approved definition"), {
       gap: { reason_code: "unsupported" },
       text: "This request asks for a calculation outside the verified financial definitions I can compute: segment revenue has no approved definition.",
       subject_refs: [{ kind: "issuer", id: IDS.issuerA }],
-      companies: [{ issuer_id: IDS.issuerA, label: "AAA" }],
+      // It computed no figure, so it names none, and no reader re-reads it.
+      scope: ["financial_gap", "financial_gap", [{ issuer_id: IDS.issuerA, label: "AAA" }], []],
     });
     // A company picked in a clarification is saved too, labelled. A reason with a figure in it is not shown.
     assert.deepEqual(await segments("Break down AMB's revenue by segment", "only 3 segments are reported", "Beta Holdings Corp."), {
       gap: { reason_code: "unsupported" },
       text: "This request asks for a calculation outside the verified financial definitions I can compute.",
       subject_refs: [{ kind: "issuer", id: IDS.issuerB }],
-      companies: [{ issuer_id: IDS.issuerB, label: "Beta Holdings Corp." }],
+      scope: ["financial_gap", "financial_gap", [{ issuer_id: IDS.issuerB, label: "Beta Holdings Corp." }], []],
     });
   });
 

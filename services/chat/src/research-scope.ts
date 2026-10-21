@@ -43,6 +43,9 @@ const ROUTES = [
   // An answer the financial engine published: its figures and their sources
   // are in that answer, and no reader here re-reads them.
   "financial_answer",
+  // A request the financial engine declined (#425): it showed no figure, and
+  // no reader here shows one in its place.
+  "financial_gap",
   "unknown",
 ] as const;
 export type ResearchRoute = (typeof ROUTES)[number];
@@ -385,7 +388,7 @@ export function resolveResearchScope(input: {
   // Unchanged, it reads what the previous answer read: not the engine's
   // answer, which no reader here re-reads, nor one that compared where this
   // turn covers one company, or the reverse. Those are routed by what they keep.
-  const reread = unchanged !== null && unchanged.reads !== "financial_answer" &&
+  const reread = unchanged !== null && unchanged.reads !== "financial_answer" && unchanged.reads !== "financial_gap" &&
       comparing === (unchanged.companies.length > 1 || unchanged.peers)
     ? unchanged
     : null;
