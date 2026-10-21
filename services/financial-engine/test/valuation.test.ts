@@ -14,7 +14,11 @@ import { recordFactFinancialContext } from "../../evidence/src/financial-context
 import Ajv2020 from "../../financial-core/node_modules/ajv/dist/2020.js";
 import type { FinancialPlanV1, FinancialRuntimeAuthority } from "../../financial-core/src/index.ts";
 import { POLYGON_MARKET_SOURCE_ID } from "../../market/src/provider-sources.ts";
+import { createEvidenceFinancialPort } from "../src/evidence-adapter.ts";
+import { executeRun } from "../src/execute.ts";
 import { finalizeUnit } from "../src/finalize.ts";
+import { acquireLease } from "../src/lease.ts";
+import { reserveRun } from "../src/run-repo.ts";
 import { inspectCommittedResult } from "../src/inspection.ts";
 import { buildDeterministicPlan } from "../src/planner.ts";
 import { authorityFor, engineDatabase, HASH, IDS as FIXTURE_IDS, pinnedClients, readyRun } from "./db-fixtures.ts";
@@ -173,6 +177,29 @@ test("market cap and P/E", { timeout: 300_000 }, async (t) => {
       ["eps", "11.93", { numerator: "1193", denominator: "1000" }],
       ["px", "1200", { numerator: "120", denominator: "1" }],
     ]);
+  });
+
+  await t.test("a run binds under the grant it recorded: a retry granting more resumes it as reserved, one granting less is a conflict", async () => {
+    const filingsOnly = authorityFor();
+    const withPrices = authorityFor(FIXTURE_IDS.owner, { allowed_source_classes: ["sec_filing", "market_data"] });
+    const plan = valuationPlan(filingsOnly);
+    const key = randomUUID();
+    const first = await reserveRun(db, { authority: filingsOnly, request_key: key, plan });
+    const retry = await reserveRun(db, { authority: withPrices, request_key: key, plan });
+    assert.deepEqual([first.status, retry.status, retry.status === "existing" && retry.run.allowed_source_classes], ["created", "existing", ["sec_filing"]]);
+    const runId = (retry as { run: { run_id: string } }).run.run_id;
+    const acquired = await acquireLease(db, { authority: withPrices, run_id: runId, worker_id: "retry", ttl_ms: 60_000 });
+    assert.ok(acquired.status === "acquired");
+    await executeRun({ client: db, lease: acquired.lease, plan, authority: withPrices, evidence: createEvidenceFinancialPort, parent_limits: {} });
+    assert.deepEqual((await results(db, runId)).out_px, ["unsupported", "source_class_not_allowed"]);
+
+    const pricedKey = randomUUID();
+    const pricedPlan = valuationPlan(withPrices);
+    const priced = await reserveRun(db, { authority: withPrices, request_key: pricedKey, plan: pricedPlan });
+    assert.ok(priced.status === "created");
+    assert.deepEqual(priced.run.allowed_source_classes, ["market_data", "sec_filing"]);
+    const narrower = await reserveRun(db, { authority: filingsOnly, request_key: pricedKey, plan: pricedPlan });
+    assert.deepEqual(narrower, { status: "conflict", reason: "source_classes_not_granted", run_id: priced.run.run_id });
   });
 
   await t.test("without market data, the price is a named gap and both figures are blocked, never computed from another price", async () => {

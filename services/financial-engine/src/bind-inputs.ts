@@ -1,9 +1,10 @@
 // Binds every reported-metric slot of a run's plan to immutable evidence in
 // one consistent read (REPEATABLE READ, under the run's lease fence) and
 // persists the bindings — bound payloads or explicit gaps — with the
-// authorized candidate-set digest. A retry reuses the persisted bindings;
-// evidence that arrives later requires an explicit recalculation (a new run),
-// never substitution.
+// authorized candidate-set digest. Only sources of the classes the run
+// recorded when it was reserved are evidence, whichever attempt binds. A
+// retry reuses the persisted bindings; evidence that arrives later requires an
+// explicit recalculation (a new run), never substitution.
 
 import {
   BOUND_INPUT_SCHEMA_VERSION,
@@ -97,7 +98,7 @@ export async function bindPlanInputs(input: {
       knowledge_cutoff: plan.time.knowledge_cutoff,
       reporting_basis: plan.policies.reporting_basis,
       max_age_days: plan.policies.freshness.max_age_days,
-      allowed_source_classes: authority.allowed_source_classes,
+      allowed_source_classes: tx.run.allowed_source_classes,
     };
     const latest = sharedLatestPeriods(reads.map((read) => read.status === "gap"
       ? { node: read.node, candidates: [], incomplete: read.reason_code }

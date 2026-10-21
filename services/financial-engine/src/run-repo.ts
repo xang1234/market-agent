@@ -1,6 +1,10 @@
 // Owner-scoped run reservation and lifecycle. Idempotency is by owner,
 // parent kind/id, and request key; the same key with a different request
-// hash or parent version is a conflict, never a silent reuse. Lifecycle
+// hash or parent version is a conflict, never a silent reuse. A run records
+// the source classes its authority allowed, and binds under that grant on
+// every attempt: a retry whose authority does not grant every class the run
+// recorded is a conflict too, since its bindings may use one, while a retry
+// that grants more resumes the run under the grant it recorded. Lifecycle
 // writes are fenced by the current lease (lease.ts), and bound payloads stay
 // immutable (enforced again by the database).
 
@@ -21,9 +25,13 @@ export type { ExecutionState, RunRecord } from "./run-record.ts";
 
 export type ReserveRunResult =
   | { status: "created" | "existing"; run: RunRecord }
-  | { status: "conflict"; reason: "request_hash_mismatch" | "parent_version_mismatch"; run_id: string | null };
+  | { status: "conflict"; reason: "request_hash_mismatch" | "parent_version_mismatch" | "source_classes_not_granted"; run_id: string | null };
 
-/** The request identity of a run: what is asked, independent of random plan ids. */
+/** Whether the authority grants every source class the run recorded, so it may drive the run's bindings. */
+export function grantsRecordedClasses(authority: FinancialRuntimeAuthority, run: RunRecord): boolean {
+  return run.allowed_source_classes.every((sourceClass) => authority.allowed_source_classes.includes(sourceClass));
+}
+
 /**
  * Reserves the run for (owner, parent, request key) or returns the existing
  * one. Concurrent creators serialize on the unique key; the loser's plan row
@@ -56,12 +64,13 @@ export async function reserveRun(
     }
     const created = (await client.query<Record<string, unknown>>(
       `insert into financial_runs (user_id, parent_kind, parent_id, parent_version, request_key, request_hash, plan_id, feature_mode,
-                                   knowledge_cutoff, policies, replay_of_run_id)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11)
+                                   knowledge_cutoff, policies, allowed_source_classes, replay_of_run_id)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::text[], $12)
        on conflict (user_id, parent_kind, parent_id, request_key) do nothing
        returning ${RUN_COLUMNS}`,
       [authority.owner_user_id, authority.parent.kind, authority.parent.id, authority.parent.version, input.request_key, requestHash,
-        plan.plan_id, authority.feature.mode, plan.time.knowledge_cutoff, JSON.stringify(plan.policies), input.replay_of_run_id ?? null],
+        plan.plan_id, authority.feature.mode, plan.time.knowledge_cutoff, JSON.stringify(plan.policies),
+        [...new Set(authority.allowed_source_classes)].sort(), input.replay_of_run_id ?? null],
     )).rows[0];
     if (created) {
       const run = toRun(created);
@@ -78,6 +87,7 @@ export async function reserveRun(
     const run = toRun(existing);
     if (run.request_hash !== requestHash) return { status: "conflict", reason: "request_hash_mismatch", run_id: run.run_id };
     if (run.parent_version !== authority.parent.version) return { status: "conflict", reason: "parent_version_mismatch", run_id: run.run_id };
+    if (!grantsRecordedClasses(authority, run)) return { status: "conflict", reason: "source_classes_not_granted", run_id: run.run_id };
     return { status: "existing", run };
   });
 }
@@ -89,7 +99,7 @@ export type ReserveReplayResult =
 
 /**
  * Reserves a pinned replay of a completed run: the same plan, cutoff,
- * policies, and parent version, marked `replay_of_run_id`. Replaying a replay
+ * policies, source-class grant, and parent version, marked `replay_of_run_id`. Replaying a replay
  * pins to the original. The owner's request key is idempotent within the
  * source's parent; reusing it for a different source is a conflict. No
  * execution happens here — a supervised worker picks the pending run up.
@@ -108,8 +118,8 @@ export async function reserveReplayRun(
     const requestKey = `replay:${input.request_key}`;
     const created = (await client.query<Record<string, unknown>>(
       `insert into financial_runs (user_id, parent_kind, parent_id, parent_version, request_key, request_hash, plan_id, feature_mode,
-                                   knowledge_cutoff, policies, replay_of_run_id)
-       select user_id, parent_kind, parent_id, parent_version, $3, request_hash, plan_id, feature_mode, knowledge_cutoff, policies, run_id
+                                   knowledge_cutoff, policies, allowed_source_classes, replay_of_run_id)
+       select user_id, parent_kind, parent_id, parent_version, $3, request_hash, plan_id, feature_mode, knowledge_cutoff, policies, allowed_source_classes, run_id
          from financial_runs where run_id = $1 and user_id = $2
        on conflict (user_id, parent_kind, parent_id, request_key) do nothing
        returning ${RUN_COLUMNS}`,

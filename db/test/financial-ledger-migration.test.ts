@@ -30,8 +30,8 @@ async function insertRun(db: Client, overrides: Partial<Record<"user_id" | "requ
   const values = { user_id: IDS.owner, request_key: "turn-1", request_hash: HASH, plan_id: PLAN_ID, ...overrides };
   const result = await db.query(
     `insert into financial_runs (user_id, parent_kind, parent_id, parent_version, request_key, request_hash, plan_id,
-                                 feature_mode, knowledge_cutoff, policies)
-     values ($1, 'chat_thread', $2, '1', $3, $4, $5, 'shadow', '2024-01-15T23:59:59.999-05:00', '{"reporting_basis":"as_reported"}')
+                                 feature_mode, knowledge_cutoff, policies, allowed_source_classes)
+     values ($1, 'chat_thread', $2, '1', $3, $4, $5, 'shadow', '2024-01-15T23:59:59.999-05:00', '{"reporting_basis":"as_reported"}', '{sec_filing}')
      returning run_id`,
     [values.user_id, PARENT_ID, values.request_key, values.request_hash, values.plan_id],
   );
@@ -52,8 +52,8 @@ test("0047 financial run ledger", { timeout: 300_000 }, async (t) => {
   const runId = await insertRun(db);
 
   await t.test("one run per owner, parent, and request key; conflicting hashes cannot reuse it", async () => {
-    await expectRejected(db, `insert into financial_runs (user_id, parent_kind, parent_id, parent_version, request_key, request_hash, plan_id, feature_mode, knowledge_cutoff, policies)
-      values ($1, 'chat_thread', $2, '1', 'turn-1', $3, $4, 'shadow', now(), '{}')`, /financial_runs_user_id_parent_kind_parent_id_request_key_key/, [IDS.owner, PARENT_ID, "b".repeat(64), PLAN_ID]);
+    await expectRejected(db, `insert into financial_runs (user_id, parent_kind, parent_id, parent_version, request_key, request_hash, plan_id, feature_mode, knowledge_cutoff, policies, allowed_source_classes)
+      values ($1, 'chat_thread', $2, '1', 'turn-1', $3, $4, 'shadow', now(), '{}', '{sec_filing}')`, /financial_runs_user_id_parent_kind_parent_id_request_key_key/, [IDS.owner, PARENT_ID, "b".repeat(64), PLAN_ID]);
     // Another owner with the same parent id and request key is a different run.
     await insertPlan(db, "0f000000-0000-4000-8000-0000000000e2", IDS.otherOwner);
     await insertRun(db, { user_id: IDS.otherOwner, plan_id: "0f000000-0000-4000-8000-0000000000e2" });
