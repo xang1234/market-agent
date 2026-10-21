@@ -273,7 +273,7 @@ const withLossPrices = (edit: (prices: ReadonlyArray<PriceObservation>) => Reado
 
 const figures = async (db: Client) => (await valuations(db)).map((row) => `${row.legal_name} ${row.valuation} ${row.value ?? row.reason_code} ${row.session_date} ${row.knowledge_cutoff}`);
 
-test("screener certification when a run fails", { timeout: 600_000 }, async (t) => {
+test("screener certification when a run fails or a price goes missing", { timeout: 600_000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for screener certification coverage");
     return;
@@ -300,5 +300,24 @@ test("screener certification when a run fails", { timeout: 600_000 }, async (t) 
     assert.deepEqual(await ledger(db), { runs: 2, financial_runs: 2, certificates: 6 });
     assert.deepEqual((await certifyScreenerUniverse(healthy, NVDA.cutoff)).map((chunk) => chunk.outcome), ["published"]);
     assert.deepEqual(await ledger(db), { runs: 2, financial_runs: 2, certificates: 6 });
+  });
+
+  const marketCaps = async () => (await figures(db)).filter((row) => row.includes(" market_cap "));
+  const unpriced = { pool, evidence: withLossPrices(() => []) };
+
+  await t.test("a gap certified later in the same session keeps the issuer's value", async () => {
+    const sameSession = "2024-06-10T15:00:00.000Z";
+    assert.deepEqual((await certifyScreenerUniverse(unpriced, sameSession)).map((chunk) => chunk.outcome), ["published"]);
+    assert.deepEqual(await marketCaps(), [
+      `Dual Listed Co market_cap split_listing_unresolved 2024-06-07 ${sameSession}`,
+      `Loss Co market_cap 20000000000 2024-06-07 ${NVDA.cutoff}`,
+      `NVIDIA Corporation market_cap 2956800000000 2024-06-07 ${sameSession}`,
+    ]);
+  });
+
+  await t.test("a gap certified a session later replaces the value", async () => {
+    const mondayClose = "2024-06-10T20:30:00.000Z";
+    assert.deepEqual((await certifyScreenerUniverse(unpriced, mondayClose)).map((chunk) => chunk.outcome), ["published"]);
+    assert.deepEqual((await marketCaps()).filter((row) => row.startsWith("Loss Co")), [`Loss Co market_cap missing_input 2024-06-10 ${mondayClose}`]);
   });
 });
