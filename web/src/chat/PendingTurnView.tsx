@@ -108,7 +108,7 @@ function StreamedTurn({ phase, stream, blocks, children }: { phase: TurnState['p
           if (block === undefined) return null
           return (
             <BlockColumn key={block_id} kind={block.kind}>
-              <StreamingBlockView block={block} />
+              <StreamingBlockView block={block} snapshotId={stream.snapshot_id} />
             </BlockColumn>
           )
         })}
