@@ -7,8 +7,9 @@
 //
 // Outcomes are explicit. Cancellation is observed at every fence. Integrity
 // failures (diverging re-execution, corrupt persisted bindings) fail the run.
-// Anything else fails the run as internal_error and is rethrown — nothing is
-// reinterpreted as missing data or partial success.
+// A transient database fault leaves the run for a retry. Anything else fails
+// the run as internal_error and is rethrown — nothing is reinterpreted as
+// missing data or partial success.
 
 import {
   ExecutionIntegrityError,
@@ -26,6 +27,7 @@ import { fencedTransaction, StaleLeaseError, type RunLease } from "./lease.ts";
 import { checkPlanLimits } from "./plan-limits.ts";
 import type { FinancialEvidencePort, SqlExecutor } from "./ports.ts";
 import { transitionRun } from "./run-repo.ts";
+import { isTransientDatabaseError } from "./transaction.ts";
 import { declareUnits } from "./unit-repo.ts";
 
 export type ExecutionReport =
@@ -67,7 +69,7 @@ export async function executeRun(input: ExecuteRunInput): Promise<ExecutionRepor
       return { run_id: lease.run_id, outcome: "cancelled" };
     }
     // A lost lease means another worker owns the run: nothing may be written.
-    if (error instanceof StaleLeaseError) throw error;
+    if (error instanceof StaleLeaseError || isTransientDatabaseError(error)) throw error;
     if (error instanceof ExecutionIntegrityError) return fail(client, lease, "integrity_failure");
     await fail(client, lease, "internal_error").catch((failure) => {
       if (!(failure instanceof StaleLeaseError)) throw failure;

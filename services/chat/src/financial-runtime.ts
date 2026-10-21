@@ -26,7 +26,7 @@ import {
   type OperationNode,
 } from "../../financial-core/src/index.ts";
 import { cashResilienceDraft, LATEST_FISCAL_YEAR, type CashResiliencePeriod } from "../../financial-engine/src/cash-resilience.ts";
-import type { PersistParentArtifact } from "../../financial-engine/src/finalize.ts";
+import { ParentRefusedError, type PersistParentArtifact } from "../../financial-engine/src/finalize.ts";
 import {
   buildDeterministicPlan,
   planFinancialRequest,
@@ -468,7 +468,7 @@ function persistAssistantMessage(
         saved === null ? null : JSON.stringify(saved),
       ],
     );
-    if (inserted.rows.length === 0) throw new Error("the chat thread no longer belongs to the run's owner");
+    if (inserted.rows.length === 0) throw new ParentRefusedError("the chat thread no longer belongs to the run's owner");
   };
 }
 
@@ -488,6 +488,7 @@ export const SCOPE_METRICS: Readonly<Record<string, string | null>> = {
   capex: "capex",
   eps_basic: "eps_basic",
   eps_diluted: "eps_diluted",
+  cash_and_equivalents: "cash_and_equivalents",
   total_assets: "total_assets",
   total_liabilities: "total_liabilities",
   total_equity: "total_equity",

@@ -18,7 +18,7 @@ import { randomUUID } from "node:crypto";
 
 import { createRuntimeAuthority, type FinancialRuntimeAuthority } from "../../financial-core/src/index.ts";
 import { cashResilienceDraft, LATEST_FISCAL_YEAR } from "../../financial-engine/src/cash-resilience.ts";
-import type { PersistParentArtifact } from "../../financial-engine/src/finalize.ts";
+import { ParentRefusedError, type PersistParentArtifact } from "../../financial-engine/src/finalize.ts";
 import { buildDeterministicPlan, type DeterministicUnits, type PlanningContext, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import type { ParentRecovery } from "../../financial-engine/src/recovery.ts";
@@ -282,7 +282,7 @@ const persistMemoSection: PersistParentArtifact = async (tx, publication) => {
      returning section_id`,
     [tx.run.parent_id, publication.unit_id, publication.run_id, publication.snapshot_id, publication.certificate_digest, JSON.stringify(publication.block), tx.run.user_id],
   );
-  if (inserted.rows.length === 0) throw new Error("the memo run no longer belongs to the financial run's owner");
+  if (inserted.rows.length === 0) throw new ParentRefusedError("the memo run no longer belongs to the financial run's owner");
 };
 
 type MemoRun = { user_id: string; template_id: string; template_version: number; context: AnalyzeRunFinancialMetadata | null; optional_sections: ReadonlySet<string> };

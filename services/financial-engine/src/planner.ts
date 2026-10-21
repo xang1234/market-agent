@@ -96,6 +96,14 @@ export type PlanningResult =
   | { outcome: "configuration_needed"; reason: string; model_calls: 0 }
   | { outcome: "unsupported"; reason: string; issues: ValidationIssue[]; model_calls: number };
 
+/** The planning model did not answer: unreachable, timed out, or failed. */
+export class PlanningModelError extends Error {
+  constructor(cause: unknown) {
+    super("the planning model did not answer", { cause });
+    this.name = "PlanningModelError";
+  }
+}
+
 export class ClarificationError extends Error {
   constructor(message: string) {
     super(message);
@@ -123,7 +131,12 @@ export async function planFinancialRequest(context: PlanningContext, requestText
   let lastIssues: ValidationIssue[] = [{ path: "$", code: "no_model_budget", message: "no model calls are available for planning" }];
   const maxCalls = Math.min(2, Math.max(0, context.max_model_calls));
   while (calls < maxCalls) {
-    const response = await model({ messages });
+    let response;
+    try {
+      response = await model({ messages });
+    } catch (cause) {
+      throw new PlanningModelError(cause);
+    }
     calls += 1;
     const draft = parseDraft(response.text);
     const attempt = draft.ok ? assemblePlan(context, draft.value, { kind: "model", adapter_version: PLANNER_ADAPTER_VERSION, model: response.model, prompt_version: PLANNER_PROMPT_VERSION }) : draft;
