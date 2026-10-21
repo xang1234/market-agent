@@ -122,6 +122,8 @@ test("guidance is kept by a follow-up until one turns it off", () => {
   // Read back from a saved answer.
   const saved = JSON.parse(JSON.stringify(asked));
   assert.deepEqual(parseResearchScope(saved), { ...saved, inherited: [] });
+  // An engine answer that was not checked for coverage reads back as one (#425).
+  assert.equal(parseResearchScope({ ...saved, coverage_unchecked: true })?.coverage_unchecked, true);
 });
 
 test("a follow-up that drops the segments clears them, keeps the rest, and they stay off", () => {

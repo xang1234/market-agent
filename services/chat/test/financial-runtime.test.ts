@@ -293,7 +293,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(await ask(revenueModel(["AAA"]), "Revenue for AAA"), ["answer", 1]);
   });
 
-  await t.test("an answer with no reading of its question says its coverage was not checked, and its scope records it (#425)", async () => {
+  await t.test("an answer with no reading of its question says its coverage was not checked, and its scope records it (#425)", { timeout: 60_000 }, async () => {
     const answer = async (readQuestion: () => Promise<ReturnType<typeof parseProposal>>) => {
       const { events } = await chatHarness(pool, { model: revenueModel(["AAA"]), readQuestion, researchScope: scopeOver as never }).run({ ...base, userIntent: "Revenue for AAA" });
       const message = (await db.query(`select blocks, research_scope from chat_messages where message_id = $1`, [completed(events).message_id])).rows[0];
@@ -302,6 +302,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     const unchecked = [["It was not checked whether this answer covers everything the question asks for."], true];
     assert.deepEqual(await answer(async () => null), unchecked, "no reading");
     assert.deepEqual(await answer(async () => { throw new Error("scope model down"); }), unchecked, "a failed reading");
+    assert.deepEqual(await answer(() => { throw new Error("no scope reader"); }), unchecked, "a reader that throws before it answers");
     assert.deepEqual(await answer(async () => parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [] }))), [[], undefined]);
   });
 
@@ -460,6 +461,14 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       const retried = completed((await harness().run({ ...turn, runId })).events);
       assert.deepEqual([retried.message_id, model.calls], [first.message_id, 1], runId);
     }
+    // One whose saved gap cannot be read back completes without it, as a published answer does.
+    st.mock.method(console, "error", () => {});
+    const failingReads = {
+      query: (text: string, values?: unknown[]) => text.includes("from chat_messages m") ? Promise.reject(new Error("Connection terminated unexpectedly")) : pool.query(text, values),
+      connect: () => pool.connect(),
+    };
+    const unread = completed((await chatHarness(failingReads as never, { model, persistAssistantMessage }).run({ ...turn, runId: randomUUID() })).events);
+    assert.deepEqual([unread.message_id, "message" in unread, model.calls], [first.message_id, false, 1]);
     const { rows } = await db.query(`select count(*)::int as n from chat_messages where thread_id = $1 and research_scope->>'reads' = 'financial_gap'`, [threadId]);
     assert.equal(rows[0].n, 0, "no scope was given, so none is saved");
     assert.equal((await db.query(`select count(*)::int as n from chat_messages where message_id = $1`, [first.message_id])).rows[0].n, 1);
