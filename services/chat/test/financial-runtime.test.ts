@@ -235,7 +235,32 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     // A company named twice takes one of the slots the carried ones fill.
     const three = [await carried("QTR"), await carried("COX"), await carried("CCC")];
     await turnWithPick(chatHarness(pool, { model, priorSubjects: async () => three }), "Compare its revenue with AMB, AAA and ALPHA", "Beta Holdings Corp.");
-    assert.deepEqual(seen, ["AAA; BBB; CCC; OPM; PAX", "AMB; BBB; CCC; OPM; PAX", "ALPHA; BBB; CCC; OPM; PAX", "AAA; AMB; OPM; PAX; COX", "QTR; COX; CCC; AMB; AAA"]);
+    // An ambiguous name past the cap is still asked about; a resolved company gives up its slot.
+    const offered = completed((await chatHarness(pool, { model }).run({ ...base, userIntent: "Compare revenue for BBB, CCC, OPM, PAX, COX and AMB" })).events);
+    assert.equal(offered.clarification, true, "the ambiguous company is asked about");
+    await turnWithPick(chatHarness(pool, { model }), "Compare revenue for BBB, CCC, OPM, PAX, COX and AMB", "Alpha Industries Inc.");
+    // A carried company named by the ticker the message gives another one is named to the planner by its legal name.
+    const alphaAsAmb = { ...(await resolveMention("AAA")), handoff: { display_labels: { ticker: "AMB" } } } as unknown as ChatResolvedSubjectPreResolution;
+    await turnWithPick(chatHarness(pool, { model, priorSubjects: async () => [alphaAsAmb] }), "Compare its revenue with the other AMB", "Beta Holdings Corp.");
+    assert.deepEqual(seen, [
+      "AAA; BBB; CCC; OPM; PAX",
+      "AMB; BBB; CCC; OPM; PAX",
+      "ALPHA; BBB; CCC; OPM; PAX",
+      "AAA; AMB; OPM; PAX; COX",
+      "QTR; COX; CCC; AMB; AAA",
+      "BBB; CCC; OPM; PAX; AMB",
+      "Alpha Industries Inc.; AMB",
+    ]);
+  });
+
+  await t.test("a planning model that fails after a clarification pick still saves the picked company (#425 review)", async () => {
+    const harness = chatHarness(pool, { model: (async () => { throw new Error("provider down"); }) as PlanningModel, researchScope: scopeOver as never });
+    const done = await turnWithPick(harness, "Compare revenue for AAA and AMB", "Beta Holdings Corp.");
+    assert.deepEqual(done.financial_gap, { reason_code: "planning_unavailable" });
+    assert.deepEqual((harness.persisted.at(-1)!.research_scope as { companies: unknown }).companies, [
+      { issuer_id: IDS.issuerA, label: "AAA" },
+      { issuer_id: IDS.issuerB, label: "Beta Holdings Corp." },
+    ]);
   });
 
   await t.test("each name a turn gives is resolved once (#425)", async () => {
@@ -250,7 +275,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
 
   await t.test("a retry of a saved answer reads neither the question nor its scope again (#425)", async () => {
     const turn = { ...base, turnId: randomUUID(), userIntent: "Revenue for AAA" };
-    completed((await chatHarness(pool, { model: revenueModel(["AAA"]) }).run(turn)).events);
+    const first = completed((await chatHarness(pool, { model: revenueModel(["AAA"]) }).run(turn)).events);
     let reads = 0;
     const readQuestion = async () => {
       reads += 1;
@@ -260,8 +285,8 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       reads += 1;
       return null as never;
     };
-    completed((await chatHarness(pool, { model: revenueModel(["AAA"]), readQuestion, researchScope }).run(turn)).events);
-    assert.equal(reads, 0);
+    const retried = completed((await chatHarness(pool, { model: revenueModel(["AAA"]), readQuestion, researchScope }).run(turn)).events);
+    assert.deepEqual([retried.message_id, reads], [first.message_id, 0], "the retry returns the saved answer, reading nothing");
   });
 
   await t.test("a resolver that fails fails the turn, with nothing planned", async () => {
