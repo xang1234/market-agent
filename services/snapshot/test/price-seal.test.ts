@@ -106,7 +106,7 @@ function priceRecords(): FinancialUnitRecords {
       observed_at: "2024-06-07T20:00:00.000Z", known_at: "2024-06-07T20:15:00.000Z", body_sha256: "d".repeat(64),
     }],
     split_histories: [{
-      subject_id: F.issuer,
+      subject_ref: { kind: "issuer", id: F.issuer },
       history: { status: "ok", listing_id: LISTING, timezone: "America/New_York", checked_at: "2024-06-10T12:00:00.000Z", splits: [{ ...SPLIT, provider_ref: "E1" }] },
     }],
     computations: publication.computations.map((computation) => ({
@@ -171,6 +171,10 @@ test("the seal resolves the subject's listing again and rebuilds the restatement
   const unresolved = mutable(priceRecords());
   unresolved.split_histories[0].history = { status: "gap", reason_code: "split_listing_unresolved" };
   assert.deepEqual(reasons(verifyFinancialUnit(unresolved, "price_unit", CONTEXT)), ["financial_input_ineligible:listing_changed"]);
+  // A history loaded for another kind of subject with the same id is not this subject's (#457 review).
+  const otherKind = mutable(priceRecords());
+  otherKind.split_histories[0].subject_ref.kind = "listing";
+  assert.deepEqual(reasons(verifyFinancialUnit(otherKind, "price_unit", CONTEXT)), ["financial_input_ineligible:listing_changed"]);
   const resplit = mutable(priceRecords());
   resplit.split_histories[0].history.splits = [{ ...SPLIT, split_to: "20" }];
   assert.deepEqual(reasons(verifyFinancialUnit(resplit, "price_unit", CONTEXT)), ["financial_input_ineligible:splits_changed"]);
