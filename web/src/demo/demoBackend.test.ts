@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { setTimeout as delay } from 'node:timers/promises'
 
 import fixture from '../../../services/app/fixtures/golden-conversation.replay.json'
 import { extractInspectableRefs, type InspectableBlockRef } from '../evidence/inspectableRefs.ts'
@@ -130,12 +131,54 @@ test('every ref a visitor can open from a recorded answer, and every ref its evi
   assert.deepEqual(unavailable, [])
 })
 
-test('the demo answers an off-script request with a 404 that names the recorded questions', async () => {
+test('the demo answers an off-script request with a 404 that names the recorded questions, not the request', async () => {
   const response = await fetch('http://demo.invalid/v1/market/quotes')
   assert.equal(response.status, 404)
   assert.deepEqual(await response.json(), {
     error:
-      'This demo replays one recorded conversation, so it has no answer for GET /v1/market/quotes. ' +
+      "This demo replays one recorded conversation, so it can't answer this. " +
       'In Chat, ask in order: "Analyze NVDA", "Compare it with AMD YTD", "Explain the differences and show the evidence".',
+  })
+})
+
+// This process's location is at `pathname` while `run` runs, and records where it was sent.
+async function withLocation(pathname: string, run: (replaced: string[]) => Promise<void>) {
+  const replaced: string[] = []
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'location')
+  Object.defineProperty(globalThis, 'location', { value: { pathname, replace: (to: string) => replaced.push(to) }, configurable: true })
+  try {
+    await run(replaced)
+  } finally {
+    if (original) Object.defineProperty(globalThis, 'location', original)
+    else delete (globalThis as { location?: Location }).location
+  }
+}
+
+const settled = (response: Promise<Response>) =>
+  Promise.race([response.then(({ status }) => `answered ${status}`, (error: Error) => `failed ${error.name}`), delay(50, 'unanswered')])
+
+test('a chat whose thread the replay has no recording of starts a new chat, with no error shown meanwhile', async () => {
+  const thread = crypto.randomUUID()
+  for (const shown of [`/market-agent/chat/${thread}`, `/market-agent/chat/${thread}/`]) {
+    await withLocation(shown, async (replaced) => {
+      const load = new AbortController()
+      const response = fetch(`http://demo.invalid/v1/chat/threads/${thread}/messages`, { signal: load.signal })
+      assert.equal(await settled(response), 'unanswered')
+      assert.deepEqual(replaced, ['/market-agent/chat'])
+      load.abort()
+      assert.equal(await settled(response), 'failed AbortError', 'an abort or the history timeout still ends the load')
+    })
+  }
+})
+
+test('a chat whose history is recorded, an off-script question in it, and another thread\'s miss stay on the page', async () => {
+  const history = fixture.exchanges.find((e) => e.method === 'GET' && e.path.endsWith('/messages'))!
+  const thread = history.path.split('/').at(-2)!
+  await withLocation(`/market-agent/chat/${thread}`, async (replaced) => {
+    assert.equal(await settled(fetch(`http://demo.invalid${history.path}?${history.query}`)), 'answered 200')
+    const offScript = fetch(`http://demo.invalid/v1/chat/threads/${thread}/messages`, { method: 'POST', body: '{"content":"What is the weather?"}' })
+    assert.equal(await settled(offScript), 'answered 404')
+    assert.equal(await settled(fetch(`http://demo.invalid/v1/chat/threads/${crypto.randomUUID()}/messages`)), 'answered 404')
+    assert.deepEqual(replaced, [])
   })
 })

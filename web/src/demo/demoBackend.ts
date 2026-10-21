@@ -1,6 +1,7 @@
 // The static demo's backend: the page answers its own /v1 requests from the recorded
 // golden conversation, through the replay UI mode runs (services/app/src/replayCore.ts).
-// Nothing here matches or rewrites requests; it adapts fetch and EventSource to it.
+// The replay matches the requests. This module adapts fetch and EventSource to it and
+// decides what a visitor gets when nothing recorded matches.
 import fixtureJson from '../../../services/app/fixtures/golden-conversation.replay.json'
 import {
   createReplay,
@@ -80,8 +81,29 @@ function installFetch(replay: Replay): void {
       body: await request.text(),
     })
     announce(request.method, url.pathname, reply)
-    return toResponse(reply ?? offScript(request.method, url.pathname))
+    if (startNewChatInstead(request.method, url.pathname, reply)) return unanswered(request.signal)
+    return toResponse(reply ?? offScript())
   }
+}
+
+/** For the history of the thread this page shows, which the replay has no recording of
+ *  (most often one New chat minted in a replay session the tab has lost, #429), sends
+ *  the page to a new chat. True when it did; the load is then left unanswered, so no
+ *  error shows while the page goes. */
+function startNewChatInstead(method: string, path: string, reply: ReplayReply | undefined): boolean {
+  const thread = /^\/v1\/chat\/threads\/([^/]+)\/messages$/.exec(path)?.[1]
+  if (reply || method !== 'GET' || thread === undefined) return false
+  const page = /^(.*\/chat)\/([^/]+)\/?$/.exec(location.pathname)
+  if (page?.[2] !== thread) return false
+  location.replace(page[1]!)
+  return true
+}
+
+function unanswered(signal: AbortSignal): Promise<never> {
+  return new Promise((_, reject) => {
+    signal.throwIfAborted()
+    signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+  })
 }
 
 const CONNECTING = 0
@@ -187,7 +209,7 @@ function announce(method: string, path: string, reply: ReplayReply | undefined):
   console.info(`[demo replay] ${method} ${path} -> ${reply?.status ?? 404}`)
 }
 
-function offScript(method: string, path: string): ReplayReply {
+function offScript(): ReplayReply {
   // The chat shows a failed request's `error` (src/http/authFetch.ts), so an off-script
   // question explains itself.
   return {
@@ -195,7 +217,7 @@ function offScript(method: string, path: string): ReplayReply {
     contentType: 'application/json',
     body: JSON.stringify({
       error:
-        `This demo replays one recorded conversation, so it has no answer for ${method} ${path}. ` +
+        "This demo replays one recorded conversation, so it can't answer this. " +
         `In Chat, ask in order: ${DEMO_QUESTIONS.map((q) => `"${q}"`).join(', ')}.`,
     }),
   }
