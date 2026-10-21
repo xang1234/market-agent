@@ -42,9 +42,9 @@ test("dev-api default runtime module resolves when loader cwd is the repo root",
   assert.equal(typeof adapters?.agents.run, "function");
 });
 
-test("the worker recovers memo and grid runs", () => {
+test("the worker recovers memo, grid and screener valuation runs", () => {
   const db = { query: async () => assert.fail("building the parents runs no query") };
-  assert.deepEqual(Object.keys(recoveryParents(db)), ["analyze_memo_run", "analyst_grid_run"]);
+  assert.deepEqual(Object.keys(recoveryParents(db)), ["analyze_memo_run", "analyst_grid_run", "screener_valuation_run"]);
 });
 
 test("dev-api refuses a runtime module whose Analyze lane cannot hydrate", async () => {

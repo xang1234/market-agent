@@ -405,8 +405,8 @@ async function seedFiling(db: Client, sourceId: string, contentHash: string, pub
   });
 }
 
-/** One SEC value certified as filed on `asFiledOn`. */
-async function seedAsFiled(db: Client, fact: {
+/** One SEC value of `issuer`, certified as filed on `asFiledOn`. */
+async function seedAsFiled(db: Client, issuer: string, fact: {
   metric: string; unit: "currency_per_share" | "shares"; value: string; source: string; asFiledOn: string; reportedAt: string;
   period: { kind: "fiscal_y" | "point"; start: string | null; end: string; fiscal_year: number; fiscal_period: string };
 }): Promise<void> {
@@ -424,7 +424,7 @@ async function seedAsFiled(db: Client, fact: {
      values ('issuer', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 1, '2026-10-01T00:00:00Z', $11, '2026-10-01T00:00:00Z', $12,
              'reported', 'authoritative', 'filing_time', 'full', 1)
      returning fact_id::text`,
-    [NVDA.issuer, metricId, fact.period.kind, fact.period.start, fact.period.end, fact.period.fiscal_year, fact.period.fiscal_period,
+    [issuer, metricId, fact.period.kind, fact.period.start, fact.period.end, fact.period.fiscal_year, fact.period.fiscal_period,
       fact.value, fact.unit, fact.unit === "shares" ? null : "USD", fact.reportedAt, fact.source],
   )).rows[0]!.fact_id;
   await recordFactPrecisionAttestation(db, {
@@ -437,31 +437,46 @@ async function seedAsFiled(db: Client, fact: {
   });
 }
 
-/** NVDA: its listing with the 2024-06-10 split synced that morning, Friday's 1200.00 close, the FY2024 10-K's diluted EPS, and the Q1 FY2025 10-Q's cover count. */
-export async function seedNvda(db: Client): Promise<void> {
+/** An issuer valued at NVDA.cutoff: its ids, its XNAS ticker and name, and the inputs of its market cap and P/E. */
+export type ValuedIssuer = Readonly<{
+  issuer: string; listing: string; tenK: string; tenQ: string;
+  ticker: string; name: string; close: string; eps: string; shares: string;
+}>;
+
+/**
+ * One common-stock listing with its splits synced on the morning of NVDA.cutoff,
+ * Friday 2024-06-07's Polygon close, the FY2024 10-K's diluted EPS, and the Q1
+ * FY2025 10-Q's cover count.
+ */
+export async function seedValuedIssuer(db: Client, subject: ValuedIssuer): Promise<void> {
   await db.query(
     `insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at) values ($1, 'polygon_market', 'market_data', 'primary', 'licensed', now())
      on conflict (source_id) do nothing`,
     [POLYGON_MARKET_SOURCE_ID],
   );
-  await seedFiling(db, NVDA.tenK, "4".repeat(64), "2024-02-21T23:59:59.999-05:00");
-  await seedFiling(db, NVDA.tenQ, "5".repeat(64), "2024-05-29T23:59:59.999-04:00");
-  await db.query(`insert into issuers (issuer_id, legal_name) values ($1, 'NVIDIA Corporation')`, [NVDA.issuer]);
-  await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1, $1, 'common_stock')`, [NVDA.issuer]);
-  await db.query(`insert into listings (listing_id, instrument_id, mic, ticker, trading_currency, timezone) values ($1, $2, 'XNAS', 'NVDA', 'USD', 'America/New_York')`, [NVDA.listing, NVDA.issuer]);
-  await db.query(`insert into listing_splits (listing_id, execution_date, split_from, split_to, source_id) values ($1, '2024-06-10', 1, 10, $2)`, [NVDA.listing, POLYGON_MARKET_SOURCE_ID]);
-  await db.query(`insert into listing_split_coverage (listing_id, checked_at, source_id) values ($1, '2024-06-10T12:00:00Z', $2)`, [NVDA.listing, POLYGON_MARKET_SOURCE_ID]);
+  await seedFiling(db, subject.tenK, "4".repeat(64), "2024-02-21T23:59:59.999-05:00");
+  await seedFiling(db, subject.tenQ, "5".repeat(64), "2024-05-29T23:59:59.999-04:00");
+  await db.query(`insert into issuers (issuer_id, legal_name) values ($1, $2)`, [subject.issuer, subject.name]);
+  await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1, $1, 'common_stock')`, [subject.issuer]);
+  await db.query(`insert into listings (listing_id, instrument_id, mic, ticker, trading_currency, timezone) values ($1, $2, 'XNAS', $3, 'USD', 'America/New_York')`, [subject.listing, subject.issuer, subject.ticker]);
+  await db.query(`insert into listing_split_coverage (listing_id, checked_at, source_id) values ($1, '2024-06-10T12:00:00Z', $2)`, [subject.listing, POLYGON_MARKET_SOURCE_ID]);
   await db.query(
     `insert into price_observations (listing_id, source_id, kind, price_text, currency, observed_at, known_at, fetched_at, body_sha256)
-     values ($1, $2, 'session_close', '1200.00', 'USD', '2024-06-07T20:00:00Z', '2024-06-07T20:15:00Z', '2024-06-07T20:15:00Z', $3)`,
-    [NVDA.listing, POLYGON_MARKET_SOURCE_ID, "d".repeat(64)],
+     values ($1, $2, 'session_close', $3, 'USD', '2024-06-07T20:00:00Z', '2024-06-07T20:15:00Z', '2024-06-07T20:15:00Z', $4)`,
+    [subject.listing, POLYGON_MARKET_SOURCE_ID, subject.close, "d".repeat(64)],
   );
-  await seedAsFiled(db, {
-    metric: "eps_diluted", unit: "currency_per_share", value: "11.93", source: NVDA.tenK, asFiledOn: "2024-02-21", reportedAt: "2024-02-21T00:00:00Z",
+  await seedAsFiled(db, subject.issuer, {
+    metric: "eps_diluted", unit: "currency_per_share", value: subject.eps, source: subject.tenK, asFiledOn: "2024-02-21", reportedAt: "2024-02-21T00:00:00Z",
     period: { kind: "fiscal_y", start: "2023-01-30", end: "2024-01-28", fiscal_year: 2024, fiscal_period: "FY" },
   });
-  await seedAsFiled(db, {
-    metric: "shares_outstanding", unit: "shares", value: "2464000000", source: NVDA.tenQ, asFiledOn: "2024-05-17", reportedAt: "2024-05-29T00:00:00Z",
+  await seedAsFiled(db, subject.issuer, {
+    metric: "shares_outstanding", unit: "shares", value: subject.shares, source: subject.tenQ, asFiledOn: "2024-05-17", reportedAt: "2024-05-29T00:00:00Z",
     period: { kind: "point", start: null, end: "2024-05-17", fiscal_year: 2025, fiscal_period: "Q1" },
   });
+}
+
+/** NVDA: its listing with the 2024-06-10 split synced that morning, Friday's 1200.00 close, the FY2024 10-K's diluted EPS, and the Q1 FY2025 10-Q's cover count. */
+export async function seedNvda(db: Client): Promise<void> {
+  await seedValuedIssuer(db, { ...NVDA, ticker: "NVDA", name: "NVIDIA Corporation", close: "1200.00", eps: "11.93", shares: "2464000000" });
+  await db.query(`insert into listing_splits (listing_id, execution_date, split_from, split_to, source_id) values ($1, '2024-06-10', 1, 10, $2)`, [NVDA.listing, POLYGON_MARKET_SOURCE_ID]);
 }
