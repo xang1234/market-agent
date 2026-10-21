@@ -7,7 +7,14 @@
 // about it can be enumerated. A certificate or operation version this build
 // does not support is reported as unavailable, never reinterpreted.
 
-import { dependencyClosure, type BoundFinancialInputV1, type LocalId, type SplitAdjustmentV2 } from "../../financial-core/src/index.ts";
+import {
+  BOUND_PRICE_INPUT_SCHEMA_VERSION,
+  dependencyClosure,
+  type BoundFinancialInputV1,
+  type LocalId,
+  type PriceObservationKind,
+  type SplitAdjustmentV2,
+} from "../../financial-core/src/index.ts";
 import type { SqlExecutor } from "./ports.ts";
 import { readClosureInputs, readCommittedResult } from "./read-model.ts";
 import { supportedPublication, unsupportedPlanVersion } from "./version-registry.ts";
@@ -28,6 +35,19 @@ export type InspectedInput = Readonly<
       period: Readonly<{ kind: string; start: string | null; end: string; fiscal_year: number; fiscal_period: string }>;
       precision_status: string;
       publication: Readonly<{ attestation_id: string; available_no_later_than: string; precision: string }>;
+    }
+  | {
+      input_slot: LocalId;
+      status: "bound";
+      observation_id: string;
+      listing_id: string;
+      source: Readonly<{ source_id: string; body_sha256: string }>;
+      metric: Readonly<{ metric_key: string; definition_version: string }>;
+      /** As observed; the computed value comes from its split adjustment. */
+      value: string;
+      split_adjustment: SplitAdjustmentV2;
+      unit: unknown;
+      observation: Readonly<{ kind: PriceObservationKind; observed_at: string; known_at: string }>;
     }
   | { input_slot: LocalId; status: "gap"; reason_code: string | null }
 >;
@@ -104,6 +124,20 @@ export async function inspectCommittedResult(db: SqlExecutor, ownerUserId: strin
     inputs: inputs.map((input): InspectedInput => {
       if (input.binding_status === "gap") return { input_slot: input.input_slot, status: "gap", reason_code: input.gap_reason };
       const bound = input.bound_payload as BoundFinancialInputV1;
+      if (bound.schema_version === BOUND_PRICE_INPUT_SCHEMA_VERSION) {
+        return {
+          input_slot: input.input_slot,
+          status: "bound",
+          observation_id: bound.observation_id,
+          listing_id: bound.listing_id,
+          source: { source_id: bound.source.source_id, body_sha256: bound.source.body_sha256 },
+          metric: bound.metric,
+          value: bound.numeric.value,
+          split_adjustment: bound.split_adjustment,
+          unit: bound.unit,
+          observation: { kind: bound.observation_kind, observed_at: bound.observed_at, known_at: bound.known_at },
+        };
+      }
       return {
         input_slot: input.input_slot,
         status: "bound",

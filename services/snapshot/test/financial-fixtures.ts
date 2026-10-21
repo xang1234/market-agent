@@ -12,7 +12,7 @@ import {
   unitPublication,
   validateBoundInput,
   validateFinancialPlan,
-  type BoundFinancialInputV1,
+  type BoundFactInputV1,
   type FinancialPlanV1,
   type SlotBinding,
 } from "../../financial-core/src/index.ts";
@@ -98,7 +98,7 @@ export function marginPlan(calculation: FixtureCalculation = GROSS_MARGIN): Fina
   return validated.value;
 }
 
-function boundInput(slot: string, factId: string, metric: string, value: string): BoundFinancialInputV1 {
+function boundInput(slot: string, factId: string, metric: string, value: string): BoundFactInputV1 {
   const validated = validateBoundInput({
     schema_version: "financial_bound_input.v1",
     input_slot: slot,

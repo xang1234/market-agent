@@ -13,8 +13,9 @@ export const FINANCIAL_CATALOG_VERSION = "catalog.v1";
  * per_share / share_count_average: duration values that are not additive (EPS,
  * weighted-average shares).
  * share_count: instant share count.
+ * price: a share price at an instant, bound from a price observation, never a fact.
  */
-export type MetricValueKind = "flow" | "balance" | "per_share" | "share_count_average" | "share_count";
+export type MetricValueKind = "flow" | "balance" | "per_share" | "share_count_average" | "share_count" | "price";
 
 export type MetricDefinition = Readonly<{
   metric_key: MetricKey;
@@ -64,8 +65,15 @@ export const METRIC_CATALOG_V1: ReadonlyMap<MetricKey, MetricDefinition> = new M
     // equity, before noncontrolling interest) to total_equity.
     metric("total_equity", "Stockholders' equity", "balance", "currency"),
     metric("shares_outstanding", "Shares outstanding", "share_count", "shares"),
+    metric("share_price", "Share price", "price", "currency_per_share"),
   ].map((definition) => [definition.metric_key, definition]),
 );
+
+/**
+ * The metrics a planner offers. No operation reads a share price yet (#444),
+ * so planners and chat routing leave it out until one does.
+ */
+export const PLANNABLE_METRICS: ReadonlyArray<MetricDefinition> = [...METRIC_CATALOG_V1.values()].filter((definition) => definition.value_kind !== "price");
 
 /** Margins: approved numerator over positive revenue in the identical period, scope, and basis. */
 export const MARGIN_NUMERATORS: Readonly<Record<"gross_margin" | "operating_margin" | "net_margin", MetricKey>> = Object.freeze({

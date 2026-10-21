@@ -238,6 +238,79 @@
       ]
     },
     "BoundFinancialInputV1": {
+      "description": "Immutable once bound: a fact, or a share price from a stored price observation.",
+      "oneOf": [{ "$ref": "#/$defs/BoundFactInputV1" }, { "$ref": "#/$defs/BoundPriceInputV1" }]
+    },
+    "BoundPriceInputV1": {
+      "description": "A share price bound from a stored, insert-only price observation. raw_token is the provider's token exactly as stored and value its canonical decimal; the price is on the split basis of its trade date, so it always binds with a split adjustment anchored there.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "input_slot",
+        "observation_id",
+        "subject_ref",
+        "metric",
+        "listing_id",
+        "source",
+        "observation_kind",
+        "numeric",
+        "unit",
+        "observed_at",
+        "known_at",
+        "split_adjustment",
+        "eligibility"
+      ],
+      "properties": {
+        "schema_version": { "const": "financial_bound_price_input.v1" },
+        "input_slot": { "$ref": "financial_plan_schema.json#/$defs/LocalId" },
+        "observation_id": { "$ref": "financial_plan_schema.json#/$defs/UUID" },
+        "subject_ref": { "$ref": "financial_plan_schema.json#/$defs/SubjectRef" },
+        "metric": { "$ref": "financial_plan_schema.json#/$defs/MetricDefinitionRef" },
+        "listing_id": { "$ref": "financial_plan_schema.json#/$defs/UUID" },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source_id", "body_sha256"],
+          "properties": {
+            "source_id": { "$ref": "financial_plan_schema.json#/$defs/UUID" },
+            "body_sha256": { "$ref": "financial_plan_schema.json#/$defs/Sha256Hex" }
+          }
+        },
+        "observation_kind": { "enum": ["last_trade", "session_close"] },
+        "numeric": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["raw_token", "value"],
+          "properties": {
+            "raw_token": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "value": { "$ref": "financial_plan_schema.json#/$defs/DecimalString" }
+          }
+        },
+        "unit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "currency"],
+          "properties": {
+            "kind": { "const": "currency_per_share" },
+            "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
+          }
+        },
+        "observed_at": { "$ref": "financial_plan_schema.json#/$defs/IsoDateTime" },
+        "known_at": { "$ref": "financial_plan_schema.json#/$defs/IsoDateTime" },
+        "split_adjustment": { "$ref": "#/$defs/SplitAdjustmentV2" },
+        "eligibility": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["selection_policy_version", "candidate_set_digest"],
+          "properties": {
+            "selection_policy_version": { "$ref": "financial_plan_schema.json#/$defs/VersionTag" },
+            "candidate_set_digest": { "$ref": "financial_plan_schema.json#/$defs/Sha256Hex" }
+          }
+        }
+      }
+    },
+    "BoundFactInputV1": {
       "description": "Immutable once bound. Only proven precision statuses can bind; legacy_unverified values produce a precision gap instead.",
       "type": "object",
       "additionalProperties": false,
@@ -368,7 +441,7 @@
       }
     },
     "SplitAdjustmentV2": {
-      "description": "An as-filed value restated to the split basis as of its listing's reference date, the plan's knowledge cutoff dated in the listing's time zone. The bound numeric stays the value as filed.",
+      "description": "A value restated from the split basis of as_filed_on (a filing's date, or a price's trade date in the listing's time zone) to the basis as of its listing's reference date, the plan's knowledge cutoff dated in the listing's time zone. The bound numeric stays the value as filed or observed.",
       "type": "object",
       "additionalProperties": false,
       "required": ["version", "as_filed_on", "reference_date", "listing_id", "listing_timezone", "splits", "factor", "adjusted_native_value"],

@@ -21,6 +21,18 @@ export type FinancialInspectedInput =
       precision_status: string
       publication: { attestation_id: string; available_no_later_than: string; precision: string }
     }
+  | {
+      input_slot: string
+      status: 'bound'
+      observation_id: string
+      listing_id: string
+      source: { source_id: string; body_sha256: string }
+      metric: { metric_key: string; definition_version: string }
+      value: string
+      split_adjustment: { reference_date: string; factor: { numerator: string; denominator: string } }
+      unit: unknown
+      observation: { kind: 'last_trade' | 'session_close'; observed_at: string; known_at: string }
+    }
   | { input_slot: string; status: 'gap'; reason_code: string | null }
 
 export type FinancialResultInspection =

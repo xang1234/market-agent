@@ -52,12 +52,12 @@ test("committed result inspection", { timeout: 300_000 }, async (t) => {
     assert.equal(margin.disposition, "verified");
     assert.deepEqual(margin.formula, { operation: "gross_margin", operation_version: "gross_margin.v1", numeric_policy_version: margin.formula!.numeric_policy_version });
     assert.deepEqual(margin.definitions.map((definition) => definition.metric_key).sort(), ["gross_profit", "revenue"]);
-    assert.deepEqual(margin.inputs.map((input) => [input.input_slot, input.status, input.status === "bound" ? input.fact_id : null]), [
+    assert.deepEqual(margin.inputs.map((input) => [input.input_slot, input.status, "fact_id" in input ? input.fact_id : null]), [
       ["a_gp", "bound", IDS.grossProfit2023],
       ["a_rev", "bound", IDS.original],
     ]);
     const revenue = margin.inputs.find((input) => input.input_slot === "a_rev")!;
-    assert.ok(revenue.status === "bound");
+    assert.ok("fact_id" in revenue);
     assert.equal(revenue.source.source_id, IDS.sourceV1);
     assert.equal(revenue.period.fiscal_year, 2023);
     assert.match(revenue.publication.available_no_later_than, /^2024-/u);

@@ -10,6 +10,7 @@
 // payloads, and source content never appear in diagnostics.
 
 import {
+  BOUND_PRICE_INPUT_SCHEMA_VERSION,
   canonicallyEqual,
   ExecutionIntegrityError,
   evaluateBoundPlan,
@@ -31,7 +32,7 @@ import {
   unitPublication,
   validateBoundInput,
   validateFinancialPlan,
-  type BoundFinancialInputV1,
+  type BoundFactInputV1,
   type CommittedResult,
   type FinancialAnswerContent,
   type FinancialPlanV1,
@@ -185,7 +186,8 @@ export function verifyFinancialUnit(records: FinancialUnitRecords, unitId: Local
   const failures: FinancialVerifierFailure[] = [];
   for (const [slot, binding] of bindings.value) {
     if (!closureNodes.has(slot) || binding.status !== "bound") continue;
-    const problem = ineligibility(binding.input, evidence.get(binding.input.fact_id), splitHistories, plan);
+    const { input } = binding;
+    const problem = input.schema_version === BOUND_PRICE_INPUT_SCHEMA_VERSION ? "price_unverified" : ineligibility(input, evidence.get(input.fact_id), splitHistories, plan);
     if (problem) failures.push(failure("financial_input_ineligible", { run_id: run.run_id, input_slot: slot, reason: problem }));
   }
   if (failures.length > 0) return { ok: false, failures };
@@ -255,7 +257,9 @@ export function verifyFinancialUnit(records: FinancialUnitRecords, unitId: Local
   }
   for (const [slot, binding] of bindings.value) {
     if (!closureNodes.has(slot) || binding.status !== "bound") continue;
-    if (!factRefs.has(binding.input.fact_id)) failures.push(failure("financial_manifest_mismatch", { run_id: run.run_id, input_slot: slot, field: "fact_refs" }));
+    if (binding.input.schema_version !== BOUND_PRICE_INPUT_SCHEMA_VERSION && !factRefs.has(binding.input.fact_id)) {
+      failures.push(failure("financial_manifest_mismatch", { run_id: run.run_id, input_slot: slot, field: "fact_refs" }));
+    }
     if (!sourceIds.has(binding.input.source.source_id)) failures.push(failure("financial_manifest_mismatch", { run_id: run.run_id, input_slot: slot, field: "source_ids" }));
   }
   if (failures.length > 0) return { ok: false, failures };
@@ -281,7 +285,7 @@ export function verifyFinancialUnit(records: FinancialUnitRecords, unitId: Local
       const binding = bindings.value.get(nodeId);
       if (!binding) return [];
       return [binding.status === "bound"
-        ? { input_slot: nodeId, status: "bound" as const, fact_id: binding.input.fact_id, payload_hash: binding.payload_hash, reason_code: null, candidate_set_digest: binding.candidate_set_digest }
+        ? { input_slot: nodeId, status: "bound" as const, fact_id: binding.input.schema_version === BOUND_PRICE_INPUT_SCHEMA_VERSION ? null : binding.input.fact_id, payload_hash: binding.payload_hash, reason_code: null, candidate_set_digest: binding.candidate_set_digest }
         : { input_slot: nodeId, status: "gap" as const, fact_id: null, payload_hash: null, reason_code: binding.reason_code, candidate_set_digest: binding.candidate_set_digest }];
     }),
     definitions: [...plan.metric_definitions].sort((left, right) => left.metric_key.localeCompare(right.metric_key)),
@@ -347,6 +351,7 @@ function bindingsFor(plan: FinancialPlanV1, records: FinancialUnitRecords): Bind
     const field =
       hashCanonical("bound_input", input) !== row.payload_hash ? "payload_hash"
       : input.input_slot !== node.node_id ? "input_slot"
+      : input.schema_version === BOUND_PRICE_INPUT_SCHEMA_VERSION ? "observation_id"
       : input.fact_id !== row.fact_id ? "fact_id"
       : input.publication.attestation_id !== row.publication_attestation_id ? "publication_attestation_id"
       : input.metric.metric_key !== node.metric_key ? "metric"
@@ -361,7 +366,7 @@ function bindingsFor(plan: FinancialPlanV1, records: FinancialUnitRecords): Bind
 
 /** Why a bound input may no longer be published, judged on its current evidence. */
 function ineligibility(
-  input: BoundFinancialInputV1,
+  input: BoundFactInputV1,
   evidence: LoadedEvidence | undefined,
   splitHistories: ReadonlyMap<string, LoadedSplitHistory>,
   plan: FinancialPlanV1,
@@ -392,7 +397,7 @@ function ineligibility(
 }
 
 /** Whether the listing's current split history and zone still restate the input exactly as it was bound. */
-function restatedAsBound(input: BoundFinancialInputV1, adjustment: SplitAdjustmentV2, history: LoadedSplitHistory | undefined, plan: FinancialPlanV1): boolean {
+function restatedAsBound(input: BoundFactInputV1, adjustment: SplitAdjustmentV2, history: LoadedSplitHistory | undefined, plan: FinancialPlanV1): boolean {
   if (history?.checked_at == null || history.timezone === null) return false;
   const referenceDate = splitReferenceDate(plan.time.knowledge_cutoff, history.timezone);
   if (!splitHistoryCovers(history.checked_at, referenceDate, history.timezone)) return false;

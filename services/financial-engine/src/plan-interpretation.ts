@@ -45,6 +45,7 @@ export function interpretPlan(plan: FinancialPlanV1, labels: ReadonlyMap<string,
 
 function periodPhrase(period: PeriodSelector): string {
   if (period.kind === "fiscal_period") return `${period.fiscal_period} ${period.fiscal_year}`;
+  if (period.kind === "at_cutoff") return "latest known at the cutoff";
   const unit = period.period_type === "annual" ? "fiscal year" : "fiscal quarter";
   return period.offset === 0 ? `latest ${unit} at the cutoff` : `${unit} ${period.offset} before the latest at the cutoff`;
 }

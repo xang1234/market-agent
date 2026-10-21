@@ -6,10 +6,11 @@
 // never substitution.
 
 import {
+  BOUND_PRICE_INPUT_SCHEMA_VERSION,
   ExecutionIntegrityError,
   hashCanonical,
   validateBoundInput,
-  type BoundFinancialInputV1,
+  type BoundFactInputV1,
   type FinancialPlanV1,
   type FinancialRuntimeAuthority,
   type LocalId,
@@ -36,7 +37,7 @@ export type InputBinding =
   | {
       slot: LocalId;
       status: "bound";
-      input: BoundFinancialInputV1;
+      input: BoundFactInputV1;
       payload_hash: Sha256Hex;
       precision_attestation_id: string;
       candidate_set_digest: Sha256Hex;
@@ -246,6 +247,7 @@ function boundBinding(
   if (!validated.ok) {
     throw new ExecutionIntegrityError(`bound input for ${node.node_id} is invalid: ${validated.issues.map((issue) => `${issue.path} ${issue.message}`).join("; ")}`);
   }
+  if (validated.value.schema_version === BOUND_PRICE_INPUT_SCHEMA_VERSION) throw new ExecutionIntegrityError(`bound input for ${node.node_id} is not a fact`);
   return {
     slot: node.node_id,
     status: "bound",
@@ -306,7 +308,7 @@ export async function loadBindings(client: SqlExecutor, runId: string): Promise<
       continue;
     }
     const validated = validateBoundInput(row.bound_payload);
-    if (!validated.ok) throw new ExecutionIntegrityError(`persisted binding ${row.input_slot} is invalid`);
+    if (!validated.ok || validated.value.schema_version === BOUND_PRICE_INPUT_SCHEMA_VERSION) throw new ExecutionIntegrityError(`persisted binding ${row.input_slot} is invalid`);
     if (hashCanonical("bound_input", validated.value) !== row.payload_hash) throw new ExecutionIntegrityError(`persisted binding ${row.input_slot} does not match its hash`);
     bindings.set(row.input_slot, {
       slot: row.input_slot,

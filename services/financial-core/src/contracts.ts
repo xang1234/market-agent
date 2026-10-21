@@ -27,6 +27,7 @@ export type ValidationIssue = { path: string; code: string; message: string };
 export const FINANCIAL_PLAN_SCHEMA_VERSION = "financial_plan.v1";
 export const FINANCIAL_RESULT_SCHEMA_VERSION = "financial_result.v1";
 export const BOUND_INPUT_SCHEMA_VERSION = "financial_bound_input.v1";
+export const BOUND_PRICE_INPUT_SCHEMA_VERSION = "financial_bound_price_input.v1";
 
 export const OPERATION_KINDS = [
   "reported_metric",
@@ -173,9 +174,11 @@ export type PlanPolicies = {
   source_policy_version: VersionTag;
 };
 
+/** `at_cutoff` selects the latest value known at the knowledge cutoff: a share price, which has no fiscal period. */
 export type PeriodSelector =
   | { kind: "fiscal_period"; fiscal_year: number; fiscal_period: FiscalPeriod }
-  | { kind: "latest"; period_type: "annual" | "quarterly"; offset: number };
+  | { kind: "latest"; period_type: "annual" | "quarterly"; offset: number }
+  | { kind: "at_cutoff" };
 
 type NodeBase = { node_id: LocalId; operation_version: VersionTag };
 
@@ -375,11 +378,13 @@ export const SPLIT_ADJUSTMENT_VERSION = "split_adjustment.v2";
 export type ExactFraction = { numerator: DecimalString; denominator: DecimalString };
 
 /**
- * An as-filed value restated to the split basis as of its listing's reference
- * date, the plan's knowledge cutoff dated in `listing_timezone`: every split
- * of the listing after the filing date and on or before the reference date,
- * in date order. The factor is the product of their split_to / split_from; a
- * share count is multiplied by it, a per-share value divided.
+ * A value restated from the split basis of `as_filed_on` to the basis as of its
+ * listing's reference date, the plan's knowledge cutoff dated in
+ * `listing_timezone`: every split of the listing after `as_filed_on` and on or
+ * before the reference date, in date order. `as_filed_on` is a filing's date,
+ * or for a price its trade date in the listing's time zone. The factor is the
+ * product of their split_to / split_from; a share count is multiplied by it, a
+ * per-share value or price divided.
  */
 export type SplitAdjustmentV2 = {
   version: typeof SPLIT_ADJUSTMENT_VERSION;
@@ -392,7 +397,10 @@ export type SplitAdjustmentV2 = {
   adjusted_native_value: ExactFraction;
 };
 
-export type BoundFinancialInputV1 = {
+/** An immutable bound input: a fact, or a share price from a stored price observation. */
+export type BoundFinancialInputV1 = BoundFactInputV1 | BoundPriceInputV1;
+
+export type BoundFactInputV1 = {
   schema_version: typeof BOUND_INPUT_SCHEMA_VERSION;
   input_slot: LocalId;
   fact_id: UUID;
@@ -445,6 +453,33 @@ export type BoundFinancialInputV1 = {
     promotion_status: "authoritative" | "corroborated" | "reviewed_extraction";
     candidate_set_digest: Sha256Hex;
   };
+};
+
+export const PRICE_OBSERVATION_KINDS = ["last_trade", "session_close"] as const;
+export type PriceObservationKind = (typeof PRICE_OBSERVATION_KINDS)[number];
+
+/**
+ * A share price bound from a stored price observation (#444). Market data
+ * never becomes a fact, so a price has its own variant. `raw_token` is the
+ * provider's token exactly as stored, `value` its canonical decimal. The price
+ * is on the split basis of its trade date, so it always binds restated to the
+ * plan's reference date.
+ */
+export type BoundPriceInputV1 = {
+  schema_version: typeof BOUND_PRICE_INPUT_SCHEMA_VERSION;
+  input_slot: LocalId;
+  observation_id: UUID;
+  subject_ref: FinancialSubjectRef;
+  metric: { metric_key: MetricKey; definition_version: VersionTag };
+  listing_id: UUID;
+  source: { source_id: UUID; body_sha256: Sha256Hex };
+  observation_kind: PriceObservationKind;
+  numeric: { raw_token: string; value: DecimalString };
+  unit: { kind: "currency_per_share"; currency: string };
+  observed_at: IsoDateTime;
+  known_at: IsoDateTime;
+  split_adjustment: SplitAdjustmentV2;
+  eligibility: { selection_policy_version: VersionTag; candidate_set_digest: Sha256Hex };
 };
 
 /** Explicit dependency edges of an operation node, in declared order. */
