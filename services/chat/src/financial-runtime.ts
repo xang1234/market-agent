@@ -41,7 +41,7 @@ import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../fi
 import { requireFinancialReadiness } from "../../financial-engine/src/readiness.ts";
 import { publishRequest, type RequestGap } from "../../financial-engine/src/request.ts";
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
-import { comparativeTurn, labelList, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
+import { comparativeTurn, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId } from "./chat-ids.ts";
 import { noteBlock } from "./fact-blocks.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
@@ -64,7 +64,8 @@ export type ChatClarificationAnswer = Readonly<{ clarification_id: string; choic
 
 export type ChatFinancialTurn =
   | Readonly<{ kind: "clarification"; clarification: Clarification }>
-  | Readonly<{ kind: "gap"; reason_code: string; text: string }>
+  // The companies the turn was asked about and its scope, saved with the gap so a follow-up continues them (#425).
+  | Readonly<{ kind: "gap"; reason_code: string; text: string; subject_refs?: ReadonlyArray<FinancialSubjectRef>; research_scope?: ResearchScope }>
   | Readonly<{ kind: "published"; run_id: string; message_id: string; message: ChatReadMessage | null }>;
 
 export type ChatFinancialTurnContext = ChatTurnRunContext & { clarificationAnswer?: ChatClarificationAnswer };
@@ -103,10 +104,12 @@ const MAX_PLANNING_MODEL_CALLS = 2;
  */
 type ChatGap = Exclude<RequestGap, "publication_failed"> | "verification_failed" | "no_company";
 
+const UNSUPPORTED = "This request asks for a calculation outside the verified financial definitions I can compute";
+
 const GAP_TEXT: Readonly<Record<ChatGap, string>> = {
   no_company: "Name the company this calculation is for.",
   planning_unavailable: "I can't verify a calculation for this request right now, so I won't give an unverified number.",
-  unsupported: "This request asks for a calculation outside the verified financial definitions I can compute.",
+  unsupported: `${UNSUPPORTED}.`,
   configuration_needed: "This request needs a subject or definition I can't resolve to one verified meaning.",
   verification_failed: "The calculation did not pass verification, so no number is shown.",
   run_failed: "The calculation could not be completed, so no number is shown.",
@@ -114,6 +117,20 @@ const GAP_TEXT: Readonly<Record<ChatGap, string>> = {
   run_cancelled: "This calculation was cancelled, so no number is shown.",
   request_conflict: "This turn was already answered with a different calculation.",
   parent_authority_required: "This calculation could not be run for this conversation.",
+};
+
+// Whether a request's gap declines the turn, or is a notice about its run:
+// running, answered otherwise, cancelled, or not this thread's. A newer
+// notice must not hide the turn's answer from the next follow-up.
+const DECLINES: Readonly<Record<Exclude<RequestGap, "publication_failed">, boolean>> = {
+  planning_unavailable: true,
+  unsupported: true,
+  configuration_needed: true,
+  run_failed: true,
+  run_in_progress: false,
+  run_cancelled: false,
+  request_conflict: false,
+  parent_authority_required: false,
 };
 
 export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): ChatFinancialRuntime {
@@ -129,35 +146,76 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     // A retry of a turn whose answer is saved returns that answer: the thread
     // holds it by now, so the turn's companies are not picked again. Before
     // the answer is saved the thread is as the first attempt found it.
-    const answered = (await deps.pool.query(`select 1 from chat_messages where message_id = $1::uuid`, [messageId])).rows.length > 0;
+    const isAnswered = async () => (await deps.pool.query(`select 1 from chat_messages where message_id = $1::uuid`, [messageId])).rows.length > 0;
+    const answered = await isAnswered();
     const requested = answered ? ANSWERED : await requestedSubjects(deps, context, text);
     if (requested.clarify) return { kind: "clarification", clarification: companyQuestion(requested.clarify) };
     if (!answered && requested.subjects.length === 0) return gap("no_company");
-    const reading = (deps.readQuestion?.(text) ?? Promise.resolve(null)).catch((reason) => {
+    // The saved answer has its reading and scope already.
+    const reading = answered ? Promise.resolve(null) : (deps.readQuestion?.(text) ?? Promise.resolve(null)).catch((reason) => {
       console.warn("[chat] no reading of the question; the financial answer names no uncovered ask", reason);
       return null;
     });
     // This lane runs before the analyst path resolves the turn's companies, so
-    // the scope gets the ones the plan requests. ponytail: a company picked in
-    // a clarification answer, or the one company two listings name, is not
-    // among them; the scope then names the companies the message resolved.
+    // the scope gets the ones the message resolved; the answer saves the ones
+    // it answered for (answeredCompanies).
     const { resolved } = requested;
-    const scope = (deps.researchScope
+    const scope = (deps.researchScope && !answered
       ? deps.researchScope({ ...context, subjectPreResolution: resolved[0], subjectPreResolutions: resolved }, reading)
       : Promise.resolve(null)).catch((reason) => {
       console.warn("[chat] research scope unavailable; saving the financial answer without it", reason);
       return null;
     });
+    // What planning settled, for a gap: the companies it was asked about, a
+    // clarification pick included (recorded before the model is called), and
+    // the planner's result.
+    let asked = requested.subjects;
+    let planned: PlanningResult | undefined;
+    const declinedGap = async (reason: ChatGap) => {
+      // ponytail: a retry that resumes a reserved run does not plan, so its
+      // gap names the companies the message resolved, without a pick.
+      const refs = asked.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref] : []);
+      // One about no company leaves the previous answer's companies and scope,
+      // and so does one whose turn another attempt answered meanwhile: a run
+      // that attempt finished reads here as run_failed.
+      if (refs.length === 0 || await isAnswered()) return gap(reason, planned);
+      const saved = await scope;
+      return {
+        ...gap(reason, planned),
+        subject_refs: refs,
+        // It computed no figure, so it names none, and no reader re-reads it.
+        ...(saved === null ? {} : {
+          research_scope: {
+            ...saved,
+            route: "financial_gap" as const,
+            reads: "financial_gap" as const,
+            companies: answeredCompanies(refs.map((ref) => ref.id), saved, requested.labels),
+            metrics: [],
+          },
+        }),
+      };
+    };
     // A retry of this turn resumes what the first attempt reserved; it never plans again.
     const outcome = await publishRequest(deps.pool, {
       authority,
       request_key: turnId,
-      plan: () => planTurn(deps, context, text, requested.subjects, authority, deps.clock?.() ?? new Date()),
+      plan: async () => {
+        planned = await planTurn(deps, context, text, requested.subjects, authority, deps.clock?.() ?? new Date(), (subjects) => {
+          asked = subjects;
+        });
+        return planned;
+      },
       evidence: deps.evidence,
       // The reading and the scope settle outside any transaction; the scope
       // queued its reads before this request took its client.
       beforeDrive: () => Promise.all([scope, reading]),
-      persistParent: persistAssistantMessage(context.threadId, messageId, { scope, reading, carried: requested.carried, notFound: requested.notFound }, { authority, request_key: turnId }),
+      persistParent: persistAssistantMessage(context.threadId, messageId, {
+        scope,
+        reading,
+        carried: requested.carried,
+        notFound: requested.notFound,
+        labels: requested.labels,
+      }, { authority, request_key: turnId }),
     });
     switch (outcome.status) {
       case "clarification":
@@ -165,13 +223,15 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       case "gap":
         // A commit that failed is an error of this turn, not an answer; the retry publishes it.
         if (outcome.reason === "publication_failed") throw new Error("the financial answer could not be committed");
-        return gap(outcome.reason);
+        return DECLINES[outcome.reason] ? declinedGap(outcome.reason) : gap(outcome.reason);
       case "driven": {
         const [unit] = outcome.report?.finalized ?? [];
         const committed = outcome.report === null || unit?.result.status === "published" || unit?.result.status === "existing" ||
           (!unit && outcome.report.existing > 0);
         if (committed) return published(deps.pool, outcome.run_id, context.threadId, messageId);
-        return gap(unit?.result.status === "rejected" ? "verification_failed" : "run_failed");
+        // A drive cancelled midway is a notice, as a cancelled run is.
+        if (outcome.report.execution === "cancelled") return gap("run_failed");
+        return declinedGap(unit?.result.status === "rejected" ? "verification_failed" : "run_failed");
       }
     }
   };
@@ -198,13 +258,24 @@ type TurnCompanies = Readonly<{
   carried: ReadonlyArray<string>;
   // Names a comparison gave that match no company.
   notFound: ReadonlyArray<string>;
+  // By issuer, the label each company the turn may answer for takes in its saved scope.
+  labels: ReadonlyMap<string, string>;
   // A change to the compared companies too unclear to plan: the question to ask.
   clarify?: string;
 }>;
 
+const label = (resolution: ChatResolvedSubjectPreResolution) => resolution.handoff?.display_labels?.ticker ?? resolution.display_label;
+
 async function requestedSubjects(deps: ChatFinancialRuntimeDeps, context: ChatFinancialTurnContext, text: string): Promise<TurnCompanies> {
-  const label = (resolution: ChatResolvedSubjectPreResolution) => resolution.handoff?.display_labels?.ticker ?? resolution.display_label;
-  const mentioned = await Promise.all(requestedMentions(context, text).map(async (mention) => ({ mention, resolution: await deps.resolveMention(mention) })));
+  // Each name is resolved once, though the analyst path's rules read the message again.
+  const resolutions = new Map<string, Promise<ChatSubjectPreResolution>>();
+  const resolve = (mention: string) => resolutions.get(mention) ?? resolutions.set(mention, deps.resolveMention(mention)).get(mention)!;
+  const mentioned = await Promise.all(requestedMentions(context, text).map(async (mention) => ({ mention, resolution: await resolve(mention) })));
+  // A carried company is named to the planner by its ticker, unless the
+  // message gives that name to another company ("the other AMB"): then by its
+  // legal name, so the two stay apart.
+  const typed = new Set(mentioned.map(({ mention }) => mention));
+  const carriedName = (resolution: ChatResolvedSubjectPreResolution) => typed.has(label(resolution)) ? resolution.display_label : label(resolution);
   let entries: ReadonlyArray<Readonly<{ mention: string; resolution: ChatSubjectPreResolution }>> = mentioned;
   let turn: TurnSubjects | null = null;
   let carried: ReadonlyArray<ChatResolvedSubjectPreResolution> = [];
@@ -218,39 +289,70 @@ async function requestedSubjects(deps: ChatFinancialRuntimeDeps, context: ChatFi
   } else if (mentioned.some(({ resolution }) => resolution.status === "needs_clarification")) {
     // An ambiguous company is asked about beside every company named, and in a
     // comparison beside the previous answer's, so the answer covers them all.
-    const namedKeys = new Set(mentioned.flatMap(({ resolution }) => resolution.status === "resolved" ? [companyKey(resolution)] : []));
     // As the analyst path does, a name that matches no company is named in a
     // comparison's answer and ignored outside one.
     const comparison = comparativeTurn(text);
     const prior = comparison ? await deps.priorSubjects?.(context.threadId) ?? [] : [];
-    carried = prior.filter((resolution, index) =>
-      !namedKeys.has(companyKey(resolution)) && prior.findIndex((other) => companyKey(other) === companyKey(resolution)) === index);
     const unmatched = mentioned.filter(({ resolution }) => resolution.status === "not_found");
+    const named = mentioned.filter((entry) => !unmatched.includes(entry));
+    // One key per company named, or per ambiguous name. They take the capped
+    // slots first; carried companies fill the rest, listed first.
+    const namedKeys = new Set(named.map(({ mention, resolution }) => resolution.status === "resolved" ? companyKey(resolution) : `mention:${mention}`));
+    carried = prior.filter((resolution, index) =>
+      !namedKeys.has(companyKey(resolution)) && prior.findIndex((other) => companyKey(other) === companyKey(resolution)) === index)
+      .slice(0, Math.max(0, MAX_TURN_SUBJECTS - namedKeys.size));
     notFound = comparison ? unmatched.map(({ mention }) => mention) : [];
-    entries = [...carried.map((resolution) => ({ mention: label(resolution), resolution })), ...mentioned.filter((entry) => !unmatched.includes(entry))];
+    entries = [...carried.map((resolution) => ({ mention: carriedName(resolution), resolution })), ...named];
   } else if (!explicit) {
     turn = await resolveTurnSubjects(
       context,
-      (request) => deps.resolveMention(request.text),
+      (request) => resolve(request.text),
       deps.priorSubjects && ((input) => deps.priorSubjects!(input.threadId)),
     );
-    if (turn.clarify) return { subjects: [], resolved: [], carried: [], notFound: [], clarify: turn.clarify };
+    if (turn.clarify) return { subjects: [], resolved: [], carried: [], notFound: [], labels: new Map(), clarify: turn.clarify };
     // A company keeps the mention that named it; one carried takes its ticker.
     const mentionOf = new Map(mentioned.flatMap(({ mention, resolution }) => resolution.status === "resolved" ? [[companyKey(resolution), mention] as const] : []));
-    entries = turn.subjects.map((resolution) => ({ mention: mentionOf.get(companyKey(resolution)) ?? label(resolution), resolution }));
+    entries = turn.subjects.map((resolution) => ({ mention: mentionOf.get(companyKey(resolution)) ?? carriedName(resolution), resolution }));
   }
   const issuers = await issuersOf(deps.pool, entries.map(({ resolution }) => resolution));
-  const requested = entries.map(({ mention, resolution }): RequestedSubject => ({ mention, resolution: requestedResolution(resolution, issuers) }));
+  // One entry per company ("NVIDIA" the page and "NVDA" the message are one),
+  // as many as the analyst path takes (resolveTurnSubjects caps its own). A
+  // name to ask about is always asked about, as the analyst path asks before
+  // it caps; resolved companies take the slots left, in order.
+  const distinct = distinctBy(
+    entries.map((entry) => ({ entry, subject: { mention: entry.mention, resolution: requestedResolution(entry.resolution, issuers) } satisfies RequestedSubject })),
+    ({ subject }) => requestedKey(subject),
+  );
+  const toAsk = distinct.filter(({ subject }) => subject.resolution.status !== "resolved");
+  const fitting = distinct.filter(({ subject }) => subject.resolution.status === "resolved").slice(0, Math.max(0, MAX_TURN_SUBJECTS - toAsk.length));
+  const kept = distinct.filter((item) => toAsk.includes(item) || fitting.includes(item));
   return {
-    // One entry per company: "NVIDIA" (the page) and "NVDA" (the message) are one.
-    subjects: distinctRequested(requested),
-    resolved: entries.flatMap(({ resolution }) => resolution.status === "resolved" ? [resolution] : []),
-    carried: (turn?.carried ?? carried).map(label),
+    subjects: kept.map(({ subject }) => subject),
+    resolved: kept.flatMap(({ entry }) => entry.resolution.status === "resolved" ? [entry.resolution] : []),
+    carried: (turn?.carried ?? carried).map(carriedName),
     notFound: turn?.notFound ?? notFound,
+    labels: companyLabels(kept.map(({ entry }) => entry.resolution), issuers),
   };
 }
 
-const ANSWERED: TurnCompanies = { subjects: [], resolved: [], carried: [], notFound: [] };
+// A company's label: its ticker, else the name it was resolved or offered
+// under. A listing offered in a clarification names its company by ticker.
+function companyLabels(resolutions: ReadonlyArray<ChatSubjectPreResolution>, issuers: IssuerOf): Map<string, string> {
+  const labels = new Map<string, string>();
+  const add = (ref: { kind: string; id: string }, text: string) => {
+    const id = issuers(ref)?.id.toLowerCase();
+    if (id !== undefined && !labels.has(id)) labels.set(id, text);
+  };
+  for (const resolution of resolutions) {
+    if (resolution.status === "resolved") add(resolution.subject_ref, label(resolution));
+    if (resolution.status !== "needs_clarification") continue;
+    for (const candidate of resolution.candidates) if (candidate.display_labels?.ticker) add(candidate.subject_ref, candidate.display_labels.ticker);
+    for (const candidate of resolution.candidates) add(candidate.subject_ref, candidate.display_name);
+  }
+  return labels;
+}
+
+const ANSWERED: TurnCompanies = { subjects: [], resolved: [], carried: [], notFound: [], labels: new Map() };
 
 // A question about the companies to compare, which only a new message answers.
 function companyQuestion(question: string): Clarification {
@@ -264,6 +366,8 @@ async function planTurn(
   requested: ReadonlyArray<RequestedSubject>,
   authority: FinancialRuntimeAuthority,
   cutoff: Date,
+  // Called with the companies to plan once a clarification pick is applied, before the model is.
+  onSubjects: (subjects: ReadonlyArray<RequestedSubject>) => void,
 ): Promise<PlanningResult> {
   const planningContext = (subjects: ReadonlyArray<RequestedSubject>): PlanningContext => ({
     plan_id: randomUUID(),
@@ -283,8 +387,9 @@ async function planTurn(
   if (context.clarificationAnswer) {
     // The chosen company may already be requested (the explicit subject), so
     // de-duplicate again once the answer resolves the ambiguous mention.
-    subjects = distinctRequested(await applyAnswer(subjects, context.clarificationAnswer, planningContext, text));
+    subjects = distinctBy(await applyAnswer(subjects, context.clarificationAnswer, planningContext, text), requestedKey);
   }
+  onSubjects(subjects);
   if (CASH_RESILIENCE.test(text)) return planCashResilience(planningContext(subjects), text);
   // A failing or unreachable model is a planning gap (publishRequest); the narrative composer is never a fallback for numbers.
   return planFinancialRequest(planningContext(subjects), text, deps.planningModel ?? noModel);
@@ -398,13 +503,12 @@ const requestedKey = (subject: RequestedSubject) => subject.resolution.status ==
   ? `${subject.resolution.subject_ref.kind}:${subject.resolution.subject_ref.id.toLowerCase()}`
   : `mention:${subject.mention}`;
 
-// One entry per company, the earlier one kept.
-function distinctRequested(subjects: ReadonlyArray<RequestedSubject>): ReadonlyArray<RequestedSubject> {
+// One item per key, the earlier one kept.
+function distinctBy<T>(items: ReadonlyArray<T>, key: (item: T) => string): T[] {
   const seen = new Set<string>();
-  return subjects.filter((subject) => {
-    const key = requestedKey(subject);
-    if (seen.has(key)) return false;
-    seen.add(key);
+  return items.filter((item) => {
+    if (seen.has(key(item))) return false;
+    seen.add(key(item));
     return true;
   });
 }
@@ -437,6 +541,7 @@ function persistAssistantMessage(
     reading: Promise<ScopeProposal | null>;
     carried: ReadonlyArray<string>;
     notFound: ReadonlyArray<string>;
+    labels: ReadonlyMap<string, string>;
   }>,
   request: { authority: FinancialRuntimeAuthority; request_key: string },
 ): PersistParentArtifact {
@@ -454,9 +559,15 @@ function persistAssistantMessage(
       publication.block,
       ...(note === "" ? [] : [noteBlock({ snapshotId: publication.snapshot_id, asOf: publication.block.as_of }, "uncovered", note)]),
     ];
-    // The scope names the figures the published plan computed, so a follow-up
-    // ("why did it change?") reads them (#378 review).
-    const saved = scope === null || plan === null ? scope : { ...scope, metrics: planMetrics(plan) };
+    // The scope names the companies and figures the published plan answered,
+    // so a follow-up ("why did it change?") continues them (#378 review, #425).
+    const saved = scope === null || plan === null ? scope : {
+      ...scope,
+      // Its figures are in this answer, whatever an evidence follow-up re-read.
+      reads: "financial_answer" as const,
+      companies: answeredCompanies(plan.subjects.members.map((member) => member.subject_ref.id), scope, turn.labels),
+      metrics: planMetrics(plan),
+    };
     const inserted = await tx.client.query(
       `insert into chat_messages (message_id, thread_id, role, snapshot_id, blocks, content_hash, research_scope)
        select $1::uuid, t.thread_id, 'assistant'::chat_role, $3::uuid, $4::jsonb, $5, $7::jsonb
@@ -474,6 +585,21 @@ function persistAssistantMessage(
     );
     if (inserted.rows.length === 0) throw new ParentRefusedError("the chat thread no longer belongs to the run's owner");
   };
+}
+
+/**
+ * The companies a turn answered for, in its order. A missing label marks an
+ * auto-selected peer (local-runtime.ts turnScope), so each keeps the scope's
+ * entry, and one the scope lacks (a clarification pick, the company two
+ * listings name) takes the label the request gave it, or is left out.
+ */
+function answeredCompanies(issuerIds: ReadonlyArray<string>, scope: ResearchScope, labels: ReadonlyMap<string, string>): ResearchScope["companies"] {
+  const kept = new Map(scope.companies.map((company) => [company.issuer_id.toLowerCase(), company]));
+  return issuerIds.flatMap((id) => {
+    const company = kept.get(id.toLowerCase());
+    const labelled = labels.get(id.toLowerCase());
+    return company ? [company] : labelled === undefined ? [] : [{ issuer_id: id, label: labelled }];
+  });
 }
 
 // The chat catalog key (research-scope.ts) of each figure the engine names,
@@ -601,8 +727,14 @@ async function published(db: SqlExecutor, runId: string, threadId: string, messa
   return message ? { kind: "published", run_id: runId, message_id: messageId, message } : gap("run_failed");
 }
 
-function gap(reason_code: ChatGap): Extract<ChatFinancialTurn, { kind: "gap" }> {
-  return { kind: "gap", reason_code, text: GAP_TEXT[reason_code] };
+// The planner's own reason for an unsupported request is shown when it gave
+// one in words. One with a numeral is not, as the lane shows no figure a
+// model wrote; a number spelled out still passes.
+function gap(reason_code: ChatGap, planned?: PlanningResult): Extract<ChatFinancialTurn, { kind: "gap" }> {
+  const reason = reason_code === "unsupported" && planned?.outcome === "unsupported" && planned.issues.length === 0
+    ? planned.reason.trim().replace(/[.\s]+$/u, "")
+    : "";
+  return { kind: "gap", reason_code, text: reason === "" || /\p{N}/u.test(reason) ? GAP_TEXT[reason_code] : `${UNSUPPORTED}: ${reason}.` };
 }
 
 const FINANCIAL_TERMS = new RegExp(

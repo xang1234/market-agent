@@ -8,7 +8,7 @@ import { connectedPool } from "../../../db/test/docker-pg.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { databaseUrl, engineDatabase, IDS } from "../../financial-engine/test/db-fixtures.ts";
-import { createChatCoordinator, type ChatAnalystToolRuntime, type ChatTurnInput } from "../src/coordinator.ts";
+import { createChatCoordinator, type ChatAnalystToolRuntime, type ChatAssistantMessageCommit, type ChatTurnInput } from "../src/coordinator.ts";
 import { createChatFinancialRuntime } from "../src/financial-runtime.ts";
 import type { ChatSubjectPreResolution } from "../src/subjects.ts";
 import { readMessage } from "./read-message-fixture.ts";
@@ -61,7 +61,7 @@ export function resolveMention(mention: string): Promise<ChatSubjectPreResolutio
     AMBX: {
       status: "needs_clarification", input_text: mention, normalized_input: mention, message: "ambiguous",
       candidates: [
-        { subject_ref: { kind: "listing", id: LISTING_A }, display_name: "Alpha Industries Inc. (XNAS)", confidence: 0.5 },
+        { subject_ref: { kind: "listing", id: LISTING_A }, display_name: "Alpha Industries Inc. (XNAS)", display_labels: { primary: "ALPX · XNAS", ticker: "ALPX" }, confidence: 0.5 },
         { subject_ref: { kind: "issuer", id: IDS.issuerA }, display_name: "Alpha Industries Inc.", confidence: 0.5 },
       ],
     } as ChatSubjectPreResolution,
@@ -114,11 +114,12 @@ export function chatHarness(
     clock?: () => Date;
   },
 ) {
-  const persisted: string[] = [];
+  // The narrative messages the turns saved: clarifications and gaps.
+  const persisted: Array<Parameters<ChatAssistantMessageCommit>[0]> = [];
   const coordinator = createChatCoordinator({
     analystToolRuntime: options.analyst ?? forbiddenAnalyst,
     persistAssistantMessage: async (message) => {
-      persisted.push(message.turnId);
+      persisted.push(message);
       return readMessage({ snapshot_id: randomUUID(), message_id: randomUUID(), thread_id: message.threadId });
     },
     financialRuntime: createChatFinancialRuntime({

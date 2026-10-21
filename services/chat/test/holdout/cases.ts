@@ -25,7 +25,7 @@
 
 import type { RejectionCheck } from "../../src/assertions.ts";
 
-export const HOLDOUT_VERSION = 8;
+export const HOLDOUT_VERSION = 9;
 
 type Assertion = Record<string, unknown>;
 
@@ -238,7 +238,7 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
     turns: ["Break down NVDA's revenue by segment."],
     scopes: [scope(["segments"], INCOME, ["revenue"])],
     plan: { outcome: "unsupported", reason: "segment revenue has no approved definition" },
-    expect: { companies: [], financial_gap: "unsupported", absent_kinds: ["metric_row", "financial_answer"] },
+    expect: { companies: ["NVDA"], financial_gap: "unsupported", absent_kinds: ["metric_row", "financial_answer"] },
     prose: "",
   },
   {

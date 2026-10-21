@@ -33,7 +33,7 @@ import { loadUsableFacts } from "../../fundamentals/src/usable-facts.ts";
 import { returnLabel } from "../../market/src/perf-points.ts";
 import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
 import { stableUuid } from "./chat-ids.ts";
-import { STATEMENT_METRIC_LABELS, statementMetrics, unavailableMetrics, type ResearchScope } from "./research-scope.ts";
+import { readsEngine, STATEMENT_METRIC_LABELS, statementMetrics, unavailableMetrics, type ResearchScope } from "./research-scope.ts";
 import { loadPerfComparisonBlocks, type PriceWindow } from "./perf-block.ts";
 import { deriveQuarterMetrics, GROWTH, MARGINS, type QuarterMetric } from "./quarter-metrics.ts";
 
@@ -841,6 +841,9 @@ export function scopeGapBlocks(
   if (scope.reads === "financial_answer") {
     notes.push(["gap:financial_answer", "The previous answer's figures were calculated and verified by the financial engine; each one links to its sources in that answer, and no other figure is shown in their place."]);
   }
+  if (scope.reads === "financial_gap") {
+    notes.push(["gap:financial_gap", "The previous answer showed no figure, so there is no evidence to show; no other figure is shown in its place."]);
+  }
   // Segments asked for now (or the segment route) and not shown: a single
   // company has none in the data; a comparison shows company totals only.
   const segmentsWanted = scope.reads === "segments" || (scope.segments && !scope.inherited.includes("segments"));
@@ -894,17 +897,17 @@ export function noteBlock(input: { snapshotId: string; asOf: string }, key: stri
 
 // Whether the answer model may see the turn's other facts (its packet figures, #302)
 // when no figure is shown: not for a turn whose request is a named gap (only
-// unavailable metrics, a financial-engine answer re-read, or a segment
+// unavailable metrics, a financial-engine answer or gap re-read, or a segment
 // breakdown with none to show), so nothing stands in for what it asked.
 export function mayOfferOtherFacts(scope: ResearchScope, shown: ReadonlyArray<Block>): boolean {
-  return scope.reads !== "financial_answer" && !requestIsNamedGap(scope, shown);
+  return !readsEngine(scope.reads) && !requestIsNamedGap(scope, shown);
 }
 
 // Whether what the turn asks for is not in the data, so its gap notes say what
 // is missing. A financial-engine answer re-read is not: its note says where
 // the figures are.
 export function requestIsNamedGap(scope: ResearchScope, shown: ReadonlyArray<Block>): boolean {
-  if (scope.reads === "unavailable_metric") return true;
+  if (scope.reads === "unavailable_metric" || scope.reads === "financial_gap") return true;
   // A named quarter with no figures is a gap: no other quarter stands in (#290).
   if (readsNamedQuarter(scope) && !showsQuarter(shown)) return true;
   if (scope.reads === "statements") return !statementMetrics(scope).some((metric) => showsStatementMetric(shown, metric.metric_key));

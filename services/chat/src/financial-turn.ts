@@ -68,10 +68,21 @@ async function emitFinancialTurn(
     source_refs: [],
     as_of: new Date().toISOString(),
     segments: [{ type: "text", text }],
+    // A gap names the companies it was asked about, and saves its scope, so a
+    // follow-up continues them (thread-context.ts).
+    ...(turn.kind === "gap" && turn.subject_refs?.length ? { subject_refs: turn.subject_refs } : {}),
   }];
   const contentHash = contentHashForText(JSON.stringify(blocks));
   const persisted = persistAssistantMessage
-    ? await persistAssistantMessage({ threadId: context.threadId, runId: context.runId, turnId, role: "assistant", blocks, content_hash: contentHash })
+    ? await persistAssistantMessage({
+      threadId: context.threadId,
+      runId: context.runId,
+      turnId,
+      role: "assistant",
+      blocks,
+      content_hash: contentHash,
+      ...(turn.kind === "gap" && turn.research_scope ? { research_scope: turn.research_scope } : {}),
+    })
     : null;
   if (persisted) emit("snapshot.sealed", { snapshot_id: persisted.snapshot_id, status: "sealed" });
   emit("block.began", { block_id: blockId, kind: "rich_text" });
