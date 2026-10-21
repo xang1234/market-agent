@@ -208,6 +208,11 @@ test("a route reads its predicate families first, from the start of the period i
     "guidance.",
     "kpi.",
   ]);
+  // A release explains an operating margin by its operating income (#425).
+  assert.deepEqual(claimSelection(scope("What changed in NVDA's operating margin?", [NVDA], proposal({ asks: ["margins", "margin_trend"], metrics: ["income_statement"], items: ["operating_margin"] })), CUTOFF).predicate_prefixes.slice(0, 2), [
+    "management.explanation.operating_income",
+    MARGINS,
+  ]);
   // Free cash flow's own explanations, then either component's alike.
   assert.deepEqual(claimSelection(scope("What is NVDA's free cash flow?", [NVDA], proposal({ metrics: ["free_cash_flow"] })), CUTOFF).predicate_prefixes.slice(0, 3), [
     "management.explanation.free_cash_flow",

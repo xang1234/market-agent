@@ -57,8 +57,18 @@ export function readsEngine(reads: ResearchRoute): boolean {
 
 export type ScopeField = "peers" | "segments" | "margin_trend" | "metrics" | "fiscal_year" | "fiscal_quarter" | "price_window" | "benchmark";
 
-// A metric a question names: one this chat's readers show, or a named gap.
-export type RequestedMetric = { metric_key: string; label: string; available: boolean };
+// A metric a question names: one this chat's readers show, or a named gap. A
+// statement metric with an adjustment or a qualifier ("adjusted EPS", "EPS
+// growth") records the catalog metric it qualifies as its base, so an engine
+// answer can tell whether it computed it (financial-runtime.ts uncoveredAsks).
+export type RequestedMetric = {
+  metric_key: string;
+  label: string;
+  available: boolean;
+  base?: string;
+  adjustment?: Adjustment;
+  qualifier?: Qualifier;
+};
 
 export type ResearchScope = {
   route: ResearchRoute;
@@ -93,6 +103,10 @@ export type ResearchScope = {
   // the whole statement: their claims come first. This turn's, or the answer
   // an evidence follow-up re-reads. Absent when none.
   income_items?: ReadonlyArray<string>;
+  // An engine answer whose question had no reading (#425): what it asks for
+  // beyond the answer's figures was not checked. Absent when it was. It
+  // describes that answer, so no follow-up inherits it.
+  coverage_unchecked?: true;
   // The fields carried from the previous answer rather than asked for now.
   inherited: ReadonlyArray<ScopeField>;
 };
@@ -114,8 +128,9 @@ export type ScopeFacet = (typeof SCOPE_FACETS)[number];
 // The periods a question can turn off beside its facets.
 export const PERIOD_FIELDS = ["fiscal_year", "fiscal_quarter"] as const;
 // The income-statement items, in earnings-release terms
-// (sec-earnings-release-extraction.ts).
-export const INCOME_ITEMS = ["revenue", "gross_margin", "operating_expenses", "operating_income", "net_income"] as const;
+// (sec-earnings-release-extraction.ts), and the operating and net margins,
+// which a release explains by their income (evidence-packet.ts).
+export const INCOME_ITEMS = ["revenue", "gross_margin", "operating_expenses", "operating_income", "operating_margin", "net_income", "net_margin"] as const;
 export type IncomeItem = (typeof INCOME_ITEMS)[number];
 
 // A model's reading of what a question asks for and turns off, every entry
@@ -212,8 +227,8 @@ export function statementMetrics(scope: ResearchScope): ReadonlyArray<RequestedM
 // ("free cash flow margin", "growth in EPS").
 export const PROPOSABLE_ADJUSTMENTS = ["adjusted", "non_gaap", "pro_forma", "core", "normalized", "levered", "unlevered"] as const;
 export const PROPOSABLE_QUALIFIERS = ["growth", "margin", "yield", "trend", "per_share", "ytd"] as const;
-type Adjustment = (typeof PROPOSABLE_ADJUSTMENTS)[number];
-type Qualifier = (typeof PROPOSABLE_QUALIFIERS)[number];
+export type Adjustment = (typeof PROPOSABLE_ADJUSTMENTS)[number];
+export type Qualifier = (typeof PROPOSABLE_QUALIFIERS)[number];
 const ADJUSTMENT_LABELS: Readonly<Record<Adjustment, string>> = {
   adjusted: "Adjusted",
   non_gaap: "Non-GAAP",
@@ -239,6 +254,9 @@ function qualifiedMetric(metric: RequestedMetric, adjustment: Adjustment | null,
     metric_key: [metric.metric_key, adjustment, qualifier].filter(Boolean).join("_"),
     label: [name, qualifier === "ytd" ? "year to date" : qualifier?.replaceAll("_", " ")].filter(Boolean).join(" "),
     available: false,
+    base: metric.metric_key,
+    ...(adjustment === null ? {} : { adjustment }),
+    ...(qualifier === null ? {} : { qualifier }),
   };
 }
 
@@ -530,6 +548,7 @@ export function parseResearchScope(value: unknown): ResearchScope | null {
     ...(Array.isArray(scope.income_items) && scope.income_items.length > 0 && scope.income_items.every((item) => typeof item === "string")
       ? { income_items: scope.income_items as string[] }
       : {}),
+    ...(scope.coverage_unchecked === true ? { coverage_unchecked: true as const } : {}),
     inherited: [],
   };
 }

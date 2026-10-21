@@ -25,7 +25,7 @@
 
 import type { RejectionCheck } from "../../src/assertions.ts";
 
-export const HOLDOUT_VERSION = 9;
+export const HOLDOUT_VERSION = 10;
 
 type Assertion = Record<string, unknown>;
 
@@ -237,7 +237,7 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
     trap: "a redefined segment: the engine has no segment definition, so neither definition's revenue is shown",
     turns: ["Break down NVDA's revenue by segment."],
     scopes: [scope(["segments"], INCOME, ["revenue"])],
-    plan: { outcome: "unsupported", reason: "segment revenue has no approved definition" },
+    plan: { outcome: "unsupported", reason: "segments" },
     expect: { companies: ["NVDA"], financial_gap: "unsupported", absent_kinds: ["metric_row", "financial_answer"] },
     prose: "",
   },
@@ -253,7 +253,7 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
     id: "interior-extremum-and-trend",
     trap: "a low inside the window, a rebound and net rise: every quarter is calculated, the low among them",
     turns: ["How have AMD's operating margins trended over the last eight quarters?"],
-    scopes: [scope(["margins", "margin_trend"], INCOME, ["operating_income"])],
+    scopes: [scope(["margins", "margin_trend"], INCOME, ["operating_margin"])],
     plan: draft(["AMD"], [7, 6, 5, 4, 3, 2, 1, 0].flatMap((offset) => amdOperatingMargin(latest("quarterly", offset), `q${offset}`)),
       [7, 6, 5, 4, 3, 2, 1, 0].map((offset) => `om_q${offset}`)),
     expect: {
@@ -316,7 +316,7 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
     id: "filed-cause",
     trap: "a cause asked for: the margin is calculated, and the answer says the cause is not",
     turns: ["Why did AMD's operating margin turn negative in Q2 2025?"],
-    scopes: [scope(["explains", "margins"], INCOME, ["operating_income"])],
+    scopes: [scope(["explains", "margins"], INCOME, ["operating_margin"])],
     plan: draft(["AMD"], amdOperatingMargin(fiscal(2025, "Q2"), "q2"), ["om_q2"]),
     expect: {
       companies: ["AMD"],

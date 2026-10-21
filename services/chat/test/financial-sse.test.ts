@@ -8,7 +8,7 @@ import { createChatCoordinator } from "../src/coordinator.ts";
 import { createChatFinancialRuntime } from "../src/financial-runtime.ts";
 import { listChatMessagesForThread } from "../src/messages.ts";
 import { CHAT_SSE_EVENT_TYPES } from "../src/sse.ts";
-import { chatDatabase, forbiddenAnalyst, resolveMention, revenueModel } from "./financial-fixtures.ts";
+import { chatDatabase, forbiddenAnalyst, NO_ASKS, resolveMention, revenueModel } from "./financial-fixtures.ts";
 import { readMessage } from "./read-message-fixture.ts";
 import { parseSseEvents, startChatTestServer } from "./sse-helpers.ts";
 
@@ -22,7 +22,7 @@ test("financial answers over SSE", { timeout: 300_000 }, async (t) => {
   const coordinator = () => createChatCoordinator({
     analystToolRuntime: forbiddenAnalyst,
     persistAssistantMessage: async ({ threadId }) => readMessage({ snapshot_id: randomUUID(), message_id: randomUUID(), thread_id: threadId }),
-    financialRuntime: createChatFinancialRuntime({ pool, planningModel: model, resolveMention, evidence: createEvidenceFinancialPort }),
+    financialRuntime: createChatFinancialRuntime({ pool, planningModel: model, resolveMention, evidence: createEvidenceFinancialPort, readQuestion: async () => NO_ASKS }),
   });
   const base = await startChatTestServer(t, { coordinator: coordinator() });
   /** Reads the stream until the turn ends (the server keeps it open with heartbeats), keeping only turn events. */
@@ -121,6 +121,7 @@ test("financial answers over SSE", { timeout: 300_000 }, async (t) => {
     const { events } = await stream(randomUUID(), {}, server);
     assert.deepEqual(events.map((event) => event.event), ["turn.started", "block.began", "block.completed", "turn.completed"]);
     const done = events.at(-1)!.data;
+    assert.deepEqual([events[1]!.data.block_id, events[1]!.data.kind], [`financial-answer-${done.message_id}`, "financial_answer"]);
     assert.equal("message" in done, false);
     const stored = await listed(done.message_id);
     assert.equal((stored?.blocks as Array<{ kind: string }> | undefined)?.[0]?.kind, "financial_answer");

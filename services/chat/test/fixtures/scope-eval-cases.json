@@ -11,7 +11,7 @@
     "question": "How have NVDA's operating margins trended?",
     "companies": ["NVDA"],
     "prior": null,
-    "expected": {"route":"trend","reads":"trend","peers":false,"segments":false,"margin_trend":true,"margins":true,"metrics":["income_statement"],"guidance":false,"explains":false,"income_items":["operating_income"],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false}
+    "expected": {"route":"trend","reads":"trend","peers":false,"segments":false,"margin_trend":true,"margins":true,"metrics":["income_statement"],"guidance":false,"explains":false,"income_items":["operating_margin"],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false}
   },
   {
     "id": 3,
@@ -32,7 +32,7 @@
     "question": "Show AMD operating margins QoQ",
     "companies": ["AMD"],
     "prior": null,
-    "expected": {"route":"trend","reads":"trend","peers":false,"segments":false,"margin_trend":true,"margins":true,"metrics":["income_statement"],"guidance":false,"explains":false,"income_items":["operating_income"],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false}
+    "expected": {"route":"trend","reads":"trend","peers":false,"segments":false,"margin_trend":true,"margins":true,"metrics":["income_statement"],"guidance":false,"explains":false,"income_items":["operating_margin"],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false}
   },
   {
     "id": 6,
@@ -311,7 +311,8 @@
     "question": "What is AMD's EBITDA and gross margin?",
     "companies": ["AMD"],
     "prior": null,
-    "expected": {"route":"derived_margin","reads":"derived_margin","peers":false,"segments":false,"margin_trend":false,"margins":true,"metrics":["ebitda","income_statement"],"guidance":false,"explains":false,"income_items":["gross_margin"],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false}
+    "expected": {"route":"derived_margin","reads":"derived_margin","peers":false,"segments":false,"margin_trend":false,"margins":true,"metrics":["ebitda","income_statement"],"guidance":false,"explains":false,"income_items":["gross_margin"],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false},
+    "accept": {"metrics":{"value":["ebitda"],"reason":"The live model names no income statement beside another metric, on main's prompt too (2026-10-21, #465)."}}
   },
   {
     "id": 45,
@@ -403,7 +404,7 @@
     "question": "Why did AMD's operating margin turn negative in Q2 2025?",
     "companies": ["AMD"],
     "prior": null,
-    "expected": {"route":"derived_margin","reads":"derived_margin","peers":false,"segments":false,"margin_trend":false,"margins":true,"metrics":["income_statement"],"guidance":false,"explains":true,"income_items":["operating_income"],"fiscal_year":2025,"fiscal_quarter":"Q2 2025","price_window":null,"benchmark":false}
+    "expected": {"route":"derived_margin","reads":"derived_margin","peers":false,"segments":false,"margin_trend":false,"margins":true,"metrics":["income_statement"],"guidance":false,"explains":true,"income_items":["operating_margin"],"fiscal_year":2025,"fiscal_quarter":"Q2 2025","price_window":null,"benchmark":false}
   },
   {
     "id": 58,
@@ -417,7 +418,8 @@
     "question": "Show NVDA's free cash flow margin and its gross margin trend",
     "companies": ["NVDA"],
     "prior": null,
-    "expected": {"route":"trend","reads":"trend","peers":false,"segments":false,"margin_trend":true,"margins":true,"metrics":["free_cash_flow_margin","income_statement"],"guidance":false,"explains":false,"income_items":["gross_margin"],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false}
+    "expected": {"route":"trend","reads":"trend","peers":false,"segments":false,"margin_trend":true,"margins":true,"metrics":["free_cash_flow_margin","income_statement"],"guidance":false,"explains":false,"income_items":["gross_margin"],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false},
+    "accept": {"metrics":{"value":["free_cash_flow_margin"],"reason":"The live model names no income statement beside another metric, on main's prompt too (2026-10-21, #465)."}}
   },
   {
     "id": 60,

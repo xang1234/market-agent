@@ -7,6 +7,7 @@ import {
   planFinancialRequest,
   planningModelFromRouter,
   resolveClarification,
+  UNSUPPORTED_REASONS,
   type PlanningContext,
   type PlanningModel,
   type RequestedSubject,
@@ -152,6 +153,17 @@ test("model JSON cannot carry ownership, budgets, verification, or executable co
   const result = await planFinancialRequest(context({ requested_subjects: [resolved(0)] }), "Apple revenue", scripted(sql, sql));
   assert.equal(result.outcome, "unsupported");
   assert.equal(await planFinancialRequest(context({ requested_subjects: [resolved(0)] }), "x", scripted("not json", "still not json")).then((r) => r.outcome), "unsupported");
+});
+
+test("a model that declines a request gives one of the listed reasons, and any other is other (#425)", async () => {
+  const declined = async (reason: unknown) => {
+    const result = await planFinancialRequest(context({ requested_subjects: [resolved(0)] }), "Apple revenue by segment", scripted({ outcome: "unsupported", reason }));
+    return result.outcome === "unsupported" ? [result.reason, result.issues] : result.outcome;
+  };
+  for (const reason of UNSUPPORTED_REASONS) assert.deepEqual(await declined(reason), [reason, []], reason);
+  for (const reason of ["segment revenue has no approved definition", "three segments are reported", "", 42, undefined]) {
+    assert.deepEqual(await declined(reason), ["other", []], String(reason));
+  }
 });
 
 test("the schema repair stays within the parent's model budget", async () => {

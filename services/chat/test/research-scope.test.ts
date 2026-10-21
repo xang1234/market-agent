@@ -122,6 +122,8 @@ test("guidance is kept by a follow-up until one turns it off", () => {
   // Read back from a saved answer.
   const saved = JSON.parse(JSON.stringify(asked));
   assert.deepEqual(parseResearchScope(saved), { ...saved, inherited: [] });
+  // An engine answer that was not checked for coverage reads back as one (#425).
+  assert.equal(parseResearchScope({ ...saved, coverage_unchecked: true })?.coverage_unchecked, true);
 });
 
 test("a follow-up that drops the segments clears them, keeps the rest, and they stay off", () => {
@@ -352,7 +354,7 @@ test("an inherited gap, or one asked beside something it can show, does not stop
 test("a statement metric asked year to date is a named gap; a comparison still charts the window", () => {
   const ytdCashFlow = proposal({ metrics: [{ metric: "free_cash_flow", qualifier: "ytd" }] });
   const single = fresh("What is NVDA's free cash flow YTD?", ytdCashFlow);
-  assert.deepEqual([single.route, single.metrics], ["unavailable_metric", [{ metric_key: "free_cash_flow_ytd", label: "Free cash flow year to date", available: false }]]);
+  assert.deepEqual([single.route, single.metrics], ["unavailable_metric", [{ metric_key: "free_cash_flow_ytd", label: "Free cash flow year to date", available: false, base: "free_cash_flow", qualifier: "ytd" }]]);
   assert.equal(fresh("Compare NVDA and AMD free cash flow YTD", ytdCashFlow, [NVDA, AMD]).route, "comparison");
   // A YTD that qualifies something else leaves the statement metric as asked.
   assert.equal(fresh("Show NVDA EPS and YTD stock return", proposal({ metrics: ["eps_diluted"] })).route, "statements");

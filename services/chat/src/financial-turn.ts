@@ -5,6 +5,8 @@
 // committed, and its turn.completed carries that committed message. Clarifications
 // and gaps are ordinary narrative messages with no numbers.
 
+import { randomUUID } from "node:crypto";
+
 import type {
   ChatAssistantMessageCommit,
   ChatTurnRunContext,
@@ -44,22 +46,31 @@ async function emitFinancialTurn(
   persistAssistantMessage: ChatAssistantMessageCommit | undefined,
 ): Promise<void> {
   const { emit } = context;
-  if (turn.kind === "published") {
+  if (turn.kind === "published" || turn.kind === "saved") {
     const { message } = turn;
     const heads = message ? blockHeads(message) : [];
     if (message) emit("snapshot.sealed", { snapshot_id: message.snapshot_id, status: "sealed", verification: { ok: true } });
-    for (const head of heads.length > 0 ? heads : [{ id: `financial-answer-${turn.message_id}`, kind: "financial_answer" }]) {
+    const unread = turn.kind === "published"
+      ? { id: `financial-answer-${turn.message_id}`, kind: "financial_answer" }
+      : { id: `financial-gap-${turn.message_id}`, kind: "rich_text" };
+    for (const head of heads.length > 0 ? heads : [unread]) {
       emit("block.began", { block_id: head.id, kind: head.kind });
       emit("block.completed", { block_id: head.id });
     }
-    emit("turn.completed", { ...sealedCompletion(turn, turn.message_id), bundle_id: FINANCIAL_BUNDLE_ID, financial: { run_id: turn.run_id } });
+    emit("turn.completed", {
+      ...sealedCompletion(turn, turn.message_id),
+      bundle_id: FINANCIAL_BUNDLE_ID,
+      ...(turn.kind === "published" ? { financial: { run_id: turn.run_id } } : {}),
+    });
     return;
   }
 
   const text = turn.kind === "clarification" ? clarificationText(turn) : turn.text;
   const turnId = context.turnId ?? context.runId;
-  const blockId = stableUuid(`financial-${turn.kind}-block:${context.threadId}:${turnId}`);
-  const snapshotId = stableUuid(`financial-${turn.kind}-snapshot:${context.threadId}:${turnId}`);
+  // Each attempt seals its own snapshot: a retry that saves nothing new (its
+  // message is saved) must not seal one id twice.
+  const blockId = randomUUID();
+  const snapshotId = randomUUID();
   const blocks = [{
     id: blockId,
     kind: "rich_text",
@@ -81,6 +92,7 @@ async function emitFinancialTurn(
       role: "assistant",
       blocks,
       content_hash: contentHash,
+      ...(turn.kind === "gap" && turn.message_id ? { message_id: turn.message_id } : {}),
       ...(turn.kind === "gap" && turn.research_scope ? { research_scope: turn.research_scope } : {}),
     })
     : null;

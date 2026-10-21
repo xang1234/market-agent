@@ -15,6 +15,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   createRuntimeAuthority,
+  dependencyClosure,
   hashCanonical,
   operationDependencies,
   PLANNABLE_METRICS,
@@ -22,7 +23,6 @@ import {
   type FinancialPlanV1,
   type FinancialRuntimeAuthority,
   type FinancialSubjectRef,
-  type MarginNode,
   type OperationNode,
 } from "../../financial-core/src/index.ts";
 import { cashResilienceDraft, LATEST_FISCAL_YEAR, type CashResiliencePeriod } from "../../financial-engine/src/cash-resilience.ts";
@@ -36,6 +36,7 @@ import {
   type PlanningModel,
   type PlanningResult,
   type RequestedSubject,
+  type UnsupportedReason,
 } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { requireFinancialReadiness } from "../../financial-engine/src/readiness.ts";
@@ -64,9 +65,21 @@ export type ChatClarificationAnswer = Readonly<{ clarification_id: string; choic
 
 export type ChatFinancialTurn =
   | Readonly<{ kind: "clarification"; clarification: Clarification }>
-  // The companies the turn was asked about and its scope, saved with the gap so a follow-up continues them (#425).
-  | Readonly<{ kind: "gap"; reason_code: string; text: string; subject_refs?: ReadonlyArray<FinancialSubjectRef>; research_scope?: ResearchScope }>
-  | Readonly<{ kind: "published"; run_id: string; message_id: string; message: ChatReadMessage | null }>;
+  // A gap the turn declined with names the companies it was asked about and
+  // saves its scope, so a follow-up continues them (#425). It is saved under
+  // the id the turn's answer takes (message_id): an answer saved first keeps
+  // it, and an answer saved later replaces it.
+  | Readonly<{
+    kind: "gap";
+    reason_code: string;
+    text: string;
+    message_id?: string;
+    subject_refs?: ReadonlyArray<FinancialSubjectRef>;
+    research_scope?: ResearchScope;
+  }>
+  | Readonly<{ kind: "published"; run_id: string; message_id: string; message: ChatReadMessage | null }>
+  // A gap an earlier attempt of the turn saved, as a retry returns it.
+  | Readonly<{ kind: "saved"; message_id: string; message: ChatReadMessage | null }>;
 
 export type ChatFinancialTurnContext = ChatTurnRunContext & { clarificationAnswer?: ChatClarificationAnswer };
 
@@ -87,7 +100,7 @@ export type ChatFinancialRuntimeDeps = Readonly<{
   /** The companies the thread's previous answer covered, for a question that names none. */
   priorSubjects?: (threadId: string) => Promise<ReadonlyArray<ChatResolvedSubjectPreResolution>>;
   evidence: (executor: SqlExecutor) => FinancialEvidencePort;
-  /** What a model reads the question to ask for (scope-proposal.ts); null or absent, no ask is named as uncovered. */
+  /** What a model reads the question to ask for (scope-proposal.ts); null or absent, the answer says its coverage was not checked. */
   readQuestion?: (question: string) => Promise<ScopeProposal | null>;
   /** The turn's research scope, saved with a published answer (#206); absent, none is saved. */
   researchScope?: (context: ChatFinancialTurnContext, reading: Promise<ScopeProposal | null>) => Promise<ResearchScope>;
@@ -145,27 +158,54 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     const messageId = financialMessageId(context.threadId, turnId);
     // A retry of a turn whose answer is saved returns that answer: the thread
     // holds it by now, so the turn's companies are not picked again. Before
-    // the answer is saved the thread is as the first attempt found it.
-    const isAnswered = async () => (await deps.pool.query(`select 1 from chat_messages where message_id = $1::uuid`, [messageId])).rows.length > 0;
-    const answered = await isAnswered();
+    // the answer is saved the thread is as the first attempt found it. A gap
+    // the turn declined with is returned as saved, with nothing planned again.
+    const { rows: [existing] } = await deps.pool.query<{ kind: string | null }>(
+      `select blocks->0->>'kind' as kind from chat_messages where message_id = $1::uuid`,
+      [messageId],
+    );
+    if (existing && existing.kind !== "financial_answer") return savedGap(deps.pool, context.threadId, messageId);
+    const answered = existing !== undefined;
     const requested = answered ? ANSWERED : await requestedSubjects(deps, context, text);
     if (requested.clarify) return { kind: "clarification", clarification: companyQuestion(requested.clarify) };
     if (!answered && requested.subjects.length === 0) return gap("no_company");
-    // The saved answer has its reading and scope already.
-    const reading = answered ? Promise.resolve(null) : (deps.readQuestion?.(text) ?? Promise.resolve(null)).catch((reason) => {
-      console.warn("[chat] no reading of the question; the financial answer names no uncovered ask", reason);
-      return null;
+    // The reading of the question is a model call, so it starts beside the
+    // planner's model call, or once a plan is driven: a turn that ends before
+    // either (a question about a company, a gap no model planned) reads
+    // nothing. The scope waits on the reading, so each use of them decides
+    // first whether to read (prepared). The saved answer has both already.
+    let decideReading = (_read: boolean): void => {};
+    const reading = answered ? Promise.resolve(null) : new Promise<ScopeProposal | null>((resolve) => {
+      decideReading = (read) => {
+        decideReading = () => {};
+        resolve(read ? Promise.resolve().then(() => deps.readQuestion?.(text) ?? null).catch((reason) => {
+          console.warn("[chat] no reading of the question; the financial answer says its coverage was not checked", reason);
+          return null;
+        }) : null);
+      };
+    });
+    const { planningModel: model } = deps;
+    const planningModel: PlanningModel | null = model && ((request) => {
+      decideReading(true);
+      return model(request);
     });
     // This lane runs before the analyst path resolves the turn's companies, so
     // the scope gets the ones the message resolved; the answer saves the ones
     // it answered for (answeredCompanies).
     const { resolved } = requested;
-    const scope = (deps.researchScope && !answered
-      ? deps.researchScope({ ...context, subjectPreResolution: resolved[0], subjectPreResolutions: resolved }, reading)
-      : Promise.resolve(null)).catch((reason) => {
+    // Called at once, so the scope queues its reads before the request takes
+    // its client; one that throws before it answers is no scope.
+    const { researchScope } = deps;
+    const scope = (async () => researchScope && !answered
+      ? researchScope({ ...context, subjectPreResolution: resolved[0], subjectPreResolutions: resolved }, reading)
+      : null)().catch((reason) => {
       console.warn("[chat] research scope unavailable; saving the financial answer without it", reason);
       return null;
     });
+    const prepared = (read: boolean) => {
+      decideReading(read);
+      return Promise.all([scope, reading]);
+    };
     // What planning settled, for a gap: the companies it was asked about, a
     // clarification pick included (recorded before the model is called), and
     // the planner's result.
@@ -175,13 +215,14 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       // ponytail: a retry that resumes a reserved run does not plan, so its
       // gap names the companies the message resolved, without a pick.
       const refs = asked.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref] : []);
-      // One about no company leaves the previous answer's companies and scope,
-      // and so does one whose turn another attempt answered meanwhile: a run
-      // that attempt finished reads here as run_failed.
-      if (refs.length === 0 || await isAnswered()) return gap(reason, planned);
-      const saved = await scope;
+      // One about no company leaves the previous answer's companies and scope.
+      if (refs.length === 0) return gap(reason, planned);
+      const [saved] = await prepared(false);
       return {
         ...gap(reason, planned),
+        // Another attempt may answer the turn meanwhile (a run it finished
+        // reads here as run_failed): the gap never replaces that answer.
+        message_id: messageId,
         subject_refs: refs,
         // It computed no figure, so it names none, and no reader re-reads it.
         ...(saved === null ? {} : {
@@ -200,7 +241,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       authority,
       request_key: turnId,
       plan: async () => {
-        planned = await planTurn(deps, context, text, requested.subjects, authority, deps.clock?.() ?? new Date(), (subjects) => {
+        planned = await planTurn(planningModel, context, text, requested.subjects, authority, deps.clock?.() ?? new Date(), (subjects) => {
           asked = subjects;
         });
         return planned;
@@ -208,10 +249,10 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       evidence: deps.evidence,
       // The reading and the scope settle outside any transaction; the scope
       // queued its reads before this request took its client.
-      beforeDrive: () => Promise.all([scope, reading]),
+      beforeDrive: () => prepared(true),
       persistParent: persistAssistantMessage(context.threadId, messageId, {
-        scope,
-        reading,
+        // Decided before the drive; never a model call inside the transaction.
+        prepared: () => prepared(false),
         carried: requested.carried,
         notFound: requested.notFound,
         labels: requested.labels,
@@ -360,7 +401,7 @@ function companyQuestion(question: string): Clarification {
 }
 
 async function planTurn(
-  deps: ChatFinancialRuntimeDeps,
+  model: PlanningModel | null,
   context: ChatFinancialTurnContext,
   text: string,
   requested: ReadonlyArray<RequestedSubject>,
@@ -378,7 +419,7 @@ async function planTurn(
     freshness_max_age_days: null,
     authority,
     parent_limits: {},
-    max_model_calls: deps.planningModel ? MAX_PLANNING_MODEL_CALLS : 0,
+    max_model_calls: model ? MAX_PLANNING_MODEL_CALLS : 0,
     requested_subjects: subjects,
     publication_unit_kind: "chat_section",
   });
@@ -392,10 +433,11 @@ async function planTurn(
   onSubjects(subjects);
   if (CASH_RESILIENCE.test(text)) return planCashResilience(planningContext(subjects), text);
   // A failing or unreachable model is a planning gap (publishRequest); the narrative composer is never a fallback for numbers.
-  return planFinancialRequest(planningContext(subjects), text, deps.planningModel ?? noModel);
+  return planFinancialRequest(planningContext(subjects), text, model ?? noModel);
 }
 
 const CASH_RESILIENCE = /\bcash[- ]resilience\b/iu;
+const CASH_RESILIENCE_VIEW = "cash_resilience_view";
 // The view is annual and has no score, rank, or cash/debt measure; a request
 // for one is unsupported rather than answered with the annual view.
 const OUTSIDE_CASH_RESILIENCE = /\b(?:quarters?|quarterly|Q[1-4]|TTM|LTM|trailing|scores?|scoring|rank|ranks|ranking|peers?|debt|net cash)\b/iu;
@@ -409,7 +451,7 @@ const FISCAL_YEAR = /\b(?:FY\s?)?(20\d{2})\b/u;
  */
 async function planCashResilience(context: PlanningContext, text: string): Promise<PlanningResult> {
   if (OUTSIDE_CASH_RESILIENCE.test(text)) {
-    return { outcome: "unsupported", reason: "cash resilience is an annual view without scores, peer ranks, or cash and debt measures", issues: [], model_calls: 0 };
+    return { outcome: "unsupported", reason: CASH_RESILIENCE_VIEW, issues: [], model_calls: 0 };
   }
   if (context.requested_subjects.some((subject) => subject.resolution.status !== "resolved")) return planFinancialRequest(context, text, noModel);
   const year = FISCAL_YEAR.exec(text)?.[1];
@@ -532,13 +574,15 @@ function chatAuthority(userId: string, threadId: string, turnId: string): Financ
   });
 }
 
+const UNCHECKED = "It was not checked whether this answer covers everything the question asks for.";
+
 /** Writes the assistant message inside the finalization transaction, under the thread's owner. */
 function persistAssistantMessage(
   threadId: string,
   messageId: string,
   turn: Readonly<{
-    scope: Promise<ResearchScope | null>;
-    reading: Promise<ScopeProposal | null>;
+    // The scope and the reading, settled before the run was driven (beforeDrive).
+    prepared: () => Promise<[ResearchScope | null, ScopeProposal | null]>;
     carried: ReadonlyArray<string>;
     notFound: ReadonlyArray<string>;
     labels: ReadonlyMap<string, string>;
@@ -546,14 +590,13 @@ function persistAssistantMessage(
   request: { authority: FinancialRuntimeAuthority; request_key: string },
 ): PersistParentArtifact {
   return async (tx, publication) => {
-    // Both settled before the run was driven (beforeDrive).
-    const [scope, reading] = await Promise.all([turn.scope, turn.reading]);
+    const [scope, reading] = await turn.prepared();
     const plan = scope === null && reading === null ? null : await findPlanForRequest(tx.client, request);
-    const missing = reading === null || plan === null ? [] : uncoveredAsks(reading, plan);
+    const missing = reading === null || plan === null ? [] : uncoveredAsks(reading, plan, turn.labels);
     const note = [
       ...(turn.notFound.length === 0 ? [] : [`No company matched ${labelList(turn.notFound)}.`]),
       ...(turn.carried.length === 0 ? [] : [`${labelList(turn.carried)} ${turn.carried.length > 1 ? "are" : "is"} carried from the previous answer.`]),
-      ...(missing.length === 0 ? [] : [`Not covered by this answer: ${missing.join("; ")}.`]),
+      ...(reading === null ? [UNCHECKED] : missing.length === 0 ? [] : [`Not covered by this answer: ${missing.join("; ")}.`]),
     ].join(" ");
     const blocks = [
       publication.block,
@@ -567,11 +610,15 @@ function persistAssistantMessage(
       reads: "financial_answer" as const,
       companies: answeredCompanies(plan.subjects.members.map((member) => member.subject_ref.id), scope, turn.labels),
       metrics: planMetrics(plan),
+      ...(reading === null ? { coverage_unchecked: true as const } : {}),
     };
+    // It replaces a gap another attempt of the turn saved under its id.
     const inserted = await tx.client.query(
       `insert into chat_messages (message_id, thread_id, role, snapshot_id, blocks, content_hash, research_scope)
        select $1::uuid, t.thread_id, 'assistant'::chat_role, $3::uuid, $4::jsonb, $5, $7::jsonb
          from chat_threads t where t.thread_id = $2::uuid and t.user_id = $6::uuid
+       on conflict (message_id) do update
+         set snapshot_id = excluded.snapshot_id, blocks = excluded.blocks, content_hash = excluded.content_hash, research_scope = excluded.research_scope
        returning message_id`,
       [
         messageId,
@@ -584,6 +631,8 @@ function persistAssistantMessage(
       ],
     );
     if (inserted.rows.length === 0) throw new ParentRefusedError("the chat thread no longer belongs to the run's owner");
+    // As any saved message does, so the thread never points at a replaced gap's snapshot.
+    await tx.client.query(`update chat_threads set latest_snapshot_id = $2::uuid, updated_at = now() where thread_id = $1::uuid`, [threadId, publication.snapshot_id]);
   };
 }
 
@@ -634,12 +683,17 @@ export const SCOPE_METRICS: Readonly<Record<string, string | null>> = {
 
 const figureKey = (node: OperationNode) => node.operation === "reported_metric" ? node.metric_key : node.operation;
 
-// The figures a plan's outputs show: a change, sum, ratio, threshold or
-// ranking is of the figures it reads.
-function shownFigures(plan: FinancialPlanV1): OperationNode[] {
-  const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
+// The figures a node shows: a change, sum, ratio, threshold or ranking is of
+// the figures it reads.
+function figuresOf(nodes: ReadonlyMap<string, OperationNode>): (node: OperationNode) => OperationNode[] {
   const figures = (node: OperationNode): OperationNode[] =>
     Object.hasOwn(SCOPE_METRICS, figureKey(node)) ? [node] : operationDependencies(node).flatMap((id) => figures(nodes.get(id)!));
+  return figures;
+}
+
+function shownFigures(plan: FinancialPlanV1): OperationNode[] {
+  const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
+  const figures = figuresOf(nodes);
   return plan.outputs.flatMap((output) => figures(nodes.get(output.node_id)!));
 }
 
@@ -663,50 +717,78 @@ const INCOME_ITEM_FIGURE: Readonly<Record<IncomeItem, string | null>> = {
   gross_margin: "gross_margin",
   operating_expenses: null,
   operating_income: "operating_income",
+  operating_margin: "operating_margin",
   net_income: "net_income",
+  net_margin: "net_margin",
 };
 
 /**
  * What a question asks for, as the model read it, that its plan does not
- * compute, so the answer names it instead of leaving it out.
- * ponytail: a qualified metric ("EPS growth", "adjusted EPS") is not checked,
- * as nothing records which qualifier the plan computed; record its base and
- * qualifier on RequestedMetric to check it.
+ * compute, so the answer names it instead of leaving it out. Each company is
+ * checked on its own figures: what some companies' figures answer is named
+ * for the others, by the label `labels` gives each issuer.
  */
-export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1): string[] {
+export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1, labels: ReadonlyMap<string, string> = new Map()): string[] {
   const { asks, offMetrics } = readingAsks(reading);
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
+  // A figure's period and company are those of its reported inputs.
+  const input = (node: OperationNode) => nodes.get(operationDependencies(node)[0]!)!;
+  const periodOf = (node: OperationNode): string => node.operation === "reported_metric" ? JSON.stringify(node.period) : periodOf(input(node));
+  const slotOf = (node: OperationNode): string => node.operation === "reported_metric" ? node.subject_slot : slotOf(input(node));
   const shown = shownFigures(plan);
-  const margins = shown.filter((node): node is MarginNode =>
-    node.operation === "gross_margin" || node.operation === "operating_margin" || node.operation === "net_margin");
-  const numerators = margins.flatMap((node) => {
-    const numerator = nodes.get(node.numerator);
-    return numerator?.operation === "reported_metric" ? [numerator.metric_key] : [];
+  const reached = [...dependencyClosure(plan, plan.outputs.map((output) => output.node_id))].map((id) => nodes.get(id)!);
+  const companies = plan.subjects.members.map((member) => {
+    const ofCompany = (node: OperationNode) => slotOf(node) === member.slot_id;
+    const own = shown.filter(ofCompany);
+    const margins = own.filter((node) => node.operation === "gross_margin" || node.operation === "operating_margin" || node.operation === "net_margin");
+    return {
+      label: labels.get(member.subject_ref.id.toLowerCase()),
+      shown: own,
+      reached: reached.filter(ofCompany),
+      read: new Set(own.flatMap((node) => [figureKey(node), SCOPE_METRICS[figureKey(node)] ?? []].flat())),
+      marginPeriods: new Set(margins.map(periodOf)).size,
+    };
   });
-  // ponytail: a margin also answers the income item it divides, because the
-  // reading has no operating or net margin item and names operating income for
-  // an operating margin; a request for operating income answered by its margin
-  // alone is not named (#425). Add the margin items to INCOME_ITEMS to drop this.
-  const read = new Set([...shown.flatMap((node) => [figureKey(node), SCOPE_METRICS[figureKey(node)] ?? []].flat()), ...numerators]);
-  const periodOf = (id: string) => {
-    const node = nodes.get(id);
-    return node?.operation === "reported_metric" ? JSON.stringify(node.period) : id;
+  type Company = (typeof companies)[number];
+  // An engine figure is as reported, so a qualified metric is computed only as
+  // its base's growth (a change whose two inputs are that figure itself, not
+  // a ratio or sum that reads it) or its trend (it over several periods).
+  const computes = (metric: RequestedMetric, company: Company) => {
+    const ofBase = (node: OperationNode) => SCOPE_METRICS[figureKey(node)] === metric.base;
+    if (metric.adjustment !== undefined) return false;
+    if (metric.qualifier === "growth") {
+      return company.reached.some((node) => (node.operation === "percent_change_positive_base" || node.operation === "absolute_change") &&
+        ofBase(nodes.get(node.current)!) && ofBase(nodes.get(node.prior)!));
+    }
+    return metric.qualifier === "trend" && new Set(company.shown.filter(ofBase).map(periodOf)).size > 1;
   };
-  const marginPeriods = new Set(margins.map((node) => periodOf(node.revenue)));
   const metrics = [...new Map(reading.metrics
     .filter((metric) => CATALOG.has(metric.metric_key))
     .flatMap((metric) => metric.metric_key === "balance_sheet" ? BALANCE_SHEET_ITEMS.map((key) => CATALOG.get(key)!) : [metric])
     .filter((metric) => !offMetrics.has(metric.metric_key))
     .map((metric) => [metric.metric_key, metric])).values()];
-  const items = reading.income_items.filter((item) => !read.has(INCOME_ITEM_FIGURE[item] ?? "")).map((item) => item.replaceAll("_", " "));
-  return [
+  const items = reading.income_items.map((item) => ({ text: item.replaceAll("_", " "), missing: (company: Company) => !company.read.has(INCOME_ITEM_FIGURE[item] ?? "") }));
+  const marginItems = items.filter((item) => item.text.endsWith("margin"));
+  // Each ask, in the order the question gives them, and whether a company's figures leave it out.
+  const asked: ReadonlyArray<Readonly<{ text: string; missing: (company: Company) => boolean }>> = [
     // The income items name its figures more closely than the whole statement does.
-    ...metrics.filter((metric) => !read.has(metric.metric_key) && !(metric.metric_key === "income_statement" && reading.income_items.length > 0))
-      .map((metric) => inSentence(metric.label)),
+    ...metrics.filter((metric) => !(metric.metric_key === "income_statement" && reading.income_items.length > 0))
+      .map((metric) => ({ text: inSentence(metric.label), missing: (company: Company) => !company.read.has(metric.metric_key) })),
+    ...reading.metrics.filter((metric) => metric.base !== undefined && !offMetrics.has(metric.metric_key))
+      .map((metric) => ({ text: inSentence(metric.label), missing: (company: Company) => !computes(metric, company) })),
     ...items,
-    ...(asks.has("margin_trend") && marginPeriods.size < 2 ? ["a margin over several periods"]
-      : asks.has("margins") && marginPeriods.size === 0 && !items.includes("gross margin") ? ["a margin"]
+    // A margin item left out names the margin already.
+    ...(asks.has("margin_trend") ? [{ text: "a margin over several periods", missing: (company: Company) => company.marginPeriods < 2 }]
+      : asks.has("margins") ? [{ text: "a margin", missing: (company: Company) => company.marginPeriods === 0 && !marginItems.some((item) => item.missing(company)) }]
       : []),
+  ];
+  return [
+    ...asked.flatMap((ask) => {
+      const lacking = companies.filter(ask.missing);
+      if (lacking.length === 0) return [];
+      const labelled = lacking.flatMap((company) => company.label ?? []);
+      return [lacking.length < companies.length && labelled.length === lacking.length ? `${ask.text} for ${labelList(labelled)}` : ask.text];
+    }),
     ...Object.entries(NEVER_PLANNED).flatMap(([facet, item]) => asks.has(facet as ScopeFacet) ? [item] : []),
   ];
 }
@@ -716,25 +798,43 @@ function inSentence(label: string): string {
   return /\p{Ll}/u.test(label[1] ?? "") ? `${label[0]!.toLowerCase()}${label.slice(1)}` : label;
 }
 
-async function published(db: SqlExecutor, runId: string, threadId: string, messageId: string): Promise<ChatFinancialTurn> {
-  let message: ChatReadMessage | null;
+// A saved message as the thread reads it; undefined when it cannot be read
+// back, so the turn completes without it.
+async function readBack(db: SqlExecutor, threadId: string, messageId: string): Promise<ChatReadMessage | null | undefined> {
   try {
-    message = await readChatMessage(db, { thread_id: threadId, message_id: messageId });
+    return await readChatMessage(db, { thread_id: threadId, message_id: messageId });
   } catch (error) {
     logUnreadMessage(messageId, error);
-    return { kind: "published", run_id: runId, message_id: messageId, message: null };
+    return undefined;
   }
-  return message ? { kind: "published", run_id: runId, message_id: messageId, message } : gap("run_failed");
 }
 
-// The planner's own reason for an unsupported request is shown when it gave
-// one in words. One with a numeral is not, as the lane shows no figure a
-// model wrote; a number spelled out still passes.
+// A gap an earlier attempt of the turn saved.
+async function savedGap(db: SqlExecutor, threadId: string, messageId: string): Promise<ChatFinancialTurn> {
+  return { kind: "saved", message_id: messageId, message: (await readBack(db, threadId, messageId)) ?? null };
+}
+
+async function published(db: SqlExecutor, runId: string, threadId: string, messageId: string): Promise<ChatFinancialTurn> {
+  const message = await readBack(db, threadId, messageId);
+  return message === null ? gap("run_failed") : { kind: "published", run_id: runId, message_id: messageId, message: message ?? null };
+}
+
+// What an unsupported request asks for, by the planner's reason (its closed
+// list) or the cash-resilience view's; any other reason gets the plain text,
+// so no model-written words reach the gap.
+const REASON_TEXT: Readonly<Record<Exclude<UnsupportedReason, "other"> | typeof CASH_RESILIENCE_VIEW, string>> = {
+  segments: "revenue or results by business segment",
+  forecast: "guidance, estimates or forecasts",
+  adjusted: "adjusted or non-GAAP figures",
+  undefined_metric: "a metric with no verified definition",
+  cash_resilience_view: "cash resilience is an annual view without scores, peer ranks, or cash and debt measures",
+};
+
 function gap(reason_code: ChatGap, planned?: PlanningResult): Extract<ChatFinancialTurn, { kind: "gap" }> {
-  const reason = reason_code === "unsupported" && planned?.outcome === "unsupported" && planned.issues.length === 0
-    ? planned.reason.trim().replace(/[.\s]+$/u, "")
-    : "";
-  return { kind: "gap", reason_code, text: reason === "" || /\p{N}/u.test(reason) ? GAP_TEXT[reason_code] : `${UNSUPPORTED}: ${reason}.` };
+  const reason = reason_code === "unsupported" && planned?.outcome === "unsupported" && Object.hasOwn(REASON_TEXT, planned.reason)
+    ? REASON_TEXT[planned.reason as keyof typeof REASON_TEXT]
+    : null;
+  return { kind: "gap", reason_code, text: reason === null ? GAP_TEXT[reason_code] : `${UNSUPPORTED}: ${reason}.` };
 }
 
 const FINANCIAL_TERMS = new RegExp(

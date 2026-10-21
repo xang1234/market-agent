@@ -53,7 +53,13 @@ export async function api<T>(base: string, method: string, path: string, body?: 
 export async function runTurn(base: string, threadId: string, userIntent: string): Promise<ParsedSseEvent[]> {
   const messageId = randomUUID();
   await api(base, "POST", `/v1/chat/threads/${threadId}/messages`, { message_id: messageId, snapshot_id: randomUUID(), content: userIntent });
-  const params = new URLSearchParams({ run_id: randomUUID(), turn_id: messageId, user_intent: userIntent, user_id: USER_ID });
+  return streamTurn(base, threadId, userIntent, messageId);
+}
+
+// Runs the turn the user's message `turnId` asks for on a new run, as the
+// client's retry does.
+export async function streamTurn(base: string, threadId: string, userIntent: string, turnId: string): Promise<ParsedSseEvent[]> {
+  const params = new URLSearchParams({ run_id: randomUUID(), turn_id: turnId, user_intent: userIntent, user_id: USER_ID });
   const response = await fetch(`${base}/v1/chat/threads/${threadId}/stream?${params}`);
   assert.equal(response.status, 200);
   const reader = response.body!.getReader();

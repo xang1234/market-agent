@@ -16,8 +16,9 @@ export function answerMessageId(threadId: string, runId: string, turnId: string)
 }
 
 /**
- * The financial lane's published answer. It differs from answerMessageId,
- * which an in-progress notice of the same turn may already hold.
+ * The financial lane's outcome for a turn: its published answer, or the gap
+ * it declined with until an answer replaces it. It differs from
+ * answerMessageId, which an in-progress notice of the same turn may hold.
  */
 export function financialMessageId(threadId: string, turnId: string): string {
   return stableUuid(`financial-message:${threadId}:${turnId}`);

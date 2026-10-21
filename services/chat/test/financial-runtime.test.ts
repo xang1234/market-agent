@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { databaseUrl, IDS, ORIGINAL_REVENUE } from "../../financial-engine/test/db-fixtures.ts";
-import type { ChatAnalystToolRuntime } from "../src/coordinator.ts";
+import type { ChatAnalystToolRuntime, ChatAssistantMessagePersistence } from "../src/coordinator.ts";
 import { financialMessageId } from "../src/chat-ids.ts";
 import { createChatFinancialRuntime, isFinancialRequest, SCOPE_METRICS } from "../src/financial-runtime.ts";
 import { METRIC_CATALOG_V1, OPERATION_REGISTRY } from "../../financial-core/src/index.ts";
@@ -26,6 +26,30 @@ test("an unready engine stops the server instead of leaving metric questions on 
   const lane = createChatFinancialRuntime({ pool: unready, planningModel: null, resolveMention: async () => assert.fail("no turn runs"), evidence: createEvidenceFinancialPort });
   await assert.rejects(() => lane.assertReady(), /verified finance is not ready for chat: schema: relation financial_runs is missing/u);
 });
+
+// The chat server's own message persistence (local-runtime.ts) on this
+// database, so a test reads what a thread saves. Imported here, not in
+// financial-fixtures.ts, which the engine's typecheck reaches without llm.
+async function savingMessages(t: TestContext, url: string): Promise<ChatAssistantMessagePersistence> {
+  const previous = process.env.CHAT_DATABASE_URL;
+  process.env.CHAT_DATABASE_URL = url;
+  const runtime = await import("../src/local-runtime.ts");
+  t.after(async () => {
+    await runtime.closeLocalRuntimePoolForTests();
+    if (previous === undefined) delete process.env.CHAT_DATABASE_URL;
+    else process.env.CHAT_DATABASE_URL = previous;
+  });
+  return runtime.persistAssistantMessage;
+}
+
+function declining(reason: string): PlanningModel & { calls: number } {
+  const model = (async () => {
+    model.calls += 1;
+    return { model: "stub-model", text: JSON.stringify({ outcome: "unsupported", reason }) };
+  }) as unknown as PlanningModel & { calls: number };
+  model.calls = 0;
+  return model;
+}
 
 test("chat financial lane", { timeout: 300_000 }, async (t) => {
   if (!dockerAvailable()) {
@@ -86,6 +110,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(saved.companies, [{ issuer_id: IDS.issuerA }, { issuer_id: IDS.issuerB }]);
     // The scope only informs follow-ups; failing to resolve it never fails the answer.
     assert.equal(await savedScope(async () => { throw new Error("prior scope unavailable"); }), null);
+    assert.equal(await savedScope((() => { throw new Error("no scope builder"); }) as never), null, "one that throws before it answers");
   });
 
   await t.test("the answer names, beside its figures, what the reading of the question asks for and the plan does not compute", async () => {
@@ -181,9 +206,9 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       const scope = harness.persisted.at(-1)!.research_scope as { route: string; reads: string; companies: unknown; metrics: unknown } | undefined;
       return { gap: done.financial_gap, text: block!.segments[0]!.text, subject_refs: block!.subject_refs, scope: scope && [scope.route, scope.reads, scope.companies, scope.metrics] };
     };
-    assert.deepEqual(await segments("Break down AAA's revenue by segment", "segment revenue has no approved definition"), {
+    assert.deepEqual(await segments("Break down AAA's revenue by segment", "segments"), {
       gap: { reason_code: "unsupported" },
-      text: "This request asks for a calculation outside the verified financial definitions I can compute: segment revenue has no approved definition.",
+      text: "This request asks for a calculation outside the verified financial definitions I can compute: revenue or results by business segment.",
       subject_refs: [{ kind: "issuer", id: IDS.issuerA }],
       scope: ["financial_gap", "financial_gap", [{ issuer_id: IDS.issuerA, label: "AAA" }], []],
     });
@@ -194,8 +219,8 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       subject_refs: undefined,
       scope: undefined,
     });
-    // A company picked in a clarification is saved too, labelled. A reason with a figure in it is not shown.
-    assert.deepEqual(await segments("Break down AMB's revenue by segment", "only 3 segments are reported", "Beta Holdings Corp."), {
+    // A company picked in a clarification is saved too, labelled. A reason the planner does not list is not shown.
+    assert.deepEqual(await segments("Break down AMB's revenue by segment", "segment revenue has no approved definition", "Beta Holdings Corp."), {
       gap: { reason_code: "unsupported" },
       text: "This request asks for a calculation outside the verified financial definitions I can compute.",
       subject_refs: [{ kind: "issuer", id: IDS.issuerB }],
@@ -261,6 +286,40 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       { issuer_id: IDS.issuerA, label: "AAA" },
       { issuer_id: IDS.issuerB, label: "Beta Holdings Corp." },
     ]);
+  });
+
+  await t.test("a turn that ends in a clarification or a gap before planning never reads its question (#425)", async () => {
+    let reads = 0;
+    const readQuestion = async () => {
+      reads += 1;
+      return parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [] }));
+    };
+    // As financialResearchScope does, the scope waits for the reading.
+    const researchScope = async (context: Parameters<typeof scopeOver>[0], reading: Promise<unknown>) => {
+      await reading;
+      return scopeOver(context);
+    };
+    const ask = async (model: PlanningModel | null, userIntent: string) => {
+      reads = 0;
+      const done = completed((await chatHarness(pool, { model, readQuestion, researchScope: researchScope as never }).run({ ...base, userIntent })).events);
+      return [done.clarification === true ? "clarification" : (done.financial_gap as { reason_code: string } | undefined)?.reason_code ?? "answer", reads];
+    };
+    assert.deepEqual(await ask(revenueModel(["AAA", "AMB"]), "Compare revenue for AAA and AMB"), ["clarification", 0], "the planner asks which company before any model call");
+    assert.deepEqual(await ask(null, "Compare revenue for AAA and BBB"), ["planning_unavailable", 0], "no model plans it");
+    assert.deepEqual(await ask(revenueModel(["AAA"]), "Revenue for AAA"), ["answer", 1]);
+  });
+
+  await t.test("an answer with no reading of its question says its coverage was not checked, and its scope records it (#425)", { timeout: 60_000 }, async () => {
+    const answer = async (readQuestion: () => Promise<ReturnType<typeof parseProposal>>) => {
+      const { events } = await chatHarness(pool, { model: revenueModel(["AAA"]), readQuestion, researchScope: scopeOver as never }).run({ ...base, userIntent: "Revenue for AAA" });
+      const message = (await db.query(`select blocks, research_scope from chat_messages where message_id = $1`, [completed(events).message_id])).rows[0];
+      return [message.blocks.slice(1).map((block: { segments: Array<{ text: string }> }) => block.segments[0]!.text), message.research_scope.coverage_unchecked];
+    };
+    const unchecked = [["It was not checked whether this answer covers everything the question asks for."], true];
+    assert.deepEqual(await answer(async () => null), unchecked, "no reading");
+    assert.deepEqual(await answer(async () => { throw new Error("scope model down"); }), unchecked, "a failed reading");
+    assert.deepEqual(await answer(() => { throw new Error("no scope reader"); }), unchecked, "a reader that throws before it answers");
+    assert.deepEqual(await answer(async () => parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [] }))), [[], undefined]);
   });
 
   await t.test("each name a turn gives is resolved once (#425)", async () => {
@@ -392,45 +451,112 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.deepEqual((harness.persisted.at(-1)!.research_scope as { companies: unknown }).companies, [{ issuer_id: MISSING_ISSUER, label: "CCC" }]);
   });
 
-  await t.test("a retry that finds its run failed declines with its companies, unless another attempt answered the turn meanwhile (#425)", async () => {
+  await t.test("a retry that finds its run failed declines with its companies (#425)", async () => {
     // The thread is another user's, so the first attempt reserves the run and cannot publish; the run then fails.
-    const failedTurn = async () => {
-      const input = { threadId: randomUUID(), userId: IDS.owner, turnId: randomUUID(), userIntent: "Revenue for AAA" };
-      await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [input.threadId, IDS.other]);
-      await chatHarness(pool, { model: revenueModel(["AAA"]) }).run(input);
-      await db.query(`update financial_runs set execution_state = 'failed', failure_code = 'internal_error' where parent_id = $1`, [input.threadId]);
-      await db.query(`update chat_threads set user_id = $2 where thread_id = $1`, [input.threadId, IDS.owner]);
-      return input;
+    const input = { threadId: randomUUID(), userId: IDS.owner, turnId: randomUUID(), userIntent: "Revenue for AAA" };
+    await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [input.threadId, IDS.other]);
+    await chatHarness(pool, { model: revenueModel(["AAA"]) }).run(input);
+    await db.query(`update financial_runs set execution_state = 'failed', failure_code = 'internal_error' where parent_id = $1`, [input.threadId]);
+    await db.query(`update chat_threads set user_id = $2 where thread_id = $1`, [input.threadId, IDS.owner]);
+    const harness = chatHarness(pool, { model: revenueModel(["AAA"]), researchScope: scopeOver as never });
+    const done = completed((await harness.run(input)).events);
+    assert.deepEqual(
+      [done.financial_gap, (harness.persisted.at(-1)!.research_scope as { companies: unknown }).companies],
+      [{ reason_code: "run_failed" }, [{ issuer_id: IDS.issuerA, label: "AAA" }]],
+    );
+  });
+
+  await t.test("a retry of a declined turn returns the gap it saved, with no second model call (#425)", async (st) => {
+    const persistAssistantMessage = await savingMessages(st, databaseUrl(db));
+    const model = declining("segments");
+    const harness = () => chatHarness(pool, { model, persistAssistantMessage });
+    const turn = { ...base, turnId: randomUUID(), userIntent: "Break down AAA's revenue by segment" };
+    const first = completed((await harness().run(turn)).events);
+    // A retry comes on a new run; one after a restart comes on the same.
+    for (const runId of [randomUUID(), turn.turnId]) {
+      const retried = completed((await harness().run({ ...turn, runId })).events);
+      assert.deepEqual([retried.message_id, model.calls], [first.message_id, 1], runId);
+    }
+    // One whose saved gap cannot be read back completes without it, as a published answer does.
+    st.mock.method(console, "error", () => {});
+    const failingReads = {
+      query: (text: string, values?: unknown[]) => text.includes("from chat_messages m") ? Promise.reject(new Error("Connection terminated unexpectedly")) : pool.query(text, values),
+      connect: () => pool.connect(),
     };
-    const retry = async (input: Awaited<ReturnType<typeof failedTurn>>, through: unknown = pool) => {
-      const harness = chatHarness(through as never, { model: revenueModel(["AAA"]), researchScope: scopeOver as never });
-      const done = completed((await harness.run(input)).events);
-      return [done.financial_gap, (harness.persisted.at(-1)!.research_scope as { companies: unknown } | undefined)?.companies];
-    };
-    assert.deepEqual(await retry(await failedTurn()), [{ reason_code: "run_failed" }, [{ issuer_id: IDS.issuerA, label: "AAA" }]]);
-    // The answer lands after this attempt checked for it, as when another attempt finishes the run it waits on.
-    const raced = await failedTurn();
+    const { events: unreadEvents } = await chatHarness(failingReads as never, { model, persistAssistantMessage }).run({ ...turn, runId: randomUUID() });
+    const unread = completed(unreadEvents);
+    assert.deepEqual([unread.message_id, "message" in unread, model.calls], [first.message_id, false, 1]);
+    const began = unreadEvents.find((event) => event.type === "block.began")!;
+    assert.deepEqual([began.block_id, began.kind], [`financial-gap-${first.message_id}`, "rich_text"], "a gap's block, never an answer's");
+    const { rows } = await db.query(`select count(*)::int as n from chat_messages where thread_id = $1 and research_scope->>'reads' = 'financial_gap'`, [threadId]);
+    assert.equal(rows[0].n, 0, "no scope was given, so none is saved");
+    assert.equal((await db.query(`select count(*)::int as n from chat_messages where message_id = $1`, [first.message_id])).rows[0].n, 1);
+  });
+
+  await t.test("a retried turn that asks which company saves its question again, never failing on the first attempt's (#425)", async (st) => {
+    const persistAssistantMessage = await savingMessages(st, databaseUrl(db));
+    const turn = { ...base, turnId: randomUUID(), userIntent: "Revenue for AMB" };
+    for (const runId of [turn.turnId, randomUUID(), turn.turnId]) {
+      const done = completed((await chatHarness(pool, { model: revenueModel(["AMB"]), persistAssistantMessage }).run({ ...turn, runId })).events);
+      assert.equal(done.clarification, true, runId);
+    }
+  });
+
+  await t.test("a declined turn's gap never hides the answer another attempt of the turn saved (#425)", async (st) => {
+    const persist = await savingMessages(st, databaseUrl(db));
+    const raced = { threadId: randomUUID(), userId: IDS.owner, turnId: randomUUID(), userIntent: "Break down AAA's revenue by segment" };
+    await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [raced.threadId, IDS.owner]);
     const { rows: [snapshot] } = await db.query<{ snapshot_id: string }>(
       `insert into snapshots (subject_refs, as_of, basis, normalization, allowed_transforms)
        values (jsonb_build_array(jsonb_build_object('kind', 'issuer', 'id', $1::text)), now(), 'unadjusted', 'raw', '{}')
        returning snapshot_id::text as snapshot_id`,
       [IDS.issuerA],
     );
-    let checked = false;
+    const answerId = financialMessageId(raced.threadId, raced.turnId);
+    // The other attempt commits its answer after this one planned its gap, before the gap is saved.
+    const persistAssistantMessage: typeof persist = async (message) => {
+      await db.query(
+        `insert into chat_messages (message_id, thread_id, role, snapshot_id, blocks, content_hash) values ($1::uuid, $2::uuid, 'assistant', $3::uuid, '[{"kind":"financial_answer"}]'::jsonb, 'answer')`,
+        [answerId, raced.threadId, snapshot!.snapshot_id],
+      );
+      return persist(message);
+    };
+    const done = completed((await chatHarness(pool, { model: declining("segments"), researchScope: scopeOver as never, persistAssistantMessage }).run(raced)).events);
+    const { rows } = await db.query(`select message_id::text as message_id, research_scope from chat_messages where thread_id = $1 and role = 'assistant'`, [raced.threadId]);
+    assert.deepEqual([done.message_id, rows], [answerId, [{ message_id: answerId, research_scope: null }]]);
+  });
+
+  await t.test("a turn's answer replaces the gap another attempt of the turn saved (#425)", async () => {
+    const turn = { ...base, turnId: randomUUID(), userIntent: "Revenue for AAA" };
+    const id = financialMessageId(threadId, turn.turnId);
+    const { rows: [snapshot] } = await db.query<{ snapshot_id: string }>(
+      `insert into snapshots (subject_refs, as_of, basis, normalization, allowed_transforms) values ('[]'::jsonb, now(), 'unadjusted', 'raw', '{}') returning snapshot_id::text as snapshot_id`,
+    );
+    // The other attempt saves its gap just after this one looked for the turn's outcome.
+    let saved = false;
     const racing = {
-      query: (text: string, values?: unknown[]) => {
-        if (!checked && text.startsWith("select 1 from chat_messages")) {
-          checked = true;
-          return db.query(
-            `insert into chat_messages (message_id, thread_id, role, snapshot_id, blocks, content_hash) values ($1::uuid, $2::uuid, 'assistant', $3::uuid, '[]'::jsonb, 'answer')`,
-            [financialMessageId(raced.threadId, raced.turnId), raced.threadId, snapshot!.snapshot_id],
-          ).then(() => ({ rows: [] }));
+      query: async (text: string, values?: unknown[]) => {
+        const result = await pool.query(text, values);
+        if (!saved && text.includes("from chat_messages where message_id")) {
+          saved = true;
+          await db.query(
+            `insert into chat_messages (message_id, thread_id, role, snapshot_id, blocks, content_hash) values ($1::uuid, $2::uuid, 'assistant', $3::uuid, '[{"kind":"rich_text"}]'::jsonb, 'gap')`,
+            [id, threadId, snapshot!.snapshot_id],
+          );
         }
-        return pool.query(text, values);
+        return result;
       },
       connect: () => pool.connect(),
     };
-    assert.deepEqual(await retry(raced, racing), [{ reason_code: "run_failed" }, undefined]);
+    const done = completed((await chatHarness(racing as never, { model: revenueModel(["AAA"]) }).run(turn)).events);
+    const { rows } = await db.query(`select blocks->0->>'kind' as kind from chat_messages where message_id = $1`, [id]);
+    assert.deepEqual([done.message_id, rows], [id, [{ kind: "financial_answer" }]]);
+    // The thread points at the answer's snapshot, not the gap's it replaced.
+    const { rows: [pointers] } = await db.query(
+      `select t.latest_snapshot_id::text as thread, m.snapshot_id::text as answer from chat_threads t join chat_messages m on m.thread_id = t.thread_id where m.message_id = $1`,
+      [id],
+    );
+    assert.equal(pointers.thread, pointers.answer);
   });
 
   await t.test("narrative turns keep the analyst path", async () => {

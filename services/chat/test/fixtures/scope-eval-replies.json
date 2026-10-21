@@ -1,6 +1,6 @@
 {
   "model": "anthropic/claude-sonnet-5-5",
-  "recorded": "2026-10-19",
+  "recorded": "2026-10-21",
   "replies": [
     {
       "match": "Question: \"Analyze NVDA's latest quarter.\"",
@@ -8,11 +8,11 @@
     },
     {
       "match": "Question: \"How have NVDA's operating margins trended?\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":\"margin\"}],\"asks\":[\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_income\"]}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":\"margin\"}],\"asks\":[\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_margin\"]}"
     },
     {
       "match": "Question: \"What changed in NVDA's gross margin in Q1 fiscal 2026?\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":\"margin\"}],\"asks\":[\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"gross_margin\"]}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":\"margin\"}],\"asks\":[\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"gross_margin\"]}"
     },
     {
       "match": "Question: \"What is NVDA's gross margin?\"",
@@ -20,11 +20,11 @@
     },
     {
       "match": "Question: \"Show AMD operating margins QoQ\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":\"margin\"}],\"asks\":[\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_income\"]}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_margin\"]}"
     },
     {
       "match": "Question: \"Compare AMD gross margin with last quarter\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"gross_margin\"]}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":\"margin\"}],\"asks\":[\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"gross_margin\"]}"
     },
     {
       "match": "Question: \"What is AMD's EBITDA?\"",
@@ -96,11 +96,11 @@
     },
     {
       "match": "Question: \"What is NVDA's gross margin target?\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":\"margin\"}],\"asks\":[\"margins\",\"guidance\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"gross_margin\"]}"
+      "text": "{\"metrics\":[],\"asks\":[\"margins\",\"guidance\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"gross_margin\"]}"
     },
     {
       "match": "Question: \"Why were NVDA's margins lower than expected?\"",
-      "text": "{\"metrics\":[],\"asks\":[\"margins\",\"explains\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[]}"
+      "text": "{\"metrics\":[],\"asks\":[\"explains\",\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[]}"
     },
     {
       "match": "Question: \"Did NVDA's revenue come in as expected?\"",
@@ -152,7 +152,7 @@
     },
     {
       "match": "Question: \"What accounted for the change in NVDA's gross margin?\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"explains\",\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"gross_margin\"]}"
+      "text": "{\"metrics\":[],\"asks\":[\"explains\",\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"gross_margin\"]}"
     },
     {
       "match": "Question: \"What did AMD say about free cash flow on its earnings call?\"",
@@ -176,7 +176,7 @@
     },
     {
       "match": "Question: \"What is AMD's EBITDA and gross margin?\"",
-      "text": "{\"metrics\":[{\"metric\":\"ebitda\",\"adjustment\":null,\"qualifier\":null},{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"gross_margin\"]}"
+      "text": "{\"metrics\":[{\"metric\":\"ebitda\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"gross_margin\"]}"
     },
     {
       "match": "Question: \"What is AMD's free cash flow margin trend?\"",
@@ -228,7 +228,7 @@
     },
     {
       "match": "Question: \"Why did AMD's operating margin turn negative in Q2 2025?\"",
-      "text": "{\"metrics\":[],\"asks\":[\"explains\",\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_income\"]}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":\"margin\"}],\"asks\":[\"explains\",\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_margin\"]}"
     },
     {
       "match": "Question: \"Compare AMD and NVDA revenue in Q2 2025\"",
@@ -236,7 +236,7 @@
     },
     {
       "match": "Question: \"Show NVDA's free cash flow margin and its gross margin trend\"",
-      "text": "{\"metrics\":[{\"metric\":\"free_cash_flow\",\"adjustment\":null,\"qualifier\":\"margin\"},{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"gross_margin\"]}"
+      "text": "{\"metrics\":[{\"metric\":\"free_cash_flow\",\"adjustment\":null,\"qualifier\":\"margin\"}],\"asks\":[\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"gross_margin\"]}"
     },
     {
       "match": "Question: \"What is the market doing?\"",

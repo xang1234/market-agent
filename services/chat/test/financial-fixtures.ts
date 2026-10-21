@@ -8,8 +8,15 @@ import { connectedPool } from "../../../db/test/docker-pg.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { databaseUrl, engineDatabase, IDS } from "../../financial-engine/test/db-fixtures.ts";
-import { createChatCoordinator, type ChatAnalystToolRuntime, type ChatAssistantMessageCommit, type ChatTurnInput } from "../src/coordinator.ts";
+import {
+  createChatCoordinator,
+  type ChatAnalystToolRuntime,
+  type ChatAssistantMessageCommit,
+  type ChatAssistantMessagePersistence,
+  type ChatTurnInput,
+} from "../src/coordinator.ts";
 import { createChatFinancialRuntime } from "../src/financial-runtime.ts";
+import type { ScopeProposal } from "../src/research-scope.ts";
 import type { ChatSubjectPreResolution } from "../src/subjects.ts";
 import { readMessage } from "./read-message-fixture.ts";
 
@@ -77,6 +84,8 @@ export function resolveMention(mention: string): Promise<ChatSubjectPreResolutio
   return Promise.resolve(table[mention] ?? ({ status: "not_found", input_text: mention, normalized_input: mention, message: "not found" } as ChatSubjectPreResolution));
 }
 
+export const NO_ASKS: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [] };
+
 /** A planning model that answers every call with a revenue draft for the given slots, and counts calls. */
 export function revenueModel(mentions: ReadonlyArray<string>): PlanningModel & { calls: number } {
   const slots = mentions.map((mention, index) => ({ slot: String.fromCharCode(97 + index), mention }));
@@ -112,6 +121,7 @@ export function chatHarness(
     priorSubjects?: Parameters<typeof createChatFinancialRuntime>[0]["priorSubjects"];
     resolveMention?: typeof resolveMention;
     clock?: () => Date;
+    persistAssistantMessage?: ChatAssistantMessagePersistence;
   },
 ) {
   // The narrative messages the turns saved: clarifications and gaps.
@@ -120,7 +130,7 @@ export function chatHarness(
     analystToolRuntime: options.analyst ?? forbiddenAnalyst,
     persistAssistantMessage: async (message) => {
       persisted.push(message);
-      return readMessage({ snapshot_id: randomUUID(), message_id: randomUUID(), thread_id: message.threadId });
+      return options.persistAssistantMessage?.(message) ?? readMessage({ snapshot_id: randomUUID(), message_id: randomUUID(), thread_id: message.threadId });
     },
     financialRuntime: createChatFinancialRuntime({
       pool,
@@ -128,14 +138,14 @@ export function chatHarness(
       resolveMention: options.resolveMention ?? resolveMention,
       evidence: createEvidenceFinancialPort,
       ...(options.researchScope ? { researchScope: options.researchScope } : {}),
-      ...(options.readQuestion ? { readQuestion: options.readQuestion } : {}),
+      readQuestion: options.readQuestion ?? (async () => NO_ASKS),
       ...(options.priorSubjects ? { priorSubjects: options.priorSubjects } : {}),
       ...(options.clock ? { clock: options.clock } : {}),
     }),
   });
-  const run = async (input: Omit<ChatTurnInput, "runId" | "turnId"> & { turnId?: string }) => {
+  const run = async (input: Omit<ChatTurnInput, "runId" | "turnId"> & { turnId?: string; runId?: string }) => {
     const turnId = input.turnId ?? randomUUID();
-    const handle = coordinator.getOrCreateTurn({ ...input, runId: turnId, turnId });
+    const handle = coordinator.getOrCreateTurn({ ...input, runId: input.runId ?? turnId, turnId });
     await handle.completed;
     return { turnId, events: handle.events };
   };

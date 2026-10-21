@@ -2,7 +2,7 @@
   "replies": [
     {
       "match": "Request: Break down NVDA's revenue by segment\nRequested",
-      "text": "{\"outcome\":\"unsupported\",\"reason\":\"segment revenue has no approved definition\"}"
+      "text": "{\"outcome\":\"unsupported\",\"reason\":\"segments\"}"
     },
     {
       "match": "Request: Why did AMD's operating margin turn negative in Q2 2025?\nRequested",
@@ -14,15 +14,15 @@
     },
     {
       "match": "Request: Break down AMD's revenue by segment\nRequested",
-      "text": "{\"outcome\":\"unsupported\",\"reason\":\"segment revenue has no approved definition\"}"
+      "text": "{\"outcome\":\"unsupported\",\"reason\":\"segments\"}"
     },
     {
       "match": "Request: Break down NVDA's revenue by segment and show its operating margin trend\nRequested",
-      "text": "{\"outcome\":\"unsupported\",\"reason\":\"segment revenue has no approved definition\"}"
+      "text": "{\"outcome\":\"unsupported\",\"reason\":\"segments\"}"
     },
     {
       "match": "Request: Break down NVDA's revenue by segment and show its gross margin\nRequested",
-      "text": "{\"outcome\":\"unsupported\",\"reason\":\"segment revenue has no approved definition\"}"
+      "text": "{\"outcome\":\"unsupported\",\"reason\":\"segments\"}"
     },
     {
       "match": "Request: What is AMD's free cash flow?\nRequested",
@@ -35,6 +35,10 @@
     {
       "match": "Request: What drives AAPL's margins?\nRequested",
       "text": "{\"outcome\":\"ready\",\"subjects\":[{\"slot_id\":\"a\",\"mention\":\"AAPL\"}],\"operations\":[{\"node_id\":\"a_rev\",\"operation\":\"reported_metric\",\"subject_slot\":\"a\",\"metric_key\":\"revenue\",\"period\":{\"kind\":\"latest\",\"period_type\":\"annual\",\"offset\":0}},{\"node_id\":\"a_gp\",\"operation\":\"reported_metric\",\"subject_slot\":\"a\",\"metric_key\":\"gross_profit\",\"period\":{\"kind\":\"latest\",\"period_type\":\"annual\",\"offset\":0}},{\"node_id\":\"a_oi\",\"operation\":\"reported_metric\",\"subject_slot\":\"a\",\"metric_key\":\"operating_income\",\"period\":{\"kind\":\"latest\",\"period_type\":\"annual\",\"offset\":0}},{\"node_id\":\"a_ni\",\"operation\":\"reported_metric\",\"subject_slot\":\"a\",\"metric_key\":\"net_income\",\"period\":{\"kind\":\"latest\",\"period_type\":\"annual\",\"offset\":0}},{\"node_id\":\"a_gm\",\"operation\":\"gross_margin\",\"numerator\":\"a_gp\",\"revenue\":\"a_rev\"},{\"node_id\":\"a_om\",\"operation\":\"operating_margin\",\"numerator\":\"a_oi\",\"revenue\":\"a_rev\"},{\"node_id\":\"a_nm\",\"operation\":\"net_margin\",\"numerator\":\"a_ni\",\"revenue\":\"a_rev\"}],\"outputs\":[{\"output_id\":\"out_a_gm\",\"node_id\":\"a_gm\"},{\"output_id\":\"out_a_om\",\"node_id\":\"a_om\"},{\"output_id\":\"out_a_nm\",\"node_id\":\"a_nm\"}],\"thresholds\":[]}"
+    },
+    {
+      "match": "Request: Compare NVDA and AMD operating margin and EPS growth\nRequested",
+      "text": "{\"outcome\":\"ready\",\"subjects\":[{\"slot_id\":\"a\",\"mention\":\"NVDA\"},{\"slot_id\":\"b\",\"mention\":\"AMD\"}],\"operations\":[{\"node_id\":\"a_rev\",\"operation\":\"reported_metric\",\"subject_slot\":\"a\",\"metric_key\":\"revenue\",\"period\":{\"kind\":\"latest\",\"period_type\":\"annual\",\"offset\":0}},{\"node_id\":\"a_oi\",\"operation\":\"reported_metric\",\"subject_slot\":\"a\",\"metric_key\":\"operating_income\",\"period\":{\"kind\":\"latest\",\"period_type\":\"annual\",\"offset\":0}},{\"node_id\":\"a_om\",\"operation\":\"operating_margin\",\"numerator\":\"a_oi\",\"revenue\":\"a_rev\"},{\"node_id\":\"b_rev\",\"operation\":\"reported_metric\",\"subject_slot\":\"b\",\"metric_key\":\"revenue\",\"period\":{\"kind\":\"latest\",\"period_type\":\"annual\",\"offset\":0}}],\"outputs\":[{\"output_id\":\"out_a_om\",\"node_id\":\"a_om\"},{\"output_id\":\"out_b_rev\",\"node_id\":\"b_rev\"}],\"thresholds\":[]}"
     },
     {
       "match": "Request: How does AMDX's Q2 2025 revenue compare with its peers?\nRequested",
@@ -86,7 +90,7 @@
     },
     {
       "match": "Question: \"Why did AMD's operating margin turn negative in Q2 2025?\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"explains\",\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_income\"]}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":\"margin\"}],\"asks\":[\"explains\",\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_margin\"]}"
     },
     {
       "match": "Question: \"What was AMD's revenue in Q2 2019?\"",
@@ -102,7 +106,7 @@
     },
     {
       "match": "Question: \"Break down NVDA's revenue by segment and show its operating margin trend\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"segments\",\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\",\"operating_income\"]}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"segments\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\",\"operating_margin\"]}"
     },
     {
       "match": "Question: \"Break down NVDA's revenue by segment and show its gross margin\"",
@@ -139,6 +143,10 @@
     {
       "match": "Question: \"What drives AAPL's margins?\"",
       "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"explains\",\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[]}"
+    },
+    {
+      "match": "Question: \"Compare NVDA and AMD operating margin and EPS growth\"",
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":\"margin\"},{\"metric\":\"eps_diluted\",\"adjustment\":null,\"qualifier\":\"growth\"}],\"asks\":[\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_margin\"]}"
     },
     {
       "match": "Question: \"How does AMDX's Q2 2025 revenue compare with its peers?\"",

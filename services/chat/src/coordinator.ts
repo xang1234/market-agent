@@ -172,7 +172,7 @@ export type ChatSubjectClarificationRenderer = (
 ) => Promise<ChatSubjectClarificationRenderResult> | ChatSubjectClarificationRenderResult;
 
 export type ChatAssistantMessagePersistenceInput = {
-  // Saves the message under this id (answerMessageId).
+  // Saves the message under this id: answerMessageId, or the financial lane's financialMessageId for a gap.
   message_id: string;
   threadId: string;
   runId: string;
@@ -196,7 +196,7 @@ export type ChatAssistantMessagePersistence = (
 ) => Promise<ChatReadMessage>;
 
 export type ChatAssistantMessageCommit = (
-  input: Omit<ChatAssistantMessagePersistenceInput, "message_id">,
+  input: Omit<ChatAssistantMessagePersistenceInput, "message_id"> & { message_id?: string },
 ) => Promise<ChatCommittedMessage>;
 
 export class ChatPersistenceContractError extends Error {
@@ -210,7 +210,7 @@ function committing(persist: ChatAssistantMessagePersistence): ChatAssistantMess
   return async (input) => {
     let message: ChatReadMessage;
     try {
-      message = await persist({ ...input, message_id: answerMessageId(input.threadId, input.runId, input.turnId) });
+      message = await persist({ ...input, message_id: input.message_id ?? answerMessageId(input.threadId, input.runId, input.turnId) });
     } catch (error) {
       if (!(error instanceof ChatMessageUnreadError)) throw error;
       logUnreadMessage(error.message_id, error.cause);

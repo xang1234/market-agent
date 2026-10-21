@@ -64,7 +64,7 @@ function summary(result: PlanningResult) {
   return { outcome: result.outcome, model_calls: result.model_calls };
 }
 
-const SEGMENTS = { outcome: "unsupported", model_calls: 1, reason: "segment revenue has no approved definition" } as const;
+const SEGMENTS = { outcome: "unsupported", model_calls: 1, reason: "segments" } as const;
 const latestMargins = (ticker: string) => {
   const metric = (key: string) => `${ticker} ${key} latest annual[0]`;
   return [
@@ -101,6 +101,11 @@ const EXPECTED: Record<string, ReturnType<typeof summary>> = {
     outputs: [...latestMargins("NVDA"), ...latestMargins("AMD"), ...latestMargins("AAPL")],
   },
   "What drives AAPL's margins?": { outcome: "ready", model_calls: 1, outputs: latestMargins("AAPL").slice(1) },
+  "Compare NVDA and AMD operating margin and EPS growth": {
+    outcome: "ready",
+    model_calls: 1,
+    outputs: ["operating_margin(NVDA operating_income latest annual[0], NVDA revenue latest annual[0])", "AMD revenue latest annual[0]"],
+  },
   "How does AMDX's Q2 2025 revenue compare with its peers?": { outcome: "ready", model_calls: 1, outputs: ["AMD revenue Q2 2025"] },
 };
 
@@ -173,7 +178,9 @@ test("an engine answer names what the reading of its question asks for and the p
   assert.deepEqual(uncoveredAsks(reading([], ["total_assets"]), assets), []);
 
   const marginOnly = plan(margin("q4", quarter("Q4")), ["om_q4"]);
-  assert.deepEqual(uncoveredAsks(reading(["margins"], ["income_statement"], ["revenue", "operating_income"]), marginOnly), ["revenue"], "an input the answer does not show is named; a margin's numerator is not");
+  assert.deepEqual(uncoveredAsks(reading(["margins"], ["income_statement"], ["revenue", "operating_income"]), marginOnly), ["revenue", "operating income"], "an input the answer does not show is named, a margin's numerator too (#425)");
+  assert.deepEqual(uncoveredAsks(reading(["margins"], ["income_statement"], ["operating_margin"]), marginOnly), [], "the margin answers its own item");
+  assert.deepEqual(uncoveredAsks(reading(["margins"], ["income_statement"], ["net_margin"]), marginOnly), ["net margin"], "one margin does not answer another");
   const turnsOff = (asks: string[], metrics: unknown[], facets: string[], offMetrics: unknown[]) =>
     parseProposal(JSON.stringify({ metrics, asks, turns_off: { facets, metrics: offMetrics }, income_items: [] }))!;
   assert.deepEqual(uncoveredAsks(turnsOff(["margins", "margin_trend"], [], ["margins"], []), revenue), [], "no margins is no trend");
@@ -183,4 +190,84 @@ test("an engine answer names what the reading of its question asks for and the p
   const cashFlow = plan([reported("ocf", "operating_cash_flow", quarter("FY"))]);
   assert.deepEqual(uncoveredAsks(reading([], ["income_statement"], ["revenue"]), cashFlow), ["revenue"]);
   assert.deepEqual(uncoveredAsks(reading(["margins"], ["income_statement"], ["gross_margin"]), revenue), ["gross margin"]);
+});
+
+test("an engine answer names what it leaves out for each company it covers (#425)", () => {
+  const q4 = { kind: "fiscal_period", fiscal_year: 2026, fiscal_period: "Q4" };
+  const reported = (node_id: string, subject_slot: string, metric_key: string) => ({ node_id, operation: "reported_metric", subject_slot, metric_key, period: q4 });
+  const planned = buildDeterministicPlan(planningContext("NVDA and AMD"), {
+    subjects: [{ slot_id: "a", mention: "NVDA" }, { slot_id: "b", mention: "AMD" }],
+    operations: [
+      reported("a_oi", "a", "operating_income"),
+      reported("a_rev", "a", "revenue"),
+      { node_id: "a_om", operation: "operating_margin", numerator: "a_oi", revenue: "a_rev" },
+      reported("b_rev", "b", "revenue"),
+    ],
+    outputs: ["a_rev", "a_om", "b_rev"].map((node_id) => ({ output_id: `out_${node_id}`, node_id })),
+    thresholds: [],
+  });
+  assert.equal(planned.outcome, "ready", JSON.stringify(planned));
+  const plan = (planned as Extract<PlanningResult, { outcome: "ready" }>).plan;
+  const ticker = (symbol: string) => GOLDEN_COMPANIES.find((company) => company.ticker === symbol)!.issuer_id;
+  const labels = new Map([[ticker("NVDA"), "NVDA"], [ticker("AMD"), "AMD"]]);
+
+  assert.deepEqual(uncoveredAsks(reading(["margins"], ["income_statement"], ["revenue", "operating_margin"]), plan, labels), ["operating margin for AMD"]);
+  assert.deepEqual(uncoveredAsks(reading(["margins"], ["income_statement"]), plan, labels), ["a margin for AMD"]);
+  assert.deepEqual(uncoveredAsks(reading(["benchmark"], ["income_statement"], ["net_income"]), plan, labels), ["net income", "a comparison with a benchmark index"], "an ask no company's figures answer names no company");
+
+  // A qualified metric is checked on each company's own figures too.
+  const fy = (fiscal_year: number) => ({ kind: "fiscal_period", fiscal_year, fiscal_period: "FY" });
+  const eps = (node_id: string, subject_slot: string, fiscal_year: number) => ({ node_id, operation: "reported_metric", subject_slot, metric_key: "eps_diluted", period: fy(fiscal_year) });
+  const change = (slot: string) => ({ node_id: `${slot}_g`, operation: "percent_change_positive_base", current: `${slot}_e26`, prior: `${slot}_e25` });
+  const epsPlan = (operations: object[], shown: string[]) => {
+    const drafted = buildDeterministicPlan(planningContext("NVDA and AMD"), {
+      subjects: [{ slot_id: "a", mention: "NVDA" }, { slot_id: "b", mention: "AMD" }],
+      operations,
+      outputs: shown.map((node_id) => ({ output_id: `out_${node_id}`, node_id })),
+      thresholds: [],
+    });
+    assert.equal(drafted.outcome, "ready", JSON.stringify(drafted));
+    return (drafted as Extract<PlanningResult, { outcome: "ready" }>).plan;
+  };
+  const years = (slot: string) => [eps(`${slot}_e25`, slot, 2025), eps(`${slot}_e26`, slot, 2026)];
+  const growthForNvda = epsPlan([...years("a"), change("a"), eps("b_e26", "b", 2026)], ["a_g", "b_e26"]);
+  const growthForBoth = epsPlan([...years("a"), change("a"), ...years("b"), change("b")], ["a_g", "b_g"]);
+  const trendForNvda = epsPlan([...years("a"), eps("b_e26", "b", 2026)], ["a_e25", "a_e26", "b_e26"]);
+  const asked = (qualifier: string) => reading([], [{ metric: "eps_diluted", qualifier }]);
+  assert.deepEqual(uncoveredAsks(asked("growth"), growthForNvda, labels), ["earnings per share growth for AMD"]);
+  assert.deepEqual(uncoveredAsks(asked("growth"), growthForBoth, labels), []);
+  assert.deepEqual(uncoveredAsks(asked("trend"), trendForNvda, labels), ["earnings per share trend for AMD"]);
+});
+
+test("an engine answer checks a qualified metric against what its plan computes (#425)", () => {
+  const year = (fiscal_year: number) => ({ kind: "fiscal_period", fiscal_year, fiscal_period: "FY" });
+  const eps = (node_id: string, fiscal_year: number) => ({ node_id, operation: "reported_metric", subject_slot: "a", metric_key: "eps_diluted", period: year(fiscal_year) });
+  const plan = (operations: object[], shown: string[]): FinancialPlanV1 => {
+    const planned = buildDeterministicPlan(planningContext("NVDA"), { subjects: [{ slot_id: "a", mention: "NVDA" }], operations, outputs: shown.map((node_id) => ({ output_id: `out_${node_id}`, node_id })), thresholds: [] });
+    assert.equal(planned.outcome, "ready", JSON.stringify(planned));
+    return (planned as Extract<PlanningResult, { outcome: "ready" }>).plan;
+  };
+  const latest = plan([eps("e26", 2026)], ["e26"]);
+  const twoYears = plan([eps("e25", 2025), eps("e26", 2026)], ["e25", "e26"]);
+  const growth = plan([eps("e25", 2025), eps("e26", 2026), { node_id: "g", operation: "percent_change_positive_base", current: "e26", prior: "e25" }], ["g"]);
+  const asked = (metric: object) => reading([], [metric]);
+
+  assert.deepEqual(uncoveredAsks(asked({ metric: "eps_diluted", qualifier: "growth" }), latest), ["earnings per share growth"]);
+  assert.deepEqual(uncoveredAsks(asked({ metric: "eps_diluted", qualifier: "growth" }), growth), [], "a change of the figure is its growth");
+  assert.deepEqual(uncoveredAsks(asked({ metric: "eps_diluted", qualifier: "trend" }), latest), ["earnings per share trend"]);
+  assert.deepEqual(uncoveredAsks(asked({ metric: "eps_diluted", qualifier: "trend" }), twoYears), [], "two periods of the figure are its trend");
+  assert.deepEqual(uncoveredAsks(asked({ metric: "eps_diluted", adjustment: "adjusted" }), growth), ["adjusted earnings per share"], "an engine figure is as reported");
+  assert.deepEqual(uncoveredAsks(asked({ metric: "free_cash_flow", qualifier: "margin" }), growth), ["free cash flow margin"]);
+  assert.deepEqual(uncoveredAsks(asked({ metric: "eps_basic", qualifier: "growth" }), growth), ["basic earnings per share growth"], "diluted EPS is not basic EPS");
+  const basic = { node_id: "b25", operation: "reported_metric", subject_slot: "a", metric_key: "eps_basic", period: year(2025) };
+  const mixed = plan([basic, eps("e26", 2026), { node_id: "g", operation: "percent_change_positive_base", current: "e26", prior: "b25" }], ["g"]);
+  assert.deepEqual(uncoveredAsks(asked({ metric: "eps_diluted", qualifier: "growth" }), mixed), ["earnings per share growth"], "a change from another figure is not its growth");
+  const balance = (node_id: string, metric_key: string, fiscal_year: number) => ({ node_id, operation: "reported_metric", subject_slot: "a", metric_key, period: year(fiscal_year) });
+  const leverage = (suffix: string, fiscal_year: number) => [
+    balance(`tl${suffix}`, "total_liabilities", fiscal_year),
+    balance(`ta${suffix}`, "total_assets", fiscal_year),
+    { node_id: `r${suffix}`, operation: "ratio", ratio_key: "liabilities_to_assets", numerator: `tl${suffix}`, denominator: `ta${suffix}` },
+  ];
+  const ratioChange = plan([...leverage("25", 2025), ...leverage("26", 2026), { node_id: "g", operation: "percent_change_positive_base", current: "r26", prior: "r25" }], ["g"]);
+  assert.deepEqual(uncoveredAsks(asked({ metric: "total_assets", qualifier: "growth" }), ratioChange), ["total assets growth"], "a change of a ratio over total assets is not total assets growth");
 });

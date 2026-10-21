@@ -672,8 +672,8 @@ function streamedBlockIds(events: ParsedSseEvent[]): unknown[] {
   return events.filter((event) => event.event === "block.completed").map((event) => event.data.block_id);
 }
 
-// The planner's recorded reason for a segment request, in the gap's text (#425).
-const UNSUPPORTED = "This request asks for a calculation outside the verified financial definitions I can compute: segment revenue has no approved definition.";
+// A segment request's gap, worded from the planner's closed reason (#425).
+const UNSUPPORTED = "This request asks for a calculation outside the verified financial definitions I can compute: revenue or results by business segment.";
 
 function answerText(message: ChatMessage): string[] {
   return message.blocks.filter((block) => block.kind === "rich_text")

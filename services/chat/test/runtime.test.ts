@@ -26,6 +26,31 @@ for (const variable of ["CHAT_DATABASE_URL", "DATABASE_URL"]) {
   });
 }
 
+test("with a database set, the server takes each piece of the in-repo runtime once verified finance is ready (#425)", async () => {
+  const piece = (name: string) => Object.assign(() => assert.fail(`${name} is not called while the options load`), { piece: name });
+  let ready: () => Promise<void> = async () => {};
+  const runtime = {
+    persistAssistantMessage: piece("persistAssistantMessage"),
+    preResolveSubject: piece("preResolveSubject"),
+    loadPriorSubjects: piece("loadPriorSubjects"),
+    generateThreadTitle: piece("generateThreadTitle"),
+    analystToolRuntime: piece("analystToolRuntime"),
+    financialRuntime: { assertReady: () => ready() },
+    financialResearchScope: piece("financialResearchScope"),
+  };
+  const load = async () => runtime as never;
+  assert.deepEqual(await loadChatServerOptionsFromEnv({ DATABASE_URL: "postgres://golden.invalid/market_agent" }, load), {
+    persistAssistantMessage: runtime.persistAssistantMessage,
+    preResolveSubject: runtime.preResolveSubject,
+    loadPriorSubjects: runtime.loadPriorSubjects,
+    generateThreadTitle: runtime.generateThreadTitle,
+    analystToolRuntime: runtime.analystToolRuntime,
+    financialRuntime: runtime.financialRuntime,
+  });
+  ready = async () => { throw new Error("verified finance is not ready for chat"); };
+  await assert.rejects(() => loadChatServerOptionsFromEnv({ CHAT_DATABASE_URL: "postgres://golden.invalid/market_agent" }, load), /not ready/u);
+});
+
 test("in-repo chat runtime runs without the local stub tool executor mode", async () => {
   const previous = process.env.CHAT_LOCAL_TOOL_EXECUTOR;
   delete process.env.CHAT_LOCAL_TOOL_EXECUTOR;
