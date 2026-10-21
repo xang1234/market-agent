@@ -50,7 +50,10 @@ async function emitFinancialTurn(
     const { message } = turn;
     const heads = message ? blockHeads(message) : [];
     if (message) emit("snapshot.sealed", { snapshot_id: message.snapshot_id, status: "sealed", verification: { ok: true } });
-    for (const head of heads.length > 0 ? heads : [{ id: `financial-answer-${turn.message_id}`, kind: "financial_answer" }]) {
+    const unread = turn.kind === "published"
+      ? { id: `financial-answer-${turn.message_id}`, kind: "financial_answer" }
+      : { id: `financial-gap-${turn.message_id}`, kind: "rich_text" };
+    for (const head of heads.length > 0 ? heads : [unread]) {
       emit("block.began", { block_id: head.id, kind: head.kind });
       emit("block.completed", { block_id: head.id });
     }

@@ -172,7 +172,7 @@ export type ChatSubjectClarificationRenderer = (
 ) => Promise<ChatSubjectClarificationRenderResult> | ChatSubjectClarificationRenderResult;
 
 export type ChatAssistantMessagePersistenceInput = {
-  // Saves the message under this id (answerMessageId).
+  // Saves the message under this id: answerMessageId, or the financial lane's financialMessageId for a gap.
   message_id: string;
   threadId: string;
   runId: string;

@@ -104,7 +104,8 @@ export type ResearchScope = {
   // an evidence follow-up re-reads. Absent when none.
   income_items?: ReadonlyArray<string>;
   // An engine answer whose question had no reading (#425): what it asks for
-  // beyond the answer's figures was not checked. Absent when it was.
+  // beyond the answer's figures was not checked. Absent when it was. It
+  // describes that answer, so no follow-up inherits it.
   coverage_unchecked?: true;
   // The fields carried from the previous answer rather than asked for now.
   inherited: ReadonlyArray<ScopeField>;
@@ -547,6 +548,7 @@ export function parseResearchScope(value: unknown): ResearchScope | null {
     ...(Array.isArray(scope.income_items) && scope.income_items.length > 0 && scope.income_items.every((item) => typeof item === "string")
       ? { income_items: scope.income_items as string[] }
       : {}),
+    ...(scope.coverage_unchecked === true ? { coverage_unchecked: true as const } : {}),
     inherited: [],
   };
 }

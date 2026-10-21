@@ -165,9 +165,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       `select blocks->0->>'kind' as kind from chat_messages where message_id = $1::uuid`,
       [messageId],
     );
-    if (existing && existing.kind !== "financial_answer") {
-      return { kind: "saved", message_id: messageId, message: await readChatMessage(deps.pool, { thread_id: context.threadId, message_id: messageId }) };
-    }
+    if (existing && existing.kind !== "financial_answer") return savedGap(deps.pool, context.threadId, messageId);
     const answered = existing !== undefined;
     const requested = answered ? ANSWERED : await requestedSubjects(deps, context, text);
     if (requested.clarify) return { kind: "clarification", clarification: companyQuestion(requested.clarify) };
@@ -175,23 +173,25 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     // The reading of the question is a model call, so it starts beside the
     // planner's model call, or once a plan is driven: a turn that ends before
     // either (a question about a company, a gap no model planned) reads
-    // nothing. The saved answer has its reading and scope already.
+    // nothing. The scope waits on the reading, so each use of them decides
+    // first whether to read (prepared). The saved answer has both already.
     let settle: (reading: Promise<ScopeProposal | null> | null) => void = () => {};
     const reading = answered ? Promise.resolve(null) : new Promise<ScopeProposal | null>((resolve) => {
       settle = resolve;
     });
-    let settled = false;
-    const settleReading = (read: boolean) => {
-      if (settled) return;
-      settled = true;
-      settle(read ? (deps.readQuestion?.(text) ?? Promise.resolve(null)).catch((reason) => {
+    let decided = false;
+    const decideReading = (read: boolean) => {
+      if (decided) return;
+      decided = true;
+      settle(read ? Promise.resolve().then(() => deps.readQuestion?.(text) ?? null).catch((reason) => {
         console.warn("[chat] no reading of the question; the financial answer says its coverage was not checked", reason);
         return null;
       }) : null);
     };
-    const planningModel: PlanningModel | null = deps.planningModel && ((request) => {
-      settleReading(true);
-      return deps.planningModel!(request);
+    const { planningModel: model } = deps;
+    const planningModel: PlanningModel | null = model && ((request) => {
+      decideReading(true);
+      return model(request);
     });
     // This lane runs before the analyst path resolves the turn's companies, so
     // the scope gets the ones the message resolved; the answer saves the ones
@@ -203,6 +203,10 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       console.warn("[chat] research scope unavailable; saving the financial answer without it", reason);
       return null;
     });
+    const prepared = (read: boolean) => {
+      decideReading(read);
+      return Promise.all([scope, reading]);
+    };
     // What planning settled, for a gap: the companies it was asked about, a
     // clarification pick included (recorded before the model is called), and
     // the planner's result.
@@ -214,8 +218,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       const refs = asked.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref] : []);
       // One about no company leaves the previous answer's companies and scope.
       if (refs.length === 0) return gap(reason, planned);
-      settleReading(false);
-      const saved = await scope;
+      const [saved] = await prepared(false);
       return {
         ...gap(reason, planned),
         // Another attempt may answer the turn meanwhile (a run it finished
@@ -247,13 +250,9 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       evidence: deps.evidence,
       // The reading and the scope settle outside any transaction; the scope
       // queued its reads before this request took its client.
-      beforeDrive: () => {
-        settleReading(true);
-        return Promise.all([scope, reading]);
-      },
+      beforeDrive: () => prepared(true),
       persistParent: persistAssistantMessage(context.threadId, messageId, {
-        scope,
-        reading,
+        prepared: () => prepared(true),
         carried: requested.carried,
         notFound: requested.notFound,
         labels: requested.labels,
@@ -582,8 +581,8 @@ function persistAssistantMessage(
   threadId: string,
   messageId: string,
   turn: Readonly<{
-    scope: Promise<ResearchScope | null>;
-    reading: Promise<ScopeProposal | null>;
+    // The scope and the reading, settled before the run was driven (beforeDrive).
+    prepared: () => Promise<[ResearchScope | null, ScopeProposal | null]>;
     carried: ReadonlyArray<string>;
     notFound: ReadonlyArray<string>;
     labels: ReadonlyMap<string, string>;
@@ -591,8 +590,7 @@ function persistAssistantMessage(
   request: { authority: FinancialRuntimeAuthority; request_key: string },
 ): PersistParentArtifact {
   return async (tx, publication) => {
-    // Both settled before the run was driven (beforeDrive).
-    const [scope, reading] = await Promise.all([turn.scope, turn.reading]);
+    const [scope, reading] = await turn.prepared();
     const plan = scope === null && reading === null ? null : await findPlanForRequest(tx.client, request);
     const missing = reading === null || plan === null ? [] : uncoveredAsks(reading, plan, turn.labels);
     const note = [
@@ -789,6 +787,17 @@ export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1, lab
 // A catalog label inside a sentence: "Free cash flow" reads "free cash flow", "EBITDA" and "P/E ratio" stay.
 function inSentence(label: string): string {
   return /\p{Ll}/u.test(label[1] ?? "") ? `${label[0]!.toLowerCase()}${label.slice(1)}` : label;
+}
+
+// A gap an earlier attempt of the turn saved. One that cannot be read back is
+// returned without its message, as a published answer is.
+async function savedGap(db: SqlExecutor, threadId: string, messageId: string): Promise<ChatFinancialTurn> {
+  try {
+    return { kind: "saved", message_id: messageId, message: await readChatMessage(db, { thread_id: threadId, message_id: messageId }) };
+  } catch (error) {
+    logUnreadMessage(messageId, error);
+    return { kind: "saved", message_id: messageId, message: null };
+  }
 }
 
 async function published(db: SqlExecutor, runId: string, threadId: string, messageId: string): Promise<ChatFinancialTurn> {
