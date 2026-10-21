@@ -11,7 +11,7 @@ import type { FinancialPlanV1, FinancialRuntimeAuthority } from "../../financial
 import type { PersistParentArtifact } from "./finalize.ts";
 import { acquireLease, releaseLease, type AcquireLeaseResult } from "./lease.ts";
 import { PlanningModelError, type Clarification, type PlanningResult } from "./planner.ts";
-import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "./ports.ts";
+import { watchConnection, type FinancialEvidencePort, type FinancialPool, type SqlExecutor } from "./ports.ts";
 import { driveLeasedRun, isRoutinePublicationFailure, type DriveReport } from "./publish.ts";
 import { findPlanForRequest, reserveRun } from "./run-repo.ts";
 import { snapshotTransactionClient, type SnapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
@@ -52,7 +52,9 @@ export type FinancialRequest = Readonly<{
 }>;
 
 export async function publishRequest(pool: FinancialPool, request: FinancialRequest): Promise<RequestOutcome> {
-  const client = snapshotTransactionClient(await pool.connect());
+  const connection = await pool.connect();
+  const watch = watchConnection(connection);
+  const client = snapshotTransactionClient(connection);
   try {
     let plan = await findPlanForRequest(client, request);
     if (!plan) {
@@ -61,14 +63,18 @@ export async function publishRequest(pool: FinancialPool, request: FinancialRequ
       plan = planned.plan;
     }
     try {
-      return await reserveAndDrive(client, request, plan);
+      return await reserveAndDrive(pool, client, request, plan);
     } catch (error) {
       // A finalization that rolled back leaves units computed and the run checkpointed: a retry or recovery finishes it.
-      if (await isRoutinePublicationFailure(client, error)) return { status: "gap", reason: "publication_failed" };
-      logDefect(request, "publication", error);
+      if (watch.lost() || isRoutinePublicationFailure(error)) {
+        console.warn(`[financial-engine] publication stopped for ${requestName(request)}; a retry or recovery finishes it`, error);
+        return { status: "gap", reason: "publication_failed" };
+      }
+      console.error(`[financial-engine] publication failed for ${requestName(request)}`, error);
       throw error;
     }
   } finally {
+    watch.stop();
     client.release();
   }
 }
@@ -79,7 +85,7 @@ export async function publishRequest(pool: FinancialPool, request: FinancialRequ
  * commit the caller never heard about lands on a completed run or on existing
  * units, never on a second publication.
  */
-async function reserveAndDrive(client: SnapshotTransactionClient, request: FinancialRequest, plan: FinancialPlanV1): Promise<RequestOutcome> {
+async function reserveAndDrive(pool: FinancialPool, client: SnapshotTransactionClient, request: FinancialRequest, plan: FinancialPlanV1): Promise<RequestOutcome> {
   const reserved = await reserveRun(client, { authority: request.authority, request_key: request.request_key, plan });
   if (reserved.status === "conflict") return { status: "gap", reason: "request_conflict" };
   const { run } = reserved;
@@ -98,8 +104,8 @@ async function reserveAndDrive(client: SnapshotTransactionClient, request: Finan
     const report = await driveLeasedRun(client, acquired.lease, acquired.run, { ...request, parent_limits: {} });
     return { status: "driven", run_id: run.run_id, report };
   } finally {
-    // Whatever stopped this drive short (a failure, a rejected unit), the next attempt need not wait out the lease.
-    await releaseLease(client, acquired.lease);
+    // Whatever stopped this drive short (a failure, a rejected unit, a lost connection), the next attempt need not wait out the lease.
+    await releaseLease(client, acquired.lease).catch(() => releaseLease(pool, acquired.lease));
   }
 }
 
@@ -117,10 +123,10 @@ async function planOrGap(db: SqlExecutor, request: FinancialRequest): Promise<Re
     result = await request.plan(db);
   } catch (error) {
     if (error instanceof PlanningModelError) {
-      console.warn(`[financial-engine] the planning model did not answer for ${request.authority.feature.surface} request ${request.request_key}`, error.cause);
+      console.warn(`[financial-engine] the planning model did not answer for ${requestName(request)}`, error.cause);
       return { status: "gap", reason: "planning_unavailable" };
     }
-    logDefect(request, "planning", error);
+    console.error(`[financial-engine] planning failed for ${requestName(request)}`, error);
     throw error;
   }
   switch (result.outcome) {
@@ -135,8 +141,8 @@ async function planOrGap(db: SqlExecutor, request: FinancialRequest): Promise<Re
   }
 }
 
-function logDefect(request: FinancialRequest, stage: "planning" | "publication", error: unknown): void {
-  console.error(`[financial-engine] ${stage} failed for ${request.authority.feature.surface} request ${request.request_key}`, error);
+function requestName(request: FinancialRequest): string {
+  return `${request.authority.feature.surface} request ${request.request_key}`;
 }
 
 /** Legal names for issuer subjects, for plan labels; an absent issuer is simply absent from the map. */

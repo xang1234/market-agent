@@ -31,14 +31,12 @@ export type DriveReport = Readonly<{
 
 /**
  * Whether a drive that threw left the run for a retry or recovery: the lease
- * lapsed, the parent refused, the database had a transient fault, or the
- * connection is gone. pg reports a lost connection without a code, and the
- * rollback on the dead client replaces the original error, so the client is
- * asked directly.
+ * lapsed, the parent refused, or the database had a transient fault. A lost
+ * connection is routine too, but pg reports it without a code, so the caller
+ * holding the client hears it (watchConnection).
  */
-export async function isRoutinePublicationFailure(client: SqlExecutor, error: unknown): Promise<boolean> {
-  if (error instanceof StaleLeaseError || error instanceof ParentRefusedError || isTransientDatabaseError(error)) return true;
-  return client.query("select 1").then(() => false, () => true);
+export function isRoutinePublicationFailure(error: unknown): boolean {
+  return error instanceof StaleLeaseError || error instanceof ParentRefusedError || isTransientDatabaseError(error);
 }
 
 /** Drives a leased run to its end: execute unless already computed, then finalize every computed unit. */

@@ -1,17 +1,17 @@
 // A supervised financial worker: on each tick it takes up to a bounded number
 // of recoverable runs and resumes them one at a time, each on its own pinned
 // connection. A failure in one run is recorded and never stops the loop; a
-// lease lost to another worker is expected and simply ends that run's turn,
-// and a defect is also logged.
+// lease lost to another worker is expected and simply ends that run's turn.
+// A defect is logged as an error, a routine failure as a warning.
 // The loop never overlaps itself, and stop() waits for the tick in flight.
 
 import { snapshotTransactionClient, type SnapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
 import { StaleLeaseError } from "./lease.ts";
-import type { SqlExecutor } from "./ports.ts";
+import { watchConnection, type FinancialPool } from "./ports.ts";
 import { isRoutinePublicationFailure } from "./publish.ts";
 import { listRecoverableRuns, recoverRun, type RecoveryDeps, type RecoveryOutcome } from "./recovery.ts";
 
-export type WorkerPool = SqlExecutor & { connect(): Promise<Parameters<typeof snapshotTransactionClient>[0]> };
+export type WorkerPool = FinancialPool;
 
 export type WorkerTickEntry = RecoveryOutcome | Readonly<{ run_id: string; status: "lease_lost" | "error"; reason: string }>;
 
@@ -38,15 +38,21 @@ export function createFinancialWorker(input: RecoveryDeps & {
     const entries: WorkerTickEntry[] = [];
     for (const run of runs) {
       const connection = await input.pool.connect();
+      const watch = watchConnection(connection);
       const client: SnapshotTransactionClient = snapshotTransactionClient(connection);
       try {
         entries.push(await recoverRun(client, run, input));
       } catch (error) {
-        if (!(await isRoutinePublicationFailure(client, error))) console.error(`[financial-engine] recovery failed for ${run.parent_kind} run ${run.run_id}`, error);
+        if (watch.lost() || isRoutinePublicationFailure(error)) {
+          console.warn(`[financial-engine] recovery stopped for ${run.parent_kind} run ${run.run_id}; a later tick retries it`, error);
+        } else {
+          console.error(`[financial-engine] recovery failed for ${run.parent_kind} run ${run.run_id}`, error);
+        }
         entries.push(error instanceof StaleLeaseError
           ? { run_id: run.run_id, status: "lease_lost", reason: error.reason }
           : { run_id: run.run_id, status: "error", reason: error instanceof Error ? error.name : "unknown" });
       } finally {
+        watch.stop();
         client.release();
       }
     }
@@ -58,7 +64,10 @@ export function createFinancialWorker(input: RecoveryDeps & {
     timer = setTimeout(() => {
       running = tick()
         .then((entries) => input.onTick?.(entries))
-        .catch(() => input.onTick?.([]))
+        .catch((error: unknown) => {
+          console.error("[financial-engine] recovery tick failed", error);
+          input.onTick?.([]);
+        })
         .finally(() => {
           running = null;
           schedule();

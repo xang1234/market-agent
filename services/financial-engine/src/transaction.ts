@@ -20,9 +20,10 @@ export async function withTransaction<T>(
 }
 
 // Postgres errors a retry gets past while the connection stays usable: a
-// serialization or deadlock rollback, a lock timeout, exhausted resources, or
-// a storage fault.
-const TRANSIENT_SQLSTATES: ReadonlySet<string> = new Set(["40001", "40P01", "55P03", "53100", "53200", "53300", "58030"]);
+// serialization or deadlock rollback, a lock timeout, a full disk, exhausted
+// memory, or a storage I/O fault. Each rolls the statement back, so a retry,
+// or recovery until the fault clears, is safe.
+const TRANSIENT_SQLSTATES: ReadonlySet<string> = new Set(["40001", "40P01", "55P03", "53100", "53200", "58030"]);
 
 export function isTransientDatabaseError(error: unknown): boolean {
   return typeof error === "object" && error !== null && TRANSIENT_SQLSTATES.has(String((error as { code?: unknown }).code));
