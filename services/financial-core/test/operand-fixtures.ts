@@ -93,11 +93,14 @@ export function operand(nodeId: string, spec: InputSpec): FinancialOperand {
       metric_key: spec.metric,
       period: { kind: "fiscal_period", fiscal_year: input.period.fiscal_year, fiscal_period: input.period.fiscal_period },
     },
-    { slot: SLOTS[spec.slot ?? "a"], definition_version: `${spec.metric}.v1` },
+    { slot: SLOTS[spec.slot ?? "a"], definition_version: `${spec.metric}.v1`, reference_date: REFERENCE_DATE },
   );
   assert.ok(outcome.ok, `operand ${nodeId}: ${JSON.stringify(!outcome.ok && outcome)}`);
   return (outcome as { operand: FinancialOperand }).operand;
 }
+
+/** The reference date operands are restated to; an evaluated plan derives its own from its cutoff. */
+export const REFERENCE_DATE = "2025-01-01";
 
 /** FY2023 calendar-year duration. */
 export const FY2023 = { start: "2023-01-01", end: "2023-12-31", fiscal_year: 2023, fiscal_period: "FY" as const };

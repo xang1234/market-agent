@@ -20,8 +20,16 @@ export type PeriodType = (typeof PERIOD_TYPES)[number];
 export const DIMENSION_SCOPES = ["consolidated", "segment"] as const;
 export type DimensionScope = (typeof DIMENSION_SCOPES)[number];
 
-export const ADJUSTMENT_BASES = ["unadjusted", "split_adjusted"] as const;
+// A filing restates its own per-share values and share counts for every split
+// before it was filed, so such a value is on the split basis of its filing date.
+export const ADJUSTMENT_BASES = ["unadjusted", "split_adjusted", "as_filed"] as const;
 export type AdjustmentBasis = (typeof ADJUSTMENT_BASES)[number];
+/** An as-filed value binds only once restated to the plan's reference date. */
+export type BoundAdjustmentBasis = Exclude<AdjustmentBasis, "as_filed">;
+/** A stored value's adjustment basis; an as-filed one names its filing date. */
+export type AdjustmentContext =
+  | Readonly<{ adjustment_basis: BoundAdjustmentBasis; as_filed_on?: never }>
+  | Readonly<{ adjustment_basis: "as_filed"; as_filed_on: string }>;
 
 export const SHARE_BASES = ["basic", "diluted", "not_applicable"] as const;
 export type ShareBasis = (typeof SHARE_BASES)[number];

@@ -52,7 +52,7 @@ export function freshnessAt(periodEnd: IsoDate, cutoff: IsoDateTime, maxAgeDays:
   return dayNumber(cutoffDate) - dayNumber(periodEnd) <= maxAgeDays ? "fresh" : "stale";
 }
 
-function localDateOf(instant: number, timeZone: string): IsoDate {
+export function localDateOf(instant: number, timeZone: string): IsoDate {
   const local = new Date(instant + offsetMs(instant, timeZone));
   return local.toISOString().slice(0, 10);
 }

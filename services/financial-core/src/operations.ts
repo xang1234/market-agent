@@ -10,6 +10,7 @@ import type {
   ChangeNode,
   FreeCashFlowNode,
   GapDisposition,
+  IsoDate,
   LocalId,
   MarginNode,
   OperationKind,
@@ -38,6 +39,7 @@ import {
   subtractRationals,
   type ExactRational,
 } from "./rational.ts";
+import { checkSplitAdjustment } from "./split-adjustment.ts";
 
 /**
  * What a value measures: an approved catalog definition plus the approved
@@ -106,6 +108,9 @@ const REASON_DISPOSITIONS: Readonly<Record<ReasonCode, GapDisposition>> = {
   database_error: "execution_error",
   integrity_failure: "execution_error",
   replay_version_unavailable: "unsupported",
+  split_listing_unresolved: "missing",
+  split_history_missing: "missing",
+  split_history_stale: "missing",
 };
 
 export function operationGap(reason: ReasonCode, explanation: string): OperationGap {
@@ -117,7 +122,7 @@ const DURATION_KINDS: ReadonlySet<MetricValueKind> = new Set(["flow", "per_share
 export function operandFromBoundInput(
   input: BoundFinancialInputV1,
   node: ReportedMetricNode,
-  expected: { slot: SubjectSlot; definition_version: VersionTag },
+  expected: { slot: SubjectSlot; definition_version: VersionTag; reference_date: IsoDate },
 ): OperandOutcome {
   if (
     node.subject_slot !== expected.slot.slot_id ||
@@ -157,10 +162,18 @@ export function operandFromBoundInput(
   if (!sameRational(scaled, native)) {
     throw new FinancialIntegrityError("scale_mismatch", `native value for ${node.node_id} is not value x scale`);
   }
+  const adjustment = input.split_adjustment;
+  if ((adjustment !== undefined) !== (input.basis.adjustment === "split_adjusted")) {
+    throw new FinancialIntegrityError("split_basis_mismatch", `input bound to ${node.node_id} has a split-adjusted basis without its adjustment, or the reverse`);
+  }
+  const restated = adjustment === undefined ? null : checkSplitAdjustment(adjustment, native, definition.value_kind, expected.reference_date);
+  if (restated !== null && !restated.ok) {
+    throw new FinancialIntegrityError(restated.code, `split adjustment of ${node.node_id} does not restate its value to the plan's reference date`);
+  }
 
   return success({
     node_id: node.node_id,
-    value: native,
+    value: restated?.value ?? native,
     subject_slot: expected.slot.slot_id,
     measure: { metric_key: definition.metric_key, definition_version: definition.definition_version, derivations: [] },
     value_kind: definition.value_kind,
