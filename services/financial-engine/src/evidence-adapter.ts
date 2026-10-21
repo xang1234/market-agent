@@ -6,7 +6,7 @@
 import type { FinancialUnit, FiscalPeriod } from "../../financial-core/src/index.ts";
 import { FISCAL_PERIODS } from "../../financial-core/src/index.ts";
 import { listFinancialInputCandidates, type FinancialInputCandidate } from "../../evidence/src/financial-input-repo.ts";
-import { loadListingSplits } from "../../market/src/split-repository.ts";
+import { loadSubjectSplitHistory } from "../../market/src/split-history.ts";
 import type { CandidatePage, CandidateRequest, FinancialEvidencePort, InputCandidate, SplitHistory, SplitHistoryRequest, SqlExecutor } from "./ports.ts";
 
 export function createEvidenceFinancialPort(db: SqlExecutor): FinancialEvidencePort {
@@ -31,30 +31,11 @@ export function createEvidenceFinancialPort(db: SqlExecutor): FinancialEvidenceP
       return { status: "ok", candidates: page.candidates.flatMap(toInputCandidate), truncated: page.truncated };
     },
 
-    // A second share class or venue may have split differently, so more than
-    // one listing is as unresolved as none.
     async readSplitHistory({ subject, as_of }: SplitHistoryRequest): Promise<SplitHistory> {
       try {
-        const { rows } = await db.query<{ listing_id: string; timezone: string }>(
-          `select l.listing_id::text as listing_id, l.timezone
-             from listings l join instruments i on i.instrument_id = l.instrument_id
-            where i.asset_type = 'common_stock'
-              and (case when $1 = 'issuer' then i.issuer_id else l.listing_id end) = $2::uuid
-              and (l.active_from is null or l.active_from <= $3::timestamptz)
-              and (l.active_to is null or l.active_to > $3::timestamptz)`,
-          [subject.kind, subject.id, as_of],
-        );
-        if (rows.length !== 1) return { status: "gap", reason_code: "split_listing_unresolved" };
-        const { listing_id: listingId, timezone } = rows[0]!;
-        const history = await loadListingSplits(db, listingId);
-        if (history.checked_at === null) return { status: "gap", reason_code: "split_history_missing" };
-        return {
-          status: "ok",
-          listing_id: listingId,
-          timezone,
-          checked_at: history.checked_at,
-          splits: history.splits.map(({ execution_date, split_from, split_to }) => ({ execution_date, split_from, split_to })),
-        };
+        const history = await loadSubjectSplitHistory(db, subject, as_of);
+        if (history.status === "gap") return history;
+        return { ...history, splits: history.splits.map(({ execution_date, split_from, split_to }) => ({ execution_date, split_from, split_to })) };
       } catch (error) {
         if (isDatabaseError(error)) return { status: "gap", reason_code: "database_error" };
         throw error;

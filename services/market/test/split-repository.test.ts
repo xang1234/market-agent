@@ -4,7 +4,8 @@ import { bootstrapDatabase, connectedPool, dbRoot, dockerAvailable, run } from "
 import { GOLDEN_ISSUER_IDS } from "../../shared/src/golden-issuers.ts";
 import { PolygonFetchError, type PolygonFetcher } from "../src/adapters/polygon.ts";
 import { POLYGON_MARKET_SOURCE_ID } from "../src/provider-sources.ts";
-import { loadListingSplits, syncListingSplits } from "../src/split-repository.ts";
+import { loadListingSplits } from "../src/split-history.ts";
+import { syncListingSplits } from "../src/split-repository.ts";
 import { syncSplits } from "../src/split-sync-cli.ts";
 
 const SEC_EDGAR_FILING_SOURCE_ID = "00000000-0000-4000-a000-000000000001";
