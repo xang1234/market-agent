@@ -17,7 +17,7 @@ import {
   trailingSum,
   type OperandOutcome,
 } from "../src/operations.ts";
-import { boundInput, FY2022, FY2023, operand, REFERENCE_DATE, SLOTS, type InputSpec } from "./operand-fixtures.ts";
+import { boundInput, FY2022, FY2023, KNOWLEDGE_CUTOFF, operand, SLOTS, type InputSpec } from "./operand-fixtures.ts";
 import { divideRational, equalRational, rational } from "./rational-oracle.ts";
 
 const change = (operation: ChangeNode["operation"]): ChangeNode => ({ node_id: "chg", operation, operation_version: `${operation}.v1`, current: "cur", prior: "pri" });
@@ -71,7 +71,7 @@ test("reported_metric rejects a native value that disagrees with value x scale",
       operandFromBoundInput(
         input,
         { node_id: "rev", operation: "reported_metric", operation_version: "reported_metric.v1", subject_slot: "a", metric_key: "revenue", period: { kind: "fiscal_period", fiscal_year: 2023, fiscal_period: "FY" } },
-        { slot: SLOTS.a, definition_version: "revenue.v1", reference_date: REFERENCE_DATE },
+        { slot: SLOTS.a, definition_version: "revenue.v1", knowledge_cutoff: KNOWLEDGE_CUTOFF },
       ),
     FinancialIntegrityError,
   );
@@ -80,19 +80,19 @@ test("reported_metric rejects a native value that disagrees with value x scale",
 test("reported_metric rejects bindings for another subject or metric as integrity failures", () => {
   const input = boundInput({ slot: "b", metric: "revenue", value: "1", ...FY2023 });
   const node = { node_id: "rev", operation: "reported_metric" as const, operation_version: "reported_metric.v1", subject_slot: "a", metric_key: "revenue", period: { kind: "fiscal_period" as const, fiscal_year: 2023, fiscal_period: "FY" as const } };
-  assert.throws(() => operandFromBoundInput(input, node, { slot: SLOTS.a, definition_version: "revenue.v1", reference_date: REFERENCE_DATE }), FinancialIntegrityError);
+  assert.throws(() => operandFromBoundInput(input, node, { slot: SLOTS.a, definition_version: "revenue.v1", knowledge_cutoff: KNOWLEDGE_CUTOFF }), FinancialIntegrityError);
   const otherMetric = boundInput({ metric: "gross_profit", value: "1", ...FY2023 });
-  assert.throws(() => operandFromBoundInput(otherMetric, node, { slot: SLOTS.a, definition_version: "revenue.v1", reference_date: REFERENCE_DATE }), FinancialIntegrityError);
+  assert.throws(() => operandFromBoundInput(otherMetric, node, { slot: SLOTS.a, definition_version: "revenue.v1", knowledge_cutoff: KNOWLEDGE_CUTOFF }), FinancialIntegrityError);
 });
 
 test("reported_metric withholds values whose unit or period shape contradicts the definition", () => {
   const node = { node_id: "rev", operation: "reported_metric" as const, operation_version: "reported_metric.v1", subject_slot: "a", metric_key: "revenue", period: { kind: "fiscal_period" as const, fiscal_year: 2023, fiscal_period: "FY" as const } };
   const shares = boundInput({ metric: "revenue", value: "1", unit: { kind: "shares" }, ...FY2023 });
-  assert.deepEqual(gap(operandFromBoundInput(shares, node, { slot: SLOTS.a, definition_version: "revenue.v1", reference_date: REFERENCE_DATE })), ["incompatible", "incompatible_unit"]);
+  assert.deepEqual(gap(operandFromBoundInput(shares, node, { slot: SLOTS.a, definition_version: "revenue.v1", knowledge_cutoff: KNOWLEDGE_CUTOFF })), ["incompatible", "incompatible_unit"]);
   const instant = boundInput({ metric: "revenue", value: "1", kind: "instant", end: "2023-12-31" });
-  assert.deepEqual(gap(operandFromBoundInput(instant, node, { slot: SLOTS.a, definition_version: "revenue.v1", reference_date: REFERENCE_DATE })), ["incompatible", "incompatible_period"]);
+  assert.deepEqual(gap(operandFromBoundInput(instant, node, { slot: SLOTS.a, definition_version: "revenue.v1", knowledge_cutoff: KNOWLEDGE_CUTOFF })), ["incompatible", "incompatible_period"]);
   const oldDefinition = boundInput({ metric: "revenue", value: "1", definition_version: "revenue.v0", ...FY2023 });
-  assert.deepEqual(gap(operandFromBoundInput(oldDefinition, node, { slot: SLOTS.a, definition_version: "revenue.v1", reference_date: REFERENCE_DATE })), ["incompatible", "incompatible_definition"]);
+  assert.deepEqual(gap(operandFromBoundInput(oldDefinition, node, { slot: SLOTS.a, definition_version: "revenue.v1", knowledge_cutoff: KNOWLEDGE_CUTOFF })), ["incompatible", "incompatible_definition"]);
 });
 
 // --- absolute_change / percent_change_positive_base -----------------------

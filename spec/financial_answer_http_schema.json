@@ -242,7 +242,7 @@
             "split_adjustment": {
               "oneOf": [
                 { "type": "null" },
-                { "$ref": "./financial_result_schema.json#/$defs/SplitAdjustmentV1" }
+                { "$ref": "./financial_result_schema.json#/$defs/SplitAdjustmentV2" }
               ]
             },
             "unit": {

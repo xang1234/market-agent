@@ -10,7 +10,7 @@ import type {
   ChangeNode,
   FreeCashFlowNode,
   GapDisposition,
-  IsoDate,
+  IsoDateTime,
   LocalId,
   MarginNode,
   OperationKind,
@@ -122,7 +122,7 @@ const DURATION_KINDS: ReadonlySet<MetricValueKind> = new Set(["flow", "per_share
 export function operandFromBoundInput(
   input: BoundFinancialInputV1,
   node: ReportedMetricNode,
-  expected: { slot: SubjectSlot; definition_version: VersionTag; reference_date: IsoDate },
+  expected: { slot: SubjectSlot; definition_version: VersionTag; knowledge_cutoff: IsoDateTime },
 ): OperandOutcome {
   if (
     node.subject_slot !== expected.slot.slot_id ||
@@ -166,9 +166,9 @@ export function operandFromBoundInput(
   if ((adjustment !== undefined) !== (input.basis.adjustment === "split_adjusted")) {
     throw new FinancialIntegrityError("split_basis_mismatch", `input bound to ${node.node_id} has a split-adjusted basis without its adjustment, or the reverse`);
   }
-  const restated = adjustment === undefined ? null : checkSplitAdjustment(adjustment, native, definition.value_kind, expected.reference_date);
+  const restated = adjustment === undefined ? null : checkSplitAdjustment(adjustment, native, definition.value_kind, expected.knowledge_cutoff);
   if (restated !== null && !restated.ok) {
-    throw new FinancialIntegrityError(restated.code, `split adjustment of ${node.node_id} does not restate its value to the plan's reference date`);
+    throw new FinancialIntegrityError(restated.code, `split adjustment of ${node.node_id} does not restate its value to its listing's reference date`);
   }
 
   return success({

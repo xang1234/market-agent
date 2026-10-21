@@ -143,10 +143,11 @@ test("as-filed share figures bound on a split basis", { timeout: 300_000 }, asyn
     const payload = (await db.query(`select bound_payload from financial_run_inputs where run_id = $1 and input_slot = 'eps'`, [runId])).rows[0]!.bound_payload;
     assert.deepEqual([payload.fact_id, payload.numeric.raw_token, payload.basis.adjustment], [eps, "11.93", "split_adjusted"]);
     assert.deepEqual(payload.split_adjustment, {
-      version: "split_adjustment.v1",
+      version: "split_adjustment.v2",
       as_filed_on: "2024-02-21",
       reference_date: "2025-01-01",
       listing_id: listingOf(IDS.nvda),
+      listing_timezone: "America/New_York",
       splits: [{ execution_date: "2024-06-10", split_from: "1", split_to: "10" }],
       factor: { numerator: "10", denominator: "1" },
       adjusted_native_value: { numerator: "1193", denominator: "1000" },
@@ -230,6 +231,22 @@ test("as-filed share figures bound on a split basis", { timeout: 300_000 }, asyn
       );
     } finally {
       await db.query(`update listing_splits set execution_date = '2024-06-10' where listing_id = $1 and execution_date = '2024-03-01'`, [listingOf(IDS.nvda)]);
+    }
+  });
+
+  await t.test("a listing whose time zone changed after binding withholds the seal", async () => {
+    const plan = sharePlan(IDS.nvda, "2025-01-01T12:00:00.000Z");
+    const { lease } = await readyRun(db, plan, authority);
+    await db.query(`update listings set timezone = 'Asia/Tokyo' where listing_id = $1`, [listingOf(IDS.nvda)]);
+    try {
+      const [client] = await pinnedClients(t, db, 1);
+      const sealed = await finalizeUnit({ client: client!, lease, authority, unit_id: "share_unit", snapshot_id: randomUUID(), persistParent: async () => {} });
+      assert.deepEqual(
+        sealed.status === "rejected" && sealed.failures.map((failure) => [failure.reason_code, failure.details.reason]),
+        [["financial_input_ineligible", "splits_changed"], ["financial_input_ineligible", "splits_changed"]],
+      );
+    } finally {
+      await db.query(`update listings set timezone = 'America/New_York' where listing_id = $1`, [listingOf(IDS.nvda)]);
     }
   });
 });

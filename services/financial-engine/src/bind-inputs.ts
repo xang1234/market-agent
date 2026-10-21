@@ -170,7 +170,7 @@ function selectSlot(read: SlotRead, plan: FinancialPlanV1, policy: SelectionPoli
   const outcome = (binding: InputBinding): SlotOutcome => ({ binding, candidate_count: read.candidates.length, truncated: read.truncated });
   const gap = (reason_code: ReasonCode): InputBinding => ({ slot: node.node_id, status: "gap", reason_code, candidate_set_digest: digest });
   if (selection.status === "gap") return outcome(gap(selection.reason_code));
-  const basis = boundBasis(selection.input, history, plan.time);
+  const basis = boundBasis(selection.input, history, plan.time.knowledge_cutoff);
   return outcome(basis.status === "gap" ? gap(basis.reason_code) : boundBinding(node, subjectSlot(plan, node), plan, selection.input, basis, digest));
 }
 

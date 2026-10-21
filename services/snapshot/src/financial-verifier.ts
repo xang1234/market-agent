@@ -26,6 +26,7 @@ import {
   resolveMetricDefinition,
   restateToReference,
   splitHistoryCovers,
+  splitReferenceDate,
   unitClosures,
   unitPublication,
   validateBoundInput,
@@ -38,7 +39,7 @@ import {
   type ReasonCode,
   type Sha256Hex,
   type SlotBinding,
-  type SplitAdjustmentV1,
+  type SplitAdjustmentV2,
 } from "../../financial-core/src/index.ts";
 import {
   loadFinancialUnitRecords,
@@ -390,9 +391,11 @@ function ineligibility(
   return null;
 }
 
-/** Whether the listing's current split history still restates the input exactly as it was bound. */
-function restatedAsBound(input: BoundFinancialInputV1, adjustment: SplitAdjustmentV1, history: LoadedSplitHistory | undefined, plan: FinancialPlanV1): boolean {
-  if (history?.checked_at == null || !splitHistoryCovers(history.checked_at, plan.time)) return false;
+/** Whether the listing's current split history and zone still restate the input exactly as it was bound. */
+function restatedAsBound(input: BoundFinancialInputV1, adjustment: SplitAdjustmentV2, history: LoadedSplitHistory | undefined, plan: FinancialPlanV1): boolean {
+  if (history?.checked_at == null || history.timezone === null) return false;
+  const referenceDate = splitReferenceDate(plan.time.knowledge_cutoff, history.timezone);
+  if (!splitHistoryCovers(history.checked_at, referenceDate, history.timezone)) return false;
   const definition = resolveMetricDefinition(input.metric.metric_key);
   const native = parseDerivedDecimalText(input.numeric.native_value);
   const nativeValue = native.ok ? rationalFromDecimal(native.value) : null;
@@ -401,8 +404,9 @@ function restatedAsBound(input: BoundFinancialInputV1, adjustment: SplitAdjustme
     native: nativeValue,
     value_kind: definition.value_kind,
     as_filed_on: adjustment.as_filed_on,
-    reference_date: adjustment.reference_date,
+    reference_date: referenceDate,
     listing_id: adjustment.listing_id,
+    listing_timezone: history.timezone,
     splits: history.splits,
   });
   return current.ok && canonicallyEqual(current.adjustment, adjustment);

@@ -205,20 +205,22 @@ split executed on or before that date is already reflected. SEC ingestion certif
 - **Stored as filed:** the context's adjustment basis is `as_filed`, with the filing date companyfacts lists beside the
   value (`as_filed_on`, migration 0066) and the basic or diluted share basis. Publication proofs cannot date the filing,
   since they prove only when a fetch saw it.
-- **Bound on the plan's basis:** an as-filed input binds `split_adjusted` with a `split_adjustment`
-  (`services/financial-core/src/split-adjustment.ts`). It names the listing's splits after the filing date and on or
-  before the plan's reference date, their factor, and the restated value, as exact fractions. The token and its proof
-  stay as filed. The reference date is the cutoff's date in the plan's time zone, one per plan, so a plan's restated
-  inputs always compare. Core rebuilds the adjustment from its own splits and fails the input's integrity on any
-  difference.
+- **Bound on the analysis's basis:** an as-filed input binds `split_adjusted` with a `split_adjustment.v2`
+  (`services/financial-core/src/split-adjustment.ts`). It names the listing and its time zone, the listing's splits
+  after the filing date and on or before the reference date, their factor, and the restated value, as exact fractions.
+  The token and its proof stay as filed. Polygon dates a split by the trading day in the listing's market, so the
+  reference date is the plan cutoff's date in the listing's time zone (`listings.timezone`), not in the plan's
+  `cutoff_timezone`. A plan has one cutoff instant and each listing one reference date, so a company's restated inputs
+  always compare. Core derives the date from the plan's cutoff and the recorded zone, rebuilds the adjustment from its
+  own splits, and fails the input's integrity on any difference.
 - **Gaps:** no single common-stock listing active at the cutoff (`split_listing_unresolved`), splits never fetched
-  (`split_history_missing`), or last fetched before the reference date's day (`split_history_stale`). The check proves
-  only that the list was fetched on or after that day. Such a list holds every split executed by the reference date
-  only if the provider lists each split before or on its execution date.
+  (`split_history_missing`), or last fetched before the reference date in the listing's zone (`split_history_stale`).
+  The check proves only that the list was fetched on or after that day. Such a list holds every split executed by the
+  reference date only if the provider lists each split before or on its execution date.
 - **A split recast is no restatement:** restatement detection compares only unadjusted originals, since a later 10-K
   states the same period on its own split basis.
-- **Seal:** the snapshot verifier rebuilds the adjustment from the listing's current splits and withholds the seal when
-  they changed (`splits_changed`).
+- **Seal:** the snapshot verifier rebuilds the adjustment from the listing's current splits and time zone and withholds
+  the seal when either changed (`splits_changed`).
 - **Operators:** `npm run backfill:sec-statements` records the context of a share fact stored before #387, and
   `npm run sync:splits` (in `services/market`) has to have run on the analysis's day.
 

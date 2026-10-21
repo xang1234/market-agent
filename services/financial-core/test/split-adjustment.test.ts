@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ChangeNode, ReportedMetricNode, SplitAdjustmentV1 } from "../src/contracts.ts";
+import type { ChangeNode, ReportedMetricNode, SplitAdjustmentV2 } from "../src/contracts.ts";
 import { parseFinancialDecimal } from "../src/exact-decimal.ts";
 import { absoluteChange, FinancialIntegrityError, operandFromBoundInput, type OperandOutcome } from "../src/operations.ts";
 import { rationalFromDecimal, type ExactRational } from "../src/rational.ts";
@@ -8,6 +8,7 @@ import { restateToReference, splitHistoryCovers, splitReferenceDate, type Record
 import { boundInput, operand, REFERENCE_DATE, SLOTS, type InputSpec } from "./operand-fixtures.ts";
 
 const LISTING = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const NEW_YORK = "America/New_York";
 // NVDA's splits as Polygon lists them, with an announced one still to come.
 const NVDA_SPLITS: RecordedSplit[] = [
   { execution_date: "2021-07-20", split_from: "1", split_to: "4" },
@@ -25,8 +26,8 @@ function exact(token: string): ExactRational {
   return rationalFromDecimal(parsed.value)!;
 }
 
-function restated(spec: { native: string; value_kind: "per_share" | "share_count_average"; as_filed_on: string; reference_date: string; splits?: RecordedSplit[] }): SplitAdjustmentV1 {
-  const outcome = restateToReference({ ...spec, native: exact(spec.native), listing_id: LISTING, splits: spec.splits ?? NVDA_SPLITS });
+function restated(spec: { native: string; value_kind: "per_share" | "share_count_average"; as_filed_on: string; reference_date: string; splits?: RecordedSplit[] }): SplitAdjustmentV2 {
+  const outcome = restateToReference({ ...spec, native: exact(spec.native), listing_id: LISTING, listing_timezone: NEW_YORK, splits: spec.splits ?? NVDA_SPLITS });
   if (!outcome.ok) return assert.fail(outcome.reason);
   return outcome.adjustment;
 }
@@ -42,10 +43,11 @@ function payloadValue(outcome: OperandOutcome): string {
 
 test("a split after the filing restates NVDA's FY2024 diluted EPS and shares; one after the reference date does not", () => {
   assert.deepEqual(restated({ native: "11.93", value_kind: "per_share", as_filed_on: "2024-02-21", reference_date: "2025-01-01" }), {
-    version: "split_adjustment.v1",
+    version: "split_adjustment.v2",
     as_filed_on: "2024-02-21",
     reference_date: "2025-01-01",
     listing_id: LISTING,
+    listing_timezone: NEW_YORK,
     splits: [{ execution_date: "2024-06-10", split_from: "1", split_to: "10" }],
     factor: { numerator: "10", denominator: "1" },
     adjusted_native_value: { numerator: "1193", denominator: "1000" },
@@ -66,38 +68,38 @@ test("a 2-for-3 split restates to exact fractions", () => {
   const shares = restated({ native: "2494000000", value_kind: "share_count_average", as_filed_on: "2024-02-21", reference_date: "2025-01-01", splits });
   assert.deepEqual(shares.adjusted_native_value, { numerator: "4988000000", denominator: "3" });
   const operandOutcome = operandFromBoundInput(boundInput({ ...SHARES, split_adjustment: shares }), reported(SHARES), {
-    slot: SLOTS.a, definition_version: "weighted_average_diluted_shares.v1", reference_date: "2025-01-01",
+    slot: SLOTS.a, definition_version: "weighted_average_diluted_shares.v1", knowledge_cutoff: "2025-01-01T12:00:00.000Z",
   });
   assert.ok(operandOutcome.ok);
   assert.deepEqual([operandOutcome.payload.value, operandOutcome.payload.exact], ["1662666666.6666666666666666666666666666666666666667", false]);
 });
 
 test("splits never restate a value they do not move, and a ratio must be positive", () => {
-  const revenue = restateToReference({ native: exact("100"), value_kind: "flow", as_filed_on: "2024-02-21", reference_date: "2025-01-01", listing_id: LISTING, splits: NVDA_SPLITS });
+  const revenue = restateToReference({ native: exact("100"), value_kind: "flow", as_filed_on: "2024-02-21", reference_date: "2025-01-01", listing_id: LISTING, listing_timezone: NEW_YORK, splits: NVDA_SPLITS });
   assert.deepEqual(revenue, { ok: false, reason: "incompatible_basis" });
-  const zero = restateToReference({ native: exact("1"), value_kind: "per_share", as_filed_on: "2024-02-21", reference_date: "2025-01-01", listing_id: LISTING, splits: [{ execution_date: "2024-06-10", split_from: "0", split_to: "10" }] });
+  const zero = restateToReference({ native: exact("1"), value_kind: "per_share", as_filed_on: "2024-02-21", reference_date: "2025-01-01", listing_id: LISTING, listing_timezone: NEW_YORK, splits: [{ execution_date: "2024-06-10", split_from: "0", split_to: "10" }] });
   assert.deepEqual(zero, { ok: false, reason: "incompatible_basis" });
 });
 
-test("a plan's reference date is its cutoff's date in its zone, and coverage counts from that day", () => {
-  assert.equal(splitReferenceDate({ knowledge_cutoff: "2025-01-01T03:00:00Z", cutoff_timezone: "America/New_York" }), "2024-12-31");
-  assert.equal(splitReferenceDate({ knowledge_cutoff: "2025-01-01T03:00:00Z", cutoff_timezone: "UTC" }), "2025-01-01");
-  const time = { knowledge_cutoff: "2025-01-01T12:00:00Z", cutoff_timezone: "UTC" };
-  assert.equal(splitHistoryCovers("2024-12-31T23:59:59Z", time), false);
-  assert.equal(splitHistoryCovers("2025-01-01T00:00:00Z", time), true);
+test("a listing's reference date is the cutoff's date in its zone, and coverage counts from that day there", () => {
+  // 02:00 UTC on 2024-06-10 is still 2024-06-09 in New York, where NVDA's split executed on 2024-06-10.
+  assert.equal(splitReferenceDate("2024-06-10T02:00:00Z", NEW_YORK), "2024-06-09");
+  assert.equal(splitReferenceDate("2024-06-10T02:00:00Z", "UTC"), "2024-06-10");
+  assert.equal(splitHistoryCovers("2024-06-10T03:59:59Z", "2024-06-10", NEW_YORK), false);
+  assert.equal(splitHistoryCovers("2024-06-10T04:00:00Z", "2024-06-10", NEW_YORK), true);
 });
 
 test("a restated input binds the as-filed token over the split factor", () => {
   const adjustment = restated({ native: "11.93", value_kind: "per_share", as_filed_on: "2024-02-21", reference_date: "2025-01-01" });
   const input = boundInput({ ...EPS, split_adjustment: adjustment });
   assert.deepEqual([input.numeric.raw_token, input.numeric.native_value, input.basis.adjustment], ["11.93", "11.93", "split_adjusted"]);
-  const expected = { slot: SLOTS.a, definition_version: "eps_diluted.v1", reference_date: "2025-01-01" };
+  const expected = { slot: SLOTS.a, definition_version: "eps_diluted.v1", knowledge_cutoff: "2025-01-01T12:00:00.000Z" };
   assert.equal(payloadValue(operandFromBoundInput(input, reported(EPS), expected)), "1.193");
 });
 
 test("a tampered or misdated restatement fails the input's integrity", () => {
   const adjustment = restated({ native: "11.93", value_kind: "per_share", as_filed_on: "2024-02-21", reference_date: "2025-01-01" });
-  const expected = { slot: SLOTS.a, definition_version: "eps_diluted.v1", reference_date: "2025-01-01" };
+  const expected = { slot: SLOTS.a, definition_version: "eps_diluted.v1", knowledge_cutoff: "2025-01-01T12:00:00.000Z" };
   const failure = (input: ReturnType<typeof boundInput>, reference = expected) => {
     try {
       operandFromBoundInput(input, reported(EPS), reference);
@@ -113,7 +115,11 @@ test("a tampered or misdated restatement fails the input's integrity", () => {
   assert.equal(failure(boundInput({ ...EPS, split_adjustment: tamperedFactor })), "split_adjustment_mismatch");
   const futureSplit = { ...adjustment, splits: [...adjustment.splits, { execution_date: "2025-06-02", split_from: "1", split_to: "2" }] };
   assert.equal(failure(boundInput({ ...EPS, split_adjustment: futureSplit })), "split_adjustment_mismatch");
-  assert.equal(failure(boundInput({ ...EPS, split_adjustment: adjustment }), { ...expected, reference_date: "2024-12-31" }), "split_reference_mismatch");
+  // 04:00 UTC on 2025-01-01 is still 2024-12-31 in New York.
+  assert.equal(failure(boundInput({ ...EPS, split_adjustment: adjustment }), { ...expected, knowledge_cutoff: "2025-01-01T04:00:00.000Z" }), "split_reference_mismatch");
+  // The zone the adjustment names dates the cutoff: noon UTC is already 2025-01-02 in Kiritimati.
+  assert.equal(failure(boundInput({ ...EPS, split_adjustment: { ...adjustment, listing_timezone: "Pacific/Kiritimati" } })), "split_reference_mismatch");
+  assert.equal(failure(boundInput({ ...EPS, split_adjustment: { ...adjustment, listing_timezone: "Mars/Olympus_Mons" } })), "split_reference_mismatch");
   assert.equal(failure(boundInput({ ...EPS, adjustment: "split_adjusted" })), "split_basis_mismatch");
 });
 

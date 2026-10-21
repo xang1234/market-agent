@@ -26,7 +26,6 @@ import { NUMERIC_POLICY } from "./numeric-policy.ts";
 import { OPERATION_REGISTRY } from "./operation-registry.ts";
 import { operandFromBoundInput, operationGap } from "./operations.ts";
 import { unitClosures } from "./publication-units.ts";
-import { splitReferenceDate } from "./split-adjustment.ts";
 
 /**
  * A persisted, contradictory, or incomplete execution record: a missing
@@ -81,7 +80,6 @@ const REJECTED_EXPLANATION = "An input to this section failed integrity checks, 
 export function evaluateBoundPlan(plan: FinancialPlanV1, bindings: ReadonlyMap<LocalId, SlotBinding>): GraphEvaluation {
   const definitions = new Map(plan.metric_definitions.map((entry) => [entry.metric_key, entry.definition_version]));
   const slots = new Map(plan.subjects.members.map((member) => [member.slot_id, member]));
-  const referenceDate = splitReferenceDate(plan.time);
   return evaluatePlan(plan, (node) => {
     const binding = bindings.get(node.node_id);
     if (!binding) throw new ExecutionIntegrityError(`reported node ${node.node_id} has no binding`);
@@ -89,7 +87,7 @@ export function evaluateBoundPlan(plan: FinancialPlanV1, bindings: ReadonlyMap<L
     return operandFromBoundInput(binding.input, node, {
       slot: slots.get(node.subject_slot)!,
       definition_version: definitions.get(node.metric_key)!,
-      reference_date: referenceDate,
+      knowledge_cutoff: plan.time.knowledge_cutoff,
     });
   });
 }

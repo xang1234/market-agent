@@ -7,7 +7,7 @@
 // about it can be enumerated. A certificate or operation version this build
 // does not support is reported as unavailable, never reinterpreted.
 
-import { dependencyClosure, type BoundFinancialInputV1, type LocalId, type SplitAdjustmentV1 } from "../../financial-core/src/index.ts";
+import { dependencyClosure, type BoundFinancialInputV1, type LocalId, type SplitAdjustmentV2 } from "../../financial-core/src/index.ts";
 import type { SqlExecutor } from "./ports.ts";
 import { readClosureInputs, readCommittedResult } from "./read-model.ts";
 import { supportedPublication, unsupportedPlanVersion } from "./version-registry.ts";
@@ -23,7 +23,7 @@ export type InspectedInput = Readonly<
       metric: Readonly<{ metric_key: string; definition_version: string }>;
       /** As filed; a restated input's computed value comes from its split adjustment. */
       value: string;
-      split_adjustment: SplitAdjustmentV1 | null;
+      split_adjustment: SplitAdjustmentV2 | null;
       unit: unknown;
       period: Readonly<{ kind: string; start: string | null; end: string; fiscal_year: number; fiscal_period: string }>;
       precision_status: string;

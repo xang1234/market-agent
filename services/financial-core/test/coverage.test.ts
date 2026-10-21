@@ -5,7 +5,7 @@ import { capPopulation, cohortAssertion, evaluatePlan, summarizeCoverage, type G
 import { FinancialIntegrityError, operandFromBoundInput, operationGap, type OperandOutcome } from "../src/operations.ts";
 import { validateFinancialPlan } from "../src/validate.ts";
 import { mutable } from "./fixtures.ts";
-import { boundInput, FY2023, REFERENCE_DATE, type InputSpec } from "./operand-fixtures.ts";
+import { boundInput, FY2023, KNOWLEDGE_CUTOFF, type InputSpec } from "./operand-fixtures.ts";
 
 const ISSUERS = [
   "11111111-1111-4111-8111-111111111111",
@@ -90,7 +90,7 @@ function reportedEvaluator(plan: FinancialPlanV1, overrides: Record<string, Beha
     const slot = plan.subjects.members.find((member) => member.slot_id === node.subject_slot)!;
     const spec: InputSpec = { metric: node.metric_key, value: behavior.value, ...FY2023 };
     const input = { ...boundInput(spec), subject_ref: slot.subject_ref };
-    return operandFromBoundInput(input, node, { slot, definition_version: `${node.metric_key}.v1`, reference_date: REFERENCE_DATE });
+    return operandFromBoundInput(input, node, { slot, definition_version: `${node.metric_key}.v1`, knowledge_cutoff: KNOWLEDGE_CUTOFF });
   };
   return { evaluator, calls };
 }

@@ -331,7 +331,7 @@
             "share_basis": { "enum": ["basic", "diluted", "not_applicable"] }
           }
         },
-        "split_adjustment": { "$ref": "#/$defs/SplitAdjustmentV1" },
+        "split_adjustment": { "$ref": "#/$defs/SplitAdjustmentV2" },
         "publication": {
           "type": "object",
           "additionalProperties": false,
@@ -366,16 +366,17 @@
         "denominator": { "$ref": "financial_plan_schema.json#/$defs/DecimalString" }
       }
     },
-    "SplitAdjustmentV1": {
-      "description": "An as-filed value restated to the split basis as of the plan's reference date. The bound numeric stays the value as filed.",
+    "SplitAdjustmentV2": {
+      "description": "An as-filed value restated to the split basis as of its listing's reference date, the plan's knowledge cutoff dated in the listing's time zone. The bound numeric stays the value as filed.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["version", "as_filed_on", "reference_date", "listing_id", "splits", "factor", "adjusted_native_value"],
+      "required": ["version", "as_filed_on", "reference_date", "listing_id", "listing_timezone", "splits", "factor", "adjusted_native_value"],
       "properties": {
-        "version": { "const": "split_adjustment.v1" },
+        "version": { "const": "split_adjustment.v2" },
         "as_filed_on": { "$ref": "financial_plan_schema.json#/$defs/IsoDate" },
         "reference_date": { "$ref": "financial_plan_schema.json#/$defs/IsoDate" },
         "listing_id": { "$ref": "financial_plan_schema.json#/$defs/UUID" },
+        "listing_timezone": { "$ref": "financial_plan_schema.json#/$defs/TimeZoneName" },
         "splits": {
           "type": "array",
           "maxItems": 64,

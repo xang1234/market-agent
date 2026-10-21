@@ -4,7 +4,7 @@
 // and every bound fact is joined with its *current* evidence state — source
 // access, invalidation, the exact source version, and whether the precision
 // and publication proofs it was bound with are still the current ones — as is
-// every listing an input was restated with, for its current splits.
+// every listing an input was restated with, for its current splits and zone.
 // Snapshot reads these tables directly; it never imports the engine.
 
 import type { QueryExecutor } from "../../shared/src/http.ts";
@@ -71,9 +71,10 @@ export type LoadedEvidence = Readonly<{
   }> | null;
 }>;
 
-/** The current split history of a listing a bound input was restated with. */
+/** The current split history and time zone of a listing a bound input was restated with. */
 export type LoadedSplitHistory = Readonly<{
   listing_id: string;
+  timezone: string | null;
   checked_at: string | null;
   splits: ReadonlyArray<Readonly<{ execution_date: string; split_from: string; split_to: string }>>;
 }>;
@@ -178,12 +179,13 @@ export async function loadFinancialUnitRecords(db: QueryExecutor, claim: Financi
          from financial_run_inputs i
         where i.run_id = $1 and i.binding_status = 'bound' and i.bound_payload ? 'split_adjustment'
      )
-     select r.listing_id,
+     select r.listing_id, l.timezone,
             to_char(c.checked_at at time zone 'UTC', ${ISO_UTC}) as checked_at,
             coalesce((select jsonb_agg(jsonb_build_object('execution_date', s.execution_date::text, 'split_from', s.split_from::text,
                                                           'split_to', s.split_to::text) order by s.execution_date)
                         from listing_splits s where s.listing_id::text = r.listing_id), '[]'::jsonb) as splits
        from restated r
+       left join listings l on l.listing_id::text = r.listing_id
        left join listing_split_coverage c on c.listing_id::text = r.listing_id
       order by r.listing_id`,
     [claim.run_id],

@@ -79,9 +79,9 @@ export type CandidatePage =
 
 export type SplitHistoryRequest = Readonly<{ subject: FinancialSubjectRef; as_of: IsoDateTime }>;
 
-/** The splits of the one listing whose splits apply to a subject, as last fetched in full. */
+/** The splits of the one listing whose splits apply to a subject, as last fetched in full, and the zone their dates are in. */
 export type SplitHistory =
-  | Readonly<{ status: "ok"; listing_id: string; checked_at: IsoDateTime; splits: ReadonlyArray<RecordedSplit> }>
+  | Readonly<{ status: "ok"; listing_id: string; timezone: string; checked_at: IsoDateTime; splits: ReadonlyArray<RecordedSplit> }>
   | Readonly<{ status: "gap"; reason_code: "split_listing_unresolved" | "split_history_missing" | "database_error" }>;
 
 /**

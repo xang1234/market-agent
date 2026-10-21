@@ -78,7 +78,7 @@ function offsetMs(instant: number, timeZone: string): number {
   return Math.round((localAsUtc - wholeSecondInstant) / MINUTE_MS) * MINUTE_MS;
 }
 
-function isKnownTimeZone(zone: string): boolean {
+export function isKnownTimeZone(zone: string): boolean {
   if (typeof zone !== "string" || zone.trim() === "") return false;
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: zone });

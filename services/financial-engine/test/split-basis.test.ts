@@ -54,6 +54,7 @@ function eps(context: Partial<NonNullable<InputCandidate["context"]>> = {}): Inp
 const NVDA_HISTORY: SplitHistory = {
   status: "ok",
   listing_id: LISTING,
+  timezone: "America/New_York",
   checked_at: "2026-10-01T12:00:00.000Z",
   splits: [
     { execution_date: "2021-07-20", split_from: "1", split_to: "4" },
@@ -69,17 +70,18 @@ function selected(candidate: InputCandidate, cutoff: string): SelectedInput {
 }
 
 function basisAt(cutoff: string, history: SplitHistory | undefined, candidate = eps()): BoundBasis {
-  return boundBasis(selected(candidate, cutoff), history, { knowledge_cutoff: cutoff, cutoff_timezone: "UTC" });
+  return boundBasis(selected(candidate, cutoff), history, cutoff);
 }
 
-test("an as-filed EPS binds restated to the plan's reference date, ignoring splits outside it", () => {
+test("an as-filed EPS binds restated to its listing's reference date, ignoring splits outside it", () => {
   assert.deepEqual(basisAt("2025-01-01T12:00:00.000Z", NVDA_HISTORY), {
     status: "restated",
     split_adjustment: {
-      version: "split_adjustment.v1",
+      version: "split_adjustment.v2",
       as_filed_on: "2024-02-21",
       reference_date: "2025-01-01",
       listing_id: LISTING,
+      listing_timezone: "America/New_York",
       splits: [{ execution_date: "2024-06-10", split_from: "1", split_to: "10" }],
       factor: { numerator: "10", denominator: "1" },
       adjusted_native_value: { numerator: "1193", denominator: "1000" },
@@ -94,8 +96,9 @@ test("an unknown split history is a named gap, never the value as filed", () => 
   const cutoff = "2025-01-01T12:00:00.000Z";
   assert.deepEqual(basisAt(cutoff, { status: "gap", reason_code: "split_history_missing" }), { status: "gap", reason_code: "split_history_missing" });
   assert.deepEqual(basisAt(cutoff, { status: "gap", reason_code: "split_listing_unresolved" }), { status: "gap", reason_code: "split_listing_unresolved" });
-  assert.deepEqual(basisAt(cutoff, { ...NVDA_HISTORY, checked_at: "2024-12-31T23:59:59.000Z" }), { status: "gap", reason_code: "split_history_stale" });
-  assert.deepEqual(basisAt(cutoff, { ...NVDA_HISTORY, checked_at: "2025-01-01T00:00:00.000Z" }).status, "restated");
+  // The reference date and the fetch are dated in New York, where 2025-01-01 starts at 05:00 UTC.
+  assert.deepEqual(basisAt(cutoff, { ...NVDA_HISTORY, checked_at: "2025-01-01T04:59:59.000Z" }), { status: "gap", reason_code: "split_history_stale" });
+  assert.deepEqual(basisAt(cutoff, { ...NVDA_HISTORY, checked_at: "2025-01-01T05:00:00.000Z" }).status, "restated");
 });
 
 test("an unadjusted value binds as stored; a split-adjusted one, which names no reference date, does not bind", () => {

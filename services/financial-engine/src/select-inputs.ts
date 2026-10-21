@@ -18,8 +18,9 @@
 // 6. Equal values tie-break by fact id; differing values are a conflict —
 //    identifier order never chooses financial truth.
 // 7. Freshness is measured to the cutoff.
-// 8. An as-filed value binds restated to the plan's reference date from its
-//    listing's split history, or is a gap when that history is unknown.
+// 8. An as-filed value binds restated to its listing's reference date, the
+//    cutoff dated in the listing's time zone, from the listing's split
+//    history, or is a gap when that history is unknown.
 //
 // A selection is a proven input: the chosen candidate with its proofs and
 // context narrowed to non-null, and its numerics parsed exactly once.
@@ -48,8 +49,7 @@ import {
   type ReasonCode,
   type ReportedMetricNode,
   type ReportingBasis,
-  type SplitAdjustmentV1,
-  type TimeContext,
+  type SplitAdjustmentV2,
 } from "../../financial-core/src/index.ts";
 import type { InputCandidate, SplitHistory } from "./ports.ts";
 
@@ -198,10 +198,10 @@ function inRequestedPeriod(candidate: InputCandidate, selector: PeriodSelector):
 
 export type BoundBasis =
   | Readonly<{ status: "unadjusted" }>
-  | Readonly<{ status: "restated"; split_adjustment: SplitAdjustmentV1 }>
+  | Readonly<{ status: "restated"; split_adjustment: SplitAdjustmentV2 }>
   | Readonly<{ status: "gap"; reason_code: ReasonCode }>;
 
-export function boundBasis(selected: SelectedInput, history: SplitHistory | undefined, time: Pick<TimeContext, "knowledge_cutoff" | "cutoff_timezone">): BoundBasis {
+export function boundBasis(selected: SelectedInput, history: SplitHistory | undefined, knowledgeCutoff: IsoDateTime): BoundBasis {
   const { context, metric_key: metricKey } = selected.candidate;
   // A split-adjusted context names no reference date, so no basis to compare it on.
   if (context.adjustment_basis !== "as_filed") {
@@ -209,8 +209,8 @@ export function boundBasis(selected: SelectedInput, history: SplitHistory | unde
   }
   if (history === undefined) return { status: "gap", reason_code: "split_history_missing" };
   if (history.status === "gap") return { status: "gap", reason_code: history.reason_code };
-  if (!splitHistoryCovers(history.checked_at, time)) return { status: "gap", reason_code: "split_history_stale" };
-  const referenceDate = splitReferenceDate(time);
+  const referenceDate = splitReferenceDate(knowledgeCutoff, history.timezone);
+  if (!splitHistoryCovers(history.checked_at, referenceDate, history.timezone)) return { status: "gap", reason_code: "split_history_stale" };
   // A value filed after the reference date would have to be restated backward.
   if (context.as_filed_on > referenceDate) return { status: "gap", reason_code: "incompatible_basis" };
   const definition = resolveMetricDefinition(metricKey);
@@ -221,6 +221,7 @@ export function boundBasis(selected: SelectedInput, history: SplitHistory | unde
     as_filed_on: context.as_filed_on,
     reference_date: referenceDate,
     listing_id: history.listing_id,
+    listing_timezone: history.timezone,
     splits: history.splits,
   });
   return restated.ok ? { status: "restated", split_adjustment: restated.adjustment } : { status: "gap", reason_code: restated.reason };
