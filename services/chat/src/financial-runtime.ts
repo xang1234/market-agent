@@ -731,7 +731,6 @@ const INCOME_ITEM_FIGURE: Readonly<Record<IncomeItem, string | null>> = {
 export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1, labels: ReadonlyMap<string, string> = new Map()): string[] {
   const { asks, offMetrics } = readingAsks(reading);
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
-  const figures = figuresOf(nodes);
   // A figure's period and company are those of its reported inputs.
   const input = (node: OperationNode) => nodes.get(operationDependencies(node)[0]!)!;
   const periodOf = (node: OperationNode): string => node.operation === "reported_metric" ? JSON.stringify(node.period) : periodOf(input(node));
@@ -752,13 +751,14 @@ export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1, lab
   });
   type Company = (typeof companies)[number];
   // An engine figure is as reported, so a qualified metric is computed only as
-  // its base's growth (a change from it to it) or its trend (it over several periods).
+  // its base's growth (a change whose two inputs are that figure itself, not
+  // a ratio or sum that reads it) or its trend (it over several periods).
   const computes = (metric: RequestedMetric, company: Company) => {
     const ofBase = (node: OperationNode) => SCOPE_METRICS[figureKey(node)] === metric.base;
     if (metric.adjustment !== undefined) return false;
     if (metric.qualifier === "growth") {
       return company.reached.some((node) => (node.operation === "percent_change_positive_base" || node.operation === "absolute_change") &&
-        figures(nodes.get(node.current)!).some(ofBase) && figures(nodes.get(node.prior)!).some(ofBase));
+        ofBase(nodes.get(node.current)!) && ofBase(nodes.get(node.prior)!));
     }
     return metric.qualifier === "trend" && new Set(company.shown.filter(ofBase).map(periodOf)).size > 1;
   };
