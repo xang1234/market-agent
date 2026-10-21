@@ -9,6 +9,7 @@ import test from "node:test";
 import type { Client } from "pg";
 import { connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
+import type { FinancialEvidencePort, PriceObservation, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { listRecoverableRuns, recoverRun } from "../../financial-engine/src/recovery.ts";
 import { databaseUrl, engineDatabase, IDS, NVDA, seedNvda, seedValuedIssuer, type ValuedIssuer } from "../../financial-engine/test/db-fixtures.ts";
 import { POLYGON_MARKET_SOURCE_ID } from "../../market/src/provider-sources.ts";
@@ -20,7 +21,7 @@ import type { ScreenerResponse } from "../../screener/src/result.ts";
 import { createPostgresScreenRepository } from "../../screener/src/screen-repository.ts";
 import { snapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
 import { recoveryParents } from "../src/runtime.ts";
-import { certifyScreenerUniverse, parseAsOf } from "../src/screener-certification.ts";
+import { certificationReport, certifyScreenerUniverse, parseAsOf } from "../src/screener-certification.ts";
 
 const id = (suffix: string) => `4f000000-0000-4000-8000-000000000${suffix}`;
 /** A loss maker: its P/E has no value. */
@@ -90,6 +91,22 @@ test("the batch certifies as of now, or the pinned past cutoff an operator resum
   assert.throws(() => parseAsOf(["--as-of", "2024-06-11T00:00:00Z"], now), /--as-of 2024-06-11T00:00:00Z is in the future/u);
   assert.throws(() => parseAsOf(["--as-of", "Monday"], now), /usage: npm run certify:screener-universe -- \[--as-of <ISO timestamp>\]/u);
   assert.throws(() => parseAsOf(["2024-06-10"], now), /usage/u);
+});
+
+test("a run that left figures unpublished names its issuers and how to resume them", () => {
+  const report = certificationReport([
+    { screener_valuation_run_id: "run-a", issuers: [NVDA.issuer], outcome: "published", rejected_units: 0 },
+    { screener_valuation_run_id: "run-b", issuers: [LOSS.issuer, DUAL.issuer], outcome: "run_failed", rejected_units: 0 },
+  ], NVDA.cutoff);
+  assert.deepEqual(report, {
+    lines: [
+      "run-a: 1 issuer(s), published",
+      "run-b: 2 issuer(s), run_failed",
+      "3 issuer(s) in 2 run(s)",
+    ],
+    unfinished: `1 run(s) did not publish every figure, for issuer(s) ${LOSS.issuer}, ${DUAL.issuer}; rerun with --as-of ${NVDA.cutoff} to resume them`,
+  });
+  assert.equal(certificationReport([{ screener_valuation_run_id: "run-a", issuers: [NVDA.issuer], outcome: "published", rejected_units: 0 }], NVDA.cutoff).unfinished, null);
 });
 
 test("screener certification", { timeout: 600_000 }, async (t) => {
@@ -238,5 +255,50 @@ test("screener certification", { timeout: 600_000 }, async (t) => {
       ["DUAL XNAS", null], ["DUAL XNYS", null], ["LOSS XNAS", null], ["NVD XFRA", null], ["NVDA XNAS", null],
     ]);
     assert.deepEqual(await ledger(db), { runs: 3, financial_runs: 0, certificates: 0 });
+  });
+});
+
+/** The evidence port, with LOSS's latest prices as `edit` leaves them. */
+const withLossPrices = (edit: (prices: ReadonlyArray<PriceObservation>) => ReadonlyArray<PriceObservation>) => (executor: SqlExecutor): FinancialEvidencePort => {
+  const port = createEvidenceFinancialPort(executor);
+  return {
+    listInputCandidates: (request) => port.listInputCandidates(request),
+    readSplitHistory: (request) => port.readSplitHistory(request),
+    async readPriceObservations(request) {
+      const page = await port.readPriceObservations(request);
+      return request.listing_id === LOSS.listing && page.status === "ok" ? { ...page, latest_by_source: edit(page.latest_by_source) } : page;
+    },
+  };
+};
+
+const figures = async (db: Client) => (await valuations(db)).map((row) => `${row.legal_name} ${row.valuation} ${row.value ?? row.reason_code} ${row.session_date} ${row.knowledge_cutoff}`);
+
+test("screener certification when a run fails", { timeout: 600_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for screener certification coverage");
+    return;
+  }
+  const db = await engineDatabase(t, "screener-certification-failure");
+  const pool = await connectedPool(t, databaseUrl(db));
+  await seedScreenerUniverse(db);
+  const healthy = { pool, evidence: createEvidenceFinancialPort };
+
+  await t.test("one issuer's integrity failure fails its whole run, and every issuer in it is unfinished", async () => {
+    const corrupt = withLossPrices((prices) => prices.map((price) => ({ ...price, body_sha256: "not a digest" })));
+    const outcomes = await certifyScreenerUniverse({ pool, evidence: corrupt }, NVDA.cutoff);
+    assert.deepEqual(outcomes.map((chunk) => [chunk.issuers, chunk.outcome, chunk.rejected_units]), [[[NVDA.issuer, LOSS.issuer, DUAL.issuer], "run_failed", 0]]);
+    assert.deepEqual(await valuations(db), []);
+  });
+
+  await t.test("a rerun at the cutoff values the failed run's issuers in a new run, once", async () => {
+    const outcomes = await certifyScreenerUniverse(healthy, NVDA.cutoff);
+    assert.deepEqual(outcomes.map((chunk) => [chunk.issuers, chunk.outcome, chunk.rejected_units]), [[[NVDA.issuer, LOSS.issuer, DUAL.issuer], "published", 0]]);
+    assert.deepEqual((await figures(db)).filter((row) => row.startsWith("Loss Co")), [
+      `Loss Co market_cap 20000000000 2024-06-07 ${NVDA.cutoff}`,
+      `Loss Co pe_ratio non_positive_denominator 2024-06-07 ${NVDA.cutoff}`,
+    ]);
+    assert.deepEqual(await ledger(db), { runs: 2, financial_runs: 2, certificates: 6 });
+    assert.deepEqual((await certifyScreenerUniverse(healthy, NVDA.cutoff)).map((chunk) => chunk.outcome), ["published"]);
+    assert.deepEqual(await ledger(db), { runs: 2, financial_runs: 2, certificates: 6 });
   });
 });
