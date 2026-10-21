@@ -127,6 +127,17 @@ cd services/market
 DATABASE_URL=... POLYGON_API_KEY=... npm run sync:splits
 ```
 
+The screener's market cap and P/E are certified figures for the last closed session. After a session closes, sync the
+splits, capture each listing's price, and certify the universe. Until the batch runs for that session, the screener
+shows no value for them.
+
+```bash
+cd services/market
+DATABASE_URL=... POLYGON_API_KEY=... npm run capture:price -- <listing_uuid> ...
+cd ../dev-api
+DATABASE_URL=... npm run certify:screener-universe
+```
+
 ### Keep frozen and live data apart
 
 Frozen modes need a database without provider-hydrated NVDA, AMD, or AAPL. Data mode refuses a database that a frozen mode seeded, because the frozen facts would let a live check pass without touching Polygon or SEC. Reset with `docker compose -f docker-compose.dev.yml --env-file .env.dev down -v` when you switch.

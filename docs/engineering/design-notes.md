@@ -322,8 +322,7 @@ divides an instant price by a duration's EPS.
   contradict its bindings, since a subject resolves to one listing per run, so they fail the unit's integrity
   (`split_reference_mismatch`). The selectors already bind the price and the count from the subject's one
   common-stock listing. The operation checks that they did.
-- **Which EPS:** the latest fiscal year's diluted EPS, as the screener uses (`services/screener/src/db-candidates.ts`).
-  The earnings node must select `{ "kind": "latest", "period_type": "annual", "offset": 0 }`, or P/E gaps
+- **Which EPS:** the latest fiscal year's diluted EPS. The earnings node must select `{ "kind": "latest", "period_type": "annual", "offset": 0 }`, or P/E gaps
   `unsupported_period`, so "P/E" always means the year that was latest at the cutoff. Trailing-twelve-month EPS
   cannot be expressed: `trailing_sum` adds only flows, and a fourth quarter's EPS is never derived. Basic EPS never
   stands in (`incompatible_definition`).
@@ -341,11 +340,46 @@ divides an instant price by a duration's EPS.
   its sealed block carries the inputs. Chat routes a market cap or P/E question to the engine (`isFinancialRequest`),
   and its scope names `market_cap` and `pe_ratio`, so a follow-up reads them (`SCOPE_METRICS`). The answer shows the
   figure beside the inputs it read, and each one's inspector shows its date: the price's trade, the count's cover
-  date, and the EPS's fiscal year. The screener moves to these figures in #444 step 5.
+  date, and the EPS's fiscal year. The screener shows them too (below).
 - **Presentation:** a valuation is dated by its price ("latest known at the cutoff"), since its other operand is
   restated to the same R. P/E reads as a multiple, as an approved ratio does.
 - **Seal:** the snapshot verifier recomputes both through the operation registry and checks each input as it does
   for any price or fact.
+
+## Market cap and P/E in the screener (#444)
+
+The screener shows the engine's certified figures and computes neither itself. Its universe is thousands of listings
+and its search needs no sign-in, while an engine run belongs to a user and a parent and values at most 25 subjects. So
+an operator command certifies the universe ahead of time, and each screen reads what it wrote.
+
+- **Batch:** `npm run certify:screener-universe -- [--as-of <iso>]` in `services/dev-api`
+  (`src/screener-certification.ts`) values every issuer with an active common-stock listing and a domicile, sector and
+  industry, at now unless pinned. Issuers go 25 to an engine run, each under its own `screener_valuation_runs` row.
+  One service user owns every such run (`00000000-0000-4000-8000-0000000005ee`, seeded by migration 0071), because
+  `financial_runs.user_id` is required and these runs belong to no person. Runs plan from the grids' valuation plan
+  (`services/financial-engine/src/valuation-plan.ts`), one unit per issuer and figure. Nothing schedules the batch,
+  as nothing schedules `sync:splits` or `capture:price`, so run it after a session's prices are captured.
+- **Read model:** the transaction that seals a figure, or the gap sealed instead, writes it to
+  `screener_certified_valuations`, keyed by issuer and figure. A null keeps its root reason: a figure blocked by an
+  input records the input's own reason, such as `split_listing_unresolved` for an issuer with two common-stock
+  listings. A run that finishes late, a recovered one say, never replaces a figure certified at a later cutoff.
+- **Screens:** a screen reads every candidate issuer's figures in one query (`loadCertifiedValuations`,
+  `services/screener/src/db-candidates.ts`) and does no engine work. Every listing of an issuer shows the issuer's
+  figure, so a second listing never counts the shares again. A row carries `market_cap_currency`, the currency the
+  figure was priced in, and the web labels the market cap with it rather than with a secondary listing's quote.
+- **Freshness:** a figure shows while it certifies the last regular session closed by now, in its listing's zone
+  (`lastRegularSessionDate`). Once a later session closes it reads as null until the batch runs again, so the screener
+  never shows a stale figure. If the batch stops running, every figure reads as null after the next close.
+- **Retries:** rerunning a cutoff resumes its runs. They are created up front under an advisory lock, so two attempts
+  never value an issuer twice, and the engine never publishes a unit twice. The supervised worker resumes an
+  interrupted run (`screenerUniverseRecovery`, registered in `services/dev-api/src/runtime.ts`).
+- **Erasure:** deleting a run's `screener_valuation_runs` row erases the run, and a figure goes with its certificate.
+  Deleting a fact erases every run that bound it, so the other issuers in that run show null until the next batch.
+- **Vendor path:** `SCREENER_CANDIDATE_SOURCE` picks the reported or the vendor repository once per process
+  (`services/screener/src/dev.ts`), so a response never mixes certified and vendor figures. The vendor path is
+  unchanged.
+- **Limits:** each refresh adds a run per 25 issuers and a sealed snapshot per figure, and nothing prunes older
+  refreshes yet.
 
 ## Source classes at binding (#444)
 
@@ -367,8 +401,8 @@ Every runtime authority declares `allowed_source_classes`. Binding uses evidence
 - **Prices:** each source's newest observations are read, and only allowed ones are evidence before the newest is
   picked. When none is allowed, the slot gaps `source_class_not_allowed`.
 - **Grants:** chat and grids allow `sec_filing` and `market_data`. The operator approved figures derived from
-  Polygon's prices there, since users bring their own key and data. Analyze, Discovery and the thesis adapter allow
-  `sec_filing` only, and the screener follows in #444 step 5.
+  Polygon's prices there, since users bring their own key and data. The screener's certification batch allows both
+  too. Analyze, Discovery and the thesis adapter allow `sec_filing` only.
 - **Recorded grant:** a run records its authority's classes as a sorted set (`financial_runs.allowed_source_classes`,
   migration 0070), immutable like its plan. Binding uses that grant on every attempt, and the seal re-checks each bound
   input's class against it (`financial_input_ineligible`, `source_class_not_allowed`). A retry whose authority grants
