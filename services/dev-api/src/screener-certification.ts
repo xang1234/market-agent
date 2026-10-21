@@ -231,8 +231,11 @@ const persistScreenerValuation: PersistParentArtifact = async (tx, publication) 
        knowledge_cutoff = excluded.knowledge_cutoff, session_date = excluded.session_date, value = excluded.value,
        currency = excluded.currency, reason_code = excluded.reason_code, listing_id = excluded.listing_id,
        snapshot_id = excluded.snapshot_id, financial_run_id = excluded.financial_run_id, financial_unit_id = excluded.financial_unit_id
-       -- A run that finishes late, a recovered one say, never replaces a figure certified at a later cutoff.
-       where screener_certified_valuations.knowledge_cutoff <= excluded.knowledge_cutoff`,
+       -- A run that finishes late, a recovered one say, never replaces a figure certified at a later cutoff,
+       -- and a gap never replaces a value the screener still shows.
+       where screener_certified_valuations.knowledge_cutoff <= excluded.knowledge_cutoff
+         and not (excluded.value is null and screener_certified_valuations.value is not null
+                  and screener_certified_valuations.session_date = excluded.session_date)`,
     [subject.issuer_id, match[1], tx.run.knowledge_cutoff, lastRegularSessionDate(tx.run.knowledge_cutoff, subject.timezone),
       figure.value, figure.currency, figure.reason_code, subject.listing_id, publication.snapshot_id, publication.run_id, publication.unit_id],
   );

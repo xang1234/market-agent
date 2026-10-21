@@ -31,8 +31,9 @@ for each row execute function erase_financial_runs_referencing($$parent_kind = '
 
 -- An issuer's latest certified market cap or P/E, or the gap the engine
 -- sealed instead, written by the finalization transaction that seals it.
--- A refresh replaces the row, never with an older cutoff. The row goes with
--- its certificate, so erased evidence takes the value with it.
+-- A refresh replaces the row, never with an older cutoff, and never a value
+-- with a gap in the value's own session. The row goes with its certificate,
+-- so erased evidence takes the value with it.
 create table screener_certified_valuations (
   issuer_id uuid not null references issuers(issuer_id) on delete cascade,
   valuation text not null check (valuation in ('market_cap', 'pe_ratio')),
