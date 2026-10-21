@@ -249,7 +249,8 @@ with step 3 of #444.
   listing, source, kind, trade time, and token. A revised close is a new row, known later.
 - **Known at the fetch:** a price is known when its response finished arriving, the earliest instant the fetch proves.
   Polygon states no delay to subtract. The adapter's `delay_class` is configuration (`services/market/src/stack.ts`),
-  and the `status` field said `DELAYED` on a daily-bars range and `OK` on `/prev` for the same bar and key. A last
+  and the `status` field states no delay either. For the same bar and key it said `DELAYED` on the capture's range,
+  which reaches into the current day, and `OK` on `/prev` and on a range that ends the day before. A last
   trade stamped after its response arrived has no known time, so it never binds, and when no other price is known by
   the cutoff the gap is `publication_time_unknown`. A session close
   is observed at 16:00 exchange time on its date, and a bar whose session had not closed is not captured.
