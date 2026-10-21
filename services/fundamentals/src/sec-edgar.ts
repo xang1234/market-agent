@@ -247,8 +247,8 @@ export const US_GAAP_TO_METRIC_KEY: Readonly<Record<string, string>> = {
   EarningsPerShareDiluted: "eps_diluted",
 
   // Shares
-  WeightedAverageNumberOfSharesOutstandingBasic: "shares_outstanding_basic",
-  WeightedAverageNumberOfDilutedSharesOutstanding: "shares_outstanding_diluted",
+  WeightedAverageNumberOfSharesOutstandingBasic: "weighted_average_basic_shares",
+  WeightedAverageNumberOfDilutedSharesOutstanding: "weighted_average_diluted_shares",
 
   // Cash flow (a 10-Q reports these year to date)
   NetCashProvidedByUsedInOperatingActivities: "operating_cash_flow",
@@ -703,8 +703,8 @@ const INCOME_KEYS: ReadonlySet<string> = new Set([
   "net_income",
   "eps_basic",
   "eps_diluted",
-  "shares_outstanding_basic",
-  "shares_outstanding_diluted",
+  "weighted_average_basic_shares",
+  "weighted_average_diluted_shares",
 ]);
 
 export const SEC_INCOME_METRIC_KEYS: ReadonlyArray<string> = Object.freeze(

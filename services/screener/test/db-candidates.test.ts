@@ -69,7 +69,7 @@ test("Postgres screener candidate repository computes current/prior fundamentals
   const f = candidates[0]?.fundamentals;
 
   assert.ok(f, "a candidate is produced");
-  assert.equal(f.market_cap, 120, "shares_outstanding_diluted(10) * price(12)");
+  assert.equal(f.market_cap, 120, "weighted_average_diluted_shares(10) * price(12)");
   assert.equal(f.pe_ratio, 6, "price(12) / eps_diluted(2)");
   assert.equal(f.gross_margin, 0.4, "gross_profit(40) / revenue(100)");
   assert.equal(f.operating_margin, 0.3, "operating_income(30) / revenue(100)");
@@ -115,7 +115,7 @@ class FakeFundamentalsDb {
           fact("operating_income", 2024, 30),
           fact("net_income", 2024, 20),
           fact("eps_diluted", 2024, 2),
-          fact("shares_outstanding_diluted", 2024, 10),
+          fact("weighted_average_diluted_shares", 2024, 10),
           fact("revenue", 2023, 80),
         ],
       );

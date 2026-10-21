@@ -56,6 +56,7 @@ export const METRIC_CATALOG_V1: ReadonlyMap<MetricKey, MetricDefinition> = new M
     metric("capex", "Capital expenditures (PP&E cash payments)", "flow", "currency"),
     metric("eps_basic", "EPS (basic)", "per_share", "currency_per_share", "basic"),
     metric("eps_diluted", "EPS (diluted)", "per_share", "currency_per_share", "diluted"),
+    metric("weighted_average_basic_shares", "Weighted-average basic shares", "share_count_average", "shares", "basic"),
     metric("weighted_average_diluted_shares", "Weighted-average diluted shares", "share_count_average", "shares", "diluted"),
     metric("total_assets", "Total assets", "balance", "currency"),
     metric("total_liabilities", "Total liabilities", "balance", "currency"),

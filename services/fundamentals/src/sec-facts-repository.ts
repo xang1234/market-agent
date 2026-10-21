@@ -1036,8 +1036,8 @@ async function hasProvenPrecision(db: FundamentalsQueryExecutor, factId: string)
 const SEC_SHARE_METRIC_KEYS: ReadonlySet<string> = new Set([
   "eps_basic",
   "eps_diluted",
-  "shares_outstanding_basic",
-  "shares_outstanding_diluted",
+  "weighted_average_basic_shares",
+  "weighted_average_diluted_shares",
 ]);
 
 const SEC_CONTEXT_VERSION = "sec_companyfacts_context.v1";

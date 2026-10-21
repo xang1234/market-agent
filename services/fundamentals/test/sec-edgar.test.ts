@@ -131,8 +131,8 @@ function secIncomeMetricRegistry() {
     metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaa10000005", "net_income", "Net Income", "currency", "sum"),
     metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaa10000006", "eps_basic", "EPS (Basic)", "currency", "derived"),
     metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaa10000007", "eps_diluted", "EPS (Diluted)", "currency", "derived"),
-    metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaa10000008", "shares_outstanding_basic", "Shares Outstanding (Basic)", "count", "avg"),
-    metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaa10000009", "shares_outstanding_diluted", "Shares Outstanding (Diluted)", "count", "avg"),
+    metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaa10000008", "weighted_average_basic_shares", "Weighted-average basic shares", "count", "avg"),
+    metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaa10000009", "weighted_average_diluted_shares", "Weighted-average diluted shares", "count", "avg"),
   ];
   return createMetricRegistry(defs);
 }
@@ -203,8 +203,8 @@ test("AAPL companyfacts extraction maps US-GAAP concepts to canonical metric_key
   assert.equal(byKey.get("net_income")?.value_num, 93_736_000_000);
   assert.equal(byKey.get("eps_basic")?.value_num, 6.11);
   assert.equal(byKey.get("eps_basic")?.unit, "currency_per_share");
-  assert.equal(byKey.get("shares_outstanding_basic")?.value_num, 15_343_783_000);
-  assert.equal(byKey.get("shares_outstanding_basic")?.unit, "shares");
+  assert.equal(byKey.get("weighted_average_basic_shares")?.value_num, 15_343_783_000);
+  assert.equal(byKey.get("weighted_average_basic_shares")?.unit, "shares");
 });
 
 test("quarterly companyfacts extraction prefers discrete quarter values over YTD values", () => {

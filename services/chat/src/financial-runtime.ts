@@ -493,6 +493,7 @@ export const SCOPE_METRICS: Readonly<Record<string, string | null>> = {
   total_equity: "total_equity",
   // SEC ingestion certifies no share count, so the engine shows one only from
   // another source, and no chat reader has one.
+  weighted_average_basic_shares: null,
   weighted_average_diluted_shares: null,
   shares_outstanding: null,
 };
