@@ -259,4 +259,7 @@ test("an engine answer checks a qualified metric against what its plan computes 
   assert.deepEqual(uncoveredAsks(asked({ metric: "eps_diluted", adjustment: "adjusted" }), growth), ["adjusted earnings per share"], "an engine figure is as reported");
   assert.deepEqual(uncoveredAsks(asked({ metric: "free_cash_flow", qualifier: "margin" }), growth), ["free cash flow margin"]);
   assert.deepEqual(uncoveredAsks(asked({ metric: "eps_basic", qualifier: "growth" }), growth), ["basic earnings per share growth"], "diluted EPS is not basic EPS");
+  const basic = { node_id: "b25", operation: "reported_metric", subject_slot: "a", metric_key: "eps_basic", period: year(2025) };
+  const mixed = plan([basic, eps("e26", 2026), { node_id: "g", operation: "percent_change_positive_base", current: "e26", prior: "b25" }], ["g"]);
+  assert.deepEqual(uncoveredAsks(asked({ metric: "eps_diluted", qualifier: "growth" }), mixed), ["earnings per share growth"], "a change from another figure is not its growth");
 });
