@@ -17,6 +17,7 @@ import {
   METRIC_CATALOG_V1,
   OPERATION_REGISTRY,
   PLANNABLE_METRICS,
+  resolveMetricDefinition,
   validateFinancialPlan,
   type ExecutionLimits,
   type FinancialPlanV1,
@@ -292,6 +293,13 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
       issues.push({ path: "$.operations", code: "unsupported_operation", message: `${String(operation.operation)} is not an approved operation` });
     }
   }
+  // A share price is planned only as the price of a valuation (#444).
+  const valuationPrices = new Set(draft.operations.flatMap((operation) => (VALUATIONS.has(String(operation.operation)) ? [operation.price] : [])));
+  for (const operation of draft.operations) {
+    if (operation.operation === "reported_metric" && resolveMetricDefinition(String(operation.metric_key))?.value_kind === "price" && !valuationPrices.has(operation.node_id)) {
+      issues.push({ path: "$.operations", code: "price_without_valuation", message: `${String(operation.node_id)} reads a share price, which is planned only as the price of market_cap or pe_ratio` });
+    }
+  }
   const unitOf = new Map<string, string>();
   for (const unit of units) {
     for (const outputId of unit.output_ids) {
@@ -411,9 +419,12 @@ function isApprovedOperation(kind: unknown): kind is OperationKind {
   return typeof kind === "string" && Object.hasOwn(OPERATION_REGISTRY, kind);
 }
 
+const VALUATIONS: ReadonlySet<string> = new Set<OperationKind>(["market_cap", "pe_ratio"]);
+
 function systemPrompt(): string {
   const metrics = PLANNABLE_METRICS.map((definition) => definition.metric_key).join(", ");
-  const operations = Object.keys(OPERATION_REGISTRY).join(", ");
+  // ponytail: chat, the only model planner, is offered valuations with their operands in #444 step 4.
+  const operations = Object.keys(OPERATION_REGISTRY).filter((kind) => !VALUATIONS.has(kind)).join(", ");
   return [
     "You translate a financial research request into a JSON plan draft. Reply with one JSON object only.",
     `Approved metric keys: ${metrics}. Approved operations: ${operations}.`,
