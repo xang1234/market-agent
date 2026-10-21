@@ -111,6 +111,7 @@ export function chatHarness(
     readQuestion?: Parameters<typeof createChatFinancialRuntime>[0]["readQuestion"];
     priorSubjects?: Parameters<typeof createChatFinancialRuntime>[0]["priorSubjects"];
     resolveMention?: typeof resolveMention;
+    clock?: () => Date;
   },
 ) {
   const persisted: string[] = [];
@@ -128,6 +129,7 @@ export function chatHarness(
       ...(options.researchScope ? { researchScope: options.researchScope } : {}),
       ...(options.readQuestion ? { readQuestion: options.readQuestion } : {}),
       ...(options.priorSubjects ? { priorSubjects: options.priorSubjects } : {}),
+      ...(options.clock ? { clock: options.clock } : {}),
     }),
   });
   const run = async (input: Omit<ChatTurnInput, "runId" | "turnId"> & { turnId?: string }) => {

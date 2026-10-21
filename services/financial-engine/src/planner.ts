@@ -38,7 +38,7 @@ import { interpretPlan } from "./plan-interpretation.ts";
 import { isRecord } from "../../shared/src/http.ts";
 
 export const PLANNER_ADAPTER_VERSION = "financial-planner.v1";
-export const PLANNER_PROMPT_VERSION = "financial-plan-prompt.v1";
+export const PLANNER_PROMPT_VERSION = "financial-plan-prompt.v2";
 export const DETERMINISTIC_ADAPTER_VERSION = "financial-deterministic-planner.v1";
 
 /** Adapter over the existing model router (router.complete). */
@@ -439,13 +439,13 @@ const VALUATIONS: ReadonlySet<string> = new Set<OperationKind>(["market_cap", "p
 
 function systemPrompt(): string {
   const metrics = PLANNABLE_METRICS.map((definition) => definition.metric_key).join(", ");
-  // ponytail: chat, the only model planner, is offered valuations with their operands in #444 step 4.
-  const operations = Object.keys(OPERATION_REGISTRY).filter((kind) => !VALUATIONS.has(kind)).join(", ");
+  const operations = Object.keys(OPERATION_REGISTRY).join(", ");
   return [
     "You translate a financial research request into a JSON plan draft. Reply with one JSON object only.",
     `Approved metric keys: ${metrics}. Approved operations: ${operations}.`,
     'Ready drafts: {"outcome":"ready","subjects":[{"slot_id","mention"}],"operations":[...],"outputs":[{"output_id","node_id"}],"thresholds":[{"threshold_id","value","unit"}]}.',
-    'Operations: reported_metric {node_id, operation, subject_slot, metric_key, period:{kind:"fiscal_period",fiscal_year,fiscal_period} or {kind:"latest",period_type,offset}}; absolute_change/percent_change_positive_base {current, prior}; gross_margin/operating_margin/net_margin {numerator, revenue}; free_cash_flow {operating_cash_flow, capex} (annual only); ratio {ratio_key, numerator, denominator}; trailing_sum {quarters:[4 node ids]}; threshold {subject, threshold_id, comparison}; peer_compare {members, direction}.',
+    'Operations: reported_metric {node_id, operation, subject_slot, metric_key, period:{kind:"fiscal_period",fiscal_year,fiscal_period} or {kind:"latest",period_type,offset}}; absolute_change/percent_change_positive_base {current, prior}; gross_margin/operating_margin/net_margin {numerator, revenue}; free_cash_flow {operating_cash_flow, capex} (annual only); ratio {ratio_key, numerator, denominator}; trailing_sum {quarters:[4 node ids]}; threshold {subject, threshold_id, comparison}; peer_compare {members, direction}; market_cap {price, shares}; pe_ratio {price, earnings}.',
+    'A valuation\'s price is a reported_metric of share_price with period {kind:"at_cutoff"}, planned only as the price of market_cap or pe_ratio. market_cap\'s shares are shares_outstanding with period {kind:"latest",period_type:"quarterly",offset:0}. pe_ratio\'s earnings are eps_diluted with period {kind:"latest",period_type:"annual",offset:0}: P/E uses the latest fiscal year\'s diluted EPS.',
     "Plan every requested company. Threshold values are decimal strings. Never invent metric definitions, identifiers, owners, budgets, modes, or verification fields.",
     'If a definition is ambiguous reply {"outcome":"needs_clarification","question","choices"}; if it cannot be expressed reply {"outcome":"unsupported","reason"}.',
   ].join("\n");

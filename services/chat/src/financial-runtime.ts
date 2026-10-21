@@ -90,6 +90,8 @@ export type ChatFinancialRuntimeDeps = Readonly<{
   readQuestion?: (question: string) => Promise<ScopeProposal | null>;
   /** The turn's research scope, saved with a published answer (#206); absent, none is saved. */
   researchScope?: (context: ChatFinancialTurnContext, reading: Promise<ScopeProposal | null>) => Promise<ResearchScope>;
+  /** The knowledge cutoff a new turn plans at; the wall clock when absent. */
+  clock?: () => Date;
 }>;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -150,7 +152,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     const outcome = await publishRequest(deps.pool, {
       authority,
       request_key: turnId,
-      plan: () => planTurn(deps, context, text, requested.subjects, authority, new Date()),
+      plan: () => planTurn(deps, context, text, requested.subjects, authority, deps.clock?.() ?? new Date()),
       evidence: deps.evidence,
       // The reading and the scope settle outside any transaction; the scope
       // queued its reads before this request took its client.
@@ -417,7 +419,9 @@ function chatAuthority(userId: string, threadId: string, turnId: string): Financ
     egress_channel: "chat",
     // Each turn is its own request; a later turn never edits an earlier answer.
     parent: { kind: "chat_thread", id: threadId, version: `turn:${turnId}` },
-    allowed_source_classes: ["sec_filing"],
+    // Market data is Polygon's prices only (sourceClassOf): the operator
+    // allowed figures derived from them in chat, from the user's own key (#444).
+    allowed_source_classes: ["sec_filing", "market_data"],
     feature: { surface: "chat", capability: "financial-answer", mode: "enforce" },
     approval_state: "not_required",
     lease: null,
@@ -496,10 +500,10 @@ export const SCOPE_METRICS: Readonly<Record<string, string | null>> = {
   weighted_average_basic_shares: null,
   weighted_average_diluted_shares: null,
   shares_outstanding: null,
-  // Not planned by chat until #444 step 4 (PLANNABLE_METRICS).
+  // A share price is shown only beside the valuation it prices.
   share_price: null,
-  market_cap: null,
-  pe_ratio: null,
+  market_cap: "market_cap",
+  pe_ratio: "pe_ratio",
 };
 
 const figureKey = (node: OperationNode) => node.operation === "reported_metric" ? node.metric_key : node.operation;
@@ -581,9 +585,9 @@ export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1): st
   ];
 }
 
-// A catalog label inside a sentence: "Free cash flow" reads "free cash flow", "EBITDA" stays.
+// A catalog label inside a sentence: "Free cash flow" reads "free cash flow", "EBITDA" and "P/E ratio" stay.
 function inSentence(label: string): string {
-  return label.length > 1 && label[1] === label[1]!.toLowerCase() ? `${label[0]!.toLowerCase()}${label.slice(1)}` : label;
+  return /\p{Ll}/u.test(label[1] ?? "") ? `${label[0]!.toLowerCase()}${label.slice(1)}` : label;
 }
 
 async function published(db: SqlExecutor, runId: string, threadId: string, messageId: string): Promise<ChatFinancialTurn> {
@@ -606,6 +610,7 @@ const FINANCIAL_TERMS = new RegExp(
     // Catalog labels without qualifiers: "EPS (basic)" is asked about as "EPS".
     ...[...PLANNABLE_METRICS, ...RATIO_CATALOG_V1.values()].map((definition) => definition.label.replace(/\s*\(.*\)$/u, "")),
     "sales", "margin", "margins", "earnings per share", "EPS", "profit", "cash flow", "free cash flow", "capex", "cash resilience", "net income", "operating income",
+    "market cap", "market capitalization", "P/E", "PE ratio", "price-to-earnings", "price to earnings", "price/earnings",
   ].map((term) => term.replace(/[.*+?^${}()|[\]\\/]/gu, "\\$&")).join("|")})\\b`,
   "iu",
 );

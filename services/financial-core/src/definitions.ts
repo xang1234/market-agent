@@ -71,9 +71,10 @@ export const METRIC_CATALOG_V1: ReadonlyMap<MetricKey, MetricDefinition> = new M
 );
 
 /**
- * The metrics a planner offers. A share price is planned only as the price of
- * a valuation (market_cap, pe_ratio), so planners and chat routing leave it
- * out until surfaces offer valuations (#444 step 4).
+ * The metrics a planner offers on their own. A share price is planned only as
+ * the price of a valuation (market_cap, pe_ratio), so it is left out: the model
+ * planner's prompt names it with the valuations, and chat routes valuations,
+ * never a bare price.
  */
 export const PLANNABLE_METRICS: ReadonlyArray<MetricDefinition> = [...METRIC_CATALOG_V1.values()].filter((definition) => definition.value_kind !== "price");
 
