@@ -350,7 +350,7 @@ const SEC_COVER_COUNT_METRIC_KEY = "shares_outstanding";
 function secCoverCount(input: IngestInput, accessionNumber: string, sourceId: UUID): CoverCount | null {
   const [value, ...others] = secCoverCountValues(input.fetched.facts, accessionNumber).sort((left, right) => right.end.localeCompare(left.end));
   const fiscalPeriod = FISCAL_PERIODS.find((period) => period === value?.fp);
-  if (value?.val_token === undefined || fiscalPeriod === undefined) return null;
+  if (value?.val_token === undefined || fiscalPeriod === undefined || !Number.isInteger(value.fy)) return null;
   return {
     period: {
       subject: { kind: "issuer", id: input.issuerId },
