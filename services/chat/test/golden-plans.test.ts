@@ -101,6 +101,11 @@ const EXPECTED: Record<string, ReturnType<typeof summary>> = {
     outputs: [...latestMargins("NVDA"), ...latestMargins("AMD"), ...latestMargins("AAPL")],
   },
   "What drives AAPL's margins?": { outcome: "ready", model_calls: 1, outputs: latestMargins("AAPL").slice(1) },
+  "Compare NVDA and AMD operating margin and EPS growth": {
+    outcome: "ready",
+    model_calls: 1,
+    outputs: ["operating_margin(NVDA operating_income latest annual[0], NVDA revenue latest annual[0])", "AMD revenue latest annual[0]"],
+  },
   "How does AMDX's Q2 2025 revenue compare with its peers?": { outcome: "ready", model_calls: 1, outputs: ["AMD revenue Q2 2025"] },
 };
 
