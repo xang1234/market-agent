@@ -181,9 +181,9 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       const scope = harness.persisted.at(-1)!.research_scope as { route: string; reads: string; companies: unknown; metrics: unknown } | undefined;
       return { gap: done.financial_gap, text: block!.segments[0]!.text, subject_refs: block!.subject_refs, scope: scope && [scope.route, scope.reads, scope.companies, scope.metrics] };
     };
-    assert.deepEqual(await segments("Break down AAA's revenue by segment", "segment revenue has no approved definition"), {
+    assert.deepEqual(await segments("Break down AAA's revenue by segment", "segments"), {
       gap: { reason_code: "unsupported" },
-      text: "This request asks for a calculation outside the verified financial definitions I can compute: segment revenue has no approved definition.",
+      text: "This request asks for a calculation outside the verified financial definitions I can compute: revenue or results by business segment.",
       subject_refs: [{ kind: "issuer", id: IDS.issuerA }],
       scope: ["financial_gap", "financial_gap", [{ issuer_id: IDS.issuerA, label: "AAA" }], []],
     });
@@ -194,8 +194,8 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       subject_refs: undefined,
       scope: undefined,
     });
-    // A company picked in a clarification is saved too, labelled. A reason with a figure in it is not shown.
-    assert.deepEqual(await segments("Break down AMB's revenue by segment", "only 3 segments are reported", "Beta Holdings Corp."), {
+    // A company picked in a clarification is saved too, labelled. A reason the planner does not list is not shown.
+    assert.deepEqual(await segments("Break down AMB's revenue by segment", "segment revenue has no approved definition", "Beta Holdings Corp."), {
       gap: { reason_code: "unsupported" },
       text: "This request asks for a calculation outside the verified financial definitions I can compute.",
       subject_refs: [{ kind: "issuer", id: IDS.issuerB }],
