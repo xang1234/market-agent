@@ -161,6 +161,6 @@ test("a share count resolves its latest filing apart from the plan's statement p
   };
   const policy = { knowledge_cutoff: "2024-03-01T16:00:00.000Z", reporting_basis: "as_reported" as const, max_age_days: null, allowed_source_classes: ["sec_filing" as const] };
   assert.deepEqual([...sharedLatestPeriods([{ node: eps, candidates: [fy2024Eps] }, { node: shares, candidates: [cover(K24)] }], policy)], [
-    ["eps", "2024-01-28|FY|2024"],
+    ["eps", { kind: "fiscal_period", fiscal_year: 2024, fiscal_period: "FY" }],
   ]);
 });

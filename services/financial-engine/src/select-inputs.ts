@@ -7,10 +7,11 @@
 //    (conservative, source-version-bound proof), from a source class the
 //    authority allows, proven precision, explicit financial context,
 //    contract-expressible unit.
-// 3. "Latest" names one period per subject in a plan: the offset-th newest
-//    period in which any of the subject's latest nodes of that period type has
-//    an eligible candidate. A node without a candidate there is a gap; an
-//    older period is never substituted.
+// 3. "Latest" names one fiscal period per subject and period type in a plan:
+//    offset fiscal years, or quarters, before the newest period any of the
+//    subject's latest nodes of that type reports by the cutoff, certifiable or
+//    not. A node without an eligible candidate there is a gap with its reason;
+//    an older period is never substituted.
 // 4. An eligible extraction correction replaces the fact it corrects.
 // 5. as_reported takes the original disclosure; as_restated takes, among the
 //    economic restatements public by the cutoff, the one filed last, else the
@@ -72,7 +73,7 @@ import {
 } from "../../financial-core/src/index.ts";
 import type { InputCandidate, SplitHistory } from "./ports.ts";
 
-export const SELECTION_POLICY_VERSION = "public-information-selection.v4";
+export const SELECTION_POLICY_VERSION = "public-information-selection.v5";
 
 /** A large accelerated filer's filings are due about 112 days apart at most, so an older count is likely superseded. */
 export const SHARE_COUNT_MAX_AGE_DAYS = 130;
@@ -132,50 +133,72 @@ type Eligible = { candidate: ProvenCandidate; publication: SelectedPublication; 
 // later evidence makes a disallowed source eligible, so it comes last.
 const EXCLUSION_PRIORITY: ReadonlyArray<ReasonCode> = ["precision_unverified", "context_unverified", "incompatible_unit", "publication_time_unknown", "source_class_not_allowed"];
 
-/** One reported period, as `end|fiscal_period|fiscal_year`; a descending sort is newest first. */
-export type PeriodKey = string & { readonly __brand: "PeriodKey" };
+type FiscalPeriodSelector = Extract<PeriodSelector, { kind: "fiscal_period" }>;
 
 /** A shared latest period, null when there is none, or the gap of a group whose period cannot be known. */
-export type LatestPeriod = PeriodKey | null | Readonly<{ unresolved: ReasonCode }>;
+export type LatestPeriod = FiscalPeriodSelector | null | Readonly<{ unresolved: ReasonCode }>;
+
+const QUARTERS = ["Q1", "Q2", "Q3", "Q4"] as const;
 
 // `incomplete` marks a slot whose page was truncated or not read: it may hold a
 // newer period than the others, so its group's latest period cannot be known.
 type LatestSlot = Readonly<{ node: ReportedMetricNode; candidates: ReadonlyArray<InputCandidate>; incomplete?: ReasonCode }>;
 
 /**
- * The period each latest node resolves to, shared per subject and period type:
- * the offset-th newest period with an eligible candidate in any of the slots.
- * Null when there is no such period; unresolved when any slot of the group is
- * incomplete. An instant share count resolves alone (rule 9).
+ * The fiscal period each latest node resolves to, shared per subject and
+ * period type: offset periods before the newest one any of the slots reports
+ * by the cutoff. Null when none reports one; unresolved when any slot of the
+ * group is incomplete. An instant share count resolves alone (rule 9).
  */
 export function sharedLatestPeriods(slots: ReadonlyArray<LatestSlot>, policy: SelectionPolicy): ReadonlyMap<LocalId, LatestPeriod> {
   const groupOf = (node: ReportedMetricNode, periodType: string) => JSON.stringify([node.subject_slot, periodType]);
-  const keysByGroup = new Map<string, Set<PeriodKey>>();
+  const newestByGroup = new Map<string, number>();
   const incompleteGroups = new Map<string, ReasonCode>();
   const shared = slots.filter(({ node }) => node.period.kind === "latest" && !isShareCount(node.metric_key));
   for (const { node, candidates, incomplete } of shared) {
     if (node.period.kind !== "latest") continue;
     const group = groupOf(node, node.period.period_type);
     if (incomplete !== undefined && !incompleteGroups.has(group)) incompleteGroups.set(group, incomplete);
-    const keys = keysByGroup.get(group) ?? new Set();
     for (const candidate of requestedCandidates(node, candidates)) {
-      if ("eligible" in eligibility(candidate, policy)) keys.add(periodKey(candidate));
+      if (reportedBy(candidate, policy)) newestByGroup.set(group, Math.max(newestByGroup.get(group) ?? -Infinity, fiscalPosition(candidate.period)));
     }
-    keysByGroup.set(group, keys);
   }
   const resolved = new Map<LocalId, LatestPeriod>();
   for (const { node } of shared) {
     if (node.period.kind !== "latest") continue;
     const group = groupOf(node, node.period.period_type);
     const incomplete = incompleteGroups.get(group);
-    if (incomplete !== undefined) {
-      resolved.set(node.node_id, { unresolved: incomplete });
-      continue;
-    }
-    const newestFirst = [...keysByGroup.get(group)!].sort((left, right) => right.localeCompare(left));
-    resolved.set(node.node_id, newestFirst[node.period.offset] ?? null);
+    const newest = newestByGroup.get(group);
+    resolved.set(node.node_id, incomplete !== undefined ? { unresolved: incomplete }
+      : newest === undefined ? null
+      : fiscalPeriodAt(newest - node.period.offset, node.period.period_type));
   }
   return resolved;
+}
+
+/**
+ * Whether a candidate shows its period reported by the cutoff: public by then
+ * from an allowed source, in its metric's unit kind, and not a segment's
+ * value. Its precision and context need not be proven, so a newest period no
+ * candidate certifies is still the latest, and a gap.
+ */
+function reportedBy(candidate: InputCandidate, policy: EligibilityPolicy): boolean {
+  const unitKind = resolveMetricDefinition(candidate.metric_key)?.unit_kind;
+  return typeof earliestPublicProof(candidate, policy.knowledge_cutoff) === "object"
+    && sourceAllowed(candidate.source_class, policy)
+    && unitKind !== undefined && candidate.unit?.kind === unitKind
+    && candidate.context?.dimension_scope !== "segment";
+}
+
+/** A period's place in its sequence: its fiscal year, or its quarter counted four to a fiscal year. */
+function fiscalPosition({ fiscal_year, fiscal_period }: InputCandidate["period"]): number {
+  return fiscal_period === "FY" ? fiscal_year : fiscal_year * 4 + QUARTERS.indexOf(fiscal_period);
+}
+
+function fiscalPeriodAt(position: number, periodType: "annual" | "quarterly"): FiscalPeriodSelector {
+  if (periodType === "annual") return { kind: "fiscal_period", fiscal_year: position, fiscal_period: "FY" };
+  const fiscalYear = Math.floor(position / 4);
+  return { kind: "fiscal_period", fiscal_year: fiscalYear, fiscal_period: QUARTERS[position - fiscalYear * 4]! };
 }
 
 /**
@@ -198,9 +221,9 @@ export function selectInput(
   const shared = node.period.kind !== "latest" ? null
     : latestPeriod !== undefined ? latestPeriod
     : sharedLatestPeriods([{ node, candidates }], policy).get(node.node_id)!;
-  if (shared !== null && typeof shared === "object") return gap(shared.unresolved);
+  if (shared !== null && "unresolved" in shared) return gap(shared.unresolved);
   const period = shared;
-  const inPeriod = period === null ? requested : requested.filter((candidate) => periodKey(candidate) === period);
+  const inPeriod = period === null ? requested : requested.filter((candidate) => inRequestedPeriod(candidate, period));
 
   const eligible = eligibleAmong(inPeriod, policy);
   if (typeof eligible === "string") return gap(eligible);
@@ -265,10 +288,6 @@ function chooseAmong(eligible: ReadonlyArray<Eligible>, requested: ReadonlyArray
 
 function requestedCandidates(node: ReportedMetricNode, candidates: ReadonlyArray<InputCandidate>): InputCandidate[] {
   return candidates.filter((candidate) => candidate.metric_key === node.metric_key && inRequestedPeriod(candidate, node.period));
-}
-
-function periodKey({ period }: InputCandidate): PeriodKey {
-  return `${period.end}|${period.fiscal_period}|${period.fiscal_year}` as PeriodKey;
 }
 
 function inRequestedPeriod(candidate: InputCandidate, selector: PeriodSelector): boolean {
