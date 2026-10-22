@@ -12,8 +12,8 @@
 //    subject's latest nodes of that type reports. A candidate reports its
 //    period when rule 2 holds for it but for precision and context, so an
 //    uncertifiable period still counts; a fiscal year reports its fourth
-//    quarter. An instant reports only with a context: a balance is labelled
-//    FY of its filing's fiscal year, whether or not it is that year's end. A
+//    quarter. A balance reports only with a context: it is labelled FY of
+//    its filing's fiscal year, whether or not it is that year's end. A
 //    node without an eligible candidate there is a gap with its reason; an
 //    older period is never substituted.
 // 4. An eligible extraction correction replaces the fact it corrects.
@@ -134,8 +134,9 @@ export type SlotSelection = { status: "selected"; input: SelectedInput } | { sta
 type Eligible = { candidate: ProvenCandidate; publication: SelectedPublication; numeric: ExactNumeric | null };
 
 // When nothing is eligible, report the reason closest to eligibility. No
-// later evidence makes a disallowed source eligible, so it comes last.
-const EXCLUSION_PRIORITY: ReadonlyArray<ReasonCode> = ["precision_unverified", "context_unverified", "incompatible_unit", "incompatible_scope", "publication_time_unknown", "source_class_not_allowed"];
+// later evidence makes a segment's value or a disallowed source eligible, so
+// they come last.
+const EXCLUSION_PRIORITY: ReadonlyArray<ReasonCode> = ["precision_unverified", "context_unverified", "incompatible_unit", "publication_time_unknown", "incompatible_scope", "source_class_not_allowed"];
 
 type FiscalPeriodSelector = Extract<PeriodSelector, { kind: "fiscal_period" }>;
 
@@ -184,7 +185,7 @@ export function sharedLatestPeriods(slots: ReadonlyArray<LatestSlot>, policy: Se
 
 function reportedBy(candidate: InputCandidate, policy: EligibilityPolicy): boolean {
   return "publication" in publicFromAllowedSource(candidate, policy) && metricMisfit(candidate) === null
-    && (candidate.context !== null || candidate.period.start !== null);
+    && (candidate.context !== null || resolveMetricDefinition(candidate.metric_key)?.value_kind !== "balance");
 }
 
 function fiscalPosition({ fiscal_year, fiscal_period }: InputCandidate["period"], periodType: "annual" | "quarterly"): number | null {
@@ -344,7 +345,7 @@ function splitNearCount(countDate: IsoDate, reportedAt: string | null, splits: R
 
 type EligibilityPolicy = Pick<SelectionPolicy, "knowledge_cutoff" | "allowed_source_classes">;
 
-/** Whether binding could use the candidate at the cutoff: public by then, from an allowed source, with proven precision, context, and unit, and an exact value. */
+/** Whether binding could use the candidate at the cutoff: eligible by rule 2, with an exact value. */
 export function bindableAt(candidate: InputCandidate, policy: EligibilityPolicy): boolean {
   const verdict = eligibility(candidate, policy);
   return "eligible" in verdict && verdict.eligible.numeric !== null;
@@ -382,7 +383,7 @@ function publicFromAllowedSource(candidate: InputCandidate, policy: EligibilityP
 function metricMisfit({ metric_key, unit, context }: InputCandidate): ReasonCode | null {
   const unitKind = resolveMetricDefinition(metric_key)?.unit_kind;
   if (unit === null || unitKind === undefined || unit.kind !== unitKind) return "incompatible_unit";
-  return context?.dimension_scope === "segment" ? "incompatible_scope" : null;
+  return context !== null && context.dimension_scope !== "consolidated" ? "incompatible_scope" : null;
 }
 
 /** The proof with the earliest conservative bound at or before the cutoff. */
