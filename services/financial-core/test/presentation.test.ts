@@ -179,7 +179,7 @@ function comparisonPlan(operations: FinancialPlanV1["operations"], outputs: stri
   return plan;
 }
 
-const FY =(fiscal_year: number) => ({ kind: "fiscal_period" as const, fiscal_year, fiscal_period: "FY" as const });
+const FY = (fiscal_year: number) => ({ kind: "fiscal_period" as const, fiscal_year, fiscal_period: "FY" as const });
 const balance = (node_id: string, metric_key: string, fiscal_year = 2023) =>
   ({ node_id, operation: "reported_metric" as const, operation_version: "reported_metric.v1", subject_slot: "a", metric_key, period: FY(fiscal_year) });
 const valueOf = (value: string, unit: unknown) => ({ kind: "value", value, unit, exact: true, rounding: null });

@@ -104,7 +104,7 @@ test('a comparison across fiscal calendars has one column per line, each cell na
   ])
   const rows = [...table.querySelectorAll('tbody tr')].map((row) => [
     row.querySelector('th')!.textContent,
-    ...[...row.querySelectorAll('td')].map((cell) => [...cell.children].filter((part) => !part.closest('[aria-hidden="true"]')).map((part) => part.textContent)),
+    ...[...row.querySelectorAll('td')].map((cell) => [...cell.children].map((part) => part.textContent)),
   ])
   assert.deepEqual(rows, [
     [

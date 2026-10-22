@@ -1,6 +1,6 @@
 // The presentation contract: everything presentFinancialUnit can produce must
-// satisfy the canonical block schema, and the web's financial_answer fixture is
-// this generator's output, not a hand-maintained copy. Regenerate the fixture
+// satisfy the canonical block schema, and the web's v2 financial_answer fixtures
+// are this generator's output, not hand-maintained copies. Regenerate the fixtures
 // with `UPDATE_FIXTURES=1 node --experimental-strip-types --test
 // test/presentation-contract.test.ts` after an intentional change.
 

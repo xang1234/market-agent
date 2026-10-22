@@ -265,6 +265,7 @@ function lineOf(plan: FinancialPlanV1, node: OperationNode, measureLabelId: stri
   return { key: JSON.stringify([measureLabelId, anchor.step, shape]), anchor };
 }
 
+// A column is a line and a rank, not a period: ranked from the requested period so a gap keeps its column, and a company missing a newer period shifts left.
 function columnKeyByResult(results: ReadonlyArray<PresentedResult>, lines: ReadonlyMap<string, Line>): ReadonlyMap<string, string> {
   const groups = new Map<string, Array<{ result_id: string } & Line>>();
   for (const result of results) {
@@ -483,6 +484,7 @@ function changeEnds(plan: FinancialPlanV1, node: ChangeNode): PeriodSelector[] {
 
 type PeriodAnchor = Readonly<{ step: "quarter" | "year" | "cutoff"; calendar: "fiscal" | "latest" | "cutoff"; recency: number }>;
 
+// Recency orders periods only within one calendar and step; fiscal recency is positive and latest is zero or below.
 function periodAnchor(selector: PeriodSelector): PeriodAnchor {
   switch (selector.kind) {
     case "fiscal_period":

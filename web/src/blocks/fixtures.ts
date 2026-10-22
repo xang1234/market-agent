@@ -502,8 +502,7 @@ export const disclosureFixture: DisclosureBlock = {
   ],
 }
 
-// Written by services/financial-core/test/presentation-contract.test.ts from
-// the real generator; that test fails if this file drifts.
+// services/financial-core/test/presentation-contract.test.ts writes the v2 fixtures from the real generator and fails if they drift; the v1 fixture is a stored answer, never regenerated.
 export const financialAnswerFixture = financialAnswerFixtureJson as FinancialAnswerBlock
 export const financialAnswerFiscalCalendarsFixture = financialAnswerFiscalCalendarsFixtureJson as FinancialAnswerBlock
 export const financialAnswerV1Fixture = financialAnswerV1FixtureJson as FinancialAnswerBlock
