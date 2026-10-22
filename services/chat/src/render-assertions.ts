@@ -115,7 +115,7 @@ function templateSegments(
   return segments;
 }
 
-// An inference the judge found unsupported (inference-judge.ts shownAs),
+// An inference the judge found unsupported (verdicts.ts shownAs),
 // with no checked results to lend it weight.
 export function unverifiedInference(assertion: Assertion, packet: EvidencePacket): Segment[] {
   return [{ type: "text", text: `> **Unverified analyst view${subjectClause(assertion, packet)}** (not backed by the figures shown): ${assertion.text}` }];

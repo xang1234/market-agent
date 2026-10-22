@@ -4,7 +4,8 @@ import test from "node:test";
 import type { LlmChatRequest } from "../../llm/src/index.ts";
 import { checkAssertions, type Assertion } from "../src/assertions.ts";
 import type { EvidencePacket } from "../src/evidence-packet.ts";
-import { judgeCases, judgeInferences, judgeMessages, parseVerdicts, shownAs, verdictsOf, type JudgeCase } from "../src/inference-judge.ts";
+import { judgeCases, judgeInferences, judgeMessages, parseVerdicts, verdictsOf, type JudgeCase } from "../src/inference-judge.ts";
+import { shownAs } from "../src/verdicts.ts";
 
 const ENV = {
   LLM_CHANNELS: "anthropic",

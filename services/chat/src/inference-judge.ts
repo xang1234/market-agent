@@ -6,8 +6,8 @@
 // each inference beside what it rests on, the rest of the answer and the
 // figures its tables show (a chart by each line's last value), each figure as
 // the page writes it, and gives it a verdict, each inference in a call of its
-// own (#376). The verdict sets what a chat turn shows (shownAs, answer-trace.ts
-// answerTurn).
+// own (#376). The verdict sets what a chat turn shows (verdicts.ts shownAs,
+// answer-trace.ts answerTurn).
 
 import { createLlmRouterFromEnv, type LlmChatClient, type LlmChatMessage, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
 import { isRecord } from "../../shared/src/http.ts";
@@ -16,6 +16,7 @@ import type { Assertion } from "./assertions.ts";
 import type { EvidencePacket } from "./evidence-packet.ts";
 import { withDeadlines, type ModelDeadlines } from "./llm-runtime.ts";
 import { checkedResults, plainText, renderAssertion } from "./render-assertions.ts";
+import { VERDICTS, type InferenceVerdict, type Verdict } from "./verdicts.ts";
 
 // One accepted inference and what it rests on, each figure as the page writes it.
 export type JudgeCase = {
@@ -34,35 +35,6 @@ export type JudgeCase = {
   // line per table; the same for each of an answer's inferences.
   figures: ReadonlyArray<string>;
 };
-
-export const VERDICTS = ["entailed", "unsupported", "contradicted"] as const;
-export type Verdict = (typeof VERDICTS)[number];
-
-export type InferenceVerdict =
-  // worded_amount: it states an amount in words, asked apart from the verdict
-  // so a right or unsupported one is still caught.
-  | { index: number; verdict: Verdict; worded_amount: boolean; reason?: string }
-  // The judge gave no usable verdict: never read as entailed.
-  | { index: number; verdict: "error"; reason: string };
-
-export type ShownAs = "shown" | "unverified" | "hidden";
-
-// An unsupported inference goes beyond the figures without contradicting
-// them, so it shows, labelled as such (render-assertions.ts
-// unverifiedInference).
-const SHOWN_AS: Readonly<Record<Verdict, ShownAs>> = { entailed: "shown", unsupported: "unverified", contradicted: "hidden" };
-
-// What the reader is shown of an inference. An amount in words is never
-// shown, whatever its verdict: every figure on the page is a packet value.
-export function shownAs(verdict: InferenceVerdict): ShownAs {
-  return verdict.verdict === "error" || verdict.worded_amount ? "hidden" : SHOWN_AS[verdict.verdict];
-}
-
-// A verdict as a log or report line reads it: "unsupported, worded_amount: <reason>".
-export function verdictText(verdict: InferenceVerdict): string {
-  const worded = verdict.verdict !== "error" && verdict.worded_amount ? ", worded_amount" : "";
-  return `${verdict.verdict}${worded}${verdict.reason ? `: ${verdict.reason}` : ""}`;
-}
 
 // What one judge call did: everything its verdicts are read from
 // (verdictsOf), so a recorded turn replays them without a model.

@@ -119,7 +119,7 @@ fixed rule, not a tool loop.
   `buildFactBackedSealInput`, which seals per block. `normalizeAssistantBlock` keeps `data_ref.params`, and fact
   blocks don't inherit the narrative's default claim/document refs, because the verifier would then demand those
   sources on the chart.
-- **Judge gate** (`inference-judge.ts`, `answer-trace.ts`): the answer is rendered from its checked assertions, each
+- **Judge gate** (`inference-judge.ts`, `verdicts.ts`, `answer-trace.ts`): the answer is rendered from its checked assertions, each
   figure a packet value in a template; an analyst inference is the model's words, with no digit or reference. A
   second model (`JUDGE_LITELLM_MODEL`) reads each inference beside the assertions it rests on, the answer's
   other observations and comparisons, and every figure its fact blocks show (a chart by each line's last value),

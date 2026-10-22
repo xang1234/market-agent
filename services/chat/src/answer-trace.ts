@@ -8,7 +8,8 @@ import { isDeepStrictEqual } from "node:util";
 
 import { loadLlmSettingsFromEnv, type LlmChatClient, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
 import type { AssertionReport } from "./assertions.ts";
-import { judgeCases, judgeInferences, judgeMessages, shownAs, verdictsOf, verdictText, type JudgeCase, type JudgeRecord, type ShownAs } from "./inference-judge.ts";
+import { judgeCases, judgeInferences, judgeMessages, verdictsOf, type JudgeCase, type JudgeRecord } from "./inference-judge.ts";
+import { shownAs, verdictText, type ShownAs } from "./verdicts.ts";
 import { composeAnalystBlocksWithLlm, turnPacket, type AnswerBlocks, type AnswerUsage, type InferenceState, type ModelDeadlines } from "./llm-runtime.ts";
 
 export type AnswerTraceInput = Omit<

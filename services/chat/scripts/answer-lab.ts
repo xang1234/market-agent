@@ -44,19 +44,8 @@ import {
   type TracedAnswer,
   type TurnTrace,
 } from "../src/answer-trace.ts";
-import {
-  judgeCases,
-  judgeInferences,
-  shownAs,
-  VERDICTS,
-  verdictsOf,
-  verdictText,
-  type InferenceVerdict,
-  type JudgeCase,
-  type JudgeRecord,
-  type ShownAs,
-  type Verdict,
-} from "../src/inference-judge.ts";
+import { judgeCases, judgeInferences, verdictsOf, type JudgeCase, type JudgeRecord } from "../src/inference-judge.ts";
+import { shownAs, VERDICTS, verdictText, type InferenceVerdict, type ShownAs, type Verdict } from "../src/verdicts.ts";
 import { turnPacket } from "../src/llm-runtime.ts";
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
