@@ -11,7 +11,7 @@
 // inference resting on comparisons carries their checked results in its label.
 
 import type { Assertion } from "./assertions.ts";
-import { checkComparison, periodText as quarterText, type CheckedComparison, type TrendResult } from "./comparisons.ts";
+import { checkComparison, metricLabel, periodText as quarterText, type CheckedComparison, type TrendResult } from "./comparisons.ts";
 import { periodCoverage, type EvidencePacket, type PacketFigure } from "./evidence-packet.ts";
 import { createSealer, type Sealer, type Segment } from "./prose-refs.ts";
 
@@ -184,6 +184,8 @@ function comparisonSegments(comparison: CheckedComparison, out: Writer): void {
         ? `Of ${out.owner(first)}segments, ${comparison.winner!.segment} ${metricLabel(metric)} was ${comparison.op}: `
         : `Of ${new Intl.ListFormat("en").format(figures.map(companyOf))}, ${subject(comparison.winner!)} was ${comparison.op}: `);
       list(companyOf);
+      const { lead } = comparison;
+      if (lead) out.text(`, ${lead.gap} percentage points ${comparison.op === "highest" ? "above" : "below"} ${new Intl.ListFormat("en").format(lead.over.map(companyOf))}`);
       out.text(".");
     }
   } else if (comparison.op === "order") {
@@ -191,7 +193,11 @@ function comparisonSegments(comparison: CheckedComparison, out: Writer): void {
     list((figure) => (comparison.axis === "time" ? periodText(figure.period!) : companyOf(figure)));
     out.text(".");
   } else {
-    const { result, net, every_step, turn } = comparison.trend!;
+    const { result, net, every_step, turn, ends_at } = comparison.trend!;
+    const atLast = () => {
+      at(last);
+      if (ends_at) out.text(`, its ${ends_at === "high" ? "highest" : "lowest"} of the periods compared`);
+    };
     const where = net === 1 ? "above where it started" : net === -1 ? "below where it started" : "about where it started";
     out.text(`${subject(first)} `);
     if (result === "rose_throughout" || result === "fell_throughout") {
@@ -207,13 +213,13 @@ function comparisonSegments(comparison: CheckedComparison, out: Writer): void {
       out.text(` to a ${rebound ? "low" : "high"} of `);
       at(turn!);
       out.text(`, then ${rebound ? "rebounded" : "pulled back"} to `);
-      at(last);
+      atLast();
       out.text(`, ${(rebound ? net === -1 : net === 1) ? "still " : ""}${where}.`);
     } else {
       out.text(result === "flat" ? "was little changed, from " : `${result} from `);
       at(first);
       out.text(" to ");
-      at(last);
+      atLast();
       out.text(result !== "flat" && !every_step ? ", though not in every period." : ".");
     }
   }
@@ -282,11 +288,6 @@ export function calendarNote(assertions: ReadonlyArray<Assertion>, packet: Evide
 // The text a rendered assertion reads as, each value as displayed.
 export function plainText(segments: ReadonlyArray<Segment>): string {
   return segments.map((segment) => (segment.type === "text" ? segment.text : segment.format)).join("");
-}
-
-// "Gross Margin" reads "gross margin" after a possessive; "EPS" and "YoY" stay.
-function metricLabel(metric: string): string {
-  return metric.replace(/\b([A-Z])(?=[a-z]+\b)/g, (letter) => letter.toLowerCase());
 }
 
 // A segment's figure is its revenue: "Data Center revenue".

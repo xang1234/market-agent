@@ -38,7 +38,9 @@ export function quarterBefore(fiscalYear: number, fiscalPeriod: string, back: nu
  * - each margin for every shown quarter whose statement line and revenue are both
  *   reported, for the same dates, in one currency, with revenue non-zero;
  * - QoQ and YoY revenue growth for the latest quarter, when the earlier quarter's
- *   revenue is reported and positive.
+ *   revenue is reported and positive;
+ * - QoQ revenue growth for each other quarter of `window` whose previous quarter
+ *   is in the window too, so both of its operands are shown.
  * `fact(metric, fiscal_year, fiscal_period)` finds a reported fact; `period(fact_id)`
  * the verifier's period dates for it.
  */
@@ -49,6 +51,8 @@ export function deriveQuarterMetrics(input: {
   // The quarter growth is for: a named quarter inside a wider window (#290);
   // else the latest shown.
   growthAt?: IssuerFundamentalFact;
+  // The revenue quarters charted, oldest first.
+  window?: ReadonlyArray<IssuerFundamentalFact>;
 }): QuarterMetric[] {
   const out: QuarterMetric[] = [];
   for (const revenue of input.shownRevenue) {
@@ -64,14 +68,31 @@ export function deriveQuarterMetrics(input: {
     for (const growth of GROWTH) {
       const earlier = quarterBefore(latest.fiscal_year!, latest.fiscal_period!, growth.back);
       const prior = earlier && input.fact("revenue", earlier.fiscal_year, earlier.fiscal_period);
-      // ponytail: growth from a zero or negative base isn't meaningful; skipped.
-      if (!prior || !sameCurrency(prior, latest) || native(prior) <= 0) continue;
-      const change = (native(latest) - native(prior)) / native(prior);
-      const spec = derived(growth.metric, growth.label, change, latest, [latest, prior], input.period);
+      const spec = prior && growthFrom(growth, latest, prior, input.period);
       if (spec) out.push(spec);
     }
   }
+  const window = input.window ?? [];
+  window.forEach((at, index) => {
+    const prior = window[index - 1];
+    const before = quarterBefore(at.fiscal_year!, at.fiscal_period!, 1);
+    if (!prior || at.fact_id === latest?.fact_id) return;
+    if (prior.fiscal_year !== before?.fiscal_year || prior.fiscal_period !== before.fiscal_period) return;
+    const spec = growthFrom(GROWTH[0], at, prior, input.period);
+    if (spec) out.push(spec);
+  });
   return out;
+}
+
+function growthFrom(
+  growth: (typeof GROWTH)[number],
+  at: IssuerFundamentalFact,
+  prior: IssuerFundamentalFact,
+  period: (factId: string) => VerifierFact | undefined,
+): QuarterMetric | undefined {
+  // ponytail: growth from a zero or negative base isn't meaningful; skipped.
+  if (!sameCurrency(prior, at) || native(prior) <= 0) return undefined;
+  return derived(growth.metric, growth.label, (native(at) - native(prior)) / native(prior), at, [at, prior], period);
 }
 
 // The derived fact carries the quarter of `at` (its period dates from the

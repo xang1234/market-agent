@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
+import { checkAssertions } from "../src/assertions.ts";
 import { buildEvidencePacket, claimSelection, packetForModel, type ClaimRecord } from "../src/evidence-packet.ts";
+import { plainText, renderAssertion } from "../src/render-assertions.ts";
 import { resolveResearchScope, type ScopeProposal } from "../src/research-scope.ts";
 import { proposal } from "./scope-fixtures.ts";
 
@@ -432,4 +435,122 @@ test("a price return carries its chart line's series and the chart's sources, an
   ]);
   const model = JSON.stringify(packetForModel(packet));
   assert.deepEqual([model.includes(NVDA_LINE), model.includes("s-px"), model.includes("\"6.6%\"")], [false, false, true]);
+});
+
+const TRACE = JSON.parse(readFileSync(new URL("./answer-lab/traces/single-latest-quarter.json", import.meta.url), "utf8"));
+const TRACE_BLOCKS: Array<Record<string, any>> = TRACE.input.factBlocks;
+const SENT = JSON.parse(TRACE.exchange.messages.find((message: { role: string }) => message.role === "user").content).evidence_packet;
+const tracePacket = (factBlocks: ReadonlyArray<Record<string, unknown>>) =>
+  buildEvidencePacket({ scope: TRACE.input.scope, factBlocks, cutoff: TRACE.input.cutoff });
+const TRACE_SOURCE = "00000000-0000-4000-a000-000000000001";
+const BAR_FACTS: string[] = TRACE_BLOCKS.find((block) => block.kind === "revenue_bars")!.bars.map((bar: { value_ref: string }) => bar.value_ref);
+const QOQ_FACT = "5f91c1f3-8566-485a-ab62-f17503efebb9";
+
+const seriesId = (i: number) => `d0000000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`;
+const SERIES = ([
+  ["Q2", 2025, "2024-04-29", "2024-07-28", "15.3%"],
+  ["Q3", 2025, "2024-07-29", "2024-10-27", "16.8%"],
+  ["Q4", 2025, "2024-10-28", "2025-01-26", "12.1%"],
+  ["Q1", 2026, "2025-01-27", "2025-04-27", "12.0%"],
+  ["Q2", 2026, "2025-04-28", "2025-07-27", "6.1%"],
+  ["Q3", 2026, "2025-07-28", "2025-10-26", "22.0%"],
+] as const).map(([fiscal_period, fiscal_year, period_start, period_end, value], i) => ({
+  record: { fact_id: seriesId(i), metric: "Revenue growth (QoQ)", period: `${fiscal_period} ${fiscal_year}`, period_end, value, of: [BAR_FACTS[i + 1], BAR_FACTS[i]] },
+  binding: { fact_id: seriesId(i), unit: "ratio", period_kind: "fiscal_q", period_start, period_end, as_of: TRACE.input.cutoff, fiscal_year, fiscal_period },
+}));
+
+const derived = (id: string, period: string, period_end: string, value: string, fact_id: string, derived_from: [string, string]) =>
+  ({ id, metric: "Revenue growth (QoQ)", period, period_end, value, fact_id, source_ids: [TRACE_SOURCE], derived_from });
+
+function withDerived(records: ReadonlyArray<unknown>) {
+  return TRACE_BLOCKS.map((block) => block.kind !== "revenue_bars" ? block : {
+    ...block,
+    provenance_fact_refs: [...block.provenance_fact_refs, ...SERIES.map(({ record }) => record.fact_id)],
+    data_ref: {
+      ...block.data_ref,
+      params: { ...block.data_ref.params, fact_bindings: [...block.data_ref.params.fact_bindings, ...SERIES.map(({ binding }) => binding)], derived_figures: records },
+    },
+  });
+}
+
+test("the trace's blocks give the packet its model was sent", () => {
+  const sent = packetForModel(tracePacket(TRACE_BLOCKS));
+  assert.deepEqual([sent.figures, sent.coverage], [SENT.figures, SENT.coverage]);
+  assert.equal(SENT.figures.length, 17);
+});
+
+test("the chart's QoQ growth series follows every displayed figure, naming its operands by packet id", () => {
+  const packet = tracePacket(withDerived(SERIES.map(({ record }) => record)));
+  assert.deepEqual(packet.figures.slice(0, 17), tracePacket(TRACE_BLOCKS).figures);
+  assert.deepEqual(["F1", "F8", "F10", "F11", "F17"].map((id) => {
+    const figure = packet.figures.find((candidate) => candidate.id === id)!;
+    return [id, figure.metric, figure.period, figure.value, figure.fact_id];
+  }), [
+    ["F1", "Revenue", "Q42026", "$62.1B", BAR_FACTS[7]],
+    ["F8", "Revenue growth (QoQ)", "Q42026", "8.9%", QOQ_FACT],
+    ["F10", "Revenue", "Q1 2025", "$26.0B", BAR_FACTS[0]],
+    ["F11", "Revenue", "Q2 2025", "$30.0B", BAR_FACTS[1]],
+    ["F17", "Revenue", "Q4 2026", "$62.1B", BAR_FACTS[7]],
+  ]);
+  assert.deepEqual(packet.figures.slice(17), [
+    derived("F18", "Q2 2025", "2024-07-28", "15.3%", seriesId(0), ["F11", "F10"]),
+    derived("F19", "Q3 2025", "2024-10-27", "16.8%", seriesId(1), ["F12", "F11"]),
+    derived("F20", "Q4 2025", "2025-01-26", "12.1%", seriesId(2), ["F13", "F12"]),
+    derived("F21", "Q1 2026", "2025-04-27", "12.0%", seriesId(3), ["F14", "F13"]),
+    derived("F22", "Q2 2026", "2025-07-27", "6.1%", seriesId(4), ["F15", "F14"]),
+    derived("F23", "Q3 2026", "2025-10-26", "22.0%", seriesId(5), ["F16", "F15"]),
+  ]);
+  assert.deepEqual(packet.coverage, [{ company: "NVDA", status: "shown" }]);
+  assert.deepEqual((packetForModel(packet).figures as unknown[]).at(-1), {
+    id: "F23", metric: "Revenue growth (QoQ)", period: "Q3 2026", period_end: "2025-10-26", value: "22.0%", derived_from: ["F16", "F15"],
+  });
+});
+
+test("a derived record is a figure only when its own fact is not shown and both operands are, and only when well formed", () => {
+  const [first, , , , , last] = SERIES.map(({ record }) => record);
+  const records = [
+    { ...first, of: [BAR_FACTS[1], "e0000000-0000-4000-8000-000000000001"] },
+    { ...first, fact_id: QOQ_FACT },
+    { ...first, of: [BAR_FACTS[1]] },
+    { ...first, value: 0.153 },
+    "15.3%",
+    null,
+    last,
+  ];
+  assert.deepEqual(tracePacket(withDerived(records)).figures.slice(17), [
+    derived("F18", "Q3 2026", "2025-10-26", "22.0%", seriesId(5), ["F16", "F15"]),
+  ]);
+});
+
+test("a derived figure names its operands by their figures in the record's own block, and is left out without them", () => {
+  const record = { fact_id: "f-qoq", metric: "Revenue growth (QoQ)", period: "Q4 2026", period_end: "2026-01-25", value: "8.9%", of: ["f-rev", "f-q3"] };
+  const carrying = (block: Record<string, unknown>) => ({ ...block, data_ref: { params: { derived_figures: [record] } } });
+  const derivedOf = (factBlocks: ReadonlyArray<Record<string, unknown>>) =>
+    buildEvidencePacket({ scope: scope("Analyze NVDA's latest quarter"), factBlocks, cutoff: CUTOFF }).figures.slice(4);
+  const qoq = { id: "F5", metric: "Revenue growth (QoQ)", period: "Q4 2026", period_end: "2026-01-25", value: "8.9%", fact_id: "f-qoq" };
+  assert.deepEqual(derivedOf([LATEST, carrying(BARS)]), [{ ...qoq, source_ids: ["s-10q", "s-10k"], derived_from: ["F4", "F3"] }]);
+  assert.deepEqual(derivedOf([carrying(LATEST), BARS]), []);
+});
+
+test("a derived figure the answer cites seals as its fact, with the binding its chart carries", () => {
+  const blocks = withDerived(SERIES.map(({ record }) => record));
+  const packet = tracePacket(blocks);
+  const report = checkAssertions([{ kind: "observation", text: "x", evidence: ["F23"] }], packet);
+  assert.deepEqual(report.rejected, []);
+  const rendered = renderAssertion(report.accepted[0]!, packet, blocks);
+  assert.equal(plainText(rendered.segments), "NVDA's revenue growth (QoQ) was 22.0% in Q3 2026 (ended Oct 2025).");
+  assert.deepEqual(rendered.segments.filter((segment) => segment.type === "ref"), [
+    { type: "ref", ref_kind: "fact", ref_id: seriesId(5), format: "22.0%" },
+  ]);
+  assert.deepEqual([rendered.fact_bindings, rendered.source_refs], [[SERIES[5]!.binding], [TRACE_SOURCE]]);
+});
+
+test("a QoQ trend covers the derived quarters and the latest quarter's QoQ", () => {
+  const packet = tracePacket(withDerived(SERIES.map(({ record }) => record)));
+  const trend = (evidence: string[]) => checkAssertions([{ kind: "comparison", op: "trend", result: "fell", text: "x", evidence }], packet);
+  const series = ["F18", "F19", "F20", "F21", "F22", "F23"];
+  assert.deepEqual(trend([...series, "F8"]).rejected, []);
+  const [rejection, ...others] = trend(series).rejected;
+  assert.deepEqual(others, []);
+  assert.equal(rejection!.reason, "comparison: leaves out Q4 2026, which shows revenue growth (QoQ) too");
 });
