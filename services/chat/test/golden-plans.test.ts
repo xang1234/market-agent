@@ -131,6 +131,9 @@ test("a company's overview shows its eight quarters to the newest it reported re
   // The SEC ingester stores a fourth quarter as the year less its first three, with no source token, so no precision proof.
   const revenue = (fiscal_year: number, fiscal_period: string, publicBy = "2026-03-01T00:00:00.000Z") => ({
     metric_key: "revenue",
+    source_class: "sec_filing",
+    unit: { kind: "currency", currency: "USD" },
+    context: null,
     period: { start: null, end: `${fiscal_year}-${{ Q1: "03-31", Q2: "06-30", Q3: "09-30", Q4: "12-31", FY: "12-31" }[fiscal_period]}`, fiscal_year, fiscal_period },
     precision: null,
     publication: [{ attestation_id: "p", timing: { available_not_before: null, available_no_later_than: publicBy, timing_precision: "instant", source_timezone: "UTC" } }],
@@ -178,6 +181,9 @@ test("a company's overview shows its eight quarters to the newest it reported re
     "percent_change_positive_base(NVDA revenue Q1 2026, NVDA revenue Q4 2025)",
     "percent_change_positive_base(NVDA revenue Q1 2026, NVDA revenue Q1 2025)",
   ], "a first quarter compares with the fourth before it and with the first a year earlier");
+  const segment = { period_type: "duration", dimension_scope: "segment", dimension_members: [{ axis: "srt:ProductOrServiceAxis", member: "nvda:DataCenterMember" }], adjustment_basis: "unadjusted", share_basis: "not_applicable", fiscal_calendar_version: "fiscal-calendar.v1", disclosure_relation: "original" };
+  const notReported = await overview(reported(revenue(2025, "Q4"), { ...revenue(2026, "Q1"), context: segment } as unknown as InputCandidate, { ...revenue(2026, "Q2"), source_class: "issuer_disclosure" }));
+  assert.equal(notReported!.outputs[0], "NVDA revenue Q1 2024", "a segment's value or a disallowed source's does not name the newest quarter, as it cannot for the engine");
   assert.equal(await overview(reported(revenue(2025, "FY"))), null, "no quarter reported: no overview");
   assert.equal(await overview({ status: "error", reason_code: "database_error" }), null, "a failed read: no overview");
   assert.deepEqual(warned, [["[chat] the company overview could not be planned; the planner answers", "database_error"]]);
@@ -187,6 +193,9 @@ test("a comparison shows each company's latest quarter, named from the newest it
   t.mock.method(console, "warn", () => {});
   const revenue = (fiscal_year: number, fiscal_period: string, end: string, publicBy = "2026-08-01T00:00:00.000Z") => ({
     metric_key: "revenue",
+    source_class: "sec_filing",
+    unit: { kind: "currency", currency: "USD" },
+    context: null,
     period: { start: null, end, fiscal_year, fiscal_period },
     precision: null,
     publication: [{ attestation_id: "p", timing: { available_not_before: null, available_no_later_than: publicBy, timing_precision: "instant", source_timezone: "UTC" } }],
