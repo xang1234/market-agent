@@ -1,16 +1,18 @@
 // One answer turn as recorded: what the answer model was given, what it wrote
 // raw, what the checks did, what the judge did with its inferences, and the
-// blocks the reader ended with. Written under CHAT_TRACE_DIR; replayed by
+// blocks the reader ended with, after one repair round for the inferences
+// it hid (inference-repair.ts). Written under CHAT_TRACE_DIR; replayed by
 // scripts/answer-lab.ts.
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
-import { loadLlmSettingsFromEnv, type LlmChatClient, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
-import type { AssertionReport } from "./assertions.ts";
-import { judgeCases, judgeInferences, judgeMessages, verdictsOf, type JudgeCase, type JudgeRecord } from "./inference-judge.ts";
-import { shownAs, verdictText, type ShownAs } from "./verdicts.ts";
-import { composeAnalystBlocksWithLlm, turnPacket, type AnswerBlocks, type AnswerUsage, type InferenceState, type ModelDeadlines } from "./llm-runtime.ts";
+import { loadLlmSettingsFromEnv, type LlmChatClient, type LlmChatMessage, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
+import { assertionList, type AssertionReport } from "./assertions.ts";
+import { judgeCases, judgeInferences, judgeMessages, verdictsOf, type JudgeCase, type JudgeRecord, type ModelRecord } from "./inference-judge.ts";
+import { repairRequests, repairRound, requestRepair, type RepairRequest, type RepairTrace } from "./inference-repair.ts";
+import { shownAs, verdictText, type InferenceVerdict, type ShownAs } from "./verdicts.ts";
+import { composeAnalystBlocksWithLlm, renderedAnswer, turnPacket, type AnswerBlocks, type AnswerUsage, type InferenceState, type ModelDeadlines } from "./llm-runtime.ts";
 
 export type AnswerTraceInput = Omit<
   Parameters<typeof composeAnalystBlocksWithLlm>[0],
@@ -45,10 +47,14 @@ export type TurnTrace = {
   // recorded before the judge gated them, and one record (one call for them
   // all) in those recorded before #376 (recordedJudge).
   judge?: ReadonlyArray<JudgeRecord> | JudgeRecord | null;
+  // The repair round for the inferences the checks or the judge hid; null
+  // when none was asked for. Absent from traces recorded before it, which
+  // replay with none.
+  repair?: RepairTrace | null;
   blocks: ReadonlyArray<Record<string, unknown>>;
 };
 
-export type TracedAnswer = Pick<TurnTrace, "exchange" | "assertions" | "blocks"> & { judge: ReadonlyArray<JudgeRecord> | null };
+export type TracedAnswer = Pick<TurnTrace, "exchange" | "assertions" | "blocks"> & { judge: ReadonlyArray<JudgeRecord> | null; repair: RepairTrace | null };
 
 // The answer as composed, its inferences not yet judged.
 export type ComposedAnswer = Pick<TurnTrace, "exchange" | "assertions"> & { blocks: AnswerBlocks };
@@ -88,8 +94,15 @@ export function inferenceCases(input: AnswerTraceInput, report: AssertionReport 
 // (shownAs).
 // records: the judge's, one per case.
 export function judgedAnswer(answer: ComposedAnswer, cases: ReadonlyArray<JudgeCase>, records: ReadonlyArray<JudgeRecord>): TracedAnswer {
-  if (cases.length === 0) return { ...answer, judge: null, blocks: answer.blocks(new Map()) };
-  const judged = cases.flatMap((inference, i) => verdictsOf([inference], records[i] ?? NO_RECORD));
+  return { ...withVerdicts(answer, verdictsFor(cases, records)), judge: cases.length === 0 ? null : records, repair: null };
+}
+
+function verdictsFor(cases: ReadonlyArray<JudgeCase>, records: ReadonlyArray<ModelRecord>): InferenceVerdict[] {
+  return cases.flatMap((inference, i) => verdictsOf([inference], records[i] ?? NO_RECORD));
+}
+
+function withVerdicts(answer: ComposedAnswer, judged: ReadonlyArray<InferenceVerdict>): Pick<TracedAnswer, "exchange" | "assertions" | "blocks"> {
+  if (judged.length === 0) return { exchange: answer.exchange, assertions: answer.assertions, blocks: answer.blocks(new Map()) };
   const shown = new Map(judged.flatMap((verdict) => {
     const as = shownAs(verdict);
     return as === "hidden" ? [] : [[verdict.index, as] as const];
@@ -112,9 +125,81 @@ export function judgedAnswer(answer: ComposedAnswer, cases: ReadonlyArray<JudgeC
       ].sort((a, b) => a.index - b.index),
       judged,
     },
-    judge: records,
     blocks: answer.blocks(shown),
   };
+}
+
+// The inferences a rendered answer would send to repair once these verdicts
+// are in.
+function repairsFor(answer: ComposedAnswer, verdicts: ReadonlyArray<InferenceVerdict>): RepairRequest[] {
+  if (answer.assertions?.rendered !== true || answer.exchange === null) return [];
+  return repairRequests(assertionList(answer.exchange.text) ?? [], answer.assertions.rejected, verdicts);
+}
+
+type RepairCalls = {
+  repair: (messages: LlmChatMessage[]) => Promise<ModelRecord>;
+  judge: (inference: JudgeCase, i: number) => Promise<ModelRecord>;
+};
+
+// The answer as its verdicts leave it, then as one repair round leaves it:
+// each repaired inference's verdict in place of its first, and the rest as
+// they were. calls: none when no repair may run. merged hears the repaired
+// answer's blocks before its inferences are judged.
+async function repairedAnswer(
+  input: AnswerTraceInput,
+  answer: ComposedAnswer,
+  cases: ReadonlyArray<JudgeCase>,
+  records: ReadonlyArray<ModelRecord>,
+  calls: RepairCalls | null,
+  merged?: (blocks: AnswerBlocks) => void,
+): Promise<TracedAnswer> {
+  const first = judgedAnswer(answer, cases, records);
+  const verdicts = first.assertions?.judged ?? [];
+  const requests = calls ? repairsFor(answer, verdicts) : [];
+  if (!calls || requests.length === 0) return first;
+  const packet = turnPacket(input);
+  const round = await repairRound({
+    messages: answer.exchange!.messages,
+    list: assertionList(answer.exchange!.text) ?? [],
+    requests,
+    packet,
+    factBlocks: input.factBlocks ?? [],
+    repair: calls.repair,
+    judge: calls.judge,
+    checked: (report) => merged?.(renderedAnswer(input, packet, report).blocks),
+  });
+  const repair = { requests, record: round.record, judge: round.records };
+  if (round.repaired.length === 0) return { ...first, repair };
+  const rendering = renderedAnswer(input, packet, round.report);
+  const final = withVerdicts({ exchange: answer.exchange, assertions: rendering.report, blocks: rendering.blocks }, [
+    ...verdicts.filter((verdict) => !round.repaired.includes(verdict.index)),
+    ...verdictsFor(round.cases, round.records),
+  ].sort((a, b) => a.index - b.index));
+  return { ...final, assertions: { ...final.assertions!, repaired: round.repaired }, judge: first.judge, repair };
+}
+
+function liveRepairCalls(companies: ReadonlyArray<string>, options: JudgeOptions, judged: (inference: JudgeCase, record: ModelRecord) => void = () => {}): RepairCalls {
+  return {
+    repair: (messages) => requestRepair({
+      messages,
+      env: options.env,
+      ...(options.createClient ? { createClient: options.createClient } : {}),
+      ...(options.repairDeadlines ? { deadlines: options.repairDeadlines } : {}),
+    }),
+    judge: async (inference) => {
+      const record = await judgeOne(inference, companies, options);
+      judged(inference, record);
+      return record;
+    },
+  };
+}
+
+// An answer judged and repaired live, as a chat turn's is, its verdicts all
+// in at once.
+export async function judgedLive(input: AnswerTraceInput, answer: ComposedAnswer, options: JudgeOptions): Promise<TracedAnswer> {
+  const { cases, companies } = inferenceCases(input, answer.assertions);
+  const records = await judgeAnswer(cases, companies, options);
+  return repairedAnswer(input, answer, cases, records, (await judgeConfigured(options.env)) ? liveRepairCalls(companies, options) : null);
 }
 
 // A recorded judge with fewer calls than today's inferences: those past its
@@ -125,6 +210,7 @@ type JudgeOptions = {
   env: LlmSettingsLoaderEnv & Record<string, string | undefined>;
   createClient?: () => Promise<LlmChatClient> | LlmChatClient;
   judgeDeadlines?: ModelDeadlines;
+  repairDeadlines?: ModelDeadlines;
 };
 
 // Only on JUDGE_LITELLM_MODEL: unset, judge calls fall back to the primary
@@ -154,15 +240,16 @@ function judgeOne(inference: JudgeCase, companies: ReadonlyArray<string>, option
 type TurnIds = Pick<TurnTrace, "thread_id" | "run_id" | "turn_id">;
 
 export type AnsweredTurn = Pick<TracedAnswer, "exchange" | "assertions" | "blocks"> & {
-  // Present while the judge reads the answer's inferences: `blocks` then hold a
-  // line in each one's place, and each inference takes its line, as shown or
-  // unverified, or drops it, as its own verdict settles.
+  // Present while the judge reads the answer's inferences, or the repair round
+  // runs: `blocks` then hold a line in each judged one's place, and each takes
+  // its line, as shown or unverified, or drops it, as its own verdict settles.
+  // A repaired inference shows nothing until its repaired verdict settles.
   judging?: {
     // Called at once with the blocks as the verdicts so far leave them, then
     // again as each later verdict settles.
     watch(listener: (blocks: TracedAnswer["blocks"]) => void): void;
-    // What the reader ends with, once every verdict is in and the trace is
-    // written. It never rejects.
+    // What the reader ends with, once every verdict is in, the repair round
+    // with them, and the trace is written. It never rejects.
     done: Promise<Pick<TracedAnswer, "assertions" | "blocks">>;
   };
 };
@@ -180,39 +267,53 @@ export async function answerTurn(
   });
   const recorded_at = new Date().toISOString();
   const { cases, companies } = inferenceCases(input, answer.assertions);
-  const finish = async (records: ReadonlyArray<JudgeRecord>): Promise<TracedAnswer> => {
-    const traced = judgedAnswer(answer, cases, records);
+  const finish = async (traced: TracedAnswer): Promise<TracedAnswer> => {
+    const records = traced.judge ?? [];
     if (cases.length > 0) {
-      const { inferences_shown: shown, inferences_unverified: unverified } = inferenceCounts(traced.assertions);
+      const { inferences_shown: shown, inferences_unverified: unverified } = inferenceCounts(judgedAnswer(answer, cases, records).assertions);
       const deployments = [...new Set(records.flatMap((record) => (record.outcome === "replied" ? [record.exchange.deployment] : [])))];
       const reasons = [...new Set(records.flatMap((record) => (record.outcome === "replied" ? [] : [record.reason])))];
       console.info(`[chat] judge ${traceIds(turn)}${deployments.length > 0 ? ` on ${deployments.join(", ")}` : ""}: ${shown} shown, ${unverified} unverified, of ${cases.length} inferences${reasons.length > 0 ? ` (${reasons.join("; ")})` : ""}`);
     }
+    if (traced.repair) {
+      const { inferences_repaired, inferences_recovered } = repairCounts(traced);
+      const failed = traced.repair.record.outcome === "replied" ? "" : ` (${traced.repair.record.reason})`;
+      console.info(`[chat] repair ${traceIds(turn)}: ${inferences_repaired} repaired, ${inferences_recovered} recovered${failed}`);
+    }
     await writeTurnTrace(options.traceDir, { version: 2, ...turn, recorded_at, input, ...traced });
     return traced;
   };
-  if (cases.length === 0) return finish([]);
-  if (!(await judgeConfigured(options.env))) return finish(cases.map(() => NO_JUDGE));
+  if (cases.length === 0 && repairsFor(answer, []).length === 0) return finish(judgedAnswer(answer, cases, []));
+  if (!(await judgeConfigured(options.env))) return finish(judgedAnswer(answer, cases, cases.map(() => NO_JUDGE)));
   const inferences = new Map<number, InferenceState>(cases.map(({ index }) => [index, "pending"]));
+  // The first answer's blocks, then the repaired answer's once it is checked.
+  let blocksOf = answer.blocks;
   const listeners: Array<(blocks: TracedAnswer["blocks"]) => void> = [];
-  const records = cases.map((inference) =>
-    judgeOne(inference, companies, options).then((record) => {
-      const as = shownAs(verdictsOf([inference], record)[0]!);
-      if (as === "hidden") inferences.delete(inference.index);
-      else inferences.set(inference.index, as);
-      const blocks = answer.blocks(inferences);
-      // A listener that throws stops hearing verdicts; the answer is still saved.
-      for (const listener of [...listeners]) {
-        try {
-          listener(blocks);
-        } catch (error) {
-          console.warn(`[chat] judge ${traceIds(turn)}: a verdict listener failed and was dropped`, error);
-          listeners.splice(listeners.indexOf(listener), 1);
-        }
+  const settle = (inference: JudgeCase, record: ModelRecord) => {
+    const as = shownAs(verdictsOf([inference], record)[0]!);
+    if (as === "hidden") inferences.delete(inference.index);
+    else inferences.set(inference.index, as);
+    const blocks = blocksOf(inferences);
+    // A listener that throws stops hearing verdicts; the answer is still saved.
+    for (const listener of [...listeners]) {
+      try {
+        listener(blocks);
+      } catch (error) {
+        console.warn(`[chat] judge ${traceIds(turn)}: a verdict listener failed and was dropped`, error);
+        listeners.splice(listeners.indexOf(listener), 1);
       }
-      return record;
-    })
-  );
+    }
+  };
+  const records = cases.map(async (inference) => {
+    const record = await judgeOne(inference, companies, options);
+    settle(inference, record);
+    return record;
+  });
+  const done = Promise.all(records)
+    .then((settled) => repairedAnswer(input, answer, cases, settled, liveRepairCalls(companies, options, settle), (blocks) => {
+      blocksOf = blocks;
+    }))
+    .then(finish);
   return {
     exchange: answer.exchange,
     assertions: answer.assertions,
@@ -220,9 +321,9 @@ export async function answerTurn(
     judging: {
       watch: (listener) => {
         listeners.push(listener);
-        listener(answer.blocks(inferences));
+        listener(blocksOf(inferences));
       },
-      done: Promise.all(records).then(finish).then(({ assertions, blocks }) => ({ assertions, blocks })),
+      done: done.then(({ assertions, blocks }) => ({ assertions, blocks })),
     },
   };
 }
@@ -232,13 +333,21 @@ function traceIds(turn: TurnIds): string {
 }
 
 // A recorded turn's input through today's post-processing, with the answer
-// model's reply and the judge's record replaced by the ones recorded, so no
-// model is called; or, given a judge, with its live verdicts in place of the
-// recorded ones. The recorded answer exchange is kept: its output, latency and
-// tokens are what was recorded. judge_input_changed: today's answer would send
-// the judge, for some inference, something other than its recorded reply
-// answered.
-export async function replayRecorded(trace: TurnTrace, judge?: JudgeOptions): Promise<TurnTrace & Pick<TracedAnswer, "judge"> & { judge_input_changed: boolean }> {
+// model's reply, the judge's records and the repair round's replaced by the
+// ones recorded, so no model is called; a trace with no repair recorded
+// replays with none. Given live options, rerun "judge" has the judge and the
+// repair round run live, and rerun "repair" keeps the recorded verdicts and
+// runs only the repair round live. The recorded answer exchange is kept: its
+// output, latency and tokens are what was recorded. judge_input_changed:
+// today's answer would send the judge, for some inference, something other
+// than its recorded reply answered; repair_input_changed: the same for the
+// recorded repair round, its call or a repaired inference's judge.
+export type LiveReplay = JudgeOptions & { rerun: "judge" | "repair" };
+
+export async function replayRecorded(
+  trace: TurnTrace,
+  live?: LiveReplay,
+): Promise<TurnTrace & Pick<TracedAnswer, "judge" | "repair"> & { judge_input_changed: boolean; repair_input_changed: boolean }> {
   const { exchange } = trace;
   const answer = await composeTraced(trace.input, {
     env: exchange === null ? {} : RECORDED_CHANNEL,
@@ -258,15 +367,32 @@ export async function replayRecorded(trace: TurnTrace, judge?: JudgeOptions): Pr
     }),
   });
   const { cases, companies } = inferenceCases(trace.input, answer.assertions);
-  const records = judge ? await judgeAnswer(cases, companies, judge) : recordedJudge(trace, cases);
+  const records = live?.rerun === "judge" ? await judgeAnswer(cases, companies, live) : recordedJudge(trace, cases);
+  const asked = (record: ModelRecord, messages: ReadonlyArray<LlmChatMessage>) =>
+    record.outcome === "replied" && !isDeepStrictEqual(record.exchange.messages, messages);
+  const recordedRepair = trace.repair ?? null;
+  let repairChanged = false;
+  const calls: RepairCalls | null = live
+    ? (await judgeConfigured(live.env)) ? liveRepairCalls(companies, live) : null
+    : recordedRepair && {
+      repair: async (messages) => {
+        repairChanged ||= asked(recordedRepair.record, messages);
+        return recordedRepair.record;
+      },
+      judge: async (inference, i) => {
+        const record = recordedRepair.judge[i] ?? NO_RECORD;
+        repairChanged ||= asked(record, judgeMessages([inference], companies));
+        return record;
+      },
+    };
+  const replayed = await repairedAnswer(trace.input, answer, cases, records, calls);
   return {
     ...trace,
     version: 2,
-    ...judgedAnswer(answer, cases, records),
+    ...replayed,
     exchange,
-    judge_input_changed: records.some((record, i) =>
-      record.outcome === "replied" && !isDeepStrictEqual(record.exchange.messages, judgeMessages([cases[i]!], companies))
-    ),
+    judge_input_changed: records.some((record, i) => asked(record, judgeMessages([cases[i]!], companies))),
+    repair_input_changed: !live && recordedRepair !== null && (repairChanged || !isDeepStrictEqual(replayed.repair?.requests ?? [], recordedRepair.requests)),
   };
 }
 
@@ -340,13 +466,20 @@ export type AnswerMetrics = {
   inferences_shown: number;
   inferences_unverified: number;
   inferences_hidden: number;
+  // Inferences sent to the repair round, and those of them it replaced that
+  // end shown or unverified; the repair call's cost.
+  inferences_repaired: number;
+  inferences_recovered: number;
+  repair_latency_ms: number;
+  repair_input_tokens: number;
+  repair_output_tokens: number;
   output_tokens: number;
   latency_ms: number;
 };
 
 type Segment = { type?: string; ref_kind?: string; text?: string };
 
-export function answerMetrics(trace: Pick<TurnTrace, "blocks" | "assertions" | "exchange">): AnswerMetrics {
+export function answerMetrics(trace: Pick<TurnTrace, "blocks" | "assertions" | "exchange" | "repair">): AnswerMetrics {
   const narrative = trace.blocks.filter((block) => block.kind === "rich_text")
     .map((block) => (Array.isArray(block.segments) ? block.segments as Segment[] : []));
   const text = (segments: ReadonlyArray<Segment>) =>
@@ -358,6 +491,7 @@ export function answerMetrics(trace: Pick<TurnTrace, "blocks" | "assertions" | "
     accepted: trace.assertions?.accepted.length ?? 0,
     rejected: trace.assertions?.rejected.length ?? 0,
     ...inferenceCounts(trace.assertions),
+    ...repairCounts(trace),
     output_tokens: trace.exchange?.usage?.output_tokens ?? 0,
     latency_ms: trace.exchange?.latency_ms ?? 0,
   };
@@ -367,4 +501,16 @@ function inferenceCounts(report: AssertionReport | null): Pick<AnswerMetrics, "i
   const shown = (report?.judged ?? []).map(shownAs);
   const count = (as: ShownAs) => shown.filter((entry) => entry === as).length;
   return { inferences_shown: count("shown"), inferences_unverified: count("unverified"), inferences_hidden: count("hidden") };
+}
+
+function repairCounts(trace: Pick<TurnTrace, "assertions" | "repair">): Pick<AnswerMetrics, "inferences_repaired" | "inferences_recovered" | "repair_latency_ms" | "repair_input_tokens" | "repair_output_tokens"> {
+  const record = trace.repair?.record;
+  const repaired = trace.assertions?.repaired ?? [];
+  return {
+    inferences_repaired: trace.repair?.requests.length ?? 0,
+    inferences_recovered: (trace.assertions?.judged ?? []).filter((verdict) => repaired.includes(verdict.index) && shownAs(verdict) !== "hidden").length,
+    repair_latency_ms: record?.outcome === "replied" ? record.exchange.latency_ms : record?.outcome === "failed" ? record.latency_ms : 0,
+    repair_input_tokens: record?.outcome === "replied" ? record.exchange.usage?.input_tokens ?? 0 : 0,
+    repair_output_tokens: record?.outcome === "replied" ? record.exchange.usage?.output_tokens ?? 0 : 0,
+  };
 }

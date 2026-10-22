@@ -92,6 +92,11 @@ test("answerMetrics counts the answer's sealed figures, a price return's series 
     inferences_shown: 0,
     inferences_unverified: 0,
     inferences_hidden: 0,
+    inferences_repaired: 0,
+    inferences_recovered: 0,
+    repair_latency_ms: 0,
+    repair_input_tokens: 0,
+    repair_output_tokens: 0,
     output_tokens: 700,
     latency_ms: 41_200,
   });
@@ -112,6 +117,11 @@ test("answerMetrics reads an answer no assertion rendered as the fallback; with 
     inferences_shown: 0,
     inferences_unverified: 0,
     inferences_hidden: 0,
+    inferences_repaired: 0,
+    inferences_recovered: 0,
+    repair_latency_ms: 0,
+    repair_input_tokens: 0,
+    repair_output_tokens: 0,
     output_tokens: 700,
     latency_ms: 41_200,
   });

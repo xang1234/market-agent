@@ -52,6 +52,9 @@ export type AssertionReport = {
   // the reader sees of it is its shownAs (verdicts.ts). Absent when no
   // inference was judged.
   judged?: ReadonlyArray<InferenceVerdict>;
+  // The inferences the repair round replaced (inference-repair.ts), in index
+  // order; each entry above is its repaired form. Absent when none was.
+  repaired?: ReadonlyArray<number>;
 };
 
 // The answer is rendered from this list (#208), so it holds a comparison
