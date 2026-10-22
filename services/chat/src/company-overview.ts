@@ -8,7 +8,7 @@ import { createSqlPeerSetResolver } from "../../fundamentals/src/peer-set-resolv
 import { MAX_TURN_SUBJECTS } from "./coordinator.ts";
 import type { FiscalQuarter } from "./fact-blocks.ts";
 import { GROWTH, MARGINS, quarterBefore } from "./quarter-metrics.ts";
-import type { ScopeProposal } from "./research-scope.ts";
+import type { ResearchScope, ScopeProposal } from "./research-scope.ts";
 
 const QUARTERS_SHOWN = 8;
 const UNPLANNED = "[chat] the company overview could not be planned; the planner answers";
@@ -26,15 +26,17 @@ export function namesCompanies(subjects: ReadonlyArray<RequestedSubject>, carrie
  * The companies a turn's overview covers, by the reading of its question: the
  * ones it names, or the one it names and that company's peers when it asks
  * for peers. Null when it asks for a figure or a period other than the
- * latest, turns something off ("no margins"), or asks for peers of several
- * companies or of one with none.
+ * latest, turns something off ("no margins"), its scope has a price window
+ * the overview would not show, or it asks for peers of several companies or
+ * of one with none.
  */
 export async function overviewSubjects(
   subjects: ReadonlyArray<RequestedSubject>,
   reading: ScopeProposal | null,
+  scope: Pick<ResearchScope, "price_window"> | null,
   peersOf: PeersOf,
 ): Promise<ReadonlyArray<RequestedSubject> | null> {
-  if (!asksForNoFigure(reading)) return null;
+  if (!asksForNoFigure(reading) || scope?.price_window) return null;
   if (!reading.asks.has("peers")) return subjects;
   const company = subjects.length === 1 ? subjects[0]! : null;
   if (company?.resolution.status !== "resolved") return null;

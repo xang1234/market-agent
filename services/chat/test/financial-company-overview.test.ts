@@ -270,8 +270,11 @@ test("a question about one company that asks for no figure is answered with its 
     );
   });
 
-  await t.test("a reading that asks for a figure or a period other than the latest, a carried company, or a company with no quarters goes to the planner", async () => {
-    const planned = async (userIntent: string, mentions: string[], options: { readQuestion?: () => Promise<ScopeProposal | null>; priorSubjects?: () => Promise<ChatResolvedSubjectPreResolution[]> } = {}) => {
+  const scoped = async (context: { userIntent?: string }, read: Promise<ScopeProposal | null>) =>
+    resolveResearchScope({ question: context.userIntent ?? "", companies: [{ issuer_id: COMPANIES.QTRS!, label: "QTRS" }], prior: null, asOf: "2026-10-22T00:00:00.000Z", served: true, proposal: await read });
+
+  await t.test("a reading that asks for a figure or a period other than the latest, a carried company, a price window in its scope, or a company with no quarters goes to the planner", async () => {
+    const planned = async (userIntent: string, mentions: string[], options: { readQuestion?: () => Promise<ScopeProposal | null>; priorSubjects?: () => Promise<ChatResolvedSubjectPreResolution[]>; researchScope?: typeof scoped } = {}) => {
       const model = revenueModel(mentions);
       const done = completed((await chatHarness(pool, { model, readQuestion: reading(NO_ASKS), resolveMention: resolve, ...options }).run({ ...base, userIntent })).events);
       return [model.calls, (await results(done.message_id)).map(([outputId]) => outputId)];
@@ -296,6 +299,7 @@ test("a question about one company that asks for no figure is answered with its 
     for (const [period, read] of periods) {
       assert.deepEqual(await planned(`Revenue for QTRS ${period}`, ["QTRS"], { readQuestion: reading(read) }), [1, ["a_out"]], period);
     }
+    assert.deepEqual(await planned("Revenue for QTRS YTD", ["QTRS"], { researchScope: scoped }), [1, ["a_out"]], "a scope with a price window the reading did not ask for");
   });
 
   await t.test("a reading of the latest period is the overview, whatever period words the question holds (#472)", async () => {
@@ -336,9 +340,7 @@ test("a question about one company that asks for no figure is answered with its 
     await db.query(`update issuers set industry = 'Quarterly test filers' where issuer_id = any($1::uuid[])`, [peerSet]);
     try {
       const peers = { ...NO_ASKS, asks: new Set(["peers"] as const) };
-      const researchScope = async (context: { userIntent?: string }, read: Promise<ScopeProposal | null>) =>
-        resolveResearchScope({ question: context.userIntent ?? "", companies: [{ issuer_id: COMPANIES.QTRS!, label: "QTRS" }], prior: null, asOf: "2026-10-22T00:00:00.000Z", served: true, proposal: await read });
-      const { turnId, events } = await chatHarness(pool, { model: null, readQuestion: reading(peers), resolveMention: resolve, researchScope }).run({ ...base, userIntent: "Revenue for QTRS" });
+      const { turnId, events } = await chatHarness(pool, { model: null, readQuestion: reading(peers), resolveMention: resolve, researchScope: scoped }).run({ ...base, userIntent: "Revenue for QTRS" });
       const done = completed(events);
       assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_OVERVIEW.slice(7)), ...slotted("b", OFFQ_LATEST)]);
       const { rows: [message] } = await db.query(`select blocks, research_scope from chat_messages where message_id = $1`, [done.message_id]);

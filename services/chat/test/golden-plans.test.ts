@@ -10,6 +10,7 @@ import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
 import { namesCompanies, overviewPeers, overviewSubjects, planCompanyOverview } from "../src/company-overview.ts";
 import { MAX_TURN_SUBJECTS } from "../src/coordinator.ts";
 import { isFinancialRequest, uncoveredAsks } from "../src/financial-runtime.ts";
+import { resolveResearchScope } from "../src/research-scope.ts";
 import { parseProposal, proposalQuestion } from "../src/scope-proposal.ts";
 import { extractSubjectMentions } from "../src/subject-extraction.ts";
 import { GOLDEN_AS_OF, GOLDEN_COMPANIES } from "./golden/dataset.ts";
@@ -293,7 +294,9 @@ test("a question about the companies it names that asks for no figure is answere
   const overview = async (question: string, { carried = false, read: readQuestion = read, peersOf = none as typeof amd } = {}) => {
     const subjects = planningContext(question).requested_subjects;
     if (!namesCompanies(subjects, carried)) return null;
-    return (await overviewSubjects(subjects, await readQuestion(question), peersOf))?.map((subject) => subject.mention) ?? null;
+    const proposal = await readQuestion(question);
+    const scope = resolveResearchScope({ question, companies: [], prior: null, asOf: GOLDEN_AS_OF, proposal });
+    return (await overviewSubjects(subjects, proposal, scope, peersOf))?.map((subject) => subject.mention) ?? null;
   };
   for (const ticker of ["NVDA", "AMD", "AAPL"]) assert.deepEqual(await overview(`Analyze ${ticker}`), [ticker], ticker);
   for (const question of ["Compare NVDA with AMD", "Compare NVDA and AMD again"]) assert.deepEqual(await overview(question), ["NVDA", "AMD"], question);
@@ -313,6 +316,7 @@ test("a question about the companies it names that asks for no figure is answere
   const periods: Array<[string, ReturnType<typeof reading>]> = [
     ["in fiscal 2025", reading([], [], [], [], { kind: "fiscal_year", fiscal_year: 2025 })],
     ["for Q4 2025", reading([], [], [], [], { kind: "fiscal_quarter", fiscal_period: "Q4", fiscal_year: 2025 })],
+    ["YTD", reading([])],
     ["YTD", reading(["price_window"])],
     ["for Q3", reading([], [], [], [], { kind: "fiscal_quarter", fiscal_period: "Q3", fiscal_year: null })],
     ["in the third quarter", reading([], [], [], [], { kind: "fiscal_quarter", fiscal_period: "Q3", fiscal_year: null })],
@@ -323,7 +327,7 @@ test("a question about the companies it names that asks for no figure is answere
   }
   const yearToDate = "Compare it with AMD YTD";
   assert.deepEqual(
-    [namesCompanies(planningContext(yearToDate).requested_subjects, true), await overviewSubjects(planningContext(yearToDate).requested_subjects, await read(yearToDate), none)],
+    [namesCompanies(planningContext(yearToDate).requested_subjects, true), await overviewSubjects(planningContext(yearToDate).requested_subjects, await read(yearToDate), null, none)],
     [false, null],
     "the golden conversation's comparison carries NVDA, and its reading asks for a price window",
   );
