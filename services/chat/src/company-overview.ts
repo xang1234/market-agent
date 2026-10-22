@@ -5,7 +5,6 @@ import { requestedFiscalQuarter, requestedFiscalYear, requestedPriceWindow, type
 import { GROWTH, MARGINS, quarterBefore } from "./quarter-metrics.ts";
 import { PARTIAL_QUARTER, type ScopeProposal } from "./research-scope.ts";
 
-const SLOT = "a";
 const QUARTERS_SHOWN = 8;
 
 type Node = Record<string, unknown> & { node_id: string };
@@ -32,27 +31,32 @@ export class OverviewEvidenceError extends Error {
 }
 
 /**
- * The overview of the context's one company, from the newest quarter it
- * reported revenue for; null when it reported none. The engine's latest
- * quarter is the newest it can certify, and it cannot certify the fourth
- * quarters the SEC ingester derives (#469), so each quarter is named: one the
- * engine cannot certify is a gap cell where it falls.
+ * The overview of the context's companies, each from the newest quarter it
+ * reported revenue for, so fiscal calendars are never aligned by date; null
+ * when one reported none. The engine's latest quarter is the newest it can
+ * certify, and it cannot certify the fourth quarters the SEC ingester derives
+ * (#469), so each quarter is named: one the engine cannot certify is a gap
+ * cell where it falls.
  */
 export async function planCompanyOverview(context: PlanningContext, evidence: FinancialEvidencePort): Promise<PlanningResult | null> {
-  const subject = context.requested_subjects[0]!;
-  if (subject.resolution.status !== "resolved") return null;
-  const page = await evidence.listInputCandidates({
+  const subjects = context.requested_subjects;
+  const refs = subjects.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref] : []);
+  if (refs.length < subjects.length) return null;
+  const pages = await Promise.all(refs.map((subject) => evidence.listInputCandidates({
     authority: context.authority,
-    subject: subject.resolution.subject_ref,
+    subject,
     metric_key: "revenue",
     fiscal_year: null,
     fiscal_period: null,
     limit: DEFAULT_EXECUTION_LIMITS.max_input_candidates,
+  })));
+  const newest = pages.map((page) => {
+    if (page.status === "error") throw new OverviewEvidenceError(page.reason_code);
+    // ponytail: a truncated page may lack the newest quarter, so the planner answers instead.
+    return page.truncated ? null : newestQuarter(page.candidates, context.knowledge_cutoff);
   });
-  if (page.status === "error") throw new OverviewEvidenceError(page.reason_code);
-  // ponytail: a truncated page may lack the newest quarter, so the planner answers instead.
-  const newest = page.truncated ? null : newestQuarter(page.candidates, context.knowledge_cutoff);
-  return newest && buildDeterministicPlan(context, companyOverviewDraft(subject.mention, newest));
+  if (newest.includes(null)) return null;
+  return buildDeterministicPlan(context, companyOverviewDraft(subjects.map((subject, index) => ({ mention: subject.mention, newest: newest[index]! }))));
 }
 
 // The engine sees a fact once a proof says its filing was public by the
@@ -64,25 +68,40 @@ function newestQuarter(candidates: ReadonlyArray<InputCandidate>, cutoff: IsoDat
   return newest && { fiscal_year: newest.period.fiscal_year, fiscal_period: newest.period.fiscal_period };
 }
 
-function companyOverviewDraft(mention: string, newest: FiscalQuarter) {
-  const quarter = (metric: string, back: number): Node => {
-    const period = quarterBefore(newest.fiscal_year, newest.fiscal_period, back)!;
-    return {
-      node_id: `${metric}_fy${period.fiscal_year}_${period.fiscal_period.toLowerCase()}`,
-      operation: "reported_metric",
-      subject_slot: SLOT,
-      metric_key: metric,
-      period: { kind: "fiscal_period", ...period },
+// One company's revenue is a series of its last eight quarters. Several
+// companies are one table (presentation.ts layout), so each shows its latest
+// quarter's revenue and reads only the quarters its growth compares with.
+function companyOverviewDraft(companies: ReadonlyArray<{ mention: string; newest: FiscalQuarter }>) {
+  const several = companies.length > 1;
+  const backs = several ? [0, ...GROWTH.map(({ back }) => back)] : Array.from({ length: QUARTERS_SHOWN }, (_, back) => back);
+  const parts = companies.map(({ mention, newest }, index) => {
+    const slot = String.fromCharCode(97 + index);
+    const id = (name: string) => several ? `${slot}_${name}` : name;
+    const quarter = (metric: string, back: number): Node => {
+      const period = quarterBefore(newest.fiscal_year, newest.fiscal_period, back)!;
+      return {
+        node_id: id(`${metric}_fy${period.fiscal_year}_${period.fiscal_period.toLowerCase()}`),
+        operation: "reported_metric",
+        subject_slot: slot,
+        metric_key: metric,
+        period: { kind: "fiscal_period", ...period },
+      };
     };
-  };
-  const revenue = Array.from({ length: QUARTERS_SHOWN }, (_, back) => quarter("revenue", back));
-  const lines = MARGINS.map(({ numerator }) => quarter(numerator, 0));
-  const margins = MARGINS.map(({ metric }, index): Node => ({ node_id: metric, operation: metric, numerator: lines[index]!.node_id, revenue: revenue[0]!.node_id }));
-  const growth = GROWTH.map(({ metric, back }): Node => ({ node_id: metric, operation: "percent_change_positive_base", current: revenue[0]!.node_id, prior: revenue[back]!.node_id }));
+    const revenue = new Map(backs.map((back) => [back, quarter("revenue", back)]));
+    const latest = revenue.get(0)!;
+    const lines = MARGINS.map(({ numerator }) => quarter(numerator, 0));
+    const margins = MARGINS.map(({ metric }, line): Node => ({ node_id: id(metric), operation: metric, numerator: lines[line]!.node_id, revenue: latest.node_id }));
+    const growth = GROWTH.map(({ metric, back }): Node => ({ node_id: id(metric), operation: "percent_change_positive_base", current: latest.node_id, prior: revenue.get(back)!.node_id }));
+    return {
+      subject: { slot_id: slot, mention },
+      operations: [...revenue.values(), ...lines, ...margins, ...growth],
+      outputs: [...(several ? [latest] : [...revenue.values()].reverse()), ...lines, ...margins, ...growth],
+    };
+  });
   return {
-    subjects: [{ slot_id: SLOT, mention }],
-    operations: [...revenue, ...lines, ...margins, ...growth],
-    outputs: [...[...revenue].reverse(), ...lines, ...margins, ...growth].map((node) => ({ output_id: `out_${node.node_id}`, node_id: node.node_id })),
+    subjects: parts.map((part) => part.subject),
+    operations: parts.flatMap((part) => part.operations),
+    outputs: parts.flatMap((part) => part.outputs).map((node) => ({ output_id: `out_${node.node_id}`, node_id: node.node_id })),
     thresholds: [],
   };
 }
