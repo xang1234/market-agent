@@ -379,6 +379,19 @@ test("a balance without a financial context, as a 10-Q's labelled FY is stored, 
   assert.deepEqual(slots.map(({ node, candidates }) => landed(selectInput(node, candidates, atCutoff, { truncated: false }, periods.get(node.node_id)!))), ["FY2024", "FY2024"]);
 });
 
+test("a 10-Q's balance, stored as FY of its fiscal year without a context, does not report that year's fourth quarter (#469)", () => {
+  const latest = (nodeId: string, metric: string): ReportedMetricNode => latestQuarter(0, { ...FY2023, node_id: nodeId, metric_key: metric });
+  const assets = (input: InputCandidate): InputCandidate => ({ ...input, metric_key: "total_assets", period: { ...input.period, start: null } });
+  const slots = [
+    { node: latest("a_rev", "revenue"), candidates: [quarter(2024, "Q3"), quarter(2025, "Q1")] },
+    { node: latest("a_assets", "total_assets"), candidates: [
+      assets(candidate({ year: 2024, value: "600" })),
+      assets(candidate({ year: 2025, end: "2025-03-31", value: "650", publishedLocalDate: "2025-05-10", context: null })),
+    ] },
+  ];
+  assert.deepEqual(sharedLatestPeriods(slots, policy({ knowledge_cutoff: "2025-06-01T00:00:00Z" })).get("a_rev"), { kind: "fiscal_period", fiscal_year: 2025, fiscal_period: "Q1" });
+});
+
 test("a fiscal year reports its fourth quarter, so a metric with no Q4 row still counts it (#469)", () => {
   const eps = (input: InputCandidate): InputCandidate => ({ ...input, metric_key: "eps_diluted", unit: { kind: "currency_per_share", currency: "USD" } });
   const node: ReportedMetricNode = { ...FY2023, metric_key: "eps_diluted" };
@@ -391,7 +404,7 @@ test("a fiscal year reports its fourth quarter, so a metric with no Q4 row still
   assert.equal(landed(selectInput(latestYear, [...candidates, eps(quarter(2025, "Q1"))], policy({ knowledge_cutoff: "2025-06-01T00:00:00Z" }))), "FY2024", "a quarter does not report its fiscal year");
 });
 
-test("every four consecutive SEC quarters hold one derived Q4, so a trailing four-quarter sum is a gap until it is certified (#469)", () => {
+test("every four consecutive SEC quarters hold one uncertifiable derived Q4 (#469)", () => {
   const candidates = [...secQuarters(2023, 2024), quarter(2025, "Q1"), quarter(2025, "Q2"), quarter(2025, "Q3")];
   for (const cutoff of ["2024-12-01", "2025-03-01", "2025-06-01", "2025-09-01", "2025-12-01"]) {
     const window = [0, 1, 2, 3].map((offset) => landed(selectInput(latestQuarter(offset), candidates, policy({ knowledge_cutoff: `${cutoff}T00:00:00Z` }))));
