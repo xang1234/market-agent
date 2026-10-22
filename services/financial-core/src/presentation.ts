@@ -13,6 +13,7 @@
 
 import { hashCanonical } from "./canonical.ts";
 import type {
+  ChangeNode,
   Comparison,
   CoverageState,
   DecimalString,
@@ -25,13 +26,15 @@ import type {
   ReasonCode,
   Sha256Hex,
 } from "./contracts.ts";
-import { operationDependencies } from "./contracts.ts";
+import { FISCAL_PERIODS, operationDependencies } from "./contracts.ts";
 import { coverageState } from "./coverage.ts";
 import { resolveMetricDefinition, resolveRatioDefinition } from "./definitions.ts";
 import { canonicalDecimalString, compareExactDecimals, parseDerivedDecimalText, type ExactDecimal } from "./exact-decimal.ts";
 import { dependencyClosure } from "./graph.ts";
 
-export const FINANCIAL_PRESENTATION_VERSION = "financial-presentation.v1";
+export const FINANCIAL_PRESENTATION_VERSION = "financial-presentation.v2";
+/** Answers certified before v2 keep this version: still accepted and rendered, never generated. */
+export const FINANCIAL_PRESENTATION_V1 = "financial-presentation.v1";
 
 export type PresentationLabel = Readonly<
   | { kind: "subject"; text: string; slot_id: LocalId }
@@ -63,7 +66,8 @@ export type Presentation = Readonly<
   | {
       kind: "table";
       caption: string;
-      columns: ReadonlyArray<Readonly<{ column_id: string; measure_label_id: string; period_label_id: string }>>;
+      /** A column's period is null when its companies read it at different periods; each cell's result then names its own. */
+      columns: ReadonlyArray<Readonly<{ column_id: string; measure_label_id: string; period_label_id: string | null }>>;
       rows: ReadonlyArray<Readonly<{ subject_label_id: string; cells: ReadonlyArray<string | null> }>>;
       /** Per column: row indexes in ascending exact-value order, rows without a value last. */
       ascending: Readonly<Record<string, ReadonlyArray<number>>>;
@@ -184,14 +188,16 @@ function layout(plan: FinancialPlanV1, results: ReadonlyArray<PresentedResult>, 
   const presentations: Presentation[] = [];
 
   if (subjects.size >= 2) {
-    const columnOf = (result: PresentedResult) => `${result.measure_label_id}|${result.period_label_id}`;
-    const columns = new Map<string, { measure_label_id: string; period_label_id: string }>();
-    for (const result of values) {
-      if (!columns.has(columnOf(result))) columns.set(columnOf(result), { measure_label_id: result.measure_label_id, period_label_id: result.period_label_id });
+    const tabled = values.filter((result) => result.subject_label_id !== null);
+    const columnOf = tableColumns(plan, tabled);
+    const columns = new Map<string, string>();
+    for (const result of tabled) {
+      const key = columnOf.get(result.result_id)!;
+      if (!columns.has(key)) columns.set(key, result.measure_label_id);
     }
     const rows = plan.subjects.members.map((member) => subjectLabelId(member.slot_id)).filter((id) => subjects.has(id)).map((subjectId) => ({
       subject_label_id: subjectId,
-      cells: [...columns.keys()].map((key) => values.find((result) => result.subject_label_id === subjectId && columnOf(result) === key)?.result_id ?? null),
+      cells: [...columns.keys()].map((key) => tabled.find((result) => result.subject_label_id === subjectId && columnOf.get(result.result_id) === key)?.result_id ?? null),
     }));
     for (const row of rows) for (const cell of row.cells) if (cell) placed.add(cell);
     const byId = new Map(results.map((result) => [result.result_id, result]));
@@ -204,8 +210,11 @@ function layout(plan: FinancialPlanV1, results: ReadonlyArray<PresentedResult>, 
     });
     presentations.push({
       kind: "table",
-      caption: `${[...new Set([...columns.values()].map((column) => labels[column.measure_label_id]!.text))].join(", ")} by company`,
-      columns: [...columns.values()].map((column, index) => ({ column_id: `c${index}`, ...column })),
+      caption: `${[...new Set([...columns.values()].map((measure) => labels[measure]!.text))].join(", ")} by company`,
+      columns: [...columns.values()].map((measure_label_id, index) => {
+        const periods = new Set(rows.flatMap((row) => (row.cells[index] ? [byId.get(row.cells[index])!.period_label_id] : [])));
+        return { column_id: `c${index}`, measure_label_id, period_label_id: periods.size === 1 ? [...periods][0]! : null };
+      }),
       rows,
       ascending,
     });
@@ -231,6 +240,29 @@ function layout(plan: FinancialPlanV1, results: ReadonlyArray<PresentedResult>, 
     presentations.push({ kind, result_id: result.result_id });
   }
   return presentations;
+}
+
+/**
+ * Each result's table column: its measure, the granularity of the period its
+ * plan requested, and its rank among its company's results of that measure and
+ * granularity, newest first. Companies on different fiscal calendars read one
+ * line at different periods, so the period is not part of a column; the
+ * requested period, never the result, decides the rank, so a gap holds its column.
+ */
+function tableColumns(plan: FinancialPlanV1, results: ReadonlyArray<PresentedResult>): ReadonlyMap<string, string> {
+  const outputNodes = new Map(plan.outputs.map((output) => [output.output_id, output.node_id]));
+  const groups = new Map<string, Array<{ result: PresentedResult; column: string; recency: number }>>();
+  for (const result of results) {
+    const { granularity, recency } = calendarAnchor(anchorSelector(plan, outputNodes.get(result.output_id)!));
+    const column = `${result.measure_label_id}|${granularity}`;
+    const group = `${result.subject_label_id}|${column}`;
+    groups.set(group, [...(groups.get(group) ?? []), { result, column, recency }]);
+  }
+  const keys = new Map<string, string>();
+  for (const group of groups.values()) {
+    group.sort((left, right) => right.recency - left.recency).forEach(({ result, column }, rank) => keys.set(result.result_id, `${column}|${rank}`));
+  }
+  return keys;
 }
 
 // ---------------------------------------------------------------------------
@@ -371,9 +403,8 @@ function measureText(plan: FinancialPlanV1, node: OperationNode): string {
     case "ratio":
       return resolveRatioDefinition(node.ratio_key)?.label ?? node.ratio_key;
     case "absolute_change":
-      return `Change in ${of(node.current)}`;
     case "percent_change_positive_base":
-      return `Percent change in ${of(node.current)}`;
+      return changeText(plan, node, of(node.current));
     case "trailing_sum":
       return `${of(node.quarters[0]!)}, trailing four quarters`;
     case "threshold":
@@ -403,14 +434,56 @@ function measureKey(plan: FinancialPlanV1, node: OperationNode): string {
     case "pe_ratio":
       return node.operation;
     case "absolute_change":
-    case "percent_change_positive_base":
-      return `${node.operation}(${of(node.current)})`;
+    case "percent_change_positive_base": {
+      const horizon = changeHorizon(plan, node);
+      return `${node.operation}(${of(node.current)})@${horizon ? `${horizon.step}${horizon.n}` : JSON.stringify([anchorSelector(plan, node.current), anchorSelector(plan, node.prior)])}`;
+    }
     case "trailing_sum":
       return `trailing_sum(${of(node.quarters[0]!)})`;
     case "threshold":
       return `threshold(${of(node.subject)})`;
     case "peer_compare":
       return `peer_compare(${of(node.members[0]!)})`;
+  }
+}
+
+function changeText(plan: FinancialPlanV1, node: ChangeNode, measure: string): string {
+  const change = `${node.operation === "absolute_change" ? "change" : "percent change"} in ${measure}`;
+  const horizon = changeHorizon(plan, node);
+  const code = horizon && `${horizon.step}${horizon.n}`;
+  if (code === "q1") return `Quarter-over-quarter ${change}`;
+  if (code === "q4" || code === "y1") return `Year-over-year ${change}`;
+  const text = `${change[0]!.toUpperCase()}${change.slice(1)}`;
+  return horizon ? `${text} over ${horizon.n} ${horizon.step === "q" ? "quarters" : "fiscal years"}` : text;
+}
+
+const HORIZON_STEPS: Readonly<Record<string, "q" | "y">> = { fiscal_quarter: "q", latest_quarterly: "q", fiscal_year: "y", latest_annual: "y" };
+
+/** How many quarters or fiscal years a change spans; null unless both its periods are on one calendar and the prior is older. */
+function changeHorizon(plan: FinancialPlanV1, node: ChangeNode): { step: "q" | "y"; n: number } | null {
+  const current = calendarAnchor(anchorSelector(plan, node.current));
+  const prior = calendarAnchor(anchorSelector(plan, node.prior));
+  const step = HORIZON_STEPS[current.granularity];
+  const n = current.recency - prior.recency;
+  return step && current.granularity === prior.granularity && n > 0 ? { step, n } : null;
+}
+
+/** The period a node is dated by: the first it reads. */
+function anchorSelector(plan: FinancialPlanV1, nodeId: LocalId): PeriodSelector {
+  return periodSelectors(plan, plan.operations.find((entry) => entry.node_id === nodeId)!)[0]!;
+}
+
+/** Where a period sits on its own calendar: within one granularity, higher recency is newer. */
+function calendarAnchor(selector: PeriodSelector): { granularity: string; recency: number } {
+  switch (selector.kind) {
+    case "fiscal_period":
+      return selector.fiscal_period === "FY"
+        ? { granularity: "fiscal_year", recency: selector.fiscal_year }
+        : { granularity: "fiscal_quarter", recency: selector.fiscal_year * 4 + FISCAL_PERIODS.indexOf(selector.fiscal_period) - 1 };
+    case "latest":
+      return { granularity: `latest_${selector.period_type}`, recency: -selector.offset };
+    case "at_cutoff":
+      return { granularity: "at_cutoff", recency: 0 };
   }
 }
 
