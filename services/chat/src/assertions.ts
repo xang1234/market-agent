@@ -52,6 +52,10 @@ export type AssertionReport = {
   // the reader sees of it is its shownAs (verdicts.ts). Absent when no
   // inference was judged.
   judged?: ReadonlyArray<InferenceVerdict>;
+  // The indices whose entry the repair reply replaced (inference-repair.ts),
+  // whether or not the replacement passed the checks, in index order; each
+  // entry above is its replacement. Absent when none was.
+  repaired?: ReadonlyArray<number>;
 };
 
 // The answer is rendered from this list (#208), so it holds a comparison
@@ -206,7 +210,7 @@ export function checkAssertions(list: unknown[] | null | undefined, packet: Evid
   return { status: "checked", accepted, rejected };
 }
 
-const SUPPORT_KINDS: ReadonlySet<AssertionKind> = new Set(["observation", "comparison", "management_attribution"]);
+export const SUPPORT_KINDS: ReadonlySet<AssertionKind> = new Set(["observation", "comparison", "management_attribution"]);
 
 // Every cited figure: the template says each cited metric changed. The
 // other period may be any shown, so the figure that moved alone will do.

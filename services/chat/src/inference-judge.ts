@@ -9,7 +9,7 @@
 // own (#376). The verdict sets what a chat turn shows (verdicts.ts shownAs,
 // answer-trace.ts answerTurn).
 
-import { createLlmRouterFromEnv, type LlmChatClient, type LlmChatMessage, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
+import { createLlmRouterFromEnv, type LlmChatClient, type LlmChatMessage, type LlmChatRequest, type LlmPurpose, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
 import { isRecord } from "../../shared/src/http.ts";
 import type { ModelExchange } from "./answer-trace.ts";
 import type { Assertion } from "./assertions.ts";
@@ -37,15 +37,16 @@ export type JudgeCase = {
   figures: ReadonlyArray<string>;
 };
 
-// What one judge call did: everything its verdicts are read from
-// (verdictsOf), so a recorded turn replays them without a model.
-export type JudgeRecord =
-  // No model was asked: none is configured, or there was nothing to judge.
+// What one model call did: everything read from it (verdictsOf, a repair's
+// list), so a recorded turn replays it without a model.
+export type ModelRecord =
+  // No model was asked: none is configured, or there was nothing to ask.
   | { outcome: "not_called"; reason: string }
-  // What the judge was sent and wrote, raw.
+  // What the model was sent and wrote, raw.
   | { outcome: "replied"; exchange: ModelExchange }
   // The router could not be built, or the call failed or ran out of time.
   | { outcome: "failed"; reason: string; latency_ms: number };
+export type JudgeRecord = ModelRecord;
 
 // The reader waits on the judge for each inference, with the figures shown;
 // the deadlines are per call, one call per inference. Measured on Haiku over
@@ -100,20 +101,38 @@ export async function judgeInferences(input: {
   deadlines?: ModelDeadlines;
 }): Promise<JudgeRecord> {
   if (input.cases.length === 0) return { outcome: "not_called", reason: "no inference to judge" };
-  const router = await createLlmRouterFromEnv(input.env, { createClient: input.createClient, purpose: "judge" })
+  return modelCall({
+    what: "judge",
+    purpose: "judge",
+    env: input.env,
+    ...(input.createClient ? { createClient: input.createClient } : {}),
+    request: { messages: judgeMessages(input.cases, input.companies), reasoning: "low", maxTokens: 4096 },
+    deadlines: input.deadlines ?? JUDGE_DEADLINES,
+  });
+}
+
+// One call, as a record; never rejects. what names the call in a reason.
+export async function modelCall(input: {
+  what: string;
+  purpose?: LlmPurpose;
+  env: LlmSettingsLoaderEnv;
+  createClient?: () => Promise<LlmChatClient> | LlmChatClient;
+  request: LlmChatRequest;
+  deadlines: ModelDeadlines;
+}): Promise<ModelRecord> {
+  const router = await createLlmRouterFromEnv(input.env, { createClient: input.createClient, ...(input.purpose ? { purpose: input.purpose } : {}) })
     .catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
-  if (router instanceof Error) return { outcome: "failed", reason: `judge model could not be configured: ${router.message}`, latency_ms: 0 };
-  if (!router) return { outcome: "not_called", reason: "no judge model is configured" };
-  const messages = judgeMessages(input.cases, input.companies);
+  if (router instanceof Error) return { outcome: "failed", reason: `${input.what} model could not be configured: ${router.message}`, latency_ms: 0 };
+  if (!router) return { outcome: "not_called", reason: `no ${input.what} model is configured` };
   const startedAt = performance.now();
-  const result = await router.complete({ messages, reasoning: "low", maxTokens: 4096 }, withDeadlines(input.deadlines ?? JUDGE_DEADLINES))
+  const result = await router.complete(input.request, withDeadlines(input.deadlines))
     .catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
   const latency_ms = Math.round(performance.now() - startedAt);
-  if (result instanceof Error) return { outcome: "failed", reason: `judge call failed: ${result.message}`, latency_ms };
+  if (result instanceof Error) return { outcome: "failed", reason: `${input.what} call failed: ${result.message}`, latency_ms };
   return {
     outcome: "replied",
     exchange: {
-      messages,
+      messages: input.request.messages,
       text: result.text,
       truncated: result.truncated === true,
       deployment: `${result.deployment.channel}/${result.deployment.model}`,

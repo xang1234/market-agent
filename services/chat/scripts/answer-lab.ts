@@ -2,10 +2,10 @@
 // through today's post-processing, with the recorded model reply (recorded) or
 // fresh replies from the live model (live), and tabulates what the answer shows.
 //
-//   node --experimental-strip-types scripts/answer-lab.ts recorded <trace dir|files...> [--check | --update] [--judge]
+//   node --experimental-strip-types scripts/answer-lab.ts recorded <trace dir|files...> [--check | --update] [--judge | --repair]
 //   node --experimental-strip-types scripts/answer-lab.ts live <trace dir|files...> [--samples K] [--concurrency N] [--against <run.json>] [--judge]
 //   node --experimental-strip-types scripts/answer-lab.ts replies <trace dir|files...> --out <file>
-//   node --experimental-strip-types scripts/answer-lab.ts judge-mutations <set.json> [--concurrency N]
+//   node --experimental-strip-types scripts/answer-lab.ts judge-mutations <set.json> [--concurrency N] [--repair]
 //
 // replies writes the traces' model replies as an LLM_REPLAY_FILE fixture, so the
 // no-keys stack (DEV_NO_KEYS=traces) answers each traced question as recorded;
@@ -18,12 +18,16 @@
 // (JUDGE_LITELLM_MODEL, src/inference-judge.ts) read each answer's accepted
 // inferences against what they rest on, as chat does: in recorded mode in place
 // of the recorded reply (with --update, recording its reply), in live mode in
-// place of none, which shows no inference. Each run summarizes what the judge
-// showed and hid. judge-mutations
+// place of none, which shows no inference; either way the repair round
+// (src/inference-repair.ts) runs live after it. --repair keeps the recorded
+// verdicts and runs only the repair round live (with --update, recording it).
+// Each run summarizes what the judge showed and hid. judge-mutations
 // judges a set of inferences and their mutations
 // (test/answer-lab/judge-mutations.json) and reports how many mutations it
 // catches, how many come back at their kind's tier, how many it would show
-// that should hide, and how many originals it flags.
+// that should hide, and how many originals it flags; --repair then sends each
+// one it hid through the repair round, as a chat turn would, and reports what
+// that shows.
 import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -36,15 +40,18 @@ import {
   answerMetrics,
   composeTraced,
   inferenceCases,
-  judgeAnswer,
   judgedAnswer,
+  judgedLive,
   replayRecorded,
   type AnswerMetrics,
   type ModelExchange,
   type TracedAnswer,
   type TurnTrace,
 } from "../src/answer-trace.ts";
-import { judgeCases, judgeInferences, verdictsOf, type JudgeCase, type JudgeRecord } from "../src/inference-judge.ts";
+import { judgeCases, judgeInferences, verdictsOf, type JudgeCase, type JudgeRecord, type ModelRecord } from "../src/inference-judge.ts";
+import { repairRequests, repairRound, requestRepair, type RepairTrace } from "../src/inference-repair.ts";
+import type { EvidencePacket } from "../src/evidence-packet.ts";
+import type { LlmChatClient, LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
 import { shownAs, VERDICTS, verdictText, type InferenceVerdict, type ShownAs, type Verdict } from "../src/verdicts.ts";
 import { turnPacket } from "../src/llm-runtime.ts";
 
@@ -94,6 +101,9 @@ const COLUMNS: ReadonlyArray<[Column, string]> = [
   ["inferences_shown", "inf shown"],
   ["inferences_unverified", "inf unverified"],
   ["inferences_hidden", "inf hidden"],
+  ["inferences_sent_to_repair", "inf sent"],
+  ["inferences_repaired", "inf repaired"],
+  ["inferences_recovered", "inf recovered"],
   ["output_tokens", "out tok"],
   ["latency_ms", "latency ms"],
 ];
@@ -136,18 +146,20 @@ function delta(before: Row, after: Row): string {
   ].join("\n");
 }
 
-// Each trace replayed with its recorded replies, the answer model's and the
-// judge's; differs: the blocks are not the recorded ones. judge: the live judge
-// reads each replay's inferences instead, and --update records its reply.
-// judge_input_changed: today's answer asks the recorded judge something else.
+// Each trace replayed with its recorded replies, the answer model's, the
+// judge's and the repair round's; differs: the blocks are not the recorded
+// ones. rerun: the live judge and repair round (judge), or the repair round
+// alone (repair), read each replay instead, and --update records their
+// replies. judge_input_changed, repair_input_changed: today's answer asks the
+// recorded judge or repair round something else.
 async function recorded(
   traces: ReadonlyArray<LabeledTrace>,
   update = false,
-  judge = false,
-): Promise<Array<{ key: string; label: string; metrics: SampleMetrics; differs: boolean; judge_input_changed: boolean; judge?: JudgeView }>> {
+  rerun?: "judge" | "repair",
+): Promise<Array<{ key: string; label: string; metrics: SampleMetrics; differs: boolean; judge_input_changed: boolean; repair_input_changed: boolean; judge?: JudgeView }>> {
   const results = [];
   for (const { key, label, file, trace } of traces) {
-    const { judge_input_changed, ...replayed } = await replayRecorded(trace, judge ? { env: liveEnv() } : undefined);
+    const { judge_input_changed, repair_input_changed, ...replayed } = await replayRecorded(trace, rerun ? { env: liveEnv(), rerun } : undefined);
     if (update) writeFileSync(file, `${JSON.stringify(replayed, null, 2)}\n`);
     const view = judgeView(replayed);
     results.push({
@@ -156,6 +168,7 @@ async function recorded(
       metrics: answerMetrics(replayed),
       differs: !isDeepStrictEqual(JSON.parse(JSON.stringify(replayed.blocks)), trace.blocks),
       judge_input_changed,
+      repair_input_changed,
       ...(view ? { judge: view } : {}),
     });
   }
@@ -195,6 +208,7 @@ type LiveSample = {
   answer?: string;
   assertions?: { rendered: boolean; accepted: AssertionKind[]; rejected: string[]; repeated?: number };
   judge?: JudgeView;
+  repair?: RepairTrace;
   error?: string;
 };
 // traces: the turns' keys; labels: their file names, for display.
@@ -242,8 +256,8 @@ async function live(traces: ReadonlyArray<LabeledTrace>, samples: number, concur
         const composed = await composeTraced(trace.input, { env });
         // No deployment configured: the placeholder came back and no model answered.
         if (composed.exchange === null) throw new Error("no model was called (no deployable LLM in the settings)");
-        const { cases, companies } = inferenceCases(trace.input, composed.assertions);
-        const answer = judgedAnswer(composed, cases, judge ? await judgeAnswer(cases, companies, { env }) : cases.map(() => UNJUDGED));
+        const { cases } = inferenceCases(trace.input, composed.assertions);
+        const answer = judge ? await judgedLive(trace.input, composed, { env }) : judgedAnswer(composed, cases, cases.map(() => UNJUDGED));
         const view = judge ? judgeView(answer) : undefined;
         results.push({
           trace: key,
@@ -263,6 +277,7 @@ async function live(traces: ReadonlyArray<LabeledTrace>, samples: number, concur
             }
             : {}),
           ...(view ? { judge: view } : {}),
+          ...(answer.repair ? { repair: answer.repair } : {}),
         });
         console.log(`done  ${label} #${sample}  (${((answer.exchange?.latency_ms ?? 0) / 1000).toFixed(1)}s)`);
       } catch (error) {
@@ -371,7 +386,15 @@ type MutationSet = {
 
 // One inference of the set as the judge reads it: an original, which its
 // supports back, or a mutation, which they do not.
-export type MutationVariant = { id: string; kind: "original" | MutationKind; judged: JudgeCase; companies: ReadonlyArray<string> };
+// turn: the answer it stands in, for the repair round: the answer request,
+// its list with the inference in its place, and the packet it was checked on.
+export type MutationVariant = {
+  id: string;
+  kind: "original" | MutationKind;
+  judged: JudgeCase;
+  companies: ReadonlyArray<string>;
+  turn: { messages: ReadonlyArray<{ role: string; content: string }>; list: unknown[]; packet: EvidencePacket; factBlocks: ReadonlyArray<Record<string, unknown>> };
+};
 
 function expectedOf(kind: MutationVariant["kind"]): Expected {
   return kind === "original" ? ORIGINAL : MUTATION_TIERS[kind];
@@ -396,13 +419,20 @@ export function mutationVariants(file: string): MutationVariant[] {
     return variants.map(({ kind, text }) => {
       if (kind !== "original" && !Object.hasOwn(MUTATION_TIERS, kind)) throw new Error(`${entry.id}: unknown mutation kind ${JSON.stringify(kind)}`);
       const inference = { kind: "analyst_inference", text, evidence: [], supports: entry.supports, ...(entry.subject ? { subject: entry.subject } : {}) };
-      const report = checkAssertions(list.with(entry.index, inference), packet);
+      const turnList = list.with(entry.index, inference);
+      const report = checkAssertions(turnList, packet);
       const accepted = report.accepted.find((assertion) => assertion.index === entry.index);
       if (accepted?.supports?.length !== entry.supports.length) {
         const reason = report.rejected.find((rejection) => rejection.index === entry.index)?.reason ?? "a support was not accepted";
         throw new Error(`${entry.id} ${kind}: the turn's checks reject it (${reason}); the set holds only inferences they pass`);
       }
-      return { id: entry.id, kind, judged: judgeCases(report.accepted, packet, factBlocks).find((judged) => judged.index === entry.index)!, companies: packet.companies };
+      return {
+        id: entry.id,
+        kind,
+        judged: judgeCases(report.accepted, packet, factBlocks).find((judged) => judged.index === entry.index)!,
+        companies: packet.companies,
+        turn: { messages: trace.exchange?.messages ?? [], list: turnList, packet, factBlocks },
+      };
     });
   });
 }
@@ -427,6 +457,22 @@ async function judgeMutations(variants: ReadonlyArray<MutationVariant>, concurre
   };
   await Promise.all(Array.from({ length: Math.max(1, concurrency) }, worker));
   return variants.map((variant) => results.find((result) => result.id === variant.id && result.text === variant.judged.text)!);
+}
+
+// Each variant the judge hid, through the repair round, live.
+async function repairMutations(variants: ReadonlyArray<MutationVariant>, results: ReadonlyArray<MutationResult>, concurrency: number): Promise<MutationRepair[]> {
+  const jobs = variants.flatMap((variant, i) => (shownAs(results[i]!.verdict) === "hidden" ? [{ variant, first: results[i]!.verdict }] : []));
+  const order = [...jobs];
+  const repairs = new Map<MutationVariant, MutationRepair>();
+  const worker = async () => {
+    for (let job = jobs.shift(); job; job = jobs.shift()) {
+      const repair = await repairMutation(job.variant, job.first, { env: liveEnv() });
+      repairs.set(job.variant, repair);
+      console.log(`${repair.id} ${repair.kind} repaired: ${repair.as}`);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, concurrency) }, worker));
+  return order.map(({ variant }) => repairs.get(variant)!);
 }
 
 // "shown though they should hide" is the safety number: a contradiction or a
@@ -460,6 +506,67 @@ export function mutationSummary(results: ReadonlyArray<Pick<MutationResult, "id"
   ].join("\n");
 }
 
+// A hidden variant after the repair round: its repaired text (null: left out,
+// or not sent, as an error verdict is not), the check that rejected that text,
+// the repaired text's verdict, and what the reader ends with.
+export type MutationRepair = {
+  id: string;
+  kind: MutationVariant["kind"];
+  first: InferenceVerdict;
+  repaired: string | null;
+  rejection?: string;
+  second?: InferenceVerdict;
+  as: ShownAs;
+  record?: ModelRecord;
+};
+
+// The variant through the round a chat turn runs (inference-repair.ts), on
+// its turn's answer request and list, with its verdict as the request.
+export async function repairMutation(
+  variant: MutationVariant,
+  first: InferenceVerdict,
+  options: { env: LlmSettingsLoaderEnv; createClient?: () => Promise<LlmChatClient> | LlmChatClient },
+): Promise<MutationRepair> {
+  const { id, kind, turn, companies } = variant;
+  const index = variant.judged.index;
+  const requests = repairRequests(turn.list, { accepted: checkAssertions(turn.list, turn.packet).accepted, rejected: [] }, [first]);
+  if (requests.length === 0) return { id, kind, first, repaired: null, as: shownAs(first) };
+  const client = options.createClient ? { createClient: options.createClient } : {};
+  const round = await repairRound({
+    messages: turn.messages,
+    list: turn.list,
+    requests,
+    packet: turn.packet,
+    factBlocks: turn.factBlocks,
+    repair: (messages) => requestRepair({ messages, env: options.env, ...client }),
+    judge: (inference) => judgeInferences({ cases: [inference], companies, env: options.env, ...client }),
+  });
+  const base = { id, kind, first, record: round.record };
+  if (!round.repaired.includes(index)) return { ...base, repaired: null, as: shownAs(first) };
+  const entry = [...round.report.accepted, ...round.report.rejected].find((assertion) => assertion.index === index);
+  const repaired = entry?.text ?? "";
+  const rejection = round.report.rejected.find((assertion) => assertion.index === index);
+  if (rejection) return { ...base, repaired, rejection: `${rejection.check}: ${rejection.reason}`, as: "hidden" };
+  const second = verdictsOf(round.cases, round.records[0] ?? { outcome: "not_called", reason: "no judge record" })[0]!;
+  return { ...base, repaired, second, as: shownAs(second) };
+}
+
+// Each repaired variant's path, and how many hide-tier mutations end shown or
+// unverified after the round.
+export function mutationRepairSummary(repairs: ReadonlyArray<MutationRepair>): string {
+  const hideTier = repairs.filter((repair) => repair.kind !== "original" && Object.hasOwn(MUTATION_TIERS, repair.kind) &&
+    verdictsAllowed(MUTATION_TIERS[repair.kind as MutationKind]).every((verdict) =>
+      shownAs({ index: 0, verdict, worded_amount: MUTATION_TIERS[repair.kind as MutationKind].worded_amount }) === "hidden"
+    ));
+  const count = (as: ShownAs) => hideTier.filter((repair) => repair.as === as).length;
+  return [
+    `after repair: ${count("shown")} shown, ${count("unverified")} unverified, ${count("hidden")} still hidden, of ${hideTier.length} hide-tier mutations the judge hid`,
+    ...repairs.map((repair) =>
+      `  ${repair.id} ${repair.kind}: ${verdictText(repair.first)}\n      ${repair.repaired ?? "left out"}${repair.rejection ? `\n      rejected: ${repair.rejection}` : ""}${repair.second ? `\n      ${verdictText(repair.second)}` : ""}\n      ${repair.as}`
+    ),
+  ].join("\n");
+}
+
 async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
     args: argv,
@@ -472,14 +579,16 @@ async function main(argv: string[]): Promise<number> {
       against: { type: "string" },
       out: { type: "string" },
       judge: { type: "boolean", default: false },
+      repair: { type: "boolean", default: false },
     },
   });
   const [mode, ...paths] = positionals;
   if (
     (mode !== "recorded" && mode !== "live" && mode !== "replies" && mode !== "judge-mutations") || paths.length === 0 ||
-    (mode === "replies" && !values.out) || (mode === "judge-mutations" && paths.length !== 1)
+    (mode === "replies" && !values.out) || (mode === "judge-mutations" && paths.length !== 1) ||
+    (values.repair && mode !== "recorded" && mode !== "judge-mutations") || (values.repair && values.judge)
   ) {
-    console.error("usage: answer-lab.ts recorded <trace dir|files...> [--check | --update] [--judge] | live <trace dir|files...> [--samples K] [--concurrency N] [--against <run.json>] [--judge] | replies <trace dir|files...> --out <file> | judge-mutations <set.json> [--concurrency N]");
+    console.error("usage: answer-lab.ts recorded <trace dir|files...> [--check | --update] [--judge | --repair] | live <trace dir|files...> [--samples K] [--concurrency N] [--against <run.json>] [--judge] | replies <trace dir|files...> --out <file> | judge-mutations <set.json> [--concurrency N] [--repair]");
     return 2;
   }
   if (mode === "judge-mutations") {
@@ -491,11 +600,14 @@ async function main(argv: string[]): Promise<number> {
       return 2;
     }
     const startedAt = Date.now();
-    const results = await judgeMutations(variants, Math.max(1, Number.parseInt(values.concurrency, 10) || 1));
+    const concurrency = Math.max(1, Number.parseInt(values.concurrency, 10) || 1);
+    const results = await judgeMutations(variants, concurrency);
+    const repairs = values.repair ? await repairMutations(variants, results, concurrency) : undefined;
     const run = new Date(startedAt).toISOString().slice(0, 19).replace(/:/g, "");
     mkdirSync(RUNS_DIR, { recursive: true });
     const file = join(RUNS_DIR, `${run}.judge-mutations.json`);
-    writeFileSync(file, `${JSON.stringify({ run, set: paths[0], wall_ms: Date.now() - startedAt, results }, null, 2)}\n`, { flag: "wx" });
+    writeFileSync(file, `${JSON.stringify({ run, set: paths[0], wall_ms: Date.now() - startedAt, results, ...(repairs ? { repairs } : {}) }, null, 2)}\n`, { flag: "wx" });
+    if (repairs) console.log(`\n${mutationRepairSummary(repairs)}`);
     const called = results.filter((result) => result.deployment !== null);
     const mean = (values: ReadonlyArray<number>) => (values.length === 0 ? 0 : Math.round(values.reduce((sum, value) => sum + value, 0) / values.length));
     console.log(`\n${mutationSummary(results)}\n\njudged on ${[...new Set(called.map((result) => result.deployment))].join(", ") || "no model"}: ${mean(called.map((result) => result.latency_ms))} ms, ${mean(called.map((result) => result.usage?.input_tokens ?? 0))} in / ${mean(called.map((result) => result.usage?.output_tokens ?? 0))} out tokens per inference; ${file}`);
@@ -515,10 +627,12 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
   if (mode === "recorded") {
-    const results = await recorded(traces, values.update, values.judge);
+    const results = await recorded(traces, values.update, values.judge ? "judge" : values.repair ? "repair" : undefined);
     const differs = new Set(results.filter((result) => result.differs).map((result) => result.key));
     const drifted = new Set(results.filter((result) => result.judge_input_changed).map((result) => result.key));
-    const flag = (key: string) => `${differs.has(key) ? "  DIFFERS" : ""}${drifted.has(key) ? "  JUDGE INPUT CHANGED" : ""}`;
+    const repairDrifted = new Set(results.filter((result) => result.repair_input_changed).map((result) => result.key));
+    const flag = (key: string) =>
+      `${differs.has(key) ? "  DIFFERS" : ""}${drifted.has(key) ? "  JUDGE INPUT CHANGED" : ""}${repairDrifted.has(key) ? "  REPAIR INPUT CHANGED" : ""}`;
     console.log(table(results.map((result) => meanRow(result, [result.metrics])), (row) => flag(row.key)));
     console.log(`\n${traces.length - differs.size} of ${traces.length} replayed to the recorded blocks`);
     const run: LiveRun = {
@@ -530,10 +644,10 @@ async function main(argv: string[]): Promise<number> {
       labels: Object.fromEntries(traces.map(({ key, label }) => [key, label])),
       results: results.map(({ key, metrics, judge }) => ({ trace: key, sample: 0, metrics, ...(judge ? { judge } : {}) })),
     };
-    if (run.results.some((result) => result.judge)) console.log(`\n${values.judge ? "judged live" : "as recorded"}, ${judgeSummary(run)}`);
-    if (values.judge) {
+    if (run.results.some((result) => result.judge)) console.log(`\n${values.judge ? "judged live" : values.repair ? "repaired live" : "as recorded"}, ${judgeSummary(run)}`);
+    if (values.judge || values.repair) {
       mkdirSync(RUNS_DIR, { recursive: true });
-      const file = join(RUNS_DIR, `${run.run}.recorded-judge.json`);
+      const file = join(RUNS_DIR, `${run.run}.recorded-${values.judge ? "judge" : "repair"}.json`);
       writeFileSync(file, `${JSON.stringify(run, null, 2)}\n`, { flag: "wx" });
       console.log(file);
     }

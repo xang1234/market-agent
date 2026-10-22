@@ -231,15 +231,17 @@ test("with no judge model configured no judge is asked, and no inference shows o
   assert.deepEqual(calls, ["anthropic/claude-sonnet-5-5"]);
 });
 
-test("an inference whose supports all failed their checks is neither judged nor shown", async () => {
+test("an inference whose supports all failed their checks is not judged or shown; it goes to the repair round, which the answer model's reply here does not repair", async () => {
   // The ranking is wrong, so the comparison both inferences rest on is rejected.
   const unsupported = { ...SEGMENTS, exchange: { ...SEGMENTS.exchange!, text: SEGMENTS.exchange!.text.replace('"op":"order","result":["F1","F2"', '"op":"order","result":["F2","F1"') } };
   const { calls, createClient } = models(unsupported, async () => assert.fail("nothing left to judge"));
   const answer = await answerTurn(unsupported.input, turn(unsupported), { env: JUDGED_ENV, createClient });
-  assert.equal(answer.judging, undefined);
   assert.equal(text(answer.blocks).includes("Analyst inference"), false);
-  assert.deepEqual(answer.assertions?.rejected.filter((entry) => entry.index === 6 || entry.index === 7).map(({ index, check }) => [index, check]), [[6, "support"], [7, "support"]]);
-  assert.deepEqual(calls, ["anthropic/claude-sonnet-5-5"]);
+  const done = await answer.judging!.done;
+  assert.equal(text(done.blocks).includes("Analyst inference"), false);
+  assert.deepEqual(done.assertions?.rejected.filter((entry) => entry.index === 6 || entry.index === 7).map(({ index, check }) => [index, check]), [[6, "support"], [7, "support"]]);
+  // The answer, then the repair on the answer's model: its list names no index to replace.
+  assert.deepEqual(calls, ["anthropic/claude-sonnet-5-5", "anthropic/claude-sonnet-5-5"]);
 });
 
 test("a turn that shows no inference makes no judge call: none rendered, or the fallback shown", async () => {

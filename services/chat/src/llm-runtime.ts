@@ -161,7 +161,6 @@ export async function composeAnalystBlocksWithLlm(input: {
   });
   if (!router) return () => input.blocks;
   const packet = turnPacket(input);
-  const factBlocks = input.factBlocks ?? [];
 
   const request: LlmChatRequest = {
     messages: [
@@ -291,6 +290,22 @@ export async function composeAnalystBlocksWithLlm(input: {
   if (report.status !== "checked" || report.rejected.length > 0) {
     console.info(`[chat] assertions ${report.status}: ${report.accepted.length} accepted, ${report.rejected.length} rejected`);
   }
+  const rendering = renderedAnswer(input, packet, report);
+  input.onAssertions?.(rendering.report);
+  // The deployment is reported only when the answer is rendered from its
+  // assertions: the fallback sentence was written by no model (#183).
+  if (rendering.report.rendered) input.onAnswered?.(`${result.deployment.channel}/${result.deployment.model}`);
+  else console.warn(`[chat] no assertion rendered (list ${report.status}${result.truncated ? ", answer cut off at the token limit" : ""}); showing the fallback sentence`);
+  return rendering.blocks;
+}
+
+export type AnswerInput = Pick<Parameters<typeof composeAnalystBlocksWithLlm>[0], "blocks" | "toolCalls" | "factBlocks" | "scope">;
+
+// The answer the accepted assertions render, or the fallback sentence, and
+// the report with what rendering left out (#208). An answer repaired after
+// its first check renders here too (inference-repair.ts).
+export function renderedAnswer(input: AnswerInput, packet: EvidencePacket, report: AssertionReport): { report: AssertionReport; blocks: AnswerBlocks } {
+  const factBlocks = input.factBlocks ?? [];
   // Pointing to "the reported figures below" needs figures shown: not a gap
   // note, nor values only an assertion references (#302).
   const shown = displayedFigures(factBlocks);
@@ -373,12 +388,7 @@ export async function composeAnalystBlocksWithLlm(input: {
       ].join(" ")
       : shown.length > 0 ? FACT_BLOCKS_FALLBACK_TEXT : NO_ANSWER_FALLBACK_TEXT,
   };
-  input.onAssertions?.(rendering.report);
-  // The deployment is reported only when the answer is rendered from its
-  // assertions: the fallback sentence was written by no model (#183).
-  if (rendering.answer) input.onAnswered?.(`${result.deployment.channel}/${result.deployment.model}`);
-  else console.warn(`[chat] no assertion rendered (list ${report.status}${result.truncated ? ", answer cut off at the token limit" : ""}); showing the fallback sentence`);
-  return (inferences) => withAnswer(input.blocks, answer, inferences);
+  return { report: rendering.report, blocks: (inferences) => withAnswer(input.blocks, answer, inferences) };
 }
 
 export type AnswerUsage = { input_tokens: number; output_tokens: number; reasoning_tokens?: number };
