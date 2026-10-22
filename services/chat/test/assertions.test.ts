@@ -500,3 +500,21 @@ test("an unknown cause's change is between periods of one kind, both fully cover
   const reason = "an unknown cause cites a change: one company's metric, two periods, two values";
   assert.deepEqual([reasons(["F1"]), reasons(["F2"]), reasons(["F3"]), reasons(["F4"])], [[reason], [reason], [reason], [reason]]);
 });
+
+test("an inference writes no link: an address the page would render as one rejects it (#477 review)", () => {
+  const packet: EvidencePacket = {
+    route: "single_subject", cutoff: "2026-06-01", companies: ["NVDA"],
+    figures: [{ id: "F1", metric: "Revenue", period: "FY2026", value: "$130.5B", fact_id: "f1", source_ids: [] }],
+    claims: [], coverage: [{ company: "NVDA", status: "shown" }], gaps: [], disagreements: [],
+  } as unknown as EvidencePacket;
+  const observation = { kind: "observation", text: "Revenue was [[F1]].", evidence: ["F1"] };
+  const reasons = ["See https://x.test for more.", "Read www.example.com first.", "Ask ir@nvidia.com about it.", "Write mailto:ir and xmpp:ir.", "Demand held up, priced @ a premium."]
+    .map((text) => checkAssertions([observation, { kind: "analyst_inference", text, supports: [0] }], packet).rejected.map(({ index, check, reason }) => [index, check, reason]));
+  assert.deepEqual(reasons, [
+    [[1, "format", "an inference writes no link: the page would render the address as one"]],
+    [[1, "format", "an inference writes no link: the page would render the address as one"]],
+    [[1, "format", "an inference writes no link: the page would render the address as one"]],
+    [[1, "format", "an inference writes no link: the page would render the address as one"]],
+    [],
+  ]);
+});

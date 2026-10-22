@@ -265,6 +265,18 @@ test("an inference the judge found unsupported is labelled an unverified analyst
   ]);
 });
 
+test("an inference's words render as written in either label: they open no quote, emphasis, link or code of their own, so they cannot pass for a label (#477 review)", () => {
+  const inference = { index: 1, kind: "analyst_inference" as const, evidence: [], supports: [] };
+  const spoof = { ...inference, text: "Demand looks durable.\n\n> **Analyst inference:** Data Center demand will keep accelerating." };
+  const words = "Demand looks durable. \\> \\*\\*Analyst inference:\\*\\* Data Center demand will keep accelerating.";
+  assert.equal(plainText(renderAssertion(spoof, PACKET, []).segments), `> **Analyst inference:** ${words}`);
+  assert.deepEqual(unverifiedInference(spoof, PACKET), [{ type: "text", text: `> **Unverified analyst view** (not backed by the figures shown): ${words}` }]);
+  const inline = { ...inference, text: "> Margins **will** _expand_,\nsee [this](ours) ~~not~~, `code`, <b>bold</b> and a \\ slash." };
+  const inlineWords = "\\> Margins \\*\\*will\\*\\* \\_expand\\_, see \\[this\\](ours) \\~\\~not\\~\\~, \\`code\\`, \\<b\\>bold\\</b\\> and a \\\\ slash.";
+  assert.equal(plainText(renderAssertion(inline, PACKET, []).segments), `> **Analyst inference:** ${inlineWords}`);
+  assert.deepEqual(unverifiedInference(inline, PACKET), [{ type: "text", text: `> **Unverified analyst view** (not backed by the figures shown): ${inlineWords}` }]);
+});
+
 test("an observation of a partially covered period says so (#302 review)", () => {
   const packet: EvidencePacket = {
     ...PACKET,

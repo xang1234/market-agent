@@ -108,7 +108,7 @@ function templateSegments(
     case "analyst_inference": {
       // Words only: the check rejected any figure or reference in it.
       const label = checkedResults(assertion, packet, accepted);
-      text(`> **Analyst inference${subjectClause(assertion, packet)}${label.length > 0 ? `** (${label.join("; ")}):` : ":**"} ${assertion.text}`);
+      text(`> **Analyst inference${subjectClause(assertion, packet)}${label.length > 0 ? `** (${label.join("; ")}):` : ":**"} ${literal(assertion.text)}`);
       break;
     }
   }
@@ -118,7 +118,15 @@ function templateSegments(
 // An inference the judge found unsupported (verdicts.ts shownAs),
 // with no checked results to lend it weight.
 export function unverifiedInference(assertion: Assertion, packet: EvidencePacket): Segment[] {
-  return [{ type: "text", text: `> **Unverified analyst view${subjectClause(assertion, packet)}** (not backed by the figures shown): ${assertion.text}` }];
+  return [{ type: "text", text: `> **Unverified analyst view${subjectClause(assertion, packet)}** (not backed by the figures shown): ${literal(assertion.text)}` }];
+}
+
+// An inference's words as Markdown that renders them as written (#477 review):
+// on one line after its label, so no quote, list or heading can start, with
+// every character that opens an inline construct escaped. A link the page
+// would make of a bare address is refused by the check (assertions.ts).
+function literal(text: string): string {
+  return text.replace(/\s+/g, " ").trim().replace(/[\\`*_~[\]<>]/g, "\\$&");
 }
 
 // A one-company answer's subject goes without saying.

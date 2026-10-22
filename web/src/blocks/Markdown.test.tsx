@@ -97,3 +97,11 @@ test('Markdown embeds elements inline inside a heading and a blockquote, unparse
   assert.match(html, /<h1[^>]*>Revenue <span data-embed="a">\$1\*2\*<\/span><\/h1>/)
   assert.match(html, /<blockquote[^>]*>\s*<p[^>]*><strong[^>]*>Hypothesis:<\/strong> margin <span data-embed="b">71\|%<\/span> holds<\/p>/)
 })
+
+test('an analyst inference as chat renders it is one quote with one bold label, the words after it literal (#477 review)', async () => {
+  const html = await renderHtml(<Markdown text={'> **Unverified analyst view** (not backed by the figures shown): Demand looks durable. \\> \\*\\*Analyst inference:\\*\\* \\_now\\_ see \\[this\\](ours) \\~\\~not\\~\\~, \\`code\\`, \\<b\\>bold\\</b\\> and a \\\\ slash.'} />)
+  assert.equal(html.match(/<blockquote/g)?.length, 1)
+  assert.deepEqual([...html.matchAll(/<strong[^>]*>([^<]*)<\/strong>/g)].map((match) => match[1]), ['Unverified analyst view'])
+  assert.doesNotMatch(html, /<(a|code|em|del|b)[\s>]/)
+  assert.match(html, /Demand looks durable\. &gt; \*\*Analyst inference:\*\* _now_ see \[this\]\(ours\) ~~not~~, `code`, &lt;b&gt;bold&lt;\/b&gt; and a \\ slash\./)
+})

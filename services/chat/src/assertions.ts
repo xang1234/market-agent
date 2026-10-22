@@ -153,6 +153,12 @@ export function checkAssertions(list: unknown[] | null | undefined, packet: Evid
       reject(index, item, "binding", "an inference rests on its supports; it writes no figure");
       continue;
     }
+    // Nor an address: the page links one whatever its escaping (GFM's
+    // autolinks: a scheme, www. or an email), and the words are the model's.
+    if (kind === "analyst_inference" && /(?:https?|mailto|xmpp):|www\.|[\w.+-]@[\w-]/i.test(item.text)) {
+      reject(index, item, "format", "an inference writes no link: the page would render the address as one");
+      continue;
+    }
     const figureIds = evidence.filter((id) => figures.has(id));
     const claimIds = evidence.filter((id) => claims.has(id));
     // A support that failed its own check is dropped; the inference stands on
