@@ -333,8 +333,28 @@ test("a company overview carries analyst commentary on its published results (#3
       const done = completed(events);
       assert.deepEqual((done.message as { blocks: Block[] }).blocks.map((block) => block.kind), ["financial_answer"], failure);
       assert.deepEqual((await message(done.message_id)).blocks.map((block) => block.kind), ["financial_answer"], failure);
-      assert.deepEqual(logged, [[`[chat] the analyst commentary on message ${done.message_id} failed; the turn completes with the answer as saved`, error]], failure);
+      assert.deepEqual(logged, [[`[chat] the analyst commentary on message ${done.message_id} failed; the turn completes with the message as stored`, error]], failure);
     }
+  });
+
+  await t.test("an append that commits before its connection drops completes the turn with the commentary as stored", async (st) => {
+    const logged: unknown[][] = [];
+    st.mock.method(console, "error", (...args: unknown[]) => logged.push(args));
+    const dropped = new Error("Connection terminated unexpectedly");
+    const committedThenDropped = {
+      query: async (text: string, values?: unknown[]) => {
+        const result = await pool.query(text, values);
+        if (text.trimStart().startsWith("update chat_messages set blocks")) throw dropped;
+        return result;
+      },
+      connect: () => pool.connect(),
+    } as unknown as Pool;
+    const harness = chatHarness(committedThenDropped, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve, commentary: saver(composer(() => ALFA_REPLY).compose) });
+    const done = completed((await harness.run({ ...base, userIntent: "Revenue for ALFA" })).events);
+    const stored = (await message(done.message_id)).blocks;
+    assert.deepEqual(stored.map((block) => block.kind), ["financial_answer", "rich_text"]);
+    assert.deepEqual((done.message as { blocks: Block[] }).blocks, stored, "turn.completed carries the message as stored");
+    assert.deepEqual(logged, [[`[chat] the analyst commentary on message ${done.message_id} failed; the turn completes with the message as stored`, dropped]]);
   });
 
   await t.test("only an overview gets commentary: a metric question, an analyst turn and a retry of a saved answer write none", async () => {
