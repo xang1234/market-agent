@@ -365,6 +365,13 @@ test("a newer period with no publication proof, reported only for a segment, or 
   assert.equal(landed(selectInput(named("Q3"), [candidates[1]!, quarter(2024, "Q3", { publication: [] })], atCutoff)), "gap publication_time_unknown", "a later proof can make the consolidated value eligible; nothing makes a segment's");
 });
 
+test("a metric outside the catalog is an unsupported metric, not an incompatible unit (#469 review)", () => {
+  const unknown: ReportedMetricNode = { ...FY2023, metric_key: "made_up_metric" };
+  const candidates = [{ ...candidate(), metric_key: "made_up_metric" }];
+  assert.equal(landed(selectInput(unknown, candidates, policy())), "gap unsupported_metric");
+  assert.equal(landed(selectInput({ ...unknown, period: { kind: "latest", period_type: "annual", offset: 0 } }, candidates, policy())), "gap unsupported_metric");
+});
+
 test("a balance without a financial context, as a 10-Q's labelled FY is stored, does not define the latest fiscal year (#469)", () => {
   const instant = (metric: string, input: InputCandidate): InputCandidate => ({ ...input, metric_key: metric, period: { ...input.period, start: null } });
   const latestYear = (nodeId: string, metric: string): ReportedMetricNode => ({ ...FY2023, node_id: nodeId, metric_key: metric, period: { kind: "latest", period_type: "annual", offset: 0 } });
