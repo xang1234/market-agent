@@ -165,6 +165,29 @@ test("per-thread coordinator schedules thread title generation after first assis
   ]);
 });
 
+test("per-thread coordinator titles a thread from its saved answer, never from analyst commentary appended to it", async () => {
+  const generated: Array<{ assistantText: string }> = [];
+  const titleJobFinished = deferred();
+  const block = (id: string, text: string, extra: Record<string, unknown> = {}) => ({ id, kind: "rich_text", segments: [{ type: "text", text }], ...extra });
+  const coordinator = createChatCoordinator({
+    generateThreadTitle: async (input) => {
+      generated.push(input);
+      titleJobFinished.resolve();
+    },
+    runner: ({ emit }) => {
+      emit("turn.completed", {
+        message_id: "message-1",
+        message: { blocks: [block("answer", "Apple revenue rose."), block("commentary", "Its services mix keeps growing.", { analyst_commentary: true })] },
+      });
+    },
+  });
+
+  await coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1", userIntent: "Apple revenue" }).completed;
+  await titleJobFinished.promise;
+
+  assert.deepEqual(generated.map((input) => input.assistantText), ["Apple revenue rose."]);
+});
+
 test("per-thread coordinator skips thread title generation for clarification turns", async () => {
   const generated: unknown[] = [];
   const coordinator = createChatCoordinator({

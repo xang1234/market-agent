@@ -100,7 +100,11 @@ test("a company overview carries analyst commentary on its published results (#3
     chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve, commentary: compose, ...extra });
   const hydrate = async (_db: unknown, ref: { kind: string; id: string }) =>
     ({ subject_ref: ref, display_label: ref.id, display_labels: {}, context: {}, normalized_input: ref.id, identity_level: "issuer", resolution_path: "test", confidence: 1 }) as never;
-  const prior = async () => ({ subjects: await loadPriorSubjects(db, { threadId }, hydrate), scope: await loadPriorScope(db, { threadId }) });
+  const prior = async () => ({
+    subjects: await loadPriorSubjects(db, { threadId }, hydrate),
+    scope: await loadPriorScope(db, { threadId }),
+    conversation: await loadRecentConversation(db, { threadId, limit: 6 }),
+  });
 
   await t.test("the answer is committed and shown first, then its commentary is saved beside it, citing only its verified results", async () => {
     let before: Awaited<ReturnType<typeof prior>> | undefined;
@@ -153,17 +157,13 @@ test("a company overview carries analyst commentary on its published results (#3
     assert.equal(answer!.presentation_hash, presentationHash(answer!.financial as FinancialAnswerContent));
     assert.deepEqual([certificate.presentation_hash, certificate.certified], [answer!.presentation_hash, answer!.presentation_hash]);
 
-    // The append moves no pointer: the thread, the companies and the scope a follow-up reads are as they were.
+    // The append moves no pointer: the thread, the companies, the scope and
+    // the conversation a follow-up reads are as they were.
     const { rows: [thread] } = await db.query(`select latest_snapshot_id::text as latest from chat_threads where thread_id = $1`, [threadId]);
     assert.equal(thread.latest, saved.snapshot_id);
     assert.ok(before?.scope, "the answer saved its scope");
+    assert.deepEqual(before?.conversation, [], "an engine answer has no narrative text");
     assert.deepEqual(await prior(), before);
-    // The next turn's conversation reads the commentary's words, each ref an
-    // empty run (as a fact ref is on the analyst path).
-    assert.deepEqual(await loadRecentConversation(db, { threadId, limit: 6 }), [{
-      role: "assistant",
-      text: "ALFA's gross margin (gross profit / revenue) was   , operating margin (operating income / revenue)    and net margin (net income / revenue)    in Q4 FY2023 . \n\n ALFA's revenue  rose in every period from Q1 FY2022 (  ) to Q4 FY2023 (  ).",
-    }]);
     // A client that left before the commentary reads it on reload.
     const reloaded = await listChatMessagesForThread(db, { thread_id: threadId, user_id: IDS.owner });
     assert.deepEqual(reloaded!.messages.find((entry) => entry.message_id === done.message_id)!.blocks, saved.blocks);

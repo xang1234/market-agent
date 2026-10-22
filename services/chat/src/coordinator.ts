@@ -681,6 +681,8 @@ function segmentText(segment: unknown): string | null {
 function messageTexts(message: unknown): string[] {
   const blocks = message !== null && typeof message === "object" ? (message as { blocks?: unknown }).blocks : undefined;
   return (Array.isArray(blocks) ? blocks : []).flatMap((block) => {
+    // Commentary appended after the answer was shown does not title the thread.
+    if (block?.analyst_commentary === true) return [];
     const segments = block !== null && typeof block === "object" ? (block as { segments?: unknown }).segments : undefined;
     return (Array.isArray(segments) ? segments : []).flatMap((segment) => segmentText(segment) ?? []);
   });
