@@ -12,7 +12,7 @@
 // cutoff): repeats already counted once, each placed by its stored polarity,
 // with any stored contradiction between them named.
 
-import { displayedFigures, QUARTERS_SHOWN, readsNamedQuarter, type DisplayedFigure } from "./fact-blocks.ts";
+import { displayedFigures, QUARTERS_SHOWN, readsNamedQuarter, type DerivedFigureRecord, type DisplayedFigure } from "./fact-blocks.ts";
 import type { ResearchScope } from "./research-scope.ts";
 import { isRecord } from "../../shared/src/http.ts";
 
@@ -22,7 +22,12 @@ export type PacketFigure = Omit<DisplayedFigure, "fact_id" | "block_id"> & {
   id: string;
   fact_id?: string;
   source_ids: ReadonlyArray<string>;
-} & ({ displayed?: undefined } | AvailableFigureFields);
+} & ({
+  displayed?: undefined;
+  // A figure no chart draws, computed from two displayed ones (fact-blocks.ts
+  // DerivedFigureRecord): their packet ids, as [current, prior].
+  derived_from?: readonly [string, string];
+} | AvailableFigureFields);
 
 // A reported value no block shows (#302): what a turn with no figure displayed
 // answers from, referenced as a displayed figure is and never counted as one.
@@ -250,7 +255,8 @@ export function buildEvidencePacket(input: {
   const blockSources = new Map(input.factBlocks.flatMap((block) =>
     typeof block.id === "string" ? [[block.id, sourceIds(block)] as const] : []
   ));
-  const displayed: PacketFigure[] = displayedFigures(input.factBlocks).map(({ fact_id, block_id, ...figure }, index) => ({
+  const shownFigures = displayedFigures(input.factBlocks);
+  const displayed: PacketFigure[] = shownFigures.map(({ fact_id, block_id, ...figure }, index) => ({
     id: `F${index + 1}`,
     ...figure,
     ...(fact_id ? { fact_id } : {}),
@@ -278,7 +284,7 @@ export function buildEvidencePacket(input: {
   // context loader reads only that one), named once there are others.
   const primary = input.scope?.companies[0] && scopeLabels.get(input.scope.companies[0].issuer_id);
   const figures: PacketFigure[] = displayed.length > 0
-    ? displayed
+    ? [...displayed, ...derivedFigures(input.factBlocks, shownFigures, blockSources)]
     : (input.available ?? []).map((figure, index) => ({
       id: `F${index + 1}`,
       ...figure,
@@ -310,6 +316,51 @@ export function buildEvidencePacket(input: {
       ? { unavailable_metrics: input.scope.metrics.filter((metric) => !metric.available).map((metric) => metric.label) }
       : {}),
   };
+}
+
+// Each block's derived records as figures after every displayed one, so a
+// displayed figure's id never shifts. A record is left out when its own fact
+// is displayed or an operand is not; an operand is named by its figure in the
+// record's block, else its first.
+function derivedFigures(
+  blocks: ReadonlyArray<Block>,
+  shown: ReadonlyArray<DisplayedFigure>,
+  blockSources: ReadonlyMap<string, string[]>,
+): PacketFigure[] {
+  const idOf = (factId: string, blockId: unknown) => {
+    const index = [shown.findIndex((figure) => figure.fact_id === factId && figure.block_id === blockId), shown.findIndex((figure) => figure.fact_id === factId)]
+      .find((candidate) => candidate !== -1);
+    return index === undefined ? undefined : `F${index + 1}`;
+  };
+  const out: PacketFigure[] = [];
+  for (const block of blocks) {
+    for (const record of derivedRecords(block)) {
+      const [current, prior] = record.of.map((factId) => idOf(factId, block.id));
+      if (idOf(record.fact_id, block.id) || !current || !prior) continue;
+      out.push({
+        id: `F${shown.length + out.length + 1}`,
+        metric: record.metric,
+        period: record.period,
+        period_end: record.period_end,
+        value: record.value,
+        fact_id: record.fact_id,
+        source_ids: (isString(block.id) && blockSources.get(block.id)) || [],
+        derived_from: [current, prior],
+      });
+    }
+  }
+  return out;
+}
+
+// data_ref.params is open JSON: a malformed record is dropped, never guessed at.
+function derivedRecords(block: Block): DerivedFigureRecord[] {
+  const params = isRecord(block.data_ref) && isRecord(block.data_ref.params) ? block.data_ref.params : {};
+  const records = Array.isArray(params.derived_figures) ? params.derived_figures : [];
+  return records.filter((record): record is DerivedFigureRecord =>
+    isRecord(record) &&
+    [record.fact_id, record.metric, record.period, record.period_end, record.value].every(isString) &&
+    Array.isArray(record.of) && record.of.length === 2 && record.of.every(isString)
+  );
 }
 
 function packetClaims(
