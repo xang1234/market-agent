@@ -247,9 +247,11 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       };
     };
     // ponytail: only the attempt that planned the overview writes its
-    // commentary. A retry of a saved answer resumes its run and plans nothing,
-    // so an attempt that failed before writing it leaves the answer without
-    // one; a commentary job keyed by the message would close that.
+    // commentary, so an attempt that did not plan writes none. Two do not: a
+    // retry that resumes a reserved run after a failed commit, and a retry of
+    // a saved answer. Either leaves the answer without commentary. Upgrade
+    // path: mark the overview in the plan's provenance, so any publishing
+    // attempt can compose.
     const withCommentary = (answer: ChatFinancialTurn): ChatFinancialTurn => {
       const { commentary: compose } = deps;
       if (!overview || !compose || answer.kind !== "published" || !answer.message) return answer;
