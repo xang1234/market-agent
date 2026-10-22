@@ -87,8 +87,10 @@ export function checkComparison(
     for (const figure of unique(sameMetric, keyOf)) perCompany.set(memberOf(figure), [...(perCompany.get(memberOf(figure)) ?? []), figure]);
     if (cited.length !== companies.size) return fail("a ranking compares one figure per company");
     // A company shown for several periods: every company at one period, so
-    // no company's best period is picked against another's.
+    // no company's best period is picked against another's. A change is
+    // compared over one span whatever else is shown.
     const periods = new Set(cited.map((figure) => cohortPeriod(figure.period)));
+    if (periods.size > 1 && [...periods].some((period) => period.startsWith("span:"))) return fail("changes across companies are compared over one span");
     const severalPeriods = [...perCompany.values()].some((figures) => figures.length > 1);
     if (severalPeriods && periods.size > 1) return fail("companies shown for several periods are compared at one period");
     eligible = [...perCompany.values()].flatMap((figures) =>

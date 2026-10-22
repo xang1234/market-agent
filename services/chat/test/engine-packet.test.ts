@@ -178,11 +178,20 @@ test("growth across companies compares each company's change over the same span,
     { kind: "comparison", text: "year over year", evidence: ["F3", "F6"], op: "highest", result: "F3" },
     { kind: "comparison", text: "mixed spans", evidence: ["F3", "F5"], op: "highest", result: "F3" },
   ], packet);
-  assert.deepEqual(report.rejected, [{ index: 1, text: "mixed spans", check: "comparative", reason: "comparison: companies shown for several periods are compared at one period" }]);
+  assert.deepEqual(report.rejected, [{ index: 1, text: "mixed spans", check: "comparative", reason: "comparison: changes across companies are compared over one span" }]);
   assert.equal(
     plainText(renderAssertion(report.accepted[0]!, packet, []).segments),
     "Of NVDA and AMD, NVDA's percent change in revenue was highest: NVDA 57.89% (Q4 FY2026 vs Q4 FY2025), AMD 45.74% (Q2 FY2026 vs Q2 FY2025).",
   );
+  // Each company with one change shown, the other a gap: still one span.
+  const oneEach = enginePacket(content([
+    value(1, "a", "measure:m2", "period:p2", "57.89%"),
+    gap(2, "a", "measure:m2", "period:p3"),
+    gap(3, "b", "measure:m2", "period:p4"),
+    value(4, "b", "measure:m2", "period:p5", "4.67%"),
+  ], ["a", "b"]), TICKERS);
+  assert.deepEqual(checkAssertions([{ kind: "comparison", text: "x", evidence: ["F1", "F4"], op: "highest", result: "F1" }], oneEach).rejected,
+    [{ index: 0, text: "x", check: "comparative", reason: "comparison: changes across companies are compared over one span" }]);
 });
 
 test("negative engine amounts compare by their sign", () => {
