@@ -1,4 +1,5 @@
 import type { DerivationProofV1, IsoDate } from "./contracts.ts";
+import type { MetricValueKind } from "./definitions.ts";
 import { compareExactDecimals, parseDerivedDecimalText, parseFinancialDecimal, type ExactDecimal } from "./exact-decimal.ts";
 import { dayNumber } from "./periods.ts";
 import { addRationals, rationalFromDecimal, rationalToValue, subtractRationals, type ExactRational } from "./rational.ts";
@@ -19,14 +20,19 @@ export function derivationValue(proof: DerivationProofV1): ExactDecimal | null {
 }
 
 export type DerivationIssue =
+  | "not_a_flow"
   | "invalid_derivation"
-  | "own_term_mismatch"
+  | "own_term_sign"
+  | "own_term_source"
+  | "own_term_end"
   | "periods_not_contiguous"
   | "fiscal_year_mismatch"
   | "value_mismatch"
   | "own_term_not_last_filed";
 
 export type DerivedFact = Readonly<{
+  /** The metric's, from its definition; null for a metric outside the catalog. */
+  value_kind: MetricValueKind | null;
   source_id: string;
   value_text: string | null;
   period: Readonly<{ start: IsoDate | null; end: IsoDate; fiscal_year: number }>;
@@ -34,19 +40,20 @@ export type DerivedFact = Readonly<{
 
 /**
  * Whether a derivation proves a fact (#481), the one check the writer, engine
- * eligibility and binding share. The fact is its own filing's term, which ends
- * on the fact's end, less the terms that tile the rest of that term exactly,
- * all of the fact's fiscal year. Every other term was filed strictly before
- * the own term, so the value is public exactly when its last input is.
+ * eligibility and binding share. Only a flow sums over periods. The fact is
+ * its own filing's term, which ends on the fact's end, less the terms that
+ * tile the rest of that term exactly, all of the fact's fiscal year. Every
+ * other term was filed strictly before the own term, so the value is public
+ * exactly when its last input is.
  */
 export function derivationIssue(proof: unknown, fact: DerivedFact): DerivationIssue | null {
+  if (fact.value_kind !== "flow") return "not_a_flow";
   const checked = validateDerivationProof(proof);
   if (!checked.ok) return "invalid_derivation";
   const [own, ...others] = checked.value.terms;
-  if (own!.sign !== "+" || others.some((term) => term.sign !== "-")
-    || own!.source.source_id.toLowerCase() !== fact.source_id.toLowerCase() || own!.end !== fact.period.end) {
-    return "own_term_mismatch";
-  }
+  if (own!.sign !== "+" || others.some((term) => term.sign !== "-")) return "own_term_sign";
+  if (own!.source.source_id.toLowerCase() !== fact.source_id.toLowerCase()) return "own_term_source";
+  if (own!.end !== fact.period.end) return "own_term_end";
   if (fact.period.start === null || !tilesBefore(own!.start, fact.period.start, others)) return "periods_not_contiguous";
   if (checked.value.terms.some((term) => term.fiscal_year !== fact.period.fiscal_year)) return "fiscal_year_mismatch";
   const sum = derivationValue(checked.value);

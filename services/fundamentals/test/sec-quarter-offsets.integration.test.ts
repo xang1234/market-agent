@@ -59,6 +59,8 @@ function companyFacts(cik: number, filed: ReadonlyArray<string>, quirks: Quirks)
       "us-gaap": {
         Revenues: concept(["100", "110", "120", "460", "140", "150", "160", "620", "180"]),
         NetIncomeLoss: concept(["10", "11", "12", "46", "14", "15", "16", "62", "18"]),
+        // Derived like revenue, but outside the engine's catalog: never attempted, so never refused.
+        CostOfRevenue: concept(["60", "66", "72", "276", "84", "90", "96", "372", "108"]),
         EarningsPerShareDiluted: concept(["0.1", "0.11", "0.12", "0.46", "0.14", "0.15", "0.16", "0.62", "0.18"], { unit: "USD/shares" }),
         Assets: concept([null, null, null, "1000", null, null, null, "1100", "1150"], { instant: true }),
         // A 10-Q states cash flows from the start of the fiscal year: FY2024's quarters are 40, 45, 50 and 55.
@@ -80,6 +82,8 @@ const latestQuarter = (metric: string, offset: number): ReportedMetricNode => ({
 const named = (metric: string, fiscal_year: number, fiscal_period: "Q1" | "Q2" | "Q3" | "Q4"): ReportedMetricNode =>
   ({ ...latestQuarter(metric, 0), period: { kind: "fiscal_period", fiscal_year, fiscal_period } });
 
+const UNPROVEN = "sec_edgar derived value left unproven";
+
 const POLICY: SelectionPolicy = { knowledge_cutoff: "2026-10-02T00:00:00.000Z", reporting_basis: "as_reported", max_age_days: null, allowed_source_classes: ["sec_filing"] };
 
 function landed(result: ReturnType<typeof selectInput>): string {
@@ -96,10 +100,11 @@ function terms(candidate: InputCandidate | undefined): string[] {
 async function secIssuer(db: Awaited<ReturnType<typeof connectedPool>>, id: string, cik: number, quirks: Quirks = {}) {
   await db.query(`insert into issuers (issuer_id, legal_name, cik) values ($1, 'ACME CORP', $2)`, [id, String(cik)]);
   const filed: string[] = [];
+  const warnings: unknown[][] = [];
   const ingest = async (fiscalYear: number, periods: ReadonlyArray<Period | "Q4">, completedAt = "2026-10-01T15:00:00.000Z") => {
     filed.push(...filings(cik, quirks).filter(([filing]) => filing.fy === fiscalYear && (periods as ReadonlyArray<string>).includes(filing.fp)).map(([filing]) => filing.accn));
     const fetcher = secCompanyFetcher(() => companyFacts(cik, filed, quirks), { completed_at: completedAt });
-    const repository = createSecBackedStatementRepository(db, { fetcher, sourceId: FALLBACK_SOURCE_ID, logger: { warn: () => {} } });
+    const repository = createSecBackedStatementRepository(db, { fetcher, sourceId: FALLBACK_SOURCE_ID, logger: { warn: (...entry: unknown[]) => warnings.push(entry) } });
     for (const fiscalPeriod of periods) {
       assert.ok(await repository.find({ issuer_id: id, family: "income", basis: "as_reported", fiscal_year: fiscalYear, fiscal_period: fiscalPeriod }), `${fiscalPeriod} FY${fiscalYear}`);
     }
@@ -126,7 +131,7 @@ async function secIssuer(db: Awaited<ReturnType<typeof connectedPool>>, id: stri
   };
   const backfill = () =>
     backfillSecCompanionStatements(db, { issuerId: id, fetcher: secCompanyFetcher(() => companyFacts(cik, filed, quirks)), sourceId: FALLBACK_SOURCE_ID, logger: { warn: () => {} } });
-  return { ingest, candidates, backfill };
+  return { ingest, candidates, backfill, warnings };
 }
 
 test("latest quarterly offsets on SEC-ingested statements", { timeout: 300_000 }, async (t) => {
@@ -157,6 +162,7 @@ test("latest quarterly offsets on SEC-ingested statements", { timeout: 300_000 }
     const own = fourth[1]!.precision!.derivation!.terms[0]!;
     assert.equal(own.source.source_id, fourth[1]!.source_id, "the 10-K's year is the Q4 fact's own input");
     assert.match(own.source.locator, /^sec_edgar:companyfacts:CIK0001234567#Revenues\|USD\|0001234567-24-000004\|2024-01-01\.\.2024-12-31$/u);
+    assert.equal(fourth[1]!.precision!.source_locator, "sec_edgar:derivation:CIK0001234567#Revenues|USD|0001234567-24-000004|2024-10-01..2024-12-31");
     assert.deepEqual([0, 1, 2, 3, 4, 5, 6, 7].map((offset) => landed(selectInput(latestQuarter("revenue", offset), revenue, POLICY))), [
       "Q4 FY2024 170",
       "Q3 FY2024 160",
@@ -230,6 +236,7 @@ test("latest quarterly offsets on SEC-ingested statements", { timeout: 300_000 }
     const revenue = await issuer.candidates("revenue");
     assert.deepEqual(revenue.filter((candidate) => candidate.period.fiscal_period === "Q4").map((candidate) => [candidate.value_text, candidate.precision]), [["170", null]]);
     assert.equal(landed(selectInput(named("revenue", 2024, "Q4"), revenue, POLICY)), "gap precision_unverified");
+    assert.deepEqual(issuer.warnings.filter(([message]) => message === UNPROVEN), [], "an input without its token is not a refused proof");
   });
 
   await t.test("a Q4 whose Q3 10-Q was filed after the 10-K is stored unproven, so it is a gap (#481)", async () => {
@@ -239,6 +246,11 @@ test("latest quarterly offsets on SEC-ingested statements", { timeout: 300_000 }
     assert.deepEqual(revenue.filter((candidate) => candidate.period.fiscal_period === "Q4").map((candidate) => [candidate.value_text, candidate.precision, candidate.context]), [["170", null, null]]);
     assert.equal(landed(selectInput(named("revenue", 2024, "Q4"), revenue, POLICY)), "gap precision_unverified");
     assert.equal(landed(selectInput(named("revenue", 2024, "Q3"), revenue, POLICY)), "Q3 FY2024 160", "the late 10-Q's own quarter is unaffected");
+    const refused = { issuer_id: "46900000-0000-4000-8000-000000000003", accession: "0003234567-24-000004", period_start: "2024-10-01", period_end: "2024-12-31", reason: "own_term_not_last_filed" };
+    assert.deepEqual(
+      issuer.warnings.filter(([message]) => message === UNPROVEN),
+      ["revenue", "net_income", "operating_cash_flow"].map((metric_key) => [UNPROVEN, { ...refused, metric_key }]),
+    );
   });
 
   await t.test("rerunning the SEC backfill proves a Q4 stored before #481 in place, and replaces one its derivation contradicts (#481)", async () => {

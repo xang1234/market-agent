@@ -18,7 +18,10 @@ import {
   US_GAAP_TO_METRIC_KEY,
   secCoverCountValues,
   secFiscalYearWindow,
+  secTokenLocator,
+  secTokenProofHash,
   selectSecConceptValue,
+  sourceIdForAccession,
   type ExtractStatementInput,
   type SecCompanyFacts,
   type SecCompanyFactsFetch,
@@ -27,20 +30,18 @@ import {
   type SecFetchEvidence,
   type SecSource,
   type SecSourceToken,
+  type SecValueLocation,
 } from "./sec-edgar.ts";
-import { DERIVATION_PROOF_VERSION, type DerivationProofV1 } from "../../financial-core/src/contracts.ts";
 import { resolveMetricDefinition } from "../../financial-core/src/definitions.ts";
-import { derivationIssue, derivationValue } from "../../financial-core/src/derivation.ts";
 import type { ShareBasis } from "../../financial-core/src/evidence-vocabulary.ts";
-import { canonicalDecimalString } from "../../financial-core/src/exact-decimal.ts";
 import { explainedBySplits, splitHistoryCovers, splitsRestate } from "../../financial-core/src/split-adjustment.ts";
 import { loadSubjectSplitHistory, type SubjectSplitHistory } from "../../market/src/split-history.ts";
 import { checkTokenAgainstStoredValue, recordFactPrecisionAttestation } from "../../evidence/src/financial-attestations.ts";
 import { recordFactFinancialContext } from "../../evidence/src/financial-context.ts";
 import { withPinnedTransaction, type TransactionalQueryExecutor } from "./pinned-transaction.ts";
 import { recordSecFetchPublication, secAccessionVersionHash } from "./sec-publication-proof.ts";
+import { secDerivedLine } from "./sec-derivation-proof.ts";
 import { recordSecFilingAcceptances, type SecFilingRef } from "./sec-acceptance.ts";
-import { createHash } from "node:crypto";
 import { factActiveSql, factKnownAtSql } from "../../evidence/src/fact-activity.ts";
 import { FundamentalsDataUnavailableError } from "./availability.ts";
 import { FROZEN_ISSUER_IDS } from "../../shared/src/golden-issuers.ts";
@@ -446,6 +447,7 @@ async function storeFiling(
         tokens: entry.tokens,
         derivations: entry.derivations,
         retrievedAt: asOf,
+        logger: input.logger,
       });
       if (entry.statement !== income?.statement) continue;
       for (const [metricKey, oldIds] of stale) {
@@ -461,6 +463,7 @@ async function storeFiling(
         tokens: new Map([[SEC_COVER_COUNT_METRIC_KEY, cover.token]]),
         retrievedAt: asOf,
         certify: cover.certified,
+        logger: input.logger,
       });
     }
     await recordSecRestatements(client, {
@@ -666,14 +669,6 @@ async function upsertSecFilingSource(db: FundamentalsQueryExecutor, source: SecS
     throw new Error(`sec_edgar source ${source.source_id} (${source.canonical_url}) has another content_hash; a source version never changes`);
   }
   return stored as UUID;
-}
-
-function sourceIdForAccession(accessionNumber: string): UUID {
-  const hash = createHash("sha256").update(accessionNumber).digest("hex").slice(0, 32).split("");
-  hash[12] = "4";
-  hash[16] = ((Number.parseInt(hash[16], 16) & 0x3) | 0x8).toString(16);
-  const hex = hash.join("");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}` as UUID;
 }
 
 function statementAccession(
@@ -1014,18 +1009,40 @@ async function persistStatementFacts(
     derivations?: ReadonlyMap<string, SecDerivation>;
     retrievedAt?: string;
     certify?: boolean;
+    logger: Pick<Console, "warn">;
   },
 ): Promise<Map<string, string>> {
   // The facts this call inserted, by metric_key (a conflicting line inserts none).
   const insertedIds = new Map<string, string>();
   for (const line of statement.lines) {
+    const token = provenance.tokens.get(line.metric_key);
     const derivation = provenance.derivations?.get(line.metric_key);
     const derived = derivation ? secDerivedLine(provenance.cik, statement, line.metric_key, derivation) : null;
-    const token = provenance.tokens.get(line.metric_key);
-    const exact = token
-      ? { value: token.token, at: token, locator: secTokenLocator(provenance.cik, token), proof: { kind: "token" as const, raw_token: token.token, token_proof_hash: secTokenProofHash(provenance.cik, token) } }
-      : derived?.status === "proven" ? { value: derived.sum, at: derived.at, locator: derived.locator, proof: { kind: "derived" as const, derivation: derived.proof } }
-      : null;
+    if (derivation && derived?.status === "unproven") {
+      provenance.logger.warn("sec_edgar derived value left unproven", {
+        reason: derived.issue,
+        issuer_id: statement.subject.id,
+        metric_key: line.metric_key,
+        accession: derivation.minuend.accn,
+        period_start: statement.period_start,
+        period_end: statement.period_end,
+      });
+    }
+    const proven = derived?.status === "proven" ? derived : null;
+    const attestation = token
+      ? {
+          precision_class: "source_token_preserved" as const,
+          raw_token: token.token,
+          token_proof_hash: secTokenProofHash(provenance.cik, token),
+          source_locator: secTokenLocator(provenance.cik, token),
+          validation_method: "sec_companyfacts_lossless_json.v1",
+        }
+      : proven && {
+          precision_class: "derived_from_source_tokens" as const,
+          derivation: proven.proof,
+          source_locator: proven.locator,
+          validation_method: "sec_companyfacts_period_difference.v1",
+        };
     const qualityFlags = derivation
       ? [await derivationLineage(db, derivation, provenance.cik, provenance.retrievedAt ?? clock().toISOString())]
       : [];
@@ -1051,7 +1068,7 @@ async function persistStatementFacts(
         statement.period_end,
         statement.fiscal_year,
         statement.fiscal_period,
-        exact?.value ?? derived?.sum ?? line.value_num,
+        token?.token ?? derived?.sum ?? line.value_num,
         line.value_text ?? null,
         line.unit,
         line.currency ?? null,
@@ -1066,35 +1083,19 @@ async function persistStatementFacts(
     );
     const factId = inserted.rows[0]?.fact_id;
     if (factId) insertedIds.set(line.metric_key, factId);
-    if (!exact) continue;
+    const exact = token ? { value: token.token, at: token } : proven && { value: proven.sum, at: proven.at };
+    if (!attestation || !exact) continue;
     const storedId = factId ?? await lockStoredExactFact(db, statement, line, exact.value);
     if (!storedId) continue;
     if (factId || !(await hasProvenPrecision(db, storedId))) {
-      const { proof } = exact;
-      await recordFactPrecisionAttestation(db, proof.kind === "derived"
-        ? {
-            fact_id: storedId,
-            precision_class: "derived_from_source_tokens",
-            derivation: proof.derivation,
-            source_locator: exact.locator,
-            validation_method: "sec_companyfacts_period_difference.v1",
-          }
-        : {
-            fact_id: storedId,
-            precision_class: factId ? "source_token_preserved" : "revalidated_against_source",
-            raw_token: proof.raw_token,
-            token_proof_hash: proof.token_proof_hash,
-            source_locator: exact.locator,
-            validation_method: "sec_companyfacts_lossless_json.v1",
-          });
+      await recordFactPrecisionAttestation(db, attestation.precision_class === "source_token_preserved" && !factId
+        ? { ...attestation, fact_id: storedId, precision_class: "revalidated_against_source" }
+        : { ...attestation, fact_id: storedId });
     }
-    if (provenance.certify !== false) await recordSecOriginalContext(db, storedId, line, exact.at, exact.locator);
+    if (provenance.certify !== false) await recordSecOriginalContext(db, storedId, line, exact.at, attestation.source_locator);
   }
   return insertedIds;
 }
-
-/** Where companyfacts states a value: a token's place, or a derived value's own filing and period. */
-type SecValueLocation = Omit<SecSourceToken, "token">;
 
 /** What facts are stored from: a statement's period, or a cover count's, and its lines. */
 type FactBatch = Pick<
@@ -1216,8 +1217,9 @@ async function derivationLineage(
   cik: number,
   retrievedAt: string,
 ): Promise<Record<string, unknown>> {
+  const inputs = [derivation.minuend, ...derivation.subtrahends];
   const sources = new Map<string, UUID>();
-  for (const accn of new Set(derivation.inputs.map((input) => input.accn))) {
+  for (const accn of new Set(inputs.map((input) => input.accn))) {
     sources.set(accn, await upsertSecFilingSource(db, secFilingSource(cik, accn, retrievedAt)));
   }
   return {
@@ -1225,55 +1227,14 @@ async function derivationLineage(
     concept: derivation.concept,
     unit: derivation.unit,
     input_source_ids: [...new Set(sources.values())],
-    inputs: derivation.inputs.map(({ accn, start, end, value }) => ({ accn, start, end, value, source_id: sources.get(accn)! })),
-  };
-}
-
-type SecDerivedLine =
-  | Readonly<{ status: "unproven"; sum: string }>
-  | Readonly<{ status: "proven"; sum: string; proof: DerivationProofV1; at: SecValueLocation; locator: string }>;
-
-// Null when the line cannot be summed exactly (not a flow, or an input without
-// its token). A refused proof leaves the line unproven: it never fails the filing.
-function secDerivedLine(
-  cik: number,
-  statement: Pick<FactBatch, "source_id" | "period_start" | "period_end" | "fiscal_year">,
-  metricKey: string,
-  derivation: SecDerivation,
-): SecDerivedLine | null {
-  if (resolveMetricDefinition(metricKey)?.value_kind !== "flow") return null;
-  const proof = secDerivationProof(cik, derivation);
-  const exact = proof && derivationValue(proof);
-  if (!proof || !exact) return null;
-  const sum = canonicalDecimalString(exact);
-  const period = { start: statement.period_start, end: statement.period_end, fiscal_year: statement.fiscal_year };
-  if (derivationIssue(proof, { source_id: statement.source_id, value_text: sum, period }) !== null) return { status: "unproven", sum };
-  const own = proof.terms.find((term) => term.source.source_id.toLowerCase() === statement.source_id.toLowerCase())!.source;
-  const at: SecValueLocation = { concept: derivation.concept, unit: derivation.unit, accn: own.accession, form: own.form, filed: own.filed, start: statement.period_start, end: statement.period_end };
-  return { status: "proven", sum, proof, at, locator: `${secTokenLocator(cik, at)}|${DERIVATION_PROOF_VERSION}` };
-}
-
-const DERIVED_FROM_PERIODS = ["FY", "Q1", "Q2", "Q3"] as const;
-
-function secDerivationProof(cik: number, derivation: SecDerivation): DerivationProofV1 | null {
-  const terms: DerivationProofV1["terms"] = [];
-  for (const input of derivation.inputs) {
-    const fiscalPeriod = DERIVED_FROM_PERIODS.find((period) => period === input.fiscal_period);
-    if (input.token === null || input.start === null || fiscalPeriod === undefined) return null;
-    const token: SecSourceToken = { token: input.token, concept: derivation.concept, unit: derivation.unit, accn: input.accn, form: input.form, filed: input.filed, start: input.start, end: input.end };
-    terms.push({
-      sign: input.sign,
-      span: input.span,
-      fiscal_year: input.fiscal_year,
-      fiscal_period: fiscalPeriod,
-      start: input.start,
+    inputs: inputs.map((input) => ({
+      accn: input.accn,
+      start: input.start ?? null,
       end: input.end,
-      raw_token: input.token,
-      token_proof_hash: secTokenProofHash(cik, token),
-      source: { source_id: sourceIdForAccession(input.accn), accession: input.accn, form: input.form, filed: input.filed, locator: secTokenLocator(cik, token) },
-    });
-  }
-  return { version: DERIVATION_PROOF_VERSION, concept: derivation.concept, unit: derivation.unit, terms };
+      value: input.val_token ?? String(input.val),
+      source_id: sources.get(input.accn)!,
+    })),
+  };
 }
 
 // A 10-K repeats the two prior years beside its own (#321). Every stored
@@ -1495,17 +1456,6 @@ async function storeLaterStatement(
     disclosure_relation: relation,
     source_context_ref: locator,
   });
-}
-
-function secTokenLocator(cik: number, token: SecValueLocation): string {
-  return `sec_edgar:companyfacts:CIK${String(cik).padStart(10, "0")}#${token.concept}|${token.unit}|${token.accn}|${token.start ?? ""}..${token.end}`;
-}
-
-/** Binds the exact token to its location in the SEC response. */
-function secTokenProofHash(cik: number, token: SecSourceToken): string {
-  return createHash("sha256")
-    .update(JSON.stringify(["sec_edgar_companyfacts.v1", cik, token.concept, token.unit, token.accn, token.start, token.end, token.token]))
-    .digest("hex");
 }
 
 async function loadLatestFiscalYear(

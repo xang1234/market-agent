@@ -184,8 +184,12 @@ function factOperand(input: BoundFactInputV1, node: ReportedMetricNode, definiti
     throw new FinancialIntegrityError("derivation_value_mismatch", `the precision status of ${node.node_id} does not name its derivation`);
   }
   if (input.derivation !== undefined) {
-    const issue = definition.value_kind !== "flow" ? "not_a_flow"
-      : derivationIssue(input.derivation, { source_id: input.source.source_id, value_text: input.numeric.value, period: input.period });
+    const issue = derivationIssue(input.derivation, {
+      value_kind: definition.value_kind,
+      source_id: input.source.source_id,
+      value_text: input.numeric.value,
+      period: input.period,
+    });
     if (issue !== null) throw new FinancialIntegrityError("derivation_value_mismatch", `the derivation of ${node.node_id} does not prove its bound value: ${issue}`);
   }
   if (rationalSign(scale) <= 0) throw new FinancialIntegrityError("invalid_scale", `scale for ${node.node_id} must be positive`);

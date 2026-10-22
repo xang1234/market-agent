@@ -99,6 +99,30 @@ test("a derived balance fails integrity, though its derivation sums to its value
   );
 });
 
+test("binding names each way a derivation that sums to its value still fails to prove it (#481)", () => {
+  const node = { node_id: "q4", operation: "reported_metric" as const, operation_version: "reported_metric.v1", subject_slot: "a", metric_key: "revenue", period: { kind: "fiscal_period" as const, fiscal_year: 2024, fiscal_period: "Q4" as const } };
+  const expected = { slot: SLOTS.a, definition_version: "revenue.v1", knowledge_cutoff: KNOWLEDGE_CUTOFF, reporting_basis: "as_reported" as const };
+  const reported = boundInput({ metric: "revenue", value: "170", start: "2024-10-01", end: "2024-12-31", fiscal_year: 2024, fiscal_period: "Q4" });
+  const { terms: [year, q1, q2, q3] } = fourthQuarter(["620", "140", "150", "160"]);
+  const withTerms = (terms: DerivationProofV1["terms"]): DerivationProofV1 => ({ ...fourthQuarter(["620", "140", "150", "160"]), terms });
+  const cases: Array<[string, unknown]> = [
+    ["invalid_derivation", { ...withTerms([year!, q1!, q2!, q3!]), version: "period_difference.v0" }],
+    ["own_term_sign", withTerms([year!, q1!, { ...q2!, sign: "+", raw_token: "-150" }, q3!])],
+    ["own_term_source", withTerms([{ ...year!, source: { ...year!.source, source_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" } }, q1!, q2!, q3!])],
+    ["own_term_end", withTerms([{ ...year!, end: "2024-12-30" }, q1!, q2!, q3!])],
+    ["periods_not_contiguous", withTerms([{ ...year!, raw_token: "610" }, q1!, q2!, q2!])],
+    ["fiscal_year_mismatch", withTerms([year!, q1!, { ...q2!, fiscal_year: 2023 }, q3!])],
+    ["value_mismatch", withTerms([year!, q1!, q2!, { ...q3!, raw_token: "150" }])],
+    ["own_term_not_last_filed", withTerms([year!, q1!, q2!, { ...q3!, source: { ...q3!.source, filed: "2025-02-16" } }])],
+  ];
+  for (const [issue, derivation] of cases) {
+    assert.throws(
+      () => operandFromBoundInput({ ...reported, precision_status: "derived_from_source_tokens", derivation: derivation as DerivationProofV1 }, node, expected),
+      { code: "derivation_value_mismatch", message: `the derivation of q4 does not prove its bound value: ${issue}` },
+    );
+  }
+});
+
 function integrityCode(action: () => unknown): string {
   try {
     action();

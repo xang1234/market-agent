@@ -156,16 +156,16 @@ test("financial attestation writers", { timeout: 180_000 }, async (t) => {
 
     await assert.rejects(() => record(derivation([fy, q1, q2, { ...q3, raw_token: "161" }])), /does not sum to the stored fact value/);
     await assert.rejects(() => record(derivation([fy, q1, q2, { ...q3, source: { ...q3.source, filed: "2023-01-10" } }])), /filed on or after the fact's own filing/);
-    await assert.rejects(() => record(derivation([{ ...fy, source: { ...fy.source, source_id: IDS.privateSource } }, q1, q2, q3])), /adds exactly one term, its first, from the fact's own source/);
+    await assert.rejects(() => record(derivation([{ ...fy, source: { ...fy.source, source_id: IDS.privateSource } }, q1, q2, q3])), /first term is not from the fact's own source/);
     await assert.rejects(() => record(derivation([fy, q1, q2, { ...q3, raw_token: "0x85" }])), /not a period_difference\.v1 proof/);
     await assert.rejects(() => record(derivation([fy, q1, q2, { ...q3, token_proof_hash: "short" }])), /not a period_difference\.v1 proof/);
     await assert.rejects(() => record(derivation([fy, q1, q2, { ...q3, span: "year_to_date", start: "2022-01-01" }])), /do not cover its first term exactly/, "Q1 and Q2 subtracted twice");
     await assert.rejects(() => record(derivation([fy, q1, term("-", "Q2", "2022-04-01", "2022-06-30", "310", "2022-08-01")])), /do not cover its first term exactly/, "a gap before the fact's start");
-    await assert.rejects(() => record(derivation([fy, q1, q2, q3].map(lastYear))), /adds exactly one term, its first/, "every term a year early");
+    await assert.rejects(() => record(derivation([fy, q1, q2, q3].map(lastYear))), /first term does not end on the fact's period end/, "every term a year early");
     await assert.rejects(() => record(derivation([fy, q1, q2, q3].map((t) => ({ ...t, fiscal_year: 2021 })))), /not of the fact's fiscal year/);
     await assert.rejects(
       () => record(derivation([{ ...term("-", "Q1", "2022-01-01", "2022-03-31", "-100", "2023-01-10"), source: { ...fy.source } }, term("+", "Q2", "2022-04-01", "2022-06-30", "70", "2022-08-01")])),
-      /adds exactly one term, its first/,
+      /adds exactly one term, its first, and subtracts the rest/,
       "the own term subtracted",
     );
 
@@ -177,6 +177,29 @@ test("financial attestation writers", { timeout: 180_000 }, async (t) => {
     assert.equal(row.token_proof_hash, hashCanonical("derivation", proven), "the proof hash binds the whole derivation");
     const stored = (await db.query(`select derivation from current_fact_precision_attestations where fact_id = $1`, [q4])).rows[0];
     assert.deepEqual(stored.derivation, proven);
+
+    const eps = "1f000000-0000-4000-8000-0000000000e2";
+    const epsMetric = "1f000000-0000-4000-8000-0000000000b2";
+    await db.query(
+      `insert into metrics (metric_id, metric_key, display_name, unit_class, aggregation, interpretation, canonical_source_class)
+       values ($1, 'eps_basic', 'EPS (Basic)', 'currency', 'derived', 'higher_is_better', 'filing')`,
+      [epsMetric],
+    );
+    await db.query(
+      `insert into facts (fact_id, subject_kind, subject_id, metric_id, period_kind, period_start, period_end, fiscal_year, fiscal_period,
+                          value_num, unit, currency, scale, as_of, reported_at, observed_at, source_id, method, verification_status,
+                          freshness_class, coverage_level, entitlement_channels, confidence)
+       select $1, subject_kind, subject_id, $2, period_kind, period_start, period_end, fiscal_year, fiscal_period,
+              value_num, unit, currency, scale, as_of, reported_at, observed_at, source_id, method, verification_status,
+              freshness_class, coverage_level, entitlement_channels, confidence
+         from facts where fact_id = $3`,
+      [eps, epsMetric, q4],
+    );
+    await assert.rejects(
+      () => recordFactPrecisionAttestation(db, { fact_id: eps, precision_class: "derived_from_source_tokens", derivation: proven, source_locator: "us-gaap:EarningsPerShareBasic#Q4", validation_method: "test" }),
+      /only a flow metric's value can be derived/,
+      "a per-share value does not sum over periods",
+    );
   });
 
   await t.test("financial contexts are recorded once per fact", async () => {

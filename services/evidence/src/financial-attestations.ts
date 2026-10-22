@@ -11,6 +11,7 @@ import {
 } from "../../financial-core/src/exact-decimal.ts";
 import { hashCanonical } from "../../financial-core/src/canonical.ts";
 import type { DerivationProofV1 } from "../../financial-core/src/contracts.ts";
+import { resolveMetricDefinition } from "../../financial-core/src/definitions.ts";
 import { derivationIssue, derivationValue, type DerivationIssue } from "../../financial-core/src/derivation.ts";
 import {
   PRECISION_CLASSES,
@@ -145,10 +146,12 @@ export async function recordFactPrecisionAttestation(
     period_start: string | null;
     period_end: string;
     fiscal_year: number;
+    metric_key: string | null;
   }>(
-    `select source_id::text, value_num::text as value_text, scale::text as scale_text,
-            period_start::text, period_end::text, fiscal_year
-       from facts where fact_id = $1`,
+    `select f.source_id::text, f.value_num::text as value_text, f.scale::text as scale_text,
+            f.period_start::text, f.period_end::text, f.fiscal_year, m.metric_key
+       from facts f left join metrics m on m.metric_id = f.metric_id
+      where f.fact_id = $1`,
     [input.fact_id],
   )).rows[0];
   if (!fact) throw new FinancialAttestationError("fact does not exist");
@@ -167,6 +170,7 @@ export async function recordFactPrecisionAttestation(
   } = { raw_token: null, token_proof_hash: null, value_text: null, scale_text: null, source_locator: null, derivation: null };
   if (input.precision_class === "derived_from_source_tokens") {
     const issue = derivationIssue(input.derivation, {
+      value_kind: (fact.metric_key === null ? null : resolveMetricDefinition(fact.metric_key)?.value_kind) ?? null,
       source_id: fact.source_id,
       value_text: fact.value_text,
       period: { start: fact.period_start, end: fact.period_end, fiscal_year: fact.fiscal_year },
@@ -238,8 +242,11 @@ export function checkTokenAgainstStoredValue(rawToken: string, storedValueText: 
 }
 
 const DERIVATION_REFUSALS: Readonly<Record<DerivationIssue, string>> = {
+  not_a_flow: "only a flow metric's value can be derived over periods",
   invalid_derivation: "derivation is not a period_difference.v1 proof with a supported decimal token in every term",
-  own_term_mismatch: "a derivation adds exactly one term, its first, from the fact's own source and ending on the fact's period end",
+  own_term_sign: "a derivation adds exactly one term, its first, and subtracts the rest",
+  own_term_source: "a derivation's first term is not from the fact's own source",
+  own_term_end: "a derivation's first term does not end on the fact's period end",
   periods_not_contiguous: "a derivation's subtracted terms do not cover its first term exactly up to the fact's period start",
   fiscal_year_mismatch: "a derivation term is not of the fact's fiscal year",
   value_mismatch: "derivation does not sum to the stored fact value",

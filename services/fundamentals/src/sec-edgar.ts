@@ -8,6 +8,7 @@
 // here resolve through the metric-mapper to the same `metric_id`s a
 // hand-seeded registry uses.
 
+import { createHash } from "node:crypto";
 import type {
   FiscalPeriod,
   NormalizedStatementInput,
@@ -15,7 +16,6 @@ import type {
   StatementLine,
 } from "./statement.ts";
 import type { IssuerSubjectRef, UUID } from "./subject-ref.ts";
-import type { DerivationProofV1 } from "../../financial-core/src/contracts.ts";
 import {
   assertIso8601Utc,
   assertPositiveInteger,
@@ -304,6 +304,28 @@ export type SecSourceToken = Readonly<{
   end: string;
 }>;
 
+/** Where companyfacts states a value: a token's place, or a derived value's own filing and period. */
+export type SecValueLocation = Omit<SecSourceToken, "token">;
+
+export function secTokenLocator(cik: number, token: SecValueLocation): string {
+  return `sec_edgar:companyfacts:CIK${String(cik).padStart(10, "0")}#${token.concept}|${token.unit}|${token.accn}|${token.start ?? ""}..${token.end}`;
+}
+
+/** Binds the exact token to its location in the SEC response. */
+export function secTokenProofHash(cik: number, token: SecSourceToken): string {
+  return createHash("sha256")
+    .update(JSON.stringify(["sec_edgar_companyfacts.v1", cik, token.concept, token.unit, token.accn, token.start, token.end, token.token]))
+    .digest("hex");
+}
+
+export function sourceIdForAccession(accessionNumber: string): UUID {
+  const hash = createHash("sha256").update(accessionNumber).digest("hex").slice(0, 32).split("");
+  hash[12] = "4";
+  hash[16] = ((Number.parseInt(hash[16], 16) & 0x3) | 0x8).toString(16);
+  const hex = hash.join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}` as UUID;
+}
+
 export const SEC_COVER_COUNT_CONCEPT = "EntityCommonStockSharesOutstanding";
 
 /**
@@ -412,26 +434,7 @@ export function extractStatementWithTokens(input: ExtractStatementInput): {
         });
       }
       if (match.derived_from !== undefined) {
-        derivations.set(metricKey, {
-          concept: conceptName,
-          unit: unitCode,
-          inputs: [
-            { value: match.derived_from.minuend, sign: "+" as const },
-            ...match.derived_from.subtrahends.map((value) => ({ value, sign: "-" as const })),
-          ].map(({ value, sign }) => ({
-            sign,
-            accn: value.accn,
-            start: value.start ?? null,
-            end: value.end,
-            value: value.val_token ?? String(value.val),
-            token: value.val_token ?? null,
-            form: value.form,
-            filed: value.filed,
-            fiscal_year: value.fy,
-            fiscal_period: value.fp,
-            span: value.fp === "FY" ? "fiscal_year" : isDiscreteQuarterDuration(value) ? "quarter" : "year_to_date",
-          })),
-        });
+        derivations.set(metricKey, { concept: conceptName, unit: unitCode, ...match.derived_from });
       }
       seenKeys.add(metricKey);
       break; // one unit per concept per period
@@ -477,23 +480,7 @@ export function extractStatementWithTokens(input: ExtractStatementInput): {
 }
 
 /** A derived line's inputs: each filed value, by its filing (accession) and period. */
-export type SecDerivation = Readonly<{
-  concept: string;
-  unit: string;
-  inputs: ReadonlyArray<Readonly<{
-    sign: "+" | "-";
-    accn: string;
-    start: string | null;
-    end: string;
-    value: string;
-    token: string | null;
-    form: string;
-    filed: string;
-    fiscal_year: number;
-    fiscal_period: string;
-    span: DerivationProofV1["terms"][number]["span"];
-  }>>;
-}>;
+export type SecDerivation = Readonly<{ concept: string; unit: string; minuend: SecConceptValue; subtrahends: ReadonlyArray<SecConceptValue> }>;
 
 export type SecStatementValueSelection = Pick<
   ExtractStatementInput,
@@ -665,7 +652,7 @@ function statementSelectionDescription(fiscalPeriod: FiscalPeriod): string {
   return 'form="10-Q"';
 }
 
-function isDiscreteQuarterDuration(value: SecConceptValue): boolean {
+export function isDiscreteQuarterDuration(value: SecConceptValue): boolean {
   if (value.start === undefined) return false;
   const days = inclusiveDurationDays(value.start, value.end);
   return days >= 60 && days <= 125;

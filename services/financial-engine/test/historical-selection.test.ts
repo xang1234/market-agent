@@ -475,6 +475,8 @@ test("a derived Q4 binds when its derivation proves its value; one that does not
   const assets: ReportedMetricNode = { ...FY2023, metric_key: "total_assets", period: { kind: "fiscal_period", fiscal_year: 2024, fiscal_period: "Q4" } };
   const derivedBalance = { ...certified, metric_key: "total_assets", period: { ...certified.period, start: null }, context: { ...certified.context!, period_type: "instant" as const } };
   assert.equal(landed(selectInput(assets, [derivedBalance], atCutoff)), "gap precision_unverified", "a balance is never derived");
+  const eps: ReportedMetricNode = { ...FY2023, metric_key: "eps_diluted", period: { kind: "fiscal_period", fiscal_year: 2024, fiscal_period: "Q4" } };
+  assert.equal(landed(selectInput(eps, [{ ...certified, metric_key: "eps_diluted" }], atCutoff)), "gap precision_unverified", "a per-share value does not sum over periods");
 });
 
 test("a margin's numerator and denominator land on one fiscal quarter, or each is a gap (#469)", () => {
