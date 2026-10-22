@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import test from "node:test";
 
 import { composeTraced, judgedLive, replayRecorded } from "../src/answer-trace.ts";
-import { answerText, assertionSummary, judgeSummary, mutationSummary, mutationVariants, readTraces, replyFixture, rerecord } from "../scripts/answer-lab.ts";
+import { answerText, assertionSummary, judgeSummary, mutationSummary, mutationVariants, primaryDeployment, readTraces, replyFixture, rerecord } from "../scripts/answer-lab.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
 import { REPAIR_INSTRUCTIONS } from "../src/inference-repair.ts";
 
@@ -297,7 +297,7 @@ test("live --judge --update re-records a trace that recorded --check replays to 
   };
   const composed = await composeTraced(trace.input, { env, createClient: createClient as never });
   const answer = await judgedLive(trace.input, composed, { env, createClient: createClient as never });
-  rerecord(source!, answer);
+  rerecord(source!, answer, "openai/gpt-4.1");
 
   const [written] = readTraces([source!.file]);
   assert.equal(written!.trace.exchange!.text, list);
@@ -328,7 +328,40 @@ test("live --judge --update leaves a trace as it was when the answer was cut off
     };
     const composed = await composeTraced(trace.input, { env: run.env, createClient: createClient as never });
     const answer = await judgedLive(trace.input, composed, { env: run.env, createClient: createClient as never });
-    rerecord(source!, answer);
+    rerecord(source!, answer, "openai/gpt-4.1");
     assert.equal(readFileSync(source!.file, "utf8"), before, name);
   }
+});
+
+test("live --judge --update leaves a trace as it was when a fallback model answered or repaired, or the judge gave an inference no verdict", async () => {
+  const { trace } = TRACES.find(({ label }) => label === "segment-drill-down")!;
+  const env = {
+    LLM_CHANNELS: "openai", LLM_OPENAI_PROTOCOL: "openai", LLM_OPENAI_MODELS: "gpt-4.1,gpt-4.1-mini",
+    LITELLM_MODEL: "openai/gpt-4.1", LITELLM_FALLBACK_MODELS: "openai/gpt-4.1-mini", JUDGE_LITELLM_MODEL: "openai/gpt-4.1",
+  };
+  assert.equal(await primaryDeployment(env), "openai/gpt-4.1");
+  const list = trace.exchange!.text.slice(trace.exchange!.text.indexOf("```assertions"));
+  const contradicted = '{"verdicts":[{"id":6,"verdict":"contradicted","worded_amount":false}]}';
+  const runs = {
+    "answer on a fallback": { primaryFails: "answer", judge: contradicted },
+    "repair on a fallback": { primaryFails: "repair", judge: contradicted },
+    "no verdict for an inference": { primaryFails: null, judge: '{"verdicts":[]}' },
+  };
+  const written = [];
+  for (const [name, run] of Object.entries(runs)) {
+    const [source] = readTraces([traceFiles({ "segment-drill-down.json": trace })]);
+    const before = readFileSync(source!.file, "utf8");
+    const createClient = () => async (deployment: { model: string }, request: { messages: ReadonlyArray<{ content: string }> }) => {
+      const transcript = request.messages.map((message) => message.content).join("\n");
+      const call = transcript.includes(REPAIR_INSTRUCTIONS) ? "repair" : transcript.startsWith("You check the analyst inferences") ? "judge" : "answer";
+      if (call === run.primaryFails && deployment.model === "gpt-4.1") throw new Error("primary unavailable");
+      return { text: call === "judge" ? run.judge : call === "repair" ? "```assertions\n[]\n```" : list };
+    };
+    const composed = await composeTraced(trace.input, { env, createClient: createClient as never });
+    // Today's repair deadline fits one attempt; these fit its fallback too.
+    const answer = await judgedLive(trace.input, composed, { env, createClient: createClient as never, repairDeadlines: { attemptMs: 15_000, totalMs: 45_000 } });
+    rerecord(source!, answer, "openai/gpt-4.1");
+    if (readFileSync(source!.file, "utf8") !== before) written.push(name);
+  }
+  assert.deepEqual(written, []);
 });
