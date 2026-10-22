@@ -156,14 +156,30 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
       assert.ok(refs.length > 0, `${block.kind} carries no value_ref`);
       for (const ref of refs) assert.ok(cited.has(ref), `${block.kind} value_ref ${ref} is not a cited fact`);
     }
-    // No margin trend was asked for, so only the latest quarter's margins and growth
-    // are minted: unused historical ones would cost lookups and inserts every turn.
-    const minted = await client.query<{ quarter: string }>(
-      `select distinct fiscal_year::text || fiscal_period as quarter from facts
-        where method = 'derived' and period_kind = 'fiscal_q' and subject_id = $1::uuid`,
+    // No margin trend was asked for, so only the latest quarter's margins and YoY
+    // growth are minted: unused historical ones would cost lookups and inserts
+    // every turn. QoQ growth is minted for each charted quarter after the first,
+    // so the answer can cite how it moved.
+    const minted = await client.query<{ minted: string }>(
+      `select distinct m.metric_key || ' ' || f.fiscal_year::text || f.fiscal_period as minted
+         from facts f join metrics m on m.metric_id = f.metric_id
+        where f.method = 'derived' and f.period_kind = 'fiscal_q' and f.subject_id = $1::uuid
+        order by 1`,
       [NVDA.issuer_id],
     );
-    assert.equal(minted.rows.length, 1, `derived facts minted for quarters ${minted.rows.map((row) => row.quarter).join(", ")}`);
+    assert.deepEqual(minted.rows.map((row) => row.minted), [
+      "gross_margin 2026Q4", "net_margin 2026Q4", "operating_margin 2026Q4",
+      "revenue_growth_qoq 2025Q2", "revenue_growth_qoq 2025Q3", "revenue_growth_qoq 2025Q4", "revenue_growth_qoq 2026Q1",
+      "revenue_growth_qoq 2026Q2", "revenue_growth_qoq 2026Q3", "revenue_growth_qoq 2026Q4",
+      "revenue_growth_yoy 2026Q4",
+    ]);
+    // The chart carries the QoQ series it does not draw, each a fact the snapshot cites;
+    // the latest quarter's is the metric row's.
+    const derived = (chart.data_ref as { params?: { derived_figures?: Array<{ fact_id: string; period: string; value: string }> } }).params?.derived_figures ?? [];
+    assert.deepEqual(derived.map((figure) => [figure.period, figure.value]), [
+      ["Q2 2025", "15.3%"], ["Q3 2025", "16.8%"], ["Q4 2025", "12.1%"], ["Q1 2026", "12.0%"], ["Q2 2026", "6.1%"], ["Q3 2026", "22.0%"],
+    ]);
+    for (const figure of derived) assert.ok(cited.has(figure.fact_id), `${figure.period} QoQ is not a cited fact`);
   });
 
   // Each turn's answer as streamed, for the reload check after turn 3.
