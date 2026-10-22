@@ -27,6 +27,7 @@ import {
   createSecBackedStatementRepository,
   createSecBackedStatsRepository,
   SEC_DERIVATION_KIND,
+  type FundamentalsQueryExecutor,
 } from "../../fundamentals/src/sec-facts-repository.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import { loadUsableFacts } from "../../fundamentals/src/usable-facts.ts";
@@ -185,7 +186,7 @@ export function requestedFiscalQuarter(question: string): FiscalQuarter | undefi
   return { fiscal_year: year.length === 2 ? 2000 + Number(year) : Number(year), fiscal_period: `Q${quarter}` };
 }
 
-async function peersOf(db: QueryExecutor, issuer: IssuerSubjectRef): Promise<ReadonlyArray<IssuerSubjectRef>> {
+export async function peersOf(db: FundamentalsQueryExecutor, issuer: IssuerSubjectRef): Promise<ReadonlyArray<IssuerSubjectRef>> {
   try {
     return await createSqlPeerSetResolver(db).resolvePeers(issuer.id, { limit: PEER_LIMIT });
   } catch (reason) {

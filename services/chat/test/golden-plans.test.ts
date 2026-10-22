@@ -4,10 +4,10 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createRuntimeAuthority, operationDependencies, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
-import { buildDeterministicPlan, planFinancialRequest, type PlanningContext, type PlanningModel, type PlanningResult } from "../../financial-engine/src/planner.ts";
+import { buildDeterministicPlan, planFinancialRequest, type PlanningContext, type PlanningModel, type PlanningResult, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import type { CandidatePage, CandidateRequest, FinancialEvidencePort, InputCandidate } from "../../financial-engine/src/ports.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
-import { asksForNoFigure, namesCompanies, planCompanyOverview } from "../src/company-overview.ts";
+import { namesCompanies, overviewSubjects, planCompanyOverview } from "../src/company-overview.ts";
 import { isFinancialRequest, uncoveredAsks } from "../src/financial-runtime.ts";
 import { parseProposal, proposalQuestion } from "../src/scope-proposal.ts";
 import { extractSubjectMentions } from "../src/subject-extraction.ts";
@@ -249,33 +249,43 @@ test("a comparison shows each company's latest quarter, named from the newest it
 const reading = (asks: string[], metrics: unknown[] = [], income_items: string[] = [], turnsOff: string[] = []) =>
   parseProposal(JSON.stringify({ metrics, asks, turns_off: { facets: turnsOff, metrics: [] }, income_items }))!;
 
-test("a question about the companies it names that asks for no figure is answered with their overview; one about a carried company, a figure or a period is not (#398)", async () => {
+test("a question about the companies it names that asks for no figure is answered with their overview, or one company's with its peers; one about a carried company, a figure or a period is not (#398)", async () => {
   const client = await createReplayLlmChatClient(REPLIES);
   const read = async (question: string) => parseProposal((await client({} as never, { messages: [{ role: "user", content: proposalQuestion(question) }] })).text);
-  const overview = async (question: string, { carried = false, read: readQuestion = read } = {}) =>
-    namesCompanies(planningContext(question).requested_subjects, carried, question) && asksForNoFigure(await readQuestion(question));
-  for (const question of ["Analyze NVDA", "Analyze AMD", "Analyze AAPL", "Compare NVDA with AMD", "Compare NVDA and AMD again"]) {
-    assert.equal(await overview(question), true, question);
-  }
+  const AMD = GOLDEN_COMPANIES.find((company) => company.ticker === "AMD")!;
+  const amd = async (): Promise<RequestedSubject[]> => [{ mention: AMD.issuer_id, resolution: { status: "resolved", subject_ref: { kind: "issuer", id: AMD.issuer_id }, label: AMD.legal_name } }];
+  const none = async () => [];
+  // The mentions of the companies the overview covers; null when the question is no overview.
+  const overview = async (question: string, { carried = false, read: readQuestion = read, peersOf = none as typeof amd } = {}) => {
+    const subjects = planningContext(question).requested_subjects;
+    if (!namesCompanies(subjects, carried, question)) return null;
+    return (await overviewSubjects(subjects, await readQuestion(question), peersOf))?.map((subject) => subject.mention) ?? null;
+  };
+  for (const ticker of ["NVDA", "AMD", "AAPL"]) assert.deepEqual(await overview(`Analyze ${ticker}`), [ticker], ticker);
+  for (const question of ["Compare NVDA with AMD", "Compare NVDA and AMD again"]) assert.deepEqual(await overview(question), ["NVDA", "AMD"], question);
+  const peers = "How does NVDA compare with its peers?";
+  assert.deepEqual(await overview(peers, { peersOf: amd }), ["NVDA", AMD.issuer_id], "NVDA, then its peers");
+  assert.equal(await overview(peers), null, "no peer resolves");
   const scripted = (proposal: ReturnType<typeof reading>) => ({ read: async () => proposal });
-  assert.equal(await overview("Analyze NVDA and AMD", scripted(reading([]))), true, "two companies");
-  assert.equal(await overview("Analyze NVDA", scripted(reading([], ["income_statement"]))), false, "a metric");
-  assert.equal(await overview("Compare NVDA with AMD", scripted(reading([], ["income_statement"]))), false, "a metric in a comparison");
-  assert.equal(await overview("Analyze NVDA, no margins", scripted(reading([], [], [], ["margins"]))), false, "a facet turned off");
-  assert.equal(await overview("Compare NVDA with AMD", scripted(reading([], [], [], ["margins"]))), false, "a facet turned off in a comparison");
-  assert.equal(await overview("Analyze NVDA", scripted({ ...reading([]), turns_off: { facets: new Set(), metrics: new Set(["revenue"]) } })), false, "a metric turned off");
-  assert.equal(await overview("Analyze NVDA", { carried: true }), false, "a carried company");
-  assert.equal(await overview("Compare NVDA with AMD", { carried: true }), false, "a carried company beside named ones");
+  assert.equal(await overview("Compare NVDA and AMD with their peers", { ...scripted(reading(["peers"])), peersOf: amd }), null, "peers of two named companies");
+  assert.deepEqual(await overview("Analyze NVDA and AMD", scripted(reading([]))), ["NVDA", "AMD"], "two companies");
+  assert.equal(await overview("Analyze NVDA", scripted(reading([], ["income_statement"]))), null, "a metric");
+  assert.equal(await overview("Compare NVDA with AMD", scripted(reading([], ["income_statement"]))), null, "a metric in a comparison");
+  assert.equal(await overview("Analyze NVDA, no margins", scripted(reading([], [], [], ["margins"]))), null, "a facet turned off");
+  assert.equal(await overview("Compare NVDA with AMD", scripted(reading([], [], [], ["margins"]))), null, "a facet turned off in a comparison");
+  assert.equal(await overview("Analyze NVDA", scripted({ ...reading([]), turns_off: { facets: new Set(), metrics: new Set(["revenue"]) } })), null, "a metric turned off");
+  assert.equal(await overview("Analyze NVDA", { carried: true }), null, "a carried company");
+  assert.equal(await overview("Compare NVDA with AMD", { carried: true }), null, "a carried company beside named ones");
   for (const period of ["in fiscal 2025", "for Q4 2025", "YTD", "for Q3", "in the third quarter"]) {
-    assert.equal(await overview(`Analyze NVDA ${period}`, scripted(reading([]))), false, period);
+    assert.equal(await overview(`Analyze NVDA ${period}`, scripted(reading([]))), null, period);
   }
   for (const period of ["in fiscal 2025", "for Q4 2025", "YTD", "for Q3"]) {
-    assert.equal(await overview(`Compare NVDA and AMD ${period}`, scripted(reading([]))), false, `a comparison ${period}`);
+    assert.equal(await overview(`Compare NVDA and AMD ${period}`, scripted(reading([]))), null, `a comparison ${period}`);
   }
   const yearToDate = "Compare it with AMD YTD";
   assert.deepEqual(
-    [namesCompanies(planningContext(yearToDate).requested_subjects, true, yearToDate), asksForNoFigure(await read(yearToDate))],
-    [false, false],
+    [namesCompanies(planningContext(yearToDate).requested_subjects, true, yearToDate), await overviewSubjects(planningContext(yearToDate).requested_subjects, await read(yearToDate), none)],
+    [false, null],
     "the golden conversation's comparison carries NVDA, and its reading asks for a price window",
   );
 });
@@ -392,6 +402,22 @@ test("an engine answer names what it leaves out for each company it covers (#425
   assert.deepEqual(uncoveredAsks(asked("growth"), growthForNvda, labels), ["earnings per share growth for AMD"]);
   assert.deepEqual(uncoveredAsks(asked("growth"), growthForBoth, labels), []);
   assert.deepEqual(uncoveredAsks(asked("trend"), trendForNvda, labels), ["earnings per share trend for AMD"]);
+});
+
+test("an engine answer that covers peers does not name them as left out (#398)", () => {
+  const q4 = { kind: "fiscal_period", fiscal_year: 2026, fiscal_period: "Q4" };
+  const planned = buildDeterministicPlan(planningContext("NVDA and AMD"), {
+    subjects: [{ slot_id: "a", mention: "NVDA" }, { slot_id: "b", mention: "AMD" }],
+    operations: ["a", "b"].map((slot) => ({ node_id: `${slot}_rev`, operation: "reported_metric", subject_slot: slot, metric_key: "revenue", period: q4 })),
+    outputs: ["a_rev", "b_rev"].map((node_id) => ({ output_id: `out_${node_id}`, node_id })),
+    thresholds: [],
+  });
+  assert.equal(planned.outcome, "ready", JSON.stringify(planned));
+  const plan = (planned as Extract<PlanningResult, { outcome: "ready" }>).plan;
+  const labels = new Map([[GOLDEN_COMPANIES.find((company) => company.ticker === "NVDA")!.issuer_id, "NVDA"]]);
+
+  assert.deepEqual(uncoveredAsks(reading(["peers"]), plan, labels, true), [], "the plan answered peers");
+  assert.deepEqual(uncoveredAsks(reading(["peers"]), plan, labels), ["peers the question did not name"]);
 });
 
 test("an engine answer checks a qualified metric against what its plan computes (#425)", () => {

@@ -1,4 +1,4 @@
-import { DEFAULT_EXECUTION_LIMITS, publicAtCutoff, type IsoDateTime } from "../../financial-core/src/index.ts";
+import { DEFAULT_EXECUTION_LIMITS, publicAtCutoff, type FinancialSubjectRef, type IsoDateTime } from "../../financial-core/src/index.ts";
 import { buildDeterministicPlan, type PlanningContext, type PlanningResult, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort, InputCandidate } from "../../financial-engine/src/ports.ts";
 import { requestedFiscalQuarter, requestedFiscalYear, requestedPriceWindow, type FiscalQuarter } from "./fact-blocks.ts";
@@ -15,11 +15,29 @@ export function namesCompanies(subjects: ReadonlyArray<RequestedSubject>, carrie
     requestedFiscalYear(text) === undefined && requestedFiscalQuarter(text) === undefined && !PARTIAL_QUARTER.test(text) && requestedPriceWindow(text) === undefined;
 }
 
-/** Whether the reading of a question asks for no figure and turns nothing off ("no margins"), so the overview answers it. */
-export function asksForNoFigure(reading: ScopeProposal | null): boolean {
+/**
+ * The companies a turn's overview covers, by the reading of its question: the
+ * ones it names, or the one it names and that company's peers when it asks
+ * for peers. Null when it asks for a figure, turns something off ("no
+ * margins"), or asks for peers of several companies or of one with none.
+ */
+export async function overviewSubjects(
+  subjects: ReadonlyArray<RequestedSubject>,
+  reading: ScopeProposal | null,
+  peersOf: (issuer: FinancialSubjectRef) => Promise<ReadonlyArray<RequestedSubject>>,
+): Promise<ReadonlyArray<RequestedSubject> | null> {
+  if (!asksForNoFigure(reading)) return null;
+  if (!reading.asks.has("peers")) return subjects;
+  const company = subjects.length === 1 ? subjects[0]! : null;
+  if (company?.resolution.status !== "resolved") return null;
+  const peers = await peersOf(company.resolution.subject_ref);
+  return peers.length === 0 ? null : [company, ...peers];
+}
+
+function asksForNoFigure(reading: ScopeProposal | null): reading is ScopeProposal {
   return reading !== null && reading.metrics.length === 0 && reading.income_items.length === 0 &&
     reading.turns_off.facets.size === 0 && reading.turns_off.metrics.size === 0 &&
-    [...reading.asks].every((facet) => facet === "latest_quarter");
+    [...reading.asks].every((facet) => facet === "latest_quarter" || facet === "peers");
 }
 
 /** The evidence could not list a company's quarters; any other throw is a defect. */
