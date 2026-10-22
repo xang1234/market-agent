@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ReportedMetricNode } from "../../financial-core/src/index.ts";
+import type { DerivationProofV1, ReportedMetricNode } from "../../financial-core/src/index.ts";
 import type { InputCandidate } from "../src/ports.ts";
 import { selectInput, sharedLatestPeriods, type SelectionPolicy } from "../src/select-inputs.ts";
 
@@ -59,7 +59,7 @@ function candidate(spec: CandidateSpec = {}): InputCandidate {
         : spec.context,
     precision:
       spec.precision === undefined
-        ? { precision_attestation_id: `p-${id}`, precision_class: "source_token_preserved", raw_token: spec.value ?? "100", token_proof_hash: HASH, source_locator: "loc" }
+        ? { precision_attestation_id: `p-${id}`, precision_class: "source_token_preserved", raw_token: spec.value ?? "100", token_proof_hash: HASH, source_locator: "loc", derivation: null }
         : spec.precision,
     publication: spec.publication ?? [
       {
@@ -152,7 +152,7 @@ test("without a proof for the fact's exact source version, timing is unknown", (
 
 test("unproven precision and missing financial context are gaps, not implicit defaults", () => {
   assert.equal(gapReason(selectInput(FY2023, [candidate({ precision: null })], policy())), "precision_unverified");
-  const legacy = candidate({ precision: { precision_attestation_id: "p", precision_class: "legacy_unverified", raw_token: null, token_proof_hash: null, source_locator: null } });
+  const legacy = candidate({ precision: { precision_attestation_id: "p", precision_class: "legacy_unverified", raw_token: null, token_proof_hash: null, source_locator: null, derivation: null } });
   assert.equal(gapReason(selectInput(FY2023, [legacy], policy())), "precision_unverified");
   assert.equal(gapReason(selectInput(FY2023, [candidate({ context: null })], policy())), "context_unverified");
 });
@@ -418,6 +418,55 @@ test("every four consecutive SEC quarters hold one uncertifiable derived Q4 (#46
     const window = [0, 1, 2, 3].map((offset) => landed(selectInput(latestQuarter(offset), candidates, policy({ knowledge_cutoff: `${cutoff}T00:00:00Z` }))));
     assert.deepEqual(window.filter((entry) => entry.startsWith("gap")), ["gap precision_unverified"], `${cutoff}: ${window.join(", ")}`);
   }
+});
+
+function derivedFourthQuarter(year: number, value: string, [annual, q1, q2, q3]: string[], spec: CandidateSpec = {}): InputCandidate {
+  const term = (sign: "+" | "-", fiscal_period: "FY" | "Q1" | "Q2" | "Q3", raw_token: string) => ({
+    sign,
+    span: fiscal_period === "FY" ? ("fiscal_year" as const) : ("quarter" as const),
+    fiscal_year: year,
+    fiscal_period,
+    start: `${year}-${fiscal_period === "FY" ? "01-01" : QUARTER_DATES[fiscal_period][0]}`,
+    end: `${year}-${fiscal_period === "FY" ? "12-31" : QUARTER_DATES[fiscal_period][1]}`,
+    raw_token,
+    token_proof_hash: HASH,
+    source: { source_id: "11111111-1111-4111-8111-111111111111", accession: `acc-${fiscal_period}`, form: fiscal_period === "FY" ? "10-K" : "10-Q", filed: `${year}-11-01`, locator: `loc-${fiscal_period}` },
+  });
+  const derivation: DerivationProofV1 = {
+    version: "period_difference.v1",
+    concept: "Revenues",
+    unit: "USD",
+    terms: [term("+", "FY", annual!), term("-", "Q1", q1!), term("-", "Q2", q2!), term("-", "Q3", q3!)],
+  };
+  return quarter(year, "Q4", {
+    value,
+    precision: { precision_attestation_id: `p-q4-${year}`, precision_class: "derived_from_source_tokens", raw_token: value, token_proof_hash: HASH, source_locator: "loc-Q4", derivation },
+    ...spec,
+  });
+}
+
+test("a derived Q4 binds when its derivation sums to its value; one that does not, or a derived balance, is unverified (#481)", () => {
+  const atCutoff = policy({ knowledge_cutoff: "2025-03-01T00:00:00Z" });
+  const quarters = [quarter(2024, "Q1", { value: "140" }), quarter(2024, "Q2", { value: "150" }), quarter(2024, "Q3", { value: "160" })];
+  const certified = derivedFourthQuarter(2024, "170", ["620", "140", "150", "160"]);
+  assert.deepEqual([0, 1, 4].map((offset) => landed(selectInput(latestQuarter(offset), [...secQuarters(2023), ...quarters, certified], atCutoff))), [
+    "Q4 FY2024",
+    "Q3 FY2024",
+    "gap precision_unverified",
+  ], "an old Q4 stored without a proof is still unverified");
+  const selected = selectInput(latestQuarter(0), [...quarters, certified], atCutoff);
+  assert.ok(selected.status === "selected");
+  assert.deepEqual([selected.input.numeric.native_value, selected.input.candidate.precision.precision_class, selected.input.candidate.precision.derivation],
+    ["170", "derived_from_source_tokens", certified.precision!.derivation]);
+
+  const tampered = derivedFourthQuarter(2024, "170", ["620", "140", "150", "150"]);
+  assert.equal(landed(selectInput(latestQuarter(0), [...quarters, tampered], atCutoff)), "gap precision_unverified");
+  const unpaired = { ...certified, precision: { ...certified.precision!, precision_class: "source_token_preserved" as const } };
+  assert.equal(landed(selectInput(latestQuarter(0), [...quarters, unpaired], atCutoff)), "gap precision_unverified", "only a derived proof carries a derivation");
+
+  const assets: ReportedMetricNode = { ...FY2023, metric_key: "total_assets", period: { kind: "fiscal_period", fiscal_year: 2024, fiscal_period: "Q4" } };
+  const derivedBalance = { ...certified, metric_key: "total_assets", period: { ...certified.period, start: null }, context: { ...certified.context!, period_type: "instant" as const } };
+  assert.equal(landed(selectInput(assets, [derivedBalance], atCutoff)), "gap precision_unverified", "a balance is never derived");
 });
 
 test("a margin's numerator and denominator land on one fiscal quarter, or each is a gap (#469)", () => {

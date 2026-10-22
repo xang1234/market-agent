@@ -11,6 +11,7 @@ import {
   BOUND_PRICE_INPUT_SCHEMA_VERSION,
   dependencyClosure,
   type BoundFinancialInputV1,
+  type DerivationProofV1,
   type LocalId,
   type PriceObservationKind,
   type SplitAdjustmentV2,
@@ -34,6 +35,7 @@ export type InspectedInput = Readonly<
       unit: unknown;
       period: Readonly<{ kind: string; start: string | null; end: string; fiscal_year: number; fiscal_period: string }>;
       precision_status: string;
+      derivation: DerivationProofV1 | null;
       publication: Readonly<{ attestation_id: string; available_no_later_than: string; precision: string }>;
     }
   | {
@@ -149,6 +151,7 @@ export async function inspectCommittedResult(db: SqlExecutor, ownerUserId: strin
         unit: bound.unit,
         period: { kind: bound.period.kind, start: bound.period.start, end: bound.period.end, fiscal_year: bound.period.fiscal_year, fiscal_period: bound.period.fiscal_period },
         precision_status: bound.precision_status,
+        derivation: bound.derivation ?? null,
         publication: { attestation_id: bound.publication.attestation_id, available_no_later_than: bound.publication.available_no_later_than, precision: bound.publication.precision },
       };
     }),

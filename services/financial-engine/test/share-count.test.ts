@@ -46,7 +46,7 @@ function cover(filing: Filing, overrides: Partial<InputCandidate> = {}): InputCa
       fiscal_calendar_version: "sec_filer_fiscal_year.v1",
       disclosure_relation: "original",
     },
-    precision: { precision_attestation_id: `p-${filing.serial}`, precision_class: "source_token_preserved", raw_token: filing.shares, token_proof_hash: HASH, source_locator: "loc" },
+    precision: { precision_attestation_id: `p-${filing.serial}`, precision_class: "source_token_preserved", raw_token: filing.shares, token_proof_hash: HASH, source_locator: "loc", derivation: null },
     publication: [{
       attestation_id: `a-${filing.serial}`,
       timing: { available_not_before: null, available_no_later_than: `${filing.filed}T23:00:00.000Z`, timing_precision: "instant", source_timezone: "UTC" },

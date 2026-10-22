@@ -170,6 +170,7 @@
             "unit",
             "period",
             "precision_status",
+            "derivation",
             "publication"
           ],
           "properties": {
@@ -285,6 +286,13 @@
               "type": "string",
               "pattern": "^[a-z][a-z0-9_]*$"
             },
+            "derivation": {
+              "description": "The filed values a derived quarter's value sums from, each with its filing; null for a value a filing states.",
+              "oneOf": [
+                { "type": "null" },
+                { "$ref": "./financial_result_schema.json#/$defs/DerivationProofV1" }
+              ]
+            },
             "publication": {
               "type": "object",
               "required": [
@@ -309,7 +317,10 @@
               "additionalProperties": false
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "if": { "properties": { "precision_status": { "const": "derived_from_source_tokens" } } },
+          "then": { "properties": { "derivation": { "type": "object" } } },
+          "else": { "properties": { "derivation": { "type": "null" } } }
         },
         {
           "description": "A share price bound from a stored price observation; its computed value comes from its split adjustment.",

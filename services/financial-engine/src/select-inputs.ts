@@ -6,7 +6,9 @@
 // 2. Eligibility, per candidate, in order: publicly available by the cutoff
 //    (conservative, source-version-bound proof), from a source class the
 //    authority allows, proven precision, explicit financial context, a unit of
-//    the metric's kind, and the consolidated value, not a segment's.
+//    the metric's kind, and the consolidated value, not a segment's. A
+//    derived value's precision is proven only for a flow whose derivation
+//    sums to its value exactly (#481).
 // 3. "Latest" names one fiscal period per subject and period type in a plan:
 //    offset fiscal years, or quarters, before the newest period any of the
 //    subject's latest nodes of that type reports. A candidate reports its
@@ -46,9 +48,11 @@
 
 import {
   canonicalDecimalString,
+  compareExactDecimals,
   compareRationals,
   conservativeAvailability,
   dayNumber,
+  derivationValue,
   freshnessAt,
   multiplyRationals,
   parseDerivedDecimalText,
@@ -60,6 +64,7 @@ import {
   splitHistoryCovers,
   splitReferenceDate,
   type DecimalString,
+  type DerivationProofV1,
   type ExactRational,
   type FinancialUnit,
   type IsoDate,
@@ -77,7 +82,7 @@ import {
 } from "../../financial-core/src/index.ts";
 import type { InputCandidate, SplitHistory } from "./ports.ts";
 
-export const SELECTION_POLICY_VERSION = "public-information-selection.v5";
+export const SELECTION_POLICY_VERSION = "public-information-selection.v6";
 
 /** A large accelerated filer's filings are due about 112 days apart at most, so an older count is likely superseded. */
 export const SHARE_COUNT_MAX_AGE_DAYS = 130;
@@ -121,6 +126,7 @@ export type ProvenCandidate = Omit<InputCandidate, "unit" | "context" | "precisi
     raw_token: string;
     token_proof_hash: string;
     source_locator: string | null;
+    derivation: DerivationProofV1 | null;
   }>;
 }>;
 
@@ -356,7 +362,8 @@ function eligibility(candidate: InputCandidate, policy: EligibilityPolicy): { el
   const admitted = publicFromAllowedSource(candidate, policy);
   if ("reason" in admitted) return admitted;
   const { precision, context, unit } = candidate;
-  if (precision === null || precision.precision_class === "legacy_unverified" || precision.raw_token === null || precision.token_proof_hash === null) {
+  if (precision === null || precision.precision_class === "legacy_unverified" || precision.raw_token === null || precision.token_proof_hash === null
+    || !derivationProves(candidate)) {
     return { reason: "precision_unverified" };
   }
   if (context === null) return { reason: "context_unverified" };
@@ -371,6 +378,15 @@ function eligibility(candidate: InputCandidate, policy: EligibilityPolicy): { el
     precision: { ...precision, precision_class: precision.precision_class, raw_token: precision.raw_token, token_proof_hash: precision.token_proof_hash },
   };
   return { eligible: { candidate: proven, publication, numeric: exactNumeric(candidate) } };
+}
+
+function derivationProves({ metric_key, value_text, precision }: InputCandidate): boolean {
+  const derivation = precision?.derivation ?? null;
+  if ((derivation !== null) !== (precision?.precision_class === "derived_from_source_tokens")) return false;
+  if (derivation === null) return true;
+  const sum = derivationValue(derivation);
+  const value = parseDerivedDecimalText(value_text);
+  return resolveMetricDefinition(metric_key)?.value_kind === "flow" && sum !== null && value.ok && compareExactDecimals(sum, value.value) === 0;
 }
 
 function publicFromAllowedSource(candidate: InputCandidate, policy: EligibilityPolicy): { publication: SelectedPublication } | { reason: ReasonCode | null } {
