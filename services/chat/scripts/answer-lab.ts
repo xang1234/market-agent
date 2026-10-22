@@ -101,6 +101,7 @@ const COLUMNS: ReadonlyArray<[Column, string]> = [
   ["inferences_shown", "inf shown"],
   ["inferences_unverified", "inf unverified"],
   ["inferences_hidden", "inf hidden"],
+  ["inferences_sent_to_repair", "inf sent"],
   ["inferences_repaired", "inf repaired"],
   ["inferences_recovered", "inf recovered"],
   ["output_tokens", "out tok"],
@@ -528,7 +529,7 @@ export async function repairMutation(
 ): Promise<MutationRepair> {
   const { id, kind, turn, companies } = variant;
   const index = variant.judged.index;
-  const requests = repairRequests(turn.list, [], [first]);
+  const requests = repairRequests(turn.list, { accepted: checkAssertions(turn.list, turn.packet).accepted, rejected: [] }, [first]);
   if (requests.length === 0) return { id, kind, first, repaired: null, as: shownAs(first) };
   const client = options.createClient ? { createClient: options.createClient } : {};
   const round = await repairRound({

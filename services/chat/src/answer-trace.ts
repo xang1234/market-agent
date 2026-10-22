@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 import { loadLlmSettingsFromEnv, type LlmChatClient, type LlmChatMessage, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
+import { isRecord } from "../../shared/src/http.ts";
 import { assertionList, type AssertionReport } from "./assertions.ts";
 import { judgeCases, judgeInferences, judgeMessages, verdictsOf, type JudgeCase, type JudgeRecord, type ModelRecord } from "./inference-judge.ts";
 import { repairRequests, repairRound, requestRepair, type RepairRequest, type RepairTrace } from "./inference-repair.ts";
@@ -133,7 +134,7 @@ function withVerdicts(answer: ComposedAnswer, judged: ReadonlyArray<InferenceVer
 // are in.
 function repairsFor(answer: ComposedAnswer, verdicts: ReadonlyArray<InferenceVerdict>): RepairRequest[] {
   if (answer.assertions?.rendered !== true || answer.exchange === null) return [];
-  return repairRequests(assertionList(answer.exchange.text) ?? [], answer.assertions.rejected, verdicts);
+  return repairRequests(assertionList(answer.exchange.text) ?? [], answer.assertions, verdicts);
 }
 
 type RepairCalls = {
@@ -270,15 +271,15 @@ export async function answerTurn(
   const finish = async (traced: TracedAnswer): Promise<TracedAnswer> => {
     const records = traced.judge ?? [];
     if (cases.length > 0) {
-      const { inferences_shown: shown, inferences_unverified: unverified } = inferenceCounts(judgedAnswer(answer, cases, records).assertions);
+      const { inferences_shown: shown, inferences_unverified: unverified, inferences_hidden: hidden } = inferenceCounts(traced.assertions);
       const deployments = [...new Set(records.flatMap((record) => (record.outcome === "replied" ? [record.exchange.deployment] : [])))];
       const reasons = [...new Set(records.flatMap((record) => (record.outcome === "replied" ? [] : [record.reason])))];
-      console.info(`[chat] judge ${traceIds(turn)}${deployments.length > 0 ? ` on ${deployments.join(", ")}` : ""}: ${shown} shown, ${unverified} unverified, of ${cases.length} inferences${reasons.length > 0 ? ` (${reasons.join("; ")})` : ""}`);
+      console.info(`[chat] judge ${traceIds(turn)}${deployments.length > 0 ? ` on ${deployments.join(", ")}` : ""}: ${shown} shown, ${unverified} unverified, of ${shown + unverified + hidden} inferences${reasons.length > 0 ? ` (${reasons.join("; ")})` : ""}`);
     }
     if (traced.repair) {
-      const { inferences_repaired, inferences_recovered } = repairCounts(traced);
+      const { inferences_sent_to_repair, inferences_repaired, inferences_recovered } = repairCounts(traced);
       const failed = traced.repair.record.outcome === "replied" ? "" : ` (${traced.repair.record.reason})`;
-      console.info(`[chat] repair ${traceIds(turn)}: ${inferences_repaired} repaired, ${inferences_recovered} recovered${failed}`);
+      console.info(`[chat] repair ${traceIds(turn)}: ${inferences_sent_to_repair} sent, ${inferences_repaired} repaired, ${inferences_recovered} recovered${failed}`);
     }
     await writeTurnTrace(options.traceDir, { version: 2, ...turn, recorded_at, input, ...traced });
     return traced;
@@ -370,7 +371,7 @@ export async function replayRecorded(
   const records = live?.rerun === "judge" ? await judgeAnswer(cases, companies, live) : recordedJudge(trace, cases);
   const asked = (record: ModelRecord, messages: ReadonlyArray<LlmChatMessage>) =>
     record.outcome === "replied" && !isDeepStrictEqual(record.exchange.messages, messages);
-  const recordedRepair = trace.repair ?? null;
+  const recordedRepair = repairRecorded(trace.repair);
   let repairChanged = false;
   const calls: RepairCalls | null = live
     ? (await judgeConfigured(live.env)) ? liveRepairCalls(companies, live) : null
@@ -386,13 +387,16 @@ export async function replayRecorded(
       },
     };
   const replayed = await repairedAnswer(trace.input, answer, cases, records, calls);
+  const unrecorded = () => repairsFor(answer, judgedAnswer(answer, cases, records).assertions?.judged ?? []).length > 0;
   return {
     ...trace,
     version: 2,
     ...replayed,
     exchange,
     judge_input_changed: records.some((record, i) => asked(record, judgeMessages([cases[i]!], companies))),
-    repair_input_changed: !live && recordedRepair !== null && (repairChanged || !isDeepStrictEqual(replayed.repair?.requests ?? [], recordedRepair.requests)),
+    repair_input_changed: !live && (recordedRepair === null
+      ? unrecorded()
+      : repairChanged || !isDeepStrictEqual(replayed.repair?.requests ?? [], recordedRepair.requests)),
   };
 }
 
@@ -404,10 +408,25 @@ export async function replayRecorded(
 function recordedJudge(trace: TurnTrace, cases: ReadonlyArray<JudgeCase>): JudgeRecord[] {
   const judge: unknown = trace.judge;
   const recorded = (record: unknown): JudgeRecord =>
-    record !== null && typeof record === "object" && "outcome" in record
-      ? record as JudgeRecord
-      : { outcome: "not_called", reason: "this trace recorded no judge reply" };
+    isModelRecord(record) ? record : { outcome: "not_called", reason: "this trace recorded no judge reply" };
   return cases.map((_, i) => recorded(Array.isArray(judge) ? judge[i] : judge));
+}
+
+// A recorded call's record, in a shape replay can read: a reply with its
+// exchange, or a reason none came.
+function isModelRecord(record: unknown): record is ModelRecord {
+  if (!isRecord(record)) return false;
+  if (record.outcome === "replied") return isRecord(record.exchange) && Array.isArray(record.exchange.messages) && typeof record.exchange.text === "string";
+  return (record.outcome === "not_called" || record.outcome === "failed") && typeof record.reason === "string";
+}
+
+// The recorded repair round, or null when none was recorded or what was
+// recorded is not one: either replays as no repair.
+function repairRecorded(repair: unknown): RepairTrace | null {
+  return isRecord(repair) && Array.isArray(repair.requests) && isModelRecord(repair.record) &&
+      Array.isArray(repair.judge) && repair.judge.every(isModelRecord)
+    ? repair as RepairTrace
+    : null;
 }
 
 const RECORDED_CHANNEL = {
@@ -466,8 +485,10 @@ export type AnswerMetrics = {
   inferences_shown: number;
   inferences_unverified: number;
   inferences_hidden: number;
-  // Inferences sent to the repair round, and those of them it replaced that
-  // end shown or unverified; the repair call's cost.
+  // Inferences sent to the repair round, those its reply replaced with an
+  // entry that passed the checks, and those of them that end shown or
+  // unverified; the repair call's cost.
+  inferences_sent_to_repair: number;
   inferences_repaired: number;
   inferences_recovered: number;
   repair_latency_ms: number;
@@ -503,12 +524,19 @@ function inferenceCounts(report: AssertionReport | null): Pick<AnswerMetrics, "i
   return { inferences_shown: count("shown"), inferences_unverified: count("unverified"), inferences_hidden: count("hidden") };
 }
 
-function repairCounts(trace: Pick<TurnTrace, "assertions" | "repair">): Pick<AnswerMetrics, "inferences_repaired" | "inferences_recovered" | "repair_latency_ms" | "repair_input_tokens" | "repair_output_tokens"> {
-  const record = trace.repair?.record;
-  const repaired = trace.assertions?.repaired ?? [];
+function repairCounts(trace: Pick<TurnTrace, "assertions" | "repair">): Pick<AnswerMetrics, "inferences_sent_to_repair" | "inferences_repaired" | "inferences_recovered" | "repair_latency_ms" | "repair_input_tokens" | "repair_output_tokens"> {
+  const repair = repairRecorded(trace.repair);
+  const record = repair?.record;
+  const report = trace.assertions;
+  const replaced = repair ? report?.repaired ?? [] : [];
+  // Past the checks: accepted, or hidden by the judge after them.
+  const passed = replaced.filter((index) =>
+    report!.accepted.some((entry) => entry.index === index) || report!.rejected.some((entry) => entry.index === index && entry.check === "judge")
+  );
   return {
-    inferences_repaired: trace.repair?.requests.length ?? 0,
-    inferences_recovered: (trace.assertions?.judged ?? []).filter((verdict) => repaired.includes(verdict.index) && shownAs(verdict) !== "hidden").length,
+    inferences_sent_to_repair: repair?.requests.length ?? 0,
+    inferences_repaired: passed.length,
+    inferences_recovered: (report?.judged ?? []).filter((verdict) => passed.includes(verdict.index) && shownAs(verdict) !== "hidden").length,
     repair_latency_ms: record?.outcome === "replied" ? record.exchange.latency_ms : record?.outcome === "failed" ? record.latency_ms : 0,
     repair_input_tokens: record?.outcome === "replied" ? record.exchange.usage?.input_tokens ?? 0 : 0,
     repair_output_tokens: record?.outcome === "replied" ? record.exchange.usage?.output_tokens ?? 0 : 0,

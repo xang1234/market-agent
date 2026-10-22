@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import type { LlmChatRequest, LlmChatResult } from "../../llm/src/index.ts";
 import { answerMetrics, answerTurn, replayRecorded, type TurnTrace } from "../src/answer-trace.ts";
 import { assertionList } from "../src/assertions.ts";
+import { REPAIR_INSTRUCTIONS } from "../src/inference-repair.ts";
 import { mutationRepairSummary, mutationVariants, repairMutation, type MutationRepair } from "../scripts/answer-lab.ts";
 
 const trace = async (name: string): Promise<TurnTrace> =>
@@ -153,8 +154,9 @@ test("an inference judged to state an amount in words is repaired once: the call
   ]);
   assert.deepEqual(done.assertions?.accepted.find((entry) => entry.index === 8), { index: 8, kind: "analyst_inference", text: ENDS_TEXT, evidence: ["F1", "F4"], supports: [0, 1] });
   assert.deepEqual(rejections(done.assertions), [[6, "kind", "an unknown cause cites a change: one company's metric, two periods, two values"]]);
-  assert.deepEqual(logged.mock.calls.map((call) => String(call.arguments[0])).filter((line) => line.startsWith("[chat] repair")), [
-    `[chat] repair thread=${FISCAL.thread_id} run=${FISCAL.run_id}: 1 repaired, 1 recovered`,
+  assert.deepEqual(logged.mock.calls.map((call) => String(call.arguments[0])).filter((line) => line.startsWith("[chat] repair") || line.startsWith("[chat] judge")), [
+    `[chat] judge thread=${FISCAL.thread_id} run=${FISCAL.run_id} on anthropic/claude-haiku-5-5: 2 shown, 0 unverified, of 2 inferences`,
+    `[chat] repair thread=${FISCAL.thread_id} run=${FISCAL.run_id}: 1 sent, 1 repaired, 1 recovered`,
   ]);
 
   const written = JSON.parse(await readFile(join(dir, FISCAL.thread_id, `${FISCAL.run_id}.json`), "utf8")) as TurnTrace;
@@ -163,7 +165,7 @@ test("an inference judged to state an amount in words is repaired once: the call
   assert.deepEqual(written.repair?.record.outcome === "replied" && [written.repair.record.exchange.text, written.repair.record.exchange.usage], [fenced([inference(8, ENDS_TEXT)]).text, { input_tokens: 9000, output_tokens: 120 }]);
   assert.deepEqual(written.repair?.judge.map((record) => record.outcome === "replied" && record.exchange.text), [verdict(8, "entailed").text]);
   const metrics = answerMetrics(written);
-  assert.deepEqual([metrics.inferences_shown, metrics.inferences_hidden, metrics.inferences_repaired, metrics.inferences_recovered, metrics.repair_input_tokens, metrics.repair_output_tokens], [2, 0, 1, 1, 9000, 120]);
+  assert.deepEqual([metrics.inferences_shown, metrics.inferences_hidden, metrics.inferences_sent_to_repair, metrics.inferences_repaired, metrics.inferences_recovered, metrics.repair_input_tokens, metrics.repair_output_tokens], [2, 0, 1, 1, 1, 9000, 120]);
 
   // Replayed with no model: the recorded repair and its judge stand in.
   const replayed = await replayRecorded(written);
@@ -234,7 +236,7 @@ test("every hidden inference of a turn goes in one repair call, once every first
 });
 
 test("a repaired entry goes through the same checks as the first: a digit, an address, a subject its evidence does not cover, or only failed supports leaves it hidden, with no second repair", async (t) => {
-  t.mock.method(console, "info", () => {});
+  const logged = t.mock.method(console, "info", () => {});
   const cases: Array<[string, Record<string, unknown>, string, string]> = [
     ["a digit", { text: "The gap of 8 months limits comparability." }, "binding", "an inference rests on its supports; it writes no figure"],
     ["an address", { text: "Comparability is limited, see www.example.com for why." }, "format", "an inference writes no link: the page would render the address as one"],
@@ -249,6 +251,7 @@ test("a repaired entry goes through the same checks as the first: a digit, an ad
     assert.deepEqual(done.assertions?.judged, [{ index: 7, verdict: "entailed", worded_amount: false }], label);
     assert.deepEqual(done.assertions?.repaired, [8], label);
     assert.deepEqual(calls.sort(), ["answer", "judge 7", "judge 8", "repair"], label);
+    assert.equal(String(logged.mock.calls.at(-1)!.arguments[0]), `[chat] repair thread=${FISCAL.thread_id} run=${FISCAL.run_id}: 1 sent, 0 repaired, 0 recovered`, label);
   }
 });
 
@@ -322,7 +325,7 @@ test("a turn whose only hidden inference is check-rejected waits for its repair,
   assert.equal(text(answer.blocks), quarter());
   const done = await answer.judging!.done;
   assert.deepEqual(repairAsked(repairs[0]!).rejected, [
-    { index: 4, text: "The large gap between YoY and QoQ growth rates indicates sequential momentum is moderating even though the company is still growing rapidly on a year-over-year basis.", check: "support", reason: "an inference binds the accepted observations it rests on" },
+    { index: 4, text: "The large gap between YoY and QoQ growth rates indicates sequential momentum is moderating even though the company is still growing rapidly on a year-over-year basis.", check: "support", reason: "an inference binds the accepted observations it rests on", rejected_supports: [9] },
     { index: 5, text: DIGIT_TEXT, check: "binding", reason: "an inference rests on its supports; it writes no figure" },
   ]);
   assert.equal(text(done.blocks), quarter("> **Analyst inference** (NVDA's revenue rose in every period): Momentum is moderating."));
@@ -334,12 +337,12 @@ test("a trace recorded before repairs replays with none: its hidden inference st
   const replayed = await replayRecorded(before);
   assert.equal(text(replayed.blocks), fiscal(PROFITABILITY));
   assert.equal(replayed.repair, null);
-  assert.equal(replayed.repair_input_changed, false);
+  // Today's code would ask a repair the trace never recorded.
+  assert.equal(replayed.repair_input_changed, true);
 
   const recorded = await replayRecorded(FISCAL);
   assert.equal(text(recorded.blocks), fiscal(PROFITABILITY, "> **Analyst inference on NVDA:** The two fiscal years end in different months, so the revenue figures cover different stretches of time and are not a clean like-for-like comparison."));
   assert.deepEqual(recorded.assertions?.repaired, [8]);
-  assert.equal(recorded.repair_input_changed, false);
 });
 
 test("a replay keeps the recorded verdicts and runs only the repair live (recorded --repair), or reruns the judge and the repair live (--judge)", async (t) => {
@@ -407,3 +410,35 @@ function hang(t: { after(fn: () => void): void }): Promise<never> {
   t.after(() => clearInterval(connection));
   return new Promise<never>(() => {});
 }
+
+test("the repair instructions name no period wording: the label states the periods, the text names none", () => {
+  for (const phrase of ["the latest quarter", "that quarter", "a year earlier", "Q1", "fiscal 2026"]) assert.equal(REPAIR_INSTRUCTIONS.includes(phrase), false, phrase);
+  assert.equal(REPAIR_INSTRUCTIONS.includes(`The inference's label already states the periods its supports cover, so its text names no period at all (no year, quarter, "latest", "earlier" or "prior") and leaves which period is which to its supports.`), true);
+});
+
+test("a malformed recorded repair replays as none recorded, and its metrics count no repair", async () => {
+  const malformed: Array<[string, unknown]> = [
+    ["no record", { ...FISCAL.repair!, record: undefined }],
+    ["replied without exchange", { ...FISCAL.repair!, record: { outcome: "replied" } }],
+    ["no judge array", { ...FISCAL.repair!, judge: undefined }],
+    ["a judge entry not a record", { ...FISCAL.repair!, judge: ["entailed"] }],
+    ["a string", "repaired"],
+    ["a number", 1],
+  ];
+  for (const [label, repair] of malformed) {
+    const trace = { ...FISCAL, repair } as TurnTrace;
+    const replayed = await replayRecorded(trace);
+    assert.equal(text(replayed.blocks), fiscal(PROFITABILITY), label);
+    assert.equal(replayed.repair, null, label);
+    assert.equal(replayed.assertions?.repaired, undefined, label);
+    const metrics = answerMetrics(trace);
+    assert.deepEqual([metrics.inferences_sent_to_repair, metrics.inferences_repaired, metrics.inferences_recovered, metrics.repair_latency_ms], [0, 0, 0, 0], label);
+  }
+});
+
+test("repair_input_changed flags a trace with no repair recorded that today's code would send to repair, and not one where nothing qualifies", async () => {
+  assert.notEqual(FISCAL.repair, null);
+  assert.equal((await replayRecorded({ ...FISCAL, repair: null })).repair_input_changed, true);
+  assert.equal(SEGMENTS.repair, null);
+  assert.equal((await replayRecorded(SEGMENTS)).repair_input_changed, false);
+});

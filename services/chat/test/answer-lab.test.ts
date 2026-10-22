@@ -78,7 +78,7 @@ test("a live sample's answer reads as the user sees it: text as written, each re
 });
 
 test("a live run's summary counts rendered answers, accepted kinds, repeated observations and rejections by reason", () => {
-  const metrics = { figure_refs: 0, plain_numbers: 0, fallback: false, accepted: 0, rejected: 0, inferences_shown: 0, inferences_unverified: 0, inferences_hidden: 0, inferences_repaired: 0, inferences_recovered: 0, repair_latency_ms: 0, repair_input_tokens: 0, repair_output_tokens: 0, output_tokens: 0, latency_ms: 0 };
+  const metrics = { figure_refs: 0, plain_numbers: 0, fallback: false, accepted: 0, rejected: 0, inferences_shown: 0, inferences_unverified: 0, inferences_hidden: 0, inferences_sent_to_repair: 0, inferences_repaired: 0, inferences_recovered: 0, repair_latency_ms: 0, repair_input_tokens: 0, repair_output_tokens: 0, output_tokens: 0, latency_ms: 0 };
   const summary = assertionSummary({
     results: [
       { trace: "a", sample: 0, metrics, assertions: { rendered: true, accepted: ["observation", "analyst_inference", "observation"], rejected: ["x", "y"], repeated: 2 } },
@@ -197,7 +197,7 @@ test("the mutation summary counts catches, each kind at its expected outcome, mu
 });
 
 test("a run with no judge configured counts each inference not called", () => {
-  const metrics = { figure_refs: 0, plain_numbers: 0, fallback: false, accepted: 0, rejected: 0, inferences_shown: 0, inferences_unverified: 0, inferences_hidden: 2, inferences_repaired: 0, inferences_recovered: 0, repair_latency_ms: 0, repair_input_tokens: 0, repair_output_tokens: 0, output_tokens: 0, latency_ms: 0 };
+  const metrics = { figure_refs: 0, plain_numbers: 0, fallback: false, accepted: 0, rejected: 0, inferences_shown: 0, inferences_unverified: 0, inferences_hidden: 2, inferences_sent_to_repair: 0, inferences_repaired: 0, inferences_recovered: 0, repair_latency_ms: 0, repair_input_tokens: 0, repair_output_tokens: 0, output_tokens: 0, latency_ms: 0 };
   const none = { outcome: "not_called" as const, reason: "no judge model is configured" };
   const judge = { records: [none, none], flagged: [] };
   const summary = judgeSummary({ results: [{ trace: "a", sample: 0, metrics, judge }, { trace: "b", sample: 0, metrics, judge }] });
@@ -206,7 +206,7 @@ test("a run with no judge configured counts each inference not called", () => {
 
 test("a judged run's summary counts the inferences shown, unverified and hidden, what the judge did per inference, its cost per reply, and each inference it showed as unverified or left out", () => {
   const metrics = (shown: number, unverified: number, hidden: number) =>
-    ({ figure_refs: 0, plain_numbers: 0, fallback: false, accepted: 0, rejected: 0, inferences_shown: shown, inferences_unverified: unverified, inferences_hidden: hidden, inferences_repaired: 0, inferences_recovered: 0, repair_latency_ms: 0, repair_input_tokens: 0, repair_output_tokens: 0, output_tokens: 0, latency_ms: 0 });
+    ({ figure_refs: 0, plain_numbers: 0, fallback: false, accepted: 0, rejected: 0, inferences_shown: shown, inferences_unverified: unverified, inferences_hidden: hidden, inferences_sent_to_repair: 0, inferences_repaired: 0, inferences_recovered: 0, repair_latency_ms: 0, repair_input_tokens: 0, repair_output_tokens: 0, output_tokens: 0, latency_ms: 0 });
   const replied = {
     outcome: "replied" as const,
     exchange: { messages: [], text: "{}", truncated: false, deployment: "anthropic/claude-haiku-5-5", latency_ms: 2000, usage: { input_tokens: 1000, output_tokens: 100 } },

@@ -7,7 +7,7 @@
 
 import type { LlmChatClient, LlmChatMessage, LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
 import { isRecord } from "../../shared/src/http.ts";
-import { assertionList, checkAssertions, type AssertionReport, type Rejection, type RejectionCheck } from "./assertions.ts";
+import { assertionList, checkAssertions, SUPPORT_KINDS, type AssertionReport, type RejectionCheck } from "./assertions.ts";
 import type { EvidencePacket } from "./evidence-packet.ts";
 import { judgeCases, modelCall, type JudgeCase, type ModelRecord } from "./inference-judge.ts";
 import type { ModelDeadlines } from "./llm-runtime.ts";
@@ -15,17 +15,19 @@ import type { InferenceVerdict, Verdict } from "./verdicts.ts";
 
 // Why an inference is hidden, as the repair call is told: the check it failed,
 // or the judge's verdict. limit and rendering are not the inference's words,
-// so no rewrite passes them.
-export type RepairRequest =
-  | { index: number; text: string; check: Exclude<RejectionCheck, "limit" | "rendering" | "judge">; reason: string }
-  | { index: number; text: string; check: "judge"; verdict: Verdict; worded_amount: boolean; reason?: string };
+// so no rewrite passes them. rejected_supports: the supports it listed that
+// the check did not accept as one, so the rewrite does not cite them again.
+export type RepairRequest = { index: number; text: string; rejected_supports?: number[] } & (
+  | { check: Exclude<RejectionCheck, "limit" | "rendering" | "judge">; reason: string }
+  | { check: "judge"; verdict: Verdict; worded_amount: boolean; reason?: string }
+);
 
 // What a turn's repair round did: what it asked, the call, and the judge's
 // call for each repaired inference that passed the checks, in index order.
 export type RepairTrace = { requests: RepairRequest[]; record: ModelRecord; judge: ModelRecord[] };
 
 // Validated live on 18 prototype repairs, 17 recovered.
-export const REPAIR_INSTRUCTIONS = "You already answered this question; your_assertions is the list you wrote. Some analyst_inference entries in it are not shown to the reader. Each is listed below with why: the check it failed and its reason, or the judge's verdict and reason (worded_amount: its words state an amount, fraction, multiple or span of time). Write each one again so it passes, under every rule above: words only, no digit anywhere, not even a year or quarter (\"the latest quarter\", \"that quarter\", \"a year earlier\", never \"Q1\" or \"fiscal 2026\"), no amount in words, nothing its supports do not show; or leave it out if it cannot be said that way. Reply with only a fenced block that opens with ```assertions on its own line: a JSON array of the corrected entries, each an analyst_inference object in the same shape as in your list (supports, and a subject only as the rules allow), with \"index\" added: the index of the entry it replaces. At most one per index listed below.";
+export const REPAIR_INSTRUCTIONS = "You already answered this question; your_assertions is the list you wrote. Some analyst_inference entries in it are not shown to the reader. Each is listed below with why: the check it failed and its reason, or the judge's verdict and reason (worded_amount: its words state an amount, fraction, multiple or span of time). Write each one again so it passes, under every rule above: words only, no digit anywhere, no amount in words, nothing its supports do not show; or leave it out if it cannot be said that way. The inference's label already states the periods its supports cover, so its text names no period at all (no year, quarter, \"latest\", \"earlier\" or \"prior\") and leaves which period is which to its supports. Reply with only a fenced block that opens with ```assertions on its own line: a JSON array of the corrected entries, each an analyst_inference object in the same shape as in your list (supports, and a subject only as the rules allow), with \"index\" added: the index of the entry it replaces. At most one per index listed below.";
 
 // Repair latency measured 1.5-2.5 s over 18 live calls: one attempt of about
 // six times the slowest. A late repair leaves its inference hidden.
@@ -34,22 +36,26 @@ export const REPAIR_DEADLINES: ModelDeadlines = { attemptMs: 15_000, totalMs: 16
 const UNREPAIRABLE: ReadonlySet<RejectionCheck> = new Set(["limit", "rendering", "judge"]);
 
 // The inferences to repair, in index order: list is the answer's list as
-// written, rejected its check's rejections, verdicts the judge's.
-export function repairRequests(list: ReadonlyArray<unknown>, rejected: ReadonlyArray<Rejection>, verdicts: ReadonlyArray<InferenceVerdict>): RepairRequest[] {
-  const textOf = (index: number) => {
+// written, report its check's, verdicts the judge's.
+export function repairRequests(list: ReadonlyArray<unknown>, report: Pick<AssertionReport, "accepted" | "rejected">, verdicts: ReadonlyArray<InferenceVerdict>): RepairRequest[] {
+  const of = (index: number) => {
     const item = list[index];
-    return isRecord(item) && typeof item.text === "string" ? item.text : "";
+    const supports = isRecord(item) && Array.isArray(item.supports) ? item.supports : [];
+    const rejected = supports.filter((n): n is number =>
+      typeof n === "number" && !report.accepted.some((entry) => entry.index === n && SUPPORT_KINDS.has(entry.kind))
+    );
+    return { index, text: isRecord(item) && typeof item.text === "string" ? item.text : "", ...(rejected.length > 0 ? { rejected_supports: rejected } : {}) };
   };
   const isInference = (index: number) => isRecord(list[index]) && list[index].kind === "analyst_inference";
-  const checks = rejected.flatMap((rejection): RepairRequest[] =>
+  const checks = report.rejected.flatMap((rejection): RepairRequest[] =>
     UNREPAIRABLE.has(rejection.check) || !isInference(rejection.index)
       ? []
-      : [{ index: rejection.index, text: textOf(rejection.index), check: rejection.check as Exclude<RejectionCheck, "limit" | "rendering" | "judge">, reason: rejection.reason }]
+      : [{ ...of(rejection.index), check: rejection.check as Exclude<RejectionCheck, "limit" | "rendering" | "judge">, reason: rejection.reason }]
   );
   const judged = verdicts.flatMap((verdict): RepairRequest[] =>
     verdict.verdict === "error" || (verdict.verdict !== "contradicted" && !verdict.worded_amount)
       ? []
-      : [{ index: verdict.index, text: textOf(verdict.index), check: "judge", verdict: verdict.verdict, worded_amount: verdict.worded_amount, ...(verdict.reason ? { reason: verdict.reason } : {}) }]
+      : [{ ...of(verdict.index), check: "judge", verdict: verdict.verdict, worded_amount: verdict.worded_amount, ...(verdict.reason ? { reason: verdict.reason } : {}) }]
   );
   return [...checks, ...judged].sort((a, b) => a.index - b.index);
 }
