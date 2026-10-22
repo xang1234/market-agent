@@ -124,6 +124,7 @@ export function chatHarness(
     clock?: () => Date;
     persistAssistantMessage?: ChatAssistantMessagePersistence;
     evidence?: Parameters<typeof createChatFinancialRuntime>[0]["evidence"];
+    commentary?: Parameters<typeof createChatFinancialRuntime>[0]["commentary"];
   },
 ) {
   // The narrative messages the turns saved: clarifications and gaps.
@@ -143,6 +144,7 @@ export function chatHarness(
       readQuestion: options.readQuestion ?? (async () => METRIC_READING),
       ...(options.priorSubjects ? { priorSubjects: options.priorSubjects } : {}),
       ...(options.clock ? { clock: options.clock } : {}),
+      ...(options.commentary ? { commentary: options.commentary } : {}),
     }),
   });
   const run = async (input: Omit<ChatTurnInput, "runId" | "turnId"> & { turnId?: string; runId?: string }) => {
