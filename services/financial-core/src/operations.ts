@@ -35,7 +35,7 @@ import {
   type VersionTag,
 } from "./contracts.ts";
 import { MARGIN_NUMERATORS, resolveMetricDefinition, resolveRatioDefinition, type MetricDefinition, type MetricValueKind } from "./definitions.ts";
-import { derivationValue } from "./derivation.ts";
+import { derivationIssue } from "./derivation.ts";
 import { measurementIncompatibility, unitIncompatibility, type Measurement, type MeasurementReason } from "./dimensions.ts";
 import { canonicalDecimalString, parseDerivedDecimalText, parseFinancialDecimal } from "./exact-decimal.ts";
 import { classifyDuration, comparePeriodEnds, dayNumber, periodsContiguous, periodsIdentical, periodsOverlap, type PeriodIdentity } from "./periods.ts";
@@ -180,11 +180,13 @@ function factOperand(input: BoundFactInputV1, node: ReportedMetricNode, definiti
   if (tokenValue === null || !sameRational(tokenValue, value)) {
     throw new FinancialIntegrityError("token_value_mismatch", `source token for ${node.node_id} does not equal the bound value`);
   }
-  const derived = input.derivation === undefined ? null : derivationValue(input.derivation);
-  const derivedValue = derived === null ? null : rationalFromDecimal(derived);
-  if ((input.derivation !== undefined) !== (input.precision_status === "derived_from_source_tokens")
-    || (input.derivation !== undefined && (derivedValue === null || !sameRational(derivedValue, value)))) {
-    throw new FinancialIntegrityError("derivation_value_mismatch", `the derivation of ${node.node_id} does not sum to the bound value, or its precision status does not name it`);
+  if ((input.derivation !== undefined) !== (input.precision_status === "derived_from_source_tokens")) {
+    throw new FinancialIntegrityError("derivation_value_mismatch", `the precision status of ${node.node_id} does not name its derivation`);
+  }
+  if (input.derivation !== undefined) {
+    const issue = definition.value_kind !== "flow" ? "not_a_flow"
+      : derivationIssue(input.derivation, { source_id: input.source.source_id, value_text: input.numeric.value, period: input.period });
+    if (issue !== null) throw new FinancialIntegrityError("derivation_value_mismatch", `the derivation of ${node.node_id} does not prove its bound value: ${issue}`);
   }
   if (rationalSign(scale) <= 0) throw new FinancialIntegrityError("invalid_scale", `scale for ${node.node_id} must be positive`);
   const scaled = multiplyRationals(value, scale);

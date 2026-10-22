@@ -30,12 +30,12 @@ import {
 } from "./sec-edgar.ts";
 import { DERIVATION_PROOF_VERSION, type DerivationProofV1 } from "../../financial-core/src/contracts.ts";
 import { resolveMetricDefinition } from "../../financial-core/src/definitions.ts";
-import { derivationValue } from "../../financial-core/src/derivation.ts";
+import { derivationIssue, derivationValue } from "../../financial-core/src/derivation.ts";
 import type { ShareBasis } from "../../financial-core/src/evidence-vocabulary.ts";
 import { canonicalDecimalString } from "../../financial-core/src/exact-decimal.ts";
 import { explainedBySplits, splitHistoryCovers, splitsRestate } from "../../financial-core/src/split-adjustment.ts";
 import { loadSubjectSplitHistory, type SubjectSplitHistory } from "../../market/src/split-history.ts";
-import { checkDerivationAgainstFact, checkTokenAgainstStoredValue, recordFactPrecisionAttestation } from "../../evidence/src/financial-attestations.ts";
+import { checkTokenAgainstStoredValue, recordFactPrecisionAttestation } from "../../evidence/src/financial-attestations.ts";
 import { recordFactFinancialContext } from "../../evidence/src/financial-context.ts";
 import { withPinnedTransaction, type TransactionalQueryExecutor } from "./pinned-transaction.ts";
 import { recordSecFetchPublication, secAccessionVersionHash } from "./sec-publication-proof.ts";
@@ -1237,7 +1237,7 @@ type SecDerivedLine =
 // its token). A refused proof leaves the line unproven: it never fails the filing.
 function secDerivedLine(
   cik: number,
-  statement: Pick<FactBatch, "source_id" | "period_start" | "period_end">,
+  statement: Pick<FactBatch, "source_id" | "period_start" | "period_end" | "fiscal_year">,
   metricKey: string,
   derivation: SecDerivation,
 ): SecDerivedLine | null {
@@ -1246,7 +1246,8 @@ function secDerivedLine(
   const exact = proof && derivationValue(proof);
   if (!proof || !exact) return null;
   const sum = canonicalDecimalString(exact);
-  if (checkDerivationAgainstFact(proof, { source_id: statement.source_id, value_text: sum }).status !== "match") return { status: "unproven", sum };
+  const period = { start: statement.period_start, end: statement.period_end, fiscal_year: statement.fiscal_year };
+  if (derivationIssue(proof, { source_id: statement.source_id, value_text: sum, period }) !== null) return { status: "unproven", sum };
   const own = proof.terms.find((term) => term.source.source_id.toLowerCase() === statement.source_id.toLowerCase())!.source;
   const at: SecValueLocation = { concept: derivation.concept, unit: derivation.unit, accn: own.accession, form: own.form, filed: own.filed, start: statement.period_start, end: statement.period_end };
   return { status: "proven", sum, proof, at, locator: `${secTokenLocator(cik, at)}|${DERIVATION_PROOF_VERSION}` };

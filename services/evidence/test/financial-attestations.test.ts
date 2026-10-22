@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { hashCanonical } from "../../financial-core/src/canonical.ts";
+import type { DerivationProofV1 } from "../../financial-core/src/contracts.ts";
 import {
   FinancialAttestationError,
   recordFactPrecisionAttestation,
@@ -121,36 +122,60 @@ test("financial attestation writers", { timeout: 180_000 }, async (t) => {
     assert.equal(legacy.raw_token, null);
   });
 
-  await t.test("a derived proof sums its terms to the stored value, and its other terms were filed before its own (#481)", async () => {
-    const term = (sign: "+" | "-", source_id: string, filed: string, raw_token: string, fiscal_period: "FY" | "Q3") => ({
+  await t.test("a derived proof is its own filing's term less terms that tile the rest of it, summing to the stored value, its other terms filed first (#481)", async () => {
+    const q4 = "1f000000-0000-4000-8000-0000000000e1";
+    await db.query(
+      `insert into facts (fact_id, subject_kind, subject_id, metric_id, period_kind, period_start, period_end, fiscal_year, fiscal_period,
+                          value_num, unit, currency, scale, as_of, reported_at, observed_at, source_id, method, verification_status,
+                          freshness_class, coverage_level, entitlement_channels, confidence)
+       values ($1, 'issuer', $2, $3, 'fiscal_q', '2022-10-01', '2022-12-31', 2022, 'Q4', 170, 'currency', 'USD', 1,
+               '2023-01-10T00:00:00Z', '2023-01-10T00:00:00Z', '2023-02-01T00:00:00Z', $4, 'reported', 'authoritative', 'filing_time', 'full', '["app"]'::jsonb, 1)`,
+      [q4, IDS.issuer, IDS.metric, IDS.sourceV1],
+    );
+    type Term = DerivationProofV1["terms"][number];
+    const term = (sign: "+" | "-", fiscal_period: "FY" | "Q1" | "Q2" | "Q3", start: string, end: string, raw_token: string, filed: string): Term => ({
       sign,
-      span: fiscal_period === "FY" ? ("fiscal_year" as const) : ("year_to_date" as const),
+      span: fiscal_period === "FY" ? "fiscal_year" : "quarter",
       fiscal_year: 2022,
       fiscal_period,
-      start: "2022-01-01",
-      end: fiscal_period === "FY" ? "2022-12-31" : "2022-09-30",
+      start,
+      end,
       raw_token,
       token_proof_hash: H.proof,
-      source: { source_id, accession: `0000320193-${filed}`, form: fiscal_period === "FY" ? "10-K" : "10-Q", filed, locator: `us-gaap:Revenues#${fiscal_period}` },
+      source: { source_id: fiscal_period === "FY" ? IDS.sourceV1 : IDS.sourceV2, accession: `0000320193-${filed}`, form: fiscal_period === "FY" ? "10-K" : "10-Q", filed, locator: `us-gaap:Revenues#${fiscal_period}` },
     });
-    const derivation = (terms: ReturnType<typeof term>[]) => ({ version: "period_difference.v1" as const, concept: "Revenues", unit: "USD", terms });
-    const proven = derivation([term("+", IDS.sourceV1, "2023-01-10", "4.00000000000e11", "FY"), term("-", IDS.sourceV2, "2022-11-01", "34183000000", "Q3")]);
+    const derivation = (terms: Term[]) => ({ version: "period_difference.v1" as const, concept: "Revenues", unit: "USD", terms });
+    const fy = term("+", "FY", "2022-01-01", "2022-12-31", "6.2E2", "2023-01-10");
+    const q1 = term("-", "Q1", "2022-01-01", "2022-03-31", "140", "2022-05-01");
+    const q2 = term("-", "Q2", "2022-04-01", "2022-06-30", "150", "2022-08-01");
+    const q3 = term("-", "Q3", "2022-07-01", "2022-09-30", "160", "2022-11-01");
+    const proven = derivation([fy, q1, q2, q3]);
     const record = (proof: ReturnType<typeof derivation>) =>
-      recordFactPrecisionAttestation(db, { fact_id: IDS.fy2022, precision_class: "derived_from_source_tokens", derivation: proof, source_locator: "us-gaap:Revenues#Q4", validation_method: "test" });
+      recordFactPrecisionAttestation(db, { fact_id: q4, precision_class: "derived_from_source_tokens", derivation: proof, source_locator: "us-gaap:Revenues#Q4", validation_method: "test" });
+    const lastYear = (t: Term): Term => ({ ...t, fiscal_year: 2021, start: t.start.replace("2022", "2021"), end: t.end.replace("2022", "2021") });
 
-    await assert.rejects(() => record(derivation([proven.terms[0]!, { ...proven.terms[1]!, raw_token: "34183000001" }])), /does not sum to the stored fact value/);
-    await assert.rejects(() => record(derivation([proven.terms[0]!, { ...proven.terms[1]!, source: { ...proven.terms[1]!.source, filed: "2023-01-10" } }])), /filed on or after the fact's own filing/);
-    await assert.rejects(() => record(derivation([{ ...proven.terms[0]!, source: { ...proven.terms[0]!.source, source_id: IDS.privateSource } }, proven.terms[1]!])), /exactly one term from the fact's own source/);
-    await assert.rejects(() => record(derivation([proven.terms[0]!, { ...proven.terms[1]!, raw_token: "0x85" }])), /not a period_difference\.v1 proof/);
-    await assert.rejects(() => record(derivation([proven.terms[0]!, { ...proven.terms[1]!, token_proof_hash: "short" }])), /not a period_difference\.v1 proof/);
+    await assert.rejects(() => record(derivation([fy, q1, q2, { ...q3, raw_token: "161" }])), /does not sum to the stored fact value/);
+    await assert.rejects(() => record(derivation([fy, q1, q2, { ...q3, source: { ...q3.source, filed: "2023-01-10" } }])), /filed on or after the fact's own filing/);
+    await assert.rejects(() => record(derivation([{ ...fy, source: { ...fy.source, source_id: IDS.privateSource } }, q1, q2, q3])), /adds exactly one term, its first, from the fact's own source/);
+    await assert.rejects(() => record(derivation([fy, q1, q2, { ...q3, raw_token: "0x85" }])), /not a period_difference\.v1 proof/);
+    await assert.rejects(() => record(derivation([fy, q1, q2, { ...q3, token_proof_hash: "short" }])), /not a period_difference\.v1 proof/);
+    await assert.rejects(() => record(derivation([fy, q1, q2, { ...q3, span: "year_to_date", start: "2022-01-01" }])), /do not cover its first term exactly/, "Q1 and Q2 subtracted twice");
+    await assert.rejects(() => record(derivation([fy, q1, term("-", "Q2", "2022-04-01", "2022-06-30", "310", "2022-08-01")])), /do not cover its first term exactly/, "a gap before the fact's start");
+    await assert.rejects(() => record(derivation([fy, q1, q2, q3].map(lastYear))), /adds exactly one term, its first/, "every term a year early");
+    await assert.rejects(() => record(derivation([fy, q1, q2, q3].map((t) => ({ ...t, fiscal_year: 2021 })))), /not of the fact's fiscal year/);
+    await assert.rejects(
+      () => record(derivation([{ ...term("-", "Q1", "2022-01-01", "2022-03-31", "-100", "2023-01-10"), source: { ...fy.source } }, term("+", "Q2", "2022-04-01", "2022-06-30", "70", "2022-08-01")])),
+      /adds exactly one term, its first/,
+      "the own term subtracted",
+    );
 
-    const row = await recordFactPrecisionAttestation(db, { fact_id: IDS.fy2022, precision_class: "derived_from_source_tokens", derivation: proven, source_locator: "us-gaap:Revenues#Q4", validation_method: "test" });
+    const row = await record(proven);
     assert.deepEqual(
       [row.precision_class, row.raw_token, row.value_text, row.scale_text, row.source_locator, row.derivation, row.supersedes],
-      ["derived_from_source_tokens", "365817000000", "365817000000", "1", "us-gaap:Revenues#Q4", proven, null],
+      ["derived_from_source_tokens", "170", "170", "1", "us-gaap:Revenues#Q4", proven, null],
     );
     assert.equal(row.token_proof_hash, hashCanonical("derivation", proven), "the proof hash binds the whole derivation");
-    const stored = (await db.query(`select derivation from current_fact_precision_attestations where fact_id = $1`, [IDS.fy2022])).rows[0];
+    const stored = (await db.query(`select derivation from current_fact_precision_attestations where fact_id = $1`, [q4])).rows[0];
     assert.deepEqual(stored.derivation, proven);
   });
 

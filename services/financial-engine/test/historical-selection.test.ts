@@ -420,6 +420,8 @@ test("every four consecutive SEC quarters hold one uncertifiable derived Q4 (#46
   }
 });
 
+const FILED = { FY: (year: number) => `${year + 1}-02-15`, Q1: (year: number) => `${year}-05-01`, Q2: (year: number) => `${year}-08-01`, Q3: (year: number) => `${year}-11-01` };
+
 function derivedFourthQuarter(year: number, value: string, [annual, q1, q2, q3]: string[], spec: CandidateSpec = {}): InputCandidate {
   const term = (sign: "+" | "-", fiscal_period: "FY" | "Q1" | "Q2" | "Q3", raw_token: string) => ({
     sign,
@@ -430,7 +432,7 @@ function derivedFourthQuarter(year: number, value: string, [annual, q1, q2, q3]:
     end: `${year}-${fiscal_period === "FY" ? "12-31" : QUARTER_DATES[fiscal_period][1]}`,
     raw_token,
     token_proof_hash: HASH,
-    source: { source_id: "11111111-1111-4111-8111-111111111111", accession: `acc-${fiscal_period}`, form: fiscal_period === "FY" ? "10-K" : "10-Q", filed: `${year}-11-01`, locator: `loc-${fiscal_period}` },
+    source: { source_id: "11111111-1111-4111-8111-111111111111", accession: `acc-${fiscal_period}`, form: fiscal_period === "FY" ? "10-K" : "10-Q", filed: FILED[fiscal_period](year), locator: `loc-${fiscal_period}` },
   });
   const derivation: DerivationProofV1 = {
     version: "period_difference.v1",
@@ -445,7 +447,7 @@ function derivedFourthQuarter(year: number, value: string, [annual, q1, q2, q3]:
   });
 }
 
-test("a derived Q4 binds when its derivation sums to its value; one that does not, or a derived balance, is unverified (#481)", () => {
+test("a derived Q4 binds when its derivation proves its value; one that does not, or a derived balance, is unverified (#481)", () => {
   const atCutoff = policy({ knowledge_cutoff: "2025-03-01T00:00:00Z" });
   const quarters = [quarter(2024, "Q1", { value: "140" }), quarter(2024, "Q2", { value: "150" }), quarter(2024, "Q3", { value: "160" })];
   const certified = derivedFourthQuarter(2024, "170", ["620", "140", "150", "160"]);
@@ -463,6 +465,12 @@ test("a derived Q4 binds when its derivation sums to its value; one that does no
   assert.equal(landed(selectInput(latestQuarter(0), [...quarters, tampered], atCutoff)), "gap precision_unverified");
   const unpaired = { ...certified, precision: { ...certified.precision!, precision_class: "source_token_preserved" as const } };
   assert.equal(landed(selectInput(latestQuarter(0), [...quarters, unpaired], atCutoff)), "gap precision_unverified", "only a derived proof carries a derivation");
+
+  const lastYears = { ...derivedFourthQuarter(2023, "170", ["620", "140", "150", "160"]), period: certified.period };
+  assert.equal(landed(selectInput(latestQuarter(0), [...quarters, lastYears], atCutoff)), "gap precision_unverified", "a derivation of another period");
+  const derivation = certified.precision!.derivation!;
+  const lateThird = { ...certified, precision: { ...certified.precision!, derivation: { ...derivation, terms: derivation.terms.map((term) => term.fiscal_period === "Q3" ? { ...term, source: { ...term.source, filed: "2025-02-20" } } : term) } } };
+  assert.equal(landed(selectInput(latestQuarter(0), [...quarters, lateThird], atCutoff)), "gap precision_unverified", "a 10-Q filed after the 10-K");
 
   const assets: ReportedMetricNode = { ...FY2023, metric_key: "total_assets", period: { kind: "fiscal_period", fiscal_year: 2024, fiscal_period: "Q4" } };
   const derivedBalance = { ...certified, metric_key: "total_assets", period: { ...certified.period, start: null }, context: { ...certified.context!, period_type: "instant" as const } };

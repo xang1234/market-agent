@@ -89,6 +89,16 @@ test("a derived quarter binds when its derivation sums to its value; a tampered 
   assert.equal(integrityCode(() => operandFromBoundInput({ ...reported, derivation: derived.derivation }, node, expected)), "derivation_value_mismatch");
 });
 
+test("a derived balance fails integrity, though its derivation sums to its value (#481)", () => {
+  const node = { node_id: "assets", operation: "reported_metric" as const, operation_version: "reported_metric.v1", subject_slot: "a", metric_key: "total_assets", period: { kind: "fiscal_period" as const, fiscal_year: 2024, fiscal_period: "Q4" as const } };
+  const expected = { slot: SLOTS.a, definition_version: "total_assets.v1", knowledge_cutoff: KNOWLEDGE_CUTOFF, reporting_basis: "as_reported" as const };
+  const balance = boundInput({ metric: "total_assets", kind: "instant", value: "170", end: "2024-12-31", fiscal_year: 2024, fiscal_period: "Q4" });
+  assert.throws(
+    () => operandFromBoundInput({ ...balance, precision_status: "derived_from_source_tokens", derivation: fourthQuarter(["620", "140", "150", "160"]) }, node, expected),
+    { code: "derivation_value_mismatch", message: "the derivation of assets does not prove its bound value: not_a_flow" },
+  );
+});
+
 function integrityCode(action: () => unknown): string {
   try {
     action();

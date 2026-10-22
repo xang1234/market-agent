@@ -11,14 +11,13 @@ import {
 } from "../../financial-core/src/exact-decimal.ts";
 import { hashCanonical } from "../../financial-core/src/canonical.ts";
 import type { DerivationProofV1 } from "../../financial-core/src/contracts.ts";
-import { derivationValue } from "../../financial-core/src/derivation.ts";
+import { derivationIssue, derivationValue, type DerivationIssue } from "../../financial-core/src/derivation.ts";
 import {
   PRECISION_CLASSES,
   PUBLICATION_TIMING_PRECISIONS,
   type PrecisionClass,
   type PublicationTimingPrecision,
 } from "../../financial-core/src/evidence-vocabulary.ts";
-import { validateDerivationProof } from "../../financial-core/src/validate.ts";
 import type { RowQueryExecutor } from "./types.ts";
 import { assertIso8601WithOffset, assertNonEmptyString, assertOneOf, assertUuidV4 } from "./validators.ts";
 
@@ -139,8 +138,17 @@ export async function recordFactPrecisionAttestation(
   assertUuidV4(input.fact_id, "fact_id");
   assertOneOf(input.precision_class, PRECISION_CLASSES, "precision_class");
   assertNonEmptyString(input.validation_method, "validation_method");
-  const fact = (await db.query<{ source_id: string; value_text: string | null; scale_text: string }>(
-    `select source_id::text, value_num::text as value_text, scale::text as scale_text from facts where fact_id = $1`,
+  const fact = (await db.query<{
+    source_id: string;
+    value_text: string | null;
+    scale_text: string;
+    period_start: string | null;
+    period_end: string;
+    fiscal_year: number;
+  }>(
+    `select source_id::text, value_num::text as value_text, scale::text as scale_text,
+            period_start::text, period_end::text, fiscal_year
+       from facts where fact_id = $1`,
     [input.fact_id],
   )).rows[0];
   if (!fact) throw new FinancialAttestationError("fact does not exist");
@@ -158,9 +166,13 @@ export async function recordFactPrecisionAttestation(
     derivation: DerivationProofV1 | null;
   } = { raw_token: null, token_proof_hash: null, value_text: null, scale_text: null, source_locator: null, derivation: null };
   if (input.precision_class === "derived_from_source_tokens") {
-    const check = checkDerivationAgainstFact(input.derivation, fact);
-    if (check.status !== "match") throw new FinancialAttestationError(DERIVATION_REFUSALS[check.status]);
-    const sum = canonicalDecimalString(check.value);
+    const issue = derivationIssue(input.derivation, {
+      source_id: fact.source_id,
+      value_text: fact.value_text,
+      period: { start: fact.period_start, end: fact.period_end, fiscal_year: fact.fiscal_year },
+    });
+    if (issue !== null) throw new FinancialAttestationError(DERIVATION_REFUSALS[issue]);
+    const sum = canonicalDecimalString(derivationValue(input.derivation)!);
     proof = {
       raw_token: sum,
       token_proof_hash: hashCanonical("derivation", input.derivation),
@@ -225,28 +237,14 @@ export function checkTokenAgainstStoredValue(rawToken: string, storedValueText: 
   return { status: "match", token: token.value };
 }
 
-export type DerivationCheck =
-  | { status: "match"; value: ExactDecimal }
-  | { status: "invalid_derivation" | "value_mismatch" | "no_own_term" | "own_term_not_last_filed" };
-
-const DERIVATION_REFUSALS: Readonly<Record<Exclude<DerivationCheck["status"], "match">, string>> = {
+const DERIVATION_REFUSALS: Readonly<Record<DerivationIssue, string>> = {
   invalid_derivation: "derivation is not a period_difference.v1 proof with a supported decimal token in every term",
+  own_term_mismatch: "a derivation adds exactly one term, its first, from the fact's own source and ending on the fact's period end",
+  periods_not_contiguous: "a derivation's subtracted terms do not cover its first term exactly up to the fact's period start",
+  fiscal_year_mismatch: "a derivation term is not of the fact's fiscal year",
   value_mismatch: "derivation does not sum to the stored fact value",
-  no_own_term: "derivation needs exactly one term from the fact's own source",
   own_term_not_last_filed: "a derivation term was filed on or after the fact's own filing",
 };
-
-export function checkDerivationAgainstFact(proof: DerivationProofV1, fact: Readonly<{ source_id: string; value_text: string | null }>): DerivationCheck {
-  if (!validateDerivationProof(proof).ok || proof.terms.some((term) => !parseFinancialDecimal(term.raw_token).ok)) return { status: "invalid_derivation" };
-  const value = derivationValue(proof);
-  const stored = fact.value_text === null ? null : parseDerivedDecimalText(fact.value_text);
-  if (value === null || stored === null || !stored.ok || compareExactDecimals(value, stored.value) !== 0) return { status: "value_mismatch" };
-  const own = proof.terms.filter((term) => term.source.source_id.toLowerCase() === fact.source_id.toLowerCase());
-  if (own.length !== 1) return { status: "no_own_term" };
-  const ownFiled = own[0]!.source.filed;
-  if (proof.terms.some((term) => term !== own[0] && !(term.source.filed < ownFiled))) return { status: "own_term_not_last_filed" };
-  return { status: "match", value };
-}
 
 async function assertPublicationInput(db: RowQueryExecutor, input: SourcePublicationAttestationInput): Promise<void> {
   assertUuidV4(input.source_id, "source_id");

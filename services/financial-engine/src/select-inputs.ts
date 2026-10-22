@@ -52,7 +52,7 @@ import {
   compareRationals,
   conservativeAvailability,
   dayNumber,
-  derivationValue,
+  derivationIssue,
   freshnessAt,
   multiplyRationals,
   parseDerivedDecimalText,
@@ -363,7 +363,7 @@ function eligibility(candidate: InputCandidate, policy: EligibilityPolicy): { el
   if ("reason" in admitted) return admitted;
   const { precision, context, unit } = candidate;
   if (precision === null || precision.precision_class === "legacy_unverified" || precision.raw_token === null || precision.token_proof_hash === null
-    || !derivationProves(candidate)) {
+    || !derivationConsistent(candidate)) {
     return { reason: "precision_unverified" };
   }
   if (context === null) return { reason: "context_unverified" };
@@ -380,13 +380,12 @@ function eligibility(candidate: InputCandidate, policy: EligibilityPolicy): { el
   return { eligible: { candidate: proven, publication, numeric: exactNumeric(candidate) } };
 }
 
-function derivationProves({ metric_key, value_text, precision }: InputCandidate): boolean {
+// A derivation exactly when the class names one, and only for a flow; a present one must prove the value.
+function derivationConsistent({ metric_key, source_id, period, value_text, precision }: InputCandidate): boolean {
   const derivation = precision?.derivation ?? null;
   if ((derivation !== null) !== (precision?.precision_class === "derived_from_source_tokens")) return false;
-  if (derivation === null) return true;
-  const sum = derivationValue(derivation);
-  const value = parseDerivedDecimalText(value_text);
-  return resolveMetricDefinition(metric_key)?.value_kind === "flow" && sum !== null && value.ok && compareExactDecimals(sum, value.value) === 0;
+  return derivation === null
+    || (resolveMetricDefinition(metric_key)?.value_kind === "flow" && derivationIssue(derivation, { source_id, value_text, period }) === null);
 }
 
 function publicFromAllowedSource(candidate: InputCandidate, policy: EligibilityPolicy): { publication: SelectedPublication } | { reason: ReasonCode | null } {

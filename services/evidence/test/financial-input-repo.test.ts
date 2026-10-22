@@ -157,16 +157,28 @@ test("financial input candidates", { timeout: 180_000 }, async (t) => {
   });
 
   await t.test("a derived value's proof is returned with its derivation, and its raw token is the derivation's sum (#481)", async () => {
-    const term = (sign: "+" | "-", fiscal_period: "FY" | "Q3", source_id: string, filed: string, raw_token: string) => ({
-      sign, span: fiscal_period === "FY" ? ("fiscal_year" as const) : ("year_to_date" as const), fiscal_year: 2022, fiscal_period,
-      start: "2022-01-01", end: fiscal_period === "FY" ? "2022-12-31" : "2022-09-30", raw_token, token_proof_hash: H.proof,
-      source: { source_id, accession: `acc-${fiscal_period}`, form: fiscal_period === "FY" ? "10-K" : "10-Q", filed, locator: `loc-${fiscal_period}` },
+    const q4 = "1f000000-0000-4000-8000-0000000000e1";
+    await db.query(
+      `insert into facts (fact_id, subject_kind, subject_id, metric_id, period_kind, period_start, period_end, fiscal_year, fiscal_period,
+                          value_num, unit, currency, scale, as_of, reported_at, observed_at, source_id, method, verification_status,
+                          freshness_class, coverage_level, entitlement_channels, confidence)
+       values ($1, 'issuer', $2, $3, 'fiscal_q', '2022-10-01', '2022-12-31', 2022, 'Q4', 170, 'currency', 'USD', 1,
+               '2023-01-10T00:00:00Z', '2023-01-10T00:00:00Z', '2023-02-01T00:00:00Z', $4, 'reported', 'authoritative', 'filing_time', 'full', '["app"]'::jsonb, 1)`,
+      [q4, IDS.issuer, IDS.metric, IDS.sourceV1],
+    );
+    const term = (sign: "+" | "-", fiscal_period: "FY" | "Q1" | "Q2" | "Q3", start: string, end: string, filed: string, raw_token: string) => ({
+      sign, span: fiscal_period === "FY" ? ("fiscal_year" as const) : ("quarter" as const), fiscal_year: 2022, fiscal_period, start, end, raw_token, token_proof_hash: H.proof,
+      source: { source_id: fiscal_period === "FY" ? IDS.sourceV1 : IDS.sourceV2, accession: `acc-${fiscal_period}`, form: fiscal_period === "FY" ? "10-K" : "10-Q", filed, locator: `loc-${fiscal_period}` },
     });
-    const derivation = { version: "period_difference.v1" as const, concept: "Revenues", unit: "USD",
-      terms: [term("+", "FY", IDS.sourceV1, "2023-01-10", "400000000000"), term("-", "Q3", IDS.sourceV2, "2022-11-01", "34183000000")] };
-    await recordFactPrecisionAttestation(db, { fact_id: IDS.fy2022, precision_class: "derived_from_source_tokens", derivation, source_locator: "loc-Q4", validation_method: "test" });
-    const derived = (await listFinancialInputCandidates(db, request())).candidates.find((candidate) => candidate.fact_id === IDS.fy2022)!;
+    const derivation = { version: "period_difference.v1" as const, concept: "Revenues", unit: "USD", terms: [
+      term("+", "FY", "2022-01-01", "2022-12-31", "2023-01-10", "6.2E2"),
+      term("-", "Q1", "2022-01-01", "2022-03-31", "2022-05-01", "140"),
+      term("-", "Q2", "2022-04-01", "2022-06-30", "2022-08-01", "150"),
+      term("-", "Q3", "2022-07-01", "2022-09-30", "2022-11-01", "160"),
+    ] };
+    await recordFactPrecisionAttestation(db, { fact_id: q4, precision_class: "derived_from_source_tokens", derivation, source_locator: "loc-Q4", validation_method: "test" });
+    const derived = (await listFinancialInputCandidates(db, request())).candidates.find((candidate) => candidate.fact_id === q4)!;
     assert.deepEqual([derived.precision?.precision_class, derived.precision?.raw_token, derived.precision?.source_locator, derived.precision?.derivation],
-      ["derived_from_source_tokens", "365817000000", "loc-Q4", derivation]);
+      ["derived_from_source_tokens", "170", "loc-Q4", derivation]);
   });
 });
