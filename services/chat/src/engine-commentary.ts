@@ -5,7 +5,6 @@
 // it beside the answer, in the same message. The seal admits no prose and no
 // model may run inside finalization, so it is appended after the commit.
 
-import type { FinancialRuntimeAuthority } from "../../financial-core/src/index.ts";
 import type { SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { LlmProviderError, LlmRouterError } from "../../llm/src/index.ts";
@@ -14,6 +13,7 @@ import type { AnsweredTurn, AnswerTraceInput, TurnTrace } from "./answer-trace.t
 import { contentHashForText } from "./chat-ids.ts";
 import { enginePacket } from "./evidence-packet.ts";
 import type { ChatReadMessage } from "./messages.ts";
+import type { CommentaryRequest } from "./financial-runtime.ts";
 import { resultRefProblem } from "./prose-refs.ts";
 
 type Block = Record<string, unknown>;
@@ -42,13 +42,7 @@ export const COMMENTARY_UNAVAILABLE = "Commentary is unavailable for this answer
 export async function saveCommentary(
   db: SqlExecutor,
   compose: CommentaryComposer,
-  input: Readonly<{
-    message: ChatReadMessage;
-    request: { authority: FinancialRuntimeAuthority; request_key: string };
-    // By issuer, the ticker the turn named each company by.
-    labels: ReadonlyMap<string, string>;
-    turn: Pick<TurnTrace, "thread_id" | "run_id" | "turn_id" | "question">;
-  }>,
+  input: CommentaryRequest,
 ): Promise<void> {
   // Another attempt of the turn wrote it: no second model call, no second block.
   if ((input.message.blocks as Block[]).some((block) => block.analyst_commentary === true)) return;

@@ -46,7 +46,6 @@ import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { comparativeTurn, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId } from "./chat-ids.ts";
 import { namesCompanies, overviewPeers, overviewSubjects, planCompanyOverview, type PeersOf } from "./company-overview.ts";
-import { saveCommentary, type CommentaryComposer } from "./engine-commentary.ts";
 import { noteBlock } from "./fact-blocks.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { COMPARATIVE, companyKey, extractSubjectMentions } from "./subject-extraction.ts";
@@ -86,6 +85,15 @@ export type ChatFinancialTurn =
   // A gap an earlier attempt of the turn saved, as a retry returns it.
   | Readonly<{ kind: "saved"; message_id: string; message: ChatReadMessage | null }>;
 
+/** What a company overview's commentary is written from. */
+export type CommentaryRequest = Readonly<{
+  message: ChatReadMessage;
+  request: { authority: FinancialRuntimeAuthority; request_key: string };
+  // By issuer, the ticker the turn named each company by.
+  labels: ReadonlyMap<string, string>;
+  turn: { thread_id: string; run_id: string; turn_id?: string; question: string };
+}>;
+
 export type ChatFinancialTurnContext = ChatTurnRunContext & { clarificationAnswer?: ChatClarificationAnswer };
 
 export type ChatFinancialRuntime = Readonly<{
@@ -111,8 +119,13 @@ export type ChatFinancialRuntimeDeps = Readonly<{
   researchScope?: (context: ChatFinancialTurnContext, reading: Promise<ScopeProposal | null>) => Promise<ResearchScope>;
   /** The knowledge cutoff a new turn plans at; the wall clock when absent. */
   clock?: () => Date;
-  /** Writes a company overview's analyst commentary (engine-commentary.ts); absent, none is written. */
-  commentary?: CommentaryComposer;
+  /**
+   * Writes a company overview's analyst commentary onto its saved answer
+   * (engine-commentary.ts saveCommentary); absent, none is written. Injected,
+   * so the engine's type check, which reaches this file, never reaches the
+   * model client.
+   */
+  commentary?: (db: SqlExecutor, input: CommentaryRequest) => Promise<void>;
 }>;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -253,15 +266,15 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     // path: mark the overview in the plan's provenance, so any publishing
     // attempt can compose.
     const withCommentary = (answer: ChatFinancialTurn): ChatFinancialTurn => {
-      const { commentary: compose } = deps;
-      if (!overview || !compose || answer.kind !== "published" || !answer.message) return answer;
+      const { commentary: save } = deps;
+      if (!overview || !save || answer.kind !== "published" || !answer.message) return answer;
       const { message } = answer;
       return {
         ...answer,
         commentary: async () => {
           // The answer is committed and shown: nothing after it may fail the turn.
           try {
-            await saveCommentary(deps.pool, compose, {
+            await save(deps.pool, {
               message,
               request: { authority, request_key: turnId },
               labels: requested.labels,

@@ -75,6 +75,8 @@ function resolve(mention: string): Promise<ChatSubjectPreResolution> {
 }
 
 type Block = Record<string, unknown> & { id: string; kind: string };
+// The commentary writer the server wires (local-runtime.ts), on a given composer.
+const saver = (compose: CommentaryComposer) => (db: Parameters<typeof saveCommentary>[0], input: Parameters<typeof saveCommentary>[2]) => saveCommentary(db, compose, input);
 const reading = (proposal: ScopeProposal) => async () => proposal;
 const segmentsOf = (block: Record<string, unknown> | undefined) => (block?.segments ?? []) as Parameters<typeof plainText>[0];
 
@@ -106,7 +108,7 @@ test("a company overview carries analyst commentary on its published results (#3
   const researchScope = async (context: { userIntent?: string }, read: Promise<ScopeProposal | null>) =>
     resolveResearchScope({ question: context.userIntent ?? "", companies: [{ issuer_id: ALFA, label: "ALFA" }], prior: null, asOf: "2026-10-22T00:00:00.000Z", served: true, proposal: await read });
   const overview = (compose: CommentaryComposer, extra: Partial<Parameters<typeof chatHarness>[1]> = {}) =>
-    chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve, commentary: compose, ...extra });
+    chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve, commentary: saver(compose), ...extra });
   const hydrate = async (_db: unknown, ref: { kind: string; id: string }) =>
     ({ subject_ref: ref, display_label: ref.id, display_labels: {}, context: {}, normalized_input: ref.id, identity_level: "issuer", resolution_path: "test", confidence: 1 }) as never;
   const prior = async () => ({
@@ -306,7 +308,7 @@ test("a company overview carries analyst commentary on its published results (#3
       ...[deadlock, terminated].map((error): [string, Error, ReturnType<typeof overview>] => [
         `the append fails: ${error.message}`,
         error,
-        chatHarness(appendFails(error), { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve, commentary: composer(() => ALFA_REPLY).compose }),
+        chatHarness(appendFails(error), { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve, commentary: saver(composer(() => ALFA_REPLY).compose) }),
       ]),
     ];
     for (const [failure, error, harness] of cases) {

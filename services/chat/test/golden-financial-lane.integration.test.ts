@@ -8,7 +8,7 @@ import type { FinancialAnswerContent } from "../../financial-core/src/index.ts";
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
 import { answerTurn } from "../src/answer-trace.ts";
-import type { CommentaryComposer } from "../src/engine-commentary.ts";
+import { saveCommentary } from "../src/engine-commentary.ts";
 import { resultRefProblem } from "../src/prose-refs.ts";
 import { plainText } from "../src/render-assertions.ts";
 import type { ScopeProposal } from "../src/research-scope.ts";
@@ -38,7 +38,8 @@ test("golden metric questions certify through the chat financial lane on the rec
   const replay = await createReplayLlmChatClient(join(import.meta.dirname, "golden", "llm-replies.json"));
   const model: PlanningModel = async ({ messages }) => ({ text: (await replay({} as never, { messages })).text, model: "recorded" });
   // The analyst prose on an overview, from the recorded replies; no judge is configured, so inferences stay hidden.
-  const commentary: CommentaryComposer = (input, turn) => answerTurn(input, turn, { env: GOLDEN_ENV });
+  const commentary = (db: Parameters<typeof saveCommentary>[0], input: Parameters<typeof saveCommentary>[2]) =>
+    saveCommentary(db, (answer, turn) => answerTurn(answer, turn, { env: GOLDEN_ENV }), input);
 
   const ask = async (userIntent: string, readQuestion?: () => Promise<ScopeProposal>) => {
     const { events } = await chatHarness(pool, { model, resolveMention: resolveListing, commentary, ...(readQuestion ? { readQuestion } : {}) }).run({ threadId, userId: OWNER, userIntent });
