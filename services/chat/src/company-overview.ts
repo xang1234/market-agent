@@ -1,3 +1,7 @@
+import { buildDeterministicPlan, type PlanningContext, type PlanningResult, type RequestedSubject } from "../../financial-engine/src/planner.ts";
+import { requestedFiscalQuarter, requestedFiscalYear, requestedPriceWindow } from "./fact-blocks.ts";
+import { readingAsks, type ScopeProposal } from "./research-scope.ts";
+
 const SLOT = "a";
 const QUARTERS_SHOWN = 8;
 const MARGIN_OF_LINE = { gross_profit: "gross_margin", operating_income: "operating_margin", net_income: "net_margin" } as const;
@@ -12,6 +16,22 @@ const quarter = (metric: string, offset: number): Node => ({
   metric_key: metric,
   period: { kind: "latest", period_type: "quarterly", offset },
 });
+
+/** Whether a turn may be a company overview before its reading: one resolved company it names, not carried, and no period. */
+export function namesOneCompany(subjects: ReadonlyArray<RequestedSubject>, carried: boolean, text: string): boolean {
+  return subjects.length === 1 && subjects[0]!.resolution.status === "resolved" && !carried &&
+    requestedFiscalYear(text) === undefined && requestedFiscalQuarter(text) === undefined && requestedPriceWindow(text) === undefined;
+}
+
+/** Whether the reading of a question asks for no figure, so the overview answers it. */
+export function asksForNoFigure(reading: ScopeProposal | null): boolean {
+  return reading !== null && reading.metrics.length === 0 && reading.income_items.length === 0 &&
+    [...readingAsks(reading).asks].every((facet) => facet === "latest_quarter");
+}
+
+export function planCompanyOverview(context: PlanningContext): PlanningResult {
+  return buildDeterministicPlan(context, companyOverviewDraft(context.requested_subjects[0]!.mention));
+}
 
 export function companyOverviewDraft(mention: string) {
   const revenue = Array.from({ length: QUARTERS_SHOWN }, (_, offset) => quarter("revenue", offset));

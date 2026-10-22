@@ -44,8 +44,8 @@ import { publishRequest, type RequestGap } from "../../financial-engine/src/requ
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { comparativeTurn, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId } from "./chat-ids.ts";
-import { companyOverviewDraft } from "./company-overview.ts";
-import { noteBlock, requestedFiscalQuarter, requestedFiscalYear, requestedPriceWindow } from "./fact-blocks.ts";
+import { asksForNoFigure, namesOneCompany, planCompanyOverview } from "./company-overview.ts";
+import { noteBlock } from "./fact-blocks.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { COMPARATIVE, companyKey, extractSubjectMentions } from "./subject-extraction.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "./subjects.ts";
@@ -442,20 +442,10 @@ async function planTurn(
   if (CASH_RESILIENCE.test(text)) return planCashResilience(planningContext(subjects), text);
   // A failing or unreachable model is a planning gap (publishRequest); the narrative composer is never a fallback for numbers.
   const planned = planFinancialRequest(planningContext(subjects), text, model ?? noModel);
-  if (!namesOneCompanyAndNoPeriod(subjects, turn.carried, text)) return planned;
+  if (!namesOneCompany(subjects, turn.carried, text)) return planned;
   // Handled now, or a planner that fails while the reading runs is an unhandled rejection; an overview drops it.
   planned.catch(() => {});
-  return asksForNoFigure(await turn.startReading()) ? buildDeterministicPlan(planningContext(subjects), companyOverviewDraft(subjects[0]!.mention)) : planned;
-}
-
-function namesOneCompanyAndNoPeriod(subjects: ReadonlyArray<RequestedSubject>, carried: boolean, text: string): boolean {
-  return subjects.length === 1 && subjects[0]!.resolution.status === "resolved" && !carried &&
-    requestedFiscalYear(text) === undefined && requestedFiscalQuarter(text) === undefined && requestedPriceWindow(text) === undefined;
-}
-
-function asksForNoFigure(reading: ScopeProposal | null): boolean {
-  return reading !== null && reading.metrics.length === 0 && reading.income_items.length === 0 &&
-    [...readingAsks(reading).asks].every((facet) => facet === "latest_quarter");
+  return asksForNoFigure(await turn.startReading()) ? planCompanyOverview(planningContext(subjects)) : planned;
 }
 
 const CASH_RESILIENCE = /\bcash[- ]resilience\b/iu;

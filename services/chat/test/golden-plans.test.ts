@@ -6,7 +6,7 @@ import test from "node:test";
 import { createRuntimeAuthority, operationDependencies, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
 import { buildDeterministicPlan, planFinancialRequest, type PlanningContext, type PlanningModel, type PlanningResult } from "../../financial-engine/src/planner.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
-import { companyOverviewDraft } from "../src/company-overview.ts";
+import { asksForNoFigure, companyOverviewDraft, namesOneCompany } from "../src/company-overview.ts";
 import { isFinancialRequest, uncoveredAsks } from "../src/financial-runtime.ts";
 import { parseProposal, proposalQuestion } from "../src/scope-proposal.ts";
 import { extractSubjectMentions } from "../src/subject-extraction.ts";
@@ -157,6 +157,21 @@ test("a question about one company that asks for no figure plans its overview wi
 
 const reading = (asks: string[], metrics: unknown[] = [], income_items: string[] = [], turnsOff: string[] = []) =>
   parseProposal(JSON.stringify({ metrics, asks, turns_off: { facets: turnsOff, metrics: [] }, income_items }))!;
+
+test("a question about one company that asks for no figure is answered with its overview; one about more, or about a figure or a period, is not (#398)", async () => {
+  const client = await createReplayLlmChatClient(REPLIES);
+  const read = async (question: string) => parseProposal((await client({} as never, { messages: [{ role: "user", content: proposalQuestion(question) }] })).text);
+  const overview = async (question: string, { carried = false, read: readQuestion = read } = {}) =>
+    namesOneCompany(planningContext(question).requested_subjects, carried, question) && asksForNoFigure(await readQuestion(question));
+  for (const question of ["Analyze NVDA", "Analyze AMD", "Analyze AAPL"]) assert.equal(await overview(question), true, question);
+  const scripted = (proposal: ReturnType<typeof reading>) => ({ read: async () => proposal });
+  assert.equal(await overview("Analyze NVDA", scripted(reading([], ["income_statement"]))), false, "a metric");
+  assert.equal(await overview("Analyze NVDA", { carried: true }), false, "a carried company");
+  assert.equal(await overview("Analyze NVDA and AMD"), false, "two companies");
+  for (const period of ["in fiscal 2025", "for Q4 2025", "YTD"]) {
+    assert.equal(await overview(`Analyze NVDA ${period}`, scripted(reading([]))), false, period);
+  }
+});
 
 test("each golden answer names what its question asks for and its plan does not compute", async () => {
   const client = await createReplayLlmChatClient(REPLIES);
