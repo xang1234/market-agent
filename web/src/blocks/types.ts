@@ -80,21 +80,21 @@ export type BaseBlock = {
 export type TextSegmentTone = 'positive' | 'negative' | 'neutral'
 export type TextSegment = { type: 'text'; text: string; tone?: TextSegmentTone }
 
-export const REF_SEGMENT_KINDS = ['fact', 'claim', 'event', 'series'] as const
+export const REF_SEGMENT_KINDS = ['fact', 'claim', 'event', 'series', 'result'] as const
 export type RefSegmentKind = (typeof REF_SEGMENT_KINDS)[number]
 
-export type RefSegment = {
-  type: 'ref'
-  ref_kind: RefSegmentKind
-  ref_id: string
-  format?: string
-}
+export type RefSegment =
+  | { type: 'ref'; ref_kind: Exclude<RefSegmentKind, 'result'>; ref_id: string; format?: string }
+  // An engine result in commentary on its financial answer, with its period as that answer labels it.
+  | { type: 'ref'; ref_kind: 'result'; ref_id: string; format?: string; period?: string }
 
 export type RichTextSegment = TextSegment | RefSegment
 
 export type RichTextBlock = BaseBlock & {
   kind: 'rich_text'
   segments: ReadonlyArray<RichTextSegment>
+  // Commentary written on a financial answer's results, shown apart from it.
+  analyst_commentary?: true
 }
 
 export type SectionBlock = BaseBlock & {

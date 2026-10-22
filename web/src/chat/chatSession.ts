@@ -430,11 +430,17 @@ function requestHistory(history: HistoryState): HistoryState {
   return { ...history, requested: history.requested + 1, loaded }
 }
 
+// A message already held is replaced when the server's copy changed since:
+// an engine answer is saved, then gains its commentary.
 function withLocal(history: HistoryState, message: ChatMessage): HistoryState {
   const known = (m: ChatMessage) => m.message_id === message.message_id
-  if (history.local.some(known)) return history
-  if (history.loaded.kind === 'ready' && history.loaded.messages.some(known)) return history
-  return { ...history, local: [...history.local, message] }
+  const replaced = (messages: ReadonlyArray<ChatMessage>) => messages.map((m) => (known(m) ? message : m))
+  const loaded = history.loaded.kind === 'ready' ? history.loaded.messages : []
+  const held = history.local.find(known) ?? loaded.find(known)
+  if (held === undefined) return { ...history, local: [...history.local, message] }
+  if (held.content_hash === message.content_hash) return history
+  if (history.local.includes(held)) return { ...history, local: replaced(history.local) }
+  return { ...history, loaded: { kind: 'ready', messages: replaced(loaded) } }
 }
 
 function reduceStreamEvent(s: ChatSessionState, threadId: string, event: ChatSseEvent): ChatSessionState {

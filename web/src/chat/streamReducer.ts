@@ -1,4 +1,4 @@
-import { REF_SEGMENT_KINDS, type Block, type RefSegmentKind, type RichTextSegment } from '../blocks/types.ts'
+import { REF_SEGMENT_KINDS, type Block, type RefSegment, type RefSegmentKind, type RichTextSegment } from '../blocks/types.ts'
 import { parseSealedMessage, parseShownAnswer, type SealedChatMessage, type ShownAnswer } from './messageTypes.ts'
 import type { ChatSseEvent } from './sseEventTypes.ts'
 import {
@@ -53,9 +53,10 @@ export type StreamState = {
   // Captured from turn.error.
   error: string | null
   unverified?: UnverifiedTurn | null
-  // The sealed answer shown while the judge reads its inferences
-  // (answer.shown); the saved message replaces it on turn.completed. A failed
-  // turn saved nothing, so it drops it.
+  // The sealed answer shown before the turn completes (answer.shown): while
+  // the judge reads its inferences, or, on the engine lane, while commentary is
+  // written on the saved answer. The saved message replaces it on
+  // turn.completed. A failed turn saved nothing, so it drops it.
   shown?: ShownAnswer | null
 } & (
   | { turn_status: 'idle' | 'started' | 'error' | 'unverified' }
@@ -264,7 +265,7 @@ function readSegment(deltaPayload: unknown): RichTextSegment | null {
   ) {
     // ref_kind is runtime-validated against REF_SEGMENT_KINDS above; TS can't
     // narrow from an `includes` check on a typed-as-readonly-string array.
-    const ref: RichTextSegment = {
+    const ref: RefSegment = {
       type: 'ref',
       ref_kind: candidate.ref_kind as RefSegmentKind,
       ref_id: candidate.ref_id,

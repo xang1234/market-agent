@@ -45,19 +45,23 @@ export function renderAssertion(
       figure_ids.push(figure.id);
       return seal.value(figure);
     },
+    gap: (figure) => {
+      figure_ids.push(figure.id);
+      return { type: "text", text: figure.gap! };
+    },
     quote: seal.quote,
   });
   const { fact_bindings, source_refs } = seal.sealed();
   return { index: assertion.index, segments, figure_ids, fact_bindings, source_refs };
 }
 
-type Writes = Pick<Sealer, "value" | "quote">;
+type Writes = Pick<Sealer, "value" | "quote"> & { gap: (figure: PacketFigure) => Segment };
 
 function templateSegments(
   assertion: Assertion & { index: number },
   packet: EvidencePacket,
   accepted: ReadonlyArray<Assertion & { index: number }>,
-  { value, quote }: Writes,
+  { value, gap, quote }: Writes,
 ): Segment[] {
   const figures = assertion.evidence.flatMap((id) => packet.figures.filter((figure) => figure.id === id));
   const claims = assertion.evidence.flatMap((id) => packet.claims.filter((claim) => claim.id === id));
@@ -69,7 +73,7 @@ function templateSegments(
       // One clause per company and period, its period said once: "NVDA's
       // gross margin was 74.4%, operating margin 64.9% and ... in Q4 2026".
       const groups = new Map<string, PacketFigure[]>();
-      for (const figure of figures) {
+      for (const figure of figures.filter((entry) => entry.gap === undefined)) {
         const key = `${owner(figure)}|${figure.period ?? ""}|${figure.period_end ?? ""}|${periodCoverage(figure) ?? ""}`;
         groups.set(key, [...(groups.get(key) ?? []), figure]);
       }
@@ -81,7 +85,11 @@ function templateSegments(
         });
         text(periodPhrase(group[0]!));
       });
-      text(".");
+      if (groups.size > 0) text(".");
+      figures.filter((entry) => entry.gap !== undefined).forEach((figure, i) => {
+        text(`${groups.size > 0 || i > 0 ? " " : ""}${capitalize(`${owner(figure)}${figureLabel(figure)}`)}${periodPhrase(figure)} is not available: `);
+        segments.push(gap(figure));
+      });
       break;
     }
     case "management_attribution":

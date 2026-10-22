@@ -4,7 +4,9 @@ export const CHAT_SSE_EVENT_TYPES = [
   "tool.completed",
   "snapshot.staged",
   "snapshot.sealed",
-  // A sealed answer shown before it is saved: its inferences are with the judge.
+  // A sealed answer shown before its turn completes. On the analyst path it is
+  // not saved yet: its inferences are with the judge. On the engine lane it is
+  // saved first, and its analyst commentary is appended after.
   "answer.shown",
   "block.began",
   "block.delta",

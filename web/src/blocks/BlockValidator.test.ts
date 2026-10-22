@@ -12,6 +12,16 @@ test('validateBlock accepts every canonical fixture', () => {
   }
 })
 
+test('validateBlock accepts analyst commentary citing an engine result, and no other ref kind', () => {
+  const commentary = {
+    ...richTextFixture,
+    analyst_commentary: true,
+    segments: [{ type: 'ref', ref_kind: 'result', ref_id: '91111111-1111-4111-9111-111111111111', format: '46.21%', period: 'FY2023' }],
+  }
+  assert.deepEqual(validateBlock(commentary), { valid: true, block: commentary })
+  assert.equal(validateBlock({ ...commentary, segments: [{ ...commentary.segments[0], ref_kind: 'calculation' }] }).valid, false)
+})
+
 test('validateBlock rejects a block missing the kind discriminator', () => {
   const block: Record<string, unknown> = { ...richTextFixture }
   delete block.kind

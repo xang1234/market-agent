@@ -110,7 +110,8 @@ export async function loadRecentConversation(
 function narrativeText(blocks: unknown): string {
   if (!Array.isArray(blocks)) return "";
   return blocks
-    .filter((block) => block?.kind === "rich_text" && Array.isArray(block.segments))
+    // Commentary appended to an answer is not what the answer said.
+    .filter((block) => block?.kind === "rich_text" && Array.isArray(block.segments) && block.analyst_commentary !== true)
     .flatMap((block) => block.segments)
     .map((segment: { text?: unknown }) => (typeof segment?.text === "string" ? segment.text : ""))
     .join(" ")

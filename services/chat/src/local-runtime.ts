@@ -55,6 +55,7 @@ import {
   structuredRefsFromHandoff,
 } from "./local-runtime-structured.ts";
 import { createChatFinancialRuntime, type ChatFinancialRuntime, type ChatFinancialTurnContext } from "./financial-runtime.ts";
+import { saveCommentary } from "./engine-commentary.ts";
 import { createChatMessagePersistence } from "./messages.ts";
 import {
   preResolveChatSubjectWithResolver,
@@ -496,6 +497,8 @@ export const financialRuntime: ChatFinancialRuntime = createChatFinancialRuntime
   evidence: createEvidenceFinancialPort,
   readQuestion: (question) => proposeScope({ question }),
   researchScope: financialResearchScope,
+  commentary: (db, input) => saveCommentary(db, (answer, turn, onAnswered) =>
+    answerTurn(answer, turn, { env: process.env, traceDir: process.env.CHAT_TRACE_DIR?.trim(), onAnswered }), input),
 });
 
 export const persistAssistantMessage: ChatAssistantMessagePersistence = async (message) =>

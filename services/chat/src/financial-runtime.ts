@@ -79,9 +79,20 @@ export type ChatFinancialTurn =
     subject_refs?: ReadonlyArray<FinancialSubjectRef>;
     research_scope?: ResearchScope;
   }>
-  | Readonly<{ kind: "published"; run_id: string; message_id: string; message: ChatReadMessage | null }>
+  // A company overview's commentary is written once the answer is shown:
+  // commentary() saves it and reads the message back.
+  | Readonly<{ kind: "published"; run_id: string; message_id: string; message: ChatReadMessage | null; commentary?: () => Promise<ChatReadMessage> }>
   // A gap an earlier attempt of the turn saved, as a retry returns it.
   | Readonly<{ kind: "saved"; message_id: string; message: ChatReadMessage | null }>;
+
+/** What a company overview's commentary is written from. */
+export type CommentaryRequest = Readonly<{
+  message: ChatReadMessage;
+  request: { authority: FinancialRuntimeAuthority; request_key: string };
+  // By issuer, the ticker the turn named each company by.
+  labels: ReadonlyMap<string, string>;
+  turn: { thread_id: string; run_id: string; turn_id?: string; question: string };
+}>;
 
 export type ChatFinancialTurnContext = ChatTurnRunContext & { clarificationAnswer?: ChatClarificationAnswer };
 
@@ -108,6 +119,13 @@ export type ChatFinancialRuntimeDeps = Readonly<{
   researchScope?: (context: ChatFinancialTurnContext, reading: Promise<ScopeProposal | null>) => Promise<ResearchScope>;
   /** The knowledge cutoff a new turn plans at; the wall clock when absent. */
   clock?: () => Date;
+  /**
+   * Writes a company overview's analyst commentary onto its saved answer
+   * (engine-commentary.ts saveCommentary); absent, none is written. Injected,
+   * so the engine's type check, which reaches this file, never reaches the
+   * model client.
+   */
+  commentary?: (db: SqlExecutor, input: CommentaryRequest) => Promise<void>;
 }>;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -215,6 +233,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     // an overview added included, and the planner's result.
     let asked = requested.subjects;
     let planned: PlanningResult | undefined;
+    let overview = false;
     const declinedGap = async (reason: ChatGap) => {
       // ponytail: a retry that resumes a reserved run does not plan, so its
       // gap names the companies the message resolved, without a pick or peers.
@@ -240,6 +259,35 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
         }),
       };
     };
+    // ponytail: only the attempt that planned the overview writes its
+    // commentary, so an attempt that did not plan writes none. Two do not: a
+    // retry that resumes a reserved run after a failed commit, and a retry of
+    // a saved answer. Either leaves the answer without commentary. Upgrade
+    // path: mark the overview in the plan's provenance, so any publishing
+    // attempt can compose.
+    const withCommentary = (answer: ChatFinancialTurn): ChatFinancialTurn => {
+      const { commentary: save } = deps;
+      if (!overview || !save || answer.kind !== "published" || !answer.message) return answer;
+      const { message } = answer;
+      return {
+        ...answer,
+        commentary: async () => {
+          // The answer is committed and shown: nothing after it may fail the turn.
+          try {
+            await save(deps.pool, {
+              message,
+              request: { authority, request_key: turnId },
+              labels: requested.labels,
+              turn: { thread_id: context.threadId, run_id: context.runId, ...(context.turnId ? { turn_id: context.turnId } : {}), question: text },
+            });
+          } catch (error) {
+            console.error(`[chat] the analyst commentary on message ${messageId} failed; the turn completes with the answer as saved`, error);
+            return message;
+          }
+          return (await readBack(deps.pool, context.threadId, messageId)) ?? message;
+        },
+      };
+    };
     // A retry of this turn resumes what the first attempt reserved; it never plans again.
     const outcome = await publishRequest(deps.pool, {
       authority,
@@ -255,6 +303,9 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
           },
           evidence: deps.evidence(db),
           peersOf: (issuer) => overviewPeers(db, issuer),
+          onOverview: () => {
+            overview = true;
+          },
         });
         return planned;
       },
@@ -281,7 +332,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
         const [unit] = outcome.report?.finalized ?? [];
         const committed = outcome.report === null || unit?.result.status === "published" || unit?.result.status === "existing" ||
           (!unit && outcome.report.existing > 0);
-        if (committed) return published(deps.pool, outcome.run_id, context.threadId, messageId);
+        if (committed) return withCommentary(await published(deps.pool, outcome.run_id, context.threadId, messageId));
         // A drive cancelled midway is a notice, as a cancelled run is.
         if (outcome.report.execution === "cancelled") return gap("run_failed");
         return declinedGap(unit?.result.status === "rejected" ? "verification_failed" : "run_failed");
@@ -427,6 +478,7 @@ async function planTurn(
     startReading: () => Promise<ScopeProposal | null>;
     evidence: FinancialEvidencePort;
     peersOf: PeersOf;
+    onOverview: () => void;
   }>,
 ): Promise<PlanningResult> {
   const planningContext = (subjects: ReadonlyArray<RequestedSubject>): PlanningContext => ({
@@ -471,6 +523,7 @@ async function planTurn(
   }
   if (!companies || !overview) return planned;
   onSubjects(companies);
+  turn.onOverview();
   dropped = true;
   void failure.then((failed) => {
     if (failed === null) return;

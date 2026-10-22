@@ -1,17 +1,21 @@
+import type { FinancialAnswerContent } from "../../financial-core/src/index.ts";
 import { isUuid } from "./chat-ids.ts";
 import type { PacketClaim, PacketFigure } from "./evidence-packet.ts";
+import { isRecord } from "../../shared/src/http.ts";
 
 type Block = Record<string, unknown>;
 
 export type Segment =
   | { type: "text"; text: string }
-  | { type: "ref"; ref_kind: "fact" | "claim" | "series"; ref_id: string; format: string };
+  | { type: "ref"; ref_kind: "fact" | "claim" | "series"; ref_id: string; format: string }
+  // An engine result, as its answer shows it: its text and its period's.
+  | { type: "ref"; ref_kind: "result"; ref_id: string; format: string; period: string };
 
 export type Sealer = {
-  // A figure's value: a fact ref when its fact can seal here (a UUID with the
-  // binding its fact block carries, or its own for a value no block shows), a
-  // series ref for a price return read off its chart line, otherwise the
-  // packet's value as plain text.
+  // A figure's value: a result ref for an engine result, a fact ref when its
+  // fact can seal here (a UUID with the binding its fact block carries, or its
+  // own for a value no block shows), a series ref for a price return read off
+  // its chart line, otherwise the packet's value as plain text.
   value: (figure: PacketFigure) => Segment;
   // A claim's text: a claim ref when its id is a UUID, otherwise plain text.
   quote: (claim: PacketClaim) => Segment;
@@ -25,6 +29,7 @@ export function createSealer(factBlocks: ReadonlyArray<Block>): Sealer {
   const sourceRefs = new Set<string>();
   return {
     value: (figure) => {
+      if (figure.result_id) return { type: "ref", ref_kind: "result", ref_id: figure.result_id, format: figure.value, period: figure.period ?? "" };
       if (!figure.fact_id && figure.series_ref && isUuid(figure.series_ref)) {
         figure.source_ids.forEach((id) => sourceRefs.add(id));
         return { type: "ref", ref_kind: "series", ref_id: figure.series_ref, format: figure.value };
@@ -54,4 +59,24 @@ function bindingsByFact(blocks: ReadonlyArray<Block>): Map<string, Record<string
         : []
     );
   }));
+}
+
+/**
+ * Why prose written on an engine answer may not be saved beside it, or null
+ * when it may: every ref is a result ref naming a verified result of that
+ * answer, showing that result's text and its period's.
+ */
+export function resultRefProblem(prose: Block, answer: { financial: FinancialAnswerContent }): string | null {
+  const { labels, results } = answer.financial;
+  const verified = new Map(results.flatMap((result) => result.disposition === "verified" && result.presented.kind === "value" ? [[result.result_id, result] as const] : []));
+  for (const segment of Array.isArray(prose.segments) ? prose.segments : []) {
+    if (!isRecord(segment) || segment.type !== "ref") continue;
+    if (segment.ref_kind !== "result") return `a ${String(segment.ref_kind)} ref is not a result ref`;
+    const result = verified.get(segment.ref_id as string);
+    if (!result) return `ref ${String(segment.ref_id)} names no verified result of this answer`;
+    if (segment.format !== result.presented.text) return `ref ${result.result_id} shows ${JSON.stringify(segment.format)}, not its result's ${JSON.stringify(result.presented.text)}`;
+    const period = labels[result.period_label_id]?.text;
+    if (segment.period !== period) return `ref ${result.result_id} is dated ${JSON.stringify(segment.period)}, not its result's ${JSON.stringify(period)}`;
+  }
+  return null;
 }

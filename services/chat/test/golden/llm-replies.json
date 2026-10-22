@@ -177,6 +177,20 @@
       "text": "AMD's operating margin turned negative in its second quarter of fiscal 2025. According to AMD's earnings release, filed with the SEC in August 2025: [[C1]]\n\n```assertions\n[{\"kind\":\"management_attribution\",\"text\":\"AMD said [[C1]]\",\"evidence\":[\"C1\"]}]\n```"
     },
     {
+      "match": [
+        "\"route\":\"financial_engine\"",
+        "\"coverage\":[{\"company\":\"NVDA\",\"status\":\"shown\"}]"
+      ],
+      "text": "NVIDIA's profit is growing with its revenue: sales rose in every quarter shown, and most of each dollar reaches net income.\n\n```assertions\n[{\"kind\":\"analyst_inference\",\"text\":\"Its growth is turning into profit at a high rate, not being spent to get there.\",\"supports\":[1,2]},{\"kind\":\"comparison\",\"op\":\"trend\",\"result\":\"rose_throughout\",\"text\":\"NVDA's revenue rose in every quarter from [[F1]] to [[F8]].\",\"evidence\":[\"F1\",\"F2\",\"F3\",\"F4\",\"F5\",\"F6\",\"F7\",\"F8\"]},{\"kind\":\"observation\",\"text\":\"In Q4 FY2026 NVDA's gross margin was [[F12]], operating margin [[F13]] and net margin [[F14]].\",\"evidence\":[\"F12\",\"F13\",\"F14\"]}]\n```"
+    },
+    {
+      "match": [
+        "\"route\":\"financial_engine\"",
+        "\"coverage\":[{\"company\":\"NVDA\",\"status\":\"shown\"},{\"company\":\"AMD\",\"status\":\"shown\"}]"
+      ],
+      "text": "NVIDIA is the more profitable and the faster-growing of the two in their latest quarters.\n\n```assertions\n[{\"kind\":\"analyst_inference\",\"text\":\"The company that leads on margin also leads on growth, so its lead is widening rather than being bought.\",\"supports\":[1,2]},{\"kind\":\"comparison\",\"op\":\"highest\",\"result\":\"F5\",\"text\":\"NVDA's gross margin [[F5]] is above AMD's [[F14]].\",\"evidence\":[\"F5\",\"F14\"]},{\"kind\":\"comparison\",\"op\":\"highest\",\"result\":\"F9\",\"text\":\"NVDA's revenue grew [[F9]] over the year, AMD's [[F18]].\",\"evidence\":[\"F9\",\"F18\"]},{\"kind\":\"observation\",\"text\":\"NVDA's revenue was [[F1]] and AMD's [[F10]] in their latest quarters.\",\"evidence\":[\"F1\",\"F10\"]}]\n```"
+    },
+    {
       "match": "Write a concise investment research answer",
       "text": "NVIDIA's reported revenue rose in every quarter shown, and gross and operating profit rose with it. The chart and figures below carry the reported values and link to their filings.\n\n```assertions\n[{\"kind\":\"comparison\",\"op\":\"trend\",\"result\":\"rose_throughout\",\"text\":\"NVDA's revenue rose in every quarter shown.\",\"evidence\":[\"F10\",\"F11\",\"F12\",\"F13\",\"F14\",\"F15\",\"F16\",\"F17\"]}]\n```"
     }

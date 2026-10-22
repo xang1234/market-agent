@@ -12,6 +12,7 @@
 // cutoff): repeats already counted once, each placed by its stored polarity,
 // with any stored contradiction between them named.
 
+import type { FinancialAnswerContent } from "../../financial-core/src/index.ts";
 import { displayedFigures, QUARTERS_SHOWN, readsNamedQuarter, type DerivedFigureRecord, type DisplayedFigure } from "./fact-blocks.ts";
 import type { ResearchScope } from "./research-scope.ts";
 import { isRecord } from "../../shared/src/http.ts";
@@ -21,6 +22,10 @@ type Block = Record<string, unknown>;
 export type PacketFigure = Omit<DisplayedFigure, "fact_id" | "block_id"> & {
   id: string;
   fact_id?: string;
+  // The engine result it shows (enginePacket); never sent to the model.
+  result_id?: string;
+  // Why the engine computed no value: the figure is unavailable, never a number.
+  gap?: string;
   source_ids: ReadonlyArray<string>;
 } & ({
   displayed?: undefined;
@@ -357,6 +362,44 @@ function derivedRecords(block: Block): DerivedFigureRecord[] {
   );
 }
 
+/**
+ * A published engine answer as the evidence its commentary is written from:
+ * each value or gap result in the answer's order, a gap with its reason. Only
+ * an answer about several companies names each figure's, by the ticker the
+ * turn gave its slot, else the engine's label for it.
+ */
+export function enginePacket(content: FinancialAnswerContent, tickers: ReadonlyMap<string, string>): EvidencePacket {
+  const subjects = Object.values(content.labels).flatMap((label) => label.kind === "subject" ? [label] : []);
+  const companyOf = new Map(subjects.map((label) => [`subject:${label.slot_id}`, tickers.get(label.slot_id) ?? label.text]));
+  const companies = [...companyOf.values()];
+  const figures = content.results.flatMap(({ result_id, subject_label_id, measure_label_id, period_label_id, presented }) => {
+    if (presented.kind !== "value" && presented.kind !== "gap") return [];
+    const company = companies.length > 1 && subject_label_id !== null ? companyOf.get(subject_label_id) : undefined;
+    return [{
+      ...(company === undefined ? {} : { company }),
+      metric: content.labels[measure_label_id]!.text,
+      period: content.labels[period_label_id]!.text,
+      value: presented.text,
+      ...(presented.kind === "gap" ? { gap: presented.text } : {}),
+      result_id,
+      source_ids: [],
+    }];
+  });
+  return {
+    route: "financial_engine",
+    cutoff: content.knowledge_cutoff,
+    companies,
+    figures: figures.map((figure, index) => ({ id: `F${index + 1}`, ...figure })),
+    coverage: companies.map((company) => ({ company, status: "shown" })),
+    gaps: [],
+    query_bounds: {},
+    claims: [],
+    disagreements: [],
+    claims_status: "none",
+    claims_truncated: false,
+  };
+}
+
 function packetClaims(
   evidence: ClaimEvidence | undefined,
   companyOf: (issuer: string) => string | undefined,
@@ -418,7 +461,11 @@ export function packetForModel(packet: EvidencePacket): Record<string, unknown> 
     route: packet.route,
     cutoff: packet.cutoff,
     figures: packet.figures.map((figure) => {
-      const { fact_id: _factId, series_ref: _seriesRef, source_ids: _sourceIds, ...shown } = figure;
+      const { fact_id: _factId, result_id: _resultId, series_ref: _seriesRef, source_ids: _sourceIds, ...shown } = figure;
+      if (shown.gap !== undefined) {
+        const { value: _value, ...unavailable } = shown;
+        return unavailable;
+      }
       if (shown.displayed === undefined) return shown;
       const { binding: _binding, ...available } = shown;
       return available;

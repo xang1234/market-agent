@@ -87,7 +87,7 @@ export async function composeTraced(
 // as the judge reads them; the fallback sentence shows none.
 export function inferenceCases(input: AnswerTraceInput, report: AssertionReport | null): { cases: JudgeCase[]; companies: ReadonlyArray<string> } {
   if (report?.rendered !== true) return { cases: [], companies: [] };
-  const packet = turnPacket(input);
+  const packet = input.packet ?? turnPacket(input);
   return { cases: judgeCases(report.accepted, packet, input.factBlocks ?? []), companies: packet.companies };
 }
 
@@ -157,7 +157,7 @@ async function repairedAnswer(
   const verdicts = first.assertions?.judged ?? [];
   const requests = calls ? repairsFor(answer, verdicts) : [];
   if (!calls || requests.length === 0) return first;
-  const packet = turnPacket(input);
+  const packet = input.packet ?? turnPacket(input);
   const round = await repairRound({
     messages: answer.exchange!.messages,
     list: assertionList(answer.exchange!.text) ?? [],
@@ -474,7 +474,7 @@ export async function writeTurnTrace(dir: string | undefined, trace: TurnTrace, 
 }
 
 export type AnswerMetrics = {
-  // Figures in the answer as sealed refs: facts, and price returns as series.
+  // Figures in the answer as refs: facts, price returns as series, and engine results.
   figure_refs: number;
   // Digit runs in its plain text, figures or not ("Q1", "2025", "$4.2").
   plain_numbers: number;
@@ -502,13 +502,15 @@ export type AnswerMetrics = {
 
 type Segment = { type?: string; ref_kind?: string; text?: string };
 
+const FIGURE_REFS: ReadonlySet<string> = new Set(["fact", "series", "result"]);
+
 export function answerMetrics(trace: Pick<TurnTrace, "blocks" | "assertions" | "exchange" | "repair">): AnswerMetrics {
   const narrative = trace.blocks.filter((block) => block.kind === "rich_text")
     .map((block) => (Array.isArray(block.segments) ? block.segments as Segment[] : []));
   const text = (segments: ReadonlyArray<Segment>) =>
     segments.map((segment) => (segment.type === "text" ? segment.text ?? "" : "")).join("");
   return {
-    figure_refs: narrative.flat().filter((segment) => segment.type === "ref" && (segment.ref_kind === "fact" || segment.ref_kind === "series")).length,
+    figure_refs: narrative.flat().filter((segment) => segment.type === "ref" && FIGURE_REFS.has(segment.ref_kind ?? "")).length,
     plain_numbers: narrative.flatMap((segments) => text(segments).match(/\d+(?:[.,]\d+)*/g) ?? []).length,
     fallback: trace.exchange !== null && trace.assertions?.rendered !== true,
     accepted: trace.assertions?.accepted.length ?? 0,

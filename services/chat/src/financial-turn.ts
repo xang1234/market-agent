@@ -2,7 +2,9 @@
 // only the turn's start: no tool previews, values, titles, or error detail
 // that could expose an unverified number. A certified answer is announced only
 // after the transaction that wrote its snapshot, certificate, and message has
-// committed, and its turn.completed carries that committed message. Clarifications
+// committed, and its turn.completed carries that committed message. A company
+// overview's answer is shown (answer.shown) before its analyst commentary is
+// written and saved beside it, so the numbers never wait on it. Clarifications
 // and gaps are ordinary narrative messages with no numbers.
 
 import { randomUUID } from "node:crypto";
@@ -47,9 +49,14 @@ async function emitFinancialTurn(
 ): Promise<void> {
   const { emit } = context;
   if (turn.kind === "published" || turn.kind === "saved") {
-    const { message } = turn;
-    const heads = message ? blockHeads(message) : [];
+    let { message } = turn;
     if (message) emit("snapshot.sealed", { snapshot_id: message.snapshot_id, status: "sealed", verification: { ok: true } });
+    if (turn.kind === "published" && turn.commentary && message) {
+      const { message_id, snapshot_id, blocks, block_proofs } = message;
+      emit("answer.shown", { message_id, snapshot_id, blocks, block_proofs });
+      message = await turn.commentary();
+    }
+    const heads = message ? blockHeads(message) : [];
     const unread = turn.kind === "published"
       ? { id: `financial-answer-${turn.message_id}`, kind: "financial_answer" }
       : { id: `financial-gap-${turn.message_id}`, kind: "rich_text" };
@@ -58,7 +65,7 @@ async function emitFinancialTurn(
       emit("block.completed", { block_id: head.id });
     }
     emit("turn.completed", {
-      ...sealedCompletion(turn, turn.message_id),
+      ...sealedCompletion({ message_id: turn.message_id, message }, turn.message_id),
       bundle_id: FINANCIAL_BUNDLE_ID,
       ...(turn.kind === "published" ? { financial: { run_id: turn.run_id } } : {}),
     });

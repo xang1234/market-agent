@@ -360,6 +360,15 @@ test('an adopted run whose answer the load already holds shows it once after the
   assert.deepEqual(ids(handedOff), ['u1', 'a1'])
 })
 
+test('an answer saved again since the load, as an engine answer gains its commentary, replaces the loaded copy on the hand-off', () => {
+  const commentary = { ...A1_SEALED.blocks[0]!, id: 'a1-commentary', analyst_commentary: true, segments: [{ type: 'text', text: 'Margins held.' }] }
+  const withCommentary: ChatMessage = { ...A1_SEALED, blocks: [...A1_SEALED.blocks, commentary], content_hash: 'sha256:a1-commentary' }
+  const adopted = reduceChatSession(opened(), loaded(1, [U1, A1_SEALED], R1))
+  const handedOff = reduceChatSession(adopted, streamEvent(sse('turn.completed', 2, { message_id: 'a1', message: withCommentary })))
+  assert.equal(handedOff.turn.phase, 'idle')
+  assert.deepEqual(selectThreadView(handedOff).messages, [U1, withCommentary])
+})
+
 test('an unsealed completion naming an answer the thread already holds hands off with no load', () => {
   const adopted = reduceChatSession(opened(), loaded(1, [U1, A1_SEALED], R1))
   const handedOff = run(adopted, [...STREAM_TO_TEXT, streamEvent(sse('turn.completed', 5, { message_id: 'a1' }))])

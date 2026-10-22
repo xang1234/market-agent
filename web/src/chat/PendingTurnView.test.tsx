@@ -19,7 +19,7 @@ import { INITIAL_STREAM_STATE, applyChatStreamEvent, type StreamState } from './
 const TURN: TurnIds = { runId: 'run-1', messageId: 'u1', snapshotId: 'snap-1', text: 'Analyze NVDA' }
 const RUN = { runId: 'run-1', turnId: 'u1' }
 const noop = () => undefined
-const handlers = { onRetry: noop, onReconnect: noop, onReload: noop, onAsk: () => true }
+const handlers = { messages: [], onRetry: noop, onReconnect: noop, onReload: noop, onAsk: () => true }
 const OWN: RunOrigin = { kind: 'own', input: { userIntent: 'Analyze NVDA' } }
 const LINK: StreamLink = { kind: 'open', attach: false, attempt: 0, reached: true, drops: 0, seenSeq: 0 }
 const ADOPTED: RunOrigin = { kind: 'adopted' }
@@ -175,7 +175,7 @@ test('an adopted run shows its plan and its link state, never streamed blocks; a
   assert.match(render({ ...LINK, attach: true }, OWN), /NVIDIA&#x27;s revenue rose/)
 })
 
-test('a sealed answer shown while the judge reads its inferences renders as the saved message it becomes, with its proofs, for any reader of the run', () => {
+test('a sealed answer shown while the judge reads its inferences renders as the saved message it becomes, with its proofs, for any reader of the run, until history holds it', () => {
   const answer = {
     id: 'b-answer',
     kind: 'rich_text',
@@ -218,6 +218,16 @@ test('a sealed answer shown while the judge reads its inferences renders as the 
     assert.match(html, /Checking an analyst inference against the figures it rests on/)
     assert.doesNotMatch(html, /Agent plan/)
   }
+
+  // A load during the answer's commentary already holds it: history shows it, once.
+  const held = { message_id: 'a1', thread_id: 'T1', role: 'assistant', snapshot_id: stream.shown!.snapshot_id, blocks: [answer], content_hash: 'sha256:a1', created_at: '2026-05-06T00:00:00.000Z' } as const
+  const attached = renderToStaticMarkup(
+    <BlockRegistryProvider registry={registry}>
+      <PendingTurnView turn={{ phase: 'streaming', run: RUN, origin: ADOPTED, stream, link: { ...LINK, attach: true } }} {...handlers} messages={[held]} />
+    </BlockRegistryProvider>,
+  )
+  assert.doesNotMatch(attached, /Data Center revenue was/)
+  assert.match(attached, /The analyst is still answering this question/)
 })
 
 test('a figure clicked while its answer streams asks the inspector for it in the sealed snapshot', async () => {

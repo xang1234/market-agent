@@ -49,8 +49,8 @@ function MessageItemInner({ message, onMeasure }: MessageItemProps): ReactElemen
 }
 
 // An assistant answer's blocks, each with its proof: a saved message, and the
-// sealed answer shown before it is saved (PendingTurnView), through one tree,
-// so the hand-off from one to the other moves nothing.
+// sealed answer shown before its turn completes (PendingTurnView), through one
+// tree, so the hand-off from one to the other moves nothing.
 export function AssistantBlocks({ blocks, proofs }: { blocks: ReadonlyArray<Block>; proofs: Readonly<Record<string, BlockProof>> | undefined }): ReactElement {
   return (
     <AssistantTurn className="w-full">

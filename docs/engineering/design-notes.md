@@ -608,3 +608,38 @@ normalized to percent return. The companies' windows must be identical, or there
   sealed. Blocks without `series` keep the live behaviour. Other ranges for a sealed answer would need the ADR-0002
   transform/refresh flow.
 
+## Analyst commentary on engine answers (#398)
+
+A company overview the financial engine answers, for one company or with its peers, carries analyst commentary
+(`services/chat/src/engine-commentary.ts`). It is written after the engine's answer is committed and shown, so the
+numbers never wait on a model.
+
+- **Data shape.** Each value or gap result the answer published is one evidence-packet figure, in the answer's order
+  (`enginePacket` in `evidence-packet.ts`). A figure keeps its `result_id`, which the model never sees. A gap figure
+  reaches the model with its reason and no value. The model writes an assertion list, and templates render it. Each
+  figure renders as a `result` ref segment holding the result's text and its period's label (`prose-refs.ts`).
+- **Where it is saved.** The commentary is one unsealed `rich_text` block marked `analyst_commentary`, appended to
+  the answer's `chat_messages` row. The seal admits no prose and no model runs inside finalization, so the append
+  comes after the commit. It moves no pointer. A follow-up's prior context and the thread title skip it.
+- **The stream.** `answer.shown` carries the committed answer. `turn.completed` follows once the commentary is saved,
+  with the message as it is then. A client that loads the thread in between already holds the answer. It shows it
+  once, from history, and takes the commentary from `turn.completed`.
+- **Checks before saving.** `checkAssertions` rejects an assertion that cites an id outside the packet, compares a
+  gap, ranks changes over different spans, or leaves out a period or company shown. A trend over time names the
+  periods shown only as gaps. `resultRefProblem` then checks every ref. It must be a `result` ref naming a verified
+  value result of this answer, showing that result's text and its period's label. Any failure saves the note in
+  place of the commentary.
+- **The judge** reads each analyst inference beside the assertions it rests on, rendered from the engine packet,
+  as on the analyst path. An inference the judge does not accept never shows. With no `JUDGE_LITELLM_MODEL`, none
+  shows.
+- **Failure modes.**
+  - A model error (`LlmRouterError` or `LlmProviderError`, a timeout and a replay miss included) saves the note
+    "Commentary is unavailable for this answer."
+  - Any other error after the commit, a defect or a database error, is logged at error level with its cause. The
+    turn completes with the answer as saved, never with `turn.error`.
+  - The append is a compare-and-set on the row's `content_hash`. A message changed since it was read is left as it
+    is, and the loss is logged. A message that already holds commentary is skipped before any model call.
+  - Only the attempt that planned the overview writes commentary. A retry that resumes a reserved run after a failed
+    commit, or a retry of a saved answer, writes none.
+- **Attribution.** The deployment that wrote rendered commentary is stored in `chat_messages.answered_by`. The note
+  records none.

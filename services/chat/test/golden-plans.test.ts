@@ -112,6 +112,15 @@ const EXPECTED: Record<string, ReturnType<typeof summary>> = {
   "How does AMDX's Q2 2025 revenue compare with its peers?": { outcome: "ready", model_calls: 1, outputs: ["AMD revenue Q2 2025"] },
 };
 
+test("each recorded reply matched by one substring answers a request made of that substring, so no reply shadows it", async () => {
+  const replies = (JSON.parse(readFileSync(REPLIES, "utf8")) as { replies: Array<{ match: string | string[]; text: string }> }).replies;
+  const client = await createReplayLlmChatClient(REPLIES);
+  for (const reply of replies) {
+    if (typeof reply.match !== "string") continue;
+    assert.equal((await client({} as never, { messages: [{ role: "user", content: reply.match }] })).text, reply.text, reply.match);
+  }
+});
+
 test("each golden metric question plans from its own recorded reply on the first call", async () => {
   const questions = (JSON.parse(readFileSync(REPLIES, "utf8")) as { replies: Array<{ match: string }> }).replies
     .flatMap((reply) => /^Question: "(.*)"$/u.exec(reply.match)?.[1] ?? [])
