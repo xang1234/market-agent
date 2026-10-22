@@ -45,7 +45,7 @@ import { publishRequest, type RequestGap } from "../../financial-engine/src/requ
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { comparativeTurn, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId } from "./chat-ids.ts";
-import { asksForNoFigure, namesOneCompany, planCompanyOverview } from "./company-overview.ts";
+import { namesCompanies, overviewPeers, overviewSubjects, planCompanyOverview, type PeersOf } from "./company-overview.ts";
 import { noteBlock } from "./fact-blocks.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { COMPARATIVE, companyKey, extractSubjectMentions } from "./subject-extraction.ts";
@@ -172,10 +172,10 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     if (requested.clarify) return { kind: "clarification", clarification: companyQuestion(requested.clarify) };
     if (!answered && requested.subjects.length === 0) return gap("no_company");
     // The reading of the question is a model call, so it starts beside the
-    // planner's model call, when planning one company (whose overview waits
-    // on it), or once a plan is driven: a turn that ends before any of these
-    // (a question about a company, a gap no model planned for several
-    // companies) reads nothing. The scope waits on the reading, so each use
+    // planner's model call, when planning companies the turn names (whose
+    // overview waits on it), or once a plan is driven: a turn that ends before
+    // any of these (a question about a company, a gap no model planned for a
+    // named period) reads nothing. The scope waits on the reading, so each use
     // of them decides first whether to read (prepared). The saved answer has
     // both already.
     let decideReading = (_read: boolean): void => {};
@@ -211,13 +211,13 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       return Promise.all([scope, reading]);
     };
     // What planning settled, for a gap: the companies it was asked about, a
-    // clarification pick included (recorded before the model is called), and
-    // the planner's result.
+    // clarification pick (recorded before the model is called) or the peers
+    // an overview added included, and the planner's result.
     let asked = requested.subjects;
     let planned: PlanningResult | undefined;
     const declinedGap = async (reason: ChatGap) => {
       // ponytail: a retry that resumes a reserved run does not plan, so its
-      // gap names the companies the message resolved, without a pick.
+      // gap names the companies the message resolved, without a pick or peers.
       const refs = asked.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref] : []);
       // One about no company leaves the previous answer's companies and scope.
       if (refs.length === 0) return gap(reason, planned);
@@ -254,6 +254,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
             return reading;
           },
           evidence: deps.evidence(db),
+          peersOf: (issuer) => overviewPeers(db, issuer),
         });
         return planned;
       },
@@ -418,9 +419,15 @@ async function planTurn(
   requested: ReadonlyArray<RequestedSubject>,
   authority: FinancialRuntimeAuthority,
   cutoff: Date,
-  // Called with the companies to plan once a clarification pick is applied, before the model is.
+  // Called with the companies to plan once a clarification pick is applied,
+  // before the model is, and with the overview's once it replaces the planner.
   onSubjects: (subjects: ReadonlyArray<RequestedSubject>) => void,
-  turn: Readonly<{ carried: boolean; startReading: () => Promise<ScopeProposal | null>; evidence: FinancialEvidencePort }>,
+  turn: Readonly<{
+    carried: boolean;
+    startReading: () => Promise<ScopeProposal | null>;
+    evidence: FinancialEvidencePort;
+    peersOf: PeersOf;
+  }>,
 ): Promise<PlanningResult> {
   const planningContext = (subjects: ReadonlyArray<RequestedSubject>): PlanningContext => ({
     plan_id: randomUUID(),
@@ -449,18 +456,21 @@ async function planTurn(
   // A planner the overview drops reaches the model no more (its repair call).
   const planning: PlanningModel | null = model && ((request) => dropped ? Promise.reject(DROPPED) : model(request));
   const planned = planFinancialRequest(planningContext(subjects), text, planning ?? noModel);
-  if (!namesOneCompany(subjects, turn.carried, text)) return planned;
+  if (!namesCompanies(subjects, turn.carried, text)) return planned;
   // Settled now, or a planner that fails while the overview is decided is an unhandled rejection.
   const failure = planned.then(() => null, (reason: unknown) => ({ reason }));
-  if (!asksForNoFigure(await turn.startReading())) return planned;
+  let companies: ReadonlyArray<RequestedSubject> | null;
   let overview: PlanningResult | null;
   try {
-    overview = await planCompanyOverview(planningContext(subjects), turn.evidence);
+    companies = await overviewSubjects(subjects, await turn.startReading(), turn.peersOf);
+    overview = companies && await planCompanyOverview(planningContext(companies), turn.evidence);
   } catch (reason) {
-    console.warn("[chat] the company overview could not be planned; the planner answers", reason);
-    return planned;
+    // A defect fails the turn, so the planner's answer is not needed either.
+    dropped = true;
+    throw reason;
   }
-  if (overview === null) return planned;
+  if (!companies || !overview) return planned;
+  onSubjects(companies);
   dropped = true;
   void failure.then((failed) => {
     if (failed === null) return;
@@ -631,7 +641,10 @@ function persistAssistantMessage(
   return async (tx, publication) => {
     const [scope, reading] = await turn.prepared();
     const plan = scope === null && reading === null ? null : await findPlanForRequest(tx.client, request);
-    const missing = reading === null || plan === null ? [] : uncoveredAsks(reading, plan, turn.labels);
+    // A plan member the turn gave no label is a peer the overview selected. The
+    // saved plan says so, as a retry that resumes the run does not plan again.
+    const answeredPeers = plan?.subjects.members.some((member) => !turn.labels.has(member.subject_ref.id.toLowerCase())) ?? false;
+    const missing = reading === null || plan === null ? [] : uncoveredAsks(answeredPeers ? withoutPeers(reading) : reading, plan, turn.labels);
     const note = [
       ...(turn.notFound.length === 0 ? [] : [`No company matched ${labelList(turn.notFound)}.`]),
       ...(turn.carried.length === 0 ? [] : [`${labelList(turn.carried)} ${turn.carried.length > 1 ? "are" : "is"} carried from the previous answer.`]),
@@ -675,18 +688,20 @@ function persistAssistantMessage(
   };
 }
 
+const withoutPeers = (reading: ScopeProposal): ScopeProposal => ({ ...reading, asks: new Set([...reading.asks].filter((facet) => facet !== "peers")) });
+
 /**
  * The companies a turn answered for, in its order. A missing label marks an
  * auto-selected peer (local-runtime.ts turnScope), so each keeps the scope's
- * entry, and one the scope lacks (a clarification pick, the company two
- * listings name) takes the label the request gave it, or is left out.
+ * entry; one the scope lacks (a clarification pick, the company two listings
+ * name) takes the label the request gave it, and one the request gave none is
+ * a peer the overview selected.
  */
 function answeredCompanies(issuerIds: ReadonlyArray<string>, scope: ResearchScope, labels: ReadonlyMap<string, string>): ResearchScope["companies"] {
   const kept = new Map(scope.companies.map((company) => [company.issuer_id.toLowerCase(), company]));
-  return issuerIds.flatMap((id) => {
-    const company = kept.get(id.toLowerCase());
+  return issuerIds.map((id) => {
     const labelled = labels.get(id.toLowerCase());
-    return company ? [company] : labelled === undefined ? [] : [{ issuer_id: id, label: labelled }];
+    return kept.get(id.toLowerCase()) ?? (labelled === undefined ? { issuer_id: id } : { issuer_id: id, label: labelled });
   });
 }
 

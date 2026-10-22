@@ -305,7 +305,8 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       return [done.clarification === true ? "clarification" : (done.financial_gap as { reason_code: string } | undefined)?.reason_code ?? "answer", reads];
     };
     assert.deepEqual(await ask(revenueModel(["AAA", "AMB"]), "Compare revenue for AAA and AMB"), ["clarification", 0], "the planner asks which company before any model call");
-    assert.deepEqual(await ask(null, "Compare revenue for AAA and BBB"), ["planning_unavailable", 0], "no model plans it");
+    assert.deepEqual(await ask(null, "Compare revenue for AAA and BBB in fiscal 2023"), ["planning_unavailable", 0], "no model plans it");
+    assert.deepEqual(await ask(null, "Compare revenue for AAA and BBB"), ["planning_unavailable", 1], "their overview, which needs no model, waits on the reading (#398)");
     assert.deepEqual(await ask(revenueModel(["AAA"]), "Revenue for AAA"), ["answer", 1]);
   });
 

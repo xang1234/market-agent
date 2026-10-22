@@ -4,10 +4,11 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createRuntimeAuthority, operationDependencies, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
-import { buildDeterministicPlan, planFinancialRequest, type PlanningContext, type PlanningModel, type PlanningResult } from "../../financial-engine/src/planner.ts";
-import type { CandidatePage, CandidateRequest, FinancialEvidencePort, InputCandidate } from "../../financial-engine/src/ports.ts";
+import { buildDeterministicPlan, planFinancialRequest, type PlanningContext, type PlanningModel, type PlanningResult, type RequestedSubject } from "../../financial-engine/src/planner.ts";
+import type { CandidatePage, CandidateRequest, FinancialEvidencePort, InputCandidate, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
-import { asksForNoFigure, namesOneCompany, planCompanyOverview } from "../src/company-overview.ts";
+import { namesCompanies, overviewPeers, overviewSubjects, planCompanyOverview } from "../src/company-overview.ts";
+import { MAX_TURN_SUBJECTS } from "../src/coordinator.ts";
 import { isFinancialRequest, uncoveredAsks } from "../src/financial-runtime.ts";
 import { parseProposal, proposalQuestion } from "../src/scope-proposal.ts";
 import { extractSubjectMentions } from "../src/subject-extraction.ts";
@@ -124,7 +125,9 @@ test("each golden metric question plans from its own recorded reply on the first
   }
 });
 
-test("a company's overview shows its eight quarters to the newest it reported revenue for by the cutoff, each named by its fiscal period (#398)", async () => {
+test("a company's overview shows its eight quarters to the newest it reported revenue for by the cutoff, each named by its fiscal period (#398)", async (t) => {
+  const warned: unknown[][] = [];
+  t.mock.method(console, "warn", (...args: unknown[]) => warned.push(args));
   // The SEC ingester stores a fourth quarter as the year less its first three, with no source token, so no precision proof.
   const revenue = (fiscal_year: number, fiscal_period: string, publicBy = "2026-03-01T00:00:00.000Z") => ({
     metric_key: "revenue",
@@ -176,27 +179,131 @@ test("a company's overview shows its eight quarters to the newest it reported re
     "percent_change_positive_base(NVDA revenue Q1 2026, NVDA revenue Q1 2025)",
   ], "a first quarter compares with the fourth before it and with the first a year earlier");
   assert.equal(await overview(reported(revenue(2025, "FY"))), null, "no quarter reported: no overview");
-  await assert.rejects(overview({ status: "error", reason_code: "database_error" }), /database_error/u);
+  assert.equal(await overview({ status: "error", reason_code: "database_error" }), null, "a failed read: no overview");
+  assert.deepEqual(warned, [["[chat] the company overview could not be planned; the planner answers", "database_error"]]);
+});
+
+test("a comparison shows each company's latest quarter, named from the newest it reported revenue for, never aligned by calendar (#398)", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  const revenue = (fiscal_year: number, fiscal_period: string, end: string, publicBy = "2026-08-01T00:00:00.000Z") => ({
+    metric_key: "revenue",
+    period: { start: null, end, fiscal_year, fiscal_period },
+    precision: null,
+    publication: [{ attestation_id: "p", timing: { available_not_before: null, available_no_later_than: publicBy, timing_precision: "instant", source_timezone: "UTC" } }],
+  }) as unknown as InputCandidate;
+  const reported = (...candidates: InputCandidate[]): CandidatePage => ({ status: "ok", candidates, truncated: false });
+  const PAGES: Record<string, CandidatePage> = {
+    NVDA: reported(revenue(2026, "Q3", "2025-10-26"), revenue(2026, "Q4", "2026-01-25"), revenue(2027, "Q1", "2026-04-26", "2026-09-02T00:00:00.000Z")),
+    AMD: reported(revenue(2026, "Q1", "2026-03-28"), revenue(2026, "Q2", "2026-06-27")),
+    AAPL: reported(revenue(2026, "Q2", "2026-03-28"), revenue(2026, "Q3", "2026-06-27")),
+  };
+  const tickerOf = (issuerId: string) => GOLDEN_COMPANIES.find((company) => company.issuer_id === issuerId)!.ticker;
+  const compare = async (question: string, pages: Record<string, CandidatePage> = PAGES) => {
+    const requests: CandidateRequest[] = [];
+    const evidence = { listInputCandidates: async (request: CandidateRequest) => (requests.push(request), pages[tickerOf(request.subject.id)]!) } as FinancialEvidencePort;
+    const planned = await planCompanyOverview(planningContext(question), evidence);
+    const reads = requests.map(({ subject, metric_key, fiscal_year, fiscal_period }) => [tickerOf(subject.id), subject.kind, metric_key, fiscal_year, fiscal_period]);
+    if (planned === null) return { planned, reads };
+    assert.equal(planned.outcome, "ready", JSON.stringify(planned));
+    const { plan, model_calls } = planned as Extract<PlanningResult, { outcome: "ready" }>;
+    return {
+      planner: plan.planner.kind,
+      model_calls,
+      units: plan.publication_units.map((unit) => unit.unit_id),
+      output_ids: plan.outputs.map((output) => output.output_id),
+      outputs: outputLabels(plan),
+      reads,
+    };
+  };
+  const latestQuarter = (ticker: string, quarter: string, previous: string, yearBefore: string) => [
+    `${ticker} revenue ${quarter}`,
+    `${ticker} gross_profit ${quarter}`,
+    `${ticker} operating_income ${quarter}`,
+    `${ticker} net_income ${quarter}`,
+    `gross_margin(${ticker} gross_profit ${quarter}, ${ticker} revenue ${quarter})`,
+    `operating_margin(${ticker} operating_income ${quarter}, ${ticker} revenue ${quarter})`,
+    `net_margin(${ticker} net_income ${quarter}, ${ticker} revenue ${quarter})`,
+    `percent_change_positive_base(${ticker} revenue ${quarter}, ${ticker} revenue ${previous})`,
+    `percent_change_positive_base(${ticker} revenue ${quarter}, ${ticker} revenue ${yearBefore})`,
+  ];
+  const NVDA = latestQuarter("NVDA", "Q4 2026", "Q3 2026", "Q4 2025");
+  const AMD = latestQuarter("AMD", "Q2 2026", "Q1 2026", "Q2 2025");
+  const AAPL = latestQuarter("AAPL", "Q3 2026", "Q2 2026", "Q3 2025");
+  const read = (ticker: string) => [ticker, "issuer", "revenue", null, null];
+  const ids = (slot: string, quarter: string) =>
+    [`revenue_${quarter}`, `gross_profit_${quarter}`, `operating_income_${quarter}`, `net_income_${quarter}`, "gross_margin", "operating_margin", "net_margin", "revenue_growth_qoq", "revenue_growth_yoy"]
+      .map((id) => `out_${slot}_${id}`);
+
+  assert.deepEqual(await compare("NVDA and AMD"), {
+    planner: "deterministic",
+    model_calls: 0,
+    units: ["answer"],
+    output_ids: [...ids("a", "fy2026_q4"), ...ids("b", "fy2026_q2")],
+    outputs: [...NVDA, ...AMD],
+    reads: [read("NVDA"), read("AMD")],
+  }, "a quarter public after the cutoff is not NVDA's newest");
+  const three = await compare("NVDA, AMD and AAPL");
+  assert.deepEqual([three?.outputs, three?.reads], [[...NVDA, ...AMD, ...AAPL], [read("NVDA"), read("AMD"), read("AAPL")]]);
+
+  let inFlight = 0;
+  let most = 0;
+  const oneAtATime = {
+    listInputCandidates: async (request: CandidateRequest) => {
+      most = Math.max(most, ++inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+      return PAGES[tickerOf(request.subject.id)]!;
+    },
+  } as FinancialEvidencePort;
+  assert.notEqual(await planCompanyOverview(planningContext("NVDA, AMD and AAPL"), oneAtATime), null);
+  assert.equal(most, 1, "one read at a time on the request's one client");
+
+  assert.deepEqual((await compare("NVDA and AMD", { ...PAGES, AMD: reported(revenue(2025, "FY", "2025-12-27")) })).planned, null, "a company that reported no quarter");
+  assert.deepEqual((await compare("NVDA and AMD", { ...PAGES, AMD: { ...PAGES.AMD!, truncated: true } as CandidatePage })).planned, null, "a truncated page");
+  assert.deepEqual((await compare("NVDA and AMD", { ...PAGES, AMD: { status: "error", reason_code: "database_error" } })).planned, null, "a failed read");
 });
 
 const reading = (asks: string[], metrics: unknown[] = [], income_items: string[] = [], turnsOff: string[] = []) =>
   parseProposal(JSON.stringify({ metrics, asks, turns_off: { facets: turnsOff, metrics: [] }, income_items }))!;
 
-test("a question about one company that asks for no figure is answered with its overview; one about more, or about a figure or a period, is not (#398)", async () => {
+test("a question about the companies it names that asks for no figure is answered with their overview, or one company's with its peers; one about a carried company, a figure or a period is not (#398)", async () => {
   const client = await createReplayLlmChatClient(REPLIES);
   const read = async (question: string) => parseProposal((await client({} as never, { messages: [{ role: "user", content: proposalQuestion(question) }] })).text);
-  const overview = async (question: string, { carried = false, read: readQuestion = read } = {}) =>
-    namesOneCompany(planningContext(question).requested_subjects, carried, question) && asksForNoFigure(await readQuestion(question));
-  for (const question of ["Analyze NVDA", "Analyze AMD", "Analyze AAPL"]) assert.equal(await overview(question), true, question);
+  const AMD = GOLDEN_COMPANIES.find((company) => company.ticker === "AMD")!;
+  const amd = async (): Promise<RequestedSubject[]> => [{ mention: AMD.issuer_id, resolution: { status: "resolved", subject_ref: { kind: "issuer", id: AMD.issuer_id }, label: AMD.legal_name } }];
+  const none = async () => [];
+  const overview = async (question: string, { carried = false, read: readQuestion = read, peersOf = none as typeof amd } = {}) => {
+    const subjects = planningContext(question).requested_subjects;
+    if (!namesCompanies(subjects, carried, question)) return null;
+    return (await overviewSubjects(subjects, await readQuestion(question), peersOf))?.map((subject) => subject.mention) ?? null;
+  };
+  for (const ticker of ["NVDA", "AMD", "AAPL"]) assert.deepEqual(await overview(`Analyze ${ticker}`), [ticker], ticker);
+  for (const question of ["Compare NVDA with AMD", "Compare NVDA and AMD again"]) assert.deepEqual(await overview(question), ["NVDA", "AMD"], question);
+  const peers = "How does NVDA compare with its peers?";
+  assert.deepEqual(await overview(peers, { peersOf: amd }), ["NVDA", AMD.issuer_id], "NVDA, then its peers");
+  assert.equal(await overview(peers), null, "no peer resolves");
   const scripted = (proposal: ReturnType<typeof reading>) => ({ read: async () => proposal });
-  assert.equal(await overview("Analyze NVDA", scripted(reading([], ["income_statement"]))), false, "a metric");
-  assert.equal(await overview("Analyze NVDA, no margins", scripted(reading([], [], [], ["margins"]))), false, "a facet turned off");
-  assert.equal(await overview("Analyze NVDA", scripted({ ...reading([]), turns_off: { facets: new Set(), metrics: new Set(["revenue"]) } })), false, "a metric turned off");
-  assert.equal(await overview("Analyze NVDA", { carried: true }), false, "a carried company");
-  assert.equal(await overview("Analyze NVDA and AMD"), false, "two companies");
+  assert.equal(await overview("Compare NVDA and AMD with their peers", { ...scripted(reading(["peers"])), peersOf: amd }), null, "peers of two named companies");
+  assert.deepEqual(await overview("Analyze NVDA and AMD", scripted(reading([]))), ["NVDA", "AMD"], "two companies");
+  assert.equal(await overview("Analyze NVDA", scripted(reading([], ["income_statement"]))), null, "a metric");
+  assert.equal(await overview("Compare NVDA with AMD", scripted(reading([], ["income_statement"]))), null, "a metric in a comparison");
+  assert.equal(await overview("Analyze NVDA, no margins", scripted(reading([], [], [], ["margins"]))), null, "a facet turned off");
+  assert.equal(await overview("Compare NVDA with AMD", scripted(reading([], [], [], ["margins"]))), null, "a facet turned off in a comparison");
+  assert.equal(await overview("Analyze NVDA", scripted({ ...reading([]), turns_off: { facets: new Set(), metrics: new Set(["revenue"]) } })), null, "a metric turned off");
+  assert.equal(await overview("Analyze NVDA", { carried: true }), null, "a carried company");
+  assert.equal(await overview("Compare NVDA with AMD", { carried: true }), null, "a carried company beside named ones");
   for (const period of ["in fiscal 2025", "for Q4 2025", "YTD", "for Q3", "in the third quarter"]) {
-    assert.equal(await overview(`Analyze NVDA ${period}`, scripted(reading([]))), false, period);
+    assert.equal(await overview(`Analyze NVDA ${period}`, scripted(reading([]))), null, period);
   }
+  for (const period of ["in fiscal 2025", "for Q4 2025", "YTD", "for Q3"]) {
+    assert.equal(await overview(`Compare NVDA and AMD ${period}`, scripted(reading([]))), null, `a comparison ${period}`);
+  }
+  const yearToDate = "Compare it with AMD YTD";
+  assert.deepEqual(
+    [namesCompanies(planningContext(yearToDate).requested_subjects, true, yearToDate), await overviewSubjects(planningContext(yearToDate).requested_subjects, await read(yearToDate), none)],
+    [false, null],
+    "the golden conversation's comparison carries NVDA, and its reading asks for a price window",
+  );
 });
 
 test("each golden answer names what its question asks for and its plan does not compute", async () => {
@@ -311,6 +418,34 @@ test("an engine answer names what it leaves out for each company it covers (#425
   assert.deepEqual(uncoveredAsks(asked("growth"), growthForNvda, labels), ["earnings per share growth for AMD"]);
   assert.deepEqual(uncoveredAsks(asked("growth"), growthForBoth, labels), []);
   assert.deepEqual(uncoveredAsks(asked("trend"), trendForNvda, labels), ["earnings per share trend for AMD"]);
+});
+
+test("a company's peers fill the turn's company cap, named by their legal names; a database error means none, and a defect fails (#398)", async (t) => {
+  const warned: unknown[][] = [];
+  t.mock.method(console, "warn", (...args: unknown[]) => warned.push(args));
+  const [NVDA, AMD] = ["NVDA", "AMD"].map((ticker) => GOLDEN_COMPANIES.find((company) => company.ticker === ticker)!);
+  const nvda = { kind: "issuer" as const, id: NVDA!.issuer_id };
+  const database = (failing?: { at: number; error: unknown }) => {
+    const values: unknown[][] = [];
+    return {
+      values,
+      query: async (text: string, params: unknown[] = []) => {
+        values.push(params);
+        if (values.length === failing?.at) throw failing.error;
+        return { rows: text.includes("legal_name") ? [{ issuer_id: AMD!.issuer_id, legal_name: AMD!.legal_name }] : [{ issuer_id: AMD!.issuer_id }] };
+      },
+    } as SqlExecutor & { values: unknown[][] };
+  };
+  const reachable = database();
+  assert.deepEqual(await overviewPeers(reachable, nvda), [
+    { mention: AMD!.issuer_id, resolution: { status: "resolved", subject_ref: { kind: "issuer", id: AMD!.issuer_id }, label: AMD!.legal_name } },
+  ]);
+  assert.deepEqual(reachable.values[0], [NVDA!.issuer_id, MAX_TURN_SUBJECTS - 1], "as many peers as the cap leaves room for");
+  const down = Object.assign(new Error("terminating connection due to administrator command"), { code: "57P01" });
+  assert.deepEqual(await overviewPeers(database({ at: 1, error: down }), nvda), [], "the peer set cannot be read");
+  assert.deepEqual(await overviewPeers(database({ at: 2, error: down }), nvda), [], "the peers' names cannot be read");
+  assert.equal(warned.length, 2);
+  await assert.rejects(overviewPeers(database({ at: 1, error: new TypeError("a defect") }), nvda), TypeError);
 });
 
 test("an engine answer checks a qualified metric against what its plan computes (#425)", () => {
