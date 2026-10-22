@@ -11,7 +11,7 @@
 // inference resting on comparisons carries their checked results in its label.
 
 import type { Assertion } from "./assertions.ts";
-import { checkComparison, periodText as quarterText, type CheckedComparison, type TrendResult } from "./comparisons.ts";
+import { checkComparison, metricLabel, periodText as quarterText, type CheckedComparison, type TrendResult } from "./comparisons.ts";
 import { periodCoverage, type EvidencePacket, type PacketFigure } from "./evidence-packet.ts";
 import { createSealer, type Sealer, type Segment } from "./prose-refs.ts";
 
@@ -196,7 +196,7 @@ function comparisonSegments(comparison: CheckedComparison, out: Writer): void {
     const { result, net, every_step, turn, ends_at } = comparison.trend!;
     const atLast = () => {
       at(last);
-      if (ends_at) out.text(`, its ${ends_at === "high" ? "highest" : "lowest"} of the periods shown`);
+      if (ends_at) out.text(`, its ${ends_at === "high" ? "highest" : "lowest"} of the periods compared`);
     };
     const where = net === 1 ? "above where it started" : net === -1 ? "below where it started" : "about where it started";
     out.text(`${subject(first)} `);
@@ -288,11 +288,6 @@ export function calendarNote(assertions: ReadonlyArray<Assertion>, packet: Evide
 // The text a rendered assertion reads as, each value as displayed.
 export function plainText(segments: ReadonlyArray<Segment>): string {
   return segments.map((segment) => (segment.type === "text" ? segment.text : segment.format)).join("");
-}
-
-// "Gross Margin" reads "gross margin" after a possessive; "EPS" and "YoY" stay.
-function metricLabel(metric: string): string {
-  return metric.replace(/\b([A-Z])(?=[a-z]+\b)/g, (letter) => letter.toLowerCase());
 }
 
 // A segment's figure is its revenue: "Data Center revenue".

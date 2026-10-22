@@ -150,11 +150,11 @@ test("a comparison over time renders its derived high, low or trend, values as f
   assert.deepEqual(low.figure_ids, ["T2"]);
   assert.equal(
     plainText(renderComparison(AMD_QUARTERS, QUARTER_BLOCKS, "trend", "rebounded", ALL).segments),
-    "AMD's operating margin fell from 10.8% in Q1 2025 to a low of -1.7% in Q2 2025, then rebounded to 14.1% in Q4 2025, its highest of the periods shown, above where it started.",
+    "AMD's operating margin fell from 10.8% in Q1 2025 to a low of -1.7% in Q2 2025, then rebounded to 14.1% in Q4 2025, its highest of the periods compared, above where it started.",
   );
   assert.equal(
     plainText(renderComparison(AMD_QUARTERS, QUARTER_BLOCKS, "trend", "rose", ALL).segments),
-    "AMD's operating margin rose from 10.8% in Q1 2025 to 14.1% in Q4 2025, its highest of the periods shown, though not in every period.",
+    "AMD's operating margin rose from 10.8% in Q1 2025 to 14.1% in Q4 2025, its highest of the periods compared, though not in every period.",
   );
   // A subset of the window fails the check, so it renders nothing (and never reaches rendering).
   assert.equal(plainText(renderComparison(AMD_QUARTERS, QUARTER_BLOCKS, "trend", "rose_throughout", ["T3", "T4"]).segments), "");
@@ -323,7 +323,7 @@ test("a trend says when it ends at the window's high or low, and not on a tie at
   const amd = traced("margin-trend-loss-quarter");
   const operating = ["F26", "F27", "F28", "F29", "F30", "F31", "F32", "F33"];
   assert.equal(amd.compare(operating, "trend", "rebounded"),
-    "AMD's operating margin fell from 10.6% in Q3 2024 to a low of -1.7% in Q2 2025, then rebounded to 14.4% in Q2 2026, its highest of the periods shown, above where it started.");
+    "AMD's operating margin fell from 10.6% in Q3 2024 to a low of -1.7% in Q2 2025, then rebounded to 14.4% in Q2 2026, its highest of the periods compared, above where it started.");
   const tiedHigh = { ...amd.packet, figures: amd.packet.figures.map((figure) => (figure.id === "F31" ? { ...figure, value: "14.4%" } : figure)) };
   assert.equal(amd.compare(operating, "trend", "rebounded", tiedHigh),
     "AMD's operating margin fell from 10.6% in Q3 2024 to a low of -1.7% in Q2 2025, then rebounded to 14.4% in Q2 2026, above where it started.");
@@ -336,7 +336,7 @@ test("a trend says when it ends at the window's high or low, and not on a tie at
     "AMD's net margin rose from 13.1% in Q1 2026 to 13.2% in Q2 2026.");
   const falling = { ...amd.packet, figures: amd.packet.figures.map((figure) => (figure.id === "F41" ? { ...figure, value: "5.0%" } : figure)) };
   assert.equal(amd.compare(["F34", "F35", "F36", "F37", "F38", "F39", "F40", "F41"], "trend", "fell", falling),
-    "AMD's net margin fell from 11.3% in Q3 2024 to 5.0% in Q2 2026, its lowest of the periods shown, though not in every period.");
+    "AMD's net margin fell from 11.3% in Q3 2024 to 5.0% in Q2 2026, its lowest of the periods compared, though not in every period.");
 });
 
 test("a trend that rose in every period renders as before, its end the high going without saying", () => {

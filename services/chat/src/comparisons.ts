@@ -99,7 +99,7 @@ export function checkComparison(
   const citedKeys = new Set(cited.map(keyOf));
   const omitted = eligible.find((figure) => !citedKeys.has(keyOf(figure)));
   if (omitted) {
-    return fail(`leaves out ${axis === "time" ? periodText(omitted.period!) : memberOf(omitted)}, which shows ${lower(metric)} too`);
+    return fail(`leaves out ${axis === "time" ? periodText(omitted.period!) : memberOf(omitted)}, which shows ${metricLabel(metric)} too`);
   }
   // The cited figure stands for its fact, so the model's id is the one named.
   const figures = eligible.map((figure) => cited.find((entry) => keyOf(entry) === keyOf(figure))!);
@@ -162,7 +162,7 @@ export function checkComparison(
   const first = figures[0]!;
   const last = figures.at(-1)!;
   const net = cmp(last, first);
-  const name = lower(metric);
+  const name = metricLabel(metric);
   const moved = net === 1 ? "rose" : net === -1 ? "fell" : "was about the same";
   const netError = fail(net === 0
     ? `${name} was about the same at ${first.value} and ${last.value}, at the precision shown`
@@ -225,8 +225,8 @@ export function periodText(period: string): string {
   return period.replace(/^([QH][1-4])(\d{4})$/, "$1 $2");
 }
 
-// "Gross Margin" reads "gross margin"; "QoQ" and "EPS" stay.
-function lower(metric: string): string {
+// "Gross Margin" reads "gross margin" after a possessive; "EPS", "QoQ" and "YoY" stay.
+export function metricLabel(metric: string): string {
   return metric.replace(/\b([A-Z])(?=[a-z]+\b)/g, (letter) => letter.toLowerCase());
 }
 
