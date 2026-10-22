@@ -588,7 +588,8 @@ function isCompany(value: unknown): boolean {
 // Whether a question writes a name as a company's: as whole words (wordsOf),
 // at least once outside a phrase of the closed catalogs above ("CASH" of "FREE
 // CASH FLOW" is the metric), and, with capital, with a capital letter in its
-// first word as written ("eBay", not "it").
+// first word as written ("eBay", not "it"). Without capital, a name no whole
+// word matches ("NVDA" of "NVDA/AMD") is kept: nothing shows it is a metric's.
 export function companyNameIn(question: string): (name: string, options?: { capital?: boolean }) => boolean {
   const written = wordsOf(question);
   const lower = written.map((word) => word.toLowerCase());
@@ -598,7 +599,9 @@ export function companyNameIn(question: string): (name: string, options?: { capi
   }
   return (name, { capital = false } = {}) => {
     const words = wordsOf(name).map((word) => word.toLowerCase());
-    return words.length > 0 && runsOf(words, lower).some((start) =>
+    const runs = runsOf(words, lower);
+    if (!capital && runs.length === 0) return words.length > 0;
+    return words.length > 0 && runs.some((start) =>
       (!capital || /\p{Lu}/u.test(written[start]!)) && words.some((_, offset) => !inCatalog[start + offset]));
   };
 }
@@ -611,11 +614,11 @@ export function companyWordsIn(question: string): string[] {
 }
 
 // A text's words as written: split at whitespace, each without the quotes,
-// brackets and sentence punctuation around it or a possessive, so a dotted or
-// dashed ticker ("BRK.B.") is one word.
+// brackets, emphasis, cashtag or hashtag sign and sentence punctuation around
+// it or a possessive, so a dotted or dashed ticker ("BRK.B.") is one word.
 function wordsOf(text: string): string[] {
   return text.split(/\s+/u)
-    .map((word) => word.replace(/^["'“‘(]+|[.,;:?!)"'”’]+$/gu, "").replace(/['’]s$/u, ""))
+    .map((word) => word.replace(/^["'“‘(\[*$#]+|[.,;:?!)\]*"'”’]+$/gu, "").replace(/['’]s$/u, ""))
     .filter(Boolean);
 }
 

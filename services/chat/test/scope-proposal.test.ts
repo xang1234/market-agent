@@ -121,6 +121,7 @@ test("a company the question does not write refuses the whole proposal", () => {
   assert.equal(read({ kind: "drop", drop: ["AMD"], add: ["Advanced Micro Devices"] }), null);
   assert.equal(read({ kind: "only", names: ["AAPL"] }), null);
   assert.deepEqual(parse(reply({ companies: { kind: "compare", add: ["eBay", "iRobot"] } }), "Compare it with eBay and iRobot")?.companies, { kind: "compare", add: ["eBay", "iRobot"] }, "a capital anywhere in the first word");
+  assert.deepEqual(parse(reply({ companies: { kind: "compare", add: ["AMD", "NVDA"] } }), "Compare $AMD's margins with #NVDA")?.companies, { kind: "compare", add: ["AMD", "NVDA"] }, "a cashtag or hashtag");
   const inQuestion = (name: string, question: string) => parse(reply({ companies: { kind: "compare", add: [name] } }), question) !== null;
   assert.deepEqual(
     [inQuestion("AMD", "Compare it with Amdocs"), inQuestion("a", "Compare it with AMD"), inQuestion("AMD", "Compare it with AMD's"), inQuestion("Berkshire Hathaway", "vs Berkshire  Hathaway?")],
