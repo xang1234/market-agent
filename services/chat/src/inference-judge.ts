@@ -3,10 +3,10 @@
 // packet template's; the model's own words survive only in an inference's
 // text, and no English matcher can tell whether they mean what the figures
 // show ("margins are expanding" beside a checked "fell"). A second model reads
-// each inference beside what it rests on and the rest of the answer, as the
-// reader sees them, and gives it a verdict, each inference in a call of its
-// own (#376). The verdict sets what a chat turn shows (SHOWN_AS,
-// answer-trace.ts answerTurn).
+// each inference beside what it rests on, the rest of the answer and the
+// figures its tables and charts show, as the reader sees them, and gives it a
+// verdict, each inference in a call of its own (#376). The verdict sets what a
+// chat turn shows (SHOWN_AS, answer-trace.ts answerTurn).
 
 import { createLlmRouterFromEnv, type LlmChatClient, type LlmChatMessage, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
 import type { ModelExchange } from "./answer-trace.ts";
@@ -28,6 +28,9 @@ export type JudgeCase = {
   // The answer's other observations and comparisons, rendered the same way:
   // the reader sees them on the same page.
   context: ReadonlyArray<string>;
+  // Every figure the page's tables and charts show, a line per table; the
+  // same for each of an answer's inferences.
+  figures: ReadonlyArray<string>;
 };
 
 export const VERDICTS = ["entailed", "unsupported", "contradicted", "worded_amount"] as const;
@@ -73,6 +76,14 @@ type Accepted = Assertion & { index: number };
 
 export function judgeCases(accepted: ReadonlyArray<Accepted>, packet: EvidencePacket, factBlocks: ReadonlyArray<Record<string, unknown>>): JudgeCase[] {
   const rendered = (entry: Accepted) => plainText(renderAssertion(entry, packet, factBlocks, accepted).segments);
+  const tables = new Map<string | undefined, string[]>();
+  for (const figure of packet.figures) {
+    if (figure.displayed !== false) tables.set(figure.shown_in, [...(tables.get(figure.shown_in) ?? []), figure.id]);
+  }
+  const figures = [...tables].map(([title, ids]) => {
+    const line = rendered({ index: -1, kind: "observation", text: "", evidence: ids });
+    return title === undefined ? line : `${title}: ${line}`;
+  });
   return accepted.filter((assertion) => assertion.kind === "analyst_inference").map((inference) => {
     const subject = inference.subject ?? (packet.companies.length === 1 ? packet.companies[0] : undefined);
     const supports = inference.supports ?? [];
@@ -88,6 +99,7 @@ export function judgeCases(accepted: ReadonlyArray<Accepted>, packet: EvidencePa
       context: accepted
         .filter((entry) => (entry.kind === "observation" || entry.kind === "comparison") && !supports.includes(entry.index))
         .map(rendered),
+      figures,
     };
   });
 }
@@ -142,13 +154,14 @@ export function judgeMessages(cases: ReadonlyArray<JudgeCase>, companies: Readon
       role: "user",
       content: JSON.stringify({
         companies,
-        inferences: cases.map(({ index, subject, text, checked, supports, context }) => ({
+        inferences: cases.map(({ index, subject, text, checked, supports, context, figures }) => ({
           id: index,
           subject: subject ?? null,
           text,
           checked_results: checked,
           supports,
           rest_of_answer: context,
+          figures_shown: figures,
         })),
       }),
     },
@@ -190,9 +203,11 @@ const JUDGE_INSTRUCTIONS = [
   "what it rests on: its supports (the observations, comparisons and management attributions it cites, each",
   "figure as the data gives it, each claim as its source words it), the checked results of the comparisons among",
   "them, and its subject, the company it is about. rest_of_answer is the answer's other observations and",
-  "comparisons, as the reader sees them on the same page. companies lists every company the answer covers.",
-  "Judge each inference only against its own subject, checked results, supports and rest_of_answer; no outside",
-  "knowledge, and nothing from another inference. A company may be named by ticker, name or alias, in any case",
+  "comparisons, and figures_shown is every figure the answer's tables and charts show, by table, as the reader",
+  "sees them on the same page. companies lists every company the answer covers; rest_of_answer and figures_shown",
+  "cover every one of them, and an inference may rest on another company's figures when it compares them.",
+  "Judge each inference against its subject, checked results, supports, rest_of_answer and figures_shown; no",
+  "outside knowledge, and nothing from another inference. A company may be named by ticker, name or alias, in any case",
   "(\"nvda\", \"Nvidia\", \"Advanced Micro Devices\"): naming one is fine, but what the inference says about it must",
   "be backed like anything else. Qualitative words that summarise the figures shown (large, concentrated, higher,",
   "slowing) are fine when the figures bear them out, and so is a count of the things they list (\"the two",
@@ -210,7 +225,7 @@ const JUDGE_INSTRUCTIONS = [
   "  as a cause, a forecast, a trend, or a metric, segment or period not shown. A hedge does not make it",
   "  supported: a valuation or market reading such as \"may be priced in\" or \"the market may already reflect\" is",
   "  unsupported unless the answer shows it.",
-  "- entailed: its supports and the rest of the answer state or clearly imply what it says.",
+  "- entailed: its supports, the rest of the answer and the figures shown state or clearly imply what it says.",
   "",
   "Reply with JSON only, one verdict per inference id; if you correct yourself, the last JSON in the reply is read:",
   '{"verdicts":[{"id":<id>,"verdict":"entailed"|"unsupported"|"contradicted"|"worded_amount","reason":"<one short sentence>"}]}',

@@ -53,6 +53,7 @@ test("a case is the inference beside its supports as the reader sees them, figur
         "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026), AMD 49.2% (FY2025), 25.4 percentage points above AMD.",
       ],
       context: [],
+      figures: ["NVDA's gross margin was 74.6% in FY2026; AMD's gross margin was 49.2% in FY2025."],
     },
     {
       index: 3,
@@ -61,6 +62,7 @@ test("a case is the inference beside its supports as the reader sees them, figur
       checked: ["NVDA highest on gross margin"],
       supports: ["Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026), AMD 49.2% (FY2025), 25.4 percentage points above AMD."],
       context: ["NVDA's gross margin was 74.6% in FY2026; AMD's gross margin was 49.2% in FY2025."],
+      figures: ["NVDA's gross margin was 74.6% in FY2026; AMD's gross margin was 49.2% in FY2025."],
     },
   ]);
   // A one-company answer's inference is about that company.
@@ -119,6 +121,31 @@ test("the rest of the answer a case carries is its other observations and compar
   ]);
 });
 
+test("every case carries the figures the page's tables and charts show, a line per table in packet order, as the reader sees them", () => {
+  const packet: EvidencePacket = {
+    ...PACKET,
+    figures: [
+      { ...PACKET.figures[0]!, shown_in: "Gross margin" },
+      { id: "F2", company: "NVDA", metric: "Revenue", period: "FY2026", value: "$130.5B", fact_id: "not-a-uuid-3", source_ids: [], shown_in: "Revenue" },
+      { ...PACKET.figures[1]!, id: "F3", shown_in: "Gross margin" },
+      { id: "F4", company: "AMD", metric: "Revenue", period: "FY2025", value: "$25.8B", fact_id: "not-a-uuid-4", source_ids: [] },
+    ],
+  };
+  const accepted: ReadonlyArray<Assertion & { index: number }> = [
+    { index: 0, kind: "analyst_inference", text: "It keeps more of each sale.", evidence: [], supports: [], subject: "NVDA" },
+    { index: 1, kind: "analyst_inference", text: "Its peer is smaller.", evidence: [], supports: [], subject: "NVDA" },
+  ];
+  const figures = [
+    "Gross margin: NVDA's gross margin was 74.6% in FY2026; AMD's gross margin was 49.2% in FY2025.",
+    "Revenue: NVDA's revenue was $130.5B in FY2026.",
+    "AMD's revenue was $25.8B in FY2025.",
+  ];
+  assert.deepEqual(judgeCases(accepted, packet, []).map((judged) => judged.figures), [figures, figures]);
+  // A turn whose blocks show no figure answers from values no table shows: none is on the page.
+  const unshown: EvidencePacket = { ...PACKET, figures: PACKET.figures.map((figure) => ({ ...figure, displayed: false as const })) };
+  assert.deepEqual(judgeCases(accepted, unshown, []).map((judged) => judged.figures), [[], []]);
+});
+
 test("one judge call per answer, on JUDGE_LITELLM_MODEL, carries every inference with its supports' text; its reply is kept raw and read per inference", async () => {
   const requests: Array<{ model: string; request: LlmChatRequest }> = [];
   const reply = 'Here you go:\n{"verdicts":[{"id":3,"verdict":"entailed"},{"id":2,"verdict":"unsupported","reason":"no figure shows what it keeps of a sale."}]}';
@@ -160,6 +187,7 @@ test("one judge call per answer, on JUDGE_LITELLM_MODEL, carries every inference
           "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026), AMD 49.2% (FY2025), 25.4 percentage points above AMD.",
         ],
         rest_of_answer: [],
+        figures_shown: ["NVDA's gross margin was 74.6% in FY2026; AMD's gross margin was 49.2% in FY2025."],
       },
       {
         id: 3,
@@ -168,6 +196,7 @@ test("one judge call per answer, on JUDGE_LITELLM_MODEL, carries every inference
         checked_results: ["NVDA highest on gross margin"],
         supports: ["Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026), AMD 49.2% (FY2025), 25.4 percentage points above AMD."],
         rest_of_answer: ["NVDA's gross margin was 74.6% in FY2026; AMD's gross margin was 49.2% in FY2025."],
+        figures_shown: ["NVDA's gross margin was 74.6% in FY2026; AMD's gross margin was 49.2% in FY2025."],
       },
     ],
   });
