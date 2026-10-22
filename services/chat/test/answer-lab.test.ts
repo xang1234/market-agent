@@ -121,12 +121,12 @@ test("the judge's held-out set: every original and mutation passes the turn's ow
   const count = (key: (variant: (typeof variants)[number]) => string) =>
     Object.fromEntries([...new Set(variants.map(key))].map((value) => [value, variants.filter((variant) => key(variant) === value).length]));
   assert.deepEqual(count((variant) => variant.kind), {
-    original: 12,
-    worded_amount: 5,
+    original: 14,
+    worded_amount: 10,
     unsupported_claim: 5,
     contradicted_ranking: 5,
     hedged_valuation: 3,
-    flipped_direction: 4,
+    flipped_direction: 6,
   });
   // The judge reads a case on its trace's packet: the peer case's label is its comparisons' checked results.
   const peer = variants.find((variant) => variant.id === "peer-lead" && variant.kind === "original")!;
@@ -136,6 +136,14 @@ test("the judge's held-out set: every original and mutation passes the turn's ow
   assert.deepEqual([offset.judged.supports, offset.judged.context[0]], [
     ["AMD's net income was $872.0M in Q2 2025 (ended Jun 2025); AMD's net margin was 11.3% in Q2 2025 (ended Jun 2025)."],
     "AMD's operating margin was -1.7% in Q2 2025 (ended Jun 2025); AMD's operating income was -$134.0M in Q2 2025 (ended Jun 2025).",
+  ]);
+  // A block case's recovery is on the page only in its gross margin chart.
+  const recovery = variants.find((variant) => variant.id === "margin-recovery" && variant.kind === "original")!;
+  const after = (lines: ReadonlyArray<string>) => lines.filter((line) => line.includes("Q3 2025"));
+  assert.deepEqual([after(recovery.judged.supports), after(recovery.judged.context), recovery.judged.figures[2]], [
+    [],
+    [],
+    "Gross margin by quarter: AMD's gross margin was 50.1% in Q3 2024 (ended Sep 2024); AMD's gross margin was 51.0% in Q4 2024 (ended Dec 2024); AMD's gross margin was 50.2% in Q1 2025 (ended Mar 2025); AMD's gross margin was 39.8% in Q2 2025 (ended Jun 2025); AMD's gross margin was 53.6% in Q3 2025 (ended Sep 2025); AMD's gross margin was 54.0% in Q4 2025 (ended Dec 2025); AMD's gross margin was 54.0% in Q1 2026 (ended Mar 2026); AMD's gross margin was 54.0% in Q2 2026 (ended Jun 2026).",
   ]);
 });
 
