@@ -270,14 +270,14 @@ export function withRequiredDisclosures(seal: SnapshotSealInput): SnapshotSealIn
 }
 
 // The financial sibling of buildFactBackedSealInput. A certified financial
-// unit cites its bound input facts and their sources, and the sources of its
-// bound share prices, so the existing source, fact-metadata, and disclosure
-// checks apply, and carries a financial
+// unit cites its bound input facts and their sources, the sources of its
+// bound share prices, and the filings its derived values come from, so the
+// existing source, fact-metadata, and disclosure checks apply, and carries a financial
 // claim the verifier resolves against the ledger in the sealing transaction.
 // It carries no blocks: verification generates the unit's `financial_answer`
 // block from the records it checked. The snapshot's as_of is the plan's
 // knowledge cutoff, never the execution time. Callers pass the bound facts'
-// rows (loadUnitBoundFacts) and price sources (loadUnitBoundPriceSources); the
+// rows (loadUnitBoundFacts) and the other sources they cite (loadUnitCitedSources); the
 // verifier rejects any seal whose manifest does not cite what the unit bound.
 export function buildFinancialSealInput(input: {
   snapshot_id: UUID;
@@ -285,10 +285,10 @@ export function buildFinancialSealInput(input: {
   knowledgeCutoff: string;
   subjectRefs: ReadonlyArray<SnapshotSubjectRef>;
   boundFacts: ReadonlyArray<FactRow>;
-  boundPriceSources: ReadonlyArray<UUID>;
+  citedSources: ReadonlyArray<UUID>;
 }): SnapshotSealInput {
   const factRefs = distinct(input.boundFacts.map((fact) => fact.fact_id));
-  const sourceIds = distinct([...input.boundFacts.map((fact) => fact.source_id), ...input.boundPriceSources]);
+  const sourceIds = distinct([...input.boundFacts.map((fact) => fact.source_id), ...input.citedSources]);
   const manifest: SnapshotManifestDraft = Object.freeze({
     ...stagedManifestBase({ subjectRefs: input.subjectRefs, asOf: input.knowledgeCutoff, modelVersion: null }),
     // Deterministic ledger content: provenanced by the certified run, not tool calls.

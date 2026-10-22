@@ -43,7 +43,14 @@ async function whileChanged<T>(db: Client, change: Statement, restore: Statement
 
 const Q4_FACT = "4f000000-0000-4000-8000-0000000000d9";
 
+const QUARTER_SOURCES = ["4f000000-0000-4000-8000-0000000000c5", "4f000000-0000-4000-8000-0000000000c6", "4f000000-0000-4000-8000-0000000000c7"] as const;
+
 async function seedDerivedQuarter(db: Client): Promise<DerivationProofV1> {
+  await db.query(
+    `insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at)
+     select id, 'sec_edgar', 'filing', 'primary', 'public', '2024-02-01T00:00:00Z' from unnest($1::uuid[]) as id`,
+    [QUARTER_SOURCES],
+  );
   await db.query(
     `insert into facts (fact_id, subject_kind, subject_id, metric_id, period_kind, period_start, period_end, fiscal_year, fiscal_period,
                         value_num, unit, currency, scale, as_of, reported_at, observed_at, source_id, method, verification_status,
@@ -69,9 +76,9 @@ async function seedDerivedQuarter(db: Client): Promise<DerivationProofV1> {
     unit: "USD",
     terms: [
       term("+", "FY", "2023-01-01", "2023-12-31", "400000000000", IDS.sourceV1, "2024-01-10"),
-      term("-", "Q1", "2023-01-01", "2023-03-31", "90000000000", "4f000000-0000-4000-8000-0000000000c5", "2023-05-01"),
-      term("-", "Q2", "2023-04-01", "2023-06-30", "100000000000", "4f000000-0000-4000-8000-0000000000c6", "2023-08-01"),
-      term("-", "Q3", "2023-07-01", "2023-09-30", "110000000000", "4f000000-0000-4000-8000-0000000000c7", "2023-11-01"),
+      term("-", "Q1", "2023-01-01", "2023-03-31", "90000000000", QUARTER_SOURCES[0], "2023-05-01"),
+      term("-", "Q2", "2023-04-01", "2023-06-30", "100000000000", QUARTER_SOURCES[1], "2023-08-01"),
+      term("-", "Q3", "2023-07-01", "2023-09-30", "110000000000", QUARTER_SOURCES[2], "2023-11-01"),
     ],
   };
   await recordFactPrecisionAttestation(db, { fact_id: Q4_FACT, precision_class: "derived_from_source_tokens", derivation, source_locator: "locator:Q4", validation_method: "fixture" });
@@ -208,5 +215,10 @@ test("committed result inspection", { timeout: 300_000 }, async (t) => {
     assert.equal(valid({ ...inspected, inputs: [{ ...input, precision_status: "source_token_preserved" }] }), false, "only a derived status shows a derivation");
     assert.deepEqual([input.fact_id, input.value, input.precision_status, input.source.locator, input.derivation],
       [Q4_FACT, "100000000000", "derived_from_source_tokens", "locator:Q4", derivation]);
+    const sealed = (await db.query<{ source_ids: string[] }>(
+      `select s.source_ids from financial_run_units u join snapshots s on s.snapshot_id = u.snapshot_id where u.run_id = $1 and u.unit_id = 'q4_unit'`,
+      [quarter.runId],
+    )).rows[0];
+    assert.deepEqual(sealed?.source_ids, [IDS.sourceV1, ...QUARTER_SOURCES], "the seal cites every filing the derived value comes from");
   });
 });
