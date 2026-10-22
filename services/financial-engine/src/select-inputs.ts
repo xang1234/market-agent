@@ -5,11 +5,16 @@
 // 1. Keep candidates for the exact metric and requested fiscal period.
 // 2. Eligibility, per candidate, in order: publicly available by the cutoff
 //    (conservative, source-version-bound proof), from a source class the
-//    authority allows, proven precision, explicit financial context,
-//    contract-expressible unit.
-// 3. "Latest" names one period per subject in a plan: the offset-th newest
-//    period in which any of the subject's latest nodes of that period type has
-//    an eligible candidate. A node without a candidate there is a gap; an
+//    authority allows, proven precision, explicit financial context, a unit of
+//    the metric's kind, and the consolidated value, not a segment's.
+// 3. "Latest" names one fiscal period per subject and period type in a plan:
+//    offset fiscal years, or quarters, before the newest period any of the
+//    subject's latest nodes of that type reports. A candidate reports its
+//    period when rule 2 holds for it but for precision and context, so an
+//    uncertifiable period still counts; a fiscal year reports its fourth
+//    quarter. A balance reports only with a context: it is labelled FY of
+//    its filing's fiscal year, whether or not it is that year's end. A
+//    node without an eligible candidate there is a gap with its reason; an
 //    older period is never substituted.
 // 4. An eligible extraction correction replaces the fact it corrects.
 // 5. as_reported takes the original disclosure; as_restated takes, among the
@@ -72,7 +77,7 @@ import {
 } from "../../financial-core/src/index.ts";
 import type { InputCandidate, SplitHistory } from "./ports.ts";
 
-export const SELECTION_POLICY_VERSION = "public-information-selection.v4";
+export const SELECTION_POLICY_VERSION = "public-information-selection.v5";
 
 /** A large accelerated filer's filings are due about 112 days apart at most, so an older count is likely superseded. */
 export const SHARE_COUNT_MAX_AGE_DAYS = 130;
@@ -129,53 +134,70 @@ export type SlotSelection = { status: "selected"; input: SelectedInput } | { sta
 type Eligible = { candidate: ProvenCandidate; publication: SelectedPublication; numeric: ExactNumeric | null };
 
 // When nothing is eligible, report the reason closest to eligibility. No
-// later evidence makes a disallowed source eligible, so it comes last.
-const EXCLUSION_PRIORITY: ReadonlyArray<ReasonCode> = ["precision_unverified", "context_unverified", "incompatible_unit", "publication_time_unknown", "source_class_not_allowed"];
+// later evidence makes another scope's value, a disallowed source, or a metric
+// outside the catalog eligible, so they come last.
+const EXCLUSION_PRIORITY: ReadonlyArray<ReasonCode> = ["precision_unverified", "context_unverified", "incompatible_unit", "publication_time_unknown", "incompatible_scope", "source_class_not_allowed", "unsupported_metric"];
 
-/** One reported period, as `end|fiscal_period|fiscal_year`; a descending sort is newest first. */
-export type PeriodKey = string & { readonly __brand: "PeriodKey" };
+type FiscalPeriodSelector = Extract<PeriodSelector, { kind: "fiscal_period" }>;
 
 /** A shared latest period, null when there is none, or the gap of a group whose period cannot be known. */
-export type LatestPeriod = PeriodKey | null | Readonly<{ unresolved: ReasonCode }>;
+export type LatestPeriod = FiscalPeriodSelector | null | Readonly<{ unresolved: ReasonCode }>;
+
+const QUARTERS = ["Q1", "Q2", "Q3", "Q4"] as const;
 
 // `incomplete` marks a slot whose page was truncated or not read: it may hold a
 // newer period than the others, so its group's latest period cannot be known.
 type LatestSlot = Readonly<{ node: ReportedMetricNode; candidates: ReadonlyArray<InputCandidate>; incomplete?: ReasonCode }>;
 
 /**
- * The period each latest node resolves to, shared per subject and period type:
- * the offset-th newest period with an eligible candidate in any of the slots.
- * Null when there is no such period; unresolved when any slot of the group is
- * incomplete. An instant share count resolves alone (rule 9).
+ * The fiscal period each latest node resolves to, shared per subject and
+ * period type: offset periods before the newest one any of the slots reports
+ * by the cutoff. Null when none reports one; unresolved when any slot of the
+ * group is incomplete. An instant share count resolves alone (rule 9).
  */
 export function sharedLatestPeriods(slots: ReadonlyArray<LatestSlot>, policy: SelectionPolicy): ReadonlyMap<LocalId, LatestPeriod> {
   const groupOf = (node: ReportedMetricNode, periodType: string) => JSON.stringify([node.subject_slot, periodType]);
-  const keysByGroup = new Map<string, Set<PeriodKey>>();
+  const newestByGroup = new Map<string, number>();
   const incompleteGroups = new Map<string, ReasonCode>();
   const shared = slots.filter(({ node }) => node.period.kind === "latest" && !isShareCount(node.metric_key));
   for (const { node, candidates, incomplete } of shared) {
     if (node.period.kind !== "latest") continue;
-    const group = groupOf(node, node.period.period_type);
+    const periodType = node.period.period_type;
+    const group = groupOf(node, periodType);
     if (incomplete !== undefined && !incompleteGroups.has(group)) incompleteGroups.set(group, incomplete);
-    const keys = keysByGroup.get(group) ?? new Set();
-    for (const candidate of requestedCandidates(node, candidates)) {
-      if ("eligible" in eligibility(candidate, policy)) keys.add(periodKey(candidate));
+    for (const candidate of candidates) {
+      const position = candidate.metric_key === node.metric_key ? fiscalPosition(candidate.period, periodType) : null;
+      if (position !== null && reportedBy(candidate, policy)) newestByGroup.set(group, Math.max(newestByGroup.get(group) ?? -Infinity, position));
     }
-    keysByGroup.set(group, keys);
   }
   const resolved = new Map<LocalId, LatestPeriod>();
   for (const { node } of shared) {
     if (node.period.kind !== "latest") continue;
     const group = groupOf(node, node.period.period_type);
     const incomplete = incompleteGroups.get(group);
-    if (incomplete !== undefined) {
-      resolved.set(node.node_id, { unresolved: incomplete });
-      continue;
-    }
-    const newestFirst = [...keysByGroup.get(group)!].sort((left, right) => right.localeCompare(left));
-    resolved.set(node.node_id, newestFirst[node.period.offset] ?? null);
+    const newest = newestByGroup.get(group);
+    resolved.set(node.node_id, incomplete !== undefined ? { unresolved: incomplete }
+      : newest === undefined ? null
+      : fiscalPeriodAt(newest - node.period.offset, node.period.period_type));
   }
   return resolved;
+}
+
+/** Whether a candidate reports its period by the cutoff (rule 3). */
+export function reportedBy(candidate: InputCandidate, policy: EligibilityPolicy): boolean {
+  return "publication" in publicFromAllowedSource(candidate, policy) && metricMisfit(candidate) === null
+    && (candidate.context !== null || resolveMetricDefinition(candidate.metric_key)?.value_kind !== "balance");
+}
+
+function fiscalPosition({ fiscal_year, fiscal_period }: InputCandidate["period"], periodType: "annual" | "quarterly"): number | null {
+  if (periodType === "annual") return fiscal_period === "FY" ? fiscal_year : null;
+  return fiscal_year * 4 + (fiscal_period === "FY" ? 3 : QUARTERS.indexOf(fiscal_period));
+}
+
+function fiscalPeriodAt(position: number, periodType: "annual" | "quarterly"): FiscalPeriodSelector {
+  if (periodType === "annual") return { kind: "fiscal_period", fiscal_year: position, fiscal_period: "FY" };
+  const fiscalYear = Math.floor(position / 4);
+  return { kind: "fiscal_period", fiscal_year: fiscalYear, fiscal_period: QUARTERS[position - fiscalYear * 4]! };
 }
 
 /**
@@ -198,9 +220,9 @@ export function selectInput(
   const shared = node.period.kind !== "latest" ? null
     : latestPeriod !== undefined ? latestPeriod
     : sharedLatestPeriods([{ node, candidates }], policy).get(node.node_id)!;
-  if (shared !== null && typeof shared === "object") return gap(shared.unresolved);
+  if (shared !== null && "unresolved" in shared) return gap(shared.unresolved);
   const period = shared;
-  const inPeriod = period === null ? requested : requested.filter((candidate) => periodKey(candidate) === period);
+  const inPeriod = period === null ? requested : requested.filter((candidate) => inRequestedPeriod(candidate, period));
 
   const eligible = eligibleAmong(inPeriod, policy);
   if (typeof eligible === "string") return gap(eligible);
@@ -267,10 +289,6 @@ function requestedCandidates(node: ReportedMetricNode, candidates: ReadonlyArray
   return candidates.filter((candidate) => candidate.metric_key === node.metric_key && inRequestedPeriod(candidate, node.period));
 }
 
-function periodKey({ period }: InputCandidate): PeriodKey {
-  return `${period.end}|${period.fiscal_period}|${period.fiscal_year}` as PeriodKey;
-}
-
 function inRequestedPeriod(candidate: InputCandidate, selector: PeriodSelector): boolean {
   if (selector.kind === "fiscal_period") {
     return candidate.period.fiscal_year === selector.fiscal_year && candidate.period.fiscal_period === selector.fiscal_period;
@@ -328,23 +346,24 @@ function splitNearCount(countDate: IsoDate, reportedAt: string | null, splits: R
 
 type EligibilityPolicy = Pick<SelectionPolicy, "knowledge_cutoff" | "allowed_source_classes">;
 
-/** Whether binding could use the candidate at the cutoff: public by then, from an allowed source, with proven precision, context, and unit, and an exact value. */
+/** Whether binding could use the candidate at the cutoff: eligible by rule 2, with an exact value. */
 export function bindableAt(candidate: InputCandidate, policy: EligibilityPolicy): boolean {
   const verdict = eligibility(candidate, policy);
   return "eligible" in verdict && verdict.eligible.numeric !== null;
 }
 
 function eligibility(candidate: InputCandidate, policy: EligibilityPolicy): { eligible: Eligible } | { reason: ReasonCode | null } {
-  const publication = earliestPublicProof(candidate, policy.knowledge_cutoff);
-  if (publication === "not_yet_public") return { reason: null };
-  if (publication === "unknown") return { reason: "publication_time_unknown" };
-  if (!sourceAllowed(candidate.source_class, policy)) return { reason: "source_class_not_allowed" };
+  const admitted = publicFromAllowedSource(candidate, policy);
+  if ("reason" in admitted) return admitted;
   const { precision, context, unit } = candidate;
   if (precision === null || precision.precision_class === "legacy_unverified" || precision.raw_token === null || precision.token_proof_hash === null) {
     return { reason: "precision_unverified" };
   }
   if (context === null) return { reason: "context_unverified" };
   if (unit === null) return { reason: "incompatible_unit" };
+  const misfit = metricMisfit(candidate);
+  if (misfit !== null) return { reason: misfit };
+  const { publication } = admitted;
   const proven: ProvenCandidate = {
     ...candidate,
     unit,
@@ -352,6 +371,21 @@ function eligibility(candidate: InputCandidate, policy: EligibilityPolicy): { el
     precision: { ...precision, precision_class: precision.precision_class, raw_token: precision.raw_token, token_proof_hash: precision.token_proof_hash },
   };
   return { eligible: { candidate: proven, publication, numeric: exactNumeric(candidate) } };
+}
+
+function publicFromAllowedSource(candidate: InputCandidate, policy: EligibilityPolicy): { publication: SelectedPublication } | { reason: ReasonCode | null } {
+  const publication = earliestPublicProof(candidate, policy.knowledge_cutoff);
+  if (publication === "not_yet_public") return { reason: null };
+  if (publication === "unknown") return { reason: "publication_time_unknown" };
+  if (!sourceAllowed(candidate.source_class, policy)) return { reason: "source_class_not_allowed" };
+  return { publication };
+}
+
+function metricMisfit({ metric_key, unit, context }: InputCandidate): ReasonCode | null {
+  const definition = resolveMetricDefinition(metric_key);
+  if (definition === null) return "unsupported_metric";
+  if (unit === null || unit.kind !== definition.unit_kind) return "incompatible_unit";
+  return context !== null && context.dimension_scope !== "consolidated" ? "incompatible_scope" : null;
 }
 
 /** The proof with the earliest conservative bound at or before the cutoff. */
