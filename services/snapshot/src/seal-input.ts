@@ -278,7 +278,8 @@ export function withRequiredDisclosures(seal: SnapshotSealInput): SnapshotSealIn
 // block from the records it checked. The snapshot's as_of is the plan's
 // knowledge cutoff, never the execution time. Callers pass the bound facts'
 // rows (loadUnitBoundFacts) and the other sources they cite (loadUnitCitedSources); the
-// verifier rejects any seal whose manifest does not cite what the unit bound.
+// verifier rejects any seal whose manifest does not cite what the unit bound,
+// including each filing a bound derivation comes from.
 export function buildFinancialSealInput(input: {
   snapshot_id: UUID;
   claim: FinancialSealClaim;

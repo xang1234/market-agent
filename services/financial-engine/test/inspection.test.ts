@@ -8,6 +8,8 @@ import { recordFactPrecisionAttestation } from "../../evidence/src/financial-att
 import Ajv2020 from "../../financial-core/node_modules/ajv/dist/2020.js";
 import { recordFactFinancialContext } from "../../evidence/src/financial-context.ts";
 import { validateFinancialPlan, type DerivationProofV1, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
+import { loadFinancialUnitRecords } from "../../snapshot/src/financial-verifier-loader.ts";
+import { verifyFinancialUnit } from "../../snapshot/src/financial-verifier.ts";
 import type { SnapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
 import { inspectCommittedResult, type ResultInspection } from "../src/inspection.ts";
 import type { SqlExecutor } from "../src/ports.ts";
@@ -220,5 +222,21 @@ test("committed result inspection", { timeout: 300_000 }, async (t) => {
       [quarter.runId],
     )).rows[0];
     assert.deepEqual(sealed?.source_ids, [IDS.sourceV1, ...QUARTER_SOURCES], "the seal cites every filing the derived value comes from");
+
+    const records = await loadFinancialUnitRecords(db, { owner_user_id: IDS.owner, run_id: quarter.runId, unit_id: "q4_unit" });
+    assert.ok(records?.unit);
+    const atSeal = {
+      ...records,
+      run: { ...records.run, execution_state: "ready_to_seal" as const },
+      unit: { ...records.unit, state: "computed" as const },
+      results: records.results.map((result) => ({ ...result, state: "draft" as const, disposition: result.disposition === "verified" ? "computed" as const : result.disposition })),
+    };
+    const seal = (source_ids: string[]) =>
+      verifyFinancialUnit(atSeal, "q4_unit", { snapshot_id: randomUUID(), manifest: { fact_refs: [Q4_FACT], source_ids, as_of: atSeal.run.knowledge_cutoff } });
+    const cited = seal([IDS.sourceV1, ...QUARTER_SOURCES.map((id) => id.toUpperCase())]);
+    assert.ok(cited.ok, JSON.stringify(!cited.ok && cited.failures));
+    const uncited = seal([IDS.sourceV1, QUARTER_SOURCES[0], QUARTER_SOURCES[1]]);
+    assert.deepEqual(!uncited.ok && uncited.failures.map((failure) => [failure.reason_code, failure.details.input_slot, failure.details.field]),
+      [["financial_manifest_mismatch", "a_q4", "derivation_source_ids"]], "a seal that omits a term's filing is rejected");
   });
 });
