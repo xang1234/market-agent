@@ -171,10 +171,12 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     if (requested.clarify) return { kind: "clarification", clarification: companyQuestion(requested.clarify) };
     if (!answered && requested.subjects.length === 0) return gap("no_company");
     // The reading of the question is a model call, so it starts beside the
-    // planner's model call, or once a plan is driven: a turn that ends before
-    // either (a question about a company, a gap no model planned) reads
-    // nothing. The scope waits on the reading, so each use of them decides
-    // first whether to read (prepared). The saved answer has both already.
+    // planner's model call, when planning one company (whose overview waits
+    // on it), or once a plan is driven: a turn that ends before any of these
+    // (a question about a company, a gap no model planned for several
+    // companies) reads nothing. The scope waits on the reading, so each use
+    // of them decides first whether to read (prepared). The saved answer has
+    // both already.
     let decideReading = (_read: boolean): void => {};
     const reading = answered ? Promise.resolve(null) : new Promise<ScopeProposal | null>((resolve) => {
       decideReading = (read) => {
@@ -241,7 +243,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     const outcome = await publishRequest(deps.pool, {
       authority,
       request_key: turnId,
-      plan: async () => {
+      plan: async (db) => {
         planned = await planTurn(planningModel, context, text, requested.subjects, authority, deps.clock?.() ?? new Date(), (subjects) => {
           asked = subjects;
         }, {
@@ -250,6 +252,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
             decideReading(true);
             return reading;
           },
+          evidence: deps.evidence(db),
         });
         return planned;
       },
@@ -416,7 +419,7 @@ async function planTurn(
   cutoff: Date,
   // Called with the companies to plan once a clarification pick is applied, before the model is.
   onSubjects: (subjects: ReadonlyArray<RequestedSubject>) => void,
-  turn: Readonly<{ carried: boolean; startReading: () => Promise<ScopeProposal | null> }>,
+  turn: Readonly<{ carried: boolean; startReading: () => Promise<ScopeProposal | null>; evidence: FinancialEvidencePort }>,
 ): Promise<PlanningResult> {
   const planningContext = (subjects: ReadonlyArray<RequestedSubject>): PlanningContext => ({
     plan_id: randomUUID(),
@@ -445,7 +448,8 @@ async function planTurn(
   if (!namesOneCompany(subjects, turn.carried, text)) return planned;
   // Handled now, or a planner that fails while the reading runs is an unhandled rejection; an overview drops it.
   planned.catch(() => {});
-  return asksForNoFigure(await turn.startReading()) ? planCompanyOverview(planningContext(subjects)) : planned;
+  const overview = asksForNoFigure(await turn.startReading()) ? await planCompanyOverview(planningContext(subjects), turn.evidence) : null;
+  return overview ?? planned;
 }
 
 const CASH_RESILIENCE = /\bcash[- ]resilience\b/iu;
