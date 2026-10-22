@@ -7,7 +7,7 @@ import { createRuntimeAuthority, operationDependencies, type FinancialPlanV1 } f
 import { buildDeterministicPlan, planFinancialRequest, type PlanningContext, type PlanningModel, type PlanningResult } from "../../financial-engine/src/planner.ts";
 import type { CandidatePage, CandidateRequest, FinancialEvidencePort, InputCandidate } from "../../financial-engine/src/ports.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
-import { asksForNoFigure, namesOneCompany, planCompanyOverview } from "../src/company-overview.ts";
+import { asksForNoFigure, namesCompanies, planCompanyOverview } from "../src/company-overview.ts";
 import { isFinancialRequest, uncoveredAsks } from "../src/financial-runtime.ts";
 import { parseProposal, proposalQuestion } from "../src/scope-proposal.ts";
 import { extractSubjectMentions } from "../src/subject-extraction.ts";
@@ -249,21 +249,35 @@ test("a comparison shows each company's latest quarter, named from the newest it
 const reading = (asks: string[], metrics: unknown[] = [], income_items: string[] = [], turnsOff: string[] = []) =>
   parseProposal(JSON.stringify({ metrics, asks, turns_off: { facets: turnsOff, metrics: [] }, income_items }))!;
 
-test("a question about one company that asks for no figure is answered with its overview; one about more, or about a figure or a period, is not (#398)", async () => {
+test("a question about the companies it names that asks for no figure is answered with their overview; one about a carried company, a figure or a period is not (#398)", async () => {
   const client = await createReplayLlmChatClient(REPLIES);
   const read = async (question: string) => parseProposal((await client({} as never, { messages: [{ role: "user", content: proposalQuestion(question) }] })).text);
   const overview = async (question: string, { carried = false, read: readQuestion = read } = {}) =>
-    namesOneCompany(planningContext(question).requested_subjects, carried, question) && asksForNoFigure(await readQuestion(question));
-  for (const question of ["Analyze NVDA", "Analyze AMD", "Analyze AAPL"]) assert.equal(await overview(question), true, question);
+    namesCompanies(planningContext(question).requested_subjects, carried, question) && asksForNoFigure(await readQuestion(question));
+  for (const question of ["Analyze NVDA", "Analyze AMD", "Analyze AAPL", "Compare NVDA with AMD", "Compare NVDA and AMD again"]) {
+    assert.equal(await overview(question), true, question);
+  }
   const scripted = (proposal: ReturnType<typeof reading>) => ({ read: async () => proposal });
+  assert.equal(await overview("Analyze NVDA and AMD", scripted(reading([]))), true, "two companies");
   assert.equal(await overview("Analyze NVDA", scripted(reading([], ["income_statement"]))), false, "a metric");
+  assert.equal(await overview("Compare NVDA with AMD", scripted(reading([], ["income_statement"]))), false, "a metric in a comparison");
   assert.equal(await overview("Analyze NVDA, no margins", scripted(reading([], [], [], ["margins"]))), false, "a facet turned off");
+  assert.equal(await overview("Compare NVDA with AMD", scripted(reading([], [], [], ["margins"]))), false, "a facet turned off in a comparison");
   assert.equal(await overview("Analyze NVDA", scripted({ ...reading([]), turns_off: { facets: new Set(), metrics: new Set(["revenue"]) } })), false, "a metric turned off");
   assert.equal(await overview("Analyze NVDA", { carried: true }), false, "a carried company");
-  assert.equal(await overview("Analyze NVDA and AMD"), false, "two companies");
+  assert.equal(await overview("Compare NVDA with AMD", { carried: true }), false, "a carried company beside named ones");
   for (const period of ["in fiscal 2025", "for Q4 2025", "YTD", "for Q3", "in the third quarter"]) {
     assert.equal(await overview(`Analyze NVDA ${period}`, scripted(reading([]))), false, period);
   }
+  for (const period of ["in fiscal 2025", "for Q4 2025", "YTD", "for Q3"]) {
+    assert.equal(await overview(`Compare NVDA and AMD ${period}`, scripted(reading([]))), false, `a comparison ${period}`);
+  }
+  const yearToDate = "Compare it with AMD YTD";
+  assert.deepEqual(
+    [namesCompanies(planningContext(yearToDate).requested_subjects, true, yearToDate), asksForNoFigure(await read(yearToDate))],
+    [false, false],
+    "the golden conversation's comparison carries NVDA, and its reading asks for a price window",
+  );
 });
 
 test("each golden answer names what its question asks for and its plan does not compute", async () => {

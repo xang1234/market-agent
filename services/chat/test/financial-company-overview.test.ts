@@ -19,6 +19,8 @@ const COMPANIES: Readonly<Record<string, string>> = {
   SECQ: "4f000000-0000-4000-8000-0000000000e4",
   // Its newest quarter is in fiscal 2201, past the plan schema's last year.
   FUTR: "4f000000-0000-4000-8000-0000000000e5",
+  // Its newest quarter is Q2 FY2024, two after QTRS's.
+  OFFQ: "4f000000-0000-4000-8000-0000000000e6",
 };
 const REVENUE = [
   [2022, 1, "800"], [2022, 2, "900"], [2022, 3, "1000"], [2022, 4, "1100"],
@@ -93,6 +95,10 @@ test("a question about one company that asks for no figure is answered with its 
     await quarterly(COMPANIES.SECQ!, metric, 2024, 1, value);
   }
   await quarterly(COMPANIES.FUTR!, "revenue", 2201, 1, "2400");
+  await quarterly(COMPANIES.OFFQ!, "revenue", 2024, 1, "2100");
+  for (const [metric, value] of [["revenue", "2600"], ["gross_profit", "1300"], ["operating_income", "650"], ["net_income", "520"]] as const) {
+    await quarterly(COMPANIES.OFFQ!, metric, 2024, 2, value);
+  }
   const results = async (messageId: unknown) => {
     const { rows: [message] } = await db.query(`select blocks from chat_messages where message_id = $1`, [messageId]);
     assert.ok(message, "a published answer");
@@ -246,7 +252,7 @@ test("a question about one company that asks for no figure is answered with its 
     );
   });
 
-  await t.test("a reading that asks for a figure, two companies, a carried company, a named period, or a company with no quarters goes to the planner", async () => {
+  await t.test("a reading that asks for a figure, a carried company, a named period, or a company with no quarters goes to the planner", async () => {
     const planned = async (userIntent: string, mentions: string[], options: { readQuestion?: () => Promise<ScopeProposal | null>; priorSubjects?: () => Promise<ChatResolvedSubjectPreResolution[]> } = {}) => {
       const model = revenueModel(mentions);
       const done = completed((await chatHarness(pool, { model, readQuestion: reading(NO_ASKS), resolveMention: resolve, ...options }).run({ ...base, userIntent })).events);
@@ -257,12 +263,41 @@ test("a question about one company that asks for no figure is answered with its 
     assert.deepEqual(await planned("Revenue for QTRS", ["QTRS"], { readQuestion: reading({ ...NO_ASKS, asks: new Set(["margins"]) }) }), [1, ["a_out"]], "a facet");
     assert.deepEqual(await planned("Revenue for QTRS", ["QTRS"], { readQuestion: reading(null) }), [1, ["a_out"]], "no reading");
     assert.deepEqual(await planned("Revenue for AAA", ["AAA"]), [1, ["a_out"]], "a company with no quarterly revenue");
-    assert.deepEqual(await planned("Compare revenue for QTRS and NOGP", ["QTRS", "NOGP"]), [1, ["a_out", "b_out"]], "two companies");
+    assert.deepEqual(await planned("Compare revenue for QTRS and AAA", ["QTRS", "AAA"]), [1, ["a_out", "b_out"]], "a company with no quarterly revenue beside one with");
     const carried = (await resolve("QTRS")) as ChatResolvedSubjectPreResolution;
     assert.deepEqual(await planned("And what about its revenue?", ["QTRS"], { priorSubjects: async () => [carried] }), [1, ["a_out"]], "a carried company");
     for (const period of ["in fiscal 2023", "for Q4 2023", "YTD"]) {
       assert.deepEqual(await planned(`Revenue for QTRS ${period}`, ["QTRS"]), [1, ["a_out"]], period);
     }
+  });
+
+  // A comparison's rows: the latest quarter of a company's overview, under its slot.
+  const slotted = (slot: string, rows: ReadonlyArray<ReadonlyArray<string>>) => rows.map(([outputId, ...rest]) => [outputId!.replace(/^out_/u, `out_${slot}_`), ...rest]);
+  const OFFQ_LATEST = [
+    ["out_revenue_fy2024_q2", "Q2 FY2024", "verified", "USD 2,600.00"],
+    ["out_gross_profit_fy2024_q2", "Q2 FY2024", "verified", "USD 1,300.00"],
+    ["out_operating_income_fy2024_q2", "Q2 FY2024", "verified", "USD 650.00"],
+    ["out_net_income_fy2024_q2", "Q2 FY2024", "verified", "USD 520.00"],
+    ["out_gross_margin", "Q2 FY2024", "verified", "50.00%"],
+    ["out_operating_margin", "Q2 FY2024", "verified", "25.00%"],
+    ["out_net_margin", "Q2 FY2024", "verified", "20.00%"],
+    ["out_revenue_growth_qoq", "Q2 FY2024 vs Q1 FY2024", "verified", "23.81%"],
+    ["out_revenue_growth_yoy", "Q2 FY2024 vs Q2 FY2023", "verified", "100.00%"],
+  ];
+
+  await t.test("a comparison of named companies is one table, each company's figures from its own latest quarter (#398)", async () => {
+    const done = completed((await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve }).run({ ...base, userIntent: "Compare revenue for QTRS and OFFQ" })).events);
+    assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_OVERVIEW.slice(7)), ...slotted("b", OFFQ_LATEST)]);
+    const { rows: [shown] } = await db.query(`select blocks->0->'financial'->'presentations' as presentations from chat_messages where message_id = $1`, [done.message_id]);
+    assert.deepEqual(shown.presentations.map((presentation: { kind: string }) => presentation.kind), ["table"]);
+  });
+
+  await t.test("a line the engine cannot certify for one compared company is its gap cell, and the comparison still publishes (#398)", async () => {
+    const done = completed((await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve }).run({ ...base, userIntent: "Compare revenue for QTRS and NOGP" })).events);
+    const nogp = slotted("b", QTRS_OVERVIEW.slice(7));
+    nogp[1] = ["out_b_gross_profit_fy2023_q4", "Q4 FY2023", "missing", "missing_input"];
+    nogp[4] = ["out_b_gross_margin", "Q4 FY2023", "blocked_dependency", "blocked_by_dependency"];
+    assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_OVERVIEW.slice(7)), ...nogp]);
   });
 
   await t.test("a line the engine cannot certify is a gap cell, and the rest still publishes", async () => {

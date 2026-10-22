@@ -9,9 +9,9 @@ const QUARTERS_SHOWN = 8;
 
 type Node = Record<string, unknown> & { node_id: string };
 
-/** Whether a turn may be a company overview before its reading: one resolved company it names, not carried, and no period. */
-export function namesOneCompany(subjects: ReadonlyArray<RequestedSubject>, carried: boolean, text: string): boolean {
-  return subjects.length === 1 && subjects[0]!.resolution.status === "resolved" && !carried &&
+/** Whether a turn may be a company overview before its reading: resolved companies it names, none carried, and no period. */
+export function namesCompanies(subjects: ReadonlyArray<RequestedSubject>, carried: boolean, text: string): boolean {
+  return subjects.length > 0 && subjects.every((subject) => subject.resolution.status === "resolved") && !carried &&
     requestedFiscalYear(text) === undefined && requestedFiscalQuarter(text) === undefined && !PARTIAL_QUARTER.test(text) && requestedPriceWindow(text) === undefined;
 }
 

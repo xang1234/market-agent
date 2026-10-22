@@ -45,7 +45,7 @@ import { publishRequest, type RequestGap } from "../../financial-engine/src/requ
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { comparativeTurn, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId } from "./chat-ids.ts";
-import { asksForNoFigure, namesOneCompany, OverviewEvidenceError, planCompanyOverview } from "./company-overview.ts";
+import { asksForNoFigure, namesCompanies, OverviewEvidenceError, planCompanyOverview } from "./company-overview.ts";
 import { noteBlock } from "./fact-blocks.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { COMPARATIVE, companyKey, extractSubjectMentions } from "./subject-extraction.ts";
@@ -172,10 +172,10 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     if (requested.clarify) return { kind: "clarification", clarification: companyQuestion(requested.clarify) };
     if (!answered && requested.subjects.length === 0) return gap("no_company");
     // The reading of the question is a model call, so it starts beside the
-    // planner's model call, when planning one company (whose overview waits
-    // on it), or once a plan is driven: a turn that ends before any of these
-    // (a question about a company, a gap no model planned for several
-    // companies) reads nothing. The scope waits on the reading, so each use
+    // planner's model call, when planning companies the turn names (whose
+    // overview waits on it), or once a plan is driven: a turn that ends before
+    // any of these (a question about a company, a gap no model planned for a
+    // named period) reads nothing. The scope waits on the reading, so each use
     // of them decides first whether to read (prepared). The saved answer has
     // both already.
     let decideReading = (_read: boolean): void => {};
@@ -449,7 +449,7 @@ async function planTurn(
   // A planner the overview drops reaches the model no more (its repair call).
   const planning: PlanningModel | null = model && ((request) => dropped ? Promise.reject(DROPPED) : model(request));
   const planned = planFinancialRequest(planningContext(subjects), text, planning ?? noModel);
-  if (!namesOneCompany(subjects, turn.carried, text)) return planned;
+  if (!namesCompanies(subjects, turn.carried, text)) return planned;
   // Settled now, or a planner that fails while the overview is decided is an unhandled rejection.
   const failure = planned.then(() => null, (reason: unknown) => ({ reason }));
   if (!asksForNoFigure(await turn.startReading())) return planned;
