@@ -85,7 +85,6 @@ export function resolveMention(mention: string): Promise<ChatSubjectPreResolutio
 }
 
 export const NO_ASKS: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [] };
-// How a model reads a metric question ("Revenue for AAA"): the income statement, nothing else.
 export const METRIC_READING: ScopeProposal = { ...NO_ASKS, metrics: [proposedMetric("income_statement", null, null)!] };
 
 /** A planning model that answers every call with a revenue draft for the given slots, and counts calls. */

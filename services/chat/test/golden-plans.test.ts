@@ -126,14 +126,6 @@ test("each golden metric question plans from its own recorded reply on the first
 test("a question about one company that asks for no figure plans its overview with no model (#398)", () => {
   const quarter = (ticker: string, metric: string, offset: number) => `${ticker} ${metric} latest quarterly[${offset}]`;
   const overview = (ticker: string) => [
-    quarter(ticker, "gross_profit", 0),
-    quarter(ticker, "operating_income", 0),
-    quarter(ticker, "net_income", 0),
-    `gross_margin(${quarter(ticker, "gross_profit", 0)}, ${quarter(ticker, "revenue", 0)})`,
-    `operating_margin(${quarter(ticker, "operating_income", 0)}, ${quarter(ticker, "revenue", 0)})`,
-    `net_margin(${quarter(ticker, "net_income", 0)}, ${quarter(ticker, "revenue", 0)})`,
-    `percent_change_positive_base(${quarter(ticker, "revenue", 0)}, ${quarter(ticker, "revenue", 1)})`,
-    `percent_change_positive_base(${quarter(ticker, "revenue", 0)}, ${quarter(ticker, "revenue", 4)})`,
     quarter(ticker, "revenue", 7),
     quarter(ticker, "revenue", 6),
     quarter(ticker, "revenue", 5),
@@ -142,6 +134,14 @@ test("a question about one company that asks for no figure plans its overview wi
     quarter(ticker, "revenue", 2),
     quarter(ticker, "revenue", 1),
     quarter(ticker, "revenue", 0),
+    quarter(ticker, "gross_profit", 0),
+    quarter(ticker, "operating_income", 0),
+    quarter(ticker, "net_income", 0),
+    `gross_margin(${quarter(ticker, "gross_profit", 0)}, ${quarter(ticker, "revenue", 0)})`,
+    `operating_margin(${quarter(ticker, "operating_income", 0)}, ${quarter(ticker, "revenue", 0)})`,
+    `net_margin(${quarter(ticker, "net_income", 0)}, ${quarter(ticker, "revenue", 0)})`,
+    `percent_change_positive_base(${quarter(ticker, "revenue", 0)}, ${quarter(ticker, "revenue", 1)})`,
+    `percent_change_positive_base(${quarter(ticker, "revenue", 0)}, ${quarter(ticker, "revenue", 4)})`,
   ];
   for (const ticker of ["NVDA", "AMD", "AAPL"]) {
     const planned = buildDeterministicPlan(planningContext(ticker), companyOverviewDraft(ticker));

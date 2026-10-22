@@ -62,17 +62,8 @@ test("golden metric questions certify through the chat financial lane on the rec
     ["out_a_fcf", "blocked_dependency", null],
   ]);
   // The lane takes only a question with a metric word until routing changes
-  // (#398 step 6), so this one's reading is scripted. No recorded planner reply
-  // matches it: the overview needs none.
+  // (#398 step 6), so this one's reading is scripted.
   assert.deepEqual(await ask("Analyze NVDA's profit", async () => NO_ASKS), [
-    ["out_gross_profit_q0", "verified", "USD 46,200,000,000.00"],
-    ["out_operating_income_q0", "verified", "USD 40,300,000,000.00"],
-    ["out_net_income_q0", "verified", "USD 35,400,000,000.00"],
-    ["out_gross_margin", "verified", "74.40%"],
-    ["out_operating_margin", "verified", "64.90%"],
-    ["out_net_margin", "verified", "57.00%"],
-    ["out_revenue_qoq", "verified", "8.94%"],
-    ["out_revenue_yoy", "verified", "57.89%"],
     ["out_revenue_q7", "verified", "USD 26,044,000,000.00"],
     ["out_revenue_q6", "verified", "USD 30,040,000,000.00"],
     ["out_revenue_q5", "verified", "USD 35,082,000,000.00"],
@@ -81,5 +72,13 @@ test("golden metric questions certify through the chat financial lane on the rec
     ["out_revenue_q2", "verified", "USD 46,743,000,000.00"],
     ["out_revenue_q1", "verified", "USD 57,006,000,000.00"],
     ["out_revenue_q0", "verified", "USD 62,100,000,000.00"],
+    ["out_gross_profit_q0", "verified", "USD 46,200,000,000.00"],
+    ["out_operating_income_q0", "verified", "USD 40,300,000,000.00"],
+    ["out_net_income_q0", "verified", "USD 35,400,000,000.00"],
+    ["out_gross_margin", "verified", "74.40%"],
+    ["out_operating_margin", "verified", "64.90%"],
+    ["out_net_margin", "verified", "57.00%"],
+    ["out_revenue_qoq", "verified", "8.94%"],
+    ["out_revenue_yoy", "verified", "57.89%"],
   ]);
 });
