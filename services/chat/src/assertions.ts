@@ -47,6 +47,9 @@ export type AssertionReport = {
   // Accepted observations the rendered answer leaves out, since a comparison
   // it shows writes every figure they state.
   repeated?: ReadonlyArray<number>;
+  // Accepted inferences the judge found unsupported (answer-trace.ts): shown,
+  // labelled as an unverified analyst view, with the judge's verdict and reason.
+  unverified?: ReadonlyArray<{ index: number; reason: string }>;
 };
 
 // The answer is rendered from this list (#208), so it holds a comparison
@@ -57,7 +60,8 @@ export const MAX_ASSERTIONS = 12;
 // The check a rejection failed, named so a report can tell a wrong number or
 // citation (binding) from a wrong ranking or trend (comparative), and so a
 // held-out mutation fails one named check (#221). judge: an inference the
-// judge did not find entailed (answer-trace.ts), so it was not shown.
+// judge hid (answer-trace.ts): it contradicts the figures shown, states an
+// amount in words, or got no verdict.
 export type RejectionCheck =
   | "binding" | "comparative" | "reference" | "kind" | "support" | "limit" | "format" | "rendering" | "judge";
 export type Rejection = { index: number; text?: string; check: RejectionCheck; reason: string };

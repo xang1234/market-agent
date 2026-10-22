@@ -92,7 +92,7 @@ function start(options: ChatCoordinatorOptions) {
 
 const types = (events: ReadonlyArray<ChatSseEvent>) => events.map((event) => event.type);
 
-test("an answer whose inferences the judge reads is shown sealed, a line in each one's place, shown again as each verdict settles, and saved once the judge is done with those it entailed", async () => {
+test("an answer whose inferences the judge reads is shown sealed, a line in each one's place, shown again as each verdict settles, and saved once the judge is done with those it shows", async () => {
   const { runtime, verdict, judged } = judgedRuntime();
   const sealed: unknown[] = [];
   const saved: unknown[] = [];

@@ -8,7 +8,7 @@ import { isDeepStrictEqual } from "node:util";
 
 import { loadLlmSettingsFromEnv, type LlmChatClient, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
 import type { AssertionReport } from "./assertions.ts";
-import { judgeCases, judgeInferences, judgeMessages, verdictsOf, type JudgeCase, type JudgeRecord } from "./inference-judge.ts";
+import { judgeCases, judgeInferences, judgeMessages, SHOWN_AS, verdictsOf, type InferenceVerdict, type JudgeCase, type JudgeRecord } from "./inference-judge.ts";
 import { composeAnalystBlocksWithLlm, turnPacket, type AnswerBlocks, type AnswerUsage, type ModelDeadlines } from "./llm-runtime.ts";
 
 export type AnswerTraceInput = Omit<
@@ -35,8 +35,9 @@ export type TurnTrace = {
   input: AnswerTraceInput;
   // Null when no model was called.
   exchange: ModelExchange | null;
-  // The checks' report; each inference the judge did not entail is a
-  // rejection with check "judge", so the accepted inferences are those shown.
+  // The checks' report; each inference the judge hid is a rejection with
+  // check "judge", so the accepted inferences are those shown, and those
+  // shown as unverified are listed in its unverified.
   assertions: AssertionReport | null;
   // What the judge did with the answer's inferences, a call per inference in
   // their order; null when it showed none to judge. Absent from traces
@@ -82,14 +83,19 @@ export function inferenceCases(input: AnswerTraceInput, report: AssertionReport 
   return { cases: judgeCases(report.accepted, packet, input.factBlocks ?? []), companies: packet.companies };
 }
 
-// What the reader ends with: each inference the judge entailed, and none
-// other. The rest leave the report's accepted list as "judge" rejections.
+// What the reader ends with: each inference as its verdict shows it
+// (SHOWN_AS). Those hidden leave the report's accepted list as "judge"
+// rejections; those shown as unverified stay, listed in its unverified.
 // records: the judge's, one per case.
 export function judgedAnswer(answer: ComposedAnswer, cases: ReadonlyArray<JudgeCase>, records: ReadonlyArray<JudgeRecord>): TracedAnswer {
   if (cases.length === 0) return { ...answer, judge: null, blocks: answer.blocks(new Map()) };
   const verdicts = cases.flatMap((inference, i) => verdictsOf([inference], records[i]!));
-  const shown = new Map(verdicts.flatMap((entry) => (entry.verdict === "entailed" ? [[entry.index, "shown"] as const] : [])));
-  const hidden = verdicts.filter((entry) => entry.verdict !== "entailed");
+  const shown = new Map(verdicts.flatMap((entry) => {
+    const as = SHOWN_AS[entry.verdict];
+    return as === "hidden" ? [] : [[entry.index, as] as const];
+  }));
+  const hidden = verdicts.filter((entry) => !shown.has(entry.index));
+  const unverified = verdicts.filter((entry) => shown.get(entry.index) === "unverified").map((entry) => ({ index: entry.index, reason: why(entry) }));
   const report = answer.assertions!;
   return {
     exchange: answer.exchange,
@@ -102,13 +108,18 @@ export function judgedAnswer(answer: ComposedAnswer, cases: ReadonlyArray<JudgeC
           index: verdict.index,
           text: report.accepted.find((entry) => entry.index === verdict.index)!.text,
           check: "judge" as const,
-          reason: `${verdict.verdict}${verdict.reason ? `: ${verdict.reason}` : ""}`,
+          reason: why(verdict),
         })),
       ].sort((a, b) => a.index - b.index),
+      ...(unverified.length > 0 ? { unverified } : {}),
     },
     judge: records,
     blocks: answer.blocks(shown),
   };
+}
+
+function why(verdict: InferenceVerdict): string {
+  return `${verdict.verdict}${verdict.reason ? `: ${verdict.reason}` : ""}`;
 }
 
 type JudgeOptions = {
@@ -145,8 +156,8 @@ type TurnIds = Pick<TurnTrace, "thread_id" | "run_id" | "turn_id">;
 
 export type AnsweredTurn = Pick<TracedAnswer, "exchange" | "assertions" | "blocks"> & {
   // Present while the judge reads the answer's inferences: `blocks` then hold a
-  // line in each one's place, and each inference takes its line, or drops it,
-  // as its own verdict settles.
+  // line in each one's place, and each inference takes its line, as shown or
+  // unverified, or drops it, as its own verdict settles.
   judging?: {
     // Called at once with the blocks as the verdicts so far leave them, then
     // again as each later verdict settles.
@@ -173,22 +184,24 @@ export async function answerTurn(
   const finish = async (records: ReadonlyArray<JudgeRecord>): Promise<TracedAnswer> => {
     const traced = judgedAnswer(answer, cases, records);
     if (cases.length > 0) {
-      const shown = traced.assertions!.accepted.filter((entry) => entry.kind === "analyst_inference").length;
+      const unverified = traced.assertions!.unverified?.length ?? 0;
+      const shown = traced.assertions!.accepted.filter((entry) => entry.kind === "analyst_inference").length - unverified;
       const deployments = [...new Set(records.flatMap((record) => (record.outcome === "replied" ? [record.exchange.deployment] : [])))];
       const reasons = [...new Set(records.flatMap((record) => (record.outcome === "replied" ? [] : [record.reason])))];
-      console.info(`[chat] judge ${traceIds(turn)}${deployments.length > 0 ? ` on ${deployments.join(", ")}` : ""}: ${shown} of ${cases.length} inferences shown${reasons.length > 0 ? ` (${reasons.join("; ")})` : ""}`);
+      console.info(`[chat] judge ${traceIds(turn)}${deployments.length > 0 ? ` on ${deployments.join(", ")}` : ""}: ${shown} shown, ${unverified} unverified, of ${cases.length} inferences${reasons.length > 0 ? ` (${reasons.join("; ")})` : ""}`);
     }
     await writeTurnTrace(options.traceDir, { version: 2, ...turn, recorded_at, input, ...traced });
     return traced;
   };
   if (cases.length === 0) return finish([]);
   if (!(await judgeConfigured(options.env))) return finish(cases.map(() => NO_JUDGE));
-  const inferences = new Map<number, "shown" | "pending">(cases.map(({ index }) => [index, "pending"]));
+  const inferences = new Map<number, "shown" | "unverified" | "pending">(cases.map(({ index }) => [index, "pending"]));
   const listeners: Array<(blocks: TracedAnswer["blocks"]) => void> = [];
   const records = cases.map((inference) =>
     judgeOne(inference, companies, options).then((record) => {
-      if (verdictsOf([inference], record)[0]!.verdict === "entailed") inferences.set(inference.index, "shown");
-      else inferences.delete(inference.index);
+      const as = SHOWN_AS[verdictsOf([inference], record)[0]!.verdict];
+      if (as === "hidden") inferences.delete(inference.index);
+      else inferences.set(inference.index, as);
       const blocks = answer.blocks(inferences);
       // A listener that throws stops hearing verdicts; the answer is still saved.
       for (const listener of [...listeners]) {
@@ -324,8 +337,10 @@ export type AnswerMetrics = {
   fallback: boolean;
   accepted: number;
   rejected: number;
-  // The answer's inferences the judge entailed, and those it left out.
+  // The answer's inferences the judge entailed, those it found unsupported
+  // (shown as unverified), and those it left out.
   inferences_shown: number;
+  inferences_unverified: number;
   inferences_hidden: number;
   output_tokens: number;
   latency_ms: number;
@@ -334,6 +349,7 @@ export type AnswerMetrics = {
 type Segment = { type?: string; ref_kind?: string; text?: string };
 
 export function answerMetrics(trace: Pick<TurnTrace, "blocks" | "assertions" | "exchange">): AnswerMetrics {
+  const unverified = new Set((trace.assertions?.unverified ?? []).map(({ index }) => index));
   const narrative = trace.blocks.filter((block) => block.kind === "rich_text")
     .map((block) => (Array.isArray(block.segments) ? block.segments as Segment[] : []));
   const text = (segments: ReadonlyArray<Segment>) =>
@@ -344,7 +360,8 @@ export function answerMetrics(trace: Pick<TurnTrace, "blocks" | "assertions" | "
     fallback: trace.exchange !== null && trace.assertions?.rendered !== true,
     accepted: trace.assertions?.accepted.length ?? 0,
     rejected: trace.assertions?.rejected.length ?? 0,
-    inferences_shown: trace.assertions?.accepted.filter((entry) => entry.kind === "analyst_inference").length ?? 0,
+    inferences_shown: trace.assertions?.accepted.filter((entry) => entry.kind === "analyst_inference" && !unverified.has(entry.index)).length ?? 0,
+    inferences_unverified: unverified.size,
     inferences_hidden: trace.assertions?.rejected.filter((entry) => entry.check === "judge").length ?? 0,
     output_tokens: trace.exchange?.usage?.output_tokens ?? 0,
     latency_ms: trace.exchange?.latency_ms ?? 0,

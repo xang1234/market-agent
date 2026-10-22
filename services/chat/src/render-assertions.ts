@@ -108,13 +108,23 @@ function templateSegments(
     case "analyst_inference": {
       // Words only: the check rejected any figure or reference in it.
       const label = checkedResults(assertion, packet, accepted);
-      // A one-company answer's subject goes without saying.
-      const on = assertion.subject && packet.companies.length > 1 ? ` on ${assertion.subject}` : "";
-      text(`> **Analyst inference${on}${label.length > 0 ? `** (${label.join("; ")}):` : ":**"} ${assertion.text}`);
+      text(`> **Analyst inference${subjectClause(assertion, packet)}${label.length > 0 ? `** (${label.join("; ")}):` : ":**"} ${assertion.text}`);
       break;
     }
   }
   return segments;
+}
+
+// An inference the judge found unsupported (inference-judge.ts SHOWN_AS): it
+// goes beyond the figures without contradicting them, so it shows as the
+// analyst's view, with no checked results to lend it weight.
+export function unverifiedInference(assertion: Assertion, packet: EvidencePacket): Segment[] {
+  return [{ type: "text", text: `> **Unverified analyst view${subjectClause(assertion, packet)}** (not backed by the figures shown): ${assertion.text}` }];
+}
+
+// A one-company answer's subject goes without saying.
+function subjectClause(assertion: Assertion, packet: EvidencePacket): string {
+  return assertion.subject && packet.companies.length > 1 ? ` on ${assertion.subject}` : "";
 }
 
 // What an inference's comparisons checked, for its label, from their results.

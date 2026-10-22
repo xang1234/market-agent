@@ -41,7 +41,7 @@ const ACCEPTED: ReadonlyArray<Assertion & { index: number }> = [
 
 const CASES = judgeCases(ACCEPTED, PACKET, []);
 
-test("a case is the inference beside its supports as the reader sees them, figures as the packet's values, and its checked results", () => {
+test("a case is the inference beside its supports as the reader sees them, figures as the packet's values, its checked results, and the answer's other observations and comparisons", () => {
   assert.deepEqual(CASES, [
     {
       index: 2,
@@ -52,6 +52,7 @@ test("a case is the inference beside its supports as the reader sees them, figur
         "NVDA's gross margin was 74.6% in FY2026; AMD's gross margin was 49.2% in FY2025.",
         "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026), AMD 49.2% (FY2025), 25.4 percentage points above AMD.",
       ],
+      context: [],
     },
     {
       index: 3,
@@ -59,6 +60,7 @@ test("a case is the inference beside its supports as the reader sees them, figur
       text: "Its peer trails on margin.",
       checked: ["NVDA highest on gross margin"],
       supports: ["Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026), AMD 49.2% (FY2025), 25.4 percentage points above AMD."],
+      context: ["NVDA's gross margin was 74.6% in FY2026; AMD's gross margin was 49.2% in FY2025."],
     },
   ]);
   // A one-company answer's inference is about that company.
@@ -90,9 +92,36 @@ test("an inference resting on a management attribution reaches the judge with th
   ]]);
 });
 
+test("the rest of the answer a case carries is its other observations and comparisons only: no management attribution, unknown cause or other inference", () => {
+  const packet: EvidencePacket = {
+    ...PACKET,
+    companies: ["AMD"],
+    figures: [
+      { id: "F2", company: "AMD", metric: "Gross margin", period: "FY2025", value: "49.2%", fact_id: "not-a-uuid-2", source_ids: [] },
+      { id: "F3", company: "AMD", metric: "Gross margin", period: "FY2024", value: "53.1%", fact_id: "not-a-uuid-3", source_ids: [] },
+    ],
+    claims: [{
+      id: "C1", text: "Export controls led to about $800 million in inventory charges.", predicate: "kpi.commentary", stance: "supporting",
+      company: "AMD", published_at: "2025-08-05T00:00:00.000Z", claim_id: "c1", source_id: "s1",
+    }],
+  };
+  const { accepted } = checkAssertions([
+    { kind: "observation", text: "AMD's gross margin was [[F2]] in FY2025.", evidence: ["F2"] },
+    { kind: "comparison", text: "Gross margin fell.", evidence: ["F3", "F2"], op: "trend", result: "fell" },
+    { kind: "management_attribution", text: "AMD management said [[C1]]", evidence: ["C1"] },
+    { kind: "unknown_cause", text: "The figures do not show why.", evidence: ["F2"] },
+    { kind: "analyst_inference", text: "The charge weighs on its margin.", supports: [2] },
+    { kind: "analyst_inference", text: "Its margin is lower than it was.", supports: [1] },
+  ], packet);
+  assert.deepEqual(judgeCases(accepted, packet, []).map(({ index, context }) => [index, context]), [
+    [4, ["AMD's gross margin was 49.2% in FY2025.", "AMD's gross margin fell from 53.1% in FY2024 to 49.2% in FY2025."]],
+    [5, ["AMD's gross margin was 49.2% in FY2025."]],
+  ]);
+});
+
 test("one judge call per answer, on JUDGE_LITELLM_MODEL, carries every inference with its supports' text; its reply is kept raw and read per inference", async () => {
   const requests: Array<{ model: string; request: LlmChatRequest }> = [];
-  const reply = 'Here you go:\n{"verdicts":[{"id":3,"verdict":"entailed"},{"id":2,"verdict":"not_entailed","reason":"unsupported: no figure shows what it keeps of a sale."}]}';
+  const reply = 'Here you go:\n{"verdicts":[{"id":3,"verdict":"entailed"},{"id":2,"verdict":"unsupported","reason":"no figure shows what it keeps of a sale."}]}';
   const record = await judgeInferences({
     cases: CASES,
     companies: PACKET.companies,
@@ -112,7 +141,7 @@ test("one judge call per answer, on JUDGE_LITELLM_MODEL, carries every inference
     usage: { input_tokens: 900, output_tokens: 60 },
   });
   assert.deepEqual(verdictsOf(CASES, record), [
-    { index: 2, verdict: "not_entailed", reason: "unsupported: no figure shows what it keeps of a sale." },
+    { index: 2, verdict: "unsupported", reason: "no figure shows what it keeps of a sale." },
     { index: 3, verdict: "entailed" },
   ]);
   assert.deepEqual(requests.map(({ model }) => model), ["anthropic/claude-haiku-5-5"]);
@@ -130,6 +159,7 @@ test("one judge call per answer, on JUDGE_LITELLM_MODEL, carries every inference
           "NVDA's gross margin was 74.6% in FY2026; AMD's gross margin was 49.2% in FY2025.",
           "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026), AMD 49.2% (FY2025), 25.4 percentage points above AMD.",
         ],
+        rest_of_answer: [],
       },
       {
         id: 3,
@@ -137,6 +167,7 @@ test("one judge call per answer, on JUDGE_LITELLM_MODEL, carries every inference
         text: "Its peer trails on margin.",
         checked_results: ["NVDA highest on gross margin"],
         supports: ["Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026), AMD 49.2% (FY2025), 25.4 percentage points above AMD."],
+        rest_of_answer: ["NVDA's gross margin was 74.6% in FY2026; AMD's gross margin was 49.2% in FY2025."],
       },
     ],
   });
@@ -152,21 +183,39 @@ test("a malformed reply is an error for every inference, never entailed; a bad v
   }
   // A reply that corrects itself is read by its last list.
   const corrected = [
-    '{"verdicts":[{"id":2,"verdict":"not_entailed","reason":"unsupported: no figure shows \\"its peer\\"."},{"id":3,"verdict":"entailed"}]}',
+    '{"verdicts":[{"id":2,"verdict":"unsupported","reason":"no figure shows \\"its peer\\"."},{"id":3,"verdict":"entailed"}]}',
     "Correction: the comparison shows its peer trails. Final:",
-    '```json\n{"verdicts":[{"id":2,"verdict":"entailed"},{"id":3,"verdict":"not_entailed","reason":"contradicts_ranking: NVDA is highest."}]}\n```',
+    '```json\n{"verdicts":[{"id":2,"verdict":"entailed"},{"id":3,"verdict":"contradicted","reason":"NVDA is highest."}]}\n```',
   ].join("\n\n");
   assert.deepEqual(parseVerdicts(corrected, two), [
     { index: 2, verdict: "entailed" },
-    { index: 3, verdict: "not_entailed", reason: "contradicts_ranking: NVDA is highest." },
+    { index: 3, verdict: "contradicted", reason: "NVDA is highest." },
   ]);
   assert.deepEqual(parseVerdicts('{"verdicts":[{"id":2,"verdict":"probably"}]}', two), [
     { index: 2, verdict: "error", reason: 'unknown verdict "probably"' },
     { index: 3, verdict: "error", reason: "no verdict for this inference" },
   ]);
-  assert.deepEqual(parseVerdicts('{"verdicts":[{"id":2,"verdict":"entailed"},{"id":2,"verdict":"not_entailed"},{"id":"3","verdict":"entailed"}]}', two), [
+  assert.deepEqual(parseVerdicts('{"verdicts":[{"id":2,"verdict":"entailed"},{"id":2,"verdict":"unsupported"},{"id":"3","verdict":"entailed"}]}', two), [
     { index: 2, verdict: "error", reason: "more than one verdict for this inference" },
     { index: 3, verdict: "error", reason: "no verdict for this inference" },
+  ]);
+});
+
+test("a verdict is one of entailed, unsupported, contradicted and worded_amount; the old not_entailed is an unknown verdict, an error", () => {
+  const cases = [1, 2, 3, 4, 5].map((index) => ({ ...CASES[0]!, index }));
+  const reply = JSON.stringify({ verdicts: [
+    { id: 1, verdict: "entailed" },
+    { id: 2, verdict: "unsupported", reason: "a forecast the figures do not show." },
+    { id: 3, verdict: "contradicted", reason: "NVDA is highest, not its peer." },
+    { id: 4, verdict: "worded_amount", reason: "it says the margin doubled." },
+    { id: 5, verdict: "not_entailed", reason: "unsupported: no figure shows it." },
+  ] });
+  assert.deepEqual(parseVerdicts(reply, cases), [
+    { index: 1, verdict: "entailed" },
+    { index: 2, verdict: "unsupported", reason: "a forecast the figures do not show." },
+    { index: 3, verdict: "contradicted", reason: "NVDA is highest, not its peer." },
+    { index: 4, verdict: "worded_amount", reason: "it says the margin doubled." },
+    { index: 5, verdict: "error", reason: 'unknown verdict "not_entailed"' },
   ]);
 });
 

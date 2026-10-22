@@ -1427,7 +1427,7 @@ async function toolBackedAnalystTurnRunner(
   // An answer whose inferences the judge reads is sealed and shown as soon as
   // it is composed, a line in each inference's place; each inference then
   // shows, or its line goes, as its own verdict settles (#376), and the answer
-  // is saved once the judge is done, with the inferences it entailed (#302).
+  // is saved once the judge is done, with the inferences it shows (#302).
   // It shows only blocks the seal verified, and is the message a reload reads
   // once the turn completes.
   let revealed = false;

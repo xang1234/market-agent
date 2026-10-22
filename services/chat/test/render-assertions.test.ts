@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { calendarNote, plainText, renderAssertion } from "../src/render-assertions.ts";
+import { calendarNote, plainText, renderAssertion, unverifiedInference } from "../src/render-assertions.ts";
 import type { Assertion } from "../src/assertions.ts";
 import type { EvidencePacket } from "../src/evidence-packet.ts";
 import { turnPacket } from "../src/llm-runtime.ts";
@@ -250,6 +250,19 @@ test("an inference's label states each supporting comparison's checked result; o
   // A one-company answer's subject goes without saying.
   assert.equal(plainText(renderAssertion({ index: 9, kind: "analyst_inference", subject: "AMD", text: "Its margin held.", evidence: [], supports: [] }, AMD_QUARTERS, [], []).segments),
     "> **Analyst inference:** Its margin held.");
+});
+
+test("an inference the judge found unsupported is labelled an unverified analyst view, its subject named across companies, with no checked results", () => {
+  const inference = { kind: "analyst_inference" as const, text: "Its lead may narrow as rivals ship.", evidence: [], supports: [0] };
+  assert.deepEqual(unverifiedInference({ ...inference, subject: "NVDA" }, PACKET), [
+    { type: "text", text: "> **Unverified analyst view on NVDA** (not backed by the figures shown): Its lead may narrow as rivals ship." },
+  ]);
+  assert.deepEqual(unverifiedInference(inference, PACKET), [
+    { type: "text", text: "> **Unverified analyst view** (not backed by the figures shown): Its lead may narrow as rivals ship." },
+  ]);
+  assert.deepEqual(unverifiedInference({ ...inference, subject: "AMD" }, AMD_QUARTERS), [
+    { type: "text", text: "> **Unverified analyst view** (not backed by the figures shown): Its lead may narrow as rivals ship." },
+  ]);
 });
 
 test("an observation of a partially covered period says so (#302 review)", () => {

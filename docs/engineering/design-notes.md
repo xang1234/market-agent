@@ -121,10 +121,12 @@ fixed rule, not a tool loop.
   sources on the chart.
 - **Judge gate** (`inference-judge.ts`, `answer-trace.ts`): the answer is rendered from its checked assertions, each
   figure a packet value in a template; an analyst inference is the model's words, with no digit or reference. A
-  second model (`JUDGE_LITELLM_MODEL`) reads each inference beside the assertions it rests on, one call per
-  inference, all at once (#376). The answer is sealed and shown at once with a line in each inference's place
-  (`answer.shown`); as each verdict arrives, `answer.shown` comes again for the same message with that inference
-  shown or its line gone, and the answer is saved once every verdict is in, with the inferences found entailed.
+  second model (`JUDGE_LITELLM_MODEL`) reads each inference beside the assertions it rests on and the answer's
+  other observations and comparisons, one call per inference, all at once (#376). Its verdict is entailed,
+  unsupported, contradicted or worded_amount (`SHOWN_AS`): entailed shows as an analyst inference, unsupported
+  shows labelled as an unverified analyst view, and the others stay hidden. The answer is sealed and shown at once
+  with a line in each inference's place (`answer.shown`); as each verdict arrives, `answer.shown` comes again for
+  the same message with that inference shown or its line gone, and the answer is saved once every verdict is in.
   Each shown state and the save may differ from the seal only in text segments, which neither the seal nor a block
   proof reads (`messages.ts`). No judge configured, a failed or late call, or no verdict: that inference is not
   shown. The judge replaced the word-list narrative guard (#302).

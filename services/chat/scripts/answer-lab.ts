@@ -90,6 +90,7 @@ const COLUMNS: ReadonlyArray<[Column, string]> = [
   ["accepted", "accepted"],
   ["rejected", "rejected"],
   ["inferences_shown", "inf shown"],
+  ["inferences_unverified", "inf unverified"],
   ["inferences_hidden", "inf hidden"],
   ["output_tokens", "out tok"],
   ["latency_ms", "latency ms"],
@@ -125,10 +126,10 @@ function table(rows: ReadonlyArray<Row>, extra: (row: Row) => string = () => "",
 
 function delta(before: Row, after: Row): string {
   return [
-    "metric      before    after    delta",
+    `${"metric".padEnd(14)} ${"before".padStart(7)} ${"after".padStart(8)} ${"delta".padStart(8)}`,
     ...COLUMNS.map(([key, title]) => {
       const change = (after[key] ?? 0) - (before[key] ?? 0);
-      return `${title.padEnd(10)} ${format(before[key]).padStart(7)} ${format(after[key]).padStart(8)} ${`${change > 0 ? "+" : ""}${format(change)}`.padStart(8)}`;
+      return `${title.padEnd(14)} ${format(before[key]).padStart(7)} ${format(after[key]).padStart(8)} ${`${change > 0 ? "+" : ""}${format(change)}`.padStart(8)}`;
     }),
   ].join("\n");
 }
@@ -164,14 +165,21 @@ function liveEnv(): Record<string, string | undefined> {
   return { ...process.env, LLM_SETTINGS_ENV_FILE: process.env.LLM_SETTINGS_ENV_FILE ?? join(ROOT, ".env.dev") };
 }
 
-// What the judge did with each of an answer's inferences, and each it left
-// out, with why: the judge's verdict and reason, or why no verdict came.
-export type JudgeView = { records: ReadonlyArray<JudgeRecord>; hidden: Array<{ index: number; text: string; reason: string }> };
+// What the judge did with each of an answer's inferences, each it showed as
+// unverified and each it left out, with why: the judge's verdict and reason,
+// or why no verdict came.
+type JudgedInference = { index: number; text: string; reason: string };
+export type JudgeView = { records: ReadonlyArray<JudgeRecord>; unverified: JudgedInference[]; hidden: JudgedInference[] };
 
 function judgeView(answer: Pick<TracedAnswer, "judge" | "assertions">): JudgeView | undefined {
   if (!answer.judge) return undefined;
   const hidden = (answer.assertions?.rejected ?? []).filter((entry) => entry.check === "judge");
-  return { records: answer.judge, hidden: hidden.map(({ index, text, reason }) => ({ index, text: text ?? "", reason })) };
+  const unverified = (answer.assertions?.unverified ?? []).map(({ index, reason }) => ({
+    index,
+    text: answer.assertions!.accepted.find((entry) => entry.index === index)?.text ?? "",
+    reason,
+  }));
+  return { records: answer.judge, unverified, hidden: hidden.map(({ index, text, reason }) => ({ index, text: text ?? "", reason })) };
 }
 
 // text: the model's raw reply; answer: the rich_text the user reads, each
@@ -315,9 +323,9 @@ function liveRows(run: LiveRun, keys: ReadonlyArray<string> = run.traces): Row[]
   });
 }
 
-// The inferences the judge showed and left out over the run, what it did per
-// inference, its cost per call it replied to, and each inference it left out,
-// with its text and why.
+// The inferences the judge showed, showed as unverified and left out over the
+// run, what it did per inference, its cost per call it replied to, and each
+// inference it showed as unverified or left out, with its text and why.
 export function judgeSummary(run: Pick<LiveRun, "labels"> & { results: ReadonlyArray<Pick<LiveSample, "trace" | "sample" | "metrics" | "judge">> }): string {
   const judged = run.results.filter((result) => result.judge);
   const records = judged.flatMap((result) => result.judge!.records);
@@ -325,14 +333,19 @@ export function judgeSummary(run: Pick<LiveRun, "labels"> & { results: ReadonlyA
   // A trace from before #376 recorded one call for all its inferences, which
   // replays as each one's record: its cost counts once.
   const replies = [...new Set(records.flatMap((record) => (record.outcome === "replied" ? [record.exchange] : [])))];
-  const sum = (key: "inferences_shown" | "inferences_hidden") => judged.reduce((total, result) => total + (result.metrics?.[key] ?? 0), 0);
+  const sum = (key: "inferences_shown" | "inferences_unverified" | "inferences_hidden") => judged.reduce((total, result) => total + (result.metrics?.[key] ?? 0), 0);
   const mean = (values: ReadonlyArray<number>) => (values.length === 0 ? 0 : Math.round(values.reduce((total, value) => total + value, 0) / values.length));
   return [
-    `judge: ${sum("inferences_shown")} shown, ${sum("inferences_hidden")} hidden, in ${judged.length} answers (${outcomes("replied")} replied, ${outcomes("failed")} failed, ${outcomes("not_called")} not called)`,
+    `judge: ${sum("inferences_shown")} shown, ${sum("inferences_unverified")} unverified, ${sum("inferences_hidden")} hidden, in ${judged.length} answers (${outcomes("replied")} replied, ${outcomes("failed")} failed, ${outcomes("not_called")} not called)`,
     `judge per reply: ${mean(replies.map((reply) => reply.latency_ms))} ms, ${mean(replies.map((reply) => reply.usage?.input_tokens ?? 0))} in / ${mean(replies.map((reply) => reply.usage?.output_tokens ?? 0))} out tokens, on ${[...new Set(replies.map((reply) => reply.deployment))].join(", ") || "no model"}`,
-    ...judged.flatMap((result) => result.judge!.hidden.map((entry) =>
-      `  hidden  ${run.labels?.[result.trace] ?? result.trace} #${result.sample} [${entry.index}] ${entry.text}\n      ${entry.reason}`
-    )),
+    ...judged.flatMap((result) =>
+      [
+        ...result.judge!.unverified.map((entry) => ({ ...entry, as: "unverified" })),
+        ...result.judge!.hidden.map((entry) => ({ ...entry, as: "hidden" })),
+      ].sort((a, b) => a.index - b.index).map((entry) =>
+        `  ${entry.as}  ${run.labels?.[result.trace] ?? result.trace} #${result.sample} [${entry.index}] ${entry.text}\n      ${entry.reason}`
+      )
+    ),
   ].join("\n");
 }
 
@@ -398,7 +411,7 @@ async function judgeMutations(variants: ReadonlyArray<MutationVariant>, concurre
         ? { deployment: record.exchange.deployment, latency_ms: record.exchange.latency_ms, ...(record.exchange.usage ? { usage: record.exchange.usage } : {}) }
         : { deployment: null, latency_ms: record.outcome === "failed" ? record.latency_ms : 0 };
       results.push({ id, kind, text: judged.text, verdict, ...cost });
-      console.log(`${verdict.verdict.padEnd(12)} ${id} ${kind}`);
+      console.log(`${verdict.verdict.padEnd(14)} ${id} ${kind}`);
     }
   };
   await Promise.all(Array.from({ length: Math.max(1, concurrency) }, worker));
@@ -408,16 +421,16 @@ async function judgeMutations(variants: ReadonlyArray<MutationVariant>, concurre
 // Mutations caught (not entailed) and originals flagged, by kind; an error is
 // neither, and is counted on its own.
 export function mutationSummary(results: ReadonlyArray<Pick<MutationResult, "id" | "kind" | "text" | "verdict">>): string {
-  const rate = (rows: ReadonlyArray<Pick<MutationResult, "verdict">>, verdict: InferenceVerdict["verdict"]) =>
-    `${rows.filter((row) => row.verdict.verdict === verdict).length} of ${rows.length}`;
+  const flagged = (row: Pick<MutationResult, "verdict">) => row.verdict.verdict !== "entailed" && row.verdict.verdict !== "error";
+  const rate = (rows: ReadonlyArray<Pick<MutationResult, "verdict">>) => `${rows.filter(flagged).length} of ${rows.length}`;
   const errors = (rows: ReadonlyArray<Pick<MutationResult, "verdict">>) => rows.filter((row) => row.verdict.verdict === "error").length;
   const mutations = results.filter((result) => result.kind !== "original");
   const originals = results.filter((result) => result.kind === "original");
-  const missed = results.filter((result) => (result.kind === "original" ? result.verdict.verdict !== "entailed" : result.verdict.verdict !== "not_entailed"));
+  const missed = results.filter((result) => (result.kind === "original" ? result.verdict.verdict !== "entailed" : !flagged(result)));
   return [
-    `caught: ${rate(mutations, "not_entailed")} mutations (${errors(mutations)} errors)`,
-    ...MUTATION_KINDS.map((kind) => `  ${kind.padEnd(22)} ${rate(mutations.filter((result) => result.kind === kind), "not_entailed")}`),
-    `false alarms: ${rate(originals, "not_entailed")} originals (${errors(originals)} errors)`,
+    `caught: ${rate(mutations)} mutations (${errors(mutations)} errors)`,
+    ...MUTATION_KINDS.map((kind) => `  ${kind.padEnd(22)} ${rate(mutations.filter((result) => result.kind === kind))}`),
+    `false alarms: ${rate(originals)} originals (${errors(originals)} errors)`,
     ...(missed.length > 0 ? ["misses, false alarms and errors:"] : []),
     ...missed.map((result) => `  ${result.id} ${result.kind}: ${result.verdict.verdict}${result.verdict.reason ? ` (${result.verdict.reason})` : ""}\n      ${result.text}`),
   ].join("\n");
