@@ -30,6 +30,7 @@ import { ParentRefusedError, type PersistParentArtifact } from "../../financial-
 import {
   buildDeterministicPlan,
   planFinancialRequest,
+  PlanningModelError,
   resolveClarification,
   type Clarification,
   type PlanningContext,
@@ -446,17 +447,33 @@ async function planTurn(
   // A failing or unreachable model is a planning gap (publishRequest); the narrative composer is never a fallback for numbers.
   let dropped = false;
   // A planner the overview drops reaches the model no more (its repair call).
-  const planning: PlanningModel | null = model && ((request) => dropped ? Promise.reject(new Error("the company overview was planned instead")) : model(request));
+  const planning: PlanningModel | null = model && ((request) => dropped ? Promise.reject(DROPPED) : model(request));
   const planned = planFinancialRequest(planningContext(subjects), text, planning ?? noModel);
   if (!namesOneCompany(subjects, turn.carried, text)) return planned;
   // Settled now, or a planner that fails while the overview is decided is an unhandled rejection.
   const failure = planned.then(() => null, (reason: unknown) => ({ reason }));
-  const overview = asksForNoFigure(await turn.startReading()) ? await planCompanyOverview(planningContext(subjects), turn.evidence) : null;
+  if (!asksForNoFigure(await turn.startReading())) return planned;
+  let overview: PlanningResult | null;
+  try {
+    overview = await planCompanyOverview(planningContext(subjects), turn.evidence);
+  } catch (reason) {
+    console.warn("[chat] the company overview could not be planned; the planner answers", reason);
+    return planned;
+  }
   if (overview === null) return planned;
   dropped = true;
-  void failure.then((failed) => failed && console.warn("[chat] the planner was dropped for the company overview", failed.reason));
+  void failure.then((failed) => {
+    if (failed === null) return;
+    if (failed.reason instanceof PlanningModelError && failed.reason.cause === DROPPED) {
+      console.warn("[chat] the planner was dropped for the company overview; its next model call was not made");
+    } else {
+      console.warn("[chat] the planner the company overview replaced had failed", failed.reason);
+    }
+  });
   return overview;
 }
+
+const DROPPED = new Error("dropped for the company overview");
 
 const CASH_RESILIENCE = /\bcash[- ]resilience\b/iu;
 const CASH_RESILIENCE_VIEW = "cash_resilience_view";

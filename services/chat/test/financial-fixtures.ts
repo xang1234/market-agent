@@ -123,6 +123,7 @@ export function chatHarness(
     resolveMention?: typeof resolveMention;
     clock?: () => Date;
     persistAssistantMessage?: ChatAssistantMessagePersistence;
+    evidence?: Parameters<typeof createChatFinancialRuntime>[0]["evidence"];
   },
 ) {
   // The narrative messages the turns saved: clarifications and gaps.
@@ -137,7 +138,7 @@ export function chatHarness(
       pool,
       planningModel: options.model,
       resolveMention: options.resolveMention ?? resolveMention,
-      evidence: createEvidenceFinancialPort,
+      evidence: options.evidence ?? createEvidenceFinancialPort,
       ...(options.researchScope ? { researchScope: options.researchScope } : {}),
       readQuestion: options.readQuestion ?? (async () => METRIC_READING),
       ...(options.priorSubjects ? { priorSubjects: options.priorSubjects } : {}),

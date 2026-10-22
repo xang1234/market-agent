@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
+import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { IDS, seedReportedFact } from "../../financial-engine/test/db-fixtures.ts";
 import type { ScopeProposal } from "../src/research-scope.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "../src/subjects.ts";
@@ -135,8 +136,29 @@ test("a question about one company that asks for no figure is answered with its 
     const dropped = () => warned.filter(([message]) => String(message).startsWith("[chat]"));
     for (const deadline = Date.now() + 10_000; dropped().length === 0 && Date.now() < deadline;) await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(calls, 1, "the planner's second call never reaches the model");
-    assert.deepEqual(dropped().map(([message, reason]) => [message, (reason as Error).name, ((reason as Error).cause as Error).message]), [
-      ["[chat] the planner was dropped for the company overview", "PlanningModelError", "the company overview was planned instead"],
+    assert.deepEqual(dropped(), [["[chat] the planner was dropped for the company overview; its next model call was not made"]]);
+  });
+
+  await t.test("an overview that cannot read the company's quarters falls back to the planner's answer", async (st) => {
+    const warned: unknown[][] = [];
+    st.mock.method(console, "warn", (...args: unknown[]) => warned.push(args));
+    let failed = false;
+    const failingOnce: typeof createEvidenceFinancialPort = (executor) => {
+      const port = createEvidenceFinancialPort(executor);
+      return {
+        ...port,
+        listInputCandidates: async (request) => {
+          if (failed) return port.listInputCandidates(request);
+          failed = true;
+          return { status: "error", reason_code: "database_error" };
+        },
+      };
+    };
+    const model = revenueModel(["QTRS"]);
+    const done = completed((await chatHarness(pool, { model, readQuestion: reading(NO_ASKS), resolveMention: resolve, evidence: failingOnce }).run({ ...base, userIntent: "Revenue for QTRS" })).events);
+    assert.deepEqual([model.calls, (await results(done.message_id)).map(([outputId]) => outputId)], [1, ["a_out"]]);
+    assert.deepEqual(warned.filter(([message]) => String(message).startsWith("[chat]")).map(([message]) => message), [
+      "[chat] the company overview could not be planned; the planner answers",
     ]);
   });
 
