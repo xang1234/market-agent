@@ -7,9 +7,10 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
 
-import { replayRecorded } from "../src/answer-trace.ts";
-import { answerText, assertionSummary, judgeSummary, mutationSummary, mutationVariants, readTraces, replyFixture } from "../scripts/answer-lab.ts";
+import { composeTraced, judgedLive, replayRecorded } from "../src/answer-trace.ts";
+import { answerText, assertionSummary, judgeSummary, mutationSummary, mutationVariants, readTraces, replyFixture, rerecord } from "../scripts/answer-lab.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
+import { REPAIR_INSTRUCTIONS } from "../src/inference-repair.ts";
 
 // One live research-quality eval run's turns (scripts/research-quality-eval.ts).
 const TRACES = readTraces([fileURLToPath(new URL("./answer-lab/traces/", import.meta.url))]);
@@ -279,4 +280,29 @@ test("recorded counts the cost of a trace's one batched judge call once, though 
     "as recorded, judge: 1 shown, 0 unverified, 1 hidden, in 1 answers (2 replied, 0 failed, 0 not called)",
     "judge per reply: 3000 ms, 500 in / 100 out tokens, on anthropic/claude-haiku-5-5",
   ].join("\n"));
+});
+
+test("live --judge --update re-records a trace that recorded --check replays to the same blocks", async () => {
+  const [source] = readTraces([traceFiles({ "segment-drill-down.json": TRACES.find(({ label }) => label === "segment-drill-down")!.trace })]);
+  const { trace } = source!;
+  const env = { LLM_CHANNELS: "openai", LLM_OPENAI_PROTOCOL: "openai", LLM_OPENAI_MODELS: "gpt-4.1", LITELLM_MODEL: "openai/gpt-4.1", JUDGE_LITELLM_MODEL: "openai/gpt-4.1" };
+  const list = trace.exchange!.text.slice(trace.exchange!.text.indexOf("```assertions"));
+  const createClient = () => async (_deployment: unknown, request: { messages: ReadonlyArray<{ content: string }> }) => {
+    const transcript = request.messages.map((message) => message.content).join("\n");
+    if (transcript.includes(REPAIR_INSTRUCTIONS)) return { text: "```assertions\n[]\n```" };
+    if (transcript.startsWith("You check the analyst inferences")) {
+      return { text: '{"verdicts":[{"id":6,"verdict":"entailed","worded_amount":false},{"id":7,"verdict":"unsupported","worded_amount":false,"reason":"no support measures diversification."}]}' };
+    }
+    return { text: list };
+  };
+  const composed = await composeTraced(trace.input, { env, createClient: createClient as never });
+  const answer = await judgedLive(trace.input, composed, { env, createClient: createClient as never });
+  rerecord(source!, answer);
+
+  const [written] = readTraces([source!.file]);
+  assert.equal(written!.trace.exchange!.text, list);
+  const { judge_input_changed, repair_input_changed, ...replayed } = await replayRecorded(written!.trace);
+  assert.deepEqual([judge_input_changed, repair_input_changed], [false, false]);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(replayed.blocks)), written!.trace.blocks);
+  assert.deepEqual(replayed.assertions?.judged?.map((verdict) => [verdict.index, verdict.verdict]), [[6, "entailed"], [7, "unsupported"]]);
 });
