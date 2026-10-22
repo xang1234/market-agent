@@ -34,7 +34,8 @@ export type CheckedComparison = {
   // every_step: it moved the net way in every period, with none missing.
   // ends_at: the last period is strictly the window's high or low.
   trend?: { result: TrendResult; net: Direction; every_step: boolean; turn?: PacketFigure; ends_at?: "high" | "low" };
-  // Companies the turn covers with no figure for the metric.
+  // Across companies, those the turn covers with no figure for the metric;
+  // over time, the periods its figure is a gap for.
   not_shown: ReadonlyArray<string>;
 };
 
@@ -116,9 +117,12 @@ export function checkComparison(
     const named = cited.find((figure) => figure.id === id) ?? packet.figures.find((figure) => figure.id === id && figureIds.includes(figure.id));
     return named && figures.find((figure) => keyOf(figure) === keyOf(named));
   };
-  const not_shown = axis === "cohort" && !segmented
-    ? packet.companies.filter((company) => !figures.some((figure) => companyOf(figure) === company))
-    : [];
+  const not_shown = axis === "time"
+    ? [...new Set(packet.figures.filter((figure) =>
+      figure.gap !== undefined && figure.period !== undefined && figure.metric === metric && memberOf(figure) === memberOf(cited[0]!) &&
+      (figure.segment !== undefined) === segmented && comparablePeriods(figure, cited[0]!)
+    ).map((figure) => periodText(figure.period!)))]
+    : segmented ? [] : packet.companies.filter((company) => !figures.some((figure) => companyOf(figure) === company));
   const base = { op, axis, metric, not_shown } as const;
 
   if (op === "highest" || op === "lowest") {
