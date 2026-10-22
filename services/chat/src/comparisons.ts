@@ -202,7 +202,8 @@ export function checkComparison(
   }
   const every_step = net !== 0 && steps.every((step) => step === net) && !missingPeriod(figures);
   const endsAt = (direction: Direction) => figures.slice(0, -1).every((figure) => cmp(last, figure) === direction);
-  const ends_at = result === "rose_throughout" || result === "fell_throughout" ? undefined : endsAt(1) ? "high" : endsAt(-1) ? "low" : undefined;
+  // Two periods' end is their high or low by the direction alone.
+  const ends_at = figures.length < 3 || result === "rose_throughout" || result === "fell_throughout" ? undefined : endsAt(1) ? "high" : endsAt(-1) ? "low" : undefined;
   return { comparison: { ...base, figures, trend: { result, net, every_step, ...(turn ? { turn } : {}), ...(ends_at ? { ends_at } : {}) } } };
 }
 

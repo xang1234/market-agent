@@ -332,6 +332,9 @@ test("a trend says when it ends at the window's high or low, and not on a tie at
     "AMD's gross margin fell from 50.1% in Q3 2024 to a low of 39.8% in Q2 2025, then rebounded to 54.0% in Q2 2026, above where it started.");
   assert.equal(amd.compare(["F34", "F35", "F36", "F37", "F38", "F39", "F40", "F41"], "trend", "rose"),
     "AMD's net margin rose from 11.3% in Q3 2024 to 13.2% in Q2 2026, though not in every period.");
+  const twoPeriods = { ...amd.packet, figures: amd.packet.figures.filter((figure) => !["F34", "F35", "F36", "F37", "F38", "F39"].includes(figure.id)) };
+  assert.equal(amd.compare(["F40", "F41"], "trend", "rose", twoPeriods),
+    "AMD's net margin rose from 13.1% in Q1 2026 to 13.2% in Q2 2026.");
   const falling = { ...amd.packet, figures: amd.packet.figures.map((figure) => (figure.id === "F41" ? { ...figure, value: "5.0%" } : figure)) };
   assert.equal(amd.compare(["F34", "F35", "F36", "F37", "F38", "F39", "F40", "F41"], "trend", "fell", falling),
     "AMD's net margin fell from 11.3% in Q3 2024 to 5.0% in Q2 2026, its lowest of the periods shown, though not in every period.");
