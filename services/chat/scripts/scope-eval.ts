@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { createDefaultPiLlmChatClient } from "../../llm/src/index.ts";
-import { parseResearchScope, resolveResearchScope, type ResearchScope } from "../src/research-scope.ts";
+import { parseResearchScope, resolveResearchScope, type ResearchScope, type ScopePeriod } from "../src/research-scope.ts";
 import { parseProposal, proposalQuestion, proposeScope } from "../src/scope-proposal.ts";
 
 const ROOT = join(import.meta.dirname, "../../..");
@@ -31,8 +31,9 @@ const COMPANIES = {
   AAPL: { issuer_id: "60000000-0000-4000-8000-000000000003", label: "AAPL" },
 };
 
-// The fields of a resolved scope an eval case checks.
-export function scopeView(scope: ResearchScope) {
+// The fields an eval case checks: a resolved scope's, and the period kind its
+// reading names.
+export function scopeView(scope: ResearchScope, period: ScopePeriod) {
   return {
     route: scope.route,
     reads: scope.reads,
@@ -48,6 +49,7 @@ export function scopeView(scope: ResearchScope) {
     fiscal_quarter: scope.fiscal_quarter && `${scope.fiscal_quarter.fiscal_period} ${scope.fiscal_quarter.fiscal_year}`,
     price_window: scope.price_window?.kind ?? null,
     benchmark: scope.benchmark,
+    period: period.kind,
   };
 }
 export type ScopeView = ReturnType<typeof scopeView>;
@@ -85,7 +87,7 @@ export function caseFailures(evalCase: ScopeEvalCase, reply: string | undefined)
     prior: evalCase.prior === null ? null : parseResearchScope(evalCase.prior),
     asOf: AS_OF,
     proposal,
-  }));
+  }), proposal.period);
   return (Object.keys(evalCase.expected) as Array<keyof ScopeView>).flatMap((field) => {
     const right = [evalCase.expected[field], ...(evalCase.accept?.[field] ? [evalCase.accept[field].value] : [])].map((value) => JSON.stringify(value));
     const got = JSON.stringify(view[field]);

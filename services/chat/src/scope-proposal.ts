@@ -1,11 +1,11 @@
 // A model reads what a question asks for and turns off (#287 follow-up): its
-// metrics, its facets (peers, segments, guidance, a cause...) and its income
-// items. English patterns kept missing phrasings, one review at a time. The
-// model only proposes, from closed vocabularies: every key is checked, and
-// anything outside them rejects the whole proposal, so the turn asks for
-// nothing new (research-scope.ts). It never picks companies, periods, data or
-// figures, and nothing it writes reaches the answer: the readers and gap notes
-// do as before.
+// metrics, its facets (peers, segments, guidance, a cause...), its income
+// items and its period (#472). English patterns kept missing phrasings, one
+// review at a time. The model only proposes, from closed vocabularies: every
+// key is checked, and anything outside them rejects the whole proposal, so the
+// turn asks for nothing new (research-scope.ts). It never picks companies,
+// data or figures, and nothing it writes reaches the answer: the readers and
+// gap notes do as before.
 //
 // Off when there is no model or CHAT_SCOPE_PROPOSAL=off. Recorded replies
 // (LLM_REPLAY_FILE) answer it like any other call: a fixture records one per
@@ -14,6 +14,7 @@
 import { createLlmRouterFromEnv, type LlmChatClient, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
 import { withDeadlines, type ModelDeadlines } from "./llm-runtime.ts";
 import {
+  FISCAL_PERIODS,
   INCOME_ITEMS,
   isOneOf,
   PERIOD_FIELDS,
@@ -23,6 +24,7 @@ import {
   proposedMetric,
   SCOPE_FACETS,
   type RequestedMetric,
+  type ScopePeriod,
   type ScopeProposal,
 } from "./research-scope.ts";
 
@@ -30,6 +32,8 @@ import {
 // new when it is slow. A large model took 3-9 s in the dev probe.
 export const SCOPE_DEADLINES: ModelDeadlines = { attemptMs: 12_000, totalMs: 15_000 };
 const MAX_METRICS = 10;
+const FIELDLESS_PERIODS = ["none", "latest", "trailing_twelve_months", "range", "other"] as const;
+const YEARS = { first: 1990, last: 2100 };
 
 type ProposalEnv = LlmSettingsLoaderEnv & { CHAT_SCOPE_PROPOSAL?: string };
 
@@ -82,7 +86,7 @@ export function parseProposal(text: string): ScopeProposal | null {
   } catch {
     return null;
   }
-  const { metrics, asks, turns_off: turnsOff, income_items: incomeItems } = (reply ?? {}) as Record<string, unknown>;
+  const { metrics, asks, turns_off: turnsOff, income_items: incomeItems, period: periodReply } = (reply ?? {}) as Record<string, unknown>;
   if (turnsOff === null || typeof turnsOff !== "object") return null;
   const { facets: offFacets, metrics: offMetrics } = turnsOff as Record<string, unknown>;
   const proposed = metricList(metrics);
@@ -90,13 +94,33 @@ export function parseProposal(text: string): ScopeProposal | null {
   const asked = members(asks, SCOPE_FACETS);
   const offAsked = members(offFacets, [...SCOPE_FACETS, ...PERIOD_FIELDS]);
   const items = members(incomeItems, INCOME_ITEMS);
-  if (!proposed || !off || !asked || !offAsked || !items) return null;
+  const period = periodOf(periodReply);
+  if (!proposed || !off || !asked || !offAsked || !items || !period) return null;
   return {
     metrics: proposed,
     asks: new Set(asked),
     turns_off: { facets: new Set(offAsked), metrics: new Set(off.map((metric) => metric.metric_key)) },
     income_items: [...new Set(items)],
+    period,
   };
+}
+
+function periodOf(value: unknown): ScopePeriod | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const { kind, ...fields } = value as Record<string, unknown>;
+  const keys = Object.keys(fields).sort().join(",");
+  const { fiscal_year: year, fiscal_period: quarter } = fields;
+  if (kind === "fiscal_year") return keys === "fiscal_year" && isYear(year) ? { kind, fiscal_year: year } : null;
+  if (kind === "fiscal_quarter") {
+    return keys === "fiscal_period,fiscal_year" && isOneOf(quarter, FISCAL_PERIODS) && (year === null || isYear(year))
+      ? { kind, fiscal_period: quarter, fiscal_year: year }
+      : null;
+  }
+  return keys === "" && isOneOf(kind, FIELDLESS_PERIODS) ? { kind } : null;
+}
+
+function isYear(value: unknown): value is number {
+  return Number.isInteger(value) && (value as number) >= YEARS.first && (value as number) <= YEARS.last;
 }
 
 function members<T extends string>(value: unknown, vocabulary: ReadonlyArray<T>): T[] | null {
@@ -123,7 +147,7 @@ function metricList(value: unknown): RequestedMetric[] | null {
 
 const PROPOSAL_INSTRUCTIONS = [
   "Read what a research question about companies asks for, and what it asks to remove. Reply with JSON only, no prose:",
-  '{"metrics":[<metric>],"asks":[<facet>],"turns_off":{"facets":[<facet or period>],"metrics":[<metric>]},"income_items":[<item>]}',
+  '{"metrics":[<metric>],"asks":[<facet>],"turns_off":{"facets":[<facet or period>],"metrics":[<metric>]},"income_items":[<item>],"period":<period>}',
   'A <metric> is {"metric":"<key>","adjustment":<adjustment or null>,"qualifier":<qualifier or null>}.',
   "metric is one of these keys (key: what it is):",
   ...PROPOSABLE_METRICS.map((metric) => `- ${metric.metric_key}: ${metric.label}`),
@@ -143,8 +167,18 @@ const PROPOSAL_INSTRUCTIONS = [
   "- explains: a cause: why, what drove, led to, contributed to or accounted for something",
   "- evidence: the sources or evidence of the previous answer",
   "- latest_quarter: the latest, most recent or current reported quarter",
-  `A period is ${PERIOD_FIELDS.join(" or ")}: a fiscal year or quarter the question asks to remove.`,
+  `A period in turns_off is ${PERIOD_FIELDS.join(" or ")}: a fiscal year or quarter the question asks to remove.`,
   `An <item> is one of ${INCOME_ITEMS.join(", ")}: an income-statement item the question names.`,
+  "A <period> is the period the question asks about, one of:",
+  '- {"kind":"none"}: the question names no period',
+  '- {"kind":"latest"}: the latest, most recent or current period ("the latest fiscal year", "most recent results")',
+  '- {"kind":"fiscal_year","fiscal_year":<year>}: a year ("fiscal 2025", "FY26", "for 2024", "2023 earnings")',
+  `- {"kind":"fiscal_quarter","fiscal_period":<${FISCAL_PERIODS.join(", ")}>,"fiscal_year":<year or null>}: a quarter,`,
+  '  its year null when the question names none ("what about Q3?")',
+  '- {"kind":"trailing_twelve_months"}: the trailing twelve months, TTM, LTM',
+  '- {"kind":"range"}: a span of periods ("since 2021", "2022 to 2024", "the past 3 years")',
+  '- {"kind":"other"}: any other period, one named relative to now ("last year", "last quarter")',
+  "A <year> is a four-digit integer; a two-digit year is in the 2000s (FY26 is 2026).",
   "Rules:",
   "- List only what the question itself asks for, in the order it asks. Empty lists when nothing applies.",
   '- A context is not a metric, but a metric discussed in it is: "what did AMD say about free cash flow on its',
@@ -163,14 +197,15 @@ const PROPOSAL_INSTRUCTIONS = [
   '  its forecast", "below target", "beat guidance" ask explains. "Current guidance versus prior guidance" asks guidance.',
   '- A company\'s "sources of revenue" are not evidence; "your sources" or "where does this come from" are.',
   '- A bare "last quarter" is the one before, not latest_quarter: "compare gross margin with last quarter" asks',
-  "  margin_trend.",
+  "  margin_trend, and its period is none.",
   '- turns_off lists what the question asks to remove or stop showing: "without guidance", "no forecasts" or',
   '  "don\'t include guidance" turn guidance off; "drop the YTD window" turns price_window off; "forget fiscal',
-  '  2025" turns fiscal_year off. turns_off.metrics holds <metric> objects like metrics, never bare keys: dropping',
-  '  "the cash flow" turns off {"metric":"operating_cash_flow"}, {"metric":"free_cash_flow"} and {"metric":"capex"};',
-  "  dropping operating cash flow by name turns off only that one.",
+  '  2025" turns fiscal_year off, and its period is none. turns_off.metrics holds <metric> objects like',
+  '  metrics, never bare keys: dropping "the cash flow" turns off {"metric":"operating_cash_flow"},',
+  '  {"metric":"free_cash_flow"} and {"metric":"capex"}; dropping operating cash flow by name turns off only that one.',
   '- Companies are not facets: "drop AMD and NOW" turns nothing off.',
   '- "No" inside a clause removes nothing: "why was there no change in margins?" asks explains and margin_trend.',
   '- Removing quarter-over-quarter growth is not removing the fiscal quarter.',
   '- A follow-up that names nothing (a "why?", or "compare it with AMD") asks only what it says: explains, or nothing.',
+  "- A question or follow-up that names no period has the period none.",
 ].join("\n");

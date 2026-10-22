@@ -119,6 +119,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       asks: ["benchmark"],
       turns_off: { facets: [], metrics: [] },
       income_items: ["revenue"],
+      period: { kind: "none" },
     }));
     const { events } = await chatHarness(pool, { model: revenueModel(["AAA", "BBB"]), readQuestion }).run({ ...base, userIntent: "Compare revenue and EBITDA for AAA and BBB against the S&P 500" });
     const message = (await db.query(`select blocks from chat_messages where message_id = $1`, [completed(events).message_id])).rows[0];
@@ -292,7 +293,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     let reads = 0;
     const readQuestion = async () => {
       reads += 1;
-      return parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [] }));
+      return parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" } }));
     };
     // As financialResearchScope does, the scope waits for the reading.
     const researchScope = async (context: Parameters<typeof scopeOver>[0], reading: Promise<unknown>) => {
@@ -305,7 +306,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       return [done.clarification === true ? "clarification" : (done.financial_gap as { reason_code: string } | undefined)?.reason_code ?? "answer", reads];
     };
     assert.deepEqual(await ask(revenueModel(["AAA", "AMB"]), "Compare revenue for AAA and AMB"), ["clarification", 0], "the planner asks which company before any model call");
-    assert.deepEqual(await ask(null, "Compare revenue for AAA and BBB in fiscal 2023"), ["planning_unavailable", 0], "no model plans it");
+    assert.deepEqual(await ask(null, "Compare revenue for AAA and BBB in fiscal 2023"), ["planning_unavailable", 1], "no model plans it, and its reading says whether it names a period (#472)");
     assert.deepEqual(await ask(null, "Compare revenue for AAA and BBB"), ["planning_unavailable", 1], "their overview, which needs no model, waits on the reading (#398)");
     assert.deepEqual(await ask(revenueModel(["AAA"]), "Revenue for AAA"), ["answer", 1]);
   });
@@ -320,7 +321,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(await answer(async () => null), unchecked, "no reading");
     assert.deepEqual(await answer(async () => { throw new Error("scope model down"); }), unchecked, "a failed reading");
     assert.deepEqual(await answer(() => { throw new Error("no scope reader"); }), unchecked, "a reader that throws before it answers");
-    assert.deepEqual(await answer(async () => parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [] }))), [[], undefined]);
+    assert.deepEqual(await answer(async () => parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" } }))), [[], undefined]);
   });
 
   await t.test("each name a turn gives is resolved once (#425)", async () => {
@@ -470,7 +471,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
   await t.test("a retry of a declined turn returns the gap it saved, with no second model call (#425)", async (st) => {
     const persistAssistantMessage = await savingMessages(st, databaseUrl(db));
     const model = declining("segments");
-    const harness = () => chatHarness(pool, { model, persistAssistantMessage });
+    const harness = () => chatHarness(pool, { model, persistAssistantMessage, researchScope: null });
     const turn = { ...base, turnId: randomUUID(), userIntent: "Break down AAA's revenue by segment" };
     const first = completed((await harness().run(turn)).events);
     // A retry comes on a new run; one after a restart comes on the same.
@@ -484,7 +485,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       query: (text: string, values?: unknown[]) => text.includes("from chat_messages m") ? Promise.reject(new Error("Connection terminated unexpectedly")) : pool.query(text, values),
       connect: () => pool.connect(),
     };
-    const { events: unreadEvents } = await chatHarness(failingReads as never, { model, persistAssistantMessage }).run({ ...turn, runId: randomUUID() });
+    const { events: unreadEvents } = await chatHarness(failingReads as never, { model, persistAssistantMessage, researchScope: null }).run({ ...turn, runId: randomUUID() });
     const unread = completed(unreadEvents);
     assert.deepEqual([unread.message_id, "message" in unread, model.calls], [first.message_id, false, 1]);
     const began = unreadEvents.find((event) => event.type === "block.began")!;

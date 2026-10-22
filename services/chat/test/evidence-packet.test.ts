@@ -15,7 +15,7 @@ const CUTOFF = "2026-09-01T00:00:00.000Z";
 const scope = (question: string, companies = [NVDA], read: ScopeProposal = proposal()) =>
   resolveResearchScope({ question, companies, prior: null, asOf: CUTOFF, proposal: read });
 const REVENUE = { metrics: ["income_statement"], items: ["revenue"] } as const;
-const GROSS_MARGIN_CHANGE = proposal({ asks: ["margins", "margin_trend"], metrics: ["income_statement"], items: ["gross_margin"] });
+const GROSS_MARGIN_CHANGE = proposal({ asks: ["margins", "margin_trend"], metrics: ["income_statement"], items: ["gross_margin"], period: { kind: "fiscal_quarter", fiscal_period: "Q1", fiscal_year: 2026 } });
 
 const LATEST = {
   id: "b-latest",
@@ -84,7 +84,7 @@ test("a comparison packet binds each figure to its company and period; a company
     ] } },
   };
   const packet = buildEvidencePacket({
-    scope: scope("Compare NVDA, AMD and AAPL fiscal 2025 revenue", [NVDA, AMD, AAPL], proposal(REVENUE)),
+    scope: scope("Compare NVDA, AMD and AAPL fiscal 2025 revenue", [NVDA, AMD, AAPL], proposal({ ...REVENUE, period: { kind: "fiscal_year", fiscal_year: 2025 } })),
     factBlocks: [comparison],
     cutoff: CUTOFF,
   });
@@ -118,7 +118,7 @@ test("a cash flow question names the periods its readers cover", () => {
     "latest quarter and latest fiscal year reported for cash flow; balance sheet at its latest period end; EPS for the latest quarter, or the fiscal year once its annual report is in",
   );
   // A named fiscal year is the only period read.
-  const year = buildEvidencePacket({ scope: scope("What was AMD's free cash flow in fiscal 2024?", [AMD], proposal({ metrics: ["free_cash_flow"] })), factBlocks: [], cutoff: CUTOFF });
+  const year = buildEvidencePacket({ scope: scope("What was AMD's free cash flow in fiscal 2024?", [AMD], proposal({ metrics: ["free_cash_flow"], period: { kind: "fiscal_year", fiscal_year: 2024 } })), factBlocks: [], cutoff: CUTOFF });
   assert.equal(
     year.query_bounds.periods,
     "fiscal year 2024 only: its latest quarter and the year for cash flow; balance sheet at its latest period end in that year; EPS for that year",
@@ -300,7 +300,7 @@ test("a route reads its predicate families first, from the start of the period i
     assert.ok(claimSelection(scope(question, [...companies], read), CUTOFF).predicate_prefixes.flat()[0]!.startsWith("management.explanation."), question);
   }
   // A fiscal year's window ends a quarter after the year, when its last release is out.
-  const fiscal = claimSelection(scope("Compare NVDA with AMD for fiscal year 2025", [NVDA, AMD]), CUTOFF);
+  const fiscal = claimSelection(scope("Compare NVDA with AMD for fiscal year 2025", [NVDA, AMD], proposal({ period: { kind: "fiscal_year", fiscal_year: 2025 } })), CUTOFF);
   assert.equal(fiscal.effective_from, "2024-01-01T00:00:00.000Z");
   assert.equal(fiscal.effective_until, "2026-04-01T00:00:00.000Z");
   // The issuer's own fiscal year bounds it where its facts date that year.
@@ -405,7 +405,7 @@ test("an auto-selected peer's claims name it as coverage does, even with no figu
 });
 
 test("a named quarter's packet says which quarter was read, and reads claims from the year before it (#290)", () => {
-  const named = scope("Why did AMD's operating margin turn negative in Q2 2025?", [AMD], proposal({ asks: ["explains", "margins"], metrics: ["income_statement"], items: ["operating_income"] }));
+  const named = scope("Why did AMD's operating margin turn negative in Q2 2025?", [AMD], proposal({ asks: ["explains", "margins"], metrics: ["income_statement"], items: ["operating_income"], period: { kind: "fiscal_quarter", fiscal_period: "Q2", fiscal_year: 2025 } }));
   const packet = buildEvidencePacket({ scope: named, factBlocks: [], cutoff: CUTOFF });
   assert.match(packet.query_bounds.periods!, /^fiscal Q2 2025/);
   assert.equal(claimSelection(named, CUTOFF).effective_from, "2024-01-01T00:00:00.000Z");

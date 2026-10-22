@@ -1,8 +1,9 @@
 // A turn's research scope (#206): which route answers it, the companies it
 // covers, the facets it asks for, and its periods. What the question asks for
-// and turns off (facets, metrics, income items) is a model's reading of it,
-// proposed from closed vocabularies and validated (scope-proposal.ts); its
-// periods are read from fixed tokens (FY2026, Q3, YTD). Everything else here
+// and turns off (facets, metrics, income items, its period) is a model's
+// reading of it, proposed from closed vocabularies and validated
+// (scope-proposal.ts). With no reading, its fiscal periods are read from
+// fixed tokens (FY2026, Q3); a YTD window always is. Everything else here
 // is derived from those: the route, inheritance, what a turn-off clears. Saved
 // with the answer, so the next follow-up and a reload read the same
 // interpretation.
@@ -127,6 +128,18 @@ export const SCOPE_FACETS = [
 export type ScopeFacet = (typeof SCOPE_FACETS)[number];
 // The periods a question can turn off beside its facets.
 export const PERIOD_FIELDS = ["fiscal_year", "fiscal_quarter"] as const;
+export const FISCAL_PERIODS = ["Q1", "Q2", "Q3", "Q4"] as const;
+// The period a question asks about.
+export type ScopePeriod =
+  // No period named: a follow-up keeps the one it inherits.
+  | { kind: "none" }
+  | { kind: "latest" }
+  | { kind: "fiscal_year"; fiscal_year: number }
+  // A null year: a quarter named alone ("Q3"), its year inherited.
+  | { kind: "fiscal_quarter"; fiscal_period: (typeof FISCAL_PERIODS)[number]; fiscal_year: number | null }
+  | { kind: "trailing_twelve_months" }
+  | { kind: "range" }
+  | { kind: "other" };
 // The income-statement items, in earnings-release terms
 // (sec-earnings-release-extraction.ts), and the operating and net margins,
 // which a release explains by their income (evidence-packet.ts).
@@ -141,9 +154,10 @@ export type ScopeProposal = {
   // Metric keys as proposedMetric builds them.
   turns_off: { facets: ReadonlySet<ScopeFacet | (typeof PERIOD_FIELDS)[number]>; metrics: ReadonlySet<string> };
   income_items: ReadonlyArray<IncomeItem>;
+  period: ScopePeriod;
 };
 
-const NO_PROPOSAL: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [] };
+const NO_PROPOSAL: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [], period: { kind: "none" } };
 
 // The field a facet turned off clears. Guidance and a cause are read apart;
 // evidence and the latest quarter are asked for one turn only.
@@ -159,8 +173,30 @@ const CLEARS: Partial<Record<ScopeFacet | (typeof PERIOD_FIELDS)[number], ScopeF
 };
 
 // A quarter named without its year ("Q3", "the third quarter").
-export const PARTIAL_QUARTER = /\bQ([1-4])\b|\b(first|second|third|fourth)\s+quarter\b/i;
+const PARTIAL_QUARTER = /\bQ([1-4])\b|\b(first|second|third|fourth)\s+quarter\b/i;
 const ORDINAL_QUARTERS: Readonly<Record<string, number>> = { first: 1, second: 2, third: 3, fourth: 4 };
+
+type NamedPeriod = { year?: number; quarter?: FiscalQuarter; yearlessQuarter?: (typeof FISCAL_PERIODS)[number]; replacesInherited?: true };
+
+function periodOfReading(period: ScopePeriod): NamedPeriod {
+  if (period.kind === "none") return {};
+  if (period.kind === "fiscal_year") return { year: period.fiscal_year };
+  // A period no fiscal field holds (TTM, a range) replaces the inherited one
+  // as the latest does, so the turn never answers for the old period.
+  if (period.kind !== "fiscal_quarter") return { replacesInherited: true };
+  return period.fiscal_year === null
+    ? { yearlessQuarter: period.fiscal_period }
+    : { quarter: { fiscal_year: period.fiscal_year, fiscal_period: period.fiscal_period } };
+}
+
+function periodTokensWithoutReading(question: string): NamedPeriod {
+  const partial = PARTIAL_QUARTER.exec(question);
+  return {
+    year: requestedFiscalYear(question),
+    quarter: requestedFiscalQuarter(question),
+    yearlessQuarter: partial ? FISCAL_PERIODS[Number(partial[1] ?? ORDINAL_QUARTERS[partial[2]!.toLowerCase()]) - 1] : undefined,
+  };
+}
 
 // The metrics a question can name. A model proposes from this catalog
 // (scope-proposal.ts); nothing else is accepted.
@@ -354,12 +390,13 @@ export function resolveResearchScope(input: {
   const income = metricByKey("income_statement");
   if (marginAsked && named.length === 0 && !offMetrics.has(income.metric_key) && !kept.some((metric) => metric.metric_key === income.metric_key)) named.push(income);
   const metrics = pick("metrics", named.length > 0 ? named : null, kept.length > 0 ? kept : null) ?? [];
+  const period = input.proposal === null ? periodTokensWithoutReading(question) : periodOfReading(input.proposal.period);
   // A period turned off is read as not named, though its words are still in
   // the question ("forget fiscal 2025").
-  const yearNamed = off.has("fiscal_year") ? undefined : requestedFiscalYear(question);
-  const quarterNamed = off.has("fiscal_quarter") ? undefined : requestedFiscalQuarter(question);
-  const latest = asks.has("latest_quarter");
-  // The latest quarter replaces an inherited fiscal year ("Q1 fiscal 2025"
+  const yearNamed = off.has("fiscal_year") ? undefined : period.year;
+  const quarterNamed = off.has("fiscal_quarter") ? undefined : period.quarter;
+  const latest = asks.has("latest_quarter") || period.replacesInherited === true;
+  // The latest period replaces an inherited fiscal year ("Q1 fiscal 2025"
   // named both), so a reader that takes no quarter isn't held to the old year.
   if (yearNamed === undefined && quarterNamed === undefined && latest) off.add("fiscal_year");
   // A complete quarter named without a fiscal year sets its year (#292
@@ -368,8 +405,7 @@ export function resolveResearchScope(input: {
   // A follow-up naming part of a period updates the inherited quarter (#292
   // review): a quarter alone ("now Q3") takes its year; a fiscal year alone
   // ("now for fiscal 2026") or the latest quarter replaces it.
-  const partial = off.has("fiscal_quarter") ? null : PARTIAL_QUARTER.exec(question);
-  const partialPeriod = partial ? `Q${partial[1] ?? ORDINAL_QUARTERS[partial[2]!.toLowerCase()]}` : null;
+  const partialPeriod = off.has("fiscal_quarter") ? null : period.yearlessQuarter ?? null;
   // Its year: one named in the question ("Q3, FY2026"), else the inherited
   // quarter's, else an inherited fiscal year (#292 review).
   const partialYear = yearNamed ?? prior?.fiscal_quarter?.fiscal_year ?? prior?.fiscal_year ?? undefined;

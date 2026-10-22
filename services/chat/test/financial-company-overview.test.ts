@@ -7,7 +7,7 @@ import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import type { PlanningModel, PlanningResult } from "../../financial-engine/src/planner.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { IDS, seedReportedFact } from "../../financial-engine/test/db-fixtures.ts";
-import { resolveResearchScope, type ScopeProposal } from "../src/research-scope.ts";
+import { resolveResearchScope, type ResearchScope, type ScopeProposal } from "../src/research-scope.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "../src/subjects.ts";
 import { chatDatabase, chatHarness, completed, METRIC_READING, NO_ASKS, resolveMention, revenueModel } from "./financial-fixtures.ts";
 
@@ -270,8 +270,11 @@ test("a question about one company that asks for no figure is answered with its 
     );
   });
 
-  await t.test("a reading that asks for a figure, a carried company, a named period, or a company with no quarters goes to the planner", async () => {
-    const planned = async (userIntent: string, mentions: string[], options: { readQuestion?: () => Promise<ScopeProposal | null>; priorSubjects?: () => Promise<ChatResolvedSubjectPreResolution[]> } = {}) => {
+  const scoped = async (context: { userIntent?: string }, read: Promise<ScopeProposal | null>) =>
+    resolveResearchScope({ question: context.userIntent ?? "", companies: [{ issuer_id: COMPANIES.QTRS!, label: "QTRS" }], prior: null, asOf: "2026-10-22T00:00:00.000Z", served: true, proposal: await read });
+
+  await t.test("a reading that asks for a figure or a period other than the latest, a carried company, a price window in its scope, or a company with no quarters goes to the planner", async () => {
+    const planned = async (userIntent: string, mentions: string[], options: { readQuestion?: () => Promise<ScopeProposal | null>; priorSubjects?: () => Promise<ChatResolvedSubjectPreResolution[]>; researchScope?: typeof scoped | (() => Promise<ResearchScope>) } = {}) => {
       const model = revenueModel(mentions);
       const done = completed((await chatHarness(pool, { model, readQuestion: reading(NO_ASKS), resolveMention: resolve, ...options }).run({ ...base, userIntent })).events);
       return [model.calls, (await results(done.message_id)).map(([outputId]) => outputId)];
@@ -284,9 +287,28 @@ test("a question about one company that asks for no figure is answered with its 
     assert.deepEqual(await planned("Compare revenue for QTRS and AAA", ["QTRS", "AAA"]), [1, ["a_out", "b_out"]], "a company with no quarterly revenue beside one with");
     const carried = (await resolve("QTRS")) as ChatResolvedSubjectPreResolution;
     assert.deepEqual(await planned("And what about its revenue?", ["QTRS"], { priorSubjects: async () => [carried] }), [1, ["a_out"]], "a carried company");
-    for (const period of ["in fiscal 2023", "for Q4 2023", "YTD"]) {
-      assert.deepEqual(await planned(`Revenue for QTRS ${period}`, ["QTRS"]), [1, ["a_out"]], period);
+    const periods: Array<[string, ScopeProposal]> = [
+      ["in fiscal 2023", { ...NO_ASKS, period: { kind: "fiscal_year", fiscal_year: 2023 } }],
+      ["for Q4 2023", { ...NO_ASKS, period: { kind: "fiscal_quarter", fiscal_period: "Q4", fiscal_year: 2023 } }],
+      ["for Q4", { ...NO_ASKS, period: { kind: "fiscal_quarter", fiscal_period: "Q4", fiscal_year: null } }],
+      ["TTM", { ...NO_ASKS, period: { kind: "trailing_twelve_months" } }],
+      ["since 2021", { ...NO_ASKS, period: { kind: "range" } }],
+      ["last year", { ...NO_ASKS, period: { kind: "other" } }],
+      ["YTD", { ...NO_ASKS, asks: new Set(["price_window"]) }],
+    ];
+    for (const [period, read] of periods) {
+      assert.deepEqual(await planned(`Revenue for QTRS ${period}`, ["QTRS"], { readQuestion: reading(read) }), [1, ["a_out"]], period);
     }
+    assert.deepEqual(await planned("Revenue for QTRS YTD", ["QTRS"], { researchScope: scoped }), [1, ["a_out"]], "a scope with a price window the reading did not ask for");
+    const failing = async (): Promise<ResearchScope> => {
+      throw new Error("the scope is down");
+    };
+    assert.deepEqual(await planned("Revenue for QTRS", ["QTRS"], { researchScope: failing }), [1, ["a_out"]], "no scope");
+  });
+
+  await t.test("a reading of the latest period is the overview, whatever period words the question holds (#472)", async () => {
+    const done = completed((await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve }).run({ ...base, userIntent: "Revenue for QTRS in fiscal 2023" })).events);
+    assert.deepEqual(await results(done.message_id), QTRS_OVERVIEW);
   });
 
   const slotted = (slot: string, rows: ReadonlyArray<ReadonlyArray<string>>) => rows.map(([outputId, ...rest]) => [outputId!.replace(/^out_/u, `out_${slot}_`), ...rest]);
@@ -322,9 +344,7 @@ test("a question about one company that asks for no figure is answered with its 
     await db.query(`update issuers set industry = 'Quarterly test filers' where issuer_id = any($1::uuid[])`, [peerSet]);
     try {
       const peers = { ...NO_ASKS, asks: new Set(["peers"] as const) };
-      const researchScope = async (context: { userIntent?: string }, read: Promise<ScopeProposal | null>) =>
-        resolveResearchScope({ question: context.userIntent ?? "", companies: [{ issuer_id: COMPANIES.QTRS!, label: "QTRS" }], prior: null, asOf: "2026-10-22T00:00:00.000Z", served: true, proposal: await read });
-      const { turnId, events } = await chatHarness(pool, { model: null, readQuestion: reading(peers), resolveMention: resolve, researchScope }).run({ ...base, userIntent: "Revenue for QTRS" });
+      const { turnId, events } = await chatHarness(pool, { model: null, readQuestion: reading(peers), resolveMention: resolve, researchScope: scoped }).run({ ...base, userIntent: "Revenue for QTRS" });
       const done = completed(events);
       assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_OVERVIEW.slice(7)), ...slotted("b", OFFQ_LATEST)]);
       const { rows: [message] } = await db.query(`select blocks, research_scope from chat_messages where message_id = $1`, [done.message_id]);

@@ -297,10 +297,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
           asked = subjects;
         }, {
           carried: requested.carried.length > 0,
-          startReading: () => {
-            decideReading(true);
-            return reading;
-          },
+          prepare: () => prepared(true),
           evidence: deps.evidence(db),
           peersOf: (issuer) => overviewPeers(db, issuer),
           onOverview: () => {
@@ -475,7 +472,7 @@ async function planTurn(
   onSubjects: (subjects: ReadonlyArray<RequestedSubject>) => void,
   turn: Readonly<{
     carried: boolean;
-    startReading: () => Promise<ScopeProposal | null>;
+    prepare: () => Promise<[ResearchScope | null, ScopeProposal | null]>;
     evidence: FinancialEvidencePort;
     peersOf: PeersOf;
     onOverview: () => void;
@@ -508,13 +505,14 @@ async function planTurn(
   // A planner the overview drops reaches the model no more (its repair call).
   const planning: PlanningModel | null = model && ((request) => dropped ? Promise.reject(DROPPED) : model(request));
   const planned = planFinancialRequest(planningContext(subjects), text, planning ?? noModel);
-  if (!namesCompanies(subjects, turn.carried, text)) return planned;
+  if (!namesCompanies(subjects, turn.carried)) return planned;
   // Settled now, or a planner that fails while the overview is decided is an unhandled rejection.
   const failure = planned.then(() => null, (reason: unknown) => ({ reason }));
   let companies: ReadonlyArray<RequestedSubject> | null;
   let overview: PlanningResult | null;
   try {
-    companies = await overviewSubjects(subjects, await turn.startReading(), turn.peersOf);
+    const [scope, reading] = await turn.prepare();
+    companies = await overviewSubjects(subjects, reading, scope, turn.peersOf);
     overview = companies && await planCompanyOverview(planningContext(companies), turn.evidence);
   } catch (reason) {
     // A defect fails the turn, so the planner's answer is not needed either.

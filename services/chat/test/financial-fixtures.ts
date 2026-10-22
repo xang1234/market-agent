@@ -16,7 +16,7 @@ import {
   type ChatTurnInput,
 } from "../src/coordinator.ts";
 import { createChatFinancialRuntime } from "../src/financial-runtime.ts";
-import { proposedMetric, type ScopeProposal } from "../src/research-scope.ts";
+import { proposedMetric, resolveResearchScope, type ScopeProposal } from "../src/research-scope.ts";
 import type { ChatSubjectPreResolution } from "../src/subjects.ts";
 import { readMessage } from "./read-message-fixture.ts";
 
@@ -84,7 +84,7 @@ export function resolveMention(mention: string): Promise<ChatSubjectPreResolutio
   return Promise.resolve(table[mention] ?? ({ status: "not_found", input_text: mention, normalized_input: mention, message: "not found" } as ChatSubjectPreResolution));
 }
 
-export const NO_ASKS: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [] };
+export const NO_ASKS: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [], period: { kind: "none" } };
 export const METRIC_READING: ScopeProposal = { ...NO_ASKS, metrics: [proposedMetric("income_statement", null, null)!] };
 
 /** A planning model that answers every call with a revenue draft for the given slots, and counts calls. */
@@ -117,7 +117,8 @@ export function chatHarness(
   options: {
     model: PlanningModel | null;
     analyst?: ChatAnalystToolRuntime;
-    researchScope?: Parameters<typeof createChatFinancialRuntime>[0]["researchScope"];
+    // null: the runtime is given no scope.
+    researchScope?: Parameters<typeof createChatFinancialRuntime>[0]["researchScope"] | null;
     readQuestion?: Parameters<typeof createChatFinancialRuntime>[0]["readQuestion"];
     priorSubjects?: Parameters<typeof createChatFinancialRuntime>[0]["priorSubjects"];
     resolveMention?: typeof resolveMention;
@@ -140,7 +141,11 @@ export function chatHarness(
       planningModel: options.model,
       resolveMention: options.resolveMention ?? resolveMention,
       evidence: options.evidence ?? createEvidenceFinancialPort,
-      ...(options.researchScope ? { researchScope: options.researchScope } : {}),
+      // As wired in production, every turn has a scope; this one has no prior answer.
+      ...(options.researchScope === null ? {} : {
+        researchScope: options.researchScope ?? (async (context, read) =>
+          resolveResearchScope({ question: context.userIntent ?? "", companies: [], prior: null, asOf: (options.clock?.() ?? new Date()).toISOString(), proposal: await read })),
+      }),
       readQuestion: options.readQuestion ?? (async () => METRIC_READING),
       ...(options.priorSubjects ? { priorSubjects: options.priorSubjects } : {}),
       ...(options.clock ? { clock: options.clock } : {}),

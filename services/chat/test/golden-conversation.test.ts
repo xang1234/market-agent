@@ -452,7 +452,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const answer = await latestAssistantMessage(base, thread.thread_id);
     assert.deepEqual(engineAnswer(answer), {
       results: [["Operating margin (operating income / revenue)", "Q2 FY2025", "verified", "-1.74%"]],
-      notes: ["Not covered by this answer: the cause of these figures."],
+      notes: ["Not covered by this answer: a margin over several periods; the cause of these figures."],
     });
     const { rows } = await client.query<{ claim_refs: string[] }>(`select claim_refs from snapshots where snapshot_id = $1::uuid`, [answer.snapshot_id]);
     assert.deepEqual(rows[0]?.claim_refs, []);
