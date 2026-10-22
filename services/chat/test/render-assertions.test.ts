@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { calendarNote, plainText, renderAssertion } from "../src/render-assertions.ts";
 import type { Assertion } from "../src/assertions.ts";
 import type { EvidencePacket } from "../src/evidence-packet.ts";
+import { turnPacket } from "../src/llm-runtime.ts";
 
 const NVDA_GM = "a1000000-0000-4000-8000-000000000001";
 const AMD_GM = "a1000000-0000-4000-8000-000000000002";
@@ -148,11 +150,11 @@ test("a comparison over time renders its derived high, low or trend, values as f
   assert.deepEqual(low.figure_ids, ["T2"]);
   assert.equal(
     plainText(renderComparison(AMD_QUARTERS, QUARTER_BLOCKS, "trend", "rebounded", ALL).segments),
-    "AMD's operating margin fell from 10.8% in Q1 2025 to a low of -1.7% in Q2 2025, then rebounded to 14.1% in Q4 2025, above where it started.",
+    "AMD's operating margin fell from 10.8% in Q1 2025 to a low of -1.7% in Q2 2025, then rebounded to 14.1% in Q4 2025, its highest of the periods shown, above where it started.",
   );
   assert.equal(
     plainText(renderComparison(AMD_QUARTERS, QUARTER_BLOCKS, "trend", "rose", ALL).segments),
-    "AMD's operating margin rose from 10.8% in Q1 2025 to 14.1% in Q4 2025, though not in every period.",
+    "AMD's operating margin rose from 10.8% in Q1 2025 to 14.1% in Q4 2025, its highest of the periods shown, though not in every period.",
   );
   // A subset of the window fails the check, so it renders nothing (and never reaches rendering).
   assert.equal(plainText(renderComparison(AMD_QUARTERS, QUARTER_BLOCKS, "trend", "rose_throughout", ["T3", "T4"]).segments), "");
@@ -185,7 +187,7 @@ test("a ranking over a price window writes its dates by month and year (#301), e
   ] };
   const rendered = renderComparison(returns, FACT_BLOCKS, "highest", "F5", ["F5", "F6"]);
   assert.equal(plainText(rendered.segments),
-    "Of NVDA and AMD, NVDA's price return was highest: NVDA 5.81%, AMD 3.17% (YTD 2026: Dec 2025 close to Aug 2026 close).");
+    "Of NVDA and AMD, NVDA's price return was highest: NVDA 5.81%, AMD 3.17% (YTD 2026: Dec 2025 close to Aug 2026 close), 2.64 percentage points above AMD.");
   assert.deepEqual(rendered.figure_ids, ["F5", "F6"]);
   assert.deepEqual(rendered.segments.filter((segment) => segment.type === "ref"), [
     { type: "ref", ref_kind: "series", ref_id: NVDA_LINE, format: "5.81%" },
@@ -281,4 +283,63 @@ test("an observation of a quote says when it was taken (#329 review)", () => {
   };
   assert.equal(plainText(renderAssertion({ index: 0, kind: "observation", text: "ignored", evidence: ["F1"] }, packet, []).segments),
     "AAPL's price was $231.60 as of Sep 1, 2026.");
+});
+
+// A recorded trace's packet and fact blocks, and one comparison rendered from them.
+function traced(name: string) {
+  const { input } = JSON.parse(readFileSync(new URL(`./answer-lab/traces/${name}.json`, import.meta.url), "utf8"));
+  const packet = turnPacket(input);
+  const compare = (evidence: string[], op: string, result: unknown, on = packet) =>
+    plainText(renderAssertion({ index: 0, kind: "comparison", text: "ignored", evidence, op, result } as Assertion & { index: number }, on, input.factBlocks).segments);
+  return { packet, compare };
+}
+
+test("a cohort high or low of percents states its lead over the closest other, on the displayed values", () => {
+  const turn3 = traced("follow-up-memory.turn-3");
+  assert.equal(turn3.compare(["F3", "F7"], "highest", "F3"),
+    "Of NVDA and AMD, NVDA's net margin was highest: NVDA 53.6% (FY2026, ended Jan 2026), AMD 12.0% (FY2025, ended Dec 2025), 41.6 percentage points above AMD.");
+  assert.match(turn3.compare(["F2", "F6"], "highest", "F2"), /AMD 49\.9% \(FY2025, ended Dec 2025\), 20\.9 percentage points above AMD\.$/);
+  assert.match(turn3.compare(["F9", "F10"], "highest", "F9"), /, 2\.64 percentage points above AMD\.$/);
+  assert.equal(turn3.compare(["F1", "F5"], "highest", "F1"),
+    "Of NVDA and AMD, NVDA's revenue was highest: NVDA $209.9B (FY2026, ended Jan 2026), AMD $34.7B (FY2025, ended Dec 2025).");
+
+  const peers = traced("peer-three");
+  assert.equal(peers.compare(["F3", "F7", "F11"], "highest", "F3"),
+    "Of NVDA, AMD, and AAPL, NVDA's net margin was highest: NVDA 53.6% (FY2026, ended Jan 2026), AMD 12.0% (FY2025, ended Dec 2025), AAPL 26.9% (FY2025, ended Sep 2025), 26.7 percentage points above AAPL.");
+  assert.equal(peers.compare(["F3", "F7", "F11"], "lowest", "F7"),
+    "Of NVDA, AMD, and AAPL, AMD's net margin was lowest: NVDA 53.6% (FY2026, ended Jan 2026), AMD 12.0% (FY2025, ended Dec 2025), AAPL 26.9% (FY2025, ended Sep 2025), 14.9 percentage points below AAPL.");
+
+  const tied = { ...peers.packet, figures: peers.packet.figures.map((figure) => (figure.id === "F11" ? { ...figure, value: "12.0%" } : figure)) };
+  assert.match(peers.compare(["F3", "F7", "F11"], "highest", "F3", tied), /, 41\.6 percentage points above AMD and AAPL\.$/);
+});
+
+test("a cohort lead is not said when a covered company shows no value, since the runner-up is then unknown", () => {
+  const turn3 = traced("follow-up-memory.turn-3");
+  const uncovered = { ...turn3.packet, companies: [...turn3.packet.companies, "INTC"] };
+  assert.equal(turn3.compare(["F3", "F7"], "highest", "F3", uncovered),
+    "Of NVDA and AMD, NVDA's net margin was highest: NVDA 53.6% (FY2026, ended Jan 2026), AMD 12.0% (FY2025, ended Dec 2025). No net margin is shown for INTC.");
+});
+
+test("a trend says when it ends at the window's high or low, and not on a tie at the displayed precision", () => {
+  const amd = traced("margin-trend-loss-quarter");
+  const operating = ["F26", "F27", "F28", "F29", "F30", "F31", "F32", "F33"];
+  assert.equal(amd.compare(operating, "trend", "rebounded"),
+    "AMD's operating margin fell from 10.6% in Q3 2024 to a low of -1.7% in Q2 2025, then rebounded to 14.4% in Q2 2026, its highest of the periods shown, above where it started.");
+  const tiedHigh = { ...amd.packet, figures: amd.packet.figures.map((figure) => (figure.id === "F31" ? { ...figure, value: "14.4%" } : figure)) };
+  assert.equal(amd.compare(operating, "trend", "rebounded", tiedHigh),
+    "AMD's operating margin fell from 10.6% in Q3 2024 to a low of -1.7% in Q2 2025, then rebounded to 14.4% in Q2 2026, above where it started.");
+  assert.equal(amd.compare(["F18", "F19", "F20", "F21", "F22", "F23", "F24", "F25"], "trend", "rebounded"),
+    "AMD's gross margin fell from 50.1% in Q3 2024 to a low of 39.8% in Q2 2025, then rebounded to 54.0% in Q2 2026, above where it started.");
+  assert.equal(amd.compare(["F34", "F35", "F36", "F37", "F38", "F39", "F40", "F41"], "trend", "rose"),
+    "AMD's net margin rose from 11.3% in Q3 2024 to 13.2% in Q2 2026, though not in every period.");
+  const falling = { ...amd.packet, figures: amd.packet.figures.map((figure) => (figure.id === "F41" ? { ...figure, value: "5.0%" } : figure)) };
+  assert.equal(amd.compare(["F34", "F35", "F36", "F37", "F38", "F39", "F40", "F41"], "trend", "fell", falling),
+    "AMD's net margin fell from 11.3% in Q3 2024 to 5.0% in Q2 2026, its lowest of the periods shown, though not in every period.");
+});
+
+test("a trend that rose in every period renders as before, its end the high going without saying", () => {
+  const amd = traced("margin-trend-loss-quarter");
+  const rising = { ...amd.packet, figures: amd.packet.figures.map((figure) => (figure.id === "F11" ? { ...figure, value: "$7.2B" } : figure)) };
+  assert.equal(amd.compare(["F10", "F11", "F12", "F13", "F14", "F15", "F16", "F17"], "trend", "rose_throughout", rising),
+    "AMD's revenue rose in every period from Q3 2024 ($6.8B) to Q2 2026 ($11.2B).");
 });

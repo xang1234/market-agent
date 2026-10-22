@@ -50,7 +50,7 @@ test("a case is the inference beside its supports as the reader sees them, figur
       checked: ["NVDA highest on gross margin"],
       supports: [
         "NVDA's gross margin was 74.6% in FY2026; AMD's gross margin was 49.2% in FY2025.",
-        "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026), AMD 49.2% (FY2025).",
+        "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026), AMD 49.2% (FY2025), 25.4 percentage points above AMD.",
       ],
     },
     {
@@ -58,7 +58,7 @@ test("a case is the inference beside its supports as the reader sees them, figur
       subject: "NVDA",
       text: "Its peer trails on margin.",
       checked: ["NVDA highest on gross margin"],
-      supports: ["Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026), AMD 49.2% (FY2025)."],
+      supports: ["Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026), AMD 49.2% (FY2025), 25.4 percentage points above AMD."],
     },
   ]);
   // A one-company answer's inference is about that company.
@@ -128,7 +128,7 @@ test("one judge call per answer, on JUDGE_LITELLM_MODEL, carries every inference
         checked_results: ["NVDA highest on gross margin"],
         supports: [
           "NVDA's gross margin was 74.6% in FY2026; AMD's gross margin was 49.2% in FY2025.",
-          "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026), AMD 49.2% (FY2025).",
+          "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026), AMD 49.2% (FY2025), 25.4 percentage points above AMD.",
         ],
       },
       {
@@ -136,7 +136,7 @@ test("one judge call per answer, on JUDGE_LITELLM_MODEL, carries every inference
         subject: "NVDA",
         text: "Its peer trails on margin.",
         checked_results: ["NVDA highest on gross margin"],
-        supports: ["Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026), AMD 49.2% (FY2025)."],
+        supports: ["Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026), AMD 49.2% (FY2025), 25.4 percentage points above AMD."],
       },
     ],
   });

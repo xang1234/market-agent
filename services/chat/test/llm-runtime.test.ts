@@ -1350,7 +1350,7 @@ test("a ranking of price returns read off their chart renders (#301)", async () 
   });
   const text = (composed[0].segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join("");
   assert.equal(text,
-    "Of NVDA and AMD, NVDA's price return was highest: NVDA 5.81%, AMD 3.17% (YTD 2026: Dec 2025 close to Aug 2026 close)." +
+    "Of NVDA and AMD, NVDA's price return was highest: NVDA 5.81%, AMD 3.17% (YTD 2026: Dec 2025 close to Aug 2026 close), 2.64 percentage points above AMD." +
     "\n\nNVDA's gross margin was 74.6% in FY2026 (ended Jan 2026); AMD's gross margin was 49.2% in FY2025 (ended Dec 2025).");
   assert.deepEqual(reports[0]!.rejected, []);
 });
@@ -1367,7 +1367,7 @@ test("across companies, an inference's label states what its comparisons checked
   assert.equal(
     segments.map((segment) => segment.text ?? segment.format).join(""),
     "> **Analyst inference** (NVDA highest on gross margin): The margin lead leaves more room to invest." +
-      "\n\nOf NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026, ended Jan 2026), AMD 49.2% (FY2025, ended Dec 2025)." +
+      "\n\nOf NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026, ended Jan 2026), AMD 49.2% (FY2025, ended Dec 2025), 25.4 percentage points above AMD." +
       "\n\nNVDA's revenue was $130.5B in FY2026 (ended Jan 2026); AMD's revenue was $25.8B in FY2025 (ended Dec 2025)." +
       "\n\n> **Analyst inference:** Scale leaves room to invest." +
       "\n\nThe periods compared end at different times, so they do not line up: NVDA's FY2026 ended Jan 2026 and AMD's FY2025 ended Dec 2025.",
@@ -1394,7 +1394,7 @@ test("across companies, an inference's subject is named in its label (#308)", as
   ]));
   assert.equal(
     (block.segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join(""),
-    "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026, ended Jan 2026), AMD 49.2% (FY2025, ended Dec 2025)." +
+    "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026, ended Jan 2026), AMD 49.2% (FY2025, ended Dec 2025), 25.4 percentage points above AMD." +
       "\n\n> **Analyst inference on AMD** (NVDA highest on gross margin): Its thinner margin leaves less room to invest." +
       "\n\nThe periods compared end at different times, so they do not line up: NVDA's FY2026 ended Jan 2026 and AMD's FY2025 ended Dec 2025.",
   );
@@ -1411,7 +1411,7 @@ test("an observation a kept comparison already writes in full is not said twice;
   ]));
   assert.equal(
     (block.segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join(""),
-    "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026, ended Jan 2026), AMD 49.2% (FY2025, ended Dec 2025)." +
+    "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026, ended Jan 2026), AMD 49.2% (FY2025, ended Dec 2025), 25.4 percentage points above AMD." +
       "\n\nNVDA's gross margin was 74.6% in FY2026 (ended Jan 2026); AMD's revenue was $25.8B in FY2025 (ended Dec 2025)." +
       "\n\n> **Analyst inference:** Pricing power shows in the margin." +
       "\n\nThe periods compared end at different times, so they do not line up: NVDA's FY2026 ended Jan 2026 and AMD's FY2025 ended Dec 2025.",
@@ -1448,7 +1448,7 @@ test("a single company's checked trend and low render (#208)", async () => {
   });
   const text = (composed[0].segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join("");
   assert.equal(text,
-    "AMD's operating margin fell from 10.8% in Q1 2025 to a low of -1.7% in Q2 2025, then rebounded to 14.1% in Q4 2025, above where it started." +
+    "AMD's operating margin fell from 10.8% in Q1 2025 to a low of -1.7% in Q2 2025, then rebounded to 14.1% in Q4 2025, its highest of the periods shown, above where it started." +
     "\n\nAMD's operating margin was lowest in Q2 2025, at -1.7%, of the periods from Q1 2025 to Q4 2025.");
   assert.deepEqual((reports[0]!.rejected as Array<{ reason: string }>).map((entry) => entry.reason), [
     "comparison: leaves out Q2 2025, which shows operating margin too",
