@@ -245,6 +245,19 @@ test("a comparison shows each company's latest quarter, named from the newest it
   const three = await compare("NVDA, AMD and AAPL");
   assert.deepEqual([three?.outputs, three?.reads], [[...NVDA, ...AMD, ...AAPL], [read("NVDA"), read("AMD"), read("AAPL")]]);
 
+  let inFlight = 0;
+  let most = 0;
+  const oneAtATime = {
+    listInputCandidates: async (request: CandidateRequest) => {
+      most = Math.max(most, ++inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+      return PAGES[tickerOf(request.subject.id)]!;
+    },
+  } as FinancialEvidencePort;
+  assert.notEqual(await planCompanyOverview(planningContext("NVDA, AMD and AAPL"), oneAtATime), null);
+  assert.equal(most, 1, "one read at a time on the request's one client");
+
   assert.deepEqual((await compare("NVDA and AMD", { ...PAGES, AMD: reported(revenue(2025, "FY", "2025-12-27")) })).planned, null, "a company that reported no quarter");
   assert.deepEqual((await compare("NVDA and AMD", { ...PAGES, AMD: { ...PAGES.AMD!, truncated: true } as CandidatePage })).planned, null, "a truncated page");
   assert.deepEqual((await compare("NVDA and AMD", { ...PAGES, AMD: { status: "error", reason_code: "database_error" } })).planned, null, "a failed read");

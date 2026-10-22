@@ -644,8 +644,7 @@ function persistAssistantMessage(
     // A plan member the turn gave no label is a peer the overview selected. The
     // saved plan says so, as a retry that resumes the run does not plan again.
     const answeredPeers = plan?.subjects.members.some((member) => !turn.labels.has(member.subject_ref.id.toLowerCase())) ?? false;
-    const asked = reading !== null && answeredPeers ? { ...reading, asks: new Set([...reading.asks].filter((facet) => facet !== "peers")) } : reading;
-    const missing = asked === null || plan === null ? [] : uncoveredAsks(asked, plan, turn.labels);
+    const missing = reading === null || plan === null ? [] : uncoveredAsks(answeredPeers ? withoutPeers(reading) : reading, plan, turn.labels);
     const note = [
       ...(turn.notFound.length === 0 ? [] : [`No company matched ${labelList(turn.notFound)}.`]),
       ...(turn.carried.length === 0 ? [] : [`${labelList(turn.carried)} ${turn.carried.length > 1 ? "are" : "is"} carried from the previous answer.`]),
@@ -688,6 +687,8 @@ function persistAssistantMessage(
     await tx.client.query(`update chat_threads set latest_snapshot_id = $2::uuid, updated_at = now() where thread_id = $1::uuid`, [threadId, publication.snapshot_id]);
   };
 }
+
+const withoutPeers = (reading: ScopeProposal): ScopeProposal => ({ ...reading, asks: new Set([...reading.asks].filter((facet) => facet !== "peers")) });
 
 /**
  * The companies a turn answered for, in its order. A missing label marks an

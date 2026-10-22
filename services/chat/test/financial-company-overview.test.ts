@@ -236,6 +236,28 @@ test("a question about one company that asks for no figure is answered with its 
     assert.ok(errors.some((args) => args.some((arg) => arg instanceof TypeError)), "the defect is logged");
   });
 
+  await t.test("a defect in the overview stops the planner's repair call too (#473)", async (st) => {
+    st.mock.method(console, "warn", () => {});
+    st.mock.method(console, "error", () => {});
+    let calls = 0;
+    let answer!: (reply: { text: string; model: string }) => void;
+    const model: PlanningModel = () => {
+      calls += 1;
+      return new Promise((resolve) => (answer = resolve));
+    };
+    const defective: typeof createEvidenceFinancialPort = (executor) => ({
+      ...createEvidenceFinancialPort(executor),
+      listInputCandidates: async () => {
+        throw new TypeError("a defect");
+      },
+    });
+    const { events } = await chatHarness(pool, { model, readQuestion: reading(NO_ASKS), resolveMention: resolve, evidence: defective }).run({ ...base, userIntent: "Revenue for QTRS" });
+    assert.equal(events.at(-1)!.type, "turn.error");
+    answer({ text: "not a draft", model: "test" });
+    for (const deadline = Date.now() + 1_000; calls < 2 && Date.now() < deadline;) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(calls, 1, "the failed turn's planner never asks the model again");
+  });
+
   await t.test("an overview the engine does not plan falls back to the planner's answer, and says why (#473)", async (st) => {
     const warned: unknown[][] = [];
     st.mock.method(console, "warn", (...args: unknown[]) => warned.push(args));
@@ -316,6 +338,13 @@ test("a question about one company that asks for no figure is answered with its 
     } finally {
       await db.query(`update issuers set industry = null where issuer_id = any($1::uuid[])`, [peerSet]);
     }
+  });
+
+  await t.test("peers the planner leaves out are named in the answer's note (#398)", async () => {
+    const model = revenueModel(["QTRS", "NOGP"]);
+    const done = completed((await chatHarness(pool, { model, readQuestion: reading({ ...NO_ASKS, asks: new Set(["peers"]) }), resolveMention: resolve }).run({ ...base, userIntent: "Compare revenue for QTRS and NOGP with their peers" })).events);
+    const { rows: [message] } = await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id]);
+    assert.deepEqual([model.calls, message.blocks[1]?.segments?.[0]?.text], [1, "Not covered by this answer: peers the question did not name."]);
   });
 
   await t.test("a line the engine cannot certify is a gap cell, and the rest still publishes", async () => {
