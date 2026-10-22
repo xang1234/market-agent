@@ -126,6 +126,21 @@ test("a company the question does not write refuses the whole proposal", () => {
     [false, false, true, true],
     "a name is written as whole words",
   );
+  assert.deepEqual(
+    [inQuestion("BRK", "Compare it with BRK.B"), inQuestion("B", "Compare it with BRK.B"), inQuestion("BF", "vs BF-B?"), inQuestion("BRK.B", "Compare it with BRK.B."), inQuestion("BF-B", "vs \"BF-B\"?")],
+    [false, false, false, true, true],
+    "a dotted or dashed ticker is one word",
+  );
+  assert.deepEqual(
+    [inQuestion("it", "Compare it with AMD"), inQuestion("CASH", "Drop FREE CASH FLOW"), inQuestion("NET", "Show NET income"), inQuestion("Apple", "Compare it with Apple"), inQuestion("AMD", "Compare it with AMD")],
+    [false, false, false, true, true],
+    "a name is a company the question writes, not a word of a metric",
+  );
+  assert.deepEqual(
+    [inQuestion("CASH", "Compare CASH and its free cash flow"), inQuestion("NET", "Compare NET and AMD net income")],
+    [true, true],
+    "a company also written outside a metric's name",
+  );
 });
 
 test("a metric to turn off may be its bare catalog key (#378 eval)", () => {
