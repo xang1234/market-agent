@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { DerivationProofV1, ReportedMetricNode } from "../../financial-core/src/index.ts";
+import { hashCanonical, type DerivationProofV1, type ReportedMetricNode } from "../../financial-core/src/index.ts";
 import type { InputCandidate } from "../src/ports.ts";
 import { selectInput, sharedLatestPeriods, type SelectionPolicy } from "../src/select-inputs.ts";
 
@@ -442,7 +442,7 @@ function derivedFourthQuarter(year: number, value: string, [annual, q1, q2, q3]:
   };
   return quarter(year, "Q4", {
     value,
-    precision: { precision_attestation_id: `p-q4-${year}`, precision_class: "derived_from_source_tokens", raw_token: value, token_proof_hash: HASH, source_locator: "loc-Q4", derivation },
+    precision: { precision_attestation_id: `p-q4-${year}`, precision_class: "derived_from_source_tokens", raw_token: value, token_proof_hash: hashCanonical("derivation", derivation), source_locator: "loc-Q4", derivation },
     ...spec,
   });
 }
@@ -463,13 +463,16 @@ test("a derived Q4 binds when its derivation proves its value; one that does not
 
   const tampered = derivedFourthQuarter(2024, "170", ["620", "140", "150", "150"]);
   assert.equal(landed(selectInput(latestQuarter(0), [...quarters, tampered], atCutoff)), "gap precision_unverified");
+  const rehashed = { ...certified, precision: { ...certified.precision!, token_proof_hash: "f".repeat(64) } };
+  assert.equal(landed(selectInput(latestQuarter(0), [...quarters, rehashed], atCutoff)), "gap precision_unverified", "a derivation its recorded hash does not bind");
   const unpaired = { ...certified, precision: { ...certified.precision!, precision_class: "source_token_preserved" as const } };
   assert.equal(landed(selectInput(latestQuarter(0), [...quarters, unpaired], atCutoff)), "gap precision_unverified", "only a derived proof carries a derivation");
 
   const lastYears = { ...derivedFourthQuarter(2023, "170", ["620", "140", "150", "160"]), period: certified.period };
   assert.equal(landed(selectInput(latestQuarter(0), [...quarters, lastYears], atCutoff)), "gap precision_unverified", "a derivation of another period");
   const derivation = certified.precision!.derivation!;
-  const lateThird = { ...certified, precision: { ...certified.precision!, derivation: { ...derivation, terms: derivation.terms.map((term) => term.fiscal_period === "Q3" ? { ...term, source: { ...term.source, filed: "2025-02-20" } } : term) } } };
+  const proving = (proof: DerivationProofV1) => ({ ...certified, precision: { ...certified.precision!, derivation: proof, token_proof_hash: hashCanonical("derivation", proof) } });
+  const lateThird = proving({ ...derivation, terms: derivation.terms.map((term) => term.fiscal_period === "Q3" ? { ...term, source: { ...term.source, filed: "2025-02-20" } } : term) });
   assert.equal(landed(selectInput(latestQuarter(0), [...quarters, lateThird], atCutoff)), "gap precision_unverified", "a 10-Q filed after the 10-K");
 
   const assets: ReportedMetricNode = { ...FY2023, metric_key: "total_assets", period: { kind: "fiscal_period", fiscal_year: 2024, fiscal_period: "Q4" } };

@@ -384,7 +384,7 @@ function derivationConsistent({ metric_key, source_id, period, value_text, preci
   const derivation = precision?.derivation ?? null;
   if ((derivation !== null) !== (precision?.precision_class === "derived_from_source_tokens")) return false;
   const value_kind = resolveMetricDefinition(metric_key)?.value_kind ?? null;
-  return derivation === null || derivationIssue(derivation, { value_kind, source_id, value_text, period }) === null;
+  return derivation === null || derivationIssue(derivation, { value_kind, source_id, token_proof_hash: precision?.token_proof_hash ?? null, value_text, period }) === null;
 }
 
 function publicFromAllowedSource(candidate: InputCandidate, policy: EligibilityPolicy): { publication: SelectedPublication } | { reason: ReasonCode | null } {

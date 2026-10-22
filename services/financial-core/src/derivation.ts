@@ -1,3 +1,4 @@
+import { hashCanonical } from "./canonical.ts";
 import type { DerivationProofV1, IsoDate } from "./contracts.ts";
 import type { MetricValueKind } from "./definitions.ts";
 import { compareExactDecimals, parseDerivedDecimalText, parseFinancialDecimal, type ExactDecimal } from "./exact-decimal.ts";
@@ -22,6 +23,7 @@ export function derivationValue(proof: DerivationProofV1): ExactDecimal | null {
 export type DerivationIssue =
   | "not_a_flow"
   | "invalid_derivation"
+  | "proof_hash_mismatch"
   | "own_term_sign"
   | "own_term_source"
   | "own_term_end"
@@ -34,6 +36,8 @@ export type DerivedFact = Readonly<{
   /** The metric's, from its definition; null for a metric outside the catalog. */
   value_kind: MetricValueKind | null;
   source_id: string;
+  /** The hash recorded beside the proof, which must bind it. */
+  token_proof_hash: string | null;
   value_text: string | null;
   period: Readonly<{ start: IsoDate | null; end: IsoDate; fiscal_year: number }>;
 }>;
@@ -50,6 +54,7 @@ export function derivationIssue(proof: unknown, fact: DerivedFact): DerivationIs
   if (fact.value_kind !== "flow") return "not_a_flow";
   const checked = validateDerivationProof(proof);
   if (!checked.ok) return "invalid_derivation";
+  if (hashCanonical("derivation", checked.value) !== fact.token_proof_hash) return "proof_hash_mismatch";
   const [own, ...others] = checked.value.terms;
   if (own!.sign !== "+" || others.some((term) => term.sign !== "-")) return "own_term_sign";
   if (own!.source.source_id.toLowerCase() !== fact.source_id.toLowerCase()) return "own_term_source";

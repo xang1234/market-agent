@@ -13,6 +13,7 @@ import { hashCanonical } from "../../financial-core/src/canonical.ts";
 import type { DerivationProofV1 } from "../../financial-core/src/contracts.ts";
 import { resolveMetricDefinition } from "../../financial-core/src/definitions.ts";
 import { derivationIssue, derivationValue, type DerivationIssue } from "../../financial-core/src/derivation.ts";
+import { validateDerivationProof } from "../../financial-core/src/validate.ts";
 import {
   PRECISION_CLASSES,
   PUBLICATION_TIMING_PRECISIONS,
@@ -169,9 +170,13 @@ export async function recordFactPrecisionAttestation(
     derivation: DerivationProofV1 | null;
   } = { raw_token: null, token_proof_hash: null, value_text: null, scale_text: null, source_locator: null, derivation: null };
   if (input.precision_class === "derived_from_source_tokens") {
+    // Hashed only once valid: a malformed proof is refused, not thrown inside canonical JSON.
+    const checked = validateDerivationProof(input.derivation);
+    const token_proof_hash = checked.ok ? hashCanonical("derivation", checked.value) : null;
     const issue = derivationIssue(input.derivation, {
       value_kind: (fact.metric_key === null ? null : resolveMetricDefinition(fact.metric_key)?.value_kind) ?? null,
       source_id: fact.source_id,
+      token_proof_hash,
       value_text: fact.value_text,
       period: { start: fact.period_start, end: fact.period_end, fiscal_year: fact.fiscal_year },
     });
@@ -179,7 +184,7 @@ export async function recordFactPrecisionAttestation(
     const sum = canonicalDecimalString(derivationValue(input.derivation)!);
     proof = {
       raw_token: sum,
-      token_proof_hash: hashCanonical("derivation", input.derivation),
+      token_proof_hash,
       value_text: sum,
       scale_text: storedScale(fact.scale_text),
       source_locator: input.source_locator,
@@ -244,6 +249,7 @@ export function checkTokenAgainstStoredValue(rawToken: string, storedValueText: 
 const DERIVATION_REFUSALS: Readonly<Record<DerivationIssue, string>> = {
   not_a_flow: "only a flow metric's value can be derived over periods",
   invalid_derivation: "derivation is not a period_difference.v1 proof with a supported decimal token in every term",
+  proof_hash_mismatch: "token_proof_hash does not bind the derivation",
   own_term_sign: "a derivation adds exactly one term, its first, and subtracts the rest",
   own_term_source: "a derivation's first term is not from the fact's own source",
   own_term_end: "a derivation's first term does not end on the fact's period end",

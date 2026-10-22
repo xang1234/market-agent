@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ChangeNode, DerivationProofV1, FreeCashFlowNode, MarginNode, RatioNode, TrailingSumNode } from "../src/contracts.ts";
+import { hashCanonical } from "../src/canonical.ts";
+import type { BoundFactInputV1, ChangeNode, DerivationProofV1, FreeCashFlowNode, MarginNode, RatioNode, TrailingSumNode } from "../src/contracts.ts";
 import { RATIO_CATALOG_V1 } from "../src/definitions.ts";
 import { OPERATION_REGISTRY } from "../src/operation-registry.ts";
 import { convertDimensionless, type DimensionlessUnit } from "../src/dimensions.ts";
@@ -81,12 +82,17 @@ test("a derived quarter binds when its derivation sums to its value; a tampered 
   const node = { node_id: "q4", operation: "reported_metric" as const, operation_version: "reported_metric.v1", subject_slot: "a", metric_key: "revenue", period: { kind: "fiscal_period" as const, fiscal_year: 2024, fiscal_period: "Q4" as const } };
   const expected = { slot: SLOTS.a, definition_version: "revenue.v1", knowledge_cutoff: KNOWLEDGE_CUTOFF, reporting_basis: "as_reported" as const };
   const reported = boundInput({ metric: "revenue", value: "170", start: "2024-10-01", end: "2024-12-31", fiscal_year: 2024, fiscal_period: "Q4" });
-  const derived = { ...reported, precision_status: "derived_from_source_tokens" as const, derivation: fourthQuarter(["6.2E2", "140", "150", "160"]) };
+  const derived = derive(reported, fourthQuarter(["6.2E2", "140", "150", "160"]));
   assert.equal(value(operandFromBoundInput(derived, node, expected)), "170");
-  assert.equal(integrityCode(() => operandFromBoundInput({ ...derived, derivation: fourthQuarter(["620", "140", "150", "150"]) }, node, expected)), "derivation_value_mismatch");
+  assert.equal(integrityCode(() => operandFromBoundInput(derive(reported, fourthQuarter(["620", "140", "150", "150"])), node, expected)), "derivation_value_mismatch");
   const { derivation: _derivation, ...unproven } = derived;
   assert.equal(integrityCode(() => operandFromBoundInput(unproven, node, expected)), "derivation_value_mismatch");
   assert.equal(integrityCode(() => operandFromBoundInput({ ...reported, derivation: derived.derivation }, node, expected)), "derivation_value_mismatch");
+  assert.throws(
+    () => operandFromBoundInput(derive(reported, derived.derivation, "f".repeat(64)), node, expected),
+    { code: "derivation_value_mismatch", message: "the derivation of q4 does not prove its bound value: proof_hash_mismatch" },
+    "a derivation its recorded hash does not bind",
+  );
 });
 
 test("a derived balance fails integrity, though its derivation sums to its value (#481)", () => {
@@ -94,7 +100,7 @@ test("a derived balance fails integrity, though its derivation sums to its value
   const expected = { slot: SLOTS.a, definition_version: "total_assets.v1", knowledge_cutoff: KNOWLEDGE_CUTOFF, reporting_basis: "as_reported" as const };
   const balance = boundInput({ metric: "total_assets", kind: "instant", value: "170", end: "2024-12-31", fiscal_year: 2024, fiscal_period: "Q4" });
   assert.throws(
-    () => operandFromBoundInput({ ...balance, precision_status: "derived_from_source_tokens", derivation: fourthQuarter(["620", "140", "150", "160"]) }, node, expected),
+    () => operandFromBoundInput(derive(balance, fourthQuarter(["620", "140", "150", "160"])), node, expected),
     { code: "derivation_value_mismatch", message: "the derivation of assets does not prove its bound value: not_a_flow" },
   );
 });
@@ -117,7 +123,7 @@ test("binding names each way a derivation that sums to its value still fails to 
   ];
   for (const [issue, derivation] of cases) {
     assert.throws(
-      () => operandFromBoundInput({ ...reported, precision_status: "derived_from_source_tokens", derivation: derivation as DerivationProofV1 }, node, expected),
+      () => operandFromBoundInput(derive(reported, derivation), node, expected),
       { code: "derivation_value_mismatch", message: `the derivation of q4 does not prove its bound value: ${issue}` },
     );
   }
@@ -131,6 +137,10 @@ function integrityCode(action: () => unknown): string {
     throw error;
   }
   return assert.fail("the input bound");
+}
+
+function derive(input: BoundFactInputV1, derivation: unknown, token_proof_hash = hashCanonical("derivation", derivation)): BoundFactInputV1 {
+  return { ...input, precision_status: "derived_from_source_tokens", derivation: derivation as DerivationProofV1, numeric: { ...input.numeric, token_proof_hash } };
 }
 
 function fourthQuarter([year, q1, q2, q3]: string[]): DerivationProofV1 {

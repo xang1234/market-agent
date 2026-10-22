@@ -1,3 +1,4 @@
+import { hashCanonical } from "../../financial-core/src/canonical.ts";
 import { DERIVATION_PROOF_VERSION, type DerivationProofV1 } from "../../financial-core/src/contracts.ts";
 import { resolveMetricDefinition } from "../../financial-core/src/definitions.ts";
 import { derivationIssue, derivationValue, type DerivationIssue } from "../../financial-core/src/derivation.ts";
@@ -33,7 +34,7 @@ export function secDerivedLine(
   if (!proof || !exact) return null;
   const sum = canonicalDecimalString(exact);
   const period = { start: fact.period_start, end: fact.period_end, fiscal_year: fact.fiscal_year };
-  const issue = derivationIssue(proof, { value_kind, source_id: fact.source_id, value_text: sum, period });
+  const issue = derivationIssue(proof, { value_kind, source_id: fact.source_id, token_proof_hash: hashCanonical("derivation", proof), value_text: sum, period });
   if (issue !== null) return { status: "unproven", sum, issue };
   const own = proof.terms[0]!.source;
   const at: SecValueLocation = { concept: derivation.concept, unit: derivation.unit, accn: own.accession, form: own.form, filed: own.filed, start: fact.period_start, end: fact.period_end };

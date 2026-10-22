@@ -187,6 +187,7 @@ function factOperand(input: BoundFactInputV1, node: ReportedMetricNode, definiti
     const issue = derivationIssue(input.derivation, {
       value_kind: definition.value_kind,
       source_id: input.source.source_id,
+      token_proof_hash: input.numeric.token_proof_hash,
       value_text: input.numeric.value,
       period: input.period,
     });

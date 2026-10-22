@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { hashCanonical } from "../src/canonical.ts";
 import type { DerivationProofV1 } from "../src/contracts.ts";
 import { derivationIssue, type DerivedFact } from "../src/derivation.ts";
 
@@ -29,27 +30,31 @@ const Q1 = term("-", "Q1", "2024-01-01", "2024-03-31", "140", "2024-05-01");
 const Q2 = term("-", "Q2", "2024-04-01", "2024-06-30", "150", "2024-08-01");
 const Q3 = term("-", "Q3", "2024-07-01", "2024-09-30", "160", "2024-11-01");
 const FOURTH = proof([YEAR, Q1, Q2, Q3]);
-const Q4_FACT: DerivedFact = { value_kind: "flow", source_id: OWN, value_text: "170", period: { start: "2024-10-01", end: "2024-12-31", fiscal_year: 2024 } };
+type Fact = Omit<DerivedFact, "token_proof_hash">;
+const issueOf = (derivation: unknown, fact: Fact, token_proof_hash: string | null = hashCanonical("derivation", derivation)) =>
+  derivationIssue(derivation, { ...fact, token_proof_hash });
+
+const Q4_FACT: Fact = { value_kind: "flow", source_id: OWN, value_text: "170", period: { start: "2024-10-01", end: "2024-12-31", fiscal_year: 2024 } };
 
 test("a fourth quarter is its year less the first three quarters (#481)", () => {
-  assert.equal(derivationIssue(FOURTH, Q4_FACT), null);
-  assert.equal(derivationIssue(FOURTH, { ...Q4_FACT, source_id: OWN.toUpperCase() }), null, "source ids compare as uuids");
+  assert.equal(issueOf(FOURTH, Q4_FACT), null);
+  assert.equal(issueOf(FOURTH, { ...Q4_FACT, source_id: OWN.toUpperCase() }), null, "source ids compare as uuids");
 });
 
 test("a cash-flow quarter is its year to date less the previous one (#481)", () => {
   const sixMonths = { ...term("+", "Q2", "2024-01-01", "2024-06-30", "290", "2024-08-01", OWN), span: "year_to_date" as const };
-  const fact: DerivedFact = { value_kind: "flow", source_id: OWN, value_text: "150", period: { start: "2024-04-01", end: "2024-06-30", fiscal_year: 2024 } };
-  assert.equal(derivationIssue(proof([sixMonths, Q1]), fact), null);
+  const fact: Fact = { value_kind: "flow", source_id: OWN, value_text: "150", period: { start: "2024-04-01", end: "2024-06-30", fiscal_year: 2024 } };
+  assert.equal(issueOf(proof([sixMonths, Q1]), fact), null);
 });
 
 test("subtracted terms tile in any order (#481)", () => {
-  assert.equal(derivationIssue(proof([YEAR, Q3, Q1, Q2]), Q4_FACT), null);
+  assert.equal(issueOf(proof([YEAR, Q3, Q1, Q2]), Q4_FACT), null);
 });
 
 test("each way a derivation can fail to prove its fact is named (#481)", () => {
   const nineMonths = { ...term("-", "Q3", "2024-01-01", "2024-09-30", "450", "2024-11-01"), span: "year_to_date" as const };
   const ends = term("-", "Q3", "2024-10-01", "2024-09-30", "-30", "2024-11-01");
-  const cases: Array<[string, unknown, DerivedFact]> = [
+  const cases: Array<[string, unknown, Fact]> = [
     ["not_a_flow", FOURTH, { ...Q4_FACT, value_kind: "per_share" }],
     ["not_a_flow", FOURTH, { ...Q4_FACT, value_kind: null }],
     ["invalid_derivation", { ...FOURTH, version: "period_difference.v0" }, Q4_FACT],
@@ -67,6 +72,15 @@ test("each way a derivation can fail to prove its fact is named (#481)", () => {
     ["own_term_not_last_filed", proof([YEAR, Q1, Q2, { ...Q3, source: { ...Q3.source, filed: "2025-02-15" } }]), Q4_FACT],
   ];
   for (const [issue, derivation, fact] of cases) {
-    assert.equal(derivationIssue(derivation, fact), issue, JSON.stringify([derivation, fact]));
+    assert.equal(issueOf(derivation, fact), issue, JSON.stringify([derivation, fact]));
   }
+});
+
+test("a derivation is the one its recorded hash binds (#481)", () => {
+  const recorded = hashCanonical("derivation", FOURTH);
+  assert.equal(issueOf(proof([YEAR, Q1, Q2, Q3]), Q4_FACT, recorded), null, "the hash binds the proof's canonical form");
+  assert.equal(issueOf(proof([YEAR, Q3, Q1, Q2]), Q4_FACT, recorded), "proof_hash_mismatch", "a reordered proof is another proof");
+  assert.equal(issueOf(FOURTH, Q4_FACT, "f".repeat(64)), "proof_hash_mismatch");
+  assert.equal(issueOf(FOURTH, Q4_FACT, null), "proof_hash_mismatch");
+  assert.equal(issueOf({ ...FOURTH, version: "period_difference.v0" }, Q4_FACT, "f".repeat(64)), "invalid_derivation", "a malformed proof is invalid before its hash is read");
 });
