@@ -580,6 +580,19 @@ export async function loadIssuerFactBlocks(
 // A derived metric minted as a fact, with the verifier's binding for it.
 export type DerivedQuarterFact = QuarterMetric & { fact_id: string; binding: VerifierFact };
 
+// A minted figure the revenue chart does not draw but is computed from two of
+// its bars (each other quarter's QoQ growth), carried in its
+// data_ref.params.derived_figures; the evidence packet makes it a figure. `of`
+// is [the quarter's fact, the previous quarter's].
+export type DerivedFigureRecord = {
+  fact_id: string;
+  metric: string;
+  period: string;
+  period_end: string;
+  value: string;
+  of: readonly [string, string];
+};
+
 // Margins and growth (#178), minted as derived facts stamped at the cutoff (so
 // known by it, like the comparison's) and loaded back for the seal. A failure only
 // costs these figures: the reported ones still render.
@@ -602,6 +615,7 @@ async function loadDerivedQuarterMetrics(
       shownRevenue: wantsMarginTrend ? revenue : [shown],
       // Growth is the shown quarter's, a named one inside the window (#290).
       growthAt: shown,
+      window: revenue,
       fact: (metricKey, fiscalYear, fiscalPeriod) => byQuarter.get(quarterKey(metricKey, fiscalYear, fiscalPeriod)),
       period: (factId) => loadable.get(factId),
     });
@@ -730,7 +744,23 @@ export function buildIssuerFactBlocks(input: {
       title: "Quarterly revenue",
     },
   });
-  const revenueBars: Block = { ...bars, ...blockBase("revenue_bars", input, revenue, loadable) };
+  // The latest quarter's QoQ is the metric row's: one figure per fact.
+  const growthSeries = revenue.flatMap((quarter) => {
+    const fact = quarter.fact_id === latest.fact_id ? undefined : derivedAt(GROWTH[0].metric, quarter);
+    return fact ? [{ fact, quarter }] : [];
+  });
+  const barsBase = blockBase("revenue_bars", input, [...revenue, ...growthSeries.map(({ fact }) => fact)], loadable);
+  const derivedFigures = growthSeries.map(({ fact, quarter }): DerivedFigureRecord => ({
+    fact_id: fact.fact_id,
+    metric: fact.label,
+    period: quarterLabel(quarter),
+    period_end: fact.period.period_end,
+    value: formatPercent(fact.value_num),
+    of: [fact.input_fact_ids[0]!, fact.input_fact_ids[1]!],
+  }));
+  const revenueBars: Block = derivedFigures.length === 0
+    ? { ...bars, ...barsBase }
+    : { ...bars, ...barsBase, data_ref: { ...barsBase.data_ref, params: { ...barsBase.data_ref.params, derived_figures: derivedFigures } } };
 
   return Object.freeze([metricRow, revenueBars, ...marginTrend]);
 }
@@ -752,7 +782,7 @@ export function blockBase(
   loadable: ReadonlyMap<string, VerifierFact>,
   // Distinguishes two blocks of one kind in a snapshot (the segment metric_row).
   idKey: string = kind,
-): Block {
+): Block & { data_ref: { kind: string; id: string; params: Record<string, unknown> } } {
   const id = blockId(idKey, input.snapshotId);
   return {
     id,

@@ -615,3 +615,68 @@ test("a comma between a quarter and its bare year is read (#292 review)", () => 
   assert.deepEqual(requestedFiscalQuarter("AMD revenue in Q2, 2026"), { fiscal_year: 2026, fiscal_period: "Q2" });
   assert.deepEqual(requestedFiscalQuarter("the second quarter, 2025"), { fiscal_year: 2025, fiscal_period: "Q2" });
 });
+
+// NVDA's reported revenue ($M) and quarter ends, Q1 2025..Q4 2026 (test/golden/dataset.ts).
+const NVDA_QUARTERS: ReadonlyArray<readonly [number, string]> = [
+  [26044, "2024-04-28"], [30040, "2024-07-28"], [35082, "2024-10-27"], [39331, "2025-01-26"],
+  [44062, "2025-04-27"], [46743, "2025-07-27"], [57006, "2025-10-26"], [62100, "2026-01-25"],
+];
+
+// The revenue window and its derived growth as the loader mints them, with or
+// without the window's QoQ series.
+function nvdaWindow(withSeries: boolean) {
+  const facts = NVDA_QUARTERS.map(([value], i) => fact("revenue", 2025 + Math.floor(i / 4), `Q${(i % 4) + 1}`, value * 1e6));
+  const ends = new Map(facts.map((f, i) => [f.fact_id, NVDA_QUARTERS[i]![1]]));
+  const key = (m: string, y: number, p: string) => `${m}|${y}|${p}`;
+  const byKey = new Map(facts.map((f) => [key(f.metric_key, f.fiscal_year!, f.fiscal_period!), f]));
+  const specs = deriveQuarterMetrics({
+    shownRevenue: [facts.at(-1)!],
+    growthAt: facts.at(-1)!,
+    ...(withSeries ? { window: facts } : {}),
+    fact: (m, y, p) => byKey.get(key(m, y, p)),
+    period: (id) => ({ fact_id: id, period_kind: "fiscal_q", period_start: null, period_end: ends.get(id)! }),
+  });
+  const derived: DerivedQuarterFact[] = specs.map((spec, index) => {
+    const fact_id = minted(index);
+    return { ...spec, fact_id, binding: { fact_id, source_id: SOURCE_ID, unit: "ratio", period_kind: "fiscal_q", as_of: AS_OF } };
+  });
+  return { facts, derived };
+}
+const minted = (index: number) => `d0000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+
+test("the revenue chart carries the window's QoQ growth as derived figures, each bound and cited on it", () => {
+  const { facts, derived } = nvdaWindow(true);
+  const [metricRow, bars] = buildIssuerFactBlocks({ facts, verifierFacts: verifierFacts(facts), derived, snapshotId: SNAPSHOT_ID, asOf: AS_OF });
+  const q = facts.map((f) => f.fact_id);
+  const params = (bars!.data_ref as { params: { fact_bindings: Array<{ fact_id: string }>; derived_figures: unknown } }).params;
+  // Specs 0 and 1 are Q4 2026's QoQ and YoY; 2..7 the series, oldest first.
+  assert.deepEqual(params.derived_figures, [
+    { fact_id: minted(2), metric: "Revenue growth (QoQ)", period: "Q2 2025", period_end: "2024-07-28", value: "15.3%", of: [q[1], q[0]] },
+    { fact_id: minted(3), metric: "Revenue growth (QoQ)", period: "Q3 2025", period_end: "2024-10-27", value: "16.8%", of: [q[2], q[1]] },
+    { fact_id: minted(4), metric: "Revenue growth (QoQ)", period: "Q4 2025", period_end: "2025-01-26", value: "12.1%", of: [q[3], q[2]] },
+    { fact_id: minted(5), metric: "Revenue growth (QoQ)", period: "Q1 2026", period_end: "2025-04-27", value: "12.0%", of: [q[4], q[3]] },
+    { fact_id: minted(6), metric: "Revenue growth (QoQ)", period: "Q2 2026", period_end: "2025-07-27", value: "6.1%", of: [q[5], q[4]] },
+    { fact_id: minted(7), metric: "Revenue growth (QoQ)", period: "Q3 2026", period_end: "2025-10-26", value: "22.0%", of: [q[6], q[5]] },
+  ]);
+  const series = [2, 3, 4, 5, 6, 7].map(minted);
+  assert.deepEqual(params.fact_bindings.map((binding) => binding.fact_id), [...q, ...series]);
+  assert.deepEqual(bars!.provenance_fact_refs, [...q, ...series]);
+  assert.deepEqual(bars!.source_refs, [SOURCE_ID]);
+  // The latest quarter's QoQ is the metric row's only.
+  assert.deepEqual(
+    (metricRow!.items as Array<{ label: string; format: string; value_ref: string }>).filter((item) => item.label.startsWith("Revenue growth")),
+    [
+      { label: "Revenue growth (QoQ)", value_ref: minted(0), format: "8.9%" },
+      { label: "Revenue growth (YoY)", value_ref: minted(1), format: "57.9%" },
+    ],
+  );
+  assert.equal((metricRow!.provenance_fact_refs as string[]).some((id) => series.includes(id)), false);
+});
+
+test("with no QoQ series, the revenue chart is the block it was", () => {
+  const { facts, derived } = nvdaWindow(false);
+  const [, bars] = buildIssuerFactBlocks({ facts, verifierFacts: verifierFacts(facts), derived, snapshotId: SNAPSHOT_ID, asOf: AS_OF });
+  assert.deepEqual(bars, blocksFor(facts)[1]);
+  assert.deepEqual(Object.keys((bars!.data_ref as { params: object }).params), ["fact_bindings"]);
+  assert.deepEqual(bars!.provenance_fact_refs, facts.map((f) => f.fact_id));
+});
