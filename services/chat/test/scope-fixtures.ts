@@ -12,7 +12,7 @@ type Metric = string | { metric: string; adjustment?: string; qualifier?: string
 
 // A model's proposal (scope-proposal.ts) as a test writes it: catalog metric
 // keys (or a key with its adjustment or qualifier), facets, what it turns off,
-// income items and its period (latest unless named).
+// income items and its period (none unless named).
 export function proposal(reply: {
   metrics?: ReadonlyArray<Metric>;
   asks?: ReadonlyArray<ScopeFacet>;
@@ -26,7 +26,7 @@ export function proposal(reply: {
     asks: new Set(reply.asks),
     turns_off: { facets: new Set(reply.off), metrics: new Set((reply.offMetrics ?? []).map((metric) => built(metric).metric_key)) },
     income_items: reply.items ?? [],
-    period: reply.period ?? { kind: "latest" },
+    period: reply.period ?? { kind: "none" },
   };
 }
 

@@ -32,7 +32,7 @@ import {
 // new when it is slow. A large model took 3-9 s in the dev probe.
 export const SCOPE_DEADLINES: ModelDeadlines = { attemptMs: 12_000, totalMs: 15_000 };
 const MAX_METRICS = 10;
-const FIELDLESS_PERIODS = ["latest", "trailing_twelve_months", "range", "other"] as const;
+const FIELDLESS_PERIODS = ["none", "latest", "trailing_twelve_months", "range", "other"] as const;
 const YEARS = { first: 1990, last: 2100 };
 
 type ProposalEnv = LlmSettingsLoaderEnv & { CHAT_SCOPE_PROPOSAL?: string };
@@ -170,7 +170,8 @@ const PROPOSAL_INSTRUCTIONS = [
   `A period in turns_off is ${PERIOD_FIELDS.join(" or ")}: a fiscal year or quarter the question asks to remove.`,
   `An <item> is one of ${INCOME_ITEMS.join(", ")}: an income-statement item the question names.`,
   "A <period> is the period the question asks about, one of:",
-  '- {"kind":"latest"}: no period named, or the latest or most recent one',
+  '- {"kind":"none"}: the question names no period',
+  '- {"kind":"latest"}: the latest, most recent or current period ("the latest fiscal year", "most recent results")',
   '- {"kind":"fiscal_year","fiscal_year":<year>}: a year ("fiscal 2025", "FY26", "for 2024", "2023 earnings")',
   `- {"kind":"fiscal_quarter","fiscal_period":<${FISCAL_PERIODS.join(", ")}>,"fiscal_year":<year or null>}: a quarter,`,
   '  its year null when the question names none ("what about Q3?")',
@@ -196,15 +197,15 @@ const PROPOSAL_INSTRUCTIONS = [
   '  its forecast", "below target", "beat guidance" ask explains. "Current guidance versus prior guidance" asks guidance.',
   '- A company\'s "sources of revenue" are not evidence; "your sources" or "where does this come from" are.',
   '- A bare "last quarter" is the one before, not latest_quarter: "compare gross margin with last quarter" asks',
-  "  margin_trend, and its period is latest.",
+  "  margin_trend, and its period is none.",
   '- turns_off lists what the question asks to remove or stop showing: "without guidance", "no forecasts" or',
   '  "don\'t include guidance" turn guidance off; "drop the YTD window" turns price_window off; "forget fiscal',
-  '  2025" turns fiscal_year off, and its period is latest. turns_off.metrics holds <metric> objects like',
+  '  2025" turns fiscal_year off, and its period is none. turns_off.metrics holds <metric> objects like',
   '  metrics, never bare keys: dropping "the cash flow" turns off {"metric":"operating_cash_flow"},',
   '  {"metric":"free_cash_flow"} and {"metric":"capex"}; dropping operating cash flow by name turns off only that one.',
   '- Companies are not facets: "drop AMD and NOW" turns nothing off.',
   '- "No" inside a clause removes nothing: "why was there no change in margins?" asks explains and margin_trend.',
   '- Removing quarter-over-quarter growth is not removing the fiscal quarter.',
   '- A follow-up that names nothing (a "why?", or "compare it with AMD") asks only what it says: explains, or nothing.',
-  "- A question or follow-up that names no period has the period latest.",
+  "- A question or follow-up that names no period has the period none.",
 ].join("\n");

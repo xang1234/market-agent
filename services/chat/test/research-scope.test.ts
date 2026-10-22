@@ -459,6 +459,17 @@ test("the reading's period wins over the period tokens in the question (#472)", 
   assert.deepEqual(followUp("What about that one?", proposal({ period: fq("Q3") }), prior).fiscal_quarter, { fiscal_year: 2025, fiscal_period: "Q3" });
 });
 
+test("a reading of the latest period drops an inherited one; a reading of none keeps it (#472 review)", () => {
+  const prior = fresh("Compare NVDA's and AMD's fiscal 2025 revenue", proposal({ metrics: ["income_statement"], period: fy(2025) }), [NVDA, AMD]);
+  const latest = followUp("Now the latest fiscal year", proposal({ period: { kind: "latest" } }), prior);
+  assert.deepEqual([latest.fiscal_year, latest.fiscal_quarter], [null, null]);
+  const kept = followUp("And their gross margins?", proposal({ asks: ["margins"], period: { kind: "none" } }), prior);
+  assert.deepEqual([kept.fiscal_year, kept.inherited.includes("fiscal_year")], [2025, true]);
+  const quarter = fresh("AMD revenue in Q2 2025", proposal({ period: fq("Q2", 2025) }), [AMD]);
+  const newest = followUp("What about the most recent results?", proposal({ period: { kind: "latest" } }), quarter);
+  assert.deepEqual([newest.fiscal_year, newest.fiscal_quarter], [null, null]);
+});
+
 test("with no reading, the period tokens in the question still apply (#472)", () => {
   assert.deepEqual([fresh("NVDA revenue FY2026", null).fiscal_year, fresh("NVDA revenue FY2026", null).fiscal_quarter], [2026, null]);
   const quarter = fresh("NVDA revenue in Q3 2025", null);

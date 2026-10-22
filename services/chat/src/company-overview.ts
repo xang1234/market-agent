@@ -26,9 +26,9 @@ export function namesCompanies(subjects: ReadonlyArray<RequestedSubject>, carrie
  * The companies a turn's overview covers, by the reading of its question: the
  * ones it names, or the one it names and that company's peers when it asks
  * for peers. Null when it asks for a figure or a period other than the
- * latest, turns something off ("no margins"), its scope has a price window
- * the overview would not show, or it asks for peers of several companies or
- * of one with none.
+ * latest, turns something off ("no margins"), it has no scope or one with a
+ * price window the overview would not show, or it asks for peers of several
+ * companies or of one with none.
  */
 export async function overviewSubjects(
   subjects: ReadonlyArray<RequestedSubject>,
@@ -36,7 +36,7 @@ export async function overviewSubjects(
   scope: Pick<ResearchScope, "price_window"> | null,
   peersOf: PeersOf,
 ): Promise<ReadonlyArray<RequestedSubject> | null> {
-  if (!asksForNoFigure(reading) || scope?.price_window) return null;
+  if (!asksForNoFigure(reading) || scope === null || scope.price_window) return null;
   if (!reading.asks.has("peers")) return subjects;
   const company = subjects.length === 1 ? subjects[0]! : null;
   if (company?.resolution.status !== "resolved") return null;
@@ -45,7 +45,7 @@ export async function overviewSubjects(
 }
 
 function asksForNoFigure(reading: ScopeProposal | null): reading is ScopeProposal {
-  return reading !== null && reading.period.kind === "latest" && reading.metrics.length === 0 && reading.income_items.length === 0 &&
+  return reading !== null && (reading.period.kind === "none" || reading.period.kind === "latest") && reading.metrics.length === 0 && reading.income_items.length === 0 &&
     reading.turns_off.facets.size === 0 && reading.turns_off.metrics.size === 0 &&
     [...reading.asks].every((facet) => facet === "latest_quarter" || facet === "peers");
 }

@@ -7,7 +7,7 @@ import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import type { PlanningModel, PlanningResult } from "../../financial-engine/src/planner.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { IDS, seedReportedFact } from "../../financial-engine/test/db-fixtures.ts";
-import { resolveResearchScope, type ScopeProposal } from "../src/research-scope.ts";
+import { resolveResearchScope, type ResearchScope, type ScopeProposal } from "../src/research-scope.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "../src/subjects.ts";
 import { chatDatabase, chatHarness, completed, METRIC_READING, NO_ASKS, resolveMention, revenueModel } from "./financial-fixtures.ts";
 
@@ -274,7 +274,7 @@ test("a question about one company that asks for no figure is answered with its 
     resolveResearchScope({ question: context.userIntent ?? "", companies: [{ issuer_id: COMPANIES.QTRS!, label: "QTRS" }], prior: null, asOf: "2026-10-22T00:00:00.000Z", served: true, proposal: await read });
 
   await t.test("a reading that asks for a figure or a period other than the latest, a carried company, a price window in its scope, or a company with no quarters goes to the planner", async () => {
-    const planned = async (userIntent: string, mentions: string[], options: { readQuestion?: () => Promise<ScopeProposal | null>; priorSubjects?: () => Promise<ChatResolvedSubjectPreResolution[]>; researchScope?: typeof scoped } = {}) => {
+    const planned = async (userIntent: string, mentions: string[], options: { readQuestion?: () => Promise<ScopeProposal | null>; priorSubjects?: () => Promise<ChatResolvedSubjectPreResolution[]>; researchScope?: typeof scoped | (() => Promise<ResearchScope>) } = {}) => {
       const model = revenueModel(mentions);
       const done = completed((await chatHarness(pool, { model, readQuestion: reading(NO_ASKS), resolveMention: resolve, ...options }).run({ ...base, userIntent })).events);
       return [model.calls, (await results(done.message_id)).map(([outputId]) => outputId)];
@@ -300,6 +300,10 @@ test("a question about one company that asks for no figure is answered with its 
       assert.deepEqual(await planned(`Revenue for QTRS ${period}`, ["QTRS"], { readQuestion: reading(read) }), [1, ["a_out"]], period);
     }
     assert.deepEqual(await planned("Revenue for QTRS YTD", ["QTRS"], { researchScope: scoped }), [1, ["a_out"]], "a scope with a price window the reading did not ask for");
+    const failing = async (): Promise<ResearchScope> => {
+      throw new Error("the scope is down");
+    };
+    assert.deepEqual(await planned("Revenue for QTRS", ["QTRS"], { researchScope: failing }), [1, ["a_out"]], "no scope");
   });
 
   await t.test("a reading of the latest period is the overview, whatever period words the question holds (#472)", async () => {

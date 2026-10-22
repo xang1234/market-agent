@@ -131,6 +131,8 @@ export const PERIOD_FIELDS = ["fiscal_year", "fiscal_quarter"] as const;
 export const FISCAL_PERIODS = ["Q1", "Q2", "Q3", "Q4"] as const;
 // The period a question asks about.
 export type ScopePeriod =
+  // No period named: a follow-up keeps the one it inherits.
+  | { kind: "none" }
   | { kind: "latest" }
   | { kind: "fiscal_year"; fiscal_year: number }
   // A null year: a quarter named alone ("Q3"), its year inherited.
@@ -155,7 +157,7 @@ export type ScopeProposal = {
   period: ScopePeriod;
 };
 
-const NO_PROPOSAL: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [], period: { kind: "latest" } };
+const NO_PROPOSAL: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [], period: { kind: "none" } };
 
 // The field a facet turned off clears. Guidance and a cause are read apart;
 // evidence and the latest quarter are asked for one turn only.
@@ -174,9 +176,10 @@ const CLEARS: Partial<Record<ScopeFacet | (typeof PERIOD_FIELDS)[number], ScopeF
 const PARTIAL_QUARTER = /\bQ([1-4])\b|\b(first|second|third|fourth)\s+quarter\b/i;
 const ORDINAL_QUARTERS: Readonly<Record<string, number>> = { first: 1, second: 2, third: 3, fourth: 4 };
 
-type NamedPeriod = { year?: number; quarter?: FiscalQuarter; yearlessQuarter?: (typeof FISCAL_PERIODS)[number] };
+type NamedPeriod = { year?: number; quarter?: FiscalQuarter; yearlessQuarter?: (typeof FISCAL_PERIODS)[number]; latest?: true };
 
 function periodOfReading(period: ScopePeriod): NamedPeriod {
+  if (period.kind === "latest") return { latest: true };
   if (period.kind === "fiscal_year") return { year: period.fiscal_year };
   if (period.kind !== "fiscal_quarter") return {};
   return period.fiscal_year === null
@@ -390,8 +393,8 @@ export function resolveResearchScope(input: {
   // the question ("forget fiscal 2025").
   const yearNamed = off.has("fiscal_year") ? undefined : period.year;
   const quarterNamed = off.has("fiscal_quarter") ? undefined : period.quarter;
-  const latest = asks.has("latest_quarter");
-  // The latest quarter replaces an inherited fiscal year ("Q1 fiscal 2025"
+  const latest = asks.has("latest_quarter") || period.latest === true;
+  // The latest period replaces an inherited fiscal year ("Q1 fiscal 2025"
   // named both), so a reader that takes no quarter isn't held to the old year.
   if (yearNamed === undefined && quarterNamed === undefined && latest) off.add("fiscal_year");
   // A complete quarter named without a fiscal year sets its year (#292

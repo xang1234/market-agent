@@ -13,7 +13,7 @@ const ENV = {
   LLM_OPENAI_MODELS: "gpt-4.1",
   LITELLM_MODEL: "openai/gpt-4.1",
 };
-const EMPTY = { metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "latest" } };
+const EMPTY = { metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" } };
 const reply = (fields: Record<string, unknown>) => JSON.stringify({ ...EMPTY, ...fields });
 const replying = (text: string) => () => async () => ({ text });
 
@@ -43,6 +43,7 @@ test("a full reply is read into the proposal, each metric built from the catalog
 
 test("each kind of period is read with exactly its fields (#472)", () => {
   for (const period of [
+    { kind: "none" },
     { kind: "latest" },
     { kind: "fiscal_year", fiscal_year: 2024 },
     { kind: "fiscal_quarter", fiscal_period: "Q3", fiscal_year: 2025 },
@@ -122,7 +123,7 @@ test("a reply wrapped in prose or a fence is read", () => {
     asks: new Set(["peers"]),
     turns_off: { facets: new Set(), metrics: new Set() },
     income_items: [],
-    period: { kind: "latest" },
+    period: { kind: "none" },
   });
 });
 

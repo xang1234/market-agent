@@ -83,8 +83,8 @@ type ScopeReply = {
   period: Readonly<Record<string, string | number | null>>;
 };
 // A turn's recorded scope: the facets it asks for, the catalog metrics and the
-// income items it names, its period (the latest unless named), nothing turned off.
-const scope = (asks: string[] = [], metrics: string[] = [], items: string[] = [], period: ScopeReply["period"] = { kind: "latest" }): ScopeReply =>
+// income items it names, its period (none unless named), nothing turned off.
+const scope = (asks: string[] = [], metrics: string[] = [], items: string[] = [], period: ScopeReply["period"] = { kind: "none" }): ScopeReply =>
   ({ metrics: metrics.map((metric) => ({ metric })), asks, turns_off: { facets: [], metrics: [] }, income_items: items, period });
 const INCOME = ["income_statement"];
 
@@ -227,7 +227,8 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
     id: "restatement",
     trap: "a restated quarter shows its restated value; the superseded one is not a cited value",
     turns: ["Analyze AAPL's latest quarter."],
-    scopes: [scope(["latest_quarter"])],
+    // hand-labelled 2026-10-22 #472: period added by hand; replace on live re-record.
+    scopes: [scope(["latest_quarter"], [], [], { kind: "latest" })],
     expect: { companies: ["AAPL"], route: "latest_quarter", shows: { block_title: "Latest quarter (Q3 2026)", label: "Revenue", format: "$97.4B" } },
     prose: "AAPL's revenue was $97.4B in its latest quarter.",
     good: [obs("AAPL's revenue was [[F1]] in Q3 2026.", ["F1"])],
