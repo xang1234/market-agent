@@ -103,27 +103,26 @@ function ResultLine({ content, result }: { content: FinancialAnswerContent; resu
   )
 }
 
-// `period` is set when the cell's column heading names none.
-function Cell({ result, period }: { result: FinancialPresentedResult | undefined; period?: string }): ReactElement {
+function Cell({ result, ownPeriod }: { result: FinancialPresentedResult | undefined; ownPeriod?: string }): ReactElement {
   if (!result) return <span className="text-muted">Not requested</span>
   const { presented } = result
+  const period = ownPeriod === undefined ? null : <span className="block text-xs text-muted">{ownPeriod}</span>
   if (presented.kind === 'value') {
-    const label = period === undefined ? presented.full_text : `${presented.full_text}, ${period}`
     return (
       <>
-        <InspectableResult resultId={result.result_id} label={label}>
-          <span title={presented.full_text} aria-label={label}>
+        <InspectableResult resultId={result.result_id} label={ownPeriod === undefined ? presented.full_text : `${presented.full_text}, ${ownPeriod}`}>
+          <span title={presented.full_text} aria-label={presented.full_text}>
             {presented.text}
           </span>
         </InspectableResult>
-        {period === undefined ? null : <span aria-hidden="true" className="block text-xs text-muted">{period}</span>}
+        {period}
       </>
     )
   }
   return (
     <>
       <span className="text-muted italic">{presented.text}</span>
-      {period === undefined ? null : <span className="block text-xs text-muted">{period}</span>}
+      {period}
     </>
   )
 }
@@ -194,10 +193,10 @@ function CertifiedTable({ blockId, content, results, table }: TableProps): React
                 </th>
                 {row.cells.map((cell, cellIndex) => {
                   const result = cell === null ? undefined : results.get(cell)
-                  const period = table.columns[cellIndex]?.period_label_id === null && result ? labelText(content, result.period_label_id) : undefined
+                  const ownPeriod = table.columns[cellIndex]?.period_label_id === null && result ? labelText(content, result.period_label_id) : undefined
                   return (
                     <td key={`${row.subject_label_id}-${cellIndex}`} className="num px-3 py-2 text-fg">
-                      <Cell result={result} period={period} />
+                      <Cell result={result} ownPeriod={ownPeriod} />
                     </td>
                   )
                 })}

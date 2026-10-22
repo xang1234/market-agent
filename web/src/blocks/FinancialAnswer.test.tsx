@@ -82,7 +82,7 @@ test('a supported answer prints server strings with full values, coverage, and a
   assert.doesNotMatch(html, /figcaption/, 'no model-supplied title')
 })
 
-test('a comparison across fiscal calendars has one column per line, each cell naming its own period', () => {
+test('a comparison across fiscal calendars has one column per line, each cell naming its own period in visible text', () => {
   const inspector: EvidenceInspectorContextValue = { openInspection() {}, openBlockInspection() {}, openFinancialResult() {}, closeInspection() {} }
   const html = renderToStaticMarkup(
     <EvidenceInspectorContext.Provider value={inspector}>
@@ -104,7 +104,7 @@ test('a comparison across fiscal calendars has one column per line, each cell na
   ])
   const rows = [...table.querySelectorAll('tbody tr')].map((row) => [
     row.querySelector('th')!.textContent,
-    ...[...row.querySelectorAll('td')].map((cell) => [...cell.children].map((part) => part.textContent)),
+    ...[...row.querySelectorAll('td')].map((cell) => [...cell.children].filter((part) => !part.closest('[aria-hidden="true"]')).map((part) => part.textContent)),
   ])
   assert.deepEqual(rows, [
     [
@@ -135,7 +135,7 @@ test('a comparison across fiscal calendars has one column per line, each cell na
   assert.doesNotMatch(html, /Not requested/)
   assert.equal(table.querySelector('tbody td button')!.getAttribute('aria-label'), 'Inspect the verified calculation for USD 68000000000, Q4 FY2026')
   const plain = renderToStaticMarkup(<FinancialAnswer block={financialAnswerFiscalCalendarsFixture} />)
-  assert.match(plain, /title="USD 7700000000" aria-label="USD 7700000000, Q2 FY2026">USD 7,700,000,000\.00</, 'without an inspector the value names its period to assistive tech')
+  assert.match(plain, /title="USD 7700000000" aria-label="USD 7700000000">USD 7,700,000,000\.00<\/span><span class="block text-xs text-muted">Q2 FY2026<\/span>/, 'the value keeps its own label; the period is ordinary text after it')
 })
 
 test('sorting uses the server exact order; descending keeps rows without a value last', () => {
