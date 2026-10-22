@@ -2479,28 +2479,59 @@
         ],
         "op": "highest",
         "result": "F1"
-      }
-    ],
-    "rejected": [
+      },
       {
         "index": 9,
+        "kind": "analyst_inference",
         "text": "NVDA shows superior profitability and growth, but AAPL has a larger revenue base; the similar price returns suggest the market may have already priced in NVDA's advantage or sees offsetting risks.",
-        "check": "judge",
-        "reason": "not_entailed: unsupported: the claim that the market may have already priced in NVDA's advantage or sees offsetting risks is a valuation reading the supports do not show."
+        "evidence": [],
+        "supports": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ]
       },
       {
         "index": 10,
+        "kind": "analyst_inference",
         "text": "The close price returns despite divergent fundamentals could reflect prior pricing of NVDA's growth or unshown risks.",
-        "check": "judge",
-        "reason": "not_entailed: unsupported: attributing the similar returns to prior pricing of NVDA's growth or unshown risks is a market explanation the supports do not show."
+        "evidence": [],
+        "supports": [
+          4,
+          5,
+          6,
+          7,
+          8
+        ]
       }
     ],
+    "rejected": [],
     "rendered": true,
     "repeated": [
       0,
       1,
       2,
       3
+    ],
+    "judged": [
+      {
+        "index": 9,
+        "verdict": "unsupported",
+        "worded_amount": false,
+        "reason": "The profitability, growth and revenue comparisons are supported, but the claim that the market may have priced in NVDA's advantage or sees offsetting risks is a valuation reading the answer does not show."
+      },
+      {
+        "index": 10,
+        "verdict": "unsupported",
+        "worded_amount": false,
+        "reason": "The answer shows similar price returns (6.05% for AAPL, 6.6% for NVDA) and divergent fundamentals, but nothing on prior pricing of NVDA's growth or unshown risks, so the proposed causes are speculation."
+      }
     ]
   },
   "removed": [],
@@ -2810,32 +2841,73 @@
         },
         {
           "type": "text",
+          "text": "\n\n"
+        },
+        {
+          "type": "text",
+          "text": "> **Unverified analyst view** (not backed by the figures shown): NVDA shows superior profitability and growth, but AAPL has a larger revenue base; the similar price returns suggest the market may have already priced in NVDA's advantage or sees offsetting risks."
+        },
+        {
+          "type": "text",
+          "text": "\n\n"
+        },
+        {
+          "type": "text",
+          "text": "> **Unverified analyst view** (not backed by the figures shown): The close price returns despite divergent fundamentals could reflect prior pricing of NVDA's growth or unshown risks."
+        },
+        {
+          "type": "text",
           "text": "\n\nThe periods compared end at different times, so they do not line up: AAPL's FY2025 ended Sep 2025 and NVDA's FY2026 ended Jan 2026."
         }
       ]
     }
   ],
-  "judge": {
-    "outcome": "replied",
-    "exchange": {
-      "messages": [
-        {
-          "role": "system",
-          "content": "You check the analyst inferences in a financial research answer. The reader sees each inference beside\nwhat it rests on: its supports (the observations, comparisons and management attributions it cites, each\nfigure as the data gives it, each claim as its source words it), the checked results of the comparisons among\nthem, and its subject, the company it is about. companies lists every company the answer covers. Judge each\ninference only against its own subject, checked results and supports; no outside knowledge, and nothing from\nanother inference. A company may be named by ticker, name or alias, in any case (\"nvda\", \"Nvidia\",\n\"Advanced Micro Devices\"): naming one is fine, but what the inference says about it must be backed like anything else.\n\nAn inference is entailed when its supports state or clearly imply what it says. Qualitative words that\nsummarise the supports' figures (large, concentrated, higher, slowing) are fine when the figures bear them\nout, and so is a count of the things the supports list (\"the two companies\", \"four segments\").\nIt is not_entailed when any of these hold; the reason starts with its code:\n- unsupported: it claims something the supports neither state nor imply, such as a cause, a forecast, a\n  trend, or a metric, segment or period they do not show. A hedge does not make it supported: a valuation or\n  market reading such as \"may be priced in\" or \"the market may already reflect\" is unsupported unless the\n  supports show it.\n- worded_amount: it states an amount or quantity in words, whether or not the supports bear it out:\n  money, a percentage, a growth rate, a multiple or fraction (\"doubled\", \"four times\", \"two-thirds\"),\n  or a span of time (\"an eight-month gap\"), e.g. \"hundreds of millions of dollars\", \"a quarter\n  billion dollars\", \"one and a half percent\", \"single-digit growth\".\n- contradicts_ranking: who leads, trails, is highest or lowest, or the order it states disagrees with\n  the checked results or the supports' figures.\n- contradicts_trend: a direction it states (rising, falling, expanding, recovering) disagrees with a\n  checked trend or the supports' figures.\n\nReply with JSON only, one verdict per inference id; if you correct yourself, the last JSON in the reply is read:\n{\"verdicts\":[{\"id\":<id>,\"verdict\":\"entailed\"|\"not_entailed\",\"reason\":\"<code>: <one short sentence>\"}]}\nGive a reason for every not_entailed verdict; for entailed, leave it out."
-        },
-        {
-          "role": "user",
-          "content": "{\"companies\":[\"AAPL\",\"NVDA\"],\"inferences\":[{\"id\":9,\"subject\":null,\"text\":\"NVDA shows superior profitability and growth, but AAPL has a larger revenue base; the similar price returns suggest the market may have already priced in NVDA's advantage or sees offsetting risks.\",\"checked_results\":[\"NVDA highest on gross margin, net margin, and revenue growth (YoY)\",\"AAPL highest on revenue\"],\"supports\":[\"AAPL's revenue was $416.2B in FY2025 (ended Sep 2025); NVDA's revenue was $209.9B in FY2026 (ended Jan 2026).\",\"AAPL's gross margin was 46.9% and net margin 26.9% in FY2025 (ended Sep 2025).\",\"NVDA's gross margin was 70.8% and net margin 53.6% in FY2026 (ended Jan 2026).\",\"AAPL's revenue growth (YoY) was 6.4% in FY2025 (ended Sep 2025); NVDA's revenue growth (YoY) was 60.9% in FY2026 (ended Jan 2026).\",\"AAPL's price return was 6.05% in Dec 2025 to Aug 2026; NVDA's price return was 6.6% in Dec 2025 to Aug 2026.\",\"Of AAPL and NVDA, NVDA's gross margin was highest: AAPL 46.9% (FY2025, ended Sep 2025), NVDA 70.8% (FY2026, ended Jan 2026).\",\"Of AAPL and NVDA, NVDA's net margin was highest: AAPL 26.9% (FY2025, ended Sep 2025), NVDA 53.6% (FY2026, ended Jan 2026).\",\"Of AAPL and NVDA, NVDA's revenue growth (YoY) was highest: AAPL 6.4% (FY2025, ended Sep 2025), NVDA 60.9% (FY2026, ended Jan 2026).\",\"Of AAPL and NVDA, AAPL's revenue was highest: AAPL $416.2B (FY2025, ended Sep 2025), NVDA $209.9B (FY2026, ended Jan 2026).\"]},{\"id\":10,\"subject\":null,\"text\":\"The close price returns despite divergent fundamentals could reflect prior pricing of NVDA's growth or unshown risks.\",\"checked_results\":[\"NVDA highest on gross margin, net margin, and revenue growth (YoY)\",\"AAPL highest on revenue\"],\"supports\":[\"AAPL's price return was 6.05% in Dec 2025 to Aug 2026; NVDA's price return was 6.6% in Dec 2025 to Aug 2026.\",\"Of AAPL and NVDA, NVDA's gross margin was highest: AAPL 46.9% (FY2025, ended Sep 2025), NVDA 70.8% (FY2026, ended Jan 2026).\",\"Of AAPL and NVDA, NVDA's net margin was highest: AAPL 26.9% (FY2025, ended Sep 2025), NVDA 53.6% (FY2026, ended Jan 2026).\",\"Of AAPL and NVDA, NVDA's revenue growth (YoY) was highest: AAPL 6.4% (FY2025, ended Sep 2025), NVDA 60.9% (FY2026, ended Jan 2026).\",\"Of AAPL and NVDA, AAPL's revenue was highest: AAPL $416.2B (FY2025, ended Sep 2025), NVDA $209.9B (FY2026, ended Jan 2026).\"]}]}"
+  "judge": [
+    {
+      "outcome": "replied",
+      "exchange": {
+        "messages": [
+          {
+            "role": "system",
+            "content": "You check the analyst inferences in a financial research answer. Each inference comes with what it rests on:\nits supports (the observations, comparisons and management attributions it cites, each figure as the data\ngives it, each claim as its source words it), the checked results of the comparisons among them, and its\nsubject, the company it is about. rest_of_answer is the answer's other checked observations and comparisons,\nwritten the same way; the page may show one of them inside a comparison that states its figures.\nfigures_shown holds the figures the page's tables and charts show, a line per table, headed by its title when it\nhas one. companies lists every company the answer covers; rest_of_answer and figures_shown cover every one of\nthem, and an inference may rest on another company's figures when it compares them. Judge each inference\nagainst its subject, checked results, supports, rest_of_answer and figures_shown; no outside knowledge, and\nnothing from another inference. A company may be named by ticker, name or alias, in any case (\"nvda\",\n\"Nvidia\", \"Advanced Micro Devices\"): naming one is fine, but what the inference says about it must be backed\nlike anything else. Qualitative words that summarise the figures (large, concentrated, higher, slowing) are\nfine when the figures bear them out, and so is an exact count of the items the answer lists (\"the two\ncompanies\", \"four segments\", \"the eight quarters shown\"). That covers no duration and no difference between\ndates or values (\"a one-month offset\", \"an eight-month gap\"): those are amounts in words.\n\nAnswer two questions about each inference.\n\nverdict: how it relates to what the answer shows. When both unsupported and contradicted apply, contradicted wins.\n- entailed: its supports, the rest of the answer and the figures shown state or clearly imply what it says.\n- unsupported: it contradicts nothing shown but claims something the answer neither states nor implies, such\n  as a cause, a forecast, a trend, or a metric, segment or period not shown. A hedge does not make it\n  supported: a valuation or market reading such as \"may be priced in\" or \"the market may already reflect\" is\n  unsupported unless the answer shows it.\n- contradicted: something it says disagrees with the figures or checked results shown: who leads, trails, is\n  highest or lowest, or the order it states; a direction it states (rising, falling, expanding, recovering)\n  against a checked trend or the figures; or any other statement the figures shown make false.\n\nworded_amount, whatever its verdict: true when the inference's own words state any amount, fraction, multiple\nor span of time, even when the figures bear it out: money, a percentage, a growth rate, a multiple or fraction\n(\"doubled\", \"four times\", \"two-thirds\"), or a duration or a difference between dates or values (\"a\none-month offset\", \"an eight-month gap\"), e.g. \"hundreds of millions of dollars\", \"a quarter billion\ndollars\", \"one and a half percent\", \"single-digit growth\". An exact count of the items the answer lists\n(\"the two companies\", \"four segments\", \"the eight quarters shown\") is not one, and neither is a word that\nnames no quantity (\"the gap\", \"the offset\", \"higher\"), whatever the figures say. Otherwise false.\n\nReply with JSON only, one verdict per inference id; if you correct yourself, the last JSON in the reply is read:\n{\"verdicts\":[{\"id\":<id>,\"verdict\":\"entailed\"|\"unsupported\"|\"contradicted\",\"worded_amount\":true|false,\"reason\":\"<one short sentence>\"}]}\nGive a reason for every verdict but entailed, and whenever worded_amount is true; otherwise leave it out."
+          },
+          {
+            "role": "user",
+            "content": "{\"companies\":[\"AAPL\",\"NVDA\"],\"inferences\":[{\"id\":9,\"subject\":null,\"text\":\"NVDA shows superior profitability and growth, but AAPL has a larger revenue base; the similar price returns suggest the market may have already priced in NVDA's advantage or sees offsetting risks.\",\"checked_results\":[\"NVDA highest on gross margin, net margin, and revenue growth (YoY)\",\"AAPL highest on revenue\"],\"supports\":[\"AAPL's revenue was $416.2B in FY2025 (ended Sep 2025); NVDA's revenue was $209.9B in FY2026 (ended Jan 2026).\",\"AAPL's gross margin was 46.9% and net margin 26.9% in FY2025 (ended Sep 2025).\",\"NVDA's gross margin was 70.8% and net margin 53.6% in FY2026 (ended Jan 2026).\",\"AAPL's revenue growth (YoY) was 6.4% in FY2025 (ended Sep 2025); NVDA's revenue growth (YoY) was 60.9% in FY2026 (ended Jan 2026).\",\"AAPL's price return was 6.05% in Dec 2025 to Aug 2026; NVDA's price return was 6.6% in Dec 2025 to Aug 2026.\",\"Of AAPL and NVDA, NVDA's gross margin was highest: AAPL 46.9% (FY2025, ended Sep 2025), NVDA 70.8% (FY2026, ended Jan 2026), 23.9 percentage points above AAPL.\",\"Of AAPL and NVDA, NVDA's net margin was highest: AAPL 26.9% (FY2025, ended Sep 2025), NVDA 53.6% (FY2026, ended Jan 2026), 26.7 percentage points above AAPL.\",\"Of AAPL and NVDA, NVDA's revenue growth (YoY) was highest: AAPL 6.4% (FY2025, ended Sep 2025), NVDA 60.9% (FY2026, ended Jan 2026), 54.5 percentage points above AAPL.\",\"Of AAPL and NVDA, AAPL's revenue was highest: AAPL $416.2B (FY2025, ended Sep 2025), NVDA $209.9B (FY2026, ended Jan 2026).\"],\"rest_of_answer\":[],\"figures_shown\":[\"Side by side: AAPL FY2025 (ended Sep 2025), NVDA FY2026 (ended Jan 2026); fiscal years end 4 months apart: AAPL's revenue was $416.2B, gross margin 46.9%, net margin 26.9% and revenue growth (YoY) 6.4% in FY2025 (ended Sep 2025); NVDA's revenue was $209.9B, gross margin 70.8%, net margin 53.6% and revenue growth (YoY) 60.9% in FY2026 (ended Jan 2026).\",\"Price return (split-adjusted, excluding dividends): AAPL's price return was 6.05% in Dec 2025 to Aug 2026; NVDA's price return was 6.6% in Dec 2025 to Aug 2026.\"]}]}"
+          }
+        ],
+        "text": "{\"verdicts\":[{\"id\":9,\"verdict\":\"unsupported\",\"worded_amount\":false,\"reason\":\"The profitability, growth and revenue comparisons are supported, but the claim that the market may have priced in NVDA's advantage or sees offsetting risks is a valuation reading the answer does not show.\"}]}",
+        "truncated": false,
+        "deployment": "anthropic/claude-haiku-5-5",
+        "latency_ms": 3528,
+        "usage": {
+          "input_tokens": 2240,
+          "output_tokens": 272
         }
-      ],
-      "text": "{\"verdicts\":[{\"id\":9,\"verdict\":\"not_entailed\",\"reason\":\"unsupported: the claim that the market may have already priced in NVDA's advantage or sees offsetting risks is a valuation reading the supports do not show.\"},{\"id\":10,\"verdict\":\"not_entailed\",\"reason\":\"unsupported: attributing the similar returns to prior pricing of NVDA's growth or unshown risks is a market explanation the supports do not show.\"}]}",
-      "truncated": false,
-      "deployment": "anthropic/claude-haiku-5-5",
-      "latency_ms": 3258,
-      "usage": {
-        "input_tokens": 2014,
-        "output_tokens": 335
+      }
+    },
+    {
+      "outcome": "replied",
+      "exchange": {
+        "messages": [
+          {
+            "role": "system",
+            "content": "You check the analyst inferences in a financial research answer. Each inference comes with what it rests on:\nits supports (the observations, comparisons and management attributions it cites, each figure as the data\ngives it, each claim as its source words it), the checked results of the comparisons among them, and its\nsubject, the company it is about. rest_of_answer is the answer's other checked observations and comparisons,\nwritten the same way; the page may show one of them inside a comparison that states its figures.\nfigures_shown holds the figures the page's tables and charts show, a line per table, headed by its title when it\nhas one. companies lists every company the answer covers; rest_of_answer and figures_shown cover every one of\nthem, and an inference may rest on another company's figures when it compares them. Judge each inference\nagainst its subject, checked results, supports, rest_of_answer and figures_shown; no outside knowledge, and\nnothing from another inference. A company may be named by ticker, name or alias, in any case (\"nvda\",\n\"Nvidia\", \"Advanced Micro Devices\"): naming one is fine, but what the inference says about it must be backed\nlike anything else. Qualitative words that summarise the figures (large, concentrated, higher, slowing) are\nfine when the figures bear them out, and so is an exact count of the items the answer lists (\"the two\ncompanies\", \"four segments\", \"the eight quarters shown\"). That covers no duration and no difference between\ndates or values (\"a one-month offset\", \"an eight-month gap\"): those are amounts in words.\n\nAnswer two questions about each inference.\n\nverdict: how it relates to what the answer shows. When both unsupported and contradicted apply, contradicted wins.\n- entailed: its supports, the rest of the answer and the figures shown state or clearly imply what it says.\n- unsupported: it contradicts nothing shown but claims something the answer neither states nor implies, such\n  as a cause, a forecast, a trend, or a metric, segment or period not shown. A hedge does not make it\n  supported: a valuation or market reading such as \"may be priced in\" or \"the market may already reflect\" is\n  unsupported unless the answer shows it.\n- contradicted: something it says disagrees with the figures or checked results shown: who leads, trails, is\n  highest or lowest, or the order it states; a direction it states (rising, falling, expanding, recovering)\n  against a checked trend or the figures; or any other statement the figures shown make false.\n\nworded_amount, whatever its verdict: true when the inference's own words state any amount, fraction, multiple\nor span of time, even when the figures bear it out: money, a percentage, a growth rate, a multiple or fraction\n(\"doubled\", \"four times\", \"two-thirds\"), or a duration or a difference between dates or values (\"a\none-month offset\", \"an eight-month gap\"), e.g. \"hundreds of millions of dollars\", \"a quarter billion\ndollars\", \"one and a half percent\", \"single-digit growth\". An exact count of the items the answer lists\n(\"the two companies\", \"four segments\", \"the eight quarters shown\") is not one, and neither is a word that\nnames no quantity (\"the gap\", \"the offset\", \"higher\"), whatever the figures say. Otherwise false.\n\nReply with JSON only, one verdict per inference id; if you correct yourself, the last JSON in the reply is read:\n{\"verdicts\":[{\"id\":<id>,\"verdict\":\"entailed\"|\"unsupported\"|\"contradicted\",\"worded_amount\":true|false,\"reason\":\"<one short sentence>\"}]}\nGive a reason for every verdict but entailed, and whenever worded_amount is true; otherwise leave it out."
+          },
+          {
+            "role": "user",
+            "content": "{\"companies\":[\"AAPL\",\"NVDA\"],\"inferences\":[{\"id\":10,\"subject\":null,\"text\":\"The close price returns despite divergent fundamentals could reflect prior pricing of NVDA's growth or unshown risks.\",\"checked_results\":[\"NVDA highest on gross margin, net margin, and revenue growth (YoY)\",\"AAPL highest on revenue\"],\"supports\":[\"AAPL's price return was 6.05% in Dec 2025 to Aug 2026; NVDA's price return was 6.6% in Dec 2025 to Aug 2026.\",\"Of AAPL and NVDA, NVDA's gross margin was highest: AAPL 46.9% (FY2025, ended Sep 2025), NVDA 70.8% (FY2026, ended Jan 2026), 23.9 percentage points above AAPL.\",\"Of AAPL and NVDA, NVDA's net margin was highest: AAPL 26.9% (FY2025, ended Sep 2025), NVDA 53.6% (FY2026, ended Jan 2026), 26.7 percentage points above AAPL.\",\"Of AAPL and NVDA, NVDA's revenue growth (YoY) was highest: AAPL 6.4% (FY2025, ended Sep 2025), NVDA 60.9% (FY2026, ended Jan 2026), 54.5 percentage points above AAPL.\",\"Of AAPL and NVDA, AAPL's revenue was highest: AAPL $416.2B (FY2025, ended Sep 2025), NVDA $209.9B (FY2026, ended Jan 2026).\"],\"rest_of_answer\":[\"AAPL's revenue was $416.2B in FY2025 (ended Sep 2025); NVDA's revenue was $209.9B in FY2026 (ended Jan 2026).\",\"AAPL's gross margin was 46.9% and net margin 26.9% in FY2025 (ended Sep 2025).\",\"NVDA's gross margin was 70.8% and net margin 53.6% in FY2026 (ended Jan 2026).\",\"AAPL's revenue growth (YoY) was 6.4% in FY2025 (ended Sep 2025); NVDA's revenue growth (YoY) was 60.9% in FY2026 (ended Jan 2026).\"],\"figures_shown\":[\"Side by side: AAPL FY2025 (ended Sep 2025), NVDA FY2026 (ended Jan 2026); fiscal years end 4 months apart: AAPL's revenue was $416.2B, gross margin 46.9%, net margin 26.9% and revenue growth (YoY) 6.4% in FY2025 (ended Sep 2025); NVDA's revenue was $209.9B, gross margin 70.8%, net margin 53.6% and revenue growth (YoY) 60.9% in FY2026 (ended Jan 2026).\",\"Price return (split-adjusted, excluding dividends): AAPL's price return was 6.05% in Dec 2025 to Aug 2026; NVDA's price return was 6.6% in Dec 2025 to Aug 2026.\"]}]}"
+          }
+        ],
+        "text": "{\"verdicts\":[{\"id\":10,\"verdict\":\"unsupported\",\"worded_amount\":false,\"reason\":\"The answer shows similar price returns (6.05% for AAPL, 6.6% for NVDA) and divergent fundamentals, but nothing on prior pricing of NVDA's growth or unshown risks, so the proposed causes are speculation.\"}]}",
+        "truncated": false,
+        "deployment": "anthropic/claude-haiku-5-5",
+        "latency_ms": 5853,
+        "usage": {
+          "input_tokens": 2215,
+          "output_tokens": 338
+        }
       }
     }
-  }
+  ]
 }

@@ -15,6 +15,7 @@
 
 import { checkComparison, comparablePeriods, type ComparisonOp } from "./comparisons.ts";
 import type { EvidencePacket } from "./evidence-packet.ts";
+import type { InferenceVerdict } from "./verdicts.ts";
 import { isRecord } from "../../shared/src/http.ts";
 
 export const ASSERTION_KINDS = ["observation", "comparison", "management_attribution", "analyst_inference", "unknown_cause"] as const;
@@ -47,6 +48,10 @@ export type AssertionReport = {
   // Accepted observations the rendered answer leaves out, since a comparison
   // it shows writes every figure they state.
   repeated?: ReadonlyArray<number>;
+  // Each judged inference's verdict, in index order (answer-trace.ts); what
+  // the reader sees of it is its shownAs (verdicts.ts). Absent when no
+  // inference was judged.
+  judged?: ReadonlyArray<InferenceVerdict>;
 };
 
 // The answer is rendered from this list (#208), so it holds a comparison
@@ -57,7 +62,7 @@ export const MAX_ASSERTIONS = 12;
 // The check a rejection failed, named so a report can tell a wrong number or
 // citation (binding) from a wrong ranking or trend (comparative), and so a
 // held-out mutation fails one named check (#221). judge: an inference the
-// judge did not find entailed (answer-trace.ts), so it was not shown.
+// judge hid (verdicts.ts shownAs).
 export type RejectionCheck =
   | "binding" | "comparative" | "reference" | "kind" | "support" | "limit" | "format" | "rendering" | "judge";
 export type Rejection = { index: number; text?: string; check: RejectionCheck; reason: string };
@@ -146,6 +151,12 @@ export function checkAssertions(list: unknown[] | null | undefined, packet: Evid
     // are its supports', rendered from the packet beside it.
     if (kind === "analyst_inference" && /\p{N}/u.test(item.text)) {
       reject(index, item, "binding", "an inference rests on its supports; it writes no figure");
+      continue;
+    }
+    // Nor an address: the page links one whatever its escaping (GFM's
+    // autolinks: a scheme, www. or an email), and the words are the model's.
+    if (kind === "analyst_inference" && /(?:https?|mailto|xmpp):|www\.|[\w.+-]@[\w-]/i.test(item.text)) {
+      reject(index, item, "format", "an inference writes no link: the page would render the address as one");
       continue;
     }
     const figureIds = evidence.filter((id) => figures.has(id));

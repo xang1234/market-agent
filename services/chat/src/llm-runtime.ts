@@ -13,7 +13,9 @@ import { displayedFigures, requestIsNamedGap } from "./fact-blocks.ts";
 import { buildEvidencePacket, packetForModel, type AvailableFigure, type ClaimEvidence, type ClaimRecord, type EvidencePacket } from "./evidence-packet.ts";
 import { assertionList, checkAssertions, MAX_ASSERTIONS, type AssertionReport } from "./assertions.ts";
 import { formatCompactCurrency, formatCurrency } from "../../analyze/src/block-format.ts";
-import { calendarNote, plainText, renderAssertion, type RenderedAssertion } from "./render-assertions.ts";
+import { calendarNote, plainText, renderAssertion, unverifiedInference, type RenderedAssertion } from "./render-assertions.ts";
+import type { Segment } from "./prose-refs.ts";
+import type { ShownAs } from "./verdicts.ts";
 import type { ResearchScope } from "./research-scope.ts";
 import type { ModelExchange } from "./answer-trace.ts";
 import { isRecord } from "../../shared/src/http.ts";
@@ -27,16 +29,20 @@ const NO_ANSWER_FALLBACK_TEXT = "No written answer is available for this questio
 // What the reader sees as the answer (#208): the accepted assertions in their
 // templates, with the notes they cannot say themselves, or a fixed sentence no
 // model wrote. The model's prose is never shown. An analyst inference's
-// paragraph names its assertion: it shows only once the judge entails it.
-type Paragraph = Pick<RenderedAssertion, "segments" | "fact_bindings" | "source_refs"> & { inference?: number };
+// paragraph names its assertion and carries its unverified form: which one
+// shows, if any, is the judge's verdict.
+type Paragraph = Pick<RenderedAssertion, "segments" | "fact_bindings" | "source_refs"> & {
+  inference?: { index: number; unverified: ReadonlyArray<Segment> };
+};
 type Answer =
   | { kind: "rendered"; paragraphs: ReadonlyArray<Paragraph>; notes: ReadonlyArray<string> }
   | { kind: "fallback"; text: string };
 
-// What an answer shows of each accepted inference, by index: "shown" (the
-// judge entailed it, inference-judge.ts), "pending" (a line in its place while
-// the judge reads it); one absent is left out.
-export type Inferences = ReadonlyMap<number, "shown" | "pending">;
+// What an answer shows of each accepted inference, by index: its verdict's
+// shownAs (verdicts.ts), or "pending", a line in its place while the
+// judge reads it; one absent is left out.
+export type InferenceState = Exclude<ShownAs, "hidden"> | "pending";
+export type Inferences = ReadonlyMap<number, InferenceState>;
 // The turn's blocks, its answer showing the given inferences.
 export type AnswerBlocks = (inferences: Inferences) => ReadonlyArray<Record<string, unknown>>;
 
@@ -296,6 +302,9 @@ export async function composeAnalystBlocksWithLlm(input: {
     const kept = report.accepted.map((assertion) => ({
       ...renderAssertion(assertion, packet, factBlocks, report.accepted),
       kind: assertion.kind,
+      ...(assertion.kind === "analyst_inference"
+        ? { inference: { index: assertion.index, unverified: unverifiedInference(assertion, packet) } }
+        : {}),
     }));
     // The figures the kept assertions state, and their companies: a comparison
     // rendered for only some of the companies it shows figures for would read
@@ -335,8 +344,7 @@ export async function composeAnalystBlocksWithLlm(input: {
     const answer = {
       kind: "rendered" as const,
       paragraphs: [
-        ...kept.filter((entry) => !repeated.includes(entry.index))
-          .map(({ kind, ...entry }) => (kind === "analyst_inference" ? { ...entry, inference: entry.index } : entry)),
+        ...kept.filter((entry) => !repeated.includes(entry.index)),
         ...otherSides,
       ],
       notes: [
@@ -556,8 +564,10 @@ function withAnswer(blocks: ReadonlyArray<Record<string, unknown>>, answer: Answ
     }
     const { notes } = answer;
     const paragraphs = answer.paragraphs.flatMap((entry) => {
-      const state = entry.inference === undefined ? "shown" : inferences.get(entry.inference);
-      return state === "shown" ? [entry] : state === "pending" ? [PENDING_INFERENCE] : [];
+      if (entry.inference === undefined) return [entry];
+      const state = inferences.get(entry.inference.index);
+      const as = { shown: entry, unverified: { ...entry, segments: entry.inference.unverified }, pending: PENDING_INFERENCE };
+      return state === undefined ? [] : [as[state]];
     });
     const segments = [
       ...paragraphs.flatMap((entry, i) => [...(i === 0 ? [] : [{ type: "text", text: "\n\n" }]), ...entry.segments]),

@@ -6,7 +6,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import type { LlmChatRequest, LlmChatResult } from "../../llm/src/index.ts";
-import { answerTurn, replayRecorded, type TurnTrace } from "../src/answer-trace.ts";
+import { answerTurn, composeTraced, inferenceCases, judgedAnswer, replayRecorded, type TurnTrace } from "../src/answer-trace.ts";
 import type { JudgeRecord } from "../src/inference-judge.ts";
 
 const trace = async (name: string): Promise<TurnTrace> =>
@@ -24,15 +24,21 @@ const ENV = {
 };
 const JUDGED_ENV = { ...ENV, JUDGE_LITELLM_MODEL: "anthropic/claude-haiku-5-5" };
 
-// One call judging both inferences, as the judge was asked before #376.
-const VERDICTS = '{"verdicts":[{"id":6,"verdict":"entailed"},{"id":7,"verdict":"not_entailed","reason":"unsupported: no support measures diversification."}]}';
-const ENTAILED = (id: number) => `{"verdicts":[{"id":${id},"verdict":"entailed"}]}`;
-const UNSUPPORTED_7 = '{"verdicts":[{"id":7,"verdict":"not_entailed","reason":"unsupported: no support measures diversification."}]}';
+// One reply judging both inferences.
+const VERDICTS = '{"verdicts":[{"id":6,"verdict":"entailed","worded_amount":false},{"id":7,"verdict":"unsupported","worded_amount":false,"reason":"no support measures diversification."}]}';
+const ENTAILED = (id: number) => `{"verdicts":[{"id":${id},"verdict":"entailed","worded_amount":false}]}`;
+const UNSUPPORTED_7 = '{"verdicts":[{"id":7,"verdict":"unsupported","worded_amount":false,"reason":"no support measures diversification."}]}';
+// The report's verdicts when 6 is entailed and 7 unsupported.
+const JUDGED = [
+  { index: 6, verdict: "entailed", worded_amount: false },
+  { index: 7, verdict: "unsupported", worded_amount: false, reason: "no support measures diversification." },
+];
 
 const FIGURES = "By revenue, highest first: Data Center $55.2B, Gaming $4.3B, OEM & Other $1.1B, Professional Visualization $900.0M, Automotive $650.0M (Q4 2026, ended Jan 2026).";
 const PENDING = "> _Checking an analyst inference against the figures it rests on…_";
 const CONCENTRATED = "> **Analyst inference** (revenue highest first: Data Center, Gaming, OEM & Other, Professional Visualization, Automotive): NVIDIA's revenue is heavily concentrated in Data Center, creating significant single-segment exposure for the consolidated top line.";
 const CUSHION = "> **Analyst inference** (revenue highest first: Data Center, Gaming, OEM & Other, Professional Visualization, Automotive): The other four segments provide limited diversification cushion relative to Data Center's dominance.";
+const UNVERIFIED_CUSHION = "> **Unverified analyst view** (not backed by the figures shown): The other four segments provide limited diversification cushion relative to Data Center's dominance.";
 
 // The answer model replies as recorded; the judge as given. Each call's model is kept.
 function models(recorded: TurnTrace, judge: (request: LlmChatRequest) => Promise<LlmChatResult>) {
@@ -63,7 +69,8 @@ const text = (blocks: ReadonlyArray<Record<string, unknown>>) =>
 const judgeRejections = (report: TurnTrace["assertions"]) =>
   (report?.rejected ?? []).filter((entry) => entry.check === "judge").map(({ index, reason }) => [index, reason]);
 
-test("an inference shows only once the judge entails it: until then a line holds its place, and one not entailed never shows", async () => {
+test("an entailed inference shows as an analyst inference and an unsupported one as an unverified analyst view; until its verdict a line holds its place", async (t) => {
+  const logged = t.mock.method(console, "info", () => {});
   const requests: number[][] = [];
   const { calls, createClient } = models(SEGMENTS, async (request) => {
     requests.push(asked(request));
@@ -73,11 +80,34 @@ test("an inference shows only once the judge entails it: until then a line holds
 
   assert.equal(text(answer.blocks), [FIGURES, PENDING, PENDING].join("\n\n"));
   const judged = await answer.judging!.done;
-  assert.equal(text(judged.blocks), [FIGURES, CONCENTRATED].join("\n\n"));
-  assert.deepEqual(judgeRejections(judged.assertions), [[7, "not_entailed: unsupported: no support measures diversification."]]);
-  assert.deepEqual(judged.assertions?.accepted.filter((entry) => entry.kind === "analyst_inference").map((entry) => entry.index), [6]);
+  assert.equal(text(judged.blocks), [FIGURES, CONCENTRATED, UNVERIFIED_CUSHION].join("\n\n"));
+  assert.deepEqual(judgeRejections(judged.assertions), []);
+  assert.deepEqual(judged.assertions?.judged, JUDGED);
+  assert.deepEqual(judged.assertions?.accepted.filter((entry) => entry.kind === "analyst_inference").map((entry) => entry.index), [6, 7]);
   assert.deepEqual(calls, ["anthropic/claude-sonnet-5-5", "anthropic/claude-haiku-5-5", "anthropic/claude-haiku-5-5"]);
   assert.deepEqual(requests.sort(), [[6], [7]]);
+  assert.deepEqual(logged.mock.calls.map((call) => String(call.arguments[0])).filter((line) => line.startsWith("[chat] judge")), [
+    `[chat] judge thread=${SEGMENTS.thread_id} run=${SEGMENTS.run_id} on anthropic/claude-haiku-5-5: 1 shown, 1 unverified, of 2 inferences`,
+  ]);
+});
+
+test("an unsupported inference's line gives way to its unverified label when its own verdict settles", async () => {
+  const slow = deferred<LlmChatResult>();
+  const { createClient } = models(SEGMENTS, byInference({ 6: async () => ({ text: ENTAILED(6) }), 7: () => slow.promise }));
+  const answer = await answerTurn(SEGMENTS.input, turn(SEGMENTS), { env: JUDGED_ENV, createClient });
+  const seen: string[] = [];
+  const concentrated = new Promise<void>((resolve) => {
+    answer.judging!.watch((blocks) => {
+      seen.push(text(blocks));
+      if (text(blocks).includes(CONCENTRATED)) resolve();
+    });
+  });
+
+  await concentrated;
+  assert.equal(seen.at(-1), [FIGURES, CONCENTRATED, PENDING].join("\n\n"));
+  slow.resolve({ text: UNSUPPORTED_7 });
+  assert.equal(text((await answer.judging!.done).blocks), [FIGURES, CONCENTRATED, UNVERIFIED_CUSHION].join("\n\n"));
+  assert.equal(seen.at(-1), [FIGURES, CONCENTRATED, UNVERIFIED_CUSHION].join("\n\n"));
 });
 
 test("each inference shows as soon as its own verdict arrives, not when a slower sibling's does", async () => {
@@ -139,14 +169,18 @@ test("a judge call that fails or runs out of time hides only its own inference",
   }
 });
 
-test("an inference with no entailed verdict stays hidden: not entailed, a reply with none for it, a reply that is no verdict list, a failed call, a call past its deadline", async (t) => {
+test("an inference stays hidden when the judge finds it contradicted or stating an amount in words, whatever its verdict, or gives it no verdict: a reply with none for it or no yes-or-no on the amount, a reply that is no verdict list, a failed call, a call past its deadline", async (t) => {
   const cases: Array<[string, (request: LlmChatRequest) => Promise<LlmChatResult>, Array<[number, string]>]> = [
-    ["not entailed", async () => ({ text: VERDICTS.replace('"verdict":"entailed"', '"verdict":"not_entailed","reason":"unsupported: no support shows exposure."') }), [
-      [6, "not_entailed: unsupported: no support shows exposure."],
-      [7, "not_entailed: unsupported: no support measures diversification."],
+    ["a worded amount, unsupported, and a contradiction", async () => ({ text: '{"verdicts":[{"id":6,"verdict":"unsupported","worded_amount":true,"reason":"it says tens of billions."},{"id":7,"verdict":"contradicted","worded_amount":false,"reason":"Data Center outweighs the other four together."}]}' }), [
+      [6, "unsupported, worded_amount: it says tens of billions."],
+      [7, "contradicted: Data Center outweighs the other four together."],
     ]],
-    ["no verdict for it", async () => ({ text: '{"verdicts":[{"id":6,"verdict":"not_entailed","reason":"unsupported: x."}]}' }), [
-      [6, "not_entailed: unsupported: x."],
+    ["a worded amount the figures bear out", async () => ({ text: '{"verdicts":[{"id":6,"verdict":"entailed","worded_amount":true,"reason":"it says over ten times the next segment."},{"id":7,"verdict":"contradicted","worded_amount":false,"reason":"x."}]}' }), [
+      [6, "entailed, worded_amount: it says over ten times the next segment."],
+      [7, "contradicted: x."],
+    ]],
+    ["no verdict for it, or no yes-or-no on the amount", async () => ({ text: '{"verdicts":[{"id":6,"verdict":"unsupported","reason":"x."},{"id":8,"verdict":"entailed","worded_amount":false}]}' }), [
+      [6, "error: no worded_amount for this inference"],
       [7, "error: no verdict for this inference"],
     ]],
     ["no verdict list", async () => ({ text: "Both look fine to me." }), [
@@ -171,6 +205,21 @@ test("an inference with no entailed verdict stays hidden: not entailed, a reply 
     assert.equal(text(judged.blocks), FIGURES, label);
     assert.deepEqual(judgeRejections(judged.assertions), hidden, label);
   }
+});
+
+test("the report keeps each judged inference's verdict, a hidden one's too, in index order", async () => {
+  const { createClient } = models(SEGMENTS, byInference({
+    6: async () => ({ text: '{"verdicts":[{"id":6,"verdict":"unsupported","worded_amount":true,"reason":"it says tens of billions."}]}' }),
+    7: async () => ({ text: UNSUPPORTED_7 }),
+  }));
+  const answer = await answerTurn(SEGMENTS.input, turn(SEGMENTS), { env: JUDGED_ENV, createClient });
+  const judged = await answer.judging!.done;
+  assert.equal(text(judged.blocks), [FIGURES, UNVERIFIED_CUSHION].join("\n\n"));
+  assert.deepEqual(judged.assertions?.judged, [
+    { index: 6, verdict: "unsupported", worded_amount: true, reason: "it says tens of billions." },
+    { index: 7, verdict: "unsupported", worded_amount: false, reason: "no support measures diversification." },
+  ]);
+  assert.deepEqual(judgeRejections(judged.assertions), [[6, "unsupported, worded_amount: it says tens of billions."]]);
 });
 
 test("with no judge model configured no judge is asked, and no inference shows or waits", async () => {
@@ -220,21 +269,23 @@ test("the trace holds what the reader ended with and each judge call's raw reply
   assert.equal(written.version, 2);
   assert.deepEqual(written.blocks, JSON.parse(JSON.stringify(judged.blocks)));
   assert.deepEqual(written.assertions, JSON.parse(JSON.stringify(judged.assertions)));
+  assert.deepEqual(written.assertions?.judged, JUDGED);
   assert.deepEqual((written.judge as Array<JudgeRecord>).map((record) => record.outcome === "replied" && { asked: asked(record.exchange), text: record.exchange.text, deployment: record.exchange.deployment, usage: record.exchange.usage }), [
     { asked: [6], text: ENTAILED(6), deployment: "anthropic/claude-haiku-5-5", usage: { input_tokens: 1200, output_tokens: 80 } },
     { asked: [7], text: UNSUPPORTED_7, deployment: "anthropic/claude-haiku-5-5", usage: { input_tokens: 1100, output_tokens: 90 } },
   ]);
 
   const replayed = await replayRecorded(written);
-  assert.equal(text(replayed.blocks), [FIGURES, CONCENTRATED].join("\n\n"));
+  assert.equal(text(replayed.blocks), [FIGURES, CONCENTRATED, UNVERIFIED_CUSHION].join("\n\n"));
   assert.deepEqual(JSON.parse(JSON.stringify(replayed.blocks)), written.blocks);
+  assert.deepEqual(replayed.assertions?.judged, JUDGED);
   assert.equal(replayed.judge_input_changed, false);
 });
 
-test("a trace from before #376, one judge call for every inference, replays each one's verdict from it", async () => {
+test("one recorded judge call for every inference replays each one's verdict from it", async () => {
   const replayed = await replayRecorded({ ...SEGMENTS, judge: { outcome: "replied", exchange: { messages: [], text: VERDICTS, truncated: false, deployment: "anthropic/claude-haiku-5-5", latency_ms: 4700 } } });
-  assert.equal(text(replayed.blocks), [FIGURES, CONCENTRATED].join("\n\n"));
-  assert.deepEqual(judgeRejections(replayed.assertions), [[7, "not_entailed: unsupported: no support measures diversification."]]);
+  assert.equal(text(replayed.blocks), [FIGURES, CONCENTRATED, UNVERIFIED_CUSHION].join("\n\n"));
+  assert.deepEqual(replayed.assertions?.judged, JUDGED);
 });
 
 test("a trace recorded before the judge gated inferences replays them hidden: no judge reply was recorded", async () => {
@@ -246,7 +297,7 @@ test("a trace recorded before the judge gated inferences replays them hidden: no
 test("a recorded reply that answers other inferences than today's is replayed as recorded, and flagged", async () => {
   const recorded = { ...SEGMENTS, judge: { outcome: "replied" as const, exchange: { messages: [{ role: "user", content: "an older answer" }], text: VERDICTS, truncated: false, deployment: "anthropic/claude-haiku-5-5", latency_ms: 4700 } } };
   const replayed = await replayRecorded(recorded);
-  assert.equal(text(replayed.blocks), [FIGURES, CONCENTRATED].join("\n\n"));
+  assert.equal(text(replayed.blocks), [FIGURES, CONCENTRATED, UNVERIFIED_CUSHION].join("\n\n"));
   assert.equal(replayed.judge_input_changed, true);
 });
 
@@ -273,3 +324,13 @@ function hang(t: { after(fn: () => void): void }): Promise<never> {
   t.after(() => clearInterval(connection));
   return new Promise<never>(() => {});
 }
+
+test("an inference with no judge record of its own stays hidden; the answer is still written (#477 review)", async () => {
+  const { createClient } = models(SEGMENTS, async () => ({ text: ENTAILED(6) }));
+  const composed = await composeTraced(SEGMENTS.input, { env: ENV, createClient });
+  const { cases } = inferenceCases(SEGMENTS.input, composed.assertions);
+  const entailed6: JudgeRecord = { outcome: "replied", exchange: { messages: [], text: ENTAILED(6), truncated: false, deployment: "anthropic/claude-haiku-5-5", latency_ms: 1000 } };
+  const judged = judgedAnswer(composed, cases, [entailed6]);
+  assert.equal(text(judged.blocks), [FIGURES, CONCENTRATED].join("\n\n"));
+  assert.deepEqual(judgeRejections(judged.assertions), [[7, "error: no judge record for this inference"]]);
+});

@@ -5,6 +5,7 @@ import type { LlmChatRequest } from "../../llm/src/index.ts";
 import { checkAssertions, type Assertion } from "../src/assertions.ts";
 import type { EvidencePacket } from "../src/evidence-packet.ts";
 import { judgeCases, judgeInferences, judgeMessages, parseVerdicts, verdictsOf, type JudgeCase } from "../src/inference-judge.ts";
+import { shownAs } from "../src/verdicts.ts";
 
 const ENV = {
   LLM_CHANNELS: "anthropic",
@@ -41,7 +42,7 @@ const ACCEPTED: ReadonlyArray<Assertion & { index: number }> = [
 
 const CASES = judgeCases(ACCEPTED, PACKET, []);
 
-test("a case is the inference beside its supports as the reader sees them, figures as the packet's values, and its checked results", () => {
+test("a case is the inference beside its supports as the reader sees them, figures as the packet's values, its checked results, and the answer's other observations and comparisons", () => {
   assert.deepEqual(CASES, [
     {
       index: 2,
@@ -52,6 +53,8 @@ test("a case is the inference beside its supports as the reader sees them, figur
         "NVDA's gross margin was 74.6% in FY2026; AMD's gross margin was 49.2% in FY2025.",
         "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026), AMD 49.2% (FY2025), 25.4 percentage points above AMD.",
       ],
+      context: [],
+      figures: ["NVDA's gross margin was 74.6% in FY2026; AMD's gross margin was 49.2% in FY2025."],
     },
     {
       index: 3,
@@ -59,6 +62,8 @@ test("a case is the inference beside its supports as the reader sees them, figur
       text: "Its peer trails on margin.",
       checked: ["NVDA highest on gross margin"],
       supports: ["Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026), AMD 49.2% (FY2025), 25.4 percentage points above AMD."],
+      context: ["NVDA's gross margin was 74.6% in FY2026; AMD's gross margin was 49.2% in FY2025."],
+      figures: ["NVDA's gross margin was 74.6% in FY2026; AMD's gross margin was 49.2% in FY2025."],
     },
   ]);
   // A one-company answer's inference is about that company.
@@ -90,9 +95,61 @@ test("an inference resting on a management attribution reaches the judge with th
   ]]);
 });
 
+test("the rest of the answer a case carries is its other observations and comparisons only: no management attribution, unknown cause or other inference", () => {
+  const packet: EvidencePacket = {
+    ...PACKET,
+    companies: ["AMD"],
+    figures: [
+      { id: "F2", company: "AMD", metric: "Gross margin", period: "FY2025", value: "49.2%", fact_id: "not-a-uuid-2", source_ids: [] },
+      { id: "F3", company: "AMD", metric: "Gross margin", period: "FY2024", value: "53.1%", fact_id: "not-a-uuid-3", source_ids: [] },
+    ],
+    claims: [{
+      id: "C1", text: "Export controls led to about $800 million in inventory charges.", predicate: "kpi.commentary", stance: "supporting",
+      company: "AMD", published_at: "2025-08-05T00:00:00.000Z", claim_id: "c1", source_id: "s1",
+    }],
+  };
+  const { accepted } = checkAssertions([
+    { kind: "observation", text: "AMD's gross margin was [[F2]] in FY2025.", evidence: ["F2"] },
+    { kind: "comparison", text: "Gross margin fell.", evidence: ["F3", "F2"], op: "trend", result: "fell" },
+    { kind: "management_attribution", text: "AMD management said [[C1]]", evidence: ["C1"] },
+    { kind: "unknown_cause", text: "The figures do not show why.", evidence: ["F2"] },
+    { kind: "analyst_inference", text: "The charge weighs on its margin.", supports: [2] },
+    { kind: "analyst_inference", text: "Its margin is lower than it was.", supports: [1] },
+  ], packet);
+  assert.deepEqual(judgeCases(accepted, packet, []).map(({ index, context }) => [index, context]), [
+    [4, ["AMD's gross margin was 49.2% in FY2025.", "AMD's gross margin fell from 53.1% in FY2024 to 49.2% in FY2025."]],
+    [5, ["AMD's gross margin was 49.2% in FY2025."]],
+  ]);
+});
+
+test("every case carries the figures the page's tables and charts show, a line per table in packet order, as the reader sees them", () => {
+  const packet: EvidencePacket = {
+    ...PACKET,
+    figures: [
+      { ...PACKET.figures[0]!, shown_in: "Gross margin" },
+      { id: "F2", company: "NVDA", metric: "Revenue", period: "FY2026", value: "$130.5B", fact_id: "not-a-uuid-3", source_ids: [], shown_in: "Revenue" },
+      { ...PACKET.figures[1]!, id: "F3", shown_in: "Gross margin" },
+      { id: "F4", company: "AMD", metric: "Revenue", period: "FY2025", value: "$25.8B", fact_id: "not-a-uuid-4", source_ids: [] },
+    ],
+  };
+  const accepted: ReadonlyArray<Assertion & { index: number }> = [
+    { index: 0, kind: "analyst_inference", text: "It keeps more of each sale.", evidence: [], supports: [], subject: "NVDA" },
+    { index: 1, kind: "analyst_inference", text: "Its peer is smaller.", evidence: [], supports: [], subject: "NVDA" },
+  ];
+  const figures = [
+    "Gross margin: NVDA's gross margin was 74.6% in FY2026; AMD's gross margin was 49.2% in FY2025.",
+    "Revenue: NVDA's revenue was $130.5B in FY2026.",
+    "AMD's revenue was $25.8B in FY2025.",
+  ];
+  assert.deepEqual(judgeCases(accepted, packet, []).map((judged) => judged.figures), [figures, figures]);
+  // A turn whose blocks show no figure answers from values no table shows: none is on the page.
+  const unshown: EvidencePacket = { ...PACKET, figures: PACKET.figures.map((figure) => ({ ...figure, displayed: false as const })) };
+  assert.deepEqual(judgeCases(accepted, unshown, []).map((judged) => judged.figures), [[], []]);
+});
+
 test("one judge call per answer, on JUDGE_LITELLM_MODEL, carries every inference with its supports' text; its reply is kept raw and read per inference", async () => {
   const requests: Array<{ model: string; request: LlmChatRequest }> = [];
-  const reply = 'Here you go:\n{"verdicts":[{"id":3,"verdict":"entailed"},{"id":2,"verdict":"not_entailed","reason":"unsupported: no figure shows what it keeps of a sale."}]}';
+  const reply = 'Here you go:\n{"verdicts":[{"id":3,"verdict":"entailed","worded_amount":false},{"id":2,"verdict":"unsupported","worded_amount":false,"reason":"no figure shows what it keeps of a sale."}]}';
   const record = await judgeInferences({
     cases: CASES,
     companies: PACKET.companies,
@@ -112,8 +169,8 @@ test("one judge call per answer, on JUDGE_LITELLM_MODEL, carries every inference
     usage: { input_tokens: 900, output_tokens: 60 },
   });
   assert.deepEqual(verdictsOf(CASES, record), [
-    { index: 2, verdict: "not_entailed", reason: "unsupported: no figure shows what it keeps of a sale." },
-    { index: 3, verdict: "entailed" },
+    { index: 2, verdict: "unsupported", worded_amount: false, reason: "no figure shows what it keeps of a sale." },
+    { index: 3, verdict: "entailed", worded_amount: false },
   ]);
   assert.deepEqual(requests.map(({ model }) => model), ["anthropic/claude-haiku-5-5"]);
   const [{ request }] = requests as [typeof requests[number]];
@@ -130,6 +187,8 @@ test("one judge call per answer, on JUDGE_LITELLM_MODEL, carries every inference
           "NVDA's gross margin was 74.6% in FY2026; AMD's gross margin was 49.2% in FY2025.",
           "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026), AMD 49.2% (FY2025), 25.4 percentage points above AMD.",
         ],
+        rest_of_answer: [],
+        figures_shown: ["NVDA's gross margin was 74.6% in FY2026; AMD's gross margin was 49.2% in FY2025."],
       },
       {
         id: 3,
@@ -137,14 +196,30 @@ test("one judge call per answer, on JUDGE_LITELLM_MODEL, carries every inference
         text: "Its peer trails on margin.",
         checked_results: ["NVDA highest on gross margin"],
         supports: ["Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.6% (FY2026), AMD 49.2% (FY2025), 25.4 percentage points above AMD."],
+        rest_of_answer: ["NVDA's gross margin was 74.6% in FY2026; AMD's gross margin was 49.2% in FY2025."],
+        figures_shown: ["NVDA's gross margin was 74.6% in FY2026; AMD's gross margin was 49.2% in FY2025."],
       },
     ],
   });
 });
 
+test("a reply is read only when its verdict list ends it, bar whitespace and its code fence: a cut-off correction in any shape is an error, never the draft it was correcting (#477 review)", () => {
+  const draft = '{"verdicts":[{"id":3,"verdict":"entailed","worded_amount":false}]}';
+  const notLast = [{ index: 3, verdict: "error", reason: "the judge's reply does not end with its verdict list" }];
+  for (const cut of ['{"verdicts":[{"id":3,"verdict":"contrad', '[{"id":3,"verdict":"contrad', '{"verdict":[{"id":3,"verdict":"contrad', "I am not sure about that."]) {
+    assert.deepEqual(parseVerdicts(`${draft}\n\nCorrection: the ranking contradicts it:\n${cut}`, [CASES[1]!]), notLast, cut);
+  }
+  assert.deepEqual(parseVerdicts("```json\n" + draft + "\n```\n\nCorrection:\n```json\n" + '{"verdicts":[{"id":3,"verd', [CASES[1]!]), notLast);
+  const entailed = [{ index: 3, verdict: "entailed", worded_amount: false }];
+  assert.deepEqual(parseVerdicts(`${draft}\n`, [CASES[1]!]), entailed);
+  assert.deepEqual(parseVerdicts("```json\n" + draft + "\n```\n", [CASES[1]!]), entailed);
+  const corrected = `${draft}\n\nCorrection:\n{"verdicts":[{"id":3,"verdict":"contradicted","worded_amount":false,"reason":"NVDA is highest."}]}`;
+  assert.deepEqual(parseVerdicts(corrected, [CASES[1]!]), [{ index: 3, verdict: "contradicted", worded_amount: false, reason: "NVDA is highest." }]);
+});
+
 test("a malformed reply is an error for every inference, never entailed; a bad verdict is an error for its own", () => {
   const two: JudgeCase[] = [...CASES];
-  for (const reply of ["entailed", '{"verdicts":"entailed"}', '{"verdicts":[{"id":2,"verdict":"entailed"}', ""]) {
+  for (const reply of ["entailed", '{"verdicts":"entailed"}', '{"verdicts":[{"id":2,"verdict":"entailed","worded_amount":false}', ""]) {
     assert.deepEqual(parseVerdicts(reply, two), [
       { index: 2, verdict: "error", reason: "the judge's reply is not a verdict list" },
       { index: 3, verdict: "error", reason: "the judge's reply is not a verdict list" },
@@ -152,22 +227,47 @@ test("a malformed reply is an error for every inference, never entailed; a bad v
   }
   // A reply that corrects itself is read by its last list.
   const corrected = [
-    '{"verdicts":[{"id":2,"verdict":"not_entailed","reason":"unsupported: no figure shows \\"its peer\\"."},{"id":3,"verdict":"entailed"}]}',
+    '{"verdicts":[{"id":2,"verdict":"unsupported","worded_amount":false,"reason":"no figure shows \\"its peer\\"."},{"id":3,"verdict":"entailed","worded_amount":false}]}',
     "Correction: the comparison shows its peer trails. Final:",
-    '```json\n{"verdicts":[{"id":2,"verdict":"entailed"},{"id":3,"verdict":"not_entailed","reason":"contradicts_ranking: NVDA is highest."}]}\n```',
+    '```json\n{"verdicts":[{"id":2,"verdict":"entailed","worded_amount":false},{"id":3,"verdict":"contradicted","worded_amount":false,"reason":"NVDA is highest."}]}\n```',
   ].join("\n\n");
   assert.deepEqual(parseVerdicts(corrected, two), [
-    { index: 2, verdict: "entailed" },
-    { index: 3, verdict: "not_entailed", reason: "contradicts_ranking: NVDA is highest." },
+    { index: 2, verdict: "entailed", worded_amount: false },
+    { index: 3, verdict: "contradicted", worded_amount: false, reason: "NVDA is highest." },
   ]);
-  assert.deepEqual(parseVerdicts('{"verdicts":[{"id":2,"verdict":"probably"}]}', two), [
+  assert.deepEqual(parseVerdicts('{"verdicts":[{"id":2,"verdict":"probably","worded_amount":false}]}', two), [
     { index: 2, verdict: "error", reason: 'unknown verdict "probably"' },
     { index: 3, verdict: "error", reason: "no verdict for this inference" },
   ]);
-  assert.deepEqual(parseVerdicts('{"verdicts":[{"id":2,"verdict":"entailed"},{"id":2,"verdict":"not_entailed"},{"id":"3","verdict":"entailed"}]}', two), [
+  assert.deepEqual(parseVerdicts('{"verdicts":[{"id":2,"verdict":"entailed","worded_amount":false},{"id":2,"verdict":"unsupported","worded_amount":false},{"id":"3","verdict":"entailed","worded_amount":false}]}', two), [
     { index: 2, verdict: "error", reason: "more than one verdict for this inference" },
     { index: 3, verdict: "error", reason: "no verdict for this inference" },
   ]);
+});
+
+test("a verdict is entailed, unsupported or contradicted, beside whether the inference states an amount in words; a verdict outside the three, or no yes-or-no on the amount, is an error", () => {
+  const cases = [1, 2, 3, 4, 5, 6, 7, 8].map((index) => ({ ...CASES[0]!, index }));
+  const reply = JSON.stringify({ verdicts: [
+    { id: 1, verdict: "entailed", worded_amount: false },
+    { id: 2, verdict: "unsupported", worded_amount: false, reason: "a forecast the figures do not show." },
+    { id: 3, verdict: "contradicted", worded_amount: false, reason: "NVDA is highest, not its peer." },
+    { id: 4, verdict: "unsupported", worded_amount: true, reason: "a forecast of hundreds of millions in savings." },
+    { id: 5, verdict: "entailed", worded_amount: true, reason: "it says the margin doubled." },
+    { id: 6, verdict: "unsupported", reason: "a forecast the figures do not show." },
+    { id: 7, verdict: "entailed", worded_amount: "no" },
+    { id: 8, verdict: "worded_amount", reason: "it says the margin doubled." },
+  ] });
+  assert.deepEqual(parseVerdicts(reply, cases), [
+    { index: 1, verdict: "entailed", worded_amount: false },
+    { index: 2, verdict: "unsupported", worded_amount: false, reason: "a forecast the figures do not show." },
+    { index: 3, verdict: "contradicted", worded_amount: false, reason: "NVDA is highest, not its peer." },
+    { index: 4, verdict: "unsupported", worded_amount: true, reason: "a forecast of hundreds of millions in savings." },
+    { index: 5, verdict: "entailed", worded_amount: true, reason: "it says the margin doubled." },
+    { index: 6, verdict: "error", reason: "no worded_amount for this inference" },
+    { index: 7, verdict: "error", reason: "no worded_amount for this inference" },
+    { index: 8, verdict: "error", reason: 'unknown verdict "worded_amount"' },
+  ]);
+  assert.deepEqual(parseVerdicts(reply, cases).map(shownAs), ["shown", "unverified", "hidden", "hidden", "hidden", "hidden", "hidden", "hidden"]);
 });
 
 test("a failed or cut-off judge call is an error for every inference; with no inference no call is made", async (t) => {

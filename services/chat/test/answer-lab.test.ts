@@ -22,8 +22,7 @@ for (const { label, trace } of TRACES) {
   test(`${label}: the recorded reply replays to the recorded blocks`, async () => {
     const replayed = await replayRecorded(trace);
     assert.deepStrictEqual(JSON.parse(JSON.stringify(replayed.blocks)), trace.blocks);
-    const judgeRejections = (report: typeof trace.assertions) => (report?.rejected ?? []).filter((entry) => entry.check === "judge");
-    assert.deepStrictEqual(JSON.parse(JSON.stringify(judgeRejections(replayed.assertions))), judgeRejections(trace.assertions));
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(replayed.assertions)), trace.assertions);
   });
 }
 
@@ -79,7 +78,7 @@ test("a live sample's answer reads as the user sees it: text as written, each re
 });
 
 test("a live run's summary counts rendered answers, accepted kinds, repeated observations and rejections by reason", () => {
-  const metrics = { figure_refs: 0, plain_numbers: 0, fallback: false, accepted: 0, rejected: 0, inferences_shown: 0, inferences_hidden: 0, output_tokens: 0, latency_ms: 0 };
+  const metrics = { figure_refs: 0, plain_numbers: 0, fallback: false, accepted: 0, rejected: 0, inferences_shown: 0, inferences_unverified: 0, inferences_hidden: 0, output_tokens: 0, latency_ms: 0 };
   const summary = assertionSummary({
     results: [
       { trace: "a", sample: 0, metrics, assertions: { rendered: true, accepted: ["observation", "analyst_inference", "observation"], rejected: ["x", "y"], repeated: 2 } },
@@ -117,21 +116,35 @@ test("the traces' reply fixture answers each traced question as recorded, and a 
 
 const MUTATIONS = fileURLToPath(new URL("./answer-lab/judge-mutations.json", import.meta.url));
 
-test("the judge's held-out set: every original and mutation passes the turn's own checks, so each is a gap only the judge can catch (#302)", () => {
+test("the judge's mutation set: every original and mutation passes the turn's own checks, so each is a gap only the judge can catch (#302)", () => {
   const variants = mutationVariants(MUTATIONS);
   const count = (key: (variant: (typeof variants)[number]) => string) =>
     Object.fromEntries([...new Set(variants.map(key))].map((value) => [value, variants.filter((variant) => key(variant) === value).length]));
   assert.deepEqual(count((variant) => variant.kind), {
-    original: 10,
-    worded_amount: 5,
+    original: 14,
+    worded_amount: 10,
     unsupported_claim: 5,
-    contradicted_ranking: 4,
+    contradicted_ranking: 5,
     hedged_valuation: 3,
-    flipped_direction: 3,
+    flipped_direction: 6,
   });
   // The judge reads a case on its trace's packet: the peer case's label is its comparisons' checked results.
   const peer = variants.find((variant) => variant.id === "peer-lead" && variant.kind === "original")!;
   assert.deepEqual([peer.judged.subject, peer.judged.checked, peer.companies], ["NVDA", ["NVDA highest on revenue, gross margin, net margin, and revenue growth (YoY)"], ["NVDA", "AMD"]]);
+  // A narrowed case's operating loss is in the rest of its answer, not in its supports.
+  const offset = variants.find((variant) => variant.id === "operating-offset" && variant.kind === "original")!;
+  assert.deepEqual([offset.judged.supports, offset.judged.context[0]], [
+    ["AMD's net income was $872.0M in Q2 2025 (ended Jun 2025); AMD's net margin was 11.3% in Q2 2025 (ended Jun 2025)."],
+    "AMD's operating margin was -1.7% in Q2 2025 (ended Jun 2025); AMD's operating income was -$134.0M in Q2 2025 (ended Jun 2025).",
+  ]);
+  // A block case's recovery is on the page only in its gross margin chart.
+  const recovery = variants.find((variant) => variant.id === "margin-recovery" && variant.kind === "original")!;
+  const after = (lines: ReadonlyArray<string>) => lines.filter((line) => line.includes("Q3 2025"));
+  assert.deepEqual([after(recovery.judged.supports), after(recovery.judged.context), recovery.judged.figures[2]], [
+    [],
+    [],
+    "Gross margin by quarter: AMD's gross margin was 50.1% in Q3 2024 (ended Sep 2024); AMD's gross margin was 51.0% in Q4 2024 (ended Dec 2024); AMD's gross margin was 50.2% in Q1 2025 (ended Mar 2025); AMD's gross margin was 39.8% in Q2 2025 (ended Jun 2025); AMD's gross margin was 53.6% in Q3 2025 (ended Sep 2025); AMD's gross margin was 54.0% in Q4 2025 (ended Dec 2025); AMD's gross margin was 54.0% in Q1 2026 (ended Mar 2026); AMD's gross margin was 54.0% in Q2 2026 (ended Jun 2026).",
+  ]);
 });
 
 test("a set inference the turn's checks already reject fails the set, rather than inflate the catch rate", () => {
@@ -150,41 +163,50 @@ test("a set inference the turn's checks already reject fails the set, rather tha
   });
 });
 
-test("the mutation summary counts catches by kind and false alarms on originals; an error is neither", () => {
-  const result = (id: string, kind: string, verdict: string, reason?: string) =>
-    ({ id, kind, text: `${id} ${kind}`, verdict: { index: 0, verdict, ...(reason ? { reason } : {}) } }) as Parameters<typeof mutationSummary>[0][number];
+test("the mutation summary counts catches, each kind at its expected outcome, mutations shown that should hide, and false alarms on originals; an error is none of these", () => {
+  const result = (id: string, kind: string, verdict: string, worded_amount: boolean, reason?: string) =>
+    ({ id, kind, text: `${id} ${kind}`, verdict: { index: 0, verdict, ...(verdict === "error" ? {} : { worded_amount }), ...(reason ? { reason } : {}) } }) as Parameters<typeof mutationSummary>[0][number];
   assert.equal(mutationSummary([
-    result("a", "original", "entailed"),
-    result("a", "worded_amount", "not_entailed", "worded_amount: says tens of billions"),
-    result("a", "hedged_valuation", "entailed"),
-    result("b", "original", "not_entailed", "unsupported: no figure shows it"),
-    result("b", "flipped_direction", "error", "judge call failed: timeout"),
+    result("a", "original", "entailed", false),
+    result("a", "worded_amount", "unsupported", true, "says tens of billions"),
+    result("a", "worded_amount", "unsupported", false, "a forecast the figures do not show"),
+    result("a", "hedged_valuation", "entailed", false),
+    result("a", "contradicted_ranking", "unsupported", false, "no figure ranks them"),
+    result("b", "original", "unsupported", false, "no figure shows it"),
+    result("b", "flipped_direction", "error", false, "judge call failed: timeout"),
+    result("b", "unsupported_claim", "contradicted", false, "revenue rose"),
+    result("c", "contradicted_ranking", "contradicted", false, "NVDA is highest"),
   ]), [
-    "caught: 1 of 3 mutations (1 errors)",
-    "  worded_amount          1 of 1",
-    "  unsupported_claim      0 of 0",
-    "  hedged_valuation       0 of 1",
-    "  flipped_direction      0 of 1",
-    "  contradicted_ranking   0 of 0",
+    "caught: 5 of 7 mutations (1 errors)",
+    "at their tier: 2 of 7 mutations",
+    "  worded_amount          worded_amount 1 of 2",
+    "  unsupported_claim      unsupported   0 of 1",
+    "  hedged_valuation       unsupported   0 of 1",
+    "  flipped_direction      contradicted  0 of 1",
+    "  contradicted_ranking   contradicted  1 of 2",
+    "shown though they should hide: 2 of 5 (1 errors, hidden but unjudged)",
     "false alarms: 1 of 2 originals (0 errors)",
-    "misses, false alarms and errors:",
+    "not at their expected outcome:",
+    "  a worded_amount: unsupported: a forecast the figures do not show\n      a worded_amount",
     "  a hedged_valuation: entailed\n      a hedged_valuation",
-    "  b original: not_entailed (unsupported: no figure shows it)\n      b original",
-    "  b flipped_direction: error (judge call failed: timeout)\n      b flipped_direction",
+    "  a contradicted_ranking: unsupported: no figure ranks them\n      a contradicted_ranking",
+    "  b original: unsupported: no figure shows it\n      b original",
+    "  b flipped_direction: error: judge call failed: timeout\n      b flipped_direction",
+    "  b unsupported_claim: contradicted: revenue rose\n      b unsupported_claim",
   ].join("\n"));
 });
 
 test("a run with no judge configured counts each inference not called", () => {
-  const metrics = { figure_refs: 0, plain_numbers: 0, fallback: false, accepted: 0, rejected: 0, inferences_shown: 0, inferences_hidden: 2, output_tokens: 0, latency_ms: 0 };
+  const metrics = { figure_refs: 0, plain_numbers: 0, fallback: false, accepted: 0, rejected: 0, inferences_shown: 0, inferences_unverified: 0, inferences_hidden: 2, output_tokens: 0, latency_ms: 0 };
   const none = { outcome: "not_called" as const, reason: "no judge model is configured" };
-  const judge = { records: [none, none], hidden: [] };
+  const judge = { records: [none, none], flagged: [] };
   const summary = judgeSummary({ results: [{ trace: "a", sample: 0, metrics, judge }, { trace: "b", sample: 0, metrics, judge }] });
-  assert.equal(summary.split("\n")[0], "judge: 0 shown, 4 hidden, in 2 answers (0 replied, 0 failed, 4 not called)");
+  assert.equal(summary.split("\n")[0], "judge: 0 shown, 0 unverified, 4 hidden, in 2 answers (0 replied, 0 failed, 4 not called)");
 });
 
-test("a judged run's summary counts the inferences shown and hidden, what the judge did per inference, its cost per reply, and each inference it left out", () => {
-  const metrics = (shown: number, hidden: number) =>
-    ({ figure_refs: 0, plain_numbers: 0, fallback: false, accepted: 0, rejected: 0, inferences_shown: shown, inferences_hidden: hidden, output_tokens: 0, latency_ms: 0 });
+test("a judged run's summary counts the inferences shown, unverified and hidden, what the judge did per inference, its cost per reply, and each inference it showed as unverified or left out", () => {
+  const metrics = (shown: number, unverified: number, hidden: number) =>
+    ({ figure_refs: 0, plain_numbers: 0, fallback: false, accepted: 0, rejected: 0, inferences_shown: shown, inferences_unverified: unverified, inferences_hidden: hidden, output_tokens: 0, latency_ms: 0 });
   const replied = {
     outcome: "replied" as const,
     exchange: { messages: [], text: "{}", truncated: false, deployment: "anthropic/claude-haiku-5-5", latency_ms: 2000, usage: { input_tokens: 1000, output_tokens: 100 } },
@@ -192,35 +214,47 @@ test("a judged run's summary counts the inferences shown and hidden, what the ju
   const summary = judgeSummary({
     labels: { a: "peer-two" },
     results: [
-      { trace: "a", sample: 1, metrics: metrics(1, 1), judge: { records: [replied, { ...replied, exchange: { ...replied.exchange } }], hidden: [{ index: 10, text: "amd trails.", reason: "not_entailed: contradicts_ranking: NVDA is highest." }] } },
-      { trace: "a", sample: 2, metrics: metrics(0, 1), judge: { records: [{ outcome: "failed", reason: "judge call failed: timeout", latency_ms: 8000 }], hidden: [{ index: 3, text: "It leads.", reason: "error: judge call failed: timeout" }] } },
+      {
+        trace: "a",
+        sample: 1,
+        metrics: metrics(1, 1, 1),
+        judge: {
+          records: [replied, { ...replied, exchange: { ...replied.exchange } }, { ...replied, exchange: { ...replied.exchange } }],
+          flagged: [
+            { index: 10, as: "hidden", text: "amd leads.", reason: "contradicted: NVDA is highest." },
+            { index: 11, as: "unverified", text: "Its lead may narrow.", reason: "unsupported: a forecast the figures do not show." },
+          ],
+        },
+      },
+      { trace: "a", sample: 2, metrics: metrics(0, 0, 1), judge: { records: [{ outcome: "failed", reason: "judge call failed: timeout", latency_ms: 8000 }], flagged: [{ index: 3, as: "hidden", text: "It leads.", reason: "error: judge call failed: timeout" }] } },
       { trace: "b", sample: 0 },
     ],
   });
   assert.equal(summary, [
-    "judge: 1 shown, 2 hidden, in 2 answers (2 replied, 1 failed, 0 not called)",
+    "judge: 1 shown, 1 unverified, 2 hidden, in 2 answers (3 replied, 1 failed, 0 not called)",
     "judge per reply: 2000 ms, 1000 in / 100 out tokens, on anthropic/claude-haiku-5-5",
-    "  hidden  peer-two #1 [10] amd trails.\n      not_entailed: contradicts_ranking: NVDA is highest.",
+    "  hidden  peer-two #1 [10] amd leads.\n      contradicted: NVDA is highest.",
+    "  unverified  peer-two #1 [11] Its lead may narrow.\n      unsupported: a forecast the figures do not show.",
     "  hidden  peer-two #2 [3] It leads.\n      error: judge call failed: timeout",
   ].join("\n"));
 });
 
-test("recorded replays each trace with the judge reply it recorded, and summarizes what that showed and hid", async () => {
+test("recorded replays each trace with the judge reply it recorded, and summarizes what that showed, showed as unverified and hid", async () => {
   const { trace } = TRACES.find(({ label }) => label === "segment-drill-down")!;
   const reply = (text: string, latency_ms: number, usage: { input_tokens: number; output_tokens: number }) =>
     ({ outcome: "replied", exchange: { messages: [], text, truncated: false, deployment: "anthropic/claude-haiku-5-5", latency_ms, usage } });
   const judge = [
-    reply('{"verdicts":[{"id":6,"verdict":"entailed"}]}', 3000, { input_tokens: 500, output_tokens: 100 }),
-    reply('{"verdicts":[{"id":7,"verdict":"not_entailed","reason":"unsupported: no support measures diversification."}]}', 4000, { input_tokens: 600, output_tokens: 200 }),
+    reply('{"verdicts":[{"id":6,"verdict":"entailed","worded_amount":false}]}', 3000, { input_tokens: 500, output_tokens: 100 }),
+    reply('{"verdicts":[{"id":7,"verdict":"unsupported","worded_amount":false,"reason":"no support measures diversification."}]}', 4000, { input_tokens: 600, output_tokens: 200 }),
   ];
   const root = traceFiles({ "judged.json": { ...trace, judge }, "missing-cash-flow.json": TRACES.find(({ label }) => label === "missing-cash-flow")!.trace });
   const script = fileURLToPath(new URL("../scripts/answer-lab.ts", import.meta.url));
   const { stdout } = await promisify(execFile)(process.execPath, ["--experimental-strip-types", script, "recorded", root]);
   assert.equal(stdout.slice(stdout.indexOf("as recorded")), [
-    "as recorded, judge: 1 shown, 1 hidden, in 1 answers (2 replied, 0 failed, 0 not called)",
+    "as recorded, judge: 1 shown, 1 unverified, 0 hidden, in 1 answers (2 replied, 0 failed, 0 not called)",
     "judge per reply: 3500 ms, 550 in / 150 out tokens, on anthropic/claude-haiku-5-5",
-    "  hidden  judged #0 [7] The other four segments provide limited diversification cushion relative to Data Center's dominance.",
-    "      not_entailed: unsupported: no support measures diversification.",
+    "  unverified  judged #0 [7] The other four segments provide limited diversification cushion relative to Data Center's dominance.",
+    "      unsupported: no support measures diversification.",
     "",
   ].join("\n"));
 });
@@ -231,7 +265,7 @@ test("recorded counts the cost of a trace's one batched judge call once, though 
     outcome: "replied",
     exchange: {
       messages: [],
-      text: '{"verdicts":[{"id":6,"verdict":"entailed"},{"id":7,"verdict":"not_entailed","reason":"unsupported: no support measures diversification."}]}',
+      text: '{"verdicts":[{"id":6,"verdict":"entailed","worded_amount":false},{"id":7,"verdict":"contradicted","worded_amount":false,"reason":"Data Center outweighs the other four together."}]}',
       truncated: false,
       deployment: "anthropic/claude-haiku-5-5",
       latency_ms: 3000,
@@ -242,7 +276,7 @@ test("recorded counts the cost of a trace's one batched judge call once, though 
   const script = fileURLToPath(new URL("../scripts/answer-lab.ts", import.meta.url));
   const { stdout } = await promisify(execFile)(process.execPath, ["--experimental-strip-types", script, "recorded", root]);
   assert.equal(stdout.slice(stdout.indexOf("as recorded")).split("\n").slice(0, 2).join("\n"), [
-    "as recorded, judge: 1 shown, 1 hidden, in 1 answers (2 replied, 0 failed, 0 not called)",
+    "as recorded, judge: 1 shown, 0 unverified, 1 hidden, in 1 answers (2 replied, 0 failed, 0 not called)",
     "judge per reply: 3000 ms, 500 in / 100 out tokens, on anthropic/claude-haiku-5-5",
   ].join("\n"));
 });

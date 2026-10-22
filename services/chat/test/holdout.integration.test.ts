@@ -40,7 +40,7 @@ import { HOLDOUT_CASES, HOLDOUT_VERSION, SYNTHETIC_CASES, SYNTHETIC_FIGURES, typ
 
 // The suite's identity: its version and the digest of every case, pinned so a
 // changed case is a new version, not a quiet edit (#221).
-const HOLDOUT_DIGEST = "sha256:814e19fc04d11b0cfea948895720195169953600d59ee08c084cedf6b694d3e7";
+const HOLDOUT_DIGEST = "sha256:1b650de706d162ccfef76849544f8357293dba9a286142d43a038fe462059366";
 
 test("the held-out suite is a fixed, versioned set of 10-12 cases (#221)", () => {
   assert.ok(HOLDOUT_CASES.length + 1 >= 10 && HOLDOUT_CASES.length + 1 <= 12, "10-12 cases, the synthetic set counted as one");
@@ -91,7 +91,7 @@ test("held-out research traps on the frozen dataset (#221)", { skip: !dockerAvai
   const converse = async (holdout: HoldoutCase, reply: string, list: ReadonlyArray<Record<string, unknown>> = [], judged: Readonly<Record<number, string>> = {}) => {
     const file = join(replies, `${holdout.id}-${++run}.json`);
     const verdicts = list.flatMap((assertion, index) =>
-      assertion.kind === "analyst_inference" ? [{ id: index, verdict: judged[index] ?? "entailed", ...(judged[index] ? { reason: "recorded verdict" } : {}) }] : []
+      assertion.kind === "analyst_inference" ? [{ id: index, verdict: judged[index] ?? "entailed", worded_amount: false, ...(judged[index] ? { reason: "recorded verdict" } : {}) }] : []
     );
     // The planner's reply first, matched by its request line; then each turn's
     // scope, matched by its quoted question alone. Then the judge's reply: its

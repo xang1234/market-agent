@@ -25,7 +25,7 @@
 
 import type { RejectionCheck } from "../../src/assertions.ts";
 
-export const HOLDOUT_VERSION = 10;
+export const HOLDOUT_VERSION = 11;
 
 type Assertion = Record<string, unknown>;
 
@@ -68,7 +68,7 @@ export type HoldoutCase = {
   prose: string;
   good?: ReadonlyArray<Assertion>;
   mutations?: ReadonlyArray<
-    | { name: string; list: ReadonlyArray<Assertion>; judged?: Readonly<Record<number, "not_entailed">>; fails: { index: number; check: RejectionCheck } }
+    | { name: string; list: ReadonlyArray<Assertion>; judged?: Readonly<Record<number, "contradicted">>; fails: { index: number; check: RejectionCheck } }
     // A prose mutation: a figure the data does not hold, which must never be shown.
     | { name: string; prose: string; never_shown: string }
     | { name: string; list: ReadonlyArray<Assertion>; never_shown: string }
@@ -293,11 +293,11 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
       { name: "narrowed cohort", list: [cmp("highest", "F2", ["F2"])], fails: { index: 0, check: "kind" } },
       { name: "wrong winner", list: [cmp("highest", "F6", ["F2", "F6"])], fails: { index: 0, check: "comparative" } },
       // Beside a checked NVDA-highest, words naming the wrong leader contradict
-      // it (#288): the judge's verdict (contradicts_ranking) keeps it off the page.
+      // it (#288).
       {
         name: "an inference naming the wrong leader",
         list: [cmp("highest", "F2", ["F2", "F6"]), inference("AMD's margin lead is the wider moat.", [0])],
-        judged: { 1: "not_entailed" },
+        judged: { 1: "contradicted" },
         fails: { index: 1, check: "judge" },
       },
       // F5 is AMD's revenue, cited by the observation the inference rests on (#301).

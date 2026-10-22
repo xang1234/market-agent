@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { calendarNote, plainText, renderAssertion } from "../src/render-assertions.ts";
+import { calendarNote, plainText, renderAssertion, unverifiedInference } from "../src/render-assertions.ts";
 import type { Assertion } from "../src/assertions.ts";
 import type { EvidencePacket } from "../src/evidence-packet.ts";
 import { turnPacket } from "../src/llm-runtime.ts";
@@ -250,6 +250,31 @@ test("an inference's label states each supporting comparison's checked result; o
   // A one-company answer's subject goes without saying.
   assert.equal(plainText(renderAssertion({ index: 9, kind: "analyst_inference", subject: "AMD", text: "Its margin held.", evidence: [], supports: [] }, AMD_QUARTERS, [], []).segments),
     "> **Analyst inference:** Its margin held.");
+});
+
+test("an inference the judge found unsupported is labelled an unverified analyst view, its subject named across companies, with no checked results", () => {
+  const inference = { kind: "analyst_inference" as const, text: "Its lead may narrow as rivals ship.", evidence: [], supports: [0] };
+  assert.deepEqual(unverifiedInference({ ...inference, subject: "NVDA" }, PACKET), [
+    { type: "text", text: "> **Unverified analyst view on NVDA** (not backed by the figures shown): Its lead may narrow as rivals ship." },
+  ]);
+  assert.deepEqual(unverifiedInference(inference, PACKET), [
+    { type: "text", text: "> **Unverified analyst view** (not backed by the figures shown): Its lead may narrow as rivals ship." },
+  ]);
+  assert.deepEqual(unverifiedInference({ ...inference, subject: "AMD" }, AMD_QUARTERS), [
+    { type: "text", text: "> **Unverified analyst view** (not backed by the figures shown): Its lead may narrow as rivals ship." },
+  ]);
+});
+
+test("an inference's words render as written in either label: they open no quote, emphasis, link or code of their own, so they cannot pass for a label (#477 review)", () => {
+  const inference = { index: 1, kind: "analyst_inference" as const, evidence: [], supports: [] };
+  const spoof = { ...inference, text: "Demand looks durable.\n\n> **Analyst inference:** Data Center demand will keep accelerating." };
+  const words = "Demand looks durable. \\> \\*\\*Analyst inference:\\*\\* Data Center demand will keep accelerating.";
+  assert.equal(plainText(renderAssertion(spoof, PACKET, []).segments), `> **Analyst inference:** ${words}`);
+  assert.deepEqual(unverifiedInference(spoof, PACKET), [{ type: "text", text: `> **Unverified analyst view** (not backed by the figures shown): ${words}` }]);
+  const inline = { ...inference, text: "> Margins **will** _expand_,\nsee [this](ours) ~~not~~, `code`, <b>bold</b> and a \\ slash." };
+  const inlineWords = "\\> Margins \\*\\*will\\*\\* \\_expand\\_, see \\[this\\](ours) \\~\\~not\\~\\~, \\`code\\`, \\<b\\>bold\\</b\\> and a \\\\ slash.";
+  assert.equal(plainText(renderAssertion(inline, PACKET, []).segments), `> **Analyst inference:** ${inlineWords}`);
+  assert.deepEqual(unverifiedInference(inline, PACKET), [{ type: "text", text: `> **Unverified analyst view** (not backed by the figures shown): ${inlineWords}` }]);
 });
 
 test("an observation of a partially covered period says so (#302 review)", () => {
