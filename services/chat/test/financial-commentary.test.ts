@@ -181,14 +181,23 @@ test("a company overview carries analyst commentary on its published results (#3
     );
   });
 
-  await t.test("an inference the judge rejects never shows; the figures it rested on still do", async () => {
-    const { compose } = composer(() => ALFA_REPLY, '{"verdicts":[{"id":2,"verdict":"not_entailed","reason":"unsupported: no support says what it keeps."}]}');
-    const done = completed((await overview(compose).run({ ...base, userIntent: "Revenue for ALFA" })).events);
-    const [, commentary] = (await message(done.message_id)).blocks;
-    assert.equal(plainText(segmentsOf(commentary)), ALFA_TEXT);
-    const entailed = composer(() => ALFA_REPLY, '{"verdicts":[{"id":2,"verdict":"entailed"}]}');
-    const shown = completed((await overview(entailed.compose).run({ ...base, userIntent: "Revenue for ALFA" })).events);
-    assert.equal(plainText(segmentsOf((await message(shown.message_id)).blocks[1])), `${ALFA_TEXT}\n\n> **Analyst inference:** It keeps most of what it sells.`);
+  await t.test("the judge's verdict decides how an inference shows: entailed as an inference, unsupported as an unverified view, otherwise not at all; the answer publishes either way", async () => {
+    const verdict = (fields: string) => `{"verdicts":[{"id":2,${fields}}]}`;
+    const cases: ReadonlyArray<readonly [string, string, string]> = [
+      ["entailed", verdict('"verdict":"entailed","worded_amount":false'), `${ALFA_TEXT}\n\n> **Analyst inference:** It keeps most of what it sells.`],
+      ["unsupported", verdict('"verdict":"unsupported","worded_amount":false,"reason":"No support says what it keeps."'), `${ALFA_TEXT}\n\n> **Unverified analyst view** (not backed by the figures shown): It keeps most of what it sells.`],
+      ["contradicted", verdict('"verdict":"contradicted","worded_amount":false,"reason":"The margins say otherwise."'), ALFA_TEXT],
+      ["a worded amount", verdict('"verdict":"entailed","worded_amount":true'), ALFA_TEXT],
+      ["no verdict", "I cannot judge this.", ALFA_TEXT],
+    ];
+    for (const [tier, reply, text] of cases) {
+      const { compose } = composer(() => ALFA_REPLY, reply);
+      const done = completed((await overview(compose).run({ ...base, userIntent: "Revenue for ALFA" })).events);
+      const saved = await message(done.message_id);
+      assert.deepEqual(saved.blocks.map((block) => block.kind), ["financial_answer", "rich_text"], tier);
+      assert.equal(saved.block_proofs[saved.blocks[0]!.id]!.calculation, "verified", tier);
+      assert.equal(plainText(segmentsOf(saved.blocks[1])), text, tier);
+    }
   });
 
   await t.test("commentary that fails leaves the answer as published and says it is unavailable", async (st) => {
