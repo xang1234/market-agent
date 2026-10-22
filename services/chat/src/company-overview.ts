@@ -1,8 +1,9 @@
-import { DEFAULT_EXECUTION_LIMITS, publicAtCutoff, type FinancialSubjectRef, type IsoDateTime } from "../../financial-core/src/index.ts";
+import { DEFAULT_EXECUTION_LIMITS, type FinancialSubjectRef } from "../../financial-core/src/index.ts";
 import { isDatabaseError } from "../../financial-engine/src/evidence-adapter.ts";
 import { buildDeterministicPlan, type PlanningContext, type PlanningResult, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort, InputCandidate, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { issuerLabels } from "../../financial-engine/src/request.ts";
+import { reportedBy, type SelectionPolicy } from "../../financial-engine/src/select-inputs.ts";
 import { createSqlPeerSetResolver } from "../../fundamentals/src/peer-set-resolver.ts";
 import { MAX_TURN_SUBJECTS } from "./coordinator.ts";
 import { requestedFiscalQuarter, requestedFiscalYear, requestedPriceWindow, type FiscalQuarter } from "./fact-blocks.ts";
@@ -87,7 +88,7 @@ export async function planCompanyOverview(context: PlanningContext, evidence: Fi
       return null;
     }
     // ponytail: a truncated page may lack the newest quarter, so the planner answers instead.
-    const newest = page.truncated ? null : newestQuarter(page.candidates, context.knowledge_cutoff);
+    const newest = page.truncated ? null : newestQuarter(page.candidates, { knowledge_cutoff: context.knowledge_cutoff, allowed_source_classes: context.authority.allowed_source_classes });
     if (newest === null) return null;
     companies.push({ mention: subject.mention, newest });
   }
@@ -97,11 +98,9 @@ export async function planCompanyOverview(context: PlanningContext, evidence: Fi
   return null;
 }
 
-// The engine sees a fact once a proof says its filing was public by the
-// cutoff. Precision is not asked, so a derived fourth quarter counts.
-function newestQuarter(candidates: ReadonlyArray<InputCandidate>, cutoff: IsoDateTime): FiscalQuarter | null {
+function newestQuarter(candidates: ReadonlyArray<InputCandidate>, policy: Pick<SelectionPolicy, "knowledge_cutoff" | "allowed_source_classes">): FiscalQuarter | null {
   const newest = candidates
-    .filter((candidate) => candidate.period.fiscal_period !== "FY" && candidate.publication.some((proof) => publicAtCutoff(proof.timing, cutoff) === "eligible"))
+    .filter((candidate) => candidate.period.fiscal_period !== "FY" && reportedBy(candidate, policy))
     .reduce<InputCandidate | null>((best, candidate) => (best === null || candidate.period.end > best.period.end ? candidate : best), null);
   return newest && { fiscal_year: newest.period.fiscal_year, fiscal_period: newest.period.fiscal_period };
 }

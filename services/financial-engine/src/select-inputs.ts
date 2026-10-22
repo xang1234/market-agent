@@ -183,7 +183,8 @@ export function sharedLatestPeriods(slots: ReadonlyArray<LatestSlot>, policy: Se
   return resolved;
 }
 
-function reportedBy(candidate: InputCandidate, policy: EligibilityPolicy): boolean {
+/** Whether a candidate reports its period by the cutoff (rule 3). */
+export function reportedBy(candidate: InputCandidate, policy: EligibilityPolicy): boolean {
   return "publication" in publicFromAllowedSource(candidate, policy) && metricMisfit(candidate) === null
     && (candidate.context !== null || resolveMetricDefinition(candidate.metric_key)?.value_kind !== "balance");
 }
