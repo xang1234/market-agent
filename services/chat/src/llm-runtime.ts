@@ -204,6 +204,7 @@ export async function composeAnalystBlocksWithLlm(input: {
           "comparison per metric; a segment breakdown is one metric, revenue, across segments; evidence lists the F ids of every",
           "company, segment or period it covers, and a comparison across periods cites every period shown for its metric; add \"op\" and \"result\": op \"highest\" or \"lowest\" with result the F id that is",
           "highest or lowest; op \"order\" with result an array of every F id it cites, highest first",
+          // Without prose before the list, an order's result came back as one id (#374 eval).
           "({\"kind\":\"comparison\",\"text\":\"Revenue is highest at AAPL, then NVDA, then AMD.\",\"evidence\":[\"F1\",\"F5\",\"F9\"],\"op\":\"order\",\"result\":[\"F9\",\"F1\",\"F5\"]});",
           "or op \"trend\" with result one of \"rose\", \"fell\", \"flat\", \"rose_throughout\",",
           "\"fell_throughout\", \"rebounded\" or \"pulled_back\"), \"management_attribution\" (what a claim says management stated;",
