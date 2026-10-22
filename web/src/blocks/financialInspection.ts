@@ -8,6 +8,23 @@ import { authenticatedJson, type FetchImpl } from '../http/authFetch.ts'
 
 export const SUPPORTED_INSPECTION_SCHEMA_VERSION = 'financial_result_inspection.v1'
 
+export type FinancialDerivation = {
+  version: string
+  concept: string
+  unit: string
+  terms: ReadonlyArray<{
+    sign: '+' | '-'
+    span: 'fiscal_year' | 'quarter' | 'year_to_date'
+    fiscal_year: number
+    fiscal_period: string
+    start: string
+    end: string
+    raw_token: string
+    token_proof_hash: string
+    source: { source_id: string; accession: string; form: string; filed: string; locator: string }
+  }>
+}
+
 export type FinancialInspectedInput =
   | {
       input_slot: string
@@ -19,6 +36,7 @@ export type FinancialInspectedInput =
       unit: unknown
       period: { kind: string; start: string | null; end: string; fiscal_year: number; fiscal_period: string }
       precision_status: string
+      derivation: FinancialDerivation | null
       publication: { attestation_id: string; available_no_later_than: string; precision: string }
     }
   | {
@@ -77,6 +95,18 @@ export function canonicalValue(payload: unknown): string | null {
   if (payload === null || typeof payload !== 'object') return null
   const record = payload as { kind?: unknown; value?: unknown }
   return record.kind === 'value' && typeof record.value === 'string' ? record.value : null
+}
+
+/** A term as its derivation writes it: signed, except a leading added term. */
+export function derivationTermLabel(term: FinancialDerivation['terms'][number], index: number): string {
+  const name = term.span === 'fiscal_year'
+    ? `FY ${term.fiscal_year}`
+    : `${term.fiscal_period} ${term.fiscal_year}${term.span === 'year_to_date' ? ' year to date' : ''}`
+  return index === 0 && term.sign === '+' ? name : `${term.sign === '-' ? '−' : '+'} ${name}`
+}
+
+export function derivationFormula(period: { fiscal_year: number; fiscal_period: string }, derivation: FinancialDerivation): string {
+  return `${period.fiscal_period} ${period.fiscal_year} = ${derivation.terms.map(derivationTermLabel).join(' ')}`
 }
 
 /** A unit as plain words, without converting any value. */

@@ -34,6 +34,7 @@ function inspection(overrides: Partial<Extract<FinancialResultInspection, { avai
         metric: { metric_key: 'revenue', definition_version: 'revenue.v1' }, value: LARGE, unit: { kind: 'currency', currency: 'USD' },
         period: { kind: 'fiscal_period', start: '2023-01-01', end: '2023-12-31', fiscal_year: 2023, fiscal_period: 'FY' },
         precision_status: 'source_token_preserved',
+        derivation: null,
         publication: { attestation_id: 'att-1', available_no_later_than: '2024-01-10T23:59:59.999-05:00', precision: 'date' },
       },
       { input_slot: 'b_rev', status: 'gap', reason_code: 'not_public_at_cutoff' },
@@ -73,6 +74,51 @@ test('a bound share price shows the observation it came from and the split resta
   ]) {
     assert.ok(html.includes(expected), `missing ${expected}`)
   }
+})
+
+test('a derived quarter shows its derivation, then each term with its value, dates, and filing', () => {
+  const term = (sign: '+' | '-', span: 'fiscal_year' | 'quarter' | 'year_to_date', fiscal_period: string, start: string, end: string, raw_token: string, form: string, accession: string, filed: string) => ({
+    sign, span, fiscal_year: 2024, fiscal_period, start, end, raw_token, token_proof_hash: 'e'.repeat(64),
+    source: { source_id: `src-${fiscal_period}`, accession, form, filed, locator: `loc-${fiscal_period}` },
+  })
+  const derived = (fiscal_period: string, start: string, terms: ReturnType<typeof term>[]) => inspection({
+    payload: { kind: 'value', value: '170.5', unit: { kind: 'currency', currency: 'USD' }, exact: true, rounding: null },
+    inputs: [{
+      input_slot: 'a_rev', status: 'bound', fact_id: 'f0000000-0000-4000-8000-000000000002',
+      source: { source_id: terms[0]!.source.source_id, document_id: null, source_version_hash: 'v'.repeat(64), locator: 'loc-derived' },
+      metric: { metric_key: 'revenue', definition_version: 'revenue.v1' }, value: '170.5', unit: { kind: 'currency', currency: 'USD' },
+      period: { kind: 'duration', start, end: terms[0]!.end, fiscal_year: 2024, fiscal_period },
+      precision_status: 'derived_from_source_tokens',
+      derivation: { version: 'period_difference.v1', concept: 'Revenues', unit: 'USD', terms },
+      publication: { attestation_id: 'att-2', available_no_later_than: '2025-02-15T23:59:59.999-05:00', precision: 'date' },
+    }],
+  })
+  const render = (load: FinancialResultInspection) => renderToStaticMarkup(<FinancialResultInspector load={{ kind: 'ready', inspection: load }} />)
+
+  const fourth = render(derived('Q4', '2024-10-01', [
+    term('+', 'fiscal_year', 'FY', '2024-01-01', '2024-12-31', '620.5', '10-K', '0001234567-25-000004', '2025-02-15'),
+    term('-', 'quarter', 'Q1', '2024-01-01', '2024-03-31', '140', '10-Q', '0001234567-24-000001', '2024-05-01'),
+    term('-', 'quarter', 'Q2', '2024-04-01', '2024-06-30', '150', '10-Q', '0001234567-24-000002', '2024-08-01'),
+    term('-', 'quarter', 'Q3', '2024-07-01', '2024-09-30', '160.000', '10-Q', '0001234567-24-000003', '2024-11-01'),
+  ]))
+  for (const expected of [
+    'derived from source tokens',
+    '>Derived<', '<span class="break-normal">Q4 2024 = FY 2024 − Q1 2024 − Q2 2024 − Q3 2024</span>',
+    '>FY 2024<', '620.5 · 2024-01-01 to 2024-12-31 · 10-K 0001234567-25-000004 filed 2025-02-15 · src-FY · loc-FY',
+    '>− Q1 2024<', '140 · 2024-01-01 to 2024-03-31 · 10-Q 0001234567-24-000001 filed 2024-05-01 · src-Q1 · loc-Q1',
+    '>− Q3 2024<', '160.000 · 2024-07-01 to 2024-09-30 · 10-Q 0001234567-24-000003 filed 2024-11-01 · src-Q3 · loc-Q3',
+  ]) {
+    assert.ok(fourth.includes(expected), `missing ${expected}`)
+  }
+
+  const cashFlow = render(derived('Q3', '2024-07-01', [
+    term('+', 'year_to_date', 'Q3', '2024-01-01', '2024-09-30', '135', '10-Q', '0001234567-24-000003', '2024-11-01'),
+    term('-', 'year_to_date', 'Q2', '2024-01-01', '2024-06-30', '85', '10-Q', '0001234567-24-000002', '2024-08-01'),
+  ]))
+  for (const expected of ['>Q3 2024 = Q3 2024 year to date − Q2 2024 year to date<', '>Q3 2024 year to date<', '>− Q2 2024 year to date<']) {
+    assert.ok(cashFlow.includes(expected), `missing ${expected}`)
+  }
+  assert.ok(!render(inspection()).includes('>Derived<'), 'a value a filing states shows no derivation')
 })
 
 test('tiny decimals and derived results keep their canonical text', () => {
