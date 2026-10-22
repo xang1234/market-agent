@@ -318,30 +318,21 @@ function traced(name: string) {
   return { packet, compare };
 }
 
-test("a cohort high or low of percents states its lead over the closest other, on the displayed values", () => {
-  const turn3 = traced("follow-up-memory.turn-3");
-  assert.equal(turn3.compare(["F3", "F7"], "highest", "F3"),
-    "Of NVDA and AMD, NVDA's net margin was highest: NVDA 53.6% (FY2026, ended Jan 2026), AMD 12.0% (FY2025, ended Dec 2025), 41.6 percentage points above AMD.");
-  assert.match(turn3.compare(["F2", "F6"], "highest", "F2"), /AMD 49\.9% \(FY2025, ended Dec 2025\), 20\.9 percentage points above AMD\.$/);
-  assert.match(turn3.compare(["F9", "F10"], "highest", "F9"), /, 2\.64 percentage points above AMD\.$/);
-  assert.equal(turn3.compare(["F1", "F5"], "highest", "F1"),
-    "Of NVDA and AMD, NVDA's revenue was highest: NVDA $209.9B (FY2026, ended Jan 2026), AMD $34.7B (FY2025, ended Dec 2025).");
+test("a cohort high or low of percents states no gap, since one subtracted from rounded values can be off at the precision shown (#490)", () => {
+  const gross = (nvda: string, amd: string): EvidencePacket => ({ ...PACKET, figures: [
+    { ...PACKET.figures[0]!, period: "FY2026", value: nvda },
+    { ...PACKET.figures[1]!, period: "FY2026", value: amd },
+  ] });
+  // 74.4049% and 54.0151%: 20.39 points apart, 20.38 from the rounded values.
+  assert.equal(plainText(renderComparison(gross("74.40%", "54.02%"), FACT_BLOCKS, "highest", "F1", ["F1", "F2"]).segments),
+    "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 74.40%, AMD 54.02% (FY2026).");
+  // 74.44% and 54.05%: 20.39 points apart, 20.3 from the rounded values.
+  assert.equal(plainText(renderComparison(gross("74.4%", "54.1%"), FACT_BLOCKS, "lowest", "F2", ["F1", "F2"]).segments),
+    "Of NVDA and AMD, AMD's gross margin was lowest: NVDA 74.4%, AMD 54.1% (FY2026).");
 
   const peers = traced("peer-three");
   assert.equal(peers.compare(["F3", "F7", "F11"], "highest", "F3"),
-    "Of NVDA, AMD, and AAPL, NVDA's net margin was highest: NVDA 53.6% (FY2026, ended Jan 2026), AMD 12.0% (FY2025, ended Dec 2025), AAPL 26.9% (FY2025, ended Sep 2025), 26.7 percentage points above AAPL.");
-  assert.equal(peers.compare(["F3", "F7", "F11"], "lowest", "F7"),
-    "Of NVDA, AMD, and AAPL, AMD's net margin was lowest: NVDA 53.6% (FY2026, ended Jan 2026), AMD 12.0% (FY2025, ended Dec 2025), AAPL 26.9% (FY2025, ended Sep 2025), 14.9 percentage points below AAPL.");
-
-  const tied = { ...peers.packet, figures: peers.packet.figures.map((figure) => (figure.id === "F11" ? { ...figure, value: "12.0%" } : figure)) };
-  assert.match(peers.compare(["F3", "F7", "F11"], "highest", "F3", tied), /, 41\.6 percentage points above AMD and AAPL\.$/);
-});
-
-test("a cohort lead is not said when a covered company shows no value, since the runner-up is then unknown", () => {
-  const turn3 = traced("follow-up-memory.turn-3");
-  const uncovered = { ...turn3.packet, companies: [...turn3.packet.companies, "INTC"] };
-  assert.equal(turn3.compare(["F3", "F7"], "highest", "F3", uncovered),
-    "Of NVDA and AMD, NVDA's net margin was highest: NVDA 53.6% (FY2026, ended Jan 2026), AMD 12.0% (FY2025, ended Dec 2025). No net margin is shown for INTC.");
+    "Of NVDA, AMD, and AAPL, NVDA's net margin was highest: NVDA 53.6% (FY2026, ended Jan 2026), AMD 12.0% (FY2025, ended Dec 2025), AAPL 26.9% (FY2025, ended Sep 2025).");
 });
 
 test("a trend says when it ends at the window's high or low, and not on a tie at the displayed precision", () => {
