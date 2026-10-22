@@ -187,7 +187,6 @@ test("a comparison shows each company's latest quarter, named from the newest it
     publication: [{ attestation_id: "p", timing: { available_not_before: null, available_no_later_than: publicBy, timing_precision: "instant", source_timezone: "UTC" } }],
   }) as unknown as InputCandidate;
   const reported = (...candidates: InputCandidate[]): CandidatePage => ({ status: "ok", candidates, truncated: false });
-  // Each company's own fiscal calendar, as the golden dataset files them.
   const PAGES: Record<string, CandidatePage> = {
     NVDA: reported(revenue(2026, "Q3", "2025-10-26"), revenue(2026, "Q4", "2026-01-25"), revenue(2027, "Q1", "2026-04-26", "2026-09-02T00:00:00.000Z")),
     AMD: reported(revenue(2026, "Q1", "2026-03-28"), revenue(2026, "Q2", "2026-06-27")),
@@ -255,7 +254,6 @@ test("a question about the companies it names that asks for no figure is answere
   const AMD = GOLDEN_COMPANIES.find((company) => company.ticker === "AMD")!;
   const amd = async (): Promise<RequestedSubject[]> => [{ mention: AMD.issuer_id, resolution: { status: "resolved", subject_ref: { kind: "issuer", id: AMD.issuer_id }, label: AMD.legal_name } }];
   const none = async () => [];
-  // The mentions of the companies the overview covers; null when the question is no overview.
   const overview = async (question: string, { carried = false, read: readQuestion = read, peersOf = none as typeof amd } = {}) => {
     const subjects = planningContext(question).requested_subjects;
     if (!namesCompanies(subjects, carried, question)) return null;

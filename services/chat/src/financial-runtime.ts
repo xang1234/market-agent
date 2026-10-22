@@ -470,7 +470,6 @@ async function planTurn(
     return planned;
   }
   if (overview === null) return planned;
-  // Facts bound no fiscal year; a plan's are 1900 to 2200.
   if (overview.outcome !== "ready") {
     console.warn(OVERVIEW_UNPLANNED, overview);
     return planned;
@@ -491,8 +490,6 @@ async function planTurn(
 const DROPPED = new Error("dropped for the company overview");
 const OVERVIEW_UNPLANNED = "[chat] the company overview could not be planned; the planner answers";
 
-// A company's peers as the planner takes them: each named by its issuer id,
-// which only binds its slot, and labelled by its legal name.
 async function overviewPeers(db: SqlExecutor, issuer: FinancialSubjectRef): Promise<ReadonlyArray<RequestedSubject>> {
   const peers = await peersOf(db, issuer);
   const names = await issuerLabels(db, peers.map((peer) => peer.id));
@@ -655,7 +652,6 @@ function persistAssistantMessage(
   return async (tx, publication) => {
     const [scope, reading] = await turn.prepared();
     const plan = scope === null && reading === null ? null : await findPlanForRequest(tx.client, request);
-    // A company the turn gave no label is a peer the overview selected.
     const answeredPeers = plan?.subjects.members.some((member) => !turn.labels.has(member.subject_ref.id.toLowerCase())) ?? false;
     const missing = reading === null || plan === null ? [] : uncoveredAsks(reading, plan, turn.labels, answeredPeers);
     const note = [

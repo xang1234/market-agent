@@ -17,9 +17,7 @@ const COMPANIES: Readonly<Record<string, string>> = {
   // These two store each fourth quarter as the SEC ingester does.
   SECY: "4f000000-0000-4000-8000-0000000000e3",
   SECQ: "4f000000-0000-4000-8000-0000000000e4",
-  // Its newest quarter is in fiscal 2201, past the plan schema's last year.
   FUTR: "4f000000-0000-4000-8000-0000000000e5",
-  // Its newest quarter is Q2 FY2024, two after QTRS's.
   OFFQ: "4f000000-0000-4000-8000-0000000000e6",
 };
 const REVENUE = [
@@ -188,7 +186,6 @@ test("a question about one company that asks for no figure is answered with its 
     };
     const turn = chatHarness(pool, { model, readQuestion: reading(NO_ASKS), resolveMention: resolve, evidence: slowFailing }).run({ ...base, userIntent: "Revenue for QTRS" });
     await overviewReads;
-    // A reply that is no draft makes the planner ask the model again.
     answer({ text: "not a draft", model: "test" });
     for (const deadline = Date.now() + 2_000; calls < 2 && Date.now() < deadline;) await new Promise((resolve) => setTimeout(resolve, 10));
     failRead!();
@@ -230,7 +227,6 @@ test("a question about one company that asks for no figure is answered with its 
         throw new TypeError("a defect");
       },
     });
-    // It rejects too: a planner the failed turn leaves behind is no unhandled rejection.
     const failing: PlanningModel = async () => {
       throw new Error("the model is down");
     };
@@ -271,7 +267,6 @@ test("a question about one company that asks for no figure is answered with its 
     }
   });
 
-  // A comparison's rows: the latest quarter of a company's overview, under its slot.
   const slotted = (slot: string, rows: ReadonlyArray<ReadonlyArray<string>>) => rows.map(([outputId, ...rest]) => [outputId!.replace(/^out_/u, `out_${slot}_`), ...rest]);
   const OFFQ_LATEST = [
     ["out_revenue_fy2024_q2", "Q2 FY2024", "verified", "USD 2,600.00"],
@@ -303,7 +298,6 @@ test("a question about one company that asks for no figure is answered with its 
   await t.test("a question about one company that asks for its peers is answered with the company and its peers, saved as auto-selected (#398)", async () => {
     await db.query(`update issuers set industry = 'Quarterly test filers' where issuer_id = any($1::uuid[])`, [[COMPANIES.QTRS, COMPANIES.OFFQ]]);
     const peers = { ...NO_ASKS, asks: new Set(["peers"] as const) };
-    // As financialResearchScope does for an engine answer: the companies the question names.
     const researchScope = async (context: { userIntent?: string }, read: Promise<ScopeProposal | null>) =>
       resolveResearchScope({ question: context.userIntent ?? "", companies: [{ issuer_id: COMPANIES.QTRS!, label: "QTRS" }], prior: null, asOf: "2026-10-22T00:00:00.000Z", served: true, proposal: await read });
     const { turnId, events } = await chatHarness(pool, { model: null, readQuestion: reading(peers), resolveMention: resolve, researchScope }).run({ ...base, userIntent: "Revenue for QTRS" });

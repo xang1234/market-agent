@@ -86,9 +86,6 @@ function newestQuarter(candidates: ReadonlyArray<InputCandidate>, cutoff: IsoDat
   return newest && { fiscal_year: newest.period.fiscal_year, fiscal_period: newest.period.fiscal_period };
 }
 
-// One company's revenue is a series of its last eight quarters. Several
-// companies are one table (presentation.ts layout), so each shows its latest
-// quarter's revenue and reads only the quarters its growth compares with.
 function companyOverviewDraft(companies: ReadonlyArray<{ mention: string; newest: FiscalQuarter }>) {
   const several = companies.length > 1;
   const backs = several ? [0, ...GROWTH.map(({ back }) => back)] : Array.from({ length: QUARTERS_SHOWN }, (_, back) => back);
