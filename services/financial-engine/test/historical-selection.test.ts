@@ -362,6 +362,7 @@ test("a newer period with no publication proof, reported only for a segment, or 
   assert.deepEqual([0, 1].map((offset) => landed(selectInput(latestQuarter(offset), candidates, atCutoff))), ["Q2 FY2024", "gap missing_input"]);
   const named = (fiscal_period: Quarter): ReportedMetricNode => ({ ...FY2023, period: { kind: "fiscal_period", fiscal_year: 2024, fiscal_period } });
   assert.deepEqual([named("Q3"), named("Q4")].map((node) => landed(selectInput(node, candidates, atCutoff))), ["gap incompatible_scope", "gap incompatible_unit"]);
+  assert.equal(landed(selectInput(named("Q3"), [candidates[1]!, quarter(2024, "Q3", { publication: [] })], atCutoff)), "gap publication_time_unknown", "a later proof can make the consolidated value eligible; nothing makes a segment's");
 });
 
 test("a balance without a financial context, as a 10-Q's labelled FY is stored, does not define the latest fiscal year (#469)", () => {

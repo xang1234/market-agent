@@ -6,7 +6,7 @@
 // 2. Eligibility, per candidate, in order: publicly available by the cutoff
 //    (conservative, source-version-bound proof), from a source class the
 //    authority allows, proven precision, explicit financial context, a unit of
-//    the metric's kind, and not a segment's value.
+//    the metric's kind, and the consolidated value, not a segment's.
 // 3. "Latest" names one fiscal period per subject and period type in a plan:
 //    offset fiscal years, or quarters, before the newest period any of the
 //    subject's latest nodes of that type reports. A candidate reports its
@@ -134,8 +134,8 @@ export type SlotSelection = { status: "selected"; input: SelectedInput } | { sta
 type Eligible = { candidate: ProvenCandidate; publication: SelectedPublication; numeric: ExactNumeric | null };
 
 // When nothing is eligible, report the reason closest to eligibility. No
-// later evidence makes a segment's value or a disallowed source eligible, so
-// they come last.
+// later evidence makes another scope's value or a disallowed source
+// eligible, so they come last.
 const EXCLUSION_PRIORITY: ReadonlyArray<ReasonCode> = ["precision_unverified", "context_unverified", "incompatible_unit", "publication_time_unknown", "incompatible_scope", "source_class_not_allowed"];
 
 type FiscalPeriodSelector = Extract<PeriodSelector, { kind: "fiscal_period" }>;
