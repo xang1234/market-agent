@@ -496,7 +496,6 @@ export const financialRuntime: ChatFinancialRuntime = createChatFinancialRuntime
   evidence: createEvidenceFinancialPort,
   readQuestion: (question) => proposeScope({ question }),
   researchScope: financialResearchScope,
-  // The analyst answer's models and judge, as the analyst path uses them.
   commentary: (input, turn) => answerTurn(input, turn, { env: process.env, traceDir: process.env.CHAT_TRACE_DIR?.trim() }),
 });
 

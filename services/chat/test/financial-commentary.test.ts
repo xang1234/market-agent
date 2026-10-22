@@ -45,7 +45,6 @@ const ALFA_TEXT = [
 ].join("\n\n");
 const JUDGE = "You check the analyst inferences";
 
-// A commentary model answering as given, and the judge, when one is configured, as given.
 function composer(answer: (request: LlmChatRequest) => string | Promise<string>, judge?: string, env: Record<string, string> = judge ? JUDGED : ENV) {
   const inputs: AnswerTraceInput[] = [];
   const compose: CommentaryComposer = (input, turn) => {
@@ -197,7 +196,6 @@ test("a company overview carries analyst commentary on its published results (#3
       "the model call fails": composer(() => Promise.reject(new Error("provider down")), undefined, ENV).compose,
       "the assertion list is malformed": composer(() => "No list.\n```assertions\n{not json\n```").compose,
       "nothing is accepted": composer(() => assertions([{ kind: "observation", text: "x", evidence: ["F99"] }])).compose,
-      // A composer whose prose names a figure the answer does not show as written.
       "a ref is not the answer's": async (input, turn) => {
         const answer = await composer(() => ALFA_REPLY).compose(input, turn);
         const [prose] = answer.blocks;

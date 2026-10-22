@@ -55,7 +55,6 @@ export function renderAssertion(
   return { index: assertion.index, segments, figure_ids, fact_bindings, source_refs };
 }
 
-// gap: why an engine figure is unavailable, in its value's place.
 type Writes = Pick<Sealer, "value" | "quote"> & { gap: (figure: PacketFigure) => Segment };
 
 function templateSegments(
@@ -73,7 +72,6 @@ function templateSegments(
     case "observation": {
       // One clause per company and period, its period said once: "NVDA's
       // gross margin was 74.4%, operating margin 64.9% and ... in Q4 2026".
-      // An unavailable figure is said apart, as the gap it is.
       const groups = new Map<string, PacketFigure[]>();
       for (const figure of figures.filter((entry) => entry.gap === undefined)) {
         const key = `${owner(figure)}|${figure.period ?? ""}|${figure.period_end ?? ""}|${periodCoverage(figure) ?? ""}`;

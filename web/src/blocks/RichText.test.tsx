@@ -454,7 +454,6 @@ test('analyst commentary is labelled as such, and a result in it opens the verif
   } finally {
     restoreGlobals()
   }
-  // Prose that is not commentary on an engine answer carries no such label.
   const plain = await renderDocument(interleavedBlock)
   assert.equal(plain.querySelector('[data-analyst-commentary]'), null)
 })

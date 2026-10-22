@@ -83,7 +83,6 @@ async function commentary(
   return problem === null ? prose : unavailable(problem);
 }
 
-// Only onto the message as it was read: one changed since is left as it is.
 async function append(db: SqlExecutor, message: ChatReadMessage, block: Block): Promise<void> {
   const blocks = JSON.stringify([...(message.blocks as Block[]), block]);
   const { rows } = await db.query(

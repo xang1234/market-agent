@@ -457,7 +457,6 @@ async function planTurn(
     startReading: () => Promise<ScopeProposal | null>;
     evidence: FinancialEvidencePort;
     peersOf: PeersOf;
-    // Called when the overview replaces the planner.
     onOverview: () => void;
   }>,
 ): Promise<PlanningResult> {
