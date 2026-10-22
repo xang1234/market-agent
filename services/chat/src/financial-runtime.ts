@@ -282,7 +282,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
             });
           } catch (error) {
             // The append may have committed before the error: the turn ends on the row as read back.
-            console.error(`[chat] the analyst commentary on message ${messageId} failed; the turn completes with the message as stored`, error);
+            console.error(`[chat] the analyst commentary on message ${messageId} failed; the turn completes with the message as read back`, error);
           }
           return (await readBack(deps.pool, context.threadId, messageId)) ?? message;
         },

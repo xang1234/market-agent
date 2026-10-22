@@ -55,20 +55,18 @@ test("a recorded reply matching several substrings answers only a request holdin
   assert.equal(await ask('{"route":"financial_engine","coverage":[{"company":"NVDA"}]}'), "One company.");
 });
 
-test("a recorded reply with an empty match list answers no request", async () => {
-  const router = await createLlmRouterFromEnv({
-    ...CHANNEL_ENV,
-    LLM_REPLAY_FILE: await replayFile([
-      { match: [], text: "Every request." },
+test("a replay file with a recording that matches nothing, or everything, is refused when it loads", async () => {
+  for (const match of [[], "", [""], ["Analyze NVDA", ""], 3] as const) {
+    const file = await replayFile([
       { match: "Analyze NVDA", text: "NVIDIA revenue grew." },
-    ]),
-  });
-  assert.ok(router);
-  const ask = async (content: string) => (await router.complete({ messages: [{ role: "user", content }] })).text;
-
-  assert.equal(await ask("Analyze NVDA"), "NVIDIA revenue grew.");
-  await assert.rejects(ask("Analyze AMD"), (error: { attempts?: ReadonlyArray<{ message: string }> }) =>
-    /no recorded reply matches/.test(error.attempts?.[0]?.message ?? ""));
+      { match: match as string, text: "Every request." },
+    ]);
+    await assert.rejects(
+      createLlmRouterFromEnv({ ...CHANNEL_ENV, LLM_REPLAY_FILE: file }),
+      /reply 1's match must be a non-empty string or a non-empty list of them/,
+      JSON.stringify(match),
+    );
+  }
 });
 
 test("LLM_REPLAY_FILE fails loudly when no recorded reply matches", async () => {
