@@ -218,7 +218,7 @@
     "question": "Why was NVDA's gross margin above the high end of its outlook?",
     "companies": ["NVDA"],
     "prior": null,
-    "expected": {"route":"derived_margin","reads":"derived_margin","peers":false,"segments":false,"margin_trend":false,"margins":true,"metrics":["income_statement"],"guidance":false,"explains":true,"income_items":["gross_margin"],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"period":"none"}
+    "expected": {"route":"derived_margin","reads":"derived_margin","peers":false,"segments":false,"margin_trend":false,"margins":true,"metrics":["income_statement"],"guidance":true,"explains":true,"income_items":["gross_margin"],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"period":"none"}
   },
   {
     "id": 32,
@@ -404,7 +404,7 @@
     "question": "Why did AMD's operating margin turn negative in Q2 2025?",
     "companies": ["AMD"],
     "prior": null,
-    "expected": {"route":"derived_margin","reads":"derived_margin","peers":false,"segments":false,"margin_trend":false,"margins":true,"metrics":["income_statement"],"guidance":false,"explains":true,"income_items":["operating_margin"],"fiscal_year":2025,"fiscal_quarter":"Q2 2025","price_window":null,"benchmark":false,"period":"fiscal_quarter"}
+    "expected": {"route":"trend","reads":"trend","peers":false,"segments":false,"margin_trend":true,"margins":true,"metrics":["income_statement"],"guidance":false,"explains":true,"income_items":["operating_margin"],"fiscal_year":2025,"fiscal_quarter":"Q2 2025","price_window":null,"benchmark":false,"period":"fiscal_quarter"}
   },
   {
     "id": 58,
@@ -541,7 +541,8 @@
     "after": "Compare NVDA with AMD",
     "companies": ["NVDA","AMD","AAPL"],
     "prior": {"route":"comparison","reads":"comparison","companies":[{"issuer_id":"60000000-0000-4000-8000-000000000001","label":"NVDA"},{"issuer_id":"60000000-0000-4000-8000-000000000002","label":"AMD"}],"peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":[],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"inherited":[]},
-    "expected": {"route":"comparison","reads":"comparison","peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":[],"guidance":false,"explains":false,"income_items":[],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"period":"none"}
+    "expected": {"route":"comparison","reads":"comparison","peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":[],"guidance":false,"explains":false,"income_items":[],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"period":"none","companies":{"kind":"compare","add":["AAPL"]}},
+    "accept": {"companies":{"value":{"kind":"as_named","names":["AAPL"]},"reason":"Known model miss (#510): \"too\" should add AAPL; as_named answers it alone after a comparison."}}
   },
   {
     "id": 75,

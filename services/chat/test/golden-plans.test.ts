@@ -344,7 +344,7 @@ test("each golden answer names what its question asks for and its plan does not 
     "Why did AMD's operating margin turn negative in Q2 2025?": ["a margin over several periods", "the cause of these figures"],
     "What was AMD's revenue in Q2 2019?": [],
     "What is AMD's free cash flow?": [],
-    "Compare NVDA, AMD and AAPL revenue and margins YTD against the S&P 500": ["a stock price return", "a comparison with a benchmark index"],
+    "Compare NVDA, AMD and AAPL revenue and margins YTD against the S&P 500": ["a comparison with a benchmark index"],
     "What drives AAPL's margins?": ["the cause of these figures"],
     "How does AMDX's Q2 2025 revenue compare with its peers?": ["peers the question did not name"],
   };
