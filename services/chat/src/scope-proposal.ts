@@ -4,8 +4,8 @@
 // review at a time. The model only proposes, from closed vocabularies: every
 // key is checked, and anything outside them rejects the whole proposal, so the
 // turn asks for nothing new (research-scope.ts). It never picks companies,
-// data or figures, and nothing it writes reaches the answer: the readers and gap notes
-// do as before.
+// data or figures, and nothing it writes reaches the answer: the readers and
+// gap notes do as before.
 //
 // Off when there is no model or CHAT_SCOPE_PROPOSAL=off. Recorded replies
 // (LLM_REPLAY_FILE) answer it like any other call: a fixture records one per
@@ -105,8 +105,6 @@ export function parseProposal(text: string): ScopeProposal | null {
   };
 }
 
-// Exactly the fields its kind has: a year outside the bounds, or a field the
-// kind does not have, rejects it.
 function periodOf(value: unknown): ScopePeriod | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
   const { kind, ...fields } = value as Record<string, unknown>;

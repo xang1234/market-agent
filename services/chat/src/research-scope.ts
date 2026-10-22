@@ -129,8 +129,7 @@ export type ScopeFacet = (typeof SCOPE_FACETS)[number];
 // The periods a question can turn off beside its facets.
 export const PERIOD_FIELDS = ["fiscal_year", "fiscal_quarter"] as const;
 export const FISCAL_PERIODS = ["Q1", "Q2", "Q3", "Q4"] as const;
-// The period a question asks about. A trailing twelve months, a range and any
-// other period are not the latest, and nothing here reads more of them.
+// The period a question asks about.
 export type ScopePeriod =
   | { kind: "latest" }
   | { kind: "fiscal_year"; fiscal_year: number }
@@ -175,26 +174,22 @@ const CLEARS: Partial<Record<ScopeFacet | (typeof PERIOD_FIELDS)[number], ScopeF
 const PARTIAL_QUARTER = /\bQ([1-4])\b|\b(first|second|third|fourth)\s+quarter\b/i;
 const ORDINAL_QUARTERS: Readonly<Record<string, number>> = { first: 1, second: 2, third: 3, fourth: 4 };
 
-// The fiscal periods a question names: a year, a whole quarter, or a quarter
-// without its year (partial).
-type NamedPeriod = { year?: number; quarter?: FiscalQuarter; partial?: string };
+type NamedPeriod = { year?: number; quarter?: FiscalQuarter; yearlessQuarter?: (typeof FISCAL_PERIODS)[number] };
 
 function periodOfReading(period: ScopePeriod): NamedPeriod {
   if (period.kind === "fiscal_year") return { year: period.fiscal_year };
   if (period.kind !== "fiscal_quarter") return {};
   return period.fiscal_year === null
-    ? { partial: period.fiscal_period }
+    ? { yearlessQuarter: period.fiscal_period }
     : { quarter: { fiscal_year: period.fiscal_year, fiscal_period: period.fiscal_period } };
 }
 
-// Explicit period tokens still apply when there is no reading (no model, a
-// failure, a reply outside the vocabularies).
 function periodTokensWithoutReading(question: string): NamedPeriod {
   const partial = PARTIAL_QUARTER.exec(question);
   return {
     year: requestedFiscalYear(question),
     quarter: requestedFiscalQuarter(question),
-    partial: partial ? `Q${partial[1] ?? ORDINAL_QUARTERS[partial[2]!.toLowerCase()]}` : undefined,
+    yearlessQuarter: partial ? FISCAL_PERIODS[Number(partial[1] ?? ORDINAL_QUARTERS[partial[2]!.toLowerCase()]) - 1] : undefined,
   };
 }
 
@@ -405,7 +400,7 @@ export function resolveResearchScope(input: {
   // A follow-up naming part of a period updates the inherited quarter (#292
   // review): a quarter alone ("now Q3") takes its year; a fiscal year alone
   // ("now for fiscal 2026") or the latest quarter replaces it.
-  const partialPeriod = off.has("fiscal_quarter") ? null : period.partial ?? null;
+  const partialPeriod = off.has("fiscal_quarter") ? null : period.yearlessQuarter ?? null;
   // Its year: one named in the question ("Q3, FY2026"), else the inherited
   // quarter's, else an inherited fiscal year (#292 review).
   const partialYear = yearNamed ?? prior?.fiscal_quarter?.fiscal_year ?? prior?.fiscal_year ?? undefined;

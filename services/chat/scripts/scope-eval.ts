@@ -31,8 +31,8 @@ const COMPANIES = {
   AAPL: { issuer_id: "60000000-0000-4000-8000-000000000003", label: "AAPL" },
 };
 
-// The fields of a resolved scope an eval case checks, and the kind of period
-// read, which a scope records only as its fiscal year and quarter.
+// The fields an eval case checks: a resolved scope's, and the period kind its
+// reading names.
 export function scopeView(scope: ResearchScope, period: ScopePeriod) {
   return {
     route: scope.route,
