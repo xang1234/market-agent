@@ -101,6 +101,9 @@ export function repairedList(list: ReadonlyArray<unknown>, requests: ReadonlyArr
     if (!isRecord(entry) || entry.kind !== "analyst_inference" || typeof entry.index !== "number") continue;
     const { index, ...fields } = entry;
     if (repaired.includes(index) || !requests.some((request) => request.index === index)) continue;
+    // The same words again are no repair: a second verdict on them is only the
+    // judge's variance.
+    if (isRecord(list[index]) && list[index].text === fields.text) continue;
     merged[index] = { ...(isRecord(list[index]) ? list[index] : {}), ...fields };
     repaired.push(index);
   }
@@ -118,13 +121,13 @@ export async function repairRound(input: {
   factBlocks: ReadonlyArray<Record<string, unknown>>;
   repair: (messages: LlmChatMessage[]) => Promise<ModelRecord>;
   judge: (inference: JudgeCase, i: number) => Promise<ModelRecord>;
-  checked?: (report: AssertionReport) => void;
+  checked?: (merged: { list: unknown[]; repaired: number[]; report: AssertionReport }) => void;
 }): Promise<{ record: ModelRecord; list: unknown[]; repaired: number[]; report: AssertionReport; cases: JudgeCase[]; records: ModelRecord[] }> {
   const record = await input.repair(repairMessages(input.messages, input.list, input.requests));
   const { list, repaired } = repairedList(input.list, input.requests, record);
   const report = checkAssertions(list, input.packet);
   if (repaired.length === 0) return { record, list, repaired, report, cases: [], records: [] };
-  input.checked?.(report);
+  input.checked?.({ list, repaired, report });
   const cases = judgeCases(report.accepted, input.packet, input.factBlocks).filter((inference) => repaired.includes(inference.index));
   return { record, list, repaired, report, cases, records: await Promise.all(cases.map(input.judge)) };
 }

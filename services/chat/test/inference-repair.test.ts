@@ -435,6 +435,89 @@ test("a replay keeps the recorded verdicts and runs only the repair live (record
   assert.deepEqual(live.calls.sort(), ["judge 7", "judge 8", "judge 8", "repair"]);
 });
 
+const UNVERIFIED_ENDS = `> **Unverified analyst view** (not backed by the figures shown): ${ENDS_TEXT}`;
+
+test("in every repair outcome the last blocks a watcher hears are the blocks saved, and no repaired text shows before its verdict", async (t) => {
+  t.mock.method(console, "info", () => {});
+  const firsts: Array<[string, LlmChatResult, string | null]> = [
+    ["entailed, worded", verdict(8, "entailed", true, GAP_REASON), UNVERIFIED_GAP],
+    ["unsupported, worded", verdict(8, "unsupported", true, GAP_REASON), UNVERIFIED_GAP],
+    ["contradicted", verdict(8, "contradicted", false, "the ends are not shown."), null],
+  ];
+  const outcomes: Array<[string, () => Promise<LlmChatResult> | LlmChatResult, LlmChatResult | null, string | null]> = [
+    ["repaired, entailed", () => fenced([inference(8, ENDS_TEXT)]), verdict(8, "entailed"), ENDS],
+    ["repaired, entailed and worded", () => fenced([inference(8, ENDS_TEXT)]), verdict(8, "entailed", true, "w."), UNVERIFIED_ENDS],
+    ["repaired, unsupported", () => fenced([inference(8, ENDS_TEXT)]), verdict(8, "unsupported", false, "x."), UNVERIFIED_ENDS],
+    ["repaired, contradicted", () => fenced([inference(8, ENDS_TEXT)]), verdict(8, "contradicted", false, "no."), "first"],
+    ["repaired, no verdict", () => fenced([inference(8, ENDS_TEXT)]), { text: "not json" }, "first"],
+    ["rejected by the checks", () => fenced([inference(8, "The gap of 8 months limits comparability.")]), null, "first"],
+    ["left out", () => fenced([]), null, "first"],
+    ["the same words", () => fenced([inference(8, GAP_TEXT)]), verdict(8, "entailed"), "first"],
+    ["no list", () => ({ text: "no block" }), null, "first"],
+    ["late", () => new Promise<LlmChatResult>(() => {}), null, "first"],
+  ];
+  const keep = setInterval(() => {}, 1000);
+  t.after(() => clearInterval(keep));
+  for (const [firstLabel, firstReply, restored] of firsts) {
+    for (const [label, repair, second, expected] of outcomes) {
+      const row = `${firstLabel}, ${label}`;
+      const { createClient } = models(FISCAL, {
+        judge: (ask) => (ask.id === 7 ? verdict(7, "entailed") : ask.text === GAP_TEXT ? firstReply : second ?? assert.fail(`${row}: no second verdict expected`)),
+        repair: repair as () => LlmChatResult,
+      });
+      const answer = await answerTurn(FISCAL.input, turn(FISCAL), { env: JUDGED_ENV, createClient, repairDeadlines: { attemptMs: 30, totalMs: 60 } });
+      const seen: string[] = [];
+      answer.judging!.watch((blocks) => seen.push(text(blocks)));
+      const done = await answer.judging!.done;
+      const shown = expected === "first" ? restored : expected;
+      assert.equal(text(done.blocks), shown === null ? fiscal(PROFITABILITY) : fiscal(PROFITABILITY, shown), row);
+      assert.equal(seen.at(-1), text(done.blocks), row);
+      assert.equal(seen.slice(0, -1).some((blocks) => blocks.includes(ENDS_TEXT)), false, row);
+      if (restored === null) assert.equal(seen.some((blocks) => blocks.includes(GAP_TEXT)), false, row);
+    }
+  }
+});
+
+test("a repair that fails the checks shows its inference's first form at once, while another repaired verdict is still out", async (t) => {
+  t.mock.method(console, "info", () => {});
+  const P_TEXT = "Despite lower absolute revenue, NVDA's substantially higher margins indicate stronger profitability per dollar of revenue compared to AAPL.";
+  const UNVERIFIED_P = `> **Unverified analyst view** (not backed by the figures shown): ${P_TEXT}`;
+  const second = deferred<LlmChatResult>();
+  const asked = deferred<void>();
+  const { createClient } = models(FISCAL, {
+    judge: (ask) => {
+      if (ask.text === P_TEXT) return verdict(7, "entailed", true, "it says substantially.");
+      if (ask.text === GAP_TEXT) return verdict(8, "entailed", true, GAP_REASON);
+      asked.resolve();
+      return second.promise as unknown as LlmChatResult;
+    },
+    repair: () => fenced([inference(7, "NVDA earns 2 times more per dollar."), inference(8, ENDS_TEXT)]),
+  });
+  const answer = await answerTurn(FISCAL.input, turn(FISCAL), { env: JUDGED_ENV, createClient });
+  const seen: string[] = [];
+  answer.judging!.watch((blocks) => seen.push(text(blocks)));
+  await asked.promise;
+  assert.equal(seen.at(-1), fiscal(UNVERIFIED_P, PENDING));
+  second.resolve(verdict(8, "entailed"));
+  const done = await answer.judging!.done;
+  assert.equal(text(done.blocks), fiscal(UNVERIFIED_P, ENDS));
+  assert.equal(seen.at(-1), text(done.blocks));
+  assert.equal(seen.some((blocks) => blocks.includes("2 times")), false);
+});
+
+test("a repair that gives back the same words is no repair: the judge is not asked again, and a worded inference stays unverified", async (t) => {
+  t.mock.method(console, "info", () => {});
+  const { calls, createClient } = models(FISCAL, {
+    judge: fiscalJudge(() => assert.fail("the same words are not judged again")),
+    repair: () => fenced([inference(8, GAP_TEXT)]),
+  });
+  const done = await (await answerTurn(FISCAL.input, turn(FISCAL), { env: JUDGED_ENV, createClient })).judging!.done;
+  assert.equal(text(done.blocks), fiscal(PROFITABILITY, UNVERIFIED_GAP));
+  assert.equal(done.assertions?.repaired, undefined);
+  assert.deepEqual(done.assertions?.judged?.at(-1), { index: 8, verdict: "entailed", worded_amount: true, reason: GAP_REASON });
+  assert.deepEqual(calls.sort(), ["answer", "judge 7", "judge 8", "repair"]);
+});
+
 const MUTATIONS = fileURLToPath(new URL("./answer-lab/judge-mutations.json", import.meta.url));
 
 test("judge-mutations --repair sends a worded variant through the turn's repair round, on its answer request with the variant in its list, and reports its path", async () => {
