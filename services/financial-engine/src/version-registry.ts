@@ -1,13 +1,15 @@
 // The deployer-reviewed set of financial versions this build can honour. It
 // lists only code compiled into this build: a saved run whose plan names an
 // operation, definition, catalog, numeric policy, or certificate version that
-// is not here is unavailable for replay and inspection. Nothing is ever
-// downloaded or substituted — a newer build does not reinterpret an older
-// version with today's implementation. Adding an entry is a reviewed change
-// that ships the matching implementation.
+// is not here is unavailable for replay and inspection. Presentation v1 is
+// listed so stored answers stay readable and inspectable, though this build
+// never generates it. Nothing is ever downloaded or substituted — a newer
+// build does not reinterpret an older version with today's implementation.
+// Adding an entry is a reviewed change that ships the matching implementation.
 
 import {
   FINANCIAL_CATALOG_VERSION,
+  FINANCIAL_PRESENTATION_V1,
   FINANCIAL_PRESENTATION_VERSION,
   METRIC_CATALOG_V1,
   NUMERIC_POLICY,
@@ -33,7 +35,7 @@ export const FINANCIAL_VERSION_REGISTRY: FinancialVersionRegistry = Object.freez
   numeric_policy_versions: new Set([NUMERIC_POLICY.version]),
   certificate_versions: new Set([FINANCIAL_PUBLICATION_SCHEMA_VERSION]),
   verifier_versions: new Set([FINANCIAL_VERIFIER_VERSION]),
-  presentation_versions: new Set([FINANCIAL_PRESENTATION_VERSION]),
+  presentation_versions: new Set([FINANCIAL_PRESENTATION_V1, FINANCIAL_PRESENTATION_VERSION]),
 });
 
 /** The first version a plan needs that this build does not ship, or null. */

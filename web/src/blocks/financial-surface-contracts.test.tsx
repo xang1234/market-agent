@@ -3,6 +3,7 @@
 // visible; an old or unknown format is legacy output, never verified text.
 
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -14,7 +15,7 @@ import type { GridRunDetail } from '../analyst-grids/gridsTypes.ts'
 import { CandidateCard } from '../discovery/CandidateCard.tsx'
 import { EvidenceInspectorContext, type EvidenceInspectorContextValue } from '../evidence/evidenceInspectorContext.ts'
 import { BlockRegistryProvider, BlockView, createDefaultBlockRegistry } from './index.ts'
-import { financialAnswerFixture, richTextFixture } from './fixtures.ts'
+import { financialAnswerFixture, financialAnswerV1Fixture, richTextFixture } from './fixtures.ts'
 import type { Block, FinancialAnswerBlock } from './types.ts'
 
 const inspector: EvidenceInspectorContextValue = {
@@ -65,6 +66,11 @@ test('every block labels its own status: legacy figures, cited narrative, and ce
   )
   assert.equal(count(html, 'Legacy output'), 1)
   assert.equal(count(html, 'Verified calculation'), 1)
+})
+
+test('a stored v1 answer renders byte for byte as it did before presentation v2', () => {
+  const html = withInspector(<BlockView block={financialAnswerV1Fixture as Block} />)
+  assert.equal(html, readFileSync(new URL('./financialAnswer.v1.golden.html', import.meta.url), 'utf8'), 'captured before the renderer changed')
 })
 
 test('an old client meeting a newer answer format shows legacy output and no values', () => {

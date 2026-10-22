@@ -115,7 +115,7 @@ test("financial verification against ledger records", { timeout: 240_000 }, asyn
       const block = sealed.verification.financial!.block;
       assert.equal(block.kind, "financial_answer");
       assert.equal(block.snapshot_id, SNAPSHOT);
-      assert.deepEqual(sealed.verification.financial?.certificate.presentation, { version: "financial-presentation.v1", hash: block.presentation_hash });
+      assert.deepEqual(sealed.verification.financial?.certificate.presentation, { version: "financial-presentation.v2", hash: block.presentation_hash });
       assert.equal(block.financial.labels["subject:a"]?.text, "Alpha Industries Inc.");
 
       const narrative = { id: "note", kind: "rich_text", snapshot_id: SNAPSHOT, data_ref: { kind: "rich_text", id: "note" }, source_refs: [], as_of: cutoff, segments: [{ type: "text", text: "Margins doubled." }] };

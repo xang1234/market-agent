@@ -120,8 +120,8 @@ test("a question about one company that asks for no figure is answered with its 
     const { rows: [shown] } = await db.query(`select blocks->0->'financial'->'presentations' as presentations from chat_messages where message_id = $1`, [done.message_id]);
     assert.deepEqual(
       shown.presentations.map((presentation: { kind: string; points?: unknown[] }) => `${presentation.kind}${presentation.points ? `(${presentation.points.length})` : ""}`),
-      ["series(8)", "series(2)", "scalar", "scalar", "scalar", "scalar", "scalar", "scalar"],
-      "revenue over the quarters first, then its growth, then the latest quarter's lines",
+      ["series(8)", "scalar", "scalar", "scalar", "scalar", "scalar", "scalar", "scalar", "scalar"],
+      "revenue over the quarters first, then the latest quarter's lines, and QoQ and YoY growth each its own line (#470)",
     );
     const latest = completed((await chatHarness(pool, { model: null, readQuestion: reading({ ...NO_ASKS, asks: new Set(["latest_quarter"]) }), resolveMention: resolve }).run({ ...base, userIntent: "Revenue for QTRS" })).events);
     assert.deepEqual(await results(latest.message_id), QTRS_OVERVIEW, "a reading that asks for the latest quarter gets the overview, which shows it");

@@ -108,6 +108,13 @@ test("committed result inspection", { timeout: 300_000 }, async (t) => {
     });
   });
 
+  await t.test("a result certified before presentation v2 is still inspectable", async () => {
+    const certifiedAs = (version: string) => ({ sql: `update snapshot_financial_runs set certificate = jsonb_set(certificate, '{presentation,version}', to_jsonb($2::text)) where run_id = $1`, params: [runId, version] });
+    await whileChanged(db, certifiedAs("financial-presentation.v1"), certifiedAs("financial-presentation.v2"), async () => {
+      assert.equal(available(await inspect("out_gm")).result_id, results.out_gm);
+    });
+  });
+
   await t.test("inspection only reads", async () => {
     const statements: string[] = [];
     const recording: SqlExecutor = { query: (text, values) => { statements.push(text); return db.query(text, values as unknown[]) as never; } };

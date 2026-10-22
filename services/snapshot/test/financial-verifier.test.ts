@@ -212,7 +212,7 @@ test("verification generates the certified block from the records it checked", (
       presentation_hash: presentationHash(block.financial), financial: undefined,
     },
   );
-  assert.deepEqual(certificate.presentation, { version: "financial-presentation.v1", hash: block.presentation_hash });
+  assert.deepEqual(certificate.presentation, { version: "financial-presentation.v2", hash: block.presentation_hash });
   const [revenue, margin] = block.financial.results;
   assert.deepEqual([revenue!.disposition, margin!.disposition], ["verified", "verified"], "only recomputed results are presented, as verified");
   assert.equal(block.financial.labels[margin!.subject_label_id!]!.text, "Fixture Industries Inc.");

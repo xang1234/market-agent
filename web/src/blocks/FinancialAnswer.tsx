@@ -103,19 +103,28 @@ function ResultLine({ content, result }: { content: FinancialAnswerContent; resu
   )
 }
 
-function Cell({ result }: { result: FinancialPresentedResult | undefined }): ReactElement {
+function Cell({ result, ownPeriod }: { result: FinancialPresentedResult | undefined; ownPeriod?: string }): ReactElement {
   if (!result) return <span className="text-muted">Not requested</span>
   const { presented } = result
+  const period = ownPeriod === undefined ? null : <span className="block text-xs text-muted">{ownPeriod}</span>
   if (presented.kind === 'value') {
     return (
-      <InspectableResult resultId={result.result_id} label={presented.full_text}>
-        <span title={presented.full_text} aria-label={presented.full_text}>
-          {presented.text}
-        </span>
-      </InspectableResult>
+      <>
+        <InspectableResult resultId={result.result_id} label={ownPeriod === undefined ? presented.full_text : `${presented.full_text}, ${ownPeriod}`}>
+          <span title={presented.full_text} aria-label={presented.full_text}>
+            {presented.text}
+          </span>
+        </InspectableResult>
+        {period}
+      </>
     )
   }
-  return <span className="text-muted italic">{presented.text}</span>
+  return (
+    <>
+      <span className="text-muted italic">{presented.text}</span>
+      {period}
+    </>
+  )
 }
 
 // A certified value opens the shared result inspector where the host provides
@@ -156,7 +165,8 @@ function CertifiedTable({ blockId, content, results, table }: TableProps): React
               Company
             </th>
             {table.columns.map((column) => {
-              const heading = `${labelText(content, column.measure_label_id)}, ${labelText(content, column.period_label_id)}`
+              const measure = labelText(content, column.measure_label_id)
+              const heading = column.period_label_id === null ? measure : `${measure}, ${labelText(content, column.period_label_id)}`
               const active = sort?.columnId === column.column_id
               return (
                 <th
@@ -181,11 +191,15 @@ function CertifiedTable({ blockId, content, results, table }: TableProps): React
                 <th scope="row" className="px-3 py-2 font-normal text-fg">
                   {labelText(content, row.subject_label_id)}
                 </th>
-                {row.cells.map((cell, cellIndex) => (
-                  <td key={`${row.subject_label_id}-${cellIndex}`} className="num px-3 py-2 text-fg">
-                    <Cell result={cell === null ? undefined : results.get(cell)} />
-                  </td>
-                ))}
+                {row.cells.map((cell, cellIndex) => {
+                  const result = cell === null ? undefined : results.get(cell)
+                  const ownPeriod = table.columns[cellIndex]?.period_label_id === null && result ? labelText(content, result.period_label_id) : undefined
+                  return (
+                    <td key={`${row.subject_label_id}-${cellIndex}`} className="num px-3 py-2 text-fg">
+                      <Cell result={result} ownPeriod={ownPeriod} />
+                    </td>
+                  )
+                })}
               </tr>
             )
           })}

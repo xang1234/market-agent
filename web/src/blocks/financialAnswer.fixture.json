@@ -10,9 +10,9 @@
     "44444444-4444-4444-9444-444444444444"
   ],
   "as_of": "2024-01-16T04:59:59.999Z",
-  "presentation_hash": "1503b4a541ee4d7d2e51b741833f27aa71e32aa385795b7782e9c36edf6ed7fe",
+  "presentation_hash": "eb75e58954f16063d936bfe1c95a77ea2156cdb5032d9fd62f8b6184cc8ae2eb",
   "financial": {
-    "presentation_version": "financial-presentation.v1",
+    "presentation_version": "financial-presentation.v2",
     "template_version": "financial-answer.v1",
     "run_id": "99999999-9999-4999-9999-999999999999",
     "unit_id": "section",
@@ -152,7 +152,7 @@
           {
             "column_id": "c0",
             "measure_label_id": "measure:m0",
-            "period_label_id": "period:p0"
+            "period_label_id": null
           },
           {
             "column_id": "c1",

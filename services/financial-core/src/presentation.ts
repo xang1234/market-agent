@@ -13,6 +13,7 @@
 
 import { hashCanonical } from "./canonical.ts";
 import type {
+  ChangeNode,
   Comparison,
   CoverageState,
   DecimalString,
@@ -25,13 +26,16 @@ import type {
   ReasonCode,
   Sha256Hex,
 } from "./contracts.ts";
-import { operationDependencies } from "./contracts.ts";
+import { FISCAL_PERIODS, operationDependencies } from "./contracts.ts";
 import { coverageState } from "./coverage.ts";
 import { resolveMetricDefinition, resolveRatioDefinition } from "./definitions.ts";
 import { canonicalDecimalString, compareExactDecimals, parseDerivedDecimalText, type ExactDecimal } from "./exact-decimal.ts";
 import { dependencyClosure } from "./graph.ts";
+import { OPERATION_REGISTRY } from "./operation-registry.ts";
 
-export const FINANCIAL_PRESENTATION_VERSION = "financial-presentation.v1";
+export const FINANCIAL_PRESENTATION_VERSION = "financial-presentation.v2";
+/** Answers certified before v2 keep this version: still accepted and rendered, never generated. */
+export const FINANCIAL_PRESENTATION_V1 = "financial-presentation.v1";
 
 export type PresentationLabel = Readonly<
   | { kind: "subject"; text: string; slot_id: LocalId }
@@ -63,7 +67,8 @@ export type Presentation = Readonly<
   | {
       kind: "table";
       caption: string;
-      columns: ReadonlyArray<Readonly<{ column_id: string; measure_label_id: string; period_label_id: string }>>;
+      /** A column's period is null unless every row has a cell there and all read one period; each cell's result then names its own. */
+      columns: ReadonlyArray<Readonly<{ column_id: string; measure_label_id: string; period_label_id: string | null }>>;
       rows: ReadonlyArray<Readonly<{ subject_label_id: string; cells: ReadonlyArray<string | null> }>>;
       /** Per column: row indexes in ascending exact-value order, rows without a value last. */
       ascending: Readonly<Record<string, ReadonlyArray<number>>>;
@@ -138,7 +143,7 @@ export function presentFinancialUnit(input: {
     coverage: { state: coverageState(verified, results.length), requested: results.length, verified },
     labels: labels.entries,
     results,
-    presentations: layout(plan, results, labels.entries),
+    presentations: layout(plan, nodes, results, labels.entries),
   };
 }
 
@@ -173,25 +178,33 @@ class LabelTable {
 }
 
 // ---------------------------------------------------------------------------
-// Layout: several subjects -> one table; one subject with a measure over
-// several periods -> a series; everything else -> scalars. Predicates,
-// rankings, and gaps outside a table or series stand alone.
+// Layout: several subjects -> one table; one subject with a line (a measure
+// at one period step and shape) over several periods of one calendar -> a
+// series; everything else -> scalars. Predicates, rankings, and gaps outside a table or series
+// stand alone.
 
-function layout(plan: FinancialPlanV1, results: ReadonlyArray<PresentedResult>, labels: Readonly<Record<string, PresentationLabel>>): Presentation[] {
-  const values = results.filter((result) => result.presented.kind === "value" || result.presented.kind === "gap");
+function layout(plan: FinancialPlanV1, nodes: ReadonlyMap<LocalId, OperationNode>, results: ReadonlyArray<PresentedResult>, labels: Readonly<Record<string, PresentationLabel>>): Presentation[] {
+  const nodeOf = new Map(plan.outputs.map((output) => [output.output_id, nodes.get(output.node_id)!]));
+  const lines = new Map(results.flatMap((result) => {
+    const node = nodeOf.get(result.output_id)!;
+    return OPERATION_REGISTRY[node.operation].produces === "value" ? [[result.result_id, lineOf(plan, node, result.measure_label_id)] as const] : [];
+  }));
+  const values = results.filter((result) => lines.has(result.result_id));
   const subjects = new Set(values.flatMap((result) => (result.subject_label_id === null ? [] : [result.subject_label_id])));
   const placed = new Set<string>();
   const presentations: Presentation[] = [];
 
   if (subjects.size >= 2) {
-    const columnOf = (result: PresentedResult) => `${result.measure_label_id}|${result.period_label_id}`;
-    const columns = new Map<string, { measure_label_id: string; period_label_id: string }>();
-    for (const result of values) {
-      if (!columns.has(columnOf(result))) columns.set(columnOf(result), { measure_label_id: result.measure_label_id, period_label_id: result.period_label_id });
+    const tabled = values.filter((result) => result.subject_label_id !== null);
+    const columnOf = columnKeyByResult(tabled, lines);
+    const columns = new Map<string, string>();
+    for (const result of tabled) {
+      const key = columnOf.get(result.result_id)!;
+      if (!columns.has(key)) columns.set(key, result.measure_label_id);
     }
     const rows = plan.subjects.members.map((member) => subjectLabelId(member.slot_id)).filter((id) => subjects.has(id)).map((subjectId) => ({
       subject_label_id: subjectId,
-      cells: [...columns.keys()].map((key) => values.find((result) => result.subject_label_id === subjectId && columnOf(result) === key)?.result_id ?? null),
+      cells: [...columns.keys()].map((key) => tabled.find((result) => result.subject_label_id === subjectId && columnOf.get(result.result_id) === key)?.result_id ?? null),
     }));
     for (const row of rows) for (const cell of row.cells) if (cell) placed.add(cell);
     const byId = new Map(results.map((result) => [result.result_id, result]));
@@ -204,14 +217,21 @@ function layout(plan: FinancialPlanV1, results: ReadonlyArray<PresentedResult>, 
     });
     presentations.push({
       kind: "table",
-      caption: `${[...new Set([...columns.values()].map((column) => labels[column.measure_label_id]!.text))].join(", ")} by company`,
-      columns: [...columns.values()].map((column, index) => ({ column_id: `c${index}`, ...column })),
+      caption: `${[...new Set([...columns.values()].map((measure) => labels[measure]!.text))].join(", ")} by company`,
+      columns: [...columns.values()].map((measure_label_id, index) => {
+        const [period, ...others] = new Set(rows.map((row) => (row.cells[index] ? byId.get(row.cells[index])!.period_label_id : null)));
+        return { column_id: `c${index}`, measure_label_id, period_label_id: others.length === 0 && period ? period : null };
+      }),
       rows,
       ascending,
     });
   } else {
     const groups = new Map<string, PresentedResult[]>();
-    for (const result of values) groups.set(result.measure_label_id, [...(groups.get(result.measure_label_id) ?? []), result]);
+    for (const result of values) {
+      const { key, anchor } = lines.get(result.result_id)!;
+      const series = `${key}|${anchor.calendar}`;
+      groups.set(series, [...(groups.get(series) ?? []), result]);
+    }
     for (const group of groups.values()) {
       const [first] = group;
       if (group.length < 2 || new Set(group.map((result) => result.period_label_id)).size < 2 || first!.subject_label_id === null) continue;
@@ -231,6 +251,35 @@ function layout(plan: FinancialPlanV1, results: ReadonlyArray<PresentedResult>, 
     presentations.push({ kind, result_id: result.result_id });
   }
   return presentations;
+}
+
+type Line = Readonly<{ key: string; anchor: PeriodAnchor }>;
+
+function lineOf(plan: FinancialPlanV1, node: OperationNode, measureLabelId: string): Line {
+  const selectors = periodSelectors(plan, node);
+  const anchor = periodAnchor(selectors[0]!);
+  const shape = selectors.map((selector) => {
+    const at = periodAnchor(selector);
+    return at.calendar === anchor.calendar && at.step === anchor.step ? `${anchor.recency - at.recency}` : JSON.stringify(selector);
+  }).sort();
+  return { key: JSON.stringify([measureLabelId, anchor.step, shape]), anchor };
+}
+
+// A column is a line and a rank, not a period: ranked from the requested period so a gap keeps its column, and a company missing a newer period shifts left.
+function columnKeyByResult(results: ReadonlyArray<PresentedResult>, lines: ReadonlyMap<string, Line>): ReadonlyMap<string, string> {
+  const groups = new Map<string, Array<{ result_id: string } & Line>>();
+  for (const result of results) {
+    const line = lines.get(result.result_id)!;
+    const group = `${result.subject_label_id}|${line.key}`;
+    groups.set(group, [...(groups.get(group) ?? []), { result_id: result.result_id, ...line }]);
+  }
+  const keys = new Map<string, string>();
+  for (const group of groups.values()) {
+    group
+      .sort((left, right) => right.anchor.recency - left.anchor.recency)
+      .forEach(({ result_id, key }, rank) => keys.set(result_id, `${key}|${rank}`));
+  }
+  return keys;
 }
 
 // ---------------------------------------------------------------------------
@@ -371,9 +420,8 @@ function measureText(plan: FinancialPlanV1, node: OperationNode): string {
     case "ratio":
       return resolveRatioDefinition(node.ratio_key)?.label ?? node.ratio_key;
     case "absolute_change":
-      return `Change in ${of(node.current)}`;
     case "percent_change_positive_base":
-      return `Percent change in ${of(node.current)}`;
+      return changeText(plan, node, of(node.current));
     case "trailing_sum":
       return `${of(node.quarters[0]!)}, trailing four quarters`;
     case "threshold":
@@ -404,7 +452,7 @@ function measureKey(plan: FinancialPlanV1, node: OperationNode): string {
       return node.operation;
     case "absolute_change":
     case "percent_change_positive_base":
-      return `${node.operation}(${of(node.current)})`;
+      return `${node.operation}(${of(node.current)})@${JSON.stringify(changeHorizon(plan, node) ?? changeEnds(plan, node))}`;
     case "trailing_sum":
       return `trailing_sum(${of(node.quarters[0]!)})`;
     case "threshold":
@@ -414,14 +462,52 @@ function measureKey(plan: FinancialPlanV1, node: OperationNode): string {
   }
 }
 
+function changeText(plan: FinancialPlanV1, node: ChangeNode, measure: string): string {
+  const change = `${node.operation === "absolute_change" ? "change" : "percent change"} in ${measure}`;
+  const horizon = changeHorizon(plan, node);
+  const quarters = horizon && (horizon.step === "quarter" ? horizon.n : horizon.n * 4);
+  if (quarters === 1) return `Quarter-over-quarter ${change}`;
+  if (quarters === 4) return `Year-over-year ${change}`;
+  const text = `${change[0]!.toUpperCase()}${change.slice(1)}`;
+  return horizon ? `${text} over ${horizon.n} ${horizon.step === "quarter" ? "quarters" : "fiscal years"}` : text;
+}
+
+function changeHorizon(plan: FinancialPlanV1, node: ChangeNode): Readonly<{ step: "quarter" | "year"; n: number }> | null {
+  const [current, prior] = changeEnds(plan, node).map(periodAnchor);
+  const n = current.recency - prior.recency;
+  return current.step !== "cutoff" && current.step === prior.step && current.calendar === prior.calendar && n > 0 ? { step: current.step, n } : null;
+}
+
+function changeEnds(plan: FinancialPlanV1, node: ChangeNode): PeriodSelector[] {
+  return [node.current, node.prior].map((id) => periodSelectors(plan, plan.operations.find((entry) => entry.node_id === id)!)[0]!);
+}
+
+type PeriodAnchor = Readonly<{ step: "quarter" | "year" | "cutoff"; calendar: "fiscal" | "latest" | "cutoff"; recency: number }>;
+
+// Recency orders periods only within one calendar and step; fiscal recency is positive and latest is zero or below.
+function periodAnchor(selector: PeriodSelector): PeriodAnchor {
+  switch (selector.kind) {
+    case "fiscal_period":
+      return selector.fiscal_period === "FY"
+        ? { step: "year", calendar: "fiscal", recency: selector.fiscal_year }
+        : { step: "quarter", calendar: "fiscal", recency: selector.fiscal_year * 4 + FISCAL_PERIODS.indexOf(selector.fiscal_period) - 1 };
+    case "latest":
+      return { step: selector.period_type === "annual" ? "year" : "quarter", calendar: "latest", recency: -selector.offset };
+    case "at_cutoff":
+      return { step: "cutoff", calendar: "cutoff", recency: 0 };
+  }
+}
+
 /**
- * The distinct periods a node reads, in operand order (current before prior).
+ * The distinct periods a node reads, in operand order (current before prior) with a trailing
+ * sum's quarters newest first; the first one dates the node.
  * A valuation is dated by its price: its other operand is restated to the same reference date.
  */
 function periodSelectors(plan: FinancialPlanV1, node: OperationNode): PeriodSelector[] {
   const of = (id: LocalId) => plan.operations.find((candidate) => candidate.node_id === id)!;
   const all = (entry: OperationNode): PeriodSelector[] => entry.operation === "reported_metric" ? [entry.period]
     : entry.operation === "market_cap" || entry.operation === "pe_ratio" ? all(of(entry.price))
+    : entry.operation === "trailing_sum" ? entry.quarters.flatMap((id) => all(of(id))).sort((left, right) => periodAnchor(right).recency - periodAnchor(left).recency)
     : operationDependencies(entry).flatMap((id) => all(of(id)));
   const distinct = new Map<string, PeriodSelector>();
   for (const selector of all(node)) if (!distinct.has(JSON.stringify(selector))) distinct.set(JSON.stringify(selector), selector);

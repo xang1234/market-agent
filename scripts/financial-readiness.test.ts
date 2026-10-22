@@ -22,6 +22,11 @@ test("the web client understands exactly the presentation and inspection version
     await constant("services/financial-core/src/presentation.ts", "FINANCIAL_PRESENTATION_VERSION"),
   );
   assert.equal(
+    await constant("web/src/blocks/types.ts", "FINANCIAL_PRESENTATION_V1"),
+    await constant("services/financial-core/src/presentation.ts", "FINANCIAL_PRESENTATION_V1"),
+    "answers certified before v2 still render",
+  );
+  assert.equal(
     await constant("web/src/blocks/financialInspection.ts", "SUPPORTED_INSPECTION_SCHEMA_VERSION"),
     await constant("services/financial-engine/src/inspection.ts", "INSPECTION_SCHEMA_VERSION"),
   );

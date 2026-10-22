@@ -343,7 +343,8 @@ export type TrustProvenanceBlock = SourcesBlock | DisclosureBlock
 // prints them and never formats or compares numbers itself. Mirrors
 // `FinancialAnswerContent` in services/financial-core, whose contract test
 // checks the generator's output against the block schema.
-export const SUPPORTED_FINANCIAL_PRESENTATION_VERSION = 'financial-presentation.v1'
+export const SUPPORTED_FINANCIAL_PRESENTATION_VERSION = 'financial-presentation.v2'
+export const FINANCIAL_PRESENTATION_V1 = 'financial-presentation.v1'
 
 export type FinancialUnit =
   | { kind: 'currency' | 'currency_per_share'; currency: string }
@@ -379,7 +380,7 @@ export type FinancialPresentedResult = {
 export type FinancialTablePresentation = {
   kind: 'table'
   caption: string
-  columns: ReadonlyArray<{ column_id: string; measure_label_id: string; period_label_id: string }>
+  columns: ReadonlyArray<{ column_id: string; measure_label_id: string; period_label_id: string | null }>
   rows: ReadonlyArray<{ subject_label_id: string; cells: ReadonlyArray<string | null> }>
   ascending: Readonly<Record<string, ReadonlyArray<number>>>
 }
@@ -397,7 +398,7 @@ export type FinancialPresentation =
   | FinancialSeriesPresentation
 
 export type FinancialAnswerContent = {
-  presentation_version: typeof SUPPORTED_FINANCIAL_PRESENTATION_VERSION
+  presentation_version: typeof SUPPORTED_FINANCIAL_PRESENTATION_VERSION | typeof FINANCIAL_PRESENTATION_V1
   template_version: string
   run_id: string
   unit_id: string

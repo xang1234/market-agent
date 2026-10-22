@@ -1,4 +1,4 @@
-import type { FinancialPlanV1, FinancialRuntimeAuthorityV1 } from "../src/contracts.ts";
+import type { FinancialPlanV1, FinancialRuntimeAuthorityV1, PeriodSelector } from "../src/contracts.ts";
 
 export const ISSUER_A = "11111111-1111-4111-8111-111111111111";
 export const ISSUER_B = "22222222-2222-4222-8222-222222222222";
@@ -86,6 +86,49 @@ function reported(nodeId: string, slot: string, metricKey: string) {
     metric_key: metricKey,
     period: { kind: "fiscal_period" as const, fiscal_year: 2023, fiscal_period: "FY" as const },
   };
+}
+
+export type Quarter = "Q1" | "Q2" | "Q3" | "Q4";
+const QUARTERS: ReadonlyArray<Quarter> = ["Q1", "Q2", "Q3", "Q4"];
+
+export function quarterBack(fiscal_year: number, fiscal_period: Quarter, back: number): PeriodSelector {
+  const total = fiscal_year * 4 + QUARTERS.indexOf(fiscal_period) - back;
+  return { kind: "fiscal_period", fiscal_year: Math.floor(total / 4), fiscal_period: QUARTERS[total % 4]! };
+}
+
+export const reportedAt = (node_id: string, subject_slot: string, metric_key: string, period: PeriodSelector) =>
+  ({ node_id, operation: "reported_metric" as const, operation_version: "reported_metric.v1", subject_slot, metric_key, period });
+
+export const change = (node_id: string, operation: "absolute_change" | "percent_change_positive_base", current: string, prior: string) =>
+  ({ node_id, operation, operation_version: `${operation}.v1`, current, prior });
+
+export const OVERVIEW_LINES = ["rev", "gp", "oi", "ni", "gm", "om", "nm", "qoq", "yoy"] as const;
+
+export function overviewComparisonPlan(companies: ReadonlyArray<{ slot: "a" | "b"; newest: [number, Quarter]; reversed?: boolean }>): FinancialPlanV1 {
+  const plan = mutable(planFixture()) as FinancialPlanV1;
+  plan.operations = [];
+  plan.outputs = [];
+  plan.thresholds = [];
+  for (const { slot, newest: [year, quarter], reversed } of companies) {
+    const id = (line: string) => `${slot}_${line}`;
+    const at = (back: number) => quarterBack(year, quarter, back);
+    plan.operations.push(
+      reportedAt(id("rev"), slot, "revenue", at(0)),
+      reportedAt(id("rev_q1"), slot, "revenue", at(1)),
+      reportedAt(id("rev_q4"), slot, "revenue", at(4)),
+      reportedAt(id("gp"), slot, "gross_profit", at(0)),
+      reportedAt(id("oi"), slot, "operating_income", at(0)),
+      reportedAt(id("ni"), slot, "net_income", at(0)),
+      { node_id: id("gm"), operation: "gross_margin", operation_version: "gross_margin.v1", numerator: id("gp"), revenue: id("rev") },
+      { node_id: id("om"), operation: "operating_margin", operation_version: "operating_margin.v1", numerator: id("oi"), revenue: id("rev") },
+      { node_id: id("nm"), operation: "net_margin", operation_version: "net_margin.v1", numerator: id("ni"), revenue: id("rev") },
+      change(id("qoq"), "percent_change_positive_base", id("rev"), id("rev_q1")),
+      change(id("yoy"), "percent_change_positive_base", id("rev"), id("rev_q4")),
+    );
+    const outputs = OVERVIEW_LINES.map((line) => ({ output_id: `out_${id(line)}`, node_id: id(line), unit_id: "section" }));
+    plan.outputs.push(...(reversed ? outputs.reverse() : outputs));
+  }
+  return plan;
 }
 
 export function authorityFixture(owner = OWNER_A): FinancialRuntimeAuthorityV1 {
