@@ -100,11 +100,12 @@ export type ChatAnalystToolRuntimeResult = {
   tool_calls?: ReadonlyArray<ChatAnalystToolRuntimeToolCall>;
   // The check of the answer's assertion list, which the answer is rendered from (#208).
   assertion_report?: AssertionReport;
-  // Present while a judge reads the answer's analyst inferences (answer-trace.ts):
-  // `blocks` show a line in each one's place. watch calls its listener at once
-  // with the blocks as the verdicts so far leave them, then again as each later
-  // verdict settles; done settles, never rejecting, with the blocks to save
-  // and the report of what the judge left out.
+  // Present while a judge reads the answer's analyst inferences, or one repair
+  // round rewrites those it hid (answer-trace.ts): `blocks` show a line in each
+  // judged one's place. watch calls its listener at once with the blocks as the
+  // verdicts so far leave them, then again as each later verdict settles; done
+  // settles, never rejecting, with the blocks to save and the report of what
+  // the judge left out.
   judging?: {
     watch(listener: (blocks: ReadonlyArray<Record<string, unknown>>) => void): void;
     done: Promise<{ blocks: ReadonlyArray<Record<string, unknown>>; assertion_report?: AssertionReport }>;
