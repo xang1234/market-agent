@@ -12,7 +12,8 @@ import {
   TITLE_DEADLINES,
   createLlmThreadTitleModel,
 } from "../src/llm-runtime.ts";
-import { MAX_ASSERTIONS, type AssertionReport, type Rejection } from "../src/assertions.ts";
+import { checkAssertions, MAX_ASSERTIONS, type AssertionReport, type Rejection } from "../src/assertions.ts";
+import type { EvidencePacket } from "../src/evidence-packet.ts";
 import { mayOfferOtherFacts, scopeGapBlocks } from "../src/fact-blocks.ts";
 import { resolveResearchScope } from "../src/research-scope.ts";
 import { proposal } from "./scope-fixtures.ts";
@@ -272,7 +273,7 @@ test("the production deadlines bound the answer and the title calls", () => {
   assert.ok(TITLE_DEADLINES.attemptMs < ANSWER_DEADLINES.attemptMs);
 });
 
-test("the answer is asked for the assertion list alone, under the rules its checks enforce (#374)", async () => {
+async function answerSystemPrompt(): Promise<string> {
   let systemPrompt = "";
   await composeAnalystBlocksWithLlm({
     env: BASE_ENV,
@@ -284,16 +285,52 @@ test("the answer is asked for the assertion list alone, under the rules its chec
       return { text: "answer" };
     },
   });
+  return systemPrompt;
+}
+
+test("the answer is asked for the assertion list alone (#374)", async () => {
+  const systemPrompt = await answerSystemPrompt();
   // The no-keys golden replay matches on the opening sentence.
   assert.match(systemPrompt, /^Write a concise investment research answer/);
   assert.match(systemPrompt, /Reply with only a fenced block that opens with ```assertions on its own line, and nothing before or after it/);
-  assert.match(systemPrompt, /An analyst_inference's text is words only: the figures are its supports', so it writes no digit/);
-  assert.match(systemPrompt, /Never compute new figures/);
-  assert.match(systemPrompt, /never state a magnitude in words/);
-  assert.match(systemPrompt, /Never state a cause the data does not show/);
-  assert.match(systemPrompt, /op "order" with result an array of every F id it cites/);
-  assert.match(systemPrompt, /"op":"order","result":\["F9","F1","F5"\]/);
   assert.doesNotMatch(systemPrompt, /\[\[F3\]\]|Unverified hypothesis/);
+});
+
+// F1, F5 and F9 are one metric for three companies, as the prompt's order example cites them.
+const EXAMPLE_PACKET: EvidencePacket = {
+  route: "comparison",
+  cutoff: "2026-09-01T00:00:00.000Z",
+  companies: ["NVDA", "AMD", "AAPL"],
+  figures: [
+    { id: "F1", company: "NVDA", metric: "Revenue", period: "FY2026", value: "$130.5B", source_ids: [] },
+    { id: "F5", company: "AMD", metric: "Revenue", period: "FY2025", value: "$25.8B", source_ids: [] },
+    { id: "F6", company: "AMD", metric: "Net margin", period: "FY2025", value: "6.4%", source_ids: [] },
+    { id: "F9", company: "AAPL", metric: "Revenue", period: "FY2025", value: "$416.2B", source_ids: [] },
+  ],
+  coverage: [],
+  gaps: [],
+  query_bounds: {},
+  claims: [{ id: "C1", text: "AMD management disclosed a one-time charge.", predicate: "management.explanation.net_income", stance: "challenging", company: "AMD", claim_id: "c1", source_id: "s1" }],
+  disagreements: [],
+  claims_status: "available",
+  claims_truncated: false,
+};
+
+test("the prompt's worked examples pass the checks they teach (#374)", async () => {
+  const systemPrompt = await answerSystemPrompt();
+  const example = (kind: string) => JSON.parse(new RegExp(`\\((\\{"kind":"${kind}".*?\\})\\)`).exec(systemPrompt)![1]!);
+  const order = example("comparison");
+  const inference = example("analyst_inference");
+  const report = checkAssertions([
+    order,
+    { kind: "observation", text: "AMD's revenue was [[F5]].", evidence: ["F5"] },
+    { kind: "observation", text: "AMD's net margin was [[F6]].", evidence: ["F6"] },
+    { kind: "management_attribution", text: "Management disclosed a one-time charge.", evidence: ["C1"] },
+    inference,
+  ], EXAMPLE_PACKET);
+  assert.deepEqual(report.rejected, []);
+  assert.deepEqual(report.accepted.map((entry) => entry.kind), ["comparison", "observation", "observation", "management_attribution", "analyst_inference"]);
+  assert.deepEqual(report.accepted[4]!.supports, [2, 3]);
 });
 
 test("composeAnalystBlocksWithLlm falls back through shared router deployments", async () => {
@@ -934,6 +971,23 @@ test("with claims on file but none rendered, a named gap's answer points to its 
     createClient: () => async () => ({ text: prose }),
   });
   assert.deepEqual(composed[0]!.segments, [{ type: "text", text: "The data here does not answer this question; the note below says what is missing." }]);
+});
+
+test("a named gap's empty list is the gap's answer, logged as the model's choice, not a failure (#374)", async (t) => {
+  const turn = gapTurn(resolveResearchScope({ question: "What is AMD's free cash flow?", companies: AMD, prior: null, asOf: GAP_AS_OF, proposal: proposal({ metrics: ["free_cash_flow"] }) }));
+  const info = t.mock.method(console, "info", () => {});
+  const warn = t.mock.method(console, "warn", () => {});
+  const composed = await composeAnalystBlocksWithLlm({
+    env: BASE_ENV,
+    context: { userIntent: "What is AMD's free cash flow?", bundleId: "single_subject_analysis" },
+    blocks: [NARRATIVE_BLOCK],
+    toolCalls: [A_TOOL_CALL],
+    ...turn,
+    createClient: () => async () => ({ text: "```assertions\n[]\n```" }),
+  });
+  assert.deepEqual(composed[0]!.segments, [{ type: "text", text: "The data here does not answer this question; the note below says what is missing." }]);
+  assert.deepEqual(info.mock.calls.map((call) => call.arguments[0]), ["[chat] the assertion list was empty; showing the fallback sentence"]);
+  assert.equal(warn.mock.callCount(), 0);
 });
 
 test("when no assertion renders, the answer is the fixed fallback sentence, never the model's prose", async () => {

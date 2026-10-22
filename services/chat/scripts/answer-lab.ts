@@ -309,9 +309,31 @@ async function live(
   };
 }
 
-export function rerecord({ file, trace }: LabeledTrace, answer: TracedAnswer): void {
+// A re-recorded trace is what recorded --check replays as right, so a live run
+// that was cut off or whose judge or repair round never replied stays unwritten.
+export function rerecord({ label, file, trace }: LabeledTrace, answer: TracedAnswer): void {
   const { exchange, assertions, judge, repair, blocks } = answer;
-  const recorded: TurnTrace = { ...trace, version: 2, recorded_at: new Date().toISOString(), exchange, assertions, judge, repair, blocks };
+  const unreplied = [...(judge ?? []), ...(repair ? [repair.record, ...repair.judge] : [])]
+    .flatMap((record) => (record.outcome === "replied" ? [] : [record.reason]));
+  const why = exchange === null ? "no model was called" : exchange.truncated ? "the answer was cut off at the token limit" : unreplied[0];
+  if (why !== undefined) {
+    console.log(`skip ${label}: ${why}`);
+    return;
+  }
+  const recorded: TurnTrace = {
+    version: 2,
+    thread_id: trace.thread_id,
+    run_id: trace.run_id,
+    ...(trace.turn_id === undefined ? {} : { turn_id: trace.turn_id }),
+    question: trace.question,
+    input: trace.input,
+    recorded_at: new Date().toISOString(),
+    exchange,
+    assertions,
+    judge,
+    repair,
+    blocks,
+  };
   writeFileSync(file, `${JSON.stringify(recorded, null, 2)}\n`);
 }
 
