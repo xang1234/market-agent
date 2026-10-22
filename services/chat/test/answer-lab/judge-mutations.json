@@ -73,7 +73,7 @@
         },
         {
           "kind": "unsupported_claim",
-          "text": "The gap between fiscal year ends limits direct comparability, and aligning the calendars would close most of the revenue difference."
+          "text": "The gap between fiscal year ends limits direct comparability, and aligning the calendars would explain the revenue difference."
         }
       ]
     },
@@ -93,7 +93,7 @@
       "mutations": [
         {
           "kind": "unsupported_claim",
-          "text": "The offset between the two fiscal-year end dates flatters the later reporter's growth, which explains most of the gap between them."
+          "text": "The offset between the two fiscal-year end dates flatters the later reporter's growth, which explains the gap between them."
         }
       ]
     },
