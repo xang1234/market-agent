@@ -209,7 +209,7 @@ test("a plan's latest nodes name one period per subject: the newest any of them 
   assert.equal(gapReason(select(1)), "missing_input", "FY2022 gross profit is not the latest fiscal year");
   assert.equal(gapReason(select(2)), "precision_unverified", "the latest year's candidate exists but is unproven; the FY2022 one is not substituted");
   assert.equal(selectedId(select(3)), slots[3]!.candidates[0]!.fact_id, "another subject keeps its own latest year");
-  assert.equal(periods.get("a_gp"), periods.get("a_rev"));
+  assert.deepEqual(periods.get("a_gp"), periods.get("a_rev"));
 });
 
 test("an incomplete page leaves its subject's latest period unresolved (#349 review)", () => {
@@ -351,12 +351,13 @@ test("an annual offset counts fiscal years back from the latest; an uncertifiabl
   ]);
 });
 
-test("a newer period reported only for a segment or in another unit kind does not define the latest (#469)", () => {
+test("a newer period with no publication proof, reported only for a segment, or in another unit kind does not define the latest (#469)", () => {
   const segment = { ...quarter(2024, "Q3").context!, dimension_scope: "segment" as const, dimension_members: [{ axis: "srt:ProductOrServiceAxis", member: "acme:CloudMember" }] };
   const candidates = [
     quarter(2024, "Q2"),
     quarter(2024, "Q3", { context: segment }),
     { ...quarter(2024, "Q4"), unit: { kind: "shares" as const } },
+    quarter(2025, "Q1", { publication: [] }),
   ];
   const atCutoff = policy({ knowledge_cutoff: "2025-06-01T00:00:00Z" });
   assert.deepEqual([0, 1].map((offset) => landed(selectInput(latestQuarter(offset), candidates, atCutoff))), ["Q2 FY2024", "gap missing_input"]);
