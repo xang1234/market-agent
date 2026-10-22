@@ -19,7 +19,11 @@ export async function createReplayLlmChatClient(path: string): Promise<LlmChatCl
   const replies = fixture.replies;
   return (_deployment, request) => {
     const transcript = request.messages.map((message) => message.content).join("\n");
-    const reply = replies.find(({ match }) => [match].flat().every((part) => transcript.includes(part)));
+    const reply = replies.find(({ match }) => {
+      const parts = [match].flat();
+      // An empty list holds no substring to match, so it answers nothing.
+      return parts.length > 0 && parts.every((part) => transcript.includes(part));
+    });
     if (!reply) {
       throw new Error(`LLM replay: no recorded reply matches this request (${path})`);
     }
