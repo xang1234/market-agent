@@ -281,8 +281,8 @@ test("a comparison shows each company's latest quarter, named from the newest it
   assert.deepEqual((await compare("NVDA and AMD", { ...PAGES, AMD: { status: "error", reason_code: "database_error" } })).planned, null, "a failed read");
 });
 
-const reading = (asks: string[], metrics: unknown[] = [], income_items: string[] = [], turnsOff: string[] = []) =>
-  parseProposal(JSON.stringify({ metrics, asks, turns_off: { facets: turnsOff, metrics: [] }, income_items }))!;
+const reading = (asks: string[], metrics: unknown[] = [], income_items: string[] = [], turnsOff: string[] = [], period: unknown = { kind: "latest" }) =>
+  parseProposal(JSON.stringify({ metrics, asks, turns_off: { facets: turnsOff, metrics: [] }, income_items, period }))!;
 
 test("a question about the companies it names that asks for no figure is answered with their overview, or one company's with its peers; one about a carried company, a figure or a period is not (#398)", async () => {
   const client = await createReplayLlmChatClient(REPLIES);
@@ -292,7 +292,7 @@ test("a question about the companies it names that asks for no figure is answere
   const none = async () => [];
   const overview = async (question: string, { carried = false, read: readQuestion = read, peersOf = none as typeof amd } = {}) => {
     const subjects = planningContext(question).requested_subjects;
-    if (!namesCompanies(subjects, carried, question)) return null;
+    if (!namesCompanies(subjects, carried)) return null;
     return (await overviewSubjects(subjects, await readQuestion(question), peersOf))?.map((subject) => subject.mention) ?? null;
   };
   for (const ticker of ["NVDA", "AMD", "AAPL"]) assert.deepEqual(await overview(`Analyze ${ticker}`), [ticker], ticker);
@@ -310,15 +310,20 @@ test("a question about the companies it names that asks for no figure is answere
   assert.equal(await overview("Analyze NVDA", scripted({ ...reading([]), turns_off: { facets: new Set(), metrics: new Set(["revenue"]) } })), null, "a metric turned off");
   assert.equal(await overview("Analyze NVDA", { carried: true }), null, "a carried company");
   assert.equal(await overview("Compare NVDA with AMD", { carried: true }), null, "a carried company beside named ones");
-  for (const period of ["in fiscal 2025", "for Q4 2025", "YTD", "for Q3", "in the third quarter"]) {
-    assert.equal(await overview(`Analyze NVDA ${period}`, scripted(reading([]))), null, period);
-  }
-  for (const period of ["in fiscal 2025", "for Q4 2025", "YTD", "for Q3"]) {
-    assert.equal(await overview(`Compare NVDA and AMD ${period}`, scripted(reading([]))), null, `a comparison ${period}`);
+  const periods: Array<[string, ReturnType<typeof reading>]> = [
+    ["in fiscal 2025", reading([], [], [], [], { kind: "fiscal_year", fiscal_year: 2025 })],
+    ["for Q4 2025", reading([], [], [], [], { kind: "fiscal_quarter", fiscal_period: "Q4", fiscal_year: 2025 })],
+    ["YTD", reading(["price_window"])],
+    ["for Q3", reading([], [], [], [], { kind: "fiscal_quarter", fiscal_period: "Q3", fiscal_year: null })],
+    ["in the third quarter", reading([], [], [], [], { kind: "fiscal_quarter", fiscal_period: "Q3", fiscal_year: null })],
+  ];
+  for (const [period, read] of periods) {
+    assert.equal(await overview(`Analyze NVDA ${period}`, scripted(read)), null, period);
+    assert.equal(await overview(`Compare NVDA and AMD ${period}`, scripted(read)), null, `a comparison ${period}`);
   }
   const yearToDate = "Compare it with AMD YTD";
   assert.deepEqual(
-    [namesCompanies(planningContext(yearToDate).requested_subjects, true, yearToDate), await overviewSubjects(planningContext(yearToDate).requested_subjects, await read(yearToDate), none)],
+    [namesCompanies(planningContext(yearToDate).requested_subjects, true), await overviewSubjects(planningContext(yearToDate).requested_subjects, await read(yearToDate), none)],
     [false, null],
     "the golden conversation's comparison carries NVDA, and its reading asks for a price window",
   );
@@ -381,7 +386,7 @@ test("an engine answer names what the reading of its question asks for and the p
   assert.deepEqual(uncoveredAsks(reading(["margins"], ["income_statement"], ["operating_margin"]), marginOnly), [], "the margin answers its own item");
   assert.deepEqual(uncoveredAsks(reading(["margins"], ["income_statement"], ["net_margin"]), marginOnly), ["net margin"], "one margin does not answer another");
   const turnsOff = (asks: string[], metrics: unknown[], facets: string[], offMetrics: unknown[]) =>
-    parseProposal(JSON.stringify({ metrics, asks, turns_off: { facets, metrics: offMetrics }, income_items: [] }))!;
+    parseProposal(JSON.stringify({ metrics, asks, turns_off: { facets, metrics: offMetrics }, income_items: [], period: { kind: "latest" } }))!;
   assert.deepEqual(uncoveredAsks(turnsOff(["margins", "margin_trend"], [], ["margins"], []), revenue), [], "no margins is no trend");
   assert.deepEqual(uncoveredAsks(turnsOff([], ["balance_sheet"], [], [{ metric: "cash_and_equivalents" }]), assets), ["total liabilities", "stockholders' equity"]);
   assert.deepEqual(uncoveredAsks(turnsOff([], ["total_assets"], [], [{ metric: "balance_sheet" }]), revenue), []);

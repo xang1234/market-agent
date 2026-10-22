@@ -74,7 +74,7 @@ export async function loadTurnFactBlocks(
     asOf: string;
     // The listing the user asked for, per issuer (see listingsForComparison).
     requestedListings?: ReadonlyMap<string, CompanyListing>;
-    // A comparison of the fiscal year the question names (requestedFiscalYear).
+    // A comparison of the fiscal year the scope names (research-scope.ts).
     fiscalYear?: number;
     // The price window the question names (requestedPriceWindow).
     priceWindow?: PriceWindow;

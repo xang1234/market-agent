@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { facetWords, parseResearchScope, resolveResearchScope, type ResearchScope, type ScopeProposal } from "../src/research-scope.ts";
+import { facetWords, parseResearchScope, resolveResearchScope, type FISCAL_PERIODS, type ResearchScope, type ScopePeriod, type ScopeProposal } from "../src/research-scope.ts";
 import { proposal } from "./scope-fixtures.ts";
 
 const NVDA = { issuer_id: "60000000-0000-4000-8000-000000000001", label: "NVDA" };
@@ -10,6 +10,8 @@ const AAPL = { issuer_id: "60000000-0000-4000-8000-000000000003", label: "AAPL" 
 const AS_OF = "2026-09-01T00:00:00.000Z";
 const LATER = "2026-09-02T00:00:00.000Z";
 const INCOME = { metric_key: "income_statement", label: "Revenue, profit and margins", available: true };
+const fy = (fiscal_year: number): ScopePeriod => ({ kind: "fiscal_year", fiscal_year });
+const fq = (fiscal_period: (typeof FISCAL_PERIODS)[number], fiscal_year: number | null = null): ScopePeriod => ({ kind: "fiscal_quarter", fiscal_period, fiscal_year });
 
 const fresh = (question: string, read: ScopeProposal | null, companies: ResearchScope["companies"] = [NVDA]) =>
   resolveResearchScope({ question, companies, prior: null, asOf: AS_OF, proposal: read });
@@ -45,7 +47,7 @@ test("the route follows from what the turn asks for and the companies it covers"
 });
 
 test("a fresh question records what it asks for and inherits nothing", () => {
-  const read = proposal({ metrics: ["income_statement"], items: ["revenue"] });
+  const read = proposal({ metrics: ["income_statement"], items: ["revenue"], period: fy(2025) });
   assert.deepEqual(fresh("Compare NVDA's and AMD's fiscal 2025 revenue YTD", read, [NVDA, AMD]), {
     route: "comparison",
     reads: "comparison",
@@ -129,7 +131,7 @@ test("guidance is kept by a follow-up until one turns it off", () => {
 test("a follow-up that drops the segments clears them, keeps the rest, and they stay off", () => {
   const prior = fresh(
     "Compare NVDA with AMD segments, margin trends and free cash flow, fiscal 2025, YTD",
-    proposal({ asks: ["segments", "margins", "margin_trend"], metrics: ["income_statement", "free_cash_flow"] }),
+    proposal({ asks: ["segments", "margins", "margin_trend"], metrics: ["income_statement", "free_cash_flow"], period: fy(2025) }),
     [NVDA, AMD],
   );
   const dropped = followUp("Same again without segments", proposal({ off: ["segments"] }), prior);
@@ -157,7 +159,7 @@ test("a follow-up that drops the segments clears them, keeps the rest, and they 
 });
 
 test("a period turned off is not read from its words", () => {
-  const prior = fresh("Why did AMD's operating margin turn negative in Q2 fiscal 2025?", proposal(), [AMD]);
+  const prior = fresh("Why did AMD's operating margin turn negative in Q2 fiscal 2025?", proposal({ period: fq("Q2", 2025) }), [AMD]);
   assert.deepEqual([prior.fiscal_year, prior.fiscal_quarter], [2025, { fiscal_year: 2025, fiscal_period: "Q2" }]);
   const noYear = followUp("Forget fiscal 2025", proposal({ off: ["fiscal_year"] }), prior);
   assert.deepEqual([noYear.fiscal_year, noYear.fiscal_quarter], [null, { fiscal_year: 2025, fiscal_period: "Q2" }]);
@@ -180,7 +182,7 @@ test("a facet both asked for and turned off routes as if never asked (#378 revie
     fresh(`Show NVDA's ${metric} without segments`, proposal({ asks: ["segments"], off: ["segments"], metrics: [metric] }));
   assert.deepEqual([without("ebitda").route, without("ebitda").segments], ["unavailable_metric", false]);
   assert.deepEqual([without("eps_diluted").route, without("eps_diluted").segments], ["statements", false]);
-  const quarter = fresh("Why did AMD's operating margin turn negative in Q2 2025?", proposal(), [AMD]);
+  const quarter = fresh("Why did AMD's operating margin turn negative in Q2 2025?", proposal({ period: fq("Q2", 2025) }), [AMD]);
   const notLatest = followUp("Not the latest quarter", proposal({ asks: ["latest_quarter"], off: ["latest_quarter"] }), quarter);
   assert.deepEqual([notLatest.fiscal_year, notLatest.fiscal_quarter], [2025, { fiscal_year: 2025, fiscal_period: "Q2" }]);
   const noEvidence = followUp("No sources", proposal({ asks: ["evidence"], off: ["evidence"] }), quarter);
@@ -188,7 +190,7 @@ test("a facet both asked for and turned off routes as if never asked (#378 revie
 });
 
 test("turning off the margin trend keeps the margins asked for (#378 eval)", () => {
-  const prior = fresh("Why did AMD's operating margin turn negative in Q2 2025?", proposal({ asks: ["explains", "margins"], metrics: ["income_statement"] }), [AMD]);
+  const prior = fresh("Why did AMD's operating margin turn negative in Q2 2025?", proposal({ asks: ["explains", "margins"], metrics: ["income_statement"], period: fq("Q2", 2025) }), [AMD]);
   const same = followUp("Same margins, without quarter-over-quarter growth", proposal({ asks: ["margins"], off: ["margin_trend"] }), prior);
   assert.deepEqual([same.route, same.margins, same.margin_trend], ["derived_margin", true, false]);
   const none = followUp("Remove the margins", proposal({ asks: ["margin_trend"], off: ["margins"] }), prior);
@@ -258,7 +260,7 @@ test("a margin trend asked for routes to the trend", () => {
 test("with no proposal, a follow-up keeps the previous scope whole", () => {
   const prior = fresh(
     "Break down NVDA's segments and margin trend for fiscal 2025 YTD: why, and what guidance?",
-    proposal({ asks: ["segments", "margins", "margin_trend", "guidance", "explains"], metrics: ["income_statement"], items: ["revenue"] }),
+    proposal({ asks: ["segments", "margins", "margin_trend", "guidance", "explains"], metrics: ["income_statement"], items: ["revenue"], period: fy(2025) }),
   );
   assert.deepEqual(followUp("And then?", null, prior), {
     ...prior,
@@ -327,8 +329,8 @@ test("with no proposal, a fresh question gets the plain answer for its companies
 });
 
 test("a follow-up that names a period or window replaces only that field", () => {
-  const prior = fresh("Compare NVDA with AMD fiscal 2025 YTD", proposal(), [NVDA, AMD]);
-  const year = followUp("Now for fiscal 2026", proposal(), prior);
+  const prior = fresh("Compare NVDA with AMD fiscal 2025 YTD", proposal({ period: fy(2025) }), [NVDA, AMD]);
+  const year = followUp("Now for fiscal 2026", proposal({ period: fy(2026) }), prior);
   assert.deepEqual([year.fiscal_year, year.price_window, year.inherited], [2026, { kind: "ytd", cutoff: AS_OF }, ["price_window"]]);
   // A window asked for again is cut off at the new turn.
   const window = followUp("And YTD now?", proposal(), fresh("Compare NVDA with AMD YTD", proposal(), [NVDA, AMD]));
@@ -400,7 +402,7 @@ test("a benchmark is a named gap the next turns keep until it is turned off", ()
 });
 
 test("a named fiscal quarter is scoped, kept by a follow-up and can be turned off (#290)", () => {
-  const asked = fresh("Why did AMD's operating margin turn negative in Q2 2025?", proposal({ asks: ["explains", "margins"], metrics: ["income_statement"] }), [AMD]);
+  const asked = fresh("Why did AMD's operating margin turn negative in Q2 2025?", proposal({ asks: ["explains", "margins"], metrics: ["income_statement"], period: fq("Q2", 2025) }), [AMD]);
   assert.deepEqual([asked.fiscal_quarter, asked.route], [{ fiscal_year: 2025, fiscal_period: "Q2" }, "derived_margin"]);
   const next = followUp("And its gross margin?", proposal({ asks: ["margins"], metrics: ["income_statement"] }), asked);
   assert.deepEqual([next.fiscal_quarter, next.inherited.includes("fiscal_quarter")], [{ fiscal_year: 2025, fiscal_period: "Q2" }, true]);
@@ -413,38 +415,61 @@ test("a named fiscal quarter is scoped, kept by a follow-up and can be turned of
 
 test("asking for the latest quarter clears an inherited named quarter and the year it named (#292 review)", () => {
   const latest = proposal({ asks: ["latest_quarter"] });
-  const quarter = fresh("Why did AMD's operating margin turn negative in Q2 2025?", proposal(), [AMD]);
+  const quarter = fresh("Why did AMD's operating margin turn negative in Q2 2025?", proposal({ period: fq("Q2", 2025) }), [AMD]);
   assert.equal(followUp("Now show the latest quarter", latest, quarter).fiscal_quarter, null);
-  const eps = fresh("What was AMD's EPS in Q1 fiscal 2025?", proposal({ metrics: ["eps_diluted"] }), [AMD]);
+  const eps = fresh("What was AMD's EPS in Q1 fiscal 2025?", proposal({ metrics: ["eps_diluted"], period: fq("Q1", 2025) }), [AMD]);
   assert.equal(eps.fiscal_year, 2025);
   const cleared = followUp("Show the latest quarter and EPS", latest, eps);
   assert.deepEqual([cleared.fiscal_quarter, cleared.fiscal_year], [null, null]);
 });
 
 test("a follow-up naming part of a period updates the inherited quarter, never keeps the old one (#292 review)", () => {
-  const asked = fresh("Why did AMD's operating margin turn negative in Q2 2025?", proposal(), [AMD]);
-  const next = (question: string) => followUp(question, proposal(), asked);
+  const asked = fresh("Why did AMD's operating margin turn negative in Q2 2025?", proposal({ period: fq("Q2", 2025) }), [AMD]);
+  const next = (question: string, period?: ScopePeriod) => followUp(question, proposal({ period }), asked);
   // A quarter without a year keeps the inherited year.
-  assert.deepEqual(next("Now Q3").fiscal_quarter, { fiscal_year: 2025, fiscal_period: "Q3" });
-  assert.deepEqual(next("What about the third quarter?").fiscal_quarter, { fiscal_year: 2025, fiscal_period: "Q3" });
+  assert.deepEqual(next("Now Q3", fq("Q3")).fiscal_quarter, { fiscal_year: 2025, fiscal_period: "Q3" });
+  assert.deepEqual(next("What about the third quarter?", fq("Q3")).fiscal_quarter, { fiscal_year: 2025, fiscal_period: "Q3" });
   // A fiscal year without a quarter clears it: the year's figures, not Q2 2025's.
-  assert.deepEqual([next("Now for fiscal 2026").fiscal_quarter, next("Now for fiscal 2026").fiscal_year], [null, 2026]);
+  const fiscal2026 = next("Now for fiscal 2026", fy(2026));
+  assert.deepEqual([fiscal2026.fiscal_quarter, fiscal2026.fiscal_year], [null, 2026]);
   // Nothing about the period: the quarter is kept.
   assert.deepEqual(next("And its gross margin?").fiscal_quarter, { fiscal_year: 2025, fiscal_period: "Q2" });
-  // A new complete quarter sets the year to its own; one written year first too.
-  assert.deepEqual([next("What about EPS in Q2 2026?").fiscal_quarter, next("What about EPS in Q2 2026?").fiscal_year], [{ fiscal_year: 2026, fiscal_period: "Q2" }, 2026]);
-  assert.deepEqual(next("Now FY2026 Q3").fiscal_quarter, { fiscal_year: 2026, fiscal_period: "Q3" });
-  // A quarter and a fiscal year written apart are paired.
-  assert.deepEqual(next("Now Q3, fiscal 2026").fiscal_quarter, { fiscal_year: 2026, fiscal_period: "Q3" });
-  assert.deepEqual(fresh("AMD revenue in Q3, FY2026", proposal(), [AMD]).fiscal_quarter, { fiscal_year: 2026, fiscal_period: "Q3" });
+  // A new complete quarter sets the year to its own.
+  const q2 = next("What about EPS in Q2 2026?", fq("Q2", 2026));
+  assert.deepEqual([q2.fiscal_quarter, q2.fiscal_year], [{ fiscal_year: 2026, fiscal_period: "Q2" }, 2026]);
   // A quarter named alone takes an inherited fiscal year when no quarter was inherited.
-  const year = fresh("Show AMD's fiscal 2025 EPS", proposal({ metrics: ["eps_diluted"] }), [AMD]);
-  assert.deepEqual(followUp("Now show revenue in Q3", proposal(), year).fiscal_quarter, { fiscal_year: 2025, fiscal_period: "Q3" });
+  const year = fresh("Show AMD's fiscal 2025 EPS", proposal({ metrics: ["eps_diluted"], period: fy(2025) }), [AMD]);
+  assert.deepEqual(followUp("Now show revenue in Q3", proposal({ period: fq("Q3") }), year).fiscal_quarter, { fiscal_year: 2025, fiscal_period: "Q3" });
 });
 
 test("a named quarter's year is the fiscal year a comparison uses (#292 review)", () => {
-  const compared = fresh("Compare AMD and NVDA revenue in Q2 2025", proposal(), [AMD, NVDA]);
+  const compared = fresh("Compare AMD and NVDA revenue in Q2 2025", proposal({ period: fq("Q2", 2025) }), [AMD, NVDA]);
   assert.deepEqual([compared.fiscal_quarter, compared.fiscal_year], [{ fiscal_year: 2025, fiscal_period: "Q2" }, 2025]);
+});
+
+test("the reading's period wins over the period tokens in the question (#472)", () => {
+  const year = fresh("NVDA revenue FY2025", proposal({ metrics: ["income_statement"], period: fy(2024) }));
+  assert.deepEqual([year.fiscal_year, year.fiscal_quarter], [2024, null]);
+  const latest = fresh("NVDA revenue FY2025", proposal({ metrics: ["income_statement"] }));
+  assert.deepEqual([latest.fiscal_year, latest.fiscal_quarter], [null, null]);
+  const quarter = fresh("NVDA revenue Q3 2025", proposal({ period: fq("Q1", 2024) }));
+  assert.deepEqual([quarter.fiscal_year, quarter.fiscal_quarter], [2024, { fiscal_year: 2024, fiscal_period: "Q1" }]);
+  // A quarter read without its year takes the inherited fiscal year.
+  const prior = fresh("Show NVDA's fiscal 2025 revenue", proposal({ period: fy(2025) }));
+  assert.deepEqual(followUp("What about that one?", proposal({ period: fq("Q3") }), prior).fiscal_quarter, { fiscal_year: 2025, fiscal_period: "Q3" });
+});
+
+test("with no reading, the period tokens in the question still apply (#472)", () => {
+  assert.deepEqual([fresh("NVDA revenue FY2026", null).fiscal_year, fresh("NVDA revenue FY2026", null).fiscal_quarter], [2026, null]);
+  const quarter = fresh("NVDA revenue in Q3 2025", null);
+  assert.deepEqual([quarter.fiscal_year, quarter.fiscal_quarter], [2025, { fiscal_year: 2025, fiscal_period: "Q3" }]);
+  const prior = fresh("Show NVDA's fiscal 2025 revenue", proposal({ period: fy(2025) }));
+  assert.deepEqual(followUp("What about Q3?", null, prior).fiscal_quarter, { fiscal_year: 2025, fiscal_period: "Q3" });
+  // Year first, or a quarter and year written apart.
+  const asked = fresh("Why did AMD's operating margin turn negative in Q2 2025?", proposal({ period: fq("Q2", 2025) }), [AMD]);
+  assert.deepEqual(followUp("Now FY2026 Q3", null, asked).fiscal_quarter, { fiscal_year: 2026, fiscal_period: "Q3" });
+  assert.deepEqual(followUp("Now Q3, fiscal 2026", null, asked).fiscal_quarter, { fiscal_year: 2026, fiscal_period: "Q3" });
+  assert.deepEqual(fresh("AMD revenue in Q3, FY2026", null, [AMD]).fiscal_quarter, { fiscal_year: 2026, fiscal_period: "Q3" });
 });
 
 test("a saved scope reads back; anything else starts fresh", () => {

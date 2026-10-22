@@ -20,7 +20,7 @@ import {
   segmentRevenueItems,
   type DerivedQuarterFact,
 } from "../src/fact-blocks.ts";
-import { resolveResearchScope, type ScopeProposal } from "../src/research-scope.ts";
+import { resolveResearchScope, type ScopePeriod, type ScopeProposal } from "../src/research-scope.ts";
 import { proposal } from "./scope-fixtures.ts";
 import { deriveQuarterMetrics } from "../src/quarter-metrics.ts";
 import { fakeQuery } from "./fake-query.ts";
@@ -442,6 +442,7 @@ test("the model sees a price chart's return per company over its window (#181)",
 });
 
 const SEGMENT_REQUEST = proposal({ asks: ["segments"], metrics: ["income_statement"], items: ["revenue"] });
+const Q1_2025: ScopePeriod = { kind: "fiscal_quarter", fiscal_period: "Q1", fiscal_year: 2025 };
 
 test("what a turn asked for and cannot show is a note each, naming its companies (#206)", () => {
   const AMD = { issuer_id: "60000000-0000-4000-8000-000000000002", label: "AMD" };
@@ -547,10 +548,10 @@ test("a named quarter on the segment or statement route is a named gap, not sile
   const EPS = [{ kind: "metric_row", title: "Statements", items: [{ label: "EPS (diluted)", format: "$0.90" }] }];
   const notes = (question: string, read: ScopeProposal, shown: ReadonlyArray<Record<string, unknown>>) => scopeGapBlocks(scope(question, read), shown, input)
     .map((block) => (block.segments as Array<{ text: string }>)[0]!.text).filter((text) => /quarter/.test(text));
-  assert.deepEqual(notes("Break down AMD's revenue by segment in Q1 2025", SEGMENT_REQUEST, SEGMENTS), [
+  assert.deepEqual(notes("Break down AMD's revenue by segment in Q1 2025", { ...SEGMENT_REQUEST, period: Q1_2025 }, SEGMENTS), [
     "A named quarter is not read for this breakdown; the latest available period is shown, not fiscal Q1 2025.",
   ]);
-  assert.deepEqual(notes("What was AMD's EPS in Q1 2025?", proposal({ metrics: ["eps_diluted"] }), EPS), [
+  assert.deepEqual(notes("What was AMD's EPS in Q1 2025?", proposal({ metrics: ["eps_diluted"], period: Q1_2025 }), EPS), [
     "A named quarter is not read for these statement figures; the latest available period is shown, not fiscal Q1 2025.",
   ]);
 });
@@ -560,7 +561,7 @@ test("with nothing shown for a named quarter on those routes, no note claims the
   const scope = (question: string, read: ScopeProposal = proposal()) =>
     resolveResearchScope({ question, companies: [AMD], prior: null, asOf: "2026-09-01T00:00:00.000Z", proposal: read });
   const input = { snapshotId: "11111111-1111-4111-8111-111111111111", asOf: "2026-09-01T00:00:00.000Z" };
-  for (const [question, read] of [["Break down AMD's revenue by segment in Q1 2025", SEGMENT_REQUEST], ["What was AMD's EPS in Q1 2025?", proposal({ metrics: ["eps_diluted"] })]] as const) {
+  for (const [question, read] of [["Break down AMD's revenue by segment in Q1 2025", { ...SEGMENT_REQUEST, period: Q1_2025 }], ["What was AMD's EPS in Q1 2025?", proposal({ metrics: ["eps_diluted"], period: Q1_2025 })]] as const) {
     const texts = scopeGapBlocks(scope(question, read), [], input).map((block) => (block.segments as Array<{ text: string }>)[0]!.text);
     assert.equal(texts.some((text) => /latest available period is shown/.test(text)), false, question);
   }
@@ -577,11 +578,11 @@ test("a named quarter is decided per reader: income honors it on a segment route
   const notes = (question: string, read: ScopeProposal, shown: ReadonlyArray<Record<string, unknown>>) => scopeGapBlocks(scope(question, read), shown, input)
     .map((block) => (block.segments as Array<{ text: string }>)[0]!.text).filter((text) => /quarter/.test(text));
   // Income and EPS together: the income row honors Q1 2025; the EPS beside it is the latest, and says so.
-  assert.deepEqual(notes("AMD revenue and EPS in Q1 2025", proposal({ metrics: ["eps_diluted", "income_statement"], items: ["revenue"] }), [QUARTER_ROW, EPS_ROW]), [
+  assert.deepEqual(notes("AMD revenue and EPS in Q1 2025", proposal({ metrics: ["eps_diluted", "income_statement"], items: ["revenue"], period: Q1_2025 }), [QUARTER_ROW, EPS_ROW]), [
     "A named quarter is not read for these statement figures; the latest available period is shown, not fiscal Q1 2025.",
   ]);
   // Segments with a margin: the income reader takes the quarter; the breakdown is flagged.
-  const segmentsAndMargin = proposal({ asks: ["segments", "margins"], metrics: ["income_statement"], items: ["operating_income"] });
+  const segmentsAndMargin = proposal({ asks: ["segments", "margins"], metrics: ["income_statement"], items: ["operating_income"], period: Q1_2025 });
   const mixed = scope("AMD segments and operating margin in Q1 2025", segmentsAndMargin);
   assert.equal(readsNamedQuarter(mixed), true);
   assert.deepEqual(notes("AMD segments and operating margin in Q1 2025", segmentsAndMargin, [QUARTER_ROW, SEGMENT_ROW]), [
@@ -602,7 +603,7 @@ test("a peers request keeps its comparison intent when no peer is found: the qua
     companies: [AMD],
     prior: null,
     asOf: "2026-09-01T00:00:00.000Z",
-    proposal: proposal({ asks: ["peers"] }),
+    proposal: proposal({ asks: ["peers"], period: Q1_2025 }),
   });
   assert.equal(scope.peers, true);
   assert.equal(readsNamedQuarter(scope), false);

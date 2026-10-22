@@ -25,7 +25,7 @@
 
 import type { RejectionCheck } from "../../src/assertions.ts";
 
-export const HOLDOUT_VERSION = 12;
+export const HOLDOUT_VERSION = 13;
 
 type Assertion = Record<string, unknown>;
 
@@ -80,11 +80,12 @@ type ScopeReply = {
   asks: ReadonlyArray<string>;
   turns_off: { facets: ReadonlyArray<string>; metrics: ReadonlyArray<{ metric: string }> };
   income_items: ReadonlyArray<string>;
+  period: Readonly<Record<string, string | number | null>>;
 };
 // A turn's recorded scope: the facets it asks for, the catalog metrics and the
-// income items it names, nothing turned off.
-const scope = (asks: string[] = [], metrics: string[] = [], items: string[] = []): ScopeReply =>
-  ({ metrics: metrics.map((metric) => ({ metric })), asks, turns_off: { facets: [], metrics: [] }, income_items: items });
+// income items it names, its period (the latest unless named), nothing turned off.
+const scope = (asks: string[] = [], metrics: string[] = [], items: string[] = [], period: ScopeReply["period"] = { kind: "latest" }): ScopeReply =>
+  ({ metrics: metrics.map((metric) => ({ metric })), asks, turns_off: { facets: [], metrics: [] }, income_items: items, period });
 const INCOME = ["income_statement"];
 
 const obs = (text: string, evidence: string[]): Assertion => ({ kind: "observation", text, evidence });
@@ -160,7 +161,8 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
     id: "fiscal-period",
     trap: "the fiscal year asked for, whose calendars end eight months apart; a substituted year",
     turns: ["Compare NVDA's and AAPL's fiscal 2025 revenue."],
-    scopes: [scope([], INCOME, ["revenue"])],
+      // hand-labelled 2026-10-22 #472: period added by hand; replace on live re-record.
+    scopes: [scope([], INCOME, ["revenue"], { kind: "fiscal_year", fiscal_year: 2025 })],
     plan: draft(["NVDA", "AAPL"], [reported("a", "a_rev", "revenue", fiscal(2025, "FY")), reported("b", "b_rev", "revenue", fiscal(2025, "FY"))], ["a_rev", "b_rev"]),
     expect: {
       companies: ["NVDA", "AAPL"],
@@ -177,7 +179,8 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
     id: "unknown-cause",
     trap: "a margin drop with no cause in evidence: the change is calculated, and no cause is stated",
     turns: ["What changed in NVDA's gross margin in Q1 fiscal 2026?"],
-    scopes: [scope(["margins", "margin_trend"], INCOME, ["gross_margin"])],
+      // hand-labelled 2026-10-22 #472: period added by hand; replace on live re-record.
+    scopes: [scope(["margins", "margin_trend"], INCOME, ["gross_margin"], { kind: "fiscal_quarter", fiscal_period: "Q1", fiscal_year: 2026 })],
     plan: draft(["NVDA"], [
       reported("a", "gp_q4", "gross_profit", fiscal(2025, "Q4")),
       reported("a", "rev_q4", "revenue", fiscal(2025, "Q4")),
@@ -253,7 +256,8 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
     id: "interior-extremum-and-trend",
     trap: "a low inside the window, a rebound and net rise: every quarter is calculated, the low among them",
     turns: ["How have AMD's operating margins trended over the last eight quarters?"],
-    scopes: [scope(["margins", "margin_trend"], INCOME, ["operating_margin"])],
+      // hand-labelled 2026-10-22 #472: period added by hand; replace on live re-record.
+    scopes: [scope(["margins", "margin_trend"], INCOME, ["operating_margin"], { kind: "range" })],
     plan: draft(["AMD"], [7, 6, 5, 4, 3, 2, 1, 0].flatMap((offset) => amdOperatingMargin(latest("quarterly", offset), `q${offset}`)),
       [7, 6, 5, 4, 3, 2, 1, 0].map((offset) => `om_q${offset}`)),
     expect: {
@@ -316,7 +320,8 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
     id: "filed-cause",
     trap: "a cause asked for: the margin is calculated, and the answer says the cause is not",
     turns: ["Why did AMD's operating margin turn negative in Q2 2025?"],
-    scopes: [scope(["explains", "margins"], INCOME, ["operating_margin"])],
+      // hand-labelled 2026-10-22 #472: period added by hand; replace on live re-record.
+    scopes: [scope(["explains", "margins"], INCOME, ["operating_margin"], { kind: "fiscal_quarter", fiscal_period: "Q2", fiscal_year: 2025 })],
     plan: draft(["AMD"], amdOperatingMargin(fiscal(2025, "Q2"), "q2"), ["om_q2"]),
     expect: {
       companies: ["AMD"],

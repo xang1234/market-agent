@@ -13,7 +13,7 @@ const ENV = {
   LLM_OPENAI_MODELS: "gpt-4.1",
   LITELLM_MODEL: "openai/gpt-4.1",
 };
-const EMPTY = { metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [] };
+const EMPTY = { metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "latest" } };
 const reply = (fields: Record<string, unknown>) => JSON.stringify({ ...EMPTY, ...fields });
 const replying = (text: string) => () => async () => ({ text });
 
@@ -27,6 +27,7 @@ test("a full reply is read into the proposal, each metric built from the catalog
     asks: ["guidance", "explains", "guidance"],
     turns_off: { facets: ["segments", "fiscal_quarter"], metrics: [{ metric: "capex" }, { metric: "eps_diluted", adjustment: "non_gaap" }] },
     income_items: ["revenue", "operating_income", "revenue"],
+    period: { kind: "fiscal_year", fiscal_year: 2025 },
   })), {
     metrics: [
       { metric_key: "eps_diluted_adjusted", label: "Adjusted earnings per share", available: false, base: "eps_diluted", adjustment: "adjusted" },
@@ -36,7 +37,41 @@ test("a full reply is read into the proposal, each metric built from the catalog
     asks: new Set(["guidance", "explains"]),
     turns_off: { facets: new Set(["segments", "fiscal_quarter"]), metrics: new Set(["capex", "eps_diluted_non_gaap"]) },
     income_items: ["revenue", "operating_income"],
+    period: { kind: "fiscal_year", fiscal_year: 2025 },
   });
+});
+
+test("each kind of period is read with exactly its fields (#472)", () => {
+  for (const period of [
+    { kind: "latest" },
+    { kind: "fiscal_year", fiscal_year: 2024 },
+    { kind: "fiscal_quarter", fiscal_period: "Q3", fiscal_year: 2025 },
+    { kind: "fiscal_quarter", fiscal_period: "Q3", fiscal_year: null },
+    { kind: "trailing_twelve_months" },
+    { kind: "range" },
+    { kind: "other" },
+  ]) {
+    assert.deepEqual(parseProposal(reply({ period }))?.period, period, JSON.stringify(period));
+  }
+  for (const period of [
+    { kind: "next_year" },
+    { kind: "fiscal_year", fiscal_year: 2024.5 },
+    { kind: "fiscal_year", fiscal_year: 1989 },
+    { kind: "fiscal_year", fiscal_year: 2101 },
+    { kind: "fiscal_year", fiscal_year: "2024" },
+    { kind: "fiscal_year" },
+    { kind: "fiscal_quarter", fiscal_period: "Q5", fiscal_year: 2025 },
+    { kind: "fiscal_quarter", fiscal_period: "Q3" },
+    { kind: "latest", fiscal_year: 2025 },
+    { kind: "range", from: 2021 },
+    { kind: "fiscal_year", fiscal_year: 2024, fiscal_period: "Q1" },
+    "latest",
+    null,
+  ]) {
+    assert.equal(parseProposal(reply({ period })), null, JSON.stringify(period));
+  }
+  const { period: _period, ...noPeriod } = EMPTY;
+  assert.equal(parseProposal(JSON.stringify(noPeriod)), null, "no period");
 });
 
 test("a metric to turn off may be its bare catalog key (#378 eval)", () => {
@@ -87,6 +122,7 @@ test("a reply wrapped in prose or a fence is read", () => {
     asks: new Set(["peers"]),
     turns_off: { facets: new Set(), metrics: new Set() },
     income_items: [],
+    period: { kind: "latest" },
   });
 });
 
@@ -103,7 +139,7 @@ test("the model sees the vocabularies and the quoted question, and its reply is 
   assert.deepEqual(proposed?.metrics.map((metric) => metric.metric_key), ["operating_cash_flow", "capex"]);
   assert.deepEqual(seen.map((message) => message.role), ["system", "user"]);
   assert.equal(seen[1]!.content, 'Question: "How did the cash NVDA\'s business threw off compare with its outlays on plant?"');
-  for (const key of ["- free_cash_flow:", "- income_statement:", "- latest_quarter:", "- evidence:", "operating_expenses"]) assert.ok(seen[0]!.content.includes(key), key);
+  for (const key of ["- free_cash_flow:", "- income_statement:", "- latest_quarter:", "- evidence:", "operating_expenses", '{"kind":"trailing_twelve_months"}']) assert.ok(seen[0]!.content.includes(key), key);
 });
 
 test("the proposal runs on EXTRACTION_LITELLM_MODEL when one is set", async () => {

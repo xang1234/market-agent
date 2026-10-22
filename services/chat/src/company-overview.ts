@@ -6,9 +6,9 @@ import { issuerLabels } from "../../financial-engine/src/request.ts";
 import { reportedBy, type SelectionPolicy } from "../../financial-engine/src/select-inputs.ts";
 import { createSqlPeerSetResolver } from "../../fundamentals/src/peer-set-resolver.ts";
 import { MAX_TURN_SUBJECTS } from "./coordinator.ts";
-import { requestedFiscalQuarter, requestedFiscalYear, requestedPriceWindow, type FiscalQuarter } from "./fact-blocks.ts";
+import type { FiscalQuarter } from "./fact-blocks.ts";
 import { GROWTH, MARGINS, quarterBefore } from "./quarter-metrics.ts";
-import { PARTIAL_QUARTER, type ScopeProposal } from "./research-scope.ts";
+import type { ScopeProposal } from "./research-scope.ts";
 
 const QUARTERS_SHOWN = 8;
 const UNPLANNED = "[chat] the company overview could not be planned; the planner answers";
@@ -17,17 +17,17 @@ type Node = Record<string, unknown> & { node_id: string };
 export type PeersOf = (issuer: FinancialSubjectRef) => Promise<ReadonlyArray<RequestedSubject>>;
 type ReadyPlan = Extract<PlanningResult, { outcome: "ready" }>;
 
-/** Whether a turn may be a company overview before its reading: resolved companies it names, none carried, and no period. */
-export function namesCompanies(subjects: ReadonlyArray<RequestedSubject>, carried: boolean, text: string): boolean {
-  return subjects.length > 0 && subjects.every((subject) => subject.resolution.status === "resolved") && !carried &&
-    requestedFiscalYear(text) === undefined && requestedFiscalQuarter(text) === undefined && !PARTIAL_QUARTER.test(text) && requestedPriceWindow(text) === undefined;
+/** Whether a turn may be a company overview before its reading: resolved companies it names, and none carried. */
+export function namesCompanies(subjects: ReadonlyArray<RequestedSubject>, carried: boolean): boolean {
+  return subjects.length > 0 && subjects.every((subject) => subject.resolution.status === "resolved") && !carried;
 }
 
 /**
  * The companies a turn's overview covers, by the reading of its question: the
  * ones it names, or the one it names and that company's peers when it asks
- * for peers. Null when it asks for a figure, turns something off ("no
- * margins"), or asks for peers of several companies or of one with none.
+ * for peers. Null when it asks for a figure or a period other than the
+ * latest, turns something off ("no margins"), or asks for peers of several
+ * companies or of one with none.
  */
 export async function overviewSubjects(
   subjects: ReadonlyArray<RequestedSubject>,
@@ -43,7 +43,7 @@ export async function overviewSubjects(
 }
 
 function asksForNoFigure(reading: ScopeProposal | null): reading is ScopeProposal {
-  return reading !== null && reading.metrics.length === 0 && reading.income_items.length === 0 &&
+  return reading !== null && reading.period.kind === "latest" && reading.metrics.length === 0 && reading.income_items.length === 0 &&
     reading.turns_off.facets.size === 0 && reading.turns_off.metrics.size === 0 &&
     [...reading.asks].every((facet) => facet === "latest_quarter" || facet === "peers");
 }

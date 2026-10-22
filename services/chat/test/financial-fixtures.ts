@@ -84,7 +84,7 @@ export function resolveMention(mention: string): Promise<ChatSubjectPreResolutio
   return Promise.resolve(table[mention] ?? ({ status: "not_found", input_text: mention, normalized_input: mention, message: "not found" } as ChatSubjectPreResolution));
 }
 
-export const NO_ASKS: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [] };
+export const NO_ASKS: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [], period: { kind: "latest" } };
 export const METRIC_READING: ScopeProposal = { ...NO_ASKS, metrics: [proposedMetric("income_statement", null, null)!] };
 
 /** A planning model that answers every call with a revenue draft for the given slots, and counts calls. */

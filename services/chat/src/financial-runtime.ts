@@ -508,7 +508,7 @@ async function planTurn(
   // A planner the overview drops reaches the model no more (its repair call).
   const planning: PlanningModel | null = model && ((request) => dropped ? Promise.reject(DROPPED) : model(request));
   const planned = planFinancialRequest(planningContext(subjects), text, planning ?? noModel);
-  if (!namesCompanies(subjects, turn.carried, text)) return planned;
+  if (!namesCompanies(subjects, turn.carried)) return planned;
   // Settled now, or a planner that fails while the overview is decided is an unhandled rejection.
   const failure = planned.then(() => null, (reason: unknown) => ({ reason }));
   let companies: ReadonlyArray<RequestedSubject> | null;
