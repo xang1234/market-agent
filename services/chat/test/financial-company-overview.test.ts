@@ -119,6 +119,27 @@ test("a question about one company that asks for no figure is answered with its 
     assert.deepEqual(await results(latest.message_id), QTRS_OVERVIEW, "a reading that asks for the latest quarter gets the overview, which shows it");
   });
 
+  await t.test("a planner the overview drops never calls the model again, and how it ended is logged", async (st) => {
+    const warned: unknown[][] = [];
+    st.mock.method(console, "warn", (...args: unknown[]) => warned.push(args));
+    let calls = 0;
+    let answer!: (reply: { text: string; model: string }) => void;
+    const model: PlanningModel = () => {
+      calls += 1;
+      return new Promise((resolve) => (answer = resolve));
+    };
+    const done = completed((await chatHarness(pool, { model, readQuestion: reading(NO_ASKS), resolveMention: resolve }).run({ ...base, userIntent: "Revenue for QTRS" })).events);
+    assert.deepEqual(await results(done.message_id), QTRS_OVERVIEW);
+    // A reply that is no draft makes the planner ask the model again.
+    answer({ text: "not a draft", model: "test" });
+    const dropped = () => warned.filter(([message]) => String(message).startsWith("[chat]"));
+    for (const deadline = Date.now() + 10_000; dropped().length === 0 && Date.now() < deadline;) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(calls, 1, "the planner's second call never reaches the model");
+    assert.deepEqual(dropped().map(([message, reason]) => [message, (reason as Error).name, ((reason as Error).cause as Error).message]), [
+      ["[chat] the planner was dropped for the company overview", "PlanningModelError", "the company overview was planned instead"],
+    ]);
+  });
+
   await t.test("a reading that asks for a figure, two companies, a carried company, a named period, or a company with no quarters goes to the planner", async () => {
     const planned = async (userIntent: string, mentions: string[], options: { readQuestion?: () => Promise<ScopeProposal | null>; priorSubjects?: () => Promise<ChatResolvedSubjectPreResolution[]> } = {}) => {
       const model = revenueModel(mentions);

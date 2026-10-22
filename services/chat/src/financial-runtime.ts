@@ -444,12 +444,18 @@ async function planTurn(
   onSubjects(subjects);
   if (CASH_RESILIENCE.test(text)) return planCashResilience(planningContext(subjects), text);
   // A failing or unreachable model is a planning gap (publishRequest); the narrative composer is never a fallback for numbers.
-  const planned = planFinancialRequest(planningContext(subjects), text, model ?? noModel);
+  let dropped = false;
+  // A planner the overview drops reaches the model no more (its repair call).
+  const planning: PlanningModel | null = model && ((request) => dropped ? Promise.reject(new Error("the company overview was planned instead")) : model(request));
+  const planned = planFinancialRequest(planningContext(subjects), text, planning ?? noModel);
   if (!namesOneCompany(subjects, turn.carried, text)) return planned;
-  // Handled now, or a planner that fails while the reading runs is an unhandled rejection; an overview drops it.
-  planned.catch(() => {});
+  // Settled now, or a planner that fails while the overview is decided is an unhandled rejection.
+  const failure = planned.then(() => null, (reason: unknown) => ({ reason }));
   const overview = asksForNoFigure(await turn.startReading()) ? await planCompanyOverview(planningContext(subjects), turn.evidence) : null;
-  return overview ?? planned;
+  if (overview === null) return planned;
+  dropped = true;
+  void failure.then((failed) => failed && console.warn("[chat] the planner was dropped for the company overview", failed.reason));
+  return overview;
 }
 
 const CASH_RESILIENCE = /\bcash[- ]resilience\b/iu;
