@@ -179,8 +179,8 @@ class LabelTable {
 
 // ---------------------------------------------------------------------------
 // Layout: several subjects -> one table; one subject with a line (a measure
-// at one period step and shape) over several periods -> a series; everything
-// else -> scalars. Predicates, rankings, and gaps outside a table or series
+// at one period step and shape) over several periods of one calendar -> a
+// series; everything else -> scalars. Predicates, rankings, and gaps outside a table or series
 // stand alone.
 
 function layout(plan: FinancialPlanV1, nodes: ReadonlyMap<LocalId, OperationNode>, results: ReadonlyArray<PresentedResult>, labels: Readonly<Record<string, PresentationLabel>>): Presentation[] {

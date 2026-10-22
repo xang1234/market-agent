@@ -1678,7 +1678,7 @@
                 "pattern": "^measure:m[0-9]+$"
               },
               "period_label_id": {
-                "description": "Null unless every row has a cell in this column and all read one period; companies on different fiscal calendars get null, and each cell's result names its own period.",
+                "description": "Null unless every row has a cell in this column and all read one period; each cell's result then names its own period.",
                 "oneOf": [
                   {
                     "type": "string",
