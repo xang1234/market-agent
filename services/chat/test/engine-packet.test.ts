@@ -195,7 +195,7 @@ test("growth across companies compares each company's change over the same span,
   assert.deepEqual(report.rejected, [{ index: 1, text: "mixed spans", check: "comparative", reason: "comparison: changes across companies are compared over one span" }]);
   assert.equal(
     plainText(renderAssertion(report.accepted[0]!, packet, []).segments),
-    "Of NVDA and AMD, NVDA's percent change in revenue was highest: NVDA 57.89% (Q4 FY2026 vs Q4 FY2025), AMD 45.74% (Q2 FY2026 vs Q2 FY2025).",
+    "Of NVDA and AMD, NVDA's percent change in revenue was highest: NVDA 57.89% (Q4 FY2026 vs Q4 FY2025), AMD 45.74% (Q2 FY2026 vs Q2 FY2025), 12.15 percentage points above AMD.",
   );
   // Each company with one change shown, the other a gap: still one span.
   const oneEach = enginePacket(content([
@@ -242,7 +242,7 @@ test("an answer written on an engine packet is sent only that packet, and its in
   const requests: LlmChatRequest[] = [];
   const createClient = () => async (_deployment: unknown, request: LlmChatRequest) => {
     requests.push(request);
-    return { text: request.messages[0]!.content.startsWith("You check the analyst inferences") ? '{"verdicts":[{"id":1,"verdict":"entailed"}]}' : reply };
+    return { text: request.messages[0]!.content.startsWith("You check the analyst inferences") ? '{"verdicts":[{"id":1,"verdict":"entailed","worded_amount":false}]}' : reply };
   };
   const skeleton = { id: "commentary-x", kind: "rich_text", snapshot_id: "s", data_ref: { kind: "rich_text", id: "commentary-x" }, source_refs: [], as_of: "2026-09-01T00:00:00.000Z", segments: [] };
   const answer = await answerTurn(

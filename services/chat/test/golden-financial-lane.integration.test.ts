@@ -116,8 +116,8 @@ test("golden metric questions certify through the chat financial lane on the rec
   const AAPL = ["USD 97,100,000,000.00", "USD 45,700,000,000.00", "USD 29,800,000,000.00", "USD 24,900,000,000.00", "47.06%", "30.69%", "25.64%", "-1.62%", "3.26%"];
   assert.deepEqual(await ask("Compare NVDA and AMD profit", async () => NO_ASKS), [...latestQuarter("a", "fy2026_q4", NVDA), ...latestQuarter("b", "fy2026_q2", AMD)]);
   assert.equal(await commentaryText(), [
-    "Of NVDA and AMD, NVDA's gross margin (gross profit / revenue) was highest: NVDA 74.40% (Q4 FY2026), AMD 54.02% (Q2 FY2026).",
-    "Of NVDA and AMD, NVDA's percent change in revenue was highest: NVDA 57.89% (Q4 FY2026 vs Q4 FY2025), AMD 45.74% (Q2 FY2026 vs Q2 FY2025).",
+    "Of NVDA and AMD, NVDA's gross margin (gross profit / revenue) was highest: NVDA 74.40% (Q4 FY2026), AMD 54.02% (Q2 FY2026), 20.38 percentage points above AMD.",
+    "Of NVDA and AMD, NVDA's percent change in revenue was highest: NVDA 57.89% (Q4 FY2026 vs Q4 FY2025), AMD 45.74% (Q2 FY2026 vs Q2 FY2025), 12.15 percentage points above AMD.",
     "NVDA's revenue was USD 62,100,000,000.00 in Q4 FY2026; AMD's revenue was USD 11,200,000,000.00 in Q2 FY2026.",
   ].join("\n\n"));
   assert.deepEqual(await ask("Compare NVDA, AMD and AAPL profit", async () => NO_ASKS), [
