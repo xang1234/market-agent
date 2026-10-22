@@ -935,8 +935,9 @@ function subjectAwareRunner(
       const added = comparedAdditions(await context.reading?.() ?? null);
       if (added.length > 0) {
         const named = await resolveNames(added, options.preResolveSubject);
-        if (named.ambiguous) {
-          await emitSubjectClarificationTurn(context, named.ambiguous, {
+        const [ambiguous] = named.ambiguous;
+        if (ambiguous) {
+          await emitSubjectClarificationTurn(context, ambiguous, {
             persistAssistantMessage: options.persistAssistantMessage,
             renderSubjectClarification: options.renderSubjectClarification,
           });
@@ -981,16 +982,29 @@ function subjectAwareRunner(
 
 export const MAX_TURN_SUBJECTS = 5;
 
+type Unresolved = Exclude<ChatSubjectPreResolution, ChatResolvedSubjectPreResolution>;
+
 export type TurnSubjects = {
   subjects: ReadonlyArray<ChatResolvedSubjectPreResolution>;
   // Those carried from the previous answer that the turn does not name.
   carried?: ReadonlyArray<ChatResolvedSubjectPreResolution>;
-  // A company the reading names to ask about, or ones not found.
-  ambiguous?: Exclude<ChatSubjectPreResolution, ChatResolvedSubjectPreResolution>;
+  // A company the turn names to ask about; named then lists, in the order
+  // written, every company it names beside the carried ones.
+  ambiguous?: Unresolved;
+  named?: ReadonlyArray<ChatSubjectPreResolution>;
   notFound: ReadonlyArray<string>;
   // A follow-up whose change to the compared companies is unclear: the question
   // to ask instead of answering (#206).
   clarify?: string;
+};
+
+// What some names resolve to: each company once, the ones to ask about and
+// the ones not found, and the companies and names to ask about as written.
+type Names = {
+  resolved: ReadonlyArray<ChatResolvedSubjectPreResolution>;
+  ambiguous: ReadonlyArray<Unresolved>;
+  notFound: ReadonlyArray<string>;
+  named: ReadonlyArray<ChatSubjectPreResolution>;
 };
 
 function readingRunner(runner: ChatTurnRunner, readQuestion: ChatCoordinatorOptions["readQuestion"]): ChatTurnRunner {
@@ -1019,81 +1033,84 @@ export async function resolveTurnSubjects(
   loadPriorSubjects: ChatPriorSubjectsLoader | undefined,
 ): Promise<TurnSubjects> {
   const text = nonEmptySubjectText(context.userIntent);
-  const [named, prior] = await Promise.all([
-    text ? resolveNamedSubjects(text, preResolve) : { resolved: [], unresolved: [] },
+  const [mentioned, prior] = await Promise.all([
+    text ? resolveNamedSubjects(text, preResolve) : namesOf([]),
     loadPriorSubjects
       ? loadPriorSubjects({ threadId: context.threadId, ...(context.userId ? { userId: context.userId } : {}) }).then(distinctCompanies)
       : [],
   ]);
-  const readingDecides = prior.length > 0 || named.unresolved.length > 0;
-  const reading = readingDecides ? await context.reading?.() ?? null : null;
-  const change = reading?.companies;
-  if (!change) return unreadChange(named.resolved, prior);
-  if (change.kind === "drop" && prior.length > 0) return dropped(prior, change, preResolve);
-  const names = await resolveNames(
-    change.kind === "compare" ? change.add : change.kind === "drop" ? [...change.drop, ...change.add] : change.names,
-    preResolve,
-  );
-  if (names.ambiguous) return { subjects: [], ambiguous: names.ambiguous, notFound: [] };
-  if (change.kind === "compare") return listed(prior, names.resolved, names.notFound);
-  if (names.resolved.length === 0) return listed(prior, [], names.notFound);
-  if (change.kind === "unclear" && prior.length >= 2) {
+  const readingDecides = prior.length > 0 || mentioned.ambiguous.length > 0 || mentioned.notFound.length > 0;
+  const change = readingDecides ? (await context.reading?.())?.companies : undefined;
+  if (!change) return unreadChange(mentioned, prior);
+  if (change.kind === "drop") return dropped(prior, change, preResolve);
+  const names = await resolveNames(change.kind === "compare" ? change.add : change.names, preResolve);
+  if (change.kind === "compare" || names.named.length === 0) return listed(prior, names);
+  if (change.kind === "unclear" && prior.length >= 2 && names.ambiguous.length === 0) {
     const priorKeys = new Set(prior.map(companyKey));
     const added = names.resolved.filter((subject) => !priorKeys.has(companyKey(subject)));
-    if (added.length > 0) return addOrAlone(added, prior);
+    if (added.length > 0) return addOrAlone(added.map(tickerLabel), prior);
   }
-  return listed([], names.resolved, names.notFound);
+  return listed([], names);
 }
 
-// With no reading, a follow-up naming no new company keeps the previous ones;
-// a new one is asked about after a comparison and replaces a single company.
-function unreadChange(
-  named: ReadonlyArray<ChatResolvedSubjectPreResolution>,
-  prior: ReadonlyArray<ChatResolvedSubjectPreResolution>,
-): TurnSubjects {
+// With no reading, a follow-up naming no new company keeps the previous ones,
+// and one naming a new company asks whether to add it or switch to it.
+function unreadChange(named: Names, prior: ReadonlyArray<ChatResolvedSubjectPreResolution>): TurnSubjects {
+  if (prior.length === 0) return listed([], named);
   const priorKeys = new Set(prior.map(companyKey));
-  const added = distinctCompanies(named).filter((subject) => !priorKeys.has(companyKey(subject)));
-  if (added.length === 0) return listed(prior, []);
-  return prior.length >= 2 ? addOrAlone(added, prior) : listed([], named);
+  const added = [
+    ...named.resolved.filter((subject) => !priorKeys.has(companyKey(subject))).map(tickerLabel),
+    ...named.ambiguous.map((resolution) => resolution.input_text),
+  ];
+  return added.length > 0 ? addOrAlone(added, prior) : listed(prior, { ...named, resolved: [], named: [] });
 }
 
-// Newly named companies get the capped slots first; carried-forward ones fill
-// the rest and stay listed first.
-function listed(
-  prior: ReadonlyArray<ChatResolvedSubjectPreResolution>,
-  named: ReadonlyArray<ChatResolvedSubjectPreResolution>,
-  notFound: ReadonlyArray<string> = [],
-): TurnSubjects {
-  const newlyNamed = distinctCompanies(named).slice(0, MAX_TURN_SUBJECTS);
-  const namedKeys = new Set(newlyNamed.map(companyKey));
-  const carried = prior
-    .filter((subject) => !namedKeys.has(companyKey(subject)))
-    .slice(0, MAX_TURN_SUBJECTS - newlyNamed.length);
-  return { subjects: [...carried, ...newlyNamed], carried, notFound };
+// The previous answer's companies the turn keeps, listed first, and the ones
+// it names. Past the cap it asks rather than drop a kept one.
+function listed(prior: ReadonlyArray<ChatResolvedSubjectPreResolution>, names: Names): TurnSubjects {
+  const namedKeys = new Set(names.resolved.map(companyKey));
+  const carried = prior.filter((subject) => !namedKeys.has(companyKey(subject)));
+  if (carried.length > 0 && carried.length + names.resolved.length + names.ambiguous.length > MAX_TURN_SUBJECTS) {
+    const all = [...carried.map(tickerLabel), ...names.resolved.map(tickerLabel), ...names.ambiguous.map((resolution) => resolution.input_text)];
+    return {
+      subjects: [],
+      notFound: [],
+      clarify: `An answer covers at most ${MAX_TURN_SUBJECTS} companies, and ${labelList(all)} are ${all.length}. Name the ones to look at.`,
+    };
+  }
+  const [ambiguous] = names.ambiguous;
+  return {
+    subjects: [...carried, ...names.resolved.slice(0, MAX_TURN_SUBJECTS)],
+    carried,
+    notFound: names.notFound,
+    ...(ambiguous ? { ambiguous, named: names.named } : {}),
+  };
 }
 
-function addOrAlone(
-  added: ReadonlyArray<ChatResolvedSubjectPreResolution>,
-  prior: ReadonlyArray<ChatResolvedSubjectPreResolution>,
-): TurnSubjects {
-  const adding = labelList(added.map(tickerLabel));
+function addOrAlone(adding: ReadonlyArray<string>, prior: ReadonlyArray<ChatResolvedSubjectPreResolution>): TurnSubjects {
+  const added = labelList(adding);
   const compared = labelList(prior.map(tickerLabel));
   return {
     subjects: [],
     notFound: [],
-    clarify: `Add ${adding} to the ${compared} comparison, or look at ${adding} alone? Say "add ${adding}" or "just ${adding}".`,
+    clarify: `Add ${added} to ${prior.length > 1 ? `the ${compared} comparison` : compared}, or look at ${added} alone? Say "add ${added}" or "just ${added}".`,
   };
 }
 
 // Only companies the previous answer covered can be dropped, and not all of
-// them: otherwise ask, rather than answer about the company named.
+// them unless others are added: otherwise ask, rather than answer about the
+// company named.
 async function dropped(
   prior: ReadonlyArray<ChatResolvedSubjectPreResolution>,
   change: Extract<CompanyChange, { kind: "drop" }>,
   preResolve: ChatSubjectPreResolver,
 ): Promise<TurnSubjects> {
+  if (prior.length === 0) {
+    return { subjects: [], notFound: [], clarify: `There is no previous answer to drop ${labelList(change.drop)} from. Name the companies to look at.` };
+  }
   const [removing, adding] = await Promise.all([resolveNames(change.drop, preResolve), resolveNames(change.add, preResolve)]);
-  if (removing.ambiguous) return { subjects: [], ambiguous: removing.ambiguous, notFound: [] };
+  const [unclear] = removing.ambiguous;
+  if (unclear) return { subjects: [], ambiguous: unclear, notFound: [] };
   const compared = labelList(prior.map(tickerLabel));
   if (removing.notFound.length > 0) {
     const missing = labelList(removing.notFound);
@@ -1114,33 +1131,29 @@ async function dropped(
     };
   }
   const removed = new Set(removing.resolved.map(companyKey));
+  const both = adding.resolved.filter((subject) => removed.has(companyKey(subject)));
+  if (both.length > 0) {
+    const named = labelList(both.map(tickerLabel));
+    return { subjects: [], notFound: [], clarify: `${named} ${both.length > 1 ? "are" : "is"} both dropped and added, so nothing was changed. Say "drop ${named}" to drop ${both.length > 1 ? "them" : "it"}.` };
+  }
   const kept = prior.filter((subject) => !removed.has(companyKey(subject)));
-  if (kept.length === 0) {
+  if (kept.length === 0 && adding.named.length === 0) {
     return { subjects: [], notFound: [], clarify: `Dropping ${compared} leaves no company to compare. Name the company to look at.` };
   }
-  if (adding.ambiguous) return { subjects: [], ambiguous: adding.ambiguous, notFound: [] };
-  const keptKeys = new Set(kept.map(companyKey));
-  const additions = adding.resolved
-    .filter((subject) => !removed.has(companyKey(subject)) && !keptKeys.has(companyKey(subject)))
-    .slice(0, MAX_TURN_SUBJECTS);
-  const keptSlots = kept.slice(0, MAX_TURN_SUBJECTS - additions.length);
-  return { subjects: [...keptSlots, ...additions], carried: keptSlots, notFound: adding.notFound };
+  return listed(kept, adding);
 }
 
-async function resolveNames(
-  names: ReadonlyArray<string>,
-  preResolve: ChatSubjectPreResolver,
-): Promise<{
-  resolved: ChatResolvedSubjectPreResolution[];
-  ambiguous?: Exclude<ChatSubjectPreResolution, ChatResolvedSubjectPreResolution>;
-  notFound: string[];
-}> {
-  const resolutions = await Promise.all(names.map((name) => preResolve({ text: name })));
-  const ambiguous = resolutions.find((resolution) => resolution.status === "needs_clarification");
+async function resolveNames(names: ReadonlyArray<string>, preResolve: ChatSubjectPreResolver): Promise<Names> {
+  return namesOf(await Promise.all(names.map((name) => preResolve({ text: name }))));
+}
+
+function namesOf(resolutions: ReadonlyArray<ChatSubjectPreResolution>): Names {
+  const named = resolutions.filter((resolution) => resolution.status !== "not_found");
   return {
-    resolved: distinctCompanies(resolutions.filter((resolution) => resolution.status === "resolved")),
-    ...(ambiguous ? { ambiguous } : {}),
+    resolved: distinctCompanies(named.filter((resolution) => resolution.status === "resolved")),
+    ambiguous: named.filter((resolution) => resolution.status !== "resolved"),
     notFound: resolutions.flatMap((resolution) => resolution.status === "not_found" ? [resolution.input_text] : []),
+    named,
   };
 }
 
@@ -1153,19 +1166,12 @@ export function labelList(labels: ReadonlyArray<string>): string {
   return labels.length < 2 ? labels.join("") : `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
 }
 
-async function resolveNamedSubjects(
-  text: string,
-  preResolve: ChatSubjectPreResolver,
-): Promise<{ resolved: ChatResolvedSubjectPreResolution[]; unresolved: Exclude<ChatSubjectPreResolution, ChatResolvedSubjectPreResolution>[] }> {
+async function resolveNamedSubjects(text: string, preResolve: ChatSubjectPreResolver): Promise<Names> {
   // The whole message first, so a bare ticker, a company name, or a theme
   // resolves exactly as before; otherwise every ticker it mentions, in order.
   const whole = await preResolve({ text });
-  if (whole.status === "resolved") return { resolved: [whole], unresolved: [] };
-  const resolutions = await Promise.all(extractSubjectMentions(text).map((mention) => preResolve({ text: mention })));
-  return {
-    resolved: resolutions.filter((resolution) => resolution.status === "resolved"),
-    unresolved: resolutions.filter((resolution) => resolution.status !== "resolved"),
-  };
+  if (whole.status === "resolved") return namesOf([whole]);
+  return namesOf(await Promise.all(extractSubjectMentions(text).map((mention) => preResolve({ text: mention }))));
 }
 
 // One entry per company: two listings of the same issuer collapse.

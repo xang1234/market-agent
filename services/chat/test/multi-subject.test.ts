@@ -116,7 +116,7 @@ test("a follow-up that names no company carries the previous companies forward",
 });
 
 test("naming a new company without comparing replaces the previous ones", async () => {
-  const { tickers } = await subjectsForTurn("Analyze AAPL and its margins", { loadPriorSubjects: priorOf("NVDA") });
+  const { tickers } = await subjectsForTurn("Analyze AAPL and its margins", { loadPriorSubjects: priorOf("NVDA"), ...asNamed("AAPL") });
   assert.deepEqual(tickers, ["AAPL"]);
 });
 
@@ -154,12 +154,12 @@ test("turn.completed lists every company the answer covers", async () => {
   ]);
 });
 
-test("a follow-up after a five-company answer keeps the newly named company", async () => {
-  const { tickers } = await subjectsForTurn("Compare it with AAPL", {
+test("a follow-up after a five-company answer asks which to keep before adding one", async () => {
+  const { tickers, context } = await subjectsForTurn("Compare it with AAPL", {
     loadPriorSubjects: priorOf("NVDA", "AMD", "MSFT", "GOOG", "META"),
     ...compare("AAPL"),
   });
-  assert.deepEqual(tickers, ["NVDA", "AMD", "MSFT", "GOOG", "AAPL"]);
+  assert.deepEqual([tickers, context], [[], null]);
 });
 
 test("an ambiguous company in a comparison asks which one instead of answering partially", async () => {
@@ -256,8 +256,8 @@ test("a follow-up that drops a company keeps the others", async () => {
   const unfound = await subjectsForTurn("Drop AMD and add XYZQ", { ...three, ...drop(["AMD"], ["XYZQ"]) });
   assert.deepEqual(unfound.tickers, ["NVDA", "AAPL"]);
   assert.deepEqual(unfound.context?.unresolvedMentions, ["XYZQ"]);
-  // An addition beside a removal gets a slot under the cap before carried companies.
-  const full = await subjectsForTurn("Drop AMD and add TSLA", { loadPriorSubjects: priorOf("NVDA", "AMD", "AAPL", "MSFT", "GOOG", "META"), ...drop(["AMD"], ["TSLA"]) });
+  // An addition beside a removal takes the slot it frees.
+  const full = await subjectsForTurn("Drop AMD and add TSLA", { loadPriorSubjects: priorOf("NVDA", "AMD", "AAPL", "MSFT", "GOOG"), ...drop(["AMD"], ["TSLA"]) });
   assert.deepEqual(full.tickers, ["NVDA", "AAPL", "MSFT", "GOOG", "TSLA"]);
   // Turning a facet off names no company, so the companies are kept.
   const { tickers } = await subjectsForTurn("Drop the segments", { loadPriorSubjects: priorOf("NVDA", "AMD"), ...asNamed() });
@@ -441,25 +441,66 @@ test("a company that cannot be found is asked about when the removal also names 
   assert.match(JSON.stringify(turn.events), /XYZQ was not found, so nothing was dropped from the NVDA, AMD and AAPL comparison\./);
 });
 
-test("with no reading, a follow-up keeps the previous companies unless it names a new one after a single company", async () => {
+// The events of a turn that asks instead of answering.
+async function askedFor(userIntent: string, options: Partial<ChatCoordinatorOptions> = {}): Promise<string> {
+  let ran = false;
+  const turn = createChatCoordinator({ preResolveSubject, ...options, runner: () => { ran = true; } })
+    .getOrCreateTurn({ threadId: "thread-1", runId: "run-1", userIntent });
+  await turn.completed;
+  assert.equal(ran, false, `answered: ${userIntent}`);
+  return JSON.stringify(turn.events);
+}
+
+test("with no reading, a follow-up keeps the previous companies unless it names a new one", async () => {
   const two = { loadPriorSubjects: priorOf("NVDA", "AMD") };
   assert.deepEqual((await subjectsForTurn("Why?", two)).tickers, ["NVDA", "AMD"], "naming none");
   assert.deepEqual((await subjectsForTurn("Drop AMD", two)).tickers, ["NVDA", "AMD"], "naming only the previous ones");
-  assert.deepEqual((await subjectsForTurn("Compare it with AMD", { loadPriorSubjects: priorOf("NVDA") })).tickers, ["AMD"], "after one company");
   const fresh = await subjectsForTurn("Compare NVDA and XYZQ", { loadPriorSubjects: priorOf() });
-  assert.deepEqual([fresh.tickers, fresh.context?.unresolvedMentions], [["NVDA"], []], "a fresh question");
+  assert.deepEqual([fresh.tickers, fresh.context?.unresolvedMentions], [["NVDA"], ["XYZQ"]], "a fresh question names the one not found");
   assert.deepEqual((await subjectsForTurn("Compare with AMD", {}, "NVDA")).tickers, ["NVDA"], "the page's company alone");
   const failing = { readQuestion: async () => { throw new Error("provider down"); } };
   assert.deepEqual((await subjectsForTurn("Drop AMD", { ...two, ...failing })).tickers, ["NVDA", "AMD"], "a reading that failed");
 });
 
-test("with no reading, a new company named after a comparison is asked about", async () => {
-  let ran = false;
-  const turn = createChatCoordinator({ preResolveSubject, loadPriorSubjects: priorOf("NVDA", "AMD"), runner: () => { ran = true; } })
-    .getOrCreateTurn({ threadId: "thread-1", runId: "run-1", userIntent: "Compare it with AAPL" });
-  await turn.completed;
-  assert.equal(ran, false);
-  assert.match(JSON.stringify(turn.events), /Add AAPL to the NVDA and AMD comparison, or look at AAPL alone\?/);
+test("with no reading, a new company named after any previous answer is asked about, never added, dropped or switched to", async () => {
+  assert.match(await askedFor("Compare it with AAPL", { loadPriorSubjects: priorOf("NVDA", "AMD") }), /Add AAPL to the NVDA and AMD comparison, or look at AAPL alone\?/);
+  const one = { loadPriorSubjects: priorOf("NVDA") };
+  for (const [question, named] of [["Drop AMD", "AMD"], ["Compare it with AMD", "AMD"], ["add TSLA", "TSLA"]]) {
+    assert.match(await askedFor(question!, one), new RegExp(`Add ${named} to NVDA, or look at ${named} alone\\? Say \\\\"add ${named}\\\\" or \\\\"just ${named}\\\\"`), question);
+  }
+  // CASH is a real ticker (Pathward): with no reading, "free cash flow" may name it, so it is asked about.
+  const withCash = async ({ text }: { text: string }) => (text === "CASH" ? { ...resolved("NOW"), input_text: text } : preResolveSubject({ text }));
+  assert.match(await askedFor("Drop FREE CASH FLOW", { ...one, preResolveSubject: withCash }), /Add NOW to NVDA, or look at NOW alone\?/);
+});
+
+test("with no reading, an ambiguous company in a fresh question is asked about", async () => {
+  assert.match(await askedFor("Compare GOOGL and NVDA", { loadPriorSubjects: priorOf() }), /Which Alphabet share class do you mean\?/);
+});
+
+test("adding companies past the cap asks which to keep, instead of dropping one silently", async () => {
+  const cap = /An answer covers at most 5 companies/;
+  const two = { loadPriorSubjects: priorOf("NVDA", "AMD") };
+  assert.match(await askedFor("Compare it with AAPL MSFT GOOG META TSLA", { ...two, ...compare("AAPL", "MSFT", "GOOG", "META", "TSLA") }), cap);
+  const five = { loadPriorSubjects: priorOf("NVDA", "AMD", "MSFT", "GOOG", "META") };
+  assert.match(await askedFor("Compare it with AAPL", { ...five, ...compare("AAPL") }), /An answer covers at most 5 companies, and NVDA, AMD, MSFT, GOOG, META and AAPL are 6\./);
+  assert.match(await askedFor("Drop AMD and add AAPL and TSLA", { ...five, ...drop(["AMD"], ["AAPL", "TSLA"]) }), cap);
+  // Five in all is not past it.
+  assert.deepEqual((await subjectsForTurn("Drop AMD and add AAPL", { ...five, ...drop(["AMD"], ["AAPL"]) })).tickers, ["NVDA", "MSFT", "GOOG", "META", "AAPL"]);
+});
+
+test("a drop read with no previous answer asks, as there is nothing to drop from", async () => {
+  // XYZQ is not found, so the turn waits on its reading.
+  const reading = drop(["AMD", "XYZQ"]);
+  assert.match(await askedFor("Drop AMD and XYZQ", { loadPriorSubjects: priorOf(), ...reading }), /There is no previous answer to drop AMD and XYZQ from\./);
+  assert.match(await askedFor("Drop AMD and XYZQ", reading), /There is no previous answer to drop AMD and XYZQ from\./);
+});
+
+test("dropping the only company while adding another answers the one added", async () => {
+  assert.deepEqual((await subjectsForTurn("Drop AMD and add TSLA", { loadPriorSubjects: priorOf("AMD"), ...drop(["AMD"], ["TSLA"]) })).tickers, ["TSLA"]);
+});
+
+test("dropping and adding the same company asks which", async () => {
+  assert.match(await askedFor("Drop AMD and add AMD", { loadPriorSubjects: priorOf("NVDA", "AMD"), ...drop(["AMD"], ["AMD"]) }), /AMD is both dropped and added, so nothing was changed\./);
 });
 
 test("a turn reads its question once, and a fresh question whose names all resolve does not wait on it", async () => {
