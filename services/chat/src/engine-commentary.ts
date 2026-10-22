@@ -6,9 +6,9 @@
 // model may run inside finalization, so it is appended after the commit.
 
 import type { FinancialRuntimeAuthority } from "../../financial-core/src/index.ts";
-import { isDatabaseError } from "../../financial-engine/src/evidence-adapter.ts";
 import type { SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
+import { LlmProviderError, LlmRouterError } from "../../llm/src/index.ts";
 import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier.ts";
 import type { AnsweredTurn, AnswerTraceInput, TurnTrace } from "./answer-trace.ts";
 import { contentHashForText } from "./chat-ids.ts";
@@ -25,8 +25,8 @@ export const COMMENTARY_UNAVAILABLE = "Commentary is unavailable for this answer
 
 /**
  * Writes the commentary on a saved engine answer and appends it to the
- * message, or the note that it is unavailable. A database error is logged and
- * leaves the answer as saved; any other throw is a defect.
+ * message, or the note that it is unavailable when the model fails. Anything
+ * else throws, and the caller keeps the answer as saved.
  */
 export async function saveCommentary(
   db: SqlExecutor,
@@ -39,17 +39,12 @@ export async function saveCommentary(
     turn: Pick<TurnTrace, "thread_id" | "run_id" | "turn_id" | "question">;
   }>,
 ): Promise<void> {
-  try {
-    const plan = await findPlanForRequest(db, input.request);
-    const tickers = new Map((plan?.subjects.members ?? []).flatMap((member) => {
-      const label = input.labels.get(member.subject_ref.id.toLowerCase());
-      return label === undefined ? [] : [[member.slot_id, label] as const];
-    }));
-    await append(db, input.message, await commentary(compose, input.message, tickers, input.turn));
-  } catch (error) {
-    if (!isDatabaseError(error)) throw error;
-    console.warn(`[chat] the analyst commentary could not be saved; message ${input.message.message_id} completes without it`, error);
-  }
+  const plan = await findPlanForRequest(db, input.request);
+  const tickers = new Map((plan?.subjects.members ?? []).flatMap((member) => {
+    const label = input.labels.get(member.subject_ref.id.toLowerCase());
+    return label === undefined ? [] : [[member.slot_id, label] as const];
+  }));
+  await append(db, input.message, await commentary(compose, input.message, tickers, input.turn));
 }
 
 async function commentary(
@@ -65,16 +60,19 @@ async function commentary(
     console.warn(`[chat] analyst commentary unavailable for message ${message.message_id}`, cause);
     return { ...skeleton, segments: [{ type: "text", text: COMMENTARY_UNAVAILABLE }] };
   };
+  const packet = enginePacket(answer.financial, tickers);
   let written: Pick<AnsweredTurn, "assertions" | "blocks">;
   try {
     const answered = await compose({
       context: { userIntent: turn.question, bundleId: "financial_answer" },
       blocks: [skeleton],
       toolCalls: [],
-      packet: enginePacket(answer.financial, tickers),
+      packet,
     }, turn);
     written = answered.judging ? await answered.judging.done : answered;
   } catch (reason) {
+    // A failed, timed-out or unmatched model call reaches here as the router's error.
+    if (!(reason instanceof LlmRouterError || reason instanceof LlmProviderError)) throw reason;
     return unavailable(reason);
   }
   if (written.assertions?.rendered !== true) return unavailable(`no assertion rendered (list ${written.assertions?.status ?? "not written"})`);

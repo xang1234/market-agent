@@ -257,12 +257,18 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       return {
         ...answer,
         commentary: async () => {
-          await saveCommentary(deps.pool, compose, {
-            message,
-            request: { authority, request_key: turnId },
-            labels: requested.labels,
-            turn: { thread_id: context.threadId, run_id: context.runId, ...(context.turnId ? { turn_id: context.turnId } : {}), question: text },
-          });
+          // The answer is committed and shown: nothing after it may fail the turn.
+          try {
+            await saveCommentary(deps.pool, compose, {
+              message,
+              request: { authority, request_key: turnId },
+              labels: requested.labels,
+              turn: { thread_id: context.threadId, run_id: context.runId, ...(context.turnId ? { turn_id: context.turnId } : {}), question: text },
+            });
+          } catch (error) {
+            console.error(`[chat] the analyst commentary on message ${messageId} failed; the turn completes with the answer as saved`, error);
+            return message;
+          }
           return (await readBack(deps.pool, context.threadId, messageId)) ?? message;
         },
       };

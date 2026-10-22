@@ -12,7 +12,7 @@ import type { Pool } from "pg";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { presentationHash, type FinancialAnswerContent } from "../../financial-core/src/index.ts";
 import { IDS, seedReportedFact } from "../../financial-engine/test/db-fixtures.ts";
-import type { LlmChatRequest } from "../../llm/src/index.ts";
+import { LlmProviderError, LlmRouterError, type LlmChatRequest } from "../../llm/src/index.ts";
 import { answerTurn, type AnswerTraceInput } from "../src/answer-trace.ts";
 import type { ChatAnalystToolRuntime } from "../src/coordinator.ts";
 import { COMMENTARY_UNAVAILABLE, type CommentaryComposer } from "../src/engine-commentary.ts";
@@ -193,7 +193,8 @@ test("a company overview carries analyst commentary on its published results (#3
     const warned: unknown[][] = [];
     st.mock.method(console, "warn", (...args: unknown[]) => warned.push(args));
     const failures: Record<string, CommentaryComposer> = {
-      "the model call fails": composer(() => Promise.reject(new Error("provider down")), undefined, ENV).compose,
+      "the model call fails": composer(() => Promise.reject(new LlmProviderError("provider_failed", "provider down")), undefined, ENV).compose,
+      "the router fails": () => Promise.reject(new LlmRouterError("all_deployments_failed", "all LLM deployments failed", [])),
       "the assertion list is malformed": composer(() => "No list.\n```assertions\n{not json\n```").compose,
       "nothing is accepted": composer(() => assertions([{ kind: "observation", text: "x", evidence: ["F99"] }])).compose,
       "a ref is not the answer's": async (input, turn) => {
@@ -234,20 +235,33 @@ test("a company overview carries analyst commentary on its published results (#3
     assert.ok(warned.some((args) => String(args[0]).includes("was not saved: the message changed")), JSON.stringify(warned));
   });
 
-  await t.test("a database error saving the commentary completes the turn with the answer alone", async (st) => {
-    const warned: unknown[][] = [];
-    st.mock.method(console, "warn", (...args: unknown[]) => warned.push(args));
-    const failing = {
-      query: (text: string, values?: unknown[]) => /^\s*update chat_messages set blocks/u.test(text)
-        ? Promise.reject(Object.assign(new Error("deadlock detected"), { code: "40P01" }))
-        : pool.query(text, values),
+  await t.test("a defect or a database error after the commit is logged, and the turn completes with the answer as saved", async (st) => {
+    const logged: unknown[][] = [];
+    st.mock.method(console, "error", (...args: unknown[]) => logged.push(args));
+    const appendFails = (error: Error) => ({
+      query: (text: string, values?: unknown[]) => text.trimStart().startsWith("update chat_messages set blocks") ? Promise.reject(error) : pool.query(text, values),
       connect: () => pool.connect(),
-    } as unknown as Pool;
-    const { compose } = composer(() => ALFA_REPLY);
-    const done = completed((await chatHarness(failing, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve, commentary: compose }).run({ ...base, userIntent: "Revenue for ALFA" })).events);
-    assert.deepEqual((await message(done.message_id)).blocks.map((block) => block.kind), ["financial_answer"]);
-    assert.deepEqual((done.message as { blocks: Block[] }).blocks.map((block) => block.kind), ["financial_answer"]);
-    assert.ok(warned.some((args) => String(args[0]).startsWith("[chat] the analyst commentary could not be saved")), JSON.stringify(warned));
+    }) as unknown as Pool;
+    const defect = new TypeError("Cannot read properties of undefined (reading 'blocks')");
+    const deadlock = Object.assign(new Error("deadlock detected"), { code: "40P01" });
+    const terminated = new Error("Connection terminated unexpectedly");
+    const cases: Array<[string, Error, ReturnType<typeof overview>]> = [
+      ["the composer throws a TypeError", defect, overview(() => Promise.reject(defect))],
+      ...[deadlock, terminated].map((error): [string, Error, ReturnType<typeof overview>] => [
+        `the append fails: ${error.message}`,
+        error,
+        chatHarness(appendFails(error), { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve, commentary: composer(() => ALFA_REPLY).compose }),
+      ]),
+    ];
+    for (const [failure, error, harness] of cases) {
+      logged.length = 0;
+      const { events } = await harness.run({ ...base, userIntent: "Revenue for ALFA" });
+      assert.deepEqual(events.filter((event) => event.type === "turn.error"), [], failure);
+      const done = completed(events);
+      assert.deepEqual((done.message as { blocks: Block[] }).blocks.map((block) => block.kind), ["financial_answer"], failure);
+      assert.deepEqual((await message(done.message_id)).blocks.map((block) => block.kind), ["financial_answer"], failure);
+      assert.deepEqual(logged, [[`[chat] the analyst commentary on message ${done.message_id} failed; the turn completes with the answer as saved`, error]], failure);
+    }
   });
 
   await t.test("only an overview gets commentary: a metric question, an analyst turn and a retry of a saved answer write none", async () => {
