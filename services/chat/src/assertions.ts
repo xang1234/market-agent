@@ -54,7 +54,8 @@ export type AssertionReport = {
   judged?: ReadonlyArray<InferenceVerdict>;
   // The indices whose entry the repair reply replaced (inference-repair.ts),
   // whether or not the replacement passed the checks, in index order; each
-  // entry above is its replacement. Absent when none was.
+  // entry above is its replacement. One a failed repair left as its first
+  // verdict showed it is not listed (answer-trace.ts). Absent when none was.
   repaired?: ReadonlyArray<number>;
 };
 

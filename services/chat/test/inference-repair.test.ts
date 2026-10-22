@@ -42,6 +42,7 @@ const GAP_TEXT = "The eight-month gap between fiscal year ends limits direct com
 const GAP_REASON = "The fiscal year ends are shown as Jan 2025 and Sep 2025, an eight-month gap, which the answer's own figures support as limiting direct comparison of the two revenue figures.";
 const ENDS_TEXT = "The different fiscal year ends limit direct comparability of the two revenue figures.";
 const ENDS = `> **Analyst inference:** ${ENDS_TEXT}`;
+const UNVERIFIED_GAP = `> **Unverified analyst view** (not backed by the figures shown): ${GAP_TEXT}`;
 const fiscal = (...paragraphs: string[]) => [FISCAL_FIGURES, ...paragraphs, FISCAL_NOTE].join("\n\n");
 
 const QUARTER_FIGURES = [
@@ -125,8 +126,8 @@ test("an inference judged to state an amount in words is repaired once: the call
 
   assert.equal(text(answer.blocks), fiscal(PENDING, PENDING));
   assert.equal(text(done.blocks), fiscal(PROFITABILITY, ENDS));
-  // The judge-hidden one's line goes when its verdict hides it; nothing holds its place in the repair.
-  assert.equal(seen.at(-2), fiscal(PROFITABILITY));
+  // The worded one keeps its line through its repair: no text shows before its own verdict.
+  assert.equal(seen.at(-2), fiscal(PROFITABILITY, PENDING));
   assert.equal(seen.at(-1), fiscal(PROFITABILITY, ENDS));
   assert.equal(seen.some((blocks) => blocks.includes(GAP_TEXT)), false);
   assert.deepEqual(calls.sort(), ["answer", "judge 7", "judge 8", "judge 8", "repair"]);
@@ -211,7 +212,7 @@ test("an inference the checks reject for a digit is repaired, checked and judged
   assert.deepEqual(calls.sort(), ["answer", "judge 4", "judge 5", "repair"]);
 });
 
-test("every hidden inference of a turn goes in one repair call, once every first verdict is in; a repair hidden again stays hidden, with no second round", async (t) => {
+test("every inference sent to repair goes in one call, once every first verdict is in; a repair hidden again stays hidden, a worded one shows as unverified, with no second round", async (t) => {
   t.mock.method(console, "info", () => {});
   const { calls, repairs, createClient } = models(QUARTER, {
     judge: (ask) => ask.id === 4
@@ -226,16 +227,15 @@ test("every hidden inference of a turn goes in one repair call, once every first
     { index: 4, text: "The large gap between YoY and QoQ growth rates indicates sequential momentum is moderating even though the company is still growing rapidly on a year-over-year basis.", check: "judge", verdict: "contradicted", worded_amount: false, reason: "QoQ growth rose." },
     { index: 5, text: DIGIT_TEXT, check: "binding", reason: "an inference rests on its supports; it writes no figure" },
   ]);
-  assert.equal(text(done.blocks), quarter());
+  assert.equal(text(done.blocks), quarter("> **Unverified analyst view** (not backed by the figures shown): Growth is a third smaller than before."));
   assert.deepEqual(calls.sort(), ["answer", "judge 4", "judge 4", "judge 5", "repair"]);
   assert.deepEqual(done.assertions?.repaired, [4, 5]);
   assert.deepEqual(rejections(done.assertions).filter(([index]) => index === 4 || index === 5), [
     [4, "judge", "contradicted: it still says momentum fell."],
-    [5, "judge", "entailed, worded_amount: it says a third smaller."],
   ]);
 });
 
-test("a repaired entry goes through the same checks as the first: a digit, an address, a subject its evidence does not cover, or only failed supports leaves it hidden, with no second repair", async (t) => {
+test("a repaired entry goes through the same checks as the first: a digit, an address, a subject its evidence does not cover, or only failed supports rejects it, and the worded inference shows as its first verdict did, with no second repair", async (t) => {
   const logged = t.mock.method(console, "info", () => {});
   const cases: Array<[string, Record<string, unknown>, string, string]> = [
     ["a digit", { text: "The gap of 8 months limits comparability." }, "binding", "an inference rests on its supports; it writes no figure"],
@@ -246,26 +246,26 @@ test("a repaired entry goes through the same checks as the first: a digit, an ad
   for (const [label, fields, check, reason] of cases) {
     const { calls, createClient } = models(FISCAL, { judge: fiscalJudge(), repair: () => fenced([{ kind: "analyst_inference", index: 8, ...fields }]) });
     const done = await (await answerTurn(FISCAL.input, turn(FISCAL), { env: JUDGED_ENV, createClient })).judging!.done;
-    assert.equal(text(done.blocks), fiscal(PROFITABILITY), label);
-    assert.deepEqual(rejections(done.assertions).find(([index]) => index === 8), [8, check, reason], label);
-    // Its first verdict still counts it: hidden, as the reader saw it.
+    assert.equal(text(done.blocks), fiscal(PROFITABILITY, UNVERIFIED_GAP), label);
+    assert.equal(rejections(done.assertions).find(([index]) => index === 8), undefined, label);
+    assert.equal(done.assertions?.accepted.find((entry) => entry.index === 8)?.text, GAP_TEXT, label);
     assert.deepEqual(done.assertions?.judged, [
       { index: 7, verdict: "entailed", worded_amount: false },
       { index: 8, verdict: "entailed", worded_amount: true, reason: GAP_REASON },
     ], label);
-    assert.deepEqual(done.assertions?.repaired, [8], label);
+    assert.equal(done.assertions?.repaired, undefined, label);
     assert.deepEqual(calls.sort(), ["answer", "judge 7", "judge 8", "repair"], label);
     const lines = logged.mock.calls.slice(-2).map((call) => String(call.arguments[0]));
     assert.deepEqual(lines, [
-      `[chat] judge thread=${FISCAL.thread_id} run=${FISCAL.run_id} on anthropic/claude-haiku-5-5: 1 shown, 0 unverified, of 2 inferences`,
+      `[chat] judge thread=${FISCAL.thread_id} run=${FISCAL.run_id} on anthropic/claude-haiku-5-5: 1 shown, 1 unverified, of 2 inferences`,
       `[chat] repair thread=${FISCAL.thread_id} run=${FISCAL.run_id}: 1 sent, 0 repaired, 0 recovered`,
     ], label);
     const metrics = answerMetrics({ ...done, exchange: FISCAL.exchange, repair: null });
-    assert.deepEqual([metrics.inferences_shown, metrics.inferences_unverified, metrics.inferences_hidden], [1, 0, 1], label);
+    assert.deepEqual([metrics.inferences_shown, metrics.inferences_unverified, metrics.inferences_hidden], [1, 1, 0], label);
   }
 });
 
-test("a repair that fails leaves its inference hidden as the first round did, and the answer is still saved: a failed call, one past its deadline, a reply cut off, with no list, leaving the entry out, or for an index or kind not asked for", async (t) => {
+test("a repair that fails leaves its inference as the first round showed it, and the answer is still saved: a failed call, one past its deadline, a reply cut off, with no list, leaving the entry out, or for an index or kind not asked for", async (t) => {
   t.mock.method(console, "info", () => {});
   const failures: Array<[string, () => Promise<LlmChatResult>]> = [
     ["a failed call", async () => {
@@ -286,18 +286,69 @@ test("a repair that fails leaves its inference hidden as the first round did, an
     const { calls, createClient } = models(FISCAL, { judge: fiscalJudge(), repair });
     const answer = await answerTurn(FISCAL.input, turn(FISCAL), { env: JUDGED_ENV, createClient, traceDir: dir, repairDeadlines: { attemptMs: 50, totalMs: 120 } });
     const done = await answer.judging!.done;
-    assert.equal(text(done.blocks), fiscal(PROFITABILITY), label);
-    assert.deepEqual(rejections(done.assertions).find(([index]) => index === 8), [8, "judge", `entailed, worded_amount: ${GAP_REASON}`], label);
+    assert.equal(text(done.blocks), fiscal(PROFITABILITY, UNVERIFIED_GAP), label);
+    assert.equal(rejections(done.assertions).find(([index]) => index === 8), undefined, label);
     assert.equal(done.assertions?.repaired, undefined, label);
     assert.deepEqual(done.assertions?.judged?.map(({ index }) => index), [7, 8], label);
     assert.deepEqual(calls.sort(), ["answer", "judge 7", "judge 8", "repair"], label);
     const written = JSON.parse(await readFile(join(dir, FISCAL.thread_id, `${FISCAL.run_id}.json`), "utf8")) as TurnTrace;
-    assert.equal(text(written.blocks), fiscal(PROFITABILITY), label);
+    assert.equal(text(written.blocks), fiscal(PROFITABILITY, UNVERIFIED_GAP), label);
     assert.deepEqual(written.repair?.requests.map(({ index }) => index), [8], label);
     assert.deepEqual(written.repair?.judge, [], label);
     const metrics = answerMetrics(written);
-    assert.deepEqual([metrics.inferences_shown, metrics.inferences_unverified, metrics.inferences_hidden], [1, 0, 1], label);
+    assert.deepEqual([metrics.inferences_shown, metrics.inferences_unverified, metrics.inferences_hidden, metrics.inferences_recovered], [1, 1, 0, 0], label);
   }
+});
+
+test("a worded inference stays unverified when its repair is judged contradicted; a contradicted one whose repair fails the checks stays hidden with that rejection; neither is recovered", async (t) => {
+  t.mock.method(console, "info", () => {});
+  const worse = models(FISCAL, {
+    judge: fiscalJudge((ask) => verdict(ask.id, "contradicted", false, "the ends are not shown.")),
+    repair: () => fenced([inference(8, ENDS_TEXT)]),
+  });
+  const kept = await (await answerTurn(FISCAL.input, turn(FISCAL), { env: JUDGED_ENV, createClient: worse.createClient })).judging!.done;
+  assert.equal(text(kept.blocks), fiscal(PROFITABILITY, UNVERIFIED_GAP));
+  assert.deepEqual(kept.assertions?.judged?.at(-1), { index: 8, verdict: "entailed", worded_amount: true, reason: GAP_REASON });
+  assert.equal(kept.assertions?.repaired, undefined);
+  assert.deepEqual(worse.calls.sort(), ["answer", "judge 7", "judge 8", "judge 8", "repair"]);
+  const keptMetrics = answerMetrics({ ...kept, exchange: FISCAL.exchange, repair: { requests: [], record: { outcome: "not_called", reason: "x" }, judge: [] } });
+  assert.deepEqual([keptMetrics.inferences_unverified, keptMetrics.inferences_hidden, keptMetrics.inferences_repaired, keptMetrics.inferences_recovered], [1, 0, 0, 0]);
+
+  const contradicted = models(FISCAL, {
+    judge: (ask) => (ask.id === 7 ? verdict(7, "entailed") : verdict(8, "contradicted", false, "the gap is not eight months.")),
+    repair: () => fenced([inference(8, "The gap of 8 months limits comparability.")]),
+  });
+  const hidden = await (await answerTurn(FISCAL.input, turn(FISCAL), { env: JUDGED_ENV, createClient: contradicted.createClient })).judging!.done;
+  assert.equal(text(hidden.blocks), fiscal(PROFITABILITY));
+  assert.deepEqual(rejections(hidden.assertions).find(([index]) => index === 8), [8, "binding", "an inference rests on its supports; it writes no figure"]);
+  assert.deepEqual(hidden.assertions?.repaired, [8]);
+  const hiddenMetrics = answerMetrics({ ...hidden, exchange: FISCAL.exchange, repair: { requests: [], record: { outcome: "not_called", reason: "x" }, judge: [] } });
+  assert.deepEqual([hiddenMetrics.inferences_hidden, hiddenMetrics.inferences_recovered], [1, 0]);
+});
+
+test("a worded inference holds its line through its repair: the repaired text shows only once its own verdict settles, and a worded repaired verdict shows as unverified", async (t) => {
+  t.mock.method(console, "info", () => {});
+  const asked = deferred<void>();
+  const second = deferred<LlmChatResult>();
+  const { createClient } = models(FISCAL, {
+    judge: fiscalJudge(() => {
+      asked.resolve();
+      return second.promise as unknown as LlmChatResult;
+    }),
+    repair: () => fenced([inference(8, ENDS_TEXT)]),
+  });
+  const answer = await answerTurn(FISCAL.input, turn(FISCAL), { env: JUDGED_ENV, createClient });
+  const seen: string[] = [];
+  answer.judging!.watch((blocks) => seen.push(text(blocks)));
+  await asked.promise;
+  assert.equal(seen.at(-1), fiscal(PROFITABILITY, PENDING));
+  assert.equal(seen.some((blocks) => blocks.includes(ENDS_TEXT) || blocks.includes(GAP_TEXT)), false);
+  second.resolve(verdict(8, "unsupported", true, "it says loosely."));
+  const done = await answer.judging!.done;
+  const unverifiedEnds = `> **Unverified analyst view** (not backed by the figures shown): ${ENDS_TEXT}`;
+  assert.equal(seen.at(-1), fiscal(PROFITABILITY, unverifiedEnds));
+  assert.equal(text(done.blocks), fiscal(PROFITABILITY, unverifiedEnds));
+  assert.deepEqual(done.assertions?.repaired, [8]);
 });
 
 test("no repair is asked for when nothing qualifies: verdicts entailed, unsupported or errors; no judge configured; the fallback shown", async (t) => {
@@ -345,10 +396,10 @@ test("a turn whose only hidden inference is check-rejected waits for its repair,
   assert.deepEqual(calls.sort(), ["answer", "judge 4", "repair"]);
 });
 
-test("a trace recorded before repairs replays with none: its hidden inference stays hidden; one recorded with a repair replays it with no model", async () => {
+test("a trace recorded before repairs replays with none: its worded inference stays unverified; one recorded with a repair replays it with no model", async () => {
   const { repair: _, ...before } = FISCAL;
   const replayed = await replayRecorded(before);
-  assert.equal(text(replayed.blocks), fiscal(PROFITABILITY));
+  assert.equal(text(replayed.blocks), fiscal(PROFITABILITY, UNVERIFIED_GAP));
   assert.equal(replayed.repair, null);
   // Today's code would ask a repair the trace never recorded.
   assert.equal(replayed.repair_input_changed, true);
@@ -375,7 +426,7 @@ test("a replay keeps the recorded verdicts and runs only the repair live (record
 
 const MUTATIONS = fileURLToPath(new URL("./answer-lab/judge-mutations.json", import.meta.url));
 
-test("judge-mutations --repair sends a hidden variant through the turn's repair round, on its answer request with the variant in its list, and reports its path", async () => {
+test("judge-mutations --repair sends a worded variant through the turn's repair round, on its answer request with the variant in its list, and reports its path", async () => {
   const variant = mutationVariants(MUTATIONS).find((entry) => entry.kind === "worded_amount")!;
   const index = variant.judged.index;
   const first = { index, verdict: "entailed" as const, worded_amount: true, reason: "it states an amount." };
@@ -391,14 +442,23 @@ test("judge-mutations --repair sends a hidden variant through the turn's repair 
 
   const digit = models(SEGMENTS, { repair: () => fenced([inference(index, "It earns 9 of every 10 dollars in one place.")]) });
   const rejected = await repairMutation(variant, first, { env: JUDGED_ENV, createClient: digit.createClient });
-  assert.deepEqual([rejected.rejection, rejected.as], ["binding: an inference rests on its supports; it writes no figure", "hidden"]);
+  // As in chat, a failed repair of one whose first verdict showed leaves it as that verdict showed it.
+  assert.deepEqual([rejected.rejection, rejected.as], ["binding: an inference rests on its supports; it writes no figure", "unverified"]);
+  const contradicted = await repairMutation(variant, first, { env: JUDGED_ENV, createClient: models(SEGMENTS, {
+    judge: (ask) => verdict(ask.id, "contradicted", false, "it is not."),
+    repair: () => fenced([inference(index, "It leans on one source of revenue.")]),
+  }).createClient });
+  assert.deepEqual([contradicted.second?.verdict, contradicted.as], ["contradicted", "unverified"]);
+  const firstContradicted = { index, verdict: "contradicted" as const, worded_amount: false, reason: "it is not." };
+  const stillHidden = await repairMutation(variant, firstContradicted, { env: JUDGED_ENV, createClient: digit.createClient });
+  assert.equal(stillHidden.as, "hidden");
 
   // An error verdict is not repaired, as a chat turn's is not.
   const error = await repairMutation(variant, { index, verdict: "error", reason: "timeout" }, { env: JUDGED_ENV, createClient: models(SEGMENTS, {}).createClient });
   assert.deepEqual([error.repaired, error.as], [null, "hidden"]);
 });
 
-test("the repair summary counts the hide-tier mutations shown and unverified after repair, and each variant's path", () => {
+test("the repair summary counts every mutation sent to repair by what it ends as, and each variant's path", () => {
   const row = (id: string, kind: string, as: string, extra: Partial<MutationRepair> = {}) =>
     ({ id, kind, first: { index: 1, verdict: "contradicted", worded_amount: false, reason: "it ranks them wrong." }, repaired: null, as, ...extra }) as MutationRepair;
   assert.equal(mutationRepairSummary([
@@ -408,7 +468,7 @@ test("the repair summary counts the hide-tier mutations shown and unverified aft
     row("d", "unsupported_claim", "hidden"),
     row("e", "original", "shown", { repaired: "It is fine.", second: { index: 1, verdict: "entailed", worded_amount: false } }),
   ]), [
-    "after repair: 1 shown, 1 unverified, 1 still hidden, of 3 hide-tier mutations the judge hid",
+    "after repair: 1 shown, 1 unverified, 2 hidden, of 4 mutations sent to repair",
     "  a contradicted_ranking: contradicted: it ranks them wrong.\n      It leads on margin.\n      entailed\n      shown",
     "  b worded_amount: contradicted: it ranks them wrong.\n      It is larger.\n      unsupported: x.\n      unverified",
     "  c flipped_direction: contradicted: it ranks them wrong.\n      It rose 5%.\n      rejected: binding: no digit\n      hidden",
@@ -442,7 +502,7 @@ test("a malformed recorded repair replays as none recorded, and its metrics coun
   for (const [label, repair] of malformed) {
     const trace = { ...FISCAL, repair } as TurnTrace;
     const replayed = await replayRecorded(trace);
-    assert.equal(text(replayed.blocks), fiscal(PROFITABILITY), label);
+    assert.equal(text(replayed.blocks), fiscal(PROFITABILITY, UNVERIFIED_GAP), label);
     assert.equal(replayed.repair, null, label);
     assert.equal(replayed.assertions?.repaired, undefined, label);
     const metrics = answerMetrics(trace);

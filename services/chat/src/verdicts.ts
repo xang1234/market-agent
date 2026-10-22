@@ -21,10 +21,18 @@ export type ShownAs = "shown" | "unverified" | "hidden";
 const SHOWN_AS: Readonly<Record<Verdict, ShownAs>> = { entailed: "shown", unsupported: "unverified", contradicted: "hidden" };
 
 // What the reader is shown of an inference. One the judge flags as stating an
-// amount in words is hidden, whatever its verdict, so the page's figures stay
-// packet values as far as the judge's flag catches them.
+// amount in words shows no higher than unverified, so the page never vouches
+// for an amount that is not a packet value.
 export function shownAs(verdict: InferenceVerdict): ShownAs {
-  return verdict.verdict === "error" || verdict.worded_amount ? "hidden" : SHOWN_AS[verdict.verdict];
+  if (verdict.verdict === "error") return "hidden";
+  const as = SHOWN_AS[verdict.verdict];
+  return verdict.worded_amount && as === "shown" ? "unverified" : as;
+}
+
+// A worded amount goes to repair even when it shows: a rewrite without the
+// amount can show clean (inference-repair.ts).
+export function sentToRepair(verdict: InferenceVerdict): boolean {
+  return verdict.verdict !== "error" && (verdict.verdict === "contradicted" || verdict.worded_amount);
 }
 
 // A verdict as a log or report line reads it: "unsupported, worded_amount: <reason>".
