@@ -948,7 +948,13 @@
         "reason": "an unknown cause cites a change: one company's metric, two periods, two values"
       }
     ],
-    "rendered": true
+    "rendered": true,
+    "unverified": [
+      {
+        "index": 4,
+        "reason": "unsupported: The answer shows only the latest QoQ (8.9%) and YoY (57.9%) rates, not a series of earlier sequential rates, so the claim that sequential momentum is moderating is a trend the answer never shows."
+      }
+    ]
   },
   "removed": [],
   "blocks": [
@@ -1190,32 +1196,34 @@
         },
         {
           "type": "text",
-          "text": "> **Analyst inference** (NVDA's revenue rose in every period): The large gap between YoY and QoQ growth rates indicates sequential momentum is moderating even though the company is still growing rapidly on a year-over-year basis."
+          "text": "> **Unverified analyst view** (not backed by the figures shown): The large gap between YoY and QoQ growth rates indicates sequential momentum is moderating even though the company is still growing rapidly on a year-over-year basis."
         }
       ]
     }
   ],
-  "judge": {
-    "outcome": "replied",
-    "exchange": {
-      "messages": [
-        {
-          "role": "system",
-          "content": "You check the analyst inferences in a financial research answer. The reader sees each inference beside\nwhat it rests on: its supports (the observations, comparisons and management attributions it cites, each\nfigure as the data gives it, each claim as its source words it), the checked results of the comparisons among\nthem, and its subject, the company it is about. companies lists every company the answer covers. Judge each\ninference only against its own subject, checked results and supports; no outside knowledge, and nothing from\nanother inference. A company may be named by ticker, name or alias, in any case (\"nvda\", \"Nvidia\",\n\"Advanced Micro Devices\"): naming one is fine, but what the inference says about it must be backed like anything else.\n\nAn inference is entailed when its supports state or clearly imply what it says. Qualitative words that\nsummarise the supports' figures (large, concentrated, higher, slowing) are fine when the figures bear them\nout, and so is a count of the things the supports list (\"the two companies\", \"four segments\").\nIt is not_entailed when any of these hold; the reason starts with its code:\n- unsupported: it claims something the supports neither state nor imply, such as a cause, a forecast, a\n  trend, or a metric, segment or period they do not show. A hedge does not make it supported: a valuation or\n  market reading such as \"may be priced in\" or \"the market may already reflect\" is unsupported unless the\n  supports show it.\n- worded_amount: it states an amount or quantity in words, whether or not the supports bear it out:\n  money, a percentage, a growth rate, a multiple or fraction (\"doubled\", \"four times\", \"two-thirds\"),\n  or a span of time (\"an eight-month gap\"), e.g. \"hundreds of millions of dollars\", \"a quarter\n  billion dollars\", \"one and a half percent\", \"single-digit growth\".\n- contradicts_ranking: who leads, trails, is highest or lowest, or the order it states disagrees with\n  the checked results or the supports' figures.\n- contradicts_trend: a direction it states (rising, falling, expanding, recovering) disagrees with a\n  checked trend or the supports' figures.\n\nReply with JSON only, one verdict per inference id; if you correct yourself, the last JSON in the reply is read:\n{\"verdicts\":[{\"id\":<id>,\"verdict\":\"entailed\"|\"not_entailed\",\"reason\":\"<code>: <one short sentence>\"}]}\nGive a reason for every not_entailed verdict; for entailed, leave it out."
-        },
-        {
-          "role": "user",
-          "content": "{\"companies\":[\"NVDA\"],\"inferences\":[{\"id\":4,\"subject\":\"NVDA\",\"text\":\"The large gap between YoY and QoQ growth rates indicates sequential momentum is moderating even though the company is still growing rapidly on a year-over-year basis.\",\"checked_results\":[\"NVDA's revenue rose in every period\"],\"supports\":[\"NVDA's revenue rose in every period from Q1 2025 ($26.0B) to Q4 2026 ($62.1B).\",\"NVDA's revenue growth (QoQ) was 8.9% and revenue growth (YoY) 57.9% in Q4 2026 (ended Jan 2026).\"]}]}"
+  "judge": [
+    {
+      "outcome": "replied",
+      "exchange": {
+        "messages": [
+          {
+            "role": "system",
+            "content": "You check the analyst inferences in a financial research answer. The reader sees each inference beside\nwhat it rests on: its supports (the observations, comparisons and management attributions it cites, each\nfigure as the data gives it, each claim as its source words it), the checked results of the comparisons among\nthem, and its subject, the company it is about. rest_of_answer is the answer's other observations and\ncomparisons, as the reader sees them on the same page. companies lists every company the answer covers.\nJudge each inference only against its own subject, checked results, supports and rest_of_answer; no outside\nknowledge, and nothing from another inference. A company may be named by ticker, name or alias, in any case\n(\"nvda\", \"Nvidia\", \"Advanced Micro Devices\"): naming one is fine, but what the inference says about it must\nbe backed like anything else. Qualitative words that summarise the figures shown (large, concentrated, higher,\nslowing) are fine when the figures bear them out, and so is a count of the things they list (\"the two\ncompanies\", \"four segments\").\n\nGive each inference one verdict. When more than one applies, the first in this list wins:\n- worded_amount: it states an amount or quantity in words, whether or not the figures bear it out:\n  money, a percentage, a growth rate, a multiple or fraction (\"doubled\", \"four times\", \"two-thirds\"),\n  or a span of time (\"an eight-month gap\"), e.g. \"hundreds of millions of dollars\", \"a quarter\n  billion dollars\", \"one and a half percent\", \"single-digit growth\".\n- contradicted: something it says disagrees with the figures or checked results shown: who leads, trails, is\n  highest or lowest, or the order it states; a direction it states (rising, falling, expanding, recovering)\n  against a checked trend or the figures; or any other statement the figures shown make false.\n- unsupported: it contradicts nothing shown but claims something the answer neither states nor implies, such\n  as a cause, a forecast, a trend, or a metric, segment or period not shown. A hedge does not make it\n  supported: a valuation or market reading such as \"may be priced in\" or \"the market may already reflect\" is\n  unsupported unless the answer shows it.\n- entailed: its supports and the rest of the answer state or clearly imply what it says.\n\nReply with JSON only, one verdict per inference id; if you correct yourself, the last JSON in the reply is read:\n{\"verdicts\":[{\"id\":<id>,\"verdict\":\"entailed\"|\"unsupported\"|\"contradicted\"|\"worded_amount\",\"reason\":\"<one short sentence>\"}]}\nGive a reason for every verdict but entailed; for entailed, leave it out."
+          },
+          {
+            "role": "user",
+            "content": "{\"companies\":[\"NVDA\"],\"inferences\":[{\"id\":4,\"subject\":\"NVDA\",\"text\":\"The large gap between YoY and QoQ growth rates indicates sequential momentum is moderating even though the company is still growing rapidly on a year-over-year basis.\",\"checked_results\":[\"NVDA's revenue rose in every period\"],\"supports\":[\"NVDA's revenue rose in every period from Q1 2025 ($26.0B) to Q4 2026 ($62.1B).\",\"NVDA's revenue growth (QoQ) was 8.9% and revenue growth (YoY) 57.9% in Q4 2026 (ended Jan 2026).\"],\"rest_of_answer\":[\"NVDA's revenue was $62.1B, net income $35.4B and net margin 57.0% in Q4 2026 (ended Jan 2026).\",\"NVDA's gross margin was 74.4% and operating margin 64.9% in Q4 2026 (ended Jan 2026).\"]}]}"
+          }
+        ],
+        "text": "{\"verdicts\":[{\"id\":4,\"verdict\":\"unsupported\",\"reason\":\"The answer shows only the latest QoQ (8.9%) and YoY (57.9%) rates, not a series of earlier sequential rates, so the claim that sequential momentum is moderating is a trend the answer never shows.\"}]}",
+        "truncated": false,
+        "deployment": "anthropic/claude-haiku-5-5",
+        "latency_ms": 3487,
+        "usage": {
+          "input_tokens": 1195,
+          "output_tokens": 348
         }
-      ],
-      "text": "{\"verdicts\":[{\"id\":4,\"verdict\":\"entailed\"}]}",
-      "truncated": false,
-      "deployment": "anthropic/claude-haiku-5-5",
-      "latency_ms": 4770,
-      "usage": {
-        "input_tokens": 1031,
-        "output_tokens": 581
       }
     }
-  }
+  ]
 }
