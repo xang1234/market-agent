@@ -16,6 +16,7 @@ import { LlmProviderError, LlmRouterError, type LlmChatRequest } from "../../llm
 import { answerTurn, type AnswerTraceInput } from "../src/answer-trace.ts";
 import type { ChatAnalystToolRuntime } from "../src/coordinator.ts";
 import { COMMENTARY_UNAVAILABLE, saveCommentary, type CommentaryComposer } from "../src/engine-commentary.ts";
+import { REPAIR_INSTRUCTIONS } from "../src/inference-repair.ts";
 import { listChatMessagesForThread, readChatMessage } from "../src/messages.ts";
 import { resultRefProblem } from "../src/prose-refs.ts";
 import { plainText } from "../src/render-assertions.ts";
@@ -188,7 +189,7 @@ test("a company overview carries analyst commentary on its published results (#3
     const [, commentary] = (await message(done.message_id)).blocks;
     assert.equal(
       plainText(segmentsOf(commentary)),
-      "Of ALFA and BRVO, ALFA's gross margin (gross profit / revenue) was highest: ALFA 60.00%, BRVO 45.00% (Q4 FY2023), 15.00 percentage points above BRVO.",
+      "Of ALFA and BRVO, ALFA's gross margin (gross profit / revenue) was highest: ALFA 60.00%, BRVO 45.00% (Q4 FY2023).",
     );
   });
 
@@ -217,6 +218,20 @@ test("a company overview carries analyst commentary on its published results (#3
       const [inference] = JSON.parse(judged[0]!.messages[1]!.content).inferences;
       assert.deepEqual(inference.figures_shown, [ALFA_FIGURES], `${tier}: the judge sees every engine result`);
     }
+  });
+
+  await t.test("an inference the judge hides and the model repairs is shown, and the commentary still renders from the engine's results", async () => {
+    const repaired = "```assertions\n" + JSON.stringify([{ kind: "analyst_inference", index: 2, text: "It keeps most of what it sells as profit.", supports: [0] }]) + "\n```";
+    const verdicts = ['"verdict":"contradicted","worded_amount":false,"reason":"The margins say otherwise."', '"verdict":"entailed","worded_amount":false'];
+    const { compose, judged } = composer(
+      (request) => request.messages.some((message) => message.content.includes(REPAIR_INSTRUCTIONS)) ? repaired : ALFA_REPLY,
+      async () => `{"verdicts":[{"id":2,${verdicts[Math.min(judged.length - 1, 1)]}}]}`,
+    );
+    const done = completed((await overview(compose).run({ ...base, userIntent: "Revenue for ALFA" })).events);
+    const [answer, commentary] = (await message(done.message_id)).blocks;
+    assert.equal(judged.length, 2, "judged once, then again after the repair");
+    assert.equal(plainText(segmentsOf(commentary)), `${ALFA_TEXT}\n\n> **Analyst inference:** It keeps most of what it sells as profit.`);
+    assert.equal(resultRefProblem(commentary!, answer as never), null);
   });
 
   await t.test("commentary that fails leaves the answer as published and says it is unavailable", async (st) => {
