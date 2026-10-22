@@ -1,8 +1,3 @@
-// SEC ingestion derives a Q4 as the fiscal year less Q1 to Q3, with no source
-// token, so the engine cannot certify it. A latest quarterly offset still
-// counts it: offset k is k fiscal quarters before the newest reported one, and
-// an uncertifiable quarter is a gap, never the next older quarter (#469).
-
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -51,7 +46,6 @@ function companyFacts(filed: ReadonlyArray<string>) {
     entityName: "ACME CORP",
     facts: {
       "us-gaap": {
-        // Each Q4 is the year less Q1 to Q3: revenue 130 and 170, net income 13 and 17.
         Revenues: concept(["100", "110", "120", "460", "140", "150", "160", "620", "180"]),
         NetIncomeLoss: concept(["10", "11", "12", "46", "14", "15", "16", "62", "18"]),
       },

@@ -9,9 +9,11 @@
 //    contract-expressible unit.
 // 3. "Latest" names one fiscal period per subject and period type in a plan:
 //    offset fiscal years, or quarters, before the newest period any of the
-//    subject's latest nodes of that type reports by the cutoff, certifiable or
-//    not. A node without an eligible candidate there is a gap with its reason;
-//    an older period is never substituted.
+//    subject's latest nodes of that type reports. A candidate reports its
+//    period when it is public by the cutoff, from an allowed source, in its
+//    metric's unit kind, and not a segment's value, certifiable or not. A node
+//    without an eligible candidate there is a gap with its reason; an older
+//    period is never substituted.
 // 4. An eligible extraction correction replaces the fact it corrects.
 // 5. as_reported takes the original disclosure; as_restated takes, among the
 //    economic restatements public by the cutoff, the one filed last, else the
@@ -176,12 +178,6 @@ export function sharedLatestPeriods(slots: ReadonlyArray<LatestSlot>, policy: Se
   return resolved;
 }
 
-/**
- * Whether a candidate shows its period reported by the cutoff: public by then
- * from an allowed source, in its metric's unit kind, and not a segment's
- * value. Its precision and context need not be proven, so a newest period no
- * candidate certifies is still the latest, and a gap.
- */
 function reportedBy(candidate: InputCandidate, policy: EligibilityPolicy): boolean {
   const unitKind = resolveMetricDefinition(candidate.metric_key)?.unit_kind;
   return typeof earliestPublicProof(candidate, policy.knowledge_cutoff) === "object"
@@ -190,7 +186,6 @@ function reportedBy(candidate: InputCandidate, policy: EligibilityPolicy): boole
     && candidate.context?.dimension_scope !== "segment";
 }
 
-/** A period's place in its sequence: its fiscal year, or its quarter counted four to a fiscal year. */
 function fiscalPosition({ fiscal_year, fiscal_period }: InputCandidate["period"]): number {
   return fiscal_period === "FY" ? fiscal_year : fiscal_year * 4 + QUARTERS.indexOf(fiscal_period);
 }

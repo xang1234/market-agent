@@ -293,7 +293,6 @@ function quarter(year: number, period: Quarter, spec: CandidateSpec = {}): Input
   return candidate({ year, period, start: `${year}-${start}`, end: `${year}-${end}`, publishedLocalDate: period === "Q4" ? `${year + 1}-02-20` : `${year}-${published}`, ...spec });
 }
 
-// SEC ingestion derives a Q4 as the fiscal year less Q1 to Q3: no source token, so no precision proof or financial context.
 const derivedQ4 = (year: number) => quarter(year, "Q4", { precision: null, context: null });
 
 const latestQuarter = (offset: number, node: ReportedMetricNode = FY2023): ReportedMetricNode => ({ ...node, period: { kind: "latest", period_type: "quarterly", offset } });
