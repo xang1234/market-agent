@@ -46,115 +46,120 @@
     },
     {
       "match": "Question: \"Analyze NVDA\"",
-      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"}}"
+      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\"]}}"
     },
     {
       "match": "Question: \"Compare it with AMD YTD\"",
-      "text": "{\"metrics\":[],\"asks\":[\"price_window\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"}}"
+      "text": "{\"metrics\":[],\"asks\":[\"price_window\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"compare\",\"add\":[\"AMD\"]}}"
     },
     {
       "match": "Question: \"Explain the differences and show the evidence\"",
-      "text": "{\"metrics\":[],\"asks\":[\"explains\",\"evidence\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"}}"
+      "text": "{\"metrics\":[],\"asks\":[\"explains\",\"evidence\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}"
     },
     {
       "match": "Question: \"Compare NVDA and AMD again\"",
-      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"}}"
+      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"compare\",\"add\":[\"NVDA\",\"AMD\"]}}"
     },
     {
       "match": "Question: \"Explain the differences\"",
-      "text": "{\"metrics\":[],\"asks\":[\"explains\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"}}"
+      "text": "{\"metrics\":[],\"asks\":[\"explains\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}"
     },
     {
       "match": "Question: \"Analyze AAPL\"",
-      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"}}"
+      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AAPL\"]}}"
     },
     {
       "match": "Question: \"Analyze AMD\"",
-      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"}}"
+      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AMD\"]}}"
     },
     {
       "match": "Question: \"How does NVDA compare with its peers?\"",
-      "text": "{\"metrics\":[],\"asks\":[\"peers\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"}}"
+      "text": "{\"metrics\":[],\"asks\":[\"peers\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\"]}}"
     },
     {
       "match": "Question: \"Drop the peers\"",
-      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[\"peers\"],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"}}"
+      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[\"peers\"],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}"
     },
     {
       "match": "Question: \"Explain it\"",
-      "text": "{\"metrics\":[],\"asks\":[\"explains\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"}}"
+      "text": "{\"metrics\":[],\"asks\":[\"explains\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}"
     },
     {
       "match": "Question: \"Drop AMD\"",
-      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"}}"
+      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"drop\",\"drop\":[\"AMD\"],\"add\":[]}}"
     },
     {
       "match": "Question: \"Break down NVDA's revenue by segment\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"segments\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"none\"}}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"segments\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\"]}}"
     },
     {
       "match": "Question: \"Why did AMD's operating margin turn negative in Q2 2025?\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"explains\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_margin\"],\"period\":{\"kind\":\"fiscal_quarter\",\"fiscal_period\":\"Q2\",\"fiscal_year\":2025}}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"explains\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_margin\"],\"period\":{\"kind\":\"fiscal_quarter\",\"fiscal_period\":\"Q2\",\"fiscal_year\":2025},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AMD\"]}}",
+      "pinned": "2026-10-23 margin_trend: the live reading flips on this question (#511)"
     },
     {
       "match": "Question: \"What was AMD's revenue in Q2 2019?\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"fiscal_quarter\",\"fiscal_period\":\"Q2\",\"fiscal_year\":2019}}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"fiscal_quarter\",\"fiscal_period\":\"Q2\",\"fiscal_year\":2019},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AMD\"]}}"
     },
     {
       "match": "Question: \"Break down AMD's revenue by segment\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"segments\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"none\"}}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"segments\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AMD\"]}}"
     },
     {
       "match": "Question: \"Show the evidence\"",
-      "text": "{\"metrics\":[],\"asks\":[\"evidence\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"}}"
+      "text": "{\"metrics\":[],\"asks\":[\"evidence\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}"
     },
     {
       "match": "Question: \"Break down NVDA's revenue by segment and show its operating margin trend\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"segments\",\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\",\"operating_margin\"],\"period\":{\"kind\":\"none\"}}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"segments\",\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\",\"operating_margin\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\"]}}"
     },
     {
       "match": "Question: \"Break down NVDA's revenue by segment and show its gross margin\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"segments\",\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\",\"gross_margin\"],\"period\":{\"kind\":\"none\"}}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"segments\",\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\",\"gross_margin\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\"]}}"
     },
     {
       "match": "Question: \"What is AMD's free cash flow?\"",
-      "text": "{\"metrics\":[{\"metric\":\"free_cash_flow\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"}}"
+      "text": "{\"metrics\":[{\"metric\":\"free_cash_flow\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AMD\"]}}"
     },
     {
       "match": "Question: \"Compare NVDA, AMD and AAPL revenue and margins YTD against the S&P 500\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"margins\",\"price_window\",\"benchmark\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"none\"}}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"margins\",\"benchmark\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\",\"AMD\",\"AAPL\"]}}"
     },
     {
       "match": "Question: \"Show it as a table\"",
-      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"}}"
+      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}"
     },
     {
       "match": "Question: \"Drop AAPL\"",
-      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"}}"
+      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"drop\",\"drop\":[\"AAPL\"],\"add\":[]}}"
+    },
+    {
+      "match": "Question: \"What about AAPL?\"",
+      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"unclear\",\"names\":[\"AAPL\"]}}"
     },
     {
       "match": "Question: \"add AAPL\"",
-      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"}}"
+      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"compare\",\"add\":[\"AAPL\"]}}"
     },
     {
       "match": "Question: \"Same, without the benchmark\"",
-      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[\"benchmark\"],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"}}"
+      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[\"benchmark\"],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}"
     },
     {
       "match": "Question: \"Compare NVDA with AMD\"",
-      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"}}"
+      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"compare\",\"add\":[\"NVDA\",\"AMD\"]}}"
     },
     {
       "match": "Question: \"What drives AAPL's margins?\"",
-      "text": "{\"metrics\":[],\"asks\":[\"explains\",\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"}}"
+      "text": "{\"metrics\":[],\"asks\":[\"explains\",\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AAPL\"]}}"
     },
     {
       "match": "Question: \"Compare NVDA and AMD operating margin and EPS growth\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":\"margin\"},{\"metric\":\"eps_diluted\",\"adjustment\":null,\"qualifier\":\"growth\"}],\"asks\":[\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_margin\"],\"period\":{\"kind\":\"none\"}}"
+      "text": "{\"metrics\":[{\"metric\":\"eps_diluted\",\"adjustment\":null,\"qualifier\":\"growth\"}],\"asks\":[\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_margin\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"compare\",\"add\":[\"NVDA\",\"AMD\"]}}"
     },
     {
       "match": "Question: \"How does AMDX's Q2 2025 revenue compare with its peers?\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"peers\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"fiscal_quarter\",\"fiscal_period\":\"Q2\",\"fiscal_year\":2025}}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"peers\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"fiscal_quarter\",\"fiscal_period\":\"Q2\",\"fiscal_year\":2025},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AMDX\"]}}"
     },
     {
       "match": "Create a short, specific research chat title",

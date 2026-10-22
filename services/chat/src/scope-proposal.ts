@@ -1,11 +1,12 @@
 // A model reads what a question asks for and turns off (#287 follow-up): its
 // metrics, its facets (peers, segments, guidance, a cause...), its income
-// items and its period (#472). English patterns kept missing phrasings, one
-// review at a time. The model only proposes, from closed vocabularies: every
-// key is checked, and anything outside them rejects the whole proposal, so the
-// turn asks for nothing new (research-scope.ts). It never picks companies,
-// data or figures, and nothing it writes reaches the answer: the readers and
-// gap notes do as before.
+// items, its period (#472) and its change to the companies discussed. English
+// patterns kept missing phrasings, one review at a time. The model only
+// proposes, from closed vocabularies: every key is checked, and anything
+// outside them rejects the whole proposal, so the turn asks for nothing new
+// (research-scope.ts). Each company it names must be written in the question,
+// and the resolver looks it up; it never picks data or figures, and nothing it
+// writes reaches the answer: the readers and gap notes do.
 //
 // Off when there is no model or CHAT_SCOPE_PROPOSAL=off. Recorded replies
 // (LLM_REPLAY_FILE) answer it like any other call: a fixture records one per
@@ -24,14 +25,17 @@ import {
   proposedMetric,
   SCOPE_FACETS,
   type RequestedMetric,
+  type CompanyChange,
   type ScopePeriod,
   type ScopeProposal,
+  companyNameIn,
 } from "./research-scope.ts";
 
 // One attempt, no fallback model: the turn waits on it, and asks for nothing
 // new when it is slow. A large model took 3-9 s in the dev probe.
 export const SCOPE_DEADLINES: ModelDeadlines = { attemptMs: 12_000, totalMs: 15_000 };
 const MAX_METRICS = 10;
+const MAX_NAMES = 5;
 const FIELDLESS_PERIODS = ["none", "latest", "trailing_twelve_months", "range", "other"] as const;
 const YEARS = { first: 1990, last: 2100 };
 
@@ -71,22 +75,23 @@ export async function proposeScope(input: {
       reasoning: "off",
     }, withDeadlines(input.deadlines ?? SCOPE_DEADLINES));
     if (result.truncated) return none("reply cut off");
-    return parseProposal(result.text) ?? none("reply outside the vocabularies");
+    return parseProposal(result.text, input.question) ?? none("reply outside the vocabularies");
   } catch (reason) {
     return none("model call failed", reason);
   }
 }
 
 // The reply as a proposal, each metric built as the scope names it; null for
-// anything malformed or outside the vocabularies.
-export function parseProposal(text: string): ScopeProposal | null {
+// anything malformed or outside the vocabularies, or a company the question
+// does not write.
+export function parseProposal(text: string, question: string): ScopeProposal | null {
   let reply: unknown;
   try {
     reply = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
   } catch {
     return null;
   }
-  const { metrics, asks, turns_off: turnsOff, income_items: incomeItems, period: periodReply } = (reply ?? {}) as Record<string, unknown>;
+  const { metrics, asks, turns_off: turnsOff, income_items: incomeItems, period: periodReply, companies: companiesReply } = (reply ?? {}) as Record<string, unknown>;
   if (turnsOff === null || typeof turnsOff !== "object") return null;
   const { facets: offFacets, metrics: offMetrics } = turnsOff as Record<string, unknown>;
   const proposed = metricList(metrics);
@@ -95,14 +100,39 @@ export function parseProposal(text: string): ScopeProposal | null {
   const offAsked = members(offFacets, [...SCOPE_FACETS, ...PERIOD_FIELDS]);
   const items = members(incomeItems, INCOME_ITEMS);
   const period = periodOf(periodReply);
-  if (!proposed || !off || !asked || !offAsked || !items || !period) return null;
+  const companies = companiesOf(companiesReply, question);
+  if (!proposed || !off || !asked || !offAsked || !items || !period || !companies) return null;
   return {
     metrics: proposed,
     asks: new Set(asked),
     turns_off: { facets: new Set(offAsked), metrics: new Set(off.map((metric) => metric.metric_key)) },
     income_items: [...new Set(items)],
     period,
+    companies,
   };
+}
+
+function companiesOf(value: unknown, question: string): CompanyChange | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const { kind, ...fields } = value as Record<string, unknown>;
+  const keys = Object.keys(fields).sort().join(",");
+  const { add, drop, names } = fields;
+  if (kind === "as_named") return keys === "names" && isNameList(names, question) ? { kind, names } : null;
+  if (kind === "compare") return keys === "add" && isNameList(add, question) ? { kind, add } : null;
+  if (kind === "drop") return keys === "add,drop" && isNameList(drop, question, 1) && isNameList(add, question) ? { kind, drop, add } : null;
+  if (kind === "only" || kind === "unclear") return keys === "names" && isNameList(names, question, 1) ? { kind, names } : null;
+  return null;
+}
+
+// A closed check on the model's output, not a phrasing list: each name it
+// proposes is written in the question as a company's name (research-scope.ts
+// companyNameIn), with a capital letter in its first word ("it" is not one).
+// ponytail: a capitalised word at a sentence's start passes ("It"), and the
+// resolver decides it; a lowercase ticker ("amd") fails, losing the reading.
+function isNameList(value: unknown, question: string, least = 0): value is string[] {
+  if (!Array.isArray(value) || value.length < least || value.length > MAX_NAMES) return false;
+  const named = companyNameIn(question);
+  return value.every((name) => typeof name === "string" && named(name, { capital: true }));
 }
 
 function periodOf(value: unknown): ScopePeriod | null {
@@ -147,7 +177,7 @@ function metricList(value: unknown): RequestedMetric[] | null {
 
 const PROPOSAL_INSTRUCTIONS = [
   "Read what a research question about companies asks for, and what it asks to remove. Reply with JSON only, no prose:",
-  '{"metrics":[<metric>],"asks":[<facet>],"turns_off":{"facets":[<facet or period>],"metrics":[<metric>]},"income_items":[<item>],"period":<period>}',
+  '{"metrics":[<metric>],"asks":[<facet>],"turns_off":{"facets":[<facet or period>],"metrics":[<metric>]},"income_items":[<item>],"period":<period>,"companies":<companies>}',
   'A <metric> is {"metric":"<key>","adjustment":<adjustment or null>,"qualifier":<qualifier or null>}.',
   "metric is one of these keys (key: what it is):",
   ...PROPOSABLE_METRICS.map((metric) => `- ${metric.metric_key}: ${metric.label}`),
@@ -179,6 +209,20 @@ const PROPOSAL_INSTRUCTIONS = [
   '- {"kind":"range"}: a span of periods ("since 2021", "2022 to 2024", "the past 3 years")',
   '- {"kind":"other"}: any other period, one named relative to now ("last year", "last quarter")',
   "A <year> is a four-digit integer; a two-digit year is in the 2000s (FY26 is 2026).",
+  "A <companies> is how the question changes the companies already being discussed, one of:",
+  '- {"kind":"as_named","names":[<name>]}: no change asked: the companies it names, with no word about earlier ones',
+  '  ("What is AAPL\'s revenue?" names AAPL); names is empty for a follow-up that names none ("why?", "show the',
+  '  evidence", "drop the free cash flow", "now without guidance")',
+  '- {"kind":"compare","add":[<name>]}: the companies already discussed stay, with those it names added ("compare it',
+  '  with AMD", "add TSLA", "vs AMD", "compare NVDA and AMD"); add is empty only for "compare them"',
+  '- {"kind":"drop","drop":[<name>],"add":[<name>]}: it removes companies by name, adding any it names beside them',
+  '  ("drop AMD", "drop AMD and add TSLA"); drop is never empty',
+  '- {"kind":"only","names":[<name>]}: these companies alone, in place of the earlier ones ("just AAPL", "AAPL instead",',
+  '  "switch to AAPL")',
+  '- {"kind":"unclear","names":[<name>]}: it names a company without saying whether to add it or switch to it',
+  '  ("what about AAPL?", "and MSFT?")',
+  'A <name> is a company exactly as the question writes it ("AMD", "Apple"), at most 5 per list. A metric, facet or',
+  'period is never a company, even in capitals ("FREE CASH FLOW", "the FCF", "NET income").',
   "Rules:",
   "- List only what the question itself asks for, in the order it asks. Empty lists when nothing applies.",
   '- A context is not a metric, but a metric discussed in it is: "what did AMD say about free cash flow on its',

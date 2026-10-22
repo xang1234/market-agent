@@ -5,7 +5,7 @@ import test from "node:test";
 import { connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { databaseUrl, IDS, ORIGINAL_REVENUE } from "../../financial-engine/test/db-fixtures.ts";
 import { createChatServer } from "../src/http.ts";
-import { chatDatabase, chatHarness, completed, INSTRUMENT_A, LISTING_A, revenueModel } from "./financial-fixtures.ts";
+import { chatDatabase, chatHarness, comparing, completed, INSTRUMENT_A, LISTING_A, revenueModel } from "./financial-fixtures.ts";
 
 type Offered = { clarification_id: string; question: string; choices: Array<{ choice_id: string; label: string }> };
 
@@ -46,7 +46,7 @@ test("financial clarifications", { timeout: 300_000 }, async (t) => {
   await t.test("choosing the explicit subject's own company for an ambiguous mention plans it once", async () => {
     const explicit = { threadId, userId: IDS.owner, subjectText: "AAA", userIntent: "Compare revenue for AMB and BBB" };
     const run = (clarificationAnswer?: { clarification_id: string; choice_id: string }) =>
-      chatHarness(pool, { model: revenueModel(["AAA", "BBB"]) }).run({ ...explicit, ...(clarificationAnswer ? { clarificationAnswer } : {}) });
+      chatHarness(pool, { model: revenueModel(["AAA", "BBB"]), readQuestion: comparing("AMB", "BBB") }).run({ ...explicit, ...(clarificationAnswer ? { clarificationAnswer } : {}) });
     const asked = completed((await run()).events).financial_clarification as Offered;
     const alpha = asked.choices.find((choice) => choice.label === "Alpha Industries Inc.")!;
     const done = completed((await run({ clarification_id: asked.clarification_id, choice_id: alpha.choice_id })).events);
@@ -67,7 +67,7 @@ test("financial clarifications", { timeout: 300_000 }, async (t) => {
     // One connection: the issuer lookup must reuse the client planning already holds.
     const single = await connectedPool(st, databaseUrl(db), { max: 1 });
     const run = (clarificationAnswer?: { clarification_id: string; choice_id: string }) =>
-      chatHarness(single, { model: revenueModel(["ALPHA", "BBB"]) }).run({ ...explicit, ...(clarificationAnswer ? { clarificationAnswer } : {}) });
+      chatHarness(single, { model: revenueModel(["ALPHA", "BBB"]), readQuestion: comparing("AMBL", "BBB") }).run({ ...explicit, ...(clarificationAnswer ? { clarificationAnswer } : {}) });
     const asked = completed((await run()).events).financial_clarification as Offered;
     const listing = asked.choices.find((choice) => choice.label === "Alpha Industries Inc. (XNAS)")!;
     const done = completed((await run({ clarification_id: asked.clarification_id, choice_id: listing.choice_id })).events);

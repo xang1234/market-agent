@@ -218,7 +218,7 @@
     "question": "Why was NVDA's gross margin above the high end of its outlook?",
     "companies": ["NVDA"],
     "prior": null,
-    "expected": {"route":"derived_margin","reads":"derived_margin","peers":false,"segments":false,"margin_trend":false,"margins":true,"metrics":["income_statement"],"guidance":false,"explains":true,"income_items":["gross_margin"],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"period":"none"}
+    "expected": {"route":"derived_margin","reads":"derived_margin","peers":false,"segments":false,"margin_trend":false,"margins":true,"metrics":["income_statement"],"guidance":true,"explains":true,"income_items":["gross_margin"],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"period":"none"}
   },
   {
     "id": 32,
@@ -404,7 +404,7 @@
     "question": "Why did AMD's operating margin turn negative in Q2 2025?",
     "companies": ["AMD"],
     "prior": null,
-    "expected": {"route":"derived_margin","reads":"derived_margin","peers":false,"segments":false,"margin_trend":false,"margins":true,"metrics":["income_statement"],"guidance":false,"explains":true,"income_items":["operating_margin"],"fiscal_year":2025,"fiscal_quarter":"Q2 2025","price_window":null,"benchmark":false,"period":"fiscal_quarter"}
+    "expected": {"route":"trend","reads":"trend","peers":false,"segments":false,"margin_trend":true,"margins":true,"metrics":["income_statement"],"guidance":false,"explains":true,"income_items":["operating_margin"],"fiscal_year":2025,"fiscal_quarter":"Q2 2025","price_window":null,"benchmark":false,"period":"fiscal_quarter"}
   },
   {
     "id": 58,
@@ -541,7 +541,8 @@
     "after": "Compare NVDA with AMD",
     "companies": ["NVDA","AMD","AAPL"],
     "prior": {"route":"comparison","reads":"comparison","companies":[{"issuer_id":"60000000-0000-4000-8000-000000000001","label":"NVDA"},{"issuer_id":"60000000-0000-4000-8000-000000000002","label":"AMD"}],"peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":[],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"inherited":[]},
-    "expected": {"route":"comparison","reads":"comparison","peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":[],"guidance":false,"explains":false,"income_items":[],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"period":"none"}
+    "expected": {"route":"comparison","reads":"comparison","peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":[],"guidance":false,"explains":false,"income_items":[],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"period":"none","companies":{"kind":"compare","add":["AAPL"]}},
+    "accept": {"companies":{"value":{"kind":"as_named","names":["AAPL"]},"reason":"Known model miss (#510): \"too\" should add AAPL; as_named answers it alone after a comparison."}}
   },
   {
     "id": 75,
@@ -931,6 +932,48 @@
   },
   {
     "id": 123,
+    "question": "Compare it with AMD",
+    "after": "Compare NVDA and AAPL revenue",
+    "companies": ["NVDA","AAPL","AMD"],
+    "prior": {"route":"comparison","reads":"comparison","companies":[{"issuer_id":"60000000-0000-4000-8000-000000000001","label":"NVDA"},{"issuer_id":"60000000-0000-4000-8000-000000000003","label":"AAPL"}],"peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":[{"metric_key":"income_statement","label":"Revenue, profit and margins","available":true}],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"inherited":[]},
+    "expected": {"route":"comparison","reads":"comparison","peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":["income_statement"],"guidance":false,"explains":false,"income_items":[],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"period":"none","companies":{"kind":"compare","add":["AMD"]}}
+  },
+  {
+    "id": 124,
+    "question": "Drop AMD",
+    "after": "Compare NVDA and AMD revenue",
+    "companies": ["NVDA"],
+    "prior": {"route":"comparison","reads":"comparison","companies":[{"issuer_id":"60000000-0000-4000-8000-000000000001","label":"NVDA"},{"issuer_id":"60000000-0000-4000-8000-000000000002","label":"AMD"}],"peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":[{"metric_key":"income_statement","label":"Revenue, profit and margins","available":true}],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"inherited":[]},
+    "expected": {"route":"latest_quarter","reads":"latest_quarter","peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":["income_statement"],"guidance":false,"explains":false,"income_items":[],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"period":"none","companies":{"kind":"drop","drop":["AMD"],"add":[]}}
+  },
+  {
+    "id": 125,
+    "question": "Drop AMD and add TSLA",
+    "after": "Compare NVDA and AMD revenue",
+    "companies": ["NVDA","TSLA"],
+    "prior": {"route":"comparison","reads":"comparison","companies":[{"issuer_id":"60000000-0000-4000-8000-000000000001","label":"NVDA"},{"issuer_id":"60000000-0000-4000-8000-000000000002","label":"AMD"}],"peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":[{"metric_key":"income_statement","label":"Revenue, profit and margins","available":true}],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"inherited":[]},
+    "expected": {"route":"comparison","reads":"comparison","peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":["income_statement"],"guidance":false,"explains":false,"income_items":[],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"period":"none","companies":{"kind":"drop","drop":["AMD"],"add":["TSLA"]}}
+  },
+  {
+    "id": 126,
+    "question": "Just AAPL",
+    "after": "Compare NVDA and AMD revenue",
+    "companies": ["AAPL"],
+    "prior": null,
+    "expected": {"route":"latest_quarter","reads":"latest_quarter","peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":[],"guidance":false,"explains":false,"income_items":[],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"period":"none","companies":{"kind":"only","names":["AAPL"]}},
+    "note": "AAPL is not in the NVDA and AMD comparison, so the previous scope does not continue (local-runtime.ts continuedScope)."
+  },
+  {
+    "id": 127,
+    "question": "What about AAPL?",
+    "after": "Compare NVDA and AMD revenue",
+    "companies": ["NVDA","AMD"],
+    "prior": {"route":"comparison","reads":"comparison","companies":[{"issuer_id":"60000000-0000-4000-8000-000000000001","label":"NVDA"},{"issuer_id":"60000000-0000-4000-8000-000000000002","label":"AMD"}],"peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":[{"metric_key":"income_statement","label":"Revenue, profit and margins","available":true}],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"inherited":[]},
+    "expected": {"route":"comparison","reads":"comparison","peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":["income_statement"],"guidance":false,"explains":false,"income_items":[],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"period":"none","companies":{"kind":"unclear","names":["AAPL"]}},
+    "note": "The coordinator asks whether to add AAPL or look at it alone before any scope is read; the case checks the reading."
+  },
+  {
+    "id": 128,
     "question": "Now the latest fiscal year",
     "after": "Compare NVDA's and AMD's fiscal 2025 revenue",
     "companies": ["NVDA", "AMD"],
@@ -938,10 +981,10 @@
     "expected": {"fiscal_year":null,"fiscal_quarter":null,"period":"latest"}
   },
   {
-    "id": 124,
+    "id": 129,
     "question": "And for AMD alone?",
     "after": "Compare NVDA's and AMD's fiscal 2025 revenue",
-    "companies": ["NVDA", "AMD"],
+    "companies": ["AMD"],
     "prior": {"route":"comparison","reads":"comparison","companies":[{"issuer_id":"60000000-0000-4000-8000-000000000001","label":"NVDA"},{"issuer_id":"60000000-0000-4000-8000-000000000002","label":"AMD"}],"peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":[{"metric_key":"income_statement","label":"Revenue, profit and margins","available":true}],"fiscal_year":2025,"fiscal_quarter":null,"price_window":null,"benchmark":false,"income_items":["revenue"],"inherited":[]},
     "expected": {"fiscal_year":2025,"fiscal_quarter":null,"period":"none"}
   }

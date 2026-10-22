@@ -11,14 +11,14 @@ const cases = JSON.parse(readFileSync(CASES_FILE, "utf8")) as ScopeEvalCase[];
 const replies = JSON.parse(readFileSync(REPLIES_FILE, "utf8")) as ScopeEvalReplies;
 
 test("every recorded reply resolves to the scope its question expects", () => {
-  assert.equal(cases.length, 124);
+  assert.equal(cases.length, 129);
   assert.deepEqual(cases.flatMap((evalCase) => caseFailures(evalCase, replyTo(replies, evalCase.question))), []);
 });
 
 test("a reply that misreads its question fails its case, and one outside the vocabularies is rejected", () => {
   const segments = cases.find((evalCase) => evalCase.id === 15)!;
   const name = "#15 Break down NVDA's revenue by segment.";
-  assert.deepEqual(caseFailures(segments, '{"metrics":[],"asks":[],"turns_off":{"facets":[],"metrics":[]},"income_items":[],"period":{"kind":"none"}}'), [
+  assert.deepEqual(caseFailures(segments, '{"metrics":[],"asks":[],"turns_off":{"facets":[],"metrics":[]},"income_items":[],"period":{"kind":"none"},"companies":{"kind":"as_named","names":[]}}'), [
     `${name}: route "latest_quarter", expected "segments"`,
     `${name}: reads "latest_quarter", expected "segments"`,
     `${name}: segments false, expected true`,

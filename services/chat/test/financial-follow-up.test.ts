@@ -10,7 +10,7 @@ import { dockerAvailable, registerLifoCleanup } from "../../../db/test/docker-pg
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { databaseUrl, IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { analystTurnScope, closeLocalRuntimePoolForTests, financialResearchScope } from "../src/local-runtime.ts";
-import { parseProposal, proposalQuestion } from "../src/scope-proposal.ts";
+import { parseProposal, proposalQuestion, proposeScope } from "../src/scope-proposal.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "../src/subjects.ts";
 import { chatDatabase, chatHarness, completed, resolveMention, revenueModel } from "./financial-fixtures.ts";
 
@@ -42,7 +42,7 @@ async function followUpToEngine(t: TestContext, prefix: string, metricKeys: stri
   const { db, pool, threadId } = await chatDatabase(t, prefix);
   const replies = join(mkdtempSync(join(tmpdir(), "fin-follow-up-")), "replies.json");
   writeFileSync(replies, JSON.stringify({
-    replies: [{ match: proposalQuestion(QUESTION), text: '{"metrics":[],"asks":["explains"],"turns_off":{"facets":[],"metrics":[]},"income_items":[],"period":{"kind":"none"}}' }],
+    replies: [{ match: proposalQuestion(QUESTION), text: '{"metrics":[],"asks":["explains"],"turns_off":{"facets":[],"metrics":[]},"income_items":[],"period":{"kind":"none"},"companies":{"kind":"as_named","names":[]}}' }],
   }));
   Object.assign(process.env, {
     CHAT_DATABASE_URL: databaseUrl(db),
@@ -60,7 +60,7 @@ async function followUpToEngine(t: TestContext, prefix: string, metricKeys: stri
   const saved = (await db.query(`select research_scope from chat_messages where message_id = $1`, [answer.message_id])).rows[0].research_scope;
 
   const aaa = await withHandoff("AAA") as ChatResolvedSubjectPreResolution;
-  const scope = (await analystTurnScope(threadId, QUESTION, [aaa]))("2026-09-01T00:00:00.000Z");
+  const scope = (await analystTurnScope(threadId, QUESTION, [aaa], proposeScope({ question: QUESTION })))("2026-09-01T00:00:00.000Z");
   return {
     saved: [saved.reads, saved.metrics],
     followUp: { route: scope.route, reads: scope.reads, metrics: scope.metrics.map((metric) => metric.metric_key), explains: scope.explains },
@@ -107,7 +107,7 @@ test("a company picked in a clarification is saved labelled, so follow-ups with 
   }
   const { db, pool, threadId } = await chatDatabase(t, "chat-fin-follow-up-pick");
   const replies = join(mkdtempSync(join(tmpdir(), "fin-follow-up-")), "replies.json");
-  const reading = (turnsOff: string[]) => JSON.stringify({ metrics: [], asks: ["explains"], turns_off: { facets: turnsOff, metrics: [] }, income_items: [], period: { kind: "none" } });
+  const reading = (turnsOff: string[]) => JSON.stringify({ metrics: [], asks: ["explains"], turns_off: { facets: turnsOff, metrics: [] }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named", names: [] } });
   writeFileSync(replies, JSON.stringify({
     replies: [
       { match: proposalQuestion(QUESTION), text: reading([]) },
@@ -125,8 +125,7 @@ test("a company picked in a clarification is saved labelled, so follow-ups with 
   registerLifoCleanup(t, () => closeLocalRuntimePoolForTests());
 
   const question = "How does AMB's FY2023 revenue compare with its peers?";
-  // hand-labelled 2026-10-22 #472: period added by hand; replace on live re-record.
-  const readQuestion = async () => parseProposal(JSON.stringify({ metrics: [{ metric: "income_statement" }], asks: ["peers"], turns_off: { facets: [], metrics: [] }, income_items: ["revenue"], period: { kind: "fiscal_year", fiscal_year: 2023 } }));
+  const readQuestion = async () => parseProposal(JSON.stringify({ metrics: [{ metric: "income_statement" }], asks: ["peers"], turns_off: { facets: [], metrics: [] }, income_items: ["revenue"], period: { kind: "fiscal_year", fiscal_year: 2023 }, companies: { kind: "as_named", names: ["AMB"] } }), question);
   const harness = chatHarness(pool, { model: revenueModel(["AMB"]), researchScope: financialResearchScope, readQuestion, resolveMention: withHandoff });
   const offered = completed((await harness.run({ threadId, userId: IDS.owner, userIntent: question })).events).financial_clarification as { clarification_id: string; choices: Array<{ choice_id: string; label: string }> };
   const alpha = offered.choices.find((choice) => choice.label === "Alpha Industries Inc.")!;
@@ -136,7 +135,7 @@ test("a company picked in a clarification is saved labelled, so follow-ups with 
 
   const aaa = await withHandoff("AAA") as ChatResolvedSubjectPreResolution;
   const followUp = async (text: string) => {
-    const scope = (await analystTurnScope(threadId, text, [aaa]))("2026-09-01T00:00:00.000Z");
+    const scope = (await analystTurnScope(threadId, text, [aaa], proposeScope({ question: text })))("2026-09-01T00:00:00.000Z");
     return { companies: scope.companies, peers: scope.peers, fiscal_year: scope.fiscal_year };
   };
   assert.deepEqual(await followUp(QUESTION), { companies: [{ issuer_id: IDS.issuerA, label: "AAA" }], peers: true, fiscal_year: 2023 });
@@ -166,7 +165,7 @@ test("an engine answer to an evidence question after a gap saves that it showed 
      values ($1::uuid, 'assistant', $2::uuid, '[]'::jsonb, 'gap', $3::jsonb)`,
     [threadId, snapshot!.snapshot_id, JSON.stringify(gapScope)],
   );
-  const readQuestion = async () => parseProposal(JSON.stringify({ metrics: [{ metric: "eps_diluted" }], asks: ["evidence"], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" } }));
+  const readQuestion = async () => parseProposal(JSON.stringify({ metrics: [{ metric: "eps_diluted" }], asks: ["evidence"], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named", names: [] } }), "Show the evidence for AAA's EPS");
   const harness = chatHarness(pool, { model: reporting("eps_diluted"), researchScope: financialResearchScope, readQuestion, resolveMention: withHandoff });
   const answer = completed((await harness.run({ threadId, userId: IDS.owner, userIntent: "Show the evidence for AAA's EPS" })).events);
   const saved = (await db.query(`select research_scope from chat_messages where message_id = $1`, [answer.message_id])).rows[0]?.research_scope;

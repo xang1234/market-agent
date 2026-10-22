@@ -155,9 +155,24 @@ export type ScopeProposal = {
   turns_off: { facets: ReadonlySet<ScopeFacet | (typeof PERIOD_FIELDS)[number]>; metrics: ReadonlySet<string> };
   income_items: ReadonlyArray<IncomeItem>;
   period: ScopePeriod;
+  companies: CompanyChange;
 };
 
-const NO_PROPOSAL: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [], period: { kind: "none" } };
+// How a turn changes the previous answer's companies, each name as the
+// question writes it. The model never sees those companies: the coordinator
+// applies the change to them (coordinator.ts resolveTurnSubjects).
+export type CompanyChange =
+  // No change asked: the companies named answer alone, or with none named the previous ones carry.
+  | { kind: "as_named"; names: ReadonlyArray<string> }
+  // The previous companies with these added ("compare it with AMD", "add TSLA"); none for "compare them".
+  | { kind: "compare"; add: ReadonlyArray<string> }
+  | { kind: "drop"; drop: ReadonlyArray<string>; add: ReadonlyArray<string> }
+  // These alone ("just AAPL", "AAPL instead").
+  | { kind: "only"; names: ReadonlyArray<string> }
+  // Named without saying add or switch ("what about AAPL?").
+  | { kind: "unclear"; names: ReadonlyArray<string> };
+
+const NO_PROPOSAL: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named", names: [] } };
 
 // The field a facet turned off clears. Guidance and a cause are read apart;
 // evidence and the latest quarter are asked for one turn only.
@@ -483,36 +498,6 @@ export function resolveResearchScope(input: {
   };
 }
 
-// Words as subject-extraction.ts splits them, so each is one a company could be.
-const wordsOf = (text: string) => text.split(/[^A-Za-z]+/).filter(Boolean);
-
-// The whole names of what a scope tracks (each catalog key and label, each
-// facet, period and income item) and the abbreviations written for them.
-const FACET_NAMES = new Set([
-  ...PROPOSABLE_METRICS.flatMap(({ metric_key, label }) => [metric_key, label]),
-  ...SCOPE_FACETS,
-  ...PERIOD_FIELDS,
-  ...INCOME_ITEMS,
-  "fcf",
-  "ocf",
-  "eps",
-].map((name) => wordsOf(name).join(" ").toLowerCase()));
-
-// The words of a phrase that lie inside a whole name this scope tracks
-// ("FREE CASH FLOW", "the FCF"), so they are not companies to drop. A word of
-// a longer name alone is not one: NET (of net income) is a company (#378).
-export function facetWords(phrase: string): ReadonlySet<string> {
-  const words = wordsOf(phrase);
-  const inside = new Set<string>();
-  for (let start = 0; start < words.length; start++) {
-    for (let end = start + 1; end <= words.length; end++) {
-      const span = words.slice(start, end);
-      if (FACET_NAMES.has(span.join(" ").toLowerCase())) for (const word of span) inside.add(word);
-    }
-  }
-  return inside;
-}
-
 function routeOf(
   companies: number,
   facets: {
@@ -599,3 +584,56 @@ function isCompany(value: unknown): boolean {
   return typeof company?.issuer_id === "string" && (company.label === undefined || typeof company.label === "string");
 }
 
+
+// Whether a question writes a name as a company's: as whole words (wordsOf),
+// at least once outside a phrase of the closed catalogs above ("CASH" of "FREE
+// CASH FLOW" is the metric), and, with capital, with a capital letter in its
+// first word as written ("eBay", not "it"). Without capital, a name no whole
+// word matches ("NVDA" of "NVDA/AMD") is kept: nothing shows it is a metric's.
+export function companyNameIn(question: string): (name: string, options?: { capital?: boolean }) => boolean {
+  const written = wordsOf(question);
+  const lower = written.map((word) => word.toLowerCase());
+  const inCatalog = lower.map(() => false);
+  for (const phrase of CATALOG_PHRASES) {
+    for (const start of runsOf(phrase, lower)) phrase.forEach((_, offset) => inCatalog[start + offset] = true);
+  }
+  return (name, { capital = false } = {}) => {
+    const words = wordsOf(name).map((word) => word.toLowerCase());
+    const runs = runsOf(words, lower);
+    if (!capital && runs.length === 0) return words.length > 0;
+    return words.length > 0 && runs.some((start) =>
+      (!capital || /\p{Lu}/u.test(written[start]!)) && words.some((_, offset) => !inCatalog[start + offset]));
+  };
+}
+
+// The words a question writes that could name a company: with a capital
+// letter, outside the closed catalogs' phrases.
+export function companyWordsIn(question: string): string[] {
+  const named = companyNameIn(question);
+  return wordsOf(question).filter((word) => /\p{Lu}/u.test(word) && named(word));
+}
+
+// A text's words as written: split at whitespace, each without the quotes,
+// brackets, emphasis, cashtag or hashtag sign and sentence punctuation around
+// it or a possessive, so a dotted or dashed ticker ("BRK.B.") is one word.
+function wordsOf(text: string): string[] {
+  return text.split(/\s+/u)
+    .map((word) => word.replace(/^["'“‘(\[*$#]+|[.,;:?!)\]*"'”’]+$/gu, "").replace(/['’]s$/u, ""))
+    .filter(Boolean);
+}
+
+// Where the words run, in order, through the question's words.
+function runsOf(words: ReadonlyArray<string>, question: ReadonlyArray<string>): number[] {
+  const starts: number[] = [];
+  for (let start = 0; start + words.length <= question.length; start++) {
+    if (words.every((word, offset) => question[start + offset] === word)) starts.push(start);
+  }
+  return starts;
+}
+
+const CATALOG_PHRASES = [
+  ...PROPOSABLE_METRICS.flatMap(({ metric_key, label }) => [metric_key, label]),
+  ...SCOPE_FACETS,
+  ...PERIOD_FIELDS,
+  ...INCOME_ITEMS,
+].map((phrase) => wordsOf(phrase.replaceAll("_", " ")).map((word) => word.toLowerCase()));

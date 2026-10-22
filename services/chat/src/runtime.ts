@@ -27,6 +27,7 @@ export async function loadChatServerOptionsFromEnv(
     persistAssistantMessage: runtime.persistAssistantMessage,
     preResolveSubject: runtime.preResolveSubject,
     loadPriorSubjects: runtime.loadPriorSubjects,
+    readQuestion: runtime.readQuestion,
     generateThreadTitle: runtime.generateThreadTitle,
     analystToolRuntime: runtime.analystToolRuntime,
     financialRuntime: runtime.financialRuntime,

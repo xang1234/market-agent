@@ -40,11 +40,6 @@ export function extractSubjectMentions(text: string | null | undefined): string[
 // company; only "Dow Jones" is the index.
 export const BENCHMARK = /\b(?:benchmarks?|S&P(?:\s*500)?|Nasdaq(?:[- ]100| composite)?|Dow Jones|Russell \d{4}|(?:market |stock )?index(?:es)?)(?![\w&])/i;
 
-// Words that ask to set companies side by side, so a follow-up that names a new
-// company keeps the previous ones ("compare it with AMD") instead of replacing
-// them ("analyze AAPL and its margins").
-export const COMPARATIVE = /\b(compare|comparison|comparing|versus|vs\.?|against|relative to|peers?|stacks? up)\b/i;
-
 // One key per company: two listings (or names) of the same issuer share it.
 export function companyKey(subject: {
   subject_ref: { kind: string; id: string };

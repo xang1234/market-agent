@@ -73,7 +73,7 @@ test("an answer that computes a valuation covers the reading that asks for it, a
     assert.ok(planned.outcome === "ready", JSON.stringify(planned));
     return planned.plan;
   };
-  const reading = parseProposal(JSON.stringify({ metrics: ["market_cap", "pe_ratio"], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" } }));
+  const reading = parseProposal(JSON.stringify({ metrics: ["market_cap", "pe_ratio"], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named", names: [] } }), "");
   assert.ok(reading);
   assert.deepEqual([uncoveredAsks(reading, plan("market_cap")), uncoveredAsks(reading, plan("pe_ratio"))], [["P/E ratio"], ["market capitalization"]]);
 });
