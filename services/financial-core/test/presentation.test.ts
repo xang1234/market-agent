@@ -552,6 +552,18 @@ test("a series is one line over several periods: never threshold checks, never a
   assert.deepEqual(shown.presentations, [{ kind: "scalar", result_id: "r-o_fy25" }, { kind: "scalar", result_id: "r-o_q4" }]);
 });
 
+test("a series is one calendar: fiscal years and the latest fiscal year have no common order", () => {
+  const plan = singleSubjectPlan(
+    [reportedAt("fy25", "a", "revenue", FY(2025)), reportedAt("fy24", "a", "revenue", FY(2024)), reportedAt("la0", "a", "revenue", { kind: "latest", period_type: "annual", offset: 0 })],
+    ["fy25", "fy24", "la0"],
+  );
+  const content = present(plan, [committed("o_fy25", "fy25", usdValue("400")), committed("o_fy24", "fy24", usdValue("380")), committed("o_la0", "la0", usdValue("410"))], { a: "Alpha Corp" });
+  const [series, ...rest] = content.presentations;
+  assert.deepEqual(rest, [{ kind: "scalar", result_id: "r-o_la0" }]);
+  assert.ok(series?.kind === "series");
+  assert.deepEqual(series.points.map((point) => [point.result_id, content.labels[point.period_label_id]!.text]), [["r-o_fy25", "FY2025"], ["r-o_fy24", "FY2024"]]);
+});
+
 test("a changed label, unit, period, or denominator changes the presentation hash", () => {
   const baseline = presentationHash(present());
   assert.equal(presentationHash(present()), baseline, "presentation is deterministic");

@@ -31,6 +31,7 @@ import { coverageState } from "./coverage.ts";
 import { resolveMetricDefinition, resolveRatioDefinition } from "./definitions.ts";
 import { canonicalDecimalString, compareExactDecimals, parseDerivedDecimalText, type ExactDecimal } from "./exact-decimal.ts";
 import { dependencyClosure } from "./graph.ts";
+import { OPERATION_REGISTRY } from "./operation-registry.ts";
 
 export const FINANCIAL_PRESENTATION_VERSION = "financial-presentation.v2";
 /** Answers certified before v2 keep this version: still accepted and rendered, never generated. */
@@ -142,7 +143,7 @@ export function presentFinancialUnit(input: {
     coverage: { state: coverageState(verified, results.length), requested: results.length, verified },
     labels: labels.entries,
     results,
-    presentations: layout(plan, results, labels.entries),
+    presentations: layout(plan, nodes, results, labels.entries),
   };
 }
 
@@ -182,11 +183,11 @@ class LabelTable {
 // else -> scalars. Predicates, rankings, and gaps outside a table or series
 // stand alone.
 
-function layout(plan: FinancialPlanV1, results: ReadonlyArray<PresentedResult>, labels: Readonly<Record<string, PresentationLabel>>): Presentation[] {
-  const nodeOf = new Map(plan.outputs.map((output) => [output.output_id, plan.operations.find((node) => node.node_id === output.node_id)!]));
+function layout(plan: FinancialPlanV1, nodes: ReadonlyMap<LocalId, OperationNode>, results: ReadonlyArray<PresentedResult>, labels: Readonly<Record<string, PresentationLabel>>): Presentation[] {
+  const nodeOf = new Map(plan.outputs.map((output) => [output.output_id, nodes.get(output.node_id)!]));
   const lines = new Map(results.flatMap((result) => {
     const node = nodeOf.get(result.output_id)!;
-    return node.operation === "threshold" || node.operation === "peer_compare" ? [] : [[result.result_id, lineOf(plan, node, result.measure_label_id)] as const];
+    return OPERATION_REGISTRY[node.operation].produces === "value" ? [[result.result_id, lineOf(plan, node, result.measure_label_id)] as const] : [];
   }));
   const values = results.filter((result) => lines.has(result.result_id));
   const subjects = new Set(values.flatMap((result) => (result.subject_label_id === null ? [] : [result.subject_label_id])));
@@ -227,8 +228,9 @@ function layout(plan: FinancialPlanV1, results: ReadonlyArray<PresentedResult>, 
   } else {
     const groups = new Map<string, PresentedResult[]>();
     for (const result of values) {
-      const { key } = lines.get(result.result_id)!;
-      groups.set(key, [...(groups.get(key) ?? []), result]);
+      const { key, anchor } = lines.get(result.result_id)!;
+      const series = `${key}|${anchor.calendar}`;
+      groups.set(series, [...(groups.get(series) ?? []), result]);
     }
     for (const group of groups.values()) {
       const [first] = group;
@@ -273,7 +275,7 @@ function columnKeyByResult(results: ReadonlyArray<PresentedResult>, lines: Reado
   const keys = new Map<string, string>();
   for (const group of groups.values()) {
     group
-      .sort((left, right) => left.anchor.calendar.localeCompare(right.anchor.calendar) || right.anchor.recency - left.anchor.recency)
+      .sort((left, right) => right.anchor.recency - left.anchor.recency)
       .forEach(({ result_id, key }, rank) => keys.set(result_id, `${key}|${rank}`));
   }
   return keys;
