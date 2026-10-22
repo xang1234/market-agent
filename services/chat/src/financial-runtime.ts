@@ -339,12 +339,17 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
 // The mentions a turn's plan requests: an explicit subject (a thread opened
 // from a ticker page) first; like the analyst path, the companies a
 // comparison's reading adds join it ("Compare revenue with AMD" from the NVDA
-// page plans both, "Revenue for AMD" plans NVDA).
+// page plans both, "Revenue for AMD" plans NVDA). A company the reading adds
+// is written capitalised (scope-proposal.ts), so a message that writes no
+// ticker or capitalised word past its first but the page's plans the page's
+// company without waiting on the reading.
 async function requestedMentions(context: ChatFinancialTurnContext, text: string): Promise<string[]> {
   const explicit = context.subjectText?.trim();
-  return explicit
-    ? [explicit, ...comparedAdditions(await context.reading?.() ?? null)]
-    : extractSubjectMentions(text);
+  const mentions = extractSubjectMentions(text);
+  if (!explicit) return mentions;
+  const capitalised = text.split(/[^\p{L}\p{N}]+/u).filter(Boolean).slice(1).filter((word) => /^\p{Lu}/u.test(word));
+  if ([...mentions, ...capitalised].every((name) => name === explicit)) return [explicit];
+  return [explicit, ...comparedAdditions(await context.reading?.() ?? null)];
 }
 
 type TurnCompanies = Readonly<{

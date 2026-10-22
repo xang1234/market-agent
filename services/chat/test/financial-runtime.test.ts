@@ -8,12 +8,12 @@ import type { ChatAnalystToolRuntime, ChatAssistantMessagePersistence } from "..
 import { financialMessageId } from "../src/chat-ids.ts";
 import { createChatFinancialRuntime, isFinancialRequest, SCOPE_METRICS } from "../src/financial-runtime.ts";
 import { METRIC_CATALOG_V1, OPERATION_REGISTRY } from "../../financial-core/src/index.ts";
-import { proposedMetric, type CompanyChange } from "../src/research-scope.ts";
+import { proposedMetric, type CompanyChange, type ScopeProposal } from "../src/research-scope.ts";
 import { parseProposal } from "../src/scope-proposal.ts";
 import { extractSubjectMentions } from "../src/subject-extraction.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import type { FinancialPool } from "../../financial-engine/src/ports.ts";
-import { changing, chatDatabase, chatHarness, comparing, completed, INSTRUMENT_A, LISTING_A, MISSING_ISSUER, resolveMention, revenueModel } from "./financial-fixtures.ts";
+import { changing, chatDatabase, chatHarness, comparing, completed, INSTRUMENT_A, LISTING_A, METRIC_READING, MISSING_ISSUER, resolveMention, revenueModel } from "./financial-fixtures.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "../src/subjects.ts";
 
 test("financial intent is recognized from the definition catalog", () => {
@@ -397,6 +397,35 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.ok(message, `expected a published answer; got ${JSON.stringify(done)}`);
     const [block] = message.blocks;
     assert.deepEqual(block.financial.results.map((result: { disposition: string }) => result.disposition), ["verified", "missing"]);
+  });
+
+  await t.test("from a company's page, a question naming no other company plans beside its reading, not after it", async () => {
+    const order: string[] = [];
+    let release = () => {};
+    const readQuestion = () => new Promise<ScopeProposal>((resolve) => {
+      const timer = setTimeout(() => release(), 2_000);
+      release = () => {
+        release = () => {};
+        clearTimeout(timer);
+        order.push("read");
+        resolve(METRIC_READING);
+      };
+    });
+    const revenue = revenueModel(["AAA"]);
+    const model = (async (request: Parameters<PlanningModel>[0]) => {
+      order.push("planned");
+      release();
+      return revenue(request);
+    }) as PlanningModel;
+    const run = async (userIntent: string) => {
+      order.length = 0;
+      const { events } = await chatHarness(pool, { model, readQuestion }).run({ ...base, subjectText: "AAA", userIntent });
+      assert.ok(completed(events).message_id, JSON.stringify(completed(events)));
+      return order;
+    };
+    assert.deepEqual(await run("What was AAA's revenue in fiscal 2023?"), ["planned", "read"]);
+    // A company written by name may be one the reading adds, so the plan waits on it.
+    assert.deepEqual(await run("Compare its revenue with Beta Holdings"), ["read", "planned"]);
   });
 
   await t.test("from a company's page, a compared name that matches no company is named in the answer", async () => {
