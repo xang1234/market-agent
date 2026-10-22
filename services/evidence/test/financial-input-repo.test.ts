@@ -127,6 +127,7 @@ test("financial input candidates", { timeout: 180_000 }, async (t) => {
     const original = (await listFinancialInputCandidates(db, request())).candidates.find((candidate) => candidate.fact_id === IDS.original)!;
     assert.equal(original.precision?.precision_attestation_id, proven.precision_attestation_id);
     assert.equal(original.precision?.precision_class, "revalidated_against_source");
+    assert.equal(original.precision?.derivation, null);
     assert.equal(original.context?.disclosure_relation, "original");
     const restated = (await listFinancialInputCandidates(db, request())).candidates.find((candidate) => candidate.fact_id === IDS.restated)!;
     assert.equal(restated.precision, null);
@@ -153,5 +154,19 @@ test("financial input candidates", { timeout: 180_000 }, async (t) => {
     assert.deepEqual([asFiled?.adjustment_basis, asFiled?.as_filed_on, asFiled?.share_basis], ["as_filed", "2024-02-21", "diluted"]);
     const unadjusted = candidates.find((candidate) => candidate.fact_id === IDS.original)!.context!;
     assert.deepEqual([unadjusted.adjustment_basis, "as_filed_on" in unadjusted], ["unadjusted", false]);
+  });
+
+  await t.test("a derived value's proof is returned with its derivation, and its raw token is the derivation's sum (#481)", async () => {
+    const term = (sign: "+" | "-", fiscal_period: "FY" | "Q3", source_id: string, filed: string, raw_token: string) => ({
+      sign, span: fiscal_period === "FY" ? ("fiscal_year" as const) : ("year_to_date" as const), fiscal_year: 2022, fiscal_period,
+      start: "2022-01-01", end: fiscal_period === "FY" ? "2022-12-31" : "2022-09-30", raw_token, token_proof_hash: H.proof,
+      source: { source_id, accession: `acc-${fiscal_period}`, form: fiscal_period === "FY" ? "10-K" : "10-Q", filed, locator: `loc-${fiscal_period}` },
+    });
+    const derivation = { version: "period_difference.v1" as const, concept: "Revenues", unit: "USD",
+      terms: [term("+", "FY", IDS.sourceV1, "2023-01-10", "400000000000"), term("-", "Q3", IDS.sourceV2, "2022-11-01", "34183000000")] };
+    await recordFactPrecisionAttestation(db, { fact_id: IDS.fy2022, precision_class: "derived_from_source_tokens", derivation, source_locator: "loc-Q4", validation_method: "test" });
+    const derived = (await listFinancialInputCandidates(db, request())).candidates.find((candidate) => candidate.fact_id === IDS.fy2022)!;
+    assert.deepEqual([derived.precision?.precision_class, derived.precision?.raw_token, derived.precision?.source_locator, derived.precision?.derivation],
+      ["derived_from_source_tokens", "365817000000", "loc-Q4", derivation]);
   });
 });

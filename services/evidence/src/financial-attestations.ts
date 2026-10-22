@@ -9,12 +9,16 @@ import {
   parseFinancialDecimal,
   type ExactDecimal,
 } from "../../financial-core/src/exact-decimal.ts";
+import { hashCanonical } from "../../financial-core/src/canonical.ts";
+import type { DerivationProofV1 } from "../../financial-core/src/contracts.ts";
+import { derivationValue } from "../../financial-core/src/derivation.ts";
 import {
   PRECISION_CLASSES,
   PUBLICATION_TIMING_PRECISIONS,
   type PrecisionClass,
   type PublicationTimingPrecision,
 } from "../../financial-core/src/evidence-vocabulary.ts";
+import { validateDerivationProof } from "../../financial-core/src/validate.ts";
 import type { RowQueryExecutor } from "./types.ts";
 import { assertIso8601WithOffset, assertNonEmptyString, assertOneOf, assertUuidV4 } from "./validators.ts";
 
@@ -97,6 +101,13 @@ export type FactPrecisionAttestationInput = Readonly<
       source_locator: string | null;
       validation_method: string;
     }
+  | {
+      fact_id: string;
+      precision_class: "derived_from_source_tokens";
+      derivation: DerivationProofV1;
+      source_locator: string | null;
+      validation_method: string;
+    }
   | { fact_id: string; precision_class: "legacy_unverified"; validation_method: string }
 >;
 
@@ -113,6 +124,7 @@ export type FactPrecisionAttestationRow = Readonly<{
   validation_method: string;
   attested_at: string;
   supersedes: string | null;
+  derivation: DerivationProofV1 | null;
 }>;
 
 /**
@@ -137,36 +149,48 @@ export async function recordFactPrecisionAttestation(
     [input.fact_id],
   )).rows[0];
 
-  let proof: { raw_token: string | null; token_proof_hash: string | null; value_text: string | null; scale_text: string | null; source_locator: string | null } = {
-    raw_token: null,
-    token_proof_hash: null,
-    value_text: null,
-    scale_text: null,
-    source_locator: null,
-  };
-  if (input.precision_class !== "legacy_unverified") {
+  let proof: {
+    raw_token: string | null;
+    token_proof_hash: string | null;
+    value_text: string | null;
+    scale_text: string | null;
+    source_locator: string | null;
+    derivation: DerivationProofV1 | null;
+  } = { raw_token: null, token_proof_hash: null, value_text: null, scale_text: null, source_locator: null, derivation: null };
+  if (input.precision_class === "derived_from_source_tokens") {
+    const check = checkDerivationAgainstFact(input.derivation, fact);
+    if (check.status !== "match") throw new FinancialAttestationError(DERIVATION_REFUSALS[check.status]);
+    const sum = canonicalDecimalString(check.value);
+    proof = {
+      raw_token: sum,
+      token_proof_hash: hashCanonical("derivation", input.derivation),
+      value_text: sum,
+      scale_text: storedScale(fact.scale_text),
+      source_locator: input.source_locator,
+      derivation: input.derivation,
+    };
+  } else if (input.precision_class !== "legacy_unverified") {
     if (!SHA256_HEX.test(input.token_proof_hash)) throw new FinancialAttestationError("token_proof_hash must be a sha256 hex digest");
     const check = checkTokenAgainstStoredValue(input.raw_token, fact.value_text);
     if (check.status !== "match") {
       throw new FinancialAttestationError(check.status === "invalid_token" ? "raw_token is not a supported decimal" : "raw_token does not equal the stored fact value");
     }
-    const scale = parseDerivedDecimalText(fact.scale_text);
-    if (!scale.ok || scale.value.coefficient <= 0n) throw new FinancialAttestationError("stored fact scale is not a positive decimal");
     proof = {
       raw_token: input.raw_token,
       token_proof_hash: input.token_proof_hash,
       value_text: canonicalDecimalString(check.token),
-      scale_text: canonicalDecimalString(scale.value),
+      scale_text: storedScale(fact.scale_text),
       source_locator: input.source_locator,
+      derivation: null,
     };
   }
 
   const inserted = await db.query<FactPrecisionAttestationRow>(
     `insert into fact_precision_attestations
-       (fact_id, source_id, precision_class, raw_token, token_proof_hash, value_text, scale_text, source_locator, validation_method, supersedes)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       (fact_id, source_id, precision_class, raw_token, token_proof_hash, value_text, scale_text, source_locator, validation_method, supersedes, derivation)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
      returning precision_attestation_id::text, fact_id::text, source_id::text, precision_class, raw_token, token_proof_hash,
-               value_text, scale_text, source_locator, validation_method, attested_at::text, supersedes::text`,
+               value_text, scale_text, source_locator, validation_method, attested_at::text, supersedes::text, derivation`,
     [
       input.fact_id,
       fact.source_id,
@@ -178,9 +202,16 @@ export async function recordFactPrecisionAttestation(
       proof.source_locator,
       input.validation_method,
       previous?.precision_attestation_id ?? null,
+      proof.derivation === null ? null : JSON.stringify(proof.derivation),
     ],
   );
   return inserted.rows[0]!;
+}
+
+function storedScale(scaleText: string): string {
+  const scale = parseDerivedDecimalText(scaleText);
+  if (!scale.ok || scale.value.coefficient <= 0n) throw new FinancialAttestationError("stored fact scale is not a positive decimal");
+  return canonicalDecimalString(scale.value);
 }
 
 export type TokenCheck = { status: "match"; token: ExactDecimal } | { status: "value_mismatch" | "invalid_token" };
@@ -192,6 +223,29 @@ export function checkTokenAgainstStoredValue(rawToken: string, storedValueText: 
   const stored = storedValueText === null ? null : parseDerivedDecimalText(storedValueText);
   if (stored === null || !stored.ok || compareExactDecimals(token.value, stored.value) !== 0) return { status: "value_mismatch" };
   return { status: "match", token: token.value };
+}
+
+export type DerivationCheck =
+  | { status: "match"; value: ExactDecimal }
+  | { status: "invalid_derivation" | "value_mismatch" | "no_own_term" | "own_term_not_last_filed" };
+
+const DERIVATION_REFUSALS: Readonly<Record<Exclude<DerivationCheck["status"], "match">, string>> = {
+  invalid_derivation: "derivation is not a period_difference.v1 proof with a supported decimal token in every term",
+  value_mismatch: "derivation does not sum to the stored fact value",
+  no_own_term: "derivation needs exactly one term from the fact's own source",
+  own_term_not_last_filed: "a derivation term was filed on or after the fact's own filing",
+};
+
+export function checkDerivationAgainstFact(proof: DerivationProofV1, fact: Readonly<{ source_id: string; value_text: string | null }>): DerivationCheck {
+  if (!validateDerivationProof(proof).ok || proof.terms.some((term) => !parseFinancialDecimal(term.raw_token).ok)) return { status: "invalid_derivation" };
+  const value = derivationValue(proof);
+  const stored = fact.value_text === null ? null : parseDerivedDecimalText(fact.value_text);
+  if (value === null || stored === null || !stored.ok || compareExactDecimals(value, stored.value) !== 0) return { status: "value_mismatch" };
+  const own = proof.terms.filter((term) => term.source.source_id.toLowerCase() === fact.source_id.toLowerCase());
+  if (own.length !== 1) return { status: "no_own_term" };
+  const ownFiled = own[0]!.source.filed;
+  if (proof.terms.some((term) => term !== own[0] && !(term.source.filed < ownFiled))) return { status: "own_term_not_last_filed" };
+  return { status: "match", value };
 }
 
 async function assertPublicationInput(db: RowQueryExecutor, input: SourcePublicationAttestationInput): Promise<void> {
