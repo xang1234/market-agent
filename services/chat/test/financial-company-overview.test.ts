@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
-import type { PlanningModel } from "../../financial-engine/src/planner.ts";
+import type { PlanningModel, PlanningResult } from "../../financial-engine/src/planner.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { IDS, seedReportedFact } from "../../financial-engine/test/db-fixtures.ts";
 import type { ScopeProposal } from "../src/research-scope.ts";
@@ -17,6 +17,8 @@ const COMPANIES: Readonly<Record<string, string>> = {
   // These two store each fourth quarter as the SEC ingester does.
   SECY: "4f000000-0000-4000-8000-0000000000e3",
   SECQ: "4f000000-0000-4000-8000-0000000000e4",
+  // Its newest quarter is in fiscal 2201, past the plan schema's last year.
+  FUTR: "4f000000-0000-4000-8000-0000000000e5",
 };
 const REVENUE = [
   [2022, 1, "800"], [2022, 2, "900"], [2022, 3, "1000"], [2022, 4, "1100"],
@@ -90,6 +92,7 @@ test("a question about one company that asks for no figure is answered with its 
   for (const [metric, value] of [["revenue", "2400"], ["gross_profit", "1200"], ["operating_income", "600"], ["net_income", "480"]] as const) {
     await quarterly(COMPANIES.SECQ!, metric, 2024, 1, value);
   }
+  await quarterly(COMPANIES.FUTR!, "revenue", 2201, 1, "2400");
   const results = async (messageId: unknown) => {
     const { rows: [message] } = await db.query(`select blocks from chat_messages where message_id = $1`, [messageId]);
     assert.ok(message, "a published answer");
@@ -160,6 +163,18 @@ test("a question about one company that asks for no figure is answered with its 
     assert.deepEqual(warned.filter(([message]) => String(message).startsWith("[chat]")).map(([message]) => message), [
       "[chat] the company overview could not be planned; the planner answers",
     ]);
+  });
+
+  await t.test("an overview the engine does not plan falls back to the planner's answer, and says why (#473)", async (st) => {
+    const warned: unknown[][] = [];
+    st.mock.method(console, "warn", (...args: unknown[]) => warned.push(args));
+    const model = revenueModel(["FUTR"]);
+    const done = completed((await chatHarness(pool, { model, readQuestion: reading(NO_ASKS), resolveMention: resolve }).run({ ...base, userIntent: "Revenue for FUTR" })).events);
+    assert.deepEqual([model.calls, (await results(done.message_id)).map(([outputId]) => outputId)], [1, ["a_out"]]);
+    assert.deepEqual(
+      warned.filter(([message]) => String(message).startsWith("[chat]")).map(([message, overview]) => [message, (overview as PlanningResult).outcome]),
+      [["[chat] the company overview could not be planned; the planner answers", "unsupported"]],
+    );
   });
 
   await t.test("a reading that asks for a figure, two companies, a carried company, a named period, or a company with no quarters goes to the planner", async () => {

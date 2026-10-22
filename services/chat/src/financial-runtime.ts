@@ -457,10 +457,15 @@ async function planTurn(
   try {
     overview = await planCompanyOverview(planningContext(subjects), turn.evidence);
   } catch (reason) {
-    console.warn("[chat] the company overview could not be planned; the planner answers", reason);
+    console.warn(OVERVIEW_UNPLANNED, reason);
     return planned;
   }
   if (overview === null) return planned;
+  // Facts bound no fiscal year; a plan's are 1900 to 2200.
+  if (overview.outcome !== "ready") {
+    console.warn(OVERVIEW_UNPLANNED, overview);
+    return planned;
+  }
   dropped = true;
   void failure.then((failed) => {
     if (failed === null) return;
@@ -474,6 +479,7 @@ async function planTurn(
 }
 
 const DROPPED = new Error("dropped for the company overview");
+const OVERVIEW_UNPLANNED = "[chat] the company overview could not be planned; the planner answers";
 
 const CASH_RESILIENCE = /\bcash[- ]resilience\b/iu;
 const CASH_RESILIENCE_VIEW = "cash_resilience_view";
