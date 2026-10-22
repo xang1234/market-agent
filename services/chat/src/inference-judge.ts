@@ -49,14 +49,13 @@ export type JudgeRecord =
 
 // The reader waits on the judge for each inference, with the figures shown;
 // the deadlines are per call, one call per inference. Measured on Haiku over
-// 150 calls carrying figures_shown (1,694 to 2,919 input tokens; the recorded
-// traces and three mutation runs, 2026-10-22): median 2.8 s, p95 4.0 s,
-// slowest 6.3 s; under load (a verifier's run beside other suites) p95 5.8 s,
-// slowest 6.9 s. One attempt of about 1.4 times that slowest: the judge model
-// has no fallback (JUDGE_LITELLM_MODEL alone), and a late verdict only costs
-// its inference, which stays hidden.
-// ceil(11000 / 10000) - 1 = 1 attempt.
-export const JUDGE_DEADLINES: ModelDeadlines = { attemptMs: 10_000, totalMs: 11_000 };
+// 623 calls carrying figures_shown (the recorded traces and 14 mutation runs,
+// 2026-10-22): median 3.0 s, p95 5.1 s, p99 6.5 s, slowest 9.5 s. One attempt
+// of about 1.6 times the slowest: the judge model has no fallback
+// (JUDGE_LITELLM_MODEL alone), and a late verdict costs its inference, which
+// stays hidden; a judge that hangs holds that inference's line for the attempt.
+// ceil(16000 / 15000) - 1 = 1 attempt.
+export const JUDGE_DEADLINES: ModelDeadlines = { attemptMs: 15_000, totalMs: 16_000 };
 
 type Accepted = Assertion & { index: number };
 
