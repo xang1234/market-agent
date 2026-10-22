@@ -324,8 +324,7 @@ function derivedFigures(
   blockSources: ReadonlyMap<string, string[]>,
 ): PacketFigure[] {
   const idOf = (factId: string, blockId: unknown) => {
-    const own = shown.findIndex((figure) => figure.fact_id === factId && figure.block_id === blockId);
-    const index = own !== -1 ? own : shown.findIndex((figure) => figure.fact_id === factId);
+    const index = shown.findIndex((figure) => figure.fact_id === factId && figure.block_id === blockId);
     return index === -1 ? undefined : `F${index + 1}`;
   };
   const out: PacketFigure[] = [];

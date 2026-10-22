@@ -608,11 +608,12 @@ async function loadDerivedQuarterMetrics(
     const { byQuarter, revenue, shown } = selectQuarters(facts, loadable, quarter);
     if (shown === undefined) return [];
     const specs = deriveQuarterMetrics({
-      // Only the latest quarter renders unless the margin trend was asked for, so
-      // mint just what is shown: each derived fact is a lookup and maybe an insert.
+      // Only the latest quarter's margins render unless the margin trend was asked
+      // for, so mint just those: each derived fact is a lookup and maybe an insert.
       shownRevenue: wantsMarginTrend ? revenue : [shown],
       // Growth is the shown quarter's, a named one inside the window (#290).
       growthAt: shown,
+      // Each charted quarter's QoQ, which the packet offers for the answer to cite.
       window: revenue,
       fact: (metricKey, fiscalYear, fiscalPeriod) => byQuarter.get(quarterKey(metricKey, fiscalYear, fiscalPeriod)),
       period: (factId) => loadable.get(factId),
