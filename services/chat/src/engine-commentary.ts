@@ -39,6 +39,8 @@ export async function saveCommentary(
     turn: Pick<TurnTrace, "thread_id" | "run_id" | "turn_id" | "question">;
   }>,
 ): Promise<void> {
+  // Another attempt of the turn wrote it: no second model call, no second block.
+  if ((input.message.blocks as Block[]).some((block) => block.analyst_commentary === true)) return;
   const plan = await findPlanForRequest(db, input.request);
   const tickers = new Map((plan?.subjects.members ?? []).flatMap((member) => {
     const label = input.labels.get(member.subject_ref.id.toLowerCase());
@@ -85,9 +87,9 @@ async function append(db: SqlExecutor, message: ChatReadMessage, block: Block): 
   const blocks = JSON.stringify([...(message.blocks as Block[]), block]);
   const { rows } = await db.query(
     `update chat_messages set blocks = $2::jsonb, content_hash = $3
-      where message_id = $1::uuid and blocks = $4::jsonb
+      where message_id = $1::uuid and content_hash = $4
       returning message_id`,
-    [message.message_id, blocks, contentHashForText(blocks), JSON.stringify(message.blocks)],
+    [message.message_id, blocks, contentHashForText(blocks), message.content_hash],
   );
   if (rows.length === 0) console.warn(`[chat] the analyst commentary for message ${message.message_id} was not saved: the message changed since it was read`);
 }

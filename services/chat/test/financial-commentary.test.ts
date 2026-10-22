@@ -10,12 +10,12 @@ import test from "node:test";
 import type { Pool } from "pg";
 
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
-import { presentationHash, type FinancialAnswerContent } from "../../financial-core/src/index.ts";
+import { createRuntimeAuthority, presentationHash, type FinancialAnswerContent } from "../../financial-core/src/index.ts";
 import { IDS, seedReportedFact } from "../../financial-engine/test/db-fixtures.ts";
 import { LlmProviderError, LlmRouterError, type LlmChatRequest } from "../../llm/src/index.ts";
 import { answerTurn, type AnswerTraceInput } from "../src/answer-trace.ts";
 import type { ChatAnalystToolRuntime } from "../src/coordinator.ts";
-import { COMMENTARY_UNAVAILABLE, type CommentaryComposer } from "../src/engine-commentary.ts";
+import { COMMENTARY_UNAVAILABLE, saveCommentary, type CommentaryComposer } from "../src/engine-commentary.ts";
 import { listChatMessagesForThread, readChatMessage } from "../src/messages.ts";
 import { resultRefProblem } from "../src/prose-refs.ts";
 import { plainText } from "../src/render-assertions.ts";
@@ -222,7 +222,7 @@ test("a company overview carries analyst commentary on its published results (#3
     const other = { id: "other", kind: "rich_text", snapshot_id: randomUUID(), data_ref: { kind: "rich_text", id: "other" }, source_refs: [], as_of: "2026-10-22T00:00:00.000Z", segments: [{ type: "text", text: "Another writer's block." }] };
     const { compose } = composer(async () => {
       await db.query(
-        `update chat_messages set blocks = blocks || $2::jsonb
+        `update chat_messages set blocks = blocks || $2::jsonb, content_hash = 'sha256:another-writer'
           where message_id = (select message_id from chat_messages where thread_id = $1 and role = 'assistant' order by created_at desc limit 1)`,
         [threadId, JSON.stringify([other])],
       );
@@ -233,6 +233,33 @@ test("a company overview carries analyst commentary on its published results (#3
     assert.deepEqual(saved.blocks.map((block) => block.id).slice(1), ["other"]);
     assert.deepEqual((done.message as { blocks: Block[] }).blocks.map((block) => block.id).slice(1), ["other"], "the turn completes with the message as saved");
     assert.ok(warned.some((args) => String(args[0]).includes("was not saved: the message changed")), JSON.stringify(warned));
+  });
+
+  await t.test("a second attempt at a message's commentary calls no model and appends nothing", async () => {
+    const first = composer(() => ALFA_REPLY);
+    const question = "Revenue for ALFA";
+    const { turnId, events } = await overview(first.compose).run({ ...base, userIntent: question });
+    const saved = await message(completed(events).message_id);
+    assert.deepEqual([first.inputs.length, saved.blocks.map((block) => block.kind)], [1, ["financial_answer", "rich_text"]]);
+
+    const again = composer(() => ALFA_REPLY);
+    const authority = createRuntimeAuthority({
+      owner_user_id: IDS.owner,
+      egress_channel: "chat",
+      parent: { kind: "chat_thread", id: threadId, version: `turn:${turnId}` },
+      allowed_source_classes: ["sec_filing", "market_data"],
+      feature: { surface: "chat", capability: "financial-answer", mode: "enforce" },
+      approval_state: "not_required",
+      lease: null,
+    });
+    await saveCommentary(pool, again.compose, {
+      message: saved,
+      request: { authority, request_key: turnId },
+      labels: new Map([[ALFA, "ALFA"]]),
+      turn: { thread_id: threadId, run_id: turnId, turn_id: turnId, question },
+    });
+    assert.equal(again.inputs.length, 0);
+    assert.deepEqual(await message(saved.message_id), saved);
   });
 
   await t.test("a defect or a database error after the commit is logged, and the turn completes with the answer as saved", async (st) => {
