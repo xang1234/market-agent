@@ -54,6 +54,8 @@ export function checkComparison(
   // The same fact shown in two blocks counts once.
   const keyOf = (figure: PacketFigure) => figure.fact_id ?? `${companyOf(figure)}|${figure.segment ?? ""}|${figure.metric}|${periodKey(figure.period)}`;
   const cited = unique(figureIds.flatMap((id) => packet.figures.filter((figure) => figure.id === id)), keyOf);
+  const unavailable = cited.find((figure) => figure.gap !== undefined);
+  if (unavailable) return fail(`${unavailable.id} is not available, so it is not compared`);
   // "F1" twice, or two ids showing one fact, is one figure: nothing to compare.
   if (cited.length < 2) return fail("a comparison needs two or more distinct figures");
   const metric = cited[0]!.metric;
@@ -68,7 +70,7 @@ export function checkComparison(
   const axis = companies.size === 1 ? "time" : "cohort";
   if (op === "trend" && axis !== "time") return fail("a trend is one company's metric over time");
   const sameMetric = packet.figures.filter((figure) =>
-    figure.metric === metric && (figure.segment !== undefined) === segmented && (!segmented || companyOf(figure) === companyOf(cited[0]!)) &&
+    figure.gap === undefined && figure.metric === metric && (figure.segment !== undefined) === segmented && (!segmented || companyOf(figure) === companyOf(cited[0]!)) &&
     comparablePeriods(figure, cited[0]!)
   );
 
@@ -86,11 +88,11 @@ export function checkComparison(
     if (cited.length !== companies.size) return fail("a ranking compares one figure per company");
     // A company shown for several periods: every company at one period, so
     // no company's best period is picked against another's.
-    const periods = new Set(cited.map((figure) => periodKey(figure.period)));
+    const periods = new Set(cited.map((figure) => cohortPeriod(figure.period)));
     const severalPeriods = [...perCompany.values()].some((figures) => figures.length > 1);
     if (severalPeriods && periods.size > 1) return fail("companies shown for several periods are compared at one period");
     eligible = [...perCompany.values()].flatMap((figures) =>
-      figures.length === 1 ? figures : figures.filter((figure) => periods.has(periodKey(figure.period)))
+      figures.length === 1 ? figures : figures.filter((figure) => periods.has(cohortPeriod(figure.period)))
     );
   }
   const citedKeys = new Set(cited.map(keyOf));
@@ -198,6 +200,16 @@ function periodKey(period: string | undefined): string {
   return (period ?? "").replace(/\s+/g, "");
 }
 
+// A change's period ("Q4 FY2026 vs Q4 FY2025") is one across companies by its
+// span, a year here, since each company's quarters are its own fiscal
+// calendar's; any other period by its name.
+function cohortPeriod(period: string | undefined): string {
+  const [current, prior, ...more] = (period ?? "").split(" vs ");
+  const [from, to] = [periodIndex(prior), periodIndex(current)];
+  const sameKind = /^Q/.test(periodKey(current)) === /^Q/.test(periodKey(prior));
+  return more.length === 0 && from !== undefined && to !== undefined && sameKind ? `span:${to - from}` : periodKey(period);
+}
+
 function quarterly(figure: PacketFigure): boolean {
   return /^Q/.test(periodKey(figure.period));
 }
@@ -238,7 +250,8 @@ function chronological(figures: ReadonlyArray<PacketFigure>): PacketFigure[] | n
 // A fiscal quarter or year as a count of its kind, so consecutive periods differ by one.
 function periodIndex(period: string | undefined): number | undefined {
   const key = periodKey(period);
-  const quarter = /^Q([1-4])(\d{4})$/.exec(key);
+  // "Q42026" as stored, "Q4FY2026" as the engine labels it.
+  const quarter = /^Q([1-4])(?:FY)?(\d{4})$/.exec(key);
   if (quarter) return Number(quarter[2]) * 4 + Number(quarter[1]) - 1;
   const year = /^(?:FY)?(\d{4})$/.exec(key);
   return year ? Number(year[1]) : undefined;
@@ -261,13 +274,16 @@ type Interval = { kind: string; low: number; high: number; mid: number };
 
 const SCALES: Readonly<Record<string, number>> = { "": 1, K: 1e3, M: 1e6, B: 1e9, T: 1e12 };
 
-// A displayed value ("-$1.7B", "74.4%", "CN¥3.1B", "12.8x") as the interval its
-// rounding covers, with its kind: the currency prefix and whether it is a
-// percent, a multiple or an amount. Undefined when it does not parse.
+// A displayed value ("-$1.7B", "74.4%", "CN¥3.1B", "12.8x", the engine's
+// "USD -1,700,000,000.00") as the interval its rounding covers, with its kind:
+// the currency prefix and whether it is a percent, a multiple or an amount.
+// Undefined when it does not parse.
 function interval(value: string): Interval | undefined {
-  const match = /^([-−+]?)(\D*?)\s*(\d[\d,]*)(?:\.(\d+))?\s*([KMBT%x]?)$/.exec(value.trim());
+  const match = /^([-−+]?)([^\d\-−+]*?)\s*([-−+]?)(\d[\d,]*)(?:\.(\d+))?\s*([KMBT%x]?)$/.exec(value.trim());
   if (!match) return undefined;
-  const [, sign, prefix, whole, fraction = "", suffix] = match;
+  const [, leading, prefix, inner, whole, fraction = "", suffix] = match;
+  if (leading && inner) return undefined;
+  const sign = leading || inner;
   const unit = suffix === "%" || suffix === "x" ? suffix : "";
   const scale = SCALES[unit ? "" : suffix!]!;
   const mid = (sign === "-" || sign === "−" ? -1 : 1) * Number(`${whole!.replace(/,/g, "")}.${fraction || "0"}`) * scale;

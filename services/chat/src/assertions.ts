@@ -213,10 +213,11 @@ export function checkAssertions(list: unknown[] | null | undefined, packet: Evid
 export const SUPPORT_KINDS: ReadonlySet<AssertionKind> = new Set(["observation", "comparison", "management_attribution"]);
 
 // Every cited figure: the template says each cited metric changed. The
-// other period may be any shown, so the figure that moved alone will do.
+// other period may be any shown, so the figure that moved alone will do. An
+// unavailable figure shows no change.
 function showsChange(cited: ReadonlyArray<EvidencePacket["figures"][number]>, shown: EvidencePacket["figures"]): boolean {
   return cited.length > 0 && cited.every((a) => shown.some((b) =>
-    a.company === b.company && a.metric === b.metric && a.segment === b.segment && a.period !== undefined && b.period !== undefined &&
+    a.gap === undefined && b.gap === undefined && a.company === b.company && a.metric === b.metric && a.segment === b.segment && a.period !== undefined && b.period !== undefined &&
     a.period.replace(/\s+/g, "") !== b.period.replace(/\s+/g, "") && a.value !== b.value && comparablePeriods(a, b)
   ));
 }
