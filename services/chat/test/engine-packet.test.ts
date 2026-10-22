@@ -22,8 +22,11 @@ const LABELS = {
   "subject:c": { kind: "subject", text: "Apple Inc.", slot_id: "c" },
   "measure:m0": { kind: "measure", text: "Revenue" },
   "measure:m1": { kind: "measure", text: "Gross margin (gross profit / revenue)" },
-  "measure:m2": { kind: "measure", text: "Percent change in Revenue" },
+  "measure:m2": { kind: "measure", text: "Quarter-over-quarter percent change in Revenue" },
   "measure:m3": { kind: "measure", text: "Revenue threshold check" },
+  "measure:m4": { kind: "measure", text: "Year-over-year percent change in Revenue" },
+  // A v1 answer named both changes alike (#493).
+  "measure:m5": { kind: "measure", text: "Percent change in Revenue" },
   "period:p0": { kind: "period", text: "Q4 FY2026" },
   "period:p1": { kind: "period", text: "Q2 FY2026" },
   "period:p2": { kind: "period", text: "Q4 FY2026 vs Q4 FY2025" },
@@ -51,7 +54,7 @@ const gap = (n: number, slot: string, measure: string, period: string): Presente
 
 function content(results: ReadonlyArray<PresentedResult>, slots: ReadonlyArray<string>, periods: Record<string, unknown> = {}): FinancialAnswerContent {
   return {
-    presentation_version: "financial-presentation.v1",
+    presentation_version: "financial-presentation.v2",
     template_version: "t",
     run_id: "5e000000-0000-4000-8000-0000000000aa",
     unit_id: "u1",
@@ -68,10 +71,10 @@ function content(results: ReadonlyArray<PresentedResult>, slots: ReadonlyArray<s
 const COMPARISON = content([
   value(1, "a", "measure:m1", "period:p0", "74.40%"),
   value(2, "a", "measure:m2", "period:p3", "8.94%"),
-  value(3, "a", "measure:m2", "period:p2", "57.89%"),
+  value(3, "a", "measure:m4", "period:p2", "57.89%"),
   gap(4, "b", "measure:m1", "period:p1"),
   value(5, "b", "measure:m2", "period:p5", "4.67%"),
-  value(6, "b", "measure:m2", "period:p4", "45.74%"),
+  value(6, "b", "measure:m4", "period:p4", "45.74%"),
   { ...value(7, "a", "measure:m3", "period:p0", ""), presented: { kind: "predicate", text: "NVIDIA Corporation — Revenue, Q4 FY2026, above USD 1.00: yes", outcome: true } },
 ], ["a", "b"]);
 const TICKERS = new Map([["a", "NVDA"], ["b", "AMD"]]);
@@ -96,11 +99,11 @@ test("an engine answer's packet holds its value and gap results in order, each c
     companies: ["NVDA", "AMD"],
     figures: [
       { id: "F1", company: "NVDA", metric: "Gross margin (gross profit / revenue)", period: "Q4 FY2026", value: "74.40%", result_id: RESULT(1), source_ids: [] },
-      { id: "F2", company: "NVDA", metric: "Percent change in Revenue", period: "Q4 FY2026 vs Q3 FY2026", value: "8.94%", result_id: RESULT(2), source_ids: [] },
-      { id: "F3", company: "NVDA", metric: "Percent change in Revenue", period: "Q4 FY2026 vs Q4 FY2025", value: "57.89%", result_id: RESULT(3), source_ids: [] },
+      { id: "F2", company: "NVDA", metric: "Quarter-over-quarter percent change in Revenue", period: "Q4 FY2026 vs Q3 FY2026", value: "8.94%", result_id: RESULT(2), source_ids: [] },
+      { id: "F3", company: "NVDA", metric: "Year-over-year percent change in Revenue", period: "Q4 FY2026 vs Q4 FY2025", value: "57.89%", result_id: RESULT(3), source_ids: [] },
       { id: "F4", company: "AMD", metric: "Gross margin (gross profit / revenue)", period: "Q2 FY2026", value: NOT_REPORTED, gap: NOT_REPORTED, result_id: RESULT(4), source_ids: [] },
-      { id: "F5", company: "AMD", metric: "Percent change in Revenue", period: "Q2 FY2026 vs Q1 FY2026", value: "4.67%", result_id: RESULT(5), source_ids: [] },
-      { id: "F6", company: "AMD", metric: "Percent change in Revenue", period: "Q2 FY2026 vs Q2 FY2025", value: "45.74%", result_id: RESULT(6), source_ids: [] },
+      { id: "F5", company: "AMD", metric: "Quarter-over-quarter percent change in Revenue", period: "Q2 FY2026 vs Q1 FY2026", value: "4.67%", result_id: RESULT(5), source_ids: [] },
+      { id: "F6", company: "AMD", metric: "Year-over-year percent change in Revenue", period: "Q2 FY2026 vs Q2 FY2025", value: "45.74%", result_id: RESULT(6), source_ids: [] },
     ],
     coverage: [{ company: "NVDA", status: "shown" }, { company: "AMD", status: "shown" }],
     gaps: [],
@@ -140,7 +143,7 @@ test("an observation writes each engine value as a result ref, and a gap as its 
     { type: "text", text: "." },
   ]);
   const missing = renderAssertion({ index: 0, kind: "observation", text: "x", evidence: ["F6", "F4"] }, packet, []);
-  assert.equal(plainText(missing.segments), `AMD's percent change in revenue was 45.74% in Q2 FY2026 vs Q2 FY2025. AMD's gross margin (gross profit / revenue) in Q2 FY2026 is not available: ${NOT_REPORTED}`);
+  assert.equal(plainText(missing.segments), `AMD's year-over-year percent change in revenue was 45.74% in Q2 FY2026 vs Q2 FY2025. AMD's gross margin (gross profit / revenue) in Q2 FY2026 is not available: ${NOT_REPORTED}`);
   assert.deepEqual(missing.segments.filter((segment) => segment.type === "ref").map((segment) => segment.type === "ref" && segment.ref_id), [RESULT(6)]);
 });
 
@@ -192,17 +195,17 @@ test("growth across companies compares each company's change over the same span,
     { kind: "comparison", text: "year over year", evidence: ["F3", "F6"], op: "highest", result: "F3" },
     { kind: "comparison", text: "mixed spans", evidence: ["F3", "F5"], op: "highest", result: "F3" },
   ], packet);
-  assert.deepEqual(report.rejected, [{ index: 1, text: "mixed spans", check: "comparative", reason: "comparison: changes across companies are compared over one span" }]);
+  assert.deepEqual(report.rejected, [{ index: 1, text: "mixed spans", check: "comparative", reason: "comparison: a comparison is of one metric" }]);
   assert.equal(
     plainText(renderAssertion(report.accepted[0]!, packet, []).segments),
-    "Of NVDA and AMD, NVDA's percent change in revenue was highest: NVDA 57.89% (Q4 FY2026 vs Q4 FY2025), AMD 45.74% (Q2 FY2026 vs Q2 FY2025).",
+    "Of NVDA and AMD, NVDA's year-over-year percent change in revenue was highest: NVDA 57.89% (Q4 FY2026 vs Q4 FY2025), AMD 45.74% (Q2 FY2026 vs Q2 FY2025).",
   );
-  // Each company with one change shown, the other a gap: still one span.
+  // A v1 answer names both changes alike, each company with one shown and the other a gap: still one span.
   const oneEach = enginePacket(content([
-    value(1, "a", "measure:m2", "period:p2", "57.89%"),
-    gap(2, "a", "measure:m2", "period:p3"),
-    gap(3, "b", "measure:m2", "period:p4"),
-    value(4, "b", "measure:m2", "period:p5", "4.67%"),
+    value(1, "a", "measure:m5", "period:p2", "57.89%"),
+    gap(2, "a", "measure:m5", "period:p3"),
+    gap(3, "b", "measure:m5", "period:p4"),
+    value(4, "b", "measure:m5", "period:p5", "4.67%"),
   ], ["a", "b"]), TICKERS);
   assert.deepEqual(checkAssertions([{ kind: "comparison", text: "x", evidence: ["F1", "F4"], op: "highest", result: "F1" }], oneEach).rejected,
     [{ index: 0, text: "x", check: "comparative", reason: "comparison: changes across companies are compared over one span" }]);
@@ -256,7 +259,7 @@ test("an answer written on an engine packet is sent only that packet, and its in
   assert.deepEqual(sent.evidence_packet, packetForModel(packet));
   assert.equal(sent.evidence_packet.route, "financial_engine");
   const asked = JSON.parse(requests[1]!.messages[1]!.content) as { inferences: Array<{ supports: string[] }> };
-  const observed = "NVDA's gross margin (gross profit / revenue) was 74.40% in Q4 FY2026; AMD's percent change in revenue was 45.74% in Q2 FY2026 vs Q2 FY2025.";
+  const observed = "NVDA's gross margin (gross profit / revenue) was 74.40% in Q4 FY2026; AMD's year-over-year percent change in revenue was 45.74% in Q2 FY2026 vs Q2 FY2025.";
   assert.deepEqual(asked.inferences[0]!.supports, [observed]);
   const segments = judged.blocks[0]!.segments as Parameters<typeof plainText>[0];
   assert.equal(plainText(segments), `${observed}\n\n> **Analyst inference on NVDA:** Its pricing holds.`);
