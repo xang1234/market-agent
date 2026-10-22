@@ -505,7 +505,8 @@ export type AnswerMetrics = {
   // Inferences sent to the repair round, those its reply replaced with an
   // entry that passed the checks, and those of them that end shown or
   // unverified on their repaired verdict; one kept as its first verdict
-  // showed it, after a failed repair, is neither. The repair call's cost.
+  // showed it, after a failed repair, counts in neither of those two. The
+  // repair call's cost.
   inferences_sent_to_repair: number;
   inferences_repaired: number;
   inferences_recovered: number;

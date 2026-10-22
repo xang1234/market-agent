@@ -26,8 +26,8 @@
 // Each run summarizes what the judge showed and hid. judge-mutations
 // judges a set of inferences and their mutations
 // (test/answer-lab/judge-mutations.json) and reports how many mutations it
-// catches, how many come back at their kind's tier, how many it would show
-// above their tier, and how many originals it flags; --repair then sends each
+// catches, how many come back at their kind's tier, how many it shows above
+// that tier, and how many originals it flags; --repair then sends each
 // one a chat turn would (verdicts.ts sentToRepair) through the repair round,
 // and reports what that shows.
 import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
@@ -531,9 +531,10 @@ async function repairMutations(variants: ReadonlyArray<MutationVariant>, results
 }
 
 // "shown above their tier" and "contradicted shown" are the safety numbers: a
-// worded amount under the entailed label, or a contradiction on the page. A
-// kind's ceiling is the most its allowed verdicts show (shownAs). An error is
-// neither caught nor at its tier, and is counted on its own.
+// mutation shown higher than its kind's ceiling, the most its allowed verdicts
+// show (shownAs), such as a worded amount under the entailed label; and a
+// contradiction on the page. An error is neither caught nor at its tier, and
+// is counted on its own.
 export function mutationSummary(results: ReadonlyArray<Pick<MutationResult, "id" | "kind" | "text" | "verdict">>): string {
   type Row = Pick<MutationResult, "kind" | "verdict">;
   const rate = (rows: ReadonlyArray<Row>, counted: (row: Row) => boolean) => `${rows.filter(counted).length} of ${rows.length}`;

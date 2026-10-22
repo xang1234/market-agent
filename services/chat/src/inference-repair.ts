@@ -14,9 +14,9 @@ import { judgeCases, modelCall, type JudgeCase, type ModelRecord } from "./infer
 import type { ModelDeadlines } from "./llm-runtime.ts";
 import { sentToRepair, type InferenceVerdict, type Verdict } from "./verdicts.ts";
 
-// Why an inference goes to repair, as the repair call is told: the check it failed,
-// or the judge's verdict. limit and rendering are not the inference's words,
-// so no rewrite passes them. rejected_supports: the supports it listed that
+// Why an inference goes to repair, as the repair call is told: the check it
+// failed, or the judge's verdict. limit and rendering are not the inference's
+// words, so no rewrite passes them. rejected_supports: the supports it listed that
 // the check did not accept as one, so the rewrite does not cite them again.
 export type RepairRequest = { index: number; text: string; rejected_supports?: number[] } & (
   | { check: Exclude<RejectionCheck, "limit" | "rendering" | "judge">; reason: string }
