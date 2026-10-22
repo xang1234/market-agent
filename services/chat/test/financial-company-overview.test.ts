@@ -142,6 +142,54 @@ test("a question about one company that asks for no figure is answered with its 
     assert.deepEqual(dropped(), [["[chat] the planner was dropped for the company overview; its next model call was not made"]]);
   });
 
+  await t.test("a planner that fails after the overview replaced it is logged as failed, not as dropped (#473)", async (st) => {
+    const warned: unknown[][] = [];
+    st.mock.method(console, "warn", (...args: unknown[]) => warned.push(args));
+    let fail!: (reason: Error) => void;
+    const model: PlanningModel = () => new Promise((_, reject) => (fail = reject));
+    const done = completed((await chatHarness(pool, { model, readQuestion: reading(NO_ASKS), resolveMention: resolve }).run({ ...base, userIntent: "Revenue for QTRS" })).events);
+    assert.deepEqual(await results(done.message_id), QTRS_OVERVIEW);
+    fail(new Error("the model is down"));
+    const logged = () => warned.filter(([message]) => String(message).startsWith("[chat]"));
+    for (const deadline = Date.now() + 10_000; logged().length === 0 && Date.now() < deadline;) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(logged().map(([message, reason]) => [message, ((reason as Error).cause as Error).message]), [
+      ["[chat] the planner the company overview replaced had failed", "the model is down"],
+    ]);
+  });
+
+  await t.test("a planner whose reply lands while the overview reads, before that read fails, still answers (#473)", async (st) => {
+    st.mock.method(console, "warn", () => {});
+    const drafts = revenueModel(["QTRS"]);
+    let calls = 0;
+    let answer!: (reply: { text: string; model: string }) => void;
+    const model: PlanningModel = (request) => {
+      calls += 1;
+      return calls === 1 ? new Promise((resolve) => (answer = resolve)) : drafts(request);
+    };
+    let started!: () => void;
+    const overviewReads = new Promise<void>((resolve) => (started = resolve));
+    let failRead: (() => void) | undefined;
+    const slowFailing: typeof createEvidenceFinancialPort = (executor) => {
+      const port = createEvidenceFinancialPort(executor);
+      return {
+        ...port,
+        listInputCandidates: (request) => {
+          if (failRead) return port.listInputCandidates(request);
+          started();
+          return new Promise((resolve) => (failRead = () => resolve({ status: "error", reason_code: "database_error" })));
+        },
+      };
+    };
+    const turn = chatHarness(pool, { model, readQuestion: reading(NO_ASKS), resolveMention: resolve, evidence: slowFailing }).run({ ...base, userIntent: "Revenue for QTRS" });
+    await overviewReads;
+    // A reply that is no draft makes the planner ask the model again.
+    answer({ text: "not a draft", model: "test" });
+    for (const deadline = Date.now() + 2_000; calls < 2 && Date.now() < deadline;) await new Promise((resolve) => setTimeout(resolve, 10));
+    failRead!();
+    const done = completed((await turn).events);
+    assert.deepEqual([calls, (await results(done.message_id)).map(([outputId]) => outputId)], [2, ["a_out"]]);
+  });
+
   await t.test("an overview that cannot read the company's quarters falls back to the planner's answer", async (st) => {
     const warned: unknown[][] = [];
     st.mock.method(console, "warn", (...args: unknown[]) => warned.push(args));
