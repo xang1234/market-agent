@@ -185,8 +185,8 @@ export async function composeAnalystBlocksWithLlm(input: {
           "cause for; and last one specific counterpoint grounded in the data that cuts against the takeaway, as an analyst_inference.",
           // A gap's words name a metric or company nothing checks (#302).
           "List nothing for what the data shown cannot tell: the answer's own notes say what is missing, from evidence_packet.gaps.",
-          "When the metric or period the question asks for has no figure in evidence_packet, list nothing in its place:",
-          "list what the rest of the evidence says about the question, and reply with an empty list if it says nothing.",
+          "If the data shown does not answer the question (the metric or period asked for is not there), list nothing about",
+          "other figures in its place: reply with an empty list.",
           "Use only evidence_packet: never add facts, numbers, or events it does not hold.",
           "evidence_packet.figures are the figures you may cite, by id, each with its metric and, in a comparison, the company",
           "it belongs to.",
@@ -217,7 +217,7 @@ export async function composeAnalystBlocksWithLlm(input: {
           "charge management stated), and it says nothing those supports do not show, not even hedged (\"may already be priced in\");",
           "add \"subject\": the company label the inference is about, one its evidence covers).",
           "An analyst_inference's text is words only: the figures are its supports', so it writes no digit, period label or",
-          "packet id (\"the margin lead\", not \"FY2025's margin\"). Never compute new figures such as growth rates, margins, differences, or",
+          "packet id (\"a year earlier\", not FY2025). Never compute new figures such as growth rates, margins, differences, or",
           // A wrong comparison in words (#228): "nine times" for 12.8x.
           "ratios, and never state a magnitude in words (\"roughly double\", \"six times\", \"larger than X's whole revenue\"):",
           "say only the direction (\"higher\", \"faster\", \"larger\") without how much.",
