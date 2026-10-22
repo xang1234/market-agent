@@ -12,7 +12,7 @@ import { proposedMetric } from "../src/research-scope.ts";
 import { parseProposal } from "../src/scope-proposal.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import type { FinancialPool } from "../../financial-engine/src/ports.ts";
-import { chatDatabase, chatHarness, completed, INSTRUMENT_A, LISTING_A, MISSING_ISSUER, resolveMention, revenueModel } from "./financial-fixtures.ts";
+import { changing, chatDatabase, chatHarness, comparing, completed, INSTRUMENT_A, LISTING_A, MISSING_ISSUER, resolveMention, revenueModel } from "./financial-fixtures.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "../src/subjects.ts";
 
 test("financial intent is recognized from the definition catalog", () => {
@@ -60,7 +60,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
   const base = { threadId, userId: IDS.owner };
 
   await t.test("a comparison names in its answer a company that matches none, and calculates the rest, as the analyst path does", async () => {
-    const { events } = await chatHarness(pool, { model: revenueModel(["AAA", "BBB"]) }).run({ ...base, userIntent: "Compare revenue for AAA, BBB and ZZZ" });
+    const { events } = await chatHarness(pool, { model: revenueModel(["AAA", "BBB"]), readQuestion: comparing("AAA", "BBB", "ZZZ") }).run({ ...base, userIntent: "Compare revenue for AAA, BBB and ZZZ" });
     const [block, note] = (await db.query(`select blocks from chat_messages where message_id = $1`, [completed(events).message_id])).rows[0].blocks;
     assert.deepEqual(block.financial.results.map((result: { disposition: string }) => result.disposition), ["verified", "missing"]);
     assert.deepEqual(note.segments, [{ type: "text", text: "No company matched ZZZ." }]);
@@ -120,7 +120,8 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       turns_off: { facets: [], metrics: [] },
       income_items: ["revenue"],
       period: { kind: "none" },
-    }));
+      companies: { kind: "as_named" },
+    }), "");
     const { events } = await chatHarness(pool, { model: revenueModel(["AAA", "BBB"]), readQuestion }).run({ ...base, userIntent: "Compare revenue and EBITDA for AAA and BBB against the S&P 500" });
     const message = (await db.query(`select blocks from chat_messages where message_id = $1`, [completed(events).message_id])).rows[0];
     assert.deepEqual(message.blocks.map((block: { kind: string }) => block.kind), ["financial_answer", "rich_text"]);
@@ -133,8 +134,8 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     const carried = async (ticker: string) => ({ ...(await resolveMention(ticker)), handoff: { display_labels: { ticker } } }) as unknown as ChatResolvedSubjectPreResolution;
     const aaa = await carried("AAA");
     const bbb = await carried("BBB");
-    const answer = async (userIntent: string, tickers: string[], prior = [aaa]) => {
-      const { events } = await chatHarness(pool, { model: revenueModel(tickers), priorSubjects: async () => prior }).run({ ...base, userIntent });
+    const answer = async (userIntent: string, tickers: string[], prior = [aaa], readQuestion = changing({ kind: "as_named" })) => {
+      const { events } = await chatHarness(pool, { model: revenueModel(tickers), priorSubjects: async () => prior, readQuestion }).run({ ...base, userIntent });
       const [block, ...notes] = (await db.query(`select blocks from chat_messages where message_id = $1`, [completed(events).message_id])).rows[0].blocks;
       return {
         companies: Object.values(block.financial.labels as Record<string, { kind: string; text: string }>).filter((label) => label.kind === "subject").map((label) => label.text),
@@ -143,13 +144,13 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     };
     // An uppercase metric acronym is not a company.
     assert.deepEqual(await answer("What about its EBIT revenue?", ["AAA"]), { companies: ["Alpha Industries Inc."], notes: ["AAA is carried from the previous answer."] });
-    assert.deepEqual(await answer("Compare its revenue with BBB", ["AAA", "BBB"]), { companies: ["Alpha Industries Inc.", "Beta Holdings Corp."], notes: ["AAA is carried from the previous answer."] });
-    assert.deepEqual(await answer("Compare AAA and BBB revenue again", ["AAA", "BBB"]), { companies: ["Alpha Industries Inc.", "Beta Holdings Corp."], notes: [] }, "a company the question names is not carried");
-    assert.deepEqual(await answer("Add BBB's revenue", ["AAA", "BBB"]), { companies: ["Alpha Industries Inc.", "Beta Holdings Corp."], notes: ["AAA is carried from the previous answer."] });
-    assert.deepEqual(await answer("Drop BBB and show revenue", ["AAA"], [aaa, bbb]), { companies: ["Alpha Industries Inc."], notes: ["AAA is carried from the previous answer."] });
+    assert.deepEqual(await answer("Compare its revenue with BBB", ["AAA", "BBB"], [aaa], comparing("BBB")), { companies: ["Alpha Industries Inc.", "Beta Holdings Corp."], notes: ["AAA is carried from the previous answer."] });
+    assert.deepEqual(await answer("Compare AAA and BBB revenue again", ["AAA", "BBB"], [aaa], comparing("AAA", "BBB")), { companies: ["Alpha Industries Inc.", "Beta Holdings Corp."], notes: [] }, "a company the question names is not carried");
+    assert.deepEqual(await answer("Add BBB's revenue", ["AAA", "BBB"], [aaa], comparing("BBB")), { companies: ["Alpha Industries Inc.", "Beta Holdings Corp."], notes: ["AAA is carried from the previous answer."] });
+    assert.deepEqual(await answer("Drop BBB and show revenue", ["AAA"], [aaa, bbb], changing({ kind: "drop", drop: ["BBB"], add: [] })), { companies: ["Alpha Industries Inc."], notes: ["AAA is carried from the previous answer."] });
     // A comparison naming an ambiguous company asks about it and still carries the previous answer's.
     const compareAmbiguous = (clarificationAnswer?: { clarification_id: string; choice_id: string }) =>
-      chatHarness(pool, { model: revenueModel(["AAA", "AMBL"]), priorSubjects: async () => [aaa] })
+      chatHarness(pool, { model: revenueModel(["AAA", "AMBL"]), priorSubjects: async () => [aaa], readQuestion: comparing("AMBL") })
         .run({ ...base, userIntent: "Compare its revenue with AMBL", ...(clarificationAnswer ? { clarificationAnswer } : {}) });
     const asked = completed((await compareAmbiguous()).events).financial_clarification as { clarification_id: string; choices: Array<{ choice_id: string; label: string }> };
     const beta = asked.choices.find((choice) => choice.label === "Beta Holdings Corp.")!;
@@ -166,15 +167,15 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
        values ($1::uuid, $2::uuid, 'XNAS', 'ALPX', 'USD', 'America/New_York') on conflict do nothing`,
       [LISTING_A, INSTRUMENT_A],
     );
-    assert.deepEqual(await answer("Compare its revenue with AMBX", ["BBB", "AMBX"], [bbb]), { companies: ["Beta Holdings Corp.", "Alpha Industries Inc."], notes: ["BBB is carried from the previous answer."] });
+    assert.deepEqual(await answer("Compare its revenue with AMBX", ["BBB", "AMBX"], [bbb], comparing("AMBX")), { companies: ["Beta Holdings Corp.", "Alpha Industries Inc."], notes: ["BBB is carried from the previous answer."] });
     // A name the comparison gives that matches no company goes to the note, not to the question.
     const compareUnknown = (clarificationAnswer?: { clarification_id: string; choice_id: string }) =>
-      chatHarness(pool, { model: revenueModel(["AAA", "AMBL"]) }).run({ ...base, userIntent: "Compare revenue for AAA, AMBL and ZZZ", ...(clarificationAnswer ? { clarificationAnswer } : {}) });
+      chatHarness(pool, { model: revenueModel(["AAA", "AMBL"]), readQuestion: comparing("AAA", "AMBL", "ZZZ") }).run({ ...base, userIntent: "Compare revenue for AAA, AMBL and ZZZ", ...(clarificationAnswer ? { clarificationAnswer } : {}) });
     const offered = completed((await compareUnknown()).events).financial_clarification as { clarification_id: string; choices: Array<{ choice_id: string; label: string }> };
     const pickedBeta = completed((await compareUnknown({ clarification_id: offered.clarification_id, choice_id: offered.choices.find((choice) => choice.label === "Beta Holdings Corp.")!.choice_id })).events);
     const [, unknownNote] = (await db.query(`select blocks from chat_messages where message_id = $1`, [pickedBeta.message_id])).rows[0].blocks;
     assert.deepEqual(unknownNote.segments, [{ type: "text", text: "No company matched ZZZ." }]);
-    const unclear = completed((await chatHarness(pool, { model: revenueModel([]), priorSubjects: async () => [aaa, bbb] }).run({ ...base, userIntent: "What about CCC's revenue?" })).events);
+    const unclear = completed((await chatHarness(pool, { model: revenueModel([]), priorSubjects: async () => [aaa, bbb], readQuestion: changing({ kind: "unclear", names: ["CCC"] }) }).run({ ...base, userIntent: "What about CCC's revenue?" })).events);
     assert.equal(unclear.clarification, true);
     assert.equal((unclear.financial_clarification as { question: string }).question, 'Add CCC to the AAA and BBB comparison, or look at CCC alone? Say "add CCC" or "just CCC".');
     const model = revenueModel([]);
@@ -250,24 +251,24 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       seen.push(/Requested companies \(mentions\): (.*)$/mu.exec(request.messages[1]!.content)![1]!);
       return { model: "stub-model", text: JSON.stringify({ outcome: "unsupported", reason: "not needed here" }) };
     }) as unknown as PlanningModel;
-    await chatHarness(pool, { model }).run({ ...base, subjectText: "AAA", userIntent: "Compare revenue with BBB, CCC, OPM, PAX, COX and QTR" });
+    await chatHarness(pool, { model, readQuestion: comparing("BBB", "CCC", "OPM", "PAX", "COX") }).run({ ...base, subjectText: "AAA", userIntent: "Compare revenue with BBB, CCC, OPM, PAX, COX and QTR" });
     await turnWithPick(chatHarness(pool, { model }), "Compare revenue for AMB, BBB, CCC, OPM, PAX, COX and QTR", "Alpha Industries Inc.");
     // The page's company named again in the message takes one slot.
-    await chatHarness(pool, { model }).run({ ...base, subjectText: "ALPHA", userIntent: "Compare revenue for AAA with BBB, CCC, OPM, PAX and COX" });
+    await chatHarness(pool, { model, readQuestion: comparing("AAA", "BBB", "CCC", "OPM", "PAX") }).run({ ...base, subjectText: "ALPHA", userIntent: "Compare revenue for AAA with BBB, CCC, OPM, PAX and COX" });
     // Carried companies fill the slots the named ones leave.
     const carried = async (ticker: string) => ({ ...(await resolveMention(ticker)), handoff: { display_labels: { ticker } } }) as unknown as ChatResolvedSubjectPreResolution;
     const prior = [await carried("AAA"), await carried("QTR")];
-    await turnWithPick(chatHarness(pool, { model, priorSubjects: async () => prior }), "Compare its revenue with AMB, OPM, PAX and COX", "Beta Holdings Corp.");
+    await turnWithPick(chatHarness(pool, { model, priorSubjects: async () => prior, readQuestion: comparing("AMB", "OPM", "PAX", "COX") }), "Compare its revenue with AMB, OPM, PAX and COX", "Beta Holdings Corp.");
     // A company named twice takes one of the slots the carried ones fill.
     const three = [await carried("QTR"), await carried("COX"), await carried("CCC")];
-    await turnWithPick(chatHarness(pool, { model, priorSubjects: async () => three }), "Compare its revenue with AMB, AAA and ALPHA", "Beta Holdings Corp.");
+    await turnWithPick(chatHarness(pool, { model, priorSubjects: async () => three, readQuestion: comparing("AMB", "AAA", "ALPHA") }), "Compare its revenue with AMB, AAA and ALPHA", "Beta Holdings Corp.");
     // An ambiguous name past the cap is still asked about; a resolved company gives up its slot.
     const offered = completed((await chatHarness(pool, { model }).run({ ...base, userIntent: "Compare revenue for BBB, CCC, OPM, PAX, COX and AMB" })).events);
     assert.equal(offered.clarification, true, "the ambiguous company is asked about");
     await turnWithPick(chatHarness(pool, { model }), "Compare revenue for BBB, CCC, OPM, PAX, COX and AMB", "Alpha Industries Inc.");
     // A carried company named by the ticker the message gives another one is named to the planner by its legal name.
     const alphaAsAmb = { ...(await resolveMention("AAA")), handoff: { display_labels: { ticker: "AMB" } } } as unknown as ChatResolvedSubjectPreResolution;
-    await turnWithPick(chatHarness(pool, { model, priorSubjects: async () => [alphaAsAmb] }), "Compare its revenue with the other AMB", "Beta Holdings Corp.");
+    await turnWithPick(chatHarness(pool, { model, priorSubjects: async () => [alphaAsAmb], readQuestion: comparing("AMB") }), "Compare its revenue with the other AMB", "Beta Holdings Corp.");
     assert.deepEqual(seen, [
       "AAA; BBB; CCC; OPM; PAX",
       "AMB; BBB; CCC; OPM; PAX",
@@ -293,7 +294,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     let reads = 0;
     const readQuestion = async () => {
       reads += 1;
-      return parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" } }));
+      return parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named" } }), "");
     };
     // As financialResearchScope does, the scope waits for the reading.
     const researchScope = async (context: Parameters<typeof scopeOver>[0], reading: Promise<unknown>) => {
@@ -321,7 +322,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(await answer(async () => null), unchecked, "no reading");
     assert.deepEqual(await answer(async () => { throw new Error("scope model down"); }), unchecked, "a failed reading");
     assert.deepEqual(await answer(() => { throw new Error("no scope reader"); }), unchecked, "a reader that throws before it answers");
-    assert.deepEqual(await answer(async () => parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" } }))), [[], undefined]);
+    assert.deepEqual(await answer(async () => parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named" } }), "")), [[], undefined]);
   });
 
   await t.test("each name a turn gives is resolved once (#425)", async () => {
@@ -369,7 +370,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
 
   await t.test("an explicit subject is planned first, alongside the companies the message names (#138)", async () => {
     const model = revenueModel(["AAA", "BBB"]);
-    const { events } = await chatHarness(pool, { model }).run({ ...base, subjectText: "AAA", userIntent: "Compare revenue with BBB" });
+    const { events } = await chatHarness(pool, { model, readQuestion: comparing("BBB") }).run({ ...base, subjectText: "AAA", userIntent: "Compare revenue with BBB" });
     const done = completed(events);
     const message = (await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id])).rows[0];
     assert.ok(message, `expected a published answer; got ${JSON.stringify(done)}`);
@@ -378,7 +379,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
   });
 
   await t.test("from a company's page, a compared name that matches no company is named in the answer", async () => {
-    const { events } = await chatHarness(pool, { model: revenueModel(["AAA"]) }).run({ ...base, subjectText: "AAA", userIntent: "Compare revenue with ZZZ" });
+    const { events } = await chatHarness(pool, { model: revenueModel(["AAA"]), readQuestion: comparing("ZZZ") }).run({ ...base, subjectText: "AAA", userIntent: "Compare revenue with ZZZ" });
     const [block, note] = (await db.query(`select blocks from chat_messages where message_id = $1`, [completed(events).message_id])).rows[0].blocks;
     assert.deepEqual(block.financial.results.map((result: { disposition: string }) => result.disposition), ["verified"]);
     assert.deepEqual(note.segments, [{ type: "text", text: "No company matched ZZZ." }]);
@@ -394,7 +395,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
 
   await t.test("an explicit subject and a mention of the same company are planned once", async () => {
     const model = revenueModel(["ALPHA", "BBB"]);
-    const { events } = await chatHarness(pool, { model }).run({ ...base, subjectText: "ALPHA", userIntent: "Compare revenue for AAA and BBB" });
+    const { events } = await chatHarness(pool, { model, readQuestion: comparing("AAA", "BBB") }).run({ ...base, subjectText: "ALPHA", userIntent: "Compare revenue for AAA and BBB" });
     const done = completed(events);
     const message = (await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id])).rows[0];
     assert.ok(message, `expected a published answer; got ${JSON.stringify(done)}`);
@@ -619,10 +620,11 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     const carried = async (ticker: string) => ({ ...(await resolveMention(ticker)), handoff: { display_labels: { ticker } } }) as unknown as ChatResolvedSubjectPreResolution;
     const [aaa, bbb] = [await carried("AAA"), await carried("BBB")];
     const turn = { ...base, turnId: randomUUID(), userIntent: "Drop BBB and show revenue" };
-    const first = completed((await chatHarness(pool, { model: revenueModel(["AAA"]), priorSubjects: async () => [aaa, bbb] }).run(turn)).events);
+    const dropBbb = changing({ kind: "drop", drop: ["BBB"], add: [] });
+    const first = completed((await chatHarness(pool, { model: revenueModel(["AAA"]), priorSubjects: async () => [aaa, bbb], readQuestion: dropBbb }).run(turn)).events);
     // The thread's latest answer is now this turn's own, about AAA alone.
     const model = revenueModel(["AAA"]);
-    const retried = completed((await chatHarness(pool, { model, priorSubjects: async () => [aaa] }).run(turn)).events);
+    const retried = completed((await chatHarness(pool, { model, priorSubjects: async () => [aaa], readQuestion: dropBbb }).run(turn)).events);
     assert.deepEqual([retried.message_id, retried.clarification, model.calls], [first.message_id, undefined, 0]);
   });
 

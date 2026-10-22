@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { createDefaultPiLlmChatClient } from "../../llm/src/index.ts";
-import { parseResearchScope, resolveResearchScope, type ResearchScope, type ScopePeriod } from "../src/research-scope.ts";
+import { parseResearchScope, resolveResearchScope, type ResearchScope, type ScopeProposal } from "../src/research-scope.ts";
 import { parseProposal, proposalQuestion, proposeScope } from "../src/scope-proposal.ts";
 
 const ROOT = join(import.meta.dirname, "../../..");
@@ -29,11 +29,12 @@ const COMPANIES = {
   NVDA: { issuer_id: "60000000-0000-4000-8000-000000000001", label: "NVDA" },
   AMD: { issuer_id: "60000000-0000-4000-8000-000000000002", label: "AMD" },
   AAPL: { issuer_id: "60000000-0000-4000-8000-000000000003", label: "AAPL" },
+  TSLA: { issuer_id: "60000000-0000-4000-8000-000000000004", label: "TSLA" },
 };
 
-// The fields an eval case checks: a resolved scope's, and the period kind its
-// reading names.
-export function scopeView(scope: ResearchScope, period: ScopePeriod) {
+// The fields an eval case checks: a resolved scope's, and the period kind and
+// change to the companies its reading names.
+export function scopeView(scope: ResearchScope, reading: ScopeProposal) {
   return {
     route: scope.route,
     reads: scope.reads,
@@ -49,7 +50,8 @@ export function scopeView(scope: ResearchScope, period: ScopePeriod) {
     fiscal_quarter: scope.fiscal_quarter && `${scope.fiscal_quarter.fiscal_period} ${scope.fiscal_quarter.fiscal_year}`,
     price_window: scope.price_window?.kind ?? null,
     benchmark: scope.benchmark,
-    period: period.kind,
+    period: reading.period.kind,
+    companies: reading.companies,
   };
 }
 export type ScopeView = ReturnType<typeof scopeView>;
@@ -79,7 +81,7 @@ export function replyTo(replies: ScopeEvalReplies, question: string): string | u
 export function caseFailures(evalCase: ScopeEvalCase, reply: string | undefined): string[] {
   const name = `#${evalCase.id} ${evalCase.question}`;
   if (reply === undefined) return [`${name}: no recorded reply`];
-  const proposal = parseProposal(reply);
+  const proposal = parseProposal(reply, evalCase.question);
   if (proposal === null) return [`${name}: reply rejected: ${reply}`];
   const view = scopeView(resolveResearchScope({
     question: evalCase.question,
@@ -87,7 +89,7 @@ export function caseFailures(evalCase: ScopeEvalCase, reply: string | undefined)
     prior: evalCase.prior === null ? null : parseResearchScope(evalCase.prior),
     asOf: AS_OF,
     proposal,
-  }), proposal.period);
+  }), proposal);
   return (Object.keys(evalCase.expected) as Array<keyof ScopeView>).flatMap((field) => {
     const right = [evalCase.expected[field], ...(evalCase.accept?.[field] ? [evalCase.accept[field].value] : [])].map((value) => JSON.stringify(value));
     const got = JSON.stringify(view[field]);
@@ -125,7 +127,7 @@ async function recordLiveReplies(): Promise<number> {
   writeFileSync(REPLIES_FILE, `${JSON.stringify(recorded, null, 2)}\n`);
   const failing = cases.map((evalCase) => caseFailures(evalCase, replyTo(recorded, evalCase.question))).filter((failures) => failures.length > 0);
   for (const failure of failing.flat()) console.log(failure);
-  const rejected = replies.filter((reply) => parseProposal(reply.text) === null).length;
+  const rejected = [...new Set(cases.map((evalCase) => evalCase.question))].filter((question) => parseProposal(replyTo(recorded, question)!, question) === null).length;
   console.log(`${recorded.model}: ${cases.length - failing.length} of ${cases.length} cases as expected; ${rejected} of ${replies.length} replies rejected`);
   return failing.length === 0 ? 0 : 1;
 }

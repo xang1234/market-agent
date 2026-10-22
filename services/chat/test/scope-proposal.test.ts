@@ -13,12 +13,13 @@ const ENV = {
   LLM_OPENAI_MODELS: "gpt-4.1",
   LITELLM_MODEL: "openai/gpt-4.1",
 };
-const EMPTY = { metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" } };
+const EMPTY = { metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named" } };
 const reply = (fields: Record<string, unknown>) => JSON.stringify({ ...EMPTY, ...fields });
+const parse = (text: string, question = "") => parseProposal(text, question);
 const replying = (text: string) => () => async () => ({ text });
 
 test("a full reply is read into the proposal, each metric built from the catalog", () => {
-  assert.deepEqual(parseProposal(reply({
+  assert.deepEqual(parse(reply({
     metrics: [
       { metric: "eps_diluted", adjustment: "adjusted", qualifier: null },
       { metric: "free_cash_flow", adjustment: null, qualifier: "growth" },
@@ -38,6 +39,7 @@ test("a full reply is read into the proposal, each metric built from the catalog
     turns_off: { facets: new Set(["segments", "fiscal_quarter"]), metrics: new Set(["capex", "eps_diluted_non_gaap"]) },
     income_items: ["revenue", "operating_income"],
     period: { kind: "fiscal_year", fiscal_year: 2025 },
+    companies: { kind: "as_named" },
   });
 });
 
@@ -52,7 +54,7 @@ test("each kind of period is read with exactly its fields (#472)", () => {
     { kind: "range" },
     { kind: "other" },
   ]) {
-    assert.deepEqual(parseProposal(reply({ period }))?.period, period, JSON.stringify(period));
+    assert.deepEqual(parse(reply({ period }))?.period, period, JSON.stringify(period));
   }
   for (const period of [
     { kind: "next_year" },
@@ -69,15 +71,58 @@ test("each kind of period is read with exactly its fields (#472)", () => {
     "latest",
     null,
   ]) {
-    assert.equal(parseProposal(reply({ period })), null, JSON.stringify(period));
+    assert.equal(parse(reply({ period })), null, JSON.stringify(period));
   }
   const { period: _period, ...noPeriod } = EMPTY;
-  assert.equal(parseProposal(JSON.stringify(noPeriod)), null, "no period");
+  assert.equal(parse(JSON.stringify(noPeriod)), null, "no period");
+});
+
+test("each change to the companies is read with exactly its fields", () => {
+  const question = "Drop AMD and add Tesla, or just AAPL? What about MSFT, GOOG and META?";
+  for (const companies of [
+    { kind: "as_named" },
+    { kind: "compare", add: [] },
+    { kind: "compare", add: ["tesla"] },
+    { kind: "drop", drop: ["AMD"], add: [] },
+    { kind: "drop", drop: ["AMD"], add: ["Tesla"] },
+    { kind: "only", names: ["AAPL"] },
+    { kind: "unclear", names: ["AAPL", "MSFT", "GOOG", "META", "AMD"] },
+  ]) {
+    assert.deepEqual(parse(reply({ companies }), question)?.companies, companies, JSON.stringify(companies));
+  }
+  for (const companies of [
+    { kind: "switch", names: ["AAPL"] },
+    { kind: "as_named", names: [] },
+    { kind: "compare" },
+    { kind: "compare", add: ["AMD"], drop: [] },
+    { kind: "drop", drop: [], add: ["AMD"] },
+    { kind: "drop", drop: ["AMD"] },
+    { kind: "only", names: [] },
+    { kind: "unclear", names: [] },
+    { kind: "unclear", names: ["AAPL", "MSFT", "GOOG", "META", "AMD", "Tesla"] },
+    { kind: "only", names: [42] },
+    { kind: "only", names: [""] },
+    { kind: "only", names: "AAPL" },
+    "as_named",
+    null,
+  ]) {
+    assert.equal(parse(reply({ companies }), question), null, JSON.stringify(companies));
+  }
+  const { companies: _companies, ...noCompanies } = EMPTY;
+  assert.equal(parse(JSON.stringify(noCompanies), question), null, "no companies");
+});
+
+test("a company the question does not write refuses the whole proposal", () => {
+  const read = (companies: unknown) => parse(reply({ asks: ["peers"], companies }), "Compare it with AMD");
+  assert.deepEqual(read({ kind: "compare", add: ["amd"] })?.asks, new Set(["peers"]));
+  assert.equal(read({ kind: "compare", add: ["AMD", "NVDA"] }), null);
+  assert.equal(read({ kind: "drop", drop: ["AMD"], add: ["Advanced Micro Devices"] }), null);
+  assert.equal(read({ kind: "only", names: ["AAPL"] }), null);
 });
 
 test("a metric to turn off may be its bare catalog key (#378 eval)", () => {
-  assert.deepEqual(parseProposal(reply({ turns_off: { facets: [], metrics: ["capex", { metric: "free_cash_flow" }] } }))?.turns_off.metrics, new Set(["capex", "free_cash_flow"]));
-  assert.equal(parseProposal(reply({ turns_off: { facets: [], metrics: ["price_to_book"] } })), null);
+  assert.deepEqual(parse(reply({ turns_off: { facets: [], metrics: ["capex", { metric: "free_cash_flow" }] } }))?.turns_off.metrics, new Set(["capex", "free_cash_flow"]));
+  assert.equal(parse(reply({ turns_off: { facets: [], metrics: ["price_to_book"] } })), null);
 });
 
 test("anything outside the vocabularies, or malformed, refuses the whole proposal", () => {
@@ -100,30 +145,31 @@ test("anything outside the vocabularies, or malformed, refuses the whole proposa
     '{"metrics":[{"metric":"capex"}]',
     "free cash flow",
   ]) {
-    assert.equal(parseProposal(text), null, text);
+    assert.equal(parse(text), null, text);
   }
 });
 
 test("an adjusted income figure is the non-GAAP gap; an unavailable metric stays the gap it is", () => {
   const nonGaap = { metric_key: "non_gaap_income", label: "Non-GAAP earnings", available: false };
   for (const adjustment of ["adjusted", "non_gaap", "pro_forma"]) {
-    assert.deepEqual(parseProposal(reply({ metrics: [{ metric: "income_statement", adjustment }] }))?.metrics, [nonGaap], adjustment);
+    assert.deepEqual(parse(reply({ metrics: [{ metric: "income_statement", adjustment }] }))?.metrics, [nonGaap], adjustment);
   }
-  assert.deepEqual(parseProposal(reply({ metrics: [{ metric: "ebitda", qualifier: "margin" }] }))?.metrics, [
+  assert.deepEqual(parse(reply({ metrics: [{ metric: "ebitda", qualifier: "margin" }] }))?.metrics, [
     { metric_key: "ebitda", label: "EBITDA", available: false },
   ]);
-  assert.deepEqual(parseProposal(reply({ metrics: [{ metric: "free_cash_flow", qualifier: "ytd" }] }))?.metrics, [
+  assert.deepEqual(parse(reply({ metrics: [{ metric: "free_cash_flow", qualifier: "ytd" }] }))?.metrics, [
     { metric_key: "free_cash_flow_ytd", label: "Free cash flow year to date", available: false, base: "free_cash_flow", qualifier: "ytd" },
   ]);
 });
 
 test("a reply wrapped in prose or a fence is read", () => {
-  assert.deepEqual(parseProposal(`Sure:\n\`\`\`json\n${reply({ asks: ["peers"] })}\n\`\`\``), {
+  assert.deepEqual(parse(`Sure:\n\`\`\`json\n${reply({ asks: ["peers"] })}\n\`\`\``), {
     metrics: [],
     asks: new Set(["peers"]),
     turns_off: { facets: new Set(), metrics: new Set() },
     income_items: [],
     period: { kind: "none" },
+    companies: { kind: "as_named" },
   });
 });
 

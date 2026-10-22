@@ -25,7 +25,7 @@
 
 import type { RejectionCheck } from "../../src/assertions.ts";
 
-export const HOLDOUT_VERSION = 13;
+export const HOLDOUT_VERSION = 14;
 
 type Assertion = Record<string, unknown>;
 
@@ -81,11 +81,19 @@ type ScopeReply = {
   turns_off: { facets: ReadonlyArray<string>; metrics: ReadonlyArray<{ metric: string }> };
   income_items: ReadonlyArray<string>;
   period: Readonly<Record<string, string | number | null>>;
+  companies: Readonly<Record<string, string | ReadonlyArray<string>>>;
 };
 // A turn's recorded scope: the facets it asks for, the catalog metrics and the
-// income items it names, its period (none unless named), nothing turned off.
-const scope = (asks: string[] = [], metrics: string[] = [], items: string[] = [], period: ScopeReply["period"] = { kind: "none" }): ScopeReply =>
-  ({ metrics: metrics.map((metric) => ({ metric })), asks, turns_off: { facets: [], metrics: [] }, income_items: items, period });
+// income items it names, its period (none unless named), its change to
+// the companies (none unless named), nothing turned off.
+const scope = (
+  asks: string[] = [],
+  metrics: string[] = [],
+  items: string[] = [],
+  period: ScopeReply["period"] = { kind: "none" },
+  companies: ScopeReply["companies"] = { kind: "as_named" },
+): ScopeReply => ({ metrics: metrics.map((metric) => ({ metric })), asks, turns_off: { facets: [], metrics: [] }, income_items: items, period, companies });
+const LATEST = { kind: "latest" };
 const INCOME = ["income_statement"];
 
 const obs = (text: string, evidence: string[]): Assertion => ({ kind: "observation", text, evidence });
@@ -134,7 +142,8 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
     id: "three-company-order",
     trap: "three companies on revenue and margins: a figure credited to the wrong company, or a company dropped",
     turns: ["Compare NVDA, AMD and AAPL on revenue and margins."],
-    scopes: [scope(["margins"], INCOME, ["revenue"])],
+      // hand-labelled 2026-10-22 #472: period and companies added by hand; replace on live re-record.
+    scopes: [scope(["margins"], INCOME, ["revenue"], LATEST, { kind: "compare", add: ["NVDA", "AMD", "AAPL"] })],
     plan: draft(["NVDA", "AMD", "AAPL"], [...latestMargins("a"), ...latestMargins("b"), ...latestMargins("c")],
       ["a", "b", "c"].flatMap((slot) => [`${slot}_rev`, `${slot}_gm`, `${slot}_om`, `${slot}_nm`])),
     expect: {
@@ -161,7 +170,8 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
     id: "fiscal-period",
     trap: "the fiscal year asked for, whose calendars end eight months apart; a substituted year",
     turns: ["Compare NVDA's and AAPL's fiscal 2025 revenue."],
-    scopes: [scope([], INCOME, ["revenue"], { kind: "fiscal_year", fiscal_year: 2025 })],
+      // hand-labelled 2026-10-22 #472: period and companies added by hand; replace on live re-record.
+    scopes: [scope([], INCOME, ["revenue"], { kind: "fiscal_year", fiscal_year: 2025 }, { kind: "compare", add: ["NVDA", "AAPL"] })],
     plan: draft(["NVDA", "AAPL"], [reported("a", "a_rev", "revenue", fiscal(2025, "FY")), reported("b", "b_rev", "revenue", fiscal(2025, "FY"))], ["a_rev", "b_rev"]),
     expect: {
       companies: ["NVDA", "AAPL"],
@@ -178,6 +188,7 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
     id: "unknown-cause",
     trap: "a margin drop with no cause in evidence: the change is calculated, and no cause is stated",
     turns: ["What changed in NVDA's gross margin in Q1 fiscal 2026?"],
+      // hand-labelled 2026-10-22 #472: period and companies added by hand; replace on live re-record.
     scopes: [scope(["margin_trend"], [], ["gross_margin"], { kind: "fiscal_quarter", fiscal_period: "Q1", fiscal_year: 2026 })],
     plan: draft(["NVDA"], [
       reported("a", "gp_q4", "gross_profit", fiscal(2025, "Q4")),
@@ -203,6 +214,7 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
     id: "missing-cash-flow",
     trap: "free cash flow is not in the data: a declared gap, never a number in its place",
     turns: ["What is AMD's free cash flow?"],
+      // hand-labelled 2026-10-22 #472: period and companies added by hand; replace on live re-record.
     scopes: [scope([], ["free_cash_flow"])],
     plan: draft(["AMD"], [
       reported("a", "a_ocf", "operating_cash_flow", latest("annual")),
@@ -225,7 +237,8 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
     id: "restatement",
     trap: "a restated quarter shows its restated value; the superseded one is not a cited value",
     turns: ["Analyze AAPL's latest quarter."],
-    scopes: [scope(["latest_quarter"], [], [], { kind: "latest" })],
+      // hand-labelled 2026-10-22 #472: period and companies added by hand; replace on live re-record.
+    scopes: [scope(["latest_quarter"], [], [], LATEST)],
     expect: { companies: ["AAPL"], route: "latest_quarter", shows: { block_title: "Latest quarter (Q3 2026)", label: "Revenue", format: "$97.4B" } },
     prose: "AAPL's revenue was $97.4B in its latest quarter.",
     good: [obs("AAPL's revenue was [[F1]] in Q3 2026.", ["F1"])],
@@ -237,6 +250,7 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
     id: "segment-definition",
     trap: "a redefined segment: the engine has no segment definition, so neither definition's revenue is shown",
     turns: ["Break down NVDA's revenue by segment."],
+      // hand-labelled 2026-10-22 #472: period and companies added by hand; replace on live re-record.
     scopes: [scope(["segments"], INCOME, ["revenue"])],
     plan: { outcome: "unsupported", reason: "segments" },
     expect: { companies: ["NVDA"], financial_gap: "unsupported", absent_kinds: ["metric_row", "financial_answer"] },
@@ -246,7 +260,8 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
     id: "ambiguous-follow-up",
     trap: "a follow-up naming a new company after a comparison could add it or switch to it: ask, never guess",
     turns: ["Compare NVDA with AMD.", "What about AAPL?"],
-    scopes: [scope(), scope()],
+      // hand-labelled 2026-10-22 #472: period and companies added by hand; replace on live re-record.
+    scopes: [scope([], [], [], LATEST, { kind: "compare", add: ["NVDA", "AMD"] }), scope([], [], [], LATEST, { kind: "unclear", names: ["AAPL"] })],
     expect: { companies: [], clarification: true, absent_kinds: ["metric_row", "metrics_comparison", "revenue_bars"] },
     prose: "",
   },
@@ -254,6 +269,7 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
     id: "interior-extremum-and-trend",
     trap: "a low inside the window, a rebound and net rise: every quarter is calculated, the low among them",
     turns: ["How have AMD's operating margins trended over the last eight quarters?"],
+      // hand-labelled 2026-10-22 #472: period and companies added by hand; replace on live re-record.
     scopes: [scope(["margins", "margin_trend"], INCOME, ["operating_margin"], { kind: "range" })],
     plan: draft(["AMD"], [7, 6, 5, 4, 3, 2, 1, 0].flatMap((offset) => amdOperatingMargin(latest("quarterly", offset), `q${offset}`)),
       [7, 6, 5, 4, 3, 2, 1, 0].map((offset) => `om_q${offset}`)),
@@ -277,7 +293,8 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
     id: "comparison-follow-up-scope",
     trap: "a follow-up keeps both companies and the sealed YTD window; a conclusion on a narrowed cohort or the wrong winner; an inference crediting one company with another's figure",
     turns: ["Analyze NVDA", "Compare it with AMD YTD", "Explain the differences and show the evidence"],
-    scopes: [scope(), scope(["price_window"]), scope(["explains", "evidence"])],
+      // hand-labelled 2026-10-22 #472: period and companies added by hand; replace on live re-record.
+    scopes: [scope(), scope(["price_window"], [], [], LATEST, { kind: "compare", add: ["AMD"] }), scope(["explains", "evidence"])],
     expect: {
       companies: ["NVDA", "AMD"],
       route: "evidence_followup",
@@ -317,6 +334,7 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
     id: "filed-cause",
     trap: "a cause asked for: the margin is calculated, and the answer says the cause is not",
     turns: ["Why did AMD's operating margin turn negative in Q2 2025?"],
+      // hand-labelled 2026-10-22 #472: period and companies added by hand; replace on live re-record.
     scopes: [scope(["explains", "margin_trend"], INCOME, ["operating_margin"], { kind: "fiscal_quarter", fiscal_period: "Q2", fiscal_year: 2025 })],
     plan: draft(["AMD"], amdOperatingMargin(fiscal(2025, "Q2"), "q2"), ["om_q2"]),
     expect: {

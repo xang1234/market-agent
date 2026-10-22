@@ -101,7 +101,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   const carriedSubjects = context.subjectPreResolutions ?? (resolved ? [resolved] : []);
   // What the turn asks for, keeping a follow-up's unchanged scope (#206). A
   // window asked for now is cut off at the turn's asOf, which a follow-up keeps.
-  const scopeAt = await analystTurnScope(context.threadId, context.userIntent ?? "", carriedSubjects);
+  const scopeAt = await analystTurnScope(context.threadId, context.userIntent ?? "", carriedSubjects, context.reading?.() ?? Promise.resolve(null));
   // A live YTD request fetches its prices first, so the cutoff below covers them (#232).
   await hydrateYtdWindow(scopeAt(turnNow(process.env)), carriedSubjects);
   const asOf = turnNow(process.env);
@@ -321,14 +321,18 @@ async function withCompanyLabels(scope: ResearchScope, asOf: string): Promise<Re
 }
 
 // An analyst turn's scope at a cutoff: what the question asks for and turns
-// off, as a model reads it (scope-proposal.ts).
+// off, as the turn's reading has it (scope-proposal.ts).
 export function analystTurnScope(
   threadId: string,
   question: string,
   covered: ReadonlyArray<ChatResolvedSubjectPreResolution>,
+  reading: Promise<ScopeProposal | null>,
 ): Promise<(cutoff: string) => ResearchScope> {
-  return turnScope(threadId, question, covered, false, proposeScope({ question }));
+  return turnScope(threadId, question, covered, false, reading);
 }
+
+// The turn's one reading of its question (coordinator.ts readingRunner).
+export const readQuestion = (question: string) => proposeScope({ question });
 
 // The turn's research scope at a cutoff (research-scope.ts): what it asks for,
 // keeping the previous answer's scope where it continues it. The companies are
@@ -495,7 +499,6 @@ export const financialRuntime: ChatFinancialRuntime = createChatFinancialRuntime
   resolveMention: (mention) => preResolveSubject({ text: mention }),
   priorSubjects: (threadId) => loadPriorSubjects({ threadId }),
   evidence: createEvidenceFinancialPort,
-  readQuestion: (question) => proposeScope({ question }),
   researchScope: financialResearchScope,
   commentary: (db, input) => saveCommentary(db, (answer, turn, onAnswered) =>
     answerTurn(answer, turn, { env: process.env, traceDir: process.env.CHAT_TRACE_DIR?.trim(), onAnswered }), input),

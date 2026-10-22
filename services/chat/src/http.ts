@@ -75,6 +75,7 @@ export type ChatServerOptions = {
   persistAssistantMessage?: ChatAssistantMessagePersistence;
   preResolveSubject?: ChatSubjectPreResolver;
   loadPriorSubjects?: ChatPriorSubjectsLoader;
+  readQuestion?: ChatCoordinatorOptions["readQuestion"];
   renderSubjectClarification?: ChatSubjectClarificationRenderer;
   runActivity?: ChatRunActivityReporter;
   generateThreadTitle?: ChatThreadTitleGenerator;
@@ -93,6 +94,7 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
     persistAssistantMessage: options.persistAssistantMessage,
     preResolveSubject: options.preResolveSubject,
     loadPriorSubjects: options.loadPriorSubjects,
+    readQuestion: options.readQuestion,
     renderSubjectClarification: options.renderSubjectClarification,
     runActivity: options.runActivity,
     generateThreadTitle: options.generateThreadTitle,

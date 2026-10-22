@@ -3,6 +3,7 @@ import {
   type IncomeItem,
   type PERIOD_FIELDS,
   type RequestedMetric,
+  type CompanyChange,
   type ScopeFacet,
   type ScopePeriod,
   type ScopeProposal,
@@ -12,7 +13,8 @@ type Metric = string | { metric: string; adjustment?: string; qualifier?: string
 
 // A model's proposal (scope-proposal.ts) as a test writes it: catalog metric
 // keys (or a key with its adjustment or qualifier), facets, what it turns off,
-// income items and its period (none unless named).
+// income items, its period (none unless named) and its change to the
+// companies (none unless named).
 export function proposal(reply: {
   metrics?: ReadonlyArray<Metric>;
   asks?: ReadonlyArray<ScopeFacet>;
@@ -20,6 +22,7 @@ export function proposal(reply: {
   offMetrics?: ReadonlyArray<Metric>;
   items?: ReadonlyArray<IncomeItem>;
   period?: ScopePeriod;
+  companies?: CompanyChange;
 } = {}): ScopeProposal {
   return {
     metrics: (reply.metrics ?? []).map(built),
@@ -27,6 +30,7 @@ export function proposal(reply: {
     turns_off: { facets: new Set(reply.off), metrics: new Set((reply.offMetrics ?? []).map((metric) => built(metric).metric_key)) },
     income_items: reply.items ?? [],
     period: reply.period ?? { kind: "none" },
+    companies: reply.companies ?? { kind: "as_named" },
   };
 }
 

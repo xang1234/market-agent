@@ -13,10 +13,11 @@ import {
   type ChatAnalystToolRuntime,
   type ChatAssistantMessageCommit,
   type ChatAssistantMessagePersistence,
+  type ChatCoordinatorOptions,
   type ChatTurnInput,
 } from "../src/coordinator.ts";
 import { createChatFinancialRuntime } from "../src/financial-runtime.ts";
-import { proposedMetric, resolveResearchScope, type ScopeProposal } from "../src/research-scope.ts";
+import { proposedMetric, resolveResearchScope, type CompanyChange, type ScopeProposal } from "../src/research-scope.ts";
 import type { ChatSubjectPreResolution } from "../src/subjects.ts";
 import { readMessage } from "./read-message-fixture.ts";
 
@@ -84,8 +85,11 @@ export function resolveMention(mention: string): Promise<ChatSubjectPreResolutio
   return Promise.resolve(table[mention] ?? ({ status: "not_found", input_text: mention, normalized_input: mention, message: "not found" } as ChatSubjectPreResolution));
 }
 
-export const NO_ASKS: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [], period: { kind: "none" } };
+export const NO_ASKS: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named" } };
 export const METRIC_READING: ScopeProposal = { ...NO_ASKS, metrics: [proposedMetric("income_statement", null, null)!] };
+/** A reading of a metric question that changes the companies so. */
+export const changing = (companies: CompanyChange) => async (): Promise<ScopeProposal> => ({ ...METRIC_READING, companies });
+export const comparing = (...add: string[]) => changing({ kind: "compare", add });
 
 /** A planning model that answers every call with a revenue draft for the given slots, and counts calls. */
 export function revenueModel(mentions: ReadonlyArray<string>): PlanningModel & { calls: number } {
@@ -119,7 +123,7 @@ export function chatHarness(
     analyst?: ChatAnalystToolRuntime;
     // null: the runtime is given no scope.
     researchScope?: Parameters<typeof createChatFinancialRuntime>[0]["researchScope"] | null;
-    readQuestion?: Parameters<typeof createChatFinancialRuntime>[0]["readQuestion"];
+    readQuestion?: ChatCoordinatorOptions["readQuestion"];
     priorSubjects?: Parameters<typeof createChatFinancialRuntime>[0]["priorSubjects"];
     resolveMention?: typeof resolveMention;
     clock?: () => Date;
@@ -132,6 +136,7 @@ export function chatHarness(
   const persisted: Array<Parameters<ChatAssistantMessageCommit>[0]> = [];
   const coordinator = createChatCoordinator({
     analystToolRuntime: options.analyst ?? forbiddenAnalyst,
+    readQuestion: options.readQuestion ?? (async () => METRIC_READING),
     persistAssistantMessage: async (message) => {
       persisted.push(message);
       return options.persistAssistantMessage?.(message) ?? readMessage({ snapshot_id: randomUUID(), message_id: randomUUID(), thread_id: message.threadId });
@@ -146,7 +151,6 @@ export function chatHarness(
         researchScope: options.researchScope ?? (async (context, read) =>
           resolveResearchScope({ question: context.userIntent ?? "", companies: [], prior: null, asOf: (options.clock?.() ?? new Date()).toISOString(), proposal: await read })),
       }),
-      readQuestion: options.readQuestion ?? (async () => METRIC_READING),
       ...(options.priorSubjects ? { priorSubjects: options.priorSubjects } : {}),
       ...(options.clock ? { clock: options.clock } : {}),
       ...(options.commentary ? { commentary: options.commentary } : {}),

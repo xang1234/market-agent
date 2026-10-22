@@ -43,12 +43,12 @@ import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../fi
 import { requireFinancialReadiness } from "../../financial-engine/src/readiness.ts";
 import { publishRequest, type RequestGap } from "../../financial-engine/src/request.ts";
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
-import { comparativeTurn, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
+import { comparedAdditions, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId } from "./chat-ids.ts";
 import { namesCompanies, overviewPeers, overviewSubjects, planCompanyOverview, type PeersOf } from "./company-overview.ts";
 import { noteBlock } from "./fact-blocks.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
-import { COMPARATIVE, companyKey, extractSubjectMentions } from "./subject-extraction.ts";
+import { companyKey, extractSubjectMentions } from "./subject-extraction.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "./subjects.ts";
 import {
   BALANCE_SHEET_ITEMS,
@@ -113,8 +113,6 @@ export type ChatFinancialRuntimeDeps = Readonly<{
   /** The companies the thread's previous answer covered, for a question that names none. */
   priorSubjects?: (threadId: string) => Promise<ReadonlyArray<ChatResolvedSubjectPreResolution>>;
   evidence: (executor: SqlExecutor) => FinancialEvidencePort;
-  /** What a model reads the question to ask for (scope-proposal.ts); null or absent, the answer says its coverage was not checked. */
-  readQuestion?: (question: string) => Promise<ScopeProposal | null>;
   /** The turn's research scope, saved with a published answer (#206); absent, none is saved. */
   researchScope?: (context: ChatFinancialTurnContext, reading: Promise<ScopeProposal | null>) => Promise<ResearchScope>;
   /** The knowledge cutoff a new turn plans at; the wall clock when absent. */
@@ -200,10 +198,8 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     const reading = answered ? Promise.resolve(null) : new Promise<ScopeProposal | null>((resolve) => {
       decideReading = (read) => {
         decideReading = () => {};
-        resolve(read ? Promise.resolve().then(() => deps.readQuestion?.(text) ?? null).catch((reason) => {
-          console.warn("[chat] no reading of the question; the financial answer says its coverage was not checked", reason);
-          return null;
-        }) : null);
+        // None, the answer says its coverage was not checked.
+        resolve(read ? context.reading?.() ?? null : null);
       };
     });
     const { planningModel: model } = deps;
@@ -341,13 +337,13 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
 }
 
 // The mentions a turn's plan requests: an explicit subject (a thread opened
-// from a ticker page) first; like the analyst path, the message's companies
-// join it only in a comparison ("Compare revenue with AMD" from the NVDA page
-// plans both, "Revenue for AMD" plans NVDA).
-function requestedMentions(context: ChatFinancialTurnContext, text: string): string[] {
+// from a ticker page) first; like the analyst path, the companies a
+// comparison's reading adds join it ("Compare revenue with AMD" from the NVDA
+// page plans both, "Revenue for AMD" plans NVDA).
+async function requestedMentions(context: ChatFinancialTurnContext, text: string): Promise<string[]> {
   const explicit = context.subjectText?.trim();
   return explicit
-    ? [explicit, ...(COMPARATIVE.test(text) ? extractSubjectMentions(text) : [])]
+    ? [explicit, ...comparedAdditions(await context.reading?.() ?? null)]
     : extractSubjectMentions(text);
 }
 
@@ -371,7 +367,7 @@ async function requestedSubjects(deps: ChatFinancialRuntimeDeps, context: ChatFi
   // Each name is resolved once, though the analyst path's rules read the message again.
   const resolutions = new Map<string, Promise<ChatSubjectPreResolution>>();
   const resolve = (mention: string) => resolutions.get(mention) ?? resolutions.set(mention, deps.resolveMention(mention)).get(mention)!;
-  const mentioned = await Promise.all(requestedMentions(context, text).map(async (mention) => ({ mention, resolution: await resolve(mention) })));
+  const mentioned = await Promise.all((await requestedMentions(context, text)).map(async (mention) => ({ mention, resolution: await resolve(mention) })));
   // A carried company is named to the planner by its ticker, unless the
   // message gives that name to another company ("the other AMB"): then by its
   // legal name, so the two stay apart.
@@ -391,10 +387,12 @@ async function requestedSubjects(deps: ChatFinancialRuntimeDeps, context: ChatFi
     // An ambiguous company is asked about beside every company named, and in a
     // comparison beside the previous answer's, so the answer covers them all.
     // As the analyst path does, a name that matches no company is named in a
-    // comparison's answer and ignored outside one.
-    const comparison = comparativeTurn(text);
-    const prior = comparison ? await deps.priorSubjects?.(context.threadId) ?? [] : [];
+    // comparison's answer and ignored outside one. Only then is the reading
+    // waited on: an ambiguous company is asked about either way.
     const unmatched = mentioned.filter(({ resolution }) => resolution.status === "not_found");
+    const previous = await deps.priorSubjects?.(context.threadId) ?? [];
+    const comparison = (previous.length > 0 || unmatched.length > 0) && (await context.reading?.())?.companies.kind === "compare";
+    const prior = comparison ? previous : [];
     const named = mentioned.filter((entry) => !unmatched.includes(entry));
     // One key per company named, or per ambiguous name. They take the capped
     // slots first; carried companies fill the rest, listed first.

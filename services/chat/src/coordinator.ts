@@ -1,6 +1,6 @@
 import { answerMessageId, contentHashForText, financialMessageId, stableUuid } from "./chat-ids.ts";
 import { DEFAULT_BUNDLE_ID, chooseBundleIdForSubjectKind } from "./bundle-routing.ts";
-import { COMPARATIVE, companyKey, extractSubjectMentions } from "./subject-extraction.ts";
+import { companyKey, extractSubjectMentions } from "./subject-extraction.ts";
 import {
   createChatSseSequencer,
   type ChatSseEvent,
@@ -37,7 +37,7 @@ import {
   type ChatReadMessage,
 } from "./messages.ts";
 import { financialAwareRunner } from "./financial-turn.ts";
-import { facetWords, type ResearchScope } from "./research-scope.ts";
+import type { CompanyChange, ResearchScope, ScopeProposal } from "./research-scope.ts";
 import type { AssertionReport } from "./assertions.ts";
 import type { BlockProof } from "../../snapshot/src/block-proof.ts";
 
@@ -64,6 +64,10 @@ export type ChatTurnRunContext = ChatTurnInput & {
   subjectPreResolutions?: ReadonlyArray<ChatResolvedSubjectPreResolution>;
   // Companies a comparison named that could not be found; the answer says so.
   unresolvedMentions?: ReadonlyArray<string>;
+  // The turn's one reading of its question (scope-proposal.ts), started by
+  // the first caller and shared by the rest: company resolution, the
+  // financial lane and the analyst's scope. Null when there is none.
+  reading?: () => Promise<ScopeProposal | null>;
   // Analyst prompt-template bundle selected for this turn. Derived from the
   // resolved subject's kind via chooseBundleIdForSubjectKind; falls back to
   // DEFAULT_BUNDLE_ID when no subject was provided. Same routing function
@@ -290,6 +294,8 @@ export type ChatPriorSubjectsLoader = (input: {
 export type ChatCoordinatorOptions = {
   runner?: ChatTurnRunner;
   loadPriorSubjects?: ChatPriorSubjectsLoader;
+  // What a model reads the question to ask for (scope-proposal.ts proposeScope); absent, no turn has a reading.
+  readQuestion?: (question: string) => Promise<ScopeProposal | null>;
   verificationMode?: ChatVerificationMode;
   financialRuntime?: ChatFinancialRuntime;
   analystToolRuntime?: ChatAnalystToolRuntime;
@@ -363,12 +369,12 @@ export function createChatCoordinator(
       verificationMode: options.verificationMode ?? "strict",
     }))
     : missingAnalystToolRuntimeRunner);
-  const runner = threadTitleGenerationRunner(runActivityReportingRunner(financialAwareRunner(subjectAwareRunner(baseRunner, {
+  const runner = threadTitleGenerationRunner(runActivityReportingRunner(readingRunner(financialAwareRunner(subjectAwareRunner(baseRunner, {
     persistAssistantMessage,
     preResolveSubject,
     loadPriorSubjects: options.loadPriorSubjects,
     renderSubjectClarification: options.renderSubjectClarification,
-  }), { financialRuntime: options.financialRuntime, persistAssistantMessage }), options.runActivity), {
+  }), { financialRuntime: options.financialRuntime, persistAssistantMessage }), options.readQuestion), options.runActivity), {
     generateThreadTitle: options.generateThreadTitle,
     onThreadTitleGenerationError: options.onThreadTitleGenerationError,
   });
@@ -928,22 +934,20 @@ function subjectAwareRunner(
         });
         return;
       }
-      // A comparison adds the companies the message names, with the explicit
+      // A comparison adds the companies the reading names, with the explicit
       // subject kept primary ("Compare with AMD" from the NVDA page).
-      const text = nonEmptySubjectText(context.userIntent);
-      if (text && COMPARATIVE.test(text)) {
-        const named = await resolveNamedSubjects(text, options.preResolveSubject);
-        const ambiguous = named.unresolved.find((resolution) => resolution.status === "needs_clarification");
-        if (ambiguous) {
-          await emitSubjectClarificationTurn(context, ambiguous, {
+      const added = comparedAdditions(await context.reading?.() ?? null);
+      if (added.length > 0) {
+        const named = await resolveNames(added, options.preResolveSubject);
+        if (named.ambiguous) {
+          await emitSubjectClarificationTurn(context, named.ambiguous, {
             persistAssistantMessage: options.persistAssistantMessage,
             renderSubjectClarification: options.renderSubjectClarification,
           });
           return;
         }
         const subjects = distinctCompanies([preResolution, ...named.resolved]).slice(0, MAX_TURN_SUBJECTS);
-        const unresolvedMentions = named.unresolved.map((resolution) => resolution.input_text);
-        await runResolvedSubjectTurn(runner, { ...context, unresolvedMentions }, subjects);
+        await runResolvedSubjectTurn(runner, { ...context, unresolvedMentions: named.notFound }, subjects);
         return;
       }
       await runResolvedSubjectTurn(runner, context, [preResolution]);
@@ -985,7 +989,7 @@ export type TurnSubjects = {
   subjects: ReadonlyArray<ChatResolvedSubjectPreResolution>;
   // Those carried from the previous answer that the turn does not name.
   carried?: ReadonlyArray<ChatResolvedSubjectPreResolution>;
-  // Set only for comparisons: a named company to ask about, or ones not found.
+  // A company the reading names to ask about, or ones not found.
   ambiguous?: Exclude<ChatSubjectPreResolution, ChatResolvedSubjectPreResolution>;
   notFound: ReadonlyArray<string>;
   // A follow-up whose change to the compared companies is unclear: the question
@@ -993,155 +997,168 @@ export type TurnSubjects = {
   clarify?: string;
 };
 
-// A follow-up's change to the compared companies (#206): adding one keeps the
-// others, as a comparison does; dropping one keeps the rest. A short follow-up
-// naming a new company after a comparison ("what about AAPL?") could mean
-// either, so it asks; "just AAPL" or a full new question switches to it.
-const ADD = /\b(?:add|adding|bring (?:back|in))\b/i;
-
-// A turn that compares companies or adds one, so the previous answer's are carried.
-export function comparativeTurn(text: string): boolean {
-  return COMPARATIVE.test(text) || ADD.test(text);
+// One reading per turn, whichever lane asks first; a failed one is none.
+function readingRunner(runner: ChatTurnRunner, readQuestion: ChatCoordinatorOptions["readQuestion"]): ChatTurnRunner {
+  return (context) => {
+    let reading: Promise<ScopeProposal | null> | undefined;
+    const read = () => reading ??= readQuestion
+      ? Promise.resolve().then(() => readQuestion(context.userIntent ?? "")).catch((reason) => {
+        console.warn("[chat] no reading of the question; the turn takes it as unread", reason);
+        return null;
+      })
+      : Promise.resolve(null);
+    return runner({ ...context, reading: read });
+  };
 }
-// Where a list of companies to remove ends: at the end of the sentence, or
-// where the next request starts ("drop AMD and AAPL, and add TSLA"). Commas and
-// "and" inside the list are part of it.
-// A word in capitals is a ticker in the list ("drop AMD and NOW"), not a
-// request, so these patterns match words in lower case or capitalised only
-// (words()), never in capitals, and take no "i" flag.
-// ponytail: spelled out per word because Node 22 has no inline (?-i:) modifier.
-function words(list: ReadonlyArray<string>): string {
-  return list.map((word) => `[${word[0]}${word[0]!.toUpperCase()}]${word.slice(1)}`).join("|");
-}
-const LIST_END = String.raw`(?=\s*[.;:?!]|,?\s+(?:(?:${words(["and", "but", "then"])})\s+)?(?:${words(["add", "adding", "bring", "include", "show", "compare", "keep", "switch", "also", "now", "instead"])})\b|$)`;
-// The companies after a removal verb, a whole list of them (LIST_END).
-const REMOVE = new RegExp(
-  String.raw`\b(?:${words(["drop", "remove", "exclude", "without", "leave out", "take out", "minus", "except"])})\s+([^.;:?!]+?)` + LIST_END,
-  "g",
-);
-const CONTINUATION = /^\s*(?:and\s+)?(?:what|how)\s+about\b|^\s*and\s+\S/i;
-const ONLY = /\b(?:just|only|instead|switch to|alone)\b/i;
 
+// The companies a comparison adds to the ones it keeps: the page's company,
+// or the previous answer's.
+export function comparedAdditions(reading: ScopeProposal | null): ReadonlyArray<string> {
+  return reading?.companies.kind === "compare" ? reading.companies.add : [];
+}
+
+// A follow-up changes the previous answer's companies only as its reading says
+// (#206): adding keeps them, dropping keeps the rest, and naming a new one
+// without saying add or switch ("what about AAPL?") after a comparison asks.
 export async function resolveTurnSubjects(
   context: ChatTurnRunContext,
   preResolve: ChatSubjectPreResolver,
   loadPriorSubjects: ChatPriorSubjectsLoader | undefined,
 ): Promise<TurnSubjects> {
   const text = nonEmptySubjectText(context.userIntent);
-  const comparative = comparativeTurn(text ?? "");
-  const named = text ? await resolveNamedSubjects(text, preResolve) : { resolved: [], unresolved: [] };
-  // A removal is handled even when what it names does not resolve ("drop XYZQ").
-  const change = text && loadPriorSubjects !== undefined && (named.resolved.length > 0 || new RegExp(REMOVE.source).test(text))
-    ? await companyChange(context, text, named, preResolve, loadPriorSubjects)
-    : null;
-  if (change !== null) return change;
-  // Outside comparisons an unresolved token is usually an acronym, not a company,
-  // so it is ignored as before.
-  if (comparative) {
-    const ambiguous = named.unresolved.find((resolution) => resolution.status === "needs_clarification");
-    if (ambiguous) return { subjects: [], ambiguous, notFound: [] };
+  const [named, prior] = await Promise.all([
+    text ? resolveNamedSubjects(text, preResolve) : { resolved: [], unresolved: [] },
+    loadPriorSubjects
+      ? loadPriorSubjects({ threadId: context.threadId, ...(context.userId ? { userId: context.userId } : {}) }).then(distinctCompanies)
+      : [],
+  ]);
+  // A fresh question whose names all resolve needs no reading to pick its
+  // companies, so it does not wait on one. A name the resolver does not know
+  // waits too: only the reading tells a company from an acronym.
+  const reading = prior.length > 0 || named.unresolved.length > 0 ? await context.reading?.() ?? null : null;
+  const change = reading?.companies;
+  if (!change) return unreadChange(named.resolved, prior);
+  switch (change.kind) {
+    case "as_named":
+      return named.resolved.length > 0 ? listed([], named.resolved) : listed(prior, []);
+    case "drop":
+      return prior.length > 0 ? dropped(prior, change, preResolve) : listed([], named.resolved);
+    case "compare":
+    case "only":
+    case "unclear": {
+      const names = await resolveNames(change.kind === "compare" ? change.add : change.names, preResolve);
+      if (names.ambiguous) return { subjects: [], ambiguous: names.ambiguous, notFound: [] };
+      if (change.kind === "compare") return listed(prior, names.resolved, names.notFound);
+      if (names.resolved.length === 0) return listed(prior, [], names.notFound);
+      const priorKeys = new Set(prior.map(companyKey));
+      const added = names.resolved.filter((subject) => !priorKeys.has(companyKey(subject)));
+      if (change.kind === "unclear" && prior.length >= 2 && added.length > 0) return addOrAlone(added, prior);
+      return listed([], names.resolved, names.notFound);
+    }
   }
-  const notFound = comparative ? named.unresolved.map((resolution) => resolution.input_text) : [];
+}
 
-  const carryForward = loadPriorSubjects !== undefined && (named.resolved.length === 0 || comparative);
-  const prior = carryForward
-    ? await loadPriorSubjects({ threadId: context.threadId, ...(context.userId ? { userId: context.userId } : {}) })
-    : [];
-  // Newly named companies get the capped slots first; carried-forward ones fill
-  // the rest and stay listed first.
-  const newlyNamed = distinctCompanies(named.resolved).slice(0, MAX_TURN_SUBJECTS);
+// With no reading, a follow-up never changes the companies it cannot read:
+// one naming none, or only the previous answer's, keeps them all, and one
+// naming a new company after a comparison asks whether to add it.
+function unreadChange(
+  named: ReadonlyArray<ChatResolvedSubjectPreResolution>,
+  prior: ReadonlyArray<ChatResolvedSubjectPreResolution>,
+): TurnSubjects {
+  const priorKeys = new Set(prior.map(companyKey));
+  const added = distinctCompanies(named).filter((subject) => !priorKeys.has(companyKey(subject)));
+  if (added.length === 0) return listed(prior, []);
+  return prior.length >= 2 ? addOrAlone(added, prior) : listed([], named);
+}
+
+// Newly named companies get the capped slots first; carried-forward ones fill
+// the rest and stay listed first.
+function listed(
+  prior: ReadonlyArray<ChatResolvedSubjectPreResolution>,
+  named: ReadonlyArray<ChatResolvedSubjectPreResolution>,
+  notFound: ReadonlyArray<string> = [],
+): TurnSubjects {
+  const newlyNamed = distinctCompanies(named).slice(0, MAX_TURN_SUBJECTS);
   const namedKeys = new Set(newlyNamed.map(companyKey));
-  const carried = distinctCompanies(prior)
+  const carried = prior
     .filter((subject) => !namedKeys.has(companyKey(subject)))
     .slice(0, MAX_TURN_SUBJECTS - newlyNamed.length);
   return { subjects: [...carried, ...newlyNamed], carried, notFound };
 }
 
-// A follow-up that drops companies from the previous answer's, or names a new
-// one in a way that could mean adding or switching; null for any other turn.
-async function companyChange(
-  context: ChatTurnRunContext,
-  text: string,
-  mentioned: Awaited<ReturnType<typeof resolveNamedSubjects>>,
-  preResolve: ChatSubjectPreResolver,
-  loadPriorSubjects: ChatPriorSubjectsLoader,
-): Promise<TurnSubjects | null> {
-  const named = mentioned.resolved;
-  const removal = [...text.matchAll(REMOVE)].map((match) => match[1]).join(", ");
-  const ambiguous = CONTINUATION.test(text) && !COMPARATIVE.test(text) && !ADD.test(text) && !ONLY.test(text);
-  if (removal === "" && !ambiguous) return null;
-  const prior = distinctCompanies(
-    await loadPriorSubjects({ threadId: context.threadId, ...(context.userId ? { userId: context.userId } : {}) }),
-  );
-  const priorKeys = new Set(prior.map(companyKey));
-  if (removal !== "") {
-    const removing = await resolveNamedSubjects(removal, preResolve);
-    // A word in a metric or facet the removal names ("drop the FCF", "drop FREE
-    // CASH FLOW") is not a company, even one that resolves as a ticker (CASH),
-    // unless the previous answer covered that company.
-    const scopeWords = facetWords(removal);
-    const inScope = (subject: ChatResolvedSubjectPreResolution) =>
-      scopeWords.has(subject.input_text) && !priorKeys.has(companyKey(subject));
-    const removedSubjects = distinctCompanies(removing.resolved.filter((subject) => !inScope(subject)));
-    const removed = new Set(removedSubjects.map(companyKey));
-    const kept = prior.filter((subject) => !removed.has(companyKey(subject)));
-    // A company to drop that is ambiguous, or cannot be found, is asked about,
-    // unless the word lies in such a name.
-    const unclear = removing.unresolved.filter((resolution) => !scopeWords.has(resolution.input_text));
-    const ambiguousTarget = unclear.find((resolution) => resolution.status === "needs_clarification");
-    if (ambiguousTarget) return { subjects: [], ambiguous: ambiguousTarget, notFound: [] };
-    if (unclear.length > 0 && prior.length > 0) {
-      const missing = labelList(unclear.map((resolution) => resolution.input_text));
-      return {
-        subjects: [],
-        notFound: [],
-        clarify: `${missing} ${unclear.length > 1 ? "were" : "was"} not found, so nothing was dropped from the ${labelList(prior.map(tickerLabel))} comparison.`,
-      };
-    }
-    // A removal that drops no company goes the usual way, unless a ticker in a
-    // metric's name resolved: that would read as a company named.
-    if (removed.size === 0 && !named.some(inScope)) return null;
-    // Only companies the previous answer covered can be dropped, and not all of
-    // them: otherwise ask, rather than answer about the company named.
-    const absent = removedSubjects.filter((subject) => !priorKeys.has(companyKey(subject)));
-    const compared = labelList(prior.map(tickerLabel));
-    if (absent.length > 0) {
-      const missing = labelList(absent.map(tickerLabel));
-      return {
-        subjects: [],
-        notFound: [],
-        clarify: `${missing} ${absent.length > 1 ? "are" : "is"} not in the ${compared} comparison, so there is nothing to drop. Say "add ${missing}" to add ${absent.length > 1 ? "them" : "it"}, or "just ${missing}" to look at ${absent.length > 1 ? "them" : "it"} alone.`,
-      };
-    }
-    if (removed.size > 0 && kept.length === 0) {
-      return { subjects: [], notFound: [], clarify: `Dropping ${compared} leaves no company to compare. Name the company to look at.` };
-    }
-    // As in a comparison: an ambiguous company named beside it is asked about,
-    // and one not found is named in the answer.
-    const unresolved = mentioned.unresolved.filter((resolution) => !scopeWords.has(resolution.input_text));
-    const ambiguousMention = unresolved.find((resolution) => resolution.status === "needs_clarification");
-    if (ambiguousMention) return { subjects: [], ambiguous: ambiguousMention, notFound: [] };
-    // One named beside them ("drop AMD and add TSLA") is added, before the
-    // carried companies take the capped slots.
-    const keptKeys = new Set(kept.map(companyKey));
-    const additions = distinctCompanies(named.filter((subject) => !inScope(subject)))
-      .filter((subject) => !removed.has(companyKey(subject)) && !keptKeys.has(companyKey(subject)))
-      .slice(0, MAX_TURN_SUBJECTS);
-    const keptSlots = kept.slice(0, MAX_TURN_SUBJECTS - additions.length);
-    return {
-      subjects: [...keptSlots, ...additions],
-      carried: keptSlots,
-      notFound: unresolved.map((resolution) => resolution.input_text),
-    };
-  }
-  const added = distinctCompanies(named).filter((subject) => !priorKeys.has(companyKey(subject)));
-  if (prior.length < 2 || added.length === 0) return null;
+function addOrAlone(
+  added: ReadonlyArray<ChatResolvedSubjectPreResolution>,
+  prior: ReadonlyArray<ChatResolvedSubjectPreResolution>,
+): TurnSubjects {
   const adding = labelList(added.map(tickerLabel));
   const compared = labelList(prior.map(tickerLabel));
   return {
     subjects: [],
     notFound: [],
     clarify: `Add ${adding} to the ${compared} comparison, or look at ${adding} alone? Say "add ${adding}" or "just ${adding}".`,
+  };
+}
+
+// Only companies the previous answer covered can be dropped, and not all of
+// them: otherwise ask, rather than answer about the company named.
+async function dropped(
+  prior: ReadonlyArray<ChatResolvedSubjectPreResolution>,
+  change: Extract<CompanyChange, { kind: "drop" }>,
+  preResolve: ChatSubjectPreResolver,
+): Promise<TurnSubjects> {
+  const [removing, adding] = await Promise.all([resolveNames(change.drop, preResolve), resolveNames(change.add, preResolve)]);
+  if (removing.ambiguous) return { subjects: [], ambiguous: removing.ambiguous, notFound: [] };
+  const compared = labelList(prior.map(tickerLabel));
+  if (removing.notFound.length > 0) {
+    const missing = labelList(removing.notFound);
+    return {
+      subjects: [],
+      notFound: [],
+      clarify: `${missing} ${removing.notFound.length > 1 ? "were" : "was"} not found, so nothing was dropped from the ${compared} comparison.`,
+    };
+  }
+  const priorKeys = new Set(prior.map(companyKey));
+  const absent = removing.resolved.filter((subject) => !priorKeys.has(companyKey(subject)));
+  if (absent.length > 0) {
+    const missing = labelList(absent.map(tickerLabel));
+    return {
+      subjects: [],
+      notFound: [],
+      clarify: `${missing} ${absent.length > 1 ? "are" : "is"} not in the ${compared} comparison, so there is nothing to drop. Say "add ${missing}" to add ${absent.length > 1 ? "them" : "it"}, or "just ${missing}" to look at ${absent.length > 1 ? "them" : "it"} alone.`,
+    };
+  }
+  const removed = new Set(removing.resolved.map(companyKey));
+  const kept = prior.filter((subject) => !removed.has(companyKey(subject)));
+  if (kept.length === 0) {
+    return { subjects: [], notFound: [], clarify: `Dropping ${compared} leaves no company to compare. Name the company to look at.` };
+  }
+  if (adding.ambiguous) return { subjects: [], ambiguous: adding.ambiguous, notFound: [] };
+  // One added beside them ("drop AMD and add TSLA") takes a capped slot
+  // before the carried companies.
+  const keptKeys = new Set(kept.map(companyKey));
+  const additions = adding.resolved
+    .filter((subject) => !removed.has(companyKey(subject)) && !keptKeys.has(companyKey(subject)))
+    .slice(0, MAX_TURN_SUBJECTS);
+  const keptSlots = kept.slice(0, MAX_TURN_SUBJECTS - additions.length);
+  return { subjects: [...keptSlots, ...additions], carried: keptSlots, notFound: adding.notFound };
+}
+
+// The companies a reading names, each looked up alone: one asked about, and
+// the ones not found.
+async function resolveNames(
+  names: ReadonlyArray<string>,
+  preResolve: ChatSubjectPreResolver,
+): Promise<{
+  resolved: ChatResolvedSubjectPreResolution[];
+  ambiguous?: Exclude<ChatSubjectPreResolution, ChatResolvedSubjectPreResolution>;
+  notFound: string[];
+}> {
+  const resolutions = await Promise.all(names.map((name) => preResolve({ text: name })));
+  const ambiguous = resolutions.find((resolution) => resolution.status === "needs_clarification");
+  return {
+    resolved: distinctCompanies(resolutions.filter((resolution) => resolution.status === "resolved")),
+    ...(ambiguous ? { ambiguous } : {}),
+    notFound: resolutions.flatMap((resolution) => resolution.status === "not_found" ? [resolution.input_text] : []),
   };
 }
 

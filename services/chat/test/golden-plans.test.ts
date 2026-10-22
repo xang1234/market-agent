@@ -283,11 +283,11 @@ test("a comparison shows each company's latest quarter, named from the newest it
 });
 
 const reading = (asks: string[], metrics: unknown[] = [], income_items: string[] = [], turnsOff: string[] = [], period: unknown = { kind: "none" }) =>
-  parseProposal(JSON.stringify({ metrics, asks, turns_off: { facets: turnsOff, metrics: [] }, income_items, period }))!;
+  parseProposal(JSON.stringify({ metrics, asks, turns_off: { facets: turnsOff, metrics: [] }, income_items, period, companies: { kind: "as_named" } }), "")!;
 
 test("a question about the companies it names that asks for no figure is answered with their overview, or one company's with its peers; one about a carried company, a figure or a period is not (#398)", async () => {
   const client = await createReplayLlmChatClient(REPLIES);
-  const read = async (question: string) => parseProposal((await client({} as never, { messages: [{ role: "user", content: proposalQuestion(question) }] })).text);
+  const read = async (question: string) => parseProposal((await client({} as never, { messages: [{ role: "user", content: proposalQuestion(question) }] })).text, question);
   const AMD = GOLDEN_COMPANIES.find((company) => company.ticker === "AMD")!;
   const amd = async (): Promise<RequestedSubject[]> => [{ mention: AMD.issuer_id, resolution: { status: "resolved", subject_ref: { kind: "issuer", id: AMD.issuer_id }, label: AMD.legal_name } }];
   const none = async () => [];
@@ -352,7 +352,7 @@ test("each golden answer names what its question asks for and its plan does not 
     const planned = await planFinancialRequest(planningContext(question), question, model);
     assert.equal(planned.outcome, "ready", question);
     if (planned.outcome !== "ready") continue;
-    assert.deepEqual(uncoveredAsks(parseProposal(await reply(proposalQuestion(question)))!, planned.plan), expected, question);
+    assert.deepEqual(uncoveredAsks(parseProposal(await reply(proposalQuestion(question)), question)!, planned.plan), expected, question);
   }
 });
 
@@ -393,7 +393,7 @@ test("an engine answer names what the reading of its question asks for and the p
   assert.deepEqual(uncoveredAsks(reading(["margins"], ["income_statement"], ["operating_margin"]), marginOnly), [], "the margin answers its own item");
   assert.deepEqual(uncoveredAsks(reading(["margins"], ["income_statement"], ["net_margin"]), marginOnly), ["net margin"], "one margin does not answer another");
   const turnsOff = (asks: string[], metrics: unknown[], facets: string[], offMetrics: unknown[]) =>
-    parseProposal(JSON.stringify({ metrics, asks, turns_off: { facets, metrics: offMetrics }, income_items: [], period: { kind: "none" } }))!;
+    parseProposal(JSON.stringify({ metrics, asks, turns_off: { facets, metrics: offMetrics }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named" } }), "")!;
   assert.deepEqual(uncoveredAsks(turnsOff(["margins", "margin_trend"], [], ["margins"], []), revenue), [], "no margins is no trend");
   assert.deepEqual(uncoveredAsks(turnsOff([], ["balance_sheet"], [], [{ metric: "cash_and_equivalents" }]), assets), ["total liabilities", "stockholders' equity"]);
   assert.deepEqual(uncoveredAsks(turnsOff([], ["total_assets"], [], [{ metric: "balance_sheet" }]), revenue), []);

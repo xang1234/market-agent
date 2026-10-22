@@ -155,9 +155,24 @@ export type ScopeProposal = {
   turns_off: { facets: ReadonlySet<ScopeFacet | (typeof PERIOD_FIELDS)[number]>; metrics: ReadonlySet<string> };
   income_items: ReadonlyArray<IncomeItem>;
   period: ScopePeriod;
+  companies: CompanyChange;
 };
 
-const NO_PROPOSAL: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [], period: { kind: "none" } };
+// How a turn changes the previous answer's companies, each name as the
+// question writes it. The model never sees those companies: the coordinator
+// applies the change to them (coordinator.ts resolveTurnSubjects).
+export type CompanyChange =
+  // No change asked: the companies named answer alone, or with none named the previous ones carry.
+  | { kind: "as_named" }
+  // The previous companies with these added ("compare it with AMD", "add TSLA"); none for "compare them".
+  | { kind: "compare"; add: ReadonlyArray<string> }
+  | { kind: "drop"; drop: ReadonlyArray<string>; add: ReadonlyArray<string> }
+  // These alone ("just AAPL", "AAPL instead").
+  | { kind: "only"; names: ReadonlyArray<string> }
+  // Named without saying add or switch ("what about AAPL?").
+  | { kind: "unclear"; names: ReadonlyArray<string> };
+
+const NO_PROPOSAL: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named" } };
 
 // The field a facet turned off clears. Guidance and a cause are read apart;
 // evidence and the latest quarter are asked for one turn only.
@@ -481,36 +496,6 @@ export function resolveResearchScope(input: {
     ...(incomeItems.length > 0 ? { income_items: incomeItems } : {}),
     inherited,
   };
-}
-
-// Words as subject-extraction.ts splits them, so each is one a company could be.
-const wordsOf = (text: string) => text.split(/[^A-Za-z]+/).filter(Boolean);
-
-// The whole names of what a scope tracks (each catalog key and label, each
-// facet, period and income item) and the abbreviations written for them.
-const FACET_NAMES = new Set([
-  ...PROPOSABLE_METRICS.flatMap(({ metric_key, label }) => [metric_key, label]),
-  ...SCOPE_FACETS,
-  ...PERIOD_FIELDS,
-  ...INCOME_ITEMS,
-  "fcf",
-  "ocf",
-  "eps",
-].map((name) => wordsOf(name).join(" ").toLowerCase()));
-
-// The words of a phrase that lie inside a whole name this scope tracks
-// ("FREE CASH FLOW", "the FCF"), so they are not companies to drop. A word of
-// a longer name alone is not one: NET (of net income) is a company (#378).
-export function facetWords(phrase: string): ReadonlySet<string> {
-  const words = wordsOf(phrase);
-  const inside = new Set<string>();
-  for (let start = 0; start < words.length; start++) {
-    for (let end = start + 1; end <= words.length; end++) {
-      const span = words.slice(start, end);
-      if (FACET_NAMES.has(span.join(" ").toLowerCase())) for (const word of span) inside.add(word);
-    }
-  }
-  return inside;
 }
 
 function routeOf(
