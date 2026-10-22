@@ -528,6 +528,18 @@ test("a derived record is a figure only when its own fact is not shown and both 
   ]);
 });
 
+test("a derived figure names an operand by its figure in the record's own block, else by its first", () => {
+  const record = { fact_id: "f-qoq", metric: "Revenue growth (QoQ)", period: "Q4 2026", period_end: "2026-01-25", value: "8.9%", of: ["f-rev", "f-q3"] };
+  const carrying = (block: Record<string, unknown>) => ({ ...block, data_ref: { params: { derived_figures: [record] } } });
+  const derivedOf = (factBlocks: ReadonlyArray<Record<string, unknown>>) =>
+    buildEvidencePacket({ scope: scope("Analyze NVDA's latest quarter"), factBlocks, cutoff: CUTOFF }).figures.slice(4);
+  const qoq = { id: "F5", metric: "Revenue growth (QoQ)", period: "Q4 2026", period_end: "2026-01-25", value: "8.9%", fact_id: "f-qoq" };
+  // Q4 2026's revenue is the metric row's F1 and the chart's F4.
+  assert.deepEqual(derivedOf([LATEST, carrying(BARS)]), [{ ...qoq, source_ids: ["s-10q", "s-10k"], derived_from: ["F4", "F3"] }]);
+  // The metric row shows no Q3 2026: that operand is the chart's.
+  assert.deepEqual(derivedOf([carrying(LATEST), BARS]), [{ ...qoq, source_ids: ["s-10q"], derived_from: ["F1", "F3"] }]);
+});
+
 test("a derived figure the answer cites seals as its fact, with the binding its chart carries", () => {
   const blocks = withDerived(SERIES.map(({ record }) => record));
   const packet = tracePacket(blocks);

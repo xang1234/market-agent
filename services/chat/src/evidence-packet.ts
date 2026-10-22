@@ -328,15 +328,15 @@ function derivedFigures(
   blockSources: ReadonlyMap<string, string[]>,
 ): PacketFigure[] {
   const idOf = (factId: string, blockId: unknown) => {
-    const index = [shown.findIndex((figure) => figure.fact_id === factId && figure.block_id === blockId), shown.findIndex((figure) => figure.fact_id === factId)]
-      .find((candidate) => candidate !== -1);
-    return index === undefined ? undefined : `F${index + 1}`;
+    const own = shown.findIndex((figure) => figure.fact_id === factId && figure.block_id === blockId);
+    const index = own !== -1 ? own : shown.findIndex((figure) => figure.fact_id === factId);
+    return index === -1 ? undefined : `F${index + 1}`;
   };
   const out: PacketFigure[] = [];
   for (const block of blocks) {
     for (const record of derivedRecords(block)) {
       const [current, prior] = record.of.map((factId) => idOf(factId, block.id));
-      if (idOf(record.fact_id, block.id) || !current || !prior) continue;
+      if (shown.some((figure) => figure.fact_id === record.fact_id) || !current || !prior) continue;
       out.push({
         id: `F${shown.length + out.length + 1}`,
         metric: record.metric,
