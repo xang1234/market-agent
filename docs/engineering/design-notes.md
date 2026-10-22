@@ -643,7 +643,7 @@ numbers never wait on a model.
   `JUDGE_LITELLM_MODEL`, none shows.
 - **One repair round** (#488), with a judge configured, goes to each inference the checks rejected and each one the
   judge found contradicted or worded as an amount. The model rewrites it once, the checks run on the engine packet, and the judge reads it
-  again. A worded one shows as unverified until its rewrite passes, and a failed rewrite leaves it as it was. A repaired commentary is rendered from the engine packet too, and its refs are checked like any other.
+  again. A failed rewrite leaves an inference as it was, so a worded one still shows as unverified. A repaired commentary is rendered from the engine packet too, and its refs are checked like any other.
 - **Failure modes.**
   - A model error (`LlmRouterError` or `LlmProviderError`, a timeout and a replay miss included) saves the note
     "Commentary is unavailable for this answer."
