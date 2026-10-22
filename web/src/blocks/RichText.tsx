@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react'
 import { InspectableRef } from '../evidence/InspectableRef.tsx'
-import { InspectableResult } from './FinancialAnswer.tsx'
+import { InspectableResult } from '../evidence/InspectableResult.tsx'
 import type { RefSegment, RichTextBlock, TextSegmentTone } from './types.ts'
 import { isRefSegment, refSegmentText } from './richText.ts'
 import { Markdown } from './Markdown.tsx'
