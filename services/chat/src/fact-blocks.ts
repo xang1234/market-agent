@@ -580,10 +580,8 @@ export async function loadIssuerFactBlocks(
 // A derived metric minted as a fact, with the verifier's binding for it.
 export type DerivedQuarterFact = QuarterMetric & { fact_id: string; binding: VerifierFact };
 
-// A minted figure the revenue chart does not draw but is computed from two of
-// its bars (each other quarter's QoQ growth), carried in its
-// data_ref.params.derived_figures; the evidence packet makes it a figure. `of`
-// is [the quarter's fact, the previous quarter's].
+// A minted figure computed from two of a block's figures and carried in its
+// data_ref.params.derived_figures; `of` is [current, prior].
 export type DerivedFigureRecord = {
   fact_id: string;
   metric: string;

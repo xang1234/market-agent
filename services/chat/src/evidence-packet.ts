@@ -24,8 +24,7 @@ export type PacketFigure = Omit<DisplayedFigure, "fact_id" | "block_id"> & {
   source_ids: ReadonlyArray<string>;
 } & ({
   displayed?: undefined;
-  // A figure no chart draws, computed from two displayed ones (fact-blocks.ts
-  // DerivedFigureRecord): their packet ids, as [current, prior].
+  // A figure no block draws, computed from two that are: their ids, [current, prior].
   derived_from?: readonly [string, string];
 } | AvailableFigureFields);
 
@@ -318,10 +317,7 @@ export function buildEvidencePacket(input: {
   };
 }
 
-// Each block's derived records as figures after every displayed one, so a
-// displayed figure's id never shifts. A record is left out when its own fact
-// is displayed or an operand is not; an operand is named by its figure in the
-// record's block, else its first.
+// After every displayed figure, so a recorded reply's ids never shift.
 function derivedFigures(
   blocks: ReadonlyArray<Block>,
   shown: ReadonlyArray<DisplayedFigure>,
@@ -352,7 +348,6 @@ function derivedFigures(
   return out;
 }
 
-// data_ref.params is open JSON: a malformed record is dropped, never guessed at.
 function derivedRecords(block: Block): DerivedFigureRecord[] {
   const params = isRecord(block.data_ref) && isRecord(block.data_ref.params) ? block.data_ref.params : {};
   const records = Array.isArray(params.derived_figures) ? params.derived_figures : [];

@@ -31,13 +31,11 @@ export type CheckedComparison = {
   figures: ReadonlyArray<PacketFigure>;
   // The high or low claimed (highest/lowest).
   winner?: PacketFigure;
-  // A cohort high or low of percents, every covered company shown: the
-  // winner's distance from the closest other, on the displayed values, and
-  // every other at that closest value.
+  // A cohort high or low of percents, every covered company shown: its gap to
+  // the closest other on the displayed values, and every other at that value.
   lead?: { gap: string; over: ReadonlyArray<PacketFigure> };
   // every_step: it moved the net way in every period, with none missing.
-  // ends_at: the last period is strictly the window's high or low (not said
-  // for *_throughout, where it goes without saying).
+  // ends_at: the last period is strictly the window's high or low.
   trend?: { result: TrendResult; net: Direction; every_step: boolean; turn?: PacketFigure; ends_at?: "high" | "low" };
   // Companies the turn covers with no figure for the metric.
   not_shown: ReadonlyArray<string>;
@@ -202,7 +200,7 @@ export function checkComparison(
   }
   const every_step = net !== 0 && steps.every((step) => step === net) && !missingPeriod(figures);
   const endsAt = (direction: Direction) => figures.slice(0, -1).every((figure) => cmp(last, figure) === direction);
-  // Two periods' end is their high or low by the direction alone.
+  // Two periods' end, or one reached in every period, is the high or low by its direction alone.
   const ends_at = figures.length < 3 || result === "rose_throughout" || result === "fell_throughout" ? undefined : endsAt(1) ? "high" : endsAt(-1) ? "low" : undefined;
   return { comparison: { ...base, figures, trend: { result, net, every_step, ...(turn ? { turn } : {}), ...(ends_at ? { ends_at } : {}) } } };
 }

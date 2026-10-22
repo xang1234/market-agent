@@ -285,7 +285,6 @@ test("an observation of a quote says when it was taken (#329 review)", () => {
     "AAPL's price was $231.60 as of Sep 1, 2026.");
 });
 
-// A recorded trace's packet and fact blocks, and one comparison rendered from them.
 function traced(name: string) {
   const { input } = JSON.parse(readFileSync(new URL(`./answer-lab/traces/${name}.json`, import.meta.url), "utf8"));
   const packet = turnPacket(input);

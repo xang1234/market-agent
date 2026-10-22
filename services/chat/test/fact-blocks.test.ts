@@ -616,14 +616,11 @@ test("a comma between a quarter and its bare year is read (#292 review)", () => 
   assert.deepEqual(requestedFiscalQuarter("the second quarter, 2025"), { fiscal_year: 2025, fiscal_period: "Q2" });
 });
 
-// NVDA's reported revenue ($M) and quarter ends, Q1 2025..Q4 2026 (test/golden/dataset.ts).
 const NVDA_QUARTERS: ReadonlyArray<readonly [number, string]> = [
   [26044, "2024-04-28"], [30040, "2024-07-28"], [35082, "2024-10-27"], [39331, "2025-01-26"],
   [44062, "2025-04-27"], [46743, "2025-07-27"], [57006, "2025-10-26"], [62100, "2026-01-25"],
 ];
 
-// The revenue window and its derived growth as the loader mints them, with or
-// without the window's QoQ series.
 function nvdaWindow(withSeries: boolean) {
   const facts = NVDA_QUARTERS.map(([value], i) => fact("revenue", 2025 + Math.floor(i / 4), `Q${(i % 4) + 1}`, value * 1e6));
   const ends = new Map(facts.map((f, i) => [f.fact_id, NVDA_QUARTERS[i]![1]]));
@@ -649,7 +646,6 @@ test("the revenue chart carries the window's QoQ growth as derived figures, each
   const [metricRow, bars] = buildIssuerFactBlocks({ facts, verifierFacts: verifierFacts(facts), derived, snapshotId: SNAPSHOT_ID, asOf: AS_OF });
   const q = facts.map((f) => f.fact_id);
   const params = (bars!.data_ref as { params: { fact_bindings: Array<{ fact_id: string }>; derived_figures: unknown } }).params;
-  // Specs 0 and 1 are Q4 2026's QoQ and YoY; 2..7 the series, oldest first.
   assert.deepEqual(params.derived_figures, [
     { fact_id: minted(2), metric: "Revenue growth (QoQ)", period: "Q2 2025", period_end: "2024-07-28", value: "15.3%", of: [q[1], q[0]] },
     { fact_id: minted(3), metric: "Revenue growth (QoQ)", period: "Q3 2025", period_end: "2024-10-27", value: "16.8%", of: [q[2], q[1]] },
@@ -662,7 +658,6 @@ test("the revenue chart carries the window's QoQ growth as derived figures, each
   assert.deepEqual(params.fact_bindings.map((binding) => binding.fact_id), [...q, ...series]);
   assert.deepEqual(bars!.provenance_fact_refs, [...q, ...series]);
   assert.deepEqual(bars!.source_refs, [SOURCE_ID]);
-  // The latest quarter's QoQ is the metric row's only.
   assert.deepEqual(
     (metricRow!.items as Array<{ label: string; format: string; value_ref: string }>).filter((item) => item.label.startsWith("Revenue growth")),
     [

@@ -593,8 +593,6 @@ async function loadFactRows(
   return rows;
 }
 
-// The facts a derived fact was computed from (the lineage the materializer
-// stamps on it), in its order, each labelled as its own inspection words it.
 async function derivationInputs(
   db: QueryExecutor,
   qualityFlags: unknown,

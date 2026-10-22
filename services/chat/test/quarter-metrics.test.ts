@@ -131,7 +131,6 @@ test("growth is computed for the quarter named, not the window's last (#292 revi
   assert.deepEqual(growth.map((spec) => [spec.period.fiscal_period, spec.period.fiscal_year, Number(spec.value_num.toFixed(3))]), [["Q2", 2025, 0.1], ["Q2", 2025, 0.375]]);
 });
 
-// NVDA's reported revenue ($M), Q1 2025..Q4 2026 (test/golden/dataset.ts).
 const NVDA_REVENUE = [26044, 30040, 35082, 39331, 44062, 46743, 57006, 62100];
 
 function windowed(window: ReadonlyArray<IssuerFundamentalFact>, growthAt: IssuerFundamentalFact) {
@@ -158,7 +157,6 @@ test("QoQ growth for every quarter of the revenue window whose previous quarter 
   const ids = (at: number) => [q[at]!.fact_id, q[at - 1]!.fact_id];
   const label = "Revenue growth (QoQ)";
   assert.deepEqual(windowed(q, q[7]!), [
-    // The latest quarter's, as before; then the window's, oldest first.
     ["Q4 2026", "8.9%", ids(7), label],
     ["Q2 2025", "15.3%", ids(1), label],
     ["Q3 2025", "16.8%", ids(2), label],
@@ -177,10 +175,8 @@ test("a named quarter's QoQ is computed once, and the window's later quarters st
 
 test("no QoQ for the quarter after a gap in the window, or from a zero or negative base", () => {
   const q = nvdaQuarters();
-  // Q2 2026 is missing: none for Q3 2026, whose previous quarter is not shown.
   const gap = [...q.slice(0, 5), ...q.slice(6)];
   assert.deepEqual(windowed(gap, gap.at(-1)!).map(([period]) => period), ["Q4 2026", "Q2 2025", "Q3 2025", "Q4 2025", "Q1 2026"]);
-  // Q3 2025 grows from zero and Q1 2026 from a loss: neither gets one.
   const based = nvdaQuarters([100, 0, 50, -20, 30, 40]);
   assert.deepEqual(windowed(based, based.at(-1)!).map(([period, value]) => [period, value]), [
     ["Q2 2026", "33.3%"],

@@ -437,18 +437,15 @@ test("a price return carries its chart line's series and the chart's sources, an
   assert.deepEqual([model.includes(NVDA_LINE), model.includes("s-px"), model.includes("\"6.6%\"")], [false, false, true]);
 });
 
-// The single-latest-quarter trace (NVDA, Q4 2026): its blocks and the packet its model was sent.
 const TRACE = JSON.parse(readFileSync(new URL("./answer-lab/traces/single-latest-quarter.json", import.meta.url), "utf8"));
 const TRACE_BLOCKS: Array<Record<string, any>> = TRACE.input.factBlocks;
 const SENT = JSON.parse(TRACE.exchange.messages.find((message: { role: string }) => message.role === "user").content).evidence_packet;
 const tracePacket = (factBlocks: ReadonlyArray<Record<string, unknown>>) =>
   buildEvidencePacket({ scope: TRACE.input.scope, factBlocks, cutoff: TRACE.input.cutoff });
 const TRACE_SOURCE = "00000000-0000-4000-a000-000000000001";
-// Q1 2025..Q4 2026 revenue, as the chart shows them.
 const BAR_FACTS: string[] = TRACE_BLOCKS.find((block) => block.kind === "revenue_bars")!.bars.map((bar: { value_ref: string }) => bar.value_ref);
 const QOQ_FACT = "5f91c1f3-8566-485a-ab62-f17503efebb9";
 
-// Each other quarter's QoQ growth as the loader mints it from the golden revenue.
 const seriesId = (i: number) => `d0000000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`;
 const SERIES = ([
   ["Q2", 2025, "2024-04-29", "2024-07-28", "15.3%"],
@@ -465,7 +462,6 @@ const SERIES = ([
 const derived = (id: string, period: string, period_end: string, value: string, fact_id: string, derived_from: [string, string]) =>
   ({ id, metric: "Revenue growth (QoQ)", period, period_end, value, fact_id, source_ids: [TRACE_SOURCE], derived_from });
 
-// The trace's blocks with the series bound and cited on the revenue chart, and these records listed.
 function withDerived(records: ReadonlyArray<unknown>) {
   return TRACE_BLOCKS.map((block) => block.kind !== "revenue_bars" ? block : {
     ...block,
@@ -486,7 +482,6 @@ test("the trace's blocks give the packet its model was sent", () => {
 test("the chart's QoQ growth series follows every displayed figure, naming its operands by packet id", () => {
   const packet = tracePacket(withDerived(SERIES.map(({ record }) => record)));
   assert.deepEqual(packet.figures.slice(0, 17), tracePacket(TRACE_BLOCKS).figures);
-  // F1 (the metric row) and F17 (the last bar) show Q4 2026's revenue; F8 is its QoQ.
   assert.deepEqual(["F1", "F8", "F10", "F11", "F17"].map((id) => {
     const figure = packet.figures.find((candidate) => candidate.id === id)!;
     return [id, figure.metric, figure.period, figure.value, figure.fact_id];
@@ -506,7 +501,6 @@ test("the chart's QoQ growth series follows every displayed figure, naming its o
     derived("F23", "Q3 2026", "2025-10-26", "22.0%", seriesId(5), ["F16", "F15"]),
   ]);
   assert.deepEqual(packet.coverage, [{ company: "NVDA", status: "shown" }]);
-  // The model sees the operands, not the fact or its sources.
   assert.deepEqual((packetForModel(packet).figures as unknown[]).at(-1), {
     id: "F23", metric: "Revenue growth (QoQ)", period: "Q3 2026", period_end: "2025-10-26", value: "22.0%", derived_from: ["F16", "F15"],
   });
@@ -534,9 +528,7 @@ test("a derived figure names an operand by its figure in the record's own block,
   const derivedOf = (factBlocks: ReadonlyArray<Record<string, unknown>>) =>
     buildEvidencePacket({ scope: scope("Analyze NVDA's latest quarter"), factBlocks, cutoff: CUTOFF }).figures.slice(4);
   const qoq = { id: "F5", metric: "Revenue growth (QoQ)", period: "Q4 2026", period_end: "2026-01-25", value: "8.9%", fact_id: "f-qoq" };
-  // Q4 2026's revenue is the metric row's F1 and the chart's F4.
   assert.deepEqual(derivedOf([LATEST, carrying(BARS)]), [{ ...qoq, source_ids: ["s-10q", "s-10k"], derived_from: ["F4", "F3"] }]);
-  // The metric row shows no Q3 2026: that operand is the chart's.
   assert.deepEqual(derivedOf([carrying(LATEST), BARS]), [{ ...qoq, source_ids: ["s-10q"], derived_from: ["F1", "F3"] }]);
 });
 
@@ -557,7 +549,6 @@ test("a QoQ trend covers the derived quarters and the latest quarter's QoQ", () 
   const packet = tracePacket(withDerived(SERIES.map(({ record }) => record)));
   const trend = (evidence: string[]) => checkAssertions([{ kind: "comparison", op: "trend", result: "fell", text: "x", evidence }], packet);
   const series = ["F18", "F19", "F20", "F21", "F22", "F23"];
-  // 15.3% in Q2 2025 to 8.9% in Q4 2026.
   assert.deepEqual(trend([...series, "F8"]).rejected, []);
   const [rejection, ...others] = trend(series).rejected;
   assert.deepEqual(others, []);

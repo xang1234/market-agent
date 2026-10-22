@@ -452,9 +452,7 @@ test("a derived fact lists the facts it was computed from, as their own inspecti
     { kind: "fact", id: Q2_REVENUE, label: "Revenue · Q2 FY 2026 · $46.7B" },
     { kind: "source", id: SOURCE_ID, label: "sec_edgar" },
   ]);
-  // One more lookup, under the user's access guard.
   assert.deepEqual(factQueries, [[[FACT_ID], USER_ID], [[Q3_REVENUE, Q2_REVENUE], USER_ID]]);
-  // An input the snapshot did not seal is not offered.
   assert.deepEqual((await inspect([FACT_ID, Q3_REVENUE])).result.related_refs.map((ref) => ref.id), [Q3_REVENUE, SOURCE_ID]);
 });
 
