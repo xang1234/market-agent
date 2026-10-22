@@ -166,6 +166,8 @@ test("a question about one company that asks for no figure is answered with its 
   for (const question of ["Analyze NVDA", "Analyze AMD", "Analyze AAPL"]) assert.equal(await overview(question), true, question);
   const scripted = (proposal: ReturnType<typeof reading>) => ({ read: async () => proposal });
   assert.equal(await overview("Analyze NVDA", scripted(reading([], ["income_statement"]))), false, "a metric");
+  assert.equal(await overview("Analyze NVDA, no margins", scripted(reading([], [], [], ["margins"]))), false, "a facet turned off");
+  assert.equal(await overview("Analyze NVDA", scripted({ ...reading([]), turns_off: { facets: new Set(), metrics: new Set(["revenue"]) } })), false, "a metric turned off");
   assert.equal(await overview("Analyze NVDA", { carried: true }), false, "a carried company");
   assert.equal(await overview("Analyze NVDA and AMD"), false, "two companies");
   for (const period of ["in fiscal 2025", "for Q4 2025", "YTD"]) {

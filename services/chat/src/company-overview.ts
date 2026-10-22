@@ -1,6 +1,6 @@
 import { buildDeterministicPlan, type PlanningContext, type PlanningResult, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import { requestedFiscalQuarter, requestedFiscalYear, requestedPriceWindow } from "./fact-blocks.ts";
-import { readingAsks, type ScopeProposal } from "./research-scope.ts";
+import type { ScopeProposal } from "./research-scope.ts";
 
 const SLOT = "a";
 const QUARTERS_SHOWN = 8;
@@ -23,10 +23,11 @@ export function namesOneCompany(subjects: ReadonlyArray<RequestedSubject>, carri
     requestedFiscalYear(text) === undefined && requestedFiscalQuarter(text) === undefined && requestedPriceWindow(text) === undefined;
 }
 
-/** Whether the reading of a question asks for no figure, so the overview answers it. */
+/** Whether the reading of a question asks for no figure and turns nothing off ("no margins"), so the overview answers it. */
 export function asksForNoFigure(reading: ScopeProposal | null): boolean {
   return reading !== null && reading.metrics.length === 0 && reading.income_items.length === 0 &&
-    [...readingAsks(reading).asks].every((facet) => facet === "latest_quarter");
+    reading.turns_off.facets.size === 0 && reading.turns_off.metrics.size === 0 &&
+    [...reading.asks].every((facet) => facet === "latest_quarter");
 }
 
 export function planCompanyOverview(context: PlanningContext): PlanningResult {
