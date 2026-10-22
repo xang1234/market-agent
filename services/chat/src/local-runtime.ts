@@ -496,7 +496,7 @@ export const financialRuntime: ChatFinancialRuntime = createChatFinancialRuntime
   evidence: createEvidenceFinancialPort,
   readQuestion: (question) => proposeScope({ question }),
   researchScope: financialResearchScope,
-  commentary: (input, turn) => answerTurn(input, turn, { env: process.env, traceDir: process.env.CHAT_TRACE_DIR?.trim() }),
+  commentary: (input, turn, onAnswered) => answerTurn(input, turn, { env: process.env, traceDir: process.env.CHAT_TRACE_DIR?.trim(), onAnswered }),
 });
 
 export const persistAssistantMessage: ChatAssistantMessagePersistence = async (message) =>

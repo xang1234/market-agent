@@ -18,8 +18,19 @@ import { resultRefProblem } from "./prose-refs.ts";
 
 type Block = Record<string, unknown>;
 
-/** The analyst answer and its judge (answer-trace.ts answerTurn), as the server configures them. */
-export type CommentaryComposer = (input: AnswerTraceInput, turn: Pick<TurnTrace, "thread_id" | "run_id" | "turn_id" | "question">) => Promise<AnsweredTurn>;
+/**
+ * The analyst answer and its judge (answer-trace.ts answerTurn), as the server
+ * configures them. onAnswered receives the deployment that wrote an answer
+ * rendered from its assertions.
+ */
+export type CommentaryComposer = (
+  input: AnswerTraceInput,
+  turn: Pick<TurnTrace, "thread_id" | "run_id" | "turn_id" | "question">,
+  onAnswered: (deployment: string) => void,
+) => Promise<AnsweredTurn>;
+
+// The block appended, and the deployment that wrote it; null for the note.
+type Commentary = { block: Block; answered_by: string | null };
 
 export const COMMENTARY_UNAVAILABLE = "Commentary is unavailable for this answer.";
 
@@ -54,15 +65,16 @@ async function commentary(
   message: ChatReadMessage,
   tickers: ReadonlyMap<string, string>,
   turn: Pick<TurnTrace, "thread_id" | "run_id" | "turn_id" | "question">,
-): Promise<Block> {
+): Promise<Commentary> {
   const [answer] = message.blocks as unknown as [FinancialAnswerBlock];
   const id = `commentary-${message.message_id}`;
   const skeleton = { id, kind: "rich_text", snapshot_id: message.snapshot_id, data_ref: { kind: "rich_text", id }, source_refs: [], as_of: answer.as_of, analyst_commentary: true, segments: [] };
-  const unavailable = (cause: unknown) => {
+  const unavailable = (cause: unknown): Commentary => {
     console.warn(`[chat] analyst commentary unavailable for message ${message.message_id}`, cause);
-    return { ...skeleton, segments: [{ type: "text", text: COMMENTARY_UNAVAILABLE }] };
+    return { block: { ...skeleton, segments: [{ type: "text", text: COMMENTARY_UNAVAILABLE }] }, answered_by: null };
   };
   const packet = enginePacket(answer.financial, tickers);
+  let deployment: string | null = null;
   let written: Pick<AnsweredTurn, "assertions" | "blocks">;
   try {
     const answered = await compose({
@@ -70,7 +82,9 @@ async function commentary(
       blocks: [skeleton],
       toolCalls: [],
       packet,
-    }, turn);
+    }, turn, (writer) => {
+      deployment = writer;
+    });
     written = answered.judging ? await answered.judging.done : answered;
   } catch (reason) {
     // A failed, timed-out or unmatched model call reaches here as the router's error.
@@ -80,16 +94,16 @@ async function commentary(
   if (written.assertions?.rendered !== true) return unavailable(`no assertion rendered (list ${written.assertions?.status ?? "not written"})`);
   const [prose] = written.blocks as [Block];
   const problem = resultRefProblem(prose, answer);
-  return problem === null ? prose : unavailable(problem);
+  return problem === null ? { block: prose, answered_by: deployment } : unavailable(problem);
 }
 
-async function append(db: SqlExecutor, message: ChatReadMessage, block: Block): Promise<void> {
+async function append(db: SqlExecutor, message: ChatReadMessage, { block, answered_by }: Commentary): Promise<void> {
   const blocks = JSON.stringify([...(message.blocks as Block[]), block]);
   const { rows } = await db.query(
-    `update chat_messages set blocks = $2::jsonb, content_hash = $3
+    `update chat_messages set blocks = $2::jsonb, content_hash = $3, answered_by = coalesce($5, answered_by)
       where message_id = $1::uuid and content_hash = $4
       returning message_id`,
-    [message.message_id, blocks, contentHashForText(blocks), message.content_hash],
+    [message.message_id, blocks, contentHashForText(blocks), message.content_hash, answered_by],
   );
   if (rows.length === 0) console.warn(`[chat] the analyst commentary for message ${message.message_id} was not saved: the message changed since it was read`);
 }

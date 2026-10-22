@@ -47,10 +47,11 @@ const JUDGE = "You check the analyst inferences";
 
 function composer(answer: (request: LlmChatRequest) => string | Promise<string>, judge?: string, env: Record<string, string> = judge ? JUDGED : ENV) {
   const inputs: AnswerTraceInput[] = [];
-  const compose: CommentaryComposer = (input, turn) => {
+  const compose: CommentaryComposer = (input, turn, onAnswered) => {
     inputs.push(input);
     return answerTurn(input, turn, {
       env,
+      onAnswered,
       createClient: () => async (_deployment, request) => ({ text: request.messages[0]!.content.startsWith(JUDGE) ? judge! : await answer(request) }),
     });
   };
@@ -137,6 +138,7 @@ test("a company overview carries analyst commentary on its published results (#3
       return { type: "ref", ref_kind: "result", ref_id: result.result_id, format: result.presented.text, period: labels[result.period_label_id]!.text };
     }));
     assert.equal(resultRefProblem(commentary!, answer as never), null);
+    assert.equal(saved.answered_by, "fixture/recorded", "the deployment that wrote the commentary");
 
     const [input] = inputs;
     assert.deepEqual([input!.toolCalls, input!.factBlocks, input!.packet!.route, input!.packet!.figures.length], [[], undefined, "financial_engine", 16]);
@@ -197,8 +199,8 @@ test("a company overview carries analyst commentary on its published results (#3
       "the router fails": () => Promise.reject(new LlmRouterError("all_deployments_failed", "all LLM deployments failed", [])),
       "the assertion list is malformed": composer(() => "No list.\n```assertions\n{not json\n```").compose,
       "nothing is accepted": composer(() => assertions([{ kind: "observation", text: "x", evidence: ["F99"] }])).compose,
-      "a ref is not the answer's": async (input, turn) => {
-        const answer = await composer(() => ALFA_REPLY).compose(input, turn);
+      "a ref is not the answer's": async (input, turn, onAnswered) => {
+        const answer = await composer(() => ALFA_REPLY).compose(input, turn, onAnswered);
         const [prose] = answer.blocks;
         const segments = segmentsOf(prose).map((segment) => segment.type === "ref" ? { ...segment, format: "60%" } : segment);
         return { ...answer, blocks: [{ ...prose, segments }] };
@@ -212,6 +214,7 @@ test("a company overview carries analyst commentary on its published results (#3
       assert.deepEqual(saved.blocks.map((block) => block.kind), ["financial_answer", "rich_text"], failure);
       assert.deepEqual([note!.id, note!.analyst_commentary, note!.segments], [`commentary-${done.message_id}`, true, [{ type: "text", text: COMMENTARY_UNAVAILABLE }]], failure);
       assert.deepEqual(saved.block_proofs[answer!.id]!.calculation, "verified", failure);
+      assert.equal(saved.answered_by, null, `${failure}: no deployment wrote the note`);
       assert.ok(warned.some((args) => String(args[0]).startsWith("[chat] analyst commentary unavailable")), `${failure}: logged ${JSON.stringify(warned)}`);
     }
   });
@@ -239,8 +242,8 @@ test("a company overview carries analyst commentary on its published results (#3
     const first = composer(() => ALFA_REPLY);
     const question = "Revenue for ALFA";
     const { turnId, events } = await overview(first.compose).run({ ...base, userIntent: question });
-    const saved = await message(completed(events).message_id);
-    assert.deepEqual([first.inputs.length, saved.blocks.map((block) => block.kind)], [1, ["financial_answer", "rich_text"]]);
+    const saved = (await readChatMessage(db, { thread_id: threadId, message_id: String(completed(events).message_id) }))!;
+    assert.deepEqual([first.inputs.length, (saved.blocks as Block[]).map((block) => block.kind)], [1, ["financial_answer", "rich_text"]]);
 
     const again = composer(() => ALFA_REPLY);
     const authority = createRuntimeAuthority({
@@ -259,7 +262,7 @@ test("a company overview carries analyst commentary on its published results (#3
       turn: { thread_id: threadId, run_id: turnId, turn_id: turnId, question },
     });
     assert.equal(again.inputs.length, 0);
-    assert.deepEqual(await message(saved.message_id), saved);
+    assert.deepEqual(await readChatMessage(db, { thread_id: threadId, message_id: saved.message_id }), saved);
   });
 
   await t.test("a defect or a database error after the commit is logged, and the turn completes with the answer as saved", async (st) => {
