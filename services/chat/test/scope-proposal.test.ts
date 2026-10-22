@@ -13,7 +13,7 @@ const ENV = {
   LLM_OPENAI_MODELS: "gpt-4.1",
   LITELLM_MODEL: "openai/gpt-4.1",
 };
-const EMPTY = { metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named" } };
+const EMPTY = { metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named", names: [] } };
 const reply = (fields: Record<string, unknown>) => JSON.stringify({ ...EMPTY, ...fields });
 const parse = (text: string, question = "") => parseProposal(text, question);
 const replying = (text: string) => () => async () => ({ text });
@@ -39,7 +39,7 @@ test("a full reply is read into the proposal, each metric built from the catalog
     turns_off: { facets: new Set(["segments", "fiscal_quarter"]), metrics: new Set(["capex", "eps_diluted_non_gaap"]) },
     income_items: ["revenue", "operating_income"],
     period: { kind: "fiscal_year", fiscal_year: 2025 },
-    companies: { kind: "as_named" },
+    companies: { kind: "as_named", names: [] },
   });
 });
 
@@ -80,7 +80,8 @@ test("each kind of period is read with exactly its fields (#472)", () => {
 test("each change to the companies is read with exactly its fields", () => {
   const question = "Drop AMD and add Tesla, or just AAPL? What about MSFT, GOOG and META?";
   for (const companies of [
-    { kind: "as_named" },
+    { kind: "as_named", names: [] },
+    { kind: "as_named", names: ["AAPL", "Tesla"] },
     { kind: "compare", add: [] },
     { kind: "compare", add: ["tesla"] },
     { kind: "drop", drop: ["AMD"], add: [] },
@@ -92,7 +93,8 @@ test("each change to the companies is read with exactly its fields", () => {
   }
   for (const companies of [
     { kind: "switch", names: ["AAPL"] },
-    { kind: "as_named", names: [] },
+    { kind: "as_named" },
+    { kind: "as_named", names: ["NVDA"] },
     { kind: "compare" },
     { kind: "compare", add: ["AMD"], drop: [] },
     { kind: "drop", drop: [], add: ["AMD"] },
@@ -169,7 +171,7 @@ test("a reply wrapped in prose or a fence is read", () => {
     turns_off: { facets: new Set(), metrics: new Set() },
     income_items: [],
     period: { kind: "none" },
-    companies: { kind: "as_named" },
+    companies: { kind: "as_named", names: [] },
   });
 });
 

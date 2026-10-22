@@ -93,6 +93,7 @@ async function subjectsForTurn(
 const priorOf = (...tickers: string[]) => async () => tickers.map(resolved);
 // The turn's reading names this change to the companies.
 const reads = (companies: CompanyChange) => ({ readQuestion: async () => proposal({ companies }) });
+const asNamed = (...names: string[]) => reads({ kind: "as_named", names });
 const compare = (...add: string[]) => reads({ kind: "compare", add });
 const drop = (names: string[], add: string[] = []) => reads({ kind: "drop", drop: names, add });
 
@@ -209,7 +210,7 @@ test("an explicit subject stays primary and a comparison adds the companies it n
 });
 
 test("an explicit subject with a non-comparative message covers that subject only", async () => {
-  const { tickers } = await subjectsForTurn("Summarize the quarter for AMD", reads({ kind: "as_named" }), "NVDA");
+  const { tickers } = await subjectsForTurn("Summarize the quarter for AMD", reads({ kind: "as_named", names: [] }), "NVDA");
   assert.deepEqual(tickers, ["NVDA"]);
 });
 
@@ -260,7 +261,7 @@ test("a follow-up that drops a company keeps the others", async () => {
   const full = await subjectsForTurn("Drop AMD and add TSLA", { loadPriorSubjects: priorOf("NVDA", "AMD", "AAPL", "MSFT", "GOOG", "META"), ...drop(["AMD"], ["TSLA"]) });
   assert.deepEqual(full.tickers, ["NVDA", "AAPL", "MSFT", "GOOG", "TSLA"]);
   // Turning a facet off names no company, so the companies are kept.
-  const { tickers } = await subjectsForTurn("Drop the segments", { loadPriorSubjects: priorOf("NVDA", "AMD"), ...compare() });
+  const { tickers } = await subjectsForTurn("Drop the segments", { loadPriorSubjects: priorOf("NVDA", "AMD"), ...asNamed() });
   assert.deepEqual(tickers, ["NVDA", "AMD"]);
 });
 
@@ -384,7 +385,7 @@ test("dropping a company that cannot be found, or is ambiguous, is asked about",
   assert.equal(ambiguous.ran, false);
   assert.match(ambiguous.events, /Which Alphabet share class do you mean\?/);
   // A metric or facet in capitals is not a company to drop.
-  assert.equal((await run("Drop the FCF", compare())).ran, true);
+  assert.equal((await run("Drop the FCF", asNamed())).ran, true);
   // NET read as a company is asked about (#378 review).
   const fragment = await run("Drop NET", drop(["NET"]));
   assert.equal(fragment.ran, false);
@@ -393,8 +394,8 @@ test("dropping a company that cannot be found, or is ambiguous, is asked about",
 
 test("a metric named in capitals is dropped as the metric, not asked about as a company (#378 review)", async () => {
   const comparison = { loadPriorSubjects: priorOf("NVDA", "AMD") };
-  assert.deepEqual((await subjectsForTurn("Drop BALANCE SHEET", { ...comparison, ...compare() })).tickers, ["NVDA", "AMD"]);
-  assert.deepEqual((await subjectsForTurn("Drop FREE CASH FLOW", { ...comparison, ...compare() })).tickers, ["NVDA", "AMD"]);
+  assert.deepEqual((await subjectsForTurn("Drop BALANCE SHEET", { ...comparison, ...asNamed() })).tickers, ["NVDA", "AMD"]);
+  assert.deepEqual((await subjectsForTurn("Drop FREE CASH FLOW", { ...comparison, ...asNamed() })).tickers, ["NVDA", "AMD"]);
   assert.deepEqual((await subjectsForTurn("Drop AMD and the FREE CASH FLOW", { ...comparison, ...drop(["AMD"]) })).tickers, ["NVDA"]);
   const { tickers, context } = await subjectsForTurn("Drop NET", { ...comparison, ...drop(["NET"]) });
   assert.deepEqual([tickers, context], [[], null]);
@@ -404,17 +405,27 @@ test("a ticker inside a metric's name is the metric, unless the comparison cover
   // CASH is a real ticker (Pathward), so the production resolver resolves it.
   const withCash = async ({ text }: { text: string }) => (text === "CASH" ? { ...resolved("NOW"), input_text: text } : preResolveSubject({ text }));
   const comparison = { preResolveSubject: withCash, loadPriorSubjects: priorOf("NVDA", "AMD") };
-  assert.deepEqual((await subjectsForTurn("Drop FREE CASH FLOW", { ...comparison, ...compare() })).tickers, ["NVDA", "AMD"]);
+  assert.deepEqual((await subjectsForTurn("Drop FREE CASH FLOW", { ...comparison, ...asNamed() })).tickers, ["NVDA", "AMD"]);
   assert.deepEqual((await subjectsForTurn("Drop AMD and the FREE CASH FLOW", { ...comparison, ...drop(["AMD"]) })).tickers, ["NVDA"]);
   assert.deepEqual((await subjectsForTurn("Drop FREE CASH FLOW and add TSLA", { ...comparison, ...compare("TSLA") })).tickers, ["NVDA", "AMD", "TSLA"]);
   // Nor are the metric's other words companies the answer could not find.
-  assert.deepEqual((await subjectsForTurn("Drop FREE CASH FLOW", { ...comparison, ...compare() })).context?.unresolvedMentions, []);
+  assert.deepEqual((await subjectsForTurn("Drop FREE CASH FLOW", { ...comparison, ...asNamed() })).context?.unresolvedMentions, []);
   assert.deepEqual((await subjectsForTurn("Drop AMD and the FREE CASH FLOW", { ...comparison, ...drop(["AMD"]) })).context?.unresolvedMentions, []);
   // With no comparison before, the turn is not about Pathward.
   const fresh = { preResolveSubject: withCash, loadPriorSubjects: priorOf() };
-  assert.deepEqual((await subjectsForTurn("Drop FREE CASH FLOW", { ...fresh, ...compare() })).tickers, []);
+  assert.deepEqual((await subjectsForTurn("Drop FREE CASH FLOW", { ...fresh, ...asNamed() })).tickers, []);
+  // With no reading, CASH is never added or switched to: the turn asks.
+  const unread = await subjectsForTurn("Drop FREE CASH FLOW", { ...comparison, readQuestion: async () => null });
+  assert.deepEqual([unread.tickers, unread.context], [[], null]);
   const covered = { preResolveSubject: withCash, loadPriorSubjects: priorOf("NVDA", "NOW") };
   assert.deepEqual((await subjectsForTurn("Drop CASH", { ...covered, ...drop(["CASH"]) })).tickers, ["NVDA"]);
+});
+
+test("a question naming a company with no word about earlier ones answers it alone", async () => {
+  const { tickers } = await subjectsForTurn("What is AAPL's revenue?", { loadPriorSubjects: priorOf("NVDA"), ...asNamed("AAPL") });
+  assert.deepEqual(tickers, ["AAPL"]);
+  const { tickers: kept } = await subjectsForTurn("Why?", { loadPriorSubjects: priorOf("NVDA", "AMD"), ...asNamed() });
+  assert.deepEqual(kept, ["NVDA", "AMD"]);
 });
 
 test("a company that cannot be found is asked about when the removal also names a facet (#275)", async () => {

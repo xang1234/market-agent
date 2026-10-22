@@ -163,7 +163,7 @@ export type ScopeProposal = {
 // applies the change to them (coordinator.ts resolveTurnSubjects).
 export type CompanyChange =
   // No change asked: the companies named answer alone, or with none named the previous ones carry.
-  | { kind: "as_named" }
+  | { kind: "as_named"; names: ReadonlyArray<string> }
   // The previous companies with these added ("compare it with AMD", "add TSLA"); none for "compare them".
   | { kind: "compare"; add: ReadonlyArray<string> }
   | { kind: "drop"; drop: ReadonlyArray<string>; add: ReadonlyArray<string> }
@@ -172,7 +172,7 @@ export type CompanyChange =
   // Named without saying add or switch ("what about AAPL?").
   | { kind: "unclear"; names: ReadonlyArray<string> };
 
-const NO_PROPOSAL: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named" } };
+const NO_PROPOSAL: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named", names: [] } };
 
 // The field a facet turned off clears. Guidance and a cause are read apart;
 // evidence and the latest quarter are asked for one turn only.

@@ -46,7 +46,7 @@
     },
     {
       "match": "Question: \"Analyze NVDA\"",
-      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\"}}",
+      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\"]}}",
       "hand_labelled": "2026-10-22 #472 period and companies added by hand; replace on live re-record"
     },
     {
@@ -56,7 +56,7 @@
     },
     {
       "match": "Question: \"Explain the differences and show the evidence\"",
-      "text": "{\"metrics\":[],\"asks\":[\"explains\",\"evidence\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\"}}",
+      "text": "{\"metrics\":[],\"asks\":[\"explains\",\"evidence\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}",
       "hand_labelled": "2026-10-22 #472 period and companies added by hand; replace on live re-record"
     },
     {
@@ -66,32 +66,32 @@
     },
     {
       "match": "Question: \"Explain the differences\"",
-      "text": "{\"metrics\":[],\"asks\":[\"explains\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\"}}",
+      "text": "{\"metrics\":[],\"asks\":[\"explains\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}",
       "hand_labelled": "2026-10-22 #472 period and companies added by hand; replace on live re-record"
     },
     {
       "match": "Question: \"Analyze AAPL\"",
-      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\"}}",
+      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AAPL\"]}}",
       "hand_labelled": "2026-10-22 #472 period and companies added by hand; replace on live re-record"
     },
     {
       "match": "Question: \"Analyze AMD\"",
-      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\"}}",
+      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AMD\"]}}",
       "hand_labelled": "2026-10-22 #472 period and companies added by hand; replace on live re-record"
     },
     {
       "match": "Question: \"How does NVDA compare with its peers?\"",
-      "text": "{\"metrics\":[],\"asks\":[\"peers\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\"}}",
+      "text": "{\"metrics\":[],\"asks\":[\"peers\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\"]}}",
       "hand_labelled": "2026-10-22 #472 period and companies added by hand; replace on live re-record"
     },
     {
       "match": "Question: \"Drop the peers\"",
-      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[\"peers\"],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"compare\",\"add\":[]}}",
+      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[\"peers\"],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}",
       "hand_labelled": "2026-10-22 #472 period and companies added by hand; replace on live re-record"
     },
     {
       "match": "Question: \"Explain it\"",
-      "text": "{\"metrics\":[],\"asks\":[\"explains\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\"}}",
+      "text": "{\"metrics\":[],\"asks\":[\"explains\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}",
       "hand_labelled": "2026-10-22 #472 period and companies added by hand; replace on live re-record"
     },
     {
@@ -101,42 +101,42 @@
     },
     {
       "match": "Question: \"Break down NVDA's revenue by segment\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"segments\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\"}}",
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"segments\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\"]}}",
       "hand_labelled": "2026-10-22 #472 period and companies added by hand; replace on live re-record"
     },
     {
       "match": "Question: \"Why did AMD's operating margin turn negative in Q2 2025?\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":\"margin\"}],\"asks\":[\"explains\",\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_margin\"],\"period\":{\"kind\":\"fiscal_quarter\",\"fiscal_period\":\"Q2\",\"fiscal_year\":2025},\"companies\":{\"kind\":\"as_named\"}}",
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":\"margin\"}],\"asks\":[\"explains\",\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_margin\"],\"period\":{\"kind\":\"fiscal_quarter\",\"fiscal_period\":\"Q2\",\"fiscal_year\":2025},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AMD\"]}}",
       "hand_labelled": "2026-10-22 #472 period and companies added by hand; replace on live re-record"
     },
     {
       "match": "Question: \"What was AMD's revenue in Q2 2019?\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"fiscal_quarter\",\"fiscal_period\":\"Q2\",\"fiscal_year\":2019},\"companies\":{\"kind\":\"as_named\"}}",
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"fiscal_quarter\",\"fiscal_period\":\"Q2\",\"fiscal_year\":2019},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AMD\"]}}",
       "hand_labelled": "2026-10-22 #472 period and companies added by hand; replace on live re-record"
     },
     {
       "match": "Question: \"Break down AMD's revenue by segment\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"segments\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\"}}",
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"segments\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AMD\"]}}",
       "hand_labelled": "2026-10-22 #472 period and companies added by hand; replace on live re-record"
     },
     {
       "match": "Question: \"Show the evidence\"",
-      "text": "{\"metrics\":[],\"asks\":[\"evidence\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\"}}",
+      "text": "{\"metrics\":[],\"asks\":[\"evidence\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}",
       "hand_labelled": "2026-10-22 #472 period and companies added by hand; replace on live re-record"
     },
     {
       "match": "Question: \"Break down NVDA's revenue by segment and show its operating margin trend\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"segments\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\",\"operating_margin\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\"}}",
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"segments\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\",\"operating_margin\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\"]}}",
       "hand_labelled": "2026-10-22 #472 period and companies added by hand; replace on live re-record"
     },
     {
       "match": "Question: \"Break down NVDA's revenue by segment and show its gross margin\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"segments\",\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\",\"gross_margin\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\"}}",
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"segments\",\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\",\"gross_margin\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\"]}}",
       "hand_labelled": "2026-10-22 #472 period and companies added by hand; replace on live re-record"
     },
     {
       "match": "Question: \"What is AMD's free cash flow?\"",
-      "text": "{\"metrics\":[{\"metric\":\"free_cash_flow\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\"}}",
+      "text": "{\"metrics\":[{\"metric\":\"free_cash_flow\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AMD\"]}}",
       "hand_labelled": "2026-10-22 #472 period and companies added by hand; replace on live re-record"
     },
     {
@@ -146,7 +146,7 @@
     },
     {
       "match": "Question: \"Show it as a table\"",
-      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\"}}",
+      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}",
       "hand_labelled": "2026-10-22 #472 period and companies added by hand; replace on live re-record"
     },
     {
@@ -166,7 +166,7 @@
     },
     {
       "match": "Question: \"Same, without the benchmark\"",
-      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[\"benchmark\"],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"compare\",\"add\":[]}}",
+      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[\"benchmark\"],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}",
       "hand_labelled": "2026-10-22 #472 period and companies added by hand; replace on live re-record"
     },
     {
@@ -176,7 +176,7 @@
     },
     {
       "match": "Question: \"What drives AAPL's margins?\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"explains\",\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\"}}",
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"explains\",\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AAPL\"]}}",
       "hand_labelled": "2026-10-22 #472 period and companies added by hand; replace on live re-record"
     },
     {
@@ -186,7 +186,7 @@
     },
     {
       "match": "Question: \"How does AMDX's Q2 2025 revenue compare with its peers?\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"peers\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"fiscal_quarter\",\"fiscal_period\":\"Q2\",\"fiscal_year\":2025},\"companies\":{\"kind\":\"as_named\"}}",
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"peers\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"fiscal_quarter\",\"fiscal_period\":\"Q2\",\"fiscal_year\":2025},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}",
       "hand_labelled": "2026-10-22 #472 period and companies added by hand; replace on live re-record"
     },
     {

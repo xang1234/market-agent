@@ -116,7 +116,7 @@ function companiesOf(value: unknown, question: string): CompanyChange | null {
   const { kind, ...fields } = value as Record<string, unknown>;
   const keys = Object.keys(fields).sort().join(",");
   const { add, drop, names } = fields;
-  if (kind === "as_named") return keys === "" ? { kind } : null;
+  if (kind === "as_named") return keys === "names" && isNameList(names, question) ? { kind, names } : null;
   if (kind === "compare") return keys === "add" && isNameList(add, question) ? { kind, add } : null;
   if (kind === "drop") return keys === "add,drop" && isNameList(drop, question, 1) && isNameList(add, question) ? { kind, drop, add } : null;
   if (kind === "only" || kind === "unclear") return keys === "names" && isNameList(names, question, 1) ? { kind, names } : null;
@@ -205,11 +205,11 @@ const PROPOSAL_INSTRUCTIONS = [
   '- {"kind":"other"}: any other period, one named relative to now ("last year", "last quarter")',
   "A <year> is a four-digit integer; a two-digit year is in the 2000s (FY26 is 2026).",
   "A <companies> is how the question changes the companies already being discussed, one of:",
-  '- {"kind":"as_named"}: no change asked: it names its companies with no word about earlier ones ("What is AAPL\'s',
-  '  revenue?"), or is a follow-up that names none ("why?", "show the evidence")',
+  '- {"kind":"as_named","names":[<name>]}: no change asked: the companies it names, with no word about earlier ones',
+  '  ("What is AAPL\'s revenue?" names AAPL); names is empty for a follow-up that names none ("why?", "show the',
+  '  evidence", "drop the free cash flow", "now without guidance")',
   '- {"kind":"compare","add":[<name>]}: the companies already discussed stay, with those it names added ("compare it',
-  '  with AMD", "add TSLA", "vs AMD", "compare NVDA and AMD"); add is empty when it adds none ("compare them", "drop the',
-  '  free cash flow", "now without guidance")',
+  '  with AMD", "add TSLA", "vs AMD", "compare NVDA and AMD"); add is empty only for "compare them"',
   '- {"kind":"drop","drop":[<name>],"add":[<name>]}: it removes companies by name, adding any it names beside them',
   '  ("drop AMD", "drop AMD and add TSLA"); drop is never empty',
   '- {"kind":"only","names":[<name>]}: these companies alone, in place of the earlier ones ("just AAPL", "AAPL instead",',

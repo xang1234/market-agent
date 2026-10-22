@@ -120,7 +120,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       turns_off: { facets: [], metrics: [] },
       income_items: ["revenue"],
       period: { kind: "none" },
-      companies: { kind: "as_named" },
+      companies: { kind: "as_named", names: [] },
     }), "");
     const { events } = await chatHarness(pool, { model: revenueModel(["AAA", "BBB"]), readQuestion }).run({ ...base, userIntent: "Compare revenue and EBITDA for AAA and BBB against the S&P 500" });
     const message = (await db.query(`select blocks from chat_messages where message_id = $1`, [completed(events).message_id])).rows[0];
@@ -134,7 +134,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     const carried = async (ticker: string) => ({ ...(await resolveMention(ticker)), handoff: { display_labels: { ticker } } }) as unknown as ChatResolvedSubjectPreResolution;
     const aaa = await carried("AAA");
     const bbb = await carried("BBB");
-    const answer = async (userIntent: string, tickers: string[], prior = [aaa], readQuestion = changing({ kind: "as_named" })) => {
+    const answer = async (userIntent: string, tickers: string[], prior = [aaa], readQuestion = changing({ kind: "as_named", names: [] })) => {
       const { events } = await chatHarness(pool, { model: revenueModel(tickers), priorSubjects: async () => prior, readQuestion }).run({ ...base, userIntent });
       const [block, ...notes] = (await db.query(`select blocks from chat_messages where message_id = $1`, [completed(events).message_id])).rows[0].blocks;
       return {
@@ -294,7 +294,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     let reads = 0;
     const readQuestion = async () => {
       reads += 1;
-      return parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named" } }), "");
+      return parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named", names: [] } }), "");
     };
     // As financialResearchScope does, the scope waits for the reading.
     const researchScope = async (context: Parameters<typeof scopeOver>[0], reading: Promise<unknown>) => {
@@ -322,7 +322,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(await answer(async () => null), unchecked, "no reading");
     assert.deepEqual(await answer(async () => { throw new Error("scope model down"); }), unchecked, "a failed reading");
     assert.deepEqual(await answer(() => { throw new Error("no scope reader"); }), unchecked, "a reader that throws before it answers");
-    assert.deepEqual(await answer(async () => parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named" } }), "")), [[], undefined]);
+    assert.deepEqual(await answer(async () => parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named", names: [] } }), "")), [[], undefined]);
   });
 
   await t.test("each name a turn gives is resolved once (#425)", async () => {

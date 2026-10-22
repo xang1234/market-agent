@@ -91,7 +91,7 @@ const scope = (
   metrics: string[] = [],
   items: string[] = [],
   period: ScopeReply["period"] = { kind: "none" },
-  companies: ScopeReply["companies"] = { kind: "as_named" },
+  companies: ScopeReply["companies"] = { kind: "as_named", names: [] },
 ): ScopeReply => ({ metrics: metrics.map((metric) => ({ metric })), asks, turns_off: { facets: [], metrics: [] }, income_items: items, period, companies });
 const LATEST = { kind: "latest" };
 const INCOME = ["income_statement"];

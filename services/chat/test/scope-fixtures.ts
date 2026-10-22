@@ -30,7 +30,7 @@ export function proposal(reply: {
     turns_off: { facets: new Set(reply.off), metrics: new Set((reply.offMetrics ?? []).map((metric) => built(metric).metric_key)) },
     income_items: reply.items ?? [],
     period: reply.period ?? { kind: "none" },
-    companies: reply.companies ?? { kind: "as_named" },
+    companies: reply.companies ?? { kind: "as_named", names: [] },
   };
 }
 

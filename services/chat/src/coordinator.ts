@@ -1038,24 +1038,20 @@ export async function resolveTurnSubjects(
   const reading = prior.length > 0 || named.unresolved.length > 0 ? await context.reading?.() ?? null : null;
   const change = reading?.companies;
   if (!change) return unreadChange(named.resolved, prior);
-  switch (change.kind) {
-    case "as_named":
-      return named.resolved.length > 0 ? listed([], named.resolved) : listed(prior, []);
-    case "drop":
-      return prior.length > 0 ? dropped(prior, change, preResolve) : listed([], named.resolved);
-    case "compare":
-    case "only":
-    case "unclear": {
-      const names = await resolveNames(change.kind === "compare" ? change.add : change.names, preResolve);
-      if (names.ambiguous) return { subjects: [], ambiguous: names.ambiguous, notFound: [] };
-      if (change.kind === "compare") return listed(prior, names.resolved, names.notFound);
-      if (names.resolved.length === 0) return listed(prior, [], names.notFound);
-      const priorKeys = new Set(prior.map(companyKey));
-      const added = names.resolved.filter((subject) => !priorKeys.has(companyKey(subject)));
-      if (change.kind === "unclear" && prior.length >= 2 && added.length > 0) return addOrAlone(added, prior);
-      return listed([], names.resolved, names.notFound);
-    }
+  if (change.kind === "drop" && prior.length > 0) return dropped(prior, change, preResolve);
+  const names = await resolveNames(
+    change.kind === "compare" ? change.add : change.kind === "drop" ? [...change.drop, ...change.add] : change.names,
+    preResolve,
+  );
+  if (names.ambiguous) return { subjects: [], ambiguous: names.ambiguous, notFound: [] };
+  if (change.kind === "compare") return listed(prior, names.resolved, names.notFound);
+  if (names.resolved.length === 0) return listed(prior, [], names.notFound);
+  if (change.kind === "unclear" && prior.length >= 2) {
+    const priorKeys = new Set(prior.map(companyKey));
+    const added = names.resolved.filter((subject) => !priorKeys.has(companyKey(subject)));
+    if (added.length > 0) return addOrAlone(added, prior);
   }
+  return listed([], names.resolved, names.notFound);
 }
 
 // With no reading, a follow-up never changes the companies it cannot read:

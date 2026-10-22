@@ -85,7 +85,7 @@ export function resolveMention(mention: string): Promise<ChatSubjectPreResolutio
   return Promise.resolve(table[mention] ?? ({ status: "not_found", input_text: mention, normalized_input: mention, message: "not found" } as ChatSubjectPreResolution));
 }
 
-export const NO_ASKS: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named" } };
+export const NO_ASKS: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named", names: [] } };
 export const METRIC_READING: ScopeProposal = { ...NO_ASKS, metrics: [proposedMetric("income_statement", null, null)!] };
 /** A reading of a metric question that changes the companies so. */
 export const changing = (companies: CompanyChange) => async (): Promise<ScopeProposal> => ({ ...METRIC_READING, companies });
