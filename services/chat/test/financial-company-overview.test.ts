@@ -165,6 +165,27 @@ test("a question about one company that asks for no figure is answered with its 
     ]);
   });
 
+  await t.test("a defect in the overview fails the turn rather than answering through the planner (#473)", async (st) => {
+    const warned: unknown[][] = [];
+    st.mock.method(console, "warn", (...args: unknown[]) => warned.push(args));
+    const errors: unknown[][] = [];
+    st.mock.method(console, "error", (...args: unknown[]) => errors.push(args));
+    const defective: typeof createEvidenceFinancialPort = (executor) => ({
+      ...createEvidenceFinancialPort(executor),
+      listInputCandidates: async () => {
+        throw new TypeError("a defect");
+      },
+    });
+    // It rejects too: a planner the failed turn leaves behind is no unhandled rejection.
+    const failing: PlanningModel = async () => {
+      throw new Error("the model is down");
+    };
+    const { events } = await chatHarness(pool, { model: failing, readQuestion: reading(NO_ASKS), resolveMention: resolve, evidence: defective }).run({ ...base, userIntent: "Revenue for QTRS" });
+    assert.deepEqual([events.at(-1)!.type, events.at(-1)!.error_code], ["turn.error", "financial_answer_failed"]);
+    assert.deepEqual(warned.filter(([message]) => String(message).startsWith("[chat]")), []);
+    assert.ok(errors.some((args) => args.some((arg) => arg instanceof TypeError)), "the defect is logged");
+  });
+
   await t.test("an overview the engine does not plan falls back to the planner's answer, and says why (#473)", async (st) => {
     const warned: unknown[][] = [];
     st.mock.method(console, "warn", (...args: unknown[]) => warned.push(args));

@@ -23,6 +23,14 @@ export function asksForNoFigure(reading: ScopeProposal | null): boolean {
     [...reading.asks].every((facet) => facet === "latest_quarter");
 }
 
+/** The evidence could not list a company's quarters; any other throw is a defect. */
+export class OverviewEvidenceError extends Error {
+  constructor(reasonCode: string) {
+    super(`the company's quarters could not be read: ${reasonCode}`);
+    this.name = "OverviewEvidenceError";
+  }
+}
+
 /**
  * The overview of the context's one company, from the newest quarter it
  * reported revenue for; null when it reported none. The engine's latest
@@ -41,7 +49,7 @@ export async function planCompanyOverview(context: PlanningContext, evidence: Fi
     fiscal_period: null,
     limit: DEFAULT_EXECUTION_LIMITS.max_input_candidates,
   });
-  if (page.status === "error") throw new Error(`the company's quarters could not be read: ${page.reason_code}`);
+  if (page.status === "error") throw new OverviewEvidenceError(page.reason_code);
   // ponytail: a truncated page may lack the newest quarter, so the planner answers instead.
   const newest = page.truncated ? null : newestQuarter(page.candidates, context.knowledge_cutoff);
   return newest && buildDeterministicPlan(context, companyOverviewDraft(subject.mention, newest));

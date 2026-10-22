@@ -45,7 +45,7 @@ import { publishRequest, type RequestGap } from "../../financial-engine/src/requ
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { comparativeTurn, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId } from "./chat-ids.ts";
-import { asksForNoFigure, namesOneCompany, planCompanyOverview } from "./company-overview.ts";
+import { asksForNoFigure, namesOneCompany, OverviewEvidenceError, planCompanyOverview } from "./company-overview.ts";
 import { noteBlock } from "./fact-blocks.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { COMPARATIVE, companyKey, extractSubjectMentions } from "./subject-extraction.ts";
@@ -457,6 +457,7 @@ async function planTurn(
   try {
     overview = await planCompanyOverview(planningContext(subjects), turn.evidence);
   } catch (reason) {
+    if (!(reason instanceof OverviewEvidenceError)) throw reason;
     console.warn(OVERVIEW_UNPLANNED, reason);
     return planned;
   }
