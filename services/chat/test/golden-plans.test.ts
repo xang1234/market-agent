@@ -341,7 +341,7 @@ test("each golden answer names what its question asks for and its plan does not 
   const reply = async (content: string) => (await client({} as never, { messages: [{ role: "user", content }] })).text;
   const model: PlanningModel = async ({ messages }) => ({ text: (await client({} as never, { messages })).text, model: "recorded" });
   const uncovered: Record<string, string[]> = {
-    "Why did AMD's operating margin turn negative in Q2 2025?": ["the cause of these figures"],
+    "Why did AMD's operating margin turn negative in Q2 2025?": ["a margin over several periods", "the cause of these figures"],
     "What was AMD's revenue in Q2 2019?": [],
     "What is AMD's free cash flow?": [],
     "Compare NVDA, AMD and AAPL revenue and margins YTD against the S&P 500": ["a stock price return", "a comparison with a benchmark index"],
