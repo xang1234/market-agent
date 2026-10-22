@@ -2674,6 +2674,10 @@
         },
         {
           "type": "text",
+          "text": ", 23.9 percentage points above AAPL"
+        },
+        {
+          "type": "text",
           "text": "."
         },
         {
@@ -2714,6 +2718,10 @@
         },
         {
           "type": "text",
+          "text": ", 26.7 percentage points above AAPL"
+        },
+        {
+          "type": "text",
           "text": "."
         },
         {
@@ -2751,6 +2759,10 @@
         {
           "type": "text",
           "text": " (FY2026, ended Jan 2026)"
+        },
+        {
+          "type": "text",
+          "text": ", 54.5 percentage points above AAPL"
         },
         {
           "type": "text",

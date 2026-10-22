@@ -3654,6 +3654,10 @@
         },
         {
           "type": "text",
+          "text": ", 20.9 percentage points above AMD"
+        },
+        {
+          "type": "text",
           "text": "."
         },
         {
@@ -3705,6 +3709,10 @@
         {
           "type": "text",
           "text": " (FY2025, ended Sep 2025)"
+        },
+        {
+          "type": "text",
+          "text": ", 26.7 percentage points above AAPL"
         },
         {
           "type": "text",
@@ -3762,6 +3770,10 @@
         },
         {
           "type": "text",
+          "text": ", 14.9 percentage points below AAPL"
+        },
+        {
+          "type": "text",
           "text": "."
         },
         {
@@ -3813,6 +3825,10 @@
         {
           "type": "text",
           "text": " (FY2025, ended Sep 2025)"
+        },
+        {
+          "type": "text",
+          "text": ", 26.4 percentage points above AMD"
         },
         {
           "type": "text",
