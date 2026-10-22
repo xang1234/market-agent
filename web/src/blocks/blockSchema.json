@@ -203,13 +203,18 @@
             "fact",
             "claim",
             "event",
-            "series"
+            "series",
+            "result"
           ]
         },
         "ref_id": {
           "$ref": "#/$defs/UUID"
         },
         "format": {
+          "type": "string"
+        },
+        "period": {
+          "description": "A result ref's period, as its financial answer labels it.",
           "type": "string"
         }
       },
@@ -238,6 +243,10 @@
                   }
                 ]
               }
+            },
+            "analyst_commentary": {
+              "description": "Analyst commentary written on a financial answer's results, shown apart from that answer.",
+              "const": true
             }
           },
           "required": [

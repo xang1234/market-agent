@@ -269,10 +269,11 @@ function readSegment(deltaPayload: unknown): RichTextSegment | null {
       ref_kind: candidate.ref_kind as RefSegmentKind,
       ref_id: candidate.ref_id,
     }
-    if (typeof candidate.format === 'string') {
-      return { ...ref, format: candidate.format }
+    return {
+      ...ref,
+      ...(typeof candidate.format === 'string' ? { format: candidate.format } : {}),
+      ...(typeof candidate.period === 'string' ? { period: candidate.period } : {}),
     }
-    return ref
   }
   return null
 }

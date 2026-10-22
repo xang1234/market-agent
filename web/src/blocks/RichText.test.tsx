@@ -408,3 +408,53 @@ test('a fact chip hands the inspector its text, a claim chip leaves it the serve
     restoreGlobals()
   }
 })
+
+const RESULT = '91111111-1111-4111-9111-111111111111'
+
+const commentaryBlock: RichTextBlock = {
+  ...richTextBlock('commentary-m1', [
+    { type: 'text', text: "AAPL's revenue was " },
+    { type: 'ref', ref_kind: 'result', ref_id: RESULT, format: 'USD 391,035,000,000.00', period: 'FY2023' },
+    { type: 'text', text: ' in FY2023.' },
+  ]),
+  analyst_commentary: true,
+}
+
+test('analyst commentary is labelled as such, and a result in it opens the verified calculation it cites', async () => {
+  const opened: string[] = []
+  const inspector: EvidenceInspectorContextValue = {
+    openInspection() {},
+    openBlockInspection() {},
+    openFinancialResult(resultId) {
+      opened.push(resultId)
+    },
+    closeInspection() {},
+  }
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restoreGlobals = installDomGlobals(dom.window as unknown as Window)
+  try {
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(
+        <EvidenceInspectorContext.Provider value={inspector}>
+          <RichText block={commentaryBlock} />
+        </EvidenceInspectorContext.Provider>,
+      )
+    })
+    const doc = dom.window.document
+    assert.deepEqual([...doc.querySelectorAll('p')].map((p) => [p.hasAttribute('data-analyst-commentary'), p.textContent]), [
+      [true, 'Analyst commentary'],
+      [false, "AAPL's revenue was USD 391,035,000,000.00 in FY2023."],
+    ])
+    const chip = doc.querySelector<HTMLButtonElement>(`[data-inspect-result="${RESULT}"]`)!
+    assert.equal(chip.getAttribute('aria-label'), 'Inspect the verified calculation for USD 391,035,000,000.00, FY2023')
+    await act(async () => chip.click())
+    assert.deepEqual(opened, [RESULT])
+    await act(async () => root.unmount())
+  } finally {
+    restoreGlobals()
+  }
+  // Prose that is not commentary on an engine answer carries no such label.
+  const plain = await renderDocument(interleavedBlock)
+  assert.equal(plain.querySelector('[data-analyst-commentary]'), null)
+})

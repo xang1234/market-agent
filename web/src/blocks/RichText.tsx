@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
 import { InspectableRef } from '../evidence/InspectableRef.tsx'
+import { InspectableResult } from './FinancialAnswer.tsx'
 import type { RefSegment, RichTextBlock, TextSegmentTone } from './types.ts'
 import { isRefSegment, refSegmentText } from './richText.ts'
 import { Markdown } from './Markdown.tsx'
@@ -20,6 +21,14 @@ const TONE_CLASS: Readonly<Record<Exclude<TextSegmentTone, 'neutral'>, string>> 
 export function RichText({ block }: RichTextProps): ReactElement {
   const parts = block.segments.map((segment, index) => {
     if (isRefSegment(segment)) {
+      if (segment.ref_kind === 'result') {
+        const shown = refSegmentText(segment)
+        return (
+          <InspectableResult resultId={segment.ref_id} label={segment.period ? `${shown}, ${segment.period}` : shown}>
+            {shown}
+          </InspectableResult>
+        )
+      }
       return (
         <RefSegmentSpan
           snapshotId={block.snapshot_id}
@@ -38,6 +47,8 @@ export function RichText({ block }: RichTextProps): ReactElement {
       data-block-kind="rich_text"
       className="text-sm leading-6 text-fg-soft"
     >
+      {/* Its figures are the answer's; its words are not verified. */}
+      {block.analyst_commentary ? <p data-analyst-commentary className="text-xs font-medium text-muted">Analyst commentary</p> : null}
       <Markdown text={parts} />
     </div>
   )
@@ -47,7 +58,7 @@ type RefSegmentSpanProps = {
   snapshotId: string
   blockId: string
   index: number
-  segment: RefSegment
+  segment: Exclude<RefSegment, { ref_kind: 'result' }>
 }
 
 // A value as the text reads it, with no padding or fill: either would show as a

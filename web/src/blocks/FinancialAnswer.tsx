@@ -129,7 +129,7 @@ function Cell({ result, ownPeriod }: { result: FinancialPresentedResult | undefi
 
 // A certified value opens the shared result inspector where the host provides
 // one; a real button, so it is reachable by keyboard. Without a host it is text.
-function InspectableResult({ resultId, label, children }: { resultId: string; label: string; children: ReactNode }): ReactElement {
+export function InspectableResult({ resultId, label, children }: { resultId: string; label: string; children: ReactNode }): ReactElement {
   const inspector = useEvidenceInspector()
   const open = inspector?.openFinancialResult
   if (!open) return <>{children}</>

@@ -68,6 +68,38 @@ test('in a mixed message, only the certified result carries its claims', () => {
   assert.ok(!narrative.includes('data-verification='), 'commentary citing nothing claims nothing')
 })
 
+test("an engine answer's analyst commentary is shown apart from it, with no verified badge of its own", () => {
+  const commentary = {
+    id: 'commentary-m1',
+    kind: 'rich_text',
+    snapshot_id: financialAnswerFixture.snapshot_id,
+    data_ref: { kind: 'rich_text', id: 'commentary-m1' },
+    source_refs: [],
+    as_of: financialAnswerFixture.as_of,
+    analyst_commentary: true,
+    segments: [
+      { type: 'text', text: "AAPL's revenue was " },
+      { type: 'ref', ref_kind: 'result', ref_id: '91111111-1111-4111-9111-111111111111', format: 'USD 391,035,000,000.00', period: 'FY2023' },
+      { type: 'text', text: '.' },
+    ],
+  } as Block
+  const message: ChatMessage = {
+    message_id: 'm1',
+    thread_id: 't1',
+    role: 'assistant',
+    snapshot_id: financialAnswerFixture.snapshot_id,
+    blocks: [financialAnswerFixture as Block, commentary],
+    content_hash: 'h',
+    created_at: '2026-06-02T00:00:00.000Z',
+    block_proofs: { [financialAnswerFixture.id]: CERTIFIED, [commentary.id]: UNPROVEN },
+  }
+  const html = render(<MessageItem message={message} onMeasure={() => {}} />)
+  assert.equal(count(html, 'Verified calculation'), 1)
+  const commentaryHtml = html.slice(html.indexOf('block-rich-text-commentary-m1'))
+  assert.ok(commentaryHtml.includes('>Analyst commentary<'), 'labelled as commentary')
+  assert.ok(!commentaryHtml.includes('Verified calculation') && !commentaryHtml.includes('data-verification='), 'it claims nothing of its own')
+})
+
 test('a forged status cannot upgrade what the server established', () => {
   // A certified-looking answer the server did not certify.
   const forged = render(<BlockView block={financialAnswerFixture as Block} proof={UNPROVEN} />)
