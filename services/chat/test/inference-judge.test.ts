@@ -203,10 +203,17 @@ test("one judge call per answer, on JUDGE_LITELLM_MODEL, carries every inference
   });
 });
 
-test("a reply whose last verdict list is cut off is an error, never the draft it was correcting (#477 review)", () => {
-  const cut = '{"verdicts":[{"id":3,"verdict":"entailed","worded_amount":false}]}\n\nCorrection: the ranking contradicts it:\n{"verdicts":[{"id":3,"verdict":"contrad';
-  assert.deepEqual(parseVerdicts(cut, [CASES[1]!]), [{ index: 3, verdict: "error", reason: "the judge's last verdict list is cut off" }]);
-  const corrected = '{"verdicts":[{"id":3,"verdict":"entailed","worded_amount":false}]}\n\nCorrection:\n{"verdicts":[{"id":3,"verdict":"contradicted","worded_amount":false,"reason":"NVDA is highest."}]}';
+test("a reply is read only when its verdict list ends it, bar whitespace and its code fence: a cut-off correction in any shape is an error, never the draft it was correcting (#477 review)", () => {
+  const draft = '{"verdicts":[{"id":3,"verdict":"entailed","worded_amount":false}]}';
+  const notLast = [{ index: 3, verdict: "error", reason: "the judge's reply does not end with its verdict list" }];
+  for (const cut of ['{"verdicts":[{"id":3,"verdict":"contrad', '[{"id":3,"verdict":"contrad', '{"verdict":[{"id":3,"verdict":"contrad', "I am not sure about that."]) {
+    assert.deepEqual(parseVerdicts(`${draft}\n\nCorrection: the ranking contradicts it:\n${cut}`, [CASES[1]!]), notLast, cut);
+  }
+  assert.deepEqual(parseVerdicts("```json\n" + draft + "\n```\n\nCorrection:\n```json\n" + '{"verdicts":[{"id":3,"verd', [CASES[1]!]), notLast);
+  const entailed = [{ index: 3, verdict: "entailed", worded_amount: false }];
+  assert.deepEqual(parseVerdicts(`${draft}\n`, [CASES[1]!]), entailed);
+  assert.deepEqual(parseVerdicts("```json\n" + draft + "\n```\n", [CASES[1]!]), entailed);
+  const corrected = `${draft}\n\nCorrection:\n{"verdicts":[{"id":3,"verdict":"contradicted","worded_amount":false,"reason":"NVDA is highest."}]}`;
   assert.deepEqual(parseVerdicts(corrected, [CASES[1]!]), [{ index: 3, verdict: "contradicted", worded_amount: false, reason: "NVDA is highest." }]);
 });
 

@@ -173,16 +173,17 @@ function isVerdict(value: unknown): value is Verdict {
   return VERDICTS.some((verdict) => verdict === value);
 }
 
-// The reply's last verdict list: a model that corrects itself in prose
-// ("Correction: ... Final answer:") writes its final list last. A list begun
-// after the last whole one was cut off, so the reply has no final verdict,
-// whether or not the call reported a cut (#477 review).
+// The reply's verdict list, read only when it ends the reply, bar whitespace
+// and the code fence around it: a model that corrects itself ("Correction:
+// ... Final answer:") writes its final list last, and anything after a whole
+// list, a correction cut off in any shape or prose, leaves the reply with no
+// final verdict, whether or not the call reported a cut (#477 review).
 function lastVerdictList(text: string): unknown[] | string {
   const end = text.lastIndexOf("}") + 1;
   for (let start = text.lastIndexOf("{", end); start >= 0; start = text.lastIndexOf("{", start - 1)) {
     try {
       const verdicts = (JSON.parse(text.slice(start, end)) as { verdicts?: unknown } | null)?.verdicts;
-      if (Array.isArray(verdicts)) return text.includes('"verdicts"', end) ? "the judge's last verdict list is cut off" : verdicts;
+      if (Array.isArray(verdicts)) return /^\s*(?:```\s*)?$/.test(text.slice(end)) ? verdicts : "the judge's reply does not end with its verdict list";
     } catch {
       // Not a whole object from here: try the brace before.
     }

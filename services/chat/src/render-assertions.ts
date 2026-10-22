@@ -122,9 +122,10 @@ export function unverifiedInference(assertion: Assertion, packet: EvidencePacket
 }
 
 // An inference's words as Markdown that renders them as written (#477 review):
-// on one line after its label, so no quote, list or heading can start, with
-// every character that opens an inline construct escaped. A link the page
-// would make of a bare address is refused by the check (assertions.ts).
+// after its label with no CommonMark line ending, so no quote, list or heading
+// can start, and with every character that opens an inline construct escaped.
+// A link the page would make of a bare address is refused by the check
+// (assertions.ts).
 function literal(text: string): string {
   return text.replace(/\s+/g, " ").trim().replace(/[\\`*_~[\]<>]/g, "\\$&");
 }
