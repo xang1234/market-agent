@@ -67,10 +67,8 @@ export async function overviewPeers(db: SqlExecutor, issuer: FinancialSubjectRef
 /**
  * The overview of the context's companies, each from the newest quarter it
  * reported revenue for, so fiscal calendars are never aligned by date; null
- * when one reported none, or when it cannot be read or planned. The engine's
- * latest quarter is the newest it can certify, and it cannot certify the
- * fourth quarters the SEC ingester derives (#469), so each quarter is named:
- * one the engine cannot certify is a gap cell where it falls.
+ * when one reported none, or when it cannot be read or planned. A quarter
+ * the engine cannot certify is a gap cell where it falls.
  */
 export async function planCompanyOverview(context: PlanningContext, evidence: FinancialEvidencePort): Promise<ReadyPlan | null> {
   const companies: Array<{ mention: string; newest: FiscalQuarter }> = [];
