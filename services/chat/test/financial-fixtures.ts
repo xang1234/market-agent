@@ -16,7 +16,7 @@ import {
   type ChatTurnInput,
 } from "../src/coordinator.ts";
 import { createChatFinancialRuntime } from "../src/financial-runtime.ts";
-import type { ScopeProposal } from "../src/research-scope.ts";
+import { proposedMetric, type ScopeProposal } from "../src/research-scope.ts";
 import type { ChatSubjectPreResolution } from "../src/subjects.ts";
 import { readMessage } from "./read-message-fixture.ts";
 
@@ -85,6 +85,8 @@ export function resolveMention(mention: string): Promise<ChatSubjectPreResolutio
 }
 
 export const NO_ASKS: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [] };
+// How a model reads a metric question ("Revenue for AAA"): the income statement, nothing else.
+export const METRIC_READING: ScopeProposal = { ...NO_ASKS, metrics: [proposedMetric("income_statement", null, null)!] };
 
 /** A planning model that answers every call with a revenue draft for the given slots, and counts calls. */
 export function revenueModel(mentions: ReadonlyArray<string>): PlanningModel & { calls: number } {
@@ -138,7 +140,7 @@ export function chatHarness(
       resolveMention: options.resolveMention ?? resolveMention,
       evidence: createEvidenceFinancialPort,
       ...(options.researchScope ? { researchScope: options.researchScope } : {}),
-      readQuestion: options.readQuestion ?? (async () => NO_ASKS),
+      readQuestion: options.readQuestion ?? (async () => METRIC_READING),
       ...(options.priorSubjects ? { priorSubjects: options.priorSubjects } : {}),
       ...(options.clock ? { clock: options.clock } : {}),
     }),
