@@ -5,9 +5,10 @@ import test from "node:test";
 
 import { createRuntimeAuthority, operationDependencies, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
 import { buildDeterministicPlan, planFinancialRequest, type PlanningContext, type PlanningModel, type PlanningResult, type RequestedSubject } from "../../financial-engine/src/planner.ts";
-import type { CandidatePage, CandidateRequest, FinancialEvidencePort, InputCandidate } from "../../financial-engine/src/ports.ts";
+import type { CandidatePage, CandidateRequest, FinancialEvidencePort, InputCandidate, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
-import { namesCompanies, overviewSubjects, planCompanyOverview } from "../src/company-overview.ts";
+import { namesCompanies, overviewPeers, overviewSubjects, planCompanyOverview } from "../src/company-overview.ts";
+import { MAX_TURN_SUBJECTS } from "../src/coordinator.ts";
 import { isFinancialRequest, uncoveredAsks } from "../src/financial-runtime.ts";
 import { parseProposal, proposalQuestion } from "../src/scope-proposal.ts";
 import { extractSubjectMentions } from "../src/subject-extraction.ts";
@@ -124,7 +125,9 @@ test("each golden metric question plans from its own recorded reply on the first
   }
 });
 
-test("a company's overview shows its eight quarters to the newest it reported revenue for by the cutoff, each named by its fiscal period (#398)", async () => {
+test("a company's overview shows its eight quarters to the newest it reported revenue for by the cutoff, each named by its fiscal period (#398)", async (t) => {
+  const warned: unknown[][] = [];
+  t.mock.method(console, "warn", (...args: unknown[]) => warned.push(args));
   // The SEC ingester stores a fourth quarter as the year less its first three, with no source token, so no precision proof.
   const revenue = (fiscal_year: number, fiscal_period: string, publicBy = "2026-03-01T00:00:00.000Z") => ({
     metric_key: "revenue",
@@ -176,10 +179,12 @@ test("a company's overview shows its eight quarters to the newest it reported re
     "percent_change_positive_base(NVDA revenue Q1 2026, NVDA revenue Q1 2025)",
   ], "a first quarter compares with the fourth before it and with the first a year earlier");
   assert.equal(await overview(reported(revenue(2025, "FY"))), null, "no quarter reported: no overview");
-  await assert.rejects(overview({ status: "error", reason_code: "database_error" }), /database_error/u);
+  assert.equal(await overview({ status: "error", reason_code: "database_error" }), null, "a failed read: no overview");
+  assert.deepEqual(warned, [["[chat] the company overview could not be planned; the planner answers", "database_error"]]);
 });
 
-test("a comparison shows each company's latest quarter, named from the newest it reported revenue for, never aligned by calendar (#398)", async () => {
+test("a comparison shows each company's latest quarter, named from the newest it reported revenue for, never aligned by calendar (#398)", async (t) => {
+  t.mock.method(console, "warn", () => {});
   const revenue = (fiscal_year: number, fiscal_period: string, end: string, publicBy = "2026-08-01T00:00:00.000Z") => ({
     metric_key: "revenue",
     period: { start: null, end, fiscal_year, fiscal_period },
@@ -242,7 +247,7 @@ test("a comparison shows each company's latest quarter, named from the newest it
 
   assert.deepEqual((await compare("NVDA and AMD", { ...PAGES, AMD: reported(revenue(2025, "FY", "2025-12-27")) })).planned, null, "a company that reported no quarter");
   assert.deepEqual((await compare("NVDA and AMD", { ...PAGES, AMD: { ...PAGES.AMD!, truncated: true } as CandidatePage })).planned, null, "a truncated page");
-  await assert.rejects(compare("NVDA and AMD", { ...PAGES, AMD: { status: "error", reason_code: "database_error" } }), /database_error/u);
+  assert.deepEqual((await compare("NVDA and AMD", { ...PAGES, AMD: { status: "error", reason_code: "database_error" } })).planned, null, "a failed read");
 });
 
 const reading = (asks: string[], metrics: unknown[] = [], income_items: string[] = [], turnsOff: string[] = []) =>
@@ -402,20 +407,32 @@ test("an engine answer names what it leaves out for each company it covers (#425
   assert.deepEqual(uncoveredAsks(asked("trend"), trendForNvda, labels), ["earnings per share trend for AMD"]);
 });
 
-test("an engine answer that covers peers does not name them as left out (#398)", () => {
-  const q4 = { kind: "fiscal_period", fiscal_year: 2026, fiscal_period: "Q4" };
-  const planned = buildDeterministicPlan(planningContext("NVDA and AMD"), {
-    subjects: [{ slot_id: "a", mention: "NVDA" }, { slot_id: "b", mention: "AMD" }],
-    operations: ["a", "b"].map((slot) => ({ node_id: `${slot}_rev`, operation: "reported_metric", subject_slot: slot, metric_key: "revenue", period: q4 })),
-    outputs: ["a_rev", "b_rev"].map((node_id) => ({ output_id: `out_${node_id}`, node_id })),
-    thresholds: [],
-  });
-  assert.equal(planned.outcome, "ready", JSON.stringify(planned));
-  const plan = (planned as Extract<PlanningResult, { outcome: "ready" }>).plan;
-  const labels = new Map([[GOLDEN_COMPANIES.find((company) => company.ticker === "NVDA")!.issuer_id, "NVDA"]]);
-
-  assert.deepEqual(uncoveredAsks(reading(["peers"]), plan, labels, true), [], "the plan answered peers");
-  assert.deepEqual(uncoveredAsks(reading(["peers"]), plan, labels), ["peers the question did not name"]);
+test("a company's peers fill the turn's company cap, named by their legal names; a database error means none, and a defect fails (#398)", async (t) => {
+  const warned: unknown[][] = [];
+  t.mock.method(console, "warn", (...args: unknown[]) => warned.push(args));
+  const [NVDA, AMD] = ["NVDA", "AMD"].map((ticker) => GOLDEN_COMPANIES.find((company) => company.ticker === ticker)!);
+  const nvda = { kind: "issuer" as const, id: NVDA!.issuer_id };
+  const database = (failing?: { at: number; error: unknown }) => {
+    const values: unknown[][] = [];
+    return {
+      values,
+      query: async (text: string, params: unknown[] = []) => {
+        values.push(params);
+        if (values.length === failing?.at) throw failing.error;
+        return { rows: text.includes("legal_name") ? [{ issuer_id: AMD!.issuer_id, legal_name: AMD!.legal_name }] : [{ issuer_id: AMD!.issuer_id }] };
+      },
+    } as SqlExecutor & { values: unknown[][] };
+  };
+  const reachable = database();
+  assert.deepEqual(await overviewPeers(reachable, nvda), [
+    { mention: AMD!.issuer_id, resolution: { status: "resolved", subject_ref: { kind: "issuer", id: AMD!.issuer_id }, label: AMD!.legal_name } },
+  ]);
+  assert.deepEqual(reachable.values[0], [NVDA!.issuer_id, MAX_TURN_SUBJECTS - 1], "as many peers as the cap leaves room for");
+  const down = Object.assign(new Error("terminating connection due to administrator command"), { code: "57P01" });
+  assert.deepEqual(await overviewPeers(database({ at: 1, error: down }), nvda), [], "the peer set cannot be read");
+  assert.deepEqual(await overviewPeers(database({ at: 2, error: down }), nvda), [], "the peers' names cannot be read");
+  assert.equal(warned.length, 2);
+  await assert.rejects(overviewPeers(database({ at: 1, error: new TypeError("a defect") }), nvda), TypeError);
 });
 
 test("an engine answer checks a qualified metric against what its plan computes (#425)", () => {

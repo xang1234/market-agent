@@ -41,12 +41,12 @@ import {
 } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { requireFinancialReadiness } from "../../financial-engine/src/readiness.ts";
-import { issuerLabels, publishRequest, type RequestGap } from "../../financial-engine/src/request.ts";
+import { publishRequest, type RequestGap } from "../../financial-engine/src/request.ts";
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { comparativeTurn, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId } from "./chat-ids.ts";
-import { namesCompanies, OverviewEvidenceError, overviewSubjects, planCompanyOverview } from "./company-overview.ts";
-import { noteBlock, peersOf } from "./fact-blocks.ts";
+import { namesCompanies, overviewPeers, overviewSubjects, planCompanyOverview, type PeersOf } from "./company-overview.ts";
+import { noteBlock } from "./fact-blocks.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { COMPARATIVE, companyKey, extractSubjectMentions } from "./subject-extraction.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "./subjects.ts";
@@ -211,13 +211,13 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       return Promise.all([scope, reading]);
     };
     // What planning settled, for a gap: the companies it was asked about, a
-    // clarification pick included (recorded before the model is called), and
-    // the planner's result.
+    // clarification pick (recorded before the model is called) or the peers
+    // an overview added included, and the planner's result.
     let asked = requested.subjects;
     let planned: PlanningResult | undefined;
     const declinedGap = async (reason: ChatGap) => {
       // ponytail: a retry that resumes a reserved run does not plan, so its
-      // gap names the companies the message resolved, without a pick.
+      // gap names the companies the message resolved, without a pick or peers.
       const refs = asked.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref] : []);
       // One about no company leaves the previous answer's companies and scope.
       if (refs.length === 0) return gap(reason, planned);
@@ -426,7 +426,7 @@ async function planTurn(
     carried: boolean;
     startReading: () => Promise<ScopeProposal | null>;
     evidence: FinancialEvidencePort;
-    peersOf: (issuer: FinancialSubjectRef) => Promise<ReadonlyArray<RequestedSubject>>;
+    peersOf: PeersOf;
   }>,
 ): Promise<PlanningResult> {
   const planningContext = (subjects: ReadonlyArray<RequestedSubject>): PlanningContext => ({
@@ -459,21 +459,17 @@ async function planTurn(
   if (!namesCompanies(subjects, turn.carried, text)) return planned;
   // Settled now, or a planner that fails while the overview is decided is an unhandled rejection.
   const failure = planned.then(() => null, (reason: unknown) => ({ reason }));
-  const companies = await overviewSubjects(subjects, await turn.startReading(), turn.peersOf);
-  if (companies === null) return planned;
+  let companies: ReadonlyArray<RequestedSubject> | null;
   let overview: PlanningResult | null;
   try {
-    overview = await planCompanyOverview(planningContext(companies), turn.evidence);
+    companies = await overviewSubjects(subjects, await turn.startReading(), turn.peersOf);
+    overview = companies && await planCompanyOverview(planningContext(companies), turn.evidence);
   } catch (reason) {
-    if (!(reason instanceof OverviewEvidenceError)) throw reason;
-    console.warn(OVERVIEW_UNPLANNED, reason);
-    return planned;
+    // A defect fails the turn, so the planner's answer is not needed either.
+    dropped = true;
+    throw reason;
   }
-  if (overview === null) return planned;
-  if (overview.outcome !== "ready") {
-    console.warn(OVERVIEW_UNPLANNED, overview);
-    return planned;
-  }
+  if (!companies || !overview) return planned;
   onSubjects(companies);
   dropped = true;
   void failure.then((failed) => {
@@ -488,13 +484,6 @@ async function planTurn(
 }
 
 const DROPPED = new Error("dropped for the company overview");
-const OVERVIEW_UNPLANNED = "[chat] the company overview could not be planned; the planner answers";
-
-async function overviewPeers(db: SqlExecutor, issuer: FinancialSubjectRef): Promise<ReadonlyArray<RequestedSubject>> {
-  const peers = await peersOf(db, issuer);
-  const names = await issuerLabels(db, peers.map((peer) => peer.id));
-  return peers.map((peer) => ({ mention: peer.id, resolution: { status: "resolved", subject_ref: peer, label: names.get(peer.id) ?? peer.id } }));
-}
 
 const CASH_RESILIENCE = /\bcash[- ]resilience\b/iu;
 const CASH_RESILIENCE_VIEW = "cash_resilience_view";
@@ -652,8 +641,11 @@ function persistAssistantMessage(
   return async (tx, publication) => {
     const [scope, reading] = await turn.prepared();
     const plan = scope === null && reading === null ? null : await findPlanForRequest(tx.client, request);
+    // A plan member the turn gave no label is a peer the overview selected. The
+    // saved plan says so, as a retry that resumes the run does not plan again.
     const answeredPeers = plan?.subjects.members.some((member) => !turn.labels.has(member.subject_ref.id.toLowerCase())) ?? false;
-    const missing = reading === null || plan === null ? [] : uncoveredAsks(reading, plan, turn.labels, answeredPeers);
+    const asked = reading !== null && answeredPeers ? { ...reading, asks: new Set([...reading.asks].filter((facet) => facet !== "peers")) } : reading;
+    const missing = asked === null || plan === null ? [] : uncoveredAsks(asked, plan, turn.labels);
     const note = [
       ...(turn.notFound.length === 0 ? [] : [`No company matched ${labelList(turn.notFound)}.`]),
       ...(turn.carried.length === 0 ? [] : [`${labelList(turn.carried)} ${turn.carried.length > 1 ? "are" : "is"} carried from the previous answer.`]),
@@ -787,10 +779,9 @@ const INCOME_ITEM_FIGURE: Readonly<Record<IncomeItem, string | null>> = {
  * What a question asks for, as the model read it, that its plan does not
  * compute, so the answer names it instead of leaving it out. Each company is
  * checked on its own figures: what some companies' figures answer is named
- * for the others, by the label `labels` gives each issuer. `answeredPeers`:
- * the plan covers peers the question did not name.
+ * for the others, by the label `labels` gives each issuer.
  */
-export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1, labels: ReadonlyMap<string, string> = new Map(), answeredPeers = false): string[] {
+export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1, labels: ReadonlyMap<string, string> = new Map()): string[] {
   const { asks, offMetrics } = readingAsks(reading);
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
   // A figure's period and company are those of its reported inputs.
@@ -851,7 +842,7 @@ export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1, lab
       const labelled = lacking.flatMap((company) => company.label ?? []);
       return [lacking.length < companies.length && labelled.length === lacking.length ? `${ask.text} for ${labelList(labelled)}` : ask.text];
     }),
-    ...Object.entries(NEVER_PLANNED).flatMap(([facet, item]) => asks.has(facet as ScopeFacet) && !(facet === "peers" && answeredPeers) ? [item] : []),
+    ...Object.entries(NEVER_PLANNED).flatMap(([facet, item]) => asks.has(facet as ScopeFacet) ? [item] : []),
   ];
 }
 

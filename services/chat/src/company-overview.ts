@@ -1,13 +1,20 @@
 import { DEFAULT_EXECUTION_LIMITS, publicAtCutoff, type FinancialSubjectRef, type IsoDateTime } from "../../financial-core/src/index.ts";
+import { isDatabaseError } from "../../financial-engine/src/evidence-adapter.ts";
 import { buildDeterministicPlan, type PlanningContext, type PlanningResult, type RequestedSubject } from "../../financial-engine/src/planner.ts";
-import type { FinancialEvidencePort, InputCandidate } from "../../financial-engine/src/ports.ts";
+import type { FinancialEvidencePort, InputCandidate, SqlExecutor } from "../../financial-engine/src/ports.ts";
+import { issuerLabels } from "../../financial-engine/src/request.ts";
+import { createSqlPeerSetResolver } from "../../fundamentals/src/peer-set-resolver.ts";
+import { MAX_TURN_SUBJECTS } from "./coordinator.ts";
 import { requestedFiscalQuarter, requestedFiscalYear, requestedPriceWindow, type FiscalQuarter } from "./fact-blocks.ts";
 import { GROWTH, MARGINS, quarterBefore } from "./quarter-metrics.ts";
 import { PARTIAL_QUARTER, type ScopeProposal } from "./research-scope.ts";
 
 const QUARTERS_SHOWN = 8;
+const UNPLANNED = "[chat] the company overview could not be planned; the planner answers";
 
 type Node = Record<string, unknown> & { node_id: string };
+export type PeersOf = (issuer: FinancialSubjectRef) => Promise<ReadonlyArray<RequestedSubject>>;
+type ReadyPlan = Extract<PlanningResult, { outcome: "ready" }>;
 
 /** Whether a turn may be a company overview before its reading: resolved companies it names, none carried, and no period. */
 export function namesCompanies(subjects: ReadonlyArray<RequestedSubject>, carried: boolean, text: string): boolean {
@@ -24,7 +31,7 @@ export function namesCompanies(subjects: ReadonlyArray<RequestedSubject>, carrie
 export async function overviewSubjects(
   subjects: ReadonlyArray<RequestedSubject>,
   reading: ScopeProposal | null,
-  peersOf: (issuer: FinancialSubjectRef) => Promise<ReadonlyArray<RequestedSubject>>,
+  peersOf: PeersOf,
 ): Promise<ReadonlyArray<RequestedSubject> | null> {
   if (!asksForNoFigure(reading)) return null;
   if (!reading.asks.has("peers")) return subjects;
@@ -40,41 +47,56 @@ function asksForNoFigure(reading: ScopeProposal | null): reading is ScopeProposa
     [...reading.asks].every((facet) => facet === "latest_quarter" || facet === "peers");
 }
 
-/** The evidence could not list a company's quarters; any other throw is a defect. */
-export class OverviewEvidenceError extends Error {
-  constructor(reasonCode: string) {
-    super(`the company's quarters could not be read: ${reasonCode}`);
-    this.name = "OverviewEvidenceError";
+/**
+ * A company's peers, as many as the turn's company cap leaves room for, each
+ * named to the planner by its issuer id and labelled by its legal name. None
+ * when the database cannot be read; any other throw is a defect.
+ */
+export async function overviewPeers(db: SqlExecutor, issuer: FinancialSubjectRef): Promise<ReadonlyArray<RequestedSubject>> {
+  try {
+    const peers = await createSqlPeerSetResolver(db).resolvePeers(issuer.id, { limit: MAX_TURN_SUBJECTS - 1 });
+    const names = await issuerLabels(db, peers.map((peer) => peer.id));
+    return peers.map((peer) => ({ mention: peer.id, resolution: { status: "resolved", subject_ref: peer, label: names.get(peer.id) ?? peer.id } }));
+  } catch (reason) {
+    if (!isDatabaseError(reason)) throw reason;
+    console.warn(UNPLANNED, reason);
+    return [];
   }
 }
 
 /**
  * The overview of the context's companies, each from the newest quarter it
  * reported revenue for, so fiscal calendars are never aligned by date; null
- * when one reported none. The engine's latest quarter is the newest it can
- * certify, and it cannot certify the fourth quarters the SEC ingester derives
- * (#469), so each quarter is named: one the engine cannot certify is a gap
- * cell where it falls.
+ * when one reported none, or when it cannot be read or planned. The engine's
+ * latest quarter is the newest it can certify, and it cannot certify the
+ * fourth quarters the SEC ingester derives (#469), so each quarter is named:
+ * one the engine cannot certify is a gap cell where it falls.
  */
-export async function planCompanyOverview(context: PlanningContext, evidence: FinancialEvidencePort): Promise<PlanningResult | null> {
-  const subjects = context.requested_subjects;
-  const refs = subjects.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref] : []);
-  if (refs.length < subjects.length) return null;
-  const pages = await Promise.all(refs.map((subject) => evidence.listInputCandidates({
-    authority: context.authority,
-    subject,
-    metric_key: "revenue",
-    fiscal_year: null,
-    fiscal_period: null,
-    limit: DEFAULT_EXECUTION_LIMITS.max_input_candidates,
-  })));
-  const newest = pages.map((page) => {
-    if (page.status === "error") throw new OverviewEvidenceError(page.reason_code);
+export async function planCompanyOverview(context: PlanningContext, evidence: FinancialEvidencePort): Promise<ReadyPlan | null> {
+  const companies: Array<{ mention: string; newest: FiscalQuarter }> = [];
+  for (const subject of context.requested_subjects) {
+    if (subject.resolution.status !== "resolved") return null;
+    const page = await evidence.listInputCandidates({
+      authority: context.authority,
+      subject: subject.resolution.subject_ref,
+      metric_key: "revenue",
+      fiscal_year: null,
+      fiscal_period: null,
+      limit: DEFAULT_EXECUTION_LIMITS.max_input_candidates,
+    });
+    if (page.status === "error") {
+      console.warn(UNPLANNED, page.reason_code);
+      return null;
+    }
     // ponytail: a truncated page may lack the newest quarter, so the planner answers instead.
-    return page.truncated ? null : newestQuarter(page.candidates, context.knowledge_cutoff);
-  });
-  if (newest.includes(null)) return null;
-  return buildDeterministicPlan(context, companyOverviewDraft(subjects.map((subject, index) => ({ mention: subject.mention, newest: newest[index]! }))));
+    const newest = page.truncated ? null : newestQuarter(page.candidates, context.knowledge_cutoff);
+    if (newest === null) return null;
+    companies.push({ mention: subject.mention, newest });
+  }
+  const planned = buildDeterministicPlan(context, companyOverviewDraft(companies));
+  if (planned.outcome === "ready") return planned;
+  console.warn(UNPLANNED, planned);
+  return null;
 }
 
 // The engine sees a fact once a proof says its filing was public by the

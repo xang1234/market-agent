@@ -296,21 +296,26 @@ test("a question about one company that asks for no figure is answered with its 
   });
 
   await t.test("a question about one company that asks for its peers is answered with the company and its peers, saved as auto-selected (#398)", async () => {
-    await db.query(`update issuers set industry = 'Quarterly test filers' where issuer_id = any($1::uuid[])`, [[COMPANIES.QTRS, COMPANIES.OFFQ]]);
-    const peers = { ...NO_ASKS, asks: new Set(["peers"] as const) };
-    const researchScope = async (context: { userIntent?: string }, read: Promise<ScopeProposal | null>) =>
-      resolveResearchScope({ question: context.userIntent ?? "", companies: [{ issuer_id: COMPANIES.QTRS!, label: "QTRS" }], prior: null, asOf: "2026-10-22T00:00:00.000Z", served: true, proposal: await read });
-    const { turnId, events } = await chatHarness(pool, { model: null, readQuestion: reading(peers), resolveMention: resolve, researchScope }).run({ ...base, userIntent: "Revenue for QTRS" });
-    const done = completed(events);
-    assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_OVERVIEW.slice(7)), ...slotted("b", OFFQ_LATEST)]);
-    const { rows: [message] } = await db.query(`select blocks, research_scope from chat_messages where message_id = $1`, [done.message_id]);
-    assert.deepEqual([message.research_scope.companies, message.research_scope.peers], [[{ issuer_id: COMPANIES.QTRS, label: "QTRS" }, { issuer_id: COMPANIES.OFFQ }], true]);
-    assert.equal(message.blocks.length, 1, "no note names peers the question did not name");
-    const { rows: [planned] } = await db.query(
-      `select p.plan->'interpretation'->>'text' as text from financial_runs r join financial_plans p on p.plan_id = r.plan_id where r.request_key = $1`,
-      [turnId],
-    );
-    assert.match(planned.text, /^Subjects: QTRS Corp \(issuer:[^)]+\), OFFQ Corp \(issuer:/u, "a peer is named by its legal name");
+    const peerSet = [COMPANIES.QTRS, COMPANIES.OFFQ];
+    await db.query(`update issuers set industry = 'Quarterly test filers' where issuer_id = any($1::uuid[])`, [peerSet]);
+    try {
+      const peers = { ...NO_ASKS, asks: new Set(["peers"] as const) };
+      const researchScope = async (context: { userIntent?: string }, read: Promise<ScopeProposal | null>) =>
+        resolveResearchScope({ question: context.userIntent ?? "", companies: [{ issuer_id: COMPANIES.QTRS!, label: "QTRS" }], prior: null, asOf: "2026-10-22T00:00:00.000Z", served: true, proposal: await read });
+      const { turnId, events } = await chatHarness(pool, { model: null, readQuestion: reading(peers), resolveMention: resolve, researchScope }).run({ ...base, userIntent: "Revenue for QTRS" });
+      const done = completed(events);
+      assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_OVERVIEW.slice(7)), ...slotted("b", OFFQ_LATEST)]);
+      const { rows: [message] } = await db.query(`select blocks, research_scope from chat_messages where message_id = $1`, [done.message_id]);
+      assert.deepEqual([message.research_scope.companies, message.research_scope.peers], [[{ issuer_id: COMPANIES.QTRS, label: "QTRS" }, { issuer_id: COMPANIES.OFFQ }], true]);
+      assert.equal(message.blocks.length, 1, "no note names peers the question did not name");
+      const { rows: [planned] } = await db.query(
+        `select p.plan->'interpretation'->>'text' as text from financial_runs r join financial_plans p on p.plan_id = r.plan_id where r.request_key = $1`,
+        [turnId],
+      );
+      assert.match(planned.text, /^Subjects: QTRS Corp \(issuer:[^)]+\), OFFQ Corp \(issuer:/u, "a peer is named by its legal name");
+    } finally {
+      await db.query(`update issuers set industry = null where issuer_id = any($1::uuid[])`, [peerSet]);
+    }
   });
 
   await t.test("a line the engine cannot certify is a gap cell, and the rest still publishes", async () => {
