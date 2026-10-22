@@ -159,7 +159,7 @@ const CLEARS: Partial<Record<ScopeFacet | (typeof PERIOD_FIELDS)[number], ScopeF
 };
 
 // A quarter named without its year ("Q3", "the third quarter").
-const PARTIAL_QUARTER = /\bQ([1-4])\b|\b(first|second|third|fourth)\s+quarter\b/i;
+export const PARTIAL_QUARTER = /\bQ([1-4])\b|\b(first|second|third|fourth)\s+quarter\b/i;
 const ORDINAL_QUARTERS: Readonly<Record<string, number>> = { first: 1, second: 2, third: 3, fourth: 4 };
 
 // The metrics a question can name. A model proposes from this catalog

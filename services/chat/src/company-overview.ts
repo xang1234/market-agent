@@ -1,6 +1,6 @@
 import { buildDeterministicPlan, type PlanningContext, type PlanningResult, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import { requestedFiscalQuarter, requestedFiscalYear, requestedPriceWindow } from "./fact-blocks.ts";
-import type { ScopeProposal } from "./research-scope.ts";
+import { PARTIAL_QUARTER, type ScopeProposal } from "./research-scope.ts";
 
 const SLOT = "a";
 const QUARTERS_SHOWN = 8;
@@ -20,7 +20,7 @@ const quarter = (metric: string, offset: number): Node => ({
 /** Whether a turn may be a company overview before its reading: one resolved company it names, not carried, and no period. */
 export function namesOneCompany(subjects: ReadonlyArray<RequestedSubject>, carried: boolean, text: string): boolean {
   return subjects.length === 1 && subjects[0]!.resolution.status === "resolved" && !carried &&
-    requestedFiscalYear(text) === undefined && requestedFiscalQuarter(text) === undefined && requestedPriceWindow(text) === undefined;
+    requestedFiscalYear(text) === undefined && requestedFiscalQuarter(text) === undefined && !PARTIAL_QUARTER.test(text) && requestedPriceWindow(text) === undefined;
 }
 
 /** Whether the reading of a question asks for no figure and turns nothing off ("no margins"), so the overview answers it. */

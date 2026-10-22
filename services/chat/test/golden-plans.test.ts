@@ -170,7 +170,7 @@ test("a question about one company that asks for no figure is answered with its 
   assert.equal(await overview("Analyze NVDA", scripted({ ...reading([]), turns_off: { facets: new Set(), metrics: new Set(["revenue"]) } })), false, "a metric turned off");
   assert.equal(await overview("Analyze NVDA", { carried: true }), false, "a carried company");
   assert.equal(await overview("Analyze NVDA and AMD"), false, "two companies");
-  for (const period of ["in fiscal 2025", "for Q4 2025", "YTD"]) {
+  for (const period of ["in fiscal 2025", "for Q4 2025", "YTD", "for Q3", "in the third quarter"]) {
     assert.equal(await overview(`Analyze NVDA ${period}`, scripted(reading([]))), false, period);
   }
 });
