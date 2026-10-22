@@ -166,15 +166,15 @@
     },
     {
       "match": "Explain the differences and show the evidence",
-      "text": "NVIDIA is far larger than AMD and converts more of its revenue into profit, as the table below shows; each figure links to its filing.\n\n```assertions\n[{\"kind\":\"comparison\",\"op\":\"highest\",\"result\":\"F2\",\"text\":\"NVDA's gross margin is the higher of the two.\",\"evidence\":[\"F2\",\"F6\"]},{\"kind\":\"comparison\",\"op\":\"highest\",\"result\":\"F3\",\"text\":\"NVDA's net margin is the higher of the two.\",\"evidence\":[\"F3\",\"F7\"]}]\n```"
+      "text": "```assertions\n[{\"kind\":\"comparison\",\"op\":\"highest\",\"result\":\"F2\",\"text\":\"NVDA's gross margin is the higher of the two.\",\"evidence\":[\"F2\",\"F6\"]},{\"kind\":\"comparison\",\"op\":\"highest\",\"result\":\"F3\",\"text\":\"NVDA's net margin is the higher of the two.\",\"evidence\":[\"F3\",\"F7\"]}]\n```"
     },
     {
       "match": "Compare it with AMD",
-      "text": "Side by side, NVIDIA reports much higher revenue and wider margins than AMD in their latest fiscal years.\n\n```assertions\n[{\"kind\":\"comparison\",\"op\":\"highest\",\"result\":\"F1\",\"text\":\"NVDA's revenue is the higher of the two.\",\"evidence\":[\"F1\",\"F5\"]}]\n```"
+      "text": "```assertions\n[{\"kind\":\"comparison\",\"op\":\"highest\",\"result\":\"F1\",\"text\":\"NVDA's revenue is the higher of the two.\",\"evidence\":[\"F1\",\"F5\"]}]\n```"
     },
     {
       "match": "Why did AMD's operating margin turn negative in Q2 2025?",
-      "text": "AMD's operating margin turned negative in its second quarter of fiscal 2025. According to AMD's earnings release, filed with the SEC in August 2025: [[C1]]\n\n```assertions\n[{\"kind\":\"management_attribution\",\"text\":\"AMD said [[C1]]\",\"evidence\":[\"C1\"]}]\n```"
+      "text": "```assertions\n[{\"kind\":\"management_attribution\",\"text\":\"AMD said [[C1]]\",\"evidence\":[\"C1\"]}]\n```"
     },
     {
       "match": [
@@ -192,7 +192,7 @@
     },
     {
       "match": "Write a concise investment research answer",
-      "text": "NVIDIA's reported revenue rose in every quarter shown, and gross and operating profit rose with it. The chart and figures below carry the reported values and link to their filings.\n\n```assertions\n[{\"kind\":\"comparison\",\"op\":\"trend\",\"result\":\"rose_throughout\",\"text\":\"NVDA's revenue rose in every quarter shown.\",\"evidence\":[\"F10\",\"F11\",\"F12\",\"F13\",\"F14\",\"F15\",\"F16\",\"F17\"]}]\n```"
+      "text": "```assertions\n[{\"kind\":\"comparison\",\"op\":\"trend\",\"result\":\"rose_throughout\",\"text\":\"NVDA's revenue rose in every quarter shown.\",\"evidence\":[\"F10\",\"F11\",\"F12\",\"F13\",\"F14\",\"F15\",\"F16\",\"F17\"]}]\n```"
     }
   ]
 }

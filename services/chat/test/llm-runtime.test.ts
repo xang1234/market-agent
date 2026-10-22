@@ -12,7 +12,8 @@ import {
   TITLE_DEADLINES,
   createLlmThreadTitleModel,
 } from "../src/llm-runtime.ts";
-import { MAX_ASSERTIONS, type AssertionReport, type Rejection } from "../src/assertions.ts";
+import { checkAssertions, MAX_ASSERTIONS, type AssertionReport, type Rejection } from "../src/assertions.ts";
+import type { EvidencePacket } from "../src/evidence-packet.ts";
 import { mayOfferOtherFacts, scopeGapBlocks } from "../src/fact-blocks.ts";
 import { resolveResearchScope } from "../src/research-scope.ts";
 import { proposal } from "./scope-fixtures.ts";
@@ -149,25 +150,6 @@ test("composeAnalystBlocksWithLlm rewrites the first rich text block", async () 
   ]);
 });
 
-test("composeAnalystBlocksWithLlm instructs the analyst to caveat stale data", async () => {
-  let systemPrompt = "";
-  await composeAnalystBlocksWithLlm({
-    env: BASE_ENV,
-    context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
-    blocks: [richTextBlock("Deterministic note")],
-    toolCalls: [],
-    createClient: () => async (_deployment, request) => {
-      systemPrompt = request.messages[0]?.content ?? "";
-      return { text: "answer" };
-    },
-  });
-
-  // The stale signals (quote.stale, fact_recency.stale) are inert unless the
-  // prompt tells the analyst to honor them.
-  assert.match(systemPrompt, /stale/i);
-  assert.match(systemPrompt, /fact_recency|out of date|age_days/i);
-});
-
 const TWO_DEPLOYMENTS = {
   LLM_CHANNELS: "openai,deepseek",
   LLM_OPENAI_PROTOCOL: "openai",
@@ -291,7 +273,7 @@ test("the production deadlines bound the answer and the title calls", () => {
   assert.ok(TITLE_DEADLINES.attemptMs < ANSWER_DEADLINES.attemptMs);
 });
 
-test("the answer is asked for an analyst's view: takeaway, trend, strengths, counterpoint, gaps (#179)", async () => {
+async function answerSystemPrompt(): Promise<string> {
   let systemPrompt = "";
   await composeAnalystBlocksWithLlm({
     env: BASE_ENV,
@@ -303,38 +285,52 @@ test("the answer is asked for an analyst's view: takeaway, trend, strengths, cou
       return { text: "answer" };
     },
   });
-  for (const part of [/takeaway/i, /trend across every period/i, /strong or weak/i, /counterpoint grounded in the data/i, /cannot tell/i, /concentrated in one segment/i, /does not answer the question/i, /do not analyze other figures\s+in its place/i]) {
-    assert.match(systemPrompt, part);
-  }
-  // Context comes from the data only, and the existing rules stay.
-  assert.match(systemPrompt, /never add facts, numbers, or events that are not in the tool context/);
-  assert.match(systemPrompt, /Never compute new figures/);
-  // A figure is written only as its packet reference, a claim as its own; no
-  // other digit but a period label (prose-refs.ts).
-  assert.match(systemPrompt, /Write a figure only as its packet reference,\s+\[\[F3\]\] for the figure with id F3, in place of the value itself/);
-  // The 2026-10-15 eval's first run: the model put the reference after the value it typed.
-  assert.match(systemPrompt, /never write the value, not even beside its\s+reference \("\$7\.7B \[\[F3\]\]" is wrong; "\[\[F3\]\]" is right\)/);
-  assert.match(systemPrompt, /Write a cited claim's content as \[\[C2\]\], in\s+place of the claim's words, never a paraphrase with \[\[C2\]\] after it/);
-  assert.match(systemPrompt, /Never write any other digit, except in a period label \(Q4, FY2026, fiscal\s+2026, a month and year\); a product named only in a claim \("MI308"\) appears by citing the claim; write\s+counts in words/);
-  assert.match(systemPrompt, /text restates the assertion in one sentence, written as the answer is: each figure or claim only as its\s+reference from the assertion's evidence/);
-  assert.doesNotMatch(systemPrompt, /Quote a figure only exactly as it|never begin it with "Its"/);
-  // A magnitude comparison in words is a computation too, and a cause needs data (#228).
-  assert.match(systemPrompt, /magnitude comparison between figures is a computation too, even in words/);
-  assert.match(systemPrompt, /only the direction/);
-  // Two figures side by side do not "show" their ratio (#228 review).
-  assert.match(systemPrompt, /two figures side by side do not state one/);
-  assert.match(systemPrompt, /never state one in words/);
-  assert.match(systemPrompt, /never state a cause the data does not show/);
-  // The allowed forms of a cause, and the hypothesis label (#261).
-  assert.match(systemPrompt, /management attribution from a cited claim/);
-  // Candidate causes go in labelled hypotheses, not inside a gap sentence (2026-10-08 eval).
-  assert.match(systemPrompt, /never as\s+a list of candidate causes inside a sentence about what the data cannot tell/);
-  assert.match(systemPrompt, /> \*\*Unverified hypothesis \(low\|medium\|high confidence\):\*\* <one explanation>, given <a figure or metric shown in this answer>/);
-  // The fact blocks render after the narrative, so nothing is "shown above" (#262 review).
-  assert.doesNotMatch(systemPrompt, /shown above/);
-  assert.match(systemPrompt, /stale/);
+  return systemPrompt;
+}
+
+test("the answer is asked for the assertion list alone (#374)", async () => {
+  const systemPrompt = await answerSystemPrompt();
   // The no-keys golden replay matches on the opening sentence.
   assert.match(systemPrompt, /^Write a concise investment research answer/);
+  assert.match(systemPrompt, /Reply with only a fenced block that opens with ```assertions on its own line, and nothing before or after it/);
+  assert.doesNotMatch(systemPrompt, /\[\[F3\]\]|Unverified hypothesis/);
+});
+
+// F1, F5 and F9 are one metric for three companies, as the prompt's order example cites them.
+const EXAMPLE_PACKET: EvidencePacket = {
+  route: "comparison",
+  cutoff: "2026-09-01T00:00:00.000Z",
+  companies: ["NVDA", "AMD", "AAPL"],
+  figures: [
+    { id: "F1", company: "NVDA", metric: "Revenue", period: "FY2026", value: "$130.5B", source_ids: [] },
+    { id: "F5", company: "AMD", metric: "Revenue", period: "FY2025", value: "$25.8B", source_ids: [] },
+    { id: "F6", company: "AMD", metric: "Net margin", period: "FY2025", value: "6.4%", source_ids: [] },
+    { id: "F9", company: "AAPL", metric: "Revenue", period: "FY2025", value: "$416.2B", source_ids: [] },
+  ],
+  coverage: [],
+  gaps: [],
+  query_bounds: {},
+  claims: [{ id: "C1", text: "AMD management disclosed a one-time charge.", predicate: "management.explanation.net_income", stance: "challenging", company: "AMD", claim_id: "c1", source_id: "s1" }],
+  disagreements: [],
+  claims_status: "available",
+  claims_truncated: false,
+};
+
+test("the prompt's worked examples pass the checks they teach (#374)", async () => {
+  const systemPrompt = await answerSystemPrompt();
+  const example = (kind: string) => JSON.parse(new RegExp(`\\((\\{"kind":"${kind}".*?\\})\\)`).exec(systemPrompt)![1]!);
+  const order = example("comparison");
+  const inference = example("analyst_inference");
+  const report = checkAssertions([
+    order,
+    { kind: "observation", text: "AMD's revenue was [[F5]].", evidence: ["F5"] },
+    { kind: "observation", text: "AMD's net margin was [[F6]].", evidence: ["F6"] },
+    { kind: "management_attribution", text: "Management disclosed a one-time charge.", evidence: ["C1"] },
+    inference,
+  ], EXAMPLE_PACKET);
+  assert.deepEqual(report.rejected, []);
+  assert.deepEqual(report.accepted.map((entry) => entry.kind), ["comparison", "observation", "observation", "management_attribution", "analyst_inference"]);
+  assert.deepEqual(report.accepted[4]!.supports, [2, 3]);
 });
 
 test("composeAnalystBlocksWithLlm falls back through shared router deployments", async () => {
@@ -724,21 +720,6 @@ test("beside blocks that show no figures (a gap note), the quote renders from it
   assert.deepEqual(segments.filter((segment) => segment.type === "ref"), []);
 });
 
-test("the prompt asks for a missing period in words, not by its year (#264)", async () => {
-  let system = "";
-  await composeAnalystBlocksWithLlm({
-    env: BASE_ENV,
-    context: { userIntent: "Analyze NVDA", bundleId: "single_subject_analysis" },
-    blocks: [NARRATIVE_BLOCK],
-    toolCalls: [],
-    createClient: () => async (_deployment, request) => {
-      system = request.messages[0]!.content;
-      return { text: "NVDA grew." };
-    },
-  });
-  assert.match(system, /describe a missing period in words \("no prior-year revenue"\), never by its year or number/);
-});
-
 test("the model sees each comparison figure with the company and metric it belongs to", async () => {
   const { prompt } = await compareWithReply("NVDA leads.");
   assert.ok(
@@ -990,6 +971,29 @@ test("with claims on file but none rendered, a named gap's answer points to its 
     createClient: () => async () => ({ text: prose }),
   });
   assert.deepEqual(composed[0]!.segments, [{ type: "text", text: "The data here does not answer this question; the note below says what is missing." }]);
+});
+
+test("a named gap's empty list is the gap's answer, logged as the model's choice; with no gap named it is a failure (#374)", async (t) => {
+  const turn = gapTurn(resolveResearchScope({ question: "What is AMD's free cash flow?", companies: AMD, prior: null, asOf: GAP_AS_OF, proposal: proposal({ metrics: ["free_cash_flow"] }) }));
+  const info = t.mock.method(console, "info", () => {});
+  const warn = t.mock.method(console, "warn", () => {});
+  const composed = await composeAnalystBlocksWithLlm({
+    env: BASE_ENV,
+    context: { userIntent: "What is AMD's free cash flow?", bundleId: "single_subject_analysis" },
+    blocks: [NARRATIVE_BLOCK],
+    toolCalls: [A_TOOL_CALL],
+    ...turn,
+    createClient: () => async () => ({ text: "```assertions\n[]\n```" }),
+  });
+  assert.deepEqual(composed[0]!.segments, [{ type: "text", text: "The data here does not answer this question; the note below says what is missing." }]);
+  assert.deepEqual(info.mock.calls.map((call) => call.arguments[0]), ["[chat] the assertion list was empty; showing the fallback sentence"]);
+  assert.equal(warn.mock.callCount(), 0);
+
+  // With figures on file and no gap named, an empty list answers nothing: a failure.
+  info.mock.resetCalls();
+  await renderWithReply("```assertions\n[]\n```");
+  assert.equal(info.mock.callCount(), 0);
+  assert.deepEqual(warn.mock.calls.map((call) => call.arguments[0]), ["[chat] no assertion rendered (list checked); showing the fallback sentence"]);
 });
 
 test("when no assertion renders, the answer is the fixed fallback sentence, never the model's prose", async () => {

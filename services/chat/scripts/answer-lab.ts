@@ -3,7 +3,7 @@
 // fresh replies from the live model (live), and tabulates what the answer shows.
 //
 //   node --experimental-strip-types scripts/answer-lab.ts recorded <trace dir|files...> [--check | --update] [--judge | --repair]
-//   node --experimental-strip-types scripts/answer-lab.ts live <trace dir|files...> [--samples K] [--concurrency N] [--against <run.json>] [--judge]
+//   node --experimental-strip-types scripts/answer-lab.ts live <trace dir|files...> [--samples K] [--concurrency N] [--against <run.json>] [--judge [--update]]
 //   node --experimental-strip-types scripts/answer-lab.ts replies <trace dir|files...> --out <file>
 //   node --experimental-strip-types scripts/answer-lab.ts judge-mutations <set.json> [--concurrency N] [--repair]
 //
@@ -21,6 +21,8 @@
 // place of none, which shows no inference; either way the repair round
 // (src/inference-repair.ts) runs live after it. --repair keeps the recorded
 // verdicts and runs only the repair round live (with --update, recording it).
+// live --judge --update (one sample) writes each live answer over its trace,
+// re-recording it for today's prompt: recorded --check then replays it as is.
 // Each run summarizes what the judge showed and hid. judge-mutations
 // judges a set of inferences and their mutations
 // (test/answer-lab/judge-mutations.json) and reports how many mutations it
@@ -28,12 +30,12 @@
 // that should hide, and how many originals it flags; --repair then sends each
 // one it hid through the repair round, as a chat turn would, and reports what
 // that shows.
-import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isDeepStrictEqual, parseArgs } from "node:util";
 
-import { LlmRouterError } from "../../llm/src/index.ts";
+import { buildLlmDeploymentOrder, loadLlmSettingsFromEnv, LlmRouterError } from "../../llm/src/index.ts";
 import type { LlmReplayFixture } from "../../llm/src/replay-client.ts";
 import { assertionList, checkAssertions, type AssertionKind } from "../src/assertions.ts";
 import {
@@ -180,6 +182,12 @@ function liveEnv(): Record<string, string | undefined> {
   return { ...process.env, LLM_SETTINGS_ENV_FILE: process.env.LLM_SETTINGS_ENV_FILE ?? join(ROOT, ".env.dev") };
 }
 
+// The deployment an answer or repair call goes to first; the rest are fallbacks.
+export async function primaryDeployment(env: LlmSettingsLoaderEnv): Promise<string | undefined> {
+  const [primary] = buildLlmDeploymentOrder(await loadLlmSettingsFromEnv(env));
+  return primary && `${primary.channel}/${primary.model}`;
+}
+
 // flagged: each inference the judge showed as unverified or left out, in
 // index order; reason: its verdict and reason, or why no verdict came.
 type FlaggedInference = { index: number; as: Exclude<ShownAs, "shown">; text: string; reason: string };
@@ -244,13 +252,19 @@ export function answerText(blocks: ReadonlyArray<Record<string, unknown>>): stri
     .join("\n\n");
 }
 
-async function live(traces: ReadonlyArray<LabeledTrace>, samples: number, concurrency: number, judge = false): Promise<LiveRun> {
+async function live(
+  traces: ReadonlyArray<LabeledTrace>,
+  samples: number,
+  concurrency: number,
+  judge = false,
+  onAnswer?: (traced: LabeledTrace, answer: TracedAnswer) => void,
+): Promise<LiveRun> {
   const startedAt = Date.now();
-  const jobs = traces.flatMap(({ key, label, trace }) => Array.from({ length: samples }, (_, sample) => ({ key, label, trace, sample })));
+  const jobs = traces.flatMap((traced) => Array.from({ length: samples }, (_, sample) => ({ ...traced, sample })));
   const results: LiveSample[] = [];
   const worker = async () => {
     for (let job = jobs.shift(); job; job = jobs.shift()) {
-      const { key, label, trace, sample } = job;
+      const { key, label, file, trace, sample } = job;
       try {
         const env = liveEnv();
         const composed = await composeTraced(trace.input, { env });
@@ -259,6 +273,7 @@ async function live(traces: ReadonlyArray<LabeledTrace>, samples: number, concur
         const { cases } = inferenceCases(trace.input, composed.assertions);
         const answer = judge ? await judgedLive(trace.input, composed, { env }) : judgedAnswer(composed, cases, cases.map(() => UNJUDGED));
         const view = judge ? judgeView(answer) : undefined;
+        onAnswer?.({ key, label, file, trace }, answer);
         results.push({
           trace: key,
           sample,
@@ -298,6 +313,45 @@ async function live(traces: ReadonlyArray<LabeledTrace>, samples: number, concur
     labels: Object.fromEntries(traces.map(({ key, label }) => [key, label])),
     results,
   };
+}
+
+// A re-recorded trace is what recorded --check replays as right, so a live run
+// that was cut off, answered or repaired by a fallback model, or whose judge or
+// repair round never replied or gave an inference no verdict stays unwritten.
+// primary: the deployment the run's answer and repair calls go to first.
+export function rerecord({ label, file, trace }: LabeledTrace, answer: TracedAnswer, primary: string | undefined): void {
+  const { exchange, assertions, judge, repair, blocks } = answer;
+  const unreplied = [...(judge ?? []), ...(repair ? [repair.record, ...repair.judge] : [])]
+    .flatMap((record) => (record.outcome === "replied" ? [] : [record.reason]));
+  const repairedOn = repair?.record.outcome === "replied" ? repair.record.exchange.deployment : primary;
+  const unjudged = assertions?.judged?.find((verdict) => verdict.verdict === "error");
+  const why = exchange === null ? "no model was called"
+    : exchange.truncated ? "the answer was cut off at the token limit"
+    : exchange.deployment !== primary ? `the answer came from ${exchange.deployment}, not the primary ${primary}`
+    : repairedOn !== primary ? `the repair came from ${repairedOn}, not the primary ${primary}`
+    : unreplied[0] ?? (unjudged && `inference ${unjudged.index} has no verdict: ${unjudged.reason}`);
+  if (why !== undefined) {
+    console.log(`skip ${label}: ${why}`);
+    return;
+  }
+  const recorded: TurnTrace = {
+    version: 2,
+    thread_id: trace.thread_id,
+    run_id: trace.run_id,
+    ...(trace.turn_id === undefined ? {} : { turn_id: trace.turn_id }),
+    question: trace.question,
+    input: trace.input,
+    recorded_at: new Date().toISOString(),
+    exchange,
+    assertions,
+    judge,
+    repair,
+    blocks,
+  };
+  // Renamed into place, so an interrupted run never leaves half a trace.
+  const partial = `${file}.${process.pid}.tmp`;
+  writeFileSync(partial, `${JSON.stringify(recorded, null, 2)}\n`);
+  renameSync(partial, file);
 }
 
 // A run without --judge shows what a reader with no judge would: no inference.
@@ -586,9 +640,10 @@ async function main(argv: string[]): Promise<number> {
   if (
     (mode !== "recorded" && mode !== "live" && mode !== "replies" && mode !== "judge-mutations") || paths.length === 0 ||
     (mode === "replies" && !values.out) || (mode === "judge-mutations" && paths.length !== 1) ||
-    (values.repair && mode !== "recorded" && mode !== "judge-mutations") || (values.repair && values.judge)
+    (values.repair && mode !== "recorded" && mode !== "judge-mutations") || (values.repair && values.judge) ||
+    (mode === "live" && values.update && (!values.judge || Number.parseInt(values.samples, 10) !== 1))
   ) {
-    console.error("usage: answer-lab.ts recorded <trace dir|files...> [--check | --update] [--judge | --repair] | live <trace dir|files...> [--samples K] [--concurrency N] [--against <run.json>] [--judge] | replies <trace dir|files...> --out <file> | judge-mutations <set.json> [--concurrency N] [--repair]");
+    console.error("usage: answer-lab.ts recorded <trace dir|files...> [--check | --update] [--judge | --repair] | live <trace dir|files...> [--samples K] [--concurrency N] [--against <run.json>] [--judge [--update]] | replies <trace dir|files...> --out <file> | judge-mutations <set.json> [--concurrency N] [--repair]");
     return 2;
   }
   if (mode === "judge-mutations") {
@@ -666,7 +721,8 @@ async function main(argv: string[]): Promise<number> {
     console.error(`${values.against} is from an older answer-lab whose traces are not keyed by turn; rerun it`);
     return 2;
   }
-  const run = await live(traces, samples, concurrency, values.judge);
+  const primary = values.update ? await primaryDeployment(liveEnv()) : undefined;
+  const run = await live(traces, samples, concurrency, values.judge, values.update ? (traced, answer) => rerecord(traced, answer, primary) : undefined);
   mkdirSync(RUNS_DIR, { recursive: true });
   const file = join(RUNS_DIR, `${run.run}.json`);
   writeFileSync(file, `${JSON.stringify(run, null, 2)}\n`, { flag: "wx" });
