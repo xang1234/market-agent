@@ -6,6 +6,7 @@ import test from "node:test";
 import { createRuntimeAuthority, operationDependencies, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
 import { buildDeterministicPlan, planFinancialRequest, type PlanningContext, type PlanningModel, type PlanningResult } from "../../financial-engine/src/planner.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
+import { companyOverviewDraft } from "../src/company-overview.ts";
 import { isFinancialRequest, uncoveredAsks } from "../src/financial-runtime.ts";
 import { parseProposal, proposalQuestion } from "../src/scope-proposal.ts";
 import { extractSubjectMentions } from "../src/subject-extraction.ts";
@@ -119,6 +120,38 @@ test("each golden metric question plans from its own recorded reply on the first
   const model: PlanningModel = async ({ messages }) => ({ text: (await client({} as never, { messages })).text, model: "recorded" });
   for (const question of questions) {
     assert.deepEqual(summary(await planFinancialRequest(planningContext(question), question, model)), EXPECTED[question], question);
+  }
+});
+
+test("a question about one company that asks for no figure plans its overview with no model (#398)", () => {
+  const quarter = (ticker: string, metric: string, offset: number) => `${ticker} ${metric} latest quarterly[${offset}]`;
+  const overview = (ticker: string) => [
+    quarter(ticker, "gross_profit", 0),
+    quarter(ticker, "operating_income", 0),
+    quarter(ticker, "net_income", 0),
+    `gross_margin(${quarter(ticker, "gross_profit", 0)}, ${quarter(ticker, "revenue", 0)})`,
+    `operating_margin(${quarter(ticker, "operating_income", 0)}, ${quarter(ticker, "revenue", 0)})`,
+    `net_margin(${quarter(ticker, "net_income", 0)}, ${quarter(ticker, "revenue", 0)})`,
+    `percent_change_positive_base(${quarter(ticker, "revenue", 0)}, ${quarter(ticker, "revenue", 1)})`,
+    `percent_change_positive_base(${quarter(ticker, "revenue", 0)}, ${quarter(ticker, "revenue", 4)})`,
+    quarter(ticker, "revenue", 7),
+    quarter(ticker, "revenue", 6),
+    quarter(ticker, "revenue", 5),
+    quarter(ticker, "revenue", 4),
+    quarter(ticker, "revenue", 3),
+    quarter(ticker, "revenue", 2),
+    quarter(ticker, "revenue", 1),
+    quarter(ticker, "revenue", 0),
+  ];
+  for (const ticker of ["NVDA", "AMD", "AAPL"]) {
+    const planned = buildDeterministicPlan(planningContext(ticker), companyOverviewDraft(ticker));
+    assert.equal(planned.outcome, "ready", JSON.stringify(planned));
+    const { plan, model_calls } = planned as Extract<PlanningResult, { outcome: "ready" }>;
+    assert.deepEqual(
+      { planner: plan.planner.kind, model_calls, units: plan.publication_units.map((unit) => unit.unit_id), outputs: outputLabels(plan) },
+      { planner: "deterministic", model_calls: 0, units: ["answer"], outputs: overview(ticker) },
+      ticker,
+    );
   }
 });
 
