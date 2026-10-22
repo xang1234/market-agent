@@ -32,8 +32,8 @@ const COMPANIES = {
   TSLA: { issuer_id: "60000000-0000-4000-8000-000000000004", label: "TSLA" },
 };
 
-// The fields an eval case checks: a resolved scope's, and the period kind and
-// change to the companies its reading names.
+// The fields an eval case checks: its resolved scope's, and its reading's
+// period kind and company change.
 export function scopeView(scope: ResearchScope, reading: ScopeProposal) {
   return {
     route: scope.route,

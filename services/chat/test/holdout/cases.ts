@@ -83,9 +83,7 @@ type ScopeReply = {
   period: Readonly<Record<string, string | number | null>>;
   companies: Readonly<Record<string, string | ReadonlyArray<string>>>;
 };
-// A turn's recorded scope: the facets it asks for, the catalog metrics and the
-// income items it names, its period (none unless named), its change to
-// the companies (none unless named), nothing turned off.
+// A turn's recorded scope; it turns nothing off.
 const scope = (
   asks: string[] = [],
   metrics: string[] = [],

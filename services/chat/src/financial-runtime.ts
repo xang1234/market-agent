@@ -198,7 +198,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     const reading = answered ? Promise.resolve(null) : new Promise<ScopeProposal | null>((resolve) => {
       decideReading = (read) => {
         decideReading = () => {};
-        // None, the answer says its coverage was not checked.
+        // No reading: the answer says its coverage was not checked (UNCHECKED).
         resolve(read ? context.reading?.() ?? null : null);
       };
     });
@@ -387,11 +387,11 @@ async function requestedSubjects(deps: ChatFinancialRuntimeDeps, context: ChatFi
     // An ambiguous company is asked about beside every company named, and in a
     // comparison beside the previous answer's, so the answer covers them all.
     // As the analyst path does, a name that matches no company is named in a
-    // comparison's answer and ignored outside one. Only then is the reading
-    // waited on: an ambiguous company is asked about either way.
+    // comparison's answer and ignored outside one.
     const unmatched = mentioned.filter(({ resolution }) => resolution.status === "not_found");
     const previous = await deps.priorSubjects?.(context.threadId) ?? [];
-    const comparison = (previous.length > 0 || unmatched.length > 0) && (await context.reading?.())?.companies.kind === "compare";
+    const mayCompare = previous.length > 0 || unmatched.length > 0;
+    const comparison = mayCompare && (await context.reading?.())?.companies.kind === "compare";
     const prior = comparison ? previous : [];
     const named = mentioned.filter((entry) => !unmatched.includes(entry));
     // One key per company named, or per ambiguous name. They take the capped

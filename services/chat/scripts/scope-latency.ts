@@ -1,14 +1,10 @@
-// Time to a follow-up's first block, with stubbed timings, at the coordinator a
-// path names (this checkout's by default), so a run on each of two commits
-// compares them:
+// Time to a follow-up's first block ("Compare it with AMD" after an answer on
+// NVDA), with stubbed timings, at the coordinator a path names, to compare two
+// commits:
 //
 //   node --experimental-strip-types scripts/scope-latency.ts [path/to/coordinator.ts]
 //
-// The follow-up is "Compare it with AMD" after an answer on NVDA. Each lane
-// waits on the question's reading as it does in the runtime: the analyst lane
-// before its answer model call, the financial lane beside its planner call.
-// Where the coordinator offers no shared reading (before #472 companies), the
-// lane starts its own once the companies are resolved.
+// A coordinator with no shared reading gets one per lane.
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 

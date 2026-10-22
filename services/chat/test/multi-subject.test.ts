@@ -91,7 +91,6 @@ async function subjectsForTurn(
 }
 
 const priorOf = (...tickers: string[]) => async () => tickers.map(resolved);
-// The turn's reading names this change to the companies.
 const reads = (companies: CompanyChange) => ({ readQuestion: async () => proposal({ companies }) });
 const asNamed = (...names: string[]) => reads({ kind: "as_named", names });
 const compare = (...add: string[]) => reads({ kind: "compare", add });
@@ -340,7 +339,7 @@ test("the reply to that question, or a clear switch, is answered", async () => {
   assert.deepEqual((await subjectsForTurn("What about AAPL?", { loadPriorSubjects: priorOf("NVDA"), ...aapl })).tickers, ["AAPL"]);
   // A company already compared is not a new one.
   assert.deepEqual((await subjectsForTurn("And what about AMD?", { ...two, ...reads({ kind: "unclear", names: ["AMD"] }) })).tickers, ["AMD"]);
-  // One that cannot be found leaves the comparison, and is named.
+  // One that cannot be found keeps the comparison, and is named.
   const xyzq = await subjectsForTurn("Just XYZQ", { ...two, ...reads({ kind: "only", names: ["XYZQ"] }) });
   assert.deepEqual([xyzq.tickers, xyzq.context?.unresolvedMentions], [["NVDA", "AMD"], ["XYZQ"]]);
 });
@@ -386,7 +385,6 @@ test("dropping a company that cannot be found, or is ambiguous, is asked about",
   assert.match(ambiguous.events, /Which Alphabet share class do you mean\?/);
   // A metric or facet in capitals is not a company to drop.
   assert.equal((await run("Drop the FCF", asNamed())).ran, true);
-  // NET read as a company is asked about (#378 review).
   const fragment = await run("Drop NET", drop(["NET"]));
   assert.equal(fragment.ran, false);
   assert.match(fragment.events, /NET was not found, so nothing was dropped from the NVDA and AMD comparison/);
@@ -414,7 +412,7 @@ test("a ticker inside a metric's name is the metric, unless the comparison cover
   // With no comparison before, the turn is not about Pathward.
   const fresh = { preResolveSubject: withCash, loadPriorSubjects: priorOf() };
   assert.deepEqual((await subjectsForTurn("Drop FREE CASH FLOW", { ...fresh, ...asNamed() })).tickers, []);
-  // With no reading, CASH is never added or switched to: the turn asks.
+  // With no reading, CASH after a comparison is asked about, not added.
   const unread = await subjectsForTurn("Drop FREE CASH FLOW", { ...comparison, readQuestion: async () => null });
   assert.deepEqual([unread.tickers, unread.context], [[], null]);
   const covered = { preResolveSubject: withCash, loadPriorSubjects: priorOf("NVDA", "NOW") };
@@ -443,8 +441,6 @@ test("a company that cannot be found is asked about when the removal also names 
   assert.match(JSON.stringify(turn.events), /XYZQ was not found, so nothing was dropped from the NVDA, AMD and AAPL comparison\./);
 });
 
-// With no reading (off, failed, slow or rejected), a follow-up never changes
-// the companies it cannot read.
 test("with no reading, a follow-up keeps the previous companies unless it names a new one after a single company", async () => {
   const two = { loadPriorSubjects: priorOf("NVDA", "AMD") };
   assert.deepEqual((await subjectsForTurn("Why?", two)).tickers, ["NVDA", "AMD"], "naming none");

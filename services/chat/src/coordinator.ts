@@ -64,9 +64,7 @@ export type ChatTurnRunContext = ChatTurnInput & {
   subjectPreResolutions?: ReadonlyArray<ChatResolvedSubjectPreResolution>;
   // Companies a comparison named that could not be found; the answer says so.
   unresolvedMentions?: ReadonlyArray<string>;
-  // The turn's one reading of its question (scope-proposal.ts), started by
-  // the first caller and shared by the rest: company resolution, the
-  // financial lane and the analyst's scope. Null when there is none.
+  // The turn's one reading of its question (scope-proposal.ts), shared by every caller; null when there is none.
   reading?: () => Promise<ScopeProposal | null>;
   // Analyst prompt-template bundle selected for this turn. Derived from the
   // resolved subject's kind via chooseBundleIdForSubjectKind; falls back to
@@ -934,8 +932,6 @@ function subjectAwareRunner(
         });
         return;
       }
-      // A comparison adds the companies the reading names, with the explicit
-      // subject kept primary ("Compare with AMD" from the NVDA page).
       const added = comparedAdditions(await context.reading?.() ?? null);
       if (added.length > 0) {
         const named = await resolveNames(added, options.preResolveSubject);
@@ -997,7 +993,6 @@ export type TurnSubjects = {
   clarify?: string;
 };
 
-// One reading per turn, whichever lane asks first; a failed one is none.
 function readingRunner(runner: ChatTurnRunner, readQuestion: ChatCoordinatorOptions["readQuestion"]): ChatTurnRunner {
   return (context) => {
     let reading: Promise<ScopeProposal | null> | undefined;
@@ -1011,8 +1006,6 @@ function readingRunner(runner: ChatTurnRunner, readQuestion: ChatCoordinatorOpti
   };
 }
 
-// The companies a comparison adds to the ones it keeps: the page's company,
-// or the previous answer's.
 export function comparedAdditions(reading: ScopeProposal | null): ReadonlyArray<string> {
   return reading?.companies.kind === "compare" ? reading.companies.add : [];
 }
@@ -1032,10 +1025,8 @@ export async function resolveTurnSubjects(
       ? loadPriorSubjects({ threadId: context.threadId, ...(context.userId ? { userId: context.userId } : {}) }).then(distinctCompanies)
       : [],
   ]);
-  // A fresh question whose names all resolve needs no reading to pick its
-  // companies, so it does not wait on one. A name the resolver does not know
-  // waits too: only the reading tells a company from an acronym.
-  const reading = prior.length > 0 || named.unresolved.length > 0 ? await context.reading?.() ?? null : null;
+  const readingDecides = prior.length > 0 || named.unresolved.length > 0;
+  const reading = readingDecides ? await context.reading?.() ?? null : null;
   const change = reading?.companies;
   if (!change) return unreadChange(named.resolved, prior);
   if (change.kind === "drop" && prior.length > 0) return dropped(prior, change, preResolve);
@@ -1054,9 +1045,8 @@ export async function resolveTurnSubjects(
   return listed([], names.resolved, names.notFound);
 }
 
-// With no reading, a follow-up never changes the companies it cannot read:
-// one naming none, or only the previous answer's, keeps them all, and one
-// naming a new company after a comparison asks whether to add it.
+// With no reading, a follow-up naming no new company keeps the previous ones;
+// a new one is asked about after a comparison and replaces a single company.
 function unreadChange(
   named: ReadonlyArray<ChatResolvedSubjectPreResolution>,
   prior: ReadonlyArray<ChatResolvedSubjectPreResolution>,
@@ -1129,8 +1119,6 @@ async function dropped(
     return { subjects: [], notFound: [], clarify: `Dropping ${compared} leaves no company to compare. Name the company to look at.` };
   }
   if (adding.ambiguous) return { subjects: [], ambiguous: adding.ambiguous, notFound: [] };
-  // One added beside them ("drop AMD and add TSLA") takes a capped slot
-  // before the carried companies.
   const keptKeys = new Set(kept.map(companyKey));
   const additions = adding.resolved
     .filter((subject) => !removed.has(companyKey(subject)) && !keptKeys.has(companyKey(subject)))
@@ -1139,8 +1127,6 @@ async function dropped(
   return { subjects: [...keptSlots, ...additions], carried: keptSlots, notFound: adding.notFound };
 }
 
-// The companies a reading names, each looked up alone: one asked about, and
-// the ones not found.
 async function resolveNames(
   names: ReadonlyArray<string>,
   preResolve: ChatSubjectPreResolver,

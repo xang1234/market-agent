@@ -120,6 +120,12 @@ test("a company the question does not write refuses the whole proposal", () => {
   assert.equal(read({ kind: "compare", add: ["AMD", "NVDA"] }), null);
   assert.equal(read({ kind: "drop", drop: ["AMD"], add: ["Advanced Micro Devices"] }), null);
   assert.equal(read({ kind: "only", names: ["AAPL"] }), null);
+  const inQuestion = (name: string, question: string) => parse(reply({ companies: { kind: "compare", add: [name] } }), question) !== null;
+  assert.deepEqual(
+    [inQuestion("AMD", "Compare it with Amdocs"), inQuestion("a", "Compare it with AMD"), inQuestion("AMD", "Compare it with AMD's"), inQuestion("Berkshire Hathaway", "vs Berkshire  Hathaway?")],
+    [false, false, true, true],
+    "a name is written as whole words",
+  );
 });
 
 test("a metric to turn off may be its bare catalog key (#378 eval)", () => {

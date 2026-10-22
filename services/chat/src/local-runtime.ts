@@ -331,7 +331,6 @@ export function analystTurnScope(
   return turnScope(threadId, question, covered, false, reading);
 }
 
-// The turn's one reading of its question (coordinator.ts readingRunner).
 export const readQuestion = (question: string) => proposeScope({ question });
 
 // The turn's research scope at a cutoff (research-scope.ts): what it asks for,

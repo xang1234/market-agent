@@ -11,10 +11,8 @@ import {
 
 type Metric = string | { metric: string; adjustment?: string; qualifier?: string };
 
-// A model's proposal (scope-proposal.ts) as a test writes it: catalog metric
-// keys (or a key with its adjustment or qualifier), facets, what it turns off,
-// income items, its period (none unless named) and its change to the
-// companies (none unless named).
+// A model's proposal (scope-proposal.ts) as a test writes it: catalog metric keys
+// (or a key with its adjustment or qualifier); a field left out asks for nothing.
 export function proposal(reply: {
   metrics?: ReadonlyArray<Metric>;
   asks?: ReadonlyArray<ScopeFacet>;

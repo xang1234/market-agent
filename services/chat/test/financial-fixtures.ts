@@ -87,7 +87,6 @@ export function resolveMention(mention: string): Promise<ChatSubjectPreResolutio
 
 export const NO_ASKS: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named", names: [] } };
 export const METRIC_READING: ScopeProposal = { ...NO_ASKS, metrics: [proposedMetric("income_statement", null, null)!] };
-/** A reading of a metric question that changes the companies so. */
 export const changing = (companies: CompanyChange) => async (): Promise<ScopeProposal> => ({ ...METRIC_READING, companies });
 export const comparing = (...add: string[]) => changing({ kind: "compare", add });
 

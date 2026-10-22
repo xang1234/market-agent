@@ -1,12 +1,12 @@
 // A model reads what a question asks for and turns off (#287 follow-up): its
 // metrics, its facets (peers, segments, guidance, a cause...), its income
-// items, its period (#472) and how it changes the companies discussed. English patterns kept missing phrasings, one
-// review at a time. The model only proposes, from closed vocabularies: every
-// key is checked, and anything outside them rejects the whole proposal, so the
-// turn asks for nothing new (research-scope.ts). The companies it names are
-// words of the question, which the resolver looks up as before; it never picks
-// data or figures, and nothing it writes reaches the answer: the readers and
-// gap notes do as before.
+// items, its period (#472) and its change to the companies discussed. English
+// patterns kept missing phrasings, one review at a time. The model only
+// proposes, from closed vocabularies: every key is checked, and anything
+// outside them rejects the whole proposal, so the turn asks for nothing new
+// (research-scope.ts). Each company it names must be written in the question,
+// and the resolver looks it up; it never picks data or figures, and nothing it
+// writes reaches the answer: the readers and gap notes do.
 //
 // Off when there is no model or CHAT_SCOPE_PROPOSAL=off. Recorded replies
 // (LLM_REPLAY_FILE) answer it like any other call: a fixture records one per
@@ -123,11 +123,16 @@ function companiesOf(value: unknown, question: string): CompanyChange | null {
   return null;
 }
 
-// A closed check on the model's output, not a phrasing list: each name it proposes is written in the question.
+// A closed check on the model's output, not a phrasing list: each name it
+// proposes is written in the question as whole words.
 function isNameList(value: unknown, question: string, least = 0): value is string[] {
   if (!Array.isArray(value) || value.length < least || value.length > MAX_NAMES) return false;
-  const written = question.toLowerCase();
-  return value.every((name) => typeof name === "string" && name.trim() !== "" && written.includes(name.toLowerCase()));
+  const words = ` ${question.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ")} `;
+  return value.every((name) => {
+    if (typeof name !== "string") return false;
+    const written = name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+    return written !== "" && words.includes(` ${written} `);
+  });
 }
 
 function periodOf(value: unknown): ScopePeriod | null {
