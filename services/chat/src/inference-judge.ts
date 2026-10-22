@@ -4,18 +4,19 @@
 // text, and no English matcher can tell whether they mean what the figures
 // show ("margins are expanding" beside a checked "fell"). A second model reads
 // each inference beside what it rests on, the rest of the answer and the
-// figures its tables and charts show, as the reader sees them, and gives it a
-// verdict, each inference in a call of its own (#376). The verdict sets what a
-// chat turn shows (SHOWN_AS, answer-trace.ts answerTurn).
+// figures its tables and charts show, each figure as the page writes it, and
+// gives it a verdict, each inference in a call of its own (#376). The verdict sets what a
+// chat turn shows (shownAs, answer-trace.ts answerTurn).
 
 import { createLlmRouterFromEnv, type LlmChatClient, type LlmChatMessage, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
+import { isRecord } from "../../shared/src/http.ts";
 import type { ModelExchange } from "./answer-trace.ts";
 import type { Assertion } from "./assertions.ts";
 import type { EvidencePacket } from "./evidence-packet.ts";
 import { withDeadlines, type ModelDeadlines } from "./llm-runtime.ts";
 import { checkedResults, plainText, renderAssertion } from "./render-assertions.ts";
 
-// One accepted inference and what it rests on, as the page shows them.
+// One accepted inference and what it rests on, each figure as the page writes it.
 export type JudgeCase = {
   index: number;
   // The company it is about: its label's, or a one-company answer's.
@@ -25,32 +26,42 @@ export type JudgeCase = {
   checked: ReadonlyArray<string>;
   // Each support's rendered text, its figures the packet's values.
   supports: ReadonlyArray<string>;
-  // The answer's other observations and comparisons, rendered the same way:
-  // the reader sees them on the same page.
+  // The answer's other accepted observations and comparisons, rendered the
+  // same way; the page may show an observation only inside a comparison.
   context: ReadonlyArray<string>;
   // Every figure the page's tables and charts show, a line per table; the
   // same for each of an answer's inferences.
   figures: ReadonlyArray<string>;
 };
 
-export const VERDICTS = ["entailed", "unsupported", "contradicted", "worded_amount"] as const;
+export const VERDICTS = ["entailed", "unsupported", "contradicted"] as const;
 export type Verdict = (typeof VERDICTS)[number];
 
 export type InferenceVerdict =
-  | { index: number; verdict: Verdict; reason?: string }
+  // worded_amount: it states an amount in words, asked apart from the verdict
+  // so a right or unsupported one is still caught.
+  | { index: number; verdict: Verdict; worded_amount: boolean; reason?: string }
   // The judge gave no usable verdict: never read as entailed.
   | { index: number; verdict: "error"; reason: string };
 
-// What the reader is shown of an inference, by its verdict. An unsupported
-// one goes beyond the figures without contradicting them, so it shows,
-// labelled as such (render-assertions.ts unverifiedInference).
-export const SHOWN_AS: Readonly<Record<InferenceVerdict["verdict"], "shown" | "unverified" | "hidden">> = {
-  entailed: "shown",
-  unsupported: "unverified",
-  contradicted: "hidden",
-  worded_amount: "hidden",
-  error: "hidden",
-};
+export type ShownAs = "shown" | "unverified" | "hidden";
+
+// An unsupported inference goes beyond the figures without contradicting
+// them, so it shows, labelled as such (render-assertions.ts
+// unverifiedInference).
+const SHOWN_AS: Readonly<Record<Verdict, ShownAs>> = { entailed: "shown", unsupported: "unverified", contradicted: "hidden" };
+
+// What the reader is shown of an inference. An amount in words is never
+// shown, whatever its verdict: every figure on the page is a packet value.
+export function shownAs(verdict: InferenceVerdict): ShownAs {
+  return verdict.verdict === "error" || verdict.worded_amount ? "hidden" : SHOWN_AS[verdict.verdict];
+}
+
+// A verdict as a log or report line reads it: "unsupported, worded_amount: <reason>".
+export function verdictText(verdict: InferenceVerdict): string {
+  const worded = verdict.verdict !== "error" && verdict.worded_amount ? ", worded_amount" : "";
+  return `${verdict.verdict}${worded}${verdict.reason ? `: ${verdict.reason}` : ""}`;
+}
 
 // What one judge call did: everything its verdicts are read from
 // (verdictsOf), so a recorded turn replays them without a model.
@@ -174,12 +185,17 @@ export function parseVerdicts(text: string, cases: ReadonlyArray<JudgeCase>): In
   const items = lastVerdictList(text);
   if (items === undefined) return cases.map(({ index }) => ({ index, verdict: "error", reason: "the judge's reply is not a verdict list" }));
   return cases.map(({ index }): InferenceVerdict => {
-    const mine = items.filter((item) => (item as { id?: unknown } | null)?.id === index);
+    const mine = items.filter(isRecord).filter((item) => item.id === index);
     if (mine.length !== 1) return { index, verdict: "error", reason: mine.length === 0 ? "no verdict for this inference" : "more than one verdict for this inference" };
-    const { verdict, reason } = mine[0] as { verdict?: unknown; reason?: unknown };
-    if (!VERDICTS.includes(verdict as Verdict)) return { index, verdict: "error", reason: `unknown verdict ${JSON.stringify(verdict)}` };
-    return { index, verdict: verdict as Verdict, ...(typeof reason === "string" && reason.trim() !== "" ? { reason: reason.trim() } : {}) };
+    const { verdict, worded_amount, reason } = mine[0]!;
+    if (!isVerdict(verdict)) return { index, verdict: "error", reason: `unknown verdict ${JSON.stringify(verdict)}` };
+    if (typeof worded_amount !== "boolean") return { index, verdict: "error", reason: "no worded_amount for this inference" };
+    return { index, verdict, worded_amount, ...(typeof reason === "string" && reason.trim() !== "" ? { reason: reason.trim() } : {}) };
   });
+}
+
+function isVerdict(value: unknown): value is Verdict {
+  return VERDICTS.some((verdict) => verdict === value);
 }
 
 // The reply's last verdict list: a model that corrects itself in prose
@@ -199,35 +215,42 @@ function lastVerdictList(text: string): unknown[] | undefined {
 }
 
 const JUDGE_INSTRUCTIONS = [
-  "You check the analyst inferences in a financial research answer. The reader sees each inference beside",
-  "what it rests on: its supports (the observations, comparisons and management attributions it cites, each",
-  "figure as the data gives it, each claim as its source words it), the checked results of the comparisons among",
-  "them, and its subject, the company it is about. rest_of_answer is the answer's other observations and",
-  "comparisons, and figures_shown is every figure the answer's tables and charts show, by table, as the reader",
-  "sees them on the same page. companies lists every company the answer covers; rest_of_answer and figures_shown",
-  "cover every one of them, and an inference may rest on another company's figures when it compares them.",
-  "Judge each inference against its subject, checked results, supports, rest_of_answer and figures_shown; no",
-  "outside knowledge, and nothing from another inference. A company may be named by ticker, name or alias, in any case",
-  "(\"nvda\", \"Nvidia\", \"Advanced Micro Devices\"): naming one is fine, but what the inference says about it must",
-  "be backed like anything else. Qualitative words that summarise the figures shown (large, concentrated, higher,",
-  "slowing) are fine when the figures bear them out, and so is a count of the things they list (\"the two",
-  "companies\", \"four segments\").",
+  "You check the analyst inferences in a financial research answer. Each inference comes with what it rests on:",
+  "its supports (the observations, comparisons and management attributions it cites, each figure as the data",
+  "gives it, each claim as its source words it), the checked results of the comparisons among them, and its",
+  "subject, the company it is about. rest_of_answer is the answer's other checked observations and comparisons,",
+  "written the same way; the page may show one of them inside a comparison that states its figures.",
+  "figures_shown holds the figures the page's tables and charts show, a line per table, headed by its title when it",
+  "has one. companies lists every company the answer covers; rest_of_answer and figures_shown cover every one of",
+  "them, and an inference may rest on another company's figures when it compares them. Judge each inference",
+  "against its subject, checked results, supports, rest_of_answer and figures_shown; no outside knowledge, and",
+  "nothing from another inference. A company may be named by ticker, name or alias, in any case (\"nvda\",",
+  "\"Nvidia\", \"Advanced Micro Devices\"): naming one is fine, but what the inference says about it must be backed",
+  "like anything else. Qualitative words that summarise the figures (large, concentrated, higher, slowing) are",
+  "fine when the figures bear them out, and so is an exact count of the items the answer lists (\"the two",
+  "companies\", \"four segments\", \"the eight quarters shown\"). That covers no duration and no difference between",
+  "dates or values (\"a one-month offset\", \"an eight-month gap\"): those are amounts in words.",
   "",
-  "Give each inference one verdict. When more than one applies, the first in this list wins:",
-  "- worded_amount: it states an amount or quantity in words, whether or not the figures bear it out:",
-  "  money, a percentage, a growth rate, a multiple or fraction (\"doubled\", \"four times\", \"two-thirds\"),",
-  "  or a span of time (\"an eight-month gap\"), e.g. \"hundreds of millions of dollars\", \"a quarter",
-  "  billion dollars\", \"one and a half percent\", \"single-digit growth\".",
-  "- contradicted: something it says disagrees with the figures or checked results shown: who leads, trails, is",
-  "  highest or lowest, or the order it states; a direction it states (rising, falling, expanding, recovering)",
-  "  against a checked trend or the figures; or any other statement the figures shown make false.",
+  "Answer two questions about each inference.",
+  "",
+  "verdict: how it relates to what the answer shows. When both unsupported and contradicted apply, contradicted wins.",
+  "- entailed: its supports, the rest of the answer and the figures shown state or clearly imply what it says.",
   "- unsupported: it contradicts nothing shown but claims something the answer neither states nor implies, such",
   "  as a cause, a forecast, a trend, or a metric, segment or period not shown. A hedge does not make it",
   "  supported: a valuation or market reading such as \"may be priced in\" or \"the market may already reflect\" is",
   "  unsupported unless the answer shows it.",
-  "- entailed: its supports, the rest of the answer and the figures shown state or clearly imply what it says.",
+  "- contradicted: something it says disagrees with the figures or checked results shown: who leads, trails, is",
+  "  highest or lowest, or the order it states; a direction it states (rising, falling, expanding, recovering)",
+  "  against a checked trend or the figures; or any other statement the figures shown make false.",
+  "",
+  "worded_amount, whatever its verdict: true when it states any amount, fraction, multiple or span of time in",
+  "words, even when the figures bear it out: money, a percentage, a growth rate, a multiple or fraction",
+  "(\"doubled\", \"four times\", \"two-thirds\"), or a duration or a difference between dates or values (\"a",
+  "one-month offset\", \"an eight-month gap\"), e.g. \"hundreds of millions of dollars\", \"a quarter billion",
+  "dollars\", \"one and a half percent\", \"single-digit growth\". An exact count of the items the answer lists",
+  "(\"the two companies\", \"four segments\", \"the eight quarters shown\") is not one. Otherwise false.",
   "",
   "Reply with JSON only, one verdict per inference id; if you correct yourself, the last JSON in the reply is read:",
-  '{"verdicts":[{"id":<id>,"verdict":"entailed"|"unsupported"|"contradicted"|"worded_amount","reason":"<one short sentence>"}]}',
-  "Give a reason for every verdict but entailed; for entailed, leave it out.",
+  '{"verdicts":[{"id":<id>,"verdict":"entailed"|"unsupported"|"contradicted","worded_amount":true|false,"reason":"<one short sentence>"}]}',
+  "Give a reason for every verdict but entailed, and whenever worded_amount is true; otherwise leave it out.",
 ].join("\n");

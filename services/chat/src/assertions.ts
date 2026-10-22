@@ -15,6 +15,7 @@
 
 import { checkComparison, comparablePeriods, type ComparisonOp } from "./comparisons.ts";
 import type { EvidencePacket } from "./evidence-packet.ts";
+import type { InferenceVerdict } from "./inference-judge.ts";
 import { isRecord } from "../../shared/src/http.ts";
 
 export const ASSERTION_KINDS = ["observation", "comparison", "management_attribution", "analyst_inference", "unknown_cause"] as const;
@@ -47,9 +48,10 @@ export type AssertionReport = {
   // Accepted observations the rendered answer leaves out, since a comparison
   // it shows writes every figure they state.
   repeated?: ReadonlyArray<number>;
-  // Accepted inferences the judge found unsupported (answer-trace.ts): shown,
-  // labelled as an unverified analyst view, with the judge's verdict and reason.
-  unverified?: ReadonlyArray<{ index: number; reason: string }>;
+  // Each judged inference's verdict, in index order (answer-trace.ts); what
+  // the reader sees of it is its shownAs (inference-judge.ts). Absent when no
+  // inference was judged.
+  judged?: ReadonlyArray<InferenceVerdict>;
 };
 
 // The answer is rendered from this list (#208), so it holds a comparison
@@ -60,7 +62,7 @@ export const MAX_ASSERTIONS = 12;
 // The check a rejection failed, named so a report can tell a wrong number or
 // citation (binding) from a wrong ranking or trend (comparative), and so a
 // held-out mutation fails one named check (#221). judge: an inference the
-// judge hid (inference-judge.ts SHOWN_AS).
+// judge hid (inference-judge.ts shownAs).
 export type RejectionCheck =
   | "binding" | "comparative" | "reference" | "kind" | "support" | "limit" | "format" | "rendering" | "judge";
 export type Rejection = { index: number; text?: string; check: RejectionCheck; reason: string };

@@ -118,7 +118,7 @@ test("answerMetrics reads an answer no assertion rendered as the fallback; with 
   assert.equal(answerMetrics({ ...fallback, exchange: null, assertions: null }).fallback, false);
 });
 
-test("answerMetrics counts the inferences shown, those shown as unverified, and those the judge left out", () => {
+test("answerMetrics counts the judged inferences shown, those shown as unverified, and those the judge left out", () => {
   const judged = {
     ...TRACE,
     assertions: {
@@ -130,12 +130,18 @@ test("answerMetrics counts the inferences shown, those shown as unverified, and 
       ],
       rejected: [
         { index: 3, text: "Its revenue fell.", check: "judge" as const, reason: "contradicted: revenue rose." },
-        { index: 4, text: "Its margin doubled.", check: "binding" as const, reason: "an inference rests on its supports; it writes no figure" },
+        { index: 4, text: "Revenue rose by tens of billions.", check: "judge" as const, reason: "entailed, worded_amount: it says tens of billions." },
+        { index: 5, text: "Its margin doubled.", check: "binding" as const, reason: "an inference rests on its supports; it writes no figure" },
       ],
       rendered: true,
-      unverified: [{ index: 2, reason: "unsupported: a forecast." }],
+      judged: [
+        { index: 1, verdict: "entailed" as const, worded_amount: false },
+        { index: 2, verdict: "unsupported" as const, worded_amount: false, reason: "a forecast." },
+        { index: 3, verdict: "contradicted" as const, worded_amount: false, reason: "revenue rose." },
+        { index: 4, verdict: "entailed" as const, worded_amount: true, reason: "it says tens of billions." },
+      ],
     },
   };
   const { inferences_shown, inferences_unverified, inferences_hidden } = answerMetrics(judged);
-  assert.deepEqual({ inferences_shown, inferences_unverified, inferences_hidden }, { inferences_shown: 1, inferences_unverified: 1, inferences_hidden: 1 });
+  assert.deepEqual({ inferences_shown, inferences_unverified, inferences_hidden }, { inferences_shown: 1, inferences_unverified: 1, inferences_hidden: 2 });
 });

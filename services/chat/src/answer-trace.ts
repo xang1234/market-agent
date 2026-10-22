@@ -8,8 +8,8 @@ import { isDeepStrictEqual } from "node:util";
 
 import { loadLlmSettingsFromEnv, type LlmChatClient, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
 import type { AssertionReport } from "./assertions.ts";
-import { judgeCases, judgeInferences, judgeMessages, SHOWN_AS, verdictsOf, type InferenceVerdict, type JudgeCase, type JudgeRecord } from "./inference-judge.ts";
-import { composeAnalystBlocksWithLlm, turnPacket, type AnswerBlocks, type AnswerUsage, type ModelDeadlines } from "./llm-runtime.ts";
+import { judgeCases, judgeInferences, judgeMessages, shownAs, verdictsOf, verdictText, type JudgeCase, type JudgeRecord, type ShownAs } from "./inference-judge.ts";
+import { composeAnalystBlocksWithLlm, turnPacket, type AnswerBlocks, type AnswerUsage, type InferenceState, type ModelDeadlines } from "./llm-runtime.ts";
 
 export type AnswerTraceInput = Omit<
   Parameters<typeof composeAnalystBlocksWithLlm>[0],
@@ -35,9 +35,9 @@ export type TurnTrace = {
   input: AnswerTraceInput;
   // Null when no model was called.
   exchange: ModelExchange | null;
-  // The checks' report; each inference the judge hid is a rejection with
-  // check "judge", so the accepted inferences are those shown, and those
-  // shown as unverified are listed in its unverified.
+  // The checks' report, with each judged inference's verdict (judged); each
+  // inference the judge hid is a rejection with check "judge", so the accepted
+  // inferences are those shown.
   assertions: AssertionReport | null;
   // What the judge did with the answer's inferences, a call per inference in
   // their order; null when it showed none to judge. Absent from traces
@@ -84,17 +84,16 @@ export function inferenceCases(input: AnswerTraceInput, report: AssertionReport 
 }
 
 // What the reader ends with: each inference as its verdict shows it
-// (SHOWN_AS).
+// (shownAs).
 // records: the judge's, one per case.
 export function judgedAnswer(answer: ComposedAnswer, cases: ReadonlyArray<JudgeCase>, records: ReadonlyArray<JudgeRecord>): TracedAnswer {
   if (cases.length === 0) return { ...answer, judge: null, blocks: answer.blocks(new Map()) };
-  const verdicts = cases.flatMap((inference, i) => verdictsOf([inference], records[i]!));
-  const shown = new Map(verdicts.flatMap((entry) => {
-    const as = SHOWN_AS[entry.verdict];
-    return as === "hidden" ? [] : [[entry.index, as] as const];
+  const judged = cases.flatMap((inference, i) => verdictsOf([inference], records[i]!));
+  const shown = new Map(judged.flatMap((verdict) => {
+    const as = shownAs(verdict);
+    return as === "hidden" ? [] : [[verdict.index, as] as const];
   }));
-  const hidden = verdicts.filter((entry) => !shown.has(entry.index));
-  const unverified = verdicts.filter((entry) => shown.get(entry.index) === "unverified").map((entry) => ({ index: entry.index, reason: why(entry) }));
+  const hidden = judged.filter((verdict) => !shown.has(verdict.index));
   const report = answer.assertions!;
   return {
     exchange: answer.exchange,
@@ -107,18 +106,14 @@ export function judgedAnswer(answer: ComposedAnswer, cases: ReadonlyArray<JudgeC
           index: verdict.index,
           text: report.accepted.find((entry) => entry.index === verdict.index)!.text,
           check: "judge" as const,
-          reason: why(verdict),
+          reason: verdictText(verdict),
         })),
       ].sort((a, b) => a.index - b.index),
-      ...(unverified.length > 0 ? { unverified } : {}),
+      judged,
     },
     judge: records,
     blocks: answer.blocks(shown),
   };
-}
-
-function why(verdict: InferenceVerdict): string {
-  return `${verdict.verdict}${verdict.reason ? `: ${verdict.reason}` : ""}`;
 }
 
 type JudgeOptions = {
@@ -183,8 +178,7 @@ export async function answerTurn(
   const finish = async (records: ReadonlyArray<JudgeRecord>): Promise<TracedAnswer> => {
     const traced = judgedAnswer(answer, cases, records);
     if (cases.length > 0) {
-      const unverified = traced.assertions!.unverified?.length ?? 0;
-      const shown = traced.assertions!.accepted.filter((entry) => entry.kind === "analyst_inference").length - unverified;
+      const { inferences_shown: shown, inferences_unverified: unverified } = inferenceCounts(traced.assertions);
       const deployments = [...new Set(records.flatMap((record) => (record.outcome === "replied" ? [record.exchange.deployment] : [])))];
       const reasons = [...new Set(records.flatMap((record) => (record.outcome === "replied" ? [] : [record.reason])))];
       console.info(`[chat] judge ${traceIds(turn)}${deployments.length > 0 ? ` on ${deployments.join(", ")}` : ""}: ${shown} shown, ${unverified} unverified, of ${cases.length} inferences${reasons.length > 0 ? ` (${reasons.join("; ")})` : ""}`);
@@ -194,11 +188,11 @@ export async function answerTurn(
   };
   if (cases.length === 0) return finish([]);
   if (!(await judgeConfigured(options.env))) return finish(cases.map(() => NO_JUDGE));
-  const inferences = new Map<number, "shown" | "unverified" | "pending">(cases.map(({ index }) => [index, "pending"]));
+  const inferences = new Map<number, InferenceState>(cases.map(({ index }) => [index, "pending"]));
   const listeners: Array<(blocks: TracedAnswer["blocks"]) => void> = [];
   const records = cases.map((inference) =>
     judgeOne(inference, companies, options).then((record) => {
-      const as = SHOWN_AS[verdictsOf([inference], record)[0]!.verdict];
+      const as = shownAs(verdictsOf([inference], record)[0]!);
       if (as === "hidden") inferences.delete(inference.index);
       else inferences.set(inference.index, as);
       const blocks = answer.blocks(inferences);
@@ -348,7 +342,6 @@ export type AnswerMetrics = {
 type Segment = { type?: string; ref_kind?: string; text?: string };
 
 export function answerMetrics(trace: Pick<TurnTrace, "blocks" | "assertions" | "exchange">): AnswerMetrics {
-  const unverified = new Set((trace.assertions?.unverified ?? []).map(({ index }) => index));
   const narrative = trace.blocks.filter((block) => block.kind === "rich_text")
     .map((block) => (Array.isArray(block.segments) ? block.segments as Segment[] : []));
   const text = (segments: ReadonlyArray<Segment>) =>
@@ -359,10 +352,14 @@ export function answerMetrics(trace: Pick<TurnTrace, "blocks" | "assertions" | "
     fallback: trace.exchange !== null && trace.assertions?.rendered !== true,
     accepted: trace.assertions?.accepted.length ?? 0,
     rejected: trace.assertions?.rejected.length ?? 0,
-    inferences_shown: trace.assertions?.accepted.filter((entry) => entry.kind === "analyst_inference" && !unverified.has(entry.index)).length ?? 0,
-    inferences_unverified: unverified.size,
-    inferences_hidden: trace.assertions?.rejected.filter((entry) => entry.check === "judge").length ?? 0,
+    ...inferenceCounts(trace.assertions),
     output_tokens: trace.exchange?.usage?.output_tokens ?? 0,
     latency_ms: trace.exchange?.latency_ms ?? 0,
   };
+}
+
+function inferenceCounts(report: AssertionReport | null): Pick<AnswerMetrics, "inferences_shown" | "inferences_unverified" | "inferences_hidden"> {
+  const shown = (report?.judged ?? []).map(shownAs);
+  const count = (as: ShownAs) => shown.filter((entry) => entry === as).length;
+  return { inferences_shown: count("shown"), inferences_unverified: count("unverified"), inferences_hidden: count("hidden") };
 }

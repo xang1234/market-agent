@@ -15,6 +15,7 @@ import { assertionList, checkAssertions, MAX_ASSERTIONS, type AssertionReport } 
 import { formatCompactCurrency, formatCurrency } from "../../analyze/src/block-format.ts";
 import { calendarNote, plainText, renderAssertion, unverifiedInference, type RenderedAssertion } from "./render-assertions.ts";
 import type { Segment } from "./prose-refs.ts";
+import type { ShownAs } from "./inference-judge.ts";
 import type { ResearchScope } from "./research-scope.ts";
 import type { ModelExchange } from "./answer-trace.ts";
 import { isRecord } from "../../shared/src/http.ts";
@@ -38,9 +39,10 @@ type Answer =
   | { kind: "fallback"; text: string };
 
 // What an answer shows of each accepted inference, by index: its verdict's
-// SHOWN_AS (inference-judge.ts), or "pending", a line in its place while the
+// shownAs (inference-judge.ts), or "pending", a line in its place while the
 // judge reads it; one absent is left out.
-export type Inferences = ReadonlyMap<number, "shown" | "unverified" | "pending">;
+export type InferenceState = Exclude<ShownAs, "hidden"> | "pending";
+export type Inferences = ReadonlyMap<number, InferenceState>;
 // The turn's blocks, its answer showing the given inferences.
 export type AnswerBlocks = (inferences: Inferences) => ReadonlyArray<Record<string, unknown>>;
 

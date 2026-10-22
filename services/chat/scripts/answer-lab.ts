@@ -44,7 +44,19 @@ import {
   type TracedAnswer,
   type TurnTrace,
 } from "../src/answer-trace.ts";
-import { judgeCases, judgeInferences, SHOWN_AS, verdictsOf, type InferenceVerdict, type JudgeCase, type JudgeRecord, type Verdict } from "../src/inference-judge.ts";
+import {
+  judgeCases,
+  judgeInferences,
+  shownAs,
+  VERDICTS,
+  verdictsOf,
+  verdictText,
+  type InferenceVerdict,
+  type JudgeCase,
+  type JudgeRecord,
+  type ShownAs,
+  type Verdict,
+} from "../src/inference-judge.ts";
 import { turnPacket } from "../src/llm-runtime.ts";
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
@@ -166,19 +178,20 @@ function liveEnv(): Record<string, string | undefined> {
   return { ...process.env, LLM_SETTINGS_ENV_FILE: process.env.LLM_SETTINGS_ENV_FILE ?? join(ROOT, ".env.dev") };
 }
 
-// reason: the judge's verdict and its reason, or why no verdict came.
-type JudgedInference = { index: number; text: string; reason: string };
-export type JudgeView = { records: ReadonlyArray<JudgeRecord>; unverified: JudgedInference[]; hidden: JudgedInference[] };
+// flagged: each inference the judge showed as unverified or left out, in
+// index order; reason: its verdict and reason, or why no verdict came.
+type FlaggedInference = { index: number; as: Exclude<ShownAs, "shown">; text: string; reason: string };
+export type JudgeView = { records: ReadonlyArray<JudgeRecord>; flagged: FlaggedInference[] };
 
 function judgeView(answer: Pick<TracedAnswer, "judge" | "assertions">): JudgeView | undefined {
   if (!answer.judge) return undefined;
-  const hidden = (answer.assertions?.rejected ?? []).filter((entry) => entry.check === "judge");
-  const unverified = (answer.assertions?.unverified ?? []).map(({ index, reason }) => ({
-    index,
-    text: answer.assertions!.accepted.find((entry) => entry.index === index)?.text ?? "",
-    reason,
-  }));
-  return { records: answer.judge, unverified, hidden: hidden.map(({ index, text, reason }) => ({ index, text: text ?? "", reason })) };
+  const report = answer.assertions;
+  const text = (index: number) => [...(report?.accepted ?? []), ...(report?.rejected ?? [])].find((entry) => entry.index === index)?.text ?? "";
+  const flagged = (report?.judged ?? []).flatMap((verdict): FlaggedInference[] => {
+    const as = shownAs(verdict);
+    return as === "shown" ? [] : [{ index: verdict.index, as, text: text(verdict.index), reason: verdictText(verdict) }];
+  });
+  return { records: answer.judge, flagged };
 }
 
 // text: the model's raw reply; answer: the rich_text the user reads, each
@@ -334,27 +347,24 @@ export function judgeSummary(run: Pick<LiveRun, "labels"> & { results: ReadonlyA
   return [
     `judge: ${sum("inferences_shown")} shown, ${sum("inferences_unverified")} unverified, ${sum("inferences_hidden")} hidden, in ${judged.length} answers (${outcomes("replied")} replied, ${outcomes("failed")} failed, ${outcomes("not_called")} not called)`,
     `judge per reply: ${mean(replies.map((reply) => reply.latency_ms))} ms, ${mean(replies.map((reply) => reply.usage?.input_tokens ?? 0))} in / ${mean(replies.map((reply) => reply.usage?.output_tokens ?? 0))} out tokens, on ${[...new Set(replies.map((reply) => reply.deployment))].join(", ") || "no model"}`,
-    ...judged.flatMap((result) =>
-      [
-        ...result.judge!.unverified.map((entry) => ({ ...entry, as: "unverified" })),
-        ...result.judge!.hidden.map((entry) => ({ ...entry, as: "hidden" })),
-      ].sort((a, b) => a.index - b.index).map((entry) =>
-        `  ${entry.as}  ${run.labels?.[result.trace] ?? result.trace} #${result.sample} [${entry.index}] ${entry.text}\n      ${entry.reason}`
-      )
-    ),
+    ...judged.flatMap((result) => result.judge!.flagged.map((entry) =>
+      `  ${entry.as}  ${run.labels?.[result.trace] ?? result.trace} #${result.sample} [${entry.index}] ${entry.text}\n      ${entry.reason}`
+    )),
   ].join("\n");
 }
 
-// The verdict each kind of mutation must come back at; an original's is
-// entailed.
+// What each kind of mutation must come back as: a worded amount flagged, at
+// any verdict, and the others at a verdict, with no worded amount.
+type Expected = { worded_amount: true } | { worded_amount: false; verdict: Verdict };
 export const MUTATION_TIERS = {
-  worded_amount: "worded_amount",
-  unsupported_claim: "unsupported",
-  hedged_valuation: "unsupported",
-  flipped_direction: "contradicted",
-  contradicted_ranking: "contradicted",
-} as const satisfies Record<string, Verdict>;
+  worded_amount: { worded_amount: true },
+  unsupported_claim: { worded_amount: false, verdict: "unsupported" },
+  hedged_valuation: { worded_amount: false, verdict: "unsupported" },
+  flipped_direction: { worded_amount: false, verdict: "contradicted" },
+  contradicted_ranking: { worded_amount: false, verdict: "contradicted" },
+} as const satisfies Record<string, Expected>;
 type MutationKind = keyof typeof MUTATION_TIERS;
+const ORIGINAL: Expected = { worded_amount: false, verdict: "entailed" };
 type MutationSet = {
   cases: Array<{
     id: string;
@@ -374,8 +384,12 @@ type MutationSet = {
 // supports back, or a mutation, which they do not.
 export type MutationVariant = { id: string; kind: "original" | MutationKind; judged: JudgeCase; companies: ReadonlyArray<string> };
 
-function tierOf(kind: MutationVariant["kind"]): Verdict {
-  return kind === "original" ? "entailed" : MUTATION_TIERS[kind];
+function expectedOf(kind: MutationVariant["kind"]): Expected {
+  return kind === "original" ? ORIGINAL : MUTATION_TIERS[kind];
+}
+
+function verdictsAllowed(expected: Expected): ReadonlyArray<Verdict> {
+  return expected.worded_amount ? VERDICTS : [expected.verdict];
 }
 
 // Each case's original and mutations on its trace's packet, through the
@@ -419,7 +433,7 @@ async function judgeMutations(variants: ReadonlyArray<MutationVariant>, concurre
         ? { deployment: record.exchange.deployment, latency_ms: record.exchange.latency_ms, ...(record.exchange.usage ? { usage: record.exchange.usage } : {}) }
         : { deployment: null, latency_ms: record.outcome === "failed" ? record.latency_ms : 0 };
       results.push({ id, kind, text: judged.text, verdict, ...cost });
-      console.log(`${verdict.verdict.padEnd(14)} ${id} ${kind}`);
+      console.log(`${id} ${kind}: ${verdictText(verdict)}`);
     }
   };
   await Promise.all(Array.from({ length: Math.max(1, concurrency) }, worker));
@@ -433,22 +447,27 @@ export function mutationSummary(results: ReadonlyArray<Pick<MutationResult, "id"
   type Row = Pick<MutationResult, "kind" | "verdict">;
   const rate = (rows: ReadonlyArray<Row>, counted: (row: Row) => boolean) => `${rows.filter(counted).length} of ${rows.length}`;
   const errors = (rows: ReadonlyArray<Row>) => rows.filter((row) => row.verdict.verdict === "error").length;
-  const flagged = (row: Row) => row.verdict.verdict !== "entailed" && row.verdict.verdict !== "error";
-  const atTier = (row: Row) => row.verdict.verdict === tierOf(row.kind);
+  const flagged = (row: Row) => row.verdict.verdict !== "error" && shownAs(row.verdict) !== "shown";
+  const atTier = ({ kind, verdict }: Row) => {
+    const expected = expectedOf(kind);
+    return verdict.verdict !== "error" && verdict.worded_amount === expected.worded_amount && verdictsAllowed(expected).includes(verdict.verdict);
+  };
+  const hides = (expected: Expected) =>
+    verdictsAllowed(expected).every((verdict) => shownAs({ index: 0, verdict, worded_amount: expected.worded_amount }) === "hidden");
   const mutations = results.filter((result) => result.kind !== "original");
   const originals = results.filter((result) => result.kind === "original");
-  const shouldHide = mutations.filter((result) => SHOWN_AS[tierOf(result.kind)] === "hidden");
+  const shouldHide = mutations.filter((result) => hides(expectedOf(result.kind)));
   const missed = results.filter((result) => !atTier(result));
   return [
     `caught: ${rate(mutations, flagged)} mutations (${errors(mutations)} errors)`,
     `at their tier: ${rate(mutations, atTier)} mutations`,
-    ...Object.entries(MUTATION_TIERS).map(([kind, tier]) =>
-      `  ${kind.padEnd(22)} ${tier.padEnd(14)}${rate(mutations.filter((result) => result.kind === kind), atTier)}`
+    ...Object.entries(MUTATION_TIERS).map(([kind, expected]) =>
+      `  ${kind.padEnd(22)} ${(expected.worded_amount ? "worded_amount" : expected.verdict).padEnd(14)}${rate(mutations.filter((result) => result.kind === kind), atTier)}`
     ),
-    `shown though they should hide: ${rate(shouldHide, (row) => SHOWN_AS[row.verdict.verdict] !== "hidden")}`,
+    `shown though they should hide: ${rate(shouldHide, (row) => shownAs(row.verdict) !== "hidden")}`,
     `false alarms: ${rate(originals, flagged)} originals (${errors(originals)} errors)`,
-    ...(missed.length > 0 ? ["misses, false alarms and errors:"] : []),
-    ...missed.map((result) => `  ${result.id} ${result.kind}: ${result.verdict.verdict}${result.verdict.reason ? ` (${result.verdict.reason})` : ""}\n      ${result.text}`),
+    ...(missed.length > 0 ? ["not at their tier:"] : []),
+    ...missed.map((result) => `  ${result.id} ${result.kind}: ${verdictText(result.verdict)}\n      ${result.text}`),
   ].join("\n");
 }
 

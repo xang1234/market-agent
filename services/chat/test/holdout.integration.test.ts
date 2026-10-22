@@ -91,7 +91,7 @@ test("held-out research traps on the frozen dataset (#221)", { skip: !dockerAvai
   const converse = async (holdout: HoldoutCase, reply: string, list: ReadonlyArray<Record<string, unknown>> = [], judged: Readonly<Record<number, string>> = {}) => {
     const file = join(replies, `${holdout.id}-${++run}.json`);
     const verdicts = list.flatMap((assertion, index) =>
-      assertion.kind === "analyst_inference" ? [{ id: index, verdict: judged[index] ?? "entailed", ...(judged[index] ? { reason: "recorded verdict" } : {}) }] : []
+      assertion.kind === "analyst_inference" ? [{ id: index, verdict: judged[index] ?? "entailed", worded_amount: false, ...(judged[index] ? { reason: "recorded verdict" } : {}) }] : []
     );
     // The planner's reply first, matched by its request line; then each turn's
     // scope, matched by its quoted question alone. Then the judge's reply: its

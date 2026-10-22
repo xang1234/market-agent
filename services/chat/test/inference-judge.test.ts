@@ -4,7 +4,7 @@ import test from "node:test";
 import type { LlmChatRequest } from "../../llm/src/index.ts";
 import { checkAssertions, type Assertion } from "../src/assertions.ts";
 import type { EvidencePacket } from "../src/evidence-packet.ts";
-import { judgeCases, judgeInferences, judgeMessages, parseVerdicts, verdictsOf, type JudgeCase } from "../src/inference-judge.ts";
+import { judgeCases, judgeInferences, judgeMessages, parseVerdicts, shownAs, verdictsOf, type JudgeCase } from "../src/inference-judge.ts";
 
 const ENV = {
   LLM_CHANNELS: "anthropic",
@@ -148,7 +148,7 @@ test("every case carries the figures the page's tables and charts show, a line p
 
 test("one judge call per answer, on JUDGE_LITELLM_MODEL, carries every inference with its supports' text; its reply is kept raw and read per inference", async () => {
   const requests: Array<{ model: string; request: LlmChatRequest }> = [];
-  const reply = 'Here you go:\n{"verdicts":[{"id":3,"verdict":"entailed"},{"id":2,"verdict":"unsupported","reason":"no figure shows what it keeps of a sale."}]}';
+  const reply = 'Here you go:\n{"verdicts":[{"id":3,"verdict":"entailed","worded_amount":false},{"id":2,"verdict":"unsupported","worded_amount":false,"reason":"no figure shows what it keeps of a sale."}]}';
   const record = await judgeInferences({
     cases: CASES,
     companies: PACKET.companies,
@@ -168,8 +168,8 @@ test("one judge call per answer, on JUDGE_LITELLM_MODEL, carries every inference
     usage: { input_tokens: 900, output_tokens: 60 },
   });
   assert.deepEqual(verdictsOf(CASES, record), [
-    { index: 2, verdict: "unsupported", reason: "no figure shows what it keeps of a sale." },
-    { index: 3, verdict: "entailed" },
+    { index: 2, verdict: "unsupported", worded_amount: false, reason: "no figure shows what it keeps of a sale." },
+    { index: 3, verdict: "entailed", worded_amount: false },
   ]);
   assert.deepEqual(requests.map(({ model }) => model), ["anthropic/claude-haiku-5-5"]);
   const [{ request }] = requests as [typeof requests[number]];
@@ -204,7 +204,7 @@ test("one judge call per answer, on JUDGE_LITELLM_MODEL, carries every inference
 
 test("a malformed reply is an error for every inference, never entailed; a bad verdict is an error for its own", () => {
   const two: JudgeCase[] = [...CASES];
-  for (const reply of ["entailed", '{"verdicts":"entailed"}', '{"verdicts":[{"id":2,"verdict":"entailed"}', ""]) {
+  for (const reply of ["entailed", '{"verdicts":"entailed"}', '{"verdicts":[{"id":2,"verdict":"entailed","worded_amount":false}', ""]) {
     assert.deepEqual(parseVerdicts(reply, two), [
       { index: 2, verdict: "error", reason: "the judge's reply is not a verdict list" },
       { index: 3, verdict: "error", reason: "the judge's reply is not a verdict list" },
@@ -212,40 +212,47 @@ test("a malformed reply is an error for every inference, never entailed; a bad v
   }
   // A reply that corrects itself is read by its last list.
   const corrected = [
-    '{"verdicts":[{"id":2,"verdict":"unsupported","reason":"no figure shows \\"its peer\\"."},{"id":3,"verdict":"entailed"}]}',
+    '{"verdicts":[{"id":2,"verdict":"unsupported","worded_amount":false,"reason":"no figure shows \\"its peer\\"."},{"id":3,"verdict":"entailed","worded_amount":false}]}',
     "Correction: the comparison shows its peer trails. Final:",
-    '```json\n{"verdicts":[{"id":2,"verdict":"entailed"},{"id":3,"verdict":"contradicted","reason":"NVDA is highest."}]}\n```',
+    '```json\n{"verdicts":[{"id":2,"verdict":"entailed","worded_amount":false},{"id":3,"verdict":"contradicted","worded_amount":false,"reason":"NVDA is highest."}]}\n```',
   ].join("\n\n");
   assert.deepEqual(parseVerdicts(corrected, two), [
-    { index: 2, verdict: "entailed" },
-    { index: 3, verdict: "contradicted", reason: "NVDA is highest." },
+    { index: 2, verdict: "entailed", worded_amount: false },
+    { index: 3, verdict: "contradicted", worded_amount: false, reason: "NVDA is highest." },
   ]);
-  assert.deepEqual(parseVerdicts('{"verdicts":[{"id":2,"verdict":"probably"}]}', two), [
+  assert.deepEqual(parseVerdicts('{"verdicts":[{"id":2,"verdict":"probably","worded_amount":false}]}', two), [
     { index: 2, verdict: "error", reason: 'unknown verdict "probably"' },
     { index: 3, verdict: "error", reason: "no verdict for this inference" },
   ]);
-  assert.deepEqual(parseVerdicts('{"verdicts":[{"id":2,"verdict":"entailed"},{"id":2,"verdict":"unsupported"},{"id":"3","verdict":"entailed"}]}', two), [
+  assert.deepEqual(parseVerdicts('{"verdicts":[{"id":2,"verdict":"entailed","worded_amount":false},{"id":2,"verdict":"unsupported","worded_amount":false},{"id":"3","verdict":"entailed","worded_amount":false}]}', two), [
     { index: 2, verdict: "error", reason: "more than one verdict for this inference" },
     { index: 3, verdict: "error", reason: "no verdict for this inference" },
   ]);
 });
 
-test("a verdict is one of entailed, unsupported, contradicted and worded_amount; the old not_entailed is an unknown verdict, an error", () => {
-  const cases = [1, 2, 3, 4, 5].map((index) => ({ ...CASES[0]!, index }));
+test("a verdict is entailed, unsupported or contradicted, beside whether the inference states an amount in words; a verdict outside the three, or no yes-or-no on the amount, is an error", () => {
+  const cases = [1, 2, 3, 4, 5, 6, 7, 8].map((index) => ({ ...CASES[0]!, index }));
   const reply = JSON.stringify({ verdicts: [
-    { id: 1, verdict: "entailed" },
-    { id: 2, verdict: "unsupported", reason: "a forecast the figures do not show." },
-    { id: 3, verdict: "contradicted", reason: "NVDA is highest, not its peer." },
-    { id: 4, verdict: "worded_amount", reason: "it says the margin doubled." },
-    { id: 5, verdict: "not_entailed", reason: "unsupported: no figure shows it." },
+    { id: 1, verdict: "entailed", worded_amount: false },
+    { id: 2, verdict: "unsupported", worded_amount: false, reason: "a forecast the figures do not show." },
+    { id: 3, verdict: "contradicted", worded_amount: false, reason: "NVDA is highest, not its peer." },
+    { id: 4, verdict: "unsupported", worded_amount: true, reason: "a forecast of hundreds of millions in savings." },
+    { id: 5, verdict: "entailed", worded_amount: true, reason: "it says the margin doubled." },
+    { id: 6, verdict: "unsupported", reason: "a forecast the figures do not show." },
+    { id: 7, verdict: "entailed", worded_amount: "no" },
+    { id: 8, verdict: "worded_amount", reason: "it says the margin doubled." },
   ] });
   assert.deepEqual(parseVerdicts(reply, cases), [
-    { index: 1, verdict: "entailed" },
-    { index: 2, verdict: "unsupported", reason: "a forecast the figures do not show." },
-    { index: 3, verdict: "contradicted", reason: "NVDA is highest, not its peer." },
-    { index: 4, verdict: "worded_amount", reason: "it says the margin doubled." },
-    { index: 5, verdict: "error", reason: 'unknown verdict "not_entailed"' },
+    { index: 1, verdict: "entailed", worded_amount: false },
+    { index: 2, verdict: "unsupported", worded_amount: false, reason: "a forecast the figures do not show." },
+    { index: 3, verdict: "contradicted", worded_amount: false, reason: "NVDA is highest, not its peer." },
+    { index: 4, verdict: "unsupported", worded_amount: true, reason: "a forecast of hundreds of millions in savings." },
+    { index: 5, verdict: "entailed", worded_amount: true, reason: "it says the margin doubled." },
+    { index: 6, verdict: "error", reason: "no worded_amount for this inference" },
+    { index: 7, verdict: "error", reason: "no worded_amount for this inference" },
+    { index: 8, verdict: "error", reason: 'unknown verdict "worded_amount"' },
   ]);
+  assert.deepEqual(parseVerdicts(reply, cases).map(shownAs), ["shown", "unverified", "hidden", "hidden", "hidden", "hidden", "hidden", "hidden"]);
 });
 
 test("a failed or cut-off judge call is an error for every inference; with no inference no call is made", async (t) => {
