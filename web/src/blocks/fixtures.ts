@@ -23,6 +23,7 @@ import type {
 } from './types.ts'
 
 import financialAnswerFixtureJson from './financialAnswer.fixture.json' with { type: 'json' }
+import financialAnswerFiscalCalendarsFixtureJson from './financialAnswer.fiscalCalendars.fixture.json' with { type: 'json' }
 import financialAnswerV1FixtureJson from './financialAnswer.v1.fixture.json' with { type: 'json' }
 
 const FIXTURE_SNAPSHOT_ID = '11111111-1111-4111-9111-111111111111'
@@ -502,8 +503,9 @@ export const disclosureFixture: DisclosureBlock = {
 }
 
 // Written by services/financial-core/test/presentation-contract.test.ts from
-// the real generator; that test fails if this file drifts.
+// the real generator; that test fails if these files drift.
 export const financialAnswerFixture = financialAnswerFixtureJson as FinancialAnswerBlock
+export const financialAnswerFiscalCalendarsFixture = financialAnswerFiscalCalendarsFixtureJson as FinancialAnswerBlock
 // A stored answer certified before presentation v2; never regenerated.
 export const financialAnswerV1Fixture = financialAnswerV1FixtureJson as FinancialAnswerBlock
 

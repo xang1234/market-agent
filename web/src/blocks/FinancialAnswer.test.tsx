@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { JSDOM } from 'jsdom'
 import { renderToStaticMarkup } from 'react-dom/server'
+
+import { EvidenceInspectorContext, type EvidenceInspectorContextValue } from '../evidence/evidenceInspectorContext.ts'
 
 import { validateBlock } from './BlockValidator.ts'
 import { FinancialAnswer } from './FinancialAnswer.tsx'
 import { resultsById, seriesBarHeights, sortedRowIndexes } from './financialAnswer.ts'
-import { financialAnswerFixture } from './fixtures.ts'
+import { financialAnswerFiscalCalendarsFixture, financialAnswerFixture } from './fixtures.ts'
 import type { FinancialAnswerBlock, FinancialAnswerContent, FinancialPresentedResult, FinancialTablePresentation } from './types.ts'
 
 function clone(): FinancialAnswerBlock & { financial: FinancialAnswerContent } {
@@ -77,6 +80,62 @@ test('a supported answer prints server strings with full values, coverage, and a
   assert.match(html, /Ranked 1 of 2 companies; no overall highest can be stated for an incomplete group/)
   assert.match(html, /at or above 40\.00%: yes/)
   assert.doesNotMatch(html, /figcaption/, 'no model-supplied title')
+})
+
+test('a comparison across fiscal calendars has one column per line, each cell naming its own period', () => {
+  const inspector: EvidenceInspectorContextValue = { openInspection() {}, openBlockInspection() {}, openFinancialResult() {}, closeInspection() {} }
+  const html = renderToStaticMarkup(
+    <EvidenceInspectorContext.Provider value={inspector}>
+      <FinancialAnswer block={financialAnswerFiscalCalendarsFixture} />
+    </EvidenceInspectorContext.Provider>,
+  )
+  const table = new JSDOM(html).window.document.querySelector('table')!
+  assert.deepEqual([...table.querySelectorAll('thead th')].map((heading) => heading.textContent), [
+    'Company',
+    'Revenue',
+    'Gross profit',
+    'Operating income',
+    'Net income',
+    'Gross margin (gross profit / revenue)',
+    'Operating margin (operating income / revenue)',
+    'Net margin (net income / revenue)',
+    'Quarter-over-quarter percent change in Revenue',
+    'Year-over-year percent change in Revenue',
+  ])
+  const rows = [...table.querySelectorAll('tbody tr')].map((row) => [
+    row.querySelector('th')!.textContent,
+    ...[...row.querySelectorAll('td')].map((cell) => [...cell.children].map((part) => part.textContent)),
+  ])
+  assert.deepEqual(rows, [
+    [
+      'NVIDIA Corp',
+      ['USD 68,000,000,000.00', 'Q4 FY2026'],
+      ['USD 51,000,000,000.00', 'Q4 FY2026'],
+      ['USD 44,200,000,000.00', 'Q4 FY2026'],
+      ['USD 37,400,000,000.00', 'Q4 FY2026'],
+      ['75.00%', 'Q4 FY2026'],
+      ['65.00%', 'Q4 FY2026'],
+      ['55.00%', 'Q4 FY2026'],
+      ['19.30%', 'Q4 FY2026 vs Q3 FY2026'],
+      ['73.20%', 'Q4 FY2026 vs Q4 FY2025'],
+    ],
+    [
+      'Advanced Micro Devices, Inc.',
+      ['USD 7,700,000,000.00', 'Q2 FY2026'],
+      ['USD 3,080,000,000.00', 'Q2 FY2026'],
+      ['USD 770,000,000.00', 'Q2 FY2026'],
+      ['USD 693,000,000.00', 'Q2 FY2026'],
+      ['40.00%', 'Q2 FY2026'],
+      ['10.00%', 'Q2 FY2026'],
+      ['9.00%', 'Q2 FY2026'],
+      ['4.80%', 'Q2 FY2026 vs Q1 FY2026'],
+      ['A required input or calculation is unavailable.', 'Q2 FY2026 vs Q2 FY2025'],
+    ],
+  ])
+  assert.doesNotMatch(html, /Not requested/)
+  assert.equal(table.querySelector('tbody td button')!.getAttribute('aria-label'), 'Inspect the verified calculation for USD 68000000000, Q4 FY2026')
+  const plain = renderToStaticMarkup(<FinancialAnswer block={financialAnswerFiscalCalendarsFixture} />)
+  assert.match(plain, /title="USD 7700000000" aria-label="USD 7700000000, Q2 FY2026">USD 7,700,000,000\.00</, 'without an inspector the value names its period to assistive tech')
 })
 
 test('sorting uses the server exact order; descending keeps rows without a value last', () => {

@@ -4,6 +4,7 @@
 // is a bounded display projection that never feeds a calculation.
 
 import {
+  FINANCIAL_PRESENTATION_V1,
   SUPPORTED_FINANCIAL_PRESENTATION_VERSION,
   type FinancialAnswerBlock,
   type FinancialAnswerContent,
@@ -12,7 +13,8 @@ import {
 } from './types.ts'
 
 export function supportedFinancialContent(block: FinancialAnswerBlock): FinancialAnswerContent | null {
-  return block.financial.presentation_version === SUPPORTED_FINANCIAL_PRESENTATION_VERSION
+  const version = block.financial.presentation_version
+  return version === SUPPORTED_FINANCIAL_PRESENTATION_VERSION || version === FINANCIAL_PRESENTATION_V1
     ? (block.financial as FinancialAnswerContent)
     : null
 }
