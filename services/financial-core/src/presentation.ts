@@ -254,8 +254,9 @@ function layout(plan: FinancialPlanV1, results: ReadonlyArray<PresentedResult>, 
 type Line = Readonly<{ key: string; anchor: PeriodAnchor }>;
 
 function lineOf(plan: FinancialPlanV1, node: OperationNode, measureLabelId: string): Line {
-  const anchor = periodAnchor(datingPeriod(plan, node.node_id));
-  const shape = periodSelectors(plan, node).map((selector) => {
+  const selectors = periodSelectors(plan, node);
+  const anchor = periodAnchor(selectors[0]!);
+  const shape = selectors.map((selector) => {
     const at = periodAnchor(selector);
     return at.calendar === anchor.calendar && at.step === anchor.step ? `${anchor.recency - at.recency}` : JSON.stringify(selector);
   }).sort();
@@ -448,7 +449,7 @@ function measureKey(plan: FinancialPlanV1, node: OperationNode): string {
       return node.operation;
     case "absolute_change":
     case "percent_change_positive_base":
-      return `${node.operation}(${of(node.current)})@${JSON.stringify(changeHorizon(plan, node) ?? [datingPeriod(plan, node.current), datingPeriod(plan, node.prior)])}`;
+      return `${node.operation}(${of(node.current)})@${JSON.stringify(changeHorizon(plan, node) ?? changeEnds(plan, node))}`;
     case "trailing_sum":
       return `trailing_sum(${of(node.quarters[0]!)})`;
     case "threshold":
@@ -469,29 +470,13 @@ function changeText(plan: FinancialPlanV1, node: ChangeNode, measure: string): s
 }
 
 function changeHorizon(plan: FinancialPlanV1, node: ChangeNode): Readonly<{ step: "quarter" | "year"; n: number }> | null {
-  const current = periodAnchor(datingPeriod(plan, node.current));
-  const prior = periodAnchor(datingPeriod(plan, node.prior));
+  const [current, prior] = changeEnds(plan, node).map(periodAnchor);
   const n = current.recency - prior.recency;
   return current.step !== "cutoff" && current.step === prior.step && current.calendar === prior.calendar && n > 0 ? { step: current.step, n } : null;
 }
 
-function datingPeriod(plan: FinancialPlanV1, nodeId: LocalId): PeriodSelector {
-  const node = plan.operations.find((entry) => entry.node_id === nodeId)!;
-  const of = (id: LocalId) => datingPeriod(plan, id);
-  switch (node.operation) {
-    case "reported_metric":
-      return node.period;
-    case "trailing_sum":
-      return node.quarters.map(of).reduce((newest, quarter) => (periodAnchor(quarter).recency > periodAnchor(newest).recency ? quarter : newest));
-    case "market_cap":
-    case "pe_ratio":
-      return of(node.price);
-    case "absolute_change":
-    case "percent_change_positive_base":
-      return of(node.current);
-    default:
-      return of(operationDependencies(node)[0]!);
-  }
+function changeEnds(plan: FinancialPlanV1, node: ChangeNode): PeriodSelector[] {
+  return [node.current, node.prior].map((id) => periodSelectors(plan, plan.operations.find((entry) => entry.node_id === id)!)[0]!);
 }
 
 type PeriodAnchor = Readonly<{ step: "quarter" | "year" | "cutoff"; calendar: "fiscal" | "latest" | "cutoff"; recency: number }>;
@@ -510,13 +495,15 @@ function periodAnchor(selector: PeriodSelector): PeriodAnchor {
 }
 
 /**
- * The distinct periods a node reads, in operand order (current before prior).
+ * The distinct periods a node reads, in operand order (current before prior) with a trailing
+ * sum's quarters newest first; the first one dates the node.
  * A valuation is dated by its price: its other operand is restated to the same reference date.
  */
 function periodSelectors(plan: FinancialPlanV1, node: OperationNode): PeriodSelector[] {
   const of = (id: LocalId) => plan.operations.find((candidate) => candidate.node_id === id)!;
   const all = (entry: OperationNode): PeriodSelector[] => entry.operation === "reported_metric" ? [entry.period]
     : entry.operation === "market_cap" || entry.operation === "pe_ratio" ? all(of(entry.price))
+    : entry.operation === "trailing_sum" ? entry.quarters.flatMap((id) => all(of(id))).sort((left, right) => periodAnchor(right).recency - periodAnchor(left).recency)
     : operationDependencies(entry).flatMap((id) => all(of(id)));
   const distinct = new Map<string, PeriodSelector>();
   for (const selector of all(node)) if (!distinct.has(JSON.stringify(selector))) distinct.set(JSON.stringify(selector), selector);

@@ -424,15 +424,47 @@ test("a change names its horizon from its periods' structure, and two unknown ho
   assert.equal(new Set(unknown).size, 4, "same text, four measures");
 });
 
-test("a change is dated by its current period, whatever order the planner listed a trailing sum's quarters in", () => {
+const ttm = (node_id: string, quarters: string[]) => ({ node_id, operation: "trailing_sum" as const, operation_version: "trailing_sum.v1", quarters });
+/** A company's trailing-four-quarter revenue, its quarters listed in `back` order (quarters before `newest`). */
+const trailingRevenue = (slot: string, [year, quarter]: [number, Parameters<typeof quarterBack>[1]], back: number[]) => [
+  ...back.map((n) => reportedAt(`${slot}_rev${n}`, slot, "revenue", quarterBack(year, quarter, n))),
+  ttm(`${slot}_ttm`, back.map((n) => `${slot}_rev${n}`)),
+];
+const TTM_Q4_FY2026 = "Q4 FY2026 vs Q3 FY2026 vs Q2 FY2026 vs Q1 FY2026";
+
+test("a change is dated by its current period and reads each side's quarters newest first, whatever order the planner listed them in", () => {
   const quarters = [0, 1, 2, 3, 4, 5, 6, 7].map((back) => reportedAt(`rev${back}`, "a", "revenue", quarterBack(2026, "Q4", back)));
-  const ttm = (node_id: string, quarterIds: string[]) => ({ node_id, operation: "trailing_sum" as const, operation_version: "trailing_sum.v1", quarters: quarterIds });
   const plan = singleSubjectPlan(
-    [...quarters, ttm("ttm", ["rev0", "rev1", "rev2", "rev3"]), ttm("ttm_prior", ["rev7", "rev6", "rev5", "rev4"]), change("yoy", "percent_change_positive_base", "ttm", "ttm_prior")],
+    [...quarters, ttm("ttm", ["rev2", "rev0", "rev3", "rev1"]), ttm("ttm_prior", ["rev7", "rev6", "rev5", "rev4"]), change("yoy", "percent_change_positive_base", "ttm", "ttm_prior")],
     ["yoy"],
   );
   const content = present(plan, [committed("o_yoy", "yoy", percentValue("12"))], { a: "Alpha Corp" });
-  assert.equal(labelTexts(content, "o_yoy")[1], "Year-over-year percent change in Revenue, trailing four quarters");
+  assert.deepEqual(labelTexts(content, "o_yoy"), [
+    "Alpha Corp",
+    "Year-over-year percent change in Revenue, trailing four quarters",
+    `${TTM_Q4_FY2026} vs Q4 FY2025 vs Q3 FY2025 vs Q2 FY2025 vs Q1 FY2025`,
+  ]);
+});
+
+test("two companies on one calendar share a trailing-sum column that names its period, whatever order each lists its quarters in", () => {
+  const plan = comparisonPlan([...trailingRevenue("a", [2026, "Q4"], [0, 1, 2, 3]), ...trailingRevenue("b", [2026, "Q4"], [3, 2, 1, 0])], ["a_ttm", "b_ttm"]);
+  const content = present(plan, [committed("o_a_ttm", "a_ttm", usdValue("400")), committed("o_b_ttm", "b_ttm", usdValue("160"))]);
+  assert.deepEqual(readTable(content), {
+    columns: [["Revenue, trailing four quarters", TTM_Q4_FY2026]],
+    rows: [["Alpha Corp", ["o_a_ttm", "USD 400.00", TTM_Q4_FY2026]], ["Beta Inc", ["o_b_ttm", "USD 160.00", TTM_Q4_FY2026]]],
+  });
+});
+
+test("two companies on different calendars share a trailing-sum column, whatever order each lists its quarters in", () => {
+  const plan = comparisonPlan([...trailingRevenue("a", [2026, "Q4"], [3, 2, 1, 0]), ...trailingRevenue("b", [2026, "Q2"], [0, 1, 2, 3])], ["a_ttm", "b_ttm"]);
+  const content = present(plan, [committed("o_a_ttm", "a_ttm", usdValue("400")), committed("o_b_ttm", "b_ttm", usdValue("160"))], NVDA_AMD);
+  assert.deepEqual(readTable(content), {
+    columns: [["Revenue, trailing four quarters", null]],
+    rows: [
+      ["NVIDIA Corp", ["o_a_ttm", "USD 400.00", TTM_Q4_FY2026]],
+      ["Advanced Micro Devices", ["o_b_ttm", "USD 160.00", "Q2 FY2026 vs Q1 FY2026 vs Q4 FY2025 vs Q3 FY2025"]],
+    ],
+  });
 });
 
 test("a company read at a fiscal quarter and one read at its latest quarter share one column", () => {
