@@ -15,6 +15,7 @@ import type {
   StatementLine,
 } from "./statement.ts";
 import type { IssuerSubjectRef, UUID } from "./subject-ref.ts";
+import type { DerivationProofV1 } from "../../financial-core/src/contracts.ts";
 import {
   assertIso8601Utc,
   assertPositiveInteger,
@@ -38,7 +39,7 @@ export type SecConceptValue = {
   filed: string;
   frame?: string;
   /** A value computed from others (a discrete quarter): the filed values it came from. */
-  derived_from?: ReadonlyArray<SecConceptValue>;
+  derived_from?: Readonly<{ minuend: SecConceptValue; subtrahends: ReadonlyArray<SecConceptValue> }>;
 };
 
 export type SecConcept = {
@@ -323,8 +324,6 @@ export function extractStatement(input: ExtractStatementInput): NormalizedStatem
 /**
  * One selection pass that yields the legacy statement plus, for each line
  * taken verbatim from a losslessly parsed value, its exact source token.
- * Derived values (e.g. a fourth quarter computed from annual minus three
- * quarters) have no token and are never presented as source-exact.
  */
 export function extractStatementWithTokens(input: ExtractStatementInput): {
   statement: NormalizedStatementInput;
@@ -416,11 +415,21 @@ export function extractStatementWithTokens(input: ExtractStatementInput): {
         derivations.set(metricKey, {
           concept: conceptName,
           unit: unitCode,
-          inputs: match.derived_from.map((value) => ({
+          inputs: [
+            { value: match.derived_from.minuend, sign: "+" as const },
+            ...match.derived_from.subtrahends.map((value) => ({ value, sign: "-" as const })),
+          ].map(({ value, sign }) => ({
+            sign,
             accn: value.accn,
             start: value.start ?? null,
             end: value.end,
             value: value.val_token ?? String(value.val),
+            token: value.val_token ?? null,
+            form: value.form,
+            filed: value.filed,
+            fiscal_year: value.fy,
+            fiscal_period: value.fp,
+            span: value.fp === "FY" ? "fiscal_year" : isDiscreteQuarterDuration(value) ? "quarter" : "year_to_date",
           })),
         });
       }
@@ -471,7 +480,19 @@ export function extractStatementWithTokens(input: ExtractStatementInput): {
 export type SecDerivation = Readonly<{
   concept: string;
   unit: string;
-  inputs: ReadonlyArray<Readonly<{ accn: string; start: string | null; end: string; value: string }>>;
+  inputs: ReadonlyArray<Readonly<{
+    sign: "+" | "-";
+    accn: string;
+    start: string | null;
+    end: string;
+    value: string;
+    token: string | null;
+    form: string;
+    filed: string;
+    fiscal_year: number;
+    fiscal_period: string;
+    span: DerivationProofV1["terms"][number]["span"];
+  }>>;
 }>;
 
 export type SecStatementValueSelection = Pick<
@@ -597,7 +618,7 @@ function deriveFourthQuarterConceptValue(
     form: annual.form,
     start: q4Start,
     end: annual.end,
-    derived_from: [annual, q1, q2, q3],
+    derived_from: { minuend: annual, subtrahends: [q1, q2, q3] },
   };
 }
 
@@ -761,8 +782,7 @@ const FAMILY_SELECTORS: Readonly<Record<StatementFamily, ConceptValueSelector>> 
 
 // A 10-Q states cash flows year to date (Q2 covers six months, Q3 nine), so a
 // quarter is its year-to-date value less the previous one, and Q4 is the year
-// less nine months. Q1's year to date is the quarter itself. A derived quarter
-// has no source token, like a derived income Q4, so it is never source-exact.
+// less nine months. Q1's year to date is the quarter itself.
 function selectCashFlowConceptValue(
   values: ReadonlyArray<SecConceptValue>,
   input: SecStatementValueSelection,
@@ -783,7 +803,7 @@ function selectCashFlowConceptValue(
   const days = inclusiveDurationDays(start, ytd.end);
   if (days < 60 || days > 125) return undefined;
   const { val_token: _token, ...rest } = ytd;
-  return { ...rest, val: ytd.val - prior.val, fp: input.fiscal_period, start, end: ytd.end, derived_from: [ytd, prior] };
+  return { ...rest, val: ytd.val - prior.val, fp: input.fiscal_period, start, end: ytd.end, derived_from: { minuend: ytd, subtrahends: [prior] } };
 }
 
 const PREVIOUS_QUARTER = { Q2: "Q1", Q3: "Q2", Q4: "Q3" } as const;
