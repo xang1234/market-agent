@@ -8,6 +8,7 @@ import {
   type ChatTurnRunContext,
 } from "../src/coordinator.ts";
 import type { CompanyChange } from "../src/research-scope.ts";
+import { proposeScope } from "../src/scope-proposal.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "../src/subjects.ts";
 import { readMessage } from "./read-message-fixture.ts";
 import { proposal } from "./scope-fixtures.ts";
@@ -477,4 +478,30 @@ test("a turn reads its question once, and a fresh question whose names all resol
   questions.length = 0;
   const fresh = await subjectsForTurn("Compare NVDA and AMD", { loadPriorSubjects: priorOf(), ...counted({ kind: "only", names: ["AMD"] }) });
   assert.deepEqual([fresh.tickers, questions], [["NVDA", "AMD"], []]);
+});
+
+test("a reading slower than its deadline is no reading: one model call, and the follow-up keeps its companies", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  let calls = 0;
+  const slow = () => async () => {
+    calls += 1;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    return { text: "{}" };
+  };
+  const env = { LLM_CHANNELS: "openai", LLM_OPENAI_PROTOCOL: "openai", LLM_OPENAI_MODELS: "gpt-4.1", LITELLM_MODEL: "openai/gpt-4.1" };
+  const readQuestion = (question: string) => proposeScope({ question, env, createClient: slow, deadlines: { attemptMs: 40, totalMs: 50 } });
+  let seen: { tickers: string[]; reading: unknown; at: number } | undefined;
+  const started = performance.now();
+  const turn = createChatCoordinator({
+    preResolveSubject,
+    loadPriorSubjects: priorOf("NVDA", "AMD"),
+    readQuestion,
+    runner: async (context) => {
+      seen = { tickers: (context.subjectPreResolutions ?? []).map((subject) => subject.input_text), reading: await context.reading?.(), at: performance.now() - started };
+      context.emit("turn.completed", { message_id: "message-1" });
+    },
+  }).getOrCreateTurn({ threadId: "thread-1", runId: "run-1", userIntent: "Drop AMD" });
+  await turn.completed;
+  assert.deepEqual([seen?.tickers, seen?.reading, calls], [["NVDA", "AMD"], null, 1]);
+  assert.ok(seen!.at < 300, `the turn went on at the deadline, not the reply: ${seen!.at} ms`);
 });
