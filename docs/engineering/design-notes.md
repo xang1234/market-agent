@@ -630,13 +630,20 @@ numbers never wait on a model.
   value result of this answer, showing that result's text and its period's label. Any failure saves the note in
   place of the commentary.
 - **The judge** reads each analyst inference beside the assertions it rests on, rendered from the engine packet,
-  as on the analyst path. An inference the judge does not accept never shows. With no `JUDGE_LITELLM_MODEL`, none
-  shows.
+  as on the analyst path, with the judge's tiers (#477). An entailed inference shows. An unsupported one shows,
+  labelled "Unverified analyst view". A contradicted one, one that states an amount in words, or one with no verdict
+  (a failed or late call, or a reply that does not end on its verdict list) does not show. With no
+  `JUDGE_LITELLM_MODEL`, none shows.
+- **One repair round** (#488), with a judge configured, goes to each inference the checks rejected and each one the
+  judge found contradicted or worded as an amount. The model rewrites it once, the checks run on the engine packet, and the judge reads it
+  again. A repaired commentary is rendered from the engine packet too, and its refs are checked like any other.
 - **Failure modes.**
   - A model error (`LlmRouterError` or `LlmProviderError`, a timeout and a replay miss included) saves the note
     "Commentary is unavailable for this answer."
   - Any other error after the commit, a defect or a database error, is logged at error level with its cause. The
-    turn completes with the answer as saved, never with `turn.error`.
+    turn reads the message back and completes with it as read, never with `turn.error`, so an append that
+    committed before its connection dropped reaches the client when the read sees it. If the read fails too, the
+    turn completes with the answer as shown.
   - The append is a compare-and-set on the row's `content_hash`. A message changed since it was read is left as it
     is, and the loss is logged. A message that already holds commentary is skipped before any model call.
   - Only the attempt that planned the overview writes commentary. A retry that resumes a reserved run after a failed

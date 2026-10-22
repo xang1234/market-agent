@@ -37,7 +37,7 @@ export const COMMENTARY_UNAVAILABLE = "Commentary is unavailable for this answer
 /**
  * Writes the commentary on a saved engine answer and appends it to the
  * message, or the note that it is unavailable when the model fails. Anything
- * else throws, and the caller keeps the answer as saved.
+ * else throws, and the caller completes the turn on the message as read back.
  */
 export async function saveCommentary(
   db: SqlExecutor,
