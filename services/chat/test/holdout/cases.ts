@@ -25,7 +25,7 @@
 
 import type { RejectionCheck } from "../../src/assertions.ts";
 
-export const HOLDOUT_VERSION = 11;
+export const HOLDOUT_VERSION = 12;
 
 type Assertion = Record<string, unknown>;
 
@@ -193,7 +193,7 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
       financial: [
         [NVIDIA, GROSS_MARGIN, "Q4 FY2025", "verified", "73.03%"],
         [NVIDIA, GROSS_MARGIN, "Q1 FY2026", "verified", "60.52%"],
-        [NVIDIA, `Change in ${GROSS_MARGIN}`, "Q1 FY2026 vs Q4 FY2025", "verified", "-12.51%"],
+        [NVIDIA, `Quarter-over-quarter change in ${GROSS_MARGIN}`, "Q1 FY2026 vs Q4 FY2025", "verified", "-12.51%"],
       ],
     },
     prose: "",
