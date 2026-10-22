@@ -87,7 +87,7 @@ export async function composeTraced(
 // as the judge reads them; the fallback sentence shows none.
 export function inferenceCases(input: AnswerTraceInput, report: AssertionReport | null): { cases: JudgeCase[]; companies: ReadonlyArray<string> } {
   if (report?.rendered !== true) return { cases: [], companies: [] };
-  const packet = turnPacket(input);
+  const packet = input.packet ?? turnPacket(input);
   return { cases: judgeCases(report.accepted, packet, input.factBlocks ?? []), companies: packet.companies };
 }
 
@@ -157,7 +157,7 @@ async function repairedAnswer(
   const verdicts = first.assertions?.judged ?? [];
   const requests = calls ? repairsFor(answer, verdicts) : [];
   if (!calls || requests.length === 0) return first;
-  const packet = turnPacket(input);
+  const packet = input.packet ?? turnPacket(input);
   const round = await repairRound({
     messages: answer.exchange!.messages,
     list: assertionList(answer.exchange!.text) ?? [],

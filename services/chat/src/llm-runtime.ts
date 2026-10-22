@@ -145,6 +145,9 @@ export async function composeAnalystBlocksWithLlm(input: {
   // The turn's research scope and cutoff, for the evidence packet (#207).
   scope?: ResearchScope;
   cutoff?: string;
+  // The evidence the answer is written from, when the caller built it (an
+  // engine answer's, enginePacket); otherwise the turn's (turnPacket).
+  packet?: EvidencePacket;
   createClient?: () => Promise<LlmChatClient> | LlmChatClient;
   // Receives the deployment (channel/model) that wrote the answer (#183).
   onAnswered?: (deployment: string) => void;
@@ -160,7 +163,7 @@ export async function composeAnalystBlocksWithLlm(input: {
     createClient: input.createClient,
   });
   if (!router) return () => input.blocks;
-  const packet = turnPacket(input);
+  const packet = input.packet ?? turnPacket(input);
 
   const request: LlmChatRequest = {
     messages: [
@@ -194,6 +197,10 @@ export async function composeAnalystBlocksWithLlm(input: {
           "a list of candidate causes inside a sentence about what the data cannot tell):",
           "> **Unverified hypothesis (low|medium|high confidence):** <one explanation>, given <a figure or metric shown in this answer>.",
           "Use only the context provided; do not invent citations or data.",
+          ...(packet.route === "financial_engine"
+            ? ["The figures are the financial engine's verified results for this question; one with a gap is not available,",
+              "its gap says why: say so, and never compare it."]
+            : []),
           "The figures you may use are listed in evidence_packet.figures, each with the metric",
           "and, in a comparison, the company it belongs to; one marked displayed false is in no chart or table",
           "the user sees, and one with a period_coverage covers only part of its period, so say so.",

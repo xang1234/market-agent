@@ -6,6 +6,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { FinancialAnswerContent, PresentedResult } from "../../financial-core/src/index.ts";
+import type { LlmChatRequest } from "../../llm/src/index.ts";
+import { answerTurn } from "../src/answer-trace.ts";
 import { checkAssertions } from "../src/assertions.ts";
 import { enginePacket, packetForModel } from "../src/evidence-packet.ts";
 import { resultRefProblem } from "../src/prose-refs.ts";
@@ -201,4 +203,42 @@ test("commentary passes the ref check only when each ref is a verified result of
   assert.equal(resultRefProblem(prose(ref({ ref_id: RESULT(4), format: NOT_REPORTED, period: "Q2 FY2026" })), answer), "ref 5e000000-0000-4000-8000-000000000004 names no verified result of this answer");
   assert.equal(resultRefProblem(prose(ref({ ref_id: RESULT(10), format: "USD 26,044,000,000.00", period: "Q1 FY2025" })), answer), "ref 5e000000-0000-4000-8000-000000000010 names no verified result of this answer");
   assert.equal(resultRefProblem(prose({ type: "ref", ref_kind: "fact", ref_id: RESULT(1), format: "74.40%" }), answer), "a fact ref is not a result ref");
+});
+
+test("an answer written on an engine packet is sent only that packet, and its inference is judged beside the engine's figures", async () => {
+  const packet = enginePacket(COMPARISON, TICKERS);
+  const reply = [
+    "NVDA's margin leads.",
+    "```assertions",
+    JSON.stringify([
+      { kind: "observation", text: "NVDA's gross margin was [[F1]]; AMD's revenue grew [[F6]].", evidence: ["F1", "F6"] },
+      { kind: "analyst_inference", subject: "NVDA", text: "Its pricing holds.", supports: [0] },
+    ]),
+    "```",
+  ].join("\n");
+  const requests: LlmChatRequest[] = [];
+  const createClient = () => async (_deployment: unknown, request: LlmChatRequest) => {
+    requests.push(request);
+    return { text: request.messages[0]!.content.startsWith("You check the analyst inferences") ? '{"verdicts":[{"id":1,"verdict":"entailed"}]}' : reply };
+  };
+  const skeleton = { id: "commentary-x", kind: "rich_text", snapshot_id: "s", data_ref: { kind: "rich_text", id: "commentary-x" }, source_refs: [], as_of: "2026-09-01T00:00:00.000Z", segments: [] };
+  const answer = await answerTurn(
+    { context: { userIntent: "Compare NVDA and AMD profit", bundleId: "financial_answer" }, blocks: [skeleton], toolCalls: [], packet },
+    { thread_id: "t", run_id: "r", question: "Compare NVDA and AMD profit" },
+    { env: { LLM_CHANNELS: "anthropic", LLM_ANTHROPIC_PROTOCOL: "anthropic", LLM_ANTHROPIC_API_KEY: "sk-test", LLM_ANTHROPIC_MODELS: "claude-sonnet-5-5,claude-haiku-5-5", LITELLM_MODEL: "anthropic/claude-sonnet-5-5", JUDGE_LITELLM_MODEL: "anthropic/claude-haiku-5-5" }, createClient },
+  );
+  const judged = await answer.judging!.done;
+
+  const sent = JSON.parse(requests[0]!.messages[1]!.content) as { evidence_packet: Record<string, unknown> };
+  assert.deepEqual(sent.evidence_packet, packetForModel(packet));
+  assert.equal(sent.evidence_packet.route, "financial_engine");
+  const asked = JSON.parse(requests[1]!.messages[1]!.content) as { inferences: Array<{ supports: string[] }> };
+  const observed = "NVDA's gross margin (gross profit / revenue) was 74.40% in Q4 FY2026; AMD's percent change in revenue was 45.74% in Q2 FY2026 vs Q2 FY2025.";
+  assert.deepEqual(asked.inferences[0]!.supports, [observed]);
+  const segments = judged.blocks[0]!.segments as Parameters<typeof plainText>[0];
+  assert.equal(plainText(segments), `${observed}\n\n> **Analyst inference on NVDA:** Its pricing holds.`);
+  assert.deepEqual(segments.filter((segment) => segment.type === "ref"), [
+    { type: "ref", ref_kind: "result", ref_id: RESULT(1), format: "74.40%", period: "Q4 FY2026" },
+    { type: "ref", ref_kind: "result", ref_id: RESULT(6), format: "45.74%", period: "Q2 FY2026 vs Q2 FY2025" },
+  ]);
 });
