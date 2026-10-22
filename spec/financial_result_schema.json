@@ -419,7 +419,8 @@
           }
         },
         "observed_at": { "$ref": "financial_plan_schema.json#/$defs/IsoDateTime" },
-        "precision_status": { "enum": ["source_token_preserved", "revalidated_against_source"] },
+        "precision_status": { "enum": ["source_token_preserved", "revalidated_against_source", "derived_from_source_tokens"] },
+        "derivation": { "$ref": "#/$defs/DerivationProofV1" },
         "eligibility": {
           "type": "object",
           "additionalProperties": false,
@@ -428,6 +429,52 @@
             "selection_policy_version": { "$ref": "financial_plan_schema.json#/$defs/VersionTag" },
             "promotion_status": { "enum": ["authoritative", "corroborated", "reviewed_extraction"] },
             "candidate_set_digest": { "$ref": "financial_plan_schema.json#/$defs/Sha256Hex" }
+          }
+        }
+      },
+      "if": { "properties": { "precision_status": { "const": "derived_from_source_tokens" } } },
+      "then": { "properties": { "derivation": true }, "required": ["derivation"] },
+      "else": { "properties": { "derivation": false } }
+    },
+    "DerivationProofV1": {
+      "description": "A value no filing states, derived from values filings do state: present exactly when precision_status is derived_from_source_tokens. The value is the exact sum of sign x raw_token over the terms, and numeric.raw_token is that sum.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "concept", "unit", "terms"],
+      "properties": {
+        "version": { "const": "period_difference.v1" },
+        "concept": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "unit": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "terms": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["sign", "span", "fiscal_year", "fiscal_period", "start", "end", "raw_token", "token_proof_hash", "source"],
+            "properties": {
+              "sign": { "enum": ["+", "-"] },
+              "span": { "enum": ["fiscal_year", "quarter", "year_to_date"] },
+              "fiscal_year": { "type": "integer", "minimum": 1900, "maximum": 2200 },
+              "fiscal_period": { "enum": ["FY", "Q1", "Q2", "Q3"] },
+              "start": { "$ref": "financial_plan_schema.json#/$defs/IsoDate" },
+              "end": { "$ref": "financial_plan_schema.json#/$defs/IsoDate" },
+              "raw_token": { "type": "string", "minLength": 1, "maxLength": 256 },
+              "token_proof_hash": { "$ref": "financial_plan_schema.json#/$defs/Sha256Hex" },
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["source_id", "accession", "form", "filed", "locator"],
+                "properties": {
+                  "source_id": { "$ref": "financial_plan_schema.json#/$defs/UUID" },
+                  "accession": { "type": "string", "minLength": 1, "maxLength": 64 },
+                  "form": { "type": "string", "minLength": 1, "maxLength": 32 },
+                  "filed": { "$ref": "financial_plan_schema.json#/$defs/IsoDate" },
+                  "locator": { "type": "string", "minLength": 1, "maxLength": 1000 }
+                }
+              }
+            }
           }
         }
       }

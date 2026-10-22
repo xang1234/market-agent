@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ChangeNode, FreeCashFlowNode, MarginNode, RatioNode, TrailingSumNode } from "../src/contracts.ts";
+import type { ChangeNode, DerivationProofV1, FreeCashFlowNode, MarginNode, RatioNode, TrailingSumNode } from "../src/contracts.ts";
 import { RATIO_CATALOG_V1 } from "../src/definitions.ts";
 import { OPERATION_REGISTRY } from "../src/operation-registry.ts";
 import { convertDimensionless, type DimensionlessUnit } from "../src/dimensions.ts";
@@ -76,6 +76,53 @@ test("reported_metric rejects a native value that disagrees with value x scale",
     FinancialIntegrityError,
   );
 });
+
+test("a derived quarter binds when its derivation sums to its value; a tampered derivation, or a derived status without one, fails integrity (#481)", () => {
+  const node = { node_id: "q4", operation: "reported_metric" as const, operation_version: "reported_metric.v1", subject_slot: "a", metric_key: "revenue", period: { kind: "fiscal_period" as const, fiscal_year: 2024, fiscal_period: "Q4" as const } };
+  const expected = { slot: SLOTS.a, definition_version: "revenue.v1", knowledge_cutoff: KNOWLEDGE_CUTOFF, reporting_basis: "as_reported" as const };
+  const reported = boundInput({ metric: "revenue", value: "170", start: "2024-10-01", end: "2024-12-31", fiscal_year: 2024, fiscal_period: "Q4" });
+  const derived = { ...reported, precision_status: "derived_from_source_tokens" as const, derivation: fourthQuarter(["6.2E2", "140", "150", "160"]) };
+  assert.equal(value(operandFromBoundInput(derived, node, expected)), "170");
+  assert.equal(integrityCode(() => operandFromBoundInput({ ...derived, derivation: fourthQuarter(["620", "140", "150", "150"]) }, node, expected)), "derivation_value_mismatch");
+  const { derivation: _derivation, ...unproven } = derived;
+  assert.equal(integrityCode(() => operandFromBoundInput(unproven, node, expected)), "derivation_value_mismatch");
+  assert.equal(integrityCode(() => operandFromBoundInput({ ...reported, derivation: derived.derivation }, node, expected)), "derivation_value_mismatch");
+});
+
+function integrityCode(action: () => unknown): string {
+  try {
+    action();
+  } catch (error) {
+    if (error instanceof FinancialIntegrityError) return error.code;
+    throw error;
+  }
+  return assert.fail("the input bound");
+}
+
+function fourthQuarter([year, q1, q2, q3]: string[]): DerivationProofV1 {
+  const term = (sign: "+" | "-", fiscal_period: "FY" | "Q1" | "Q2" | "Q3", start: string, end: string, raw_token: string, filed: string) => ({
+    sign,
+    span: fiscal_period === "FY" ? ("fiscal_year" as const) : ("quarter" as const),
+    fiscal_year: 2024,
+    fiscal_period,
+    start,
+    end,
+    raw_token,
+    token_proof_hash: "c".repeat(64),
+    source: { source_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", accession: `0001234567-24-${fiscal_period}`, form: fiscal_period === "FY" ? "10-K" : "10-Q", filed, locator: `loc:${fiscal_period}` },
+  });
+  return {
+    version: "period_difference.v1",
+    concept: "Revenues",
+    unit: "USD",
+    terms: [
+      term("+", "FY", "2024-01-01", "2024-12-31", year!, "2025-02-15"),
+      term("-", "Q1", "2024-01-01", "2024-03-31", q1!, "2024-05-01"),
+      term("-", "Q2", "2024-04-01", "2024-06-30", q2!, "2024-08-01"),
+      term("-", "Q3", "2024-07-01", "2024-09-30", q3!, "2024-11-01"),
+    ],
+  };
+}
 
 test("reported_metric rejects bindings for another subject or metric as integrity failures", () => {
   const input = boundInput({ slot: "b", metric: "revenue", value: "1", ...FY2023 });
