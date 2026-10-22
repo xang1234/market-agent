@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
+import { FINANCIAL_PUBLICATION_SCHEMA_VERSION, FINANCIAL_VERIFIER_VERSION } from "../../snapshot/src/financial-verifier.ts";
 import { checkFinancialReadiness, removedModeFlagWarnings, requireFinancialReadiness } from "../src/readiness.ts";
-import { FINANCIAL_VERSION_REGISTRY } from "../src/version-registry.ts";
+import { FINANCIAL_VERSION_REGISTRY, supportedPublication } from "../src/version-registry.ts";
 import { engineDatabase } from "./db-fixtures.ts";
 
 test("a removed mode flag that is still set gets one warning naming it", () => {
@@ -12,6 +13,13 @@ test("a removed mode flag that is still set gets one warning naming it", () => {
     "GRID_FINANCIAL_MODE is set but no longer read: the financial engine is always on",
   ]);
   assert.deepEqual(removedModeFlagWarnings({}, ["CHAT_FINANCIAL_MODE", "ANALYZE_FINANCIAL_MODE", "GRID_FINANCIAL_MODE", "THESIS_FINANCIAL_MODE"]), []);
+});
+
+test("a publication presented as v1 or v2 is supported, and a presentation version never shipped is not", () => {
+  const supported = (presentation_version: string) => supportedPublication({
+    certificate_version: FINANCIAL_PUBLICATION_SCHEMA_VERSION, verifier_version: FINANCIAL_VERIFIER_VERSION, presentation_version, operation_version: null, numeric_policy_version: null,
+  });
+  assert.deepEqual(["financial-presentation.v1", "financial-presentation.v2", "financial-presentation.v3"].map(supported), [true, true, false]);
 });
 
 test("financial readiness", { skip: !dockerAvailable(), timeout: 300_000 }, async (t) => {

@@ -8,6 +8,7 @@
 
 import {
   FINANCIAL_CATALOG_VERSION,
+  FINANCIAL_PRESENTATION_V1,
   FINANCIAL_PRESENTATION_VERSION,
   METRIC_CATALOG_V1,
   NUMERIC_POLICY,
@@ -33,7 +34,7 @@ export const FINANCIAL_VERSION_REGISTRY: FinancialVersionRegistry = Object.freez
   numeric_policy_versions: new Set([NUMERIC_POLICY.version]),
   certificate_versions: new Set([FINANCIAL_PUBLICATION_SCHEMA_VERSION]),
   verifier_versions: new Set([FINANCIAL_VERIFIER_VERSION]),
-  presentation_versions: new Set([FINANCIAL_PRESENTATION_VERSION]),
+  presentation_versions: new Set([FINANCIAL_PRESENTATION_V1, FINANCIAL_PRESENTATION_VERSION]),
 });
 
 /** The first version a plan needs that this build does not ship, or null. */
