@@ -53,9 +53,10 @@ export type StreamState = {
   // Captured from turn.error.
   error: string | null
   unverified?: UnverifiedTurn | null
-  // The sealed answer shown while the judge reads its inferences
-  // (answer.shown); the saved message replaces it on turn.completed. A failed
-  // turn saved nothing, so it drops it.
+  // The sealed answer shown before the turn completes (answer.shown): while
+  // the judge reads its inferences, or, on the engine lane, while commentary is
+  // written on the saved answer. The saved message replaces it on
+  // turn.completed. A failed turn saved nothing, so it drops it.
   shown?: ShownAnswer | null
 } & (
   | { turn_status: 'idle' | 'started' | 'error' | 'unverified' }

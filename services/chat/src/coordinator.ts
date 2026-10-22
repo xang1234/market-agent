@@ -631,8 +631,8 @@ function threadTitleGenerationRunner(
         completed = true;
         // Unverified answers (display_unverified mode) are not saved, so they don't title the thread.
         clarification = payload.clarification === true || payload.unverified !== undefined;
-        // An answer shown before it was saved (answer.shown) streams no
-        // deltas; its saved message holds its text.
+        // An answer shown before its turn completed (answer.shown) streams
+        // no deltas; its saved message holds its text.
         if (assistantTextParts.length === 0) assistantTextParts.push(...messageTexts(payload.message));
       }
       return context.emit(type, payload);

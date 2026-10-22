@@ -42,9 +42,11 @@ export function parseSealedMessage(value: unknown, expected: { threadId: string;
   return parseShownAnswer(value) === null ? null : value as SealedChatMessage
 }
 
-// A sealed answer shown before it is saved (answer.shown): its analyst
-// inferences are with the judge, a line in each one's place. The saved
-// message it becomes arrives with turn.completed.
+// A sealed answer shown before its turn completes (answer.shown). On the
+// analyst path it is not saved yet: its analyst inferences are with the judge,
+// a line in each one's place. On the engine lane it is saved first, and its
+// analyst commentary is appended after. Either way the saved message arrives
+// with turn.completed.
 export type ShownAnswer = Pick<SealedChatMessage, 'message_id' | 'snapshot_id' | 'blocks' | 'block_proofs'>
 
 export function parseShownAnswer(value: Record<string, unknown>): ShownAnswer | null {
