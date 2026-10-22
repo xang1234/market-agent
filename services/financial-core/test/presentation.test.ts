@@ -229,7 +229,6 @@ function linesOf(slot: string, payloads: Record<string, unknown>, dispositions: 
   return Object.entries(payloads).map(([line, payload]) => committed(`out_${slot}_${line}`, `${slot}_${line}`, payload, dispositions[line]));
 }
 
-/** The one table as a reader sees it: each heading's measure and period, and each row's company with every cell's output, text, and own period. */
 function readTable(content: FinancialAnswerContent) {
   const tables = content.presentations.filter((presentation) => presentation.kind === "table");
   assert.equal(tables.length, 1);

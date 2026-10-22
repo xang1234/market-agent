@@ -1678,7 +1678,7 @@
                 "pattern": "^measure:m[0-9]+$"
               },
               "period_label_id": {
-                "description": "Null when the column's companies read its line at different periods (different fiscal calendars); each cell's result then names its own period.",
+                "description": "Null unless every row has a cell in the column and all read one period, as when companies on different fiscal calendars share a line; each cell's result then names its own period.",
                 "oneOf": [
                   {
                     "type": "string",

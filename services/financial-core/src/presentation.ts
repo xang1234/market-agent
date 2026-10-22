@@ -66,7 +66,7 @@ export type Presentation = Readonly<
   | {
       kind: "table";
       caption: string;
-      /** A column's period is null when its companies read it at different periods; each cell's result then names its own. */
+      /** A column's period is null unless every row has a cell there and all read one period; each cell's result then names its own. */
       columns: ReadonlyArray<Readonly<{ column_id: string; measure_label_id: string; period_label_id: string | null }>>;
       rows: ReadonlyArray<Readonly<{ subject_label_id: string; cells: ReadonlyArray<string | null> }>>;
       /** Per column: row indexes in ascending exact-value order, rows without a value last. */

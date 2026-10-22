@@ -344,7 +344,6 @@ export type TrustProvenanceBlock = SourcesBlock | DisclosureBlock
 // `FinancialAnswerContent` in services/financial-core, whose contract test
 // checks the generator's output against the block schema.
 export const SUPPORTED_FINANCIAL_PRESENTATION_VERSION = 'financial-presentation.v2'
-// Answers certified before v2 keep this version and render as they always did.
 export const FINANCIAL_PRESENTATION_V1 = 'financial-presentation.v1'
 
 export type FinancialUnit =
@@ -381,7 +380,6 @@ export type FinancialPresentedResult = {
 export type FinancialTablePresentation = {
   kind: 'table'
   caption: string
-  // A column without a period holds companies read at different periods; each cell names its own.
   columns: ReadonlyArray<{ column_id: string; measure_label_id: string; period_label_id: string | null }>
   rows: ReadonlyArray<{ subject_label_id: string; cells: ReadonlyArray<string | null> }>
   ascending: Readonly<Record<string, ReadonlyArray<number>>>

@@ -91,7 +91,6 @@ function reported(nodeId: string, slot: string, metricKey: string) {
 export type Quarter = "Q1" | "Q2" | "Q3" | "Q4";
 const QUARTERS: ReadonlyArray<Quarter> = ["Q1", "Q2", "Q3", "Q4"];
 
-/** The fiscal quarter `back` quarters before the given one. */
 export function quarterBack(fiscal_year: number, fiscal_period: Quarter, back: number): PeriodSelector {
   const total = fiscal_year * 4 + QUARTERS.indexOf(fiscal_period) - back;
   return { kind: "fiscal_period", fiscal_year: Math.floor(total / 4), fiscal_period: QUARTERS[total % 4]! };
@@ -105,11 +104,6 @@ export const change = (node_id: string, operation: "absolute_change" | "percent_
 
 export const OVERVIEW_LINES = ["rev", "gp", "oi", "ni", "gm", "om", "nm", "qoq", "yoy"] as const;
 
-/**
- * planFixture's two companies, each with its newest quarter's lines, margins,
- * and QoQ and YoY revenue growth read at its own newest quarter, as the chat
- * comparison plans them. Output `out_<slot>_<line>` reads node `<slot>_<line>`.
- */
 export function overviewComparisonPlan(companies: ReadonlyArray<{ slot: "a" | "b"; newest: [number, Quarter]; reversed?: boolean }>): FinancialPlanV1 {
   const plan = mutable(planFixture()) as FinancialPlanV1;
   plan.operations = [];

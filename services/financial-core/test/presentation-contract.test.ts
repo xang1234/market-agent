@@ -1,9 +1,8 @@
 // The presentation contract: everything presentFinancialUnit can produce must
 // satisfy the canonical block schema, and the web's financial_answer fixture is
-// this generator's output, not a hand-maintained copy. Regenerate the fixtures
+// this generator's output, not a hand-maintained copy. Regenerate the fixture
 // with `UPDATE_FIXTURES=1 node --experimental-strip-types --test
-// test/presentation-contract.test.ts` after an intentional change. The v1
-// fixture is a stored answer from before v2 and is never regenerated.
+// test/presentation-contract.test.ts` after an intentional change.
 
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -78,8 +77,7 @@ function series(): FinancialAnswerContent {
   });
 }
 
-/** NVDA and AMD each at its own newest quarter, AMD's YoY growth a gap: one column per line. */
-function fiscalCalendars(): FinancialAnswerContent {
+function nvdaAmdOnTheirOwnCalendars(): FinancialAnswerContent {
   const lines = (slot: string, first: number, payloads: ReadonlyArray<unknown>): CommittedResult[] => OVERVIEW_LINES.map((line, index) => ({
     result_id: `98888888-8888-4888-9888-${String(first + index).padStart(12, "0")}`,
     output_id: `out_${slot}_${line}`,
@@ -110,7 +108,7 @@ test("every presentation shape the generator produces satisfies the canonical bl
   const valid = validator();
   valid(block(comparison()), "table, gap, predicate, incomplete ranking");
   valid(block(series()), "series and scalar");
-  valid(block(fiscalCalendars()), "a table across fiscal calendars, columns without a period");
+  valid(block(nvdaAmdOnTheirOwnCalendars()), "a table across fiscal calendars, columns without a period");
   valid(JSON.parse(readFileSync(WEB_V1_FIXTURE, "utf8")), "a stored v1 answer");
 });
 
@@ -130,7 +128,7 @@ test("each version's table is checked against its own shape: only v2 columns may
 });
 
 test("the web financial_answer fixtures are the generator's output", () => {
-  for (const [fixture, content] of [[WEB_FIXTURE, comparison()], [WEB_FISCAL_CALENDARS_FIXTURE, fiscalCalendars()]] as const) {
+  for (const [fixture, content] of [[WEB_FIXTURE, comparison()], [WEB_FISCAL_CALENDARS_FIXTURE, nvdaAmdOnTheirOwnCalendars()]] as const) {
     const expected = `${JSON.stringify(block(content), null, 2)}\n`;
     if (process.env.UPDATE_FIXTURES === "1") writeFileSync(fixture, expected);
     assert.equal(readFileSync(fixture, "utf8"), expected, "regenerate with UPDATE_FIXTURES=1");
