@@ -32,8 +32,8 @@ const JUDGED_ENV = { ...ENV, JUDGE_LITELLM_MODEL: "anthropic/claude-haiku-5-5" }
 const PENDING = "> _Checking an analyst inference against the figures it rests on…_";
 const FISCAL_FIGURES = [
   "Of NVDA and AAPL, AAPL's revenue was highest: NVDA $130.5B (FY2025, ended Jan 2025), AAPL $416.2B (FY2025, ended Sep 2025).",
-  "Of NVDA and AAPL, NVDA's gross margin was highest: NVDA 75.0% (FY2025, ended Jan 2025), AAPL 46.9% (FY2025, ended Sep 2025), 28.1 percentage points above AAPL.",
-  "Of NVDA and AAPL, NVDA's net margin was highest: NVDA 55.8% (FY2025, ended Jan 2025), AAPL 26.9% (FY2025, ended Sep 2025), 28.9 percentage points above AAPL.",
+  "Of NVDA and AAPL, NVDA's gross margin was highest: NVDA 75.0% (FY2025, ended Jan 2025), AAPL 46.9% (FY2025, ended Sep 2025).",
+  "Of NVDA and AAPL, NVDA's net margin was highest: NVDA 55.8% (FY2025, ended Jan 2025), AAPL 26.9% (FY2025, ended Sep 2025).",
   "AAPL's revenue growth (YoY) was 6.4% in FY2025 (ended Sep 2025).",
 ].join("\n\n");
 const FISCAL_NOTE = "The periods compared end at different times, so they do not line up: NVDA's FY2025 ended Jan 2025 and AAPL's FY2025 ended Sep 2025.";
@@ -354,7 +354,7 @@ test("a trace recorded before repairs replays with none: its hidden inference st
   assert.equal(replayed.repair_input_changed, true);
 
   const recorded = await replayRecorded(FISCAL);
-  assert.equal(text(recorded.blocks), fiscal(PROFITABILITY, "> **Analyst inference:** The two fiscal years end in different months, so the two revenue figures cover different stretches of time and are not a strict like-for-like comparison."));
+  assert.equal(text(recorded.blocks), fiscal(PROFITABILITY, "> **Analyst inference:** The two fiscal years end in different months, so the revenue figures cover different stretches of time and are not a like-for-like comparison."));
   assert.deepEqual(recorded.assertions?.repaired, [8]);
   assert.equal(recorded.repair_input_changed, false);
 });

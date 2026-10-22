@@ -187,7 +187,7 @@ test("a ranking over a price window writes its dates by month and year (#301), e
   ] };
   const rendered = renderComparison(returns, FACT_BLOCKS, "highest", "F5", ["F5", "F6"]);
   assert.equal(plainText(rendered.segments),
-    "Of NVDA and AMD, NVDA's price return was highest: NVDA 5.81%, AMD 3.17% (YTD 2026: Dec 2025 close to Aug 2026 close), 2.64 percentage points above AMD.");
+    "Of NVDA and AMD, NVDA's price return was highest: NVDA 5.81%, AMD 3.17% (YTD 2026: Dec 2025 close to Aug 2026 close).");
   assert.deepEqual(rendered.figure_ids, ["F5", "F6"]);
   assert.deepEqual(rendered.segments.filter((segment) => segment.type === "ref"), [
     { type: "ref", ref_kind: "series", ref_id: NVDA_LINE, format: "5.81%" },

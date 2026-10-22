@@ -2462,7 +2462,7 @@
       {
         "index": 8,
         "kind": "analyst_inference",
-        "text": "The two fiscal years end in different months, so the two revenue figures cover different stretches of time and are not a strict like-for-like comparison.",
+        "text": "The two fiscal years end in different months, so the revenue figures cover different stretches of time and are not a like-for-like comparison.",
         "evidence": [
           "F1",
           "F4"
@@ -2495,7 +2495,8 @@
       {
         "index": 8,
         "verdict": "entailed",
-        "worded_amount": false
+        "worded_amount": false,
+        "reason": "The figures show NVDA's fiscal year ends Jan 2025 and AAPL's ends Sep 2025, eight months apart, so the revenue periods differ."
       }
     ],
     "repaired": [
@@ -2666,10 +2667,6 @@
         },
         {
           "type": "text",
-          "text": ", 28.1 percentage points above AAPL"
-        },
-        {
-          "type": "text",
           "text": "."
         },
         {
@@ -2707,10 +2704,6 @@
         {
           "type": "text",
           "text": " (FY2025, ended Sep 2025)"
-        },
-        {
-          "type": "text",
-          "text": ", 28.9 percentage points above AAPL"
         },
         {
           "type": "text",
@@ -2752,7 +2745,7 @@
         },
         {
           "type": "text",
-          "text": "> **Analyst inference:** The two fiscal years end in different months, so the two revenue figures cover different stretches of time and are not a strict like-for-like comparison."
+          "text": "> **Analyst inference:** The two fiscal years end in different months, so the revenue figures cover different stretches of time and are not a like-for-like comparison."
         },
         {
           "type": "text",
@@ -2772,16 +2765,16 @@
           },
           {
             "role": "user",
-            "content": "{\"companies\":[\"NVDA\",\"AAPL\"],\"inferences\":[{\"id\":7,\"subject\":null,\"text\":\"Despite lower absolute revenue, NVDA's substantially higher margins indicate stronger profitability per dollar of revenue compared to AAPL.\",\"checked_results\":[\"AAPL highest on revenue\",\"NVDA highest on gross margin and net margin\"],\"supports\":[\"Of NVDA and AAPL, AAPL's revenue was highest: NVDA $130.5B (FY2025, ended Jan 2025), AAPL $416.2B (FY2025, ended Sep 2025).\",\"Of NVDA and AAPL, NVDA's gross margin was highest: NVDA 75.0% (FY2025, ended Jan 2025), AAPL 46.9% (FY2025, ended Sep 2025), 28.1 percentage points above AAPL.\",\"Of NVDA and AAPL, NVDA's net margin was highest: NVDA 55.8% (FY2025, ended Jan 2025), AAPL 26.9% (FY2025, ended Sep 2025), 28.9 percentage points above AAPL.\"],\"rest_of_answer\":[\"NVDA's revenue was $130.5B in FY2025 (ended Jan 2025).\",\"AAPL's revenue was $416.2B in FY2025 (ended Sep 2025).\",\"AAPL's revenue growth (YoY) was 6.4% in FY2025 (ended Sep 2025).\"],\"figures_shown\":[\"Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart: NVDA's revenue was $130.5B, gross margin 75.0% and net margin 55.8% in FY2025 (ended Jan 2025); AAPL's revenue was $416.2B, gross margin 46.9%, net margin 26.9% and revenue growth (YoY) 6.4% in FY2025 (ended Sep 2025).\",\"Price return (split-adjusted, excluding dividends): NVDA's price return was 6.6% in Dec 2025 to Aug 2026; AAPL's price return was 6.05% in Dec 2025 to Aug 2026.\"]}]}"
+            "content": "{\"companies\":[\"NVDA\",\"AAPL\"],\"inferences\":[{\"id\":7,\"subject\":null,\"text\":\"Despite lower absolute revenue, NVDA's substantially higher margins indicate stronger profitability per dollar of revenue compared to AAPL.\",\"checked_results\":[\"AAPL highest on revenue\",\"NVDA highest on gross margin and net margin\"],\"supports\":[\"Of NVDA and AAPL, AAPL's revenue was highest: NVDA $130.5B (FY2025, ended Jan 2025), AAPL $416.2B (FY2025, ended Sep 2025).\",\"Of NVDA and AAPL, NVDA's gross margin was highest: NVDA 75.0% (FY2025, ended Jan 2025), AAPL 46.9% (FY2025, ended Sep 2025).\",\"Of NVDA and AAPL, NVDA's net margin was highest: NVDA 55.8% (FY2025, ended Jan 2025), AAPL 26.9% (FY2025, ended Sep 2025).\"],\"rest_of_answer\":[\"NVDA's revenue was $130.5B in FY2025 (ended Jan 2025).\",\"AAPL's revenue was $416.2B in FY2025 (ended Sep 2025).\",\"AAPL's revenue growth (YoY) was 6.4% in FY2025 (ended Sep 2025).\"],\"figures_shown\":[\"Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart: NVDA's revenue was $130.5B, gross margin 75.0% and net margin 55.8% in FY2025 (ended Jan 2025); AAPL's revenue was $416.2B, gross margin 46.9%, net margin 26.9% and revenue growth (YoY) 6.4% in FY2025 (ended Sep 2025).\",\"Price return (split-adjusted, excluding dividends): NVDA's price return was 6.6% in Dec 2025 to Aug 2026; AAPL's price return was 6.05% in Dec 2025 to Aug 2026.\"]}]}"
           }
         ],
-        "text": "{\"verdicts\":[{\"id\":7,\"verdict\":\"entailed\",\"worded_amount\":false,\"reason\":\"\"}]}",
+        "text": "{\"verdicts\":[{\"id\":7,\"verdict\":\"entailed\",\"worded_amount\":false}]}",
         "truncated": false,
         "deployment": "anthropic/claude-haiku-5-5",
-        "latency_ms": 1458,
+        "latency_ms": 3063,
         "usage": {
-          "input_tokens": 1924,
-          "output_tokens": 42
+          "input_tokens": 1895,
+          "output_tokens": 290
         }
       }
     },
@@ -2795,16 +2788,16 @@
           },
           {
             "role": "user",
-            "content": "{\"companies\":[\"NVDA\",\"AAPL\"],\"inferences\":[{\"id\":8,\"subject\":null,\"text\":\"The eight-month gap between fiscal year ends limits direct comparability of the two revenue figures.\",\"checked_results\":[],\"supports\":[\"NVDA's revenue was $130.5B in FY2025 (ended Jan 2025).\",\"AAPL's revenue was $416.2B in FY2025 (ended Sep 2025).\"],\"rest_of_answer\":[\"Of NVDA and AAPL, AAPL's revenue was highest: NVDA $130.5B (FY2025, ended Jan 2025), AAPL $416.2B (FY2025, ended Sep 2025).\",\"Of NVDA and AAPL, NVDA's gross margin was highest: NVDA 75.0% (FY2025, ended Jan 2025), AAPL 46.9% (FY2025, ended Sep 2025), 28.1 percentage points above AAPL.\",\"Of NVDA and AAPL, NVDA's net margin was highest: NVDA 55.8% (FY2025, ended Jan 2025), AAPL 26.9% (FY2025, ended Sep 2025), 28.9 percentage points above AAPL.\",\"AAPL's revenue growth (YoY) was 6.4% in FY2025 (ended Sep 2025).\"],\"figures_shown\":[\"Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart: NVDA's revenue was $130.5B, gross margin 75.0% and net margin 55.8% in FY2025 (ended Jan 2025); AAPL's revenue was $416.2B, gross margin 46.9%, net margin 26.9% and revenue growth (YoY) 6.4% in FY2025 (ended Sep 2025).\",\"Price return (split-adjusted, excluding dividends): NVDA's price return was 6.6% in Dec 2025 to Aug 2026; AAPL's price return was 6.05% in Dec 2025 to Aug 2026.\"]}]}"
+            "content": "{\"companies\":[\"NVDA\",\"AAPL\"],\"inferences\":[{\"id\":8,\"subject\":null,\"text\":\"The eight-month gap between fiscal year ends limits direct comparability of the two revenue figures.\",\"checked_results\":[],\"supports\":[\"NVDA's revenue was $130.5B in FY2025 (ended Jan 2025).\",\"AAPL's revenue was $416.2B in FY2025 (ended Sep 2025).\"],\"rest_of_answer\":[\"Of NVDA and AAPL, AAPL's revenue was highest: NVDA $130.5B (FY2025, ended Jan 2025), AAPL $416.2B (FY2025, ended Sep 2025).\",\"Of NVDA and AAPL, NVDA's gross margin was highest: NVDA 75.0% (FY2025, ended Jan 2025), AAPL 46.9% (FY2025, ended Sep 2025).\",\"Of NVDA and AAPL, NVDA's net margin was highest: NVDA 55.8% (FY2025, ended Jan 2025), AAPL 26.9% (FY2025, ended Sep 2025).\",\"AAPL's revenue growth (YoY) was 6.4% in FY2025 (ended Sep 2025).\"],\"figures_shown\":[\"Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart: NVDA's revenue was $130.5B, gross margin 75.0% and net margin 55.8% in FY2025 (ended Jan 2025); AAPL's revenue was $416.2B, gross margin 46.9%, net margin 26.9% and revenue growth (YoY) 6.4% in FY2025 (ended Sep 2025).\",\"Price return (split-adjusted, excluding dividends): NVDA's price return was 6.6% in Dec 2025 to Aug 2026; AAPL's price return was 6.05% in Dec 2025 to Aug 2026.\"]}]}"
           }
         ],
-        "text": "{\"verdicts\":[{\"id\":8,\"verdict\":\"entailed\",\"worded_amount\":true,\"reason\":\"The fiscal year ends are shown as Jan 2025 and Sep 2025, an eight-month gap, which the answer's own figures support as limiting direct comparison of the two revenue figures.\"}]}",
+        "text": "{\"verdicts\":[{\"id\":8,\"verdict\":\"entailed\",\"worded_amount\":true,\"reason\":\"The eight-month gap between the fiscal year ends (Jan 2025 vs Sep 2025) is stated in the figures, and the inference only notes it limits comparability, which follows from the differing periods.\"}]}",
         "truncated": false,
         "deployment": "anthropic/claude-haiku-5-5",
-        "latency_ms": 1109,
+        "latency_ms": 1222,
         "usage": {
-          "input_tokens": 1880,
-          "output_tokens": 104
+          "input_tokens": 1850,
+          "output_tokens": 107
         }
       }
     }
@@ -2817,7 +2810,7 @@
         "check": "judge",
         "verdict": "entailed",
         "worded_amount": true,
-        "reason": "The fiscal year ends are shown as Jan 2025 and Sep 2025, an eight-month gap, which the answer's own figures support as limiting direct comparison of the two revenue figures."
+        "reason": "The eight-month gap between the fiscal year ends (Jan 2025 vs Sep 2025) is stated in the figures, and the inference only notes it limits comparability, which follows from the differing periods."
       }
     ],
     "record": {
@@ -2830,16 +2823,16 @@
           },
           {
             "role": "user",
-            "content": "{\"question\":\"Compare NVDA's and AAPL's fiscal 2025 revenue.\",\"conversation\":[{\"role\":\"user\",\"text\":\"Compare NVDA's and AAPL's fiscal 2025 revenue.\"}],\"evidence_packet\":{\"route\":\"comparison\",\"cutoff\":\"2026-09-01T00:00:00.000Z\",\"figures\":[{\"id\":\"F1\",\"company\":\"NVDA\",\"metric\":\"Revenue\",\"period\":\"FY2025\",\"period_end\":\"2025-01-26\",\"value\":\"$130.5B\",\"shown_in\":\"Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart\"},{\"id\":\"F2\",\"company\":\"NVDA\",\"metric\":\"Gross Margin\",\"period\":\"FY2025\",\"period_end\":\"2025-01-26\",\"value\":\"75.0%\",\"shown_in\":\"Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart\"},{\"id\":\"F3\",\"company\":\"NVDA\",\"metric\":\"Net Margin\",\"period\":\"FY2025\",\"period_end\":\"2025-01-26\",\"value\":\"55.8%\",\"shown_in\":\"Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart\"},{\"id\":\"F4\",\"company\":\"AAPL\",\"metric\":\"Revenue\",\"period\":\"FY2025\",\"period_end\":\"2025-09-27\",\"value\":\"$416.2B\",\"shown_in\":\"Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart\"},{\"id\":\"F5\",\"company\":\"AAPL\",\"metric\":\"Gross Margin\",\"period\":\"FY2025\",\"period_end\":\"2025-09-27\",\"value\":\"46.9%\",\"shown_in\":\"Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart\"},{\"id\":\"F6\",\"company\":\"AAPL\",\"metric\":\"Net Margin\",\"period\":\"FY2025\",\"period_end\":\"2025-09-27\",\"value\":\"26.9%\",\"shown_in\":\"Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart\"},{\"id\":\"F7\",\"company\":\"AAPL\",\"metric\":\"Revenue Growth (YoY)\",\"period\":\"FY2025\",\"period_end\":\"2025-09-27\",\"value\":\"6.4%\",\"shown_in\":\"Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart\"},{\"id\":\"F8\",\"company\":\"NVDA\",\"metric\":\"Price return\",\"period\":\"2025-12-01 to 2026-08-31\",\"value\":\"6.6%\",\"shown_in\":\"Price return (split-adjusted, excluding dividends)\"},{\"id\":\"F9\",\"company\":\"AAPL\",\"metric\":\"Price return\",\"period\":\"2025-12-01 to 2026-08-31\",\"value\":\"6.05%\",\"shown_in\":\"Price return (split-adjusted, excluding dividends)\"}],\"coverage\":[{\"company\":\"NVDA\",\"status\":\"shown\"},{\"company\":\"AAPL\",\"status\":\"shown\"}],\"query_bounds\":{\"periods\":\"fiscal year 2025 per company\",\"claims\":\"management, guidance, and kpi claims from 2024-01-01 until 2026-04-01 first, then the most recent others, published by the 2026-09-01 cutoff; a claim repeated by several sources or copies counts once\"},\"staleness\":{\"quote\":[{\"ticker\":\"NVDA\",\"as_of\":\"2026-09-01T00:00:00.000Z\",\"stale\":false,\"session_state\":\"closed\",\"delay_class\":\"eod\"}],\"fact_recency\":[{\"latest_as_of\":\"2026-09-01T00:00:00.000Z\",\"fiscal_year\":2026,\"fiscal_period\":\"Q1\",\"age_days\":0,\"stale\":false}]}}}\n\nYou already answered this question; your_assertions is the list you wrote. Some analyst_inference entries in it are not shown to the reader. Each is listed below with why: the check it failed and its reason, or the judge's verdict and reason (worded_amount: its words state an amount, fraction, multiple or span of time). Write each one again so it passes, under every rule above: words only, no digit anywhere, no amount in words, nothing its supports do not show; or leave it out if it cannot be said that way. Its supports carry the periods, so its text names no period at all (no year, quarter, \"latest\", \"earlier\" or \"prior\") and leaves which period is which to its supports. Reply with only a fenced block that opens with ```assertions on its own line: a JSON array of the corrected entries, each an analyst_inference object in the same shape as in your list (supports, and a subject only as the rules allow), with \"index\" added: the index of the entry it replaces. At most one per index listed below.\n{\"your_assertions\":[{\"kind\":\"observation\",\"text\":\"NVDA's fiscal 2025 revenue (ended January 2025) is [[F1]].\",\"evidence\":[\"F1\"]},{\"kind\":\"observation\",\"text\":\"AAPL's fiscal 2025 revenue (ended September 2025) is [[F4]].\",\"evidence\":[\"F4\"]},{\"kind\":\"comparison\",\"text\":\"AAPL's fiscal 2025 revenue is higher than NVDA's.\",\"evidence\":[\"F1\",\"F4\"],\"op\":\"highest\",\"result\":\"F4\"},{\"kind\":\"comparison\",\"text\":\"NVDA's gross margin is higher than AAPL's in fiscal 2025.\",\"evidence\":[\"F2\",\"F5\"],\"op\":\"highest\",\"result\":\"F2\"},{\"kind\":\"comparison\",\"text\":\"NVDA's net margin is higher than AAPL's in fiscal 2025.\",\"evidence\":[\"F3\",\"F6\"],\"op\":\"highest\",\"result\":\"F3\"},{\"kind\":\"observation\",\"text\":\"AAPL's fiscal 2025 year-over-year revenue growth is [[F7]].\",\"evidence\":[\"F7\"]},{\"kind\":\"unknown_cause\",\"text\":\"NVDA's year-over-year revenue growth rate is not shown, so the pace of NVDA's revenue change cannot be assessed.\",\"evidence\":[\"F1\"]},{\"kind\":\"analyst_inference\",\"text\":\"Despite lower absolute revenue, NVDA's substantially higher margins indicate stronger profitability per dollar of revenue compared to AAPL.\",\"evidence\":[\"F1\",\"F2\",\"F3\",\"F4\",\"F5\",\"F6\"],\"supports\":[2,3,4]},{\"kind\":\"analyst_inference\",\"text\":\"The eight-month gap between fiscal year ends limits direct comparability of the two revenue figures.\",\"evidence\":[\"F1\",\"F4\"],\"supports\":[0,1]}],\"rejected\":[{\"index\":8,\"text\":\"The eight-month gap between fiscal year ends limits direct comparability of the two revenue figures.\",\"check\":\"judge\",\"verdict\":\"entailed\",\"worded_amount\":true,\"reason\":\"The fiscal year ends are shown as Jan 2025 and Sep 2025, an eight-month gap, which the answer's own figures support as limiting direct comparison of the two revenue figures.\"}]}"
+            "content": "{\"question\":\"Compare NVDA's and AAPL's fiscal 2025 revenue.\",\"conversation\":[{\"role\":\"user\",\"text\":\"Compare NVDA's and AAPL's fiscal 2025 revenue.\"}],\"evidence_packet\":{\"route\":\"comparison\",\"cutoff\":\"2026-09-01T00:00:00.000Z\",\"figures\":[{\"id\":\"F1\",\"company\":\"NVDA\",\"metric\":\"Revenue\",\"period\":\"FY2025\",\"period_end\":\"2025-01-26\",\"value\":\"$130.5B\",\"shown_in\":\"Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart\"},{\"id\":\"F2\",\"company\":\"NVDA\",\"metric\":\"Gross Margin\",\"period\":\"FY2025\",\"period_end\":\"2025-01-26\",\"value\":\"75.0%\",\"shown_in\":\"Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart\"},{\"id\":\"F3\",\"company\":\"NVDA\",\"metric\":\"Net Margin\",\"period\":\"FY2025\",\"period_end\":\"2025-01-26\",\"value\":\"55.8%\",\"shown_in\":\"Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart\"},{\"id\":\"F4\",\"company\":\"AAPL\",\"metric\":\"Revenue\",\"period\":\"FY2025\",\"period_end\":\"2025-09-27\",\"value\":\"$416.2B\",\"shown_in\":\"Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart\"},{\"id\":\"F5\",\"company\":\"AAPL\",\"metric\":\"Gross Margin\",\"period\":\"FY2025\",\"period_end\":\"2025-09-27\",\"value\":\"46.9%\",\"shown_in\":\"Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart\"},{\"id\":\"F6\",\"company\":\"AAPL\",\"metric\":\"Net Margin\",\"period\":\"FY2025\",\"period_end\":\"2025-09-27\",\"value\":\"26.9%\",\"shown_in\":\"Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart\"},{\"id\":\"F7\",\"company\":\"AAPL\",\"metric\":\"Revenue Growth (YoY)\",\"period\":\"FY2025\",\"period_end\":\"2025-09-27\",\"value\":\"6.4%\",\"shown_in\":\"Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart\"},{\"id\":\"F8\",\"company\":\"NVDA\",\"metric\":\"Price return\",\"period\":\"2025-12-01 to 2026-08-31\",\"value\":\"6.6%\",\"shown_in\":\"Price return (split-adjusted, excluding dividends)\"},{\"id\":\"F9\",\"company\":\"AAPL\",\"metric\":\"Price return\",\"period\":\"2025-12-01 to 2026-08-31\",\"value\":\"6.05%\",\"shown_in\":\"Price return (split-adjusted, excluding dividends)\"}],\"coverage\":[{\"company\":\"NVDA\",\"status\":\"shown\"},{\"company\":\"AAPL\",\"status\":\"shown\"}],\"query_bounds\":{\"periods\":\"fiscal year 2025 per company\",\"claims\":\"management, guidance, and kpi claims from 2024-01-01 until 2026-04-01 first, then the most recent others, published by the 2026-09-01 cutoff; a claim repeated by several sources or copies counts once\"},\"staleness\":{\"quote\":[{\"ticker\":\"NVDA\",\"as_of\":\"2026-09-01T00:00:00.000Z\",\"stale\":false,\"session_state\":\"closed\",\"delay_class\":\"eod\"}],\"fact_recency\":[{\"latest_as_of\":\"2026-09-01T00:00:00.000Z\",\"fiscal_year\":2026,\"fiscal_period\":\"Q1\",\"age_days\":0,\"stale\":false}]}}}\n\nYou already answered this question; your_assertions is the list you wrote. Some analyst_inference entries in it are not shown to the reader. Each is listed below with why: the check it failed and its reason, or the judge's verdict and reason (worded_amount: its words state an amount, fraction, multiple or span of time). Write each one again so it passes, under every rule above: words only, no digit anywhere, no amount in words, nothing its supports do not show; or leave it out if it cannot be said that way. Its supports carry the periods, so its text names no period at all (no year, quarter, \"latest\", \"earlier\" or \"prior\") and leaves which period is which to its supports. Reply with only a fenced block that opens with ```assertions on its own line: a JSON array of the corrected entries, each an analyst_inference object in the same shape as in your list (supports, and a subject only as the rules allow), with \"index\" added: the index of the entry it replaces. At most one per index listed below.\n{\"your_assertions\":[{\"kind\":\"observation\",\"text\":\"NVDA's fiscal 2025 revenue (ended January 2025) is [[F1]].\",\"evidence\":[\"F1\"]},{\"kind\":\"observation\",\"text\":\"AAPL's fiscal 2025 revenue (ended September 2025) is [[F4]].\",\"evidence\":[\"F4\"]},{\"kind\":\"comparison\",\"text\":\"AAPL's fiscal 2025 revenue is higher than NVDA's.\",\"evidence\":[\"F1\",\"F4\"],\"op\":\"highest\",\"result\":\"F4\"},{\"kind\":\"comparison\",\"text\":\"NVDA's gross margin is higher than AAPL's in fiscal 2025.\",\"evidence\":[\"F2\",\"F5\"],\"op\":\"highest\",\"result\":\"F2\"},{\"kind\":\"comparison\",\"text\":\"NVDA's net margin is higher than AAPL's in fiscal 2025.\",\"evidence\":[\"F3\",\"F6\"],\"op\":\"highest\",\"result\":\"F3\"},{\"kind\":\"observation\",\"text\":\"AAPL's fiscal 2025 year-over-year revenue growth is [[F7]].\",\"evidence\":[\"F7\"]},{\"kind\":\"unknown_cause\",\"text\":\"NVDA's year-over-year revenue growth rate is not shown, so the pace of NVDA's revenue change cannot be assessed.\",\"evidence\":[\"F1\"]},{\"kind\":\"analyst_inference\",\"text\":\"Despite lower absolute revenue, NVDA's substantially higher margins indicate stronger profitability per dollar of revenue compared to AAPL.\",\"evidence\":[\"F1\",\"F2\",\"F3\",\"F4\",\"F5\",\"F6\"],\"supports\":[2,3,4]},{\"kind\":\"analyst_inference\",\"text\":\"The eight-month gap between fiscal year ends limits direct comparability of the two revenue figures.\",\"evidence\":[\"F1\",\"F4\"],\"supports\":[0,1]}],\"rejected\":[{\"index\":8,\"text\":\"The eight-month gap between fiscal year ends limits direct comparability of the two revenue figures.\",\"check\":\"judge\",\"verdict\":\"entailed\",\"worded_amount\":true,\"reason\":\"The eight-month gap between the fiscal year ends (Jan 2025 vs Sep 2025) is stated in the figures, and the inference only notes it limits comparability, which follows from the differing periods.\"}]}"
           }
         ],
-        "text": "```assertions\n[{\"index\":8,\"kind\":\"analyst_inference\",\"text\":\"The two fiscal years end in different months, so the two revenue figures cover different stretches of time and are not a strict like-for-like comparison.\",\"supports\":[0,1]}]\n```",
+        "text": "```assertions\n[{\"index\":8,\"kind\":\"analyst_inference\",\"text\":\"The two fiscal years end in different months, so the revenue figures cover different stretches of time and are not a like-for-like comparison.\",\"supports\":[0,1]}]\n```",
         "truncated": false,
         "deployment": "anthropic/claude-sonnet-5-5",
-        "latency_ms": 2932,
+        "latency_ms": 1650,
         "usage": {
-          "input_tokens": 4816,
-          "output_tokens": 85
+          "input_tokens": 4819,
+          "output_tokens": 82
         }
       }
     },
@@ -2854,16 +2847,16 @@
             },
             {
               "role": "user",
-              "content": "{\"companies\":[\"NVDA\",\"AAPL\"],\"inferences\":[{\"id\":8,\"subject\":null,\"text\":\"The two fiscal years end in different months, so the two revenue figures cover different stretches of time and are not a strict like-for-like comparison.\",\"checked_results\":[],\"supports\":[\"NVDA's revenue was $130.5B in FY2025 (ended Jan 2025).\",\"AAPL's revenue was $416.2B in FY2025 (ended Sep 2025).\"],\"rest_of_answer\":[\"Of NVDA and AAPL, AAPL's revenue was highest: NVDA $130.5B (FY2025, ended Jan 2025), AAPL $416.2B (FY2025, ended Sep 2025).\",\"Of NVDA and AAPL, NVDA's gross margin was highest: NVDA 75.0% (FY2025, ended Jan 2025), AAPL 46.9% (FY2025, ended Sep 2025), 28.1 percentage points above AAPL.\",\"Of NVDA and AAPL, NVDA's net margin was highest: NVDA 55.8% (FY2025, ended Jan 2025), AAPL 26.9% (FY2025, ended Sep 2025), 28.9 percentage points above AAPL.\",\"AAPL's revenue growth (YoY) was 6.4% in FY2025 (ended Sep 2025).\"],\"figures_shown\":[\"Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart: NVDA's revenue was $130.5B, gross margin 75.0% and net margin 55.8% in FY2025 (ended Jan 2025); AAPL's revenue was $416.2B, gross margin 46.9%, net margin 26.9% and revenue growth (YoY) 6.4% in FY2025 (ended Sep 2025).\",\"Price return (split-adjusted, excluding dividends): NVDA's price return was 6.6% in Dec 2025 to Aug 2026; AAPL's price return was 6.05% in Dec 2025 to Aug 2026.\"]}]}"
+              "content": "{\"companies\":[\"NVDA\",\"AAPL\"],\"inferences\":[{\"id\":8,\"subject\":null,\"text\":\"The two fiscal years end in different months, so the revenue figures cover different stretches of time and are not a like-for-like comparison.\",\"checked_results\":[],\"supports\":[\"NVDA's revenue was $130.5B in FY2025 (ended Jan 2025).\",\"AAPL's revenue was $416.2B in FY2025 (ended Sep 2025).\"],\"rest_of_answer\":[\"Of NVDA and AAPL, AAPL's revenue was highest: NVDA $130.5B (FY2025, ended Jan 2025), AAPL $416.2B (FY2025, ended Sep 2025).\",\"Of NVDA and AAPL, NVDA's gross margin was highest: NVDA 75.0% (FY2025, ended Jan 2025), AAPL 46.9% (FY2025, ended Sep 2025).\",\"Of NVDA and AAPL, NVDA's net margin was highest: NVDA 55.8% (FY2025, ended Jan 2025), AAPL 26.9% (FY2025, ended Sep 2025).\",\"AAPL's revenue growth (YoY) was 6.4% in FY2025 (ended Sep 2025).\"],\"figures_shown\":[\"Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart: NVDA's revenue was $130.5B, gross margin 75.0% and net margin 55.8% in FY2025 (ended Jan 2025); AAPL's revenue was $416.2B, gross margin 46.9%, net margin 26.9% and revenue growth (YoY) 6.4% in FY2025 (ended Sep 2025).\",\"Price return (split-adjusted, excluding dividends): NVDA's price return was 6.6% in Dec 2025 to Aug 2026; AAPL's price return was 6.05% in Dec 2025 to Aug 2026.\"]}]}"
             }
           ],
-          "text": "{\"verdicts\":[{\"id\":8,\"verdict\":\"entailed\",\"worded_amount\":false}]}",
+          "text": "{\"verdicts\":[{\"id\":8,\"verdict\":\"entailed\",\"worded_amount\":false,\"reason\":\"The figures show NVDA's fiscal year ends Jan 2025 and AAPL's ends Sep 2025, eight months apart, so the revenue periods differ.\"}]}",
           "truncated": false,
           "deployment": "anthropic/claude-haiku-5-5",
-          "latency_ms": 6090,
+          "latency_ms": 5857,
           "usage": {
-            "input_tokens": 1892,
-            "output_tokens": 189
+            "input_tokens": 1859,
+            "output_tokens": 264
           }
         }
       }

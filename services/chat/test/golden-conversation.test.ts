@@ -270,8 +270,8 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.deepEqual(
       (narrative?.segments as Array<{ text?: string; format?: string }> | undefined)?.map((segment) => segment.text ?? segment.format).join(""),
       [
-        "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 70.8% (FY2026, ended Jan 2026), AMD 49.9% (FY2025, ended Dec 2025), 20.9 percentage points above AMD.",
-        "Of NVDA and AMD, NVDA's net margin was highest: NVDA 53.6% (FY2026, ended Jan 2026), AMD 12.0% (FY2025, ended Dec 2025), 41.6 percentage points above AMD.",
+        "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 70.8% (FY2026, ended Jan 2026), AMD 49.9% (FY2025, ended Dec 2025).",
+        "Of NVDA and AMD, NVDA's net margin was highest: NVDA 53.6% (FY2026, ended Jan 2026), AMD 12.0% (FY2025, ended Dec 2025).",
         "The periods compared end at different times, so they do not line up: NVDA's FY2026 ended Jan 2026 and AMD's FY2025 ended Dec 2025.",
       ].join("\n\n"),
     );

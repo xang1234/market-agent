@@ -202,8 +202,6 @@ function comparisonSegments(comparison: CheckedComparison, out: Writer): void {
         ? `Of ${out.owner(first)}segments, ${comparison.winner!.segment} ${metricLabel(metric)} was ${comparison.op}: `
         : `Of ${new Intl.ListFormat("en").format(figures.map(companyOf))}, ${subject(comparison.winner!)} was ${comparison.op}: `);
       list(companyOf);
-      const { lead } = comparison;
-      if (lead) out.text(`, ${lead.gap} percentage points ${comparison.op === "highest" ? "above" : "below"} ${new Intl.ListFormat("en").format(lead.over.map(companyOf))}`);
       out.text(".");
     }
   } else if (comparison.op === "order") {
