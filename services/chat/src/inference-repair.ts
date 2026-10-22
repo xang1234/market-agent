@@ -26,7 +26,8 @@ export type RepairRequest = { index: number; text: string; rejected_supports?: n
 // call for each repaired inference that passed the checks, in index order.
 export type RepairTrace = { requests: RepairRequest[]; record: ModelRecord; judge: ModelRecord[] };
 
-// Validated live on 18 prototype repairs, 17 recovered.
+// Validated live (2026-10-22): 5 of 6 repairs on the recorded traces and 20 of
+// 21 on the hide-tier judge mutations end shown or unverified.
 export const REPAIR_INSTRUCTIONS = "You already answered this question; your_assertions is the list you wrote. Some analyst_inference entries in it are not shown to the reader. Each is listed below with why: the check it failed and its reason, or the judge's verdict and reason (worded_amount: its words state an amount, fraction, multiple or span of time). Write each one again so it passes, under every rule above: words only, no digit anywhere, no amount in words, nothing its supports do not show; or leave it out if it cannot be said that way. The inference's label already states the periods its supports cover, so its text names no period at all (no year, quarter, \"latest\", \"earlier\" or \"prior\") and leaves which period is which to its supports. Reply with only a fenced block that opens with ```assertions on its own line: a JSON array of the corrected entries, each an analyst_inference object in the same shape as in your list (supports, and a subject only as the rules allow), with \"index\" added: the index of the entry it replaces. At most one per index listed below.";
 
 // Repair latency measured 1.5-2.5 s over 18 live calls: one attempt of about

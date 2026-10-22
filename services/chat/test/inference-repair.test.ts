@@ -341,8 +341,9 @@ test("a trace recorded before repairs replays with none: its hidden inference st
   assert.equal(replayed.repair_input_changed, true);
 
   const recorded = await replayRecorded(FISCAL);
-  assert.equal(text(recorded.blocks), fiscal(PROFITABILITY, "> **Analyst inference on NVDA:** The two fiscal years end in different months, so the revenue figures cover different stretches of time and are not a clean like-for-like comparison."));
+  assert.equal(text(recorded.blocks), fiscal(PROFITABILITY, "> **Analyst inference:** The fiscal years end in different months for the two companies, which limits direct comparability of the two revenue figures."));
   assert.deepEqual(recorded.assertions?.repaired, [8]);
+  assert.equal(recorded.repair_input_changed, false);
 });
 
 test("a replay keeps the recorded verdicts and runs only the repair live (recorded --repair), or reruns the judge and the repair live (--judge)", async (t) => {
