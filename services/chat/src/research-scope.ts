@@ -176,12 +176,14 @@ const CLEARS: Partial<Record<ScopeFacet | (typeof PERIOD_FIELDS)[number], ScopeF
 const PARTIAL_QUARTER = /\bQ([1-4])\b|\b(first|second|third|fourth)\s+quarter\b/i;
 const ORDINAL_QUARTERS: Readonly<Record<string, number>> = { first: 1, second: 2, third: 3, fourth: 4 };
 
-type NamedPeriod = { year?: number; quarter?: FiscalQuarter; yearlessQuarter?: (typeof FISCAL_PERIODS)[number]; latest?: true };
+type NamedPeriod = { year?: number; quarter?: FiscalQuarter; yearlessQuarter?: (typeof FISCAL_PERIODS)[number]; replacesInherited?: true };
 
 function periodOfReading(period: ScopePeriod): NamedPeriod {
-  if (period.kind === "latest") return { latest: true };
+  if (period.kind === "none") return {};
   if (period.kind === "fiscal_year") return { year: period.fiscal_year };
-  if (period.kind !== "fiscal_quarter") return {};
+  // A period no fiscal field holds (TTM, a range) replaces the inherited one
+  // as the latest does, so the turn never answers for the old period.
+  if (period.kind !== "fiscal_quarter") return { replacesInherited: true };
   return period.fiscal_year === null
     ? { yearlessQuarter: period.fiscal_period }
     : { quarter: { fiscal_year: period.fiscal_year, fiscal_period: period.fiscal_period } };
@@ -393,7 +395,7 @@ export function resolveResearchScope(input: {
   // the question ("forget fiscal 2025").
   const yearNamed = off.has("fiscal_year") ? undefined : period.year;
   const quarterNamed = off.has("fiscal_quarter") ? undefined : period.quarter;
-  const latest = asks.has("latest_quarter") || period.latest === true;
+  const latest = asks.has("latest_quarter") || period.replacesInherited === true;
   // The latest period replaces an inherited fiscal year ("Q1 fiscal 2025"
   // named both), so a reader that takes no quarter isn't held to the old year.
   if (yearNamed === undefined && quarterNamed === undefined && latest) off.add("fiscal_year");
