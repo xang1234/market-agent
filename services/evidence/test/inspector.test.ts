@@ -420,6 +420,44 @@ test("a fact's title follows its unit, and its period reads in words", async () 
   }
 });
 
+test("a derived fact lists the facts it was computed from, as their own inspections word them, before its source", async () => {
+  const Q3_REVENUE = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const Q2_REVENUE = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const revenue = (fact_id: string, fiscal_period: string, value: string) =>
+    factRow({ fact_id, value, unit: "currency", currency: "USD", metric_name: "Revenue", period_kind: "fiscal_q", fiscal_year: 2026, fiscal_period });
+  const facts = [
+    factRow({
+      value: "0.2195622874013221", unit: "ratio", metric_unit_class: "percent", metric_name: "Revenue Growth (QoQ)",
+      period_kind: "fiscal_q", fiscal_year: 2026, fiscal_period: "Q3", method: "derived",
+      quality_flags: [{ kind: "derivation", metric: "revenue_growth_qoq", input_fact_ids: [Q3_REVENUE, Q2_REVENUE] }],
+    }),
+    revenue(Q3_REVENUE, "Q3", "57006000000"),
+    revenue(Q2_REVENUE, "Q2", "46743000000"),
+  ];
+  const inspect = async (fact_refs: string[]) => {
+    const { db, calls } = stubDb((text, values) => {
+      if (text.includes("from chat_messages")) return [{ visible: 1 }];
+      if (text.includes("from snapshots")) return [manifestRow({ fact_refs })];
+      if (text.includes("from facts")) return facts.filter((fact) => (values?.[0] as string[]).includes(fact.fact_id));
+      return [];
+    });
+    const result = await loadEvidenceInspection(db, { user_id: USER_ID, snapshot_id: SNAPSHOT_ID, ref: { kind: "fact", id: FACT_ID } });
+    return { result, factQueries: calls.filter((call) => call.text.includes("from facts")).map((call) => call.values) };
+  };
+
+  const { result, factQueries } = await inspect([FACT_ID, Q3_REVENUE, Q2_REVENUE]);
+  assert.deepEqual([result.title, result.subtitle], ["22.0%", "Revenue Growth (QoQ) · Q3 FY 2026"]);
+  assert.deepEqual(result.related_refs, [
+    { kind: "fact", id: Q3_REVENUE, label: "Revenue · Q3 FY 2026 · $57.0B" },
+    { kind: "fact", id: Q2_REVENUE, label: "Revenue · Q2 FY 2026 · $46.7B" },
+    { kind: "source", id: SOURCE_ID, label: "sec_edgar" },
+  ]);
+  // One more lookup, under the user's access guard.
+  assert.deepEqual(factQueries, [[[FACT_ID], USER_ID], [[Q3_REVENUE, Q2_REVENUE], USER_ID]]);
+  // An input the snapshot did not seal is not offered.
+  assert.deepEqual((await inspect([FACT_ID, Q3_REVENUE])).result.related_refs.map((ref) => ref.id), [Q3_REVENUE, SOURCE_ID]);
+});
+
 test("loadEvidenceInspection filters related refs to the sealed snapshot manifest", async () => {
   const { db } = stubDb((text) => {
     if (text.includes("from chat_messages")) return [{ visible: 1 }];

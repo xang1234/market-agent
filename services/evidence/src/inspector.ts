@@ -495,37 +495,71 @@ async function inspectFact(
   factId: string,
   userId: string,
 ): Promise<EvidenceInspection> {
-  const { rows } = await db.query<{
-    fact_id: string;
-    source_id: string;
-    value: string;
-    value_text: string | null;
-    unit: string;
-    currency: string | null;
-    metric_name: string | null;
-    metric_unit_class: string | null;
-    period_kind: string;
-    period_start: string | null;
-    period_end: string | null;
-    fiscal_year: number | null;
-    fiscal_period: string | null;
-    as_of: Date | string;
-    verification_status: string;
-    freshness_class: string;
-    coverage_level: string;
-    method: string;
-    confidence: string | number;
-    provider: string;
-    canonical_url: string | null;
-  }>(
+  const [row] = await loadFactRows(db, [factId], userId);
+  if (!row) throw new EvidenceInspectionError(404, "fact not found");
+  return Object.freeze({
+    snapshot_id: snapshotId,
+    ref: Object.freeze({ kind: "fact", id: factId }),
+    kind: "fact",
+    title: factValueText(row),
+    subtitle: factSubtitle(row),
+    badges: Object.freeze([row.verification_status, row.freshness_class, row.coverage_level]),
+    rows: Object.freeze([
+      { label: "Value", value: row.value },
+      { label: "Unit", value: row.unit },
+      { label: "As of", value: isoString(row.as_of) },
+      { label: "Method", value: row.method },
+      { label: "Confidence", value: String(row.confidence) },
+    ]),
+    links: sourceLinks(row.canonical_url),
+    related_refs: Object.freeze([
+      ...(await derivationInputs(db, row.quality_flags, userId)),
+      { kind: "source" as const, id: row.source_id, label: row.provider },
+    ]),
+  });
+}
+
+type FactRow = {
+  fact_id: string;
+  source_id: string;
+  value: string;
+  value_text: string | null;
+  unit: string;
+  currency: string | null;
+  metric_name: string | null;
+  metric_unit_class: string | null;
+  period_kind: string;
+  period_start: string | null;
+  period_end: string | null;
+  fiscal_year: number | null;
+  fiscal_period: string | null;
+  as_of: Date | string;
+  verification_status: string;
+  freshness_class: string;
+  coverage_level: string;
+  method: string;
+  confidence: string | number;
+  provider: string;
+  canonical_url: string | null;
+  quality_flags: unknown;
+};
+
+async function loadFactRows(
+  db: QueryExecutor,
+  factIds: ReadonlyArray<string>,
+  userId: string,
+): Promise<ReadonlyArray<FactRow>> {
+  const { rows } = await db.query<FactRow>(
     // Provenance lookup by fact_id for a ref that assertRefBelongsToSnapshot has
-    // already confirmed belongs to this sealed (immutable) snapshot. This is
-    // deliberately NOT guarded by method='reported'/superseded_by/invalidated_at:
-    // a snapshot must always be able to show the exact fact it cited at seal time,
-    // even after that fact is later superseded or invalidated. The guards that
-    // apply here are access guards — snapshot visibility, entitlement_channels,
-    // and user scoping (below) — not the freshness/selection guard used by readers
-    // that pick the current authoritative fact among candidates.
+    // already confirmed belongs to this sealed (immutable) snapshot, or for a
+    // derived fact's inputs, which withSnapshotScopedRelatedRefs keeps only when
+    // the snapshot sealed them too. This is deliberately NOT guarded by
+    // method='reported'/superseded_by/invalidated_at: a snapshot must always be
+    // able to show the exact fact it cited at seal time, even after that fact is
+    // later superseded or invalidated. The guards that apply here are access
+    // guards — snapshot visibility, entitlement_channels, and user scoping
+    // (below) — not the freshness/selection guard used by readers that pick the
+    // current authoritative fact among candidates.
     `select f.fact_id::text as fact_id,
             f.source_id::text as source_id,
             coalesce(f.value_text, (f.value_num * f.scale)::text, '') as value,
@@ -545,35 +579,40 @@ async function inspectFact(
             f.coverage_level,
             f.method,
             f.confidence,
+            f.quality_flags,
             s.provider,
             s.canonical_url
        from facts f
        join sources s on s.source_id = f.source_id
        left join metrics m on m.metric_id = f.metric_id
-      where f.fact_id = $1::uuid
+      where f.fact_id = any($1::uuid[])
         and f.entitlement_channels ? 'app'
         and (s.user_id is null or s.user_id = $2::uuid)`,
-    [factId, userId],
+    [factIds, userId],
   );
-  const row = rows[0];
-  if (!row) throw new EvidenceInspectionError(404, "fact not found");
-  return Object.freeze({
-    snapshot_id: snapshotId,
-    ref: Object.freeze({ kind: "fact", id: factId }),
-    kind: "fact",
-    title: factValueText(row),
-    subtitle: [row.metric_name, factPeriodText({ ...row, as_of: isoString(row.as_of) })].filter((part) => part).join(" · "),
-    badges: Object.freeze([row.verification_status, row.freshness_class, row.coverage_level]),
-    rows: Object.freeze([
-      { label: "Value", value: row.value },
-      { label: "Unit", value: row.unit },
-      { label: "As of", value: isoString(row.as_of) },
-      { label: "Method", value: row.method },
-      { label: "Confidence", value: String(row.confidence) },
-    ]),
-    links: sourceLinks(row.canonical_url),
-    related_refs: Object.freeze([{ kind: "source" as const, id: row.source_id, label: row.provider }]),
+  return rows;
+}
+
+// The facts a derived fact was computed from (the lineage the materializer
+// stamps on it), in its order, each labelled as its own inspection words it.
+async function derivationInputs(
+  db: QueryExecutor,
+  qualityFlags: unknown,
+  userId: string,
+): Promise<ReadonlyArray<EvidenceInspectionRelatedRef>> {
+  const ids = [...new Set((Array.isArray(qualityFlags) ? qualityFlags : []).flatMap((flag) =>
+    isRecord(flag) && flag.kind === "derivation" && Array.isArray(flag.input_fact_ids) ? flag.input_fact_ids.filter(isUuid) : []
+  ))];
+  if (ids.length === 0) return [];
+  const rows = new Map((await loadFactRows(db, ids, userId)).map((row) => [row.fact_id, row]));
+  return ids.flatMap((id) => {
+    const row = rows.get(id);
+    return row ? [{ kind: "fact" as const, id, label: [factSubtitle(row), factValueText(row)].filter((part) => part).join(" · ") }] : [];
   });
+}
+
+function factSubtitle(row: FactRow): string {
+  return [row.metric_name, factPeriodText({ ...row, as_of: isoString(row.as_of) })].filter((part) => part).join(" · ");
 }
 
 // Worded as the answer words the figure, with its formatters: "$209.9B", "$2.0M", "13.9%", "$4.12".
