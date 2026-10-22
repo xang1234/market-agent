@@ -329,11 +329,17 @@ test("a turn whose only hidden inference is check-rejected waits for its repair,
   assert.deepEqual(calls.sort(), ["answer", "judge 4", "repair"]);
 });
 
-test("a trace recorded before repairs replays with none: its hidden inference stays hidden", async () => {
-  const replayed = await replayRecorded(FISCAL);
+test("a trace recorded before repairs replays with none: its hidden inference stays hidden; one recorded with a repair replays it with no model", async () => {
+  const { repair: _, ...before } = FISCAL;
+  const replayed = await replayRecorded(before);
   assert.equal(text(replayed.blocks), fiscal(PROFITABILITY));
   assert.equal(replayed.repair, null);
   assert.equal(replayed.repair_input_changed, false);
+
+  const recorded = await replayRecorded(FISCAL);
+  assert.equal(text(recorded.blocks), fiscal(PROFITABILITY, "> **Analyst inference on NVDA:** The two fiscal years end in different months, so the revenue figures cover different stretches of time and are not a clean like-for-like comparison."));
+  assert.deepEqual(recorded.assertions?.repaired, [8]);
+  assert.equal(recorded.repair_input_changed, false);
 });
 
 test("a replay keeps the recorded verdicts and runs only the repair live (recorded --repair), or reruns the judge and the repair live (--judge)", async (t) => {
