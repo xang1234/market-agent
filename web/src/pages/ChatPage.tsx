@@ -143,7 +143,7 @@ function ChatThreadView({ chat, threadName, collapsed, setCollapsed }: ChatThrea
             <VirtualizedMessageList
               key={view.listKey}
               messages={view.messages}
-              tail={<PendingTurnView turn={view.turn} onRetry={chat.retry} onReconnect={chat.reconnect} onReload={chat.reload} onAsk={chat.ask} />}
+              tail={<PendingTurnView turn={view.turn} messages={view.messages} onRetry={chat.retry} onReconnect={chat.reconnect} onReload={chat.reload} onAsk={chat.ask} />}
             />
           </section>
         ) : null}

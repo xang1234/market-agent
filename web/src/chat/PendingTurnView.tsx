@@ -4,12 +4,15 @@ import { BlockView } from '../blocks/BlockView.tsx'
 import { AgentPlanPanel } from './AgentPlanPanel.tsx'
 import { AssistantBlocks } from './MessageItem.tsx'
 import type { StreamLink, TurnState } from './chatSession.ts'
+import type { ChatMessage } from './messageTypes.ts'
 import { StreamingBlockView } from './StreamingBlockView.tsx'
 import type { StreamState, UnverifiedTurn } from './streamReducer.ts'
 import { AssistantTurn, BlockColumn, USER_BUBBLE_CLASS } from './turnLayout.tsx'
 
 type PendingTurnViewProps = {
   turn: TurnState
+  // The thread's messages, which may already hold the answer the turn shows.
+  messages: ReadonlyArray<ChatMessage>
   onRetry: () => void
   onReconnect: () => void
   onReload: () => void
@@ -21,7 +24,7 @@ const ACTION_BUTTON_CLASS = 'rounded-md border border-negative px-3 py-1.5 text-
 // The turn that is not yet in the thread's history. Streaming and failed
 // render through one tree, so React keeps the answer's DOM nodes until the
 // completion commit replaces them with the sealed MessageItem.
-export function PendingTurnView({ turn, onRetry, onReconnect, onReload, onAsk }: PendingTurnViewProps): ReactElement | null {
+export function PendingTurnView({ turn, messages, onRetry, onReconnect, onReload, onAsk }: PendingTurnViewProps): ReactElement | null {
   switch (turn.phase) {
     case 'idle':
       return null
@@ -48,13 +51,13 @@ export function PendingTurnView({ turn, onRetry, onReconnect, onReload, onAsk }:
       return turn.stream.unverified ? <UnverifiedTurnView state={turn.stream} unverified={turn.stream.unverified} /> : null
     case 'streaming':
       return (
-        <StreamedTurn phase={turn.phase} stream={turn.stream} blocks={turn.origin.kind === 'own'}>
+        <StreamedTurn phase={turn.phase} stream={turn.stream} blocks={turn.origin.kind === 'own'} messages={messages}>
           <LinkNotice link={turn.link} onReconnect={onReconnect} />
         </StreamedTurn>
       )
     case 'failed':
       return (
-        <StreamedTurn phase={turn.phase} stream={turn.stream} blocks={turn.origin.kind === 'own'}>
+        <StreamedTurn phase={turn.phase} stream={turn.stream} blocks={turn.origin.kind === 'own'} messages={messages}>
           {turn.recovery === 'none'
             ? <p className="text-sm text-negative">{turn.error}</p>
             : (
@@ -81,15 +84,18 @@ function LinkNotice({ link, onReconnect }: { link: StreamLink; onReconnect: () =
   }
 }
 
-function StreamedTurn({ phase, stream, blocks, children }: { phase: TurnState['phase']; stream: StreamState; blocks: boolean; children?: ReactNode }): ReactElement {
+function StreamedTurn({ phase, stream, blocks, messages, children }: { phase: TurnState['phase']; stream: StreamState; blocks: boolean; messages: ReadonlyArray<ChatMessage>; children?: ReactNode }): ReactElement {
+  const { shown } = stream
   // A sealed answer, shown while the judge reads its inferences: it renders as
   // the saved message it becomes, in MessageItem's own wrapper and with no plan
   // above it, so the hand-off changes only the lines the judge resolves. Any
-  // reader of the run may see it: it holds only what the seal verified.
-  if (stream.shown) {
+  // reader of the run may see it: it holds only what the seal verified. An
+  // engine answer is saved before its commentary is written, so a load in that
+  // window holds it, and history shows it instead.
+  if (shown && !messages.some((message) => message.message_id === shown.message_id)) {
     return (
       <div data-testid="streaming-turn" data-turn-status={phase} aria-live="polite" className="flex flex-col items-start py-2">
-        <AssistantBlocks blocks={stream.shown.blocks} proofs={stream.shown.block_proofs} />
+        <AssistantBlocks blocks={shown.blocks} proofs={shown.block_proofs} />
         {children}
       </div>
     )
