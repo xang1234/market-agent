@@ -103,6 +103,24 @@ test("answerMetrics counts the answer's sealed figures, a price return's series 
   });
 });
 
+test("answerMetrics counts an engine answer's results in its commentary as figures, and their period labels as plain numbers", () => {
+  const commentary = {
+    ...TRACE,
+    blocks: [{
+      kind: "rich_text",
+      analyst_commentary: true,
+      segments: [
+        { type: "text", text: "ALFA's revenue rose from Q1 FY2022 (" },
+        { type: "ref", ref_kind: "result", ref_id: "91111111-1111-4111-9111-111111111111", format: "USD 800.00", period: "Q1 FY2022" },
+        { type: "text", text: ") to Q4 FY2023 (" },
+        { type: "ref", ref_kind: "result", ref_id: "92222222-2222-4222-9222-222222222222", format: "USD 2,000.00", period: "Q4 FY2023" },
+        { type: "text", text: ")." },
+      ],
+    }],
+  };
+  assert.deepEqual([answerMetrics(commentary).figure_refs, answerMetrics(commentary).plain_numbers], [2, 4]);
+});
+
 test("answerMetrics reads an answer no assertion rendered as the fallback; with no model called there is none", () => {
   const fallback = {
     ...TRACE,
