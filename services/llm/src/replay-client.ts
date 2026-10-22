@@ -4,10 +4,11 @@ import type { LlmChatClient } from "./router.ts";
 
 // Recorded model replies for offline tests and no-keys development. Opt-in only,
 // via LLM_REPLAY_FILE: a JSON file `{ "replies": [{ "match": "...", "text": "..." }] }`.
-// The first reply whose `match` appears in the request's messages answers it.
+// The first reply whose `match` appears in the request's messages answers it;
+// a list of substrings matches only a request holding every one.
 // ponytail: substring matching, no request hashing; add exact keys if replies collide.
 export type LlmReplayFixture = {
-  replies: ReadonlyArray<{ match: string; text: string }>;
+  replies: ReadonlyArray<{ match: string | ReadonlyArray<string>; text: string }>;
 };
 
 export async function createReplayLlmChatClient(path: string): Promise<LlmChatClient> {
@@ -18,7 +19,7 @@ export async function createReplayLlmChatClient(path: string): Promise<LlmChatCl
   const replies = fixture.replies;
   return (_deployment, request) => {
     const transcript = request.messages.map((message) => message.content).join("\n");
-    const reply = replies.find((candidate) => transcript.includes(candidate.match));
+    const reply = replies.find(({ match }) => [match].flat().every((part) => transcript.includes(part)));
     if (!reply) {
       throw new Error(`LLM replay: no recorded reply matches this request (${path})`);
     }

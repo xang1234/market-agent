@@ -13,7 +13,7 @@ const CHANNEL_ENV = {
   LITELLM_MODEL: "fixture/recorded",
 };
 
-async function replayFile(replies: ReadonlyArray<{ match: string; text: string }>): Promise<string> {
+async function replayFile(replies: ReadonlyArray<{ match: string | ReadonlyArray<string>; text: string }>): Promise<string> {
   const path = join(await mkdtemp(join(tmpdir(), "llm-replay-")), "replies.json");
   await writeFile(path, JSON.stringify({ replies }));
   return path;
@@ -37,6 +37,22 @@ test("LLM_REPLAY_FILE answers with the first recorded reply matching the request
   });
 
   assert.equal(result.text, "NVIDIA revenue grew.");
+});
+
+test("a recorded reply matching several substrings answers only a request holding every one of them", async () => {
+  const router = await createLlmRouterFromEnv({
+    ...CHANNEL_ENV,
+    LLM_REPLAY_FILE: await replayFile([
+      { match: ['"route":"financial_engine"', '"company":"AMD"'], text: "Both companies." },
+      { match: '"route":"financial_engine"', text: "One company." },
+    ]),
+  });
+  assert.ok(router);
+  const ask = async (packet: string) =>
+    (await router.complete({ messages: [{ role: "system", content: "Answer." }, { role: "user", content: packet }] })).text;
+
+  assert.equal(await ask('{"route":"financial_engine","coverage":[{"company":"NVDA"},{"company":"AMD"}]}'), "Both companies.");
+  assert.equal(await ask('{"route":"financial_engine","coverage":[{"company":"NVDA"}]}'), "One company.");
 });
 
 test("LLM_REPLAY_FILE fails loudly when no recorded reply matches", async () => {

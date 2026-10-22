@@ -233,7 +233,7 @@ export function replyFixture(traces: ReadonlyArray<LabeledTrace>, golden: LlmRep
   const answers = traces.flatMap(({ trace }) =>
     trace.exchange?.text ? [{ match: `"question":${JSON.stringify(trace.question)}`, text: trace.exchange.text }] : []
   );
-  return { replies: [...golden.replies.filter((reply) => reply.match.startsWith("Create a short")), ...answers] };
+  return { replies: [...golden.replies.filter((reply) => typeof reply.match === "string" && reply.match.startsWith("Create a short")), ...answers] };
 }
 
 // The rich_text blocks as read: text as written, each ref its displayed value.
