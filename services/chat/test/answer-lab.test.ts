@@ -116,7 +116,7 @@ test("the traces' reply fixture answers each traced question as recorded, and a 
 
 const MUTATIONS = fileURLToPath(new URL("./answer-lab/judge-mutations.json", import.meta.url));
 
-test("the judge's held-out set: every original and mutation passes the turn's own checks, so each is a gap only the judge can catch (#302)", () => {
+test("the judge's mutation set: every original and mutation passes the turn's own checks, so each is a gap only the judge can catch (#302)", () => {
   const variants = mutationVariants(MUTATIONS);
   const count = (key: (variant: (typeof variants)[number]) => string) =>
     Object.fromEntries([...new Set(variants.map(key))].map((value) => [value, variants.filter((variant) => key(variant) === value).length]));
@@ -186,7 +186,7 @@ test("the mutation summary counts catches, each kind at its expected outcome, mu
     "  contradicted_ranking   contradicted  1 of 2",
     "shown though they should hide: 2 of 5",
     "false alarms: 1 of 2 originals (0 errors)",
-    "not at their tier:",
+    "not at their expected outcome:",
     "  a worded_amount: unsupported: a forecast the figures do not show\n      a worded_amount",
     "  a hedged_valuation: entailed\n      a hedged_valuation",
     "  a contradicted_ranking: unsupported: no figure ranks them\n      a contradicted_ranking",

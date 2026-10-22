@@ -20,7 +20,7 @@
 // of the recorded reply (with --update, recording its reply), in live mode in
 // place of none, which shows no inference. Each run summarizes what the judge
 // showed and hid. judge-mutations
-// judges a held-out set of inferences and their mutations
+// judges a set of inferences and their mutations
 // (test/answer-lab/judge-mutations.json) and reports how many mutations it
 // catches, how many come back at their kind's tier, how many it would show
 // that should hide, and how many originals it flags.
@@ -466,7 +466,7 @@ export function mutationSummary(results: ReadonlyArray<Pick<MutationResult, "id"
     ),
     `shown though they should hide: ${rate(shouldHide, (row) => shownAs(row.verdict) !== "hidden")}`,
     `false alarms: ${rate(originals, flagged)} originals (${errors(originals)} errors)`,
-    ...(missed.length > 0 ? ["not at their tier:"] : []),
+    ...(missed.length > 0 ? ["not at their expected outcome:"] : []),
     ...missed.map((result) => `  ${result.id} ${result.kind}: ${verdictText(result.verdict)}\n      ${result.text}`),
   ].join("\n");
 }

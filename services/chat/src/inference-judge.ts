@@ -4,9 +4,10 @@
 // text, and no English matcher can tell whether they mean what the figures
 // show ("margins are expanding" beside a checked "fell"). A second model reads
 // each inference beside what it rests on, the rest of the answer and the
-// figures its tables and charts show, each figure as the page writes it, and
-// gives it a verdict, each inference in a call of its own (#376). The verdict
-// sets what a chat turn shows (shownAs, answer-trace.ts answerTurn).
+// figures its tables show (a chart by each line's last value), each figure as
+// the page writes it, and gives it a verdict, each inference in a call of its
+// own (#376). The verdict sets what a chat turn shows (shownAs, answer-trace.ts
+// answerTurn).
 
 import { createLlmRouterFromEnv, type LlmChatClient, type LlmChatMessage, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
 import { isRecord } from "../../shared/src/http.ts";
@@ -29,8 +30,8 @@ export type JudgeCase = {
   // The answer's other accepted observations and comparisons, rendered the
   // same way; the page may show an observation only inside a comparison.
   context: ReadonlyArray<string>;
-  // Every figure the page's tables and charts show, a line per table; the
-  // same for each of an answer's inferences.
+  // Every figure the page's tables show, a chart by each line's last value, a
+  // line per table; the same for each of an answer's inferences.
   figures: ReadonlyArray<string>;
 };
 
@@ -75,11 +76,11 @@ export type JudgeRecord =
 
 // The reader waits on the judge for each inference, with the figures shown;
 // the deadlines are per call, one call per inference. Measured on Haiku over
-// the 14 recorded traces' 12 judged answers, when one call judged all of an
-// answer's 1 to 3 inferences: 2.4 to 6.6 s, about 10 ms per output token plus
-// a second, so a call of one is no slower. One attempt of 1.5 times the
-// slowest: the judge model has no fallback (JUDGE_LITELLM_MODEL alone), and a
-// late verdict only costs its inference, which stays hidden.
+// 150 calls carrying figures_shown (1,694 to 2,919 input tokens; the recorded
+// traces and three mutation runs, 2026-10-22): median 2.8 s, p95 4.0 s,
+// slowest 6.3 s. One attempt of about 1.6 times the slowest: the judge model
+// has no fallback (JUDGE_LITELLM_MODEL alone), and a late verdict only costs
+// its inference, which stays hidden.
 // ceil(11000 / 10000) - 1 = 1 attempt.
 export const JUDGE_DEADLINES: ModelDeadlines = { attemptMs: 10_000, totalMs: 11_000 };
 
@@ -220,9 +221,10 @@ const JUDGE_INSTRUCTIONS = [
   "gives it, each claim as its source words it), the checked results of the comparisons among them, and its",
   "subject, the company it is about. rest_of_answer is the answer's other checked observations and comparisons,",
   "written the same way; the page may show one of them inside a comparison that states its figures.",
-  "figures_shown holds the figures the page's tables and charts show, a line per table, headed by its title when it",
-  "has one. companies lists every company the answer covers; rest_of_answer and figures_shown cover every one of",
-  "them, and an inference may rest on another company's figures when it compares them. Judge each inference",
+  "figures_shown holds the figures the page's tables show, a chart by each line's last value, a line per table,",
+  "headed by its title when it has one. companies lists every company the answer covers. rest_of_answer and",
+  "figures_shown are not limited to the inference's subject: an inference may rest on another company's figures",
+  "when it compares them. Judge each inference",
   "against its subject, checked results, supports, rest_of_answer and figures_shown; no outside knowledge, and",
   "nothing from another inference. A company may be named by ticker, name or alias, in any case (\"nvda\",",
   "\"Nvidia\", \"Advanced Micro Devices\"): naming one is fine, but what the inference says about it must be backed",
