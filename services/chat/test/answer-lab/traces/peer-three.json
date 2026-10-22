@@ -3482,13 +3482,13 @@
         "index": 9,
         "verdict": "unsupported",
         "worded_amount": false,
-        "reason": "The NVDA leadership claims are supported by the checked results, but the claim that AMD's low net margin reflects heavy investment is a cause the answer never states or implies."
+        "reason": "The ranking claims are backed (NVDA leads on gross margin, net margin and growth; AMD has the lowest net margin), but the claim that AMD's low margin means it is still investing heavily is a cause the answer never states or implies."
       },
       {
         "index": 10,
         "verdict": "unsupported",
         "worded_amount": false,
-        "reason": "The answer cites the $800M export-control charge and AMD's 12.0% net margin but never links the charge to the margin, and it says nothing about whether the headwind was one-off or structural."
+        "reason": "The answer cites the roughly $800 million export-control charge but never states that it depressed AMD's net margin or that it was a one-year headwind rather than a structural ceiling."
       }
     ]
   },
@@ -3681,10 +3681,6 @@
         },
         {
           "type": "text",
-          "text": ", 20.9 percentage points above AMD"
-        },
-        {
-          "type": "text",
           "text": "."
         },
         {
@@ -3736,10 +3732,6 @@
         {
           "type": "text",
           "text": " (FY2025, ended Sep 2025)"
-        },
-        {
-          "type": "text",
-          "text": ", 26.7 percentage points above AAPL"
         },
         {
           "type": "text",
@@ -3797,10 +3789,6 @@
         },
         {
           "type": "text",
-          "text": ", 14.9 percentage points below AAPL"
-        },
-        {
-          "type": "text",
           "text": "."
         },
         {
@@ -3852,10 +3840,6 @@
         {
           "type": "text",
           "text": " (FY2025, ended Sep 2025)"
-        },
-        {
-          "type": "text",
-          "text": ", 26.4 percentage points above AMD"
         },
         {
           "type": "text",
@@ -3963,16 +3947,16 @@
           },
           {
             "role": "user",
-            "content": "{\"companies\":[\"NVDA\",\"AMD\",\"AAPL\"],\"inferences\":[{\"id\":9,\"subject\":null,\"text\":\"NVDA's combination of the highest margins and fastest growth makes it the standout on profitability and momentum, while AMD's low net margin suggests it is still investing heavily relative to its revenue base.\",\"checked_results\":[\"NVDA highest on gross margin, net margin, and revenue growth (YoY)\",\"AMD lowest on net margin\"],\"supports\":[\"NVDA's revenue was $209.9B, gross margin 70.8% and net margin 53.6% in FY2026 (ended Jan 2026).\",\"AMD's revenue was $34.7B, gross margin 49.9% and net margin 12.0% in FY2025 (ended Dec 2025).\",\"AAPL's revenue was $416.2B, gross margin 46.9% and net margin 26.9% in FY2025 (ended Sep 2025).\",\"Of NVDA, AMD, and AAPL, NVDA's gross margin was highest: NVDA 70.8% (FY2026, ended Jan 2026), AMD 49.9% (FY2025, ended Dec 2025), AAPL 46.9% (FY2025, ended Sep 2025), 20.9 percentage points above AMD.\",\"Of NVDA, AMD, and AAPL, NVDA's net margin was highest: NVDA 53.6% (FY2026, ended Jan 2026), AMD 12.0% (FY2025, ended Dec 2025), AAPL 26.9% (FY2025, ended Sep 2025), 26.7 percentage points above AAPL.\",\"Of NVDA, AMD, and AAPL, AMD's net margin was lowest: NVDA 53.6% (FY2026, ended Jan 2026), AMD 12.0% (FY2025, ended Dec 2025), AAPL 26.9% (FY2025, ended Sep 2025), 14.9 percentage points below AAPL.\",\"Of NVDA, AMD, and AAPL, NVDA's revenue growth (YoY) was highest: NVDA 60.9% (FY2026, ended Jan 2026), AMD 34.5% (FY2025, ended Dec 2025), AAPL 6.4% (FY2025, ended Sep 2025), 26.4 percentage points above AMD.\"],\"rest_of_answer\":[\"Of NVDA, AMD, and AAPL, AAPL's revenue was highest: NVDA $209.9B (FY2026, ended Jan 2026), AMD $34.7B (FY2025, ended Dec 2025), AAPL $416.2B (FY2025, ended Sep 2025).\"],\"figures_shown\":[\"Side by side: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025), AAPL FY2025 (ended Sep 2025); fiscal years end up to 4 months apart: NVDA's revenue was $209.9B, gross margin 70.8%, net margin 53.6% and revenue growth (YoY) 60.9% in FY2026 (ended Jan 2026); AMD's revenue was $34.7B, gross margin 49.9%, net margin 12.0% and revenue growth (YoY) 34.5% in FY2025 (ended Dec 2025); AAPL's revenue was $416.2B, gross margin 46.9%, net margin 26.9% and revenue growth (YoY) 6.4% in FY2025 (ended Sep 2025).\",\"Price return (split-adjusted, excluding dividends): NVDA's price return was 6.6% in Dec 2025 to Aug 2026; AMD's price return was 3.58% in Dec 2025 to Aug 2026; AAPL's price return was 6.05% in Dec 2025 to Aug 2026.\"]}]}"
+            "content": "{\"companies\":[\"NVDA\",\"AMD\",\"AAPL\"],\"inferences\":[{\"id\":9,\"subject\":null,\"text\":\"NVDA's combination of the highest margins and fastest growth makes it the standout on profitability and momentum, while AMD's low net margin suggests it is still investing heavily relative to its revenue base.\",\"checked_results\":[\"NVDA highest on gross margin, net margin, and revenue growth (YoY)\",\"AMD lowest on net margin\"],\"supports\":[\"NVDA's revenue was $209.9B, gross margin 70.8% and net margin 53.6% in FY2026 (ended Jan 2026).\",\"AMD's revenue was $34.7B, gross margin 49.9% and net margin 12.0% in FY2025 (ended Dec 2025).\",\"AAPL's revenue was $416.2B, gross margin 46.9% and net margin 26.9% in FY2025 (ended Sep 2025).\",\"Of NVDA, AMD, and AAPL, NVDA's gross margin was highest: NVDA 70.8% (FY2026, ended Jan 2026), AMD 49.9% (FY2025, ended Dec 2025), AAPL 46.9% (FY2025, ended Sep 2025).\",\"Of NVDA, AMD, and AAPL, NVDA's net margin was highest: NVDA 53.6% (FY2026, ended Jan 2026), AMD 12.0% (FY2025, ended Dec 2025), AAPL 26.9% (FY2025, ended Sep 2025).\",\"Of NVDA, AMD, and AAPL, AMD's net margin was lowest: NVDA 53.6% (FY2026, ended Jan 2026), AMD 12.0% (FY2025, ended Dec 2025), AAPL 26.9% (FY2025, ended Sep 2025).\",\"Of NVDA, AMD, and AAPL, NVDA's revenue growth (YoY) was highest: NVDA 60.9% (FY2026, ended Jan 2026), AMD 34.5% (FY2025, ended Dec 2025), AAPL 6.4% (FY2025, ended Sep 2025).\"],\"rest_of_answer\":[\"Of NVDA, AMD, and AAPL, AAPL's revenue was highest: NVDA $209.9B (FY2026, ended Jan 2026), AMD $34.7B (FY2025, ended Dec 2025), AAPL $416.2B (FY2025, ended Sep 2025).\"],\"figures_shown\":[\"Side by side: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025), AAPL FY2025 (ended Sep 2025); fiscal years end up to 4 months apart: NVDA's revenue was $209.9B, gross margin 70.8%, net margin 53.6% and revenue growth (YoY) 60.9% in FY2026 (ended Jan 2026); AMD's revenue was $34.7B, gross margin 49.9%, net margin 12.0% and revenue growth (YoY) 34.5% in FY2025 (ended Dec 2025); AAPL's revenue was $416.2B, gross margin 46.9%, net margin 26.9% and revenue growth (YoY) 6.4% in FY2025 (ended Sep 2025).\",\"Price return (split-adjusted, excluding dividends): NVDA's price return was 6.6% in Dec 2025 to Aug 2026; AMD's price return was 3.58% in Dec 2025 to Aug 2026; AAPL's price return was 6.05% in Dec 2025 to Aug 2026.\"]}]}"
           }
         ],
-        "text": "{\"verdicts\":[{\"id\":9,\"verdict\":\"unsupported\",\"worded_amount\":false,\"reason\":\"The NVDA leadership claims are supported by the checked results, but the claim that AMD's low net margin reflects heavy investment is a cause the answer never states or implies.\"}]}",
+        "text": "{\"verdicts\":[{\"id\":9,\"verdict\":\"unsupported\",\"worded_amount\":false,\"reason\":\"The ranking claims are backed (NVDA leads on gross margin, net margin and growth; AMD has the lowest net margin), but the claim that AMD's low margin means it is still investing heavily is a cause the answer never states or implies.\"}]}",
         "truncated": false,
         "deployment": "anthropic/claude-haiku-5-5",
-        "latency_ms": 6990,
+        "latency_ms": 4171,
         "usage": {
-          "input_tokens": 2452,
-          "output_tokens": 337
+          "input_tokens": 2395,
+          "output_tokens": 257
         }
       }
     },
@@ -3986,16 +3970,16 @@
           },
           {
             "role": "user",
-            "content": "{\"companies\":[\"NVDA\",\"AMD\",\"AAPL\"],\"inferences\":[{\"id\":10,\"subject\":null,\"text\":\"AMD's net margin may have been depressed by the export-control charge management disclosed, which is a headwind specific to that fiscal year rather than a structural margin ceiling.\",\"checked_results\":[],\"supports\":[\"AMD's revenue was $34.7B, gross margin 49.9% and net margin 12.0% in FY2025 (ended Dec 2025).\",\"According to a source dated Aug 2025, effective Jun 2025 on AMD: As previously announced, our second quarter results were impacted by the U.S. Government's export control on our AMD Instinct MI308 data center GPU products. For the quarter, these restrictions led to approximately $800 million in inventory and related charges.\"],\"rest_of_answer\":[\"NVDA's revenue was $209.9B, gross margin 70.8% and net margin 53.6% in FY2026 (ended Jan 2026).\",\"AAPL's revenue was $416.2B, gross margin 46.9% and net margin 26.9% in FY2025 (ended Sep 2025).\",\"Of NVDA, AMD, and AAPL, NVDA's gross margin was highest: NVDA 70.8% (FY2026, ended Jan 2026), AMD 49.9% (FY2025, ended Dec 2025), AAPL 46.9% (FY2025, ended Sep 2025), 20.9 percentage points above AMD.\",\"Of NVDA, AMD, and AAPL, NVDA's net margin was highest: NVDA 53.6% (FY2026, ended Jan 2026), AMD 12.0% (FY2025, ended Dec 2025), AAPL 26.9% (FY2025, ended Sep 2025), 26.7 percentage points above AAPL.\",\"Of NVDA, AMD, and AAPL, AMD's net margin was lowest: NVDA 53.6% (FY2026, ended Jan 2026), AMD 12.0% (FY2025, ended Dec 2025), AAPL 26.9% (FY2025, ended Sep 2025), 14.9 percentage points below AAPL.\",\"Of NVDA, AMD, and AAPL, NVDA's revenue growth (YoY) was highest: NVDA 60.9% (FY2026, ended Jan 2026), AMD 34.5% (FY2025, ended Dec 2025), AAPL 6.4% (FY2025, ended Sep 2025), 26.4 percentage points above AMD.\",\"Of NVDA, AMD, and AAPL, AAPL's revenue was highest: NVDA $209.9B (FY2026, ended Jan 2026), AMD $34.7B (FY2025, ended Dec 2025), AAPL $416.2B (FY2025, ended Sep 2025).\"],\"figures_shown\":[\"Side by side: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025), AAPL FY2025 (ended Sep 2025); fiscal years end up to 4 months apart: NVDA's revenue was $209.9B, gross margin 70.8%, net margin 53.6% and revenue growth (YoY) 60.9% in FY2026 (ended Jan 2026); AMD's revenue was $34.7B, gross margin 49.9%, net margin 12.0% and revenue growth (YoY) 34.5% in FY2025 (ended Dec 2025); AAPL's revenue was $416.2B, gross margin 46.9%, net margin 26.9% and revenue growth (YoY) 6.4% in FY2025 (ended Sep 2025).\",\"Price return (split-adjusted, excluding dividends): NVDA's price return was 6.6% in Dec 2025 to Aug 2026; AMD's price return was 3.58% in Dec 2025 to Aug 2026; AAPL's price return was 6.05% in Dec 2025 to Aug 2026.\"]}]}"
+            "content": "{\"companies\":[\"NVDA\",\"AMD\",\"AAPL\"],\"inferences\":[{\"id\":10,\"subject\":null,\"text\":\"AMD's net margin may have been depressed by the export-control charge management disclosed, which is a headwind specific to that fiscal year rather than a structural margin ceiling.\",\"checked_results\":[],\"supports\":[\"AMD's revenue was $34.7B, gross margin 49.9% and net margin 12.0% in FY2025 (ended Dec 2025).\",\"According to a source dated Aug 2025, effective Jun 2025 on AMD: As previously announced, our second quarter results were impacted by the U.S. Government's export control on our AMD Instinct MI308 data center GPU products. For the quarter, these restrictions led to approximately $800 million in inventory and related charges.\"],\"rest_of_answer\":[\"NVDA's revenue was $209.9B, gross margin 70.8% and net margin 53.6% in FY2026 (ended Jan 2026).\",\"AAPL's revenue was $416.2B, gross margin 46.9% and net margin 26.9% in FY2025 (ended Sep 2025).\",\"Of NVDA, AMD, and AAPL, NVDA's gross margin was highest: NVDA 70.8% (FY2026, ended Jan 2026), AMD 49.9% (FY2025, ended Dec 2025), AAPL 46.9% (FY2025, ended Sep 2025).\",\"Of NVDA, AMD, and AAPL, NVDA's net margin was highest: NVDA 53.6% (FY2026, ended Jan 2026), AMD 12.0% (FY2025, ended Dec 2025), AAPL 26.9% (FY2025, ended Sep 2025).\",\"Of NVDA, AMD, and AAPL, AMD's net margin was lowest: NVDA 53.6% (FY2026, ended Jan 2026), AMD 12.0% (FY2025, ended Dec 2025), AAPL 26.9% (FY2025, ended Sep 2025).\",\"Of NVDA, AMD, and AAPL, NVDA's revenue growth (YoY) was highest: NVDA 60.9% (FY2026, ended Jan 2026), AMD 34.5% (FY2025, ended Dec 2025), AAPL 6.4% (FY2025, ended Sep 2025).\",\"Of NVDA, AMD, and AAPL, AAPL's revenue was highest: NVDA $209.9B (FY2026, ended Jan 2026), AMD $34.7B (FY2025, ended Dec 2025), AAPL $416.2B (FY2025, ended Sep 2025).\"],\"figures_shown\":[\"Side by side: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025), AAPL FY2025 (ended Sep 2025); fiscal years end up to 4 months apart: NVDA's revenue was $209.9B, gross margin 70.8%, net margin 53.6% and revenue growth (YoY) 60.9% in FY2026 (ended Jan 2026); AMD's revenue was $34.7B, gross margin 49.9%, net margin 12.0% and revenue growth (YoY) 34.5% in FY2025 (ended Dec 2025); AAPL's revenue was $416.2B, gross margin 46.9%, net margin 26.9% and revenue growth (YoY) 6.4% in FY2025 (ended Sep 2025).\",\"Price return (split-adjusted, excluding dividends): NVDA's price return was 6.6% in Dec 2025 to Aug 2026; AMD's price return was 3.58% in Dec 2025 to Aug 2026; AAPL's price return was 6.05% in Dec 2025 to Aug 2026.\"]}]}"
           }
         ],
-        "text": "{\"verdicts\":[{\"id\":10,\"verdict\":\"unsupported\",\"worded_amount\":false,\"reason\":\"The answer cites the $800M export-control charge and AMD's 12.0% net margin but never links the charge to the margin, and it says nothing about whether the headwind was one-off or structural.\"}]}",
+        "text": "{\"verdicts\":[{\"id\":10,\"verdict\":\"unsupported\",\"worded_amount\":false,\"reason\":\"The answer cites the roughly $800 million export-control charge but never states that it depressed AMD's net margin or that it was a one-year headwind rather than a structural ceiling.\"}]}",
         "truncated": false,
         "deployment": "anthropic/claude-haiku-5-5",
-        "latency_ms": 5569,
+        "latency_ms": 3583,
         "usage": {
-          "input_tokens": 2508,
-          "output_tokens": 334
+          "input_tokens": 2450,
+          "output_tokens": 291
         }
       }
     }

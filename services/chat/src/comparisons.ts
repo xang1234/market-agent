@@ -31,9 +31,6 @@ export type CheckedComparison = {
   figures: ReadonlyArray<PacketFigure>;
   // The high or low claimed (highest/lowest).
   winner?: PacketFigure;
-  // A cohort high or low of percents, every covered company shown: its gap to
-  // the closest other on the displayed values, and every other at that value.
-  lead?: { gap: string; over: ReadonlyArray<PacketFigure> };
   // every_step: it moved the net way in every period, with none missing.
   // ends_at: the last period is strictly the window's high or low.
   trend?: { result: TrendResult; net: Direction; every_step: boolean; turn?: PacketFigure; ends_at?: "high" | "low" };
@@ -129,16 +126,7 @@ export function checkComparison(
       if (order === 0) return fail(`${label(winner)} and ${label(other)} cannot be told apart at the precision shown`);
       if (order !== sign) return fail(`${label(other)} is ${op === "highest" ? "higher" : "lower"} than ${label(winner)}`);
     }
-    // ponytail: percents only; amounts and multiples carry mixed scale suffixes. Add when an eval needs a scale gap.
-    if (axis !== "cohort" || not_shown.length > 0 || !values[0]!.kind.endsWith("|%")) return { comparison: { ...base, figures, winner } };
-    const won = valueOf.get(winner)!;
-    const others = figures.filter((figure) => figure !== winner);
-    const distance = (figure: PacketFigure) => Math.abs(valueOf.get(figure)!.mid - won.mid);
-    const closest = valueOf.get(others.reduce((best, figure) => (distance(figure) < distance(best) ? figure : best)))!;
-    const over = others.filter((figure) => valueOf.get(figure)!.mid === closest.mid);
-    const digits = Math.max(won.digits, closest.digits);
-    const gap = (Math.abs(Math.round(won.mid * 10 ** digits) - Math.round(closest.mid * 10 ** digits)) / 10 ** digits).toFixed(digits);
-    return { comparison: { ...base, figures, winner, lead: { gap, over } } };
+    return { comparison: { ...base, figures, winner } };
   }
 
   if (op === "order") {
@@ -269,7 +257,7 @@ function missingPeriod(figures: ReadonlyArray<PacketFigure>): string | undefined
   return undefined;
 }
 
-type Interval = { kind: string; low: number; high: number; mid: number; digits: number };
+type Interval = { kind: string; low: number; high: number; mid: number };
 
 const SCALES: Readonly<Record<string, number>> = { "": 1, K: 1e3, M: 1e6, B: 1e9, T: 1e12 };
 
@@ -284,7 +272,7 @@ function interval(value: string): Interval | undefined {
   const scale = SCALES[unit ? "" : suffix!]!;
   const mid = (sign === "-" || sign === "−" ? -1 : 1) * Number(`${whole!.replace(/,/g, "")}.${fraction || "0"}`) * scale;
   const half = 0.5 * 10 ** -fraction.length * scale;
-  return { kind: `${prefix!.trim()}|${unit}`, low: mid - half, high: mid + half, mid, digits: fraction.length };
+  return { kind: `${prefix!.trim()}|${unit}`, low: mid - half, high: mid + half, mid };
 }
 
 // Ordered only when the intervals do not overlap; a shared edge is two
