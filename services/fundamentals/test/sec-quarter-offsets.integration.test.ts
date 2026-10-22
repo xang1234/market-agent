@@ -33,12 +33,14 @@ const FILINGS: ReadonlyArray<readonly [Filing, start: string, end: string]> = [
 ];
 
 function companyFacts(filed: ReadonlyArray<string>) {
-  const concept = (tokens: ReadonlyArray<string>) => ({
+  const concept = (tokens: ReadonlyArray<string | null>, unit = "USD", instant = false) => ({
     label: "",
     description: "",
     units: {
-      USD: FILINGS.flatMap(([filing, start, end], index) =>
-        filed.includes(filing.accn) ? [{ start, end, val: Number(tokens[index]), val_token: tokens[index], ...filing }] : []),
+      [unit]: FILINGS.flatMap(([filing, start, end], index) => {
+        const token = tokens[index];
+        return filed.includes(filing.accn) && token !== null ? [{ ...(instant ? {} : { start }), end, val: Number(token), val_token: token, ...filing }] : [];
+      }),
     },
   });
   return {
@@ -48,6 +50,8 @@ function companyFacts(filed: ReadonlyArray<string>) {
       "us-gaap": {
         Revenues: concept(["100", "110", "120", "460", "140", "150", "160", "620", "180"]),
         NetIncomeLoss: concept(["10", "11", "12", "46", "14", "15", "16", "62", "18"]),
+        EarningsPerShareDiluted: concept(["0.1", "0.11", "0.12", "0.46", "0.14", "0.15", "0.16", "0.62", "0.18"], "USD/shares"),
+        Assets: concept([null, null, null, "1000", null, null, null, "1100", "1150"], "USD", true),
       },
     },
   };
@@ -67,7 +71,7 @@ const POLICY: SelectionPolicy = { knowledge_cutoff: "2026-10-02T00:00:00.000Z", 
 function landed(result: ReturnType<typeof selectInput>): string {
   if (result.status === "gap") return `gap ${result.reason_code}`;
   const { fiscal_period, fiscal_year } = result.input.candidate.period;
-  return `${fiscal_period} FY${fiscal_year} ${result.input.numeric.native_value}`;
+  return `${fiscal_period === "FY" ? "" : `${fiscal_period} `}FY${fiscal_year} ${result.input.numeric.native_value}`;
 }
 
 test("latest quarterly offsets on SEC-ingested statements", { timeout: 300_000 }, async (t) => {
@@ -127,6 +131,11 @@ test("latest quarterly offsets on SEC-ingested statements", { timeout: 300_000 }
       "Q2 FY2023 110",
       "Q1 FY2023 100",
     ]);
+    const eps = await candidates("eps_diluted");
+    assert.deepEqual([0, 1].map((offset) => landed(selectInput(latestQuarter("eps_diluted", offset), eps, POLICY))), [
+      "gap missing_input",
+      "Q3 FY2024 0.16",
+    ], "no EPS Q4 is derived, and the FY2024 10-K still reports the fourth quarter");
   });
 
   await t.test("after the next Q1, one quarter back is the prior year's Q4 and four back is the prior Q1", async () => {
@@ -136,6 +145,20 @@ test("latest quarterly offsets on SEC-ingested statements", { timeout: 300_000 }
       "Q1 FY2025 180",
       "gap precision_unverified",
       "Q1 FY2024 140",
+    ]);
+  });
+
+  await t.test("the Q1 10-Q's balance, stored as FY2025 without a context, leaves FY2024 the latest fiscal year", async () => {
+    const latestYear = (metric: string): ReportedMetricNode => ({ ...latestQuarter(metric, 0), period: { kind: "latest", period_type: "annual", offset: 0 } });
+    const slots = [
+      { node: latestYear("total_assets"), candidates: await candidates("total_assets") },
+      { node: latestYear("revenue"), candidates: await candidates("revenue") },
+    ];
+    assert.ok(slots[0]!.candidates.some((candidate) => candidate.period.fiscal_year === 2025 && candidate.context === null));
+    const periods = sharedLatestPeriods(slots, POLICY);
+    assert.deepEqual(slots.map(({ node, candidates }) => landed(selectInput(node, candidates, POLICY, { truncated: false }, periods.get(node.node_id)!))), [
+      "FY2024 1100",
+      "FY2024 620",
     ]);
   });
 

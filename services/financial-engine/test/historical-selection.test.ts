@@ -285,12 +285,12 @@ const QUARTER_DATES: Record<Quarter, readonly [start: string, end: string, publi
   Q1: ["01-01", "03-31", "05-10"],
   Q2: ["04-01", "06-30", "08-10"],
   Q3: ["07-01", "09-30", "11-10"],
-  Q4: ["10-01", "12-31", "12-31"],
+  Q4: ["10-01", "12-31", "02-20"],
 };
 
 function quarter(year: number, period: Quarter, spec: CandidateSpec = {}): InputCandidate {
   const [start, end, published] = QUARTER_DATES[period];
-  return candidate({ year, period, start: `${year}-${start}`, end: `${year}-${end}`, publishedLocalDate: period === "Q4" ? `${year + 1}-02-20` : `${year}-${published}`, ...spec });
+  return candidate({ year, period, start: `${year}-${start}`, end: `${year}-${end}`, publishedLocalDate: `${period === "Q4" ? year + 1 : year}-${published}`, ...spec });
 }
 
 const derivedQ4 = (year: number) => quarter(year, "Q4", { precision: null, context: null });
@@ -350,7 +350,7 @@ test("an annual offset counts fiscal years back from the latest; an uncertifiabl
   ]);
 });
 
-test("a newer period with no publication proof, reported only for a segment, or in another unit kind does not define the latest (#469)", () => {
+test("a newer period with no publication proof, reported only for a segment, or in another unit kind does not define the latest, and does not bind (#469)", () => {
   const segment = { ...quarter(2024, "Q3").context!, dimension_scope: "segment" as const, dimension_members: [{ axis: "srt:ProductOrServiceAxis", member: "acme:CloudMember" }] };
   const candidates = [
     quarter(2024, "Q2"),
@@ -360,6 +360,43 @@ test("a newer period with no publication proof, reported only for a segment, or 
   ];
   const atCutoff = policy({ knowledge_cutoff: "2025-06-01T00:00:00Z" });
   assert.deepEqual([0, 1].map((offset) => landed(selectInput(latestQuarter(offset), candidates, atCutoff))), ["Q2 FY2024", "gap missing_input"]);
+  const named = (fiscal_period: Quarter): ReportedMetricNode => ({ ...FY2023, period: { kind: "fiscal_period", fiscal_year: 2024, fiscal_period } });
+  assert.deepEqual([named("Q3"), named("Q4")].map((node) => landed(selectInput(node, candidates, atCutoff))), ["gap incompatible_scope", "gap incompatible_unit"]);
+});
+
+test("a balance without a financial context, as a 10-Q's labelled FY is stored, does not define the latest fiscal year (#469)", () => {
+  const instant = (metric: string, input: InputCandidate): InputCandidate => ({ ...input, metric_key: metric, period: { ...input.period, start: null } });
+  const latestYear = (nodeId: string, metric: string): ReportedMetricNode => ({ ...FY2023, node_id: nodeId, metric_key: metric, period: { kind: "latest", period_type: "annual", offset: 0 } });
+  const slots = [
+    { node: latestYear("a_assets", "total_assets"), candidates: [
+      instant("total_assets", candidate({ year: 2024, value: "600" })),
+      instant("total_assets", candidate({ year: 2025, end: "2025-03-31", value: "650", publishedLocalDate: "2025-05-10", context: null })),
+    ] },
+    { node: latestYear("a_rev", "revenue"), candidates: [candidate({ year: 2024, value: "400" })] },
+  ];
+  const atCutoff = policy({ knowledge_cutoff: "2025-06-01T00:00:00Z" });
+  const periods = sharedLatestPeriods(slots, atCutoff);
+  assert.deepEqual(slots.map(({ node, candidates }) => landed(selectInput(node, candidates, atCutoff, { truncated: false }, periods.get(node.node_id)!))), ["FY2024", "FY2024"]);
+});
+
+test("a fiscal year reports its fourth quarter, so a metric with no Q4 row still counts it (#469)", () => {
+  const eps = (input: InputCandidate): InputCandidate => ({ ...input, metric_key: "eps_diluted", unit: { kind: "currency_per_share", currency: "USD" } });
+  const node: ReportedMetricNode = { ...FY2023, metric_key: "eps_diluted" };
+  const candidates = [quarter(2024, "Q1"), quarter(2024, "Q2"), quarter(2024, "Q3"), candidate({ year: 2024 })].map(eps);
+  assert.deepEqual([0, 1].map((offset) => landed(selectInput(latestQuarter(offset, node), candidates, policy({ knowledge_cutoff: "2025-03-01T00:00:00Z" })))), [
+    "gap missing_input",
+    "Q3 FY2024",
+  ]);
+  const latestYear: ReportedMetricNode = { ...node, period: { kind: "latest", period_type: "annual", offset: 0 } };
+  assert.equal(landed(selectInput(latestYear, [...candidates, eps(quarter(2025, "Q1"))], policy({ knowledge_cutoff: "2025-06-01T00:00:00Z" }))), "FY2024", "a quarter does not report its fiscal year");
+});
+
+test("every four consecutive SEC quarters hold one derived Q4, so a trailing four-quarter sum is a gap until it is certified (#469)", () => {
+  const candidates = [...secQuarters(2023, 2024), quarter(2025, "Q1"), quarter(2025, "Q2"), quarter(2025, "Q3")];
+  for (const cutoff of ["2024-12-01", "2025-03-01", "2025-06-01", "2025-09-01", "2025-12-01"]) {
+    const window = [0, 1, 2, 3].map((offset) => landed(selectInput(latestQuarter(offset), candidates, policy({ knowledge_cutoff: `${cutoff}T00:00:00Z` }))));
+    assert.deepEqual(window.filter((entry) => entry.startsWith("gap")), ["gap precision_unverified"], `${cutoff}: ${window.join(", ")}`);
+  }
 });
 
 test("a margin's numerator and denominator land on one fiscal quarter, or each is a gap (#469)", () => {
