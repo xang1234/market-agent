@@ -6,8 +6,9 @@ import test from "node:test";
 import { bootstrapDatabase, connectedClient, connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
+import type { ScopeProposal } from "../src/research-scope.ts";
 import type { ChatSubjectPreResolution } from "../src/subjects.ts";
-import { chatHarness, completed } from "./financial-fixtures.ts";
+import { chatHarness, completed, NO_ASKS } from "./financial-fixtures.ts";
 import { GOLDEN_COMPANIES, seedGoldenDataset } from "./golden/dataset.ts";
 
 const OWNER = "10000000-0000-4000-8000-000000000001";
@@ -31,8 +32,8 @@ test("golden metric questions certify through the chat financial lane on the rec
   const replay = await createReplayLlmChatClient(join(import.meta.dirname, "golden", "llm-replies.json"));
   const model: PlanningModel = async ({ messages }) => ({ text: (await replay({} as never, { messages })).text, model: "recorded" });
 
-  const ask = async (userIntent: string) => {
-    const { events } = await chatHarness(pool, { model, resolveMention: resolveListing }).run({ threadId, userId: OWNER, userIntent });
+  const ask = async (userIntent: string, readQuestion?: () => Promise<ScopeProposal>) => {
+    const { events } = await chatHarness(pool, { model, resolveMention: resolveListing, ...(readQuestion ? { readQuestion } : {}) }).run({ threadId, userId: OWNER, userIntent });
     const done = completed(events);
     const message = (await client.query(`select blocks from chat_messages where message_id = $1`, [done.message_id])).rows[0];
     assert.ok(message, `expected a published answer; got ${JSON.stringify(done)}`);
@@ -59,5 +60,26 @@ test("golden metric questions certify through the chat financial lane on the rec
     ["a_ocf_input", "missing", null],
     ["a_capex_input", "missing", null],
     ["out_a_fcf", "blocked_dependency", null],
+  ]);
+  // The lane takes only a question with a metric word until routing changes
+  // (#398 step 6), so this one's reading is scripted. No recorded planner reply
+  // matches it: the overview needs none.
+  assert.deepEqual(await ask("Analyze NVDA's profit", async () => NO_ASKS), [
+    ["out_gross_profit_q0", "verified", "USD 46,200,000,000.00"],
+    ["out_operating_income_q0", "verified", "USD 40,300,000,000.00"],
+    ["out_net_income_q0", "verified", "USD 35,400,000,000.00"],
+    ["out_gross_margin", "verified", "74.40%"],
+    ["out_operating_margin", "verified", "64.90%"],
+    ["out_net_margin", "verified", "57.00%"],
+    ["out_revenue_qoq", "verified", "8.94%"],
+    ["out_revenue_yoy", "verified", "57.89%"],
+    ["out_revenue_q7", "verified", "USD 26,044,000,000.00"],
+    ["out_revenue_q6", "verified", "USD 30,040,000,000.00"],
+    ["out_revenue_q5", "verified", "USD 35,082,000,000.00"],
+    ["out_revenue_q4", "verified", "USD 39,331,000,000.00"],
+    ["out_revenue_q3", "verified", "USD 44,062,000,000.00"],
+    ["out_revenue_q2", "verified", "USD 46,743,000,000.00"],
+    ["out_revenue_q1", "verified", "USD 57,006,000,000.00"],
+    ["out_revenue_q0", "verified", "USD 62,100,000,000.00"],
   ]);
 });

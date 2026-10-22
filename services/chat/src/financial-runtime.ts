@@ -44,7 +44,8 @@ import { publishRequest, type RequestGap } from "../../financial-engine/src/requ
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { comparativeTurn, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId } from "./chat-ids.ts";
-import { noteBlock } from "./fact-blocks.ts";
+import { companyOverviewDraft } from "./company-overview.ts";
+import { noteBlock, requestedFiscalQuarter, requestedFiscalYear, requestedPriceWindow } from "./fact-blocks.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { COMPARATIVE, companyKey, extractSubjectMentions } from "./subject-extraction.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "./subjects.ts";
@@ -243,6 +244,12 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       plan: async () => {
         planned = await planTurn(planningModel, context, text, requested.subjects, authority, deps.clock?.() ?? new Date(), (subjects) => {
           asked = subjects;
+        }, {
+          carried: requested.carried.length > 0,
+          read: () => {
+            decideReading(true);
+            return reading;
+          },
         });
         return planned;
       },
@@ -409,6 +416,8 @@ async function planTurn(
   cutoff: Date,
   // Called with the companies to plan once a clarification pick is applied, before the model is.
   onSubjects: (subjects: ReadonlyArray<RequestedSubject>) => void,
+  // Whether a company is carried from the previous answer, and the reading of the question, started on call.
+  turn: Readonly<{ carried: boolean; read: () => Promise<ScopeProposal | null> }>,
 ): Promise<PlanningResult> {
   const planningContext = (subjects: ReadonlyArray<RequestedSubject>): PlanningContext => ({
     plan_id: randomUUID(),
@@ -433,7 +442,24 @@ async function planTurn(
   onSubjects(subjects);
   if (CASH_RESILIENCE.test(text)) return planCashResilience(planningContext(subjects), text);
   // A failing or unreachable model is a planning gap (publishRequest); the narrative composer is never a fallback for numbers.
-  return planFinancialRequest(planningContext(subjects), text, model ?? noModel);
+  const planned = planFinancialRequest(planningContext(subjects), text, model ?? noModel);
+  if (!aboutOneNamedCompany(subjects, turn.carried, text)) return planned;
+  // When the reading asks for no figure the overview answers, and the planner's outcome is dropped.
+  planned.catch(() => {});
+  return asksForNoFigure(await turn.read()) ? buildDeterministicPlan(planningContext(subjects), companyOverviewDraft(subjects[0]!.mention)) : planned;
+}
+
+// One company the message names, resolved, for no period or price window:
+// its overview answers it if the reading asks for no figure (#398).
+function aboutOneNamedCompany(subjects: ReadonlyArray<RequestedSubject>, carried: boolean, text: string): boolean {
+  return subjects.length === 1 && subjects[0]!.resolution.status === "resolved" && !carried &&
+    requestedFiscalYear(text) === undefined && requestedFiscalQuarter(text) === undefined && requestedPriceWindow(text) === undefined;
+}
+
+// No reading is no answer to whether it asks for a figure: the planner plans the question.
+function asksForNoFigure(reading: ScopeProposal | null): boolean {
+  return reading !== null && reading.metrics.length === 0 && reading.income_items.length === 0 &&
+    [...readingAsks(reading).asks].every((facet) => facet === "latest_quarter");
 }
 
 const CASH_RESILIENCE = /\bcash[- ]resilience\b/iu;
