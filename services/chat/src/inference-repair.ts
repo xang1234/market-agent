@@ -88,6 +88,12 @@ export function requestRepair(input: {
   });
 }
 
+// Words that differ only in spacing, case or a closing stop.
+function sameWords(a: string, b: string): boolean {
+  const words = (text: string) => text.trim().replace(/\s+/g, " ").toLowerCase().replace(/[.!?;:,\s]+$/, "");
+  return words(a) === words(b);
+}
+
 // The list with each repaired inference in its entry's place: the entry as
 // written, under the fields the repair gives it (its supports, subject and
 // evidence stay unless it lists its own). Only the first analyst_inference per
@@ -101,9 +107,9 @@ export function repairedList(list: ReadonlyArray<unknown>, requests: ReadonlyArr
     if (!isRecord(entry) || entry.kind !== "analyst_inference" || typeof entry.index !== "number") continue;
     const { index, ...fields } = entry;
     if (repaired.includes(index) || !requests.some((request) => request.index === index)) continue;
-    // The same words again are no repair: a second verdict on them is only the
-    // judge's variance.
-    if (isRecord(list[index]) && list[index].text === fields.text) continue;
+    // No text, or the same words again, is no repair: a second verdict on the
+    // same words is only the judge's variance.
+    if (typeof fields.text !== "string" || (isRecord(list[index]) && typeof list[index].text === "string" && sameWords(list[index].text, fields.text))) continue;
     merged[index] = { ...(isRecord(list[index]) ? list[index] : {}), ...fields };
     repaired.push(index);
   }

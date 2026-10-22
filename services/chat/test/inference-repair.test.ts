@@ -518,6 +518,38 @@ test("a repair that gives back the same words is no repair: the judge is not ask
   assert.deepEqual(calls.sort(), ["answer", "judge 7", "judge 8", "repair"]);
 });
 
+test("a repair that changes only spacing, case or the closing stop is the same words, and one with no text is no repair: neither is judged again", async (t) => {
+  t.mock.method(console, "info", () => {});
+  const firsts: Array<[string, LlmChatResult, string]> = [
+    ["entailed, worded", verdict(8, "entailed", true, GAP_REASON), fiscal(PROFITABILITY, UNVERIFIED_GAP)],
+    ["contradicted", verdict(8, "contradicted", false, "the ends are not shown."), fiscal(PROFITABILITY)],
+  ];
+  const repairs: Array<[string, Record<string, unknown>]> = [
+    ["a trailing space", inference(8, `${GAP_TEXT} `)],
+    ["the stop dropped", inference(8, GAP_TEXT.slice(0, -1))],
+    ["spacing and case", inference(8, `  ${GAP_TEXT.replace("eight-month gap", "Eight-Month  gap")}`)],
+    ["no text", { kind: "analyst_inference", index: 8, supports: [0] }],
+    ["a text that is not a string", inference(8, 8 as unknown as string)],
+  ];
+  for (const [firstLabel, firstReply, saved] of firsts) {
+    for (const [label, entry] of repairs) {
+      const row = `${firstLabel}, ${label}`;
+      const { calls, createClient } = models(FISCAL, {
+        judge: (ask) => (ask.id === 7 ? verdict(7, "entailed") : ask.text === GAP_TEXT ? firstReply : verdict(8, "entailed")),
+        repair: () => fenced([entry]),
+      });
+      const answer = await answerTurn(FISCAL.input, turn(FISCAL), { env: JUDGED_ENV, createClient });
+      const seen: string[] = [];
+      answer.judging!.watch((blocks) => seen.push(text(blocks)));
+      const done = await answer.judging!.done;
+      assert.equal(text(done.blocks), saved, row);
+      assert.equal(seen.at(-1), saved, row);
+      assert.equal(done.assertions?.repaired, undefined, row);
+      assert.deepEqual(calls.sort(), ["answer", "judge 7", "judge 8", "repair"], row);
+    }
+  }
+});
+
 const MUTATIONS = fileURLToPath(new URL("./answer-lab/judge-mutations.json", import.meta.url));
 
 test("judge-mutations --repair sends a worded variant through the turn's repair round, on its answer request with the variant in its list, and reports its path", async () => {
