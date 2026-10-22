@@ -747,8 +747,7 @@
       {
         "index": 7,
         "verdict": "entailed",
-        "worded_amount": false,
-        "reason": "The four other segments total about $7.0B against Data Center's $55.2B in Q4 2026, so the figures bear out limited diversification relative to Data Center."
+        "worded_amount": false
       }
     ]
   },
@@ -917,13 +916,13 @@
             "content": "{\"companies\":[\"NVDA\"],\"inferences\":[{\"id\":6,\"subject\":\"NVDA\",\"text\":\"NVIDIA's revenue is heavily concentrated in Data Center, creating significant single-segment exposure for the consolidated top line.\",\"checked_results\":[\"revenue highest first: Data Center, Gaming, OEM & Other, Professional Visualization, Automotive\"],\"supports\":[\"By revenue, highest first: Data Center $55.2B, Gaming $4.3B, OEM & Other $1.1B, Professional Visualization $900.0M, Automotive $650.0M (Q4 2026, ended Jan 2026).\"],\"rest_of_answer\":[\"NVDA's Data Center revenue was $55.2B in Q4 2026 (ended Jan 2026).\",\"NVDA's Gaming revenue was $4.3B in Q4 2026 (ended Jan 2026).\",\"NVDA's OEM & Other revenue was $1.1B in Q4 2026 (ended Jan 2026).\",\"NVDA's Professional Visualization revenue was $900.0M in Q4 2026 (ended Jan 2026).\",\"NVDA's Automotive revenue was $650.0M in Q4 2026 (ended Jan 2026).\"],\"figures_shown\":[\"Revenue by segment (Q4 2026): NVDA's Data Center revenue was $55.2B, Gaming revenue $4.3B, OEM & Other revenue $1.1B, Professional Visualization revenue $900.0M and Automotive revenue $650.0M in Q4 2026 (ended Jan 2026).\"]}]}"
           }
         ],
-        "text": "{\"verdicts\":[{\"id\":6,\"verdict\":\"entailed\",\"worded_amount\":false}]}",
+        "text": "{\"verdicts\":[{\"id\":6,\"verdict\":\"entailed\",\"worded_amount\":false,\"reason\":\"\"}]}",
         "truncated": false,
         "deployment": "anthropic/claude-haiku-5-5",
-        "latency_ms": 2203,
+        "latency_ms": 2675,
         "usage": {
           "input_tokens": 1711,
-          "output_tokens": 185
+          "output_tokens": 157
         }
       }
     },
@@ -940,13 +939,13 @@
             "content": "{\"companies\":[\"NVDA\"],\"inferences\":[{\"id\":7,\"subject\":\"NVDA\",\"text\":\"The other four segments provide limited diversification cushion relative to Data Center's dominance.\",\"checked_results\":[\"revenue highest first: Data Center, Gaming, OEM & Other, Professional Visualization, Automotive\"],\"supports\":[\"By revenue, highest first: Data Center $55.2B, Gaming $4.3B, OEM & Other $1.1B, Professional Visualization $900.0M, Automotive $650.0M (Q4 2026, ended Jan 2026).\"],\"rest_of_answer\":[\"NVDA's Data Center revenue was $55.2B in Q4 2026 (ended Jan 2026).\",\"NVDA's Gaming revenue was $4.3B in Q4 2026 (ended Jan 2026).\",\"NVDA's OEM & Other revenue was $1.1B in Q4 2026 (ended Jan 2026).\",\"NVDA's Professional Visualization revenue was $900.0M in Q4 2026 (ended Jan 2026).\",\"NVDA's Automotive revenue was $650.0M in Q4 2026 (ended Jan 2026).\"],\"figures_shown\":[\"Revenue by segment (Q4 2026): NVDA's Data Center revenue was $55.2B, Gaming revenue $4.3B, OEM & Other revenue $1.1B, Professional Visualization revenue $900.0M and Automotive revenue $650.0M in Q4 2026 (ended Jan 2026).\"]}]}"
           }
         ],
-        "text": "{\"verdicts\":[{\"id\":7,\"verdict\":\"entailed\",\"worded_amount\":false,\"reason\":\"The four other segments total about $7.0B against Data Center's $55.2B in Q4 2026, so the figures bear out limited diversification relative to Data Center.\"}]}",
+        "text": "{\"verdicts\":[{\"id\":7,\"verdict\":\"entailed\",\"worded_amount\":false}]}",
         "truncated": false,
         "deployment": "anthropic/claude-haiku-5-5",
-        "latency_ms": 3051,
+        "latency_ms": 3624,
         "usage": {
           "input_tokens": 1694,
-          "output_tokens": 307
+          "output_tokens": 262
         }
       }
     }

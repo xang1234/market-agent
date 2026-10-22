@@ -938,7 +938,7 @@
         "index": 4,
         "text": "NVIDIA shows exceptionally high profitability and strong YoY growth, but single-digit sequential growth suggests the pace of incremental expansion is not accelerating.",
         "check": "judge",
-        "reason": "entailed, worded_amount: The 74.4%/64.9%/57.0% margins and 57.9% YoY growth support the profitability and growth claim, and the 8.9% QoQ figure is single-digit and below Q3's implied ~22% sequential rise, so the latest step is not accelerating."
+        "reason": "entailed, worded_amount: Q4 2026 QoQ growth of 8.9% is single-digit, and the quarterly series shows sequential growth slowing from about 22% in Q3 2026 to 8.9%, while margins (74.4%, 64.9%, 57.0%) and YoY growth (57.9%) support the profitability and growth claims."
       },
       {
         "index": 6,
@@ -956,13 +956,13 @@
         "index": 4,
         "verdict": "entailed",
         "worded_amount": true,
-        "reason": "The 74.4%/64.9%/57.0% margins and 57.9% YoY growth support the profitability and growth claim, and the 8.9% QoQ figure is single-digit and below Q3's implied ~22% sequential rise, so the latest step is not accelerating."
+        "reason": "Q4 2026 QoQ growth of 8.9% is single-digit, and the quarterly series shows sequential growth slowing from about 22% in Q3 2026 to 8.9%, while margins (74.4%, 64.9%, 57.0%) and YoY growth (57.9%) support the profitability and growth claims."
       },
       {
         "index": 5,
         "verdict": "unsupported",
         "worded_amount": false,
-        "reason": "The forecast that YoY growth will compress at the current sequential rate, and the claim that the year-ago base is small, are not stated or implied by the figures; the figures show sequential growth slowing from about 22% to 8.9%, but nothing projects the YoY rate."
+        "reason": "The answer shows YoY growth decelerating (about 69.6%, 55.7%, 62.4%, 57.9% across recent quarters) but never states that a small year-ago base causes the figure. The forecast that YoY will compress if sequential growth holds is also not shown."
       }
     ]
   },
@@ -1185,13 +1185,13 @@
             "content": "{\"companies\":[\"NVDA\"],\"inferences\":[{\"id\":4,\"subject\":\"NVDA\",\"text\":\"NVIDIA shows exceptionally high profitability and strong YoY growth, but single-digit sequential growth suggests the pace of incremental expansion is not accelerating.\",\"checked_results\":[\"NVDA's revenue rose in every period\"],\"supports\":[\"NVDA's gross margin was 74.4%, operating margin 64.9% and net margin 57.0% in Q4 2026 (ended Jan 2026).\",\"NVDA's revenue growth (QoQ) was 8.9% and revenue growth (YoY) 57.9% in Q4 2026 (ended Jan 2026).\",\"NVDA's revenue rose in every period from Q1 2025 ($26.0B) to Q4 2026 ($62.1B).\"],\"rest_of_answer\":[\"NVDA's revenue was $62.1B in Q4 2026 (ended Jan 2026).\"],\"figures_shown\":[\"Latest quarter (Q4 2026): NVDA's revenue was $62.1B, gross profit $46.2B, operating income $40.3B, net income $35.4B, gross margin 74.4%, operating margin 64.9%, net margin 57.0%, revenue growth (QoQ) 8.9% and revenue growth (YoY) 57.9% in Q4 2026 (ended Jan 2026).\",\"Quarterly revenue: NVDA's revenue was $26.0B in Q1 2025 (ended Apr 2024); NVDA's revenue was $30.0B in Q2 2025 (ended Jul 2024); NVDA's revenue was $35.1B in Q3 2025 (ended Oct 2024); NVDA's revenue was $39.3B in Q4 2025 (ended Jan 2025); NVDA's revenue was $44.1B in Q1 2026 (ended Apr 2025); NVDA's revenue was $46.7B in Q2 2026 (ended Jul 2025); NVDA's revenue was $57.0B in Q3 2026 (ended Oct 2025); NVDA's revenue was $62.1B in Q4 2026 (ended Jan 2026).\"]}]}"
           }
         ],
-        "text": "{\"verdicts\":[{\"id\":4,\"verdict\":\"entailed\",\"worded_amount\":true,\"reason\":\"The 74.4%/64.9%/57.0% margins and 57.9% YoY growth support the profitability and growth claim, and the 8.9% QoQ figure is single-digit and below Q3's implied ~22% sequential rise, so the latest step is not accelerating.\"}]}",
+        "text": "{\"verdicts\":[{\"id\":4,\"verdict\":\"entailed\",\"worded_amount\":true,\"reason\":\"Q4 2026 QoQ growth of 8.9% is single-digit, and the quarterly series shows sequential growth slowing from about 22% in Q3 2026 to 8.9%, while margins (74.4%, 64.9%, 57.0%) and YoY growth (57.9%) support the profitability and growth claims.\"}]}",
         "truncated": false,
         "deployment": "anthropic/claude-haiku-5-5",
-        "latency_ms": 6324,
+        "latency_ms": 5554,
         "usage": {
           "input_tokens": 1909,
-          "output_tokens": 804
+          "output_tokens": 565
         }
       }
     },
@@ -1208,13 +1208,13 @@
             "content": "{\"companies\":[\"NVDA\"],\"inferences\":[{\"id\":5,\"subject\":\"NVDA\",\"text\":\"The large YoY growth figure partly reflects a small year-ago base rather than a steepening current trajectory; if sequential growth stays at this level the YoY rate will compress.\",\"checked_results\":[\"NVDA's revenue rose in every period\"],\"supports\":[\"NVDA's revenue growth (QoQ) was 8.9% and revenue growth (YoY) 57.9% in Q4 2026 (ended Jan 2026).\",\"NVDA's revenue rose in every period from Q1 2025 ($26.0B) to Q4 2026 ($62.1B).\"],\"rest_of_answer\":[\"NVDA's revenue was $62.1B in Q4 2026 (ended Jan 2026).\",\"NVDA's gross margin was 74.4%, operating margin 64.9% and net margin 57.0% in Q4 2026 (ended Jan 2026).\"],\"figures_shown\":[\"Latest quarter (Q4 2026): NVDA's revenue was $62.1B, gross profit $46.2B, operating income $40.3B, net income $35.4B, gross margin 74.4%, operating margin 64.9%, net margin 57.0%, revenue growth (QoQ) 8.9% and revenue growth (YoY) 57.9% in Q4 2026 (ended Jan 2026).\",\"Quarterly revenue: NVDA's revenue was $26.0B in Q1 2025 (ended Apr 2024); NVDA's revenue was $30.0B in Q2 2025 (ended Jul 2024); NVDA's revenue was $35.1B in Q3 2025 (ended Oct 2024); NVDA's revenue was $39.3B in Q4 2025 (ended Jan 2025); NVDA's revenue was $44.1B in Q1 2026 (ended Apr 2025); NVDA's revenue was $46.7B in Q2 2026 (ended Jul 2025); NVDA's revenue was $57.0B in Q3 2026 (ended Oct 2025); NVDA's revenue was $62.1B in Q4 2026 (ended Jan 2026).\"]}]}"
           }
         ],
-        "text": "{\"verdicts\":[{\"id\":5,\"verdict\":\"unsupported\",\"worded_amount\":false,\"reason\":\"The forecast that YoY growth will compress at the current sequential rate, and the claim that the year-ago base is small, are not stated or implied by the figures; the figures show sequential growth slowing from about 22% to 8.9%, but nothing projects the YoY rate.\"}]}",
+        "text": "{\"verdicts\":[{\"id\":5,\"verdict\":\"unsupported\",\"worded_amount\":false,\"reason\":\"The answer shows YoY growth decelerating (about 69.6%, 55.7%, 62.4%, 57.9% across recent quarters) but never states that a small year-ago base causes the figure. The forecast that YoY will compress if sequential growth holds is also not shown.\"}]}",
         "truncated": false,
         "deployment": "anthropic/claude-haiku-5-5",
-        "latency_ms": 4964,
+        "latency_ms": 8667,
         "usage": {
           "input_tokens": 1908,
-          "output_tokens": 600
+          "output_tokens": 791
         }
       }
     }

@@ -2524,13 +2524,13 @@
         "index": 9,
         "verdict": "unsupported",
         "worded_amount": false,
-        "reason": "The profitability, growth and revenue comparisons are supported, but the claim that the market may have already priced in NVDA's advantage or sees offsetting risks is a valuation reading the answer does not show."
+        "reason": "The profitability, growth and revenue comparisons are supported, but the claim that the market may have priced in NVDA's advantage or sees offsetting risks is a valuation reading the answer does not show."
       },
       {
         "index": 10,
         "verdict": "unsupported",
         "worded_amount": false,
-        "reason": "The answer shows similar price returns (6.05% for AAPL, 6.6% for NVDA) and divergent fundamentals, but it never states or implies the causes offered, such as prior pricing of NVDA's growth or unshown risks."
+        "reason": "The answer shows similar price returns (6.05% for AAPL, 6.6% for NVDA) and divergent fundamentals, but nothing on prior pricing of NVDA's growth or unshown risks, so the proposed causes are speculation."
       }
     ]
   },
@@ -2873,16 +2873,16 @@
           },
           {
             "role": "user",
-            "content": "{\"companies\":[\"AAPL\",\"NVDA\"],\"inferences\":[{\"id\":9,\"subject\":null,\"text\":\"NVDA shows superior profitability and growth, but AAPL has a larger revenue base; the similar price returns suggest the market may have already priced in NVDA's advantage or sees offsetting risks.\",\"checked_results\":[\"NVDA highest on gross margin, net margin, and revenue growth (YoY)\",\"AAPL highest on revenue\"],\"supports\":[\"AAPL's revenue was $416.2B in FY2025 (ended Sep 2025); NVDA's revenue was $209.9B in FY2026 (ended Jan 2026).\",\"AAPL's gross margin was 46.9% and net margin 26.9% in FY2025 (ended Sep 2025).\",\"NVDA's gross margin was 70.8% and net margin 53.6% in FY2026 (ended Jan 2026).\",\"AAPL's revenue growth (YoY) was 6.4% in FY2025 (ended Sep 2025); NVDA's revenue growth (YoY) was 60.9% in FY2026 (ended Jan 2026).\",\"AAPL's price return was 6.05% in Dec 2025 to Aug 2026; NVDA's price return was 6.6% in Dec 2025 to Aug 2026.\",\"Of AAPL and NVDA, NVDA's gross margin was highest: AAPL 46.9% (FY2025, ended Sep 2025), NVDA 70.8% (FY2026, ended Jan 2026).\",\"Of AAPL and NVDA, NVDA's net margin was highest: AAPL 26.9% (FY2025, ended Sep 2025), NVDA 53.6% (FY2026, ended Jan 2026).\",\"Of AAPL and NVDA, NVDA's revenue growth (YoY) was highest: AAPL 6.4% (FY2025, ended Sep 2025), NVDA 60.9% (FY2026, ended Jan 2026).\",\"Of AAPL and NVDA, AAPL's revenue was highest: AAPL $416.2B (FY2025, ended Sep 2025), NVDA $209.9B (FY2026, ended Jan 2026).\"],\"rest_of_answer\":[],\"figures_shown\":[\"Side by side: AAPL FY2025 (ended Sep 2025), NVDA FY2026 (ended Jan 2026); fiscal years end 4 months apart: AAPL's revenue was $416.2B, gross margin 46.9%, net margin 26.9% and revenue growth (YoY) 6.4% in FY2025 (ended Sep 2025); NVDA's revenue was $209.9B, gross margin 70.8%, net margin 53.6% and revenue growth (YoY) 60.9% in FY2026 (ended Jan 2026).\",\"Price return (split-adjusted, excluding dividends): AAPL's price return was 6.05% in Dec 2025 to Aug 2026; NVDA's price return was 6.6% in Dec 2025 to Aug 2026.\"]}]}"
+            "content": "{\"companies\":[\"AAPL\",\"NVDA\"],\"inferences\":[{\"id\":9,\"subject\":null,\"text\":\"NVDA shows superior profitability and growth, but AAPL has a larger revenue base; the similar price returns suggest the market may have already priced in NVDA's advantage or sees offsetting risks.\",\"checked_results\":[\"NVDA highest on gross margin, net margin, and revenue growth (YoY)\",\"AAPL highest on revenue\"],\"supports\":[\"AAPL's revenue was $416.2B in FY2025 (ended Sep 2025); NVDA's revenue was $209.9B in FY2026 (ended Jan 2026).\",\"AAPL's gross margin was 46.9% and net margin 26.9% in FY2025 (ended Sep 2025).\",\"NVDA's gross margin was 70.8% and net margin 53.6% in FY2026 (ended Jan 2026).\",\"AAPL's revenue growth (YoY) was 6.4% in FY2025 (ended Sep 2025); NVDA's revenue growth (YoY) was 60.9% in FY2026 (ended Jan 2026).\",\"AAPL's price return was 6.05% in Dec 2025 to Aug 2026; NVDA's price return was 6.6% in Dec 2025 to Aug 2026.\",\"Of AAPL and NVDA, NVDA's gross margin was highest: AAPL 46.9% (FY2025, ended Sep 2025), NVDA 70.8% (FY2026, ended Jan 2026), 23.9 percentage points above AAPL.\",\"Of AAPL and NVDA, NVDA's net margin was highest: AAPL 26.9% (FY2025, ended Sep 2025), NVDA 53.6% (FY2026, ended Jan 2026), 26.7 percentage points above AAPL.\",\"Of AAPL and NVDA, NVDA's revenue growth (YoY) was highest: AAPL 6.4% (FY2025, ended Sep 2025), NVDA 60.9% (FY2026, ended Jan 2026), 54.5 percentage points above AAPL.\",\"Of AAPL and NVDA, AAPL's revenue was highest: AAPL $416.2B (FY2025, ended Sep 2025), NVDA $209.9B (FY2026, ended Jan 2026).\"],\"rest_of_answer\":[],\"figures_shown\":[\"Side by side: AAPL FY2025 (ended Sep 2025), NVDA FY2026 (ended Jan 2026); fiscal years end 4 months apart: AAPL's revenue was $416.2B, gross margin 46.9%, net margin 26.9% and revenue growth (YoY) 6.4% in FY2025 (ended Sep 2025); NVDA's revenue was $209.9B, gross margin 70.8%, net margin 53.6% and revenue growth (YoY) 60.9% in FY2026 (ended Jan 2026).\",\"Price return (split-adjusted, excluding dividends): AAPL's price return was 6.05% in Dec 2025 to Aug 2026; NVDA's price return was 6.6% in Dec 2025 to Aug 2026.\"]}]}"
           }
         ],
-        "text": "```json\n{\"verdicts\":[{\"id\":9,\"verdict\":\"unsupported\",\"worded_amount\":false,\"reason\":\"The profitability, growth and revenue comparisons are supported, but the claim that the market may have already priced in NVDA's advantage or sees offsetting risks is a valuation reading the answer does not show.\"}]}\n```",
+        "text": "{\"verdicts\":[{\"id\":9,\"verdict\":\"unsupported\",\"worded_amount\":false,\"reason\":\"The profitability, growth and revenue comparisons are supported, but the claim that the market may have priced in NVDA's advantage or sees offsetting risks is a valuation reading the answer does not show.\"}]}",
         "truncated": false,
         "deployment": "anthropic/claude-haiku-5-5",
-        "latency_ms": 3992,
+        "latency_ms": 3528,
         "usage": {
-          "input_tokens": 2195,
-          "output_tokens": 283
+          "input_tokens": 2240,
+          "output_tokens": 272
         }
       }
     },
@@ -2896,16 +2896,16 @@
           },
           {
             "role": "user",
-            "content": "{\"companies\":[\"AAPL\",\"NVDA\"],\"inferences\":[{\"id\":10,\"subject\":null,\"text\":\"The close price returns despite divergent fundamentals could reflect prior pricing of NVDA's growth or unshown risks.\",\"checked_results\":[\"NVDA highest on gross margin, net margin, and revenue growth (YoY)\",\"AAPL highest on revenue\"],\"supports\":[\"AAPL's price return was 6.05% in Dec 2025 to Aug 2026; NVDA's price return was 6.6% in Dec 2025 to Aug 2026.\",\"Of AAPL and NVDA, NVDA's gross margin was highest: AAPL 46.9% (FY2025, ended Sep 2025), NVDA 70.8% (FY2026, ended Jan 2026).\",\"Of AAPL and NVDA, NVDA's net margin was highest: AAPL 26.9% (FY2025, ended Sep 2025), NVDA 53.6% (FY2026, ended Jan 2026).\",\"Of AAPL and NVDA, NVDA's revenue growth (YoY) was highest: AAPL 6.4% (FY2025, ended Sep 2025), NVDA 60.9% (FY2026, ended Jan 2026).\",\"Of AAPL and NVDA, AAPL's revenue was highest: AAPL $416.2B (FY2025, ended Sep 2025), NVDA $209.9B (FY2026, ended Jan 2026).\"],\"rest_of_answer\":[\"AAPL's revenue was $416.2B in FY2025 (ended Sep 2025); NVDA's revenue was $209.9B in FY2026 (ended Jan 2026).\",\"AAPL's gross margin was 46.9% and net margin 26.9% in FY2025 (ended Sep 2025).\",\"NVDA's gross margin was 70.8% and net margin 53.6% in FY2026 (ended Jan 2026).\",\"AAPL's revenue growth (YoY) was 6.4% in FY2025 (ended Sep 2025); NVDA's revenue growth (YoY) was 60.9% in FY2026 (ended Jan 2026).\"],\"figures_shown\":[\"Side by side: AAPL FY2025 (ended Sep 2025), NVDA FY2026 (ended Jan 2026); fiscal years end 4 months apart: AAPL's revenue was $416.2B, gross margin 46.9%, net margin 26.9% and revenue growth (YoY) 6.4% in FY2025 (ended Sep 2025); NVDA's revenue was $209.9B, gross margin 70.8%, net margin 53.6% and revenue growth (YoY) 60.9% in FY2026 (ended Jan 2026).\",\"Price return (split-adjusted, excluding dividends): AAPL's price return was 6.05% in Dec 2025 to Aug 2026; NVDA's price return was 6.6% in Dec 2025 to Aug 2026.\"]}]}"
+            "content": "{\"companies\":[\"AAPL\",\"NVDA\"],\"inferences\":[{\"id\":10,\"subject\":null,\"text\":\"The close price returns despite divergent fundamentals could reflect prior pricing of NVDA's growth or unshown risks.\",\"checked_results\":[\"NVDA highest on gross margin, net margin, and revenue growth (YoY)\",\"AAPL highest on revenue\"],\"supports\":[\"AAPL's price return was 6.05% in Dec 2025 to Aug 2026; NVDA's price return was 6.6% in Dec 2025 to Aug 2026.\",\"Of AAPL and NVDA, NVDA's gross margin was highest: AAPL 46.9% (FY2025, ended Sep 2025), NVDA 70.8% (FY2026, ended Jan 2026), 23.9 percentage points above AAPL.\",\"Of AAPL and NVDA, NVDA's net margin was highest: AAPL 26.9% (FY2025, ended Sep 2025), NVDA 53.6% (FY2026, ended Jan 2026), 26.7 percentage points above AAPL.\",\"Of AAPL and NVDA, NVDA's revenue growth (YoY) was highest: AAPL 6.4% (FY2025, ended Sep 2025), NVDA 60.9% (FY2026, ended Jan 2026), 54.5 percentage points above AAPL.\",\"Of AAPL and NVDA, AAPL's revenue was highest: AAPL $416.2B (FY2025, ended Sep 2025), NVDA $209.9B (FY2026, ended Jan 2026).\"],\"rest_of_answer\":[\"AAPL's revenue was $416.2B in FY2025 (ended Sep 2025); NVDA's revenue was $209.9B in FY2026 (ended Jan 2026).\",\"AAPL's gross margin was 46.9% and net margin 26.9% in FY2025 (ended Sep 2025).\",\"NVDA's gross margin was 70.8% and net margin 53.6% in FY2026 (ended Jan 2026).\",\"AAPL's revenue growth (YoY) was 6.4% in FY2025 (ended Sep 2025); NVDA's revenue growth (YoY) was 60.9% in FY2026 (ended Jan 2026).\"],\"figures_shown\":[\"Side by side: AAPL FY2025 (ended Sep 2025), NVDA FY2026 (ended Jan 2026); fiscal years end 4 months apart: AAPL's revenue was $416.2B, gross margin 46.9%, net margin 26.9% and revenue growth (YoY) 6.4% in FY2025 (ended Sep 2025); NVDA's revenue was $209.9B, gross margin 70.8%, net margin 53.6% and revenue growth (YoY) 60.9% in FY2026 (ended Jan 2026).\",\"Price return (split-adjusted, excluding dividends): AAPL's price return was 6.05% in Dec 2025 to Aug 2026; NVDA's price return was 6.6% in Dec 2025 to Aug 2026.\"]}]}"
           }
         ],
-        "text": "{\"verdicts\":[{\"id\":10,\"verdict\":\"unsupported\",\"worded_amount\":false,\"reason\":\"The answer shows similar price returns (6.05% for AAPL, 6.6% for NVDA) and divergent fundamentals, but it never states or implies the causes offered, such as prior pricing of NVDA's growth or unshown risks.\"}]}",
+        "text": "{\"verdicts\":[{\"id\":10,\"verdict\":\"unsupported\",\"worded_amount\":false,\"reason\":\"The answer shows similar price returns (6.05% for AAPL, 6.6% for NVDA) and divergent fundamentals, but nothing on prior pricing of NVDA's growth or unshown risks, so the proposed causes are speculation.\"}]}",
         "truncated": false,
         "deployment": "anthropic/claude-haiku-5-5",
-        "latency_ms": 2973,
+        "latency_ms": 5853,
         "usage": {
-          "input_tokens": 2170,
-          "output_tokens": 316
+          "input_tokens": 2215,
+          "output_tokens": 338
         }
       }
     }

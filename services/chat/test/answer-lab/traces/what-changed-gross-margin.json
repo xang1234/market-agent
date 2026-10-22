@@ -1955,7 +1955,7 @@
         "index": 6,
         "verdict": "unsupported",
         "worded_amount": false,
-        "reason": "Revenue did keep rising and gross margin fell to 60.5% in Q1 2026 before recovering, but the answer shows no cost, mix or demand breakdown that would establish the cause."
+        "reason": "The figures show revenue rising while gross margin fell to 60.5% and then recovered, but nothing shown establishes a cost or mix cause rather than demand, so the causal attribution is not stated or implied."
       }
     ]
   },
@@ -2188,13 +2188,13 @@
             "content": "{\"companies\":[\"NVDA\"],\"inferences\":[{\"id\":6,\"subject\":\"NVDA\",\"text\":\"The margin compression appears to be a cost-side or mix event rather than a demand problem, because revenue continued to grow while margins dropped and then recovered.\",\"checked_results\":[\"NVDA's gross margin lowest in Q1 2026\"],\"supports\":[\"NVDA's gross margin was lowest in Q1 2026, at 60.5%, of the periods from Q1 2025 to Q4 2026.\",\"NVDA's revenue growth (QoQ) was 12.0% and revenue growth (YoY) 69.2% in Q1 2026 (ended Apr 2025); NVDA's revenue was $39.3B in Q4 2025 (ended Jan 2025); NVDA's revenue was $44.1B in Q1 2026 (ended Apr 2025).\"],\"rest_of_answer\":[\"NVDA's gross margin was 60.5% in Q1 2026 (ended Apr 2025).\",\"NVDA's operating margin was 49.1% and net margin 42.6% in Q1 2026 (ended Apr 2025).\"],\"figures_shown\":[\"Fiscal Q1 2026: NVDA's revenue was $44.1B, gross profit $26.7B, operating income $21.6B, net income $18.8B, gross margin 60.5%, operating margin 49.1%, net margin 42.6%, revenue growth (QoQ) 12.0% and revenue growth (YoY) 69.2% in Q1 2026 (ended Apr 2025).\",\"Quarterly revenue: NVDA's revenue was $26.0B in Q1 2025 (ended Apr 2024); NVDA's revenue was $30.0B in Q2 2025 (ended Jul 2024); NVDA's revenue was $35.1B in Q3 2025 (ended Oct 2024); NVDA's revenue was $39.3B in Q4 2025 (ended Jan 2025); NVDA's revenue was $44.1B in Q1 2026 (ended Apr 2025); NVDA's revenue was $46.7B in Q2 2026 (ended Jul 2025); NVDA's revenue was $57.0B in Q3 2026 (ended Oct 2025); NVDA's revenue was $62.1B in Q4 2026 (ended Jan 2026).\",\"Gross margin by quarter: NVDA's gross margin was 78.4% in Q1 2025 (ended Apr 2024); NVDA's gross margin was 75.1% in Q2 2025 (ended Jul 2024); NVDA's gross margin was 74.6% in Q3 2025 (ended Oct 2024); NVDA's gross margin was 73.0% in Q4 2025 (ended Jan 2025); NVDA's gross margin was 60.5% in Q1 2026 (ended Apr 2025); NVDA's gross margin was 72.4% in Q2 2026 (ended Jul 2025); NVDA's gross margin was 73.4% in Q3 2026 (ended Oct 2025); NVDA's gross margin was 74.4% in Q4 2026 (ended Jan 2026).\",\"Operating margin by quarter: NVDA's operating margin was 64.9% in Q1 2025 (ended Apr 2024); NVDA's operating margin was 62.1% in Q2 2025 (ended Jul 2024); NVDA's operating margin was 62.3% in Q3 2025 (ended Oct 2024); NVDA's operating margin was 61.1% in Q4 2025 (ended Jan 2025); NVDA's operating margin was 49.1% in Q1 2026 (ended Apr 2025); NVDA's operating margin was 60.8% in Q2 2026 (ended Jul 2025); NVDA's operating margin was 63.2% in Q3 2026 (ended Oct 2025); NVDA's operating margin was 64.9% in Q4 2026 (ended Jan 2026).\",\"Net margin by quarter: NVDA's net margin was 57.1% in Q1 2025 (ended Apr 2024); NVDA's net margin was 55.3% in Q2 2025 (ended Jul 2024); NVDA's net margin was 55.0% in Q3 2025 (ended Oct 2024); NVDA's net margin was 56.2% in Q4 2025 (ended Jan 2025); NVDA's net margin was 42.6% in Q1 2026 (ended Apr 2025); NVDA's net margin was 56.5% in Q2 2026 (ended Jul 2025); NVDA's net margin was 56.0% in Q3 2026 (ended Oct 2025); NVDA's net margin was 57.0% in Q4 2026 (ended Jan 2026).\"]}]}"
           }
         ],
-        "text": "{\"verdicts\":[{\"id\":6,\"verdict\":\"unsupported\",\"worded_amount\":false,\"reason\":\"Revenue did keep rising and gross margin fell to 60.5% in Q1 2026 before recovering, but the answer shows no cost, mix or demand breakdown that would establish the cause.\"}]}",
+        "text": "{\"verdicts\":[{\"id\":6,\"verdict\":\"unsupported\",\"worded_amount\":false,\"reason\":\"The figures show revenue rising while gross margin fell to 60.5% and then recovered, but nothing shown establishes a cost or mix cause rather than demand, so the causal attribution is not stated or implied.\"}]}",
         "truncated": false,
         "deployment": "anthropic/claude-haiku-5-5",
-        "latency_ms": 3575,
+        "latency_ms": 5687,
         "usage": {
           "input_tokens": 2781,
-          "output_tokens": 383
+          "output_tokens": 388
         }
       }
     }

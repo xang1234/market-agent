@@ -954,7 +954,7 @@
         "index": 4,
         "verdict": "entailed",
         "worded_amount": false,
-        "reason": "The quarterly revenue figures show Q4 2026 sequential growth of 8.9%, down from about 22% in Q3, while YoY growth remains 57.9%."
+        "reason": "The quarterly revenue figures show sequential growth slowing from about 22% in Q3 2026 to 8.9% in Q4 2026, while YoY growth stays at 57.9%."
       }
     ]
   },
@@ -1217,13 +1217,13 @@
             "content": "{\"companies\":[\"NVDA\"],\"inferences\":[{\"id\":4,\"subject\":\"NVDA\",\"text\":\"The large gap between YoY and QoQ growth rates indicates sequential momentum is moderating even though the company is still growing rapidly on a year-over-year basis.\",\"checked_results\":[\"NVDA's revenue rose in every period\"],\"supports\":[\"NVDA's revenue rose in every period from Q1 2025 ($26.0B) to Q4 2026 ($62.1B).\",\"NVDA's revenue growth (QoQ) was 8.9% and revenue growth (YoY) 57.9% in Q4 2026 (ended Jan 2026).\"],\"rest_of_answer\":[\"NVDA's revenue was $62.1B, net income $35.4B and net margin 57.0% in Q4 2026 (ended Jan 2026).\",\"NVDA's gross margin was 74.4% and operating margin 64.9% in Q4 2026 (ended Jan 2026).\"],\"figures_shown\":[\"Latest quarter (Q4 2026): NVDA's revenue was $62.1B, gross profit $46.2B, operating income $40.3B, net income $35.4B, gross margin 74.4%, operating margin 64.9%, net margin 57.0%, revenue growth (QoQ) 8.9% and revenue growth (YoY) 57.9% in Q4 2026 (ended Jan 2026).\",\"Quarterly revenue: NVDA's revenue was $26.0B in Q1 2025 (ended Apr 2024); NVDA's revenue was $30.0B in Q2 2025 (ended Jul 2024); NVDA's revenue was $35.1B in Q3 2025 (ended Oct 2024); NVDA's revenue was $39.3B in Q4 2025 (ended Jan 2025); NVDA's revenue was $44.1B in Q1 2026 (ended Apr 2025); NVDA's revenue was $46.7B in Q2 2026 (ended Jul 2025); NVDA's revenue was $57.0B in Q3 2026 (ended Oct 2025); NVDA's revenue was $62.1B in Q4 2026 (ended Jan 2026).\"]}]}"
           }
         ],
-        "text": "{\"verdicts\":[{\"id\":4,\"verdict\":\"entailed\",\"worded_amount\":false,\"reason\":\"The quarterly revenue figures show Q4 2026 sequential growth of 8.9%, down from about 22% in Q3, while YoY growth remains 57.9%.\"}]}",
+        "text": "{\"verdicts\":[{\"id\":4,\"verdict\":\"entailed\",\"worded_amount\":false,\"reason\":\"The quarterly revenue figures show sequential growth slowing from about 22% in Q3 2026 to 8.9% in Q4 2026, while YoY growth stays at 57.9%.\"}]}",
         "truncated": false,
         "deployment": "anthropic/claude-haiku-5-5",
-        "latency_ms": 3999,
+        "latency_ms": 6454,
         "usage": {
           "input_tokens": 1913,
-          "output_tokens": 708
+          "output_tokens": 570
         }
       }
     }

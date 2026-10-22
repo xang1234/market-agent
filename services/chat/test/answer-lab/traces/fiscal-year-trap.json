@@ -2471,7 +2471,7 @@
         "index": 8,
         "text": "The eight-month gap between fiscal year ends limits direct comparability of the two revenue figures.",
         "check": "judge",
-        "reason": "entailed, worded_amount: The answer shows the two fiscal years end about eight months apart (Jan 2025 vs Sep 2025), so the revenue figures are not directly comparable on period alignment; the eight-month gap is stated by the figures' dates."
+        "reason": "entailed, worded_amount: The fiscal year ends are shown as Jan 2025 and Sep 2025, an eight-month gap, which the answer's own figures support as limiting direct comparison of the two revenue figures."
       }
     ],
     "rendered": true,
@@ -2483,14 +2483,13 @@
       {
         "index": 7,
         "verdict": "entailed",
-        "worded_amount": false,
-        "reason": "NVDA has lower revenue than AAPL but higher gross and net margins, so the higher-margin profitability claim is supported by the figures shown."
+        "worded_amount": false
       },
       {
         "index": 8,
         "verdict": "entailed",
         "worded_amount": true,
-        "reason": "The answer shows the two fiscal years end about eight months apart (Jan 2025 vs Sep 2025), so the revenue figures are not directly comparable on period alignment; the eight-month gap is stated by the figures' dates."
+        "reason": "The fiscal year ends are shown as Jan 2025 and Sep 2025, an eight-month gap, which the answer's own figures support as limiting direct comparison of the two revenue figures."
       }
     ]
   },
@@ -2756,16 +2755,16 @@
           },
           {
             "role": "user",
-            "content": "{\"companies\":[\"NVDA\",\"AAPL\"],\"inferences\":[{\"id\":7,\"subject\":null,\"text\":\"Despite lower absolute revenue, NVDA's substantially higher margins indicate stronger profitability per dollar of revenue compared to AAPL.\",\"checked_results\":[\"AAPL highest on revenue\",\"NVDA highest on gross margin and net margin\"],\"supports\":[\"Of NVDA and AAPL, AAPL's revenue was highest: NVDA $130.5B (FY2025, ended Jan 2025), AAPL $416.2B (FY2025, ended Sep 2025).\",\"Of NVDA and AAPL, NVDA's gross margin was highest: NVDA 75.0% (FY2025, ended Jan 2025), AAPL 46.9% (FY2025, ended Sep 2025).\",\"Of NVDA and AAPL, NVDA's net margin was highest: NVDA 55.8% (FY2025, ended Jan 2025), AAPL 26.9% (FY2025, ended Sep 2025).\"],\"rest_of_answer\":[\"NVDA's revenue was $130.5B in FY2025 (ended Jan 2025).\",\"AAPL's revenue was $416.2B in FY2025 (ended Sep 2025).\",\"AAPL's revenue growth (YoY) was 6.4% in FY2025 (ended Sep 2025).\"],\"figures_shown\":[\"Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart: NVDA's revenue was $130.5B, gross margin 75.0% and net margin 55.8% in FY2025 (ended Jan 2025); AAPL's revenue was $416.2B, gross margin 46.9%, net margin 26.9% and revenue growth (YoY) 6.4% in FY2025 (ended Sep 2025).\",\"Price return (split-adjusted, excluding dividends): NVDA's price return was 6.6% in Dec 2025 to Aug 2026; AAPL's price return was 6.05% in Dec 2025 to Aug 2026.\"]}]}"
+            "content": "{\"companies\":[\"NVDA\",\"AAPL\"],\"inferences\":[{\"id\":7,\"subject\":null,\"text\":\"Despite lower absolute revenue, NVDA's substantially higher margins indicate stronger profitability per dollar of revenue compared to AAPL.\",\"checked_results\":[\"AAPL highest on revenue\",\"NVDA highest on gross margin and net margin\"],\"supports\":[\"Of NVDA and AAPL, AAPL's revenue was highest: NVDA $130.5B (FY2025, ended Jan 2025), AAPL $416.2B (FY2025, ended Sep 2025).\",\"Of NVDA and AAPL, NVDA's gross margin was highest: NVDA 75.0% (FY2025, ended Jan 2025), AAPL 46.9% (FY2025, ended Sep 2025), 28.1 percentage points above AAPL.\",\"Of NVDA and AAPL, NVDA's net margin was highest: NVDA 55.8% (FY2025, ended Jan 2025), AAPL 26.9% (FY2025, ended Sep 2025), 28.9 percentage points above AAPL.\"],\"rest_of_answer\":[\"NVDA's revenue was $130.5B in FY2025 (ended Jan 2025).\",\"AAPL's revenue was $416.2B in FY2025 (ended Sep 2025).\",\"AAPL's revenue growth (YoY) was 6.4% in FY2025 (ended Sep 2025).\"],\"figures_shown\":[\"Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart: NVDA's revenue was $130.5B, gross margin 75.0% and net margin 55.8% in FY2025 (ended Jan 2025); AAPL's revenue was $416.2B, gross margin 46.9%, net margin 26.9% and revenue growth (YoY) 6.4% in FY2025 (ended Sep 2025).\",\"Price return (split-adjusted, excluding dividends): NVDA's price return was 6.6% in Dec 2025 to Aug 2026; AAPL's price return was 6.05% in Dec 2025 to Aug 2026.\"]}]}"
           }
         ],
-        "text": "{\"verdicts\":[{\"id\":7,\"verdict\":\"entailed\",\"worded_amount\":false,\"reason\":\"NVDA has lower revenue than AAPL but higher gross and net margins, so the higher-margin profitability claim is supported by the figures shown.\"}]}",
+        "text": "{\"verdicts\":[{\"id\":7,\"verdict\":\"entailed\",\"worded_amount\":false,\"reason\":\"\"}]}",
         "truncated": false,
         "deployment": "anthropic/claude-haiku-5-5",
-        "latency_ms": 1019,
+        "latency_ms": 1458,
         "usage": {
-          "input_tokens": 1895,
-          "output_tokens": 89
+          "input_tokens": 1924,
+          "output_tokens": 42
         }
       }
     },
@@ -2779,16 +2778,16 @@
           },
           {
             "role": "user",
-            "content": "{\"companies\":[\"NVDA\",\"AAPL\"],\"inferences\":[{\"id\":8,\"subject\":null,\"text\":\"The eight-month gap between fiscal year ends limits direct comparability of the two revenue figures.\",\"checked_results\":[],\"supports\":[\"NVDA's revenue was $130.5B in FY2025 (ended Jan 2025).\",\"AAPL's revenue was $416.2B in FY2025 (ended Sep 2025).\"],\"rest_of_answer\":[\"Of NVDA and AAPL, AAPL's revenue was highest: NVDA $130.5B (FY2025, ended Jan 2025), AAPL $416.2B (FY2025, ended Sep 2025).\",\"Of NVDA and AAPL, NVDA's gross margin was highest: NVDA 75.0% (FY2025, ended Jan 2025), AAPL 46.9% (FY2025, ended Sep 2025).\",\"Of NVDA and AAPL, NVDA's net margin was highest: NVDA 55.8% (FY2025, ended Jan 2025), AAPL 26.9% (FY2025, ended Sep 2025).\",\"AAPL's revenue growth (YoY) was 6.4% in FY2025 (ended Sep 2025).\"],\"figures_shown\":[\"Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart: NVDA's revenue was $130.5B, gross margin 75.0% and net margin 55.8% in FY2025 (ended Jan 2025); AAPL's revenue was $416.2B, gross margin 46.9%, net margin 26.9% and revenue growth (YoY) 6.4% in FY2025 (ended Sep 2025).\",\"Price return (split-adjusted, excluding dividends): NVDA's price return was 6.6% in Dec 2025 to Aug 2026; AAPL's price return was 6.05% in Dec 2025 to Aug 2026.\"]}]}"
+            "content": "{\"companies\":[\"NVDA\",\"AAPL\"],\"inferences\":[{\"id\":8,\"subject\":null,\"text\":\"The eight-month gap between fiscal year ends limits direct comparability of the two revenue figures.\",\"checked_results\":[],\"supports\":[\"NVDA's revenue was $130.5B in FY2025 (ended Jan 2025).\",\"AAPL's revenue was $416.2B in FY2025 (ended Sep 2025).\"],\"rest_of_answer\":[\"Of NVDA and AAPL, AAPL's revenue was highest: NVDA $130.5B (FY2025, ended Jan 2025), AAPL $416.2B (FY2025, ended Sep 2025).\",\"Of NVDA and AAPL, NVDA's gross margin was highest: NVDA 75.0% (FY2025, ended Jan 2025), AAPL 46.9% (FY2025, ended Sep 2025), 28.1 percentage points above AAPL.\",\"Of NVDA and AAPL, NVDA's net margin was highest: NVDA 55.8% (FY2025, ended Jan 2025), AAPL 26.9% (FY2025, ended Sep 2025), 28.9 percentage points above AAPL.\",\"AAPL's revenue growth (YoY) was 6.4% in FY2025 (ended Sep 2025).\"],\"figures_shown\":[\"Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart: NVDA's revenue was $130.5B, gross margin 75.0% and net margin 55.8% in FY2025 (ended Jan 2025); AAPL's revenue was $416.2B, gross margin 46.9%, net margin 26.9% and revenue growth (YoY) 6.4% in FY2025 (ended Sep 2025).\",\"Price return (split-adjusted, excluding dividends): NVDA's price return was 6.6% in Dec 2025 to Aug 2026; AAPL's price return was 6.05% in Dec 2025 to Aug 2026.\"]}]}"
           }
         ],
-        "text": "{\"verdicts\":[{\"id\":8,\"verdict\":\"entailed\",\"worded_amount\":true,\"reason\":\"The answer shows the two fiscal years end about eight months apart (Jan 2025 vs Sep 2025), so the revenue figures are not directly comparable on period alignment; the eight-month gap is stated by the figures' dates.\"}]}",
+        "text": "{\"verdicts\":[{\"id\":8,\"verdict\":\"entailed\",\"worded_amount\":true,\"reason\":\"The fiscal year ends are shown as Jan 2025 and Sep 2025, an eight-month gap, which the answer's own figures support as limiting direct comparison of the two revenue figures.\"}]}",
         "truncated": false,
         "deployment": "anthropic/claude-haiku-5-5",
-        "latency_ms": 1152,
+        "latency_ms": 1109,
         "usage": {
-          "input_tokens": 1850,
-          "output_tokens": 116
+          "input_tokens": 1880,
+          "output_tokens": 104
         }
       }
     }

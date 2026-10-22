@@ -2001,13 +2001,12 @@
         "index": 9,
         "verdict": "entailed",
         "worded_amount": false,
-        "reason": "Q2 2025 operating income was -$134.0M while net income was +$872.0M, so non-operating and tax items more than offset the operating loss, as the inference says."
+        "reason": "Q2 2025 operating income was -$134.0M while net income was +$872.0M, so non-operating items must have netted to a large positive amount that more than offset the operating loss."
       },
       {
         "index": 10,
         "verdict": "entailed",
-        "worded_amount": false,
-        "reason": "The cited Aug 2025 source attributes the Q2 2025 results impact to the export control on the MI308, and the figures show the margin drop from Q1 to Q2 2025; the caveat that a line-item breakdown is needed is consistent with what the answer shows."
+        "worded_amount": false
       }
     ]
   },
@@ -2392,10 +2391,10 @@
         "text": "{\"verdicts\":[{\"id\":8,\"verdict\":\"entailed\",\"worded_amount\":false}]}",
         "truncated": false,
         "deployment": "anthropic/claude-haiku-5-5",
-        "latency_ms": 4772,
+        "latency_ms": 3695,
         "usage": {
           "input_tokens": 2919,
-          "output_tokens": 479
+          "output_tokens": 549
         }
       }
     },
@@ -2412,13 +2411,13 @@
             "content": "{\"companies\":[\"AMD\"],\"inferences\":[{\"id\":9,\"subject\":\"AMD\",\"text\":\"Below-the-line items fully offset the operating loss, limiting the bottom-line impact despite the negative operating margin.\",\"checked_results\":[],\"supports\":[\"AMD's net income was $872.0M in Q2 2025 (ended Jun 2025); AMD's net margin was 11.3% in Q2 2025 (ended Jun 2025).\"],\"rest_of_answer\":[\"AMD's operating margin was -1.7% in Q2 2025 (ended Jun 2025); AMD's operating income was -$134.0M in Q2 2025 (ended Jun 2025).\",\"AMD's gross margin was 50.1% in Q3 2024 (ended Sep 2024); AMD's gross margin was 51.0% in Q4 2024 (ended Dec 2024); AMD's gross margin was 50.2% in Q1 2025 (ended Mar 2025); AMD's gross margin was 39.8% in Q2 2025 (ended Jun 2025).\",\"AMD's revenue was $7.7B in Q4 2024 (ended Dec 2024); AMD's revenue was $7.4B in Q1 2025 (ended Mar 2025); AMD's revenue was $7.7B in Q2 2025 (ended Jun 2025).\"],\"figures_shown\":[\"Fiscal Q2 2025: AMD's revenue was $7.7B, gross profit $3.1B, operating income -$134.0M, net income $872.0M, gross margin 39.8%, operating margin -1.7%, net margin 11.3% and revenue growth (QoQ) 3.3% in Q2 2025 (ended Jun 2025).\",\"Quarterly revenue: AMD's revenue was $6.8B in Q3 2024 (ended Sep 2024); AMD's revenue was $7.7B in Q4 2024 (ended Dec 2024); AMD's revenue was $7.4B in Q1 2025 (ended Mar 2025); AMD's revenue was $7.7B in Q2 2025 (ended Jun 2025); AMD's revenue was $9.2B in Q3 2025 (ended Sep 2025); AMD's revenue was $10.3B in Q4 2025 (ended Dec 2025); AMD's revenue was $10.7B in Q1 2026 (ended Mar 2026); AMD's revenue was $11.2B in Q2 2026 (ended Jun 2026).\",\"Gross margin by quarter: AMD's gross margin was 50.1% in Q3 2024 (ended Sep 2024); AMD's gross margin was 51.0% in Q4 2024 (ended Dec 2024); AMD's gross margin was 50.2% in Q1 2025 (ended Mar 2025); AMD's gross margin was 39.8% in Q2 2025 (ended Jun 2025); AMD's gross margin was 53.6% in Q3 2025 (ended Sep 2025); AMD's gross margin was 54.0% in Q4 2025 (ended Dec 2025); AMD's gross margin was 54.0% in Q1 2026 (ended Mar 2026); AMD's gross margin was 54.0% in Q2 2026 (ended Jun 2026).\",\"Operating margin by quarter: AMD's operating margin was 10.6% in Q3 2024 (ended Sep 2024); AMD's operating margin was 11.4% in Q4 2024 (ended Dec 2024); AMD's operating margin was 10.8% in Q1 2025 (ended Mar 2025); AMD's operating margin was -1.7% in Q2 2025 (ended Jun 2025); AMD's operating margin was 13.7% in Q3 2025 (ended Sep 2025); AMD's operating margin was 14.1% in Q4 2025 (ended Dec 2025); AMD's operating margin was 14.2% in Q1 2026 (ended Mar 2026); AMD's operating margin was 14.4% in Q2 2026 (ended Jun 2026).\",\"Net margin by quarter: AMD's net margin was 11.3% in Q3 2024 (ended Sep 2024); AMD's net margin was 6.3% in Q4 2024 (ended Dec 2024); AMD's net margin was 9.5% in Q1 2025 (ended Mar 2025); AMD's net margin was 11.3% in Q2 2025 (ended Jun 2025); AMD's net margin was 13.4% in Q3 2025 (ended Sep 2025); AMD's net margin was 13.1% in Q4 2025 (ended Dec 2025); AMD's net margin was 13.1% in Q1 2026 (ended Mar 2026); AMD's net margin was 13.2% in Q2 2026 (ended Jun 2026).\"]}]}"
           }
         ],
-        "text": "{\"verdicts\":[{\"id\":9,\"verdict\":\"entailed\",\"worded_amount\":false,\"reason\":\"Q2 2025 operating income was -$134.0M while net income was +$872.0M, so non-operating and tax items more than offset the operating loss, as the inference says.\"}]}",
+        "text": "{\"verdicts\":[{\"id\":9,\"verdict\":\"entailed\",\"worded_amount\":false,\"reason\":\"Q2 2025 operating income was -$134.0M while net income was +$872.0M, so non-operating items must have netted to a large positive amount that more than offset the operating loss.\"}]}",
         "truncated": false,
         "deployment": "anthropic/claude-haiku-5-5",
-        "latency_ms": 2886,
+        "latency_ms": 3977,
         "usage": {
           "input_tokens": 2804,
-          "output_tokens": 402
+          "output_tokens": 474
         }
       }
     },
@@ -2435,13 +2434,13 @@
             "content": "{\"companies\":[\"AMD\"],\"inferences\":[{\"id\":10,\"subject\":\"AMD\",\"text\":\"The export-control charge is the stated cause of the margin decline, but the data alone cannot confirm the mechanism without a line-item breakdown.\",\"checked_results\":[],\"supports\":[\"AMD's operating margin was -1.7% in Q2 2025 (ended Jun 2025); AMD's operating income was -$134.0M in Q2 2025 (ended Jun 2025).\",\"AMD's gross margin was 50.1% in Q3 2024 (ended Sep 2024); AMD's gross margin was 51.0% in Q4 2024 (ended Dec 2024); AMD's gross margin was 50.2% in Q1 2025 (ended Mar 2025); AMD's gross margin was 39.8% in Q2 2025 (ended Jun 2025).\",\"According to a source dated Aug 2025, effective Jun 2025 on AMD: As previously announced, our second quarter results were impacted by the U.S. Government's export control on our AMD Instinct MI308 data center GPU products. For the quarter, these restrictions led to approximately $800 million in inventory and related charges.\"],\"rest_of_answer\":[\"AMD's revenue was $7.7B in Q4 2024 (ended Dec 2024); AMD's revenue was $7.4B in Q1 2025 (ended Mar 2025); AMD's revenue was $7.7B in Q2 2025 (ended Jun 2025).\",\"AMD's net income was $872.0M in Q2 2025 (ended Jun 2025); AMD's net margin was 11.3% in Q2 2025 (ended Jun 2025).\"],\"figures_shown\":[\"Fiscal Q2 2025: AMD's revenue was $7.7B, gross profit $3.1B, operating income -$134.0M, net income $872.0M, gross margin 39.8%, operating margin -1.7%, net margin 11.3% and revenue growth (QoQ) 3.3% in Q2 2025 (ended Jun 2025).\",\"Quarterly revenue: AMD's revenue was $6.8B in Q3 2024 (ended Sep 2024); AMD's revenue was $7.7B in Q4 2024 (ended Dec 2024); AMD's revenue was $7.4B in Q1 2025 (ended Mar 2025); AMD's revenue was $7.7B in Q2 2025 (ended Jun 2025); AMD's revenue was $9.2B in Q3 2025 (ended Sep 2025); AMD's revenue was $10.3B in Q4 2025 (ended Dec 2025); AMD's revenue was $10.7B in Q1 2026 (ended Mar 2026); AMD's revenue was $11.2B in Q2 2026 (ended Jun 2026).\",\"Gross margin by quarter: AMD's gross margin was 50.1% in Q3 2024 (ended Sep 2024); AMD's gross margin was 51.0% in Q4 2024 (ended Dec 2024); AMD's gross margin was 50.2% in Q1 2025 (ended Mar 2025); AMD's gross margin was 39.8% in Q2 2025 (ended Jun 2025); AMD's gross margin was 53.6% in Q3 2025 (ended Sep 2025); AMD's gross margin was 54.0% in Q4 2025 (ended Dec 2025); AMD's gross margin was 54.0% in Q1 2026 (ended Mar 2026); AMD's gross margin was 54.0% in Q2 2026 (ended Jun 2026).\",\"Operating margin by quarter: AMD's operating margin was 10.6% in Q3 2024 (ended Sep 2024); AMD's operating margin was 11.4% in Q4 2024 (ended Dec 2024); AMD's operating margin was 10.8% in Q1 2025 (ended Mar 2025); AMD's operating margin was -1.7% in Q2 2025 (ended Jun 2025); AMD's operating margin was 13.7% in Q3 2025 (ended Sep 2025); AMD's operating margin was 14.1% in Q4 2025 (ended Dec 2025); AMD's operating margin was 14.2% in Q1 2026 (ended Mar 2026); AMD's operating margin was 14.4% in Q2 2026 (ended Jun 2026).\",\"Net margin by quarter: AMD's net margin was 11.3% in Q3 2024 (ended Sep 2024); AMD's net margin was 6.3% in Q4 2024 (ended Dec 2024); AMD's net margin was 9.5% in Q1 2025 (ended Mar 2025); AMD's net margin was 11.3% in Q2 2025 (ended Jun 2025); AMD's net margin was 13.4% in Q3 2025 (ended Sep 2025); AMD's net margin was 13.1% in Q4 2025 (ended Dec 2025); AMD's net margin was 13.1% in Q1 2026 (ended Mar 2026); AMD's net margin was 13.2% in Q2 2026 (ended Jun 2026).\"]}]}"
           }
         ],
-        "text": "{\"verdicts\":[{\"id\":10,\"verdict\":\"entailed\",\"worded_amount\":false,\"reason\":\"The cited Aug 2025 source attributes the Q2 2025 results impact to the export control on the MI308, and the figures show the margin drop from Q1 to Q2 2025; the caveat that a line-item breakdown is needed is consistent with what the answer shows.\"}]}",
+        "text": "{\"verdicts\":[{\"id\":10,\"verdict\":\"entailed\",\"worded_amount\":false}]}",
         "truncated": false,
         "deployment": "anthropic/claude-haiku-5-5",
-        "latency_ms": 3494,
+        "latency_ms": 3083,
         "usage": {
           "input_tokens": 2914,
-          "output_tokens": 429
+          "output_tokens": 325
         }
       }
     }

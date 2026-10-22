@@ -1991,8 +1991,7 @@
       {
         "index": 4,
         "verdict": "entailed",
-        "worded_amount": false,
-        "reason": "Operating margin of 14.4% in Q2 2026 is the highest in the window, and the rise since Q3 2025 is small (13.7%, 14.1%, 14.2%, 14.4%), matching the 'incremental' description after the rebound from -1.7%."
+        "worded_amount": false
       }
     ]
   },
@@ -2278,13 +2277,13 @@
             "content": "{\"companies\":[\"AMD\"],\"inferences\":[{\"id\":4,\"subject\":\"AMD\",\"text\":\"AMD's operating profitability has recovered to its strongest level in the eight-quarter window and is trending higher, though the pace of improvement has been incremental since the initial rebound.\",\"checked_results\":[\"AMD's operating margin highest in Q2 2026\"],\"supports\":[\"AMD's operating margin was 10.6% in Q3 2024 (ended Sep 2024); AMD's operating margin was 11.4% in Q4 2024 (ended Dec 2024); AMD's operating margin was 10.8% in Q1 2025 (ended Mar 2025); AMD's operating margin was -1.7% in Q2 2025 (ended Jun 2025); AMD's operating margin was 13.7% in Q3 2025 (ended Sep 2025); AMD's operating margin was 14.1% in Q4 2025 (ended Dec 2025); AMD's operating margin was 14.2% in Q1 2026 (ended Mar 2026); AMD's operating margin was 14.4% in Q2 2026 (ended Jun 2026).\",\"AMD's operating margin was highest in Q2 2026, at 14.4%, of the periods from Q3 2024 to Q2 2026.\"],\"rest_of_answer\":[],\"figures_shown\":[\"Latest quarter (Q2 2026): AMD's revenue was $11.2B, gross profit $6.1B, operating income $1.6B, net income $1.5B, gross margin 54.0%, operating margin 14.4%, net margin 13.2%, revenue growth (QoQ) 4.7% and revenue growth (YoY) 45.7% in Q2 2026 (ended Jun 2026).\",\"Quarterly revenue: AMD's revenue was $6.8B in Q3 2024 (ended Sep 2024); AMD's revenue was $7.7B in Q4 2024 (ended Dec 2024); AMD's revenue was $7.4B in Q1 2025 (ended Mar 2025); AMD's revenue was $7.7B in Q2 2025 (ended Jun 2025); AMD's revenue was $9.2B in Q3 2025 (ended Sep 2025); AMD's revenue was $10.3B in Q4 2025 (ended Dec 2025); AMD's revenue was $10.7B in Q1 2026 (ended Mar 2026); AMD's revenue was $11.2B in Q2 2026 (ended Jun 2026).\",\"Gross margin by quarter: AMD's gross margin was 50.1% in Q3 2024 (ended Sep 2024); AMD's gross margin was 51.0% in Q4 2024 (ended Dec 2024); AMD's gross margin was 50.2% in Q1 2025 (ended Mar 2025); AMD's gross margin was 39.8% in Q2 2025 (ended Jun 2025); AMD's gross margin was 53.6% in Q3 2025 (ended Sep 2025); AMD's gross margin was 54.0% in Q4 2025 (ended Dec 2025); AMD's gross margin was 54.0% in Q1 2026 (ended Mar 2026); AMD's gross margin was 54.0% in Q2 2026 (ended Jun 2026).\",\"Operating margin by quarter: AMD's operating margin was 10.6% in Q3 2024 (ended Sep 2024); AMD's operating margin was 11.4% in Q4 2024 (ended Dec 2024); AMD's operating margin was 10.8% in Q1 2025 (ended Mar 2025); AMD's operating margin was -1.7% in Q2 2025 (ended Jun 2025); AMD's operating margin was 13.7% in Q3 2025 (ended Sep 2025); AMD's operating margin was 14.1% in Q4 2025 (ended Dec 2025); AMD's operating margin was 14.2% in Q1 2026 (ended Mar 2026); AMD's operating margin was 14.4% in Q2 2026 (ended Jun 2026).\",\"Net margin by quarter: AMD's net margin was 11.3% in Q3 2024 (ended Sep 2024); AMD's net margin was 6.3% in Q4 2024 (ended Dec 2024); AMD's net margin was 9.5% in Q1 2025 (ended Mar 2025); AMD's net margin was 11.3% in Q2 2025 (ended Jun 2025); AMD's net margin was 13.4% in Q3 2025 (ended Sep 2025); AMD's net margin was 13.1% in Q4 2025 (ended Dec 2025); AMD's net margin was 13.1% in Q1 2026 (ended Mar 2026); AMD's net margin was 13.2% in Q2 2026 (ended Jun 2026).\"]}]}"
           }
         ],
-        "text": "{\"verdicts\":[{\"id\":4,\"verdict\":\"entailed\",\"worded_amount\":false,\"reason\":\"Operating margin of 14.4% in Q2 2026 is the highest in the window, and the rise since Q3 2025 is small (13.7%, 14.1%, 14.2%, 14.4%), matching the 'incremental' description after the rebound from -1.7%.\"}]}",
+        "text": "{\"verdicts\":[{\"id\":4,\"verdict\":\"entailed\",\"worded_amount\":false}]}",
         "truncated": false,
         "deployment": "anthropic/claude-haiku-5-5",
-        "latency_ms": 2649,
+        "latency_ms": 3211,
         "usage": {
           "input_tokens": 2810,
-          "output_tokens": 472
+          "output_tokens": 347
         }
       }
     }

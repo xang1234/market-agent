@@ -2355,7 +2355,7 @@
         "index": 7,
         "text": "The one-month offset between the two fiscal-year end dates means the comparison is not on identical calendar periods, which limits direct comparability.",
         "check": "judge",
-        "reason": "entailed, worded_amount: The supports give NVDA's fiscal year ending Jan 2026 and AMD's ending Dec 2025, so the one-month offset and the resulting limit on comparability follow directly."
+        "reason": "entailed, worded_amount: The answer shows NVDA's fiscal year ending January 2026 and AMD's ending December 2025, which implies the one-month offset and that the periods are not identical."
       }
     ],
     "rendered": true,
@@ -2366,14 +2366,13 @@
       {
         "index": 6,
         "verdict": "entailed",
-        "worded_amount": false,
-        "reason": "NVDA's YTD price return (5.81%) exceeds AMD's (3.17%), and NVDA is higher on revenue, gross margin, net margin and revenue growth; the export-control charge is cited in AMD's sources."
+        "worded_amount": false
       },
       {
         "index": 7,
         "verdict": "entailed",
         "worded_amount": true,
-        "reason": "The supports give NVDA's fiscal year ending Jan 2026 and AMD's ending Dec 2025, so the one-month offset and the resulting limit on comparability follow directly."
+        "reason": "The answer shows NVDA's fiscal year ending January 2026 and AMD's ending December 2025, which implies the one-month offset and that the periods are not identical."
       }
     ]
   },
@@ -2655,16 +2654,16 @@
           },
           {
             "role": "user",
-            "content": "{\"companies\":[\"NVDA\",\"AMD\"],\"inferences\":[{\"id\":6,\"subject\":null,\"text\":\"NVIDIA is outperforming AMD both on YTD price return and on every fundamental metric shown, though AMD's results were weighed down by a disclosed export-control charge.\",\"checked_results\":[\"NVDA highest on price return\"],\"supports\":[\"Of NVDA and AMD, NVDA's price return was highest: NVDA 5.81%, AMD 3.17% (YTD 2026: Dec 2025 close to Aug 2026 close).\",\"According to a source dated Aug 2025, effective Jun 2025 on AMD: As previously announced, our second quarter results were impacted by the U.S. Government's export control on our AMD Instinct MI308 data center GPU products. For the quarter, these restrictions led to approximately $800 million in inventory and related charges.\"],\"rest_of_answer\":[\"NVDA's revenue was $209.9B, gross margin 70.8%, net margin 53.6% and revenue growth (YoY) 60.9% in FY2026 (ended Jan 2026).\",\"AMD's revenue was $34.7B, gross margin 49.9%, net margin 12.0% and revenue growth (YoY) 34.5% in FY2025 (ended Dec 2025).\",\"NVDA's price return was 5.81% in YTD 2026: Dec 2025 close to Aug 2026 close; AMD's price return was 3.17% in YTD 2026: Dec 2025 close to Aug 2026 close.\"],\"figures_shown\":[\"Side by side: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025): NVDA's revenue was $209.9B, gross margin 70.8%, net margin 53.6% and revenue growth (YoY) 60.9% in FY2026 (ended Jan 2026); AMD's revenue was $34.7B, gross margin 49.9%, net margin 12.0% and revenue growth (YoY) 34.5% in FY2025 (ended Dec 2025).\",\"Price return YTD 2026 (split-adjusted, excluding dividends): NVDA's price return was 5.81% in YTD 2026: Dec 2025 close to Aug 2026 close; AMD's price return was 3.17% in YTD 2026: Dec 2025 close to Aug 2026 close.\"]}]}"
+            "content": "{\"companies\":[\"NVDA\",\"AMD\"],\"inferences\":[{\"id\":6,\"subject\":null,\"text\":\"NVIDIA is outperforming AMD both on YTD price return and on every fundamental metric shown, though AMD's results were weighed down by a disclosed export-control charge.\",\"checked_results\":[\"NVDA highest on price return\"],\"supports\":[\"Of NVDA and AMD, NVDA's price return was highest: NVDA 5.81%, AMD 3.17% (YTD 2026: Dec 2025 close to Aug 2026 close), 2.64 percentage points above AMD.\",\"According to a source dated Aug 2025, effective Jun 2025 on AMD: As previously announced, our second quarter results were impacted by the U.S. Government's export control on our AMD Instinct MI308 data center GPU products. For the quarter, these restrictions led to approximately $800 million in inventory and related charges.\"],\"rest_of_answer\":[\"NVDA's revenue was $209.9B, gross margin 70.8%, net margin 53.6% and revenue growth (YoY) 60.9% in FY2026 (ended Jan 2026).\",\"AMD's revenue was $34.7B, gross margin 49.9%, net margin 12.0% and revenue growth (YoY) 34.5% in FY2025 (ended Dec 2025).\",\"NVDA's price return was 5.81% in YTD 2026: Dec 2025 close to Aug 2026 close; AMD's price return was 3.17% in YTD 2026: Dec 2025 close to Aug 2026 close.\"],\"figures_shown\":[\"Side by side: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025): NVDA's revenue was $209.9B, gross margin 70.8%, net margin 53.6% and revenue growth (YoY) 60.9% in FY2026 (ended Jan 2026); AMD's revenue was $34.7B, gross margin 49.9%, net margin 12.0% and revenue growth (YoY) 34.5% in FY2025 (ended Dec 2025).\",\"Price return YTD 2026 (split-adjusted, excluding dividends): NVDA's price return was 5.81% in YTD 2026: Dec 2025 close to Aug 2026 close; AMD's price return was 3.17% in YTD 2026: Dec 2025 close to Aug 2026 close.\"]}]}"
           }
         ],
-        "text": "{\"verdicts\":[{\"id\":6,\"verdict\":\"entailed\",\"worded_amount\":false,\"reason\":\"NVDA's YTD price return (5.81%) exceeds AMD's (3.17%), and NVDA is higher on revenue, gross margin, net margin and revenue growth; the export-control charge is cited in AMD's sources.\"}]}",
+        "text": "{\"verdicts\":[{\"id\":6,\"verdict\":\"entailed\",\"worded_amount\":false}]}",
         "truncated": false,
         "deployment": "anthropic/claude-haiku-5-5",
-        "latency_ms": 3494,
+        "latency_ms": 4058,
         "usage": {
-          "input_tokens": 1969,
-          "output_tokens": 455
+          "input_tokens": 1983,
+          "output_tokens": 383
         }
       }
     },
@@ -2678,16 +2677,16 @@
           },
           {
             "role": "user",
-            "content": "{\"companies\":[\"NVDA\",\"AMD\"],\"inferences\":[{\"id\":7,\"subject\":null,\"text\":\"The one-month offset between the two fiscal-year end dates means the comparison is not on identical calendar periods, which limits direct comparability.\",\"checked_results\":[],\"supports\":[\"NVDA's revenue was $209.9B, gross margin 70.8%, net margin 53.6% and revenue growth (YoY) 60.9% in FY2026 (ended Jan 2026).\",\"AMD's revenue was $34.7B, gross margin 49.9%, net margin 12.0% and revenue growth (YoY) 34.5% in FY2025 (ended Dec 2025).\"],\"rest_of_answer\":[\"NVDA's price return was 5.81% in YTD 2026: Dec 2025 close to Aug 2026 close; AMD's price return was 3.17% in YTD 2026: Dec 2025 close to Aug 2026 close.\",\"Of NVDA and AMD, NVDA's price return was highest: NVDA 5.81%, AMD 3.17% (YTD 2026: Dec 2025 close to Aug 2026 close).\"],\"figures_shown\":[\"Side by side: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025): NVDA's revenue was $209.9B, gross margin 70.8%, net margin 53.6% and revenue growth (YoY) 60.9% in FY2026 (ended Jan 2026); AMD's revenue was $34.7B, gross margin 49.9%, net margin 12.0% and revenue growth (YoY) 34.5% in FY2025 (ended Dec 2025).\",\"Price return YTD 2026 (split-adjusted, excluding dividends): NVDA's price return was 5.81% in YTD 2026: Dec 2025 close to Aug 2026 close; AMD's price return was 3.17% in YTD 2026: Dec 2025 close to Aug 2026 close.\"]}]}"
+            "content": "{\"companies\":[\"NVDA\",\"AMD\"],\"inferences\":[{\"id\":7,\"subject\":null,\"text\":\"The one-month offset between the two fiscal-year end dates means the comparison is not on identical calendar periods, which limits direct comparability.\",\"checked_results\":[],\"supports\":[\"NVDA's revenue was $209.9B, gross margin 70.8%, net margin 53.6% and revenue growth (YoY) 60.9% in FY2026 (ended Jan 2026).\",\"AMD's revenue was $34.7B, gross margin 49.9%, net margin 12.0% and revenue growth (YoY) 34.5% in FY2025 (ended Dec 2025).\"],\"rest_of_answer\":[\"NVDA's price return was 5.81% in YTD 2026: Dec 2025 close to Aug 2026 close; AMD's price return was 3.17% in YTD 2026: Dec 2025 close to Aug 2026 close.\",\"Of NVDA and AMD, NVDA's price return was highest: NVDA 5.81%, AMD 3.17% (YTD 2026: Dec 2025 close to Aug 2026 close), 2.64 percentage points above AMD.\"],\"figures_shown\":[\"Side by side: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025): NVDA's revenue was $209.9B, gross margin 70.8%, net margin 53.6% and revenue growth (YoY) 60.9% in FY2026 (ended Jan 2026); AMD's revenue was $34.7B, gross margin 49.9%, net margin 12.0% and revenue growth (YoY) 34.5% in FY2025 (ended Dec 2025).\",\"Price return YTD 2026 (split-adjusted, excluding dividends): NVDA's price return was 5.81% in YTD 2026: Dec 2025 close to Aug 2026 close; AMD's price return was 3.17% in YTD 2026: Dec 2025 close to Aug 2026 close.\"]}]}"
           }
         ],
-        "text": "{\"verdicts\":[{\"id\":7,\"verdict\":\"entailed\",\"worded_amount\":true,\"reason\":\"The supports give NVDA's fiscal year ending Jan 2026 and AMD's ending Dec 2025, so the one-month offset and the resulting limit on comparability follow directly.\"}]}",
+        "text": "{\"verdicts\":[{\"id\":7,\"verdict\":\"entailed\",\"worded_amount\":true,\"reason\":\"The answer shows NVDA's fiscal year ending January 2026 and AMD's ending December 2025, which implies the one-month offset and that the periods are not identical.\"}]}",
         "truncated": false,
         "deployment": "anthropic/claude-haiku-5-5",
-        "latency_ms": 2907,
+        "latency_ms": 6011,
         "usage": {
-          "input_tokens": 1844,
-          "output_tokens": 381
+          "input_tokens": 1857,
+          "output_tokens": 384
         }
       }
     }
