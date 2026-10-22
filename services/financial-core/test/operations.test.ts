@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ChangeNode, FreeCashFlowNode, MarginNode, RatioNode, TrailingSumNode } from "../src/contracts.ts";
+import { hashCanonical } from "../src/canonical.ts";
+import type { BoundFactInputV1, ChangeNode, DerivationProofV1, FreeCashFlowNode, MarginNode, RatioNode, TrailingSumNode } from "../src/contracts.ts";
 import { RATIO_CATALOG_V1 } from "../src/definitions.ts";
 import { OPERATION_REGISTRY } from "../src/operation-registry.ts";
 import { convertDimensionless, type DimensionlessUnit } from "../src/dimensions.ts";
@@ -76,6 +77,96 @@ test("reported_metric rejects a native value that disagrees with value x scale",
     FinancialIntegrityError,
   );
 });
+
+test("a derived quarter binds when its derivation sums to its value; a tampered derivation, or a derived status without one, fails integrity (#481)", () => {
+  const node = { node_id: "q4", operation: "reported_metric" as const, operation_version: "reported_metric.v1", subject_slot: "a", metric_key: "revenue", period: { kind: "fiscal_period" as const, fiscal_year: 2024, fiscal_period: "Q4" as const } };
+  const expected = { slot: SLOTS.a, definition_version: "revenue.v1", knowledge_cutoff: KNOWLEDGE_CUTOFF, reporting_basis: "as_reported" as const };
+  const reported = boundInput({ metric: "revenue", value: "170", start: "2024-10-01", end: "2024-12-31", fiscal_year: 2024, fiscal_period: "Q4" });
+  const derived = derive(reported, fourthQuarter(["6.2E2", "140", "150", "160"]));
+  assert.equal(value(operandFromBoundInput(derived, node, expected)), "170");
+  assert.equal(integrityCode(() => operandFromBoundInput(derive(reported, fourthQuarter(["620", "140", "150", "150"])), node, expected)), "derivation_value_mismatch");
+  const { derivation: _derivation, ...unproven } = derived;
+  assert.equal(integrityCode(() => operandFromBoundInput(unproven, node, expected)), "derivation_value_mismatch");
+  assert.equal(integrityCode(() => operandFromBoundInput({ ...reported, derivation: derived.derivation }, node, expected)), "derivation_value_mismatch");
+  assert.throws(
+    () => operandFromBoundInput(derive(reported, derived.derivation, "f".repeat(64)), node, expected),
+    { code: "derivation_value_mismatch", message: "the derivation of q4 does not prove its bound value: proof_hash_mismatch" },
+    "a derivation its recorded hash does not bind",
+  );
+});
+
+test("a derived balance fails integrity, though its derivation sums to its value (#481)", () => {
+  const node = { node_id: "assets", operation: "reported_metric" as const, operation_version: "reported_metric.v1", subject_slot: "a", metric_key: "total_assets", period: { kind: "fiscal_period" as const, fiscal_year: 2024, fiscal_period: "Q4" as const } };
+  const expected = { slot: SLOTS.a, definition_version: "total_assets.v1", knowledge_cutoff: KNOWLEDGE_CUTOFF, reporting_basis: "as_reported" as const };
+  const balance = boundInput({ metric: "total_assets", kind: "instant", value: "170", end: "2024-12-31", fiscal_year: 2024, fiscal_period: "Q4" });
+  assert.throws(
+    () => operandFromBoundInput(derive(balance, fourthQuarter(["620", "140", "150", "160"])), node, expected),
+    { code: "derivation_value_mismatch", message: "the derivation of assets does not prove its bound value: not_a_flow" },
+  );
+});
+
+test("binding names each way a derivation that sums to its value still fails to prove it (#481)", () => {
+  const node = { node_id: "q4", operation: "reported_metric" as const, operation_version: "reported_metric.v1", subject_slot: "a", metric_key: "revenue", period: { kind: "fiscal_period" as const, fiscal_year: 2024, fiscal_period: "Q4" as const } };
+  const expected = { slot: SLOTS.a, definition_version: "revenue.v1", knowledge_cutoff: KNOWLEDGE_CUTOFF, reporting_basis: "as_reported" as const };
+  const reported = boundInput({ metric: "revenue", value: "170", start: "2024-10-01", end: "2024-12-31", fiscal_year: 2024, fiscal_period: "Q4" });
+  const { terms: [year, q1, q2, q3] } = fourthQuarter(["620", "140", "150", "160"]);
+  const withTerms = (terms: DerivationProofV1["terms"]): DerivationProofV1 => ({ ...fourthQuarter(["620", "140", "150", "160"]), terms });
+  const cases: Array<[string, unknown]> = [
+    ["invalid_derivation", { ...withTerms([year!, q1!, q2!, q3!]), version: "period_difference.v0" }],
+    ["own_term_sign", withTerms([year!, q1!, { ...q2!, sign: "+", raw_token: "-150" }, q3!])],
+    ["own_term_source", withTerms([{ ...year!, source: { ...year!.source, source_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" } }, q1!, q2!, q3!])],
+    ["own_term_end", withTerms([{ ...year!, end: "2024-12-30" }, q1!, q2!, q3!])],
+    ["periods_not_contiguous", withTerms([{ ...year!, raw_token: "610" }, q1!, q2!, q2!])],
+    ["fiscal_year_mismatch", withTerms([year!, q1!, { ...q2!, fiscal_year: 2023 }, q3!])],
+    ["value_mismatch", withTerms([year!, q1!, q2!, { ...q3!, raw_token: "150" }])],
+    ["own_term_not_last_filed", withTerms([year!, q1!, q2!, { ...q3!, source: { ...q3!.source, filed: "2025-02-16" } }])],
+  ];
+  for (const [issue, derivation] of cases) {
+    assert.throws(
+      () => operandFromBoundInput(derive(reported, derivation), node, expected),
+      { code: "derivation_value_mismatch", message: `the derivation of q4 does not prove its bound value: ${issue}` },
+    );
+  }
+});
+
+function integrityCode(action: () => unknown): string {
+  try {
+    action();
+  } catch (error) {
+    if (error instanceof FinancialIntegrityError) return error.code;
+    throw error;
+  }
+  return assert.fail("the input bound");
+}
+
+function derive(input: BoundFactInputV1, derivation: unknown, token_proof_hash = hashCanonical("derivation", derivation)): BoundFactInputV1 {
+  return { ...input, precision_status: "derived_from_source_tokens", derivation: derivation as DerivationProofV1, numeric: { ...input.numeric, token_proof_hash } };
+}
+
+function fourthQuarter([year, q1, q2, q3]: string[]): DerivationProofV1 {
+  const term = (sign: "+" | "-", fiscal_period: "FY" | "Q1" | "Q2" | "Q3", start: string, end: string, raw_token: string, filed: string) => ({
+    sign,
+    span: fiscal_period === "FY" ? ("fiscal_year" as const) : ("quarter" as const),
+    fiscal_year: 2024,
+    fiscal_period,
+    start,
+    end,
+    raw_token,
+    token_proof_hash: "c".repeat(64),
+    source: { source_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", accession: `0001234567-24-${fiscal_period}`, form: fiscal_period === "FY" ? "10-K" : "10-Q", filed, locator: `loc:${fiscal_period}` },
+  });
+  return {
+    version: "period_difference.v1",
+    concept: "Revenues",
+    unit: "USD",
+    terms: [
+      term("+", "FY", "2024-01-01", "2024-12-31", year!, "2025-02-15"),
+      term("-", "Q1", "2024-01-01", "2024-03-31", q1!, "2024-05-01"),
+      term("-", "Q2", "2024-04-01", "2024-06-30", q2!, "2024-08-01"),
+      term("-", "Q3", "2024-07-01", "2024-09-30", q3!, "2024-11-01"),
+    ],
+  };
+}
 
 test("reported_metric rejects bindings for another subject or metric as integrity failures", () => {
   const input = boundInput({ slot: "b", metric: "revenue", value: "1", ...FY2023 });

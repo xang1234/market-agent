@@ -264,15 +264,23 @@ export async function loadSubjectNames(
   )).rows;
 }
 
-/** The sources of the prices a unit's closure bound, in id order: a seal cites them beside its facts' sources. */
-export async function loadUnitBoundPriceSources(db: QueryExecutor, runId: string, unitId: string): Promise<string[]> {
+/**
+ * The sources a unit's closure bound beyond its facts' own, in id order: its
+ * prices' and the filings its derived values come from. A seal cites them
+ * beside its facts' sources.
+ */
+export async function loadUnitCitedSources(db: QueryExecutor, runId: string, unitId: string): Promise<string[]> {
   return (await db.query<{ source_id: string }>(
-    `select distinct o.source_id::text as source_id
-       from financial_run_units u
-       join financial_run_inputs i on i.run_id = u.run_id and u.closure_node_ids ? i.input_slot and i.binding_status = 'bound'
-       join price_observations o on o.observation_id = i.price_observation_id
-      where u.run_id = $1 and u.unit_id = $2
-      order by 1`,
+    `with bound as (
+       select i.price_observation_id, i.bound_payload
+         from financial_run_units u
+         join financial_run_inputs i on i.run_id = u.run_id and u.closure_node_ids ? i.input_slot and i.binding_status = 'bound'
+        where u.run_id = $1 and u.unit_id = $2
+     )
+     select o.source_id::text as source_id from bound b join price_observations o on o.observation_id = b.price_observation_id
+     union
+     select (term -> 'source' ->> 'source_id')::uuid::text from bound b cross join jsonb_array_elements(b.bound_payload -> 'derivation' -> 'terms') as term
+     order by 1`,
     [runId, unitId],
   )).rows.map((row) => row.source_id);
 }

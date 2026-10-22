@@ -413,6 +413,32 @@ export type SplitAdjustmentV2 = {
   adjusted_native_value: ExactFraction;
 };
 
+export const DERIVATION_PROOF_VERSION = "period_difference.v1";
+
+/**
+ * A value no filing states, derived from values filings do state (#481): a
+ * fourth quarter is its fiscal year less the first three quarters, and a
+ * cash-flow quarter its year to date less the previous one. The value is
+ * Σ sign × raw_token, exactly (derivationValue). Each term is one filed value,
+ * with its token's proof hash and the filing that states it.
+ */
+export type DerivationProofV1 = {
+  version: typeof DERIVATION_PROOF_VERSION;
+  concept: string;
+  unit: string;
+  terms: Array<{
+    sign: "+" | "-";
+    span: "fiscal_year" | "quarter" | "year_to_date";
+    fiscal_year: number;
+    fiscal_period: "FY" | "Q1" | "Q2" | "Q3";
+    start: IsoDate;
+    end: IsoDate;
+    raw_token: string;
+    token_proof_hash: Sha256Hex;
+    source: { source_id: UUID; accession: string; form: string; filed: IsoDate; locator: string };
+  }>;
+};
+
 /** An immutable bound input: a fact, or a share price from a stored price observation. */
 export type BoundFinancialInputV1 = BoundFactInputV1 | BoundPriceInputV1;
 
@@ -464,6 +490,8 @@ export type BoundFactInputV1 = {
   };
   observed_at: IsoDateTime;
   precision_status: ProvenPrecisionClass;
+  /** Present exactly when precision_status is derived_from_source_tokens; `numeric.raw_token` is then its sum. */
+  derivation?: DerivationProofV1;
   eligibility: {
     selection_policy_version: VersionTag;
     promotion_status: "authoritative" | "corroborated" | "reviewed_extraction";

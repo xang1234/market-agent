@@ -258,9 +258,9 @@ export function verifyFinancialUnit(records: FinancialUnitRecords, unitId: Local
   }
   if (failures.length > 0) return { ok: false, failures };
 
-  // The seal must cite every bound fact of the closure and its source, at the knowledge cutoff.
+  // The seal must cite every bound fact of the closure, its source, and each filing a derived value comes from, at the knowledge cutoff.
   const factRefs = new Set(context.manifest.fact_refs);
-  const sourceIds = new Set(context.manifest.source_ids);
+  const sourceIds = new Set(context.manifest.source_ids.map((id) => id.toLowerCase()));
   if (Date.parse(context.manifest.as_of) !== Date.parse(plan.time.knowledge_cutoff)) {
     return failed("financial_manifest_mismatch", { run_id: run.run_id, field: "as_of" });
   }
@@ -269,7 +269,11 @@ export function verifyFinancialUnit(records: FinancialUnitRecords, unitId: Local
     if (binding.input.schema_version !== BOUND_PRICE_INPUT_SCHEMA_VERSION && !factRefs.has(binding.input.fact_id)) {
       failures.push(failure("financial_manifest_mismatch", { run_id: run.run_id, input_slot: slot, field: "fact_refs" }));
     }
-    if (!sourceIds.has(binding.input.source.source_id)) failures.push(failure("financial_manifest_mismatch", { run_id: run.run_id, input_slot: slot, field: "source_ids" }));
+    if (!sourceIds.has(binding.input.source.source_id.toLowerCase())) failures.push(failure("financial_manifest_mismatch", { run_id: run.run_id, input_slot: slot, field: "source_ids" }));
+    const derivation = binding.input.schema_version === BOUND_PRICE_INPUT_SCHEMA_VERSION ? null : binding.input.derivation;
+    if (derivation?.terms.some((term) => !sourceIds.has(term.source.source_id.toLowerCase()))) {
+      failures.push(failure("financial_manifest_mismatch", { run_id: run.run_id, input_slot: slot, field: "derivation_source_ids" }));
+    }
   }
   if (failures.length > 0) return { ok: false, failures };
 

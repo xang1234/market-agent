@@ -3,13 +3,18 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import type { Client } from "pg";
 import { connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
+import { hashCanonical } from "../../financial-core/src/index.ts";
 import type { SnapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
+import { bindPlanInputs } from "../src/bind-inputs.ts";
+import { createEvidenceFinancialPort } from "../src/evidence-adapter.ts";
+import { executeRun } from "../src/execute.ts";
+import { finalizeUnit } from "../src/finalize.ts";
 import type { FinancialEvidencePort } from "../src/ports.ts";
 import { readRunStatus } from "../src/read-model.ts";
 import { reserveReplayRun } from "../src/run-repo.ts";
 import { FINANCIAL_VERSION_REGISTRY } from "../src/version-registry.ts";
 import { createFinancialWorker, type WorkerPool } from "../src/worker.ts";
-import { completedRun, databaseUrl, engineDatabase, IDS, pinnedClients } from "./db-fixtures.ts";
+import { authorityFor, completedRun, databaseUrl, engineDatabase, IDS, leasedRun, marginPlan, pinnedClients } from "./db-fixtures.ts";
 
 /** Evidence that fails the test if a replay ever asks for it. */
 const noEvidence = (): FinancialEvidencePort => ({
@@ -62,6 +67,31 @@ test("pinned verification replay", { timeout: 300_000 }, async (t) => {
     assert.deepEqual([status?.execution_state, status?.coverage_state, status?.replay_of_run_id], ["completed", "partial", original.runId]);
     assert.equal(await certificates(), before, "a replay never issues a certificate");
     assert.deepEqual((await worker().tick()).filter((candidate) => candidate.run_id === replayId), [], "a finished replay is not picked up again");
+  });
+
+  await t.test("a run bound under selection v5 still passes the seal and replays as verified after selection moved to v6 (#481)", async () => {
+    const plan = marginPlan();
+    const authority = authorityFor();
+    const { runId, lease } = await leasedRun(db, plan, authority);
+    await bindPlanInputs({ client: db, lease, plan, authority, evidence: createEvidenceFinancialPort });
+    const policies = async () => (await db.query(`select distinct selection_policy_version from financial_run_inputs where run_id = $1`, [runId])).rows;
+    assert.deepEqual(await policies(), [{ selection_policy_version: "public-information-selection.v6" }]);
+    const rows = (await db.query<{ input_slot: string; bound_payload: { eligibility: { selection_policy_version: string } } | null }>(
+      `select input_slot, bound_payload from financial_run_inputs where run_id = $1`, [runId])).rows;
+    for (const row of rows) {
+      const payload = row.bound_payload && { ...row.bound_payload, eligibility: { ...row.bound_payload.eligibility, selection_policy_version: "public-information-selection.v5" } };
+      await bypass(db, `update financial_run_inputs set selection_policy_version = 'public-information-selection.v5', bound_payload = $3::jsonb, payload_hash = $4
+                         where run_id = $1 and input_slot = $2`, [runId, row.input_slot, payload && JSON.stringify(payload), payload && hashCanonical("bound_input", payload)]);
+    }
+    assert.deepEqual(await policies(), [{ selection_policy_version: "public-information-selection.v5" }]);
+    assert.equal((await executeRun({ client: db, lease, plan, authority, evidence: createEvidenceFinancialPort, parent_limits: {} })).outcome, "ready_to_seal");
+    for (const unit of plan.publication_units) {
+      const outcome = await finalizeUnit({ client, lease, authority, unit_id: unit.unit_id, snapshot_id: randomUUID(), persistParent: async () => {} });
+      assert.equal(outcome.status, "published", JSON.stringify(outcome));
+    }
+    const replayId = await replayOf(runId);
+    const entry = (await worker().tick()).find((candidate) => candidate.run_id === replayId);
+    assert.ok(entry && entry.status === "replayed" && entry.replay.status === "verified", JSON.stringify(entry));
   });
 
   await t.test("a historical version this build does not ship is unavailable, not reinterpreted", async () => {

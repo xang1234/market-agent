@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import type { Client } from "pg";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
+import { recordFactPrecisionAttestation } from "../../evidence/src/financial-attestations.ts";
+import Ajv2020 from "../../financial-core/node_modules/ajv/dist/2020.js";
+import { recordFactFinancialContext } from "../../evidence/src/financial-context.ts";
+import { validateFinancialPlan, type DerivationProofV1, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
+import { loadFinancialUnitRecords } from "../../snapshot/src/financial-verifier-loader.ts";
+import { verifyFinancialUnit } from "../../snapshot/src/financial-verifier.ts";
 import type { SnapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
 import { inspectCommittedResult, type ResultInspection } from "../src/inspection.ts";
 import type { SqlExecutor } from "../src/ports.ts";
-import { completedRun, engineDatabase, IDS, marginPlan, pinnedClients, readyRun } from "./db-fixtures.ts";
+import { completedRun, engineDatabase, IDS, marginPlan, pinnedClients, readyRun, revenuePlan } from "./db-fixtures.ts";
 
 function available(inspection: ResultInspection | null): Extract<ResultInspection, { availability: "available" }> {
   assert.ok(inspection && inspection.availability === "available", JSON.stringify(inspection));
@@ -36,6 +43,75 @@ async function whileChanged<T>(db: Client, change: Statement, restore: Statement
   }
 }
 
+const Q4_FACT = "4f000000-0000-4000-8000-0000000000d9";
+
+const QUARTER_SOURCES = ["4f000000-0000-4000-8000-0000000000c5", "4f000000-0000-4000-8000-0000000000c6", "4f000000-0000-4000-8000-0000000000c7"] as const;
+
+async function seedDerivedQuarter(db: Client): Promise<DerivationProofV1> {
+  await db.query(
+    `insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at)
+     select id, 'sec_edgar', 'filing', 'primary', 'public', '2024-02-01T00:00:00Z' from unnest($1::uuid[]) as id`,
+    [QUARTER_SOURCES],
+  );
+  await db.query(
+    `insert into facts (fact_id, subject_kind, subject_id, metric_id, period_kind, period_start, period_end, fiscal_year, fiscal_period,
+                        value_num, unit, currency, scale, as_of, reported_at, observed_at, source_id, method, verification_status,
+                        freshness_class, coverage_level, confidence)
+     values ($1, 'issuer', $2, $3, 'fiscal_q', '2023-10-01', '2023-12-31', 2023, 'Q4', 100000000000, 'currency', 'USD', 1,
+             '2024-02-01T00:00:00Z', '2024-01-10T00:00:00Z', '2024-02-01T00:00:00Z', $4, 'reported', 'authoritative', 'filing_time', 'full', 1)`,
+    [Q4_FACT, IDS.issuerA, IDS.revenue, IDS.sourceV1],
+  );
+  const term = (sign: "+" | "-", fiscal_period: "FY" | "Q1" | "Q2" | "Q3", start: string, end: string, raw_token: string, source_id: string, filed: string) => ({
+    sign,
+    span: fiscal_period === "FY" ? ("fiscal_year" as const) : ("quarter" as const),
+    fiscal_year: 2023,
+    fiscal_period,
+    start,
+    end,
+    raw_token,
+    token_proof_hash: "8".repeat(64),
+    source: { source_id, accession: `0000000001-23-${fiscal_period}`, form: fiscal_period === "FY" ? "10-K" : "10-Q", filed, locator: `locator:${fiscal_period}` },
+  });
+  const derivation: DerivationProofV1 = {
+    version: "period_difference.v1",
+    concept: "Revenues",
+    unit: "USD",
+    terms: [
+      term("+", "FY", "2023-01-01", "2023-12-31", "400000000000", IDS.sourceV1, "2024-01-10"),
+      term("-", "Q1", "2023-01-01", "2023-03-31", "90000000000", QUARTER_SOURCES[0], "2023-05-01"),
+      term("-", "Q2", "2023-04-01", "2023-06-30", "100000000000", QUARTER_SOURCES[1], "2023-08-01"),
+      term("-", "Q3", "2023-07-01", "2023-09-30", "110000000000", QUARTER_SOURCES[2], "2023-11-01"),
+    ],
+  };
+  await recordFactPrecisionAttestation(db, { fact_id: Q4_FACT, precision_class: "derived_from_source_tokens", derivation, source_locator: "locator:Q4", validation_method: "fixture" });
+  await recordFactFinancialContext(db, {
+    fact_id: Q4_FACT,
+    context_version: "context.v1",
+    period_type: "duration",
+    dimension_scope: "consolidated",
+    dimension_members: [],
+    reporting_basis: "as_reported",
+    adjustment_basis: "unadjusted",
+    share_basis: "not_applicable",
+    fiscal_calendar_version: "fiscal-calendar.v1",
+    disclosure_relation: "original",
+    source_context_ref: "locator:Q4",
+  });
+  return derivation;
+}
+
+function fourthQuarterPlan(): FinancialPlanV1 {
+  const validated = validateFinancialPlan({
+    ...revenuePlan(),
+    plan_id: randomUUID(),
+    operations: [{ node_id: "a_q4", operation: "reported_metric", operation_version: "reported_metric.v1", subject_slot: "a", metric_key: "revenue", period: { kind: "fiscal_period", fiscal_year: 2023, fiscal_period: "Q4" } }],
+    outputs: [{ output_id: "out_q4", node_id: "a_q4", unit_id: "q4_unit" }],
+    publication_units: [{ unit_id: "q4_unit", kind: "chat_section" }],
+  });
+  assert.ok(validated.ok, JSON.stringify(!validated.ok && validated.issues));
+  return validated.value;
+}
+
 test("committed result inspection", { timeout: 300_000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for inspection coverage");
@@ -60,6 +136,7 @@ test("committed result inspection", { timeout: 300_000 }, async (t) => {
     assert.ok("fact_id" in revenue);
     assert.equal(revenue.source.source_id, IDS.sourceV1);
     assert.equal(revenue.period.fiscal_year, 2023);
+    assert.equal(revenue.derivation, null);
     assert.match(revenue.publication.available_no_later_than, /^2024-/u);
     assert.equal(margin.time.time_mode, "public_information");
     assert.equal(margin.coverage_state, "partial", "the unit's FY2022 margin is a gap");
@@ -121,5 +198,45 @@ test("committed result inspection", { timeout: 300_000 }, async (t) => {
     available(await inspectCommittedResult(recording, IDS.owner, results.out_gm!));
     assert.ok(statements.length > 0);
     for (const statement of statements) assert.match(statement.trimStart(), /^select\b/iu);
+  });
+
+  await t.test("a derived quarter binds with its derivation, passes the seal, and is inspected with each term's filing (#481)", async () => {
+    const derivation = await seedDerivedQuarter(db);
+    const quarter = await completedRun(db, client, fourthQuarterPlan());
+    const inspected = available(await inspectCommittedResult(db, IDS.owner, quarter.results.out_q4!));
+    assert.equal(inspected.disposition, "verified");
+    const ajv = new Ajv2020({ strict: false, validateFormats: false });
+    for (const file of ["finance_research_block_schema.json", "financial_plan_schema.json", "financial_result_schema.json", "financial_answer_http_schema.json"]) {
+      ajv.addSchema(JSON.parse(readFileSync(new URL(`../../../spec/${file}`, import.meta.url), "utf8")));
+    }
+    const valid = ajv.getSchema("https://example.com/schemas/financial_answer_http_schema.json#/$defs/FinancialResultInspection")!;
+    assert.ok(valid(inspected), JSON.stringify(valid.errors));
+    const [input] = inspected.inputs;
+    assert.ok(input && "fact_id" in input);
+    assert.equal(valid({ ...inspected, inputs: [{ ...input, derivation: null }] }), false, "a derived status shows its derivation");
+    assert.equal(valid({ ...inspected, inputs: [{ ...input, precision_status: "source_token_preserved" }] }), false, "only a derived status shows a derivation");
+    assert.deepEqual([input.fact_id, input.value, input.precision_status, input.source.locator, input.derivation],
+      [Q4_FACT, "100000000000", "derived_from_source_tokens", "locator:Q4", derivation]);
+    const sealed = (await db.query<{ source_ids: string[] }>(
+      `select s.source_ids from financial_run_units u join snapshots s on s.snapshot_id = u.snapshot_id where u.run_id = $1 and u.unit_id = 'q4_unit'`,
+      [quarter.runId],
+    )).rows[0];
+    assert.deepEqual(sealed?.source_ids, [IDS.sourceV1, ...QUARTER_SOURCES], "the seal cites every filing the derived value comes from");
+
+    const records = await loadFinancialUnitRecords(db, { owner_user_id: IDS.owner, run_id: quarter.runId, unit_id: "q4_unit" });
+    assert.ok(records?.unit);
+    const atSeal = {
+      ...records,
+      run: { ...records.run, execution_state: "ready_to_seal" as const },
+      unit: { ...records.unit, state: "computed" as const },
+      results: records.results.map((result) => ({ ...result, state: "draft" as const, disposition: result.disposition === "verified" ? "computed" as const : result.disposition })),
+    };
+    const seal = (source_ids: string[]) =>
+      verifyFinancialUnit(atSeal, "q4_unit", { snapshot_id: randomUUID(), manifest: { fact_refs: [Q4_FACT], source_ids, as_of: atSeal.run.knowledge_cutoff } });
+    const cited = seal([IDS.sourceV1, ...QUARTER_SOURCES.map((id) => id.toUpperCase())]);
+    assert.ok(cited.ok, JSON.stringify(!cited.ok && cited.failures));
+    const uncited = seal([IDS.sourceV1, QUARTER_SOURCES[0], QUARTER_SOURCES[1]]);
+    assert.deepEqual(!uncited.ok && uncited.failures.map((failure) => [failure.reason_code, failure.details.input_slot, failure.details.field]),
+      [["financial_manifest_mismatch", "a_q4", "derivation_source_ids"]], "a seal that omits a term's filing is rejected");
   });
 });

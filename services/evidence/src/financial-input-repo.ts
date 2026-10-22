@@ -8,6 +8,7 @@
 // facts are returned — historical selection decides eligibility at a cutoff —
 // and numerics are projected as text; no value passes through Number.
 
+import type { DerivationProofV1 } from "../../financial-core/src/contracts.ts";
 import type { PrecisionClass, PublicationTimingPrecision } from "../../financial-core/src/evidence-vocabulary.ts";
 import type { CoverageLevel, FactEntitlementChannel } from "./fact-repo.ts";
 import type { FinancialContextFields } from "./financial-context.ts";
@@ -51,6 +52,7 @@ export type PrecisionProof = Readonly<{
   value_text: string | null;
   scale_text: string | null;
   source_locator: string | null;
+  derivation: DerivationProofV1 | null;
 }>;
 
 export type FinancialInputCandidate = Readonly<{
@@ -127,7 +129,7 @@ export async function listFinancialInputCandidates(db: RowQueryExecutor, request
          select jsonb_build_object(
                   'precision_attestation_id', a.precision_attestation_id::text, 'precision_class', a.precision_class,
                   'raw_token', a.raw_token, 'token_proof_hash', a.token_proof_hash, 'value_text', a.value_text,
-                  'scale_text', a.scale_text, 'source_locator', a.source_locator) as precision
+                  'scale_text', a.scale_text, 'source_locator', a.source_locator, 'derivation', a.derivation) as precision
            from current_fact_precision_attestations a
           where a.fact_id = f.fact_id
        ) prec on true

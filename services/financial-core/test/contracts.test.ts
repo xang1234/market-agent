@@ -16,7 +16,7 @@ import {
   SURFACES,
   UNIT_KINDS,
 } from "../src/contracts.ts";
-import { SOURCE_CLASSES } from "../src/evidence-vocabulary.ts";
+import { PRECISION_CLASSES, SOURCE_CLASSES } from "../src/evidence-vocabulary.ts";
 import {
   FinancialContractError,
   createRuntimeAuthority,
@@ -309,6 +309,39 @@ test("bound inputs require proven precision and publication evidence", () => {
   assert.equal(validateBoundInput(oversizedToken).ok, false);
 });
 
+test("a derived input carries its derivation, whose terms are filed values of the year's first three quarters or the year (#481)", () => {
+  const term = (sign: string, span: string, fiscal_period: string, start: string, end: string, filed: string) => ({
+    sign, span, fiscal_year: 2023, fiscal_period, start, end, raw_token: "1", token_proof_hash: HASH,
+    source: { source_id: "77777777-7777-4777-8777-777777777777", accession: `0000320193-23-${fiscal_period}`, form: "10-Q", filed, locator: "us-gaap:NetCashProvidedByUsedInOperatingActivities" },
+  });
+  const yearToDate = term("+", "year_to_date", "Q2", "2022-09-25", "2023-04-01", "2023-05-05");
+  const firstQuarter = term("-", "quarter", "Q1", "2022-09-25", "2022-12-31", "2023-02-03");
+  const derived = boundInput();
+  derived.precision_status = "derived_from_source_tokens";
+  derived.derivation = { version: "period_difference.v1", concept: "NetCashProvidedByUsedInOperatingActivities", unit: "USD", terms: [yearToDate, firstQuarter] };
+  assert.equal(validateBoundInput(derived).ok, true);
+  for (const tampered of [{ ...firstQuarter, fiscal_period: "Q4" }, { ...firstQuarter, sign: "*" }, { ...firstQuarter, value: "1" }]) {
+    derived.derivation.terms = [yearToDate, tampered];
+    assert.equal(validateBoundInput(derived).ok, false, JSON.stringify(tampered));
+  }
+  derived.derivation.terms = [yearToDate];
+  assert.equal(validateBoundInput(derived).ok, false, "a derivation has at least two terms");
+});
+
+test("a bound input carries a derivation exactly when its precision status is derived_from_source_tokens (#481)", () => {
+  const derivation = { version: "period_difference.v1" as const, concept: "Revenues", unit: "USD", terms: [1, 2].map((n) => ({
+    sign: n === 1 ? ("+" as const) : ("-" as const), span: "quarter" as const, fiscal_year: 2023, fiscal_period: "Q1" as const, start: "2023-01-01", end: "2023-03-31", raw_token: "1", token_proof_hash: HASH,
+    source: { source_id: "77777777-7777-4777-8777-777777777777", accession: `acc-${n}`, form: "10-Q", filed: "2023-05-05", locator: "loc" },
+  })) };
+  const derivedWithout = boundInput();
+  derivedWithout.precision_status = "derived_from_source_tokens";
+  assert.equal(validateBoundInput(derivedWithout).ok, false, "a derived status needs its derivation");
+  assert.equal(validateBoundInput({ ...derivedWithout, derivation }).ok, true);
+  const tokenWith = boundInput();
+  assert.equal(validateBoundInput(tokenWith).ok, true);
+  assert.equal(validateBoundInput({ ...tokenWith, derivation }).ok, false, "only a derived status carries a derivation");
+});
+
 // ---------------------------------------------------------------------------
 // Schema <-> TypeScript agreement
 
@@ -341,6 +374,7 @@ test("schema enums agree with TypeScript discriminated unions", () => {
   assert.deepEqual(enumAt(plan, "FinancialRuntimeAuthorityV1", "properties", "allowed_source_classes", "items"), [...SOURCE_CLASSES]);
   const units = plan.$defs.FinancialUnit.oneOf.flatMap((branch: any) => branch.properties.kind.enum);
   assert.deepEqual([...units].sort(), [...UNIT_KINDS].sort());
+  assert.deepEqual(enumAt(result, "BoundFactInputV1", "properties", "precision_status"), PRECISION_CLASSES.filter((precision) => precision !== "legacy_unverified"));
   assert.deepEqual(enumAt(result, "GapDisposition"), [...GAP_DISPOSITIONS]);
   assert.deepEqual(enumAt(result, "ReasonCode"), [...REASON_CODES]);
 });

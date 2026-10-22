@@ -152,7 +152,11 @@ filing's cash flow and balance sheet are extracted from it and stored in the sam
   year.
 - **A full year is 350 to 380 days.** A pre-2021 10-K also tags its fourth quarter alone as `fp=FY`, ending the same day.
 - **Cash flow is year to date in a 10-Q:** a quarter is its year to date less the previous one, and Q4 is the year less
-  nine months. Derived quarters carry no source token, like a derived income Q4.
+  nine months. A derived quarter, cash flow or an income Q4, has no source token of its own. When every input has one,
+  its `derived_from_source_tokens` proof is the derivation (`DerivationProofV1`): each input's token and filing, summing
+  exactly to the stored value. The proof names its own filing's term first, the subtracted terms tile the rest of that
+  term up to the quarter, and every other input was filed before its own, so the quarter is public when its last input
+  is (`derivationIssue`, `services/financial-core/src/derivation.ts`). A late 10-Q leaves it unproven, logged, and a gap.
 - **A derived quarter names every filing it comes from.** Its source is the statement's filing, but its inputs usually
   span filings (Q2 cash flow is the Q2 10-Q's six months less the Q1 10-Q's three; an income Q4 is the 10-K's year less
   three 10-Qs). Its `quality_flags` hold a `sec_period_difference` lineage: each input's accession, period, value and
@@ -175,7 +179,8 @@ filing's cash flow and balance sheet are extracted from it and stored in the sam
   fact is stored, and the old one is `superseded_by` it, in the filing's transaction. A stored income fact whose metric
   the filing no longer yields for the period is invalidated too when its dates are another period's. A snapshot cut before the repair
   still reads the old fact (`factActiveSql` judges activity at the cutoff). A rerun keeps a matching fact's value, and
-  one with no proven precision gains a `revalidated_against_source` proof. The CLI skips the frozen golden dataset's issuers.
+  one with no proven precision gains a `revalidated_against_source` proof, or a `derived_from_source_tokens` one for a
+  derived quarter whose value equals its derivation (`persistStatementFacts`, `services/fundamentals/src/sec-facts-repository.ts`). The CLI skips the frozen golden dataset's issuers.
   Lineage for derived income quarters stored before it existed is not rewritten.
 
 In chat, a single-company question naming cash flow, capex, free cash flow, the balance sheet or one of its items

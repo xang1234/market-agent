@@ -8,6 +8,7 @@
 // here resolve through the metric-mapper to the same `metric_id`s a
 // hand-seeded registry uses.
 
+import { createHash } from "node:crypto";
 import type {
   FiscalPeriod,
   NormalizedStatementInput,
@@ -38,7 +39,7 @@ export type SecConceptValue = {
   filed: string;
   frame?: string;
   /** A value computed from others (a discrete quarter): the filed values it came from. */
-  derived_from?: ReadonlyArray<SecConceptValue>;
+  derived_from?: Readonly<{ minuend: SecConceptValue; subtrahends: ReadonlyArray<SecConceptValue> }>;
 };
 
 export type SecConcept = {
@@ -303,6 +304,28 @@ export type SecSourceToken = Readonly<{
   end: string;
 }>;
 
+/** Where companyfacts states a value: a token's place, or a derived value's own filing and period. */
+export type SecValueLocation = Omit<SecSourceToken, "token">;
+
+export function secTokenLocator(cik: number, token: SecValueLocation): string {
+  return `sec_edgar:companyfacts:CIK${String(cik).padStart(10, "0")}#${token.concept}|${token.unit}|${token.accn}|${token.start ?? ""}..${token.end}`;
+}
+
+/** Binds the exact token to its location in the SEC response. */
+export function secTokenProofHash(cik: number, token: SecSourceToken): string {
+  return createHash("sha256")
+    .update(JSON.stringify(["sec_edgar_companyfacts.v1", cik, token.concept, token.unit, token.accn, token.start, token.end, token.token]))
+    .digest("hex");
+}
+
+export function sourceIdForAccession(accessionNumber: string): UUID {
+  const hash = createHash("sha256").update(accessionNumber).digest("hex").slice(0, 32).split("");
+  hash[12] = "4";
+  hash[16] = ((Number.parseInt(hash[16], 16) & 0x3) | 0x8).toString(16);
+  const hex = hash.join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}` as UUID;
+}
+
 export const SEC_COVER_COUNT_CONCEPT = "EntityCommonStockSharesOutstanding";
 
 /**
@@ -323,8 +346,6 @@ export function extractStatement(input: ExtractStatementInput): NormalizedStatem
 /**
  * One selection pass that yields the legacy statement plus, for each line
  * taken verbatim from a losslessly parsed value, its exact source token.
- * Derived values (e.g. a fourth quarter computed from annual minus three
- * quarters) have no token and are never presented as source-exact.
  */
 export function extractStatementWithTokens(input: ExtractStatementInput): {
   statement: NormalizedStatementInput;
@@ -413,16 +434,7 @@ export function extractStatementWithTokens(input: ExtractStatementInput): {
         });
       }
       if (match.derived_from !== undefined) {
-        derivations.set(metricKey, {
-          concept: conceptName,
-          unit: unitCode,
-          inputs: match.derived_from.map((value) => ({
-            accn: value.accn,
-            start: value.start ?? null,
-            end: value.end,
-            value: value.val_token ?? String(value.val),
-          })),
-        });
+        derivations.set(metricKey, { concept: conceptName, unit: unitCode, ...match.derived_from });
       }
       seenKeys.add(metricKey);
       break; // one unit per concept per period
@@ -468,11 +480,7 @@ export function extractStatementWithTokens(input: ExtractStatementInput): {
 }
 
 /** A derived line's inputs: each filed value, by its filing (accession) and period. */
-export type SecDerivation = Readonly<{
-  concept: string;
-  unit: string;
-  inputs: ReadonlyArray<Readonly<{ accn: string; start: string | null; end: string; value: string }>>;
-}>;
+export type SecDerivation = Readonly<{ concept: string; unit: string; minuend: SecConceptValue; subtrahends: ReadonlyArray<SecConceptValue> }>;
 
 export type SecStatementValueSelection = Pick<
   ExtractStatementInput,
@@ -597,7 +605,7 @@ function deriveFourthQuarterConceptValue(
     form: annual.form,
     start: q4Start,
     end: annual.end,
-    derived_from: [annual, q1, q2, q3],
+    derived_from: { minuend: annual, subtrahends: [q1, q2, q3] },
   };
 }
 
@@ -644,7 +652,7 @@ function statementSelectionDescription(fiscalPeriod: FiscalPeriod): string {
   return 'form="10-Q"';
 }
 
-function isDiscreteQuarterDuration(value: SecConceptValue): boolean {
+export function isDiscreteQuarterDuration(value: SecConceptValue): boolean {
   if (value.start === undefined) return false;
   const days = inclusiveDurationDays(value.start, value.end);
   return days >= 60 && days <= 125;
@@ -761,8 +769,7 @@ const FAMILY_SELECTORS: Readonly<Record<StatementFamily, ConceptValueSelector>> 
 
 // A 10-Q states cash flows year to date (Q2 covers six months, Q3 nine), so a
 // quarter is its year-to-date value less the previous one, and Q4 is the year
-// less nine months. Q1's year to date is the quarter itself. A derived quarter
-// has no source token, like a derived income Q4, so it is never source-exact.
+// less nine months. Q1's year to date is the quarter itself.
 function selectCashFlowConceptValue(
   values: ReadonlyArray<SecConceptValue>,
   input: SecStatementValueSelection,
@@ -783,7 +790,7 @@ function selectCashFlowConceptValue(
   const days = inclusiveDurationDays(start, ytd.end);
   if (days < 60 || days > 125) return undefined;
   const { val_token: _token, ...rest } = ytd;
-  return { ...rest, val: ytd.val - prior.val, fp: input.fiscal_period, start, end: ytd.end, derived_from: [ytd, prior] };
+  return { ...rest, val: ytd.val - prior.val, fp: input.fiscal_period, start, end: ytd.end, derived_from: { minuend: ytd, subtrahends: [prior] } };
 }
 
 const PREVIOUS_QUARTER = { Q2: "Q1", Q3: "Q2", Q4: "Q3" } as const;

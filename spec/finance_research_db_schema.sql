@@ -1341,7 +1341,7 @@ create table fact_precision_attestations (
   precision_attestation_id uuid primary key default gen_random_uuid(),
   fact_id uuid not null,
   source_id uuid not null,
-  precision_class text not null check (precision_class in ('source_token_preserved', 'revalidated_against_source', 'legacy_unverified')),
+  precision_class text not null check (precision_class in ('source_token_preserved', 'revalidated_against_source', 'legacy_unverified', 'derived_from_source_tokens')),
   raw_token text check (raw_token is null or length(raw_token) between 1 and 256),
   token_proof_hash text check (token_proof_hash is null or token_proof_hash ~ '^[0-9a-f]{64}$'),
   value_text text check (value_text is null or value_text ~ '^-?(0|[1-9][0-9]*)(\.[0-9]*[1-9])?$'),
@@ -1350,11 +1350,16 @@ create table fact_precision_attestations (
   validation_method text not null check (length(btrim(validation_method)) > 0),
   attested_at timestamptz not null default now(),
   supersedes uuid references fact_precision_attestations(precision_attestation_id),
+  -- A derived value's proof (#481): each input's token and filing, which sum
+  -- exactly to the stored value; raw_token holds that sum.
+  derivation jsonb,
   foreign key (fact_id, source_id) references facts(fact_id, source_id) on delete cascade,
   constraint fact_precision_attestations_proof check (
     precision_class = 'legacy_unverified'
     or (raw_token is not null and token_proof_hash is not null and value_text is not null and scale_text is not null)
-  )
+  ),
+  constraint fact_precision_attestations_derivation
+    check ((precision_class = 'derived_from_source_tokens') = (derivation is not null) and (derivation is null or jsonb_typeof(derivation) = 'object'))
 );
 create unique index fact_precision_attestations_successor_uidx on fact_precision_attestations(supersedes) where supersedes is not null;
 -- One chain per fact: a single root, each proof superseded at most once.

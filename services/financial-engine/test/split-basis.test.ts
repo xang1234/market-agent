@@ -45,7 +45,7 @@ function eps(context: Partial<NonNullable<InputCandidate["context"]>> = {}): Inp
       disclosure_relation: "original",
       ...context,
     } as NonNullable<InputCandidate["context"]>,
-    precision: { precision_attestation_id: "p-1", precision_class: "source_token_preserved", raw_token: "11.93", token_proof_hash: HASH, source_locator: "loc" },
+    precision: { precision_attestation_id: "p-1", precision_class: "source_token_preserved", raw_token: "11.93", token_proof_hash: HASH, source_locator: "loc", derivation: null },
     publication: [{
       attestation_id: "a-1",
       timing: { available_not_before: null, available_no_later_than: "2024-02-21T00:00:00-05:00", timing_precision: "date", source_timezone: "America/New_York" },

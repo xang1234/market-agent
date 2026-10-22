@@ -5,6 +5,7 @@
 
 import type {
   AdjustmentContext,
+  DerivationProofV1,
   DimensionScope,
   DisclosureRelation,
   FinancialRuntimeAuthority,
@@ -73,6 +74,8 @@ export type InputCandidate = Readonly<{
     raw_token: string | null;
     token_proof_hash: string | null;
     source_locator: string | null;
+    /** A derived value's proof; its raw_token is the derivation's exact sum. */
+    derivation: DerivationProofV1 | null;
   }> | null;
   publication: ReadonlyArray<Readonly<{ attestation_id: string; timing: PublicationTiming }>>;
 }>;

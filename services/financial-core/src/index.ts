@@ -19,4 +19,5 @@ export * from "./coverage.ts";
 export * from "./bound-evaluation.ts";
 export * from "./public-time.ts";
 export * from "./split-adjustment.ts";
+export * from "./derivation.ts";
 export * from "./presentation.ts";

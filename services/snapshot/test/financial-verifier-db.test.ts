@@ -102,7 +102,7 @@ test("financial verification against ledger records", { timeout: 240_000 }, asyn
         knowledgeCutoff: cutoff,
         subjectRefs: [{ kind: "issuer", id: IDS.issuerA }],
         boundFacts: facts,
-        boundPriceSources: [],
+        citedSources: [],
       });
 
       await client.query("begin");

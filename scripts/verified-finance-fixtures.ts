@@ -290,7 +290,7 @@ function disclosure(id: string, input: { value: string; published: string; preci
       period_type: "duration", dimension_scope: "consolidated", dimension_members: [], adjustment_basis: "unadjusted", share_basis: "not_applicable",
       fiscal_calendar_version: "fiscal-calendar.v1", disclosure_relation: input.relation ?? "original",
     },
-    precision: { precision_attestation_id: `p-${id}`, precision_class: "source_token_preserved", raw_token: input.value, token_proof_hash: HASH, source_locator: "loc" },
+    precision: { precision_attestation_id: `p-${id}`, precision_class: "source_token_preserved", raw_token: input.value, token_proof_hash: HASH, source_locator: "loc", derivation: null },
     publication: [{
       attestation_id: `a-${id}`,
       timing: {

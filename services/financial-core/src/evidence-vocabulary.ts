@@ -3,9 +3,9 @@
 // imports it directly. The database check constraints enumerate the same
 // values.
 
-export const PRECISION_CLASSES = ["source_token_preserved", "revalidated_against_source", "legacy_unverified"] as const;
+export const PRECISION_CLASSES = ["source_token_preserved", "revalidated_against_source", "legacy_unverified", "derived_from_source_tokens"] as const;
 export type PrecisionClass = (typeof PRECISION_CLASSES)[number];
-/** Precision classes whose raw token is proven equal to the stored value. */
+/** Precision classes whose raw token is proven equal to the stored value: a source token, or for a derived class its derivation's exact sum. */
 export type ProvenPrecisionClass = Exclude<PrecisionClass, "legacy_unverified">;
 
 export const PUBLICATION_TIMING_PRECISIONS = ["instant", "date", "observed_public"] as const;

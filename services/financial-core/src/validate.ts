@@ -11,6 +11,7 @@ import { validatePlanGraph } from "./graph.ts";
 import {
   operationDependencies,
   type BoundFinancialInputV1,
+  type DerivationProofV1,
   type DraftFinancialResultV1,
   type FinalizedFinancialResultV1,
   type FinancialPlanV1,
@@ -46,6 +47,7 @@ const validators = {
   plan: compiled(planSchema.$id, "FinancialPlanV1"),
   authority: compiled(planSchema.$id, "FinancialRuntimeAuthorityV1"),
   boundInput: compiled(resultSchema.$id, "BoundFinancialInputV1"),
+  derivation: compiled(resultSchema.$id, "DerivationProofV1"),
   draftResult: compiled(resultSchema.$id, "DraftFinancialResultV1"),
   finalizedResult: compiled(resultSchema.$id, "FinalizedFinancialResultV1"),
 };
@@ -70,6 +72,12 @@ export function validateBoundInput(input: unknown): ValidationResult<BoundFinanc
   const structural = structuralIssues(validators.boundInput, input);
   if (structural.length > 0) return { ok: false, issues: structural };
   return { ok: true, value: deepFreeze(structuredClone(input as BoundFinancialInputV1)) };
+}
+
+export function validateDerivationProof(input: unknown): ValidationResult<DerivationProofV1> {
+  const structural = structuralIssues(validators.derivation, input);
+  if (structural.length > 0) return { ok: false, issues: structural };
+  return { ok: true, value: deepFreeze(structuredClone(input as DerivationProofV1)) };
 }
 
 /** Engine-side draft results. A caller can never submit `verified` here. */

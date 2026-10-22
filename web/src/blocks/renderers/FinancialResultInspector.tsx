@@ -2,6 +2,8 @@ import type { ReactElement, ReactNode } from 'react'
 
 import {
   canonicalValue,
+  derivationFormula,
+  derivationTermLabel,
   inspectableDetails,
   payloadSummary,
   unitText,
@@ -125,6 +127,16 @@ function InputView({ input }: { input: FinancialInspectedInput }): ReactElement 
       <Row label="Metric">{`${input.metric.metric_key} ${input.metric.definition_version}`}</Row>
       <Row label="Period">{`${input.period.fiscal_period} ${input.period.fiscal_year} (${input.period.start ?? '…'} to ${input.period.end})`}</Row>
       <Row label="Precision">{input.precision_status.replaceAll('_', ' ')}</Row>
+      {input.derivation ? (
+        <>
+          <Row label="Derived"><span className="break-normal">{derivationFormula(input.period, input.derivation)}</span></Row>
+          {input.derivation.terms.map((term, index) => (
+            <Row key={index} label={derivationTermLabel(term, index)}>
+              {`${term.raw_token} · ${term.start} to ${term.end} · ${term.source.form} ${term.source.accession} filed ${term.source.filed} · ${term.source.source_id} · ${term.source.locator}`}
+            </Row>
+          ))}
+        </>
+      ) : null}
       <Row label="Public by">{`${input.publication.available_no_later_than} (${input.publication.precision})`}</Row>
       <Row label="Source">{`${input.source.source_id} · version ${input.source.source_version_hash}${input.source.locator ? ` · ${input.source.locator}` : ''}`}</Row>
     </dl>

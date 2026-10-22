@@ -9,6 +9,11 @@ import {
   parseFinancialDecimal,
   type ExactDecimal,
 } from "../../financial-core/src/exact-decimal.ts";
+import { hashCanonical } from "../../financial-core/src/canonical.ts";
+import type { DerivationProofV1 } from "../../financial-core/src/contracts.ts";
+import { resolveMetricDefinition } from "../../financial-core/src/definitions.ts";
+import { derivationIssue, derivationValue, type DerivationIssue } from "../../financial-core/src/derivation.ts";
+import { validateDerivationProof } from "../../financial-core/src/validate.ts";
 import {
   PRECISION_CLASSES,
   PUBLICATION_TIMING_PRECISIONS,
@@ -97,6 +102,13 @@ export type FactPrecisionAttestationInput = Readonly<
       source_locator: string | null;
       validation_method: string;
     }
+  | {
+      fact_id: string;
+      precision_class: "derived_from_source_tokens";
+      derivation: DerivationProofV1;
+      source_locator: string | null;
+      validation_method: string;
+    }
   | { fact_id: string; precision_class: "legacy_unverified"; validation_method: string }
 >;
 
@@ -113,6 +125,7 @@ export type FactPrecisionAttestationRow = Readonly<{
   validation_method: string;
   attested_at: string;
   supersedes: string | null;
+  derivation: DerivationProofV1 | null;
 }>;
 
 /**
@@ -127,8 +140,19 @@ export async function recordFactPrecisionAttestation(
   assertUuidV4(input.fact_id, "fact_id");
   assertOneOf(input.precision_class, PRECISION_CLASSES, "precision_class");
   assertNonEmptyString(input.validation_method, "validation_method");
-  const fact = (await db.query<{ source_id: string; value_text: string | null; scale_text: string }>(
-    `select source_id::text, value_num::text as value_text, scale::text as scale_text from facts where fact_id = $1`,
+  const fact = (await db.query<{
+    source_id: string;
+    value_text: string | null;
+    scale_text: string;
+    period_start: string | null;
+    period_end: string;
+    fiscal_year: number;
+    metric_key: string | null;
+  }>(
+    `select f.source_id::text, f.value_num::text as value_text, f.scale::text as scale_text,
+            f.period_start::text, f.period_end::text, f.fiscal_year, m.metric_key
+       from facts f left join metrics m on m.metric_id = f.metric_id
+      where f.fact_id = $1`,
     [input.fact_id],
   )).rows[0];
   if (!fact) throw new FinancialAttestationError("fact does not exist");
@@ -137,36 +161,57 @@ export async function recordFactPrecisionAttestation(
     [input.fact_id],
   )).rows[0];
 
-  let proof: { raw_token: string | null; token_proof_hash: string | null; value_text: string | null; scale_text: string | null; source_locator: string | null } = {
-    raw_token: null,
-    token_proof_hash: null,
-    value_text: null,
-    scale_text: null,
-    source_locator: null,
-  };
-  if (input.precision_class !== "legacy_unverified") {
+  let proof: {
+    raw_token: string | null;
+    token_proof_hash: string | null;
+    value_text: string | null;
+    scale_text: string | null;
+    source_locator: string | null;
+    derivation: DerivationProofV1 | null;
+  } = { raw_token: null, token_proof_hash: null, value_text: null, scale_text: null, source_locator: null, derivation: null };
+  if (input.precision_class === "derived_from_source_tokens") {
+    // Hashed only once valid: a malformed proof is refused, not thrown inside canonical JSON.
+    const checked = validateDerivationProof(input.derivation);
+    const token_proof_hash = checked.ok ? hashCanonical("derivation", checked.value) : null;
+    const issue = derivationIssue(input.derivation, {
+      value_kind: (fact.metric_key === null ? null : resolveMetricDefinition(fact.metric_key)?.value_kind) ?? null,
+      source_id: fact.source_id,
+      token_proof_hash,
+      value_text: fact.value_text,
+      period: { start: fact.period_start, end: fact.period_end, fiscal_year: fact.fiscal_year },
+    });
+    if (issue !== null) throw new FinancialAttestationError(DERIVATION_REFUSALS[issue]);
+    const sum = canonicalDecimalString(derivationValue(input.derivation)!);
+    proof = {
+      raw_token: sum,
+      token_proof_hash,
+      value_text: sum,
+      scale_text: storedScale(fact.scale_text),
+      source_locator: input.source_locator,
+      derivation: input.derivation,
+    };
+  } else if (input.precision_class !== "legacy_unverified") {
     if (!SHA256_HEX.test(input.token_proof_hash)) throw new FinancialAttestationError("token_proof_hash must be a sha256 hex digest");
     const check = checkTokenAgainstStoredValue(input.raw_token, fact.value_text);
     if (check.status !== "match") {
       throw new FinancialAttestationError(check.status === "invalid_token" ? "raw_token is not a supported decimal" : "raw_token does not equal the stored fact value");
     }
-    const scale = parseDerivedDecimalText(fact.scale_text);
-    if (!scale.ok || scale.value.coefficient <= 0n) throw new FinancialAttestationError("stored fact scale is not a positive decimal");
     proof = {
       raw_token: input.raw_token,
       token_proof_hash: input.token_proof_hash,
       value_text: canonicalDecimalString(check.token),
-      scale_text: canonicalDecimalString(scale.value),
+      scale_text: storedScale(fact.scale_text),
       source_locator: input.source_locator,
+      derivation: null,
     };
   }
 
   const inserted = await db.query<FactPrecisionAttestationRow>(
     `insert into fact_precision_attestations
-       (fact_id, source_id, precision_class, raw_token, token_proof_hash, value_text, scale_text, source_locator, validation_method, supersedes)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       (fact_id, source_id, precision_class, raw_token, token_proof_hash, value_text, scale_text, source_locator, validation_method, supersedes, derivation)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
      returning precision_attestation_id::text, fact_id::text, source_id::text, precision_class, raw_token, token_proof_hash,
-               value_text, scale_text, source_locator, validation_method, attested_at::text, supersedes::text`,
+               value_text, scale_text, source_locator, validation_method, attested_at::text, supersedes::text, derivation`,
     [
       input.fact_id,
       fact.source_id,
@@ -178,9 +223,16 @@ export async function recordFactPrecisionAttestation(
       proof.source_locator,
       input.validation_method,
       previous?.precision_attestation_id ?? null,
+      proof.derivation === null ? null : JSON.stringify(proof.derivation),
     ],
   );
   return inserted.rows[0]!;
+}
+
+function storedScale(scaleText: string): string {
+  const scale = parseDerivedDecimalText(scaleText);
+  if (!scale.ok || scale.value.coefficient <= 0n) throw new FinancialAttestationError("stored fact scale is not a positive decimal");
+  return canonicalDecimalString(scale.value);
 }
 
 export type TokenCheck = { status: "match"; token: ExactDecimal } | { status: "value_mismatch" | "invalid_token" };
@@ -193,6 +245,19 @@ export function checkTokenAgainstStoredValue(rawToken: string, storedValueText: 
   if (stored === null || !stored.ok || compareExactDecimals(token.value, stored.value) !== 0) return { status: "value_mismatch" };
   return { status: "match", token: token.value };
 }
+
+const DERIVATION_REFUSALS: Readonly<Record<DerivationIssue, string>> = {
+  not_a_flow: "only a flow metric's value can be derived over periods",
+  invalid_derivation: "derivation is not a period_difference.v1 proof with a supported decimal token in every term",
+  proof_hash_mismatch: "token_proof_hash does not bind the derivation",
+  own_term_sign: "a derivation adds exactly one term, its first, and subtracts the rest",
+  own_term_source: "a derivation's first term is not from the fact's own source",
+  own_term_end: "a derivation's first term does not end on the fact's period end",
+  periods_not_contiguous: "a derivation's subtracted terms do not cover its first term exactly up to the fact's period start",
+  fiscal_year_mismatch: "a derivation term is not of the fact's fiscal year",
+  value_mismatch: "derivation does not sum to the stored fact value",
+  own_term_not_last_filed: "a derivation term was filed on or after the fact's own filing",
+};
 
 async function assertPublicationInput(db: RowQueryExecutor, input: SourcePublicationAttestationInput): Promise<void> {
   assertUuidV4(input.source_id, "source_id");
