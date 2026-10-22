@@ -171,7 +171,15 @@ function singleSubjectPlan(operations: FinancialPlanV1["operations"], outputs: s
   return plan;
 }
 
-const FY = (fiscal_year: number) => ({ kind: "fiscal_period" as const, fiscal_year, fiscal_period: "FY" as const });
+function comparisonPlan(operations: FinancialPlanV1["operations"], outputs: string[]): FinancialPlanV1 {
+  const plan = mutable(planFixture()) as FinancialPlanV1;
+  plan.operations = operations;
+  plan.outputs = outputs.map((node_id) => ({ output_id: `o_${node_id}`, node_id, unit_id: "section" }));
+  plan.thresholds = [];
+  return plan;
+}
+
+const FY =(fiscal_year: number) => ({ kind: "fiscal_period" as const, fiscal_year, fiscal_period: "FY" as const });
 const balance = (node_id: string, metric_key: string, fiscal_year = 2023) =>
   ({ node_id, operation: "reported_metric" as const, operation_version: "reported_metric.v1", subject_slot: "a", metric_key, period: FY(fiscal_year) });
 const valueOf = (value: string, unit: unknown) => ({ kind: "value", value, unit, exact: true, rounding: null });
@@ -394,8 +402,9 @@ test("a change names its horizon from its periods' structure, and two unknown ho
       change("pct_mixed", "percent_change_positive_base", "fy26", "q4"),
       change("pct_backwards", "percent_change_positive_base", "q3", "q4"),
       change("pct_cutoff", "percent_change_positive_base", "cut", "la0"),
+      change("pct_calendars", "percent_change_positive_base", "q4", "lq1"),
     ],
-    ["abs_qoq", "pct_2q", "abs_yoy", "abs_2y", "pct_2y", "pct_latest_q", "abs_latest_2y", "pct_mixed", "pct_backwards", "pct_cutoff"],
+    ["abs_qoq", "pct_2q", "abs_yoy", "abs_2y", "pct_2y", "pct_latest_q", "abs_latest_2y", "pct_mixed", "pct_backwards", "pct_cutoff", "pct_calendars"],
   );
   const ids = plan.outputs.map((output) => output.node_id);
   const content = present(plan, ids.map((id) => committed(`o_${id}`, id, usdValue("1"))), { a: "Alpha Corp" });
@@ -410,9 +419,106 @@ test("a change names its horizon from its periods' structure, and two unknown ho
     pct_mixed: "Percent change in Revenue",
     pct_backwards: "Percent change in Revenue",
     pct_cutoff: "Percent change in Revenue",
+    pct_calendars: "Percent change in Revenue",
   });
-  const unknown = ["pct_mixed", "pct_backwards", "pct_cutoff"].map((id) => result(content, `o_${id}`).measure_label_id);
-  assert.equal(new Set(unknown).size, 3, "same text, three measures");
+  const unknown = ["pct_mixed", "pct_backwards", "pct_cutoff", "pct_calendars"].map((id) => result(content, `o_${id}`).measure_label_id);
+  assert.equal(new Set(unknown).size, 4, "same text, four measures");
+});
+
+test("a change is dated by its current period, whatever order the planner listed a trailing sum's quarters in", () => {
+  const quarters = [0, 1, 2, 3, 4, 5, 6, 7].map((back) => reportedAt(`rev${back}`, "a", "revenue", quarterBack(2026, "Q4", back)));
+  const ttm = (node_id: string, quarterIds: string[]) => ({ node_id, operation: "trailing_sum" as const, operation_version: "trailing_sum.v1", quarters: quarterIds });
+  const plan = singleSubjectPlan(
+    [...quarters, ttm("ttm", ["rev0", "rev1", "rev2", "rev3"]), ttm("ttm_prior", ["rev7", "rev6", "rev5", "rev4"]), change("yoy", "percent_change_positive_base", "ttm", "ttm_prior")],
+    ["yoy"],
+  );
+  const content = present(plan, [committed("o_yoy", "yoy", percentValue("12"))], { a: "Alpha Corp" });
+  assert.equal(labelTexts(content, "o_yoy")[1], "Year-over-year percent change in Revenue, trailing four quarters");
+});
+
+test("a company read at a fiscal quarter and one read at its latest quarter share one column", () => {
+  const plan = comparisonPlan(
+    [reportedAt("a_rev", "a", "revenue", quarterBack(2026, "Q4", 0)), reportedAt("b_rev", "b", "revenue", { kind: "latest", period_type: "quarterly", offset: 0 })],
+    ["a_rev", "b_rev"],
+  );
+  const content = present(plan, [committed("o_a_rev", "a_rev", usdValue("100")), committed("o_b_rev", "b_rev", usdValue("40"))], NVDA_AMD);
+  assert.deepEqual(readTable(content), {
+    columns: [["Revenue", null]],
+    rows: [["NVIDIA Corp", ["o_a_rev", "USD 100.00", "Q4 FY2026"]], ["Advanced Micro Devices", ["o_b_rev", "USD 40.00", "latest fiscal quarter"]]],
+  });
+});
+
+test("two margins of one company over different periods are two lines, whatever order each company lists them in", () => {
+  const margins = (slot: string) => [
+    reportedAt(`${slot}_gp`, slot, "gross_profit", quarterBack(2026, "Q4", 0)),
+    reportedAt(`${slot}_rev`, slot, "revenue", quarterBack(2026, "Q4", 0)),
+    reportedAt(`${slot}_rev_q3`, slot, "revenue", quarterBack(2026, "Q4", 1)),
+    { node_id: `${slot}_same`, operation: "gross_margin" as const, operation_version: "gross_margin.v1", numerator: `${slot}_gp`, revenue: `${slot}_rev` },
+    { node_id: `${slot}_cross`, operation: "gross_margin" as const, operation_version: "gross_margin.v1", numerator: `${slot}_gp`, revenue: `${slot}_rev_q3` },
+  ];
+  const plan = comparisonPlan([...margins("a"), ...margins("b")], ["a_same", "a_cross", "b_cross", "b_same"]);
+  const content = present(plan, [
+    committed("o_a_same", "a_same", ratioValue("0.75")),
+    committed("o_a_cross", "a_cross", ratioValue("0.8")),
+    committed("o_b_cross", "b_cross", ratioValue("0.6")),
+    committed("o_b_same", "b_same", ratioValue("0.5")),
+  ], NVDA_AMD);
+  assert.deepEqual(readTable(content), {
+    columns: [["Gross margin (gross profit / revenue)", "Q4 FY2026"], ["Gross margin (gross profit / revenue)", "Q4 FY2026 vs Q3 FY2026"]],
+    rows: [
+      ["NVIDIA Corp", ["o_a_same", "75.00%", "Q4 FY2026"], ["o_a_cross", "80.00%", "Q4 FY2026 vs Q3 FY2026"]],
+      ["Advanced Micro Devices", ["o_b_same", "50.00%", "Q4 FY2026"], ["o_b_cross", "60.00%", "Q4 FY2026 vs Q3 FY2026"]],
+    ],
+  });
+});
+
+test("a column names a period only when every company has a cell there and all read that period", () => {
+  const plan = comparisonPlan(
+    [reportedAt("a_rev25", "a", "revenue", FY(2025)), reportedAt("a_rev24", "a", "revenue", FY(2024)), reportedAt("b_rev24", "b", "revenue", FY(2024))],
+    ["a_rev25", "a_rev24", "b_rev24"],
+  );
+  const content = present(plan, [committed("o_a_rev25", "a_rev25", usdValue("120")), committed("o_a_rev24", "a_rev24", usdValue("100")), committed("o_b_rev24", "b_rev24", usdValue("40"))], NVDA_AMD);
+  assert.deepEqual(readTable(content), {
+    columns: [["Revenue", null], ["Revenue", null]],
+    rows: [
+      ["NVIDIA Corp", ["o_a_rev25", "USD 120.00", "FY2025"], ["o_a_rev24", "USD 100.00", "FY2024"]],
+      ["Advanced Micro Devices", ["o_b_rev24", "USD 40.00", "FY2024"], null],
+    ],
+  });
+});
+
+test("a threshold check is never a column, whether it verified or gapped", () => {
+  const plan = mutable(planFixture()) as FinancialPlanV1;
+  plan.operations.push({ node_id: "b_gm_check", operation: "threshold", operation_version: "threshold.v1", subject: "b_gm", threshold_id: "min_gm", comparison: "gte" });
+  plan.outputs.push({ output_id: "out_b_check", node_id: "b_gm_check", unit_id: "section" });
+  const content = present(plan, comparisonResults({
+    out_check: committed("out_check", "a_gm_check", UNAVAILABLE, "missing"),
+    out_b_check: committed("out_b_check", "b_gm_check", { kind: "predicate", predicate: "threshold", comparison: "gte", outcome: false }),
+  }));
+  assert.deepEqual(readTable(content).columns, [["Revenue", null], ["Gross margin (gross profit / revenue)", "FY2023"]]);
+  assert.deepEqual(content.presentations.filter((presentation) => presentation.kind !== "table"), [
+    { kind: "gap", result_id: "r-out_check" },
+    { kind: "predicate", result_id: "r-out_rank" },
+    { kind: "predicate", result_id: "r-out_b_check" },
+  ]);
+});
+
+test("a series is one line over several periods: never threshold checks, never a year beside a quarter", () => {
+  const checks = singleSubjectPlan(
+    [
+      reportedAt("rev25", "a", "revenue", FY(2025)),
+      reportedAt("rev24", "a", "revenue", FY(2024)),
+      ...["rev25", "rev24"].map((subject) => ({ node_id: `${subject}_check`, operation: "threshold" as const, operation_version: "threshold.v1", subject, threshold_id: "min_rev", comparison: "gte" as const })),
+    ],
+    ["rev25_check", "rev24_check"],
+    [{ threshold_id: "min_rev", value: "100", unit: { kind: "currency", currency: "USD" }, attribution: { kind: "user_request", ref: "chat:turn:1" } }],
+  );
+  const gapped = present(checks, [committed("o_rev25_check", "rev25_check", UNAVAILABLE, "missing"), committed("o_rev24_check", "rev24_check", UNAVAILABLE, "missing")], { a: "Alpha Corp" });
+  assert.deepEqual(gapped.presentations, [{ kind: "gap", result_id: "r-o_rev25_check" }, { kind: "gap", result_id: "r-o_rev24_check" }]);
+
+  const yearAndQuarter = singleSubjectPlan([reportedAt("fy25", "a", "revenue", FY(2025)), reportedAt("q4", "a", "revenue", quarterBack(2025, "Q4", 0))], ["fy25", "q4"]);
+  const shown = present(yearAndQuarter, [committed("o_fy25", "fy25", usdValue("400")), committed("o_q4", "q4", usdValue("110"))], { a: "Alpha Corp" });
+  assert.deepEqual(shown.presentations, [{ kind: "scalar", result_id: "r-o_fy25" }, { kind: "scalar", result_id: "r-o_q4" }]);
 });
 
 test("a changed label, unit, period, or denominator changes the presentation hash", () => {
@@ -465,6 +571,6 @@ test("a result missing for a requested output or a subject without a name is ref
 
 test("a ranking that could not be computed stands alone as a gap, never as a column no company fills", () => {
   const content = present(planFixture(), comparisonResults({ out_rank: committed("out_rank", "gm_rank", UNAVAILABLE, "missing") }));
-  assert.deepEqual(readTable(content).columns, [["Revenue", "FY2023"], ["Gross margin (gross profit / revenue)", "FY2023"]]);
+  assert.deepEqual(readTable(content).columns, [["Revenue", null], ["Gross margin (gross profit / revenue)", "FY2023"]]);
   assert.deepEqual(content.presentations.filter((presentation) => presentation.kind !== "table"), [{ kind: "predicate", result_id: "r-out_check" }, { kind: "gap", result_id: "r-out_rank" }]);
 });

@@ -177,19 +177,25 @@ class LabelTable {
 }
 
 // ---------------------------------------------------------------------------
-// Layout: several subjects -> one table; one subject with a measure over
-// several periods -> a series; everything else -> scalars. Predicates,
-// rankings, and gaps outside a table or series stand alone.
+// Layout: several subjects -> one table; one subject with a line (a measure
+// at one period step and shape) over several periods -> a series; everything
+// else -> scalars. Predicates, rankings, and gaps outside a table or series
+// stand alone.
 
 function layout(plan: FinancialPlanV1, results: ReadonlyArray<PresentedResult>, labels: Readonly<Record<string, PresentationLabel>>): Presentation[] {
-  const values = results.filter((result) => result.presented.kind === "value" || result.presented.kind === "gap");
+  const nodeOf = new Map(plan.outputs.map((output) => [output.output_id, plan.operations.find((node) => node.node_id === output.node_id)!]));
+  const lines = new Map(results.flatMap((result) => {
+    const node = nodeOf.get(result.output_id)!;
+    return node.operation === "threshold" || node.operation === "peer_compare" ? [] : [[result.result_id, lineOf(plan, node, result.measure_label_id)] as const];
+  }));
+  const values = results.filter((result) => lines.has(result.result_id));
   const subjects = new Set(values.flatMap((result) => (result.subject_label_id === null ? [] : [result.subject_label_id])));
   const placed = new Set<string>();
   const presentations: Presentation[] = [];
 
   if (subjects.size >= 2) {
     const tabled = values.filter((result) => result.subject_label_id !== null);
-    const columnOf = tableColumns(plan, tabled);
+    const columnOf = columnKeyByResult(tabled, lines);
     const columns = new Map<string, string>();
     for (const result of tabled) {
       const key = columnOf.get(result.result_id)!;
@@ -212,15 +218,18 @@ function layout(plan: FinancialPlanV1, results: ReadonlyArray<PresentedResult>, 
       kind: "table",
       caption: `${[...new Set([...columns.values()].map((measure) => labels[measure]!.text))].join(", ")} by company`,
       columns: [...columns.values()].map((measure_label_id, index) => {
-        const periods = new Set(rows.flatMap((row) => (row.cells[index] ? [byId.get(row.cells[index])!.period_label_id] : [])));
-        return { column_id: `c${index}`, measure_label_id, period_label_id: periods.size === 1 ? [...periods][0]! : null };
+        const [period, ...others] = new Set(rows.map((row) => (row.cells[index] ? byId.get(row.cells[index])!.period_label_id : null)));
+        return { column_id: `c${index}`, measure_label_id, period_label_id: others.length === 0 && period ? period : null };
       }),
       rows,
       ascending,
     });
   } else {
     const groups = new Map<string, PresentedResult[]>();
-    for (const result of values) groups.set(result.measure_label_id, [...(groups.get(result.measure_label_id) ?? []), result]);
+    for (const result of values) {
+      const { key } = lines.get(result.result_id)!;
+      groups.set(key, [...(groups.get(key) ?? []), result]);
+    }
     for (const group of groups.values()) {
       const [first] = group;
       if (group.length < 2 || new Set(group.map((result) => result.period_label_id)).size < 2 || first!.subject_label_id === null) continue;
@@ -242,25 +251,29 @@ function layout(plan: FinancialPlanV1, results: ReadonlyArray<PresentedResult>, 
   return presentations;
 }
 
-/**
- * Each result's table column: its measure, the granularity of the period its
- * plan requested, and its rank among its company's results of that measure and
- * granularity, newest first. Companies on different fiscal calendars read one
- * line at different periods, so the period is not part of a column; the
- * requested period, never the result, decides the rank, so a gap holds its column.
- */
-function tableColumns(plan: FinancialPlanV1, results: ReadonlyArray<PresentedResult>): ReadonlyMap<string, string> {
-  const outputNodes = new Map(plan.outputs.map((output) => [output.output_id, output.node_id]));
-  const groups = new Map<string, Array<{ result: PresentedResult; column: string; recency: number }>>();
+type Line = Readonly<{ key: string; anchor: PeriodAnchor }>;
+
+function lineOf(plan: FinancialPlanV1, node: OperationNode, measureLabelId: string): Line {
+  const anchor = periodAnchor(datingPeriod(plan, node.node_id));
+  const shape = periodSelectors(plan, node).map((selector) => {
+    const at = periodAnchor(selector);
+    return at.calendar === anchor.calendar && at.step === anchor.step ? `${anchor.recency - at.recency}` : JSON.stringify(selector);
+  }).sort();
+  return { key: JSON.stringify([measureLabelId, anchor.step, shape]), anchor };
+}
+
+function columnKeyByResult(results: ReadonlyArray<PresentedResult>, lines: ReadonlyMap<string, Line>): ReadonlyMap<string, string> {
+  const groups = new Map<string, Array<{ result_id: string } & Line>>();
   for (const result of results) {
-    const { granularity, recency } = calendarAnchor(anchorSelector(plan, outputNodes.get(result.output_id)!));
-    const column = `${result.measure_label_id}|${granularity}`;
-    const group = `${result.subject_label_id}|${column}`;
-    groups.set(group, [...(groups.get(group) ?? []), { result, column, recency }]);
+    const line = lines.get(result.result_id)!;
+    const group = `${result.subject_label_id}|${line.key}`;
+    groups.set(group, [...(groups.get(group) ?? []), { result_id: result.result_id, ...line }]);
   }
   const keys = new Map<string, string>();
   for (const group of groups.values()) {
-    group.sort((left, right) => right.recency - left.recency).forEach(({ result, column }, rank) => keys.set(result.result_id, `${column}|${rank}`));
+    group
+      .sort((left, right) => left.anchor.calendar.localeCompare(right.anchor.calendar) || right.anchor.recency - left.anchor.recency)
+      .forEach(({ result_id, key }, rank) => keys.set(result_id, `${key}|${rank}`));
   }
   return keys;
 }
@@ -434,10 +447,8 @@ function measureKey(plan: FinancialPlanV1, node: OperationNode): string {
     case "pe_ratio":
       return node.operation;
     case "absolute_change":
-    case "percent_change_positive_base": {
-      const horizon = changeHorizon(plan, node);
-      return `${node.operation}(${of(node.current)})@${horizon ? `${horizon.step}${horizon.n}` : JSON.stringify([anchorSelector(plan, node.current), anchorSelector(plan, node.prior)])}`;
-    }
+    case "percent_change_positive_base":
+      return `${node.operation}(${of(node.current)})@${JSON.stringify(changeHorizon(plan, node) ?? [datingPeriod(plan, node.current), datingPeriod(plan, node.prior)])}`;
     case "trailing_sum":
       return `trailing_sum(${of(node.quarters[0]!)})`;
     case "threshold":
@@ -450,40 +461,51 @@ function measureKey(plan: FinancialPlanV1, node: OperationNode): string {
 function changeText(plan: FinancialPlanV1, node: ChangeNode, measure: string): string {
   const change = `${node.operation === "absolute_change" ? "change" : "percent change"} in ${measure}`;
   const horizon = changeHorizon(plan, node);
-  const code = horizon && `${horizon.step}${horizon.n}`;
-  if (code === "q1") return `Quarter-over-quarter ${change}`;
-  if (code === "q4" || code === "y1") return `Year-over-year ${change}`;
+  const quarters = horizon && (horizon.step === "quarter" ? horizon.n : horizon.n * 4);
+  if (quarters === 1) return `Quarter-over-quarter ${change}`;
+  if (quarters === 4) return `Year-over-year ${change}`;
   const text = `${change[0]!.toUpperCase()}${change.slice(1)}`;
-  return horizon ? `${text} over ${horizon.n} ${horizon.step === "q" ? "quarters" : "fiscal years"}` : text;
+  return horizon ? `${text} over ${horizon.n} ${horizon.step === "quarter" ? "quarters" : "fiscal years"}` : text;
 }
 
-const HORIZON_STEPS: Readonly<Record<string, "q" | "y">> = { fiscal_quarter: "q", latest_quarterly: "q", fiscal_year: "y", latest_annual: "y" };
-
-/** How many quarters or fiscal years a change spans; null unless both its periods are on one calendar and the prior is older. */
-function changeHorizon(plan: FinancialPlanV1, node: ChangeNode): { step: "q" | "y"; n: number } | null {
-  const current = calendarAnchor(anchorSelector(plan, node.current));
-  const prior = calendarAnchor(anchorSelector(plan, node.prior));
-  const step = HORIZON_STEPS[current.granularity];
+function changeHorizon(plan: FinancialPlanV1, node: ChangeNode): Readonly<{ step: "quarter" | "year"; n: number }> | null {
+  const current = periodAnchor(datingPeriod(plan, node.current));
+  const prior = periodAnchor(datingPeriod(plan, node.prior));
   const n = current.recency - prior.recency;
-  return step && current.granularity === prior.granularity && n > 0 ? { step, n } : null;
+  return current.step !== "cutoff" && current.step === prior.step && current.calendar === prior.calendar && n > 0 ? { step: current.step, n } : null;
 }
 
-/** The period a node is dated by: the first it reads. */
-function anchorSelector(plan: FinancialPlanV1, nodeId: LocalId): PeriodSelector {
-  return periodSelectors(plan, plan.operations.find((entry) => entry.node_id === nodeId)!)[0]!;
+function datingPeriod(plan: FinancialPlanV1, nodeId: LocalId): PeriodSelector {
+  const node = plan.operations.find((entry) => entry.node_id === nodeId)!;
+  const of = (id: LocalId) => datingPeriod(plan, id);
+  switch (node.operation) {
+    case "reported_metric":
+      return node.period;
+    case "trailing_sum":
+      return node.quarters.map(of).reduce((newest, quarter) => (periodAnchor(quarter).recency > periodAnchor(newest).recency ? quarter : newest));
+    case "market_cap":
+    case "pe_ratio":
+      return of(node.price);
+    case "absolute_change":
+    case "percent_change_positive_base":
+      return of(node.current);
+    default:
+      return of(operationDependencies(node)[0]!);
+  }
 }
 
-/** Where a period sits on its own calendar: within one granularity, higher recency is newer. */
-function calendarAnchor(selector: PeriodSelector): { granularity: string; recency: number } {
+type PeriodAnchor = Readonly<{ step: "quarter" | "year" | "cutoff"; calendar: "fiscal" | "latest" | "cutoff"; recency: number }>;
+
+function periodAnchor(selector: PeriodSelector): PeriodAnchor {
   switch (selector.kind) {
     case "fiscal_period":
       return selector.fiscal_period === "FY"
-        ? { granularity: "fiscal_year", recency: selector.fiscal_year }
-        : { granularity: "fiscal_quarter", recency: selector.fiscal_year * 4 + FISCAL_PERIODS.indexOf(selector.fiscal_period) - 1 };
+        ? { step: "year", calendar: "fiscal", recency: selector.fiscal_year }
+        : { step: "quarter", calendar: "fiscal", recency: selector.fiscal_year * 4 + FISCAL_PERIODS.indexOf(selector.fiscal_period) - 1 };
     case "latest":
-      return { granularity: `latest_${selector.period_type}`, recency: -selector.offset };
+      return { step: selector.period_type === "annual" ? "year" : "quarter", calendar: "latest", recency: -selector.offset };
     case "at_cutoff":
-      return { granularity: "at_cutoff", recency: 0 };
+      return { step: "cutoff", calendar: "cutoff", recency: 0 };
   }
 }
 
