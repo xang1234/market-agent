@@ -285,8 +285,15 @@ test("a repair that fails leaves its inference as the first round showed it, and
     const dir = await mkdtemp(join(tmpdir(), "inference-repair-"));
     const { calls, createClient } = models(FISCAL, { judge: fiscalJudge(), repair });
     const answer = await answerTurn(FISCAL.input, turn(FISCAL), { env: JUDGED_ENV, createClient, traceDir: dir, repairDeadlines: { attemptMs: 50, totalMs: 120 } });
+    const seen: string[] = [];
+    answer.judging!.watch((blocks) => seen.push(text(blocks)));
     const done = await answer.judging!.done;
     assert.equal(text(done.blocks), fiscal(PROFITABILITY, UNVERIFIED_GAP), label);
+    // A watcher ends on what is saved, not on the line held through the repair.
+    assert.equal(seen.at(-1), fiscal(PROFITABILITY, UNVERIFIED_GAP), label);
+    const late: string[] = [];
+    answer.judging!.watch((blocks) => late.push(text(blocks)));
+    assert.deepEqual(late, [fiscal(PROFITABILITY, UNVERIFIED_GAP)], label);
     assert.equal(rejections(done.assertions).find(([index]) => index === 8), undefined, label);
     assert.equal(done.assertions?.repaired, undefined, label);
     assert.deepEqual(done.assertions?.judged?.map(({ index }) => index), [7, 8], label);
@@ -306,8 +313,12 @@ test("a worded inference stays unverified when its repair is judged contradicted
     judge: fiscalJudge((ask) => verdict(ask.id, "contradicted", false, "the ends are not shown.")),
     repair: () => fenced([inference(8, ENDS_TEXT)]),
   });
-  const kept = await (await answerTurn(FISCAL.input, turn(FISCAL), { env: JUDGED_ENV, createClient: worse.createClient })).judging!.done;
+  const worseTurn = await answerTurn(FISCAL.input, turn(FISCAL), { env: JUDGED_ENV, createClient: worse.createClient });
+  const worseSeen: string[] = [];
+  worseTurn.judging!.watch((blocks) => worseSeen.push(text(blocks)));
+  const kept = await worseTurn.judging!.done;
   assert.equal(text(kept.blocks), fiscal(PROFITABILITY, UNVERIFIED_GAP));
+  assert.equal(worseSeen.at(-1), fiscal(PROFITABILITY, UNVERIFIED_GAP));
   assert.deepEqual(kept.assertions?.judged?.at(-1), { index: 8, verdict: "entailed", worded_amount: true, reason: GAP_REASON });
   assert.equal(kept.assertions?.repaired, undefined);
   assert.deepEqual(worse.calls.sort(), ["answer", "judge 7", "judge 8", "judge 8", "repair"]);

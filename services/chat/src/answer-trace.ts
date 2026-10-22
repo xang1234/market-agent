@@ -311,7 +311,12 @@ export async function answerTurn(
     const as = !repaired && sentToRepair(verdict) ? "pending" : shownAs(verdict);
     if (as === "hidden") inferences.delete(inference.index);
     else inferences.set(inference.index, as);
-    const blocks = blocksOf(inferences);
+    publish(blocksOf(inferences));
+  };
+  // The blocks listeners last heard, and what a later watch hears first.
+  let published: TracedAnswer["blocks"] | null = null;
+  const publish = (blocks: TracedAnswer["blocks"]) => {
+    published = blocks;
     // A listener that throws stops hearing verdicts; the answer is still saved.
     for (const listener of [...listeners]) {
       try {
@@ -331,6 +336,11 @@ export async function answerTurn(
     .then((settled) => repairedAnswer(input, answer, cases, settled, liveRepairCalls(companies, options, (inference, record) => settle(inference, record, true)), (blocks) => {
       blocksOf = blocks;
     }))
+    // A failed repair restores what its placeholder held: listeners hear it.
+    .then((traced) => {
+      if (published !== null && !isDeepStrictEqual(traced.blocks, published)) publish(traced.blocks);
+      return traced;
+    })
     .then(finish);
   return {
     exchange: answer.exchange,
@@ -339,7 +349,7 @@ export async function answerTurn(
     judging: {
       watch: (listener) => {
         listeners.push(listener);
-        listener(blocksOf(inferences));
+        listener(published ?? blocksOf(inferences));
       },
       done: done.then(({ assertions, blocks }) => ({ assertions, blocks })),
     },
