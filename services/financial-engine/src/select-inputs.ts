@@ -134,9 +134,9 @@ export type SlotSelection = { status: "selected"; input: SelectedInput } | { sta
 type Eligible = { candidate: ProvenCandidate; publication: SelectedPublication; numeric: ExactNumeric | null };
 
 // When nothing is eligible, report the reason closest to eligibility. No
-// later evidence makes another scope's value or a disallowed source
-// eligible, so they come last.
-const EXCLUSION_PRIORITY: ReadonlyArray<ReasonCode> = ["precision_unverified", "context_unverified", "incompatible_unit", "publication_time_unknown", "incompatible_scope", "source_class_not_allowed"];
+// later evidence makes another scope's value, a disallowed source, or a metric
+// outside the catalog eligible, so they come last.
+const EXCLUSION_PRIORITY: ReadonlyArray<ReasonCode> = ["precision_unverified", "context_unverified", "incompatible_unit", "publication_time_unknown", "incompatible_scope", "source_class_not_allowed", "unsupported_metric"];
 
 type FiscalPeriodSelector = Extract<PeriodSelector, { kind: "fiscal_period" }>;
 
@@ -381,8 +381,9 @@ function publicFromAllowedSource(candidate: InputCandidate, policy: EligibilityP
 }
 
 function metricMisfit({ metric_key, unit, context }: InputCandidate): ReasonCode | null {
-  const unitKind = resolveMetricDefinition(metric_key)?.unit_kind;
-  if (unit === null || unitKind === undefined || unit.kind !== unitKind) return "incompatible_unit";
+  const definition = resolveMetricDefinition(metric_key);
+  if (definition === null) return "unsupported_metric";
+  if (unit === null || unit.kind !== definition.unit_kind) return "incompatible_unit";
   return context !== null && context.dimension_scope !== "consolidated" ? "incompatible_scope" : null;
 }
 
