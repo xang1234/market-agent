@@ -44,18 +44,27 @@ const ALFA_TEXT = [
   "ALFA's revenue rose in every period from Q1 FY2022 (USD 800.00) to Q4 FY2023 (USD 2,000.00).",
 ].join("\n\n");
 const JUDGE = "You check the analyst inferences";
+// Every one of ALFA's overview results, as the judge reads them beside an inference.
+const ALFA_FIGURES = "ALFA's revenue was USD 800.00 in Q1 FY2022; ALFA's revenue was USD 900.00 in Q2 FY2022; ALFA's revenue was USD 1,000.00 in Q3 FY2022; ALFA's revenue was USD 1,100.00 in Q4 FY2022; ALFA's revenue was USD 1,200.00 in Q1 FY2023; ALFA's revenue was USD 1,300.00 in Q2 FY2023; ALFA's revenue was USD 1,500.00 in Q3 FY2023; ALFA's revenue was USD 2,000.00, gross profit USD 1,200.00, operating income USD 500.00, net income USD 400.00, gross margin (gross profit / revenue) 60.00%, operating margin (operating income / revenue) 25.00% and net margin (net income / revenue) 20.00% in Q4 FY2023; ALFA's percent change in revenue was 33.33% in Q4 FY2023 vs Q3 FY2023; ALFA's percent change in revenue was 81.82% in Q4 FY2023 vs Q4 FY2022.";
 
-function composer(answer: (request: LlmChatRequest) => string | Promise<string>, judge?: string, env: Record<string, string> = judge ? JUDGED : ENV) {
+// judge: its reply, or what it does instead of replying; judged: what it was sent.
+function composer(answer: (request: LlmChatRequest) => string | Promise<string>, judge?: string | (() => Promise<string>), env: Record<string, string> = judge ? JUDGED : ENV) {
   const inputs: AnswerTraceInput[] = [];
+  const judged: LlmChatRequest[] = [];
+  const reply = async (request: LlmChatRequest) => {
+    if (!request.messages[0]!.content.startsWith(JUDGE)) return answer(request);
+    judged.push(request);
+    return typeof judge === "function" ? judge() : judge!;
+  };
   const compose: CommentaryComposer = (input, turn, onAnswered) => {
     inputs.push(input);
     return answerTurn(input, turn, {
       env,
       onAnswered,
-      createClient: () => async (_deployment, request) => ({ text: request.messages[0]!.content.startsWith(JUDGE) ? judge! : await answer(request) }),
+      createClient: () => async (_deployment, request) => ({ text: await reply(request) }),
     });
   };
-  return { compose, inputs };
+  return { compose, inputs, judged };
 }
 
 function resolve(mention: string): Promise<ChatSubjectPreResolution> {
@@ -177,26 +186,34 @@ test("a company overview carries analyst commentary on its published results (#3
     const [, commentary] = (await message(done.message_id)).blocks;
     assert.equal(
       plainText(segmentsOf(commentary)),
-      "Of ALFA and BRVO, ALFA's gross margin (gross profit / revenue) was highest: ALFA 60.00%, BRVO 45.00% (Q4 FY2023).",
+      "Of ALFA and BRVO, ALFA's gross margin (gross profit / revenue) was highest: ALFA 60.00%, BRVO 45.00% (Q4 FY2023), 15.00 percentage points above BRVO.",
     );
   });
 
   await t.test("the judge's verdict decides how an inference shows: entailed as an inference, unsupported as an unverified view, otherwise not at all; the answer publishes either way", async () => {
     const verdict = (fields: string) => `{"verdicts":[{"id":2,${fields}}]}`;
-    const cases: ReadonlyArray<readonly [string, string, string]> = [
+    const cases: ReadonlyArray<readonly [string, string | (() => Promise<string>), string]> = [
       ["entailed", verdict('"verdict":"entailed","worded_amount":false'), `${ALFA_TEXT}\n\n> **Analyst inference:** It keeps most of what it sells.`],
       ["unsupported", verdict('"verdict":"unsupported","worded_amount":false,"reason":"No support says what it keeps."'), `${ALFA_TEXT}\n\n> **Unverified analyst view** (not backed by the figures shown): It keeps most of what it sells.`],
       ["contradicted", verdict('"verdict":"contradicted","worded_amount":false,"reason":"The margins say otherwise."'), ALFA_TEXT],
       ["a worded amount", verdict('"verdict":"entailed","worded_amount":true'), ALFA_TEXT],
       ["no verdict", "I cannot judge this.", ALFA_TEXT],
+      ["a verdict list the reply does not end with", `${verdict('"verdict":"entailed","worded_amount":false')} On reflection, I am not sure.`, ALFA_TEXT],
+      ["a judge that times out", () => Promise.reject(new LlmProviderError("timeout", "LLM provider attempt timed out")), ALFA_TEXT],
     ];
     for (const [tier, reply, text] of cases) {
-      const { compose } = composer(() => ALFA_REPLY, reply);
+      const { compose, judged } = composer(() => ALFA_REPLY, reply);
       const done = completed((await overview(compose).run({ ...base, userIntent: "Revenue for ALFA" })).events);
       const saved = await message(done.message_id);
+      const [answer, commentary] = saved.blocks;
       assert.deepEqual(saved.blocks.map((block) => block.kind), ["financial_answer", "rich_text"], tier);
-      assert.equal(saved.block_proofs[saved.blocks[0]!.id]!.calculation, "verified", tier);
-      assert.equal(plainText(segmentsOf(saved.blocks[1])), text, tier);
+      assert.equal(saved.block_proofs[answer!.id]!.calculation, "verified", tier);
+      assert.equal(plainText(segmentsOf(commentary)), text, tier);
+      // The escaping of inference words leaves the figures as the answer shows them.
+      assert.equal(resultRefProblem(commentary!, answer as never), null, tier);
+      assert.equal(judged.length, 1, tier);
+      const [inference] = JSON.parse(judged[0]!.messages[1]!.content).inferences;
+      assert.deepEqual(inference.figures_shown, [ALFA_FIGURES], `${tier}: the judge sees every engine result`);
     }
   });
 
