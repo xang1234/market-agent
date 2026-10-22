@@ -561,5 +561,5 @@ test("a QoQ trend covers the derived quarters and the latest quarter's QoQ", () 
   assert.deepEqual(trend([...series, "F8"]).rejected, []);
   const [rejection, ...others] = trend(series).rejected;
   assert.deepEqual(others, []);
-  assert.match(rejection!.reason, /^comparison: leaves out Q4 2026, which shows revenue growth \(/);
+  assert.equal(rejection!.reason, "comparison: leaves out Q4 2026, which shows revenue growth (QoQ) too");
 });

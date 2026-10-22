@@ -227,8 +227,9 @@ export function periodText(period: string): string {
   return period.replace(/^([QH][1-4])(\d{4})$/, "$1 $2");
 }
 
+// "Gross Margin" reads "gross margin"; "QoQ" and "EPS" stay.
 function lower(metric: string): string {
-  return metric.replace(/\b([A-Z])(?=[a-z])/g, (letter) => letter.toLowerCase());
+  return metric.replace(/\b([A-Z])(?=[a-z]+\b)/g, (letter) => letter.toLowerCase());
 }
 
 // The first figure for each key, in order.
