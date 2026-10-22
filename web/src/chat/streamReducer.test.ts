@@ -150,14 +150,6 @@ test('block.delta accepts a series ref segment', () => {
   ])
 })
 
-test('block.delta accepts an engine result ref segment, with its period', () => {
-  let state: StreamState = INITIAL_STREAM_STATE
-  state = applyChatStreamEvent(state, event('block.began', 1, { block_id: 'b1', kind: 'rich_text' }))
-  const segment = { type: 'ref', ref_kind: 'result', ref_id: '44444444-4444-4444-8444-444444444444', format: '74.40%', period: 'Q4 FY2026' }
-  state = applyChatStreamEvent(state, event('block.delta', 2, { block_id: 'b1', delta: { segment } }))
-  assert.deepEqual((state.blocks_by_id.get('b1') as StreamingRichTextBlock).segments, [segment])
-})
-
 test('block.delta for an unknown block_id is a no-op', () => {
   // Treat as a missed sequence rather than silently fabricating a block;
   // upstream resume logic should detect the gap via seq numbers.

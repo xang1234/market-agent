@@ -1,4 +1,4 @@
-import { REF_SEGMENT_KINDS, type Block, type RefSegmentKind, type RichTextSegment } from '../blocks/types.ts'
+import { REF_SEGMENT_KINDS, type Block, type RefSegment, type RefSegmentKind, type RichTextSegment } from '../blocks/types.ts'
 import { parseSealedMessage, parseShownAnswer, type SealedChatMessage, type ShownAnswer } from './messageTypes.ts'
 import type { ChatSseEvent } from './sseEventTypes.ts'
 import {
@@ -264,16 +264,15 @@ function readSegment(deltaPayload: unknown): RichTextSegment | null {
   ) {
     // ref_kind is runtime-validated against REF_SEGMENT_KINDS above; TS can't
     // narrow from an `includes` check on a typed-as-readonly-string array.
-    const ref: RichTextSegment = {
+    const ref: RefSegment = {
       type: 'ref',
       ref_kind: candidate.ref_kind as RefSegmentKind,
       ref_id: candidate.ref_id,
     }
-    return {
-      ...ref,
-      ...(typeof candidate.format === 'string' ? { format: candidate.format } : {}),
-      ...(typeof candidate.period === 'string' ? { period: candidate.period } : {}),
+    if (typeof candidate.format === 'string') {
+      return { ...ref, format: candidate.format }
     }
+    return ref
   }
   return null
 }
