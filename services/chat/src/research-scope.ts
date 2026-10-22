@@ -584,3 +584,53 @@ function isCompany(value: unknown): boolean {
   return typeof company?.issuer_id === "string" && (company.label === undefined || typeof company.label === "string");
 }
 
+
+// Whether a question writes a name as a company's: as whole words (wordsOf),
+// at least once outside a phrase of the closed catalogs above ("CASH" of "FREE
+// CASH FLOW" is the metric), and, with capital, with a capital letter in its
+// first word as written ("eBay", not "it").
+export function companyNameIn(question: string): (name: string, options?: { capital?: boolean }) => boolean {
+  const written = wordsOf(question);
+  const lower = written.map((word) => word.toLowerCase());
+  const inCatalog = lower.map(() => false);
+  for (const phrase of CATALOG_PHRASES) {
+    for (const start of runsOf(phrase, lower)) phrase.forEach((_, offset) => inCatalog[start + offset] = true);
+  }
+  return (name, { capital = false } = {}) => {
+    const words = wordsOf(name).map((word) => word.toLowerCase());
+    return words.length > 0 && runsOf(words, lower).some((start) =>
+      (!capital || /\p{Lu}/u.test(written[start]!)) && words.some((_, offset) => !inCatalog[start + offset]));
+  };
+}
+
+// The words a question writes that could name a company: with a capital
+// letter, outside the closed catalogs' phrases.
+export function companyWordsIn(question: string): string[] {
+  const named = companyNameIn(question);
+  return wordsOf(question).filter((word) => /\p{Lu}/u.test(word) && named(word));
+}
+
+// A text's words as written: split at whitespace, each without the quotes,
+// brackets and sentence punctuation around it or a possessive, so a dotted or
+// dashed ticker ("BRK.B.") is one word.
+function wordsOf(text: string): string[] {
+  return text.split(/\s+/u)
+    .map((word) => word.replace(/^["'“‘(]+|[.,;:?!)"'”’]+$/gu, "").replace(/['’]s$/u, ""))
+    .filter(Boolean);
+}
+
+// Where the words run, in order, through the question's words.
+function runsOf(words: ReadonlyArray<string>, question: ReadonlyArray<string>): number[] {
+  const starts: number[] = [];
+  for (let start = 0; start + words.length <= question.length; start++) {
+    if (words.every((word, offset) => question[start + offset] === word)) starts.push(start);
+  }
+  return starts;
+}
+
+const CATALOG_PHRASES = [
+  ...PROPOSABLE_METRICS.flatMap(({ metric_key, label }) => [metric_key, label]),
+  ...SCOPE_FACETS,
+  ...PERIOD_FIELDS,
+  ...INCOME_ITEMS,
+].map((phrase) => wordsOf(phrase.replaceAll("_", " ")).map((word) => word.toLowerCase()));

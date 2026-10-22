@@ -28,6 +28,7 @@ import {
   type CompanyChange,
   type ScopePeriod,
   type ScopeProposal,
+  companyNameIn,
 } from "./research-scope.ts";
 
 // One attempt, no fallback model: the turn waits on it, and asks for nothing
@@ -124,51 +125,15 @@ function companiesOf(value: unknown, question: string): CompanyChange | null {
 }
 
 // A closed check on the model's output, not a phrasing list: each name it
-// proposes is written in the question as whole words, the first capitalised
-// as a company's name is ("it" is not one), somewhere outside the name of a
-// metric, facet or income item ("CASH" of "FREE CASH FLOW" is not one).
-// ponytail: a capitalised word at a sentence's start passes ("It"); the
-// resolver then decides, as for any name written in capitals.
+// proposes is written in the question as a company's name (research-scope.ts
+// companyNameIn), with a capital letter in its first word ("it" is not one).
+// ponytail: a capitalised word at a sentence's start passes ("It"), and the
+// resolver decides it; a lowercase ticker ("amd") fails, losing the reading.
 function isNameList(value: unknown, question: string, least = 0): value is string[] {
   if (!Array.isArray(value) || value.length < least || value.length > MAX_NAMES) return false;
-  const written = wordsOf(question);
-  const lower = written.map((word) => word.toLowerCase());
-  const inCatalog = lower.map(() => false);
-  for (const phrase of CATALOG_PHRASES) {
-    for (const start of runsOf(phrase, lower)) phrase.forEach((_, offset) => inCatalog[start + offset] = true);
-  }
-  return value.every((name) => {
-    if (typeof name !== "string") return false;
-    const words = wordsOf(name).map((word) => word.toLowerCase());
-    return words.length > 0 && runsOf(words, lower).some((start) =>
-      /^\p{Lu}/u.test(written[start]!) && words.some((_, offset) => !inCatalog[start + offset]));
-  });
+  const named = companyNameIn(question);
+  return value.every((name) => typeof name === "string" && named(name, { capital: true }));
 }
-
-// A text's words as written: split at whitespace, each without the quotes,
-// brackets and sentence punctuation around it or a possessive, so a dotted or
-// dashed ticker ("BRK.B.") is one word.
-function wordsOf(text: string): string[] {
-  return text.split(/\s+/u)
-    .map((word) => word.replace(/^["'“‘(]+|[.,;:?!)"'”’]+$/gu, "").replace(/['’]s$/u, ""))
-    .filter(Boolean);
-}
-
-// Where the words run, in order, through the question's words.
-function runsOf(words: ReadonlyArray<string>, question: ReadonlyArray<string>): number[] {
-  const starts: number[] = [];
-  for (let start = 0; start + words.length <= question.length; start++) {
-    if (words.every((word, offset) => question[start + offset] === word)) starts.push(start);
-  }
-  return starts;
-}
-
-const CATALOG_PHRASES = [
-  ...PROPOSABLE_METRICS.flatMap(({ metric_key, label }) => [metric_key, label]),
-  ...SCOPE_FACETS,
-  ...PERIOD_FIELDS,
-  ...INCOME_ITEMS,
-].map((phrase) => wordsOf(phrase.replaceAll("_", " ")).map((word) => word.toLowerCase()));
 
 function periodOf(value: unknown): ScopePeriod | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;

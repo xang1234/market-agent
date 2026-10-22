@@ -412,9 +412,9 @@ test("a ticker inside a metric's name is the metric, unless the comparison cover
   // With no comparison before, the turn is not about Pathward.
   const fresh = { preResolveSubject: withCash, loadPriorSubjects: priorOf() };
   assert.deepEqual((await subjectsForTurn("Drop FREE CASH FLOW", { ...fresh, ...asNamed() })).tickers, []);
-  // With no reading, CASH after a comparison is asked about, not added.
+  // With no reading too: CASH, FREE and FLOW lie in the metric's name, so none is looked up or noted.
   const unread = await subjectsForTurn("Drop FREE CASH FLOW", { ...comparison, readQuestion: async () => null });
-  assert.deepEqual([unread.tickers, unread.context], [[], null]);
+  assert.deepEqual([unread.tickers, unread.context?.unresolvedMentions], [["NVDA", "AMD"], []]);
   const covered = { preResolveSubject: withCash, loadPriorSubjects: priorOf("NVDA", "NOW") };
   assert.deepEqual((await subjectsForTurn("Drop CASH", { ...covered, ...drop(["CASH"]) })).tickers, ["NVDA"]);
 });
@@ -468,9 +468,9 @@ test("with no reading, a new company named after any previous answer is asked ab
   for (const [question, named] of [["Drop AMD", "AMD"], ["Compare it with AMD", "AMD"], ["add TSLA", "TSLA"]]) {
     assert.match(await askedFor(question!, one), new RegExp(`Add ${named} to NVDA, or look at ${named} alone\\? Say \\\\"add ${named}\\\\" or \\\\"just ${named}\\\\"`), question);
   }
-  // CASH is a real ticker (Pathward): with no reading, "free cash flow" may name it, so it is asked about.
+  // CASH is a real ticker (Pathward), but written only inside a metric's name it is the metric.
   const withCash = async ({ text }: { text: string }) => (text === "CASH" ? { ...resolved("NOW"), input_text: text } : preResolveSubject({ text }));
-  assert.match(await askedFor("Drop FREE CASH FLOW", { ...one, preResolveSubject: withCash }), /Add NOW to NVDA, or look at NOW alone\?/);
+  assert.deepEqual((await subjectsForTurn("Drop FREE CASH FLOW", { ...one, preResolveSubject: withCash })).tickers, ["NVDA"]);
 });
 
 test("with no reading, an ambiguous company in a fresh question is asked about", async () => {

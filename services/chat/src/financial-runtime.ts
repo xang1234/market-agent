@@ -52,6 +52,7 @@ import { companyKey, extractSubjectMentions } from "./subject-extraction.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "./subjects.ts";
 import {
   BALANCE_SHEET_ITEMS,
+  companyWordsIn,
   PROPOSABLE_METRICS,
   proposedMetric,
   readingAsks,
@@ -340,15 +341,15 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
 // from a ticker page) first; like the analyst path, the companies a
 // comparison's reading adds join it ("Compare revenue with AMD" from the NVDA
 // page plans both, "Revenue for AMD" plans NVDA). A company the reading adds
-// is written capitalised (scope-proposal.ts), so a message that writes no
-// ticker or capitalised word past its first but the page's plans the page's
-// company without waiting on the reading.
+// is written with a capital letter outside the catalogs (companyNameIn), so a
+// message that writes no such word but the page's plans the page's company
+// without waiting on the reading.
 async function requestedMentions(context: ChatFinancialTurnContext, text: string): Promise<string[]> {
   const explicit = context.subjectText?.trim();
   const mentions = extractSubjectMentions(text);
   if (!explicit) return mentions;
-  const capitalised = text.split(/[^\p{L}\p{N}]+/u).filter(Boolean).slice(1).filter((word) => /^\p{Lu}/u.test(word));
-  if ([...mentions, ...capitalised].every((name) => name === explicit)) return [explicit];
+  const page = explicit.toLowerCase();
+  if ([...mentions, ...companyWordsIn(text)].every((name) => name.toLowerCase() === page)) return [explicit];
   return [explicit, ...comparedAdditions(await context.reading?.() ?? null)];
 }
 

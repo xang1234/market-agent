@@ -423,9 +423,12 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       assert.ok(completed(events).message_id, JSON.stringify(completed(events)));
       return order;
     };
-    assert.deepEqual(await run("What was AAA's revenue in fiscal 2023?"), ["planned", "read"]);
-    // A company written by name may be one the reading adds, so the plan waits on it.
+    assert.deepEqual(await run("Revenue in fiscal 2023?"), ["planned", "read"]);
+    assert.deepEqual(await run("AAA's Gross Margin?"), ["planned", "read"], "the page's own ticker and a metric's name");
+    // A company written by name may be one the reading adds, so the plan waits on it, the first word too.
     assert.deepEqual(await run("Compare its revenue with Beta Holdings"), ["read", "planned"]);
+    assert.deepEqual(await run("Beta's revenue in fiscal 2023, and this one's?"), ["read", "planned"]);
+    assert.deepEqual(await run("Microsoft revenue in fiscal 2023 versus this?"), ["read", "planned"]);
   });
 
   await t.test("from a company's page, a compared name that matches no company is named in the answer", async () => {

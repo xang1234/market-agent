@@ -37,7 +37,7 @@ import {
   type ChatReadMessage,
 } from "./messages.ts";
 import { financialAwareRunner } from "./financial-turn.ts";
-import type { CompanyChange, ResearchScope, ScopeProposal } from "./research-scope.ts";
+import { companyNameIn, type CompanyChange, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
 import type { AssertionReport } from "./assertions.ts";
 import type { BlockProof } from "../../snapshot/src/block-proof.ts";
 
@@ -1173,10 +1173,12 @@ export function labelList(labels: ReadonlyArray<string>): string {
 
 async function resolveNamedSubjects(text: string, preResolve: ChatSubjectPreResolver): Promise<Names> {
   // The whole message first, so a bare ticker, a company name, or a theme
-  // resolves exactly as before; otherwise every ticker it mentions, in order.
+  // resolves exactly as before; otherwise every ticker it mentions, in order,
+  // but one written only inside a metric's or facet's name ("FREE CASH FLOW").
   const whole = await preResolve({ text });
   if (whole.status === "resolved") return namesOf([whole]);
-  return namesOf(await Promise.all(extractSubjectMentions(text).map((mention) => preResolve({ text: mention }))));
+  const named = companyNameIn(text);
+  return namesOf(await Promise.all(extractSubjectMentions(text).filter((mention) => named(mention)).map((mention) => preResolve({ text: mention }))));
 }
 
 // One entry per company: two listings of the same issuer collapse.
