@@ -5,8 +5,8 @@
 // show ("margins are expanding" beside a checked "fell"). A second model reads
 // each inference beside what it rests on, the rest of the answer and the
 // figures its tables and charts show, each figure as the page writes it, and
-// gives it a verdict, each inference in a call of its own (#376). The verdict sets what a
-// chat turn shows (shownAs, answer-trace.ts answerTurn).
+// gives it a verdict, each inference in a call of its own (#376). The verdict
+// sets what a chat turn shows (shownAs, answer-trace.ts answerTurn).
 
 import { createLlmRouterFromEnv, type LlmChatClient, type LlmChatMessage, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
 import { isRecord } from "../../shared/src/http.ts";
