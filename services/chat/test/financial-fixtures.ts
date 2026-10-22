@@ -16,7 +16,7 @@ import {
   type ChatTurnInput,
 } from "../src/coordinator.ts";
 import { createChatFinancialRuntime } from "../src/financial-runtime.ts";
-import type { ScopeProposal } from "../src/research-scope.ts";
+import { proposedMetric, type ScopeProposal } from "../src/research-scope.ts";
 import type { ChatSubjectPreResolution } from "../src/subjects.ts";
 import { readMessage } from "./read-message-fixture.ts";
 
@@ -85,6 +85,7 @@ export function resolveMention(mention: string): Promise<ChatSubjectPreResolutio
 }
 
 export const NO_ASKS: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [] };
+export const METRIC_READING: ScopeProposal = { ...NO_ASKS, metrics: [proposedMetric("income_statement", null, null)!] };
 
 /** A planning model that answers every call with a revenue draft for the given slots, and counts calls. */
 export function revenueModel(mentions: ReadonlyArray<string>): PlanningModel & { calls: number } {
@@ -122,6 +123,7 @@ export function chatHarness(
     resolveMention?: typeof resolveMention;
     clock?: () => Date;
     persistAssistantMessage?: ChatAssistantMessagePersistence;
+    evidence?: Parameters<typeof createChatFinancialRuntime>[0]["evidence"];
   },
 ) {
   // The narrative messages the turns saved: clarifications and gaps.
@@ -136,9 +138,9 @@ export function chatHarness(
       pool,
       planningModel: options.model,
       resolveMention: options.resolveMention ?? resolveMention,
-      evidence: createEvidenceFinancialPort,
+      evidence: options.evidence ?? createEvidenceFinancialPort,
       ...(options.researchScope ? { researchScope: options.researchScope } : {}),
-      readQuestion: options.readQuestion ?? (async () => NO_ASKS),
+      readQuestion: options.readQuestion ?? (async () => METRIC_READING),
       ...(options.priorSubjects ? { priorSubjects: options.priorSubjects } : {}),
       ...(options.clock ? { clock: options.clock } : {}),
     }),

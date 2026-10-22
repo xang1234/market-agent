@@ -5,7 +5,9 @@ import test from "node:test";
 
 import { createRuntimeAuthority, operationDependencies, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
 import { buildDeterministicPlan, planFinancialRequest, type PlanningContext, type PlanningModel, type PlanningResult } from "../../financial-engine/src/planner.ts";
+import type { CandidatePage, CandidateRequest, FinancialEvidencePort, InputCandidate } from "../../financial-engine/src/ports.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
+import { asksForNoFigure, namesOneCompany, planCompanyOverview } from "../src/company-overview.ts";
 import { isFinancialRequest, uncoveredAsks } from "../src/financial-runtime.ts";
 import { parseProposal, proposalQuestion } from "../src/scope-proposal.ts";
 import { extractSubjectMentions } from "../src/subject-extraction.ts";
@@ -122,8 +124,80 @@ test("each golden metric question plans from its own recorded reply on the first
   }
 });
 
+test("a company's overview shows its eight quarters to the newest it reported revenue for by the cutoff, each named by its fiscal period (#398)", async () => {
+  // The SEC ingester stores a fourth quarter as the year less its first three, with no source token, so no precision proof.
+  const revenue = (fiscal_year: number, fiscal_period: string, publicBy = "2026-03-01T00:00:00.000Z") => ({
+    metric_key: "revenue",
+    period: { start: null, end: `${fiscal_year}-${{ Q1: "03-31", Q2: "06-30", Q3: "09-30", Q4: "12-31", FY: "12-31" }[fiscal_period]}`, fiscal_year, fiscal_period },
+    precision: null,
+    publication: [{ attestation_id: "p", timing: { available_not_before: null, available_no_later_than: publicBy, timing_precision: "instant", source_timezone: "UTC" } }],
+  }) as unknown as InputCandidate;
+  const requests: CandidateRequest[] = [];
+  const overview = async (page: CandidatePage) => {
+    const evidence = { listInputCandidates: async (request: CandidateRequest) => (requests.push(request), page) } as FinancialEvidencePort;
+    const planned = await planCompanyOverview(planningContext("NVDA"), evidence);
+    if (planned === null) return null;
+    assert.equal(planned.outcome, "ready", JSON.stringify(planned));
+    const { plan, model_calls } = planned as Extract<PlanningResult, { outcome: "ready" }>;
+    return { planner: plan.planner.kind, model_calls, units: plan.publication_units.map((unit) => unit.unit_id), outputs: outputLabels(plan) };
+  };
+  const reported = (...candidates: InputCandidate[]) => ({ status: "ok" as const, candidates, truncated: false });
+
+  assert.deepEqual(await overview(reported(revenue(2025, "Q3"), revenue(2025, "Q4"), revenue(2025, "FY"), revenue(2026, "Q1", "2026-09-02T00:00:00.000Z"))), {
+    planner: "deterministic",
+    model_calls: 0,
+    units: ["answer"],
+    outputs: [
+      "NVDA revenue Q1 2024",
+      "NVDA revenue Q2 2024",
+      "NVDA revenue Q3 2024",
+      "NVDA revenue Q4 2024",
+      "NVDA revenue Q1 2025",
+      "NVDA revenue Q2 2025",
+      "NVDA revenue Q3 2025",
+      "NVDA revenue Q4 2025",
+      "NVDA gross_profit Q4 2025",
+      "NVDA operating_income Q4 2025",
+      "NVDA net_income Q4 2025",
+      "gross_margin(NVDA gross_profit Q4 2025, NVDA revenue Q4 2025)",
+      "operating_margin(NVDA operating_income Q4 2025, NVDA revenue Q4 2025)",
+      "net_margin(NVDA net_income Q4 2025, NVDA revenue Q4 2025)",
+      "percent_change_positive_base(NVDA revenue Q4 2025, NVDA revenue Q3 2025)",
+      "percent_change_positive_base(NVDA revenue Q4 2025, NVDA revenue Q4 2024)",
+    ],
+  }, "a fourth quarter with no precision proof is the newest; a quarter public after the cutoff, or a year, is not");
+  assert.deepEqual(requests.map(({ subject, metric_key, fiscal_year, fiscal_period }) => ({ subject, metric_key, fiscal_year, fiscal_period })), [
+    { subject: { kind: "issuer", id: GOLDEN_COMPANIES.find((company) => company.ticker === "NVDA")!.issuer_id }, metric_key: "revenue", fiscal_year: null, fiscal_period: null },
+  ]);
+  const afterQ1 = (await overview(reported(revenue(2025, "Q4"), revenue(2026, "Q1"))))!.outputs;
+  assert.deepEqual([afterQ1[0], ...afterQ1.slice(-2)], [
+    "NVDA revenue Q2 2024",
+    "percent_change_positive_base(NVDA revenue Q1 2026, NVDA revenue Q4 2025)",
+    "percent_change_positive_base(NVDA revenue Q1 2026, NVDA revenue Q1 2025)",
+  ], "a first quarter compares with the fourth before it and with the first a year earlier");
+  assert.equal(await overview(reported(revenue(2025, "FY"))), null, "no quarter reported: no overview");
+  await assert.rejects(overview({ status: "error", reason_code: "database_error" }), /database_error/u);
+});
+
 const reading = (asks: string[], metrics: unknown[] = [], income_items: string[] = [], turnsOff: string[] = []) =>
   parseProposal(JSON.stringify({ metrics, asks, turns_off: { facets: turnsOff, metrics: [] }, income_items }))!;
+
+test("a question about one company that asks for no figure is answered with its overview; one about more, or about a figure or a period, is not (#398)", async () => {
+  const client = await createReplayLlmChatClient(REPLIES);
+  const read = async (question: string) => parseProposal((await client({} as never, { messages: [{ role: "user", content: proposalQuestion(question) }] })).text);
+  const overview = async (question: string, { carried = false, read: readQuestion = read } = {}) =>
+    namesOneCompany(planningContext(question).requested_subjects, carried, question) && asksForNoFigure(await readQuestion(question));
+  for (const question of ["Analyze NVDA", "Analyze AMD", "Analyze AAPL"]) assert.equal(await overview(question), true, question);
+  const scripted = (proposal: ReturnType<typeof reading>) => ({ read: async () => proposal });
+  assert.equal(await overview("Analyze NVDA", scripted(reading([], ["income_statement"]))), false, "a metric");
+  assert.equal(await overview("Analyze NVDA, no margins", scripted(reading([], [], [], ["margins"]))), false, "a facet turned off");
+  assert.equal(await overview("Analyze NVDA", scripted({ ...reading([]), turns_off: { facets: new Set(), metrics: new Set(["revenue"]) } })), false, "a metric turned off");
+  assert.equal(await overview("Analyze NVDA", { carried: true }), false, "a carried company");
+  assert.equal(await overview("Analyze NVDA and AMD"), false, "two companies");
+  for (const period of ["in fiscal 2025", "for Q4 2025", "YTD", "for Q3", "in the third quarter"]) {
+    assert.equal(await overview(`Analyze NVDA ${period}`, scripted(reading([]))), false, period);
+  }
+});
 
 test("each golden answer names what its question asks for and its plan does not compute", async () => {
   const client = await createReplayLlmChatClient(REPLIES);

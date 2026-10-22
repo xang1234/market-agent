@@ -69,6 +69,10 @@
       "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[]}"
     },
     {
+      "match": "Question: \"Analyze AMD\"",
+      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[]}"
+    },
+    {
       "match": "Question: \"How does NVDA compare with its peers?\"",
       "text": "{\"metrics\":[],\"asks\":[\"peers\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[]}"
     },

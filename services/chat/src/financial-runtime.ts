@@ -30,6 +30,7 @@ import { ParentRefusedError, type PersistParentArtifact } from "../../financial-
 import {
   buildDeterministicPlan,
   planFinancialRequest,
+  PlanningModelError,
   resolveClarification,
   type Clarification,
   type PlanningContext,
@@ -44,6 +45,7 @@ import { publishRequest, type RequestGap } from "../../financial-engine/src/requ
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { comparativeTurn, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId } from "./chat-ids.ts";
+import { asksForNoFigure, namesOneCompany, planCompanyOverview } from "./company-overview.ts";
 import { noteBlock } from "./fact-blocks.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { COMPARATIVE, companyKey, extractSubjectMentions } from "./subject-extraction.ts";
@@ -170,10 +172,12 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     if (requested.clarify) return { kind: "clarification", clarification: companyQuestion(requested.clarify) };
     if (!answered && requested.subjects.length === 0) return gap("no_company");
     // The reading of the question is a model call, so it starts beside the
-    // planner's model call, or once a plan is driven: a turn that ends before
-    // either (a question about a company, a gap no model planned) reads
-    // nothing. The scope waits on the reading, so each use of them decides
-    // first whether to read (prepared). The saved answer has both already.
+    // planner's model call, when planning one company (whose overview waits
+    // on it), or once a plan is driven: a turn that ends before any of these
+    // (a question about a company, a gap no model planned for several
+    // companies) reads nothing. The scope waits on the reading, so each use
+    // of them decides first whether to read (prepared). The saved answer has
+    // both already.
     let decideReading = (_read: boolean): void => {};
     const reading = answered ? Promise.resolve(null) : new Promise<ScopeProposal | null>((resolve) => {
       decideReading = (read) => {
@@ -240,9 +244,16 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     const outcome = await publishRequest(deps.pool, {
       authority,
       request_key: turnId,
-      plan: async () => {
+      plan: async (db) => {
         planned = await planTurn(planningModel, context, text, requested.subjects, authority, deps.clock?.() ?? new Date(), (subjects) => {
           asked = subjects;
+        }, {
+          carried: requested.carried.length > 0,
+          startReading: () => {
+            decideReading(true);
+            return reading;
+          },
+          evidence: deps.evidence(db),
         });
         return planned;
       },
@@ -409,6 +420,7 @@ async function planTurn(
   cutoff: Date,
   // Called with the companies to plan once a clarification pick is applied, before the model is.
   onSubjects: (subjects: ReadonlyArray<RequestedSubject>) => void,
+  turn: Readonly<{ carried: boolean; startReading: () => Promise<ScopeProposal | null>; evidence: FinancialEvidencePort }>,
 ): Promise<PlanningResult> {
   const planningContext = (subjects: ReadonlyArray<RequestedSubject>): PlanningContext => ({
     plan_id: randomUUID(),
@@ -433,8 +445,35 @@ async function planTurn(
   onSubjects(subjects);
   if (CASH_RESILIENCE.test(text)) return planCashResilience(planningContext(subjects), text);
   // A failing or unreachable model is a planning gap (publishRequest); the narrative composer is never a fallback for numbers.
-  return planFinancialRequest(planningContext(subjects), text, model ?? noModel);
+  let dropped = false;
+  // A planner the overview drops reaches the model no more (its repair call).
+  const planning: PlanningModel | null = model && ((request) => dropped ? Promise.reject(DROPPED) : model(request));
+  const planned = planFinancialRequest(planningContext(subjects), text, planning ?? noModel);
+  if (!namesOneCompany(subjects, turn.carried, text)) return planned;
+  // Settled now, or a planner that fails while the overview is decided is an unhandled rejection.
+  const failure = planned.then(() => null, (reason: unknown) => ({ reason }));
+  if (!asksForNoFigure(await turn.startReading())) return planned;
+  let overview: PlanningResult | null;
+  try {
+    overview = await planCompanyOverview(planningContext(subjects), turn.evidence);
+  } catch (reason) {
+    console.warn("[chat] the company overview could not be planned; the planner answers", reason);
+    return planned;
+  }
+  if (overview === null) return planned;
+  dropped = true;
+  void failure.then((failed) => {
+    if (failed === null) return;
+    if (failed.reason instanceof PlanningModelError && failed.reason.cause === DROPPED) {
+      console.warn("[chat] the planner was dropped for the company overview; its next model call was not made");
+    } else {
+      console.warn("[chat] the planner the company overview replaced had failed", failed.reason);
+    }
+  });
+  return overview;
 }
+
+const DROPPED = new Error("dropped for the company overview");
 
 const CASH_RESILIENCE = /\bcash[- ]resilience\b/iu;
 const CASH_RESILIENCE_VIEW = "cash_resilience_view";
