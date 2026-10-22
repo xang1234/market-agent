@@ -117,12 +117,11 @@ function withVerdicts(answer: ComposedAnswer, judged: ReadonlyArray<InferenceVer
       accepted: report.accepted.filter((entry) => !hidden.some((verdict) => verdict.index === entry.index)),
       rejected: [
         ...report.rejected,
-        ...hidden.map((verdict) => ({
-          index: verdict.index,
-          text: report.accepted.find((entry) => entry.index === verdict.index)!.text,
-          check: "judge" as const,
-          reason: verdictText(verdict),
-        })),
+        // One a check rejected after its verdict (a failed repair) keeps that rejection.
+        ...hidden.flatMap((verdict) => {
+          const entry = report.accepted.find((accepted) => accepted.index === verdict.index);
+          return entry ? [{ index: verdict.index, text: entry.text, check: "judge" as const, reason: verdictText(verdict) }] : [];
+        }),
       ].sort((a, b) => a.index - b.index),
       judged,
     },
@@ -172,9 +171,12 @@ async function repairedAnswer(
   const repair = { requests, record: round.record, judge: round.records };
   if (round.repaired.length === 0) return { ...first, repair };
   const rendering = renderedAnswer(input, packet, round.report);
+  // A repair that failed the checks has no verdict of its own: its first
+  // still counts it, hidden.
+  const second = verdictsFor(round.cases, round.records);
   const final = withVerdicts({ exchange: answer.exchange, assertions: rendering.report, blocks: rendering.blocks }, [
-    ...verdicts.filter((verdict) => !round.repaired.includes(verdict.index)),
-    ...verdictsFor(round.cases, round.records),
+    ...verdicts.filter((verdict) => !second.some((repaired) => repaired.index === verdict.index)),
+    ...second,
   ].sort((a, b) => a.index - b.index));
   return { ...final, assertions: { ...final.assertions!, repaired: round.repaired }, judge: first.judge, repair };
 }

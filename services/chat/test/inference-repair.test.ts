@@ -248,10 +248,20 @@ test("a repaired entry goes through the same checks as the first: a digit, an ad
     const done = await (await answerTurn(FISCAL.input, turn(FISCAL), { env: JUDGED_ENV, createClient })).judging!.done;
     assert.equal(text(done.blocks), fiscal(PROFITABILITY), label);
     assert.deepEqual(rejections(done.assertions).find(([index]) => index === 8), [8, check, reason], label);
-    assert.deepEqual(done.assertions?.judged, [{ index: 7, verdict: "entailed", worded_amount: false }], label);
+    // Its first verdict still counts it: hidden, as the reader saw it.
+    assert.deepEqual(done.assertions?.judged, [
+      { index: 7, verdict: "entailed", worded_amount: false },
+      { index: 8, verdict: "entailed", worded_amount: true, reason: GAP_REASON },
+    ], label);
     assert.deepEqual(done.assertions?.repaired, [8], label);
     assert.deepEqual(calls.sort(), ["answer", "judge 7", "judge 8", "repair"], label);
-    assert.equal(String(logged.mock.calls.at(-1)!.arguments[0]), `[chat] repair thread=${FISCAL.thread_id} run=${FISCAL.run_id}: 1 sent, 0 repaired, 0 recovered`, label);
+    const lines = logged.mock.calls.slice(-2).map((call) => String(call.arguments[0]));
+    assert.deepEqual(lines, [
+      `[chat] judge thread=${FISCAL.thread_id} run=${FISCAL.run_id} on anthropic/claude-haiku-5-5: 1 shown, 0 unverified, of 2 inferences`,
+      `[chat] repair thread=${FISCAL.thread_id} run=${FISCAL.run_id}: 1 sent, 0 repaired, 0 recovered`,
+    ], label);
+    const metrics = answerMetrics({ ...done, exchange: FISCAL.exchange, repair: null });
+    assert.deepEqual([metrics.inferences_shown, metrics.inferences_unverified, metrics.inferences_hidden], [1, 0, 1], label);
   }
 });
 
@@ -279,11 +289,14 @@ test("a repair that fails leaves its inference hidden as the first round did, an
     assert.equal(text(done.blocks), fiscal(PROFITABILITY), label);
     assert.deepEqual(rejections(done.assertions).find(([index]) => index === 8), [8, "judge", `entailed, worded_amount: ${GAP_REASON}`], label);
     assert.equal(done.assertions?.repaired, undefined, label);
+    assert.deepEqual(done.assertions?.judged?.map(({ index }) => index), [7, 8], label);
     assert.deepEqual(calls.sort(), ["answer", "judge 7", "judge 8", "repair"], label);
     const written = JSON.parse(await readFile(join(dir, FISCAL.thread_id, `${FISCAL.run_id}.json`), "utf8")) as TurnTrace;
     assert.equal(text(written.blocks), fiscal(PROFITABILITY), label);
     assert.deepEqual(written.repair?.requests.map(({ index }) => index), [8], label);
     assert.deepEqual(written.repair?.judge, [], label);
+    const metrics = answerMetrics(written);
+    assert.deepEqual([metrics.inferences_shown, metrics.inferences_unverified, metrics.inferences_hidden], [1, 0, 1], label);
   }
 });
 
@@ -341,7 +354,7 @@ test("a trace recorded before repairs replays with none: its hidden inference st
   assert.equal(replayed.repair_input_changed, true);
 
   const recorded = await replayRecorded(FISCAL);
-  assert.equal(text(recorded.blocks), fiscal(PROFITABILITY, "> **Analyst inference:** The fiscal years end in different months for the two companies, which limits direct comparability of the two revenue figures."));
+  assert.equal(text(recorded.blocks), fiscal(PROFITABILITY, "> **Analyst inference:** The two fiscal years end in different months, so the two revenue figures cover different stretches of time and are not a strict like-for-like comparison."));
   assert.deepEqual(recorded.assertions?.repaired, [8]);
   assert.equal(recorded.repair_input_changed, false);
 });
@@ -414,7 +427,7 @@ function hang(t: { after(fn: () => void): void }): Promise<never> {
 
 test("the repair instructions name no period wording: the label states the periods, the text names none", () => {
   for (const phrase of ["the latest quarter", "that quarter", "a year earlier", "Q1", "fiscal 2026"]) assert.equal(REPAIR_INSTRUCTIONS.includes(phrase), false, phrase);
-  assert.equal(REPAIR_INSTRUCTIONS.includes(`The inference's label already states the periods its supports cover, so its text names no period at all (no year, quarter, "latest", "earlier" or "prior") and leaves which period is which to its supports.`), true);
+  assert.equal(REPAIR_INSTRUCTIONS.includes(`Its supports carry the periods, so its text names no period at all (no year, quarter, "latest", "earlier" or "prior") and leaves which period is which to its supports.`), true);
 });
 
 test("a malformed recorded repair replays as none recorded, and its metrics count no repair", async () => {
