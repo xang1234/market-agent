@@ -1,10 +1,11 @@
 // The deployer-reviewed set of financial versions this build can honour. It
 // lists only code compiled into this build: a saved run whose plan names an
 // operation, definition, catalog, numeric policy, or certificate version that
-// is not here is unavailable for replay and inspection. Nothing is ever
-// downloaded or substituted — a newer build does not reinterpret an older
-// version with today's implementation. Adding an entry is a reviewed change
-// that ships the matching implementation.
+// is not here is unavailable for replay and inspection. Presentation v1 is
+// listed so stored answers stay readable and inspectable, though this build
+// never generates it. Nothing is ever downloaded or substituted — a newer
+// build does not reinterpret an older version with today's implementation.
+// Adding an entry is a reviewed change that ships the matching implementation.
 
 import {
   FINANCIAL_CATALOG_VERSION,
