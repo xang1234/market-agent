@@ -6,10 +6,7 @@
 // each inference beside what it rests on and the rest of the answer, as the
 // reader sees them, and gives it a verdict, each inference in a call of its
 // own (#376). The verdict sets what a chat turn shows (SHOWN_AS,
-// answer-trace.ts answerTurn): an entailed inference as an analyst inference,
-// an unsupported one labelled an unverified analyst view; one that
-// contradicts the figures, states an amount in words, or got no verdict stays
-// hidden.
+// answer-trace.ts answerTurn).
 
 import { createLlmRouterFromEnv, type LlmChatClient, type LlmChatMessage, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
 import type { ModelExchange } from "./answer-trace.ts";

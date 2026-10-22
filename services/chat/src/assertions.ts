@@ -60,8 +60,7 @@ export const MAX_ASSERTIONS = 12;
 // The check a rejection failed, named so a report can tell a wrong number or
 // citation (binding) from a wrong ranking or trend (comparative), and so a
 // held-out mutation fails one named check (#221). judge: an inference the
-// judge hid (answer-trace.ts): it contradicts the figures shown, states an
-// amount in words, or got no verdict.
+// judge hid (inference-judge.ts SHOWN_AS).
 export type RejectionCheck =
   | "binding" | "comparative" | "reference" | "kind" | "support" | "limit" | "format" | "rendering" | "judge";
 export type Rejection = { index: number; text?: string; check: RejectionCheck; reason: string };

@@ -293,7 +293,7 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
       { name: "narrowed cohort", list: [cmp("highest", "F2", ["F2"])], fails: { index: 0, check: "kind" } },
       { name: "wrong winner", list: [cmp("highest", "F6", ["F2", "F6"])], fails: { index: 0, check: "comparative" } },
       // Beside a checked NVDA-highest, words naming the wrong leader contradict
-      // it (#288): the judge's contradicted verdict keeps it off the page.
+      // it (#288).
       {
         name: "an inference naming the wrong leader",
         list: [cmp("highest", "F2", ["F2", "F6"]), inference("AMD's margin lead is the wider moat.", [0])],

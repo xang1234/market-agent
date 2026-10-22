@@ -84,8 +84,7 @@ export function inferenceCases(input: AnswerTraceInput, report: AssertionReport 
 }
 
 // What the reader ends with: each inference as its verdict shows it
-// (SHOWN_AS). Those hidden leave the report's accepted list as "judge"
-// rejections; those shown as unverified stay, listed in its unverified.
+// (SHOWN_AS).
 // records: the judge's, one per case.
 export function judgedAnswer(answer: ComposedAnswer, cases: ReadonlyArray<JudgeCase>, records: ReadonlyArray<JudgeRecord>): TracedAnswer {
   if (cases.length === 0) return { ...answer, judge: null, blocks: answer.blocks(new Map()) };

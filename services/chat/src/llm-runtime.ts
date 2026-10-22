@@ -37,10 +37,9 @@ type Answer =
   | { kind: "rendered"; paragraphs: ReadonlyArray<Paragraph>; notes: ReadonlyArray<string> }
   | { kind: "fallback"; text: string };
 
-// What an answer shows of each accepted inference, by index, from the
-// judge's verdict (inference-judge.ts SHOWN_AS): "shown" (entailed),
-// "unverified" (unsupported, labelled so), "pending" (a line in its place
-// while the judge reads it); one absent is left out.
+// What an answer shows of each accepted inference, by index: its verdict's
+// SHOWN_AS (inference-judge.ts), or "pending", a line in its place while the
+// judge reads it; one absent is left out.
 export type Inferences = ReadonlyMap<number, "shown" | "unverified" | "pending">;
 // The turn's blocks, its answer showing the given inferences.
 export type AnswerBlocks = (inferences: Inferences) => ReadonlyArray<Record<string, unknown>>;

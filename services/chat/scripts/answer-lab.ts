@@ -166,9 +166,7 @@ function liveEnv(): Record<string, string | undefined> {
   return { ...process.env, LLM_SETTINGS_ENV_FILE: process.env.LLM_SETTINGS_ENV_FILE ?? join(ROOT, ".env.dev") };
 }
 
-// What the judge did with each of an answer's inferences, each it showed as
-// unverified and each it left out, with why: the judge's verdict and reason,
-// or why no verdict came.
+// reason: the judge's verdict and its reason, or why no verdict came.
 type JudgedInference = { index: number; text: string; reason: string };
 export type JudgeView = { records: ReadonlyArray<JudgeRecord>; unverified: JudgedInference[]; hidden: JudgedInference[] };
 
@@ -324,9 +322,6 @@ function liveRows(run: LiveRun, keys: ReadonlyArray<string> = run.traces): Row[]
   });
 }
 
-// The inferences the judge showed, showed as unverified and left out over the
-// run, what it did per inference, its cost per call it replied to, and each
-// inference it showed as unverified or left out, with its text and why.
 export function judgeSummary(run: Pick<LiveRun, "labels"> & { results: ReadonlyArray<Pick<LiveSample, "trace" | "sample" | "metrics" | "judge">> }): string {
   const judged = run.results.filter((result) => result.judge);
   const records = judged.flatMap((result) => result.judge!.records);
@@ -431,10 +426,9 @@ async function judgeMutations(variants: ReadonlyArray<MutationVariant>, concurre
   return variants.map((variant) => results.find((result) => result.id === variant.id && result.text === variant.judged.text)!);
 }
 
-// Mutations caught (not entailed), those at their kind's tier, those shown
-// that should hide (the safety number: a contradiction or a worded amount on
-// the page), and originals flagged; an error is none of these, and is counted
-// on its own. A miss is any inference not at its tier.
+// "shown though they should hide" is the safety number: a contradiction or a
+// worded amount on the page. An error is neither caught nor at its tier, and
+// is counted on its own.
 export function mutationSummary(results: ReadonlyArray<Pick<MutationResult, "id" | "kind" | "text" | "verdict">>): string {
   type Row = Pick<MutationResult, "kind" | "verdict">;
   const rate = (rows: ReadonlyArray<Row>, counted: (row: Row) => boolean) => `${rows.filter(counted).length} of ${rows.length}`;
