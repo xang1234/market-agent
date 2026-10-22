@@ -6,7 +6,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import type { LlmChatRequest, LlmChatResult } from "../../llm/src/index.ts";
-import { answerTurn, replayRecorded, type TurnTrace } from "../src/answer-trace.ts";
+import { answerTurn, composeTraced, inferenceCases, judgedAnswer, replayRecorded, type TurnTrace } from "../src/answer-trace.ts";
 import type { JudgeRecord } from "../src/inference-judge.ts";
 
 const trace = async (name: string): Promise<TurnTrace> =>
@@ -324,3 +324,13 @@ function hang(t: { after(fn: () => void): void }): Promise<never> {
   t.after(() => clearInterval(connection));
   return new Promise<never>(() => {});
 }
+
+test("an inference with no judge record of its own stays hidden; the answer is still written (#477 review)", async () => {
+  const { createClient } = models(SEGMENTS, async () => ({ text: ENTAILED(6) }));
+  const composed = await composeTraced(SEGMENTS.input, { env: ENV, createClient });
+  const { cases } = inferenceCases(SEGMENTS.input, composed.assertions);
+  const entailed6: JudgeRecord = { outcome: "replied", exchange: { messages: [], text: ENTAILED(6), truncated: false, deployment: "anthropic/claude-haiku-5-5", latency_ms: 1000 } };
+  const judged = judgedAnswer(composed, cases, [entailed6]);
+  assert.equal(text(judged.blocks), [FIGURES, CONCENTRATED].join("\n\n"));
+  assert.deepEqual(judgeRejections(judged.assertions), [[7, "error: no judge record for this inference"]]);
+});

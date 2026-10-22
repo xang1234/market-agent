@@ -203,6 +203,13 @@ test("one judge call per answer, on JUDGE_LITELLM_MODEL, carries every inference
   });
 });
 
+test("a reply whose last verdict list is cut off is an error, never the draft it was correcting (#477 review)", () => {
+  const cut = '{"verdicts":[{"id":3,"verdict":"entailed","worded_amount":false}]}\n\nCorrection: the ranking contradicts it:\n{"verdicts":[{"id":3,"verdict":"contrad';
+  assert.deepEqual(parseVerdicts(cut, [CASES[1]!]), [{ index: 3, verdict: "error", reason: "the judge's last verdict list is cut off" }]);
+  const corrected = '{"verdicts":[{"id":3,"verdict":"entailed","worded_amount":false}]}\n\nCorrection:\n{"verdicts":[{"id":3,"verdict":"contradicted","worded_amount":false,"reason":"NVDA is highest."}]}';
+  assert.deepEqual(parseVerdicts(corrected, [CASES[1]!]), [{ index: 3, verdict: "contradicted", worded_amount: false, reason: "NVDA is highest." }]);
+});
+
 test("a malformed reply is an error for every inference, never entailed; a bad verdict is an error for its own", () => {
   const two: JudgeCase[] = [...CASES];
   for (const reply of ["entailed", '{"verdicts":"entailed"}', '{"verdicts":[{"id":2,"verdict":"entailed","worded_amount":false}', ""]) {

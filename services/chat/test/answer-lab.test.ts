@@ -184,7 +184,7 @@ test("the mutation summary counts catches, each kind at its expected outcome, mu
     "  hedged_valuation       unsupported   0 of 1",
     "  flipped_direction      contradicted  0 of 1",
     "  contradicted_ranking   contradicted  1 of 2",
-    "shown though they should hide: 2 of 5",
+    "shown though they should hide: 2 of 5 (1 errors, hidden but unjudged)",
     "false alarms: 1 of 2 originals (0 errors)",
     "not at their expected outcome:",
     "  a worded_amount: unsupported: a forecast the figures do not show\n      a worded_amount",

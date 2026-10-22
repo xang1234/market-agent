@@ -453,7 +453,7 @@ export function mutationSummary(results: ReadonlyArray<Pick<MutationResult, "id"
     ...Object.entries(MUTATION_TIERS).map(([kind, expected]) =>
       `  ${kind.padEnd(22)} ${(expected.worded_amount ? "worded_amount" : expected.verdict).padEnd(14)}${rate(mutations.filter((result) => result.kind === kind), atTier)}`
     ),
-    `shown though they should hide: ${rate(shouldHide, (row) => shownAs(row.verdict) !== "hidden")}`,
+    `shown though they should hide: ${rate(shouldHide, (row) => shownAs(row.verdict) !== "hidden")} (${errors(shouldHide)} errors, hidden but unjudged)`,
     `false alarms: ${rate(originals, flagged)} originals (${errors(originals)} errors)`,
     ...(missed.length > 0 ? ["not at their expected outcome:"] : []),
     ...missed.map((result) => `  ${result.id} ${result.kind}: ${verdictText(result.verdict)}\n      ${result.text}`),

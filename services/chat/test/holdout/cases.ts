@@ -68,7 +68,7 @@ export type HoldoutCase = {
   prose: string;
   good?: ReadonlyArray<Assertion>;
   mutations?: ReadonlyArray<
-    | { name: string; list: ReadonlyArray<Assertion>; judged?: Readonly<Record<number, "contradicted" | "worded_amount">>; fails: { index: number; check: RejectionCheck } }
+    | { name: string; list: ReadonlyArray<Assertion>; judged?: Readonly<Record<number, "contradicted">>; fails: { index: number; check: RejectionCheck } }
     // A prose mutation: a figure the data does not hold, which must never be shown.
     | { name: string; prose: string; never_shown: string }
     | { name: string; list: ReadonlyArray<Assertion>; never_shown: string }

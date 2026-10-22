@@ -32,7 +32,8 @@ export type JudgeCase = {
   // same way; the page may show an observation only inside a comparison.
   context: ReadonlyArray<string>;
   // Every figure the page's tables show, a chart by each line's last value, a
-  // line per table; the same for each of an answer's inferences.
+  // line per table title (tables that share one, or have none, share a line);
+  // the same for each of an answer's inferences.
   figures: ReadonlyArray<string>;
 };
 
@@ -50,7 +51,8 @@ export type JudgeRecord =
 // the deadlines are per call, one call per inference. Measured on Haiku over
 // 150 calls carrying figures_shown (1,694 to 2,919 input tokens; the recorded
 // traces and three mutation runs, 2026-10-22): median 2.8 s, p95 4.0 s,
-// slowest 6.3 s. One attempt of about 1.6 times the slowest: the judge model
+// slowest 6.3 s; under load (a verifier's run beside other suites) p95 5.8 s,
+// slowest 6.9 s. One attempt of about 1.4 times that slowest: the judge model
 // has no fallback (JUDGE_LITELLM_MODEL alone), and a late verdict only costs
 // its inference, which stays hidden.
 // ceil(11000 / 10000) - 1 = 1 attempt.
@@ -156,7 +158,7 @@ export function judgeMessages(cases: ReadonlyArray<JudgeCase>, companies: Readon
 // a case with no well-formed verdict of its own is one too.
 export function parseVerdicts(text: string, cases: ReadonlyArray<JudgeCase>): InferenceVerdict[] {
   const items = lastVerdictList(text);
-  if (items === undefined) return cases.map(({ index }) => ({ index, verdict: "error", reason: "the judge's reply is not a verdict list" }));
+  if (typeof items === "string") return cases.map(({ index }) => ({ index, verdict: "error", reason: items }));
   return cases.map(({ index }): InferenceVerdict => {
     const mine = items.filter(isRecord).filter((item) => item.id === index);
     if (mine.length !== 1) return { index, verdict: "error", reason: mine.length === 0 ? "no verdict for this inference" : "more than one verdict for this inference" };
@@ -172,19 +174,21 @@ function isVerdict(value: unknown): value is Verdict {
 }
 
 // The reply's last verdict list: a model that corrects itself in prose
-// ("Correction: ... Final answer:") writes its final list last.
-function lastVerdictList(text: string): unknown[] | undefined {
+// ("Correction: ... Final answer:") writes its final list last. A list begun
+// after the last whole one was cut off, so the reply has no final verdict,
+// whether or not the call reported a cut (#477 review).
+function lastVerdictList(text: string): unknown[] | string {
   const end = text.lastIndexOf("}") + 1;
   for (let start = text.lastIndexOf("{", end); start >= 0; start = text.lastIndexOf("{", start - 1)) {
     try {
       const verdicts = (JSON.parse(text.slice(start, end)) as { verdicts?: unknown } | null)?.verdicts;
-      if (Array.isArray(verdicts)) return verdicts;
+      if (Array.isArray(verdicts)) return text.includes('"verdicts"', end) ? "the judge's last verdict list is cut off" : verdicts;
     } catch {
       // Not a whole object from here: try the brace before.
     }
     if (start === 0) break;
   }
-  return undefined;
+  return "the judge's reply is not a verdict list";
 }
 
 const JUDGE_INSTRUCTIONS = [

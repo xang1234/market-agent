@@ -89,7 +89,7 @@ export function inferenceCases(input: AnswerTraceInput, report: AssertionReport 
 // records: the judge's, one per case.
 export function judgedAnswer(answer: ComposedAnswer, cases: ReadonlyArray<JudgeCase>, records: ReadonlyArray<JudgeRecord>): TracedAnswer {
   if (cases.length === 0) return { ...answer, judge: null, blocks: answer.blocks(new Map()) };
-  const judged = cases.flatMap((inference, i) => verdictsOf([inference], records[i]!));
+  const judged = cases.flatMap((inference, i) => verdictsOf([inference], records[i] ?? NO_RECORD));
   const shown = new Map(judged.flatMap((verdict) => {
     const as = shownAs(verdict);
     return as === "hidden" ? [] : [[verdict.index, as] as const];
@@ -116,6 +116,10 @@ export function judgedAnswer(answer: ComposedAnswer, cases: ReadonlyArray<JudgeC
     blocks: answer.blocks(shown),
   };
 }
+
+// A recorded judge with fewer calls than today's inferences: those past its
+// end show nothing.
+const NO_RECORD: JudgeRecord = { outcome: "not_called", reason: "no judge record for this inference" };
 
 type JudgeOptions = {
   env: LlmSettingsLoaderEnv & Record<string, string | undefined>;

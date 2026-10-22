@@ -20,8 +20,9 @@ export type ShownAs = "shown" | "unverified" | "hidden";
 // unverifiedInference).
 const SHOWN_AS: Readonly<Record<Verdict, ShownAs>> = { entailed: "shown", unsupported: "unverified", contradicted: "hidden" };
 
-// What the reader is shown of an inference. An amount in words is never
-// shown, whatever its verdict: every figure on the page is a packet value.
+// What the reader is shown of an inference. One the judge flags as stating an
+// amount in words is hidden, whatever its verdict, so the page's figures stay
+// packet values as far as the judge's flag catches them.
 export function shownAs(verdict: InferenceVerdict): ShownAs {
   return verdict.verdict === "error" || verdict.worded_amount ? "hidden" : SHOWN_AS[verdict.verdict];
 }
