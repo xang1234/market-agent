@@ -407,6 +407,20 @@ test("a turn whose only hidden inference is check-rejected waits for its repair,
   assert.deepEqual(calls.sort(), ["answer", "judge 4", "repair"]);
 });
 
+test("an inference the checks rejected for its supports is repaired by the same words on new supports: the same-words rule is for what the judge read", async (t) => {
+  t.mock.method(console, "info", () => {});
+  const MODERATING_TEXT = "The large gap between YoY and QoQ growth rates indicates sequential momentum is moderating even though the company is still growing rapidly on a year-over-year basis.";
+  const unsupported = { ...QUARTER, exchange: { ...QUARTER.exchange!, text: QUARTER.exchange!.text.replace('"supports":[2,3]', '"supports":[9]') } };
+  const { calls, createClient } = models(unsupported, {
+    judge: (ask) => verdict(ask.id, "entailed"),
+    repair: () => fenced([inference(4, `${MODERATING_TEXT} `, { supports: [2, 3] })]),
+  });
+  const done = await (await answerTurn(unsupported.input, turn(unsupported), { env: JUDGED_ENV, createClient })).judging!.done;
+  assert.equal(text(done.blocks), quarter(MODERATING));
+  assert.deepEqual(done.assertions?.repaired, [4]);
+  assert.deepEqual(calls.sort(), ["answer", "judge 4", "repair"]);
+});
+
 test("a trace recorded before repairs replays with none: its worded inference stays unverified; one recorded with a repair replays it with no model", async () => {
   const { repair: _, ...before } = FISCAL;
   const replayed = await replayRecorded(before);

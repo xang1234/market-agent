@@ -106,10 +106,12 @@ export function repairedList(list: ReadonlyArray<unknown>, requests: ReadonlyArr
   for (const entry of entries) {
     if (!isRecord(entry) || entry.kind !== "analyst_inference" || typeof entry.index !== "number") continue;
     const { index, ...fields } = entry;
-    if (repaired.includes(index) || !requests.some((request) => request.index === index)) continue;
-    // No text, or the same words again, is no repair: a second verdict on the
-    // same words is only the judge's variance.
-    if (typeof fields.text !== "string" || (isRecord(list[index]) && typeof list[index].text === "string" && sameWords(list[index].text, fields.text))) continue;
+    const request = requests.find((asked) => asked.index === index);
+    if (repaired.includes(index) || !request) continue;
+    if (typeof fields.text !== "string") continue;
+    // The words the judge read, again, are no repair: a second verdict on them
+    // is only its variance. One a check rejected may keep its words.
+    if (request.check === "judge" && sameWords(request.text, fields.text)) continue;
     merged[index] = { ...(isRecord(list[index]) ? list[index] : {}), ...fields };
     repaired.push(index);
   }
