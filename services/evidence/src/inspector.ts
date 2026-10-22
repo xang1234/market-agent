@@ -130,7 +130,7 @@ export async function loadEvidenceInspection(
   } else if (input.ref.kind === "event") {
     inspection = await inspectEvent(db, input.snapshot_id, input.ref.id);
   } else if (input.ref.kind === "fact") {
-    inspection = await inspectFact(db, input.snapshot_id, input.ref.id, input.user_id);
+    inspection = await inspectFact(db, input.snapshot_id, input.ref.id, input.user_id, manifest.fact_refs);
   } else {
     const spec = manifest.series_specs.find((candidate) => candidate.series_ref === input.ref.id)!;
     inspection = await inspectSeries(db, input.snapshot_id, spec, input.user_id);
@@ -494,6 +494,7 @@ async function inspectFact(
   snapshotId: string,
   factId: string,
   userId: string,
+  sealed: ReadonlyArray<string>,
 ): Promise<EvidenceInspection> {
   const [row] = await loadFactRows(db, [factId], userId);
   if (!row) throw new EvidenceInspectionError(404, "fact not found");
@@ -513,7 +514,7 @@ async function inspectFact(
     ]),
     links: sourceLinks(row.canonical_url),
     related_refs: Object.freeze([
-      ...(await derivationInputs(db, row.quality_flags, userId)),
+      ...(await derivationInputs(db, row.quality_flags, userId, sealed)),
       { kind: "source" as const, id: row.source_id, label: row.provider },
     ]),
   });
@@ -597,10 +598,12 @@ async function derivationInputs(
   db: QueryExecutor,
   qualityFlags: unknown,
   userId: string,
+  // The snapshot's facts: an input it did not seal is never read.
+  sealed: ReadonlyArray<string>,
 ): Promise<ReadonlyArray<EvidenceInspectionRelatedRef>> {
   const ids = [...new Set((Array.isArray(qualityFlags) ? qualityFlags : []).flatMap((flag) =>
     isRecord(flag) && flag.kind === "derivation" && Array.isArray(flag.input_fact_ids) ? flag.input_fact_ids.filter(isUuid) : []
-  ))];
+  ))].filter((id) => sealed.includes(id));
   if (ids.length === 0) return [];
   const rows = new Map((await loadFactRows(db, ids, userId)).map((row) => [row.fact_id, row]));
   return ids.flatMap((id) => {

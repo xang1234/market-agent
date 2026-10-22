@@ -453,7 +453,9 @@ test("a derived fact lists the facts it was computed from, as their own inspecti
     { kind: "source", id: SOURCE_ID, label: "sec_edgar" },
   ]);
   assert.deepEqual(factQueries, [[[FACT_ID], USER_ID], [[Q3_REVENUE, Q2_REVENUE], USER_ID]]);
-  assert.deepEqual((await inspect([FACT_ID, Q3_REVENUE])).result.related_refs.map((ref) => ref.id), [Q3_REVENUE, SOURCE_ID]);
+  const unsealed = await inspect([FACT_ID, Q3_REVENUE]);
+  assert.deepEqual(unsealed.result.related_refs.map((ref) => ref.id), [Q3_REVENUE, SOURCE_ID]);
+  assert.deepEqual(unsealed.factQueries, [[[FACT_ID], USER_ID], [[Q3_REVENUE], USER_ID]]);
 });
 
 test("loadEvidenceInspection filters related refs to the sealed snapshot manifest", async () => {
