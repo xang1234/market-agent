@@ -126,7 +126,7 @@ test("a company picked in a clarification is saved labelled, so follow-ups with 
 
   const question = "How does AMB's FY2023 revenue compare with its peers?";
   // hand-labelled 2026-10-22 #472: period and companies added by hand; replace on live re-record.
-  const readQuestion = async () => parseProposal(JSON.stringify({ metrics: [{ metric: "income_statement" }], asks: ["peers"], turns_off: { facets: [], metrics: [] }, income_items: ["revenue"], period: { kind: "fiscal_year", fiscal_year: 2023 }, companies: { kind: "as_named", names: [] } }), question);
+  const readQuestion = async () => parseProposal(JSON.stringify({ metrics: [{ metric: "income_statement" }], asks: ["peers"], turns_off: { facets: [], metrics: [] }, income_items: ["revenue"], period: { kind: "fiscal_year", fiscal_year: 2023 }, companies: { kind: "as_named", names: ["AMB"] } }), question);
   const harness = chatHarness(pool, { model: revenueModel(["AMB"]), researchScope: financialResearchScope, readQuestion, resolveMention: withHandoff });
   const offered = completed((await harness.run({ threadId, userId: IDS.owner, userIntent: question })).events).financial_clarification as { clarification_id: string; choices: Array<{ choice_id: string; label: string }> };
   const alpha = offered.choices.find((choice) => choice.label === "Alpha Industries Inc.")!;

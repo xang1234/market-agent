@@ -18,6 +18,7 @@ import {
 } from "../src/coordinator.ts";
 import { createChatFinancialRuntime } from "../src/financial-runtime.ts";
 import { proposedMetric, resolveResearchScope, type CompanyChange, type ScopeProposal } from "../src/research-scope.ts";
+import { extractSubjectMentions } from "../src/subject-extraction.ts";
 import type { ChatSubjectPreResolution } from "../src/subjects.ts";
 import { readMessage } from "./read-message-fixture.ts";
 
@@ -135,7 +136,8 @@ export function chatHarness(
   const persisted: Array<Parameters<ChatAssistantMessageCommit>[0]> = [];
   const coordinator = createChatCoordinator({
     analystToolRuntime: options.analyst ?? forbiddenAnalyst,
-    readQuestion: options.readQuestion ?? (async () => METRIC_READING),
+    // By default the reading names the tickers the question writes, with no change asked.
+    readQuestion: options.readQuestion ?? (async (question) => ({ ...METRIC_READING, companies: { kind: "as_named", names: extractSubjectMentions(question) } })),
     persistAssistantMessage: async (message) => {
       persisted.push(message);
       return options.persistAssistantMessage?.(message) ?? readMessage({ snapshot_id: randomUUID(), message_id: randomUUID(), thread_id: message.threadId });

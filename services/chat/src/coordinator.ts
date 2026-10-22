@@ -988,8 +988,9 @@ export type TurnSubjects = {
   subjects: ReadonlyArray<ChatResolvedSubjectPreResolution>;
   // Those carried from the previous answer that the turn does not name.
   carried?: ReadonlyArray<ChatResolvedSubjectPreResolution>;
-  // A company the turn names to ask about; named then lists, in the order
-  // written, every company it names beside the carried ones.
+  // A company the turn names to ask about. With named, which lists in the
+  // order written every company it names beside the carried ones, it is asked
+  // about beside them; without, it is a company to drop, asked about alone.
   ambiguous?: Unresolved;
   named?: ReadonlyArray<ChatSubjectPreResolution>;
   notFound: ReadonlyArray<string>;
@@ -1045,10 +1046,9 @@ export async function resolveTurnSubjects(
   if (change.kind === "drop") return dropped(prior, change, preResolve);
   const names = await resolveNames(change.kind === "compare" ? change.add : change.names, preResolve);
   if (change.kind === "compare" || names.named.length === 0) return listed(prior, names);
-  if (change.kind === "unclear" && prior.length >= 2 && names.ambiguous.length === 0) {
-    const priorKeys = new Set(prior.map(companyKey));
-    const added = names.resolved.filter((subject) => !priorKeys.has(companyKey(subject)));
-    if (added.length > 0) return addOrAlone(added.map(tickerLabel), prior);
+  if (change.kind === "unclear" && prior.length >= 2) {
+    const added = newNames(names, prior);
+    if (added.length > 0) return addOrAlone(added, prior);
   }
   return listed([], names);
 }
@@ -1057,12 +1057,17 @@ export async function resolveTurnSubjects(
 // and one naming a new company asks whether to add it or switch to it.
 function unreadChange(named: Names, prior: ReadonlyArray<ChatResolvedSubjectPreResolution>): TurnSubjects {
   if (prior.length === 0) return listed([], named);
-  const priorKeys = new Set(prior.map(companyKey));
-  const added = [
-    ...named.resolved.filter((subject) => !priorKeys.has(companyKey(subject))).map(tickerLabel),
-    ...named.ambiguous.map((resolution) => resolution.input_text),
-  ];
+  const added = newNames(named, prior);
   return added.length > 0 ? addOrAlone(added, prior) : listed(prior, { ...named, resolved: [], named: [] });
+}
+
+// The names that are not the previous answer's companies, as a question writes them.
+function newNames(names: Names, prior: ReadonlyArray<ChatResolvedSubjectPreResolution>): string[] {
+  const priorKeys = new Set(prior.map(companyKey));
+  return [
+    ...names.resolved.filter((subject) => !priorKeys.has(companyKey(subject))).map(tickerLabel),
+    ...names.ambiguous.map((resolution) => resolution.input_text),
+  ];
 }
 
 // The previous answer's companies the turn keeps, listed first, and the ones

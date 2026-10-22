@@ -8,8 +8,9 @@ import type { ChatAnalystToolRuntime, ChatAssistantMessagePersistence } from "..
 import { financialMessageId } from "../src/chat-ids.ts";
 import { createChatFinancialRuntime, isFinancialRequest, SCOPE_METRICS } from "../src/financial-runtime.ts";
 import { METRIC_CATALOG_V1, OPERATION_REGISTRY } from "../../financial-core/src/index.ts";
-import { proposedMetric } from "../src/research-scope.ts";
+import { proposedMetric, type CompanyChange } from "../src/research-scope.ts";
 import { parseProposal } from "../src/scope-proposal.ts";
+import { extractSubjectMentions } from "../src/subject-extraction.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import type { FinancialPool } from "../../financial-engine/src/ports.ts";
 import { changing, chatDatabase, chatHarness, comparing, completed, INSTRUMENT_A, LISTING_A, MISSING_ISSUER, resolveMention, revenueModel } from "./financial-fixtures.ts";
@@ -257,8 +258,11 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     await chatHarness(pool, { model, readQuestion: comparing("AAA", "BBB", "CCC", "OPM", "PAX") }).run({ ...base, subjectText: "ALPHA", userIntent: "Compare revenue for AAA with BBB, CCC, OPM, PAX and COX" });
     // Carried companies fill the slots the named ones leave.
     const carried = async (ticker: string) => ({ ...(await resolveMention(ticker)), handoff: { display_labels: { ticker } } }) as unknown as ChatResolvedSubjectPreResolution;
-    const prior = [await carried("AAA"), await carried("QTR")];
-    await turnWithPick(chatHarness(pool, { model, priorSubjects: async () => prior, readQuestion: comparing("AMB", "OPM", "PAX", "COX") }), "Compare its revenue with AMB, OPM, PAX and COX", "Beta Holdings Corp.");
+    await turnWithPick(chatHarness(pool, { model, priorSubjects: async () => [await carried("AAA")], readQuestion: comparing("AMB", "OPM", "PAX", "COX") }), "Compare its revenue with AMB, OPM, PAX and COX", "Beta Holdings Corp.");
+    // Past the cap a carried company is not dropped silently: the turn asks.
+    const two = [await carried("AAA"), await carried("QTR")];
+    const past = completed((await chatHarness(pool, { model, priorSubjects: async () => two, readQuestion: comparing("AMB", "OPM", "PAX", "COX") }).run({ ...base, userIntent: "Compare its revenue with AMB, OPM, PAX and COX" })).events);
+    assert.equal((past.financial_clarification as { question: string }).question, "An answer covers at most 5 companies, and AAA, QTR, OPM, PAX, COX and AMB are 6. Name the ones to look at.");
     // A company named twice takes one of the slots the carried ones fill.
     const three = [await carried("QTR"), await carried("COX"), await carried("CCC")];
     await turnWithPick(chatHarness(pool, { model, priorSubjects: async () => three, readQuestion: comparing("AMB", "AAA", "ALPHA") }), "Compare its revenue with AMB, AAA and ALPHA", "Beta Holdings Corp.");
@@ -280,6 +284,23 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     ]);
   });
 
+  await t.test("a turn naming an ambiguous company changes the previous answer's companies only as its reading says", async () => {
+    const seen: string[] = [];
+    const model = (async (request: { messages: Array<{ content: string }> }) => {
+      seen.push(/Requested companies \(mentions\): (.*)$/mu.exec(request.messages[1]!.content)![1]!);
+      return { model: "stub-model", text: JSON.stringify({ outcome: "unsupported", reason: "not needed here" }) };
+    }) as unknown as PlanningModel;
+    const carried = async (ticker: string) => ({ ...(await resolveMention(ticker)), handoff: { display_labels: { ticker } } }) as unknown as ChatResolvedSubjectPreResolution;
+    const prior = [await carried("AAA"), await carried("QTR")];
+    const harness = (companies: CompanyChange) => chatHarness(pool, { model, priorSubjects: async () => prior, readQuestion: changing(companies) });
+    await turnWithPick(harness({ kind: "drop", drop: ["QTR"], add: ["AMB"] }), "Drop QTR and add AMB's revenue", "Beta Holdings Corp.");
+    assert.deepEqual(seen, ["AAA; AMB"], "the dropped company is not planned, the kept one is");
+    const unclear = completed((await harness({ kind: "unclear", names: ["AMB"] }).run({ ...base, userIntent: "What about AMB's revenue?" })).events);
+    assert.equal((unclear.financial_clarification as { question: string }).question, 'Add AMB to the AAA and QTR comparison, or look at AMB alone? Say "add AMB" or "just AMB".');
+    const dropping = completed((await harness({ kind: "drop", drop: ["AMB"], add: [] }).run({ ...base, userIntent: "Drop AMB from the revenue table" })).events);
+    assert.deepEqual([dropping.clarification, (dropping.financial_clarification as { choices: unknown[] }).choices, seen.length], [true, [], 1], "a company to drop is asked about, never planned");
+  });
+
   await t.test("a planning model that fails after a clarification pick still saves the picked company (#425 review)", async () => {
     const harness = chatHarness(pool, { model: (async () => { throw new Error("provider down"); }) as PlanningModel, researchScope: scopeOver as never });
     const done = await turnWithPick(harness, "Compare revenue for AAA and AMB", "Beta Holdings Corp.");
@@ -290,11 +311,11 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     ]);
   });
 
-  await t.test("a turn that ends in a clarification or a gap before planning never reads its question (#425)", async () => {
+  await t.test("a turn that ends in a clarification or a gap before planning reads its question only for its companies (#425)", async () => {
     let reads = 0;
-    const readQuestion = async () => {
+    const readQuestion = async (question: string) => {
       reads += 1;
-      return parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named", names: [] } }), "");
+      return parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named", names: extractSubjectMentions(question) } }), question);
     };
     // As financialResearchScope does, the scope waits for the reading.
     const researchScope = async (context: Parameters<typeof scopeOver>[0], reading: Promise<unknown>) => {
@@ -306,7 +327,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       const done = completed((await chatHarness(pool, { model, readQuestion, researchScope: researchScope as never }).run({ ...base, userIntent })).events);
       return [done.clarification === true ? "clarification" : (done.financial_gap as { reason_code: string } | undefined)?.reason_code ?? "answer", reads];
     };
-    assert.deepEqual(await ask(revenueModel(["AAA", "AMB"]), "Compare revenue for AAA and AMB"), ["clarification", 0], "the planner asks which company before any model call");
+    assert.deepEqual(await ask(revenueModel(["AAA", "AMB"]), "Compare revenue for AAA and AMB"), ["clarification", 1], "an ambiguous name waits on the reading, which says whether it names a company; the planner asks before any model call");
     assert.deepEqual(await ask(null, "Compare revenue for AAA and BBB in fiscal 2023"), ["planning_unavailable", 1], "no model plans it, and its reading says whether it names a period (#472)");
     assert.deepEqual(await ask(null, "Compare revenue for AAA and BBB"), ["planning_unavailable", 1], "their overview, which needs no model, waits on the reading (#398)");
     assert.deepEqual(await ask(revenueModel(["AAA"]), "Revenue for AAA"), ["answer", 1]);
