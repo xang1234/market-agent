@@ -22,7 +22,8 @@
 // showed and hid. judge-mutations
 // judges a held-out set of inferences and their mutations
 // (test/answer-lab/judge-mutations.json) and reports how many mutations it
-// catches and how many originals it flags.
+// catches, how many come back at their kind's tier, how many it would show
+// that should hide, and how many originals it flags.
 import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -43,7 +44,7 @@ import {
   type TracedAnswer,
   type TurnTrace,
 } from "../src/answer-trace.ts";
-import { judgeCases, judgeInferences, verdictsOf, type InferenceVerdict, type JudgeCase, type JudgeRecord } from "../src/inference-judge.ts";
+import { judgeCases, judgeInferences, SHOWN_AS, verdictsOf, type InferenceVerdict, type JudgeCase, type JudgeRecord, type Verdict } from "../src/inference-judge.ts";
 import { turnPacket } from "../src/llm-runtime.ts";
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
@@ -349,8 +350,16 @@ export function judgeSummary(run: Pick<LiveRun, "labels"> & { results: ReadonlyA
   ].join("\n");
 }
 
-export const MUTATION_KINDS = ["worded_amount", "unsupported_claim", "hedged_valuation", "flipped_direction", "contradicted_ranking"] as const;
-type MutationKind = (typeof MUTATION_KINDS)[number];
+// The verdict each kind of mutation must come back at; an original's is
+// entailed.
+export const MUTATION_TIERS = {
+  worded_amount: "worded_amount",
+  unsupported_claim: "unsupported",
+  hedged_valuation: "unsupported",
+  flipped_direction: "contradicted",
+  contradicted_ranking: "contradicted",
+} as const satisfies Record<string, Verdict>;
+type MutationKind = keyof typeof MUTATION_TIERS;
 type MutationSet = {
   cases: Array<{
     id: string;
@@ -370,6 +379,10 @@ type MutationSet = {
 // supports back, or a mutation, which they do not.
 export type MutationVariant = { id: string; kind: "original" | MutationKind; judged: JudgeCase; companies: ReadonlyArray<string> };
 
+function tierOf(kind: MutationVariant["kind"]): Verdict {
+  return kind === "original" ? "entailed" : MUTATION_TIERS[kind];
+}
+
 // Each case's original and mutations on its trace's packet, through the
 // turn's own checks. One those checks reject is no gap of theirs, so it fails
 // the set rather than inflate the catch rate.
@@ -383,7 +396,7 @@ export function mutationVariants(file: string): MutationVariant[] {
     if (!Array.isArray(list) || entry.index >= list.length) throw new Error(`${entry.id}: ${entry.trace} has no assertion ${entry.index}`);
     const variants = [...entry.originals.map((text) => ({ kind: "original" as const, text })), ...entry.mutations];
     return variants.map(({ kind, text }) => {
-      if (kind !== "original" && !MUTATION_KINDS.includes(kind)) throw new Error(`${entry.id}: unknown mutation kind ${JSON.stringify(kind)}`);
+      if (kind !== "original" && !Object.hasOwn(MUTATION_TIERS, kind)) throw new Error(`${entry.id}: unknown mutation kind ${JSON.stringify(kind)}`);
       const inference = { kind: "analyst_inference", text, evidence: [], supports: entry.supports, ...(entry.subject ? { subject: entry.subject } : {}) };
       const report = checkAssertions(list.with(entry.index, inference), packet);
       const accepted = report.accepted.find((assertion) => assertion.index === entry.index);
@@ -418,19 +431,28 @@ async function judgeMutations(variants: ReadonlyArray<MutationVariant>, concurre
   return variants.map((variant) => results.find((result) => result.id === variant.id && result.text === variant.judged.text)!);
 }
 
-// Mutations caught (not entailed) and originals flagged, by kind; an error is
-// neither, and is counted on its own.
+// Mutations caught (not entailed), those at their kind's tier, those shown
+// that should hide (the safety number: a contradiction or a worded amount on
+// the page), and originals flagged; an error is none of these, and is counted
+// on its own. A miss is any inference not at its tier.
 export function mutationSummary(results: ReadonlyArray<Pick<MutationResult, "id" | "kind" | "text" | "verdict">>): string {
-  const flagged = (row: Pick<MutationResult, "verdict">) => row.verdict.verdict !== "entailed" && row.verdict.verdict !== "error";
-  const rate = (rows: ReadonlyArray<Pick<MutationResult, "verdict">>) => `${rows.filter(flagged).length} of ${rows.length}`;
-  const errors = (rows: ReadonlyArray<Pick<MutationResult, "verdict">>) => rows.filter((row) => row.verdict.verdict === "error").length;
+  type Row = Pick<MutationResult, "kind" | "verdict">;
+  const rate = (rows: ReadonlyArray<Row>, counted: (row: Row) => boolean) => `${rows.filter(counted).length} of ${rows.length}`;
+  const errors = (rows: ReadonlyArray<Row>) => rows.filter((row) => row.verdict.verdict === "error").length;
+  const flagged = (row: Row) => row.verdict.verdict !== "entailed" && row.verdict.verdict !== "error";
+  const atTier = (row: Row) => row.verdict.verdict === tierOf(row.kind);
   const mutations = results.filter((result) => result.kind !== "original");
   const originals = results.filter((result) => result.kind === "original");
-  const missed = results.filter((result) => (result.kind === "original" ? result.verdict.verdict !== "entailed" : !flagged(result)));
+  const shouldHide = mutations.filter((result) => SHOWN_AS[tierOf(result.kind)] === "hidden");
+  const missed = results.filter((result) => !atTier(result));
   return [
-    `caught: ${rate(mutations)} mutations (${errors(mutations)} errors)`,
-    ...MUTATION_KINDS.map((kind) => `  ${kind.padEnd(22)} ${rate(mutations.filter((result) => result.kind === kind))}`),
-    `false alarms: ${rate(originals)} originals (${errors(originals)} errors)`,
+    `caught: ${rate(mutations, flagged)} mutations (${errors(mutations)} errors)`,
+    `at their tier: ${rate(mutations, atTier)} mutations`,
+    ...Object.entries(MUTATION_TIERS).map(([kind, tier]) =>
+      `  ${kind.padEnd(22)} ${tier.padEnd(14)}${rate(mutations.filter((result) => result.kind === kind), atTier)}`
+    ),
+    `shown though they should hide: ${rate(shouldHide, (row) => SHOWN_AS[row.verdict.verdict] !== "hidden")}`,
+    `false alarms: ${rate(originals, flagged)} originals (${errors(originals)} errors)`,
     ...(missed.length > 0 ? ["misses, false alarms and errors:"] : []),
     ...missed.map((result) => `  ${result.id} ${result.kind}: ${result.verdict.verdict}${result.verdict.reason ? ` (${result.verdict.reason})` : ""}\n      ${result.text}`),
   ].join("\n");

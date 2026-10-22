@@ -122,16 +122,22 @@ test("the judge's held-out set: every original and mutation passes the turn's ow
   const count = (key: (variant: (typeof variants)[number]) => string) =>
     Object.fromEntries([...new Set(variants.map(key))].map((value) => [value, variants.filter((variant) => key(variant) === value).length]));
   assert.deepEqual(count((variant) => variant.kind), {
-    original: 10,
+    original: 12,
     worded_amount: 5,
     unsupported_claim: 5,
-    contradicted_ranking: 4,
+    contradicted_ranking: 5,
     hedged_valuation: 3,
-    flipped_direction: 3,
+    flipped_direction: 4,
   });
   // The judge reads a case on its trace's packet: the peer case's label is its comparisons' checked results.
   const peer = variants.find((variant) => variant.id === "peer-lead" && variant.kind === "original")!;
   assert.deepEqual([peer.judged.subject, peer.judged.checked, peer.companies], ["NVDA", ["NVDA highest on revenue, gross margin, net margin, and revenue growth (YoY)"], ["NVDA", "AMD"]]);
+  // A narrowed case's operating loss is in the rest of its answer, not in its supports.
+  const offset = variants.find((variant) => variant.id === "operating-offset" && variant.kind === "original")!;
+  assert.deepEqual([offset.judged.supports, offset.judged.context[0]], [
+    ["AMD's net income was $872.0M in Q2 2025 (ended Jun 2025); AMD's net margin was 11.3% in Q2 2025 (ended Jun 2025)."],
+    "AMD's operating margin was -1.7% in Q2 2025 (ended Jun 2025); AMD's operating income was -$134.0M in Q2 2025 (ended Jun 2025).",
+  ]);
 });
 
 test("a set inference the turn's checks already reject fails the set, rather than inflate the catch rate", () => {
@@ -150,27 +156,33 @@ test("a set inference the turn's checks already reject fails the set, rather tha
   });
 });
 
-test("the mutation summary counts catches by kind and false alarms on originals; an error is neither", () => {
+test("the mutation summary counts catches, each kind at its tier, mutations shown that should hide, and false alarms on originals; an error is none of these", () => {
   const result = (id: string, kind: string, verdict: string, reason?: string) =>
     ({ id, kind, text: `${id} ${kind}`, verdict: { index: 0, verdict, ...(reason ? { reason } : {}) } }) as Parameters<typeof mutationSummary>[0][number];
   assert.equal(mutationSummary([
     result("a", "original", "entailed"),
     result("a", "worded_amount", "worded_amount", "says tens of billions"),
     result("a", "hedged_valuation", "entailed"),
+    result("a", "contradicted_ranking", "unsupported", "no figure ranks them"),
     result("b", "original", "unsupported", "no figure shows it"),
     result("b", "flipped_direction", "error", "judge call failed: timeout"),
+    result("b", "unsupported_claim", "contradicted", "revenue rose"),
   ]), [
-    "caught: 1 of 3 mutations (1 errors)",
-    "  worded_amount          1 of 1",
-    "  unsupported_claim      0 of 0",
-    "  hedged_valuation       0 of 1",
-    "  flipped_direction      0 of 1",
-    "  contradicted_ranking   0 of 0",
+    "caught: 3 of 5 mutations (1 errors)",
+    "at their tier: 1 of 5 mutations",
+    "  worded_amount          worded_amount 1 of 1",
+    "  unsupported_claim      unsupported   0 of 1",
+    "  hedged_valuation       unsupported   0 of 1",
+    "  flipped_direction      contradicted  0 of 1",
+    "  contradicted_ranking   contradicted  0 of 1",
+    "shown though they should hide: 1 of 3",
     "false alarms: 1 of 2 originals (0 errors)",
     "misses, false alarms and errors:",
     "  a hedged_valuation: entailed\n      a hedged_valuation",
+    "  a contradicted_ranking: unsupported (no figure ranks them)\n      a contradicted_ranking",
     "  b original: unsupported (no figure shows it)\n      b original",
     "  b flipped_direction: error (judge call failed: timeout)\n      b flipped_direction",
+    "  b unsupported_claim: contradicted (revenue rose)\n      b unsupported_claim",
   ].join("\n"));
 });
 

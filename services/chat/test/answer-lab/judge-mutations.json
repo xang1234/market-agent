@@ -1,5 +1,5 @@
 {
-  "about": "Held-out set for the inference judge (src/inference-judge.ts, #302): inferences on real recorded turns, each case's originals (which its supports back) paired with mutations the word rules in assertions.ts pass but its supports do not back. A case stands in the place of its trace's assertion at index, resting on the accepted assertions in supports. source: trace (the trace's own accepted inference), edited (the trace's inference with a worded quantity cut), adapted (an inference the trace's checks rejected for naming companies, rewritten about its subject), written (a new inference on the trace's accepted supports, where the trace's own claims more than they show). Naming a company by ticker, name or alias is no fault in itself (owner, 2026-10-18), so an original may name one when its supports back what it says; a hedged valuation or market reading the supports do not show is a mutation. Run: node --experimental-strip-types scripts/answer-lab.ts judge-mutations test/answer-lab/judge-mutations.json",
+  "about": "Held-out set for the inference judge (src/inference-judge.ts, #302): inferences on real recorded turns, each case's originals (which its supports and the rest of its answer back) paired with mutations the word rules in assertions.ts pass but the answer does not back. Each kind must come back at its tier (scripts/answer-lab.ts MUTATION_TIERS): an original at entailed; worded_amount at worded_amount; unsupported_claim and hedged_valuation at unsupported, shown labelled as an unverified analyst view; flipped_direction and contradicted_ranking at contradicted. worded_amount and contradicted hide the inference, so one of those mutations that comes back entailed or unsupported would be shown. A case stands in the place of its trace's assertion at index, resting on the accepted assertions in supports; the judge also reads the answer's other accepted observations and comparisons, as rest_of_answer. source: trace (the trace's own accepted inference), edited (the trace's inference with a worded quantity cut), adapted (an inference the trace's checks rejected for naming companies, rewritten about its subject), written (a new inference on the trace's accepted supports, where the trace's own claims more than they show), narrowed (the trace's inference, rewritten to claim only what the whole answer shows, whose supports leave out figures it rests on that another accepted observation shows, so only rest_of_answer backs it; its mutation contradicts a figure shown only there). Naming a company by ticker, name or alias is no fault in itself (owner, 2026-10-18), so an original may name one when the answer backs what it says; a hedged valuation or market reading the answer does not show is a mutation. Run: node --experimental-strip-types scripts/answer-lab.ts judge-mutations test/answer-lab/judge-mutations.json",
   "cases": [
     {
       "id": "segment-concentration",
@@ -185,6 +185,42 @@
         {
           "kind": "unsupported_claim",
           "text": "Gross margin bottomed out in that quarter because of an inventory charge, then recovered."
+        }
+      ]
+    },
+    {
+      "id": "operating-offset",
+      "trace": "traces/cause-in-evidence.json",
+      "index": 9,
+      "supports": [
+        3
+      ],
+      "source": "narrowed",
+      "originals": [
+        "Net income stayed positive despite the operating loss, so items below the operating line more than offset it."
+      ],
+      "mutations": [
+        {
+          "kind": "flipped_direction",
+          "text": "Net income stayed positive despite the operating loss, while gross margin rose in the latest period shown."
+        }
+      ]
+    },
+    {
+      "id": "peer-fundamentals",
+      "trace": "traces/follow-up-memory.turn-2.json",
+      "index": 6,
+      "supports": [
+        3
+      ],
+      "source": "narrowed",
+      "originals": [
+        "NVIDIA is ahead of AMD both on YTD price return and on every fundamental metric shown."
+      ],
+      "mutations": [
+        {
+          "kind": "contradicted_ranking",
+          "text": "NVIDIA is ahead of AMD on YTD price return, though AMD leads on net margin."
         }
       ]
     }
