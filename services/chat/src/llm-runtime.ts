@@ -266,8 +266,9 @@ export async function composeAnalystBlocksWithLlm(input: {
   // The deployment is reported only when the answer is rendered from its
   // assertions: the fallback sentence was written by no model (#183).
   if (rendering.report.rendered) input.onAnswered?.(`${result.deployment.channel}/${result.deployment.model}`);
-  // An empty list checked is the model saying the evidence does not answer.
-  else if (report.status === "checked" && report.accepted.length === 0 && report.rejected.length === 0) console.info("[chat] the assertion list was empty; showing the fallback sentence");
+  // An empty list checked, where the packet names a gap, is the model saying
+  // the evidence does not answer.
+  else if (report.status === "checked" && report.accepted.length === 0 && report.rejected.length === 0 && packet.gaps.length > 0) console.info("[chat] the assertion list was empty; showing the fallback sentence");
   else console.warn(`[chat] no assertion rendered (list ${report.status}${result.truncated ? ", answer cut off at the token limit" : ""}); showing the fallback sentence`);
   return rendering.blocks;
 }

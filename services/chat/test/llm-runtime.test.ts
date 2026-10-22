@@ -973,7 +973,7 @@ test("with claims on file but none rendered, a named gap's answer points to its 
   assert.deepEqual(composed[0]!.segments, [{ type: "text", text: "The data here does not answer this question; the note below says what is missing." }]);
 });
 
-test("a named gap's empty list is the gap's answer, logged as the model's choice, not a failure (#374)", async (t) => {
+test("a named gap's empty list is the gap's answer, logged as the model's choice; with no gap named it is a failure (#374)", async (t) => {
   const turn = gapTurn(resolveResearchScope({ question: "What is AMD's free cash flow?", companies: AMD, prior: null, asOf: GAP_AS_OF, proposal: proposal({ metrics: ["free_cash_flow"] }) }));
   const info = t.mock.method(console, "info", () => {});
   const warn = t.mock.method(console, "warn", () => {});
@@ -988,6 +988,12 @@ test("a named gap's empty list is the gap's answer, logged as the model's choice
   assert.deepEqual(composed[0]!.segments, [{ type: "text", text: "The data here does not answer this question; the note below says what is missing." }]);
   assert.deepEqual(info.mock.calls.map((call) => call.arguments[0]), ["[chat] the assertion list was empty; showing the fallback sentence"]);
   assert.equal(warn.mock.callCount(), 0);
+
+  // With figures on file and no gap named, an empty list answers nothing: a failure.
+  info.mock.resetCalls();
+  await renderWithReply("```assertions\n[]\n```");
+  assert.equal(info.mock.callCount(), 0);
+  assert.deepEqual(warn.mock.calls.map((call) => call.arguments[0]), ["[chat] no assertion rendered (list checked); showing the fallback sentence"]);
 });
 
 test("when no assertion renders, the answer is the fixed fallback sentence, never the model's prose", async () => {
