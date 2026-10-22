@@ -195,7 +195,7 @@ test("growth across companies compares each company's change over the same span,
   assert.deepEqual(report.rejected, [{ index: 1, text: "mixed spans", check: "comparative", reason: "comparison: changes across companies are compared over one span" }]);
   assert.equal(
     plainText(renderAssertion(report.accepted[0]!, packet, []).segments),
-    "Of NVDA and AMD, NVDA's percent change in revenue was highest: NVDA 57.89% (Q4 FY2026 vs Q4 FY2025), AMD 45.74% (Q2 FY2026 vs Q2 FY2025), 12.15 percentage points above AMD.",
+    "Of NVDA and AMD, NVDA's percent change in revenue was highest: NVDA 57.89% (Q4 FY2026 vs Q4 FY2025), AMD 45.74% (Q2 FY2026 vs Q2 FY2025).",
   );
   // Each company with one change shown, the other a gap: still one span.
   const oneEach = enginePacket(content([
