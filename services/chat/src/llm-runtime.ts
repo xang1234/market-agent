@@ -328,7 +328,7 @@ export function renderedAnswer(input: AnswerInput, packet: EvidencePacket, repor
     // What the rendered assertions cannot say themselves: a company with no
     // figures shown, unless the answer states one of its values (a claim is
     // no value), and stale data.
-    const stated = new Set(keptFigures.map((figure) => figure.company ?? packet.companies[0]));
+    const stated = new Set(keptFigures.flatMap((figure) => figureCompanies(figure, packet)));
     const notShown = packet.coverage.filter((entry) => entry.status === "not_shown" && !stated.has(entry.company)).map((entry) => entry.company);
     const answer = {
       kind: "rendered" as const,

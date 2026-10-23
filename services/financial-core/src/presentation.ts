@@ -353,7 +353,7 @@ function periodRanking(plan: FinancialPlanV1, node: PeriodRankNode, ranking: Ran
   const { requested, evaluated } = ranking.population;
   const [step, ...others] = new Set(node.members.map((id) => periodAnchor(periodSelectors(plan, nodeOf(id))[0]!).step));
   const periods = others.length === 0 && step !== "cutoff" ? { quarter: "quarters", year: "fiscal years" }[step!] : "periods";
-  const measure = `${ranking.direction} ${inSentence(measureText(plan, nodeOf(node.members[0]!)))}`;
+  const measure = `${ranking.direction} ${lowercaseUnlessAcronym(measureText(plan, nodeOf(node.members[0]!)))}`;
   const leading = leaders.length > 1 ? `tie for the ${measure}` : `has the ${measure}`;
   return {
     kind: "ranking",
@@ -364,8 +364,8 @@ function periodRanking(plan: FinancialPlanV1, node: PeriodRankNode, ranking: Ran
   };
 }
 
-// A label inside a sentence: "Revenue" reads "revenue", "EBITDA" stays.
-function inSentence(label: string): string {
+/** A label inside a sentence: "Free cash flow" reads "free cash flow", "EBITDA" and "P/E ratio" stay. */
+export function lowercaseUnlessAcronym(label: string): string {
   return /\p{Ll}/u.test(label[1] ?? "") ? `${label[0]!.toLowerCase()}${label.slice(1)}` : label;
 }
 

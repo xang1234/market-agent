@@ -17,6 +17,7 @@ import {
   createRuntimeAuthority,
   dependencyClosure,
   hashCanonical,
+  lowercaseUnlessAcronym,
   operationDependencies,
   type FinancialPlanV1,
   type FinancialRuntimeAuthority,
@@ -909,9 +910,9 @@ export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1, lab
   const asked: ReadonlyArray<Readonly<{ text: string; missing: (company: Company) => boolean }>> = [
     // The income items name its figures more closely than the whole statement does.
     ...metrics.filter((metric) => !(metric.metric_key === "income_statement" && reading.income_items.length > 0))
-      .map((metric) => ({ text: inSentence(metric.label), missing: (company: Company) => !company.read.has(metric.metric_key) })),
+      .map((metric) => ({ text: lowercaseUnlessAcronym(metric.label), missing: (company: Company) => !company.read.has(metric.metric_key) })),
     ...reading.metrics.filter((metric) => metric.base !== undefined && !offMetrics.has(metric.metric_key))
-      .map((metric) => ({ text: inSentence(metric.label), missing: (company: Company) => !computes(metric, company) })),
+      .map((metric) => ({ text: lowercaseUnlessAcronym(metric.label), missing: (company: Company) => !computes(metric, company) })),
     ...items,
     // A margin item left out names the margin already.
     ...(asks.has("margin_trend") ? [{ text: "a margin over several periods", missing: (company: Company) => company.marginPeriods < 2 }]
@@ -927,11 +928,6 @@ export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1, lab
     }),
     ...Object.entries(NEVER_PLANNED).flatMap(([facet, item]) => asks.has(facet as ScopeFacet) ? [item] : []),
   ];
-}
-
-// A catalog label inside a sentence: "Free cash flow" reads "free cash flow", "EBITDA" and "P/E ratio" stay.
-function inSentence(label: string): string {
-  return /\p{Ll}/u.test(label[1] ?? "") ? `${label[0]!.toLowerCase()}${label.slice(1)}` : label;
 }
 
 // A saved message as the thread reads it; undefined when it cannot be read

@@ -12,6 +12,7 @@ import { readingAsks, type PERIOD_FIELDS, type ResearchScope, type ScopeFacet, t
 
 const QUARTERS_SHOWN = 8;
 const UNPLANNED = "[chat] the company overview could not be planned; the planner answers";
+const TREND_UNPLANNED = "[chat] the margin trend could not be planned; the planner answers";
 
 type Node = Record<string, unknown> & { node_id: string };
 export type PeersOf = (issuer: FinancialSubjectRef) => Promise<ReadonlyArray<RequestedSubject>>;
@@ -91,8 +92,8 @@ type Omission = (name: (slot: string) => string) => string;
  * the engine cannot certify is a gap cell where it falls.
  */
 export async function planCompanyOverview(context: PlanningContext, evidence: FinancialEvidencePort): Promise<ReadyPlan | null> {
-  const companies = await planningQuarters(context, evidence);
-  return companies && planned(context, companyOverviewDraft(companies));
+  const companies = await planningQuarters(context, evidence, UNPLANNED);
+  return companies && planned(context, companyOverviewDraft(companies), UNPLANNED);
 }
 
 /**
@@ -101,8 +102,8 @@ export async function planCompanyOverview(context: PlanningContext, evidence: Fi
  * model planning it. Null as for the overview.
  */
 export async function planMarginTrend(context: PlanningContext, evidence: FinancialEvidencePort): Promise<ReadyPlan | null> {
-  const companies = await planningQuarters(context, evidence);
-  return companies && planned(context, marginTrendDraft(companies[0]!));
+  const companies = await planningQuarters(context, evidence, TREND_UNPLANNED);
+  return companies && planned(context, marginTrendDraft(companies[0]!), TREND_UNPLANNED);
 }
 
 /**
@@ -150,7 +151,7 @@ export function marginTrendSubjects(
 // The companies' slots, in the order the context names them: "a", "b", ...
 const slotOf = (index: number) => String.fromCharCode(97 + index);
 
-function planned(context: PlanningContext, { operations, outputs }: { operations: ReadonlyArray<Node>; outputs: ReadonlyArray<Node> }): ReadyPlan | null {
+function planned(context: PlanningContext, { operations, outputs }: { operations: ReadonlyArray<Node>; outputs: ReadonlyArray<Node> }, unplanned: string): ReadyPlan | null {
   const result = buildDeterministicPlan(context, {
     subjects: context.requested_subjects.map((subject, index) => ({ slot_id: slotOf(index), mention: subject.mention })),
     operations,
@@ -158,14 +159,14 @@ function planned(context: PlanningContext, { operations, outputs }: { operations
     thresholds: [],
   });
   if (result.outcome === "ready") return result;
-  console.warn(UNPLANNED, result);
+  console.warn(unplanned, result);
   return null;
 }
 
-function planningQuarters(context: PlanningContext, evidence: FinancialEvidencePort): Promise<RevenueQuarters[] | null> {
+function planningQuarters(context: PlanningContext, evidence: FinancialEvidencePort, unplanned: string): Promise<RevenueQuarters[] | null> {
   const refs = context.requested_subjects.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref] : []);
   if (refs.length !== context.requested_subjects.length) return Promise.resolve(null);
-  return revenueQuarters(refs, context, evidence, UNPLANNED);
+  return revenueQuarters(refs, context, evidence, unplanned);
 }
 
 const UNREAD = "[chat] the overview's revenue quarters could not be read again, so its note names no growth it leaves out";

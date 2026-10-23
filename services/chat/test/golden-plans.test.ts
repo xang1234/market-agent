@@ -459,6 +459,13 @@ test("a question about one company's margin trend plans its three margins over t
   assert.equal(marginTrendSubjects(subjects, null, scope), null, "no reading");
 });
 
+test("a margin trend whose quarters cannot be read says so as a margin trend, and the planner answers (#398)", async (t) => {
+  const warned: unknown[][] = [];
+  t.mock.method(console, "warn", (...args: unknown[]) => warned.push(args));
+  assert.equal(await overviewOf("NVDA", () => ({ status: "error", reason_code: "database_error" }), planMarginTrend), null);
+  assert.deepEqual(warned, [["[chat] the margin trend could not be planned; the planner answers", "database_error"]]);
+});
+
 test("each golden answer names what its question asks for and its plan does not compute", async () => {
   const client = await createReplayLlmChatClient(REPLIES);
   const reply = async (content: string) => (await client({} as never, { messages: [{ role: "user", content }] })).text;
