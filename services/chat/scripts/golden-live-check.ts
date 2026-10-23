@@ -17,7 +17,6 @@ export type GoldenTurn = { question: string; check: (kinds: ReadonlySet<string>)
 export const GOLDEN_TURNS: ReadonlyArray<GoldenTurn> = [
   {
     question: "Analyze NVDA",
-    // A question about a company is the engine's (#398).
     check: (kinds) => ({ failures: kinds.has("financial_answer") ? [] : ["expected the engine's financial_answer"], notes: [] }),
   },
   {

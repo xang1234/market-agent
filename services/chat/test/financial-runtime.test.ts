@@ -614,7 +614,6 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       return { snapshot_id: randomUUID(), blocks: [], verification: { ok: true } };
     };
     const reading = (proposal: Partial<ScopeProposal>) => async () => ({ ...NO_ASKS, ...proposal });
-    // The lane a turn takes, and the companies an engine answer covers.
     const lane = async (userIntent: string, options: Omit<Parameters<typeof chatHarness>[1], "model" | "analyst">, mentions: string[] = []) => {
       const before = analystCalls;
       const done = completed((await chatHarness(pool, { model: revenueModel(mentions), analyst, ...options }).run({ ...base, userIntent })).events);

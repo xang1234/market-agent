@@ -1,10 +1,10 @@
 // Chat's financial lane. A turn about a company is planned by the engine's
-// planner against the server-resolved subject set,
-// executed on evidence, and published only through finalization — whose
-// transaction also writes the assistant message, so an answer exists exactly
-// when its snapshot and certificate do. Nothing in this lane calls the legacy
-// free-text composer: when a calculation cannot be planned or verified, the
-// turn gets a structured gap, never a model-written number.
+// planner against the server-resolved subject set, executed on evidence, and
+// published only through finalization — whose transaction also writes the
+// assistant message, so an answer exists exactly when its snapshot and
+// certificate do. Nothing in this lane calls the legacy free-text composer:
+// when a calculation cannot be planned or verified, the turn gets a structured
+// gap, never a model-written number.
 //
 // A turn's companies are the ones the analyst path would take for it
 // (coordinator.ts resolveTurnSubjects): each is resolved, asked about, or
