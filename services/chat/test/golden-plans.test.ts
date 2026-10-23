@@ -7,13 +7,13 @@ import { createRuntimeAuthority, operationDependencies, type FinancialPlanV1 } f
 import { buildDeterministicPlan, planFinancialRequest, type PlanningContext, type PlanningModel, type PlanningResult, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import type { CandidatePage, CandidateRequest, FinancialEvidencePort, InputCandidate, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
-import { namesCompanies, overviewPeers, overviewSubjects, planCompanyOverview } from "../src/company-overview.ts";
+import { namesCompanies, overviewPeers, overviewSubjects, planCompanyOverview, turnReplacement, withCatalogPeers } from "../src/company-overview.ts";
 import { MAX_TURN_SUBJECTS } from "../src/coordinator.ts";
 import { isFinancialRequest, uncoveredAsks } from "../src/financial-runtime.ts";
 import { resolveResearchScope } from "../src/research-scope.ts";
 import { parseProposal, proposalQuestion } from "../src/scope-proposal.ts";
 import { extractSubjectMentions } from "../src/subject-extraction.ts";
-import { GOLDEN_AS_OF, GOLDEN_COMPANIES } from "./golden/dataset.ts";
+import { GOLDEN_AS_OF, GOLDEN_COMPANIES, goldenCatalogPeers } from "./golden/dataset.ts";
 
 const REPLIES = join(import.meta.dirname, "golden", "llm-replies.json");
 
@@ -69,15 +69,23 @@ function summary(result: PlanningResult) {
 }
 
 const SEGMENTS = { outcome: "unsupported", model_calls: 1, reason: "segments" } as const;
-const latestMargins = (ticker: string) => {
-  const metric = (key: string) => `${ticker} ${key} latest annual[0]`;
+const latestProfit = (ticker: string, period: string) => {
+  const metric = (key: string) => `${ticker} ${key} latest ${period}[0]`;
   return [
-    metric("revenue"),
+    metric("gross_profit"),
+    metric("operating_income"),
+    metric("net_income"),
     `gross_margin(${metric("gross_profit")}, ${metric("revenue")})`,
     `operating_margin(${metric("operating_income")}, ${metric("revenue")})`,
     `net_margin(${metric("net_income")}, ${metric("revenue")})`,
   ];
 };
+const revenueAndProfit = (ticker: string) => [
+  `${ticker} revenue latest annual[0]`,
+  `${ticker} revenue latest quarterly[0]`,
+  ...latestProfit(ticker, "annual"),
+  ...latestProfit(ticker, "quarterly"),
+];
 
 const EXPECTED: Record<string, ReturnType<typeof summary>> = {
   "Break down NVDA's revenue by segment": SEGMENTS,
@@ -102,15 +110,20 @@ const EXPECTED: Record<string, ReturnType<typeof summary>> = {
   "Compare NVDA, AMD and AAPL revenue and margins YTD against the S&P 500": {
     outcome: "ready",
     model_calls: 1,
-    outputs: [...latestMargins("NVDA"), ...latestMargins("AMD"), ...latestMargins("AAPL")],
+    outputs: [...revenueAndProfit("NVDA"), ...revenueAndProfit("AMD"), ...revenueAndProfit("AAPL")],
   },
-  "What drives AAPL's margins?": { outcome: "ready", model_calls: 1, outputs: latestMargins("AAPL").slice(1) },
+  "What drives AAPL's margins?": { outcome: "ready", model_calls: 1, outputs: [...latestProfit("AAPL", "annual"), ...latestProfit("AAPL", "quarterly")] },
   "Compare NVDA and AMD operating margin and EPS growth": {
     outcome: "ready",
     model_calls: 1,
-    outputs: ["operating_margin(NVDA operating_income latest annual[0], NVDA revenue latest annual[0])", "AMD revenue latest annual[0]"],
+    outputs: [
+      "operating_margin(NVDA operating_income latest annual[0], NVDA revenue latest annual[0])",
+      "operating_margin(AMD operating_income latest annual[0], AMD revenue latest annual[0])",
+      "percent_change_positive_base(NVDA eps_diluted latest annual[0], NVDA eps_diluted latest annual[1])",
+      "percent_change_positive_base(AMD eps_diluted latest annual[0], AMD eps_diluted latest annual[1])",
+    ],
   },
-  "How does AMDX's Q2 2025 revenue compare with its peers?": { outcome: "ready", model_calls: 1, outputs: ["AMD revenue Q2 2025"] },
+  "How does AMDX's Q2 2025 revenue compare with its peers?": { outcome: "needs_clarification", model_calls: 1 },
 };
 
 test("each recorded reply matched by one substring answers a request made of that substring, so no reply shadows it", async () => {
@@ -285,6 +298,26 @@ test("a comparison shows each company's latest quarter, named from the newest it
 const reading = (asks: string[], metrics: unknown[] = [], income_items: string[] = [], turnsOff: string[] = [], period: unknown = { kind: "none" }) =>
   parseProposal(JSON.stringify({ metrics, asks, turns_off: { facets: turnsOff, metrics: [] }, income_items, period, companies: { kind: "as_named", names: [] } }), "")!;
 
+test("a peer question whose overview does not plan is planned over the catalog peers, read from the catalog once (#517)", async () => {
+  const subjects = planningContext("How does NVDA compare with its peers?").requested_subjects;
+  const AMD = GOLDEN_COMPANIES.find((company) => company.ticker === "AMD")!;
+  const peer: RequestedSubject = { mention: AMD.issuer_id, resolution: { status: "resolved", subject_ref: { kind: "issuer", id: AMD.issuer_id }, label: AMD.legal_name } };
+  const scope = { price_window: null };
+  const decide = async (asks: string[], metrics: unknown[], overview: PlanningResult | null) => {
+    const calls: string[] = [];
+    const replacement = await turnReplacement(subjects, reading(asks, metrics), scope, async (issuer) => {
+      calls.push(issuer.id);
+      return [peer];
+    }, async () => overview);
+    return { via: replacement?.via ?? null, subjects: replacement?.subjects.map((subject) => subject.mention) ?? null, calls: calls.length };
+  };
+  const planned = { outcome: "unsupported", reason: "segments", model_calls: 0 } as unknown as PlanningResult;
+  assert.deepEqual(await decide(["peers"], [], null), { via: "peers", subjects: ["NVDA", AMD.issuer_id], calls: 1 }, "no overview plans");
+  assert.deepEqual(await decide(["peers"], [], planned), { via: "overview", subjects: ["NVDA", AMD.issuer_id], calls: 1 }, "the overview plans");
+  assert.deepEqual(await decide(["peers"], ["income_statement"], planned), { via: "peers", subjects: ["NVDA", AMD.issuer_id], calls: 1 }, "a figure is asked");
+  assert.deepEqual(await decide([], ["income_statement"], planned), { via: null, subjects: null, calls: 0 }, "no peers are asked");
+});
+
 test("a question about the companies it names that asks for no figure is answered with their overview, or one company's with its peers; one about a carried company, a figure or a period is not (#398)", async () => {
   const client = await createReplayLlmChatClient(REPLIES);
   const read = async (question: string) => parseProposal((await client({} as never, { messages: [{ role: "user", content: proposalQuestion(question) }] })).text, question);
@@ -296,7 +329,7 @@ test("a question about the companies it names that asks for no figure is answere
     if (!namesCompanies(subjects, carried)) return null;
     const proposal = await readQuestion(question);
     const scope = resolveResearchScope({ question, companies: [], prior: null, asOf: GOLDEN_AS_OF, proposal });
-    return (await overviewSubjects(subjects, proposal, scope, peersOf))?.map((subject) => subject.mention) ?? null;
+    return overviewSubjects(subjects, proposal, scope, await withCatalogPeers(subjects, proposal, peersOf))?.map((subject) => subject.mention) ?? null;
   };
   for (const ticker of ["NVDA", "AMD", "AAPL"]) assert.deepEqual(await overview(`Analyze ${ticker}`), [ticker], ticker);
   for (const question of ["Compare NVDA with AMD", "Compare NVDA and AMD again"]) assert.deepEqual(await overview(question), ["NVDA", "AMD"], question);
@@ -315,7 +348,7 @@ test("a question about the companies it names that asks for no figure is answere
   assert.equal(await overview("Compare NVDA with AMD", { carried: true }), null, "a carried company beside named ones");
   assert.deepEqual(await overview("Analyze NVDA's most recent results", scripted(reading([], [], [], [], { kind: "latest" }))), ["NVDA"], "the latest period");
   const subjects = planningContext("Analyze NVDA").requested_subjects;
-  assert.equal(await overviewSubjects(subjects, reading([]), null, none), null, "a scope that failed to resolve");
+  assert.equal(overviewSubjects(subjects, reading([]), null, null), null, "a scope that failed to resolve");
   const periods: Array<[string, ReturnType<typeof reading>]> = [
     ["in fiscal 2025", reading([], [], [], [], { kind: "fiscal_year", fiscal_year: 2025 })],
     ["for Q4 2025", reading([], [], [], [], { kind: "fiscal_quarter", fiscal_period: "Q4", fiscal_year: 2025 })],
@@ -330,7 +363,7 @@ test("a question about the companies it names that asks for no figure is answere
   }
   const yearToDate = "Compare it with AMD YTD";
   assert.deepEqual(
-    [namesCompanies(planningContext(yearToDate).requested_subjects, true), await overviewSubjects(planningContext(yearToDate).requested_subjects, await read(yearToDate), null, none)],
+    [namesCompanies(planningContext(yearToDate).requested_subjects, true), overviewSubjects(planningContext(yearToDate).requested_subjects, await read(yearToDate), null, null)],
     [false, null],
     "the golden conversation's comparison carries NVDA, and its reading asks for a price window",
   );
@@ -348,8 +381,13 @@ test("each golden answer names what its question asks for and its plan does not 
     "What drives AAPL's margins?": ["the cause of these figures"],
     "How does AMDX's Q2 2025 revenue compare with its peers?": ["peers the question did not name"],
   };
+  const AMD = GOLDEN_COMPANIES.find((company) => company.ticker === "AMD")!;
+  const context = (question: string) => {
+    const planning = planningContext(question);
+    return question.includes("its peers") ? { ...planning, requested_subjects: [...planning.requested_subjects, ...goldenCatalogPeers(AMD)] } : planning;
+  };
   for (const [question, expected] of Object.entries(uncovered)) {
-    const planned = await planFinancialRequest(planningContext(question), question, model);
+    const planned = await planFinancialRequest(context(question), question, model);
     assert.equal(planned.outcome, "ready", question);
     if (planned.outcome !== "ready") continue;
     assert.deepEqual(uncoveredAsks(parseProposal(await reply(proposalQuestion(question)), question)!, planned.plan), expected, question);

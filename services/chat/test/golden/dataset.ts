@@ -27,6 +27,7 @@ import { recordFactPrecisionAttestation, recordSourcePublicationAttestation } fr
 import { recordFactFinancialContext } from "../../../evidence/src/financial-context.ts";
 import { ephemeralRawBlobIdForSource } from "../../../evidence/src/object-store.ts";
 import { createSource } from "../../../evidence/src/source-repo.ts";
+import type { RequestedSubject } from "../../../financial-engine/src/planner.ts";
 import { FROZEN_AS_OF } from "../../src/ytd-hydration.ts";
 import { GOLDEN_ISSUER_IDS } from "../../../shared/src/golden-issuers.ts";
 import { SEC_EDGAR_FILING_SOURCE_ID } from "../../../fundamentals/src/provider-sources.ts";
@@ -181,6 +182,14 @@ export const GOLDEN_COMPANIES: ReadonlyArray<GoldenCompany> = Object.freeze([
     ],
   },
 ]);
+
+/** A company's industry peers, as the peer catalog gives them to the planner: each named by its issuer id. */
+export function goldenCatalogPeers(company: GoldenCompany): RequestedSubject[] {
+  return GOLDEN_COMPANIES.filter((peer) => peer !== company && peer.industry === company.industry).map((peer) => ({
+    mention: peer.issuer_id,
+    resolution: { status: "resolved", subject_ref: { kind: "issuer", id: peer.issuer_id }, label: peer.legal_name },
+  }));
+}
 
 const INCOME_METRICS = ["revenue", "gross_profit", "operating_income", "net_income"] as const;
 

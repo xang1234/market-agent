@@ -43,6 +43,16 @@ test("a full reply is read into the proposal, each metric built from the catalog
   });
 });
 
+test("a reply that corrects itself is read as its last whole object (#517 live run)", () => {
+  const question = "Compare NVDA with its peers on sales";
+  const first = reply({ metrics: [{ metric: "income_statement" }], asks: ["peers"], income_items: ["revenue"], companies: { kind: "compare", add: [] } });
+  const second = reply({ metrics: [{ metric: "income_statement" }], asks: ["peers"], income_items: ["revenue"], companies: { kind: "as_named", names: ["NVDA"] } });
+  assert.deepEqual(parse(`${first}\n\nWait—NVDA is named, so companies should reflect that.\n\n${second}`, question), parse(second, question));
+  assert.deepEqual(parse(second, question)?.companies, { kind: "as_named", names: ["NVDA"] });
+  assert.equal(parse(`${first}\nsome prose with no object after it`, question)?.companies.kind, "compare");
+  assert.equal(parse("no object at all", question), null);
+});
+
 test("each kind of period is read with exactly its fields (#472)", () => {
   for (const period of [
     { kind: "none" },

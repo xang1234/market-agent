@@ -24,24 +24,59 @@ export function namesCompanies(subjects: ReadonlyArray<RequestedSubject>, carrie
 
 /**
  * The companies a turn's overview covers, by the reading of its question: the
- * ones it names, or the one it names and that company's peers when it asks
- * for peers. Null when it asks for a figure or a period other than the
- * latest, turns something off ("no margins"), it has no scope or one with a
- * price window the overview would not show, or it asks for peers of several
- * companies or of one with none.
+ * ones it names, or, when it asks for peers, the one it names and that
+ * company's catalog peers (withCatalogPeers). Null when it asks for a figure or
+ * a period other than the latest, turns something off ("no margins"), it has
+ * no scope or one with a price window the overview would not show, or it asks
+ * for peers it has none of.
  */
-export async function overviewSubjects(
+export function overviewSubjects(
+  subjects: ReadonlyArray<RequestedSubject>,
+  reading: ScopeProposal | null,
+  scope: Pick<ResearchScope, "price_window"> | null,
+  peered: ReadonlyArray<RequestedSubject> | null,
+): ReadonlyArray<RequestedSubject> | null {
+  if (!asksForNoFigure(reading) || scope === null || scope.price_window) return null;
+  return reading.asks.has("peers") ? peered : subjects;
+}
+
+/**
+ * The one company a turn names and its catalog peers, when the reading asks
+ * for peers. Null when it does not, when the turn names several companies or
+ * none resolved, or when the catalog has no peers for it.
+ */
+export async function withCatalogPeers(
+  subjects: ReadonlyArray<RequestedSubject>,
+  reading: ScopeProposal | null,
+  peersOf: PeersOf,
+): Promise<ReadonlyArray<RequestedSubject> | null> {
+  const company = subjects.length === 1 ? subjects[0]! : null;
+  if (!reading?.asks.has("peers") || company?.resolution.status !== "resolved") return null;
+  const peers = await peersOf(company.resolution.subject_ref);
+  return peers.length === 0 ? null : [company, ...peers];
+}
+
+/** What replaces a turn's first planner: its overview, or the planner over one company and its catalog peers. */
+export type TurnReplacement =
+  | { via: "overview"; subjects: ReadonlyArray<RequestedSubject>; overview: PlanningResult }
+  | { via: "peers"; subjects: ReadonlyArray<RequestedSubject> };
+
+/**
+ * The plan that replaces the turn's first planner, decided once by its
+ * reading: the overview when one plans, or else the catalog peers when it asks
+ * for them. Null when the first planner answers. The catalog is read once.
+ */
+export async function turnReplacement(
   subjects: ReadonlyArray<RequestedSubject>,
   reading: ScopeProposal | null,
   scope: Pick<ResearchScope, "price_window"> | null,
   peersOf: PeersOf,
-): Promise<ReadonlyArray<RequestedSubject> | null> {
-  if (!asksForNoFigure(reading) || scope === null || scope.price_window) return null;
-  if (!reading.asks.has("peers")) return subjects;
-  const company = subjects.length === 1 ? subjects[0]! : null;
-  if (company?.resolution.status !== "resolved") return null;
-  const peers = await peersOf(company.resolution.subject_ref);
-  return peers.length === 0 ? null : [company, ...peers];
+  planOverview: (companies: ReadonlyArray<RequestedSubject>) => Promise<PlanningResult | null>,
+): Promise<TurnReplacement | null> {
+  const peered = await withCatalogPeers(subjects, reading, peersOf);
+  const companies = overviewSubjects(subjects, reading, scope, peered);
+  const overview = companies && await planOverview(companies);
+  return companies && overview ? { via: "overview", subjects: companies, overview } : peered && { via: "peers", subjects: peered };
 }
 
 function asksForNoFigure(reading: ScopeProposal | null): reading is ScopeProposal {

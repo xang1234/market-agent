@@ -507,11 +507,22 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     completedTurn(await runTurn(base, starterThread.thread_id, metricStarters[0]!));
     assert.deepEqual(engineAnswer(await latestAssistantMessage(base, starterThread.thread_id)), {
       results: [
+        ["Gross profit", "latest fiscal year", "verified", "USD 195,201,000,000.00"],
+        ["Operating income", "latest fiscal year", "verified", "USD 133,050,000,000.00"],
+        ["Net income", "latest fiscal year", "verified", "USD 112,010,000,000.00"],
         ["Gross margin (gross profit / revenue)", "latest fiscal year", "verified", "46.91%"],
         ["Operating margin (operating income / revenue)", "latest fiscal year", "verified", "31.97%"],
         ["Net margin (net income / revenue)", "latest fiscal year", "verified", "26.92%"],
+        ["Gross profit", "latest fiscal quarter", "verified", "USD 45,700,000,000.00"],
+        ["Operating income", "latest fiscal quarter", "verified", "USD 29,800,000,000.00"],
+        ["Net income", "latest fiscal quarter", "verified", "USD 24,900,000,000.00"],
+        ["Gross margin (gross profit / revenue)", "latest fiscal quarter", "verified", "47.06%"],
+        ["Operating margin (operating income / revenue)", "latest fiscal quarter", "verified", "30.69%"],
+        ["Net margin (net income / revenue)", "latest fiscal quarter", "verified", "25.64%"],
       ],
-      notes: ["Not covered by this answer: the cause of these figures."],
+      notes: [
+        "Profit is read as gross profit, operating income and net income, with their margins, for the latest fiscal year and the latest quarter. Name a measure or a period to change it. Not covered by this answer: the cause of these figures.",
+      ],
     });
   });
 
@@ -561,10 +572,12 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.equal(first.benchmark, true);
     assert.deepEqual(first.metrics.map((metric) => metric.metric_key), ["income_statement"]);
     const firstAnswer = engineAnswer(await latestAssistantMessage(base, regressionThread.thread_id));
-    assert.equal(firstAnswer.results.length, 12);
+    assert.equal(firstAnswer.results.length, 42);
     assert.ok(firstAnswer.results.every(([, , disposition]) => disposition === "verified"), JSON.stringify(firstAnswer.results));
     // "S&P" is not two companies the answer could not find.
-    assert.deepEqual(firstAnswer.notes, ["Not covered by this answer: a comparison with a benchmark index."]);
+    assert.deepEqual(firstAnswer.notes, [
+      "Revenue is shown for the latest fiscal year and the latest quarter. Profit is read as gross profit, operating income and net income, with their margins, for the latest fiscal year and the latest quarter. Name a measure or a period to change it. Not covered by this answer: a comparison with a benchmark index.",
+    ]);
 
     const unchanged = (scope: Saved, companies: string[]) => {
       assert.deepEqual(issuers(scope), companies);
@@ -645,10 +658,17 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const amd = { issuer_id: AMD.issuer_id, label: "AMDX" };
 
     completedTurn(await runTurn(base, peersThread.thread_id, "How does AMDX's Q2 2025 revenue compare with its peers?"));
-    assert.deepEqual(engineAnswer(await latestAssistantMessage(base, peersThread.thread_id)).results.map(([measure, period, disposition]) => [measure, period, disposition]), [["Revenue", "Q2 FY2025", "verified"]]);
-    assert.deepEqual(await scope(), { companies: [amd], peers: true });
+    // The answer shows both revenues it ranks. AMD's and NVDA's fiscal Q2 2025
+    // cover different months, so the engine declines the ranking itself.
+    const answer = engineAnswer(await latestAssistantMessage(base, peersThread.thread_id));
+    assert.deepEqual(answer.results, [
+      ["Revenue", "Q2 FY2025", "verified", "USD 7,685,000,000.00"],
+      ["Revenue", "Q2 FY2025", "verified", "USD 30,040,000,000.00"],
+      ["Revenue ranking", "Q2 FY2025", "incompatible", "The cohort members cover different periods."],
+    ], "AMD's revenue, then NVDA's, then the ranking");
+    assert.deepEqual(answer.notes, ["Peers chosen from the catalog: NVIDIA Corporation. Name peers to change them."]);
+    assert.deepEqual(await scope(), { companies: [amd, { issuer_id: NVDA.issuer_id }], peers: true });
     completedTurn(await runTurn(base, peersThread.thread_id, "Explain it"));
-    // AMD's industry peer is auto-selected, so it carries no label.
     assert.deepEqual(await scope(), { companies: [amd, { issuer_id: NVDA.issuer_id }], peers: true });
     completedTurn(await runTurn(base, peersThread.thread_id, "Drop the peers"));
     assert.deepEqual(await scope(), { companies: [amd], peers: false });

@@ -27,6 +27,7 @@ import {
 } from "../../financial-core/src/index.ts";
 import { cashResilienceDraft, LATEST_FISCAL_YEAR, type CashResiliencePeriod } from "../../financial-engine/src/cash-resilience.ts";
 import { ParentRefusedError, type PersistParentArtifact } from "../../financial-engine/src/finalize.ts";
+import { measureDefaultsNote } from "../../financial-engine/src/measure-defaults.ts";
 import {
   buildDeterministicPlan,
   planFinancialRequest,
@@ -45,7 +46,7 @@ import { publishRequest, type RequestGap } from "../../financial-engine/src/requ
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { comparedAdditions, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId } from "./chat-ids.ts";
-import { namesCompanies, overviewPeers, overviewSubjects, planCompanyOverview, type PeersOf } from "./company-overview.ts";
+import { namesCompanies, overviewPeers, planCompanyOverview, turnReplacement, type PeersOf, type TurnReplacement } from "./company-overview.ts";
 import { noteBlock } from "./fact-blocks.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { companyKey, extractSubjectMentions } from "./subject-extraction.ts";
@@ -457,7 +458,8 @@ async function planTurn(
   authority: FinancialRuntimeAuthority,
   cutoff: Date,
   // Called with the companies to plan once a clarification pick is applied,
-  // before the model is, and with the overview's once it replaces the planner.
+  // before the model is, and with the overview's or the catalog peers' once
+  // they replace the planner.
   onSubjects: (subjects: ReadonlyArray<RequestedSubject>) => void,
   turn: Readonly<{
     carried: boolean;
@@ -491,39 +493,39 @@ async function planTurn(
   if (CASH_RESILIENCE.test(text)) return planCashResilience(planningContext(subjects), text);
   // A failing or unreachable model is a planning gap (publishRequest); the narrative composer is never a fallback for numbers.
   let dropped = false;
-  // A planner the overview drops reaches the model no more (its repair call).
+  // A planner the overview or the catalog peers drop reaches the model no more (its repair call).
   const planning: PlanningModel | null = model && ((request) => dropped ? Promise.reject(DROPPED) : model(request));
   const planned = planFinancialRequest(planningContext(subjects), text, planning ?? noModel);
   if (!namesCompanies(subjects, turn.carried)) return planned;
   // Settled now, or a planner that fails while the overview is decided is an unhandled rejection.
   const failure = planned.then(() => null, (reason: unknown) => ({ reason }));
-  let companies: ReadonlyArray<RequestedSubject> | null;
-  let overview: PlanningResult | null;
+  let replacement: TurnReplacement | null;
   try {
     const [scope, reading] = await turn.prepare();
-    companies = await overviewSubjects(subjects, reading, scope, turn.peersOf);
-    overview = companies && await planCompanyOverview(planningContext(companies), turn.evidence);
+    replacement = await turnReplacement(subjects, reading, scope, turn.peersOf, (companies) => planCompanyOverview(planningContext(companies), turn.evidence));
   } catch (reason) {
     // A defect fails the turn, so the planner's answer is not needed either.
     dropped = true;
     throw reason;
   }
-  if (!companies || !overview) return planned;
-  onSubjects(companies);
-  turn.onOverview();
+  if (!replacement) return planned;
+  const by = replacement.via === "overview" ? "the company overview" : "the catalog peers";
   dropped = true;
   void failure.then((failed) => {
     if (failed === null) return;
     if (failed.reason instanceof PlanningModelError && failed.reason.cause === DROPPED) {
-      console.warn("[chat] the planner was dropped for the company overview; its next model call was not made");
+      console.warn(`[chat] the planner was dropped for ${by}; its next model call was not made`);
     } else {
-      console.warn("[chat] the planner the company overview replaced had failed", failed.reason);
+      console.warn(`[chat] the planner replaced by ${by} had failed`, failed.reason);
     }
   });
-  return overview;
+  onSubjects(replacement.subjects);
+  if (replacement.via === "peers") return planFinancialRequest(planningContext(replacement.subjects), text, model ?? noModel);
+  turn.onOverview();
+  return replacement.overview;
 }
 
-const DROPPED = new Error("dropped for the company overview");
+const DROPPED = new Error("dropped for another plan of the turn");
 
 const CASH_RESILIENCE = /\bcash[- ]resilience\b/iu;
 const CASH_RESILIENCE_VIEW = "cash_resilience_view";
@@ -680,14 +682,20 @@ function persistAssistantMessage(
 ): PersistParentArtifact {
   return async (tx, publication) => {
     const [scope, reading] = await turn.prepared();
-    const plan = scope === null && reading === null ? null : await findPlanForRequest(tx.client, request);
-    // A plan member the turn gave no label is a peer the overview selected. The
-    // saved plan says so, as a retry that resumes the run does not plan again.
-    const answeredPeers = plan?.subjects.members.some((member) => !turn.labels.has(member.subject_ref.id.toLowerCase())) ?? false;
+    // The note reads the saved plan, as a retry that resumes the run does not plan again.
+    const plan = await findPlanForRequest(tx.client, request);
+    // A plan member the turn gave no label is a peer chosen from the catalog.
+    const peers = plan?.subjects.members.filter((member) => !turn.labels.has(member.subject_ref.id.toLowerCase())) ?? [];
+    const answeredPeers = peers.length > 0;
+    const subjectNames = new Map(Object.values(publication.block.financial.labels).flatMap((entry) => entry.kind === "subject" ? [[entry.slot_id, entry.text] as const] : []));
+    const peerNames = peers.flatMap((member) => subjectNames.get(member.slot_id) ?? []);
+    const defaults = measureDefaultsNote(plan?.measure_defaults ?? []);
     const missing = reading === null || plan === null ? [] : uncoveredAsks(answeredPeers ? withoutPeers(reading) : reading, plan, turn.labels);
     const note = [
       ...(turn.notFound.length === 0 ? [] : [`No company matched ${labelList(turn.notFound)}.`]),
       ...(turn.carried.length === 0 ? [] : [`${labelList(turn.carried)} ${turn.carried.length > 1 ? "are" : "is"} carried from the previous answer.`]),
+      ...(peerNames.length === 0 ? [] : [catalogPeersNote(peerNames)]),
+      ...(defaults === null ? [] : [defaults]),
       ...(reading === null ? [UNCHECKED] : missing.length === 0 ? [] : [`Not covered by this answer: ${missing.join("; ")}.`]),
     ].join(" ");
     const blocks = [
@@ -726,6 +734,11 @@ function persistAssistantMessage(
     // As any saved message does, so the thread never points at a replaced gap's snapshot.
     await tx.client.query(`update chat_threads set latest_snapshot_id = $2::uuid, updated_at = now() where thread_id = $1::uuid`, [threadId, publication.snapshot_id]);
   };
+}
+
+/** The peers the turn did not name, as the answer names them; a legal name may end the sentence ("Inc."). */
+export function catalogPeersNote(names: ReadonlyArray<string>): string {
+  return `Peers chosen from the catalog: ${labelList(names).replace(/\.$/u, "")}. Name peers to change them.`;
 }
 
 const withoutPeers = (reading: ScopeProposal): ScopeProposal => ({ ...reading, asks: new Set([...reading.asks].filter((facet) => facet !== "peers")) });

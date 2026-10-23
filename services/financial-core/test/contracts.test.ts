@@ -389,3 +389,28 @@ test("the database admits exactly the engine's parent kinds and publication unit
   assert.deepEqual(admitted("parent_kind"), [...PARENT_KINDS]);
   assert.deepEqual(admitted("unit_kind"), [...PUBLICATION_UNIT_KINDS]);
 });
+
+test("measure_defaults is optional and records each cited family exactly (#517)", () => {
+  const withDefaults = (measureDefaults: unknown) => ({ ...mutable(planFixture()), measure_defaults: measureDefaults });
+  assert.equal(validateFinancialPlan(planFixture()).ok, true);
+  const valid = withDefaults([
+    { family: "profit", table_version: "measure-defaults.v1", period: "default" },
+    { family: "revenue", table_version: "measure-defaults.v1", period: "requested", requested_period: { kind: "latest", period_type: "quarterly", offset: 0 } },
+  ]);
+  const accepted = validateFinancialPlan(valid);
+  assert.equal(accepted.ok, true, JSON.stringify(!accepted.ok && accepted.issues));
+  assert.deepEqual(accepted.ok && accepted.value.measure_defaults, valid.measure_defaults);
+
+  for (const [name, measureDefaults] of [
+    ["empty list", []],
+    ["unknown period", [{ family: "profit", table_version: "measure-defaults.v1", period: "latest" }]],
+    ["requested without its period", [{ family: "profit", table_version: "measure-defaults.v1", period: "requested" }]],
+    ["default with a period", [{ family: "profit", table_version: "measure-defaults.v1", period: "default", requested_period: { kind: "at_cutoff" } }]],
+    ["missing version", [{ family: "profit", period: "default" }]],
+    ["extra field", [{ family: "profit", table_version: "measure-defaults.v1", period: "default", metrics: ["net_income"] }]],
+    ["malformed family", [{ family: "Profit!", table_version: "measure-defaults.v1", period: "default" }]],
+    ["malformed period", [{ family: "revenue", table_version: "measure-defaults.v1", period: "requested", requested_period: { kind: "latest", period_type: "monthly", offset: 0 } }]],
+  ] as const) {
+    assert.equal(validateFinancialPlan(withDefaults(measureDefaults)).ok, false, name);
+  }
+});

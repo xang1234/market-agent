@@ -85,12 +85,8 @@ export async function proposeScope(input: {
 // anything malformed or outside the vocabularies, or a company the question
 // does not write.
 export function parseProposal(text: string, question: string): ScopeProposal | null {
-  let reply: unknown;
-  try {
-    reply = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
-  } catch {
-    return null;
-  }
+  const reply = lastObject(text);
+  if (reply === null) return null;
   const { metrics, asks, turns_off: turnsOff, income_items: incomeItems, period: periodReply, companies: companiesReply } = (reply ?? {}) as Record<string, unknown>;
   if (turnsOff === null || typeof turnsOff !== "object") return null;
   const { facets: offFacets, metrics: offMetrics } = turnsOff as Record<string, unknown>;
@@ -110,6 +106,21 @@ export function parseProposal(text: string, question: string): ScopeProposal | n
     period,
     companies,
   };
+}
+
+// The reply's last whole JSON object: a model that corrects itself writes a
+// second object after its first (#517 live run).
+// ponytail: tries each "{" up to the last "}", quadratic in a 512-token reply.
+function lastObject(text: string): unknown {
+  const end = text.lastIndexOf("}") + 1;
+  for (let start = text.indexOf("{"); start !== -1 && start < end; start = text.indexOf("{", start + 1)) {
+    try {
+      return JSON.parse(text.slice(start, end));
+    } catch {
+      // Not an object that runs to the end: the next "{" may start the last one.
+    }
+  }
+  return null;
 }
 
 function companiesOf(value: unknown, question: string): CompanyChange | null {

@@ -34,13 +34,20 @@ test("golden coverage notes and declined-turn retries (#425)", { skip: !dockerAv
   await seedGoldenDataset(client);
   const base = await startChatServer(t, databaseUrl);
 
-  await t.test("a comparison names what its plan left out for each company, and a qualified metric it did not compute", async (st) => {
+  await t.test("a comparison that plans each company's metrics names nothing left out, and shows a metric it could not compute (#517)", async (st) => {
     requireRecordedScopes(st);
     const { thread_id } = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Coverage" });
     completedTurn(await runTurn(base, thread_id, "Compare NVDA and AMD operating margin and EPS growth"));
     const answer = await latestAssistantMessage(base, thread_id);
     assert.equal(answer.blocks[0]?.kind, "financial_answer");
-    assert.deepEqual(texts(answer), ["Not covered by this answer: earnings per share growth; operating margin for AMD."]);
+    const results = (answer.blocks[0]?.financial as { results: Array<{ output_id: string; disposition: string; presented: { text: string } }> }).results;
+    assert.deepEqual(results.map((result) => [result.output_id, result.disposition, result.presented.text]), [
+      ["nvda_operating_margin", "verified", "60.21%"],
+      ["amd_operating_margin", "verified", "9.78%"],
+      ["nvda_eps_growth", "blocked_dependency", "A required input or calculation is unavailable."],
+      ["amd_eps_growth", "blocked_dependency", "A required input or calculation is unavailable."],
+    ]);
+    assert.deepEqual(texts(answer), []);
   });
 
   await t.test("with the scope reading off, the answer says its coverage was not checked", async (st) => {

@@ -157,7 +157,7 @@ test("a question about one company that asks for no figure is answered with its 
     const logged = () => warned.filter(([message]) => String(message).startsWith("[chat]"));
     for (const deadline = Date.now() + 10_000; logged().length === 0 && Date.now() < deadline;) await new Promise((resolve) => setTimeout(resolve, 10));
     assert.deepEqual(logged().map(([message, reason]) => [message, ((reason as Error).cause as Error).message]), [
-      ["[chat] the planner the company overview replaced had failed", "the model is down"],
+      ["[chat] the planner replaced by the company overview had failed", "the model is down"],
     ]);
   });
 
@@ -349,7 +349,8 @@ test("a question about one company that asks for no figure is answered with its 
       assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_OVERVIEW.slice(7)), ...slotted("b", OFFQ_LATEST)]);
       const { rows: [message] } = await db.query(`select blocks, research_scope from chat_messages where message_id = $1`, [done.message_id]);
       assert.deepEqual([message.research_scope.companies, message.research_scope.peers], [[{ issuer_id: COMPANIES.QTRS, label: "QTRS" }, { issuer_id: COMPANIES.OFFQ }], true]);
-      assert.equal(message.blocks.length, 1, "no note names peers the question did not name");
+      assert.deepEqual(message.blocks.slice(1).map((block: { segments: Array<{ text: string }> }) => block.segments[0]!.text), ["Peers chosen from the catalog: OFFQ Corp. Name peers to change them."],
+        "the note says the catalog chose the peers, and never names them as not covered");
       const { rows: [planned] } = await db.query(
         `select p.plan->'interpretation'->>'text' as text from financial_runs r join financial_plans p on p.plan_id = r.plan_id where r.request_key = $1`,
         [turnId],
@@ -412,5 +413,86 @@ test("a question about one company that asks for no figure is answered with its 
       blocked("out_revenue_growth_qoq", "Q1 FY2024 vs Q4 FY2023"),
       ["out_revenue_growth_yoy", "Q1 FY2024 vs Q1 FY2023", "verified", "100.00%"],
     ], "growth after a first quarter compares with the fourth quarter before it and the first a year earlier");
+  });
+
+  const citingModel = (reply: (mentions: string[]) => unknown) => {
+    const asked: string[][] = [];
+    const model = (async ({ messages }: { messages: ReadonlyArray<{ content: string }> }) => {
+      const mentions = /Requested companies \(mentions\): (.*)$/mu.exec(messages[1]!.content)![1]!.split("; ");
+      asked.push(mentions);
+      return { model: "stub-model", text: JSON.stringify(reply(mentions)) };
+    }) as unknown as PlanningModel & { asked: string[][] };
+    model.asked = asked;
+    return model;
+  };
+  const citing = (...defaults: unknown[]) => citingModel((mentions) => ({
+    outcome: "ready",
+    subjects: mentions.map((mention, index) => ({ slot_id: String.fromCharCode(97 + index), mention })),
+    operations: [],
+    outputs: [],
+    thresholds: [],
+    defaults,
+  }));
+  const saved = async (messageId: unknown) => {
+    const { rows: [message] } = await db.query(`select blocks, research_scope from chat_messages where message_id = $1`, [messageId]);
+    return {
+      outputs: (message.blocks[0].financial.results as Array<{ output_id: string }>).map((result) => result.output_id),
+      notes: (message.blocks.slice(1) as Array<{ segments: Array<{ text: string }> }>).map((block) => block.segments[0]!.text),
+      companies: message.research_scope?.companies,
+    };
+  };
+  const PROFIT_NOTE = "Profit is read as gross profit, operating income and net income, with their margins, for the latest fiscal year and the latest quarter. Name a measure or a period to change it.";
+  const profitOutputs = (slot: string) => ["fy0", "q0"].flatMap((period) =>
+    ["gross_profit", "operating_income", "net_income", "gross_margin", "operating_margin", "net_margin"].map((figure) => `out_${slot}_${figure}_latest_${period}`));
+
+  await t.test("a broad measure the question names is read by its family, and the note says how (#517)", async () => {
+    const model = citing({ family: "profit" });
+    const done = completed((await chatHarness(pool, { model, readQuestion: reading(METRIC_READING), resolveMention: resolve }).run({ ...base, userIntent: "Analyze profit for QTRS" })).events);
+    const answer = await saved(done.message_id);
+    assert.deepEqual([answer.outputs, answer.notes], [profitOutputs("a"), [PROFIT_NOTE]]);
+  });
+
+  await t.test("a family read for the period the question names says that period (#517)", async () => {
+    const model = citing({ family: "revenue", period: { kind: "latest", period_type: "quarterly", offset: 0 } });
+    const done = completed((await chatHarness(pool, { model, readQuestion: reading(METRIC_READING), resolveMention: resolve }).run({ ...base, userIntent: "Latest quarter sales for QTRS" })).events);
+    const answer = await saved(done.message_id);
+    assert.deepEqual([answer.outputs, answer.notes], [
+      ["out_a_revenue_latest_q0"],
+      ["Revenue is shown for the latest quarter. Name a measure or a period to change it."],
+    ]);
+  });
+
+  await t.test("a question naming a measure gets no defaults note (#517)", async () => {
+    const done = completed((await chatHarness(pool, { model: revenueModel(["QTRS"]), readQuestion: reading(METRIC_READING), resolveMention: resolve }).run({ ...base, userIntent: "FY2023 revenue for QTRS" })).events);
+    const answer = await saved(done.message_id);
+    assert.deepEqual([answer.outputs, answer.notes], [["a_out"], []]);
+  });
+
+  await t.test("a figure asked of one company's peers is planned with its catalog peers, which the note names as chosen (#517)", async () => {
+    const peerSet = [COMPANIES.QTRS, COMPANIES.OFFQ];
+    await db.query(`update issuers set industry = 'Quarterly test filers' where issuer_id = any($1::uuid[])`, [peerSet]);
+    try {
+      const model = citing({ family: "profit" });
+      const peers = { ...METRIC_READING, asks: new Set(["peers"] as const) };
+      const done = completed((await chatHarness(pool, { model, readQuestion: reading(peers), resolveMention: resolve, researchScope: scoped }).run({ ...base, userIntent: "How does profit for QTRS compare with its peers?" })).events);
+      assert.deepEqual(model.asked, [["QTRS"], ["QTRS", COMPANIES.OFFQ]], "the planner the peers replace saw the company alone");
+      const answer = await saved(done.message_id);
+      assert.deepEqual(answer, {
+        outputs: [...profitOutputs("a"), ...profitOutputs("b")],
+        notes: [`Peers chosen from the catalog: OFFQ Corp. Name peers to change them. ${PROFIT_NOTE}`],
+        companies: [{ issuer_id: COMPANIES.QTRS, label: "QTRS" }, { issuer_id: COMPANIES.OFFQ }],
+      });
+    } finally {
+      await db.query(`update issuers set industry = null where issuer_id = any($1::uuid[])`, [peerSet]);
+    }
+  });
+
+  await t.test("a figure asked of the peers of a company the catalog has none for is still asked about (#517)", async () => {
+    const question = "Which companies should NOGP's profit be compared with?";
+    const model = citingModel(() => ({ outcome: "needs_clarification", question, choices: [] }));
+    const peers = { ...METRIC_READING, asks: new Set(["peers"] as const) };
+    const done = completed((await chatHarness(pool, { model, readQuestion: reading(peers), resolveMention: resolve, researchScope: scoped }).run({ ...base, userIntent: "How does profit for NOGP compare with its peers?" })).events);
+    assert.deepEqual(model.asked, [["NOGP"]]);
+    assert.deepEqual([done.clarification, (done.financial_clarification as { question: string }).question], [true, question]);
   });
 });
