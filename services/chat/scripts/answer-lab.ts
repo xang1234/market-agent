@@ -11,7 +11,8 @@
 // no-keys stack (DEV_NO_KEYS=traces) answers each traced question as recorded;
 // recorded is deterministic and offline: each trace's answer reply and judge
 // reply as recorded; --check exits 1 when a replay's blocks differ from the
-// recorded ones; --update writes each replay over its trace (blocks,
+// recorded ones, or a later turn quotes an earlier turn's answer other than as
+// that turn recorded it; --update writes each replay over its trace (blocks,
 // assertions, judge), for a deliberate change to post-processing. live uses the stack's LLM settings
 // (LLM_SETTINGS_ENV_FILE, default .env.dev, as dev-shell sets it) and writes
 // docs/eval-runs/answer-lab/<stamp>.json. --judge has the judge model
@@ -263,35 +264,84 @@ export function answerText(blocks: ReadonlyArray<Record<string, unknown>>): stri
     .join("\n\n");
 }
 
-// A turn's place in its thread: how many questions its conversation holds.
-function turnPlace(trace: TurnTrace): number {
-  return (trace.input.conversation ?? []).filter((message) => message.role === "user").length;
+type Conversation = NonNullable<AnswerTraceInput["conversation"]>;
+
+// Whether later was asked after earlier: its conversation holds earlier's question.
+function asksAfter(later: TurnTrace, earlier: TurnTrace): boolean {
+  return later !== earlier && (later.input.conversation ?? []).some((message) => message.role === "user" && message.text === earlier.question);
 }
 
-// Each thread's turns, in their order in it.
+// Each thread's turns, each after every turn it was asked after.
 export function threadChains(traces: ReadonlyArray<LabeledTrace>): LabeledTrace[][] {
-  return [...Map.groupBy(traces, ({ trace }) => trace.thread_id).values()]
-    .map((chain) => chain.toSorted((a, b) => turnPlace(a.trace) - turnPlace(b.trace)));
+  return [...Map.groupBy(traces, ({ trace }) => trace.thread_id).values()].map((chain) => {
+    const left = [...chain];
+    const ordered: LabeledTrace[] = [];
+    while (left.length > 0) {
+      const next = left.findIndex(({ trace }) => !left.some((other) => asksAfter(trace, other.trace)));
+      ordered.push(...left.splice(Math.max(next, 0), 1));
+    }
+    return ordered;
+  });
+}
+
+// The question each assistant entry answers: the entry before it. Production
+// holds the last CONVERSATION_MESSAGES (local-runtime.ts), so a window can open
+// on an answer: its question is the one asked before the window's first, as
+// the turn that asked that one holds it. An answer the window cut is not there.
+function questionsAnswered(conversation: Conversation, chain: ReadonlyArray<LabeledTrace>): Array<string | undefined> {
+  return conversation.map((message, i) => {
+    if (message.role !== "assistant") return undefined;
+    if (i > 0) return conversation[i - 1]!.role === "user" ? conversation[i - 1]!.text : undefined;
+    const first = conversation.find((entry) => entry.role === "user")?.text;
+    const asker = chain.find(({ trace }) => trace.question === first)?.trace.input.conversation ?? [];
+    return asker.filter((entry) => entry.role === "user").at(-2)?.text;
+  });
+}
+
+// What a turn saves for its thread: its answer's blocks, then its fact blocks (local-runtime.ts).
+function savedNarrative({ blocks, input }: Pick<TurnTrace, "blocks" | "input">): string {
+  return narrativeText([...blocks, ...(input.factBlocks ?? [])]);
 }
 
 // A follow-up's input with each re-recorded earlier turn's answer in its
-// conversation, as a thread would hold it: the narrative of the blocks that
-// turn saved (thread-context.ts), in the entry after its question.
-// answered: each such turn's place and saved narrative.
-export function followUp(input: AnswerTraceInput, answered: ReadonlyMap<number, string>): AnswerTraceInput {
-  let place = 0;
-  const conversation = (input.conversation ?? []).flatMap((message) => {
-    if (message.role === "user") place += 1;
-    const text = message.role === "assistant" ? answered.get(place) : undefined;
+// conversation, as a thread would hold it (savedNarrative), in place of the
+// entry that answers its question. answered: each such turn's question and
+// saved narrative.
+export function followUp(input: AnswerTraceInput, answered: ReadonlyMap<string, string>, chain: ReadonlyArray<LabeledTrace>): AnswerTraceInput {
+  const questions = questionsAnswered(input.conversation ?? [], chain);
+  const conversation = (input.conversation ?? []).flatMap((message, i) => {
+    const text = questions[i] === undefined ? undefined : answered.get(questions[i]!);
     return text === undefined ? [message] : text.length > 0 ? [{ ...message, text }] : [];
   });
   return { ...input, conversation };
 }
 
+// Why a follow-up may not be re-recorded on this run's answers: an answer in
+// its conversation whose turn the run did not just re-record.
+function unchained(input: AnswerTraceInput, answered: ReadonlyMap<string, string>, chain: ReadonlyArray<LabeledTrace>): string | undefined {
+  const questions = questionsAnswered(input.conversation ?? [], chain);
+  const i = (input.conversation ?? []).findIndex((message, j) => message.role === "assistant" && (questions[j] === undefined || !answered.has(questions[j]!)));
+  if (i === -1) return undefined;
+  return questions[i] === undefined ? "not run: its conversation opens on an answer no turn given places" : `not run: the turn asking ${JSON.stringify(questions[i])} was not re-recorded in this run`;
+}
+
+// Each later turn whose conversation quotes an earlier turn's answer other
+// than as that turn saved it: a thread re-recorded in part.
+export function staleFollowUps(traces: ReadonlyArray<LabeledTrace>): string[] {
+  return threadChains(traces).flatMap((chain) => chain.flatMap(({ label, trace }) => {
+    const conversation = trace.input.conversation ?? [];
+    const questions = questionsAnswered(conversation, chain);
+    return conversation.flatMap((message, i) => {
+      const earlier = chain.find((other) => other.trace !== trace && other.trace.question === questions[i]);
+      return !earlier || message.text === savedNarrative(earlier.trace) ? [] : [`${label}: its answer to ${JSON.stringify(earlier.trace.question)} is not the one ${earlier.label} recorded`];
+    });
+  }));
+}
+
 // record: writes a sample over its trace (rerecord), or says why not. With
 // it, each thread's turns run in their order, every later one asked after the
-// earlier answers just recorded (followUp); one after a turn left unrecorded
-// is not run.
+// earlier answers just recorded (followUp); one whose conversation holds an
+// answer the run did not just re-record is not run (unchained).
 export async function live(
   traces: ReadonlyArray<LabeledTrace>,
   samples: number,
@@ -343,24 +393,20 @@ export async function live(
   };
   const worker = async () => {
     for (let chain = chains.shift(); chain; chain = chains.shift()) {
-      // Each recorded turn's place and saved narrative, and the first left unrecorded.
-      const answered = new Map<number, string>();
-      let unrecorded: number | undefined;
+      // Each turn re-recorded so far: its question and saved narrative.
+      const answered = new Map<string, string>();
       for (const job of chain) {
-        const place = turnPlace(job.trace);
-        if (unrecorded !== undefined) {
-          const why = `not run: turn ${unrecorded} of its thread was not re-recorded`;
-          results.push({ trace: job.key, sample: 0, error: why });
-          console.log(`skip ${job.label}: ${why}`);
+        const unrun = record ? unchained(job.trace.input, answered, chain) : undefined;
+        if (unrun !== undefined) {
+          results.push({ trace: job.key, sample: 0, error: unrun });
+          console.log(`skip ${job.label}: ${unrun}`);
           continue;
         }
-        const traced = record ? { ...job, trace: { ...job.trace, input: followUp(job.trace.input, answered) } } : job;
+        const traced = record ? { ...job, trace: { ...job.trace, input: followUp(job.trace.input, answered, chain) } } : job;
         const answer = await sample(traced, job.sample);
         if (!record) continue;
         const why = answer ? record(traced, answer) : "the run failed";
-        // What the turn saves: its answer's blocks, then its fact blocks (local-runtime.ts).
-        if (why === undefined) answered.set(place, narrativeText([...answer!.blocks, ...(traced.trace.input.factBlocks ?? [])]));
-        else unrecorded = place;
+        if (why === undefined) answered.set(job.trace.question, savedNarrative({ blocks: answer!.blocks, input: traced.trace.input }));
       }
     }
   };
@@ -764,6 +810,8 @@ async function main(argv: string[]): Promise<number> {
       `${differs.has(key) ? "  DIFFERS" : ""}${drifted.has(key) ? "  JUDGE INPUT CHANGED" : ""}${repairDrifted.has(key) ? "  REPAIR INPUT CHANGED" : ""}`;
     console.log(table(results.map((result) => meanRow(result, [result.metrics])), (row) => flag(row.key)));
     console.log(`\n${traces.length - differs.size} of ${traces.length} replayed to the recorded blocks`);
+    const stale = staleFollowUps(traces);
+    for (const line of stale) console.log(`stale ${line}`);
     const prompts = Map.groupBy(results.filter((result) => result.system_prompt_changed), (result) => JSON.stringify(result.system_prompt_changed));
     for (const [pair, changed] of prompts) {
       const { recorded: was, today } = JSON.parse(pair) as { recorded: string; today: string };
@@ -785,7 +833,7 @@ async function main(argv: string[]): Promise<number> {
       writeFileSync(file, `${JSON.stringify(run, null, 2)}\n`, { flag: "wx" });
       console.log(file);
     }
-    return values.check && differs.size > 0 ? 1 : 0;
+    return values.check && (differs.size > 0 || stale.length > 0) ? 1 : 0;
   }
   const samples = Number.parseInt(values.samples, 10);
   const concurrency = Number.parseInt(values.concurrency, 10);
