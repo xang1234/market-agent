@@ -625,6 +625,46 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.equal(scopes[0]?.research_scope.price_window, null);
   });
 
+  // #398 step 7: a follow-up that changes only the period is the engine's, at
+  // that period, with no model planning it.
+  await t.test("a follow-up naming only another period is the engine's overview there: 'What about Q2?' at NVDA's newest second quarter, 'And fiscal 2025?' at that year's newest quarter (#398)", async () => {
+    const periodThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Periods" });
+    const shown = async (question: string) => {
+      assert.equal(completedTurn(await runTurn(base, periodThread.thread_id, question)).data.bundle_id, "financial_answer", question);
+      const answer = await latestAssistantMessage(base, periodThread.thread_id);
+      const { rows } = await client.query<{ research_scope: { fiscal_year: number | null; fiscal_quarter: unknown } }>(`select research_scope from chat_messages where message_id = $1::uuid`, [answer.message_id]);
+      const results = engineAnswer(answer).results;
+      return {
+        first: results[0],
+        margin: results.find(([measure]) => measure.startsWith("Gross margin")),
+        yoy: results.find(([measure]) => measure.startsWith("Year-over-year")),
+        period: [rows[0]?.research_scope.fiscal_year, rows[0]?.research_scope.fiscal_quarter],
+      };
+    };
+    assert.deepEqual(await shown("How is NVDA doing?"), {
+      first: ["Revenue", "Q1 FY2025", "verified", "USD 26,044,000,000.00"],
+      margin: ["Gross margin (gross profit / revenue)", "Q4 FY2026", "verified", "74.40%"],
+      yoy: ["Year-over-year percent change in Revenue", "Q4 FY2026 vs Q4 FY2025", "verified", "57.89%"],
+      period: [null, null],
+    });
+    // NVDA's newest second quarter is Q2 FY2026; the quarters before its first on file are gaps where they fall.
+    assert.deepEqual(await shown("What about Q2?"), {
+      first: ["Revenue", "Q3 FY2024", "missing", "No eligible input was public before the knowledge cutoff."],
+      margin: ["Gross margin (gross profit / revenue)", "Q2 FY2026", "verified", "72.42%"],
+      yoy: ["Year-over-year percent change in Revenue", "Q2 FY2026 vs Q2 FY2025", "verified", "55.60%"],
+      period: [null, null],
+    });
+    assert.deepEqual(await shown("And fiscal 2025?"), {
+      first: ["Revenue", "Q1 FY2024", "missing", "No eligible input was public before the knowledge cutoff."],
+      margin: ["Gross margin (gross profit / revenue)", "Q4 FY2025", "verified", "73.03%"],
+      yoy: ["Year-over-year percent change in Revenue", "Q4 FY2025 vs Q4 FY2024", "blocked_dependency", "A required input or calculation is unavailable."],
+      period: [2025, null],
+    });
+    // No model planned them: there is no recorded planner reply for these questions.
+    const { rows } = await client.query<{ kind: string }>(`select plan->'planner'->>'kind' as kind from financial_plans where origin_ref like $1`, [`chat:${periodThread.thread_id}:%`]);
+    assert.deepEqual(rows.map((row) => row.kind), ["deterministic", "deterministic", "deterministic"]);
+  });
+
   // Two listings under one ticker are one company, so the engine plans it
   // without asking. Last, as the listings it adds stay.
   await t.test("a company two listings name keeps its peers after its engine answer, and keeps itself when they are turned off (#425)", async () => {
@@ -648,7 +688,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     completedTurn(await runTurn(base, peersThread.thread_id, "How does AMDX's Q2 2025 revenue compare with its peers?"));
     assert.deepEqual(engineAnswer(await latestAssistantMessage(base, peersThread.thread_id)).results.map(([measure, period, disposition]) => [measure, period, disposition]), [["Revenue", "Q2 FY2025", "verified"]]);
     assert.deepEqual(await scope(), { companies: [amd], peers: true });
-    // It inherits the asked quarter, which an overview would not show, so it stays the analyst's.
+    // An explanation with no period or company of its own stays the analyst's.
     assert.equal(completedTurn(await runTurn(base, peersThread.thread_id, "Explain it")).data.bundle_id, "single_subject_analysis");
     // AMD's industry peer is auto-selected, so it carries no label.
     assert.deepEqual(await scope(), { companies: [amd, { issuer_id: NVDA.issuer_id }], peers: true });

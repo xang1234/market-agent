@@ -72,7 +72,6 @@ import {
   type RequestedMetric,
   type ResearchScope,
   type ScopeFacet,
-  type ScopeField,
   type ScopeProposal,
 } from "./research-scope.ts";
 
@@ -158,11 +157,6 @@ const FACET_LANE: Readonly<Record<ScopeFacet, "figure" | "analyst" | "neutral">>
   latest_quarter: "neutral",
 };
 
-// What a follow-up may keep from its scope and still be answered by the
-// overview, which shows the latest quarters of the income statement.
-const OVERVIEW_KEEPS: ReadonlySet<ScopeField> = new Set(["peers", "metrics"]);
-const OVERVIEW_METRICS: ReadonlySet<string> = new Set(["income_statement"]);
-
 // The companies a reading's change names, whatever it does with them.
 function namedCompanies(change: CompanyChange): number {
   switch (change.kind) {
@@ -176,24 +170,23 @@ function namedCompanies(change: CompanyChange): number {
 }
 
 // The analyst path keeps a turn that asks for no figure but something only it
-// answers, or whose scope keeps market data; a follow-up that names no company
-// and asks for nothing but an explanation ("Why?", "thanks"); and one whose
-// scope keeps what an overview would not show.
+// answers; a follow-up whose scope keeps guidance; one that names no period and
+// whose scope keeps market data; and a follow-up that names no company and no
+// period, turns nothing off, and asks for nothing but an explanation ("Why?",
+// "thanks"). Every other turn about a company is the engine's, its figures
+// planned from its reading and scope.
 function leftToAnalyst(reading: ScopeProposal | null, scope: ResearchScope | null): boolean {
   if (reading === null) return false;
-  const { asks, offMetrics } = readingAsks(reading);
+  const { asks, offFacets, offMetrics } = readingAsks(reading);
   if (reading.metrics.some((metric) => !offMetrics.has(metric.metric_key)) || reading.income_items.length > 0) return false;
   const lanes = [...asks].map((facet) => FACET_LANE[facet]);
   if (lanes.includes("figure")) return false;
   if (lanes.includes("analyst")) return true;
+  const ownCompanies = reading.companies.kind === "as_named" && reading.companies.names.length > 0;
+  if (scope?.guidance === true && !ownCompanies) return true;
+  if (reading.period.kind !== "none") return false;
   if (scope !== null && (scope.price_window !== null || scope.benchmark)) return true;
-  const asksNothing = [...asks].every((facet) => facet === "explains") && reading.period.kind !== "latest";
-  if (namedCompanies(reading.companies) === 0 && asksNothing) return true;
-  if ((reading.companies.kind === "as_named" && reading.companies.names.length > 0) || scope === null) return false;
-  const overviewPeriod = reading.period.kind === "none" || reading.period.kind === "latest";
-  const keepsOther = scope.inherited.some((field) => !OVERVIEW_KEEPS.has(field)) || scope.guidance === true ||
-    (scope.inherited.includes("metrics") && scope.metrics.some((metric) => !OVERVIEW_METRICS.has(metric.metric_key)));
-  return !overviewPeriod || keepsOther;
+  return namedCompanies(reading.companies) === 0 && offFacets.size === 0 && offMetrics.size === 0 && [...asks].every((facet) => facet === "explains");
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;

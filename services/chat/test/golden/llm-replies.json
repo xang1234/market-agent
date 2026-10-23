@@ -166,6 +166,18 @@
       "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"peers\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"fiscal_quarter\",\"fiscal_period\":\"Q2\",\"fiscal_year\":2025},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AMDX\"]}}"
     },
     {
+      "match": "Question: \"How is NVDA doing?\"",
+      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\"]}}"
+    },
+    {
+      "match": "Question: \"What about Q2?\"",
+      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"fiscal_quarter\",\"fiscal_period\":\"Q2\",\"fiscal_year\":null},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}"
+    },
+    {
+      "match": "Question: \"And fiscal 2025?\"",
+      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"fiscal_year\",\"fiscal_year\":2025},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}"
+    },
+    {
       "match": "Create a short, specific research chat title",
       "text": "NVIDIA revenue and margins"
     },

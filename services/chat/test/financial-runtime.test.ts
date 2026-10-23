@@ -653,7 +653,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     // A facet read as asked and turned off is not asked (readingAsks).
     const offGuidance = reading({ ...aaaNamed, asks: new Set(["guidance"]), turns_off: { facets: new Set(["guidance"]), metrics: new Set() } });
     assert.deepEqual(await lane("Tell me about AAA, skip the guidance", { readQuestion: offGuidance }, ["AAA"]), ["AAA"]);
-    // A follow-up that asks for no figure keeps its scope's period, which an overview would not show.
+    // A follow-up keeps its scope's period and figures, and the engine plans them there (#398 step 7).
     // A scope over the question's reading, as if the previous answer's scope held more.
     const keeping = (kept: Record<string, unknown>) => (async (context: { userIntent?: string }, read: Promise<ScopeProposal | null>) => {
       const proposal = await read;
@@ -665,18 +665,28 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(await lane("And its latest quarter?", { priorSubjects: async () => [aaa], researchScope: keepsYear, readQuestion: reading({ period: { kind: "latest" } }) }, ["AAA"]), ["AAA"]);
     assert.deepEqual(await lane("How is AAA doing?", { priorSubjects: async () => [aaa], researchScope: keepsYear, readQuestion: reading(aaaNamed) }, ["AAA"]), ["AAA"], "a question that names its company is a new one");
     const keepsCashFlow = keeping({ metrics: [proposedMetric("free_cash_flow", null, null)!], inherited: ["metrics"] });
-    assert.deepEqual(await lane("And BBB?", { priorSubjects: async () => [aaa], researchScope: keepsCashFlow, readQuestion: reading({ companies: { kind: "compare", add: ["BBB"] } }) }), "analyst", "a metric the overview does not show");
+    assert.deepEqual(await lane("And BBB?", { priorSubjects: async () => [aaa], researchScope: keepsCashFlow, readQuestion: reading({ companies: { kind: "compare", add: ["BBB"] } }) }), ["AAA", "BBB"], "a metric the overview does not show");
+    const cashFlow = completed((await chatHarness(pool, { model: null, analyst, priorSubjects: async () => [aaa], researchScope: keepsCashFlow, readQuestion: reading({ companies: { kind: "compare", add: ["BBB"] } }) }).run({ ...base, userIntent: "And BBB?" })).events);
+    const { rows: [answer] } = await db.query(`select blocks from chat_messages where message_id = $1`, [cashFlow.message_id]);
+    assert.deepEqual((answer.blocks[0].financial.results as Array<{ output_id: string }>).map((result) => result.output_id),
+      ["a", "b"].flatMap((slot) => ["operating_cash_flow", "capex", "free_cash_flow"].map((metric) => `out_${slot}_${metric}_latest_fy`)), "planned with no model: each company's free cash flow, the latest fiscal year");
+    // Guidance its scope keeps is the analyst's, at any period, unless the question names its own company.
+    const keepsGuidance = keeping({ guidance: true });
+    assert.deepEqual(await lane("And BBB?", { priorSubjects: async () => [aaa], researchScope: keepsGuidance, readQuestion: reading({ companies: { kind: "compare", add: ["BBB"] } }) }), "analyst");
+    assert.deepEqual(await lane("And for Q3?", { priorSubjects: async () => [aaa], researchScope: keepsGuidance, readQuestion: reading({ period: { kind: "fiscal_quarter", fiscal_period: "Q3", fiscal_year: null } }) }), "analyst");
+    assert.deepEqual(await lane("How is AAA doing?", { priorSubjects: async () => [aaa], researchScope: keepsGuidance, readQuestion: reading(aaaNamed) }, ["AAA"]), ["AAA"]);
     const keepsStatement = keeping({ metrics: [proposedMetric("income_statement", null, null)!], inherited: ["metrics"] });
     assert.deepEqual(await lane("And BBB?", { priorSubjects: async () => [aaa], researchScope: keepsStatement, readQuestion: reading({ companies: { kind: "compare", add: ["BBB"] } }) }, ["AAA", "BBB"]), ["AAA", "BBB"]);
-    assert.deepEqual(await lane("And Q3?", { priorSubjects: async () => [aaa], readQuestion: reading({ period: { kind: "fiscal_quarter", fiscal_period: "Q3", fiscal_year: null } }) }), "analyst", "a follow-up's period");
+    assert.deepEqual(await lane("And Q3?", { priorSubjects: async () => [aaa], readQuestion: reading({ period: { kind: "fiscal_quarter", fiscal_period: "Q3", fiscal_year: null } }) }, ["AAA"]), ["AAA"], "a follow-up's period");
     // Only a carried company the scope dropped is left out, and a turn left with none is the analyst's.
     const overBbb = keeping({ companies: [{ issuer_id: IDS.issuerB, label: "BBB" }] });
     assert.deepEqual(await lane("Explain it", { priorSubjects: async () => [aaa], researchScope: overBbb, readQuestion: reading({ asks: new Set(["explains"]) }) }), "analyst");
     assert.deepEqual(await lane("How is AAA doing?", { researchScope: overBbb, readQuestion: reading(aaaNamed) }, ["AAA"]), ["AAA"]);
-    // A follow-up that names no company and asks for no figure is the analyst's; one that adds or drops a company is the engine's.
+    // A follow-up that names no company, no period and asks for no figure is the analyst's; one that adds or drops a company, or turns something off, is the engine's.
     assert.deepEqual(await lane("Why?", { priorSubjects: async () => [aaa], readQuestion: reading({ asks: new Set(["explains"]) }) }), "analyst");
     assert.deepEqual(await lane("Thanks", { priorSubjects: async () => [aaa], readQuestion: reading({}) }), "analyst");
     assert.deepEqual(await lane("and BBB?", { priorSubjects: async () => [aaa], readQuestion: reading({ companies: { kind: "compare", add: ["BBB"] } }) }, ["AAA", "BBB"]), ["AAA", "BBB"]);
+    assert.deepEqual(await lane("Without the margins", { priorSubjects: async () => [aaa], readQuestion: reading({ turns_off: { facets: new Set(["margins"]), metrics: new Set() } }) }, ["AAA"]), ["AAA"]);
     // A metric read as asked and turned off is not asked either.
     const offCapex = reading({ metrics: [proposedMetric("capex", null, null)!], asks: new Set(["evidence"]), turns_off: { facets: new Set(), metrics: new Set(["capex"]) } });
     assert.deepEqual(await lane("Skip the capex: where did those numbers come from?", { priorSubjects: async () => [aaa], readQuestion: offCapex }), "analyst");
