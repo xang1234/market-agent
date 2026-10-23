@@ -381,7 +381,8 @@ export function enginePacket(content: FinancialAnswerContent, tickers: ReadonlyM
   const subjects = Object.values(content.labels).flatMap((label) => label.kind === "subject" ? [label] : []);
   const companyOf = new Map(subjects.map((label) => [`subject:${label.slot_id}`, tickers.get(label.slot_id) ?? label.text]));
   const companies = [...companyOf.values()];
-  const shown = content.results.filter(({ presented }) => presented.kind !== "predicate");
+  // A window's ranking is its company's; a peer ranking is no one company's, so it stays out.
+  const shown = content.results.filter(({ presented, subject_label_id }) => presented.kind === "ranking" ? subject_label_id !== null : presented.kind !== "predicate");
   const idOf = new Map(shown.map(({ output_id }, index) => [output_id, `F${index + 1}`]));
   const sides = leadSides(plan, content.unit_id);
   const figures = shown.map(({ result_id, output_id, subject_label_id, measure_label_id, period_label_id, presented }, index) => {

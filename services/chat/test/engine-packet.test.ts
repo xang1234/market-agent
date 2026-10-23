@@ -387,3 +387,12 @@ test("an unknown cause never cites a lead as a change: each is two companies' fi
   const window = enginePacket(HIGH, TICKERS);
   assert.deepEqual(checkAssertions([{ kind: "unknown_cause", text: "x", evidence: ["F9"] }], window).rejected.map((entry) => entry.check), ["kind"], "a ranking states no value that changed");
 });
+
+test("a peer ranking is no figure of the packet: it is no one company's (#398)", () => {
+  const cohort = content([
+    value(1, "a", "measure:m1", "period:p0", "74.40%"),
+    value(2, "b", "measure:m1", "period:p1", "54.02%"),
+    { ...value(3, "a", "measure:m7", "period:p0", ""), subject_label_id: null, presented: { kind: "ranking", text: "NVIDIA Corporation has the highest gross margin of the 2 companies ranked", complete: true, order: [], leader_label_ids: ["subject:a"] } },
+  ], ["a", "b"], { "measure:m7": { kind: "measure", text: "Gross margin (gross profit / revenue) peer ranking" } });
+  assert.deepEqual(enginePacket(cohort, TICKERS).figures.map((figure) => [figure.id, figure.company]), [["F1", "NVDA"], ["F2", "AMD"]]);
+});
