@@ -127,16 +127,18 @@ test("a question about one company that asks for no figure is answered with its 
     assert.deepEqual(await results(latest.message_id), QTRS_OVERVIEW, "a reading that asks for the latest quarter gets the overview, which shows it");
   });
 
-  await t.test("an explanation of a company is its overview, whose note calls the cause uncovered only without commentary (#398)", async () => {
+  await t.test("an explanation of a company is its overview, and its note names the cause as not covered, commentary or not (#398)", async () => {
     const notes = async (commentary?: Parameters<typeof chatHarness>[1]["commentary"]) => {
       const done = completed((await chatHarness(pool, { model: null, readQuestion: reading({ ...NO_ASKS, asks: new Set(["explains"]) }), resolveMention: resolve, ...(commentary ? { commentary } : {}) }).run({ ...base, userIntent: "Explain QTRS's results" })).events);
       assert.deepEqual(await results(done.message_id), QTRS_OVERVIEW);
       const { rows: [message] } = await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id]);
       return message.blocks.slice(1).map((block: { segments: Array<{ text: string }> }) => block.segments[0]!.text);
     };
-    assert.deepEqual(await notes(async () => {}), []);
-    assert.deepEqual(await notes(), ["Not covered by this answer: the cause of these figures."]);
+    const uncovered = ["Not covered by this answer: the cause of these figures."];
+    assert.deepEqual(await notes(async () => {}), uncovered, "commentary written from the figures gives no cause");
+    assert.deepEqual(await notes(), uncovered);
   });
+
 
 
   await t.test("a question the overview answers never calls the planner's model (#398)", async () => {

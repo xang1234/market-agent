@@ -616,7 +616,10 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     const reading = (proposal: Partial<ScopeProposal>) => async () => ({ ...NO_ASKS, ...proposal });
     const lane = async (userIntent: string, options: Omit<Parameters<typeof chatHarness>[1], "model" | "analyst">, mentions: string[] = []) => {
       const before = analystCalls;
-      const done = completed((await chatHarness(pool, { model: revenueModel(mentions), analyst, ...options }).run({ ...base, userIntent })).events);
+      const { events } = await chatHarness(pool, { model: revenueModel(mentions), analyst, ...options }).run({ ...base, userIntent });
+      // Either lane starts the turn once, before any other event (#398).
+      assert.deepEqual([events[0]?.type, events.filter((event) => event.type === "turn.started").length], ["turn.started", 1], userIntent);
+      const done = completed(events);
       if (analystCalls > before) return "analyst";
       assert.equal(done.bundle_id, "financial_answer", userIntent);
       const { rows: [saved] } = await db.query(`select research_scope from chat_messages where message_id = $1`, [done.message_id]);
@@ -673,6 +676,19 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     // A metric read as asked and turned off is not asked either.
     const offCapex = reading({ metrics: [proposedMetric("capex", null, null)!], asks: new Set(["evidence"]), turns_off: { facets: new Set(), metrics: new Set(["capex"]) } });
     assert.deepEqual(await lane("Skip the capex: where did those numbers come from?", { priorSubjects: async () => [aaa], readQuestion: offCapex }), "analyst");
+  });
+
+  await t.test("with no reading, market data and an evidence question reach the engine, whose planner declines them (#398)", async () => {
+    const carried = { ...(await resolveMention("AAA")), handoff: { display_labels: { ticker: "AAA" } } } as unknown as ChatResolvedSubjectPreResolution;
+    const down = async () => {
+      throw new Error("the reading model is down");
+    };
+    const gaps = [];
+    for (const [userIntent, priorSubjects] of [["AAA YTD", async () => []], ["show the evidence", async () => [carried]]] as const) {
+      const done = completed((await chatHarness(pool, { model: declining("other"), readQuestion: down, priorSubjects }).run({ ...base, userIntent })).events);
+      gaps.push([done.bundle_id, done.financial_gap]);
+    }
+    assert.deepEqual(gaps, [["financial_answer", { reason_code: "unsupported" }], ["financial_answer", { reason_code: "unsupported" }]]);
   });
 
   await t.test("a retry of a turn whose run is reserved resumes it, whatever its reading says now", async () => {

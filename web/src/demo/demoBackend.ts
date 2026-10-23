@@ -81,7 +81,8 @@ function installFetch(replay: Replay): void {
       body: await request.text(),
     })
     announce(request.method, url.pathname, reply)
-    if (startNewChatInstead(request.method, url.pathname, reply)) return unanswered(request.signal)
+    // The caller's signal: the Request's own follows it only weakly, so a collected Request would never abort.
+    if (startNewChatInstead(request.method, url.pathname, reply)) return unanswered(init?.signal ?? request.signal)
     return toResponse(reply ?? offScript())
   }
 }

@@ -301,7 +301,6 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
           scope,
           reading,
           overview: () => overview,
-        explained: () => overview && deps.commentary !== undefined,
           carried: requested.carried,
           notFound: requested.notFound,
           labels: requested.labels,
@@ -683,9 +682,8 @@ function persistAssistantMessage(
   turn: Readonly<{
     scope: ResearchScope | null;
     reading: ScopeProposal | null;
-    // Whether the plan is the overview, of the latest quarters, and whether its commentary explains its figures.
+    // Whether the plan is the overview, of the latest quarters.
     overview: () => boolean;
-    explained: () => boolean;
     carried: ReadonlyArray<string>;
     notFound: ReadonlyArray<string>;
     labels: ReadonlyMap<string, string>;
@@ -698,8 +696,8 @@ function persistAssistantMessage(
     // A plan member the turn gave no label is a peer the overview selected. The
     // saved plan says so, as a retry that resumes the run does not plan again.
     const answeredPeers = plan?.subjects.members.some((member) => !turn.labels.has(member.subject_ref.id.toLowerCase())) ?? false;
-    const covered = [...(answeredPeers ? ["peers" as const] : []), ...(turn.explained() ? ["explains" as const] : [])];
-    const missing = reading === null || plan === null ? [] : uncoveredAsks(without(reading, covered), plan, turn.labels);
+    // The commentary is written from the answer's figures alone, so it gives no cause: an explanation stays uncovered.
+    const missing = reading === null || plan === null ? [] : uncoveredAsks(answeredPeers ? withoutPeers(reading) : reading, plan, turn.labels);
     const note = [
       ...(turn.notFound.length === 0 ? [] : [`No company matched ${labelList(turn.notFound)}.`]),
       ...(turn.carried.length === 0 ? [] : [`${labelList(turn.carried)} ${turn.carried.length > 1 ? "are" : "is"} carried from the previous answer.`]),
@@ -745,8 +743,7 @@ function persistAssistantMessage(
   };
 }
 
-const without = (reading: ScopeProposal, facets: ReadonlyArray<ScopeFacet>): ScopeProposal =>
-  ({ ...reading, asks: new Set([...reading.asks].filter((facet) => !facets.includes(facet))) });
+const withoutPeers = (reading: ScopeProposal): ScopeProposal => ({ ...reading, asks: new Set([...reading.asks].filter((facet) => facet !== "peers")) });
 
 /**
  * The companies a turn answered for, in its order. A missing label marks an

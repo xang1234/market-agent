@@ -123,10 +123,10 @@ test("each recorded reply matched by one substring answers a request made of tha
 });
 
 test("each golden metric question plans from its own recorded reply on the first call", async () => {
-  const recorded = new Set((JSON.parse(readFileSync(REPLIES, "utf8")) as { replies: Array<{ match: string }> }).replies
-    .flatMap((reply) => /^Question: "(.*)"$/u.exec(reply.match)?.[1] ?? []));
-  const questions = Object.keys(EXPECTED);
-  assert.deepEqual(questions.filter((question) => !recorded.has(question)), [], "each planned question has a recorded reading");
+  // Each recorded planner reply answers one golden question, and each is expected here.
+  const questions = (JSON.parse(readFileSync(REPLIES, "utf8")) as { replies: Array<{ match: string | string[] }> }).replies
+    .flatMap((reply) => typeof reply.match === "string" ? /^Request: (.*)\nRequested$/u.exec(reply.match)?.[1] ?? [] : []);
+  assert.deepEqual(questions, Object.keys(EXPECTED), "the golden questions the planner answers");
 
   const client = await createReplayLlmChatClient(REPLIES);
   const model: PlanningModel = async ({ messages }) => ({ text: (await client({} as never, { messages })).text, model: "recorded" });

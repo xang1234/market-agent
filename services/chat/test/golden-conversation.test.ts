@@ -93,7 +93,8 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
       "NVDA's revenue rose in every period from Q1 FY2025 (USD 26,044,000,000.00) to Q4 FY2026 (USD 62,100,000,000.00).\n\n" +
         "NVDA's gross margin (gross profit / revenue) was 74.40%, operating margin (operating income / revenue) 64.90% and net margin (net income / revenue) 57.00% in Q4 FY2026.",
     ]);
-    // ...and the deployment that wrote it is saved with the message (#183).
+    // ...and the deployment that wrote it is on the completion and saved with the message (#183).
+    assert.equal(completed.data.answered_by, "fixture/recorded");
     assert.equal(assistant.answered_by, "fixture/recorded");
   });
 

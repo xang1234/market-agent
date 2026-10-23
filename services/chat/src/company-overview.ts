@@ -44,7 +44,7 @@ export async function overviewSubjects(
   return peers.length === 0 ? null : [company, ...peers];
 }
 
-// Its commentary explains its figures.
+// Its commentary comments on its figures; a cause stays a named gap.
 const OVERVIEW_ASKS: ReadonlySet<ScopeFacet> = new Set(["latest_quarter", "peers", "explains"]);
 const OVERVIEW_SHOWS: ReadonlySet<ScopeFacet | (typeof PERIOD_FIELDS)[number]> = new Set(["latest_quarter", "margins", "margin_trend"]);
 

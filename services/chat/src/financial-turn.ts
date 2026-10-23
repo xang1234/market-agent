@@ -77,6 +77,8 @@ async function emitFinancialTurn(
     emit("turn.completed", {
       ...sealedCompletion({ message_id: turn.message_id, message }, turn.message_id),
       bundle_id: FINANCIAL_BUNDLE_ID,
+      // The deployment that wrote the commentary, as an analyst turn names its own (#183).
+      ...(message?.answered_by ? { answered_by: message.answered_by } : {}),
       ...(turn.kind === "published" ? { financial: { run_id: turn.run_id } } : {}),
     });
     return;
