@@ -66,18 +66,17 @@ export const VALUATIONS: ReadonlySet<string> = new Set<Valuation>(["market_cap",
 /**
  * The one plan a turn about a company gets. The analyst path keeps a turn that
  * asks for no figure but something only it answers; a follow-up naming no
- * company of its own whose scope keeps guidance, or keeps market data and
- * that names no period; and a follow-up that names no company and turns
- * nothing off, asking only for a cause at whatever period, or for nothing with
- * no period. A gap the engine declines with
- * no model: segments asked for, or kept by a turn naming no figure of its
- * own; a period no fiscal field holds, asked by a follow-up naming no company
- * or figure; kept figures with peers, or none the engine can plan at the
- * period. Otherwise, with a scope: one company's margin trend, the companies'
- * overview, or the figures a follow-up keeps beside the income statement. A
- * follow-up naming no company or figure that turns off what none of those
- * leaves out, asking at most why, is the analyst's; anything else is the
- * planner's.
+ * company of its own whose scope keeps guidance, or keeps market data and that
+ * names no period; and a follow-up that names no company and turns nothing
+ * off, asking only for a cause at whatever period, or for nothing with no
+ * period. A gap the engine declines with no model: segments asked for, or kept
+ * by a turn naming no figure of its own; a period no fiscal field holds, asked
+ * by a follow-up naming no company or figure; kept figures with peers, or none
+ * the engine can plan at the period. Otherwise, with a scope: one company's
+ * margin trend, the companies' overview, or the figures a follow-up keeps
+ * beside the income statement. A follow-up naming no company or figure that
+ * turns off what none of those leaves out, asking at most why, is the
+ * analyst's; anything else is the planner's.
  */
 export function routeTurn(reading: ScopeProposal | null, scope: ResearchScope | null): PlanChoice {
   if (reading === null) return PLANNER;
