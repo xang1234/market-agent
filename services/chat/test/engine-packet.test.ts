@@ -5,11 +5,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { FinancialAnswerContent, PresentedResult } from "../../financial-core/src/index.ts";
+import type { FinancialAnswerContent, FinancialPlanV1, PresentedResult } from "../../financial-core/src/index.ts";
 import type { LlmChatRequest } from "../../llm/src/index.ts";
 import { answerTurn } from "../src/answer-trace.ts";
 import { checkAssertions } from "../src/assertions.ts";
 import { enginePacket, packetForModel } from "../src/evidence-packet.ts";
+import { judgeCases } from "../src/inference-judge.ts";
 import { resultRefProblem } from "../src/prose-refs.ts";
 import { plainText, renderAssertion } from "../src/render-assertions.ts";
 
@@ -267,4 +268,90 @@ test("an answer written on an engine packet is sent only that packet, and its in
     { type: "ref", ref_kind: "result", ref_id: RESULT(1), format: "74.40%", period: "Q4 FY2026" },
     { type: "ref", ref_kind: "result", ref_id: RESULT(6), format: "45.74%", period: "Q2 FY2026 vs Q2 FY2025" },
   ]);
+});
+
+// NVDA's and AMD's gross margins and NVDA's lead, each company in its own quarter.
+const LEAD = content([
+  value(1, "a", "measure:m1", "period:p0", "74.40%"),
+  value(2, "b", "measure:m1", "period:p1", "54.02%"),
+  { ...value(3, "a", "measure:m6", "period:p7", "20.38 pp"), subject_label_id: null },
+], ["a", "b"], {
+  "measure:m6": { kind: "measure", text: "Difference in Gross margin (gross profit / revenue)" },
+  "period:p7": { kind: "period", text: "NVIDIA Corporation Q4 FY2026 minus Advanced Micro Devices, Inc. Q2 FY2026" },
+});
+// The plan the lead's answer published, as far as its packet reads it.
+const LEAD_PLAN = {
+  operations: [
+    { node_id: "a_gm", operation: "gross_margin" },
+    { node_id: "b_gm", operation: "gross_margin" },
+    { node_id: "lead", operation: "spread", left: "a_gm", right: "b_gm" },
+  ],
+  outputs: [["out_1", "a_gm"], ["out_2", "b_gm"], ["out_3", "lead"]].map(([output_id, node_id]) => ({ output_id, node_id, unit_id: "u1" })),
+} as unknown as FinancialPlanV1;
+// NVDA's revenue high over its eight quarters.
+const HIGH = content([
+  ...QUARTERS.results,
+  { ...value(18, "a", "measure:m7", "period:p8", ""), presented: { kind: "ranking", text: "Q4 FY2026 has the highest revenue of the 8 quarters ranked", complete: true, order: [], leader_label_ids: ["period:q7"] } },
+], ["a"], {
+  ...Object.fromEntries(REVENUE.map(([period], i) => [`period:q${i}`, { kind: "period", text: period }])),
+  "measure:m7": { kind: "measure", text: "Revenue ranked across periods" },
+  "period:p8": { kind: "period", text: "Q1 FY2025 to Q4 FY2026" },
+});
+
+test("a lead is a figure derived from its two sides' results, and a ranking is a figure that states itself (#398)", () => {
+  assert.deepEqual(enginePacket(LEAD, TICKERS, LEAD_PLAN).figures.slice(2), [{
+    id: "F3",
+    metric: "Difference in Gross margin (gross profit / revenue)",
+    period: "NVIDIA Corporation Q4 FY2026 minus Advanced Micro Devices, Inc. Q2 FY2026",
+    value: "20.38 pp",
+    derived_from: ["F1", "F2"],
+    result_id: RESULT(3),
+    source_ids: [],
+  }]);
+  assert.equal("derived_from" in enginePacket(LEAD, TICKERS).figures[2]!, false, "without its plan, a lead names no sides");
+  assert.deepEqual(enginePacket(HIGH, TICKERS).figures.at(-1), {
+    id: "F9",
+    metric: "Revenue ranked across periods",
+    period: "Q1 FY2025 to Q4 FY2026",
+    value: "Q4 FY2026 has the highest revenue of the 8 quarters ranked",
+    ranking: true,
+    result_id: RESULT(18),
+    source_ids: [],
+  });
+});
+
+test("commentary cites a lead and a ranking by their results, and the judge reads them as supports (#398)", () => {
+  const lead = enginePacket(LEAD, TICKERS, LEAD_PLAN);
+  const leads = renderAssertion({ index: 0, kind: "observation", text: "x", evidence: ["F3"] }, lead, []);
+  assert.equal(plainText(leads.segments), "Difference in gross margin (gross profit / revenue) was 20.38 pp in NVIDIA Corporation Q4 FY2026 minus Advanced Micro Devices, Inc. Q2 FY2026.");
+  assert.deepEqual(leads.segments.filter((segment) => segment.type === "ref"), [
+    { type: "ref", ref_kind: "result", ref_id: RESULT(3), format: "20.38 pp", period: "NVIDIA Corporation Q4 FY2026 minus Advanced Micro Devices, Inc. Q2 FY2026" },
+  ]);
+  assert.equal(resultRefProblem(prose(...leads.segments), block(LEAD)), null);
+  const high = enginePacket(HIGH, TICKERS);
+  const states = renderAssertion({ index: 0, kind: "observation", text: "x", evidence: ["F8", "F9"] }, high, []);
+  assert.equal(plainText(states.segments), "NVDA's revenue was USD 62,100,000,000.00 in Q4 FY2026. Q4 FY2026 has the highest revenue of the 8 quarters ranked.");
+  assert.equal(resultRefProblem(prose(...states.segments), block(HIGH)), null);
+
+  const accepted = checkAssertions([
+    { kind: "observation", text: "x", evidence: ["F3"] },
+    { kind: "analyst_inference", subject: "NVDA", text: "Its pricing holds better.", supports: [0] },
+  ], lead).accepted;
+  const [judged] = judgeCases(accepted, lead, []);
+  const trailing = checkAssertions([
+    { kind: "observation", text: "x", evidence: ["F3"] },
+    { kind: "analyst_inference", subject: "AMD", text: "Its pricing trails.", supports: [0] },
+  ], lead);
+  assert.deepEqual([trailing.accepted.map((entry) => entry.index), trailing.rejected], [[0, 1], []], "a lead is about both its companies");
+  assert.deepEqual(judged!.supports, ["Difference in gross margin (gross profit / revenue) was 20.38 pp in NVIDIA Corporation Q4 FY2026 minus Advanced Micro Devices, Inc. Q2 FY2026."]);
+  const [window] = judgeCases(checkAssertions([
+    { kind: "observation", text: "x", evidence: ["F9"] },
+    { kind: "analyst_inference", text: "Its growth has not stalled.", supports: [0] },
+  ], high).accepted, high, []);
+  assert.deepEqual(window!.supports, ["Q4 FY2026 has the highest revenue of the 8 quarters ranked."]);
+  assert.deepEqual(renderAssertion({ index: 0, kind: "observation", text: "x", evidence: ["F9"] }, high, []).segments, [
+    { type: "ref", ref_kind: "result", ref_id: RESULT(18), format: "Q4 FY2026 has the highest revenue of the 8 quarters ranked", period: "Q1 FY2025 to Q4 FY2026" },
+    { type: "text", text: "." },
+  ]);
+  assert.match(window!.figures[0]!, /USD 62,100,000,000\.00 in Q4 FY2026\. Q4 FY2026 has the highest revenue of the 8 quarters ranked\.$/u, "the judge sees the ranking among the figures shown");
 });

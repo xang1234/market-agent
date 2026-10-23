@@ -5,6 +5,7 @@
 // it beside the answer, in the same message. The seal admits no prose and no
 // model may run inside finalization, so it is appended after the commit.
 
+import type { FinancialPlanV1 } from "../../financial-core/src/index.ts";
 import type { SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { LlmProviderError, LlmRouterError } from "../../llm/src/index.ts";
@@ -51,13 +52,14 @@ export async function saveCommentary(
     const label = input.labels.get(member.subject_ref.id.toLowerCase());
     return label === undefined ? [] : [[member.slot_id, label] as const];
   }));
-  await append(db, input.message, await commentary(compose, input.message, tickers, input.turn));
+  await append(db, input.message, await commentary(compose, input.message, tickers, plan, input.turn));
 }
 
 async function commentary(
   compose: CommentaryComposer,
   message: ChatReadMessage,
   tickers: ReadonlyMap<string, string>,
+  plan: FinancialPlanV1 | null,
   turn: Pick<TurnTrace, "thread_id" | "run_id" | "turn_id" | "question">,
 ): Promise<Commentary> {
   const [answer] = message.blocks as unknown as [FinancialAnswerBlock];
@@ -67,7 +69,7 @@ async function commentary(
     console.warn(`[chat] analyst commentary unavailable for message ${message.message_id}`, cause);
     return { block: { ...skeleton, segments: [{ type: "text", text: COMMENTARY_UNAVAILABLE }] }, answered_by: null };
   };
-  const packet = enginePacket(answer.financial, tickers);
+  const packet = enginePacket(answer.financial, tickers, plan);
   let deployment: string | null = null;
   let written: Pick<AnsweredTurn, "assertions" | "blocks">;
   try {

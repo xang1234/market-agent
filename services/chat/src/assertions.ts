@@ -14,7 +14,7 @@
 // and the report goes to evals and logs.
 
 import { checkComparison, comparablePeriods, type ComparisonOp } from "./comparisons.ts";
-import type { EvidencePacket } from "./evidence-packet.ts";
+import { figureCompanies, type EvidencePacket } from "./evidence-packet.ts";
 import type { InferenceVerdict } from "./verdicts.ts";
 import { isRecord } from "../../shared/src/http.ts";
 
@@ -247,11 +247,10 @@ function shapeError(
   }
 }
 
-// The companies cited figures and claims are about; a figure with no company
-// is the only company's.
+// The companies cited figures and claims are about (figureCompanies).
 export function companiesOf(cited: ReadonlyArray<string>, packet: EvidencePacket): Set<string | undefined> {
   return new Set([
-    ...packet.figures.filter((figure) => cited.includes(figure.id)).map((figure) => figure.company ?? packet.companies[0]),
+    ...packet.figures.filter((figure) => cited.includes(figure.id)).flatMap((figure) => figureCompanies(figure, packet)),
     ...packet.claims.filter((claim) => cited.includes(claim.id)).map((claim) => claim.company),
   ]);
 }

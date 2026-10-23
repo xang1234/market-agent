@@ -10,7 +10,7 @@ import type {
   ChatAnalystToolRuntimeToolCall,
 } from "./coordinator.ts";
 import { displayedFigures, requestIsNamedGap } from "./fact-blocks.ts";
-import { buildEvidencePacket, packetForModel, type AvailableFigure, type ClaimEvidence, type ClaimRecord, type EvidencePacket } from "./evidence-packet.ts";
+import { buildEvidencePacket, figureCompanies, packetForModel, type AvailableFigure, type ClaimEvidence, type ClaimRecord, type EvidencePacket } from "./evidence-packet.ts";
 import { assertionList, checkAssertions, MAX_ASSERTIONS, type AssertionReport } from "./assertions.ts";
 import { formatCompactCurrency, formatCurrency } from "../../analyze/src/block-format.ts";
 import { calendarNote, plainText, renderAssertion, unverifiedInference, type RenderedAssertion } from "./render-assertions.ts";
@@ -302,7 +302,7 @@ export function renderedAnswer(input: AnswerInput, packet: EvidencePacket, repor
     const keptAssertions = report.accepted.filter((assertion) => assertion.kind !== "analyst_inference");
     const keptFigures = keptAssertions.flatMap((assertion) => packet.figures.filter((figure) => assertion.evidence.includes(figure.id)));
     const covered = new Set([
-      ...keptFigures.map((figure) => figure.company ?? packet.companies[0]),
+      ...keptFigures.flatMap((figure) => figureCompanies(figure, packet)),
       ...keptAssertions.flatMap((assertion) => packet.claims.filter((claim) => assertion.evidence.includes(claim.id)).map((claim) => claim.company)),
     ]);
     if (packet.companies.length > 1 && packet.coverage.some((entry) => entry.status === "shown" && !covered.has(entry.company))) {

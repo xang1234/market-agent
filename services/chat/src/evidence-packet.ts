@@ -12,7 +12,7 @@
 // cutoff): repeats already counted once, each placed by its stored polarity,
 // with any stored contradiction between them named.
 
-import type { FinancialAnswerContent } from "../../financial-core/src/index.ts";
+import type { FinancialAnswerContent, FinancialPlanV1 } from "../../financial-core/src/index.ts";
 import { displayedFigures, QUARTERS_SHOWN, readsNamedQuarter, type DerivedFigureRecord, type DisplayedFigure } from "./fact-blocks.ts";
 import type { ResearchScope } from "./research-scope.ts";
 import { isRecord } from "../../shared/src/http.ts";
@@ -26,10 +26,12 @@ export type PacketFigure = Omit<DisplayedFigure, "fact_id" | "block_id"> & {
   result_id?: string;
   // Why the engine computed no value: the figure is unavailable, never a number.
   gap?: string;
+  // An engine ranking, whose value is its sentence ("Q4 FY2026 has the highest revenue of the 8 quarters ranked").
+  ranking?: true;
   source_ids: ReadonlyArray<string>;
 } & ({
   displayed?: undefined;
-  // A figure no block draws, computed from two that are: their ids, [current, prior].
+  // A figure computed from two others: their ids, [current, prior], or a lead's [left, right].
   derived_from?: readonly [string, string];
 } | AvailableFigureFields);
 
@@ -46,6 +48,12 @@ type AvailableFigureFields = {
 };
 
 export type AvailableFigure = Omit<PacketFigure, "id" | "shown_in"> & AvailableFigureFields;
+
+// The companies a figure is about: a lead's two sides', else its own, else the only company's.
+export function figureCompanies(figure: PacketFigure, packet: EvidencePacket): Array<string | undefined> {
+  const sides = figure.displayed === undefined && figure.derived_from ? packet.figures.filter((side) => figure.derived_from!.includes(side.id)) : [];
+  return sides.length > 0 ? sides.map((side) => side.company ?? packet.companies[0]) : [figure.company ?? packet.companies[0]];
+}
 
 // How completely a figure's period is covered, when it is not fully.
 export function periodCoverage(figure: PacketFigure): string | undefined {
@@ -364,32 +372,39 @@ function derivedRecords(block: Block): DerivedFigureRecord[] {
 
 /**
  * A published engine answer as the evidence its commentary is written from:
- * each value or gap result in the answer's order, a gap with its reason. Only
- * an answer about several companies names each figure's, by the ticker the
- * turn gave its slot, else the engine's label for it.
+ * each value, ranking or gap result in the answer's order, a gap with its
+ * reason, and a lead with the two results it is the difference of, when its
+ * plan is given. Only an answer about several companies names each figure's,
+ * by the ticker the turn gave its slot, else the engine's label for it.
  */
-export function enginePacket(content: FinancialAnswerContent, tickers: ReadonlyMap<string, string>): EvidencePacket {
+export function enginePacket(content: FinancialAnswerContent, tickers: ReadonlyMap<string, string>, plan: FinancialPlanV1 | null = null): EvidencePacket {
   const subjects = Object.values(content.labels).flatMap((label) => label.kind === "subject" ? [label] : []);
   const companyOf = new Map(subjects.map((label) => [`subject:${label.slot_id}`, tickers.get(label.slot_id) ?? label.text]));
   const companies = [...companyOf.values()];
-  const figures = content.results.flatMap(({ result_id, subject_label_id, measure_label_id, period_label_id, presented }) => {
-    if (presented.kind !== "value" && presented.kind !== "gap") return [];
+  const shown = content.results.filter(({ presented }) => presented.kind !== "predicate");
+  const idOf = new Map(shown.map(({ output_id }, index) => [output_id, `F${index + 1}`]));
+  const sides = leadSides(plan, content.unit_id);
+  const figures = shown.map(({ result_id, output_id, subject_label_id, measure_label_id, period_label_id, presented }, index) => {
     const company = companies.length > 1 && subject_label_id !== null ? companyOf.get(subject_label_id) : undefined;
-    return [{
+    const [left, right] = (sides.get(output_id) ?? []).map((side) => idOf.get(side));
+    return {
+      id: `F${index + 1}`,
       ...(company === undefined ? {} : { company }),
       metric: content.labels[measure_label_id]!.text,
       period: content.labels[period_label_id]!.text,
       value: presented.text,
       ...(presented.kind === "gap" ? { gap: presented.text } : {}),
+      ...(presented.kind === "ranking" ? { ranking: true as const } : {}),
+      ...(left !== undefined && right !== undefined ? { derived_from: [left, right] as const } : {}),
       result_id,
       source_ids: [],
-    }];
+    };
   });
   return {
     route: "financial_engine",
     cutoff: content.knowledge_cutoff,
     companies,
-    figures: figures.map((figure, index) => ({ id: `F${index + 1}`, ...figure })),
+    figures,
     coverage: companies.map((company) => ({ company, status: "shown" })),
     gaps: [],
     query_bounds: {},
@@ -398,6 +413,16 @@ export function enginePacket(content: FinancialAnswerContent, tickers: ReadonlyM
     claims_status: "none",
     claims_truncated: false,
   };
+}
+
+// Each lead's two sides in the unit, by output: a spread's left and right.
+function leadSides(plan: FinancialPlanV1 | null, unitId: string): ReadonlyMap<string, ReadonlyArray<string>> {
+  const outputs = plan?.outputs.filter((output) => output.unit_id === unitId) ?? [];
+  const outputOf = new Map(outputs.map((output) => [output.node_id, output.output_id]));
+  return new Map(outputs.flatMap((output) => {
+    const node = plan!.operations.find((entry) => entry.node_id === output.node_id);
+    return node?.operation === "spread" ? [[output.output_id, [node.left, node.right].flatMap((side) => outputOf.get(side) ?? [])]] : [];
+  }));
 }
 
 function packetClaims(
