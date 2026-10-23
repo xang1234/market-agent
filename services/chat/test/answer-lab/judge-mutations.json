@@ -1,5 +1,5 @@
 {
-  "about": "Mutation set for the inference judge (src/inference-judge.ts, #302): inferences on real recorded turns, each case's originals (which the answer backs) paired with mutations the word rules in assertions.ts pass but the judge must catch. A case stands in the place of its trace's assertion at index, resting on the accepted assertions in supports; the judge also reads the answer's other accepted observations and comparisons (rest_of_answer) and every figure its tables and charts show (figures_shown). Each kind must come back at its expected outcome (scripts/answer-lab.ts MUTATION_TIERS): an original entailed, with worded_amount false; worded_amount with the worded_amount flag true, at any verdict, which shows it as an unverified analyst view when entailed or unsupported and hides it when contradicted; unsupported_claim and hedged_valuation unsupported, flag false, shown labelled as an unverified analyst view; flipped_direction and contradicted_ranking contradicted, flag false, which hides it. A mutation shown above its kind's tier counts against the judge: a worded_amount mutation shown with the entailed label, or a flipped_direction or contradicted_ranking one shown or unverified. source: trace (each case's original is its trace's own accepted inference, at its index and on its accepted supports, which the trace's judge entailed; a case's second original says the same naming the companies). Re-curated in #498 on the traces re-recorded under the list-only prompt: each case keeps its id and its mutations' kinds, each mutation rewritten from the new original. Where a trace has one inference fitting two cases, they share it (segment-concentration and segment-cushion; margin-recovery and revenue-after-loss). follow-up-memory.turn-2 has no entailed inference now, so its cases moved: fiscal-offset to follow-up-memory.turn-3, peer-fundamentals to peer-three. operating-offset's supports leave out the operating loss, which only the rest of the answer shows (rest_of_answer); its mutation and revenue-after-loss's contradict figures their supports do not state and the rest of the answer does. margin-recovery's mutation contradicts the gross margin recovery, which neither its supports nor the rest of the answer state and only the gross margin chart shows (figures_shown). Some worded_amount mutations also make an unsupported claim (a forecast or cause with an amount in words), and the rest state an amount the page bears out, so only the flag keeps them from the entailed label. Naming a company by ticker, name or alias is no fault in itself (owner, 2026-10-18), so an original may name one when the answer backs what it says; a hedged valuation or market reading the answer does not show is a mutation. Run: node --experimental-strip-types scripts/answer-lab.ts judge-mutations test/answer-lab/judge-mutations.json",
+  "about": "Mutation set for the inference judge (src/inference-judge.ts, #302): inferences on real recorded turns, each case's originals (which the answer backs) paired with mutations the word rules in assertions.ts pass but the judge must catch. A case stands in the place of its trace's assertion at index, resting on the accepted assertions in supports; the judge also reads the answer's other accepted observations and comparisons (rest_of_answer) and every figure its tables and charts show (figures_shown). Each kind must come back at its expected outcome (scripts/answer-lab.ts MUTATION_TIERS): an original entailed, with worded_amount false; worded_amount with the worded_amount flag true, at any verdict, which shows it as an unverified analyst view when entailed or unsupported and hides it when contradicted; unsupported_claim and hedged_valuation unsupported, flag false, shown labelled as an unverified analyst view; flipped_direction and contradicted_ranking contradicted, flag false, which hides it. A mutation shown above its kind's tier counts against the judge: a worded_amount mutation shown with the entailed label, or a flipped_direction or contradicted_ranking one shown or unverified. source: trace (each case's original is its trace's own accepted inference, at its index and on its accepted supports, which the trace's judge entailed; a case's second original says the same naming the companies). Re-curated in #498 on the traces re-recorded under the list-only prompt: each case keeps its id and its mutations' kinds, each mutation rewritten from the new original. Where a trace has one inference fitting two cases, they are one case, so its original is judged once: segment-concentration holds segment-cushion's mutations, and margin-recovery holds revenue-after-loss's. follow-up-memory.turn-2 has no entailed inference now, so its cases moved: fiscal-offset to follow-up-memory.turn-3, peer-fundamentals to peer-three. operating-offset's supports leave out the operating loss, which only the rest of the answer shows (rest_of_answer); its mutation and margin-recovery's second (revenue slipping since) contradict figures their supports do not state and the rest of the answer does. margin-recovery's first mutation contradicts the gross margin recovery, which neither its supports nor the rest of the answer state and only the gross margin chart shows (figures_shown). Some worded_amount mutations also make an unsupported claim (a forecast or cause with an amount in words), and the rest state an amount the page bears out, so only the flag keeps them from the entailed label. Naming a company by ticker, name or alias is no fault in itself (owner, 2026-10-18), so an original may name one when the answer backs what it says; a hedged valuation or market reading the answer does not show is a mutation. Run: node --experimental-strip-types scripts/answer-lab.ts judge-mutations test/answer-lab/judge-mutations.json",
   "cases": [
     {
       "id": "segment-concentration",
@@ -35,24 +35,7 @@
         {
           "kind": "worded_amount",
           "text": "Its revenue is overwhelmingly concentrated in Data Center, and that segment should add several billion dollars a quarter as hyperscaler demand grows."
-        }
-      ]
-    },
-    {
-      "id": "segment-cushion",
-      "source": "trace",
-      "trace": "traces/segment-drill-down.json",
-      "index": 3,
-      "supports": [
-        0,
-        1,
-        2
-      ],
-      "subject": "NVDA",
-      "originals": [
-        "Its revenue is overwhelmingly concentrated in Data Center, with every other segment far smaller."
-      ],
-      "mutations": [
+        },
         {
           "kind": "worded_amount",
           "text": "Its revenue is overwhelmingly concentrated in Data Center, with the other four segments together bringing in only single-digit billions of dollars."
@@ -280,24 +263,7 @@
         {
           "kind": "flipped_direction",
           "text": "The operating loss in that quarter came mainly from a sharp gross margin drop that has not recovered since, rather than from weak revenue."
-        }
-      ]
-    },
-    {
-      "id": "revenue-after-loss",
-      "source": "trace",
-      "trace": "traces/cause-in-evidence.json",
-      "index": 0,
-      "supports": [
-        1,
-        2,
-        3
-      ],
-      "subject": "AMD",
-      "originals": [
-        "The operating loss in that quarter came mainly from a sharp gross margin drop, which management ties to export-control inventory charges, rather than from weak revenue."
-      ],
-      "mutations": [
+        },
         {
           "kind": "flipped_direction",
           "text": "The operating loss in that quarter came mainly from a sharp gross margin drop rather than from weak revenue, though revenue has slipped in the quarters since."

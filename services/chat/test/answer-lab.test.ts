@@ -121,8 +121,11 @@ test("the judge's mutation set: every original and mutation passes the turn's ow
   const variants = mutationVariants(MUTATIONS);
   const count = (key: (variant: (typeof variants)[number]) => string) =>
     Object.fromEntries([...new Set(variants.map(key))].map((value) => [value, variants.filter((variant) => key(variant) === value).length]));
+  // A case per inference a trace holds, so no original is judged twice.
+  const cases = (JSON.parse(readFileSync(MUTATIONS, "utf8")) as { cases: Array<{ id: string; trace: string; index: number }> }).cases;
+  assert.deepEqual(cases.filter((entry, i) => cases.findIndex((other) => other.trace === entry.trace && other.index === entry.index) !== i).map(({ id }) => id), []);
   assert.deepEqual(count((variant) => variant.kind), {
-    original: 14,
+    original: 12,
     worded_amount: 10,
     unsupported_claim: 5,
     contradicted_ranking: 5,
