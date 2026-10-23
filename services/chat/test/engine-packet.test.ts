@@ -353,19 +353,22 @@ test("commentary cites a lead and a ranking by their results, and the judge read
   assert.match(window!.figures[0]!, /USD 62,100,000,000\.00 in Q4 FY2026\. Q4 FY2026 has the highest revenue of the 8 quarters ranked\.$/u, "the judge sees the ranking among the figures shown");
 });
 
+// NVDA's lead in gross margin over AMD and over INTC, each a figure of no one company.
+const LEADS = content([
+  value(1, "a", "measure:m1", "period:p0", "74.40%"),
+  value(2, "b", "measure:m1", "period:p1", "54.02%"),
+  value(3, "c", "measure:m1", "period:p6", "39.20%"),
+  { ...value(4, "a", "measure:m6", "period:p7", "20.38 pp"), subject_label_id: null },
+  { ...value(5, "a", "measure:m6", "period:p9", "35.20 pp"), subject_label_id: null },
+], ["a", "b", "c"], {
+  "subject:c": { kind: "subject", text: "Intel Corporation", slot_id: "c" },
+  "measure:m6": { kind: "measure", text: "Difference in Gross margin (gross profit / revenue)" },
+  "period:p7": { kind: "period", text: "NVIDIA Corporation Q4 FY2026 minus Advanced Micro Devices, Inc. Q2 FY2026" },
+  "period:p9": { kind: "period", text: "NVIDIA Corporation Q4 FY2026 minus Intel Corporation Q3 FY2026" },
+});
+const LEADS_TICKERS = new Map([["a", "NVDA"], ["b", "AMD"], ["c", "INTC"]]);
+
 test("an unknown cause never cites a lead as a change: each is two companies' figures (#398)", () => {
-  const leads = content([
-    value(1, "a", "measure:m1", "period:p0", "74.40%"),
-    value(2, "b", "measure:m1", "period:p1", "54.02%"),
-    value(3, "c", "measure:m1", "period:p6", "39.20%"),
-    { ...value(4, "a", "measure:m6", "period:p7", "20.38 pp"), subject_label_id: null },
-    { ...value(5, "a", "measure:m6", "period:p9", "35.20 pp"), subject_label_id: null },
-  ], ["a", "b", "c"], {
-    "subject:c": { kind: "subject", text: "Intel Corporation", slot_id: "c" },
-    "measure:m6": { kind: "measure", text: "Difference in Gross margin (gross profit / revenue)" },
-    "period:p7": { kind: "period", text: "NVIDIA Corporation Q4 FY2026 minus Advanced Micro Devices, Inc. Q2 FY2026" },
-    "period:p9": { kind: "period", text: "NVIDIA Corporation Q4 FY2026 minus Intel Corporation Q3 FY2026" },
-  });
   const plan = {
     operations: [
       ...["a", "b", "c"].map((slot) => ({ node_id: `${slot}_gm`, operation: "gross_margin" })),
@@ -374,7 +377,7 @@ test("an unknown cause never cites a lead as a change: each is two companies' fi
     ],
     outputs: ["a_gm", "b_gm", "c_gm", "a_minus_b", "a_minus_c"].map((node_id, index) => ({ output_id: `out_${index + 1}`, node_id, unit_id: "u1" })),
   } as unknown as FinancialPlanV1;
-  const packet = enginePacket(leads, new Map([["a", "NVDA"], ["b", "AMD"], ["c", "INTC"]]), plan);
+  const packet = enginePacket(LEADS, LEADS_TICKERS, plan);
   const report = checkAssertions([
     { kind: "unknown_cause", text: "x", evidence: ["F4"] },
     { kind: "unknown_cause", text: "y", evidence: ["F4", "F5"] },
@@ -382,6 +385,16 @@ test("an unknown cause never cites a lead as a change: each is two companies' fi
   assert.deepEqual(report.rejected.map((entry) => [entry.index, entry.check]), [[0, "kind"], [1, "kind"]]);
   const window = enginePacket(HIGH, TICKERS);
   assert.deepEqual(checkAssertions([{ kind: "unknown_cause", text: "x", evidence: ["F9"] }], window).rejected.map((entry) => entry.check), ["kind"], "a ranking states no value that changed");
+});
+
+test("without its plan, a packet holds no lead or ranking: nothing says what either is derived from, so commentary cannot cite one (#398 review)", () => {
+  const rejected = (packet: ReturnType<typeof enginePacket>, ...assertions: unknown[]) => checkAssertions(assertions, packet).rejected.map((entry) => [entry.index, entry.reason]);
+  assert.deepEqual(rejected(enginePacket(LEADS, LEADS_TICKERS, null),
+    { kind: "unknown_cause", text: "x", evidence: ["F4"] },
+    { kind: "unknown_cause", text: "y", evidence: ["F4", "F5"] },
+  ), [[0, 'unknown evidence id "F4"'], [1, 'unknown evidence id "F4"']]);
+  assert.deepEqual(rejected(enginePacket(LEAD, TICKERS, null), { kind: "observation", text: "x", evidence: ["F3"] }), [[0, 'unknown evidence id "F3"']]);
+  assert.deepEqual(rejected(enginePacket(HIGH, TICKERS, null), { kind: "observation", text: "x", evidence: ["F9"] }), [[0, 'unknown evidence id "F9"']]);
 });
 
 test("a peer ranking is no figure of the packet: it is no one company's (#398)", () => {
