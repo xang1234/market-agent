@@ -308,7 +308,6 @@ test("a comparison shows each company's latest quarter, named from the newest it
     changeOf(ticker, quarter, yearBefore),
   ];
   const CLOSEST: Record<string, [string, string]> = { AMD: ["Q4 2025", "fy2025_q4"], AAPL: ["Q1 2026", "fy2026_q1"] };
-  const closest = (...tickers: string[]) => tickers.flatMap((ticker) => MARGINS.map(([metric, line]) => margin(ticker, metric, line, CLOSEST[ticker]![0])));
   const leads = (...tickers: string[]) => MARGINS.flatMap(([metric, line]) => tickers.slice(1).map((other) =>
     `spread(${margin(tickers[0]!, metric, line, "Q4 2026")}, ${margin(other, metric, line, CLOSEST[other]![0])})`));
   const NVDA = latestQuarter("NVDA", "Q4 2026", "Q3 2026", "Q4 2025");
@@ -326,15 +325,14 @@ test("a comparison shows each company's latest quarter, named from the newest it
     output_ids: [
       ...ids("a", "fy2026_q4"),
       ...ids("b", "fy2026_q2"),
-      ...MARGINS.map(([metric]) => `out_b_${metric}_fy2025_q4`),
       ...MARGINS.map(([metric]) => `out_a_minus_b_${metric}`),
     ],
-    outputs: [...NVDA, ...AMD, ...closest("AMD"), ...leads("NVDA", "AMD")],
+    outputs: [...NVDA, ...AMD, ...leads("NVDA", "AMD")],
     uncovered: [],
     reads: [read("NVDA"), read("AMD")],
   }, "a quarter public after the cutoff is not NVDA's newest");
   const three = await compare("NVDA, AMD and AAPL");
-  assert.deepEqual([three?.outputs, three?.reads], [[...NVDA, ...AMD, ...AAPL, ...closest("AMD", "AAPL"), ...leads("NVDA", "AMD", "AAPL")], [read("NVDA"), read("AMD"), read("AAPL")]],
+  assert.deepEqual([three?.outputs, three?.reads], [[...NVDA, ...AMD, ...AAPL, ...leads("NVDA", "AMD", "AAPL")], [read("NVDA"), read("AMD"), read("AAPL")]],
     "NVDA's newest quarter ends 2026-01-25, and AMD's Q4 2025 and AAPL's Q1 2026 each 29 days before it");
   const noLead = "NVIDIA Corporation's lead over Advanced Micro Devices, Inc. in each margin, as no quarter Advanced Micro Devices, Inc. reported ends within half a quarter of NVIDIA Corporation's Q4 FY2026";
   const apart = await compare("NVDA and AMD", { ...PAGES, AMD: candidatePage(...goldenQuarters("AMD", "2026-08-01T00:00:00.000Z").slice(6)) });

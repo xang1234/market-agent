@@ -7,7 +7,10 @@ import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import type { PlanningModel, PlanningResult } from "../../financial-engine/src/planner.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
+import { inspectCommittedResult } from "../../financial-engine/src/inspection.ts";
 import type { SqlExecutor } from "../../financial-engine/src/ports.ts";
+import type { FinancialAnswerContent } from "../../financial-core/src/index.ts";
+import { enginePacket, figureCompanies } from "../src/evidence-packet.ts";
 import { IDS, seedReportedFact } from "../../financial-engine/test/db-fixtures.ts";
 import { resolveResearchScope, type ResearchScope, type ScopeProposal } from "../src/research-scope.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "../src/subjects.ts";
@@ -395,18 +398,40 @@ test("a question about one company that asks for no figure is answered with its 
   ];
   const leads = (period: string, outcomes: ReadonlyArray<ReadonlyArray<string>>) =>
     ["gross_margin", "operating_margin", "net_margin"].map((metric, index) => [`out_a_minus_b_${metric}`, period, ...outcomes[index]!]);
-  const QTRS_OVER_OFFQ = [
-    ["out_b_gross_margin_fy2023_q4", "Q4 FY2023", "verified", "60.00%"],
-    ["out_b_operating_margin_fy2023_q4", "Q4 FY2023", "verified", "25.00%"],
-    ["out_b_net_margin_fy2023_q4", "Q4 FY2023", "verified", "20.00%"],
-    ...leads("QTRS Corp Q4 FY2023 minus OFFQ Corp Q4 FY2023", Array(3).fill(["verified", "0.00 pp"])),
-  ];
+  // OFFQ's newest quarter ends half a year after QTRS's, so each lead takes OFFQ's Q4 FY2023, which ends with QTRS's.
+  const QTRS_OVER_OFFQ = leads("QTRS Corp Q4 FY2023 minus OFFQ Corp Q4 FY2023", Array(3).fill(["verified", "0.00 pp"]));
 
   await t.test("a comparison of named companies is one table, each company's figures from its own latest quarter (#398)", async () => {
     const done = completed((await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve }).run({ ...base, userIntent: "Compare revenue for QTRS and OFFQ" })).events);
     assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_LATEST), ...slotted("b", OFFQ_LATEST), ...QTRS_OVER_OFFQ]);
     const { rows: [shown] } = await db.query(`select blocks->0->'financial'->'presentations' as presentations from chat_messages where message_id = $1`, [done.message_id]);
     assert.deepEqual(shown.presentations.map((presentation: { kind: string }) => presentation.kind), ["table", "scalar", "scalar", "scalar"], "the leads stand beside the table");
+  });
+
+  await t.test("a lead against a peer's earlier quarter shows each company at its newest quarter alone: one column per figure, each lead both companies', inspected with its four inputs (#398 review)", async () => {
+    const { turnId, events } = await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve }).run({ ...base, userIntent: "Compare revenue for QTRS and OFFQ" });
+    const done = completed(events);
+    const { rows: [saved] } = await db.query(`select blocks->0->'financial' as financial from chat_messages where message_id = $1`, [done.message_id]);
+    const financial = saved.financial as FinancialAnswerContent;
+    const table = financial.presentations[0]!;
+    assert.equal(table.kind, "table");
+    const MEASURES = ["Revenue", "Gross profit", "Operating income", "Net income", "Gross margin (gross profit / revenue)", "Operating margin (operating income / revenue)", "Net margin (net income / revenue)"];
+    // FinancialAnswer.tsx renders a null cell as "Not requested".
+    assert.deepEqual([table.kind === "table" && table.columns.map((column) => financial.labels[column.measure_label_id]!.text), table.kind === "table" && table.rows.map((row) => row.cells.filter((cell) => cell === null).length)], [
+      [...MEASURES, "Quarter-over-quarter percent change in Revenue", "Year-over-year percent change in Revenue"],
+      [0, 0],
+    ]);
+    const { rows: [planned] } = await db.query(`select p.plan from financial_runs r join financial_plans p on p.plan_id = r.plan_id where r.request_key = $1`, [turnId]);
+    const packet = enginePacket(financial, new Map([["a", "QTRS"], ["b", "OFFQ"]]), planned.plan);
+    const margins = MEASURES.slice(4);
+    assert.deepEqual(packet.figures.filter((figure) => figure.metric.includes("margin")).map((figure) => [figureCompanies(figure, packet).join(" and "), figure.metric, figure.period]), [
+      ...margins.map((metric) => ["QTRS", metric, "Q4 FY2023"]),
+      ...margins.map((metric) => ["OFFQ", metric, "Q2 FY2024"]),
+      ...margins.map((metric) => ["QTRS and OFFQ", `Difference in ${metric}`, "QTRS Corp Q4 FY2023 minus OFFQ Corp Q4 FY2023"]),
+    ], "OFFQ's margins are its newest quarter's alone, so no trend of them can be written");
+    const lead = financial.results.find((result) => result.output_id === "out_a_minus_b_gross_margin")!;
+    const inspected = await inspectCommittedResult(db, IDS.owner, lead.result_id);
+    assert.deepEqual(inspected?.availability === "available" && inspected.inputs.map((input) => input.input_slot).sort(), ["a_gross_profit_fy2023_q4", "a_revenue_fy2023_q4", "b_gross_profit_fy2023_q4", "b_revenue_fy2023_q4"]);
   });
 
   await t.test("a line the engine cannot certify for one compared company is its gap cell, and the comparison still publishes (#398)", async () => {
