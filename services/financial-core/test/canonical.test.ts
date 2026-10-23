@@ -106,3 +106,8 @@ test("binding hash retains persistence IDs", () => {
   renamed.plan_id = "99999999-9999-4999-8999-999999999999";
   assert.notEqual(planBindingHash(renamed, authorityFixture()), planBindingHash(plan, authorityFixture()));
 });
+
+test("a plan without measure_defaults hashes as it did before the field existed (#517)", () => {
+  assert.equal(planSemanticHash(planFixture()), "1e799a824de53b84a43a2bfe20f945488dfbc4e776158b5ae3a10a759e078bbe");
+  assert.equal(planBindingHash(planFixture(), authorityFixture()), "9e81462d08cfb67049598367961b22c2c73d7600c3caf45a50321361dd1f7a8c");
+});

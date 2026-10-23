@@ -310,7 +310,15 @@ export type FinancialPlanV1 = {
   thresholds: PlanThreshold[];
   limits: ExecutionLimits;
   presentation_template_version: VersionTag;
+  /** Absent when the request cited no measure family, so such a plan hashes as before (#517). */
+  measure_defaults?: MeasureDefaultRecord[];
 };
+
+/** A measure family the plan was expanded from: for its table's periods, or for the one the request named. */
+export type MeasureDefaultRecord = { family: LocalId; table_version: VersionTag } & (
+  | { period: "default" }
+  | { period: "requested"; requested_period: PeriodSelector }
+);
 
 // ---------------------------------------------------------------------------
 // Server-only runtime authority. Never part of a plan and never model-supplied.

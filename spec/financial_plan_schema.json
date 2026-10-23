@@ -482,8 +482,41 @@
           "items": { "$ref": "#/$defs/Threshold" }
         },
         "limits": { "$ref": "#/$defs/ExecutionLimits" },
-        "presentation_template_version": { "$ref": "#/$defs/VersionTag" }
+        "presentation_template_version": { "$ref": "#/$defs/VersionTag" },
+        "measure_defaults": {
+          "description": "The measure families the plan reads a broad measure as. Absent when the request cited none.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/MeasureDefault" }
+        }
       }
+    },
+    "MeasureDefault": {
+      "description": "A cited family: planned for its table's periods, or for the one period the request named.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["family", "table_version", "period"],
+          "properties": {
+            "family": { "$ref": "#/$defs/LocalId" },
+            "table_version": { "$ref": "#/$defs/VersionTag" },
+            "period": { "const": "default" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["family", "table_version", "period", "requested_period"],
+          "properties": {
+            "family": { "$ref": "#/$defs/LocalId" },
+            "table_version": { "$ref": "#/$defs/VersionTag" },
+            "period": { "const": "requested" },
+            "requested_period": { "$ref": "#/$defs/PeriodSelector" }
+          }
+        }
+      ]
     },
     "Surface": {
       "enum": ["chat", "analyze", "analyst_grid", "thesis", "discovery", "screener"]
