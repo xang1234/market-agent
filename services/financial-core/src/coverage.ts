@@ -1,9 +1,10 @@
 // Dependency propagation, publication-unit isolation, and output coverage.
 //
 // * Every requested output receives a state; missing rows never vanish.
-// * Ordinary gaps block downstream nodes (blocked_dependency). peer_compare
-//   alone tolerates members missing for evidence reasons and reports an
-//   incomplete cohort; execution failures are never tolerated as "missing".
+// * Ordinary gaps block downstream nodes (blocked_dependency). The rankings
+//   (peer_compare, period_rank) alone tolerate members missing for evidence
+//   reasons and report how many they ranked; execution failures are never
+//   tolerated as "missing".
 // * A FinancialIntegrityError rejects every predeclared unit whose closure
 //   contains the failing node; unaffected units continue.
 // * Any other exception is run-fatal and propagates. Nothing is caught and

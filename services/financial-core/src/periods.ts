@@ -26,6 +26,17 @@ export function periodDays(period: PeriodIdentity): number | null {
   return dayNumber(period.end) - dayNumber(period.start) + 1;
 }
 
+/**
+ * Two periods, each in its own fiscal calendar, cover mostly the same months:
+ * their ends lie at most half the shorter period apart. Any two calendars
+ * have periods that close, so a wider gap means one is a period ahead.
+ */
+export function coverSameMonths(left: Pick<PeriodIdentity, "start" | "end">, right: Pick<PeriodIdentity, "start" | "end">): boolean {
+  if (left.start === null || right.start === null) return false;
+  const days = Math.min(dayNumber(left.end) - dayNumber(left.start), dayNumber(right.end) - dayNumber(right.start)) + 1;
+  return 2 * Math.abs(dayNumber(left.end) - dayNumber(right.end)) <= days;
+}
+
 export function classifyDuration(period: PeriodIdentity): "instant" | "quarter" | "annual" | "other" {
   const days = periodDays(period);
   if (days === null) return "instant";

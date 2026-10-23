@@ -7,17 +7,19 @@ import type { FinancialPlanV1, OperationKind, OperationNode, ReportedMetricNode,
 import {
   absoluteChange,
   freeCashFlow,
+  operationGap,
   margin,
   marketCap,
   peRatio,
   percentChangePositiveBase,
   ratio,
+  spread,
   trailingSum,
   type FinancialOperand,
   type OperandOutcome,
   type OperationOutcome,
 } from "./operations.ts";
-import { peerCompare, thresholdPredicate } from "./predicates.ts";
+import { peerCompare, periodRank, thresholdPredicate } from "./predicates.ts";
 
 /** Supplies reported inputs; the engine binds evidence, the core never does. */
 export type ReportedMetricEvaluator = (node: ReportedMetricNode) => OperandOutcome;
@@ -30,7 +32,7 @@ export type OperationSpec<K extends OperationKind> = Readonly<{
   operation_version: VersionTag;
   interpretation: string;
   produces: "value" | "predicate";
-  /** Only peer_compare: evaluates the available members and reports an incomplete cohort. */
+  /** Only the rankings: they evaluate the available members and report how many they ranked. */
   tolerates_missing_operands: boolean;
   evaluate: (node: NodeOf<K>, operands: Operands, context: EvaluationContext) => OperationOutcome;
 }>;
@@ -125,9 +127,26 @@ export const OPERATION_REGISTRY: { readonly [K in OperationKind]: OperationSpec<
       return peRatio(node, required(node, operands, 0), required(node, operands, 1), earnings?.operation === "reported_metric" ? earnings.period : null);
     },
   },
+  spread: {
+    ...VALUE_OPERATION,
+    operation_version: "spread.v1",
+    interpretation: "Left minus right for two subjects on one measure, each in its own period of the same length, ending within half a period of each other; a margin or percentage lead is in percentage points.",
+    evaluate: (node, operands) => spread(node, required(node, operands, 0), required(node, operands, 1)),
+  },
+  period_rank: {
+    operation_version: "period_rank.v1",
+    interpretation: "Ranking of one subject's measure across two or more of its own distinct, non-overlapping quarters, or years; ties explicit, and a period without a value left out and counted.",
+    produces: "predicate",
+    tolerates_missing_operands: true,
+    evaluate: (node, operands) => periodRank(node, operands),
+  },
 });
 
 export function evaluateOperation<K extends OperationKind>(node: NodeOf<K>, operands: Operands, context: EvaluationContext): OperationOutcome {
+  // A lead carries only its left company and period, so any operation over it would mix peers.
+  if (operands.some((operand) => operand?.measure.derivations.some((step) => step.operation === "spread"))) {
+    return operationGap("incompatible_scope", "A lead is one company's figure minus another's, so no operation reads it.");
+  }
   const spec: OperationSpec<K> = OPERATION_REGISTRY[node.operation as K];
   return spec.evaluate(node, operands, context);
 }

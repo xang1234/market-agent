@@ -10,7 +10,7 @@ import test from "node:test";
 import Ajv2020 from "ajv/dist/2020.js";
 import type { FinancialPlanV1 } from "../src/contracts.ts";
 import { presentationHash, presentFinancialUnit, type CommittedResult, type FinancialAnswerContent } from "../src/presentation.ts";
-import { mutable, OVERVIEW_LINES, overviewComparisonPlan, planFixture } from "./fixtures.ts";
+import { mutable, OVERVIEW_LINES, overviewComparisonPlan, planFixture, quarterBack, reportedAt } from "./fixtures.ts";
 
 const SCHEMA = JSON.parse(readFileSync(new URL("../../../spec/finance_research_block_schema.json", import.meta.url), "utf8"));
 const WEB_FIXTURE = new URL("../../../web/src/blocks/financialAnswer.fixture.json", import.meta.url);
@@ -97,6 +97,47 @@ function nvdaAmdOnTheirOwnCalendars(): FinancialAnswerContent {
   });
 }
 
+function leadAcrossCalendars(): FinancialAnswerContent {
+  const plan = mutable(overviewComparisonPlan([{ slot: "a", newest: [2026, "Q4"] }, { slot: "b", newest: [2026, "Q2"] }])) as FinancialPlanV1;
+  plan.operations.push({ node_id: "gm_lead", operation: "spread", operation_version: "spread.v1", left: "a_gm", right: "b_gm" });
+  plan.outputs = [{ output_id: "out_a_gm", node_id: "a_gm", unit_id: "section" }, { output_id: "out_b_gm", node_id: "b_gm", unit_id: "section" }, { output_id: "out_gm_lead", node_id: "gm_lead", unit_id: "section" }];
+  return presentFinancialUnit({
+    plan, run_id: RUN_ID, unit_id: "section",
+    subject_names: { a: "NVIDIA Corp", b: "Advanced Micro Devices, Inc." },
+    results: [
+      committed(1, "out_a_gm", "a_gm", ratio("0.75")),
+      committed(2, "out_b_gm", "b_gm", ratio("0.4")),
+      committed(3, "out_gm_lead", "gm_lead", { kind: "value", value: "-35", unit: { kind: "percentage_points" }, exact: true, rounding: null }),
+    ],
+  });
+}
+
+function windowHighAndLow(): FinancialAnswerContent {
+  const plan = mutable(planFixture()) as FinancialPlanV1;
+  plan.subjects = { ...plan.subjects, requested_count: 1, resolved_count: 1, members: [plan.subjects.members[0]!] };
+  const quarters = [3, 2, 1, 0].map((back) => reportedAt(`rev_${back}`, "a", "revenue", quarterBack(2026, "Q4", back)));
+  const members = quarters.map((node) => node.node_id);
+  plan.operations = [
+    ...quarters,
+    { node_id: "high", operation: "period_rank", operation_version: "period_rank.v1", members, direction: "highest" },
+    { node_id: "low", operation: "period_rank", operation_version: "period_rank.v1", members, direction: "lowest" },
+  ];
+  plan.outputs = [...members, "high", "low"].map((node_id) => ({ output_id: `out_${node_id}`, node_id, unit_id: "section" }));
+  plan.thresholds = [];
+  const ranks = (order: number[]) => members.map((node_id, index) => ({ node_id, rank: order[index]! })).filter((entry) => entry.rank > 0);
+  return presentFinancialUnit({
+    plan, run_id: RUN_ID, unit_id: "section", subject_names: { a: "NVIDIA Corp" },
+    results: [
+      committed(1, "out_rev_3", "rev_3", usd("44062000000")),
+      committed(2, "out_rev_2", "rev_2", missing, "missing"),
+      committed(3, "out_rev_1", "rev_1", usd("57006000000")),
+      committed(4, "out_rev_0", "rev_0", usd("62100000000")),
+      committed(5, "out_high", "high", { kind: "ranking", direction: "highest", population: { requested: 4, evaluated: 3 }, complete: false, ranks: ranks([3, 0, 2, 1]), extreme: ["rev_0"] }),
+      committed(6, "out_low", "low", { kind: "ranking", direction: "lowest", population: { requested: 4, evaluated: 3 }, complete: false, ranks: ranks([1, 0, 2, 3]), extreme: ["rev_3"] }),
+    ],
+  });
+}
+
 function validator() {
   const ajv = new Ajv2020({ allErrors: true, strict: false, validateFormats: false });
   ajv.addSchema(SCHEMA);
@@ -109,6 +150,8 @@ test("every presentation shape the generator produces satisfies the canonical bl
   valid(block(comparison()), "table, gap, predicate, incomplete ranking");
   valid(block(series()), "series and scalar");
   valid(block(nvdaAmdOnTheirOwnCalendars()), "a table across fiscal calendars, columns without a period");
+  valid(block(leadAcrossCalendars()), "a lead in percentage points between two companies' own quarters");
+  valid(block(windowHighAndLow()), "a window's high and low, with a quarter missing");
   valid(JSON.parse(readFileSync(WEB_V1_FIXTURE, "utf8")), "a stored v1 answer");
 });
 

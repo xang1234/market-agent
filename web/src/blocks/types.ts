@@ -361,7 +361,8 @@ export type FinancialPresentedPayload =
       kind: 'ranking'
       text: string
       complete: boolean
-      order: ReadonlyArray<{ subject_label_id: string; rank: number }>
+      // A peer ranking orders subjects; a period ranking orders one subject's periods.
+      order: ReadonlyArray<{ subject_label_id: string; rank: number } | { period_label_id: string; rank: number }>
       leader_label_ids: ReadonlyArray<string> | null
     }
   | { kind: 'gap'; text: string; reason_code: string }

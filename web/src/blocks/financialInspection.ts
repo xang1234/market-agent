@@ -118,7 +118,7 @@ export function unitText(unit: unknown): string {
 }
 
 /** The payload's outcome in words for predicates, rankings, and gaps. */
-export function payloadSummary(payload: unknown): string {
+export function payloadSummary(payload: unknown, operation?: string): string {
   if (payload === null || typeof payload !== 'object') return 'No result'
   const record = payload as { kind?: unknown; outcome?: unknown; comparison?: unknown; reason_code?: unknown; complete?: unknown }
   switch (record.kind) {
@@ -127,7 +127,8 @@ export function payloadSummary(payload: unknown): string {
     case 'predicate':
       return `${record.outcome === true ? 'Met' : 'Not met'} (${String(record.comparison)})`
     case 'ranking':
-      return record.complete === true ? 'Complete ranking' : 'Partial ranking: not every requested company has a value'
+      if (record.complete === true) return 'Complete ranking'
+      return `Partial ranking: not every ${operation === 'period_rank' ? 'period' : 'requested company'} has a value`
     case 'gap':
       return `Not available (${String(record.reason_code ?? 'unknown')})`
     default:

@@ -2,10 +2,15 @@
 // (#398 step 6), so each turn here asks one and scripts how its question is read.
 
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import type { PlanningModel, PlanningResult } from "../../financial-engine/src/planner.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
+import { inspectCommittedResult } from "../../financial-engine/src/inspection.ts";
+import type { SqlExecutor } from "../../financial-engine/src/ports.ts";
+import type { FinancialAnswerContent } from "../../financial-core/src/index.ts";
+import { enginePacket, figureCompanies } from "../src/evidence-packet.ts";
 import { IDS, seedReportedFact } from "../../financial-engine/test/db-fixtures.ts";
 import { resolveResearchScope, type ResearchScope, type ScopeProposal } from "../src/research-scope.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "../src/subjects.ts";
@@ -19,19 +24,14 @@ const COMPANIES: Readonly<Record<string, string>> = {
   SECQ: "4f000000-0000-4000-8000-0000000000e4",
   FUTR: "4f000000-0000-4000-8000-0000000000e5",
   OFFQ: "4f000000-0000-4000-8000-0000000000e6",
+  MOVD: "4f000000-0000-4000-8000-0000000000e7",
+  MRGN: "4f000000-0000-4000-8000-0000000000e8",
 };
 const REVENUE = [
   [2022, 1, "800"], [2022, 2, "900"], [2022, 3, "1000"], [2022, 4, "1100"],
   [2023, 1, "1200"], [2023, 2, "1300"], [2023, 3, "1500"], [2023, 4, "2000"],
 ] as const;
-const QTRS_OVERVIEW = [
-  ["out_revenue_fy2022_q1", "Q1 FY2022", "verified", "USD 800.00"],
-  ["out_revenue_fy2022_q2", "Q2 FY2022", "verified", "USD 900.00"],
-  ["out_revenue_fy2022_q3", "Q3 FY2022", "verified", "USD 1,000.00"],
-  ["out_revenue_fy2022_q4", "Q4 FY2022", "verified", "USD 1,100.00"],
-  ["out_revenue_fy2023_q1", "Q1 FY2023", "verified", "USD 1,200.00"],
-  ["out_revenue_fy2023_q2", "Q2 FY2023", "verified", "USD 1,300.00"],
-  ["out_revenue_fy2023_q3", "Q3 FY2023", "verified", "USD 1,500.00"],
+const QTRS_LATEST = [
   ["out_revenue_fy2023_q4", "Q4 FY2023", "verified", "USD 2,000.00"],
   ["out_gross_profit_fy2023_q4", "Q4 FY2023", "verified", "USD 1,200.00"],
   ["out_operating_income_fy2023_q4", "Q4 FY2023", "verified", "USD 500.00"],
@@ -41,6 +41,25 @@ const QTRS_OVERVIEW = [
   ["out_net_margin", "Q4 FY2023", "verified", "20.00%"],
   ["out_revenue_growth_qoq", "Q4 FY2023 vs Q3 FY2023", "verified", "33.33%"],
   ["out_revenue_growth_yoy", "Q4 FY2023 vs Q4 FY2022", "verified", "81.82%"],
+];
+const QTRS_OVERVIEW = [
+  ["out_revenue_fy2022_q1", "Q1 FY2022", "verified", "USD 800.00"],
+  ["out_revenue_fy2022_q2", "Q2 FY2022", "verified", "USD 900.00"],
+  ["out_revenue_fy2022_q3", "Q3 FY2022", "verified", "USD 1,000.00"],
+  ["out_revenue_fy2022_q4", "Q4 FY2022", "verified", "USD 1,100.00"],
+  ["out_revenue_fy2023_q1", "Q1 FY2023", "verified", "USD 1,200.00"],
+  ["out_revenue_fy2023_q2", "Q2 FY2023", "verified", "USD 1,300.00"],
+  ["out_revenue_fy2023_q3", "Q3 FY2023", "verified", "USD 1,500.00"],
+  ...QTRS_LATEST.slice(0, 7),
+  ["out_revenue_growth_qoq_fy2022_q2", "Q2 FY2022 vs Q1 FY2022", "verified", "12.50%"],
+  ["out_revenue_growth_qoq_fy2022_q3", "Q3 FY2022 vs Q2 FY2022", "verified", "11.11%"],
+  ["out_revenue_growth_qoq_fy2022_q4", "Q4 FY2022 vs Q3 FY2022", "verified", "10.00%"],
+  ["out_revenue_growth_qoq_fy2023_q1", "Q1 FY2023 vs Q4 FY2022", "verified", "9.09%"],
+  ["out_revenue_growth_qoq_fy2023_q2", "Q2 FY2023 vs Q1 FY2023", "verified", "8.33%"],
+  ["out_revenue_growth_qoq_fy2023_q3", "Q3 FY2023 vs Q2 FY2023", "verified", "15.38%"],
+  ...QTRS_LATEST.slice(7),
+  ["out_revenue_highest", "Q1 FY2022 to Q4 FY2023", "verified", "Q4 FY2023 has the highest revenue of the 8 quarters ranked"],
+  ["out_revenue_lowest", "Q1 FY2022 to Q4 FY2023", "verified", "Q1 FY2022 has the lowest revenue of the 8 quarters ranked"],
 ];
 
 function resolve(mention: string): Promise<ChatSubjectPreResolution> {
@@ -92,6 +111,15 @@ test("a question about one company that asks for no figure is answered with its 
   for (const [metric, value] of [["revenue", "2400"], ["gross_profit", "1200"], ["operating_income", "600"], ["net_income", "480"]] as const) {
     await quarterly(COMPANIES.SECQ!, metric, 2024, 1, value);
   }
+  await db.query(
+    `update facts set period_start = period_start + interval '1 month', period_end = period_start + interval '4 months' - interval '1 day' where subject_id = $1 and fiscal_year = 2023`,
+    [COMPANIES.MOVD],
+  );
+  const MRGN_LINES = { gross_profit: ["400", "450", "500", "550", "600", "650", "900", "1200"], operating_income: ["80", "90", "100", "110", "120", "130", "150", "500"], net_income: ["-8", "9", "10", "11", "12", "13", "15", "400"] };
+  await db.query(`delete from facts where subject_id = $1 and fiscal_year = 2023 and fiscal_period = 'Q4' and metric_id in (select metric_id from metrics where metric_key <> 'revenue')`, [COMPANIES.MRGN]);
+  for (const [metric, values] of Object.entries(MRGN_LINES)) {
+    for (const [index, [year, quarter]] of REVENUE.entries()) await quarterly(COMPANIES.MRGN!, metric, year, quarter, values[index]!);
+  }
   await quarterly(COMPANIES.FUTR!, "revenue", 2201, 1, "2400");
   await quarterly(COMPANIES.OFFQ!, "revenue", 2024, 1, "2100");
   for (const [metric, value] of [["revenue", "2600"], ["gross_profit", "1300"], ["operating_income", "650"], ["net_income", "520"]] as const) {
@@ -104,7 +132,7 @@ test("a question about one company that asks for no figure is answered with its 
       labels: Record<string, { text: string }>;
       results: Array<{ output_id: string; period_label_id: string; disposition: string; presented: { kind: string; text: string; reason_code?: string } }>;
     };
-    return results.map((result) => [result.output_id, labels[result.period_label_id]!.text, result.disposition, result.presented.kind === "value" ? result.presented.text : result.presented.reason_code]);
+    return results.map((result) => [result.output_id, labels[result.period_label_id]!.text, result.disposition, result.presented.kind === "gap" ? result.presented.reason_code : result.presented.text]);
   };
   const reading = readingOf;
 
@@ -120,8 +148,8 @@ test("a question about one company that asks for no figure is answered with its 
     const { rows: [shown] } = await db.query(`select blocks->0->'financial'->'presentations' as presentations from chat_messages where message_id = $1`, [done.message_id]);
     assert.deepEqual(
       shown.presentations.map((presentation: { kind: string; points?: unknown[] }) => `${presentation.kind}${presentation.points ? `(${presentation.points.length})` : ""}`),
-      ["series(8)", "scalar", "scalar", "scalar", "scalar", "scalar", "scalar", "scalar", "scalar"],
-      "revenue over the quarters first, then the latest quarter's lines, and QoQ and YoY growth each its own line (#470)",
+      ["series(8)", "series(7)", "scalar", "scalar", "scalar", "scalar", "scalar", "scalar", "scalar", "predicate", "predicate"],
+      "revenue and its QoQ growth over the quarters, then the latest quarter's lines, its YoY growth, and the high and low (#470)",
     );
     const latest = completed((await chatHarness(pool, { model: null, readQuestion: reading({ ...NO_ASKS, asks: new Set(["latest_quarter"]) }), resolveMention: resolve }).run({ ...base, userIntent: "Revenue for QTRS" })).events);
     assert.deepEqual(await results(latest.message_id), QTRS_OVERVIEW, "a reading that asks for the latest quarter gets the overview, which shows it");
@@ -266,6 +294,96 @@ test("a question about one company that asks for no figure is answered with its 
     assert.deepEqual(await results(done.message_id), QTRS_OVERVIEW);
   });
 
+  await t.test("a quarter whose dates do not follow the one before it gets no growth, and the answer's note names it (#479)", async () => {
+    const done = completed((await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve }).run({ ...base, userIntent: "Revenue for MOVD" })).events);
+    const growth = (await results(done.message_id)).flatMap(([outputId, period]) => outputId!.startsWith("out_revenue_growth") ? [period] : []);
+    assert.deepEqual(growth, ["Q2 FY2022 vs Q1 FY2022", "Q3 FY2022 vs Q2 FY2022", "Q4 FY2022 vs Q3 FY2022", "Q2 FY2023 vs Q1 FY2023", "Q3 FY2023 vs Q2 FY2023", "Q4 FY2023 vs Q3 FY2023"]);
+    const { rows: [message] } = await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id]);
+    assert.equal(
+      message.blocks[1]?.segments?.[0]?.text,
+      "Not covered by this answer: revenue growth from Q4 FY2022 to Q1 FY2023, whose quarters are not dated consecutively; revenue growth from Q4 FY2022 to Q4 FY2023, whose quarters are not dated consecutively.",
+    );
+  });
+
+  await t.test("a turn resumed before its overview was saved notes the growth its first attempt left out (#479)", async () => {
+    const thread = (await db.query(`insert into chat_threads (thread_id, user_id) values (gen_random_uuid(), $1) returning thread_id`, [IDS.other])).rows[0].thread_id;
+    const turn = { threadId: thread, userId: IDS.owner, turnId: randomUUID(), userIntent: "Revenue for MOVD" };
+    // The thread is another user's, so the first attempt plans and reserves the run but cannot publish.
+    await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve }).run(turn);
+    await db.query(`update chat_threads set user_id = $2 where thread_id = $1`, [thread, IDS.owner]);
+    const done = completed((await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve }).run(turn)).events);
+    const { rows: [message] } = await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id]);
+    assert.equal(
+      message.blocks[1]?.segments?.[0]?.text,
+      "Not covered by this answer: revenue growth from Q4 FY2022 to Q1 FY2023, whose quarters are not dated consecutively; revenue growth from Q4 FY2022 to Q4 FY2023, whose quarters are not dated consecutively.",
+    );
+  });
+
+  await t.test("a statement error as the overview is read again for its note leaves the answer published (#479 review)", async (st) => {
+    const warned: unknown[][] = [];
+    st.mock.method(console, "warn", (...args: unknown[]) => warned.push(args));
+    // Its revenue is read to plan the overview, then again in the transaction that saves the answer.
+    let reads = 0;
+    const failingReread: typeof createEvidenceFinancialPort = (executor) => {
+      const port = createEvidenceFinancialPort(executor);
+      const failing = createEvidenceFinancialPort({ query: () => executor.query("select 1/0") } as unknown as SqlExecutor);
+      return { ...port, listInputCandidates: (request) => (request.fiscal_year === null && reads++ > 0 ? failing : port).listInputCandidates(request) };
+    };
+    const done = completed((await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve, evidence: failingReread }).run({ ...base, userIntent: "Revenue for QTRS" })).events);
+    assert.deepEqual([reads, await results(done.message_id)], [2, QTRS_OVERVIEW]);
+    assert.deepEqual(warned.filter(([message]) => String(message).startsWith("[chat]")), [
+      ["[chat] the overview's revenue quarters could not be read again, so its note names no growth it leaves out", "database_error"],
+    ]);
+  });
+
+  await t.test("a question about one company's margin trend is its three margins over the quarters, each with its high and low, with no model planning it (#398)", async () => {
+    let calls = 0;
+    const counted: PlanningModel = async () => {
+      calls += 1;
+      throw new Error("the planner should not be asked");
+    };
+    const trend = { ...NO_ASKS, asks: new Set(["margins", "margin_trend"] as const), income_items: ["operating_margin" as const] };
+    const done = completed((await chatHarness(pool, { model: counted, readQuestion: reading(trend), resolveMention: resolve }).run({ ...base, userIntent: "How have MRGN's operating margins trended?" })).events);
+    const rows = await results(done.message_id);
+    assert.equal(calls, 0);
+    assert.deepEqual(rows.filter(([outputId]) => outputId!.startsWith("out_operating_margin_fy")).map(([, period, , text]) => [period, text]), REVENUE.map(([year, quarter], index) => [`Q${quarter} FY${year}`, index === 7 ? "25.00%" : "10.00%"]));
+    assert.deepEqual(rows.filter(([outputId]) => /_(highest|lowest)$/u.test(outputId!)).map(([outputId, period, , text]) => [outputId, period, text]), [
+      ["out_gross_margin_highest", "Q1 FY2022 to Q4 FY2023", "Q3 FY2023 and Q4 FY2023 tie for the highest gross margin (gross profit / revenue) of the 8 quarters ranked"],
+      ["out_gross_margin_lowest", "Q1 FY2022 to Q4 FY2023", "Q1 FY2022, Q2 FY2022, Q3 FY2022, Q4 FY2022, Q1 FY2023, and Q2 FY2023 tie for the lowest gross margin (gross profit / revenue) of the 8 quarters ranked"],
+      ["out_operating_margin_highest", "Q1 FY2022 to Q4 FY2023", "Q4 FY2023 has the highest operating margin (operating income / revenue) of the 8 quarters ranked"],
+      ["out_operating_margin_lowest", "Q1 FY2022 to Q4 FY2023", "Q1 FY2022, Q2 FY2022, Q3 FY2022, Q4 FY2022, Q1 FY2023, Q2 FY2023, and Q3 FY2023 tie for the lowest operating margin (operating income / revenue) of the 8 quarters ranked"],
+      ["out_net_margin_highest", "Q1 FY2022 to Q4 FY2023", "Q4 FY2023 has the highest net margin (net income / revenue) of the 8 quarters ranked"],
+      ["out_net_margin_lowest", "Q1 FY2022 to Q4 FY2023", "Q1 FY2022 has the lowest net margin (net income / revenue) of the 8 quarters ranked"],
+    ]);
+    const { rows: [shown] } = await db.query(`select blocks->0->'financial'->'presentations' as presentations, research_scope from chat_messages where message_id = $1`, [done.message_id]);
+    assert.deepEqual(shown.presentations.map((presentation: { kind: string; points?: unknown[] }) => `${presentation.kind}${presentation.points ? `(${presentation.points.length})` : ""}`), [
+      "series(8)", "series(8)", "series(8)", "predicate", "predicate", "predicate", "predicate", "predicate", "predicate",
+    ]);
+    assert.deepEqual([shown.research_scope.fiscal_year, shown.research_scope.fiscal_quarter], [null, null], "it shows the latest quarters, so it keeps no period");
+  });
+
+  await t.test("a margin trend's answer is saved without reading its revenue again, as only an overview's note names growth it leaves out (#479 review)", async () => {
+    const reads: string[] = [];
+    const counted: typeof createEvidenceFinancialPort = (executor) => {
+      const port = createEvidenceFinancialPort(executor);
+      return {
+        ...port,
+        listInputCandidates: (request) => {
+          if (request.fiscal_year === null) reads.push(request.metric_key);
+          return port.listInputCandidates(request);
+        },
+      };
+    };
+    const quartersRead = async (read: ScopeProposal) => {
+      reads.length = 0;
+      completed((await chatHarness(pool, { model: null, readQuestion: reading(read), resolveMention: resolve, evidence: counted }).run({ ...base, userIntent: "How have MRGN's margins trended?" })).events);
+      return [...reads];
+    };
+    const trend = { ...NO_ASKS, asks: new Set(["margins", "margin_trend"] as const) };
+    assert.deepEqual(await quartersRead(trend), ["revenue"], "read once, to plan the trend");
+    assert.deepEqual(await quartersRead(NO_ASKS), ["revenue", "revenue"], "an overview is read again as its answer is saved");
+  });
+
   const slotted = (slot: string, rows: ReadonlyArray<ReadonlyArray<string>>) => rows.map(([outputId, ...rest]) => [outputId!.replace(/^out_/u, `out_${slot}_`), ...rest]);
   const OFFQ_LATEST = [
     ["out_revenue_fy2024_q2", "Q2 FY2024", "verified", "USD 2,600.00"],
@@ -278,20 +396,51 @@ test("a question about one company that asks for no figure is answered with its 
     ["out_revenue_growth_qoq", "Q2 FY2024 vs Q1 FY2024", "verified", "23.81%"],
     ["out_revenue_growth_yoy", "Q2 FY2024 vs Q2 FY2023", "verified", "100.00%"],
   ];
+  const leads = (period: string, outcomes: ReadonlyArray<ReadonlyArray<string>>) =>
+    ["gross_margin", "operating_margin", "net_margin"].map((metric, index) => [`out_a_minus_b_${metric}`, period, ...outcomes[index]!]);
+  // OFFQ's newest quarter ends half a year after QTRS's, so each lead takes OFFQ's Q4 FY2023, which ends with QTRS's.
+  const QTRS_OVER_OFFQ = leads("QTRS Corp Q4 FY2023 minus OFFQ Corp Q4 FY2023", Array(3).fill(["verified", "0.00 pp"]));
 
   await t.test("a comparison of named companies is one table, each company's figures from its own latest quarter (#398)", async () => {
     const done = completed((await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve }).run({ ...base, userIntent: "Compare revenue for QTRS and OFFQ" })).events);
-    assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_OVERVIEW.slice(7)), ...slotted("b", OFFQ_LATEST)]);
+    assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_LATEST), ...slotted("b", OFFQ_LATEST), ...QTRS_OVER_OFFQ]);
     const { rows: [shown] } = await db.query(`select blocks->0->'financial'->'presentations' as presentations from chat_messages where message_id = $1`, [done.message_id]);
-    assert.deepEqual(shown.presentations.map((presentation: { kind: string }) => presentation.kind), ["table"]);
+    assert.deepEqual(shown.presentations.map((presentation: { kind: string }) => presentation.kind), ["table", "scalar", "scalar", "scalar"], "the leads stand beside the table");
+  });
+
+  await t.test("a lead against a peer's earlier quarter shows each company at its newest quarter alone: one column per figure, each lead both companies', inspected with its four inputs (#398 review)", async () => {
+    const { turnId, events } = await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve }).run({ ...base, userIntent: "Compare revenue for QTRS and OFFQ" });
+    const done = completed(events);
+    const { rows: [saved] } = await db.query(`select blocks->0->'financial' as financial from chat_messages where message_id = $1`, [done.message_id]);
+    const financial = saved.financial as FinancialAnswerContent;
+    const table = financial.presentations[0]!;
+    assert.equal(table.kind, "table");
+    const MEASURES = ["Revenue", "Gross profit", "Operating income", "Net income", "Gross margin (gross profit / revenue)", "Operating margin (operating income / revenue)", "Net margin (net income / revenue)"];
+    // FinancialAnswer.tsx renders a null cell as "Not requested".
+    assert.deepEqual([table.kind === "table" && table.columns.map((column) => financial.labels[column.measure_label_id]!.text), table.kind === "table" && table.rows.map((row) => row.cells.filter((cell) => cell === null).length)], [
+      [...MEASURES, "Quarter-over-quarter percent change in Revenue", "Year-over-year percent change in Revenue"],
+      [0, 0],
+    ]);
+    const { rows: [planned] } = await db.query(`select p.plan from financial_runs r join financial_plans p on p.plan_id = r.plan_id where r.request_key = $1`, [turnId]);
+    const packet = enginePacket(financial, new Map([["a", "QTRS"], ["b", "OFFQ"]]), planned.plan);
+    const margins = MEASURES.slice(4);
+    assert.deepEqual(packet.figures.filter((figure) => figure.metric.includes("margin")).map((figure) => [figureCompanies(figure, packet).join(" and "), figure.metric, figure.period]), [
+      ...margins.map((metric) => ["QTRS", metric, "Q4 FY2023"]),
+      ...margins.map((metric) => ["OFFQ", metric, "Q2 FY2024"]),
+      ...margins.map((metric) => ["QTRS and OFFQ", `Difference in ${metric}`, "QTRS Corp Q4 FY2023 minus OFFQ Corp Q4 FY2023"]),
+    ], "OFFQ's margins are its newest quarter's alone, so no trend of them can be written");
+    const lead = financial.results.find((result) => result.output_id === "out_a_minus_b_gross_margin")!;
+    const inspected = await inspectCommittedResult(db, IDS.owner, lead.result_id);
+    assert.deepEqual(inspected?.availability === "available" && inspected.inputs.map((input) => input.input_slot).sort(), ["a_gross_profit_fy2023_q4", "a_revenue_fy2023_q4", "b_gross_profit_fy2023_q4", "b_revenue_fy2023_q4"]);
   });
 
   await t.test("a line the engine cannot certify for one compared company is its gap cell, and the comparison still publishes (#398)", async () => {
     const done = completed((await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve }).run({ ...base, userIntent: "Compare revenue for QTRS and NOGP" })).events);
-    const nogp = slotted("b", QTRS_OVERVIEW.slice(7));
+    const nogp = slotted("b", QTRS_LATEST);
     nogp[1] = ["out_b_gross_profit_fy2023_q4", "Q4 FY2023", "missing", "missing_input"];
     nogp[4] = ["out_b_gross_margin", "Q4 FY2023", "blocked_dependency", "blocked_by_dependency"];
-    assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_OVERVIEW.slice(7)), ...nogp]);
+    const tied = leads("QTRS Corp Q4 FY2023 minus NOGP Corp Q4 FY2023", [["blocked_dependency", "blocked_by_dependency"], ["verified", "0.00 pp"], ["verified", "0.00 pp"]]);
+    assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_LATEST), ...nogp, ...tied], "equal margins tie at a real zero; a lead over a gap is blocked, never zero");
   });
 
   await t.test("a question about one company that asks for its peers is answered with the company and its peers, saved as auto-selected (#398)", async () => {
@@ -301,7 +450,7 @@ test("a question about one company that asks for no figure is answered with its 
       const peers = { ...NO_ASKS, asks: new Set(["peers"] as const) };
       const { turnId, events } = await chatHarness(pool, { model: null, readQuestion: reading(peers), resolveMention: resolve, researchScope: scoped }).run({ ...base, userIntent: "Revenue for QTRS" });
       const done = completed(events);
-      assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_OVERVIEW.slice(7)), ...slotted("b", OFFQ_LATEST)]);
+      assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_LATEST), ...slotted("b", OFFQ_LATEST), ...QTRS_OVER_OFFQ]);
       const { rows: [message] } = await db.query(`select blocks, research_scope from chat_messages where message_id = $1`, [done.message_id]);
       assert.deepEqual([message.research_scope.companies, message.research_scope.peers], [[{ issuer_id: COMPANIES.QTRS, label: "QTRS" }, { issuer_id: COMPANIES.OFFQ }], true]);
       assert.equal(message.blocks.length, 1, "no note names peers the question did not name");
@@ -338,6 +487,10 @@ test("a question about one company that asks for no figure is answered with its 
       results(completed((await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve }).run({ ...base, userIntent })).events).message_id);
     const derived = (outputId: string, period: string) => [outputId, period, "missing", "precision_unverified"];
     const blocked = (outputId: string, period: string) => [outputId, period, "blocked_dependency", "blocked_by_dependency"];
+    const window = (period: string, highest: string, lowest: string) => [
+      ["out_revenue_highest", period, "verified", `${highest} has the highest revenue of the 6 of 8 quarters ranked`],
+      ["out_revenue_lowest", period, "verified", `${lowest} has the lowest revenue of the 6 of 8 quarters ranked`],
+    ];
     assert.deepEqual(await overview("Revenue for SECY"), [
       ...QTRS_OVERVIEW.slice(0, 3),
       derived("out_revenue_fy2022_q4", "Q4 FY2022"),
@@ -349,9 +502,14 @@ test("a question about one company that asks for no figure is answered with its 
       blocked("out_gross_margin", "Q4 FY2023"),
       blocked("out_operating_margin", "Q4 FY2023"),
       blocked("out_net_margin", "Q4 FY2023"),
+      ...QTRS_OVERVIEW.slice(14, 16),
+      blocked("out_revenue_growth_qoq_fy2022_q4", "Q4 FY2022 vs Q3 FY2022"),
+      blocked("out_revenue_growth_qoq_fy2023_q1", "Q1 FY2023 vs Q4 FY2022"),
+      ...QTRS_OVERVIEW.slice(18, 20),
       blocked("out_revenue_growth_qoq", "Q4 FY2023 vs Q3 FY2023"),
       blocked("out_revenue_growth_yoy", "Q4 FY2023 vs Q4 FY2022"),
-    ], "the latest quarter is the derived fourth quarter, not the third before it");
+      ...window("Q1 FY2022 to Q4 FY2023", "Q3 FY2023", "Q1 FY2022"),
+    ], "the latest quarter is the derived fourth quarter, not the third before it, and the window ranks the quarters with a value");
     assert.deepEqual(await overview("Revenue for SECQ"), [
       ...QTRS_OVERVIEW.slice(1, 3),
       derived("out_revenue_fy2022_q4", "Q4 FY2022"),
@@ -364,8 +522,14 @@ test("a question about one company that asks for no figure is answered with its 
       ["out_gross_margin", "Q1 FY2024", "verified", "50.00%"],
       ["out_operating_margin", "Q1 FY2024", "verified", "25.00%"],
       ["out_net_margin", "Q1 FY2024", "verified", "20.00%"],
+      QTRS_OVERVIEW[15]!,
+      blocked("out_revenue_growth_qoq_fy2022_q4", "Q4 FY2022 vs Q3 FY2022"),
+      blocked("out_revenue_growth_qoq_fy2023_q1", "Q1 FY2023 vs Q4 FY2022"),
+      ...QTRS_OVERVIEW.slice(18, 20),
+      blocked("out_revenue_growth_qoq_fy2023_q4", "Q4 FY2023 vs Q3 FY2023"),
       blocked("out_revenue_growth_qoq", "Q1 FY2024 vs Q4 FY2023"),
       ["out_revenue_growth_yoy", "Q1 FY2024 vs Q1 FY2023", "verified", "100.00%"],
+      ...window("Q2 FY2022 to Q1 FY2024", "Q1 FY2024", "Q2 FY2022"),
     ], "growth after a first quarter compares with the fourth quarter before it and the first a year earlier");
   });
 });

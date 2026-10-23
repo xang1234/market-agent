@@ -14,7 +14,7 @@
 // and the report goes to evals and logs.
 
 import { checkComparison, comparablePeriods, type ComparisonOp } from "./comparisons.ts";
-import type { EvidencePacket } from "./evidence-packet.ts";
+import { figureCompanies, type EvidencePacket } from "./evidence-packet.ts";
 import type { InferenceVerdict } from "./verdicts.ts";
 import { isRecord } from "../../shared/src/http.ts";
 
@@ -177,9 +177,18 @@ export function checkAssertions(list: unknown[] | null | undefined, packet: Evid
       reject(index, item, shape.check, shape.reason);
       continue;
     }
+    // A lead is two companies' figures and a ranking's value is a sentence:
+    // neither is a value to compare, nor one that changed.
+    if ((kind === "comparison" || kind === "unknown_cause") && figureIds.some((id) => {
+      const figure = figures.get(id)!;
+      return figure.ranking || (figure.displayed === undefined && figure.lead_of !== undefined);
+    })) {
+      reject(index, item, "kind", `${kind === "comparison" ? "a comparison" : "an unknown cause"} cites no lead or ranking: neither is one company's value in one period`);
+      continue;
+    }
     // An unknown cause is a change's: each figure it cites has its company's
     // same metric in another period with a different value beside it.
-    if (kind === "unknown_cause" && !showsChange(figureIds.map((id) => figures.get(id)!), packet.figures)) {
+    if (kind === "unknown_cause" && !showsChange(figureIds.map((id) => figures.get(id)!), packet)) {
       reject(index, item, "kind", "an unknown cause cites a change: one company's metric, two periods, two values");
       continue;
     }
@@ -214,10 +223,13 @@ export function checkAssertions(list: unknown[] | null | undefined, packet: Evid
 export const SUPPORT_KINDS: ReadonlySet<AssertionKind> = new Set(["observation", "comparison", "management_attribution"]);
 
 // Every cited figure: the template says each cited metric changed. The
-// other period may be any shown, so the figure that moved alone will do.
-function showsChange(cited: ReadonlyArray<EvidencePacket["figures"][number]>, shown: EvidencePacket["figures"]): boolean {
-  return cited.length > 0 && cited.every((a) => shown.some((b) =>
-    a.gap === undefined && b.gap === undefined && a.company === b.company && a.metric === b.metric && a.segment === b.segment && a.period !== undefined && b.period !== undefined &&
+// other period may be any shown, so the figure that moved alone will do. A
+// lead is two companies' figures and a ranking's value is a sentence, so
+// neither is one company's metric that changed.
+function showsChange(cited: ReadonlyArray<EvidencePacket["figures"][number]>, packet: EvidencePacket): boolean {
+  const changes = (figure: EvidencePacket["figures"][number]) => figure.gap === undefined && !figure.ranking && new Set(figureCompanies(figure, packet)).size === 1;
+  return cited.length > 0 && cited.every((a) => packet.figures.some((b) =>
+    changes(a) && changes(b) && a.company === b.company && a.metric === b.metric && a.segment === b.segment && a.period !== undefined && b.period !== undefined &&
     a.period.replace(/\s+/g, "") !== b.period.replace(/\s+/g, "") && a.value !== b.value && comparablePeriods(a, b)
   ));
 }
@@ -247,11 +259,9 @@ function shapeError(
   }
 }
 
-// The companies cited figures and claims are about; a figure with no company
-// is the only company's.
 export function companiesOf(cited: ReadonlyArray<string>, packet: EvidencePacket): Set<string | undefined> {
   return new Set([
-    ...packet.figures.filter((figure) => cited.includes(figure.id)).map((figure) => figure.company ?? packet.companies[0]),
+    ...packet.figures.filter((figure) => cited.includes(figure.id)).flatMap((figure) => figureCompanies(figure, packet)),
     ...packet.claims.filter((claim) => cited.includes(claim.id)).map((claim) => claim.company),
   ]);
 }

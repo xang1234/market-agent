@@ -7,7 +7,7 @@ import { createRuntimeAuthority, operationDependencies, type FinancialPlanV1 } f
 import { buildDeterministicPlan, planFinancialRequest, type PlanningContext, type PlanningModel, type PlanningResult, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import type { CandidatePage, CandidateRequest, FinancialEvidencePort, InputCandidate, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
-import { allResolved, overviewPeers, overviewSubjects, planCompanyOverview } from "../src/company-overview.ts";
+import { allResolved, marginTrendSubjects, overviewOmissions, overviewPeers, overviewSubjects, planCompanyOverview, planMarginTrend } from "../src/company-overview.ts";
 import { MAX_TURN_SUBJECTS } from "../src/coordinator.ts";
 import { uncoveredAsks } from "../src/financial-runtime.ts";
 import { resolveResearchScope } from "../src/research-scope.ts";
@@ -135,86 +135,149 @@ test("each golden metric question plans from its own recorded reply on the first
   }
 });
 
+const revenueCandidate = (fiscal_year: number, fiscal_period: string, start: string | null, end: string, publicBy = "2026-03-01T00:00:00.000Z") => ({
+  metric_key: "revenue",
+  source_class: "sec_filing",
+  unit: { kind: "currency", currency: "USD" },
+  context: null,
+  period: { start, end, fiscal_year, fiscal_period },
+  precision: null,
+  publication: [{ attestation_id: "p", timing: { available_not_before: null, available_no_later_than: publicBy, timing_precision: "instant", source_timezone: "UTC" } }],
+}) as unknown as InputCandidate;
+const CALENDAR = { Q1: ["01-01", "03-31"], Q2: ["04-01", "06-30"], Q3: ["07-01", "09-30"], Q4: ["10-01", "12-31"], FY: ["01-01", "12-31"] } as const;
+const calendarQuarter = (fiscal_year: number, fiscal_period: keyof typeof CALENDAR, publicBy?: string) =>
+  revenueCandidate(fiscal_year, fiscal_period, `${fiscal_year}-${CALENDAR[fiscal_period][0]}`, `${fiscal_year}-${CALENDAR[fiscal_period][1]}`, publicBy);
+const goldenQuarters = (ticker: string, publicBy?: string) => GOLDEN_COMPANIES.find((company) => company.ticker === ticker)!.quarters
+  .map((quarter) => revenueCandidate(quarter.fiscal_year, quarter.fiscal_period, quarter.period_start, quarter.period_end, publicBy));
+const candidatePage = (...candidates: InputCandidate[]): CandidatePage => ({ status: "ok", candidates, truncated: false });
+const changeOf = (ticker: string, current: string, prior: string) => `percent_change_positive_base(${ticker} revenue ${current}, ${ticker} revenue ${prior})`;
+
+const omissions = (plan: FinancialPlanV1, evidence: FinancialEvidencePort) => overviewOmissions(plan, authority, evidence, (slot) => {
+  const member = plan.subjects.members.find((candidate) => candidate.slot_id === slot)!;
+  return GOLDEN_COMPANIES.find((company) => company.issuer_id === member.subject_ref.id)!.legal_name;
+});
+
+async function overviewOf(question: string, pages: (ticker: string) => CandidatePage, plan = planCompanyOverview) {
+  const tickerOf = (issuerId: string) => GOLDEN_COMPANIES.find((company) => company.issuer_id === issuerId)!.ticker;
+  const evidence = { listInputCandidates: async (request: CandidateRequest) => pages(tickerOf(request.subject.id)) } as FinancialEvidencePort;
+  const planned = await plan(planningContext(question), evidence);
+  if (planned === null) return null;
+  assert.equal(planned.outcome, "ready", JSON.stringify(planned));
+  return { outputs: outputLabels(planned.plan), uncovered: await omissions(planned.plan, evidence) };
+}
+
 test("a company's overview shows its eight quarters to the newest it reported revenue for by the cutoff, each named by its fiscal period (#398)", async (t) => {
   const warned: unknown[][] = [];
   t.mock.method(console, "warn", (...args: unknown[]) => warned.push(args));
-  // The SEC ingester stores a fourth quarter as the year less its first three, with no source token, so no precision proof.
-  const revenue = (fiscal_year: number, fiscal_period: string, publicBy = "2026-03-01T00:00:00.000Z") => ({
-    metric_key: "revenue",
-    source_class: "sec_filing",
-    unit: { kind: "currency", currency: "USD" },
-    context: null,
-    period: { start: null, end: `${fiscal_year}-${{ Q1: "03-31", Q2: "06-30", Q3: "09-30", Q4: "12-31", FY: "12-31" }[fiscal_period]}`, fiscal_year, fiscal_period },
-    precision: null,
-    publication: [{ attestation_id: "p", timing: { available_not_before: null, available_no_later_than: publicBy, timing_precision: "instant", source_timezone: "UTC" } }],
-  }) as unknown as InputCandidate;
   const requests: CandidateRequest[] = [];
   const overview = async (page: CandidatePage) => {
     const evidence = { listInputCandidates: async (request: CandidateRequest) => (requests.push(request), page) } as FinancialEvidencePort;
     const planned = await planCompanyOverview(planningContext("NVDA"), evidence);
     if (planned === null) return null;
     assert.equal(planned.outcome, "ready", JSON.stringify(planned));
-    const { plan, model_calls } = planned as Extract<PlanningResult, { outcome: "ready" }>;
-    return { planner: plan.planner.kind, model_calls, units: plan.publication_units.map((unit) => unit.unit_id), outputs: outputLabels(plan) };
+    const { plan, model_calls } = planned;
+    const uncovered = await omissions(plan, { listInputCandidates: async () => page } as unknown as FinancialEvidencePort);
+    return { planner: plan.planner.kind, model_calls, units: plan.publication_units.map((unit) => unit.unit_id), outputs: outputLabels(plan), uncovered };
   };
-  const reported = (...candidates: InputCandidate[]) => ({ status: "ok" as const, candidates, truncated: false });
+  const charted = [2024, 2025].flatMap((year) => (["Q1", "Q2", "Q3", "Q4"] as const).map((quarter) => `${quarter} ${year}`));
+  const eightQuarters = [2024, 2025].flatMap((year) => (["Q1", "Q2", "Q3", "Q4"] as const).map((quarter) => calendarQuarter(year, quarter)));
 
-  assert.deepEqual(await overview(reported(revenue(2025, "Q3"), revenue(2025, "Q4"), revenue(2025, "FY"), revenue(2026, "Q1", "2026-09-02T00:00:00.000Z"))), {
+  assert.deepEqual(await overview(candidatePage(...eightQuarters, calendarQuarter(2025, "FY"), calendarQuarter(2026, "Q1", "2026-09-02T00:00:00.000Z"))), {
     planner: "deterministic",
     model_calls: 0,
     units: ["answer"],
     outputs: [
-      "NVDA revenue Q1 2024",
-      "NVDA revenue Q2 2024",
-      "NVDA revenue Q3 2024",
-      "NVDA revenue Q4 2024",
-      "NVDA revenue Q1 2025",
-      "NVDA revenue Q2 2025",
-      "NVDA revenue Q3 2025",
-      "NVDA revenue Q4 2025",
+      ...charted.map((quarter) => `NVDA revenue ${quarter}`),
       "NVDA gross_profit Q4 2025",
       "NVDA operating_income Q4 2025",
       "NVDA net_income Q4 2025",
       "gross_margin(NVDA gross_profit Q4 2025, NVDA revenue Q4 2025)",
       "operating_margin(NVDA operating_income Q4 2025, NVDA revenue Q4 2025)",
       "net_margin(NVDA net_income Q4 2025, NVDA revenue Q4 2025)",
-      "percent_change_positive_base(NVDA revenue Q4 2025, NVDA revenue Q3 2025)",
-      "percent_change_positive_base(NVDA revenue Q4 2025, NVDA revenue Q4 2024)",
+      ...charted.slice(1).map((quarter, index) => changeOf("NVDA", quarter, charted[index]!)),
+      changeOf("NVDA", "Q4 2025", "Q4 2024"),
+      ...["highest", "lowest"].map(() => `period_rank(${charted.map((quarter) => `NVDA revenue ${quarter}`).join(", ")})`),
     ],
+    uncovered: [],
   }, "a fourth quarter with no precision proof is the newest; a quarter public after the cutoff, or a year, is not");
   assert.deepEqual(requests.map(({ subject, metric_key, fiscal_year, fiscal_period }) => ({ subject, metric_key, fiscal_year, fiscal_period })), [
     { subject: { kind: "issuer", id: GOLDEN_COMPANIES.find((company) => company.ticker === "NVDA")!.issuer_id }, metric_key: "revenue", fiscal_year: null, fiscal_period: null },
   ]);
-  const afterQ1 = (await overview(reported(revenue(2025, "Q4"), revenue(2026, "Q1"))))!.outputs;
-  assert.deepEqual([afterQ1[0], ...afterQ1.slice(-2)], [
+  const afterQ1 = (await overview(candidatePage(...eightQuarters.slice(4), calendarQuarter(2026, "Q1"))))!.outputs;
+  assert.deepEqual([afterQ1[0], ...afterQ1.filter((output) => output.startsWith("percent_change")).slice(-2)], [
     "NVDA revenue Q2 2024",
-    "percent_change_positive_base(NVDA revenue Q1 2026, NVDA revenue Q4 2025)",
-    "percent_change_positive_base(NVDA revenue Q1 2026, NVDA revenue Q1 2025)",
+    changeOf("NVDA", "Q1 2026", "Q4 2025"),
+    changeOf("NVDA", "Q1 2026", "Q1 2025"),
   ], "a first quarter compares with the fourth before it and with the first a year earlier");
   const segment = { period_type: "duration", dimension_scope: "segment", dimension_members: [{ axis: "srt:ProductOrServiceAxis", member: "nvda:DataCenterMember" }], adjustment_basis: "unadjusted", share_basis: "not_applicable", fiscal_calendar_version: "fiscal-calendar.v1", disclosure_relation: "original" };
-  const notReported = await overview(reported(revenue(2025, "Q4"), { ...revenue(2026, "Q1"), context: segment } as unknown as InputCandidate, { ...revenue(2026, "Q2"), source_class: "issuer_disclosure" }));
+  const notReported = await overview(candidatePage(calendarQuarter(2025, "Q4"), { ...calendarQuarter(2026, "Q1"), context: segment } as unknown as InputCandidate, { ...calendarQuarter(2026, "Q2"), source_class: "issuer_disclosure" }));
   assert.equal(notReported!.outputs[0], "NVDA revenue Q1 2024", "a segment's value or a disallowed source's does not name the newest quarter, as it cannot for the engine");
-  assert.equal(await overview(reported(revenue(2025, "FY"))), null, "no quarter reported: no overview");
+  assert.equal(await overview(candidatePage(calendarQuarter(2025, "FY"))), null, "no quarter reported: no overview");
   assert.equal(await overview({ status: "error", reason_code: "database_error" }), null, "a failed read: no overview");
   assert.deepEqual(warned, [["[chat] the company overview could not be planned; the planner answers", "database_error"]]);
 });
 
-test("a comparison shows each company's latest quarter, named from the newest it reported revenue for, never aligned by calendar (#398)", async (t) => {
+test("a change is planned only between quarters whose reported dates follow each other, and one that is not is named (#479)", async () => {
+  const run = (start: string, labels: ReadonlyArray<[number, string]>, days: ReadonlyArray<number>) => {
+    let next = Date.parse(`${start}T00:00:00Z`);
+    return labels.map(([year, quarter], index) => {
+      const from = new Date(next).toISOString().slice(0, 10);
+      next += days[index]! * 86_400_000;
+      return revenueCandidate(year, quarter, from, new Date(next - 86_400_000).toISOString().slice(0, 10));
+    });
+  };
+  const eight = [2023, 2024].flatMap((year) => ["Q1", "Q2", "Q3", "Q4"].map((quarter): [number, string] => [year, quarter]));
+  const changes = (outputs: ReadonlyArray<string>) => outputs.filter((output) => output.startsWith("percent_change"));
+  const all = [...eight.slice(1).map(([year, quarter], index) => changeOf("NVDA", `${quarter} ${year}`, `${eight[index]![1]} ${eight[index]![0]}`)), changeOf("NVDA", "Q4 2024", "Q4 2023")];
+
+  const longYear = await overviewOf("NVDA", () => candidatePage(...run("2023-01-02", eight, [91, 91, 91, 98, 91, 91, 91, 91])));
+  assert.deepEqual([changes(longYear!.outputs), longYear!.uncovered], [all, []], "a 53-week year's 14-week fourth quarter still follows its third");
+
+  const moved = [...run("2023-01-01", eight.slice(0, 4), [90, 91, 92, 92]), ...run("2024-02-01", eight.slice(4), [90, 92, 92, 92])];
+  const recalendared = await overviewOf("NVDA", () => candidatePage(...moved));
+  assert.deepEqual(changes(recalendared!.outputs), all.filter((change) => !change.includes("Q1 2024, NVDA revenue Q4 2023") && !change.includes("Q4 2024, NVDA revenue Q4 2023")));
+  assert.deepEqual(recalendared!.uncovered, [
+    "revenue growth from Q4 FY2023 to Q1 FY2024, whose quarters are not dated consecutively",
+    "revenue growth from Q4 FY2023 to Q4 FY2024, whose quarters are not dated consecutively",
+  ], "a new fiscal year end leaves a transition month between the old calendar's last quarter and the new one's first");
+
+  const mislabelled = [...goldenQuarters("NVDA").slice(0, 4), revenueCandidate(2026, "Q1", "2025-07-28", "2025-10-26")];
+  const misread = await overviewOf("NVDA", () => candidatePage(...mislabelled));
+  assert.deepEqual([changes(misread!.outputs).filter((change) => change.includes("Q1 2026")), misread!.uncovered.filter((note) => note.includes("Q1 FY2026"))], [[], [
+    "revenue growth from Q4 FY2025 to Q1 FY2026, whose quarters are not dated consecutively",
+    "revenue growth from Q1 FY2025 to Q1 FY2026, whose quarters are not dated consecutively",
+  ]], "the quarter filed as Q1 FY2026 is dated as the third after Q4 FY2025: neither the latest QoQ nor its YoY");
+  const startingOn = async (start: string) => changes((await overviewOf("NVDA", () => candidatePage(...goldenQuarters("NVDA").slice(0, 7), revenueCandidate(2026, "Q4", start, "2026-01-25"))))!.outputs)
+    .filter((change) => change.includes("Q4 2026, NVDA revenue Q3 2026"));
+  assert.deepEqual([await startingOn("2025-11-02"), await startingOn("2025-11-03")], [[changeOf("NVDA", "Q4 2026", "Q3 2026")], []],
+    "Q3 FY2026 ends 2025-10-26: a quarter starting up to a week later still follows it, eight days later it does not");
+  const disputed = await overviewOf("NVDA", () => candidatePage(...goldenQuarters("NVDA"), revenueCandidate(2026, "Q3", "2025-07-28", "2025-10-19")));
+  assert.deepEqual([changes(disputed!.outputs).filter((change) => change.includes("Q3 2026")), disputed!.uncovered], [[], [
+    "revenue growth from Q2 FY2026 to Q3 FY2026, as its filings date Q3 FY2026 differently",
+    "revenue growth from Q3 FY2026 to Q4 FY2026, as its filings date Q3 FY2026 differently",
+    "revenue growth from Q4 FY2025 to Q4 FY2026, as its filings date Q3 FY2026 differently",
+  ]], "two filings that date one quarter differently prove neither date");
+
+  const five = await overviewOf("NVDA", () => candidatePage(...goldenQuarters("NVDA").slice(3)));
+  const shown = GOLDEN_COMPANIES.find((company) => company.ticker === "NVDA")!.quarters.map((quarter) => `${quarter.fiscal_period} ${quarter.fiscal_year}`);
+  assert.deepEqual([changes(five!.outputs), five!.uncovered], [[...shown.slice(1).map((quarter, index) => changeOf("NVDA", quarter, shown[index]!)), changeOf("NVDA", "Q4 2026", "Q4 2025")], []],
+    "five quarters reported: a change from one of the three before them is a gap where it falls, never a note");
+  const gapped = await overviewOf("NVDA", () => candidatePage(...goldenQuarters("NVDA").filter((quarter) => quarter.period.fiscal_year !== 2026 || quarter.period.fiscal_period !== "Q2")));
+  assert.deepEqual([changes(gapped!.outputs).filter((change) => change === changeOf("NVDA", "Q4 2026", "Q4 2025")), gapped!.uncovered], [[], ["revenue growth from Q4 FY2025 to Q4 FY2026, as Q2 FY2026 has no reported revenue"]],
+    "a year whose middle quarter was never reported is not proven to follow on");
+
+  const apart = await overviewOf("NVDA", () => candidatePage(...eight.flatMap(([year, quarter]) => run(`${year}-${CALENDAR[quarter as keyof typeof CALENDAR][0]}`, [[year, quarter]], [60]))));
+  const named = ([fromYear, from]: [number, string], [toYear, to]: [number, string]) => `revenue growth from ${from} FY${fromYear} to ${to} FY${toYear}, whose quarters are not dated consecutively`;
+  assert.deepEqual([changes(apart!.outputs), apart!.uncovered], [[], [...eight.slice(1).map((to, index) => named(eight[index]!, to)), named(eight[3]!, eight[7]!)]],
+    "an overview that pairs no quarters plans no growth, and its note names every change");
+});
+
+test("a comparison shows each company's latest quarter, named from the newest it reported revenue for, never aligned by calendar, and the first company's lead in each margin (#398)", async (t) => {
   t.mock.method(console, "warn", () => {});
-  const revenue = (fiscal_year: number, fiscal_period: string, end: string, publicBy = "2026-08-01T00:00:00.000Z") => ({
-    metric_key: "revenue",
-    source_class: "sec_filing",
-    unit: { kind: "currency", currency: "USD" },
-    context: null,
-    period: { start: null, end, fiscal_year, fiscal_period },
-    precision: null,
-    publication: [{ attestation_id: "p", timing: { available_not_before: null, available_no_later_than: publicBy, timing_precision: "instant", source_timezone: "UTC" } }],
-  }) as unknown as InputCandidate;
-  const reported = (...candidates: InputCandidate[]): CandidatePage => ({ status: "ok", candidates, truncated: false });
   const PAGES: Record<string, CandidatePage> = {
-    NVDA: reported(revenue(2026, "Q3", "2025-10-26"), revenue(2026, "Q4", "2026-01-25"), revenue(2027, "Q1", "2026-04-26", "2026-09-02T00:00:00.000Z")),
-    AMD: reported(revenue(2026, "Q1", "2026-03-28"), revenue(2026, "Q2", "2026-06-27")),
-    AAPL: reported(revenue(2026, "Q2", "2026-03-28"), revenue(2026, "Q3", "2026-06-27")),
+    NVDA: candidatePage(...goldenQuarters("NVDA", "2026-08-01T00:00:00.000Z"), revenueCandidate(2027, "Q1", "2026-01-26", "2026-04-26", "2026-09-02T00:00:00.000Z")),
+    AMD: candidatePage(...goldenQuarters("AMD", "2026-08-01T00:00:00.000Z")),
+    AAPL: candidatePage(...goldenQuarters("AAPL", "2026-08-01T00:00:00.000Z")),
   };
   const tickerOf = (issuerId: string) => GOLDEN_COMPANIES.find((company) => company.issuer_id === issuerId)!.ticker;
   const compare = async (question: string, pages: Record<string, CandidatePage> = PAGES) => {
@@ -224,27 +287,29 @@ test("a comparison shows each company's latest quarter, named from the newest it
     const reads = requests.map(({ subject, metric_key, fiscal_year, fiscal_period }) => [tickerOf(subject.id), subject.kind, metric_key, fiscal_year, fiscal_period]);
     if (planned === null) return { planned, reads };
     assert.equal(planned.outcome, "ready", JSON.stringify(planned));
-    const { plan, model_calls } = planned as Extract<PlanningResult, { outcome: "ready" }>;
+    const { plan, model_calls } = planned;
     return {
       planner: plan.planner.kind,
       model_calls,
       units: plan.publication_units.map((unit) => unit.unit_id),
       output_ids: plan.outputs.map((output) => output.output_id),
       outputs: outputLabels(plan),
+      uncovered: await omissions(plan, evidence),
       reads,
     };
   };
+  const margin = (ticker: string, metric: string, line: string, quarter: string) => `${metric}(${ticker} ${line} ${quarter}, ${ticker} revenue ${quarter})`;
+  const MARGINS = [["gross_margin", "gross_profit"], ["operating_margin", "operating_income"], ["net_margin", "net_income"]] as const;
   const latestQuarter = (ticker: string, quarter: string, previous: string, yearBefore: string) => [
     `${ticker} revenue ${quarter}`,
-    `${ticker} gross_profit ${quarter}`,
-    `${ticker} operating_income ${quarter}`,
-    `${ticker} net_income ${quarter}`,
-    `gross_margin(${ticker} gross_profit ${quarter}, ${ticker} revenue ${quarter})`,
-    `operating_margin(${ticker} operating_income ${quarter}, ${ticker} revenue ${quarter})`,
-    `net_margin(${ticker} net_income ${quarter}, ${ticker} revenue ${quarter})`,
-    `percent_change_positive_base(${ticker} revenue ${quarter}, ${ticker} revenue ${previous})`,
-    `percent_change_positive_base(${ticker} revenue ${quarter}, ${ticker} revenue ${yearBefore})`,
+    ...MARGINS.map(([, line]) => `${ticker} ${line} ${quarter}`),
+    ...MARGINS.map(([metric, line]) => margin(ticker, metric, line, quarter)),
+    changeOf(ticker, quarter, previous),
+    changeOf(ticker, quarter, yearBefore),
   ];
+  const CLOSEST: Record<string, [string, string]> = { AMD: ["Q4 2025", "fy2025_q4"], AAPL: ["Q1 2026", "fy2026_q1"] };
+  const leads = (...tickers: string[]) => MARGINS.flatMap(([metric, line]) => tickers.slice(1).map((other) =>
+    `spread(${margin(tickers[0]!, metric, line, "Q4 2026")}, ${margin(other, metric, line, CLOSEST[other]![0])})`));
   const NVDA = latestQuarter("NVDA", "Q4 2026", "Q3 2026", "Q4 2025");
   const AMD = latestQuarter("AMD", "Q2 2026", "Q1 2026", "Q2 2025");
   const AAPL = latestQuarter("AAPL", "Q3 2026", "Q2 2026", "Q3 2025");
@@ -257,12 +322,29 @@ test("a comparison shows each company's latest quarter, named from the newest it
     planner: "deterministic",
     model_calls: 0,
     units: ["answer"],
-    output_ids: [...ids("a", "fy2026_q4"), ...ids("b", "fy2026_q2")],
-    outputs: [...NVDA, ...AMD],
+    output_ids: [
+      ...ids("a", "fy2026_q4"),
+      ...ids("b", "fy2026_q2"),
+      ...MARGINS.map(([metric]) => `out_a_minus_b_${metric}`),
+    ],
+    outputs: [...NVDA, ...AMD, ...leads("NVDA", "AMD")],
+    uncovered: [],
     reads: [read("NVDA"), read("AMD")],
   }, "a quarter public after the cutoff is not NVDA's newest");
   const three = await compare("NVDA, AMD and AAPL");
-  assert.deepEqual([three?.outputs, three?.reads], [[...NVDA, ...AMD, ...AAPL], [read("NVDA"), read("AMD"), read("AAPL")]]);
+  assert.deepEqual([three?.outputs, three?.reads], [[...NVDA, ...AMD, ...AAPL, ...leads("NVDA", "AMD", "AAPL")], [read("NVDA"), read("AMD"), read("AAPL")]],
+    "NVDA's newest quarter ends 2026-01-25, and AMD's Q4 2025 and AAPL's Q1 2026 each 29 days before it");
+  const noLead = "NVIDIA Corporation's lead over Advanced Micro Devices, Inc. in each margin, as no quarter Advanced Micro Devices, Inc. reported ends within half a quarter of NVIDIA Corporation's Q4 FY2026";
+  const apart = await compare("NVDA and AMD", { ...PAGES, AMD: candidatePage(...goldenQuarters("AMD", "2026-08-01T00:00:00.000Z").slice(6)) });
+  assert.deepEqual([apart.outputs?.filter((output) => output.startsWith("spread")), apart.uncovered], [[], [noLead]], "AMD's Q1 2026 ends 62 days after NVDA's newest: more than half a quarter");
+  const disputed = await compare("NVDA and AMD", { ...PAGES, NVDA: candidatePage(...goldenQuarters("NVDA", "2026-08-01T00:00:00.000Z"), revenueCandidate(2026, "Q4", "2025-10-27", "2026-01-18", "2026-08-01T00:00:00.000Z")) });
+  assert.deepEqual([disputed.outputs?.filter((output) => output.startsWith("spread")), disputed.uncovered?.at(-1)], [[],
+    "NVIDIA Corporation's lead over Advanced Micro Devices, Inc. in each margin, as the filings of NVIDIA Corporation do not agree on the dates of its Q4 FY2026"]);
+  const undated = await compare("NVDA and AMD", { ...PAGES, AMD: candidatePage(revenueCandidate(2026, "Q1", null, "2026-03-28"), revenueCandidate(2026, "Q2", null, "2026-06-27")) });
+  assert.deepEqual(undated.uncovered, [
+    "revenue growth from Q1 FY2026 to Q2 FY2026 for Advanced Micro Devices, Inc., whose quarters are not dated consecutively",
+    noLead,
+  ], "a company is named when several are compared; Q2 FY2025 was never reported, so its year-over-year change is a gap where it falls");
 
   let inFlight = 0;
   let most = 0;
@@ -277,7 +359,7 @@ test("a comparison shows each company's latest quarter, named from the newest it
   assert.notEqual(await planCompanyOverview(planningContext("NVDA, AMD and AAPL"), oneAtATime), null);
   assert.equal(most, 1, "one read at a time on the request's one client");
 
-  assert.deepEqual((await compare("NVDA and AMD", { ...PAGES, AMD: reported(revenue(2025, "FY", "2025-12-27")) })).planned, null, "a company that reported no quarter");
+  assert.deepEqual((await compare("NVDA and AMD", { ...PAGES, AMD: candidatePage(revenueCandidate(2025, "FY", "2024-12-29", "2025-12-27")) })).planned, null, "a company that reported no quarter");
   assert.deepEqual((await compare("NVDA and AMD", { ...PAGES, AMD: { ...PAGES.AMD!, truncated: true } as CandidatePage })).planned, null, "a truncated page");
   assert.deepEqual((await compare("NVDA and AMD", { ...PAGES, AMD: { status: "error", reason_code: "database_error" } })).planned, null, "a failed read");
 });
@@ -335,6 +417,44 @@ test("a question about its companies, named or carried, that asks for no figure 
     [true, null],
     "the golden conversation's comparison asks for a price window",
   );
+});
+
+test("a question about one company's margin trend plans its three margins over the charted quarters, each with its high and low, with no model (#398)", async () => {
+  const quarters = GOLDEN_COMPANIES.find((company) => company.ticker === "NVDA")!.quarters.map((quarter) => `${quarter.fiscal_period} ${quarter.fiscal_year}`);
+  const MARGINS = [["gross_margin", "gross_profit"], ["operating_margin", "operating_income"], ["net_margin", "net_income"]] as const;
+  const over = (metric: string, line: string) => quarters.map((quarter) => `${metric}(NVDA ${line} ${quarter}, NVDA revenue ${quarter})`);
+  assert.deepEqual(await overviewOf("NVDA", () => candidatePage(...goldenQuarters("NVDA")), planMarginTrend), {
+    outputs: [
+      ...MARGINS.flatMap(([metric, line]) => over(metric, line)),
+      ...MARGINS.flatMap(([metric, line]) => ["highest", "lowest"].map(() => `period_rank(${over(metric, line).join(", ")})`)),
+    ],
+    uncovered: [],
+  });
+
+  const subjects = planningContext("NVDA").requested_subjects;
+  const scope = { price_window: null };
+  const trend = (proposal: ReturnType<typeof reading>, over = subjects, scoped: { price_window: null | object } | null = scope) =>
+    marginTrendSubjects(over, proposal, scoped as never)?.map((subject) => subject.mention) ?? null;
+  assert.deepEqual(trend(reading(["margin_trend"], ["income_statement"], ["operating_margin"])), ["NVDA"], "one margin over time");
+  assert.deepEqual(trend(reading(["margins", "margin_trend", "explains"])), ["NVDA"], "margins over time and why");
+  assert.deepEqual(trend(reading(["margin_trend"], [], [], [], { kind: "latest" })), ["NVDA"], "the latest periods");
+  assert.equal(trend(reading(["margins"])), null, "margins, not their trend");
+  assert.equal(trend(reading(["margin_trend", "segments"])), null, "segments too");
+  assert.equal(trend(reading(["margin_trend"], [], ["revenue"])), null, "another income item");
+  assert.equal(trend(reading(["margin_trend"], ["free_cash_flow"])), null, "another metric");
+  assert.equal(trend(reading(["margin_trend"], [], [], [], { kind: "fiscal_quarter", fiscal_period: "Q2", fiscal_year: 2025 })), null, "a named quarter");
+  assert.equal(trend(reading(["margin_trend"], [], [], ["margins"])), null, "margins turned off");
+  assert.equal(trend(reading(["margin_trend"]), planningContext("NVDA and AMD").requested_subjects), null, "two companies");
+  assert.equal(trend(reading(["margin_trend"]), subjects, { price_window: { kind: "ytd" } }), null, "a price window");
+  assert.equal(trend(reading(["margin_trend"]), subjects, null), null, "no scope");
+  assert.equal(marginTrendSubjects(subjects, null, scope), null, "no reading");
+});
+
+test("a margin trend whose quarters cannot be read says so as a margin trend, and the planner answers (#398)", async (t) => {
+  const warned: unknown[][] = [];
+  t.mock.method(console, "warn", (...args: unknown[]) => warned.push(args));
+  assert.equal(await overviewOf("NVDA", () => ({ status: "error", reason_code: "database_error" }), planMarginTrend), null);
+  assert.deepEqual(warned, [["[chat] the margin trend could not be planned; the planner answers", "database_error"]]);
 });
 
 test("each golden answer names what its question asks for and its plan does not compute", async () => {

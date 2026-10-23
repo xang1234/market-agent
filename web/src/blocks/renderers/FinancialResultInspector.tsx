@@ -47,7 +47,7 @@ export function FinancialResultInspector({ load, onCopy }: { load: FinancialInsp
           {details.coverage_state && details.coverage_state !== 'complete' ? <VerificationLabel kind="partial" /> : null}
         </div>
         <p className="num break-all text-base font-semibold text-fg" data-testid="financial-inspector-value">
-          {payloadSummary(details.payload)}
+          {payloadSummary(details.payload, details.formula?.operation)}
         </p>
         {value !== null && onCopy ? (
           <button

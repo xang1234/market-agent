@@ -22,9 +22,12 @@ import type {
   GapDisposition,
   LocalId,
   OperationNode,
+  PeriodRankNode,
   PeriodSelector,
+  RankingPayload,
   ReasonCode,
   Sha256Hex,
+  SpreadNode,
 } from "./contracts.ts";
 import { FISCAL_PERIODS, operationDependencies } from "./contracts.ts";
 import { coverageState } from "./coverage.ts";
@@ -46,7 +49,14 @@ export type PresentationLabel = Readonly<
 export type PresentedPayload = Readonly<
   | { kind: "value"; text: string; full_text: string; value: DecimalString; unit: FinancialUnit; exact: boolean }
   | { kind: "predicate"; text: string; outcome: boolean }
-  | { kind: "ranking"; text: string; complete: boolean; order: ReadonlyArray<Readonly<{ subject_label_id: string; rank: number }>>; leader_label_ids: ReadonlyArray<string> | null }
+  | {
+      kind: "ranking";
+      text: string;
+      complete: boolean;
+      /** A peer ranking orders subjects; a period ranking orders one subject's periods. */
+      order: ReadonlyArray<Readonly<{ subject_label_id: string; rank: number } | { period_label_id: string; rank: number }>>;
+      leader_label_ids: ReadonlyArray<string> | null;
+    }
   | { kind: "gap"; text: string; reason_code: ReasonCode }
 >;
 
@@ -115,6 +125,7 @@ export function presentFinancialUnit(input: {
     if (name === undefined) throw new RangeError(`no display name for subject slot ${member.slot_id}`);
     labels.subject(member.slot_id, name);
   }
+  const names = subjectNames(labels.entries);
 
   const results: PresentedResult[] = plan.outputs.filter((output) => output.unit_id === input.unit_id).map((output) => {
     const result = byOutput.get(output.output_id);
@@ -127,8 +138,8 @@ export function presentFinancialUnit(input: {
       disposition: result.disposition === "computed" ? "verified" : result.disposition,
       subject_label_id: slot === null ? null : subjectLabelId(slot),
       measure_label_id: labels.intern("measure", measureKey(plan, node), measureText(plan, node)),
-      period_label_id: labels.intern("period", JSON.stringify([periodSelectors(plan, node), measuresInstant(plan, node)]), periodText(plan, node)),
-      presented: presentPayload(plan, node, result.payload, labels.entries),
+      period_label_id: labels.intern("period", periodKey(plan, node), periodText(plan, node, names)),
+      presented: presentPayload(plan, node, result.payload, labels),
       result_hash: result.result_hash,
     };
   });
@@ -285,8 +296,9 @@ function columnKeyByResult(results: ReadonlyArray<PresentedResult>, lines: Reado
 // ---------------------------------------------------------------------------
 // Payload text.
 
-function presentPayload(plan: FinancialPlanV1, node: OperationNode, payload: unknown, labels: Readonly<Record<string, PresentationLabel>>): PresentedPayload {
+function presentPayload(plan: FinancialPlanV1, node: OperationNode, payload: unknown, table: LabelTable): PresentedPayload {
   const record = payload as { kind: string } & Record<string, unknown>;
+  const labels = table.entries;
   switch (record.kind) {
     case "value": {
       const unit = record.unit as FinancialUnit;
@@ -304,10 +316,11 @@ function presentPayload(plan: FinancialPlanV1, node: OperationNode, payload: unk
       return {
         kind: "predicate",
         outcome,
-        text: `${who}${measureText(plan, subjectNode)}, ${periodText(plan, subjectNode)}, ${COMPARISON_TEXT[record.comparison as Comparison]} ${bound}: ${outcome ? "yes" : "no"}`,
+        text: `${who}${measureText(plan, subjectNode)}, ${periodText(plan, subjectNode, subjectNames(labels))}, ${COMPARISON_TEXT[record.comparison as Comparison]} ${bound}: ${outcome ? "yes" : "no"}`,
       };
     }
     case "ranking": {
+      if (node.operation === "period_rank") return periodRanking(plan, node, record as unknown as RankingPayload, table);
       const slotOf = (memberNode: LocalId) => subjectSlot(plan, plan.operations.find((entry) => entry.node_id === memberNode)!);
       const order = (record.ranks as Array<{ node_id: LocalId; rank: number }>).map((entry) => ({ subject_label_id: subjectLabelId(slotOf(entry.node_id)!), rank: entry.rank }));
       const extreme = record.extreme as LocalId[] | null;
@@ -325,6 +338,29 @@ function presentPayload(plan: FinancialPlanV1, node: OperationNode, payload: unk
       return { kind: "gap", text: gap.explanation, reason_code: gap.reason_code };
     }
   }
+}
+
+function periodRanking(plan: FinancialPlanV1, node: PeriodRankNode, ranking: RankingPayload, labels: LabelTable): PresentedPayload {
+  const names = subjectNames(labels.entries);
+  const nodeOf = (id: LocalId) => plan.operations.find((entry) => entry.node_id === id)!;
+  const periodOf = (id: LocalId) => labels.intern("period", periodKey(plan, nodeOf(id)), periodText(plan, nodeOf(id), names));
+  const leaders = (ranking.extreme ?? []).map(periodOf);
+  const { requested, evaluated } = ranking.population;
+  const [step, ...others] = new Set(node.members.map((id) => periodAnchor(periodSelectors(plan, nodeOf(id))[0]!).step));
+  const periods = others.length === 0 && step !== "cutoff" ? { quarter: "quarters", year: "fiscal years" }[step!] : "periods";
+  const measure = `${ranking.direction} ${lowercaseUnlessAcronym(measureText(plan, nodeOf(node.members[0]!)))}`;
+  const leading = leaders.length > 1 ? `tie for the ${measure}` : `has the ${measure}`;
+  return {
+    kind: "ranking",
+    text: `${new Intl.ListFormat("en").format(leaders.map((id) => labels.entries[id]!.text))} ${leading} of the ${evaluated === requested ? requested : `${evaluated} of ${requested}`} ${periods} ranked`,
+    complete: ranking.complete,
+    order: ranking.ranks.map((entry) => ({ period_label_id: periodOf(entry.node_id), rank: entry.rank })),
+    leader_label_ids: ranking.complete ? leaders : null,
+  };
+}
+
+export function lowercaseUnlessAcronym(label: string): string {
+  return /\p{Ll}/u.test(label[1] ?? "") ? `${label[0]!.toLowerCase()}${label.slice(1)}` : label;
 }
 
 const COMPARISON_TEXT: Readonly<Record<Comparison, string>> = { gt: "above", gte: "at or above", lt: "below", lte: "at or below", eq: "equal to" };
@@ -432,6 +468,10 @@ function measureText(plan: FinancialPlanV1, node: OperationNode): string {
       return "Market capitalization (share price × shares outstanding)";
     case "pe_ratio":
       return "P/E ratio (share price / latest fiscal year diluted EPS)";
+    case "spread":
+      return `Difference in ${of(node.left)}`;
+    case "period_rank":
+      return `${of(node.members[0]!)} ranked across periods`;
   }
 }
 
@@ -459,6 +499,10 @@ function measureKey(plan: FinancialPlanV1, node: OperationNode): string {
       return `threshold(${of(node.subject)})`;
     case "peer_compare":
       return `peer_compare(${of(node.members[0]!)})`;
+    case "spread":
+      return `spread(${of(node.left)})`;
+    case "period_rank":
+      return `period_rank(${of(node.members[0]!)})`;
   }
 }
 
@@ -515,9 +559,39 @@ function periodSelectors(plan: FinancialPlanV1, node: OperationNode): PeriodSele
 }
 
 // A balance is a point in time: "end of FY2023", never the year's amount.
-function periodText(plan: FinancialPlanV1, node: OperationNode): string {
+function periodText(plan: FinancialPlanV1, node: OperationNode, names: (slot: LocalId) => string): string {
+  if (node.operation === "spread") return spreadSides(plan, node, (side) => `${names(side.slot)} ${periodText(plan, side.node, names)}`).join(" minus ");
+  if (node.operation === "period_rank") return windowSpan(plan, node, names);
   const instant = measuresInstant(plan, node);
   return periodSelectors(plan, node).map((selector) => (instant ? `end of ${selectorText(selector)}` : selectorText(selector))).join(" vs ");
+}
+
+function periodKey(plan: FinancialPlanV1, node: OperationNode): string {
+  if (node.operation === "spread") return spreadPeriodKey(plan, node);
+  if (node.operation === "period_rank") return JSON.stringify(["window", periodSelectors(plan, node).map((selector) => JSON.stringify(selector)).sort()]);
+  return JSON.stringify([periodSelectors(plan, node), measuresInstant(plan, node)]);
+}
+
+function spreadPeriodKey(plan: FinancialPlanV1, node: SpreadNode): string {
+  return JSON.stringify(spreadSides(plan, node, (side) => [side.slot, periodKey(plan, side.node)]));
+}
+
+function windowSpan(plan: FinancialPlanV1, node: PeriodRankNode, names: (slot: LocalId) => string): string {
+  const members = node.members.map((id) => plan.operations.find((entry) => entry.node_id === id)!);
+  const recency = (member: OperationNode) => periodAnchor(periodSelectors(plan, member)[0]!).recency;
+  const sorted = members.sort((left, right) => recency(left) - recency(right));
+  return `${periodText(plan, sorted[0]!, names)} to ${periodText(plan, sorted.at(-1)!, names)}`;
+}
+
+function spreadSides<T>(plan: FinancialPlanV1, node: SpreadNode, side: (entry: { slot: LocalId; node: OperationNode }) => T): T[] {
+  return [node.left, node.right].map((id) => {
+    const operand = plan.operations.find((entry) => entry.node_id === id)!;
+    return side({ slot: subjectSlot(plan, operand) ?? "", node: operand });
+  });
+}
+
+function subjectNames(labels: Readonly<Record<string, PresentationLabel>>): (slot: LocalId) => string {
+  return (slot) => labels[subjectLabelId(slot)]?.text ?? slot;
 }
 
 /** Whether every reported value under the node is a point-in-time measure. */

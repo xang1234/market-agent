@@ -63,12 +63,13 @@ function bindingsByFact(blocks: ReadonlyArray<Block>): Map<string, Record<string
 
 /**
  * Why prose written on an engine answer may not be saved beside it, or null
- * when it may: every ref is a result ref naming a verified result of that
- * answer, showing that result's text and its period's.
+ * when it may: every ref is a result ref naming a verified value or ranking
+ * of that answer, showing that result's text and its period's.
  */
 export function resultRefProblem(prose: Block, answer: { financial: FinancialAnswerContent }): string | null {
   const { labels, results } = answer.financial;
-  const verified = new Map(results.flatMap((result) => result.disposition === "verified" && result.presented.kind === "value" ? [[result.result_id, result] as const] : []));
+  const cited = (kind: string) => kind === "value" || kind === "ranking";
+  const verified = new Map(results.flatMap((result) => result.disposition === "verified" && cited(result.presented.kind) ? [[result.result_id, result] as const] : []));
   for (const segment of Array.isArray(prose.segments) ? prose.segments : []) {
     if (!isRecord(segment) || segment.type !== "ref") continue;
     if (segment.ref_kind !== "result") return `a ${String(segment.ref_kind)} ref is not a result ref`;

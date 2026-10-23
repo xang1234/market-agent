@@ -34,7 +34,9 @@ const JUDGED = { ...ENV, JUDGE_LITELLM_MODEL: "fixture/judge" };
 
 const assertions = (list: unknown[]) => `ALFA turns most of its revenue into profit.\n\`\`\`assertions\n${JSON.stringify(list)}\n\`\`\``;
 // ALFA's overview: F1..F8 its revenue, oldest first, then its latest
-// quarter's lines (F9..F11), margins (F12..F14) and growth (F15, F16).
+// quarter's lines (F9..F11) and margins (F12..F14), each quarter's growth
+// from the one before (F15..F21), the latest's from a year before (F22),
+// and its revenue high and low (F23, F24).
 const ALFA_REPLY = assertions([
   { kind: "observation", text: "Margins.", evidence: ["F12", "F13", "F14"] },
   { kind: "comparison", text: "Revenue rose.", evidence: ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8"], op: "trend", result: "rose_throughout" },
@@ -46,7 +48,24 @@ const ALFA_TEXT = [
 ].join("\n\n");
 const JUDGE = "You check the analyst inferences";
 // Every one of ALFA's overview results, as the judge reads them beside an inference.
-const ALFA_FIGURES = "ALFA's revenue was USD 800.00 in Q1 FY2022; ALFA's revenue was USD 900.00 in Q2 FY2022; ALFA's revenue was USD 1,000.00 in Q3 FY2022; ALFA's revenue was USD 1,100.00 in Q4 FY2022; ALFA's revenue was USD 1,200.00 in Q1 FY2023; ALFA's revenue was USD 1,300.00 in Q2 FY2023; ALFA's revenue was USD 1,500.00 in Q3 FY2023; ALFA's revenue was USD 2,000.00, gross profit USD 1,200.00, operating income USD 500.00, net income USD 400.00, gross margin (gross profit / revenue) 60.00%, operating margin (operating income / revenue) 25.00% and net margin (net income / revenue) 20.00% in Q4 FY2023; ALFA's quarter-over-quarter percent change in revenue was 33.33% in Q4 FY2023 vs Q3 FY2023; ALFA's year-over-year percent change in revenue was 81.82% in Q4 FY2023 vs Q4 FY2022.";
+const ALFA_FIGURES = [
+  "ALFA's revenue was USD 800.00 in Q1 FY2022",
+  "ALFA's revenue was USD 900.00 in Q2 FY2022",
+  "ALFA's revenue was USD 1,000.00 in Q3 FY2022",
+  "ALFA's revenue was USD 1,100.00 in Q4 FY2022",
+  "ALFA's revenue was USD 1,200.00 in Q1 FY2023",
+  "ALFA's revenue was USD 1,300.00 in Q2 FY2023",
+  "ALFA's revenue was USD 1,500.00 in Q3 FY2023",
+  "ALFA's revenue was USD 2,000.00, gross profit USD 1,200.00, operating income USD 500.00, net income USD 400.00, gross margin (gross profit / revenue) 60.00%, operating margin (operating income / revenue) 25.00% and net margin (net income / revenue) 20.00% in Q4 FY2023",
+  "ALFA's quarter-over-quarter percent change in revenue was 12.50% in Q2 FY2022 vs Q1 FY2022",
+  "ALFA's quarter-over-quarter percent change in revenue was 11.11% in Q3 FY2022 vs Q2 FY2022",
+  "ALFA's quarter-over-quarter percent change in revenue was 10.00% in Q4 FY2022 vs Q3 FY2022",
+  "ALFA's quarter-over-quarter percent change in revenue was 9.09% in Q1 FY2023 vs Q4 FY2022",
+  "ALFA's quarter-over-quarter percent change in revenue was 8.33% in Q2 FY2023 vs Q1 FY2023",
+  "ALFA's quarter-over-quarter percent change in revenue was 15.38% in Q3 FY2023 vs Q2 FY2023",
+  "ALFA's quarter-over-quarter percent change in revenue was 33.33% in Q4 FY2023 vs Q3 FY2023",
+  "ALFA's year-over-year percent change in revenue was 81.82% in Q4 FY2023 vs Q4 FY2022. Q4 FY2023 has the highest revenue of the 8 quarters ranked. Q1 FY2022 has the lowest revenue of the 8 quarters ranked.",
+].join("; ");
 
 // judge: its reply, or what it does instead of replying; judged: what it was sent.
 function composer(answer: (request: LlmChatRequest) => string | Promise<string>, judge?: string | (() => Promise<string>), env: Record<string, string> = judge ? JUDGED : ENV) {
@@ -157,7 +176,7 @@ test("a company overview carries analyst commentary on its published results (#3
     assert.equal(saved.answered_by, "fixture/recorded", "the deployment that wrote the commentary");
 
     const [input] = inputs;
-    assert.deepEqual([input!.toolCalls, input!.factBlocks, input!.packet!.route, input!.packet!.figures.length], [[], undefined, "financial_engine", 16]);
+    assert.deepEqual([input!.toolCalls, input!.factBlocks, input!.packet!.route, input!.packet!.figures.length], [[], undefined, "financial_engine", 24]);
 
     // The seal still verifies the answer: its proof, its stored hash, and its certificate's.
     assert.deepEqual(saved.block_proofs[answer!.id], { evidence: "linked", calculation: "verified", public_by_cutoff: "proven" });
@@ -191,6 +210,25 @@ test("a company overview carries analyst commentary on its published results (#3
       plainText(segmentsOf(commentary)),
       "Of ALFA and BRVO, ALFA's gross margin (gross profit / revenue) was highest: ALFA 60.00%, BRVO 45.00% (Q4 FY2023).",
     );
+  });
+
+  await t.test("a comparison's commentary cites its lead by result, and the judge reads the lead as the inference's support (#398)", async () => {
+    // ALFA's figures F1..F9, BRVO's F10..F18, then ALFA's lead in gross, operating and net margin.
+    const { compose, inputs, judged } = composer(() => assertions([
+      { kind: "observation", text: "ALFA leads.", evidence: ["F19"] },
+      { kind: "analyst_inference", subject: "ALFA", text: "It keeps more of each sale than BRVO does.", supports: [0] },
+    ]), '{"verdicts":[{"id":1,"verdict":"entailed","worded_amount":false}]}');
+    const done = completed((await overview(compose).run({ ...base, userIntent: "Compare revenue for ALFA and BRVO" })).events);
+    const saved = await message(done.message_id);
+    const [answer, commentary] = saved.blocks;
+    const lead = "Difference in gross margin (gross profit / revenue) was 15.00 pp in Alfa Corp Q4 FY2023 minus Bravo Corp Q4 FY2023.";
+    assert.equal(plainText(segmentsOf(commentary)), `${lead}\n\n> **Analyst inference on ALFA:** It keeps more of each sale than BRVO does.`);
+    const { results } = answer!.financial as FinancialAnswerContent;
+    assert.deepEqual(segmentsOf(commentary).flatMap((segment) => segment.type === "ref" ? [results.find((result) => result.result_id === segment.ref_id)?.output_id] : []), ["out_a_minus_b_gross_margin"]);
+    assert.equal(resultRefProblem(commentary!, answer as never), null);
+    const figure = inputs[0]!.packet!.figures.find((entry) => entry.id === "F19");
+    assert.deepEqual(figure && "lead_of" in figure && figure.lead_of, ["ALFA", "BRVO"], "the lead is of the two companies' gross margins");
+    assert.deepEqual(JSON.parse(judged[0]!.messages[1]!.content).inferences[0].supports, [lead]);
   });
 
   await t.test("the judge's verdict decides how an inference shows: entailed as an inference, unsupported or stating an amount in words as an unverified view, otherwise not at all; the answer publishes either way", async () => {

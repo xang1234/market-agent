@@ -137,7 +137,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     }
   });
 
-  await t.test("the answer shows NVDA's eight quarters of revenue, its latest margins and its growth, each verified from cited facts", async () => {
+  await t.test("the answer shows NVDA's eight quarters of revenue and each one's growth, its latest margins and year-over-year growth, and the quarters' high and low, each verified from cited facts", async () => {
     assert.ok(assistant);
     assert.deepEqual(engineAnswer(assistant).results, [
       ["Revenue", "Q1 FY2025", "verified", "USD 26,044,000,000.00"],
@@ -154,8 +154,16 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
       ["Gross margin (gross profit / revenue)", "Q4 FY2026", "verified", "74.40%"],
       ["Operating margin (operating income / revenue)", "Q4 FY2026", "verified", "64.90%"],
       ["Net margin (net income / revenue)", "Q4 FY2026", "verified", "57.00%"],
+      ["Quarter-over-quarter percent change in Revenue", "Q2 FY2025 vs Q1 FY2025", "verified", "15.34%"],
+      ["Quarter-over-quarter percent change in Revenue", "Q3 FY2025 vs Q2 FY2025", "verified", "16.78%"],
+      ["Quarter-over-quarter percent change in Revenue", "Q4 FY2025 vs Q3 FY2025", "verified", "12.11%"],
+      ["Quarter-over-quarter percent change in Revenue", "Q1 FY2026 vs Q4 FY2025", "verified", "12.03%"],
+      ["Quarter-over-quarter percent change in Revenue", "Q2 FY2026 vs Q1 FY2026", "verified", "6.08%"],
+      ["Quarter-over-quarter percent change in Revenue", "Q3 FY2026 vs Q2 FY2026", "verified", "21.96%"],
       ["Quarter-over-quarter percent change in Revenue", "Q4 FY2026 vs Q3 FY2026", "verified", "8.94%"],
       ["Year-over-year percent change in Revenue", "Q4 FY2026 vs Q4 FY2025", "verified", "57.89%"],
+      ["Revenue ranked across periods", "Q1 FY2025 to Q4 FY2026", "verified", "Q4 FY2026 has the highest revenue of the 8 quarters ranked"],
+      ["Revenue ranked across periods", "Q1 FY2025 to Q4 FY2026", "verified", "Q1 FY2025 has the lowest revenue of the 8 quarters ranked"],
     ]);
     // The engine computes its figures and mints no derived fact, as the legacy chart did.
     const { rows } = await client.query(`select 1 from facts where method = 'derived' and subject_id = $1::uuid`, [NVDA.issuer_id]);

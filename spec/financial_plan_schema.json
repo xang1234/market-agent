@@ -227,7 +227,9 @@
         { "$ref": "#/$defs/ThresholdNode" },
         { "$ref": "#/$defs/PeerCompareNode" },
         { "$ref": "#/$defs/MarketCapNode" },
-        { "$ref": "#/$defs/PeRatioNode" }
+        { "$ref": "#/$defs/PeRatioNode" },
+        { "$ref": "#/$defs/SpreadNode" },
+        { "$ref": "#/$defs/PeriodRankNode" }
       ]
     },
     "ReportedMetricNode": {
@@ -360,6 +362,35 @@
         "operation_version": { "$ref": "#/$defs/VersionTag" },
         "price": { "$ref": "#/$defs/LocalId" },
         "earnings": { "$ref": "#/$defs/LocalId" }
+      }
+    },
+    "SpreadNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_id", "operation", "operation_version", "left", "right"],
+      "properties": {
+        "node_id": { "$ref": "#/$defs/LocalId" },
+        "operation": { "const": "spread" },
+        "operation_version": { "$ref": "#/$defs/VersionTag" },
+        "left": { "$ref": "#/$defs/LocalId" },
+        "right": { "$ref": "#/$defs/LocalId" }
+      }
+    },
+    "PeriodRankNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_id", "operation", "operation_version", "members", "direction"],
+      "properties": {
+        "node_id": { "$ref": "#/$defs/LocalId" },
+        "operation": { "const": "period_rank" },
+        "operation_version": { "$ref": "#/$defs/VersionTag" },
+        "members": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 25,
+          "items": { "$ref": "#/$defs/LocalId" }
+        },
+        "direction": { "enum": ["highest", "lowest"] }
       }
     },
     "RequestedOutput": {

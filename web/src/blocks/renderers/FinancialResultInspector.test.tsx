@@ -132,7 +132,8 @@ test('tiny decimals and derived results keep their canonical text', () => {
 
 test('predicates, partial rankings, and gaps say what they are', () => {
   assert.equal(payloadSummary({ kind: 'predicate', predicate: 'threshold', comparison: 'gt', outcome: true }), 'Met (gt)')
-  assert.match(payloadSummary({ kind: 'ranking', complete: false }), /Partial ranking/u)
+  assert.equal(payloadSummary({ kind: 'ranking', complete: false }, 'peer_compare'), 'Partial ranking: not every requested company has a value')
+  assert.equal(payloadSummary({ kind: 'ranking', complete: false }, 'period_rank'), 'Partial ranking: not every period has a value')
   assert.equal(payloadSummary({ kind: 'gap', reason_code: 'stale_input' }), 'Not available (stale_input)')
   const partial = renderToStaticMarkup(<FinancialResultInspector load={{ kind: 'ready', inspection: inspection({ coverage_state: 'partial' }) }} />)
   assert.ok(partial.includes('Partial coverage'))

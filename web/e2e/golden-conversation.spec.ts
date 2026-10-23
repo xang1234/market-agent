@@ -230,8 +230,9 @@ async function openEveryEvidencePage(page: Page, message: Locator) {
 
 // The revenue series draws real bars (#187): the tallest fills most of its row, and
 // each bar's height matches its share of the tallest, as its inline percentage says.
+// The nearest figure only: the answer's own figure also holds the growth series' bars.
 async function expectProportionalBars(page: Page) {
-  const bars = page.locator('figure', { has: page.getByText(NVDA_REVENUE) }).locator('[aria-hidden="true"] > div')
+  const bars = page.getByText(NVDA_REVENUE).locator('xpath=ancestor::figure[1]').locator('[aria-hidden="true"] > div')
   await expect(bars.first()).toBeVisible()
   const measured = await bars.evaluateAll((nodes) =>
     nodes.map((node) => ({ px: node.getBoundingClientRect().height, pct: parseFloat((node as HTMLElement).style.height) })))

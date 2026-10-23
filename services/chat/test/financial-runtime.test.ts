@@ -803,7 +803,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
 
 test("every figure the engine names maps to the chat metric a follow-up reads, or none (#381)", () => {
   // These operations are of the figures they read; every other one is a figure.
-  const ofFigures = new Set(["reported_metric", "absolute_change", "percent_change_positive_base", "ratio", "trailing_sum", "threshold", "peer_compare"]);
+  const ofFigures = new Set(["reported_metric", "absolute_change", "percent_change_positive_base", "ratio", "trailing_sum", "threshold", "peer_compare", "spread", "period_rank"]);
   const named = Object.keys(OPERATION_REGISTRY).filter((operation) => !ofFigures.has(operation));
   const engine = [...METRIC_CATALOG_V1.keys(), ...named].sort();
   assert.deepEqual(Object.keys(SCOPE_METRICS).sort(), engine);

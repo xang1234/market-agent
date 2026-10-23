@@ -1203,7 +1203,7 @@
       ]
     },
     "FinancialPresentedPayload": {
-      "description": "Server-generated text only. A value's text is a formatted number; comparative words (highest, above, all) appear only in evaluated predicate or ranking results, and an incomplete ranking can never name a leader.",
+      "description": "Server-generated text only. A value's text is a formatted number; comparative words (highest, above, all) appear only in evaluated predicate or ranking results. An incomplete ranking labels no leader: an incomplete peer ranking names none, and an incomplete period ranking names the leader of the periods it ranked only in its text, with how many it ranked.",
       "oneOf": [
         {
           "type": "object",
@@ -1280,24 +1280,47 @@
               "type": "boolean"
             },
             "order": {
+              "description": "A peer ranking orders subjects; a period ranking orders one subject's periods.",
               "type": "array",
               "items": {
-                "type": "object",
-                "required": [
-                  "subject_label_id",
-                  "rank"
-                ],
-                "properties": {
-                  "subject_label_id": {
-                    "type": "string",
-                    "pattern": "^subject:[a-z][a-z0-9_]{0,63}$"
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "required": [
+                      "subject_label_id",
+                      "rank"
+                    ],
+                    "properties": {
+                      "subject_label_id": {
+                        "type": "string",
+                        "pattern": "^subject:[a-z][a-z0-9_]{0,63}$"
+                      },
+                      "rank": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    },
+                    "additionalProperties": false
                   },
-                  "rank": {
-                    "type": "integer",
-                    "minimum": 1
+                  {
+                    "type": "object",
+                    "required": [
+                      "period_label_id",
+                      "rank"
+                    ],
+                    "properties": {
+                      "period_label_id": {
+                        "type": "string",
+                        "pattern": "^period:p[0-9]+$"
+                      },
+                      "rank": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    },
+                    "additionalProperties": false
                   }
-                },
-                "additionalProperties": false
+                ]
               }
             },
             "leader_label_ids": {
@@ -1310,7 +1333,7 @@
                   "minItems": 1,
                   "items": {
                     "type": "string",
-                    "pattern": "^subject:[a-z][a-z0-9_]{0,63}$"
+                    "pattern": "^(subject:[a-z][a-z0-9_]{0,63}|period:p[0-9]+)$"
                   }
                 }
               ]

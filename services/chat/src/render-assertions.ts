@@ -73,7 +73,7 @@ function templateSegments(
       // One clause per company and period, its period said once: "NVDA's
       // gross margin was 74.4%, operating margin 64.9% and ... in Q4 2026".
       const groups = new Map<string, PacketFigure[]>();
-      for (const figure of figures.filter((entry) => entry.gap === undefined)) {
+      for (const figure of figures.filter((entry) => entry.gap === undefined && !entry.ranking)) {
         const key = `${owner(figure)}|${figure.period ?? ""}|${figure.period_end ?? ""}|${periodCoverage(figure) ?? ""}`;
         groups.set(key, [...(groups.get(key) ?? []), figure]);
       }
@@ -86,8 +86,14 @@ function templateSegments(
         text(periodPhrase(group[0]!));
       });
       if (groups.size > 0) text(".");
-      figures.filter((entry) => entry.gap !== undefined).forEach((figure, i) => {
-        text(`${groups.size > 0 || i > 0 ? " " : ""}${capitalize(`${owner(figure)}${figureLabel(figure)}`)}${periodPhrase(figure)} is not available: `);
+      figures.filter((entry) => entry.ranking).forEach((figure) => {
+        const lead = `${segments.length > 0 ? " " : ""}${figure.company ? `For ${figure.company}, ` : ""}`;
+        if (lead !== "") text(lead);
+        segments.push(value(figure));
+        text(".");
+      });
+      figures.filter((entry) => entry.gap !== undefined).forEach((figure) => {
+        text(`${segments.length > 0 ? " " : ""}${capitalize(`${owner(figure)}${figureLabel(figure)}`)}${periodPhrase(figure)} is not available: `);
         segments.push(gap(figure));
       });
       break;

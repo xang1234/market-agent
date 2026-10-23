@@ -47,7 +47,7 @@ test("golden metric questions certify through the chat financial lane on the rec
     const message = (await client.query(`select blocks from chat_messages where message_id = $1`, [done.message_id])).rows[0];
     assert.ok(message, `expected a published answer; got ${JSON.stringify(done)}`);
     return (message.blocks[0].financial.results as Array<{ output_id: string; disposition: string; presented: { kind: string; text: string } }>)
-      .map((result) => [result.output_id, result.disposition, result.presented.kind === "value" ? result.presented.text : null]);
+      .map((result) => [result.output_id, result.disposition, result.presented.kind === "gap" ? null : result.presented.text]);
   };
   // The latest answer's commentary, which follows its engine block and cites
   // only that block's verified results, each with its exact text and period.
@@ -101,8 +101,16 @@ test("golden metric questions certify through the chat financial lane on the rec
     ["out_gross_margin", "verified", "74.40%"],
     ["out_operating_margin", "verified", "64.90%"],
     ["out_net_margin", "verified", "57.00%"],
+    ["out_revenue_growth_qoq_fy2025_q2", "verified", "15.34%"],
+    ["out_revenue_growth_qoq_fy2025_q3", "verified", "16.78%"],
+    ["out_revenue_growth_qoq_fy2025_q4", "verified", "12.11%"],
+    ["out_revenue_growth_qoq_fy2026_q1", "verified", "12.03%"],
+    ["out_revenue_growth_qoq_fy2026_q2", "verified", "6.08%"],
+    ["out_revenue_growth_qoq_fy2026_q3", "verified", "21.96%"],
     ["out_revenue_growth_qoq", "verified", "8.94%"],
     ["out_revenue_growth_yoy", "verified", "57.89%"],
+    ["out_revenue_highest", "verified", "Q4 FY2026 has the highest revenue of the 8 quarters ranked"],
+    ["out_revenue_lowest", "verified", "Q1 FY2025 has the lowest revenue of the 8 quarters ranked"],
   ]);
   assert.equal(await commentaryText(), [
     "NVDA's revenue rose in every period from Q1 FY2025 (USD 26,044,000,000.00) to Q4 FY2026 (USD 62,100,000,000.00).",
@@ -114,15 +122,20 @@ test("golden metric questions certify through the chat financial lane on the rec
   const NVDA = ["USD 62,100,000,000.00", "USD 46,200,000,000.00", "USD 40,300,000,000.00", "USD 35,400,000,000.00", "74.40%", "64.90%", "57.00%", "8.94%", "57.89%"];
   const AMD = ["USD 11,200,000,000.00", "USD 6,050,000,000.00", "USD 1,610,000,000.00", "USD 1,480,000,000.00", "54.02%", "14.38%", "13.21%", "4.67%", "45.74%"];
   const AAPL = ["USD 97,100,000,000.00", "USD 45,700,000,000.00", "USD 29,800,000,000.00", "USD 24,900,000,000.00", "47.06%", "30.69%", "25.64%", "-1.62%", "3.26%"];
-  assert.deepEqual(await ask("Compare NVDA and AMD profit", readingOf(NO_ASKS)), [...latestQuarter("a", "fy2026_q4", NVDA), ...latestQuarter("b", "fy2026_q2", AMD)]);
+  const MARGINS = ["gross_margin", "operating_margin", "net_margin"];
+  const LEADS: Record<string, string[]> = { b: ["20.42 pp", "50.82 pp", "43.90 pp"], c: ["27.36 pp", "30.44 pp", "27.71 pp"] };
+  const leads = (...slots: string[]) => MARGINS.flatMap((metric, index) => slots.map((slot) => [`out_a_minus_${slot}_${metric}`, "verified", LEADS[slot]![index]]));
+  assert.deepEqual(await ask("Compare NVDA and AMD profit", readingOf(NO_ASKS)), [...latestQuarter("a", "fy2026_q4", NVDA), ...latestQuarter("b", "fy2026_q2", AMD), ...leads("b")],
+    "NVDA's quarter ends in January and AMD's in June, so the lead takes AMD's quarter ending in December, 29 days before NVDA's");
   assert.equal(await commentaryText(), [
     "Of NVDA and AMD, NVDA's gross margin (gross profit / revenue) was highest: NVDA 74.40% (Q4 FY2026), AMD 54.02% (Q2 FY2026).",
     "Of NVDA and AMD, NVDA's year-over-year percent change in revenue was highest: NVDA 57.89% (Q4 FY2026 vs Q4 FY2025), AMD 45.74% (Q2 FY2026 vs Q2 FY2025).",
     "NVDA's revenue was USD 62,100,000,000.00 in Q4 FY2026; AMD's revenue was USD 11,200,000,000.00 in Q2 FY2026.",
-  ].join("\n\n"));
+  ].join("\n\n"), "each company is shown at its newest quarter alone, so the recorded gross margin comparison of the two stands");
   assert.deepEqual(await ask("Compare NVDA, AMD and AAPL profit", readingOf(NO_ASKS)), [
     ...latestQuarter("a", "fy2026_q4", NVDA),
     ...latestQuarter("b", "fy2026_q2", AMD),
     ...latestQuarter("c", "fy2026_q3", AAPL),
+    ...leads("b", "c"),
   ]);
 });

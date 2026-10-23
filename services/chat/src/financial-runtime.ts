@@ -17,6 +17,7 @@ import {
   createRuntimeAuthority,
   dependencyClosure,
   hashCanonical,
+  lowercaseUnlessAcronym,
   operationDependencies,
   type FinancialPlanV1,
   type FinancialRuntimeAuthority,
@@ -42,7 +43,7 @@ import { publishRequest, type RequestGap } from "../../financial-engine/src/requ
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { comparedAdditions, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId } from "./chat-ids.ts";
-import { allResolved, overviewPeers, overviewSubjects, planCompanyOverview, type PeersOf } from "./company-overview.ts";
+import { allResolved, marginTrendSubjects, overviewOmissions, overviewPeers, overviewSubjects, planCompanyOverview, planMarginTrend, type PeersOf } from "./company-overview.ts";
 import { noteBlock } from "./fact-blocks.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { companyKey, extractSubjectMentions } from "./subject-extraction.ts";
@@ -314,6 +315,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
         persistParent: persistAssistantMessage(context.threadId, messageId, {
           scope,
           reading,
+          evidence: deps.evidence,
           overview: () => overview,
           carried: requested.carried,
           notFound: requested.notFound,
@@ -534,8 +536,6 @@ async function planTurn(
   }
   onSubjects(subjects);
   if (CASH_RESILIENCE.test(text)) return planCashResilience(planningContext(subjects), text);
-  // The reading is settled before the turn is planned, so an overview is
-  // decided first and the planner's model is called only without one.
   if (allResolved(subjects)) {
     const companies = await overviewSubjects(subjects, turn.reading, turn.scope, turn.peersOf);
     const overview = companies && await planCompanyOverview(planningContext(companies), turn.evidence);
@@ -543,6 +543,12 @@ async function planTurn(
       onSubjects(companies);
       turn.onOverview();
       return overview;
+    }
+    const trended = marginTrendSubjects(subjects, turn.reading, turn.scope);
+    const trend = trended && await planMarginTrend(planningContext(trended), turn.evidence);
+    if (trend) {
+      turn.onOverview();
+      return trend;
     }
   }
   // A failing or unreachable model is a planning gap (publishRequest); the narrative composer is never a fallback for numbers.
@@ -696,7 +702,8 @@ function persistAssistantMessage(
   turn: Readonly<{
     scope: ResearchScope | null;
     reading: ScopeProposal | null;
-    // Whether the plan is the overview, of the latest quarters.
+    evidence: ChatFinancialRuntimeDeps["evidence"];
+    // Whether the turn published the overview or margin trend, of the latest quarters.
     overview: () => boolean;
     carried: ReadonlyArray<string>;
     notFound: ReadonlyArray<string>;
@@ -711,7 +718,11 @@ function persistAssistantMessage(
     // saved plan says so, as a retry that resumes the run does not plan again.
     const answeredPeers = plan?.subjects.members.some((member) => !turn.labels.has(member.subject_ref.id.toLowerCase())) ?? false;
     // The commentary is written from the answer's figures alone, so it gives no cause: an explanation stays uncovered.
-    const missing = reading === null || plan === null ? [] : uncoveredAsks(answeredPeers ? withoutPeers(reading) : reading, plan, turn.labels);
+    const names = (slot: string) => publication.block.financial.labels[`subject:${slot}`]?.text ?? slot;
+    const missing = reading === null || plan === null ? [] : [
+      ...uncoveredAsks(answeredPeers ? withoutPeers(reading) : reading, plan, turn.labels),
+      ...await overviewOmissions(plan, request.authority, inSavepoints(tx.client, turn.evidence(tx.client)), names),
+    ];
     const note = [
       ...(turn.notFound.length === 0 ? [] : [`No company matched ${labelList(turn.notFound)}.`]),
       ...(turn.carried.length === 0 ? [] : [`${labelList(turn.carried)} ${turn.carried.length > 1 ? "are" : "is"} carried from the previous answer.`]),
@@ -754,6 +765,20 @@ function persistAssistantMessage(
     if (inserted.rows.length === 0) throw new ParentRefusedError("the chat thread no longer belongs to the run's owner");
     // As any saved message does, so the thread never points at a replaced gap's snapshot.
     await tx.client.query(`update chat_threads set latest_snapshot_id = $2::uuid, updated_at = now() where thread_id = $1::uuid`, [threadId, publication.snapshot_id]);
+  };
+}
+
+// A read a statement error fails rolls back to its savepoint, so the
+// transaction can still save the answer, as bind-inputs.ts reads evidence.
+function inSavepoints(client: SqlExecutor, evidence: FinancialEvidencePort): FinancialEvidencePort {
+  return {
+    ...evidence,
+    async listInputCandidates(request) {
+      await client.query("savepoint candidate_read");
+      const page = await evidence.listInputCandidates(request);
+      await client.query(page.status === "error" ? "rollback to savepoint candidate_read" : "release savepoint candidate_read");
+      return page;
+    },
   };
 }
 
@@ -896,9 +921,9 @@ export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1, lab
   const asked: ReadonlyArray<Readonly<{ text: string; missing: (company: Company) => boolean }>> = [
     // The income items name its figures more closely than the whole statement does.
     ...metrics.filter((metric) => !(metric.metric_key === "income_statement" && reading.income_items.length > 0))
-      .map((metric) => ({ text: inSentence(metric.label), missing: (company: Company) => !company.read.has(metric.metric_key) })),
+      .map((metric) => ({ text: lowercaseUnlessAcronym(metric.label), missing: (company: Company) => !company.read.has(metric.metric_key) })),
     ...reading.metrics.filter((metric) => metric.base !== undefined && !offMetrics.has(metric.metric_key))
-      .map((metric) => ({ text: inSentence(metric.label), missing: (company: Company) => !computes(metric, company) })),
+      .map((metric) => ({ text: lowercaseUnlessAcronym(metric.label), missing: (company: Company) => !computes(metric, company) })),
     ...items,
     // A margin item left out names the margin already.
     ...(asks.has("margin_trend") ? [{ text: "a margin over several periods", missing: (company: Company) => company.marginPeriods < 2 }]
@@ -914,11 +939,6 @@ export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1, lab
     }),
     ...Object.entries(NEVER_PLANNED).flatMap(([facet, item]) => asks.has(facet as ScopeFacet) ? [item] : []),
   ];
-}
-
-// A catalog label inside a sentence: "Free cash flow" reads "free cash flow", "EBITDA" and "P/E ratio" stay.
-function inSentence(label: string): string {
-  return /\p{Ll}/u.test(label[1] ?? "") ? `${label[0]!.toLowerCase()}${label.slice(1)}` : label;
 }
 
 // A saved message as the thread reads it; undefined when it cannot be read
