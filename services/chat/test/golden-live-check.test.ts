@@ -111,26 +111,12 @@ test("the live check asks the golden conversation's three questions, in order", 
   ]);
 });
 
-test("turn 1 needs a completed turn with a chart and a metric row", () => {
-  const [analyze] = GOLDEN_TURNS;
-  assert.deepEqual(evaluateGoldenTurn(analyze!, { outcome: "turn.completed", blocks: blocks("rich_text", "metric_row", "revenue_bars") }), { failures: [], notes: [] });
-  assert.deepEqual(evaluateGoldenTurn(analyze!, { outcome: "turn.completed", blocks: blocks("rich_text", "line_chart", "metric_row") }).failures, []);
-  assert.match(
-    evaluateGoldenTurn(analyze!, { outcome: "turn.completed", blocks: blocks("rich_text") }).failures.join(" "),
-    /chart.*metric_row/,
-  );
-  assert.match(evaluateGoldenTurn(analyze!, { outcome: "turn.error", blocks: [] }).failures.join(" "), /turn\.error/);
-});
-
-test("turn 2 needs a metrics comparison; a missing price chart is only a note", () => {
-  const compare = GOLDEN_TURNS[1]!;
-  const withoutChart = evaluateGoldenTurn(compare, { outcome: "turn.completed", blocks: blocks("rich_text", "metrics_comparison") });
-  assert.deepEqual(withoutChart.failures, []);
-  assert.match(withoutChart.notes.join(" "), /perf_comparison/);
-  assert.match(
-    evaluateGoldenTurn(compare, { outcome: "turn.completed", blocks: blocks("rich_text") }).failures.join(" "),
-    /metrics_comparison/,
-  );
+test("turns 1 and 2 need a completed turn with the engine's answer (#398)", () => {
+  for (const turn of GOLDEN_TURNS.slice(0, 2)) {
+    assert.deepEqual(evaluateGoldenTurn(turn, { outcome: "turn.completed", blocks: blocks("financial_answer", "rich_text") }), { failures: [], notes: [] });
+    assert.match(evaluateGoldenTurn(turn, { outcome: "turn.completed", blocks: blocks("rich_text", "metric_row", "revenue_bars") }).failures.join(" "), /financial_answer/);
+    assert.match(evaluateGoldenTurn(turn, { outcome: "turn.error", blocks: [] }).failures.join(" "), /turn\.error/);
+  }
 });
 
 test("turn 3 only needs to complete", () => {
