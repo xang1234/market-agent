@@ -836,6 +836,7 @@ const NEVER_PLANNED: Partial<Readonly<Record<ScopeFacet, string>>> = {
   segments: "revenue by segment",
   peers: "peers the question did not name",
   price_window: "a stock price return",
+  price_history: "a stock price return over a window other than year to date",
   benchmark: "a comparison with a benchmark index",
   guidance: "company guidance",
   explains: "the cause of these figures",

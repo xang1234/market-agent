@@ -30,7 +30,7 @@ import {
 import { answerTurn, type AnswerTraceInput } from "./answer-trace.ts";
 import { isUuid } from "./chat-ids.ts";
 import { claimSelection } from "./evidence-packet.ts";
-import { readsEngine, resolveResearchScope, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
+import { readingAsks, readsEngine, resolveResearchScope, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
 import { proposeScope } from "./scope-proposal.ts";
 import { frozenDataMode, hydrateYtdBars, marketHydrationOrigin, turnNow } from "./ytd-hydration.ts";
 import { companyListings, listingTimeZones, loadPerfComparisonBlocks, priceListingsForTurn, turnCompanies } from "./perf-block.ts";
@@ -179,7 +179,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     window ? ytdChart(scope, window, requestedListingsOf(covered), result.snapshot_id, asOf) : Promise.resolve([]),
     loadRecentConversation(pool(), { threadId: context.threadId, limit: CONVERSATION_MESSAGES }),
   ]);
-  const factBlocks = [...performance, ...scopeGapBlocks(scope, { snapshotId: result.snapshot_id, asOf })];
+  const factBlocks = [...performance, ...scopeGapBlocks(scope, { snapshotId: result.snapshot_id, asOf }, await context.reading?.() ?? null)];
   let answeredBy: string | undefined;
   const answerInput: AnswerTraceInput = {
     // Only what the answer reads: the turn context also holds callbacks.
@@ -278,9 +278,10 @@ async function ytdChart(
 }
 
 // What the scope asks for and the data does not hold, each as a note (#206):
-// a benchmark index; and for a turn re-reading the engine's answer or
-// declined request, where its evidence is.
-export function scopeGapBlocks(scope: ResearchScope, input: { snapshotId: string; asOf: string }): ReadonlyArray<Record<string, unknown>> {
+// a benchmark index; a price return over another window than year to date;
+// and for a turn re-reading the engine's answer or declined request, where its
+// evidence is.
+export function scopeGapBlocks(scope: ResearchScope, input: { snapshotId: string; asOf: string }, reading: ScopeProposal | null = null): ReadonlyArray<Record<string, unknown>> {
   const names = scope.companies.flatMap((company) => company.label ?? []).join(", ") || "these companies";
   const notes: Array<readonly [string, string]> = [];
   if (scope.reads === "financial_answer") {
@@ -288,6 +289,9 @@ export function scopeGapBlocks(scope: ResearchScope, input: { snapshotId: string
   }
   if (scope.reads === "financial_gap") {
     notes.push(["gap:financial_gap", "The previous answer showed no figure, so there is no evidence to show; no other figure is shown in its place."]);
+  }
+  if (reading !== null && readingAsks(reading).asks.has("price_history")) {
+    notes.push(["gap:price_history", "Only a year-to-date price return is charted here, not the window this question asks for."]);
   }
   if (scope.benchmark) {
     notes.push(["gap:benchmark", scope.companies.length > 1

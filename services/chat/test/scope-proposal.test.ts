@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { withDeadlines } from "../src/llm-runtime.ts";
+import { resolveResearchScope } from "../src/research-scope.ts";
 import { parseProposal, proposalQuestion, proposeScope, SCOPE_DEADLINES } from "../src/scope-proposal.ts";
 
 const ENV = {
@@ -268,4 +269,12 @@ test("recorded replies answer the proposal, matched by the quoted question alone
 
 test("the proposal gets one attempt: the turn waits on it, so a slow model asks for nothing new", () => {
   assert.equal(withDeadlines(SCOPE_DEADLINES).maxAttempts, 1);
+});
+
+test("a stock price return over any window but year to date is its own facet, and no window is recorded for it (#398)", () => {
+  const question = "Compare NVDA and AMD stock over the past five years";
+  const read = parseProposal(JSON.stringify({ metrics: [], asks: ["price_history"], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "range" }, companies: { kind: "as_named", names: ["NVDA", "AMD"] } }), question);
+  assert.deepEqual([...read!.asks], ["price_history"]);
+  const companies = [{ issuer_id: "60000000-0000-4000-8000-000000000001" }, { issuer_id: "60000000-0000-4000-8000-000000000002" }];
+  assert.equal(resolveResearchScope({ companies, prior: null, asOf: "2026-09-01T00:00:00.000Z", proposal: read }).price_window, null);
 });

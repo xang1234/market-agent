@@ -46,6 +46,7 @@ const FACET_LANE: Readonly<Record<ScopeFacet, "figure" | "analyst" | "neutral">>
   margins: "figure",
   margin_trend: "figure",
   price_window: "analyst",
+  price_history: "analyst",
   benchmark: "analyst",
   guidance: "analyst",
   explains: "neutral",

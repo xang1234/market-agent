@@ -809,6 +809,15 @@ function gapTurn(scope: ReturnType<typeof resolveResearchScope>) {
 }
 const BENCHMARK = resolveResearchScope({ companies: AMD, prior: null, asOf: GAP_AS_OF, proposal: proposal({ asks: ["benchmark"] }) });
 
+test("a price return over another window than year to date is a gap note, and no window is charted (#398)", () => {
+  const read = proposal({ asks: ["price_history"] });
+  const scope = resolveResearchScope({ companies: AMD, prior: null, asOf: GAP_AS_OF, proposal: read });
+  assert.deepEqual(
+    scopeGapBlocks(scope, { snapshotId: "00000000-0000-4000-8000-0000000000aa", asOf: GAP_AS_OF }, read).map((block) => (block.segments as Array<{ text: string }>)[0]!.text),
+    ["Only a year-to-date price return is charted here, not the window this question asks for."],
+  );
+});
+
 test("a turn with no figure and only gap notes points to its notes, never the model's prose (#302)", async () => {
   const turn = gapTurn(BENCHMARK);
   assert.deepEqual(turn.factBlocks.map((block) => (block.segments as Array<{ text: string }>)[0]!.text), ["A benchmark index is not in this data, so AMD is not compared with one."]);

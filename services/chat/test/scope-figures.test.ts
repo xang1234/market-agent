@@ -76,6 +76,7 @@ const ROUTES: ReadonlyArray<readonly [string, ScopeProposal | null, ResearchScop
   ["evidence", read({ asks: ["evidence"] }), FRESH, "analyst"],
   ["guidance", read({ asks: ["guidance"], companies: named("NVDA") }), FRESH, "analyst"],
   ["a price window", read({ asks: ["price_window"], companies: named("NVDA") }), FRESH, "analyst"],
+  ["a price return over another window", read({ asks: ["price_history"], companies: named("NVDA", "AMD") }), FRESH, "analyst"],
   ["peers and a price window", read({ asks: ["peers", "price_window"], companies: named("NVDA") }), FRESH, "analyst"],
   ["the latest quarter and a price window", read({ asks: ["latest_quarter", "price_window"], companies: named("NVDA") }), FRESH, "analyst"],
   ["a metric with the evidence", read({ metrics: ["income_statement"], asks: ["evidence"], companies: named("NVDA") }), FRESH, "planner"],

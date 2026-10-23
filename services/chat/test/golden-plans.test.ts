@@ -504,6 +504,7 @@ test("an engine answer names what the reading of its question asks for and the p
   const revenue = plan([reported("rev", "revenue", quarter("Q4"))]);
 
   assert.deepEqual(uncoveredAsks(reading(["price_window", "benchmark", "explains"]), revenue), ["a stock price return", "a comparison with a benchmark index", "the cause of these figures"]);
+  assert.deepEqual(uncoveredAsks(reading(["price_history"], ["income_statement"], ["revenue"]), revenue), ["a stock price return over a window other than year to date"]);
   assert.deepEqual(uncoveredAsks(reading([], ["income_statement"], ["revenue"]), revenue), [], "revenue YTD asks for no stock price return");
   assert.deepEqual(uncoveredAsks(reading(["benchmark"], [], [], ["benchmark"]), revenue), [], "a facet the question turns off is not asked for");
 

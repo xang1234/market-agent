@@ -126,6 +126,7 @@ export const SCOPE_FACETS = [
   "margins",
   "margin_trend",
   "price_window",
+  "price_history",
   "benchmark",
   "guidance",
   "explains",
