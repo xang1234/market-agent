@@ -7,6 +7,7 @@ import type { FinancialPlanV1, OperationKind, OperationNode, ReportedMetricNode,
 import {
   absoluteChange,
   freeCashFlow,
+  operationGap,
   margin,
   marketCap,
   peRatio,
@@ -142,6 +143,10 @@ export const OPERATION_REGISTRY: { readonly [K in OperationKind]: OperationSpec<
 });
 
 export function evaluateOperation<K extends OperationKind>(node: NodeOf<K>, operands: Operands, context: EvaluationContext): OperationOutcome {
+  // A lead carries only its left company and period, so any operation over it would mix peers.
+  if (operands.some((operand) => operand?.measure.derivations.some((step) => step.operation === "spread"))) {
+    return operationGap("incompatible_scope", "A lead is one company's figure minus another's, so no operation reads it.");
+  }
   const spec: OperationSpec<K> = OPERATION_REGISTRY[node.operation as K];
   return spec.evaluate(node, operands, context);
 }

@@ -9,7 +9,7 @@ import { margin, operationGap, spread, type FinancialOperand, type OperandOutcom
 import { presentFinancialUnit } from "../src/presentation.ts";
 import { validateFinancialPlan } from "../src/validate.ts";
 import { planFixture } from "./fixtures.ts";
-import { FY2023, operand } from "./operand-fixtures.ts";
+import { FY2023, operand, SLOTS } from "./operand-fixtures.ts";
 
 const SPREAD: SpreadNode = { node_id: "lead", operation: "spread", operation_version: "spread.v1", left: "a_gm", right: "b_gm" };
 
@@ -131,4 +131,40 @@ test("the presentation names each side's company and period, and reads the lead 
     [null, "Difference in Gross margin (gross profit / revenue)", "NVIDIA FY2023 minus AMD FY2023", "41.60 pp"],
   );
   assert.deepEqual(content.presentations.map((presentation) => presentation.kind), ["table", "scalar"], "the lead stands beside the companies' table");
+});
+
+test("a lead is never another operation's operand: it is one company's figure minus another's", () => {
+  const fixture = planFixture();
+  const gm = (slot: string) => ({ node_id: `${slot}_gm`, operation: "gross_margin" as const, operation_version: "gross_margin.v1", numerator: `${slot}_gp`, revenue: `${slot}_rev` });
+  const lead = (left: string, right: string) => ({ node_id: `${left}_minus_${right}`, operation: "spread" as const, operation_version: "spread.v1", left: `${left}_gm`, right: `${right}_gm` });
+  const reported = (slot: string, metric_key: string) => ({ ...fixture.operations[0]!, node_id: `${slot}_${metric_key === "revenue" ? "rev" : "gp"}`, subject_slot: slot, metric_key });
+  const validated = validateFinancialPlan({
+    ...fixture,
+    subjects: { ...fixture.subjects, requested_count: 3, resolved_count: 3, members: [...fixture.subjects.members, { slot_id: "c", subject_ref: SLOTS.c.subject_ref, display_order: 2, role: "peer" }] },
+    operations: [
+      ...["a", "b", "c"].flatMap((slot) => [reported(slot, "revenue"), reported(slot, "gross_profit"), gm(slot)]),
+      lead("a", "b"),
+      lead("a", "c"),
+      lead("c", "a"),
+      { node_id: "change", operation: "absolute_change", operation_version: "absolute_change.v1", current: "a_minus_c", prior: "a_minus_b" },
+      { node_id: "lead_of_leads", operation: "spread", operation_version: "spread.v1", left: "a_minus_b", right: "c_minus_a" },
+      { node_id: "cohort", operation: "peer_compare", operation_version: "peer_compare.v1", members: ["a_minus_b", "c_minus_a"], direction: "highest" },
+      { node_id: "check", operation: "threshold", operation_version: "threshold.v1", subject: "a_minus_b", threshold_id: "min_gm", comparison: "gte" },
+    ],
+    outputs: ["a_minus_b", "change", "lead_of_leads", "cohort", "check"].map((node_id) => ({ output_id: `out_${node_id}`, node_id, unit_id: "section" })),
+  });
+  assert.ok(validated.ok, JSON.stringify(!validated.ok && validated.issues));
+  const GROSS: Record<string, string> = { a: "744", b: "328", c: "470" };
+  const evaluation = evaluatePlan(validated.value, (node) => {
+    const slot = node.subject_slot as "a" | "b" | "c";
+    const result = operand(node.node_id, { slot, metric: node.metric_key, value: node.metric_key === "revenue" ? "1000" : GROSS[slot]!, ...FY2023 });
+    return { ok: true, operand: result, payload: { kind: "value", value: "0", unit: result.measurement.unit, exact: true, rounding: null } };
+  });
+  assert.deepEqual(evaluation.outputs.map((output) => [output.output_id, output.state.status, output.state.status === "gap" ? output.state.reason_code : null]), [
+    ["out_a_minus_b", "computed", null],
+    ["out_change", "gap", "incompatible_scope"],
+    ["out_lead_of_leads", "gap", "incompatible_scope"],
+    ["out_cohort", "gap", "incompatible_scope"],
+    ["out_check", "gap", "incompatible_scope"],
+  ]);
 });
