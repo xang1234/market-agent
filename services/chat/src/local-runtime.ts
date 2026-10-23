@@ -681,7 +681,7 @@ function normalizeAssistantBlock(
   },
 ): Record<string, unknown> {
   const kind = typeof block.kind === "string" && block.kind.length > 0 ? block.kind : "rich_text";
-  // Keep data_ref.params: fact blocks carry their fact_bindings there.
+  // Keep data_ref.params: the perf_comparison chart carries its series_refs there.
   const params = (block.data_ref as { params?: unknown } | undefined)?.params;
   return {
     ...block,

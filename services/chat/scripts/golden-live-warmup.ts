@@ -2,10 +2,10 @@
 // only, so on a fresh database NVDA and AMD have no identity and no SEC facts. This
 // ingests them through the running stack, as a company page would:
 //   1. resolve the ticker (the resolver discovers it through Polygon on a miss);
-//   2. read key stats live, which persists the latest two fiscal years (turn 2's
-//      metrics_comparison);
+//   2. read key stats live, which persists the latest two fiscal years and names
+//      the latest, where step 3 starts;
 //   3. read quarterly income statements newest first until 8 are available
-//      (turn 1's revenue_bars and metric_row).
+//      (the engine's company overview in turns 1 and 2).
 // It needs no credentials of its own: the services hold POLYGON_API_KEY and
 // SEC_EDGAR_USER_AGENT. Idempotent: a persisted identity or statement is read back,
 // not refetched. It refuses a stack serving the frozen golden dataset, so live facts

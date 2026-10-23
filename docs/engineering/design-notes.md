@@ -5,11 +5,11 @@ Migrated from beads memories on 2026-09-30. Promote a note to `docs/adr/` when i
 
 ## Deterministic seals for fact-built blocks
 
-Pure-deterministic snapshot seals (DB facts, zero `tool_call_id`s), e.g. Analyst Grid cells, are exempted from the
-tool-call provenance audit via the `DETERMINISTIC_SNAPSHOT_MANIFEST` symbol set by `buildFactBackedSealInput`
-(`services/snapshot/src/seal-input.ts`; moved from `services/analyze/src/block-seal-input.ts` on 2026-06-11, and
-analyze re-exports it). `auditManifestToolCallLog` (`services/snapshot/src/manifest-staging.ts`) skips the
-`missing_provenance` check for these.
+Pure-deterministic snapshot seals (DB facts, zero `tool_call_id`s), e.g. Analyze's analyst-consensus block, are
+exempted from the tool-call provenance audit via the `DETERMINISTIC_SNAPSHOT_MANIFEST` symbol set by
+`buildFactBackedSealInput` (`services/snapshot/src/seal-input.ts`; moved from
+`services/analyze/src/block-seal-input.ts` on 2026-06-11, and analyze re-exports it). `auditManifestToolCallLog`
+(`services/snapshot/src/manifest-staging.ts`) skips the `missing_provenance` check for these.
 
 - **LLM-derived blocks** use `buildClaimBackedSealInput` (same file): a STAGED-only manifest, never DETERMINISTIC, so
   the tool-call audit applies. `result_hash` comes from `writeToolCallLog`'s `RETURNING` (canonical `hashJsonValue`);
@@ -19,13 +19,10 @@ analyze re-exports it). `auditManifestToolCallLog` (`services/snapshot/src/manif
   enforces. The tool-call audit exists for LLM-tool-derived content.
 - Analyze's merged seals are unaffected: `seal-input-merge` spreads only `base.manifest` symbols, never DETERMINISTIC.
 - Approved by the project owner on 2026-06-09.
-- **Gotchas:** grid cell provenance blocks must use a REGISTERED block kind (`metric_row` for facts, `rich_text` for
-  reader cells). A `point`-period fact needs a temporal anchor for the fact-binding check: an undated point fact
-  (`period_end` null) binds by `as_of`, and a dated legacy point fact binds by `period_end`
-  (`requiredFactBindingFields` in `services/snapshot/src/snapshot-verifier.ts`; covered by
+- **Gotchas:** a sealed block must use a REGISTERED block kind. A `point`-period fact needs a temporal anchor for the
+  fact-binding check: an undated point fact (`period_end` null) binds by `as_of`, and a dated legacy point fact binds
+  by `period_end` (`requiredFactBindingFields` in `services/snapshot/src/snapshot-verifier.ts`; covered by
   `services/snapshot/test/point-fact-binding.test.ts`). Do not invent a `period_end` for undated facts.
-
-This is the path the chat-recovery epic uses to seal chart and table blocks built from facts.
 
 ## What a block's label claims (#193)
 
