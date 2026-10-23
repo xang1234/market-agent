@@ -106,11 +106,13 @@ when `NODE_ENV=production`.
 
 ## Charts and tables in chat answers
 
-Every figure chat shows is the financial engine's (#398): a turn about a company is planned and certified by the
+Every figure chat computes is the financial engine's (#398): a turn about a company is planned and certified by the
 engine (`services/chat/src/financial-runtime.ts`), and its `financial_answer` block shows each result with its proof.
-The analyst path shows no figure of its own. Its one block with values is a comparison's year-to-date price chart
-(`perf-block.ts`, below): market data, which stays outside the engine and is labelled not verified until #444's price
-observations let the engine state a price return (D2). Chat's own fact blocks (metric rows, revenue bars, comparison
+The analyst path computes no figure. A number appears in its answer only inside a claim it quotes, cited to the
+claim's document, through the judge-gated render. Its one block with values is a comparison's year-to-date price chart
+(`perf-block.ts`, below): market data outside the engine until #444's price observations let it state a price return
+(D2). The chart's proof is source-linked (its evidence is sealed) and its calculation is not verified, so the web labels
+it source-linked (`web/src/blocks/blockProof.ts`). Chat's own fact blocks (metric rows, revenue bars, comparison
 and segment tables) were deleted in #398 step 7. The web still renders those kinds: analyze produces them, and saved
 threads hold them.
 
@@ -124,10 +126,11 @@ threads hold them.
   other observations and comparisons, and every figure in its packet (a chart by each line's last value),
   one call per inference, all at once
   (#376). Its verdict is entailed, unsupported or contradicted, with a separate `worded_amount` flag for an amount
-  stated in words, and `shownAs` reads both: entailed shows as an analyst inference, unsupported shows labelled as
-  an unverified analyst view, and a contradicted one stays hidden. One stating an amount in words shows at most as
-  an unverified analyst view. It still goes to the repair round once, which may show it clean. A failed repair
-  leaves it as it was. The report keeps every verdict (`judged`). The
+  stated in words, and `shownAs` reads both, on the answer's path (`answerPath`): entailed shows as an analyst
+  inference, unsupported shows labelled as an unverified analyst view, and a contradicted one stays hidden. One
+  stating an amount in words is hidden in an analyst answer, whatever its verdict, and shows at most as an
+  unverified analyst view in an engine answer's commentary (#509). It still goes to the repair round once, which may
+  show it clean. A failed repair leaves it as it was. The report keeps every verdict (`judged`). The
   answer is sealed and shown at once with a line in each inference's place (`answer.shown`); as each verdict
   arrives, `answer.shown` comes again for the same message with that inference shown or its line gone, and the
   answer is saved once every verdict is in. Each shown state and the save may differ from the seal only in text
@@ -186,10 +189,12 @@ filing's cash flow and balance sheet are extracted from it and stored in the sam
 
 In chat, a question naming cash flow, capex, free cash flow, the balance sheet or one of its items (cash, total
 assets, liabilities, equity or book value), or EPS is the engine's: its planner plans the figures, for one company or
-several. A follow-up that keeps them and changes only its period or companies plans each at the period it reads, with
-no model (`planScopeFigures`, `services/chat/src/company-overview.ts`): the latest fiscal year, the year named, or a
-quarter, a quarter named alone being each company's newest such quarter. The engine computes free cash flow for a
-fiscal year only, and says so for a quarter.
+several. A follow-up that keeps them and changes only its period or companies plans each at the period its scope
+reads, with no model (`planScopeFigures`, `services/chat/src/scope-figures.ts`): the latest, of the type the previous
+answer showed (a quarter once a turn asks for the latest quarter); the year named; or a quarter, a quarter named alone
+being each company's newest such quarter. A valuation kept is planned at the cutoff, so only at the latest. A period
+no fiscal field holds, a valuation at a fiscal period, or kept figures with peers are a declared gap with no model.
+The engine computes free cash flow for a fiscal year only, and says so for a quarter.
 
 - **A qualified metric is its own gap:** "free cash flow margin", "EPS growth" or "FCF per share" name a metric no
   definition serves, never the plain figure. So do adjusted figures ("adjusted EPS", "non-GAAP free cash flow",
@@ -340,10 +345,10 @@ divides an instant price by a duration's EPS.
   params. A cell lists its own figure first and its price and operand after it, so the cell shows the valuation and
   its sealed block carries the inputs. A chat turn with a resolved company reaches the engine (`take`,
   `financial-runtime.ts`), so a market cap or P/E question does, and its scope names `market_cap` and `pe_ratio`, so
-  a follow-up reads them (`SCOPE_METRICS`). The analyst path keeps (`leftToAnalyst`) a turn that asks for no figure
-  but for evidence, guidance or market data; a follow-up whose scope keeps guidance; one that names no period and
-  whose scope keeps a price window or a benchmark; and a follow-up that names no company and no period, turns
-  nothing off, and asks for nothing but an explanation. The engine's answer shows the
+  a follow-up reads them (`SCOPE_METRICS`). The router (`routeTurn`, `scope-figures.ts`) keeps on the analyst path a
+  turn that asks for no figure but for evidence, guidance or market data; a follow-up naming no company of its own
+  whose scope keeps guidance, or keeps a price window or a benchmark and that names no period; and a follow-up that
+  names no company and no period, turns nothing off, and asks for nothing but an explanation. The engine's answer shows the
   figure beside the inputs it read, and each one's inspector shows its date: the price's trade, the count's cover
   date, and the EPS's fiscal year. The screener shows them too (below).
 - **Presentation:** a valuation is dated by its price ("latest known at the cutoff"), since its other operand is
@@ -551,7 +556,9 @@ thread. The price-performance chart is tracked separately (#133).
 ## Sealed price series (`perf_comparison`)
 
 An analyst turn about two or more listed companies whose reading asks for a year-to-date price window gets a price
-chart (`services/chat/src/perf-block.ts`): market data outside the engine, labelled not verified (#398 D2). Each
+chart (`services/chat/src/perf-block.ts`): market data outside the engine, source-linked and not engine-verified
+(#398 D2). A year-to-date window over one company gets a note that only a comparison is charted, and a return over any
+other window (`price_history`) a note that only year to date is charted. Each
 company's line comes from a stored daily bar range (`market_bar_ranges` / `market_bars`), normalized to percent return
 over the window.
 

@@ -93,7 +93,7 @@ The [user guide](docs/guide.md) covers every page, including Analyze memos, Anal
 ## How it works
 
 1. The resolver turns each company you name into a canonical id. An ambiguous name gets a clarifying question, not a guess.
-2. The financial engine plans and computes every figure from stored facts, and certifies each one. The analyst does not browse the web, and shows no figure of its own except a year-to-date price chart, labelled not verified.
+2. The financial engine plans and computes every figure from stored facts, and certifies each one. The analyst does not browse the web and computes no figure. A number appears in its answer only inside a claim it quotes with the claim's source document, or on a comparison's year-to-date price chart, which is source-linked to stored prices but not verified by the engine.
 3. The model writes its narrative as structured assertions. A check rejects any assertion whose references or comparisons do not match the evidence. Every figure in the prose comes from a template filled with a value from the evidence.
 4. The app seals a snapshot of every fact the answer used and checks each one against the logged tool calls. That snapshot is what the evidence inspector shows.
 5. A judge model checks each inference against the facts it rests on. An inference appears only once the judge accepts it.
