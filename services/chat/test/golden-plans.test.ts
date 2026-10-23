@@ -547,6 +547,7 @@ test("an engine answer names what the reading of its question asks for and the p
     "company guidance",
     "the cause of these figures",
   ], "what the scope keeps beside its figures");
+  assert.deepEqual(uncoveredAsks(reading([], ["income_statement"], ["revenue"]), revenue, new Map(), { ...kept(), segments: true }), ["revenue by segment"], "segments kept beside a figure the question names, which the planner answers");
 });
 
 test("an engine answer names what it leaves out for each company it covers (#425)", () => {
