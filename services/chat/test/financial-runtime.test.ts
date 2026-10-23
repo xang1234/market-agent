@@ -709,6 +709,16 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(await gapOf("And over the last twelve months?", { period: { kind: "trailing_twelve_months" } }, "free_cash_flow"), declined("figures for the trailing twelve months"));
     assert.deepEqual(await gapOf("And fiscal 2024?", { period: { kind: "fiscal_year", fiscal_year: 2024 } }, "pe_ratio"), declined("a market capitalization or P/E ratio at a fiscal period, as a valuation is calculated only at the current price"));
     assert.deepEqual(await gapOf("How does it compare with its peers?", { asks: new Set(["peers"]) }, "free_cash_flow"), declined("peers the question does not name, beside figures other than the income statement"));
+    assert.deepEqual(await gapOf("And fiscal 2024?", { period: { kind: "fiscal_year", fiscal_year: 2024 } }, "ebitda"), declined("a metric with no verified definition"));
+
+    // The metric a gap declined stays in its scope, so the next follow-up is that gap again.
+    const ebitda = proposedMetric("ebitda", null, null)!;
+    const declining = (async () => ({ model: "stub-model", text: JSON.stringify({ outcome: "unsupported", reason: "undefined_metric" }) })) as unknown as PlanningModel;
+    const resolving = (async (context: { subjectPreResolutions?: ReadonlyArray<ChatResolvedSubjectPreResolution> }, read: Promise<ScopeProposal | null>) =>
+      resolveResearchScope({ companies: (await scopeOver(context)).companies, prior: null, asOf: new Date().toISOString(), served: true, proposal: await read })) as never;
+    const harness = chatHarness(pool, { model: declining, researchScope: resolving, readQuestion: async () => ({ ...NO_ASKS, metrics: [ebitda], companies: { kind: "as_named", names: ["AAA"] } }) });
+    completed((await harness.run({ ...base, userIntent: "What is AAA's EBITDA?" })).events);
+    assert.deepEqual((harness.persisted.at(-1)!.research_scope as { metrics: unknown }).metrics, [{ ...ebitda, available: false }]);
   });
 
   await t.test("with no reading, market data and an evidence question reach the engine, whose planner declines them (#398)", async () => {

@@ -535,6 +535,14 @@ test("an engine answer names what the reading of its question asks for and the p
   const kept = (...keys: string[]) => ({ ...resolveResearchScope({ companies: [], prior: null, asOf: GOLDEN_AS_OF, proposal: null }), metrics: keys.map((key) => proposedMetric(key, null, null)!), inherited: ["metrics" as const] });
   assert.deepEqual(uncoveredAsks(reading([]), revenue, new Map(), kept("income_statement", "pe_ratio")), ["P/E ratio"], "a figure the scope keeps and the plan does not compute");
   assert.deepEqual(uncoveredAsks(reading([]), revenue, new Map(), { ...kept("pe_ratio"), inherited: [] }), [], "one named by an earlier answer but not kept");
+  const keptFacets = { ...kept("income_statement"), margin_trend: true, price_window: { kind: "ytd" as const, cutoff: GOLDEN_AS_OF }, benchmark: true, guidance: true as const, explains: true as const };
+  assert.deepEqual(uncoveredAsks(reading([]), revenue, new Map(), keptFacets), [
+    "a margin over several periods",
+    "a stock price return",
+    "a comparison with a benchmark index",
+    "company guidance",
+    "the cause of these figures",
+  ], "what the scope keeps beside its figures");
 });
 
 test("an engine answer names what it leaves out for each company it covers (#425)", () => {

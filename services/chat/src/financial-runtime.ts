@@ -196,14 +196,17 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
           // reads here as run_failed): the gap never replaces that answer.
           message_id: messageId,
           subject_refs: refs,
-          // It computed no figure, so it names none, and no reader re-reads it.
+          // It keeps the figures its scope kept, and the metrics no definition
+          // serves that it declined, so a follow-up is that gap again.
           ...(scope === null ? {} : {
             research_scope: {
               ...scope,
               route: "financial_gap" as const,
               reads: "financial_gap" as const,
               companies: answeredCompanies(refs.map((ref) => ref.id), scope, requested.labels),
-              metrics: [],
+              metrics: scope.inherited.includes("metrics")
+                ? scope.metrics
+                : scope.metrics.filter((metric) => CATALOG.get(metric.metric_key)?.available !== true).map((metric) => ({ ...metric, available: false })),
             },
           }),
         };
@@ -859,9 +862,18 @@ export function uncoveredAsks(
   reading: ScopeProposal,
   plan: FinancialPlanV1,
   labels: ReadonlyMap<string, string> = new Map(),
-  scope: Pick<ResearchScope, "metrics" | "inherited"> | null = null,
+  scope: Pick<ResearchScope, "metrics" | "inherited" | "segments" | "margin_trend" | "price_window" | "benchmark" | "guidance" | "explains"> | null = null,
 ): string[] {
-  const { asks, offMetrics } = readingAsks(reading);
+  const { asks: readAsks, offMetrics } = readingAsks(reading);
+  const kept: ScopeFacet[] = scope === null ? [] : [
+    ...(scope.segments ? ["segments" as const] : []),
+    ...(scope.margin_trend ? ["margin_trend" as const] : []),
+    ...(scope.price_window ? ["price_window" as const] : []),
+    ...(scope.benchmark ? ["benchmark" as const] : []),
+    ...(scope.guidance ? ["guidance" as const] : []),
+    ...(scope.explains ? ["explains" as const] : []),
+  ];
+  const asks = new Set([...readAsks, ...kept]);
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
   // A figure's period and company are those of its reported inputs.
   const input = (node: OperationNode) => nodes.get(operationDependencies(node)[0]!)!;

@@ -22,7 +22,7 @@ export type ReadPeriod =
 export const LATEST: ReadPeriod = { kind: "latest", period: null };
 
 /** A request the engine declines with no model, by its reason (financial-runtime.ts REASON_TEXT). */
-export type NamedGap = "valuation_period" | "trailing_twelve_months" | "range" | "relative_period" | "peers";
+export type NamedGap = "valuation_period" | "undefined_metric" | "trailing_twelve_months" | "range" | "relative_period" | "peers";
 
 /** How a turn about a company is answered: by the analyst path, or by the engine with one plan. */
 export type PlanChoice =
@@ -65,13 +65,13 @@ const VALUATIONS: ReadonlySet<string> = new Set<Valuation>(["market_cap", "pe_ra
  * asks for no figure but something only it answers; a follow-up naming no
  * company of its own whose scope keeps guidance, or keeps market data and
  * that names no period; and a follow-up that names no company and no period,
- * turns nothing off and asks only for a cause. A turn
- * asking for segments is the engine's segment gap, and a follow-up asking for
- * no figure of its own at a period no fiscal field holds is that gap.
- * Otherwise, with a scope: one company's margin trend, the companies'
- * overview, or the figures a follow-up keeps beside the income statement, a
- * valuation only at the latest and with no peers; anything else is the
- * planner's.
+ * turns nothing off and asks only for a cause. A gap the engine declines with
+ * no model: segments asked for, or kept by a turn naming no figure of its
+ * own; a period no fiscal field holds, asked by a follow-up naming no company
+ * or figure; kept figures with peers, or none the engine can plan at the
+ * period. Otherwise, with a scope: one company's margin trend, the companies'
+ * overview, or the figures a follow-up keeps beside the income statement;
+ * anything else is the planner's.
  */
 export function routeTurn(reading: ScopeProposal | null, scope: ResearchScope | null): PlanChoice {
   if (reading === null) return PLANNER;
@@ -85,7 +85,7 @@ export function routeTurn(reading: ScopeProposal | null, scope: ResearchScope | 
     const keptAnalyst = scope !== null && !own && (scope.guidance === true || (reading.period.kind === "none" && (scope.price_window !== null || scope.benchmark)));
     if (lanes.has("analyst") || keptAnalyst || (reading.period.kind === "none" && onlyExplains)) return { kind: "analyst" };
   }
-  if (asks.has("segments")) return { kind: "segments_gap" };
+  if (asks.has("segments") || (scope?.segments === true && !namesFigure)) return { kind: "segments_gap" };
   if (scope === null) return PLANNER;
   const { kind } = reading.period;
   if (kind === "trailing_twelve_months" || kind === "range" || kind === "other") {
@@ -106,7 +106,8 @@ export function routeTurn(reading: ScopeProposal | null, scope: ResearchScope | 
   if (asksNoFigure && !keptIncome && [...asks].every((facet) => KEPT_ASKS.has(facet) || facet === "peers")) {
     if (asks.has("peers")) return { kind: "named_gap", reason: "peers" };
     const planned = kept.filter((key) => Object.hasOwn(AT_PERIOD, key) || (VALUATIONS.has(key) && period.kind === "latest"));
-    return planned.length > 0 ? { kind: "kept_figures", metrics: planned, period } : { kind: "named_gap", reason: "valuation_period" };
+    if (planned.length > 0) return { kind: "kept_figures", metrics: planned, period };
+    return { kind: "named_gap", reason: kept.some((key) => VALUATIONS.has(key)) ? "valuation_period" : "undefined_metric" };
   }
   return PLANNER;
 }
