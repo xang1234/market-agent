@@ -310,6 +310,11 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
       issues.push({ path: "$.operations", code: "unsupported_operation", message: `${String(operation.operation)} is not an approved operation` });
     }
   }
+  for (const operation of draft.operations) {
+    if (planner.kind === "model" && DETERMINISTIC_OPERATIONS.has(String(operation.operation))) {
+      issues.push({ path: "$.operations", code: "deterministic_operation", message: `${String(operation.node_id)} is a ${String(operation.operation)}, which only a deterministic plan asks for` });
+    }
+  }
   // A share price is planned only as the price of a valuation (#444).
   const valuationPrices = new Set(draft.operations.flatMap((operation) => (VALUATIONS.has(String(operation.operation)) ? [operation.price] : [])));
   for (const operation of draft.operations) {
@@ -451,10 +456,12 @@ function isApprovedOperation(kind: unknown): kind is OperationKind {
 }
 
 const VALUATIONS: ReadonlySet<string> = new Set<OperationKind>(["market_cap", "pe_ratio"]);
+// The model planner was never evaluated on these, so only server-built plans ask for them (#398).
+const DETERMINISTIC_OPERATIONS: ReadonlySet<string> = new Set<OperationKind>(["spread", "period_rank"]);
 
 function systemPrompt(): string {
   const metrics = PLANNABLE_METRICS.map((definition) => definition.metric_key).join(", ");
-  const operations = Object.keys(OPERATION_REGISTRY).join(", ");
+  const operations = Object.keys(OPERATION_REGISTRY).filter((kind) => !DETERMINISTIC_OPERATIONS.has(kind)).join(", ");
   return [
     "You translate a financial research request into a JSON plan draft. Reply with one JSON object only.",
     `Approved metric keys: ${metrics}. Approved operations: ${operations}.`,

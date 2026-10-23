@@ -373,6 +373,26 @@ test("a deterministic plan asks for a lead between two companies and a window's 
   assert.match(planned.plan.interpretation?.text ?? "", / Calculations: difference between two companies, each in its own fiscal period, ranking across one company's periods\.$/u);
 });
 
+test("the model is never offered a lead or a window, and a draft that plans one is refused (#398)", async () => {
+  const quarter = (node_id: string, fiscal_period: string) =>
+    ({ node_id, operation: "reported_metric", subject_slot: "a", metric_key: "revenue", period: { kind: "fiscal_period", fiscal_year: 2023, fiscal_period } });
+  const drafted = (operation: Record<string, unknown>) => ({
+    outcome: "ready",
+    subjects: [{ slot_id: "a", mention: NAMES[0] }],
+    operations: [quarter("q3", "Q3"), quarter("q4", "Q4"), { node_id: "x", ...operation }],
+    outputs: [{ output_id: "out_x", node_id: "x" }],
+    thresholds: [],
+  });
+  for (const operation of [{ operation: "spread", left: "q4", right: "q3" }, { operation: "period_rank", members: ["q3", "q4"], direction: "highest" }]) {
+    const model = scripted(drafted(operation), drafted(operation));
+    const result = await planFinancialRequest(context({ requested_subjects: [resolved(0)] }), "Apple's revenue lead", model);
+    assert.deepEqual(result.outcome === "unsupported" && result.issues.map((issue) => [issue.code, issue.message]), [
+      ["deterministic_operation", `x is a ${operation.operation}, which only a deterministic plan asks for`],
+    ], operation.operation);
+    assert.match(model.calls[0]![0]!, /^Approved metric keys: .*\. Approved operations: reported_metric, absolute_change, percent_change_positive_base, gross_margin, operating_margin, net_margin, free_cash_flow, ratio, trailing_sum, threshold, peer_compare, market_cap, pe_ratio\.$/mu);
+  }
+});
+
 test("a market cap or P/E answer always publishes the price and the count or EPS it reads, before the result (#444)", async () => {
   const draft = valuationDraft();
   const model = scripted({ outcome: "ready", ...draft, outputs: [{ output_id: "out_cap", node_id: "cap" }] });
