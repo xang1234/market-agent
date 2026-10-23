@@ -58,6 +58,7 @@ export type ScopeField = "peers" | "segments" | "margin_trend" | "metrics" | "fi
 
 // A company's own fiscal quarter, as its facts are filed.
 export type FiscalQuarter = { fiscal_year: number; fiscal_period: string };
+export type ScopeQuarter = { fiscal_year: number | null; fiscal_period: string };
 
 // A metric a question names: one this chat's readers show, or a named gap. A
 // statement metric with an adjustment or a qualifier ("adjusted EPS", "EPS
@@ -88,9 +89,9 @@ export type ResearchScope = {
   // The metrics the question names (none: the route's usual figures).
   metrics: ReadonlyArray<RequestedMetric>;
   fiscal_year: number | null;
-  // A fiscal quarter the question names (#290): a single company's answer shows
-  // it instead of the latest quarter.
-  fiscal_quarter: FiscalQuarter | null;
+  // A fiscal quarter the question names (#290); with no year named or kept,
+  // each company's newest such quarter.
+  fiscal_quarter: ScopeQuarter | null;
   // The window's cutoff is the answer that first charted it.
   price_window: { kind: "ytd"; cutoff: string } | null;
   // A benchmark index asked for: never in this data, so always a named gap.
@@ -404,10 +405,9 @@ export function resolveResearchScope(input: {
   // ("now for fiscal 2026") or the latest quarter replaces it.
   const partialPeriod = off.has("fiscal_quarter") ? null : period.yearlessQuarter ?? null;
   // Its year: one named in the question ("Q3, FY2026"), else the inherited
-  // quarter's, else an inherited fiscal year (#292 review).
+  // quarter's, else an inherited fiscal year (#292 review), else none.
   const partialYear = yearNamed ?? prior?.fiscal_quarter?.fiscal_year ?? prior?.fiscal_year ?? undefined;
-  const namedQuarter = quarterNamed ??
-    (partialPeriod && partialYear !== undefined ? { fiscal_year: partialYear, fiscal_period: partialPeriod } : null);
+  const namedQuarter = quarterNamed ?? (partialPeriod ? { fiscal_year: partialYear ?? null, fiscal_period: partialPeriod } : null);
   if (namedQuarter === null && (latest || yearNamed !== undefined)) off.add("fiscal_quarter");
   const fiscal_quarter = pick("fiscal_quarter", namedQuarter, prior?.fiscal_quarter);
   // A window asked for now is cut off at the turn.
@@ -509,7 +509,7 @@ export function parseResearchScope(value: unknown): ResearchScope | null {
   const quarter = scope.fiscal_quarter as { fiscal_year?: unknown; fiscal_period?: unknown } | null | undefined;
   // Absent on scopes saved before quarters were recorded (#290): none.
   const validQuarter = quarter === undefined || quarter === null ||
-    (Number.isInteger(quarter.fiscal_year) && typeof quarter.fiscal_period === "string" && /^Q[1-4]$/.test(quarter.fiscal_period));
+    ((quarter.fiscal_year === null || Number.isInteger(quarter.fiscal_year)) && typeof quarter.fiscal_period === "string" && /^Q[1-4]$/.test(quarter.fiscal_period));
   const validWindow = window === null || (window?.kind === "ytd" && typeof window.cutoff === "string" && !Number.isNaN(Date.parse(window.cutoff)));
   if (
     typeof scope.peers !== "boolean" ||
@@ -536,7 +536,7 @@ export function parseResearchScope(value: unknown): ResearchScope | null {
     // Absent on scopes saved before metrics were recorded.
     metrics: (scope.metrics ?? []) as ResearchScope["metrics"],
     fiscal_year: scope.fiscal_year as number | null,
-    fiscal_quarter: quarter ? { fiscal_year: quarter.fiscal_year as number, fiscal_period: quarter.fiscal_period as string } : null,
+    fiscal_quarter: quarter ? { fiscal_year: quarter.fiscal_year as number | null, fiscal_period: quarter.fiscal_period as string } : null,
     price_window: window === null ? null : { kind: "ytd", cutoff: window!.cutoff as string },
     // Absent on scopes saved before benchmarks were recorded.
     benchmark: scope.benchmark === true,

@@ -178,6 +178,10 @@
       "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"fiscal_year\",\"fiscal_year\":2025},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}"
     },
     {
+      "match": "Question: \"Add AMD\"",
+      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"compare\",\"add\":[\"AMD\"]}}"
+    },
+    {
       "match": "Question: \"What guidance did AMD give?\"",
       "text": "{\"metrics\":[],\"asks\":[\"guidance\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AMD\"]}}"
     },

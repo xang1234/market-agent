@@ -78,8 +78,8 @@ export function routeTurn(reading: ScopeProposal | null, scope: ResearchScope | 
     if (reading.period.kind === "none" && (marketData || onlyExplains)) return { kind: "analyst" };
   }
   if (asks.has("segments")) return { kind: "segments_gap" };
-  const period = readPeriod(reading, scope);
-  if (period === null || scope === null) return PLANNER;
+  if (scope === null || !READ_PERIODS.has(reading.period.kind)) return PLANNER;
+  const period = own && reading.period.kind === "none" ? LATEST : readPeriod(scope);
   const kept = own ? [] : scope.metrics.map((metric) => metric.metric_key);
   const keptIncome = kept.every((key) => key === INCOME_STATEMENT);
   const asksNoFigure = READ_PERIODS.has(reading.period.kind) && reading.metrics.length === 0 && reading.income_items.length === 0;
@@ -107,30 +107,10 @@ function namedCompanies(change: ScopeProposal["companies"]): number {
   }
 }
 
-/**
- * The period a reading reads its figures at, or null for one no fiscal field
- * holds (TTM, a range), which the planner answers. A follow-up that names no
- * period keeps the one its scope holds; a question of its own reads the latest.
- */
-export function readPeriod(reading: ScopeProposal, scope: Pick<ResearchScope, "fiscal_year" | "fiscal_quarter"> | null): ReadPeriod | null {
-  const { period } = reading;
-  switch (period.kind) {
-    case "latest":
-      return LATEST;
-    case "fiscal_year":
-      return { kind: "fiscal_year", fiscal_year: period.fiscal_year };
-    case "fiscal_quarter": {
-      // A quarter named alone takes the year its scope gives it (research-scope.ts), if any.
-      const kept = scope?.fiscal_quarter?.fiscal_period === period.fiscal_period ? scope.fiscal_quarter.fiscal_year : null;
-      return { kind: "fiscal_quarter", fiscal_period: period.fiscal_period, fiscal_year: period.fiscal_year ?? kept };
-    }
-    case "none":
-      if ((reading.companies.kind === "as_named" && reading.companies.names.length > 0) || scope === null) return LATEST;
-      if (scope.fiscal_quarter !== null) return { kind: "fiscal_quarter", ...scope.fiscal_quarter };
-      return scope.fiscal_year === null ? LATEST : { kind: "fiscal_year", fiscal_year: scope.fiscal_year };
-    default:
-      return null;
-  }
+/** The period a resolved scope reads its figures at: its quarter, else its fiscal year, else the latest. */
+export function readPeriod(scope: Pick<ResearchScope, "fiscal_year" | "fiscal_quarter">): ReadPeriod {
+  if (scope.fiscal_quarter !== null) return { kind: "fiscal_quarter", ...scope.fiscal_quarter };
+  return scope.fiscal_year === null ? LATEST : { kind: "fiscal_year", fiscal_year: scope.fiscal_year };
 }
 
 // A figure computed from reported metrics of one period, each input by its role.

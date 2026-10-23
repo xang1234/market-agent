@@ -628,7 +628,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
       first: ["Revenue", "Q3 FY2024", "missing", "No eligible input was public before the knowledge cutoff."],
       margin: ["Gross margin (gross profit / revenue)", "Q2 FY2026", "verified", "72.42%"],
       yoy: ["Year-over-year percent change in Revenue", "Q2 FY2026 vs Q2 FY2025", "verified", "55.60%"],
-      period: [null, null],
+      period: [null, { fiscal_year: null, fiscal_period: "Q2" }],
     });
     assert.deepEqual(await shown("And fiscal 2025?"), {
       first: ["Revenue", "Q1 FY2024", "missing", "No eligible input was public before the knowledge cutoff."],
@@ -639,6 +639,14 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     // No model planned them: there is no recorded planner reply for these questions.
     const { rows } = await client.query<{ kind: string }>(`select plan->'planner'->>'kind' as kind from financial_plans where origin_ref like $1`, [`chat:${periodThread.thread_id}:%`]);
     assert.deepEqual(rows.map((row) => row.kind), ["deterministic", "deterministic", "deterministic"]);
+
+    const addedThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "A quarter, then a company" });
+    for (const question of ["How is NVDA doing?", "What about Q2?", "Add AMD"]) completedTurn(await runTurn(base, addedThread.thread_id, question));
+    const added = engineAnswer(await latestAssistantMessage(base, addedThread.thread_id)).results;
+    assert.deepEqual(added.filter(([measure]) => measure.startsWith("Gross margin")), [
+      ["Gross margin (gross profit / revenue)", "Q2 FY2026", "verified", "72.42%"],
+      ["Gross margin (gross profit / revenue)", "Q2 FY2026", "verified", "54.02%"],
+    ], "each company at its newest second quarter");
   });
 
   // Two listings under one ticker are one company, so the engine plans it
