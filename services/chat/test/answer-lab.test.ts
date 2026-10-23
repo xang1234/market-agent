@@ -415,7 +415,7 @@ test("live --judge --update leaves a trace as it was when a fallback model answe
 test("live --judge --update re-records a thread's turns in their order, each later one asked after the answer its earlier turn just recorded", async () => {
   const turn = (n: number) => TRACES.find(({ label }) => label === `follow-up-memory.turn-${n}`)!.trace;
   // Named against their order in the thread, which their conversations give.
-  const traces = readTraces([traceFiles({ "a.json": turn(2), "b.json": turn(1) })]);
+  const traces = readTraces([traceFiles({ "a.json": turn(2), "b.json": withNote(turn(1), "Segment revenue is not available for NVDA in this data.") })]);
   const env = { LLM_CHANNELS: "openai", LLM_OPENAI_PROTOCOL: "openai", LLM_OPENAI_MODELS: "gpt-4.1", LITELLM_MODEL: "openai/gpt-4.1", JUDGE_LITELLM_MODEL: "openai/gpt-4.1" };
   const asked: unknown[] = [];
   const createClient = () => async (_deployment: unknown, request: { messages: ReadonlyArray<{ content: string }> }) => {
@@ -427,7 +427,7 @@ test("live --judge --update re-records a thread's turns in their order, each lat
   const first = [{ role: "user", text: "Analyze NVDA." }];
   const second = [
     ...first,
-    { role: "assistant", text: "The reported figures below come from the company's filings; select any value to see its source." },
+    { role: "assistant", text: "The reported figures below come from the company's filings; select any value to see its source. Segment revenue is not available for NVDA in this data." },
     { role: "user", text: "Compare it with AMD YTD." },
   ];
   assert.deepEqual(asked, [first, second]);
@@ -562,7 +562,7 @@ test("recorded --update --judge and --repair write a live round over the trace o
     "--repair, repair on a fallback": { rerun: "repair", primaryFails: "repair", judge: contradicted },
     "healthy": { rerun: "judge", primaryFails: null, judge: contradicted },
   } as const;
-  // --repair replays the recorded verdict, which sends inference 6 to repair.
+  // --repair replays the recorded verdict, which sends inference 3 to repair.
   const recordedJudge = [{ outcome: "replied", exchange: { messages: [], text: contradicted, truncated: false, deployment: "openai/gpt-4.1", latency_ms: 1 } }];
   const written = [];
   const skipped: Array<[string, string | undefined]> = [];

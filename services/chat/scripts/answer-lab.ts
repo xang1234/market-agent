@@ -267,8 +267,6 @@ export function answerText(blocks: ReadonlyArray<Record<string, unknown>>): stri
     .join("\n\n");
 }
 
-type Conversation = NonNullable<AnswerTraceInput["conversation"]>;
-
 // Whether later was asked after earlier: its conversation holds earlier's question.
 function asksAfter(later: TurnTrace, earlier: TurnTrace): boolean {
   return later !== earlier && (later.input.conversation ?? []).some((message) => message.role === "user" && message.text === earlier.question);
@@ -291,7 +289,7 @@ export function threadChains(traces: ReadonlyArray<LabeledTrace>): LabeledTrace[
 // holds the last CONVERSATION_MESSAGES (local-runtime.ts), so a window can open
 // on an answer: its question is the one asked before the window's first, as
 // the turn that asked that one holds it. An answer the window cut is not there.
-function questionsAnswered(conversation: Conversation, chain: ReadonlyArray<LabeledTrace>): Array<string | undefined> {
+function questionsAnswered(conversation: NonNullable<AnswerTraceInput["conversation"]>, chain: ReadonlyArray<LabeledTrace>): Array<string | undefined> {
   return conversation.map((message, i) => {
     if (message.role !== "assistant") return undefined;
     if (i > 0) return conversation[i - 1]!.role === "user" ? conversation[i - 1]!.text : undefined;
@@ -358,7 +356,7 @@ export async function live(
     ? threadChains(traces).map((chain) => chain.map((traced) => ({ ...traced, sample: 0 })))
     : traces.flatMap((traced) => Array.from({ length: samples }, (_, sample) => [{ ...traced, sample }]));
   const results: LiveSample[] = [];
-  const sample = async ({ key, label, trace }: LabeledTrace, sample: number): Promise<TracedAnswer | undefined> => {
+  const sample = async ({ key, label, trace }: LabeledTrace, n: number): Promise<{ answer: TracedAnswer; result: LiveSample } | undefined> => {
     try {
       const composed = await composeTraced(trace.input, models);
       // No deployment configured: the placeholder came back and no model answered.
@@ -366,9 +364,9 @@ export async function live(
       const { cases } = inferenceCases(trace.input, composed.assertions);
       const answer = judge ? await judgedLive(trace.input, composed, models) : judgedAnswer(composed, cases, cases.map(() => UNJUDGED));
       const view = judge ? judgeView(answer) : undefined;
-      results.push({
+      const result: LiveSample = {
         trace: key,
-        sample,
+        sample: n,
         deployment: answer.exchange?.deployment,
         metrics: answerMetrics(answer),
         text: answer.exchange?.text,
@@ -385,12 +383,13 @@ export async function live(
           : {}),
         ...(view ? { judge: view } : {}),
         ...(answer.repair ? { repair: answer.repair } : {}),
-      });
-      console.log(`done  ${label} #${sample}  (${((answer.exchange?.latency_ms ?? 0) / 1000).toFixed(1)}s)`);
-      return answer;
+      };
+      results.push(result);
+      console.log(`done  ${label} #${n}  (${((answer.exchange?.latency_ms ?? 0) / 1000).toFixed(1)}s)`);
+      return { answer, result };
     } catch (error) {
-      results.push({ trace: key, sample, error: failure(error) });
-      console.log(`error ${label} #${sample}: ${failure(error)}`);
+      results.push({ trace: key, sample: n, error: failure(error) });
+      console.log(`error ${label} #${n}: ${failure(error)}`);
       return undefined;
     }
   };
@@ -406,12 +405,11 @@ export async function live(
           continue;
         }
         const traced = record ? { ...job, trace: { ...job.trace, input: followUp(job.trace.input, answered, chain) } } : job;
-        const answer = await sample(traced, job.sample);
-        if (!record) continue;
-        const why = answer ? record(traced, answer) : "the run failed";
-        const result = answer && why !== undefined ? results.find((entry) => entry.trace === job.key) : undefined;
-        if (result) result.skipped = why;
-        if (why === undefined) answered.set(job.trace.question, savedNarrative({ blocks: answer!.blocks, input: traced.trace.input }));
+        const done = await sample(traced, job.sample);
+        if (!record || !done) continue;
+        const why = record(traced, done.answer);
+        if (why === undefined) answered.set(job.trace.question, savedNarrative({ blocks: done.answer.blocks, input: traced.trace.input }));
+        else done.result.skipped = why;
       }
     }
   };
