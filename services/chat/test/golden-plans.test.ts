@@ -7,7 +7,7 @@ import { createRuntimeAuthority, operationDependencies, type FinancialPlanV1 } f
 import { buildDeterministicPlan, planFinancialRequest, type PlanningContext, type PlanningModel, type PlanningResult, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import type { CandidatePage, CandidateRequest, FinancialEvidencePort, InputCandidate, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
-import { allResolved, marginTrendSubjects, overviewPeers, overviewSubjects, planCompanyOverview, planMarginTrend } from "../src/company-overview.ts";
+import { allResolved, marginTrendSubjects, overviewOmissions, overviewPeers, overviewSubjects, planCompanyOverview, planMarginTrend } from "../src/company-overview.ts";
 import { MAX_TURN_SUBJECTS } from "../src/coordinator.ts";
 import { uncoveredAsks } from "../src/financial-runtime.ts";
 import { resolveResearchScope } from "../src/research-scope.ts";
@@ -156,13 +156,19 @@ const goldenQuarters = (ticker: string, publicBy?: string) => GOLDEN_COMPANIES.f
 const candidatePage = (...candidates: InputCandidate[]): CandidatePage => ({ status: "ok", candidates, truncated: false });
 const changeOf = (ticker: string, current: string, prior: string) => `percent_change_positive_base(${ticker} revenue ${current}, ${ticker} revenue ${prior})`;
 
+// What the answer's note says a plan leaves out, each company named by its legal name.
+const omissions = (plan: FinancialPlanV1, evidence: FinancialEvidencePort) => overviewOmissions(plan, authority, evidence, (slot) => {
+  const member = plan.subjects.members.find((candidate) => candidate.slot_id === slot)!;
+  return GOLDEN_COMPANIES.find((company) => company.issuer_id === member.subject_ref.id)!.legal_name;
+});
+
 async function overviewOf(question: string, pages: (ticker: string) => CandidatePage, plan = planCompanyOverview) {
   const tickerOf = (issuerId: string) => GOLDEN_COMPANIES.find((company) => company.issuer_id === issuerId)!.ticker;
   const evidence = { listInputCandidates: async (request: CandidateRequest) => pages(tickerOf(request.subject.id)) } as FinancialEvidencePort;
   const planned = await plan(planningContext(question), evidence);
   if (planned === null) return null;
   assert.equal(planned.outcome, "ready", JSON.stringify(planned));
-  return { outputs: outputLabels(planned.plan), uncovered: planned.uncovered };
+  return { outputs: outputLabels(planned.plan), uncovered: await omissions(planned.plan, evidence) };
 }
 
 test("a company's overview shows its eight quarters to the newest it reported revenue for by the cutoff, each named by its fiscal period (#398)", async (t) => {
@@ -174,7 +180,8 @@ test("a company's overview shows its eight quarters to the newest it reported re
     const planned = await planCompanyOverview(planningContext("NVDA"), evidence);
     if (planned === null) return null;
     assert.equal(planned.outcome, "ready", JSON.stringify(planned));
-    const { plan, model_calls, uncovered } = planned;
+    const { plan, model_calls } = planned;
+    const uncovered = await omissions(plan, { listInputCandidates: async () => page } as unknown as FinancialEvidencePort);
     return { planner: plan.planner.kind, model_calls, units: plan.publication_units.map((unit) => unit.unit_id), outputs: outputLabels(plan), uncovered };
   };
   const charted = [2024, 2025].flatMap((year) => (["Q1", "Q2", "Q3", "Q4"] as const).map((quarter) => `${quarter} ${year}`));
@@ -273,14 +280,14 @@ test("a comparison shows each company's latest quarter, named from the newest it
     const reads = requests.map(({ subject, metric_key, fiscal_year, fiscal_period }) => [tickerOf(subject.id), subject.kind, metric_key, fiscal_year, fiscal_period]);
     if (planned === null) return { planned, reads };
     assert.equal(planned.outcome, "ready", JSON.stringify(planned));
-    const { plan, model_calls, uncovered } = planned;
+    const { plan, model_calls } = planned;
     return {
       planner: plan.planner.kind,
       model_calls,
       units: plan.publication_units.map((unit) => unit.unit_id),
       output_ids: plan.outputs.map((output) => output.output_id),
       outputs: outputLabels(plan),
-      uncovered,
+      uncovered: await omissions(plan, evidence),
       reads,
     };
   };

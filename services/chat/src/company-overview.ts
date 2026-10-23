@@ -1,4 +1,4 @@
-import { DEFAULT_EXECUTION_LIMITS, dayNumber, type FinancialSubjectRef } from "../../financial-core/src/index.ts";
+import { DEFAULT_EXECUTION_LIMITS, dayNumber, type FinancialPlanV1, type FinancialRuntimeAuthority, type FinancialSubjectRef } from "../../financial-core/src/index.ts";
 import { isDatabaseError } from "../../financial-engine/src/evidence-adapter.ts";
 import { buildDeterministicPlan, type PlanningContext, type PlanningResult, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort, InputCandidate, SqlExecutor } from "../../financial-engine/src/ports.ts";
@@ -72,19 +72,17 @@ export async function overviewPeers(db: SqlExecutor, issuer: FinancialSubjectRef
   }
 }
 
-/** A ready deterministic plan, and what it leaves out for its answer's note: each change it could not pair by date. */
-export type OverviewPlan = ReadyPlan & Readonly<{ uncovered: ReadonlyArray<string> }>;
-
 type Dates = Readonly<{ start: string; end: string }>;
 
 // A company's revenue quarters, as the candidates reported by the cutoff state them.
-type Company = Readonly<{
-  mention: string;
-  label: string;
+type RevenueQuarters = Readonly<{
   newest: FiscalQuarter;
   // A quarter's dates, when every revenue reported for it states the same ones.
   dated: (quarter: FiscalQuarter) => Dates | null;
 }>;
+
+// What a plan leaves out, for its answer's note, given each slot's company name.
+type Omission = (name: (slot: string) => string) => string;
 
 /**
  * The overview of the context's companies, each from the newest quarter it
@@ -92,8 +90,8 @@ type Company = Readonly<{
  * when one reported none, or when it cannot be read or planned. A quarter
  * the engine cannot certify is a gap cell where it falls.
  */
-export async function planCompanyOverview(context: PlanningContext, evidence: FinancialEvidencePort): Promise<OverviewPlan | null> {
-  const companies = await companyQuarters(context, evidence);
+export async function planCompanyOverview(context: PlanningContext, evidence: FinancialEvidencePort): Promise<ReadyPlan | null> {
+  const companies = await planningQuarters(context, evidence);
   return companies && planned(context, companyOverviewDraft(companies));
 }
 
@@ -102,9 +100,29 @@ export async function planCompanyOverview(context: PlanningContext, evidence: Fi
  * and low (#398): the answer to a question about its margin trend, with no
  * model planning it. Null as for the overview.
  */
-export async function planMarginTrend(context: PlanningContext, evidence: FinancialEvidencePort): Promise<OverviewPlan | null> {
-  const companies = await companyQuarters(context, evidence);
-  return companies && planned(context, { draft: marginTrendDraft(companies[0]!), uncovered: [] });
+export async function planMarginTrend(context: PlanningContext, evidence: FinancialEvidencePort): Promise<ReadyPlan | null> {
+  const companies = await planningQuarters(context, evidence);
+  return companies && planned(context, marginTrendDraft(companies[0]!));
+}
+
+/**
+ * What a saved overview plan leaves out, for its answer's note: read again
+ * from the evidence by the plan's cutoff, so a run resumed without planning
+ * notes what its first attempt planned. None for any other plan.
+ */
+export async function overviewOmissions(
+  plan: FinancialPlanV1,
+  authority: FinancialRuntimeAuthority,
+  evidence: FinancialEvidencePort,
+  name: (slot: string) => string,
+): Promise<string[]> {
+  if (plan.planner.kind !== "deterministic") return [];
+  const members = [...plan.subjects.members].sort((left, right) => left.display_order - right.display_order);
+  const companies = await revenueQuarters(members.map((member) => member.subject_ref), { authority, knowledge_cutoff: plan.time.knowledge_cutoff }, evidence, UNREAD);
+  if (companies === null) return [];
+  const { operations, omitted } = companyOverviewDraft(companies);
+  const saved = new Set(plan.operations.map((node) => node.node_id));
+  return operations.length === saved.size && operations.every((node) => saved.has(node.node_id)) ? omitted.map((omission) => omission(name)) : [];
 }
 
 const TREND_ASKS: ReadonlySet<ScopeFacet> = new Set(["margin_trend", "margins", "explains"]);
@@ -129,28 +147,48 @@ export function marginTrendSubjects(
   return latest && trendOnly && marginsOnly && offMetrics.size === 0 ? subjects : null;
 }
 
-function planned(context: PlanningContext, { draft, uncovered }: { draft: unknown; uncovered: ReadonlyArray<string> }): OverviewPlan | null {
-  const result = buildDeterministicPlan(context, draft);
-  if (result.outcome === "ready") return { ...result, uncovered };
+// The companies' slots, in the order the context names them: "a", "b", ...
+const slotOf = (index: number) => String.fromCharCode(97 + index);
+
+function planned(context: PlanningContext, { operations, outputs }: { operations: ReadonlyArray<Node>; outputs: ReadonlyArray<Node> }): ReadyPlan | null {
+  const result = buildDeterministicPlan(context, {
+    subjects: context.requested_subjects.map((subject, index) => ({ slot_id: slotOf(index), mention: subject.mention })),
+    operations,
+    outputs: outputs.map((node) => ({ output_id: `out_${node.node_id}`, node_id: node.node_id })),
+    thresholds: [],
+  });
+  if (result.outcome === "ready") return result;
   console.warn(UNPLANNED, result);
   return null;
 }
 
-async function companyQuarters(context: PlanningContext, evidence: FinancialEvidencePort): Promise<Company[] | null> {
-  const policy = { knowledge_cutoff: context.knowledge_cutoff, allowed_source_classes: context.authority.allowed_source_classes };
-  const companies: Company[] = [];
-  for (const subject of context.requested_subjects) {
-    if (subject.resolution.status !== "resolved") return null;
+function planningQuarters(context: PlanningContext, evidence: FinancialEvidencePort): Promise<RevenueQuarters[] | null> {
+  const refs = context.requested_subjects.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref] : []);
+  if (refs.length !== context.requested_subjects.length) return Promise.resolve(null);
+  return revenueQuarters(refs, context, evidence, UNPLANNED);
+}
+
+const UNREAD = "[chat] the overview's revenue quarters could not be read again, so its note names no growth it leaves out";
+
+async function revenueQuarters(
+  subjects: ReadonlyArray<FinancialSubjectRef>,
+  { authority, knowledge_cutoff }: Pick<PlanningContext, "authority" | "knowledge_cutoff">,
+  evidence: FinancialEvidencePort,
+  unread: string,
+): Promise<RevenueQuarters[] | null> {
+  const policy = { knowledge_cutoff, allowed_source_classes: authority.allowed_source_classes };
+  const companies: RevenueQuarters[] = [];
+  for (const subject of subjects) {
     const page = await evidence.listInputCandidates({
-      authority: context.authority,
-      subject: subject.resolution.subject_ref,
+      authority,
+      subject,
       metric_key: "revenue",
       fiscal_year: null,
       fiscal_period: null,
       limit: DEFAULT_EXECUTION_LIMITS.max_input_candidates,
     });
     if (page.status === "error") {
-      console.warn(UNPLANNED, page.reason_code);
+      console.warn(unread, page.reason_code);
       return null;
     }
     // ponytail: a truncated page may lack the newest quarter, so the planner answers instead.
@@ -158,12 +196,12 @@ async function companyQuarters(context: PlanningContext, evidence: FinancialEvid
     const newest = reported.reduce<InputCandidate | null>((best, candidate) => (best === null || candidate.period.end > best.period.end ? candidate : best), null);
     if (newest === null) return null;
     const { fiscal_year, fiscal_period } = newest.period;
-    companies.push({ mention: subject.mention, label: subject.resolution.label, newest: { fiscal_year, fiscal_period }, dated: quarterDates(reported) });
+    companies.push({ newest: { fiscal_year, fiscal_period }, dated: quarterDates(reported) });
   }
   return companies;
 }
 
-function quarterDates(reported: ReadonlyArray<InputCandidate>): Company["dated"] {
+function quarterDates(reported: ReadonlyArray<InputCandidate>): RevenueQuarters["dated"] {
   const dates = new Map<string, Set<string>>();
   for (const { period } of reported) dates.set(quarterId(period), (dates.get(quarterId(period)) ?? new Set()).add(JSON.stringify([period.start, period.end])));
   return (quarter) => {
@@ -180,7 +218,7 @@ function quarterDates(reported: ReadonlyArray<InputCandidate>): Company["dated"]
 const FOLLOWS_WITHIN_DAYS = 7;
 
 // Whether each quarter of the `span` before `at` follows the one before it, by their reported dates.
-function consecutive(company: Company, at: FiscalQuarter, span: number): boolean {
+function consecutive(company: RevenueQuarters, at: FiscalQuarter, span: number): boolean {
   return Array.from({ length: span }, (_, step) => step).every((step) => {
     const [prior, current] = [company.dated(before(at, step + 1)), company.dated(before(at, step))];
     if (prior === null || current === null) return false;
@@ -201,12 +239,12 @@ function quarterly(slot: string, id: (name: string) => string, newest: FiscalQua
   };
 }
 
-function companyOverviewDraft(companies: ReadonlyArray<Company>) {
+function companyOverviewDraft(companies: ReadonlyArray<RevenueQuarters>) {
   const several = companies.length > 1;
   const backs = several ? [0, ...GROWTH.map(({ back }) => back)] : Array.from({ length: QUARTERS_SHOWN }, (_, back) => back);
-  const uncovered: string[] = [];
+  const omitted: Omission[] = [];
   const parts = companies.map((company, index) => {
-    const slot = String.fromCharCode(97 + index);
+    const slot = slotOf(index);
     const id = (name: string) => several ? `${slot}_${name}` : name;
     const quarter = quarterly(slot, id, company.newest);
     const revenue = new Map(backs.map((back) => [back, quarter("revenue", back)]));
@@ -221,7 +259,7 @@ function companyOverviewDraft(companies: ReadonlyArray<Company>) {
     const growth = changes.flatMap(({ back, span, name }): Node[] => {
       const at = before(company.newest, back);
       if (consecutive(company, at, span)) return [{ node_id: id(name), operation: "percent_change_positive_base", current: revenue.get(back)!.node_id, prior: revenue.get(back + span)!.node_id }];
-      uncovered.push(`revenue growth from ${quarterText(before(at, span))} to ${quarterText(at)}${several ? ` for ${company.label}` : ""}, whose quarters are not dated consecutively`);
+      omitted.push((named) => `revenue growth from ${quarterText(before(at, span))} to ${quarterText(at)}${several ? ` for ${named(slot)}` : ""}, whose quarters are not dated consecutively`);
       return [];
     });
     const charted = [...revenue.values()].reverse();
@@ -229,7 +267,6 @@ function companyOverviewDraft(companies: ReadonlyArray<Company>) {
     return {
       slot,
       margins,
-      subject: { slot_id: slot, mention: company.mention },
       operations: [...revenue.values(), ...lines, ...margins, ...growth, ...window],
       outputs: [...(several ? [latest] : charted), ...lines, ...margins, ...growth, ...window],
     };
@@ -243,17 +280,13 @@ function companyOverviewDraft(companies: ReadonlyArray<Company>) {
     right: other.margins[line]!.node_id,
   })));
   return {
-    draft: {
-      subjects: parts.map((part) => part.subject),
-      operations: [...parts.flatMap((part) => part.operations), ...leads],
-      outputs: [...parts.flatMap((part) => part.outputs), ...leads].map((node) => ({ output_id: `out_${node.node_id}`, node_id: node.node_id })),
-      thresholds: [],
-    },
-    uncovered,
+    operations: [...parts.flatMap((part) => part.operations), ...leads],
+    outputs: [...parts.flatMap((part) => part.outputs), ...leads],
+    omitted,
   };
 }
 
-function marginTrendDraft(company: Company) {
+function marginTrendDraft(company: RevenueQuarters) {
   const quarter = quarterly("a", (name) => name, company.newest);
   const backs = Array.from({ length: QUARTERS_SHOWN }, (_, back) => QUARTERS_SHOWN - 1 - back);
   const revenue = backs.map((back) => quarter("revenue", back));
@@ -265,12 +298,7 @@ function marginTrendDraft(company: Company) {
     revenue: revenue[index]!.node_id,
   })));
   const windows = MARGINS.flatMap(({ metric }, line) => highAndLow(metric, margins[line]!));
-  return {
-    subjects: [{ slot_id: "a", mention: company.mention }],
-    operations: [...revenue, ...lines.flat(), ...margins.flat(), ...windows],
-    outputs: [...margins.flat(), ...windows].map((node) => ({ output_id: `out_${node.node_id}`, node_id: node.node_id })),
-    thresholds: [],
-  };
+  return { operations: [...revenue, ...lines.flat(), ...margins.flat(), ...windows], outputs: [...margins.flat(), ...windows] };
 }
 
 // A figure's highest and lowest among the quarters shown.

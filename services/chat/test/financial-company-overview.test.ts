@@ -2,6 +2,7 @@
 // (#398 step 6), so each turn here asks one and scripts how its question is read.
 
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import type { PlanningModel, PlanningResult } from "../../financial-engine/src/planner.ts";
@@ -297,6 +298,20 @@ test("a question about one company that asks for no figure is answered with its 
     const done = completed((await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve }).run({ ...base, userIntent: "Revenue for MOVD" })).events);
     const growth = (await results(done.message_id)).flatMap(([outputId, period]) => outputId!.startsWith("out_revenue_growth") ? [period] : []);
     assert.deepEqual(growth, ["Q2 FY2022 vs Q1 FY2022", "Q3 FY2022 vs Q2 FY2022", "Q4 FY2022 vs Q3 FY2022", "Q2 FY2023 vs Q1 FY2023", "Q3 FY2023 vs Q2 FY2023", "Q4 FY2023 vs Q3 FY2023"]);
+    const { rows: [message] } = await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id]);
+    assert.equal(
+      message.blocks[1]?.segments?.[0]?.text,
+      "Not covered by this answer: revenue growth from Q4 FY2022 to Q1 FY2023, whose quarters are not dated consecutively; revenue growth from Q4 FY2022 to Q4 FY2023, whose quarters are not dated consecutively.",
+    );
+  });
+
+  await t.test("a turn resumed before its overview was saved notes the growth its first attempt left out (#479)", async () => {
+    const thread = (await db.query(`insert into chat_threads (thread_id, user_id) values (gen_random_uuid(), $1) returning thread_id`, [IDS.other])).rows[0].thread_id;
+    const turn = { threadId: thread, userId: IDS.owner, turnId: randomUUID(), userIntent: "Revenue for MOVD" };
+    // The thread is another user's, so the first attempt plans and reserves the run but cannot publish.
+    await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve }).run(turn);
+    await db.query(`update chat_threads set user_id = $2 where thread_id = $1`, [thread, IDS.owner]);
+    const done = completed((await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve }).run(turn)).events);
     const { rows: [message] } = await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id]);
     assert.equal(
       message.blocks[1]?.segments?.[0]?.text,

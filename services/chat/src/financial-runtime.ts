@@ -42,7 +42,7 @@ import { publishRequest, type RequestGap } from "../../financial-engine/src/requ
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { comparedAdditions, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId } from "./chat-ids.ts";
-import { allResolved, marginTrendSubjects, overviewPeers, overviewSubjects, planCompanyOverview, planMarginTrend, type OverviewPlan, type PeersOf } from "./company-overview.ts";
+import { allResolved, marginTrendSubjects, overviewOmissions, overviewPeers, overviewSubjects, planCompanyOverview, planMarginTrend, type PeersOf } from "./company-overview.ts";
 import { noteBlock } from "./fact-blocks.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { companyKey, extractSubjectMentions } from "./subject-extraction.ts";
@@ -238,7 +238,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       // an overview added included, and the planner's result.
       let asked = requested.subjects;
       let planned: PlanningResult | undefined;
-      let overview: OverviewPlan | null = null;
+      let overview = false;
       const declinedGap = (reason: ChatGap) => {
         // ponytail: a retry that resumes a reserved run does not plan, so its
         // gap names the companies the message resolved, without a pick or peers.
@@ -304,8 +304,8 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
             reading,
             evidence: deps.evidence(db),
             peersOf: (issuer) => overviewPeers(db, issuer),
-            onOverview: (plan) => {
-              overview = plan;
+            onOverview: () => {
+              overview = true;
             },
           });
           return planned;
@@ -314,6 +314,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
         persistParent: persistAssistantMessage(context.threadId, messageId, {
           scope,
           reading,
+          evidence: deps.evidence,
           overview: () => overview,
           carried: requested.carried,
           notFound: requested.notFound,
@@ -509,7 +510,7 @@ async function planTurn(
     reading: ScopeProposal | null;
     evidence: FinancialEvidencePort;
     peersOf: PeersOf;
-    onOverview: (plan: OverviewPlan) => void;
+    onOverview: () => void;
   }>,
 ): Promise<PlanningResult> {
   const planningContext = (subjects: ReadonlyArray<RequestedSubject>): PlanningContext => ({
@@ -542,13 +543,13 @@ async function planTurn(
     const overview = companies && await planCompanyOverview(planningContext(companies), turn.evidence);
     if (companies && overview) {
       onSubjects(companies);
-      turn.onOverview(overview);
+      turn.onOverview();
       return overview;
     }
     const trended = marginTrendSubjects(subjects, turn.reading, turn.scope);
     const trend = trended && await planMarginTrend(planningContext(trended), turn.evidence);
     if (trend) {
-      turn.onOverview(trend);
+      turn.onOverview();
       return trend;
     }
   }
@@ -703,8 +704,9 @@ function persistAssistantMessage(
   turn: Readonly<{
     scope: ResearchScope | null;
     reading: ScopeProposal | null;
-    // The overview the turn planned, of the latest quarters; null for another plan.
-    overview: () => OverviewPlan | null;
+    evidence: ChatFinancialRuntimeDeps["evidence"];
+    // Whether the plan is the overview or margin trend, of the latest quarters.
+    overview: () => boolean;
     carried: ReadonlyArray<string>;
     notFound: ReadonlyArray<string>;
     labels: ReadonlyMap<string, string>;
@@ -718,9 +720,10 @@ function persistAssistantMessage(
     // saved plan says so, as a retry that resumes the run does not plan again.
     const answeredPeers = plan?.subjects.members.some((member) => !turn.labels.has(member.subject_ref.id.toLowerCase())) ?? false;
     // The commentary is written from the answer's figures alone, so it gives no cause: an explanation stays uncovered.
-    const missing = [
-      ...(reading === null || plan === null ? [] : uncoveredAsks(answeredPeers ? withoutPeers(reading) : reading, plan, turn.labels)),
-      ...turn.overview()?.uncovered ?? [],
+    const names = (slot: string) => publication.block.financial.labels[`subject:${slot}`]?.text ?? slot;
+    const missing = reading === null || plan === null ? [] : [
+      ...uncoveredAsks(answeredPeers ? withoutPeers(reading) : reading, plan, turn.labels),
+      ...await overviewOmissions(plan, request.authority, turn.evidence(tx.client), names),
     ];
     const note = [
       ...(turn.notFound.length === 0 ? [] : [`No company matched ${labelList(turn.notFound)}.`]),
@@ -740,7 +743,7 @@ function persistAssistantMessage(
       companies: answeredCompanies(plan.subjects.members.map((member) => member.subject_ref.id), scope, turn.labels),
       metrics: planMetrics(plan),
       // The overview shows each company's latest quarters, so it keeps no period.
-      ...(turn.overview() !== null ? { fiscal_year: null, fiscal_quarter: null } : {}),
+      ...(turn.overview() ? { fiscal_year: null, fiscal_quarter: null } : {}),
       ...(reading === null ? { coverage_unchecked: true as const } : {}),
     };
     // It replaces a gap another attempt of the turn saved under its id.
