@@ -658,10 +658,14 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const amd = { issuer_id: AMD.issuer_id, label: "AMDX" };
 
     completedTurn(await runTurn(base, peersThread.thread_id, "How does AMDX's Q2 2025 revenue compare with its peers?"));
-    // The plan ranks the two revenues, and AMD's and NVDA's fiscal Q2 2025 cover
-    // different months, so the engine declines the ranking.
+    // The answer shows both revenues it ranks. AMD's and NVDA's fiscal Q2 2025
+    // cover different months, so the engine declines the ranking itself.
     const answer = engineAnswer(await latestAssistantMessage(base, peersThread.thread_id));
-    assert.deepEqual(answer.results.map(([measure, period, disposition]) => [measure, period, disposition]), [["Revenue ranking", "Q2 FY2025", "incompatible"]]);
+    assert.deepEqual(answer.results, [
+      ["Revenue", "Q2 FY2025", "verified", "USD 7,685,000,000.00"],
+      ["Revenue", "Q2 FY2025", "verified", "USD 30,040,000,000.00"],
+      ["Revenue ranking", "Q2 FY2025", "incompatible", "The cohort members cover different periods."],
+    ], "AMD's revenue, then NVDA's, then the ranking");
     assert.deepEqual(answer.notes, ["Peers chosen from the catalog: NVIDIA Corporation. Name peers to change them."]);
     assert.deepEqual(await scope(), { companies: [amd, { issuer_id: NVDA.issuer_id }], peers: true });
     completedTurn(await runTurn(base, peersThread.thread_id, "Explain it"));
