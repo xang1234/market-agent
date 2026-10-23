@@ -10,7 +10,8 @@ export const MEASURE_DEFAULTS_VERSION = "measure-defaults.v1";
 export type MeasureMargin = "gross_margin" | "operating_margin" | "net_margin";
 
 export type MeasureFamily = Readonly<{
-  label: string;
+  /** What a request calls the broad measure; the answer's note uses the first. */
+  names: readonly [string, ...string[]];
   periods: ReadonlyArray<PeriodSelector>;
 } & (
   /** A family that is its one figure: the answer's note says that figure is shown. */
@@ -28,7 +29,7 @@ const LATEST_QUARTER: PeriodSelector = { kind: "latest", period_type: "quarterly
 
 export const MEASURE_DEFAULTS = {
   profit: {
-    label: "profit",
+    names: ["profit", "earnings"],
     note: "read_as",
     metrics: ["gross_profit", "operating_income", "net_income"],
     margins: [
@@ -39,14 +40,14 @@ export const MEASURE_DEFAULTS = {
     periods: [LATEST_FISCAL_YEAR, LATEST_QUARTER],
   },
   revenue: {
-    label: "revenue",
+    names: ["revenue", "sales"],
     note: "shown",
     metrics: ["revenue"],
     margins: [],
     periods: [LATEST_FISCAL_YEAR, LATEST_QUARTER],
   },
   eps: {
-    label: "earnings per share",
+    names: ["earnings per share"],
     note: "read_as",
     metrics: ["eps_diluted"],
     margins: [],
@@ -126,7 +127,7 @@ export function measureDefaultsNote(records: ReadonlyArray<MeasureDefaultRecord>
   }
   const sentences = [...periods].map(([key, read]) => {
     const family: MeasureFamily = MEASURE_DEFAULTS[key];
-    const label = `${family.label[0]!.toUpperCase()}${family.label.slice(1)}`;
+    const label = `${family.names[0][0]!.toUpperCase()}${family.names[0].slice(1)}`;
     const reading = family.note === "shown"
       ? `${label} is shown`
       : `${label} is read as ${andList(family.metrics.map((metric) => inSentence(METRIC_CATALOG_V1.get(metric)!.label)))}${family.margins.length > 0 ? ", with their margins," : ""}`;

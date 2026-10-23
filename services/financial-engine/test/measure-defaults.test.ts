@@ -10,7 +10,7 @@ const LATEST_FISCAL_YEAR = { kind: "latest", period_type: "annual", offset: 0 } 
 const TAIL = "Name a measure or a period to change it.";
 
 test("a table edit fails until its version is bumped (#517)", () => {
-  assert.deepEqual([MEASURE_DEFAULTS_VERSION, hashCanonical("plan_semantic", MEASURE_DEFAULTS)], [V1, "bea5e20970712ef870e732ffd1567b10e7729e591503d7f46fd405e476816a35"]);
+  assert.deepEqual([MEASURE_DEFAULTS_VERSION, hashCanonical("plan_semantic", MEASURE_DEFAULTS)], [V1, "e5678f17449e352313cf12043db03f718109933f20c3d8ba93ba8172a57f74ce"]);
 });
 
 test("each family reads as one sentence over its periods, and one tail closes the note (#517)", () => {

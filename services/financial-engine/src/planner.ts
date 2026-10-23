@@ -517,6 +517,7 @@ function systemPrompt(): string {
   const operations = Object.keys(OPERATION_REGISTRY).join(", ");
   const families = Object.entries(MEASURE_DEFAULTS).map(([key, family]) =>
     `${key}: ${[...family.metrics, ...family.margins.map(({ margin }) => margin)].join(", ")} for the ${family.periods.map(periodPhrase).join(" and the ")}`).join("; ");
+  const broadMeasures = Object.entries(MEASURE_DEFAULTS).map(([key, family]) => `${key}: ${family.names.map((name) => JSON.stringify(name)).join(" or ")}`).join("; ");
   return [
     "You translate a financial research request into a JSON plan draft. Reply with one JSON object only.",
     `Approved metric keys: ${metrics}. Approved operations: ${operations}.`,
@@ -525,7 +526,7 @@ function systemPrompt(): string {
     'A valuation\'s price is a reported_metric of share_price with period {kind:"at_cutoff"}, planned only as the price of market_cap or pe_ratio. market_cap\'s shares are shares_outstanding with period {kind:"latest",period_type:"quarterly",offset:0}. pe_ratio\'s earnings are eps_diluted with period {kind:"latest",period_type:"annual",offset:0}: P/E uses the latest fiscal year\'s diluted EPS.',
     "Plan every requested company. Threshold values are decimal strings. Never invent metric definitions, identifiers, owners, budgets, modes, or verification fields.",
     `Measure families (key: what the server plans for each requested company): ${families}.`,
-    `When the request names a broad measure a family covers and does not pick its members, cite the family in "defaults" as {"family":"<key>"}; do not plan it and do not ask. Give "period", a fiscal_period or latest period selector, only when the request names one: "latest quarter sales" is ${JSON.stringify(LATEST_QUARTER_SALES)}. Never write a cited family's nodes or outputs; still list every requested company in "subjects".`,
+    `Cite a family in "defaults" as {"family":"<key>"} only when the request names its broad measure itself (${broadMeasures}) and picks none of the figures it lists; do not plan it and do not ask. A request that names figures a family lists (margins, a gross, operating or net margin, gross profit, net income, diluted EPS) plans those figures as operations and cites no family for them: "revenue and margins" cites revenue and plans gross_margin, operating_margin and net_margin. Give "period", a fiscal_period or latest period selector, only when the request names one: "latest quarter sales" is ${JSON.stringify(LATEST_QUARTER_SALES)}. Never write a cited family's nodes or outputs; still list every requested company in "subjects".`,
     "A market index or benchmark (the S&P 500) and a share price return (year to date) are answered outside the plan: ignore them and plan the companies' figures.",
     'Reply {"outcome":"needs_clarification","question","choices"} only when the request needs companies that are not among the requested companies, or a measure that is neither an approved metric key nor a measure family. If it cannot be expressed reply {"outcome":"unsupported","reason"}.',
     `An unsupported reason is one of these keys (key: what the request asks for): ${UNSUPPORTED_REASONS.map((reason) => `${reason}: ${UNSUPPORTED_MEANINGS[reason]}`).join("; ")}.`,
