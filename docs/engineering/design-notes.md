@@ -136,7 +136,7 @@ threads hold them.
   answer is saved once every verdict is in. Each shown state and the save may differ from the seal only in text
   segments, which neither the seal nor a block proof reads (`messages.ts`). No judge configured, a failed or late
   call, or no verdict: that inference is not shown. The judge replaced the word-list narrative guard (#302).
-- The chart's returns reach the model in its evidence packet (`perfFigures`, `perf-block.ts`; `evidence-packet.ts`),
+- The chart's returns reach the model in its evidence packet (`perfFigures`, `evidence-packet.ts`),
   each with an id and the company it belongs to. With no chart the packet holds claims only, so a number reaches an
   analyst answer only inside a claim it quotes, with the claim's document. The model cites a figure only by its id
   (`[[F2]]`); the answer renders the packet's value in a template, so no figure is the model's words, and an analyst
