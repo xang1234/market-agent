@@ -58,7 +58,7 @@ Chat answers from stored facts, not from the web or the model's memory. A chat t
 7. Chat saves the message after the seal, the judge and the repair round are done.
 8. The web app renders blocks, never raw Markdown. A block that makes a claim about its values is labelled verified, source-linked, or not verified. Figures are linked to their fact or price series where one can be sealed. Clicking a linked figure opens the evidence inspector on its sealed provenance.
 
-When a surface runs on the financial engine, its calculations (margins, growth, ratios, thresholds) come from `services/financial-engine`. The engine binds a typed plan to stored facts and computes with exact fractions in `services/financial-core`. Anything it cannot verify appears as a named gap. In chat, only questions that name a metric reach the engine today ([#398](https://github.com/xang1234/market-agent/issues/398)). See [Configuration](configuration.md#verified-financial-answers).
+When a surface runs on the financial engine, its calculations (margins, growth, ratios, thresholds) come from `services/financial-engine`. The engine binds a typed plan to stored facts and computes with exact fractions in `services/financial-core`. Anything it cannot verify appears as a named gap. In chat it computes every figure an answer shows, and step 3 says which turns it plans. See [Configuration](configuration.md#verified-financial-answers).
 
 ## Services
 
