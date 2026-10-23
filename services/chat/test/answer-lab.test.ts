@@ -517,6 +517,32 @@ test("live --judge --update runs no turn after one of its thread it left unrecor
   assert.deepEqual(traces.map(({ file }) => readFileSync(file, "utf8")), before);
 });
 
+test("recorded --update --repair leaves a trace as it was when the repair was cut off, or the repair's judge gave no verdict a repaired inference could be read by", async () => {
+  const { trace } = TRACES.find(({ label }) => label === "segment-drill-down")!;
+  const env = { LLM_CHANNELS: "openai", LLM_OPENAI_PROTOCOL: "openai", LLM_OPENAI_MODELS: "gpt-4.1", LITELLM_MODEL: "openai/gpt-4.1", JUDGE_LITELLM_MODEL: "openai/gpt-4.1" };
+  // A worded amount on inference 3 sends it to repair, and shows it as unverified meanwhile.
+  const worded = '{"verdicts":[{"id":3,"verdict":"entailed","worded_amount":true},{"id":4,"verdict":"entailed","worded_amount":false}]}';
+  // One batched record, which replays as each inference's.
+  const recordedJudge = { outcome: "replied", exchange: { messages: [], text: worded, truncated: false, deployment: "openai/gpt-4.1", latency_ms: 1 } };
+  const repaired = '```assertions\n[{"index":3,"kind":"analyst_inference","text":"Data Center carries its revenue, with every other segment far smaller."}]\n```';
+  const runs = {
+    "repair cut off": { truncated: true, judge: '{"verdicts":[{"id":3,"verdict":"entailed","worded_amount":false}]}' },
+    "repair's judge unreadable": { truncated: false, judge: "{}" },
+    "repair's judge silent on it": { truncated: false, judge: '{"verdicts":[]}' },
+    "healthy": { truncated: false, judge: '{"verdicts":[{"id":3,"verdict":"entailed","worded_amount":false}]}' },
+  };
+  const written = [];
+  for (const [name, run] of Object.entries(runs)) {
+    const traces = readTraces([traceFiles({ "segment-drill-down.json": { ...trace, judge: recordedJudge } })]);
+    const before = readFileSync(traces[0]!.file, "utf8");
+    const createClient = () => async (_deployment: unknown, request: { messages: ReadonlyArray<{ content: string }> }) =>
+      request.messages.map((message) => message.content).join("\n").includes(REPAIR_INSTRUCTIONS) ? { text: repaired, truncated: run.truncated } : { text: run.judge };
+    await recorded(traces, true, "repair", { env, createClient: createClient as never });
+    if (readFileSync(traces[0]!.file, "utf8") !== before) written.push(name);
+  }
+  assert.deepEqual(written, ["healthy"]);
+});
+
 test("recorded --update --judge and --repair write a live round over the trace only when it was not degraded", async () => {
   const { trace } = TRACES.find(({ label }) => label === "segment-drill-down")!;
   const env = {

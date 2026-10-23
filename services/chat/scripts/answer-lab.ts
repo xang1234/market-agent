@@ -425,15 +425,37 @@ export async function live(
 }
 
 // Why a live judge and repair round may not be recorded: the repair came from
-// a fallback model, or the judge or repair round never replied or gave an
-// inference no verdict. primary: the deployment repair calls go to first.
+// a fallback model or was cut off, or the judge or repair round never replied
+// or gave an inference no verdict. A repaired inference the repair's judge
+// gave none ends as its first verdict (answer-trace.ts repairedAnswer), so its
+// record is read too. primary: the deployment repair calls go to first.
 export function degradedRound({ assertions, judge, repair }: Pick<TracedAnswer, "assertions" | "judge" | "repair">, primary: string | undefined): string | undefined {
   const unreplied = [...(judge ?? []), ...(repair ? [repair.record, ...repair.judge] : [])]
     .flatMap((record) => (record.outcome === "replied" ? [] : [record.reason]));
   const repairedOn = repair?.record.outcome === "replied" ? repair.record.exchange.deployment : primary;
   const unjudged = assertions?.judged?.find((verdict) => verdict.verdict === "error");
+  const unread = (repair?.judge ?? []).flatMap((record) => (record.outcome === "replied" ? verdictsOf(askedAbout(record.exchange), record) : []))
+    .find((verdict) => verdict.verdict === "error");
   return repairedOn !== primary ? `the repair came from ${repairedOn}, not the primary ${primary}`
-    : unreplied[0] ?? (unjudged && `inference ${unjudged.index} has no verdict: ${unjudged.reason}`);
+    : repair?.record.outcome === "replied" && repair.record.exchange.truncated ? "the repair was cut off at the token limit"
+    : unreplied[0] ?? (unjudged && `inference ${unjudged.index} has no verdict: ${unjudged.reason}`)
+      ?? (unread && `repaired inference ${unread.index} has no verdict: ${unread.reason}`);
+}
+
+// The cases a judge call was sent, read back from its request (judgeMessages).
+function askedAbout(exchange: ModelExchange): JudgeCase[] {
+  const request = JSON.parse(exchange.messages.at(-1)?.content ?? "{}") as {
+    inferences?: Array<{ id: number; subject: string | null; text: string; checked_results: string[]; supports: string[]; rest_of_answer: string[]; figures_shown: string[] }>;
+  };
+  return (request.inferences ?? []).map((inference) => ({
+    index: inference.id,
+    ...(inference.subject === null ? {} : { subject: inference.subject }),
+    text: inference.text,
+    checked: inference.checked_results,
+    supports: inference.supports,
+    context: inference.rest_of_answer,
+    figures: inference.figures_shown,
+  }));
 }
 
 // A re-recorded trace is what recorded --check replays as right, so a live run
