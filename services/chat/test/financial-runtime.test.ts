@@ -729,5 +729,5 @@ test("every figure the engine names maps to the chat metric a follow-up reads, o
 
 test("the catalog peers note ends one sentence after a legal name that ends in a period (#517 live run)", () => {
   assert.equal(catalogPeersNote(["Advanced Micro Devices, Inc."]), "Peers chosen from the catalog: Advanced Micro Devices, Inc. Name peers to change them.");
-  assert.equal(catalogPeersNote(["NVIDIA Corporation", "Intel Corp"]), "Peers chosen from the catalog: NVIDIA Corporation, Intel Corp. Name peers to change them.");
+  assert.equal(catalogPeersNote(["NVIDIA Corporation", "Intel Corp"]), "Peers chosen from the catalog: NVIDIA Corporation and Intel Corp. Name peers to change them.");
 });

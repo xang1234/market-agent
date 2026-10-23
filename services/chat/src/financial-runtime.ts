@@ -17,20 +17,17 @@ import {
   createRuntimeAuthority,
   dependencyClosure,
   hashCanonical,
-  METRIC_CATALOG_V1,
   operationDependencies,
   PLANNABLE_METRICS,
   RATIO_CATALOG_V1,
   type FinancialPlanV1,
   type FinancialRuntimeAuthority,
   type FinancialSubjectRef,
-  type MeasureDefaultRecord,
   type OperationNode,
 } from "../../financial-core/src/index.ts";
 import { cashResilienceDraft, LATEST_FISCAL_YEAR, type CashResiliencePeriod } from "../../financial-engine/src/cash-resilience.ts";
 import { ParentRefusedError, type PersistParentArtifact } from "../../financial-engine/src/finalize.ts";
-import { MEASURE_DEFAULTS, type MeasureFamilyKey } from "../../financial-engine/src/measure-defaults.ts";
-import { periodPhrase } from "../../financial-engine/src/plan-interpretation.ts";
+import { measureDefaultsNote } from "../../financial-engine/src/measure-defaults.ts";
 import {
   buildDeterministicPlan,
   planFinancialRequest,
@@ -702,12 +699,13 @@ function persistAssistantMessage(
     const answeredPeers = peers.length > 0;
     const subjectNames = new Map(Object.values(publication.block.financial.labels).flatMap((entry) => entry.kind === "subject" ? [[entry.slot_id, entry.text] as const] : []));
     const peerNames = peers.flatMap((member) => subjectNames.get(member.slot_id) ?? []);
+    const defaults = measureDefaultsNote(plan?.measure_defaults ?? []);
     const missing = reading === null || plan === null ? [] : uncoveredAsks(answeredPeers ? withoutPeers(reading) : reading, plan, turn.labels);
     const note = [
       ...(turn.notFound.length === 0 ? [] : [`No company matched ${labelList(turn.notFound)}.`]),
       ...(turn.carried.length === 0 ? [] : [`${labelList(turn.carried)} ${turn.carried.length > 1 ? "are" : "is"} carried from the previous answer.`]),
       ...(peerNames.length === 0 ? [] : [catalogPeersNote(peerNames)]),
-      ...(plan?.measure_defaults ?? []).flatMap(measureDefaultNote),
+      ...(defaults === null ? [] : [defaults]),
       ...(reading === null ? [UNCHECKED] : missing.length === 0 ? [] : [`Not covered by this answer: ${missing.join("; ")}.`]),
     ].join(" ");
     const blocks = [
@@ -750,23 +748,7 @@ function persistAssistantMessage(
 
 /** The peers the turn did not name, as the answer names them; a legal name may end the sentence ("Inc."). */
 export function catalogPeersNote(names: ReadonlyArray<string>): string {
-  return `Peers chosen from the catalog: ${names.join(", ").replace(/\.$/u, "")}. Name peers to change them.`;
-}
-
-function measureDefaultNote(record: MeasureDefaultRecord): string[] {
-  if (!Object.hasOwn(MEASURE_DEFAULTS, record.family)) return [];
-  const family = MEASURE_DEFAULTS[record.family as MeasureFamilyKey];
-  const figures = labelList(family.metrics.map((key) => inSentence(METRIC_CATALOG_V1.get(key)!.label)));
-  const period = record.period === "default"
-    // ponytail: every family's periods are these two (measure-defaults.ts); word them from the table if one differs.
-    ? "the latest fiscal year and the latest quarter"
-    : `${record.requested_period.kind === "latest" ? "the " : ""}${periodPhrase(record.requested_period)}`;
-  const label = `${family.label[0]!.toUpperCase()}${family.label.slice(1)}`;
-  const isItsOneFigure = figures === family.label && family.margins.length === 0;
-  const reading = isItsOneFigure
-    ? `${label} is shown`
-    : `${label} is read as ${figures}${family.margins.length > 0 ? ", with their margins" : ""},`;
-  return [`${reading} for ${period}. Name a measure or a period to change it.`];
+  return `Peers chosen from the catalog: ${labelList(names).replace(/\.$/u, "")}. Name peers to change them.`;
 }
 
 const withoutPeers = (reading: ScopeProposal): ScopeProposal => ({ ...reading, asks: new Set([...reading.asks].filter((facet) => facet !== "peers")) });
