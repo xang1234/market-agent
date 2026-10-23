@@ -97,6 +97,22 @@ function nvdaAmdOnTheirOwnCalendars(): FinancialAnswerContent {
   });
 }
 
+/** The same comparison with NVDA's gross-margin lead over AMD, each company in its own quarter. */
+function leadAcrossCalendars(): FinancialAnswerContent {
+  const plan = mutable(overviewComparisonPlan([{ slot: "a", newest: [2026, "Q4"] }, { slot: "b", newest: [2026, "Q2"] }])) as FinancialPlanV1;
+  plan.operations.push({ node_id: "gm_lead", operation: "spread", operation_version: "spread.v1", left: "a_gm", right: "b_gm" });
+  plan.outputs = [{ output_id: "out_a_gm", node_id: "a_gm", unit_id: "section" }, { output_id: "out_b_gm", node_id: "b_gm", unit_id: "section" }, { output_id: "out_gm_lead", node_id: "gm_lead", unit_id: "section" }];
+  return presentFinancialUnit({
+    plan, run_id: RUN_ID, unit_id: "section",
+    subject_names: { a: "NVIDIA Corp", b: "Advanced Micro Devices, Inc." },
+    results: [
+      committed(1, "out_a_gm", "a_gm", ratio("0.75")),
+      committed(2, "out_b_gm", "b_gm", ratio("0.4")),
+      committed(3, "out_gm_lead", "gm_lead", { kind: "value", value: "-35", unit: { kind: "percentage_points" }, exact: true, rounding: null }),
+    ],
+  });
+}
+
 function validator() {
   const ajv = new Ajv2020({ allErrors: true, strict: false, validateFormats: false });
   ajv.addSchema(SCHEMA);
@@ -109,6 +125,7 @@ test("every presentation shape the generator produces satisfies the canonical bl
   valid(block(comparison()), "table, gap, predicate, incomplete ranking");
   valid(block(series()), "series and scalar");
   valid(block(nvdaAmdOnTheirOwnCalendars()), "a table across fiscal calendars, columns without a period");
+  valid(block(leadAcrossCalendars()), "a lead in percentage points between two companies' own quarters");
   valid(JSON.parse(readFileSync(WEB_V1_FIXTURE, "utf8")), "a stored v1 answer");
 });
 

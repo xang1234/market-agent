@@ -28,6 +28,7 @@ import {
   type ReasonCode,
   type ReportedMetricNode,
   type ReportingBasis,
+  type SpreadNode,
   type SubjectSlot,
   type TrailingSumNode,
   type UUID,
@@ -38,7 +39,7 @@ import { MARGIN_NUMERATORS, resolveMetricDefinition, resolveRatioDefinition, typ
 import { derivationIssue } from "./derivation.ts";
 import { measurementIncompatibility, unitIncompatibility, type Measurement, type MeasurementReason } from "./dimensions.ts";
 import { canonicalDecimalString, parseDerivedDecimalText, parseFinancialDecimal } from "./exact-decimal.ts";
-import { classifyDuration, comparePeriodEnds, dayNumber, periodsContiguous, periodsIdentical, periodsOverlap, type PeriodIdentity } from "./periods.ts";
+import { classifyDuration, comparePeriodEnds, dayNumber, periodDays, periodsContiguous, periodsIdentical, periodsOverlap, type PeriodIdentity } from "./periods.ts";
 import { localDateOf } from "./public-time.ts";
 import {
   addRationals,
@@ -416,6 +417,44 @@ export function peRatio(node: PeRatioNode, price: FinancialOperand, earnings: Fi
   return success(valuation(node, price, value, { kind: "ratio" }));
 }
 
+/**
+ * One subject's value minus another's on one measure and measurement, each in
+ * its own fiscal period (#398): a lead across fiscal calendars. A margin or
+ * percentage lead is in percentage points. The result is the left subject's.
+ */
+export function spread(node: SpreadNode, left: FinancialOperand, right: FinancialOperand): OperandOutcome {
+  if (left.subject_slot === right.subject_slot) return operationGap("incompatible_scope", "A spread is between two different subjects.");
+  const incompatible = measureMismatch(left, right) ?? measurementMismatch(left, right);
+  if (incompatible) return incompatible;
+  const shape = classifyDuration(left.period);
+  if ((shape !== "quarter" && shape !== "annual") || shape !== classifyDuration(right.period)) {
+    return operationGap("incompatible_period", "A spread compares a quarter with a quarter or a year with a year.");
+  }
+  // Each side keeps its own fiscal calendar, so two periods are set side by
+  // side only while they mostly cover the same months: ends at most half the
+  // shorter period apart, sharing about half their days or more. Any two
+  // calendars have periods that close, so a wider gap means one side is a
+  // period ahead of the other.
+  const apart = Math.abs(dayNumber(left.period.end) - dayNumber(right.period.end));
+  if (2 * apart > Math.min(periodDays(left.period)!, periodDays(right.period)!)) {
+    return operationGap("incompatible_period", "The two periods end more than half a period apart, so they do not cover the same months.");
+  }
+  const unit = left.measurement.unit;
+  if (unit.kind === "ratio" && !readsAsPercentage(left)) return operationGap("unsupported_operation", "A spread of multiples is not supported.");
+  const difference = subtractRationals(left.value, right.value);
+  const points = difference !== null && unit.kind === "ratio" ? multiplyRationals(difference, HUNDRED) : difference;
+  if (points === null) return operationGap("numeric_limit_exceeded", "The spread exceeds supported numeric limits.");
+  const percentage = unit.kind === "ratio" || unit.kind === "percent";
+  return success(derived(node, left, points, percentage ? { ...left.measurement, unit: { kind: "percentage_points" } } : left.measurement));
+}
+
+const HUNDRED = rationalFromDecimal({ coefficient: 100n, scale: 0 })!;
+
+// A margin or percent change is a ratio read as a percentage; an approved ratio or P/E reads as a multiple.
+function readsAsPercentage(operand: FinancialOperand): boolean {
+  return Object.hasOwn(MARGIN_NUMERATORS, operand.measure.metric_key) || operand.measure.derivations.some((step) => step.operation === "percent_change_positive_base");
+}
+
 function isReported(operand: FinancialOperand, metricKey: string, valueKind: MetricValueKind): boolean {
   return operand.value_kind === valueKind && operand.measure.metric_key === metricKey;
 }
@@ -520,7 +559,7 @@ function quotient(nodeId: LocalId, measure: MeasureIdentity, numerator: Financia
 
 /** Result of applying `node` to `source`'s measure: the approved operation is appended to its lineage. */
 function derived(
-  node: ChangeNode | TrailingSumNode,
+  node: ChangeNode | TrailingSumNode | SpreadNode,
   source: FinancialOperand,
   value: ExactRational,
   measurement: Measurement,

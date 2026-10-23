@@ -44,6 +44,7 @@ export const OPERATION_KINDS = [
   "peer_compare",
   "market_cap",
   "pe_ratio",
+  "spread",
 ] as const;
 export type OperationKind = (typeof OPERATION_KINDS)[number];
 
@@ -234,6 +235,8 @@ export type PeerCompareNode = NodeBase & {
 export type MarketCapNode = NodeBase & { operation: "market_cap"; price: LocalId; shares: LocalId };
 /** A share price over the latest fiscal year's diluted EPS, both restated to its listing's reference date (#444). */
 export type PeRatioNode = NodeBase & { operation: "pe_ratio"; price: LocalId; earnings: LocalId };
+/** One subject's value minus another's on one measure, each in its own period of the same length. */
+export type SpreadNode = NodeBase & { operation: "spread"; left: LocalId; right: LocalId };
 
 export type OperationNode =
   | ReportedMetricNode
@@ -245,7 +248,8 @@ export type OperationNode =
   | ThresholdNode
   | PeerCompareNode
   | MarketCapNode
-  | PeRatioNode;
+  | PeRatioNode
+  | SpreadNode;
 
 export type RequestedOutput = { output_id: LocalId; node_id: LocalId; unit_id: LocalId };
 export type PublicationUnit = { unit_id: LocalId; kind: PublicationUnitKind };
@@ -552,5 +556,7 @@ export function operationDependencies(node: OperationNode): LocalId[] {
       return [node.price, node.shares];
     case "pe_ratio":
       return [node.price, node.earnings];
+    case "spread":
+      return [node.left, node.right];
   }
 }

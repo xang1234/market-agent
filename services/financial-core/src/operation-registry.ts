@@ -12,6 +12,7 @@ import {
   peRatio,
   percentChangePositiveBase,
   ratio,
+  spread,
   trailingSum,
   type FinancialOperand,
   type OperandOutcome,
@@ -124,6 +125,12 @@ export const OPERATION_REGISTRY: { readonly [K in OperationKind]: OperationSpec<
       const earnings = context.plan.operations.find((entry) => entry.node_id === node.earnings);
       return peRatio(node, required(node, operands, 0), required(node, operands, 1), earnings?.operation === "reported_metric" ? earnings.period : null);
     },
+  },
+  spread: {
+    ...VALUE_OPERATION,
+    operation_version: "spread.v1",
+    interpretation: "Left minus right for two subjects on one measure, each in its own period of the same length, ending within half a period of each other; a margin or percentage lead is in percentage points.",
+    evaluate: (node, operands) => spread(node, required(node, operands, 0), required(node, operands, 1)),
   },
 });
 
