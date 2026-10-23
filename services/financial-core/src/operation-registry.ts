@@ -18,7 +18,7 @@ import {
   type OperandOutcome,
   type OperationOutcome,
 } from "./operations.ts";
-import { peerCompare, thresholdPredicate } from "./predicates.ts";
+import { peerCompare, periodRank, thresholdPredicate } from "./predicates.ts";
 
 /** Supplies reported inputs; the engine binds evidence, the core never does. */
 export type ReportedMetricEvaluator = (node: ReportedMetricNode) => OperandOutcome;
@@ -31,7 +31,7 @@ export type OperationSpec<K extends OperationKind> = Readonly<{
   operation_version: VersionTag;
   interpretation: string;
   produces: "value" | "predicate";
-  /** Only peer_compare: evaluates the available members and reports an incomplete cohort. */
+  /** Only the rankings: they evaluate the available members and report how many they ranked. */
   tolerates_missing_operands: boolean;
   evaluate: (node: NodeOf<K>, operands: Operands, context: EvaluationContext) => OperationOutcome;
 }>;
@@ -131,6 +131,13 @@ export const OPERATION_REGISTRY: { readonly [K in OperationKind]: OperationSpec<
     operation_version: "spread.v1",
     interpretation: "Left minus right for two subjects on one measure, each in its own period of the same length, ending within half a period of each other; a margin or percentage lead is in percentage points.",
     evaluate: (node, operands) => spread(node, required(node, operands, 0), required(node, operands, 1)),
+  },
+  period_rank: {
+    operation_version: "period_rank.v1",
+    interpretation: "Ranking of one subject's measure across its own distinct, non-overlapping periods of one length; ties explicit, and a period without a value left out and counted.",
+    produces: "predicate",
+    tolerates_missing_operands: true,
+    evaluate: (node, operands) => periodRank(node, operands),
   },
 });
 

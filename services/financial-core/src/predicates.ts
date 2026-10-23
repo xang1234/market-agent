@@ -1,8 +1,9 @@
-// Exact predicates: thresholds against attributed values and explicit-peer
-// rankings. Operand values are exact rationals, so every comparison is an
-// exact cross-product; display-rounded values never decide an outcome.
+// Exact predicates: thresholds against attributed values, explicit-peer
+// rankings, and one subject's periods ranked. Operand values are exact
+// rationals, so every comparison is an exact cross-product; display-rounded
+// values never decide an outcome.
 
-import type { Comparison, PeerCompareNode, PlanThreshold, ThresholdNode } from "./contracts.ts";
+import type { Comparison, PeerCompareNode, PeriodRankNode, PlanThreshold, ThresholdNode } from "./contracts.ts";
 import { convertDimensionless, isDimensionless, unitIncompatibility } from "./dimensions.ts";
 import { parseDerivedDecimalText } from "./exact-decimal.ts";
 import {
@@ -13,6 +14,7 @@ import {
   type OperationGap,
   type PredicateOutcome,
 } from "./operations.ts";
+import { classifyDuration, periodsOverlap } from "./periods.ts";
 import { compareRationals, rationalFromDecimal } from "./rational.ts";
 
 export function evaluateComparison(comparison: -1 | 0 | 1, operator: Comparison): boolean {
@@ -56,15 +58,32 @@ export function thresholdPredicate(node: ThresholdNode, subject: FinancialOperan
  * (`extreme`) are withheld unless every requested member was evaluated.
  */
 export function peerCompare(node: PeerCompareNode, members: ReadonlyArray<FinancialOperand | null>): PredicateOutcome {
-  if (members.length !== node.members.length) throw new RangeError("peer_compare members must align with node.members");
+  return rank(node, members, { mismatch: cohortMismatch, none: "No cohort member has an eligible value.", leaders: "of_complete" });
+}
+
+/**
+ * Ranks one subject's measure across its own periods: a window's high or low.
+ * A period without a value is left out and counted, and the leaders of the
+ * periods ranked are named, so a reader sees how many were ranked.
+ */
+export function periodRank(node: PeriodRankNode, members: ReadonlyArray<FinancialOperand | null>): PredicateOutcome {
+  return rank(node, members, { mismatch: windowMismatch, none: "No period has an eligible value.", leaders: "of_ranked" });
+}
+
+function rank(
+  node: PeerCompareNode | PeriodRankNode,
+  members: ReadonlyArray<FinancialOperand | null>,
+  rules: { mismatch: (left: FinancialOperand, right: FinancialOperand) => OperationGap | null; none: string; leaders: "of_complete" | "of_ranked" },
+): PredicateOutcome {
+  if (members.length !== node.members.length) throw new RangeError(`${node.operation} members must align with node.members`);
   const present = node.members
     .map((nodeId, index) => ({ nodeId, operand: members[index] ?? null }))
     .filter((entry): entry is { nodeId: string; operand: FinancialOperand } => entry.operand !== null);
-  if (present.length === 0) return operationGap("missing_input", "No cohort member has an eligible value.");
+  if (present.length === 0) return operationGap("missing_input", rules.none);
 
   for (let left = 0; left < present.length; left += 1) {
     for (let right = left + 1; right < present.length; right += 1) {
-      const incompatible = cohortMismatch(present[left]!.operand, present[right]!.operand);
+      const incompatible = rules.mismatch(present[left]!.operand, present[right]!.operand);
       if (incompatible) return incompatible;
     }
   }
@@ -84,7 +103,7 @@ export function peerCompare(node: PeerCompareNode, members: ReadonlyArray<Financ
       population: { requested: node.members.length, evaluated: present.length },
       complete,
       ranks,
-      extreme: complete ? ranks.filter((entry) => entry.rank === 1).map((entry) => entry.node_id).sort() : null,
+      extreme: complete || rules.leaders === "of_ranked" ? ranks.filter((entry) => entry.rank === 1).map((entry) => entry.node_id).sort() : null,
     },
   };
 }
@@ -98,4 +117,14 @@ function cohortMismatch(left: FinancialOperand, right: FinancialOperand): Operat
     measurementMismatch(left, right) ??
     (samePeriod ? null : operationGap("incompatible_period", "The cohort members cover different periods."))
   );
+}
+
+/** A window's periods: one subject, one measure, one measurement, distinct periods of one length. */
+function windowMismatch(left: FinancialOperand, right: FinancialOperand): OperationGap | null {
+  if (left.subject_slot !== right.subject_slot) return operationGap("incompatible_scope", "A period ranking is of one subject.");
+  const incompatible = measureMismatch(left, right) ?? measurementMismatch(left, right);
+  if (incompatible) return incompatible;
+  const shape = classifyDuration(left.period);
+  if (shape === "other" || shape !== classifyDuration(right.period)) return operationGap("incompatible_period", "A period ranking compares periods of one length.");
+  return periodsOverlap(left.period, right.period) ? operationGap("overlapping_periods", "The ranked periods overlap.") : null;
 }

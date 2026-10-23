@@ -49,7 +49,7 @@ function dec(token: string): ExactDecimal {
 test("the catalog registers exactly the approved operations, each versioned", () => {
   assert.deepEqual(
     Object.keys(OPERATION_REGISTRY).sort(),
-    ["absolute_change", "free_cash_flow", "gross_margin", "market_cap", "net_margin", "operating_margin", "pe_ratio", "peer_compare", "percent_change_positive_base", "ratio", "reported_metric", "spread", "threshold", "trailing_sum"],
+    ["absolute_change", "free_cash_flow", "gross_margin", "market_cap", "net_margin", "operating_margin", "pe_ratio", "peer_compare", "percent_change_positive_base", "period_rank", "ratio", "reported_metric", "spread", "threshold", "trailing_sum"],
   );
   for (const [kind, spec] of Object.entries(OPERATION_REGISTRY)) assert.equal(spec.operation_version, `${kind}.v1`);
 });

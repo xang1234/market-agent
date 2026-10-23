@@ -45,6 +45,7 @@ export const OPERATION_KINDS = [
   "market_cap",
   "pe_ratio",
   "spread",
+  "period_rank",
 ] as const;
 export type OperationKind = (typeof OPERATION_KINDS)[number];
 
@@ -237,6 +238,12 @@ export type MarketCapNode = NodeBase & { operation: "market_cap"; price: LocalId
 export type PeRatioNode = NodeBase & { operation: "pe_ratio"; price: LocalId; earnings: LocalId };
 /** One subject's value minus another's on one measure, each in its own period of the same length. */
 export type SpreadNode = NodeBase & { operation: "spread"; left: LocalId; right: LocalId };
+/** One subject's measure ranked across its own distinct periods of one length. */
+export type PeriodRankNode = NodeBase & {
+  operation: "period_rank";
+  members: LocalId[];
+  direction: "highest" | "lowest";
+};
 
 export type OperationNode =
   | ReportedMetricNode
@@ -249,7 +256,8 @@ export type OperationNode =
   | PeerCompareNode
   | MarketCapNode
   | PeRatioNode
-  | SpreadNode;
+  | SpreadNode
+  | PeriodRankNode;
 
 export type RequestedOutput = { output_id: LocalId; node_id: LocalId; unit_id: LocalId };
 export type PublicationUnit = { unit_id: LocalId; kind: PublicationUnitKind };
@@ -364,7 +372,7 @@ export type RankingPayload = {
   population: { requested: number; evaluated: number };
   complete: boolean;
   ranks: Array<{ node_id: LocalId; rank: number }>;
-  /** Tied leaders; null whenever the cohort is incomplete. */
+  /** Tied leaders. peer_compare withholds them for an incomplete cohort; period_rank names those of the periods it ranked. */
   extreme: LocalId[] | null;
 };
 export type GapPayload = { kind: "gap"; reason_code: ReasonCode; explanation: string };
@@ -551,6 +559,7 @@ export function operationDependencies(node: OperationNode): LocalId[] {
     case "threshold":
       return [node.subject];
     case "peer_compare":
+    case "period_rank":
       return [...node.members];
     case "market_cap":
       return [node.price, node.shares];

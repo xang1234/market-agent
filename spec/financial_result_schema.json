@@ -111,7 +111,7 @@
           }
         },
         "extreme": {
-          "description": "Tied leaders of a complete cohort; null whenever the cohort is incomplete.",
+          "description": "Tied leaders. peer_compare withholds them (null) for an incomplete cohort; period_rank names those of the periods it ranked.",
           "oneOf": [
             { "type": "null" },
             {

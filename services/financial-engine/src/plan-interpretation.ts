@@ -20,6 +20,7 @@ const OPERATION_PHRASES: Record<Exclude<OperationNode["operation"], "reported_me
   market_cap: "market capitalization (share price × shares outstanding)",
   pe_ratio: "P/E ratio (share price / latest fiscal year diluted EPS)",
   spread: "difference between two companies, each in its own fiscal period",
+  period_rank: "ranking across one company's periods",
 };
 
 /** `labels` maps subject slot ids to display names resolved by the server. */
