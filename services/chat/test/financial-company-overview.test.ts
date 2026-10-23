@@ -157,7 +157,7 @@ test("a question about one company that asks for no figure is answered with its 
     const logged = () => warned.filter(([message]) => String(message).startsWith("[chat]"));
     for (const deadline = Date.now() + 10_000; logged().length === 0 && Date.now() < deadline;) await new Promise((resolve) => setTimeout(resolve, 10));
     assert.deepEqual(logged().map(([message, reason]) => [message, ((reason as Error).cause as Error).message]), [
-      ["[chat] the planner the company overview replaced had failed", "the model is down"],
+      ["[chat] the planner replaced by the company overview had failed", "the model is down"],
     ]);
   });
 
