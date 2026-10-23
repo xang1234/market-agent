@@ -106,7 +106,8 @@ function recordedMessages(): RecordedMessage[] {
 test('every ref a visitor can open from a recorded answer, and every ref its evidence links to, has its evidence recorded', async () => {
   // What the block's figures and its metadata page offer; each evidence page then links on.
   const pending: InspectableBlockRef[] = recordedMessages().flatMap((message) => message.blocks.flatMap((block) => extractInspectableRefs(block)))
-  assert.ok(pending.some(({ ref }) => ref.kind === 'fact'), 'the recorded answers cite facts')
+  // Every figure is the engine's or the year-to-date chart's: the analyst's answers cite its series and a filed claim (#398).
+  assert.deepEqual(['claim', 'series'].filter((kind) => !pending.some(({ ref }) => ref.kind === kind)), [], 'the recorded answers cite a claim and chart series')
   const opened = new Set<string>()
   const unavailable: string[] = []
   while (pending.length > 0) {

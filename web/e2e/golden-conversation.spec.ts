@@ -8,11 +8,14 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 
 // Each answer is rendered from its recorded reply's assertions, so neither the
 // placeholder nor the fallback sentence passes. The first is the engine's answer
-// with its commentary (#398).
+// with its commentary (#398); the others are the analyst's, whose only figures
+// are the year-to-date chart's returns, market data outside the engine (#398 D2).
 const NVDA_NARRATIVE = "NVDA's revenue rose in every period from Q1 FY2025"
 const NVDA_REVENUE = 'NVIDIA Corporation: Revenue'
-const COMPARE_NARRATIVE = "Of NVDA and AMD, NVDA's revenue was highest"
-const EXPLAIN_NARRATIVE = "Of NVDA and AMD, NVDA's gross margin was highest"
+const COMPARE_NARRATIVE = "Of NVDA and AMD, NVDA's price return was highest"
+// The third answer repeats the chart's comparison, then quotes the cause AMD filed.
+const EXPLAIN_NARRATIVE = 'effective Jun 2025 on AMD'
+const AMD_RELEASE = 'AMD Reports Second Quarter 2025 Financial Results (Form 8-K, Exhibit 99.1)'
 const QUESTIONS = ['Analyze NVDA', 'Compare it with AMD YTD', 'Explain the differences and show the evidence']
 const YTD_TITLE = 'Price return YTD 2026 (split-adjusted, excluding dividends)'
 const YTD_RANGE = 'YTD 2026: 2025-12-31 close to 2026-08-31 close'
@@ -34,6 +37,9 @@ async function ask(page: Page, question: string) {
 
 const answer = (page: Page, narrative: string) =>
   page.locator('[data-role="assistant"]', { hasText: narrative })
+// The second answer alone: the third begins with the same comparison.
+const compareAnswer = (page: Page) =>
+  page.locator('[data-role="assistant"]', { hasText: COMPARE_NARRATIVE, hasNotText: EXPLAIN_NARRATIVE })
 
 // The URLs of the /v1 requests the page makes from now on. The static demo answers them
 // in the page, so they never reach the network; there the evidence is the demo's own
@@ -50,7 +56,7 @@ function apiRequests(page: Page, method: string, path: RegExp): string[] {
   return seen
 }
 
-test('golden conversation renders charts, metrics and inspectable sources, and survives a reload', async ({ page }) => {
+test('golden conversation renders the verified answer, the year-to-date chart and inspectable sources, and survives a reload', async ({ page }) => {
   test.slow(CAPTURE, 'opens every evidence page')
   // From its first appearance, the first answer is on the page exactly once in every
   // mutation batch: the streamed copy hands off to the sealed one with no gap or duplicate.
@@ -102,26 +108,26 @@ test('golden conversation renders charts, metrics and inspectable sources, and s
   }
 
   await ask(page, QUESTIONS[1])
-  await expect(page.getByText(COMPARE_NARRATIVE)).toBeVisible()
-  await expectComparison(answer(page, COMPARE_NARRATIVE))
-  await expectYtdChart(answer(page, COMPARE_NARRATIVE))
+  await expect(compareAnswer(page)).toBeVisible()
+  await expectYtdChart(compareAnswer(page))
   // End-of-day prices and the split-adjusted, dividend-free basis are disclosed (#191).
-  const disclosure = answer(page, COMPARE_NARRATIVE).locator('[data-block-kind="disclosure"]')
+  const disclosure = compareAnswer(page).locator('[data-block-kind="disclosure"]')
   await expect(disclosure).toContainText('end-of-day')
   await expect(disclosure).toContainText('split-adjusted price returns; dividends are not included')
   if (CAPTURE) {
-    await openEveryEvidencePage(page, answer(page, COMPARE_NARRATIVE))
+    await openEveryEvidencePage(page, compareAnswer(page))
     await loadThreadElsewhere(page, QUESTIONS.slice(0, 2))
   }
 
   await ask(page, QUESTIONS[2])
-  await expect(page.getByText(EXPLAIN_NARRATIVE)).toBeVisible()
-  // The third answer keeps both companies and shows the figures it points to.
-  await expectComparison(answer(page, EXPLAIN_NARRATIVE))
+  await expect(answer(page, EXPLAIN_NARRATIVE)).toBeVisible()
+  // The third answer keeps both companies' chart, and the claim it quotes holds its own figure.
+  await expectYtdChart(answer(page, EXPLAIN_NARRATIVE))
+  await expect(answer(page, EXPLAIN_NARRATIVE).locator('button[data-inspection-kind="claim"]')).toContainText('$800 million')
   if (CAPTURE) await openEveryEvidencePage(page, answer(page, EXPLAIN_NARRATIVE))
 
-  // The inspector opens a figure cited in the third answer and, through it, its filing.
-  await inspectCitedFigure(page, answer(page, EXPLAIN_NARRATIVE))
+  // The inspector opens the claim cited in the third answer and, through it, the release it was filed in.
+  await inspectCitedClaim(page, answer(page, EXPLAIN_NARRATIVE))
 
   expect(historyReads).toEqual([])
 
@@ -134,12 +140,9 @@ test('golden conversation renders charts, metrics and inspectable sources, and s
   }
   await expect(page.getByText(NVDA_NARRATIVE)).toBeVisible()
   await expect(page.getByText(NVDA_REVENUE)).toBeVisible()
-  await expect(page.getByText(COMPARE_NARRATIVE)).toBeVisible()
-  await expectComparison(answer(page, COMPARE_NARRATIVE))
-  await expectYtdChart(answer(page, COMPARE_NARRATIVE))
-  await expect(page.getByText(EXPLAIN_NARRATIVE)).toBeVisible()
-  await expectComparison(answer(page, EXPLAIN_NARRATIVE))
-  await inspectCitedFigure(page, answer(page, EXPLAIN_NARRATIVE))
+  await expectYtdChart(compareAnswer(page))
+  await expect(answer(page, EXPLAIN_NARRATIVE)).toBeVisible()
+  await inspectCitedClaim(page, answer(page, EXPLAIN_NARRATIVE))
   expect(historyReads.length).toBeGreaterThanOrEqual(1)
   await expect(page.getByRole('button', { name: 'Send' })).toBeEnabled()
   expect(streamsAfterReload).toEqual([])
@@ -158,21 +161,17 @@ async function loadThreadElsewhere(page: Page, asked: readonly string[]) {
   await tab.close()
 }
 
-// NVDA first, then AMD, each row with figures that open their evidence.
-async function expectComparison(message: Locator) {
-  const table = message.locator('[data-block-kind="metrics_comparison"]')
-  await expect(table).toBeVisible()
-  await expect(table.locator('tbody th[scope="row"]')).toHaveText(['NVDA', 'AMD'])
-  for (const row of await table.locator('tbody tr').all()) {
-    await expect(row.locator('button[data-inspection-kind="fact"]').first()).toBeVisible()
-  }
-}
-
 // The requested year-to-date window, labelled with its dates and basis, drawn as one
-// line per company.
+// line per company: market data, source-linked and never a verified calculation.
+// No other block in the answer shows a figure.
 async function expectYtdChart(message: Locator) {
   const chart = message.locator('[data-block-kind="perf_comparison"]')
   await expect(chart).toBeVisible()
+  const labelled = message.locator('[data-block-verification]', { has: message.page().locator('[data-block-kind="perf_comparison"]') })
+  await expect(labelled).toHaveAttribute('data-block-verification', 'source_linked')
+  for (const legacy of ['metric_row', 'revenue_bars', 'metrics_comparison', 'segment_donut']) {
+    await expect(message.locator(`[data-block-kind="${legacy}"]`)).toHaveCount(0)
+  }
   await expect(chart).toContainText(YTD_TITLE)
   await expect(chart).toHaveAttribute('data-default-range', YTD_RANGE)
   await expect(chart.locator('[data-testid$="-legend"] li')).toHaveText(['NVDA(%)', 'AMD(%)'])
@@ -184,12 +183,12 @@ async function expectYtdChart(message: Locator) {
   }
 }
 
-async function inspectCitedFigure(page: Page, message: Locator) {
-  await message.locator('button[data-inspection-kind="fact"]').first().click()
+async function inspectCitedClaim(page: Page, message: Locator) {
+  await message.locator('button[data-inspection-kind="claim"]').first().click()
   const inspector = page.getByRole('complementary', { name: 'Evidence inspector' })
   await expect(inspector).toBeVisible()
-  await inspector.locator('button[data-inspection-kind="source"]').first().click()
-  await expect(inspector.getByRole('heading', { name: 'golden_fixture filing', exact: true })).toBeVisible()
+  await inspector.locator('button[data-inspection-kind="document"]').first().click()
+  await expect(inspector.getByRole('heading', { name: AMD_RELEASE, exact: true })).toBeVisible()
   await inspector.getByRole('button', { name: 'Close' }).click()
   await expect(inspector).toBeHidden()
 }
