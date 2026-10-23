@@ -1,5 +1,5 @@
-// Chat's financial lane. A turn about a company is
-// planned by the engine's planner against the server-resolved subject set,
+// Chat's financial lane. A turn about a company is planned by the engine's
+// planner against the server-resolved subject set,
 // executed on evidence, and published only through finalization — whose
 // transaction also writes the assistant message, so an answer exists exactly
 // when its snapshot and certificate do. Nothing in this lane calls the legacy
@@ -28,7 +28,6 @@ import { ParentRefusedError, type PersistParentArtifact } from "../../financial-
 import {
   buildDeterministicPlan,
   planFinancialRequest,
-  PlanningModelError,
   resolveClarification,
   type Clarification,
   type PlanningContext,
@@ -97,9 +96,8 @@ export type ChatFinancialTurnContext = ChatTurnRunContext & { clarificationAnswe
 
 export type ChatFinancialRuntime = Readonly<{
   /**
-   * The lane's outcome for a turn about a company: one the turn names, a
-   * follow-up keeps, or a clarification asks about. Null leaves the turn to
-   * the analyst path.
+   * Runs a turn about a company: one the turn names, a follow-up keeps, or a
+   * clarification asks about. Null leaves the turn to the analyst path.
    */
   take(context: ChatFinancialTurnContext): Promise<(() => Promise<ChatFinancialTurn>) | null>;
   /** Throws unless verified finance is ready; the server awaits it before serving any turn. */
@@ -146,9 +144,7 @@ function analystReads(reading: ScopeProposal | null, scope: ResearchScope | null
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const MAX_PLANNING_MODEL_CALLS = 2;
 
-/**
- * A turn's gap: the engine's reason, or a unit the verifier refused. A failed commit is a turn error instead.
- */
+/** A turn's gap: the engine's reason, or a unit the verifier refused. A failed commit is a turn error instead. */
 type ChatGap = Exclude<RequestGap, "publication_failed"> | "verification_failed";
 
 const UNSUPPORTED = "This request asks for a calculation outside the verified financial definitions I can compute";
@@ -313,8 +309,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
         return planned;
       },
       evidence: deps.evidence,
-      // The reading and the scope settle outside any transaction; the scope
-      // queued its reads before this request took its client.
+      // The reading and the scope settled before this request took its client.
       beforeDrive: prepared,
       persistParent: persistAssistantMessage(context.threadId, messageId, {
         // Decided before the drive; never a model call inside the transaction.
@@ -512,41 +507,21 @@ async function planTurn(
   }
   onSubjects(subjects);
   if (CASH_RESILIENCE.test(text)) return planCashResilience(planningContext(subjects), text);
-  // A failing or unreachable model is a planning gap (publishRequest); the narrative composer is never a fallback for numbers.
-  let dropped = false;
-  // A planner the overview drops reaches the model no more (its repair call).
-  const planning: PlanningModel | null = model && ((request) => dropped ? Promise.reject(DROPPED) : model(request));
-  const planned = planFinancialRequest(planningContext(subjects), text, planning ?? noModel);
-  if (!resolvedCompanies(subjects)) return planned;
-  // Settled now, or a planner that fails while the overview is decided is an unhandled rejection.
-  const failure = planned.then(() => null, (reason: unknown) => ({ reason }));
-  let companies: ReadonlyArray<RequestedSubject> | null;
-  let overview: PlanningResult | null;
-  try {
+  // The reading is settled before the turn is planned, so an overview is
+  // decided first and the planner's model is called only without one.
+  if (resolvedCompanies(subjects)) {
     const [scope, reading] = await turn.prepare();
-    companies = await overviewSubjects(subjects, reading, scope, turn.peersOf);
-    overview = companies && await planCompanyOverview(planningContext(companies), turn.evidence);
-  } catch (reason) {
-    // A defect fails the turn, so the planner's answer is not needed either.
-    dropped = true;
-    throw reason;
-  }
-  if (!companies || !overview) return planned;
-  onSubjects(companies);
-  turn.onOverview();
-  dropped = true;
-  void failure.then((failed) => {
-    if (failed === null) return;
-    if (failed.reason instanceof PlanningModelError && failed.reason.cause === DROPPED) {
-      console.warn("[chat] the planner was dropped for the company overview; its next model call was not made");
-    } else {
-      console.warn("[chat] the planner the company overview replaced had failed", failed.reason);
+    const companies = await overviewSubjects(subjects, reading, scope, turn.peersOf);
+    const overview = companies && await planCompanyOverview(planningContext(companies), turn.evidence);
+    if (companies && overview) {
+      onSubjects(companies);
+      turn.onOverview();
+      return overview;
     }
-  });
-  return overview;
+  }
+  // A failing or unreachable model is a planning gap (publishRequest); the narrative composer is never a fallback for numbers.
+  return planFinancialRequest(planningContext(subjects), text, model ?? noModel);
 }
-
-const DROPPED = new Error("dropped for the company overview");
 
 const CASH_RESILIENCE = /\bcash[- ]resilience\b/iu;
 const CASH_RESILIENCE_VIEW = "cash_resilience_view";
