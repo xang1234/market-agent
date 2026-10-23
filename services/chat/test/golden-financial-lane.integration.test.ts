@@ -123,22 +123,19 @@ test("golden metric questions certify through the chat financial lane on the rec
   const AMD = ["USD 11,200,000,000.00", "USD 6,050,000,000.00", "USD 1,610,000,000.00", "USD 1,480,000,000.00", "54.02%", "14.38%", "13.21%", "4.67%", "45.74%"];
   const AAPL = ["USD 97,100,000,000.00", "USD 45,700,000,000.00", "USD 29,800,000,000.00", "USD 24,900,000,000.00", "47.06%", "30.69%", "25.64%", "-1.62%", "3.26%"];
   const MARGINS = ["gross_margin", "operating_margin", "net_margin"];
-  const closest = (slot: string, quarter: string, values: string[]) => MARGINS.map((metric, index) => [`out_${slot}_${metric}_${quarter}`, "verified", values[index]]);
-  const AMD_Q4_FY2025 = closest("b", "fy2025_q4", ["53.98%", "14.08%", "13.11%"]);
   const LEADS: Record<string, string[]> = { b: ["20.42 pp", "50.82 pp", "43.90 pp"], c: ["27.36 pp", "30.44 pp", "27.71 pp"] };
   const leads = (...slots: string[]) => MARGINS.flatMap((metric, index) => slots.map((slot) => [`out_a_minus_${slot}_${metric}`, "verified", LEADS[slot]![index]]));
-  assert.deepEqual(await ask("Compare NVDA and AMD profit", readingOf(NO_ASKS)), [...latestQuarter("a", "fy2026_q4", NVDA), ...latestQuarter("b", "fy2026_q2", AMD), ...AMD_Q4_FY2025, ...leads("b")],
+  assert.deepEqual(await ask("Compare NVDA and AMD profit", readingOf(NO_ASKS)), [...latestQuarter("a", "fy2026_q4", NVDA), ...latestQuarter("b", "fy2026_q2", AMD), ...leads("b")],
     "NVDA's quarter ends in January and AMD's in June, so the lead takes AMD's quarter ending in December, 29 days before NVDA's");
   assert.equal(await commentaryText(), [
+    "Of NVDA and AMD, NVDA's gross margin (gross profit / revenue) was highest: NVDA 74.40% (Q4 FY2026), AMD 54.02% (Q2 FY2026).",
     "Of NVDA and AMD, NVDA's year-over-year percent change in revenue was highest: NVDA 57.89% (Q4 FY2026 vs Q4 FY2025), AMD 45.74% (Q2 FY2026 vs Q2 FY2025).",
     "NVDA's revenue was USD 62,100,000,000.00 in Q4 FY2026; AMD's revenue was USD 11,200,000,000.00 in Q2 FY2026.",
-  ].join("\n\n"), "the recorded gross margin comparison of the two newest quarters is rejected: AMD is shown for two quarters, so companies are compared at one period");
+  ].join("\n\n"), "each company is shown at its newest quarter alone, so the recorded gross margin comparison of the two stands");
   assert.deepEqual(await ask("Compare NVDA, AMD and AAPL profit", readingOf(NO_ASKS)), [
     ...latestQuarter("a", "fy2026_q4", NVDA),
     ...latestQuarter("b", "fy2026_q2", AMD),
     ...latestQuarter("c", "fy2026_q3", AAPL),
-    ...AMD_Q4_FY2025,
-    ...closest("c", "fy2026_q1", ["47.03%", "34.45%", "29.30%"]),
     ...leads("b", "c"),
   ]);
 });

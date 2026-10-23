@@ -395,11 +395,11 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
       ["Gross margin (gross profit / revenue)", "Q4 FY2026", "verified", "74.40%"],
       ["Revenue", "Q2 FY2026", "verified", "USD 11,200,000,000.00"],
       ["Gross margin (gross profit / revenue)", "Q2 FY2026", "verified", "54.02%"],
-      ["Gross margin (gross profit / revenue)", "Q4 FY2025", "verified", "53.98%"],
-    ], "AMD's gross margin also in its Q4 FY2025, the quarter NVDA's lead is stated against");
+    ]);
     assert.deepEqual(engineAnswer(answer).notes, [
-      "NVDA's revenue was USD 62,100,000,000.00 in Q4 FY2026; Advanced Micro Devices, Inc.'s revenue was USD 11,200,000,000.00 in Q2 FY2026.",
-    ], "the recorded gross margin comparison of the two newest quarters is rejected, as AMD is shown for two");
+      "Of NVDA and Advanced Micro Devices, Inc., NVDA's gross margin (gross profit / revenue) was highest: NVDA 74.40% (Q4 FY2026), Advanced Micro Devices, Inc. 54.02% (Q2 FY2026).\n\n" +
+        "NVDA's revenue was USD 62,100,000,000.00 in Q4 FY2026; Advanced Micro Devices, Inc.'s revenue was USD 11,200,000,000.00 in Q2 FY2026.",
+    ]);
     // The saved scope covers the auto-selected peer, so a follow-up about AMD continues it (#206).
     const { rows } = await client.query<{ research_scope: { companies: Array<{ issuer_id: string }> } }>(
       `select research_scope from chat_messages where thread_id = $1::uuid and role = 'assistant'`,

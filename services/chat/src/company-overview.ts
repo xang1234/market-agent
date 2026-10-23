@@ -301,7 +301,7 @@ function companyOverviewDraft(companies: ReadonlyArray<RevenueQuarters>) {
   const newest = companies[0]!.newest;
   const dates = companies[0]!.agreedDates(newest);
   const anchor = typeof dates === "string" || dates.start === null ? null : dates;
-  const paired = others.flatMap((other, index): Array<{ slot: string; margins: ReadonlyArray<Node>; operations: ReadonlyArray<Node>; shown: ReadonlyArray<Node> }> => {
+  const paired = others.flatMap((other, index): Array<{ slot: string; margins: ReadonlyArray<Node>; operations: ReadonlyArray<Node> }> => {
     const quarter = anchor && closestQuarter(companies[index + 1]!, anchor);
     if (quarter === null) {
       omitted.push((named) => `${named(primary!.slot)}'s lead over ${named(other.slot)} in each margin, as ${anchor === null
@@ -309,11 +309,12 @@ function companyOverviewDraft(companies: ReadonlyArray<RevenueQuarters>) {
         : `no quarter ${named(other.slot)} reported ends within half a quarter of ${named(primary!.slot)}'s ${quarterText(newest)}`}`);
       return [];
     }
-    if (quarterId(quarter) === quarterId(companies[index + 1]!.newest)) return [{ slot: other.slot, margins: other.margins, operations: [], shown: [] }];
+    if (quarterId(quarter) === quarterId(companies[index + 1]!.newest)) return [{ slot: other.slot, margins: other.margins, operations: [] }];
     const revenue = other.at("revenue", quarter);
     const lines = MARGINS.map(({ numerator }) => other.at(numerator, quarter));
     const margins = MARGINS.map(({ metric }, line): Node => ({ node_id: other.id(`${metric}_${quarterId(quarter)}`), operation: metric, numerator: lines[line]!.node_id, revenue: revenue.node_id }));
-    return [{ slot: other.slot, margins, operations: [revenue, ...lines, ...margins], shown: margins }];
+    // Only the lead shows them: each company is shown at its newest quarter.
+    return [{ slot: other.slot, margins, operations: [revenue, ...lines, ...margins] }];
   });
   const leads = MARGINS.flatMap(({ metric }, line) => paired.map((other): Node => ({
     node_id: `${primary!.slot}_minus_${other.slot}_${metric}`,
@@ -325,7 +326,7 @@ function companyOverviewDraft(companies: ReadonlyArray<RevenueQuarters>) {
   const operations = new Map([...parts.flatMap((part) => part.operations), ...paired.flatMap((other) => other.operations), ...leads].map((node) => [node.node_id, node]));
   return {
     operations: [...operations.values()],
-    outputs: [...parts.flatMap((part) => part.outputs), ...paired.flatMap((other) => other.shown), ...leads],
+    outputs: [...parts.flatMap((part) => part.outputs), ...leads],
     omitted,
   };
 }
