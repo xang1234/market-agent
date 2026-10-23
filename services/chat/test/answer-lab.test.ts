@@ -131,12 +131,18 @@ test("the judge's mutation set: every original and mutation passes the turn's ow
   });
   // The judge reads a case on its trace's packet: the peer case's label is its comparisons' checked results.
   const peer = variants.find((variant) => variant.id === "peer-lead" && variant.kind === "original")!;
-  assert.deepEqual([peer.judged.subject, peer.judged.checked, peer.companies], ["NVDA", ["NVDA highest on revenue, gross margin, net margin, and revenue growth (YoY)"], ["NVDA", "AMD"]]);
-  // A narrowed case's operating loss is in the rest of its answer, not in its supports.
+  assert.deepEqual([peer.judged.subject, peer.judged.checked, peer.companies], ["NVDA", [
+    "revenue highest first: NVDA, AMD",
+    "gross margin highest first: NVDA, AMD",
+    "net margin highest first: NVDA, AMD",
+    "revenue growth (YoY) highest first: NVDA, AMD",
+    "price return highest first: NVDA, AMD",
+  ], ["NVDA", "AMD"]]);
+  // A case's operating loss is in the rest of its answer, not in its supports.
   const offset = variants.find((variant) => variant.id === "operating-offset" && variant.kind === "original")!;
   assert.deepEqual([offset.judged.supports, offset.judged.context[0]], [
-    ["AMD's net income was $872.0M in Q2 2025 (ended Jun 2025); AMD's net margin was 11.3% in Q2 2025 (ended Jun 2025)."],
-    "AMD's operating margin was -1.7% in Q2 2025 (ended Jun 2025); AMD's operating income was -$134.0M in Q2 2025 (ended Jun 2025).",
+    ["AMD's net income was $872.0M and net margin 11.3% in Q2 2025 (ended Jun 2025)."],
+    "AMD's revenue was $7.7B, operating income -$134.0M and operating margin -1.7% in Q2 2025 (ended Jun 2025).",
   ]);
   // A block case's recovery is on the page only in its gross margin chart.
   const recovery = variants.find((variant) => variant.id === "margin-recovery" && variant.kind === "original")!;
@@ -154,8 +160,8 @@ test("a set inference the turn's checks already reject fails the set, rather tha
   writeFileSync(file, JSON.stringify({ cases: [{
     id: "typed",
     trace: fileURLToPath(new URL("./answer-lab/traces/segment-drill-down.json", import.meta.url)),
-    index: 6,
-    supports: [5],
+    index: 3,
+    supports: [0, 1, 2],
     originals: ["Data Center dominates the top line."],
     mutations: [{ kind: "worded_amount", text: "Data Center brings in 90% of the top line." }],
   }] }));
@@ -248,8 +254,8 @@ test("recorded replays each trace with the judge reply it recorded, and summariz
   const reply = (text: string, latency_ms: number, usage: { input_tokens: number; output_tokens: number }) =>
     ({ outcome: "replied", exchange: { messages: [], text, truncated: false, deployment: "anthropic/claude-haiku-5-5", latency_ms, usage } });
   const judge = [
-    reply('{"verdicts":[{"id":6,"verdict":"entailed","worded_amount":false}]}', 3000, { input_tokens: 500, output_tokens: 100 }),
-    reply('{"verdicts":[{"id":7,"verdict":"unsupported","worded_amount":false,"reason":"no support measures diversification."}]}', 4000, { input_tokens: 600, output_tokens: 200 }),
+    reply('{"verdicts":[{"id":3,"verdict":"entailed","worded_amount":false}]}', 3000, { input_tokens: 500, output_tokens: 100 }),
+    reply('{"verdicts":[{"id":4,"verdict":"unsupported","worded_amount":false,"reason":"no support measures the trend."}]}', 4000, { input_tokens: 600, output_tokens: 200 }),
   ];
   const root = traceFiles({ "judged.json": { ...trace, judge }, "missing-cash-flow.json": TRACES.find(({ label }) => label === "missing-cash-flow")!.trace });
   const script = fileURLToPath(new URL("../scripts/answer-lab.ts", import.meta.url));
@@ -257,8 +263,8 @@ test("recorded replays each trace with the judge reply it recorded, and summariz
   assert.equal(stdout.slice(stdout.indexOf("as recorded")), [
     "as recorded, judge: 1 shown, 1 unverified, 0 hidden, in 1 answers (2 replied, 0 failed, 0 not called)",
     "judge per reply: 3500 ms, 550 in / 150 out tokens, on anthropic/claude-haiku-5-5",
-    "  unverified  judged #0 [7] The other four segments provide limited diversification cushion relative to Data Center's dominance.",
-    "      unsupported: no support measures diversification.",
+    "  unverified  judged #0 [4] Counterpoint: only one quarter of segment data is shown, so the data cannot show whether this concentration is rising or falling.",
+    "      unsupported: no support measures the trend.",
     "",
   ].join("\n"));
 });
@@ -269,7 +275,7 @@ test("recorded counts the cost of a trace's one batched judge call once, though 
     outcome: "replied",
     exchange: {
       messages: [],
-      text: '{"verdicts":[{"id":6,"verdict":"entailed","worded_amount":false},{"id":7,"verdict":"contradicted","worded_amount":false,"reason":"Data Center outweighs the other four together."}]}',
+      text: '{"verdicts":[{"id":3,"verdict":"entailed","worded_amount":false},{"id":4,"verdict":"contradicted","worded_amount":false,"reason":"the segments shown span more than one quarter."}]}',
       truncated: false,
       deployment: "anthropic/claude-haiku-5-5",
       latency_ms: 3000,
@@ -316,7 +322,7 @@ test("live --judge --update re-records a trace that recorded --check replays to 
     const transcript = request.messages.map((message) => message.content).join("\n");
     if (transcript.includes(REPAIR_INSTRUCTIONS)) return { text: "```assertions\n[]\n```" };
     if (transcript.startsWith("You check the analyst inferences")) {
-      return { text: '{"verdicts":[{"id":6,"verdict":"entailed","worded_amount":false},{"id":7,"verdict":"unsupported","worded_amount":false,"reason":"no support measures diversification."}]}' };
+      return { text: '{"verdicts":[{"id":3,"verdict":"entailed","worded_amount":false},{"id":4,"verdict":"unsupported","worded_amount":false,"reason":"no support measures the trend."}]}' };
     }
     return { text: list };
   };
@@ -330,20 +336,21 @@ test("live --judge --update re-records a trace that recorded --check replays to 
   const { judge_input_changed, repair_input_changed, ...replayed } = await replayRecorded(written!.trace);
   assert.deepEqual([judge_input_changed, repair_input_changed], [false, false]);
   assert.deepStrictEqual(JSON.parse(JSON.stringify(replayed.blocks)), written!.trace.blocks);
-  assert.deepEqual(replayed.assertions?.judged?.map((verdict) => [verdict.index, verdict.verdict]), [[6, "entailed"], [7, "unsupported"]]);
+  assert.deepEqual(replayed.assertions?.judged?.map((verdict) => [verdict.index, verdict.verdict]), [[3, "entailed"], [4, "unsupported"]]);
 });
 
 test("live --judge --update leaves a trace as it was when the answer was cut off, the judge failed, or no judge is configured", async () => {
   const { trace } = TRACES.find(({ label }) => label === "segment-drill-down")!;
   const env = { LLM_CHANNELS: "openai", LLM_OPENAI_PROTOCOL: "openai", LLM_OPENAI_MODELS: "gpt-4.1", LITELLM_MODEL: "openai/gpt-4.1", JUDGE_LITELLM_MODEL: "openai/gpt-4.1" };
   const list = trace.exchange!.text.slice(trace.exchange!.text.indexOf("```assertions"));
-  const entailed = async () => ({ text: '{"verdicts":[{"id":6,"verdict":"entailed","worded_amount":false}]}' });
+  const entailed = async () => ({ text: '{"verdicts":[{"id":3,"verdict":"entailed","worded_amount":false},{"id":4,"verdict":"entailed","worded_amount":false}]}' });
   const { JUDGE_LITELLM_MODEL: _, ...unjudged } = env;
   const runs = {
     "cut off": { env, truncated: true, judge: entailed },
     "judge failed": { env, truncated: false, judge: async () => { throw new Error("judge unavailable"); } },
     "no judge": { env: unjudged, truncated: false, judge: entailed },
   };
+  const skipped: Array<[string, string | undefined]> = [];
   for (const [name, run] of Object.entries(runs)) {
     const [source] = readTraces([traceFiles({ "segment-drill-down.json": trace })]);
     const before = readFileSync(source!.file, "utf8");
@@ -353,9 +360,14 @@ test("live --judge --update leaves a trace as it was when the answer was cut off
     };
     const composed = await composeTraced(trace.input, { env: run.env, createClient: createClient as never });
     const answer = await judgedLive(trace.input, composed, { env: run.env, createClient: createClient as never });
-    rerecord(source!, answer, "openai/gpt-4.1");
+    skipped.push([name, rerecord(source!, answer, "openai/gpt-4.1")]);
     assert.equal(readFileSync(source!.file, "utf8"), before, name);
   }
+  assert.deepEqual(skipped, [
+    ["cut off", "the answer was cut off at the token limit"],
+    ["judge failed", "judge call failed: all LLM deployments failed"],
+    ["no judge", "no judge model is configured"],
+  ]);
 });
 
 test("live --judge --update leaves a trace as it was when a fallback model answered or repaired, or the judge gave an inference no verdict", async () => {
@@ -366,13 +378,14 @@ test("live --judge --update leaves a trace as it was when a fallback model answe
   };
   assert.equal(await primaryDeployment(env), "openai/gpt-4.1");
   const list = trace.exchange!.text.slice(trace.exchange!.text.indexOf("```assertions"));
-  const contradicted = '{"verdicts":[{"id":6,"verdict":"contradicted","worded_amount":false}]}';
+  const contradicted = '{"verdicts":[{"id":3,"verdict":"contradicted","worded_amount":false},{"id":4,"verdict":"entailed","worded_amount":false}]}';
   const runs = {
     "answer on a fallback": { primaryFails: "answer", judge: contradicted },
     "repair on a fallback": { primaryFails: "repair", judge: contradicted },
     "no verdict for an inference": { primaryFails: null, judge: '{"verdicts":[]}' },
   };
   const written = [];
+  const skipped: Array<[string, string | undefined]> = [];
   for (const [name, run] of Object.entries(runs)) {
     const [source] = readTraces([traceFiles({ "segment-drill-down.json": trace })]);
     const before = readFileSync(source!.file, "utf8");
@@ -385,10 +398,15 @@ test("live --judge --update leaves a trace as it was when a fallback model answe
     const composed = await composeTraced(trace.input, { env, createClient: createClient as never });
     // Today's repair deadline fits one attempt; these fit its fallback too.
     const answer = await judgedLive(trace.input, composed, { env, createClient: createClient as never, repairDeadlines: { attemptMs: 15_000, totalMs: 45_000 } });
-    rerecord(source!, answer, "openai/gpt-4.1");
+    skipped.push([name, rerecord(source!, answer, "openai/gpt-4.1")]);
     if (readFileSync(source!.file, "utf8") !== before) written.push(name);
   }
   assert.deepEqual(written, []);
+  assert.deepEqual(skipped, [
+    ["answer on a fallback", "the answer came from openai/gpt-4.1-mini, not the primary openai/gpt-4.1"],
+    ["repair on a fallback", "the repair came from openai/gpt-4.1-mini, not the primary openai/gpt-4.1"],
+    ["no verdict for an inference", "inference 3 has no verdict: no verdict for this inference"],
+  ]);
 });
 
 test("live --judge --update re-records a thread's turns in their order, each later one asked after the answer its earlier turn just recorded", async () => {
@@ -435,7 +453,7 @@ test("recorded --update --judge and --repair write a live round over the trace o
     LLM_CHANNELS: "openai", LLM_OPENAI_PROTOCOL: "openai", LLM_OPENAI_MODELS: "gpt-4.1,gpt-4.1-mini",
     LITELLM_MODEL: "openai/gpt-4.1", LITELLM_FALLBACK_MODELS: "openai/gpt-4.1-mini", JUDGE_LITELLM_MODEL: "openai/gpt-4.1",
   };
-  const contradicted = '{"verdicts":[{"id":6,"verdict":"contradicted","worded_amount":false},{"id":7,"verdict":"entailed","worded_amount":false}]}';
+  const contradicted = '{"verdicts":[{"id":3,"verdict":"contradicted","worded_amount":false},{"id":4,"verdict":"entailed","worded_amount":false}]}';
   const runs = {
     "judge failed": { rerun: "judge", primaryFails: null, judge: null },
     "repair on a fallback": { rerun: "judge", primaryFails: "repair", judge: contradicted },

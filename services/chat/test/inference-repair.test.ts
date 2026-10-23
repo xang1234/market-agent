@@ -14,10 +14,14 @@ import { mutationRepairSummary, mutationVariants, repairMutation, type MutationR
 const trace = async (name: string): Promise<TurnTrace> =>
   JSON.parse(await readFile(fileURLToPath(new URL(`./answer-lab/traces/${name}`, import.meta.url)), "utf8")) as TurnTrace;
 
-// Two companies; 7 an inference, 8 one the recorded judge found entailed but stating an amount in words.
+// Two companies; 4 an inference, 6 one the recorded judge found entailed but stating an amount in words.
 const FISCAL = await trace("fiscal-year-trap.json");
-// One company; 4 an inference, 5 one the checks reject for a digit.
-const QUARTER = await trace("single-latest-quarter.json");
+// One company; 0 and 6 inferences. 6 is written here with digits, so the
+// checks reject it: the recorded answer wrote none.
+const SEQUENTIAL_TEXT = "Its sequential growth was slower in the latest quarter than the prior-quarter step-up, which hints at some moderation in momentum.";
+const DIGIT_TEXT = "The absolute revenue increase from Q2 to Q3 fiscal 2026 was larger than from Q3 to Q4 fiscal 2026, consistent with decelerating sequential growth on a larger base.";
+const RECORDED_QUARTER = await trace("single-latest-quarter.json");
+const QUARTER = { ...RECORDED_QUARTER, exchange: { ...RECORDED_QUARTER.exchange!, text: RECORDED_QUARTER.exchange!.text.replace(SEQUENTIAL_TEXT, DIGIT_TEXT) } };
 const SEGMENTS = await trace("segment-drill-down.json");
 
 const ENV = {
@@ -31,31 +35,35 @@ const JUDGED_ENV = { ...ENV, JUDGE_LITELLM_MODEL: "anthropic/claude-haiku-5-5" }
 
 const PENDING = "> _Checking an analyst inference against the figures it rests on…_";
 const FISCAL_FIGURES = [
-  "Of NVDA and AAPL, AAPL's revenue was highest: NVDA $130.5B (FY2025, ended Jan 2025), AAPL $416.2B (FY2025, ended Sep 2025).",
-  "Of NVDA and AAPL, NVDA's gross margin was highest: NVDA 75.0% (FY2025, ended Jan 2025), AAPL 46.9% (FY2025, ended Sep 2025).",
-  "Of NVDA and AAPL, NVDA's net margin was highest: NVDA 55.8% (FY2025, ended Jan 2025), AAPL 26.9% (FY2025, ended Sep 2025).",
+  "By revenue, highest first: AAPL $416.2B (FY2025, ended Sep 2025), NVDA $130.5B (FY2025, ended Jan 2025).",
+  "By gross margin, highest first: NVDA 75.0% (FY2025, ended Jan 2025), AAPL 46.9% (FY2025, ended Sep 2025).",
+  "By net margin, highest first: NVDA 55.8% (FY2025, ended Jan 2025), AAPL 26.9% (FY2025, ended Sep 2025).",
   "AAPL's revenue growth (YoY) was 6.4% in FY2025 (ended Sep 2025).",
 ].join("\n\n");
+const FISCAL_PRICES = "By price return, highest first: NVDA 6.6%, AAPL 6.05% (Dec 2025 to Aug 2026).";
 const FISCAL_NOTE = "The periods compared end at different times, so they do not line up: NVDA's FY2025 ended Jan 2025 and AAPL's FY2025 ended Sep 2025.";
-const PROFITABILITY = "> **Analyst inference** (AAPL highest on revenue; NVDA highest on gross margin and net margin): Despite lower absolute revenue, NVDA's substantially higher margins indicate stronger profitability per dollar of revenue compared to AAPL.";
-const GAP_TEXT = "The eight-month gap between fiscal year ends limits direct comparability of the two revenue figures.";
-const GAP_REASON = "The fiscal year ends are shown as Jan 2025 and Sep 2025, an eight-month gap, which the answer's own figures support as limiting direct comparison of the two revenue figures.";
+const PROFITABILITY_TEXT = "It has the larger revenue base, while the other company converts far more of its sales into profit.";
+const PROFITABILITY = `> **Analyst inference on AAPL** (revenue highest first: AAPL, NVDA; gross margin highest first: NVDA, AAPL; net margin highest first: NVDA, AAPL): ${PROFITABILITY_TEXT}`;
+const GAP_TEXT = "The revenue comparison is not like-for-like, since its fiscal year ended months before the other's, so the gap could shift on a matched period.";
+const GAP_REASON = "The figures show NVDA's fiscal year ended Jan 2025 and AAPL's Sep 2025, eight months apart, so the revenue comparison is not period-matched; the caveat that the gap could shift follows from that.";
 const ENDS_TEXT = "The different fiscal year ends limit direct comparability of the two revenue figures.";
-const ENDS = `> **Analyst inference:** ${ENDS_TEXT}`;
-const UNVERIFIED_GAP = `> **Unverified analyst view** (not backed by the figures shown): ${GAP_TEXT}`;
-const fiscal = (...paragraphs: string[]) => [FISCAL_FIGURES, ...paragraphs, FISCAL_NOTE].join("\n\n");
+const ENDS = `> **Analyst inference on NVDA** (revenue highest first: AAPL, NVDA): ${ENDS_TEXT}`;
+const UNVERIFIED_GAP = `> **Unverified analyst view on NVDA** (not backed by the figures shown): ${GAP_TEXT}`;
+// The answer: its figures, inference 4, the price returns, then inference 6.
+const fiscal = (takeaway: string, ...rest: string[]) => [FISCAL_FIGURES, takeaway, FISCAL_PRICES, ...rest, FISCAL_NOTE].join("\n\n");
 
 const QUARTER_FIGURES = [
-  "NVDA's revenue was $62.1B, net income $35.4B and net margin 57.0% in Q4 2026 (ended Jan 2026).",
-  "NVDA's gross margin was 74.4% and operating margin 64.9% in Q4 2026 (ended Jan 2026).",
-  "NVDA's revenue rose in every period from Q1 2025 ($26.0B) to Q4 2026 ($62.1B).",
+  "NVDA's revenue was $62.1B, gross profit $46.2B, operating income $40.3B and net income $35.4B in Q4 2026 (ended Jan 2026).",
+  "NVDA's gross margin was 74.4%, operating margin 64.9% and net margin 57.0% in Q4 2026 (ended Jan 2026).",
   "NVDA's revenue growth (QoQ) was 8.9% and revenue growth (YoY) 57.9% in Q4 2026 (ended Jan 2026).",
+  "NVDA's revenue rose in every period from Q1 2025 ($26.0B) to Q4 2026 ($62.1B).",
 ].join("\n\n");
-const MODERATING = "> **Analyst inference** (NVDA's revenue rose in every period): The large gap between YoY and QoQ growth rates indicates sequential momentum is moderating even though the company is still growing rapidly on a year-over-year basis.";
-const DIGIT_TEXT = "The absolute revenue increase from Q2 to Q3 fiscal 2026 was larger than from Q3 to Q4 fiscal 2026, consistent with decelerating sequential growth on a larger base.";
+const TAKEAWAY_TEXT = "Its latest quarter shows very strong scale and profitability, with revenue still climbing and margins at a high level.";
+const TAKEAWAY = `> **Analyst inference:** ${TAKEAWAY_TEXT}`;
 const SLOWING_TEXT = "Sequential growth is slowing on a larger base.";
 const UNVERIFIED_SLOWING = `> **Unverified analyst view** (not backed by the figures shown): ${SLOWING_TEXT}`;
-const quarter = (...paragraphs: string[]) => [QUARTER_FIGURES, ...paragraphs].join("\n\n");
+// The answer: inference 0 (null: not shown), its figures, then inference 6.
+const quarter = (takeaway: string | null, ...rest: string[]) => [...(takeaway === null ? [] : [takeaway]), QUARTER_FIGURES, ...rest].join("\n\n");
 
 const REPAIR_MARK = "You already answered this question; your_assertions";
 const verdict = (id: number, verdict: string, worded_amount = false, reason?: string) =>
@@ -108,16 +116,16 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-// The fiscal turn: 7 entailed, 8 entailed and worded, as recorded; the repaired 8 as given.
+// The fiscal turn: 4 entailed, 6 entailed and worded, as recorded; the repaired 6 as given.
 const fiscalJudge = (repaired: (ask: JudgeAsk) => LlmChatResult = (ask) => verdict(ask.id, "entailed")) => (ask: JudgeAsk) =>
-  ask.id === 7 ? verdict(7, "entailed") : ask.text === GAP_TEXT ? verdict(8, "entailed", true, GAP_REASON) : repaired(ask);
+  ask.id === 4 ? verdict(4, "entailed") : ask.text === GAP_TEXT ? verdict(6, "entailed", true, GAP_REASON) : repaired(ask);
 
 test("an inference judged to state an amount in words is repaired once: the call carries its verdict and reason, and the entailed repair shows in its place, recorded in the report and trace", async (t) => {
   const logged = t.mock.method(console, "info", () => {});
   const dir = await mkdtemp(join(tmpdir(), "inference-repair-"));
   const { calls, repairs, asks, createClient } = models(FISCAL, {
     judge: fiscalJudge(),
-    repair: () => ({ ...fenced([inference(8, ENDS_TEXT)]), usage: { inputTokens: 9000, outputTokens: 120, totalTokens: 9120 } }),
+    repair: () => ({ ...fenced([inference(6, ENDS_TEXT)]), usage: { inputTokens: 9000, outputTokens: 120, totalTokens: 9120 } }),
   });
   const answer = await answerTurn(FISCAL.input, turn(FISCAL), { env: JUDGED_ENV, createClient, traceDir: dir });
   const seen: string[] = [];
@@ -130,7 +138,7 @@ test("an inference judged to state an amount in words is repaired once: the call
   assert.equal(seen.at(-2), fiscal(PROFITABILITY, PENDING));
   assert.equal(seen.at(-1), fiscal(PROFITABILITY, ENDS));
   assert.equal(seen.some((blocks) => blocks.includes(GAP_TEXT)), false);
-  assert.deepEqual(calls.sort(), ["answer", "judge 7", "judge 8", "judge 8", "repair"]);
+  assert.deepEqual(calls.sort(), ["answer", "judge 4", "judge 6", "judge 6", "repair"]);
 
   const [request] = repairs;
   // The answer's own request, its system prompt unchanged.
@@ -140,21 +148,20 @@ test("an inference judged to state an amount in words is repaired once: the call
   assert.deepEqual([request!.temperature, request!.reasoning, request!.maxTokens], [0.2, "low", 2048]);
   assert.deepEqual(repairAsked(request!), {
     your_assertions: assertionList(FISCAL.exchange!.text),
-    rejected: [{ index: 8, text: GAP_TEXT, check: "judge", verdict: "entailed", worded_amount: true, reason: GAP_REASON }],
+    rejected: [{ index: 6, text: GAP_TEXT, check: "judge", verdict: "entailed", worded_amount: true, reason: GAP_REASON }],
   });
   // The repaired entry lists no supports, so it keeps the entry's own.
   assert.deepEqual(asks.find((ask) => ask.text === ENDS_TEXT)!.supports, [
-    "NVDA's revenue was $130.5B in FY2025 (ended Jan 2025).",
-    "AAPL's revenue was $416.2B in FY2025 (ended Sep 2025).",
+    "By revenue, highest first: AAPL $416.2B (FY2025, ended Sep 2025), NVDA $130.5B (FY2025, ended Jan 2025).",
   ]);
 
-  assert.deepEqual(done.assertions?.repaired, [8]);
+  assert.deepEqual(done.assertions?.repaired, [6]);
   assert.deepEqual(done.assertions?.judged, [
-    { index: 7, verdict: "entailed", worded_amount: false },
-    { index: 8, verdict: "entailed", worded_amount: false },
+    { index: 4, verdict: "entailed", worded_amount: false },
+    { index: 6, verdict: "entailed", worded_amount: false },
   ]);
-  assert.deepEqual(done.assertions?.accepted.find((entry) => entry.index === 8), { index: 8, kind: "analyst_inference", text: ENDS_TEXT, evidence: ["F1", "F4"], supports: [0, 1] });
-  assert.deepEqual(rejections(done.assertions), [[6, "kind", "an unknown cause cites a change: one company's metric, two periods, two values"]]);
+  assert.deepEqual(done.assertions?.accepted.find((entry) => entry.index === 6), { index: 6, kind: "analyst_inference", text: ENDS_TEXT, evidence: [], supports: [0], subject: "NVDA" });
+  assert.deepEqual(rejections(done.assertions), []);
   assert.deepEqual(logged.mock.calls.map((call) => String(call.arguments[0])).filter((line) => line.startsWith("[chat] repair") || line.startsWith("[chat] judge")), [
     `[chat] judge thread=${FISCAL.thread_id} run=${FISCAL.run_id} on anthropic/claude-haiku-5-5: 2 shown, 0 unverified, of 2 inferences`,
     `[chat] repair thread=${FISCAL.thread_id} run=${FISCAL.run_id}: 1 sent, 1 repaired, 1 recovered`,
@@ -162,9 +169,9 @@ test("an inference judged to state an amount in words is repaired once: the call
 
   const written = JSON.parse(await readFile(join(dir, FISCAL.thread_id, `${FISCAL.run_id}.json`), "utf8")) as TurnTrace;
   assert.deepEqual(written.blocks, JSON.parse(JSON.stringify(done.blocks)));
-  assert.deepEqual(written.repair?.requests, [{ index: 8, text: GAP_TEXT, check: "judge", verdict: "entailed", worded_amount: true, reason: GAP_REASON }]);
-  assert.deepEqual(written.repair?.record.outcome === "replied" && [written.repair.record.exchange.text, written.repair.record.exchange.usage], [fenced([inference(8, ENDS_TEXT)]).text, { input_tokens: 9000, output_tokens: 120 }]);
-  assert.deepEqual(written.repair?.judge.map((record) => record.outcome === "replied" && record.exchange.text), [verdict(8, "entailed").text]);
+  assert.deepEqual(written.repair?.requests, [{ index: 6, text: GAP_TEXT, check: "judge", verdict: "entailed", worded_amount: true, reason: GAP_REASON }]);
+  assert.deepEqual(written.repair?.record.outcome === "replied" && [written.repair.record.exchange.text, written.repair.record.exchange.usage], [fenced([inference(6, ENDS_TEXT)]).text, { input_tokens: 9000, output_tokens: 120 }]);
+  assert.deepEqual(written.repair?.judge.map((record) => record.outcome === "replied" && record.exchange.text), [verdict(6, "entailed").text]);
   const metrics = answerMetrics(written);
   assert.deepEqual([metrics.inferences_shown, metrics.inferences_hidden, metrics.inferences_sent_to_repair, metrics.inferences_repaired, metrics.inferences_recovered, metrics.repair_input_tokens, metrics.repair_output_tokens], [2, 0, 1, 1, 1, 9000, 120]);
 
@@ -182,7 +189,7 @@ test("an inference the checks reject for a digit is repaired, checked and judged
   t.mock.method(console, "info", () => {});
   const repaired = deferred<LlmChatResult>();
   const { calls, repairs, asks, createClient } = models(QUARTER, {
-    judge: (ask) => (ask.id === 4 ? verdict(4, "entailed") : verdict(5, "unsupported", false, "nothing shows the base effect.")),
+    judge: (ask) => (ask.id === 0 ? verdict(0, "entailed") : verdict(6, "unsupported", false, "nothing shows the base effect.")),
     repair: () => repaired.promise,
   });
   const answer = await answerTurn(QUARTER.input, turn(QUARTER), { env: JUDGED_ENV, createClient });
@@ -190,48 +197,48 @@ test("an inference the checks reject for a digit is repaired, checked and judged
   const moderating = new Promise<void>((resolve) => {
     answer.judging!.watch((blocks) => {
       seen.push(text(blocks));
-      if (text(blocks).includes(MODERATING)) resolve();
+      if (text(blocks).includes(TAKEAWAY)) resolve();
     });
   });
   await moderating;
   // Held in its repair: the reader sees the first answer's verdicts.
-  assert.deepEqual(seen, [quarter(PENDING), quarter(MODERATING)]);
-  repaired.resolve(fenced([inference(5, SLOWING_TEXT, { supports: [2] })]));
+  assert.deepEqual(seen, [quarter(PENDING), quarter(TAKEAWAY)]);
+  repaired.resolve(fenced([inference(6, SLOWING_TEXT, { supports: [4] })]));
   const done = await answer.judging!.done;
 
-  assert.deepEqual(seen, [quarter(PENDING), quarter(MODERATING), quarter(MODERATING, UNVERIFIED_SLOWING)]);
-  assert.deepEqual(repairAsked(repairs[0]!).rejected, [{ index: 5, text: DIGIT_TEXT, check: "binding", reason: "an inference rests on its supports; it writes no figure" }]);
-  assert.equal(text(done.blocks), quarter(MODERATING, UNVERIFIED_SLOWING));
-  assert.deepEqual(asks.find((ask) => ask.id === 5)!.supports, ["NVDA's revenue rose in every period from Q1 2025 ($26.0B) to Q4 2026 ($62.1B)."]);
-  assert.deepEqual(done.assertions?.accepted.find((entry) => entry.index === 5), { index: 5, kind: "analyst_inference", text: SLOWING_TEXT, evidence: [], supports: [2] });
+  assert.deepEqual(seen, [quarter(PENDING), quarter(TAKEAWAY), quarter(TAKEAWAY, UNVERIFIED_SLOWING)]);
+  assert.deepEqual(repairAsked(repairs[0]!).rejected, [{ index: 6, text: DIGIT_TEXT, check: "binding", reason: "an inference rests on its supports; it writes no figure" }]);
+  assert.equal(text(done.blocks), quarter(TAKEAWAY, UNVERIFIED_SLOWING));
+  assert.deepEqual(asks.find((ask) => ask.id === 6)!.supports, ["NVDA's revenue rose in every period from Q1 2025 ($26.0B) to Q4 2026 ($62.1B)."]);
+  assert.deepEqual(done.assertions?.accepted.find((entry) => entry.index === 6), { index: 6, kind: "analyst_inference", text: SLOWING_TEXT, evidence: [], supports: [4], subject: "NVDA" });
   assert.deepEqual(done.assertions?.judged, [
-    { index: 4, verdict: "entailed", worded_amount: false },
-    { index: 5, verdict: "unsupported", worded_amount: false, reason: "nothing shows the base effect." },
+    { index: 0, verdict: "entailed", worded_amount: false },
+    { index: 6, verdict: "unsupported", worded_amount: false, reason: "nothing shows the base effect." },
   ]);
-  assert.deepEqual(done.assertions?.repaired, [5]);
-  assert.deepEqual(calls.sort(), ["answer", "judge 4", "judge 5", "repair"]);
+  assert.deepEqual(done.assertions?.repaired, [6]);
+  assert.deepEqual(calls.sort(), ["answer", "judge 0", "judge 6", "repair"]);
 });
 
 test("every inference sent to repair goes in one call, once every first verdict is in; a repair hidden again stays hidden, a worded one shows as unverified, with no second round", async (t) => {
   t.mock.method(console, "info", () => {});
   const { calls, repairs, createClient } = models(QUARTER, {
-    judge: (ask) => ask.id === 4
-      ? verdict(4, "contradicted", false, ask.text.startsWith("The large gap") ? "QoQ growth rose." : "it still says momentum fell.")
-      : verdict(5, "entailed", true, "it says a third smaller."),
-    repair: () => fenced([inference(4, "Momentum is moderating."), inference(5, "Growth is a third smaller than before.")]),
+    judge: (ask) => ask.id === 0
+      ? verdict(0, "contradicted", false, ask.text === TAKEAWAY_TEXT ? "QoQ growth rose." : "it still says momentum fell.")
+      : verdict(6, "entailed", true, "it says a third smaller."),
+    repair: () => fenced([inference(0, "Momentum is moderating."), inference(6, "Growth is a third smaller than before.")]),
   });
   const answer = await answerTurn(QUARTER.input, turn(QUARTER), { env: JUDGED_ENV, createClient });
   const done = await answer.judging!.done;
 
   assert.deepEqual(repairAsked(repairs[0]!).rejected, [
-    { index: 4, text: "The large gap between YoY and QoQ growth rates indicates sequential momentum is moderating even though the company is still growing rapidly on a year-over-year basis.", check: "judge", verdict: "contradicted", worded_amount: false, reason: "QoQ growth rose." },
-    { index: 5, text: DIGIT_TEXT, check: "binding", reason: "an inference rests on its supports; it writes no figure" },
+    { index: 0, text: TAKEAWAY_TEXT, check: "judge", verdict: "contradicted", worded_amount: false, reason: "QoQ growth rose." },
+    { index: 6, text: DIGIT_TEXT, check: "binding", reason: "an inference rests on its supports; it writes no figure" },
   ]);
-  assert.equal(text(done.blocks), quarter("> **Unverified analyst view** (not backed by the figures shown): Growth is a third smaller than before."));
-  assert.deepEqual(calls.sort(), ["answer", "judge 4", "judge 4", "judge 5", "repair"]);
-  assert.deepEqual(done.assertions?.repaired, [4, 5]);
-  assert.deepEqual(rejections(done.assertions).filter(([index]) => index === 4 || index === 5), [
-    [4, "judge", "contradicted: it still says momentum fell."],
+  assert.equal(text(done.blocks), quarter(null, "> **Unverified analyst view** (not backed by the figures shown): Growth is a third smaller than before."));
+  assert.deepEqual(calls.sort(), ["answer", "judge 0", "judge 0", "judge 6", "repair"]);
+  assert.deepEqual(done.assertions?.repaired, [0, 6]);
+  assert.deepEqual(rejections(done.assertions).filter(([index]) => index === 0 || index === 6), [
+    [0, "judge", "contradicted: it still says momentum fell."],
   ]);
 });
 
@@ -241,20 +248,20 @@ test("a repaired entry goes through the same checks as the first: a digit, an ad
     ["a digit", { text: "The gap of 8 months limits comparability." }, "binding", "an inference rests on its supports; it writes no figure"],
     ["an address", { text: "Comparability is limited, see www.example.com for why." }, "format", "an inference writes no link: the page would render the address as one"],
     ["a subject not in its evidence", { text: ENDS_TEXT, subject: "MSFT" }, "binding", "an inference's subject is a company its evidence covers"],
-    ["only failed supports", { text: ENDS_TEXT, supports: [6] }, "support", "an inference binds the accepted observations it rests on"],
+    ["only failed supports", { text: ENDS_TEXT, supports: [4] }, "support", "an inference binds the accepted observations it rests on"],
   ];
   for (const [label, fields, check, reason] of cases) {
-    const { calls, createClient } = models(FISCAL, { judge: fiscalJudge(), repair: () => fenced([{ kind: "analyst_inference", index: 8, ...fields }]) });
+    const { calls, createClient } = models(FISCAL, { judge: fiscalJudge(), repair: () => fenced([{ kind: "analyst_inference", index: 6, ...fields }]) });
     const done = await (await answerTurn(FISCAL.input, turn(FISCAL), { env: JUDGED_ENV, createClient })).judging!.done;
     assert.equal(text(done.blocks), fiscal(PROFITABILITY, UNVERIFIED_GAP), label);
-    assert.equal(rejections(done.assertions).find(([index]) => index === 8), undefined, label);
-    assert.equal(done.assertions?.accepted.find((entry) => entry.index === 8)?.text, GAP_TEXT, label);
+    assert.equal(rejections(done.assertions).find(([index]) => index === 6), undefined, label);
+    assert.equal(done.assertions?.accepted.find((entry) => entry.index === 6)?.text, GAP_TEXT, label);
     assert.deepEqual(done.assertions?.judged, [
-      { index: 7, verdict: "entailed", worded_amount: false },
-      { index: 8, verdict: "entailed", worded_amount: true, reason: GAP_REASON },
+      { index: 4, verdict: "entailed", worded_amount: false },
+      { index: 6, verdict: "entailed", worded_amount: true, reason: GAP_REASON },
     ], label);
     assert.equal(done.assertions?.repaired, undefined, label);
-    assert.deepEqual(calls.sort(), ["answer", "judge 7", "judge 8", "repair"], label);
+    assert.deepEqual(calls.sort(), ["answer", "judge 4", "judge 6", "repair"], label);
     const lines = logged.mock.calls.slice(-2).map((call) => String(call.arguments[0]));
     assert.deepEqual(lines, [
       `[chat] judge thread=${FISCAL.thread_id} run=${FISCAL.run_id} on anthropic/claude-haiku-5-5: 1 shown, 1 unverified, of 2 inferences`,
@@ -272,13 +279,13 @@ test("a repair that fails leaves its inference as the first round showed it, and
       throw new Error("provider down");
     }],
     ["past its deadline", () => hang(t)],
-    ["cut off", async () => ({ ...fenced([inference(8, ENDS_TEXT)]), truncated: true })],
+    ["cut off", async () => ({ ...fenced([inference(6, ENDS_TEXT)]), truncated: true })],
     ["no list", async () => ({ text: "I cannot say it without the gap." })],
     ["left out", async () => fenced([])],
     ["another index, or another kind", async () => fenced([
-      inference(7, "It is more profitable."),
+      inference(4, "It is more profitable."),
       inference(0, "It replaces an observation."),
-      { kind: "observation", index: 8, text: "AAPL's revenue is [[F4]].", evidence: ["F4"] },
+      { kind: "observation", index: 6, text: "AAPL's revenue is [[F4]].", evidence: ["F4"] },
     ])],
   ];
   for (const [label, repair] of failures) {
@@ -294,13 +301,13 @@ test("a repair that fails leaves its inference as the first round showed it, and
     const late: string[] = [];
     answer.judging!.watch((blocks) => late.push(text(blocks)));
     assert.deepEqual(late, [fiscal(PROFITABILITY, UNVERIFIED_GAP)], label);
-    assert.equal(rejections(done.assertions).find(([index]) => index === 8), undefined, label);
+    assert.equal(rejections(done.assertions).find(([index]) => index === 6), undefined, label);
     assert.equal(done.assertions?.repaired, undefined, label);
-    assert.deepEqual(done.assertions?.judged?.map(({ index }) => index), [7, 8], label);
-    assert.deepEqual(calls.sort(), ["answer", "judge 7", "judge 8", "repair"], label);
+    assert.deepEqual(done.assertions?.judged?.map(({ index }) => index), [4, 6], label);
+    assert.deepEqual(calls.sort(), ["answer", "judge 4", "judge 6", "repair"], label);
     const written = JSON.parse(await readFile(join(dir, FISCAL.thread_id, `${FISCAL.run_id}.json`), "utf8")) as TurnTrace;
     assert.equal(text(written.blocks), fiscal(PROFITABILITY, UNVERIFIED_GAP), label);
-    assert.deepEqual(written.repair?.requests.map(({ index }) => index), [8], label);
+    assert.deepEqual(written.repair?.requests.map(({ index }) => index), [6], label);
     assert.deepEqual(written.repair?.judge, [], label);
     const metrics = answerMetrics(written);
     assert.deepEqual([metrics.inferences_shown, metrics.inferences_unverified, metrics.inferences_hidden, metrics.inferences_recovered], [1, 1, 0, 0], label);
@@ -311,7 +318,7 @@ test("a worded inference stays unverified when its repair is judged contradicted
   t.mock.method(console, "info", () => {});
   const worse = models(FISCAL, {
     judge: fiscalJudge((ask) => verdict(ask.id, "contradicted", false, "the ends are not shown.")),
-    repair: () => fenced([inference(8, ENDS_TEXT)]),
+    repair: () => fenced([inference(6, ENDS_TEXT)]),
   });
   const worseTurn = await answerTurn(FISCAL.input, turn(FISCAL), { env: JUDGED_ENV, createClient: worse.createClient });
   const worseSeen: string[] = [];
@@ -319,20 +326,20 @@ test("a worded inference stays unverified when its repair is judged contradicted
   const kept = await worseTurn.judging!.done;
   assert.equal(text(kept.blocks), fiscal(PROFITABILITY, UNVERIFIED_GAP));
   assert.equal(worseSeen.at(-1), fiscal(PROFITABILITY, UNVERIFIED_GAP));
-  assert.deepEqual(kept.assertions?.judged?.at(-1), { index: 8, verdict: "entailed", worded_amount: true, reason: GAP_REASON });
+  assert.deepEqual(kept.assertions?.judged?.at(-1), { index: 6, verdict: "entailed", worded_amount: true, reason: GAP_REASON });
   assert.equal(kept.assertions?.repaired, undefined);
-  assert.deepEqual(worse.calls.sort(), ["answer", "judge 7", "judge 8", "judge 8", "repair"]);
+  assert.deepEqual(worse.calls.sort(), ["answer", "judge 4", "judge 6", "judge 6", "repair"]);
   const keptMetrics = answerMetrics({ ...kept, exchange: FISCAL.exchange, repair: { requests: [], record: { outcome: "not_called", reason: "x" }, judge: [] } });
   assert.deepEqual([keptMetrics.inferences_unverified, keptMetrics.inferences_hidden, keptMetrics.inferences_repaired, keptMetrics.inferences_recovered], [1, 0, 0, 0]);
 
   const contradicted = models(FISCAL, {
-    judge: (ask) => (ask.id === 7 ? verdict(7, "entailed") : verdict(8, "contradicted", false, "the gap is not eight months.")),
-    repair: () => fenced([inference(8, "The gap of 8 months limits comparability.")]),
+    judge: (ask) => (ask.id === 4 ? verdict(4, "entailed") : verdict(6, "contradicted", false, "the gap is not eight months.")),
+    repair: () => fenced([inference(6, "The gap of 8 months limits comparability.")]),
   });
   const hidden = await (await answerTurn(FISCAL.input, turn(FISCAL), { env: JUDGED_ENV, createClient: contradicted.createClient })).judging!.done;
   assert.equal(text(hidden.blocks), fiscal(PROFITABILITY));
-  assert.deepEqual(rejections(hidden.assertions).find(([index]) => index === 8), [8, "binding", "an inference rests on its supports; it writes no figure"]);
-  assert.deepEqual(hidden.assertions?.repaired, [8]);
+  assert.deepEqual(rejections(hidden.assertions).find(([index]) => index === 6), [6, "binding", "an inference rests on its supports; it writes no figure"]);
+  assert.deepEqual(hidden.assertions?.repaired, [6]);
   const hiddenMetrics = answerMetrics({ ...hidden, exchange: FISCAL.exchange, repair: { requests: [], record: { outcome: "not_called", reason: "x" }, judge: [] } });
   assert.deepEqual([hiddenMetrics.inferences_hidden, hiddenMetrics.inferences_recovered], [1, 0]);
 });
@@ -346,7 +353,7 @@ test("a worded inference holds its line through its repair: the repaired text sh
       asked.resolve();
       return second.promise as unknown as LlmChatResult;
     }),
-    repair: () => fenced([inference(8, ENDS_TEXT)]),
+    repair: () => fenced([inference(6, ENDS_TEXT)]),
   });
   const answer = await answerTurn(FISCAL.input, turn(FISCAL), { env: JUDGED_ENV, createClient });
   const seen: string[] = [];
@@ -354,25 +361,25 @@ test("a worded inference holds its line through its repair: the repaired text sh
   await asked.promise;
   assert.equal(seen.at(-1), fiscal(PROFITABILITY, PENDING));
   assert.equal(seen.some((blocks) => blocks.includes(ENDS_TEXT) || blocks.includes(GAP_TEXT)), false);
-  second.resolve(verdict(8, "unsupported", true, "it says loosely."));
+  second.resolve(verdict(6, "unsupported", true, "it says loosely."));
   const done = await answer.judging!.done;
-  const unverifiedEnds = `> **Unverified analyst view** (not backed by the figures shown): ${ENDS_TEXT}`;
+  const unverifiedEnds = `> **Unverified analyst view on NVDA** (not backed by the figures shown): ${ENDS_TEXT}`;
   assert.equal(seen.at(-1), fiscal(PROFITABILITY, unverifiedEnds));
   assert.equal(text(done.blocks), fiscal(PROFITABILITY, unverifiedEnds));
-  assert.deepEqual(done.assertions?.repaired, [8]);
+  assert.deepEqual(done.assertions?.repaired, [6]);
 });
 
 test("no repair is asked for when nothing qualifies: verdicts entailed, unsupported or errors; no judge configured; the fallback shown", async (t) => {
   t.mock.method(console, "info", () => {});
-  const nothing = models(SEGMENTS, { judge: (ask) => (ask.id === 6 ? verdict(6, "entailed") : verdict(7, "unsupported", false, "x.")) });
+  const nothing = models(SEGMENTS, { judge: (ask) => (ask.id === 3 ? verdict(3, "entailed") : verdict(4, "unsupported", false, "x.")) });
   const segments = await (await answerTurn(SEGMENTS.input, turn(SEGMENTS), { env: JUDGED_ENV, createClient: nothing.createClient })).judging!.done;
-  assert.deepEqual(nothing.calls.sort(), ["answer", "judge 6", "judge 7"]);
+  assert.deepEqual(nothing.calls.sort(), ["answer", "judge 3", "judge 4"]);
   assert.equal(segments.assertions?.repaired, undefined);
 
-  const errors = models(FISCAL, { judge: (ask) => (ask.id === 7 ? verdict(7, "entailed") : { text: "no verdicts" }) });
+  const errors = models(FISCAL, { judge: (ask) => (ask.id === 4 ? verdict(4, "entailed") : { text: "no verdicts" }) });
   const errored = await (await answerTurn(FISCAL.input, turn(FISCAL), { env: JUDGED_ENV, createClient: errors.createClient })).judging!.done;
   assert.equal(text(errored.blocks), fiscal(PROFITABILITY));
-  assert.deepEqual(errors.calls.sort(), ["answer", "judge 7", "judge 8"]);
+  assert.deepEqual(errors.calls.sort(), ["answer", "judge 4", "judge 6"]);
 
   // A digit-rejected inference, but no judge model: nothing waits or is asked.
   const unjudged = models(QUARTER, {});
@@ -391,34 +398,33 @@ test("no repair is asked for when nothing qualifies: verdicts entailed, unsuppor
 test("a turn whose only hidden inference is check-rejected waits for its repair, with no line in its place", async (t) => {
   t.mock.method(console, "info", () => {});
   // 4 cites no assertion as its support, and 5 has a digit.
-  const unsupported = { ...QUARTER, exchange: { ...QUARTER.exchange!, text: QUARTER.exchange!.text.replace('"supports":[2,3]', '"supports":[9]') } };
+  const unsupported = { ...QUARTER, exchange: { ...QUARTER.exchange!, text: QUARTER.exchange!.text.replace('"supports":[1,2,3]', '"supports":[9]') } };
   const { calls, repairs, createClient } = models(unsupported, {
     judge: (ask) => verdict(ask.id, "entailed"),
-    repair: () => fenced([inference(4, "Momentum is moderating.", { supports: [2, 3] })]),
+    repair: () => fenced([inference(0, "Momentum is moderating.", { supports: [1, 2, 3] })]),
   });
   const answer = await answerTurn(unsupported.input, turn(unsupported), { env: JUDGED_ENV, createClient });
-  assert.equal(text(answer.blocks), quarter());
+  assert.equal(text(answer.blocks), quarter(null));
   const done = await answer.judging!.done;
   assert.deepEqual(repairAsked(repairs[0]!).rejected, [
-    { index: 4, text: "The large gap between YoY and QoQ growth rates indicates sequential momentum is moderating even though the company is still growing rapidly on a year-over-year basis.", check: "support", reason: "an inference binds the accepted observations it rests on", rejected_supports: [9] },
-    { index: 5, text: DIGIT_TEXT, check: "binding", reason: "an inference rests on its supports; it writes no figure" },
+    { index: 0, text: TAKEAWAY_TEXT, check: "support", reason: "an inference binds the accepted observations it rests on", rejected_supports: [9] },
+    { index: 6, text: DIGIT_TEXT, check: "binding", reason: "an inference rests on its supports; it writes no figure" },
   ]);
-  assert.equal(text(done.blocks), quarter("> **Analyst inference** (NVDA's revenue rose in every period): Momentum is moderating."));
-  assert.deepEqual(calls.sort(), ["answer", "judge 4", "repair"]);
+  assert.equal(text(done.blocks), quarter("> **Analyst inference:** Momentum is moderating."));
+  assert.deepEqual(calls.sort(), ["answer", "judge 0", "repair"]);
 });
 
 test("an inference the checks rejected for its supports is repaired by the same words on new supports: the same-words rule is for what the judge read", async (t) => {
   t.mock.method(console, "info", () => {});
-  const MODERATING_TEXT = "The large gap between YoY and QoQ growth rates indicates sequential momentum is moderating even though the company is still growing rapidly on a year-over-year basis.";
-  const unsupported = { ...QUARTER, exchange: { ...QUARTER.exchange!, text: QUARTER.exchange!.text.replace('"supports":[2,3]', '"supports":[9]') } };
+  const unsupported = { ...QUARTER, exchange: { ...QUARTER.exchange!, text: QUARTER.exchange!.text.replace('"supports":[1,2,3]', '"supports":[9]') } };
   const { calls, createClient } = models(unsupported, {
     judge: (ask) => verdict(ask.id, "entailed"),
-    repair: () => fenced([inference(4, `${MODERATING_TEXT} `, { supports: [2, 3] })]),
+    repair: () => fenced([inference(0, `${TAKEAWAY_TEXT} `, { supports: [1, 2, 3] })]),
   });
   const done = await (await answerTurn(unsupported.input, turn(unsupported), { env: JUDGED_ENV, createClient })).judging!.done;
-  assert.equal(text(done.blocks), quarter(MODERATING));
-  assert.deepEqual(done.assertions?.repaired, [4]);
-  assert.deepEqual(calls.sort(), ["answer", "judge 4", "repair"]);
+  assert.equal(text(done.blocks), quarter(TAKEAWAY));
+  assert.deepEqual(done.assertions?.repaired, [0]);
+  assert.deepEqual(calls.sort(), ["answer", "judge 0", "repair"]);
 });
 
 test("a trace recorded before repairs replays with none: its worded inference stays unverified; one recorded with a repair replays it with no model", async () => {
@@ -430,43 +436,43 @@ test("a trace recorded before repairs replays with none: its worded inference st
   assert.equal(replayed.repair_input_changed, true);
 
   const recorded = await replayRecorded(FISCAL);
-  assert.equal(text(recorded.blocks), fiscal(PROFITABILITY, "> **Analyst inference on NVDA:** Its fiscal year ends well before the other company's, so the two revenue figures cover different stretches of time and compare only loosely."));
-  assert.deepEqual(recorded.assertions?.repaired, [8]);
+  assert.equal(text(recorded.blocks), fiscal(PROFITABILITY, "> **Analyst inference on NVDA** (revenue highest first: AAPL, NVDA): The revenue comparison is not like-for-like, since its fiscal year ended well before the other's, so the gap could look different on matched periods."));
+  assert.deepEqual(recorded.assertions?.repaired, [6]);
   assert.equal(recorded.repair_input_changed, false);
 });
 
 test("a replay keeps the recorded verdicts and runs only the repair live (recorded --repair), or reruns the judge and the repair live (--judge)", async (t) => {
   t.mock.method(console, "info", () => {});
-  const repairOnly = models(FISCAL, { judge: fiscalJudge(), repair: () => fenced([inference(8, ENDS_TEXT)]) });
+  const repairOnly = models(FISCAL, { judge: fiscalJudge(), repair: () => fenced([inference(6, ENDS_TEXT)]) });
   const repaired = await replayRecorded(FISCAL, { env: JUDGED_ENV, createClient: repairOnly.createClient, rerun: "repair" });
   assert.equal(text(repaired.blocks), fiscal(PROFITABILITY, ENDS));
-  assert.deepEqual(repairOnly.calls, ["repair", "judge 8"]);
+  assert.deepEqual(repairOnly.calls, ["repair", "judge 6"]);
   assert.deepEqual(repaired.judge, FISCAL.judge);
 
-  const live = models(FISCAL, { judge: fiscalJudge(), repair: () => fenced([inference(8, ENDS_TEXT)]) });
+  const live = models(FISCAL, { judge: fiscalJudge(), repair: () => fenced([inference(6, ENDS_TEXT)]) });
   const judged = await replayRecorded(FISCAL, { env: JUDGED_ENV, createClient: live.createClient, rerun: "judge" });
   assert.equal(text(judged.blocks), fiscal(PROFITABILITY, ENDS));
-  assert.deepEqual(live.calls.sort(), ["judge 7", "judge 8", "judge 8", "repair"]);
+  assert.deepEqual(live.calls.sort(), ["judge 4", "judge 6", "judge 6", "repair"]);
 });
 
-const UNVERIFIED_ENDS = `> **Unverified analyst view** (not backed by the figures shown): ${ENDS_TEXT}`;
+const UNVERIFIED_ENDS = `> **Unverified analyst view on NVDA** (not backed by the figures shown): ${ENDS_TEXT}`;
 
 test("in every repair outcome the last blocks a watcher hears are the blocks saved, and no repaired text shows before its verdict", async (t) => {
   t.mock.method(console, "info", () => {});
   const firsts: Array<[string, LlmChatResult, string | null]> = [
-    ["entailed, worded", verdict(8, "entailed", true, GAP_REASON), UNVERIFIED_GAP],
-    ["unsupported, worded", verdict(8, "unsupported", true, GAP_REASON), UNVERIFIED_GAP],
-    ["contradicted", verdict(8, "contradicted", false, "the ends are not shown."), null],
+    ["entailed, worded", verdict(6, "entailed", true, GAP_REASON), UNVERIFIED_GAP],
+    ["unsupported, worded", verdict(6, "unsupported", true, GAP_REASON), UNVERIFIED_GAP],
+    ["contradicted", verdict(6, "contradicted", false, "the ends are not shown."), null],
   ];
   const outcomes: Array<[string, () => Promise<LlmChatResult> | LlmChatResult, LlmChatResult | null, string | null]> = [
-    ["repaired, entailed", () => fenced([inference(8, ENDS_TEXT)]), verdict(8, "entailed"), ENDS],
-    ["repaired, entailed and worded", () => fenced([inference(8, ENDS_TEXT)]), verdict(8, "entailed", true, "w."), UNVERIFIED_ENDS],
-    ["repaired, unsupported", () => fenced([inference(8, ENDS_TEXT)]), verdict(8, "unsupported", false, "x."), UNVERIFIED_ENDS],
-    ["repaired, contradicted", () => fenced([inference(8, ENDS_TEXT)]), verdict(8, "contradicted", false, "no."), "first"],
-    ["repaired, no verdict", () => fenced([inference(8, ENDS_TEXT)]), { text: "not json" }, "first"],
-    ["rejected by the checks", () => fenced([inference(8, "The gap of 8 months limits comparability.")]), null, "first"],
+    ["repaired, entailed", () => fenced([inference(6, ENDS_TEXT)]), verdict(6, "entailed"), ENDS],
+    ["repaired, entailed and worded", () => fenced([inference(6, ENDS_TEXT)]), verdict(6, "entailed", true, "w."), UNVERIFIED_ENDS],
+    ["repaired, unsupported", () => fenced([inference(6, ENDS_TEXT)]), verdict(6, "unsupported", false, "x."), UNVERIFIED_ENDS],
+    ["repaired, contradicted", () => fenced([inference(6, ENDS_TEXT)]), verdict(6, "contradicted", false, "no."), "first"],
+    ["repaired, no verdict", () => fenced([inference(6, ENDS_TEXT)]), { text: "not json" }, "first"],
+    ["rejected by the checks", () => fenced([inference(6, "The gap of 8 months limits comparability.")]), null, "first"],
     ["left out", () => fenced([]), null, "first"],
-    ["the same words", () => fenced([inference(8, GAP_TEXT)]), verdict(8, "entailed"), "first"],
+    ["the same words", () => fenced([inference(6, GAP_TEXT)]), verdict(6, "entailed"), "first"],
     ["no list", () => ({ text: "no block" }), null, "first"],
     ["late", () => new Promise<LlmChatResult>(() => {}), null, "first"],
   ];
@@ -476,7 +482,7 @@ test("in every repair outcome the last blocks a watcher hears are the blocks sav
     for (const [label, repair, second, expected] of outcomes) {
       const row = `${firstLabel}, ${label}`;
       const { createClient } = models(FISCAL, {
-        judge: (ask) => (ask.id === 7 ? verdict(7, "entailed") : ask.text === GAP_TEXT ? firstReply : second ?? assert.fail(`${row}: no second verdict expected`)),
+        judge: (ask) => (ask.id === 4 ? verdict(4, "entailed") : ask.text === GAP_TEXT ? firstReply : second ?? assert.fail(`${row}: no second verdict expected`)),
         repair: repair as () => LlmChatResult,
       });
       const answer = await answerTurn(FISCAL.input, turn(FISCAL), { env: JUDGED_ENV, createClient, repairDeadlines: { attemptMs: 30, totalMs: 60 } });
@@ -494,25 +500,24 @@ test("in every repair outcome the last blocks a watcher hears are the blocks sav
 
 test("a repair that fails the checks shows its inference's first form at once, while another repaired verdict is still out", async (t) => {
   t.mock.method(console, "info", () => {});
-  const P_TEXT = "Despite lower absolute revenue, NVDA's substantially higher margins indicate stronger profitability per dollar of revenue compared to AAPL.";
-  const UNVERIFIED_P = `> **Unverified analyst view** (not backed by the figures shown): ${P_TEXT}`;
+  const UNVERIFIED_P = `> **Unverified analyst view on AAPL** (not backed by the figures shown): ${PROFITABILITY_TEXT}`;
   const second = deferred<LlmChatResult>();
   const asked = deferred<void>();
   const { createClient } = models(FISCAL, {
     judge: (ask) => {
-      if (ask.text === P_TEXT) return verdict(7, "entailed", true, "it says substantially.");
-      if (ask.text === GAP_TEXT) return verdict(8, "entailed", true, GAP_REASON);
+      if (ask.text === PROFITABILITY_TEXT) return verdict(4, "entailed", true, "it says substantially.");
+      if (ask.text === GAP_TEXT) return verdict(6, "entailed", true, GAP_REASON);
       asked.resolve();
       return second.promise as unknown as LlmChatResult;
     },
-    repair: () => fenced([inference(7, "NVDA earns 2 times more per dollar."), inference(8, ENDS_TEXT)]),
+    repair: () => fenced([inference(4, "It earns 2 times more per dollar."), inference(6, ENDS_TEXT)]),
   });
   const answer = await answerTurn(FISCAL.input, turn(FISCAL), { env: JUDGED_ENV, createClient });
   const seen: string[] = [];
   answer.judging!.watch((blocks) => seen.push(text(blocks)));
   await asked.promise;
   assert.equal(seen.at(-1), fiscal(UNVERIFIED_P, PENDING));
-  second.resolve(verdict(8, "entailed"));
+  second.resolve(verdict(6, "entailed"));
   const done = await answer.judging!.done;
   assert.equal(text(done.blocks), fiscal(UNVERIFIED_P, ENDS));
   assert.equal(seen.at(-1), text(done.blocks));
@@ -523,33 +528,33 @@ test("a repair that gives back the same words is no repair: the judge is not ask
   t.mock.method(console, "info", () => {});
   const { calls, createClient } = models(FISCAL, {
     judge: fiscalJudge(() => assert.fail("the same words are not judged again")),
-    repair: () => fenced([inference(8, GAP_TEXT)]),
+    repair: () => fenced([inference(6, GAP_TEXT)]),
   });
   const done = await (await answerTurn(FISCAL.input, turn(FISCAL), { env: JUDGED_ENV, createClient })).judging!.done;
   assert.equal(text(done.blocks), fiscal(PROFITABILITY, UNVERIFIED_GAP));
   assert.equal(done.assertions?.repaired, undefined);
-  assert.deepEqual(done.assertions?.judged?.at(-1), { index: 8, verdict: "entailed", worded_amount: true, reason: GAP_REASON });
-  assert.deepEqual(calls.sort(), ["answer", "judge 7", "judge 8", "repair"]);
+  assert.deepEqual(done.assertions?.judged?.at(-1), { index: 6, verdict: "entailed", worded_amount: true, reason: GAP_REASON });
+  assert.deepEqual(calls.sort(), ["answer", "judge 4", "judge 6", "repair"]);
 });
 
 test("a repair that changes only spacing, case or the closing stop is the same words, and one with no text is no repair: neither is judged again", async (t) => {
   t.mock.method(console, "info", () => {});
   const firsts: Array<[string, LlmChatResult, string]> = [
-    ["entailed, worded", verdict(8, "entailed", true, GAP_REASON), fiscal(PROFITABILITY, UNVERIFIED_GAP)],
-    ["contradicted", verdict(8, "contradicted", false, "the ends are not shown."), fiscal(PROFITABILITY)],
+    ["entailed, worded", verdict(6, "entailed", true, GAP_REASON), fiscal(PROFITABILITY, UNVERIFIED_GAP)],
+    ["contradicted", verdict(6, "contradicted", false, "the ends are not shown."), fiscal(PROFITABILITY)],
   ];
   const repairs: Array<[string, Record<string, unknown>]> = [
-    ["a trailing space", inference(8, `${GAP_TEXT} `)],
-    ["the stop dropped", inference(8, GAP_TEXT.slice(0, -1))],
-    ["spacing and case", inference(8, `  ${GAP_TEXT.replace("eight-month gap", "Eight-Month  gap")}`)],
-    ["no text", { kind: "analyst_inference", index: 8, supports: [0] }],
-    ["a text that is not a string", inference(8, 8 as unknown as string)],
+    ["a trailing space", inference(6, `${GAP_TEXT} `)],
+    ["the stop dropped", inference(6, GAP_TEXT.slice(0, -1))],
+    ["spacing and case", inference(6, `  ${GAP_TEXT.replace("not like-for-like", "Not  Like-For-Like")}`)],
+    ["no text", { kind: "analyst_inference", index: 6, supports: [0] }],
+    ["a text that is not a string", inference(6, 8 as unknown as string)],
   ];
   for (const [firstLabel, firstReply, saved] of firsts) {
     for (const [label, entry] of repairs) {
       const row = `${firstLabel}, ${label}`;
       const { calls, createClient } = models(FISCAL, {
-        judge: (ask) => (ask.id === 7 ? verdict(7, "entailed") : ask.text === GAP_TEXT ? firstReply : verdict(8, "entailed")),
+        judge: (ask) => (ask.id === 4 ? verdict(4, "entailed") : ask.text === GAP_TEXT ? firstReply : verdict(6, "entailed")),
         repair: () => fenced([entry]),
       });
       const answer = await answerTurn(FISCAL.input, turn(FISCAL), { env: JUDGED_ENV, createClient });
@@ -559,7 +564,7 @@ test("a repair that changes only spacing, case or the closing stop is the same w
       assert.equal(text(done.blocks), saved, row);
       assert.equal(seen.at(-1), saved, row);
       assert.equal(done.assertions?.repaired, undefined, row);
-      assert.deepEqual(calls.sort(), ["answer", "judge 7", "judge 8", "repair"], row);
+      assert.deepEqual(calls.sort(), ["answer", "judge 4", "judge 6", "repair"], row);
     }
   }
 });
