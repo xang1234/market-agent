@@ -400,6 +400,22 @@ test("without its plan, a packet holds no lead or ranking: nothing says what eit
   assert.deepEqual(rejected(enginePacket(HIGH, TICKERS, null), { kind: "observation", text: "x", evidence: ["F9"] }), [[0, 'unknown evidence id "F9"']]);
 });
 
+test("a comparison or an unknown cause cites no lead or ranking, by a rule of its own: neither is one company's value in one period (#398 review)", () => {
+  const leads = enginePacket(LEADS, LEADS_TICKERS, leadPlan(["a", "b", "c"], [["a", "b"], ["a", "c"]]));
+  const rejected = (packet: ReturnType<typeof enginePacket>, ...assertions: unknown[]) => checkAssertions(assertions, packet).rejected.map((entry) => [entry.index, entry.check, entry.reason]);
+  assert.deepEqual(rejected(leads,
+    { kind: "comparison", text: "x", evidence: ["F4", "F5"], op: "highest", result: "F5" },
+    { kind: "unknown_cause", text: "y", evidence: ["F4"] },
+    { kind: "comparison", text: "z", evidence: ["F1", "F2", "F3"], op: "highest", result: "F1" },
+  ), [
+    [0, "kind", "a comparison cites no lead or ranking: neither is one company's value in one period"],
+    [1, "kind", "an unknown cause cites no lead or ranking: neither is one company's value in one period"],
+  ]);
+  assert.deepEqual(rejected(enginePacket(HIGH, TICKERS, HIGH_PLAN), { kind: "comparison", text: "x", evidence: ["F8", "F9"], op: "highest", result: "F8" }), [
+    [0, "kind", "a comparison cites no lead or ranking: neither is one company's value in one period"],
+  ]);
+});
+
 test("a peer ranking is no figure of the packet: it is no one company's (#398)", () => {
   const cohort = content([
     value(1, "a", "measure:m1", "period:p0", "74.40%"),
