@@ -7,6 +7,7 @@ import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import type { PlanningModel, PlanningResult } from "../../financial-engine/src/planner.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
+import type { SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { IDS, seedReportedFact } from "../../financial-engine/test/db-fixtures.ts";
 import { resolveResearchScope, type ResearchScope, type ScopeProposal } from "../src/research-scope.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "../src/subjects.ts";
@@ -313,6 +314,23 @@ test("a question about one company that asks for no figure is answered with its 
       message.blocks[1]?.segments?.[0]?.text,
       "Not covered by this answer: revenue growth from Q4 FY2022 to Q1 FY2023, whose quarters are not dated consecutively; revenue growth from Q4 FY2022 to Q4 FY2023, whose quarters are not dated consecutively.",
     );
+  });
+
+  await t.test("a statement error as the overview is read again for its note leaves the answer published (#479 review)", async (st) => {
+    const warned: unknown[][] = [];
+    st.mock.method(console, "warn", (...args: unknown[]) => warned.push(args));
+    // Its revenue is read to plan the overview, then again in the transaction that saves the answer.
+    let reads = 0;
+    const failingReread: typeof createEvidenceFinancialPort = (executor) => {
+      const port = createEvidenceFinancialPort(executor);
+      const failing = createEvidenceFinancialPort({ query: () => executor.query("select 1/0") } as unknown as SqlExecutor);
+      return { ...port, listInputCandidates: (request) => (request.fiscal_year === null && reads++ > 0 ? failing : port).listInputCandidates(request) };
+    };
+    const done = completed((await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve, evidence: failingReread }).run({ ...base, userIntent: "Revenue for QTRS" })).events);
+    assert.deepEqual([reads, await results(done.message_id)], [2, QTRS_OVERVIEW]);
+    assert.deepEqual(warned.filter(([message]) => String(message).startsWith("[chat]")), [
+      ["[chat] the overview's revenue quarters could not be read again, so its note names no growth it leaves out", "database_error"],
+    ]);
   });
 
   await t.test("a question about one company's margin trend is its three margins over the quarters, each with its high and low, with no model planning it (#398)", async () => {
