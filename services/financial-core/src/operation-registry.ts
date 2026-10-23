@@ -135,7 +135,7 @@ export const OPERATION_REGISTRY: { readonly [K in OperationKind]: OperationSpec<
   },
   period_rank: {
     operation_version: "period_rank.v1",
-    interpretation: "Ranking of one subject's measure across its own distinct, non-overlapping periods of one length; ties explicit, and a period without a value left out and counted.",
+    interpretation: "Ranking of one subject's measure across two or more of its own distinct, non-overlapping quarters, or years; ties explicit, and a period without a value left out and counted.",
     produces: "predicate",
     tolerates_missing_operands: true,
     evaluate: (node, operands) => periodRank(node, operands),
