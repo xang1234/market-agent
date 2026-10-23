@@ -15,19 +15,25 @@ export type InferenceVerdict =
 
 export type ShownAs = "shown" | "unverified" | "hidden";
 
+// Which answer an inference is in: an analyst answer, written from claims and
+// the year-to-date chart, or the commentary on an engine answer.
+export type AnswerPath = "analyst" | "engine";
+
 // An unsupported inference goes beyond the figures without contradicting
 // them, so it shows, labelled as such (render-assertions.ts
 // unverifiedInference).
 const SHOWN_AS: Readonly<Record<Verdict, ShownAs>> = { entailed: "shown", unsupported: "unverified", contradicted: "hidden" };
 
 // What the reader is shown of an inference. One the judge flags as stating an
-// amount in words shows no higher than unverified, so the page does not vouch
-// for an amount that is not a packet value, as far as the judge's flag catches
-// them.
-export function shownAs(verdict: InferenceVerdict): ShownAs {
+// amount in words is not shown in an analyst answer, whose numbers are only
+// its claims' and its chart's (#398), and shows no higher than unverified in
+// an engine answer's commentary (#509), so neither page vouches for an amount
+// that is not a packet value, as far as the judge's flag catches them.
+export function shownAs(verdict: InferenceVerdict, path: AnswerPath): ShownAs {
   if (verdict.verdict === "error") return "hidden";
   const as = SHOWN_AS[verdict.verdict];
-  return verdict.worded_amount && as === "shown" ? "unverified" : as;
+  if (!verdict.worded_amount) return as;
+  return path === "analyst" ? "hidden" : as === "shown" ? "unverified" : as;
 }
 
 // A worded amount goes to repair even when it shows: a rewrite without the

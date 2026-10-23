@@ -2466,18 +2466,6 @@
         ]
       },
       {
-        "index": 6,
-        "kind": "analyst_inference",
-        "text": "The sharp drop looks like a one-quarter dislocation rather than a lasting reset, since margin recovered afterward while revenue kept growing.",
-        "evidence": [],
-        "supports": [
-          1,
-          2,
-          4
-        ],
-        "subject": "NVDA"
-      },
-      {
         "index": 7,
         "kind": "analyst_inference",
         "text": "Still, the recovered margin remains below the level at the start of the period shown, so the earlier peak has not been regained.",
@@ -2488,7 +2476,14 @@
         "subject": "NVDA"
       }
     ],
-    "rejected": [],
+    "rejected": [
+      {
+        "index": 6,
+        "text": "The sharp drop looks like a one-quarter dislocation rather than a lasting reset, since margin recovered afterward while revenue kept growing.",
+        "check": "judge",
+        "reason": "entailed, worded_amount"
+      }
+    ],
     "rendered": true,
     "judged": [
       {
@@ -2922,14 +2917,6 @@
         {
           "type": "text",
           "text": "The figures do not show why NVDA's gross margin changed."
-        },
-        {
-          "type": "text",
-          "text": "\n\n"
-        },
-        {
-          "type": "text",
-          "text": "> **Unverified analyst view** (not backed by the figures shown): The sharp drop looks like a one-quarter dislocation rather than a lasting reset, since margin recovered afterward while revenue kept growing."
         },
         {
           "type": "text",

@@ -13,7 +13,7 @@ import { isRecord } from "../../shared/src/http.ts";
 import { assertionList, checkAssertions, type AssertionReport } from "./assertions.ts";
 import { judgeCases, judgeInferences, judgeMessages, verdictsOf, type JudgeCase, type JudgeRecord, type ModelRecord } from "./inference-judge.ts";
 import { repairRequests, repairRound, requestRepair, type RepairRequest, type RepairTrace } from "./inference-repair.ts";
-import { sentToRepair, shownAs, verdictText, type InferenceVerdict, type ShownAs } from "./verdicts.ts";
+import { sentToRepair, shownAs, verdictText, type AnswerPath, type InferenceVerdict, type ShownAs } from "./verdicts.ts";
 import { composeAnalystBlocksWithLlm, renderedAnswer, turnPacket, type AnswerBlocks, type AnswerUsage, type InferenceState, type ModelDeadlines } from "./llm-runtime.ts";
 
 export type AnswerTraceInput = Omit<
@@ -59,7 +59,12 @@ export type TurnTrace = {
 export type TracedAnswer = Pick<TurnTrace, "exchange" | "assertions" | "blocks"> & { judge: ReadonlyArray<JudgeRecord> | null; repair: RepairTrace | null };
 
 // The answer as composed, its inferences not yet judged.
-export type ComposedAnswer = Pick<TurnTrace, "exchange" | "assertions"> & { blocks: AnswerBlocks };
+export type ComposedAnswer = Pick<TurnTrace, "exchange" | "assertions"> & { blocks: AnswerBlocks; path: AnswerPath };
+
+// An engine answer's commentary is written from that answer's packet (enginePacket); any other answer is the analyst's.
+export function answerPath(input: Pick<AnswerTraceInput, "packet">): AnswerPath {
+  return input.packet?.route === "financial_engine" ? "engine" : "analyst";
+}
 
 export async function composeTraced(
   input: AnswerTraceInput,
@@ -81,7 +86,7 @@ export async function composeTraced(
       assertions = report;
     },
   });
-  return { exchange, assertions, blocks };
+  return { exchange, assertions, blocks, path: answerPath(input) };
 }
 
 // The inferences a rendered answer would show, each beside what it rests on,
@@ -106,7 +111,7 @@ function verdictsFor(cases: ReadonlyArray<JudgeCase>, records: ReadonlyArray<Mod
 function withVerdicts(answer: ComposedAnswer, judged: ReadonlyArray<InferenceVerdict>): Pick<TracedAnswer, "exchange" | "assertions" | "blocks"> {
   if (judged.length === 0) return { exchange: answer.exchange, assertions: answer.assertions, blocks: answer.blocks(new Map()) };
   const shown = new Map(judged.flatMap((verdict) => {
-    const as = shownAs(verdict);
+    const as = shownAs(verdict, answer.path);
     return as === "hidden" ? [] : [[verdict.index, as] as const];
   }));
   const hidden = judged.filter((verdict) => !shown.has(verdict.index));
@@ -190,11 +195,11 @@ async function repairedAnswer(
   const restored = round.repaired.filter((index) => {
     const before = verdicts.find((verdict) => verdict.index === index);
     const after = judged.find((verdict) => verdict.index === index);
-    return before !== undefined && shownAs(before) !== "hidden" && (after === undefined || shownAs(after) === "hidden");
+    return before !== undefined && shownAs(before, answer.path) !== "hidden" && (after === undefined || shownAs(after, answer.path) === "hidden");
   });
   const rendering = renderedAnswer(input, packet, restoredReport(round.list, round.report, restored));
   const second = judged.filter((verdict) => !restored.includes(verdict.index));
-  const final = withVerdicts({ exchange: answer.exchange, assertions: rendering.report, blocks: rendering.blocks }, [
+  const final = withVerdicts({ exchange: answer.exchange, assertions: rendering.report, blocks: rendering.blocks, path: answer.path }, [
     ...verdicts.filter((verdict) => !second.some((repaired) => repaired.index === verdict.index)),
     ...second,
   ].sort((a, b) => a.index - b.index));
@@ -331,7 +336,7 @@ export async function answerTurn(
   const listeners: Array<(blocks: TracedAnswer["blocks"]) => void> = [];
   const settle = (inference: JudgeCase, record: ModelRecord, repaired: boolean) => {
     const verdict = verdictsOf([inference], record)[0]!;
-    const as = shownAs(verdict);
+    const as = shownAs(verdict, answer.path);
     if (!repaired && sentToRepair(verdict)) {
       firsts.set(inference.index, as);
       inferences.set(inference.index, "pending");
@@ -600,8 +605,16 @@ export function answerMetrics(trace: Pick<TurnTrace, "blocks" | "assertions" | "
   };
 }
 
+// What the reader was shown of a judged inference, as its verdicts left the
+// report: one left out is a judge's rejection, and one kept shows unless its
+// verdict is less than entailed or flags a worded amount.
+export function shownIn(report: AssertionReport, verdict: InferenceVerdict): ShownAs {
+  if (!report.accepted.some((entry) => entry.index === verdict.index)) return "hidden";
+  return verdict.verdict === "entailed" && !verdict.worded_amount ? "shown" : "unverified";
+}
+
 function inferenceCounts(report: AssertionReport | null): Pick<AnswerMetrics, "inferences_shown" | "inferences_unverified" | "inferences_hidden"> {
-  const shown = (report?.judged ?? []).map(shownAs);
+  const shown = (report?.judged ?? []).map((verdict) => shownIn(report!, verdict));
   const count = (as: ShownAs) => shown.filter((entry) => entry === as).length;
   return { inferences_shown: count("shown"), inferences_unverified: count("unverified"), inferences_hidden: count("hidden") };
 }
@@ -618,7 +631,7 @@ function repairCounts(trace: Pick<TurnTrace, "assertions" | "repair">): Pick<Ans
   return {
     inferences_sent_to_repair: repair?.requests.length ?? 0,
     inferences_repaired: passed.length,
-    inferences_recovered: (report?.judged ?? []).filter((verdict) => passed.includes(verdict.index) && shownAs(verdict) !== "hidden").length,
+    inferences_recovered: (report?.judged ?? []).filter((verdict) => passed.includes(verdict.index) && shownIn(report!, verdict) !== "hidden").length,
     repair_latency_ms: record?.outcome === "replied" ? record.exchange.latency_ms : record?.outcome === "failed" ? record.latency_ms : 0,
     repair_input_tokens: record?.outcome === "replied" ? record.exchange.usage?.input_tokens ?? 0 : 0,
     repair_output_tokens: record?.outcome === "replied" ? record.exchange.usage?.output_tokens ?? 0 : 0,

@@ -688,9 +688,13 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
   // The root's condition for #398: a number reaches an analyst answer only in
   // a claim segment citing its source document, through the judge-gated path;
   // never in the analyst's own words.
-  await t.test("an analyst answer on guidance quotes a claim's figure with its document; a figure in its own words is rejected, and its prose is never shown (#398)", async () => {
+  await t.test("an analyst answer on guidance quotes a claim's figure with its document; a figure in its own words is rejected, an amount in words is hidden, and its prose is never shown (#398)", async () => {
     const guidanceThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD guidance" });
-    const completed = completedTurn(await runTurn(base, guidanceThread.thread_id, "What guidance did AMD give?"));
+    // The judge reads this turn's inferences, as a deployment with one does.
+    process.env.JUDGE_LITELLM_MODEL = GOLDEN_ENV.LITELLM_MODEL;
+    const completed = await runTurn(base, guidanceThread.thread_id, "What guidance did AMD give?").then(completedTurn).finally(() => {
+      delete process.env.JUDGE_LITELLM_MODEL;
+    });
     assert.notEqual(completed.data.bundle_id, "financial_answer", "guidance is the analyst's");
     const answer = await latestAssistantMessage(base, guidanceThread.thread_id);
     assert.deepEqual(answer.blocks.map((block) => block.kind), ["rich_text"]);
@@ -701,11 +705,12 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.deepEqual([claim![0], claim![2], others], ["claim", AMD_Q2_2025_RELEASE.text, []]);
     const words = (narrative!.segments as Array<{ type: string; text?: string }>).filter((segment) => segment.type === "text").map((segment) => segment.text).join("");
     assert.doesNotMatch(words, /\$|%|million|billion/);
-    // The inference that wrote the claim's figure in its own words is rejected; the prose before the list is never shown.
+    // An inference writing the claim's figure in its own words is rejected, in digits by the checks and in words by the judge; the prose before the list is never shown.
     assert.deepEqual((completed.data.assertion_report as { rejected: unknown[] }).rejected, [
       { index: 1, text: "The $800 million charge, not demand, held the quarter back.", check: "binding", reason: "an inference rests on its supports; it writes no figure" },
-    ]);
-    assert.doesNotMatch(JSON.stringify(answer.blocks), /8\.7 billion/);
+      { index: 2, text: "The eight-hundred-million-dollar charge, not demand, held the quarter back.", check: "judge", reason: "entailed, worded_amount: It states the charge in words." },
+    ], "an amount in words is hidden, whatever the judge's verdict");
+    assert.doesNotMatch(JSON.stringify(answer.blocks), /8\.7 billion|eight-hundred-million/);
     // The claim cites its document: the release it was filed in.
     const inspection = await loadEvidenceInspection(client, { user_id: USER_ID, snapshot_id: answer.snapshot_id, ref: { kind: "claim", id: claim![1] } });
     assert.equal(inspection.related_refs.find((ref) => ref.kind === "document")?.label, AMD_Q2_2025_RELEASE.title);

@@ -264,7 +264,7 @@ test("a verdict is entailed, unsupported or contradicted, beside whether the inf
     { index: 7, verdict: "error", reason: "no worded_amount for this inference" },
     { index: 8, verdict: "error", reason: 'unknown verdict "worded_amount"' },
   ]);
-  assert.deepEqual(parseVerdicts(reply, cases).map(shownAs), ["shown", "unverified", "hidden", "unverified", "unverified", "hidden", "hidden", "hidden"]);
+  assert.deepEqual(parseVerdicts(reply, cases).map((verdict) => shownAs(verdict, "engine")), ["shown", "unverified", "hidden", "unverified", "unverified", "hidden", "hidden", "hidden"]);
 });
 
 test("a failed or cut-off judge call is an error for every inference; with no inference no call is made", async (t) => {
@@ -311,7 +311,7 @@ test("a failed or cut-off judge call is an error for every inference; with no in
   assert.deepEqual([none, called], [{ outcome: "not_called", reason: "no inference to judge" }, false]);
 });
 
-test("a worded amount shows no higher than unverified and goes to repair; contradicted hides and goes to repair; an error hides and does not", () => {
+test("a worded amount is hidden in an analyst answer, shows no higher than unverified in an engine answer's commentary, and goes to repair; contradicted hides and goes to repair; an error hides and does not (#398, #509)", () => {
   const rows = [
     { index: 0, verdict: "entailed" as const, worded_amount: false },
     { index: 0, verdict: "entailed" as const, worded_amount: true },
@@ -321,13 +321,14 @@ test("a worded amount shows no higher than unverified and goes to repair; contra
     { index: 0, verdict: "contradicted" as const, worded_amount: true },
     { index: 0, verdict: "error" as const, reason: "timeout" },
   ];
-  assert.deepEqual(rows.map((row) => [shownAs(row), sentToRepair(row)]), [
-    ["shown", false],
-    ["unverified", true],
-    ["unverified", false],
-    ["unverified", true],
-    ["hidden", true],
-    ["hidden", true],
-    ["hidden", false],
+  // [analyst answer, engine answer's commentary, sent to repair]
+  assert.deepEqual(rows.map((row) => [shownAs(row, "analyst"), shownAs(row, "engine"), sentToRepair(row)]), [
+    ["shown", "shown", false],
+    ["hidden", "unverified", true],
+    ["unverified", "unverified", false],
+    ["hidden", "unverified", true],
+    ["hidden", "hidden", true],
+    ["hidden", "hidden", true],
+    ["hidden", "hidden", false],
   ]);
 });

@@ -11,7 +11,7 @@ import { composeTraced, judgedLive, replayRecorded } from "../src/answer-trace.t
 import { answerText, assertionSummary, judgeSummary, live, mutationSummary, mutationVariants, primaryDeployment, readTraces, recorded, replyFixture, rerecord } from "../scripts/answer-lab.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
 import { REPAIR_INSTRUCTIONS } from "../src/inference-repair.ts";
-import { repairUnderTodaysPrompt } from "./answer-lab/todays-prompt.ts";
+import { repairUnderTodaysPrompt } from "./answer-lab/trace-views.ts";
 
 // One live research-quality eval run's turns (scripts/research-quality-eval.ts).
 const TRACES = readTraces([fileURLToPath(new URL("./answer-lab/traces/", import.meta.url))]);
@@ -194,7 +194,8 @@ test("the mutation summary counts catches, each kind at its expected outcome, mu
     "  hedged_valuation       unsupported   0 of 1",
     "  flipped_direction      contradicted  0 of 1",
     "  contradicted_ranking   contradicted  1 of 2",
-    "shown above their tier: 3 of 8 mutations",
+    // A worded amount's tier is hidden, as an analyst answer shows none: one judged unsupported and not flagged is above it.
+    "shown above their tier: 4 of 8 mutations",
     "contradicted shown: 0 of 10",
     "false alarms: 1 of 2 originals (0 errors)",
     "not at their expected outcome:",

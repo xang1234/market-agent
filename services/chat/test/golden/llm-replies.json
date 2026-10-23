@@ -228,10 +228,24 @@
     },
     {
       "match": [
+        "You already answered this question",
+        "\"question\":\"What guidance did AMD give?\""
+      ],
+      "text": "```assertions\n[]\n```"
+    },
+    {
+      "match": [
+        "You check the analyst inferences",
+        "eight-hundred-million-dollar charge"
+      ],
+      "text": "{\"verdicts\":[{\"id\":2,\"verdict\":\"entailed\",\"worded_amount\":true,\"reason\":\"It states the charge in words.\"}]}"
+    },
+    {
+      "match": [
         "Write a concise investment research answer",
         "\"question\":\"What guidance did AMD give?\""
       ],
-      "text": "AMD guided to about $8.7 billion of revenue, with $800 million of charges behind it.\n\n```assertions\n[{\"kind\":\"management_attribution\",\"text\":\"AMD said export controls led to about $800 million of charges.\",\"evidence\":[\"C1\"]},{\"kind\":\"analyst_inference\",\"subject\":\"AMD\",\"text\":\"The $800 million charge, not demand, held the quarter back.\",\"supports\":[0]}]\n```"
+      "text": "AMD guided to about $8.7 billion of revenue, with $800 million of charges behind it.\n\n```assertions\n[{\"kind\":\"management_attribution\",\"text\":\"AMD said export controls led to about $800 million of charges.\",\"evidence\":[\"C1\"]},{\"kind\":\"analyst_inference\",\"subject\":\"AMD\",\"text\":\"The $800 million charge, not demand, held the quarter back.\",\"supports\":[0]},{\"kind\":\"analyst_inference\",\"subject\":\"AMD\",\"text\":\"The eight-hundred-million-dollar charge, not demand, held the quarter back.\",\"supports\":[0]}]\n```"
     },
     {
       "match": "Write a concise investment research answer",
