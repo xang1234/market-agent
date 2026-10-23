@@ -157,13 +157,9 @@ export function periodNote(scope: ScopePeriod, shown: PeriodType | null): string
   return `These figures are for a fiscal year, not ${read.fiscal_year === null ? `each company's newest ${read.fiscal_period}` : `${read.fiscal_period} FY${read.fiscal_year}`}.`;
 }
 
-// A figure computed from reported metrics of one period, each input by its role.
 type Computed = Readonly<{ operation: string; inputs: Readonly<Record<string, string>> }>;
 
-// What a follow-up reads of each chat catalog metric, at the period it reads:
-// engine metrics as reported, and figures computed from them in that period.
-// A valuation is the one at the cutoff (valuation-plan.ts), so only the latest
-// has one.
+// A valuation is the one at the cutoff (valuation-plan.ts), so only the latest has one.
 export const ENGINE_READS_BY_CATALOG_METRIC: Readonly<Record<string, ReadonlyArray<string | Computed>>> = {
   income_statement: [
     "revenue",

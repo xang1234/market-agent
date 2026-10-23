@@ -171,7 +171,6 @@ test("a live YTD turn whose refresh fails names the stale cached window as a gap
   // the missing year-end baseline instead; either way no stale chart.)
   assert.equal(result.blocks.some((block) => block.kind === "perf_comparison"), false);
   assert.match(JSON.stringify(result.blocks), /Year-to-date price performance is not shown: /);
-  // The narrative is offered no price return, and no other figure stands in its place.
   assert.deepEqual(perfFigures(result.blocks), []);
   assert.deepEqual(result.blocks.filter((block) => block.kind !== "rich_text").map((block) => block.kind), []);
 });

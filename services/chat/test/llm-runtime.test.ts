@@ -414,7 +414,6 @@ const NARRATIVE_BLOCK = {
   kind: "rich_text",
   segments: [{ type: "text", text: "placeholder" }],
 };
-// The analyst's only figures: a comparison's year-to-date price chart (#398 D2).
 const PERF_BLOCKS = [{
   id: "perf-1",
   kind: "perf_comparison",
@@ -572,7 +571,6 @@ test("the answer model sees a compact context, not raw tool JSON (#181)", async 
   const context = JSON.parse(prompt) as Record<string, unknown>;
   assert.deepEqual(Object.keys(context).sort(), ["conversation", "evidence_packet", "question"].sort());
   const packet = context.evidence_packet as Record<string, unknown>;
-  // The figures carry short packet ids; the series behind them stay server-side (#207).
   assert.deepEqual((packet.figures as Array<{ id: string }>).map((figure) => figure.id), ["F1", "F2"]);
   // Each claim keeps its dates, so a past claim is not read as current, and a
   // short id: its claim and source ids stay server-side (#207).
@@ -703,16 +701,12 @@ const RENDER_BLOCKS = [{
     period_end: n < 3 ? "2026-01-25" : "2025-12-27", as_of: "2026-02-26T00:00:00.000Z", source_id: n < 3 ? "s-nvda" : "s-amd",
   })) } },
 }];
-// The composer reads any packet it is given (engine answers', answer-lab
-// traces'); these hold reported facts as a recorded turn's packet does, beside
-// the turn's own claims, and the blocks whose bindings seal each fact.
-function recorded(
+function recordedPacket(
   figures: ReadonlyArray<PacketFigure>,
   input: { toolCalls?: ReadonlyArray<never>; factBlocks?: ReadonlyArray<Record<string, unknown>> } = {},
 ): EvidencePacket {
   const packet = turnPacket({ toolCalls: input.toolCalls ?? [], factBlocks: input.factBlocks ?? [], cutoff: "2026-09-01T00:00:00.000Z" });
-  // A single company's figures name no company: they are all its own.
-  const shown = (company: string) => figures.some((figure) => figure.company === company) || (packet.companies.length === 1 && figures.length > 0);
+  const shown = (company: string) => figures.some((figure) => figure.company === company);
   return { ...packet, figures, coverage: packet.companies.map((company) => ({ company, status: shown(company) ? "shown" : "not_shown" })) };
 }
 const reported = (id: string, company: string | undefined, metric: string, period: string, period_end: string, value: string, fact_id: string): PacketFigure => ({
@@ -724,7 +718,7 @@ const RENDER_FIGURES = [
   reported("F3", "AMD", "Revenue", "FY2025", "2025-12-27", "$25.8B", FACT(3)),
   reported("F4", "AMD", "Gross Margin", "FY2025", "2025-12-27", "49.2%", FACT(4)),
 ];
-const RENDER_PACKET = recorded(RENDER_FIGURES, { factBlocks: RENDER_BLOCKS });
+const RENDER_PACKET = recordedPacket(RENDER_FIGURES, { factBlocks: RENDER_BLOCKS });
 
 async function renderWithReply(reply: string | { text: string; truncated: boolean }, env: Record<string, string> = BASE_ENV) {
   const reports: Array<Record<string, unknown>> = [];
@@ -761,7 +755,7 @@ async function renderA(list: unknown[]) {
     blocks: [NARRATIVE_BLOCK],
     toolCalls: [A_TOOL_CALL],
     factBlocks: A_BLOCKS,
-    packet: recorded(A_FIGURES, { toolCalls: [A_TOOL_CALL], factBlocks: A_BLOCKS }),
+    packet: recordedPacket(A_FIGURES, { toolCalls: [A_TOOL_CALL], factBlocks: A_BLOCKS }),
     createClient: () => async () => ({ text: withList(list) }),
     onAssertions: (report) => reports.push(report as unknown as Record<string, unknown>),
   });
@@ -808,7 +802,6 @@ test("a data gap the model writes never reaches the answer: what is missing is t
 const AMD = [{ issuer_id: "60000000-0000-4000-8000-000000000002", label: "AMD" }];
 const GAP_AS_OF = "2026-09-01T00:00:00.000Z";
 
-// The blocks and scope local-runtime gives the answer for a scope with nothing shown.
 function gapTurn(scope: ReturnType<typeof resolveResearchScope>) {
   return { scope, factBlocks: scopeGapBlocks(scope, { snapshotId: "00000000-0000-4000-8000-0000000000aa", asOf: GAP_AS_OF }) };
 }
@@ -1056,7 +1049,7 @@ test("a rendered inference is words only: one with a figure, typed or referenced
   ]);
 });
 
-const NVDA_ONLY = recorded(RENDER_FIGURES.slice(0, 2), { factBlocks: RENDER_BLOCKS });
+const NVDA_ONLY = recordedPacket(RENDER_FIGURES.slice(0, 2), { factBlocks: RENDER_BLOCKS });
 
 test("a rendered answer says which compared companies it shows no figures for (#208)", async () => {
   const composed = await composeAnalystBlocksWithLlm({
@@ -1085,7 +1078,7 @@ test("a cited claim about a compared company does not drop the note that no figu
     blocks: [NARRATIVE_BLOCK],
     toolCalls: [amdClaim],
     factBlocks: RENDER_BLOCKS,
-    packet: recorded(RENDER_FIGURES.slice(0, 2), { toolCalls: [amdClaim], factBlocks: RENDER_BLOCKS }),
+    packet: recordedPacket(RENDER_FIGURES.slice(0, 2), { toolCalls: [amdClaim], factBlocks: RENDER_BLOCKS }),
     createClient: () => async () => ({ text: withList([
       { kind: "observation", text: "NVDA's gross margin was [[F2]].", evidence: ["F2"] },
       { kind: "management_attribution", text: "AMD expects data center growth.", evidence: ["C1"] },
@@ -1162,7 +1155,7 @@ test("a rendered comparison covers every company it shows figures for, and warns
     blocks: [NARRATIVE_BLOCK],
     toolCalls: [amdDemand],
     factBlocks: RENDER_BLOCKS,
-    packet: recorded(RENDER_FIGURES, { toolCalls: [amdDemand], factBlocks: RENDER_BLOCKS }),
+    packet: recordedPacket(RENDER_FIGURES, { toolCalls: [amdDemand], factBlocks: RENDER_BLOCKS }),
     createClient: () => async () => ({ text: withList([
       { kind: "observation", text: "NVDA's gross margin was [[F2]].", evidence: ["F2"] },
       { kind: "management_attribution", text: "Demand doubled.", evidence: ["C1"] },
@@ -1181,7 +1174,7 @@ test("a rendered comparison covers every company it shows figures for, and warns
     blocks: [NARRATIVE_BLOCK],
     toolCalls: [],
     factBlocks: RENDER_BLOCKS,
-    packet: recorded(sameYear, { factBlocks: RENDER_BLOCKS }),
+    packet: recordedPacket(sameYear, { factBlocks: RENDER_BLOCKS }),
     createClient: () => async () => ({ text: withList([
       { kind: "observation", text: "NVDA's gross margin was [[F2]].", evidence: ["F2"] },
       { kind: "observation", text: "AMD's gross margin was [[F4]].", evidence: ["F4"] },
@@ -1200,7 +1193,7 @@ test("a rendered answer says when more claims matched, or none could be read (#2
     blocks: [NARRATIVE_BLOCK],
     toolCalls: [truncated as never],
     factBlocks: A_BLOCKS,
-    packet: recorded(A_FIGURES, { toolCalls: [truncated as never], factBlocks: A_BLOCKS }),
+    packet: recordedPacket(A_FIGURES, { toolCalls: [truncated as never], factBlocks: A_BLOCKS }),
     createClient: () => async () => ({ text: withList([{ kind: "management_attribution", text: "Management raised its outlook.", evidence: ["C1"] }]) }),
   });
   const text = (composed[0].segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join("");
@@ -1213,7 +1206,7 @@ test("a rendered answer says when more claims matched, or none could be read (#2
     blocks: [NARRATIVE_BLOCK],
     toolCalls: [unreadable],
     factBlocks: RENDER_BLOCKS,
-    packet: recorded(RENDER_FIGURES, { toolCalls: [unreadable], factBlocks: RENDER_BLOCKS }),
+    packet: recordedPacket(RENDER_FIGURES, { toolCalls: [unreadable], factBlocks: RENDER_BLOCKS }),
     createClient: () => async () => ({ text: withList([{ kind: "observation", text: "NVDA's gross margin was [[F2]] and AMD's was [[F4]].", evidence: ["F2", "F4"] }]) }),
   });
   assert.match((answer[0].segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join(""), /\n\nResearch claims could not be read for this answer\.$/);
@@ -1255,8 +1248,7 @@ test("a ranking of price returns read off their chart renders (#301)", async () 
     blocks: [NARRATIVE_BLOCK],
     toolCalls: [],
     factBlocks: [...RENDER_BLOCKS, perf],
-    // A recorded packet's reported facts, then the chart's returns.
-    packet: recorded([...RENDER_FIGURES, ...turnPacket({ toolCalls: [], factBlocks: [perf] }).figures.map((figure, index) => ({ ...figure, id: `F${5 + index}` }))], { factBlocks: [...RENDER_BLOCKS, perf] }),
+    packet: recordedPacket([...RENDER_FIGURES, ...turnPacket({ toolCalls: [], factBlocks: [perf] }).figures.map((figure, index) => ({ ...figure, id: `F${5 + index}` }))], { factBlocks: [...RENDER_BLOCKS, perf] }),
     createClient: () => async () => ({ text: withList([
       { kind: "comparison", op: "highest", result: "F5", text: "NVDA's price return was highest.", evidence: ["F5", "F6"] },
       { kind: "observation", text: "NVDA's gross margin was [[F2]] and AMD's was [[F4]].", evidence: ["F2", "F4"] },
@@ -1353,7 +1345,7 @@ test("a single company's checked trend and low render (#208)", async () => {
     blocks: [NARRATIVE_BLOCK],
     toolCalls: [],
     factBlocks: [trendRow],
-    packet: recorded(quarters.map(([period, period_end, value], n) => ({
+    packet: recordedPacket(quarters.map(([period, period_end, value], n) => ({
       id: `F${n + 1}`, metric: "Operating margin", period, period_end, value, shown_in: trendRow.title, fact_id: id(n), source_ids: ["s-amd"],
     })), { factBlocks: [trendRow] }),
     createClient: () => async () => ({ text: withList([

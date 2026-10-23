@@ -11,7 +11,6 @@ const company = (ticker: string) => GOLDEN_COMPANIES.find((candidate) => candida
 const NVDA = company("NVDA");
 const AMD = company("AMD");
 const LISTINGS = [{ id: NVDA.listing_id, label: "NVDA" }, { id: AMD.listing_id, label: "AMD" }];
-// A full year-to-date window, so a chart could be drawn from it were it read.
 const LEGACY_RANGE = { start: "2025-12-01T05:00:00.000Z", end: GOLDEN_AS_OF };
 
 test("Polygon ranges cached under the old dividend-adjusted label are never reused, nor rewritten (#191)", { timeout: 300_000 }, async (t) => {

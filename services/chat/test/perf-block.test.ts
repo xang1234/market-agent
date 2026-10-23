@@ -44,7 +44,6 @@ function storedRow(r: SealedPriceRange) {
 
 const LISTINGS = [{ id: NVDA.listing_id, label: "NVDA" }, { id: AMD.listing_id, label: "AMD" }];
 
-// New York sessions stamped at local midnight.
 const ytdBar = (date: string, close: number) => ({
   ts: `${date}T${date >= "2026-03-08" ? "04" : "05"}:00:00.000Z`,
   close,
@@ -125,7 +124,6 @@ test("end-of-day prices come with the pricing disclosure the verifier requires, 
 });
 
 test("lines use only the sessions every company has, and the window says how many it skipped", async () => {
-  // AMD did not trade on 2026-01-02 (a mid-window halt, say); NVDA did.
   const [block] = await chartOf([ytdRow(NVDA, NVDA_YTD), ytdRow(AMD, [AMD_YTD[0]!, AMD_YTD[2]!])]);
   const series = block!.series as Array<{ points: Array<{ x: string; y: number }> }>;
   for (const line of series) assert.deepEqual(line.points.map((p) => p.x), ["2025-12-31", "2026-08-31"]);

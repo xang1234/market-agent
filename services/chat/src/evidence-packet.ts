@@ -1,9 +1,7 @@
 // The evidence an answer is written from (#207): the turn's route and cutoff,
 // each figure shown with a short packet id bound to its source, which
 // companies have figures and which do not, what could not be shown, and the
-// bounds the readers applied. An analyst turn's figures are its price chart's
-// alone, market data outside the engine (#398 D2); an engine answer's are its
-// results (enginePacket). Never built from raw tool results.
+// price window asked for. Never built from raw tool results.
 //
 // The model sees short ids ("F1", "C1"); the fact, claim and source ids stay
 // here, so the prompt stays compact (#181) and an assertion citing one can be
@@ -20,23 +18,16 @@ import { isRecord } from "../../shared/src/http.ts";
 
 type Block = Record<string, unknown>;
 
-// A figure an answer may cite: its company (in a comparison), metric, period
-// and value. A recorded packet (answer-lab traces) also holds the reported
-// facts, segments and derived figures chat once showed; no turn makes them now.
 export type PacketFigure = {
   id: string;
   company?: string;
-  // A business segment's revenue: metric "Revenue", for the segment named here.
   segment?: string;
   metric: string;
   period?: string;
   period_end?: string;
   value: string;
-  // The block it is shown in, by title.
   shown_in?: string;
-  // The fact the value cites; never sent to the model.
   fact_id?: string;
-  // A price return's chart line, by its sealed series (#317); never sent to the model.
   series_ref?: string;
   // The engine result it shows (enginePacket); never sent to the model.
   result_id?: string;
@@ -55,13 +46,10 @@ export type PacketFigure = {
 export type PerfFigure = {
   company: string;
   metric: "Price return";
-  // The window drawn.
   period?: string;
   value: string;
   shown_in?: string;
-  // The chart showing it, for the evidence packet; never sent to the model.
   block_id?: string;
-  // The line's sealed series (#317); never sent to the model.
   series_ref?: string;
 };
 

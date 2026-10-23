@@ -605,7 +605,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.equal(pointers.thread, pointers.answer);
   });
 
-  await t.test("a turn about a company reaches the engine; one about none, or whose reading asks for no figure but evidence, guidance or market data, the analyst (#398)", async () => {
+  await t.test("a turn about a company reaches the engine; one about none, or whose reading asks for no figure but evidence, guidance or market data, the analyst (#398)", async (st) => {
     const carried = async (ticker: string) => ({ ...(await resolveMention(ticker)), handoff: { display_labels: { ticker } } }) as unknown as ChatResolvedSubjectPreResolution;
     const [aaa, bbb] = [await carried("AAA"), await carried("BBB")];
     let analystCalls = 0;
@@ -617,8 +617,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     const lane = async (userIntent: string, options: Omit<Parameters<typeof chatHarness>[1], "model" | "analyst">, mentions: string[] = []) => {
       const before = analystCalls;
       const { events } = await chatHarness(pool, { model: revenueModel(mentions), analyst, ...options }).run({ ...base, userIntent });
-      // Either lane starts the turn once, before any other event (#398).
-      assert.deepEqual([events[0]?.type, events.filter((event) => event.type === "turn.started").length], ["turn.started", 1], userIntent);
+      assert.deepEqual([events[0]?.type, events.filter((event) => event.type === "turn.started").length], ["turn.started", 1], `${userIntent}: either lane starts the turn once, before any other event`);
       const done = completed(events);
       if (analystCalls > before) return "analyst";
       assert.equal(done.bundle_id, "financial_answer", userIntent);
@@ -626,70 +625,86 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       return (saved?.research_scope?.companies ?? []).map((company: { label?: string }) => company.label);
     };
     const named = (...names: string[]) => reading({ companies: { kind: "as_named", names } });
-    assert.deepEqual(await lane("How is AAA doing?", { readQuestion: named("AAA") }, ["AAA"]), ["AAA"]);
-    assert.deepEqual(await lane("Tell me about BBB", { readQuestion: named("BBB") }, ["BBB"]), ["BBB"]);
-    // No facet names strategy or management, so it reads as a question about the company.
-    assert.deepEqual(await lane("Who runs AAA?", { readQuestion: named("AAA") }, ["AAA"]), ["AAA"]);
-    assert.deepEqual(await lane("what is the latest news", { readQuestion: named() }), "analyst");
-    assert.deepEqual(await lane("and BBB?", { priorSubjects: async () => [aaa], readQuestion: comparing("BBB") }, ["AAA", "BBB"]), ["AAA", "BBB"]);
-    // No reading: the companies the question names still decide, and the planner reads it.
-    const unread = async () => {
-      throw new Error("the reading model is down");
-    };
-    assert.deepEqual(await lane("How is AAA doing?", { readQuestion: unread }, ["AAA"]), ["AAA"]);
-    assert.deepEqual(await lane("show the evidence", { priorSubjects: async () => [aaa], readQuestion: reading({ asks: new Set(["evidence"]) }) }), "analyst");
-    assert.deepEqual(await lane("Revenue for AAA, with the evidence", { readQuestion: reading({ ...METRIC_READING, asks: new Set(["evidence"]), companies: { kind: "as_named", names: ["AAA"] } }) }, ["AAA"]), ["AAA"]);
-    assert.deepEqual(await lane("What is AAA's guidance?", { readQuestion: reading({ asks: new Set(["guidance"]), companies: { kind: "as_named", names: ["AAA"] } }) }), "analyst");
-    assert.deepEqual(await lane("AAA YTD", { readQuestion: reading({ asks: new Set(["price_window"]), companies: { kind: "as_named", names: ["AAA"] } }) }), "analyst");
-    assert.deepEqual(await lane("AAA revenue YTD", { readQuestion: reading({ ...METRIC_READING, asks: new Set(["price_window"]), companies: { kind: "as_named", names: ["AAA"] } }) }, ["AAA"]), ["AAA"]);
-    assert.deepEqual(await lane("And what about its revenue?", { priorSubjects: async () => [], readQuestion: reading(METRIC_READING) }), "analyst");
-    const dropped = completed((await chatHarness(pool, { model: revenueModel([]), analyst, priorSubjects: async () => [aaa], readQuestion: reading({ companies: { kind: "drop", drop: ["AAA"], add: [] } }) }).run({ ...base, userIntent: "drop AAA" })).events);
-    assert.deepEqual((dropped.financial_clarification as { question: string }).question, "Dropping AAA leaves no company to compare. Name the company to look at.");
-    assert.deepEqual(await lane("drop BBB", { priorSubjects: async () => [aaa, bbb], readQuestion: reading({ companies: { kind: "drop", drop: ["BBB"], add: [] } }) }, ["AAA"]), ["AAA"]);
     const aaaNamed = { companies: { kind: "as_named" as const, names: ["AAA"] } };
-    for (const asks of [["peers", "price_window"], ["latest_quarter", "price_window"]] as const) {
-      assert.deepEqual(await lane("How has AAA's stock done?", { readQuestion: reading({ ...aaaNamed, asks: new Set(asks) }) }), "analyst", `${asks.join(", ")}: peers and the latest quarter are no figure`);
-    }
-    // A facet read as asked and turned off is not asked (readingAsks).
-    const offGuidance = reading({ ...aaaNamed, asks: new Set(["guidance"]), turns_off: { facets: new Set(["guidance"]), metrics: new Set() } });
-    assert.deepEqual(await lane("Tell me about AAA, skip the guidance", { readQuestion: offGuidance }, ["AAA"]), ["AAA"]);
-    // A follow-up keeps its scope's period and figures, and the engine plans them there (#398 step 7).
     // A scope over the question's reading, as if the previous answer's scope held more.
     const keeping = (kept: Record<string, unknown>) => (async (context: { userIntent?: string }, read: Promise<ScopeProposal | null>) => {
       const proposal = await read;
       const scope = resolveResearchScope({ companies: [], prior: null, asOf: new Date().toISOString(), proposal });
       return proposal?.period.kind === "latest" ? scope : { ...scope, ...kept };
     }) as never;
-    const keepsYear = keeping({ fiscal_year: 2023, inherited: ["fiscal_year"] });
-    assert.deepEqual(await lane("Explain it", { priorSubjects: async () => [aaa], researchScope: keepsYear, readQuestion: reading({ asks: new Set(["explains"]) }) }), "analyst");
-    assert.deepEqual(await lane("And its latest quarter?", { priorSubjects: async () => [aaa], researchScope: keepsYear, readQuestion: reading({ period: { kind: "latest" } }) }, ["AAA"]), ["AAA"]);
-    assert.deepEqual(await lane("How is AAA doing?", { priorSubjects: async () => [aaa], researchScope: keepsYear, readQuestion: reading(aaaNamed) }, ["AAA"]), ["AAA"], "naming its company again continues it, on the engine's path");
-    const keepsCashFlow = keeping({ metrics: [proposedMetric("free_cash_flow", null, null)!], inherited: ["metrics"] });
-    assert.deepEqual(await lane("And BBB?", { priorSubjects: async () => [aaa], researchScope: keepsCashFlow, readQuestion: reading({ companies: { kind: "compare", add: ["BBB"] } }) }), ["AAA", "BBB"], "a metric the overview does not show");
-    const cashFlow = completed((await chatHarness(pool, { model: null, analyst, priorSubjects: async () => [aaa], researchScope: keepsCashFlow, readQuestion: reading({ companies: { kind: "compare", add: ["BBB"] } }) }).run({ ...base, userIntent: "And BBB?" })).events);
-    const { rows: [answer] } = await db.query(`select blocks from chat_messages where message_id = $1`, [cashFlow.message_id]);
-    assert.deepEqual((answer.blocks[0].financial.results as Array<{ output_id: string }>).map((result) => result.output_id),
-      ["a", "b"].flatMap((slot) => ["operating_cash_flow", "capex", "free_cash_flow"].map((metric) => `out_${slot}_${metric}_latest_fy`)), "planned with no model: each company's free cash flow, the latest fiscal year");
-    // Guidance its scope keeps is the analyst's, at any period, unless the question names its own company.
-    const keepsGuidance = keeping({ guidance: true });
-    assert.deepEqual(await lane("And BBB?", { priorSubjects: async () => [aaa], researchScope: keepsGuidance, readQuestion: reading({ companies: { kind: "compare", add: ["BBB"] } }) }), "analyst");
-    assert.deepEqual(await lane("And for Q3?", { priorSubjects: async () => [aaa], researchScope: keepsGuidance, readQuestion: reading({ period: { kind: "fiscal_quarter", fiscal_period: "Q3", fiscal_year: null } }) }), "analyst");
-    assert.deepEqual(await lane("How is AAA doing?", { priorSubjects: async () => [aaa], researchScope: keepsGuidance, readQuestion: reading(aaaNamed) }, ["AAA"]), ["AAA"]);
-    const keepsStatement = keeping({ metrics: [proposedMetric("income_statement", null, null)!], inherited: ["metrics"] });
-    assert.deepEqual(await lane("And BBB?", { priorSubjects: async () => [aaa], researchScope: keepsStatement, readQuestion: reading({ companies: { kind: "compare", add: ["BBB"] } }) }, ["AAA", "BBB"]), ["AAA", "BBB"]);
-    assert.deepEqual(await lane("And Q3?", { priorSubjects: async () => [aaa], readQuestion: reading({ period: { kind: "fiscal_quarter", fiscal_period: "Q3", fiscal_year: null } }) }, ["AAA"]), ["AAA"], "a follow-up's period");
-    // Only a carried company the scope dropped is left out, and a turn left with none is the analyst's.
-    const overBbb = keeping({ companies: [{ issuer_id: IDS.issuerB, label: "BBB" }] });
-    assert.deepEqual(await lane("Explain it", { priorSubjects: async () => [aaa], researchScope: overBbb, readQuestion: reading({ asks: new Set(["explains"]) }) }), "analyst");
-    assert.deepEqual(await lane("How is AAA doing?", { researchScope: overBbb, readQuestion: reading(aaaNamed) }, ["AAA"]), ["AAA"]);
-    // A follow-up that names no company, no period and asks for no figure is the analyst's; one that adds or drops a company, or turns something off, is the engine's.
-    assert.deepEqual(await lane("Why?", { priorSubjects: async () => [aaa], readQuestion: reading({ asks: new Set(["explains"]) }) }), "analyst");
-    assert.deepEqual(await lane("Thanks", { priorSubjects: async () => [aaa], readQuestion: reading({}) }), "analyst");
-    assert.deepEqual(await lane("and BBB?", { priorSubjects: async () => [aaa], readQuestion: reading({ companies: { kind: "compare", add: ["BBB"] } }) }, ["AAA", "BBB"]), ["AAA", "BBB"]);
-    assert.deepEqual(await lane("Without the margins", { priorSubjects: async () => [aaa], readQuestion: reading({ turns_off: { facets: new Set(["margins"]), metrics: new Set() } }) }, ["AAA"]), ["AAA"]);
-    // A metric read as asked and turned off is not asked either.
-    const offCapex = reading({ metrics: [proposedMetric("capex", null, null)!], asks: new Set(["evidence"]), turns_off: { facets: new Set(), metrics: new Set(["capex"]) } });
-    assert.deepEqual(await lane("Skip the capex: where did those numbers come from?", { priorSubjects: async () => [aaa], readQuestion: offCapex }), "analyst");
+
+    await st.test("a question naming a company, or adding one, is the engine's; one about none is the analyst's", async () => {
+      assert.deepEqual(await lane("How is AAA doing?", { readQuestion: named("AAA") }, ["AAA"]), ["AAA"]);
+      assert.deepEqual(await lane("Tell me about BBB", { readQuestion: named("BBB") }, ["BBB"]), ["BBB"]);
+      assert.deepEqual(await lane("Who runs AAA?", { readQuestion: named("AAA") }, ["AAA"]), ["AAA"], "no facet names strategy or management, so it reads as a question about the company");
+      assert.deepEqual(await lane("what is the latest news", { readQuestion: named() }), "analyst");
+      assert.deepEqual(await lane("and BBB?", { priorSubjects: async () => [aaa], readQuestion: comparing("BBB") }, ["AAA", "BBB"]), ["AAA", "BBB"]);
+      assert.deepEqual(await lane("And what about its revenue?", { priorSubjects: async () => [], readQuestion: reading(METRIC_READING) }), "analyst");
+    });
+
+    await st.test("with no reading, the companies the question names decide, and the planner reads it", async () => {
+      const unread = async () => {
+        throw new Error("the reading model is down");
+      };
+      assert.deepEqual(await lane("How is AAA doing?", { readQuestion: unread }, ["AAA"]), ["AAA"]);
+    });
+
+    await st.test("a reading asking for no figure but evidence, guidance or market data is the analyst's; with a figure beside them, the engine's", async () => {
+      assert.deepEqual(await lane("show the evidence", { priorSubjects: async () => [aaa], readQuestion: reading({ asks: new Set(["evidence"]) }) }), "analyst");
+      assert.deepEqual(await lane("Revenue for AAA, with the evidence", { readQuestion: reading({ ...METRIC_READING, asks: new Set(["evidence"]), companies: { kind: "as_named", names: ["AAA"] } }) }, ["AAA"]), ["AAA"]);
+      assert.deepEqual(await lane("What is AAA's guidance?", { readQuestion: reading({ asks: new Set(["guidance"]), companies: { kind: "as_named", names: ["AAA"] } }) }), "analyst");
+      assert.deepEqual(await lane("AAA YTD", { readQuestion: reading({ asks: new Set(["price_window"]), companies: { kind: "as_named", names: ["AAA"] } }) }), "analyst");
+      assert.deepEqual(await lane("AAA revenue YTD", { readQuestion: reading({ ...METRIC_READING, asks: new Set(["price_window"]), companies: { kind: "as_named", names: ["AAA"] } }) }, ["AAA"]), ["AAA"]);
+      for (const asks of [["peers", "price_window"], ["latest_quarter", "price_window"]] as const) {
+        assert.deepEqual(await lane("How has AAA's stock done?", { readQuestion: reading({ ...aaaNamed, asks: new Set(asks) }) }), "analyst", `${asks.join(", ")}: peers and the latest quarter are no figure`);
+      }
+      const offGuidance = reading({ ...aaaNamed, asks: new Set(["guidance"]), turns_off: { facets: new Set(["guidance"]), metrics: new Set() } });
+      assert.deepEqual(await lane("Tell me about AAA, skip the guidance", { readQuestion: offGuidance }, ["AAA"]), ["AAA"], "a facet read as asked and turned off is not asked (readingAsks)");
+      const offCapex = reading({ metrics: [proposedMetric("capex", null, null)!], asks: new Set(["evidence"]), turns_off: { facets: new Set(), metrics: new Set(["capex"]) } });
+      assert.deepEqual(await lane("Skip the capex: where did those numbers come from?", { priorSubjects: async () => [aaa], readQuestion: offCapex }), "analyst", "a metric read as asked and turned off is not asked either");
+    });
+
+    await st.test("dropping a company changes the companies only as the reading says", async () => {
+      const dropped = completed((await chatHarness(pool, { model: revenueModel([]), analyst, priorSubjects: async () => [aaa], readQuestion: reading({ companies: { kind: "drop", drop: ["AAA"], add: [] } }) }).run({ ...base, userIntent: "drop AAA" })).events);
+      assert.deepEqual((dropped.financial_clarification as { question: string }).question, "Dropping AAA leaves no company to compare. Name the company to look at.");
+      assert.deepEqual(await lane("drop BBB", { priorSubjects: async () => [aaa, bbb], readQuestion: reading({ companies: { kind: "drop", drop: ["BBB"], add: [] } }) }, ["AAA"]), ["AAA"]);
+    });
+
+    await st.test("a follow-up keeps its scope's period and figures, and the engine plans them there (#398)", async () => {
+      const keepsYear = keeping({ fiscal_year: 2023, inherited: ["fiscal_year"] });
+      assert.deepEqual(await lane("Explain it", { priorSubjects: async () => [aaa], researchScope: keepsYear, readQuestion: reading({ asks: new Set(["explains"]) }) }), "analyst");
+      assert.deepEqual(await lane("And its latest quarter?", { priorSubjects: async () => [aaa], researchScope: keepsYear, readQuestion: reading({ period: { kind: "latest" } }) }, ["AAA"]), ["AAA"]);
+      assert.deepEqual(await lane("How is AAA doing?", { priorSubjects: async () => [aaa], researchScope: keepsYear, readQuestion: reading(aaaNamed) }, ["AAA"]), ["AAA"], "naming its company again continues it, on the engine's path");
+      const keepsCashFlow = keeping({ metrics: [proposedMetric("free_cash_flow", null, null)!], inherited: ["metrics"] });
+      assert.deepEqual(await lane("And BBB?", { priorSubjects: async () => [aaa], researchScope: keepsCashFlow, readQuestion: reading({ companies: { kind: "compare", add: ["BBB"] } }) }), ["AAA", "BBB"], "a metric the overview does not show");
+      const cashFlow = completed((await chatHarness(pool, { model: null, analyst, priorSubjects: async () => [aaa], researchScope: keepsCashFlow, readQuestion: reading({ companies: { kind: "compare", add: ["BBB"] } }) }).run({ ...base, userIntent: "And BBB?" })).events);
+      const { rows: [answer] } = await db.query(`select blocks from chat_messages where message_id = $1`, [cashFlow.message_id]);
+      assert.deepEqual((answer.blocks[0].financial.results as Array<{ output_id: string }>).map((result) => result.output_id),
+        ["a", "b"].flatMap((slot) => ["operating_cash_flow", "capex", "free_cash_flow"].map((metric) => `out_${slot}_${metric}_latest_fy`)), "planned with no model: each company's free cash flow, the latest fiscal year");
+      const keepsStatement = keeping({ metrics: [proposedMetric("income_statement", null, null)!], inherited: ["metrics"] });
+      assert.deepEqual(await lane("And BBB?", { priorSubjects: async () => [aaa], researchScope: keepsStatement, readQuestion: reading({ companies: { kind: "compare", add: ["BBB"] } }) }, ["AAA", "BBB"]), ["AAA", "BBB"]);
+      assert.deepEqual(await lane("And Q3?", { priorSubjects: async () => [aaa], readQuestion: reading({ period: { kind: "fiscal_quarter", fiscal_period: "Q3", fiscal_year: null } }) }, ["AAA"]), ["AAA"], "a follow-up's period");
+    });
+
+    await st.test("guidance its scope keeps is the analyst's, at any period, unless the question names its own company", async () => {
+      const keepsGuidance = keeping({ guidance: true });
+      assert.deepEqual(await lane("And BBB?", { priorSubjects: async () => [aaa], researchScope: keepsGuidance, readQuestion: reading({ companies: { kind: "compare", add: ["BBB"] } }) }), "analyst");
+      assert.deepEqual(await lane("And for Q3?", { priorSubjects: async () => [aaa], researchScope: keepsGuidance, readQuestion: reading({ period: { kind: "fiscal_quarter", fiscal_period: "Q3", fiscal_year: null } }) }), "analyst");
+      assert.deepEqual(await lane("How is AAA doing?", { priorSubjects: async () => [aaa], researchScope: keepsGuidance, readQuestion: reading(aaaNamed) }, ["AAA"]), ["AAA"]);
+    });
+
+    await st.test("only a carried company the scope dropped is left out, and a turn left with none is the analyst's", async () => {
+      const overBbb = keeping({ companies: [{ issuer_id: IDS.issuerB, label: "BBB" }] });
+      assert.deepEqual(await lane("Explain it", { priorSubjects: async () => [aaa], researchScope: overBbb, readQuestion: reading({ asks: new Set(["explains"]) }) }), "analyst");
+      assert.deepEqual(await lane("How is AAA doing?", { researchScope: overBbb, readQuestion: reading(aaaNamed) }, ["AAA"]), ["AAA"]);
+    });
+
+    await st.test("a follow-up naming no company or period and asking for no figure is the analyst's; one adding a company or turning something off, the engine's", async () => {
+      assert.deepEqual(await lane("Why?", { priorSubjects: async () => [aaa], readQuestion: reading({ asks: new Set(["explains"]) }) }), "analyst");
+      assert.deepEqual(await lane("Thanks", { priorSubjects: async () => [aaa], readQuestion: reading({}) }), "analyst");
+      assert.deepEqual(await lane("and BBB?", { priorSubjects: async () => [aaa], readQuestion: reading({ companies: { kind: "compare", add: ["BBB"] } }) }, ["AAA", "BBB"]), ["AAA", "BBB"]);
+      assert.deepEqual(await lane("Without the margins", { priorSubjects: async () => [aaa], readQuestion: reading({ turns_off: { facets: new Set(["margins"]), metrics: new Set() } }) }, ["AAA"]), ["AAA"]);
+    });
   });
 
   await t.test("a follow-up its scope keeps figures for, at a period or with peers the engine cannot plan them at, is a named gap, with no model (#398)", async () => {

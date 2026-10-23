@@ -207,10 +207,6 @@ const CONVERSATION_MESSAGES = 6;
 // A turn re-reading an engine answer, or asking only for metrics no reader serves, charts nothing.
 const chartedWindow = (scope: ResearchScope) => scope.reads !== "unavailable_metric" && !readsEngine(scope.reads) ? scope.price_window : null;
 
-// The year-to-date chart of the companies the scope records, peers already
-// resolved (comparedCompanies). An inherited window keeps the cutoff it was
-// charted at. Empty when the listings cannot be read: the chart never costs
-// the turn its answer.
 async function ytdChart(
   scope: ResearchScope,
   window: NonNullable<ResearchScope["price_window"]>,
@@ -230,11 +226,6 @@ async function ytdChart(
   });
 }
 
-// What the scope asks for and the data does not hold, each as a note (#206):
-// a year-to-date window over one company, which only a comparison charts; a
-// price return over another window than year to date; a benchmark index; and
-// for a turn re-reading the engine's answer or declined request, where its
-// evidence is.
 export function scopeGapBlocks(scope: ResearchScope, input: { snapshotId: string; asOf: string }, reading: ScopeProposal | null = null): ReadonlyArray<Record<string, unknown>> {
   const names = scope.companies.flatMap((company) => company.label ?? []).join(", ") || "these companies";
   const notes: Array<readonly [string, string]> = [];
@@ -337,8 +328,7 @@ async function turnScope(
 }
 
 // The companies the answer compares: the ones the turn covers, or for a peers
-// request one company plus its auto-selected peers (turnCompanies, the set the
-// fact blocks chart).
+// request one company plus its auto-selected peers (turnCompanies).
 async function comparedCompanies(
   named: ResearchScope["companies"],
   peers: boolean,

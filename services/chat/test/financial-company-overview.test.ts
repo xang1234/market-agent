@@ -273,7 +273,6 @@ test("a question about one company that asks for no figure is answered with its 
     const carried = (await resolve("QTRS")) as ChatResolvedSubjectPreResolution;
     // A follow-up that adds a company is the overview of the carried one and the added one.
     assert.deepEqual(await planned("Compare it with AAA", ["QTRS", "AAA"], { priorSubjects: async () => [carried], readQuestion: reading({ ...NO_ASKS, companies: { kind: "compare", add: ["AAA"] } }) }), [1, ["a_out", "b_out"]], "a carried company beside one with no quarters");
-    // The reading names QTRS, so each is a question of its own, not a follow-up.
     const named = (period: ScopeProposal["period"]) => reading({ ...NO_ASKS, period, companies: { kind: "as_named", names: ["QTRS"] } });
     for (const [period, read] of [
       ["TTM", { kind: "trailing_twelve_months" }],
@@ -282,7 +281,6 @@ test("a question about one company that asks for no figure is answered with its 
     ] as const) {
       assert.deepEqual(await planned(`Revenue for QTRS ${period}`, ["QTRS"], { readQuestion: named(read) }), [1, ["a_out"]], period);
     }
-    // A fiscal period is the overview at the company's own quarter there, planned with no model.
     for (const [period, read] of [
       ["in fiscal 2023", { kind: "fiscal_year", fiscal_year: 2023 }],
       ["for Q4 2023", { kind: "fiscal_quarter", fiscal_period: "Q4", fiscal_year: 2023 }],

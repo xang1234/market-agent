@@ -16,10 +16,6 @@
 // digest of these cases is pinned in holdout.integration.test.ts, so a change
 // to a case is a deliberate new version, never a quiet edit.
 //
-// Packet ids follow the order figures are shown (evidence-packet.ts): an
-// analyst turn's are its year-to-date chart's returns, one per company in the
-// order compared (#398 D2); an engine answer's are its results, in the
-// answer's order (enginePacket).
 
 import type { RejectionCheck } from "../../src/assertions.ts";
 
@@ -328,7 +324,6 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
         judged: { 1: "contradicted" },
         fails: { index: 1, check: "judge" },
       },
-      // F2 is AMD's return, cited by the observation the inference rests on (#301).
       {
         name: "a reference swapped to another company's figure",
         list: [

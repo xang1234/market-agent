@@ -340,9 +340,6 @@ export function renderedAnswer(input: AnswerInput, packet: EvidencePacket, repor
     };
     return { answer, report: { ...report, rendered: true, ...(repeated.length > 0 ? { repeated } : {}) } };
   };
-  // A request the data does not hold points to the gap notes shown below the
-  // answer (#302): a benchmark, a YTD window not charted, a declined engine
-  // request re-read.
   const namedGap = input.scope !== undefined && packet.figures.length === 0 && packet.gaps.length > 0;
   const rendering = renderAccepted();
   const answer: Answer = rendering.answer ?? {

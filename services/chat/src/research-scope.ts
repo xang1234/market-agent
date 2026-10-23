@@ -4,9 +4,8 @@
 // reading of it, proposed from closed vocabularies and validated
 // (scope-proposal.ts); with no reading, no period or window is read.
 // Everything else here is derived from those: the route, inheritance, what a
-// turn-off clears. Saved
-// with the answer, so the next follow-up and a reload read the same
-// interpretation.
+// turn-off clears. Saved with the answer, so the next follow-up and a reload
+// read the same interpretation.
 //
 // The scope is what the thread is researching, not what one answer drew: a
 // field a turn's blocks cannot show (a single company's answer has no price
@@ -242,9 +241,6 @@ export const PROPOSABLE_METRICS: ReadonlyArray<RequestedMetric> = Object.freeze(
   { metric_key: "income_statement", label: "Revenue, profit and margins", available: true },
 ].map((metric) => Object.freeze(metric)));
 
-// The cash flow, balance sheet and EPS a question can name: each can be
-// qualified into another figure (proposedMetric), and a comparison asking only
-// for them routes as a gap (resolveResearchScope).
 const STATEMENT_METRICS: ReadonlySet<string> = new Set([
   "operating_cash_flow",
   "capex",
@@ -421,7 +417,6 @@ export function resolveResearchScope(input: {
   const namedQuarter = quarterNamed ?? (partialPeriod ? { fiscal_year: partialYear ?? null, fiscal_period: partialPeriod } : null);
   if (namedQuarter === null && (latest || yearNamed !== undefined)) off.add("fiscal_quarter");
   const fiscal_quarter = pick("fiscal_quarter", namedQuarter, prior?.fiscal_quarter);
-  // A window asked for now is cut off at the turn.
   const asked = asks.has("price_window") ? { kind: "ytd" as const, cutoff: input.asOf } : null;
   const price_window = pick("price_window", asked, prior?.price_window);
   // An evidence follow-up asks for the sources of the previous answer about the

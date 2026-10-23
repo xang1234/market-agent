@@ -7,13 +7,10 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 // proves the UI renders and links it.
 
 // Each answer is rendered from its recorded reply's assertions, so neither the
-// placeholder nor the fallback sentence passes. The first is the engine's answer
-// with its commentary (#398); the others are the analyst's, whose only figures
-// are the year-to-date chart's returns, market data outside the engine (#398 D2).
+// placeholder nor the fallback sentence passes.
 const NVDA_NARRATIVE = "NVDA's revenue rose in every period from Q1 FY2025"
 const NVDA_REVENUE = 'NVIDIA Corporation: Revenue'
 const COMPARE_NARRATIVE = "Of NVDA and AMD, NVDA's price return was highest"
-// The third answer repeats the chart's comparison, then quotes the cause AMD filed.
 const EXPLAIN_NARRATIVE = 'effective Jun 2025 on AMD'
 const AMD_RELEASE = 'AMD Reports Second Quarter 2025 Financial Results (Form 8-K, Exhibit 99.1)'
 const QUESTIONS = ['Analyze NVDA', 'Compare it with AMD YTD', 'Explain the differences and show the evidence']
@@ -37,7 +34,6 @@ async function ask(page: Page, question: string) {
 
 const answer = (page: Page, narrative: string) =>
   page.locator('[data-role="assistant"]', { hasText: narrative })
-// The second answer alone: the third begins with the same comparison.
 const compareAnswer = (page: Page) =>
   page.locator('[data-role="assistant"]', { hasText: COMPARE_NARRATIVE, hasNotText: EXPLAIN_NARRATIVE })
 
@@ -121,12 +117,10 @@ test('golden conversation renders the verified answer, the year-to-date chart an
 
   await ask(page, QUESTIONS[2])
   await expect(answer(page, EXPLAIN_NARRATIVE)).toBeVisible()
-  // The third answer keeps both companies' chart, and the claim it quotes holds its own figure.
   await expectYtdChart(answer(page, EXPLAIN_NARRATIVE))
   await expect(answer(page, EXPLAIN_NARRATIVE).locator('button[data-inspection-kind="claim"]')).toContainText('$800 million')
   if (CAPTURE) await openEveryEvidencePage(page, answer(page, EXPLAIN_NARRATIVE))
 
-  // The inspector opens the claim cited in the third answer and, through it, the release it was filed in.
   await inspectCitedClaim(page, answer(page, EXPLAIN_NARRATIVE))
 
   expect(historyReads).toEqual([])
@@ -161,9 +155,6 @@ async function loadThreadElsewhere(page: Page, asked: readonly string[]) {
   await tab.close()
 }
 
-// The requested year-to-date window, labelled with its dates and basis, drawn as one
-// line per company: market data, source-linked and never a verified calculation.
-// No other block in the answer shows a figure.
 async function expectYtdChart(message: Locator) {
   const chart = message.locator('[data-block-kind="perf_comparison"]')
   await expect(chart).toBeVisible()

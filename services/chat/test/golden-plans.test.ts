@@ -382,7 +382,6 @@ test("an overview at a period shows each company from its own quarter there: the
   assert.deepEqual(await at({ kind: "fiscal_year", fiscal_year: 2019 }), ["NVDA revenue Q1 2018", margin("Q4 2019"), changeOf("NVDA", "Q4 2019", "Q4 2018")], "a year never reported: its fourth quarter, each figure a gap");
   assert.equal(await at(quarter("Q2"), goldenQuarters("NVDA").filter((candidate) => candidate.period.fiscal_period !== "Q2")), null, "a quarter named alone it never reported");
 
-  // Its note is read again at the quarter its saved margins are of.
   const undated = goldenQuarters("NVDA").map((candidate) => candidate.period.fiscal_year === 2026 && candidate.period.fiscal_period === "Q1"
     ? revenueCandidate(2026, "Q1", "2025-02-15", "2025-04-27")
     : candidate);

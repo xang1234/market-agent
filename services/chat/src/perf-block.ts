@@ -1,20 +1,9 @@
-// A comparison's year-to-date price performance (#192), the one figure chat
-// shows outside the financial engine: market data, labelled not verified,
-// until #444's price observations let the engine state a price return (#398
-// D2). Drawn only from sealed data: each company's line is its stored daily
-// bars (market_bar_ranges / market_bars), normalized to percent return from
-// the final close before January 1 to the latest completed session every
-// company has, the same for all (ytd-window.ts). The snapshot pins every series
-// (series_specs: listing, stored bar range, source), the block cites them
-// (data_ref.params.series_refs), and the points travel in the block, so the
-// chart shows exactly what was sealed; nothing is fetched live.
-//
-// Lines are drawn over the sessions every company has, each measured from the
-// shared baseline close. Delayed or end-of-day prices get the pricing
-// disclosure the verifier requires for their series. Anything short of a full
-// window is a named gap, never a shorter window called YTD; so is a full window
-// that is no longer current at the cutoff (#256): a failed refresh must not
-// pass off a months-old cached window as this year to date.
+// A comparison's year-to-date price performance (#192): the one figure chat
+// shows outside the financial engine, source-linked but not engine-verified
+// until #444 lets the engine state a price return (#398 D2). Drawn only from
+// sealed bars; nothing is fetched live. A window short of the full year, or no
+// longer current at the cutoff (#256), is a named gap, never a shorter window
+// called YTD.
 //
 // Lines are only comparable on one price basis (#191): Polygon's prices are
 // split-adjusted only, so their returns exclude dividends, while other sources
@@ -23,8 +12,6 @@
 // instead of a chart. Ranges Polygon wrote under the old dividend-adjusted label
 // are never used (cache-repository.ts).
 //
-// A live YTD turn fetches and stores its window before the cutoff
-// (ytd-hydration.ts); this module reads only stored bars.
 
 import { createSqlPeerSetResolver } from "../../fundamentals/src/peer-set-resolver.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
@@ -113,7 +100,6 @@ async function loadSealedRanges(
   db: QueryExecutor,
   input: PerfInput,
 ): Promise<Block> {
-  // The window covers the cutoff's year on the exchanges' calendars.
   const zones = await listingTimeZones(db, input.listings);
   const zoneOf = (listingId: string) => zones.get(listingId) ?? "UTC";
   const years = new Set(input.listings.map((listing) => ytdYear(input.asOf, zoneOf(listing.id))));
@@ -198,7 +184,6 @@ async function loadSealedRanges(
   };
   const hasRange = (listing: { id: string }) => ranges.some((range) => range.listing_id === listing.id);
   const shared = COMPARABLE_BASES.filter((basis) => input.listings.every((listing) => rangeOf(listing.id, basis)));
-  // A company with no range reaching back over the year-end is the gap, on any basis.
   const uncovered = input.listings.find((listing) => !hasRange(listing));
   if (uncovered) return ytdGapBlock(input, `${uncovered.label} has no prices from before ${year}`);
   if (shared.length === 0) return basisGapBlock(input, ranges);
@@ -354,7 +339,6 @@ export type CompanyListing = { listing_id: string | null; label: string };
 
 const PEER_LIMIT = 4;
 
-// The companies a turn compares: the ones it names, or one plus its peers.
 export async function turnCompanies(
   db: QueryExecutor,
   issuers: ReadonlyArray<IssuerSubjectRef>,
@@ -373,8 +357,6 @@ async function peersOf(db: QueryExecutor, issuer: IssuerSubjectRef): Promise<Rea
   }
 }
 
-// The listings a turn's price chart covers, so their bars can be fetched
-// before the cutoff (#232). None for a single company, which gets no chart.
 export async function priceListingsForTurn(
   db: QueryExecutor,
   input: {
@@ -391,8 +373,6 @@ export async function priceListingsForTurn(
   return priceListingsForComparison(issuerIds, listingsForComparison(issuerIds, input.requestedListings ?? new Map(), active));
 }
 
-// The listings to chart: every compared company's, or none if any has no
-// listing, so the chart never covers fewer companies than the comparison.
 export function priceListingsForComparison(
   issuerIds: ReadonlyArray<string>,
   companies: ReadonlyMap<string, CompanyListing>,
@@ -404,9 +384,6 @@ export function priceListingsForComparison(
   return listings.length === issuerIds.length ? listings : [];
 }
 
-// The listing to chart and label for each company: the one the user asked for
-// when they named a listing (a specific share class or venue), otherwise the
-// issuer's active listing (e.g. an auto-selected peer).
 export function listingsForComparison(
   issuerIds: ReadonlyArray<string>,
   requested: ReadonlyMap<string, CompanyListing>,
@@ -420,8 +397,6 @@ export function listingsForComparison(
   return out;
 }
 
-// Each company's active listing (for prices) and display label: its ticker,
-// else its legal name.
 export async function companyListings(
   db: Pick<QueryExecutor, "query">,
   issuerIds: ReadonlyArray<string>,

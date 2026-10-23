@@ -218,7 +218,6 @@ function quarterly(figure: PacketFigure): boolean {
   return /^Q/.test(periodKey(figure.period));
 }
 
-// Two figures whose periods can be set side by side: both quarters or both years.
 export function comparablePeriods(a: PacketFigure, b: PacketFigure): boolean {
   return quarterly(a) === quarterly(b);
 }

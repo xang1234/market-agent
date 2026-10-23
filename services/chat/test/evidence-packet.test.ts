@@ -342,8 +342,6 @@ test("a price return carries its chart line's series and the chart's sources, an
   assert.deepEqual([model.includes(NVDA_LINE), model.includes("s-px"), model.includes("block_id"), model.includes("\"6.6%\"")], [false, false, false, true]);
 });
 
-// A recorded turn's packet (answer-lab traces), as its model was sent it, which
-// the judge and repair suites replay from.
 test("a recorded trace carries the packet its model was sent", () => {
   const trace = JSON.parse(readFileSync(new URL("./answer-lab/traces/single-latest-quarter.json", import.meta.url), "utf8"));
   const sent = JSON.parse(trace.exchange.messages.find((message: { role: string }) => message.role === "user").content).evidence_packet;

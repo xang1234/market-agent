@@ -331,7 +331,6 @@ function periodText(period: string): string {
   return quarterText(period).replace(/\d{4}-\d{2}-\d{2}/g, (date) => monthYear(date));
 }
 
-// The end month is said, since fiscal calendars differ (#180).
 function periodPhrase(figure: PacketFigure): string {
   return `${figure.period ? ` in ${periodText(figure.period)}` : ""}${figure.period_end ? ` (ended ${monthYear(figure.period_end)})` : ""}`;
 }

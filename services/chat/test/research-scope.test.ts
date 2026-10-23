@@ -278,7 +278,6 @@ test("with no proposal, a follow-up reads what the previous answer read (#378 re
   assert.deepEqual(followUp("And then?", null, trend), { ...trend, inherited: ["margin_trend", "metrics"] });
   const margin = fresh("What is NVDA's gross margin?", proposal({ asks: ["margins"], metrics: ["income_statement"] }));
   assert.deepEqual(followUp("And then?", null, margin), { ...margin, inherited: ["metrics"] });
-  // With no reading no period is read, whatever the question writes.
   assert.deepEqual(followUp("And for FY2025?", null, segments), { ...segments, inherited: ["segments", "metrics"] });
   // Its companies are the turn's: one company added to a single company's answer is compared.
   assert.equal(followUp("And then?", null, margin, [NVDA, AMD]).route, "comparison");
@@ -490,7 +489,6 @@ test("a reading of a period no fiscal field holds drops an inherited one, never 
 test("with no reading, no period is read, whatever the question writes (#398)", () => {
   const quarter = fresh("NVDA revenue in Q3 2025", null);
   assert.deepEqual([quarter.fiscal_year, quarter.fiscal_quarter], [null, null]);
-  // A follow-up keeps the period it inherits.
   const prior = fresh("Show NVDA's fiscal 2025 revenue", proposal({ period: fy(2025) }));
   const kept = followUp("What about Q3?", null, prior);
   assert.deepEqual([kept.fiscal_year, kept.fiscal_quarter], [2025, null]);

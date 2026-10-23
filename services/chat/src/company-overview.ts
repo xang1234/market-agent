@@ -58,7 +58,6 @@ type RevenueQuarters = Readonly<{
   agreedDates: (quarter: FiscalQuarter) => Dates | "unreported" | "conflicting";
 }>;
 
-// A company's quarters with the one its figures are shown at.
 type Anchored = RevenueQuarters & Readonly<{ anchor: FiscalQuarter }>;
 
 // What a plan leaves out, for its answer's note, given each slot's company name.
@@ -99,18 +98,22 @@ export async function overviewOmissions(
   const several = members.length > 1;
   if (!members.every(({ slot_id }) => MARGINS.every(({ metric }) => saved.has(nodeIdOf(several, slot_id)(metric))))) return [];
   const companies = await revenueQuarters(members.map((member) => member.subject_ref), { authority, knowledge_cutoff: plan.time.knowledge_cutoff }, evidence, UNREAD);
-  if (companies === null) return [];
-  // Each company at the quarter its saved margins are of.
+  const anchored = companies && savedAnchors(plan, members.map(({ slot_id }) => nodeIdOf(several, slot_id)), companies);
+  if (!anchored) return [];
+  const { operations, omitted } = companyOverviewDraft(anchored);
+  return operations.length === saved.size && operations.every((node) => saved.has(node.node_id)) ? omitted.map((omission) => omission(name)) : [];
+}
+
+// Each company at the quarter its saved margins are of; null when one's is not a quarter.
+function savedAnchors(plan: FinancialPlanV1, ids: ReadonlyArray<(name: string) => string>, companies: ReadonlyArray<RevenueQuarters>): Anchored[] | null {
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
   const anchored = companies.flatMap((company, index) => {
-    const margin = nodes.get(nodeIdOf(several, members[index]!.slot_id)(MARGINS[0].metric));
+    const margin = nodes.get(ids[index]!(MARGINS[0].metric));
     const line = margin?.operation === MARGINS[0].metric ? nodes.get(margin.numerator) : undefined;
     const period = line?.operation === "reported_metric" && line.period.kind === "fiscal_period" ? line.period : null;
     return period !== null && period.fiscal_period !== "FY" ? [{ ...company, anchor: { fiscal_year: period.fiscal_year, fiscal_period: period.fiscal_period } }] : [];
   });
-  if (anchored.length !== companies.length) return [];
-  const { operations, omitted } = companyOverviewDraft(anchored);
-  return operations.length === saved.size && operations.every((node) => saved.has(node.node_id)) ? omitted.map((omission) => omission(name)) : [];
+  return anchored.length === companies.length ? anchored : null;
 }
 
 export const slotOf = (index: number) => String.fromCharCode(97 + index);
@@ -139,10 +142,6 @@ export async function planningQuarters(context: PlanningContext, evidence: Finan
   return anchored?.length === refs.length ? anchored : null;
 }
 
-// The quarter a company's figures are shown at: its newest for the latest; a
-// fiscal year's newest it reported, else that year's fourth; the quarter
-// named, or with no year its newest such quarter, which it may never have
-// reported (null).
 function anchorOf(company: RevenueQuarters, period: ReadPeriod): FiscalQuarter | null {
   const order = (quarter: FiscalQuarter) => quarter.fiscal_year * 4 + FISCAL_PERIODS.indexOf(quarter.fiscal_period);
   const newestOf = (quarters: ReadonlyArray<FiscalQuarter>) =>
@@ -296,7 +295,7 @@ function companyOverviewDraft(companies: ReadonlyArray<Anchored>) {
   const shownAt = companies[0]!.anchor;
   const dates = companies[0]!.agreedDates(shownAt);
   const anchor = typeof dates === "string" || dates.start === null ? null : dates;
-  const paired = others.flatMap((other, index): Array<{ slot: string; margins: ReadonlyArray<Node>; operations: ReadonlyArray<Node> }> => {
+  const paired = others.flatMap((other, index): Array<{ slot: string; margins: ReadonlyArray<Node>; leadOperations: ReadonlyArray<Node> }> => {
     const quarter = anchor && closestQuarter(companies[index + 1]!, anchor);
     if (quarter === null) {
       omitted.push((named) => `${named(primary!.slot)}'s lead over ${named(other.slot)} in each margin, as ${dates === "unreported"
@@ -306,12 +305,11 @@ function companyOverviewDraft(companies: ReadonlyArray<Anchored>) {
         : `no quarter ${named(other.slot)} reported ends within half a quarter of ${named(primary!.slot)}'s ${quarterText(shownAt)}`}`);
       return [];
     }
-    if (quarterId(quarter) === quarterId(companies[index + 1]!.anchor)) return [{ slot: other.slot, margins: other.margins, operations: [] }];
+    if (quarterId(quarter) === quarterId(companies[index + 1]!.anchor)) return [{ slot: other.slot, margins: other.margins, leadOperations: [] }];
     const revenue = other.at("revenue", quarter);
     const lines = MARGINS.map(({ numerator }) => other.at(numerator, quarter));
     const margins = MARGINS.map(({ metric }, line): Node => ({ node_id: other.id(`${metric}_${quarterId(quarter)}`), operation: metric, numerator: lines[line]!.node_id, revenue: revenue.node_id }));
-    // Only the lead shows them: each company is shown at its own quarter.
-    return [{ slot: other.slot, margins, operations: [revenue, ...lines, ...margins] }];
+    return [{ slot: other.slot, margins, leadOperations: [revenue, ...lines, ...margins] }];
   });
   const leads = MARGINS.flatMap(({ metric }, line) => paired.map((other): Node => ({
     node_id: `${primary!.slot}_minus_${other.slot}_${metric}`,
@@ -320,7 +318,7 @@ function companyOverviewDraft(companies: ReadonlyArray<Anchored>) {
     right: other.margins[line]!.node_id,
   })));
   // A company's closest quarter may be one its growth already reads.
-  const operations = new Map([...parts.flatMap((part) => part.operations), ...paired.flatMap((other) => other.operations), ...leads].map((node) => [node.node_id, node]));
+  const operations = new Map([...parts.flatMap((part) => part.operations), ...paired.flatMap((other) => other.leadOperations), ...leads].map((node) => [node.node_id, node]));
   return {
     operations: [...operations.values()],
     outputs: [...parts.flatMap((part) => part.outputs), ...leads],
