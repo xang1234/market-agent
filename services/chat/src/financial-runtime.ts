@@ -43,7 +43,20 @@ import { publishRequest, type RequestGap } from "../../financial-engine/src/requ
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { comparedAdditions, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId } from "./chat-ids.ts";
-import { allResolved, marginTrendSubjects, overviewOmissions, overviewPeers, overviewSubjects, planCompanyOverview, planMarginTrend, type PeersOf } from "./company-overview.ts";
+import {
+  allResolved,
+  keptFigures,
+  marginTrendSubjects,
+  overviewOmissions,
+  overviewPeers,
+  overviewSubjects,
+  planCompanyOverview,
+  planMarginTrend,
+  planScopeFigures,
+  readPeriod,
+  type PeersOf,
+  type ReadPeriod,
+} from "./company-overview.ts";
 import { noteBlock } from "./fact-blocks.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { companyKey, extractSubjectMentions } from "./subject-extraction.ts";
@@ -239,7 +252,8 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       // an overview added included, and the planner's result.
       let asked = requested.subjects;
       let planned: PlanningResult | undefined;
-      let overview = false;
+      // The period an overview or margin trend was planned at, when one was.
+      let overview: ReadPeriod | null = null;
       const declinedGap = (reason: ChatGap) => {
         // ponytail: a retry that resumes a reserved run does not plan, so its
         // gap names the companies the message resolved, without a pick or peers.
@@ -272,7 +286,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       // attempt can compose.
       const withCommentary = (answer: ChatFinancialTurn): ChatFinancialTurn => {
         const { commentary: save } = deps;
-        if (!overview || !save || answer.kind !== "published" || !answer.message) return answer;
+        if (overview === null || !save || answer.kind !== "published" || !answer.message) return answer;
         const { message } = answer;
         return {
           ...answer,
@@ -305,8 +319,8 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
             reading,
             evidence: deps.evidence(db),
             peersOf: (issuer) => overviewPeers(db, issuer),
-            onOverview: () => {
-              overview = true;
+            onOverview: (period) => {
+              overview = period;
             },
           });
           return planned;
@@ -511,7 +525,7 @@ async function planTurn(
     reading: ScopeProposal | null;
     evidence: FinancialEvidencePort;
     peersOf: PeersOf;
-    onOverview: () => void;
+    onOverview: (period: ReadPeriod) => void;
   }>,
 ): Promise<PlanningResult> {
   const planningContext = (subjects: ReadonlyArray<RequestedSubject>): PlanningContext => ({
@@ -536,20 +550,27 @@ async function planTurn(
   }
   onSubjects(subjects);
   if (CASH_RESILIENCE.test(text)) return planCashResilience(planningContext(subjects), text);
-  if (allResolved(subjects)) {
-    const companies = await overviewSubjects(subjects, turn.reading, turn.scope, turn.peersOf);
-    const overview = companies && await planCompanyOverview(planningContext(companies), turn.evidence);
-    if (companies && overview) {
-      onSubjects(companies);
-      turn.onOverview();
-      return overview;
-    }
-    const trended = marginTrendSubjects(subjects, turn.reading, turn.scope);
-    const trend = trended && await planMarginTrend(planningContext(trended), turn.evidence);
+  const { reading, scope } = turn;
+  // The engine has no segment definition: a turn that asks for segments is that gap, whatever else it asks.
+  if (reading !== null && readingAsks(reading).asks.has("segments")) return { outcome: "unsupported", reason: "segments", issues: [], model_calls: 0 };
+  const period = reading && readPeriod(reading, scope);
+  if (period && allResolved(subjects)) {
+    const trended = marginTrendSubjects(subjects, reading, scope);
+    const trend = trended && await planMarginTrend(planningContext(trended), turn.evidence, period);
     if (trend) {
-      turn.onOverview();
+      turn.onOverview(period);
       return trend;
     }
+    const companies = await overviewSubjects(subjects, reading, scope, turn.peersOf);
+    const overview = companies && await planCompanyOverview(planningContext(companies), turn.evidence, period);
+    if (companies && overview) {
+      onSubjects(companies);
+      turn.onOverview(period);
+      return overview;
+    }
+    const kept = keptFigures(reading, scope);
+    const figures = kept && await planScopeFigures(planningContext(subjects), turn.evidence, kept, period);
+    if (figures) return figures;
   }
   // A failing or unreachable model is a planning gap (publishRequest); the narrative composer is never a fallback for numbers.
   return planFinancialRequest(planningContext(subjects), text, model ?? noModel);
@@ -703,8 +724,8 @@ function persistAssistantMessage(
     scope: ResearchScope | null;
     reading: ScopeProposal | null;
     evidence: ChatFinancialRuntimeDeps["evidence"];
-    // Whether the turn published the overview or margin trend, of the latest quarters.
-    overview: () => boolean;
+    // The period the turn's overview or margin trend was planned at, when it published one.
+    overview: () => ReadPeriod | null;
     carried: ReadonlyArray<string>;
     notFound: ReadonlyArray<string>;
     labels: ReadonlyMap<string, string>;
@@ -740,8 +761,8 @@ function persistAssistantMessage(
       reads: "financial_answer" as const,
       companies: answeredCompanies(plan.subjects.members.map((member) => member.subject_ref.id), scope, turn.labels),
       metrics: planMetrics(plan),
-      // The overview shows each company's latest quarters, so it keeps no period.
-      ...(turn.overview() ? { fiscal_year: null, fiscal_quarter: null } : {}),
+      // An overview of the latest quarters keeps no period; one at a period keeps it.
+      ...(turn.overview()?.kind === "latest" ? { fiscal_year: null, fiscal_quarter: null } : {}),
       ...(reading === null ? { coverage_unchecked: true as const } : {}),
     };
     // It replaces a gap another attempt of the turn saved under its id.

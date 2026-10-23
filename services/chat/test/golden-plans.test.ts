@@ -7,7 +7,20 @@ import { createRuntimeAuthority, operationDependencies, type FinancialPlanV1 } f
 import { buildDeterministicPlan, planFinancialRequest, type PlanningContext, type PlanningModel, type PlanningResult, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import type { CandidatePage, CandidateRequest, FinancialEvidencePort, InputCandidate, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
-import { allResolved, marginTrendSubjects, overviewOmissions, overviewPeers, overviewSubjects, planCompanyOverview, planMarginTrend } from "../src/company-overview.ts";
+import {
+  allResolved,
+  keptFigures,
+  LATEST,
+  marginTrendSubjects,
+  overviewOmissions,
+  overviewPeers,
+  overviewSubjects,
+  planCompanyOverview,
+  planMarginTrend,
+  planScopeFigures,
+  readPeriod,
+  type ReadPeriod,
+} from "../src/company-overview.ts";
 import { MAX_TURN_SUBJECTS } from "../src/coordinator.ts";
 import { uncoveredAsks } from "../src/financial-runtime.ts";
 import { resolveResearchScope } from "../src/research-scope.ts";
@@ -367,6 +380,87 @@ test("a comparison shows each company's latest quarter, named from the newest it
 const reading = (asks: string[], metrics: unknown[] = [], income_items: string[] = [], turnsOff: string[] = [], period: unknown = { kind: "none" }) =>
   parseProposal(JSON.stringify({ metrics, asks, turns_off: { facets: turnsOff, metrics: [] }, income_items, period, companies: { kind: "as_named", names: [] } }), "")!;
 
+test("an overview at a period shows each company from its own quarter there: the one named, a quarter named alone at its newest, a fiscal year at its newest quarter (#398)", async () => {
+  const at = async (period: ReadPeriod, candidates = goldenQuarters("NVDA")) => {
+    const shown = await overviewOf("NVDA", () => candidatePage(...candidates), (context, evidence) => planCompanyOverview(context, evidence, period));
+    return shown && [shown.outputs[0], shown.outputs.find((output) => output.startsWith("gross_margin")), shown.outputs.filter((output) => output.startsWith("percent_change")).at(-1)];
+  };
+  const quarter = (fiscal_period: string, fiscal_year: number | null = null): ReadPeriod => ({ kind: "fiscal_quarter", fiscal_period, fiscal_year });
+  const margin = (quarter: string) => `gross_margin(NVDA gross_profit ${quarter}, NVDA revenue ${quarter})`;
+  assert.deepEqual(await at(LATEST), ["NVDA revenue Q1 2025", margin("Q4 2026"), changeOf("NVDA", "Q4 2026", "Q4 2025")]);
+  assert.deepEqual(await at(quarter("Q2")), ["NVDA revenue Q3 2024", margin("Q2 2026"), changeOf("NVDA", "Q2 2026", "Q2 2025")], "its newest second quarter");
+  assert.deepEqual(await at(quarter("Q2", 2025)), ["NVDA revenue Q3 2023", margin("Q2 2025"), changeOf("NVDA", "Q2 2025", "Q2 2024")]);
+  assert.deepEqual(await at({ kind: "fiscal_year", fiscal_year: 2025 }), ["NVDA revenue Q1 2024", margin("Q4 2025"), changeOf("NVDA", "Q4 2025", "Q4 2024")], "the year's newest quarter");
+  assert.deepEqual(await at({ kind: "fiscal_year", fiscal_year: 2019 }), ["NVDA revenue Q1 2018", margin("Q4 2019"), changeOf("NVDA", "Q4 2019", "Q4 2018")], "a year never reported: its fourth quarter, each figure a gap");
+  assert.equal(await at(quarter("Q2"), goldenQuarters("NVDA").filter((candidate) => candidate.period.fiscal_period !== "Q2")), null, "a quarter named alone it never reported");
+
+  // Its note is read again at the quarter its saved margins are of.
+  const undated = goldenQuarters("NVDA").map((candidate) => candidate.period.fiscal_year === 2026 && candidate.period.fiscal_period === "Q1"
+    ? revenueCandidate(2026, "Q1", "2025-02-15", "2025-04-27")
+    : candidate);
+  const q1 = await overviewOf("NVDA", () => candidatePage(...undated), (context, evidence) => planCompanyOverview(context, evidence, quarter("Q1", 2026)));
+  assert.deepEqual(q1!.uncovered, [
+    "revenue growth from Q4 FY2025 to Q1 FY2026, whose quarters are not dated consecutively",
+    "revenue growth from Q1 FY2025 to Q1 FY2026, whose quarters are not dated consecutively",
+  ]);
+});
+
+test("a follow-up's kept figures are each chat metric's engine figures at the period it reads (#398)", async () => {
+  const tickerOf = (issuerId: string) => GOLDEN_COMPANIES.find((company) => company.issuer_id === issuerId)!.ticker;
+  const evidence = { listInputCandidates: async (request: CandidateRequest) => candidatePage(...goldenQuarters(tickerOf(request.subject.id))) } as FinancialEvidencePort;
+  const figures = async (question: string, metrics: string[], period: ReadPeriod) => {
+    const planned = await planScopeFigures(planningContext(question), evidence, metrics, period);
+    return planned && outputLabels(planned.plan);
+  };
+  const cashFlow = (ticker: string, period: string) => [
+    `${ticker} operating_cash_flow ${period}`,
+    `${ticker} capex ${period}`,
+    `free_cash_flow(${ticker} operating_cash_flow ${period}, ${ticker} capex ${period})`,
+  ];
+  const fcf = ["free_cash_flow", "operating_cash_flow", "capex"];
+  assert.deepEqual(await figures("AMD", fcf, LATEST), cashFlow("AMD", "latest annual[0]"), "the latest fiscal year");
+  assert.deepEqual(await figures("AMD", fcf, { kind: "fiscal_year", fiscal_year: 2025 }), cashFlow("AMD", "FY 2025"));
+  assert.deepEqual(await figures("AMD", ["free_cash_flow"], { kind: "fiscal_quarter", fiscal_period: "Q2", fiscal_year: 2025 }), cashFlow("AMD", "Q2 2025"), "the engine says free cash flow is annual");
+  assert.deepEqual(await figures("AMD", ["balance_sheet"], { kind: "fiscal_year", fiscal_year: 2025 }), ["cash_and_equivalents", "total_assets", "total_liabilities", "total_equity"].map((metric) => `AMD ${metric} FY 2025`));
+  const income = (ticker: string, period: string) => [
+    `${ticker} revenue ${period}`,
+    `${ticker} gross_profit ${period}`,
+    `${ticker} operating_income ${period}`,
+    `${ticker} net_income ${period}`,
+    `gross_margin(${ticker} gross_profit ${period}, ${ticker} revenue ${period})`,
+    `operating_margin(${ticker} operating_income ${period}, ${ticker} revenue ${period})`,
+    `net_margin(${ticker} net_income ${period}, ${ticker} revenue ${period})`,
+  ];
+  const q2 = { kind: "fiscal_quarter", fiscal_period: "Q2", fiscal_year: null } as const;
+  assert.deepEqual(await figures("AMD", ["income_statement", "eps_diluted"], q2), [...income("AMD", "Q2 2026"), "AMD eps_diluted Q2 2026"], "a quarter named alone is the company's newest");
+  assert.deepEqual(await figures("NVDA and AMD", ["eps_diluted"], q2), ["NVDA eps_diluted Q2 2026", "AMD eps_diluted Q2 2026"], "each company's own");
+  assert.deepEqual(await figures("NVDA and AAPL", ["eps_diluted"], q2), ["NVDA eps_diluted Q2 2026", "AAPL eps_diluted Q2 2026"]);
+  for (const metrics of [["market_cap"], ["eps_diluted", "pe_ratio"], ["ebitda"], []]) assert.equal(await figures("AMD", metrics, LATEST), null, JSON.stringify(metrics));
+});
+
+test("a reading's period: a follow-up keeps its scope's, a question of its own reads the latest, and one no fiscal field holds is the planner's (#398)", () => {
+  const scope = (fiscal_year: number | null, fiscal_quarter: { fiscal_year: number; fiscal_period: string } | null = null) => ({ fiscal_year, fiscal_quarter });
+  const own = { kind: "as_named", names: ["NVDA"] } as const;
+  const period = (read: ReturnType<typeof reading>, scoped = scope(null)) => readPeriod(read, scoped);
+  assert.deepEqual(period(reading([])), LATEST);
+  assert.deepEqual(period(reading([]), scope(2025)), { kind: "fiscal_year", fiscal_year: 2025 });
+  assert.deepEqual(period(reading([]), scope(2025, { fiscal_year: 2025, fiscal_period: "Q2" })), { kind: "fiscal_quarter", fiscal_year: 2025, fiscal_period: "Q2" });
+  assert.deepEqual(period({ ...reading([]), companies: own }, scope(2025)), LATEST, "a question of its own");
+  assert.deepEqual(period(reading([], [], [], [], { kind: "latest" }), scope(2025)), LATEST);
+  const q2 = reading([], [], [], [], { kind: "fiscal_quarter", fiscal_period: "Q2", fiscal_year: null });
+  assert.deepEqual(period(q2), { kind: "fiscal_quarter", fiscal_period: "Q2", fiscal_year: null });
+  assert.deepEqual(period(q2, scope(2025, { fiscal_year: 2025, fiscal_period: "Q2" })), { kind: "fiscal_quarter", fiscal_period: "Q2", fiscal_year: 2025 }, "the year the scope gives it");
+  assert.equal(period(reading([], [], [], [], { kind: "trailing_twelve_months" })), null);
+
+  const kept = (read: ReturnType<typeof reading>, ...metrics: string[]) => keptFigures(read, { metrics: metrics.map((metric_key) => ({ metric_key, label: metric_key, available: true })) });
+  assert.deepEqual(kept(q2, "free_cash_flow", "capex"), ["free_cash_flow", "capex"]);
+  assert.deepEqual(kept(reading(["explains"]), "eps_diluted"), ["eps_diluted"]);
+  assert.equal(kept(q2, "income_statement"), null, "the overview shows them");
+  assert.equal(kept({ ...q2, companies: own }, "free_cash_flow"), null, "a question of its own");
+  assert.equal(kept(reading(["margins"]), "free_cash_flow"), null, "a figure asked for");
+  assert.deepEqual(kept({ ...reading([]), turns_off: { facets: new Set(), metrics: new Set(["capex"]) } }, "free_cash_flow"), ["free_cash_flow"], "its scope has turned the rest off");
+});
+
 test("a question about its companies, named or carried, that asks for no figure is answered with their overview, or one company's with its peers; one about a figure or a period is not (#398)", async () => {
   const client = await createReplayLlmChatClient(REPLIES);
   const read = async (question: string) => parseProposal((await client({} as never, { messages: [{ role: "user", content: proposalQuestion(question) }] })).text, question);
@@ -399,16 +493,18 @@ test("a question about its companies, named or carried, that asks for no figure 
   assert.deepEqual(await overview("Analyze NVDA's most recent results", scripted(reading([], [], [], [], { kind: "latest" }))), ["NVDA"], "the latest period");
   const subjects = planningContext("Analyze NVDA").requested_subjects;
   assert.equal(await overviewSubjects(subjects, reading([]), null, none), null, "a scope that failed to resolve");
-  const periods: Array<[string, ReturnType<typeof reading>]> = [
-    ["in fiscal 2025", reading([], [], [], [], { kind: "fiscal_year", fiscal_year: 2025 })],
-    ["for Q4 2025", reading([], [], [], [], { kind: "fiscal_quarter", fiscal_period: "Q4", fiscal_year: 2025 })],
-    ["YTD", reading(["price_window"])],
-    ["for Q3", reading([], [], [], [], { kind: "fiscal_quarter", fiscal_period: "Q3", fiscal_year: null })],
-    ["in the third quarter", reading([], [], [], [], { kind: "fiscal_quarter", fiscal_period: "Q3", fiscal_year: null })],
+  // A fiscal period is the overview at it (planCompanyOverview); a price window, or a period no fiscal field holds, is not.
+  const periods: Array<[string, ReturnType<typeof reading>, boolean]> = [
+    ["in fiscal 2025", reading([], [], [], [], { kind: "fiscal_year", fiscal_year: 2025 }), true],
+    ["for Q4 2025", reading([], [], [], [], { kind: "fiscal_quarter", fiscal_period: "Q4", fiscal_year: 2025 }), true],
+    ["for Q3", reading([], [], [], [], { kind: "fiscal_quarter", fiscal_period: "Q3", fiscal_year: null }), true],
+    ["YTD", reading(["price_window"]), false],
+    ["over the last twelve months", reading([], [], [], [], { kind: "trailing_twelve_months" }), false],
+    ["since 2021", reading([], [], [], [], { kind: "range" }), false],
   ];
-  for (const [period, read] of periods) {
-    assert.equal(await overview(`Analyze NVDA ${period}`, scripted(read)), null, period);
-    assert.equal(await overview(`Compare NVDA and AMD ${period}`, scripted(read)), null, `a comparison ${period}`);
+  for (const [period, read, shown] of periods) {
+    assert.deepEqual(await overview(`Analyze NVDA ${period}`, scripted(read)), shown ? ["NVDA"] : null, period);
+    assert.deepEqual(await overview(`Compare NVDA and AMD ${period}`, scripted(read)), shown ? ["NVDA", "AMD"] : null, `a comparison ${period}`);
   }
   const yearToDate = "Compare it with AMD YTD";
   assert.deepEqual(
@@ -431,8 +527,8 @@ test("a question about one company's margin trend plans its three margins over t
   });
 
   const subjects = planningContext("NVDA").requested_subjects;
-  const scope = { price_window: null };
-  const trend = (proposal: ReturnType<typeof reading>, over = subjects, scoped: { price_window: null | object } | null = scope) =>
+  const scope = { margin_trend: false, metrics: [] };
+  const trend = (proposal: ReturnType<typeof reading>, over = subjects, scoped: { margin_trend: boolean; metrics: unknown[] } | null = scope) =>
     marginTrendSubjects(over, proposal, scoped as never)?.map((subject) => subject.mention) ?? null;
   assert.deepEqual(trend(reading(["margin_trend"], ["income_statement"], ["operating_margin"])), ["NVDA"], "one margin over time");
   assert.deepEqual(trend(reading(["margins", "margin_trend", "explains"])), ["NVDA"], "margins over time and why");
@@ -444,8 +540,16 @@ test("a question about one company's margin trend plans its three margins over t
   assert.equal(trend(reading(["margin_trend"], [], [], [], { kind: "fiscal_quarter", fiscal_period: "Q2", fiscal_year: 2025 })), null, "a named quarter");
   assert.equal(trend(reading(["margin_trend"], [], [], ["margins"])), null, "margins turned off");
   assert.equal(trend(reading(["margin_trend"]), planningContext("NVDA and AMD").requested_subjects), null, "two companies");
-  assert.equal(trend(reading(["margin_trend"]), subjects, { price_window: { kind: "ytd" } }), null, "a price window");
   assert.equal(trend(reading(["margin_trend"]), subjects, null), null, "no scope");
+  // A follow-up naming only another period keeps the trend its scope holds; one naming no period, or a company of its own, does not.
+  const kept = { margin_trend: true, metrics: [{ metric_key: "income_statement" }] };
+  const q2 = { kind: "fiscal_quarter", fiscal_period: "Q2", fiscal_year: null };
+  assert.deepEqual(trend(reading([], [], [], [], q2), subjects, kept), ["NVDA"], "what about Q2");
+  assert.deepEqual(trend(reading([], [], [], [], { kind: "fiscal_year", fiscal_year: 2025 }), subjects, kept), ["NVDA"], "and fiscal 2025");
+  assert.equal(trend(reading([]), subjects, kept), null, "no other period");
+  assert.equal(trend(reading([], [], [], [], q2), subjects, scope), null, "no trend kept");
+  assert.equal(trend({ ...reading([], [], [], [], q2), companies: { kind: "as_named", names: ["NVDA"] } }, subjects, kept), null, "a question of its own");
+  assert.equal(trend(reading([], [], [], [], q2), subjects, { margin_trend: true, metrics: [{ metric_key: "free_cash_flow" }] }), null, "a figure the trend does not show");
   assert.equal(marginTrendSubjects(subjects, null, scope), null, "no reading");
 });
 
