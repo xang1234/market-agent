@@ -1,0 +1,618 @@
+{
+  "cause-in-evidence#0": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 2,
+      "no_invented_numbers": 1,
+      "notes": "The $7.7B revenue, -$134M operating income, -1.7% operating margin and 39.8% gross margin match, and the dated $800M charge is attributed to management. Positive net income is a specific counterpoint, but saying weakness was confined to operations glosses over the unexplained below-operating-line offset."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 0,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "All quoted figures match, including $872M net income, and the positive bottom line supplies a concrete counterpoint with the unexplained offset acknowledged. However, saying the figures do not show why operating margin changed conflicts with the management explanation it quotes, and revenue growth alone does not rule out weak demand."
+    },
+    "better": "X",
+    "why": "X gives a more coherent causal answer; Y explicitly denies an explanation immediately after quoting management’s charge attribution."
+  },
+  "cause-in-evidence#1": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "The answer connects the 39.8% gross margin and -1.7% operating margin to management’s dated $800M export-control charge attribution. The $872M positive net income and 11.3% net margin versus 9.5% previously give a specific, numerically correct qualification."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 0,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "The revenue, operating-loss, growth and charge numbers match, and the charge-allocation uncertainty is stated rather than filled with an invented split. Its claim that operating-margin causation is not shown contradicts the management attribution; the positive net result nevertheless supplies a data-grounded counterpoint."
+    },
+    "better": "X",
+    "why": "X consistently uses the disclosed cause and supports its bottom-line qualification, while Y contradicts the causal evidence."
+  },
+  "fiscal-year-trap#0": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "AAPL’s $416.2B and NVDA’s $130.5B revenue and both sets of margins match the data. The January versus September 2025 year ends are explicitly identified as a concrete limit on the revenue comparison."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "The revenue, margin, growth and return figures are correct for their named companies and periods. The later AAPL year end is presented as a possible comparison distortion, not an established numerical adjustment."
+    },
+    "better": "tie",
+    "why": "Both correctly compare revenue and margins and explicitly qualify the different fiscal-year windows."
+  },
+  "fiscal-year-trap#1": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "All company figures match, including $416.2B versus $130.5B revenue and 26.9% versus 55.8% net margins. The January/September year-end mismatch is explicitly used to qualify comparability."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "The revenue, margin and return rankings match the listed values, with fiscal periods named. Its profitability statement is supported by the margin comparison, and the different time windows provide a specific counterpoint."
+    },
+    "better": "tie",
+    "why": "Both supply the same correct revenue comparison with explicit fiscal-calendar qualifications."
+  },
+  "follow-up-memory.turn-1#0": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "The NVDA-only first turn correctly reports Q4 FY2026 revenue of $62.1B, 8.9% sequential growth and all profit figures and margins. The latest sequential slowdown is supported by the preceding $46.7B-to-$57.0B jump, and the absence of valuation data is acknowledged."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "All reported Q4 FY2026 figures and the eight-quarter revenue direction match the data. Its counterpoint explicitly contrasts the latest growth rate with the larger preceding-quarter step-up, which the revenue series supports."
+    },
+    "better": "tie",
+    "why": "Both preserve the correct first-turn company and period and give a supported sequential-growth qualification."
+  },
+  "follow-up-memory.turn-1#1": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "The revenue, profit and margin figures are correct and the latest slowdown versus the prior quarter is supported. The broader claim that later-quarter step-ups were larger than early ones is imprecise: later jumps include $2.6B and $5.1B as well as the unusually large $10.3B jump."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "The Q4 FY2026 figures match, and strong growth and profitability follow from 57.9% annual growth and 64.9% operating margin. The possible sequential slowdown is grounded in the series, and valuation is explicitly identified as unavailable."
+    },
+    "better": "Y",
+    "why": "Y offers a clearer supported assessment without X’s overgeneralization about later-quarter revenue jumps."
+  },
+  "follow-up-memory.turn-2#0": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "Both companies are retained, the YTD returns are correctly 5.81% and 3.17%, and the January/December fiscal-year mismatch is disclosed. The charge is a specific profitability counterpoint, but the labelled view that the market is not rewarding NVDA proportionally cannot be established from returns without valuation or expectations."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "The YTD return window and all fiscal-year figures match, with the fiscal mismatch stated. The narrow price-return difference versus the much larger margin differences qualifies the leadership conclusion using actual data, without asserting a valuation conclusion."
+    },
+    "better": "Y",
+    "why": "Y confines its interpretation to observed fundamental and return differences, whereas X adds a thin market-reward inference."
+  },
+  "follow-up-memory.turn-2#1": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "All figures, both companies and the YTD window are correct, and the fiscal mismatch is explicit. The small return difference is a specific counterpoint, but it cannot establish that the market is paying little extra for NVDA’s stronger business."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "All company figures and YTD returns match; the management charge provides a specific qualification to AMD’s margins and the fiscal mismatch is stated. Even with an unverified-view label, the market-reward interpretation remains thinly supported by returns alone."
+    },
+    "better": "tie",
+    "why": "Both are numerically correct and offer concrete counterpoints, but both infer market pricing from return differences without valuation evidence."
+  },
+  "follow-up-memory.turn-3#0": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "The final turn retains NVDA and AMD, reports the correct YTD and fiscal figures, and cites the $800M charge as a margin qualification. Calling profitability the widest lead lacks a stated comparison basis across dollar scale, percentage-point gaps and relative differences."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "Both companies and their exact figures are retained, with the fiscal mismatch explicitly disclosed. The labelled possibility that AMD’s charge widens the reported margin gap is grounded in management’s $800M disclosure and does not invent an adjusted margin."
+    },
+    "better": "Y",
+    "why": "Y makes the supported leadership and charge-adjustment points without X’s undefined widest-gap ranking."
+  },
+  "follow-up-memory.turn-3#1": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "The company coverage, fiscal periods, YTD returns and all monetary and margin values match the data. The charge supplies a specific counterpoint, but the claim that profitability is the widest gap has no defined basis across metrics with different units."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "The rankings and all numbers are correct, and the labelled underlying-margin possibility is grounded in the disclosed charge. The widest-profitability-gap claim is under-specified, since a percentage-point comparison does not establish the largest relative lead across scale, growth and returns."
+    },
+    "better": "tie",
+    "why": "Both preserve the context and numerical evidence, with the same useful charge counterpoint and the same ambiguous widest-gap claim."
+  },
+  "margin-trend-loss-quarter#0": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "The 10.6%, -1.7% and 14.4% operating margins, 39.8% gross-margin trough and attributed $800M charge are correct. The flat recent gross margin is a concrete qualification, but it does not prove that future operating-margin gains must exclude renewed gross-margin expansion; the intermediate operating quarters are also omitted."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "All eight operating margins are given in order, including the negative Q2 FY2025 margin, and the charge is attributed to management. Small recent operating-margin increases and the recovered gross margin support the qualified improvement and operating-leverage reading."
+    },
+    "better": "Y",
+    "why": "Y shows the full requested quarterly sequence and avoids X’s unwarranted constraint on future gross-margin contribution."
+  },
+  "margin-trend-loss-quarter#1": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "The operating-margin endpoints and trough, revenue endpoints and recent net margins are all correct. Small recent gains and unchanged 54.0% gross margins in the data support its flattening qualification, although it does not enumerate all eight operating margins."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "The reported quarterly operating and gross margins match, and operating leverage is a reasonable inference from higher revenue and flat gross margin. The labelled assertion that flat recent gross margin limits future upside goes beyond the data, since future gross margin need not remain flat; Q3 FY2025’s operating margin is omitted."
+    },
+    "better": "X",
+    "why": "X’s caution describes the observed recent trend, whereas Y additionally extrapolates a future upside limit from flat historical gross margins."
+  },
+  "missing-cash-flow#0": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": "n/a",
+      "figures_match_sources": "n/a",
+      "conclusions_justified": "n/a",
+      "counterarguments": "n/a",
+      "no_invented_numbers": 1,
+      "notes": "The $800M charge is a real management disclosure, not invented free cash flow, but it is irrelevant to the requested metric. Saying no figures are shown for AMD does not plainly identify the specific missing data."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": "n/a",
+      "figures_match_sources": "n/a",
+      "conclusions_justified": "n/a",
+      "counterarguments": "n/a",
+      "no_invented_numbers": 2,
+      "notes": "The short answer honestly says the available data cannot answer the question and directs the reader to the displayed note naming the missing metric. It supplies no substitute or invented figure, and the company remains clear from the question and note."
+    },
+    "better": "Y",
+    "why": "Y directly identifies the inability to answer and refers to the specific gap note; X distracts with an unrelated charge."
+  },
+  "missing-cash-flow#1": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": "n/a",
+      "figures_match_sources": "n/a",
+      "conclusions_justified": "n/a",
+      "counterarguments": "n/a",
+      "no_invented_numbers": 1,
+      "notes": "The $800M charge is a real management disclosure, not invented free cash flow, but it is irrelevant to the requested metric. Saying no figures are shown for AMD does not plainly identify the specific missing data."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": "n/a",
+      "figures_match_sources": "n/a",
+      "conclusions_justified": "n/a",
+      "counterarguments": "n/a",
+      "no_invented_numbers": 2,
+      "notes": "The short answer honestly says the available data cannot answer the question and directs the reader to the displayed note naming the missing metric. It supplies no substitute or invented figure, and the company remains clear from the question and note."
+    },
+    "better": "Y",
+    "why": "Y directly identifies the inability to answer and refers to the specific gap note; X distracts with an unrelated charge."
+  },
+  "missing-segments#0": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": "n/a",
+      "figures_match_sources": "n/a",
+      "conclusions_justified": "n/a",
+      "counterarguments": "n/a",
+      "no_invented_numbers": 1,
+      "notes": "The management-disclosed $800M charge is not a segment-revenue number, but it does not answer the segment request. The general statement that no AMD figures are shown leaves the specific segment-data gap unstated."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": "n/a",
+      "figures_match_sources": "n/a",
+      "conclusions_justified": "n/a",
+      "counterarguments": "n/a",
+      "no_invented_numbers": 2,
+      "notes": "The short answer honestly says the available data cannot answer the question and directs the reader to the displayed note naming the missing metric. It supplies no substitute or invented figure, and the company remains clear from the question and note."
+    },
+    "better": "Y",
+    "why": "Y gives an honest unavailable-data response tied to the displayed segment-gap note, without the unrelated charge discussion."
+  },
+  "missing-segments#1": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": "n/a",
+      "figures_match_sources": "n/a",
+      "conclusions_justified": "n/a",
+      "counterarguments": "n/a",
+      "no_invented_numbers": 2,
+      "notes": "The short answer honestly says the available data cannot answer the question and directs the reader to the displayed note naming the missing metric. It supplies no substitute or invented figure, and the company remains clear from the question and note."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": "n/a",
+      "figures_match_sources": "n/a",
+      "conclusions_justified": "n/a",
+      "counterarguments": "n/a",
+      "no_invented_numbers": 1,
+      "notes": "The $800M charge matches management’s statement and is not passed off as segment revenue. However, saying no AMD figures are shown does not clearly explain that revenue by segment is unavailable."
+    },
+    "better": "X",
+    "why": "X directly communicates that the question cannot be answered and points to the missing-segment note."
+  },
+  "peer-three#0": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "All three companies’ revenue, gross margins, net margins, growth and returns are correct, and all year-end differences are disclosed. AMD’s faster growth than AAPL is a specific counterpoint, but the labelled claim about AAPL’s profitability resting on maturity rather than expansion is thinly supported and industry differences are not discussed."
+    },
+    "Y": {
+      "correct_companies": 1,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "The three companies’ revenue and growth values are correct and different year ends are expressly noted. However, none of the requested margin values is actually reported, leaving each company only partly analyzed; the margin-lead conclusion is not traced through the answer and the industry-comparison limit is missing."
+    },
+    "better": "X",
+    "why": "X supplies the requested revenue and margin comparisons for all three, while Y omits the margin evidence entirely."
+  },
+  "peer-three#1": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "All three companies’ revenue, net margin, growth and return numbers match, and the gross-margin leadership claim also matches the displayed data even though those values are not repeated. The AMD charge supplies a specific counterpoint and all fiscal mismatches are named, but industry differences are not discussed."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "Revenue and both margin measures are correctly compared for all three companies, with fiscal differences stated. The AMD charge and AAPL’s 6.05% return despite only 6.4% growth provide specific counterpoints, although the different-industry limitation is omitted."
+    },
+    "better": "Y",
+    "why": "Y gives the complete requested gross- and net-margin comparison and a more explicit return-versus-growth counterpoint."
+  },
+  "peer-two#0": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "Both companies’ fiscal-year metrics and 6.6% versus 3.58% price returns match the listed data, with the year-end mismatch explicit. The disclosed charge is used as a specific margin counterpoint while honestly stating that its contribution to the gap is not quantified."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "All values, company attributions and periods are correct, and the charge gives a specific qualification to AMD’s profitability. The final claim that the market is not rewarding NVDA proportionally goes beyond observed returns because no valuation or expectations data is provided."
+    },
+    "better": "X",
+    "why": "X supports the business comparison and expressly limits the charge interpretation, while Y overreaches about market reward."
+  },
+  "peer-two#1": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "The revenue, growth, margins and returns are correct for both companies and their periods, with fiscal misalignment stated. AMD’s disclosed charge is a specific qualification, and the unquantified contribution to the margin gap is plainly acknowledged."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "The company rankings and every quoted figure match, and the year ends and return window are named. Its labelled qualifications about AMD’s charge, the different fiscal periods and the relatively small price-return gap are grounded in the data without invented adjustments."
+    },
+    "better": "tie",
+    "why": "Both give the correct side-by-side comparison, explicit fiscal mismatch and a specific charge-related profitability qualification."
+  },
+  "segment-drill-down#0": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "All five segment values match, led by Data Center’s $55.2B versus Gaming’s $4.3B, for Q4 FY2026. Concentration follows directly from those values, and the single-quarter limitation specifically explains why a concentration or segment-growth trend cannot be established."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 0,
+      "no_invented_numbers": 2,
+      "notes": "The five values, ranking and quarter are correct, and the Data Center concentration inference is supported. Both inferences reinforce the same concentration thesis without a counterpoint or a stated condition that could change it."
+    },
+    "better": "X",
+    "why": "X adds a specific limitation grounded in the single quarter available; Y repeats the concentration case without a counterargument."
+  },
+  "segment-drill-down#1": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 0,
+      "no_invented_numbers": 2,
+      "notes": "The five Q4 FY2026 segment figures match and clearly support Data Center dominance. The answer gives no counterpoint or condition that could qualify its concentration interpretation."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "Every segment figure and the quarter match, including $55.2B Data Center and $4.3B Gaming revenue. The contribution from the smaller segments is visible in the data, and the one-period limitation specifically prevents claims about their growth, though dominance could be stated more directly."
+    },
+    "better": "Y",
+    "why": "Y supplies a data-grounded qualification and identifies the unavailable growth trend, while X is entirely one-sided."
+  },
+  "single-latest-quarter#0": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "All Q4 FY2026 financial figures match, including $62.1B revenue, $40.3B operating income and 64.9% operating margin. The slower sequential step-up is a concrete counterpoint supported by the prior $46.7B-to-$57.0B revenue jump."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "Revenue, profits, margins and both growth rates match the named quarter. The conditional warning about continued sequential deceleration is supported by the prior-quarter revenue series, while missing guidance and valuation context are stated plainly."
+    },
+    "better": "tie",
+    "why": "Both accurately analyze the latest quarter and qualify the strong results with the supported sequential slowdown."
+  },
+  "single-latest-quarter#1": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "All Q4 FY2026 figures match, and the strong-growth and profitability reading is supported by 57.9% annual growth and 64.9% operating margin. The comparison with the prior quarter’s faster sequential pace supplies a specific grounded counterpoint."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 1,
+      "no_invented_numbers": 2,
+      "notes": "Every reported financial value and quarter matches, and strong profitability is supported. Comparing 8.9% quarterly growth with 57.9% annual growth does not itself establish deceleration or a change in acceleration; the resulting watchpoint is weaker than an explicit prior-quarter comparison."
+    },
+    "better": "X",
+    "why": "X grounds deceleration in the prior quarter, whereas Y invokes different growth horizons as though they establish the same trend."
+  },
+  "ticker-page-compare#0": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "Both intended companies, every financial figure, returns and fiscal-year mismatch are correct. Similar 6.05% and 6.6% returns qualify the operating comparison, but calling AAPL steadier is unsupported by the single fiscal-year observation for each company."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "The revenue, growth and margin rankings match, with AAPL’s September 2025 and NVDA’s January 2026 year ends explicitly distinguished. Similar observed returns are a concrete counterpoint to equating stronger reported fundamentals with a much higher return over this window."
+    },
+    "better": "Y",
+    "why": "Y stays within supported scale, growth, margin and return comparisons, while X adds an unsupported stability characterization."
+  },
+  "ticker-page-compare#1": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "All figures and the September/January fiscal mismatch match the data, and the similar returns supply a concrete qualification. The statement that the market did not pay extra for growth and margins is not established by percentage returns without valuation evidence."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "Every ranking and numerical value matches the two companies and their named periods. The labelled observation of approximately similar returns and AAPL’s larger $416.2B revenue base provide specific qualifications without asserting an unsupported valuation conclusion."
+    },
+    "better": "Y",
+    "why": "Y frames the return observation and scale counterpoint more carefully than X’s claim about what the market paid."
+  },
+  "what-changed-gross-margin#0": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "The 78.4%, 60.5% and 74.4% gross-margin observations and 49.1% operating-margin trough match, and the absent cause is explicitly acknowledged. Recovery below the original peak is a concrete counterpoint, although the immediate preceding 73.0% quarter could have been stated."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "The Q1 FY2026 snapshot, 60.5% margin, 49.1% operating-margin trough and growth rates match. The labelled recovery interpretation and below-starting-level counterpoint are supported by the displayed series, and no cause is invented, though recovery values are not repeated."
+    },
+    "better": "X",
+    "why": "Both satisfy the rubric, but X makes the recovery and remaining shortfall easier to verify by quoting the actual series endpoints."
+  },
+  "what-changed-gross-margin#1": {
+    "X": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "The Q1 FY2026 snapshot and growth rates match, and the missing gross-margin cause is explicitly stated. Gross, operating and net margins all fall at the trough, and recovery below the 78.4% initial peak provides a specific counterpoint supported by the series."
+    },
+    "Y": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 0,
+      "no_invented_numbers": 2,
+      "notes": "The 60.5% gross margin, $44.1B revenue, 49.1% operating margin, 42.6% net margin and growth rates match, and the cause gap is honest. The answer largely lists the trough snapshot without explaining the prior-quarter drop or later recovery and offers no counterargument."
+    },
+    "better": "X",
+    "why": "X explains the dip and recovery with a concrete residual shortfall, while Y gives a limited snapshot without a counterpoint."
+  }
+}

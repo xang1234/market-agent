@@ -1,0 +1,114 @@
+{
+ "cause-in-evidence#0": {
+  "X": "2026-10-18",
+  "Y": "today"
+ },
+ "cause-in-evidence#1": {
+  "X": "2026-10-18",
+  "Y": "today"
+ },
+ "fiscal-year-trap#0": {
+  "X": "today",
+  "Y": "2026-10-18"
+ },
+ "fiscal-year-trap#1": {
+  "X": "2026-10-18",
+  "Y": "today"
+ },
+ "follow-up-memory.turn-1#0": {
+  "X": "2026-10-18",
+  "Y": "today"
+ },
+ "follow-up-memory.turn-1#1": {
+  "X": "today",
+  "Y": "2026-10-18"
+ },
+ "follow-up-memory.turn-2#0": {
+  "X": "today",
+  "Y": "2026-10-18"
+ },
+ "follow-up-memory.turn-2#1": {
+  "X": "2026-10-18",
+  "Y": "today"
+ },
+ "follow-up-memory.turn-3#0": {
+  "X": "2026-10-18",
+  "Y": "today"
+ },
+ "follow-up-memory.turn-3#1": {
+  "X": "2026-10-18",
+  "Y": "today"
+ },
+ "margin-trend-loss-quarter#0": {
+  "X": "2026-10-18",
+  "Y": "today"
+ },
+ "margin-trend-loss-quarter#1": {
+  "X": "2026-10-18",
+  "Y": "today"
+ },
+ "missing-cash-flow#0": {
+  "X": "2026-10-18",
+  "Y": "today"
+ },
+ "missing-cash-flow#1": {
+  "X": "2026-10-18",
+  "Y": "today"
+ },
+ "missing-segments#0": {
+  "X": "2026-10-18",
+  "Y": "today"
+ },
+ "missing-segments#1": {
+  "X": "today",
+  "Y": "2026-10-18"
+ },
+ "peer-three#0": {
+  "X": "today",
+  "Y": "2026-10-18"
+ },
+ "peer-three#1": {
+  "X": "2026-10-18",
+  "Y": "today"
+ },
+ "peer-two#0": {
+  "X": "2026-10-18",
+  "Y": "today"
+ },
+ "peer-two#1": {
+  "X": "2026-10-18",
+  "Y": "today"
+ },
+ "segment-drill-down#0": {
+  "X": "today",
+  "Y": "2026-10-18"
+ },
+ "segment-drill-down#1": {
+  "X": "today",
+  "Y": "2026-10-18"
+ },
+ "single-latest-quarter#0": {
+  "X": "today",
+  "Y": "2026-10-18"
+ },
+ "single-latest-quarter#1": {
+  "X": "2026-10-18",
+  "Y": "today"
+ },
+ "ticker-page-compare#0": {
+  "X": "2026-10-18",
+  "Y": "today"
+ },
+ "ticker-page-compare#1": {
+  "X": "2026-10-18",
+  "Y": "today"
+ },
+ "what-changed-gross-margin#0": {
+  "X": "2026-10-18",
+  "Y": "today"
+ },
+ "what-changed-gross-margin#1": {
+  "X": "today",
+  "Y": "2026-10-18"
+ }
+}

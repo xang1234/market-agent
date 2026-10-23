@@ -1,0 +1,125 @@
+[1] follow-up-memory.turn-2 #0 id=6
+ INF: It has led on the year-to-date price return and on scale, margins and growth, so the market and the fundamentals both favor it over the peer.
+ CHECKED: ['NVDA highest on price return, revenue, gross margin, net margin, and revenue growth (YoY)']
+  S: Of NVDA and AMD, NVDA's price return was highest: NVDA 5.81%, AMD 3.17% (YTD 2026: Dec 2025 close to Aug 2026 close).
+  S: Of NVDA and AMD, NVDA's revenue was highest: NVDA $209.9B (FY2026, ended Jan 2026), AMD $34.7B (FY2025, ended Dec 2025).
+  S: Of NVDA and AMD, NVDA's gross margin was highest: NVDA 70.8% (FY2026, ended Jan 2026), AMD 49.9% (FY2025, ended Dec 2025).
+  S: Of NVDA and AMD, NVDA's net margin was highest: NVDA 53.6% (FY2026, ended Jan 2026), AMD 12.0% (FY2025, ended Dec 2025).
+  S: Of NVDA and AMD, NVDA's revenue growth (YoY) was highest: NVDA 60.9% (FY2026, ended Jan 2026), AMD 34.5% (FY2025, ended Dec 2025).
+ WHY: NVDA leads on price return, revenue, gross margin, net margin and revenue growth against AMD, as the supports and figures show. 
+
+[2] cause-in-evidence #0 id=0
+ INF: The negative operating margin came from a gross margin collapse, not weak demand, and management ties that to export-control charges on its data center GPU products.
+ CHECKED: ["AMD's gross margin lowest in Q2 2025", "AMD's operating margin fell, then rebounded"]
+  S: AMD's revenue was $7.7B, operating income -$134.0M and operating margin -1.7% in Q2 2025 (ended Jun 2025).
+  S: AMD's gross margin was lowest in Q2 2025, at 39.8%, of the periods from Q3 2024 to Q2 2026.
+  S: According to a source dated Aug 2025, effective Jun 2025 on AMD: As previously announced, our second quarter results were impacted by the U.S. Government's export control on our AMD Instinct MI308 data center GPU products. For the quarter, these restrictions l
+  S: AMD's operating margin fell from 10.6% in Q3 2024 to a low of -1.7% in Q2 2025, then rebounded to 14.4% in Q2 2026, its highest of the periods compared, above where it started.
+ WHY: Gross margin fell from 50.2% in Q1 2025 to 39.8% in Q2 2025, operating margin turned negative in the same quarter, revenue rose 3.3% QoQ, and management attributes the hit to about $800 million of export-control charges. 
+
+[3] peer-two #1 id=0
+ INF: It is the stronger business on every metric shown: larger, faster growing and far more profitable, with a modestly better share price return.
+ CHECKED: ['revenue highest first: NVDA, AMD', 'revenue growth (YoY) highest first: NVDA, AMD', 'gross margin highest first: NVDA, AMD', 'net margin highest first: NVDA, AMD', 'price return highest first: NVDA, AMD']
+  S: By revenue, highest first: NVDA $209.9B (FY2026, ended Jan 2026), AMD $34.7B (FY2025, ended Dec 2025).
+  S: By revenue growth (YoY), highest first: NVDA 60.9% (FY2026, ended Jan 2026), AMD 34.5% (FY2025, ended Dec 2025).
+  S: By gross margin, highest first: NVDA 70.8% (FY2026, ended Jan 2026), AMD 49.9% (FY2025, ended Dec 2025).
+  S: By net margin, highest first: NVDA 53.6% (FY2026, ended Jan 2026), AMD 12.0% (FY2025, ended Dec 2025).
+  S: By price return, highest first: NVDA 6.6%, AMD 3.58% (Dec 2025 to Aug 2026).
+  S: According to a source dated Aug 2025, effective Jun 2025 on AMD: As previously announced, our second quarter results were impacted by the U.S. Government's export control on our AMD Instinct MI308 data center GPU products. For the quarter, these restrictions l
+ WHY: {'worded_amount': False} 
+
+[4] ticker-page-compare #0 id=5
+ INF: It is the faster-growing, more profitable business, while the other has the larger revenue base.
+ CHECKED: ['revenue highest first: AAPL, NVDA', 'gross margin highest first: NVDA, AAPL', 'net margin highest first: NVDA, AAPL', 'revenue growth (YoY) highest first: NVDA, AAPL']
+  S: By revenue, highest first: AAPL $416.2B (FY2025, ended Sep 2025), NVDA $209.9B (FY2026, ended Jan 2026).
+  S: By gross margin, highest first: NVDA 70.8% (FY2026, ended Jan 2026), AAPL 46.9% (FY2025, ended Sep 2025).
+  S: By net margin, highest first: NVDA 53.6% (FY2026, ended Jan 2026), AAPL 26.9% (FY2025, ended Sep 2025).
+  S: By revenue growth (YoY), highest first: NVDA 60.9% (FY2026, ended Jan 2026), AAPL 6.4% (FY2025, ended Sep 2025).
+ WHY: {'worded_amount': False} 
+
+[5] cause-in-evidence #1 id=0
+ INF: The operating loss in that quarter traces mainly to a sharp gross margin drop that management ties to export-control charges, not to a revenue shortfall.
+ CHECKED: ["AMD's operating margin lowest in Q2 2025"]
+  S: AMD's revenue was $7.7B, operating income -$134.0M and operating margin -1.7% in Q2 2025 (ended Jun 2025).
+  S: According to a source dated Aug 2025, effective Jun 2025 on AMD: As previously announced, our second quarter results were impacted by the U.S. Government's export control on our AMD Instinct MI308 data center GPU products. For the quarter, these restrictions l
+  S: AMD's operating margin was lowest in Q2 2025, at -1.7%, of the periods from Q3 2024 to Q2 2026.
+ WHY: Gross margin fell from 50.2% in Q1 2025 to 39.8% in Q2 2025 while revenue rose 3.3%, and management attributes about $800 million of inventory and related charges to the export control. 
+
+[6] follow-up-memory.turn-1 #1 id=5
+ INF: Its sequential step-up was larger in the later quarters than in the early ones, though the latest quarter's sequential growth was slower than the prior quarter's jump.
+ CHECKED: ["NVDA's revenue rose in every period"]
+  S: NVDA's revenue rose in every period from Q1 2025 ($26.0B) to Q4 2026 ($62.1B).
+ WHY: In dollar terms the later sequential increases (average about $5.7B across Q1 2026 to Q4 2026) exceed the early ones (about $4.4B across Q2 to Q4 2025), and the latest step ($5.1B) is smaller than the prior one ($10.3B). 
+
+[7] follow-up-memory.turn-3 #0 id=0
+ INF: It is stronger than its peer on scale, growth, margins and year-to-date price return, though the fiscal years are not identical periods.
+ CHECKED: ['NVDA highest on revenue, revenue growth (YoY), gross margin, net margin, and price return']
+  S: Of NVDA and AMD, NVDA's revenue was highest: NVDA $209.9B (FY2026, ended Jan 2026), AMD $34.7B (FY2025, ended Dec 2025).
+  S: Of NVDA and AMD, NVDA's revenue growth (YoY) was highest: NVDA 60.9% (FY2026, ended Jan 2026), AMD 34.5% (FY2025, ended Dec 2025).
+  S: Of NVDA and AMD, NVDA's gross margin was highest: NVDA 70.8% (FY2026, ended Jan 2026), AMD 49.9% (FY2025, ended Dec 2025).
+  S: Of NVDA and AMD, NVDA's net margin was highest: NVDA 53.6% (FY2026, ended Jan 2026), AMD 12.0% (FY2025, ended Dec 2025).
+  S: Of NVDA and AMD, NVDA's price return was highest: NVDA 5.81%, AMD 3.17% (YTD 2026: Dec 2025 close to Aug 2026 close).
+  S: According to a source dated Aug 2025, effective Jun 2025 on AMD: As previously announced, our second quarter results were impacted by the U.S. Government's export control on our AMD Instinct MI308 data center GPU products. For the quarter, these restrictions l
+ WHY: {'worded_amount': False, 'reason': ''} 
+
+[8] cause-in-evidence #0 id=8
+ INF: The positive net income despite an operating loss cuts against reading the quarter as a broad earnings deterioration, since the packet does not explain the offset.
+ CHECKED: []
+  S: AMD's revenue was $7.7B, operating income -$134.0M and operating margin -1.7% in Q2 2025 (ended Jun 2025).
+  S: AMD's net income was $872.0M and net margin 11.3% in Q2 2025 (ended Jun 2025).
+ WHY: {'worded_amount': False} 
+
+[9] cause-in-evidence #2 id=0
+ INF: Operating margin turned negative because gross margin collapsed in that quarter, and management ties that collapse to export-control charges rather than to weak demand.
+ CHECKED: ["AMD's gross margin lowest in Q2 2025"]
+  S: AMD's revenue was $7.7B, operating income -$134.0M and operating margin -1.7% in Q2 2025 (ended Jun 2025).
+  S: AMD's gross margin was lowest in Q2 2025, at 39.8%, of the periods from Q3 2024 to Q2 2026.
+  S: According to a source dated Aug 2025, effective Jun 2025 on AMD: As previously announced, our second quarter results were impacted by the U.S. Government's export control on our AMD Instinct MI308 data center GPU products. For the quarter, these restrictions l
+ WHY: Gross margin fell from 50.2% to 39.8% in Q2 2025 as operating margin went to -1.7%, and the cited source attributes the quarter's impact to export-control charges. 
+
+[10] single-latest-quarter #1 id=5
+ INF: Its latest quarter shows strong growth combined with very high profitability, so scale is converting into earnings.
+ CHECKED: ["NVDA's revenue rose in every period"]
+  S: NVDA's revenue was $62.1B, gross profit $46.2B and operating income $40.3B in Q4 2026 (ended Jan 2026).
+  S: NVDA's net income was $35.4B, net margin 57.0%, gross margin 74.4% and operating margin 64.9% in Q4 2026 (ended Jan 2026).
+  S: NVDA's revenue growth (QoQ) was 8.9% and revenue growth (YoY) 57.9% in Q4 2026 (ended Jan 2026).
+  S: NVDA's revenue rose in every period from Q1 2025 ($26.0B) to Q4 2026 ($62.1B).
+ WHY: {'worded_amount': False} 
+
+[11] follow-up-memory.turn-1 #0 id=4
+ INF: The sequential growth rate in the latest quarter is slower than the step-up the prior quarter showed, so the counterpoint is that momentum may be moderating from its peak pace.
+ CHECKED: ["NVDA's revenue rose in every period"]
+  S: NVDA's revenue rose in every period from Q1 2025 ($26.0B) to Q4 2026 ($62.1B).
+ WHY: Latest QoQ growth of 8.9% (Q4 2026) is well below the prior quarter's step-up of about 22% (Q3 2026 $57.0B vs Q2 $46.7B), so sequential growth did slow. 
+
+[12] peer-three #0 id=5
+ INF: It combines the fastest growth with the highest gross and net margins, making it the strongest of the three on this data.
+ CHECKED: ['revenue highest first: AAPL, NVDA, AMD', 'gross margin highest first: NVDA, AMD, AAPL', 'net margin highest first: NVDA, AAPL, AMD', 'revenue growth (YoY) highest first: NVDA, AMD, AAPL']
+  S: By revenue, highest first: AAPL $416.2B (FY2025, ended Sep 2025), NVDA $209.9B (FY2026, ended Jan 2026), AMD $34.7B (FY2025, ended Dec 2025).
+  S: By gross margin, highest first: NVDA 70.8% (FY2026, ended Jan 2026), AMD 49.9% (FY2025, ended Dec 2025), AAPL 46.9% (FY2025, ended Sep 2025).
+  S: By net margin, highest first: NVDA 53.6% (FY2026, ended Jan 2026), AAPL 26.9% (FY2025, ended Sep 2025), AMD 12.0% (FY2025, ended Dec 2025).
+  S: By revenue growth (YoY), highest first: NVDA 60.9% (FY2026, ended Jan 2026), AMD 34.5% (FY2025, ended Dec 2025), AAPL 6.4% (FY2025, ended Sep 2025).
+ WHY: NVDA ranks first on revenue growth, gross margin and net margin, so the claim of fastest growth and highest margins is borne out, and the 'strongest on this data' summary follows from those rankings. 
+
+[13] ticker-page-compare #0 id=6
+ INF: Its far stronger fundamentals did not translate into a clearly better share price return over the period, which was similar for both.
+ CHECKED: ['revenue growth (YoY) highest first: NVDA, AAPL', 'price return highest first: NVDA, AAPL']
+  S: By revenue growth (YoY), highest first: NVDA 60.9% (FY2026, ended Jan 2026), AAPL 6.4% (FY2025, ended Sep 2025).
+  S: By price return, highest first: NVDA 6.6%, AAPL 6.05% (Dec 2025 to Aug 2026).
+ WHY: {'worded_amount': False} 
+
+[14] fiscal-year-trap #1 id=4
+ INF: It has the larger revenue base, but its margins are well below the other company's, so the scale does not carry through to profitability.
+ CHECKED: ['revenue highest first: AAPL, NVDA', 'gross margin highest first: NVDA, AAPL', 'net margin highest first: NVDA, AAPL']
+  S: By revenue, highest first: AAPL $416.2B (FY2025, ended Sep 2025), NVDA $130.5B (FY2025, ended Jan 2025).
+  S: By gross margin, highest first: NVDA 75.0% (FY2025, ended Jan 2025), AAPL 46.9% (FY2025, ended Sep 2025).
+  S: By net margin, highest first: NVDA 55.8% (FY2025, ended Jan 2025), AAPL 26.9% (FY2025, ended Sep 2025).
+ WHY: AAPL has the larger revenue ($416.2B vs $130.5B) yet trails NVDA clearly on gross margin (46.9% vs 75.0%) and net margin (26.9% vs 55.8%), so scale does not carry through to profitability. 
+
+[15] margin-trend-loss-quarter #2 id=7
+ INF: Margin expansion looks steady but is flattening, since the recent gains follow a gross margin that has stopped rising.
+ CHECKED: ["AMD's gross margin fell, then rebounded"]
+  S: AMD's operating margin was 14.1% in Q4 2025 (ended Dec 2025); AMD's operating margin was 14.2% in Q1 2026 (ended Mar 2026); AMD's operating margin was 14.4% in Q2 2026 (ended Jun 2026).
+  S: AMD's gross margin fell from 50.1% in Q3 2024 to a low of 39.8% in Q2 2025, then rebounded to 54.0% in Q2 2026, above where it started.
+ WHY: {'worded_amount': False} 
+
