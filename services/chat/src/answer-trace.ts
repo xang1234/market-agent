@@ -442,8 +442,6 @@ export async function replayRecorded(
   const calls: RepairCalls | null = live
     ? (await judgeConfigured(live.env)) ? liveRepairCalls(companies, live) : null
     : recordedRepair && {
-      // The answer's system prompt is the repair's too: an edit to it is one
-      // change (system_prompt), not each repaired trace's.
       repair: async ([system, ...rest]) => {
         const record = recordedRepair.record;
         if (record.outcome === "replied") {

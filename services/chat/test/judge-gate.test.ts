@@ -28,7 +28,6 @@ const JUDGED_ENV = { ...ENV, JUDGE_LITELLM_MODEL: "anthropic/claude-haiku-5-5" }
 const VERDICTS = '{"verdicts":[{"id":3,"verdict":"entailed","worded_amount":false},{"id":4,"verdict":"unsupported","worded_amount":false,"reason":"no support measures diversification."}]}';
 const ENTAILED = (id: number) => `{"verdicts":[{"id":${id},"verdict":"entailed","worded_amount":false}]}`;
 const UNSUPPORTED_4 = '{"verdicts":[{"id":4,"verdict":"unsupported","worded_amount":false,"reason":"no support measures diversification."}]}';
-// The report's verdicts when 3 is entailed and 4 unsupported.
 const JUDGED = [
   { index: 3, verdict: "entailed", worded_amount: false },
   { index: 4, verdict: "unsupported", worded_amount: false, reason: "no support measures diversification." },
@@ -249,10 +248,9 @@ test("with no judge model configured no judge is asked, and no inference shows o
 });
 
 test("an inference whose supports all failed their checks is not judged or shown; it goes to the repair round, which the answer model's reply here does not repair", async () => {
-  // The ranking is wrong, so the comparison both inferences rest on, here alone, is rejected.
-  const unsupported = { ...SEGMENTS, exchange: { ...SEGMENTS.exchange!, text: SEGMENTS.exchange!.text.replace('"op":"order","result":["F1","F2"', '"op":"order","result":["F2","F1"').replace('"supports":[0,1,2]', '"supports":[0]') } };
-  const { calls, createClient } = models(unsupported, async () => assert.fail("nothing left to judge"));
-  const answer = await answerTurn(unsupported.input, turn(unsupported), { env: JUDGED_ENV, createClient });
+  const reversedRanking = { ...SEGMENTS, exchange: { ...SEGMENTS.exchange!, text: SEGMENTS.exchange!.text.replace('"op":"order","result":["F1","F2"', '"op":"order","result":["F2","F1"').replace('"supports":[0,1,2]', '"supports":[0]') } };
+  const { calls, createClient } = models(reversedRanking, async () => assert.fail("nothing left to judge"));
+  const answer = await answerTurn(reversedRanking.input, turn(reversedRanking), { env: JUDGED_ENV, createClient });
   assert.equal(text(answer.blocks).includes("Analyst inference"), false);
   const done = await answer.judging!.done;
   assert.equal(text(done.blocks).includes("Analyst inference"), false);

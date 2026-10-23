@@ -14,14 +14,11 @@ import { mutationRepairSummary, mutationVariants, repairMutation, type MutationR
 const trace = async (name: string): Promise<TurnTrace> =>
   JSON.parse(await readFile(fileURLToPath(new URL(`./answer-lab/traces/${name}`, import.meta.url)), "utf8")) as TurnTrace;
 
-// Two companies; 4 an inference, 6 one the recorded judge found entailed but stating an amount in words.
 const FISCAL = await trace("fiscal-year-trap.json");
-// One company; 0 and 6 inferences. 6 is written here with digits, so the
-// checks reject it: the recorded answer wrote none.
 const SEQUENTIAL_TEXT = "Its sequential growth was slower in the latest quarter than the prior-quarter step-up, which hints at some moderation in momentum.";
 const DIGIT_TEXT = "The absolute revenue increase from Q2 to Q3 fiscal 2026 was larger than from Q3 to Q4 fiscal 2026, consistent with decelerating sequential growth on a larger base.";
 const RECORDED_QUARTER = await trace("single-latest-quarter.json");
-const QUARTER = { ...RECORDED_QUARTER, exchange: { ...RECORDED_QUARTER.exchange!, text: RECORDED_QUARTER.exchange!.text.replace(SEQUENTIAL_TEXT, DIGIT_TEXT) } };
+const DIGIT_QUARTER = { ...RECORDED_QUARTER, exchange: { ...RECORDED_QUARTER.exchange!, text: RECORDED_QUARTER.exchange!.text.replace(SEQUENTIAL_TEXT, DIGIT_TEXT) } };
 const SEGMENTS = await trace("segment-drill-down.json");
 
 const ENV = {
@@ -49,7 +46,6 @@ const GAP_REASON = "The figures show NVDA's fiscal year ended Jan 2025 and AAPL'
 const ENDS_TEXT = "The different fiscal year ends limit direct comparability of the two revenue figures.";
 const ENDS = `> **Analyst inference on NVDA** (revenue highest first: AAPL, NVDA): ${ENDS_TEXT}`;
 const UNVERIFIED_GAP = `> **Unverified analyst view on NVDA** (not backed by the figures shown): ${GAP_TEXT}`;
-// The answer: its figures, inference 4, the price returns, then inference 6.
 const fiscal = (takeaway: string, ...rest: string[]) => [FISCAL_FIGURES, takeaway, FISCAL_PRICES, ...rest, FISCAL_NOTE].join("\n\n");
 
 const QUARTER_FIGURES = [
@@ -62,7 +58,6 @@ const TAKEAWAY_TEXT = "Its latest quarter shows very strong scale and profitabil
 const TAKEAWAY = `> **Analyst inference:** ${TAKEAWAY_TEXT}`;
 const SLOWING_TEXT = "Sequential growth is slowing on a larger base.";
 const UNVERIFIED_SLOWING = `> **Unverified analyst view** (not backed by the figures shown): ${SLOWING_TEXT}`;
-// The answer: inference 0 (null: not shown), its figures, then inference 6.
 const quarter = (takeaway: string | null, ...rest: string[]) => [...(takeaway === null ? [] : [takeaway]), QUARTER_FIGURES, ...rest].join("\n\n");
 
 const REPAIR_MARK = "You already answered this question; your_assertions";
@@ -116,7 +111,6 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-// The fiscal turn: 4 entailed, 6 entailed and worded, as recorded; the repaired 6 as given.
 const fiscalJudge = (repaired: (ask: JudgeAsk) => LlmChatResult = (ask) => verdict(ask.id, "entailed")) => (ask: JudgeAsk) =>
   ask.id === 4 ? verdict(4, "entailed") : ask.text === GAP_TEXT ? verdict(6, "entailed", true, GAP_REASON) : repaired(ask);
 
@@ -188,11 +182,11 @@ test("an inference judged to state an amount in words is repaired once: the call
 test("an inference the checks reject for a digit is repaired, checked and judged: with new supports it rests on them, and an unsupported repair shows as unverified; it shows nothing until its verdict", async (t) => {
   t.mock.method(console, "info", () => {});
   const repaired = deferred<LlmChatResult>();
-  const { calls, repairs, asks, createClient } = models(QUARTER, {
+  const { calls, repairs, asks, createClient } = models(DIGIT_QUARTER, {
     judge: (ask) => (ask.id === 0 ? verdict(0, "entailed") : verdict(6, "unsupported", false, "nothing shows the base effect.")),
     repair: () => repaired.promise,
   });
-  const answer = await answerTurn(QUARTER.input, turn(QUARTER), { env: JUDGED_ENV, createClient });
+  const answer = await answerTurn(DIGIT_QUARTER.input, turn(DIGIT_QUARTER), { env: JUDGED_ENV, createClient });
   const seen: string[] = [];
   const moderating = new Promise<void>((resolve) => {
     answer.judging!.watch((blocks) => {
@@ -221,13 +215,13 @@ test("an inference the checks reject for a digit is repaired, checked and judged
 
 test("every inference sent to repair goes in one call, once every first verdict is in; a repair hidden again stays hidden, a worded one shows as unverified, with no second round", async (t) => {
   t.mock.method(console, "info", () => {});
-  const { calls, repairs, createClient } = models(QUARTER, {
+  const { calls, repairs, createClient } = models(DIGIT_QUARTER, {
     judge: (ask) => ask.id === 0
       ? verdict(0, "contradicted", false, ask.text === TAKEAWAY_TEXT ? "QoQ growth rose." : "it still says momentum fell.")
       : verdict(6, "entailed", true, "it says a third smaller."),
     repair: () => fenced([inference(0, "Momentum is moderating."), inference(6, "Growth is a third smaller than before.")]),
   });
-  const answer = await answerTurn(QUARTER.input, turn(QUARTER), { env: JUDGED_ENV, createClient });
+  const answer = await answerTurn(DIGIT_QUARTER.input, turn(DIGIT_QUARTER), { env: JUDGED_ENV, createClient });
   const done = await answer.judging!.done;
 
   assert.deepEqual(repairAsked(repairs[0]!).rejected, [
@@ -382,13 +376,13 @@ test("no repair is asked for when nothing qualifies: verdicts entailed, unsuppor
   assert.deepEqual(errors.calls.sort(), ["answer", "judge 4", "judge 6"]);
 
   // A digit-rejected inference, but no judge model: nothing waits or is asked.
-  const unjudged = models(QUARTER, {});
-  const plain = await answerTurn(QUARTER.input, turn(QUARTER), { env: ENV, createClient: unjudged.createClient });
+  const unjudged = models(DIGIT_QUARTER, {});
+  const plain = await answerTurn(DIGIT_QUARTER.input, turn(DIGIT_QUARTER), { env: ENV, createClient: unjudged.createClient });
   assert.equal(plain.judging, undefined);
   assert.deepEqual(unjudged.calls, ["answer"]);
 
   // The list does not parse: the fallback sentence shows, with no inference to repair.
-  const malformed = { ...QUARTER, exchange: { ...QUARTER.exchange!, text: QUARTER.exchange!.text.replace("```assertions\n[", "```assertions\n{") } };
+  const malformed = { ...DIGIT_QUARTER, exchange: { ...DIGIT_QUARTER.exchange!, text: DIGIT_QUARTER.exchange!.text.replace("```assertions\n[", "```assertions\n{") } };
   const fallback = models(malformed, {});
   const fell = await answerTurn(malformed.input, turn(malformed), { env: JUDGED_ENV, createClient: fallback.createClient });
   assert.equal(fell.judging, undefined);
@@ -398,7 +392,7 @@ test("no repair is asked for when nothing qualifies: verdicts entailed, unsuppor
 test("a turn whose only hidden inference is check-rejected waits for its repair, with no line in its place", async (t) => {
   t.mock.method(console, "info", () => {});
   // 4 cites no assertion as its support, and 5 has a digit.
-  const unsupported = { ...QUARTER, exchange: { ...QUARTER.exchange!, text: QUARTER.exchange!.text.replace('"supports":[1,2,3]', '"supports":[9]') } };
+  const unsupported = { ...DIGIT_QUARTER, exchange: { ...DIGIT_QUARTER.exchange!, text: DIGIT_QUARTER.exchange!.text.replace('"supports":[1,2,3]', '"supports":[9]') } };
   const { calls, repairs, createClient } = models(unsupported, {
     judge: (ask) => verdict(ask.id, "entailed"),
     repair: () => fenced([inference(0, "Momentum is moderating.", { supports: [1, 2, 3] })]),
@@ -416,7 +410,7 @@ test("a turn whose only hidden inference is check-rejected waits for its repair,
 
 test("an inference the checks rejected for its supports is repaired by the same words on new supports: the same-words rule is for what the judge read", async (t) => {
   t.mock.method(console, "info", () => {});
-  const unsupported = { ...QUARTER, exchange: { ...QUARTER.exchange!, text: QUARTER.exchange!.text.replace('"supports":[1,2,3]', '"supports":[9]') } };
+  const unsupported = { ...DIGIT_QUARTER, exchange: { ...DIGIT_QUARTER.exchange!, text: DIGIT_QUARTER.exchange!.text.replace('"supports":[1,2,3]', '"supports":[9]') } };
   const { calls, createClient } = models(unsupported, {
     judge: (ask) => verdict(ask.id, "entailed"),
     repair: () => fenced([inference(0, `${TAKEAWAY_TEXT} `, { supports: [1, 2, 3] })]),

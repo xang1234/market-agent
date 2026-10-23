@@ -121,7 +121,6 @@ test("the judge's mutation set: every original and mutation passes the turn's ow
   const variants = mutationVariants(MUTATIONS);
   const count = (key: (variant: (typeof variants)[number]) => string) =>
     Object.fromEntries([...new Set(variants.map(key))].map((value) => [value, variants.filter((variant) => key(variant) === value).length]));
-  // A case per inference a trace holds, so no original is judged twice.
   const cases = (JSON.parse(readFileSync(MUTATIONS, "utf8")) as { cases: Array<{ id: string; trace: string; index: number }> }).cases;
   assert.deepEqual(cases.filter((entry, i) => cases.findIndex((other) => other.trace === entry.trace && other.index === entry.index) !== i).map(({ id }) => id), []);
   assert.deepEqual(count((variant) => variant.kind), {
@@ -141,7 +140,6 @@ test("the judge's mutation set: every original and mutation passes the turn's ow
     "revenue growth (YoY) highest first: NVDA, AMD",
     "price return highest first: NVDA, AMD",
   ], ["NVDA", "AMD"]]);
-  // A case's operating loss is in the rest of its answer, not in its supports.
   const offset = variants.find((variant) => variant.id === "operating-offset" && variant.kind === "original")!;
   assert.deepEqual([offset.judged.supports, offset.judged.context[0]], [
     ["AMD's net income was $872.0M and net margin 11.3% in Q2 2025 (ended Jun 2025)."],
@@ -414,8 +412,7 @@ test("live --judge --update leaves a trace as it was when a fallback model answe
 
 test("live --judge --update re-records a thread's turns in their order, each later one asked after the answer its earlier turn just recorded", async () => {
   const turn = (n: number) => TRACES.find(({ label }) => label === `follow-up-memory.turn-${n}`)!.trace;
-  // Named against their order in the thread, which their conversations give.
-  const traces = readTraces([traceFiles({ "a.json": turn(2), "b.json": withNote(turn(1), "Segment revenue is not available for NVDA in this data.") })]);
+  const traces = readTraces([traceFiles({ "a-turn-2.json": turn(2), "b-turn-1.json": withNote(turn(1), "Segment revenue is not available for NVDA in this data.") })]);
   const env = { LLM_CHANNELS: "openai", LLM_OPENAI_PROTOCOL: "openai", LLM_OPENAI_MODELS: "gpt-4.1", LITELLM_MODEL: "openai/gpt-4.1", JUDGE_LITELLM_MODEL: "openai/gpt-4.1" };
   const asked: unknown[] = [];
   const createClient = () => async (_deployment: unknown, request: { messages: ReadonlyArray<{ content: string }> }) => {
@@ -434,7 +431,6 @@ test("live --judge --update re-records a thread's turns in their order, each lat
   assert.deepEqual(readTraces([traces[0]!.file])[0]!.trace.input.conversation, second);
 });
 
-// A thread's turn with a gap note of its own, so each turn's saved answer reads apart.
 function withNote(trace: (typeof TRACES)[number]["trace"], note: string) {
   const gap = { kind: "rich_text", segments: [{ type: "text", text: note }] };
   return { ...trace, input: { ...trace.input, factBlocks: [...(trace.input.factBlocks ?? []), gap] } };
@@ -443,14 +439,13 @@ function withNote(trace: (typeof TRACES)[number]["trace"], note: string) {
 test("live --judge --update chains a thread's turns by question, so a window that opens mid-thread holds each answer re-recorded in it after its own question", async () => {
   const turn = (n: number) => TRACES.find(({ label }) => label === `follow-up-memory.turn-${n}`)!.trace;
   const [, answer1, question2, answer2, question3] = turn(3).input.conversation!;
-  // Turn 4's window as production holds it: the last six messages, opening on turn 1's answer.
   const fourth = {
     ...turn(3),
     run_id: "turn-4",
     question: "And INTC?",
     input: { ...turn(3).input, conversation: [answer1!, question2!, answer2!, question3!, { role: "assistant", text: "an old answer" }, { role: "user", text: "And INTC?" }] },
   };
-  const traces = readTraces([traceFiles({ "a.json": fourth, "b.json": withNote(turn(3), "Third."), "c.json": withNote(turn(2), "Second."), "d.json": withNote(turn(1), "First.") })]);
+  const traces = readTraces([traceFiles({ "a-turn-4.json": fourth, "b-turn-3.json": withNote(turn(3), "Third."), "c-turn-2.json": withNote(turn(2), "Second."), "d-turn-1.json": withNote(turn(1), "First.") })]);
   const env = { LLM_CHANNELS: "openai", LLM_OPENAI_PROTOCOL: "openai", LLM_OPENAI_MODELS: "gpt-4.1", LITELLM_MODEL: "openai/gpt-4.1", JUDGE_LITELLM_MODEL: "openai/gpt-4.1" };
   const asked = new Map<string, unknown>();
   const createClient = () => async (_deployment: unknown, request: { messages: ReadonlyArray<{ content: string }> }) => {
@@ -526,9 +521,7 @@ test("live --judge --update runs no turn after one of its thread it left unrecor
 test("recorded --update --repair leaves a trace as it was when the repair was cut off, or the repair's judge gave no verdict a repaired inference could be read by", async () => {
   const { trace } = TRACES.find(({ label }) => label === "segment-drill-down")!;
   const env = { LLM_CHANNELS: "openai", LLM_OPENAI_PROTOCOL: "openai", LLM_OPENAI_MODELS: "gpt-4.1", LITELLM_MODEL: "openai/gpt-4.1", JUDGE_LITELLM_MODEL: "openai/gpt-4.1" };
-  // A worded amount on inference 3 sends it to repair, and shows it as unverified meanwhile.
   const worded = '{"verdicts":[{"id":3,"verdict":"entailed","worded_amount":true},{"id":4,"verdict":"entailed","worded_amount":false}]}';
-  // One batched record, which replays as each inference's.
   const recordedJudge = { outcome: "replied", exchange: { messages: [], text: worded, truncated: false, deployment: "openai/gpt-4.1", latency_ms: 1 } };
   const repaired = '```assertions\n[{"index":3,"kind":"analyst_inference","text":"Data Center carries its revenue, with every other segment far smaller."}]\n```';
   const runs = {
@@ -562,7 +555,6 @@ test("recorded --update --judge and --repair write a live round over the trace o
     "--repair, repair on a fallback": { rerun: "repair", primaryFails: "repair", judge: contradicted },
     "healthy": { rerun: "judge", primaryFails: null, judge: contradicted },
   } as const;
-  // --repair replays the recorded verdict, which sends inference 3 to repair.
   const recordedJudge = [{ outcome: "replied", exchange: { messages: [], text: contradicted, truncated: false, deployment: "openai/gpt-4.1", latency_ms: 1 } }];
   const written = [];
   const skipped: Array<[string, string | undefined]> = [];

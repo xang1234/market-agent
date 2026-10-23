@@ -285,10 +285,9 @@ export function threadChains(traces: ReadonlyArray<LabeledTrace>): LabeledTrace[
   });
 }
 
-// The question each assistant entry answers: the entry before it. Production
-// holds the last CONVERSATION_MESSAGES (local-runtime.ts), so a window can open
-// on an answer: its question is the one asked before the window's first, as
-// the turn that asked that one holds it. An answer the window cut is not there.
+// The question each assistant entry answers: the entry before it, or, for an
+// entry opening the window, the question asked before the window's first, as
+// the turn that asked that one holds it; undefined when the window cut it.
 function questionsAnswered(conversation: NonNullable<AnswerTraceInput["conversation"]>, chain: ReadonlyArray<LabeledTrace>): Array<string | undefined> {
   return conversation.map((message, i) => {
     if (message.role !== "assistant") return undefined;
@@ -395,7 +394,6 @@ export async function live(
   };
   const worker = async () => {
     for (let chain = chains.shift(); chain; chain = chains.shift()) {
-      // Each turn re-recorded so far: its question and saved narrative.
       const answered = new Map<string, string>();
       for (const job of chain) {
         const unrun = record ? unchained(job.trace.input, answered, chain) : undefined;
@@ -429,9 +427,8 @@ export async function live(
 
 // Why a live judge and repair round may not be recorded: the repair came from
 // a fallback model or was cut off, or the judge or repair round never replied
-// or gave an inference no verdict. A repaired inference the repair's judge
-// gave none ends as its first verdict (answer-trace.ts repairedAnswer), so its
-// record is read too. primary: the deployment repair calls go to first.
+// or gave an inference no verdict. primary: the deployment repair calls go to
+// first.
 export function degradedRound({ assertions, judge, repair }: Pick<TracedAnswer, "assertions" | "judge" | "repair">, primary: string | undefined): string | undefined {
   const unreplied = [...(judge ?? []), ...(repair ? [repair.record, ...repair.judge] : [])]
     .flatMap((record) => (record.outcome === "replied" ? [] : [record.reason]));
