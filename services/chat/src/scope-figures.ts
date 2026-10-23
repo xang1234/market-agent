@@ -60,14 +60,16 @@ const KEPT_ASKS: ReadonlySet<ScopeFacet> = new Set(["explains", "latest_quarter"
 const TREND_ASKS: ReadonlySet<ScopeFacet> = new Set(["margin_trend", "margins", "explains"]);
 const MARGIN_ITEMS: ReadonlySet<string> = new Set(MARGINS.map(({ metric }) => metric));
 const READ_PERIODS: ReadonlySet<ScopeProposal["period"]["kind"]> = new Set(["none", "latest", "fiscal_year", "fiscal_quarter"]);
+const LATEST_ASKS: ReadonlySet<ScopeFacet> = new Set(["latest_quarter", "latest_fiscal_year"]);
 export const VALUATIONS: ReadonlySet<string> = new Set<Valuation>(["market_cap", "pe_ratio"]);
 
 /**
  * The one plan a turn about a company gets. The analyst path keeps a turn that
  * asks for no figure but something only it answers; a follow-up naming no
  * company of its own whose scope keeps guidance, or keeps market data and
- * that names no period; and a follow-up that names no company and no period,
- * turns nothing off and asks only for a cause. A gap the engine declines with
+ * that names no period; and a follow-up that names no company and turns
+ * nothing off, asking only for a cause at whatever period, or for nothing with
+ * no period. A gap the engine declines with
  * no model: segments asked for, or kept by a turn naming no figure of its
  * own; a period no fiscal field holds, asked by a follow-up naming no company
  * or figure; kept figures with peers, or none the engine can plan at the
@@ -82,10 +84,12 @@ export function routeTurn(reading: ScopeProposal | null, scope: ResearchScope | 
   const own = reading.companies.kind === "as_named" && reading.companies.names.length > 0;
   const lanes = new Set([...asks].map((facet) => FACET_LANE[facet]));
   const followUp = namedCompanies(reading.companies) === 0;
-  const onlyExplains = followUp && offFacets.size === 0 && offMetrics.size === 0 && [...asks].every((facet) => facet === "explains");
+  const turnsOff = offFacets.size > 0 || offMetrics.size > 0;
+  const asksWhy = asks.has("explains") && [...asks].every((facet) => facet === "explains" || LATEST_ASKS.has(facet));
+  const asksNothing = asks.size === 0 && reading.period.kind === "none";
   if (!namesFigure && !lanes.has("figure")) {
     const keptAnalyst = scope !== null && !own && (scope.guidance === true || (reading.period.kind === "none" && (scope.price_window !== null || scope.benchmark)));
-    if (lanes.has("analyst") || keptAnalyst || (reading.period.kind === "none" && onlyExplains)) return { kind: "analyst" };
+    if (lanes.has("analyst") || keptAnalyst || (followUp && !turnsOff && (asksWhy || asksNothing))) return { kind: "analyst" };
   }
   if (asks.has("segments") || (scope?.segments === true && !namesFigure)) return { kind: "segments_gap" };
   if (scope === null) return PLANNER;
