@@ -122,20 +122,17 @@ test("golden metric questions certify through the chat financial lane on the rec
   const NVDA = ["USD 62,100,000,000.00", "USD 46,200,000,000.00", "USD 40,300,000,000.00", "USD 35,400,000,000.00", "74.40%", "64.90%", "57.00%", "8.94%", "57.89%"];
   const AMD = ["USD 11,200,000,000.00", "USD 6,050,000,000.00", "USD 1,610,000,000.00", "USD 1,480,000,000.00", "54.02%", "14.38%", "13.21%", "4.67%", "45.74%"];
   const AAPL = ["USD 97,100,000,000.00", "USD 45,700,000,000.00", "USD 29,800,000,000.00", "USD 24,900,000,000.00", "47.06%", "30.69%", "25.64%", "-1.62%", "3.26%"];
-  // NVDA's latest quarter ends in January and the others' in June, so each lead takes the other company's
-  // quarter that ends in December, 29 days before NVDA's: AMD's Q4 FY2025 and AAPL's Q1 FY2026.
   const MARGINS = ["gross_margin", "operating_margin", "net_margin"];
   const closest = (slot: string, quarter: string, values: string[]) => MARGINS.map((metric, index) => [`out_${slot}_${metric}_${quarter}`, "verified", values[index]]);
   const AMD_Q4_FY2025 = closest("b", "fy2025_q4", ["53.98%", "14.08%", "13.11%"]);
   const LEADS: Record<string, string[]> = { b: ["20.42 pp", "50.82 pp", "43.90 pp"], c: ["27.36 pp", "30.44 pp", "27.71 pp"] };
   const leads = (...slots: string[]) => MARGINS.flatMap((metric, index) => slots.map((slot) => [`out_a_minus_${slot}_${metric}`, "verified", LEADS[slot]![index]]));
-  assert.deepEqual(await ask("Compare NVDA and AMD profit", readingOf(NO_ASKS)), [...latestQuarter("a", "fy2026_q4", NVDA), ...latestQuarter("b", "fy2026_q2", AMD), ...AMD_Q4_FY2025, ...leads("b")]);
-  // The recorded reply's gross margin comparison (NVDA's Q4 FY2026 against AMD's Q2 FY2026) is rejected:
-  // AMD is shown for two quarters now, so companies are compared at one period, and the lead states it.
+  assert.deepEqual(await ask("Compare NVDA and AMD profit", readingOf(NO_ASKS)), [...latestQuarter("a", "fy2026_q4", NVDA), ...latestQuarter("b", "fy2026_q2", AMD), ...AMD_Q4_FY2025, ...leads("b")],
+    "NVDA's quarter ends in January and AMD's in June, so the lead takes AMD's quarter ending in December, 29 days before NVDA's");
   assert.equal(await commentaryText(), [
     "Of NVDA and AMD, NVDA's year-over-year percent change in revenue was highest: NVDA 57.89% (Q4 FY2026 vs Q4 FY2025), AMD 45.74% (Q2 FY2026 vs Q2 FY2025).",
     "NVDA's revenue was USD 62,100,000,000.00 in Q4 FY2026; AMD's revenue was USD 11,200,000,000.00 in Q2 FY2026.",
-  ].join("\n\n"));
+  ].join("\n\n"), "the recorded gross margin comparison of the two newest quarters is rejected: AMD is shown for two quarters, so companies are compared at one period");
   assert.deepEqual(await ask("Compare NVDA, AMD and AAPL profit", readingOf(NO_ASKS)), [
     ...latestQuarter("a", "fy2026_q4", NVDA),
     ...latestQuarter("b", "fy2026_q2", AMD),

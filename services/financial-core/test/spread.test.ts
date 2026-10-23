@@ -1,6 +1,3 @@
-// spread.v1: one company's figure minus another's, each in its own fiscal
-// period of the same length. A margin's lead is stated in percentage points.
-
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { FinancialPlanV1, MarginNode, SpreadNode } from "../src/contracts.ts";
@@ -13,7 +10,6 @@ import { FY2023, operand, SLOTS } from "./operand-fixtures.ts";
 
 const SPREAD: SpreadNode = { node_id: "lead", operation: "spread", operation_version: "spread.v1", left: "a_gm", right: "b_gm" };
 
-// NVDA's quarter ends in late January, AMD's in late December: 29 days apart.
 const NVDA_Q4 = { start: "2025-10-27", end: "2026-01-25", fiscal_year: 2026, fiscal_period: "Q4" as const };
 const AMD_Q4 = { start: "2025-09-28", end: "2025-12-27", fiscal_year: 2025, fiscal_period: "Q4" as const };
 
@@ -61,7 +57,6 @@ test("a spread is between two subjects on one measure, in periods of one length 
 });
 
 test("two quarters pair only while their ends lie within half a quarter of each other", () => {
-  // Both 91 days long: the left ends 2025-12-30.
   const left = grossMargin("a_gm", "a", "744", "1000", { start: "2025-10-01", end: "2025-12-30", fiscal_year: 2025, fiscal_period: "Q4" });
   const endingOn = (start: string, end: string) => grossMargin("b_gm", "b", "328", "1000", { start, end, fiscal_year: 2026, fiscal_period: "Q1" });
   assert.equal(value(spread(SPREAD, left, endingOn("2025-11-15", "2026-02-13")))?.value, "41.6", "45 days apart");

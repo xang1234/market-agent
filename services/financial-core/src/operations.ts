@@ -417,11 +417,7 @@ export function peRatio(node: PeRatioNode, price: FinancialOperand, earnings: Fi
   return success(valuation(node, price, value, { kind: "ratio" }));
 }
 
-/**
- * One subject's value minus another's on one measure and measurement, each in
- * its own fiscal period (#398): a lead across fiscal calendars. A margin or
- * percentage lead is in percentage points. The result is the left subject's.
- */
+/** One subject's value minus another's on one measure and measurement, each in its own fiscal period. A margin or percentage lead is in percentage points; the result is the left subject's. */
 export function spread(node: SpreadNode, left: FinancialOperand, right: FinancialOperand): OperandOutcome {
   if (left.subject_slot === right.subject_slot) return operationGap("incompatible_scope", "A spread is between two different subjects.");
   const incompatible = measureMismatch(left, right) ?? measurementMismatch(left, right);
@@ -444,7 +440,6 @@ export function spread(node: SpreadNode, left: FinancialOperand, right: Financia
 
 const HUNDRED = rationalFromDecimal({ coefficient: 100n, scale: 0 })!;
 
-// A margin or percent change is a ratio read as a percentage; an approved ratio or P/E reads as a multiple.
 function readsAsPercentage(operand: FinancialOperand): boolean {
   return Object.hasOwn(MARGIN_NUMERATORS, operand.measure.metric_key) || operand.measure.derivations.some((step) => step.operation === "percent_change_positive_base");
 }

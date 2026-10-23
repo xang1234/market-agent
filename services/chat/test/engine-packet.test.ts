@@ -270,7 +270,6 @@ test("an answer written on an engine packet is sent only that packet, and its in
   ]);
 });
 
-// NVDA's and AMD's gross margins and NVDA's lead, each company in its own quarter.
 const LEAD = content([
   value(1, "a", "measure:m1", "period:p0", "74.40%"),
   value(2, "b", "measure:m1", "period:p1", "54.02%"),
@@ -279,7 +278,6 @@ const LEAD = content([
   "measure:m6": { kind: "measure", text: "Difference in Gross margin (gross profit / revenue)" },
   "period:p7": { kind: "period", text: "NVIDIA Corporation Q4 FY2026 minus Advanced Micro Devices, Inc. Q2 FY2026" },
 });
-// The plan the lead's answer published, as far as its packet reads it.
 const LEAD_PLAN = {
   operations: [
     { node_id: "a_gm", operation: "gross_margin" },
@@ -288,7 +286,6 @@ const LEAD_PLAN = {
   ],
   outputs: [["out_1", "a_gm"], ["out_2", "b_gm"], ["out_3", "lead"]].map(([output_id, node_id]) => ({ output_id, node_id, unit_id: "u1" })),
 } as unknown as FinancialPlanV1;
-// NVDA's revenue high over its eight quarters.
 const HIGH = content([
   ...QUARTERS.results,
   { ...value(18, "a", "measure:m7", "period:p8", ""), presented: { kind: "ranking", text: "Q4 FY2026 has the highest revenue of the 8 quarters ranked", complete: true, order: [], leader_label_ids: ["period:q7"] } },
@@ -357,7 +354,6 @@ test("commentary cites a lead and a ranking by their results, and the judge read
 });
 
 test("an unknown cause never cites a lead as a change: each is two companies' figures (#398)", () => {
-  // NVDA's gross margin lead over AMD (F4) and over INTC (F5), each against the other company's own quarter.
   const leads = content([
     value(1, "a", "measure:m1", "period:p0", "74.40%"),
     value(2, "b", "measure:m1", "period:p1", "54.02%"),

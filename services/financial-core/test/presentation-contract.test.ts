@@ -97,7 +97,6 @@ function nvdaAmdOnTheirOwnCalendars(): FinancialAnswerContent {
   });
 }
 
-/** The same comparison with NVDA's gross-margin lead over AMD, each company in its own quarter. */
 function leadAcrossCalendars(): FinancialAnswerContent {
   const plan = mutable(overviewComparisonPlan([{ slot: "a", newest: [2026, "Q4"] }, { slot: "b", newest: [2026, "Q2"] }])) as FinancialPlanV1;
   plan.operations.push({ node_id: "gm_lead", operation: "spread", operation_version: "spread.v1", left: "a_gm", right: "b_gm" });
@@ -113,7 +112,6 @@ function leadAcrossCalendars(): FinancialAnswerContent {
   });
 }
 
-/** One company's revenue over four quarters, its high complete and its low with a quarter missing. */
 function windowHighAndLow(): FinancialAnswerContent {
   const plan = mutable(planFixture()) as FinancialPlanV1;
   plan.subjects = { ...plan.subjects, requested_count: 1, resolved_count: 1, members: [plan.subjects.members[0]!] };

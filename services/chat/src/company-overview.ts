@@ -78,7 +78,6 @@ type Dates = Readonly<{ start: string | null; end: string }>;
 type RevenueQuarters = Readonly<{
   newest: FiscalQuarter;
   quarters: ReadonlyArray<FiscalQuarter>;
-  // A quarter's dates as all its reported revenue states them, else why it has none.
   agreedDates: (quarter: FiscalQuarter) => Dates | "unreported" | "conflicting";
 }>;
 
@@ -96,11 +95,7 @@ export async function planCompanyOverview(context: PlanningContext, evidence: Fi
   return companies && planned(context, companyOverviewDraft(companies), UNPLANNED);
 }
 
-/**
- * One company's three margins over its charted quarters, each with its high
- * and low (#398): the answer to a question about its margin trend, with no
- * model planning it. Null as for the overview.
- */
+/** One company's three margins over its charted quarters, each with its high and low. Null as for planCompanyOverview. */
 export async function planMarginTrend(context: PlanningContext, evidence: FinancialEvidencePort): Promise<ReadyPlan | null> {
   const companies = await planningQuarters(context, evidence, TREND_UNPLANNED);
   return companies && planned(context, marginTrendDraft(companies[0]!), TREND_UNPLANNED);
@@ -148,7 +143,6 @@ export function marginTrendSubjects(
   return latest && trendOnly && marginsOnly && offMetrics.size === 0 ? subjects : null;
 }
 
-// The companies' slots, in the order the context names them: "a", "b", ...
 const slotOf = (index: number) => String.fromCharCode(97 + index);
 
 function planned(context: PlanningContext, { operations, outputs }: { operations: ReadonlyArray<Node>; outputs: ReadonlyArray<Node> }, unplanned: string): ReadyPlan | null {
@@ -262,6 +256,13 @@ function closestQuarter(company: RevenueQuarters, target: Dates): FiscalQuarter 
   return closest !== undefined && coverSameMonths(target, closest.dates) ? closest.quarter : null;
 }
 
+function growthChanges(backs: ReadonlyArray<number>, newest: FiscalQuarter) {
+  return [
+    ...backs.filter((back) => backs.includes(back + 1)).reverse().map((back) => ({ back, span: 1, name: back === 0 ? GROWTH[0].metric : `${GROWTH[0].metric}_${quarterId(before(newest, back))}` })),
+    { back: 0, span: GROWTH[1].back, name: GROWTH[1].metric },
+  ];
+}
+
 function companyOverviewDraft(companies: ReadonlyArray<RevenueQuarters>) {
   const several = companies.length > 1;
   const backs = several ? [0, ...GROWTH.map(({ back }) => back)] : Array.from({ length: QUARTERS_SHOWN }, (_, back) => back);
@@ -274,12 +275,7 @@ function companyOverviewDraft(companies: ReadonlyArray<RevenueQuarters>) {
     const latest = revenue.get(0)!;
     const lines = MARGINS.map(({ numerator }) => at(numerator, company.newest));
     const margins = MARGINS.map(({ metric }, line): Node => ({ node_id: id(metric), operation: metric, numerator: lines[line]!.node_id, revenue: latest.node_id }));
-    // Each charted quarter's change from the one before it, oldest first, then the latest's from a year earlier.
-    const changes = [
-      ...backs.filter((back) => revenue.has(back + 1)).reverse().map((back) => ({ back, span: 1, name: back === 0 ? GROWTH[0].metric : `${GROWTH[0].metric}_${quarterId(before(company.newest, back))}` })),
-      { back: 0, span: GROWTH[1].back, name: GROWTH[1].metric },
-    ];
-    const growth = changes.flatMap(({ back, span, name }): Node[] => {
+    const growth = growthChanges(backs, company.newest).flatMap(({ back, span, name }): Node[] => {
       const at = before(company.newest, back);
       const why = unpaired(company, at, span);
       if (why === null) return [{ node_id: id(name), operation: "percent_change_positive_base", current: revenue.get(back)!.node_id, prior: revenue.get(back + span)!.node_id }];
@@ -297,8 +293,6 @@ function companyOverviewDraft(companies: ReadonlyArray<RevenueQuarters>) {
       outputs: [...(several ? [latest] : charted), ...lines, ...margins, ...growth, ...window],
     };
   });
-  // The first company's lead over each other company in each margin, against
-  // that company's quarter ending closest to its newest, shown beside it.
   const [primary, ...others] = parts;
   const newest = companies[0]!.newest;
   const dates = companies[0]!.agreedDates(newest);
@@ -347,7 +341,6 @@ function marginTrendDraft(company: RevenueQuarters) {
   return { operations: [...revenue, ...lines.flat(), ...margins.flat(), ...windows], outputs: [...margins.flat(), ...windows] };
 }
 
-// A figure's highest and lowest among the quarters shown.
 function highAndLow(name: string, members: ReadonlyArray<Node>): Node[] {
   return (["highest", "lowest"] as const).map((direction) => ({ node_id: `${name}_${direction}`, operation: "period_rank", members: members.map((member) => member.node_id), direction }));
 }

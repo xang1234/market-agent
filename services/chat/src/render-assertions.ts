@@ -86,7 +86,6 @@ function templateSegments(
         text(periodPhrase(group[0]!));
       });
       if (groups.size > 0) text(".");
-      // A ranking states itself, as its answer shows it.
       figures.filter((entry) => entry.ranking).forEach((figure) => {
         const lead = `${segments.length > 0 ? " " : ""}${figure.company ? `For ${figure.company}, ` : ""}`;
         if (lead !== "") text(lead);

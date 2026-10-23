@@ -340,11 +340,6 @@ function presentPayload(plan: FinancialPlanV1, node: OperationNode, payload: unk
   }
 }
 
-/**
- * A window's high or low, by its periods' labels: "Q3 FY2026 has the highest
- * revenue of the 7 of 8 quarters ranked". Leaders stay unlabelled for an
- * incomplete window, as for an incomplete cohort; the text says how many it ranked.
- */
 function periodRanking(plan: FinancialPlanV1, node: PeriodRankNode, ranking: RankingPayload, labels: LabelTable): PresentedPayload {
   const names = subjectNames(labels.entries);
   const nodeOf = (id: LocalId) => plan.operations.find((entry) => entry.node_id === id)!;
@@ -364,7 +359,6 @@ function periodRanking(plan: FinancialPlanV1, node: PeriodRankNode, ranking: Ran
   };
 }
 
-/** A label inside a sentence: "Free cash flow" reads "free cash flow", "EBITDA" and "P/E ratio" stay. */
 export function lowercaseUnlessAcronym(label: string): string {
   return /\p{Ll}/u.test(label[1] ?? "") ? `${label[0]!.toLowerCase()}${label.slice(1)}` : label;
 }
@@ -572,14 +566,16 @@ function periodText(plan: FinancialPlanV1, node: OperationNode, names: (slot: Lo
   return periodSelectors(plan, node).map((selector) => (instant ? `end of ${selectorText(selector)}` : selectorText(selector))).join(" vs ");
 }
 
-/** What a period label denotes: its selections, and a spread's sides by company too. */
 function periodKey(plan: FinancialPlanV1, node: OperationNode): string {
-  if (node.operation === "spread") return JSON.stringify(spreadSides(plan, node, (side) => [side.slot, periodKey(plan, side.node)]));
+  if (node.operation === "spread") return spreadPeriodKey(plan, node);
   if (node.operation === "period_rank") return JSON.stringify(["window", periodSelectors(plan, node).map((selector) => JSON.stringify(selector)).sort()]);
   return JSON.stringify([periodSelectors(plan, node), measuresInstant(plan, node)]);
 }
 
-// The ranked periods, oldest to newest.
+function spreadPeriodKey(plan: FinancialPlanV1, node: SpreadNode): string {
+  return JSON.stringify(spreadSides(plan, node, (side) => [side.slot, periodKey(plan, side.node)]));
+}
+
 function windowSpan(plan: FinancialPlanV1, node: PeriodRankNode, names: (slot: LocalId) => string): string {
   const members = node.members.map((id) => plan.operations.find((entry) => entry.node_id === id)!);
   const recency = (member: OperationNode) => periodAnchor(periodSelectors(plan, member)[0]!).recency;
@@ -587,7 +583,6 @@ function windowSpan(plan: FinancialPlanV1, node: PeriodRankNode, names: (slot: L
   return `${periodText(plan, sorted[0]!, names)} to ${periodText(plan, sorted.at(-1)!, names)}`;
 }
 
-// Each side of a spread is one company's figure in its own period.
 function spreadSides<T>(plan: FinancialPlanV1, node: SpreadNode, side: (entry: { slot: LocalId; node: OperationNode }) => T): T[] {
   return [node.left, node.right].map((id) => {
     const operand = plan.operations.find((entry) => entry.node_id === id)!;

@@ -20,16 +20,13 @@ const COMPANIES: Readonly<Record<string, string>> = {
   SECQ: "4f000000-0000-4000-8000-0000000000e4",
   FUTR: "4f000000-0000-4000-8000-0000000000e5",
   OFFQ: "4f000000-0000-4000-8000-0000000000e6",
-  // Moves its fiscal year a month later after FY2022: a month falls between FY2022's last quarter and FY2023's first.
   MOVD: "4f000000-0000-4000-8000-0000000000e7",
-  // Reports every line for every quarter.
   MRGN: "4f000000-0000-4000-8000-0000000000e8",
 };
 const REVENUE = [
   [2022, 1, "800"], [2022, 2, "900"], [2022, 3, "1000"], [2022, 4, "1100"],
   [2023, 1, "1200"], [2023, 2, "1300"], [2023, 3, "1500"], [2023, 4, "2000"],
 ] as const;
-// A compared company's figures: its latest quarter's.
 const QTRS_LATEST = [
   ["out_revenue_fy2023_q4", "Q4 FY2023", "verified", "USD 2,000.00"],
   ["out_gross_profit_fy2023_q4", "Q4 FY2023", "verified", "USD 1,200.00"],
@@ -50,7 +47,6 @@ const QTRS_OVERVIEW = [
   ["out_revenue_fy2023_q2", "Q2 FY2023", "verified", "USD 1,300.00"],
   ["out_revenue_fy2023_q3", "Q3 FY2023", "verified", "USD 1,500.00"],
   ...QTRS_LATEST.slice(0, 7),
-  // Each charted quarter's change from the one before it (#479), then the latest's from a year earlier.
   ["out_revenue_growth_qoq_fy2022_q2", "Q2 FY2022 vs Q1 FY2022", "verified", "12.50%"],
   ["out_revenue_growth_qoq_fy2022_q3", "Q3 FY2022 vs Q2 FY2022", "verified", "11.11%"],
   ["out_revenue_growth_qoq_fy2022_q4", "Q4 FY2022 vs Q3 FY2022", "verified", "10.00%"],
@@ -357,10 +353,8 @@ test("a question about one company that asks for no figure is answered with its 
     ["out_revenue_growth_qoq", "Q2 FY2024 vs Q1 FY2024", "verified", "23.81%"],
     ["out_revenue_growth_yoy", "Q2 FY2024 vs Q2 FY2023", "verified", "100.00%"],
   ];
-  // The first company's lead over the second in each margin, each in its own latest quarter.
   const leads = (period: string, outcomes: ReadonlyArray<ReadonlyArray<string>>) =>
     ["gross_margin", "operating_margin", "net_margin"].map((metric, index) => [`out_a_minus_b_${metric}`, period, ...outcomes[index]!]);
-  // OFFQ's newest quarter ends half a year after QTRS's, so each lead takes OFFQ's Q4 FY2023, which ends with QTRS's, shown beside the table.
   const QTRS_OVER_OFFQ = [
     ["out_b_gross_margin_fy2023_q4", "Q4 FY2023", "verified", "60.00%"],
     ["out_b_operating_margin_fy2023_q4", "Q4 FY2023", "verified", "25.00%"],
@@ -380,9 +374,8 @@ test("a question about one company that asks for no figure is answered with its 
     const nogp = slotted("b", QTRS_LATEST);
     nogp[1] = ["out_b_gross_profit_fy2023_q4", "Q4 FY2023", "missing", "missing_input"];
     nogp[4] = ["out_b_gross_margin", "Q4 FY2023", "blocked_dependency", "blocked_by_dependency"];
-    // Equal margins tie at a real zero; a lead over a gap is blocked, never zero.
     const tied = leads("QTRS Corp Q4 FY2023 minus NOGP Corp Q4 FY2023", [["blocked_dependency", "blocked_by_dependency"], ["verified", "0.00 pp"], ["verified", "0.00 pp"]]);
-    assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_LATEST), ...nogp, ...tied]);
+    assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_LATEST), ...nogp, ...tied], "equal margins tie at a real zero; a lead over a gap is blocked, never zero");
   });
 
   await t.test("a question about one company that asks for its peers is answered with the company and its peers, saved as auto-selected (#398)", async () => {

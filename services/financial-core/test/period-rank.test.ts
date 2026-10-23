@@ -1,6 +1,3 @@
-// period_rank.v1: one company's figure ranked across its own periods, the
-// window's high or low, with ties explicit and a gap period left out.
-
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { FinancialPlanV1, PeriodRankNode } from "../src/contracts.ts";
@@ -12,7 +9,6 @@ import { validateFinancialPlan } from "../src/validate.ts";
 import { mutable, planFixture } from "./fixtures.ts";
 import { operand } from "./operand-fixtures.ts";
 
-// NVDA's fiscal 2026 quarters.
 const QUARTERS = {
   q1: { start: "2025-01-27", end: "2025-04-27", fiscal_year: 2026, fiscal_period: "Q1" },
   q2: { start: "2025-04-28", end: "2025-07-27", fiscal_year: 2026, fiscal_period: "Q2" },

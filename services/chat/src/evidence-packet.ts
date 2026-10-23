@@ -49,7 +49,7 @@ type AvailableFigureFields = {
 
 export type AvailableFigure = Omit<PacketFigure, "id" | "shown_in"> & AvailableFigureFields;
 
-// The companies a figure is about: a lead's two sides', else its own, else the only company's.
+// The companies a figure is about: a derived figure's sides', else its own, else the only company's.
 export function figureCompanies(figure: PacketFigure, packet: EvidencePacket): Array<string | undefined> {
   const sides = figure.displayed === undefined && figure.derived_from ? packet.figures.filter((side) => figure.derived_from!.includes(side.id)) : [];
   return sides.length > 0 ? sides.map((side) => side.company ?? packet.companies[0]) : [figure.company ?? packet.companies[0]];
@@ -416,7 +416,6 @@ export function enginePacket(content: FinancialAnswerContent, tickers: ReadonlyM
   };
 }
 
-// Each lead's two sides in the unit, by output: a spread's left and right.
 function leadSides(plan: FinancialPlanV1 | null, unitId: string): ReadonlyMap<string, ReadonlyArray<string>> {
   const outputs = plan?.outputs.filter((output) => output.unit_id === unitId) ?? [];
   const outputOf = new Map(outputs.map((output) => [output.node_id, output.output_id]));

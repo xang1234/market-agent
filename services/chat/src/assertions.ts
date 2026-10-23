@@ -250,7 +250,6 @@ function shapeError(
   }
 }
 
-// The companies cited figures and claims are about (figureCompanies).
 export function companiesOf(cited: ReadonlyArray<string>, packet: EvidencePacket): Set<string | undefined> {
   return new Set([
     ...packet.figures.filter((figure) => cited.includes(figure.id)).flatMap((figure) => figureCompanies(figure, packet)),

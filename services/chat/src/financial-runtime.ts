@@ -536,9 +536,6 @@ async function planTurn(
   }
   onSubjects(subjects);
   if (CASH_RESILIENCE.test(text)) return planCashResilience(planningContext(subjects), text);
-  // The reading is settled before the turn is planned, so an overview or a
-  // margin trend is decided first and the planner's model is called only
-  // without one.
   if (allResolved(subjects)) {
     const companies = await overviewSubjects(subjects, turn.reading, turn.scope, turn.peersOf);
     const overview = companies && await planCompanyOverview(planningContext(companies), turn.evidence);
@@ -706,7 +703,7 @@ function persistAssistantMessage(
     scope: ResearchScope | null;
     reading: ScopeProposal | null;
     evidence: ChatFinancialRuntimeDeps["evidence"];
-    // Whether the plan is the overview or margin trend, of the latest quarters.
+    // Whether the turn published the overview or margin trend, of the latest quarters.
     overview: () => boolean;
     carried: ReadonlyArray<string>;
     notFound: ReadonlyArray<string>;

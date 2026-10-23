@@ -135,9 +135,6 @@ test("each golden metric question plans from its own recorded reply on the first
   }
 });
 
-// A revenue quarter as the evidence port lists it. The SEC ingester stores a
-// fourth quarter as the year less its first three, with no source token, so
-// none here has a precision proof.
 const revenueCandidate = (fiscal_year: number, fiscal_period: string, start: string | null, end: string, publicBy = "2026-03-01T00:00:00.000Z") => ({
   metric_key: "revenue",
   source_class: "sec_filing",
@@ -150,13 +147,11 @@ const revenueCandidate = (fiscal_year: number, fiscal_period: string, start: str
 const CALENDAR = { Q1: ["01-01", "03-31"], Q2: ["04-01", "06-30"], Q3: ["07-01", "09-30"], Q4: ["10-01", "12-31"], FY: ["01-01", "12-31"] } as const;
 const calendarQuarter = (fiscal_year: number, fiscal_period: keyof typeof CALENDAR, publicBy?: string) =>
   revenueCandidate(fiscal_year, fiscal_period, `${fiscal_year}-${CALENDAR[fiscal_period][0]}`, `${fiscal_year}-${CALENDAR[fiscal_period][1]}`, publicBy);
-// A golden company's revenue quarters, dated as its filings date them.
 const goldenQuarters = (ticker: string, publicBy?: string) => GOLDEN_COMPANIES.find((company) => company.ticker === ticker)!.quarters
   .map((quarter) => revenueCandidate(quarter.fiscal_year, quarter.fiscal_period, quarter.period_start, quarter.period_end, publicBy));
 const candidatePage = (...candidates: InputCandidate[]): CandidatePage => ({ status: "ok", candidates, truncated: false });
 const changeOf = (ticker: string, current: string, prior: string) => `percent_change_positive_base(${ticker} revenue ${current}, ${ticker} revenue ${prior})`;
 
-// What the answer's note says a plan leaves out, each company named by its legal name.
 const omissions = (plan: FinancialPlanV1, evidence: FinancialEvidencePort) => overviewOmissions(plan, authority, evidence, (slot) => {
   const member = plan.subjects.members.find((candidate) => candidate.slot_id === slot)!;
   return GOLDEN_COMPANIES.find((company) => company.issuer_id === member.subject_ref.id)!.legal_name;
@@ -223,7 +218,6 @@ test("a company's overview shows its eight quarters to the newest it reported re
 });
 
 test("a change is planned only between quarters whose reported dates follow each other, and one that is not is named (#479)", async () => {
-  // Quarters of the given day counts, the first starting on `start`.
   const run = (start: string, labels: ReadonlyArray<[number, string]>, days: ReadonlyArray<number>) => {
     let next = Date.parse(`${start}T00:00:00Z`);
     return labels.map(([year, quarter], index) => {
@@ -236,46 +230,41 @@ test("a change is planned only between quarters whose reported dates follow each
   const changes = (outputs: ReadonlyArray<string>) => outputs.filter((output) => output.startsWith("percent_change"));
   const all = [...eight.slice(1).map(([year, quarter], index) => changeOf("NVDA", `${quarter} ${year}`, `${eight[index]![1]} ${eight[index]![0]}`)), changeOf("NVDA", "Q4 2024", "Q4 2023")];
 
-  // A 53-week year: its fourth quarter runs 14 weeks, and still follows its third.
   const longYear = await overviewOf("NVDA", () => candidatePage(...run("2023-01-02", eight, [91, 91, 91, 98, 91, 91, 91, 91])));
-  assert.deepEqual([changes(longYear!.outputs), longYear!.uncovered], [all, []]);
+  assert.deepEqual([changes(longYear!.outputs), longYear!.uncovered], [all, []], "a 53-week year's 14-week fourth quarter still follows its third");
 
-  // A new fiscal year end: a transition month separates the old calendar's last quarter from the new one's first.
   const moved = [...run("2023-01-01", eight.slice(0, 4), [90, 91, 92, 92]), ...run("2024-02-01", eight.slice(4), [90, 92, 92, 92])];
   const recalendared = await overviewOf("NVDA", () => candidatePage(...moved));
   assert.deepEqual(changes(recalendared!.outputs), all.filter((change) => !change.includes("Q1 2024, NVDA revenue Q4 2023") && !change.includes("Q4 2024, NVDA revenue Q4 2023")));
   assert.deepEqual(recalendared!.uncovered, [
     "revenue growth from Q4 FY2023 to Q1 FY2024, whose quarters are not dated consecutively",
     "revenue growth from Q4 FY2023 to Q4 FY2024, whose quarters are not dated consecutively",
-  ]);
+  ], "a new fiscal year end leaves a transition month between the old calendar's last quarter and the new one's first");
 
-  // Mislabelled: the quarter filed as Q1 FY2026 is dated as the third after Q4 FY2025.
   const mislabelled = [...goldenQuarters("NVDA").slice(0, 4), revenueCandidate(2026, "Q1", "2025-07-28", "2025-10-26")];
   const misread = await overviewOf("NVDA", () => candidatePage(...mislabelled));
   assert.deepEqual([changes(misread!.outputs).filter((change) => change.includes("Q1 2026")), misread!.uncovered.filter((note) => note.includes("Q1 FY2026"))], [[], [
     "revenue growth from Q4 FY2025 to Q1 FY2026, whose quarters are not dated consecutively",
     "revenue growth from Q1 FY2025 to Q1 FY2026, whose quarters are not dated consecutively",
-  ]], "neither the latest QoQ nor its YoY");
-  // A quarter dated to start up to a week after the one before it ends still follows it; eight days later it does not.
+  ]], "the quarter filed as Q1 FY2026 is dated as the third after Q4 FY2025: neither the latest QoQ nor its YoY");
   const startingOn = async (start: string) => changes((await overviewOf("NVDA", () => candidatePage(...goldenQuarters("NVDA").slice(0, 7), revenueCandidate(2026, "Q4", start, "2026-01-25"))))!.outputs)
     .filter((change) => change.includes("Q4 2026, NVDA revenue Q3 2026"));
-  assert.deepEqual([await startingOn("2025-11-02"), await startingOn("2025-11-03")], [[changeOf("NVDA", "Q4 2026", "Q3 2026")], []], "Q3 FY2026 ends 2025-10-26");
-  // Two filings that date one quarter differently prove neither date.
+  assert.deepEqual([await startingOn("2025-11-02"), await startingOn("2025-11-03")], [[changeOf("NVDA", "Q4 2026", "Q3 2026")], []],
+    "Q3 FY2026 ends 2025-10-26: a quarter starting up to a week later still follows it, eight days later it does not");
   const disputed = await overviewOf("NVDA", () => candidatePage(...goldenQuarters("NVDA"), revenueCandidate(2026, "Q3", "2025-07-28", "2025-10-19")));
-  assert.deepEqual(changes(disputed!.outputs).filter((change) => change.includes("Q3 2026")), []);
-  assert.deepEqual(disputed!.uncovered, [
+  assert.deepEqual([changes(disputed!.outputs).filter((change) => change.includes("Q3 2026")), disputed!.uncovered], [[], [
     "revenue growth from Q2 FY2026 to Q3 FY2026, as its filings date Q3 FY2026 differently",
     "revenue growth from Q3 FY2026 to Q4 FY2026, as its filings date Q3 FY2026 differently",
     "revenue growth from Q4 FY2025 to Q4 FY2026, as its filings date Q3 FY2026 differently",
-  ]);
+  ]], "two filings that date one quarter differently prove neither date");
 
-  // Five quarters reported: the three before them are gap bars, and a change from one is a gap where it falls, not a note.
   const five = await overviewOf("NVDA", () => candidatePage(...goldenQuarters("NVDA").slice(3)));
   const shown = GOLDEN_COMPANIES.find((company) => company.ticker === "NVDA")!.quarters.map((quarter) => `${quarter.fiscal_period} ${quarter.fiscal_year}`);
-  assert.deepEqual([changes(five!.outputs), five!.uncovered], [[...shown.slice(1).map((quarter, index) => changeOf("NVDA", quarter, shown[index]!)), changeOf("NVDA", "Q4 2026", "Q4 2025")], []]);
-  // A year whose middle quarter was never reported is not proven to follow on.
+  assert.deepEqual([changes(five!.outputs), five!.uncovered], [[...shown.slice(1).map((quarter, index) => changeOf("NVDA", quarter, shown[index]!)), changeOf("NVDA", "Q4 2026", "Q4 2025")], []],
+    "five quarters reported: a change from one of the three before them is a gap where it falls, never a note");
   const gapped = await overviewOf("NVDA", () => candidatePage(...goldenQuarters("NVDA").filter((quarter) => quarter.period.fiscal_year !== 2026 || quarter.period.fiscal_period !== "Q2")));
-  assert.deepEqual([changes(gapped!.outputs).filter((change) => change === changeOf("NVDA", "Q4 2026", "Q4 2025")), gapped!.uncovered], [[], ["revenue growth from Q4 FY2025 to Q4 FY2026, as Q2 FY2026 has no reported revenue"]]);
+  assert.deepEqual([changes(gapped!.outputs).filter((change) => change === changeOf("NVDA", "Q4 2026", "Q4 2025")), gapped!.uncovered], [[], ["revenue growth from Q4 FY2025 to Q4 FY2026, as Q2 FY2026 has no reported revenue"]],
+    "a year whose middle quarter was never reported is not proven to follow on");
 });
 
 test("a comparison shows each company's latest quarter, named from the newest it reported revenue for, never aligned by calendar, and the first company's lead in each margin (#398)", async (t) => {
@@ -313,7 +302,6 @@ test("a comparison shows each company's latest quarter, named from the newest it
     changeOf(ticker, quarter, previous),
     changeOf(ticker, quarter, yearBefore),
   ];
-  // NVDA's newest quarter ends 2026-01-25; AMD's Q4 2025 and AAPL's Q1 2026 each end 2025-12-27, 29 days before it.
   const CLOSEST: Record<string, [string, string]> = { AMD: ["Q4 2025", "fy2025_q4"], AAPL: ["Q1 2026", "fy2026_q1"] };
   const closest = (...tickers: string[]) => tickers.flatMap((ticker) => MARGINS.map(([metric, line]) => margin(ticker, metric, line, CLOSEST[ticker]![0])));
   const leads = (...tickers: string[]) => MARGINS.flatMap(([metric, line]) => tickers.slice(1).map((other) =>
@@ -341,11 +329,11 @@ test("a comparison shows each company's latest quarter, named from the newest it
     reads: [read("NVDA"), read("AMD")],
   }, "a quarter public after the cutoff is not NVDA's newest");
   const three = await compare("NVDA, AMD and AAPL");
-  assert.deepEqual([three?.outputs, three?.reads], [[...NVDA, ...AMD, ...AAPL, ...closest("AMD", "AAPL"), ...leads("NVDA", "AMD", "AAPL")], [read("NVDA"), read("AMD"), read("AAPL")]]);
+  assert.deepEqual([three?.outputs, three?.reads], [[...NVDA, ...AMD, ...AAPL, ...closest("AMD", "AAPL"), ...leads("NVDA", "AMD", "AAPL")], [read("NVDA"), read("AMD"), read("AAPL")]],
+    "NVDA's newest quarter ends 2026-01-25, and AMD's Q4 2025 and AAPL's Q1 2026 each 29 days before it");
   const noLead = "NVIDIA Corporation's lead over Advanced Micro Devices, Inc. in each margin, as no quarter Advanced Micro Devices, Inc. reported ends within half a quarter of NVIDIA Corporation's Q4 FY2026";
-  // AMD's Q1 2026 ends 2026-03-28, 62 days after NVDA's newest: more than half a quarter.
   const apart = await compare("NVDA and AMD", { ...PAGES, AMD: candidatePage(...goldenQuarters("AMD", "2026-08-01T00:00:00.000Z").slice(6)) });
-  assert.deepEqual([apart.outputs?.filter((output) => output.startsWith("spread")), apart.uncovered], [[], [noLead]]);
+  assert.deepEqual([apart.outputs?.filter((output) => output.startsWith("spread")), apart.uncovered], [[], [noLead]], "AMD's Q1 2026 ends 62 days after NVDA's newest: more than half a quarter");
   const disputed = await compare("NVDA and AMD", { ...PAGES, NVDA: candidatePage(...goldenQuarters("NVDA", "2026-08-01T00:00:00.000Z"), revenueCandidate(2026, "Q4", "2025-10-27", "2026-01-18", "2026-08-01T00:00:00.000Z")) });
   assert.deepEqual([disputed.outputs?.filter((output) => output.startsWith("spread")), disputed.uncovered?.at(-1)], [[],
     "NVIDIA Corporation's lead over Advanced Micro Devices, Inc. in each margin, as the filings of NVIDIA Corporation do not agree on the dates of its Q4 FY2026"]);
