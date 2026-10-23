@@ -2267,7 +2267,177 @@
         "price_window"
       ]
     },
-    "cutoff": "2026-09-01T00:00:00.000Z"
+    "cutoff": "2026-09-01T00:00:00.000Z",
+    "packet": {
+      "route": "evidence_followup",
+      "cutoff": "2026-09-01T00:00:00.000Z",
+      "companies": [
+        "NVDA",
+        "AMD"
+      ],
+      "figures": [
+        {
+          "id": "F1",
+          "company": "NVDA",
+          "metric": "Revenue",
+          "period": "FY2026",
+          "period_end": "2026-01-25",
+          "value": "$209.9B",
+          "shown_in": "Side by side: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025)",
+          "fact_id": "672cd83c-a487-4d08-ada6-267141565554",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F2",
+          "company": "NVDA",
+          "metric": "Gross Margin",
+          "period": "FY2026",
+          "period_end": "2026-01-25",
+          "value": "70.8%",
+          "shown_in": "Side by side: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025)",
+          "fact_id": "d5fe236c-96c7-4c96-96d5-60d52e01d2ca",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F3",
+          "company": "NVDA",
+          "metric": "Net Margin",
+          "period": "FY2026",
+          "period_end": "2026-01-25",
+          "value": "53.6%",
+          "shown_in": "Side by side: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025)",
+          "fact_id": "420cbe72-f5a9-454f-9720-035958c26d7a",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F4",
+          "company": "NVDA",
+          "metric": "Revenue Growth (YoY)",
+          "period": "FY2026",
+          "period_end": "2026-01-25",
+          "value": "60.9%",
+          "shown_in": "Side by side: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025)",
+          "fact_id": "ae834621-4243-452b-8cfe-89ae490cd0ca",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F5",
+          "company": "AMD",
+          "metric": "Revenue",
+          "period": "FY2025",
+          "period_end": "2025-12-27",
+          "value": "$34.7B",
+          "shown_in": "Side by side: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025)",
+          "fact_id": "a1f36630-d8d7-4c74-96d0-23ebddcf236f",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F6",
+          "company": "AMD",
+          "metric": "Gross Margin",
+          "period": "FY2025",
+          "period_end": "2025-12-27",
+          "value": "49.9%",
+          "shown_in": "Side by side: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025)",
+          "fact_id": "e739b4b5-2e5e-44fa-8ef5-492365db7717",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F7",
+          "company": "AMD",
+          "metric": "Net Margin",
+          "period": "FY2025",
+          "period_end": "2025-12-27",
+          "value": "12.0%",
+          "shown_in": "Side by side: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025)",
+          "fact_id": "73f2cf53-c5b7-4f07-820d-0b0a09837e85",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F8",
+          "company": "AMD",
+          "metric": "Revenue Growth (YoY)",
+          "period": "FY2025",
+          "period_end": "2025-12-27",
+          "value": "34.5%",
+          "shown_in": "Side by side: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025)",
+          "fact_id": "6007c204-e28a-4fd3-9fe5-fa7cb4b5e892",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F9",
+          "company": "NVDA",
+          "metric": "Price return",
+          "period": "YTD 2026: 2025-12-31 close to 2026-08-31 close",
+          "value": "5.81%",
+          "shown_in": "Price return YTD 2026 (split-adjusted, excluding dividends)",
+          "series_ref": "ec53e413-bdea-4fae-82f5-eec935b3581a",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000009"
+          ]
+        },
+        {
+          "id": "F10",
+          "company": "AMD",
+          "metric": "Price return",
+          "period": "YTD 2026: 2025-12-31 close to 2026-08-31 close",
+          "value": "3.17%",
+          "shown_in": "Price return YTD 2026 (split-adjusted, excluding dividends)",
+          "series_ref": "0559b15f-5fac-435d-8e8c-7036c4086775",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000009"
+          ]
+        }
+      ],
+      "coverage": [
+        {
+          "company": "NVDA",
+          "status": "shown"
+        },
+        {
+          "company": "AMD",
+          "status": "shown"
+        }
+      ],
+      "gaps": [],
+      "query_bounds": {
+        "periods": "latest fiscal year per company",
+        "price_window": "year to date, to the 2026-09-01 cutoff",
+        "claims": "management, guidance, kpi, and material_event claims from 2024-09-01 first, then the most recent others, published by the 2026-09-01 cutoff; a claim repeated by several sources or copies counts once"
+      },
+      "claims": [
+        {
+          "id": "C1",
+          "text": "As previously announced, our second quarter results were impacted by the U.S. Government's export control on our AMD Instinct MI308 data center GPU products. For the quarter, these restrictions led to approximately $800 million in inventory and related charges.",
+          "predicate": "kpi.commentary",
+          "stance": "challenging",
+          "company": "AMD",
+          "effective_time": "2025-06-28T00:00:00.000Z",
+          "published_at": "2025-08-05T00:00:00.000Z",
+          "claim_id": "6d499c74-bc94-43d6-8468-ae34d0becda2",
+          "source_id": "138fef65-4ad7-48cf-b641-6c099b2d0a60"
+        }
+      ],
+      "disagreements": [],
+      "claims_status": "available",
+      "claims_truncated": false
+    }
   },
   "recorded_at": "2026-10-23T01:21:33.485Z",
   "exchange": {

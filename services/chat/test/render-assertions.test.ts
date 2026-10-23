@@ -5,7 +5,6 @@ import { readFileSync } from "node:fs";
 import { calendarNote, plainText, renderAssertion, unverifiedInference } from "../src/render-assertions.ts";
 import type { Assertion } from "../src/assertions.ts";
 import type { EvidencePacket } from "../src/evidence-packet.ts";
-import { turnPacket } from "../src/llm-runtime.ts";
 
 const NVDA_GM = "a1000000-0000-4000-8000-000000000001";
 const AMD_GM = "a1000000-0000-4000-8000-000000000002";
@@ -312,7 +311,7 @@ test("an observation of a quote says when it was taken (#329 review)", () => {
 
 function traced(name: string) {
   const { input } = JSON.parse(readFileSync(new URL(`./answer-lab/traces/${name}.json`, import.meta.url), "utf8"));
-  const packet = turnPacket(input);
+  const packet: EvidencePacket = input.packet;
   const compare = (evidence: string[], op: string, result: unknown, on = packet) =>
     plainText(renderAssertion({ index: 0, kind: "comparison", text: "ignored", evidence, op, result } as Assertion & { index: number }, on, input.factBlocks).segments);
   return { packet, compare };

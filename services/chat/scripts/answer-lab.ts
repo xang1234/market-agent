@@ -605,7 +605,7 @@ export function mutationVariants(file: string): MutationVariant[] {
   const set = JSON.parse(readFileSync(file, "utf8")) as MutationSet;
   return set.cases.flatMap((entry) => {
     const trace = JSON.parse(readFileSync(resolve(dirname(file), entry.trace), "utf8")) as TurnTrace;
-    const packet = turnPacket(trace.input);
+    const packet = trace.input.packet ?? turnPacket(trace.input);
     const factBlocks = trace.input.factBlocks ?? [];
     const list = assertionList(trace.exchange?.text ?? "");
     if (!Array.isArray(list) || entry.index >= list.length) throw new Error(`${entry.id}: ${entry.trace} has no assertion ${entry.index}`);
