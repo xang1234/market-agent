@@ -61,11 +61,11 @@ An `anthropic` channel calls the Claude Messages API directly. It turns prompt c
 
 The financial engine plans a calculation, binds it to stored facts, and computes it with exact fractions. Anything it cannot verify appears as a gap, never as prose.
 
-Chat questions that name a metric, Analyze memos, grid columns, thesis conditions and Discovery criteria always use the engine.
+Chat figures, Analyze memos, grid columns, thesis conditions and Discovery criteria always use the engine.
 
 The engine checks each SEC fact's proof. Facts stored before 2026-10-16 have none and show as gaps until you run the SEC proof backfill described in [Development](development.md#data-mode).
 
-For chat, only questions that name a metric reach the engine today. When the scope model reads the question, the answer adds a note for parts of it the plan did not calculate, such as a benchmark index; a qualified metric such as EPS growth is not checked. Other questions use the standard path until [#398](https://github.com/xang1234/market-agent/issues/398) lands.
+In chat, the engine computes every figure an answer shows ([#398](https://github.com/xang1234/market-agent/issues/398)). When the scope model reads the question, the answer adds a note for parts of it the plan did not calculate, such as a benchmark index, or EPS growth when the plan computes EPS alone.
 
 dev-api runs a worker that recovers interrupted financial runs. It is on by default, and `FINANCIAL_WORKER_ENABLED=false` turns it off.
 
