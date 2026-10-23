@@ -31,6 +31,13 @@ const ALL_SHOWN = new Map(Array.from({ length: MAX_ASSERTIONS }, (_, i) => [i, "
 const composeAnalystBlocksWithLlm = async (input: Parameters<typeof composeAnswer>[0]) => (await composeAnswer(input))(ALL_SHOWN);
 
 const NO_ANSWER = "No written answer is available for this question; try asking again.";
+// One claim on file, so the answer model is asked: with no figure and no claim it is not (#398).
+const ON_FILE = [{
+  tool_call_id: "tool-0",
+  tool_name: "load_evidence",
+  status: "ok",
+  result: { evidence: { claims: [{ claim_id: "c0", source_id: "s0", text_canonical: "Apple said demand stayed strong.", predicate: "management.tone", polarity: "positive" }] } },
+}] as never;
 
 test("createLlmThreadTitleModel delegates to the shared router", async () => {
   const calls: string[] = [];
@@ -73,7 +80,7 @@ test("composeAnalystBlocksWithLlm gives reasoning models room to think and still
     env: BASE_ENV,
     context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
     blocks: [richTextBlock("Deterministic note")],
-    toolCalls: [],
+    toolCalls: ON_FILE,
     createClient: () => async (_deployment, request) => {
       observedMaxTokens = request.maxTokens;
       return { text: "Apple's revenue rose." };
@@ -90,7 +97,7 @@ test("composeAnalystBlocksWithLlm reports the model exchange raw, before the che
     env: BASE_ENV,
     context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
     blocks: [richTextBlock("Deterministic note")],
-    toolCalls: [],
+    toolCalls: ON_FILE,
     createClient: () => async () => ({
       text: "Apple's revenue rose 12%.",
       usage: { inputTokens: 900, outputTokens: 40, totalTokens: 940 },
@@ -134,7 +141,7 @@ test("composeAnalystBlocksWithLlm rewrites the first rich text block", async () 
       status: "ok",
       bundle_id: "single_subject_analysis",
       arguments: { query: "Analyze AAPL" },
-      result: { evidence_status: "available" },
+      result: { evidence: { claims: [{ claim_id: "c0", source_id: "s0", text_canonical: "Apple said demand stayed strong.", predicate: "management.tone", polarity: "positive" }] } },
     }],
     createClient: () => async (_deployment, request) => {
       // The question goes in; the raw tool call does not (#181).
@@ -169,7 +176,7 @@ test("an answer model that hangs falls back at its attempt deadline (#184)", asy
     env: TWO_DEPLOYMENTS,
     context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
     blocks: [richTextBlock("Deterministic note")],
-    toolCalls: [],
+    toolCalls: ON_FILE,
     deadlines: { attemptMs: 50, totalMs: 5_000 },
     createClient: () => async (deployment) => {
       calls.push(deployment.model);
@@ -191,7 +198,7 @@ test("when every model hangs, the answer call ends with an error at its deadline
     env: TWO_DEPLOYMENTS,
     context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
     blocks: [richTextBlock("Deterministic note")],
-    toolCalls: [],
+    toolCalls: ON_FILE,
     deadlines: { attemptMs: 50, totalMs: 5_000 },
     createClient: () => () => hang(t),
   }), /all LLM deployments failed/);
@@ -205,7 +212,7 @@ test("only attempts the total can finish are made, so a failure names each timeo
     env: TWO_DEPLOYMENTS,
     context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
     blocks: [richTextBlock("Deterministic note")],
-    toolCalls: [],
+    toolCalls: ON_FILE,
     deadlines: { attemptMs: 60, totalMs: 100 },
     createClient: () => (deployment) => {
       calls.push(deployment.model);
@@ -222,7 +229,7 @@ test("deadlines that leave no room for a whole attempt are rejected before any m
       env: TWO_DEPLOYMENTS,
       context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
       blocks: [richTextBlock("Deterministic note")],
-      toolCalls: [],
+      toolCalls: ON_FILE,
       deadlines,
       createClient: () => () => {
         called += 1;
@@ -240,7 +247,7 @@ test("an exact fit leaves the last attempt out, so the total never cuts one", as
     env: TWO_DEPLOYMENTS,
     context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
     blocks: [richTextBlock("Deterministic note")],
-    toolCalls: [],
+    toolCalls: ON_FILE,
     deadlines: { attemptMs: 60, totalMs: 120 },
     createClient: () => (deployment) => {
       calls.push(deployment.model);
@@ -258,7 +265,7 @@ test("the last attempt gets only what is left of the total, so it still fails as
     env: TWO_DEPLOYMENTS,
     context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
     blocks: [richTextBlock("Deterministic note")],
-    toolCalls: [],
+    toolCalls: ON_FILE,
     deadlines: { attemptMs: 50, totalMs: 101 },
     createClient: () => () => hang(t),
   }), (error) => error instanceof LlmRouterError && error.attempts.length === 2 && error.attempts.every((a) => a.code === "timeout"));
@@ -280,7 +287,7 @@ async function answerSystemPrompt(): Promise<string> {
     env: BASE_ENV,
     context: { userIntent: "Analyze NVDA", bundleId: "single_subject_analysis" },
     blocks: [richTextBlock("Deterministic note")],
-    toolCalls: [],
+    toolCalls: ON_FILE,
     createClient: () => async (_deployment, request) => {
       systemPrompt = request.messages[0]?.content ?? "";
       return { text: "answer" };
@@ -349,7 +356,7 @@ test("composeAnalystBlocksWithLlm falls back through shared router deployments",
     },
     context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
     blocks: [richTextBlock("Deterministic note")],
-    toolCalls: [],
+    toolCalls: ON_FILE,
     createClient: () => async (deployment) => {
       calls.push(`${deployment.channel}/${deployment.model}`);
       if (calls.length === 1) throw new LlmProviderError("provider_failed", "primary down");
@@ -463,10 +470,8 @@ test("an answer cut off at the token limit is never shown; the fallback sentence
 });
 
 test("an empty answer replaces the placeholder line instead of leaving it on screen", async () => {
-  for (const factBlocks of [PERF_BLOCKS, undefined]) {
-    const { text } = await composeWith({ text: "  " }, factBlocks);
-    assert.equal(text, NO_ANSWER);
-  }
+  assert.equal((await composeWith({ text: "  " }, PERF_BLOCKS)).text, NO_ANSWER);
+  assert.equal((await composeWith({ text: "  " })).text, "No research claims are on file for this question.");
 });
 
 test("a thread title cut off at the token limit falls back instead of being saved", async () => {
@@ -581,10 +586,7 @@ test("the answer model sees a compact context, not raw tool JSON (#181)", async 
   }]);
   assert.equal(packet.claims_truncated, true);
   assert.deepEqual(packet.gaps, ["Year-to-date price performance is not shown: AMD has no prices from before 2026."]);
-  assert.deepEqual(packet.staleness, {
-    quote: [{ ticker: "NVDA", as_of: "2026-09-01T00:00:00.000Z", stale: true }],
-    fact_recency: [{ latest_as_of: "2026-08-01T00:00:00.000Z", age_days: 31, stale: false }],
-  });
+  assert.equal(packet.staleness, undefined, "the analyst shows no quote or fact, so their staleness is not its evidence");
   // None of the raw tool JSON: no facts, prices, ids, or the placeholder block.
   for (const absent of ["fact_id", "178.4", "manifest_contribution", "tool_calls", "existing_blocks", "bundle_id"]) {
     assert.ok(!prompt.includes(absent), absent);
@@ -613,56 +615,59 @@ test("an answer whose every sentence goes beside a gap note falls back without p
     env: BASE_ENV,
     context: { userIntent: "What is AMD's free cash flow?", bundleId: "single_subject_analysis" },
     blocks: [NARRATIVE_BLOCK],
-    toolCalls: [],
+    toolCalls: ON_FILE,
     factBlocks: [gap],
     createClient: () => async () => ({ text: "It fell due to heavy spending." }),
   });
   assert.equal((blocks[0].segments as Array<{ text: string }>)[0].text, "No written answer is available for this question; try asking again.");
 });
 
-test("with claims unreadable and nothing else on file, the gap never says there are no claims (#207)", () => {
-  const toolCall = {
-    tool_call_id: "tc-1",
-    tool_name: "research_lookup",
-    status: "ok",
-    result: { evidence_status: "insufficient_evidence", evidence: { claims: [], unavailable: true } },
-  } as never;
-  const packet = answerContext({ context: { userIntent: "Analyze ACME", bundleId: "single_name" }, toolCalls: [toolCall] }).evidence_packet as Record<string, unknown>;
-  assert.equal(packet.claims_status, "unavailable");
-  assert.deepEqual(packet.gaps, ["No reported facts or quote are on file for this subject, and its research claims could not be read."]);
-});
-
-test("a subject with nothing on file answers that it has nothing on file, not to ask again, whatever the model replied (#498)", async () => {
-  const shown = async (unavailable: boolean, reply: string) => {
-    const toolCall = { tool_call_id: "tc-1", tool_name: "research_lookup", status: "ok", result: { evidence_status: "insufficient_evidence", evidence: { claims: [], ...(unavailable ? { unavailable } : {}) } } } as never;
+test("an analyst packet with no figure and no claim calls no model, and says what is missing, never to ask again (#498, #398)", async () => {
+  const shown = async (unavailable: boolean, scope = resolveResearchScope({ companies: AMD, prior: null, asOf: GAP_AS_OF, proposal: proposal({ asks: ["guidance"] }) })) => {
+    let calls = 0;
+    const toolCall = { tool_call_id: "tc-1", tool_name: "research_lookup", status: "ok", result: { evidence: { claims: [], ...(unavailable ? { unavailable } : {}) } } } as never;
     const blocks = await composeAnalystBlocksWithLlm({
       env: BASE_ENV,
-      context: { userIntent: "Analyze ACME", bundleId: "single_name" },
+      context: { userIntent: "What guidance did AMD give?", bundleId: "single_name" },
       blocks: [NARRATIVE_BLOCK],
       toolCalls: [toolCall],
       factBlocks: [],
-      createClient: () => async () => ({ text: reply }),
+      scope,
+      createClient: () => async () => {
+        calls += 1;
+        return { text: "AMD is a strong buy." };
+      },
     });
-    return (blocks[0].segments as Array<{ text: string }>)[0].text;
+    return [calls, (blocks[0].segments as Array<{ text: string }>)[0].text];
   };
-  assert.equal(await shown(false, "```assertions\n[]\n```"), "No research claims, reported facts, or quote are on file for this subject.");
-  assert.equal(await shown(false, "ACME is a strong buy."), "No research claims, reported facts, or quote are on file for this subject.");
-  assert.equal(await shown(true, "```assertions\n[]\n```"), "No reported facts or quote are on file for this subject, and its research claims could not be read.");
+  assert.deepEqual(await shown(false), [0, "No research claims are on file for AMD."]);
+  assert.deepEqual(await shown(true), [0, "Research claims could not be read for AMD, and no figure is shown."]);
 });
 
-test("with no figures shown there is nothing to bind, so the check is skipped (#208)", async () => {
+test("a year-to-date window over one company is a gap note: only a comparison is charted (#398)", () => {
+  const scope = resolveResearchScope({ companies: AMD, prior: null, asOf: GAP_AS_OF, proposal: proposal({ asks: ["price_window"] }) });
+  assert.deepEqual(gapTurn(scope).factBlocks.map((block) => (block.segments as Array<{ text: string }>)[0]!.text), [
+    "A year-to-date price return is charted only to compare two or more companies, so none is shown for AMD.",
+  ]);
+});
+
+test("with no figure and no claim there is nothing to bind or write from: no model is asked (#208, #398)", async () => {
   const reports: Array<{ status: string }> = [];
+  let calls = 0;
   const composed = await composeAnalystBlocksWithLlm({
     env: BASE_ENV,
     context: { userIntent: "Analyze ACME", bundleId: "single_name" },
     blocks: [NARRATIVE_BLOCK],
     toolCalls: [],
     factBlocks: [],
-    createClient: () => async () => ({ text: "ACME has nothing on file.\n```assertions\n[{\"kind\":\"observation\",\"text\":\"ACME trades at $12.\",\"evidence\":[]}]\n```" }),
+    createClient: () => async () => {
+      calls += 1;
+      return { text: "```assertions\n[{\"kind\":\"observation\",\"text\":\"ACME trades at $12.\",\"evidence\":[]}]\n```" };
+    },
     onAssertions: (report) => reports.push(report),
   });
-  assert.equal((composed[0].segments as Array<{ text: string }>)[0].text, "No written answer is available for this question; try asking again.");
-  assert.deepEqual(reports.map((report) => report.status), ["skipped"]);
+  assert.equal((composed[0].segments as Array<{ text: string }>)[0].text, "No research claims are on file for this question.");
+  assert.deepEqual([calls, reports.map((report) => report.status)], [0, ["skipped"]]);
 });
 
 test("an answer cut off inside its assertion list shows the fallback: the list does not parse (#208)", async () => {
@@ -872,9 +877,9 @@ test("a financial-engine answer's evidence follow-up never reads its note as mis
     ...turn,
     createClient: () => async () => ({ text: reply }),
   }))[0]!.segments;
-  // Nothing renders from no figures and no claims, and the note is no gap: no pointer to it.
+  // No figure and no claim: no model is asked, and the note is no gap, so nothing points to it.
   for (const reply of [prose, ""]) {
-    assert.deepEqual(await shown(reply), [{ type: "text", text: "No written answer is available for this question; try asking again." }]);
+    assert.deepEqual(await shown(reply), [{ type: "text", text: "No research claims are on file for AMD." }]);
   }
 });
 

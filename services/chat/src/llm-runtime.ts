@@ -156,6 +156,11 @@ export async function composeAnalystBlocksWithLlm(input: {
   });
   if (!router) return () => input.blocks;
   const packet = input.packet ?? turnPacket(input);
+  if (packet.figures.length === 0 && packet.claims.length === 0) {
+    const report: AssertionReport = { status: "skipped", accepted: [], rejected: [] };
+    input.onAssertions?.(report);
+    return renderedAnswer(input, packet, report).blocks;
+  }
 
   const request: LlmChatRequest = {
     messages: [
@@ -348,7 +353,7 @@ export function renderedAnswer(input: AnswerInput, packet: EvidencePacket, repor
         `The data here does not answer this question; the ${packet.gaps.length > 1 ? "notes below say" : "note below says"} what is missing.`,
         ...(packet.claims_status === "unavailable" ? ["Research claims could not be read for this answer."] : []),
       ].join(" ")
-      : nothingOnFile(input.toolCalls) ?? NO_ANSWER_FALLBACK_TEXT,
+      : packet.figures.length === 0 && packet.claims.length === 0 ? missingEvidence(packet) : NO_ANSWER_FALLBACK_TEXT,
   };
   return { report: rendering.report, blocks: (inferences) => withAnswer(input.blocks, answer, inferences) };
 }
@@ -357,10 +362,9 @@ export type AnswerUsage = { input_tokens: number; output_tokens: number; reasoni
 
 // What the answer model sees (#181): only what it can use, as an evidence
 // packet (#207, evidence-packet.ts) plus the question and conversation. The figures
-// it may reference (with company, period and period end), cited claim text, what
-// could not be shown, and staleness flags. Raw tool JSON, the placeholder block,
-// and the routing bundle are left out: the answer writes a figure only as a
-// packet reference.
+// it may reference (with company, period and period end), cited claim text, and
+// what could not be shown. Raw tool JSON, the placeholder block, and the routing
+// bundle are left out: the answer writes a figure only as a packet reference.
 export function answerContext(input: {
   context: LlmRuntimeContext;
   toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>;
@@ -371,41 +375,21 @@ export function answerContext(input: {
   // The turn's packet, when the caller has built it (turnPacket).
   packet?: EvidencePacket;
 }): Record<string, unknown> {
-  const results = input.toolCalls.map((toolCall) => (isRecord(toolCall.result) ? toolCall.result : {}));
-  const structured = results.map((result) => (isRecord(result.structured_context) ? result.structured_context : {}));
-  const quotes = structured.flatMap((context) => isRecord(context.quote) ? [{
-    ticker: context.quote.ticker,
-    as_of: context.quote.as_of,
-    stale: context.quote.stale,
-    // Fresh is not live: an end-of-day or delayed quote says so.
-    ...(typeof context.quote.session_state === "string" ? { session_state: context.quote.session_state } : {}),
-    ...(typeof context.quote.delay_class === "string" ? { delay_class: context.quote.delay_class } : {}),
-  }] : []);
-  const factRecency = structured.flatMap((context) => (isRecord(context.fact_recency) ? [context.fact_recency] : []));
-  const packet = packetForModel(input.packet ?? turnPacket(input));
-  const empty = nothingOnFile(input.toolCalls);
-  const gaps = [...((packet.gaps as string[] | undefined) ?? []), ...(empty ? [empty] : [])];
   return {
     question: input.context.userIntent ?? "Start a research thread",
     conversation: input.conversation ?? [],
-    evidence_packet: {
-      ...packet,
-      ...(gaps.length > 0 ? { gaps } : {}),
-      ...(quotes.length > 0 || factRecency.length > 0
-        ? { staleness: { ...(quotes.length > 0 ? { quote: quotes } : {}), ...(factRecency.length > 0 ? { fact_recency: factRecency } : {}) } }
-        : {}),
-    },
+    evidence_packet: packetForModel(input.packet ?? turnPacket(input)),
   };
 }
 
-// A subject with no evidence at all is a gap too, the answer model's and the
-// reader's, whom asking again would not help; when the claims read failed,
-// the claims are unknown, not absent (#207).
-function nothingOnFile(toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>): string | undefined {
-  if (!toolCalls.some((toolCall) => isRecord(toolCall.result) && toolCall.result.evidence_status === "insufficient_evidence")) return undefined;
-  return claimEvidence(toolCalls).unavailable
-    ? "No reported facts or quote are on file for this subject, and its research claims could not be read."
-    : "No research claims, reported facts, or quote are on file for this subject.";
+// What an answer with no figure and no claim to write from says, with no
+// model asked: asking again would not help (#498). When the claims read
+// failed, the claims are unknown, not absent (#207).
+function missingEvidence(packet: EvidencePacket): string {
+  const companies = packet.companies.length > 0 ? new Intl.ListFormat("en").format(packet.companies) : "this question";
+  return packet.claims_status === "unavailable"
+    ? `Research claims could not be read for ${companies}, and no figure is shown.`
+    : `No research claims are on file for ${companies}.`;
 }
 
 // The turn's evidence packet: its figures, claims and bounds (#207).

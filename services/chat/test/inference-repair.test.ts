@@ -10,6 +10,7 @@ import { answerMetrics, answerTurn, replayRecorded, type TurnTrace } from "../sr
 import { assertionList } from "../src/assertions.ts";
 import { REPAIR_INSTRUCTIONS } from "../src/inference-repair.ts";
 import { mutationRepairSummary, mutationVariants, repairMutation, type MutationRepair } from "../scripts/answer-lab.ts";
+import { repairUnderTodaysPrompt } from "./answer-lab/todays-prompt.ts";
 
 const trace = async (name: string): Promise<TurnTrace> =>
   JSON.parse(await readFile(fileURLToPath(new URL(`./answer-lab/traces/${name}`, import.meta.url)), "utf8")) as TurnTrace;
@@ -429,7 +430,8 @@ test("a trace recorded before repairs replays with none: its worded inference st
   // Today's code would ask a repair the trace never recorded.
   assert.equal(replayed.repair_input_changed, true);
 
-  const recorded = await replayRecorded(FISCAL);
+  assert.equal((await replayRecorded(FISCAL)).repair_input_changed, true, "its recorded answer prompt carried staleness the analyst no longer sends (#398)");
+  const recorded = await replayRecorded(repairUnderTodaysPrompt(FISCAL));
   assert.equal(text(recorded.blocks), fiscal(PROFITABILITY, "> **Analyst inference on NVDA** (revenue highest first: AAPL, NVDA): The revenue comparison is not like-for-like, since its fiscal year ended well before the other's, so the gap could look different on matched periods."));
   assert.deepEqual(recorded.assertions?.repaired, [6]);
   assert.equal(recorded.repair_input_changed, false);

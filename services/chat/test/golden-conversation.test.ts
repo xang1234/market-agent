@@ -710,6 +710,9 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const inspection = await loadEvidenceInspection(client, { user_id: USER_ID, snapshot_id: answer.snapshot_id, ref: { kind: "claim", id: claim![1] } });
     assert.equal(inspection.related_refs.find((ref) => ref.kind === "document")?.label, AMD_Q2_2025_RELEASE.title);
     assert.ok((narrative!.source_refs as string[]).length > 0, "the narrative names the claim's source");
+    const { rows: [sealed] } = await client.query<{ claim_refs: string[]; document_refs: string[]; fact_refs: string[] }>(
+      `select claim_refs, document_refs, fact_refs from snapshots where snapshot_id = $1::uuid`, [answer.snapshot_id]);
+    assert.deepEqual([sealed!.claim_refs, sealed!.document_refs.length, sealed!.fact_refs], [[claim![1]], 1, []], "the snapshot seals only what the answer quotes");
   });
 
   await t.test("no turn, on the engine's path or the analyst's, follow-ups included, shows a legacy figure block (#398)", async () => {
