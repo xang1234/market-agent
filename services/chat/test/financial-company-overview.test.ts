@@ -360,14 +360,19 @@ test("a question about one company that asks for no figure is answered with its 
   // The first company's lead over the second in each margin, each in its own latest quarter.
   const leads = (period: string, outcomes: ReadonlyArray<ReadonlyArray<string>>) =>
     ["gross_margin", "operating_margin", "net_margin"].map((metric, index) => [`out_a_minus_b_${metric}`, period, ...outcomes[index]!]);
-  // QTRS's quarter ends 2023-12-31 and OFFQ's 2024-06-30: half a year apart, so no lead is stated.
-  const QTRS_OVER_OFFQ = leads("QTRS Corp Q4 FY2023 minus OFFQ Corp Q2 FY2024", Array(3).fill(["incompatible", "incompatible_period"]));
+  // OFFQ's newest quarter ends half a year after QTRS's, so each lead takes OFFQ's Q4 FY2023, which ends with QTRS's, shown beside the table.
+  const QTRS_OVER_OFFQ = [
+    ["out_b_gross_margin_fy2023_q4", "Q4 FY2023", "verified", "60.00%"],
+    ["out_b_operating_margin_fy2023_q4", "Q4 FY2023", "verified", "25.00%"],
+    ["out_b_net_margin_fy2023_q4", "Q4 FY2023", "verified", "20.00%"],
+    ...leads("QTRS Corp Q4 FY2023 minus OFFQ Corp Q4 FY2023", Array(3).fill(["verified", "0.00 pp"])),
+  ];
 
   await t.test("a comparison of named companies is one table, each company's figures from its own latest quarter (#398)", async () => {
     const done = completed((await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve }).run({ ...base, userIntent: "Compare revenue for QTRS and OFFQ" })).events);
     assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_LATEST), ...slotted("b", OFFQ_LATEST), ...QTRS_OVER_OFFQ]);
     const { rows: [shown] } = await db.query(`select blocks->0->'financial'->'presentations' as presentations from chat_messages where message_id = $1`, [done.message_id]);
-    assert.deepEqual(shown.presentations.map((presentation: { kind: string }) => presentation.kind), ["table", "gap", "gap", "gap"], "the leads stand beside the table");
+    assert.deepEqual(shown.presentations.map((presentation: { kind: string }) => presentation.kind), ["table", "scalar", "scalar", "scalar"], "the leads stand beside the table");
   });
 
   await t.test("a line the engine cannot certify for one compared company is its gap cell, and the comparison still publishes (#398)", async () => {

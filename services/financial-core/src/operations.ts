@@ -39,7 +39,7 @@ import { MARGIN_NUMERATORS, resolveMetricDefinition, resolveRatioDefinition, typ
 import { derivationIssue } from "./derivation.ts";
 import { measurementIncompatibility, unitIncompatibility, type Measurement, type MeasurementReason } from "./dimensions.ts";
 import { canonicalDecimalString, parseDerivedDecimalText, parseFinancialDecimal } from "./exact-decimal.ts";
-import { classifyDuration, comparePeriodEnds, dayNumber, periodDays, periodsContiguous, periodsIdentical, periodsOverlap, type PeriodIdentity } from "./periods.ts";
+import { classifyDuration, comparePeriodEnds, coverSameMonths, dayNumber, periodsContiguous, periodsIdentical, periodsOverlap, type PeriodIdentity } from "./periods.ts";
 import { localDateOf } from "./public-time.ts";
 import {
   addRationals,
@@ -430,13 +430,7 @@ export function spread(node: SpreadNode, left: FinancialOperand, right: Financia
   if ((shape !== "quarter" && shape !== "annual") || shape !== classifyDuration(right.period)) {
     return operationGap("incompatible_period", "A spread compares a quarter with a quarter or a year with a year.");
   }
-  // Each side keeps its own fiscal calendar, so two periods are set side by
-  // side only while they mostly cover the same months: ends at most half the
-  // shorter period apart, sharing about half their days or more. Any two
-  // calendars have periods that close, so a wider gap means one side is a
-  // period ahead of the other.
-  const apart = Math.abs(dayNumber(left.period.end) - dayNumber(right.period.end));
-  if (2 * apart > Math.min(periodDays(left.period)!, periodDays(right.period)!)) {
+  if (!coverSameMonths(left.period, right.period)) {
     return operationGap("incompatible_period", "The two periods end more than half a period apart, so they do not cover the same months.");
   }
   const unit = left.measurement.unit;

@@ -313,9 +313,11 @@ test("a comparison shows each company's latest quarter, named from the newest it
     changeOf(ticker, quarter, previous),
     changeOf(ticker, quarter, yearBefore),
   ];
-  const NEWEST: Record<string, string> = { NVDA: "Q4 2026", AMD: "Q2 2026", AAPL: "Q3 2026" };
+  // NVDA's newest quarter ends 2026-01-25; AMD's Q4 2025 and AAPL's Q1 2026 each end 2025-12-27, 29 days before it.
+  const CLOSEST: Record<string, [string, string]> = { AMD: ["Q4 2025", "fy2025_q4"], AAPL: ["Q1 2026", "fy2026_q1"] };
+  const closest = (...tickers: string[]) => tickers.flatMap((ticker) => MARGINS.map(([metric, line]) => margin(ticker, metric, line, CLOSEST[ticker]![0])));
   const leads = (...tickers: string[]) => MARGINS.flatMap(([metric, line]) => tickers.slice(1).map((other) =>
-    `spread(${margin(tickers[0]!, metric, line, NEWEST[tickers[0]!]!)}, ${margin(other, metric, line, NEWEST[other]!)})`));
+    `spread(${margin(tickers[0]!, metric, line, "Q4 2026")}, ${margin(other, metric, line, CLOSEST[other]![0])})`));
   const NVDA = latestQuarter("NVDA", "Q4 2026", "Q3 2026", "Q4 2025");
   const AMD = latestQuarter("AMD", "Q2 2026", "Q1 2026", "Q2 2025");
   const AAPL = latestQuarter("AAPL", "Q3 2026", "Q2 2026", "Q3 2025");
@@ -328,16 +330,29 @@ test("a comparison shows each company's latest quarter, named from the newest it
     planner: "deterministic",
     model_calls: 0,
     units: ["answer"],
-    output_ids: [...ids("a", "fy2026_q4"), ...ids("b", "fy2026_q2"), ...MARGINS.map(([metric]) => `out_a_minus_b_${metric}`)],
-    outputs: [...NVDA, ...AMD, ...leads("NVDA", "AMD")],
+    output_ids: [
+      ...ids("a", "fy2026_q4"),
+      ...ids("b", "fy2026_q2"),
+      ...MARGINS.map(([metric]) => `out_b_${metric}_fy2025_q4`),
+      ...MARGINS.map(([metric]) => `out_a_minus_b_${metric}`),
+    ],
+    outputs: [...NVDA, ...AMD, ...closest("AMD"), ...leads("NVDA", "AMD")],
     uncovered: [],
     reads: [read("NVDA"), read("AMD")],
   }, "a quarter public after the cutoff is not NVDA's newest");
   const three = await compare("NVDA, AMD and AAPL");
-  assert.deepEqual([three?.outputs, three?.reads], [[...NVDA, ...AMD, ...AAPL, ...leads("NVDA", "AMD", "AAPL")], [read("NVDA"), read("AMD"), read("AAPL")]]);
+  assert.deepEqual([three?.outputs, three?.reads], [[...NVDA, ...AMD, ...AAPL, ...closest("AMD", "AAPL"), ...leads("NVDA", "AMD", "AAPL")], [read("NVDA"), read("AMD"), read("AAPL")]]);
+  const noLead = "NVIDIA Corporation's lead over Advanced Micro Devices, Inc. in each margin, as no quarter Advanced Micro Devices, Inc. reported ends within half a quarter of NVIDIA Corporation's Q4 FY2026";
+  // AMD's Q1 2026 ends 2026-03-28, 62 days after NVDA's newest: more than half a quarter.
+  const apart = await compare("NVDA and AMD", { ...PAGES, AMD: candidatePage(...goldenQuarters("AMD", "2026-08-01T00:00:00.000Z").slice(6)) });
+  assert.deepEqual([apart.outputs?.filter((output) => output.startsWith("spread")), apart.uncovered], [[], [noLead]]);
+  const disputed = await compare("NVDA and AMD", { ...PAGES, NVDA: candidatePage(...goldenQuarters("NVDA", "2026-08-01T00:00:00.000Z"), revenueCandidate(2026, "Q4", "2025-10-27", "2026-01-18", "2026-08-01T00:00:00.000Z")) });
+  assert.deepEqual([disputed.outputs?.filter((output) => output.startsWith("spread")), disputed.uncovered?.at(-1)], [[],
+    "NVIDIA Corporation's lead over Advanced Micro Devices, Inc. in each margin, as the filings of NVIDIA Corporation do not agree on the dates of its Q4 FY2026"]);
   const undated = await compare("NVDA and AMD", { ...PAGES, AMD: candidatePage(revenueCandidate(2026, "Q1", null, "2026-03-28"), revenueCandidate(2026, "Q2", null, "2026-06-27")) });
   assert.deepEqual(undated.uncovered, [
     "revenue growth from Q1 FY2026 to Q2 FY2026 for Advanced Micro Devices, Inc., whose quarters are not dated consecutively",
+    noLead,
   ], "a company is named when several are compared; Q2 FY2025 was never reported, so its year-over-year change is a gap where it falls");
 
   let inFlight = 0;

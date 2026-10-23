@@ -1,4 +1,4 @@
-import { DEFAULT_EXECUTION_LIMITS, dayNumber, type FinancialPlanV1, type FinancialRuntimeAuthority, type FinancialSubjectRef } from "../../financial-core/src/index.ts";
+import { coverSameMonths, DEFAULT_EXECUTION_LIMITS, dayNumber, type FinancialPlanV1, type FinancialRuntimeAuthority, type FinancialSubjectRef } from "../../financial-core/src/index.ts";
 import { isDatabaseError } from "../../financial-engine/src/evidence-adapter.ts";
 import { buildDeterministicPlan, type PlanningContext, type PlanningResult, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort, InputCandidate, SqlExecutor } from "../../financial-engine/src/ports.ts";
@@ -76,6 +76,7 @@ type Dates = Readonly<{ start: string | null; end: string }>;
 
 type RevenueQuarters = Readonly<{
   newest: FiscalQuarter;
+  quarters: ReadonlyArray<FiscalQuarter>;
   // A quarter's dates as all its reported revenue states them, else why it has none.
   agreedDates: (quarter: FiscalQuarter) => Dates | "unreported" | "conflicting";
 }>;
@@ -194,8 +195,8 @@ async function revenueQuarters(
     const reported = page.truncated ? [] : page.candidates.filter((candidate) => candidate.period.fiscal_period !== "FY" && reportedBy(candidate, policy));
     const newest = reported.reduce<InputCandidate | null>((best, candidate) => (best === null || candidate.period.end > best.period.end ? candidate : best), null);
     if (newest === null) return null;
-    const { fiscal_year, fiscal_period } = newest.period;
-    companies.push({ newest: { fiscal_year, fiscal_period }, agreedDates: agreedDates(reported) });
+    const quarters = new Map(reported.map(({ period: { fiscal_year, fiscal_period } }) => [quarterId({ fiscal_year, fiscal_period }), { fiscal_year, fiscal_period }]));
+    companies.push({ newest: quarters.get(quarterId(newest.period))!, quarters: [...quarters.values()], agreedDates: agreedDates(reported) });
   }
   return companies;
 }
@@ -243,12 +244,21 @@ const before = (quarter: FiscalQuarter, back: number): FiscalQuarter => quarterB
 const quarterId = (quarter: FiscalQuarter) => `fy${quarter.fiscal_year}_${quarter.fiscal_period.toLowerCase()}`;
 const quarterText = (quarter: FiscalQuarter) => `${quarter.fiscal_period} FY${quarter.fiscal_year}`;
 
-// A company's reported figure `back` quarters before its newest.
-function quarterly(slot: string, id: (name: string) => string, newest: FiscalQuarter) {
-  return (metric: string, back: number): Node => {
-    const period = before(newest, back);
-    return { node_id: id(`${metric}_${quarterId(period)}`), operation: "reported_metric", subject_slot: slot, metric_key: metric, period: { kind: "fiscal_period", ...period } };
-  };
+function reportedAt(slot: string, id: (name: string) => string) {
+  return (metric: string, period: FiscalQuarter): Node =>
+    ({ node_id: id(`${metric}_${quarterId(period)}`), operation: "reported_metric", subject_slot: slot, metric_key: metric, period: { kind: "fiscal_period", ...period } });
+}
+
+// The company's quarter ending closest to `target`, when the two cover mostly the same months.
+function closestQuarter(company: RevenueQuarters, target: Dates): FiscalQuarter | null {
+  const apart = (dates: Dates) => Math.abs(dayNumber(dates.end) - dayNumber(target.end));
+  const [closest] = company.quarters
+    .flatMap((quarter) => {
+      const dates = company.agreedDates(quarter);
+      return typeof dates === "string" || dates.start === null ? [] : [{ quarter, dates }];
+    })
+    .sort((left, right) => apart(left.dates) - apart(right.dates) || right.dates.end.localeCompare(left.dates.end));
+  return closest !== undefined && coverSameMonths(target, closest.dates) ? closest.quarter : null;
 }
 
 function companyOverviewDraft(companies: ReadonlyArray<RevenueQuarters>) {
@@ -258,10 +268,10 @@ function companyOverviewDraft(companies: ReadonlyArray<RevenueQuarters>) {
   const parts = companies.map((company, index) => {
     const slot = slotOf(index);
     const id = (name: string) => several ? `${slot}_${name}` : name;
-    const quarter = quarterly(slot, id, company.newest);
-    const revenue = new Map(backs.map((back) => [back, quarter("revenue", back)]));
+    const at = reportedAt(slot, id);
+    const revenue = new Map(backs.map((back) => [back, at("revenue", before(company.newest, back))]));
     const latest = revenue.get(0)!;
-    const lines = MARGINS.map(({ numerator }) => quarter(numerator, 0));
+    const lines = MARGINS.map(({ numerator }) => at(numerator, company.newest));
     const margins = MARGINS.map(({ metric }, line): Node => ({ node_id: id(metric), operation: metric, numerator: lines[line]!.node_id, revenue: latest.node_id }));
     // Each charted quarter's change from the one before it, oldest first, then the latest's from a year earlier.
     const changes = [
@@ -279,31 +289,53 @@ function companyOverviewDraft(companies: ReadonlyArray<RevenueQuarters>) {
     const window = several ? [] : highAndLow("revenue", charted);
     return {
       slot,
+      at,
+      id,
       margins,
       operations: [...revenue.values(), ...lines, ...margins, ...growth, ...window],
       outputs: [...(several ? [latest] : charted), ...lines, ...margins, ...growth, ...window],
     };
   });
-  // The first company's lead over each other company, for each margin.
+  // The first company's lead over each other company in each margin, against
+  // that company's quarter ending closest to its newest, shown beside it.
   const [primary, ...others] = parts;
-  const leads = MARGINS.flatMap(({ metric }, line) => others.map((other): Node => ({
+  const newest = companies[0]!.newest;
+  const dates = companies[0]!.agreedDates(newest);
+  const anchor = typeof dates === "string" || dates.start === null ? null : dates;
+  const paired = others.flatMap((other, index): Array<{ slot: string; margins: ReadonlyArray<Node>; operations: ReadonlyArray<Node>; shown: ReadonlyArray<Node> }> => {
+    const quarter = anchor && closestQuarter(companies[index + 1]!, anchor);
+    if (quarter === null) {
+      omitted.push((named) => `${named(primary!.slot)}'s lead over ${named(other.slot)} in each margin, as ${anchor === null
+        ? `the filings of ${named(primary!.slot)} do not agree on the dates of its ${quarterText(newest)}`
+        : `no quarter ${named(other.slot)} reported ends within half a quarter of ${named(primary!.slot)}'s ${quarterText(newest)}`}`);
+      return [];
+    }
+    if (quarterId(quarter) === quarterId(companies[index + 1]!.newest)) return [{ slot: other.slot, margins: other.margins, operations: [], shown: [] }];
+    const revenue = other.at("revenue", quarter);
+    const lines = MARGINS.map(({ numerator }) => other.at(numerator, quarter));
+    const margins = MARGINS.map(({ metric }, line): Node => ({ node_id: other.id(`${metric}_${quarterId(quarter)}`), operation: metric, numerator: lines[line]!.node_id, revenue: revenue.node_id }));
+    return [{ slot: other.slot, margins, operations: [revenue, ...lines, ...margins], shown: margins }];
+  });
+  const leads = MARGINS.flatMap(({ metric }, line) => paired.map((other): Node => ({
     node_id: `${primary!.slot}_minus_${other.slot}_${metric}`,
     operation: "spread",
     left: primary!.margins[line]!.node_id,
     right: other.margins[line]!.node_id,
   })));
+  // A company's closest quarter may be one its growth already reads.
+  const operations = new Map([...parts.flatMap((part) => part.operations), ...paired.flatMap((other) => other.operations), ...leads].map((node) => [node.node_id, node]));
   return {
-    operations: [...parts.flatMap((part) => part.operations), ...leads],
-    outputs: [...parts.flatMap((part) => part.outputs), ...leads],
+    operations: [...operations.values()],
+    outputs: [...parts.flatMap((part) => part.outputs), ...paired.flatMap((other) => other.shown), ...leads],
     omitted,
   };
 }
 
 function marginTrendDraft(company: RevenueQuarters) {
-  const quarter = quarterly("a", (name) => name, company.newest);
+  const at = reportedAt("a", (name) => name);
   const backs = Array.from({ length: QUARTERS_SHOWN }, (_, back) => QUARTERS_SHOWN - 1 - back);
-  const revenue = backs.map((back) => quarter("revenue", back));
-  const lines = MARGINS.map(({ numerator }) => backs.map((back) => quarter(numerator, back)));
+  const revenue = backs.map((back) => at("revenue", before(company.newest, back)));
+  const lines = MARGINS.map(({ numerator }) => backs.map((back) => at(numerator, before(company.newest, back))));
   const margins = MARGINS.map(({ metric }, line) => lines[line]!.map((numerator, index): Node => ({
     node_id: `${metric}_${quarterId(before(company.newest, backs[index]!))}`,
     operation: metric,
