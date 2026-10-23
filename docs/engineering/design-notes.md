@@ -348,8 +348,12 @@ divides an instant price by a duration's EPS.
 - **Surfaces:** grids offer `latest_market_cap` and `latest_pe_ratio`, labelled "P/E (latest FY diluted EPS)"
   (`services/analyst-grids/src/financial-column.ts`). Both are valued at the run's cutoff, so they take no period
   params. A cell lists its own figure first and its price and operand after it, so the cell shows the valuation and
-  its sealed block carries the inputs. A chat question about any resolved company reaches the engine (`take`, `financial-runtime.ts`),
-  and its scope names `market_cap` and `pe_ratio`, so a follow-up reads them (`SCOPE_METRICS`). The answer shows the
+  its sealed block carries the inputs. A chat turn with a resolved company reaches the engine (`take`,
+  `financial-runtime.ts`), so a market cap or P/E question does, and its scope names `market_cap` and `pe_ratio`, so
+  a follow-up reads them (`SCOPE_METRICS`). The analyst path keeps (`leftToAnalyst`) a turn that asks for no figure
+  but for evidence, guidance or market data (a price window or a benchmark, asked or kept by its scope); a follow-up
+  that names no company and asks for nothing but an explanation; and a follow-up whose scope keeps a period,
+  segments, a margin trend, guidance or a metric outside the income statement. The engine's answer shows the
   figure beside the inputs it read, and each one's inspector shows its date: the price's trade, the count's cover
   date, and the EPS's fiscal year. The screener shows them too (below).
 - **Presentation:** a valuation is dated by its price ("latest known at the cutoff"), since its other operand is

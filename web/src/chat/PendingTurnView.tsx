@@ -109,7 +109,7 @@ function StreamedTurn({ phase, stream, blocks, messages, children }: { phase: Tu
     >
       <AgentPlanPanel steps={stream.plan_steps} />
       {/* The server may read the question before it starts the turn (#398). */}
-      {stream.turn_status === 'idle' ? <p className="text-sm text-muted">Starting…</p> : null}
+      {phase === 'streaming' && stream.turn_status === 'idle' ? <p className="text-sm text-muted">Starting…</p> : null}
       <AssistantTurn className="w-full">
         {blocks && stream.block_order.map((block_id) => {
           const block = stream.blocks_by_id.get(block_id)

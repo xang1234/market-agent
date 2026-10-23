@@ -88,6 +88,11 @@ export function resolveMention(mention: string): Promise<ChatSubjectPreResolutio
 
 export const NO_ASKS: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named", names: [] } };
 export const METRIC_READING: ScopeProposal = { ...NO_ASKS, metrics: [proposedMetric("income_statement", null, null)!] };
+/** A recorded reading that, like the model's, names the tickers its question writes when it names no company. */
+export const readingOf = (proposal: ScopeProposal | null) => async (question: string): Promise<ScopeProposal | null> =>
+  proposal !== null && proposal.companies.kind === "as_named" && proposal.companies.names.length === 0
+    ? { ...proposal, companies: { kind: "as_named", names: extractSubjectMentions(question) } }
+    : proposal;
 export const changing = (companies: CompanyChange) => async (): Promise<ScopeProposal> => ({ ...METRIC_READING, companies });
 export const comparing = (...add: string[]) => changing({ kind: "compare", add });
 

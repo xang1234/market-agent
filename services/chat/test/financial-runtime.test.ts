@@ -334,7 +334,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(await answer(async () => null), unchecked, "no reading");
     assert.deepEqual(await answer(async () => { throw new Error("scope model down"); }), unchecked, "a failed reading");
     assert.deepEqual(await answer(() => { throw new Error("no scope reader"); }), unchecked, "a reader that throws before it answers");
-    assert.deepEqual(await answer(async () => parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named", names: [] } }), "")), [[], undefined]);
+    assert.deepEqual(await answer(async () => parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named", names: ["AAA"] } }), "Revenue for AAA")), [[], undefined]);
   });
 
   await t.test("each name a turn gives is resolved once (#425)", async () => {
@@ -673,6 +673,10 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     const overBbb = keeping({ companies: [{ issuer_id: IDS.issuerB, label: "BBB" }] });
     assert.deepEqual(await lane("Explain it", { priorSubjects: async () => [aaa], researchScope: overBbb, readQuestion: reading({ asks: new Set(["explains"]) }) }), "analyst");
     assert.deepEqual(await lane("How is AAA doing?", { researchScope: overBbb, readQuestion: reading(aaaNamed) }, ["AAA"]), ["AAA"]);
+    // A follow-up that names no company and asks for no figure is the analyst's; one that adds or drops a company is the engine's.
+    assert.deepEqual(await lane("Why?", { priorSubjects: async () => [aaa], readQuestion: reading({ asks: new Set(["explains"]) }) }), "analyst");
+    assert.deepEqual(await lane("Thanks", { priorSubjects: async () => [aaa], readQuestion: reading({}) }), "analyst");
+    assert.deepEqual(await lane("and BBB?", { priorSubjects: async () => [aaa], readQuestion: reading({ companies: { kind: "compare", add: ["BBB"] } }) }, ["AAA", "BBB"]), ["AAA", "BBB"]);
     // A metric read as asked and turned off is not asked either.
     const offCapex = reading({ metrics: [proposedMetric("capex", null, null)!], asks: new Set(["evidence"]), turns_off: { facets: new Set(), metrics: new Set(["capex"]) } });
     assert.deepEqual(await lane("Skip the capex: where did those numbers come from?", { priorSubjects: async () => [aaa], readQuestion: offCapex }), "analyst");

@@ -53,6 +53,7 @@ import {
   PROPOSABLE_METRICS,
   proposedMetric,
   readingAsks,
+  type CompanyChange,
   type IncomeItem,
   type RequestedMetric,
   type ResearchScope,
@@ -148,9 +149,22 @@ const FACET_LANE: Readonly<Record<ScopeFacet, "figure" | "analyst" | "neutral">>
 const OVERVIEW_KEEPS: ReadonlySet<ScopeField> = new Set(["peers", "metrics"]);
 const OVERVIEW_METRICS: ReadonlySet<string> = new Set(["income_statement"]);
 
+// The companies a reading's change names, whatever it does with them.
+function namedCompanies(change: CompanyChange): number {
+  switch (change.kind) {
+    case "compare":
+      return change.add.length;
+    case "drop":
+      return change.drop.length + change.add.length;
+    default:
+      return change.names.length;
+  }
+}
+
 // The analyst path keeps a turn that asks for no figure but something only it
-// answers, or whose scope keeps market data; and a follow-up (a question that
-// names no company afresh) whose scope keeps what an overview would not show.
+// answers, or whose scope keeps market data; a follow-up that names no company
+// and asks for nothing but an explanation ("Why?", "thanks"); and one whose
+// scope keeps what an overview would not show.
 function leftToAnalyst(reading: ScopeProposal | null, scope: ResearchScope | null): boolean {
   if (reading === null) return false;
   const { asks, offMetrics } = readingAsks(reading);
@@ -158,10 +172,10 @@ function leftToAnalyst(reading: ScopeProposal | null, scope: ResearchScope | nul
   const lanes = [...asks].map((facet) => FACET_LANE[facet]);
   if (lanes.includes("figure")) return false;
   if (lanes.includes("analyst")) return true;
-  if (scope === null) return false;
-  if (scope.price_window !== null || scope.benchmark) return true;
-  const fresh = reading.companies.kind === "as_named" && reading.companies.names.length > 0;
-  if (fresh) return false;
+  if (scope !== null && (scope.price_window !== null || scope.benchmark)) return true;
+  const asksNothing = [...asks].every((facet) => facet === "explains") && reading.period.kind !== "latest";
+  if (namedCompanies(reading.companies) === 0 && asksNothing) return true;
+  if ((reading.companies.kind === "as_named" && reading.companies.names.length > 0) || scope === null) return false;
   const overviewPeriod = reading.period.kind === "none" || reading.period.kind === "latest";
   const keepsOther = scope.inherited.some((field) => !OVERVIEW_KEEPS.has(field)) || scope.guidance === true ||
     (scope.inherited.includes("metrics") && scope.metrics.some((metric) => !OVERVIEW_METRICS.has(metric.metric_key)));

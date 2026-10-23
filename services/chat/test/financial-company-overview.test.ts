@@ -9,7 +9,7 @@ import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence
 import { IDS, seedReportedFact } from "../../financial-engine/test/db-fixtures.ts";
 import { resolveResearchScope, type ResearchScope, type ScopeProposal } from "../src/research-scope.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "../src/subjects.ts";
-import { chatDatabase, chatHarness, completed, METRIC_READING, NO_ASKS, resolveMention, revenueModel } from "./financial-fixtures.ts";
+import { chatDatabase, chatHarness, completed, METRIC_READING, NO_ASKS, readingOf, resolveMention, revenueModel } from "./financial-fixtures.ts";
 
 const COMPANIES: Readonly<Record<string, string>> = {
   QTRS: "4f000000-0000-4000-8000-0000000000e1",
@@ -106,7 +106,7 @@ test("a question about one company that asks for no figure is answered with its 
     };
     return results.map((result) => [result.output_id, labels[result.period_label_id]!.text, result.disposition, result.presented.kind === "value" ? result.presented.text : result.presented.reason_code]);
   };
-  const reading = (reading: ScopeProposal | null) => async () => reading;
+  const reading = readingOf;
 
   await t.test("a reading that asks for no figure publishes the overview, never waiting on the planning model", async () => {
     let calls = 0;
@@ -216,7 +216,7 @@ test("a question about one company that asks for no figure is answered with its 
   });
 
   await t.test("a reading that asks for a figure or a period other than the latest, or a company with no quarters, goes to the planner; a carried company is the overview, and a price window the analyst's", async () => {
-    const planned = async (userIntent: string, mentions: string[], options: { readQuestion?: () => Promise<ScopeProposal | null>; priorSubjects?: () => Promise<ChatResolvedSubjectPreResolution[]>; researchScope?: typeof scoped | (() => Promise<ResearchScope>) } = {}) => {
+    const planned = async (userIntent: string, mentions: string[], options: { readQuestion?: (question: string) => Promise<ScopeProposal | null>; priorSubjects?: () => Promise<ChatResolvedSubjectPreResolution[]>; researchScope?: typeof scoped | (() => Promise<ResearchScope>) } = {}) => {
       const model = revenueModel(mentions);
       const done = completed((await chatHarness(pool, { model, readQuestion: reading(NO_ASKS), resolveMention: resolve, ...options }).run({ ...base, userIntent })).events);
       return [model.calls, (await results(done.message_id)).map(([outputId]) => outputId)];
@@ -228,7 +228,8 @@ test("a question about one company that asks for no figure is answered with its 
     assert.deepEqual(await planned("Revenue for AAA", ["AAA"]), [1, ["a_out"]], "a company with no quarterly revenue");
     assert.deepEqual(await planned("Compare revenue for QTRS and AAA", ["QTRS", "AAA"]), [1, ["a_out", "b_out"]], "a company with no quarterly revenue beside one with");
     const carried = (await resolve("QTRS")) as ChatResolvedSubjectPreResolution;
-    assert.deepEqual(await planned("And what about its revenue?", ["QTRS"], { priorSubjects: async () => [carried] }), [0, QTRS_OVERVIEW.map(([outputId]) => outputId)], "a carried company");
+    // A follow-up that adds a company is the overview of the carried one and the added one.
+    assert.deepEqual(await planned("Compare it with AAA", ["QTRS", "AAA"], { priorSubjects: async () => [carried], readQuestion: reading({ ...NO_ASKS, companies: { kind: "compare", add: ["AAA"] } }) }), [1, ["a_out", "b_out"]], "a carried company beside one with no quarters");
     const periods: Array<[string, ScopeProposal]> = [
       ["in fiscal 2023", { ...NO_ASKS, period: { kind: "fiscal_year", fiscal_year: 2023 } }],
       ["for Q4 2023", { ...NO_ASKS, period: { kind: "fiscal_quarter", fiscal_period: "Q4", fiscal_year: 2023 } }],
