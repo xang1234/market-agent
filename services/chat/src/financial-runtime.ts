@@ -46,7 +46,7 @@ import { publishRequest, type RequestGap } from "../../financial-engine/src/requ
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { comparedAdditions, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId } from "./chat-ids.ts";
-import { namesCompanies, overviewPeers, overviewSubjects, planCompanyOverview, withCatalogPeers, type PeersOf } from "./company-overview.ts";
+import { namesCompanies, overviewPeers, planCompanyOverview, turnReplacement, type PeersOf, type TurnReplacement } from "./company-overview.ts";
 import { noteBlock } from "./fact-blocks.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { companyKey, extractSubjectMentions } from "./subject-extraction.ts";
@@ -499,40 +499,30 @@ async function planTurn(
   if (!namesCompanies(subjects, turn.carried)) return planned;
   // Settled now, or a planner that fails while the overview is decided is an unhandled rejection.
   const failure = planned.then(() => null, (reason: unknown) => ({ reason }));
-  const replaceBy = (by: string) => {
-    dropped = true;
-    void failure.then((failed) => {
-      if (failed === null) return;
-      if (failed.reason instanceof PlanningModelError && failed.reason.cause === DROPPED) {
-        console.warn(`[chat] the planner was dropped for ${by}; its next model call was not made`);
-      } else {
-        console.warn(`[chat] the planner ${by} replaced had failed`, failed.reason);
-      }
-    });
-  };
-  let companies: ReadonlyArray<RequestedSubject> | null;
-  let overview: PlanningResult | null;
-  let peered: ReadonlyArray<RequestedSubject> | null = null;
+  let replacement: TurnReplacement | null;
   try {
     const [scope, reading] = await turn.prepare();
-    companies = await overviewSubjects(subjects, reading, scope, turn.peersOf);
-    overview = companies && await planCompanyOverview(planningContext(companies), turn.evidence);
-    if (!overview) peered = await withCatalogPeers(subjects, reading, turn.peersOf);
+    replacement = await turnReplacement(subjects, reading, scope, turn.peersOf, (companies) => planCompanyOverview(planningContext(companies), turn.evidence));
   } catch (reason) {
     // A defect fails the turn, so the planner's answer is not needed either.
     dropped = true;
     throw reason;
   }
-  if (peered) {
-    onSubjects(peered);
-    replaceBy("the catalog peers");
-    return planFinancialRequest(planningContext(peered), text, model ?? noModel);
-  }
-  if (!companies || !overview) return planned;
-  onSubjects(companies);
+  if (!replacement) return planned;
+  const by = replacement.via === "overview" ? "the company overview" : "the catalog peers";
+  dropped = true;
+  void failure.then((failed) => {
+    if (failed === null) return;
+    if (failed.reason instanceof PlanningModelError && failed.reason.cause === DROPPED) {
+      console.warn(`[chat] the planner was dropped for ${by}; its next model call was not made`);
+    } else {
+      console.warn(`[chat] the planner replaced by ${by} had failed`, failed.reason);
+    }
+  });
+  onSubjects(replacement.subjects);
+  if (replacement.via === "peers") return planFinancialRequest(planningContext(replacement.subjects), text, model ?? noModel);
   turn.onOverview();
-  replaceBy("the company overview");
-  return overview;
+  return replacement.overview;
 }
 
 const DROPPED = new Error("dropped for another plan of the turn");
