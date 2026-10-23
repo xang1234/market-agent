@@ -56,10 +56,10 @@ const READ_PERIODS: ReadonlySet<ScopeProposal["period"]["kind"]> = new Set(["non
 
 /**
  * The one plan a turn about a company gets. The analyst path keeps a turn that
- * asks for no figure but something only it answers; a follow-up whose scope
- * keeps guidance and that names no company of its own; one that names no
- * period and whose scope keeps market data; and a follow-up that names no
- * company and no period, turns nothing off and asks only for a cause. A turn
+ * asks for no figure but something only it answers; a follow-up naming no
+ * company of its own whose scope keeps guidance, or keeps market data and
+ * that names no period; and a follow-up that names no company and no period,
+ * turns nothing off and asks only for a cause. A turn
  * asking for segments is the engine's segment gap. Otherwise, with a scope:
  * one company's margin trend, the companies' overview, or the figures a
  * follow-up keeps beside the income statement; anything else is the planner's.
@@ -73,9 +73,8 @@ export function routeTurn(reading: ScopeProposal | null, scope: ResearchScope | 
   const followUp = namedCompanies(reading.companies) === 0;
   const onlyExplains = followUp && offFacets.size === 0 && offMetrics.size === 0 && [...asks].every((facet) => facet === "explains");
   if (!namesFigure && !lanes.has("figure")) {
-    const marketData = scope !== null && (scope.price_window !== null || scope.benchmark);
-    if (lanes.has("analyst") || (scope?.guidance === true && !own)) return { kind: "analyst" };
-    if (reading.period.kind === "none" && (marketData || onlyExplains)) return { kind: "analyst" };
+    const keptAnalyst = scope !== null && !own && (scope.guidance === true || (reading.period.kind === "none" && (scope.price_window !== null || scope.benchmark)));
+    if (lanes.has("analyst") || keptAnalyst || (reading.period.kind === "none" && onlyExplains)) return { kind: "analyst" };
   }
   if (asks.has("segments")) return { kind: "segments_gap" };
   if (scope === null || !READ_PERIODS.has(reading.period.kind)) return PLANNER;

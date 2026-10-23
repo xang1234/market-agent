@@ -88,6 +88,8 @@ const ROUTES: ReadonlyArray<readonly [string, ScopeProposal | null, ResearchScop
   ["kept guidance, a company of its own", read({ companies: named("NVDA") }), after({ guidance: true }), "overview at latest"],
   ["a kept price window", read(), after({ price_window: YTD }), "analyst"],
   ["a kept benchmark", read(), after({ benchmark: true }), "analyst"],
+  ["a kept price window, naming one of its companies", read({ companies: named("AMD") }), after({ companies: [NVDA, AMD], price_window: YTD }), "overview at latest"],
+  ["a kept benchmark, naming its company", read({ companies: named("NVDA") }), after({ benchmark: true }), "overview at latest"],
   ["a kept price window, another period", read({ period: Q2 }), after({ price_window: YTD }), "overview at newest Q2"],
   ["segments", read({ asks: ["segments"], companies: named("NVDA") }), FRESH, "segments_gap"],
   ["segments with a metric", read({ asks: ["segments"], metrics: ["income_statement"], items: ["revenue"] }), FRESH, "segments_gap"],
