@@ -106,23 +106,22 @@ when `NODE_ENV=production`.
 
 ## Charts and tables in chat answers
 
-Chat answers carry deterministic fact blocks (`services/chat/src/fact-blocks.ts`). For a resolved company, those are
-a latest-quarter `metric_row` and a `revenue_bars` chart covering 8 quarters. Both are built from reported facts
-through the shared eligibility reader (`loadRecentIssuerFundamentals`), with no model involvement. Block choice is a
-fixed rule, not a tool loop.
+Every figure chat shows is the financial engine's (#398): a turn about a company is planned and certified by the
+engine (`services/chat/src/financial-runtime.ts`), and its `financial_answer` block shows each result with its proof.
+The analyst path shows no figure of its own. Its one block with values is a comparison's year-to-date price chart
+(`perf-block.ts`, below): market data, which stays outside the engine and is labelled not verified until #444's price
+observations let the engine state a price return (D2). Chat's own fact blocks (metric rows, revenue bars, comparison
+and segment tables) were deleted in #398 step 7. The web still renders those kinds: analyze produces them, and saved
+threads hold them.
 
-- Every value cites its fact (`value_ref`), and the fact is bound in `data_ref.params.fact_bindings`. Bindings come
-  from the same loader the seal verifies with (`loadVerifierFactsForRefs`), so they match by construction. Only facts
-  that loader returns are rendered.
-- **Chat seals one snapshot per message.** Fact blocks join the message's existing staged manifest: their facts go in
-  via `provenance_fact_refs`, and the tool-call audit still applies to the narrative. They don't use
-  `buildFactBackedSealInput`, which seals per block. `normalizeAssistantBlock` keeps `data_ref.params`, and fact
-  blocks don't inherit the narrative's default claim/document refs, because the verifier would then demand those
-  sources on the chart.
+- **Chat seals one snapshot per message.** The chart joins the message's staged manifest: its series go in via
+  `provenance_series_specs`, and the tool-call audit still applies to the narrative. `normalizeAssistantBlock` keeps
+  `data_ref.params`, and the chart doesn't inherit the narrative's default claim/document refs, because the verifier
+  would then demand those sources on it.
 - **Judge gate** (`inference-judge.ts`, `verdicts.ts`, `answer-trace.ts`): the answer is rendered from its checked assertions, each
   figure a packet value in a template; an analyst inference is the model's words, with no digit or reference. A
   second model (`JUDGE_LITELLM_MODEL`) reads each inference beside the assertions it rests on, the answer's
-  other observations and comparisons, and every figure its fact blocks show (a chart by each line's last value),
+  other observations and comparisons, and every figure in its packet (a chart by each line's last value),
   one call per inference, all at once
   (#376). Its verdict is entailed, unsupported or contradicted, with a separate `worded_amount` flag for an amount
   stated in words, and `shownAs` reads both: entailed shows as an analyst inference, unsupported shows labelled as
@@ -134,10 +133,12 @@ fixed rule, not a tool loop.
   answer is saved once every verdict is in. Each shown state and the save may differ from the seal only in text
   segments, which neither the seal nor a block proof reads (`messages.ts`). No judge configured, a failed or late
   call, or no verdict: that inference is not shown. The judge replaced the word-list narrative guard (#302).
-- The displayed figures reach the model in its evidence packet (`displayedFigures`, `fact-blocks.ts`;
-  `evidence-packet.ts`), each with an id and the company and metric it belongs to. The model cites a figure only by
-  its id (`[[F3]]`); the answer renders the packet's value in a template, so no figure is the model's words.
-- A failure while building fact blocks degrades to a narrative-only answer; it never costs the user the answer.
+- The chart's returns reach the model in its evidence packet (`perfFigures`, `perf-block.ts`; `evidence-packet.ts`),
+  each with an id and the company it belongs to. With no chart the packet holds claims only, so a number reaches an
+  analyst answer only inside a claim it quotes, with the claim's document. The model cites a figure only by its id
+  (`[[F2]]`); the answer renders the packet's value in a template, so no figure is the model's words, and an analyst
+  inference that writes a digit is rejected.
+- A failure while reading the chart's prices leaves the answer without it; it never costs the user the answer.
 
 ## Cash flow, balance sheet and EPS (#205)
 
@@ -162,13 +163,11 @@ filing's cash flow and balance sheet are extracted from it and stored in the sam
 - **A derived quarter names every filing it comes from.** Its source is the statement's filing, but its inputs usually
   span filings (Q2 cash flow is the Q2 10-Q's six months less the Q1 10-Q's three; an income Q4 is the 10-K's year less
   three 10-Qs). Its `quality_flags` hold a `sec_period_difference` lineage: each input's accession, period, value and
-  filing `source_id`, every one registered as a source. Chat adds those sources to the block showing the figure
-  (`withDerivationSources`, `services/chat/src/fact-blocks.ts`), so the inspector reaches every filing.
+  filing `source_id`, every one registered as a source.
 - **A balance is a point** at the filing's period end. The statement contract labels every point `FY` of its fiscal
-  year, so readers date a balance by `period_end`, never by its fiscal label. The chat block's figures tell the model it
-  is a "balance at period end" (`displayedFigures`). The model's other facts (`availableFigures` in
-  `services/chat/src/llm-runtime.ts`, its figures when no block shows one) leave out cash flow and balances altogether (`excludeMetricKeys`, `local-runtime-structured.ts`): there a balance would read as its fiscal
-  label, and the extra rows would crowd income facts out of the 24-row cap.
+  year, so readers date a balance by `period_end`, never by its fiscal label. Only a 10-K's balance carries a financial
+  context (`recordSecOriginalContext`), so the engine certifies a balance at its fiscal year's end and states a
+  quarter's as a gap.
 - A family that cannot be extracted or mapped is logged and left out; only a database failure fails the ingestion.
 - **Mapped:** operating cash flow, capex (`PaymentsToAcquirePropertyPlantAndEquipment`, else NVDA-style
   `PaymentsToAcquireProductiveAssets`), cash and equivalents, total assets, liabilities and equity. **Not mapped:**
@@ -185,27 +184,18 @@ filing's cash flow and balance sheet are extracted from it and stored in the sam
   derived quarter whose value equals its derivation (`persistStatementFacts`, `services/fundamentals/src/sec-facts-repository.ts`). The CLI skips the frozen golden dataset's issuers.
   Lineage for derived income quarters stored before it existed is not rewritten.
 
-In chat, a single-company question naming cash flow, capex, free cash flow, the balance sheet or one of its items
-(cash, total assets, liabilities, equity or book value), or EPS reads them (`services/chat/src/statement-blocks.ts`). A question asking only for them takes the `statements`
-route and reads nothing else.
+In chat, a question naming cash flow, capex, free cash flow, the balance sheet or one of its items (cash, total
+assets, liabilities, equity or book value), or EPS is the engine's: its planner plans the figures, for one company or
+several. A follow-up that keeps them and changes only its period or companies plans each at the period it reads, with
+no model (`planScopeFigures`, `services/chat/src/company-overview.ts`): the latest fiscal year, the year named, or a
+quarter, a quarter named alone being each company's newest such quarter. The engine computes free cash flow for a
+fiscal year only, and says so for a quarter.
 
-- **One company at a time:** a comparison asking now only for them is a named gap (`unavailable_metric`), with no
-  income figures in their place. Kept from an earlier turn, they don't stop a comparison asked for now.
-- **A block shows the items asked for**, not its whole family: "how much cash" shows cash, and with no cash figure
-  names the gap rather than showing another balance. Free cash flow comes with the two figures it is computed from.
-  An item dropped later stays dropped; dropping one item of the whole balance sheet keeps the others, named.
 - **A qualified metric is its own gap:** "free cash flow margin", "EPS growth" or "FCF per share" name a metric no
-  reader serves, never the plain figure. So do adjusted figures ("adjusted EPS", "non-GAAP free cash flow", "non-GAAP
-  operating income"): the reported GAAP figure never stands in for them. "Cash flow from investing (or financing)
-  activities" is that category, a gap, never operating cash flow.
-- **Periods:** cash flow shows the latest quarter and fiscal year; the balance sheet its latest period end; EPS (diluted;
-  basic only when asked for by name, never diluted in its place) the latest quarter or, once the 10-K is in, the year
-  (a fourth quarter's EPS is never derived). A fiscal year the question
-  names limits each to that year. "Drop the cash flow" drops capex and free cash flow too.
-- Free cash flow is operating cash flow less capex, for the same dates in one currency. It is minted as a derived fact
-  that states its currency and cites both inputs.
-- The blocks are ordinary fact-bound `metric_row`s, so they read "Source-linked". Like every other chat figure they are
-  not "Verified calculation": that label still needs the financial engine's certificate (#200, #211).
+  definition serves, never the plain figure. So do adjusted figures ("adjusted EPS", "non-GAAP free cash flow",
+  "non-GAAP operating income"): the reported GAAP figure never stands in for them. "Cash flow from investing (or
+  financing) activities" is that category, a gap, never operating cash flow. The engine's answer names each in its
+  note of what it does not cover.
 
 ## EPS and share counts on a split basis (#387)
 
@@ -351,9 +341,9 @@ divides an instant price by a duration's EPS.
   its sealed block carries the inputs. A chat turn with a resolved company reaches the engine (`take`,
   `financial-runtime.ts`), so a market cap or P/E question does, and its scope names `market_cap` and `pe_ratio`, so
   a follow-up reads them (`SCOPE_METRICS`). The analyst path keeps (`leftToAnalyst`) a turn that asks for no figure
-  but for evidence, guidance or market data (a price window or a benchmark, asked or kept by its scope); a follow-up
-  that names no company and asks for nothing but an explanation; and a follow-up whose scope keeps a period,
-  segments, a margin trend, guidance or a metric outside the income statement. The engine's answer shows the
+  but for evidence, guidance or market data; a follow-up whose scope keeps guidance; one that names no period and
+  whose scope keeps a price window or a benchmark; and a follow-up that names no company and no period, turns
+  nothing off, and asks for nothing but an explanation. The engine's answer shows the
   figure beside the inputs it read, and each one's inspector shows its date: the price's trade, the count's cover
   date, and the EPS's fiscal year. The screener shows them too (below).
 - **Presentation:** a valuation is dated by its price ("latest known at the cutoff"), since its other operand is
@@ -517,13 +507,13 @@ income-statement items it names. English patterns in `research-scope.ts` missed 
   metrics) and `income_items` (`INCOME_ITEMS`). `parseProposal` checks every key; anything outside the vocabularies,
   malformed or cut off rejects the whole proposal. It never picks companies, periods, data or figures, and nothing
   it writes reaches the answer.
-- **Fixed syntax stays code.** Periods come from token readers (`FY2026`, `Q3`, `the third quarter`, `YTD` in
-  `fact-blocks.ts` and `research-scope.ts`), companies from the coordinator, and the route, inheritance and what a
-  turn-off clears are derived from the proposal in `resolveResearchScope`. A field turned off is never also asked for.
+- **Periods and a price window come only from the proposal** (#398): no token reader reads them from the question's
+  words. Companies come from the coordinator, and the route, inheritance and what a turn-off clears are derived from
+  the proposal in `resolveResearchScope`. A field turned off is never also asked for.
 - **No proposal** when there is no model, the call fails or takes longer than one 12 s attempt (`SCOPE_DEADLINES`),
   the reply is invalid, or `CHAT_SCOPE_PROPOSAL=off`. The turn then asks for nothing new: a follow-up keeps the
-  previous answer's scope whole and reads what it read, and a fresh question gets the plain answer for its companies (the latest quarter for
-  one, a comparison for several) and its period tokens. One `[chat] no scope proposal (<reason>)` warning names why.
+  previous answer's scope whole and reads what it read, and a fresh question gets the plain answer for its companies,
+  with no period or window. One `[chat] no scope proposal (<reason>)` warning names why.
 - **A financial-engine answer** saves its scope with no proposal, so its turn waits on no extra model call. Its
   metrics are the ones the published plan computed (`planMetrics` in `financial-runtime.ts`), so a follow-up reads
   those figures.
@@ -553,25 +543,17 @@ clarification turn. That subject is primary; a comparative message adds the comp
 (ambiguous one asks, one not found is named in the answer, de-duplicated, capped at 5). A non-comparative message
 covers the explicit subject only.
 
-The turn's fact blocks follow from that list:
-- one company gets the metric row and revenue chart;
-- two or more get a `metrics_comparison` of the latest fiscal year, via analyze's peer pipeline (key stats, then the
-  materializer, then the builder);
-- one company plus "peers" uses the industry peer set (`createSqlPeerSetResolver`);
-- one company plus "segment(s)" adds a `metric_row` "Revenue by segment (…)" for the latest quarter that has segment
-  facts. A segment is a `segments` row (issuer, axis, name), and its revenue is a fact with `subject_kind = 'segment'`,
-  `subject_id = segment_id` (#157). So each value is an ordinary cited fact, and consolidated readers
-  (`subject_kind = 'issuer'`) never see segment rows. No segment facts means no block, and the narrative says the
-  breakdown isn't available.
-
-A block that names its own subjects (a comparison's issuers) adds them to the snapshot's subject refs. The model also
-sees the last 6 messages of the thread. The price-performance chart is tracked separately (#133).
+The engine plans the turn's figures for that list (#398): each company's overview from its own latest quarter, or
+one company's with its industry peers (`createSqlPeerSetResolver`) for "peers". Segments are a declared gap, as the
+engine has no segment definition, so chat shows no segment figures. The model also sees the last 6 messages of the
+thread. The price-performance chart is tracked separately (#133).
 
 ## Sealed price series (`perf_comparison`)
 
-A comparison of two or more listed companies also gets a price-performance chart (`services/chat/src/perf-block.ts`).
-Each company's line comes from its latest stored daily bar range (`market_bar_ranges` / `market_bars`),
-normalized to percent return. The companies' windows must be identical, or there is no chart.
+An analyst turn about two or more listed companies whose reading asks for a year-to-date price window gets a price
+chart (`services/chat/src/perf-block.ts`): market data outside the engine, labelled not verified (#398 D2). Each
+company's line comes from a stored daily bar range (`market_bar_ranges` / `market_bars`), normalized to percent return
+over the window.
 
 - **Price basis (#191):** all lines use one adjustment basis that every company has, `split_adjusted` first, then
   `split_and_div_adjusted`.
@@ -587,8 +569,7 @@ normalized to percent return. The companies' windows must be identical, or there
   - Stooq serves `split_and_div_adjusted`.
   - yfinance serves both adjusted bases.
   - Web price charts request `split_adjusted`.
-- **Year to date (#192):** a question that says "YTD" or "year-to-date" charts that window instead of the latest
-  stored range. The rules live in `services/market/src/ytd-window.ts`.
+- **Year to date (#192):** the window's rules live in `services/market/src/ytd-window.ts`.
   - The baseline is the final completed close before January 1 of the cutoff's exchange-local year. The end is the
     latest completed session (from 16:00 local), and every company must have both the same baseline and the same end.
   - Returns are `(close - baseline) / baseline * 100`. Sessions that not every company traded are skipped and counted

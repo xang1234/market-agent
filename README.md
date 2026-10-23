@@ -67,8 +67,8 @@ Chat answers only from facts already stored. Open a company's symbol page once, 
     <td width="50%"><img src="docs/media/evidence.png" alt="The evidence inspector open on NVDA's FY2026 revenue, showing the SEC EDGAR fact behind it"></td>
   </tr>
   <tr>
-    <td><b>Chat with an analyst.</b> Answers arrive as charts, tables, metric rows, and a short narrative. Threads persist.</td>
-    <td><b>Check the numbers.</b> Click a linked figure to see the fact behind it and open the source filing. Each chart, table, and metric row is labelled verified, source-linked, or not verified.</td>
+    <td><b>Chat with an analyst.</b> Answers arrive as verified tables and charts and a short narrative. Threads persist.</td>
+    <td><b>Check the numbers.</b> Click a linked figure to see the fact behind it and open the source filing. Each chart and table is labelled verified, source-linked, or not verified.</td>
   </tr>
   <tr>
     <td><img src="docs/media/symbol.png" alt="The NVDA symbol page with a one-year chart, key stats, analyst consensus, and price targets"></td>
@@ -93,7 +93,7 @@ The [user guide](docs/guide.md) covers every page, including Analyze memos, Anal
 ## How it works
 
 1. The resolver turns each company you name into a canonical id. An ambiguous name gets a clarifying question, not a guess.
-2. Code builds the charts, tables, and metric rows from stored facts. The analyst does not browse the web.
+2. The financial engine plans and computes every figure from stored facts, and certifies each one. The analyst does not browse the web, and shows no figure of its own except a year-to-date price chart, labelled not verified.
 3. The model writes its narrative as structured assertions. A check rejects any assertion whose references or comparisons do not match the evidence. Every figure in the prose comes from a template filled with a value from the evidence.
 4. The app seals a snapshot of every fact the answer used and checks each one against the logged tool calls. That snapshot is what the evidence inspector shows.
 5. A judge model checks each inference against the facts it rests on. An inference appears only once the judge accepts it.
