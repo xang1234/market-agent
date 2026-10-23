@@ -418,7 +418,8 @@ export function resolveResearchScope(input: {
   if (namedQuarter === null && (latest || yearNamed !== undefined)) off.add("fiscal_quarter");
   const fiscal_quarter = pick("fiscal_quarter", namedQuarter, prior?.fiscal_quarter);
   const asked = asks.has("price_window") ? { kind: "ytd" as const, cutoff: input.asOf } : null;
-  const price_window = pick("price_window", asked, prior?.price_window);
+  // A return over another window asked for replaces the YTD one kept, so that is never charted in its place.
+  const price_window = pick("price_window", asked, asks.has("price_history") ? null : prior?.price_window);
   // An evidence follow-up asks for the sources of the previous answer about the
   // same companies, so it reads that answer's scope again.
   const priorIds = new Set(prior?.companies.map((company) => company.issuer_id) ?? []);
