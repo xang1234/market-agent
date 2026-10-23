@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import type { LlmChatRequest, LlmChatResult } from "../../llm/src/index.ts";
 import { answerTurn, composeTraced, inferenceCases, judgedAnswer, replayRecorded, type TurnTrace } from "../src/answer-trace.ts";
 import type { JudgeRecord } from "../src/inference-judge.ts";
+import { asCommentary } from "./answer-lab/trace-views.ts";
 
 const trace = async (name: string): Promise<TurnTrace> =>
   JSON.parse(await readFile(fileURLToPath(new URL(`./answer-lab/traces/${name}`, import.meta.url)), "utf8")) as TurnTrace;
@@ -171,22 +172,28 @@ test("a judge call that fails or runs out of time hides only its own inference",
   }
 });
 
-test("an inference the judge finds stating an amount in words shows as an unverified analyst view, never as an analyst inference, whether entailed or unsupported", async () => {
+test("an inference the judge finds stating an amount in words is hidden in an analyst answer, and shows as an unverified analyst view in an engine answer's commentary, whether entailed or unsupported (#398, #509)", async () => {
   const cases: Array<[string, string]> = [
     ["unsupported", '{"verdicts":[{"id":3,"verdict":"unsupported","worded_amount":true,"reason":"it says tens of billions."},{"id":4,"verdict":"contradicted","worded_amount":false,"reason":"Data Center outweighs the other four together."}]}'],
     ["entailed", '{"verdicts":[{"id":3,"verdict":"entailed","worded_amount":true,"reason":"it says over ten times the next segment."},{"id":4,"verdict":"contradicted","worded_amount":false,"reason":"x."}]}'],
   ];
   for (const [label, reply] of cases) {
-    const { createClient } = models(SEGMENTS, async () => ({ text: reply }));
-    const judged = await (await answerTurn(SEGMENTS.input, turn(SEGMENTS), { env: JUDGED_ENV, createClient })).judging!.done;
-    assert.equal(text(judged.blocks), [FIGURES, UNVERIFIED_CONCENTRATED].join("\n\n"), label);
-    assert.deepEqual(judgeRejections(judged.assertions).map(([index]) => index), [4], label);
+    const judged = async (recorded: typeof SEGMENTS) => {
+      const { createClient } = models(recorded, async () => ({ text: reply }));
+      return (await answerTurn(recorded.input, turn(recorded), { env: JUDGED_ENV, createClient })).judging!.done;
+    };
+    const analyst = await judged(SEGMENTS);
+    assert.equal(text(analyst.blocks), FIGURES, `${label}: analyst`);
+    assert.deepEqual(judgeRejections(analyst.assertions).map(([index]) => index), [3, 4], `${label}: analyst`);
+    const commentary = await judged(asCommentary(SEGMENTS));
+    assert.equal(text(commentary.blocks), [FIGURES, UNVERIFIED_CONCENTRATED].join("\n\n"), `${label}: commentary`);
+    assert.deepEqual(judgeRejections(commentary.assertions).map(([index]) => index), [4], `${label}: commentary`);
   }
 });
 
-test("a worded inference's words render escaped on one line under the unverified label", async () => {
+test("a worded inference's words render escaped on one line under the unverified label of an engine answer's commentary", async () => {
   const worded = "Data Center is *ten times* the rest\n# combined, see [x](y).";
-  const recorded = { ...SEGMENTS, exchange: { ...SEGMENTS.exchange!, text: SEGMENTS.exchange!.text.replace(CONCENTRATED_TEXT, JSON.stringify(worded).slice(1, -1)) } };
+  const recorded = { ...asCommentary(SEGMENTS), exchange: { ...SEGMENTS.exchange!, text: SEGMENTS.exchange!.text.replace(CONCENTRATED_TEXT, JSON.stringify(worded).slice(1, -1)) } };
   const { createClient } = models(recorded, async (request) =>
     ({ text: asked(request)[0] === 3 ? '{"verdicts":[{"id":3,"verdict":"entailed","worded_amount":true,"reason":"ten times."}]}' : ENTAILED(4) }));
   const judged = await (await answerTurn(recorded.input, turn(recorded), { env: JUDGED_ENV, createClient })).judging!.done;

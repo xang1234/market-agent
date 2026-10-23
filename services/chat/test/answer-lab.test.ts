@@ -11,6 +11,7 @@ import { composeTraced, judgedLive, replayRecorded } from "../src/answer-trace.t
 import { answerText, assertionSummary, judgeSummary, live, mutationSummary, mutationVariants, primaryDeployment, readTraces, recorded, replyFixture, rerecord } from "../scripts/answer-lab.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
 import { REPAIR_INSTRUCTIONS } from "../src/inference-repair.ts";
+import { repairUnderTodaysPrompt } from "./answer-lab/trace-views.ts";
 
 // One live research-quality eval run's turns (scripts/research-quality-eval.ts).
 const TRACES = readTraces([fileURLToPath(new URL("./answer-lab/traces/", import.meta.url))]);
@@ -193,7 +194,8 @@ test("the mutation summary counts catches, each kind at its expected outcome, mu
     "  hedged_valuation       unsupported   0 of 1",
     "  flipped_direction      contradicted  0 of 1",
     "  contradicted_ranking   contradicted  1 of 2",
-    "shown above their tier: 3 of 8 mutations",
+    // A worded amount's tier is hidden, as an analyst answer shows none: one judged unsupported and not flagged is above it.
+    "shown above their tier: 4 of 8 mutations",
     "contradicted shown: 0 of 10",
     "false alarms: 1 of 2 originals (0 errors)",
     "not at their expected outcome:",
@@ -294,7 +296,7 @@ test("recorded counts the cost of a trace's one batched judge call once, though 
 
 test("recorded reports an edit to the answer's system prompt once, not as each repaired trace's changed repair input; a change to the repair request itself still flags its trace", async () => {
   const underOldPrompt = (label: string, user?: string) => {
-    const { trace } = TRACES.find((traced) => traced.label === label)!;
+    const trace = repairUnderTodaysPrompt(TRACES.find((traced) => traced.label === label)!.trace);
     const record = trace.repair!.record as Extract<NonNullable<typeof trace.repair>["record"], { outcome: "replied" }>;
     const [, recordedUser] = record.exchange.messages;
     const messages = [{ role: "system", content: "an older answer prompt" }, user === undefined ? recordedUser : { ...recordedUser, content: user }];
@@ -424,7 +426,7 @@ test("live --judge --update re-records a thread's turns in their order, each lat
   const first = [{ role: "user", text: "Analyze NVDA." }];
   const second = [
     ...first,
-    { role: "assistant", text: "The reported figures below come from the company's filings; select any value to see its source. Segment revenue is not available for NVDA in this data." },
+    { role: "assistant", text: "No written answer is available for this question; try asking again. Segment revenue is not available for NVDA in this data." },
     { role: "user", text: "Compare it with AMD YTD." },
   ];
   assert.deepEqual(asked, [first, second]);
@@ -455,7 +457,7 @@ test("live --judge --update chains a thread's turns by question, so a window tha
   };
   await live(traces, 1, 2, true, (traced, answer) => rerecord(traced, answer, "openai/gpt-4.1"), { env, createClient: createClient as never });
 
-  const saved = (note: string) => `The reported figures below come from the company's filings; select any value to see its source. ${note}`;
+  const saved = (note: string) => `No written answer is available for this question; try asking again. ${note}`;
   assert.deepEqual(asked.get("And INTC?"), [
     { role: "assistant", text: saved("First.") },
     question2,

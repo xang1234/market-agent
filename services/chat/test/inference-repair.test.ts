@@ -10,14 +10,19 @@ import { answerMetrics, answerTurn, replayRecorded, type TurnTrace } from "../sr
 import { assertionList } from "../src/assertions.ts";
 import { REPAIR_INSTRUCTIONS } from "../src/inference-repair.ts";
 import { mutationRepairSummary, mutationVariants, repairMutation, type MutationRepair } from "../scripts/answer-lab.ts";
+import { asCommentary, repairUnderTodaysPrompt } from "./answer-lab/trace-views.ts";
 
 const trace = async (name: string): Promise<TurnTrace> =>
   JSON.parse(await readFile(fileURLToPath(new URL(`./answer-lab/traces/${name}`, import.meta.url)), "utf8")) as TurnTrace;
 
-const FISCAL = await trace("fiscal-year-trap.json");
+// Only the commentary on an engine answer can leave a worded amount as its
+// first verdict showed it, after a failed repair: the repair round's tests read
+// the recorded turns as that commentary; the analyst's are on ANALYST_FISCAL.
+const ANALYST_FISCAL = await trace("fiscal-year-trap.json");
+const FISCAL = asCommentary(ANALYST_FISCAL);
 const SEQUENTIAL_TEXT = "Its sequential growth was slower in the latest quarter than the prior-quarter step-up, which hints at some moderation in momentum.";
 const DIGIT_TEXT = "The absolute revenue increase from Q2 to Q3 fiscal 2026 was larger than from Q3 to Q4 fiscal 2026, consistent with decelerating sequential growth on a larger base.";
-const RECORDED_QUARTER = await trace("single-latest-quarter.json");
+const RECORDED_QUARTER = asCommentary(await trace("single-latest-quarter.json"));
 const DIGIT_QUARTER = { ...RECORDED_QUARTER, exchange: { ...RECORDED_QUARTER.exchange!, text: RECORDED_QUARTER.exchange!.text.replace(SEQUENTIAL_TEXT, DIGIT_TEXT) } };
 const SEGMENTS = await trace("segment-drill-down.json");
 
@@ -421,6 +426,18 @@ test("an inference the checks rejected for its supports is repaired by the same 
   assert.deepEqual(calls.sort(), ["answer", "judge 0", "repair"]);
 });
 
+test("in an analyst answer a worded amount is hidden: its repair shows only when judged entailed with no amount, and a failed or worded repair leaves it hidden (#398)", async (t) => {
+  t.mock.method(console, "info", () => {});
+  const answered = async (repair: () => LlmChatResult, repaired?: (ask: JudgeAsk) => LlmChatResult) => {
+    const { createClient } = models(ANALYST_FISCAL, { judge: fiscalJudge(repaired), repair });
+    const answer = await answerTurn(ANALYST_FISCAL.input, turn(ANALYST_FISCAL), { env: JUDGED_ENV, createClient });
+    return text((await answer.judging!.done).blocks);
+  };
+  assert.equal(await answered(() => fenced([inference(6, ENDS_TEXT)])), fiscal(PROFITABILITY, ENDS), "repaired with no amount, and entailed");
+  assert.equal(await answered(() => fenced([])), fiscal(PROFITABILITY), "left out by its repair");
+  assert.equal(await answered(() => fenced([inference(6, ENDS_TEXT)]), (ask) => verdict(ask.id, "entailed", true, "w.")), fiscal(PROFITABILITY), "repaired, and still worded");
+});
+
 test("a trace recorded before repairs replays with none: its worded inference stays unverified; one recorded with a repair replays it with no model", async () => {
   const { repair: _, ...before } = FISCAL;
   const replayed = await replayRecorded(before);
@@ -429,7 +446,8 @@ test("a trace recorded before repairs replays with none: its worded inference st
   // Today's code would ask a repair the trace never recorded.
   assert.equal(replayed.repair_input_changed, true);
 
-  const recorded = await replayRecorded(FISCAL);
+  assert.equal((await replayRecorded(FISCAL)).repair_input_changed, true, "its recorded answer prompt carried staleness the analyst no longer sends (#398)");
+  const recorded = await replayRecorded(repairUnderTodaysPrompt(FISCAL));
   assert.equal(text(recorded.blocks), fiscal(PROFITABILITY, "> **Analyst inference on NVDA** (revenue highest first: AAPL, NVDA): The revenue comparison is not like-for-like, since its fiscal year ended well before the other's, so the gap could look different on matched periods."));
   assert.deepEqual(recorded.assertions?.repaired, [6]);
   assert.equal(recorded.repair_input_changed, false);
@@ -581,13 +599,13 @@ test("judge-mutations --repair sends a worded variant through the turn's repair 
 
   const digit = models(SEGMENTS, { repair: () => fenced([inference(index, "It earns 9 of every 10 dollars in one place.")]) });
   const rejected = await repairMutation(variant, first, { env: JUDGED_ENV, createClient: digit.createClient });
-  // As in chat, a failed repair of one whose first verdict showed leaves it as that verdict showed it.
-  assert.deepEqual([rejected.rejection, rejected.as], ["binding: an inference rests on its supports; it writes no figure", "unverified"]);
+  // As in an analyst answer, a worded amount the repair does not take out stays hidden.
+  assert.deepEqual([rejected.rejection, rejected.as], ["binding: an inference rests on its supports; it writes no figure", "hidden"]);
   const contradicted = await repairMutation(variant, first, { env: JUDGED_ENV, createClient: models(SEGMENTS, {
     judge: (ask) => verdict(ask.id, "contradicted", false, "it is not."),
     repair: () => fenced([inference(index, "It leans on one source of revenue.")]),
   }).createClient });
-  assert.deepEqual([contradicted.second?.verdict, contradicted.as], ["contradicted", "unverified"]);
+  assert.deepEqual([contradicted.second?.verdict, contradicted.as], ["contradicted", "hidden"]);
   const firstContradicted = { index, verdict: "contradicted" as const, worded_amount: false, reason: "it is not." };
   const stillHidden = await repairMutation(variant, firstContradicted, { env: JUDGED_ENV, createClient: digit.createClient });
   assert.equal(stillHidden.as, "hidden");

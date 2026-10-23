@@ -63,9 +63,7 @@ type Accepted = Assertion & { index: number };
 export function judgeCases(accepted: ReadonlyArray<Accepted>, packet: EvidencePacket, factBlocks: ReadonlyArray<Record<string, unknown>>): JudgeCase[] {
   const rendered = (entry: Accepted) => plainText(renderAssertion(entry, packet, factBlocks, accepted).segments);
   const tables = new Map<string | undefined, string[]>();
-  for (const figure of packet.figures) {
-    if (figure.displayed !== false) tables.set(figure.shown_in, [...(tables.get(figure.shown_in) ?? []), figure.id]);
-  }
+  for (const figure of packet.figures) tables.set(figure.shown_in, [...(tables.get(figure.shown_in) ?? []), figure.id]);
   const figures = [...tables].map(([title, ids]) => {
     const line = rendered({ index: -1, kind: "observation", text: "", evidence: ids });
     return title === undefined ? line : `${title}: ${line}`;

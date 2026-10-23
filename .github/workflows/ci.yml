@@ -735,9 +735,9 @@ jobs:
         working-directory: services/llm
         run: npm ci
 
-      # Chat's fact blocks read statements and key stats through fundamentals,
-      # which resolves its own dependencies (lossless-json) from its node_modules.
-      - name: Install fundamentals deps (imported by chat's fact blocks)
+      # Chat reads peer sets through fundamentals, which resolves its own
+      # dependencies (lossless-json) from its node_modules.
+      - name: Install fundamentals deps (imported by chat)
         working-directory: services/fundamentals
         run: npm ci
 

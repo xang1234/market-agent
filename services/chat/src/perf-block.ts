@@ -1,14 +1,9 @@
-// Price performance for a comparison, drawn only from sealed data: each
-// company's line is its stored daily bars (market_bar_ranges / market_bars),
-// normalized to percent return over one shared window. The snapshot pins every
-// series (series_specs: listing, stored bar range, source), the block cites them
-// (data_ref.params.series_refs), and the points travel in the block, so the
-// chart shows exactly what was sealed; nothing is fetched live.
-//
-// Lines are drawn over the dates every company has (an IPO mid-window or a
-// venue holiday would otherwise misalign them), each measured from the first
-// shared close. Delayed or end-of-day prices get the pricing disclosure the
-// verifier requires for their series.
+// A comparison's year-to-date price performance (#192): the one figure chat
+// shows outside the financial engine, source-linked but not engine-verified
+// until #444 lets the engine state a price return (#398 D2). Drawn only from
+// sealed bars; nothing is fetched live. A window short of the full year, or no
+// longer current at the cutoff (#256), is a named gap, never a shorter window
+// called YTD.
 //
 // Lines are only comparable on one price basis (#191): Polygon's prices are
 // split-adjusted only, so their returns exclude dividends, while other sources
@@ -17,25 +12,15 @@
 // instead of a chart. Ranges Polygon wrote under the old dividend-adjusted label
 // are never used (cache-repository.ts).
 //
-// A year-to-date request (#192) charts the requested window instead: from the
-// final close before January 1 to the latest completed session every company
-// has, the same for all (ytd-window.ts). It reads a stored range per company
-// that covers the year-end, and anything short of a full window is a named
-// gap, never a shorter window called YTD. So is a full window that is no
-// longer current at the cutoff (#256): a failed refresh must not pass off a
-// months-old cached window as this year to date.
-//
-// ponytail: uses each listing's latest stored window and requires them to be
-// identical; a shared sub-window across different stored ranges is the upgrade.
-// A live YTD turn fetches and stores its window before the cutoff
-// (ytd-hydration.ts); this module still reads only stored bars.
 
+import { createSqlPeerSetResolver } from "../../fundamentals/src/peer-set-resolver.ts";
+import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import { MISLABELED_POLYGON_RANGE_SQL } from "../../market/src/cache-repository.ts";
 import { PERF_POINTS, perfLines, type PerfLine } from "../../market/src/perf-points.ts";
 import { isCurrentEnd, sessionDate, ytdYear, type YtdWindow } from "../../market/src/ytd-window.ts";
 import { compileDisclosurePolicy } from "../../snapshot/src/disclosure-policy.ts";
 import type { SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
-import { stableUuid } from "./chat-ids.ts";
+import { noteBlock, stableUuid } from "./chat-ids.ts";
 import type { QueryExecutor } from "../../shared/src/http.ts";
 
 const INTERVAL = "1d";
@@ -53,14 +38,10 @@ const NORMALIZATION = "pct_return";
 // every exchange's time zone; selectYtdWindow then checks the bars themselves.
 const YEAR_END_LOOKBACK = "-12-25T00:00:00.000Z";
 
-// A price window the question asks for; absent, the latest stored window.
-export type PriceWindow = "ytd";
-
 type PerfInput = {
   listings: ReadonlyArray<{ id: string; label: string }>;
   snapshotId: string;
   asOf: string;
-  window?: PriceWindow;
   // The frozen data modes' prices (frozenDataMode): their YTD window is charted
   // whatever its age, since nothing can refresh it.
   frozenPrices?: boolean;
@@ -82,9 +63,9 @@ export type SealedPriceRange = {
 
 type Block = Record<string, unknown>;
 
-// The chart plus any pricing disclosure it requires. Empty on failure: the price
-// chart is optional, so an unavailable market read omits only the chart and
-// never the comparison it sits next to.
+// The chart plus any pricing disclosure it requires, or the gap that stands
+// where it would be. Empty on failure: an unavailable market read omits only
+// the chart, never the answer it sits in.
 export async function loadPerfComparisonBlocks(
   db: QueryExecutor,
   input: PerfInput,
@@ -92,10 +73,9 @@ export async function loadPerfComparisonBlocks(
   if (input.listings.length < 2) return [];
   try {
     const block = await loadSealedRanges(db, input);
-    if (block === null) return [];
     return block.kind === "perf_comparison" ? [block, ...perfDisclosureBlocks(block)] : [block];
   } catch (reason) {
-    console.warn("[chat] price performance unavailable; showing the comparison without it", reason);
+    console.warn("[chat] price performance unavailable; answering without it", reason);
     return [];
   }
 }
@@ -119,15 +99,12 @@ export function perfDisclosureBlocks(chart: Block): ReadonlyArray<Block> {
 async function loadSealedRanges(
   db: QueryExecutor,
   input: PerfInput,
-): Promise<Block | null> {
-  // A YTD window covers the cutoff's year on the exchanges' calendars.
-  const zones = input.window === "ytd" ? await listingTimeZones(db, input.listings) : new Map<string, string>();
+): Promise<Block> {
+  const zones = await listingTimeZones(db, input.listings);
   const zoneOf = (listingId: string) => zones.get(listingId) ?? "UTC";
   const years = new Set(input.listings.map((listing) => ytdYear(input.asOf, zoneOf(listing.id))));
-  if (input.window === "ytd" && years.size > 1) {
-    return ytdGapBlock(input, "the companies' exchanges are in different calendar years at the cutoff");
-  }
-  const year = input.window === "ytd" ? [...years][0] : undefined;
+  if (years.size > 1) return ytdGapBlock(input, "the companies' exchanges are in different calendar years at the cutoff");
+  const [year] = years as Set<number>;
   // One statement, so the range and its bars come from one consistent view: a
   // cache refresh upserts the same bar_range_id and replaces its bars, and two
   // reads could pair old metadata with new prices.
@@ -160,8 +137,8 @@ async function loadSealedRanges(
           -- compare the database's clock with the app's and let a concurrent
           -- refresh of the same range hide one this turn just fetched.
           and as_of <= $4::timestamptz
-          -- A YTD window: only ranges that reach back over the year-end.
-          and ($5::timestamptz is null or range_start <= $5::timestamptz)
+          -- Only ranges that reach back over the year-end.
+          and range_start <= $5::timestamptz
         order by listing_id, adjustment_basis, range_end desc, fetched_at desc
      )
      select picked.bar_range_id::text as bar_range_id,
@@ -183,7 +160,7 @@ async function loadSealedRanges(
       INTERVAL,
       COMPARABLE_BASES,
       input.asOf,
-      year === undefined ? null : `${year - 1}${YEAR_END_LOOKBACK}`,
+      `${year! - 1}${YEAR_END_LOOKBACK}`,
     ],
   );
   const rangeOf = (listingId: string, basis: ComparableBasis) =>
@@ -207,23 +184,10 @@ async function loadSealedRanges(
   };
   const hasRange = (listing: { id: string }) => ranges.some((range) => range.listing_id === listing.id);
   const shared = COMPARABLE_BASES.filter((basis) => input.listings.every((listing) => rangeOf(listing.id, basis)));
-  if (year !== undefined) {
-    // A company with no range reaching back over the year-end is the gap, on any basis.
-    const uncovered = input.listings.find((listing) => !hasRange(listing));
-    if (uncovered) return ytdGapBlock(input, `${uncovered.label} has no prices from before ${year}`);
-    if (shared.length === 0) return basisGapBlock(input, ranges);
-    return ytdBlock(input, shared, sealedOf, zoneOf);
-  }
-  // Every company or no chart: a chart quietly missing one would cover fewer
-  // companies than the comparison beside it.
-  if (!input.listings.every(hasRange)) return null;
+  const uncovered = input.listings.find((listing) => !hasRange(listing));
+  if (uncovered) return ytdGapBlock(input, `${uncovered.label} has no prices from before ${year}`);
   if (shared.length === 0) return basisGapBlock(input, ranges);
-  for (const basis of shared) {
-    const sealed = input.listings.map((listing) => sealedOf(listing, basis)!);
-    const chart = buildPerfComparisonBlock({ ranges: sealed, snapshotId: input.snapshotId, asOf: input.asOf });
-    if (chart) return chart;
-  }
-  return null;
+  return ytdBlock(input, shared, sealedOf, zoneOf);
 }
 
 // The YTD chart on the first basis every company has that gives a full,
@@ -290,47 +254,6 @@ function basisGapBlock(
   );
 }
 
-// A named gap where the chart would be.
-function noteBlock(input: PerfInput, idKey: string, text: string): Block {
-  const id = stableUuid(`block:${input.snapshotId}:${idKey}`);
-  return {
-    id,
-    kind: "rich_text",
-    snapshot_id: input.snapshotId,
-    data_ref: { kind: "rich_text", id },
-    source_refs: [],
-    as_of: input.asOf,
-    segments: [{ type: "text", text }],
-  };
-}
-
-export function buildPerfComparisonBlock(input: {
-  ranges: ReadonlyArray<SealedPriceRange>;
-  snapshotId: string;
-  asOf: string;
-}): Block | null {
-  const ranges = input.ranges;
-  if (ranges.length < 2) return null;
-  const [first] = ranges;
-  // Lines are only comparable over the same window...
-  if (ranges.some((range) => range.range_start !== first.range_start || range.range_end !== first.range_end)) {
-    return null;
-  }
-  // ...and on the same dates (perf-points.ts).
-  const drawn = perfLines({ kind: "latest", bars: ranges.map((range) => range.bars) });
-  if (!drawn.ok) return null;
-  const dates = drawn.lines[0].points.map((point) => point.x);
-
-  return assemblePerfBlock({
-    ranges,
-    snapshotId: input.snapshotId,
-    title: chartTitle(first.adjustment_basis, ""),
-    // The window actually drawn: the shared dates, not the stored range.
-    defaultRange: `${dates[0]} to ${dates[dates.length - 1]}`,
-    lines: drawn.lines,
-  });
-}
-
 // The YTD chart for a selected window: each line from the shared baseline close,
 // the window stated in the block, and each series' digest over exactly the bars
 // the line uses, so a reload can show nothing else.
@@ -368,7 +291,7 @@ function assemblePerfBlock(input: {
   defaultRange: string;
   // Per range, its line.
   lines: ReadonlyArray<PerfLine>;
-  window?: Record<string, unknown>;
+  window: Record<string, unknown>;
 }): Block {
   const { ranges } = input;
   const specs = ranges.map((range, index) => ({
@@ -383,7 +306,7 @@ function assemblePerfBlock(input: {
     points: PERF_POINTS,
     delay_class: range.delay_class,
     range: { start: range.range_start, end: range.range_end },
-    ...(input.window ? { window: input.window } : {}),
+    window: input.window,
     as_of: range.as_of,
   }));
   const id = stableUuid(`block:${input.snapshotId}:perf_comparison`);
@@ -410,4 +333,94 @@ function assemblePerfBlock(input: {
 
 function iso(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
+export type CompanyListing = { listing_id: string | null; label: string };
+
+const PEER_LIMIT = 4;
+
+export async function turnCompanies(
+  db: QueryExecutor,
+  issuers: ReadonlyArray<IssuerSubjectRef>,
+  wantsPeers: boolean,
+): Promise<ReadonlyArray<IssuerSubjectRef>> {
+  const [primary] = issuers;
+  return issuers.length === 1 && primary !== undefined && wantsPeers ? [primary, ...(await peersOf(db, primary))] : issuers;
+}
+
+async function peersOf(db: QueryExecutor, issuer: IssuerSubjectRef): Promise<ReadonlyArray<IssuerSubjectRef>> {
+  try {
+    return await createSqlPeerSetResolver(db).resolvePeers(issuer.id, { limit: PEER_LIMIT });
+  } catch (reason) {
+    console.warn("[chat] peer set unavailable; answering about the company alone", reason);
+    return [];
+  }
+}
+
+export async function priceListingsForTurn(
+  db: QueryExecutor,
+  input: {
+    issuers: ReadonlyArray<IssuerSubjectRef>;
+    wantsPeers: boolean;
+    requestedListings?: ReadonlyMap<string, CompanyListing>;
+    asOf: string;
+  },
+): Promise<Array<{ id: string; label: string }>> {
+  const companies = await turnCompanies(db, input.issuers, input.wantsPeers);
+  if (companies.length < 2) return [];
+  const issuerIds = companies.map((company) => company.id);
+  const active = await companyListings(db, issuerIds, input.asOf);
+  return priceListingsForComparison(issuerIds, listingsForComparison(issuerIds, input.requestedListings ?? new Map(), active));
+}
+
+export function priceListingsForComparison(
+  issuerIds: ReadonlyArray<string>,
+  companies: ReadonlyMap<string, CompanyListing>,
+): Array<{ id: string; label: string }> {
+  const listings = issuerIds.flatMap((issuerId) => {
+    const company = companies.get(issuerId);
+    return company?.listing_id ? [{ id: company.listing_id, label: company.label }] : [];
+  });
+  return listings.length === issuerIds.length ? listings : [];
+}
+
+export function listingsForComparison(
+  issuerIds: ReadonlyArray<string>,
+  requested: ReadonlyMap<string, CompanyListing>,
+  active: ReadonlyMap<string, CompanyListing>,
+): Map<string, CompanyListing> {
+  const out = new Map<string, CompanyListing>();
+  for (const issuerId of issuerIds) {
+    const listing = requested.get(issuerId) ?? active.get(issuerId);
+    if (listing) out.set(issuerId, listing);
+  }
+  return out;
+}
+
+export async function companyListings(
+  db: Pick<QueryExecutor, "query">,
+  issuerIds: ReadonlyArray<string>,
+  asOf: string,
+): Promise<Map<string, CompanyListing>> {
+  const { rows } = await db.query<{ issuer_id: string; listing_id: string | null; ticker: string | null; legal_name: string }>(
+    `select i.issuer_id::text as issuer_id,
+            l.listing_id::text as listing_id,
+            l.ticker,
+            i.legal_name
+       from issuers i
+       left join lateral (
+         select l.listing_id, l.ticker
+           from instruments ins
+           join listings l on l.instrument_id = ins.instrument_id
+          where ins.issuer_id = i.issuer_id
+            -- Active at the turn's cutoff (the resolver's rule, lookup.ts).
+            and (l.active_from is null or l.active_from <= $2::timestamptz)
+            and (l.active_to is null or l.active_to > $2::timestamptz)
+          order by l.ticker
+          limit 1
+       ) l on true
+      where i.issuer_id = any($1::uuid[])`,
+    [issuerIds, asOf],
+  );
+  return new Map(rows.map((row) => [row.issuer_id, { listing_id: row.listing_id, label: row.ticker ?? row.legal_name }]));
 }

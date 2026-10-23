@@ -1883,7 +1883,535 @@
       ],
       "inherited": []
     },
-    "cutoff": "2026-09-01T00:00:00.000Z"
+    "cutoff": "2026-09-01T00:00:00.000Z",
+    "packet": {
+      "route": "trend",
+      "cutoff": "2026-09-01T00:00:00.000Z",
+      "companies": [
+        "AMD"
+      ],
+      "figures": [
+        {
+          "id": "F1",
+          "metric": "Revenue",
+          "period": "Q22026",
+          "period_end": "2026-06-27",
+          "value": "$11.2B",
+          "shown_in": "Latest quarter (Q2 2026)",
+          "fact_id": "dad226bf-5195-4a3d-a0a9-02fe9e8b1646",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F2",
+          "metric": "Gross profit",
+          "period": "Q22026",
+          "period_end": "2026-06-27",
+          "value": "$6.1B",
+          "shown_in": "Latest quarter (Q2 2026)",
+          "fact_id": "f189e2e6-cc56-4d4e-834d-e9b2f9fba586",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F3",
+          "metric": "Operating income",
+          "period": "Q22026",
+          "period_end": "2026-06-27",
+          "value": "$1.6B",
+          "shown_in": "Latest quarter (Q2 2026)",
+          "fact_id": "67c113d7-8d41-457e-a096-23cd24b5b2d4",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F4",
+          "metric": "Net income",
+          "period": "Q22026",
+          "period_end": "2026-06-27",
+          "value": "$1.5B",
+          "shown_in": "Latest quarter (Q2 2026)",
+          "fact_id": "3f4f8a8d-0363-4955-9efd-7530a2a3b090",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F5",
+          "metric": "Gross margin",
+          "period": "Q22026",
+          "period_end": "2026-06-27",
+          "value": "54.0%",
+          "shown_in": "Latest quarter (Q2 2026)",
+          "fact_id": "b9b9fd18-8a7e-44b6-8dfa-744cc6c0361f",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F6",
+          "metric": "Operating margin",
+          "period": "Q22026",
+          "period_end": "2026-06-27",
+          "value": "14.4%",
+          "shown_in": "Latest quarter (Q2 2026)",
+          "fact_id": "b0eacb5e-dbab-4d82-9045-c46740a0bac7",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F7",
+          "metric": "Net margin",
+          "period": "Q22026",
+          "period_end": "2026-06-27",
+          "value": "13.2%",
+          "shown_in": "Latest quarter (Q2 2026)",
+          "fact_id": "1da1688c-6cff-4724-8a0f-9bb0dff0d985",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F8",
+          "metric": "Revenue growth (QoQ)",
+          "period": "Q22026",
+          "period_end": "2026-06-27",
+          "value": "4.7%",
+          "shown_in": "Latest quarter (Q2 2026)",
+          "fact_id": "383d7ce9-fac5-4d2c-a720-02f0e6549d52",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F9",
+          "metric": "Revenue growth (YoY)",
+          "period": "Q22026",
+          "period_end": "2026-06-27",
+          "value": "45.7%",
+          "shown_in": "Latest quarter (Q2 2026)",
+          "fact_id": "135449df-8ec7-463a-a17d-875e5631b081",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F10",
+          "metric": "Revenue",
+          "period": "Q3 2024",
+          "period_end": "2024-09-28",
+          "value": "$6.8B",
+          "shown_in": "Quarterly revenue",
+          "fact_id": "e4897f3a-1c1c-45b7-834a-62506f680391",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F11",
+          "metric": "Revenue",
+          "period": "Q4 2024",
+          "period_end": "2024-12-28",
+          "value": "$7.7B",
+          "shown_in": "Quarterly revenue",
+          "fact_id": "dd7f1ab0-38ab-4efa-8db5-c584f577f370",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F12",
+          "metric": "Revenue",
+          "period": "Q1 2025",
+          "period_end": "2025-03-29",
+          "value": "$7.4B",
+          "shown_in": "Quarterly revenue",
+          "fact_id": "7be6cc26-0771-4991-959e-984cc3141466",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F13",
+          "metric": "Revenue",
+          "period": "Q2 2025",
+          "period_end": "2025-06-28",
+          "value": "$7.7B",
+          "shown_in": "Quarterly revenue",
+          "fact_id": "c157ae2b-3a75-4ad8-aefd-da5b7e5fc718",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F14",
+          "metric": "Revenue",
+          "period": "Q3 2025",
+          "period_end": "2025-09-27",
+          "value": "$9.2B",
+          "shown_in": "Quarterly revenue",
+          "fact_id": "1559775f-eac3-4d94-a122-dcaaad42dceb",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F15",
+          "metric": "Revenue",
+          "period": "Q4 2025",
+          "period_end": "2025-12-27",
+          "value": "$10.3B",
+          "shown_in": "Quarterly revenue",
+          "fact_id": "18e0887f-4205-46ad-b5f6-453a590361c3",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F16",
+          "metric": "Revenue",
+          "period": "Q1 2026",
+          "period_end": "2026-03-28",
+          "value": "$10.7B",
+          "shown_in": "Quarterly revenue",
+          "fact_id": "45fa86cb-2cda-4fb0-9691-0f04379c4a7d",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F17",
+          "metric": "Revenue",
+          "period": "Q2 2026",
+          "period_end": "2026-06-27",
+          "value": "$11.2B",
+          "shown_in": "Quarterly revenue",
+          "fact_id": "dad226bf-5195-4a3d-a0a9-02fe9e8b1646",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F18",
+          "metric": "Gross margin",
+          "period": "Q3 2024",
+          "period_end": "2024-09-28",
+          "value": "50.1%",
+          "shown_in": "Gross margin by quarter",
+          "fact_id": "c0e84104-e68f-4aa0-9eea-dde53ed5ce4c",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F19",
+          "metric": "Gross margin",
+          "period": "Q4 2024",
+          "period_end": "2024-12-28",
+          "value": "51.0%",
+          "shown_in": "Gross margin by quarter",
+          "fact_id": "412f2827-331d-46f2-8df0-c05f422750bc",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F20",
+          "metric": "Gross margin",
+          "period": "Q1 2025",
+          "period_end": "2025-03-29",
+          "value": "50.2%",
+          "shown_in": "Gross margin by quarter",
+          "fact_id": "b6640235-f31e-4e18-8786-325a40c60bb7",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F21",
+          "metric": "Gross margin",
+          "period": "Q2 2025",
+          "period_end": "2025-06-28",
+          "value": "39.8%",
+          "shown_in": "Gross margin by quarter",
+          "fact_id": "506570de-d34e-4477-902d-79a73f8426e5",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F22",
+          "metric": "Gross margin",
+          "period": "Q3 2025",
+          "period_end": "2025-09-27",
+          "value": "53.6%",
+          "shown_in": "Gross margin by quarter",
+          "fact_id": "94e4ecb7-5cc6-4dbc-94d0-b534345c0755",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F23",
+          "metric": "Gross margin",
+          "period": "Q4 2025",
+          "period_end": "2025-12-27",
+          "value": "54.0%",
+          "shown_in": "Gross margin by quarter",
+          "fact_id": "5891315c-1625-41a9-9744-302649ef11ad",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F24",
+          "metric": "Gross margin",
+          "period": "Q1 2026",
+          "period_end": "2026-03-28",
+          "value": "54.0%",
+          "shown_in": "Gross margin by quarter",
+          "fact_id": "92934914-3055-4aa7-a86e-0d9ed7c28d7d",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F25",
+          "metric": "Gross margin",
+          "period": "Q2 2026",
+          "period_end": "2026-06-27",
+          "value": "54.0%",
+          "shown_in": "Gross margin by quarter",
+          "fact_id": "b9b9fd18-8a7e-44b6-8dfa-744cc6c0361f",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F26",
+          "metric": "Operating margin",
+          "period": "Q3 2024",
+          "period_end": "2024-09-28",
+          "value": "10.6%",
+          "shown_in": "Operating margin by quarter",
+          "fact_id": "ce00c50a-f51f-4bd2-8cf2-7023d2076ba4",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F27",
+          "metric": "Operating margin",
+          "period": "Q4 2024",
+          "period_end": "2024-12-28",
+          "value": "11.4%",
+          "shown_in": "Operating margin by quarter",
+          "fact_id": "4cabf3fa-490b-4764-a458-0cdf1ae92a63",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F28",
+          "metric": "Operating margin",
+          "period": "Q1 2025",
+          "period_end": "2025-03-29",
+          "value": "10.8%",
+          "shown_in": "Operating margin by quarter",
+          "fact_id": "d56714a3-f542-4cba-b141-b83c58ceb8e7",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F29",
+          "metric": "Operating margin",
+          "period": "Q2 2025",
+          "period_end": "2025-06-28",
+          "value": "-1.7%",
+          "shown_in": "Operating margin by quarter",
+          "fact_id": "02303148-4a24-4de7-95c7-2e399af2d181",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F30",
+          "metric": "Operating margin",
+          "period": "Q3 2025",
+          "period_end": "2025-09-27",
+          "value": "13.7%",
+          "shown_in": "Operating margin by quarter",
+          "fact_id": "f13bfc7f-418c-43c9-b4cd-e3af30f28d79",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F31",
+          "metric": "Operating margin",
+          "period": "Q4 2025",
+          "period_end": "2025-12-27",
+          "value": "14.1%",
+          "shown_in": "Operating margin by quarter",
+          "fact_id": "dbed8c9f-d721-41db-b8f0-55daf26be9a4",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F32",
+          "metric": "Operating margin",
+          "period": "Q1 2026",
+          "period_end": "2026-03-28",
+          "value": "14.2%",
+          "shown_in": "Operating margin by quarter",
+          "fact_id": "0fff02ad-ec1c-4f8e-9c66-228386366341",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F33",
+          "metric": "Operating margin",
+          "period": "Q2 2026",
+          "period_end": "2026-06-27",
+          "value": "14.4%",
+          "shown_in": "Operating margin by quarter",
+          "fact_id": "b0eacb5e-dbab-4d82-9045-c46740a0bac7",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F34",
+          "metric": "Net margin",
+          "period": "Q3 2024",
+          "period_end": "2024-09-28",
+          "value": "11.3%",
+          "shown_in": "Net margin by quarter",
+          "fact_id": "9c7e8ba0-dfb9-4bdf-90f9-50b59ca7d536",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F35",
+          "metric": "Net margin",
+          "period": "Q4 2024",
+          "period_end": "2024-12-28",
+          "value": "6.3%",
+          "shown_in": "Net margin by quarter",
+          "fact_id": "284d0145-4606-4438-94f8-1812b1c2f855",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F36",
+          "metric": "Net margin",
+          "period": "Q1 2025",
+          "period_end": "2025-03-29",
+          "value": "9.5%",
+          "shown_in": "Net margin by quarter",
+          "fact_id": "5c8a1990-95f1-47e1-8567-9dbbc2aba528",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F37",
+          "metric": "Net margin",
+          "period": "Q2 2025",
+          "period_end": "2025-06-28",
+          "value": "11.3%",
+          "shown_in": "Net margin by quarter",
+          "fact_id": "87b1606e-5f32-4126-a195-0b962cff2ef1",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F38",
+          "metric": "Net margin",
+          "period": "Q3 2025",
+          "period_end": "2025-09-27",
+          "value": "13.4%",
+          "shown_in": "Net margin by quarter",
+          "fact_id": "41c898da-15ee-4c36-9d66-629c58dfa508",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F39",
+          "metric": "Net margin",
+          "period": "Q4 2025",
+          "period_end": "2025-12-27",
+          "value": "13.1%",
+          "shown_in": "Net margin by quarter",
+          "fact_id": "42f721eb-a880-42ac-9d5c-a6e38a754e85",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F40",
+          "metric": "Net margin",
+          "period": "Q1 2026",
+          "period_end": "2026-03-28",
+          "value": "13.1%",
+          "shown_in": "Net margin by quarter",
+          "fact_id": "3e0397c7-9ae1-48ac-9981-6edb3c8e8aed",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F41",
+          "metric": "Net margin",
+          "period": "Q2 2026",
+          "period_end": "2026-06-27",
+          "value": "13.2%",
+          "shown_in": "Net margin by quarter",
+          "fact_id": "1da1688c-6cff-4724-8a0f-9bb0dff0d985",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        }
+      ],
+      "coverage": [
+        {
+          "company": "AMD",
+          "status": "shown"
+        }
+      ],
+      "gaps": [],
+      "query_bounds": {
+        "periods": "last 8 quarters",
+        "claims": "management, guidance, and kpi claims from 2024-09-01 first, then the most recent others, published by the 2026-09-01 cutoff; a claim repeated by several sources or copies counts once"
+      },
+      "claims": [
+        {
+          "id": "C1",
+          "text": "As previously announced, our second quarter results were impacted by the U.S. Government's export control on our AMD Instinct MI308 data center GPU products. For the quarter, these restrictions led to approximately $800 million in inventory and related charges.",
+          "predicate": "kpi.commentary",
+          "stance": "challenging",
+          "company": "AMD",
+          "effective_time": "2025-06-28T00:00:00.000Z",
+          "published_at": "2025-08-05T00:00:00.000Z",
+          "claim_id": "6d499c74-bc94-43d6-8468-ae34d0becda2",
+          "source_id": "138fef65-4ad7-48cf-b641-6c099b2d0a60"
+        }
+      ],
+      "disagreements": [],
+      "claims_status": "available",
+      "claims_truncated": false
+    }
   },
   "recorded_at": "2026-10-23T01:21:25.260Z",
   "exchange": {

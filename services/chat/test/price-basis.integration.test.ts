@@ -11,7 +11,7 @@ const company = (ticker: string) => GOLDEN_COMPANIES.find((candidate) => candida
 const NVDA = company("NVDA");
 const AMD = company("AMD");
 const LISTINGS = [{ id: NVDA.listing_id, label: "NVDA" }, { id: AMD.listing_id, label: "AMD" }];
-const LEGACY_RANGE = { start: "2026-08-25T00:00:00.000Z", end: GOLDEN_AS_OF };
+const LEGACY_RANGE = { start: "2025-12-01T05:00:00.000Z", end: GOLDEN_AS_OF };
 
 test("Polygon ranges cached under the old dividend-adjusted label are never reused, nor rewritten (#191)", { timeout: 300_000 }, async (t) => {
   if (!dockerAvailable()) {
@@ -36,7 +36,7 @@ test("Polygon ranges cached under the old dividend-adjusted label are never reus
     legacy[listing_id] = rows[0]!.bar_range_id;
     await client.query(
       `insert into market_bars (bar_range_id, ts, open, high, low, close, volume)
-       values ($1::uuid, '2026-08-25T00:00:00Z', 1, 1, 1, 1, 1), ($1::uuid, '2026-08-26T00:00:00Z', 2, 2, 2, 2, 1)`,
+       values ($1::uuid, '2025-12-31T05:00:00Z', 1, 1, 1, 1, 1), ($1::uuid, '2026-08-31T04:00:00Z', 2, 2, 2, 2, 1)`,
       [legacy[listing_id]],
     );
   }
@@ -56,7 +56,8 @@ test("Polygon ranges cached under the old dividend-adjusted label are never reus
     `delete from market_bar_ranges where listing_id = $1::uuid and adjustment_basis = 'split_adjusted'`,
     [AMD.listing_id],
   );
-  assert.equal(await chart(), undefined);
+  const gap = await chart();
+  assert.deepEqual([gap?.kind, (gap?.segments as Array<{ text: string }>)[0]!.text], ["rich_text", "Year-to-date price performance is not shown: AMD has no prices from before 2026."]);
 
   // The cache never serves the legacy range; a refetch under the correct basis is served.
   // A pool: storing bars takes a transaction on its own connection. Closed

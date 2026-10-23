@@ -15,7 +15,7 @@
 // cannot make a false winner; values too close to separate at the precision
 // shown are a tie. Upgrade path: carry each fact's unrounded value in the packet.
 
-import { periodCoverage, type EvidencePacket, type PacketFigure } from "./evidence-packet.ts";
+import type { EvidencePacket, PacketFigure } from "./evidence-packet.ts";
 
 export const COMPARISON_OPS = ["highest", "lowest", "order", "trend"] as const;
 export type ComparisonOp = (typeof COMPARISON_OPS)[number];
@@ -65,8 +65,6 @@ export function checkComparison(
   if (cited.some((figure) => figure.metric !== metric || (figure.segment !== undefined) !== segmented)) return fail("a comparison is of one metric");
   if (segmented && new Set(cited.map(companyOf)).size > 1) return fail("segments are ranked within one company");
   if (cited.some((figure) => quarterly(figure) !== quarterly(cited[0]!))) return fail("a comparison does not set an annual figure against a quarterly one");
-  const partial = cited.find((figure) => periodCoverage(figure) !== undefined);
-  if (partial) return fail(`${partial.id} covers only part of ${partial.period ? periodText(partial.period) : "its period"}, so it is not compared`);
   const companies = new Set(cited.map(memberOf));
   const axis = companies.size === 1 ? "time" : "cohort";
   if (op === "trend" && axis !== "time") return fail("a trend is one company's metric over time");
@@ -220,10 +218,8 @@ function quarterly(figure: PacketFigure): boolean {
   return /^Q/.test(periodKey(figure.period));
 }
 
-// Two figures whose periods can be set side by side: both quarters or both
-// years, neither only partly covered.
 export function comparablePeriods(a: PacketFigure, b: PacketFigure): boolean {
-  return quarterly(a) === quarterly(b) && periodCoverage(a) === undefined && periodCoverage(b) === undefined;
+  return quarterly(a) === quarterly(b);
 }
 
 // A stored quarter ("Q42026") as prose writes it ("Q4 2026").

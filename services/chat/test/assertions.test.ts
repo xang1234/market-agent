@@ -484,21 +484,20 @@ test("an inference names its subject, a company its own evidence or its supports
   assert.deepEqual(single.accepted.map((entry) => [entry.index, entry.subject]), [[0, undefined], [1, "NVDA"]]);
 });
 
-test("an unknown cause's change is between periods of one kind, both fully covered (#302 review)", () => {
+test("an unknown cause's change is between periods of one kind (#302 review)", () => {
   const packet: EvidencePacket = {
     ...PACKET,
     companies: ["AAPL"],
     figures: [
-      { id: "F1", metric: "Revenue", period: "FY2025", value: "$416.2B", source_ids: [], displayed: false },
-      { id: "F2", metric: "Revenue", period: "Q12026", value: "$124.3B", source_ids: [], displayed: false },
-      { id: "F3", metric: "Net income", period: "Q42025", value: "$20.0B", source_ids: [], displayed: false },
-      { id: "F4", metric: "Net income", period: "Q12026", value: "$25.0B", source_ids: [], displayed: false, period_coverage: "partial" },
+      { id: "F1", metric: "Revenue", period: "FY2025", value: "$416.2B", source_ids: [] },
+      { id: "F2", metric: "Revenue", period: "Q12026", value: "$124.3B", source_ids: [] },
+      { id: "F3", metric: "Net income", period: "Q42025", value: "$20.0B", source_ids: [] },
     ],
   };
   const reasons = (evidence: string[]) =>
     checkAssertions([{ kind: "unknown_cause", text: "The figures do not show why.", evidence }], packet).rejected.map((entry) => entry.reason);
   const reason = "an unknown cause cites a change: one company's metric, two periods, two values";
-  assert.deepEqual([reasons(["F1"]), reasons(["F2"]), reasons(["F3"]), reasons(["F4"])], [[reason], [reason], [reason], [reason]]);
+  assert.deepEqual([reasons(["F1"]), reasons(["F2"]), reasons(["F3"])], [[reason], [reason], [reason]]);
 });
 
 test("an inference writes no link: an address the page would render as one rejects it (#477 review)", () => {

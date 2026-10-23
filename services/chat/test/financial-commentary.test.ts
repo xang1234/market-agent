@@ -126,7 +126,7 @@ test("a company overview carries analyst commentary on its published results (#3
     return { ...read, blocks: read.blocks as Block[] };
   };
   const researchScope = async (context: { userIntent?: string }, read: Promise<ScopeProposal | null>) =>
-    resolveResearchScope({ question: context.userIntent ?? "", companies: [{ issuer_id: ALFA, label: "ALFA" }], prior: null, asOf: "2026-10-22T00:00:00.000Z", served: true, proposal: await read });
+    resolveResearchScope({ companies: [{ issuer_id: ALFA, label: "ALFA" }], prior: null, asOf: "2026-10-22T00:00:00.000Z", served: true, proposal: await read });
   const overview = (compose: CommentaryComposer, extra: Partial<Parameters<typeof chatHarness>[1]> = {}) =>
     chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve, commentary: saver(compose), ...extra });
   const hydrate = async (_db: unknown, ref: { kind: string; id: string }) =>

@@ -576,7 +576,44 @@
       ],
       "inherited": []
     },
-    "cutoff": "2026-09-01T00:00:00.000Z"
+    "cutoff": "2026-09-01T00:00:00.000Z",
+    "packet": {
+      "route": "segments",
+      "cutoff": "2026-09-01T00:00:00.000Z",
+      "companies": [
+        "AMD"
+      ],
+      "figures": [],
+      "coverage": [
+        {
+          "company": "AMD",
+          "status": "not_shown"
+        }
+      ],
+      "gaps": [
+        "Revenue by segment is not available for AMD in this data."
+      ],
+      "query_bounds": {
+        "periods": "latest quarter's segments",
+        "claims": "management, segment, and guidance claims from 2024-09-01 first, then the most recent others, published by the 2026-09-01 cutoff; a claim repeated by several sources or copies counts once"
+      },
+      "claims": [
+        {
+          "id": "C1",
+          "text": "As previously announced, our second quarter results were impacted by the U.S. Government's export control on our AMD Instinct MI308 data center GPU products. For the quarter, these restrictions led to approximately $800 million in inventory and related charges.",
+          "predicate": "kpi.commentary",
+          "stance": "challenging",
+          "company": "AMD",
+          "effective_time": "2025-06-28T00:00:00.000Z",
+          "published_at": "2025-08-05T00:00:00.000Z",
+          "claim_id": "6d499c74-bc94-43d6-8468-ae34d0becda2",
+          "source_id": "138fef65-4ad7-48cf-b641-6c099b2d0a60"
+        }
+      ],
+      "disagreements": [],
+      "claims_status": "available",
+      "claims_truncated": false
+    }
   },
   "recorded_at": "2026-10-23T01:21:27.326Z",
   "exchange": {

@@ -2,11 +2,10 @@
 // covers, the facets it asks for, and its periods. What the question asks for
 // and turns off (facets, metrics, income items, its period) is a model's
 // reading of it, proposed from closed vocabularies and validated
-// (scope-proposal.ts). With no reading, its fiscal periods are read from
-// fixed tokens (FY2026, Q3); a YTD window always is. Everything else here
-// is derived from those: the route, inheritance, what a turn-off clears. Saved
-// with the answer, so the next follow-up and a reload read the same
-// interpretation.
+// (scope-proposal.ts); with no reading, no period or window is read.
+// Everything else here is derived from those: the route, inheritance, what a
+// turn-off clears. Saved with the answer, so the next follow-up and a reload
+// read the same interpretation.
 //
 // The scope is what the thread is researching, not what one answer drew: a
 // field a turn's blocks cannot show (a single company's answer has no price
@@ -17,7 +16,7 @@
 // recomputed from the current date. With no proposal (no model, a failure, a
 // reply outside the vocabularies) a turn asks for nothing new: a follow-up
 // keeps the previous scope whole, and a fresh question gets the plain answer
-// for its companies and periods.
+// for its companies.
 //
 // A metric the question names that no reader here serves (EBITDA, debt)
 // is a named gap: it is never answered with another metric in its place, so a
@@ -28,8 +27,6 @@
 //
 // A benchmark index (the S&P 500) is a named gap no reader serves; it is kept
 // like any other facet, so a later turn still says it is missing.
-
-import { requestedFiscalQuarter, requestedFiscalYear, requestedPriceWindow, type FiscalQuarter } from "./fact-blocks.ts";
 
 const ROUTES = [
   "latest_quarter",
@@ -57,6 +54,10 @@ export function readsEngine(reads: ResearchRoute): boolean {
 }
 
 export type ScopeField = "peers" | "segments" | "margin_trend" | "metrics" | "fiscal_year" | "fiscal_quarter" | "price_window" | "benchmark";
+
+export type FiscalQuarter = { fiscal_year: number; fiscal_period: (typeof FISCAL_PERIODS)[number] };
+export type ScopeQuarter = { fiscal_year: number | null; fiscal_period: (typeof FISCAL_PERIODS)[number] };
+export type PeriodType = "quarter" | "fiscal_year";
 
 // A metric a question names: one this chat's readers show, or a named gap. A
 // statement metric with an adjustment or a qualifier ("adjusted EPS", "EPS
@@ -87,9 +88,14 @@ export type ResearchScope = {
   // The metrics the question names (none: the route's usual figures).
   metrics: ReadonlyArray<RequestedMetric>;
   fiscal_year: number | null;
-  // A fiscal quarter the question names (#290): a single company's answer shows
-  // it instead of the latest quarter.
-  fiscal_quarter: FiscalQuarter | null;
+  // A fiscal quarter the question names (#290); with no year named or kept,
+  // each company's newest such quarter.
+  fiscal_quarter: ScopeQuarter | null;
+  // What the latest period is when no year or quarter is set: the type a turn
+  // reading the latest asks for (a quarter unless it says the fiscal year), or
+  // the previous answer's figures' type for a turn naming no period. Absent
+  // when neither has said.
+  latest_period?: PeriodType;
   // The window's cutoff is the answer that first charted it.
   price_window: { kind: "ytd"; cutoff: string } | null;
   // A benchmark index asked for: never in this data, so always a named gap.
@@ -119,16 +125,20 @@ export const SCOPE_FACETS = [
   "margins",
   "margin_trend",
   "price_window",
+  "price_history",
   "benchmark",
   "guidance",
   "explains",
   "evidence",
   "latest_quarter",
+  "latest_fiscal_year",
 ] as const;
 export type ScopeFacet = (typeof SCOPE_FACETS)[number];
 // The periods a question can turn off beside its facets.
 export const PERIOD_FIELDS = ["fiscal_year", "fiscal_quarter"] as const;
 export const FISCAL_PERIODS = ["Q1", "Q2", "Q3", "Q4"] as const;
+// The quarters a company overview charts, to the one it is shown at.
+export const QUARTERS_SHOWN = 8;
 // The period a question asks about.
 export type ScopePeriod =
   // No period named: a follow-up keeps the one it inherits.
@@ -175,7 +185,7 @@ export type CompanyChange =
 const NO_PROPOSAL: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named", names: [] } };
 
 // The field a facet turned off clears. Guidance and a cause are read apart;
-// evidence and the latest quarter are asked for one turn only.
+// evidence and a latest period are asked for one turn only.
 const CLEARS: Partial<Record<ScopeFacet | (typeof PERIOD_FIELDS)[number], ScopeField>> = {
   peers: "peers",
   segments: "segments",
@@ -186,10 +196,6 @@ const CLEARS: Partial<Record<ScopeFacet | (typeof PERIOD_FIELDS)[number], ScopeF
   fiscal_year: "fiscal_year",
   fiscal_quarter: "fiscal_quarter",
 };
-
-// A quarter named without its year ("Q3", "the third quarter").
-const PARTIAL_QUARTER = /\bQ([1-4])\b|\b(first|second|third|fourth)\s+quarter\b/i;
-const ORDINAL_QUARTERS: Readonly<Record<string, number>> = { first: 1, second: 2, third: 3, fourth: 4 };
 
 type NamedPeriod = { year?: number; quarter?: FiscalQuarter; yearlessQuarter?: (typeof FISCAL_PERIODS)[number]; replacesInherited?: true };
 
@@ -202,15 +208,6 @@ function periodOfReading(period: ScopePeriod): NamedPeriod {
   return period.fiscal_year === null
     ? { yearlessQuarter: period.fiscal_period }
     : { quarter: { fiscal_year: period.fiscal_year, fiscal_period: period.fiscal_period } };
-}
-
-function periodTokensWithoutReading(question: string): NamedPeriod {
-  const partial = PARTIAL_QUARTER.exec(question);
-  return {
-    year: requestedFiscalYear(question),
-    quarter: requestedFiscalQuarter(question),
-    yearlessQuarter: partial ? FISCAL_PERIODS[Number(partial[1] ?? ORDINAL_QUARTERS[partial[2]!.toLowerCase()]) - 1] : undefined,
-  };
 }
 
 // The metrics a question can name. A model proposes from this catalog
@@ -246,31 +243,23 @@ export const PROPOSABLE_METRICS: ReadonlyArray<RequestedMetric> = Object.freeze(
   { metric_key: "income_statement", label: "Revenue, profit and margins", available: true },
 ].map((metric) => Object.freeze(metric)));
 
-// The cash flow, balance sheet and EPS a question can name, each with the item
-// labels its block shows (statement-blocks.ts). One company at a time: a
-// comparison names them as a gap.
-export const STATEMENT_METRIC_LABELS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  operating_cash_flow: ["Operating cash flow"],
-  capex: ["Capital expenditures"],
-  free_cash_flow: ["Free cash flow"],
-  balance_sheet: ["Cash and equivalents", "Total assets", "Total liabilities", "Stockholders' equity"],
-  cash_and_equivalents: ["Cash and equivalents"],
-  total_assets: ["Total assets"],
-  total_liabilities: ["Total liabilities"],
-  total_equity: ["Stockholders' equity"],
-  eps_diluted: ["EPS (diluted)"],
-  eps_basic: ["EPS (basic)"],
-};
+const STATEMENT_METRICS: ReadonlySet<string> = new Set([
+  "operating_cash_flow",
+  "capex",
+  "free_cash_flow",
+  "balance_sheet",
+  "cash_and_equivalents",
+  "total_assets",
+  "total_liabilities",
+  "total_equity",
+  "eps_diluted",
+  "eps_basic",
+]);
 
 export const BALANCE_SHEET_ITEMS = ["cash_and_equivalents", "total_assets", "total_liabilities", "total_equity"];
 
 function metricByKey(key: string): RequestedMetric {
   return PROPOSABLE_METRICS.find((candidate) => candidate.metric_key === key)!;
-}
-
-// The statement metrics a turn asks for (or kept from the previous one).
-export function statementMetrics(scope: ResearchScope): ReadonlyArray<RequestedMetric> {
-  return scope.metrics.filter((metric) => metric.available && metric.metric_key in STATEMENT_METRIC_LABELS);
 }
 
 // Adjectives that make a statement metric another, unreported figure
@@ -326,7 +315,7 @@ export function proposedMetric(
   // Adjusted income ("adjusted profit") is not the reported income statement:
   // the non-GAAP gap.
   if (metric.metric_key === "income_statement" && adjustment !== null) return proposedMetric("non_gaap_income", null, null);
-  if (!(metric.metric_key in STATEMENT_METRIC_LABELS)) return metric;
+  if (!STATEMENT_METRICS.has(metric.metric_key)) return metric;
   return qualifiedMetric(metric, adjustment, qualifier);
 }
 
@@ -348,7 +337,6 @@ export function readingAsks(proposal: ScopeProposal): {
 }
 
 export function resolveResearchScope(input: {
-  question: string;
   companies: ResearchScope["companies"];
   // The previous answer's scope, for a follow-up; null for a fresh question.
   prior: ResearchScope | null;
@@ -359,11 +347,15 @@ export function resolveResearchScope(input: {
   // Every auto-selected peer was dropped by name: peers are off (local-runtime).
   peersOff?: boolean;
   // What a model read the question to ask for and turn off
-  // (scope-proposal.ts). Null: it asks for nothing beyond its companies and
-  // period tokens, and turns nothing off.
+  // (scope-proposal.ts). Null: it asks for nothing beyond its companies, and
+  // turns nothing off.
   proposal: ScopeProposal | null;
 }): ResearchScope {
-  const { prior, question } = input;
+  // A question naming a company the previous answer did not cover is a new
+  // one; naming only its companies again continues it.
+  const ownNames = input.proposal?.companies.kind === "as_named" ? input.proposal.companies.names : [];
+  const covered = new Set(input.prior?.companies.map((company) => company.issuer_id));
+  const prior = ownNames.length > 0 && input.companies.some((company) => !covered.has(company.issuer_id)) ? null : input.prior;
   const { metrics: proposed, income_items: namedItems } = input.proposal ?? NO_PROPOSAL;
   const { asks, offFacets, offMetrics } = readingAsks(input.proposal ?? NO_PROPOSAL);
   const off = new Set([...offFacets].flatMap((facet) => CLEARS[facet] ?? []));
@@ -405,12 +397,12 @@ export function resolveResearchScope(input: {
   const income = metricByKey("income_statement");
   if (marginAsked && named.length === 0 && !offMetrics.has(income.metric_key) && !kept.some((metric) => metric.metric_key === income.metric_key)) named.push(income);
   const metrics = pick("metrics", named.length > 0 ? named : null, kept.length > 0 ? kept : null) ?? [];
-  const period = input.proposal === null ? periodTokensWithoutReading(question) : periodOfReading(input.proposal.period);
+  const period = periodOfReading((input.proposal ?? NO_PROPOSAL).period);
   // A period turned off is read as not named, though its words are still in
   // the question ("forget fiscal 2025").
   const yearNamed = off.has("fiscal_year") ? undefined : period.year;
   const quarterNamed = off.has("fiscal_quarter") ? undefined : period.quarter;
-  const latest = asks.has("latest_quarter") || period.replacesInherited === true;
+  const latest = asks.has("latest_quarter") || asks.has("latest_fiscal_year") || period.replacesInherited === true;
   // The latest period replaces an inherited fiscal year ("Q1 fiscal 2025"
   // named both), so a reader that takes no quarter isn't held to the old year.
   if (yearNamed === undefined && quarterNamed === undefined && latest) off.add("fiscal_year");
@@ -422,16 +414,14 @@ export function resolveResearchScope(input: {
   // ("now for fiscal 2026") or the latest quarter replaces it.
   const partialPeriod = off.has("fiscal_quarter") ? null : period.yearlessQuarter ?? null;
   // Its year: one named in the question ("Q3, FY2026"), else the inherited
-  // quarter's, else an inherited fiscal year (#292 review).
+  // quarter's, else an inherited fiscal year (#292 review), else none.
   const partialYear = yearNamed ?? prior?.fiscal_quarter?.fiscal_year ?? prior?.fiscal_year ?? undefined;
-  const namedQuarter = quarterNamed ??
-    (partialPeriod && partialYear !== undefined ? { fiscal_year: partialYear, fiscal_period: partialPeriod } : null);
+  const namedQuarter = quarterNamed ?? (partialPeriod ? { fiscal_year: partialYear ?? null, fiscal_period: partialPeriod } : null);
   if (namedQuarter === null && (latest || yearNamed !== undefined)) off.add("fiscal_quarter");
   const fiscal_quarter = pick("fiscal_quarter", namedQuarter, prior?.fiscal_quarter);
-  // The window is fixed syntax (YTD): its token asks for it, and the proposal
-  // only turns it off.
-  const asked = !off.has("price_window") && requestedPriceWindow(question) === "ytd" ? { kind: "ytd" as const, cutoff: input.asOf } : null;
-  const price_window = pick("price_window", asked, prior?.price_window);
+  const asked = asks.has("price_window") ? { kind: "ytd" as const, cutoff: input.asOf } : null;
+  // A return over another window asked for replaces the YTD one kept, so that is never charted in its place.
+  const price_window = pick("price_window", asked, asks.has("price_history") ? null : prior?.price_window);
   // An evidence follow-up asks for the sources of the previous answer about the
   // same companies, so it reads that answer's scope again.
   const priorIds = new Set(prior?.companies.map((company) => company.issuer_id) ?? []);
@@ -446,13 +436,13 @@ export function resolveResearchScope(input: {
   // not stop a comparison asked for now ("compare it with AMD").
   const comparing = input.companies.length > 1 || peers;
   const readable = (metric: RequestedMetric) =>
-    metric.available && !(comparing && named.length > 0 && metric.metric_key in STATEMENT_METRIC_LABELS);
+    metric.available && !(comparing && named.length > 0 && STATEMENT_METRICS.has(metric.metric_key));
   const onlyUnavailable = metrics.length > 0 && metrics.every((metric) => !readable(metric)) &&
     (asked === null || input.companies.length < 2) && !asks.has("peers") && !asks.has("segments") && !margins;
   // Only cash flow, balance sheet or EPS (and any named gaps beside them): the
   // statement figures alone, as a segment request reads segments alone.
-  const onlyStatements = metrics.some((metric) => metric.available && metric.metric_key in STATEMENT_METRIC_LABELS) &&
-    metrics.every((metric) => !metric.available || metric.metric_key in STATEMENT_METRIC_LABELS) &&
+  const onlyStatements = metrics.some((metric) => metric.available && STATEMENT_METRICS.has(metric.metric_key)) &&
+    metrics.every((metric) => !metric.available || STATEMENT_METRICS.has(metric.metric_key)) &&
     !asks.has("segments") && !margins;
   // The items named now; else the previous answer's, where this turn re-reads
   // it (an evidence follow-up) or keeps the metrics it named them for ("Why?").
@@ -477,6 +467,14 @@ export function resolveResearchScope(input: {
   // the other facets are, unless this one turns them off.
   const keeps = (facet: "guidance" | "explains", kept: true | undefined) =>
     !offFacets.has(facet) && (asks.has(facet) || kept === true);
+  const readKind = (input.proposal ?? NO_PROPOSAL).period.kind;
+  const latestPeriod = asks.has("latest_fiscal_year")
+    ? "fiscal_year"
+    : asks.has("latest_quarter") || readKind === "latest"
+    ? "quarter"
+    : readKind === "none"
+    ? prior?.latest_period
+    : undefined;
   return {
     route: evidence ? "evidence_followup" : reread?.route ?? reads,
     reads,
@@ -489,6 +487,7 @@ export function resolveResearchScope(input: {
     metrics,
     fiscal_year,
     fiscal_quarter,
+    ...(latestPeriod ? { latest_period: latestPeriod } : {}),
     price_window,
     benchmark,
     ...(keeps("guidance", prior?.guidance) ? { guidance: true as const } : {}),
@@ -519,11 +518,6 @@ function routeOf(
   return "latest_quarter";
 }
 
-// The metrics a turn names that no reader here serves: each is a named gap.
-export function unavailableMetrics(scope: ResearchScope): ReadonlyArray<RequestedMetric> {
-  return scope.metrics.filter((metric) => !metric.available);
-}
-
 // A scope read back from a saved answer; null when absent or not a scope (an
 // answer saved before scopes were, or a malformed row), so the turn starts fresh.
 export function parseResearchScope(value: unknown): ResearchScope | null {
@@ -533,7 +527,7 @@ export function parseResearchScope(value: unknown): ResearchScope | null {
   const quarter = scope.fiscal_quarter as { fiscal_year?: unknown; fiscal_period?: unknown } | null | undefined;
   // Absent on scopes saved before quarters were recorded (#290): none.
   const validQuarter = quarter === undefined || quarter === null ||
-    (Number.isInteger(quarter.fiscal_year) && typeof quarter.fiscal_period === "string" && /^Q[1-4]$/.test(quarter.fiscal_period));
+    ((quarter.fiscal_year === null || Number.isInteger(quarter.fiscal_year)) && typeof quarter.fiscal_period === "string" && /^Q[1-4]$/.test(quarter.fiscal_period));
   const validWindow = window === null || (window?.kind === "ytd" && typeof window.cutoff === "string" && !Number.isNaN(Date.parse(window.cutoff)));
   if (
     typeof scope.peers !== "boolean" ||
@@ -560,7 +554,8 @@ export function parseResearchScope(value: unknown): ResearchScope | null {
     // Absent on scopes saved before metrics were recorded.
     metrics: (scope.metrics ?? []) as ResearchScope["metrics"],
     fiscal_year: scope.fiscal_year as number | null,
-    fiscal_quarter: quarter ? { fiscal_year: quarter.fiscal_year as number, fiscal_period: quarter.fiscal_period as string } : null,
+    fiscal_quarter: quarter ? { fiscal_year: quarter.fiscal_year as number | null, fiscal_period: quarter.fiscal_period as FiscalQuarter["fiscal_period"] } : null,
+    ...(scope.latest_period === "quarter" || scope.latest_period === "fiscal_year" ? { latest_period: scope.latest_period } : {}),
     price_window: window === null ? null : { kind: "ytd", cutoff: window!.cutoff as string },
     // Absent on scopes saved before benchmarks were recorded.
     benchmark: scope.benchmark === true,

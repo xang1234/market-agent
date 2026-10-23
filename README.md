@@ -67,8 +67,8 @@ Chat answers only from facts already stored. Open a company's symbol page once, 
     <td width="50%"><img src="docs/media/evidence.png" alt="The evidence inspector open on NVDA's FY2026 revenue, showing the SEC EDGAR fact behind it"></td>
   </tr>
   <tr>
-    <td><b>Chat with an analyst.</b> Answers arrive as charts, tables, metric rows, and a short narrative. Threads persist.</td>
-    <td><b>Check the numbers.</b> Click a linked figure to see the fact behind it and open the source filing. Each chart, table, and metric row is labelled verified, source-linked, or not verified.</td>
+    <td><b>Chat with an analyst.</b> Answers arrive as verified tables and charts and a short narrative. Threads persist.</td>
+    <td><b>Check the numbers.</b> Click a linked figure to see the fact behind it and open the source filing. Each chart and table is labelled verified, source-linked, or not verified.</td>
   </tr>
   <tr>
     <td><img src="docs/media/symbol.png" alt="The NVDA symbol page with a one-year chart, key stats, analyst consensus, and price targets"></td>
@@ -93,12 +93,12 @@ The [user guide](docs/guide.md) covers every page, including Analyze memos, Anal
 ## How it works
 
 1. The resolver turns each company you name into a canonical id. An ambiguous name gets a clarifying question, not a guess.
-2. Code builds the charts, tables, and metric rows from stored facts. The analyst does not browse the web.
+2. The financial engine plans and computes every figure from stored facts, and certifies each one. The analyst does not browse the web and computes no figure. A number appears in its answer only inside a claim it quotes with the claim's source document, or on a comparison's year-to-date price chart, which is source-linked to stored prices but not verified by the engine.
 3. The model writes its narrative as structured assertions. A check rejects any assertion whose references or comparisons do not match the evidence. Every figure in the prose comes from a template filled with a value from the evidence.
 4. The app seals a snapshot of every fact the answer used and checks each one against the logged tool calls. That snapshot is what the evidence inspector shows.
 5. A judge model checks each inference against the facts it rests on. An inference appears only once the judge accepts it.
 
-Questions that name a metric run through the financial engine, which computes with exact fractions and shows anything it cannot verify as a gap. The answer also notes parts of the question the engine did not calculate, such as a benchmark index. Other questions still use the standard path until [#398](https://github.com/xang1234/market-agent/issues/398) lands. [Architecture](docs/architecture.md) has the full flow and the service map.
+The financial engine computes with exact fractions and shows anything it cannot verify as a gap. The answer also notes parts of the question the engine did not calculate, such as a benchmark index. [Architecture](docs/architecture.md) has the full flow and the service map.
 
 ## Documentation
 
@@ -113,7 +113,6 @@ Questions that name a metric run through the financial engine, which computes wi
 
 ## Roadmap
 
-- [ ] Route every company question through the verified financial engine ([#398](https://github.com/xang1234/market-agent/issues/398))
 - [ ] Live business-segment revenue in cited chat breakdowns ([#196](https://github.com/xang1234/market-agent/issues/196))
 - [ ] Valuation scenarios with explicit P/E assumptions and dated analyst estimates ([#201](https://github.com/xang1234/market-agent/issues/201), [#224](https://github.com/xang1234/market-agent/issues/224), [#225](https://github.com/xang1234/market-agent/issues/225))
 - [ ] Comparisons that disclose their basis, peers, and exclusions ([#209](https://github.com/xang1234/market-agent/issues/209)), and checked gap comparisons ([#288](https://github.com/xang1234/market-agent/issues/288))

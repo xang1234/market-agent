@@ -48,6 +48,7 @@ import {
   judgedAnswer,
   judgedLive,
   replayRecorded,
+  shownIn,
   type AnswerMetrics,
   type AnswerTraceInput,
   type LiveReplay,
@@ -211,7 +212,7 @@ function judgeView(answer: Pick<TracedAnswer, "judge" | "assertions">): JudgeVie
   const report = answer.assertions;
   const text = (index: number) => [...(report?.accepted ?? []), ...(report?.rejected ?? [])].find((entry) => entry.index === index)?.text ?? "";
   const flagged = (report?.judged ?? []).flatMap((verdict): FlaggedInference[] => {
-    const as = shownAs(verdict);
+    const as = shownIn(report!, verdict);
     return as === "shown" ? [] : [{ index: verdict.index, as, text: text(verdict.index), reason: verdictText(verdict) }];
   });
   return { records: answer.judge, flagged };
@@ -605,7 +606,7 @@ export function mutationVariants(file: string): MutationVariant[] {
   const set = JSON.parse(readFileSync(file, "utf8")) as MutationSet;
   return set.cases.flatMap((entry) => {
     const trace = JSON.parse(readFileSync(resolve(dirname(file), entry.trace), "utf8")) as TurnTrace;
-    const packet = turnPacket(trace.input);
+    const packet = trace.input.packet ?? turnPacket(trace.input);
     const factBlocks = trace.input.factBlocks ?? [];
     const list = assertionList(trace.exchange?.text ?? "");
     if (!Array.isArray(list) || entry.index >= list.length) throw new Error(`${entry.id}: ${entry.trace} has no assertion ${entry.index}`);
@@ -678,14 +679,14 @@ export function mutationSummary(results: ReadonlyArray<Pick<MutationResult, "id"
   type Row = Pick<MutationResult, "kind" | "verdict">;
   const rate = (rows: ReadonlyArray<Row>, counted: (row: Row) => boolean) => `${rows.filter(counted).length} of ${rows.length}`;
   const errors = (rows: ReadonlyArray<Row>) => rows.filter((row) => row.verdict.verdict === "error").length;
-  const flagged = (row: Row) => row.verdict.verdict !== "error" && shownAs(row.verdict) !== "shown";
+  const flagged = (row: Row) => row.verdict.verdict !== "error" && shownAs(row.verdict, "analyst") !== "shown";
   const atTier = ({ kind, verdict }: Row) => {
     const expected = expectedOf(kind);
     return verdict.verdict !== "error" && verdict.worded_amount === expected.worded_amount && verdictsAllowed(expected).includes(verdict.verdict);
   };
   const ceiling = (expected: Expected) =>
-    Math.max(...verdictsAllowed(expected).map((verdict) => SHOWN_RANK[shownAs({ index: 0, verdict, worded_amount: expected.worded_amount })]));
-  const aboveTier = ({ kind, verdict }: Row) => SHOWN_RANK[shownAs(verdict)] > ceiling(expectedOf(kind));
+    Math.max(...verdictsAllowed(expected).map((verdict) => SHOWN_RANK[shownAs({ index: 0, verdict, worded_amount: expected.worded_amount }, "analyst")]));
+  const aboveTier = ({ kind, verdict }: Row) => SHOWN_RANK[shownAs(verdict, "analyst")] > ceiling(expectedOf(kind));
   const mutations = results.filter((result) => result.kind !== "original");
   const originals = results.filter((result) => result.kind === "original");
   const missed = results.filter((result) => !atTier(result));
@@ -696,7 +697,7 @@ export function mutationSummary(results: ReadonlyArray<Pick<MutationResult, "id"
       `  ${kind.padEnd(22)} ${(expected.worded_amount ? "worded_amount" : expected.verdict).padEnd(14)}${rate(mutations.filter((result) => result.kind === kind), atTier)}`
     ),
     `shown above their tier: ${rate(mutations, aboveTier)} mutations`,
-    `contradicted shown: ${rate(results, (row) => row.verdict.verdict === "contradicted" && shownAs(row.verdict) !== "hidden")}`,
+    `contradicted shown: ${rate(results, (row) => row.verdict.verdict === "contradicted" && shownAs(row.verdict, "analyst") !== "hidden")}`,
     `false alarms: ${rate(originals, flagged)} originals (${errors(originals)} errors)`,
     ...(missed.length > 0 ? ["not at their expected outcome:"] : []),
     ...missed.map((result) => `  ${result.id} ${result.kind}: ${verdictText(result.verdict)}\n      ${result.text}`),
@@ -729,7 +730,7 @@ export async function repairMutation(
   const { id, kind, turn, companies } = variant;
   const index = variant.judged.index;
   const requests = repairRequests(turn.list, { accepted: checkAssertions(turn.list, turn.packet).accepted, rejected: [] }, [first]);
-  if (requests.length === 0) return { id, kind, first, repaired: null, as: shownAs(first) };
+  if (requests.length === 0) return { id, kind, first, repaired: null, as: shownAs(first, "analyst") };
   const client = options.createClient ? { createClient: options.createClient } : {};
   const round = await repairRound({
     messages: turn.messages,
@@ -741,14 +742,14 @@ export async function repairMutation(
     judge: (inference) => judgeInferences({ cases: [inference], companies, env: options.env, ...client }),
   });
   const base = { id, kind, first, record: round.record };
-  if (!round.repaired.includes(index)) return { ...base, repaired: null, as: shownAs(first) };
+  if (!round.repaired.includes(index)) return { ...base, repaired: null, as: shownAs(first, "analyst") };
   const entry = [...round.report.accepted, ...round.report.rejected].find((assertion) => assertion.index === index);
   const repaired = entry?.text ?? "";
   const rejection = round.report.rejected.find((assertion) => assertion.index === index);
-  if (rejection) return { ...base, repaired, rejection: `${rejection.check}: ${rejection.reason}`, as: shownAs(first) };
+  if (rejection) return { ...base, repaired, rejection: `${rejection.check}: ${rejection.reason}`, as: shownAs(first, "analyst") };
   const second = verdictsOf(round.cases, round.records[0] ?? { outcome: "not_called", reason: "no judge record" })[0]!;
-  const as = shownAs(second);
-  return { ...base, repaired, second, as: as === "hidden" ? shownAs(first) : as };
+  const as = shownAs(second, "analyst");
+  return { ...base, repaired, second, as: as === "hidden" ? shownAs(first, "analyst") : as };
 }
 
 // Each repaired variant's path, and what the mutations sent to repair end as.

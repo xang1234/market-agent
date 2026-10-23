@@ -2364,7 +2364,164 @@
       "benchmark": false,
       "inherited": []
     },
-    "cutoff": "2026-09-01T00:00:00.000Z"
+    "cutoff": "2026-09-01T00:00:00.000Z",
+    "packet": {
+      "route": "comparison",
+      "cutoff": "2026-09-01T00:00:00.000Z",
+      "companies": [
+        "AAPL",
+        "NVDA"
+      ],
+      "figures": [
+        {
+          "id": "F1",
+          "company": "AAPL",
+          "metric": "Revenue",
+          "period": "FY2025",
+          "period_end": "2025-09-27",
+          "value": "$416.2B",
+          "shown_in": "Side by side: AAPL FY2025 (ended Sep 2025), NVDA FY2026 (ended Jan 2026); fiscal years end 4 months apart",
+          "fact_id": "69e42eac-3e5c-4990-b4be-fe5c15036203",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F2",
+          "company": "AAPL",
+          "metric": "Gross Margin",
+          "period": "FY2025",
+          "period_end": "2025-09-27",
+          "value": "46.9%",
+          "shown_in": "Side by side: AAPL FY2025 (ended Sep 2025), NVDA FY2026 (ended Jan 2026); fiscal years end 4 months apart",
+          "fact_id": "6529293e-4f62-4344-b6b2-47b903f2dcc9",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F3",
+          "company": "AAPL",
+          "metric": "Net Margin",
+          "period": "FY2025",
+          "period_end": "2025-09-27",
+          "value": "26.9%",
+          "shown_in": "Side by side: AAPL FY2025 (ended Sep 2025), NVDA FY2026 (ended Jan 2026); fiscal years end 4 months apart",
+          "fact_id": "927d708f-21be-44ee-be7a-c3d25c1f876e",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F4",
+          "company": "AAPL",
+          "metric": "Revenue Growth (YoY)",
+          "period": "FY2025",
+          "period_end": "2025-09-27",
+          "value": "6.4%",
+          "shown_in": "Side by side: AAPL FY2025 (ended Sep 2025), NVDA FY2026 (ended Jan 2026); fiscal years end 4 months apart",
+          "fact_id": "0f3b901e-0f59-40f7-aa06-fbbbb884915a",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F5",
+          "company": "NVDA",
+          "metric": "Revenue",
+          "period": "FY2026",
+          "period_end": "2026-01-25",
+          "value": "$209.9B",
+          "shown_in": "Side by side: AAPL FY2025 (ended Sep 2025), NVDA FY2026 (ended Jan 2026); fiscal years end 4 months apart",
+          "fact_id": "672cd83c-a487-4d08-ada6-267141565554",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F6",
+          "company": "NVDA",
+          "metric": "Gross Margin",
+          "period": "FY2026",
+          "period_end": "2026-01-25",
+          "value": "70.8%",
+          "shown_in": "Side by side: AAPL FY2025 (ended Sep 2025), NVDA FY2026 (ended Jan 2026); fiscal years end 4 months apart",
+          "fact_id": "d5fe236c-96c7-4c96-96d5-60d52e01d2ca",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F7",
+          "company": "NVDA",
+          "metric": "Net Margin",
+          "period": "FY2026",
+          "period_end": "2026-01-25",
+          "value": "53.6%",
+          "shown_in": "Side by side: AAPL FY2025 (ended Sep 2025), NVDA FY2026 (ended Jan 2026); fiscal years end 4 months apart",
+          "fact_id": "420cbe72-f5a9-454f-9720-035958c26d7a",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F8",
+          "company": "NVDA",
+          "metric": "Revenue Growth (YoY)",
+          "period": "FY2026",
+          "period_end": "2026-01-25",
+          "value": "60.9%",
+          "shown_in": "Side by side: AAPL FY2025 (ended Sep 2025), NVDA FY2026 (ended Jan 2026); fiscal years end 4 months apart",
+          "fact_id": "ae834621-4243-452b-8cfe-89ae490cd0ca",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F9",
+          "company": "AAPL",
+          "metric": "Price return",
+          "period": "2025-12-01 to 2026-08-31",
+          "value": "6.05%",
+          "shown_in": "Price return (split-adjusted, excluding dividends)",
+          "series_ref": "a70a34a2-3265-44c1-8e8c-1590c6a44d80",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000009"
+          ]
+        },
+        {
+          "id": "F10",
+          "company": "NVDA",
+          "metric": "Price return",
+          "period": "2025-12-01 to 2026-08-31",
+          "value": "6.6%",
+          "shown_in": "Price return (split-adjusted, excluding dividends)",
+          "series_ref": "03714e96-1525-4a91-8fb6-ec615013527d",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000009"
+          ]
+        }
+      ],
+      "coverage": [
+        {
+          "company": "AAPL",
+          "status": "shown"
+        },
+        {
+          "company": "NVDA",
+          "status": "shown"
+        }
+      ],
+      "gaps": [],
+      "query_bounds": {
+        "periods": "latest fiscal year per company",
+        "claims": "management, guidance, and kpi claims from 2024-09-01 first, then the most recent others, published by the 2026-09-01 cutoff; a claim repeated by several sources or copies counts once"
+      },
+      "claims": [],
+      "disagreements": [],
+      "claims_status": "none",
+      "claims_truncated": false
+    }
   },
   "recorded_at": "2026-10-23T01:22:00.474Z",
   "exchange": {

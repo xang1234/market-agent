@@ -144,8 +144,8 @@ done; it is not counted as complete.
 ## 3. Status
 
 Every surface in section 2 has a certified lane and always uses it, with no
-flag. Chat sends only questions that name a metric to it; other questions stay
-on the narrative path until #398. The shared foundations are in place:
+flag. Every figure a chat answer shows comes from it (#398). The shared
+foundations are in place:
 
 - **T00–T04:** the pure financial core (contracts, exact arithmetic, reviewed
   operations, coverage).
@@ -173,7 +173,7 @@ on the narrative path until #398. The shared foundations are in place:
 
   | Surface | What is certified | Parent write in finalization |
   |---|---|---|
-  | Chat | Model-planned requests over resolved subjects, for questions that name a metric | Assistant message |
+  | Chat | Deterministic or model-planned requests over resolved subjects, for every figure an answer shows | Assistant message |
   | Analyze | One deterministic plan per memo, one unit per numerical section | `analyze_run_financial_sections` row (0049) |
   | Grids | One plan per run, one unit per numerical cell | Cell write and progress count (0050) |
   | Thesis | One plan per saved metric condition | Current-version check under the agent lock |

@@ -1,8 +1,7 @@
 // The evidence an answer is written from (#207): the turn's route and cutoff,
-// each figure shown with a short packet id bound to its fact and sources,
-// which companies have figures and which do not, what could not be shown, and
-// the bounds the readers applied. Built from the deterministic fact blocks
-// and the turn's research scope, never from raw tool results.
+// each figure shown with a short packet id bound to its source, which
+// companies have figures and which do not, what could not be shown, and the
+// price window asked for. Never built from raw tool results.
 //
 // The model sees short ids ("F1", "C1"); the fact, claim and source ids stay
 // here, so the prompt stays compact (#181) and an assertion citing one can be
@@ -13,15 +12,23 @@
 // with any stored contradiction between them named.
 
 import { dependencyClosure, type FinancialAnswerContent, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
-import { displayedFigures, QUARTERS_SHOWN, readsNamedQuarter, type DerivedFigureRecord, type DisplayedFigure } from "./fact-blocks.ts";
-import type { ResearchScope } from "./research-scope.ts";
+import { returnLabel } from "../../market/src/perf-points.ts";
+import { QUARTERS_SHOWN, type ResearchScope } from "./research-scope.ts";
 import { isRecord } from "../../shared/src/http.ts";
 
 type Block = Record<string, unknown>;
 
-export type PacketFigure = Omit<DisplayedFigure, "fact_id" | "block_id"> & {
+export type PacketFigure = {
   id: string;
+  company?: string;
+  segment?: string;
+  metric: string;
+  period?: string;
+  period_end?: string;
+  value: string;
+  shown_in?: string;
   fact_id?: string;
+  series_ref?: string;
   // The engine result it shows (enginePacket); never sent to the model.
   result_id?: string;
   // Why the engine computed no value: the figure is unavailable, never a number.
@@ -29,38 +36,48 @@ export type PacketFigure = Omit<DisplayedFigure, "fact_id" | "block_id"> & {
   // An engine ranking, whose value is its sentence ("Q4 FY2026 has the highest revenue of the 8 quarters ranked").
   ranking?: true;
   source_ids: ReadonlyArray<string>;
-} & ({
-  displayed?: undefined;
   // A figure computed from two others: their ids, [current, prior].
   derived_from?: readonly [string, string];
   // A lead's two companies, [left, right]: it is the difference of their figures.
   lead_of?: readonly [string, string];
-} | AvailableFigureFields);
-
-// A reported value no block shows (#302): what a turn with no figure displayed
-// answers from, referenced as a displayed figure is and never counted as one.
-type AvailableFigureFields = {
-  displayed: false;
-  // The value's own date: fact_recency only dates the newest one.
-  as_of?: string;
-  // How completely the period is covered, when it is not fully.
-  period_coverage?: string;
-  // The seal binding of its fact, which no block's bindings carry; never sent to the model.
-  binding?: Readonly<Record<string, unknown>>;
 };
 
-export type AvailableFigure = Omit<PacketFigure, "id" | "shown_in"> & AvailableFigureFields;
+/** A price return the chart shows: one line's last point, credited to its company. */
+export type PerfFigure = {
+  company: string;
+  metric: "Price return";
+  period?: string;
+  value: string;
+  shown_in?: string;
+  block_id?: string;
+  series_ref?: string;
+};
+
+/** Each price chart line's return over the window drawn, so the answer can cite it as a figure of the chart. */
+export function perfFigures(blocks: ReadonlyArray<Block>): PerfFigure[] {
+  return blocks.flatMap((block): PerfFigure[] => {
+    if (block.kind !== "perf_comparison") return [];
+    const series = (block.series ?? []) as ReadonlyArray<{ name?: string; points?: ReadonlyArray<{ y?: number }> }>;
+    const seriesRefs = (block.data_ref as { params?: { series_refs?: unknown } } | undefined)?.params?.series_refs;
+    const period = typeof block.default_range === "string" ? { period: block.default_range } : {};
+    const shownIn = {
+      ...(typeof block.title === "string" ? { shown_in: block.title } : {}),
+      ...(typeof block.id === "string" ? { block_id: block.id } : {}),
+    };
+    return series.flatMap((line, index) => {
+      const last = line.points?.at(-1)?.y;
+      // Line i is drawn from series_refs[i].
+      const seriesRef = Array.isArray(seriesRefs) && typeof seriesRefs[index] === "string" ? { series_ref: seriesRefs[index] as string } : {};
+      return line.name && typeof last === "number" ? [{ company: line.name, metric: "Price return" as const, ...period, value: returnLabel(last), ...shownIn, ...seriesRef }] : [];
+    });
+  });
+}
 
 // The companies a figure is about: a lead's two, a derived figure's sides', else its own, else the only company's.
 export function figureCompanies(figure: PacketFigure, packet: EvidencePacket): Array<string | undefined> {
-  if (figure.displayed === undefined && figure.lead_of) return [...figure.lead_of];
-  const sides = figure.displayed === undefined && figure.derived_from ? packet.figures.filter((side) => figure.derived_from!.includes(side.id)) : [];
+  if (figure.lead_of) return [...figure.lead_of];
+  const sides = figure.derived_from ? packet.figures.filter((side) => figure.derived_from!.includes(side.id)) : [];
   return sides.length > 0 ? sides.map((side) => side.company ?? packet.companies[0]) : [figure.company ?? packet.companies[0]];
-}
-
-// How completely a figure's period is covered, when it is not fully.
-export function periodCoverage(figure: PacketFigure): string | undefined {
-  return figure.displayed === false ? figure.period_coverage : undefined;
 }
 
 // A claim as the evidence loader returns it (local-runtime-evidence.ts).
@@ -245,7 +262,9 @@ function explainedMetrics(scope: ResearchScope): Array<string | ReadonlyArray<st
   });
 }
 
-// ponytail: calendar approximations of the readers' periods; a fiscal year is
+const ROUTE_MONTHS = 3 * QUARTERS_SHOWN;
+
+// ponytail: calendar approximations of the route's periods; a fiscal year is
 // widened by a year so one ending mid-year still covers its claims. One window
 // for every predicate: the route's period, which covers a year-to-date window.
 function periodStart(scope: ResearchScope, cutoff: string, routed: boolean): string | null {
@@ -255,7 +274,7 @@ function periodStart(scope: ResearchScope, cutoff: string, routed: boolean): str
   if (scope.price_window && !routed) return `${cutoff.slice(0, 4)}-01-01T00:00:00.000Z`;
   const start = new Date(cutoff);
   if (Number.isNaN(start.getTime())) return null;
-  start.setUTCMonth(start.getUTCMonth() - 3 * QUARTERS_SHOWN);
+  start.setUTCMonth(start.getUTCMonth() - ROUTE_MONTHS);
   return start.toISOString();
 }
 
@@ -264,17 +283,13 @@ export function buildEvidencePacket(input: {
   factBlocks: ReadonlyArray<Block>;
   cutoff: string;
   claims?: ClaimEvidence;
-  // The turn's other reported values, which become its figures when no block shows one.
-  available?: ReadonlyArray<AvailableFigure>;
 }): EvidencePacket {
   const blockSources = new Map(input.factBlocks.flatMap((block) =>
     typeof block.id === "string" ? [[block.id, sourceIds(block)] as const] : []
   ));
-  const shownFigures = displayedFigures(input.factBlocks);
-  const displayed: PacketFigure[] = shownFigures.map(({ fact_id, block_id, ...figure }, index) => ({
+  const figures: PacketFigure[] = perfFigures(input.factBlocks).map(({ block_id, ...figure }, index) => ({
     id: `F${index + 1}`,
     ...figure,
-    ...(fact_id ? { fact_id } : {}),
     source_ids: (block_id && blockSources.get(block_id)) || [],
   }));
   // Every company the scope covers, whether or not a block shows it. An
@@ -295,20 +310,7 @@ export function buildEvidencePacket(input: {
     ...scopeLabels.values(),
     ...input.factBlocks.flatMap((block) => Array.isArray(block.subject_labels) ? block.subject_labels.filter(isString) : []),
   ]);
-  // The turn's other values are its primary company's (the structured
-  // context loader reads only that one), named once there are others.
-  const primary = input.scope?.companies[0] && scopeLabels.get(input.scope.companies[0].issuer_id);
-  const figures: PacketFigure[] = displayed.length > 0
-    ? [...displayed, ...derivedFigures(input.factBlocks, shownFigures, blockSources)]
-    : (input.available ?? []).map((figure, index) => ({
-      id: `F${index + 1}`,
-      ...figure,
-      ...(companies.length > 1 && primary ? { company: primary } : {}),
-    }));
-  // A single company's figures name no company: they are all its own.
-  const shown = (company: string) =>
-    displayed.some((figure) => figure.company === company) ||
-    (companies.length === 1 && displayed.length > 0);
+  const shown = (company: string) => figures.some((figure) => figure.company === company);
   return {
     route: input.scope?.route ?? "unknown",
     cutoff: input.cutoff,
@@ -321,7 +323,7 @@ export function buildEvidencePacket(input: {
         : []
     ),
     query_bounds: {
-      ...(input.scope ? queryBounds(input.scope) : {}),
+      ...(input.scope ? priceWindowBound(input.scope) : {}),
       ...(input.claims ? { claims: claimBounds(input.scope, input.cutoff) } : {}),
     },
     // A claim names its company as coverage does; one matched outside the
@@ -331,46 +333,6 @@ export function buildEvidencePacket(input: {
       ? { unavailable_metrics: input.scope.metrics.filter((metric) => !metric.available).map((metric) => metric.label) }
       : {}),
   };
-}
-
-// After every displayed figure, so a recorded reply's ids never shift.
-function derivedFigures(
-  blocks: ReadonlyArray<Block>,
-  shown: ReadonlyArray<DisplayedFigure>,
-  blockSources: ReadonlyMap<string, string[]>,
-): PacketFigure[] {
-  const idOf = (factId: string, blockId: unknown) => {
-    const index = shown.findIndex((figure) => figure.fact_id === factId && figure.block_id === blockId);
-    return index === -1 ? undefined : `F${index + 1}`;
-  };
-  const out: PacketFigure[] = [];
-  for (const block of blocks) {
-    for (const record of derivedRecords(block)) {
-      const [current, prior] = record.of.map((factId) => idOf(factId, block.id));
-      if (shown.some((figure) => figure.fact_id === record.fact_id) || !current || !prior) continue;
-      out.push({
-        id: `F${shown.length + out.length + 1}`,
-        metric: record.metric,
-        period: record.period,
-        period_end: record.period_end,
-        value: record.value,
-        fact_id: record.fact_id,
-        source_ids: (isString(block.id) && blockSources.get(block.id)) || [],
-        derived_from: [current, prior],
-      });
-    }
-  }
-  return out;
-}
-
-function derivedRecords(block: Block): DerivedFigureRecord[] {
-  const params = isRecord(block.data_ref) && isRecord(block.data_ref.params) ? block.data_ref.params : {};
-  const records = Array.isArray(params.derived_figures) ? params.derived_figures : [];
-  return records.filter((record): record is DerivedFigureRecord =>
-    isRecord(record) &&
-    [record.fact_id, record.metric, record.period, record.period_end, record.value].every(isString) &&
-    Array.isArray(record.of) && record.of.length === 2 && record.of.every(isString)
-  );
 }
 
 /**
@@ -502,13 +464,9 @@ export function packetForModel(packet: EvidencePacket): Record<string, unknown> 
     cutoff: packet.cutoff,
     figures: packet.figures.map((figure) => {
       const { fact_id: _factId, result_id: _resultId, series_ref: _seriesRef, source_ids: _sourceIds, ...shown } = figure;
-      if (shown.gap !== undefined) {
-        const { value: _value, ...unavailable } = shown;
-        return unavailable;
-      }
-      if (shown.displayed === undefined) return shown;
-      const { binding: _binding, ...available } = shown;
-      return available;
+      if (shown.gap === undefined) return shown;
+      const { value: _value, ...unavailable } = shown;
+      return unavailable;
     }),
     ...(packet.coverage.length > 0 ? { coverage: packet.coverage } : {}),
     ...(packet.gaps.length > 0 ? { gaps: packet.gaps } : {}),
@@ -522,29 +480,8 @@ export function packetForModel(packet: EvidencePacket): Record<string, unknown> 
   };
 }
 
-// The periods and window the readers were asked for (fact-blocks.ts), so the
-// answer can say what the data covers and what it was never asked to cover.
-function queryBounds(scope: ResearchScope): Record<string, string> {
-  const periods: Partial<Record<ResearchScope["reads"], string>> = {
-    latest_quarter: `latest quarter, with revenue for the last ${QUARTERS_SHOWN} quarters`,
-    trend: `last ${QUARTERS_SHOWN} quarters`,
-    derived_margin: `latest quarter, with revenue for the last ${QUARTERS_SHOWN} quarters`,
-    segments: "latest quarter's segments",
-    // What statement-blocks.ts reads: EPS is the year once its annual report is
-    // in, and a named fiscal year is the only one read.
-    statements: scope.fiscal_year === null
-      ? "latest quarter and latest fiscal year reported for cash flow; balance sheet at its latest period end; EPS for the latest quarter, or the fiscal year once its annual report is in"
-      : `fiscal year ${scope.fiscal_year} only: its latest quarter and the year for cash flow; balance sheet at its latest period end in that year; EPS for that year`,
-    comparison: scope.fiscal_year === null ? "latest fiscal year per company" : `fiscal year ${scope.fiscal_year} per company`,
-  };
-  // A single company's named quarter replaces its latest (#290).
-  const quarter = scope.fiscal_quarter && readsNamedQuarter(scope)
-    ? `fiscal ${scope.fiscal_quarter.fiscal_period} ${scope.fiscal_quarter.fiscal_year}, with revenue for the ${QUARTERS_SHOWN} quarters around it`
-    : undefined;
-  return {
-    ...(quarter ?? periods[scope.reads] ? { periods: quarter ?? periods[scope.reads]! } : {}),
-    ...(scope.price_window ? { price_window: `year to date, to the ${scope.price_window.cutoff.slice(0, 10)} cutoff` } : {}),
-  };
+function priceWindowBound(scope: ResearchScope): Record<string, string> {
+  return scope.price_window ? { price_window: `year to date, to the ${scope.price_window.cutoff.slice(0, 10)} cutoff` } : {};
 }
 
 function sourceIds(block: Block): string[] {

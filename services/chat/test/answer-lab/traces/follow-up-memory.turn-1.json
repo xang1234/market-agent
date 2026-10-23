@@ -851,7 +851,235 @@
       "benchmark": false,
       "inherited": []
     },
-    "cutoff": "2026-09-01T00:00:00.000Z"
+    "cutoff": "2026-09-01T00:00:00.000Z",
+    "packet": {
+      "route": "latest_quarter",
+      "cutoff": "2026-09-01T00:00:00.000Z",
+      "companies": [
+        "NVDA"
+      ],
+      "figures": [
+        {
+          "id": "F1",
+          "metric": "Revenue",
+          "period": "Q42026",
+          "period_end": "2026-01-25",
+          "value": "$62.1B",
+          "shown_in": "Latest quarter (Q4 2026)",
+          "fact_id": "5939e2b9-4381-40b5-a08f-376ec2b9a3f8",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F2",
+          "metric": "Gross profit",
+          "period": "Q42026",
+          "period_end": "2026-01-25",
+          "value": "$46.2B",
+          "shown_in": "Latest quarter (Q4 2026)",
+          "fact_id": "75d9a4fa-e94c-4428-ae29-eea33fb14afb",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F3",
+          "metric": "Operating income",
+          "period": "Q42026",
+          "period_end": "2026-01-25",
+          "value": "$40.3B",
+          "shown_in": "Latest quarter (Q4 2026)",
+          "fact_id": "f7c11202-b76d-4778-af8d-1ee1fb4ef068",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F4",
+          "metric": "Net income",
+          "period": "Q42026",
+          "period_end": "2026-01-25",
+          "value": "$35.4B",
+          "shown_in": "Latest quarter (Q4 2026)",
+          "fact_id": "2e15eabf-5aa4-4107-9170-81c296a1e7f3",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F5",
+          "metric": "Gross margin",
+          "period": "Q42026",
+          "period_end": "2026-01-25",
+          "value": "74.4%",
+          "shown_in": "Latest quarter (Q4 2026)",
+          "fact_id": "40a1d034-34d1-4361-bc97-cbb54d8efaff",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F6",
+          "metric": "Operating margin",
+          "period": "Q42026",
+          "period_end": "2026-01-25",
+          "value": "64.9%",
+          "shown_in": "Latest quarter (Q4 2026)",
+          "fact_id": "b27ac585-c679-428e-8fd2-3bd4ebbdf893",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F7",
+          "metric": "Net margin",
+          "period": "Q42026",
+          "period_end": "2026-01-25",
+          "value": "57.0%",
+          "shown_in": "Latest quarter (Q4 2026)",
+          "fact_id": "bd5ab73f-5ff2-494a-aeb5-b2ef502238fc",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F8",
+          "metric": "Revenue growth (QoQ)",
+          "period": "Q42026",
+          "period_end": "2026-01-25",
+          "value": "8.9%",
+          "shown_in": "Latest quarter (Q4 2026)",
+          "fact_id": "5f91c1f3-8566-485a-ab62-f17503efebb9",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F9",
+          "metric": "Revenue growth (YoY)",
+          "period": "Q42026",
+          "period_end": "2026-01-25",
+          "value": "57.9%",
+          "shown_in": "Latest quarter (Q4 2026)",
+          "fact_id": "8673677c-5f7c-4626-939f-e2ef46050566",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F10",
+          "metric": "Revenue",
+          "period": "Q1 2025",
+          "period_end": "2024-04-28",
+          "value": "$26.0B",
+          "shown_in": "Quarterly revenue",
+          "fact_id": "38597108-41f0-4f88-be18-94966b3543bf",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F11",
+          "metric": "Revenue",
+          "period": "Q2 2025",
+          "period_end": "2024-07-28",
+          "value": "$30.0B",
+          "shown_in": "Quarterly revenue",
+          "fact_id": "7953d0a8-7d07-4aba-b827-baf9c5b574bb",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F12",
+          "metric": "Revenue",
+          "period": "Q3 2025",
+          "period_end": "2024-10-27",
+          "value": "$35.1B",
+          "shown_in": "Quarterly revenue",
+          "fact_id": "227abc96-cd14-4fb2-8c90-e78f9468cece",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F13",
+          "metric": "Revenue",
+          "period": "Q4 2025",
+          "period_end": "2025-01-26",
+          "value": "$39.3B",
+          "shown_in": "Quarterly revenue",
+          "fact_id": "650f96e7-a96a-435e-b960-fffe50f9bd67",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F14",
+          "metric": "Revenue",
+          "period": "Q1 2026",
+          "period_end": "2025-04-27",
+          "value": "$44.1B",
+          "shown_in": "Quarterly revenue",
+          "fact_id": "92d70d3e-9d91-4f22-a7a8-d0385b7f06d1",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F15",
+          "metric": "Revenue",
+          "period": "Q2 2026",
+          "period_end": "2025-07-27",
+          "value": "$46.7B",
+          "shown_in": "Quarterly revenue",
+          "fact_id": "639a95a1-b25a-4e14-9010-ad6fc0ccec3e",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F16",
+          "metric": "Revenue",
+          "period": "Q3 2026",
+          "period_end": "2025-10-26",
+          "value": "$57.0B",
+          "shown_in": "Quarterly revenue",
+          "fact_id": "ddeae553-3bf7-47a9-97ba-b2480044fc3f",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F17",
+          "metric": "Revenue",
+          "period": "Q4 2026",
+          "period_end": "2026-01-25",
+          "value": "$62.1B",
+          "shown_in": "Quarterly revenue",
+          "fact_id": "5939e2b9-4381-40b5-a08f-376ec2b9a3f8",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        }
+      ],
+      "coverage": [
+        {
+          "company": "NVDA",
+          "status": "shown"
+        }
+      ],
+      "gaps": [],
+      "query_bounds": {
+        "periods": "latest quarter, with revenue for the last 8 quarters",
+        "claims": "management, guidance, and kpi claims from 2024-09-01 first, then the most recent others, published by the 2026-09-01 cutoff; a claim repeated by several sources or copies counts once"
+      },
+      "claims": [],
+      "disagreements": [],
+      "claims_status": "none",
+      "claims_truncated": false
+    }
   },
   "recorded_at": "2026-10-23T01:21:16.523Z",
   "exchange": {

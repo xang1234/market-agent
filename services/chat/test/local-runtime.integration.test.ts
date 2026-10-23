@@ -14,7 +14,6 @@ import { createClaimArgument } from "../../evidence/src/claim-argument-repo.ts";
 import { createClaimEvidence } from "../../evidence/src/claim-evidence-repo.ts";
 import { createClaim } from "../../evidence/src/claim-repo.ts";
 import { createDocument } from "../../evidence/src/document-repo.ts";
-import { createFact } from "../../evidence/src/fact-repo.ts";
 import { ephemeralRawBlobIdForSource } from "../../evidence/src/object-store.ts";
 import { createSource } from "../../evidence/src/source-repo.ts";
 import {
@@ -87,7 +86,7 @@ async function seedExistingEvidence(
   return { claimId: claim.claim_id, documentId: document.document_id, sourceId: source.source_id };
 }
 
-test("default local chat runtime persists a verifier-valid assistant message from existing evidence", {
+test("default local chat runtime persists a verifier-valid assistant message from the user's own evidence, citing none it does not quote (#398)", {
   skip: !dockerAvailable(),
   timeout: 120_000,
 }, async (t) => {
@@ -108,7 +107,7 @@ test("default local chat runtime persists a verifier-valid assistant message fro
   await seedUser(client);
   await seedUser(client, OTHER_USER_ID);
   const thread = await createThread(client, USER_ID, { title: "Local runtime" });
-  const otherUserSeeded = await seedExistingEvidence(client, thread.thread_id, {
+  await seedExistingEvidence(client, thread.thread_id, {
     userId: OTHER_USER_ID,
     label: "other-user",
   });
@@ -128,10 +127,10 @@ test("default local chat runtime persists a verifier-valid assistant message fro
   });
 
   assert.equal(result.blocks.length, 1);
-  assert.deepEqual(result.blocks[0]?.source_refs, [seeded.sourceId]);
-  assert.deepEqual(result.blocks[0]?.claim_refs, [seeded.claimId]);
-  assert.deepEqual(result.blocks[0]?.document_refs, [seeded.documentId]);
-  assert.equal((result.blocks[0]?.claim_refs as unknown[]).includes(otherUserSeeded.claimId), false);
+  const [loaded] = result.tool_calls ?? [];
+  assert.deepEqual((loaded?.result as { evidence: { claim_refs: string[] } }).evidence.claim_refs, [seeded.claimId], "only the user's own claim is read");
+  // No model writes this answer, so it quotes no claim and cites none.
+  assert.deepEqual([result.blocks[0]?.source_refs, result.blocks[0]?.claim_refs, result.blocks[0]?.document_refs], [[], [], []]);
   assert.doesNotMatch(JSON.stringify(result.blocks[0]), /other-user seeded chat evidence/);
   const runtimeToolCallIds = result.blocks[0]?.tool_call_ids;
   assert.ok(Array.isArray(runtimeToolCallIds));
@@ -153,17 +152,16 @@ test("default local chat runtime persists a verifier-valid assistant message fro
     claim_refs: unknown;
     document_refs: unknown;
     source_ids: unknown;
+    fact_refs: unknown;
     tool_call_ids: unknown;
   }>(
-    `select claim_refs, document_refs, source_ids, tool_call_ids
+    `select claim_refs, document_refs, source_ids, fact_refs, tool_call_ids
        from snapshots
       where snapshot_id = $1::uuid`,
     [result.snapshot_id],
   )).rows;
   assert.equal(snapshotRows.length, 1);
-  assert.deepEqual(snapshotRows[0]?.claim_refs, [seeded.claimId]);
-  assert.deepEqual(snapshotRows[0]?.document_refs, [seeded.documentId]);
-  assert.deepEqual(snapshotRows[0]?.source_ids, [seeded.sourceId]);
+  assert.deepEqual([snapshotRows[0]?.claim_refs, snapshotRows[0]?.document_refs, snapshotRows[0]?.source_ids, snapshotRows[0]?.fact_refs], [[], [], [], []]);
   const persistedToolCallIds = snapshotRows[0]?.tool_call_ids;
   assert.ok(Array.isArray(persistedToolCallIds));
   assert.ok(persistedToolCallIds.length > 0);
@@ -201,101 +199,6 @@ test("default local chat runtime persists a verifier-valid assistant message fro
   )).rows;
   assert.equal(toolRows.length, 1);
   assert.match(toolRows[0]?.result_hash ?? "", /^sha256:/);
-});
-
-test("chat snapshot cites fundamentals fact_refs and their source for a resolved issuer", {
-  skip: !dockerAvailable(),
-  timeout: 120_000,
-}, async (t) => {
-  const ISSUER_ID = "40000000-0000-4000-8000-000000000004";
-  const { databaseUrl } = await bootstrapDatabase(t, "chat-provenance");
-  const previousChatUrl = process.env.CHAT_DATABASE_URL;
-  const previousStub = process.env.CHAT_LOCAL_TOOL_EXECUTOR;
-  process.env.CHAT_DATABASE_URL = databaseUrl;
-  delete process.env.CHAT_LOCAL_TOOL_EXECUTOR;
-  registerLifoCleanup(t, async () => {
-    await closeLocalRuntimePoolForTests();
-    restoreEnv("CHAT_DATABASE_URL", previousChatUrl);
-    restoreEnv("CHAT_LOCAL_TOOL_EXECUTOR", previousStub);
-  });
-
-  const client = await connectedClient(t, databaseUrl);
-  await seedUser(client);
-  const thread = await createThread(client, USER_ID, { title: "Provenance" });
-
-  // Public source (user_id null) + revenue metric + one authoritative app-entitled FY fact.
-  const sourceId = (await client.query<{ source_id: string }>(
-    `insert into sources (provider, kind, trust_tier, license_class, retrieved_at)
-     values ('test', 'filing', 'primary', 'test', now())
-     returning source_id::text as source_id`,
-  )).rows[0].source_id;
-  const metricId = (await client.query<{ metric_id: string }>(
-    `insert into metrics (metric_key, display_name, unit_class, aggregation, interpretation, canonical_source_class)
-     values ('revenue', 'Revenue', 'currency', 'sum', 'higher_is_better', 'gaap')
-     returning metric_id::text as metric_id`,
-  )).rows[0].metric_id;
-  const fact = await createFact(client, {
-    subject_kind: "issuer",
-    subject_id: ISSUER_ID,
-    metric_id: metricId,
-    period_kind: "fiscal_y",
-    fiscal_year: 2024,
-    fiscal_period: "FY",
-    value_num: 100,
-    unit: "currency",
-    currency: "USD",
-    as_of: "2026-05-08T00:00:00.000Z",
-    observed_at: "2026-05-08T00:00:00.000Z",
-    source_id: sourceId,
-    method: "reported",
-    verification_status: "authoritative",
-    freshness_class: "filing_time",
-    coverage_level: "full",
-    entitlement_channels: ["app"],
-    confidence: 1,
-  });
-  const factId = fact.fact_id;
-
-  // Minimal resolved handoff so structuredRefsFromHandoff yields the issuer
-  // (handoff.subject_ref.kind === "issuer"); no listings → no quote.
-  const issuerRef = { kind: "issuer" as const, id: ISSUER_ID };
-  const result = await analystToolRuntime({
-    threadId: thread.thread_id,
-    runId: RUN_ID,
-    turnId: TURN_ID,
-    userId: USER_ID,
-    bundleId: "single_subject_analysis",
-    userIntent: "Summarize revenue",
-    emit: (() => ({}) as never),
-    subjectPreResolution: {
-      status: "resolved",
-      subject_ref: issuerRef,
-      handoff: { subject_ref: issuerRef, context: {} },
-    } as never,
-  });
-
-  // The answer's blocks carry the fundamentals fact as provenance + its source.
-  assert.ok((result.blocks[0]?.provenance_fact_refs as unknown[]).includes(factId));
-  assert.ok((result.blocks[0]?.source_refs as unknown[]).includes(sourceId));
-
-  const persisted = await persistAssistantMessage({
-    message_id: "44444444-4444-4444-a444-444444444444",
-    threadId: thread.thread_id,
-    runId: RUN_ID,
-    turnId: TURN_ID,
-    role: "assistant",
-    blocks: result.blocks,
-    content_hash: contentHash(JSON.stringify(result.blocks)),
-  });
-  // Seal verified (no throw) and the manifest carries the provenance.
-  assert.equal(persisted.snapshot_id, result.snapshot_id);
-
-  const snap = (await client.query<{ fact_refs: unknown; source_ids: unknown }>(
-    `select fact_refs, source_ids from snapshots where snapshot_id = $1::uuid`,
-    [result.snapshot_id],
-  )).rows[0];
-  assert.deepEqual(snap?.fact_refs, [factId]);
-  assert.ok((snap?.source_ids as string[]).includes(sourceId));
 });
 
 function restoreEnv(key: string, value: string | undefined): void {

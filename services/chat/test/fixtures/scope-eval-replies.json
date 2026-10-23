@@ -1,6 +1,6 @@
 {
   "model": "anthropic/claude-sonnet-5-5",
-  "recorded": "2026-10-22",
+  "recorded": "2026-10-23",
   "replies": [
     {
       "match": "Question: \"Analyze NVDA's latest quarter.\"",
@@ -8,11 +8,11 @@
     },
     {
       "match": "Question: \"How have NVDA's operating margins trended?\"",
-      "text": "{\"metrics\":[],\"asks\":[\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_margin\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\"]}}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":\"margin\"}],\"asks\":[\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_margin\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\"]}}"
     },
     {
       "match": "Question: \"What changed in NVDA's gross margin in Q1 fiscal 2026?\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"gross_margin\"],\"period\":{\"kind\":\"fiscal_quarter\",\"fiscal_period\":\"Q1\",\"fiscal_year\":2026},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\"]}}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":\"margin\"}],\"asks\":[\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"gross_margin\"],\"period\":{\"kind\":\"fiscal_quarter\",\"fiscal_period\":\"Q1\",\"fiscal_year\":2026},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\"]}}"
     },
     {
       "match": "Question: \"What is NVDA's gross margin?\"",
@@ -20,11 +20,11 @@
     },
     {
       "match": "Question: \"Show AMD operating margins QoQ\"",
-      "text": "{\"metrics\":[],\"asks\":[\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_margin\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AMD\"]}}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":\"margin\"}],\"asks\":[\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_margin\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AMD\"]}}"
     },
     {
       "match": "Question: \"Compare AMD gross margin with last quarter\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"gross_margin\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AMD\"]}}"
+      "text": "{\"metrics\":[],\"asks\":[\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"gross_margin\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AMD\"]}}"
     },
     {
       "match": "Question: \"What is AMD's EBITDA?\"",
@@ -52,7 +52,7 @@
     },
     {
       "match": "Question: \"Compare NVDA and AMD revenue and free cash flow\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null},{\"metric\":\"free_cash_flow\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"compare\",\"add\":[\"NVDA\",\"AMD\"]}}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null},{\"metric\":\"free_cash_flow\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\",\"AMD\"]}}"
     },
     {
       "match": "Question: \"What is NVDA's revenue and free cash flow?\"",
@@ -68,7 +68,7 @@
     },
     {
       "match": "Question: \"Compare NVDA's and AMD's fiscal 2025 revenue YTD\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":\"ytd\"}],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"fiscal_year\",\"fiscal_year\":2025},\"companies\":{\"kind\":\"compare\",\"add\":[\"NVDA\",\"AMD\"]}}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":\"ytd\"}],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"fiscal_year\",\"fiscal_year\":2025},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\",\"AMD\"]}}"
     },
     {
       "match": "Question: \"What revenue guidance did NVDA give?\"",
@@ -196,7 +196,7 @@
     },
     {
       "match": "Question: \"What was NVDA's non-GAAP operating income?\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":\"non_gaap\",\"qualifier\":null}],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_income\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\"]}}"
+      "text": "{\"metrics\":[{\"metric\":\"non_gaap_income\",\"adjustment\":\"non_gaap\",\"qualifier\":null}],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_income\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\"]}}"
     },
     {
       "match": "Question: \"Show NVDA's EPS and adjusted EPS\"",
@@ -208,7 +208,7 @@
     },
     {
       "match": "Question: \"What is its profitability?\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}"
+      "text": "{\"metrics\":[],\"asks\":[\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}"
     },
     {
       "match": "Question: \"Break down AMD's revenue by segment and show its gross margin\"",
@@ -233,11 +233,11 @@
     },
     {
       "match": "Question: \"Compare AMD and NVDA revenue in Q2 2025\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"fiscal_quarter\",\"fiscal_period\":\"Q2\",\"fiscal_year\":2025},\"companies\":{\"kind\":\"compare\",\"add\":[\"AMD\",\"NVDA\"]}}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"fiscal_quarter\",\"fiscal_period\":\"Q2\",\"fiscal_year\":2025},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AMD\",\"NVDA\"]}}"
     },
     {
       "match": "Question: \"Show NVDA's free cash flow margin and its gross margin trend\"",
-      "text": "{\"metrics\":[{\"metric\":\"free_cash_flow\",\"adjustment\":null,\"qualifier\":\"margin\"}],\"asks\":[\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"gross_margin\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\"]}}"
+      "text": "{\"metrics\":[{\"metric\":\"free_cash_flow\",\"adjustment\":null,\"qualifier\":\"margin\"},{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"margins\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"gross_margin\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\"]}}"
     },
     {
       "match": "Question: \"What is the market doing?\"",
@@ -273,7 +273,7 @@
     },
     {
       "match": "Question: \"And its gross margin, remove the outlook\"",
-      "text": "{\"metrics\":[],\"asks\":[\"margins\"],\"turns_off\":{\"facets\":[\"guidance\"],\"metrics\":[]},\"income_items\":[\"gross_margin\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":\"margin\"}],\"asks\":[\"margins\"],\"turns_off\":{\"facets\":[\"guidance\"],\"metrics\":[]},\"income_items\":[\"gross_margin\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}"
     },
     {
       "match": "Question: \"Take out the forecasts and show margins\"",
@@ -505,11 +505,15 @@
     },
     {
       "match": "Question: \"Now the latest fiscal year\"",
-      "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"latest\"},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}"
+      "text": "{\"metrics\":[],\"asks\":[\"latest_fiscal_year\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"latest\"},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}"
     },
     {
       "match": "Question: \"And for AMD alone?\"",
       "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"only\",\"names\":[\"AMD\"]}}"
+    },
+    {
+      "match": "Question: \"How about over the past year?\"",
+      "text": "{\"metrics\":[],\"asks\":[\"price_history\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"range\"},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}"
     }
   ]
 }

@@ -233,14 +233,29 @@ test("a question about one company that asks for no figure is answered with its 
   });
 
   const scoped = async (context: { userIntent?: string }, read: Promise<ScopeProposal | null>) =>
-    resolveResearchScope({ question: context.userIntent ?? "", companies: [{ issuer_id: COMPANIES.QTRS!, label: "QTRS" }], prior: null, asOf: "2026-10-22T00:00:00.000Z", served: true, proposal: await read });
+    resolveResearchScope({ companies: [{ issuer_id: COMPANIES.QTRS!, label: "QTRS" }], prior: null, asOf: "2026-10-22T00:00:00.000Z", served: true, proposal: await read });
 
-  await t.test("an overview keeps no period in its saved scope, as it shows the latest quarters (#398)", async () => {
-    const keepsYear = (async (context: { userIntent?: string }, read: Promise<ScopeProposal | null>) => ({ ...(await scoped(context, read)), fiscal_year: 2023 })) as never;
-    const done = completed((await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve, researchScope: keepsYear }).run({ ...base, userIntent: "How is QTRS doing?" })).events);
-    assert.deepEqual(await results(done.message_id), QTRS_OVERVIEW);
-    const { rows: [saved] } = await db.query(`select research_scope from chat_messages where message_id = $1`, [done.message_id]);
-    assert.deepEqual([saved.research_scope.fiscal_year, saved.research_scope.fiscal_quarter], [null, null]);
+  await t.test("an overview of the latest quarters keeps no period in its saved scope; one at a period keeps it (#398)", async () => {
+    // The previous answer was at fiscal 2023.
+    const keepsYear = (async (context: { userIntent?: string }, read: Promise<ScopeProposal | null>) => {
+      const prior = { ...(await scoped(context, Promise.resolve(NO_ASKS))), fiscal_year: 2023 };
+      return resolveResearchScope({ companies: prior.companies, prior, asOf: "2026-10-22T00:00:00.000Z", served: true, proposal: await read });
+    }) as never;
+    const savedPeriod = async (read: ScopeProposal, userIntent: string) => {
+      const done = completed((await chatHarness(pool, { model: null, readQuestion: async () => read, resolveMention: resolve, researchScope: keepsYear }).run({ ...base, userIntent })).events);
+      assert.deepEqual(await results(done.message_id), QTRS_OVERVIEW, userIntent);
+      const { rows: [saved] } = await db.query(`select research_scope from chat_messages where message_id = $1`, [done.message_id]);
+      return [saved.research_scope.fiscal_year, saved.research_scope.fiscal_quarter];
+    };
+    assert.deepEqual(await savedPeriod({ ...NO_ASKS, period: { kind: "latest" } }, "And QTRS's latest quarter?"), [null, null]);
+    assert.deepEqual(await savedPeriod({ ...NO_ASKS, period: { kind: "fiscal_year", fiscal_year: 2023 } }, "How was QTRS in fiscal 2023?"), [2023, null]);
+  });
+
+  await t.test("a turn that asks for segments is the engine's segment gap, planned with no model, whatever else it asks (#398)", async () => {
+    for (const asks of [["segments"], ["segments", "margins"]] as const) {
+      const done = completed((await chatHarness(pool, { model: null, readQuestion: reading({ ...NO_ASKS, asks: new Set(asks) }), resolveMention: resolve }).run({ ...base, userIntent: "Break down QTRS's revenue by segment" })).events);
+      assert.deepEqual(done.financial_gap, { reason_code: "unsupported" }, asks.join());
+    }
   });
 
   await t.test("a reading that asks for a figure or a period other than the latest, or a company with no quarters, goes to the planner; a carried company is the overview, and a price window the analyst's", async () => {
@@ -258,31 +273,39 @@ test("a question about one company that asks for no figure is answered with its 
     const carried = (await resolve("QTRS")) as ChatResolvedSubjectPreResolution;
     // A follow-up that adds a company is the overview of the carried one and the added one.
     assert.deepEqual(await planned("Compare it with AAA", ["QTRS", "AAA"], { priorSubjects: async () => [carried], readQuestion: reading({ ...NO_ASKS, companies: { kind: "compare", add: ["AAA"] } }) }), [1, ["a_out", "b_out"]], "a carried company beside one with no quarters");
-    const periods: Array<[string, ScopeProposal]> = [
-      ["in fiscal 2023", { ...NO_ASKS, period: { kind: "fiscal_year", fiscal_year: 2023 } }],
-      ["for Q4 2023", { ...NO_ASKS, period: { kind: "fiscal_quarter", fiscal_period: "Q4", fiscal_year: 2023 } }],
-      ["for Q4", { ...NO_ASKS, period: { kind: "fiscal_quarter", fiscal_period: "Q4", fiscal_year: null } }],
-      ["TTM", { ...NO_ASKS, period: { kind: "trailing_twelve_months" } }],
-      ["since 2021", { ...NO_ASKS, period: { kind: "range" } }],
-      ["last year", { ...NO_ASKS, period: { kind: "other" } }],
-    ];
-    for (const [period, read] of periods) {
-      // The reading names QTRS, so it is a question of its own, not a follow-up.
-      const named = { ...read, companies: { kind: "as_named" as const, names: ["QTRS"] } };
-      assert.deepEqual(await planned(`Revenue for QTRS ${period}`, ["QTRS"], { readQuestion: reading(named) }), [1, ["a_out"]], period);
+    const named = (period: ScopeProposal["period"]) => reading({ ...NO_ASKS, period, companies: { kind: "as_named", names: ["QTRS"] } });
+    for (const [period, read] of [
+      ["TTM", { kind: "trailing_twelve_months" }],
+      ["since 2021", { kind: "range" }],
+      ["last year", { kind: "other" }],
+    ] as const) {
+      assert.deepEqual(await planned(`Revenue for QTRS ${period}`, ["QTRS"], { readQuestion: named(read) }), [1, ["a_out"]], period);
     }
+    for (const [period, read] of [
+      ["in fiscal 2023", { kind: "fiscal_year", fiscal_year: 2023 }],
+      ["for Q4 2023", { kind: "fiscal_quarter", fiscal_period: "Q4", fiscal_year: 2023 }],
+      ["for Q4", { kind: "fiscal_quarter", fiscal_period: "Q4", fiscal_year: null }],
+    ] as const) {
+      assert.deepEqual(await planned(`Revenue for QTRS ${period}`, ["QTRS"], { readQuestion: named(read) }), [0, QTRS_OVERVIEW.map(([outputId]) => outputId)], period);
+    }
+    const [calls, outputs] = await planned("Revenue for QTRS for Q2 2023", ["QTRS"], { readQuestion: named({ kind: "fiscal_quarter", fiscal_period: "Q2", fiscal_year: 2023 }) });
+    assert.deepEqual([calls, (outputs as string[])[0], (outputs as string[]).filter((output) => output.endsWith("_yoy"))], [0, "out_revenue_fy2021_q3", ["out_revenue_growth_yoy"]], "eight quarters to Q2 FY2023");
     // A price window, asked for or kept by the scope, is market data the analyst path charts (#398 D2).
     let analystCalls = 0;
     const analyst = () => {
       analystCalls += 1;
       return { snapshot_id: "00000000-0000-4000-8000-000000000000", blocks: [], verification: { ok: true } };
     };
-    for (const options of [{ readQuestion: reading({ ...NO_ASKS, asks: new Set(["price_window"]) }) }, { researchScope: scoped }]) {
+    const keepsWindow = async (context: { userIntent?: string }, read: Promise<ScopeProposal | null>): Promise<ResearchScope> =>
+      ({ ...(await scoped(context, read)), price_window: { kind: "ytd", cutoff: "2026-10-22T00:00:00.000Z" }, inherited: ["price_window"] });
+    for (const options of [{ readQuestion: reading({ ...NO_ASKS, asks: new Set(["price_window"]) }) }, { readQuestion: async () => NO_ASKS, researchScope: keepsWindow }]) {
       const model = revenueModel(["QTRS"]);
-      await chatHarness(pool, { model, readQuestion: reading(NO_ASKS), resolveMention: resolve, analyst, ...options }).run({ ...base, userIntent: "Revenue for QTRS YTD" });
+      await chatHarness(pool, { model, resolveMention: resolve, analyst, ...options }).run({ ...base, userIntent: "Revenue for QTRS YTD" });
       assert.equal(model.calls, 0);
     }
-    assert.equal(analystCalls, 2, "a window the reading asks for, and one the scope keeps");
+    assert.equal(analystCalls, 2, "a window the reading asks for, and one the scope keeps for a follow-up naming no company");
+    const ownCompany = completed((await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve, analyst, researchScope: keepsWindow }).run({ ...base, userIntent: "How is QTRS doing?" })).events);
+    assert.deepEqual([analystCalls, ownCompany.bundle_id], [2, "financial_answer"], "a question naming its company is the engine's, whatever window the scope keeps");
     const failing = async (): Promise<ResearchScope> => {
       throw new Error("the scope is down");
     };

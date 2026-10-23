@@ -42,24 +42,22 @@ import { requireFinancialReadiness } from "../../financial-engine/src/readiness.
 import { publishRequest, type RequestGap } from "../../financial-engine/src/request.ts";
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { comparedAdditions, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
-import { contentHashForText, financialMessageId } from "./chat-ids.ts";
-import { allResolved, marginTrendSubjects, overviewOmissions, overviewPeers, overviewSubjects, planCompanyOverview, planMarginTrend, type PeersOf } from "./company-overview.ts";
-import { noteBlock } from "./fact-blocks.ts";
+import { contentHashForText, financialMessageId, noteBlock } from "./chat-ids.ts";
+import { allResolved, overviewOmissions, overviewPeers, planCompanyOverview, planMarginTrend, type PeersOf } from "./company-overview.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { companyKey, extractSubjectMentions } from "./subject-extraction.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "./subjects.ts";
+import { periodNote, planPeriod, planScopeFigures, routeTurn, type NamedGap, type PlanChoice, type ReadPeriod } from "./scope-figures.ts";
 import {
   BALANCE_SHEET_ITEMS,
   companyWordsIn,
   PROPOSABLE_METRICS,
   proposedMetric,
   readingAsks,
-  type CompanyChange,
   type IncomeItem,
   type RequestedMetric,
   type ResearchScope,
   type ScopeFacet,
-  type ScopeField,
   type ScopeProposal,
 } from "./research-scope.ts";
 
@@ -129,60 +127,6 @@ export type ChatFinancialRuntimeDeps = Readonly<{
   commentary?: (db: SqlExecutor, input: CommentaryRequest) => Promise<void>;
 }>;
 
-// The lane each facet asks for, when a question names no metric: a figure
-// the engine shows, something only the analyst path answers (the previous
-// answer's evidence, guidance from claims, market data per #398 D2), or neither.
-const FACET_LANE: Readonly<Record<ScopeFacet, "figure" | "analyst" | "neutral">> = {
-  peers: "neutral",
-  segments: "figure",
-  margins: "figure",
-  margin_trend: "figure",
-  price_window: "analyst",
-  benchmark: "analyst",
-  guidance: "analyst",
-  explains: "neutral",
-  evidence: "analyst",
-  latest_quarter: "neutral",
-};
-
-// What a follow-up may keep from its scope and still be answered by the
-// overview, which shows the latest quarters of the income statement.
-const OVERVIEW_KEEPS: ReadonlySet<ScopeField> = new Set(["peers", "metrics"]);
-const OVERVIEW_METRICS: ReadonlySet<string> = new Set(["income_statement"]);
-
-// The companies a reading's change names, whatever it does with them.
-function namedCompanies(change: CompanyChange): number {
-  switch (change.kind) {
-    case "compare":
-      return change.add.length;
-    case "drop":
-      return change.drop.length + change.add.length;
-    default:
-      return change.names.length;
-  }
-}
-
-// The analyst path keeps a turn that asks for no figure but something only it
-// answers, or whose scope keeps market data; a follow-up that names no company
-// and asks for nothing but an explanation ("Why?", "thanks"); and one whose
-// scope keeps what an overview would not show.
-function leftToAnalyst(reading: ScopeProposal | null, scope: ResearchScope | null): boolean {
-  if (reading === null) return false;
-  const { asks, offMetrics } = readingAsks(reading);
-  if (reading.metrics.some((metric) => !offMetrics.has(metric.metric_key)) || reading.income_items.length > 0) return false;
-  const lanes = [...asks].map((facet) => FACET_LANE[facet]);
-  if (lanes.includes("figure")) return false;
-  if (lanes.includes("analyst")) return true;
-  if (scope !== null && (scope.price_window !== null || scope.benchmark)) return true;
-  const asksNothing = [...asks].every((facet) => facet === "explains") && reading.period.kind !== "latest";
-  if (namedCompanies(reading.companies) === 0 && asksNothing) return true;
-  if ((reading.companies.kind === "as_named" && reading.companies.names.length > 0) || scope === null) return false;
-  const overviewPeriod = reading.period.kind === "none" || reading.period.kind === "latest";
-  const keepsOther = scope.inherited.some((field) => !OVERVIEW_KEEPS.has(field)) || scope.guidance === true ||
-    (scope.inherited.includes("metrics") && scope.metrics.some((metric) => !OVERVIEW_METRICS.has(metric.metric_key)));
-  return !overviewPeriod || keepsOther;
-}
-
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const MAX_PLANNING_MODEL_CALLS = 2;
 
@@ -233,13 +177,13 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       `select blocks->0->>'kind' as kind from chat_messages where message_id = $1::uuid`,
       [messageId],
     );
-    const run = (requested: TurnCompanies, reading: ScopeProposal | null, scope: ResearchScope | null) => async (): Promise<ChatFinancialTurn> => {
+    const run = (requested: TurnCompanies, reading: ScopeProposal | null, scope: ResearchScope | null, choice: PlanChoice) => async (): Promise<ChatFinancialTurn> => {
       // What planning settled, for a gap: the companies it was asked about, a
       // clarification pick (recorded before the model is called) or the peers
       // an overview added included, and the planner's result.
       let asked = requested.subjects;
       let planned: PlanningResult | undefined;
-      let overview = false;
+      let overviewPeriod: ReadPeriod | null = null;
       const declinedGap = (reason: ChatGap) => {
         // ponytail: a retry that resumes a reserved run does not plan, so its
         // gap names the companies the message resolved, without a pick or peers.
@@ -252,14 +196,17 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
           // reads here as run_failed): the gap never replaces that answer.
           message_id: messageId,
           subject_refs: refs,
-          // It computed no figure, so it names none, and no reader re-reads it.
+          // It keeps the figures its scope kept, and the metrics no definition
+          // serves that it declined, so a follow-up is that gap again.
           ...(scope === null ? {} : {
             research_scope: {
               ...scope,
               route: "financial_gap" as const,
               reads: "financial_gap" as const,
               companies: answeredCompanies(refs.map((ref) => ref.id), scope, requested.labels),
-              metrics: [],
+              metrics: scope.inherited.includes("metrics")
+                ? scope.metrics
+                : scope.metrics.filter((metric) => CATALOG.get(metric.metric_key)?.available !== true).map((metric) => ({ ...metric, available: false })),
             },
           }),
         };
@@ -272,7 +219,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       // attempt can compose.
       const withCommentary = (answer: ChatFinancialTurn): ChatFinancialTurn => {
         const { commentary: save } = deps;
-        if (!overview || !save || answer.kind !== "published" || !answer.message) return answer;
+        if (overviewPeriod === null || !save || answer.kind !== "published" || !answer.message) return answer;
         const { message } = answer;
         return {
           ...answer,
@@ -301,12 +248,11 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
           planned = await planTurn(deps.planningModel, context, text, requested.subjects, authority, deps.clock?.() ?? new Date(), (subjects) => {
             asked = subjects;
           }, {
-            scope,
-            reading,
+            choice,
             evidence: deps.evidence(db),
             peersOf: (issuer) => overviewPeers(db, issuer),
-            onOverview: () => {
-              overview = true;
+            onOverview: (period) => {
+              overviewPeriod = period;
             },
           });
           return planned;
@@ -316,7 +262,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
           scope,
           reading,
           evidence: deps.evidence,
-          overview: () => overview,
+          overviewPeriod: () => overviewPeriod,
           carried: requested.carried,
           notFound: requested.notFound,
           labels: requested.labels,
@@ -340,7 +286,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
         }
       }
     };
-    if (existing) return existing.kind === "financial_answer" ? run(NO_COMPANIES, null, null) : () => savedGap(deps.pool, context.threadId, messageId);
+    if (existing) return existing.kind === "financial_answer" ? run(NO_COMPANIES, null, null, PLANNER) : () => savedGap(deps.pool, context.threadId, messageId);
     // A retry of a turn whose run is reserved resumes it, whatever this attempt's reading says.
     const reserved = await findPlanForRequest(deps.pool, { authority, request_key: turnId }) !== null;
     const requested = await requestedSubjects(deps, context, text);
@@ -359,10 +305,11 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       console.warn("[chat] research scope unavailable; saving the financial answer without it", reason);
       return null;
     });
-    if (reserved) return run(requested, reading, scope);
-    if (leftToAnalyst(reading, scope)) return null;
+    const choice = routeTurn(reading, scope);
+    if (reserved) return run(requested, reading, scope, choice);
+    if (choice.kind === "analyst") return null;
     const kept = withinScope(requested, scope);
-    return kept.subjects.length === 0 ? null : run(kept, reading, scope);
+    return kept.subjects.length === 0 ? null : run(kept, reading, scope, choice);
   };
   const assertReady = () => requireFinancialReadiness(deps.pool, ["chat"]);
   return Object.freeze({ take, assertReady });
@@ -495,6 +442,7 @@ function withinScope(requested: TurnCompanies, scope: ResearchScope | null): Tur
 }
 
 const NO_COMPANIES: TurnCompanies = { subjects: [], resolved: [], carried: [], notFound: [], labels: new Map() };
+const PLANNER: PlanChoice = { kind: "planner" };
 
 async function planTurn(
   model: PlanningModel | null,
@@ -507,11 +455,10 @@ async function planTurn(
   // before the model is, and with the overview's once it replaces the planner.
   onSubjects: (subjects: ReadonlyArray<RequestedSubject>) => void,
   turn: Readonly<{
-    scope: ResearchScope | null;
-    reading: ScopeProposal | null;
+    choice: PlanChoice;
     evidence: FinancialEvidencePort;
     peersOf: PeersOf;
-    onOverview: () => void;
+    onOverview: (period: ReadPeriod) => void;
   }>,
 ): Promise<PlanningResult> {
   const planningContext = (subjects: ReadonlyArray<RequestedSubject>): PlanningContext => ({
@@ -536,23 +483,42 @@ async function planTurn(
   }
   onSubjects(subjects);
   if (CASH_RESILIENCE.test(text)) return planCashResilience(planningContext(subjects), text);
-  if (allResolved(subjects)) {
-    const companies = await overviewSubjects(subjects, turn.reading, turn.scope, turn.peersOf);
-    const overview = companies && await planCompanyOverview(planningContext(companies), turn.evidence);
-    if (companies && overview) {
-      onSubjects(companies);
-      turn.onOverview();
-      return overview;
+  const { choice } = turn;
+  if (choice.kind === "segments_gap" || choice.kind === "named_gap") {
+    return { outcome: "unsupported", reason: choice.kind === "segments_gap" ? "segments" : choice.reason, issues: [], model_calls: 0 };
+  }
+  const deterministic = async (): Promise<PlanningResult | null> => {
+    if (!allResolved(subjects)) return null;
+    switch (choice.kind) {
+      case "trend":
+        return subjects.length === 1 ? planMarginTrend(planningContext(subjects), turn.evidence, choice.period) : null;
+      case "overview": {
+        const companies = choice.peers ? await withPeers(subjects, turn.peersOf) : subjects;
+        const overview = companies && await planCompanyOverview(planningContext(companies), turn.evidence, choice.period);
+        if (overview) onSubjects(companies!);
+        return overview;
+      }
+      case "kept_figures":
+        return planScopeFigures(planningContext(subjects), turn.evidence, choice.metrics, choice.period);
+      default:
+        return null;
     }
-    const trended = marginTrendSubjects(subjects, turn.reading, turn.scope);
-    const trend = trended && await planMarginTrend(planningContext(trended), turn.evidence);
-    if (trend) {
-      turn.onOverview();
-      return trend;
-    }
+  };
+  const plan = await deterministic();
+  if (plan) {
+    if (choice.kind === "trend" || choice.kind === "overview") turn.onOverview(choice.period);
+    return plan;
   }
   // A failing or unreachable model is a planning gap (publishRequest); the narrative composer is never a fallback for numbers.
   return planFinancialRequest(planningContext(subjects), text, model ?? noModel);
+}
+
+// One company and its peers; null for several companies, or one with none.
+async function withPeers(subjects: ReadonlyArray<RequestedSubject>, peersOf: PeersOf): Promise<ReadonlyArray<RequestedSubject> | null> {
+  const [company] = subjects;
+  if (subjects.length !== 1 || company?.resolution.status !== "resolved") return null;
+  const peers = await peersOf(company.resolution.subject_ref);
+  return peers.length === 0 ? null : [company, ...peers];
 }
 
 const CASH_RESILIENCE = /\bcash[- ]resilience\b/iu;
@@ -703,8 +669,7 @@ function persistAssistantMessage(
     scope: ResearchScope | null;
     reading: ScopeProposal | null;
     evidence: ChatFinancialRuntimeDeps["evidence"];
-    // Whether the turn published the overview or margin trend, of the latest quarters.
-    overview: () => boolean;
+    overviewPeriod: () => ReadPeriod | null;
     carried: ReadonlyArray<string>;
     notFound: ReadonlyArray<string>;
     labels: ReadonlyMap<string, string>;
@@ -720,13 +685,18 @@ function persistAssistantMessage(
     // The commentary is written from the answer's figures alone, so it gives no cause: an explanation stays uncovered.
     const names = (slot: string) => publication.block.financial.labels[`subject:${slot}`]?.text ?? slot;
     const missing = reading === null || plan === null ? [] : [
-      ...uncoveredAsks(answeredPeers ? withoutPeers(reading) : reading, plan, turn.labels),
+      ...uncoveredAsks(answeredPeers ? withoutPeers(reading) : reading, plan, turn.labels, scope),
       ...await overviewOmissions(plan, request.authority, inSavepoints(tx.client, turn.evidence(tx.client)), names),
     ];
+    const shownPeriod = plan === null ? null : planPeriod(plan);
+    const stillShown = reading === null || plan === null ? [] : shownTurnedOff(reading, plan);
+    const replaced = scope === null ? null : periodNote(scope, shownPeriod);
     const note = [
       ...(turn.notFound.length === 0 ? [] : [`No company matched ${labelList(turn.notFound)}.`]),
       ...(turn.carried.length === 0 ? [] : [`${labelList(turn.carried)} ${turn.carried.length > 1 ? "are" : "is"} carried from the previous answer.`]),
+      ...(replaced === null ? [] : [replaced]),
       ...(reading === null ? [UNCHECKED] : missing.length === 0 ? [] : [`Not covered by this answer: ${missing.join("; ")}.`]),
+      ...(stillShown.length === 0 ? [] : [`Still shown as an input to another figure: ${labelList(stillShown)}.`]),
     ].join(" ");
     const blocks = [
       publication.block,
@@ -740,8 +710,7 @@ function persistAssistantMessage(
       reads: "financial_answer" as const,
       companies: answeredCompanies(plan.subjects.members.map((member) => member.subject_ref.id), scope, turn.labels),
       metrics: planMetrics(plan),
-      // The overview shows each company's latest quarters, so it keeps no period.
-      ...(turn.overview() ? { fiscal_year: null, fiscal_quarter: null } : {}),
+      ...(shownPeriod === null ? {} : { latest_period: shownPeriod }),
       ...(reading === null ? { coverage_unchecked: true as const } : {}),
     };
     // It replaces a gap another attempt of the turn saved under its id.
@@ -855,6 +824,7 @@ const NEVER_PLANNED: Partial<Readonly<Record<ScopeFacet, string>>> = {
   segments: "revenue by segment",
   peers: "peers the question did not name",
   price_window: "a stock price return",
+  price_history: "a stock price return over a window other than year to date",
   benchmark: "a comparison with a benchmark index",
   guidance: "company guidance",
   explains: "the cause of these figures",
@@ -871,13 +841,28 @@ const INCOME_ITEM_FIGURE: Readonly<Record<IncomeItem, string | null>> = {
 };
 
 /**
- * What a question asks for, as the model read it, that its plan does not
- * compute, so the answer names it instead of leaving it out. Each company is
- * checked on its own figures: what some companies' figures answer is named
- * for the others, by the label `labels` gives each issuer.
+ * What a question asks for, as the model read it, or keeps from its scope,
+ * that its plan does not compute, so the answer names it instead of leaving it
+ * out. Each company is checked on its own figures: what some companies'
+ * figures answer is named for the others, by the label `labels` gives each
+ * issuer.
  */
-export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1, labels: ReadonlyMap<string, string> = new Map()): string[] {
-  const { asks, offMetrics } = readingAsks(reading);
+export function uncoveredAsks(
+  reading: ScopeProposal,
+  plan: FinancialPlanV1,
+  labels: ReadonlyMap<string, string> = new Map(),
+  scope: Pick<ResearchScope, "metrics" | "inherited" | "segments" | "margin_trend" | "price_window" | "benchmark" | "guidance" | "explains"> | null = null,
+): string[] {
+  const { asks: readAsks, offMetrics } = readingAsks(reading);
+  const kept: ScopeFacet[] = scope === null ? [] : [
+    ...(scope.segments ? ["segments" as const] : []),
+    ...(scope.margin_trend ? ["margin_trend" as const] : []),
+    ...(scope.price_window ? ["price_window" as const] : []),
+    ...(scope.benchmark ? ["benchmark" as const] : []),
+    ...(scope.guidance ? ["guidance" as const] : []),
+    ...(scope.explains ? ["explains" as const] : []),
+  ];
+  const asks = new Set([...readAsks, ...kept]);
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
   // A figure's period and company are those of its reported inputs.
   const input = (node: OperationNode) => nodes.get(operationDependencies(node)[0]!)!;
@@ -910,7 +895,8 @@ export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1, lab
     }
     return metric.qualifier === "trend" && new Set(company.shown.filter(ofBase).map(periodOf)).size > 1;
   };
-  const metrics = [...new Map(reading.metrics
+  const named = [...reading.metrics, ...(scope?.inherited.includes("metrics") ? scope.metrics : [])];
+  const metrics = [...new Map(named
     .filter((metric) => CATALOG.has(metric.metric_key))
     .flatMap((metric) => metric.metric_key === "balance_sheet" ? BALANCE_SHEET_ITEMS.map((key) => CATALOG.get(key)!) : [metric])
     .filter((metric) => !offMetrics.has(metric.metric_key))
@@ -922,7 +908,7 @@ export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1, lab
     // The income items name its figures more closely than the whole statement does.
     ...metrics.filter((metric) => !(metric.metric_key === "income_statement" && reading.income_items.length > 0))
       .map((metric) => ({ text: lowercaseUnlessAcronym(metric.label), missing: (company: Company) => !company.read.has(metric.metric_key) })),
-    ...reading.metrics.filter((metric) => metric.base !== undefined && !offMetrics.has(metric.metric_key))
+    ...named.filter((metric) => metric.base !== undefined && !offMetrics.has(metric.metric_key))
       .map((metric) => ({ text: lowercaseUnlessAcronym(metric.label), missing: (company: Company) => !computes(metric, company) })),
     ...items,
     // A margin item left out names the margin already.
@@ -939,6 +925,12 @@ export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1, lab
     }),
     ...Object.entries(NEVER_PLANNED).flatMap(([facet, item]) => asks.has(facet as ScopeFacet) ? [item] : []),
   ];
+}
+
+/** The metrics a question turned off that its answer still shows, as inputs the engine shows beside a figure (#324). */
+export function shownTurnedOff(reading: ScopeProposal, plan: FinancialPlanV1): string[] {
+  const { offMetrics } = readingAsks(reading);
+  return planMetrics(plan).filter((metric) => offMetrics.has(metric.metric_key)).map((metric) => lowercaseUnlessAcronym(metric.label));
 }
 
 // A saved message as the thread reads it; undefined when it cannot be read
@@ -963,14 +955,19 @@ async function published(db: SqlExecutor, runId: string, threadId: string, messa
 }
 
 // What an unsupported request asks for, by the planner's reason (its closed
-// list) or the cash-resilience view's; any other reason gets the plain text,
-// so no model-written words reach the gap.
-const REASON_TEXT: Readonly<Record<Exclude<UnsupportedReason, "other"> | typeof CASH_RESILIENCE_VIEW, string>> = {
+// list), the cash-resilience view's or a named gap's (scope-figures.ts); any
+// other reason gets the plain text, so no model-written words reach the gap.
+const REASON_TEXT: Readonly<Record<Exclude<UnsupportedReason, "other"> | typeof CASH_RESILIENCE_VIEW | NamedGap, string>> = {
   segments: "revenue or results by business segment",
   forecast: "guidance, estimates or forecasts",
   adjusted: "adjusted or non-GAAP figures",
   undefined_metric: "a metric with no verified definition",
   cash_resilience_view: "cash resilience is an annual view without scores, peer ranks, or cash and debt measures",
+  valuation_period: "a market capitalization or P/E ratio at a fiscal period, as a valuation is calculated only at the current price",
+  trailing_twelve_months: "figures for the trailing twelve months",
+  range: "figures over a range of periods",
+  relative_period: "a period named relative to now, such as last year",
+  peers: "peers the question does not name, beside figures other than the income statement",
 };
 
 function gap(reason_code: ChatGap, planned?: PlanningResult): Extract<ChatFinancialTurn, { kind: "gap" }> {

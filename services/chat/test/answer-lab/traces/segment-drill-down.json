@@ -616,7 +616,96 @@
       ],
       "inherited": []
     },
-    "cutoff": "2026-09-01T00:00:00.000Z"
+    "cutoff": "2026-09-01T00:00:00.000Z",
+    "packet": {
+      "route": "segments",
+      "cutoff": "2026-09-01T00:00:00.000Z",
+      "companies": [
+        "NVDA"
+      ],
+      "figures": [
+        {
+          "id": "F1",
+          "segment": "Data Center",
+          "metric": "Revenue",
+          "period": "Q42026",
+          "period_end": "2026-01-25",
+          "value": "$55.2B",
+          "shown_in": "Revenue by segment (Q4 2026)",
+          "fact_id": "3b881bfd-34d4-484d-b876-b4d5aea3275e",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F2",
+          "segment": "Gaming",
+          "metric": "Revenue",
+          "period": "Q42026",
+          "period_end": "2026-01-25",
+          "value": "$4.3B",
+          "shown_in": "Revenue by segment (Q4 2026)",
+          "fact_id": "6b5e40b3-0f83-4b03-872d-e6d11762d066",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F3",
+          "segment": "OEM & Other",
+          "metric": "Revenue",
+          "period": "Q42026",
+          "period_end": "2026-01-25",
+          "value": "$1.1B",
+          "shown_in": "Revenue by segment (Q4 2026)",
+          "fact_id": "f1c0b2a0-22ec-450d-9c9b-6ad56e8dd5cd",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F4",
+          "segment": "Professional Visualization",
+          "metric": "Revenue",
+          "period": "Q42026",
+          "period_end": "2026-01-25",
+          "value": "$900.0M",
+          "shown_in": "Revenue by segment (Q4 2026)",
+          "fact_id": "7fd1921e-2341-445b-b2f6-6fb7f8a6a2e8",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        },
+        {
+          "id": "F5",
+          "segment": "Automotive",
+          "metric": "Revenue",
+          "period": "Q42026",
+          "period_end": "2026-01-25",
+          "value": "$650.0M",
+          "shown_in": "Revenue by segment (Q4 2026)",
+          "fact_id": "8b85a901-c92a-47ab-adfb-263924fb6ebf",
+          "source_ids": [
+            "00000000-0000-4000-a000-000000000001"
+          ]
+        }
+      ],
+      "coverage": [
+        {
+          "company": "NVDA",
+          "status": "shown"
+        }
+      ],
+      "gaps": [],
+      "query_bounds": {
+        "periods": "latest quarter's segments",
+        "claims": "management, segment, and guidance claims from 2024-09-01 first, then the most recent others, published by the 2026-09-01 cutoff; a claim repeated by several sources or copies counts once"
+      },
+      "claims": [],
+      "disagreements": [],
+      "claims_status": "none",
+      "claims_truncated": false
+    }
   },
   "recorded_at": "2026-10-23T01:21:44.313Z",
   "exchange": {

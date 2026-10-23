@@ -109,7 +109,7 @@ DEV_MODE=data ./scripts/dev-shell.sh up
 cd services/chat && npm run golden:live [base URL]
 ```
 
-`golden:live` runs the three golden turns against the running stack and checks structure only: every turn completes, and the chart, metric row, and comparison table appear. Live figures and wording vary, so it checks nothing finer.
+`golden:live` runs the three golden turns against the running stack and checks structure only: every turn completes, and the first two are the financial engine's answers. Live figures and wording vary, so it checks nothing finer.
 
 Chat reads persisted facts only, so the check first warms NVDA and AMD. It resolves each ticker through Polygon, then reads its key stats and eight quarterly income statements from SEC, which persists them. Reruns read the persisted data back. The check stops before any turn if a company cannot be warmed.
 

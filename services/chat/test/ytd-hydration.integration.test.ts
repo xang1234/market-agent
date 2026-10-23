@@ -11,11 +11,12 @@ import { createMarketServer } from "../../market/src/http.ts";
 import { createPostgresListingRepository } from "../../market/src/listings.ts";
 import { zonedDateStartUtcIso } from "../../market/src/range-canonicalization.ts";
 import { ytdYear } from "../../market/src/ytd-window.ts";
-import { displayedFigures } from "../src/fact-blocks.ts";
 import { analystToolRuntime, closeLocalRuntimePoolForTests } from "../src/local-runtime.ts";
+import { perfFigures } from "../src/evidence-packet.ts";
 import { loadPerfComparisonBlocks } from "../src/perf-block.ts";
 import { createThread } from "../src/threads-repo.ts";
 import { hydrateYtdBars } from "../src/ytd-hydration.ts";
+import { proposal } from "./scope-fixtures.ts";
 import { bootstrapDatabase, connectedPool, dockerAvailable, registerLifoCleanup } from "../../../db/test/docker-pg.ts";
 import { GOLDEN_AS_OF, GOLDEN_COMPANIES, MARKET_SOURCE_ID, seedGoldenDataset } from "./golden/dataset.ts";
 
@@ -92,7 +93,7 @@ test("a live YTD request with an empty cache fetches, stores, and seals the wind
   registerLifoCleanup(t, () => new Promise<void>((resolve) => server.close(() => resolve())));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const chart = async (asOf: string) =>
-    (await loadPerfComparisonBlocks(pool, { listings: LISTINGS, snapshotId: "64000000-0000-4000-8000-0000000000d1", asOf, window: "ytd" }))[0];
+    (await loadPerfComparisonBlocks(pool, { listings: LISTINGS, snapshotId: "64000000-0000-4000-8000-0000000000d1", asOf }))[0];
 
   await hydrateYtdBars({ origin, listings: LISTINGS, now: new Date().toISOString() });
   assert.equal(provider.calls(), 2, "one provider fetch per company");
@@ -159,6 +160,7 @@ test("a live YTD turn whose refresh fails names the stale cached window as a gap
     userId,
     bundleId: "single_subject_analysis",
     userIntent: "Compare NVDA with AMD YTD",
+    reading: async () => proposal({ asks: ["price_window"] }),
     emit: (() => ({})) as never,
     subjectPreResolution: subject("NVDA") as never,
     subjectPreResolutions: [subject("NVDA"), subject("AMD")] as never,
@@ -169,9 +171,8 @@ test("a live YTD turn whose refresh fails names the stale cached window as a gap
   // the missing year-end baseline instead; either way no stale chart.)
   assert.equal(result.blocks.some((block) => block.kind === "perf_comparison"), false);
   assert.match(JSON.stringify(result.blocks), /Year-to-date price performance is not shown: /);
-  // The rest of the answer stands, and the narrative is offered no price return.
-  assert.ok(result.blocks.some((block) => block.kind === "metrics_comparison"));
-  assert.deepEqual(displayedFigures(result.blocks).filter((figure) => figure.metric === "Price return"), []);
+  assert.deepEqual(perfFigures(result.blocks), []);
+  assert.deepEqual(result.blocks.filter((block) => block.kind !== "rich_text").map((block) => block.kind), []);
 });
 
 function setEnv(t: TestContext, values: Record<string, string | undefined>): void {

@@ -11,7 +11,7 @@ const cases = JSON.parse(readFileSync(CASES_FILE, "utf8")) as ScopeEvalCase[];
 const replies = JSON.parse(readFileSync(REPLIES_FILE, "utf8")) as ScopeEvalReplies;
 
 test("every recorded reply resolves to the scope its question expects", () => {
-  assert.equal(cases.length, 129);
+  assert.equal(cases.length, 130);
   assert.deepEqual(cases.flatMap((evalCase) => caseFailures(evalCase, replyTo(replies, evalCase.question))), []);
 });
 

@@ -5,7 +5,6 @@ import { readFileSync } from "node:fs";
 import { calendarNote, plainText, renderAssertion, unverifiedInference } from "../src/render-assertions.ts";
 import type { Assertion } from "../src/assertions.ts";
 import type { EvidencePacket } from "../src/evidence-packet.ts";
-import { turnPacket } from "../src/llm-runtime.ts";
 
 const NVDA_GM = "a1000000-0000-4000-8000-000000000001";
 const AMD_GM = "a1000000-0000-4000-8000-000000000002";
@@ -277,42 +276,9 @@ test("an inference's words render as written in either label: they open no quote
   assert.deepEqual(unverifiedInference(inline, PACKET), [{ type: "text", text: `> **Unverified analyst view** (not backed by the figures shown): ${inlineWords}` }]);
 });
 
-test("an observation of a partially covered period says so (#302 review)", () => {
-  const packet: EvidencePacket = {
-    ...PACKET,
-    companies: ["AAPL"],
-    figures: [
-      { id: "F1", metric: "Net income", period: "Q12026", value: "$25.0B", source_ids: [], displayed: false, period_coverage: "partial" },
-      { id: "F2", metric: "Revenue", period: "Q12026", value: "$124.3B", source_ids: [], displayed: false },
-    ],
-  };
-  const rendered = renderAssertion({ index: 0, kind: "observation", text: "ignored", evidence: ["F1", "F2"] }, packet, []);
-  assert.equal(plainText(rendered.segments), "AAPL's net income was $25.0B in Q1 2026 (partial period); AAPL's revenue was $124.3B in Q1 2026.");
-});
-
-test("an observation names its figure's actual coverage, sparse included (#329 review)", () => {
-  const packet: EvidencePacket = {
-    ...PACKET,
-    companies: ["AAPL"],
-    figures: [{ id: "F1", metric: "Revenue", period: "Q12026", value: "$124.3B", source_ids: [], displayed: false, period_coverage: "sparse" }],
-  };
-  assert.equal(plainText(renderAssertion({ index: 0, kind: "observation", text: "ignored", evidence: ["F1"] }, packet, []).segments),
-    "AAPL's revenue was $124.3B in Q1 2026 (sparse coverage).");
-});
-
-test("an observation of a quote says when it was taken (#329 review)", () => {
-  const packet: EvidencePacket = {
-    ...PACKET,
-    companies: ["AAPL"],
-    figures: [{ id: "F1", metric: "Price", value: "$231.60", as_of: "2026-09-01T20:00:00.000Z", source_ids: [], displayed: false }],
-  };
-  assert.equal(plainText(renderAssertion({ index: 0, kind: "observation", text: "ignored", evidence: ["F1"] }, packet, []).segments),
-    "AAPL's price was $231.60 as of Sep 1, 2026.");
-});
-
 function traced(name: string) {
   const { input } = JSON.parse(readFileSync(new URL(`./answer-lab/traces/${name}.json`, import.meta.url), "utf8"));
-  const packet = turnPacket(input);
+  const packet: EvidencePacket = input.packet;
   const compare = (evidence: string[], op: string, result: unknown, on = packet) =>
     plainText(renderAssertion({ index: 0, kind: "comparison", text: "ignored", evidence, op, result } as Assertion & { index: number }, on, input.factBlocks).segments);
   return { packet, compare };

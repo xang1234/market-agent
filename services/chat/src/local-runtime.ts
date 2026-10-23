@@ -5,6 +5,7 @@ import {
   loadLocalRuntimeEvidence,
   loadVerifierFactsForRefs,
   loadVerifierRowsForRefs,
+  type LocalRuntimeClaimEvidence,
   type LocalRuntimeEvidence,
   type LocalRuntimeEvidenceInput,
 } from "../../evidence/src/local-runtime-evidence.ts";
@@ -28,32 +29,16 @@ import {
   type ChatThreadTitleGenerator,
 } from "./coordinator.ts";
 import { answerTurn, type AnswerTraceInput } from "./answer-trace.ts";
-import { isUuid } from "./chat-ids.ts";
+import { isUuid, noteBlock } from "./chat-ids.ts";
 import { claimSelection } from "./evidence-packet.ts";
-import {
-  companyListings,
-  loadTurnFactBlocks,
-  mayOfferOtherFacts,
-  priceListingsForTurn,
-  readsNamedQuarter,
-  scopeGapBlocks,
-  turnCompanies,
-  withDerivationSources,
-} from "./fact-blocks.ts";
-import { readsEngine, resolveResearchScope, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
+import { readingAsks, readsEngine, resolveResearchScope, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
 import { proposeScope } from "./scope-proposal.ts";
-import { loadStatementBlocks, statementFacets, wantsStatements } from "./statement-blocks.ts";
 import { frozenDataMode, hydrateYtdBars, marketHydrationOrigin, turnNow } from "./ytd-hydration.ts";
-import { listingTimeZones } from "./perf-block.ts";
+import { companyListings, listingTimeZones, loadPerfComparisonBlocks, priceListingsForTurn, turnCompanies } from "./perf-block.ts";
 import { loadPriorScope, loadPriorSubjects as loadThreadPriorSubjects, loadRecentConversation } from "./thread-context.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import { createLlmThreadTitleModel } from "./llm-runtime.ts";
-import {
-  loadStructuredSubjectContext,
-  NO_STRUCTURED_REFS,
-  structuredEvidenceStatus,
-  structuredRefsFromHandoff,
-} from "./local-runtime-structured.ts";
+import { structuredRefsFromHandoff } from "./local-runtime-structured.ts";
 import { createChatFinancialRuntime, type ChatFinancialRuntime, type ChatFinancialTurnContext } from "./financial-runtime.ts";
 import { saveCommentary } from "./engine-commentary.ts";
 import { createChatMessagePersistence } from "./messages.ts";
@@ -102,8 +87,9 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   // What the turn asks for, keeping a follow-up's unchanged scope (#206). A
   // window asked for now is cut off at the turn's asOf, which a follow-up keeps.
   const scopeAt = await analystTurnScope(context.threadId, context.userIntent ?? "", carriedSubjects, context.reading?.() ?? Promise.resolve(null));
-  // A live YTD request fetches its prices first, so the cutoff below covers them (#232).
-  await hydrateYtdWindow(scopeAt(turnNow(process.env)), carriedSubjects);
+  // A live YTD chart fetches its prices first, so the cutoff below covers them (#232).
+  const draft = scopeAt(turnNow(process.env));
+  if (chartedWindow(draft)) await hydrateYtdWindow(draft, carriedSubjects);
   const asOf = turnNow(process.env);
   const scope = scopeAt(asOf);
   // A carried-forward company the scope dropped (an auto-selected peer turned
@@ -116,56 +102,25 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   const subjectRefs = covered.length > 0
     ? covered.map((subject) => subject.subject_ref)
     : [{ kind: "screen" as const, id: context.threadId }];
-  // Structured loaders key off the resolver's already-hydrated issuer/listings,
-  // not the raw subject_ref — no SQL re-derivation of the subject graph.
-  const structuredRefs = resolved ? structuredRefsFromHandoff(resolved.handoff) : NO_STRUCTURED_REFS;
   const registryRuntime = createRegistryBackedAnalystToolRuntime({
     executeTool: async ({ toolName, arguments: args }) => {
-      // Research claims are only one evidence type. A subject often has a live
-      // quote and issuer fundamentals but no extracted claims (every subject in
-      // dev, and any freshly-covered name in prod); gating solely on claims made
-      // the analyst answer "insufficient data" for those. Load the structured
-      // context too so the analyst can ground an answer in price + fundamentals,
-      // and only report insufficient_evidence when nothing at all exists.
-      //
-      // Both loaders are empty-on-failure (loadEvidenceOrEmpty wraps the claims
-      // read; loadStructuredSubjectContext self-degrades its facts/quote reads),
-      // so a DB hiccup or one malformed row keeps the surviving evidence instead
-      // of failing the turn — and when nothing loads, the analyst gets a clean
-      // insufficient_evidence signal rather than a 500.
-      const [evidence, structured] = await Promise.all([
-        loadEvidenceOrEmpty(pool(), {
-          subject_refs: subjectRefs,
-          user_id: context.userId ?? null,
-          // The route's claims first, none published after the turn's cutoff (#207).
-          as_of: asOf,
-          selection: claimSelection(scope, asOf),
-        }),
-        loadStructuredSubjectContext(pool(), structuredRefs, { now: asOf }),
-      ]);
+      const evidence = await loadEvidenceOrEmpty(pool(), {
+        subject_refs: subjectRefs,
+        user_id: context.userId ?? null,
+        // The route's claims first, none published after the turn's cutoff (#207).
+        as_of: asOf,
+        selection: claimSelection(scope, asOf),
+      });
       return {
         kind: "local_evidence_tool_result",
         status: "ok",
         tool_name: toolName,
         arguments: args,
-        evidence_status: structuredEvidenceStatus({
-          claimCount: evidence.claim_refs.length,
-          factCount: structured.facts.length,
-          quote: structured.quote,
-        }),
         manifest_contribution: {
           subject_refs: subjectRefs,
           claim_refs: evidence.claim_refs,
           document_refs: evidence.document_refs,
           source_ids: evidence.source_ids,
-        },
-        // Surfaced to the analyst LLM via summarizeToolCall(result) so it can
-        // compose from price + fundamentals, not just research claims.
-        structured_context: {
-          quote: structured.quote,
-          facts: structured.facts,
-          source_ids: structured.source_ids,
-          fact_recency: structured.fact_recency,
         },
         evidence,
       };
@@ -173,59 +128,17 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   });
   const result = await registryRuntime(context);
   const toolCalls = result.tool_calls ?? [];
-  const evidence = evidenceForToolCalls(toolCalls);
+  const claims = evidenceForToolCalls(toolCalls).flatMap((evidence) => evidence.claims);
   await writeLocalToolCallLogs(context.threadId, toolCalls);
-  const structured = structuredContextForToolCalls(toolCalls);
-  const defaultRefs = combinedDefaultRefs(evidence, structured);
   const toolCallIds = toolCalls
     .filter((toolCall) => toolCall.status === "ok")
     .map((toolCall) => toolCall.tool_call_id);
-  const requestedListings = requestedListingsOf(covered);
-  // Charts and tables come from facts, never from the model (see fact-blocks.ts).
-  // A turn asking only for metrics no reader serves reads no other facts, nor
-  // does one re-reading a financial-engine answer, whose evidence is in it
-  // (#206), or a request the engine declined (#425).
-  const readsFacts = scope.reads !== "unavailable_metric" && !readsEngine(scope.reads);
-  // Cash flow, balance sheet and EPS for one company; a statement-only request
-  // reads them alone, as a segment request reads segments alone.
-  const [statementIssuer] = issuersOfScope(scope);
-  const statements = statementFacets(scope);
-  const readsStatements = readsFacts && wantsStatements(statements) && scope.companies.length === 1 && !scope.peers;
-  const [incomeBlocks, statementBlocks, conversation] = await Promise.all([
-    readsFacts && scope.reads !== "statements" ? loadTurnFactBlocks(pool(), {
-      // The companies the scope records, peers already resolved (comparedCompanies),
-      // so the blocks chart exactly the set the scope saves.
-      issuers: issuersOfScope(scope),
-      wantsPeers: false,
-      wantsSegments: scope.segments,
-      // A margin asked about in a named quarter gets the margins around it (#290).
-      wantsMarginTrend: scope.margin_trend || (scope.margins && scope.fiscal_quarter !== null),
-      ...(scope.fiscal_quarter && readsNamedQuarter(scope) ? { fiscalQuarter: scope.fiscal_quarter } : {}),
-      // A request for segments alone; one also asking for a margin (its latest
-      // value or its trend) reads both.
-      segmentsOnly: scope.reads === "segments" && !scope.margins,
-      requestedListings,
-      fiscalYear: scope.fiscal_year ?? undefined,
-      priceWindow: scope.price_window?.kind,
-      // An inherited window keeps the cutoff it was charted at.
-      ...(scope.inherited.includes("price_window") ? { priceAsOf: scope.price_window!.cutoff } : {}),
-      frozenPrices: frozenDataMode(process.env),
-      snapshotId: result.snapshot_id,
-      asOf,
-    }) : Promise.resolve([]),
-    readsStatements && statementIssuer
-      ? loadStatementBlocks(pool(), {
-        issuer: statementIssuer,
-        facets: statements,
-        fiscalYear: scope.fiscal_year ?? undefined,
-        snapshotId: result.snapshot_id,
-        asOf,
-      })
-      : Promise.resolve([]),
+  const window = chartedWindow(scope);
+  const [performance, conversation] = await Promise.all([
+    window ? ytdChart(scope, window, requestedListingsOf(covered), result.snapshot_id, asOf) : Promise.resolve([]),
     loadRecentConversation(pool(), { threadId: context.threadId, limit: CONVERSATION_MESSAGES }),
   ]);
-  const shownBlocks = await withDerivationSources(pool(), [...incomeBlocks, ...statementBlocks]);
-  const factBlocks = [...shownBlocks, ...scopeGapBlocks(scope, shownBlocks, { snapshotId: result.snapshot_id, asOf })];
+  const factBlocks = [...performance, ...scopeGapBlocks(scope, { snapshotId: result.snapshot_id, asOf }, await context.reading?.() ?? null)];
   let answeredBy: string | undefined;
   const answerInput: AnswerTraceInput = {
     // Only what the answer reads: the turn context also holds callbacks.
@@ -234,7 +147,6 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     toolCalls,
     factBlocks,
     conversation,
-    availableData: mayOfferOtherFacts(scope, shownBlocks),
     // Auto-selected peers named for the packet; the saved scope keeps them
     // unlabelled, which is how a later turn knows they were auto-selected.
     scope: await withCompanyLabels(scope, asOf),
@@ -257,7 +169,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   });
   const answerUsage = answer.exchange?.usage;
   const { judging } = answer;
-  const normalize = (block: Record<string, unknown>, refs: typeof defaultRefs) =>
+  const normalize = (block: Record<string, unknown>, refs: CitedRefs) =>
     normalizeAssistantBlock(block, {
       snapshotId: result.snapshot_id,
       asOf,
@@ -266,17 +178,8 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
       toolCallIds,
     });
   const turnBlocks = (llmBlocks: ReadonlyArray<Record<string, unknown>>) => [
-    // A rendered narrative (#208) names the sources its refs cite; the turn's
-    // default sources still apply alongside them.
-    ...llmBlocks.map((block) => normalize(
-      Array.isArray(block.source_refs)
-        ? { ...block, source_refs: [...new Set([...(block.source_refs as string[]), ...defaultRefs.source_refs])] }
-        : block,
-      defaultRefs,
-    )),
-    // Fact blocks cite exactly their own facts and sources; the narrative's
-    // default claim/document refs would demand sources they do not show.
-    ...factBlocks.map((block) => normalize(block, NO_DEFAULT_REFS)),
+    ...llmBlocks.map((block) => normalize(block, citedRefs(block, claims))),
+    ...[...factBlocks, ...engineAnswerNote(scope, { snapshotId: result.snapshot_id, asOf })].map((block) => normalize(block, NO_DEFAULT_REFS)),
   ];
   return {
     ...result,
@@ -300,6 +203,55 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
 };
 
 const CONVERSATION_MESSAGES = 6;
+
+// A turn re-reading an engine answer, or asking only for metrics no reader serves, charts nothing.
+const chartedWindow = (scope: ResearchScope) => scope.reads !== "unavailable_metric" && !readsEngine(scope.reads) ? scope.price_window : null;
+
+async function ytdChart(
+  scope: ResearchScope,
+  window: NonNullable<ResearchScope["price_window"]>,
+  requestedListings: ReadonlyMap<string, { listing_id: string; label: string }>,
+  snapshotId: string,
+  asOf: string,
+): Promise<ReadonlyArray<Record<string, unknown>>> {
+  const listings = await priceListingsForTurn(pool(), { issuers: issuersOfScope(scope), wantsPeers: false, requestedListings, asOf }).catch((reason) => {
+    console.warn("[chat] company listings unavailable; answering without the price chart", reason);
+    return [];
+  });
+  return loadPerfComparisonBlocks(pool(), {
+    listings,
+    snapshotId,
+    asOf: scope.inherited.includes("price_window") ? window.cutoff : asOf,
+    frozenPrices: frozenDataMode(process.env),
+  });
+}
+
+export function scopeGapBlocks(scope: ResearchScope, input: { snapshotId: string; asOf: string }, reading: ScopeProposal | null = null): ReadonlyArray<Record<string, unknown>> {
+  const names = scope.companies.flatMap((company) => company.label ?? []).join(", ") || "these companies";
+  const notes: Array<readonly [string, string]> = [];
+  if (scope.reads === "financial_gap") {
+    notes.push(["gap:financial_gap", "The previous answer showed no figure, so there is no evidence to show; no other figure is shown in its place."]);
+  }
+  if (scope.price_window !== null && scope.companies.length < 2 && !readsEngine(scope.reads)) {
+    notes.push(["gap:price_window", `A year-to-date price return is charted only to compare two or more companies, so none is shown for ${names}.`]);
+  }
+  if (reading !== null && readingAsks(reading).asks.has("price_history")) {
+    notes.push(["gap:price_history", "Only a year-to-date price return is charted here, not the window this question asks for."]);
+  }
+  if (scope.benchmark) {
+    notes.push(["gap:benchmark", scope.companies.length > 1
+      ? "A benchmark index is not in this data, so the companies are compared only with each other."
+      : `A benchmark index is not in this data, so ${names} is not compared with one.`]);
+  }
+  return notes.map(([key, text]) => noteBlock(input, key, text));
+}
+
+// Where a turn re-reading the engine's answer finds its figures: a note, not a gap.
+export function engineAnswerNote(scope: ResearchScope, input: { snapshotId: string; asOf: string }): ReadonlyArray<Record<string, unknown>> {
+  return scope.reads === "financial_answer"
+    ? [noteBlock(input, "note:financial_answer", "The previous answer's figures were calculated and verified by the financial engine; each one links to its sources in that answer, and no other figure is shown in their place.")]
+    : [];
+}
 
 // The scope with every company named by its ticker (else legal name), for the
 // evidence packet. Unchanged if the lookup fails: the packet then names an
@@ -357,10 +309,10 @@ async function turnScope(
   const dropped = new Set([...autoPeers].filter((id) => !carriedIds.has(id)));
   const allDropped = autoPeers.size > 0 && dropped.size === autoPeers.size;
   const peersOff = autoPeers.size > 0 && (allDropped ||
-    !resolveResearchScope({ question, companies: carried, prior, asOf: turnNow(process.env), served, proposal: read }).peers);
+    !resolveResearchScope({ companies: carried, prior, asOf: turnNow(process.env), served, proposal: read }).peers);
   const named = peersOff ? carried.filter((company) => !autoPeers.has(company.issuer_id)) : carried;
   const resolve = (cutoff: string) =>
-    resolveResearchScope({ question, companies: named, prior, asOf: cutoff, served, peersOff: allDropped, proposal: read });
+    resolveResearchScope({ companies: named, prior, asOf: cutoff, served, peersOff: allDropped, proposal: read });
   const base = resolve(turnNow(process.env));
   // An evidence follow-up keeps the previous answer's companies as they were; a
   // financial answer covers exactly the companies its plan requested.
@@ -376,8 +328,7 @@ async function turnScope(
 }
 
 // The companies the answer compares: the ones the turn covers, or for a peers
-// request one company plus its auto-selected peers (turnCompanies, the set the
-// fact blocks chart).
+// request one company plus its auto-selected peers (turnCompanies).
 async function comparedCompanies(
   named: ResearchScope["companies"],
   peers: boolean,
@@ -469,7 +420,7 @@ function issuersOfScope(scope: ResearchScope): IssuerSubjectRef[] {
   return scope.companies.map((company) => ({ kind: "issuer" as const, id: company.issuer_id }));
 }
 
-const NO_DEFAULT_REFS = Object.freeze({
+const NO_DEFAULT_REFS: CitedRefs = Object.freeze({
   source_refs: [],
   claim_refs: [],
   document_refs: [],
@@ -571,71 +522,31 @@ function evidenceForToolCalls(
   );
 }
 
-// The structured-context provenance carried in a tool result: the quote +
-// fundamentals source_ids, and the fundamentals fact_ids. Mirrors
-// evidenceForToolCalls — extracted so the sealed manifest can cite them
-// (fra-eegq), instead of dropping them after the LLM composes its answer.
-type StructuredContextRefs = {
-  source_ids: ReadonlyArray<string>;
-  facts: ReadonlyArray<{ fact_id: string }>;
-};
-
-function structuredContextForToolCalls(
-  toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>,
-): ReadonlyArray<StructuredContextRefs> {
-  return Object.freeze(
-    toolCalls.flatMap((toolCall) => {
-      if (toolCall.status !== "ok" || !isJsonObject(toolCall.result)) return [];
-      const ctx = toolCall.result.structured_context;
-      if (!isJsonObject(ctx)) return [];
-      const source_ids = Array.isArray(ctx.source_ids)
-        ? ctx.source_ids.filter((id): id is string => typeof id === "string")
-        : [];
-      const facts = Array.isArray(ctx.facts)
-        ? ctx.facts.flatMap((fact) =>
-            isJsonObject(fact) && typeof fact.fact_id === "string" ? [{ fact_id: fact.fact_id }] : [],
-          )
-        : [];
-      return [{ source_ids, facts }];
-    }),
-  );
-}
-
-function defaultEvidenceRefs(evidence: ReadonlyArray<LocalRuntimeEvidence>): {
-  source_refs: ReadonlyArray<string>;
-  claim_refs: ReadonlyArray<string>;
-  document_refs: ReadonlyArray<string>;
-} {
-  return {
-    source_refs: firstSeen(evidence.flatMap((item) => item.source_ids)),
-    claim_refs: firstSeen(evidence.flatMap((item) => item.claim_refs)),
-    document_refs: firstSeen(evidence.flatMap((item) => item.document_refs)),
-  };
-}
-
-// Block default-refs: research-claim evidence plus the structured context. The
-// structured source_ids (fact + quote sources) union into source_refs (a passive
-// citation). The fundamentals fact_ids become provenance_fact_refs — NOT block
-// fact_refs: the verifier treats a block.fact_refs entry as a rendering binding
-// (the block must bind that fact's value), but these facts only informed the
-// prose. provenance_fact_refs is a non-extracted carrier that manifestFromBlockRefs
-// promotes to manifest.fact_refs, where the verifier accepts them as manifest-only
-// (metadata-checked, no per-block binding).
-export function combinedDefaultRefs(
-  evidence: ReadonlyArray<LocalRuntimeEvidence>,
-  structured: ReadonlyArray<StructuredContextRefs>,
-): {
+type CitedRefs = Readonly<{
   source_refs: ReadonlyArray<string>;
   claim_refs: ReadonlyArray<string>;
   document_refs: ReadonlyArray<string>;
   provenance_fact_refs: ReadonlyArray<string>;
-} {
-  const base = defaultEvidenceRefs(evidence);
+}>;
+
+/**
+ * What an analyst answer's block cites, for its seal: the claims its segments
+ * quote, with their documents and sources, and the sources its figures name.
+ * Nothing it loaded and did not use.
+ */
+export function citedRefs(
+  block: Record<string, unknown>,
+  claims: ReadonlyArray<Pick<LocalRuntimeClaimEvidence, "claim_id" | "document_id" | "source_id">>,
+): CitedRefs {
+  const segments = Array.isArray(block.segments) ? block.segments as Array<{ type?: unknown; ref_kind?: unknown; ref_id?: unknown }> : [];
+  const quoted = new Set(segments.flatMap((segment) => segment.type === "ref" && segment.ref_kind === "claim" && typeof segment.ref_id === "string" ? [segment.ref_id] : []));
+  const cited = claims.filter((claim) => quoted.has(claim.claim_id));
+  const sources = Array.isArray(block.source_refs) ? block.source_refs.filter((id): id is string => typeof id === "string") : [];
   return {
-    source_refs: firstSeen([...base.source_refs, ...structured.flatMap((s) => s.source_ids)]),
-    claim_refs: base.claim_refs,
-    document_refs: base.document_refs,
-    provenance_fact_refs: firstSeen(structured.flatMap((s) => s.facts.map((f) => f.fact_id))),
+    source_refs: firstSeen([...sources, ...cited.map((claim) => claim.source_id)]),
+    claim_refs: firstSeen(cited.map((claim) => claim.claim_id)),
+    document_refs: firstSeen(cited.map((claim) => claim.document_id)),
+    provenance_fact_refs: [],
   };
 }
 
@@ -765,17 +676,12 @@ function normalizeAssistantBlock(
     snapshotId: string;
     asOf: string;
     subjectRefs: ReadonlyArray<SnapshotSubjectRef>;
-    defaultRefs: {
-      source_refs: ReadonlyArray<string>;
-      claim_refs: ReadonlyArray<string>;
-      document_refs: ReadonlyArray<string>;
-      provenance_fact_refs: ReadonlyArray<string>;
-    };
+    defaultRefs: CitedRefs;
     toolCallIds: ReadonlyArray<string>;
   },
 ): Record<string, unknown> {
   const kind = typeof block.kind === "string" && block.kind.length > 0 ? block.kind : "rich_text";
-  // Keep data_ref.params: fact blocks carry their fact_bindings there.
+  // Keep data_ref.params: the perf_comparison chart carries its series_refs there.
   const params = (block.data_ref as { params?: unknown } | undefined)?.params;
   return {
     ...block,
