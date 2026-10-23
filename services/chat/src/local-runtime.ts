@@ -87,8 +87,9 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   // What the turn asks for, keeping a follow-up's unchanged scope (#206). A
   // window asked for now is cut off at the turn's asOf, which a follow-up keeps.
   const scopeAt = await analystTurnScope(context.threadId, context.userIntent ?? "", carriedSubjects, context.reading?.() ?? Promise.resolve(null));
-  // A live YTD request fetches its prices first, so the cutoff below covers them (#232).
-  await hydrateYtdWindow(scopeAt(turnNow(process.env)), carriedSubjects);
+  // A live YTD chart fetches its prices first, so the cutoff below covers them (#232).
+  const draft = scopeAt(turnNow(process.env));
+  if (chartedWindow(draft)) await hydrateYtdWindow(draft, carriedSubjects);
   const asOf = turnNow(process.env);
   const scope = scopeAt(asOf);
   // A carried-forward company the scope dropped (an auto-selected peer turned
@@ -132,12 +133,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   const toolCallIds = toolCalls
     .filter((toolCall) => toolCall.status === "ok")
     .map((toolCall) => toolCall.tool_call_id);
-  // The analyst shows no figure of its own: every number is the engine's (#398),
-  // but for a comparison's year-to-date price chart, market data outside the
-  // engine and labelled not verified until #444's price observations (D2). A
-  // turn re-reading an engine answer, or asking only for metrics no reader
-  // serves, charts nothing.
-  const window = scope.reads !== "unavailable_metric" && !readsEngine(scope.reads) ? scope.price_window : null;
+  const window = chartedWindow(scope);
   const [performance, conversation] = await Promise.all([
     window ? ytdChart(scope, window, requestedListingsOf(covered), result.snapshot_id, asOf) : Promise.resolve([]),
     loadRecentConversation(pool(), { threadId: context.threadId, limit: CONVERSATION_MESSAGES }),
@@ -183,7 +179,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     });
   const turnBlocks = (llmBlocks: ReadonlyArray<Record<string, unknown>>) => [
     ...llmBlocks.map((block) => normalize(block, citedRefs(block, claims))),
-    ...factBlocks.map((block) => normalize(block, NO_DEFAULT_REFS)),
+    ...[...factBlocks, ...engineAnswerNote(scope, { snapshotId: result.snapshot_id, asOf })].map((block) => normalize(block, NO_DEFAULT_REFS)),
   ];
   return {
     ...result,
@@ -207,6 +203,9 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
 };
 
 const CONVERSATION_MESSAGES = 6;
+
+// A turn re-reading an engine answer, or asking only for metrics no reader serves, charts nothing.
+const chartedWindow = (scope: ResearchScope) => scope.reads !== "unavailable_metric" && !readsEngine(scope.reads) ? scope.price_window : null;
 
 // The year-to-date chart of the companies the scope records, peers already
 // resolved (comparedCompanies). An inherited window keeps the cutoff it was
@@ -239,9 +238,6 @@ async function ytdChart(
 export function scopeGapBlocks(scope: ResearchScope, input: { snapshotId: string; asOf: string }, reading: ScopeProposal | null = null): ReadonlyArray<Record<string, unknown>> {
   const names = scope.companies.flatMap((company) => company.label ?? []).join(", ") || "these companies";
   const notes: Array<readonly [string, string]> = [];
-  if (scope.reads === "financial_answer") {
-    notes.push(["gap:financial_answer", "The previous answer's figures were calculated and verified by the financial engine; each one links to its sources in that answer, and no other figure is shown in their place."]);
-  }
   if (scope.reads === "financial_gap") {
     notes.push(["gap:financial_gap", "The previous answer showed no figure, so there is no evidence to show; no other figure is shown in its place."]);
   }
@@ -257,6 +253,13 @@ export function scopeGapBlocks(scope: ResearchScope, input: { snapshotId: string
       : `A benchmark index is not in this data, so ${names} is not compared with one.`]);
   }
   return notes.map(([key, text]) => noteBlock(input, key, text));
+}
+
+// Where a turn re-reading the engine's answer finds its figures: a note, not a gap.
+export function engineAnswerNote(scope: ResearchScope, input: { snapshotId: string; asOf: string }): ReadonlyArray<Record<string, unknown>> {
+  return scope.reads === "financial_answer"
+    ? [noteBlock(input, "note:financial_answer", "The previous answer's figures were calculated and verified by the financial engine; each one links to its sources in that answer, and no other figure is shown in their place.")]
+    : [];
 }
 
 // The scope with every company named by its ticker (else legal name), for the

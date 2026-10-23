@@ -56,9 +56,8 @@ export function readsEngine(reads: ResearchRoute): boolean {
 
 export type ScopeField = "peers" | "segments" | "margin_trend" | "metrics" | "fiscal_year" | "fiscal_quarter" | "price_window" | "benchmark";
 
-// A company's own fiscal quarter, as its facts are filed.
-export type FiscalQuarter = { fiscal_year: number; fiscal_period: string };
-export type ScopeQuarter = { fiscal_year: number | null; fiscal_period: string };
+export type FiscalQuarter = { fiscal_year: number; fiscal_period: (typeof FISCAL_PERIODS)[number] };
+export type ScopeQuarter = { fiscal_year: number | null; fiscal_period: (typeof FISCAL_PERIODS)[number] };
 export type PeriodType = "quarter" | "fiscal_year";
 
 // A metric a question names: one this chat's readers show, or a named gap. A
@@ -137,6 +136,8 @@ export type ScopeFacet = (typeof SCOPE_FACETS)[number];
 // The periods a question can turn off beside its facets.
 export const PERIOD_FIELDS = ["fiscal_year", "fiscal_quarter"] as const;
 export const FISCAL_PERIODS = ["Q1", "Q2", "Q3", "Q4"] as const;
+// The quarters a company overview charts, to the one it is shown at.
+export const QUARTERS_SHOWN = 8;
 // The period a question asks about.
 export type ScopePeriod =
   // No period named: a follow-up keeps the one it inherits.
@@ -548,7 +549,7 @@ export function parseResearchScope(value: unknown): ResearchScope | null {
     // Absent on scopes saved before metrics were recorded.
     metrics: (scope.metrics ?? []) as ResearchScope["metrics"],
     fiscal_year: scope.fiscal_year as number | null,
-    fiscal_quarter: quarter ? { fiscal_year: quarter.fiscal_year as number | null, fiscal_period: quarter.fiscal_period as string } : null,
+    fiscal_quarter: quarter ? { fiscal_year: quarter.fiscal_year as number | null, fiscal_period: quarter.fiscal_period as FiscalQuarter["fiscal_period"] } : null,
     ...(scope.latest_period === "quarter" || scope.latest_period === "fiscal_year" ? { latest_period: scope.latest_period } : {}),
     price_window: window === null ? null : { kind: "ytd", cutoff: window!.cutoff as string },
     // Absent on scopes saved before benchmarks were recorded.

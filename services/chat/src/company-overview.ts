@@ -6,22 +6,18 @@ import { issuerLabels } from "../../financial-engine/src/request.ts";
 import { reportedBy } from "../../financial-engine/src/select-inputs.ts";
 import { createSqlPeerSetResolver } from "../../fundamentals/src/peer-set-resolver.ts";
 import { MAX_TURN_SUBJECTS } from "./coordinator.ts";
-import type { FiscalQuarter } from "./research-scope.ts";
+import { FISCAL_PERIODS, QUARTERS_SHOWN, type FiscalQuarter } from "./research-scope.ts";
 import type { ReadPeriod } from "./scope-figures.ts";
 
-const QUARTERS_SHOWN = 8;
-// Each margin, and the statement line it divides by revenue.
 export const MARGINS = [
   { metric: "gross_margin", numerator: "gross_profit" },
   { metric: "operating_margin", numerator: "operating_income" },
   { metric: "net_margin", numerator: "net_income" },
 ] as const;
-// Revenue growth from the quarter before, and from a year earlier.
 const GROWTH = [
-  { metric: "revenue_growth_qoq", back: 1 },
-  { metric: "revenue_growth_yoy", back: 4 },
+  { metric: "revenue_growth_qoq", quartersBack: 1 },
+  { metric: "revenue_growth_yoy", quartersBack: 4 },
 ] as const;
-const QUARTERS = ["Q1", "Q2", "Q3", "Q4"];
 const UNPLANNED = "[chat] the company overview could not be planned; the planner answers";
 const TREND_UNPLANNED = "[chat] the margin trend could not be planned; the planner answers";
 
@@ -52,6 +48,9 @@ export async function overviewPeers(db: SqlExecutor, issuer: FinancialSubjectRef
 }
 
 type Dates = Readonly<{ start: string | null; end: string }>;
+// A revenue candidate for a fiscal quarter, not a fiscal year.
+type Quarterly = InputCandidate & Readonly<{ period: InputCandidate["period"] & FiscalQuarter }>;
+const quarterly = (candidate: InputCandidate): candidate is Quarterly => candidate.period.fiscal_period !== "FY";
 
 type RevenueQuarters = Readonly<{
   newest: FiscalQuarter;
@@ -106,9 +105,8 @@ export async function overviewOmissions(
   const anchored = companies.flatMap((company, index) => {
     const margin = nodes.get(nodeIdOf(several, members[index]!.slot_id)(MARGINS[0].metric));
     const line = margin?.operation === MARGINS[0].metric ? nodes.get(margin.numerator) : undefined;
-    return line?.operation === "reported_metric" && line.period.kind === "fiscal_period"
-      ? [{ ...company, anchor: { fiscal_year: line.period.fiscal_year, fiscal_period: line.period.fiscal_period } }]
-      : [];
+    const period = line?.operation === "reported_metric" && line.period.kind === "fiscal_period" ? line.period : null;
+    return period !== null && period.fiscal_period !== "FY" ? [{ ...company, anchor: { fiscal_year: period.fiscal_year, fiscal_period: period.fiscal_period } }] : [];
   });
   if (anchored.length !== companies.length) return [];
   const { operations, omitted } = companyOverviewDraft(anchored);
@@ -146,7 +144,7 @@ export async function planningQuarters(context: PlanningContext, evidence: Finan
 // named, or with no year its newest such quarter, which it may never have
 // reported (null).
 function anchorOf(company: RevenueQuarters, period: ReadPeriod): FiscalQuarter | null {
-  const order = (quarter: FiscalQuarter) => quarter.fiscal_year * 4 + QUARTERS.indexOf(quarter.fiscal_period);
+  const order = (quarter: FiscalQuarter) => quarter.fiscal_year * 4 + FISCAL_PERIODS.indexOf(quarter.fiscal_period);
   const newestOf = (quarters: ReadonlyArray<FiscalQuarter>) =>
     quarters.reduce<FiscalQuarter | null>((best, quarter) => (best === null || order(quarter) > order(best) ? quarter : best), null);
   switch (period.kind) {
@@ -185,8 +183,8 @@ async function revenueQuarters(
       return null;
     }
     // ponytail: a truncated page may lack the newest quarter, so the planner answers instead.
-    const reported = page.truncated ? [] : page.candidates.filter((candidate) => candidate.period.fiscal_period !== "FY" && reportedBy(candidate, policy));
-    const newest = reported.reduce<InputCandidate | null>((best, candidate) => (best === null || candidate.period.end > best.period.end ? candidate : best), null);
+    const reported = page.truncated ? [] : page.candidates.filter(quarterly).filter((candidate) => reportedBy(candidate, policy));
+    const newest = reported.reduce<Quarterly | null>((best, candidate) => (best === null || candidate.period.end > best.period.end ? candidate : best), null);
     if (newest === null) return null;
     const quarters = new Map(reported.map(({ period: { fiscal_year, fiscal_period } }) => [quarterId({ fiscal_year, fiscal_period }), { fiscal_year, fiscal_period }]));
     companies.push({ newest: quarters.get(quarterId(newest.period))!, quarters: [...quarters.values()], agreedDates: agreedDates(reported) });
@@ -194,7 +192,7 @@ async function revenueQuarters(
   return companies;
 }
 
-function agreedDates(reported: ReadonlyArray<InputCandidate>): RevenueQuarters["agreedDates"] {
+function agreedDates(reported: ReadonlyArray<Quarterly>): RevenueQuarters["agreedDates"] {
   const dates = new Map<string, Set<string>>();
   for (const { period } of reported) dates.set(quarterId(period), (dates.get(quarterId(period)) ?? new Set()).add(JSON.stringify([period.start, period.end])));
   return (quarter) => {
@@ -233,12 +231,11 @@ function unpaired(company: Anchored, at: FiscalQuarter, span: number): string | 
   return follows ? null : "whose quarters are not dated consecutively";
 }
 
-// The quarter `back` quarters before (1 = the previous one, 4 = a year earlier).
-function before(quarter: FiscalQuarter, back: number): FiscalQuarter {
-  const total = quarter.fiscal_year * 4 + QUARTERS.indexOf(quarter.fiscal_period) - back;
-  return { fiscal_year: Math.floor(total / 4), fiscal_period: QUARTERS[total % 4]! };
+function before(quarter: FiscalQuarter, quartersBack: number): FiscalQuarter {
+  const total = quarter.fiscal_year * 4 + FISCAL_PERIODS.indexOf(quarter.fiscal_period) - quartersBack;
+  return { fiscal_year: Math.floor(total / 4), fiscal_period: FISCAL_PERIODS[total % 4]! };
 }
-export const quarterId = (quarter: FiscalQuarter) => `fy${quarter.fiscal_year}_${quarter.fiscal_period.toLowerCase()}`;
+export const quarterId = (quarter: Readonly<{ fiscal_year: number; fiscal_period: string }>) => `fy${quarter.fiscal_year}_${quarter.fiscal_period.toLowerCase()}`;
 const quarterText = (quarter: FiscalQuarter) => `${quarter.fiscal_period} FY${quarter.fiscal_year}`;
 
 function reportedAt(slot: string, id: (name: string) => string) {
@@ -261,13 +258,13 @@ function closestQuarter(company: Anchored, target: Dates): FiscalQuarter | null 
 function growthChanges(backs: ReadonlyArray<number>, anchor: FiscalQuarter) {
   return [
     ...backs.filter((back) => backs.includes(back + 1)).reverse().map((back) => ({ back, span: 1, name: back === 0 ? GROWTH[0].metric : `${GROWTH[0].metric}_${quarterId(before(anchor, back))}` })),
-    { back: 0, span: GROWTH[1].back, name: GROWTH[1].metric },
+    { back: 0, span: GROWTH[1].quartersBack, name: GROWTH[1].metric },
   ];
 }
 
 function companyOverviewDraft(companies: ReadonlyArray<Anchored>) {
   const several = companies.length > 1;
-  const backs = several ? [0, ...GROWTH.map(({ back }) => back)] : Array.from({ length: QUARTERS_SHOWN }, (_, back) => back);
+  const backs = several ? [0, ...GROWTH.map(({ quartersBack }) => quartersBack)] : Array.from({ length: QUARTERS_SHOWN }, (_, back) => back);
   const omitted: Omission[] = [];
   const parts = companies.map((company, index) => {
     const slot = slotOf(index);

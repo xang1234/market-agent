@@ -4,7 +4,8 @@ import test from "node:test";
 
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
 import { proposedMetric, resolveResearchScope, type CompanyChange, type ResearchScope, type ScopePeriod, type ScopeProposal } from "../src/research-scope.ts";
-import { periodNote, routeTurn, type PlanChoice, type ReadPeriod } from "../src/scope-figures.ts";
+import { SCOPE_METRICS } from "../src/financial-runtime.ts";
+import { ENGINE_READS_BY_CATALOG_METRIC, periodNote, routeTurn, VALUATIONS, type PlanChoice, type ReadPeriod } from "../src/scope-figures.ts";
 import { parseProposal, proposalQuestion } from "../src/scope-proposal.ts";
 import { proposal as read } from "./scope-fixtures.ts";
 
@@ -246,4 +247,9 @@ test("an answer whose figures are of another period type than the one its turn r
     null,
     null,
   ]);
+});
+
+test("every chat metric an engine answer saves is one a follow-up plans again, at a period or, for a valuation, at the latest (#381)", () => {
+  const saved = [...new Set(Object.values(SCOPE_METRICS).flatMap((key) => key ?? []))];
+  assert.deepEqual(saved.filter((key) => !Object.hasOwn(ENGINE_READS_BY_CATALOG_METRIC, key) && !VALUATIONS.has(key)), []);
 });

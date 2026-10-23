@@ -10,8 +10,8 @@ import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
 import { overviewOmissions, overviewPeers, planCompanyOverview, planMarginTrend } from "../src/company-overview.ts";
 import { LATEST, planPeriod, planScopeFigures, type ReadPeriod } from "../src/scope-figures.ts";
 import { MAX_TURN_SUBJECTS } from "../src/coordinator.ts";
-import { uncoveredAsks } from "../src/financial-runtime.ts";
-import { proposedMetric, resolveResearchScope } from "../src/research-scope.ts";
+import { shownTurnedOff, uncoveredAsks } from "../src/financial-runtime.ts";
+import { proposedMetric, resolveResearchScope, type FISCAL_PERIODS } from "../src/research-scope.ts";
 import { parseProposal, proposalQuestion } from "../src/scope-proposal.ts";
 import { extractSubjectMentions } from "../src/subject-extraction.ts";
 import { GOLDEN_AS_OF, GOLDEN_COMPANIES } from "./golden/dataset.ts";
@@ -373,7 +373,7 @@ test("an overview at a period shows each company from its own quarter there: the
     const shown = await overviewOf("NVDA", () => candidatePage(...candidates), (context, evidence) => planCompanyOverview(context, evidence, period));
     return shown && [shown.outputs[0], shown.outputs.find((output) => output.startsWith("gross_margin")), shown.outputs.filter((output) => output.startsWith("percent_change")).at(-1)];
   };
-  const quarter = (fiscal_period: string, fiscal_year: number | null = null): ReadPeriod => ({ kind: "fiscal_quarter", fiscal_period, fiscal_year });
+  const quarter = (fiscal_period: (typeof FISCAL_PERIODS)[number], fiscal_year: number | null = null): ReadPeriod => ({ kind: "fiscal_quarter", fiscal_period, fiscal_year });
   const margin = (quarter: string) => `gross_margin(NVDA gross_profit ${quarter}, NVDA revenue ${quarter})`;
   assert.deepEqual(await at(LATEST), ["NVDA revenue Q1 2025", margin("Q4 2026"), changeOf("NVDA", "Q4 2026", "Q4 2025")]);
   assert.deepEqual(await at(quarter("Q2")), ["NVDA revenue Q3 2024", margin("Q2 2026"), changeOf("NVDA", "Q2 2026", "Q2 2025")], "its newest second quarter");
@@ -536,6 +536,10 @@ test("an engine answer names what the reading of its question asks for and the p
   const kept = (...keys: string[]) => ({ ...resolveResearchScope({ companies: [], prior: null, asOf: GOLDEN_AS_OF, proposal: null }), metrics: keys.map((key) => proposedMetric(key, null, null)!), inherited: ["metrics" as const] });
   assert.deepEqual(uncoveredAsks(reading([]), revenue, new Map(), kept("income_statement", "pe_ratio")), ["P/E ratio"], "a figure the scope keeps and the plan does not compute");
   assert.deepEqual(uncoveredAsks(reading([]), revenue, new Map(), { ...kept("pe_ratio"), inherited: [] }), [], "one named by an earlier answer but not kept");
+  const freeCashFlow = plan([reported("ocf", "operating_cash_flow", quarter("FY")), reported("capex", "capex", quarter("FY")), { node_id: "fcf", operation: "free_cash_flow", operating_cash_flow: "ocf", capex: "capex" }]);
+  const dropsCapex = parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [{ metric: "capex" }] }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named", names: [] } }), "")!;
+  assert.deepEqual(shownTurnedOff(dropsCapex, freeCashFlow), ["capital expenditures"], "the engine shows free cash flow's inputs beside it (#324)");
+  assert.deepEqual(shownTurnedOff(dropsCapex, revenue), []);
   const keptFacets = { ...kept("income_statement"), margin_trend: true, price_window: { kind: "ytd" as const, cutoff: GOLDEN_AS_OF }, benchmark: true, guidance: true as const, explains: true as const };
   assert.deepEqual(uncoveredAsks(reading([]), revenue, new Map(), keptFacets), [
     "a margin over several periods",

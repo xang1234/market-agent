@@ -17,7 +17,7 @@ import { BALANCE_SHEET_ITEMS, readingAsks, type FiscalQuarter, type PERIOD_FIELD
 export type ReadPeriod =
   | Readonly<{ kind: "latest"; period: PeriodType | null }>
   | Readonly<{ kind: "fiscal_year"; fiscal_year: number }>
-  | Readonly<{ kind: "fiscal_quarter"; fiscal_period: string; fiscal_year: number | null }>;
+  | Readonly<{ kind: "fiscal_quarter"; fiscal_period: FiscalQuarter["fiscal_period"]; fiscal_year: number | null }>;
 
 export const LATEST: ReadPeriod = { kind: "latest", period: null };
 
@@ -59,7 +59,7 @@ const KEPT_ASKS: ReadonlySet<ScopeFacet> = new Set(["explains", "latest_quarter"
 const TREND_ASKS: ReadonlySet<ScopeFacet> = new Set(["margin_trend", "margins", "explains"]);
 const MARGIN_ITEMS: ReadonlySet<string> = new Set(MARGINS.map(({ metric }) => metric));
 const READ_PERIODS: ReadonlySet<ScopeProposal["period"]["kind"]> = new Set(["none", "latest", "fiscal_year", "fiscal_quarter"]);
-const VALUATIONS: ReadonlySet<string> = new Set<Valuation>(["market_cap", "pe_ratio"]);
+export const VALUATIONS: ReadonlySet<string> = new Set<Valuation>(["market_cap", "pe_ratio"]);
 
 /**
  * The one plan a turn about a company gets. The analyst path keeps a turn that
@@ -106,7 +106,7 @@ export function routeTurn(reading: ScopeProposal | null, scope: ResearchScope | 
   if (overview && keptIncome) return { kind: "overview", period, peers: asks.has("peers") };
   if (asksNoFigure && !keptIncome && [...asks].every((facet) => KEPT_ASKS.has(facet) || facet === "peers")) {
     if (asks.has("peers")) return { kind: "named_gap", reason: "peers" };
-    const planned = kept.filter((key) => Object.hasOwn(AT_PERIOD, key) || (VALUATIONS.has(key) && period.kind === "latest"));
+    const planned = kept.filter((key) => Object.hasOwn(ENGINE_READS_BY_CATALOG_METRIC, key) || (VALUATIONS.has(key) && period.kind === "latest"));
     if (planned.length > 0) return { kind: "kept_figures", metrics: planned, period };
     return { kind: "named_gap", reason: kept.some((key) => VALUATIONS.has(key)) ? "valuation_period" : "undefined_metric" };
   }
@@ -163,10 +163,8 @@ type Computed = Readonly<{ operation: string; inputs: Readonly<Record<string, st
 // What a follow-up reads of each chat catalog metric, at the period it reads:
 // engine metrics as reported, and figures computed from them in that period.
 // A valuation is the one at the cutoff (valuation-plan.ts), so only the latest
-// has one. The engine computes free cash flow for a fiscal year only, and a
-// balance its filings certify at the year's end: at a quarter either is a gap
-// cell with the engine's reason.
-const AT_PERIOD: Readonly<Record<string, ReadonlyArray<string | Computed>>> = {
+// has one.
+export const ENGINE_READS_BY_CATALOG_METRIC: Readonly<Record<string, ReadonlyArray<string | Computed>>> = {
   income_statement: [
     "revenue",
     ...MARGINS.map(({ numerator }) => numerator),
@@ -201,7 +199,7 @@ export async function planScopeFigures(
   period: ReadPeriod,
 ): Promise<ReadyPlan | null> {
   const valuations = metrics.filter((key): key is Valuation => VALUATIONS.has(key));
-  const figures = metrics.filter((key) => !VALUATIONS.has(key)).map((key) => AT_PERIOD[key]);
+  const figures = metrics.filter((key) => !VALUATIONS.has(key)).map((key) => ENGINE_READS_BY_CATALOG_METRIC[key]);
   if (metrics.length === 0 || figures.some((entry) => entry === undefined) || (valuations.length > 0 && period.kind !== "latest")) return null;
   const selectors = await periodSelectors(context, evidence, period);
   if (selectors === null) return null;
@@ -238,4 +236,4 @@ async function periodSelectors(context: PlanningContext, evidence: FinancialEvid
   }
 }
 
-const fiscalPeriod = (quarter: FiscalQuarter) => ({ kind: "fiscal_period", ...quarter }) as PeriodSelector;
+const fiscalPeriod = (quarter: FiscalQuarter): PeriodSelector => ({ kind: "fiscal_period", ...quarter });

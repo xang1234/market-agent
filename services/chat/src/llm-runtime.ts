@@ -342,9 +342,8 @@ export function renderedAnswer(input: AnswerInput, packet: EvidencePacket, repor
   };
   // A request the data does not hold points to the gap notes shown below the
   // answer (#302): a benchmark, a YTD window not charted, a declined engine
-  // request re-read. An engine answer's note says where its figures are, so
-  // it is no gap (#358 review).
-  const namedGap = input.scope !== undefined && input.scope.reads !== "financial_answer" && packet.figures.length === 0 && packet.gaps.length > 0;
+  // request re-read.
+  const namedGap = input.scope !== undefined && packet.figures.length === 0 && packet.gaps.length > 0;
   const rendering = renderAccepted();
   const answer: Answer = rendering.answer ?? {
     kind: "fallback",

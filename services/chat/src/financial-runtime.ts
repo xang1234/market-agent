@@ -689,12 +689,14 @@ function persistAssistantMessage(
       ...await overviewOmissions(plan, request.authority, inSavepoints(tx.client, turn.evidence(tx.client)), names),
     ];
     const shownPeriod = plan === null ? null : planPeriod(plan);
+    const stillShown = reading === null || plan === null ? [] : shownTurnedOff(reading, plan);
     const replaced = scope === null ? null : periodNote(scope, shownPeriod);
     const note = [
       ...(turn.notFound.length === 0 ? [] : [`No company matched ${labelList(turn.notFound)}.`]),
       ...(turn.carried.length === 0 ? [] : [`${labelList(turn.carried)} ${turn.carried.length > 1 ? "are" : "is"} carried from the previous answer.`]),
       ...(replaced === null ? [] : [replaced]),
       ...(reading === null ? [UNCHECKED] : missing.length === 0 ? [] : [`Not covered by this answer: ${missing.join("; ")}.`]),
+      ...(stillShown.length === 0 ? [] : [`Still shown as an input to another figure: ${labelList(stillShown)}.`]),
     ].join(" ");
     const blocks = [
       publication.block,
@@ -923,6 +925,12 @@ export function uncoveredAsks(
     }),
     ...Object.entries(NEVER_PLANNED).flatMap(([facet, item]) => asks.has(facet as ScopeFacet) ? [item] : []),
   ];
+}
+
+/** The metrics a question turned off that its answer still shows, as inputs the engine shows beside a figure (#324). */
+export function shownTurnedOff(reading: ScopeProposal, plan: FinancialPlanV1): string[] {
+  const { offMetrics } = readingAsks(reading);
+  return planMetrics(plan).filter((metric) => offMetrics.has(metric.metric_key)).map((metric) => lowercaseUnlessAcronym(metric.label));
 }
 
 // A saved message as the thread reads it; undefined when it cannot be read

@@ -15,7 +15,7 @@ import {
 } from "../src/llm-runtime.ts";
 import { checkAssertions, MAX_ASSERTIONS, type AssertionReport, type Rejection } from "../src/assertions.ts";
 import type { EvidencePacket, PacketFigure } from "../src/evidence-packet.ts";
-import { scopeGapBlocks } from "../src/local-runtime.ts";
+import { engineAnswerNote, scopeGapBlocks } from "../src/local-runtime.ts";
 import { resolveResearchScope } from "../src/research-scope.ts";
 import { proposal } from "./scope-fixtures.ts";
 
@@ -865,7 +865,8 @@ test("a financial-engine answer's evidence follow-up never reads its note as mis
     proposal: proposal({ asks: ["margins"], metrics: ["income_statement"], items: ["operating_income"] }),
   });
   const turn = gapTurn(resolveResearchScope({ companies: AMD, prior: served, asOf: GAP_AS_OF, proposal: proposal({ asks: ["evidence"] }) }));
-  assert.deepEqual(turn.factBlocks.map((block) => (block.segments as Array<{ text: string }>)[0]!.text), [
+  assert.deepEqual(turn.factBlocks, [], "the engine answer's note is no gap the answer is written from");
+  assert.deepEqual(engineAnswerNote(turn.scope, { snapshotId: "00000000-0000-4000-8000-0000000000aa", asOf: GAP_AS_OF }).map((block) => (block.segments as Array<{ text: string }>)[0]!.text), [
     "The previous answer's figures were calculated and verified by the financial engine; each one links to its sources in that answer, and no other figure is shown in their place.",
   ]);
   const prose = "The previous answer's operating margin came from the financial engine, and each figure links to its filing.";

@@ -15,7 +15,7 @@
 
 import { dependencyClosure, type FinancialAnswerContent, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
 import { returnLabel } from "../../market/src/perf-points.ts";
-import type { ResearchScope } from "./research-scope.ts";
+import { QUARTERS_SHOWN, type ResearchScope } from "./research-scope.ts";
 import { isRecord } from "../../shared/src/http.ts";
 
 type Block = Record<string, unknown>;
@@ -274,8 +274,7 @@ function explainedMetrics(scope: ResearchScope): Array<string | ReadonlyArray<st
   });
 }
 
-// The months of claims a route reads: the eight quarters an overview charts (company-overview.ts).
-const ROUTE_MONTHS = 24;
+const ROUTE_MONTHS = 3 * QUARTERS_SHOWN;
 
 // ponytail: calendar approximations of the route's periods; a fiscal year is
 // widened by a year so one ending mid-year still covers its claims. One window
@@ -336,7 +335,7 @@ export function buildEvidencePacket(input: {
         : []
     ),
     query_bounds: {
-      ...(input.scope ? queryBounds(input.scope) : {}),
+      ...(input.scope ? priceWindowBound(input.scope) : {}),
       ...(input.claims ? { claims: claimBounds(input.scope, input.cutoff) } : {}),
     },
     // A claim names its company as coverage does; one matched outside the
@@ -493,8 +492,7 @@ export function packetForModel(packet: EvidencePacket): Record<string, unknown> 
   };
 }
 
-// The window the price chart was asked for, so the answer can say what it covers.
-function queryBounds(scope: ResearchScope): Record<string, string> {
+function priceWindowBound(scope: ResearchScope): Record<string, string> {
   return scope.price_window ? { price_window: `year to date, to the ${scope.price_window.cutoff.slice(0, 10)} cutoff` } : {};
 }
 
