@@ -699,11 +699,11 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       assert.deepEqual(await lane("How is AAA doing?", { researchScope: overBbb, readQuestion: reading(aaaNamed) }, ["AAA"]), ["AAA"]);
     });
 
-    await st.test("a follow-up naming no company or period and asking for no figure is the analyst's; one adding a company or turning something off, the engine's", async () => {
+    await st.test("a follow-up naming no company or period and asking for no figure is the analyst's, as is one turning off what no plan leaves out; one adding a company, the engine's", async () => {
       assert.deepEqual(await lane("Why?", { priorSubjects: async () => [aaa], readQuestion: reading({ asks: new Set(["explains"]) }) }), "analyst");
       assert.deepEqual(await lane("Thanks", { priorSubjects: async () => [aaa], readQuestion: reading({}) }), "analyst");
       assert.deepEqual(await lane("and BBB?", { priorSubjects: async () => [aaa], readQuestion: reading({ companies: { kind: "compare", add: ["BBB"] } }) }, ["AAA", "BBB"]), ["AAA", "BBB"]);
-      assert.deepEqual(await lane("Without the margins", { priorSubjects: async () => [aaa], readQuestion: reading({ turns_off: { facets: new Set(["margins"]), metrics: new Set() } }) }, ["AAA"]), ["AAA"]);
+      assert.deepEqual(await lane("Without the margins", { priorSubjects: async () => [aaa], readQuestion: reading({ turns_off: { facets: new Set(["margins"]), metrics: new Set() } }) }), "analyst");
     });
   });
 

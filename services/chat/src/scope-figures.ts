@@ -74,8 +74,10 @@ export const VALUATIONS: ReadonlySet<string> = new Set<Valuation>(["market_cap",
  * own; a period no fiscal field holds, asked by a follow-up naming no company
  * or figure; kept figures with peers, or none the engine can plan at the
  * period. Otherwise, with a scope: one company's margin trend, the companies'
- * overview, or the figures a follow-up keeps beside the income statement;
- * anything else is the planner's.
+ * overview, or the figures a follow-up keeps beside the income statement. A
+ * follow-up naming no company or figure that turns off what none of those
+ * leaves out, asking at most why, is the analyst's; anything else is the
+ * planner's.
  */
 export function routeTurn(reading: ScopeProposal | null, scope: ResearchScope | null): PlanChoice {
   if (reading === null) return PLANNER;
@@ -115,7 +117,7 @@ export function routeTurn(reading: ScopeProposal | null, scope: ResearchScope | 
     if (planned.length > 0) return { kind: "kept_figures", metrics: planned, period };
     return { kind: "named_gap", reason: kept.some((key) => VALUATIONS.has(key)) ? "valuation_period" : "undefined_metric" };
   }
-  return PLANNER;
+  return followUp && asksNoFigure && [...asks].every((facet) => facet === "explains") ? { kind: "analyst" } : PLANNER;
 }
 
 // The companies a reading's change names, whatever it does with them.
