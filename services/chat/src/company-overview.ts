@@ -97,6 +97,38 @@ export async function planCompanyOverview(context: PlanningContext, evidence: Fi
   return companies && planned(context, companyOverviewDraft(companies));
 }
 
+/**
+ * One company's three margins over its charted quarters, each with its high
+ * and low (#398): the answer to a question about its margin trend, with no
+ * model planning it. Null as for the overview.
+ */
+export async function planMarginTrend(context: PlanningContext, evidence: FinancialEvidencePort): Promise<OverviewPlan | null> {
+  const companies = await companyQuarters(context, evidence);
+  return companies && planned(context, { draft: marginTrendDraft(companies[0]!), uncovered: [] });
+}
+
+const TREND_ASKS: ReadonlySet<ScopeFacet> = new Set(["margin_trend", "margins", "explains"]);
+const MARGIN_ITEMS: ReadonlySet<string> = new Set(MARGINS.map(({ metric }) => metric));
+
+/**
+ * The one company a question about its margin trend covers: its reading asks
+ * for margins over time, names no other figure, and reads the latest
+ * periods. Null otherwise, and for several companies, which the planner
+ * answers.
+ */
+export function marginTrendSubjects(
+  subjects: ReadonlyArray<RequestedSubject>,
+  reading: ScopeProposal | null,
+  scope: Pick<ResearchScope, "price_window"> | null,
+): ReadonlyArray<RequestedSubject> | null {
+  if (reading === null || scope === null || scope.price_window || subjects.length !== 1) return null;
+  const { asks, offMetrics } = readingAsks(reading);
+  const latest = reading.period.kind === "none" || reading.period.kind === "latest";
+  const trendOnly = asks.has("margin_trend") && [...asks].every((facet) => TREND_ASKS.has(facet));
+  const marginsOnly = reading.metrics.every((metric) => metric.metric_key === "income_statement") && reading.income_items.every((item) => MARGIN_ITEMS.has(item));
+  return latest && trendOnly && marginsOnly && offMetrics.size === 0 ? subjects : null;
+}
+
 function planned(context: PlanningContext, { draft, uncovered }: { draft: unknown; uncovered: ReadonlyArray<string> }): OverviewPlan | null {
   const result = buildDeterministicPlan(context, draft);
   if (result.outcome === "ready") return { ...result, uncovered };
@@ -193,10 +225,11 @@ function companyOverviewDraft(companies: ReadonlyArray<Company>) {
       return [];
     });
     const charted = [...revenue.values()].reverse();
+    const window = several ? [] : highAndLow("revenue", charted);
     return {
       subject: { slot_id: slot, mention: company.mention },
-      operations: [...revenue.values(), ...lines, ...margins, ...growth],
-      outputs: [...(several ? [latest] : charted), ...lines, ...margins, ...growth],
+      operations: [...revenue.values(), ...lines, ...margins, ...growth, ...window],
+      outputs: [...(several ? [latest] : charted), ...lines, ...margins, ...growth, ...window],
     };
   });
   return {
@@ -208,4 +241,29 @@ function companyOverviewDraft(companies: ReadonlyArray<Company>) {
     },
     uncovered,
   };
+}
+
+function marginTrendDraft(company: Company) {
+  const quarter = quarterly("a", (name) => name, company.newest);
+  const backs = Array.from({ length: QUARTERS_SHOWN }, (_, back) => QUARTERS_SHOWN - 1 - back);
+  const revenue = backs.map((back) => quarter("revenue", back));
+  const lines = MARGINS.map(({ numerator }) => backs.map((back) => quarter(numerator, back)));
+  const margins = MARGINS.map(({ metric }, line) => lines[line]!.map((numerator, index): Node => ({
+    node_id: `${metric}_${quarterId(before(company.newest, backs[index]!))}`,
+    operation: metric,
+    numerator: numerator.node_id,
+    revenue: revenue[index]!.node_id,
+  })));
+  const windows = MARGINS.flatMap(({ metric }, line) => highAndLow(metric, margins[line]!));
+  return {
+    subjects: [{ slot_id: "a", mention: company.mention }],
+    operations: [...revenue, ...lines.flat(), ...margins.flat(), ...windows],
+    outputs: [...margins.flat(), ...windows].map((node) => ({ output_id: `out_${node.node_id}`, node_id: node.node_id })),
+    thresholds: [],
+  };
+}
+
+// A figure's highest and lowest among the quarters shown.
+function highAndLow(name: string, members: ReadonlyArray<Node>): Node[] {
+  return (["highest", "lowest"] as const).map((direction) => ({ node_id: `${name}_${direction}`, operation: "period_rank", members: members.map((member) => member.node_id), direction }));
 }

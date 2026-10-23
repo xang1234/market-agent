@@ -25,7 +25,7 @@
 
 import type { RejectionCheck } from "../../src/assertions.ts";
 
-export const HOLDOUT_VERSION = 16;
+export const HOLDOUT_VERSION = 17;
 
 type Assertion = Record<string, unknown>;
 
@@ -250,6 +250,8 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
         [APPLE, "Quarter-over-quarter percent change in Revenue", "Q2 FY2026 vs Q1 FY2026", "verified", "-22.89%"],
         [APPLE, "Quarter-over-quarter percent change in Revenue", "Q3 FY2026 vs Q2 FY2026", "verified", "-1.62%"],
         [APPLE, "Year-over-year percent change in Revenue", "Q3 FY2026 vs Q3 FY2025", "verified", "3.26%"],
+        [APPLE, "Revenue ranked across periods", "Q4 FY2024 to Q3 FY2026", "verified", "Q1 FY2026 has the highest revenue of the 8 quarters ranked"],
+        [APPLE, "Revenue ranked across periods", "Q4 FY2024 to Q3 FY2026", "verified", "Q3 FY2025 has the lowest revenue of the 8 quarters ranked"],
       ],
       uncovered: "AAPL's revenue was USD 97,100,000,000.00 in Q3 FY2026.",
     },

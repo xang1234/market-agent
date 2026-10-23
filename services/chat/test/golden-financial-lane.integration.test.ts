@@ -47,7 +47,7 @@ test("golden metric questions certify through the chat financial lane on the rec
     const message = (await client.query(`select blocks from chat_messages where message_id = $1`, [done.message_id])).rows[0];
     assert.ok(message, `expected a published answer; got ${JSON.stringify(done)}`);
     return (message.blocks[0].financial.results as Array<{ output_id: string; disposition: string; presented: { kind: string; text: string } }>)
-      .map((result) => [result.output_id, result.disposition, result.presented.kind === "value" ? result.presented.text : null]);
+      .map((result) => [result.output_id, result.disposition, result.presented.kind === "gap" ? null : result.presented.text]);
   };
   // The latest answer's commentary, which follows its engine block and cites
   // only that block's verified results, each with its exact text and period.
@@ -109,6 +109,8 @@ test("golden metric questions certify through the chat financial lane on the rec
     ["out_revenue_growth_qoq_fy2026_q3", "verified", "21.96%"],
     ["out_revenue_growth_qoq", "verified", "8.94%"],
     ["out_revenue_growth_yoy", "verified", "57.89%"],
+    ["out_revenue_highest", "verified", "Q4 FY2026 has the highest revenue of the 8 quarters ranked"],
+    ["out_revenue_lowest", "verified", "Q1 FY2025 has the lowest revenue of the 8 quarters ranked"],
   ]);
   assert.equal(await commentaryText(), [
     "NVDA's revenue rose in every period from Q1 FY2025 (USD 26,044,000,000.00) to Q4 FY2026 (USD 62,100,000,000.00).",

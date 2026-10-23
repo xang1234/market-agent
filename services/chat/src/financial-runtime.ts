@@ -42,7 +42,7 @@ import { publishRequest, type RequestGap } from "../../financial-engine/src/requ
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { comparedAdditions, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId } from "./chat-ids.ts";
-import { allResolved, overviewPeers, overviewSubjects, planCompanyOverview, type OverviewPlan, type PeersOf } from "./company-overview.ts";
+import { allResolved, marginTrendSubjects, overviewPeers, overviewSubjects, planCompanyOverview, planMarginTrend, type OverviewPlan, type PeersOf } from "./company-overview.ts";
 import { noteBlock } from "./fact-blocks.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { companyKey, extractSubjectMentions } from "./subject-extraction.ts";
@@ -534,8 +534,9 @@ async function planTurn(
   }
   onSubjects(subjects);
   if (CASH_RESILIENCE.test(text)) return planCashResilience(planningContext(subjects), text);
-  // The reading is settled before the turn is planned, so an overview is
-  // decided first and the planner's model is called only without one.
+  // The reading is settled before the turn is planned, so an overview or a
+  // margin trend is decided first and the planner's model is called only
+  // without one.
   if (allResolved(subjects)) {
     const companies = await overviewSubjects(subjects, turn.reading, turn.scope, turn.peersOf);
     const overview = companies && await planCompanyOverview(planningContext(companies), turn.evidence);
@@ -543,6 +544,12 @@ async function planTurn(
       onSubjects(companies);
       turn.onOverview(overview);
       return overview;
+    }
+    const trended = marginTrendSubjects(subjects, turn.reading, turn.scope);
+    const trend = trended && await planMarginTrend(planningContext(trended), turn.evidence);
+    if (trend) {
+      turn.onOverview(trend);
+      return trend;
     }
   }
   // A failing or unreachable model is a planning gap (publishRequest); the narrative composer is never a fallback for numbers.

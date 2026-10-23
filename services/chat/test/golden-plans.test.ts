@@ -7,7 +7,7 @@ import { createRuntimeAuthority, operationDependencies, type FinancialPlanV1 } f
 import { buildDeterministicPlan, planFinancialRequest, type PlanningContext, type PlanningModel, type PlanningResult, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import type { CandidatePage, CandidateRequest, FinancialEvidencePort, InputCandidate, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
-import { allResolved, overviewPeers, overviewSubjects, planCompanyOverview } from "../src/company-overview.ts";
+import { allResolved, marginTrendSubjects, overviewPeers, overviewSubjects, planCompanyOverview, planMarginTrend } from "../src/company-overview.ts";
 import { MAX_TURN_SUBJECTS } from "../src/coordinator.ts";
 import { uncoveredAsks } from "../src/financial-runtime.ts";
 import { resolveResearchScope } from "../src/research-scope.ts";
@@ -194,6 +194,7 @@ test("a company's overview shows its eight quarters to the newest it reported re
       "net_margin(NVDA net_income Q4 2025, NVDA revenue Q4 2025)",
       ...charted.slice(1).map((quarter, index) => changeOf("NVDA", quarter, charted[index]!)),
       changeOf("NVDA", "Q4 2025", "Q4 2024"),
+      ...["highest", "lowest"].map(() => `period_rank(${charted.map((quarter) => `NVDA revenue ${quarter}`).join(", ")})`),
     ],
     uncovered: [],
   }, "a fourth quarter with no precision proof is the newest; a quarter public after the cutoff, or a year, is not");
@@ -388,6 +389,37 @@ test("a question about its companies, named or carried, that asks for no figure 
     [true, null],
     "the golden conversation's comparison asks for a price window",
   );
+});
+
+test("a question about one company's margin trend plans its three margins over the charted quarters, each with its high and low, with no model (#398)", async () => {
+  const quarters = GOLDEN_COMPANIES.find((company) => company.ticker === "NVDA")!.quarters.map((quarter) => `${quarter.fiscal_period} ${quarter.fiscal_year}`);
+  const MARGINS = [["gross_margin", "gross_profit"], ["operating_margin", "operating_income"], ["net_margin", "net_income"]] as const;
+  const over = (metric: string, line: string) => quarters.map((quarter) => `${metric}(NVDA ${line} ${quarter}, NVDA revenue ${quarter})`);
+  assert.deepEqual(await overviewOf("NVDA", () => candidatePage(...goldenQuarters("NVDA")), planMarginTrend), {
+    outputs: [
+      ...MARGINS.flatMap(([metric, line]) => over(metric, line)),
+      ...MARGINS.flatMap(([metric, line]) => ["highest", "lowest"].map(() => `period_rank(${over(metric, line).join(", ")})`)),
+    ],
+    uncovered: [],
+  });
+
+  const subjects = planningContext("NVDA").requested_subjects;
+  const scope = { price_window: null };
+  const trend = (proposal: ReturnType<typeof reading>, over = subjects, scoped: { price_window: null | object } | null = scope) =>
+    marginTrendSubjects(over, proposal, scoped as never)?.map((subject) => subject.mention) ?? null;
+  assert.deepEqual(trend(reading(["margin_trend"], ["income_statement"], ["operating_margin"])), ["NVDA"], "one margin over time");
+  assert.deepEqual(trend(reading(["margins", "margin_trend", "explains"])), ["NVDA"], "margins over time and why");
+  assert.deepEqual(trend(reading(["margin_trend"], [], [], [], { kind: "latest" })), ["NVDA"], "the latest periods");
+  assert.equal(trend(reading(["margins"])), null, "margins, not their trend");
+  assert.equal(trend(reading(["margin_trend", "segments"])), null, "segments too");
+  assert.equal(trend(reading(["margin_trend"], [], ["revenue"])), null, "another income item");
+  assert.equal(trend(reading(["margin_trend"], ["free_cash_flow"])), null, "another metric");
+  assert.equal(trend(reading(["margin_trend"], [], [], [], { kind: "fiscal_quarter", fiscal_period: "Q2", fiscal_year: 2025 })), null, "a named quarter");
+  assert.equal(trend(reading(["margin_trend"], [], [], ["margins"])), null, "margins turned off");
+  assert.equal(trend(reading(["margin_trend"]), planningContext("NVDA and AMD").requested_subjects), null, "two companies");
+  assert.equal(trend(reading(["margin_trend"]), subjects, { price_window: { kind: "ytd" } }), null, "a price window");
+  assert.equal(trend(reading(["margin_trend"]), subjects, null), null, "no scope");
+  assert.equal(marginTrendSubjects(subjects, null, scope), null, "no reading");
 });
 
 test("each golden answer names what its question asks for and its plan does not compute", async () => {
