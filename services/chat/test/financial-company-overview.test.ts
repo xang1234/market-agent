@@ -342,12 +342,17 @@ test("a question about one company that asks for no figure is answered with its 
     ["out_revenue_growth_qoq", "Q2 FY2024 vs Q1 FY2024", "verified", "23.81%"],
     ["out_revenue_growth_yoy", "Q2 FY2024 vs Q2 FY2023", "verified", "100.00%"],
   ];
+  // The first company's lead over the second in each margin, each in its own latest quarter.
+  const leads = (period: string, outcomes: ReadonlyArray<ReadonlyArray<string>>) =>
+    ["gross_margin", "operating_margin", "net_margin"].map((metric, index) => [`out_a_minus_b_${metric}`, period, ...outcomes[index]!]);
+  // QTRS's quarter ends 2023-12-31 and OFFQ's 2024-06-30: half a year apart, so no lead is stated.
+  const QTRS_OVER_OFFQ = leads("QTRS Corp Q4 FY2023 minus OFFQ Corp Q2 FY2024", Array(3).fill(["incompatible", "incompatible_period"]));
 
   await t.test("a comparison of named companies is one table, each company's figures from its own latest quarter (#398)", async () => {
     const done = completed((await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve }).run({ ...base, userIntent: "Compare revenue for QTRS and OFFQ" })).events);
-    assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_LATEST), ...slotted("b", OFFQ_LATEST)]);
+    assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_LATEST), ...slotted("b", OFFQ_LATEST), ...QTRS_OVER_OFFQ]);
     const { rows: [shown] } = await db.query(`select blocks->0->'financial'->'presentations' as presentations from chat_messages where message_id = $1`, [done.message_id]);
-    assert.deepEqual(shown.presentations.map((presentation: { kind: string }) => presentation.kind), ["table"]);
+    assert.deepEqual(shown.presentations.map((presentation: { kind: string }) => presentation.kind), ["table", "gap", "gap", "gap"], "the leads stand beside the table");
   });
 
   await t.test("a line the engine cannot certify for one compared company is its gap cell, and the comparison still publishes (#398)", async () => {
@@ -355,7 +360,9 @@ test("a question about one company that asks for no figure is answered with its 
     const nogp = slotted("b", QTRS_LATEST);
     nogp[1] = ["out_b_gross_profit_fy2023_q4", "Q4 FY2023", "missing", "missing_input"];
     nogp[4] = ["out_b_gross_margin", "Q4 FY2023", "blocked_dependency", "blocked_by_dependency"];
-    assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_LATEST), ...nogp]);
+    // Equal margins tie at a real zero; a lead over a gap is blocked, never zero.
+    const tied = leads("QTRS Corp Q4 FY2023 minus NOGP Corp Q4 FY2023", [["blocked_dependency", "blocked_by_dependency"], ["verified", "0.00 pp"], ["verified", "0.00 pp"]]);
+    assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_LATEST), ...nogp, ...tied]);
   });
 
   await t.test("a question about one company that asks for its peers is answered with the company and its peers, saved as auto-selected (#398)", async () => {
@@ -365,7 +372,7 @@ test("a question about one company that asks for no figure is answered with its 
       const peers = { ...NO_ASKS, asks: new Set(["peers"] as const) };
       const { turnId, events } = await chatHarness(pool, { model: null, readQuestion: reading(peers), resolveMention: resolve, researchScope: scoped }).run({ ...base, userIntent: "Revenue for QTRS" });
       const done = completed(events);
-      assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_LATEST), ...slotted("b", OFFQ_LATEST)]);
+      assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_LATEST), ...slotted("b", OFFQ_LATEST), ...QTRS_OVER_OFFQ]);
       const { rows: [message] } = await db.query(`select blocks, research_scope from chat_messages where message_id = $1`, [done.message_id]);
       assert.deepEqual([message.research_scope.companies, message.research_scope.peers], [[{ issuer_id: COMPANIES.QTRS, label: "QTRS" }, { issuer_id: COMPANIES.OFFQ }], true]);
       assert.equal(message.blocks.length, 1, "no note names peers the question did not name");

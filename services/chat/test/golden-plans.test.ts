@@ -258,7 +258,7 @@ test("a change is planned only between quarters whose reported dates follow each
   assert.deepEqual(changes(disputed!.outputs).filter((change) => change.includes("Q3 2026")), []);
 });
 
-test("a comparison shows each company's latest quarter, named from the newest it reported revenue for, never aligned by calendar (#398)", async (t) => {
+test("a comparison shows each company's latest quarter, named from the newest it reported revenue for, never aligned by calendar, and the first company's lead in each margin (#398)", async (t) => {
   t.mock.method(console, "warn", () => {});
   const PAGES: Record<string, CandidatePage> = {
     NVDA: candidatePage(...goldenQuarters("NVDA", "2026-08-01T00:00:00.000Z"), revenueCandidate(2027, "Q1", "2026-01-26", "2026-04-26", "2026-09-02T00:00:00.000Z")),
@@ -293,6 +293,9 @@ test("a comparison shows each company's latest quarter, named from the newest it
     changeOf(ticker, quarter, previous),
     changeOf(ticker, quarter, yearBefore),
   ];
+  const NEWEST: Record<string, string> = { NVDA: "Q4 2026", AMD: "Q2 2026", AAPL: "Q3 2026" };
+  const leads = (...tickers: string[]) => MARGINS.flatMap(([metric, line]) => tickers.slice(1).map((other) =>
+    `spread(${margin(tickers[0]!, metric, line, NEWEST[tickers[0]!]!)}, ${margin(other, metric, line, NEWEST[other]!)})`));
   const NVDA = latestQuarter("NVDA", "Q4 2026", "Q3 2026", "Q4 2025");
   const AMD = latestQuarter("AMD", "Q2 2026", "Q1 2026", "Q2 2025");
   const AAPL = latestQuarter("AAPL", "Q3 2026", "Q2 2026", "Q3 2025");
@@ -305,13 +308,13 @@ test("a comparison shows each company's latest quarter, named from the newest it
     planner: "deterministic",
     model_calls: 0,
     units: ["answer"],
-    output_ids: [...ids("a", "fy2026_q4"), ...ids("b", "fy2026_q2")],
-    outputs: [...NVDA, ...AMD],
+    output_ids: [...ids("a", "fy2026_q4"), ...ids("b", "fy2026_q2"), ...MARGINS.map(([metric]) => `out_a_minus_b_${metric}`)],
+    outputs: [...NVDA, ...AMD, ...leads("NVDA", "AMD")],
     uncovered: [],
     reads: [read("NVDA"), read("AMD")],
   }, "a quarter public after the cutoff is not NVDA's newest");
   const three = await compare("NVDA, AMD and AAPL");
-  assert.deepEqual([three?.outputs, three?.reads], [[...NVDA, ...AMD, ...AAPL], [read("NVDA"), read("AMD"), read("AAPL")]]);
+  assert.deepEqual([three?.outputs, three?.reads], [[...NVDA, ...AMD, ...AAPL, ...leads("NVDA", "AMD", "AAPL")], [read("NVDA"), read("AMD"), read("AAPL")]]);
   const undated = await compare("NVDA and AMD", { ...PAGES, AMD: candidatePage(revenueCandidate(2026, "Q1", null, "2026-03-28"), revenueCandidate(2026, "Q2", null, "2026-06-27")) });
   assert.deepEqual(undated.uncovered, [
     "revenue growth from Q1 FY2026 to Q2 FY2026 for Advanced Micro Devices, Inc., whose quarters are not dated consecutively",

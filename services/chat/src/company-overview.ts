@@ -227,16 +227,26 @@ function companyOverviewDraft(companies: ReadonlyArray<Company>) {
     const charted = [...revenue.values()].reverse();
     const window = several ? [] : highAndLow("revenue", charted);
     return {
+      slot,
+      margins,
       subject: { slot_id: slot, mention: company.mention },
       operations: [...revenue.values(), ...lines, ...margins, ...growth, ...window],
       outputs: [...(several ? [latest] : charted), ...lines, ...margins, ...growth, ...window],
     };
   });
+  // The first company's lead over each other company, for each margin.
+  const [primary, ...others] = parts;
+  const leads = MARGINS.flatMap(({ metric }, line) => others.map((other): Node => ({
+    node_id: `${primary!.slot}_minus_${other.slot}_${metric}`,
+    operation: "spread",
+    left: primary!.margins[line]!.node_id,
+    right: other.margins[line]!.node_id,
+  })));
   return {
     draft: {
       subjects: parts.map((part) => part.subject),
-      operations: parts.flatMap((part) => part.operations),
-      outputs: parts.flatMap((part) => part.outputs).map((node) => ({ output_id: `out_${node.node_id}`, node_id: node.node_id })),
+      operations: [...parts.flatMap((part) => part.operations), ...leads],
+      outputs: [...parts.flatMap((part) => part.outputs), ...leads].map((node) => ({ output_id: `out_${node.node_id}`, node_id: node.node_id })),
       thresholds: [],
     },
     uncovered,

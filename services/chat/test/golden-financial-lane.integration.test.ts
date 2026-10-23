@@ -122,7 +122,10 @@ test("golden metric questions certify through the chat financial lane on the rec
   const NVDA = ["USD 62,100,000,000.00", "USD 46,200,000,000.00", "USD 40,300,000,000.00", "USD 35,400,000,000.00", "74.40%", "64.90%", "57.00%", "8.94%", "57.89%"];
   const AMD = ["USD 11,200,000,000.00", "USD 6,050,000,000.00", "USD 1,610,000,000.00", "USD 1,480,000,000.00", "54.02%", "14.38%", "13.21%", "4.67%", "45.74%"];
   const AAPL = ["USD 97,100,000,000.00", "USD 45,700,000,000.00", "USD 29,800,000,000.00", "USD 24,900,000,000.00", "47.06%", "30.69%", "25.64%", "-1.62%", "3.26%"];
-  assert.deepEqual(await ask("Compare NVDA and AMD profit", readingOf(NO_ASKS)), [...latestQuarter("a", "fy2026_q4", NVDA), ...latestQuarter("b", "fy2026_q2", AMD)]);
+  // NVDA's latest quarter ends in January and the others' in June: too far apart to state a lead.
+  const MARGINS = ["gross_margin", "operating_margin", "net_margin"];
+  const apart = (...slots: string[]) => MARGINS.flatMap((metric) => slots.map((slot) => [`out_a_minus_${slot}_${metric}`, "incompatible", null]));
+  assert.deepEqual(await ask("Compare NVDA and AMD profit", readingOf(NO_ASKS)), [...latestQuarter("a", "fy2026_q4", NVDA), ...latestQuarter("b", "fy2026_q2", AMD), ...apart("b")]);
   assert.equal(await commentaryText(), [
     "Of NVDA and AMD, NVDA's gross margin (gross profit / revenue) was highest: NVDA 74.40% (Q4 FY2026), AMD 54.02% (Q2 FY2026).",
     "Of NVDA and AMD, NVDA's year-over-year percent change in revenue was highest: NVDA 57.89% (Q4 FY2026 vs Q4 FY2025), AMD 45.74% (Q2 FY2026 vs Q2 FY2025).",
@@ -132,5 +135,6 @@ test("golden metric questions certify through the chat financial lane on the rec
     ...latestQuarter("a", "fy2026_q4", NVDA),
     ...latestQuarter("b", "fy2026_q2", AMD),
     ...latestQuarter("c", "fy2026_q3", AAPL),
+    ...apart("b", "c"),
   ]);
 });
