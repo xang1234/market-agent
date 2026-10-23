@@ -1,0 +1,1497 @@
+{
+  "version": 2,
+  "thread_id": "94bed2ca-40d0-4880-895d-50c2d50d141a",
+  "run_id": "8bb64206-a5c4-41aa-a9fa-0e5f8d370b36",
+  "turn_id": "1be369fd-d2de-466d-9315-4ed8074e830e",
+  "question": "Analyze AMD. It recovered within a single quarter, right?",
+  "recorded_at": "2026-10-23T00:49:57.274Z",
+  "input": {
+    "context": {
+      "userIntent": "Analyze AMD. It recovered within a single quarter, right?",
+      "bundleId": "single_subject_analysis"
+    },
+    "blocks": [
+      {
+        "id": "56d009f8-dfd8-4e96-8ca3-1a3868b0a045",
+        "kind": "rich_text",
+        "snapshot_id": "c05d451d-2cb1-4a90-8643-96569b4ee64f",
+        "data_ref": {
+          "kind": "rich_text",
+          "id": "56d009f8-dfd8-4e96-8ca3-1a3868b0a045"
+        },
+        "source_refs": [],
+        "as_of": "1970-01-01T00:00:00.000Z",
+        "title": "single_subject_analysis",
+        "segments": [
+          {
+            "type": "text",
+            "text": "Analyze AMD. It recovered within a single quarter, right?. Used get_quote from the single_subject_analysis bundle and produced snapshot-backed research blocks."
+          }
+        ]
+      }
+    ],
+    "toolCalls": [
+      {
+        "tool_call_id": "fa37d3fa-7d82-47f1-86c8-66138a0e4a8d",
+        "tool_name": "get_quote",
+        "status": "ok",
+        "bundle_id": "single_subject_analysis",
+        "arguments": {
+          "query": "Analyze AMD. It recovered within a single quarter, right?",
+          "subject_ref": {
+            "kind": "listing",
+            "id": "62000000-0000-4000-8000-000000000002"
+          }
+        },
+        "result": {
+          "kind": "local_evidence_tool_result",
+          "status": "ok",
+          "tool_name": "get_quote",
+          "arguments": {
+            "query": "Analyze AMD. It recovered within a single quarter, right?",
+            "subject_ref": {
+              "kind": "listing",
+              "id": "62000000-0000-4000-8000-000000000002"
+            }
+          },
+          "evidence_status": "available",
+          "manifest_contribution": {
+            "subject_refs": [
+              {
+                "kind": "listing",
+                "id": "62000000-0000-4000-8000-000000000002"
+              }
+            ],
+            "claim_refs": [
+              "7c46e727-8a24-4020-8e30-92f09548eeba"
+            ],
+            "document_refs": [
+              "1e601f45-0577-44c4-bd47-6c410cd7a31f"
+            ],
+            "source_ids": [
+              "280fd44b-d8b9-4d7a-ab96-22189da1d81c"
+            ]
+          },
+          "structured_context": {
+            "quote": {
+              "listing_id": "62000000-0000-4000-8000-000000000002",
+              "ticker": "AMD",
+              "provider": "golden_fixture",
+              "price": 162.3,
+              "prev_close": 164.9,
+              "change_abs": -2.5999999999999943,
+              "change_pct": -0.01576713159490597,
+              "session_state": "closed",
+              "delay_class": "eod",
+              "currency": "USD",
+              "as_of": "2026-09-01T00:00:00.000Z",
+              "source_id": "00000000-0000-4000-a000-000000000009",
+              "expires_at": "2126-09-01T00:00:00.000Z",
+              "stale": false
+            },
+            "facts": [
+              {
+                "fact_id": "fb6bb89c-c953-4eb3-9a62-5e143935b1fe",
+                "metric_key": "gross_profit",
+                "display_name": "Gross Profit",
+                "value_num": 6050000000,
+                "value_text": null,
+                "unit": "currency",
+                "currency": "USD",
+                "scale": 1,
+                "period_kind": "fiscal_q",
+                "fiscal_year": 2026,
+                "fiscal_period": "Q2",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "source_id": "65000000-0000-4000-8000-000000000001",
+                "coverage_level": "full"
+              },
+              {
+                "fact_id": "5e99de9c-3305-4800-aabd-ac283faba74b",
+                "metric_key": "gross_profit",
+                "display_name": "Gross Profit",
+                "value_num": 5780000000,
+                "value_text": null,
+                "unit": "currency",
+                "currency": "USD",
+                "scale": 1,
+                "period_kind": "fiscal_q",
+                "fiscal_year": 2026,
+                "fiscal_period": "Q1",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "source_id": "65000000-0000-4000-8000-000000000001",
+                "coverage_level": "full"
+              },
+              {
+                "fact_id": "9285fd44-7a14-4a4e-be34-3ae092bfb68c",
+                "metric_key": "net_income",
+                "display_name": "Net Income",
+                "value_num": 1400000000,
+                "value_text": null,
+                "unit": "currency",
+                "currency": "USD",
+                "scale": 1,
+                "period_kind": "fiscal_q",
+                "fiscal_year": 2026,
+                "fiscal_period": "Q1",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "source_id": "65000000-0000-4000-8000-000000000001",
+                "coverage_level": "full"
+              },
+              {
+                "fact_id": "1dd17761-1177-41f8-b3f3-f36d8bf892d1",
+                "metric_key": "net_income",
+                "display_name": "Net Income",
+                "value_num": 1480000000,
+                "value_text": null,
+                "unit": "currency",
+                "currency": "USD",
+                "scale": 1,
+                "period_kind": "fiscal_q",
+                "fiscal_year": 2026,
+                "fiscal_period": "Q2",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "source_id": "65000000-0000-4000-8000-000000000001",
+                "coverage_level": "full"
+              },
+              {
+                "fact_id": "5bf89b97-3842-4ea7-a2fc-833e1ab7405e",
+                "metric_key": "operating_income",
+                "display_name": "Operating Income",
+                "value_num": 1610000000,
+                "value_text": null,
+                "unit": "currency",
+                "currency": "USD",
+                "scale": 1,
+                "period_kind": "fiscal_q",
+                "fiscal_year": 2026,
+                "fiscal_period": "Q2",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "source_id": "65000000-0000-4000-8000-000000000001",
+                "coverage_level": "full"
+              },
+              {
+                "fact_id": "7faf6ef4-4aac-46bb-a36c-84ab43c8d83d",
+                "metric_key": "operating_income",
+                "display_name": "Operating Income",
+                "value_num": 1520000000,
+                "value_text": null,
+                "unit": "currency",
+                "currency": "USD",
+                "scale": 1,
+                "period_kind": "fiscal_q",
+                "fiscal_year": 2026,
+                "fiscal_period": "Q1",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "source_id": "65000000-0000-4000-8000-000000000001",
+                "coverage_level": "full"
+              },
+              {
+                "fact_id": "507db774-8cbf-486f-97a2-69eabea4ef03",
+                "metric_key": "revenue",
+                "display_name": "Revenue",
+                "value_num": 11200000000,
+                "value_text": null,
+                "unit": "currency",
+                "currency": "USD",
+                "scale": 1,
+                "period_kind": "fiscal_q",
+                "fiscal_year": 2026,
+                "fiscal_period": "Q2",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "source_id": "65000000-0000-4000-8000-000000000001",
+                "coverage_level": "full"
+              },
+              {
+                "fact_id": "4522c287-763b-4eae-a8f9-dae78a1dcb57",
+                "metric_key": "revenue",
+                "display_name": "Revenue",
+                "value_num": 10700000000,
+                "value_text": null,
+                "unit": "currency",
+                "currency": "USD",
+                "scale": 1,
+                "period_kind": "fiscal_q",
+                "fiscal_year": 2026,
+                "fiscal_period": "Q1",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "source_id": "65000000-0000-4000-8000-000000000001",
+                "coverage_level": "full"
+              },
+              {
+                "fact_id": "26681ecc-c691-450c-80af-eb52944c4ce9",
+                "metric_key": "gross_profit",
+                "display_name": "Gross Profit",
+                "value_num": 3735000000,
+                "value_text": null,
+                "unit": "currency",
+                "currency": "USD",
+                "scale": 1,
+                "period_kind": "fiscal_q",
+                "fiscal_year": 2025,
+                "fiscal_period": "Q1",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "source_id": "65000000-0000-4000-8000-000000000001",
+                "coverage_level": "full"
+              },
+              {
+                "fact_id": "f597e19a-928d-4721-9641-9b8b201605de",
+                "metric_key": "gross_profit",
+                "display_name": "Gross Profit",
+                "value_num": 4953000000,
+                "value_text": null,
+                "unit": "currency",
+                "currency": "USD",
+                "scale": 1,
+                "period_kind": "fiscal_q",
+                "fiscal_year": 2025,
+                "fiscal_period": "Q3",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "source_id": "65000000-0000-4000-8000-000000000001",
+                "coverage_level": "full"
+              },
+              {
+                "fact_id": "d7533129-a5e0-4250-a3bc-86fe4f41574a",
+                "metric_key": "gross_profit",
+                "display_name": "Gross Profit",
+                "value_num": 17307000000,
+                "value_text": null,
+                "unit": "currency",
+                "currency": "USD",
+                "scale": 1,
+                "period_kind": "fiscal_y",
+                "fiscal_year": 2025,
+                "fiscal_period": "FY",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "source_id": "65000000-0000-4000-8000-000000000001",
+                "coverage_level": "full"
+              },
+              {
+                "fact_id": "b3b74bd3-1571-4dbb-918d-9ab054737fdd",
+                "metric_key": "gross_profit",
+                "display_name": "Gross Profit",
+                "value_num": 5560000000,
+                "value_text": null,
+                "unit": "currency",
+                "currency": "USD",
+                "scale": 1,
+                "period_kind": "fiscal_q",
+                "fiscal_year": 2025,
+                "fiscal_period": "Q4",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "source_id": "65000000-0000-4000-8000-000000000001",
+                "coverage_level": "full"
+              },
+              {
+                "fact_id": "e7cad3f0-3fe2-4feb-833e-d1b5695af8cd",
+                "metric_key": "gross_profit",
+                "display_name": "Gross Profit",
+                "value_num": 3059000000,
+                "value_text": null,
+                "unit": "currency",
+                "currency": "USD",
+                "scale": 1,
+                "period_kind": "fiscal_q",
+                "fiscal_year": 2025,
+                "fiscal_period": "Q2",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "source_id": "65000000-0000-4000-8000-000000000001",
+                "coverage_level": "full"
+              },
+              {
+                "fact_id": "e355b0d7-8dd1-4da5-ba92-ce0022576604",
+                "metric_key": "net_income",
+                "display_name": "Net Income",
+                "value_num": 872000000,
+                "value_text": null,
+                "unit": "currency",
+                "currency": "USD",
+                "scale": 1,
+                "period_kind": "fiscal_q",
+                "fiscal_year": 2025,
+                "fiscal_period": "Q2",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "source_id": "65000000-0000-4000-8000-000000000001",
+                "coverage_level": "full"
+              },
+              {
+                "fact_id": "da556806-1189-45e0-9918-ba35d6b00e9f",
+                "metric_key": "net_income",
+                "display_name": "Net Income",
+                "value_num": 1350000000,
+                "value_text": null,
+                "unit": "currency",
+                "currency": "USD",
+                "scale": 1,
+                "period_kind": "fiscal_q",
+                "fiscal_year": 2025,
+                "fiscal_period": "Q4",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "source_id": "65000000-0000-4000-8000-000000000001",
+                "coverage_level": "full"
+              },
+              {
+                "fact_id": "2acd39ba-5540-46f6-94cb-264c5efcd7c5",
+                "metric_key": "net_income",
+                "display_name": "Net Income",
+                "value_num": 4174000000,
+                "value_text": null,
+                "unit": "currency",
+                "currency": "USD",
+                "scale": 1,
+                "period_kind": "fiscal_y",
+                "fiscal_year": 2025,
+                "fiscal_period": "FY",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "source_id": "65000000-0000-4000-8000-000000000001",
+                "coverage_level": "full"
+              },
+              {
+                "fact_id": "a175c1c7-3f0a-4717-a919-e2fe406bfe31",
+                "metric_key": "net_income",
+                "display_name": "Net Income",
+                "value_num": 709000000,
+                "value_text": null,
+                "unit": "currency",
+                "currency": "USD",
+                "scale": 1,
+                "period_kind": "fiscal_q",
+                "fiscal_year": 2025,
+                "fiscal_period": "Q1",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "source_id": "65000000-0000-4000-8000-000000000001",
+                "coverage_level": "full"
+              },
+              {
+                "fact_id": "7875ada5-976a-4fee-b639-12210159e65f",
+                "metric_key": "net_income",
+                "display_name": "Net Income",
+                "value_num": 1243000000,
+                "value_text": null,
+                "unit": "currency",
+                "currency": "USD",
+                "scale": 1,
+                "period_kind": "fiscal_q",
+                "fiscal_year": 2025,
+                "fiscal_period": "Q3",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "source_id": "65000000-0000-4000-8000-000000000001",
+                "coverage_level": "full"
+              },
+              {
+                "fact_id": "6c297567-941d-40b9-b9d2-e92c2d445e84",
+                "metric_key": "operating_income",
+                "display_name": "Operating Income",
+                "value_num": 3392000000,
+                "value_text": null,
+                "unit": "currency",
+                "currency": "USD",
+                "scale": 1,
+                "period_kind": "fiscal_y",
+                "fiscal_year": 2025,
+                "fiscal_period": "FY",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "source_id": "65000000-0000-4000-8000-000000000001",
+                "coverage_level": "full"
+              },
+              {
+                "fact_id": "cd2e89fb-0739-4fbf-8219-7ee40b9f174a",
+                "metric_key": "operating_income",
+                "display_name": "Operating Income",
+                "value_num": 806000000,
+                "value_text": null,
+                "unit": "currency",
+                "currency": "USD",
+                "scale": 1,
+                "period_kind": "fiscal_q",
+                "fiscal_year": 2025,
+                "fiscal_period": "Q1",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "source_id": "65000000-0000-4000-8000-000000000001",
+                "coverage_level": "full"
+              },
+              {
+                "fact_id": "1eb7331a-7d55-4140-8a7a-6e648860c7e4",
+                "metric_key": "operating_income",
+                "display_name": "Operating Income",
+                "value_num": 1450000000,
+                "value_text": null,
+                "unit": "currency",
+                "currency": "USD",
+                "scale": 1,
+                "period_kind": "fiscal_q",
+                "fiscal_year": 2025,
+                "fiscal_period": "Q4",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "source_id": "65000000-0000-4000-8000-000000000001",
+                "coverage_level": "full"
+              },
+              {
+                "fact_id": "6fbd4746-b177-4840-bc58-450b591042f8",
+                "metric_key": "operating_income",
+                "display_name": "Operating Income",
+                "value_num": 1270000000,
+                "value_text": null,
+                "unit": "currency",
+                "currency": "USD",
+                "scale": 1,
+                "period_kind": "fiscal_q",
+                "fiscal_year": 2025,
+                "fiscal_period": "Q3",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "source_id": "65000000-0000-4000-8000-000000000001",
+                "coverage_level": "full"
+              },
+              {
+                "fact_id": "ac875d6f-230b-46e2-81a0-b1c64191300f",
+                "metric_key": "operating_income",
+                "display_name": "Operating Income",
+                "value_num": -134000000,
+                "value_text": null,
+                "unit": "currency",
+                "currency": "USD",
+                "scale": 1,
+                "period_kind": "fiscal_q",
+                "fiscal_year": 2025,
+                "fiscal_period": "Q2",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "source_id": "65000000-0000-4000-8000-000000000001",
+                "coverage_level": "full"
+              },
+              {
+                "fact_id": "0bd1e8db-e8b1-4d60-915a-a1bd8da7cbde",
+                "metric_key": "revenue",
+                "display_name": "Revenue",
+                "value_num": 7685000000,
+                "value_text": null,
+                "unit": "currency",
+                "currency": "USD",
+                "scale": 1,
+                "period_kind": "fiscal_q",
+                "fiscal_year": 2025,
+                "fiscal_period": "Q2",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "source_id": "65000000-0000-4000-8000-000000000001",
+                "coverage_level": "full"
+              }
+            ],
+            "source_ids": [
+              "65000000-0000-4000-8000-000000000001",
+              "00000000-0000-4000-a000-000000000009"
+            ],
+            "fact_recency": {
+              "latest_as_of": "2026-09-01T00:00:00.000Z",
+              "fiscal_year": 2026,
+              "fiscal_period": "Q2",
+              "age_days": 0,
+              "stale": false
+            }
+          },
+          "evidence": {
+            "claims": [
+              {
+                "claim_id": "7c46e727-8a24-4020-8e30-92f09548eeba",
+                "document_id": "1e601f45-0577-44c4-bd47-6c410cd7a31f",
+                "source_id": "280fd44b-d8b9-4d7a-ab96-22189da1d81c",
+                "text_canonical": "As previously announced, our second quarter results were impacted by the U.S. Government's export control on our AMD Instinct MI308 data center GPU products. For the quarter, these restrictions led to approximately $800 million in inventory and related charges.",
+                "predicate": "kpi.commentary",
+                "polarity": "negative",
+                "trust_tier": "primary",
+                "license_class": "public",
+                "provider": "sec_edgar",
+                "source_canonical_url": "https://www.sec.gov/Archives/edgar/data/2488/000000248825000106/q22025991.htm",
+                "source_disclosure": null,
+                "confidence": 0.95,
+                "document_title": "AMD Reports Second Quarter 2025 Financial Results (Form 8-K, Exhibit 99.1)",
+                "published_at": "2025-08-05T00:00:00.000Z",
+                "effective_time": "2025-06-28T00:00:00.000Z",
+                "subject_id": "60000000-0000-4000-8000-000000000002"
+              }
+            ],
+            "source_ids": [
+              "280fd44b-d8b9-4d7a-ab96-22189da1d81c"
+            ],
+            "document_refs": [
+              "1e601f45-0577-44c4-bd47-6c410cd7a31f"
+            ],
+            "claim_refs": [
+              "7c46e727-8a24-4020-8e30-92f09548eeba"
+            ],
+            "subject_refs": [
+              {
+                "kind": "listing",
+                "id": "62000000-0000-4000-8000-000000000002"
+              }
+            ],
+            "verifier_sources": [
+              {
+                "source_id": "280fd44b-d8b9-4d7a-ab96-22189da1d81c"
+              }
+            ],
+            "verifier_documents": [
+              {
+                "document_id": "1e601f45-0577-44c4-bd47-6c410cd7a31f",
+                "source_id": "280fd44b-d8b9-4d7a-ab96-22189da1d81c"
+              }
+            ],
+            "verifier_claims": [
+              {
+                "claim_id": "7c46e727-8a24-4020-8e30-92f09548eeba",
+                "source_id": "280fd44b-d8b9-4d7a-ab96-22189da1d81c"
+              }
+            ],
+            "truncated": false,
+            "contradictions": []
+          }
+        }
+      }
+    ],
+    "factBlocks": [
+      {
+        "id": "09c3d099-4607-4a3e-8919-5cba235c6fbb",
+        "kind": "metric_row",
+        "snapshot_id": "c05d451d-2cb1-4a90-8643-96569b4ee64f",
+        "data_ref": {
+          "kind": "metric_row",
+          "id": "09c3d099-4607-4a3e-8919-5cba235c6fbb",
+          "params": {
+            "fact_bindings": [
+              {
+                "fact_id": "507db774-8cbf-486f-97a2-69eabea4ef03",
+                "unit": "currency",
+                "period_kind": "fiscal_q",
+                "period_start": "2026-03-29",
+                "period_end": "2026-06-27",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "fiscal_year": 2026,
+                "fiscal_period": "Q2"
+              },
+              {
+                "fact_id": "fb6bb89c-c953-4eb3-9a62-5e143935b1fe",
+                "unit": "currency",
+                "period_kind": "fiscal_q",
+                "period_start": "2026-03-29",
+                "period_end": "2026-06-27",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "fiscal_year": 2026,
+                "fiscal_period": "Q2"
+              },
+              {
+                "fact_id": "5bf89b97-3842-4ea7-a2fc-833e1ab7405e",
+                "unit": "currency",
+                "period_kind": "fiscal_q",
+                "period_start": "2026-03-29",
+                "period_end": "2026-06-27",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "fiscal_year": 2026,
+                "fiscal_period": "Q2"
+              },
+              {
+                "fact_id": "1dd17761-1177-41f8-b3f3-f36d8bf892d1",
+                "unit": "currency",
+                "period_kind": "fiscal_q",
+                "period_start": "2026-03-29",
+                "period_end": "2026-06-27",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "fiscal_year": 2026,
+                "fiscal_period": "Q2"
+              },
+              {
+                "fact_id": "19abb14c-cbf0-4745-a1f1-42fd4f3c4a2a",
+                "unit": "ratio",
+                "period_kind": "fiscal_q",
+                "period_start": "2026-03-29",
+                "period_end": "2026-06-27",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "fiscal_year": 2026,
+                "fiscal_period": "Q2"
+              },
+              {
+                "fact_id": "1934f95a-7398-4b25-aa97-33f82f3ae13d",
+                "unit": "ratio",
+                "period_kind": "fiscal_q",
+                "period_start": "2026-03-29",
+                "period_end": "2026-06-27",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "fiscal_year": 2026,
+                "fiscal_period": "Q2"
+              },
+              {
+                "fact_id": "b826738a-f35a-41e2-97f9-d239ef18da19",
+                "unit": "ratio",
+                "period_kind": "fiscal_q",
+                "period_start": "2026-03-29",
+                "period_end": "2026-06-27",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "fiscal_year": 2026,
+                "fiscal_period": "Q2"
+              },
+              {
+                "fact_id": "10401513-ea6e-4778-87c6-bd91c1e838f2",
+                "unit": "ratio",
+                "period_kind": "fiscal_q",
+                "period_start": "2026-03-29",
+                "period_end": "2026-06-27",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "fiscal_year": 2026,
+                "fiscal_period": "Q2"
+              },
+              {
+                "fact_id": "446c18d7-889a-437d-8379-78ad48baef95",
+                "unit": "ratio",
+                "period_kind": "fiscal_q",
+                "period_start": "2026-03-29",
+                "period_end": "2026-06-27",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "fiscal_year": 2026,
+                "fiscal_period": "Q2"
+              },
+              {
+                "fact_id": "4522c287-763b-4eae-a8f9-dae78a1dcb57",
+                "unit": "currency",
+                "period_kind": "fiscal_q",
+                "period_start": "2025-12-28",
+                "period_end": "2026-03-28",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "fiscal_year": 2026,
+                "fiscal_period": "Q1"
+              },
+              {
+                "fact_id": "0bd1e8db-e8b1-4d60-915a-a1bd8da7cbde",
+                "unit": "currency",
+                "period_kind": "fiscal_q",
+                "period_start": "2025-03-30",
+                "period_end": "2025-06-28",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "fiscal_year": 2025,
+                "fiscal_period": "Q2"
+              }
+            ]
+          }
+        },
+        "source_refs": [
+          "65000000-0000-4000-8000-000000000001"
+        ],
+        "as_of": "2026-09-01T00:00:00.000Z",
+        "provenance_fact_refs": [
+          "507db774-8cbf-486f-97a2-69eabea4ef03",
+          "fb6bb89c-c953-4eb3-9a62-5e143935b1fe",
+          "5bf89b97-3842-4ea7-a2fc-833e1ab7405e",
+          "1dd17761-1177-41f8-b3f3-f36d8bf892d1",
+          "19abb14c-cbf0-4745-a1f1-42fd4f3c4a2a",
+          "1934f95a-7398-4b25-aa97-33f82f3ae13d",
+          "b826738a-f35a-41e2-97f9-d239ef18da19",
+          "10401513-ea6e-4778-87c6-bd91c1e838f2",
+          "446c18d7-889a-437d-8379-78ad48baef95",
+          "4522c287-763b-4eae-a8f9-dae78a1dcb57",
+          "0bd1e8db-e8b1-4d60-915a-a1bd8da7cbde"
+        ],
+        "title": "Latest quarter (Q2 2026)",
+        "items": [
+          {
+            "label": "Revenue",
+            "value_ref": "507db774-8cbf-486f-97a2-69eabea4ef03",
+            "format": "$11.2B"
+          },
+          {
+            "label": "Gross profit",
+            "value_ref": "fb6bb89c-c953-4eb3-9a62-5e143935b1fe",
+            "format": "$6.1B"
+          },
+          {
+            "label": "Operating income",
+            "value_ref": "5bf89b97-3842-4ea7-a2fc-833e1ab7405e",
+            "format": "$1.6B"
+          },
+          {
+            "label": "Net income",
+            "value_ref": "1dd17761-1177-41f8-b3f3-f36d8bf892d1",
+            "format": "$1.5B"
+          },
+          {
+            "label": "Gross margin",
+            "value_ref": "19abb14c-cbf0-4745-a1f1-42fd4f3c4a2a",
+            "format": "54.0%"
+          },
+          {
+            "label": "Operating margin",
+            "value_ref": "1934f95a-7398-4b25-aa97-33f82f3ae13d",
+            "format": "14.4%"
+          },
+          {
+            "label": "Net margin",
+            "value_ref": "b826738a-f35a-41e2-97f9-d239ef18da19",
+            "format": "13.2%"
+          },
+          {
+            "label": "Revenue growth (QoQ)",
+            "value_ref": "10401513-ea6e-4778-87c6-bd91c1e838f2",
+            "format": "4.7%"
+          },
+          {
+            "label": "Revenue growth (YoY)",
+            "value_ref": "446c18d7-889a-437d-8379-78ad48baef95",
+            "format": "45.7%"
+          }
+        ]
+      },
+      {
+        "id": "da26d010-e1fa-4635-896d-200fb8c918a7",
+        "kind": "revenue_bars",
+        "snapshot_id": "c05d451d-2cb1-4a90-8643-96569b4ee64f",
+        "data_ref": {
+          "kind": "revenue_bars",
+          "id": "da26d010-e1fa-4635-896d-200fb8c918a7",
+          "params": {
+            "fact_bindings": [
+              {
+                "fact_id": "8669f039-716a-44b6-a91f-0f26f688a614",
+                "unit": "currency",
+                "period_kind": "fiscal_q",
+                "period_start": "2024-06-30",
+                "period_end": "2024-09-28",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "fiscal_year": 2024,
+                "fiscal_period": "Q3"
+              },
+              {
+                "fact_id": "25f8c7ba-5b2a-408d-9e1f-b2d387ec5954",
+                "unit": "currency",
+                "period_kind": "fiscal_q",
+                "period_start": "2024-09-29",
+                "period_end": "2024-12-28",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "fiscal_year": 2024,
+                "fiscal_period": "Q4"
+              },
+              {
+                "fact_id": "7860593b-362c-40af-a4f2-ca6915b460b7",
+                "unit": "currency",
+                "period_kind": "fiscal_q",
+                "period_start": "2024-12-29",
+                "period_end": "2025-03-29",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "fiscal_year": 2025,
+                "fiscal_period": "Q1"
+              },
+              {
+                "fact_id": "0bd1e8db-e8b1-4d60-915a-a1bd8da7cbde",
+                "unit": "currency",
+                "period_kind": "fiscal_q",
+                "period_start": "2025-03-30",
+                "period_end": "2025-06-28",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "fiscal_year": 2025,
+                "fiscal_period": "Q2"
+              },
+              {
+                "fact_id": "39ea7c6e-fcb1-463c-92c2-f5a60081bf4c",
+                "unit": "currency",
+                "period_kind": "fiscal_q",
+                "period_start": "2025-06-29",
+                "period_end": "2025-09-27",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "fiscal_year": 2025,
+                "fiscal_period": "Q3"
+              },
+              {
+                "fact_id": "083f03b9-1a0b-461f-8279-16a8112cfa52",
+                "unit": "currency",
+                "period_kind": "fiscal_q",
+                "period_start": "2025-09-28",
+                "period_end": "2025-12-27",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "fiscal_year": 2025,
+                "fiscal_period": "Q4"
+              },
+              {
+                "fact_id": "4522c287-763b-4eae-a8f9-dae78a1dcb57",
+                "unit": "currency",
+                "period_kind": "fiscal_q",
+                "period_start": "2025-12-28",
+                "period_end": "2026-03-28",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "fiscal_year": 2026,
+                "fiscal_period": "Q1"
+              },
+              {
+                "fact_id": "507db774-8cbf-486f-97a2-69eabea4ef03",
+                "unit": "currency",
+                "period_kind": "fiscal_q",
+                "period_start": "2026-03-29",
+                "period_end": "2026-06-27",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "fiscal_year": 2026,
+                "fiscal_period": "Q2"
+              },
+              {
+                "fact_id": "9b3d8091-99bb-401f-8314-c40a60ba1a1f",
+                "unit": "ratio",
+                "period_kind": "fiscal_q",
+                "period_start": "2024-09-29",
+                "period_end": "2024-12-28",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "fiscal_year": 2024,
+                "fiscal_period": "Q4"
+              },
+              {
+                "fact_id": "60c68c87-3272-4a0f-abc5-76b04c840420",
+                "unit": "ratio",
+                "period_kind": "fiscal_q",
+                "period_start": "2024-12-29",
+                "period_end": "2025-03-29",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "fiscal_year": 2025,
+                "fiscal_period": "Q1"
+              },
+              {
+                "fact_id": "c50e9c70-3e7b-4824-9b58-b3dbde68c146",
+                "unit": "ratio",
+                "period_kind": "fiscal_q",
+                "period_start": "2025-03-30",
+                "period_end": "2025-06-28",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "fiscal_year": 2025,
+                "fiscal_period": "Q2"
+              },
+              {
+                "fact_id": "838b06e7-8e75-476e-bb16-c9c38b8ff9af",
+                "unit": "ratio",
+                "period_kind": "fiscal_q",
+                "period_start": "2025-06-29",
+                "period_end": "2025-09-27",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "fiscal_year": 2025,
+                "fiscal_period": "Q3"
+              },
+              {
+                "fact_id": "30b7925f-9e89-4e53-83b3-d4b78f57deae",
+                "unit": "ratio",
+                "period_kind": "fiscal_q",
+                "period_start": "2025-09-28",
+                "period_end": "2025-12-27",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "fiscal_year": 2025,
+                "fiscal_period": "Q4"
+              },
+              {
+                "fact_id": "f7eb78db-5cb9-49c6-bc93-65fbed9a8ad8",
+                "unit": "ratio",
+                "period_kind": "fiscal_q",
+                "period_start": "2025-12-28",
+                "period_end": "2026-03-28",
+                "as_of": "2026-09-01T00:00:00.000Z",
+                "fiscal_year": 2026,
+                "fiscal_period": "Q1"
+              }
+            ],
+            "derived_figures": [
+              {
+                "fact_id": "9b3d8091-99bb-401f-8314-c40a60ba1a1f",
+                "metric": "Revenue growth (QoQ)",
+                "period": "Q4 2024",
+                "period_end": "2024-12-28",
+                "value": "12.3%",
+                "of": [
+                  "25f8c7ba-5b2a-408d-9e1f-b2d387ec5954",
+                  "8669f039-716a-44b6-a91f-0f26f688a614"
+                ]
+              },
+              {
+                "fact_id": "60c68c87-3272-4a0f-abc5-76b04c840420",
+                "metric": "Revenue growth (QoQ)",
+                "period": "Q1 2025",
+                "period_end": "2025-03-29",
+                "value": "-2.9%",
+                "of": [
+                  "7860593b-362c-40af-a4f2-ca6915b460b7",
+                  "25f8c7ba-5b2a-408d-9e1f-b2d387ec5954"
+                ]
+              },
+              {
+                "fact_id": "c50e9c70-3e7b-4824-9b58-b3dbde68c146",
+                "metric": "Revenue growth (QoQ)",
+                "period": "Q2 2025",
+                "period_end": "2025-06-28",
+                "value": "3.3%",
+                "of": [
+                  "0bd1e8db-e8b1-4d60-915a-a1bd8da7cbde",
+                  "7860593b-362c-40af-a4f2-ca6915b460b7"
+                ]
+              },
+              {
+                "fact_id": "838b06e7-8e75-476e-bb16-c9c38b8ff9af",
+                "metric": "Revenue growth (QoQ)",
+                "period": "Q3 2025",
+                "period_end": "2025-09-27",
+                "value": "20.3%",
+                "of": [
+                  "39ea7c6e-fcb1-463c-92c2-f5a60081bf4c",
+                  "0bd1e8db-e8b1-4d60-915a-a1bd8da7cbde"
+                ]
+              },
+              {
+                "fact_id": "30b7925f-9e89-4e53-83b3-d4b78f57deae",
+                "metric": "Revenue growth (QoQ)",
+                "period": "Q4 2025",
+                "period_end": "2025-12-27",
+                "value": "11.4%",
+                "of": [
+                  "083f03b9-1a0b-461f-8279-16a8112cfa52",
+                  "39ea7c6e-fcb1-463c-92c2-f5a60081bf4c"
+                ]
+              },
+              {
+                "fact_id": "f7eb78db-5cb9-49c6-bc93-65fbed9a8ad8",
+                "metric": "Revenue growth (QoQ)",
+                "period": "Q1 2026",
+                "period_end": "2026-03-28",
+                "value": "3.9%",
+                "of": [
+                  "4522c287-763b-4eae-a8f9-dae78a1dcb57",
+                  "083f03b9-1a0b-461f-8279-16a8112cfa52"
+                ]
+              }
+            ]
+          }
+        },
+        "source_refs": [
+          "65000000-0000-4000-8000-000000000001"
+        ],
+        "as_of": "2026-09-01T00:00:00.000Z",
+        "title": "Quarterly revenue",
+        "bars": [
+          {
+            "label": "Q3 2024",
+            "value_ref": "8669f039-716a-44b6-a91f-0f26f688a614",
+            "magnitude": 0.6088392857142857,
+            "format": "$6.8B"
+          },
+          {
+            "label": "Q4 2024",
+            "value_ref": "25f8c7ba-5b2a-408d-9e1f-b2d387ec5954",
+            "magnitude": 0.68375,
+            "format": "$7.7B"
+          },
+          {
+            "label": "Q1 2025",
+            "value_ref": "7860593b-362c-40af-a4f2-ca6915b460b7",
+            "magnitude": 0.6641071428571429,
+            "format": "$7.4B"
+          },
+          {
+            "label": "Q2 2025",
+            "value_ref": "0bd1e8db-e8b1-4d60-915a-a1bd8da7cbde",
+            "magnitude": 0.6861607142857142,
+            "format": "$7.7B"
+          },
+          {
+            "label": "Q3 2025",
+            "value_ref": "39ea7c6e-fcb1-463c-92c2-f5a60081bf4c",
+            "magnitude": 0.8255357142857143,
+            "format": "$9.2B"
+          },
+          {
+            "label": "Q4 2025",
+            "value_ref": "083f03b9-1a0b-461f-8279-16a8112cfa52",
+            "magnitude": 0.9196428571428571,
+            "format": "$10.3B"
+          },
+          {
+            "label": "Q1 2026",
+            "value_ref": "4522c287-763b-4eae-a8f9-dae78a1dcb57",
+            "magnitude": 0.9553571428571429,
+            "format": "$10.7B"
+          },
+          {
+            "label": "Q2 2026",
+            "value_ref": "507db774-8cbf-486f-97a2-69eabea4ef03",
+            "magnitude": 1,
+            "format": "$11.2B"
+          }
+        ],
+        "provenance_fact_refs": [
+          "8669f039-716a-44b6-a91f-0f26f688a614",
+          "25f8c7ba-5b2a-408d-9e1f-b2d387ec5954",
+          "7860593b-362c-40af-a4f2-ca6915b460b7",
+          "0bd1e8db-e8b1-4d60-915a-a1bd8da7cbde",
+          "39ea7c6e-fcb1-463c-92c2-f5a60081bf4c",
+          "083f03b9-1a0b-461f-8279-16a8112cfa52",
+          "4522c287-763b-4eae-a8f9-dae78a1dcb57",
+          "507db774-8cbf-486f-97a2-69eabea4ef03",
+          "9b3d8091-99bb-401f-8314-c40a60ba1a1f",
+          "60c68c87-3272-4a0f-abc5-76b04c840420",
+          "c50e9c70-3e7b-4824-9b58-b3dbde68c146",
+          "838b06e7-8e75-476e-bb16-c9c38b8ff9af",
+          "30b7925f-9e89-4e53-83b3-d4b78f57deae",
+          "f7eb78db-5cb9-49c6-bc93-65fbed9a8ad8"
+        ]
+      }
+    ],
+    "conversation": [
+      {
+        "role": "user",
+        "text": "Analyze AMD. It recovered within a single quarter, right?"
+      }
+    ],
+    "availableData": true,
+    "scope": {
+      "route": "latest_quarter",
+      "reads": "latest_quarter",
+      "companies": [
+        {
+          "issuer_id": "60000000-0000-4000-8000-000000000002",
+          "label": "AMD"
+        }
+      ],
+      "peers": false,
+      "segments": false,
+      "margin_trend": false,
+      "margins": false,
+      "metrics": [],
+      "fiscal_year": null,
+      "fiscal_quarter": null,
+      "price_window": null,
+      "benchmark": false,
+      "inherited": []
+    },
+    "cutoff": "2026-09-01T00:00:00.000Z"
+  },
+  "exchange": {
+    "messages": [
+      {
+        "role": "system",
+        "content": "Write a concise investment research answer for the chat user, as the list of what it asserts. Reply with only a fenced block that opens with ```assertions on its own line, and nothing before or after it: a JSON array of at most 12 objects {\"kind\", \"text\", \"evidence\"}. The answer is rendered from this list alone, in its order: each figure, claim, period and company comes from the evidence an entry cites, and only an analyst_inference's text is shown as written. Every entry's text says it in one short sentence. Answer as a buy-side analyst would: first your takeaway, answering the question directly, as an analyst_inference; then the observations and comparisons that show the trend across every period shown, not just the latest, and what is strong or weak against the other periods or companies shown; an unknown_cause for a change the evidence gives no cause for; and last one specific counterpoint grounded in the data that cuts against the takeaway, as an analyst_inference. List nothing for what the data shown cannot tell: the answer's own notes say what is missing, from evidence_packet.gaps. If the data shown does not answer the question (the metric or period asked for is not there), list nothing about other figures in its place: reply with an empty list. Use only evidence_packet: never add facts, numbers, or events it does not hold. evidence_packet.figures are the figures you may cite, by id, each with its metric and, in a comparison, the company it belongs to. evidence_packet.claims are sourced statements you may cite, by id; evidence_packet.disagreements names claims that may conflict, and an inference never picks one side. If claims_status is unavailable, research claims could not be read, so never say there are none. Never state a cause the data does not show (a charge, supply constraints, heavy spending): a cause stated by management is a management_attribution citing its claim, and a change the evidence gives no cause for is an unknown_cause. kind is \"observation\" (what figures show; evidence lists their F ids only), \"comparison\" (a high or low, a ranking, or a trend of exactly one metric, so one comparison per metric; a segment breakdown is one metric, revenue, across segments; evidence lists the F ids of every company, segment or period it covers, and a comparison across periods cites every period shown for its metric; add \"op\" and \"result\": op \"highest\" or \"lowest\" with result the F id that is highest or lowest; op \"order\" with result an array of every F id it cites, highest first ({\"kind\":\"comparison\",\"text\":\"Revenue is highest at AAPL, then NVDA, then AMD.\",\"evidence\":[\"F1\",\"F5\",\"F9\"],\"op\":\"order\",\"result\":[\"F9\",\"F1\",\"F5\"]}); or op \"trend\" with result one of \"rose\", \"fell\", \"flat\", \"rose_throughout\", \"fell_throughout\", \"rebounded\" or \"pulled_back\"), \"management_attribution\" (what a claim says management stated; evidence lists its C id), \"unknown_cause\" (a change the evidence gives no cause for; evidence lists the F id of each figure that changed), or \"analyst_inference\" (what the observations, comparisons and management attributions mean, in words, such as revenue concentrated in one segment; evidence may be omitted; add \"supports\": the array indexes of every observation, comparison and management_attribution whose content it uses (a figure, a price return, scale, a ranking, a charge management stated), and it says nothing those supports do not show, not even hedged (\"may already be priced in\"); add \"subject\": the company label the inference is about, one its evidence covers). An analyst_inference's text is words only: the figures are its supports', so it writes no digit, period label or packet id (\"a year earlier\", not FY2025). Never compute new figures such as growth rates, margins, differences, or ratios, and never state a magnitude in words (\"roughly double\", \"six times\", \"larger than X's whole revenue\"): say only the direction (\"higher\", \"faster\", \"larger\") without how much. When the answer covers more than one company, an analyst_inference's text names no company, not even in the counterpoint: who leads, trails, rose or fell is shown from the comparisons it rests on, so rest a ranking or direction on its comparison and say only what it means (\"the margin lead funds more research\", not \"NVDA leads AMD\"); the text refers to its subject as \"it\" or \"its\" ({\"kind\":\"analyst_inference\",\"subject\":\"AMD\",\"text\":\"Its net margin may understate underlying profitability, given the one-time charge management disclosed.\",\"supports\":[2,3]}). When evidence_packet has neither figures nor claims, reply with an empty list."
+      },
+      {
+        "role": "user",
+        "content": "{\"question\":\"Analyze AMD. It recovered within a single quarter, right?\",\"conversation\":[{\"role\":\"user\",\"text\":\"Analyze AMD. It recovered within a single quarter, right?\"}],\"evidence_packet\":{\"route\":\"latest_quarter\",\"cutoff\":\"2026-09-01T00:00:00.000Z\",\"figures\":[{\"id\":\"F1\",\"metric\":\"Revenue\",\"period\":\"Q22026\",\"period_end\":\"2026-06-27\",\"value\":\"$11.2B\",\"shown_in\":\"Latest quarter (Q2 2026)\"},{\"id\":\"F2\",\"metric\":\"Gross profit\",\"period\":\"Q22026\",\"period_end\":\"2026-06-27\",\"value\":\"$6.1B\",\"shown_in\":\"Latest quarter (Q2 2026)\"},{\"id\":\"F3\",\"metric\":\"Operating income\",\"period\":\"Q22026\",\"period_end\":\"2026-06-27\",\"value\":\"$1.6B\",\"shown_in\":\"Latest quarter (Q2 2026)\"},{\"id\":\"F4\",\"metric\":\"Net income\",\"period\":\"Q22026\",\"period_end\":\"2026-06-27\",\"value\":\"$1.5B\",\"shown_in\":\"Latest quarter (Q2 2026)\"},{\"id\":\"F5\",\"metric\":\"Gross margin\",\"period\":\"Q22026\",\"period_end\":\"2026-06-27\",\"value\":\"54.0%\",\"shown_in\":\"Latest quarter (Q2 2026)\"},{\"id\":\"F6\",\"metric\":\"Operating margin\",\"period\":\"Q22026\",\"period_end\":\"2026-06-27\",\"value\":\"14.4%\",\"shown_in\":\"Latest quarter (Q2 2026)\"},{\"id\":\"F7\",\"metric\":\"Net margin\",\"period\":\"Q22026\",\"period_end\":\"2026-06-27\",\"value\":\"13.2%\",\"shown_in\":\"Latest quarter (Q2 2026)\"},{\"id\":\"F8\",\"metric\":\"Revenue growth (QoQ)\",\"period\":\"Q22026\",\"period_end\":\"2026-06-27\",\"value\":\"4.7%\",\"shown_in\":\"Latest quarter (Q2 2026)\"},{\"id\":\"F9\",\"metric\":\"Revenue growth (YoY)\",\"period\":\"Q22026\",\"period_end\":\"2026-06-27\",\"value\":\"45.7%\",\"shown_in\":\"Latest quarter (Q2 2026)\"},{\"id\":\"F10\",\"metric\":\"Revenue\",\"period\":\"Q3 2024\",\"period_end\":\"2024-09-28\",\"value\":\"$6.8B\",\"shown_in\":\"Quarterly revenue\"},{\"id\":\"F11\",\"metric\":\"Revenue\",\"period\":\"Q4 2024\",\"period_end\":\"2024-12-28\",\"value\":\"$7.7B\",\"shown_in\":\"Quarterly revenue\"},{\"id\":\"F12\",\"metric\":\"Revenue\",\"period\":\"Q1 2025\",\"period_end\":\"2025-03-29\",\"value\":\"$7.4B\",\"shown_in\":\"Quarterly revenue\"},{\"id\":\"F13\",\"metric\":\"Revenue\",\"period\":\"Q2 2025\",\"period_end\":\"2025-06-28\",\"value\":\"$7.7B\",\"shown_in\":\"Quarterly revenue\"},{\"id\":\"F14\",\"metric\":\"Revenue\",\"period\":\"Q3 2025\",\"period_end\":\"2025-09-27\",\"value\":\"$9.2B\",\"shown_in\":\"Quarterly revenue\"},{\"id\":\"F15\",\"metric\":\"Revenue\",\"period\":\"Q4 2025\",\"period_end\":\"2025-12-27\",\"value\":\"$10.3B\",\"shown_in\":\"Quarterly revenue\"},{\"id\":\"F16\",\"metric\":\"Revenue\",\"period\":\"Q1 2026\",\"period_end\":\"2026-03-28\",\"value\":\"$10.7B\",\"shown_in\":\"Quarterly revenue\"},{\"id\":\"F17\",\"metric\":\"Revenue\",\"period\":\"Q2 2026\",\"period_end\":\"2026-06-27\",\"value\":\"$11.2B\",\"shown_in\":\"Quarterly revenue\"},{\"id\":\"F18\",\"metric\":\"Revenue growth (QoQ)\",\"period\":\"Q4 2024\",\"period_end\":\"2024-12-28\",\"value\":\"12.3%\",\"derived_from\":[\"F11\",\"F10\"]},{\"id\":\"F19\",\"metric\":\"Revenue growth (QoQ)\",\"period\":\"Q1 2025\",\"period_end\":\"2025-03-29\",\"value\":\"-2.9%\",\"derived_from\":[\"F12\",\"F11\"]},{\"id\":\"F20\",\"metric\":\"Revenue growth (QoQ)\",\"period\":\"Q2 2025\",\"period_end\":\"2025-06-28\",\"value\":\"3.3%\",\"derived_from\":[\"F13\",\"F12\"]},{\"id\":\"F21\",\"metric\":\"Revenue growth (QoQ)\",\"period\":\"Q3 2025\",\"period_end\":\"2025-09-27\",\"value\":\"20.3%\",\"derived_from\":[\"F14\",\"F13\"]},{\"id\":\"F22\",\"metric\":\"Revenue growth (QoQ)\",\"period\":\"Q4 2025\",\"period_end\":\"2025-12-27\",\"value\":\"11.4%\",\"derived_from\":[\"F15\",\"F14\"]},{\"id\":\"F23\",\"metric\":\"Revenue growth (QoQ)\",\"period\":\"Q1 2026\",\"period_end\":\"2026-03-28\",\"value\":\"3.9%\",\"derived_from\":[\"F16\",\"F15\"]}],\"coverage\":[{\"company\":\"AMD\",\"status\":\"shown\"}],\"query_bounds\":{\"periods\":\"latest quarter, with revenue for the last 8 quarters\",\"claims\":\"management, guidance, and kpi claims from 2024-09-01 first, then the most recent others, published by the 2026-09-01 cutoff; a claim repeated by several sources or copies counts once\"},\"claims\":[{\"id\":\"C1\",\"text\":\"As previously announced, our second quarter results were impacted by the U.S. Government's export control on our AMD Instinct MI308 data center GPU products. For the quarter, these restrictions led to approximately $800 million in inventory and related charges.\",\"predicate\":\"kpi.commentary\",\"stance\":\"challenging\",\"company\":\"AMD\",\"effective_time\":\"2025-06-28T00:00:00.000Z\",\"published_at\":\"2025-08-05T00:00:00.000Z\"}],\"staleness\":{\"quote\":[{\"ticker\":\"AMD\",\"as_of\":\"2026-09-01T00:00:00.000Z\",\"stale\":false,\"session_state\":\"closed\",\"delay_class\":\"eod\"}],\"fact_recency\":[{\"latest_as_of\":\"2026-09-01T00:00:00.000Z\",\"fiscal_year\":2026,\"fiscal_period\":\"Q2\",\"age_days\":0,\"stale\":false}]}}}"
+      }
+    ],
+    "text": "```assertions\n[\n{\"kind\":\"analyst_inference\",\"subject\":\"AMD\",\"text\":\"The premise that it recovered within a single quarter does not fit: the dip was brief, but growth rebuilt over several quarters and has since slowed.\",\"supports\":[1,2]},\n{\"kind\":\"comparison\",\"text\":\"Quarterly revenue dipped in Q1 2025, then rose in every later quarter through Q2 2026.\",\"evidence\":[\"F11\",\"F12\",\"F13\",\"F14\",\"F15\",\"F16\",\"F17\"],\"op\":\"trend\",\"result\":\"rebounded\"},\n{\"kind\":\"observation\",\"text\":\"Revenue fell 2.9% sequentially in Q1 2025 to $7.4B, then grew 3.3% in Q2 2025.\",\"evidence\":[\"F19\",\"F12\",\"F20\",\"F13\"]},\n{\"kind\":\"comparison\",\"text\":\"Sequential growth peaked at 20.3% in Q3 2025, then slowed to 11.4%, 3.9%, and 4.7% in the latest quarter.\",\"evidence\":[\"F20\",\"F21\",\"F22\",\"F23\",\"F8\"],\"op\":\"trend\",\"result\":\"pulled_back\"},\n{\"kind\":\"management_attribution\",\"text\":\"Management said Q2 2025 results were hit by US export controls on the MI308 GPU, causing about $800 million in inventory and related charges.\",\"evidence\":[\"C1\"]},\n{\"kind\":\"observation\",\"text\":\"Latest quarter revenue was $11.2B, up 45.7% year over year, with gross margin 54.0%, operating margin 14.4% and net margin 13.2%.\",\"evidence\":[\"F1\",\"F9\",\"F5\",\"F6\",\"F7\"]},\n{\"kind\":\"analyst_inference\",\"subject\":\"AMD\",\"text\":\"Its year-over-year growth is strong, though the sequential pace has cooled from the peak.\",\"supports\":[3,5]}\n]\n```",
+    "truncated": false,
+    "deployment": "anthropic/claude-sonnet-5-5",
+    "latency_ms": 4662,
+    "usage": {
+      "input_tokens": 3573,
+      "output_tokens": 601,
+      "reasoning_tokens": 0
+    }
+  },
+  "assertions": {
+    "status": "checked",
+    "accepted": [
+      {
+        "index": 2,
+        "kind": "observation",
+        "text": "Revenue fell 2.9% sequentially in Q1 2025 to $7.4B, then grew 3.3% in Q2 2025.",
+        "evidence": [
+          "F19",
+          "F12",
+          "F20",
+          "F13"
+        ]
+      },
+      {
+        "index": 4,
+        "kind": "management_attribution",
+        "text": "Management said Q2 2025 results were hit by US export controls on the MI308 GPU, causing about $800 million in inventory and related charges.",
+        "evidence": [
+          "C1"
+        ]
+      },
+      {
+        "index": 5,
+        "kind": "observation",
+        "text": "Latest quarter revenue was $11.2B, up 45.7% year over year, with gross margin 54.0%, operating margin 14.4% and net margin 13.2%.",
+        "evidence": [
+          "F1",
+          "F9",
+          "F5",
+          "F6",
+          "F7"
+        ]
+      },
+      {
+        "index": 6,
+        "kind": "analyst_inference",
+        "text": "Its year-over-year growth is strong, though the sequential pace has cooled from the peak.",
+        "evidence": [],
+        "supports": [
+          5
+        ],
+        "subject": "AMD"
+      }
+    ],
+    "rejected": [
+      {
+        "index": 0,
+        "text": "The premise that it recovered within a single quarter does not fit: the dip was brief, but growth rebuilt over several quarters and has since slowed.",
+        "check": "judge",
+        "reason": "contradicted, worded_amount: The figures show revenue back at its Q4 2024 level ($7.7B) by Q2 2025, one quarter after the Q1 2025 dip, with positive growth that quarter, so the premise of a single-quarter recovery fits rather than failing."
+      },
+      {
+        "index": 1,
+        "text": "Quarterly revenue dipped in Q1 2025, then rose in every later quarter through Q2 2026.",
+        "check": "comparative",
+        "reason": "comparison: leaves out Q3 2024, which shows revenue too"
+      },
+      {
+        "index": 3,
+        "text": "Sequential growth peaked at 20.3% in Q3 2025, then slowed to 11.4%, 3.9%, and 4.7% in the latest quarter.",
+        "check": "comparative",
+        "reason": "comparison: leaves out Q4 2024, which shows revenue growth (QoQ) too"
+      }
+    ],
+    "rendered": true,
+    "judged": [
+      {
+        "index": 0,
+        "verdict": "contradicted",
+        "worded_amount": true,
+        "reason": "The figures show revenue back at its Q4 2024 level ($7.7B) by Q2 2025, one quarter after the Q1 2025 dip, with positive growth that quarter, so the premise of a single-quarter recovery fits rather than failing."
+      },
+      {
+        "index": 6,
+        "verdict": "entailed",
+        "worded_amount": false
+      }
+    ]
+  },
+  "blocks": [
+    {
+      "id": "56d009f8-dfd8-4e96-8ca3-1a3868b0a045",
+      "kind": "rich_text",
+      "snapshot_id": "c05d451d-2cb1-4a90-8643-96569b4ee64f",
+      "data_ref": {
+        "kind": "rich_text",
+        "id": "56d009f8-dfd8-4e96-8ca3-1a3868b0a045",
+        "params": {
+          "fact_bindings": [
+            {
+              "fact_id": "60c68c87-3272-4a0f-abc5-76b04c840420",
+              "unit": "ratio",
+              "period_kind": "fiscal_q",
+              "period_start": "2024-12-29",
+              "period_end": "2025-03-29",
+              "as_of": "2026-09-01T00:00:00.000Z",
+              "fiscal_year": 2025,
+              "fiscal_period": "Q1"
+            },
+            {
+              "fact_id": "7860593b-362c-40af-a4f2-ca6915b460b7",
+              "unit": "currency",
+              "period_kind": "fiscal_q",
+              "period_start": "2024-12-29",
+              "period_end": "2025-03-29",
+              "as_of": "2026-09-01T00:00:00.000Z",
+              "fiscal_year": 2025,
+              "fiscal_period": "Q1"
+            },
+            {
+              "fact_id": "c50e9c70-3e7b-4824-9b58-b3dbde68c146",
+              "unit": "ratio",
+              "period_kind": "fiscal_q",
+              "period_start": "2025-03-30",
+              "period_end": "2025-06-28",
+              "as_of": "2026-09-01T00:00:00.000Z",
+              "fiscal_year": 2025,
+              "fiscal_period": "Q2"
+            },
+            {
+              "fact_id": "0bd1e8db-e8b1-4d60-915a-a1bd8da7cbde",
+              "unit": "currency",
+              "period_kind": "fiscal_q",
+              "period_start": "2025-03-30",
+              "period_end": "2025-06-28",
+              "as_of": "2026-09-01T00:00:00.000Z",
+              "fiscal_year": 2025,
+              "fiscal_period": "Q2"
+            },
+            {
+              "fact_id": "507db774-8cbf-486f-97a2-69eabea4ef03",
+              "unit": "currency",
+              "period_kind": "fiscal_q",
+              "period_start": "2026-03-29",
+              "period_end": "2026-06-27",
+              "as_of": "2026-09-01T00:00:00.000Z",
+              "fiscal_year": 2026,
+              "fiscal_period": "Q2"
+            },
+            {
+              "fact_id": "446c18d7-889a-437d-8379-78ad48baef95",
+              "unit": "ratio",
+              "period_kind": "fiscal_q",
+              "period_start": "2026-03-29",
+              "period_end": "2026-06-27",
+              "as_of": "2026-09-01T00:00:00.000Z",
+              "fiscal_year": 2026,
+              "fiscal_period": "Q2"
+            },
+            {
+              "fact_id": "19abb14c-cbf0-4745-a1f1-42fd4f3c4a2a",
+              "unit": "ratio",
+              "period_kind": "fiscal_q",
+              "period_start": "2026-03-29",
+              "period_end": "2026-06-27",
+              "as_of": "2026-09-01T00:00:00.000Z",
+              "fiscal_year": 2026,
+              "fiscal_period": "Q2"
+            },
+            {
+              "fact_id": "1934f95a-7398-4b25-aa97-33f82f3ae13d",
+              "unit": "ratio",
+              "period_kind": "fiscal_q",
+              "period_start": "2026-03-29",
+              "period_end": "2026-06-27",
+              "as_of": "2026-09-01T00:00:00.000Z",
+              "fiscal_year": 2026,
+              "fiscal_period": "Q2"
+            },
+            {
+              "fact_id": "b826738a-f35a-41e2-97f9-d239ef18da19",
+              "unit": "ratio",
+              "period_kind": "fiscal_q",
+              "period_start": "2026-03-29",
+              "period_end": "2026-06-27",
+              "as_of": "2026-09-01T00:00:00.000Z",
+              "fiscal_year": 2026,
+              "fiscal_period": "Q2"
+            }
+          ]
+        }
+      },
+      "source_refs": [
+        "65000000-0000-4000-8000-000000000001",
+        "280fd44b-d8b9-4d7a-ab96-22189da1d81c"
+      ],
+      "as_of": "1970-01-01T00:00:00.000Z",
+      "title": "single_subject_analysis",
+      "segments": [
+        {
+          "type": "text",
+          "text": "AMD's revenue growth (QoQ) was "
+        },
+        {
+          "type": "ref",
+          "ref_kind": "fact",
+          "ref_id": "60c68c87-3272-4a0f-abc5-76b04c840420",
+          "format": "-2.9%"
+        },
+        {
+          "type": "text",
+          "text": " and revenue "
+        },
+        {
+          "type": "ref",
+          "ref_kind": "fact",
+          "ref_id": "7860593b-362c-40af-a4f2-ca6915b460b7",
+          "format": "$7.4B"
+        },
+        {
+          "type": "text",
+          "text": " in Q1 2025 (ended Mar 2025)"
+        },
+        {
+          "type": "text",
+          "text": "; AMD's revenue growth (QoQ) was "
+        },
+        {
+          "type": "ref",
+          "ref_kind": "fact",
+          "ref_id": "c50e9c70-3e7b-4824-9b58-b3dbde68c146",
+          "format": "3.3%"
+        },
+        {
+          "type": "text",
+          "text": " and revenue "
+        },
+        {
+          "type": "ref",
+          "ref_kind": "fact",
+          "ref_id": "0bd1e8db-e8b1-4d60-915a-a1bd8da7cbde",
+          "format": "$7.7B"
+        },
+        {
+          "type": "text",
+          "text": " in Q2 2025 (ended Jun 2025)"
+        },
+        {
+          "type": "text",
+          "text": "."
+        },
+        {
+          "type": "text",
+          "text": "\n\n"
+        },
+        {
+          "type": "text",
+          "text": "According to a source dated Aug 2025, effective Jun 2025 on AMD: "
+        },
+        {
+          "type": "ref",
+          "ref_kind": "claim",
+          "ref_id": "7c46e727-8a24-4020-8e30-92f09548eeba",
+          "format": "As previously announced, our second quarter results were impacted by the U.S. Government's export control on our AMD Instinct MI308 data center GPU products. For the quarter, these restrictions led to approximately $800 million in inventory and related charges."
+        },
+        {
+          "type": "text",
+          "text": "\n\n"
+        },
+        {
+          "type": "text",
+          "text": "AMD's revenue was "
+        },
+        {
+          "type": "ref",
+          "ref_kind": "fact",
+          "ref_id": "507db774-8cbf-486f-97a2-69eabea4ef03",
+          "format": "$11.2B"
+        },
+        {
+          "type": "text",
+          "text": ", revenue growth (YoY) "
+        },
+        {
+          "type": "ref",
+          "ref_kind": "fact",
+          "ref_id": "446c18d7-889a-437d-8379-78ad48baef95",
+          "format": "45.7%"
+        },
+        {
+          "type": "text",
+          "text": ", gross margin "
+        },
+        {
+          "type": "ref",
+          "ref_kind": "fact",
+          "ref_id": "19abb14c-cbf0-4745-a1f1-42fd4f3c4a2a",
+          "format": "54.0%"
+        },
+        {
+          "type": "text",
+          "text": ", operating margin "
+        },
+        {
+          "type": "ref",
+          "ref_kind": "fact",
+          "ref_id": "1934f95a-7398-4b25-aa97-33f82f3ae13d",
+          "format": "14.4%"
+        },
+        {
+          "type": "text",
+          "text": " and net margin "
+        },
+        {
+          "type": "ref",
+          "ref_kind": "fact",
+          "ref_id": "b826738a-f35a-41e2-97f9-d239ef18da19",
+          "format": "13.2%"
+        },
+        {
+          "type": "text",
+          "text": " in Q2 2026 (ended Jun 2026)"
+        },
+        {
+          "type": "text",
+          "text": "."
+        },
+        {
+          "type": "text",
+          "text": "\n\n"
+        },
+        {
+          "type": "text",
+          "text": "> **Analyst inference:** Its year-over-year growth is strong, though the sequential pace has cooled from the peak."
+        }
+      ]
+    }
+  ],
+  "judge": [
+    {
+      "outcome": "replied",
+      "exchange": {
+        "messages": [
+          {
+            "role": "system",
+            "content": "You check the analyst inferences in a financial research answer. Each inference comes with what it rests on:\nits supports (the observations, comparisons and management attributions it cites, each figure as the data\ngives it, each claim as its source words it), the checked results of the comparisons among them, and its\nsubject, the company it is about. rest_of_answer is the answer's other checked observations and comparisons,\nwritten the same way; the page may show one of them inside a comparison that states its figures.\nfigures_shown holds the figures the page's tables and charts show, a line per table, headed by its title when it\nhas one. companies lists every company the answer covers; rest_of_answer and figures_shown cover every one of\nthem, and an inference may rest on another company's figures when it compares them. Judge each inference\nagainst its subject, checked results, supports, rest_of_answer and figures_shown; no outside knowledge, and\nnothing from another inference. A company may be named by ticker, name or alias, in any case (\"nvda\",\n\"Nvidia\", \"Advanced Micro Devices\"): naming one is fine, but what the inference says about it must be backed\nlike anything else. Qualitative words that summarise the figures (large, concentrated, higher, slowing) are\nfine when the figures bear them out, and so is an exact count of the items the answer lists (\"the two\ncompanies\", \"four segments\", \"the eight quarters shown\"). That covers no duration and no difference between\ndates or values (\"a one-month offset\", \"an eight-month gap\"): those are amounts in words.\n\nAnswer two questions about each inference.\n\nverdict: how it relates to what the answer shows. When both unsupported and contradicted apply, contradicted wins.\n- entailed: its supports, the rest of the answer and the figures shown state or clearly imply what it says.\n- unsupported: it contradicts nothing shown but claims something the answer neither states nor implies, such\n  as a cause, a forecast, a trend, or a metric, segment or period not shown. A hedge does not make it\n  supported: a valuation or market reading such as \"may be priced in\" or \"the market may already reflect\" is\n  unsupported unless the answer shows it.\n- contradicted: something it says disagrees with the figures or checked results shown: who leads, trails, is\n  highest or lowest, or the order it states; a direction it states (rising, falling, expanding, recovering)\n  against a checked trend or the figures; or any other statement the figures shown make false.\n\nworded_amount, whatever its verdict: true when the inference's own words state any amount, fraction, multiple\nor span of time, even when the figures bear it out: money, a percentage, a growth rate, a multiple or fraction\n(\"doubled\", \"four times\", \"two-thirds\"), or a duration or a difference between dates or values (\"a\none-month offset\", \"an eight-month gap\"), e.g. \"hundreds of millions of dollars\", \"a quarter billion\ndollars\", \"one and a half percent\", \"single-digit growth\". An exact count of the items the answer lists\n(\"the two companies\", \"four segments\", \"the eight quarters shown\") is not one, and neither is a word that\nnames no quantity (\"the gap\", \"the offset\", \"higher\"), whatever the figures say. Otherwise false.\n\nReply with JSON only, one verdict per inference id; if you correct yourself, the last JSON in the reply is read:\n{\"verdicts\":[{\"id\":<id>,\"verdict\":\"entailed\"|\"unsupported\"|\"contradicted\",\"worded_amount\":true|false,\"reason\":\"<one short sentence>\"}]}\nGive a reason for every verdict but entailed, and whenever worded_amount is true; otherwise leave it out."
+          },
+          {
+            "role": "user",
+            "content": "{\"companies\":[\"AMD\"],\"inferences\":[{\"id\":0,\"subject\":\"AMD\",\"text\":\"The premise that it recovered within a single quarter does not fit: the dip was brief, but growth rebuilt over several quarters and has since slowed.\",\"checked_results\":[],\"supports\":[\"AMD's revenue growth (QoQ) was -2.9% and revenue $7.4B in Q1 2025 (ended Mar 2025); AMD's revenue growth (QoQ) was 3.3% and revenue $7.7B in Q2 2025 (ended Jun 2025).\"],\"rest_of_answer\":[\"AMD's revenue was $11.2B, revenue growth (YoY) 45.7%, gross margin 54.0%, operating margin 14.4% and net margin 13.2% in Q2 2026 (ended Jun 2026).\"],\"figures_shown\":[\"Latest quarter (Q2 2026): AMD's revenue was $11.2B, gross profit $6.1B, operating income $1.6B, net income $1.5B, gross margin 54.0%, operating margin 14.4%, net margin 13.2%, revenue growth (QoQ) 4.7% and revenue growth (YoY) 45.7% in Q2 2026 (ended Jun 2026).\",\"Quarterly revenue: AMD's revenue was $6.8B in Q3 2024 (ended Sep 2024); AMD's revenue was $7.7B in Q4 2024 (ended Dec 2024); AMD's revenue was $7.4B in Q1 2025 (ended Mar 2025); AMD's revenue was $7.7B in Q2 2025 (ended Jun 2025); AMD's revenue was $9.2B in Q3 2025 (ended Sep 2025); AMD's revenue was $10.3B in Q4 2025 (ended Dec 2025); AMD's revenue was $10.7B in Q1 2026 (ended Mar 2026); AMD's revenue was $11.2B in Q2 2026 (ended Jun 2026).\",\"AMD's revenue growth (QoQ) was 12.3% in Q4 2024 (ended Dec 2024); AMD's revenue growth (QoQ) was -2.9% in Q1 2025 (ended Mar 2025); AMD's revenue growth (QoQ) was 3.3% in Q2 2025 (ended Jun 2025); AMD's revenue growth (QoQ) was 20.3% in Q3 2025 (ended Sep 2025); AMD's revenue growth (QoQ) was 11.4% in Q4 2025 (ended Dec 2025); AMD's revenue growth (QoQ) was 3.9% in Q1 2026 (ended Mar 2026).\"]}]}"
+          }
+        ],
+        "text": "```json\n{\"verdicts\":[{\"id\":0,\"verdict\":\"contradicted\",\"worded_amount\":true,\"reason\":\"The figures show revenue back at its Q4 2024 level ($7.7B) by Q2 2025, one quarter after the Q1 2025 dip, with positive growth that quarter, so the premise of a single-quarter recovery fits rather than failing.\"}]}\n```",
+        "truncated": false,
+        "deployment": "anthropic/claude-haiku-5-5",
+        "latency_ms": 5621,
+        "usage": {
+          "input_tokens": 2096,
+          "output_tokens": 841
+        }
+      }
+    },
+    {
+      "outcome": "replied",
+      "exchange": {
+        "messages": [
+          {
+            "role": "system",
+            "content": "You check the analyst inferences in a financial research answer. Each inference comes with what it rests on:\nits supports (the observations, comparisons and management attributions it cites, each figure as the data\ngives it, each claim as its source words it), the checked results of the comparisons among them, and its\nsubject, the company it is about. rest_of_answer is the answer's other checked observations and comparisons,\nwritten the same way; the page may show one of them inside a comparison that states its figures.\nfigures_shown holds the figures the page's tables and charts show, a line per table, headed by its title when it\nhas one. companies lists every company the answer covers; rest_of_answer and figures_shown cover every one of\nthem, and an inference may rest on another company's figures when it compares them. Judge each inference\nagainst its subject, checked results, supports, rest_of_answer and figures_shown; no outside knowledge, and\nnothing from another inference. A company may be named by ticker, name or alias, in any case (\"nvda\",\n\"Nvidia\", \"Advanced Micro Devices\"): naming one is fine, but what the inference says about it must be backed\nlike anything else. Qualitative words that summarise the figures (large, concentrated, higher, slowing) are\nfine when the figures bear them out, and so is an exact count of the items the answer lists (\"the two\ncompanies\", \"four segments\", \"the eight quarters shown\"). That covers no duration and no difference between\ndates or values (\"a one-month offset\", \"an eight-month gap\"): those are amounts in words.\n\nAnswer two questions about each inference.\n\nverdict: how it relates to what the answer shows. When both unsupported and contradicted apply, contradicted wins.\n- entailed: its supports, the rest of the answer and the figures shown state or clearly imply what it says.\n- unsupported: it contradicts nothing shown but claims something the answer neither states nor implies, such\n  as a cause, a forecast, a trend, or a metric, segment or period not shown. A hedge does not make it\n  supported: a valuation or market reading such as \"may be priced in\" or \"the market may already reflect\" is\n  unsupported unless the answer shows it.\n- contradicted: something it says disagrees with the figures or checked results shown: who leads, trails, is\n  highest or lowest, or the order it states; a direction it states (rising, falling, expanding, recovering)\n  against a checked trend or the figures; or any other statement the figures shown make false.\n\nworded_amount, whatever its verdict: true when the inference's own words state any amount, fraction, multiple\nor span of time, even when the figures bear it out: money, a percentage, a growth rate, a multiple or fraction\n(\"doubled\", \"four times\", \"two-thirds\"), or a duration or a difference between dates or values (\"a\none-month offset\", \"an eight-month gap\"), e.g. \"hundreds of millions of dollars\", \"a quarter billion\ndollars\", \"one and a half percent\", \"single-digit growth\". An exact count of the items the answer lists\n(\"the two companies\", \"four segments\", \"the eight quarters shown\") is not one, and neither is a word that\nnames no quantity (\"the gap\", \"the offset\", \"higher\"), whatever the figures say. Otherwise false.\n\nReply with JSON only, one verdict per inference id; if you correct yourself, the last JSON in the reply is read:\n{\"verdicts\":[{\"id\":<id>,\"verdict\":\"entailed\"|\"unsupported\"|\"contradicted\",\"worded_amount\":true|false,\"reason\":\"<one short sentence>\"}]}\nGive a reason for every verdict but entailed, and whenever worded_amount is true; otherwise leave it out."
+          },
+          {
+            "role": "user",
+            "content": "{\"companies\":[\"AMD\"],\"inferences\":[{\"id\":6,\"subject\":\"AMD\",\"text\":\"Its year-over-year growth is strong, though the sequential pace has cooled from the peak.\",\"checked_results\":[],\"supports\":[\"AMD's revenue was $11.2B, revenue growth (YoY) 45.7%, gross margin 54.0%, operating margin 14.4% and net margin 13.2% in Q2 2026 (ended Jun 2026).\"],\"rest_of_answer\":[\"AMD's revenue growth (QoQ) was -2.9% and revenue $7.4B in Q1 2025 (ended Mar 2025); AMD's revenue growth (QoQ) was 3.3% and revenue $7.7B in Q2 2025 (ended Jun 2025).\"],\"figures_shown\":[\"Latest quarter (Q2 2026): AMD's revenue was $11.2B, gross profit $6.1B, operating income $1.6B, net income $1.5B, gross margin 54.0%, operating margin 14.4%, net margin 13.2%, revenue growth (QoQ) 4.7% and revenue growth (YoY) 45.7% in Q2 2026 (ended Jun 2026).\",\"Quarterly revenue: AMD's revenue was $6.8B in Q3 2024 (ended Sep 2024); AMD's revenue was $7.7B in Q4 2024 (ended Dec 2024); AMD's revenue was $7.4B in Q1 2025 (ended Mar 2025); AMD's revenue was $7.7B in Q2 2025 (ended Jun 2025); AMD's revenue was $9.2B in Q3 2025 (ended Sep 2025); AMD's revenue was $10.3B in Q4 2025 (ended Dec 2025); AMD's revenue was $10.7B in Q1 2026 (ended Mar 2026); AMD's revenue was $11.2B in Q2 2026 (ended Jun 2026).\",\"AMD's revenue growth (QoQ) was 12.3% in Q4 2024 (ended Dec 2024); AMD's revenue growth (QoQ) was -2.9% in Q1 2025 (ended Mar 2025); AMD's revenue growth (QoQ) was 3.3% in Q2 2025 (ended Jun 2025); AMD's revenue growth (QoQ) was 20.3% in Q3 2025 (ended Sep 2025); AMD's revenue growth (QoQ) was 11.4% in Q4 2025 (ended Dec 2025); AMD's revenue growth (QoQ) was 3.9% in Q1 2026 (ended Mar 2026).\"]}]}"
+          }
+        ],
+        "text": "{\"verdicts\":[{\"id\":6,\"verdict\":\"entailed\",\"worded_amount\":false}]}",
+        "truncated": false,
+        "deployment": "anthropic/claude-haiku-5-5",
+        "latency_ms": 3035,
+        "usage": {
+          "input_tokens": 2079,
+          "output_tokens": 210
+        }
+      }
+    }
+  ],
+  "repair": {
+    "requests": [
+      {
+        "index": 0,
+        "text": "The premise that it recovered within a single quarter does not fit: the dip was brief, but growth rebuilt over several quarters and has since slowed.",
+        "rejected_supports": [
+          1
+        ],
+        "check": "judge",
+        "verdict": "contradicted",
+        "worded_amount": true,
+        "reason": "The figures show revenue back at its Q4 2024 level ($7.7B) by Q2 2025, one quarter after the Q1 2025 dip, with positive growth that quarter, so the premise of a single-quarter recovery fits rather than failing."
+      }
+    ],
+    "record": {
+      "outcome": "replied",
+      "exchange": {
+        "messages": [
+          {
+            "role": "system",
+            "content": "Write a concise investment research answer for the chat user, as the list of what it asserts. Reply with only a fenced block that opens with ```assertions on its own line, and nothing before or after it: a JSON array of at most 12 objects {\"kind\", \"text\", \"evidence\"}. The answer is rendered from this list alone, in its order: each figure, claim, period and company comes from the evidence an entry cites, and only an analyst_inference's text is shown as written. Every entry's text says it in one short sentence. Answer as a buy-side analyst would: first your takeaway, answering the question directly, as an analyst_inference; then the observations and comparisons that show the trend across every period shown, not just the latest, and what is strong or weak against the other periods or companies shown; an unknown_cause for a change the evidence gives no cause for; and last one specific counterpoint grounded in the data that cuts against the takeaway, as an analyst_inference. List nothing for what the data shown cannot tell: the answer's own notes say what is missing, from evidence_packet.gaps. If the data shown does not answer the question (the metric or period asked for is not there), list nothing about other figures in its place: reply with an empty list. Use only evidence_packet: never add facts, numbers, or events it does not hold. evidence_packet.figures are the figures you may cite, by id, each with its metric and, in a comparison, the company it belongs to. evidence_packet.claims are sourced statements you may cite, by id; evidence_packet.disagreements names claims that may conflict, and an inference never picks one side. If claims_status is unavailable, research claims could not be read, so never say there are none. Never state a cause the data does not show (a charge, supply constraints, heavy spending): a cause stated by management is a management_attribution citing its claim, and a change the evidence gives no cause for is an unknown_cause. kind is \"observation\" (what figures show; evidence lists their F ids only), \"comparison\" (a high or low, a ranking, or a trend of exactly one metric, so one comparison per metric; a segment breakdown is one metric, revenue, across segments; evidence lists the F ids of every company, segment or period it covers, and a comparison across periods cites every period shown for its metric; add \"op\" and \"result\": op \"highest\" or \"lowest\" with result the F id that is highest or lowest; op \"order\" with result an array of every F id it cites, highest first ({\"kind\":\"comparison\",\"text\":\"Revenue is highest at AAPL, then NVDA, then AMD.\",\"evidence\":[\"F1\",\"F5\",\"F9\"],\"op\":\"order\",\"result\":[\"F9\",\"F1\",\"F5\"]}); or op \"trend\" with result one of \"rose\", \"fell\", \"flat\", \"rose_throughout\", \"fell_throughout\", \"rebounded\" or \"pulled_back\"), \"management_attribution\" (what a claim says management stated; evidence lists its C id), \"unknown_cause\" (a change the evidence gives no cause for; evidence lists the F id of each figure that changed), or \"analyst_inference\" (what the observations, comparisons and management attributions mean, in words, such as revenue concentrated in one segment; evidence may be omitted; add \"supports\": the array indexes of every observation, comparison and management_attribution whose content it uses (a figure, a price return, scale, a ranking, a charge management stated), and it says nothing those supports do not show, not even hedged (\"may already be priced in\"); add \"subject\": the company label the inference is about, one its evidence covers). An analyst_inference's text is words only: the figures are its supports', so it writes no digit, period label or packet id (\"a year earlier\", not FY2025). Never compute new figures such as growth rates, margins, differences, or ratios, and never state a magnitude in words (\"roughly double\", \"six times\", \"larger than X's whole revenue\"): say only the direction (\"higher\", \"faster\", \"larger\") without how much. When the answer covers more than one company, an analyst_inference's text names no company, not even in the counterpoint: who leads, trails, rose or fell is shown from the comparisons it rests on, so rest a ranking or direction on its comparison and say only what it means (\"the margin lead funds more research\", not \"NVDA leads AMD\"); the text refers to its subject as \"it\" or \"its\" ({\"kind\":\"analyst_inference\",\"subject\":\"AMD\",\"text\":\"Its net margin may understate underlying profitability, given the one-time charge management disclosed.\",\"supports\":[2,3]}). When evidence_packet has neither figures nor claims, reply with an empty list."
+          },
+          {
+            "role": "user",
+            "content": "{\"question\":\"Analyze AMD. It recovered within a single quarter, right?\",\"conversation\":[{\"role\":\"user\",\"text\":\"Analyze AMD. It recovered within a single quarter, right?\"}],\"evidence_packet\":{\"route\":\"latest_quarter\",\"cutoff\":\"2026-09-01T00:00:00.000Z\",\"figures\":[{\"id\":\"F1\",\"metric\":\"Revenue\",\"period\":\"Q22026\",\"period_end\":\"2026-06-27\",\"value\":\"$11.2B\",\"shown_in\":\"Latest quarter (Q2 2026)\"},{\"id\":\"F2\",\"metric\":\"Gross profit\",\"period\":\"Q22026\",\"period_end\":\"2026-06-27\",\"value\":\"$6.1B\",\"shown_in\":\"Latest quarter (Q2 2026)\"},{\"id\":\"F3\",\"metric\":\"Operating income\",\"period\":\"Q22026\",\"period_end\":\"2026-06-27\",\"value\":\"$1.6B\",\"shown_in\":\"Latest quarter (Q2 2026)\"},{\"id\":\"F4\",\"metric\":\"Net income\",\"period\":\"Q22026\",\"period_end\":\"2026-06-27\",\"value\":\"$1.5B\",\"shown_in\":\"Latest quarter (Q2 2026)\"},{\"id\":\"F5\",\"metric\":\"Gross margin\",\"period\":\"Q22026\",\"period_end\":\"2026-06-27\",\"value\":\"54.0%\",\"shown_in\":\"Latest quarter (Q2 2026)\"},{\"id\":\"F6\",\"metric\":\"Operating margin\",\"period\":\"Q22026\",\"period_end\":\"2026-06-27\",\"value\":\"14.4%\",\"shown_in\":\"Latest quarter (Q2 2026)\"},{\"id\":\"F7\",\"metric\":\"Net margin\",\"period\":\"Q22026\",\"period_end\":\"2026-06-27\",\"value\":\"13.2%\",\"shown_in\":\"Latest quarter (Q2 2026)\"},{\"id\":\"F8\",\"metric\":\"Revenue growth (QoQ)\",\"period\":\"Q22026\",\"period_end\":\"2026-06-27\",\"value\":\"4.7%\",\"shown_in\":\"Latest quarter (Q2 2026)\"},{\"id\":\"F9\",\"metric\":\"Revenue growth (YoY)\",\"period\":\"Q22026\",\"period_end\":\"2026-06-27\",\"value\":\"45.7%\",\"shown_in\":\"Latest quarter (Q2 2026)\"},{\"id\":\"F10\",\"metric\":\"Revenue\",\"period\":\"Q3 2024\",\"period_end\":\"2024-09-28\",\"value\":\"$6.8B\",\"shown_in\":\"Quarterly revenue\"},{\"id\":\"F11\",\"metric\":\"Revenue\",\"period\":\"Q4 2024\",\"period_end\":\"2024-12-28\",\"value\":\"$7.7B\",\"shown_in\":\"Quarterly revenue\"},{\"id\":\"F12\",\"metric\":\"Revenue\",\"period\":\"Q1 2025\",\"period_end\":\"2025-03-29\",\"value\":\"$7.4B\",\"shown_in\":\"Quarterly revenue\"},{\"id\":\"F13\",\"metric\":\"Revenue\",\"period\":\"Q2 2025\",\"period_end\":\"2025-06-28\",\"value\":\"$7.7B\",\"shown_in\":\"Quarterly revenue\"},{\"id\":\"F14\",\"metric\":\"Revenue\",\"period\":\"Q3 2025\",\"period_end\":\"2025-09-27\",\"value\":\"$9.2B\",\"shown_in\":\"Quarterly revenue\"},{\"id\":\"F15\",\"metric\":\"Revenue\",\"period\":\"Q4 2025\",\"period_end\":\"2025-12-27\",\"value\":\"$10.3B\",\"shown_in\":\"Quarterly revenue\"},{\"id\":\"F16\",\"metric\":\"Revenue\",\"period\":\"Q1 2026\",\"period_end\":\"2026-03-28\",\"value\":\"$10.7B\",\"shown_in\":\"Quarterly revenue\"},{\"id\":\"F17\",\"metric\":\"Revenue\",\"period\":\"Q2 2026\",\"period_end\":\"2026-06-27\",\"value\":\"$11.2B\",\"shown_in\":\"Quarterly revenue\"},{\"id\":\"F18\",\"metric\":\"Revenue growth (QoQ)\",\"period\":\"Q4 2024\",\"period_end\":\"2024-12-28\",\"value\":\"12.3%\",\"derived_from\":[\"F11\",\"F10\"]},{\"id\":\"F19\",\"metric\":\"Revenue growth (QoQ)\",\"period\":\"Q1 2025\",\"period_end\":\"2025-03-29\",\"value\":\"-2.9%\",\"derived_from\":[\"F12\",\"F11\"]},{\"id\":\"F20\",\"metric\":\"Revenue growth (QoQ)\",\"period\":\"Q2 2025\",\"period_end\":\"2025-06-28\",\"value\":\"3.3%\",\"derived_from\":[\"F13\",\"F12\"]},{\"id\":\"F21\",\"metric\":\"Revenue growth (QoQ)\",\"period\":\"Q3 2025\",\"period_end\":\"2025-09-27\",\"value\":\"20.3%\",\"derived_from\":[\"F14\",\"F13\"]},{\"id\":\"F22\",\"metric\":\"Revenue growth (QoQ)\",\"period\":\"Q4 2025\",\"period_end\":\"2025-12-27\",\"value\":\"11.4%\",\"derived_from\":[\"F15\",\"F14\"]},{\"id\":\"F23\",\"metric\":\"Revenue growth (QoQ)\",\"period\":\"Q1 2026\",\"period_end\":\"2026-03-28\",\"value\":\"3.9%\",\"derived_from\":[\"F16\",\"F15\"]}],\"coverage\":[{\"company\":\"AMD\",\"status\":\"shown\"}],\"query_bounds\":{\"periods\":\"latest quarter, with revenue for the last 8 quarters\",\"claims\":\"management, guidance, and kpi claims from 2024-09-01 first, then the most recent others, published by the 2026-09-01 cutoff; a claim repeated by several sources or copies counts once\"},\"claims\":[{\"id\":\"C1\",\"text\":\"As previously announced, our second quarter results were impacted by the U.S. Government's export control on our AMD Instinct MI308 data center GPU products. For the quarter, these restrictions led to approximately $800 million in inventory and related charges.\",\"predicate\":\"kpi.commentary\",\"stance\":\"challenging\",\"company\":\"AMD\",\"effective_time\":\"2025-06-28T00:00:00.000Z\",\"published_at\":\"2025-08-05T00:00:00.000Z\"}],\"staleness\":{\"quote\":[{\"ticker\":\"AMD\",\"as_of\":\"2026-09-01T00:00:00.000Z\",\"stale\":false,\"session_state\":\"closed\",\"delay_class\":\"eod\"}],\"fact_recency\":[{\"latest_as_of\":\"2026-09-01T00:00:00.000Z\",\"fiscal_year\":2026,\"fiscal_period\":\"Q2\",\"age_days\":0,\"stale\":false}]}}}\n\nYou already answered this question; your_assertions is the list you wrote. Some analyst_inference entries in it are not shown to the reader. Each is listed below with why: the check it failed and its reason, or the judge's verdict and reason (worded_amount: its words state an amount, fraction, multiple or span of time). Write each one again so it passes, under every rule above: words only, no digit anywhere, no amount in words, nothing its supports do not show; or leave it out if it cannot be said that way. Its supports carry the periods, so its text names no period at all (no year, quarter, \"latest\", \"earlier\" or \"prior\") and leaves which period is which to its supports. Reply with only a fenced block that opens with ```assertions on its own line: a JSON array of the corrected entries, each an analyst_inference object in the same shape as in your list (supports, and a subject only as the rules allow), with \"index\" added: the index of the entry it replaces. At most one per index listed below.\n{\"your_assertions\":[{\"kind\":\"analyst_inference\",\"subject\":\"AMD\",\"text\":\"The premise that it recovered within a single quarter does not fit: the dip was brief, but growth rebuilt over several quarters and has since slowed.\",\"supports\":[1,2]},{\"kind\":\"comparison\",\"text\":\"Quarterly revenue dipped in Q1 2025, then rose in every later quarter through Q2 2026.\",\"evidence\":[\"F11\",\"F12\",\"F13\",\"F14\",\"F15\",\"F16\",\"F17\"],\"op\":\"trend\",\"result\":\"rebounded\"},{\"kind\":\"observation\",\"text\":\"Revenue fell 2.9% sequentially in Q1 2025 to $7.4B, then grew 3.3% in Q2 2025.\",\"evidence\":[\"F19\",\"F12\",\"F20\",\"F13\"]},{\"kind\":\"comparison\",\"text\":\"Sequential growth peaked at 20.3% in Q3 2025, then slowed to 11.4%, 3.9%, and 4.7% in the latest quarter.\",\"evidence\":[\"F20\",\"F21\",\"F22\",\"F23\",\"F8\"],\"op\":\"trend\",\"result\":\"pulled_back\"},{\"kind\":\"management_attribution\",\"text\":\"Management said Q2 2025 results were hit by US export controls on the MI308 GPU, causing about $800 million in inventory and related charges.\",\"evidence\":[\"C1\"]},{\"kind\":\"observation\",\"text\":\"Latest quarter revenue was $11.2B, up 45.7% year over year, with gross margin 54.0%, operating margin 14.4% and net margin 13.2%.\",\"evidence\":[\"F1\",\"F9\",\"F5\",\"F6\",\"F7\"]},{\"kind\":\"analyst_inference\",\"subject\":\"AMD\",\"text\":\"Its year-over-year growth is strong, though the sequential pace has cooled from the peak.\",\"supports\":[3,5]}],\"rejected\":[{\"index\":0,\"text\":\"The premise that it recovered within a single quarter does not fit: the dip was brief, but growth rebuilt over several quarters and has since slowed.\",\"rejected_supports\":[1],\"check\":\"judge\",\"verdict\":\"contradicted\",\"worded_amount\":true,\"reason\":\"The figures show revenue back at its Q4 2024 level ($7.7B) by Q2 2025, one quarter after the Q1 2025 dip, with positive growth that quarter, so the premise of a single-quarter recovery fits rather than failing.\"}]}"
+          }
+        ],
+        "text": "```assertions\n[{\"index\":0,\"subject\":\"AMD\",\"text\":\"The premise largely fits: the dip was brief and revenue was back to its prior peak one quarter later, after which growth kept building and has since cooled.\",\"supports\":[1,2,3]}]\n```",
+        "truncated": false,
+        "deployment": "anthropic/claude-sonnet-5-5",
+        "latency_ms": 1826,
+        "usage": {
+          "input_tokens": 4659,
+          "output_tokens": 87
+        }
+      }
+    },
+    "judge": []
+  }
+}
