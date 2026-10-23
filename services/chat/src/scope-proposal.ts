@@ -198,6 +198,7 @@ const PROPOSAL_INSTRUCTIONS = [
   "- explains: a cause: why, what drove, led to, contributed to or accounted for something",
   "- evidence: the sources or evidence of the previous answer",
   "- latest_quarter: the latest, most recent or current reported quarter",
+  '- latest_fiscal_year: the latest, most recent or current full fiscal year ("the latest fiscal year", "the latest annual results")',
   `A period in turns_off is ${PERIOD_FIELDS.join(" or ")}: a fiscal year or quarter the question asks to remove.`,
   `An <item> is one of ${INCOME_ITEMS.join(", ")}: an income-statement item the question names.`,
   "A <period> is the period the question asks about, one of:",

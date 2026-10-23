@@ -91,9 +91,10 @@ export type ResearchScope = {
   // A fiscal quarter the question names (#290); with no year named or kept,
   // each company's newest such quarter.
   fiscal_quarter: ScopeQuarter | null;
-  // What the latest period is when no year or quarter is set: the period type
-  // of the previous answer's figures, or a quarter once a turn asks for the
-  // latest quarter. Absent when no answer has said.
+  // What the latest period is when no year or quarter is set: the type a turn
+  // reading the latest asks for (a quarter unless it says the fiscal year), or
+  // the previous answer's figures' type for a turn naming no period. Absent
+  // when neither has said.
   latest_period?: PeriodType;
   // The window's cutoff is the answer that first charted it.
   price_window: { kind: "ytd"; cutoff: string } | null;
@@ -130,6 +131,7 @@ export const SCOPE_FACETS = [
   "explains",
   "evidence",
   "latest_quarter",
+  "latest_fiscal_year",
 ] as const;
 export type ScopeFacet = (typeof SCOPE_FACETS)[number];
 // The periods a question can turn off beside its facets.
@@ -183,7 +185,7 @@ export type CompanyChange =
 const NO_PROPOSAL: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named", names: [] } };
 
 // The field a facet turned off clears. Guidance and a cause are read apart;
-// evidence and the latest quarter are asked for one turn only.
+// evidence and a latest period are asked for one turn only.
 const CLEARS: Partial<Record<ScopeFacet | (typeof PERIOD_FIELDS)[number], ScopeField>> = {
   peers: "peers",
   segments: "segments",
@@ -400,7 +402,7 @@ export function resolveResearchScope(input: {
   // the question ("forget fiscal 2025").
   const yearNamed = off.has("fiscal_year") ? undefined : period.year;
   const quarterNamed = off.has("fiscal_quarter") ? undefined : period.quarter;
-  const latest = asks.has("latest_quarter") || period.replacesInherited === true;
+  const latest = asks.has("latest_quarter") || asks.has("latest_fiscal_year") || period.replacesInherited === true;
   // The latest period replaces an inherited fiscal year ("Q1 fiscal 2025"
   // named both), so a reader that takes no quarter isn't held to the old year.
   if (yearNamed === undefined && quarterNamed === undefined && latest) off.add("fiscal_year");
@@ -465,7 +467,14 @@ export function resolveResearchScope(input: {
   // the other facets are, unless this one turns them off.
   const keeps = (facet: "guidance" | "explains", kept: true | undefined) =>
     !offFacets.has(facet) && (asks.has(facet) || kept === true);
-  const latestPeriod = asks.has("latest_quarter") ? "quarter" : prior?.latest_period;
+  const readKind = (input.proposal ?? NO_PROPOSAL).period.kind;
+  const latestPeriod = asks.has("latest_fiscal_year")
+    ? "fiscal_year"
+    : asks.has("latest_quarter") || readKind === "latest"
+    ? "quarter"
+    : readKind === "none"
+    ? prior?.latest_period
+    : undefined;
   return {
     route: evidence ? "evidence_followup" : reread?.route ?? reads,
     reads,

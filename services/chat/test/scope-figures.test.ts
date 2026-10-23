@@ -117,7 +117,7 @@ const ROUTES: ReadonlyArray<readonly [string, ScopeProposal | null, ResearchScop
   ["a cause, naming the companies", read({ asks: ["explains"], companies: named("NVDA", "AMD") }), after({ companies: [NVDA, AMD] }), "overview at latest"],
   ["peers turned off", read({ off: ["peers"] }), FRESH, "overview at latest"],
   ["a cause of the margins", read({ asks: ["explains", "margins"], companies: named("NVDA") }), FRESH, "planner"],
-  ["the latest period", read({ period: { kind: "latest" }, companies: named("NVDA") }), FRESH, "overview at latest"],
+  ["the latest period", read({ period: { kind: "latest" }, companies: named("NVDA") }), FRESH, "overview at latest quarter"],
   ["a fiscal year", read({ period: FY2025, companies: named("NVDA") }), FRESH, "overview at FY2025"],
   ["a quarter", read({ period: Q2_2025, companies: named("NVDA") }), FRESH, "overview at Q2 FY2025"],
   ["a quarter named alone", read({ period: Q2 }), FRESH, "overview at newest Q2"],
@@ -125,12 +125,13 @@ const ROUTES: ReadonlyArray<readonly [string, ScopeProposal | null, ResearchScop
   ["no period, the scope's year", read(), after({ fiscal_year: 2025 }), "analyst"],
   ["adding a company, the scope's year", read({ companies: adds("AMD") }), after({ companies: [NVDA, AMD], fiscal_year: 2025 }), "overview at FY2025"],
   ["adding a company, the scope's quarter", read({ companies: adds("AMD") }), after({ companies: [NVDA, AMD], fiscal_year: 2025, fiscal_quarter: { fiscal_year: 2025, fiscal_period: "Q2" } }), "overview at Q2 FY2025"],
-  ["the latest quarter, the scope's year", read({ period: { kind: "latest" } }), after({ fiscal_year: 2025 }), "overview at latest"],
+  ["the latest quarter, the scope's year", read({ period: { kind: "latest" } }), after({ fiscal_year: 2025 }), "overview at latest quarter"],
+  ["the latest fiscal year, the scope's year", read({ asks: ["latest_fiscal_year"], period: { kind: "latest" } }), after({ fiscal_year: 2025 }), "overview at latest fiscal year"],
   ["the trailing twelve months", read({ period: { kind: "trailing_twelve_months" }, companies: named("NVDA") }), FRESH, "planner"],
   ["a range", read({ period: { kind: "range" }, companies: named("NVDA") }), FRESH, "planner"],
   ["a margin over time", read({ asks: ["margin_trend"], metrics: ["income_statement"], items: ["operating_margin"], companies: named("NVDA") }), FRESH, "trend at latest"],
   ["margins over time and why", read({ asks: ["margins", "margin_trend", "explains"], companies: named("NVDA") }), FRESH, "trend at latest"],
-  ["a margin over the latest periods", read({ asks: ["margin_trend"], period: { kind: "latest" }, companies: named("NVDA") }), FRESH, "trend at latest"],
+  ["a margin over the latest periods", read({ asks: ["margin_trend"], period: { kind: "latest" }, companies: named("NVDA") }), FRESH, "trend at latest quarter"],
   ["margins, not their trend", read({ asks: ["margins"], companies: named("NVDA") }), FRESH, "planner"],
   ["a trend of another income item", read({ asks: ["margin_trend"], items: ["revenue"], companies: named("NVDA") }), FRESH, "planner"],
   ["a trend beside another metric", read({ asks: ["margin_trend"], metrics: ["free_cash_flow"], companies: named("NVDA") }), FRESH, "planner"],
@@ -150,6 +151,8 @@ const ROUTES: ReadonlyArray<readonly [string, ScopeProposal | null, ResearchScop
   ["kept figures, the latest quarter", read({ asks: ["latest_quarter"] }), after(keeps("eps_diluted")), "eps_diluted at latest quarter"],
   ["kept figures after a quarterly answer, adding a company", read({ companies: adds("AMD") }), after({ companies: [NVDA, AMD], latest_period: "quarter", ...keeps("eps_diluted") }), "eps_diluted at latest quarter"],
   ["kept figures after an annual answer, the latest quarter", read({ asks: ["latest_quarter"] }), after({ latest_period: "fiscal_year", ...keeps("free_cash_flow") }), "free_cash_flow at latest quarter"],
+  ["kept figures after a quarterly answer, the latest fiscal year", read({ asks: ["latest_fiscal_year"], period: { kind: "latest" } }), after({ latest_period: "quarter", ...keeps("eps_diluted") }), "eps_diluted at latest fiscal year"],
+  ["kept figures after an annual answer, the most recent results", read({ period: { kind: "latest" } }), after({ latest_period: "fiscal_year", ...keeps("eps_diluted") }), "eps_diluted at latest quarter"],
   ["the income statement after an annual answer, adding a company", read({ companies: adds("AMD") }), after({ companies: [NVDA, AMD], latest_period: "fiscal_year", ...keeps("income_statement") }), "overview at latest fiscal year"],
   ["kept income statement, another quarter", read({ period: Q2 }), after(keeps("income_statement")), "overview at newest Q2"],
   ["kept figures, a margin asked for", read({ asks: ["margins"] }), after(keeps("free_cash_flow")), "planner"],
@@ -225,6 +228,19 @@ test("a quarter named alone is saved as each company's newest such quarter, so a
   );
 });
 
+test("the latest fiscal year asked after the latest quarter's EPS reads the EPS annually (#398 review)", () => {
+  const turn = (reading: ScopeProposal, prior: ResearchScope | null) => {
+    const resolved = resolveResearchScope({ companies: [NVDA], prior, asOf: AS_OF, served: true, proposal: reading });
+    return { resolved, plan: choiceText(routeTurn(reading, resolved)) };
+  };
+  const quarter = turn(read({ metrics: ["eps_diluted"], asks: ["latest_quarter"], period: { kind: "latest" }, companies: named("NVDA") }), null);
+  const year = turn(read({ asks: ["latest_fiscal_year"], period: { kind: "latest" } }), quarter.resolved);
+  assert.deepEqual(
+    [quarter.plan, quarter.resolved.latest_period, year.plan, year.resolved.latest_period],
+    ["planner", "quarter", "eps_diluted at latest fiscal year", "fiscal_year"],
+  );
+});
+
 test("an answer whose figures are of another period type than the one its turn read says so (#398)", () => {
   assert.deepEqual([
     periodNote(after({ fiscal_year: 2025 }), "quarter"),
@@ -238,7 +254,7 @@ test("an answer whose figures are of another period type than the one its turn r
     periodNote(after({ fiscal_year: 2025 }), null),
   ], [
     "Fiscal 2025 is shown by quarter, to the newest quarter reported in it.",
-    "These figures are quarterly, where the previous answer's were for the latest fiscal year.",
+    "These figures are quarterly, not for the latest fiscal year.",
     "These figures are for the latest fiscal year, not the latest quarter.",
     "These figures are for a fiscal year, not Q2 FY2025.",
     "These figures are for a fiscal year, not each company's newest Q2.",

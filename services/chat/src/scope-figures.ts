@@ -52,10 +52,11 @@ const FACET_LANE: Readonly<Record<ScopeFacet, "figure" | "analyst" | "neutral">>
   explains: "neutral",
   evidence: "analyst",
   latest_quarter: "neutral",
+  latest_fiscal_year: "neutral",
 };
-const OVERVIEW_ASKS: ReadonlySet<ScopeFacet> = new Set(["latest_quarter", "peers", "explains"]);
+const OVERVIEW_ASKS: ReadonlySet<ScopeFacet> = new Set(["latest_quarter", "latest_fiscal_year", "peers", "explains"]);
 const OVERVIEW_SHOWS: ReadonlySet<ScopeFacet | (typeof PERIOD_FIELDS)[number]> = new Set(["latest_quarter", "margins", "margin_trend"]);
-const KEPT_ASKS: ReadonlySet<ScopeFacet> = new Set(["explains", "latest_quarter"]);
+const KEPT_ASKS: ReadonlySet<ScopeFacet> = new Set(["explains", "latest_quarter", "latest_fiscal_year"]);
 const TREND_ASKS: ReadonlySet<ScopeFacet> = new Set(["margin_trend", "margins", "explains"]);
 const MARGIN_ITEMS: ReadonlySet<string> = new Set(MARGINS.map(({ metric }) => metric));
 const READ_PERIODS: ReadonlySet<ScopeProposal["period"]["kind"]> = new Set(["none", "latest", "fiscal_year", "fiscal_quarter"]);
@@ -151,7 +152,7 @@ export function periodNote(scope: ScopePeriod, shown: PeriodType | null): string
   if (shown === "quarter") {
     return read.kind === "fiscal_year"
       ? `Fiscal ${read.fiscal_year} is shown by quarter, to the newest quarter reported in it.`
-      : "These figures are quarterly, where the previous answer's were for the latest fiscal year.";
+      : "These figures are quarterly, not for the latest fiscal year.";
   }
   if (read.kind !== "fiscal_quarter") return "These figures are for the latest fiscal year, not the latest quarter.";
   return `These figures are for a fiscal year, not ${read.fiscal_year === null ? `each company's newest ${read.fiscal_period}` : `${read.fiscal_period} FY${read.fiscal_year}`}.`;
