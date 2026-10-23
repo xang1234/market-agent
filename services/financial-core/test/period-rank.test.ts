@@ -146,3 +146,28 @@ test("the presentation names the high and low periods, how many it ranked, and e
   assert.deepEqual([low.text, low.complete, low.leader_label_ids], ["Q1 FY2026 has the lowest revenue of the 3 of 4 quarters ranked", false, null]);
   assert.deepEqual(content.presentations.map((presentation) => presentation.kind), ["series", "predicate", "predicate"]);
 });
+
+test("a window's period is its own label, never a trailing sum's over the same quarters", () => {
+  const plan = mutable(windowPlan()) as FinancialPlanV1;
+  plan.operations = [
+    ...plan.operations.filter((node) => node.operation === "reported_metric"),
+    { node_id: "ttm", operation: "trailing_sum", operation_version: "trailing_sum.v1", quarters: ["q1", "q2", "q3", "q4"] },
+    rank(["q4", "q3", "q2", "q1"]),
+  ];
+  plan.outputs = ["ttm", "window"].map((node_id) => ({ output_id: `out_${node_id}`, node_id, unit_id: "section" }));
+  const validated = validateFinancialPlan(plan);
+  assert.ok(validated.ok, JSON.stringify(!validated.ok && validated.issues));
+  const content = presentFinancialUnit({
+    plan: validated.value,
+    run_id: "44444444-4444-4444-8444-444444444444",
+    unit_id: "section",
+    subject_names: { a: "NVIDIA" },
+    results: [
+      { result_id: "55555555-5555-4555-8555-000000000000", output_id: "out_ttm", node_id: "ttm", disposition: "computed", payload: { kind: "value", value: "90", unit: { kind: "currency", currency: "USD" }, exact: true, rounding: null }, result_hash: "f".repeat(64) },
+      { result_id: "55555555-5555-4555-8555-000000000001", output_id: "out_window", node_id: "window", disposition: "computed", payload: ranking(periodRank(rank(["q4", "q3", "q2", "q1"]), [...all].reverse())), result_hash: "f".repeat(64) },
+    ],
+  });
+  const [ttm, window] = content.results.map((result) => content.labels[result.period_label_id]!.text);
+  assert.equal(window, "Q1 FY2026 to Q4 FY2026");
+  assert.notEqual(ttm, window);
+});

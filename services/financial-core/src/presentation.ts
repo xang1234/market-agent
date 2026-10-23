@@ -575,6 +575,7 @@ function periodText(plan: FinancialPlanV1, node: OperationNode, names: (slot: Lo
 /** What a period label denotes: its selections, and a spread's sides by company too. */
 function periodKey(plan: FinancialPlanV1, node: OperationNode): string {
   if (node.operation === "spread") return JSON.stringify(spreadSides(plan, node, (side) => [side.slot, periodKey(plan, side.node)]));
+  if (node.operation === "period_rank") return JSON.stringify(["window", periodSelectors(plan, node).map((selector) => JSON.stringify(selector)).sort()]);
   return JSON.stringify([periodSelectors(plan, node), measuresInstant(plan, node)]);
 }
 
