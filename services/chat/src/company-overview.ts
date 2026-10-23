@@ -72,13 +72,12 @@ export async function overviewPeers(db: SqlExecutor, issuer: FinancialSubjectRef
   }
 }
 
-type Dates = Readonly<{ start: string; end: string }>;
+type Dates = Readonly<{ start: string | null; end: string }>;
 
-// A company's revenue quarters, as the candidates reported by the cutoff state them.
 type RevenueQuarters = Readonly<{
   newest: FiscalQuarter;
-  // A quarter's dates, when every revenue reported for it states the same ones.
-  dated: (quarter: FiscalQuarter) => Dates | null;
+  // A quarter's dates as all its reported revenue states them, else why it has none.
+  agreedDates: (quarter: FiscalQuarter) => Dates | "unreported" | "conflicting";
 }>;
 
 // What a plan leaves out, for its answer's note, given each slot's company name.
@@ -196,35 +195,48 @@ async function revenueQuarters(
     const newest = reported.reduce<InputCandidate | null>((best, candidate) => (best === null || candidate.period.end > best.period.end ? candidate : best), null);
     if (newest === null) return null;
     const { fiscal_year, fiscal_period } = newest.period;
-    companies.push({ newest: { fiscal_year, fiscal_period }, dated: quarterDates(reported) });
+    companies.push({ newest: { fiscal_year, fiscal_period }, agreedDates: agreedDates(reported) });
   }
   return companies;
 }
 
-function quarterDates(reported: ReadonlyArray<InputCandidate>): RevenueQuarters["dated"] {
+function agreedDates(reported: ReadonlyArray<InputCandidate>): RevenueQuarters["agreedDates"] {
   const dates = new Map<string, Set<string>>();
   for (const { period } of reported) dates.set(quarterId(period), (dates.get(quarterId(period)) ?? new Set()).add(JSON.stringify([period.start, period.end])));
   return (quarter) => {
     const [only, ...others] = dates.get(quarterId(quarter)) ?? [];
-    const [start, end] = only === undefined || others.length > 0 ? [null, null] : JSON.parse(only) as [string | null, string];
-    return start === null ? null : { start, end: end! };
+    if (only === undefined) return "unreported";
+    if (others.length > 0) return "conflicting";
+    const [start, end] = JSON.parse(only) as [string | null, string];
+    return { start, end };
   };
 }
 
-// A quarter starts the day after the one before it ends. A week's slack takes
-// a start dated a few days late, as some filings date them, and stays far
-// below the shortest quarter (89 days), so a quarter skipped, mislabelled or
-// moved to a new fiscal calendar never pairs with the one before it (#479).
+// Some filings date a quarter's start a few days late (#479).
 const FOLLOWS_WITHIN_DAYS = 7;
 
-// Whether each quarter of the `span` before `at` follows the one before it, by their reported dates.
-function consecutive(company: RevenueQuarters, at: FiscalQuarter, span: number): boolean {
-  return Array.from({ length: span }, (_, step) => step).every((step) => {
-    const [prior, current] = [company.dated(before(at, step + 1)), company.dated(before(at, step))];
-    if (prior === null || current === null) return false;
-    const gap = dayNumber(current.start) - dayNumber(prior.end);
+/**
+ * Why the change from `span` quarters before `at` to `at` is not planned, or
+ * null when it is: every quarter between them starts just after the one
+ * before it ends. An end never reported is planned all the same, as the
+ * engine cannot compute it: the change is a gap where it falls.
+ */
+function unpaired(company: RevenueQuarters, at: FiscalQuarter, span: number): string | null {
+  const chain = Array.from({ length: span + 1 }, (_, back) => before(at, back));
+  if (company.agreedDates(at) === "unreported" || company.agreedDates(chain[span]!) === "unreported") return null;
+  const dates: Dates[] = [];
+  for (const quarter of chain) {
+    const agreed = company.agreedDates(quarter);
+    if (agreed === "unreported") return `as ${quarterText(quarter)} has no reported revenue`;
+    if (agreed === "conflicting") return `as its filings date ${quarterText(quarter)} differently`;
+    dates.push(agreed);
+  }
+  const follows = dates.slice(1).every((prior, step) => {
+    const start = dates[step]!.start;
+    const gap = start === null ? 0 : dayNumber(start) - dayNumber(prior.end);
     return gap >= 1 && gap <= FOLLOWS_WITHIN_DAYS;
   });
+  return follows ? null : "whose quarters are not dated consecutively";
 }
 
 const before = (quarter: FiscalQuarter, back: number): FiscalQuarter => quarterBefore(quarter.fiscal_year, quarter.fiscal_period, back)!;
@@ -258,8 +270,9 @@ function companyOverviewDraft(companies: ReadonlyArray<RevenueQuarters>) {
     ];
     const growth = changes.flatMap(({ back, span, name }): Node[] => {
       const at = before(company.newest, back);
-      if (consecutive(company, at, span)) return [{ node_id: id(name), operation: "percent_change_positive_base", current: revenue.get(back)!.node_id, prior: revenue.get(back + span)!.node_id }];
-      omitted.push((named) => `revenue growth from ${quarterText(before(at, span))} to ${quarterText(at)}${several ? ` for ${named(slot)}` : ""}, whose quarters are not dated consecutively`);
+      const why = unpaired(company, at, span);
+      if (why === null) return [{ node_id: id(name), operation: "percent_change_positive_base", current: revenue.get(back)!.node_id, prior: revenue.get(back + span)!.node_id }];
+      omitted.push((named) => `revenue growth from ${quarterText(before(at, span))} to ${quarterText(at)}${several ? ` for ${named(slot)}` : ""}, ${why}`);
       return [];
     });
     const charted = [...revenue.values()].reverse();

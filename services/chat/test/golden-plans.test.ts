@@ -263,6 +263,19 @@ test("a change is planned only between quarters whose reported dates follow each
   // Two filings that date one quarter differently prove neither date.
   const disputed = await overviewOf("NVDA", () => candidatePage(...goldenQuarters("NVDA"), revenueCandidate(2026, "Q3", "2025-07-28", "2025-10-19")));
   assert.deepEqual(changes(disputed!.outputs).filter((change) => change.includes("Q3 2026")), []);
+  assert.deepEqual(disputed!.uncovered, [
+    "revenue growth from Q2 FY2026 to Q3 FY2026, as its filings date Q3 FY2026 differently",
+    "revenue growth from Q3 FY2026 to Q4 FY2026, as its filings date Q3 FY2026 differently",
+    "revenue growth from Q4 FY2025 to Q4 FY2026, as its filings date Q3 FY2026 differently",
+  ]);
+
+  // Five quarters reported: the three before them are gap bars, and a change from one is a gap where it falls, not a note.
+  const five = await overviewOf("NVDA", () => candidatePage(...goldenQuarters("NVDA").slice(3)));
+  const shown = GOLDEN_COMPANIES.find((company) => company.ticker === "NVDA")!.quarters.map((quarter) => `${quarter.fiscal_period} ${quarter.fiscal_year}`);
+  assert.deepEqual([changes(five!.outputs), five!.uncovered], [[...shown.slice(1).map((quarter, index) => changeOf("NVDA", quarter, shown[index]!)), changeOf("NVDA", "Q4 2026", "Q4 2025")], []]);
+  // A year whose middle quarter was never reported is not proven to follow on.
+  const gapped = await overviewOf("NVDA", () => candidatePage(...goldenQuarters("NVDA").filter((quarter) => quarter.period.fiscal_year !== 2026 || quarter.period.fiscal_period !== "Q2")));
+  assert.deepEqual([changes(gapped!.outputs).filter((change) => change === changeOf("NVDA", "Q4 2026", "Q4 2025")), gapped!.uncovered], [[], ["revenue growth from Q4 FY2025 to Q4 FY2026, as Q2 FY2026 has no reported revenue"]]);
 });
 
 test("a comparison shows each company's latest quarter, named from the newest it reported revenue for, never aligned by calendar, and the first company's lead in each margin (#398)", async (t) => {
@@ -325,8 +338,7 @@ test("a comparison shows each company's latest quarter, named from the newest it
   const undated = await compare("NVDA and AMD", { ...PAGES, AMD: candidatePage(revenueCandidate(2026, "Q1", null, "2026-03-28"), revenueCandidate(2026, "Q2", null, "2026-06-27")) });
   assert.deepEqual(undated.uncovered, [
     "revenue growth from Q1 FY2026 to Q2 FY2026 for Advanced Micro Devices, Inc., whose quarters are not dated consecutively",
-    "revenue growth from Q2 FY2025 to Q2 FY2026 for Advanced Micro Devices, Inc., whose quarters are not dated consecutively",
-  ], "a company is named when several are compared");
+  ], "a company is named when several are compared; Q2 FY2025 was never reported, so its year-over-year change is a gap where it falls");
 
   let inFlight = 0;
   let most = 0;
