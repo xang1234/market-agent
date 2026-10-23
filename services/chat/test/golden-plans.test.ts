@@ -8,7 +8,7 @@ import { buildDeterministicPlan, planFinancialRequest, type PlanningContext, typ
 import type { CandidatePage, CandidateRequest, FinancialEvidencePort, InputCandidate, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
 import { overviewOmissions, overviewPeers, planCompanyOverview, planMarginTrend } from "../src/company-overview.ts";
-import { LATEST, planScopeFigures, type ReadPeriod } from "../src/scope-figures.ts";
+import { LATEST, planPeriod, planScopeFigures, type ReadPeriod } from "../src/scope-figures.ts";
 import { MAX_TURN_SUBJECTS } from "../src/coordinator.ts";
 import { uncoveredAsks } from "../src/financial-runtime.ts";
 import { parseProposal, proposalQuestion } from "../src/scope-proposal.ts";
@@ -406,6 +406,7 @@ test("a follow-up's kept figures are each chat metric's engine figures at the pe
   ];
   const fcf = ["free_cash_flow", "operating_cash_flow", "capex"];
   assert.deepEqual(await figures("AMD", fcf, LATEST), cashFlow("AMD", "latest annual[0]"), "the latest fiscal year");
+  assert.deepEqual(await figures("AMD", ["eps_diluted"], { kind: "latest", period: "quarter" }), ["AMD eps_diluted latest quarterly[0]"], "the latest quarter");
   assert.deepEqual(await figures("AMD", fcf, { kind: "fiscal_year", fiscal_year: 2025 }), cashFlow("AMD", "FY 2025"));
   assert.deepEqual(await figures("AMD", ["free_cash_flow"], { kind: "fiscal_quarter", fiscal_period: "Q2", fiscal_year: 2025 }), cashFlow("AMD", "Q2 2025"), "the engine says free cash flow is annual");
   assert.deepEqual(await figures("AMD", ["balance_sheet"], { kind: "fiscal_year", fiscal_year: 2025 }), ["cash_and_equivalents", "total_assets", "total_liabilities", "total_equity"].map((metric) => `AMD ${metric} FY 2025`));
@@ -423,6 +424,15 @@ test("a follow-up's kept figures are each chat metric's engine figures at the pe
   assert.deepEqual(await figures("NVDA and AMD", ["eps_diluted"], q2), ["NVDA eps_diluted Q2 2026", "AMD eps_diluted Q2 2026"], "each company's own");
   assert.deepEqual(await figures("NVDA and AAPL", ["eps_diluted"], q2), ["NVDA eps_diluted Q2 2026", "AAPL eps_diluted Q2 2026"]);
   for (const metrics of [["market_cap"], ["eps_diluted", "pe_ratio"], ["ebitda"], []]) assert.equal(await figures("AMD", metrics, LATEST), null, JSON.stringify(metrics));
+});
+
+test("a plan's period type is a quarter or a fiscal year when all its reported figures are of one (#398)", async () => {
+  const tickerOf = (issuerId: string) => GOLDEN_COMPANIES.find((company) => company.issuer_id === issuerId)!.ticker;
+  const evidence = { listInputCandidates: async (request: CandidateRequest) => candidatePage(...goldenQuarters(tickerOf(request.subject.id))) } as FinancialEvidencePort;
+  const overview = await planCompanyOverview(planningContext("NVDA"), evidence, LATEST);
+  const annual = await planScopeFigures(planningContext("AMD"), evidence, ["free_cash_flow"], LATEST);
+  const quarterly = await planScopeFigures(planningContext("AMD"), evidence, ["eps_diluted"], { kind: "fiscal_quarter", fiscal_period: "Q2", fiscal_year: 2025 });
+  assert.deepEqual([overview, annual, quarterly].map((planned) => planPeriod(planned!.plan)), ["quarter", "fiscal_year", "quarter"]);
 });
 
 test("a question about one company's margin trend plans its three margins over the charted quarters, each with its high and low, with no model (#398)", async () => {

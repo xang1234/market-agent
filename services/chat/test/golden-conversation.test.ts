@@ -608,33 +608,38 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const shown = async (question: string) => {
       assert.equal(completedTurn(await runTurn(base, periodThread.thread_id, question)).data.bundle_id, "financial_answer", question);
       const answer = await latestAssistantMessage(base, periodThread.thread_id);
-      const { rows } = await client.query<{ research_scope: { fiscal_year: number | null; fiscal_quarter: unknown } }>(`select research_scope from chat_messages where message_id = $1::uuid`, [answer.message_id]);
-      const results = engineAnswer(answer).results;
+      const { rows } = await client.query<{ research_scope: { fiscal_year: number | null; fiscal_quarter: unknown; latest_period?: string } }>(`select research_scope from chat_messages where message_id = $1::uuid`, [answer.message_id]);
+      const { results } = engineAnswer(answer);
+      const notes = answerText({ ...answer, blocks: answer.blocks.filter((block) => block.analyst_commentary !== true) });
       return {
         first: results[0],
         margin: results.find(([measure]) => measure.startsWith("Gross margin")),
         yoy: results.find(([measure]) => measure.startsWith("Year-over-year")),
-        period: [rows[0]?.research_scope.fiscal_year, rows[0]?.research_scope.fiscal_quarter],
+        period: [rows[0]?.research_scope.fiscal_year, rows[0]?.research_scope.fiscal_quarter, rows[0]?.research_scope.latest_period],
+        notes,
       };
     };
     assert.deepEqual(await shown("How is NVDA doing?"), {
       first: ["Revenue", "Q1 FY2025", "verified", "USD 26,044,000,000.00"],
       margin: ["Gross margin (gross profit / revenue)", "Q4 FY2026", "verified", "74.40%"],
       yoy: ["Year-over-year percent change in Revenue", "Q4 FY2026 vs Q4 FY2025", "verified", "57.89%"],
-      period: [null, null],
+      period: [null, null, "quarter"],
+      notes: [],
     });
     // NVDA's newest second quarter is Q2 FY2026; the quarters before its first on file are gaps where they fall.
     assert.deepEqual(await shown("What about Q2?"), {
       first: ["Revenue", "Q3 FY2024", "missing", "No eligible input was public before the knowledge cutoff."],
       margin: ["Gross margin (gross profit / revenue)", "Q2 FY2026", "verified", "72.42%"],
       yoy: ["Year-over-year percent change in Revenue", "Q2 FY2026 vs Q2 FY2025", "verified", "55.60%"],
-      period: [null, { fiscal_year: null, fiscal_period: "Q2" }],
+      period: [null, { fiscal_year: null, fiscal_period: "Q2" }, "quarter"],
+      notes: ["NVDA is carried from the previous answer."],
     });
     assert.deepEqual(await shown("And fiscal 2025?"), {
       first: ["Revenue", "Q1 FY2024", "missing", "No eligible input was public before the knowledge cutoff."],
       margin: ["Gross margin (gross profit / revenue)", "Q4 FY2025", "verified", "73.03%"],
       yoy: ["Year-over-year percent change in Revenue", "Q4 FY2025 vs Q4 FY2024", "blocked_dependency", "A required input or calculation is unavailable."],
-      period: [2025, null],
+      period: [2025, null, "quarter"],
+      notes: ["NVDA is carried from the previous answer. Fiscal 2025 is shown by quarter, to the newest quarter reported in it."],
     });
     // No model planned them: there is no recorded planner reply for these questions.
     const { rows } = await client.query<{ kind: string }>(`select plan->'planner'->>'kind' as kind from financial_plans where origin_ref like $1`, [`chat:${periodThread.thread_id}:%`]);

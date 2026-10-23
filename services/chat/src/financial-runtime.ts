@@ -47,7 +47,7 @@ import { allResolved, overviewOmissions, overviewPeers, planCompanyOverview, pla
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { companyKey, extractSubjectMentions } from "./subject-extraction.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "./subjects.ts";
-import { planScopeFigures, routeTurn, type PlanChoice, type ReadPeriod } from "./scope-figures.ts";
+import { periodNote, planPeriod, planScopeFigures, routeTurn, type PlanChoice, type ReadPeriod } from "./scope-figures.ts";
 import {
   BALANCE_SHEET_ITEMS,
   companyWordsIn,
@@ -697,9 +697,12 @@ function persistAssistantMessage(
       ...uncoveredAsks(answeredPeers ? withoutPeers(reading) : reading, plan, turn.labels),
       ...await overviewOmissions(plan, request.authority, inSavepoints(tx.client, turn.evidence(tx.client)), names),
     ];
+    const shownPeriod = plan === null ? null : planPeriod(plan);
+    const replaced = scope === null ? null : periodNote(scope, shownPeriod);
     const note = [
       ...(turn.notFound.length === 0 ? [] : [`No company matched ${labelList(turn.notFound)}.`]),
       ...(turn.carried.length === 0 ? [] : [`${labelList(turn.carried)} ${turn.carried.length > 1 ? "are" : "is"} carried from the previous answer.`]),
+      ...(replaced === null ? [] : [replaced]),
       ...(reading === null ? [UNCHECKED] : missing.length === 0 ? [] : [`Not covered by this answer: ${missing.join("; ")}.`]),
     ].join(" ");
     const blocks = [
@@ -714,6 +717,7 @@ function persistAssistantMessage(
       reads: "financial_answer" as const,
       companies: answeredCompanies(plan.subjects.members.map((member) => member.subject_ref.id), scope, turn.labels),
       metrics: planMetrics(plan),
+      ...(shownPeriod === null ? {} : { latest_period: shownPeriod }),
       ...(reading === null ? { coverage_unchecked: true as const } : {}),
     };
     // It replaces a gap another attempt of the turn saved under its id.

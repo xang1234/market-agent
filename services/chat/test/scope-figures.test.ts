@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
 import { proposedMetric, resolveResearchScope, type CompanyChange, type ResearchScope, type ScopePeriod, type ScopeProposal } from "../src/research-scope.ts";
-import { routeTurn, type PlanChoice, type ReadPeriod } from "../src/scope-figures.ts";
+import { periodNote, routeTurn, type PlanChoice, type ReadPeriod } from "../src/scope-figures.ts";
 import { parseProposal, proposalQuestion } from "../src/scope-proposal.ts";
 import { proposal as read } from "./scope-fixtures.ts";
 
@@ -46,7 +46,7 @@ const YTD = { kind: "ytd", cutoff: "2026-08-31T00:00:00.000Z" } as const;
 function periodText(period: ReadPeriod): string {
   switch (period.kind) {
     case "latest":
-      return "latest";
+      return period.period ? `latest ${period.period === "quarter" ? "quarter" : "fiscal year"}` : "latest";
     case "fiscal_year":
       return `FY${period.fiscal_year}`;
     case "fiscal_quarter":
@@ -136,7 +136,10 @@ const ROUTES: ReadonlyArray<readonly [string, ScopeProposal | null, ResearchScop
   ["a kept trend beside another figure", read({ period: Q2 }), after({ margin_trend: true, ...keeps("free_cash_flow") }), "free_cash_flow at newest Q2"],
   ["kept figures, another quarter", read({ period: Q2 }), after(keeps("free_cash_flow", "capex")), "free_cash_flow, capex at newest Q2"],
   ["kept figures, adding a company", read({ companies: adds("AMD") }), after({ companies: [NVDA, AMD], ...keeps("free_cash_flow") }), "free_cash_flow at latest"],
-  ["kept figures, the latest quarter", read({ asks: ["latest_quarter"] }), after(keeps("eps_diluted")), "eps_diluted at latest"],
+  ["kept figures, the latest quarter", read({ asks: ["latest_quarter"] }), after(keeps("eps_diluted")), "eps_diluted at latest quarter"],
+  ["kept figures after a quarterly answer, adding a company", read({ companies: adds("AMD") }), after({ companies: [NVDA, AMD], latest_period: "quarter", ...keeps("eps_diluted") }), "eps_diluted at latest quarter"],
+  ["kept figures after an annual answer, the latest quarter", read({ asks: ["latest_quarter"] }), after({ latest_period: "fiscal_year", ...keeps("free_cash_flow") }), "free_cash_flow at latest quarter"],
+  ["the income statement after an annual answer, adding a company", read({ companies: adds("AMD") }), after({ companies: [NVDA, AMD], latest_period: "fiscal_year", ...keeps("income_statement") }), "overview at latest fiscal year"],
   ["kept income statement, another quarter", read({ period: Q2 }), after(keeps("income_statement")), "overview at newest Q2"],
   ["kept figures, a margin asked for", read({ asks: ["margins"] }), after(keeps("free_cash_flow")), "planner"],
   ["kept figures, one turned off", read({ offMetrics: ["capex"] }), after(keeps("free_cash_flow")), "free_cash_flow at latest"],
@@ -199,4 +202,28 @@ test("a quarter named alone is saved as each company's newest such quarter, so a
     [first.plan, q2.plan, q2.resolved.fiscal_quarter, added.plan],
     ["overview at latest", "overview at newest Q2", { fiscal_year: null, fiscal_period: "Q2" }, "overview at newest Q2"],
   );
+});
+
+test("an answer whose figures are of another period type than the one its turn read says so (#398)", () => {
+  assert.deepEqual([
+    periodNote(after({ fiscal_year: 2025 }), "quarter"),
+    periodNote(after({ latest_period: "fiscal_year" }), "quarter"),
+    periodNote(after({ latest_period: "quarter" }), "fiscal_year"),
+    periodNote(after({ fiscal_year: 2025, fiscal_quarter: { fiscal_year: 2025, fiscal_period: "Q2" } }), "fiscal_year"),
+    periodNote(after({ fiscal_quarter: { fiscal_year: null, fiscal_period: "Q2" } }), "fiscal_year"),
+    periodNote(after({ fiscal_year: 2025 }), "fiscal_year"),
+    periodNote(after({ latest_period: "quarter" }), "quarter"),
+    periodNote(after(), "quarter"),
+    periodNote(after({ fiscal_year: 2025 }), null),
+  ], [
+    "Fiscal 2025 is shown by quarter, to the newest quarter reported in it.",
+    "These figures are quarterly, where the previous answer's were for the latest fiscal year.",
+    "These figures are for the latest fiscal year, not the latest quarter.",
+    "These figures are for a fiscal year, not Q2 FY2025.",
+    "These figures are for a fiscal year, not each company's newest Q2.",
+    null,
+    null,
+    null,
+    null,
+  ]);
 });

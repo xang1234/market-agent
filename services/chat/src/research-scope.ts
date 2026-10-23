@@ -59,6 +59,7 @@ export type ScopeField = "peers" | "segments" | "margin_trend" | "metrics" | "fi
 // A company's own fiscal quarter, as its facts are filed.
 export type FiscalQuarter = { fiscal_year: number; fiscal_period: string };
 export type ScopeQuarter = { fiscal_year: number | null; fiscal_period: string };
+export type PeriodType = "quarter" | "fiscal_year";
 
 // A metric a question names: one this chat's readers show, or a named gap. A
 // statement metric with an adjustment or a qualifier ("adjusted EPS", "EPS
@@ -92,6 +93,10 @@ export type ResearchScope = {
   // A fiscal quarter the question names (#290); with no year named or kept,
   // each company's newest such quarter.
   fiscal_quarter: ScopeQuarter | null;
+  // What the latest period is when no year or quarter is set: the period type
+  // of the previous answer's figures, or a quarter once a turn asks for the
+  // latest quarter. Absent when no answer has said.
+  latest_period?: PeriodType;
   // The window's cutoff is the answer that first charted it.
   price_window: { kind: "ytd"; cutoff: string } | null;
   // A benchmark index asked for: never in this data, so always a named gap.
@@ -462,6 +467,7 @@ export function resolveResearchScope(input: {
   // the other facets are, unless this one turns them off.
   const keeps = (facet: "guidance" | "explains", kept: true | undefined) =>
     !offFacets.has(facet) && (asks.has(facet) || kept === true);
+  const latestPeriod = asks.has("latest_quarter") ? "quarter" : prior?.latest_period;
   return {
     route: evidence ? "evidence_followup" : reread?.route ?? reads,
     reads,
@@ -474,6 +480,7 @@ export function resolveResearchScope(input: {
     metrics,
     fiscal_year,
     fiscal_quarter,
+    ...(latestPeriod ? { latest_period: latestPeriod } : {}),
     price_window,
     benchmark,
     ...(keeps("guidance", prior?.guidance) ? { guidance: true as const } : {}),
@@ -541,6 +548,7 @@ export function parseResearchScope(value: unknown): ResearchScope | null {
     metrics: (scope.metrics ?? []) as ResearchScope["metrics"],
     fiscal_year: scope.fiscal_year as number | null,
     fiscal_quarter: quarter ? { fiscal_year: quarter.fiscal_year as number | null, fiscal_period: quarter.fiscal_period as string } : null,
+    ...(scope.latest_period === "quarter" || scope.latest_period === "fiscal_year" ? { latest_period: scope.latest_period } : {}),
     price_window: window === null ? null : { kind: "ytd", cutoff: window!.cutoff as string },
     // Absent on scopes saved before benchmarks were recorded.
     benchmark: scope.benchmark === true,

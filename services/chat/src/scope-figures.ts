@@ -2,23 +2,23 @@
 // and resolved scope make, and the figures a follow-up keeps, at the period it
 // reads.
 
-import type { PeriodSelector } from "../../financial-core/src/index.ts";
+import type { FinancialPlanV1, PeriodSelector } from "../../financial-core/src/index.ts";
 import type { PlanningContext } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort } from "../../financial-engine/src/ports.ts";
 import { MARGINS, nodeIdOf, planned, planningQuarters, quarterId, slotOf, type ReadyPlan } from "./company-overview.ts";
-import { BALANCE_SHEET_ITEMS, readingAsks, type FiscalQuarter, type PERIOD_FIELDS, type ResearchScope, type ScopeFacet, type ScopeProposal } from "./research-scope.ts";
+import { BALANCE_SHEET_ITEMS, readingAsks, type FiscalQuarter, type PERIOD_FIELDS, type PeriodType, type ResearchScope, type ScopeFacet, type ScopeProposal } from "./research-scope.ts";
 
 /**
- * The period a turn's figures are read at: the latest, a fiscal year, or a
- * fiscal quarter, which with no year named is each company's newest such
- * quarter.
+ * The period a turn's figures are read at: the latest, of the type its scope
+ * records, if any; a fiscal year; or a fiscal quarter, which with no year
+ * named is each company's newest such quarter.
  */
 export type ReadPeriod =
-  | Readonly<{ kind: "latest" }>
+  | Readonly<{ kind: "latest"; period: PeriodType | null }>
   | Readonly<{ kind: "fiscal_year"; fiscal_year: number }>
   | Readonly<{ kind: "fiscal_quarter"; fiscal_period: string; fiscal_year: number | null }>;
 
-export const LATEST: ReadPeriod = { kind: "latest" };
+export const LATEST: ReadPeriod = { kind: "latest", period: null };
 
 /** How a turn about a company is answered: by the analyst path, or by the engine with one plan. */
 export type PlanChoice =
@@ -106,10 +106,36 @@ function namedCompanies(change: ScopeProposal["companies"]): number {
   }
 }
 
+type ScopePeriod = Pick<ResearchScope, "fiscal_year" | "fiscal_quarter" | "latest_period">;
+
 /** The period a resolved scope reads its figures at: its quarter, else its fiscal year, else the latest. */
-export function readPeriod(scope: Pick<ResearchScope, "fiscal_year" | "fiscal_quarter">): ReadPeriod {
+export function readPeriod(scope: ScopePeriod): ReadPeriod {
   if (scope.fiscal_quarter !== null) return { kind: "fiscal_quarter", ...scope.fiscal_quarter };
-  return scope.fiscal_year === null ? LATEST : { kind: "fiscal_year", fiscal_year: scope.fiscal_year };
+  return scope.fiscal_year === null ? { kind: "latest", period: scope.latest_period ?? null } : { kind: "fiscal_year", fiscal_year: scope.fiscal_year };
+}
+
+/** A plan's period type: the one every reported figure in it is of, or null. */
+export function planPeriod(plan: FinancialPlanV1): PeriodType | null {
+  const types = new Set(plan.operations.flatMap((node): PeriodType[] => {
+    if (node.operation !== "reported_metric" || node.period.kind === "at_cutoff") return [];
+    const annual = node.period.kind === "latest" ? node.period.period_type === "annual" : node.period.fiscal_period === "FY";
+    return [annual ? "fiscal_year" : "quarter"];
+  }));
+  return types.size === 1 ? [...types][0]! : null;
+}
+
+/** What an answer's note says when its figures are of another period type than the one its turn read; null when they are not. */
+export function periodNote(scope: ScopePeriod, shown: PeriodType | null): string | null {
+  const read = readPeriod(scope);
+  const readType = read.kind === "latest" ? read.period : read.kind === "fiscal_year" ? "fiscal_year" : "quarter";
+  if (shown === null || readType === null || shown === readType) return null;
+  if (shown === "quarter") {
+    return read.kind === "fiscal_year"
+      ? `Fiscal ${read.fiscal_year} is shown by quarter, to the newest quarter reported in it.`
+      : "These figures are quarterly, where the previous answer's were for the latest fiscal year.";
+  }
+  if (read.kind !== "fiscal_quarter") return "These figures are for the latest fiscal year, not the latest quarter.";
+  return `These figures are for a fiscal year, not ${read.fiscal_year === null ? `each company's newest ${read.fiscal_period}` : `${read.fiscal_period} FY${read.fiscal_year}`}.`;
 }
 
 // A figure computed from reported metrics of one period, each input by its role.
@@ -162,7 +188,7 @@ export async function planScopeFigures(
   const parts = selectors.map((selector, index) => {
     const slot = slotOf(index);
     const id = nodeIdOf(several, slot);
-    const suffix = selector.kind === "fiscal_period" ? quarterId(selector) : "latest_fy";
+    const suffix = selector.kind === "fiscal_period" ? quarterId(selector) : selector.kind === "latest" && selector.period_type === "quarterly" ? "latest_q" : "latest_fy";
     const reported = (metric: string): Node => ({ node_id: id(`${metric}_${suffix}`), operation: "reported_metric", subject_slot: slot, metric_key: metric, period: selector });
     const shown = figures.flat().map((figure): Node => typeof figure === "string"
       ? reported(figure)
@@ -178,7 +204,7 @@ async function periodSelectors(context: PlanningContext, evidence: FinancialEvid
   const each = (selector: PeriodSelector) => context.requested_subjects.map(() => selector);
   switch (period.kind) {
     case "latest":
-      return each({ kind: "latest", period_type: "annual", offset: 0 });
+      return each({ kind: "latest", period_type: period.period === "quarter" ? "quarterly" : "annual", offset: 0 });
     case "fiscal_year":
       return each({ kind: "fiscal_period", fiscal_year: period.fiscal_year, fiscal_period: "FY" });
     case "fiscal_quarter": {
