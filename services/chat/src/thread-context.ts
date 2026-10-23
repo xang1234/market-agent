@@ -107,7 +107,7 @@ export async function loadRecentConversation(
     .reverse();
 }
 
-function narrativeText(blocks: unknown): string {
+export function narrativeText(blocks: unknown): string {
   if (!Array.isArray(blocks)) return "";
   return blocks
     // Commentary appended to an answer is not what the answer said.

@@ -23,6 +23,8 @@
 // verdicts and runs only the repair round live (with --update, recording it).
 // live --judge --update (one sample) writes each live answer over its trace,
 // re-recording it for today's prompt: recorded --check then replays it as is.
+// It runs a thread's turns in their order, each later one asked after the
+// answers its earlier turns just recorded, so give a thread's turns together.
 // Each run summarizes what the judge showed and hid. judge-mutations
 // judges a set of inferences and their mutations
 // (test/answer-lab/judge-mutations.json) and reports how many mutations it
@@ -46,6 +48,7 @@ import {
   judgedLive,
   replayRecorded,
   type AnswerMetrics,
+  type AnswerTraceInput,
   type LiveReplay,
   type ModelExchange,
   type TracedAnswer,
@@ -57,6 +60,7 @@ import type { EvidencePacket } from "../src/evidence-packet.ts";
 import type { LlmChatClient, LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
 import { sentToRepair, shownAs, VERDICTS, verdictText, type InferenceVerdict, type ShownAs, type Verdict } from "../src/verdicts.ts";
 import { turnPacket } from "../src/llm-runtime.ts";
+import { narrativeText } from "../src/thread-context.ts";
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const RUNS_DIR = join(ROOT, "docs/eval-runs/answer-lab");
@@ -259,52 +263,104 @@ export function answerText(blocks: ReadonlyArray<Record<string, unknown>>): stri
     .join("\n\n");
 }
 
-async function live(
+// A turn's place in its thread: how many questions its conversation holds.
+function turnPlace(trace: TurnTrace): number {
+  return (trace.input.conversation ?? []).filter((message) => message.role === "user").length;
+}
+
+// Each thread's turns, in their order in it.
+export function threadChains(traces: ReadonlyArray<LabeledTrace>): LabeledTrace[][] {
+  return [...Map.groupBy(traces, ({ trace }) => trace.thread_id).values()]
+    .map((chain) => chain.toSorted((a, b) => turnPlace(a.trace) - turnPlace(b.trace)));
+}
+
+// A follow-up's input with each re-recorded earlier turn's answer in its
+// conversation, as a thread would hold it: the narrative of the blocks that
+// turn saved (thread-context.ts), in the entry after its question.
+// answered: each such turn's place and saved narrative.
+export function followUp(input: AnswerTraceInput, answered: ReadonlyMap<number, string>): AnswerTraceInput {
+  let place = 0;
+  const conversation = (input.conversation ?? []).flatMap((message) => {
+    if (message.role === "user") place += 1;
+    const text = message.role === "assistant" ? answered.get(place) : undefined;
+    return text === undefined ? [message] : text.length > 0 ? [{ ...message, text }] : [];
+  });
+  return { ...input, conversation };
+}
+
+// record: writes a sample over its trace (rerecord), or says why not. With
+// it, each thread's turns run in their order, every later one asked after the
+// earlier answers just recorded (followUp); one after a turn left unrecorded
+// is not run.
+export async function live(
   traces: ReadonlyArray<LabeledTrace>,
   samples: number,
   concurrency: number,
   judge = false,
-  onAnswer?: (traced: LabeledTrace, answer: TracedAnswer) => void,
+  record?: (traced: LabeledTrace, answer: TracedAnswer) => string | undefined,
+  models: Omit<LiveReplay, "rerun"> = { env: liveEnv() },
 ): Promise<LiveRun> {
   const startedAt = Date.now();
-  const jobs = traces.flatMap((traced) => Array.from({ length: samples }, (_, sample) => ({ ...traced, sample })));
+  const chains = record
+    ? threadChains(traces).map((chain) => chain.map((traced) => ({ ...traced, sample: 0 })))
+    : traces.flatMap((traced) => Array.from({ length: samples }, (_, sample) => [{ ...traced, sample }]));
   const results: LiveSample[] = [];
+  const sample = async ({ key, label, trace }: LabeledTrace, sample: number): Promise<TracedAnswer | undefined> => {
+    try {
+      const composed = await composeTraced(trace.input, models);
+      // No deployment configured: the placeholder came back and no model answered.
+      if (composed.exchange === null) throw new Error("no model was called (no deployable LLM in the settings)");
+      const { cases } = inferenceCases(trace.input, composed.assertions);
+      const answer = judge ? await judgedLive(trace.input, composed, models) : judgedAnswer(composed, cases, cases.map(() => UNJUDGED));
+      const view = judge ? judgeView(answer) : undefined;
+      results.push({
+        trace: key,
+        sample,
+        deployment: answer.exchange?.deployment,
+        metrics: answerMetrics(answer),
+        text: answer.exchange?.text,
+        answer: answerText(answer.blocks),
+        ...(answer.assertions
+          ? {
+            assertions: {
+              rendered: answer.assertions.rendered === true,
+              accepted: answer.assertions.accepted.map((entry) => entry.kind),
+              rejected: answer.assertions.rejected.map((entry) => entry.reason),
+              ...(answer.assertions.repeated ? { repeated: answer.assertions.repeated.length } : {}),
+            },
+          }
+          : {}),
+        ...(view ? { judge: view } : {}),
+        ...(answer.repair ? { repair: answer.repair } : {}),
+      });
+      console.log(`done  ${label} #${sample}  (${((answer.exchange?.latency_ms ?? 0) / 1000).toFixed(1)}s)`);
+      return answer;
+    } catch (error) {
+      results.push({ trace: key, sample, error: failure(error) });
+      console.log(`error ${label} #${sample}: ${failure(error)}`);
+      return undefined;
+    }
+  };
   const worker = async () => {
-    for (let job = jobs.shift(); job; job = jobs.shift()) {
-      const { key, label, file, trace, sample } = job;
-      try {
-        const env = liveEnv();
-        const composed = await composeTraced(trace.input, { env });
-        // No deployment configured: the placeholder came back and no model answered.
-        if (composed.exchange === null) throw new Error("no model was called (no deployable LLM in the settings)");
-        const { cases } = inferenceCases(trace.input, composed.assertions);
-        const answer = judge ? await judgedLive(trace.input, composed, { env }) : judgedAnswer(composed, cases, cases.map(() => UNJUDGED));
-        const view = judge ? judgeView(answer) : undefined;
-        onAnswer?.({ key, label, file, trace }, answer);
-        results.push({
-          trace: key,
-          sample,
-          deployment: answer.exchange?.deployment,
-          metrics: answerMetrics(answer),
-          text: answer.exchange?.text,
-          answer: answerText(answer.blocks),
-          ...(answer.assertions
-            ? {
-              assertions: {
-                rendered: answer.assertions.rendered === true,
-                accepted: answer.assertions.accepted.map((entry) => entry.kind),
-                rejected: answer.assertions.rejected.map((entry) => entry.reason),
-                ...(answer.assertions.repeated ? { repeated: answer.assertions.repeated.length } : {}),
-              },
-            }
-            : {}),
-          ...(view ? { judge: view } : {}),
-          ...(answer.repair ? { repair: answer.repair } : {}),
-        });
-        console.log(`done  ${label} #${sample}  (${((answer.exchange?.latency_ms ?? 0) / 1000).toFixed(1)}s)`);
-      } catch (error) {
-        results.push({ trace: key, sample, error: failure(error) });
-        console.log(`error ${label} #${sample}: ${failure(error)}`);
+    for (let chain = chains.shift(); chain; chain = chains.shift()) {
+      // Each recorded turn's place and saved narrative, and the first left unrecorded.
+      const answered = new Map<number, string>();
+      let unrecorded: number | undefined;
+      for (const job of chain) {
+        const place = turnPlace(job.trace);
+        if (unrecorded !== undefined) {
+          const why = `not run: turn ${unrecorded} of its thread was not re-recorded`;
+          results.push({ trace: job.key, sample: 0, error: why });
+          console.log(`skip ${job.label}: ${why}`);
+          continue;
+        }
+        const traced = record ? { ...job, trace: { ...job.trace, input: followUp(job.trace.input, answered) } } : job;
+        const answer = await sample(traced, job.sample);
+        if (!record) continue;
+        const why = answer ? record(traced, answer) : "the run failed";
+        // What the turn saves: its answer's blocks, then its fact blocks (local-runtime.ts).
+        if (why === undefined) answered.set(place, narrativeText([...answer!.blocks, ...(traced.trace.input.factBlocks ?? [])]));
+        else unrecorded = place;
       }
     }
   };
@@ -338,7 +394,7 @@ export function degradedRound({ assertions, judge, repair }: Pick<TracedAnswer, 
 // that was cut off, answered by a fallback model, or whose round is degraded
 // (degradedRound) stays unwritten.
 // primary: the deployment the run's answer and repair calls go to first.
-export function rerecord({ label, file, trace }: LabeledTrace, answer: TracedAnswer, primary: string | undefined): void {
+export function rerecord({ label, file, trace }: LabeledTrace, answer: TracedAnswer, primary: string | undefined): string | undefined {
   const { exchange, assertions, judge, repair, blocks } = answer;
   const why = exchange === null ? "no model was called"
     : exchange.truncated ? "the answer was cut off at the token limit"
@@ -346,7 +402,7 @@ export function rerecord({ label, file, trace }: LabeledTrace, answer: TracedAns
     : degradedRound(answer, primary);
   if (why !== undefined) {
     console.log(`skip ${label}: ${why}`);
-    return;
+    return why;
   }
   const recorded: TurnTrace = {
     version: 2,
@@ -366,6 +422,7 @@ export function rerecord({ label, file, trace }: LabeledTrace, answer: TracedAns
   const partial = `${file}.${process.pid}.tmp`;
   writeFileSync(partial, `${JSON.stringify(recorded, null, 2)}\n`);
   renameSync(partial, file);
+  return undefined;
 }
 
 // A run without --judge shows what a reader with no judge would: no inference.

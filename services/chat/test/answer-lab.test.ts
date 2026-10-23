@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import test from "node:test";
 
 import { composeTraced, judgedLive, replayRecorded } from "../src/answer-trace.ts";
-import { answerText, assertionSummary, judgeSummary, mutationSummary, mutationVariants, primaryDeployment, readTraces, recorded, replyFixture, rerecord } from "../scripts/answer-lab.ts";
+import { answerText, assertionSummary, judgeSummary, live, mutationSummary, mutationVariants, primaryDeployment, readTraces, recorded, replyFixture, rerecord } from "../scripts/answer-lab.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
 import { REPAIR_INSTRUCTIONS } from "../src/inference-repair.ts";
 
@@ -389,6 +389,44 @@ test("live --judge --update leaves a trace as it was when a fallback model answe
     if (readFileSync(source!.file, "utf8") !== before) written.push(name);
   }
   assert.deepEqual(written, []);
+});
+
+test("live --judge --update re-records a thread's turns in their order, each later one asked after the answer its earlier turn just recorded", async () => {
+  const turn = (n: number) => TRACES.find(({ label }) => label === `follow-up-memory.turn-${n}`)!.trace;
+  // Named against their order in the thread, which their conversations give.
+  const traces = readTraces([traceFiles({ "a.json": turn(2), "b.json": turn(1) })]);
+  const env = { LLM_CHANNELS: "openai", LLM_OPENAI_PROTOCOL: "openai", LLM_OPENAI_MODELS: "gpt-4.1", LITELLM_MODEL: "openai/gpt-4.1", JUDGE_LITELLM_MODEL: "openai/gpt-4.1" };
+  const asked: unknown[] = [];
+  const createClient = () => async (_deployment: unknown, request: { messages: ReadonlyArray<{ content: string }> }) => {
+    asked.push(JSON.parse(request.messages[1]!.content).conversation);
+    return { text: "```assertions\n[]\n```" };
+  };
+  await live(traces, 1, 2, true, (traced, answer) => rerecord(traced, answer, "openai/gpt-4.1"), { env, createClient: createClient as never });
+
+  const first = [{ role: "user", text: "Analyze NVDA." }];
+  const second = [
+    ...first,
+    { role: "assistant", text: "The reported figures below come from the company's filings; select any value to see its source." },
+    { role: "user", text: "Compare it with AMD YTD." },
+  ];
+  assert.deepEqual(asked, [first, second]);
+  assert.deepEqual(readTraces([traces[0]!.file])[0]!.trace.input.conversation, second);
+});
+
+test("live --judge --update runs no turn after one of its thread it left unrecorded, and says why", async () => {
+  const turn = (n: number) => TRACES.find(({ label }) => label === `follow-up-memory.turn-${n}`)!.trace;
+  const traces = readTraces([traceFiles({ "turn-1.json": turn(1), "turn-2.json": turn(2) })]);
+  const before = traces.map(({ file }) => readFileSync(file, "utf8"));
+  const env = { LLM_CHANNELS: "openai", LLM_OPENAI_PROTOCOL: "openai", LLM_OPENAI_MODELS: "gpt-4.1", LITELLM_MODEL: "openai/gpt-4.1", JUDGE_LITELLM_MODEL: "openai/gpt-4.1" };
+  let calls = 0;
+  const createClient = () => async () => {
+    calls += 1;
+    return { text: "```assertions\n[]\n```", truncated: true };
+  };
+  const run = await live(traces, 1, 2, true, (traced, answer) => rerecord(traced, answer, "openai/gpt-4.1"), { env, createClient: createClient as never });
+  assert.equal(calls, 1);
+  assert.deepEqual(run.results.map(({ error }) => error), [undefined, "not run: turn 1 of its thread was not re-recorded"]);
+  assert.deepEqual(traces.map(({ file }) => readFileSync(file, "utf8")), before);
 });
 
 test("recorded --update --judge and --repair write a live round over the trace only when it was not degraded", async () => {
