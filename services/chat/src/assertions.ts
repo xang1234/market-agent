@@ -181,7 +181,7 @@ export function checkAssertions(list: unknown[] | null | undefined, packet: Evid
     // neither is a value to compare, nor one that changed.
     if ((kind === "comparison" || kind === "unknown_cause") && figureIds.some((id) => {
       const figure = figures.get(id)!;
-      return figure.ranking || (figure.displayed === undefined && figure.lead_of !== undefined);
+      return figure.ranking || figure.lead_of !== undefined;
     })) {
       reject(index, item, "kind", `${kind === "comparison" ? "a comparison" : "an unknown cause"} cites no lead or ranking: neither is one company's value in one period`);
       continue;

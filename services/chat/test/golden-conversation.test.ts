@@ -4,10 +4,11 @@
 // save each user message, open the turn stream, reload the thread — against the
 // frozen dataset in test/golden/, with recorded model replies (no provider
 // keys). Three turns, as the browser spec asks them (#194): "Analyze NVDA"
-// (chart + metric row, #120), then the follow-ups "Compare it with AMD YTD"
-// (both companies side by side, with the year-to-date price window, #121/#192)
-// and "Explain the differences and show the evidence"; then a reload of all
-// three. Every subtest is strict.
+// (the engine's verified overview, #398), then the follow-ups "Compare it with
+// AMD YTD" (both companies' year-to-date price chart, market data outside the
+// engine, #192, #398 D2) and "Explain the differences and show the evidence"
+// (the chart and the cause management filed); then a reload of all three.
+// Every subtest is strict.
 
 import assert from "node:assert/strict";
 import { join } from "node:path";
@@ -174,7 +175,10 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
   const turns: Array<{ question: string; streamedIds: unknown[]; answer: ChatMessage; completed: ParsedSseEvent }> = [];
   if (assistant) turns.push({ question: "Analyze NVDA", streamedIds: streamedBlockIds(events), answer: assistant, completed: completedTurn(events) });
 
-  await t.test("follow-up 'Compare it with AMD YTD' sets both companies side by side over the year to date", async () => {
+  // #398 D2: market data stays outside the engine until #444's price
+  // observations, so the YTD chart is the analyst's, labelled not verified,
+  // and the analyst shows no figure of its own.
+  await t.test("follow-up 'Compare it with AMD YTD' charts both companies over the year to date, as market data not verified (#398 D2)", async () => {
     const turnEvents = await runTurn(base, thread.thread_id, "Compare it with AMD YTD");
     const completed = completedTurn(turnEvents);
     // NVDA is carried from the engine's answer, which names the company, not a listing.
@@ -182,30 +186,21 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
 
     const answer = await latestAssistantMessage(base, thread.thread_id);
     turns.push({ question: "Compare it with AMD YTD", streamedIds: streamedBlockIds(turnEvents), answer, completed });
-    const comparison = comparisonBlock(answer);
-    assert.deepEqual(
-      (comparison.subjects as Array<{ id: string }>).map((subject) => subject.id),
-      [NVDA.issuer_id, AMD.issuer_id],
-    );
-    // Rows are labelled for people, not by reference id.
-    assert.deepEqual(comparison.subject_labels, ["NVDA", "AMD"]);
-    // On reload, each block carries the server's own claims (#193): the table is
-    // source-linked, but not a verified calculation nor proven public by the
-    // cutoff. So is the chart, whose drawn points the seal recomputed from its
-    // sealed bars (#236). The narrative claims no linkage.
-    assert.deepEqual(answer.block_proofs?.[String(comparison.id)], { evidence: "linked", calculation: "not_verified", public_by_cutoff: "unknown" });
-    const chart = answer.blocks.find((block) => block.kind === "perf_comparison");
-    assert.deepEqual(answer.block_proofs?.[String(chart?.id)], { evidence: "linked", calculation: "not_verified", public_by_cutoff: "unknown" });
-    const narrative = answer.blocks.find((block) => block.kind === "rich_text");
-    assert.equal((answer.block_proofs?.[String(narrative?.id)] as { calculation?: string } | undefined)?.calculation, "not_verified");
-    const cited = await citedFacts(answer);
-    const refs = valueRefs(comparison);
-    assert.ok(refs.length >= 2, "the comparison shows too few figures");
-    for (const ref of refs) assert.ok(cited.has(ref), `metrics_comparison value_ref ${ref} is not a cited fact`);
+    assert.deepEqual(answer.blocks.map((block) => block.kind), ["rich_text", "perf_comparison", "disclosure"]);
+    // The narrative's every figure is a return read off the chart's sealed lines.
+    const performance = answer.blocks.find((block) => block.kind === "perf_comparison")!;
+    const seriesRefs = (performance.data_ref as { params: { series_refs: string[] } }).params.series_refs;
+    const narrative = answer.blocks[0]!;
+    assert.equal(narrativeText(narrative), "Of NVDA and AMD, NVDA's price return was highest: NVDA 5.81%, AMD 3.17% (YTD 2026: Dec 2025 close to Aug 2026 close).");
+    assert.deepEqual(refsOf(narrative), [["series", seriesRefs[0], "5.81%"], ["series", seriesRefs[1], "3.17%"]]);
+    // On reload, each block carries the server's own claims (#193): the chart
+    // is source-linked, its drawn points recomputed from its sealed bars by the
+    // seal (#236), but it is no verified calculation nor proven public by the
+    // cutoff. Neither is the narrative.
+    assert.deepEqual(answer.block_proofs?.[String(performance.id)], { evidence: "linked", calculation: "not_verified", public_by_cutoff: "unknown" });
+    assert.equal((answer.block_proofs?.[String(narrative.id)] as { calculation?: string } | undefined)?.calculation, "not_verified");
 
-    // Price performance alongside, drawn only from series the snapshot sealed (#133).
-    const performance = answer.blocks.find((block) => block.kind === "perf_comparison");
-    assert.ok(performance, `expected a perf_comparison; got [${answer.blocks.map((b) => b.kind).join(", ")}]`);
+    // Price performance, drawn only from series the snapshot sealed (#133).
     assert.deepEqual(performance.subject_labels, ["NVDA", "AMD"]);
     const series = performance.series as Array<{ name: string; points: Array<{ x: string; y: number }> }>;
     assert.deepEqual(series.map((line) => line.name), ["NVDA", "AMD"]);
@@ -240,7 +235,6 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     }
     assert.equal(rows[0]?.normalization, "pct_return");
     const sealed = new Set((rows[0]?.series_specs ?? []).map((spec) => spec.series_ref));
-    const seriesRefs = (performance.data_ref as { params: { series_refs: string[] } }).params.series_refs;
     assert.equal(seriesRefs.length, 2);
     for (const ref of seriesRefs) assert.ok(sealed.has(ref), `series ${ref} is not sealed in the snapshot`);
     // The chart is dated by its stored prices, not the answer time.
@@ -248,43 +242,25 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.equal(performance.as_of, oldest);
   });
 
-  await t.test("'Explain the differences and show the evidence' keeps both companies and cites facts from each", async () => {
-    const derivedFacts = async () =>
-      (await client.query<{ n: number }>(`select count(*)::int as n from facts where method = 'derived'`)).rows[0]!.n;
-    const derivedBefore = await derivedFacts();
+  await t.test("'Explain the differences and show the evidence' keeps both companies, the chart's returns and the cause management filed, quoted with its document", async () => {
     const turnEvents = await runTurn(base, thread.thread_id, "Explain the differences and show the evidence");
     const completed = completedTurn(turnEvents);
     assert.deepEqual(completed.data.subject_refs, CARRIED_NVDA_WITH_AMD);
-    // The same comparison reuses turn 2's derived facts instead of re-minting them (#134).
-    assert.equal(await derivedFacts(), derivedBefore, "turn 3 added derived facts");
 
     const answer = await latestAssistantMessage(base, thread.thread_id);
     turns.push({ question: "Explain the differences and show the evidence", streamedIds: streamedBlockIds(turnEvents), answer, completed });
     // The answer is rendered from the recorded reply's assertions: not the placeholder, nor the fallback.
-    const narrative = answer.blocks.find((block) => block.kind === "rich_text");
-    assert.deepEqual(
-      (narrative?.segments as Array<{ text?: string; format?: string }> | undefined)?.map((segment) => segment.text ?? segment.format).join(""),
-      [
-        "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 70.8% (FY2026, ended Jan 2026), AMD 49.9% (FY2025, ended Dec 2025).",
-        "Of NVDA and AMD, NVDA's net margin was highest: NVDA 53.6% (FY2026, ended Jan 2026), AMD 12.0% (FY2025, ended Dec 2025).",
-        "The periods compared end at different times, so they do not line up: NVDA's FY2026 ended Jan 2026 and AMD's FY2025 ended Dec 2025.",
-      ].join("\n\n"),
-    );
-    // The figures it points to are displayed for both companies, and cited.
-    const comparison = comparisonBlock(answer);
-    assert.deepEqual(comparison.subject_labels, ["NVDA", "AMD"]);
-    const cited = await citedFacts(answer);
-    const displayed = valueRefs(comparison);
-    for (const ref of displayed) assert.ok(cited.has(ref), `metrics_comparison value_ref ${ref} is not a cited fact`);
-    const { rows } = await client.query<{ subject_id: string }>(
-      `select distinct subject_id::text as subject_id from facts where fact_id = any($1::uuid[])`,
-      [displayed],
-    );
-    assert.deepEqual(
-      rows.map((row) => row.subject_id).sort(),
-      [NVDA.issuer_id, AMD.issuer_id].sort(),
-      "the answer should display cited facts about both companies",
-    );
+    const narrative = answer.blocks[0]!;
+    assert.equal(narrativeText(narrative), [
+      "Of NVDA and AMD, NVDA's price return was highest: NVDA 5.81%, AMD 3.17% (YTD 2026: Dec 2025 close to Aug 2026 close).",
+      `According to a source dated Aug 2025, effective Jun 2025 on AMD: ${AMD_Q2_2025_RELEASE.text}`,
+    ].join("\n\n"));
+    // The claim's figure is the claim's own words, sealed with the turn and inspected to its filed release.
+    const [claim] = refsOf(narrative).filter(([kind]) => kind === "claim");
+    const { rows } = await client.query<{ claim_refs: string[] }>(`select claim_refs from snapshots where snapshot_id = $1::uuid`, [answer.snapshot_id]);
+    assert.deepEqual(rows[0]?.claim_refs, [claim![1]]);
+    const inspection = await loadEvidenceInspection(client, { user_id: USER_ID, snapshot_id: answer.snapshot_id, ref: { kind: "claim", id: claim![1]! } });
+    assert.deepEqual(inspection.related_refs.find((ref) => ref.kind === "document")?.label, AMD_Q2_2025_RELEASE.title);
     // Turn 2's YTD window carries over at its cutoff, not the default history window (#206).
     const performance = answer.blocks.find((block) => block.kind === "perf_comparison");
     assert.equal(performance?.default_range, "YTD 2026: 2025-12-31 close to 2026-08-31 close");
@@ -696,20 +672,53 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.deepEqual(await scope(), { companies: [amd], peers: false });
   });
 
+  // The root's condition for #398: a number reaches an analyst answer only in
+  // a claim segment citing its source document, through the judge-gated path;
+  // never in the analyst's own words.
+  await t.test("an analyst answer on guidance quotes a claim's figure with its document; a figure in its own words is rejected, and its prose is never shown (#398)", async () => {
+    const guidanceThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD guidance" });
+    const completed = completedTurn(await runTurn(base, guidanceThread.thread_id, "What guidance did AMD give?"));
+    assert.notEqual(completed.data.bundle_id, "financial_answer", "guidance is the analyst's");
+    const answer = await latestAssistantMessage(base, guidanceThread.thread_id);
+    assert.deepEqual(answer.blocks.map((block) => block.kind), ["rich_text"]);
+    const [narrative] = answer.blocks;
+    // The figure is the claim's, inside its claim segment; the words around it are the template's.
+    assert.equal(narrativeText(narrative!), `According to a source dated Aug 2025, effective Jun 2025 on AMD: ${AMD_Q2_2025_RELEASE.text}\n\nNo figures are shown for AMD.`);
+    const [claim, ...others] = refsOf(narrative!);
+    assert.deepEqual([claim![0], claim![2], others], ["claim", AMD_Q2_2025_RELEASE.text, []]);
+    const words = (narrative!.segments as Array<{ type: string; text?: string }>).filter((segment) => segment.type === "text").map((segment) => segment.text).join("");
+    assert.doesNotMatch(words, /\$|%|million|billion/);
+    // The inference that wrote the claim's figure in its own words is rejected; the prose before the list is never shown.
+    assert.deepEqual((completed.data.assertion_report as { rejected: unknown[] }).rejected, [
+      { index: 1, text: "The $800 million charge, not demand, held the quarter back.", check: "binding", reason: "an inference rests on its supports; it writes no figure" },
+    ]);
+    assert.doesNotMatch(JSON.stringify(answer.blocks), /8\.7 billion/);
+    // The claim cites its document: the release it was filed in.
+    const inspection = await loadEvidenceInspection(client, { user_id: USER_ID, snapshot_id: answer.snapshot_id, ref: { kind: "claim", id: claim![1] } });
+    assert.equal(inspection.related_refs.find((ref) => ref.kind === "document")?.label, AMD_Q2_2025_RELEASE.title);
+    assert.ok((narrative!.source_refs as string[]).length > 0, "the narrative names the claim's source");
+  });
+
+  await t.test("no turn, on the engine's path or the analyst's, follow-ups included, shows a legacy figure block (#398)", async () => {
+    const { rows } = await client.query<{ kind: string }>(
+      `select distinct block->>'kind' as kind from chat_messages m, jsonb_array_elements(m.blocks) block where m.role = 'assistant' order by 1`,
+    );
+    // The engine's answers and notes, and the analyst's narratives with their D2 chart and its disclosure.
+    assert.deepEqual(rows.map((row) => row.kind), ["disclosure", "financial_answer", "perf_comparison", "rich_text"]);
+    const { rows: [answered] } = await client.query<{ engine: number; analyst: number }>(
+      `select count(*) filter (where blocks->0->>'kind' = 'financial_answer')::int as engine,
+              count(*) filter (where blocks->0->>'kind' = 'rich_text')::int as analyst
+         from chat_messages where role = 'assistant'`,
+    );
+    assert.ok(answered!.engine > 10 && answered!.analyst > 10, JSON.stringify(answered));
+  });
+
   function completedTurn(turnEvents: ParsedSseEvent[]): ParsedSseEvent {
     const error = turnEvents.find((event) => event.event === "turn.error");
     assert.equal(error, undefined, `turn.error: ${JSON.stringify(error?.data)}`);
     const completed = turnEvents.find((event) => event.event === "turn.completed");
     assert.ok(completed, `no turn.completed; events: ${turnEvents.map((event) => event.event).join(", ")}`);
     return completed;
-  }
-
-  async function citedFacts(message: ChatMessage): Promise<Set<string>> {
-    const { rows } = await client.query<{ fact_refs: string[] }>(
-      `select fact_refs from snapshots where snapshot_id = $1::uuid`,
-      [message.snapshot_id],
-    );
-    return new Set(rows[0]?.fact_refs ?? []);
   }
 });
 
@@ -718,6 +727,16 @@ async function latestAssistantMessage(base: string, threadId: string): Promise<C
   const answer = messages.filter((message) => message.role === "assistant").at(-1);
   assert.ok(answer, "no assistant message in the thread");
   return answer;
+}
+
+// A rich text block as the reader sees it, each ref its displayed value.
+function narrativeText(block: Block): string {
+  return (block.segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format ?? "").join("");
+}
+
+function refsOf(block: Block): Array<[kind: string, id: string, shown: string]> {
+  return (block.segments as Array<{ type: string; ref_kind?: string; ref_id?: string; format?: string }>)
+    .filter((segment) => segment.type === "ref").map((segment) => [segment.ref_kind!, segment.ref_id!, segment.format!]);
 }
 
 function streamedBlockIds(events: ParsedSseEvent[]): unknown[] {
@@ -744,12 +763,6 @@ function engineAnswer(message: ChatMessage): { results: Array<[measure: string, 
       [financial.labels[result.measure_label_id]!.text, financial.labels[result.period_label_id]!.text, result.disposition, result.presented.text]),
     notes: answerText({ ...message, blocks: notes }),
   };
-}
-
-function comparisonBlock(message: ChatMessage): Block {
-  const block = message.blocks.find((candidate) => candidate.kind === "metrics_comparison");
-  assert.ok(block, `expected a metrics_comparison; got [${message.blocks.map((b) => b.kind).join(", ")}]`);
-  return block;
 }
 
 async function startGoldenServer(t: TestContext, databaseUrl: string): Promise<string> {

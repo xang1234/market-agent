@@ -11,9 +11,8 @@ import { createMarketServer } from "../../market/src/http.ts";
 import { createPostgresListingRepository } from "../../market/src/listings.ts";
 import { zonedDateStartUtcIso } from "../../market/src/range-canonicalization.ts";
 import { ytdYear } from "../../market/src/ytd-window.ts";
-import { displayedFigures } from "../src/fact-blocks.ts";
 import { analystToolRuntime, closeLocalRuntimePoolForTests } from "../src/local-runtime.ts";
-import { loadPerfComparisonBlocks } from "../src/perf-block.ts";
+import { loadPerfComparisonBlocks, perfFigures } from "../src/perf-block.ts";
 import { createThread } from "../src/threads-repo.ts";
 import { hydrateYtdBars } from "../src/ytd-hydration.ts";
 import { proposal } from "./scope-fixtures.ts";
@@ -171,9 +170,9 @@ test("a live YTD turn whose refresh fails names the stale cached window as a gap
   // the missing year-end baseline instead; either way no stale chart.)
   assert.equal(result.blocks.some((block) => block.kind === "perf_comparison"), false);
   assert.match(JSON.stringify(result.blocks), /Year-to-date price performance is not shown: /);
-  // The rest of the answer stands, and the narrative is offered no price return.
-  assert.ok(result.blocks.some((block) => block.kind === "metrics_comparison"));
-  assert.deepEqual(displayedFigures(result.blocks).filter((figure) => figure.metric === "Price return"), []);
+  // The narrative is offered no price return, and no other figure stands in its place.
+  assert.deepEqual(perfFigures(result.blocks), []);
+  assert.deepEqual(result.blocks.filter((block) => block.kind !== "rich_text").map((block) => block.kind), []);
 });
 
 function setEnv(t: TestContext, values: Record<string, string | undefined>): void {

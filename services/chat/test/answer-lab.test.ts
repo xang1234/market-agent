@@ -424,7 +424,7 @@ test("live --judge --update re-records a thread's turns in their order, each lat
   const first = [{ role: "user", text: "Analyze NVDA." }];
   const second = [
     ...first,
-    { role: "assistant", text: "The reported figures below come from the company's filings; select any value to see its source. Segment revenue is not available for NVDA in this data." },
+    { role: "assistant", text: "No written answer is available for this question; try asking again. Segment revenue is not available for NVDA in this data." },
     { role: "user", text: "Compare it with AMD YTD." },
   ];
   assert.deepEqual(asked, [first, second]);
@@ -455,7 +455,7 @@ test("live --judge --update chains a thread's turns by question, so a window tha
   };
   await live(traces, 1, 2, true, (traced, answer) => rerecord(traced, answer, "openai/gpt-4.1"), { env, createClient: createClient as never });
 
-  const saved = (note: string) => `The reported figures below come from the company's filings; select any value to see its source. ${note}`;
+  const saved = (note: string) => `No written answer is available for this question; try asking again. ${note}`;
   assert.deepEqual(asked.get("And INTC?"), [
     { role: "assistant", text: saved("First.") },
     question2,

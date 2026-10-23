@@ -193,7 +193,7 @@ test("a comparison needs two distinct facts, however its evidence repeats them (
 
 test("a comparison never sets an annual figure against a quarterly one (#302 review)", () => {
   const available = (id: string, metric: string, period: string, value: string, extra: Partial<PacketFigure> = {}) =>
-    fig(id, metric, period, value, { fact_id: `f-${id}`, displayed: false, ...extra } as Partial<PacketFigure>);
+    fig(id, metric, period, value, { fact_id: `f-${id}`, ...extra });
   const aapl = packet(["AAPL"], [
     available("F1", "Revenue", "FY2025", "$416.2B"),
     available("F2", "Revenue", "Q12026", "$124.3B"),
@@ -204,14 +204,3 @@ test("a comparison never sets an annual figure against a quarterly one (#302 rev
   assert.deepEqual(reasons(aapl, "trend", ["F3", "F2"], "fell"), ["comparison: revenue rose from $90.0B to $124.3B"]);
 });
 
-test("a partial period's figure is never compared (#302 review)", () => {
-  const available = (id: string, period: string, value: string, extra: Record<string, unknown> = {}) =>
-    fig(id, "Net income", period, value, { fact_id: `f-${id}`, displayed: false, ...extra } as Partial<PacketFigure>);
-  const aapl = packet(["AAPL"], [
-    available("F1", "Q32025", "$18.0B"),
-    available("F2", "Q42025", "$20.0B"),
-    available("F3", "Q12026", "$25.0B", { period_coverage: "partial" }),
-  ]);
-  assert.deepEqual(reasons(aapl, "trend", ["F1", "F2", "F3"], "rose"), ["comparison: F3 covers only part of Q1 2026, so it is not compared"]);
-  ok(aapl, "trend", ["F1", "F2"], "rose_throughout");
-});

@@ -42,7 +42,7 @@ import { requireFinancialReadiness } from "../../financial-engine/src/readiness.
 import { publishRequest, type RequestGap } from "../../financial-engine/src/request.ts";
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { comparedAdditions, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
-import { contentHashForText, financialMessageId } from "./chat-ids.ts";
+import { contentHashForText, financialMessageId, stableUuid } from "./chat-ids.ts";
 import {
   allResolved,
   keptFigures,
@@ -57,7 +57,6 @@ import {
   type PeersOf,
   type ReadPeriod,
 } from "./company-overview.ts";
-import { noteBlock } from "./fact-blocks.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { companyKey, extractSubjectMentions } from "./subject-extraction.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "./subjects.ts";
@@ -708,6 +707,20 @@ function chatAuthority(userId: string, threadId: string, turnId: string): Financ
 }
 
 const UNCHECKED = "It was not checked whether this answer covers everything the question asks for.";
+
+/** A note in an answer: one plain sentence, citing nothing. */
+export function noteBlock(input: { snapshotId: string; asOf: string }, key: string, text: string): Record<string, unknown> {
+  const id = stableUuid(`block:${input.snapshotId}:${key}`);
+  return {
+    id,
+    kind: "rich_text",
+    snapshot_id: input.snapshotId,
+    data_ref: { kind: "rich_text", id },
+    source_refs: [],
+    as_of: input.asOf,
+    segments: [{ type: "text", text }],
+  };
+}
 
 /** Writes the assistant message inside the finalization transaction, under the thread's owner. */
 function persistAssistantMessage(

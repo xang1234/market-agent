@@ -30,21 +30,11 @@ import {
 import { answerTurn, type AnswerTraceInput } from "./answer-trace.ts";
 import { isUuid } from "./chat-ids.ts";
 import { claimSelection } from "./evidence-packet.ts";
-import {
-  companyListings,
-  loadTurnFactBlocks,
-  mayOfferOtherFacts,
-  priceListingsForTurn,
-  readsNamedQuarter,
-  scopeGapBlocks,
-  turnCompanies,
-  withDerivationSources,
-} from "./fact-blocks.ts";
+import { companyListings, priceListingsForTurn, turnCompanies } from "./fact-blocks.ts";
 import { readsEngine, resolveResearchScope, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
 import { proposeScope } from "./scope-proposal.ts";
-import { loadStatementBlocks, statementFacets, wantsStatements } from "./statement-blocks.ts";
 import { frozenDataMode, hydrateYtdBars, marketHydrationOrigin, turnNow } from "./ytd-hydration.ts";
-import { listingTimeZones } from "./perf-block.ts";
+import { listingTimeZones, loadPerfComparisonBlocks } from "./perf-block.ts";
 import { loadPriorScope, loadPriorSubjects as loadThreadPriorSubjects, loadRecentConversation } from "./thread-context.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import { createLlmThreadTitleModel } from "./llm-runtime.ts";
@@ -54,7 +44,7 @@ import {
   structuredEvidenceStatus,
   structuredRefsFromHandoff,
 } from "./local-runtime-structured.ts";
-import { createChatFinancialRuntime, type ChatFinancialRuntime, type ChatFinancialTurnContext } from "./financial-runtime.ts";
+import { createChatFinancialRuntime, noteBlock, type ChatFinancialRuntime, type ChatFinancialTurnContext } from "./financial-runtime.ts";
 import { saveCommentary } from "./engine-commentary.ts";
 import { createChatMessagePersistence } from "./messages.ts";
 import {
@@ -180,52 +170,17 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   const toolCallIds = toolCalls
     .filter((toolCall) => toolCall.status === "ok")
     .map((toolCall) => toolCall.tool_call_id);
-  const requestedListings = requestedListingsOf(covered);
-  // Charts and tables come from facts, never from the model (see fact-blocks.ts).
-  // A turn asking only for metrics no reader serves reads no other facts, nor
-  // does one re-reading a financial-engine answer, whose evidence is in it
-  // (#206), or a request the engine declined (#425).
-  const readsFacts = scope.reads !== "unavailable_metric" && !readsEngine(scope.reads);
-  // Cash flow, balance sheet and EPS for one company; a statement-only request
-  // reads them alone, as a segment request reads segments alone.
-  const [statementIssuer] = issuersOfScope(scope);
-  const statements = statementFacets(scope);
-  const readsStatements = readsFacts && wantsStatements(statements) && scope.companies.length === 1 && !scope.peers;
-  const [incomeBlocks, statementBlocks, conversation] = await Promise.all([
-    readsFacts && scope.reads !== "statements" ? loadTurnFactBlocks(pool(), {
-      // The companies the scope records, peers already resolved (comparedCompanies),
-      // so the blocks chart exactly the set the scope saves.
-      issuers: issuersOfScope(scope),
-      wantsPeers: false,
-      wantsSegments: scope.segments,
-      // A margin asked about in a named quarter gets the margins around it (#290).
-      wantsMarginTrend: scope.margin_trend || (scope.margins && scope.fiscal_quarter !== null),
-      ...(scope.fiscal_quarter && readsNamedQuarter(scope) ? { fiscalQuarter: scope.fiscal_quarter } : {}),
-      // A request for segments alone; one also asking for a margin (its latest
-      // value or its trend) reads both.
-      segmentsOnly: scope.reads === "segments" && !scope.margins,
-      requestedListings,
-      fiscalYear: scope.fiscal_year ?? undefined,
-      priceWindow: scope.price_window?.kind,
-      // An inherited window keeps the cutoff it was charted at.
-      ...(scope.inherited.includes("price_window") ? { priceAsOf: scope.price_window!.cutoff } : {}),
-      frozenPrices: frozenDataMode(process.env),
-      snapshotId: result.snapshot_id,
-      asOf,
-    }) : Promise.resolve([]),
-    readsStatements && statementIssuer
-      ? loadStatementBlocks(pool(), {
-        issuer: statementIssuer,
-        facets: statements,
-        fiscalYear: scope.fiscal_year ?? undefined,
-        snapshotId: result.snapshot_id,
-        asOf,
-      })
-      : Promise.resolve([]),
+  // The analyst shows no figure of its own: every number is the engine's (#398),
+  // but for a comparison's year-to-date price chart, market data outside the
+  // engine and labelled not verified until #444's price observations (D2). A
+  // turn re-reading an engine answer, or asking only for metrics no reader
+  // serves, charts nothing.
+  const window = scope.reads !== "unavailable_metric" && !readsEngine(scope.reads) ? scope.price_window : null;
+  const [performance, conversation] = await Promise.all([
+    window ? ytdChart(scope, window, requestedListingsOf(covered), result.snapshot_id, asOf) : Promise.resolve([]),
     loadRecentConversation(pool(), { threadId: context.threadId, limit: CONVERSATION_MESSAGES }),
   ]);
-  const shownBlocks = await withDerivationSources(pool(), [...incomeBlocks, ...statementBlocks]);
-  const factBlocks = [...shownBlocks, ...scopeGapBlocks(scope, shownBlocks, { snapshotId: result.snapshot_id, asOf })];
+  const factBlocks = [...performance, ...scopeGapBlocks(scope, { snapshotId: result.snapshot_id, asOf })];
   let answeredBy: string | undefined;
   const answerInput: AnswerTraceInput = {
     // Only what the answer reads: the turn context also holds callbacks.
@@ -234,7 +189,6 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     toolCalls,
     factBlocks,
     conversation,
-    availableData: mayOfferOtherFacts(scope, shownBlocks),
     // Auto-selected peers named for the packet; the saved scope keeps them
     // unlabelled, which is how a later turn knows they were auto-selected.
     scope: await withCompanyLabels(scope, asOf),
@@ -300,6 +254,50 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
 };
 
 const CONVERSATION_MESSAGES = 6;
+
+// The year-to-date chart of the companies the scope records, peers already
+// resolved (comparedCompanies). An inherited window keeps the cutoff it was
+// charted at. Empty when the listings cannot be read: the chart never costs
+// the turn its answer.
+async function ytdChart(
+  scope: ResearchScope,
+  window: NonNullable<ResearchScope["price_window"]>,
+  requestedListings: ReadonlyMap<string, { listing_id: string; label: string }>,
+  snapshotId: string,
+  asOf: string,
+): Promise<ReadonlyArray<Record<string, unknown>>> {
+  const listings = await priceListingsForTurn(pool(), { issuers: issuersOfScope(scope), wantsPeers: false, requestedListings, asOf }).catch((reason) => {
+    console.warn("[chat] company listings unavailable; answering without the price chart", reason);
+    return [];
+  });
+  return loadPerfComparisonBlocks(pool(), {
+    listings,
+    snapshotId,
+    asOf: scope.inherited.includes("price_window") ? window.cutoff : asOf,
+    window: "ytd",
+    frozenPrices: frozenDataMode(process.env),
+  });
+}
+
+// What the scope asks for and the data does not hold, each as a note (#206):
+// a benchmark index; and for a turn re-reading the engine's answer or
+// declined request, where its evidence is.
+export function scopeGapBlocks(scope: ResearchScope, input: { snapshotId: string; asOf: string }): ReadonlyArray<Record<string, unknown>> {
+  const names = scope.companies.flatMap((company) => company.label ?? []).join(", ") || "these companies";
+  const notes: Array<readonly [string, string]> = [];
+  if (scope.reads === "financial_answer") {
+    notes.push(["gap:financial_answer", "The previous answer's figures were calculated and verified by the financial engine; each one links to its sources in that answer, and no other figure is shown in their place."]);
+  }
+  if (scope.reads === "financial_gap") {
+    notes.push(["gap:financial_gap", "The previous answer showed no figure, so there is no evidence to show; no other figure is shown in its place."]);
+  }
+  if (scope.benchmark) {
+    notes.push(["gap:benchmark", scope.companies.length > 1
+      ? "A benchmark index is not in this data, so the companies are compared only with each other."
+      : `A benchmark index is not in this data, so ${names} is not compared with one.`]);
+  }
+  return notes.map(([key, text]) => noteBlock(input, key, text));
+}
 
 // The scope with every company named by its ticker (else legal name), for the
 // evidence packet. Unchanged if the lookup fails: the packet then names an

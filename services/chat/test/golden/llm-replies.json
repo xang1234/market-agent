@@ -178,6 +178,10 @@
       "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"fiscal_year\",\"fiscal_year\":2025},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}"
     },
     {
+      "match": "Question: \"What guidance did AMD give?\"",
+      "text": "{\"metrics\":[],\"asks\":[\"guidance\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AMD\"]}}"
+    },
+    {
       "match": "Create a short, specific research chat title",
       "text": "NVIDIA revenue and margins"
     },
@@ -194,11 +198,11 @@
     },
     {
       "match": "Explain the differences and show the evidence",
-      "text": "```assertions\n[{\"kind\":\"comparison\",\"op\":\"highest\",\"result\":\"F2\",\"text\":\"NVDA's gross margin is the higher of the two.\",\"evidence\":[\"F2\",\"F6\"]},{\"kind\":\"comparison\",\"op\":\"highest\",\"result\":\"F3\",\"text\":\"NVDA's net margin is the higher of the two.\",\"evidence\":[\"F3\",\"F7\"]}]\n```"
+      "text": "```assertions\n[{\"kind\":\"comparison\",\"op\":\"highest\",\"result\":\"F1\",\"text\":\"NVDA's price return is the higher of the two.\",\"evidence\":[\"F1\",\"F2\"]},{\"kind\":\"management_attribution\",\"text\":\"AMD said export controls on its MI308 GPUs led to inventory and related charges.\",\"evidence\":[\"C1\"]}]\n```"
     },
     {
       "match": "Compare it with AMD",
-      "text": "```assertions\n[{\"kind\":\"comparison\",\"op\":\"highest\",\"result\":\"F1\",\"text\":\"NVDA's revenue is the higher of the two.\",\"evidence\":[\"F1\",\"F5\"]}]\n```"
+      "text": "```assertions\n[{\"kind\":\"comparison\",\"op\":\"highest\",\"result\":\"F1\",\"text\":\"NVDA's price return is the higher of the two.\",\"evidence\":[\"F1\",\"F2\"]}]\n```"
     },
     {
       "match": "Why did AMD's operating margin turn negative in Q2 2025?",
@@ -217,6 +221,13 @@
         "\"coverage\":[{\"company\":\"NVDA\",\"status\":\"shown\"},{\"company\":\"AMD\",\"status\":\"shown\"}]"
       ],
       "text": "NVIDIA is the more profitable and the faster-growing of the two in their latest quarters.\n\n```assertions\n[{\"kind\":\"analyst_inference\",\"text\":\"The company that leads on margin also leads on growth, so its lead is widening rather than being bought.\",\"supports\":[1,2]},{\"kind\":\"comparison\",\"op\":\"highest\",\"result\":\"F5\",\"text\":\"NVDA's gross margin [[F5]] is above AMD's [[F14]].\",\"evidence\":[\"F5\",\"F14\"]},{\"kind\":\"comparison\",\"op\":\"highest\",\"result\":\"F9\",\"text\":\"NVDA's revenue grew [[F9]] over the year, AMD's [[F18]].\",\"evidence\":[\"F9\",\"F18\"]},{\"kind\":\"observation\",\"text\":\"NVDA's revenue was [[F1]] and AMD's [[F10]] in their latest quarters.\",\"evidence\":[\"F1\",\"F10\"]}]\n```"
+    },
+    {
+      "match": [
+        "Write a concise investment research answer",
+        "\"question\":\"What guidance did AMD give?\""
+      ],
+      "text": "AMD guided to about $8.7 billion of revenue, with $800 million of charges behind it.\n\n```assertions\n[{\"kind\":\"management_attribution\",\"text\":\"AMD said export controls led to about $800 million of charges.\",\"evidence\":[\"C1\"]},{\"kind\":\"analyst_inference\",\"subject\":\"AMD\",\"text\":\"The $800 million charge, not demand, held the quarter back.\",\"supports\":[0]}]\n```"
     },
     {
       "match": "Write a concise investment research answer",

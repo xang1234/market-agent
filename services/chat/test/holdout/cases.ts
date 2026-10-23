@@ -16,16 +16,14 @@
 // digest of these cases is pinned in holdout.integration.test.ts, so a change
 // to a case is a deliberate new version, never a quiet edit.
 //
-// Packet ids follow the order figures are shown (evidence-packet.ts): a single
-// company's latest-quarter row F1-F9 (revenue, gross profit, operating and net
-// income, gross/operating/net margin, QoQ and YoY growth), its eight revenue
-// bars F10-F17, then any margin rows by quarter (gross F18-F25, operating
-// F26-F33, net F34-F41); a comparison's companies four figures each (revenue,
-// gross margin, net margin, YoY growth) in the order compared.
+// Packet ids follow the order figures are shown (evidence-packet.ts): an
+// analyst turn's are its year-to-date chart's returns, one per company in the
+// order compared (#398 D2); an engine answer's are its results, in the
+// answer's order (enginePacket).
 
 import type { RejectionCheck } from "../../src/assertions.ts";
 
-export const HOLDOUT_VERSION = 17;
+export const HOLDOUT_VERSION = 18;
 
 type Assertion = Record<string, unknown>;
 
@@ -303,39 +301,40 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
   },
   {
     id: "comparison-follow-up-scope",
-    trap: "a follow-up keeps both companies and the sealed YTD window; a conclusion on a narrowed cohort or the wrong winner; an inference crediting one company with another's figure",
+    trap: "a follow-up keeps both companies and the sealed YTD window, its only figures the chart's returns; a conclusion on a narrowed cohort or the wrong winner; an inference crediting one company with another's figure",
     turns: ["Analyze NVDA", "Compare it with AMD YTD", "Explain the differences and show the evidence"],
     scopes: [{metrics: [], asks: [], turns_off: {facets: [], metrics: []}, income_items: [], period: {kind: "none"}, companies: {kind: "as_named", names: ["NVDA"]}}, {metrics: [], asks: ["price_window"], turns_off: {facets: [], metrics: []}, income_items: [], period: {kind: "none"}, companies: {kind: "compare", add: ["AMD"]}}, {metrics: [], asks: ["explains", "evidence"], turns_off: {facets: [], metrics: []}, income_items: [], period: {kind: "none"}, companies: {kind: "as_named", names: []}}],
     expect: {
       companies: ["NVDA", "AMD"],
       route: "evidence_followup",
       ytd_range: "YTD 2026: 2025-12-31 close to 2026-08-31 close",
-      blocks: [{ kind: "metrics_comparison" }, { kind: "perf_comparison" }],
+      blocks: [{ kind: "perf_comparison" }],
+      absent_kinds: ["metrics_comparison", "metric_row", "revenue_bars"],
     },
-    prose: "NVDA's gross margin is higher than AMD's.",
+    prose: "NVDA's shares returned more than AMD's.",
     good: [
-      cmp("highest", "F2", ["F2", "F6"]),
-      obs("NVDA's revenue was [[F1]] in FY2026; AMD's was [[F5]] in FY2025.", ["F1", "F5"]),
-      inference("The margin lead comes with the larger revenue base.", [0, 1]),
+      cmp("highest", "F1", ["F1", "F2"]),
+      obs("NVDA's price return was [[F1]]; AMD's was [[F2]].", ["F1", "F2"]),
+      inference("The market rewarded the faster grower more this year.", [0, 1]),
     ],
     mutations: [
-      { name: "narrowed cohort", list: [cmp("highest", "F2", ["F2"])], fails: { index: 0, check: "kind" } },
-      { name: "wrong winner", list: [cmp("highest", "F6", ["F2", "F6"])], fails: { index: 0, check: "comparative" } },
+      { name: "narrowed cohort", list: [cmp("highest", "F1", ["F1"])], fails: { index: 0, check: "kind" } },
+      { name: "wrong winner", list: [cmp("highest", "F2", ["F1", "F2"])], fails: { index: 0, check: "comparative" } },
       // Beside a checked NVDA-highest, words naming the wrong leader contradict
       // it (#288).
       {
         name: "an inference naming the wrong leader",
-        list: [cmp("highest", "F2", ["F2", "F6"]), inference("AMD's margin lead is the wider moat.", [0])],
+        list: [cmp("highest", "F1", ["F1", "F2"]), inference("AMD's lead in returns shows the market favours it.", [0])],
         judged: { 1: "contradicted" },
         fails: { index: 1, check: "judge" },
       },
-      // F5 is AMD's revenue, cited by the observation the inference rests on (#301).
+      // F2 is AMD's return, cited by the observation the inference rests on (#301).
       {
         name: "a reference swapped to another company's figure",
         list: [
-          cmp("highest", "F2", ["F2", "F6"]),
-          obs("NVDA's revenue was [[F1]] in FY2026; AMD's was [[F5]] in FY2025.", ["F1", "F5"]),
-          inference("The margin lead comes with [[F5]] of revenue.", [0, 1]),
+          cmp("highest", "F1", ["F1", "F2"]),
+          obs("NVDA's price return was [[F1]]; AMD's was [[F2]].", ["F1", "F2"]),
+          inference("The lead comes with [[F2]] of return.", [0, 1]),
         ],
         fails: { index: 2, check: "binding" },
       },

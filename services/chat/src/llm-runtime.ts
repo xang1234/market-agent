@@ -9,10 +9,8 @@ import type { ThreadTitleModel } from "../../summary/src/title-generator.ts";
 import type {
   ChatAnalystToolRuntimeToolCall,
 } from "./coordinator.ts";
-import { displayedFigures, requestIsNamedGap } from "./fact-blocks.ts";
-import { buildEvidencePacket, figureCompanies, packetForModel, type AvailableFigure, type ClaimEvidence, type ClaimRecord, type EvidencePacket } from "./evidence-packet.ts";
+import { buildEvidencePacket, figureCompanies, packetForModel, type ClaimEvidence, type ClaimRecord, type EvidencePacket } from "./evidence-packet.ts";
 import { assertionList, checkAssertions, MAX_ASSERTIONS, type AssertionReport } from "./assertions.ts";
-import { formatCompactCurrency, formatCurrency } from "../../analyze/src/block-format.ts";
 import { calendarNote, plainText, renderAssertion, unverifiedInference, type RenderedAssertion } from "./render-assertions.ts";
 import type { Segment } from "./prose-refs.ts";
 import type { ShownAs } from "./verdicts.ts";
@@ -21,9 +19,6 @@ import type { ModelExchange } from "./answer-trace.ts";
 import { isRecord } from "../../shared/src/http.ts";
 
 // Shown when no assertion renders.
-const FACT_BLOCKS_FALLBACK_TEXT =
-  "The reported figures below come from the company's filings; select any value to see its source.";
-// The same case for an answer without figures to point to.
 const NO_ANSWER_FALLBACK_TEXT = "No written answer is available for this question; try asking again.";
 
 // What the reader sees as the answer (#208): the accepted assertions in their
@@ -134,14 +129,11 @@ export async function composeAnalystBlocksWithLlm(input: {
   context: LlmRuntimeContext;
   blocks: ReadonlyArray<Record<string, unknown>>;
   toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>;
-  // Deterministic chart/table blocks shown with the answer, whose figures its
-  // assertions cite.
+  // The blocks shown with the answer: a price chart whose figures its
+  // assertions cite (#398 D2), and notes on what the data does not hold.
   factBlocks?: ReadonlyArray<Record<string, unknown>>;
   // Recent thread messages, oldest first, so the answer reads as a reply.
   conversation?: ReadonlyArray<{ role: string; text: string }>;
-  // False when the turn asks only for metrics no reader serves (#206): the
-  // model then sees the named gap, not other facts it could offer in its place.
-  availableData?: boolean;
   // The turn's research scope and cutoff, for the evidence packet (#207).
   scope?: ResearchScope;
   cutoff?: string;
@@ -280,9 +272,6 @@ export type AnswerInput = Pick<Parameters<typeof composeAnalystBlocksWithLlm>[0]
 // its first check renders here too (inference-repair.ts).
 export function renderedAnswer(input: AnswerInput, packet: EvidencePacket, report: AssertionReport): { report: AssertionReport; blocks: AnswerBlocks } {
   const factBlocks = input.factBlocks ?? [];
-  // Pointing to "the reported figures below" needs figures shown: not a gap
-  // note, nor values only an assertion references (#302).
-  const shown = displayedFigures(factBlocks);
   const renderAccepted = (): Rendering => {
     if (report.status !== "checked" || report.accepted.length === 0) return { answer: null, report };
     // Nothing is left out once accepted, so every support an inference rests
@@ -342,16 +331,15 @@ export function renderedAnswer(input: AnswerInput, packet: EvidencePacket, repor
         // The claims as selected: more matched than were read, or none could be.
         ...(packet.claims_truncated ? ["More sources matched than are shown here."] : []),
         ...(packet.claims_status === "unavailable" ? ["Research claims could not be read for this answer."] : []),
-        ...stalenessNotes(input.toolCalls),
       ],
     };
     return { answer, report: { ...report, rendered: true, ...(repeated.length > 0 ? { repeated } : {}) } };
   };
   // A request the data does not hold points to the gap notes shown below the
-  // answer (#302). Not every note is a gap ("the previous answer's figures
-  // were ... verified"), so the scope says whether the request is one (#358 review).
-  const namedGap = input.scope !== undefined && requestIsNamedGap(input.scope, factBlocks) &&
-    packet.figures.length === 0 && packet.gaps.length > 0;
+  // answer (#302): a benchmark, a YTD window not charted, a declined engine
+  // request re-read. An engine answer's note says where its figures are, so
+  // it is no gap (#358 review).
+  const namedGap = input.scope !== undefined && input.scope.reads !== "financial_answer" && packet.figures.length === 0 && packet.gaps.length > 0;
   const rendering = renderAccepted();
   const answer: Answer = rendering.answer ?? {
     kind: "fallback",
@@ -360,7 +348,7 @@ export function renderedAnswer(input: AnswerInput, packet: EvidencePacket, repor
         `The data here does not answer this question; the ${packet.gaps.length > 1 ? "notes below say" : "note below says"} what is missing.`,
         ...(packet.claims_status === "unavailable" ? ["Research claims could not be read for this answer."] : []),
       ].join(" ")
-      : shown.length > 0 ? FACT_BLOCKS_FALLBACK_TEXT : nothingOnFile(input.toolCalls) ?? NO_ANSWER_FALLBACK_TEXT,
+      : nothingOnFile(input.toolCalls) ?? NO_ANSWER_FALLBACK_TEXT,
   };
   return { report: rendering.report, blocks: (inferences) => withAnswer(input.blocks, answer, inferences) };
 }
@@ -372,15 +360,12 @@ export type AnswerUsage = { input_tokens: number; output_tokens: number; reasoni
 // it may reference (with company, period and period end), cited claim text, what
 // could not be shown, and staleness flags. Raw tool JSON, the placeholder block,
 // and the routing bundle are left out: the answer writes a figure only as a
-// packet reference, so the raw facts behind them only added tokens and reasoning.
-// When no figures are shown (a quote-only subject, or the fact loader came back
-// empty), the turn's quote and reported facts are the packet's figures (#302).
+// packet reference.
 export function answerContext(input: {
   context: LlmRuntimeContext;
   toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>;
   factBlocks?: ReadonlyArray<Record<string, unknown>>;
   conversation?: ReadonlyArray<{ role: string; text: string }>;
-  availableData?: boolean;
   scope?: ResearchScope;
   cutoff?: string;
   // The turn's packet, when the caller has built it (turnPacket).
@@ -423,12 +408,10 @@ function nothingOnFile(toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>)
     : "No research claims, reported facts, or quote are on file for this subject.";
 }
 
-// The turn's evidence packet: its figures, claims and bounds (#207). A named
-// gap's turn offers no other values in the metric's place (#206).
+// The turn's evidence packet: its figures, claims and bounds (#207).
 export function turnPacket(input: {
   toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>;
   factBlocks?: ReadonlyArray<Record<string, unknown>>;
-  availableData?: boolean;
   scope?: ResearchScope;
   cutoff?: string;
 }): EvidencePacket {
@@ -437,7 +420,6 @@ export function turnPacket(input: {
     factBlocks: input.factBlocks ?? [],
     cutoff: input.cutoff ?? new Date().toISOString(),
     claims: claimEvidence(input.toolCalls),
-    ...(input.availableData === false ? {} : { available: availableFigures(input.toolCalls) }),
   });
 }
 
@@ -475,70 +457,6 @@ function claimEvidence(toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>)
   };
 }
 
-// The quote and reported facts as figures: what an answer with no displayed
-// figures stands on (#302), each fact once across tool calls.
-function availableFigures(toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>): AvailableFigure[] {
-  const structured = toolCalls.flatMap((toolCall) => {
-    const context = isRecord(toolCall.result) ? toolCall.result.structured_context : undefined;
-    return isRecord(context) ? [context] : [];
-  });
-  const quotes = structured.flatMap(({ quote }): AvailableFigure[] => {
-    if (!isRecord(quote) || typeof quote.price !== "number" || typeof quote.currency !== "string") return [];
-    const dated = typeof quote.as_of === "string" ? { as_of: quote.as_of } : {};
-    return [
-      { metric: "Price", value: formatCurrency(quote.price, quote.currency), ...dated, source_ids: [], displayed: false },
-      // change_pct is a fraction (0.0078 = 0.78%).
-      ...(typeof quote.change_pct === "number"
-        ? [{ metric: "Day change", value: `${quote.change_pct >= 0 ? "+" : ""}${(quote.change_pct * 100).toFixed(2)}%`, ...dated, source_ids: [], displayed: false as const }]
-        : []),
-    ];
-  });
-  const facts = new Map<string, AvailableFigure>();
-  for (const fact of structured.flatMap((context) => (Array.isArray(context.facts) ? context.facts : []))) {
-    if (!isRecord(fact) || typeof fact.fact_id !== "string" || facts.has(fact.fact_id)) continue;
-    const value = factValue(fact);
-    const metric = fact.display_name ?? fact.metric_key;
-    // A fact whose period has no coverage is no value for it.
-    if (value === undefined || typeof metric !== "string" || fact.coverage_level === "unavailable") continue;
-    const fiscal = typeof fact.fiscal_year === "number" ? { period: `${typeof fact.fiscal_period === "string" ? fact.fiscal_period : ""}${fact.fiscal_year}` } : {};
-    facts.set(fact.fact_id, {
-      metric,
-      ...fiscal,
-      value,
-      fact_id: fact.fact_id,
-      source_ids: typeof fact.source_id === "string" ? [fact.source_id] : [],
-      displayed: false,
-      ...(typeof fact.as_of === "string" ? { as_of: fact.as_of } : {}),
-      ...(typeof fact.coverage_level === "string" && fact.coverage_level !== "full" ? { period_coverage: fact.coverage_level } : {}),
-      ...factBinding(fact),
-    });
-  }
-  return [...quotes, ...facts.values()];
-}
-
-// A fact's value as a block would display it.
-function factValue(fact: Record<string, unknown>): string | undefined {
-  if (typeof fact.value_num !== "number") return typeof fact.value_text === "string" ? fact.value_text : undefined;
-  const value = fact.value_num * (typeof fact.scale === "number" ? fact.scale : 1);
-  const currency = typeof fact.currency === "string" ? fact.currency : undefined;
-  if (currency && fact.unit === "currency") return formatCompactCurrency(value, currency);
-  if (currency && fact.unit === "currency_per_share") return formatCurrency(value, currency);
-  const amount = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
-  return typeof fact.unit === "string" && fact.unit !== "pure" ? `${amount} ${fact.unit}` : amount;
-}
-
-// The binding a seal checks a fiscal fact by (snapshot-verifier.ts): its unit,
-// period kind, and fiscal year and period. Another kind is bound by dates the
-// fact summary does not carry, so its value renders unsealed.
-function factBinding(fact: Record<string, unknown>): { binding?: Record<string, unknown> } {
-  if (typeof fact.unit !== "string" || typeof fact.fiscal_year !== "number") return {};
-  if (fact.period_kind === "fiscal_y") return { binding: { fact_id: fact.fact_id, unit: fact.unit, period_kind: "fiscal_y", fiscal_year: fact.fiscal_year } };
-  if (fact.period_kind === "fiscal_q" && typeof fact.fiscal_period === "string") {
-    return { binding: { fact_id: fact.fact_id, unit: fact.unit, period_kind: "fiscal_q", fiscal_year: fact.fiscal_year, fiscal_period: fact.fiscal_period } };
-  }
-  return {};
-}
-
 function withAnswer(blocks: ReadonlyArray<Record<string, unknown>>, answer: Answer, inferences: Inferences): ReadonlyArray<Record<string, unknown>> {
   let rewritten = false;
   return Object.freeze(blocks.map((block) => {
@@ -567,27 +485,4 @@ function withAnswer(blocks: ReadonlyArray<Record<string, unknown>>, answer: Answ
       source_refs: [...new Set(paragraphs.flatMap((entry) => entry.source_refs))],
     });
   }));
-}
-
-// What the prompt asks the model to say about stale data, said by the rendered
-// answer itself: the reported figures' age, and a quote's date.
-function stalenessNotes(toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>): string[] {
-  const structured = toolCalls.flatMap((toolCall) => {
-    const result = isRecord(toolCall.result) ? toolCall.result.structured_context : undefined;
-    return isRecord(result) ? [result] : [];
-  });
-  const ages = structured.flatMap((context) =>
-    isRecord(context.fact_recency) && context.fact_recency.stale === true && typeof context.fact_recency.age_days === "number"
-      ? [context.fact_recency.age_days]
-      : []
-  );
-  const quotes = structured.flatMap((context) =>
-    isRecord(context.quote) && context.quote.stale === true && typeof context.quote.as_of === "string" ? [context.quote.as_of] : []
-  );
-  return [
-    ...(ages.length > 0 ? [`The latest reported figures are ${Math.max(...ages)} days old and may be out of date.`] : []),
-    ...[...new Set(quotes)].map((asOf) =>
-      `The quote, as of ${new Date(asOf).toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" })}, may be out of date.`
-    ),
-  ];
 }

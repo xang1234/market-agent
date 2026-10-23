@@ -142,9 +142,6 @@ test("every case carries the figures the page's tables and charts show, a line p
     "AMD's revenue was $25.8B in FY2025.",
   ];
   assert.deepEqual(judgeCases(accepted, packet, []).map((judged) => judged.figures), [figures, figures]);
-  // A turn whose blocks show no figure answers from values no table shows: none is on the page.
-  const unshown: EvidencePacket = { ...PACKET, figures: PACKET.figures.map((figure) => ({ ...figure, displayed: false as const })) };
-  assert.deepEqual(judgeCases(accepted, unshown, []).map((judged) => judged.figures), [[], []]);
 });
 
 test("one judge call per answer, on JUDGE_LITELLM_MODEL, carries every inference with its supports' text; its reply is kept raw and read per inference", async () => {

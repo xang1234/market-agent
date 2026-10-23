@@ -11,10 +11,11 @@ import {
   composeAnalystBlocksWithLlm as composeAnswer,
   TITLE_DEADLINES,
   createLlmThreadTitleModel,
+  turnPacket,
 } from "../src/llm-runtime.ts";
 import { checkAssertions, MAX_ASSERTIONS, type AssertionReport, type Rejection } from "../src/assertions.ts";
-import type { EvidencePacket } from "../src/evidence-packet.ts";
-import { mayOfferOtherFacts, scopeGapBlocks } from "../src/fact-blocks.ts";
+import type { EvidencePacket, PacketFigure } from "../src/evidence-packet.ts";
+import { scopeGapBlocks } from "../src/local-runtime.ts";
 import { resolveResearchScope } from "../src/research-scope.ts";
 import { proposal } from "./scope-fixtures.ts";
 
@@ -29,7 +30,7 @@ const BASE_ENV = {
 const ALL_SHOWN = new Map(Array.from({ length: MAX_ASSERTIONS }, (_, i) => [i, "shown"] as const));
 const composeAnalystBlocksWithLlm = async (input: Parameters<typeof composeAnswer>[0]) => (await composeAnswer(input))(ALL_SHOWN);
 
-const FIGURES_FALLBACK = "The reported figures below come from the company's filings; select any value to see its source.";
+const NO_ANSWER = "No written answer is available for this question; try asking again.";
 
 test("createLlmThreadTitleModel delegates to the shared router", async () => {
   const calls: string[] = [];
@@ -406,28 +407,36 @@ const NARRATIVE_BLOCK = {
   kind: "rich_text",
   segments: [{ type: "text", text: "placeholder" }],
 };
-const FACT_BLOCKS = [{
-  id: "metric-row-1",
-  kind: "metric_row",
-  title: "Latest quarter (Q4 2026)",
-  items: [{ label: "Revenue", value_ref: "fact-1", format: "$62.1B" }],
+// The analyst's only figures: a comparison's year-to-date price chart (#398 D2).
+const PERF_BLOCKS = [{
+  id: "perf-1",
+  kind: "perf_comparison",
+  title: "Price return YTD 2026 (split-adjusted, excluding dividends)",
+  default_range: "YTD 2026: 2025-12-31 close to 2026-08-31 close",
+  subject_labels: ["NVDA", "AMD"],
+  source_refs: ["s-px"],
+  series: [
+    { name: "NVDA", points: [{ x: "2025-12-31", y: 0 }, { x: "2026-08-31", y: 5.81 }] },
+    { name: "AMD", points: [{ x: "2025-12-31", y: 0 }, { x: "2026-08-31", y: 3.17 }] },
+  ],
 }];
 
-test("the model is told which figures it may cite, by id and value", async () => {
+test("the model is told which figures it may cite, by id and value: its price chart's returns", async () => {
   let prompt = "";
   await composeAnalystBlocksWithLlm({
     env: BASE_ENV,
-    context: { userIntent: "Analyze NVDA", bundleId: "single_subject_analysis" },
+    context: { userIntent: "Compare NVDA with AMD YTD", bundleId: "peer_comparison" },
     blocks: [NARRATIVE_BLOCK],
     toolCalls: [],
-    factBlocks: FACT_BLOCKS,
+    factBlocks: PERF_BLOCKS,
     createClient: () => async (_deployment, request) => {
       prompt = request.messages.map((message) => message.content).join("\n");
-      return { text: "Revenue reached [[F1]] in Q4 2026." };
+      return { text: "NVDA returned [[F1]] this year." };
     },
   });
   assert.match(prompt, /evidence_packet/);
-  assert.match(prompt, /"id":"F1"[^}]*"value":"\$62\.1B"/);
+  assert.match(prompt, /"id":"F1"[^}]*"value":"5\.81%"/);
+  assert.match(prompt, /"id":"F2"[^}]*"value":"3\.17%"/);
 });
 
 async function composeWith(result: { text: string; truncated?: boolean }, factBlocks?: ReadonlyArray<Record<string, unknown>>) {
@@ -446,19 +455,18 @@ async function composeWith(result: { text: string; truncated?: boolean }, factBl
   return { text: (blocks[0].segments as Array<{ text: string }>)[0].text, reasoning };
 }
 
-test("an answer cut off at the token limit is never shown; the figures pointer is", async () => {
+test("an answer cut off at the token limit is never shown; the fallback sentence is", async () => {
   // The #124 baseline showed "...The displayed figures do not include a Q".
-  const { text, reasoning } = await composeWith({ text: "Gross margin fell. The displayed figures do not include a Q", truncated: true }, FACT_BLOCKS);
-  assert.match(text, /select any value to see its source/);
+  const { text, reasoning } = await composeWith({ text: "Gross margin fell. The displayed figures do not include a Q", truncated: true }, PERF_BLOCKS);
+  assert.equal(text, NO_ANSWER);
   assert.equal(reasoning, "low", "the answer asks for low reasoning effort");
 });
 
 test("an empty answer replaces the placeholder line instead of leaving it on screen", async () => {
-  assert.match((await composeWith({ text: "" }, FACT_BLOCKS)).text, /select any value to see its source/);
-  // No figures to point to: say there's no answer rather than show the placeholder.
-  const { text } = await composeWith({ text: "  " });
-  assert.notEqual(text, "placeholder");
-  assert.match(text, /No written answer is available/);
+  for (const factBlocks of [PERF_BLOCKS, undefined]) {
+    const { text } = await composeWith({ text: "  " }, factBlocks);
+    assert.equal(text, NO_ANSWER);
+  }
 });
 
 test("a thread title cut off at the token limit falls back instead of being saved", async () => {
@@ -469,19 +477,6 @@ test("a thread title cut off at the token limit falls back instead of being save
   await assert.rejects(async () => model({ userIntent: "Why did Apple sell off?", assistantText: "Margins compressed." }), /cut off/);
 });
 
-const COMPARISON_BLOCKS = [{
-  id: "comparison-1",
-  kind: "metrics_comparison",
-  title: "Side by side (latest fiscal year)",
-  subjects: [{ kind: "issuer", id: "issuer-nvda" }, { kind: "issuer", id: "issuer-amd" }],
-  subject_labels: ["NVDA", "AMD"],
-  metrics: ["Revenue", "Gross Margin"],
-  cells: [
-    [{ value_ref: "f1", format: "$130.5B" }, { value_ref: "f2", format: "74.6%" }],
-    [{ value_ref: "f3", format: "$25.8B" }, { value_ref: "f4", format: "49.2%" }],
-  ],
-}];
-
 async function compareWithReply(reply: string) {
   let prompt = "";
   await composeAnalystBlocksWithLlm({
@@ -489,7 +484,7 @@ async function compareWithReply(reply: string) {
     context: { userIntent: "Compare NVDA with AMD", bundleId: "peer_comparison" },
     blocks: [NARRATIVE_BLOCK],
     toolCalls: [],
-    factBlocks: COMPARISON_BLOCKS,
+    factBlocks: PERF_BLOCKS,
     createClient: () => async (_deployment, request) => {
       prompt = request.messages.map((message) => message.content).join("\n");
       return { text: reply };
@@ -502,11 +497,11 @@ test("the composer reports the deployment that wrote the answer (#183)", async (
   const answered: string[] = [];
   await composeAnalystBlocksWithLlm({
     env: BASE_ENV,
-    context: { userIntent: "Summarize revenue", bundleId: "single_subject_analysis" },
+    context: { userIntent: "Compare NVDA with AMD YTD", bundleId: "peer_comparison" },
     blocks: [NARRATIVE_BLOCK],
     toolCalls: [],
-    factBlocks: FACT_BLOCKS,
-    createClient: () => async () => ({ text: '```assertions\n[{"kind": "observation", "text": "Revenue was [[F1]].", "evidence": ["F1"]}]\n```' }),
+    factBlocks: PERF_BLOCKS,
+    createClient: () => async () => ({ text: '```assertions\n[{"kind": "observation", "text": "Returns.", "evidence": ["F1", "F2"]}]\n```' }),
     onAnswered: (deployment) => answered.push(deployment),
   });
   assert.deepEqual(answered, ["openai/gpt-4.1"]);
@@ -528,9 +523,9 @@ test("a fallback sentence shown in place of the answer was written by no model (
   };
   assert.deepEqual(await answeredBy({ text: "" }), [], "empty");
   assert.deepEqual(await answeredBy({ text: "Demand rose and", truncated: true }), [], "cut off");
-  assert.deepEqual(await answeredBy({ text: "NVDA's margin is 99.9%." }, COMPARISON_BLOCKS), [], "no list");
-  const both = '```assertions\n[{"kind": "observation", "text": "Gross margins.", "evidence": ["F2", "F4"]}]\n```';
-  assert.deepEqual(await answeredBy({ text: both }, COMPARISON_BLOCKS), ["openai/gpt-4.1"], "rendered");
+  assert.deepEqual(await answeredBy({ text: "NVDA returned 99.9%." }, PERF_BLOCKS), [], "no list");
+  const both = '```assertions\n[{"kind": "observation", "text": "Returns.", "evidence": ["F1", "F2"]}]\n```';
+  assert.deepEqual(await answeredBy({ text: both }, PERF_BLOCKS), ["openai/gpt-4.1"], "rendered");
 });
 
 test("the answer model sees a compact context, not raw tool JSON (#181)", async () => {
@@ -562,7 +557,7 @@ test("the answer model sees a compact context, not raw tool JSON (#181)", async 
     context: { userIntent: "Compare NVDA with AMD", bundleId: "peer_comparison" },
     blocks: [NARRATIVE_BLOCK],
     toolCalls: [toolCall],
-    factBlocks: [...COMPARISON_BLOCKS, gap],
+    factBlocks: [...PERF_BLOCKS, gap],
     createClient: () => async (_deployment, request) => {
       prompt = request.messages.at(-1)!.content;
       return { text: "NVDA is larger.", usage: { inputTokens: 900, outputTokens: 120, totalTokens: 1020, reasoningTokens: 80 } };
@@ -572,8 +567,8 @@ test("the answer model sees a compact context, not raw tool JSON (#181)", async 
   const context = JSON.parse(prompt) as Record<string, unknown>;
   assert.deepEqual(Object.keys(context).sort(), ["conversation", "evidence_packet", "question"].sort());
   const packet = context.evidence_packet as Record<string, unknown>;
-  // The figures carry short packet ids; the facts behind them stay server-side (#207).
-  assert.deepEqual((packet.figures as Array<{ id: string }>).map((figure) => figure.id), ["F1", "F2", "F3", "F4"]);
+  // The figures carry short packet ids; the series behind them stay server-side (#207).
+  assert.deepEqual((packet.figures as Array<{ id: string }>).map((figure) => figure.id), ["F1", "F2"]);
   // Each claim keeps its dates, so a past claim is not read as current, and a
   // short id: its claim and source ids stay server-side (#207).
   assert.deepEqual(packet.claims, [{
@@ -597,135 +592,10 @@ test("the answer model sees a compact context, not raw tool JSON (#181)", async 
   assert.deepEqual(usage, [{ input_tokens: 900, output_tokens: 120, reasoning_tokens: 80 }]);
 });
 
-const AVAILABLE_FACT = (n: number) => `f3020000-0000-4000-8000-00000000000${n}`;
-// A turn whose fact blocks show nothing, with a quote and two reported facts on file.
-const AVAILABLE_TOOL_CALL = {
-  tool_call_id: "tc-1",
-  tool_name: "research_lookup",
-  bundle_id: "single_subject_analysis",
-  status: "ok",
-  result: {
-    evidence_status: "available",
-    structured_context: {
-      quote: { ticker: "AAPL", price: 231.6, change_pct: 0.0078, currency: "USD", as_of: "2026-09-01T00:00:00.000Z", stale: false, session_state: "closed", delay_class: "eod", source_id: "s-quote" },
-      facts: [
-        { fact_id: AVAILABLE_FACT(1), metric_key: "revenue", display_name: "Revenue", value_num: 416.161, scale: 1e9, unit: "currency", currency: "USD", period_kind: "fiscal_y", fiscal_year: 2025, fiscal_period: "FY", as_of: "2025-10-31T00:00:00.000Z", source_id: "s-facts", coverage_level: "full" },
-        { fact_id: AVAILABLE_FACT(2), metric_key: "net_income", display_name: "Net income", value_num: 25, scale: 1e9, unit: "currency", currency: "USD", period_kind: "fiscal_q", fiscal_year: 2026, fiscal_period: "Q1", as_of: "2026-01-30T00:00:00.000Z", source_id: "s-facts", coverage_level: "partial" },
-        { fact_id: AVAILABLE_FACT(4), metric_key: "operating_income", display_name: "Operating income", value_num: 0, scale: 1e9, unit: "currency", currency: "USD", period_kind: "fiscal_q", fiscal_year: 2026, fiscal_period: "Q1", as_of: "2026-01-30T00:00:00.000Z", source_id: "s-facts", coverage_level: "unavailable" },
-        { fact_id: AVAILABLE_FACT(3), value_num: 1, unit: "pure", period_kind: "fiscal_y", fiscal_year: 2025, fiscal_period: "FY", source_id: "s-facts" },
-      ],
-    },
-  },
-} as never;
-
-test("with no figures shown, the turn's other values are packet figures with ids, none counted as displayed (#181, #302)", async () => {
-  let prompt = "";
-  const run = async (factBlocks?: ReadonlyArray<Record<string, unknown>>, availableData?: boolean) => {
-    await composeAnalystBlocksWithLlm({
-      env: BASE_ENV,
-      context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
-      blocks: [NARRATIVE_BLOCK],
-      toolCalls: [AVAILABLE_TOOL_CALL],
-      factBlocks,
-      ...(availableData === undefined ? {} : { availableData }),
-      createClient: () => async (_deployment, request) => {
-        prompt = request.messages.at(-1)!.content;
-        return { text: "AAPL trades at [[F1]]." };
-      },
-    });
-    return JSON.parse(prompt) as Record<string, unknown>;
-  };
-  const packetOf = (context: Record<string, unknown>) => context.evidence_packet as Record<string, unknown>;
-  const packet = packetOf(await run());
-  assert.deepEqual(packet.figures, [
-    { id: "F1", metric: "Price", value: "$231.60", as_of: "2026-09-01T00:00:00.000Z", displayed: false },
-    { id: "F2", metric: "Day change", value: "+0.78%", as_of: "2026-09-01T00:00:00.000Z", displayed: false },
-    { id: "F3", metric: "Revenue", period: "FY2025", value: "$416.2B", as_of: "2025-10-31T00:00:00.000Z", displayed: false },
-    // A partially covered period says so.
-    { id: "F4", metric: "Net income", period: "Q12026", value: "$25.0B", as_of: "2026-01-30T00:00:00.000Z", period_coverage: "partial", displayed: false },
-  ]);
-  assert.equal("available_data" in packet, false);
-  // Fresh is not live: an end-of-day or delayed quote says so.
-  assert.deepEqual(packet.staleness, {
-    quote: [{ ticker: "AAPL", as_of: "2026-09-01T00:00:00.000Z", stale: false, session_state: "closed", delay_class: "eod" }],
-  });
-  assert.ok(!prompt.includes("fact_id") && !prompt.includes('"source_id"') && !prompt.includes("binding"), "still compact: no ids");
-  // With figures shown, only those may be referenced.
-  assert.deepEqual((packetOf(await run(COMPARISON_BLOCKS)).figures as Array<{ id: string; value: string }>).map((figure) => `${figure.id} ${figure.value}`), ["F1 $130.5B", "F2 74.6%", "F3 $25.8B", "F4 49.2%"]);
-  // A turn asking only for a metric no reader serves gets the named gap, not
-  // other facts it could offer in that metric's place (#206).
-  const gap = { kind: "rich_text", segments: [{ type: "text", text: "Free cash flow is not available for AAPL in this data, so no other figure is shown in its place." }] };
-  const withheld = packetOf(await run([gap], false));
-  assert.deepEqual([withheld.figures, withheld.gaps], [[], [gap.segments[0]!.text]]);
-});
-
-test("with no figures shown, an available value renders from the packet, sealed to its fact (#302)", async () => {
-  const composed = await composeAnalystBlocksWithLlm({
-    env: BASE_ENV,
-    context: { userIntent: "How did AAPL do?", bundleId: "single_subject_analysis" },
-    blocks: [NARRATIVE_BLOCK],
-    toolCalls: [AVAILABLE_TOOL_CALL],
-    factBlocks: [],
-    createClient: () => async () => ({ text: withList([{ kind: "observation", text: "Net income was [[F4]].", evidence: ["F4"] }]) }),
-  });
-  const block = composed[0] as Record<string, unknown>;
-  const segments = block.segments as Array<{ type: string; text?: string; format?: string }>;
-  assert.equal(segments.map((segment) => segment.text ?? segment.format).join(""), "Net income was $25.0B in Q1 2026 (partial period).");
-  assert.deepEqual(segments.filter((segment) => segment.type === "ref"), [{ type: "ref", ref_kind: "fact", ref_id: AVAILABLE_FACT(2), format: "$25.0B" }]);
-  assert.deepEqual(block.data_ref, { params: { fact_bindings: [
-    { fact_id: AVAILABLE_FACT(2), unit: "currency", period_kind: "fiscal_q", fiscal_year: 2026, fiscal_period: "Q1" },
-  ] } });
-  assert.deepEqual(block.source_refs, ["s-facts"]);
-});
-
-test("with no figures shown, an assertion about an available value is checked against the packet, never left unchecked (#302)", async () => {
-  const reports: unknown[] = [];
-  const asOf = "2026-09-01T00:00:00.000Z";
-  const composed = await composeAnalystBlocksWithLlm({
-    env: BASE_ENV,
-    context: { userIntent: "How did AAPL do?", bundleId: "single_subject_analysis" },
-    blocks: [NARRATIVE_BLOCK],
-    toolCalls: [AVAILABLE_TOOL_CALL],
-    factBlocks: [],
-    scope: resolveResearchScope({ companies: [{ issuer_id: "60000000-0000-4000-8000-000000000003", label: "AAPL" }], prior: null, asOf, proposal: proposal() }),
-    cutoff: asOf,
-    createClient: () => async () => ({ text: withList([
-      { kind: "observation", text: "Net income was [[F4]].", evidence: ["F4"] },
-      { kind: "observation", text: "Revenue was [[F9]].", evidence: ["F9"] },
-    ]) }),
-    onAssertions: (report) => reports.push(report),
-  });
-  assert.deepEqual(reports, [{
-    status: "checked",
-    accepted: [{ index: 0, kind: "observation", text: "Net income was [[F4]].", evidence: ["F4"] }],
-    rejected: [{ index: 1, text: "Revenue was [[F9]].", check: "reference", reason: 'unknown evidence id "F9"' }],
-    rendered: true,
-  }]);
-  assert.equal((composed[0].segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join(""), "AAPL's net income was $25.0B in Q1 2026 (partial period).");
-});
-
-test("beside blocks that show no figures (a gap note), the quote renders from its assertion, dated to the day (#181, #302, #329 review)", async () => {
-  const gap = { kind: "rich_text", segments: [{ type: "text", text: "Year-to-date price performance is not shown." }] };
-  const blocks = await composeAnalystBlocksWithLlm({
-    env: BASE_ENV,
-    context: { userIntent: "How is AAPL doing YTD?", bundleId: "single_subject_analysis" },
-    blocks: [NARRATIVE_BLOCK],
-    toolCalls: [AVAILABLE_TOOL_CALL],
-    factBlocks: [gap],
-    createClient: () => async () => ({ text: withList([{ kind: "observation", text: "AAPL trades at [[F1]].", evidence: ["F1"] }]) }),
-  });
-  const segments = blocks[0]!.segments as Array<{ type: string; text?: string; format?: string }>;
-  assert.equal(segments.map((segment) => segment.text ?? segment.format).join(""), "Price was $231.60 as of Sep 1, 2026.");
-  // A quote is no stored fact, so its value is the packet's in plain text.
-  assert.deepEqual(segments.filter((segment) => segment.type === "ref"), []);
-});
-
 test("the model sees each comparison figure with the company and metric it belongs to", async () => {
   const { prompt } = await compareWithReply("NVDA leads.");
-  assert.ok(
-    prompt.includes(JSON.stringify({ id: "F4", company: "AMD", metric: "Gross Margin", value: "49.2%", shown_in: "Side by side (latest fiscal year)" })),
-    prompt,
-  );
+  const figure = { id: "F2", company: "AMD", metric: "Price return", period: PERF_BLOCKS[0]!.default_range, value: "3.17%", shown_in: PERF_BLOCKS[0]!.title };
+  assert.ok(prompt.includes(JSON.stringify(figure)), prompt);
 });
 
 // A provider that accepts the request and never answers. Its open connection keeps
@@ -802,11 +672,11 @@ test("an answer cut off inside its assertion list shows the fallback: the list d
     context: { userIntent: "Compare NVDA with AMD", bundleId: "peer_comparison" },
     blocks: [NARRATIVE_BLOCK],
     toolCalls: [],
-    factBlocks: COMPARISON_BLOCKS,
+    factBlocks: PERF_BLOCKS,
     createClient: () => async () => ({ text: "NVDA is larger.\n\n```assertions\n[{\"kind\":\"obs", truncated: true }),
     onAssertions: (report) => reports.push(report),
   });
-  assert.equal((composed[0].segments as Array<{ text: string }>)[0].text, FIGURES_FALLBACK);
+  assert.equal((composed[0].segments as Array<{ text: string }>)[0].text, NO_ANSWER);
   assert.deepEqual(reports.map((report) => report.status), ["malformed"]);
 });
 
@@ -828,6 +698,29 @@ const RENDER_BLOCKS = [{
     period_end: n < 3 ? "2026-01-25" : "2025-12-27", as_of: "2026-02-26T00:00:00.000Z", source_id: n < 3 ? "s-nvda" : "s-amd",
   })) } },
 }];
+// The composer reads any packet it is given (engine answers', answer-lab
+// traces'); these hold reported facts as a recorded turn's packet does, beside
+// the turn's own claims, and the blocks whose bindings seal each fact.
+function recorded(
+  figures: ReadonlyArray<PacketFigure>,
+  input: { toolCalls?: ReadonlyArray<never>; factBlocks?: ReadonlyArray<Record<string, unknown>> } = {},
+): EvidencePacket {
+  const packet = turnPacket({ toolCalls: input.toolCalls ?? [], factBlocks: input.factBlocks ?? [], cutoff: "2026-09-01T00:00:00.000Z" });
+  // A single company's figures name no company: they are all its own.
+  const shown = (company: string) => figures.some((figure) => figure.company === company) || (packet.companies.length === 1 && figures.length > 0);
+  return { ...packet, figures, coverage: packet.companies.map((company) => ({ company, status: shown(company) ? "shown" : "not_shown" })) };
+}
+const reported = (id: string, company: string | undefined, metric: string, period: string, period_end: string, value: string, fact_id: string): PacketFigure => ({
+  id, ...(company ? { company } : {}), metric, period, period_end, value, shown_in: "Side by side (latest fiscal year)", fact_id, source_ids: ["s-nvda", "s-amd"],
+});
+const RENDER_FIGURES = [
+  reported("F1", "NVDA", "Revenue", "FY2026", "2026-01-25", "$130.5B", FACT(1)),
+  reported("F2", "NVDA", "Gross Margin", "FY2026", "2026-01-25", "74.6%", FACT(2)),
+  reported("F3", "AMD", "Revenue", "FY2025", "2025-12-27", "$25.8B", FACT(3)),
+  reported("F4", "AMD", "Gross Margin", "FY2025", "2025-12-27", "49.2%", FACT(4)),
+];
+const RENDER_PACKET = recorded(RENDER_FIGURES, { factBlocks: RENDER_BLOCKS });
+
 async function renderWithReply(reply: string | { text: string; truncated: boolean }, env: Record<string, string> = BASE_ENV) {
   const reports: Array<Record<string, unknown>> = [];
   const blocks = await composeAnalystBlocksWithLlm({
@@ -836,6 +729,7 @@ async function renderWithReply(reply: string | { text: string; truncated: boolea
     blocks: [NARRATIVE_BLOCK],
     toolCalls: [],
     factBlocks: RENDER_BLOCKS,
+    packet: RENDER_PACKET,
     createClient: () => async () => (typeof reply === "string" ? { text: reply } : reply),
     onAssertions: (report) => reports.push(report as unknown as Record<string, unknown>),
   });
@@ -853,6 +747,7 @@ const A_TOOL_CALL = {
   status: "ok",
   result: { evidence: { claims: [{ claim_id: A_CLAIM, source_id: "s-a", text_canonical: "Management raised its outlook.", predicate: "guidance.change", polarity: "positive", published_at: "2026-02-25T00:00:00.000Z" }] } },
 } as never;
+const A_FIGURES = RENDER_FIGURES.slice(0, 2).map((figure) => ({ ...figure, company: "A" }));
 async function renderA(list: unknown[]) {
   const reports: Array<Record<string, unknown>> = [];
   const composed = await composeAnalystBlocksWithLlm({
@@ -861,6 +756,7 @@ async function renderA(list: unknown[]) {
     blocks: [NARRATIVE_BLOCK],
     toolCalls: [A_TOOL_CALL],
     factBlocks: A_BLOCKS,
+    packet: recorded(A_FIGURES, { toolCalls: [A_TOOL_CALL], factBlocks: A_BLOCKS }),
     createClient: () => async () => ({ text: withList(list) }),
     onAssertions: (report) => reports.push(report as unknown as Record<string, unknown>),
   });
@@ -907,19 +803,16 @@ test("a data gap the model writes never reaches the answer: what is missing is t
 const AMD = [{ issuer_id: "60000000-0000-4000-8000-000000000002", label: "AMD" }];
 const GAP_AS_OF = "2026-09-01T00:00:00.000Z";
 
-// The blocks, scope and offer local-runtime gives the answer for a scope with nothing shown.
+// The blocks and scope local-runtime gives the answer for a scope with nothing shown.
 function gapTurn(scope: ReturnType<typeof resolveResearchScope>) {
-  return {
-    scope,
-    factBlocks: scopeGapBlocks(scope, [], { snapshotId: "00000000-0000-4000-8000-0000000000aa", asOf: GAP_AS_OF }),
-    availableData: mayOfferOtherFacts(scope, []),
-  };
+  return { scope, factBlocks: scopeGapBlocks(scope, { snapshotId: "00000000-0000-4000-8000-0000000000aa", asOf: GAP_AS_OF }) };
 }
+const BENCHMARK = resolveResearchScope({ companies: AMD, prior: null, asOf: GAP_AS_OF, proposal: proposal({ asks: ["benchmark"] }) });
 
 test("a turn with no figure and only gap notes points to its notes, never the model's prose (#302)", async () => {
-  const turn = gapTurn(resolveResearchScope({ companies: AMD, prior: null, asOf: GAP_AS_OF, proposal: proposal({ metrics: ["free_cash_flow"] }) }));
-  assert.deepEqual(turn.factBlocks.map((block) => (block.segments as Array<{ text: string }>)[0]!.text), ["Free cash flow is not available for AMD in this data, so no other figure is shown in its place."]);
-  const prose = "It shows no operating cash flow, no capital expenditure and no free cash flow for AMD.";
+  const turn = gapTurn(BENCHMARK);
+  assert.deepEqual(turn.factBlocks.map((block) => (block.segments as Array<{ text: string }>)[0]!.text), ["A benchmark index is not in this data, so AMD is not compared with one."]);
+  const prose = "AMD beat the S&P 500 by 12 points.";
   const shown = async (env: Record<string, string>, reply: string, toolCalls: ReadonlyArray<never> = []) => {
     const answered: string[] = [];
     const composed = await composeAnalystBlocksWithLlm({
@@ -937,7 +830,7 @@ test("a turn with no figure and only gap notes points to its notes, never the mo
   assert.deepEqual(await shown(BASE_ENV, prose), pointer);
   // The data does not hold what was asked whatever the model replied.
   assert.deepEqual(await shown(BASE_ENV, ""), pointer);
-  assert.deepEqual(await shown(BASE_ENV, `${prose}\n\n\`\`\`assertions\n${JSON.stringify([{ kind: "data_gap", text: "No free cash flow is shown." }])}\n\`\`\``), pointer);
+  assert.deepEqual(await shown(BASE_ENV, `${prose}\n\n\`\`\`assertions\n${JSON.stringify([{ kind: "data_gap", text: "No benchmark is shown." }])}\n\`\`\``), pointer);
   // A claim the model attributes is an answer, rendered as such.
   assert.deepEqual(
     (await shown(BASE_ENV, withList([{ kind: "management_attribution", text: "Management raised its outlook.", evidence: ["C1"] }]), [A_TOOL_CALL])).segments,
@@ -977,11 +870,11 @@ test("a financial-engine answer's evidence follow-up never reads its note as mis
 });
 
 test("with claims on file but none rendered, a named gap's answer points to its note (#358 review)", async () => {
-  const turn = gapTurn(resolveResearchScope({ companies: AMD, prior: null, asOf: GAP_AS_OF, proposal: proposal({ metrics: ["free_cash_flow"] }) }));
+  const turn = gapTurn(BENCHMARK);
   const prose = "Management raised its outlook.";
   const composed = await composeAnalystBlocksWithLlm({
     env: BASE_ENV,
-    context: { userIntent: "What is AMD's free cash flow?", bundleId: "single_subject_analysis" },
+    context: { userIntent: "How does AMD compare with the S&P 500?", bundleId: "single_subject_analysis" },
     blocks: [NARRATIVE_BLOCK],
     toolCalls: [A_TOOL_CALL],
     ...turn,
@@ -991,12 +884,12 @@ test("with claims on file but none rendered, a named gap's answer points to its 
 });
 
 test("a named gap's empty list is the gap's answer, logged as the model's choice; with no gap named it is a failure (#374)", async (t) => {
-  const turn = gapTurn(resolveResearchScope({ companies: AMD, prior: null, asOf: GAP_AS_OF, proposal: proposal({ metrics: ["free_cash_flow"] }) }));
+  const turn = gapTurn(BENCHMARK);
   const info = t.mock.method(console, "info", () => {});
   const warn = t.mock.method(console, "warn", () => {});
   const composed = await composeAnalystBlocksWithLlm({
     env: BASE_ENV,
-    context: { userIntent: "What is AMD's free cash flow?", bundleId: "single_subject_analysis" },
+    context: { userIntent: "How does AMD compare with the S&P 500?", bundleId: "single_subject_analysis" },
     blocks: [NARRATIVE_BLOCK],
     toolCalls: [A_TOOL_CALL],
     ...turn,
@@ -1014,7 +907,7 @@ test("a named gap's empty list is the gap's answer, logged as the model's choice
 });
 
 test("when no assertion renders, the answer is the fixed fallback sentence, never the model's prose", async () => {
-  const fallback = [{ type: "text", text: "The reported figures below come from the company's filings; select any value to see its source." }];
+  const fallback = [{ type: "text", text: NO_ANSWER }];
   const prose = "NVDA earns more on each sale than AMD.";
   for (const reply of [
     prose,
@@ -1106,27 +999,7 @@ test("an inference resting on a management attribution renders (#302)", async ()
   assert.deepEqual(report.rejected, []);
 });
 
-test("a rendered answer keeps a stale-data warning; a sourced causal claim renders with no figures shown (#208)", async () => {
-  const stale = {
-    tool_call_id: "tc-1",
-    tool_name: "research_lookup",
-    status: "ok",
-    result: { structured_context: {
-      quote: { ticker: "NVDA", as_of: "2026-06-01T00:00:00.000Z", stale: true },
-      fact_recency: { latest_as_of: "2026-02-26T00:00:00.000Z", fiscal_year: 2026, fiscal_period: "FY", age_days: 190, stale: true },
-    } },
-  } as never;
-  const staleAnswer = await composeAnalystBlocksWithLlm({
-    env: BASE_ENV,
-    context: { userIntent: "Compare NVDA with AMD", bundleId: "peer_comparison" },
-    blocks: [NARRATIVE_BLOCK],
-    toolCalls: [stale],
-    factBlocks: RENDER_BLOCKS,
-    createClient: () => async () => ({ text: withList([{ kind: "observation", text: "NVDA's gross margin was [[F2]] and AMD's was [[F4]].", evidence: ["F2", "F4"] }]) }),
-  });
-  const staleText = (staleAnswer[0].segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join("");
-  assert.equal(staleText, "NVDA's gross margin was 74.6% in FY2026 (ended Jan 2026); AMD's gross margin was 49.2% in FY2025 (ended Dec 2025).\n\nThe latest reported figures are 190 days old and may be out of date. The quote, as of Jun 2026, may be out of date.");
-
+test("a sourced causal claim renders with no figures shown (#208)", async () => {
   const claimId = "c2080000-0000-4000-8000-000000000002";
   const causal = {
     tool_call_id: "tc-2",
@@ -1168,14 +1041,16 @@ test("a rendered inference is words only: one with a figure, typed or referenced
   ]);
 });
 
+const NVDA_ONLY = recorded(RENDER_FIGURES.slice(0, 2), { factBlocks: RENDER_BLOCKS });
+
 test("a rendered answer says which compared companies it shows no figures for (#208)", async () => {
-  const nvdaOnly = [{ ...RENDER_BLOCKS[0]!, cells: [RENDER_BLOCKS[0]!.cells[0]!, [null, null]] }];
   const composed = await composeAnalystBlocksWithLlm({
     env: BASE_ENV,
     context: { userIntent: "Compare NVDA with AMD", bundleId: "peer_comparison" },
     blocks: [NARRATIVE_BLOCK],
     toolCalls: [],
-    factBlocks: nvdaOnly,
+    factBlocks: RENDER_BLOCKS,
+    packet: NVDA_ONLY,
     createClient: () => async () => ({ text: withList([{ kind: "observation", text: "NVDA's gross margin was [[F2]].", evidence: ["F2"] }]) }),
   });
   const text = (composed[0].segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join("");
@@ -1183,7 +1058,6 @@ test("a rendered answer says which compared companies it shows no figures for (#
 });
 
 test("a cited claim about a compared company does not drop the note that no figures are shown for it (#302 review)", async () => {
-  const nvdaOnly = [{ ...RENDER_BLOCKS[0]!, cells: [RENDER_BLOCKS[0]!.cells[0]!, [null, null]] }];
   const amdClaim = {
     tool_call_id: "tc-amd",
     tool_name: "research_lookup",
@@ -1195,7 +1069,8 @@ test("a cited claim about a compared company does not drop the note that no figu
     context: { userIntent: "Compare NVDA with AMD", bundleId: "peer_comparison" },
     blocks: [NARRATIVE_BLOCK],
     toolCalls: [amdClaim],
-    factBlocks: nvdaOnly,
+    factBlocks: RENDER_BLOCKS,
+    packet: recorded(RENDER_FIGURES.slice(0, 2), { toolCalls: [amdClaim], factBlocks: RENDER_BLOCKS }),
     createClient: () => async () => ({ text: withList([
       { kind: "observation", text: "NVDA's gross margin was [[F2]].", evidence: ["F2"] },
       { kind: "management_attribution", text: "AMD expects data center growth.", evidence: ["C1"] },
@@ -1243,7 +1118,7 @@ test("a rendered comparison covers every company it shows figures for, and warns
   const oneSided = await renderWithReply(withList([{ kind: "observation", text: "NVDA's gross margin was [[F2]].", evidence: ["F2"] }]));
   assert.deepEqual(
     { segments: oneSided.block.segments, rendered: oneSided.report.rendered, accepted: oneSided.report.accepted, rejected: oneSided.report.rejected },
-    { segments: [{ type: "text", text: FIGURES_FALLBACK }], rendered: undefined, accepted: [], rejected: [nvdaMargin] },
+    { segments: [{ type: "text", text: NO_ANSWER }], rendered: undefined, accepted: [], rejected: [nvdaMargin] },
   );
   // An inference shows no figure, so its evidence covers no company: AMD still has none on the page.
   const inferred = await renderWithReply(withList([
@@ -1253,24 +1128,26 @@ test("a rendered comparison covers every company it shows figures for, and warns
   assert.deepEqual(
     { segments: inferred.block.segments, rendered: inferred.report.rendered, rejected: inferred.report.rejected },
     {
-      segments: [{ type: "text", text: FIGURES_FALLBACK }],
+      segments: [{ type: "text", text: NO_ANSWER }],
       rendered: undefined,
       rejected: [nvdaMargin, { index: 1, text: "> **Analyst inference on NVDA:** It keeps more of each sale.", check: "rendering", reason: leftOut }],
     },
   );
   // A claim on AMD covers AMD's side, whatever its words.
   const reports: AssertionReport[] = [];
+  const amdDemand = {
+    tool_call_id: "tc-1",
+    tool_name: "research_lookup",
+    status: "ok",
+    result: { evidence: { claims: [{ claim_id: A_CLAIM, source_id: "s-a", text_canonical: "Data center demand doubled.", predicate: "kpi.commentary", polarity: "positive", subject_id: "issuer-amd" }] } },
+  } as never;
   const claimedSide = await composeAnalystBlocksWithLlm({
     env: BASE_ENV,
     context: { userIntent: "Compare NVDA with AMD", bundleId: "peer_comparison" },
     blocks: [NARRATIVE_BLOCK],
-    toolCalls: [{
-      tool_call_id: "tc-1",
-      tool_name: "research_lookup",
-      status: "ok",
-      result: { evidence: { claims: [{ claim_id: A_CLAIM, source_id: "s-a", text_canonical: "Data center demand doubled.", predicate: "kpi.commentary", polarity: "positive", subject_id: "issuer-amd" }] } },
-    } as never],
+    toolCalls: [amdDemand],
     factBlocks: RENDER_BLOCKS,
+    packet: recorded(RENDER_FIGURES, { toolCalls: [amdDemand], factBlocks: RENDER_BLOCKS }),
     createClient: () => async () => ({ text: withList([
       { kind: "observation", text: "NVDA's gross margin was [[F2]].", evidence: ["F2"] },
       { kind: "management_attribution", text: "Demand doubled.", evidence: ["C1"] },
@@ -1282,16 +1159,14 @@ test("a rendered comparison covers every company it shows figures for, and warns
     rejected: [],
   });
 
-  const sameYear = [{
-    ...RENDER_BLOCKS[0]!,
-    data_ref: { ...RENDER_BLOCKS[0]!.data_ref, params: { fact_bindings: RENDER_BLOCKS[0]!.data_ref.params.fact_bindings.map((binding) => ({ ...binding, fiscal_year: 2026 })) } },
-  }];
+  const sameYear = RENDER_FIGURES.map((figure) => ({ ...figure, period: "FY2026" }));
   const composed = await composeAnalystBlocksWithLlm({
     env: BASE_ENV,
     context: { userIntent: "Compare NVDA with AMD", bundleId: "peer_comparison" },
     blocks: [NARRATIVE_BLOCK],
     toolCalls: [],
-    factBlocks: sameYear,
+    factBlocks: RENDER_BLOCKS,
+    packet: recorded(sameYear, { factBlocks: RENDER_BLOCKS }),
     createClient: () => async () => ({ text: withList([
       { kind: "observation", text: "NVDA's gross margin was [[F2]].", evidence: ["F2"] },
       { kind: "observation", text: "AMD's gross margin was [[F4]].", evidence: ["F4"] },
@@ -1310,6 +1185,7 @@ test("a rendered answer says when more claims matched, or none could be read (#2
     blocks: [NARRATIVE_BLOCK],
     toolCalls: [truncated as never],
     factBlocks: A_BLOCKS,
+    packet: recorded(A_FIGURES, { toolCalls: [truncated as never], factBlocks: A_BLOCKS }),
     createClient: () => async () => ({ text: withList([{ kind: "management_attribution", text: "Management raised its outlook.", evidence: ["C1"] }]) }),
   });
   const text = (composed[0].segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join("");
@@ -1322,6 +1198,7 @@ test("a rendered answer says when more claims matched, or none could be read (#2
     blocks: [NARRATIVE_BLOCK],
     toolCalls: [unreadable],
     factBlocks: RENDER_BLOCKS,
+    packet: recorded(RENDER_FIGURES, { toolCalls: [unreadable], factBlocks: RENDER_BLOCKS }),
     createClient: () => async () => ({ text: withList([{ kind: "observation", text: "NVDA's gross margin was [[F2]] and AMD's was [[F4]].", evidence: ["F2", "F4"] }]) }),
   });
   assert.match((answer[0].segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join(""), /\n\nResearch claims could not be read for this answer\.$/);
@@ -1363,6 +1240,8 @@ test("a ranking of price returns read off their chart renders (#301)", async () 
     blocks: [NARRATIVE_BLOCK],
     toolCalls: [],
     factBlocks: [...RENDER_BLOCKS, perf],
+    // A recorded packet's reported facts, then the chart's returns.
+    packet: recorded([...RENDER_FIGURES, ...turnPacket({ toolCalls: [], factBlocks: [perf] }).figures.map((figure, index) => ({ ...figure, id: `F${5 + index}` }))], { factBlocks: [...RENDER_BLOCKS, perf] }),
     createClient: () => async () => ({ text: withList([
       { kind: "comparison", op: "highest", result: "F5", text: "NVDA's price return was highest.", evidence: ["F5", "F6"] },
       { kind: "observation", text: "NVDA's gross margin was [[F2]] and AMD's was [[F4]].", evidence: ["F2", "F4"] },
@@ -1459,6 +1338,9 @@ test("a single company's checked trend and low render (#208)", async () => {
     blocks: [NARRATIVE_BLOCK],
     toolCalls: [],
     factBlocks: [trendRow],
+    packet: recorded(quarters.map(([period, period_end, value], n) => ({
+      id: `F${n + 1}`, metric: "Operating margin", period, period_end, value, shown_in: trendRow.title, fact_id: id(n), source_ids: ["s-amd"],
+    })), { factBlocks: [trendRow] }),
     createClient: () => async () => ({ text: withList([
       { kind: "comparison", op: "trend", result: "rebounded", text: "AMD's operating margin rebounded.", evidence: ["F1", "F2", "F3", "F4"] },
       { kind: "comparison", op: "lowest", result: "F2", text: "Q2 2025 was the low.", evidence: ["F1", "F2", "F3", "F4"] },
@@ -1483,7 +1365,7 @@ test("a rejected comparison never falls back to the model's prose (#286 review)"
   ]) + "\n```";
   const { block, report } = await renderWithReply(reply);
   const text = (block.segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join("");
-  assert.equal(text, FIGURES_FALLBACK);
+  assert.equal(text, NO_ANSWER);
   assert.equal(report.rendered, undefined);
 });
 
