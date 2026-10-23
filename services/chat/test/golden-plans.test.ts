@@ -4,26 +4,13 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createRuntimeAuthority, operationDependencies, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
-import { buildDeterministicPlan, planFinancialRequest, type PlanningContext, type PlanningModel, type PlanningResult, type RequestedSubject } from "../../financial-engine/src/planner.ts";
+import { buildDeterministicPlan, planFinancialRequest, type PlanningContext, type PlanningModel, type PlanningResult } from "../../financial-engine/src/planner.ts";
 import type { CandidatePage, CandidateRequest, FinancialEvidencePort, InputCandidate, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
-import {
-  allResolved,
-  keptFigures,
-  LATEST,
-  marginTrendSubjects,
-  overviewOmissions,
-  overviewPeers,
-  overviewSubjects,
-  planCompanyOverview,
-  planMarginTrend,
-  planScopeFigures,
-  readPeriod,
-  type ReadPeriod,
-} from "../src/company-overview.ts";
+import { overviewOmissions, overviewPeers, planCompanyOverview, planMarginTrend } from "../src/company-overview.ts";
+import { LATEST, planScopeFigures, type ReadPeriod } from "../src/scope-figures.ts";
 import { MAX_TURN_SUBJECTS } from "../src/coordinator.ts";
 import { uncoveredAsks } from "../src/financial-runtime.ts";
-import { resolveResearchScope } from "../src/research-scope.ts";
 import { parseProposal, proposalQuestion } from "../src/scope-proposal.ts";
 import { extractSubjectMentions } from "../src/subject-extraction.ts";
 import { GOLDEN_AS_OF, GOLDEN_COMPANIES } from "./golden/dataset.ts";
@@ -170,10 +157,10 @@ const omissions = (plan: FinancialPlanV1, evidence: FinancialEvidencePort) => ov
   return GOLDEN_COMPANIES.find((company) => company.issuer_id === member.subject_ref.id)!.legal_name;
 });
 
-async function overviewOf(question: string, pages: (ticker: string) => CandidatePage, plan = planCompanyOverview) {
+async function overviewOf(question: string, pages: (ticker: string) => CandidatePage, plan: typeof planCompanyOverview = (context, evidence) => planCompanyOverview(context, evidence, LATEST)) {
   const tickerOf = (issuerId: string) => GOLDEN_COMPANIES.find((company) => company.issuer_id === issuerId)!.ticker;
   const evidence = { listInputCandidates: async (request: CandidateRequest) => pages(tickerOf(request.subject.id)) } as FinancialEvidencePort;
-  const planned = await plan(planningContext(question), evidence);
+  const planned = await plan(planningContext(question), evidence, LATEST);
   if (planned === null) return null;
   assert.equal(planned.outcome, "ready", JSON.stringify(planned));
   return { outputs: outputLabels(planned.plan), uncovered: await omissions(planned.plan, evidence) };
@@ -185,7 +172,7 @@ test("a company's overview shows its eight quarters to the newest it reported re
   const requests: CandidateRequest[] = [];
   const overview = async (page: CandidatePage) => {
     const evidence = { listInputCandidates: async (request: CandidateRequest) => (requests.push(request), page) } as FinancialEvidencePort;
-    const planned = await planCompanyOverview(planningContext("NVDA"), evidence);
+    const planned = await planCompanyOverview(planningContext("NVDA"), evidence, LATEST);
     if (planned === null) return null;
     assert.equal(planned.outcome, "ready", JSON.stringify(planned));
     const { plan, model_calls } = planned;
@@ -296,7 +283,7 @@ test("a comparison shows each company's latest quarter, named from the newest it
   const compare = async (question: string, pages: Record<string, CandidatePage> = PAGES) => {
     const requests: CandidateRequest[] = [];
     const evidence = { listInputCandidates: async (request: CandidateRequest) => (requests.push(request), pages[tickerOf(request.subject.id)]!) } as FinancialEvidencePort;
-    const planned = await planCompanyOverview(planningContext(question), evidence);
+    const planned = await planCompanyOverview(planningContext(question), evidence, LATEST);
     const reads = requests.map(({ subject, metric_key, fiscal_year, fiscal_period }) => [tickerOf(subject.id), subject.kind, metric_key, fiscal_year, fiscal_period]);
     if (planned === null) return { planned, reads };
     assert.equal(planned.outcome, "ready", JSON.stringify(planned));
@@ -369,7 +356,7 @@ test("a comparison shows each company's latest quarter, named from the newest it
       return PAGES[tickerOf(request.subject.id)]!;
     },
   } as FinancialEvidencePort;
-  assert.notEqual(await planCompanyOverview(planningContext("NVDA, AMD and AAPL"), oneAtATime), null);
+  assert.notEqual(await planCompanyOverview(planningContext("NVDA, AMD and AAPL"), oneAtATime, LATEST), null);
   assert.equal(most, 1, "one read at a time on the request's one client");
 
   assert.deepEqual((await compare("NVDA and AMD", { ...PAGES, AMD: candidatePage(revenueCandidate(2025, "FY", "2024-12-29", "2025-12-27")) })).planned, null, "a company that reported no quarter");
@@ -438,82 +425,6 @@ test("a follow-up's kept figures are each chat metric's engine figures at the pe
   for (const metrics of [["market_cap"], ["eps_diluted", "pe_ratio"], ["ebitda"], []]) assert.equal(await figures("AMD", metrics, LATEST), null, JSON.stringify(metrics));
 });
 
-test("a reading's period: a follow-up keeps its scope's, a question of its own reads the latest, and one no fiscal field holds is the planner's (#398)", () => {
-  const scope = (fiscal_year: number | null, fiscal_quarter: { fiscal_year: number; fiscal_period: string } | null = null) => ({ fiscal_year, fiscal_quarter });
-  const own = { kind: "as_named", names: ["NVDA"] } as const;
-  const period = (read: ReturnType<typeof reading>, scoped = scope(null)) => readPeriod(read, scoped);
-  assert.deepEqual(period(reading([])), LATEST);
-  assert.deepEqual(period(reading([]), scope(2025)), { kind: "fiscal_year", fiscal_year: 2025 });
-  assert.deepEqual(period(reading([]), scope(2025, { fiscal_year: 2025, fiscal_period: "Q2" })), { kind: "fiscal_quarter", fiscal_year: 2025, fiscal_period: "Q2" });
-  assert.deepEqual(period({ ...reading([]), companies: own }, scope(2025)), LATEST, "a question of its own");
-  assert.deepEqual(period(reading([], [], [], [], { kind: "latest" }), scope(2025)), LATEST);
-  const q2 = reading([], [], [], [], { kind: "fiscal_quarter", fiscal_period: "Q2", fiscal_year: null });
-  assert.deepEqual(period(q2), { kind: "fiscal_quarter", fiscal_period: "Q2", fiscal_year: null });
-  assert.deepEqual(period(q2, scope(2025, { fiscal_year: 2025, fiscal_period: "Q2" })), { kind: "fiscal_quarter", fiscal_period: "Q2", fiscal_year: 2025 }, "the year the scope gives it");
-  assert.equal(period(reading([], [], [], [], { kind: "trailing_twelve_months" })), null);
-
-  const kept = (read: ReturnType<typeof reading>, ...metrics: string[]) => keptFigures(read, { metrics: metrics.map((metric_key) => ({ metric_key, label: metric_key, available: true })) });
-  assert.deepEqual(kept(q2, "free_cash_flow", "capex"), ["free_cash_flow", "capex"]);
-  assert.deepEqual(kept(reading(["explains"]), "eps_diluted"), ["eps_diluted"]);
-  assert.equal(kept(q2, "income_statement"), null, "the overview shows them");
-  assert.equal(kept({ ...q2, companies: own }, "free_cash_flow"), null, "a question of its own");
-  assert.equal(kept(reading(["margins"]), "free_cash_flow"), null, "a figure asked for");
-  assert.deepEqual(kept({ ...reading([]), turns_off: { facets: new Set(), metrics: new Set(["capex"]) } }, "free_cash_flow"), ["free_cash_flow"], "its scope has turned the rest off");
-});
-
-test("a question about its companies, named or carried, that asks for no figure is answered with their overview, or one company's with its peers; one about a figure or a period is not (#398)", async () => {
-  const client = await createReplayLlmChatClient(REPLIES);
-  const read = async (question: string) => parseProposal((await client({} as never, { messages: [{ role: "user", content: proposalQuestion(question) }] })).text, question);
-  const AMD = GOLDEN_COMPANIES.find((company) => company.ticker === "AMD")!;
-  const amd = async (): Promise<RequestedSubject[]> => [{ mention: AMD.issuer_id, resolution: { status: "resolved", subject_ref: { kind: "issuer", id: AMD.issuer_id }, label: AMD.legal_name } }];
-  const none = async () => [];
-  const overview = async (question: string, { read: readQuestion = read, peersOf = none as typeof amd } = {}) => {
-    const subjects = planningContext(question).requested_subjects;
-    if (!allResolved(subjects)) return null;
-    const proposal = await readQuestion(question);
-    const scope = resolveResearchScope({ companies: [], prior: null, asOf: GOLDEN_AS_OF, proposal });
-    return (await overviewSubjects(subjects, proposal, scope, peersOf))?.map((subject) => subject.mention) ?? null;
-  };
-  for (const ticker of ["NVDA", "AMD", "AAPL"]) assert.deepEqual(await overview(`Analyze ${ticker}`), [ticker], ticker);
-  for (const question of ["Compare NVDA with AMD", "Compare NVDA and AMD again"]) assert.deepEqual(await overview(question), ["NVDA", "AMD"], question);
-  const peers = "How does NVDA compare with its peers?";
-  assert.deepEqual(await overview(peers, { peersOf: amd }), ["NVDA", AMD.issuer_id], "NVDA, then its peers");
-  assert.equal(await overview(peers), null, "no peer resolves");
-  const scripted = (proposal: ReturnType<typeof reading>) => ({ read: async () => proposal });
-  assert.equal(await overview("Compare NVDA and AMD with their peers", { ...scripted(reading(["peers"])), peersOf: amd }), null, "peers of two named companies");
-  assert.deepEqual(await overview("Analyze NVDA and AMD", scripted(reading([]))), ["NVDA", "AMD"], "two companies");
-  assert.equal(await overview("Analyze NVDA", scripted(reading([], ["income_statement"]))), null, "a metric");
-  assert.equal(await overview("Compare NVDA with AMD", scripted(reading([], ["income_statement"]))), null, "a metric in a comparison");
-  assert.equal(await overview("Analyze NVDA, no margins", scripted(reading([], [], [], ["margins"]))), null, "a facet turned off");
-  assert.equal(await overview("Compare NVDA with AMD", scripted(reading([], [], [], ["margins"]))), null, "a facet turned off in a comparison");
-  assert.equal(await overview("Analyze NVDA", scripted({ ...reading([]), turns_off: { facets: new Set(), metrics: new Set(["revenue"]) } })), null, "a metric turned off");
-  assert.deepEqual(await overview("Explain the differences between NVDA and AMD", scripted(reading(["explains"]))), ["NVDA", "AMD"], "an explanation, which the commentary gives");
-  assert.deepEqual(await overview("Analyze NVDA without peers", scripted(reading([], [], [], ["peers"]))), ["NVDA"], "a facet the overview does not show turned off");
-  assert.equal(await overview("Analyze NVDA", scripted(reading(["explains", "margins"]))), null, "an explanation of a figure");
-  assert.deepEqual(await overview("Analyze NVDA's most recent results", scripted(reading([], [], [], [], { kind: "latest" }))), ["NVDA"], "the latest period");
-  const subjects = planningContext("Analyze NVDA").requested_subjects;
-  assert.equal(await overviewSubjects(subjects, reading([]), null, none), null, "a scope that failed to resolve");
-  // A fiscal period is the overview at it (planCompanyOverview); a price window, or a period no fiscal field holds, is not.
-  const periods: Array<[string, ReturnType<typeof reading>, boolean]> = [
-    ["in fiscal 2025", reading([], [], [], [], { kind: "fiscal_year", fiscal_year: 2025 }), true],
-    ["for Q4 2025", reading([], [], [], [], { kind: "fiscal_quarter", fiscal_period: "Q4", fiscal_year: 2025 }), true],
-    ["for Q3", reading([], [], [], [], { kind: "fiscal_quarter", fiscal_period: "Q3", fiscal_year: null }), true],
-    ["YTD", reading(["price_window"]), false],
-    ["over the last twelve months", reading([], [], [], [], { kind: "trailing_twelve_months" }), false],
-    ["since 2021", reading([], [], [], [], { kind: "range" }), false],
-  ];
-  for (const [period, read, shown] of periods) {
-    assert.deepEqual(await overview(`Analyze NVDA ${period}`, scripted(read)), shown ? ["NVDA"] : null, period);
-    assert.deepEqual(await overview(`Compare NVDA and AMD ${period}`, scripted(read)), shown ? ["NVDA", "AMD"] : null, `a comparison ${period}`);
-  }
-  const yearToDate = "Compare it with AMD YTD";
-  assert.deepEqual(
-    [allResolved(planningContext(yearToDate).requested_subjects), await overviewSubjects(planningContext(yearToDate).requested_subjects, await read(yearToDate), null, none)],
-    [true, null],
-    "the golden conversation's comparison asks for a price window",
-  );
-});
-
 test("a question about one company's margin trend plans its three margins over the charted quarters, each with its high and low, with no model (#398)", async () => {
   const quarters = GOLDEN_COMPANIES.find((company) => company.ticker === "NVDA")!.quarters.map((quarter) => `${quarter.fiscal_period} ${quarter.fiscal_year}`);
   const MARGINS = [["gross_margin", "gross_profit"], ["operating_margin", "operating_income"], ["net_margin", "net_income"]] as const;
@@ -525,32 +436,6 @@ test("a question about one company's margin trend plans its three margins over t
     ],
     uncovered: [],
   });
-
-  const subjects = planningContext("NVDA").requested_subjects;
-  const scope = { margin_trend: false, metrics: [] };
-  const trend = (proposal: ReturnType<typeof reading>, over = subjects, scoped: { margin_trend: boolean; metrics: unknown[] } | null = scope) =>
-    marginTrendSubjects(over, proposal, scoped as never)?.map((subject) => subject.mention) ?? null;
-  assert.deepEqual(trend(reading(["margin_trend"], ["income_statement"], ["operating_margin"])), ["NVDA"], "one margin over time");
-  assert.deepEqual(trend(reading(["margins", "margin_trend", "explains"])), ["NVDA"], "margins over time and why");
-  assert.deepEqual(trend(reading(["margin_trend"], [], [], [], { kind: "latest" })), ["NVDA"], "the latest periods");
-  assert.equal(trend(reading(["margins"])), null, "margins, not their trend");
-  assert.equal(trend(reading(["margin_trend", "segments"])), null, "segments too");
-  assert.equal(trend(reading(["margin_trend"], [], ["revenue"])), null, "another income item");
-  assert.equal(trend(reading(["margin_trend"], ["free_cash_flow"])), null, "another metric");
-  assert.equal(trend(reading(["margin_trend"], [], [], [], { kind: "fiscal_quarter", fiscal_period: "Q2", fiscal_year: 2025 })), null, "a named quarter");
-  assert.equal(trend(reading(["margin_trend"], [], [], ["margins"])), null, "margins turned off");
-  assert.equal(trend(reading(["margin_trend"]), planningContext("NVDA and AMD").requested_subjects), null, "two companies");
-  assert.equal(trend(reading(["margin_trend"]), subjects, null), null, "no scope");
-  // A follow-up naming only another period keeps the trend its scope holds; one naming no period, or a company of its own, does not.
-  const kept = { margin_trend: true, metrics: [{ metric_key: "income_statement" }] };
-  const q2 = { kind: "fiscal_quarter", fiscal_period: "Q2", fiscal_year: null };
-  assert.deepEqual(trend(reading([], [], [], [], q2), subjects, kept), ["NVDA"], "what about Q2");
-  assert.deepEqual(trend(reading([], [], [], [], { kind: "fiscal_year", fiscal_year: 2025 }), subjects, kept), ["NVDA"], "and fiscal 2025");
-  assert.equal(trend(reading([]), subjects, kept), null, "no other period");
-  assert.equal(trend(reading([], [], [], [], q2), subjects, scope), null, "no trend kept");
-  assert.equal(trend({ ...reading([], [], [], [], q2), companies: { kind: "as_named", names: ["NVDA"] } }, subjects, kept), null, "a question of its own");
-  assert.equal(trend(reading([], [], [], [], q2), subjects, { margin_trend: true, metrics: [{ metric_key: "free_cash_flow" }] }), null, "a figure the trend does not show");
-  assert.equal(marginTrendSubjects(subjects, null, scope), null, "no reading");
 });
 
 test("a margin trend whose quarters cannot be read says so as a margin trend, and the planner answers (#398)", async (t) => {

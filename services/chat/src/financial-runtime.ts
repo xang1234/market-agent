@@ -43,30 +43,17 @@ import { publishRequest, type RequestGap } from "../../financial-engine/src/requ
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { comparedAdditions, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId, stableUuid } from "./chat-ids.ts";
-import {
-  allResolved,
-  keptFigures,
-  marginTrendSubjects,
-  overviewOmissions,
-  overviewPeers,
-  overviewSubjects,
-  planCompanyOverview,
-  planMarginTrend,
-  planScopeFigures,
-  readPeriod,
-  type PeersOf,
-  type ReadPeriod,
-} from "./company-overview.ts";
+import { allResolved, overviewOmissions, overviewPeers, planCompanyOverview, planMarginTrend, type PeersOf } from "./company-overview.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { companyKey, extractSubjectMentions } from "./subject-extraction.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "./subjects.ts";
+import { planScopeFigures, routeTurn, type PlanChoice, type ReadPeriod } from "./scope-figures.ts";
 import {
   BALANCE_SHEET_ITEMS,
   companyWordsIn,
   PROPOSABLE_METRICS,
   proposedMetric,
   readingAsks,
-  type CompanyChange,
   type IncomeItem,
   type RequestedMetric,
   type ResearchScope,
@@ -140,54 +127,6 @@ export type ChatFinancialRuntimeDeps = Readonly<{
   commentary?: (db: SqlExecutor, input: CommentaryRequest) => Promise<void>;
 }>;
 
-// The lane each facet asks for, when a question names no metric: a figure
-// the engine shows, something only the analyst path answers (the previous
-// answer's evidence, guidance from claims, market data per #398 D2), or neither.
-const FACET_LANE: Readonly<Record<ScopeFacet, "figure" | "analyst" | "neutral">> = {
-  peers: "neutral",
-  segments: "figure",
-  margins: "figure",
-  margin_trend: "figure",
-  price_window: "analyst",
-  benchmark: "analyst",
-  guidance: "analyst",
-  explains: "neutral",
-  evidence: "analyst",
-  latest_quarter: "neutral",
-};
-
-// The companies a reading's change names, whatever it does with them.
-function namedCompanies(change: CompanyChange): number {
-  switch (change.kind) {
-    case "compare":
-      return change.add.length;
-    case "drop":
-      return change.drop.length + change.add.length;
-    default:
-      return change.names.length;
-  }
-}
-
-// The analyst path keeps a turn that asks for no figure but something only it
-// answers; a follow-up whose scope keeps guidance; one that names no period and
-// whose scope keeps market data; and a follow-up that names no company and no
-// period, turns nothing off, and asks for nothing but an explanation ("Why?",
-// "thanks"). Every other turn about a company is the engine's, its figures
-// planned from its reading and scope.
-function leftToAnalyst(reading: ScopeProposal | null, scope: ResearchScope | null): boolean {
-  if (reading === null) return false;
-  const { asks, offFacets, offMetrics } = readingAsks(reading);
-  if (reading.metrics.some((metric) => !offMetrics.has(metric.metric_key)) || reading.income_items.length > 0) return false;
-  const lanes = [...asks].map((facet) => FACET_LANE[facet]);
-  if (lanes.includes("figure")) return false;
-  if (lanes.includes("analyst")) return true;
-  const ownCompanies = reading.companies.kind === "as_named" && reading.companies.names.length > 0;
-  if (scope?.guidance === true && !ownCompanies) return true;
-  if (reading.period.kind !== "none") return false;
-  if (scope !== null && (scope.price_window !== null || scope.benchmark)) return true;
-  return namedCompanies(reading.companies) === 0 && offFacets.size === 0 && offMetrics.size === 0 && [...asks].every((facet) => facet === "explains");
-}
-
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const MAX_PLANNING_MODEL_CALLS = 2;
 
@@ -238,14 +177,13 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       `select blocks->0->>'kind' as kind from chat_messages where message_id = $1::uuid`,
       [messageId],
     );
-    const run = (requested: TurnCompanies, reading: ScopeProposal | null, scope: ResearchScope | null) => async (): Promise<ChatFinancialTurn> => {
+    const run = (requested: TurnCompanies, reading: ScopeProposal | null, scope: ResearchScope | null, choice: PlanChoice) => async (): Promise<ChatFinancialTurn> => {
       // What planning settled, for a gap: the companies it was asked about, a
       // clarification pick (recorded before the model is called) or the peers
       // an overview added included, and the planner's result.
       let asked = requested.subjects;
       let planned: PlanningResult | undefined;
-      // The period an overview or margin trend was planned at, when one was.
-      let overview: ReadPeriod | null = null;
+      let overviewPeriod: ReadPeriod | null = null;
       const declinedGap = (reason: ChatGap) => {
         // ponytail: a retry that resumes a reserved run does not plan, so its
         // gap names the companies the message resolved, without a pick or peers.
@@ -278,7 +216,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       // attempt can compose.
       const withCommentary = (answer: ChatFinancialTurn): ChatFinancialTurn => {
         const { commentary: save } = deps;
-        if (overview === null || !save || answer.kind !== "published" || !answer.message) return answer;
+        if (overviewPeriod === null || !save || answer.kind !== "published" || !answer.message) return answer;
         const { message } = answer;
         return {
           ...answer,
@@ -307,12 +245,11 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
           planned = await planTurn(deps.planningModel, context, text, requested.subjects, authority, deps.clock?.() ?? new Date(), (subjects) => {
             asked = subjects;
           }, {
-            scope,
-            reading,
+            choice,
             evidence: deps.evidence(db),
             peersOf: (issuer) => overviewPeers(db, issuer),
             onOverview: (period) => {
-              overview = period;
+              overviewPeriod = period;
             },
           });
           return planned;
@@ -322,7 +259,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
           scope,
           reading,
           evidence: deps.evidence,
-          overview: () => overview,
+          overviewPeriod: () => overviewPeriod,
           carried: requested.carried,
           notFound: requested.notFound,
           labels: requested.labels,
@@ -346,7 +283,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
         }
       }
     };
-    if (existing) return existing.kind === "financial_answer" ? run(NO_COMPANIES, null, null) : () => savedGap(deps.pool, context.threadId, messageId);
+    if (existing) return existing.kind === "financial_answer" ? run(NO_COMPANIES, null, null, PLANNER) : () => savedGap(deps.pool, context.threadId, messageId);
     // A retry of a turn whose run is reserved resumes it, whatever this attempt's reading says.
     const reserved = await findPlanForRequest(deps.pool, { authority, request_key: turnId }) !== null;
     const requested = await requestedSubjects(deps, context, text);
@@ -365,10 +302,11 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       console.warn("[chat] research scope unavailable; saving the financial answer without it", reason);
       return null;
     });
-    if (reserved) return run(requested, reading, scope);
-    if (leftToAnalyst(reading, scope)) return null;
+    const choice = routeTurn(reading, scope);
+    if (reserved) return run(requested, reading, scope, choice);
+    if (choice.kind === "analyst") return null;
     const kept = withinScope(requested, scope);
-    return kept.subjects.length === 0 ? null : run(kept, reading, scope);
+    return kept.subjects.length === 0 ? null : run(kept, reading, scope, choice);
   };
   const assertReady = () => requireFinancialReadiness(deps.pool, ["chat"]);
   return Object.freeze({ take, assertReady });
@@ -501,6 +439,7 @@ function withinScope(requested: TurnCompanies, scope: ResearchScope | null): Tur
 }
 
 const NO_COMPANIES: TurnCompanies = { subjects: [], resolved: [], carried: [], notFound: [], labels: new Map() };
+const PLANNER: PlanChoice = { kind: "planner" };
 
 async function planTurn(
   model: PlanningModel | null,
@@ -513,8 +452,7 @@ async function planTurn(
   // before the model is, and with the overview's once it replaces the planner.
   onSubjects: (subjects: ReadonlyArray<RequestedSubject>) => void,
   turn: Readonly<{
-    scope: ResearchScope | null;
-    reading: ScopeProposal | null;
+    choice: PlanChoice;
     evidence: FinancialEvidencePort;
     peersOf: PeersOf;
     onOverview: (period: ReadPeriod) => void;
@@ -542,30 +480,40 @@ async function planTurn(
   }
   onSubjects(subjects);
   if (CASH_RESILIENCE.test(text)) return planCashResilience(planningContext(subjects), text);
-  const { reading, scope } = turn;
-  // The engine has no segment definition: a turn that asks for segments is that gap, whatever else it asks.
-  if (reading !== null && readingAsks(reading).asks.has("segments")) return { outcome: "unsupported", reason: "segments", issues: [], model_calls: 0 };
-  const period = reading && readPeriod(reading, scope);
-  if (period && allResolved(subjects)) {
-    const trended = marginTrendSubjects(subjects, reading, scope);
-    const trend = trended && await planMarginTrend(planningContext(trended), turn.evidence, period);
-    if (trend) {
-      turn.onOverview(period);
-      return trend;
+  const { choice } = turn;
+  if (choice.kind === "segments_gap") return { outcome: "unsupported", reason: "segments", issues: [], model_calls: 0 };
+  const deterministic = async (): Promise<PlanningResult | null> => {
+    if (!allResolved(subjects)) return null;
+    switch (choice.kind) {
+      case "trend":
+        return subjects.length === 1 ? planMarginTrend(planningContext(subjects), turn.evidence, choice.period) : null;
+      case "overview": {
+        const companies = choice.peers ? await withPeers(subjects, turn.peersOf) : subjects;
+        const overview = companies && await planCompanyOverview(planningContext(companies), turn.evidence, choice.period);
+        if (overview) onSubjects(companies!);
+        return overview;
+      }
+      case "kept_figures":
+        return planScopeFigures(planningContext(subjects), turn.evidence, choice.metrics, choice.period);
+      default:
+        return null;
     }
-    const companies = await overviewSubjects(subjects, reading, scope, turn.peersOf);
-    const overview = companies && await planCompanyOverview(planningContext(companies), turn.evidence, period);
-    if (companies && overview) {
-      onSubjects(companies);
-      turn.onOverview(period);
-      return overview;
-    }
-    const kept = keptFigures(reading, scope);
-    const figures = kept && await planScopeFigures(planningContext(subjects), turn.evidence, kept, period);
-    if (figures) return figures;
+  };
+  const plan = await deterministic();
+  if (plan) {
+    if (choice.kind === "trend" || choice.kind === "overview") turn.onOverview(choice.period);
+    return plan;
   }
   // A failing or unreachable model is a planning gap (publishRequest); the narrative composer is never a fallback for numbers.
   return planFinancialRequest(planningContext(subjects), text, model ?? noModel);
+}
+
+// One company and its peers; null for several companies, or one with none.
+async function withPeers(subjects: ReadonlyArray<RequestedSubject>, peersOf: PeersOf): Promise<ReadonlyArray<RequestedSubject> | null> {
+  const [company] = subjects;
+  if (subjects.length !== 1 || company?.resolution.status !== "resolved") return null;
+  const peers = await peersOf(company.resolution.subject_ref);
+  return peers.length === 0 ? null : [company, ...peers];
 }
 
 const CASH_RESILIENCE = /\bcash[- ]resilience\b/iu;
@@ -730,8 +678,7 @@ function persistAssistantMessage(
     scope: ResearchScope | null;
     reading: ScopeProposal | null;
     evidence: ChatFinancialRuntimeDeps["evidence"];
-    // The period the turn's overview or margin trend was planned at, when it published one.
-    overview: () => ReadPeriod | null;
+    overviewPeriod: () => ReadPeriod | null;
     carried: ReadonlyArray<string>;
     notFound: ReadonlyArray<string>;
     labels: ReadonlyMap<string, string>;
@@ -767,8 +714,7 @@ function persistAssistantMessage(
       reads: "financial_answer" as const,
       companies: answeredCompanies(plan.subjects.members.map((member) => member.subject_ref.id), scope, turn.labels),
       metrics: planMetrics(plan),
-      // An overview of the latest quarters keeps no period; one at a period keeps it.
-      ...(turn.overview()?.kind === "latest" ? { fiscal_year: null, fiscal_quarter: null } : {}),
+      ...(turn.overviewPeriod()?.kind === "latest" ? { fiscal_year: null, fiscal_quarter: null } : {}),
       ...(reading === null ? { coverage_unchecked: true as const } : {}),
     };
     // It replaces a gap another attempt of the turn saved under its id.
