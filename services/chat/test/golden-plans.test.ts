@@ -7,7 +7,7 @@ import { createRuntimeAuthority, operationDependencies, type FinancialPlanV1 } f
 import { buildDeterministicPlan, planFinancialRequest, type PlanningContext, type PlanningModel, type PlanningResult, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import type { CandidatePage, CandidateRequest, FinancialEvidencePort, InputCandidate, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
-import { namesCompanies, overviewPeers, overviewSubjects, planCompanyOverview } from "../src/company-overview.ts";
+import { overviewPeers, overviewSubjects, planCompanyOverview, resolvedCompanies } from "../src/company-overview.ts";
 import { MAX_TURN_SUBJECTS } from "../src/coordinator.ts";
 import { uncoveredAsks } from "../src/financial-runtime.ts";
 import { resolveResearchScope } from "../src/research-scope.ts";
@@ -285,15 +285,15 @@ test("a comparison shows each company's latest quarter, named from the newest it
 const reading = (asks: string[], metrics: unknown[] = [], income_items: string[] = [], turnsOff: string[] = [], period: unknown = { kind: "none" }) =>
   parseProposal(JSON.stringify({ metrics, asks, turns_off: { facets: turnsOff, metrics: [] }, income_items, period, companies: { kind: "as_named", names: [] } }), "")!;
 
-test("a question about the companies it names that asks for no figure is answered with their overview, or one company's with its peers; one about a carried company, a figure or a period is not (#398)", async () => {
+test("a question about its companies, named or carried, that asks for no figure is answered with their overview, or one company's with its peers; one about a figure or a period is not (#398)", async () => {
   const client = await createReplayLlmChatClient(REPLIES);
   const read = async (question: string) => parseProposal((await client({} as never, { messages: [{ role: "user", content: proposalQuestion(question) }] })).text, question);
   const AMD = GOLDEN_COMPANIES.find((company) => company.ticker === "AMD")!;
   const amd = async (): Promise<RequestedSubject[]> => [{ mention: AMD.issuer_id, resolution: { status: "resolved", subject_ref: { kind: "issuer", id: AMD.issuer_id }, label: AMD.legal_name } }];
   const none = async () => [];
-  const overview = async (question: string, { carried = false, read: readQuestion = read, peersOf = none as typeof amd } = {}) => {
+  const overview = async (question: string, { read: readQuestion = read, peersOf = none as typeof amd } = {}) => {
     const subjects = planningContext(question).requested_subjects;
-    if (!namesCompanies(subjects, carried)) return null;
+    if (!resolvedCompanies(subjects)) return null;
     const proposal = await readQuestion(question);
     const scope = resolveResearchScope({ question, companies: [], prior: null, asOf: GOLDEN_AS_OF, proposal });
     return (await overviewSubjects(subjects, proposal, scope, peersOf))?.map((subject) => subject.mention) ?? null;
@@ -311,8 +311,9 @@ test("a question about the companies it names that asks for no figure is answere
   assert.equal(await overview("Analyze NVDA, no margins", scripted(reading([], [], [], ["margins"]))), null, "a facet turned off");
   assert.equal(await overview("Compare NVDA with AMD", scripted(reading([], [], [], ["margins"]))), null, "a facet turned off in a comparison");
   assert.equal(await overview("Analyze NVDA", scripted({ ...reading([]), turns_off: { facets: new Set(), metrics: new Set(["revenue"]) } })), null, "a metric turned off");
-  assert.equal(await overview("Analyze NVDA", { carried: true }), null, "a carried company");
-  assert.equal(await overview("Compare NVDA with AMD", { carried: true }), null, "a carried company beside named ones");
+  assert.deepEqual(await overview("Explain the differences between NVDA and AMD", scripted(reading(["explains"]))), ["NVDA", "AMD"], "an explanation, which the commentary gives");
+  assert.deepEqual(await overview("Analyze NVDA without peers", scripted(reading([], [], [], ["peers"]))), ["NVDA"], "a facet the overview does not show turned off");
+  assert.equal(await overview("Analyze NVDA", scripted(reading(["explains", "margins"]))), null, "an explanation of a figure");
   assert.deepEqual(await overview("Analyze NVDA's most recent results", scripted(reading([], [], [], [], { kind: "latest" }))), ["NVDA"], "the latest period");
   const subjects = planningContext("Analyze NVDA").requested_subjects;
   assert.equal(await overviewSubjects(subjects, reading([]), null, none), null, "a scope that failed to resolve");
@@ -330,9 +331,9 @@ test("a question about the companies it names that asks for no figure is answere
   }
   const yearToDate = "Compare it with AMD YTD";
   assert.deepEqual(
-    [namesCompanies(planningContext(yearToDate).requested_subjects, true), await overviewSubjects(planningContext(yearToDate).requested_subjects, await read(yearToDate), null, none)],
-    [false, null],
-    "the golden conversation's comparison carries NVDA, and its reading asks for a price window",
+    [resolvedCompanies(planningContext(yearToDate).requested_subjects), await overviewSubjects(planningContext(yearToDate).requested_subjects, await read(yearToDate), null, none)],
+    [true, null],
+    "the golden conversation's comparison asks for a price window",
   );
 });
 

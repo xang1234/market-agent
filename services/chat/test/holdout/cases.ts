@@ -25,7 +25,7 @@
 
 import type { RejectionCheck } from "../../src/assertions.ts";
 
-export const HOLDOUT_VERSION = 14;
+export const HOLDOUT_VERSION = 15;
 
 type Assertion = Record<string, unknown>;
 
@@ -117,6 +117,9 @@ const amdOperatingMargin = (period: Period, suffix: string) => [
 
 const NVIDIA = "NVIDIA Corporation";
 const AMD = "Advanced Micro Devices, Inc.";
+const AAPL = "Apple Inc.";
+// A reply for an engine answer's commentary, which renders from its assertion list alone.
+const commentary = (list: ReadonlyArray<Assertion>) => `\`\`\`assertions\n${JSON.stringify(list)}\n\`\`\``;
 const APPLE = "Apple Inc.";
 const REVENUE = "Revenue";
 const GROSS_MARGIN = "Gross margin (gross profit / revenue)";
@@ -219,14 +222,37 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
   },
   {
     id: "restatement",
-    trap: "a restated quarter shows its restated value; the superseded one is not a cited value",
+    // Chat's engine plans are as reported (docs/engineering/verified-finance-producer-inventory.md), so it shows the original disclosure, one value only.
+    trap: "a restated quarter: the engine shows the one value its as-reported basis selects, and the other is never shown",
     turns: ["Analyze AAPL's latest quarter."],
     scopes: [{metrics: [], asks: ["latest_quarter"], turns_off: {facets: [], metrics: []}, income_items: [], period: {kind: "latest"}, companies: {kind: "as_named", names: ["AAPL"]}}],
-    expect: { companies: ["AAPL"], route: "latest_quarter", shows: { block_title: "Latest quarter (Q3 2026)", label: "Revenue", format: "$97.4B" } },
-    prose: "AAPL's revenue was $97.4B in its latest quarter.",
-    good: [obs("AAPL's revenue was [[F1]] in Q3 2026.", ["F1"])],
+    expect: {
+      companies: ["AAPL"],
+      route: "financial_answer",
+      financial: [
+        [AAPL, "Revenue", "Q4 FY2024", "verified", "USD 94,930,000,000.00"],
+        [AAPL, "Revenue", "Q1 FY2025", "verified", "USD 124,300,000,000.00"],
+        [AAPL, "Revenue", "Q2 FY2025", "verified", "USD 95,359,000,000.00"],
+        [AAPL, "Revenue", "Q3 FY2025", "verified", "USD 94,036,000,000.00"],
+        [AAPL, "Revenue", "Q4 FY2025", "verified", "USD 102,466,000,000.00"],
+        [AAPL, "Revenue", "Q1 FY2026", "verified", "USD 128,000,000,000.00"],
+        [AAPL, "Revenue", "Q2 FY2026", "verified", "USD 98,700,000,000.00"],
+        [AAPL, "Revenue", "Q3 FY2026", "verified", "USD 97,100,000,000.00"],
+        [AAPL, "Gross profit", "Q3 FY2026", "verified", "USD 45,700,000,000.00"],
+        [AAPL, "Operating income", "Q3 FY2026", "verified", "USD 29,800,000,000.00"],
+        [AAPL, "Net income", "Q3 FY2026", "verified", "USD 24,900,000,000.00"],
+        [AAPL, "Gross margin (gross profit / revenue)", "Q3 FY2026", "verified", "47.06%"],
+        [AAPL, OPERATING_MARGIN, "Q3 FY2026", "verified", "30.69%"],
+        [AAPL, "Net margin (net income / revenue)", "Q3 FY2026", "verified", "25.64%"],
+        [AAPL, "Quarter-over-quarter percent change in Revenue", "Q3 FY2026 vs Q2 FY2026", "verified", "-1.62%"],
+        [AAPL, "Year-over-year percent change in Revenue", "Q3 FY2026 vs Q3 FY2025", "verified", "3.26%"],
+      ],
+      uncovered: "AAPL's revenue was USD 97,100,000,000.00 in Q3 FY2026.",
+    },
+    // The engine's commentary, citing its Q3 FY2026 revenue result.
+    prose: commentary([obs("AAPL's revenue was [[F8]] in Q3 FY2026.", ["F8"])]),
     mutations: [
-      { name: "superseded value", list: [obs("AAPL's revenue was $97.1B in Q3 2026.", ["F1"])], never_shown: "$97.1B" },
+      { name: "the restated value written into the commentary", prose: commentary([obs("AAPL's revenue was $97.4B in Q3 FY2026.", ["F8"])]), never_shown: "97.4" },
     ],
   },
   {

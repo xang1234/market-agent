@@ -43,7 +43,7 @@ import { publishRequest, type RequestGap } from "../../financial-engine/src/requ
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { comparedAdditions, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId } from "./chat-ids.ts";
-import { namesCompanies, overviewPeers, overviewSubjects, planCompanyOverview, type PeersOf } from "./company-overview.ts";
+import { overviewPeers, overviewSubjects, planCompanyOverview, resolvedCompanies, type PeersOf } from "./company-overview.ts";
 import { noteBlock } from "./fact-blocks.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { companyKey, extractSubjectMentions } from "./subject-extraction.ts";
@@ -127,17 +127,22 @@ export type ChatFinancialRuntimeDeps = Readonly<{
   commentary?: (db: SqlExecutor, input: CommentaryRequest) => Promise<void>;
 }>;
 
-const MARKET_DATA: ReadonlySet<ScopeFacet> = new Set(["price_window", "benchmark"]);
+// What a question asks the engine to show beside its metrics.
+const FIGURE_ASKS: ReadonlySet<ScopeFacet> = new Set(["margins", "margin_trend", "segments", "latest_quarter", "peers"]);
+// What the analyst path answers and the engine does not: the previous
+// answer's evidence, which it re-reads; guidance, which it reads from claims;
+// and market data (#398 D2).
+const ANALYST_ASKS: ReadonlySet<ScopeFacet> = new Set(["evidence", "guidance", "price_window", "benchmark"]);
 
-// The analyst path keeps a turn whose reading asks for the previous answer's
-// evidence, which it re-reads, or for market data alone, which the engine
-// does not compute (#398 D2).
-function analystReads(reading: ScopeProposal | null): boolean {
-  if (reading === null) return false;
-  if (reading.asks.has("evidence")) return true;
-  return reading.metrics.length === 0 && reading.income_items.length === 0 && reading.asks.size > 0 &&
-    [...reading.asks].every((facet) => MARKET_DATA.has(facet));
+// The analyst path keeps a turn whose reading asks for no figure and for
+// something only it answers, or whose scope keeps market data.
+function analystReads(reading: ScopeProposal | null, scope: ResearchScope | null): boolean {
+  if (reading === null || reading.metrics.length > 0 || reading.income_items.length > 0) return false;
+  const asks = [...reading.asks];
+  if (asks.some((facet) => FIGURE_ASKS.has(facet))) return false;
+  return asks.some((facet) => ANALYST_ASKS.has(facet)) || (scope !== null && (scope.price_window !== null || scope.benchmark));
 }
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const MAX_PLANNING_MODEL_CALLS = 2;
 
@@ -192,7 +197,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     );
     if (existing) {
       return existing.kind === "financial_answer"
-        ? () => runTurn(context, text, turnId, authority, messageId, true, NO_COMPANIES, null)
+        ? () => runTurn(context, text, turnId, authority, messageId, true, NO_COMPANIES, null, null)
         : () => savedGap(deps.pool, context.threadId, messageId);
     }
     const requested = await requestedSubjects(deps, context, text);
@@ -200,8 +205,19 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     if (clarify) return async () => ({ kind: "clarification", clarification: companyQuestion(clarify) });
     if (requested.subjects.length === 0) return null;
     const reading = await context.reading?.() ?? null;
-    if (analystReads(reading)) return null;
-    return () => runTurn(context, text, turnId, authority, messageId, false, requested, reading);
+    // The scope gets the companies the message resolved, as this lane runs
+    // before the analyst path resolves them; the answer saves the ones it
+    // answered for (answeredCompanies). One that throws is no scope.
+    const { resolved } = requested;
+    const { researchScope } = deps;
+    const scope = await (async () => researchScope
+      ? researchScope({ ...context, subjectPreResolution: resolved[0], subjectPreResolutions: resolved }, Promise.resolve(reading))
+      : null)().catch((reason) => {
+      console.warn("[chat] research scope unavailable; saving the financial answer without it", reason);
+      return null;
+    });
+    if (analystReads(reading, scope)) return null;
+    return () => runTurn(context, text, turnId, authority, messageId, false, withinScope(requested, scope), reading, scope);
   };
   const runTurn = async (
     context: ChatFinancialTurnContext,
@@ -212,23 +228,12 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     answered: boolean,
     requested: TurnCompanies,
     read: ScopeProposal | null,
+    saved: ResearchScope | null,
   ): Promise<ChatFinancialTurn> => {
     // The saved answer has its reading and scope already.
     const reading = Promise.resolve(read);
+    const scope = Promise.resolve(saved);
     const { planningModel } = deps;
-    // This lane runs before the analyst path resolves the turn's companies, so
-    // the scope gets the ones the message resolved; the answer saves the ones
-    // it answered for (answeredCompanies).
-    const { resolved } = requested;
-    // Called at once, so the scope queues its reads before the request takes
-    // its client; one that throws before it answers is no scope.
-    const { researchScope } = deps;
-    const scope = (async () => researchScope && !answered
-      ? researchScope({ ...context, subjectPreResolution: resolved[0], subjectPreResolutions: resolved }, reading)
-      : null)().catch((reason) => {
-      console.warn("[chat] research scope unavailable; saving the financial answer without it", reason);
-      return null;
-    });
     const prepared = () => Promise.all([scope, reading]);
     // What planning settled, for a gap: the companies it was asked about, a
     // clarification pick (recorded before the model is called) or the peers
@@ -298,7 +303,6 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
         planned = await planTurn(planningModel, context, text, requested.subjects, authority, deps.clock?.() ?? new Date(), (subjects) => {
           asked = subjects;
         }, {
-          carried: requested.carried.length > 0,
           prepare: prepared,
           evidence: deps.evidence(db),
           peersOf: (issuer) => overviewPeers(db, issuer),
@@ -452,6 +456,21 @@ function companyQuestion(question: string): Clarification {
   return { clarification_id: hashCanonical("clarification", { kind: "request", question, choices: [] }), kind: "request", question, choices: [] };
 }
 
+// A carried company the scope dropped (an auto-selected peer turned off) is
+// not planned, as the analyst path does not cover it.
+function withinScope(requested: TurnCompanies, scope: ResearchScope | null): TurnCompanies {
+  const scoped = new Set(scope?.companies.map((company) => company.issuer_id.toLowerCase()));
+  if (scoped.size === 0) return requested;
+  const dropped = requested.subjects.filter((subject) => subject.resolution.status === "resolved" && !scoped.has(subject.resolution.subject_ref.id.toLowerCase()));
+  if (dropped.length === 0) return requested;
+  const mentions = new Set(dropped.map((subject) => subject.mention));
+  return {
+    ...requested,
+    subjects: requested.subjects.filter((subject) => !dropped.includes(subject)),
+    carried: requested.carried.filter((name) => !mentions.has(name)),
+  };
+}
+
 const NO_COMPANIES: TurnCompanies = { subjects: [], resolved: [], carried: [], notFound: [], labels: new Map() };
 
 async function planTurn(
@@ -465,7 +484,6 @@ async function planTurn(
   // before the model is, and with the overview's once it replaces the planner.
   onSubjects: (subjects: ReadonlyArray<RequestedSubject>) => void,
   turn: Readonly<{
-    carried: boolean;
     prepare: () => Promise<[ResearchScope | null, ScopeProposal | null]>;
     evidence: FinancialEvidencePort;
     peersOf: PeersOf;
@@ -499,7 +517,7 @@ async function planTurn(
   // A planner the overview drops reaches the model no more (its repair call).
   const planning: PlanningModel | null = model && ((request) => dropped ? Promise.reject(DROPPED) : model(request));
   const planned = planFinancialRequest(planningContext(subjects), text, planning ?? noModel);
-  if (!namesCompanies(subjects, turn.carried)) return planned;
+  if (!resolvedCompanies(subjects)) return planned;
   // Settled now, or a planner that fails while the overview is decided is an unhandled rejection.
   const failure = planned.then(() => null, (reason: unknown) => ({ reason }));
   let companies: ReadonlyArray<RequestedSubject> | null;

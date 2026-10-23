@@ -605,7 +605,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.equal(pointers.thread, pointers.answer);
   });
 
-  await t.test("a turn about a company reaches the engine; one about none, or whose reading asks for evidence or market data alone, the analyst (#398)", async () => {
+  await t.test("a turn about a company reaches the engine; one about none, or whose reading asks for no figure but evidence, guidance or market data, the analyst (#398)", async () => {
     const carried = async (ticker: string) => ({ ...(await resolveMention(ticker)), handoff: { display_labels: { ticker } } }) as unknown as ChatResolvedSubjectPreResolution;
     const [aaa, bbb] = [await carried("AAA"), await carried("BBB")];
     let analystCalls = 0;
@@ -636,7 +636,8 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     };
     assert.deepEqual(await lane("How is AAA doing?", { readQuestion: unread }, ["AAA"]), ["AAA"]);
     assert.deepEqual(await lane("show the evidence", { priorSubjects: async () => [aaa], readQuestion: reading({ asks: new Set(["evidence"]) }) }), "analyst");
-    assert.deepEqual(await lane("Revenue for AAA, with the evidence", { readQuestion: reading({ ...METRIC_READING, asks: new Set(["evidence"]), companies: { kind: "as_named", names: ["AAA"] } }) }), "analyst");
+    assert.deepEqual(await lane("Revenue for AAA, with the evidence", { readQuestion: reading({ ...METRIC_READING, asks: new Set(["evidence"]), companies: { kind: "as_named", names: ["AAA"] } }) }, ["AAA"]), ["AAA"]);
+    assert.deepEqual(await lane("What is AAA's guidance?", { readQuestion: reading({ asks: new Set(["guidance"]), companies: { kind: "as_named", names: ["AAA"] } }) }), "analyst");
     assert.deepEqual(await lane("AAA YTD", { readQuestion: reading({ asks: new Set(["price_window"]), companies: { kind: "as_named", names: ["AAA"] } }) }), "analyst");
     assert.deepEqual(await lane("AAA revenue YTD", { readQuestion: reading({ ...METRIC_READING, asks: new Set(["price_window"]), companies: { kind: "as_named", names: ["AAA"] } }) }, ["AAA"]), ["AAA"]);
     assert.deepEqual(await lane("And what about its revenue?", { priorSubjects: async () => [], readQuestion: reading(METRIC_READING) }), "analyst");

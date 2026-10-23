@@ -397,7 +397,7 @@ test("a company overview carries analyst commentary on its published results (#3
       analystCalls += 1;
       return { snapshot_id: randomUUID(), blocks: [], verification: { ok: true } };
     };
-    await overview(compose, { analyst }).run({ ...base, userIntent: "tell me about ALFA" });
+    await overview(compose, { analyst, readQuestion: reading({ ...NO_ASKS, asks: new Set(["evidence"]) }) }).run({ ...base, userIntent: "show the evidence for ALFA" });
     assert.deepEqual([analystCalls, inputs.length], [1, 1]);
   });
 });

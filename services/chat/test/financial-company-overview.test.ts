@@ -273,7 +273,7 @@ test("a question about one company that asks for no figure is answered with its 
   const scoped = async (context: { userIntent?: string }, read: Promise<ScopeProposal | null>) =>
     resolveResearchScope({ question: context.userIntent ?? "", companies: [{ issuer_id: COMPANIES.QTRS!, label: "QTRS" }], prior: null, asOf: "2026-10-22T00:00:00.000Z", served: true, proposal: await read });
 
-  await t.test("a reading that asks for a figure or a period other than the latest, a carried company, a price window in its scope, or a company with no quarters goes to the planner", async () => {
+  await t.test("a reading that asks for a figure or a period other than the latest, or a company with no quarters, goes to the planner; a carried company is the overview, and a price window the analyst's", async () => {
     const planned = async (userIntent: string, mentions: string[], options: { readQuestion?: () => Promise<ScopeProposal | null>; priorSubjects?: () => Promise<ChatResolvedSubjectPreResolution[]>; researchScope?: typeof scoped | (() => Promise<ResearchScope>) } = {}) => {
       const model = revenueModel(mentions);
       const done = completed((await chatHarness(pool, { model, readQuestion: reading(NO_ASKS), resolveMention: resolve, ...options }).run({ ...base, userIntent })).events);
@@ -286,7 +286,7 @@ test("a question about one company that asks for no figure is answered with its 
     assert.deepEqual(await planned("Revenue for AAA", ["AAA"]), [1, ["a_out"]], "a company with no quarterly revenue");
     assert.deepEqual(await planned("Compare revenue for QTRS and AAA", ["QTRS", "AAA"]), [1, ["a_out", "b_out"]], "a company with no quarterly revenue beside one with");
     const carried = (await resolve("QTRS")) as ChatResolvedSubjectPreResolution;
-    assert.deepEqual(await planned("And what about its revenue?", ["QTRS"], { priorSubjects: async () => [carried] }), [1, ["a_out"]], "a carried company");
+    assert.deepEqual(await planned("And what about its revenue?", ["QTRS"], { priorSubjects: async () => [carried] }), [1, QTRS_OVERVIEW.map(([outputId]) => outputId)], "a carried company");
     const periods: Array<[string, ScopeProposal]> = [
       ["in fiscal 2023", { ...NO_ASKS, period: { kind: "fiscal_year", fiscal_year: 2023 } }],
       ["for Q4 2023", { ...NO_ASKS, period: { kind: "fiscal_quarter", fiscal_period: "Q4", fiscal_year: 2023 } }],
@@ -294,12 +294,22 @@ test("a question about one company that asks for no figure is answered with its 
       ["TTM", { ...NO_ASKS, period: { kind: "trailing_twelve_months" } }],
       ["since 2021", { ...NO_ASKS, period: { kind: "range" } }],
       ["last year", { ...NO_ASKS, period: { kind: "other" } }],
-      ["YTD", { ...NO_ASKS, asks: new Set(["price_window"]) }],
     ];
     for (const [period, read] of periods) {
       assert.deepEqual(await planned(`Revenue for QTRS ${period}`, ["QTRS"], { readQuestion: reading(read) }), [1, ["a_out"]], period);
     }
-    assert.deepEqual(await planned("Revenue for QTRS YTD", ["QTRS"], { researchScope: scoped }), [1, ["a_out"]], "a scope with a price window the reading did not ask for");
+    // A price window, asked for or kept by the scope, is market data the analyst path charts (#398 D2).
+    let analystCalls = 0;
+    const analyst = () => {
+      analystCalls += 1;
+      return { snapshot_id: "00000000-0000-4000-8000-000000000000", blocks: [], verification: { ok: true } };
+    };
+    for (const options of [{ readQuestion: reading({ ...NO_ASKS, asks: new Set(["price_window"]) }) }, { researchScope: scoped }]) {
+      const model = revenueModel(["QTRS"]);
+      await chatHarness(pool, { model, readQuestion: reading(NO_ASKS), resolveMention: resolve, analyst, ...options }).run({ ...base, userIntent: "Revenue for QTRS YTD" });
+      assert.equal(model.calls, 0);
+    }
+    assert.equal(analystCalls, 2, "a window the reading asks for, and one the scope keeps");
     const failing = async (): Promise<ResearchScope> => {
       throw new Error("the scope is down");
     };

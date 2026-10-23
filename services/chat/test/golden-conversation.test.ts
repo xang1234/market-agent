@@ -26,7 +26,6 @@ import { createChatServer } from "../src/http.ts";
 import { closeLocalRuntimePoolForTests } from "../src/local-runtime.ts";
 import { readChatMessage } from "../src/messages.ts";
 import { loadChatServerOptionsFromEnv } from "../src/runtime.ts";
-import { isFinancialRequest } from "../src/financial-runtime.ts";
 import { STARTER_QUESTIONS } from "../../../web/src/chat/starterQuestionList.ts";
 import { AMD_Q2_2025_RELEASE, GOLDEN_COMPANIES, seedGoldenDataset } from "./golden/dataset.ts";
 import { requireRecordedScopes } from "./golden/harness.ts";
@@ -41,7 +40,10 @@ const BOTH_LISTINGS = [
   { kind: "listing", id: NVDA.listing_id },
   { kind: "listing", id: AMD.listing_id },
 ];
-const CHART_KINDS = new Set(["revenue_bars", "line_chart"]);
+const CARRIED_NVDA_WITH_AMD = [
+  { kind: "issuer", id: NVDA.issuer_id },
+  { kind: "listing", id: AMD.listing_id },
+];
 
 const GOLDEN_ENV: Record<string, string> = {
   LLM_CHANNELS: "fixture",
@@ -76,38 +78,33 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
   )).messages;
   const assistant = messages.find((message) => message.role === "assistant");
 
-  await t.test("turn completes on NVDA and the answer is persisted", () => {
+  await t.test("turn completes on NVDA and the answer is persisted", async () => {
     const error = events.find((event) => event.event === "turn.error");
     assert.equal(error, undefined, `turn.error: ${JSON.stringify(error?.data)}`);
     const completed = events.find((event) => event.event === "turn.completed");
     assert.ok(completed, `no turn.completed; events: ${events.map((event) => event.event).join(", ")}`);
-    assert.deepEqual(
-      completed.data.subject_ref,
-      { kind: "listing", id: NVDA.listing_id },
-      "the turn should resolve 'NVDA' to the seeded listing",
-    );
+    assert.equal(completed.data.bundle_id, "financial_answer", "a question about a company is the engine's (#398)");
     assert.ok(assistant, "assistant message missing from the reloaded thread");
     assert.equal(assistant.message_id, completed.data.message_id);
-    // The narrative is rendered from the recorded reply's assertions, so the LLM step really ran.
-    const narrative = assistant.blocks.find((block) => block.kind === "rich_text");
-    assert.equal(
-      (narrative?.segments as Array<{ text?: string; format?: string }> | undefined)?.map((segment) => segment.text ?? segment.format).join(""),
-      "NVDA's revenue rose in every period from Q1 2025 ($26.0B) to Q4 2026 ($62.1B).",
-    );
-    // ...and the deployment that wrote it is on the completion and saved with the message (#183).
-    assert.equal(completed.data.answered_by, "fixture/recorded");
+    const { rows } = await client.query<{ research_scope: { companies: unknown } }>(`select research_scope from chat_messages where message_id = $1::uuid`, [assistant.message_id]);
+    assert.deepEqual(rows[0]?.research_scope.companies, [{ issuer_id: NVDA.issuer_id, label: "NVDA" }], "the turn should resolve 'NVDA' to the seeded company");
+    // The commentary is rendered from the recorded reply's assertions, so the LLM step really ran.
+    assert.deepEqual(engineAnswer(assistant).notes, [
+      "NVDA's revenue rose in every period from Q1 FY2025 (USD 26,044,000,000.00) to Q4 FY2026 (USD 62,100,000,000.00).\n\n" +
+        "NVDA's gross margin (gross profit / revenue) was 74.40%, operating margin (operating income / revenue) 64.90% and net margin (net income / revenue) 57.00% in Q4 FY2026.",
+    ]);
+    // ...and the deployment that wrote it is saved with the message (#183).
     assert.equal(assistant.answered_by, "fixture/recorded");
   });
 
-  await t.test("the rendered answer passes strict verification, each value a fact the snapshot cites (#208)", async () => {
-    const completed = events.find((event) => event.event === "turn.completed")!;
-    assert.equal(completed.data.unverified, undefined, `the rendered answer failed verification: ${JSON.stringify(completed.data.unverified)}`);
-    assert.equal((completed.data.assertion_report as { rendered?: boolean } | undefined)?.rendered, true);
-    const segments = (assistant!.blocks.find((block) => block.kind === "rich_text")?.segments ?? []) as Array<{ type: string; ref_kind?: string; ref_id?: string }>;
-    const factRefs = segments.filter((segment) => segment.type === "ref" && segment.ref_kind === "fact").map((segment) => segment.ref_id!);
-    assert.equal(factRefs.length, 2);
-    const { rows } = await client.query<{ fact_refs: string[] }>(`select fact_refs from snapshots where snapshot_id = $1::uuid`, [assistant!.snapshot_id]);
-    for (const ref of factRefs) assert.ok((rows[0]?.fact_refs ?? []).includes(ref), `the rendered value ${ref} is not a fact the snapshot cites`);
+  await t.test("the answer passes strict verification, and each value its commentary shows is one of its verified results (#208)", () => {
+    const [answer, commentary] = assistant!.blocks;
+    assert.deepEqual(assistant!.block_proofs?.[answer!.id!], { evidence: "linked", calculation: "verified", public_by_cutoff: "proven" });
+    const results = new Map((answer!.financial as { results: Array<{ result_id: string; disposition: string; presented: { text: string } }> }).results.map((result) => [result.result_id, result]));
+    const refs = (commentary!.segments as Array<{ type: string; ref_kind?: string; ref_id?: string; format?: string }>).filter((segment) => segment.type === "ref");
+    assert.deepEqual(refs.map((ref) => [ref.ref_kind, results.get(ref.ref_id!)?.disposition, ref.format === results.get(ref.ref_id!)?.presented.text]), [
+      ["result", "verified", true], ["result", "verified", true], ["result", "verified", true], ["result", "verified", true], ["result", "verified", true],
+    ]);
   });
 
   await t.test("reload returns the streamed blocks", () => {
@@ -139,41 +136,29 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     }
   });
 
-  await t.test("answer includes a chart and a metric row bound to cited facts", async () => {
+  await t.test("the answer shows NVDA's eight quarters of revenue, its latest margins and its growth, each verified from cited facts", async () => {
     assert.ok(assistant);
-    const kinds = assistant.blocks.map((block) => block.kind);
-    const chart = assistant.blocks.find((block) => CHART_KINDS.has(String(block.kind)));
-    const metricRow = assistant.blocks.find((block) => block.kind === "metric_row");
-    assert.ok(chart && metricRow, `expected a chart (revenue_bars or line_chart) and a metric_row; got [${kinds.join(", ")}]`);
-
-    const { rows } = await client.query<{ fact_refs: string[] }>(
-      `select fact_refs from snapshots where snapshot_id = $1::uuid`,
-      [assistant.snapshot_id],
-    );
-    const cited = new Set(rows[0]?.fact_refs ?? []);
-    for (const block of [chart, metricRow]) {
-      const refs = valueRefs(block);
-      assert.ok(refs.length > 0, `${block.kind} carries no value_ref`);
-      for (const ref of refs) assert.ok(cited.has(ref), `${block.kind} value_ref ${ref} is not a cited fact`);
-    }
-    const minted = await client.query<{ minted: string }>(
-      `select distinct m.metric_key || ' ' || f.fiscal_year::text || f.fiscal_period as minted
-         from facts f join metrics m on m.metric_id = f.metric_id
-        where f.method = 'derived' and f.period_kind = 'fiscal_q' and f.subject_id = $1::uuid
-        order by 1`,
-      [NVDA.issuer_id],
-    );
-    assert.deepEqual(minted.rows.map((row) => row.minted), [
-      "gross_margin 2026Q4", "net_margin 2026Q4", "operating_margin 2026Q4",
-      "revenue_growth_qoq 2025Q2", "revenue_growth_qoq 2025Q3", "revenue_growth_qoq 2025Q4", "revenue_growth_qoq 2026Q1",
-      "revenue_growth_qoq 2026Q2", "revenue_growth_qoq 2026Q3", "revenue_growth_qoq 2026Q4",
-      "revenue_growth_yoy 2026Q4",
+    assert.deepEqual(engineAnswer(assistant).results, [
+      ["Revenue", "Q1 FY2025", "verified", "USD 26,044,000,000.00"],
+      ["Revenue", "Q2 FY2025", "verified", "USD 30,040,000,000.00"],
+      ["Revenue", "Q3 FY2025", "verified", "USD 35,082,000,000.00"],
+      ["Revenue", "Q4 FY2025", "verified", "USD 39,331,000,000.00"],
+      ["Revenue", "Q1 FY2026", "verified", "USD 44,062,000,000.00"],
+      ["Revenue", "Q2 FY2026", "verified", "USD 46,743,000,000.00"],
+      ["Revenue", "Q3 FY2026", "verified", "USD 57,006,000,000.00"],
+      ["Revenue", "Q4 FY2026", "verified", "USD 62,100,000,000.00"],
+      ["Gross profit", "Q4 FY2026", "verified", "USD 46,200,000,000.00"],
+      ["Operating income", "Q4 FY2026", "verified", "USD 40,300,000,000.00"],
+      ["Net income", "Q4 FY2026", "verified", "USD 35,400,000,000.00"],
+      ["Gross margin (gross profit / revenue)", "Q4 FY2026", "verified", "74.40%"],
+      ["Operating margin (operating income / revenue)", "Q4 FY2026", "verified", "64.90%"],
+      ["Net margin (net income / revenue)", "Q4 FY2026", "verified", "57.00%"],
+      ["Quarter-over-quarter percent change in Revenue", "Q4 FY2026 vs Q3 FY2026", "verified", "8.94%"],
+      ["Year-over-year percent change in Revenue", "Q4 FY2026 vs Q4 FY2025", "verified", "57.89%"],
     ]);
-    const derived = (chart.data_ref as { params?: { derived_figures?: Array<{ fact_id: string; period: string; value: string }> } }).params?.derived_figures ?? [];
-    assert.deepEqual(derived.map((figure) => [figure.period, figure.value]), [
-      ["Q2 2025", "15.3%"], ["Q3 2025", "16.8%"], ["Q4 2025", "12.1%"], ["Q1 2026", "12.0%"], ["Q2 2026", "6.1%"], ["Q3 2026", "22.0%"],
-    ]);
-    for (const figure of derived) assert.ok(cited.has(figure.fact_id), `${figure.period} QoQ is not a cited fact`);
+    // The engine computes its figures and mints no derived fact, as the legacy chart did.
+    const { rows } = await client.query(`select 1 from facts where method = 'derived' and subject_id = $1::uuid`, [NVDA.issuer_id]);
+    assert.deepEqual(rows, []);
   });
 
   // Each turn's answer as streamed, for the reload check after turn 3.
@@ -183,7 +168,8 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
   await t.test("follow-up 'Compare it with AMD YTD' sets both companies side by side over the year to date", async () => {
     const turnEvents = await runTurn(base, thread.thread_id, "Compare it with AMD YTD");
     const completed = completedTurn(turnEvents);
-    assert.deepEqual(completed.data.subject_refs, BOTH_LISTINGS, "'it' should carry NVDA forward and add AMD");
+    // NVDA is carried from the engine's answer, which names the company, not a listing.
+    assert.deepEqual(completed.data.subject_refs, CARRIED_NVDA_WITH_AMD, "'it' should carry NVDA forward and add AMD");
 
     const answer = await latestAssistantMessage(base, thread.thread_id);
     turns.push({ question: "Compare it with AMD YTD", streamedIds: streamedBlockIds(turnEvents), answer, completed });
@@ -259,7 +245,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const derivedBefore = await derivedFacts();
     const turnEvents = await runTurn(base, thread.thread_id, "Explain the differences and show the evidence");
     const completed = completedTurn(turnEvents);
-    assert.deepEqual(completed.data.subject_refs, BOTH_LISTINGS);
+    assert.deepEqual(completed.data.subject_refs, CARRIED_NVDA_WITH_AMD);
     // The same comparison reuses turn 2's derived facts instead of re-minting them (#134).
     assert.equal(await derivedFacts(), derivedBefore, "turn 3 added derived facts");
 
@@ -303,7 +289,8 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.deepEqual(explained?.price_window, compared?.price_window);
     // Asking for the evidence of the previous answer is its own route (#206).
     assert.equal((explained as { route?: string } | undefined)?.route, "evidence_followup");
-    assert.deepEqual(explained?.inherited, ["price_window"]);
+    // Turn 1's engine answer named its figures as the scope's metrics (#381), which carry over too.
+    assert.deepEqual(explained?.inherited, ["metrics", "price_window"]);
   });
 
   await t.test("a reload returns all three turns: questions, figures, chart points and sources", async () => {
@@ -362,7 +349,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     completedTurn(await runTurn(base, thread.thread_id, "Compare NVDA and AMD again"));
     const again = await latestScope();
     assert.deepEqual(again?.price_window, established?.price_window);
-    assert.deepEqual(again?.inherited, ["price_window"]);
+    assert.deepEqual(again?.inherited, ["metrics", "price_window"]);
     // An answer with no scope and no company (an enforced financial gap) erases
     // neither: the next follow-up still carries both companies and the window.
     const gap = await client.query<{ snapshot_id: string }>(
@@ -388,15 +375,22 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
   await t.test("'How does NVDA compare with its peers?' brings in its industry peers", async () => {
     const peersThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Peers" });
     const turnEvents = await runTurn(base, peersThread.thread_id, "How does NVDA compare with its peers?");
-    assert.deepEqual(completedTurn(turnEvents).data.subject_refs, [{ kind: "listing", id: NVDA.listing_id }]);
+    assert.equal(completedTurn(turnEvents).data.bundle_id, "financial_answer");
 
-    const comparison = comparisonBlock(await latestAssistantMessage(base, peersThread.thread_id));
-    // AMD shares NVDA's industry; AAPL does not. The auto-selected peer is labelled too.
-    assert.deepEqual(
-      (comparison.subjects as Array<{ id: string }>).map((subject) => subject.id),
-      [NVDA.issuer_id, AMD.issuer_id],
-    );
-    assert.deepEqual(comparison.subject_labels, ["NVDA", "AMD"]);
+    // AMD shares NVDA's industry; AAPL does not. Each company is shown at its own latest quarter, the peer by its legal name.
+    const answer = await latestAssistantMessage(base, peersThread.thread_id);
+    const companies = (answer.blocks[0]!.financial as { labels: Record<string, { kind: string; text: string }> }).labels;
+    assert.deepEqual(Object.values(companies).filter((label) => label.kind === "subject").map((label) => label.text), ["NVIDIA Corporation", "Advanced Micro Devices, Inc."]);
+    assert.deepEqual(engineAnswer(answer).results.filter(([measure]) => measure.startsWith("Gross margin") || measure === "Revenue"), [
+      ["Revenue", "Q4 FY2026", "verified", "USD 62,100,000,000.00"],
+      ["Gross margin (gross profit / revenue)", "Q4 FY2026", "verified", "74.40%"],
+      ["Revenue", "Q2 FY2026", "verified", "USD 11,200,000,000.00"],
+      ["Gross margin (gross profit / revenue)", "Q2 FY2026", "verified", "54.02%"],
+    ]);
+    assert.deepEqual(engineAnswer(answer).notes, [
+      "Of NVDA and Advanced Micro Devices, Inc., NVDA's gross margin (gross profit / revenue) was highest: NVDA 74.40% (Q4 FY2026), Advanced Micro Devices, Inc. 54.02% (Q2 FY2026).\n\n" +
+        "NVDA's revenue was USD 62,100,000,000.00 in Q4 FY2026; Advanced Micro Devices, Inc.'s revenue was USD 11,200,000,000.00 in Q2 FY2026.",
+    ]);
     // The saved scope covers the auto-selected peer, so a follow-up about AMD continues it (#206).
     const { rows } = await client.query<{ research_scope: { companies: Array<{ issuer_id: string }> } }>(
       `select research_scope from chat_messages where thread_id = $1::uuid and role = 'assistant'`,
@@ -500,11 +494,15 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     }
   });
 
-  await t.test("each starter question that names a metric gets the engine's answer, not a request to name the company", async () => {
-    const metricStarters = STARTER_QUESTIONS.filter(isFinancialRequest);
-    assert.deepEqual(metricStarters, ["What drives AAPL's margins?"]);
+  await t.test("each starter question names a company: its figures are the engine's, and a year-to-date price chart stays the analyst's (#398)", async () => {
+    const bundles: string[] = [];
+    for (const question of STARTER_QUESTIONS) {
+      const thread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Starter" });
+      bundles.push(String(completedTurn(await runTurn(base, thread.thread_id, question)).data.bundle_id));
+    }
+    assert.deepEqual(bundles, ["financial_answer", "single_subject_analysis", "financial_answer"]);
     const starterThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Starter" });
-    completedTurn(await runTurn(base, starterThread.thread_id, metricStarters[0]!));
+    completedTurn(await runTurn(base, starterThread.thread_id, "What drives AAPL's margins?"));
     assert.deepEqual(engineAnswer(await latestAssistantMessage(base, starterThread.thread_id)), {
       results: [
         ["Gross margin (gross profit / revenue)", "latest fiscal year", "verified", "46.91%"],
@@ -599,29 +597,23 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.equal(messages.filter((message) => message.role === "assistant").length, 7);
   });
 
-  await t.test("'Compare NVDA with AMD' without a period charts the shared price history, not YTD", async () => {
+  await t.test("'Compare NVDA with AMD' without a period compares each company's latest quarter, with no YTD window", async () => {
     const defaultThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Default window" });
     const turnEvents = await runTurn(base, defaultThread.thread_id, "Compare NVDA with AMD");
-    assert.deepEqual(completedTurn(turnEvents).data.subject_refs, BOTH_LISTINGS);
+    assert.equal(completedTurn(turnEvents).data.bundle_id, "financial_answer");
     const answer = await latestAssistantMessage(base, defaultThread.thread_id);
-    const performance = answer.blocks.find((block) => block.kind === "perf_comparison");
-    assert.ok(performance, `expected a perf_comparison; got [${answer.blocks.map((b) => b.kind).join(", ")}]`);
-    assert.equal(performance.title, "Price return (split-adjusted, excluding dividends)");
-    assert.doesNotMatch(String(performance.default_range), /YTD/);
-    // A line per company, each drawn from a series the snapshot sealed.
-    const series = performance.series as Array<{ name: string; points: unknown[] }>;
-    assert.deepEqual(series.map((line) => line.name), ["NVDA", "AMD"]);
-    assert.ok(series.every((line) => line.points.length > 1), "each company needs a price line");
-    const { rows } = await client.query<{ series_specs: Array<{ series_ref: string; adjustment_basis: string; window?: unknown }> }>(
-      `select series_specs from snapshots where snapshot_id = $1::uuid`,
-      [answer.snapshot_id],
-    );
-    const specs = rows[0]?.series_specs ?? [];
-    assert.equal(specs.length, 2, "one sealed series per company");
-    assert.ok(specs.every((spec) => spec.adjustment_basis === "split_adjusted"));
-    assert.ok(specs.every((spec) => spec.window === undefined), "no YTD window was asked for");
-    const seriesRefs = (performance.data_ref as { params: { series_refs: string[] } }).params.series_refs;
-    assert.deepEqual([...seriesRefs].sort(), specs.map((spec) => spec.series_ref).sort());
+    // Each company at its own latest quarter (#398 D4), with no price chart: price history is not an engine figure.
+    assert.deepEqual(engineAnswer(answer).results.filter(([measure]) => measure === "Revenue" || measure.startsWith("Year-over-year")), [
+      ["Revenue", "Q4 FY2026", "verified", "USD 62,100,000,000.00"],
+      ["Year-over-year percent change in Revenue", "Q4 FY2026 vs Q4 FY2025", "verified", "57.89%"],
+      ["Revenue", "Q2 FY2026", "verified", "USD 11,200,000,000.00"],
+      ["Year-over-year percent change in Revenue", "Q2 FY2026 vs Q2 FY2025", "verified", "45.74%"],
+    ]);
+    assert.deepEqual(answer.blocks.map((block) => block.kind), ["financial_answer", "rich_text"]);
+    const { rows } = await client.query<{ series_specs: unknown[] | null }>(`select series_specs from snapshots where snapshot_id = $1::uuid`, [answer.snapshot_id]);
+    assert.deepEqual(rows[0]?.series_specs ?? [], [], "no price series is sealed, so no YTD window either");
+    const { rows: scopes } = await client.query<{ research_scope: { price_window: unknown } }>(`select research_scope from chat_messages where message_id = $1::uuid`, [answer.message_id]);
+    assert.equal(scopes[0]?.research_scope.price_window, null);
   });
 
   // Two listings under one ticker are one company, so the engine plans it
@@ -647,9 +639,13 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     completedTurn(await runTurn(base, peersThread.thread_id, "How does AMDX's Q2 2025 revenue compare with its peers?"));
     assert.deepEqual(engineAnswer(await latestAssistantMessage(base, peersThread.thread_id)).results.map(([measure, period, disposition]) => [measure, period, disposition]), [["Revenue", "Q2 FY2025", "verified"]]);
     assert.deepEqual(await scope(), { companies: [amd], peers: true });
+    // The explanation is the overview of the company the answer showed, which named no peer; the scope still asks for peers.
     completedTurn(await runTurn(base, peersThread.thread_id, "Explain it"));
-    // AMD's industry peer is auto-selected, so it carries no label.
-    assert.deepEqual(await scope(), { companies: [amd, { issuer_id: NVDA.issuer_id }], peers: true });
+    assert.deepEqual(engineAnswer(await latestAssistantMessage(base, peersThread.thread_id)).notes, [
+      "AMDX is carried from the previous answer. Not covered by this answer: the cause of these figures.",
+      "AMDX's revenue was USD 11,200,000,000.00 in Q2 FY2026; AMDX's year-over-year percent change in revenue was 45.74% in Q2 FY2026 vs Q2 FY2025.",
+    ]);
+    assert.deepEqual(await scope(), { companies: [amd], peers: true });
     completedTurn(await runTurn(base, peersThread.thread_id, "Drop the peers"));
     assert.deepEqual(await scope(), { companies: [amd], peers: false });
   });
@@ -687,7 +683,7 @@ const UNSUPPORTED = "This request asks for a calculation outside the verified fi
 
 function answerText(message: ChatMessage): string[] {
   return message.blocks.filter((block) => block.kind === "rich_text")
-    .map((block) => (block.segments as Array<{ text?: string }>).map((segment) => segment.text ?? "").join(""));
+    .map((block) => (block.segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format ?? "").join(""));
 }
 
 function engineAnswer(message: ChatMessage): { results: Array<[measure: string, period: string, disposition: string, text: string]>; notes: string[] } {
