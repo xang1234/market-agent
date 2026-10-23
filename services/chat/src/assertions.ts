@@ -177,6 +177,15 @@ export function checkAssertions(list: unknown[] | null | undefined, packet: Evid
       reject(index, item, shape.check, shape.reason);
       continue;
     }
+    // A lead is two companies' figures and a ranking's value is a sentence:
+    // neither is a value to compare, nor one that changed.
+    if ((kind === "comparison" || kind === "unknown_cause") && figureIds.some((id) => {
+      const figure = figures.get(id)!;
+      return figure.ranking || (figure.displayed === undefined && figure.lead_of !== undefined);
+    })) {
+      reject(index, item, "kind", `${kind === "comparison" ? "a comparison" : "an unknown cause"} cites no lead or ranking: neither is one company's value in one period`);
+      continue;
+    }
     // An unknown cause is a change's: each figure it cites has its company's
     // same metric in another period with a different value beside it.
     if (kind === "unknown_cause" && !showsChange(figureIds.map((id) => figures.get(id)!), packet)) {
