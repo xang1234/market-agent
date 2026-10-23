@@ -708,7 +708,7 @@ function persistAssistantMessage(
     const note = [
       ...(turn.notFound.length === 0 ? [] : [`No company matched ${labelList(turn.notFound)}.`]),
       ...(turn.carried.length === 0 ? [] : [`${labelList(turn.carried)} ${turn.carried.length > 1 ? "are" : "is"} carried from the previous answer.`]),
-      ...(peerNames.length === 0 ? [] : [`Peers chosen from the catalog: ${peerNames.join(", ")}. Name peers to change them.`]),
+      ...(peerNames.length === 0 ? [] : [catalogPeersNote(peerNames)]),
       ...(plan?.measure_defaults ?? []).flatMap(measureDefaultNote),
       ...(reading === null ? [UNCHECKED] : missing.length === 0 ? [] : [`Not covered by this answer: ${missing.join("; ")}.`]),
     ].join(" ");
@@ -748,6 +748,11 @@ function persistAssistantMessage(
     // As any saved message does, so the thread never points at a replaced gap's snapshot.
     await tx.client.query(`update chat_threads set latest_snapshot_id = $2::uuid, updated_at = now() where thread_id = $1::uuid`, [threadId, publication.snapshot_id]);
   };
+}
+
+/** The peers the turn did not name, as the answer names them; a legal name may end the sentence ("Inc."). */
+export function catalogPeersNote(names: ReadonlyArray<string>): string {
+  return `Peers chosen from the catalog: ${names.join(", ").replace(/\.$/u, "")}. Name peers to change them.`;
 }
 
 /** How the answer read a broad measure, from the plan's record and the table it names (#517). */
