@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  LlmClientError,
   LlmProviderError,
   LlmRouterError,
   createLlmRouter,
@@ -352,3 +353,19 @@ function hang(t: { after(fn: () => void): void }): Promise<never> {
   t.after(() => clearInterval(connection));
   return new Promise<never>(() => {});
 }
+
+test("a client failure stops the router at its first deployment: every other deployment would fail the same way", async () => {
+  const calls: string[] = [];
+  const router = createLlmRouter({
+    settings: settings(),
+    client: async (deployment) => {
+      calls.push(`${deployment.channel}/${deployment.model}`);
+      throw new LlmClientError("Cannot read properties of undefined (reading 'totalTokens')");
+    },
+  });
+
+  await assert.rejects(router.complete({ messages: [{ role: "user", content: "hello" }] }), (error: unknown) =>
+    error instanceof LlmRouterError && error.code === "client_failed" && error.attempts.length === 1 && error.attempts[0]!.code === "client_failed" &&
+    /totalTokens/u.test(error.message));
+  assert.equal(calls.length, 1);
+});
