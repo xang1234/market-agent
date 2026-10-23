@@ -69,15 +69,25 @@ function summary(result: PlanningResult) {
 }
 
 const SEGMENTS = { outcome: "unsupported", model_calls: 1, reason: "segments" } as const;
-const latestMargins = (ticker: string) => {
-  const metric = (key: string) => `${ticker} ${key} latest annual[0]`;
+// The profit family the server expands (financial-engine measure-defaults.ts):
+// each income item, then its margin, for the latest year and the latest quarter.
+const latestProfit = (ticker: string, period: string) => {
+  const metric = (key: string) => `${ticker} ${key} latest ${period}[0]`;
   return [
-    metric("revenue"),
+    metric("gross_profit"),
+    metric("operating_income"),
+    metric("net_income"),
     `gross_margin(${metric("gross_profit")}, ${metric("revenue")})`,
     `operating_margin(${metric("operating_income")}, ${metric("revenue")})`,
     `net_margin(${metric("net_income")}, ${metric("revenue")})`,
   ];
 };
+const revenueAndProfit = (ticker: string) => [
+  `${ticker} revenue latest annual[0]`,
+  `${ticker} revenue latest quarterly[0]`,
+  ...latestProfit(ticker, "annual"),
+  ...latestProfit(ticker, "quarterly"),
+];
 
 const EXPECTED: Record<string, ReturnType<typeof summary>> = {
   "Break down NVDA's revenue by segment": SEGMENTS,
@@ -102,15 +112,21 @@ const EXPECTED: Record<string, ReturnType<typeof summary>> = {
   "Compare NVDA, AMD and AAPL revenue and margins YTD against the S&P 500": {
     outcome: "ready",
     model_calls: 1,
-    outputs: [...latestMargins("NVDA"), ...latestMargins("AMD"), ...latestMargins("AAPL")],
+    outputs: [...revenueAndProfit("NVDA"), ...revenueAndProfit("AMD"), ...revenueAndProfit("AAPL")],
   },
-  "What drives AAPL's margins?": { outcome: "ready", model_calls: 1, outputs: latestMargins("AAPL").slice(1) },
+  "What drives AAPL's margins?": { outcome: "ready", model_calls: 1, outputs: [...latestProfit("AAPL", "annual"), ...latestProfit("AAPL", "quarterly")] },
   "Compare NVDA and AMD operating margin and EPS growth": {
     outcome: "ready",
     model_calls: 1,
-    outputs: ["operating_margin(NVDA operating_income latest annual[0], NVDA revenue latest annual[0])", "AMD revenue latest annual[0]"],
+    outputs: [
+      "operating_margin(NVDA operating_income latest annual[0], NVDA revenue latest annual[0])",
+      "operating_margin(AMD operating_income latest annual[0], AMD revenue latest annual[0])",
+      "percent_change_positive_base(NVDA eps_diluted latest annual[0], NVDA eps_diluted latest annual[1])",
+      "percent_change_positive_base(AMD eps_diluted latest annual[0], AMD eps_diluted latest annual[1])",
+    ],
   },
-  "How does AMDX's Q2 2025 revenue compare with its peers?": { outcome: "ready", model_calls: 1, outputs: ["AMD revenue Q2 2025"] },
+  // Without its catalog peer, the question names no company to compare with.
+  "How does AMDX's Q2 2025 revenue compare with its peers?": { outcome: "needs_clarification", model_calls: 1 },
 };
 
 test("each recorded reply matched by one substring answers a request made of that substring, so no reply shadows it", async () => {
@@ -348,8 +364,15 @@ test("each golden answer names what its question asks for and its plan does not 
     "What drives AAPL's margins?": ["the cause of these figures"],
     "How does AMDX's Q2 2025 revenue compare with its peers?": ["peers the question did not name"],
   };
+  // The peers question is planned, as its golden turn is, with AMD's catalog peer named by its issuer id.
+  const NVDA = GOLDEN_COMPANIES.find((company) => company.ticker === "NVDA")!;
+  const catalogPeer: RequestedSubject = { mention: NVDA.issuer_id, resolution: { status: "resolved", subject_ref: { kind: "issuer", id: NVDA.issuer_id }, label: NVDA.legal_name } };
+  const context = (question: string) => {
+    const planning = planningContext(question);
+    return question.includes("its peers") ? { ...planning, requested_subjects: [...planning.requested_subjects, catalogPeer] } : planning;
+  };
   for (const [question, expected] of Object.entries(uncovered)) {
-    const planned = await planFinancialRequest(planningContext(question), question, model);
+    const planned = await planFinancialRequest(context(question), question, model);
     assert.equal(planned.outcome, "ready", question);
     if (planned.outcome !== "ready") continue;
     assert.deepEqual(uncoveredAsks(parseProposal(await reply(proposalQuestion(question)), question)!, planned.plan), expected, question);

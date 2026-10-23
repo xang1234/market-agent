@@ -66,19 +66,23 @@ test("golden metric questions certify through the chat financial lane on the rec
   };
 
   assert.deepEqual(await ask("Why did AMD's operating margin turn negative in Q2 2025?"), [["out_a_om", "verified", "-1.74%"]]);
+  // Revenue and profit are read as their families (#517): revenue, then each
+  // income item and its margin, for the latest year and the latest quarter.
+  const families = (slot: string, year: string[], quarter: string[]) => [
+    ...[["revenue_latest_fy0", year[0]], ["revenue_latest_q0", quarter[0]]],
+    ...["gross_profit", "operating_income", "net_income", "gross_margin", "operating_margin", "net_margin"].map((id, index) => [`${id}_latest_fy0`, year[index + 1]]),
+    ...["gross_profit", "operating_income", "net_income", "gross_margin", "operating_margin", "net_margin"].map((id, index) => [`${id}_latest_q0`, quarter[index + 1]]),
+  ].map(([id, value]) => [`out_${slot}_${id}`, "verified", value]);
   assert.deepEqual(await ask("Compare NVDA, AMD and AAPL revenue and margins YTD against the S&P 500"), [
-    ["out_a_rev", "verified", "USD 209,911,000,000.00"],
-    ["out_a_gm", "verified", "70.78%"],
-    ["out_a_om", "verified", "60.21%"],
-    ["out_a_nm", "verified", "53.60%"],
-    ["out_b_rev", "verified", "USD 34,669,000,000.00"],
-    ["out_b_gm", "verified", "49.92%"],
-    ["out_b_om", "verified", "9.78%"],
-    ["out_b_nm", "verified", "12.04%"],
-    ["out_c_rev", "verified", "USD 416,161,000,000.00"],
-    ["out_c_gm", "verified", "46.91%"],
-    ["out_c_om", "verified", "31.97%"],
-    ["out_c_nm", "verified", "26.92%"],
+    ...families("s1",
+      ["USD 209,911,000,000.00", "USD 148,570,000,000.00", "USD 126,388,000,000.00", "USD 112,507,000,000.00", "70.78%", "60.21%", "53.60%"],
+      ["USD 62,100,000,000.00", "USD 46,200,000,000.00", "USD 40,300,000,000.00", "USD 35,400,000,000.00", "74.40%", "64.90%", "57.00%"]),
+    ...families("s2",
+      ["USD 34,669,000,000.00", "USD 17,307,000,000.00", "USD 3,392,000,000.00", "USD 4,174,000,000.00", "49.92%", "9.78%", "12.04%"],
+      ["USD 11,200,000,000.00", "USD 6,050,000,000.00", "USD 1,610,000,000.00", "USD 1,480,000,000.00", "54.02%", "14.38%", "13.21%"]),
+    ...families("s3",
+      ["USD 416,161,000,000.00", "USD 195,201,000,000.00", "USD 133,050,000,000.00", "USD 112,010,000,000.00", "46.91%", "31.97%", "26.92%"],
+      ["USD 97,100,000,000.00", "USD 45,700,000,000.00", "USD 29,800,000,000.00", "USD 24,900,000,000.00", "47.06%", "30.69%", "25.64%"]),
   ]);
   assert.deepEqual(await ask("What is AMD's free cash flow?"), [
     ["a_ocf_input", "missing", null],
