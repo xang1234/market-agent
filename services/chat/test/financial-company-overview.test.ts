@@ -236,7 +236,9 @@ test("a question about one company that asks for no figure is answered with its 
       ["last year", { ...NO_ASKS, period: { kind: "other" } }],
     ];
     for (const [period, read] of periods) {
-      assert.deepEqual(await planned(`Revenue for QTRS ${period}`, ["QTRS"], { readQuestion: reading(read) }), [1, ["a_out"]], period);
+      // The reading names QTRS, so it is a question of its own, not a follow-up.
+      const named = { ...read, companies: { kind: "as_named" as const, names: ["QTRS"] } };
+      assert.deepEqual(await planned(`Revenue for QTRS ${period}`, ["QTRS"], { readQuestion: reading(named) }), [1, ["a_out"]], period);
     }
     // A price window, asked for or kept by the scope, is market data the analyst path charts (#398 D2).
     let analystCalls = 0;

@@ -651,11 +651,25 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     const offGuidance = reading({ ...aaaNamed, asks: new Set(["guidance"]), turns_off: { facets: new Set(["guidance"]), metrics: new Set() } });
     assert.deepEqual(await lane("Tell me about AAA, skip the guidance", { readQuestion: offGuidance }, ["AAA"]), ["AAA"]);
     // A follow-up that asks for no figure keeps its scope's period, which an overview would not show.
-    const keepsYear = (async (context: { userIntent?: string }, read: Promise<ScopeProposal | null>) =>
-      ({ ...resolveResearchScope({ question: context.userIntent ?? "", companies: [], prior: null, asOf: new Date().toISOString(), proposal: await read }), fiscal_year: 2023 })) as never;
+    // A scope over the question's reading, as if the previous answer's scope held more.
+    const keeping = (kept: Record<string, unknown>) => (async (context: { userIntent?: string }, read: Promise<ScopeProposal | null>) => {
+      const proposal = await read;
+      const scope = resolveResearchScope({ question: context.userIntent ?? "", companies: [], prior: null, asOf: new Date().toISOString(), proposal });
+      return proposal?.period.kind === "latest" ? scope : { ...scope, ...kept };
+    }) as never;
+    const keepsYear = keeping({ fiscal_year: 2023, inherited: ["fiscal_year"] });
     assert.deepEqual(await lane("Explain it", { priorSubjects: async () => [aaa], researchScope: keepsYear, readQuestion: reading({ asks: new Set(["explains"]) }) }), "analyst");
     assert.deepEqual(await lane("And its latest quarter?", { priorSubjects: async () => [aaa], researchScope: keepsYear, readQuestion: reading({ period: { kind: "latest" } }) }, ["AAA"]), ["AAA"]);
     assert.deepEqual(await lane("How is AAA doing?", { priorSubjects: async () => [aaa], researchScope: keepsYear, readQuestion: reading(aaaNamed) }, ["AAA"]), ["AAA"], "a question that names its company is a new one");
+    const keepsCashFlow = keeping({ metrics: [proposedMetric("free_cash_flow", null, null)!], inherited: ["metrics"] });
+    assert.deepEqual(await lane("And BBB?", { priorSubjects: async () => [aaa], researchScope: keepsCashFlow, readQuestion: reading({ companies: { kind: "compare", add: ["BBB"] } }) }), "analyst", "a metric the overview does not show");
+    const keepsStatement = keeping({ metrics: [proposedMetric("income_statement", null, null)!], inherited: ["metrics"] });
+    assert.deepEqual(await lane("And BBB?", { priorSubjects: async () => [aaa], researchScope: keepsStatement, readQuestion: reading({ companies: { kind: "compare", add: ["BBB"] } }) }, ["AAA", "BBB"]), ["AAA", "BBB"]);
+    assert.deepEqual(await lane("And Q3?", { priorSubjects: async () => [aaa], readQuestion: reading({ period: { kind: "fiscal_quarter", fiscal_period: "Q3", fiscal_year: null } }) }), "analyst", "a follow-up's period");
+    // Only a carried company the scope dropped is left out, and a turn left with none is the analyst's.
+    const overBbb = keeping({ companies: [{ issuer_id: IDS.issuerB, label: "BBB" }] });
+    assert.deepEqual(await lane("Explain it", { priorSubjects: async () => [aaa], researchScope: overBbb, readQuestion: reading({ asks: new Set(["explains"]) }) }), "analyst");
+    assert.deepEqual(await lane("How is AAA doing?", { researchScope: overBbb, readQuestion: reading(aaaNamed) }, ["AAA"]), ["AAA"]);
     // A metric read as asked and turned off is not asked either.
     const offCapex = reading({ metrics: [proposedMetric("capex", null, null)!], asks: new Set(["evidence"]), turns_off: { facets: new Set(), metrics: new Set(["capex"]) } });
     assert.deepEqual(await lane("Skip the capex: where did those numbers come from?", { priorSubjects: async () => [aaa], readQuestion: offCapex }), "analyst");

@@ -57,6 +57,7 @@ import {
   type RequestedMetric,
   type ResearchScope,
   type ScopeFacet,
+  type ScopeField,
   type ScopeProposal,
 } from "./research-scope.ts";
 
@@ -142,18 +143,29 @@ const FACET_LANE: Readonly<Record<ScopeFacet, "figure" | "analyst" | "neutral">>
   latest_quarter: "neutral",
 };
 
+// What a follow-up may keep from its scope and still be answered by the
+// overview, which shows the latest quarters of the income statement.
+const OVERVIEW_KEEPS: ReadonlySet<ScopeField> = new Set(["peers", "metrics"]);
+const OVERVIEW_METRICS: ReadonlySet<string> = new Set(["income_statement"]);
+
 // The analyst path keeps a turn that asks for no figure but something only it
-// answers, or whose scope keeps market data; and a follow-up about the previous
-// answer's companies alone that keeps its period, which an overview would not show.
-function leftToAnalyst(reading: ScopeProposal | null, scope: ResearchScope | null, followUp: boolean): boolean {
+// answers, or whose scope keeps market data; and a follow-up (a question that
+// names no company afresh) whose scope keeps what an overview would not show.
+function leftToAnalyst(reading: ScopeProposal | null, scope: ResearchScope | null): boolean {
   if (reading === null) return false;
   const { asks, offMetrics } = readingAsks(reading);
   if (reading.metrics.some((metric) => !offMetrics.has(metric.metric_key)) || reading.income_items.length > 0) return false;
   const lanes = [...asks].map((facet) => FACET_LANE[facet]);
   if (lanes.includes("figure")) return false;
   if (lanes.includes("analyst")) return true;
-  const keepsPeriod = followUp && reading.period.kind === "none" && (scope?.fiscal_year != null || scope?.fiscal_quarter != null);
-  return scope !== null && (scope.price_window !== null || scope.benchmark || keepsPeriod);
+  if (scope === null) return false;
+  if (scope.price_window !== null || scope.benchmark) return true;
+  const fresh = reading.companies.kind === "as_named" && reading.companies.names.length > 0;
+  if (fresh) return false;
+  const overviewPeriod = reading.period.kind === "none" || reading.period.kind === "latest";
+  const keepsOther = scope.inherited.some((field) => !OVERVIEW_KEEPS.has(field)) || scope.guidance === true ||
+    (scope.inherited.includes("metrics") && scope.metrics.some((metric) => !OVERVIEW_METRICS.has(metric.metric_key)));
+  return !overviewPeriod || keepsOther;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -333,8 +345,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       return null;
     });
     if (reserved) return run(requested, reading, scope);
-    const followUp = requested.carried.length > 0 && requested.carried.length === requested.subjects.length;
-    if (leftToAnalyst(reading, scope, followUp)) return null;
+    if (leftToAnalyst(reading, scope)) return null;
     const kept = withinScope(requested, scope);
     return kept.subjects.length === 0 ? null : run(kept, reading, scope);
   };
