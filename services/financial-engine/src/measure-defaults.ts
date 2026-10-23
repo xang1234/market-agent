@@ -45,3 +45,51 @@ export const MEASURE_DEFAULTS = {
 } as const satisfies Readonly<Record<string, MeasureFamily>>;
 
 export type MeasureFamilyKey = keyof typeof MEASURE_DEFAULTS;
+
+/** A family a draft cites; a period given replaces the family's own. */
+export type CitedFamily = Readonly<{ family: MeasureFamilyKey; period?: PeriodSelector }>;
+
+type DefaultNode = Record<string, unknown> & { node_id: string };
+
+/**
+ * The nodes and outputs the cited families plan for each slot. One id per
+ * (slot, figure, period), so families that read one figure share its node: a
+ * revenue node that is only a margin's denominator is not an output.
+ */
+export function expandMeasureDefaults(
+  slots: ReadonlyArray<string>,
+  cited: ReadonlyArray<CitedFamily>,
+): { operations: DefaultNode[]; outputs: Array<{ output_id: string; node_id: string }> } {
+  const operations = new Map<string, DefaultNode>();
+  const shown = new Set<string>();
+  for (const slot of slots) {
+    const metric = (metricKey: MetricKey, period: PeriodSelector) => {
+      const id = defaultNodeId(slot, metricKey, period);
+      if (!operations.has(id)) operations.set(id, { node_id: id, operation: "reported_metric", subject_slot: slot, metric_key: metricKey, period });
+      return id;
+    };
+    for (const { family: key, period: requested } of cited) {
+      const family: MeasureFamily = MEASURE_DEFAULTS[key];
+      for (const period of requested ? [requested] : family.periods) {
+        for (const metricKey of family.metrics) shown.add(metric(metricKey, period));
+        for (const { margin, numerator } of family.margins) {
+          const id = defaultNodeId(slot, margin, period);
+          operations.set(id, { node_id: id, operation: margin, numerator: metric(numerator, period), revenue: metric("revenue", period) });
+          shown.add(id);
+        }
+      }
+    }
+  }
+  return { operations: [...operations.values()], outputs: [...shown].map((id) => ({ output_id: `out_${id}`, node_id: id })) };
+}
+
+function defaultNodeId(slot: string, figure: string, period: PeriodSelector): string {
+  switch (period.kind) {
+    case "latest":
+      return `${slot}_${figure}_latest_${period.period_type === "annual" ? "fy" : "q"}${period.offset}`;
+    case "fiscal_period":
+      return `${slot}_${figure}_fy${period.fiscal_year}_${period.fiscal_period.toLowerCase()}`;
+    case "at_cutoff":
+      return `${slot}_${figure}_at_cutoff`;
+  }
+}

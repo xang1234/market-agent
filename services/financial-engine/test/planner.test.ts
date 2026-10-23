@@ -363,3 +363,122 @@ test("a market cap or P/E answer always publishes the price and the count or EPS
     [["px_input", "px", "answer"], ["shares_input", "shares", "answer"], ["out_cap", "cap", "answer"]],
   );
 });
+
+const LATEST_QUARTER = { kind: "latest", period_type: "quarterly", offset: 0 };
+
+function citing(slots: number[], defaults: unknown[], extra: Record<string, unknown> = {}) {
+  const letters = ["a", "b", "c", "d"];
+  return { outcome: "ready", subjects: slots.map((index) => ({ slot_id: letters[index], mention: NAMES[index] })), operations: [], outputs: [], thresholds: [], defaults, ...extra };
+}
+
+async function plannedFrom(slots: number[], ...replies: unknown[]) {
+  const model = scripted(...replies);
+  const result = await planFinancialRequest(context({ requested_subjects: slots.map(resolved) }), "Analyze profit", model);
+  assert.equal(result.outcome, "ready", JSON.stringify(result));
+  if (result.outcome !== "ready") throw new Error("not ready");
+  return { plan: result.plan, model };
+}
+
+const outputNodes = (plan: { outputs: ReadonlyArray<{ node_id: string }> }) => plan.outputs.map((output) => output.node_id);
+
+test("a cited profit family plans its figures and margins for the latest fiscal year and quarter (#517)", async () => {
+  const { plan } = await plannedFrom([0], citing([0], [{ family: "profit" }]));
+  assert.deepEqual(outputNodes(plan), [
+    "a_gross_profit_latest_fy0", "a_operating_income_latest_fy0", "a_net_income_latest_fy0",
+    "a_gross_margin_latest_fy0", "a_operating_margin_latest_fy0", "a_net_margin_latest_fy0",
+    "a_gross_profit_latest_q0", "a_operating_income_latest_q0", "a_net_income_latest_q0",
+    "a_gross_margin_latest_q0", "a_operating_margin_latest_q0", "a_net_margin_latest_q0",
+  ]);
+  assert.deepEqual(plan.operations.find((node) => node.node_id === "a_net_margin_latest_q0"), {
+    node_id: "a_net_margin_latest_q0", operation: "net_margin", numerator: "a_net_income_latest_q0", revenue: "a_revenue_latest_q0", operation_version: "net_margin.v1",
+  });
+  assert.deepEqual(plan.operations.find((node) => node.node_id === "a_revenue_latest_fy0"), {
+    node_id: "a_revenue_latest_fy0", operation: "reported_metric", subject_slot: "a", metric_key: "revenue", period: { kind: "latest", period_type: "annual", offset: 0 }, operation_version: "reported_metric.v1",
+  });
+  assert.deepEqual(plan.metric_definitions.map((definition) => definition.metric_key), ["gross_profit", "operating_income", "net_income", "revenue"]);
+  assert.deepEqual(plan.measure_defaults, [{ family: "profit", table_version: "measure-defaults.v1", period: "default" }]);
+});
+
+test("profit and revenue cited for two companies share one revenue node per company and period (#517)", async () => {
+  const { plan } = await plannedFrom([0, 1], citing([0, 1], [{ family: "profit" }, { family: "revenue" }]));
+  const profit = (slot: string, period: string) => ["gross_profit", "operating_income", "net_income", "gross_margin", "operating_margin", "net_margin"].map((figure) => `${slot}_${figure}_latest_${period}`);
+  assert.deepEqual(outputNodes(plan), ["a", "b"].flatMap((slot) => [...profit(slot, "fy0"), ...profit(slot, "q0"), `${slot}_revenue_latest_fy0`, `${slot}_revenue_latest_q0`]));
+  assert.equal(plan.operations.filter((node) => node.operation === "reported_metric" && node.metric_key === "revenue").length, 4);
+  assert.deepEqual(plan.subjects.members.map((member) => member.slot_id), ["a", "b"]);
+  assert.deepEqual(plan.measure_defaults, [
+    { family: "profit", table_version: "measure-defaults.v1", period: "default" },
+    { family: "revenue", table_version: "measure-defaults.v1", period: "default" },
+  ]);
+});
+
+test("a family cited with a requested period plans that period only (#517)", async () => {
+  const { plan } = await plannedFrom([0, 1], citing([0, 1], [{ family: "revenue", period: LATEST_QUARTER }]));
+  assert.deepEqual(outputNodes(plan), ["a_revenue_latest_q0", "b_revenue_latest_q0"]);
+  assert.deepEqual(plan.measure_defaults, [{ family: "revenue", table_version: "measure-defaults.v1", period: "requested", requested_period: LATEST_QUARTER }]);
+});
+
+test("a cited eps family plans diluted EPS beside the draft's own figures (#517)", async () => {
+  const { plan } = await plannedFrom([0], citing([0], [{ family: "eps" }], {
+    operations: [{ node_id: "a_rev", operation: "reported_metric", subject_slot: "a", metric_key: "revenue", period: { kind: "fiscal_period", fiscal_year: 2023, fiscal_period: "FY" } }],
+    outputs: [{ output_id: "a_out", node_id: "a_rev" }],
+  }));
+  assert.deepEqual(outputNodes(plan), ["a_rev", "a_eps_diluted_latest_fy0", "a_eps_diluted_latest_q0"]);
+  assert.deepEqual(plan.measure_defaults, [{ family: "eps", table_version: "measure-defaults.v1", period: "default" }]);
+});
+
+test("an unknown measure family is repaired on the second call (#517)", async () => {
+  const { plan, model } = await plannedFrom([0], citing([0], [{ family: "margin" }]), citing([0], [{ family: "revenue" }]));
+  assert.deepEqual(outputNodes(plan), ["a_revenue_latest_fy0", "a_revenue_latest_q0"]);
+  assert.match(model.calls[1]!.at(-1)!, /unknown_measure_family at \$\.defaults: margin is not a measure family; families are profit, revenue, eps/u);
+});
+
+test("a malformed default or period is a draft issue (#517)", async () => {
+  for (const defaults of [
+    { family: "profit" },
+    [{ family: "profit", metrics: ["net_income"] }],
+    [{ family: "revenue", period: { kind: "at_cutoff" } }],
+    [{ family: "revenue", period: { kind: "latest", period_type: "annual", offset: -1 } }],
+    [{ family: "profit" }, { family: "profit" }],
+  ]) {
+    const result = await planFinancialRequest(context({ requested_subjects: [resolved(0)], max_model_calls: 1 }), "Analyze profit", scripted(citing([0], defaults as unknown[])));
+    assert.equal(result.outcome, "unsupported", JSON.stringify(defaults));
+    assert.match(result.outcome === "unsupported" ? result.reason : "", /^(invalid_draft|duplicate_measure_family)$/u, JSON.stringify(defaults));
+  }
+});
+
+test("a draft node whose id a cited family plans is rejected (#517)", async () => {
+  const colliding = citing([0], [{ family: "revenue" }], {
+    operations: [{ node_id: "a_revenue_latest_fy0", operation: "reported_metric", subject_slot: "a", metric_key: "net_income", period: { kind: "latest", period_type: "annual", offset: 0 } }],
+    outputs: [{ output_id: "a_out", node_id: "a_revenue_latest_fy0" }],
+  });
+  const model = scripted(colliding, colliding);
+  const result = await planFinancialRequest(context({ requested_subjects: [resolved(0)] }), "Revenue and net income", model);
+  assert.deepEqual(result.outcome === "unsupported" && [result.reason, result.model_calls], ["default_node_collision", 2]);
+  assert.match(model.calls[1]!.at(-1)!, /default_node_collision at \$\.operations: a_revenue_latest_fy0 is planned by a cited measure family/u);
+});
+
+test("a cited family plans the subject, so it is not reported unplanned (#517)", async () => {
+  const { plan } = await plannedFrom([0, 1], citing([0, 1], [{ family: "eps" }], {
+    operations: [{ node_id: "a_rev", operation: "reported_metric", subject_slot: "a", metric_key: "revenue", period: { kind: "fiscal_period", fiscal_year: 2023, fiscal_period: "FY" } }],
+    outputs: [{ output_id: "a_out", node_id: "a_rev" }],
+  }));
+  assert.deepEqual(outputNodes(plan).filter((id) => id.startsWith("b_")), ["b_eps_diluted_latest_fy0", "b_eps_diluted_latest_q0"]);
+});
+
+test("a plan citing no family carries no measure_defaults and hashes as before (#517)", async () => {
+  const result = await planFinancialRequest(context(), "Compare FY2023 revenue for Apple, Microsoft, Alphabet and Amazon", scripted(revenueProposal([0, 1, 2, 3])));
+  assert.equal(result.outcome, "ready");
+  if (result.outcome !== "ready") return;
+  assert.equal(Object.hasOwn(result.plan, "measure_defaults"), false);
+  assert.equal(planSemanticHash(result.plan), "98007c76b3fa56e6d9f655cc714f99d21ce35b8799a35becf59699e294fa10d7");
+});
+
+test("the planning prompt names each family from the table and clarifies only for missing companies or measures (#517)", async () => {
+  const model = scripted(citing([0], [{ family: "profit" }]));
+  await planFinancialRequest(context({ requested_subjects: [resolved(0)] }), "Analyze Apple's profit", model);
+  const [system] = model.calls[0]!;
+  assert.match(system!, /Measure families \(key: what the server plans for each requested company\): profit: gross_profit, operating_income, net_income, gross_margin, operating_margin, net_margin for the latest fiscal year at the cutoff and the latest fiscal quarter at the cutoff; revenue: revenue for the latest fiscal year at the cutoff and the latest fiscal quarter at the cutoff; eps: eps_diluted for the latest fiscal year at the cutoff and the latest fiscal quarter at the cutoff\./u);
+  assert.match(system!, /"latest quarter sales" is \{"family":"revenue","period":\{"kind":"latest","period_type":"quarterly","offset":0\}\}/u);
+  assert.match(system!, /only when the request needs companies that are not among the requested companies, or a measure that is neither an approved metric key nor a measure family/u);
+  assert.doesNotMatch(system!, /If a definition is ambiguous/u);
+});

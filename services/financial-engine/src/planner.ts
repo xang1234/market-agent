@@ -25,7 +25,9 @@ import {
   type FinancialSubjectRef,
   type LocalId,
   type OperationKind,
+  type MeasureDefaultRecord,
   type OperationNode,
+  type PeriodSelector,
   type PlanOrigin,
   type PublicationUnitKind,
   type ReportingBasis,
@@ -34,11 +36,12 @@ import {
   type ValidationIssue,
 } from "../../financial-core/src/index.ts";
 import { checkPlanLimits } from "./plan-limits.ts";
-import { interpretPlan } from "./plan-interpretation.ts";
+import { MEASURE_DEFAULTS, MEASURE_DEFAULTS_VERSION, expandMeasureDefaults, type CitedFamily, type MeasureFamilyKey } from "./measure-defaults.ts";
+import { interpretPlan, periodPhrase } from "./plan-interpretation.ts";
 import { isRecord } from "../../shared/src/http.ts";
 
 export const PLANNER_ADAPTER_VERSION = "financial-planner.v1";
-export const PLANNER_PROMPT_VERSION = "financial-plan-prompt.v3";
+export const PLANNER_PROMPT_VERSION = "financial-plan-prompt.v4";
 export const DETERMINISTIC_ADAPTER_VERSION = "financial-deterministic-planner.v1";
 
 /**
@@ -201,6 +204,7 @@ type Draft = {
   operations: Array<Record<string, unknown>>;
   outputs: Array<{ output_id: string; node_id: string }>;
   thresholds: Array<Record<string, unknown>>;
+  defaults: CitedFamily[];
 };
 
 type Rejection =
@@ -210,7 +214,7 @@ type Rejection =
 
 type Attempt<T> = { ok: true; value: T } | ({ ok: false } & Rejection);
 
-const READY_KEYS = ["outcome", "subjects", "operations", "outputs", "thresholds"];
+const READY_KEYS = ["outcome", "subjects", "operations", "outputs", "thresholds", "defaults"];
 
 function parseDraft(text: string): Attempt<Draft> {
   const body = text.trim().replace(/^```(?:json)?\s*/u, "").replace(/\s*```$/u, "");
@@ -254,6 +258,8 @@ function checkDraft(value: unknown): Attempt<Draft> {
   if ((value.operations as unknown[]).some((operation) => !isRecord(operation)) || ((value.thresholds ?? []) as unknown[]).some((threshold) => !isRecord(threshold))) {
     return invalid("$.operations", "invalid_draft", "operations and thresholds must be objects");
   }
+  const defaults = checkDefaults(value.defaults);
+  if (!defaults.ok) return defaults;
   return {
     ok: true,
     value: {
@@ -261,11 +267,45 @@ function checkDraft(value: unknown): Attempt<Draft> {
       operations: value.operations as Draft["operations"],
       outputs: value.outputs as Draft["outputs"],
       thresholds: (value.thresholds ?? []) as Draft["thresholds"],
+      defaults: defaults.value,
     },
   };
 }
 
-function assemblePlan(context: PlanningContext, draft: Draft, planner: FinancialPlanV1["planner"], units: DeterministicUnits = [{ unit_id: "answer", output_ids: draft.outputs.map((output) => output.output_id) }]): Attempt<FinancialPlanV1> {
+function checkDefaults(value: unknown): Attempt<CitedFamily[]> {
+  if (value === undefined) return { ok: true, value: [] };
+  if (!Array.isArray(value)) return invalid("$.defaults", "invalid_draft", "defaults must be an array");
+  const cited: CitedFamily[] = [];
+  const seen = new Set<string>();
+  for (const entry of value as unknown[]) {
+    if (!isRecord(entry) || Object.keys(entry).some((key) => key !== "family" && key !== "period") || typeof entry.family !== "string") {
+      return invalid("$.defaults", "invalid_draft", 'each default is {"family"} or {"family","period"}');
+    }
+    if (!Object.hasOwn(MEASURE_DEFAULTS, entry.family)) {
+      return invalid("$.defaults", "unknown_measure_family", `${entry.family} is not a measure family; families are ${Object.keys(MEASURE_DEFAULTS).join(", ")}`);
+    }
+    if (entry.period !== undefined && !isFiscalPeriodSelector(entry.period)) {
+      return invalid("$.defaults", "invalid_draft", `${entry.family}'s period must be a fiscal_period or latest period selector`);
+    }
+    const key = JSON.stringify([entry.family, entry.period ?? null]);
+    if (seen.has(key)) return invalid("$.defaults", "duplicate_measure_family", `${entry.family} is cited more than once for one period`);
+    seen.add(key);
+    cited.push(entry.period === undefined ? { family: entry.family as MeasureFamilyKey } : { family: entry.family as MeasureFamilyKey, period: entry.period });
+  }
+  return { ok: true, value: cited };
+}
+
+function isFiscalPeriodSelector(value: unknown): value is PeriodSelector {
+  if (!isRecord(value)) return false;
+  const keys = Object.keys(value).sort().join(",");
+  if (value.kind === "latest") {
+    return keys === "kind,offset,period_type" && (value.period_type === "annual" || value.period_type === "quarterly") && Number.isInteger(value.offset) && (value.offset as number) >= 0 && (value.offset as number) <= 19;
+  }
+  return value.kind === "fiscal_period" && keys === "fiscal_period,fiscal_year,kind" && Number.isInteger(value.fiscal_year) && (value.fiscal_year as number) >= 1900 && (value.fiscal_year as number) <= 2200 &&
+    ["FY", "Q1", "Q2", "Q3", "Q4"].includes(value.fiscal_period as string);
+}
+
+function assemblePlan(context: PlanningContext, draft: Draft, planner: FinancialPlanV1["planner"], deterministicUnits?: DeterministicUnits): Attempt<FinancialPlanV1> {
   const resolved = context.requested_subjects.flatMap((subject) =>
     subject.resolution.status === "resolved" ? [{ mention: subject.mention, ref: subject.resolution.subject_ref, label: subject.resolution.label }] : [],
   );
@@ -281,7 +321,17 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
     }
   }
 
-  const metricKeys = [...new Set(draft.operations.flatMap((operation) => (operation.operation === "reported_metric" && typeof operation.metric_key === "string" ? [operation.metric_key] : [])))];
+  // The model never writes a cited family's nodes: the server plans them for every slot.
+  const expanded = expandMeasureDefaults(draft.subjects.map((subject) => subject.slot_id), draft.defaults);
+  const written = new Set(draft.operations.map((operation) => operation.node_id));
+  for (const node of expanded.operations) {
+    if (written.has(node.node_id)) issues.push({ path: "$.operations", code: "default_node_collision", message: `${node.node_id} is planned by a cited measure family; give the draft's node another id` });
+  }
+  const operations = [...draft.operations, ...expanded.operations];
+  const outputs = [...draft.outputs, ...expanded.outputs];
+  const units = deterministicUnits ?? [{ unit_id: "answer", output_ids: outputs.map((output) => output.output_id) }];
+
+  const metricKeys = [...new Set(operations.flatMap((operation) => (operation.operation === "reported_metric" && typeof operation.metric_key === "string" ? [operation.metric_key] : [])))];
   const unknownMetric = metricKeys.find((key) => !METRIC_CATALOG_V1.has(key));
   if (unknownMetric) {
     const question = `The metric "${unknownMetric}" has no approved definition. Which approved metric should be used instead?`;
@@ -302,17 +352,17 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
   });
   for (const entry of resolved) {
     const slot = slotByMention.get(entry.mention);
-    const planned = slot !== undefined && draft.operations.some((operation) => operation.operation === "reported_metric" && operation.subject_slot === slot);
+    const planned = slot !== undefined && operations.some((operation) => operation.operation === "reported_metric" && operation.subject_slot === slot);
     if (!planned) issues.push({ path: "$.operations", code: "subject_not_planned", message: entry.mention });
   }
-  for (const operation of draft.operations) {
+  for (const operation of operations) {
     if (!isApprovedOperation(operation.operation)) {
       issues.push({ path: "$.operations", code: "unsupported_operation", message: `${String(operation.operation)} is not an approved operation` });
     }
   }
   // A share price is planned only as the price of a valuation (#444).
-  const valuationPrices = new Set(draft.operations.flatMap((operation) => (VALUATIONS.has(String(operation.operation)) ? [operation.price] : [])));
-  for (const operation of draft.operations) {
+  const valuationPrices = new Set(operations.flatMap((operation) => (VALUATIONS.has(String(operation.operation)) ? [operation.price] : [])));
+  for (const operation of operations) {
     if (operation.operation === "reported_metric" && resolveMetricDefinition(String(operation.metric_key))?.value_kind === "price" && !valuationPrices.has(operation.node_id)) {
       issues.push({ path: "$.operations", code: "price_without_valuation", message: `${String(operation.node_id)} reads a share price, which is planned only as the price of market_cap or pe_ratio` });
     }
@@ -324,7 +374,7 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
       unitOf.set(outputId, unit.unit_id);
     }
   }
-  for (const output of draft.outputs) {
+  for (const output of outputs) {
     if (!unitOf.has(output.output_id)) issues.push({ path: "$.outputs", code: "unassigned_output", message: `${output.output_id} belongs to no publication unit` });
   }
   if (issues.length > 0) return { ok: false, kind: "invalid", issues };
@@ -351,12 +401,13 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
       source_policy_version: "sources.v1",
     },
     metric_definitions: metricKeys.map((key) => ({ metric_key: key, definition_version: METRIC_CATALOG_V1.get(key)!.definition_version })),
-    operations: draft.operations.map((operation) => ({ ...operation, operation_version: OPERATION_REGISTRY[operation.operation as OperationKind].operation_version })),
-    outputs: draft.outputs.map((output) => ({ output_id: output.output_id, node_id: output.node_id, unit_id: unitOf.get(output.output_id)! })),
+    operations: operations.map((operation) => ({ ...operation, operation_version: OPERATION_REGISTRY[operation.operation as OperationKind].operation_version })),
+    outputs: outputs.map((output) => ({ output_id: output.output_id, node_id: output.node_id, unit_id: unitOf.get(output.output_id)! })),
     publication_units: units.map((unit) => ({ unit_id: unit.unit_id, kind: context.publication_unit_kind })),
     thresholds: draft.thresholds.map((threshold) => ({ ...threshold, attribution: context.threshold_attribution ?? { kind: "user_request", ref: context.origin.ref } })),
     limits: { ...DEFAULT_EXECUTION_LIMITS },
     presentation_template_version: "financial-answer.v1",
+    ...(draft.defaults.length === 0 ? {} : { measure_defaults: draft.defaults.map(measureDefaultRecord) }),
   };
   const drafted = validateFinancialPlan(plan);
   if (!drafted.ok) return { ok: false, kind: "invalid", issues: drafted.issues };
@@ -369,6 +420,12 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
   const labels = new Map(members.map((member) => [member.slot_id, resolved.find((entry) => entry.ref.id === member.subject_ref.id)!.label]));
   const withInterpretation = validateFinancialPlan({ ...validated.value, interpretation: interpretPlan(validated.value, labels) });
   return withInterpretation.ok ? withInterpretation : { ok: false, kind: "invalid", issues: withInterpretation.issues };
+}
+
+function measureDefaultRecord({ family, period }: CitedFamily): MeasureDefaultRecord {
+  return period === undefined
+    ? { family, table_version: MEASURE_DEFAULTS_VERSION, period: "default" }
+    : { family, table_version: MEASURE_DEFAULTS_VERSION, period: "requested", requested_period: period };
 }
 
 /**
@@ -455,17 +512,23 @@ const VALUATIONS: ReadonlySet<string> = new Set<OperationKind>(["market_cap", "p
 function systemPrompt(): string {
   const metrics = PLANNABLE_METRICS.map((definition) => definition.metric_key).join(", ");
   const operations = Object.keys(OPERATION_REGISTRY).join(", ");
+  const families = Object.entries(MEASURE_DEFAULTS).map(([key, family]) =>
+    `${key}: ${[...family.metrics, ...family.margins.map(({ margin }) => margin)].join(", ")} for the ${family.periods.map(periodPhrase).join(" and the ")}`).join("; ");
   return [
     "You translate a financial research request into a JSON plan draft. Reply with one JSON object only.",
     `Approved metric keys: ${metrics}. Approved operations: ${operations}.`,
-    'Ready drafts: {"outcome":"ready","subjects":[{"slot_id","mention"}],"operations":[...],"outputs":[{"output_id","node_id"}],"thresholds":[{"threshold_id","value","unit"}]}.',
+    'Ready drafts: {"outcome":"ready","subjects":[{"slot_id","mention"}],"operations":[...],"outputs":[{"output_id","node_id"}],"thresholds":[{"threshold_id","value","unit"}],"defaults":[{"family","period"}]}.',
     'Operations: reported_metric {node_id, operation, subject_slot, metric_key, period:{kind:"fiscal_period",fiscal_year,fiscal_period} or {kind:"latest",period_type,offset}}; absolute_change/percent_change_positive_base {current, prior}; gross_margin/operating_margin/net_margin {numerator, revenue}; free_cash_flow {operating_cash_flow, capex} (annual only); ratio {ratio_key, numerator, denominator}; trailing_sum {quarters:[4 node ids]}; threshold {subject, threshold_id, comparison}; peer_compare {members, direction}; market_cap {price, shares}; pe_ratio {price, earnings}.',
     'A valuation\'s price is a reported_metric of share_price with period {kind:"at_cutoff"}, planned only as the price of market_cap or pe_ratio. market_cap\'s shares are shares_outstanding with period {kind:"latest",period_type:"quarterly",offset:0}. pe_ratio\'s earnings are eps_diluted with period {kind:"latest",period_type:"annual",offset:0}: P/E uses the latest fiscal year\'s diluted EPS.',
     "Plan every requested company. Threshold values are decimal strings. Never invent metric definitions, identifiers, owners, budgets, modes, or verification fields.",
-    'If a definition is ambiguous reply {"outcome":"needs_clarification","question","choices"}; if it cannot be expressed reply {"outcome":"unsupported","reason"}.',
+    `Measure families (key: what the server plans for each requested company): ${families}.`,
+    `When the request names a broad measure a family covers and does not pick its members, cite the family in "defaults" as {"family":"<key>"}; do not plan it and do not ask. Give "period", a fiscal_period or latest period selector, only when the request names one: "latest quarter sales" is ${JSON.stringify(LATEST_QUARTER_SALES)}. Never write a cited family's nodes or outputs; still list every requested company in "subjects".`,
+    'Reply {"outcome":"needs_clarification","question","choices"} only when the request needs companies that are not among the requested companies, or a measure that is neither an approved metric key nor a measure family. If it cannot be expressed reply {"outcome":"unsupported","reason"}.',
     `An unsupported reason is one of these keys (key: what the request asks for): ${UNSUPPORTED_REASONS.map((reason) => `${reason}: ${UNSUPPORTED_MEANINGS[reason]}`).join("; ")}.`,
   ].join("\n");
 }
+
+const LATEST_QUARTER_SALES = { family: "revenue" satisfies MeasureFamilyKey, period: { kind: "latest", period_type: "quarterly", offset: 0 } };
 
 function userPrompt(context: PlanningContext, requestText: string): string {
   const subjects = context.requested_subjects.map((subject) => subject.mention).join("; ");
