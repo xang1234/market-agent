@@ -480,5 +480,6 @@ test("the planning prompt names each family from the table and clarifies only fo
   assert.match(system!, /Measure families \(key: what the server plans for each requested company\): profit: gross_profit, operating_income, net_income, gross_margin, operating_margin, net_margin for the latest fiscal year at the cutoff and the latest fiscal quarter at the cutoff; revenue: revenue for the latest fiscal year at the cutoff and the latest fiscal quarter at the cutoff; eps: eps_diluted for the latest fiscal year at the cutoff and the latest fiscal quarter at the cutoff\./u);
   assert.match(system!, /"latest quarter sales" is \{"family":"revenue","period":\{"kind":"latest","period_type":"quarterly","offset":0\}\}/u);
   assert.match(system!, /only when the request needs companies that are not among the requested companies, or a measure that is neither an approved metric key nor a measure family/u);
+  assert.match(system!, /A market index or benchmark \(the S&P 500\) and a share price return \(year to date\) are answered outside the plan: ignore them and plan the companies' figures\./u);
   assert.doesNotMatch(system!, /If a definition is ambiguous/u);
 });

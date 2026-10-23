@@ -523,6 +523,7 @@ function systemPrompt(): string {
     "Plan every requested company. Threshold values are decimal strings. Never invent metric definitions, identifiers, owners, budgets, modes, or verification fields.",
     `Measure families (key: what the server plans for each requested company): ${families}.`,
     `When the request names a broad measure a family covers and does not pick its members, cite the family in "defaults" as {"family":"<key>"}; do not plan it and do not ask. Give "period", a fiscal_period or latest period selector, only when the request names one: "latest quarter sales" is ${JSON.stringify(LATEST_QUARTER_SALES)}. Never write a cited family's nodes or outputs; still list every requested company in "subjects".`,
+    "A market index or benchmark (the S&P 500) and a share price return (year to date) are answered outside the plan: ignore them and plan the companies' figures.",
     'Reply {"outcome":"needs_clarification","question","choices"} only when the request needs companies that are not among the requested companies, or a measure that is neither an approved metric key nor a measure family. If it cannot be expressed reply {"outcome":"unsupported","reason"}.',
     `An unsupported reason is one of these keys (key: what the request asks for): ${UNSUPPORTED_REASONS.map((reason) => `${reason}: ${UNSUPPORTED_MEANINGS[reason]}`).join("; ")}.`,
   ].join("\n");
