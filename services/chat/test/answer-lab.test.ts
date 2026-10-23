@@ -513,7 +513,10 @@ test("live --judge --update runs no turn after one of its thread it left unrecor
   };
   const run = await live(traces, 1, 2, true, (traced, answer) => rerecord(traced, answer, "openai/gpt-4.1"), { env, createClient: createClient as never });
   assert.equal(calls, 1);
-  assert.deepEqual(run.results.map(({ error }) => error), [undefined, 'not run: the turn asking "Analyze NVDA." was not re-recorded in this run']);
+  assert.deepEqual(run.results.map(({ skipped, error }) => [skipped, error]), [
+    ["the answer was cut off at the token limit", undefined],
+    [undefined, 'not run: the turn asking "Analyze NVDA." was not re-recorded in this run'],
+  ]);
   assert.deepEqual(traces.map(({ file }) => readFileSync(file, "utf8")), before);
 });
 
@@ -559,6 +562,7 @@ test("recorded --update --judge and --repair write a live round over the trace o
   // --repair replays the recorded verdict, which sends inference 6 to repair.
   const recordedJudge = [{ outcome: "replied", exchange: { messages: [], text: contradicted, truncated: false, deployment: "openai/gpt-4.1", latency_ms: 1 } }];
   const written = [];
+  const skipped: Array<[string, string | undefined]> = [];
   for (const [name, run] of Object.entries(runs)) {
     const traces = readTraces([traceFiles({ "segment-drill-down.json": run.rerun === "repair" ? { ...trace, judge: recordedJudge } : trace })]);
     const before = readFileSync(traces[0]!.file, "utf8");
@@ -569,8 +573,15 @@ test("recorded --update --judge and --repair write a live round over the trace o
       if (call === "judge" && run.judge === null) throw new Error("judge unavailable");
       return { text: call === "judge" ? run.judge : "```assertions\n[]\n```" };
     };
-    await recorded(traces, true, run.rerun, { env, createClient: createClient as never, repairDeadlines: { attemptMs: 15_000, totalMs: 45_000 } });
+    const [result] = await recorded(traces, true, run.rerun, { env, createClient: createClient as never, repairDeadlines: { attemptMs: 15_000, totalMs: 45_000 } });
+    skipped.push([name, result!.skipped]);
     if (readFileSync(traces[0]!.file, "utf8") !== before) written.push(name);
   }
   assert.deepEqual(written, ["healthy"]);
+  assert.deepEqual(skipped, [
+    ["judge failed", "judge call failed: all LLM deployments failed"],
+    ["repair on a fallback", "the repair came from openai/gpt-4.1-mini, not the primary openai/gpt-4.1"],
+    ["--repair, repair on a fallback", "the repair came from openai/gpt-4.1-mini, not the primary openai/gpt-4.1"],
+    ["healthy", undefined],
+  ]);
 });

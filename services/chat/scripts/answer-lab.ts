@@ -160,13 +160,13 @@ function delta(before: Row, after: Row): string {
 // alone (repair), read each replay instead, and --update records their
 // replies. judge_input_changed, repair_input_changed: today's answer asks the
 // recorded judge or repair round something else. A live round --update would
-// record is held to rerecord's guard (degradedRound).
+// record is held to rerecord's guard (degradedRound); skipped: why it was not.
 export async function recorded(
   traces: ReadonlyArray<LabeledTrace>,
   update = false,
   rerun?: "judge" | "repair",
   live: Omit<LiveReplay, "rerun"> = { env: liveEnv() },
-): Promise<Array<{ key: string; label: string; metrics: SampleMetrics; differs: boolean; judge_input_changed: boolean; repair_input_changed: boolean; system_prompt_changed: { recorded: string; today: string } | null; judge?: JudgeView }>> {
+): Promise<Array<{ key: string; label: string; metrics: SampleMetrics; differs: boolean; judge_input_changed: boolean; repair_input_changed: boolean; system_prompt_changed: { recorded: string; today: string } | null; judge?: JudgeView; skipped?: string }>> {
   const primary = update && rerun ? await primaryDeployment(live.env) : undefined;
   const results = [];
   for (const { key, label, file, trace } of traces) {
@@ -184,6 +184,7 @@ export async function recorded(
       repair_input_changed,
       system_prompt_changed,
       ...(view ? { judge: view } : {}),
+      ...(why === undefined ? {} : { skipped: why }),
     });
   }
   return results;
@@ -229,6 +230,8 @@ type LiveSample = {
   assertions?: { rendered: boolean; accepted: AssertionKind[]; rejected: string[]; repeated?: number };
   judge?: JudgeView;
   repair?: RepairTrace;
+  // Answered, but not written over its trace (rerecord), and why.
+  skipped?: string;
   error?: string;
 };
 // traces: the turns' keys; labels: their file names, for display.
@@ -406,6 +409,8 @@ export async function live(
         const answer = await sample(traced, job.sample);
         if (!record) continue;
         const why = answer ? record(traced, answer) : "the run failed";
+        const result = answer && why !== undefined ? results.find((entry) => entry.trace === job.key) : undefined;
+        if (result) result.skipped = why;
         if (why === undefined) answered.set(job.trace.question, savedNarrative({ blocks: answer!.blocks, input: traced.trace.input }));
       }
     }
@@ -846,7 +851,7 @@ async function main(argv: string[]): Promise<number> {
       wall_ms: 0,
       traces: traces.map(({ key }) => key),
       labels: Object.fromEntries(traces.map(({ key, label }) => [key, label])),
-      results: results.map(({ key, metrics, judge }) => ({ trace: key, sample: 0, metrics, ...(judge ? { judge } : {}) })),
+      results: results.map(({ key, metrics, judge, skipped }) => ({ trace: key, sample: 0, metrics, ...(judge ? { judge } : {}), ...(skipped ? { skipped } : {}) })),
     };
     if (run.results.some((result) => result.judge)) console.log(`\n${values.judge ? "judged live" : values.repair ? "repaired live" : "as recorded"}, ${judgeSummary(run)}`);
     if (values.judge || values.repair) {
@@ -855,7 +860,8 @@ async function main(argv: string[]): Promise<number> {
       writeFileSync(file, `${JSON.stringify(run, null, 2)}\n`, { flag: "wx" });
       console.log(file);
     }
-    return values.check && (differs.size > 0 || stale.length > 0) ? 1 : 0;
+    const skipped = results.filter((result) => result.skipped !== undefined).length;
+    return (values.check && (differs.size > 0 || stale.length > 0)) || skipped > 0 ? 1 : 0;
   }
   const samples = Number.parseInt(values.samples, 10);
   const concurrency = Number.parseInt(values.concurrency, 10);
@@ -877,15 +883,16 @@ async function main(argv: string[]): Promise<number> {
   writeFileSync(file, `${JSON.stringify(run, null, 2)}\n`, { flag: "wx" });
   const rows = liveRows(run);
   const errors = run.results.filter((result) => result.error).length;
+  const skipped = run.results.filter((result) => result.skipped).length;
   const unanswered = run.traces.filter((key) => !rows.some((row) => row.key === key)).map((key) => run.labels?.[key] ?? key);
-  console.log(`\n${table(rows)}\n\n${assertionSummary(run)}${values.judge ? `\n\n${judgeSummary(run)}` : ""}\n\n${run.results.length - errors} answers, ${errors} errors, ${(run.wall_ms / 1000).toFixed(1)}s wall; ${file}`);
+  console.log(`\n${table(rows)}\n\n${assertionSummary(run)}${values.judge ? `\n\n${judgeSummary(run)}` : ""}\n\n${run.results.length - errors} answers, ${errors} errors, ${skipped} not re-recorded, ${(run.wall_ms / 1000).toFixed(1)}s wall; ${file}`);
   if (unanswered.length > 0) console.log(`no answer: ${unanswered.join(", ")}`);
   if (before) {
     // Only traces both runs answered, so a failed one does not read as a change.
     const shared = liveRows(before).map((row) => row.key).filter((key) => rows.some((row) => row.key === key));
     console.log(`\nagainst ${values.against}, over the ${shared.length} traces both answered:\n${delta(totalRow(liveRows(before, shared)), totalRow(liveRows(run, shared)))}`);
   }
-  return errors > 0 ? 1 : 0;
+  return errors > 0 || skipped > 0 ? 1 : 0;
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
