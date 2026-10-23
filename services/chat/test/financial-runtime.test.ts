@@ -655,6 +655,10 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       ({ ...resolveResearchScope({ question: context.userIntent ?? "", companies: [], prior: null, asOf: new Date().toISOString(), proposal: await read }), fiscal_year: 2023 })) as never;
     assert.deepEqual(await lane("Explain it", { priorSubjects: async () => [aaa], researchScope: keepsYear, readQuestion: reading({ asks: new Set(["explains"]) }) }), "analyst");
     assert.deepEqual(await lane("And its latest quarter?", { priorSubjects: async () => [aaa], researchScope: keepsYear, readQuestion: reading({ period: { kind: "latest" } }) }, ["AAA"]), ["AAA"]);
+    assert.deepEqual(await lane("How is AAA doing?", { priorSubjects: async () => [aaa], researchScope: keepsYear, readQuestion: reading(aaaNamed) }, ["AAA"]), ["AAA"], "a question that names its company is a new one");
+    // A metric read as asked and turned off is not asked either.
+    const offCapex = reading({ metrics: [proposedMetric("capex", null, null)!], asks: new Set(["evidence"]), turns_off: { facets: new Set(), metrics: new Set(["capex"]) } });
+    assert.deepEqual(await lane("Skip the capex: where did those numbers come from?", { priorSubjects: async () => [aaa], readQuestion: offCapex }), "analyst");
   });
 
   await t.test("a retry of a turn whose run is reserved resumes it, whatever its reading says now", async () => {

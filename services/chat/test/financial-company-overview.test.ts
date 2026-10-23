@@ -127,12 +127,17 @@ test("a question about one company that asks for no figure is answered with its 
     assert.deepEqual(await results(latest.message_id), QTRS_OVERVIEW, "a reading that asks for the latest quarter gets the overview, which shows it");
   });
 
-  await t.test("an explanation of a company is its overview, and its note does not call the cause uncovered (#398)", async () => {
-    const done = completed((await chatHarness(pool, { model: null, readQuestion: reading({ ...NO_ASKS, asks: new Set(["explains"]) }), resolveMention: resolve }).run({ ...base, userIntent: "Explain QTRS's results" })).events);
-    assert.deepEqual(await results(done.message_id), QTRS_OVERVIEW);
-    const { rows: [message] } = await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id]);
-    assert.deepEqual(message.blocks.map((block: { kind: string }) => block.kind), ["financial_answer"], "no note names the cause as not covered");
+  await t.test("an explanation of a company is its overview, whose note calls the cause uncovered only without commentary (#398)", async () => {
+    const notes = async (commentary?: Parameters<typeof chatHarness>[1]["commentary"]) => {
+      const done = completed((await chatHarness(pool, { model: null, readQuestion: reading({ ...NO_ASKS, asks: new Set(["explains"]) }), resolveMention: resolve, ...(commentary ? { commentary } : {}) }).run({ ...base, userIntent: "Explain QTRS's results" })).events);
+      assert.deepEqual(await results(done.message_id), QTRS_OVERVIEW);
+      const { rows: [message] } = await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id]);
+      return message.blocks.slice(1).map((block: { segments: Array<{ text: string }> }) => block.segments[0]!.text);
+    };
+    assert.deepEqual(await notes(async () => {}), []);
+    assert.deepEqual(await notes(), ["Not covered by this answer: the cause of these figures."]);
   });
+
 
   await t.test("a question the overview answers never calls the planner's model (#398)", async () => {
     const model = revenueModel(["QTRS"]);
@@ -199,6 +204,14 @@ test("a question about one company that asks for no figure is answered with its 
 
   const scoped = async (context: { userIntent?: string }, read: Promise<ScopeProposal | null>) =>
     resolveResearchScope({ question: context.userIntent ?? "", companies: [{ issuer_id: COMPANIES.QTRS!, label: "QTRS" }], prior: null, asOf: "2026-10-22T00:00:00.000Z", served: true, proposal: await read });
+
+  await t.test("an overview keeps no period in its saved scope, as it shows the latest quarters (#398)", async () => {
+    const keepsYear = (async (context: { userIntent?: string }, read: Promise<ScopeProposal | null>) => ({ ...(await scoped(context, read)), fiscal_year: 2023 })) as never;
+    const done = completed((await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve, researchScope: keepsYear }).run({ ...base, userIntent: "How is QTRS doing?" })).events);
+    assert.deepEqual(await results(done.message_id), QTRS_OVERVIEW);
+    const { rows: [saved] } = await db.query(`select research_scope from chat_messages where message_id = $1`, [done.message_id]);
+    assert.deepEqual([saved.research_scope.fiscal_year, saved.research_scope.fiscal_quarter], [null, null]);
+  });
 
   await t.test("a reading that asks for a figure or a period other than the latest, or a company with no quarters, goes to the planner; a carried company is the overview, and a price window the analyst's", async () => {
     const planned = async (userIntent: string, mentions: string[], options: { readQuestion?: () => Promise<ScopeProposal | null>; priorSubjects?: () => Promise<ChatResolvedSubjectPreResolution[]>; researchScope?: typeof scoped | (() => Promise<ResearchScope>) } = {}) => {
