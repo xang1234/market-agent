@@ -26,10 +26,10 @@
 // Each run summarizes what the judge showed and hid. judge-mutations
 // judges a set of inferences and their mutations
 // (test/answer-lab/judge-mutations.json) and reports how many mutations it
-// catches, how many come back at their kind's tier, how many it would show
-// that should hide, and how many originals it flags; --repair then sends each
-// one it hid through the repair round, as a chat turn would, and reports what
-// that shows.
+// catches, how many come back at their kind's tier, how many it shows above
+// that tier, and how many originals it flags; --repair then sends each
+// one a chat turn would (verdicts.ts sentToRepair) through the repair round,
+// and reports what that shows.
 import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -54,7 +54,7 @@ import { judgeCases, judgeInferences, verdictsOf, type JudgeCase, type JudgeReco
 import { repairRequests, repairRound, requestRepair, type RepairTrace } from "../src/inference-repair.ts";
 import type { EvidencePacket } from "../src/evidence-packet.ts";
 import type { LlmChatClient, LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
-import { shownAs, VERDICTS, verdictText, type InferenceVerdict, type ShownAs, type Verdict } from "../src/verdicts.ts";
+import { sentToRepair, shownAs, VERDICTS, verdictText, type InferenceVerdict, type ShownAs, type Verdict } from "../src/verdicts.ts";
 import { turnPacket } from "../src/llm-runtime.ts";
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
@@ -422,6 +422,7 @@ export const MUTATION_TIERS = {
   contradicted_ranking: { worded_amount: false, verdict: "contradicted" },
 } as const satisfies Record<string, Expected>;
 type MutationKind = keyof typeof MUTATION_TIERS;
+const SHOWN_RANK: Readonly<Record<ShownAs, number>> = { hidden: 0, unverified: 1, shown: 2 };
 const ORIGINAL: Expected = { worded_amount: false, verdict: "entailed" };
 type MutationSet = {
   cases: Array<{
@@ -513,9 +514,9 @@ async function judgeMutations(variants: ReadonlyArray<MutationVariant>, concurre
   return variants.map((variant) => results.find((result) => result.id === variant.id && result.text === variant.judged.text)!);
 }
 
-// Each variant the judge hid, through the repair round, live.
+// Each variant a chat turn would send to repair, through the round, live.
 async function repairMutations(variants: ReadonlyArray<MutationVariant>, results: ReadonlyArray<MutationResult>, concurrency: number): Promise<MutationRepair[]> {
-  const jobs = variants.flatMap((variant, i) => (shownAs(results[i]!.verdict) === "hidden" ? [{ variant, first: results[i]!.verdict }] : []));
+  const jobs = variants.flatMap((variant, i) => (sentToRepair(results[i]!.verdict) ? [{ variant, first: results[i]!.verdict }] : []));
   const order = [...jobs];
   const repairs = new Map<MutationVariant, MutationRepair>();
   const worker = async () => {
@@ -529,8 +530,10 @@ async function repairMutations(variants: ReadonlyArray<MutationVariant>, results
   return order.map(({ variant }) => repairs.get(variant)!);
 }
 
-// "shown though they should hide" is the safety number: a contradiction or a
-// worded amount on the page. An error is neither caught nor at its tier, and
+// "shown above their tier" and "contradicted shown" are the safety numbers: a
+// mutation shown higher than its kind's ceiling, the most its allowed verdicts
+// show (shownAs), such as a worded amount under the entailed label; and a
+// contradiction on the page. An error is neither caught nor at its tier, and
 // is counted on its own.
 export function mutationSummary(results: ReadonlyArray<Pick<MutationResult, "id" | "kind" | "text" | "verdict">>): string {
   type Row = Pick<MutationResult, "kind" | "verdict">;
@@ -541,11 +544,11 @@ export function mutationSummary(results: ReadonlyArray<Pick<MutationResult, "id"
     const expected = expectedOf(kind);
     return verdict.verdict !== "error" && verdict.worded_amount === expected.worded_amount && verdictsAllowed(expected).includes(verdict.verdict);
   };
-  const hides = (expected: Expected) =>
-    verdictsAllowed(expected).every((verdict) => shownAs({ index: 0, verdict, worded_amount: expected.worded_amount }) === "hidden");
+  const ceiling = (expected: Expected) =>
+    Math.max(...verdictsAllowed(expected).map((verdict) => SHOWN_RANK[shownAs({ index: 0, verdict, worded_amount: expected.worded_amount })]));
+  const aboveTier = ({ kind, verdict }: Row) => SHOWN_RANK[shownAs(verdict)] > ceiling(expectedOf(kind));
   const mutations = results.filter((result) => result.kind !== "original");
   const originals = results.filter((result) => result.kind === "original");
-  const shouldHide = mutations.filter((result) => hides(expectedOf(result.kind)));
   const missed = results.filter((result) => !atTier(result));
   return [
     `caught: ${rate(mutations, flagged)} mutations (${errors(mutations)} errors)`,
@@ -553,16 +556,17 @@ export function mutationSummary(results: ReadonlyArray<Pick<MutationResult, "id"
     ...Object.entries(MUTATION_TIERS).map(([kind, expected]) =>
       `  ${kind.padEnd(22)} ${(expected.worded_amount ? "worded_amount" : expected.verdict).padEnd(14)}${rate(mutations.filter((result) => result.kind === kind), atTier)}`
     ),
-    `shown though they should hide: ${rate(shouldHide, (row) => shownAs(row.verdict) !== "hidden")} (${errors(shouldHide)} errors, hidden but unjudged)`,
+    `shown above their tier: ${rate(mutations, aboveTier)} mutations`,
+    `contradicted shown: ${rate(results, (row) => row.verdict.verdict === "contradicted" && shownAs(row.verdict) !== "hidden")}`,
     `false alarms: ${rate(originals, flagged)} originals (${errors(originals)} errors)`,
     ...(missed.length > 0 ? ["not at their expected outcome:"] : []),
     ...missed.map((result) => `  ${result.id} ${result.kind}: ${verdictText(result.verdict)}\n      ${result.text}`),
   ].join("\n");
 }
 
-// A hidden variant after the repair round: its repaired text (null: left out,
-// or not sent, as an error verdict is not), the check that rejected that text,
-// the repaired text's verdict, and what the reader ends with.
+// A variant after the repair round: its repaired text (null: left out, or not
+// sent, as an error verdict is not), the check that rejected that text, the
+// repaired text's verdict, and what the reader ends with.
 export type MutationRepair = {
   id: string;
   kind: MutationVariant["kind"];
@@ -575,7 +579,9 @@ export type MutationRepair = {
 };
 
 // The variant through the round a chat turn runs (inference-repair.ts), on
-// its turn's answer request and list, with its verdict as the request.
+// its turn's answer request and list, with its verdict as the request. As in
+// chat (answer-trace.ts), a failed repair of one whose first verdict showed
+// leaves it as that verdict showed it.
 export async function repairMutation(
   variant: MutationVariant,
   first: InferenceVerdict,
@@ -600,21 +606,18 @@ export async function repairMutation(
   const entry = [...round.report.accepted, ...round.report.rejected].find((assertion) => assertion.index === index);
   const repaired = entry?.text ?? "";
   const rejection = round.report.rejected.find((assertion) => assertion.index === index);
-  if (rejection) return { ...base, repaired, rejection: `${rejection.check}: ${rejection.reason}`, as: "hidden" };
+  if (rejection) return { ...base, repaired, rejection: `${rejection.check}: ${rejection.reason}`, as: shownAs(first) };
   const second = verdictsOf(round.cases, round.records[0] ?? { outcome: "not_called", reason: "no judge record" })[0]!;
-  return { ...base, repaired, second, as: shownAs(second) };
+  const as = shownAs(second);
+  return { ...base, repaired, second, as: as === "hidden" ? shownAs(first) : as };
 }
 
-// Each repaired variant's path, and how many hide-tier mutations end shown or
-// unverified after the round.
+// Each repaired variant's path, and what the mutations sent to repair end as.
 export function mutationRepairSummary(repairs: ReadonlyArray<MutationRepair>): string {
-  const hideTier = repairs.filter((repair) => repair.kind !== "original" && Object.hasOwn(MUTATION_TIERS, repair.kind) &&
-    verdictsAllowed(MUTATION_TIERS[repair.kind as MutationKind]).every((verdict) =>
-      shownAs({ index: 0, verdict, worded_amount: MUTATION_TIERS[repair.kind as MutationKind].worded_amount }) === "hidden"
-    ));
-  const count = (as: ShownAs) => hideTier.filter((repair) => repair.as === as).length;
+  const mutations = repairs.filter((repair) => repair.kind !== "original");
+  const count = (as: ShownAs) => mutations.filter((repair) => repair.as === as).length;
   return [
-    `after repair: ${count("shown")} shown, ${count("unverified")} unverified, ${count("hidden")} still hidden, of ${hideTier.length} hide-tier mutations the judge hid`,
+    `after repair: ${count("shown")} shown, ${count("unverified")} unverified, ${count("hidden")} hidden, of ${mutations.length} mutations sent to repair`,
     ...repairs.map((repair) =>
       `  ${repair.id} ${repair.kind}: ${verdictText(repair.first)}\n      ${repair.repaired ?? "left out"}${repair.rejection ? `\n      rejected: ${repair.rejection}` : ""}${repair.second ? `\n      ${verdictText(repair.second)}` : ""}\n      ${repair.as}`
     ),

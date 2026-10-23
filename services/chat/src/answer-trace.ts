@@ -9,10 +9,10 @@ import { isDeepStrictEqual } from "node:util";
 
 import { loadLlmSettingsFromEnv, type LlmChatClient, type LlmChatMessage, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
 import { isRecord } from "../../shared/src/http.ts";
-import { assertionList, type AssertionReport } from "./assertions.ts";
+import { assertionList, checkAssertions, type AssertionReport } from "./assertions.ts";
 import { judgeCases, judgeInferences, judgeMessages, verdictsOf, type JudgeCase, type JudgeRecord, type ModelRecord } from "./inference-judge.ts";
 import { repairRequests, repairRound, requestRepair, type RepairRequest, type RepairTrace } from "./inference-repair.ts";
-import { shownAs, verdictText, type InferenceVerdict, type ShownAs } from "./verdicts.ts";
+import { sentToRepair, shownAs, verdictText, type InferenceVerdict, type ShownAs } from "./verdicts.ts";
 import { composeAnalystBlocksWithLlm, renderedAnswer, turnPacket, type AnswerBlocks, type AnswerUsage, type InferenceState, type ModelDeadlines } from "./llm-runtime.ts";
 
 export type AnswerTraceInput = Omit<
@@ -141,44 +141,64 @@ type RepairCalls = {
   judge: (inference: JudgeCase, i: number) => Promise<ModelRecord>;
 };
 
+// What a stream shows once the repair reply is checked: the merged answer's
+// blocks with the given inferences in their first form, and the inferences
+// whose repair already failed (left out, or rejected by the checks).
+export type RepairStream = { blocks: (restored: ReadonlyArray<number>) => AnswerBlocks; failed: number[] };
+
 // The answer as its verdicts leave it, then as one repair round leaves it:
 // each repaired inference's verdict in place of its first, and the rest as
-// they were. calls: none when no repair may run. merged hears the repaired
-// answer's blocks before its inferences are judged.
+// they were. A repair never leaves the reader worse off: one whose first
+// verdict showed it keeps its first text and verdict when the repair left it
+// out, failed the checks or was judged hidden. calls: none when no repair may
+// run. merged hears the checked repair before its inferences are judged.
 async function repairedAnswer(
   input: AnswerTraceInput,
   answer: ComposedAnswer,
   cases: ReadonlyArray<JudgeCase>,
   records: ReadonlyArray<ModelRecord>,
   calls: RepairCalls | null,
-  merged?: (blocks: AnswerBlocks) => void,
+  merged?: (stream: RepairStream) => void,
 ): Promise<TracedAnswer> {
   const first = judgedAnswer(answer, cases, records);
   const verdicts = first.assertions?.judged ?? [];
   const requests = calls ? repairsFor(answer, verdicts) : [];
   if (!calls || requests.length === 0) return first;
   const packet = input.packet ?? turnPacket(input);
+  const original = assertionList(answer.exchange!.text) ?? [];
+  const restoredReport = (list: ReadonlyArray<unknown>, report: AssertionReport, restored: ReadonlyArray<number>) =>
+    restored.length === 0 ? report : checkAssertions(list.map((entry, index) => (restored.includes(index) ? original[index] : entry)), packet);
   const round = await repairRound({
     messages: answer.exchange!.messages,
-    list: assertionList(answer.exchange!.text) ?? [],
+    list: original,
     requests,
     packet,
     factBlocks: input.factBlocks ?? [],
     repair: calls.repair,
     judge: calls.judge,
-    checked: (report) => merged?.(renderedAnswer(input, packet, report).blocks),
+    checked: ({ list, repaired, report }) => merged?.({
+      blocks: (restored) => renderedAnswer(input, packet, restoredReport(list, report, restored)).blocks,
+      failed: requests.map(({ index }) => index).filter((index) => !repaired.includes(index) || report.rejected.some((entry) => entry.index === index)),
+    }),
   });
   const repair = { requests, record: round.record, judge: round.records };
   if (round.repaired.length === 0) return { ...first, repair };
-  const rendering = renderedAnswer(input, packet, round.report);
   // A repair that failed the checks has no verdict of its own: its first
-  // still counts it, hidden.
-  const second = verdictsFor(round.cases, round.records);
+  // still counts it, hidden unless it showed.
+  const judged = verdictsFor(round.cases, round.records);
+  const restored = round.repaired.filter((index) => {
+    const before = verdicts.find((verdict) => verdict.index === index);
+    const after = judged.find((verdict) => verdict.index === index);
+    return before !== undefined && shownAs(before) !== "hidden" && (after === undefined || shownAs(after) === "hidden");
+  });
+  const rendering = renderedAnswer(input, packet, restoredReport(round.list, round.report, restored));
+  const second = judged.filter((verdict) => !restored.includes(verdict.index));
   const final = withVerdicts({ exchange: answer.exchange, assertions: rendering.report, blocks: rendering.blocks }, [
     ...verdicts.filter((verdict) => !second.some((repaired) => repaired.index === verdict.index)),
     ...second,
   ].sort((a, b) => a.index - b.index));
-  return { ...final, assertions: { ...final.assertions!, repaired: round.repaired }, judge: first.judge, repair };
+  const repaired = round.repaired.filter((index) => !restored.includes(index));
+  return { ...final, assertions: { ...final.assertions!, ...(repaired.length > 0 ? { repaired } : {}) }, judge: first.judge, repair };
 }
 
 function liveRepairCalls(companies: ReadonlyArray<string>, options: JudgeOptions, judged: (inference: JudgeCase, record: ModelRecord) => void = () => {}): RepairCalls {
@@ -246,7 +266,8 @@ export type AnsweredTurn = Pick<TracedAnswer, "exchange" | "assertions" | "block
   // Present while the judge reads the answer's inferences, or the repair round
   // runs: `blocks` then hold a line in each judged one's place, and each takes
   // its line, as shown or unverified, or drops it, as its own verdict settles.
-  // A repaired inference shows nothing until its repaired verdict settles.
+  // One sent to repair keeps its line until its repaired verdict settles, so
+  // no repaired text shows unjudged; done restores a failed repair's first.
   judging?: {
     // Called at once with the blocks as the verdicts so far leave them, then
     // again as each later verdict settles.
@@ -289,14 +310,42 @@ export async function answerTurn(
   if (cases.length === 0 && repairsFor(answer, []).length === 0) return finish(judgedAnswer(answer, cases, []));
   if (!(await judgeConfigured(options.env))) return finish(judgedAnswer(answer, cases, cases.map(() => NO_JUDGE)));
   const inferences = new Map<number, InferenceState>(cases.map(({ index }) => [index, "pending"]));
-  // The first answer's blocks, then the repaired answer's once it is checked.
-  let blocksOf = answer.blocks;
+  // The first answer's blocks, then the repaired answer's once it is checked,
+  // with each inference whose repair failed back in its first form.
+  let stream: RepairStream | null = null;
+  const restored: number[] = [];
+  const blocksOf = (states: ReadonlyMap<number, InferenceState>) => (stream ? stream.blocks(restored) : answer.blocks)(states);
+  // How the first verdict showed each inference sent to repair.
+  const firsts = new Map<number, ShownAs>();
+  // A failed repair leaves its inference as its first verdict showed it.
+  const keepFirst = (index: number) => {
+    const as = firsts.get(index);
+    if (as === undefined || as === "hidden") {
+      inferences.delete(index);
+    } else {
+      inferences.set(index, as);
+      restored.push(index);
+    }
+  };
   const listeners: Array<(blocks: TracedAnswer["blocks"]) => void> = [];
-  const settle = (inference: JudgeCase, record: ModelRecord) => {
-    const as = shownAs(verdictsOf([inference], record)[0]!);
-    if (as === "hidden") inferences.delete(inference.index);
-    else inferences.set(inference.index, as);
-    const blocks = blocksOf(inferences);
+  const settle = (inference: JudgeCase, record: ModelRecord, repaired: boolean) => {
+    const verdict = verdictsOf([inference], record)[0]!;
+    const as = shownAs(verdict);
+    if (!repaired && sentToRepair(verdict)) {
+      firsts.set(inference.index, as);
+      inferences.set(inference.index, "pending");
+    } else if (as === "hidden") {
+      if (repaired) keepFirst(inference.index);
+      else inferences.delete(inference.index);
+    } else {
+      inferences.set(inference.index, as);
+    }
+    publish(blocksOf(inferences));
+  };
+  // The blocks listeners last heard, and what a later watch hears first.
+  let published: TracedAnswer["blocks"] | null = null;
+  const publish = (blocks: TracedAnswer["blocks"]) => {
+    published = blocks;
     // A listener that throws stops hearing verdicts; the answer is still saved.
     for (const listener of [...listeners]) {
       try {
@@ -309,13 +358,20 @@ export async function answerTurn(
   };
   const records = cases.map(async (inference) => {
     const record = await judgeOne(inference, companies, options);
-    settle(inference, record);
+    settle(inference, record, false);
     return record;
   });
   const done = Promise.all(records)
-    .then((settled) => repairedAnswer(input, answer, cases, settled, liveRepairCalls(companies, options, settle), (blocks) => {
-      blocksOf = blocks;
+    .then((settled) => repairedAnswer(input, answer, cases, settled, liveRepairCalls(companies, options, (inference, record) => settle(inference, record, true)), (checked) => {
+      stream = checked;
+      checked.failed.forEach(keepFirst);
+      if (checked.failed.length > 0) publish(blocksOf(inferences));
     }))
+    // A repair reply that failed whole restores no line until here.
+    .then((traced) => {
+      if (published !== null && !isDeepStrictEqual(traced.blocks, published)) publish(traced.blocks);
+      return traced;
+    })
     .then(finish);
   return {
     exchange: answer.exchange,
@@ -324,7 +380,7 @@ export async function answerTurn(
     judging: {
       watch: (listener) => {
         listeners.push(listener);
-        listener(blocksOf(inferences));
+        listener(published ?? blocksOf(inferences));
       },
       done: done.then(({ assertions, blocks }) => ({ assertions, blocks })),
     },
@@ -489,7 +545,9 @@ export type AnswerMetrics = {
   inferences_hidden: number;
   // Inferences sent to the repair round, those its reply replaced with an
   // entry that passed the checks, and those of them that end shown or
-  // unverified; the repair call's cost.
+  // unverified on their repaired verdict; one kept as its first verdict
+  // showed it, after a failed repair, counts in neither of those two. The
+  // repair call's cost.
   inferences_sent_to_repair: number;
   inferences_repaired: number;
   inferences_recovered: number;

@@ -126,7 +126,9 @@ fixed rule, not a tool loop.
   one call per inference, all at once
   (#376). Its verdict is entailed, unsupported or contradicted, with a separate `worded_amount` flag for an amount
   stated in words, and `shownAs` reads both: entailed shows as an analyst inference, unsupported shows labelled as
-  an unverified analyst view, and a contradicted one or one stating an amount in words stays hidden. The report keeps every verdict (`judged`). The
+  an unverified analyst view, and a contradicted one stays hidden. One stating an amount in words shows at most as
+  an unverified analyst view. It still goes to the repair round once, which may show it clean. A failed repair
+  leaves it as it was. The report keeps every verdict (`judged`). The
   answer is sealed and shown at once with a line in each inference's place (`answer.shown`); as each verdict
   arrives, `answer.shown` comes again for the same message with that inference shown or its line gone, and the
   answer is saved once every verdict is in. Each shown state and the save may differ from the seal only in text
@@ -636,12 +638,12 @@ numbers never wait on a model.
   place of the commentary.
 - **The judge** reads each analyst inference beside the assertions it rests on, rendered from the engine packet,
   as on the analyst path, with the judge's tiers (#477). An entailed inference shows. An unsupported one shows,
-  labelled "Unverified analyst view". A contradicted one, one that states an amount in words, or one with no verdict
+  labelled "Unverified analyst view", and so does an entailed one that states an amount in words. A contradicted one, or one with no verdict
   (a failed or late call, or a reply that does not end on its verdict list) does not show. With no
   `JUDGE_LITELLM_MODEL`, none shows.
 - **One repair round** (#488), with a judge configured, goes to each inference the checks rejected and each one the
   judge found contradicted or worded as an amount. The model rewrites it once, the checks run on the engine packet, and the judge reads it
-  again. A repaired commentary is rendered from the engine packet too, and its refs are checked like any other.
+  again. A failed rewrite leaves an inference as it was, so a worded one still shows as unverified. A repaired commentary is rendered from the engine packet too, and its refs are checked like any other.
 - **Failure modes.**
   - A model error (`LlmRouterError` or `LlmProviderError`, a timeout and a replay miss included) saves the note
     "Commentary is unavailable for this answer."

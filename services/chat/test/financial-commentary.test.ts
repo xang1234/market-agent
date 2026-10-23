@@ -193,13 +193,13 @@ test("a company overview carries analyst commentary on its published results (#3
     );
   });
 
-  await t.test("the judge's verdict decides how an inference shows: entailed as an inference, unsupported as an unverified view, otherwise not at all; the answer publishes either way", async () => {
+  await t.test("the judge's verdict decides how an inference shows: entailed as an inference, unsupported or stating an amount in words as an unverified view, otherwise not at all; the answer publishes either way", async () => {
     const verdict = (fields: string) => `{"verdicts":[{"id":2,${fields}}]}`;
     const cases: ReadonlyArray<readonly [string, string | (() => Promise<string>), string]> = [
       ["entailed", verdict('"verdict":"entailed","worded_amount":false'), `${ALFA_TEXT}\n\n> **Analyst inference:** It keeps most of what it sells.`],
       ["unsupported", verdict('"verdict":"unsupported","worded_amount":false,"reason":"No support says what it keeps."'), `${ALFA_TEXT}\n\n> **Unverified analyst view** (not backed by the figures shown): It keeps most of what it sells.`],
       ["contradicted", verdict('"verdict":"contradicted","worded_amount":false,"reason":"The margins say otherwise."'), ALFA_TEXT],
-      ["a worded amount", verdict('"verdict":"entailed","worded_amount":true'), ALFA_TEXT],
+      ["a worded amount", verdict('"verdict":"entailed","worded_amount":true'), `${ALFA_TEXT}\n\n> **Unverified analyst view** (not backed by the figures shown): It keeps most of what it sells.`],
       ["no verdict", "I cannot judge this.", ALFA_TEXT],
       ["a verdict list the reply does not end with", `${verdict('"verdict":"entailed","worded_amount":false')} On reflection, I am not sure.`, ALFA_TEXT],
       ["a judge that times out", () => Promise.reject(new LlmProviderError("timeout", "LLM provider attempt timed out")), ALFA_TEXT],

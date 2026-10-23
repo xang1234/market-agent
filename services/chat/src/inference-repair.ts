@@ -1,9 +1,10 @@
-// One repair round for hidden analyst inferences. An inference a check
-// rejected (assertions.ts), or the judge found contradicted or stating an
-// amount in words (verdicts.ts), goes back to the answer model once, with why;
-// what it writes in its place goes through the same checks and the judge, and
-// shows by the same rules. A repair that fails again, or never comes, leaves it
-// hidden. Never a second round.
+// One repair round for analyst inferences. An inference a check rejected
+// (assertions.ts), or the judge found contradicted or stating an amount in
+// words (verdicts.ts sentToRepair), goes back to the answer model once, with
+// why; what it writes in its place goes through the same checks and the judge,
+// and shows by the same rules. A repair that fails again, or never comes,
+// leaves it as its first verdict showed it (answer-trace.ts). Never a second
+// round.
 
 import type { LlmChatClient, LlmChatMessage, LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
 import { isRecord } from "../../shared/src/http.ts";
@@ -11,11 +12,11 @@ import { assertionList, checkAssertions, SUPPORT_KINDS, type AssertionReport, ty
 import type { EvidencePacket } from "./evidence-packet.ts";
 import { judgeCases, modelCall, type JudgeCase, type ModelRecord } from "./inference-judge.ts";
 import type { ModelDeadlines } from "./llm-runtime.ts";
-import type { InferenceVerdict, Verdict } from "./verdicts.ts";
+import { sentToRepair, type InferenceVerdict, type Verdict } from "./verdicts.ts";
 
-// Why an inference is hidden, as the repair call is told: the check it failed,
-// or the judge's verdict. limit and rendering are not the inference's words,
-// so no rewrite passes them. rejected_supports: the supports it listed that
+// Why an inference goes to repair, as the repair call is told: the check it
+// failed, or the judge's verdict. limit and rendering are not the inference's
+// words, so no rewrite passes them. rejected_supports: the supports it listed that
 // the check did not accept as one, so the rewrite does not cite them again.
 export type RepairRequest = { index: number; text: string; rejected_supports?: number[] } & (
   | { check: Exclude<RejectionCheck, "limit" | "rendering" | "judge">; reason: string }
@@ -31,7 +32,7 @@ export type RepairTrace = { requests: RepairRequest[]; record: ModelRecord; judg
 export const REPAIR_INSTRUCTIONS = "You already answered this question; your_assertions is the list you wrote. Some analyst_inference entries in it are not shown to the reader. Each is listed below with why: the check it failed and its reason, or the judge's verdict and reason (worded_amount: its words state an amount, fraction, multiple or span of time). Write each one again so it passes, under every rule above: words only, no digit anywhere, no amount in words, nothing its supports do not show; or leave it out if it cannot be said that way. Its supports carry the periods, so its text names no period at all (no year, quarter, \"latest\", \"earlier\" or \"prior\") and leaves which period is which to its supports. Reply with only a fenced block that opens with ```assertions on its own line: a JSON array of the corrected entries, each an analyst_inference object in the same shape as in your list (supports, and a subject only as the rules allow), with \"index\" added: the index of the entry it replaces. At most one per index listed below.";
 
 // Repair latency measured 1.5-2.5 s over 18 live calls: one attempt of about
-// six times the slowest. A late repair leaves its inference hidden.
+// six times the slowest. A late repair leaves its inference as it was.
 export const REPAIR_DEADLINES: ModelDeadlines = { attemptMs: 15_000, totalMs: 16_000 };
 
 const UNREPAIRABLE: ReadonlySet<RejectionCheck> = new Set(["limit", "rendering", "judge"]);
@@ -54,7 +55,7 @@ export function repairRequests(list: ReadonlyArray<unknown>, report: Pick<Assert
       : [{ ...of(rejection.index), check: rejection.check as Exclude<RejectionCheck, "limit" | "rendering" | "judge">, reason: rejection.reason }]
   );
   const judged = verdicts.flatMap((verdict): RepairRequest[] =>
-    verdict.verdict === "error" || (verdict.verdict !== "contradicted" && !verdict.worded_amount)
+    verdict.verdict === "error" || !sentToRepair(verdict)
       ? []
       : [{ ...of(verdict.index), check: "judge", verdict: verdict.verdict, worded_amount: verdict.worded_amount, ...(verdict.reason ? { reason: verdict.reason } : {}) }]
   );
@@ -87,6 +88,12 @@ export function requestRepair(input: {
   });
 }
 
+// Words that differ only in spacing, case or a closing stop.
+function sameWords(a: string, b: string): boolean {
+  const words = (text: string) => text.trim().replace(/\s+/g, " ").toLowerCase().replace(/[.!?;:,\s]+$/, "");
+  return words(a) === words(b);
+}
+
 // The list with each repaired inference in its entry's place: the entry as
 // written, under the fields the repair gives it (its supports, subject and
 // evidence stay unless it lists its own). Only the first analyst_inference per
@@ -99,7 +106,12 @@ export function repairedList(list: ReadonlyArray<unknown>, requests: ReadonlyArr
   for (const entry of entries) {
     if (!isRecord(entry) || entry.kind !== "analyst_inference" || typeof entry.index !== "number") continue;
     const { index, ...fields } = entry;
-    if (repaired.includes(index) || !requests.some((request) => request.index === index)) continue;
+    const request = requests.find((asked) => asked.index === index);
+    if (repaired.includes(index) || !request) continue;
+    if (typeof fields.text !== "string") continue;
+    // The words the judge read, again, are no repair: a second verdict on them
+    // is only its variance. One a check rejected may keep its words.
+    if (request.check === "judge" && sameWords(request.text, fields.text)) continue;
     merged[index] = { ...(isRecord(list[index]) ? list[index] : {}), ...fields };
     repaired.push(index);
   }
@@ -117,13 +129,13 @@ export async function repairRound(input: {
   factBlocks: ReadonlyArray<Record<string, unknown>>;
   repair: (messages: LlmChatMessage[]) => Promise<ModelRecord>;
   judge: (inference: JudgeCase, i: number) => Promise<ModelRecord>;
-  checked?: (report: AssertionReport) => void;
-}): Promise<{ record: ModelRecord; repaired: number[]; report: AssertionReport; cases: JudgeCase[]; records: ModelRecord[] }> {
+  checked?: (merged: { list: unknown[]; repaired: number[]; report: AssertionReport }) => void;
+}): Promise<{ record: ModelRecord; list: unknown[]; repaired: number[]; report: AssertionReport; cases: JudgeCase[]; records: ModelRecord[] }> {
   const record = await input.repair(repairMessages(input.messages, input.list, input.requests));
   const { list, repaired } = repairedList(input.list, input.requests, record);
   const report = checkAssertions(list, input.packet);
-  if (repaired.length === 0) return { record, repaired, report, cases: [], records: [] };
-  input.checked?.(report);
+  if (repaired.length === 0) return { record, list, repaired, report, cases: [], records: [] };
+  input.checked?.({ list, repaired, report });
   const cases = judgeCases(report.accepted, input.packet, input.factBlocks).filter((inference) => repaired.includes(inference.index));
-  return { record, repaired, report, cases, records: await Promise.all(cases.map(input.judge)) };
+  return { record, list, repaired, report, cases, records: await Promise.all(cases.map(input.judge)) };
 }

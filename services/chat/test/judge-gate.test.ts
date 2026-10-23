@@ -38,6 +38,7 @@ const FIGURES = "By revenue, highest first: Data Center $55.2B, Gaming $4.3B, OE
 const PENDING = "> _Checking an analyst inference against the figures it rests on…_";
 const CONCENTRATED = "> **Analyst inference** (revenue highest first: Data Center, Gaming, OEM & Other, Professional Visualization, Automotive): NVIDIA's revenue is heavily concentrated in Data Center, creating significant single-segment exposure for the consolidated top line.";
 const CUSHION = "> **Analyst inference** (revenue highest first: Data Center, Gaming, OEM & Other, Professional Visualization, Automotive): The other four segments provide limited diversification cushion relative to Data Center's dominance.";
+const UNVERIFIED_CONCENTRATED = "> **Unverified analyst view** (not backed by the figures shown): NVIDIA's revenue is heavily concentrated in Data Center, creating significant single-segment exposure for the consolidated top line.";
 const UNVERIFIED_CUSHION = "> **Unverified analyst view** (not backed by the figures shown): The other four segments provide limited diversification cushion relative to Data Center's dominance.";
 
 // The answer model replies as recorded; the judge as given. Each call's model is kept.
@@ -169,16 +170,30 @@ test("a judge call that fails or runs out of time hides only its own inference",
   }
 });
 
-test("an inference stays hidden when the judge finds it contradicted or stating an amount in words, whatever its verdict, or gives it no verdict: a reply with none for it or no yes-or-no on the amount, a reply that is no verdict list, a failed call, a call past its deadline", async (t) => {
+test("an inference the judge finds stating an amount in words shows as an unverified analyst view, never as an analyst inference, whether entailed or unsupported", async () => {
+  const cases: Array<[string, string]> = [
+    ["unsupported", '{"verdicts":[{"id":6,"verdict":"unsupported","worded_amount":true,"reason":"it says tens of billions."},{"id":7,"verdict":"contradicted","worded_amount":false,"reason":"Data Center outweighs the other four together."}]}'],
+    ["entailed", '{"verdicts":[{"id":6,"verdict":"entailed","worded_amount":true,"reason":"it says over ten times the next segment."},{"id":7,"verdict":"contradicted","worded_amount":false,"reason":"x."}]}'],
+  ];
+  for (const [label, reply] of cases) {
+    const { createClient } = models(SEGMENTS, async () => ({ text: reply }));
+    const judged = await (await answerTurn(SEGMENTS.input, turn(SEGMENTS), { env: JUDGED_ENV, createClient })).judging!.done;
+    assert.equal(text(judged.blocks), [FIGURES, UNVERIFIED_CONCENTRATED].join("\n\n"), label);
+    assert.deepEqual(judgeRejections(judged.assertions).map(([index]) => index), [7], label);
+  }
+});
+
+test("a worded inference's words render escaped on one line under the unverified label", async () => {
+  const worded = "Data Center is *ten times* the rest\n# combined, see [x](y).";
+  const recorded = { ...SEGMENTS, exchange: { ...SEGMENTS.exchange!, text: SEGMENTS.exchange!.text.replace("NVIDIA's revenue is heavily concentrated in Data Center, creating significant single-segment exposure for the consolidated top line.", JSON.stringify(worded).slice(1, -1)) } };
+  const { createClient } = models(recorded, async (request) =>
+    ({ text: asked(request)[0] === 6 ? '{"verdicts":[{"id":6,"verdict":"entailed","worded_amount":true,"reason":"ten times."}]}' : ENTAILED(7) }));
+  const judged = await (await answerTurn(recorded.input, turn(recorded), { env: JUDGED_ENV, createClient })).judging!.done;
+  assert.equal(text(judged.blocks), [FIGURES, "> **Unverified analyst view** (not backed by the figures shown): Data Center is \\*ten times\\* the rest # combined, see \\[x\\](y).", CUSHION].join("\n\n"));
+});
+
+test("an inference stays hidden when the judge finds it contradicted, or gives it no verdict: a reply with none for it or no yes-or-no on the amount, a reply that is no verdict list, a failed call, a call past its deadline", async (t) => {
   const cases: Array<[string, (request: LlmChatRequest) => Promise<LlmChatResult>, Array<[number, string]>]> = [
-    ["a worded amount, unsupported, and a contradiction", async () => ({ text: '{"verdicts":[{"id":6,"verdict":"unsupported","worded_amount":true,"reason":"it says tens of billions."},{"id":7,"verdict":"contradicted","worded_amount":false,"reason":"Data Center outweighs the other four together."}]}' }), [
-      [6, "unsupported, worded_amount: it says tens of billions."],
-      [7, "contradicted: Data Center outweighs the other four together."],
-    ]],
-    ["a worded amount the figures bear out", async () => ({ text: '{"verdicts":[{"id":6,"verdict":"entailed","worded_amount":true,"reason":"it says over ten times the next segment."},{"id":7,"verdict":"contradicted","worded_amount":false,"reason":"x."}]}' }), [
-      [6, "entailed, worded_amount: it says over ten times the next segment."],
-      [7, "contradicted: x."],
-    ]],
     ["no verdict for it, or no yes-or-no on the amount", async () => ({ text: '{"verdicts":[{"id":6,"verdict":"unsupported","reason":"x."},{"id":8,"verdict":"entailed","worded_amount":false}]}' }), [
       [6, "error: no worded_amount for this inference"],
       [7, "error: no verdict for this inference"],
@@ -209,17 +224,17 @@ test("an inference stays hidden when the judge finds it contradicted or stating 
 
 test("the report keeps each judged inference's verdict, a hidden one's too, in index order", async () => {
   const { createClient } = models(SEGMENTS, byInference({
-    6: async () => ({ text: '{"verdicts":[{"id":6,"verdict":"unsupported","worded_amount":true,"reason":"it says tens of billions."}]}' }),
+    6: async () => ({ text: '{"verdicts":[{"id":6,"verdict":"contradicted","worded_amount":true,"reason":"it says tens of billions."}]}' }),
     7: async () => ({ text: UNSUPPORTED_7 }),
   }));
   const answer = await answerTurn(SEGMENTS.input, turn(SEGMENTS), { env: JUDGED_ENV, createClient });
   const judged = await answer.judging!.done;
   assert.equal(text(judged.blocks), [FIGURES, UNVERIFIED_CUSHION].join("\n\n"));
   assert.deepEqual(judged.assertions?.judged, [
-    { index: 6, verdict: "unsupported", worded_amount: true, reason: "it says tens of billions." },
+    { index: 6, verdict: "contradicted", worded_amount: true, reason: "it says tens of billions." },
     { index: 7, verdict: "unsupported", worded_amount: false, reason: "no support measures diversification." },
   ]);
-  assert.deepEqual(judgeRejections(judged.assertions), [[6, "unsupported, worded_amount: it says tens of billions."]]);
+  assert.deepEqual(judgeRejections(judged.assertions), [[6, "contradicted, worded_amount: it says tens of billions."]]);
 });
 
 test("with no judge model configured no judge is asked, and no inference shows or waits", async () => {

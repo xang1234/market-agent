@@ -164,7 +164,7 @@ test("a set inference the turn's checks already reject fails the set, rather tha
   });
 });
 
-test("the mutation summary counts catches, each kind at its expected outcome, mutations shown that should hide, and false alarms on originals; an error is none of these", () => {
+test("the mutation summary counts catches, each kind at its expected outcome, mutations shown above their tier, contradictions shown, and false alarms on originals; an error is none of these", () => {
   const result = (id: string, kind: string, verdict: string, worded_amount: boolean, reason?: string) =>
     ({ id, kind, text: `${id} ${kind}`, verdict: { index: 0, verdict, ...(verdict === "error" ? {} : { worded_amount }), ...(reason ? { reason } : {}) } }) as Parameters<typeof mutationSummary>[0][number];
   assert.equal(mutationSummary([
@@ -177,15 +177,17 @@ test("the mutation summary counts catches, each kind at its expected outcome, mu
     result("b", "flipped_direction", "error", false, "judge call failed: timeout"),
     result("b", "unsupported_claim", "contradicted", false, "revenue rose"),
     result("c", "contradicted_ranking", "contradicted", false, "NVDA is highest"),
+    result("c", "worded_amount", "entailed", false),
   ]), [
-    "caught: 5 of 7 mutations (1 errors)",
-    "at their tier: 2 of 7 mutations",
-    "  worded_amount          worded_amount 1 of 2",
+    "caught: 5 of 8 mutations (1 errors)",
+    "at their tier: 2 of 8 mutations",
+    "  worded_amount          worded_amount 1 of 3",
     "  unsupported_claim      unsupported   0 of 1",
     "  hedged_valuation       unsupported   0 of 1",
     "  flipped_direction      contradicted  0 of 1",
     "  contradicted_ranking   contradicted  1 of 2",
-    "shown though they should hide: 2 of 5 (1 errors, hidden but unjudged)",
+    "shown above their tier: 3 of 8 mutations",
+    "contradicted shown: 0 of 10",
     "false alarms: 1 of 2 originals (0 errors)",
     "not at their expected outcome:",
     "  a worded_amount: unsupported: a forecast the figures do not show\n      a worded_amount",
@@ -194,6 +196,7 @@ test("the mutation summary counts catches, each kind at its expected outcome, mu
     "  b original: unsupported: no figure shows it\n      b original",
     "  b flipped_direction: error: judge call failed: timeout\n      b flipped_direction",
     "  b unsupported_claim: contradicted: revenue rose\n      b unsupported_claim",
+    "  c worded_amount: entailed\n      c worded_amount",
   ].join("\n"));
 });
 
