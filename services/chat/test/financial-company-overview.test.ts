@@ -359,6 +359,28 @@ test("a question about one company that asks for no figure is answered with its 
     assert.deepEqual([shown.research_scope.fiscal_year, shown.research_scope.fiscal_quarter], [null, null], "it shows the latest quarters, so it keeps no period");
   });
 
+  await t.test("a margin trend's answer is saved without reading its revenue again, as only an overview's note names growth it leaves out (#479 review)", async () => {
+    const reads: string[] = [];
+    const counted: typeof createEvidenceFinancialPort = (executor) => {
+      const port = createEvidenceFinancialPort(executor);
+      return {
+        ...port,
+        listInputCandidates: (request) => {
+          if (request.fiscal_year === null) reads.push(request.metric_key);
+          return port.listInputCandidates(request);
+        },
+      };
+    };
+    const quartersRead = async (read: ScopeProposal) => {
+      reads.length = 0;
+      completed((await chatHarness(pool, { model: null, readQuestion: reading(read), resolveMention: resolve, evidence: counted }).run({ ...base, userIntent: "How have MRGN's margins trended?" })).events);
+      return [...reads];
+    };
+    const trend = { ...NO_ASKS, asks: new Set(["margins", "margin_trend"] as const) };
+    assert.deepEqual(await quartersRead(trend), ["revenue"], "read once, to plan the trend");
+    assert.deepEqual(await quartersRead(NO_ASKS), ["revenue", "revenue"], "an overview is read again as its answer is saved");
+  });
+
   const slotted = (slot: string, rows: ReadonlyArray<ReadonlyArray<string>>) => rows.map(([outputId, ...rest]) => [outputId!.replace(/^out_/u, `out_${slot}_`), ...rest]);
   const OFFQ_LATEST = [
     ["out_revenue_fy2024_q2", "Q2 FY2024", "verified", "USD 2,600.00"],

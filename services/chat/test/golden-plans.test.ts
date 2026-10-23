@@ -265,6 +265,11 @@ test("a change is planned only between quarters whose reported dates follow each
   const gapped = await overviewOf("NVDA", () => candidatePage(...goldenQuarters("NVDA").filter((quarter) => quarter.period.fiscal_year !== 2026 || quarter.period.fiscal_period !== "Q2")));
   assert.deepEqual([changes(gapped!.outputs).filter((change) => change === changeOf("NVDA", "Q4 2026", "Q4 2025")), gapped!.uncovered], [[], ["revenue growth from Q4 FY2025 to Q4 FY2026, as Q2 FY2026 has no reported revenue"]],
     "a year whose middle quarter was never reported is not proven to follow on");
+
+  const apart = await overviewOf("NVDA", () => candidatePage(...eight.flatMap(([year, quarter]) => run(`${year}-${CALENDAR[quarter as keyof typeof CALENDAR][0]}`, [[year, quarter]], [60]))));
+  const named = ([fromYear, from]: [number, string], [toYear, to]: [number, string]) => `revenue growth from ${from} FY${fromYear} to ${to} FY${toYear}, whose quarters are not dated consecutively`;
+  assert.deepEqual([changes(apart!.outputs), apart!.uncovered], [[], [...eight.slice(1).map((to, index) => named(eight[index]!, to)), named(eight[3]!, eight[7]!)]],
+    "an overview that pairs no quarters plans no growth, and its note names every change");
 });
 
 test("a comparison shows each company's latest quarter, named from the newest it reported revenue for, never aligned by calendar, and the first company's lead in each margin (#398)", async (t) => {
