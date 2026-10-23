@@ -48,7 +48,7 @@ export type LlmCompletion = {
   latencyMs: number;
   outcome: "ok" | "failed";
   /** Failure code, for a failed attempt. */
-  code?: LlmProviderErrorCode | "unknown";
+  code?: LlmRouterAttempt["code"];
   usage?: LlmUsage;
 };
 
@@ -83,12 +83,13 @@ export type LlmProviderErrorCode =
 
 export type LlmRouterErrorCode =
   | LlmProviderErrorCode
+  | "client_failed"
   | "no_deployments"
   | "all_deployments_failed";
 
 export type LlmRouterAttempt = {
   deployment: Pick<LlmDeployment, "channel" | "model">;
-  code: LlmProviderErrorCode | "unknown";
+  code: LlmProviderErrorCode | "client_failed" | "unknown";
   message: string;
 };
 
@@ -107,6 +108,16 @@ export class LlmProviderError extends Error {
     super(message);
     this.name = "LlmProviderError";
     this.code = code;
+  }
+}
+
+/** The client failed before any provider saw the request: a defect every deployment would hit. */
+export class LlmClientError extends Error {
+  readonly code = "client_failed";
+
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "LlmClientError";
   }
 }
 
@@ -283,11 +294,11 @@ function attemptFromError(deployment: LlmDeployment, error: unknown): LlmRouterA
       channel: deployment.channel,
       model: deployment.model,
     }),
-    code: providerError?.code ?? "unknown",
+    code: providerError?.code ?? (error instanceof LlmClientError ? error.code : "unknown"),
     message: error instanceof Error ? error.message : "unknown LLM provider failure",
   });
 }
 
-function isTerminalProviderCode(code: LlmProviderErrorCode | "unknown"): code is "auth_failed" | "model_not_found" {
-  return code === "auth_failed" || code === "model_not_found";
+function isTerminalProviderCode(code: LlmRouterAttempt["code"]): code is "auth_failed" | "model_not_found" | "client_failed" {
+  return code === "auth_failed" || code === "model_not_found" || code === "client_failed";
 }

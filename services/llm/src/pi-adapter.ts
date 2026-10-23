@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 
 import {
+  LlmClientError,
   type LlmChatClient,
   type LlmClientExecutionOptions,
   type LlmChatMessage,
@@ -28,14 +29,34 @@ type PiAssistantMessage = {
   usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; totalTokens?: number; reasoning?: number };
 };
 
+// pi-ai sizes the context from each assistant turn's usage (clampMaxTokensToContext),
+// so an earlier answer is a whole assistant message: its text, the model, and no usage.
+type PiContextMessage =
+  | { role: "user"; content: string; timestamp: number }
+  | {
+    role: "assistant";
+    content: ReadonlyArray<PiTextContent>;
+    api: LlmApi;
+    provider: string;
+    model: string;
+    usage: typeof NO_USAGE;
+    stopReason: "stop";
+    timestamp: number;
+  };
+
 type PiContext = {
   systemPrompt?: string;
-  messages: ReadonlyArray<{
-    role: "user" | "assistant";
-    content: string;
-    timestamp: number;
-  }>;
+  messages: ReadonlyArray<PiContextMessage>;
 };
+
+const NO_USAGE = Object.freeze({
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: Object.freeze({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }),
+});
 
 // What pi-ai's model catalog knows about a model: whether it reasons, which effort
 // levels it supports (and their provider values), and its API quirks.
@@ -197,7 +218,7 @@ export function createPiLlmChatClient(input: CreatePiLlmChatClientInput): LlmCha
       const model = modelFromDeployment(deployment, request, known);
       const message = await input.complete(
         model,
-        contextFromRequest(request),
+        contextFromRequest(request, model),
         optionsFromDeployment(deployment, request, execution, reasoningFor(model, request, input.clampLevel)),
       );
       if (message.stopReason === "error" || message.stopReason === "aborted") {
@@ -206,6 +227,7 @@ export function createPiLlmChatClient(input: CreatePiLlmChatClientInput): LlmCha
       return resultFromMessage(message);
     } catch (error) {
       if (error instanceof LlmProviderError) throw error;
+      if (isClientDefect(error)) throw new LlmClientError(error.message, { cause: error });
       throw providerErrorFromUnknown(error);
     }
   };
@@ -255,16 +277,23 @@ function reasoningFor(
   return clamp ? clamp(model, request.reasoning) : request.reasoning;
 }
 
-function contextFromRequest(request: LlmChatRequest): PiContext {
+function contextFromRequest(request: LlmChatRequest, model: PiModel): PiContext {
   const systemPrompt = messagesByRole(request.messages, "system").join("\n\n").trim();
   const timestamp = Date.now();
   const messages = request.messages
     .filter(isConversationMessage)
-    .map((message) => Object.freeze({
-      role: message.role,
-      content: message.content,
-      timestamp,
-    }));
+    .map((message): PiContextMessage => Object.freeze(message.role === "user"
+      ? { role: "user", content: message.content, timestamp }
+      : {
+        role: "assistant",
+        content: Object.freeze([Object.freeze({ type: "text" as const, text: message.content })]),
+        api: model.api,
+        provider: model.provider,
+        model: model.id,
+        usage: NO_USAGE,
+        stopReason: "stop",
+        timestamp,
+      }));
   return Object.freeze({
     ...(systemPrompt.length === 0 ? {} : { systemPrompt }),
     messages: Object.freeze(messages),
@@ -351,6 +380,13 @@ function providerErrorFromUnknown(error: unknown): LlmProviderError {
     return new LlmProviderError("timeout", message);
   }
   return new LlmProviderError("provider_failed", message);
+}
+
+// A built-in error pi-ai throws while building the request, before any provider saw it.
+// ponytail: fetch's own "fetch failed" TypeError is the network, so it stays a provider failure.
+function isClientDefect(error: unknown): error is Error {
+  return (error instanceof TypeError || error instanceof ReferenceError || error instanceof RangeError) &&
+    statusFromError(error) === null && error.message !== "fetch failed";
 }
 
 function providerErrorFromText(message: string): LlmProviderError {

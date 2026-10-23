@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import test from "node:test";
 
 import type { LlmDeployment } from "../src/channel-config.ts";
-import { LlmProviderError } from "../src/router.ts";
+import { LlmClientError, LlmProviderError } from "../src/router.ts";
 import {
   createCatalogLookup,
   createDefaultPiLlmChatClient,
@@ -516,6 +516,81 @@ test("an Anthropic permission error or unknown model stops the router instead of
 
   assert.equal(await code("claude-opus-5-5"), "auth_failed");
   assert.equal(await code("claude-opus-5-5-typo"), "model_not_found");
+});
+
+test("a planner repair call, its rejected draft an assistant turn, reaches the Messages API through pi-ai", async (t) => {
+  const stub = await messagesApiStub(t, () => ({ status: 200, events: claudeReply("claude-sonnet-5-5", "{\"outcome\":\"ready\"}") }));
+  const client = await createDefaultPiLlmChatClient();
+  const result = await client(
+    { channel: "claude", model: "claude-sonnet-5-5", protocol: "anthropic", baseUrl: stub.baseUrl, apiKeys: ["k"] },
+    {
+      messages: [
+        { role: "system", content: "Reply with one JSON object only." },
+        { role: "user", content: "Request: Compare NVDA and AMD revenue" },
+        { role: "assistant", content: "{\"outcome\":\"ready\",\"subjects\":[]}" },
+        { role: "user", content: "The draft was rejected. Fix these issues and reply with the corrected JSON only." },
+      ],
+      temperature: 0,
+      maxTokens: 4096,
+    },
+  );
+
+  assert.equal(result.text, "{\"outcome\":\"ready\"}");
+  const [{ body }] = stub.requests as [CapturedRequest];
+  const text = (content: unknown) => typeof content === "string" ? content : (content as Array<{ text: string }>).map((block) => block.text).join("");
+  assert.deepEqual((body.messages as Array<{ role: string; content: unknown }>).map((message) => [message.role, text(message.content)]), [
+    ["user", "Request: Compare NVDA and AMD revenue"],
+    ["assistant", "{\"outcome\":\"ready\",\"subjects\":[]}"],
+    ["user", "The draft was rejected. Fix these issues and reply with the corrected JSON only."],
+  ]);
+});
+
+test("a multi-turn history reaches an OpenAI-compatible API through pi-ai, each earlier answer an assistant turn", async (t) => {
+  const bodies: Array<Record<string, unknown>> = [];
+  const server = createServer(async (req, res) => {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    bodies.push(JSON.parse(raw));
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write(`data: ${JSON.stringify({ id: "c", object: "chat.completion.chunk", created: 0, model: "m", choices: [{ index: 0, delta: { role: "assistant", content: "Because of data centers." }, finish_reason: "stop" }] })}\n\n`);
+    res.end("data: [DONE]\n\n");
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const client = await createDefaultPiLlmChatClient();
+
+  const result = await client(
+    { channel: "local", model: "m", protocol: "openai-compatible", baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`, apiKeys: ["k"] },
+    { messages: [{ role: "user", content: "Analyze NVDA" }, { role: "assistant", content: "NVIDIA grew revenue." }, { role: "user", content: "Why?" }], maxTokens: 256 },
+  );
+
+  assert.equal(result.text, "Because of data centers.");
+  assert.deepEqual((bodies[0]!.messages as Array<{ role: string; content: unknown }>).map((message) => [message.role, typeof message.content === "string" ? message.content : JSON.stringify(message.content)]), [
+    ["user", "Analyze NVDA"],
+    ["assistant", "NVIDIA grew revenue."],
+    ["user", "Why?"],
+  ]);
+});
+
+test("a throw inside pi-ai before any request is a client failure, not a provider failure", async () => {
+  const client = createPiLlmChatClient({
+    complete: async () => {
+      throw new TypeError("Cannot read properties of undefined (reading 'totalTokens')");
+    },
+  });
+  await assert.rejects(async () => client(deployment(), { messages: [{ role: "user", content: "hello" }] }), (error: unknown) =>
+    error instanceof LlmClientError && error.code === "client_failed" && /totalTokens/u.test(error.message));
+
+});
+
+test("a fetch that never reached the provider stays a provider failure the router falls back from", async () => {
+  const client = createPiLlmChatClient({
+    complete: async () => {
+      throw new TypeError("fetch failed");
+    },
+  });
+  await assert.rejects(async () => client(deployment(), { messages: [{ role: "user", content: "hello" }] }), (error: unknown) =>
+    error instanceof LlmProviderError && error.code === "provider_failed");
 });
 
 function deployment(): LlmDeployment {
