@@ -94,7 +94,7 @@ const block = (financial: FinancialAnswerContent) => ({ id: "financial-answer-x"
 const prose = (...segments: ReadonlyArray<Record<string, unknown>>) => ({ id: "commentary-x", kind: "rich_text", segments });
 
 test("an engine answer's packet holds its value and gap results in order, each cited by its result, and no other figure", () => {
-  assert.deepEqual(enginePacket(COMPARISON, TICKERS), {
+  assert.deepEqual(enginePacket(COMPARISON, TICKERS, null), {
     route: "financial_engine",
     cutoff: "2026-09-01T00:00:00.000Z",
     companies: ["NVDA", "AMD"],
@@ -115,12 +115,12 @@ test("an engine answer's packet holds its value and gap results in order, each c
     claims_truncated: false,
   });
   // A peer the turn gave no ticker is named by the engine's label for it; one company names none.
-  assert.deepEqual(enginePacket(COMPARISON, new Map([["a", "NVDA"]])).companies, ["NVDA", "Advanced Micro Devices, Inc."]);
-  assert.deepEqual(enginePacket(QUARTERS, TICKERS).figures[0], { id: "F1", metric: "Revenue", period: "Q1 FY2025", value: "USD 26,044,000,000.00", result_id: RESULT(10), source_ids: [] });
+  assert.deepEqual(enginePacket(COMPARISON, new Map([["a", "NVDA"]]), null).companies, ["NVDA", "Advanced Micro Devices, Inc."]);
+  assert.deepEqual(enginePacket(QUARTERS, TICKERS, null).figures[0], { id: "F1", metric: "Revenue", period: "Q1 FY2025", value: "USD 26,044,000,000.00", result_id: RESULT(10), source_ids: [] });
 });
 
 test("the model sees a gap result as unavailable, with its reason and no value, and no result id", () => {
-  const { figures } = packetForModel(enginePacket(COMPARISON, TICKERS)) as { figures: unknown[] };
+  const { figures } = packetForModel(enginePacket(COMPARISON, TICKERS, null)) as { figures: unknown[] };
   assert.deepEqual(figures[0], { id: "F1", company: "NVDA", metric: "Gross margin (gross profit / revenue)", period: "Q4 FY2026", value: "74.40%" });
   assert.deepEqual(figures[3], { id: "F4", company: "AMD", metric: "Gross margin (gross profit / revenue)", period: "Q2 FY2026", gap: NOT_REPORTED });
 });
@@ -129,13 +129,13 @@ test("an assertion citing an id outside the engine packet is rejected", () => {
   const report = checkAssertions([
     { kind: "observation", text: "x", evidence: ["F1"] },
     { kind: "observation", text: "y", evidence: ["F7"] },
-  ], enginePacket(COMPARISON, TICKERS));
+  ], enginePacket(COMPARISON, TICKERS, null));
   assert.deepEqual(report.accepted.map((entry) => entry.index), [0]);
   assert.deepEqual(report.rejected, [{ index: 1, text: "y", check: "reference", reason: 'unknown evidence id "F7"' }]);
 });
 
 test("an observation writes each engine value as a result ref, and a gap as its reason, never a number", () => {
-  const packet = enginePacket(COMPARISON, TICKERS);
+  const packet = enginePacket(COMPARISON, TICKERS, null);
   const values = renderAssertion({ index: 0, kind: "observation", text: "x", evidence: ["F1"] }, packet, []);
   assert.deepEqual(values.segments, [
     { type: "text", text: "NVDA's gross margin (gross profit / revenue) was " },
@@ -149,7 +149,7 @@ test("an observation writes each engine value as a result ref, and a gap as its 
 });
 
 test("a gap is never compared: a comparison citing one is rejected, and a cohort names its company as not shown", () => {
-  const packet = enginePacket(COMPARISON, TICKERS);
+  const packet = enginePacket(COMPARISON, TICKERS, null);
   assert.deepEqual(checkAssertions([{ kind: "comparison", text: "x", evidence: ["F1", "F4"], op: "highest", result: "F1" }], packet).rejected,
     [{ index: 0, text: "x", check: "comparative", reason: "comparison: F4 is not available, so it is not compared" }]);
   assert.deepEqual(checkAssertions([{ kind: "unknown_cause", text: "x", evidence: ["F4"] }], packet).rejected.map((entry) => entry.check), ["kind"]);
@@ -157,7 +157,7 @@ test("a gap is never compared: a comparison citing one is rejected, and a cohort
     value(1, "a", "measure:m1", "period:p0", "74.40%"),
     gap(2, "b", "measure:m1", "period:p1"),
     value(3, "c", "measure:m1", "period:p6", "47.06%"),
-  ], ["a", "b", "c"]), new Map([["a", "NVDA"], ["b", "AMD"], ["c", "AAPL"]]));
+  ], ["a", "b", "c"]), new Map([["a", "NVDA"], ["b", "AMD"], ["c", "AAPL"]]), null);
   const report = checkAssertions([{ kind: "comparison", text: "x", evidence: ["F1", "F3"], op: "highest", result: "F1" }], three);
   assert.deepEqual(report.rejected, []);
   assert.equal(
@@ -167,7 +167,7 @@ test("a gap is never compared: a comparison citing one is rejected, and a cohort
 });
 
 test("a trend orders the engine's quarters by their fiscal labels", () => {
-  const packet = enginePacket(QUARTERS, new Map([["a", "NVDA"]]));
+  const packet = enginePacket(QUARTERS, new Map([["a", "NVDA"]]), null);
   const report = checkAssertions([{ kind: "comparison", text: "x", evidence: packet.figures.map((figure) => figure.id), op: "trend", result: "rose_throughout" }], packet);
   assert.deepEqual(report.rejected, []);
   assert.equal(
@@ -181,7 +181,7 @@ test("a trend over time names the periods its company and metric show as gaps", 
     [...REVENUE.slice(0, 7).map(([, text], i) => value(10 + i, "a", "measure:m0", `period:q${i}`, text)), gap(17, "a", "measure:m0", "period:q7")],
     ["a"],
     Object.fromEntries(REVENUE.map(([period], i) => [`period:q${i}`, { kind: "period", text: period }])),
-  ), new Map([["a", "NVDA"]]));
+  ), new Map([["a", "NVDA"]]), null);
   const report = checkAssertions([{ kind: "comparison", text: "x", evidence: ["F1", "F2", "F3", "F4", "F5", "F6", "F7"], op: "trend", result: "rose_throughout" }], packet);
   assert.deepEqual(report.rejected, []);
   assert.equal(
@@ -191,7 +191,7 @@ test("a trend over time names the periods its company and metric show as gaps", 
 });
 
 test("growth across companies compares each company's change over the same span, whatever their fiscal calendars", () => {
-  const packet = enginePacket(COMPARISON, TICKERS);
+  const packet = enginePacket(COMPARISON, TICKERS, null);
   const report = checkAssertions([
     { kind: "comparison", text: "year over year", evidence: ["F3", "F6"], op: "highest", result: "F3" },
     { kind: "comparison", text: "mixed spans", evidence: ["F3", "F5"], op: "highest", result: "F3" },
@@ -207,7 +207,7 @@ test("growth across companies compares each company's change over the same span,
     gap(2, "a", "measure:m5", "period:p3"),
     gap(3, "b", "measure:m5", "period:p4"),
     value(4, "b", "measure:m5", "period:p5", "4.67%"),
-  ], ["a", "b"]), TICKERS);
+  ], ["a", "b"]), TICKERS, null);
   assert.deepEqual(checkAssertions([{ kind: "comparison", text: "x", evidence: ["F1", "F4"], op: "highest", result: "F1" }], oneEach).rejected,
     [{ index: 0, text: "x", check: "comparative", reason: "comparison: changes across companies are compared over one span" }]);
 });
@@ -216,7 +216,7 @@ test("negative engine amounts compare by their sign", () => {
   const losses = enginePacket(content([
     value(1, "a", "measure:m0", "period:p0", "USD -134,000,000.00"),
     value(2, "b", "measure:m0", "period:p1", "USD -50,000,000.00"),
-  ], ["a", "b"]), TICKERS);
+  ], ["a", "b"]), TICKERS, null);
   const report = checkAssertions([{ kind: "comparison", text: "x", evidence: ["F1", "F2"], op: "lowest", result: "F1" }], losses);
   assert.deepEqual(report.rejected, []);
 });
@@ -233,7 +233,7 @@ test("commentary passes the ref check only when each ref is a verified result of
 });
 
 test("an answer written on an engine packet is sent only that packet, and its inference is judged beside the engine's figures", async () => {
-  const packet = enginePacket(COMPARISON, TICKERS);
+  const packet = enginePacket(COMPARISON, TICKERS, null);
   const reply = [
     "NVDA's margin leads.",
     "```assertions",
@@ -278,14 +278,19 @@ const LEAD = content([
   "measure:m6": { kind: "measure", text: "Difference in Gross margin (gross profit / revenue)" },
   "period:p7": { kind: "period", text: "NVIDIA Corporation Q4 FY2026 minus Advanced Micro Devices, Inc. Q2 FY2026" },
 });
-const LEAD_PLAN = {
+// Each slot's gross margin of its own reported inputs, then each lead over two of them; outputs are numbered as the results.
+const leadPlan = (slots: ReadonlyArray<string>, leads: ReadonlyArray<readonly [string, string]>) => ({
   operations: [
-    { node_id: "a_gm", operation: "gross_margin" },
-    { node_id: "b_gm", operation: "gross_margin" },
-    { node_id: "lead", operation: "spread", left: "a_gm", right: "b_gm" },
+    ...slots.flatMap((slot) => [
+      { node_id: `${slot}_gp`, operation: "reported_metric", subject_slot: slot },
+      { node_id: `${slot}_rev`, operation: "reported_metric", subject_slot: slot },
+      { node_id: `${slot}_gm`, operation: "gross_margin", numerator: `${slot}_gp`, revenue: `${slot}_rev` },
+    ]),
+    ...leads.map(([left, right]) => ({ node_id: `${left}_minus_${right}`, operation: "spread", left: `${left}_gm`, right: `${right}_gm` })),
   ],
-  outputs: [["out_1", "a_gm"], ["out_2", "b_gm"], ["out_3", "lead"]].map(([output_id, node_id]) => ({ output_id, node_id, unit_id: "u1" })),
-} as unknown as FinancialPlanV1;
+  outputs: [...slots.map((slot) => `${slot}_gm`), ...leads.map(([left, right]) => `${left}_minus_${right}`)].map((node_id, index) => ({ output_id: `out_${index + 1}`, node_id, unit_id: "u1" })),
+}) as unknown as FinancialPlanV1;
+const LEAD_PLAN = leadPlan(["a", "b"], [["a", "b"]]);
 const HIGH = content([
   ...QUARTERS.results,
   { ...value(18, "a", "measure:m7", "period:p8", ""), presented: { kind: "ranking", text: "Q4 FY2026 has the highest revenue of the 8 quarters ranked", complete: true, order: [], leader_label_ids: ["period:q7"] } },
@@ -294,6 +299,13 @@ const HIGH = content([
   "measure:m7": { kind: "measure", text: "Revenue ranked across periods" },
   "period:p8": { kind: "period", text: "Q1 FY2025 to Q4 FY2026" },
 });
+const HIGH_PLAN = {
+  operations: [
+    ...REVENUE.map((_, i) => ({ node_id: `revenue_q${i}`, operation: "reported_metric", subject_slot: "a" })),
+    { node_id: "revenue_highest", operation: "period_rank", members: REVENUE.map((_, i) => `revenue_q${i}`), direction: "highest" },
+  ],
+  outputs: [...REVENUE.map((_, i) => ({ output_id: `out_${10 + i}`, node_id: `revenue_q${i}`, unit_id: "u1" })), { output_id: "out_18", node_id: "revenue_highest", unit_id: "u1" }],
+} as unknown as FinancialPlanV1;
 
 test("a lead is a figure derived from its two sides' results, and a ranking is a figure that states itself (#398)", () => {
   assert.deepEqual(enginePacket(LEAD, TICKERS, LEAD_PLAN).figures.slice(2), [{
@@ -301,12 +313,11 @@ test("a lead is a figure derived from its two sides' results, and a ranking is a
     metric: "Difference in Gross margin (gross profit / revenue)",
     period: "NVIDIA Corporation Q4 FY2026 minus Advanced Micro Devices, Inc. Q2 FY2026",
     value: "20.38 pp",
-    derived_from: ["F1", "F2"],
+    lead_of: ["NVDA", "AMD"],
     result_id: RESULT(3),
     source_ids: [],
   }]);
-  assert.equal("derived_from" in enginePacket(LEAD, TICKERS).figures[2]!, false, "without its plan, a lead names no sides");
-  assert.deepEqual(enginePacket(HIGH, TICKERS).figures.at(-1), {
+  assert.deepEqual(enginePacket(HIGH, TICKERS, HIGH_PLAN).figures.at(-1), {
     id: "F9",
     metric: "Revenue ranked across periods",
     period: "Q1 FY2025 to Q4 FY2026",
@@ -325,7 +336,7 @@ test("commentary cites a lead and a ranking by their results, and the judge read
     { type: "ref", ref_kind: "result", ref_id: RESULT(3), format: "20.38 pp", period: "NVIDIA Corporation Q4 FY2026 minus Advanced Micro Devices, Inc. Q2 FY2026" },
   ]);
   assert.equal(resultRefProblem(prose(...leads.segments), block(LEAD)), null);
-  const high = enginePacket(HIGH, TICKERS);
+  const high = enginePacket(HIGH, TICKERS, HIGH_PLAN);
   const states = renderAssertion({ index: 0, kind: "observation", text: "x", evidence: ["F8", "F9"] }, high, []);
   assert.equal(plainText(states.segments), "NVDA's revenue was USD 62,100,000,000.00 in Q4 FY2026. Q4 FY2026 has the highest revenue of the 8 quarters ranked.");
   assert.equal(resultRefProblem(prose(...states.segments), block(HIGH)), null);
@@ -369,21 +380,13 @@ const LEADS = content([
 const LEADS_TICKERS = new Map([["a", "NVDA"], ["b", "AMD"], ["c", "INTC"]]);
 
 test("an unknown cause never cites a lead as a change: each is two companies' figures (#398)", () => {
-  const plan = {
-    operations: [
-      ...["a", "b", "c"].map((slot) => ({ node_id: `${slot}_gm`, operation: "gross_margin" })),
-      { node_id: "a_minus_b", operation: "spread", left: "a_gm", right: "b_gm" },
-      { node_id: "a_minus_c", operation: "spread", left: "a_gm", right: "c_gm" },
-    ],
-    outputs: ["a_gm", "b_gm", "c_gm", "a_minus_b", "a_minus_c"].map((node_id, index) => ({ output_id: `out_${index + 1}`, node_id, unit_id: "u1" })),
-  } as unknown as FinancialPlanV1;
-  const packet = enginePacket(LEADS, LEADS_TICKERS, plan);
+  const packet = enginePacket(LEADS, LEADS_TICKERS, leadPlan(["a", "b", "c"], [["a", "b"], ["a", "c"]]));
   const report = checkAssertions([
     { kind: "unknown_cause", text: "x", evidence: ["F4"] },
     { kind: "unknown_cause", text: "y", evidence: ["F4", "F5"] },
   ], packet);
   assert.deepEqual(report.rejected.map((entry) => [entry.index, entry.check]), [[0, "kind"], [1, "kind"]]);
-  const window = enginePacket(HIGH, TICKERS);
+  const window = enginePacket(HIGH, TICKERS, HIGH_PLAN);
   assert.deepEqual(checkAssertions([{ kind: "unknown_cause", text: "x", evidence: ["F9"] }], window).rejected.map((entry) => entry.check), ["kind"], "a ranking states no value that changed");
 });
 
@@ -403,5 +406,5 @@ test("a peer ranking is no figure of the packet: it is no one company's (#398)",
     value(2, "b", "measure:m1", "period:p1", "54.02%"),
     { ...value(3, "a", "measure:m7", "period:p0", ""), subject_label_id: null, presented: { kind: "ranking", text: "NVIDIA Corporation has the highest gross margin of the 2 companies ranked", complete: true, order: [], leader_label_ids: ["subject:a"] } },
   ], ["a", "b"], { "measure:m7": { kind: "measure", text: "Gross margin (gross profit / revenue) peer ranking" } });
-  assert.deepEqual(enginePacket(cohort, TICKERS).figures.map((figure) => [figure.id, figure.company]), [["F1", "NVDA"], ["F2", "AMD"]]);
+  assert.deepEqual(enginePacket(cohort, TICKERS, leadPlan(["a", "b"], [])).figures.map((figure) => [figure.id, figure.company]), [["F1", "NVDA"], ["F2", "AMD"]]);
 });

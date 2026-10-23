@@ -227,7 +227,7 @@ test("a company overview carries analyst commentary on its published results (#3
     assert.deepEqual(segmentsOf(commentary).flatMap((segment) => segment.type === "ref" ? [results.find((result) => result.result_id === segment.ref_id)?.output_id] : []), ["out_a_minus_b_gross_margin"]);
     assert.equal(resultRefProblem(commentary!, answer as never), null);
     const figure = inputs[0]!.packet!.figures.find((entry) => entry.id === "F19");
-    assert.deepEqual(figure && "derived_from" in figure && figure.derived_from, ["F5", "F14"], "the lead is derived from the two gross margins");
+    assert.deepEqual(figure && "lead_of" in figure && figure.lead_of, ["ALFA", "BRVO"], "the lead is of the two companies' gross margins");
     assert.deepEqual(JSON.parse(judged[0]!.messages[1]!.content).inferences[0].supports, [lead]);
   });
 

@@ -12,7 +12,7 @@
 // cutoff): repeats already counted once, each placed by its stored polarity,
 // with any stored contradiction between them named.
 
-import type { FinancialAnswerContent, FinancialPlanV1 } from "../../financial-core/src/index.ts";
+import { dependencyClosure, type FinancialAnswerContent, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
 import { displayedFigures, QUARTERS_SHOWN, readsNamedQuarter, type DerivedFigureRecord, type DisplayedFigure } from "./fact-blocks.ts";
 import type { ResearchScope } from "./research-scope.ts";
 import { isRecord } from "../../shared/src/http.ts";
@@ -31,8 +31,10 @@ export type PacketFigure = Omit<DisplayedFigure, "fact_id" | "block_id"> & {
   source_ids: ReadonlyArray<string>;
 } & ({
   displayed?: undefined;
-  // A figure computed from two others: their ids, [current, prior], or a lead's [left, right].
+  // A figure computed from two others: their ids, [current, prior].
   derived_from?: readonly [string, string];
+  // A lead's two companies, [left, right]: it is the difference of their figures.
+  lead_of?: readonly [string, string];
 } | AvailableFigureFields);
 
 // A reported value no block shows (#302): what a turn with no figure displayed
@@ -49,8 +51,9 @@ type AvailableFigureFields = {
 
 export type AvailableFigure = Omit<PacketFigure, "id" | "shown_in"> & AvailableFigureFields;
 
-// The companies a figure is about: a derived figure's sides', else its own, else the only company's.
+// The companies a figure is about: a lead's two, a derived figure's sides', else its own, else the only company's.
 export function figureCompanies(figure: PacketFigure, packet: EvidencePacket): Array<string | undefined> {
+  if (figure.displayed === undefined && figure.lead_of) return [...figure.lead_of];
   const sides = figure.displayed === undefined && figure.derived_from ? packet.figures.filter((side) => figure.derived_from!.includes(side.id)) : [];
   return sides.length > 0 ? sides.map((side) => side.company ?? packet.companies[0]) : [figure.company ?? packet.companies[0]];
 }
@@ -373,21 +376,23 @@ function derivedRecords(block: Block): DerivedFigureRecord[] {
 /**
  * A published engine answer as the evidence its commentary is written from:
  * each value, ranking or gap result in the answer's order, a gap with its
- * reason, and a lead with the two results it is the difference of, when its
- * plan is given. Only an answer about several companies names each figure's,
- * by the ticker the turn gave its slot, else the engine's label for it.
+ * reason, and a lead with the two companies its plan reads it from. Without
+ * the plan nothing says what a ranking or a lead is derived from, so neither
+ * is in the packet. Only an answer about several companies names each
+ * figure's, by the ticker the turn gave its slot, else the engine's label for it.
  */
-export function enginePacket(content: FinancialAnswerContent, tickers: ReadonlyMap<string, string>, plan: FinancialPlanV1 | null = null): EvidencePacket {
+export function enginePacket(content: FinancialAnswerContent, tickers: ReadonlyMap<string, string>, plan: FinancialPlanV1 | null): EvidencePacket {
   const subjects = Object.values(content.labels).flatMap((label) => label.kind === "subject" ? [label] : []);
   const companyOf = new Map(subjects.map((label) => [`subject:${label.slot_id}`, tickers.get(label.slot_id) ?? label.text]));
   const companies = [...companyOf.values()];
-  // A window's ranking is its company's; a peer ranking is no one company's, so it stays out.
-  const shown = content.results.filter(({ presented, subject_label_id }) => presented.kind === "ranking" ? subject_label_id !== null : presented.kind !== "predicate");
-  const idOf = new Map(shown.map(({ output_id }, index) => [output_id, `F${index + 1}`]));
-  const sides = leadSides(plan, content.unit_id);
+  const leads = leadCompanies(plan, content.unit_id, companyOf);
+  // A window's ranking is its company's; a peer ranking, or a value no one company's that is no lead, stays out.
+  const shown = content.results.filter(({ output_id, presented, subject_label_id }) => presented.kind === "ranking"
+    ? subject_label_id !== null && plan !== null
+    : presented.kind !== "predicate" && (subject_label_id !== null || leads.has(output_id)));
   const figures = shown.map(({ result_id, output_id, subject_label_id, measure_label_id, period_label_id, presented }, index) => {
     const company = companies.length > 1 && subject_label_id !== null ? companyOf.get(subject_label_id) : undefined;
-    const [left, right] = (sides.get(output_id) ?? []).map((side) => idOf.get(side));
+    const lead = leads.get(output_id);
     return {
       id: `F${index + 1}`,
       ...(company === undefined ? {} : { company }),
@@ -396,7 +401,7 @@ export function enginePacket(content: FinancialAnswerContent, tickers: ReadonlyM
       value: presented.text,
       ...(presented.kind === "gap" ? { gap: presented.text } : {}),
       ...(presented.kind === "ranking" ? { ranking: true as const } : {}),
-      ...(left !== undefined && right !== undefined ? { derived_from: [left, right] as const } : {}),
+      ...(lead === undefined ? {} : { lead_of: lead }),
       result_id,
       source_ids: [],
     };
@@ -416,12 +421,22 @@ export function enginePacket(content: FinancialAnswerContent, tickers: ReadonlyM
   };
 }
 
-function leadSides(plan: FinancialPlanV1 | null, unitId: string): ReadonlyMap<string, ReadonlyArray<string>> {
-  const outputs = plan?.outputs.filter((output) => output.unit_id === unitId) ?? [];
-  const outputOf = new Map(outputs.map((output) => [output.node_id, output.output_id]));
-  return new Map(outputs.flatMap((output) => {
-    const node = plan!.operations.find((entry) => entry.node_id === output.node_id);
-    return node?.operation === "spread" ? [[output.output_id, [node.left, node.right].flatMap((side) => outputOf.get(side) ?? [])]] : [];
+// Each lead's companies, by its output: the one company each side's inputs are reported for.
+function leadCompanies(plan: FinancialPlanV1 | null, unitId: string, companyOf: ReadonlyMap<string, string>): ReadonlyMap<string, readonly [string, string]> {
+  if (plan === null) return new Map();
+  const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
+  const companyOfSide = (nodeId: string) => {
+    const [slot, ...others] = new Set([...dependencyClosure(plan, [nodeId])].flatMap((id) => {
+      const node = nodes.get(id);
+      return node?.operation === "reported_metric" ? [node.subject_slot] : [];
+    }));
+    return slot === undefined || others.length > 0 ? undefined : companyOf.get(`subject:${slot}`);
+  };
+  return new Map(plan.outputs.filter((output) => output.unit_id === unitId).flatMap((output) => {
+    const node = nodes.get(output.node_id);
+    if (node?.operation !== "spread") return [];
+    const [left, right] = [companyOfSide(node.left), companyOfSide(node.right)];
+    return left === undefined || right === undefined ? [] : [[output.output_id, [left, right] as const]];
   }));
 }
 
