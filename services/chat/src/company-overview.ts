@@ -38,8 +38,21 @@ export async function overviewSubjects(
 ): Promise<ReadonlyArray<RequestedSubject> | null> {
   if (!asksForNoFigure(reading) || scope === null || scope.price_window) return null;
   if (!reading.asks.has("peers")) return subjects;
+  return withCatalogPeers(subjects, reading, peersOf);
+}
+
+/**
+ * The one company a turn names and its catalog peers, when the reading asks
+ * for peers. Null when it does not, when the turn names several companies or
+ * none resolved, or when the catalog has no peers for it.
+ */
+export async function withCatalogPeers(
+  subjects: ReadonlyArray<RequestedSubject>,
+  reading: ScopeProposal | null,
+  peersOf: PeersOf,
+): Promise<ReadonlyArray<RequestedSubject> | null> {
   const company = subjects.length === 1 ? subjects[0]! : null;
-  if (company?.resolution.status !== "resolved") return null;
+  if (!reading?.asks.has("peers") || company?.resolution.status !== "resolved") return null;
   const peers = await peersOf(company.resolution.subject_ref);
   return peers.length === 0 ? null : [company, ...peers];
 }

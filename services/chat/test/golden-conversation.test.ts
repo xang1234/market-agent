@@ -645,10 +645,12 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const amd = { issuer_id: AMD.issuer_id, label: "AMDX" };
 
     completedTurn(await runTurn(base, peersThread.thread_id, "How does AMDX's Q2 2025 revenue compare with its peers?"));
-    assert.deepEqual(engineAnswer(await latestAssistantMessage(base, peersThread.thread_id)).results.map(([measure, period, disposition]) => [measure, period, disposition]), [["Revenue", "Q2 FY2025", "verified"]]);
-    assert.deepEqual(await scope(), { companies: [amd], peers: true });
+    // AMD's industry peer is chosen from the catalog (#517), so it carries no label.
+    const answer = engineAnswer(await latestAssistantMessage(base, peersThread.thread_id));
+    assert.deepEqual(answer.results.map(([measure, period, disposition]) => [measure, period, disposition]), [["Revenue", "Q2 FY2025", "verified"], ["Revenue", "Q2 FY2025", "verified"]]);
+    assert.deepEqual(answer.notes, ["Peers chosen from the catalog: NVIDIA Corporation. Name peers to change them."]);
+    assert.deepEqual(await scope(), { companies: [amd, { issuer_id: NVDA.issuer_id }], peers: true });
     completedTurn(await runTurn(base, peersThread.thread_id, "Explain it"));
-    // AMD's industry peer is auto-selected, so it carries no label.
     assert.deepEqual(await scope(), { companies: [amd, { issuer_id: NVDA.issuer_id }], peers: true });
     completedTurn(await runTurn(base, peersThread.thread_id, "Drop the peers"));
     assert.deepEqual(await scope(), { companies: [amd], peers: false });

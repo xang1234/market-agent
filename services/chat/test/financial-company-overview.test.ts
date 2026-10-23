@@ -349,7 +349,8 @@ test("a question about one company that asks for no figure is answered with its 
       assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_OVERVIEW.slice(7)), ...slotted("b", OFFQ_LATEST)]);
       const { rows: [message] } = await db.query(`select blocks, research_scope from chat_messages where message_id = $1`, [done.message_id]);
       assert.deepEqual([message.research_scope.companies, message.research_scope.peers], [[{ issuer_id: COMPANIES.QTRS, label: "QTRS" }, { issuer_id: COMPANIES.OFFQ }], true]);
-      assert.equal(message.blocks.length, 1, "no note names peers the question did not name");
+      assert.deepEqual(message.blocks.slice(1).map((block: { segments: Array<{ text: string }> }) => block.segments[0]!.text), ["Peers chosen from the catalog: OFFQ Corp. Name peers to change them."],
+        "the note says the catalog chose the peers, and never names them as not covered");
       const { rows: [planned] } = await db.query(
         `select p.plan->'interpretation'->>'text' as text from financial_runs r join financial_plans p on p.plan_id = r.plan_id where r.request_key = $1`,
         [turnId],
