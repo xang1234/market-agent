@@ -11,6 +11,7 @@
 // Nothing here acquires evidence.
 
 import {
+  canonicalJson,
   DEFAULT_EXECUTION_LIMITS,
   dependencyClosure,
   hashCanonical,
@@ -284,18 +285,21 @@ function checkDefaults(value: unknown): Attempt<CitedFamily[]> {
     if (!Object.hasOwn(MEASURE_DEFAULTS, entry.family)) {
       return invalid("$.defaults", "unknown_measure_family", `${entry.family} is not a measure family; families are ${Object.keys(MEASURE_DEFAULTS).join(", ")}`);
     }
-    if (entry.period !== undefined && !isFiscalPeriodSelector(entry.period)) {
+    // A model writes an optional field it leaves out as null.
+    const period = entry.period ?? undefined;
+    if (period !== undefined && !isLatestOrFiscalPeriod(period)) {
       return invalid("$.defaults", "invalid_draft", `${entry.family}'s period must be a fiscal_period or latest period selector`);
     }
-    const key = JSON.stringify([entry.family, entry.period ?? null]);
+    const key = canonicalJson([entry.family, period ?? null]);
     if (seen.has(key)) return invalid("$.defaults", "duplicate_measure_family", `${entry.family} is cited more than once for one period`);
     seen.add(key);
-    cited.push(entry.period === undefined ? { family: entry.family as MeasureFamilyKey } : { family: entry.family as MeasureFamilyKey, period: entry.period });
+    cited.push(period === undefined ? { family: entry.family as MeasureFamilyKey } : { family: entry.family as MeasureFamilyKey, period });
   }
   return { ok: true, value: cited };
 }
 
-function isFiscalPeriodSelector(value: unknown): value is PeriodSelector {
+// ponytail: the schema's PeriodSelector bounds, copied; financial-core compiles no PeriodSelector check to call.
+function isLatestOrFiscalPeriod(value: unknown): value is PeriodSelector {
   if (!isRecord(value)) return false;
   const keys = Object.keys(value).sort().join(",");
   if (value.kind === "latest") {
@@ -516,7 +520,7 @@ function systemPrompt(): string {
   return [
     "You translate a financial research request into a JSON plan draft. Reply with one JSON object only.",
     `Approved metric keys: ${metrics}. Approved operations: ${operations}.`,
-    'Ready drafts: {"outcome":"ready","subjects":[{"slot_id","mention"}],"operations":[...],"outputs":[{"output_id","node_id"}],"thresholds":[{"threshold_id","value","unit"}],"defaults":[{"family","period"}]}.',
+    'Ready drafts: {"outcome":"ready","subjects":[{"slot_id","mention"}],"operations":[...],"outputs":[{"output_id","node_id"}],"thresholds":[{"threshold_id","value","unit"}],"defaults":[{"family"} or {"family","period"}]}.',
     'Operations: reported_metric {node_id, operation, subject_slot, metric_key, period:{kind:"fiscal_period",fiscal_year,fiscal_period} or {kind:"latest",period_type,offset}}; absolute_change/percent_change_positive_base {current, prior}; gross_margin/operating_margin/net_margin {numerator, revenue}; free_cash_flow {operating_cash_flow, capex} (annual only); ratio {ratio_key, numerator, denominator}; trailing_sum {quarters:[4 node ids]}; threshold {subject, threshold_id, comparison}; peer_compare {members, direction}; market_cap {price, shares}; pe_ratio {price, earnings}.',
     'A valuation\'s price is a reported_metric of share_price with period {kind:"at_cutoff"}, planned only as the price of market_cap or pe_ratio. market_cap\'s shares are shares_outstanding with period {kind:"latest",period_type:"quarterly",offset:0}. pe_ratio\'s earnings are eps_diluted with period {kind:"latest",period_type:"annual",offset:0}: P/E uses the latest fiscal year\'s diluted EPS.',
     "Plan every requested company. Threshold values are decimal strings. Never invent metric definitions, identifiers, owners, budgets, modes, or verification fields.",

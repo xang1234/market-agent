@@ -446,6 +446,22 @@ test("a malformed default or period is a draft issue (#517)", async () => {
   }
 });
 
+test("a family cited twice for one period is a duplicate however its period's keys are ordered (#517)", async () => {
+  for (const defaults of [
+    [{ family: "revenue", period: LATEST_QUARTER }, { family: "revenue", period: { offset: 0, kind: "latest", period_type: "quarterly" } }],
+    [{ family: "profit" }, { family: "profit", period: null }],
+  ]) {
+    const result = await planFinancialRequest(context({ requested_subjects: [resolved(0)], max_model_calls: 1 }), "Analyze revenue", scripted(citing([0], defaults)));
+    assert.deepEqual(result.outcome === "unsupported" && result.reason, "duplicate_measure_family", JSON.stringify(defaults));
+  }
+});
+
+test("a null period is the family's own periods (#517)", async () => {
+  const { plan } = await plannedFrom([0], citing([0], [{ family: "revenue", period: null }]));
+  assert.deepEqual(outputNodes(plan), ["a_revenue_latest_fy0", "a_revenue_latest_q0"]);
+  assert.deepEqual(plan.measure_defaults, [{ family: "revenue", table_version: "measure-defaults.v1", period: "default" }]);
+});
+
 test("a draft node whose id a cited family plans is rejected (#517)", async () => {
   const colliding = citing([0], [{ family: "revenue" }], {
     operations: [{ node_id: "a_revenue_latest_fy0", operation: "reported_metric", subject_slot: "a", metric_key: "net_income", period: { kind: "latest", period_type: "annual", offset: 0 } }],
@@ -478,6 +494,7 @@ test("the planning prompt names each family from the table and clarifies only fo
   await planFinancialRequest(context({ requested_subjects: [resolved(0)] }), "Analyze Apple's profit", model);
   const [system] = model.calls[0]!;
   assert.match(system!, /Measure families \(key: what the server plans for each requested company\): profit: gross_profit, operating_income, net_income, gross_margin, operating_margin, net_margin for the latest fiscal year at the cutoff and the latest fiscal quarter at the cutoff; revenue: revenue for the latest fiscal year at the cutoff and the latest fiscal quarter at the cutoff; eps: eps_diluted for the latest fiscal year at the cutoff and the latest fiscal quarter at the cutoff\./u);
+  assert.match(system!, /"defaults":\[\{"family"\} or \{"family","period"\}\]\}\./u);
   assert.match(system!, /"latest quarter sales" is \{"family":"revenue","period":\{"kind":"latest","period_type":"quarterly","offset":0\}\}/u);
   assert.match(system!, /only when the request needs companies that are not among the requested companies, or a measure that is neither an approved metric key nor a measure family/u);
   assert.match(system!, /A market index or benchmark \(the S&P 500\) and a share price return \(year to date\) are answered outside the plan: ignore them and plan the companies' figures\./u);
