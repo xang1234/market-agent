@@ -33,7 +33,7 @@ import { loadUsableFacts } from "../../fundamentals/src/usable-facts.ts";
 import { returnLabel } from "../../market/src/perf-points.ts";
 import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
 import { stableUuid } from "./chat-ids.ts";
-import { readsEngine, STATEMENT_METRIC_LABELS, statementMetrics, unavailableMetrics, type ResearchScope } from "./research-scope.ts";
+import { readsEngine, STATEMENT_METRIC_LABELS, statementMetrics, unavailableMetrics, type FiscalQuarter, type ResearchScope } from "./research-scope.ts";
 import { loadPerfComparisonBlocks, type PriceWindow } from "./perf-block.ts";
 import { deriveQuarterMetrics, GROWTH, MARGINS, type QuarterMetric } from "./quarter-metrics.ts";
 
@@ -76,7 +76,7 @@ export async function loadTurnFactBlocks(
     requestedListings?: ReadonlyMap<string, CompanyListing>;
     // A comparison of the fiscal year the scope names (research-scope.ts).
     fiscalYear?: number;
-    // The price window the question names (requestedPriceWindow).
+    // The price window the scope keeps (research-scope.ts).
     priceWindow?: PriceWindow;
     // The window's cutoff when an earlier answer charted it (research-scope.ts),
     // so its baseline and end stay the ones already shown; else asOf.
@@ -141,48 +141,6 @@ export async function priceListingsForTurn(
   const issuerIds = companies.map((company) => company.id);
   const active = await companyListings(db, issuerIds, input.asOf);
   return priceListingsForComparison(issuerIds, listingsForComparison(issuerIds, input.requestedListings ?? new Map(), active));
-}
-
-// A price window the question names: year to date ("YTD", "year-to-date").
-// ponytail: YTD only; other named windows still chart the latest stored range.
-export function requestedPriceWindow(question: string): PriceWindow | undefined {
-  return /\b(?:ytd|year[- ]to[- ]date)\b/i.test(question) ? "ytd" : undefined;
-}
-
-// The fiscal year a question names ("fiscal 2025", "FY25", "2025 fiscal year").
-// ponytail: years only; a named quarter still gets the latest fiscal year.
-const FISCAL_YEAR = /\b(?:FY\s?'?|fiscal\s+(?:year\s+)?)(\d{4}|\d{2})\b|\b(\d{4})\s+fiscal\b/i;
-
-export function requestedFiscalYear(question: string): number | undefined {
-  const match = FISCAL_YEAR.exec(question);
-  const year = match?.[1] ?? match?.[2];
-  if (year === undefined) return undefined;
-  return year.length === 2 ? 2000 + Number(year) : Number(year);
-}
-
-// A fiscal quarter a question names ("Q2 2025", "Q1 fiscal 2026", "Q4 FY26",
-// "fiscal Q3 2025", "the second quarter of 2025") (#290). The quarter is each
-// company's own fiscal quarter, as its facts are filed.
-export type FiscalQuarter = { fiscal_year: number; fiscal_period: string };
-// A comma may sit between the quarter and its year ("Q2, 2026", #292 review).
-const NAMED_QUARTER = /\b(?:fiscal\s+)?Q([1-4]),?\s+(?:of\s+)?(?:fiscal\s+(?:year\s+)?|FY\s?'?)?(\d{4}|\d{2})\b/i;
-const SPELLED_QUARTER = /\b(first|second|third|fourth)\s+(?:fiscal\s+)?quarter,?\s+(?:of\s+)?(?:fiscal\s+(?:year\s+)?|FY\s?)?(\d{4})\b/i;
-const ORDINALS: Readonly<Record<string, number>> = { first: 1, second: 2, third: 3, fourth: 4 };
-// The year first ("FY2026 Q3", "fiscal 2025 Q2", "FY26 Q1") (#292 review).
-const YEAR_FIRST_QUARTER = /\b(?:FY\s?'?|fiscal\s+(?:year\s+)?)(\d{4}|\d{2})\s+Q([1-4])\b/i;
-
-export function requestedFiscalQuarter(question: string): FiscalQuarter | undefined {
-  const yearFirst = YEAR_FIRST_QUARTER.exec(question);
-  if (yearFirst) {
-    const year = yearFirst[1]!;
-    return { fiscal_year: year.length === 2 ? 2000 + Number(year) : Number(year), fiscal_period: `Q${yearFirst[2]}` };
-  }
-  const named = NAMED_QUARTER.exec(question);
-  const spelled = named ? null : SPELLED_QUARTER.exec(question);
-  const quarter = named ? Number(named[1]) : spelled ? ORDINALS[spelled[1]!.toLowerCase()] : undefined;
-  const year = named?.[2] ?? spelled?.[2];
-  if (quarter === undefined || year === undefined) return undefined;
-  return { fiscal_year: year.length === 2 ? 2000 + Number(year) : Number(year), fiscal_period: `Q${quarter}` };
 }
 
 async function peersOf(db: QueryExecutor, issuer: IssuerSubjectRef): Promise<ReadonlyArray<IssuerSubjectRef>> {

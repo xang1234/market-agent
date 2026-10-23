@@ -12,8 +12,8 @@ const NVDA = { issuer_id: "60000000-0000-4000-8000-000000000001", label: "NVDA" 
 const AMD = { issuer_id: "60000000-0000-4000-8000-000000000002", label: "AMD" };
 const AAPL = { issuer_id: "60000000-0000-4000-8000-000000000003", label: "AAPL" };
 const CUTOFF = "2026-09-01T00:00:00.000Z";
-const scope = (question: string, companies = [NVDA], read: ScopeProposal = proposal()) =>
-  resolveResearchScope({ question, companies, prior: null, asOf: CUTOFF, proposal: read });
+const scope = (_question: string, companies = [NVDA], read: ScopeProposal = proposal()) =>
+  resolveResearchScope({ companies, prior: null, asOf: CUTOFF, proposal: read });
 const REVENUE = { metrics: ["income_statement"], items: ["revenue"] } as const;
 const GROSS_MARGIN_CHANGE = proposal({ asks: ["margins", "margin_trend"], metrics: ["income_statement"], items: ["gross_margin"], period: { kind: "fiscal_quarter", fiscal_period: "Q1", fiscal_year: 2026 } });
 
@@ -126,9 +126,8 @@ test("a cash flow question names the periods its readers cover", () => {
 });
 
 test("an inherited YTD window is bounded at its own cutoff (#207)", () => {
-  const first = scope("Compare NVDA with AMD YTD", [NVDA, AMD]);
+  const first = scope("Compare NVDA with AMD YTD", [NVDA, AMD], proposal({ asks: ["price_window"] }));
   const next = resolveResearchScope({
-    question: "Explain the differences",
     companies: [NVDA, AMD],
     prior: first,
     asOf: "2026-09-05T00:00:00.000Z",
@@ -381,7 +380,7 @@ test("a stored contradiction listed in either order is one disagreement (#207)",
 });
 
 test("a price window adds its event predicates to the route's, over the route's period (#207)", () => {
-  const ytd = scope("Compare NVDA with AMD YTD", [NVDA, AMD]);
+  const ytd = scope("Compare NVDA with AMD YTD", [NVDA, AMD], proposal({ asks: ["price_window"] }));
   assert.equal(ytd.reads, "comparison");
   assert.deepEqual(claimSelection(ytd, CUTOFF), {
     predicate_prefixes: ["management.explanation.", "guidance.", "kpi.", "material_event."],

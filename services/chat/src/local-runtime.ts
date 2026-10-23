@@ -357,10 +357,10 @@ async function turnScope(
   const dropped = new Set([...autoPeers].filter((id) => !carriedIds.has(id)));
   const allDropped = autoPeers.size > 0 && dropped.size === autoPeers.size;
   const peersOff = autoPeers.size > 0 && (allDropped ||
-    !resolveResearchScope({ question, companies: carried, prior, asOf: turnNow(process.env), served, proposal: read }).peers);
+    !resolveResearchScope({ companies: carried, prior, asOf: turnNow(process.env), served, proposal: read }).peers);
   const named = peersOff ? carried.filter((company) => !autoPeers.has(company.issuer_id)) : carried;
   const resolve = (cutoff: string) =>
-    resolveResearchScope({ question, companies: named, prior, asOf: cutoff, served, peersOff: allDropped, proposal: read });
+    resolveResearchScope({ companies: named, prior, asOf: cutoff, served, peersOff: allDropped, proposal: read });
   const base = resolve(turnNow(process.env));
   // An evidence follow-up keeps the previous answer's companies as they were; a
   // financial answer covers exactly the companies its plan requested.

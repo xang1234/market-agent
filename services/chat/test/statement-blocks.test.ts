@@ -227,7 +227,7 @@ test("EPS shows the latest quarter's diluted EPS to the cent", () => {
 
 test("a block shows the statement items asked for, and a dropped item stays dropped", () => {
   const ask = (question: string, read: ScopeProposal, prior: ResearchScope | null = null) =>
-    resolveResearchScope({ question, companies: [NVDA], prior, asOf: AS_OF, proposal: read });
+    resolveResearchScope({ companies: [NVDA], prior, asOf: AS_OF, proposal: read });
   const labels = (scope: ResearchScope) => blocksFor(undefined, statementFacets(scope)).flatMap(items).map((item) => item.label);
 
   const ocf = ask("Show NVDA's operating cash flow", proposal({ metrics: ["operating_cash_flow"] }));
@@ -243,7 +243,7 @@ test("a block shows the statement items asked for, and a dropped item stays drop
 });
 
 test("basic EPS asked for shows basic EPS, not diluted", () => {
-  const scope = resolveResearchScope({ question: "What was NVDA's basic EPS?", companies: [NVDA], prior: null, asOf: AS_OF, proposal: proposal({ metrics: ["eps_basic"] }) });
+  const scope = resolveResearchScope({ companies: [NVDA], prior: null, asOf: AS_OF, proposal: proposal({ metrics: ["eps_basic"] }) });
   const facts = [
     fact("eps_diluted", 2026, "Q4", 1.76, Q4),
     fact("eps_basic", 2026, "Q4", 1.77, Q4),
@@ -252,7 +252,7 @@ test("basic EPS asked for shows basic EPS, not diluted", () => {
   assert.equal(block!.title, "Earnings per share (Q4 2026)");
   assert.deepEqual(items(block!).map((item) => [item.label, item.format]), [["EPS (basic)", "$1.77"]]);
   // Both asked for: both shown, for the same period.
-  const both = statementFacets(resolveResearchScope({ question: "NVDA basic EPS and diluted EPS", companies: [NVDA], prior: null, asOf: AS_OF, proposal: proposal({ metrics: ["eps_basic", "eps_diluted"] }) }));
+  const both = statementFacets(resolveResearchScope({ companies: [NVDA], prior: null, asOf: AS_OF, proposal: proposal({ metrics: ["eps_basic", "eps_diluted"] }) }));
   assert.deepEqual(items(blocksFor(facts, both)[0]!).map((item) => item.label), ["EPS (diluted)", "EPS (basic)"]);
 });
 
@@ -345,7 +345,7 @@ test("a read failure costs only these blocks, and the reads are full-coverage at
 
 test("a turn's statement facets follow the metrics it names", () => {
   const facets = (question: string, read: ScopeProposal) => {
-    const { items: _items, ...families } = statementFacets(resolveResearchScope({ question, companies: [NVDA], prior: null, asOf: AS_OF, proposal: read }));
+    const { items: _items, ...families } = statementFacets(resolveResearchScope({ companies: [NVDA], prior: null, asOf: AS_OF, proposal: read }));
     return families;
   };
   assert.deepEqual(facets("What is NVDA's free cash flow?", proposal({ metrics: ["free_cash_flow"] })), { cashFlow: true, balanceSheet: false, eps: false, epsBasic: false });
@@ -356,7 +356,7 @@ test("a turn's statement facets follow the metrics it names", () => {
 
 test("a statement metric not shown, or asked of a comparison, is a named gap", () => {
   const scope = (question: string, companies: ResearchScope["companies"]) =>
-    resolveResearchScope({ question, companies, prior: null, asOf: AS_OF, proposal: proposal({ metrics: ["free_cash_flow"] }) });
+    resolveResearchScope({ companies, prior: null, asOf: AS_OF, proposal: proposal({ metrics: ["free_cash_flow"] }) });
   const input = { snapshotId: SNAPSHOT_ID, asOf: AS_OF };
   const notes = (blocks: ReadonlyArray<Record<string, unknown>>) =>
     blocks.map((block) => (block.segments as Array<{ text: string }>)[0]!.text);
@@ -373,7 +373,7 @@ test("a statement metric not shown, or asked of a comparison, is a named gap", (
 });
 
 test("a cash question with no cash figure is a named gap, never another balance in its place", () => {
-  const scope = resolveResearchScope({ question: "How much cash does NVDA have?", companies: [NVDA], prior: null, asOf: AS_OF, proposal: proposal({ metrics: ["cash_and_equivalents"] }) });
+  const scope = resolveResearchScope({ companies: [NVDA], prior: null, asOf: AS_OF, proposal: proposal({ metrics: ["cash_and_equivalents"] }) });
   assert.equal(scope.reads, "statements");
   // The filer reports assets but not the mapped cash concept.
   const facts = [fact("total_assets", 2026, "FY", 206_803e6, point("2026-01-25"))];
@@ -386,7 +386,7 @@ test("a cash question with no cash figure is a named gap, never another balance 
 });
 
 test("a statement request offers other facts only when it shows what it asked for", () => {
-  const scope = resolveResearchScope({ question: "What is NVDA's free cash flow?", companies: [NVDA], prior: null, asOf: AS_OF, proposal: proposal({ metrics: ["free_cash_flow"] }) });
+  const scope = resolveResearchScope({ companies: [NVDA], prior: null, asOf: AS_OF, proposal: proposal({ metrics: ["free_cash_flow"] }) });
   assert.equal(scope.reads, "statements");
   assert.equal(mayOfferOtherFacts(scope, blocksFor()), true);
   assert.equal(mayOfferOtherFacts(scope, []), false);

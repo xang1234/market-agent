@@ -377,7 +377,7 @@ test("a question about its companies, named or carried, that asks for no figure 
     const subjects = planningContext(question).requested_subjects;
     if (!allResolved(subjects)) return null;
     const proposal = await readQuestion(question);
-    const scope = resolveResearchScope({ question, companies: [], prior: null, asOf: GOLDEN_AS_OF, proposal });
+    const scope = resolveResearchScope({ companies: [], prior: null, asOf: GOLDEN_AS_OF, proposal });
     return (await overviewSubjects(subjects, proposal, scope, peersOf))?.map((subject) => subject.mention) ?? null;
   };
   for (const ticker of ["NVDA", "AMD", "AAPL"]) assert.deepEqual(await overview(`Analyze ${ticker}`), [ticker], ticker);
@@ -402,7 +402,6 @@ test("a question about its companies, named or carried, that asks for no figure 
   const periods: Array<[string, ReturnType<typeof reading>]> = [
     ["in fiscal 2025", reading([], [], [], [], { kind: "fiscal_year", fiscal_year: 2025 })],
     ["for Q4 2025", reading([], [], [], [], { kind: "fiscal_quarter", fiscal_period: "Q4", fiscal_year: 2025 })],
-    ["YTD", reading([])],
     ["YTD", reading(["price_window"])],
     ["for Q3", reading([], [], [], [], { kind: "fiscal_quarter", fiscal_period: "Q3", fiscal_year: null })],
     ["in the third quarter", reading([], [], [], [], { kind: "fiscal_quarter", fiscal_period: "Q3", fiscal_year: null })],
@@ -465,7 +464,7 @@ test("each golden answer names what its question asks for and its plan does not 
     "Why did AMD's operating margin turn negative in Q2 2025?": ["a margin over several periods", "the cause of these figures"],
     "What was AMD's revenue in Q2 2019?": [],
     "What is AMD's free cash flow?": [],
-    "Compare NVDA, AMD and AAPL revenue and margins YTD against the S&P 500": ["a comparison with a benchmark index"],
+    "Compare NVDA, AMD and AAPL revenue and margins YTD against the S&P 500": ["a stock price return", "a comparison with a benchmark index"],
     "What drives AAPL's margins?": ["the cause of these figures"],
     "How does AMDX's Q2 2025 revenue compare with its peers?": ["peers the question did not name"],
   };

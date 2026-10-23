@@ -571,7 +571,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.equal(firstAnswer.results.length, 12);
     assert.ok(firstAnswer.results.every(([, , disposition]) => disposition === "verified"), JSON.stringify(firstAnswer.results));
     // "S&P" is not two companies the answer could not find.
-    assert.deepEqual(firstAnswer.notes, ["Not covered by this answer: a comparison with a benchmark index."]);
+    assert.deepEqual(firstAnswer.notes, ["Not covered by this answer: a stock price return; a comparison with a benchmark index."]);
 
     const unchanged = (scope: Saved, companies: string[]) => {
       assert.deepEqual(issuers(scope), companies);

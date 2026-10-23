@@ -6,9 +6,8 @@ import { issuerLabels } from "../../financial-engine/src/request.ts";
 import { reportedBy } from "../../financial-engine/src/select-inputs.ts";
 import { createSqlPeerSetResolver } from "../../fundamentals/src/peer-set-resolver.ts";
 import { MAX_TURN_SUBJECTS } from "./coordinator.ts";
-import type { FiscalQuarter } from "./fact-blocks.ts";
 import { GROWTH, MARGINS, quarterBefore } from "./quarter-metrics.ts";
-import { readingAsks, type PERIOD_FIELDS, type ResearchScope, type ScopeFacet, type ScopeProposal } from "./research-scope.ts";
+import { readingAsks, type FiscalQuarter, type PERIOD_FIELDS, type ResearchScope, type ScopeFacet, type ScopeProposal } from "./research-scope.ts";
 
 const QUARTERS_SHOWN = 8;
 const UNPLANNED = "[chat] the company overview could not be planned; the planner answers";

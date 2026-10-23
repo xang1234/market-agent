@@ -657,7 +657,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     // A scope over the question's reading, as if the previous answer's scope held more.
     const keeping = (kept: Record<string, unknown>) => (async (context: { userIntent?: string }, read: Promise<ScopeProposal | null>) => {
       const proposal = await read;
-      const scope = resolveResearchScope({ question: context.userIntent ?? "", companies: [], prior: null, asOf: new Date().toISOString(), proposal });
+      const scope = resolveResearchScope({ companies: [], prior: null, asOf: new Date().toISOString(), proposal });
       return proposal?.period.kind === "latest" ? scope : { ...scope, ...kept };
     }) as never;
     const keepsYear = keeping({ fiscal_year: 2023, inherited: ["fiscal_year"] });

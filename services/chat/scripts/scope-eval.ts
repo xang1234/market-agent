@@ -84,7 +84,6 @@ export function caseFailures(evalCase: ScopeEvalCase, reply: string | undefined)
   const proposal = parseProposal(reply, evalCase.question);
   if (proposal === null) return [`${name}: reply rejected: ${reply}`];
   const view = scopeView(resolveResearchScope({
-    question: evalCase.question,
     companies: evalCase.companies.map((ticker) => COMPANIES[ticker]),
     prior: evalCase.prior === null ? null : parseResearchScope(evalCase.prior),
     asOf: AS_OF,

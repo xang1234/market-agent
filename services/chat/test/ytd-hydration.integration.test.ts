@@ -16,6 +16,7 @@ import { analystToolRuntime, closeLocalRuntimePoolForTests } from "../src/local-
 import { loadPerfComparisonBlocks } from "../src/perf-block.ts";
 import { createThread } from "../src/threads-repo.ts";
 import { hydrateYtdBars } from "../src/ytd-hydration.ts";
+import { proposal } from "./scope-fixtures.ts";
 import { bootstrapDatabase, connectedPool, dockerAvailable, registerLifoCleanup } from "../../../db/test/docker-pg.ts";
 import { GOLDEN_AS_OF, GOLDEN_COMPANIES, MARKET_SOURCE_ID, seedGoldenDataset } from "./golden/dataset.ts";
 
@@ -159,6 +160,7 @@ test("a live YTD turn whose refresh fails names the stale cached window as a gap
     userId,
     bundleId: "single_subject_analysis",
     userIntent: "Compare NVDA with AMD YTD",
+    reading: async () => proposal({ asks: ["price_window"] }),
     emit: (() => ({})) as never,
     subjectPreResolution: subject("NVDA") as never,
     subjectPreResolutions: [subject("NVDA"), subject("AMD")] as never,

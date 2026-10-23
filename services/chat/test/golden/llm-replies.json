@@ -123,7 +123,7 @@
     },
     {
       "match": "Question: \"Compare NVDA, AMD and AAPL revenue and margins YTD against the S&P 500\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"margins\",\"benchmark\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\",\"AMD\",\"AAPL\"]}}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"margins\",\"price_window\",\"benchmark\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\",\"AMD\",\"AAPL\"]}}"
     },
     {
       "match": "Question: \"Show it as a table\"",

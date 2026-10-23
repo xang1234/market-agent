@@ -233,7 +233,7 @@ test("a question about one company that asks for no figure is answered with its 
   });
 
   const scoped = async (context: { userIntent?: string }, read: Promise<ScopeProposal | null>) =>
-    resolveResearchScope({ question: context.userIntent ?? "", companies: [{ issuer_id: COMPANIES.QTRS!, label: "QTRS" }], prior: null, asOf: "2026-10-22T00:00:00.000Z", served: true, proposal: await read });
+    resolveResearchScope({ companies: [{ issuer_id: COMPANIES.QTRS!, label: "QTRS" }], prior: null, asOf: "2026-10-22T00:00:00.000Z", served: true, proposal: await read });
 
   await t.test("an overview keeps no period in its saved scope, as it shows the latest quarters (#398)", async () => {
     const keepsYear = (async (context: { userIntent?: string }, read: Promise<ScopeProposal | null>) => ({ ...(await scoped(context, read)), fiscal_year: 2023 })) as never;
@@ -277,7 +277,9 @@ test("a question about one company that asks for no figure is answered with its 
       analystCalls += 1;
       return { snapshot_id: "00000000-0000-4000-8000-000000000000", blocks: [], verification: { ok: true } };
     };
-    for (const options of [{ readQuestion: reading({ ...NO_ASKS, asks: new Set(["price_window"]) }) }, { researchScope: scoped }]) {
+    const keepsWindow = async (context: { userIntent?: string }, read: Promise<ScopeProposal | null>): Promise<ResearchScope> =>
+      ({ ...(await scoped(context, read)), price_window: { kind: "ytd", cutoff: "2026-10-22T00:00:00.000Z" }, inherited: ["price_window"] });
+    for (const options of [{ readQuestion: reading({ ...NO_ASKS, asks: new Set(["price_window"]) }) }, { researchScope: keepsWindow }]) {
       const model = revenueModel(["QTRS"]);
       await chatHarness(pool, { model, readQuestion: reading(NO_ASKS), resolveMention: resolve, analyst, ...options }).run({ ...base, userIntent: "Revenue for QTRS YTD" });
       assert.equal(model.calls, 0);

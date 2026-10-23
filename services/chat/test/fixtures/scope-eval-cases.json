@@ -119,7 +119,7 @@
     "question": "Compare NVDA's and AMD's fiscal 2025 revenue YTD",
     "companies": ["NVDA","AMD"],
     "prior": null,
-    "expected": {"route":"comparison","reads":"comparison","peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":["income_statement"],"guidance":false,"explains":false,"income_items":["revenue"],"fiscal_year":2025,"fiscal_quarter":null,"price_window":"ytd","benchmark":false,"period":"fiscal_year"}
+    "expected": {"route":"comparison","reads":"comparison","peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":["income_statement"],"guidance":false,"explains":false,"income_items":["revenue"],"fiscal_year":2025,"fiscal_quarter":null,"price_window":null,"benchmark":false,"period":"fiscal_year"}
   },
   {
     "id": 18,
@@ -383,7 +383,7 @@
     "question": "What is NVDA's free cash flow YTD?",
     "companies": ["NVDA"],
     "prior": null,
-    "expected": {"route":"unavailable_metric","reads":"unavailable_metric","peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":["free_cash_flow_ytd"],"guidance":false,"explains":false,"income_items":[],"fiscal_year":null,"fiscal_quarter":null,"price_window":"ytd","benchmark":false,"period":"none"}
+    "expected": {"route":"unavailable_metric","reads":"unavailable_metric","peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":["free_cash_flow_ytd"],"guidance":false,"explains":false,"income_items":[],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"period":"none"}
   },
   {
     "id": 55,

@@ -155,7 +155,7 @@ export function chatHarness(
       // As wired in production, every turn has a scope; this one has no prior answer.
       ...(options.researchScope === null ? {} : {
         researchScope: options.researchScope ?? (async (context, read) =>
-          resolveResearchScope({ question: context.userIntent ?? "", companies: [], prior: null, asOf: (options.clock?.() ?? new Date()).toISOString(), proposal: await read })),
+          resolveResearchScope({ companies: [], prior: null, asOf: (options.clock?.() ?? new Date()).toISOString(), proposal: await read })),
       }),
       ...(options.priorSubjects ? { priorSubjects: options.priorSubjects } : {}),
       ...(options.clock ? { clock: options.clock } : {}),

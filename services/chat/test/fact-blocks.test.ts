@@ -6,15 +6,12 @@ import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
 import {
   buildIssuerFactBlocks,
   readsNamedQuarter,
-  requestedFiscalQuarter,
   loadIssuerFactBlocks,
   comparisonTitle,
   displayedFigures,
   listingsForComparison,
   loadTurnFactBlocks,
   priceListingsForComparison,
-  requestedFiscalYear,
-  requestedPriceWindow,
   mayOfferOtherFacts,
   scopeGapBlocks,
   segmentRevenueItems,
@@ -357,16 +354,6 @@ test("a segment breakdown lists the latest quarter's segments, largest first, ea
   assert.equal(segmentRevenueItems([row("Data Center", 55.2e9, 2026, "Q4"), row("Gaming", 4.3e9, 2026, "Q4", "full", "EUR")]), null);
 });
 
-test("a question's named fiscal year is read in its common spellings (#180)", () => {
-  assert.equal(requestedFiscalYear("Compare NVDA's and AAPL's fiscal 2025 revenue."), 2025);
-  assert.equal(requestedFiscalYear("NVDA vs AMD fiscal year 2024 margins"), 2024);
-  assert.equal(requestedFiscalYear("FY25 revenue for AAPL and NVDA"), 2025);
-  assert.equal(requestedFiscalYear("their FY 2026 results"), 2026);
-  assert.equal(requestedFiscalYear("the 2025 fiscal year"), 2025);
-  assert.equal(requestedFiscalYear("Compare NVDA and AMD revenue in 2025"), undefined, "a calendar year is not a fiscal one");
-  assert.equal(requestedFiscalYear("Compare NVDA and AMD"), undefined);
-});
-
 test("the comparison title names each company's period and end, and a fiscal-calendar gap (#180)", () => {
   assert.equal(
     comparisonTitle(["NVDA", "AAPL"], [
@@ -415,13 +402,6 @@ test("the model sees each comparison figure's period and end date (#180)", () =>
   });
 });
 
-test("a question asking for year to date gets the YTD price window (#192)", () => {
-  assert.equal(requestedPriceWindow("Compare NVDA with AMD YTD"), "ytd");
-  assert.equal(requestedPriceWindow("How have NVDA and AMD done year-to-date?"), "ytd");
-  assert.equal(requestedPriceWindow("NVDA vs AMD year to date"), "ytd");
-  assert.equal(requestedPriceWindow("Compare NVDA with AMD"), undefined);
-});
-
 test("the model sees a price chart's return per company over its window (#181)", () => {
   const figures = displayedFigures([{
     kind: "perf_comparison",
@@ -447,7 +427,7 @@ const Q1_2025: ScopePeriod = { kind: "fiscal_quarter", fiscal_period: "Q1", fisc
 test("what a turn asked for and cannot show is a note each, naming its companies (#206)", () => {
   const AMD = { issuer_id: "60000000-0000-4000-8000-000000000002", label: "AMD" };
   const scope = (question: string, read: ScopeProposal = proposal()) =>
-    resolveResearchScope({ question, companies: [AMD], prior: null, asOf: "2026-09-01T00:00:00.000Z", proposal: read });
+    resolveResearchScope({ companies: [AMD], prior: null, asOf: "2026-09-01T00:00:00.000Z", proposal: read });
   const input = { snapshotId: "11111111-1111-4111-8111-111111111111", asOf: "2026-09-01T00:00:00.000Z" };
   const text = (blocks: ReadonlyArray<Record<string, unknown>>) =>
     blocks.map((block) => (block.segments as Array<{ text: string }>)[0]!.text);
@@ -465,16 +445,16 @@ test("what a turn asked for and cannot show is a note each, naming its companies
   assert.deepEqual(scopeGapBlocks(scope("Analyze AMD"), [], input), []);
   // Segments asked for in a comparison are named as not shown there.
   const NVDA = { issuer_id: "60000000-0000-4000-8000-000000000001", label: "NVDA" };
-  const compared = resolveResearchScope({ question: "Compare NVDA and AMD revenue by segment", companies: [NVDA, AMD], prior: null, asOf: input.asOf, proposal: SEGMENT_REQUEST });
+  const compared = resolveResearchScope({ companies: [NVDA, AMD], prior: null, asOf: input.asOf, proposal: SEGMENT_REQUEST });
   assert.deepEqual(text(scopeGapBlocks(compared, [{ kind: "metrics_comparison" }], input)), [
     "Revenue by segment is not shown when comparing companies; ask about one company for its breakdown.",
   ]);
   // A segment facet only inherited by a comparison is not named again.
-  const inherited = resolveResearchScope({ question: "Compare it with AMD", companies: [NVDA, AMD], prior: scope("Break down AMD's revenue by segment", SEGMENT_REQUEST), asOf: input.asOf, proposal: proposal() });
+  const inherited = resolveResearchScope({ companies: [NVDA, AMD], prior: scope("Break down AMD's revenue by segment", SEGMENT_REQUEST), asOf: input.asOf, proposal: proposal() });
   assert.deepEqual(scopeGapBlocks(inherited, [{ kind: "metrics_comparison" }], input), []);
   // Re-reading a financial-engine answer points to that answer's sources.
-  const financial = resolveResearchScope({ question: "What was AMD's EPS?", companies: [AMD], prior: null, asOf: input.asOf, served: true, proposal: proposal({ metrics: ["eps_diluted"] }) });
-  const evidence = resolveResearchScope({ question: "Show the evidence", companies: [AMD], prior: financial, asOf: input.asOf, proposal: proposal({ asks: ["evidence"] }) });
+  const financial = resolveResearchScope({ companies: [AMD], prior: null, asOf: input.asOf, served: true, proposal: proposal({ metrics: ["eps_diluted"] }) });
+  const evidence = resolveResearchScope({ companies: [AMD], prior: financial, asOf: input.asOf, proposal: proposal({ asks: ["evidence"] }) });
   assert.match(text(scopeGapBlocks(evidence, [], input)).join(" "), /calculated and verified by the financial engine/);
 });
 
@@ -484,37 +464,24 @@ test("a benchmark asked for, or kept from the previous turn, is named as not in 
   const input = { snapshotId: "11111111-1111-4111-8111-111111111111", asOf: "2026-09-01T00:00:00.000Z" };
   const text = (blocks: ReadonlyArray<Record<string, unknown>>) =>
     blocks.map((block) => (block.segments as Array<{ text: string }>)[0]!.text);
-  const asked = resolveResearchScope({ question: "Compare NVDA and AMD YTD against the S&P 500", companies: [NVDA, AMD], prior: null, asOf: input.asOf, proposal: proposal({ asks: ["benchmark"] }) });
+  const asked = resolveResearchScope({ companies: [NVDA, AMD], prior: null, asOf: input.asOf, proposal: proposal({ asks: ["benchmark"] }) });
   const note = "A benchmark index is not in this data, so the companies are compared only with each other.";
   assert.deepEqual(text(scopeGapBlocks(asked, [{ kind: "metrics_comparison" }], input)), [note]);
-  const kept = resolveResearchScope({ question: "Show it as a table", companies: [NVDA, AMD], prior: asked, asOf: input.asOf, proposal: proposal() });
+  const kept = resolveResearchScope({ companies: [NVDA, AMD], prior: asked, asOf: input.asOf, proposal: proposal() });
   assert.deepEqual(text(scopeGapBlocks(kept, [{ kind: "metrics_comparison" }], input)), [note]);
   // One company: there is nothing to compare it with.
-  const single = resolveResearchScope({ question: "How has NVDA done against the S&P 500?", companies: [NVDA], prior: null, asOf: input.asOf, proposal: proposal({ asks: ["benchmark"] }) });
+  const single = resolveResearchScope({ companies: [NVDA], prior: null, asOf: input.asOf, proposal: proposal({ asks: ["benchmark"] }) });
   assert.deepEqual(text(scopeGapBlocks(single, [], input)), ["A benchmark index is not in this data, so NVDA is not compared with one."]);
 });
 
 test("other facts are offered only when nothing the turn asked for is a named gap (#206)", () => {
   const AMD = { issuer_id: "60000000-0000-4000-8000-000000000002", label: "AMD" };
   const scope = (question: string, read: ScopeProposal = proposal()) =>
-    resolveResearchScope({ question, companies: [AMD], prior: null, asOf: "2026-09-01T00:00:00.000Z", proposal: read });
+    resolveResearchScope({ companies: [AMD], prior: null, asOf: "2026-09-01T00:00:00.000Z", proposal: read });
   assert.equal(mayOfferOtherFacts(scope("Analyze AMD"), []), true);
   assert.equal(mayOfferOtherFacts(scope("What is AMD's free cash flow?", proposal({ metrics: ["free_cash_flow"] })), []), false);
   assert.equal(mayOfferOtherFacts(scope("Break down AMD's revenue by segment", SEGMENT_REQUEST), []), false);
   assert.equal(mayOfferOtherFacts(scope("Break down AMD's revenue by segment", SEGMENT_REQUEST), [{ kind: "metric_row", title: "Revenue by segment (Q2 2026)" }]), true);
-});
-
-test("a question's named fiscal quarter is read in its common spellings (#290)", () => {
-  const q = (fiscal_year: number, fiscal_period: string) => ({ fiscal_year, fiscal_period });
-  assert.deepEqual(requestedFiscalQuarter("Why did AMD's operating margin turn negative in Q2 2025?"), q(2025, "Q2"));
-  assert.deepEqual(requestedFiscalQuarter("What changed in NVDA's gross margin in Q1 fiscal 2026?"), q(2026, "Q1"));
-  assert.deepEqual(requestedFiscalQuarter("NVDA's Q4 FY2026 revenue"), q(2026, "Q4"));
-  assert.deepEqual(requestedFiscalQuarter("AMD in fiscal Q3 2025"), q(2025, "Q3"));
-  assert.deepEqual(requestedFiscalQuarter("Q1 FY26 margins"), q(2026, "Q1"));
-  assert.deepEqual(requestedFiscalQuarter("the second quarter of fiscal 2025"), q(2025, "Q2"));
-  assert.deepEqual(requestedFiscalQuarter("AMD's third quarter of 2025"), q(2025, "Q3"));
-  assert.equal(requestedFiscalQuarter("Analyze NVDA's latest quarter."), undefined);
-  assert.equal(requestedFiscalQuarter("Compare NVDA's and AAPL's fiscal 2025 revenue."), undefined);
 });
 
 function quarterBlocks(facts: ReadonlyArray<IssuerFundamentalFact>, quarter: { fiscal_year: number; fiscal_period: string }, wantsMarginTrend = false) {
@@ -541,7 +508,7 @@ test("a named quarter is the quarter shown, inside the trend; never the latest i
 test("a named quarter on the segment or statement route is a named gap, not silently the latest period (#292 review)", () => {
   const AMD = { issuer_id: "60000000-0000-4000-8000-000000000002", label: "AMD" };
   const scope = (question: string, read: ScopeProposal = proposal()) =>
-    resolveResearchScope({ question, companies: [AMD], prior: null, asOf: "2026-09-01T00:00:00.000Z", proposal: read });
+    resolveResearchScope({ companies: [AMD], prior: null, asOf: "2026-09-01T00:00:00.000Z", proposal: read });
   const input = { snapshotId: "11111111-1111-4111-8111-111111111111", asOf: "2026-09-01T00:00:00.000Z" };
   // As each route shows it: a segment breakdown, or an EPS row, for the latest period.
   const SEGMENTS = [{ kind: "metric_row", title: "Revenue by segment (Q2 2026)", items: [{ label: "Data Center", format: "$4.0B" }] }];
@@ -559,7 +526,7 @@ test("a named quarter on the segment or statement route is a named gap, not sile
 test("with nothing shown for a named quarter on those routes, no note claims the latest period is shown (#292 review)", () => {
   const AMD = { issuer_id: "60000000-0000-4000-8000-000000000002", label: "AMD" };
   const scope = (question: string, read: ScopeProposal = proposal()) =>
-    resolveResearchScope({ question, companies: [AMD], prior: null, asOf: "2026-09-01T00:00:00.000Z", proposal: read });
+    resolveResearchScope({ companies: [AMD], prior: null, asOf: "2026-09-01T00:00:00.000Z", proposal: read });
   const input = { snapshotId: "11111111-1111-4111-8111-111111111111", asOf: "2026-09-01T00:00:00.000Z" };
   for (const [question, read] of [["Break down AMD's revenue by segment in Q1 2025", { ...SEGMENT_REQUEST, period: Q1_2025 }], ["What was AMD's EPS in Q1 2025?", proposal({ metrics: ["eps_diluted"], period: Q1_2025 })]] as const) {
     const texts = scopeGapBlocks(scope(question, read), [], input).map((block) => (block.segments as Array<{ text: string }>)[0]!.text);
@@ -570,7 +537,7 @@ test("with nothing shown for a named quarter on those routes, no note claims the
 test("a named quarter is decided per reader: income honors it on a segment route; a statement or segment block shown beside it is flagged (#292 review)", () => {
   const AMD = { issuer_id: "60000000-0000-4000-8000-000000000002", label: "AMD" };
   const scope = (question: string, read: ScopeProposal = proposal()) =>
-    resolveResearchScope({ question, companies: [AMD], prior: null, asOf: "2026-09-01T00:00:00.000Z", proposal: read });
+    resolveResearchScope({ companies: [AMD], prior: null, asOf: "2026-09-01T00:00:00.000Z", proposal: read });
   const input = { snapshotId: "11111111-1111-4111-8111-111111111111", asOf: "2026-09-01T00:00:00.000Z" };
   const QUARTER_ROW = { kind: "metric_row", title: "Fiscal Q1 2025", items: [{ label: "Revenue", format: "$7.4B" }] };
   const EPS_ROW = { kind: "metric_row", title: "Statements", items: [{ label: "EPS (diluted)", format: "$0.90" }] };
@@ -590,16 +557,9 @@ test("a named quarter is decided per reader: income honors it on a segment route
   ]);
 });
 
-test("a year-first quarter is read, fresh or after another quarter (#292 review)", () => {
-  assert.deepEqual(requestedFiscalQuarter("NVDA FY2026 Q3 revenue"), { fiscal_year: 2026, fiscal_period: "Q3" });
-  assert.deepEqual(requestedFiscalQuarter("AMD's fiscal 2025 Q2 margins"), { fiscal_year: 2025, fiscal_period: "Q2" });
-  assert.deepEqual(requestedFiscalQuarter("FY26 Q1"), { fiscal_year: 2026, fiscal_period: "Q1" });
-});
-
 test("a peers request keeps its comparison intent when no peer is found: the quarter is said not to be compared (#292 review)", () => {
   const AMD = { issuer_id: "60000000-0000-4000-8000-000000000002", label: "AMD" };
   const scope = resolveResearchScope({
-    question: "How does AMD compare with its peers in Q1 2025?",
     companies: [AMD],
     prior: null,
     asOf: "2026-09-01T00:00:00.000Z",
@@ -610,11 +570,6 @@ test("a peers request keeps its comparison intent when no peer is found: the qua
   const texts = scopeGapBlocks(scope, [], { snapshotId: "11111111-1111-4111-8111-111111111111", asOf: "2026-09-01T00:00:00.000Z" })
     .map((block) => (block.segments as Array<{ text: string }>)[0]!.text);
   assert.ok(texts.some((text) => /not compared across companies/.test(text)), JSON.stringify(texts));
-});
-
-test("a comma between a quarter and its bare year is read (#292 review)", () => {
-  assert.deepEqual(requestedFiscalQuarter("AMD revenue in Q2, 2026"), { fiscal_year: 2026, fiscal_period: "Q2" });
-  assert.deepEqual(requestedFiscalQuarter("the second quarter, 2025"), { fiscal_year: 2025, fiscal_period: "Q2" });
 });
 
 const NVDA_QUARTERS: ReadonlyArray<readonly [number, string]> = [

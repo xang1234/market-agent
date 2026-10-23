@@ -13,10 +13,11 @@ const INCOME = { metric_key: "income_statement", label: "Revenue, profit and mar
 const fy = (fiscal_year: number): ScopePeriod => ({ kind: "fiscal_year", fiscal_year });
 const fq = (fiscal_period: (typeof FISCAL_PERIODS)[number], fiscal_year: number | null = null): ScopePeriod => ({ kind: "fiscal_quarter", fiscal_period, fiscal_year });
 
-const fresh = (question: string, read: ScopeProposal | null, companies: ResearchScope["companies"] = [NVDA]) =>
-  resolveResearchScope({ question, companies, prior: null, asOf: AS_OF, proposal: read });
-const followUp = (question: string, read: ScopeProposal | null, prior: ResearchScope, companies = prior.companies, asOf = LATER) =>
-  resolveResearchScope({ question, companies, prior, asOf, proposal: read });
+// The question labels each case: the scope reads only its proposal.
+const fresh = (_question: string, read: ScopeProposal | null, companies: ResearchScope["companies"] = [NVDA]) =>
+  resolveResearchScope({ companies, prior: null, asOf: AS_OF, proposal: read });
+const followUp = (_question: string, read: ScopeProposal | null, prior: ResearchScope, companies = prior.companies, asOf = LATER) =>
+  resolveResearchScope({ companies, prior, asOf, proposal: read });
 
 test("the route follows from what the turn asks for and the companies it covers", () => {
   const cases: Array<[ScopeProposal, ResearchScope["companies"], ResearchScope["route"]]> = [
@@ -47,7 +48,7 @@ test("the route follows from what the turn asks for and the companies it covers"
 });
 
 test("a fresh question records what it asks for and inherits nothing", () => {
-  const read = proposal({ metrics: ["income_statement"], items: ["revenue"], period: fy(2025) });
+  const read = proposal({ asks: ["price_window"], metrics: ["income_statement"], items: ["revenue"], period: fy(2025) });
   assert.deepEqual(fresh("Compare NVDA's and AMD's fiscal 2025 revenue YTD", read, [NVDA, AMD]), {
     route: "comparison",
     reads: "comparison",
@@ -131,7 +132,7 @@ test("guidance is kept by a follow-up until one turns it off", () => {
 test("a follow-up that drops the segments clears them, keeps the rest, and they stay off", () => {
   const prior = fresh(
     "Compare NVDA with AMD segments, margin trends and free cash flow, fiscal 2025, YTD",
-    proposal({ asks: ["segments", "margins", "margin_trend"], metrics: ["income_statement", "free_cash_flow"], period: fy(2025) }),
+    proposal({ asks: ["segments", "margins", "margin_trend", "price_window"], metrics: ["income_statement", "free_cash_flow"], period: fy(2025) }),
     [NVDA, AMD],
   );
   const dropped = followUp("Same again without segments", proposal({ off: ["segments"] }), prior);
@@ -260,7 +261,7 @@ test("a margin trend asked for routes to the trend", () => {
 test("with no proposal, a follow-up keeps the previous scope whole", () => {
   const prior = fresh(
     "Break down NVDA's segments and margin trend for fiscal 2025 YTD: why, and what guidance?",
-    proposal({ asks: ["segments", "margins", "margin_trend", "guidance", "explains"], metrics: ["income_statement"], items: ["revenue"], period: fy(2025) }),
+    proposal({ asks: ["segments", "margins", "margin_trend", "price_window", "guidance", "explains"], metrics: ["income_statement"], items: ["revenue"], period: fy(2025) }),
   );
   assert.deepEqual(followUp("And then?", null, prior), {
     ...prior,
@@ -277,8 +278,8 @@ test("with no proposal, a follow-up reads what the previous answer read (#378 re
   assert.deepEqual(followUp("And then?", null, trend), { ...trend, inherited: ["margin_trend", "metrics"] });
   const margin = fresh("What is NVDA's gross margin?", proposal({ asks: ["margins"], metrics: ["income_statement"] }));
   assert.deepEqual(followUp("And then?", null, margin), { ...margin, inherited: ["metrics"] });
-  // Explicit period tokens still apply.
-  assert.deepEqual(followUp("And for FY2025?", null, segments), { ...segments, fiscal_year: 2025, inherited: ["segments", "metrics"] });
+  // With no reading no period is read, whatever the question writes.
+  assert.deepEqual(followUp("And for FY2025?", null, segments), { ...segments, inherited: ["segments", "metrics"] });
   // Its companies are the turn's: one company added to a single company's answer is compared.
   assert.equal(followUp("And then?", null, margin, [NVDA, AMD]).route, "comparison");
   // The engine's answer is not re-read here: its kept figures are.
@@ -307,7 +308,7 @@ test("with no proposal, a follow-up keeps the margins, and a company added route
   assert.deepEqual(followUp("And then?", null, why), { ...why, inherited: [] });
 });
 
-test("with no proposal, a fresh question gets the plain answer for its companies and period tokens", () => {
+test("with no proposal, a fresh question gets the plain answer for its companies, with no period or window", () => {
   assert.deepEqual(fresh("How does NVDA stack up against AMD on margins and segments?", null, [NVDA, AMD]), {
     route: "comparison",
     reads: "comparison",
@@ -324,16 +325,17 @@ test("with no proposal, a fresh question gets the plain answer for its companies
     inherited: [],
   });
   const year = fresh("NVDA revenue FY2025", null);
-  assert.deepEqual([year.route, year.fiscal_year], ["latest_quarter", 2025]);
-  assert.deepEqual(fresh("NVDA YTD", null).price_window, { kind: "ytd", cutoff: AS_OF });
+  assert.deepEqual([year.route, year.fiscal_year], ["latest_quarter", null]);
+  assert.equal(fresh("NVDA YTD", null).price_window, null);
 });
 
 test("a follow-up that names a period or window replaces only that field", () => {
-  const prior = fresh("Compare NVDA with AMD fiscal 2025 YTD", proposal({ period: fy(2025) }), [NVDA, AMD]);
+  const prior = fresh("Compare NVDA with AMD fiscal 2025 YTD", proposal({ asks: ["price_window"], period: fy(2025) }), [NVDA, AMD]);
   const year = followUp("Now for fiscal 2026", proposal({ period: fy(2026) }), prior);
   assert.deepEqual([year.fiscal_year, year.price_window, year.inherited], [2026, { kind: "ytd", cutoff: AS_OF }, ["price_window"]]);
   // A window asked for again is cut off at the new turn.
-  const window = followUp("And YTD now?", proposal(), fresh("Compare NVDA with AMD YTD", proposal(), [NVDA, AMD]));
+  const ytd = proposal({ asks: ["price_window"] });
+  const window = followUp("And YTD now?", ytd, fresh("Compare NVDA with AMD YTD", ytd, [NVDA, AMD]));
   assert.deepEqual([window.price_window, window.inherited], [{ kind: "ytd", cutoff: LATER }, []]);
 });
 
@@ -350,23 +352,26 @@ test("an inherited gap, or one asked beside something it can show, does not stop
   const ytd = followUp("Also compare its YTD stock performance with NVDA", proposal({ asks: ["price_window"] }), prior, [AMD, NVDA]);
   assert.deepEqual([ytd.route, ytd.metrics.map((metric) => metric.metric_key)], ["comparison", ["free_cash_flow"]]);
   assert.equal(followUp("What is its profitability?", proposal({ asks: ["margins"], metrics: ["income_statement"] }), prior).route, "derived_margin");
-  assert.equal(fresh("What is AMD's free cash flow YTD versus NVDA?", proposal({ metrics: ["free_cash_flow"] }), [AMD, NVDA]).route, "comparison");
+  assert.equal(fresh("What is AMD's free cash flow versus NVDA, and their YTD stock performance?", proposal({ asks: ["price_window"], metrics: ["free_cash_flow"] }), [AMD, NVDA]).route, "comparison");
 });
 
-test("a statement metric asked year to date is a named gap; a comparison still charts the window", () => {
+test("a statement metric asked year to date is a named gap; a comparison charts a window only when the reading asks for one", () => {
   const ytdCashFlow = proposal({ metrics: [{ metric: "free_cash_flow", qualifier: "ytd" }] });
   const single = fresh("What is NVDA's free cash flow YTD?", ytdCashFlow);
   assert.deepEqual([single.route, single.metrics], ["unavailable_metric", [{ metric_key: "free_cash_flow_ytd", label: "Free cash flow year to date", available: false, base: "free_cash_flow", qualifier: "ytd" }]]);
-  assert.equal(fresh("Compare NVDA and AMD free cash flow YTD", ytdCashFlow, [NVDA, AMD]).route, "comparison");
+  const compared = fresh("Compare NVDA and AMD free cash flow YTD", ytdCashFlow, [NVDA, AMD]);
+  assert.deepEqual([compared.route, compared.price_window], ["unavailable_metric", null]);
+  const charted = fresh("Compare NVDA and AMD free cash flow and stock returns YTD", proposal({ asks: ["price_window"], metrics: [{ metric: "free_cash_flow", qualifier: "ytd" }] }), [NVDA, AMD]);
+  assert.deepEqual([charted.route, charted.price_window], ["comparison", { kind: "ytd", cutoff: AS_OF }]);
   // A YTD that qualifies something else leaves the statement metric as asked.
   assert.equal(fresh("Show NVDA EPS and YTD stock return", proposal({ metrics: ["eps_diluted"] })).route, "statements");
   // A gap with a window: one company's answer has no price chart, a comparison does.
   assert.equal(fresh("What was AMD's EBITDA YTD?", proposal({ metrics: ["ebitda"] }), [AMD]).route, "unavailable_metric");
-  assert.equal(fresh("What is AMD's EBITDA YTD versus NVDA?", proposal({ metrics: ["ebitda"] }), [AMD, NVDA]).route, "comparison");
+  assert.equal(fresh("What is AMD's EBITDA versus NVDA, and their YTD returns?", proposal({ asks: ["price_window"], metrics: ["ebitda"] }), [AMD, NVDA]).route, "comparison");
 });
 
 test("metrics the financial engine served are not gaps", () => {
-  const scope = resolveResearchScope({ question: "What was NVDA's EPS?", companies: [NVDA], prior: null, asOf: AS_OF, served: true, proposal: proposal({ metrics: ["eps_diluted"] }) });
+  const scope = resolveResearchScope({ companies: [NVDA], prior: null, asOf: AS_OF, served: true, proposal: proposal({ metrics: ["eps_diluted"] }) });
   assert.deepEqual([scope.metrics.map((metric) => metric.available), scope.reads], [[true], "financial_answer"]);
   // A follow-up asking for its evidence re-reads that answer; any other reads its own route.
   assert.equal(followUp("Show the evidence", proposal({ asks: ["evidence"] }), scope).reads, "financial_answer");
@@ -482,17 +487,15 @@ test("a reading of a period no fiscal field holds drops an inherited one, never 
   assert.deepEqual(followUp("What about Q3?", proposal({ period: fq("Q3") }), prior).fiscal_quarter, { fiscal_year: 2025, fiscal_period: "Q3" }, "a quarter inherits its year");
 });
 
-test("with no reading, the period tokens in the question still apply (#472)", () => {
-  assert.deepEqual([fresh("NVDA revenue FY2026", null).fiscal_year, fresh("NVDA revenue FY2026", null).fiscal_quarter], [2026, null]);
+test("with no reading, no period is read, whatever the question writes (#398)", () => {
   const quarter = fresh("NVDA revenue in Q3 2025", null);
-  assert.deepEqual([quarter.fiscal_year, quarter.fiscal_quarter], [2025, { fiscal_year: 2025, fiscal_period: "Q3" }]);
+  assert.deepEqual([quarter.fiscal_year, quarter.fiscal_quarter], [null, null]);
+  // A follow-up keeps the period it inherits.
   const prior = fresh("Show NVDA's fiscal 2025 revenue", proposal({ period: fy(2025) }));
-  assert.deepEqual(followUp("What about Q3?", null, prior).fiscal_quarter, { fiscal_year: 2025, fiscal_period: "Q3" });
-  // Year first, or a quarter and year written apart.
+  const kept = followUp("What about Q3?", null, prior);
+  assert.deepEqual([kept.fiscal_year, kept.fiscal_quarter], [2025, null]);
   const asked = fresh("Why did AMD's operating margin turn negative in Q2 2025?", proposal({ period: fq("Q2", 2025) }), [AMD]);
-  assert.deepEqual(followUp("Now FY2026 Q3", null, asked).fiscal_quarter, { fiscal_year: 2026, fiscal_period: "Q3" });
-  assert.deepEqual(followUp("Now Q3, fiscal 2026", null, asked).fiscal_quarter, { fiscal_year: 2026, fiscal_period: "Q3" });
-  assert.deepEqual(fresh("AMD revenue in Q3, FY2026", null, [AMD]).fiscal_quarter, { fiscal_year: 2026, fiscal_period: "Q3" });
+  assert.deepEqual(followUp("Now FY2026 Q3", null, asked).fiscal_quarter, { fiscal_year: 2025, fiscal_period: "Q2" });
 });
 
 test("a saved scope reads back; anything else starts fresh", () => {

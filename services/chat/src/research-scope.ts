@@ -2,9 +2,9 @@
 // covers, the facets it asks for, and its periods. What the question asks for
 // and turns off (facets, metrics, income items, its period) is a model's
 // reading of it, proposed from closed vocabularies and validated
-// (scope-proposal.ts). With no reading, its fiscal periods are read from
-// fixed tokens (FY2026, Q3); a YTD window always is. Everything else here
-// is derived from those: the route, inheritance, what a turn-off clears. Saved
+// (scope-proposal.ts); with no reading, no period or window is read.
+// Everything else here is derived from those: the route, inheritance, what a
+// turn-off clears. Saved
 // with the answer, so the next follow-up and a reload read the same
 // interpretation.
 //
@@ -17,7 +17,7 @@
 // recomputed from the current date. With no proposal (no model, a failure, a
 // reply outside the vocabularies) a turn asks for nothing new: a follow-up
 // keeps the previous scope whole, and a fresh question gets the plain answer
-// for its companies and periods.
+// for its companies.
 //
 // A metric the question names that no reader here serves (EBITDA, debt)
 // is a named gap: it is never answered with another metric in its place, so a
@@ -28,8 +28,6 @@
 //
 // A benchmark index (the S&P 500) is a named gap no reader serves; it is kept
 // like any other facet, so a later turn still says it is missing.
-
-import { requestedFiscalQuarter, requestedFiscalYear, requestedPriceWindow, type FiscalQuarter } from "./fact-blocks.ts";
 
 const ROUTES = [
   "latest_quarter",
@@ -57,6 +55,9 @@ export function readsEngine(reads: ResearchRoute): boolean {
 }
 
 export type ScopeField = "peers" | "segments" | "margin_trend" | "metrics" | "fiscal_year" | "fiscal_quarter" | "price_window" | "benchmark";
+
+// A company's own fiscal quarter, as its facts are filed.
+export type FiscalQuarter = { fiscal_year: number; fiscal_period: string };
 
 // A metric a question names: one this chat's readers show, or a named gap. A
 // statement metric with an adjustment or a qualifier ("adjusted EPS", "EPS
@@ -187,10 +188,6 @@ const CLEARS: Partial<Record<ScopeFacet | (typeof PERIOD_FIELDS)[number], ScopeF
   fiscal_quarter: "fiscal_quarter",
 };
 
-// A quarter named without its year ("Q3", "the third quarter").
-const PARTIAL_QUARTER = /\bQ([1-4])\b|\b(first|second|third|fourth)\s+quarter\b/i;
-const ORDINAL_QUARTERS: Readonly<Record<string, number>> = { first: 1, second: 2, third: 3, fourth: 4 };
-
 type NamedPeriod = { year?: number; quarter?: FiscalQuarter; yearlessQuarter?: (typeof FISCAL_PERIODS)[number]; replacesInherited?: true };
 
 function periodOfReading(period: ScopePeriod): NamedPeriod {
@@ -202,15 +199,6 @@ function periodOfReading(period: ScopePeriod): NamedPeriod {
   return period.fiscal_year === null
     ? { yearlessQuarter: period.fiscal_period }
     : { quarter: { fiscal_year: period.fiscal_year, fiscal_period: period.fiscal_period } };
-}
-
-function periodTokensWithoutReading(question: string): NamedPeriod {
-  const partial = PARTIAL_QUARTER.exec(question);
-  return {
-    year: requestedFiscalYear(question),
-    quarter: requestedFiscalQuarter(question),
-    yearlessQuarter: partial ? FISCAL_PERIODS[Number(partial[1] ?? ORDINAL_QUARTERS[partial[2]!.toLowerCase()]) - 1] : undefined,
-  };
 }
 
 // The metrics a question can name. A model proposes from this catalog
@@ -348,7 +336,6 @@ export function readingAsks(proposal: ScopeProposal): {
 }
 
 export function resolveResearchScope(input: {
-  question: string;
   companies: ResearchScope["companies"];
   // The previous answer's scope, for a follow-up; null for a fresh question.
   prior: ResearchScope | null;
@@ -359,11 +346,11 @@ export function resolveResearchScope(input: {
   // Every auto-selected peer was dropped by name: peers are off (local-runtime).
   peersOff?: boolean;
   // What a model read the question to ask for and turn off
-  // (scope-proposal.ts). Null: it asks for nothing beyond its companies and
-  // period tokens, and turns nothing off.
+  // (scope-proposal.ts). Null: it asks for nothing beyond its companies, and
+  // turns nothing off.
   proposal: ScopeProposal | null;
 }): ResearchScope {
-  const { prior, question } = input;
+  const { prior } = input;
   const { metrics: proposed, income_items: namedItems } = input.proposal ?? NO_PROPOSAL;
   const { asks, offFacets, offMetrics } = readingAsks(input.proposal ?? NO_PROPOSAL);
   const off = new Set([...offFacets].flatMap((facet) => CLEARS[facet] ?? []));
@@ -405,7 +392,7 @@ export function resolveResearchScope(input: {
   const income = metricByKey("income_statement");
   if (marginAsked && named.length === 0 && !offMetrics.has(income.metric_key) && !kept.some((metric) => metric.metric_key === income.metric_key)) named.push(income);
   const metrics = pick("metrics", named.length > 0 ? named : null, kept.length > 0 ? kept : null) ?? [];
-  const period = input.proposal === null ? periodTokensWithoutReading(question) : periodOfReading(input.proposal.period);
+  const period = periodOfReading((input.proposal ?? NO_PROPOSAL).period);
   // A period turned off is read as not named, though its words are still in
   // the question ("forget fiscal 2025").
   const yearNamed = off.has("fiscal_year") ? undefined : period.year;
@@ -428,9 +415,8 @@ export function resolveResearchScope(input: {
     (partialPeriod && partialYear !== undefined ? { fiscal_year: partialYear, fiscal_period: partialPeriod } : null);
   if (namedQuarter === null && (latest || yearNamed !== undefined)) off.add("fiscal_quarter");
   const fiscal_quarter = pick("fiscal_quarter", namedQuarter, prior?.fiscal_quarter);
-  // The window is fixed syntax (YTD): its token asks for it, and the proposal
-  // only turns it off.
-  const asked = !off.has("price_window") && requestedPriceWindow(question) === "ytd" ? { kind: "ytd" as const, cutoff: input.asOf } : null;
+  // A window asked for now is cut off at the turn.
+  const asked = asks.has("price_window") ? { kind: "ytd" as const, cutoff: input.asOf } : null;
   const price_window = pick("price_window", asked, prior?.price_window);
   // An evidence follow-up asks for the sources of the previous answer about the
   // same companies, so it reads that answer's scope again.
