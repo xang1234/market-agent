@@ -47,7 +47,7 @@ import { allResolved, overviewOmissions, overviewPeers, planCompanyOverview, pla
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { companyKey, extractSubjectMentions } from "./subject-extraction.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "./subjects.ts";
-import { periodNote, planPeriod, planScopeFigures, routeTurn, type PlanChoice, type ReadPeriod } from "./scope-figures.ts";
+import { periodNote, planPeriod, planScopeFigures, routeTurn, type NamedGap, type PlanChoice, type ReadPeriod } from "./scope-figures.ts";
 import {
   BALANCE_SHEET_ITEMS,
   companyWordsIn,
@@ -481,7 +481,9 @@ async function planTurn(
   onSubjects(subjects);
   if (CASH_RESILIENCE.test(text)) return planCashResilience(planningContext(subjects), text);
   const { choice } = turn;
-  if (choice.kind === "segments_gap") return { outcome: "unsupported", reason: "segments", issues: [], model_calls: 0 };
+  if (choice.kind === "segments_gap" || choice.kind === "named_gap") {
+    return { outcome: "unsupported", reason: choice.kind === "segments_gap" ? "segments" : choice.reason, issues: [], model_calls: 0 };
+  }
   const deterministic = async (): Promise<PlanningResult | null> => {
     if (!allResolved(subjects)) return null;
     switch (choice.kind) {
@@ -694,7 +696,7 @@ function persistAssistantMessage(
     // The commentary is written from the answer's figures alone, so it gives no cause: an explanation stays uncovered.
     const names = (slot: string) => publication.block.financial.labels[`subject:${slot}`]?.text ?? slot;
     const missing = reading === null || plan === null ? [] : [
-      ...uncoveredAsks(answeredPeers ? withoutPeers(reading) : reading, plan, turn.labels),
+      ...uncoveredAsks(answeredPeers ? withoutPeers(reading) : reading, plan, turn.labels, scope),
       ...await overviewOmissions(plan, request.authority, inSavepoints(tx.client, turn.evidence(tx.client)), names),
     ];
     const shownPeriod = plan === null ? null : planPeriod(plan);
@@ -847,12 +849,18 @@ const INCOME_ITEM_FIGURE: Readonly<Record<IncomeItem, string | null>> = {
 };
 
 /**
- * What a question asks for, as the model read it, that its plan does not
- * compute, so the answer names it instead of leaving it out. Each company is
- * checked on its own figures: what some companies' figures answer is named
- * for the others, by the label `labels` gives each issuer.
+ * What a question asks for, as the model read it, or keeps from its scope,
+ * that its plan does not compute, so the answer names it instead of leaving it
+ * out. Each company is checked on its own figures: what some companies'
+ * figures answer is named for the others, by the label `labels` gives each
+ * issuer.
  */
-export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1, labels: ReadonlyMap<string, string> = new Map()): string[] {
+export function uncoveredAsks(
+  reading: ScopeProposal,
+  plan: FinancialPlanV1,
+  labels: ReadonlyMap<string, string> = new Map(),
+  scope: Pick<ResearchScope, "metrics" | "inherited"> | null = null,
+): string[] {
   const { asks, offMetrics } = readingAsks(reading);
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
   // A figure's period and company are those of its reported inputs.
@@ -886,7 +894,8 @@ export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1, lab
     }
     return metric.qualifier === "trend" && new Set(company.shown.filter(ofBase).map(periodOf)).size > 1;
   };
-  const metrics = [...new Map(reading.metrics
+  const named = [...reading.metrics, ...(scope?.inherited.includes("metrics") ? scope.metrics : [])];
+  const metrics = [...new Map(named
     .filter((metric) => CATALOG.has(metric.metric_key))
     .flatMap((metric) => metric.metric_key === "balance_sheet" ? BALANCE_SHEET_ITEMS.map((key) => CATALOG.get(key)!) : [metric])
     .filter((metric) => !offMetrics.has(metric.metric_key))
@@ -898,7 +907,7 @@ export function uncoveredAsks(reading: ScopeProposal, plan: FinancialPlanV1, lab
     // The income items name its figures more closely than the whole statement does.
     ...metrics.filter((metric) => !(metric.metric_key === "income_statement" && reading.income_items.length > 0))
       .map((metric) => ({ text: lowercaseUnlessAcronym(metric.label), missing: (company: Company) => !company.read.has(metric.metric_key) })),
-    ...reading.metrics.filter((metric) => metric.base !== undefined && !offMetrics.has(metric.metric_key))
+    ...named.filter((metric) => metric.base !== undefined && !offMetrics.has(metric.metric_key))
       .map((metric) => ({ text: lowercaseUnlessAcronym(metric.label), missing: (company: Company) => !computes(metric, company) })),
     ...items,
     // A margin item left out names the margin already.
@@ -939,14 +948,19 @@ async function published(db: SqlExecutor, runId: string, threadId: string, messa
 }
 
 // What an unsupported request asks for, by the planner's reason (its closed
-// list) or the cash-resilience view's; any other reason gets the plain text,
-// so no model-written words reach the gap.
-const REASON_TEXT: Readonly<Record<Exclude<UnsupportedReason, "other"> | typeof CASH_RESILIENCE_VIEW, string>> = {
+// list), the cash-resilience view's or a named gap's (scope-figures.ts); any
+// other reason gets the plain text, so no model-written words reach the gap.
+const REASON_TEXT: Readonly<Record<Exclude<UnsupportedReason, "other"> | typeof CASH_RESILIENCE_VIEW | NamedGap, string>> = {
   segments: "revenue or results by business segment",
   forecast: "guidance, estimates or forecasts",
   adjusted: "adjusted or non-GAAP figures",
   undefined_metric: "a metric with no verified definition",
   cash_resilience_view: "cash resilience is an annual view without scores, peer ranks, or cash and debt measures",
+  valuation_period: "a market capitalization or P/E ratio at a fiscal period, as a valuation is calculated only at the current price",
+  trailing_twelve_months: "figures for the trailing twelve months",
+  range: "figures over a range of periods",
+  relative_period: "a period named relative to now, such as last year",
+  peers: "peers the question does not name, beside figures other than the income statement",
 };
 
 function gap(reason_code: ChatGap, planned?: PlanningResult): Extract<ChatFinancialTurn, { kind: "gap" }> {

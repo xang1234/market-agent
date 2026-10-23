@@ -692,6 +692,25 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(await lane("Skip the capex: where did those numbers come from?", { priorSubjects: async () => [aaa], readQuestion: offCapex }), "analyst");
   });
 
+  await t.test("a follow-up its scope keeps figures for, at a period or with peers the engine cannot plan them at, is a named gap, with no model (#398)", async () => {
+    const carried = { ...(await resolveMention("AAA")), handoff: { display_labels: { ticker: "AAA" } } } as unknown as ChatResolvedSubjectPreResolution;
+    const gapOf = async (userIntent: string, proposal: Partial<ScopeProposal>, ...kept: string[]) => {
+      const researchScope = (async (_context: unknown, read: Promise<ScopeProposal | null>) => ({
+        ...resolveResearchScope({ companies: [], prior: null, asOf: new Date().toISOString(), proposal: await read }),
+        metrics: kept.map((key) => proposedMetric(key, null, null)!),
+        inherited: ["metrics"],
+      })) as never;
+      const harness = chatHarness(pool, { model: null, priorSubjects: async () => [carried], researchScope, readQuestion: async () => ({ ...NO_ASKS, ...proposal }) });
+      const done = completed((await harness.run({ ...base, userIntent })).events);
+      const [block] = harness.persisted.at(-1)!.blocks as ReadonlyArray<{ segments: Array<{ text: string }> }>;
+      return [done.financial_gap, block!.segments[0]!.text];
+    };
+    const declined = (what: string) => [{ reason_code: "unsupported" }, `This request asks for a calculation outside the verified financial definitions I can compute: ${what}.`];
+    assert.deepEqual(await gapOf("And over the last twelve months?", { period: { kind: "trailing_twelve_months" } }, "free_cash_flow"), declined("figures for the trailing twelve months"));
+    assert.deepEqual(await gapOf("And fiscal 2024?", { period: { kind: "fiscal_year", fiscal_year: 2024 } }, "pe_ratio"), declined("a market capitalization or P/E ratio at a fiscal period, as a valuation is calculated only at the current price"));
+    assert.deepEqual(await gapOf("How does it compare with its peers?", { asks: new Set(["peers"]) }, "free_cash_flow"), declined("peers the question does not name, beside figures other than the income statement"));
+  });
+
   await t.test("with no reading, market data and an evidence question reach the engine, whose planner declines them (#398)", async () => {
     const carried = { ...(await resolveMention("AAA")), handoff: { display_labels: { ticker: "AAA" } } } as unknown as ChatResolvedSubjectPreResolution;
     const down = async () => {

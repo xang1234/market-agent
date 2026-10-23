@@ -11,6 +11,7 @@ import { overviewOmissions, overviewPeers, planCompanyOverview, planMarginTrend 
 import { LATEST, planPeriod, planScopeFigures, type ReadPeriod } from "../src/scope-figures.ts";
 import { MAX_TURN_SUBJECTS } from "../src/coordinator.ts";
 import { uncoveredAsks } from "../src/financial-runtime.ts";
+import { proposedMetric, resolveResearchScope } from "../src/research-scope.ts";
 import { parseProposal, proposalQuestion } from "../src/scope-proposal.ts";
 import { extractSubjectMentions } from "../src/subject-extraction.ts";
 import { GOLDEN_AS_OF, GOLDEN_COMPANIES } from "./golden/dataset.ts";
@@ -423,7 +424,18 @@ test("a follow-up's kept figures are each chat metric's engine figures at the pe
   assert.deepEqual(await figures("AMD", ["income_statement", "eps_diluted"], q2), [...income("AMD", "Q2 2026"), "AMD eps_diluted Q2 2026"], "a quarter named alone is the company's newest");
   assert.deepEqual(await figures("NVDA and AMD", ["eps_diluted"], q2), ["NVDA eps_diluted Q2 2026", "AMD eps_diluted Q2 2026"], "each company's own");
   assert.deepEqual(await figures("NVDA and AAPL", ["eps_diluted"], q2), ["NVDA eps_diluted Q2 2026", "AAPL eps_diluted Q2 2026"]);
-  for (const metrics of [["market_cap"], ["eps_diluted", "pe_ratio"], ["ebitda"], []]) assert.equal(await figures("AMD", metrics, LATEST), null, JSON.stringify(metrics));
+  assert.deepEqual(await figures("AMD", ["market_cap"], LATEST), [
+    "market_cap(AMD share_price at_cutoff, AMD shares_outstanding latest quarterly[0])",
+    "AMD share_price at_cutoff",
+    "AMD shares_outstanding latest quarterly[0]",
+  ], "a valuation at the latest is the one at the cutoff");
+  assert.deepEqual(await figures("AMD", ["pe_ratio"], { kind: "latest", period: "quarter" }), [
+    "pe_ratio(AMD share_price at_cutoff, AMD eps_diluted latest annual[0])",
+    "AMD share_price at_cutoff",
+    "AMD eps_diluted latest annual[0]",
+  ], "whatever the latest period's type");
+  for (const metrics of [["ebitda"], []]) assert.equal(await figures("AMD", metrics, LATEST), null, JSON.stringify(metrics));
+  assert.equal(await figures("AMD", ["pe_ratio"], { kind: "fiscal_year", fiscal_year: 2025 }), null, "a valuation at a fiscal period");
 });
 
 test("a plan's period type is a quarter or a fiscal year when all its reported figures are of one (#398)", async () => {
@@ -520,6 +532,9 @@ test("an engine answer names what the reading of its question asks for and the p
   const cashFlow = plan([reported("ocf", "operating_cash_flow", quarter("FY"))]);
   assert.deepEqual(uncoveredAsks(reading([], ["income_statement"], ["revenue"]), cashFlow), ["revenue"]);
   assert.deepEqual(uncoveredAsks(reading(["margins"], ["income_statement"], ["gross_margin"]), revenue), ["gross margin"]);
+  const kept = (...keys: string[]) => ({ ...resolveResearchScope({ companies: [], prior: null, asOf: GOLDEN_AS_OF, proposal: null }), metrics: keys.map((key) => proposedMetric(key, null, null)!), inherited: ["metrics" as const] });
+  assert.deepEqual(uncoveredAsks(reading([]), revenue, new Map(), kept("income_statement", "pe_ratio")), ["P/E ratio"], "a figure the scope keeps and the plan does not compute");
+  assert.deepEqual(uncoveredAsks(reading([]), revenue, new Map(), { ...kept("pe_ratio"), inherited: [] }), [], "one named by an earlier answer but not kept");
 });
 
 test("an engine answer names what it leaves out for each company it covers (#425)", () => {

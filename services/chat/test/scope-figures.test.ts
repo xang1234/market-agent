@@ -62,6 +62,8 @@ function choiceText(choice: PlanChoice): string {
       return `overview at ${periodText(choice.period)}${choice.peers ? " with peers" : ""}`;
     case "kept_figures":
       return `${choice.metrics.join(", ")} at ${periodText(choice.period)}`;
+    case "named_gap":
+      return `gap: ${choice.reason}`;
     default:
       return choice.kind;
   }
@@ -145,6 +147,16 @@ const ROUTES: ReadonlyArray<readonly [string, ScopeProposal | null, ResearchScop
   ["kept figures, one turned off", read({ offMetrics: ["capex"] }), after(keeps("free_cash_flow")), "free_cash_flow at latest"],
   ["kept figures, naming their company again with another year", read({ period: FY2024, companies: named("NVDA") }), after(keeps("free_cash_flow")), "free_cash_flow at FY2024"],
   ["the scope's year, naming its company again", read({ companies: named("NVDA") }), after({ fiscal_year: 2025 }), "overview at FY2025"],
+  ["a kept P/E, another year", read({ period: FY2025 }), after(keeps("pe_ratio")), "gap: valuation_period"],
+  ["a kept market cap, adding a company", read({ companies: adds("AMD") }), after({ companies: [NVDA, AMD], ...keeps("market_cap") }), "market_cap at latest"],
+  ["the income statement and a P/E kept, another year", read({ period: FY2025 }), after(keeps("income_statement", "pe_ratio")), "income_statement at FY2025"],
+  ["kept figures, the trailing twelve months", read({ period: { kind: "trailing_twelve_months" } }), after(keeps("free_cash_flow")), "gap: trailing_twelve_months"],
+  ["the trailing twelve months, naming no company", read({ period: { kind: "trailing_twelve_months" } }), after(), "gap: trailing_twelve_months"],
+  ["a range, naming no company", read({ period: { kind: "range" } }), after(), "gap: range"],
+  ["a period named relative to now, naming no company", read({ period: { kind: "other" } }), after(), "gap: relative_period"],
+  ["a metric for the trailing twelve months", read({ metrics: ["income_statement"], period: { kind: "trailing_twelve_months" } }), after(), "planner"],
+  ["kept figures with peers", read({ asks: ["peers"] }), after(keeps("free_cash_flow")), "gap: peers"],
+  ["kept figures with peers, another year", read({ asks: ["peers"], period: FY2025 }), after(keeps("free_cash_flow")), "gap: peers"],
   ["kept figures, naming a company the answer before did not cover", read({ companies: named("NVDA", "AMD") }), after(keeps("free_cash_flow")), "overview at latest"],
 ];
 

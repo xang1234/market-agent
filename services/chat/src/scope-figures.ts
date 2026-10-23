@@ -5,6 +5,7 @@
 import type { FinancialPlanV1, PeriodSelector } from "../../financial-core/src/index.ts";
 import type { PlanningContext } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort } from "../../financial-engine/src/ports.ts";
+import { valuationOperations, valuationOutputs, type Valuation } from "../../financial-engine/src/valuation-plan.ts";
 import { MARGINS, nodeIdOf, planned, planningQuarters, quarterId, slotOf, type ReadyPlan } from "./company-overview.ts";
 import { BALANCE_SHEET_ITEMS, readingAsks, type FiscalQuarter, type PERIOD_FIELDS, type PeriodType, type ResearchScope, type ScopeFacet, type ScopeProposal } from "./research-scope.ts";
 
@@ -20,10 +21,14 @@ export type ReadPeriod =
 
 export const LATEST: ReadPeriod = { kind: "latest", period: null };
 
+/** A request the engine declines with no model, by its reason (financial-runtime.ts REASON_TEXT). */
+export type NamedGap = "valuation_period" | "trailing_twelve_months" | "range" | "relative_period" | "peers";
+
 /** How a turn about a company is answered: by the analyst path, or by the engine with one plan. */
 export type PlanChoice =
   | Readonly<{ kind: "analyst" }>
   | Readonly<{ kind: "segments_gap" }>
+  | Readonly<{ kind: "named_gap"; reason: NamedGap }>
   | Readonly<{ kind: "trend"; period: ReadPeriod }>
   | Readonly<{ kind: "overview"; period: ReadPeriod; peers: boolean }>
   | Readonly<{ kind: "kept_figures"; metrics: ReadonlyArray<string>; period: ReadPeriod }>
@@ -53,6 +58,7 @@ const KEPT_ASKS: ReadonlySet<ScopeFacet> = new Set(["explains", "latest_quarter"
 const TREND_ASKS: ReadonlySet<ScopeFacet> = new Set(["margin_trend", "margins", "explains"]);
 const MARGIN_ITEMS: ReadonlySet<string> = new Set(MARGINS.map(({ metric }) => metric));
 const READ_PERIODS: ReadonlySet<ScopeProposal["period"]["kind"]> = new Set(["none", "latest", "fiscal_year", "fiscal_quarter"]);
+const VALUATIONS: ReadonlySet<string> = new Set<Valuation>(["market_cap", "pe_ratio"]);
 
 /**
  * The one plan a turn about a company gets. The analyst path keeps a turn that
@@ -60,9 +66,12 @@ const READ_PERIODS: ReadonlySet<ScopeProposal["period"]["kind"]> = new Set(["non
  * company of its own whose scope keeps guidance, or keeps market data and
  * that names no period; and a follow-up that names no company and no period,
  * turns nothing off and asks only for a cause. A turn
- * asking for segments is the engine's segment gap. Otherwise, with a scope:
- * one company's margin trend, the companies' overview, or the figures a
- * follow-up keeps beside the income statement; anything else is the planner's.
+ * asking for segments is the engine's segment gap, and a follow-up asking for
+ * no figure of its own at a period no fiscal field holds is that gap.
+ * Otherwise, with a scope: one company's margin trend, the companies'
+ * overview, or the figures a follow-up keeps beside the income statement, a
+ * valuation only at the latest and with no peers; anything else is the
+ * planner's.
  */
 export function routeTurn(reading: ScopeProposal | null, scope: ResearchScope | null): PlanChoice {
   if (reading === null) return PLANNER;
@@ -77,7 +86,11 @@ export function routeTurn(reading: ScopeProposal | null, scope: ResearchScope | 
     if (lanes.has("analyst") || keptAnalyst || (reading.period.kind === "none" && onlyExplains)) return { kind: "analyst" };
   }
   if (asks.has("segments")) return { kind: "segments_gap" };
-  if (scope === null || !READ_PERIODS.has(reading.period.kind)) return PLANNER;
+  if (scope === null) return PLANNER;
+  const { kind } = reading.period;
+  if (kind === "trailing_twelve_months" || kind === "range" || kind === "other") {
+    return own || namesFigure ? PLANNER : { kind: "named_gap", reason: kind === "other" ? "relative_period" : kind };
+  }
   const period = readPeriod(scope);
   const kept = scope.inherited.includes("metrics") ? scope.metrics.map((metric) => metric.metric_key) : [];
   const keptIncome = kept.every((key) => key === INCOME_STATEMENT);
@@ -90,7 +103,11 @@ export function routeTurn(reading: ScopeProposal | null, scope: ResearchScope | 
   const keptTrend = (reading.period.kind === "fiscal_year" || reading.period.kind === "fiscal_quarter") && overview && scope.margin_trend && keptIncome;
   if (oneCompany && (askedTrend || keptTrend)) return { kind: "trend", period };
   if (overview && keptIncome) return { kind: "overview", period, peers: asks.has("peers") };
-  if (asksNoFigure && [...asks].every((facet) => KEPT_ASKS.has(facet)) && !keptIncome) return { kind: "kept_figures", metrics: kept, period };
+  if (asksNoFigure && !keptIncome && [...asks].every((facet) => KEPT_ASKS.has(facet) || facet === "peers")) {
+    if (asks.has("peers")) return { kind: "named_gap", reason: "peers" };
+    const planned = kept.filter((key) => Object.hasOwn(AT_PERIOD, key) || (VALUATIONS.has(key) && period.kind === "latest"));
+    return planned.length > 0 ? { kind: "kept_figures", metrics: planned, period } : { kind: "named_gap", reason: "valuation_period" };
+  }
   return PLANNER;
 }
 
@@ -143,8 +160,8 @@ type Computed = Readonly<{ operation: string; inputs: Readonly<Record<string, st
 
 // What a follow-up reads of each chat catalog metric, at the period it reads:
 // engine metrics as reported, and figures computed from them in that period.
-// A metric with no entry (a valuation, one no definition serves) is the
-// planner's. The engine computes free cash flow for a fiscal year only, and a
+// A valuation is the one at the cutoff (valuation-plan.ts), so only the latest
+// has one. The engine computes free cash flow for a fiscal year only, and a
 // balance its filings certify at the year's end: at a quarter either is a gap
 // cell with the engine's reason.
 const AT_PERIOD: Readonly<Record<string, ReadonlyArray<string | Computed>>> = {
@@ -170,9 +187,10 @@ const FIGURES_UNPLANNED = "[chat] the follow-up's figures could not be planned; 
 
 /**
  * Each company's figures for the chat catalog metrics, at the period: the
- * latest fiscal year, the year or quarter named, or a quarter named alone at
- * the company's newest such quarter. Null when a metric has no entry, or a
- * company has no such quarter or cannot be read or planned.
+ * latest of its type, the year or quarter named, or a quarter named alone at
+ * the company's newest such quarter; a valuation at the cutoff. Null when a
+ * metric has no entry or is a valuation at a fiscal period, or a company has
+ * no such quarter or cannot be read or planned.
  */
 export async function planScopeFigures(
   context: PlanningContext,
@@ -180,8 +198,9 @@ export async function planScopeFigures(
   metrics: ReadonlyArray<string>,
   period: ReadPeriod,
 ): Promise<ReadyPlan | null> {
-  const figures = metrics.map((key) => AT_PERIOD[key]);
-  if (figures.length === 0 || figures.some((entry) => entry === undefined)) return null;
+  const valuations = metrics.filter((key): key is Valuation => VALUATIONS.has(key));
+  const figures = metrics.filter((key) => !VALUATIONS.has(key)).map((key) => AT_PERIOD[key]);
+  if (metrics.length === 0 || figures.some((entry) => entry === undefined) || (valuations.length > 0 && period.kind !== "latest")) return null;
   const selectors = await periodSelectors(context, evidence, period);
   if (selectors === null) return null;
   const several = selectors.length > 1;
@@ -194,7 +213,9 @@ export async function planScopeFigures(
       ? reported(figure)
       : { node_id: id(`${figure.operation}_${suffix}`), operation: figure.operation, ...Object.fromEntries(Object.entries(figure.inputs).map(([role, metric]) => [role, reported(metric).node_id])) });
     const inputs = figures.flat().flatMap((figure) => typeof figure === "string" ? [] : Object.values(figure.inputs).map(reported));
-    return { operations: [...inputs, ...shown], outputs: shown };
+    const valued = valuations.flatMap((valuation) => valuationOperations(id(valuation), slot, valuation) as Node[]);
+    const valuationShown = valuations.flatMap((valuation) => valuationOutputs(id(valuation), valuation).map((nodeId) => valued.find((node) => node.node_id === nodeId)!));
+    return { operations: [...inputs, ...shown, ...valued], outputs: [...shown, ...valuationShown] };
   });
   const distinct = (nodes: ReadonlyArray<Node>) => [...new Map(nodes.map((node) => [node.node_id, node])).values()];
   return planned(context, { operations: distinct(parts.flatMap((part) => part.operations)), outputs: distinct(parts.flatMap((part) => part.outputs)) }, FIGURES_UNPLANNED);
