@@ -721,7 +721,7 @@ function persistAssistantMessage(
     const names = (slot: string) => publication.block.financial.labels[`subject:${slot}`]?.text ?? slot;
     const missing = reading === null || plan === null ? [] : [
       ...uncoveredAsks(answeredPeers ? withoutPeers(reading) : reading, plan, turn.labels),
-      ...await overviewOmissions(plan, request.authority, turn.evidence(tx.client), names),
+      ...await overviewOmissions(plan, request.authority, inSavepoints(tx.client, turn.evidence(tx.client)), names),
     ];
     const note = [
       ...(turn.notFound.length === 0 ? [] : [`No company matched ${labelList(turn.notFound)}.`]),
@@ -765,6 +765,20 @@ function persistAssistantMessage(
     if (inserted.rows.length === 0) throw new ParentRefusedError("the chat thread no longer belongs to the run's owner");
     // As any saved message does, so the thread never points at a replaced gap's snapshot.
     await tx.client.query(`update chat_threads set latest_snapshot_id = $2::uuid, updated_at = now() where thread_id = $1::uuid`, [threadId, publication.snapshot_id]);
+  };
+}
+
+// A read a statement error fails rolls back to its savepoint, so the
+// transaction can still save the answer, as bind-inputs.ts reads evidence.
+function inSavepoints(client: SqlExecutor, evidence: FinancialEvidencePort): FinancialEvidencePort {
+  return {
+    ...evidence,
+    async listInputCandidates(request) {
+      await client.query("savepoint candidate_read");
+      const page = await evidence.listInputCandidates(request);
+      await client.query(page.status === "error" ? "rollback to savepoint candidate_read" : "release savepoint candidate_read");
+      return page;
+    },
   };
 }
 
