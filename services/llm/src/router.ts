@@ -111,7 +111,7 @@ export class LlmProviderError extends Error {
   }
 }
 
-/** The client failed before any provider saw the request: a defect every deployment would hit. */
+/** The client itself failed, not a provider: a defect every deployment would hit. */
 export class LlmClientError extends Error {
   readonly code = "client_failed";
 

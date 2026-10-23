@@ -382,7 +382,8 @@ function providerErrorFromUnknown(error: unknown): LlmProviderError {
   return new LlmProviderError("provider_failed", message);
 }
 
-// A built-in error pi-ai throws while building the request, before any provider saw it.
+// A built-in error thrown out of complete() is pi-ai's own code failing: pi-ai reports a
+// failure after the request is sent as a message with stopReason "error", not a throw.
 // ponytail: fetch's own "fetch failed" TypeError is the network, so it stays a provider failure.
 function isClientDefect(error: unknown): error is Error {
   return (error instanceof TypeError || error instanceof ReferenceError || error instanceof RangeError) &&
