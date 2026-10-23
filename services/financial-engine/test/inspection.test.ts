@@ -13,7 +13,7 @@ import { verifyFinancialUnit } from "../../snapshot/src/financial-verifier.ts";
 import type { SnapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
 import { inspectCommittedResult, type ResultInspection } from "../src/inspection.ts";
 import type { SqlExecutor } from "../src/ports.ts";
-import { completedRun, engineDatabase, IDS, marginPlan, pinnedClients, readyRun, revenuePlan } from "./db-fixtures.ts";
+import { completedRun, engineDatabase, IDS, marginPlan, pinnedClients, readyRun, revenuePlan, seedReportedFact } from "./db-fixtures.ts";
 
 function available(inspection: ResultInspection | null): Extract<ResultInspection, { availability: "available" }> {
   assert.ok(inspection && inspection.availability === "available", JSON.stringify(inspection));
@@ -198,6 +198,42 @@ test("committed result inspection", { timeout: 300_000 }, async (t) => {
     available(await inspectCommittedResult(recording, IDS.owner, results.out_gm!));
     assert.ok(statements.length > 0);
     for (const statement of statements) assert.match(statement.trimStart(), /^select\b/iu);
+  });
+
+  await t.test("a growth and a lead between two companies each list both operands' inputs (#398)", async () => {
+    const bRevenue = await seedReportedFact(db, { metric_key: "revenue", value: "300000000000", fiscal_year: 2023, subject: IDS.issuerB });
+    const bGrossProfit = await seedReportedFact(db, { metric_key: "gross_profit", value: "120000000000", fiscal_year: 2023, subject: IDS.issuerB });
+    const reported = (node_id: string, subject_slot: string, metric_key: string, fiscal_year: number) =>
+      ({ node_id, operation: "reported_metric", operation_version: "reported_metric.v1", subject_slot, metric_key, period: { kind: "fiscal_period", fiscal_year, fiscal_period: "FY" } });
+    const margin = (node_id: string, numerator: string, revenue: string) => ({ node_id, operation: "gross_margin", operation_version: "gross_margin.v1", numerator, revenue });
+    const validated = validateFinancialPlan({
+      ...revenuePlan({ subjects: ["a", "b"] }),
+      plan_id: randomUUID(),
+      metric_definitions: [{ metric_key: "revenue", definition_version: "revenue.v1" }, { metric_key: "gross_profit", definition_version: "gross_profit.v1" }],
+      operations: [
+        reported("a_rev", "a", "revenue", 2023),
+        reported("a_prev", "a", "revenue", 2022),
+        reported("a_gp", "a", "gross_profit", 2023),
+        reported("b_rev", "b", "revenue", 2023),
+        reported("b_gp", "b", "gross_profit", 2023),
+        { node_id: "a_growth", operation: "percent_change_positive_base", operation_version: "percent_change_positive_base.v1", current: "a_rev", prior: "a_prev" },
+        margin("a_gm", "a_gp", "a_rev"),
+        margin("b_gm", "b_gp", "b_rev"),
+        { node_id: "lead", operation: "spread", operation_version: "spread.v1", left: "a_gm", right: "b_gm" },
+      ],
+      outputs: [{ output_id: "out_growth", node_id: "a_growth", unit_id: "lead_unit" }, { output_id: "out_lead", node_id: "lead", unit_id: "lead_unit" }],
+      publication_units: [{ unit_id: "lead_unit", kind: "chat_section" }],
+    });
+    assert.ok(validated.ok, JSON.stringify(!validated.ok && validated.issues));
+    const run = await completedRun(db, client, validated.value);
+    const inputsOf = (inspection: ReturnType<typeof available>) => inspection.inputs.map((input) => [input.input_slot, "fact_id" in input ? input.fact_id : null]).sort();
+    const growth = available(await inspectCommittedResult(db, IDS.owner, run.results.out_growth!));
+    assert.deepEqual([growth.disposition, growth.formula?.operation, inputsOf(growth)], ["verified", "percent_change_positive_base", [["a_prev", IDS.fy2022], ["a_rev", IDS.original]]]);
+    const lead = available(await inspectCommittedResult(db, IDS.owner, run.results.out_lead!));
+    assert.deepEqual([lead.disposition, lead.formula?.operation, (lead.payload as { unit: unknown }).unit, inputsOf(lead)], [
+      "verified", "spread", { kind: "percentage_points" },
+      [["a_gp", IDS.grossProfit2023], ["a_rev", IDS.original], ["b_gp", bGrossProfit], ["b_rev", bRevenue]],
+    ]);
   });
 
   await t.test("a derived quarter binds with its derivation, passes the seal, and is inspected with each term's filing (#481)", async () => {
