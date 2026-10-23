@@ -73,6 +73,13 @@ test("period_rank ranks one company and one measure over distinct quarters, or d
   assert.deepEqual(gap(periodRank(rank(["q1", "q1_shifted"]), [all[0]!, shifted])), ["incompatible", "overlapping_periods"], "overlapping quarters");
   const year = operand("fy", { metric: "revenue", value: "90", start: "2025-01-27", end: "2026-01-25", fiscal_year: 2026, fiscal_period: "FY" });
   assert.deepEqual(gap(periodRank(rank(["q4", "fy"]), [all[3]!, year])), ["incompatible", "incompatible_period"], "a quarter and a year");
+  const cash = (nodeId: string, end: string, fiscal_period: "Q3" | "FY") => operand(nodeId, { metric: "cash_and_equivalents", value: "7", kind: "instant", end, fiscal_year: 2026, fiscal_period });
+  assert.deepEqual(gap(periodRank(rank(["q3", "fy"]), [cash("q3", "2025-10-26", "Q3"), cash("fy", "2026-01-25", "FY")])), ["incompatible", "incompatible_period"], "a quarter-end balance and a year-end one");
+});
+
+test("a window with fewer than two periods valued is a gap, never a high of one value", () => {
+  assert.deepEqual(gap(periodRank(rank(["q1", "q2", "q3"]), [null, all[1]!, null])), ["missing", "missing_input"]);
+  assert.deepEqual(gap(periodRank(rank(["q2"]), [all[1]!])), ["missing", "missing_input"], "a window of one period");
 });
 
 function windowPlan(): FinancialPlanV1 {
