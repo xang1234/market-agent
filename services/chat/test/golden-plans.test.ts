@@ -13,7 +13,7 @@ import { isFinancialRequest, uncoveredAsks } from "../src/financial-runtime.ts";
 import { resolveResearchScope } from "../src/research-scope.ts";
 import { parseProposal, proposalQuestion } from "../src/scope-proposal.ts";
 import { extractSubjectMentions } from "../src/subject-extraction.ts";
-import { GOLDEN_AS_OF, GOLDEN_COMPANIES } from "./golden/dataset.ts";
+import { GOLDEN_AS_OF, GOLDEN_COMPANIES, goldenCatalogPeers } from "./golden/dataset.ts";
 
 const REPLIES = join(import.meta.dirname, "golden", "llm-replies.json");
 
@@ -69,8 +69,6 @@ function summary(result: PlanningResult) {
 }
 
 const SEGMENTS = { outcome: "unsupported", model_calls: 1, reason: "segments" } as const;
-// The profit family the server expands (financial-engine measure-defaults.ts):
-// each income item, then its margin, for the latest year and the latest quarter.
 const latestProfit = (ticker: string, period: string) => {
   const metric = (key: string) => `${ticker} ${key} latest ${period}[0]`;
   return [
@@ -125,7 +123,6 @@ const EXPECTED: Record<string, ReturnType<typeof summary>> = {
       "percent_change_positive_base(AMD eps_diluted latest annual[0], AMD eps_diluted latest annual[1])",
     ],
   },
-  // Without its catalog peer, the question names no company to compare with.
   "How does AMDX's Q2 2025 revenue compare with its peers?": { outcome: "needs_clarification", model_calls: 1 },
 };
 
@@ -364,12 +361,10 @@ test("each golden answer names what its question asks for and its plan does not 
     "What drives AAPL's margins?": ["the cause of these figures"],
     "How does AMDX's Q2 2025 revenue compare with its peers?": ["peers the question did not name"],
   };
-  // The peers question is planned, as its golden turn is, with AMD's catalog peer named by its issuer id.
-  const NVDA = GOLDEN_COMPANIES.find((company) => company.ticker === "NVDA")!;
-  const catalogPeer: RequestedSubject = { mention: NVDA.issuer_id, resolution: { status: "resolved", subject_ref: { kind: "issuer", id: NVDA.issuer_id }, label: NVDA.legal_name } };
+  const AMD = GOLDEN_COMPANIES.find((company) => company.ticker === "AMD")!;
   const context = (question: string) => {
     const planning = planningContext(question);
-    return question.includes("its peers") ? { ...planning, requested_subjects: [...planning.requested_subjects, catalogPeer] } : planning;
+    return question.includes("its peers") ? { ...planning, requested_subjects: [...planning.requested_subjects, ...goldenCatalogPeers(AMD)] } : planning;
   };
   for (const [question, expected] of Object.entries(uncovered)) {
     const planned = await planFinancialRequest(context(question), question, model);

@@ -34,8 +34,6 @@ test("golden coverage notes and declined-turn retries (#425)", { skip: !dockerAv
   await seedGoldenDataset(client);
   const base = await startChatServer(t, databaseUrl);
 
-  // The planner plans each company's operating margin and EPS growth (#517), so
-  // nothing is left out; the per-company note is pinned in golden-plans.test.ts.
   await t.test("a comparison that plans each company's metrics names nothing left out, and shows a metric it could not compute (#517)", async (st) => {
     requireRecordedScopes(st);
     const { thread_id } = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Coverage" });

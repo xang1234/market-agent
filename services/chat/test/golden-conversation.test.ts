@@ -506,7 +506,6 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const starterThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Starter" });
     completedTurn(await runTurn(base, starterThread.thread_id, metricStarters[0]!));
     assert.deepEqual(engineAnswer(await latestAssistantMessage(base, starterThread.thread_id)), {
-      // Margins are read as the profit family (#517).
       results: [
         ["Gross profit", "latest fiscal year", "verified", "USD 195,201,000,000.00"],
         ["Operating income", "latest fiscal year", "verified", "USD 133,050,000,000.00"],
@@ -573,7 +572,6 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.equal(first.benchmark, true);
     assert.deepEqual(first.metrics.map((metric) => metric.metric_key), ["income_statement"]);
     const firstAnswer = engineAnswer(await latestAssistantMessage(base, regressionThread.thread_id));
-    // Revenue and profit, each for the latest year and quarter, per company (#517).
     assert.equal(firstAnswer.results.length, 42);
     assert.ok(firstAnswer.results.every(([, , disposition]) => disposition === "verified"), JSON.stringify(firstAnswer.results));
     // "S&P" is not two companies the answer could not find.
@@ -660,7 +658,6 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const amd = { issuer_id: AMD.issuer_id, label: "AMDX" };
 
     completedTurn(await runTurn(base, peersThread.thread_id, "How does AMDX's Q2 2025 revenue compare with its peers?"));
-    // AMD's industry peer is chosen from the catalog (#517), so it carries no label.
     // The plan ranks the two revenues, and AMD's and NVDA's fiscal Q2 2025 cover
     // different months, so the engine declines the ranking.
     const answer = engineAnswer(await latestAssistantMessage(base, peersThread.thread_id));

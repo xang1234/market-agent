@@ -520,8 +520,6 @@ async function planTurn(
     const [scope, reading] = await turn.prepare();
     companies = await overviewSubjects(subjects, reading, scope, turn.peersOf);
     overview = companies && await planCompanyOverview(planningContext(companies), turn.evidence);
-    // A question about the company's peers is planned with its catalog peers
-    // (#517); with none, the planner asks which companies to compare.
     if (!overview) peered = await withCatalogPeers(subjects, reading, turn.peersOf);
   } catch (reason) {
     // A defect fails the turn, so the planner's answer is not needed either.
@@ -755,7 +753,6 @@ export function catalogPeersNote(names: ReadonlyArray<string>): string {
   return `Peers chosen from the catalog: ${names.join(", ").replace(/\.$/u, "")}. Name peers to change them.`;
 }
 
-/** How the answer read a broad measure, from the plan's record and the table it names (#517). */
 function measureDefaultNote(record: MeasureDefaultRecord): string[] {
   if (!Object.hasOwn(MEASURE_DEFAULTS, record.family)) return [];
   const family = MEASURE_DEFAULTS[record.family as MeasureFamilyKey];
@@ -765,8 +762,8 @@ function measureDefaultNote(record: MeasureDefaultRecord): string[] {
     ? "the latest fiscal year and the latest quarter"
     : `${record.requested_period.kind === "latest" ? "the " : ""}${periodPhrase(record.requested_period)}`;
   const label = `${family.label[0]!.toUpperCase()}${family.label.slice(1)}`;
-  // A family that is its one figure ("revenue") names only the period it read.
-  const reading = figures === family.label && family.margins.length === 0
+  const isItsOneFigure = figures === family.label && family.margins.length === 0;
+  const reading = isItsOneFigure
     ? `${label} is shown`
     : `${label} is read as ${figures}${family.margins.length > 0 ? ", with their margins" : ""},`;
   return [`${reading} for ${period}. Name a measure or a period to change it.`];

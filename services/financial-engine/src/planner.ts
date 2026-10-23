@@ -321,7 +321,6 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
     }
   }
 
-  // The model never writes a cited family's nodes: the server plans them for every slot.
   const expanded = expandMeasureDefaults(draft.subjects.map((subject) => subject.slot_id), draft.defaults);
   const written = new Set(draft.operations.map((operation) => operation.node_id));
   for (const node of expanded.operations) {

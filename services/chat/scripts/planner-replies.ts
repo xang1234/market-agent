@@ -17,7 +17,7 @@ import { createRuntimeAuthority } from "../../financial-core/src/index.ts";
 import { planFinancialRequest, planningModelFromRouter, type PlanningContext, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import { createLlmRouterFromEnv } from "../../llm/src/index.ts";
 import { extractSubjectMentions } from "../src/subject-extraction.ts";
-import { GOLDEN_AS_OF, GOLDEN_COMPANIES, type GoldenCompany } from "../test/golden/dataset.ts";
+import { GOLDEN_AS_OF, GOLDEN_COMPANIES, goldenCatalogPeers, type GoldenCompany } from "../test/golden/dataset.ts";
 
 const ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 const REPLIES = fileURLToPath(new URL("../test/golden/llm-replies.json", import.meta.url));
@@ -25,7 +25,6 @@ const PEERS = " --peers";
 
 type Reply = { match: string | string[]; text: string };
 
-// AMDX names two more AMD listings (golden-conversation.test.ts).
 const company = (mention: string) => GOLDEN_COMPANIES.find((candidate) => candidate.ticker === (mention === "AMDX" ? "AMD" : mention))!;
 const subject = (mention: string, golden: GoldenCompany): RequestedSubject =>
   ({ mention, resolution: { status: "resolved", subject_ref: { kind: "issuer", id: golden.issuer_id }, label: golden.legal_name } });
@@ -33,9 +32,7 @@ const subject = (mention: string, golden: GoldenCompany): RequestedSubject =>
 function subjects(question: string, peers: boolean): RequestedSubject[] {
   const named = extractSubjectMentions(question).map((mention) => subject(mention, company(mention)));
   if (!peers) return named;
-  const primary = company(extractSubjectMentions(question)[0]!);
-  // A catalog peer is named to the planner by its issuer id (company-overview.ts overviewPeers).
-  return [...named, ...GOLDEN_COMPANIES.filter((peer) => peer !== primary && peer.industry === primary.industry).map((peer) => subject(peer.issuer_id, peer))];
+  return [...named, ...goldenCatalogPeers(company(extractSubjectMentions(question)[0]!))];
 }
 
 function context(requested: RequestedSubject[]): PlanningContext {
@@ -78,13 +75,11 @@ for (const argument of process.argv.slice(2)) {
     texts.push(reply.text);
     return reply;
   });
-  // A repaired plan would replay only its first reply.
   if (texts.length !== 1) throw new Error(`"${question}" took ${texts.length} planner calls; re-record it again`);
   const prefix = `Request: ${question}\nRequested`;
   const match: Reply["match"] = peers ? [prefix, ...requested.slice(extractSubjectMentions(question).length).map((peer) => peer.mention)] : prefix;
   const at = fixture.replies.findIndex((reply) => JSON.stringify(reply.match) === JSON.stringify(match));
   if (at === -1) throw new Error(`no recorded reply matches ${JSON.stringify(match)}`);
-  // In place, so the fixture keeps its formatting and its diff names only the replies re-recorded.
   const recorded = `"text": ${JSON.stringify(fixture.replies[at]!.text)}`;
   if (source.split(recorded).length !== 2) throw new Error(`the recorded reply for ${JSON.stringify(match)} is not unique in the fixture`);
   source = source.replace(recorded, () => `"text": ${JSON.stringify(texts[0]!)}`);

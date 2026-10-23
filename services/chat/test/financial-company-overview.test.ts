@@ -415,7 +415,6 @@ test("a question about one company that asks for no figure is answered with its 
     ], "growth after a first quarter compares with the fourth quarter before it and the first a year earlier");
   });
 
-  // A planning model that cites measure families for every company it is asked about (#517).
   const citingModel = (reply: (mentions: string[]) => unknown) => {
     const asked: string[][] = [];
     const model = (async ({ messages }: { messages: ReadonlyArray<{ content: string }> }) => {

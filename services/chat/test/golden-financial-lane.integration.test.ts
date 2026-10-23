@@ -66,8 +66,6 @@ test("golden metric questions certify through the chat financial lane on the rec
   };
 
   assert.deepEqual(await ask("Why did AMD's operating margin turn negative in Q2 2025?"), [["out_a_om", "verified", "-1.74%"]]);
-  // Revenue and profit are read as their families (#517): revenue, then each
-  // income item and its margin, for the latest year and the latest quarter.
   const families = (slot: string, year: string[], quarter: string[]) => [
     ...[["revenue_latest_fy0", year[0]], ["revenue_latest_q0", quarter[0]]],
     ...["gross_profit", "operating_income", "net_income", "gross_margin", "operating_margin", "net_margin"].map((id, index) => [`${id}_latest_fy0`, year[index + 1]]),
