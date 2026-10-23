@@ -391,7 +391,7 @@ test("no repair is asked for when nothing qualifies: verdicts entailed, unsuppor
 
 test("a turn whose only hidden inference is check-rejected waits for its repair, with no line in its place", async (t) => {
   t.mock.method(console, "info", () => {});
-  // 4 cites no assertion as its support, and 5 has a digit.
+  // 0 cites no assertion as its support, and 6 has a digit.
   const unsupported = { ...DIGIT_QUARTER, exchange: { ...DIGIT_QUARTER.exchange!, text: DIGIT_QUARTER.exchange!.text.replace('"supports":[1,2,3]', '"supports":[9]') } };
   const { calls, repairs, createClient } = models(unsupported, {
     judge: (ask) => verdict(ask.id, "entailed"),
