@@ -762,6 +762,24 @@ test("with claims unreadable and nothing else on file, the gap never says there 
   assert.deepEqual(packet.gaps, ["No reported facts or quote are on file for this subject, and its research claims could not be read."]);
 });
 
+test("a subject with nothing on file answers that it has nothing on file, not to ask again, whatever the model replied (#498)", async () => {
+  const shown = async (unavailable: boolean, reply: string) => {
+    const toolCall = { tool_call_id: "tc-1", tool_name: "research_lookup", status: "ok", result: { evidence_status: "insufficient_evidence", evidence: { claims: [], ...(unavailable ? { unavailable } : {}) } } } as never;
+    const blocks = await composeAnalystBlocksWithLlm({
+      env: BASE_ENV,
+      context: { userIntent: "Analyze ACME", bundleId: "single_name" },
+      blocks: [NARRATIVE_BLOCK],
+      toolCalls: [toolCall],
+      factBlocks: [],
+      createClient: () => async () => ({ text: reply }),
+    });
+    return (blocks[0].segments as Array<{ text: string }>)[0].text;
+  };
+  assert.equal(await shown(false, "```assertions\n[]\n```"), "No research claims, reported facts, or quote are on file for this subject.");
+  assert.equal(await shown(false, "ACME is a strong buy."), "No research claims, reported facts, or quote are on file for this subject.");
+  assert.equal(await shown(true, "```assertions\n[]\n```"), "No reported facts or quote are on file for this subject, and its research claims could not be read.");
+});
+
 test("with no figures shown there is nothing to bind, so the check is skipped (#208)", async () => {
   const reports: Array<{ status: string }> = [];
   const composed = await composeAnalystBlocksWithLlm({

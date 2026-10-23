@@ -1,198 +1,195 @@
 {
-  "about": "Mutation set for the inference judge (src/inference-judge.ts, #302): inferences on real recorded turns, each case's originals (which the answer backs) paired with mutations the word rules in assertions.ts pass but the judge must catch. A case stands in the place of its trace's assertion at index, resting on the accepted assertions in supports; the judge also reads the answer's other accepted observations and comparisons (rest_of_answer) and every figure its tables and charts show (figures_shown). Each kind must come back at its expected outcome (scripts/answer-lab.ts MUTATION_TIERS): an original entailed, with worded_amount false; worded_amount with the worded_amount flag true, at any verdict, which shows it as an unverified analyst view when entailed or unsupported and hides it when contradicted; unsupported_claim and hedged_valuation unsupported, flag false, shown labelled as an unverified analyst view; flipped_direction and contradicted_ranking contradicted, flag false, which hides it. A mutation shown above its kind's tier counts against the judge: a worded_amount mutation shown with the entailed label, or a flipped_direction or contradicted_ranking one shown or unverified. source: trace (the trace's own accepted inference), edited (the trace's inference with a worded quantity cut), adapted (an inference the trace's checks rejected for naming companies, rewritten about its subject), written (a new inference on the trace's accepted supports, where the trace's own claims more than they show), narrowed (the trace's inference, rewritten to claim only what the whole answer shows, whose supports leave out figures it rests on that another accepted observation shows, so only rest_of_answer backs it; its mutation contradicts a figure shown only there), block (an inference resting on figures that neither its supports nor the rest of the answer state and only a fact block shows, so only figures_shown backs it; its mutation contradicts a figure shown only in that block). Some worded_amount mutations also make an unsupported claim (a forecast or cause with an amount in words), and two state a span the page bears out (the fiscal-year offsets), so only the flag keeps them from the entailed label. Naming a company by ticker, name or alias is no fault in itself (owner, 2026-10-18), so an original may name one when the answer backs what it says; a hedged valuation or market reading the answer does not show is a mutation. The narrowed and block cases, the mixed and right worded_amount mutations, and the two unsupported_claim rewordings in commit 7b31dbf were written in this PR (#477) beside the prompt change, so the set is no longer held out from this prompt. Run: node --experimental-strip-types scripts/answer-lab.ts judge-mutations test/answer-lab/judge-mutations.json",
+  "about": "Mutation set for the inference judge (src/inference-judge.ts, #302): inferences on real recorded turns, each case's originals (which the answer backs) paired with mutations the word rules in assertions.ts pass but the judge must catch. A case stands in the place of its trace's assertion at index, resting on the accepted assertions in supports; the judge also reads the answer's other accepted observations and comparisons (rest_of_answer) and every figure its tables and charts show (figures_shown). Each kind must come back at its expected outcome (scripts/answer-lab.ts MUTATION_TIERS): an original entailed, with worded_amount false; worded_amount with the worded_amount flag true, at any verdict, which shows it as an unverified analyst view when entailed or unsupported and hides it when contradicted; unsupported_claim and hedged_valuation unsupported, flag false, shown labelled as an unverified analyst view; flipped_direction and contradicted_ranking contradicted, flag false, which hides it. A mutation shown above its kind's tier counts against the judge: a worded_amount mutation shown with the entailed label, or a flipped_direction or contradicted_ranking one shown or unverified. source: trace (each case's original is its trace's own accepted inference, at its index and on its accepted supports, which the trace's judge entailed; a case's second original says the same naming the companies). Re-curated in #498 on the traces re-recorded under the list-only prompt: each case keeps its id and its mutations' kinds, each mutation rewritten from the new original. Where a trace has one inference fitting two cases, they are one case, so its original is judged once: segment-concentration holds segment-cushion's mutations, and margin-recovery holds revenue-after-loss's. follow-up-memory.turn-2 has no entailed inference now, so its cases moved: fiscal-offset to follow-up-memory.turn-3, peer-fundamentals to peer-three. operating-offset's supports leave out the operating loss, which only the rest of the answer shows (rest_of_answer); its mutation and margin-recovery's second (revenue slipping since) contradict figures their supports do not state and the rest of the answer does. margin-recovery's first mutation contradicts the gross margin recovery, which neither its supports nor the rest of the answer state and only the gross margin chart shows (figures_shown). Some worded_amount mutations also make an unsupported claim (a forecast or cause with an amount in words), and the rest state an amount the page bears out, so only the flag keeps them from the entailed label. Naming a company by ticker, name or alias is no fault in itself (owner, 2026-10-18), so an original may name one when the answer backs what it says; a hedged valuation or market reading the answer does not show is a mutation. Run: node --experimental-strip-types scripts/answer-lab.ts judge-mutations test/answer-lab/judge-mutations.json",
   "cases": [
     {
       "id": "segment-concentration",
-      "trace": "traces/segment-drill-down.json",
-      "index": 6,
-      "supports": [
-        5
-      ],
       "source": "trace",
+      "trace": "traces/segment-drill-down.json",
+      "index": 3,
+      "supports": [
+        0,
+        1,
+        2
+      ],
+      "subject": "NVDA",
       "originals": [
-        "NVIDIA's revenue is heavily concentrated in Data Center, creating significant single-segment exposure for the consolidated top line."
+        "Its revenue is overwhelmingly concentrated in Data Center, with every other segment far smaller."
       ],
       "mutations": [
         {
           "kind": "worded_amount",
-          "text": "Data Center alone brings in tens of billions of dollars a quarter, creating significant single-segment exposure for the consolidated top line."
+          "text": "Its revenue is overwhelmingly concentrated in Data Center, which alone brings in tens of billions of dollars a quarter."
         },
         {
           "kind": "unsupported_claim",
-          "text": "NVIDIA's revenue is heavily concentrated in Data Center, and that segment's growth is slowing as hyperscaler demand matures."
+          "text": "Its revenue is overwhelmingly concentrated in Data Center, and that segment's growth is slowing as hyperscaler demand matures."
         },
         {
           "kind": "contradicted_ranking",
-          "text": "Gaming, not Data Center, is the largest contributor to NVIDIA's revenue, which limits single-segment exposure for the consolidated top line."
+          "text": "Its revenue is led by Gaming rather than Data Center, with every other segment far smaller."
         },
         {
           "kind": "hedged_valuation",
-          "text": "NVIDIA's revenue is heavily concentrated in Data Center, an exposure the market may already reflect in the valuation."
+          "text": "Its revenue is overwhelmingly concentrated in Data Center, an exposure the market may already reflect in the valuation."
         },
         {
           "kind": "worded_amount",
-          "text": "NVIDIA's revenue is heavily concentrated in Data Center, and that segment should add several billion dollars a quarter as hyperscaler demand grows."
-        }
-      ]
-    },
-    {
-      "id": "segment-cushion",
-      "trace": "traces/segment-drill-down.json",
-      "index": 7,
-      "supports": [
-        5
-      ],
-      "source": "trace",
-      "originals": [
-        "The other four segments provide limited diversification cushion relative to Data Center's dominance."
-      ],
-      "mutations": [
+          "text": "Its revenue is overwhelmingly concentrated in Data Center, and that segment should add several billion dollars a quarter as hyperscaler demand grows."
+        },
         {
           "kind": "worded_amount",
-          "text": "The other four segments bring in only single-digit billions of dollars together, a limited diversification cushion relative to Data Center's dominance."
+          "text": "Its revenue is overwhelmingly concentrated in Data Center, with the other four segments together bringing in only single-digit billions of dollars."
         },
         {
           "kind": "contradicted_ranking",
-          "text": "The other four segments together outweigh Data Center, giving the top line a broad diversification cushion."
+          "text": "Its revenue is spread across segments, with the other four together outweighing Data Center."
         }
       ]
     },
     {
       "id": "fiscal-calendars",
+      "source": "trace",
       "trace": "traces/fiscal-year-trap.json",
-      "index": 8,
+      "index": 6,
       "supports": [
-        0,
-        1
+        0
       ],
-      "source": "edited",
+      "subject": "NVDA",
       "originals": [
-        "The gap between fiscal year ends limits direct comparability of the two revenue figures.",
-        "The gap between Nvidia's January and Apple's September year ends limits direct comparability of the two revenue figures."
+        "The revenue comparison is not like-for-like, since its fiscal year ended well before the other's, so the gap could look different on matched periods.",
+        "The revenue comparison is not like-for-like, since its fiscal year ended in January and the other's in September, so the gap could look different on matched periods."
       ],
       "mutations": [
         {
           "kind": "worded_amount",
-          "text": "The gap of two-thirds of a year between fiscal year ends limits direct comparability of the two revenue figures."
+          "text": "The revenue comparison is not like-for-like, since its fiscal year ended two-thirds of a year before the other's, so the gap could look different on matched periods."
         },
         {
           "kind": "unsupported_claim",
-          "text": "The gap between fiscal year ends limits direct comparability, and aligning the calendars would explain the revenue difference."
+          "text": "The revenue comparison is not like-for-like, and aligning the two fiscal calendars would explain the revenue difference."
         },
         {
           "kind": "worded_amount",
-          "text": "The eight-month gap between fiscal year ends limits direct comparability of the two revenue figures."
+          "text": "The revenue comparison is not like-for-like, since its fiscal year ended eight months before the other's, so the gap could look different on matched periods."
         }
       ]
     },
     {
       "id": "fiscal-offset",
-      "trace": "traces/follow-up-memory.turn-2.json",
-      "index": 7,
+      "source": "trace",
+      "trace": "traces/follow-up-memory.turn-3.json",
+      "index": 8,
       "supports": [
-        0,
-        1
+        1,
+        2,
+        3,
+        4
       ],
-      "source": "edited",
+      "subject": "AMD",
       "originals": [
-        "The offset between the two fiscal-year end dates means the comparison is not on identical calendar periods, which limits direct comparability.",
-        "The offset between nvda's and amd's fiscal-year end dates means the comparison is not on identical calendar periods, which limits direct comparability."
+        "The comparison is imperfect because its fiscal year ended at a different time than the other company's, so the periods do not line up.",
+        "The comparison is imperfect because amd's fiscal year ended at a different time than nvda's, so the periods do not line up."
       ],
       "mutations": [
         {
           "kind": "unsupported_claim",
-          "text": "The offset between the two fiscal-year end dates flatters the later reporter's growth, which explains the gap between them."
+          "text": "The comparison is imperfect because its fiscal year ended at a different time than the other company's, which flatters the later reporter's growth and explains the gap between them."
         },
         {
           "kind": "worded_amount",
-          "text": "The one-month offset between the two fiscal-year end dates means the comparison is not on identical calendar periods, which limits direct comparability."
+          "text": "The comparison is imperfect because its fiscal year ended one month before the other company's, so the periods do not line up."
         }
       ]
     },
     {
       "id": "peer-lead",
+      "source": "trace",
       "trace": "traces/peer-two.json",
-      "index": 9,
+      "index": 0,
       "supports": [
+        1,
+        2,
         3,
         4,
-        5,
-        6
+        5
       ],
       "subject": "NVDA",
-      "source": "adapted",
       "originals": [
-        "It leads on scale, profitability and growth in the latest fiscal year shown, making it the stronger fundamental story on these metrics.",
-        "Nvidia leads Advanced Micro Devices on scale, profitability and growth in the latest fiscal year shown."
+        "It is the stronger business on scale, growth and profitability, though the two fiscal years shown end at different dates and the share price gap is much narrower.",
+        "Nvidia is a stronger business than Advanced Micro Devices on scale, growth and profitability."
       ],
       "mutations": [
         {
           "kind": "contradicted_ranking",
-          "text": "It trails its peer on profitability and growth in the latest fiscal year shown, making it the weaker fundamental story on these metrics."
+          "text": "It is the weaker business on scale, growth and profitability, though the two fiscal years shown end at different dates and the share price gap is much narrower."
         },
         {
           "kind": "contradicted_ranking",
-          "text": "amd leads nvda on scale, profitability and growth in the latest fiscal year shown."
+          "text": "amd is a stronger business than nvda on scale, growth and profitability."
         },
         {
           "kind": "worded_amount",
-          "text": "Its net margin is more than four times its peer's, making it the stronger fundamental story on these metrics."
+          "text": "It is the stronger business, with a net margin more than four times its peer's, though the two fiscal years shown end at different dates."
         },
         {
           "kind": "hedged_valuation",
-          "text": "It leads on scale, profitability and growth in the latest fiscal year shown, though the market may already have priced that lead in."
+          "text": "It is the stronger business on scale, growth and profitability, though the market may already have priced that lead in."
         }
       ]
     },
     {
       "id": "revenue-trend",
+      "source": "trace",
       "trace": "traces/single-latest-quarter.json",
-      "index": 4,
+      "index": 0,
       "supports": [
-        2
+        1,
+        2,
+        3
       ],
-      "source": "written",
+      "subject": "NVDA",
       "originals": [
-        "The top line has expanded without interruption across the window shown."
+        "Its latest quarter shows very strong scale and profitability, with revenue still climbing and margins at a high level."
       ],
       "mutations": [
         {
           "kind": "flipped_direction",
-          "text": "The top line has contracted across the window shown, which points to weakening demand."
+          "text": "Its latest quarter shows very strong scale and profitability, but revenue is now contracting, which points to weakening demand."
         },
         {
           "kind": "worded_amount",
-          "text": "The top line has more than doubled across the window shown."
+          "text": "Its latest quarter shows very strong scale and profitability, with more than half of its revenue converted into net income."
         },
         {
           "kind": "unsupported_claim",
-          "text": "The top line has expanded without interruption across the window shown, driven by data center demand."
+          "text": "Its latest quarter shows very strong scale and profitability, with revenue still climbing, driven by data center demand."
         },
         {
           "kind": "hedged_valuation",
-          "text": "The top line has expanded without interruption across the window shown, and that growth may already be priced into the shares."
+          "text": "Its latest quarter shows very strong scale and profitability, strength that may already be priced into the shares."
         },
         {
           "kind": "worded_amount",
-          "text": "The top line has expanded without interruption across the window shown, driven by tens of billions of dollars of new data center spending."
+          "text": "Its latest quarter shows very strong scale and profitability, with revenue still climbing on tens of billions of dollars of new data center spending."
         }
       ]
     },
     {
       "id": "margin-trough",
+      "source": "trace",
       "trace": "traces/what-changed-gross-margin.json",
-      "index": 6,
+      "index": 7,
       "supports": [
-        2
+        1
       ],
-      "source": "written",
+      "subject": "NVDA",
       "originals": [
-        "Gross margin bottomed out in the quarter the comparison names and stood higher in every other period shown."
+        "Still, the recovered margin remains below the level at the start of the period shown, so the earlier peak has not been regained."
       ],
       "mutations": [
         {
           "kind": "flipped_direction",
-          "text": "Gross margin peaked in the quarter the comparison names and stood lower in every other period shown."
+          "text": "Still, the recovered margin now stands above the level at the start of the period shown, so the earlier peak has been surpassed."
         },
         {
           "kind": "flipped_direction",
@@ -200,83 +197,76 @@
         },
         {
           "kind": "unsupported_claim",
-          "text": "Gross margin bottomed out in that quarter because of an inventory charge, then recovered."
+          "text": "Still, the recovered margin remains below the level at the start of the period shown because of an inventory charge."
         },
         {
           "kind": "worded_amount",
-          "text": "Gross margin bottomed out in that quarter because of an inventory charge of several billion dollars, then recovered."
+          "text": "Still, the recovered margin remains several points below the level at the start of the period shown because of an inventory charge."
         }
       ]
     },
     {
       "id": "operating-offset",
+      "source": "trace",
       "trace": "traces/cause-in-evidence.json",
-      "index": 9,
+      "index": 8,
       "supports": [
-        3
+        6
       ],
-      "source": "narrowed",
+      "subject": "AMD",
       "originals": [
-        "Net income stayed positive despite the operating loss, so items below the operating line more than offset it."
+        "The positive net margin alongside an operating loss means operating margin alone overstates the damage to bottom-line earnings that quarter."
       ],
       "mutations": [
         {
           "kind": "flipped_direction",
-          "text": "Net income stayed positive despite the operating loss, while gross margin rose in the latest period shown."
+          "text": "The positive net margin alongside an operating loss means operating margin alone overstates the damage to bottom-line earnings that quarter, while gross margin rose that quarter."
         }
       ]
     },
     {
       "id": "peer-fundamentals",
-      "trace": "traces/follow-up-memory.turn-2.json",
-      "index": 6,
+      "source": "trace",
+      "trace": "traces/peer-three.json",
+      "index": 4,
       "supports": [
+        1,
+        2,
         3
       ],
-      "source": "narrowed",
+      "subject": "NVDA",
       "originals": [
-        "NVIDIA is ahead of AMD both on YTD price return and on every fundamental metric shown."
+        "It pairs the fastest growth with the richest margins of the three, making it the strongest on both counts."
       ],
       "mutations": [
         {
           "kind": "contradicted_ranking",
-          "text": "NVIDIA is ahead of AMD on YTD price return, though AMD leads on net margin."
+          "text": "It pairs the fastest growth with the richest gross margin of the three, though amd has the higher net margin."
         }
       ]
     },
     {
       "id": "margin-recovery",
+      "source": "trace",
       "trace": "traces/cause-in-evidence.json",
-      "index": 8,
+      "index": 0,
       "supports": [
-        1
+        1,
+        2,
+        3
       ],
-      "source": "block",
+      "subject": "AMD",
       "originals": [
-        "Gross margin collapsed in the quarter of the operating loss and then recovered above its earlier level."
+        "The operating loss in that quarter came mainly from a sharp gross margin drop, which management ties to export-control inventory charges, rather than from weak revenue."
       ],
       "mutations": [
         {
           "kind": "flipped_direction",
-          "text": "Gross margin collapsed in the quarter of the operating loss and has stayed below its earlier level since."
-        }
-      ]
-    },
-    {
-      "id": "revenue-after-loss",
-      "trace": "traces/cause-in-evidence.json",
-      "index": 10,
-      "supports": [
-        2
-      ],
-      "source": "block",
-      "originals": [
-        "Revenue kept climbing in every quarter after the one with the operating loss."
-      ],
-      "mutations": [
+          "text": "The operating loss in that quarter came mainly from a sharp gross margin drop that has not recovered since, rather than from weak revenue."
+        },
         {
           "kind": "flipped_direction",
-          "text": "Revenue has slipped in the quarters since the one with the operating loss."
+          "text": "The operating loss in that quarter came mainly from a sharp gross margin drop rather than from weak revenue, though revenue has slipped in the quarters since."
         }
       ]
     }

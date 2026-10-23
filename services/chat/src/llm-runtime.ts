@@ -360,7 +360,7 @@ export function renderedAnswer(input: AnswerInput, packet: EvidencePacket, repor
         `The data here does not answer this question; the ${packet.gaps.length > 1 ? "notes below say" : "note below says"} what is missing.`,
         ...(packet.claims_status === "unavailable" ? ["Research claims could not be read for this answer."] : []),
       ].join(" ")
-      : shown.length > 0 ? FACT_BLOCKS_FALLBACK_TEXT : NO_ANSWER_FALLBACK_TEXT,
+      : shown.length > 0 ? FACT_BLOCKS_FALLBACK_TEXT : nothingOnFile(input.toolCalls) ?? NO_ANSWER_FALLBACK_TEXT,
   };
   return { report: rendering.report, blocks: (inferences) => withAnswer(input.blocks, answer, inferences) };
 }
@@ -397,18 +397,9 @@ export function answerContext(input: {
     ...(typeof context.quote.delay_class === "string" ? { delay_class: context.quote.delay_class } : {}),
   }] : []);
   const factRecency = structured.flatMap((context) => (isRecord(context.fact_recency) ? [context.fact_recency] : []));
-  const claims = claimEvidence(input.toolCalls);
   const packet = packetForModel(input.packet ?? turnPacket(input));
-  // Subjects with no evidence at all are a gap too; when the claims read
-  // failed, the claims are unknown, not absent (#207).
-  const gaps = [
-    ...((packet.gaps as string[] | undefined) ?? []),
-    ...(results.some((result) => result.evidence_status === "insufficient_evidence")
-      ? [claims.unavailable
-        ? "No reported facts or quote are on file for this subject, and its research claims could not be read."
-        : "No research claims, reported facts, or quote are on file for this subject."]
-      : []),
-  ];
+  const empty = nothingOnFile(input.toolCalls);
+  const gaps = [...((packet.gaps as string[] | undefined) ?? []), ...(empty ? [empty] : [])];
   return {
     question: input.context.userIntent ?? "Start a research thread",
     conversation: input.conversation ?? [],
@@ -420,6 +411,16 @@ export function answerContext(input: {
         : {}),
     },
   };
+}
+
+// A subject with no evidence at all is a gap too, the answer model's and the
+// reader's, whom asking again would not help; when the claims read failed,
+// the claims are unknown, not absent (#207).
+function nothingOnFile(toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>): string | undefined {
+  if (!toolCalls.some((toolCall) => isRecord(toolCall.result) && toolCall.result.evidence_status === "insufficient_evidence")) return undefined;
+  return claimEvidence(toolCalls).unavailable
+    ? "No reported facts or quote are on file for this subject, and its research claims could not be read."
+    : "No research claims, reported facts, or quote are on file for this subject.";
 }
 
 // The turn's evidence packet: its figures, claims and bounds (#207). A named

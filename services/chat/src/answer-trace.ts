@@ -3,6 +3,7 @@
 // blocks the reader ended with, after one repair round for the inferences
 // it hid (inference-repair.ts). Written under CHAT_TRACE_DIR; replayed by
 // scripts/answer-lab.ts.
+import { createHash } from "node:crypto";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -400,13 +401,19 @@ function traceIds(turn: TurnIds): string {
 // output, latency and tokens are what was recorded. judge_input_changed:
 // today's answer would send the judge, for some inference, something other
 // than its recorded reply answered; repair_input_changed: the same for the
-// recorded repair round, its call or a repaired inference's judge.
+// recorded repair round, its call (but for the system prompt) or a repaired
+// inference's judge. system_prompt_changed: the repair call was recorded under
+// another answer system prompt, the two hashed.
 export type LiveReplay = JudgeOptions & { rerun: "judge" | "repair" };
 
 export async function replayRecorded(
   trace: TurnTrace,
   live?: LiveReplay,
-): Promise<TurnTrace & Pick<TracedAnswer, "judge" | "repair"> & { judge_input_changed: boolean; repair_input_changed: boolean }> {
+): Promise<TurnTrace & Pick<TracedAnswer, "judge" | "repair"> & {
+  judge_input_changed: boolean;
+  repair_input_changed: boolean;
+  system_prompt_changed: { recorded: string; today: string } | null;
+}> {
   const { exchange } = trace;
   const answer = await composeTraced(trace.input, {
     env: exchange === null ? {} : RECORDED_CHANNEL,
@@ -431,12 +438,20 @@ export async function replayRecorded(
     record.outcome === "replied" && !isDeepStrictEqual(record.exchange.messages, messages);
   const recordedRepair = repairRecorded(trace.repair);
   let repairChanged = false;
+  let systemPrompt: { recorded: string; today: string } | null = null;
   const calls: RepairCalls | null = live
     ? (await judgeConfigured(live.env)) ? liveRepairCalls(companies, live) : null
     : recordedRepair && {
-      repair: async (messages) => {
-        repairChanged ||= asked(recordedRepair.record, messages);
-        return recordedRepair.record;
+      repair: async ([system, ...rest]) => {
+        const record = recordedRepair.record;
+        if (record.outcome === "replied") {
+          const [recordedSystem, ...recordedRest] = record.exchange.messages;
+          if (recordedSystem?.content !== system?.content) {
+            systemPrompt = { recorded: promptHash(recordedSystem?.content), today: promptHash(system?.content) };
+          }
+          repairChanged ||= !isDeepStrictEqual(recordedRest, rest);
+        }
+        return record;
       },
       judge: async (inference, i) => {
         const record = recordedRepair.judge[i] ?? NO_RECORD;
@@ -455,7 +470,12 @@ export async function replayRecorded(
     repair_input_changed: !live && (recordedRepair === null
       ? unrecorded()
       : repairChanged || !isDeepStrictEqual(replayed.repair?.requests ?? [], recordedRepair.requests)),
+    system_prompt_changed: systemPrompt,
   };
+}
+
+function promptHash(content: string | undefined): string {
+  return createHash("sha256").update(content ?? "").digest("hex").slice(0, 12);
 }
 
 // The recorded judge's record for each case: the one at its place. A trace
