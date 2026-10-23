@@ -7,8 +7,10 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 // proves the UI renders and links it.
 
 // Each answer is rendered from its recorded reply's assertions, so neither the
-// placeholder nor the fallback sentence passes.
-const NVDA_NARRATIVE = "NVDA's revenue rose in every period from Q1 2025"
+// placeholder nor the fallback sentence passes. The first is the engine's answer
+// with its commentary (#398).
+const NVDA_NARRATIVE = "NVDA's revenue rose in every period from Q1 FY2025"
+const NVDA_REVENUE = 'NVIDIA Corporation: Revenue'
 const COMPARE_NARRATIVE = "Of NVDA and AMD, NVDA's revenue was highest"
 const EXPLAIN_NARRATIVE = "Of NVDA and AMD, NVDA's gross margin was highest"
 const QUESTIONS = ['Analyze NVDA', 'Compare it with AMD YTD', 'Explain the differences and show the evidence']
@@ -90,9 +92,9 @@ test('golden conversation renders charts, metrics and inspectable sources, and s
   expect(narrativeCounts.length).toBeGreaterThan(0)
   expect(narrativeCounts.filter((count) => count !== 1)).toEqual([])
   await expect(page.getByRole('status').filter({ hasText: 'Loading message history' })).toHaveCount(0)
-  // Fact-built blocks: the metric row's figures and the revenue chart.
-  await expect(page.getByText('Revenue', { exact: true }).first()).toBeVisible()
-  await expect(page.getByText('Quarterly revenue')).toBeVisible()
+  // The engine's verified answer: its revenue over the quarters, drawn as bars.
+  await expect(answer(page, NVDA_NARRATIVE).getByText('Verified calculation')).toBeVisible()
+  await expect(page.getByText(NVDA_REVENUE)).toBeVisible()
   await expectProportionalBars(page)
   if (CAPTURE) {
     await openEveryEvidencePage(page, answer(page, NVDA_NARRATIVE))
@@ -131,7 +133,7 @@ test('golden conversation renders charts, metrics and inspectable sources, and s
     await expect(page.locator('[data-role="user"]', { hasText: question })).toBeVisible()
   }
   await expect(page.getByText(NVDA_NARRATIVE)).toBeVisible()
-  await expect(page.getByText('Quarterly revenue')).toBeVisible()
+  await expect(page.getByText(NVDA_REVENUE)).toBeVisible()
   await expect(page.getByText(COMPARE_NARRATIVE)).toBeVisible()
   await expectComparison(answer(page, COMPARE_NARRATIVE))
   await expectYtdChart(answer(page, COMPARE_NARRATIVE))
@@ -226,15 +228,16 @@ async function openEveryEvidencePage(page: Page, message: Locator) {
   }
 }
 
-// The revenue chart draws real bars (#187): the tallest fills most of the chart, and
+// The revenue series draws real bars (#187): the tallest fills most of its row, and
 // each bar's height matches its share of the tallest, as its inline percentage says.
 async function expectProportionalBars(page: Page) {
-  const bars = page.locator('[data-testid^="block-revenue-bars-"] [data-bar]')
+  const bars = page.locator('figure', { has: page.getByText(NVDA_REVENUE) }).locator('[aria-hidden="true"] > div')
   await expect(bars.first()).toBeVisible()
   const measured = await bars.evaluateAll((nodes) =>
     nodes.map((node) => ({ px: node.getBoundingClientRect().height, pct: parseFloat((node as HTMLElement).style.height) })))
   expect(measured.length).toBeGreaterThan(1)
   const tallest = measured.reduce((a, b) => (b.px > a.px ? b : a))
   expect(tallest.px).toBeGreaterThan(40)
+  expect(measured.length).toBe(8)
   for (const bar of measured) expect(bar.px / tallest.px).toBeCloseTo(bar.pct / tallest.pct, 1)
 }
