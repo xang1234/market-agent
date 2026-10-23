@@ -46,6 +46,7 @@ import {
   judgedLive,
   replayRecorded,
   type AnswerMetrics,
+  type LiveReplay,
   type ModelExchange,
   type TracedAnswer,
   type TurnTrace,
@@ -153,16 +154,21 @@ function delta(before: Row, after: Row): string {
 // ones. rerun: the live judge and repair round (judge), or the repair round
 // alone (repair), read each replay instead, and --update records their
 // replies. judge_input_changed, repair_input_changed: today's answer asks the
-// recorded judge or repair round something else.
-async function recorded(
+// recorded judge or repair round something else. A live round --update would
+// record is held to rerecord's guard (degradedRound).
+export async function recorded(
   traces: ReadonlyArray<LabeledTrace>,
   update = false,
   rerun?: "judge" | "repair",
+  live: Omit<LiveReplay, "rerun"> = { env: liveEnv() },
 ): Promise<Array<{ key: string; label: string; metrics: SampleMetrics; differs: boolean; judge_input_changed: boolean; repair_input_changed: boolean; judge?: JudgeView }>> {
+  const primary = update && rerun ? await primaryDeployment(live.env) : undefined;
   const results = [];
   for (const { key, label, file, trace } of traces) {
-    const { judge_input_changed, repair_input_changed, ...replayed } = await replayRecorded(trace, rerun ? { env: liveEnv(), rerun } : undefined);
-    if (update) writeFileSync(file, `${JSON.stringify(replayed, null, 2)}\n`);
+    const { judge_input_changed, repair_input_changed, ...replayed } = await replayRecorded(trace, rerun ? { ...live, rerun } : undefined);
+    const why = update && rerun ? degradedRound(replayed, primary) : undefined;
+    if (why !== undefined) console.log(`skip ${label}: ${why}`);
+    else if (update) writeFileSync(file, `${JSON.stringify(replayed, null, 2)}\n`);
     const view = judgeView(replayed);
     results.push({
       key,
@@ -315,21 +321,28 @@ async function live(
   };
 }
 
-// A re-recorded trace is what recorded --check replays as right, so a live run
-// that was cut off, answered or repaired by a fallback model, or whose judge or
-// repair round never replied or gave an inference no verdict stays unwritten.
-// primary: the deployment the run's answer and repair calls go to first.
-export function rerecord({ label, file, trace }: LabeledTrace, answer: TracedAnswer, primary: string | undefined): void {
-  const { exchange, assertions, judge, repair, blocks } = answer;
+// Why a live judge and repair round may not be recorded: the repair came from
+// a fallback model, or the judge or repair round never replied or gave an
+// inference no verdict. primary: the deployment repair calls go to first.
+export function degradedRound({ assertions, judge, repair }: Pick<TracedAnswer, "assertions" | "judge" | "repair">, primary: string | undefined): string | undefined {
   const unreplied = [...(judge ?? []), ...(repair ? [repair.record, ...repair.judge] : [])]
     .flatMap((record) => (record.outcome === "replied" ? [] : [record.reason]));
   const repairedOn = repair?.record.outcome === "replied" ? repair.record.exchange.deployment : primary;
   const unjudged = assertions?.judged?.find((verdict) => verdict.verdict === "error");
+  return repairedOn !== primary ? `the repair came from ${repairedOn}, not the primary ${primary}`
+    : unreplied[0] ?? (unjudged && `inference ${unjudged.index} has no verdict: ${unjudged.reason}`);
+}
+
+// A re-recorded trace is what recorded --check replays as right, so a live run
+// that was cut off, answered by a fallback model, or whose round is degraded
+// (degradedRound) stays unwritten.
+// primary: the deployment the run's answer and repair calls go to first.
+export function rerecord({ label, file, trace }: LabeledTrace, answer: TracedAnswer, primary: string | undefined): void {
+  const { exchange, assertions, judge, repair, blocks } = answer;
   const why = exchange === null ? "no model was called"
     : exchange.truncated ? "the answer was cut off at the token limit"
     : exchange.deployment !== primary ? `the answer came from ${exchange.deployment}, not the primary ${primary}`
-    : repairedOn !== primary ? `the repair came from ${repairedOn}, not the primary ${primary}`
-    : unreplied[0] ?? (unjudged && `inference ${unjudged.index} has no verdict: ${unjudged.reason}`);
+    : degradedRound(answer, primary);
   if (why !== undefined) {
     console.log(`skip ${label}: ${why}`);
     return;

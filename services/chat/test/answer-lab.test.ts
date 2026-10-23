@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import test from "node:test";
 
 import { composeTraced, judgedLive, replayRecorded } from "../src/answer-trace.ts";
-import { answerText, assertionSummary, judgeSummary, mutationSummary, mutationVariants, primaryDeployment, readTraces, replyFixture, rerecord } from "../scripts/answer-lab.ts";
+import { answerText, assertionSummary, judgeSummary, mutationSummary, mutationVariants, primaryDeployment, readTraces, recorded, replyFixture, rerecord } from "../scripts/answer-lab.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
 import { REPAIR_INSTRUCTIONS } from "../src/inference-repair.ts";
 
@@ -367,4 +367,36 @@ test("live --judge --update leaves a trace as it was when a fallback model answe
     if (readFileSync(source!.file, "utf8") !== before) written.push(name);
   }
   assert.deepEqual(written, []);
+});
+
+test("recorded --update --judge and --repair write a live round over the trace only when it was not degraded", async () => {
+  const { trace } = TRACES.find(({ label }) => label === "segment-drill-down")!;
+  const env = {
+    LLM_CHANNELS: "openai", LLM_OPENAI_PROTOCOL: "openai", LLM_OPENAI_MODELS: "gpt-4.1,gpt-4.1-mini",
+    LITELLM_MODEL: "openai/gpt-4.1", LITELLM_FALLBACK_MODELS: "openai/gpt-4.1-mini", JUDGE_LITELLM_MODEL: "openai/gpt-4.1",
+  };
+  const contradicted = '{"verdicts":[{"id":6,"verdict":"contradicted","worded_amount":false},{"id":7,"verdict":"entailed","worded_amount":false}]}';
+  const runs = {
+    "judge failed": { rerun: "judge", primaryFails: null, judge: null },
+    "repair on a fallback": { rerun: "judge", primaryFails: "repair", judge: contradicted },
+    "--repair, repair on a fallback": { rerun: "repair", primaryFails: "repair", judge: contradicted },
+    "healthy": { rerun: "judge", primaryFails: null, judge: contradicted },
+  } as const;
+  // --repair replays the recorded verdict, which sends inference 6 to repair.
+  const recordedJudge = [{ outcome: "replied", exchange: { messages: [], text: contradicted, truncated: false, deployment: "openai/gpt-4.1", latency_ms: 1 } }];
+  const written = [];
+  for (const [name, run] of Object.entries(runs)) {
+    const traces = readTraces([traceFiles({ "segment-drill-down.json": run.rerun === "repair" ? { ...trace, judge: recordedJudge } : trace })]);
+    const before = readFileSync(traces[0]!.file, "utf8");
+    const createClient = () => async (deployment: { model: string }, request: { messages: ReadonlyArray<{ content: string }> }) => {
+      const transcript = request.messages.map((message) => message.content).join("\n");
+      const call = transcript.includes(REPAIR_INSTRUCTIONS) ? "repair" : "judge";
+      if (call === run.primaryFails && deployment.model === "gpt-4.1") throw new Error("primary unavailable");
+      if (call === "judge" && run.judge === null) throw new Error("judge unavailable");
+      return { text: call === "judge" ? run.judge : "```assertions\n[]\n```" };
+    };
+    await recorded(traces, true, run.rerun, { env, createClient: createClient as never, repairDeadlines: { attemptMs: 15_000, totalMs: 45_000 } });
+    if (readFileSync(traces[0]!.file, "utf8") !== before) written.push(name);
+  }
+  assert.deepEqual(written, ["healthy"]);
 });
