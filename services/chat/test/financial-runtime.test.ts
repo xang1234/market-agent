@@ -8,7 +8,7 @@ import type { ChatAnalystToolRuntime, ChatAssistantMessagePersistence } from "..
 import { financialMessageId } from "../src/chat-ids.ts";
 import { createChatFinancialRuntime, SCOPE_METRICS } from "../src/financial-runtime.ts";
 import { METRIC_CATALOG_V1, OPERATION_REGISTRY } from "../../financial-core/src/index.ts";
-import { proposedMetric, type CompanyChange, type ScopeProposal } from "../src/research-scope.ts";
+import { proposedMetric, resolveResearchScope, type CompanyChange, type ScopeProposal } from "../src/research-scope.ts";
 import { parseProposal } from "../src/scope-proposal.ts";
 import { extractSubjectMentions } from "../src/subject-extraction.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
@@ -644,6 +644,31 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     const dropped = completed((await chatHarness(pool, { model: revenueModel([]), analyst, priorSubjects: async () => [aaa], readQuestion: reading({ companies: { kind: "drop", drop: ["AAA"], add: [] } }) }).run({ ...base, userIntent: "drop AAA" })).events);
     assert.deepEqual((dropped.financial_clarification as { question: string }).question, "Dropping AAA leaves no company to compare. Name the company to look at.");
     assert.deepEqual(await lane("drop BBB", { priorSubjects: async () => [aaa, bbb], readQuestion: reading({ companies: { kind: "drop", drop: ["BBB"], add: [] } }) }, ["AAA"]), ["AAA"]);
+    const aaaNamed = { companies: { kind: "as_named" as const, names: ["AAA"] } };
+    for (const asks of [["peers", "price_window"], ["latest_quarter", "price_window"]] as const) {
+      assert.deepEqual(await lane("How has AAA's stock done?", { readQuestion: reading({ ...aaaNamed, asks: new Set(asks) }) }), "analyst", `${asks.join(", ")}: peers and the latest quarter are no figure`);
+    }
+    // A facet read as asked and turned off is not asked (readingAsks).
+    const offGuidance = reading({ ...aaaNamed, asks: new Set(["guidance"]), turns_off: { facets: new Set(["guidance"]), metrics: new Set() } });
+    assert.deepEqual(await lane("Tell me about AAA, skip the guidance", { readQuestion: offGuidance }, ["AAA"]), ["AAA"]);
+    // A follow-up that asks for no figure keeps its scope's period, which an overview would not show.
+    const keepsYear = (async (context: { userIntent?: string }, read: Promise<ScopeProposal | null>) =>
+      ({ ...resolveResearchScope({ question: context.userIntent ?? "", companies: [], prior: null, asOf: new Date().toISOString(), proposal: await read }), fiscal_year: 2023 })) as never;
+    assert.deepEqual(await lane("Explain it", { priorSubjects: async () => [aaa], researchScope: keepsYear, readQuestion: reading({ asks: new Set(["explains"]) }) }), "analyst");
+    assert.deepEqual(await lane("And its latest quarter?", { priorSubjects: async () => [aaa], researchScope: keepsYear, readQuestion: reading({ period: { kind: "latest" } }) }, ["AAA"]), ["AAA"]);
+  });
+
+  await t.test("a retry of a turn whose run is reserved resumes it, whatever its reading says now", async () => {
+    const thread = randomUUID();
+    const turnId = randomUUID();
+    // The thread is another user's, so the first attempt reserves the run and cannot publish.
+    await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [thread, IDS.other]);
+    const input = { threadId: thread, userId: IDS.owner, turnId, userIntent: "Revenue for AAA" };
+    await chatHarness(pool, { model: revenueModel(["AAA"]) }).run(input);
+    await db.query(`update chat_threads set user_id = $2 where thread_id = $1`, [thread, IDS.owner]);
+    const evidence = async () => ({ ...NO_ASKS, asks: new Set(["evidence"] as const), companies: { kind: "as_named" as const, names: ["AAA"] } });
+    const retried = completed((await chatHarness(pool, { model: revenueModel(["AAA"]), readQuestion: evidence }).run(input)).events);
+    assert.equal(retried.bundle_id, "financial_answer", "the analyst path is never reached (forbiddenAnalyst)");
   });
 
   await t.test("a retry of a turn whose engine answer is saved does not read its question again", async () => {

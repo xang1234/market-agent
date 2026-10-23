@@ -127,6 +127,13 @@ test("a question about one company that asks for no figure is answered with its 
     assert.deepEqual(await results(latest.message_id), QTRS_OVERVIEW, "a reading that asks for the latest quarter gets the overview, which shows it");
   });
 
+  await t.test("an explanation of a company is its overview, and its note does not call the cause uncovered (#398)", async () => {
+    const done = completed((await chatHarness(pool, { model: null, readQuestion: reading({ ...NO_ASKS, asks: new Set(["explains"]) }), resolveMention: resolve }).run({ ...base, userIntent: "Explain QTRS's results" })).events);
+    assert.deepEqual(await results(done.message_id), QTRS_OVERVIEW);
+    const { rows: [message] } = await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id]);
+    assert.deepEqual(message.blocks.map((block: { kind: string }) => block.kind), ["financial_answer"], "no note names the cause as not covered");
+  });
+
   await t.test("a question the overview answers never calls the planner's model (#398)", async () => {
     const model = revenueModel(["QTRS"]);
     const done = completed((await chatHarness(pool, { model, readQuestion: reading(NO_ASKS), resolveMention: resolve }).run({ ...base, userIntent: "Tell me about QTRS" })).events);

@@ -28,14 +28,15 @@ export function financialAwareRunner(
   const runtime = options.financialRuntime;
   if (!runtime) return runner;
   return async (context) => {
-    // Nothing about an unfinished calculation leaves the server.
+    // Nothing about an unfinished turn's companies or calculation leaves the server.
     const failed = () => {
       context.emit("turn.error", { error_code: "financial_answer_failed", message: "The calculation could not be completed." });
     };
     let taken: (() => Promise<ChatFinancialTurn>) | null;
     try {
       taken = await runtime.take(context);
-    } catch {
+    } catch (error) {
+      console.error("[chat] the financial lane could not decide whether it takes the turn", error);
       return failed();
     }
     if (!taken) return runner(context);
@@ -43,7 +44,8 @@ export function financialAwareRunner(
     let turn: ChatFinancialTurn;
     try {
       turn = await taken();
-    } catch {
+    } catch (error) {
+      console.error("[chat] the financial turn failed", error);
       return failed();
     }
     await emitFinancialTurn(context, turn, options.persistAssistantMessage);

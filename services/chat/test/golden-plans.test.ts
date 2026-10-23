@@ -7,7 +7,7 @@ import { createRuntimeAuthority, operationDependencies, type FinancialPlanV1 } f
 import { buildDeterministicPlan, planFinancialRequest, type PlanningContext, type PlanningModel, type PlanningResult, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import type { CandidatePage, CandidateRequest, FinancialEvidencePort, InputCandidate, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
-import { overviewPeers, overviewSubjects, planCompanyOverview, resolvedCompanies } from "../src/company-overview.ts";
+import { allResolved, overviewPeers, overviewSubjects, planCompanyOverview } from "../src/company-overview.ts";
 import { MAX_TURN_SUBJECTS } from "../src/coordinator.ts";
 import { uncoveredAsks } from "../src/financial-runtime.ts";
 import { resolveResearchScope } from "../src/research-scope.ts";
@@ -293,7 +293,7 @@ test("a question about its companies, named or carried, that asks for no figure 
   const none = async () => [];
   const overview = async (question: string, { read: readQuestion = read, peersOf = none as typeof amd } = {}) => {
     const subjects = planningContext(question).requested_subjects;
-    if (!resolvedCompanies(subjects)) return null;
+    if (!allResolved(subjects)) return null;
     const proposal = await readQuestion(question);
     const scope = resolveResearchScope({ question, companies: [], prior: null, asOf: GOLDEN_AS_OF, proposal });
     return (await overviewSubjects(subjects, proposal, scope, peersOf))?.map((subject) => subject.mention) ?? null;
@@ -331,7 +331,7 @@ test("a question about its companies, named or carried, that asks for no figure 
   }
   const yearToDate = "Compare it with AMD YTD";
   assert.deepEqual(
-    [resolvedCompanies(planningContext(yearToDate).requested_subjects), await overviewSubjects(planningContext(yearToDate).requested_subjects, await read(yearToDate), null, none)],
+    [allResolved(planningContext(yearToDate).requested_subjects), await overviewSubjects(planningContext(yearToDate).requested_subjects, await read(yearToDate), null, none)],
     [true, null],
     "the golden conversation's comparison asks for a price window",
   );

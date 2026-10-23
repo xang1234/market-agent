@@ -639,13 +639,10 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     completedTurn(await runTurn(base, peersThread.thread_id, "How does AMDX's Q2 2025 revenue compare with its peers?"));
     assert.deepEqual(engineAnswer(await latestAssistantMessage(base, peersThread.thread_id)).results.map(([measure, period, disposition]) => [measure, period, disposition]), [["Revenue", "Q2 FY2025", "verified"]]);
     assert.deepEqual(await scope(), { companies: [amd], peers: true });
-    // The explanation is the overview of the company the answer showed, which named no peer; the scope still asks for peers.
-    completedTurn(await runTurn(base, peersThread.thread_id, "Explain it"));
-    assert.deepEqual(engineAnswer(await latestAssistantMessage(base, peersThread.thread_id)).notes, [
-      "AMDX is carried from the previous answer. Not covered by this answer: the cause of these figures.",
-      "AMDX's revenue was USD 11,200,000,000.00 in Q2 FY2026; AMDX's year-over-year percent change in revenue was 45.74% in Q2 FY2026 vs Q2 FY2025.",
-    ]);
-    assert.deepEqual(await scope(), { companies: [amd], peers: true });
+    // It inherits the asked quarter, which an overview would not show, so it stays the analyst's.
+    assert.equal(completedTurn(await runTurn(base, peersThread.thread_id, "Explain it")).data.bundle_id, "single_subject_analysis");
+    // AMD's industry peer is auto-selected, so it carries no label.
+    assert.deepEqual(await scope(), { companies: [amd, { issuer_id: NVDA.issuer_id }], peers: true });
     completedTurn(await runTurn(base, peersThread.thread_id, "Drop the peers"));
     assert.deepEqual(await scope(), { companies: [amd], peers: false });
   });

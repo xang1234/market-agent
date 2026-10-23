@@ -207,13 +207,6 @@
       "text": "NVIDIA is the more profitable and the faster-growing of the two in their latest quarters.\n\n```assertions\n[{\"kind\":\"analyst_inference\",\"text\":\"The company that leads on margin also leads on growth, so its lead is widening rather than being bought.\",\"supports\":[1,2]},{\"kind\":\"comparison\",\"op\":\"highest\",\"result\":\"F5\",\"text\":\"NVDA's gross margin [[F5]] is above AMD's [[F14]].\",\"evidence\":[\"F5\",\"F14\"]},{\"kind\":\"comparison\",\"op\":\"highest\",\"result\":\"F9\",\"text\":\"NVDA's revenue grew [[F9]] over the year, AMD's [[F18]].\",\"evidence\":[\"F9\",\"F18\"]},{\"kind\":\"observation\",\"text\":\"NVDA's revenue was [[F1]] and AMD's [[F10]] in their latest quarters.\",\"evidence\":[\"F1\",\"F10\"]}]\n```"
     },
     {
-      "match": [
-        "\"route\":\"financial_engine\"",
-        "\"coverage\":[{\"company\":\"AMDX\",\"status\":\"shown\"}]"
-      ],
-      "text": "```assertions\n[{\"kind\":\"observation\",\"text\":\"AMDX's revenue was [[F8]] in Q2 FY2026, up [[F16]] on the year.\",\"evidence\":[\"F8\",\"F16\"]}]\n```"
-    },
-    {
       "match": "Write a concise investment research answer",
       "text": "```assertions\n[{\"kind\":\"comparison\",\"op\":\"trend\",\"result\":\"rose_throughout\",\"text\":\"NVDA's revenue rose in every quarter shown.\",\"evidence\":[\"F10\",\"F11\",\"F12\",\"F13\",\"F14\",\"F15\",\"F16\",\"F17\"]}]\n```"
     }
