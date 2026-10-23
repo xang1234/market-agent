@@ -433,8 +433,8 @@ function measureDefaultRecord({ family, period }: CitedFamily): MeasureDefaultRe
 
 /**
  * The reported operands an answer resting on a figure always shows beside it:
- * free cash flow's OCF and capex (#324), and a valuation's price and the share
- * count or EPS it reads (#444).
+ * free cash flow's OCF and capex (#324), a valuation's price and the share
+ * count or EPS it reads (#444), and the figures a ranking ranks (#517).
  */
 function shownOperands(node: OperationNode): LocalId[] {
   switch (node.operation) {
@@ -444,6 +444,8 @@ function shownOperands(node: OperationNode): LocalId[] {
       return [node.price, node.shares];
     case "pe_ratio":
       return [node.price, node.earnings];
+    case "peer_compare":
+      return [...node.members];
     default:
       return [];
   }

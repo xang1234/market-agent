@@ -364,6 +364,23 @@ test("a market cap or P/E answer always publishes the price and the count or EPS
   );
 });
 
+test("a ranking always publishes the figures it ranks, before the ranking (#517)", async () => {
+  const revenue = (slot: string) => ({ node_id: `${slot}_rev`, operation: "reported_metric", subject_slot: slot, metric_key: "revenue", period: { kind: "fiscal_period", fiscal_year: 2025, fiscal_period: "Q2" } });
+  const model = scripted({
+    outcome: "ready",
+    subjects: [{ slot_id: "a", mention: NAMES[0] }, { slot_id: "b", mention: NAMES[1] }],
+    operations: [revenue("a"), revenue("b"), { node_id: "rank", operation: "peer_compare", members: ["a_rev", "b_rev"], direction: "highest" }],
+    outputs: [{ output_id: "out_rank", node_id: "rank" }],
+    thresholds: [],
+  });
+  const result = await planFinancialRequest(context({ requested_subjects: [resolved(0), resolved(1)] }), "How does Apple's Q2 2025 revenue compare with Microsoft's?", model);
+  assert.equal(result.outcome, "ready", JSON.stringify(result));
+  assert.deepEqual(
+    result.outcome === "ready" && result.plan.outputs.map((output) => [output.output_id, output.node_id]),
+    [["a_rev_input", "a_rev"], ["b_rev_input", "b_rev"], ["out_rank", "rank"]],
+  );
+});
+
 const LATEST_QUARTER = { kind: "latest", period_type: "quarterly", offset: 0 };
 
 function citing(slots: number[], defaults: unknown[], extra: Record<string, unknown> = {}) {
