@@ -978,7 +978,7 @@
     "after": "Compare NVDA's and AMD's fiscal 2025 revenue",
     "companies": ["NVDA", "AMD"],
     "prior": {"route":"comparison","reads":"comparison","companies":[{"issuer_id":"60000000-0000-4000-8000-000000000001","label":"NVDA"},{"issuer_id":"60000000-0000-4000-8000-000000000002","label":"AMD"}],"peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":[{"metric_key":"income_statement","label":"Revenue, profit and margins","available":true}],"fiscal_year":2025,"fiscal_quarter":null,"price_window":null,"benchmark":false,"income_items":["revenue"],"inherited":[]},
-    "expected": {"fiscal_year":null,"fiscal_quarter":null,"period":"latest"}
+    "expected": {"fiscal_year":null,"fiscal_quarter":null,"period":"latest","latest_period":"fiscal_year"}
   },
   {
     "id": 129,
@@ -987,5 +987,13 @@
     "companies": ["AMD"],
     "prior": {"route":"comparison","reads":"comparison","companies":[{"issuer_id":"60000000-0000-4000-8000-000000000001","label":"NVDA"},{"issuer_id":"60000000-0000-4000-8000-000000000002","label":"AMD"}],"peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":[{"metric_key":"income_statement","label":"Revenue, profit and margins","available":true}],"fiscal_year":2025,"fiscal_quarter":null,"price_window":null,"benchmark":false,"income_items":["revenue"],"inherited":[]},
     "expected": {"fiscal_year":2025,"fiscal_quarter":null,"period":"none"}
+  },
+  {
+    "id": 130,
+    "question": "How about over the past year?",
+    "after": "Compare NVDA and AMD YTD",
+    "companies": ["NVDA", "AMD"],
+    "prior": {"route":"comparison","reads":"comparison","companies":[{"issuer_id":"60000000-0000-4000-8000-000000000001","label":"NVDA"},{"issuer_id":"60000000-0000-4000-8000-000000000002","label":"AMD"}],"peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":[],"fiscal_year":null,"fiscal_quarter":null,"price_window":{"kind":"ytd","cutoff":"2026-08-31T00:00:00.000Z"},"benchmark":false,"inherited":[]},
+    "expected": {"route":"comparison","price_window":null}
   }
 ]

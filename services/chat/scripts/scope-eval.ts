@@ -48,6 +48,7 @@ export function scopeView(scope: ResearchScope, reading: ScopeProposal) {
     income_items: [...(scope.income_items ?? [])],
     fiscal_year: scope.fiscal_year,
     fiscal_quarter: scope.fiscal_quarter && `${scope.fiscal_quarter.fiscal_period} ${scope.fiscal_quarter.fiscal_year}`,
+    latest_period: scope.latest_period ?? null,
     price_window: scope.price_window?.kind ?? null,
     benchmark: scope.benchmark,
     period: reading.period.kind,
