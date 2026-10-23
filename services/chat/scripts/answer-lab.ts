@@ -161,11 +161,11 @@ export async function recorded(
   update = false,
   rerun?: "judge" | "repair",
   live: Omit<LiveReplay, "rerun"> = { env: liveEnv() },
-): Promise<Array<{ key: string; label: string; metrics: SampleMetrics; differs: boolean; judge_input_changed: boolean; repair_input_changed: boolean; judge?: JudgeView }>> {
+): Promise<Array<{ key: string; label: string; metrics: SampleMetrics; differs: boolean; judge_input_changed: boolean; repair_input_changed: boolean; system_prompt_changed: { recorded: string; today: string } | null; judge?: JudgeView }>> {
   const primary = update && rerun ? await primaryDeployment(live.env) : undefined;
   const results = [];
   for (const { key, label, file, trace } of traces) {
-    const { judge_input_changed, repair_input_changed, ...replayed } = await replayRecorded(trace, rerun ? { ...live, rerun } : undefined);
+    const { judge_input_changed, repair_input_changed, system_prompt_changed, ...replayed } = await replayRecorded(trace, rerun ? { ...live, rerun } : undefined);
     const why = update && rerun ? degradedRound(replayed, primary) : undefined;
     if (why !== undefined) console.log(`skip ${label}: ${why}`);
     else if (update) writeFileSync(file, `${JSON.stringify(replayed, null, 2)}\n`);
@@ -177,6 +177,7 @@ export async function recorded(
       differs: !isDeepStrictEqual(JSON.parse(JSON.stringify(replayed.blocks)), trace.blocks),
       judge_input_changed,
       repair_input_changed,
+      system_prompt_changed,
       ...(view ? { judge: view } : {}),
     });
   }
@@ -706,6 +707,11 @@ async function main(argv: string[]): Promise<number> {
       `${differs.has(key) ? "  DIFFERS" : ""}${drifted.has(key) ? "  JUDGE INPUT CHANGED" : ""}${repairDrifted.has(key) ? "  REPAIR INPUT CHANGED" : ""}`;
     console.log(table(results.map((result) => meanRow(result, [result.metrics])), (row) => flag(row.key)));
     console.log(`\n${traces.length - differs.size} of ${traces.length} replayed to the recorded blocks`);
+    const prompts = Map.groupBy(results.filter((result) => result.system_prompt_changed), (result) => JSON.stringify(result.system_prompt_changed));
+    for (const [pair, changed] of prompts) {
+      const { recorded: was, today } = JSON.parse(pair) as { recorded: string; today: string };
+      console.log(`system prompt changed: ${changed.length} repair rounds were recorded under ${was}, today's is ${today} (${changed.map((result) => result.label).join(", ")})`);
+    }
     const run: LiveRun = {
       run: new Date().toISOString().slice(0, 19).replace(/:/g, ""),
       samples: 1,

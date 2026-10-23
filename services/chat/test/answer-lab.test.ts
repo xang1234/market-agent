@@ -285,6 +285,28 @@ test("recorded counts the cost of a trace's one batched judge call once, though 
   ].join("\n"));
 });
 
+test("recorded reports an edit to the answer's system prompt once, not as each repaired trace's changed repair input; a change to the repair request itself still flags its trace", async () => {
+  const underOldPrompt = (label: string, user?: string) => {
+    const { trace } = TRACES.find((traced) => traced.label === label)!;
+    const record = trace.repair!.record as Extract<NonNullable<typeof trace.repair>["record"], { outcome: "replied" }>;
+    const [, recordedUser] = record.exchange.messages;
+    const messages = [{ role: "system", content: "an older answer prompt" }, user === undefined ? recordedUser : { ...recordedUser, content: user }];
+    return { ...trace, repair: { ...trace.repair, record: { ...record, exchange: { ...record.exchange, messages } } } };
+  };
+  const root = traceFiles({
+    "fiscal-year-trap.json": underOldPrompt("fiscal-year-trap"),
+    "margin-trend-loss-quarter.json": underOldPrompt("margin-trend-loss-quarter"),
+    "what-changed-gross-margin.json": underOldPrompt("what-changed-gross-margin", "another repair request"),
+  });
+  const script = fileURLToPath(new URL("../scripts/answer-lab.ts", import.meta.url));
+  const { stdout } = await promisify(execFile)(process.execPath, ["--experimental-strip-types", script, "recorded", root, "--check"]);
+  const lines = stdout.split("\n");
+  assert.deepEqual(lines.filter((line) => line.includes("REPAIR INPUT CHANGED")).map((line) => line.split(" ")[0]), ["what-changed-gross-margin"]);
+  assert.deepEqual(lines.filter((line) => line.startsWith("system prompt changed")).map((line) => line.replace(/today's is \w+/, "today's is <hash>")), [
+    "system prompt changed: 3 repair rounds were recorded under 5c3d808c0eb5, today's is <hash> (fiscal-year-trap, margin-trend-loss-quarter, what-changed-gross-margin)",
+  ]);
+});
+
 test("live --judge --update re-records a trace that recorded --check replays to the same blocks", async () => {
   const [source] = readTraces([traceFiles({ "segment-drill-down.json": TRACES.find(({ label }) => label === "segment-drill-down")!.trace })]);
   const { trace } = source!;
