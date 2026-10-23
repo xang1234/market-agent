@@ -114,10 +114,13 @@ export async function overviewOmissions(
 ): Promise<string[]> {
   if (plan.planner.kind !== "deterministic") return [];
   const members = [...plan.subjects.members].sort((left, right) => left.display_order - right.display_order);
+  const saved = new Set(plan.operations.map((node) => node.node_id));
+  // An overview names each company's margins by the margin alone, whatever growth it omits. A margin trend names each by its quarter.
+  const several = members.length > 1;
+  if (!members.every(({ slot_id }) => MARGINS.every(({ metric }) => saved.has(nodeIdOf(several, slot_id)(metric))))) return [];
   const companies = await revenueQuarters(members.map((member) => member.subject_ref), { authority, knowledge_cutoff: plan.time.knowledge_cutoff }, evidence, UNREAD);
   if (companies === null) return [];
   const { operations, omitted } = companyOverviewDraft(companies);
-  const saved = new Set(plan.operations.map((node) => node.node_id));
   return operations.length === saved.size && operations.every((node) => saved.has(node.node_id)) ? omitted.map((omission) => omission(name)) : [];
 }
 
@@ -144,6 +147,7 @@ export function marginTrendSubjects(
 }
 
 const slotOf = (index: number) => String.fromCharCode(97 + index);
+const nodeIdOf = (several: boolean, slot: string) => (name: string) => several ? `${slot}_${name}` : name;
 
 function planned(context: PlanningContext, { operations, outputs }: { operations: ReadonlyArray<Node>; outputs: ReadonlyArray<Node> }, unplanned: string): ReadyPlan | null {
   const result = buildDeterministicPlan(context, {
@@ -269,7 +273,7 @@ function companyOverviewDraft(companies: ReadonlyArray<RevenueQuarters>) {
   const omitted: Omission[] = [];
   const parts = companies.map((company, index) => {
     const slot = slotOf(index);
-    const id = (name: string) => several ? `${slot}_${name}` : name;
+    const id = nodeIdOf(several, slot);
     const at = reportedAt(slot, id);
     const revenue = new Map(backs.map((back) => [back, at("revenue", before(company.newest, back))]));
     const latest = revenue.get(0)!;
