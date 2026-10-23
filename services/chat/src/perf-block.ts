@@ -29,11 +29,11 @@
 import { createSqlPeerSetResolver } from "../../fundamentals/src/peer-set-resolver.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import { MISLABELED_POLYGON_RANGE_SQL } from "../../market/src/cache-repository.ts";
-import { PERF_POINTS, perfLines, returnLabel, type PerfLine } from "../../market/src/perf-points.ts";
+import { PERF_POINTS, perfLines, type PerfLine } from "../../market/src/perf-points.ts";
 import { isCurrentEnd, sessionDate, ytdYear, type YtdWindow } from "../../market/src/ytd-window.ts";
 import { compileDisclosurePolicy } from "../../snapshot/src/disclosure-policy.ts";
 import type { SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
-import { stableUuid } from "./chat-ids.ts";
+import { noteBlock, stableUuid } from "./chat-ids.ts";
 import type { QueryExecutor } from "../../shared/src/http.ts";
 
 const INTERVAL = "1d";
@@ -269,20 +269,6 @@ function basisGapBlock(
   );
 }
 
-// A named gap where the chart would be.
-function noteBlock(input: PerfInput, idKey: string, text: string): Block {
-  const id = stableUuid(`block:${input.snapshotId}:${idKey}`);
-  return {
-    id,
-    kind: "rich_text",
-    snapshot_id: input.snapshotId,
-    data_ref: { kind: "rich_text", id },
-    source_refs: [],
-    as_of: input.asOf,
-    segments: [{ type: "text", text }],
-  };
-}
-
 // The YTD chart for a selected window: each line from the shared baseline close,
 // the window stated in the block, and each series' digest over exactly the bars
 // the line uses, so a reload can show nothing else.
@@ -358,40 +344,6 @@ function assemblePerfBlock(input: {
     // Promoted to manifest.series_specs when the answer is sealed.
     provenance_series_specs: specs,
   };
-}
-
-/** A price return the chart shows: one line's last point, credited to its company. */
-export type PerfFigure = {
-  company: string;
-  metric: "Price return";
-  // The window drawn.
-  period?: string;
-  value: string;
-  shown_in?: string;
-  // The chart showing it, for the evidence packet; never sent to the model.
-  block_id?: string;
-  // The line's sealed series (#317); never sent to the model.
-  series_ref?: string;
-};
-
-/** Each price chart line's return over the window drawn, so the answer can cite it as a figure of the chart. */
-export function perfFigures(blocks: ReadonlyArray<Block>): PerfFigure[] {
-  return blocks.flatMap((block): PerfFigure[] => {
-    if (block.kind !== "perf_comparison") return [];
-    const series = (block.series ?? []) as ReadonlyArray<{ name?: string; points?: ReadonlyArray<{ y?: number }> }>;
-    const seriesRefs = (block.data_ref as { params?: { series_refs?: unknown } } | undefined)?.params?.series_refs;
-    const period = typeof block.default_range === "string" ? { period: block.default_range } : {};
-    const shownIn = {
-      ...(typeof block.title === "string" ? { shown_in: block.title } : {}),
-      ...(typeof block.id === "string" ? { block_id: block.id } : {}),
-    };
-    return series.flatMap((line, index) => {
-      const last = line.points?.at(-1)?.y;
-      // Line i is drawn from series_refs[i].
-      const seriesRef = Array.isArray(seriesRefs) && typeof seriesRefs[index] === "string" ? { series_ref: seriesRefs[index] as string } : {};
-      return line.name && typeof last === "number" ? [{ company: line.name, metric: "Price return" as const, ...period, value: returnLabel(last), ...shownIn, ...seriesRef }] : [];
-    });
-  });
 }
 
 function iso(value: Date | string): string {

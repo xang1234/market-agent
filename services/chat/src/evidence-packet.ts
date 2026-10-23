@@ -14,7 +14,7 @@
 // with any stored contradiction between them named.
 
 import { dependencyClosure, type FinancialAnswerContent, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
-import { perfFigures } from "./perf-block.ts";
+import { returnLabel } from "../../market/src/perf-points.ts";
 import type { ResearchScope } from "./research-scope.ts";
 import { isRecord } from "../../shared/src/http.ts";
 
@@ -50,6 +50,40 @@ export type PacketFigure = {
   // A lead's two companies, [left, right]: it is the difference of their figures.
   lead_of?: readonly [string, string];
 };
+
+/** A price return the chart shows: one line's last point, credited to its company. */
+export type PerfFigure = {
+  company: string;
+  metric: "Price return";
+  // The window drawn.
+  period?: string;
+  value: string;
+  shown_in?: string;
+  // The chart showing it, for the evidence packet; never sent to the model.
+  block_id?: string;
+  // The line's sealed series (#317); never sent to the model.
+  series_ref?: string;
+};
+
+/** Each price chart line's return over the window drawn, so the answer can cite it as a figure of the chart. */
+export function perfFigures(blocks: ReadonlyArray<Block>): PerfFigure[] {
+  return blocks.flatMap((block): PerfFigure[] => {
+    if (block.kind !== "perf_comparison") return [];
+    const series = (block.series ?? []) as ReadonlyArray<{ name?: string; points?: ReadonlyArray<{ y?: number }> }>;
+    const seriesRefs = (block.data_ref as { params?: { series_refs?: unknown } } | undefined)?.params?.series_refs;
+    const period = typeof block.default_range === "string" ? { period: block.default_range } : {};
+    const shownIn = {
+      ...(typeof block.title === "string" ? { shown_in: block.title } : {}),
+      ...(typeof block.id === "string" ? { block_id: block.id } : {}),
+    };
+    return series.flatMap((line, index) => {
+      const last = line.points?.at(-1)?.y;
+      // Line i is drawn from series_refs[i].
+      const seriesRef = Array.isArray(seriesRefs) && typeof seriesRefs[index] === "string" ? { series_ref: seriesRefs[index] as string } : {};
+      return line.name && typeof last === "number" ? [{ company: line.name, metric: "Price return" as const, ...period, value: returnLabel(last), ...shownIn, ...seriesRef }] : [];
+    });
+  });
+}
 
 // The companies a figure is about: a lead's two, a derived figure's sides', else its own, else the only company's.
 export function figureCompanies(figure: PacketFigure, packet: EvidencePacket): Array<string | undefined> {

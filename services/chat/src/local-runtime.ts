@@ -29,7 +29,7 @@ import {
   type ChatThreadTitleGenerator,
 } from "./coordinator.ts";
 import { answerTurn, type AnswerTraceInput } from "./answer-trace.ts";
-import { isUuid } from "./chat-ids.ts";
+import { isUuid, noteBlock } from "./chat-ids.ts";
 import { claimSelection } from "./evidence-packet.ts";
 import { readingAsks, readsEngine, resolveResearchScope, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
 import { proposeScope } from "./scope-proposal.ts";
@@ -39,7 +39,7 @@ import { loadPriorScope, loadPriorSubjects as loadThreadPriorSubjects, loadRecen
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import { createLlmThreadTitleModel } from "./llm-runtime.ts";
 import { structuredRefsFromHandoff } from "./local-runtime-structured.ts";
-import { createChatFinancialRuntime, noteBlock, type ChatFinancialRuntime, type ChatFinancialTurnContext } from "./financial-runtime.ts";
+import { createChatFinancialRuntime, type ChatFinancialRuntime, type ChatFinancialTurnContext } from "./financial-runtime.ts";
 import { saveCommentary } from "./engine-commentary.ts";
 import { createChatMessagePersistence } from "./messages.ts";
 import {

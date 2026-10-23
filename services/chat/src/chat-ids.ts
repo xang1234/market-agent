@@ -40,3 +40,17 @@ export function stableUuid(seed: string): string {
     hex.slice(20, 32),
   ].join("-");
 }
+
+/** A note in an answer: one plain sentence, citing nothing. */
+export function noteBlock(input: { snapshotId: string; asOf: string }, key: string, text: string): Record<string, unknown> {
+  const id = stableUuid(`block:${input.snapshotId}:${key}`);
+  return {
+    id,
+    kind: "rich_text",
+    snapshot_id: input.snapshotId,
+    data_ref: { kind: "rich_text", id },
+    source_refs: [],
+    as_of: input.asOf,
+    segments: [{ type: "text", text }],
+  };
+}
