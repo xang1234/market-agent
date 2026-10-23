@@ -98,7 +98,7 @@ The [user guide](docs/guide.md) covers every page, including Analyze memos, Anal
 4. The app seals a snapshot of every fact the answer used and checks each one against the logged tool calls. That snapshot is what the evidence inspector shows.
 5. A judge model checks each inference against the facts it rests on. An inference appears only once the judge accepts it.
 
-Questions that name a metric run through the financial engine, which computes with exact fractions and shows anything it cannot verify as a gap. The answer also notes parts of the question the engine did not calculate, such as a benchmark index. Other questions still use the standard path until [#398](https://github.com/xang1234/market-agent/issues/398) lands. [Architecture](docs/architecture.md) has the full flow and the service map.
+The financial engine computes with exact fractions and shows anything it cannot verify as a gap. The answer also notes parts of the question the engine did not calculate, such as a benchmark index. [Architecture](docs/architecture.md) has the full flow and the service map.
 
 ## Documentation
 
@@ -113,7 +113,6 @@ Questions that name a metric run through the financial engine, which computes wi
 
 ## Roadmap
 
-- [ ] Route every company question through the verified financial engine ([#398](https://github.com/xang1234/market-agent/issues/398))
 - [ ] Live business-segment revenue in cited chat breakdowns ([#196](https://github.com/xang1234/market-agent/issues/196))
 - [ ] Valuation scenarios with explicit P/E assumptions and dated analyst estimates ([#201](https://github.com/xang1234/market-agent/issues/201), [#224](https://github.com/xang1234/market-agent/issues/224), [#225](https://github.com/xang1234/market-agent/issues/225))
 - [ ] Comparisons that disclose their basis, peers, and exclusions ([#209](https://github.com/xang1234/market-agent/issues/209)), and checked gap comparisons ([#288](https://github.com/xang1234/market-agent/issues/288))
