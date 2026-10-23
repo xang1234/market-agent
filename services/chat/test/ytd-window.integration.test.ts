@@ -20,7 +20,7 @@ test("an unrelated cached range cannot change the requested YTD window (#192)", 
   await seedGoldenDataset(client);
   const typed = client as unknown as Parameters<typeof loadPerfComparisonBlocks>[0];
   const ytd = () =>
-    loadPerfComparisonBlocks(typed, { listings: LISTINGS, snapshotId: "64000000-0000-4000-8000-0000000000cf", asOf: GOLDEN_AS_OF, window: "ytd" });
+    loadPerfComparisonBlocks(typed, { listings: LISTINGS, snapshotId: "64000000-0000-4000-8000-0000000000cf", asOf: GOLDEN_AS_OF });
   const before = await ytd();
 
   // A newer, shorter NVDA range (fetched later, ending later) with other prices.

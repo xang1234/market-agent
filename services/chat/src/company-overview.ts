@@ -6,10 +6,21 @@ import { issuerLabels } from "../../financial-engine/src/request.ts";
 import { reportedBy } from "../../financial-engine/src/select-inputs.ts";
 import { createSqlPeerSetResolver } from "../../fundamentals/src/peer-set-resolver.ts";
 import { MAX_TURN_SUBJECTS } from "./coordinator.ts";
-import { GROWTH, MARGINS, quarterBefore } from "./quarter-metrics.ts";
 import { BALANCE_SHEET_ITEMS, readingAsks, type FiscalQuarter, type PERIOD_FIELDS, type ResearchScope, type ScopeFacet, type ScopeProposal } from "./research-scope.ts";
 
 const QUARTERS_SHOWN = 8;
+// Each margin, and the statement line it divides by revenue.
+const MARGINS = [
+  { metric: "gross_margin", numerator: "gross_profit" },
+  { metric: "operating_margin", numerator: "operating_income" },
+  { metric: "net_margin", numerator: "net_income" },
+] as const;
+// Revenue growth from the quarter before, and from a year earlier.
+const GROWTH = [
+  { metric: "revenue_growth_qoq", back: 1 },
+  { metric: "revenue_growth_yoy", back: 4 },
+] as const;
+const QUARTERS = ["Q1", "Q2", "Q3", "Q4"];
 const UNPLANNED = "[chat] the company overview could not be planned; the planner answers";
 const TREND_UNPLANNED = "[chat] the margin trend could not be planned; the planner answers";
 const FIGURES_UNPLANNED = "[chat] the follow-up's figures could not be planned; the planner answers";
@@ -332,7 +343,7 @@ async function planningQuarters(context: PlanningContext, evidence: FinancialEvi
 // named, or with no year its newest such quarter, which it may never have
 // reported (null).
 function anchorOf(company: RevenueQuarters, period: ReadPeriod): FiscalQuarter | null {
-  const order = (quarter: FiscalQuarter) => quarter.fiscal_year * 4 + Number(quarter.fiscal_period.slice(1));
+  const order = (quarter: FiscalQuarter) => quarter.fiscal_year * 4 + QUARTERS.indexOf(quarter.fiscal_period);
   const newestOf = (quarters: ReadonlyArray<FiscalQuarter>) =>
     quarters.reduce<FiscalQuarter | null>((best, quarter) => (best === null || order(quarter) > order(best) ? quarter : best), null);
   switch (period.kind) {
@@ -419,7 +430,11 @@ function unpaired(company: Anchored, at: FiscalQuarter, span: number): string | 
   return follows ? null : "whose quarters are not dated consecutively";
 }
 
-const before = (quarter: FiscalQuarter, back: number): FiscalQuarter => quarterBefore(quarter.fiscal_year, quarter.fiscal_period, back)!;
+// The quarter `back` quarters before (1 = the previous one, 4 = a year earlier).
+function before(quarter: FiscalQuarter, back: number): FiscalQuarter {
+  const total = quarter.fiscal_year * 4 + QUARTERS.indexOf(quarter.fiscal_period) - back;
+  return { fiscal_year: Math.floor(total / 4), fiscal_period: QUARTERS[total % 4]! };
+}
 const quarterId = (quarter: FiscalQuarter) => `fy${quarter.fiscal_year}_${quarter.fiscal_period.toLowerCase()}`;
 const quarterText = (quarter: FiscalQuarter) => `${quarter.fiscal_period} FY${quarter.fiscal_year}`;
 

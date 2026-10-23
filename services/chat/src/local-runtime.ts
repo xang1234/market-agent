@@ -30,11 +30,10 @@ import {
 import { answerTurn, type AnswerTraceInput } from "./answer-trace.ts";
 import { isUuid } from "./chat-ids.ts";
 import { claimSelection } from "./evidence-packet.ts";
-import { companyListings, priceListingsForTurn, turnCompanies } from "./fact-blocks.ts";
 import { readsEngine, resolveResearchScope, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
 import { proposeScope } from "./scope-proposal.ts";
 import { frozenDataMode, hydrateYtdBars, marketHydrationOrigin, turnNow } from "./ytd-hydration.ts";
-import { listingTimeZones, loadPerfComparisonBlocks } from "./perf-block.ts";
+import { companyListings, listingTimeZones, loadPerfComparisonBlocks, priceListingsForTurn, turnCompanies } from "./perf-block.ts";
 import { loadPriorScope, loadPriorSubjects as loadThreadPriorSubjects, loadRecentConversation } from "./thread-context.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import { createLlmThreadTitleModel } from "./llm-runtime.ts";
@@ -274,7 +273,6 @@ async function ytdChart(
     listings,
     snapshotId,
     asOf: scope.inherited.includes("price_window") ? window.cutoff : asOf,
-    window: "ytd",
     frozenPrices: frozenDataMode(process.env),
   });
 }

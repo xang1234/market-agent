@@ -92,7 +92,7 @@ test("a live YTD request with an empty cache fetches, stores, and seals the wind
   registerLifoCleanup(t, () => new Promise<void>((resolve) => server.close(() => resolve())));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const chart = async (asOf: string) =>
-    (await loadPerfComparisonBlocks(pool, { listings: LISTINGS, snapshotId: "64000000-0000-4000-8000-0000000000d1", asOf, window: "ytd" }))[0];
+    (await loadPerfComparisonBlocks(pool, { listings: LISTINGS, snapshotId: "64000000-0000-4000-8000-0000000000d1", asOf }))[0];
 
   await hydrateYtdBars({ origin, listings: LISTINGS, now: new Date().toISOString() });
   assert.equal(provider.calls(), 2, "one provider fetch per company");

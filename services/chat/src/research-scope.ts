@@ -234,31 +234,26 @@ export const PROPOSABLE_METRICS: ReadonlyArray<RequestedMetric> = Object.freeze(
   { metric_key: "income_statement", label: "Revenue, profit and margins", available: true },
 ].map((metric) => Object.freeze(metric)));
 
-// The cash flow, balance sheet and EPS a question can name, each with the item
-// labels its block shows (statement-blocks.ts). One company at a time: a
-// comparison names them as a gap.
-export const STATEMENT_METRIC_LABELS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  operating_cash_flow: ["Operating cash flow"],
-  capex: ["Capital expenditures"],
-  free_cash_flow: ["Free cash flow"],
-  balance_sheet: ["Cash and equivalents", "Total assets", "Total liabilities", "Stockholders' equity"],
-  cash_and_equivalents: ["Cash and equivalents"],
-  total_assets: ["Total assets"],
-  total_liabilities: ["Total liabilities"],
-  total_equity: ["Stockholders' equity"],
-  eps_diluted: ["EPS (diluted)"],
-  eps_basic: ["EPS (basic)"],
-};
+// The cash flow, balance sheet and EPS a question can name: each can be
+// qualified into another figure (proposedMetric), and a comparison asking only
+// for them routes as a gap (resolveResearchScope).
+const STATEMENT_METRICS: ReadonlySet<string> = new Set([
+  "operating_cash_flow",
+  "capex",
+  "free_cash_flow",
+  "balance_sheet",
+  "cash_and_equivalents",
+  "total_assets",
+  "total_liabilities",
+  "total_equity",
+  "eps_diluted",
+  "eps_basic",
+]);
 
 export const BALANCE_SHEET_ITEMS = ["cash_and_equivalents", "total_assets", "total_liabilities", "total_equity"];
 
 function metricByKey(key: string): RequestedMetric {
   return PROPOSABLE_METRICS.find((candidate) => candidate.metric_key === key)!;
-}
-
-// The statement metrics a turn asks for (or kept from the previous one).
-export function statementMetrics(scope: ResearchScope): ReadonlyArray<RequestedMetric> {
-  return scope.metrics.filter((metric) => metric.available && metric.metric_key in STATEMENT_METRIC_LABELS);
 }
 
 // Adjectives that make a statement metric another, unreported figure
@@ -314,7 +309,7 @@ export function proposedMetric(
   // Adjusted income ("adjusted profit") is not the reported income statement:
   // the non-GAAP gap.
   if (metric.metric_key === "income_statement" && adjustment !== null) return proposedMetric("non_gaap_income", null, null);
-  if (!(metric.metric_key in STATEMENT_METRIC_LABELS)) return metric;
+  if (!STATEMENT_METRICS.has(metric.metric_key)) return metric;
   return qualifiedMetric(metric, adjustment, qualifier);
 }
 
@@ -432,13 +427,13 @@ export function resolveResearchScope(input: {
   // not stop a comparison asked for now ("compare it with AMD").
   const comparing = input.companies.length > 1 || peers;
   const readable = (metric: RequestedMetric) =>
-    metric.available && !(comparing && named.length > 0 && metric.metric_key in STATEMENT_METRIC_LABELS);
+    metric.available && !(comparing && named.length > 0 && STATEMENT_METRICS.has(metric.metric_key));
   const onlyUnavailable = metrics.length > 0 && metrics.every((metric) => !readable(metric)) &&
     (asked === null || input.companies.length < 2) && !asks.has("peers") && !asks.has("segments") && !margins;
   // Only cash flow, balance sheet or EPS (and any named gaps beside them): the
   // statement figures alone, as a segment request reads segments alone.
-  const onlyStatements = metrics.some((metric) => metric.available && metric.metric_key in STATEMENT_METRIC_LABELS) &&
-    metrics.every((metric) => !metric.available || metric.metric_key in STATEMENT_METRIC_LABELS) &&
+  const onlyStatements = metrics.some((metric) => metric.available && STATEMENT_METRICS.has(metric.metric_key)) &&
+    metrics.every((metric) => !metric.available || STATEMENT_METRICS.has(metric.metric_key)) &&
     !asks.has("segments") && !margins;
   // The items named now; else the previous answer's, where this turn re-reads
   // it (an evidence follow-up) or keeps the metrics it named them for ("Why?").
@@ -503,11 +498,6 @@ function routeOf(
   if (facets.margin_trend) return "trend";
   if (facets.margins) return "derived_margin";
   return "latest_quarter";
-}
-
-// The metrics a turn names that no reader here serves: each is a named gap.
-export function unavailableMetrics(scope: ResearchScope): ReadonlyArray<RequestedMetric> {
-  return scope.metrics.filter((metric) => !metric.available);
 }
 
 // A scope read back from a saved answer; null when absent or not a scope (an

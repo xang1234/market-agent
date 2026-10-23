@@ -146,9 +146,8 @@ async function loadIssuerFacts(
   if (issuer === null) return [];
   // The canonical reader owns the eligibility filter (reported, active, entitled
   // for the "app" channel, display-verified). Chat answers render on "app".
-  // Cash flow and balances reach the model only through their own blocks
-  // (statement-blocks.ts), which date a balance by its period end; here a
-  // balance would read as its fiscal-year label and crowd out the income rows.
+  // Cash flow and balances are left out: a balance would read as its
+  // fiscal-year label and crowd out the income rows.
   return loadRecentIssuerFundamentals(db, issuer, { channel: "app", limit, cutoff, excludeMetricKeys: STATEMENT_ONLY_METRICS });
 }
 

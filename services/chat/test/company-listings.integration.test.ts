@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { companyListings } from "../src/fact-blocks.ts";
+import { companyListings } from "../src/perf-block.ts";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
 
 const ISSUER = "63000000-0000-4000-8000-000000000001";
