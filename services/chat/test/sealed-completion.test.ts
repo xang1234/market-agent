@@ -42,7 +42,7 @@ const verifiedRuntime: ChatAnalystToolRuntime = async (context) => ({
 });
 
 function financialRuntime(turn: ChatFinancialTurn): ChatFinancialRuntime {
-  return { answers: () => true, run: async () => turn, assertReady: async () => {} };
+  return { take: async () => async () => turn, assertReady: async () => {} };
 }
 
 const ambiguous: ChatCoordinatorOptions["preResolveSubject"] = async ({ text }) => ({
@@ -130,9 +130,8 @@ test("a published financial answer is committed before it emits any answer block
   const { atCommit, after } = await eventsAtCommit((commit) => ({
     analystToolRuntime: verifiedRuntime,
     financialRuntime: {
-      answers: () => true,
       assertReady: async () => {},
-      run: async () => (commit(), { kind: "published", run_id: "run-9", message_id: "44444444-4444-4444-a444-444444444444", message: published }),
+      take: async () => async () => (commit(), { kind: "published", run_id: "run-9", message_id: "44444444-4444-4444-a444-444444444444", message: published }),
     },
   }));
   assert.deepEqual(atCommit, ["turn.started"]);

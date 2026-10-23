@@ -8,7 +8,7 @@ import { createSqlPeerSetResolver } from "../../fundamentals/src/peer-set-resolv
 import { MAX_TURN_SUBJECTS } from "./coordinator.ts";
 import type { FiscalQuarter } from "./fact-blocks.ts";
 import { GROWTH, MARGINS, quarterBefore } from "./quarter-metrics.ts";
-import type { ResearchScope, ScopeProposal } from "./research-scope.ts";
+import { readingAsks, type PERIOD_FIELDS, type ResearchScope, type ScopeFacet, type ScopeProposal } from "./research-scope.ts";
 
 const QUARTERS_SHOWN = 8;
 const UNPLANNED = "[chat] the company overview could not be planned; the planner answers";
@@ -17,16 +17,16 @@ type Node = Record<string, unknown> & { node_id: string };
 export type PeersOf = (issuer: FinancialSubjectRef) => Promise<ReadonlyArray<RequestedSubject>>;
 type ReadyPlan = Extract<PlanningResult, { outcome: "ready" }>;
 
-/** Whether a turn may be a company overview before its reading: resolved companies it names, and none carried. */
-export function namesCompanies(subjects: ReadonlyArray<RequestedSubject>, carried: boolean): boolean {
-  return subjects.length > 0 && subjects.every((subject) => subject.resolution.status === "resolved") && !carried;
+/** Whether every company a turn covers, named or carried, is resolved, as an overview needs. */
+export function allResolved(subjects: ReadonlyArray<RequestedSubject>): boolean {
+  return subjects.length > 0 && subjects.every((subject) => subject.resolution.status === "resolved");
 }
 
 /**
  * The companies a turn's overview covers, by the reading of its question: the
  * ones it names, or the one it names and that company's peers when it asks
  * for peers. Null when it asks for a figure or a period other than the
- * latest, turns something off ("no margins"), it has no scope or one with a
+ * latest, turns off something it shows ("no margins"), it has no scope or one with a
  * price window the overview would not show, or it asks for peers of several
  * companies or of one with none.
  */
@@ -37,17 +37,22 @@ export async function overviewSubjects(
   peersOf: PeersOf,
 ): Promise<ReadonlyArray<RequestedSubject> | null> {
   if (!asksForNoFigure(reading) || scope === null || scope.price_window) return null;
-  if (!reading.asks.has("peers")) return subjects;
+  if (!readingAsks(reading).asks.has("peers")) return subjects;
   const company = subjects.length === 1 ? subjects[0]! : null;
   if (company?.resolution.status !== "resolved") return null;
   const peers = await peersOf(company.resolution.subject_ref);
   return peers.length === 0 ? null : [company, ...peers];
 }
 
+// Its commentary comments on its figures; a cause stays a named gap.
+const OVERVIEW_ASKS: ReadonlySet<ScopeFacet> = new Set(["latest_quarter", "peers", "explains"]);
+const OVERVIEW_SHOWS: ReadonlySet<ScopeFacet | (typeof PERIOD_FIELDS)[number]> = new Set(["latest_quarter", "margins", "margin_trend"]);
+
 function asksForNoFigure(reading: ScopeProposal | null): reading is ScopeProposal {
-  return reading !== null && (reading.period.kind === "none" || reading.period.kind === "latest") && reading.metrics.length === 0 && reading.income_items.length === 0 &&
-    reading.turns_off.facets.size === 0 && reading.turns_off.metrics.size === 0 &&
-    [...reading.asks].every((facet) => facet === "latest_quarter" || facet === "peers");
+  if (reading === null) return false;
+  const { asks, offFacets, offMetrics } = readingAsks(reading);
+  return (reading.period.kind === "none" || reading.period.kind === "latest") && reading.metrics.length === 0 && reading.income_items.length === 0 &&
+    ![...offFacets].some((facet) => OVERVIEW_SHOWS.has(facet)) && offMetrics.size === 0 && [...asks].every((facet) => OVERVIEW_ASKS.has(facet));
 }
 
 /**

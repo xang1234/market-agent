@@ -150,6 +150,10 @@
       "text": "{\"metrics\":[],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"compare\",\"add\":[\"NVDA\",\"AMD\"]}}"
     },
     {
+      "match": "Question: \"Compare NVDA with AMD year to date\"",
+      "text": "{\"metrics\":[],\"asks\":[\"price_window\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\",\"AMD\"]}}"
+    },
+    {
       "match": "Question: \"What drives AAPL's margins?\"",
       "text": "{\"metrics\":[],\"asks\":[\"explains\",\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AAPL\"]}}"
     },
@@ -164,6 +168,13 @@
     {
       "match": "Create a short, specific research chat title",
       "text": "NVIDIA revenue and margins"
+    },
+    {
+      "match": [
+        "\"route\":\"financial_engine\"",
+        "\"coverage\":[{\"company\":\"NVDA\",\"status\":\"shown\"},{\"company\":\"Advanced Micro Devices, Inc.\",\"status\":\"shown\"}]"
+      ],
+      "text": "```assertions\n[{\"kind\":\"comparison\",\"op\":\"highest\",\"result\":\"F5\",\"text\":\"NVDA's gross margin [[F5]] is above its peer Advanced Micro Devices, Inc.'s [[F14]].\",\"evidence\":[\"F5\",\"F14\"]},{\"kind\":\"observation\",\"text\":\"NVDA's revenue was [[F1]] in Q4 FY2026, and Advanced Micro Devices, Inc.'s [[F10]] in Q2 FY2026.\",\"evidence\":[\"F1\",\"F10\"]}]\n```"
     },
     {
       "match": "How does NVDA compare with its peers?",

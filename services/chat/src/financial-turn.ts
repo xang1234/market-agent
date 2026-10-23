@@ -20,7 +20,7 @@ import type { ChatFinancialRuntime, ChatFinancialTurn, ChatFinancialTurnContext 
 
 export const FINANCIAL_BUNDLE_ID = "financial_answer";
 
-/** Routes financial turns to the financial lane; every other turn goes to `runner` unchanged. */
+/** Routes a turn the financial lane takes to it; every other turn goes to `runner` unchanged. */
 export function financialAwareRunner(
   runner: ChatTurnRunner,
   options: { financialRuntime?: ChatFinancialRuntime; persistAssistantMessage?: ChatAssistantMessageCommit },
@@ -28,15 +28,25 @@ export function financialAwareRunner(
   const runtime = options.financialRuntime;
   if (!runtime) return runner;
   return async (context) => {
-    if (!runtime.answers(context)) return runner(context);
+    // Nothing about an unfinished turn's companies or calculation leaves the server.
+    const failed = () => {
+      context.emit("turn.error", { error_code: "financial_answer_failed", message: "The calculation could not be completed." });
+    };
+    let taken: (() => Promise<ChatFinancialTurn>) | null;
+    try {
+      taken = await runtime.take(context);
+    } catch (error) {
+      console.error("[chat] the financial lane could not decide whether it takes the turn", error);
+      return failed();
+    }
+    if (!taken) return runner(context);
     context.emit("turn.started", { bundle_id: FINANCIAL_BUNDLE_ID });
     let turn: ChatFinancialTurn;
     try {
-      turn = await runtime.run(context);
-    } catch {
-      // Nothing about an unfinished calculation leaves the server.
-      context.emit("turn.error", { error_code: "financial_answer_failed", message: "The calculation could not be completed." });
-      return;
+      turn = await taken();
+    } catch (error) {
+      console.error("[chat] the financial turn failed", error);
+      return failed();
     }
     await emitFinancialTurn(context, turn, options.persistAssistantMessage);
   };
@@ -67,6 +77,8 @@ async function emitFinancialTurn(
     emit("turn.completed", {
       ...sealedCompletion({ message_id: turn.message_id, message }, turn.message_id),
       bundle_id: FINANCIAL_BUNDLE_ID,
+      // The deployment that wrote the commentary, as an analyst turn names its own (#183).
+      ...(message?.answered_by ? { answered_by: message.answered_by } : {}),
       ...(turn.kind === "published" ? { financial: { run_id: turn.run_id } } : {}),
     });
     return;

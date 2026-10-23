@@ -440,7 +440,7 @@ test('a golden completion whose rich_text lost its segments shows a notice in th
     assert.deepEqual(notices(h), [[GOLDEN_RICH_TEXT, 'rich_text', NOTICE]])
     const answer = h.query('[data-role="assistant"]')?.textContent ?? ''
     assert.deepEqual(
-      ['Latest quarter (Q4 2026)', 'Quarterly revenue', NOTICE].map((text) => answer.includes(text)),
+      ['All 16 requested results verified', 'NVIDIA Corporation: Revenue', NOTICE].map((text) => answer.includes(text)),
       [true, true, true],
     )
     assert.equal(errors.calls(), 1)
@@ -461,7 +461,7 @@ test('the same malformed block read by the messages GET shows the notice, and th
     assert.equal(server.gets(`/v1/chat/threads/${GOLDEN_THREAD}/messages`), 1)
     assert.deepEqual(notices(h), [[GOLDEN_RICH_TEXT, 'rich_text', NOTICE]])
     assert.deepEqual(roles(h).slice(0, 2).map(([role]) => role), ['user', 'assistant'])
-    assert.match(h.text(), /Latest quarter \(Q4 2026\)/)
+    assert.match(h.text(), /NVIDIA Corporation: Revenue/)
     assert.equal(errors.calls(), 1)
   } finally {
     errors.restore()
@@ -480,7 +480,7 @@ test('a valid golden completion renders every block with no notice', async () =>
     assert.deepEqual(notices(h), [])
     const answer = h.query('[data-role="assistant"]')?.textContent ?? ''
     assert.deepEqual(
-      ["NVDA's revenue rose in every period from Q1 2025 ($26.0B) to Q4 2026 ($62.1B).", 'Latest quarter (Q4 2026)', 'Quarterly revenue'].map((text) => answer.includes(text)),
+      ["NVDA's revenue rose in every period from Q1 FY2025 (USD 26,044,000,000.00) to Q4 FY2026 (USD 62,100,000,000.00).", 'All 16 requested results verified', 'NVIDIA Corporation: Revenue'].map((text) => answer.includes(text)),
       [true, true, true],
     )
   } finally {

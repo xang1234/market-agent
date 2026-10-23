@@ -17,20 +17,11 @@ export type GoldenTurn = { question: string; check: (kinds: ReadonlySet<string>)
 export const GOLDEN_TURNS: ReadonlyArray<GoldenTurn> = [
   {
     question: "Analyze NVDA",
-    check: (kinds) => ({
-      failures: (kinds.has("revenue_bars") || kinds.has("line_chart")) && kinds.has("metric_row")
-        ? []
-        : ["expected a chart (revenue_bars or line_chart) and a metric_row"],
-      notes: [],
-    }),
+    check: (kinds) => ({ failures: kinds.has("financial_answer") ? [] : ["expected the engine's financial_answer"], notes: [] }),
   },
   {
     question: "Compare it with AMD",
-    check: (kinds) => ({
-      failures: kinds.has("metrics_comparison") ? [] : ["expected a metrics_comparison"],
-      // A missing live bar range degrades to no price chart by design (#133).
-      notes: kinds.has("perf_comparison") ? [] : ["no perf_comparison (live price bars missing?)"],
-    }),
+    check: (kinds) => ({ failures: kinds.has("financial_answer") ? [] : ["expected the engine's financial_answer"], notes: [] }),
   },
   { question: "Explain the differences and show the evidence", check: () => ({ failures: [], notes: [] }) },
 ];

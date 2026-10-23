@@ -156,6 +156,18 @@ test('PendingTurnView shows the optimistic question while it is being saved', ()
   assert.doesNotMatch(html, /data-testid="streaming-turn"/)
 })
 
+test('an opened stream shows Starting… until turn.started, which no other event precedes (#398)', () => {
+  const render = (stream: StreamState) =>
+    renderToStaticMarkup(<PendingTurnView turn={{ phase: 'streaming', run: RUN, origin: OWN, stream, link: LINK }} {...handlers} />)
+  assert.match(render(INITIAL_STREAM_STATE), /Starting…/)
+  const started = applyChatStreamEvent(INITIAL_STREAM_STATE, { type: 'turn.started', seq: 1, bundle_id: 'financial_answer' } as unknown as ChatSseEvent)
+  assert.doesNotMatch(render(started), /Starting…/)
+  const failed = renderToStaticMarkup(
+    <PendingTurnView turn={{ phase: 'failed', run: RUN, origin: OWN, stream: INITIAL_STREAM_STATE, error: 'The run failed.', recovery: 'retry_run' }} {...handlers} />,
+  )
+  assert.deepEqual([/The run failed\./.test(failed), /Starting…/.test(failed)], [true, false], 'a failed run says so, not Starting…')
+})
+
 test('an adopted run shows its plan and its link state, never streamed blocks; an own run shows its blocks attached or not', () => {
   const stream: StreamState = { ...STREAMED, turn_status: 'started', plan_steps: [{ step_id: 'planner', label: 'Planner', detail: 'Planning.', status: 'running' }] }
   const render = (link: StreamLink, origin: RunOrigin = ADOPTED) => renderToStaticMarkup(<PendingTurnView turn={{ phase: 'streaming', run: RUN, origin, stream, link }} {...handlers} />)

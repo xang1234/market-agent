@@ -1,10 +1,10 @@
-// Chat's financial lane. A turn that asks for a financial calculation is
-// planned by the engine's planner against the server-resolved subject set,
-// executed on evidence, and published only through finalization — whose
-// transaction also writes the assistant message, so an answer exists exactly
-// when its snapshot and certificate do. Nothing in this lane calls the legacy
-// free-text composer: when a calculation cannot be planned or verified, the
-// turn gets a structured gap, never a model-written number.
+// Chat's financial lane. A turn about a company is planned by the engine's
+// planner against the server-resolved subject set, executed on evidence, and
+// published only through finalization — whose transaction also writes the
+// assistant message, so an answer exists exactly when its snapshot and
+// certificate do. Nothing in this lane calls the legacy free-text composer:
+// when a calculation cannot be planned or verified, the turn gets a structured
+// gap, never a model-written number.
 //
 // A turn's companies are the ones the analyst path would take for it
 // (coordinator.ts resolveTurnSubjects): each is resolved, asked about, or
@@ -18,8 +18,6 @@ import {
   dependencyClosure,
   hashCanonical,
   operationDependencies,
-  PLANNABLE_METRICS,
-  RATIO_CATALOG_V1,
   type FinancialPlanV1,
   type FinancialRuntimeAuthority,
   type FinancialSubjectRef,
@@ -30,7 +28,6 @@ import { ParentRefusedError, type PersistParentArtifact } from "../../financial-
 import {
   buildDeterministicPlan,
   planFinancialRequest,
-  PlanningModelError,
   resolveClarification,
   type Clarification,
   type PlanningContext,
@@ -45,7 +42,7 @@ import { publishRequest, type RequestGap } from "../../financial-engine/src/requ
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { comparedAdditions, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId } from "./chat-ids.ts";
-import { namesCompanies, overviewPeers, overviewSubjects, planCompanyOverview, type PeersOf } from "./company-overview.ts";
+import { allResolved, overviewPeers, overviewSubjects, planCompanyOverview, type PeersOf } from "./company-overview.ts";
 import { noteBlock } from "./fact-blocks.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { companyKey, extractSubjectMentions } from "./subject-extraction.ts";
@@ -56,10 +53,12 @@ import {
   PROPOSABLE_METRICS,
   proposedMetric,
   readingAsks,
+  type CompanyChange,
   type IncomeItem,
   type RequestedMetric,
   type ResearchScope,
   type ScopeFacet,
+  type ScopeField,
   type ScopeProposal,
 } from "./research-scope.ts";
 
@@ -98,10 +97,12 @@ export type CommentaryRequest = Readonly<{
 export type ChatFinancialTurnContext = ChatTurnRunContext & { clarificationAnswer?: ChatClarificationAnswer };
 
 export type ChatFinancialRuntime = Readonly<{
-  /** Whether this lane takes the turn. Cheap and synchronous, so the stream can say so before any work. */
-  answers(context: ChatFinancialTurnContext): boolean;
-  /** The lane's outcome. Call only after answers(context); it throws otherwise. */
-  run(context: ChatFinancialTurnContext): Promise<ChatFinancialTurn>;
+  /**
+   * The run of a turn about a company (one it names, a follow-up keeps, or a
+   * clarification asks about), or null to leave the turn to the analyst path.
+   * It reads the question first, so it may wait on a model.
+   */
+  take(context: ChatFinancialTurnContext): Promise<(() => Promise<ChatFinancialTurn>) | null>;
   /** Throws unless verified finance is ready; the server awaits it before serving any turn. */
   assertReady(): Promise<void>;
 }>;
@@ -127,19 +128,69 @@ export type ChatFinancialRuntimeDeps = Readonly<{
   commentary?: (db: SqlExecutor, input: CommentaryRequest) => Promise<void>;
 }>;
 
+// The lane each facet asks for, when a question names no metric: a figure
+// the engine shows, something only the analyst path answers (the previous
+// answer's evidence, guidance from claims, market data per #398 D2), or neither.
+const FACET_LANE: Readonly<Record<ScopeFacet, "figure" | "analyst" | "neutral">> = {
+  peers: "neutral",
+  segments: "figure",
+  margins: "figure",
+  margin_trend: "figure",
+  price_window: "analyst",
+  benchmark: "analyst",
+  guidance: "analyst",
+  explains: "neutral",
+  evidence: "analyst",
+  latest_quarter: "neutral",
+};
+
+// What a follow-up may keep from its scope and still be answered by the
+// overview, which shows the latest quarters of the income statement.
+const OVERVIEW_KEEPS: ReadonlySet<ScopeField> = new Set(["peers", "metrics"]);
+const OVERVIEW_METRICS: ReadonlySet<string> = new Set(["income_statement"]);
+
+// The companies a reading's change names, whatever it does with them.
+function namedCompanies(change: CompanyChange): number {
+  switch (change.kind) {
+    case "compare":
+      return change.add.length;
+    case "drop":
+      return change.drop.length + change.add.length;
+    default:
+      return change.names.length;
+  }
+}
+
+// The analyst path keeps a turn that asks for no figure but something only it
+// answers, or whose scope keeps market data; a follow-up that names no company
+// and asks for nothing but an explanation ("Why?", "thanks"); and one whose
+// scope keeps what an overview would not show.
+function leftToAnalyst(reading: ScopeProposal | null, scope: ResearchScope | null): boolean {
+  if (reading === null) return false;
+  const { asks, offMetrics } = readingAsks(reading);
+  if (reading.metrics.some((metric) => !offMetrics.has(metric.metric_key)) || reading.income_items.length > 0) return false;
+  const lanes = [...asks].map((facet) => FACET_LANE[facet]);
+  if (lanes.includes("figure")) return false;
+  if (lanes.includes("analyst")) return true;
+  if (scope !== null && (scope.price_window !== null || scope.benchmark)) return true;
+  const asksNothing = [...asks].every((facet) => facet === "explains") && reading.period.kind !== "latest";
+  if (namedCompanies(reading.companies) === 0 && asksNothing) return true;
+  if ((reading.companies.kind === "as_named" && reading.companies.names.length > 0) || scope === null) return false;
+  const overviewPeriod = reading.period.kind === "none" || reading.period.kind === "latest";
+  const keepsOther = scope.inherited.some((field) => !OVERVIEW_KEEPS.has(field)) || scope.guidance === true ||
+    (scope.inherited.includes("metrics") && scope.metrics.some((metric) => !OVERVIEW_METRICS.has(metric.metric_key)));
+  return !overviewPeriod || keepsOther;
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const MAX_PLANNING_MODEL_CALLS = 2;
 
-/**
- * A turn's gap: the engine's reason, a unit the verifier refused, or a
- * question that names no company. A failed commit is a turn error instead.
- */
-type ChatGap = Exclude<RequestGap, "publication_failed"> | "verification_failed" | "no_company";
+/** A turn's gap: the engine's reason, or a unit the verifier refused. A failed commit is a turn error instead. */
+type ChatGap = Exclude<RequestGap, "publication_failed"> | "verification_failed";
 
 const UNSUPPORTED = "This request asks for a calculation outside the verified financial definitions I can compute";
 
 const GAP_TEXT: Readonly<Record<ChatGap, string>> = {
-  no_company: "Name the company this calculation is for.",
   planning_unavailable: "I can't verify a calculation for this request right now, so I won't give an unverified number.",
   unsupported: `${UNSUPPORTED}.`,
   configuration_needed: "This request needs a subject or definition I can't resolve to one verified meaning.",
@@ -166,13 +217,11 @@ const DECLINES: Readonly<Record<Exclude<RequestGap, "publication_failed">, boole
 };
 
 export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): ChatFinancialRuntime {
-  const answers = (context: ChatFinancialTurnContext) =>
-    isFinancialRequest(context.userIntent ?? "") && Boolean(context.userId) && UUID.test(context.threadId);
-  const run = async (context: ChatFinancialTurnContext): Promise<ChatFinancialTurn> => {
-    if (!answers(context)) throw new Error("the financial lane does not take this turn");
-    const text = context.userIntent!;
+  const take = async (context: ChatFinancialTurnContext): Promise<(() => Promise<ChatFinancialTurn>) | null> => {
+    if (!context.userId || !UUID.test(context.threadId)) return null;
+    const text = context.userIntent ?? "";
     const turnId = context.turnId ?? context.runId;
-    const authority = chatAuthority(context.userId!, context.threadId, turnId);
+    const authority = chatAuthority(context.userId, context.threadId, turnId);
 
     const messageId = financialMessageId(context.threadId, turnId);
     // A retry of a turn whose answer is saved returns that answer: the thread
@@ -183,158 +232,138 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       `select blocks->0->>'kind' as kind from chat_messages where message_id = $1::uuid`,
       [messageId],
     );
-    if (existing && existing.kind !== "financial_answer") return savedGap(deps.pool, context.threadId, messageId);
-    const answered = existing !== undefined;
-    const requested = answered ? ANSWERED : await requestedSubjects(deps, context, text);
-    if (requested.clarify) return { kind: "clarification", clarification: companyQuestion(requested.clarify) };
-    if (!answered && requested.subjects.length === 0) return gap("no_company");
-    // The reading of the question is a model call, so it starts beside the
-    // planner's model call, when planning companies the turn names (whose
-    // overview waits on it), or once a plan is driven: a turn that ends before
-    // any of these (a question about a company, a gap no model planned for a
-    // named period) reads nothing. The scope waits on the reading, so each use
-    // of them decides first whether to read (prepared). The saved answer has
-    // both already.
-    let decideReading = (_read: boolean): void => {};
-    const reading = answered ? Promise.resolve(null) : new Promise<ScopeProposal | null>((resolve) => {
-      decideReading = (read) => {
-        decideReading = () => {};
-        // No reading: the answer says its coverage was not checked (UNCHECKED).
-        resolve(read ? context.reading?.() ?? null : null);
+    const run = (requested: TurnCompanies, reading: ScopeProposal | null, scope: ResearchScope | null) => async (): Promise<ChatFinancialTurn> => {
+      // What planning settled, for a gap: the companies it was asked about, a
+      // clarification pick (recorded before the model is called) or the peers
+      // an overview added included, and the planner's result.
+      let asked = requested.subjects;
+      let planned: PlanningResult | undefined;
+      let overview = false;
+      const declinedGap = (reason: ChatGap) => {
+        // ponytail: a retry that resumes a reserved run does not plan, so its
+        // gap names the companies the message resolved, without a pick or peers.
+        const refs = asked.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref] : []);
+        // One about no company leaves the previous answer's companies and scope.
+        if (refs.length === 0) return gap(reason, planned);
+        return {
+          ...gap(reason, planned),
+          // Another attempt may answer the turn meanwhile (a run it finished
+          // reads here as run_failed): the gap never replaces that answer.
+          message_id: messageId,
+          subject_refs: refs,
+          // It computed no figure, so it names none, and no reader re-reads it.
+          ...(scope === null ? {} : {
+            research_scope: {
+              ...scope,
+              route: "financial_gap" as const,
+              reads: "financial_gap" as const,
+              companies: answeredCompanies(refs.map((ref) => ref.id), scope, requested.labels),
+              metrics: [],
+            },
+          }),
+        };
       };
-    });
-    const { planningModel: model } = deps;
-    const planningModel: PlanningModel | null = model && ((request) => {
-      decideReading(true);
-      return model(request);
-    });
-    // This lane runs before the analyst path resolves the turn's companies, so
-    // the scope gets the ones the message resolved; the answer saves the ones
-    // it answered for (answeredCompanies).
+      // ponytail: only the attempt that planned the overview writes its
+      // commentary, so an attempt that did not plan writes none. Two do not: a
+      // retry that resumes a reserved run after a failed commit, and a retry of
+      // a saved answer. Either leaves the answer without commentary. Upgrade
+      // path: mark the overview in the plan's provenance, so any publishing
+      // attempt can compose.
+      const withCommentary = (answer: ChatFinancialTurn): ChatFinancialTurn => {
+        const { commentary: save } = deps;
+        if (!overview || !save || answer.kind !== "published" || !answer.message) return answer;
+        const { message } = answer;
+        return {
+          ...answer,
+          commentary: async () => {
+            // The answer is committed and shown: nothing after it may fail the turn.
+            try {
+              await save(deps.pool, {
+                message,
+                request: { authority, request_key: turnId },
+                labels: requested.labels,
+                turn: { thread_id: context.threadId, run_id: context.runId, ...(context.turnId ? { turn_id: context.turnId } : {}), question: text },
+              });
+            } catch (error) {
+              // The append may have committed before the error: the turn ends on the row as read back.
+              console.error(`[chat] the analyst commentary on message ${messageId} failed; the turn completes with the message as read back`, error);
+            }
+            return (await readBack(deps.pool, context.threadId, messageId)) ?? message;
+          },
+        };
+      };
+      // A retry of this turn resumes what the first attempt reserved; it never plans again.
+      const outcome = await publishRequest(deps.pool, {
+        authority,
+        request_key: turnId,
+        plan: async (db) => {
+          planned = await planTurn(deps.planningModel, context, text, requested.subjects, authority, deps.clock?.() ?? new Date(), (subjects) => {
+            asked = subjects;
+          }, {
+            scope,
+            reading,
+            evidence: deps.evidence(db),
+            peersOf: (issuer) => overviewPeers(db, issuer),
+            onOverview: () => {
+              overview = true;
+            },
+          });
+          return planned;
+        },
+        evidence: deps.evidence,
+        persistParent: persistAssistantMessage(context.threadId, messageId, {
+          scope,
+          reading,
+          overview: () => overview,
+          carried: requested.carried,
+          notFound: requested.notFound,
+          labels: requested.labels,
+        }, { authority, request_key: turnId }),
+      });
+      switch (outcome.status) {
+        case "clarification":
+          return { kind: "clarification", clarification: outcome.clarification };
+        case "gap":
+          // A commit that failed is an error of this turn, not an answer; the retry publishes it.
+          if (outcome.reason === "publication_failed") throw new Error("the financial answer could not be committed");
+          return DECLINES[outcome.reason] ? declinedGap(outcome.reason) : gap(outcome.reason);
+        case "driven": {
+          const [unit] = outcome.report?.finalized ?? [];
+          const committed = outcome.report === null || unit?.result.status === "published" || unit?.result.status === "existing" ||
+            (!unit && outcome.report.existing > 0);
+          if (committed) return withCommentary(await published(deps.pool, outcome.run_id, context.threadId, messageId));
+          // A drive cancelled midway is a notice, as a cancelled run is.
+          if (outcome.report.execution === "cancelled") return gap("run_failed");
+          return declinedGap(unit?.result.status === "rejected" ? "verification_failed" : "run_failed");
+        }
+      }
+    };
+    if (existing) return existing.kind === "financial_answer" ? run(NO_COMPANIES, null, null) : () => savedGap(deps.pool, context.threadId, messageId);
+    // A retry of a turn whose run is reserved resumes it, whatever this attempt's reading says.
+    const reserved = await findPlanForRequest(deps.pool, { authority, request_key: turnId }) !== null;
+    const requested = await requestedSubjects(deps, context, text);
+    const { clarify } = requested;
+    if (clarify && !reserved) return async () => ({ kind: "clarification", clarification: companyQuestion(clarify) });
+    if (requested.subjects.length === 0 && !reserved) return null;
+    const reading = await context.reading?.() ?? null;
+    // The scope gets the companies the message resolved, as this lane runs
+    // before the analyst path resolves them; the answer saves the ones it
+    // answered for (answeredCompanies).
     const { resolved } = requested;
-    // Called at once, so the scope queues its reads before the request takes
-    // its client; one that throws before it answers is no scope.
     const { researchScope } = deps;
-    const scope = (async () => researchScope && !answered
-      ? researchScope({ ...context, subjectPreResolution: resolved[0], subjectPreResolutions: resolved }, reading)
+    const scope = await (async () => researchScope
+      ? researchScope({ ...context, subjectPreResolution: resolved[0], subjectPreResolutions: resolved }, Promise.resolve(reading))
       : null)().catch((reason) => {
       console.warn("[chat] research scope unavailable; saving the financial answer without it", reason);
       return null;
     });
-    const prepared = (read: boolean) => {
-      decideReading(read);
-      return Promise.all([scope, reading]);
-    };
-    // What planning settled, for a gap: the companies it was asked about, a
-    // clarification pick (recorded before the model is called) or the peers
-    // an overview added included, and the planner's result.
-    let asked = requested.subjects;
-    let planned: PlanningResult | undefined;
-    let overview = false;
-    const declinedGap = async (reason: ChatGap) => {
-      // ponytail: a retry that resumes a reserved run does not plan, so its
-      // gap names the companies the message resolved, without a pick or peers.
-      const refs = asked.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref] : []);
-      // One about no company leaves the previous answer's companies and scope.
-      if (refs.length === 0) return gap(reason, planned);
-      const [saved] = await prepared(false);
-      return {
-        ...gap(reason, planned),
-        // Another attempt may answer the turn meanwhile (a run it finished
-        // reads here as run_failed): the gap never replaces that answer.
-        message_id: messageId,
-        subject_refs: refs,
-        // It computed no figure, so it names none, and no reader re-reads it.
-        ...(saved === null ? {} : {
-          research_scope: {
-            ...saved,
-            route: "financial_gap" as const,
-            reads: "financial_gap" as const,
-            companies: answeredCompanies(refs.map((ref) => ref.id), saved, requested.labels),
-            metrics: [],
-          },
-        }),
-      };
-    };
-    // ponytail: only the attempt that planned the overview writes its
-    // commentary, so an attempt that did not plan writes none. Two do not: a
-    // retry that resumes a reserved run after a failed commit, and a retry of
-    // a saved answer. Either leaves the answer without commentary. Upgrade
-    // path: mark the overview in the plan's provenance, so any publishing
-    // attempt can compose.
-    const withCommentary = (answer: ChatFinancialTurn): ChatFinancialTurn => {
-      const { commentary: save } = deps;
-      if (!overview || !save || answer.kind !== "published" || !answer.message) return answer;
-      const { message } = answer;
-      return {
-        ...answer,
-        commentary: async () => {
-          // The answer is committed and shown: nothing after it may fail the turn.
-          try {
-            await save(deps.pool, {
-              message,
-              request: { authority, request_key: turnId },
-              labels: requested.labels,
-              turn: { thread_id: context.threadId, run_id: context.runId, ...(context.turnId ? { turn_id: context.turnId } : {}), question: text },
-            });
-          } catch (error) {
-            // The append may have committed before the error: the turn ends on the row as read back.
-            console.error(`[chat] the analyst commentary on message ${messageId} failed; the turn completes with the message as read back`, error);
-          }
-          return (await readBack(deps.pool, context.threadId, messageId)) ?? message;
-        },
-      };
-    };
-    // A retry of this turn resumes what the first attempt reserved; it never plans again.
-    const outcome = await publishRequest(deps.pool, {
-      authority,
-      request_key: turnId,
-      plan: async (db) => {
-        planned = await planTurn(planningModel, context, text, requested.subjects, authority, deps.clock?.() ?? new Date(), (subjects) => {
-          asked = subjects;
-        }, {
-          carried: requested.carried.length > 0,
-          prepare: () => prepared(true),
-          evidence: deps.evidence(db),
-          peersOf: (issuer) => overviewPeers(db, issuer),
-          onOverview: () => {
-            overview = true;
-          },
-        });
-        return planned;
-      },
-      evidence: deps.evidence,
-      // The reading and the scope settle outside any transaction; the scope
-      // queued its reads before this request took its client.
-      beforeDrive: () => prepared(true),
-      persistParent: persistAssistantMessage(context.threadId, messageId, {
-        // Decided before the drive; never a model call inside the transaction.
-        prepared: () => prepared(false),
-        carried: requested.carried,
-        notFound: requested.notFound,
-        labels: requested.labels,
-      }, { authority, request_key: turnId }),
-    });
-    switch (outcome.status) {
-      case "clarification":
-        return { kind: "clarification", clarification: outcome.clarification };
-      case "gap":
-        // A commit that failed is an error of this turn, not an answer; the retry publishes it.
-        if (outcome.reason === "publication_failed") throw new Error("the financial answer could not be committed");
-        return DECLINES[outcome.reason] ? declinedGap(outcome.reason) : gap(outcome.reason);
-      case "driven": {
-        const [unit] = outcome.report?.finalized ?? [];
-        const committed = outcome.report === null || unit?.result.status === "published" || unit?.result.status === "existing" ||
-          (!unit && outcome.report.existing > 0);
-        if (committed) return withCommentary(await published(deps.pool, outcome.run_id, context.threadId, messageId));
-        // A drive cancelled midway is a notice, as a cancelled run is.
-        if (outcome.report.execution === "cancelled") return gap("run_failed");
-        return declinedGap(unit?.result.status === "rejected" ? "verification_failed" : "run_failed");
-      }
-    }
+    if (reserved) return run(requested, reading, scope);
+    if (leftToAnalyst(reading, scope)) return null;
+    const kept = withinScope(requested, scope);
+    return kept.subjects.length === 0 ? null : run(kept, reading, scope);
   };
   const assertReady = () => requireFinancialReadiness(deps.pool, ["chat"]);
-  return Object.freeze({ answers, run, assertReady });
+  return Object.freeze({ take, assertReady });
 }
 
 // The mentions a turn's plan requests: an explicit subject (a thread opened
@@ -442,12 +471,28 @@ function companyLabels(resolutions: ReadonlyArray<ChatSubjectPreResolution>, iss
   return labels;
 }
 
-const ANSWERED: TurnCompanies = { subjects: [], resolved: [], carried: [], notFound: [], labels: new Map() };
-
 // A question about the companies to compare, which only a new message answers.
 function companyQuestion(question: string): Clarification {
   return { clarification_id: hashCanonical("clarification", { kind: "request", question, choices: [] }), kind: "request", question, choices: [] };
 }
+
+// A carried company the scope dropped (an auto-selected peer turned off) is
+// not planned, as the analyst path does not cover it.
+function withinScope(requested: TurnCompanies, scope: ResearchScope | null): TurnCompanies {
+  const scoped = new Set(scope?.companies.map((company) => company.issuer_id.toLowerCase()));
+  if (scoped.size === 0) return requested;
+  const carried = new Set(requested.carried);
+  const dropped = new Set(requested.subjects.filter((subject) =>
+    subject.resolution.status === "resolved" && carried.has(subject.mention) && !scoped.has(subject.resolution.subject_ref.id.toLowerCase())).map((subject) => subject.mention));
+  if (dropped.size === 0) return requested;
+  return {
+    ...requested,
+    subjects: requested.subjects.filter((subject) => !dropped.has(subject.mention)),
+    carried: requested.carried.filter((name) => !dropped.has(name)),
+  };
+}
+
+const NO_COMPANIES: TurnCompanies = { subjects: [], resolved: [], carried: [], notFound: [], labels: new Map() };
 
 async function planTurn(
   model: PlanningModel | null,
@@ -460,8 +505,8 @@ async function planTurn(
   // before the model is, and with the overview's once it replaces the planner.
   onSubjects: (subjects: ReadonlyArray<RequestedSubject>) => void,
   turn: Readonly<{
-    carried: boolean;
-    prepare: () => Promise<[ResearchScope | null, ScopeProposal | null]>;
+    scope: ResearchScope | null;
+    reading: ScopeProposal | null;
     evidence: FinancialEvidencePort;
     peersOf: PeersOf;
     onOverview: () => void;
@@ -489,41 +534,20 @@ async function planTurn(
   }
   onSubjects(subjects);
   if (CASH_RESILIENCE.test(text)) return planCashResilience(planningContext(subjects), text);
-  // A failing or unreachable model is a planning gap (publishRequest); the narrative composer is never a fallback for numbers.
-  let dropped = false;
-  // A planner the overview drops reaches the model no more (its repair call).
-  const planning: PlanningModel | null = model && ((request) => dropped ? Promise.reject(DROPPED) : model(request));
-  const planned = planFinancialRequest(planningContext(subjects), text, planning ?? noModel);
-  if (!namesCompanies(subjects, turn.carried)) return planned;
-  // Settled now, or a planner that fails while the overview is decided is an unhandled rejection.
-  const failure = planned.then(() => null, (reason: unknown) => ({ reason }));
-  let companies: ReadonlyArray<RequestedSubject> | null;
-  let overview: PlanningResult | null;
-  try {
-    const [scope, reading] = await turn.prepare();
-    companies = await overviewSubjects(subjects, reading, scope, turn.peersOf);
-    overview = companies && await planCompanyOverview(planningContext(companies), turn.evidence);
-  } catch (reason) {
-    // A defect fails the turn, so the planner's answer is not needed either.
-    dropped = true;
-    throw reason;
-  }
-  if (!companies || !overview) return planned;
-  onSubjects(companies);
-  turn.onOverview();
-  dropped = true;
-  void failure.then((failed) => {
-    if (failed === null) return;
-    if (failed.reason instanceof PlanningModelError && failed.reason.cause === DROPPED) {
-      console.warn("[chat] the planner was dropped for the company overview; its next model call was not made");
-    } else {
-      console.warn("[chat] the planner the company overview replaced had failed", failed.reason);
+  // The reading is settled before the turn is planned, so an overview is
+  // decided first and the planner's model is called only without one.
+  if (allResolved(subjects)) {
+    const companies = await overviewSubjects(subjects, turn.reading, turn.scope, turn.peersOf);
+    const overview = companies && await planCompanyOverview(planningContext(companies), turn.evidence);
+    if (companies && overview) {
+      onSubjects(companies);
+      turn.onOverview();
+      return overview;
     }
-  });
-  return overview;
+  }
+  // A failing or unreachable model is a planning gap (publishRequest); the narrative composer is never a fallback for numbers.
+  return planFinancialRequest(planningContext(subjects), text, model ?? noModel);
 }
-
-const DROPPED = new Error("dropped for the company overview");
 
 const CASH_RESILIENCE = /\bcash[- ]resilience\b/iu;
 const CASH_RESILIENCE_VIEW = "cash_resilience_view";
@@ -670,8 +694,10 @@ function persistAssistantMessage(
   threadId: string,
   messageId: string,
   turn: Readonly<{
-    // The scope and the reading, settled before the run was driven (beforeDrive).
-    prepared: () => Promise<[ResearchScope | null, ScopeProposal | null]>;
+    scope: ResearchScope | null;
+    reading: ScopeProposal | null;
+    // Whether the plan is the overview, of the latest quarters.
+    overview: () => boolean;
     carried: ReadonlyArray<string>;
     notFound: ReadonlyArray<string>;
     labels: ReadonlyMap<string, string>;
@@ -679,11 +705,12 @@ function persistAssistantMessage(
   request: { authority: FinancialRuntimeAuthority; request_key: string },
 ): PersistParentArtifact {
   return async (tx, publication) => {
-    const [scope, reading] = await turn.prepared();
+    const { scope, reading } = turn;
     const plan = scope === null && reading === null ? null : await findPlanForRequest(tx.client, request);
     // A plan member the turn gave no label is a peer the overview selected. The
     // saved plan says so, as a retry that resumes the run does not plan again.
     const answeredPeers = plan?.subjects.members.some((member) => !turn.labels.has(member.subject_ref.id.toLowerCase())) ?? false;
+    // The commentary is written from the answer's figures alone, so it gives no cause: an explanation stays uncovered.
     const missing = reading === null || plan === null ? [] : uncoveredAsks(answeredPeers ? withoutPeers(reading) : reading, plan, turn.labels);
     const note = [
       ...(turn.notFound.length === 0 ? [] : [`No company matched ${labelList(turn.notFound)}.`]),
@@ -702,6 +729,8 @@ function persistAssistantMessage(
       reads: "financial_answer" as const,
       companies: answeredCompanies(plan.subjects.members.map((member) => member.subject_ref.id), scope, turn.labels),
       metrics: planMetrics(plan),
+      // The overview shows each company's latest quarters, so it keeps no period.
+      ...(turn.overview() ? { fiscal_year: null, fiscal_quarter: null } : {}),
       ...(reading === null ? { coverage_unchecked: true as const } : {}),
     };
     // It replaces a gap another attempt of the turn saved under its id.
@@ -929,19 +958,4 @@ function gap(reason_code: ChatGap, planned?: PlanningResult): Extract<ChatFinanc
     ? REASON_TEXT[planned.reason as keyof typeof REASON_TEXT]
     : null;
   return { kind: "gap", reason_code, text: reason === null ? GAP_TEXT[reason_code] : `${UNSUPPORTED}: ${reason}.` };
-}
-
-const FINANCIAL_TERMS = new RegExp(
-  `\\b(${[
-    // Catalog labels without qualifiers: "EPS (basic)" is asked about as "EPS".
-    ...[...PLANNABLE_METRICS, ...RATIO_CATALOG_V1.values()].map((definition) => definition.label.replace(/\s*\(.*\)$/u, "")),
-    "sales", "margin", "margins", "earnings per share", "EPS", "profit", "cash flow", "free cash flow", "capex", "cash resilience", "net income", "operating income",
-    "market cap", "market capitalization", "P/E", "PE ratio", "price-to-earnings", "price to earnings", "price/earnings",
-  ].map((term) => term.replace(/[.*+?^${}()|[\]\\/]/gu, "\\$&")).join("|")})\\b`,
-  "iu",
-);
-
-/** Whether a message asks about a financial quantity this lane can verify. Anything else stays narrative. */
-export function isFinancialRequest(text: string): boolean {
-  return FINANCIAL_TERMS.test(text);
 }

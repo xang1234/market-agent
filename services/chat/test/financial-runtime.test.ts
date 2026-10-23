@@ -6,20 +6,15 @@ import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { databaseUrl, IDS, ORIGINAL_REVENUE } from "../../financial-engine/test/db-fixtures.ts";
 import type { ChatAnalystToolRuntime, ChatAssistantMessagePersistence } from "../src/coordinator.ts";
 import { financialMessageId } from "../src/chat-ids.ts";
-import { createChatFinancialRuntime, isFinancialRequest, SCOPE_METRICS } from "../src/financial-runtime.ts";
+import { createChatFinancialRuntime, SCOPE_METRICS } from "../src/financial-runtime.ts";
 import { METRIC_CATALOG_V1, OPERATION_REGISTRY } from "../../financial-core/src/index.ts";
-import { proposedMetric, type CompanyChange, type ScopeProposal } from "../src/research-scope.ts";
+import { proposedMetric, resolveResearchScope, type CompanyChange, type ScopeProposal } from "../src/research-scope.ts";
 import { parseProposal } from "../src/scope-proposal.ts";
 import { extractSubjectMentions } from "../src/subject-extraction.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import type { FinancialPool } from "../../financial-engine/src/ports.ts";
-import { changing, chatDatabase, chatHarness, comparing, completed, INSTRUMENT_A, LISTING_A, METRIC_READING, MISSING_ISSUER, resolveMention, revenueModel } from "./financial-fixtures.ts";
+import { changing, chatDatabase, chatHarness, comparing, completed, INSTRUMENT_A, LISTING_A, METRIC_READING, MISSING_ISSUER, NO_ASKS, resolveMention, revenueModel } from "./financial-fixtures.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "../src/subjects.ts";
-
-test("financial intent is recognized from the definition catalog", () => {
-  for (const text of ["Compare revenue for AAA and BBB", "What was AAA's gross margin?", "EPS for AAA", "net income trend", "AAA's cash and equivalents"]) assert.ok(isFinancialRequest(text), text);
-  for (const text of ["tell me about AAA", "what is the latest news", "who is the CEO"]) assert.ok(!isFinancialRequest(text), text);
-});
 
 test("an unready engine stops the server instead of leaving metric questions on legacy numbers", async () => {
   // A database missing every financial table: every readiness check reports absent.
@@ -179,10 +174,6 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     const unclear = completed((await chatHarness(pool, { model: revenueModel([]), priorSubjects: async () => [aaa, bbb], readQuestion: changing({ kind: "unclear", names: ["CCC"] }) }).run({ ...base, userIntent: "What about CCC's revenue?" })).events);
     assert.equal(unclear.clarification, true);
     assert.equal((unclear.financial_clarification as { question: string }).question, 'Add CCC to the AAA and BBB comparison, or look at CCC alone? Say "add CCC" or "just CCC".');
-    const model = revenueModel([]);
-    const none = completed((await chatHarness(pool, { model, priorSubjects: async () => [] }).run({ ...base, userIntent: "And what about its revenue?" })).events);
-    assert.deepEqual(none.financial_gap, { reason_code: "no_company" });
-    assert.equal(model.calls, 0, "nothing is planned for no company");
   });
 
   // The scope financialResearchScope saves, over the companies it is given.
@@ -343,7 +334,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(await answer(async () => null), unchecked, "no reading");
     assert.deepEqual(await answer(async () => { throw new Error("scope model down"); }), unchecked, "a failed reading");
     assert.deepEqual(await answer(() => { throw new Error("no scope reader"); }), unchecked, "a reader that throws before it answers");
-    assert.deepEqual(await answer(async () => parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named", names: [] } }), "")), [[], undefined]);
+    assert.deepEqual(await answer(async () => parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named", names: ["AAA"] } }), "Revenue for AAA")), [[], undefined]);
   });
 
   await t.test("each name a turn gives is resolved once (#425)", async () => {
@@ -399,7 +390,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(block.financial.results.map((result: { disposition: string }) => result.disposition), ["verified", "missing"]);
   });
 
-  await t.test("from a company's page, a question naming no other company plans beside its reading, not after it", async () => {
+  await t.test("from a company's page, a question plans after its reading, which decides its lane", async () => {
     const order: string[] = [];
     let release = () => {};
     const readQuestion = () => new Promise<ScopeProposal>((resolve) => {
@@ -423,9 +414,8 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       assert.ok(completed(events).message_id, JSON.stringify(completed(events)));
       return order;
     };
-    assert.deepEqual(await run("Revenue in fiscal 2023?"), ["planned", "read"]);
-    assert.deepEqual(await run("AAA's Gross Margin?"), ["planned", "read"], "the page's own ticker and a metric's name");
-    // A company written by name may be one the reading adds, so the plan waits on it, the first word too.
+    assert.deepEqual(await run("Revenue in fiscal 2023?"), ["read", "planned"]);
+    assert.deepEqual(await run("AAA's Gross Margin?"), ["read", "planned"], "the page's own ticker and a metric's name");
     assert.deepEqual(await run("Compare its revenue with Beta Holdings"), ["read", "planned"]);
     assert.deepEqual(await run("Beta's revenue in fiscal 2023, and this one's?"), ["read", "planned"]);
     assert.deepEqual(await run("Microsoft revenue in fiscal 2023 versus this?"), ["read", "planned"]);
@@ -615,20 +605,122 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.equal(pointers.thread, pointers.answer);
   });
 
-  await t.test("narrative turns keep the analyst path", async () => {
+  await t.test("a turn about a company reaches the engine; one about none, or whose reading asks for no figure but evidence, guidance or market data, the analyst (#398)", async () => {
+    const carried = async (ticker: string) => ({ ...(await resolveMention(ticker)), handoff: { display_labels: { ticker } } }) as unknown as ChatResolvedSubjectPreResolution;
+    const [aaa, bbb] = [await carried("AAA"), await carried("BBB")];
     let analystCalls = 0;
     const analyst: ChatAnalystToolRuntime = () => {
       analystCalls += 1;
       return { snapshot_id: randomUUID(), blocks: [], verification: { ok: true } };
     };
-    await chatHarness(pool, { model: revenueModel([]), analyst }).run({ ...base, userIntent: "tell me about AAA" });
-    assert.equal(analystCalls, 1);
-    const { events } = await chatHarness(pool, { model: revenueModel(["AAA"]), analyst }).run({ ...base, userIntent: "Revenue for AAA" });
-    assert.equal(completed(events).bundle_id, "financial_answer");
-    assert.equal(analystCalls, 1, "a metric question always reaches the engine, never the analyst");
+    const reading = (proposal: Partial<ScopeProposal>) => async () => ({ ...NO_ASKS, ...proposal });
+    const lane = async (userIntent: string, options: Omit<Parameters<typeof chatHarness>[1], "model" | "analyst">, mentions: string[] = []) => {
+      const before = analystCalls;
+      const { events } = await chatHarness(pool, { model: revenueModel(mentions), analyst, ...options }).run({ ...base, userIntent });
+      // Either lane starts the turn once, before any other event (#398).
+      assert.deepEqual([events[0]?.type, events.filter((event) => event.type === "turn.started").length], ["turn.started", 1], userIntent);
+      const done = completed(events);
+      if (analystCalls > before) return "analyst";
+      assert.equal(done.bundle_id, "financial_answer", userIntent);
+      const { rows: [saved] } = await db.query(`select research_scope from chat_messages where message_id = $1`, [done.message_id]);
+      return (saved?.research_scope?.companies ?? []).map((company: { label?: string }) => company.label);
+    };
+    const named = (...names: string[]) => reading({ companies: { kind: "as_named", names } });
+    assert.deepEqual(await lane("How is AAA doing?", { readQuestion: named("AAA") }, ["AAA"]), ["AAA"]);
+    assert.deepEqual(await lane("Tell me about BBB", { readQuestion: named("BBB") }, ["BBB"]), ["BBB"]);
+    // No facet names strategy or management, so it reads as a question about the company.
+    assert.deepEqual(await lane("Who runs AAA?", { readQuestion: named("AAA") }, ["AAA"]), ["AAA"]);
+    assert.deepEqual(await lane("what is the latest news", { readQuestion: named() }), "analyst");
+    assert.deepEqual(await lane("and BBB?", { priorSubjects: async () => [aaa], readQuestion: comparing("BBB") }, ["AAA", "BBB"]), ["AAA", "BBB"]);
+    // No reading: the companies the question names still decide, and the planner reads it.
+    const unread = async () => {
+      throw new Error("the reading model is down");
+    };
+    assert.deepEqual(await lane("How is AAA doing?", { readQuestion: unread }, ["AAA"]), ["AAA"]);
+    assert.deepEqual(await lane("show the evidence", { priorSubjects: async () => [aaa], readQuestion: reading({ asks: new Set(["evidence"]) }) }), "analyst");
+    assert.deepEqual(await lane("Revenue for AAA, with the evidence", { readQuestion: reading({ ...METRIC_READING, asks: new Set(["evidence"]), companies: { kind: "as_named", names: ["AAA"] } }) }, ["AAA"]), ["AAA"]);
+    assert.deepEqual(await lane("What is AAA's guidance?", { readQuestion: reading({ asks: new Set(["guidance"]), companies: { kind: "as_named", names: ["AAA"] } }) }), "analyst");
+    assert.deepEqual(await lane("AAA YTD", { readQuestion: reading({ asks: new Set(["price_window"]), companies: { kind: "as_named", names: ["AAA"] } }) }), "analyst");
+    assert.deepEqual(await lane("AAA revenue YTD", { readQuestion: reading({ ...METRIC_READING, asks: new Set(["price_window"]), companies: { kind: "as_named", names: ["AAA"] } }) }, ["AAA"]), ["AAA"]);
+    assert.deepEqual(await lane("And what about its revenue?", { priorSubjects: async () => [], readQuestion: reading(METRIC_READING) }), "analyst");
+    const dropped = completed((await chatHarness(pool, { model: revenueModel([]), analyst, priorSubjects: async () => [aaa], readQuestion: reading({ companies: { kind: "drop", drop: ["AAA"], add: [] } }) }).run({ ...base, userIntent: "drop AAA" })).events);
+    assert.deepEqual((dropped.financial_clarification as { question: string }).question, "Dropping AAA leaves no company to compare. Name the company to look at.");
+    assert.deepEqual(await lane("drop BBB", { priorSubjects: async () => [aaa, bbb], readQuestion: reading({ companies: { kind: "drop", drop: ["BBB"], add: [] } }) }, ["AAA"]), ["AAA"]);
+    const aaaNamed = { companies: { kind: "as_named" as const, names: ["AAA"] } };
+    for (const asks of [["peers", "price_window"], ["latest_quarter", "price_window"]] as const) {
+      assert.deepEqual(await lane("How has AAA's stock done?", { readQuestion: reading({ ...aaaNamed, asks: new Set(asks) }) }), "analyst", `${asks.join(", ")}: peers and the latest quarter are no figure`);
+    }
+    // A facet read as asked and turned off is not asked (readingAsks).
+    const offGuidance = reading({ ...aaaNamed, asks: new Set(["guidance"]), turns_off: { facets: new Set(["guidance"]), metrics: new Set() } });
+    assert.deepEqual(await lane("Tell me about AAA, skip the guidance", { readQuestion: offGuidance }, ["AAA"]), ["AAA"]);
+    // A follow-up that asks for no figure keeps its scope's period, which an overview would not show.
+    // A scope over the question's reading, as if the previous answer's scope held more.
+    const keeping = (kept: Record<string, unknown>) => (async (context: { userIntent?: string }, read: Promise<ScopeProposal | null>) => {
+      const proposal = await read;
+      const scope = resolveResearchScope({ question: context.userIntent ?? "", companies: [], prior: null, asOf: new Date().toISOString(), proposal });
+      return proposal?.period.kind === "latest" ? scope : { ...scope, ...kept };
+    }) as never;
+    const keepsYear = keeping({ fiscal_year: 2023, inherited: ["fiscal_year"] });
+    assert.deepEqual(await lane("Explain it", { priorSubjects: async () => [aaa], researchScope: keepsYear, readQuestion: reading({ asks: new Set(["explains"]) }) }), "analyst");
+    assert.deepEqual(await lane("And its latest quarter?", { priorSubjects: async () => [aaa], researchScope: keepsYear, readQuestion: reading({ period: { kind: "latest" } }) }, ["AAA"]), ["AAA"]);
+    assert.deepEqual(await lane("How is AAA doing?", { priorSubjects: async () => [aaa], researchScope: keepsYear, readQuestion: reading(aaaNamed) }, ["AAA"]), ["AAA"], "a question that names its company is a new one");
+    const keepsCashFlow = keeping({ metrics: [proposedMetric("free_cash_flow", null, null)!], inherited: ["metrics"] });
+    assert.deepEqual(await lane("And BBB?", { priorSubjects: async () => [aaa], researchScope: keepsCashFlow, readQuestion: reading({ companies: { kind: "compare", add: ["BBB"] } }) }), "analyst", "a metric the overview does not show");
+    const keepsStatement = keeping({ metrics: [proposedMetric("income_statement", null, null)!], inherited: ["metrics"] });
+    assert.deepEqual(await lane("And BBB?", { priorSubjects: async () => [aaa], researchScope: keepsStatement, readQuestion: reading({ companies: { kind: "compare", add: ["BBB"] } }) }, ["AAA", "BBB"]), ["AAA", "BBB"]);
+    assert.deepEqual(await lane("And Q3?", { priorSubjects: async () => [aaa], readQuestion: reading({ period: { kind: "fiscal_quarter", fiscal_period: "Q3", fiscal_year: null } }) }), "analyst", "a follow-up's period");
+    // Only a carried company the scope dropped is left out, and a turn left with none is the analyst's.
+    const overBbb = keeping({ companies: [{ issuer_id: IDS.issuerB, label: "BBB" }] });
+    assert.deepEqual(await lane("Explain it", { priorSubjects: async () => [aaa], researchScope: overBbb, readQuestion: reading({ asks: new Set(["explains"]) }) }), "analyst");
+    assert.deepEqual(await lane("How is AAA doing?", { researchScope: overBbb, readQuestion: reading(aaaNamed) }, ["AAA"]), ["AAA"]);
+    // A follow-up that names no company and asks for no figure is the analyst's; one that adds or drops a company is the engine's.
+    assert.deepEqual(await lane("Why?", { priorSubjects: async () => [aaa], readQuestion: reading({ asks: new Set(["explains"]) }) }), "analyst");
+    assert.deepEqual(await lane("Thanks", { priorSubjects: async () => [aaa], readQuestion: reading({}) }), "analyst");
+    assert.deepEqual(await lane("and BBB?", { priorSubjects: async () => [aaa], readQuestion: reading({ companies: { kind: "compare", add: ["BBB"] } }) }, ["AAA", "BBB"]), ["AAA", "BBB"]);
+    // A metric read as asked and turned off is not asked either.
+    const offCapex = reading({ metrics: [proposedMetric("capex", null, null)!], asks: new Set(["evidence"]), turns_off: { facets: new Set(), metrics: new Set(["capex"]) } });
+    assert.deepEqual(await lane("Skip the capex: where did those numbers come from?", { priorSubjects: async () => [aaa], readQuestion: offCapex }), "analyst");
   });
 
-  await t.test("a retried turn settles the reading of its question while it holds the run's lease, never inside the publication", async () => {
+  await t.test("with no reading, market data and an evidence question reach the engine, whose planner declines them (#398)", async () => {
+    const carried = { ...(await resolveMention("AAA")), handoff: { display_labels: { ticker: "AAA" } } } as unknown as ChatResolvedSubjectPreResolution;
+    const down = async () => {
+      throw new Error("the reading model is down");
+    };
+    const gaps = [];
+    for (const [userIntent, priorSubjects] of [["AAA YTD", async () => []], ["show the evidence", async () => [carried]]] as const) {
+      const done = completed((await chatHarness(pool, { model: declining("other"), readQuestion: down, priorSubjects }).run({ ...base, userIntent })).events);
+      gaps.push([done.bundle_id, done.financial_gap]);
+    }
+    assert.deepEqual(gaps, [["financial_answer", { reason_code: "unsupported" }], ["financial_answer", { reason_code: "unsupported" }]]);
+  });
+
+  await t.test("a retry of a turn whose run is reserved resumes it, whatever its reading says now", async () => {
+    const thread = randomUUID();
+    const turnId = randomUUID();
+    // The thread is another user's, so the first attempt reserves the run and cannot publish.
+    await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [thread, IDS.other]);
+    const input = { threadId: thread, userId: IDS.owner, turnId, userIntent: "Revenue for AAA" };
+    await chatHarness(pool, { model: revenueModel(["AAA"]) }).run(input);
+    await db.query(`update chat_threads set user_id = $2 where thread_id = $1`, [thread, IDS.owner]);
+    const evidence = async () => ({ ...NO_ASKS, asks: new Set(["evidence"] as const), companies: { kind: "as_named" as const, names: ["AAA"] } });
+    const retried = completed((await chatHarness(pool, { model: revenueModel(["AAA"]), readQuestion: evidence }).run(input)).events);
+    assert.equal(retried.bundle_id, "financial_answer", "the analyst path is never reached (forbiddenAnalyst)");
+  });
+
+  await t.test("a retry of a turn whose engine answer is saved does not read its question again", async () => {
+    const turn = { ...base, turnId: randomUUID(), userIntent: "How is AAA doing?" };
+    let reads = 0;
+    const readQuestion = async () => {
+      reads += 1;
+      return { ...NO_ASKS, companies: { kind: "as_named" as const, names: ["AAA"] } };
+    };
+    const first = completed((await chatHarness(pool, { model: revenueModel(["AAA"]), readQuestion }).run(turn)).events);
+    const retried = completed((await chatHarness(pool, { model: revenueModel(["AAA"]), readQuestion }).run(turn)).events);
+    assert.deepEqual([retried.message_id, reads], [first.message_id, 1]);
+  });
+
+  await t.test("a retried turn settles the reading of its question before it takes the run's lease", async () => {
     const thread = randomUUID();
     const turnId = randomUUID();
     // The thread is another user's, so the first attempt reserves the run and cannot publish.
@@ -648,24 +740,16 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
         return new Promise<null>((resolve) => { release = resolve; });
       },
     }).run(input);
-    // The retry holds the lease while the reading is out: it is past every
-    // step but the drive.
-    const leased = async () => (await db.query(
-      `select 1 from financial_runs where run_id = $1::uuid and lease_owner is not null and lease_expires_at > now()`, [reserved.run_id],
-    )).rows.length > 0;
-    for (let waited = 0; !(read && await leased()); waited += 20) {
-      assert.ok(waited < 30_000, "the retry never took the lease");
+    // The reading decides the lane, so the retry takes the run's lease only once it settles.
+    for (let waited = 0; !read; waited += 20) {
+      assert.ok(waited < 30_000, "the retry never read its question");
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
-    const probe = await pool.connect();
-    try {
-      await probe.query("begin");
-      await probe.query(`select 1 from financial_runs where run_id = $1::uuid for update nowait`, [reserved.run_id]);
-      await probe.query("rollback");
-    } finally {
-      probe.release();
-      release(null);
-    }
+    const leased = (await db.query(
+      `select 1 from financial_runs where run_id = $1::uuid and lease_owner is not null and lease_expires_at > now()`, [reserved.run_id],
+    )).rows.length > 0;
+    release(null);
+    assert.equal(leased, false, "no lease is held while the reading is out");
     assert.ok(completed((await retry).events).message_id, "the retry publishes once the reading settles");
   });
 

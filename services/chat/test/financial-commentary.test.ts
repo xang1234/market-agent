@@ -23,7 +23,7 @@ import { plainText } from "../src/render-assertions.ts";
 import { resolveResearchScope, type ScopeProposal } from "../src/research-scope.ts";
 import type { ChatSubjectPreResolution } from "../src/subjects.ts";
 import { loadPriorScope, loadPriorSubjects, loadRecentConversation } from "../src/thread-context.ts";
-import { chatDatabase, chatHarness, completed, METRIC_READING, NO_ASKS, revenueModel } from "./financial-fixtures.ts";
+import { chatDatabase, chatHarness, completed, METRIC_READING, NO_ASKS, readingOf, revenueModel } from "./financial-fixtures.ts";
 
 const ALFA = "4f000000-0000-4000-8000-0000000000f1";
 const BRVO = "4f000000-0000-4000-8000-0000000000f2";
@@ -78,7 +78,7 @@ function resolve(mention: string): Promise<ChatSubjectPreResolution> {
 type Block = Record<string, unknown> & { id: string; kind: string };
 // The commentary writer the server wires (local-runtime.ts), on a given composer.
 const saver = (compose: CommentaryComposer) => (db: Parameters<typeof saveCommentary>[0], input: Parameters<typeof saveCommentary>[2]) => saveCommentary(db, compose, input);
-const reading = (proposal: ScopeProposal) => async () => proposal;
+const reading = readingOf;
 const segmentsOf = (block: Record<string, unknown> | undefined) => (block?.segments ?? []) as Parameters<typeof plainText>[0];
 
 test("a company overview carries analyst commentary on its published results (#398)", { timeout: 300_000 }, async (t) => {
@@ -397,7 +397,7 @@ test("a company overview carries analyst commentary on its published results (#3
       analystCalls += 1;
       return { snapshot_id: randomUUID(), blocks: [], verification: { ok: true } };
     };
-    await overview(compose, { analyst }).run({ ...base, userIntent: "tell me about ALFA" });
+    await overview(compose, { analyst, readQuestion: reading({ ...NO_ASKS, asks: new Set(["evidence"]) }) }).run({ ...base, userIntent: "show the evidence for ALFA" });
     assert.deepEqual([analystCalls, inputs.length], [1, 1]);
   });
 });
