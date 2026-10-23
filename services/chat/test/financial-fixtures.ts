@@ -152,10 +152,15 @@ export function chatHarness(
       planningModel: options.model,
       resolveMention: options.resolveMention ?? resolveMention,
       evidence: options.evidence ?? createEvidenceFinancialPort,
-      // As wired in production, every turn has a scope; this one has no prior answer.
+      // As wired in production, every turn has a scope over the companies it
+      // resolved; this one has no prior answer.
       ...(options.researchScope === null ? {} : {
-        researchScope: options.researchScope ?? (async (context, read) =>
-          resolveResearchScope({ companies: [], prior: null, asOf: (options.clock?.() ?? new Date()).toISOString(), proposal: await read })),
+        researchScope: options.researchScope ?? (async (context, read) => resolveResearchScope({
+          companies: (context.subjectPreResolutions ?? []).map((subject) => ({ issuer_id: subject.subject_ref.id, label: subject.handoff?.display_labels?.ticker ?? subject.display_label })),
+          prior: null,
+          asOf: (options.clock?.() ?? new Date()).toISOString(),
+          proposal: await read,
+        })),
       }),
       ...(options.priorSubjects ? { priorSubjects: options.priorSubjects } : {}),
       ...(options.clock ? { clock: options.clock } : {}),
