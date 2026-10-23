@@ -9,7 +9,7 @@ import type { CandidatePage, CandidateRequest, FinancialEvidencePort, InputCandi
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
 import { namesCompanies, overviewPeers, overviewSubjects, planCompanyOverview } from "../src/company-overview.ts";
 import { MAX_TURN_SUBJECTS } from "../src/coordinator.ts";
-import { isFinancialRequest, uncoveredAsks } from "../src/financial-runtime.ts";
+import { uncoveredAsks } from "../src/financial-runtime.ts";
 import { resolveResearchScope } from "../src/research-scope.ts";
 import { parseProposal, proposalQuestion } from "../src/scope-proposal.ts";
 import { extractSubjectMentions } from "../src/subject-extraction.ts";
@@ -123,10 +123,10 @@ test("each recorded reply matched by one substring answers a request made of tha
 });
 
 test("each golden metric question plans from its own recorded reply on the first call", async () => {
-  const questions = (JSON.parse(readFileSync(REPLIES, "utf8")) as { replies: Array<{ match: string }> }).replies
-    .flatMap((reply) => /^Question: "(.*)"$/u.exec(reply.match)?.[1] ?? [])
-    .filter(isFinancialRequest);
-  assert.deepEqual(questions, Object.keys(EXPECTED), "the golden questions that reach the financial lane");
+  const recorded = new Set((JSON.parse(readFileSync(REPLIES, "utf8")) as { replies: Array<{ match: string }> }).replies
+    .flatMap((reply) => /^Question: "(.*)"$/u.exec(reply.match)?.[1] ?? []));
+  const questions = Object.keys(EXPECTED);
+  assert.deepEqual(questions.filter((question) => !recorded.has(question)), [], "each planned question has a recorded reading");
 
   const client = await createReplayLlmChatClient(REPLIES);
   const model: PlanningModel = async ({ messages }) => ({ text: (await client({} as never, { messages })).text, model: "recorded" });

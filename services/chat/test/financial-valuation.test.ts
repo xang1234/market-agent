@@ -10,7 +10,7 @@ import type { FinancialPlanV1 } from "../../financial-core/src/index.ts";
 import { inspectCommittedResult } from "../../financial-engine/src/inspection.ts";
 import { buildDeterministicPlan, type PlanningModel } from "../../financial-engine/src/planner.ts";
 import { authorityFor, IDS, NVDA, seedNvda } from "../../financial-engine/test/db-fixtures.ts";
-import { isFinancialRequest, uncoveredAsks } from "../src/financial-runtime.ts";
+import { uncoveredAsks } from "../src/financial-runtime.ts";
 import { listChatMessagesForThread } from "../src/messages.ts";
 import { parseProposal } from "../src/scope-proposal.ts";
 import { extractSubjectMentions } from "../src/subject-extraction.ts";
@@ -47,10 +47,10 @@ const resolveNvda = (mention: string): Promise<ChatSubjectPreResolution> => ment
   ? Promise.resolve({ status: "resolved", subject_ref: { kind: "issuer", id: NVDA.issuer }, display_label: "NVIDIA Corporation", handoff: { display_labels: { ticker: "NVDA" } } } as unknown as ChatSubjectPreResolution)
   : resolveMention(mention);
 
-test("a question about market cap or P/E takes the financial lane, and P/E names no company (#444)", () => {
+test("a question about market cap or P/E names its company, which takes it to the financial lane, and P/E names no company (#444)", () => {
   assert.deepEqual(
-    ["What is NVDA's market cap?", "NVDA market capitalization", "What's NVDA's P/E?", "NVDA PE ratio", "NVDA price-to-earnings", "How is NVDA doing?"].map(isFinancialRequest),
-    [true, true, true, true, true, false],
+    ["What is NVDA's market cap?", "NVDA market capitalization", "What's NVDA's P/E?", "NVDA PE ratio", "NVDA price-to-earnings", "How is NVDA doing?"].map(extractSubjectMentions),
+    [["NVDA"], ["NVDA"], ["NVDA"], ["NVDA"], ["NVDA"], ["NVDA"]],
   );
   assert.deepEqual(extractSubjectMentions("Compare the P/E and PE ratio of NVDA and AMD"), ["NVDA", "AMD"]);
 });

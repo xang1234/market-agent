@@ -6,20 +6,15 @@ import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { databaseUrl, IDS, ORIGINAL_REVENUE } from "../../financial-engine/test/db-fixtures.ts";
 import type { ChatAnalystToolRuntime, ChatAssistantMessagePersistence } from "../src/coordinator.ts";
 import { financialMessageId } from "../src/chat-ids.ts";
-import { createChatFinancialRuntime, isFinancialRequest, SCOPE_METRICS } from "../src/financial-runtime.ts";
+import { createChatFinancialRuntime, SCOPE_METRICS } from "../src/financial-runtime.ts";
 import { METRIC_CATALOG_V1, OPERATION_REGISTRY } from "../../financial-core/src/index.ts";
 import { proposedMetric, type CompanyChange, type ScopeProposal } from "../src/research-scope.ts";
 import { parseProposal } from "../src/scope-proposal.ts";
 import { extractSubjectMentions } from "../src/subject-extraction.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import type { FinancialPool } from "../../financial-engine/src/ports.ts";
-import { changing, chatDatabase, chatHarness, comparing, completed, INSTRUMENT_A, LISTING_A, METRIC_READING, MISSING_ISSUER, resolveMention, revenueModel } from "./financial-fixtures.ts";
+import { changing, chatDatabase, chatHarness, comparing, completed, INSTRUMENT_A, LISTING_A, METRIC_READING, MISSING_ISSUER, NO_ASKS, resolveMention, revenueModel } from "./financial-fixtures.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "../src/subjects.ts";
-
-test("financial intent is recognized from the definition catalog", () => {
-  for (const text of ["Compare revenue for AAA and BBB", "What was AAA's gross margin?", "EPS for AAA", "net income trend", "AAA's cash and equivalents"]) assert.ok(isFinancialRequest(text), text);
-  for (const text of ["tell me about AAA", "what is the latest news", "who is the CEO"]) assert.ok(!isFinancialRequest(text), text);
-});
 
 test("an unready engine stops the server instead of leaving metric questions on legacy numbers", async () => {
   // A database missing every financial table: every readiness check reports absent.
@@ -179,10 +174,6 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     const unclear = completed((await chatHarness(pool, { model: revenueModel([]), priorSubjects: async () => [aaa, bbb], readQuestion: changing({ kind: "unclear", names: ["CCC"] }) }).run({ ...base, userIntent: "What about CCC's revenue?" })).events);
     assert.equal(unclear.clarification, true);
     assert.equal((unclear.financial_clarification as { question: string }).question, 'Add CCC to the AAA and BBB comparison, or look at CCC alone? Say "add CCC" or "just CCC".');
-    const model = revenueModel([]);
-    const none = completed((await chatHarness(pool, { model, priorSubjects: async () => [] }).run({ ...base, userIntent: "And what about its revenue?" })).events);
-    assert.deepEqual(none.financial_gap, { reason_code: "no_company" });
-    assert.equal(model.calls, 0, "nothing is planned for no company");
   });
 
   // The scope financialResearchScope saves, over the companies it is given.
@@ -399,7 +390,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(block.financial.results.map((result: { disposition: string }) => result.disposition), ["verified", "missing"]);
   });
 
-  await t.test("from a company's page, a question naming no other company plans beside its reading, not after it", async () => {
+  await t.test("from a company's page, a question plans after its reading, which decides its lane", async () => {
     const order: string[] = [];
     let release = () => {};
     const readQuestion = () => new Promise<ScopeProposal>((resolve) => {
@@ -423,9 +414,8 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       assert.ok(completed(events).message_id, JSON.stringify(completed(events)));
       return order;
     };
-    assert.deepEqual(await run("Revenue in fiscal 2023?"), ["planned", "read"]);
-    assert.deepEqual(await run("AAA's Gross Margin?"), ["planned", "read"], "the page's own ticker and a metric's name");
-    // A company written by name may be one the reading adds, so the plan waits on it, the first word too.
+    assert.deepEqual(await run("Revenue in fiscal 2023?"), ["read", "planned"]);
+    assert.deepEqual(await run("AAA's Gross Margin?"), ["read", "planned"], "the page's own ticker and a metric's name");
     assert.deepEqual(await run("Compare its revenue with Beta Holdings"), ["read", "planned"]);
     assert.deepEqual(await run("Beta's revenue in fiscal 2023, and this one's?"), ["read", "planned"]);
     assert.deepEqual(await run("Microsoft revenue in fiscal 2023 versus this?"), ["read", "planned"]);
@@ -615,20 +605,59 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.equal(pointers.thread, pointers.answer);
   });
 
-  await t.test("narrative turns keep the analyst path", async () => {
+  await t.test("a turn about a company reaches the engine; one about none, or whose reading asks for evidence or market data alone, the analyst (#398)", async () => {
+    const carried = async (ticker: string) => ({ ...(await resolveMention(ticker)), handoff: { display_labels: { ticker } } }) as unknown as ChatResolvedSubjectPreResolution;
+    const [aaa, bbb] = [await carried("AAA"), await carried("BBB")];
     let analystCalls = 0;
     const analyst: ChatAnalystToolRuntime = () => {
       analystCalls += 1;
       return { snapshot_id: randomUUID(), blocks: [], verification: { ok: true } };
     };
-    await chatHarness(pool, { model: revenueModel([]), analyst }).run({ ...base, userIntent: "tell me about AAA" });
-    assert.equal(analystCalls, 1);
-    const { events } = await chatHarness(pool, { model: revenueModel(["AAA"]), analyst }).run({ ...base, userIntent: "Revenue for AAA" });
-    assert.equal(completed(events).bundle_id, "financial_answer");
-    assert.equal(analystCalls, 1, "a metric question always reaches the engine, never the analyst");
+    const reading = (proposal: Partial<ScopeProposal>) => async () => ({ ...NO_ASKS, ...proposal });
+    // The lane a turn takes, and the companies an engine answer covers.
+    const lane = async (userIntent: string, options: Omit<Parameters<typeof chatHarness>[1], "model" | "analyst">, mentions: string[] = []) => {
+      const before = analystCalls;
+      const done = completed((await chatHarness(pool, { model: revenueModel(mentions), analyst, ...options }).run({ ...base, userIntent })).events);
+      if (analystCalls > before) return "analyst";
+      assert.equal(done.bundle_id, "financial_answer", userIntent);
+      const { rows: [saved] } = await db.query(`select research_scope from chat_messages where message_id = $1`, [done.message_id]);
+      return (saved?.research_scope?.companies ?? []).map((company: { label?: string }) => company.label);
+    };
+    const named = (...names: string[]) => reading({ companies: { kind: "as_named", names } });
+    assert.deepEqual(await lane("How is AAA doing?", { readQuestion: named("AAA") }, ["AAA"]), ["AAA"]);
+    assert.deepEqual(await lane("Tell me about BBB", { readQuestion: named("BBB") }, ["BBB"]), ["BBB"]);
+    // No facet names strategy or management, so it reads as a question about the company.
+    assert.deepEqual(await lane("Who runs AAA?", { readQuestion: named("AAA") }, ["AAA"]), ["AAA"]);
+    assert.deepEqual(await lane("what is the latest news", { readQuestion: named() }), "analyst");
+    assert.deepEqual(await lane("and BBB?", { priorSubjects: async () => [aaa], readQuestion: comparing("BBB") }, ["AAA", "BBB"]), ["AAA", "BBB"]);
+    // No reading: the companies the question names still decide, and the planner reads it.
+    const unread = async () => {
+      throw new Error("the reading model is down");
+    };
+    assert.deepEqual(await lane("How is AAA doing?", { readQuestion: unread }, ["AAA"]), ["AAA"]);
+    assert.deepEqual(await lane("show the evidence", { priorSubjects: async () => [aaa], readQuestion: reading({ asks: new Set(["evidence"]) }) }), "analyst");
+    assert.deepEqual(await lane("Revenue for AAA, with the evidence", { readQuestion: reading({ ...METRIC_READING, asks: new Set(["evidence"]), companies: { kind: "as_named", names: ["AAA"] } }) }), "analyst");
+    assert.deepEqual(await lane("AAA YTD", { readQuestion: reading({ asks: new Set(["price_window"]), companies: { kind: "as_named", names: ["AAA"] } }) }), "analyst");
+    assert.deepEqual(await lane("AAA revenue YTD", { readQuestion: reading({ ...METRIC_READING, asks: new Set(["price_window"]), companies: { kind: "as_named", names: ["AAA"] } }) }, ["AAA"]), ["AAA"]);
+    assert.deepEqual(await lane("And what about its revenue?", { priorSubjects: async () => [], readQuestion: reading(METRIC_READING) }), "analyst");
+    const dropped = completed((await chatHarness(pool, { model: revenueModel([]), analyst, priorSubjects: async () => [aaa], readQuestion: reading({ companies: { kind: "drop", drop: ["AAA"], add: [] } }) }).run({ ...base, userIntent: "drop AAA" })).events);
+    assert.deepEqual((dropped.financial_clarification as { question: string }).question, "Dropping AAA leaves no company to compare. Name the company to look at.");
+    assert.deepEqual(await lane("drop BBB", { priorSubjects: async () => [aaa, bbb], readQuestion: reading({ companies: { kind: "drop", drop: ["BBB"], add: [] } }) }, ["AAA"]), ["AAA"]);
   });
 
-  await t.test("a retried turn settles the reading of its question while it holds the run's lease, never inside the publication", async () => {
+  await t.test("a retry of a turn whose engine answer is saved does not read its question again", async () => {
+    const turn = { ...base, turnId: randomUUID(), userIntent: "How is AAA doing?" };
+    let reads = 0;
+    const readQuestion = async () => {
+      reads += 1;
+      return { ...NO_ASKS, companies: { kind: "as_named" as const, names: ["AAA"] } };
+    };
+    const first = completed((await chatHarness(pool, { model: revenueModel(["AAA"]), readQuestion }).run(turn)).events);
+    const retried = completed((await chatHarness(pool, { model: revenueModel(["AAA"]), readQuestion }).run(turn)).events);
+    assert.deepEqual([retried.message_id, reads], [first.message_id, 1]);
+  });
+
+  await t.test("a retried turn settles the reading of its question before it takes the run's lease", async () => {
     const thread = randomUUID();
     const turnId = randomUUID();
     // The thread is another user's, so the first attempt reserves the run and cannot publish.
@@ -648,24 +677,16 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
         return new Promise<null>((resolve) => { release = resolve; });
       },
     }).run(input);
-    // The retry holds the lease while the reading is out: it is past every
-    // step but the drive.
-    const leased = async () => (await db.query(
-      `select 1 from financial_runs where run_id = $1::uuid and lease_owner is not null and lease_expires_at > now()`, [reserved.run_id],
-    )).rows.length > 0;
-    for (let waited = 0; !(read && await leased()); waited += 20) {
-      assert.ok(waited < 30_000, "the retry never took the lease");
+    // The reading decides the lane, so the retry takes the run's lease only once it settles.
+    for (let waited = 0; !read; waited += 20) {
+      assert.ok(waited < 30_000, "the retry never read its question");
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
-    const probe = await pool.connect();
-    try {
-      await probe.query("begin");
-      await probe.query(`select 1 from financial_runs where run_id = $1::uuid for update nowait`, [reserved.run_id]);
-      await probe.query("rollback");
-    } finally {
-      probe.release();
-      release(null);
-    }
+    const leased = (await db.query(
+      `select 1 from financial_runs where run_id = $1::uuid and lease_owner is not null and lease_expires_at > now()`, [reserved.run_id],
+    )).rows.length > 0;
+    release(null);
+    assert.equal(leased, false, "no lease is held while the reading is out");
     assert.ok(completed((await retry).events).message_id, "the retry publishes once the reading settles");
   });
 

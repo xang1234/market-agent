@@ -1,4 +1,4 @@
-// Chat's financial lane. A turn that asks for a financial calculation is
+// Chat's financial lane. A turn about a company is
 // planned by the engine's planner against the server-resolved subject set,
 // executed on evidence, and published only through finalization — whose
 // transaction also writes the assistant message, so an answer exists exactly
@@ -18,8 +18,6 @@ import {
   dependencyClosure,
   hashCanonical,
   operationDependencies,
-  PLANNABLE_METRICS,
-  RATIO_CATALOG_V1,
   type FinancialPlanV1,
   type FinancialRuntimeAuthority,
   type FinancialSubjectRef,
@@ -98,10 +96,12 @@ export type CommentaryRequest = Readonly<{
 export type ChatFinancialTurnContext = ChatTurnRunContext & { clarificationAnswer?: ChatClarificationAnswer };
 
 export type ChatFinancialRuntime = Readonly<{
-  /** Whether this lane takes the turn. Cheap and synchronous, so the stream can say so before any work. */
-  answers(context: ChatFinancialTurnContext): boolean;
-  /** The lane's outcome. Call only after answers(context); it throws otherwise. */
-  run(context: ChatFinancialTurnContext): Promise<ChatFinancialTurn>;
+  /**
+   * The lane's outcome for a turn about a company: one the turn names, a
+   * follow-up keeps, or a clarification asks about. Null leaves the turn to
+   * the analyst path.
+   */
+  take(context: ChatFinancialTurnContext): Promise<(() => Promise<ChatFinancialTurn>) | null>;
   /** Throws unless verified finance is ready; the server awaits it before serving any turn. */
   assertReady(): Promise<void>;
 }>;
@@ -127,19 +127,28 @@ export type ChatFinancialRuntimeDeps = Readonly<{
   commentary?: (db: SqlExecutor, input: CommentaryRequest) => Promise<void>;
 }>;
 
+const MARKET_DATA: ReadonlySet<ScopeFacet> = new Set(["price_window", "benchmark"]);
+
+// The analyst path keeps a turn whose reading asks for the previous answer's
+// evidence, which it re-reads, or for market data alone, which the engine
+// does not compute (#398 D2).
+function analystReads(reading: ScopeProposal | null): boolean {
+  if (reading === null) return false;
+  if (reading.asks.has("evidence")) return true;
+  return reading.metrics.length === 0 && reading.income_items.length === 0 && reading.asks.size > 0 &&
+    [...reading.asks].every((facet) => MARKET_DATA.has(facet));
+}
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const MAX_PLANNING_MODEL_CALLS = 2;
 
 /**
- * A turn's gap: the engine's reason, a unit the verifier refused, or a
- * question that names no company. A failed commit is a turn error instead.
+ * A turn's gap: the engine's reason, or a unit the verifier refused. A failed commit is a turn error instead.
  */
-type ChatGap = Exclude<RequestGap, "publication_failed"> | "verification_failed" | "no_company";
+type ChatGap = Exclude<RequestGap, "publication_failed"> | "verification_failed";
 
 const UNSUPPORTED = "This request asks for a calculation outside the verified financial definitions I can compute";
 
 const GAP_TEXT: Readonly<Record<ChatGap, string>> = {
-  no_company: "Name the company this calculation is for.",
   planning_unavailable: "I can't verify a calculation for this request right now, so I won't give an unverified number.",
   unsupported: `${UNSUPPORTED}.`,
   configuration_needed: "This request needs a subject or definition I can't resolve to one verified meaning.",
@@ -166,13 +175,11 @@ const DECLINES: Readonly<Record<Exclude<RequestGap, "publication_failed">, boole
 };
 
 export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): ChatFinancialRuntime {
-  const answers = (context: ChatFinancialTurnContext) =>
-    isFinancialRequest(context.userIntent ?? "") && Boolean(context.userId) && UUID.test(context.threadId);
-  const run = async (context: ChatFinancialTurnContext): Promise<ChatFinancialTurn> => {
-    if (!answers(context)) throw new Error("the financial lane does not take this turn");
-    const text = context.userIntent!;
+  const take = async (context: ChatFinancialTurnContext): Promise<(() => Promise<ChatFinancialTurn>) | null> => {
+    if (!context.userId || !UUID.test(context.threadId)) return null;
+    const text = context.userIntent ?? "";
     const turnId = context.turnId ?? context.runId;
-    const authority = chatAuthority(context.userId!, context.threadId, turnId);
+    const authority = chatAuthority(context.userId, context.threadId, turnId);
 
     const messageId = financialMessageId(context.threadId, turnId);
     // A retry of a turn whose answer is saved returns that answer: the thread
@@ -183,31 +190,32 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       `select blocks->0->>'kind' as kind from chat_messages where message_id = $1::uuid`,
       [messageId],
     );
-    if (existing && existing.kind !== "financial_answer") return savedGap(deps.pool, context.threadId, messageId);
-    const answered = existing !== undefined;
-    const requested = answered ? ANSWERED : await requestedSubjects(deps, context, text);
-    if (requested.clarify) return { kind: "clarification", clarification: companyQuestion(requested.clarify) };
-    if (!answered && requested.subjects.length === 0) return gap("no_company");
-    // The reading of the question is a model call, so it starts beside the
-    // planner's model call, when planning companies the turn names (whose
-    // overview waits on it), or once a plan is driven: a turn that ends before
-    // any of these (a question about a company, a gap no model planned for a
-    // named period) reads nothing. The scope waits on the reading, so each use
-    // of them decides first whether to read (prepared). The saved answer has
-    // both already.
-    let decideReading = (_read: boolean): void => {};
-    const reading = answered ? Promise.resolve(null) : new Promise<ScopeProposal | null>((resolve) => {
-      decideReading = (read) => {
-        decideReading = () => {};
-        // No reading: the answer says its coverage was not checked (UNCHECKED).
-        resolve(read ? context.reading?.() ?? null : null);
-      };
-    });
-    const { planningModel: model } = deps;
-    const planningModel: PlanningModel | null = model && ((request) => {
-      decideReading(true);
-      return model(request);
-    });
+    if (existing) {
+      return existing.kind === "financial_answer"
+        ? () => runTurn(context, text, turnId, authority, messageId, true, NO_COMPANIES, null)
+        : () => savedGap(deps.pool, context.threadId, messageId);
+    }
+    const requested = await requestedSubjects(deps, context, text);
+    const { clarify } = requested;
+    if (clarify) return async () => ({ kind: "clarification", clarification: companyQuestion(clarify) });
+    if (requested.subjects.length === 0) return null;
+    const reading = await context.reading?.() ?? null;
+    if (analystReads(reading)) return null;
+    return () => runTurn(context, text, turnId, authority, messageId, false, requested, reading);
+  };
+  const runTurn = async (
+    context: ChatFinancialTurnContext,
+    text: string,
+    turnId: string,
+    authority: FinancialRuntimeAuthority,
+    messageId: string,
+    answered: boolean,
+    requested: TurnCompanies,
+    read: ScopeProposal | null,
+  ): Promise<ChatFinancialTurn> => {
+    // The saved answer has its reading and scope already.
+    const reading = Promise.resolve(read);
+    const { planningModel } = deps;
     // This lane runs before the analyst path resolves the turn's companies, so
     // the scope gets the ones the message resolved; the answer saves the ones
     // it answered for (answeredCompanies).
@@ -221,10 +229,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       console.warn("[chat] research scope unavailable; saving the financial answer without it", reason);
       return null;
     });
-    const prepared = (read: boolean) => {
-      decideReading(read);
-      return Promise.all([scope, reading]);
-    };
+    const prepared = () => Promise.all([scope, reading]);
     // What planning settled, for a gap: the companies it was asked about, a
     // clarification pick (recorded before the model is called) or the peers
     // an overview added included, and the planner's result.
@@ -237,7 +242,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       const refs = asked.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref] : []);
       // One about no company leaves the previous answer's companies and scope.
       if (refs.length === 0) return gap(reason, planned);
-      const [saved] = await prepared(false);
+      const [saved] = await prepared();
       return {
         ...gap(reason, planned),
         // Another attempt may answer the turn meanwhile (a run it finished
@@ -294,7 +299,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
           asked = subjects;
         }, {
           carried: requested.carried.length > 0,
-          prepare: () => prepared(true),
+          prepare: prepared,
           evidence: deps.evidence(db),
           peersOf: (issuer) => overviewPeers(db, issuer),
           onOverview: () => {
@@ -306,10 +311,10 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       evidence: deps.evidence,
       // The reading and the scope settle outside any transaction; the scope
       // queued its reads before this request took its client.
-      beforeDrive: () => prepared(true),
+      beforeDrive: prepared,
       persistParent: persistAssistantMessage(context.threadId, messageId, {
         // Decided before the drive; never a model call inside the transaction.
-        prepared: () => prepared(false),
+        prepared,
         carried: requested.carried,
         notFound: requested.notFound,
         labels: requested.labels,
@@ -334,7 +339,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     }
   };
   const assertReady = () => requireFinancialReadiness(deps.pool, ["chat"]);
-  return Object.freeze({ answers, run, assertReady });
+  return Object.freeze({ take, assertReady });
 }
 
 // The mentions a turn's plan requests: an explicit subject (a thread opened
@@ -442,12 +447,12 @@ function companyLabels(resolutions: ReadonlyArray<ChatSubjectPreResolution>, iss
   return labels;
 }
 
-const ANSWERED: TurnCompanies = { subjects: [], resolved: [], carried: [], notFound: [], labels: new Map() };
-
 // A question about the companies to compare, which only a new message answers.
 function companyQuestion(question: string): Clarification {
   return { clarification_id: hashCanonical("clarification", { kind: "request", question, choices: [] }), kind: "request", question, choices: [] };
 }
+
+const NO_COMPANIES: TurnCompanies = { subjects: [], resolved: [], carried: [], notFound: [], labels: new Map() };
 
 async function planTurn(
   model: PlanningModel | null,
@@ -929,19 +934,4 @@ function gap(reason_code: ChatGap, planned?: PlanningResult): Extract<ChatFinanc
     ? REASON_TEXT[planned.reason as keyof typeof REASON_TEXT]
     : null;
   return { kind: "gap", reason_code, text: reason === null ? GAP_TEXT[reason_code] : `${UNSUPPORTED}: ${reason}.` };
-}
-
-const FINANCIAL_TERMS = new RegExp(
-  `\\b(${[
-    // Catalog labels without qualifiers: "EPS (basic)" is asked about as "EPS".
-    ...[...PLANNABLE_METRICS, ...RATIO_CATALOG_V1.values()].map((definition) => definition.label.replace(/\s*\(.*\)$/u, "")),
-    "sales", "margin", "margins", "earnings per share", "EPS", "profit", "cash flow", "free cash flow", "capex", "cash resilience", "net income", "operating income",
-    "market cap", "market capitalization", "P/E", "PE ratio", "price-to-earnings", "price to earnings", "price/earnings",
-  ].map((term) => term.replace(/[.*+?^${}()|[\]\\/]/gu, "\\$&")).join("|")})\\b`,
-  "iu",
-);
-
-/** Whether a message asks about a financial quantity this lane can verify. Anything else stays narrative. */
-export function isFinancialRequest(text: string): boolean {
-  return FINANCIAL_TERMS.test(text);
 }
