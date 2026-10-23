@@ -101,6 +101,12 @@ test("golden metric questions certify through the chat financial lane on the rec
     ["out_gross_margin", "verified", "74.40%"],
     ["out_operating_margin", "verified", "64.90%"],
     ["out_net_margin", "verified", "57.00%"],
+    ["out_revenue_growth_qoq_fy2025_q2", "verified", "15.34%"],
+    ["out_revenue_growth_qoq_fy2025_q3", "verified", "16.78%"],
+    ["out_revenue_growth_qoq_fy2025_q4", "verified", "12.11%"],
+    ["out_revenue_growth_qoq_fy2026_q1", "verified", "12.03%"],
+    ["out_revenue_growth_qoq_fy2026_q2", "verified", "6.08%"],
+    ["out_revenue_growth_qoq_fy2026_q3", "verified", "21.96%"],
     ["out_revenue_growth_qoq", "verified", "8.94%"],
     ["out_revenue_growth_yoy", "verified", "57.89%"],
   ]);

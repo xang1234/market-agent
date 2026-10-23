@@ -19,19 +19,15 @@ const COMPANIES: Readonly<Record<string, string>> = {
   SECQ: "4f000000-0000-4000-8000-0000000000e4",
   FUTR: "4f000000-0000-4000-8000-0000000000e5",
   OFFQ: "4f000000-0000-4000-8000-0000000000e6",
+  // Moves its fiscal year a month later after FY2022: a month falls between FY2022's last quarter and FY2023's first.
+  MOVD: "4f000000-0000-4000-8000-0000000000e7",
 };
 const REVENUE = [
   [2022, 1, "800"], [2022, 2, "900"], [2022, 3, "1000"], [2022, 4, "1100"],
   [2023, 1, "1200"], [2023, 2, "1300"], [2023, 3, "1500"], [2023, 4, "2000"],
 ] as const;
-const QTRS_OVERVIEW = [
-  ["out_revenue_fy2022_q1", "Q1 FY2022", "verified", "USD 800.00"],
-  ["out_revenue_fy2022_q2", "Q2 FY2022", "verified", "USD 900.00"],
-  ["out_revenue_fy2022_q3", "Q3 FY2022", "verified", "USD 1,000.00"],
-  ["out_revenue_fy2022_q4", "Q4 FY2022", "verified", "USD 1,100.00"],
-  ["out_revenue_fy2023_q1", "Q1 FY2023", "verified", "USD 1,200.00"],
-  ["out_revenue_fy2023_q2", "Q2 FY2023", "verified", "USD 1,300.00"],
-  ["out_revenue_fy2023_q3", "Q3 FY2023", "verified", "USD 1,500.00"],
+// A compared company's figures: its latest quarter's.
+const QTRS_LATEST = [
   ["out_revenue_fy2023_q4", "Q4 FY2023", "verified", "USD 2,000.00"],
   ["out_gross_profit_fy2023_q4", "Q4 FY2023", "verified", "USD 1,200.00"],
   ["out_operating_income_fy2023_q4", "Q4 FY2023", "verified", "USD 500.00"],
@@ -41,6 +37,24 @@ const QTRS_OVERVIEW = [
   ["out_net_margin", "Q4 FY2023", "verified", "20.00%"],
   ["out_revenue_growth_qoq", "Q4 FY2023 vs Q3 FY2023", "verified", "33.33%"],
   ["out_revenue_growth_yoy", "Q4 FY2023 vs Q4 FY2022", "verified", "81.82%"],
+];
+const QTRS_OVERVIEW = [
+  ["out_revenue_fy2022_q1", "Q1 FY2022", "verified", "USD 800.00"],
+  ["out_revenue_fy2022_q2", "Q2 FY2022", "verified", "USD 900.00"],
+  ["out_revenue_fy2022_q3", "Q3 FY2022", "verified", "USD 1,000.00"],
+  ["out_revenue_fy2022_q4", "Q4 FY2022", "verified", "USD 1,100.00"],
+  ["out_revenue_fy2023_q1", "Q1 FY2023", "verified", "USD 1,200.00"],
+  ["out_revenue_fy2023_q2", "Q2 FY2023", "verified", "USD 1,300.00"],
+  ["out_revenue_fy2023_q3", "Q3 FY2023", "verified", "USD 1,500.00"],
+  ...QTRS_LATEST.slice(0, 7),
+  // Each charted quarter's change from the one before it (#479), then the latest's from a year earlier.
+  ["out_revenue_growth_qoq_fy2022_q2", "Q2 FY2022 vs Q1 FY2022", "verified", "12.50%"],
+  ["out_revenue_growth_qoq_fy2022_q3", "Q3 FY2022 vs Q2 FY2022", "verified", "11.11%"],
+  ["out_revenue_growth_qoq_fy2022_q4", "Q4 FY2022 vs Q3 FY2022", "verified", "10.00%"],
+  ["out_revenue_growth_qoq_fy2023_q1", "Q1 FY2023 vs Q4 FY2022", "verified", "9.09%"],
+  ["out_revenue_growth_qoq_fy2023_q2", "Q2 FY2023 vs Q1 FY2023", "verified", "8.33%"],
+  ["out_revenue_growth_qoq_fy2023_q3", "Q3 FY2023 vs Q2 FY2023", "verified", "15.38%"],
+  ...QTRS_LATEST.slice(7),
 ];
 
 function resolve(mention: string): Promise<ChatSubjectPreResolution> {
@@ -92,6 +106,10 @@ test("a question about one company that asks for no figure is answered with its 
   for (const [metric, value] of [["revenue", "2400"], ["gross_profit", "1200"], ["operating_income", "600"], ["net_income", "480"]] as const) {
     await quarterly(COMPANIES.SECQ!, metric, 2024, 1, value);
   }
+  await db.query(
+    `update facts set period_start = period_start + interval '1 month', period_end = period_start + interval '4 months' - interval '1 day' where subject_id = $1 and fiscal_year = 2023`,
+    [COMPANIES.MOVD],
+  );
   await quarterly(COMPANIES.FUTR!, "revenue", 2201, 1, "2400");
   await quarterly(COMPANIES.OFFQ!, "revenue", 2024, 1, "2100");
   for (const [metric, value] of [["revenue", "2600"], ["gross_profit", "1300"], ["operating_income", "650"], ["net_income", "520"]] as const) {
@@ -104,7 +122,7 @@ test("a question about one company that asks for no figure is answered with its 
       labels: Record<string, { text: string }>;
       results: Array<{ output_id: string; period_label_id: string; disposition: string; presented: { kind: string; text: string; reason_code?: string } }>;
     };
-    return results.map((result) => [result.output_id, labels[result.period_label_id]!.text, result.disposition, result.presented.kind === "value" ? result.presented.text : result.presented.reason_code]);
+    return results.map((result) => [result.output_id, labels[result.period_label_id]!.text, result.disposition, result.presented.kind === "gap" ? result.presented.reason_code : result.presented.text]);
   };
   const reading = readingOf;
 
@@ -120,8 +138,8 @@ test("a question about one company that asks for no figure is answered with its 
     const { rows: [shown] } = await db.query(`select blocks->0->'financial'->'presentations' as presentations from chat_messages where message_id = $1`, [done.message_id]);
     assert.deepEqual(
       shown.presentations.map((presentation: { kind: string; points?: unknown[] }) => `${presentation.kind}${presentation.points ? `(${presentation.points.length})` : ""}`),
-      ["series(8)", "scalar", "scalar", "scalar", "scalar", "scalar", "scalar", "scalar", "scalar"],
-      "revenue over the quarters first, then the latest quarter's lines, and QoQ and YoY growth each its own line (#470)",
+      ["series(8)", "series(7)", "scalar", "scalar", "scalar", "scalar", "scalar", "scalar", "scalar"],
+      "revenue and its QoQ growth over the quarters, then the latest quarter's lines and its YoY growth (#470)",
     );
     const latest = completed((await chatHarness(pool, { model: null, readQuestion: reading({ ...NO_ASKS, asks: new Set(["latest_quarter"]) }), resolveMention: resolve }).run({ ...base, userIntent: "Revenue for QTRS" })).events);
     assert.deepEqual(await results(latest.message_id), QTRS_OVERVIEW, "a reading that asks for the latest quarter gets the overview, which shows it");
@@ -266,6 +284,17 @@ test("a question about one company that asks for no figure is answered with its 
     assert.deepEqual(await results(done.message_id), QTRS_OVERVIEW);
   });
 
+  await t.test("a quarter whose dates do not follow the one before it gets no growth, and the answer's note names it (#479)", async () => {
+    const done = completed((await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve }).run({ ...base, userIntent: "Revenue for MOVD" })).events);
+    const growth = (await results(done.message_id)).flatMap(([outputId, period]) => outputId!.startsWith("out_revenue_growth") ? [period] : []);
+    assert.deepEqual(growth, ["Q2 FY2022 vs Q1 FY2022", "Q3 FY2022 vs Q2 FY2022", "Q4 FY2022 vs Q3 FY2022", "Q2 FY2023 vs Q1 FY2023", "Q3 FY2023 vs Q2 FY2023", "Q4 FY2023 vs Q3 FY2023"]);
+    const { rows: [message] } = await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id]);
+    assert.equal(
+      message.blocks[1]?.segments?.[0]?.text,
+      "Not covered by this answer: revenue growth from Q4 FY2022 to Q1 FY2023, whose quarters are not dated consecutively; revenue growth from Q4 FY2022 to Q4 FY2023, whose quarters are not dated consecutively.",
+    );
+  });
+
   const slotted = (slot: string, rows: ReadonlyArray<ReadonlyArray<string>>) => rows.map(([outputId, ...rest]) => [outputId!.replace(/^out_/u, `out_${slot}_`), ...rest]);
   const OFFQ_LATEST = [
     ["out_revenue_fy2024_q2", "Q2 FY2024", "verified", "USD 2,600.00"],
@@ -281,17 +310,17 @@ test("a question about one company that asks for no figure is answered with its 
 
   await t.test("a comparison of named companies is one table, each company's figures from its own latest quarter (#398)", async () => {
     const done = completed((await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve }).run({ ...base, userIntent: "Compare revenue for QTRS and OFFQ" })).events);
-    assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_OVERVIEW.slice(7)), ...slotted("b", OFFQ_LATEST)]);
+    assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_LATEST), ...slotted("b", OFFQ_LATEST)]);
     const { rows: [shown] } = await db.query(`select blocks->0->'financial'->'presentations' as presentations from chat_messages where message_id = $1`, [done.message_id]);
     assert.deepEqual(shown.presentations.map((presentation: { kind: string }) => presentation.kind), ["table"]);
   });
 
   await t.test("a line the engine cannot certify for one compared company is its gap cell, and the comparison still publishes (#398)", async () => {
     const done = completed((await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve }).run({ ...base, userIntent: "Compare revenue for QTRS and NOGP" })).events);
-    const nogp = slotted("b", QTRS_OVERVIEW.slice(7));
+    const nogp = slotted("b", QTRS_LATEST);
     nogp[1] = ["out_b_gross_profit_fy2023_q4", "Q4 FY2023", "missing", "missing_input"];
     nogp[4] = ["out_b_gross_margin", "Q4 FY2023", "blocked_dependency", "blocked_by_dependency"];
-    assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_OVERVIEW.slice(7)), ...nogp]);
+    assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_LATEST), ...nogp]);
   });
 
   await t.test("a question about one company that asks for its peers is answered with the company and its peers, saved as auto-selected (#398)", async () => {
@@ -301,7 +330,7 @@ test("a question about one company that asks for no figure is answered with its 
       const peers = { ...NO_ASKS, asks: new Set(["peers"] as const) };
       const { turnId, events } = await chatHarness(pool, { model: null, readQuestion: reading(peers), resolveMention: resolve, researchScope: scoped }).run({ ...base, userIntent: "Revenue for QTRS" });
       const done = completed(events);
-      assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_OVERVIEW.slice(7)), ...slotted("b", OFFQ_LATEST)]);
+      assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_LATEST), ...slotted("b", OFFQ_LATEST)]);
       const { rows: [message] } = await db.query(`select blocks, research_scope from chat_messages where message_id = $1`, [done.message_id]);
       assert.deepEqual([message.research_scope.companies, message.research_scope.peers], [[{ issuer_id: COMPANIES.QTRS, label: "QTRS" }, { issuer_id: COMPANIES.OFFQ }], true]);
       assert.equal(message.blocks.length, 1, "no note names peers the question did not name");
@@ -349,6 +378,10 @@ test("a question about one company that asks for no figure is answered with its 
       blocked("out_gross_margin", "Q4 FY2023"),
       blocked("out_operating_margin", "Q4 FY2023"),
       blocked("out_net_margin", "Q4 FY2023"),
+      ...QTRS_OVERVIEW.slice(14, 16),
+      blocked("out_revenue_growth_qoq_fy2022_q4", "Q4 FY2022 vs Q3 FY2022"),
+      blocked("out_revenue_growth_qoq_fy2023_q1", "Q1 FY2023 vs Q4 FY2022"),
+      ...QTRS_OVERVIEW.slice(18, 20),
       blocked("out_revenue_growth_qoq", "Q4 FY2023 vs Q3 FY2023"),
       blocked("out_revenue_growth_yoy", "Q4 FY2023 vs Q4 FY2022"),
     ], "the latest quarter is the derived fourth quarter, not the third before it");
@@ -364,6 +397,11 @@ test("a question about one company that asks for no figure is answered with its 
       ["out_gross_margin", "Q1 FY2024", "verified", "50.00%"],
       ["out_operating_margin", "Q1 FY2024", "verified", "25.00%"],
       ["out_net_margin", "Q1 FY2024", "verified", "20.00%"],
+      QTRS_OVERVIEW[15]!,
+      blocked("out_revenue_growth_qoq_fy2022_q4", "Q4 FY2022 vs Q3 FY2022"),
+      blocked("out_revenue_growth_qoq_fy2023_q1", "Q1 FY2023 vs Q4 FY2022"),
+      ...QTRS_OVERVIEW.slice(18, 20),
+      blocked("out_revenue_growth_qoq_fy2023_q4", "Q4 FY2023 vs Q3 FY2023"),
       blocked("out_revenue_growth_qoq", "Q1 FY2024 vs Q4 FY2023"),
       ["out_revenue_growth_yoy", "Q1 FY2024 vs Q1 FY2023", "verified", "100.00%"],
     ], "growth after a first quarter compares with the fourth quarter before it and the first a year earlier");

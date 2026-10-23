@@ -25,7 +25,7 @@
 
 import type { RejectionCheck } from "../../src/assertions.ts";
 
-export const HOLDOUT_VERSION = 15;
+export const HOLDOUT_VERSION = 16;
 
 type Assertion = Record<string, unknown>;
 
@@ -242,6 +242,12 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
         [APPLE, "Gross margin (gross profit / revenue)", "Q3 FY2026", "verified", "47.06%"],
         [APPLE, OPERATING_MARGIN, "Q3 FY2026", "verified", "30.69%"],
         [APPLE, "Net margin (net income / revenue)", "Q3 FY2026", "verified", "25.64%"],
+        [APPLE, "Quarter-over-quarter percent change in Revenue", "Q1 FY2025 vs Q4 FY2024", "verified", "30.94%"],
+        [APPLE, "Quarter-over-quarter percent change in Revenue", "Q2 FY2025 vs Q1 FY2025", "verified", "-23.28%"],
+        [APPLE, "Quarter-over-quarter percent change in Revenue", "Q3 FY2025 vs Q2 FY2025", "verified", "-1.39%"],
+        [APPLE, "Quarter-over-quarter percent change in Revenue", "Q4 FY2025 vs Q3 FY2025", "verified", "8.96%"],
+        [APPLE, "Quarter-over-quarter percent change in Revenue", "Q1 FY2026 vs Q4 FY2025", "verified", "24.92%"],
+        [APPLE, "Quarter-over-quarter percent change in Revenue", "Q2 FY2026 vs Q1 FY2026", "verified", "-22.89%"],
         [APPLE, "Quarter-over-quarter percent change in Revenue", "Q3 FY2026 vs Q2 FY2026", "verified", "-1.62%"],
         [APPLE, "Year-over-year percent change in Revenue", "Q3 FY2026 vs Q3 FY2025", "verified", "3.26%"],
       ],
