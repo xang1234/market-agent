@@ -353,6 +353,26 @@ test("a deterministic plan asks for market cap and P/E, reading a share price on
   ]);
 });
 
+test("a deterministic plan asks for a lead between two companies and a window's high, each at its approved version (#398)", () => {
+  const quarter = (node_id: string, subject_slot: string, fiscal_period: string) =>
+    ({ node_id, operation: "reported_metric", subject_slot, metric_key: "revenue", period: { kind: "fiscal_period", fiscal_year: 2023, fiscal_period } });
+  const planned = buildDeterministicPlan(context({ requested_subjects: [resolved(0), resolved(1)] }), {
+    subjects: [{ slot_id: "a", mention: NAMES[0] }, { slot_id: "b", mention: NAMES[1] }],
+    operations: [
+      quarter("a_q3", "a", "Q3"),
+      quarter("a_q4", "a", "Q4"),
+      quarter("b_q4", "b", "Q4"),
+      { node_id: "lead", operation: "spread", left: "a_q4", right: "b_q4" },
+      { node_id: "high", operation: "period_rank", members: ["a_q3", "a_q4"], direction: "highest" },
+    ],
+    outputs: ["lead", "high"].map((node_id) => ({ output_id: `out_${node_id}`, node_id })),
+    thresholds: [],
+  });
+  assert.ok(planned.outcome === "ready", JSON.stringify(planned));
+  assert.deepEqual(planned.plan.operations.flatMap((node) => (node.operation === "reported_metric" ? [] : [[node.node_id, node.operation_version]])), [["lead", "spread.v1"], ["high", "period_rank.v1"]]);
+  assert.match(planned.plan.interpretation?.text ?? "", / Calculations: difference between two companies, each in its own fiscal period, ranking across one company's periods\.$/u);
+});
+
 test("a market cap or P/E answer always publishes the price and the count or EPS it reads, before the result (#444)", async () => {
   const draft = valuationDraft();
   const model = scripted({ outcome: "ready", ...draft, outputs: [{ output_id: "out_cap", node_id: "cap" }] });
