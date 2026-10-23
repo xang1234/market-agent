@@ -40,6 +40,7 @@ const adds = (...add: string[]): CompanyChange => ({ kind: "compare", add });
 const Q2: ScopePeriod = { kind: "fiscal_quarter", fiscal_period: "Q2", fiscal_year: null };
 const Q2_2025: ScopePeriod = { kind: "fiscal_quarter", fiscal_period: "Q2", fiscal_year: 2025 };
 const FY2025: ScopePeriod = { kind: "fiscal_year", fiscal_year: 2025 };
+const FY2024: ScopePeriod = { kind: "fiscal_year", fiscal_year: 2024 };
 const YTD = { kind: "ytd", cutoff: "2026-08-31T00:00:00.000Z" } as const;
 
 function periodText(period: ReadPeriod): string {
@@ -129,7 +130,7 @@ const ROUTES: ReadonlyArray<readonly [string, ScopeProposal | null, ResearchScop
   ["a kept trend, no other period", read({ off: ["peers"] }), after({ margin_trend: true, ...keeps("income_statement") }), "overview at latest"],
   ["a kept trend, adding a company", read({ companies: adds("AMD") }), after({ companies: [NVDA, AMD], margin_trend: true, ...keeps("income_statement") }), "overview at latest"],
   ["comparing them, naming no company", read({ companies: adds() }), after({ companies: [NVDA, AMD] }), "analyst"],
-  ["a kept trend, a company of its own", read({ period: Q2, companies: named("NVDA") }), after({ margin_trend: true, ...keeps("income_statement") }), "overview at newest Q2"],
+  ["a kept trend, naming its company again", read({ period: Q2, companies: named("NVDA") }), after({ margin_trend: true, ...keeps("income_statement") }), "trend at newest Q2"],
   ["a kept trend beside another figure", read({ period: Q2 }), after({ margin_trend: true, ...keeps("free_cash_flow") }), "free_cash_flow at newest Q2"],
   ["kept figures, another quarter", read({ period: Q2 }), after(keeps("free_cash_flow", "capex")), "free_cash_flow, capex at newest Q2"],
   ["kept figures, adding a company", read({ companies: adds("AMD") }), after({ companies: [NVDA, AMD], ...keeps("free_cash_flow") }), "free_cash_flow at latest"],
@@ -137,6 +138,9 @@ const ROUTES: ReadonlyArray<readonly [string, ScopeProposal | null, ResearchScop
   ["kept income statement, another quarter", read({ period: Q2 }), after(keeps("income_statement")), "overview at newest Q2"],
   ["kept figures, a margin asked for", read({ asks: ["margins"] }), after(keeps("free_cash_flow")), "planner"],
   ["kept figures, one turned off", read({ offMetrics: ["capex"] }), after(keeps("free_cash_flow")), "free_cash_flow at latest"],
+  ["kept figures, naming their company again with another year", read({ period: FY2024, companies: named("NVDA") }), after(keeps("free_cash_flow")), "free_cash_flow at FY2024"],
+  ["the scope's year, naming its company again", read({ companies: named("NVDA") }), after({ fiscal_year: 2025 }), "overview at FY2025"],
+  ["kept figures, naming a company the answer before did not cover", read({ companies: named("NVDA", "AMD") }), after(keeps("free_cash_flow")), "overview at latest"],
 ];
 
 // The companies a turn covers, as the coordinator takes them from its reading.

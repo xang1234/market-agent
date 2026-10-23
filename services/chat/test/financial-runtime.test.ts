@@ -663,7 +663,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     const keepsYear = keeping({ fiscal_year: 2023, inherited: ["fiscal_year"] });
     assert.deepEqual(await lane("Explain it", { priorSubjects: async () => [aaa], researchScope: keepsYear, readQuestion: reading({ asks: new Set(["explains"]) }) }), "analyst");
     assert.deepEqual(await lane("And its latest quarter?", { priorSubjects: async () => [aaa], researchScope: keepsYear, readQuestion: reading({ period: { kind: "latest" } }) }, ["AAA"]), ["AAA"]);
-    assert.deepEqual(await lane("How is AAA doing?", { priorSubjects: async () => [aaa], researchScope: keepsYear, readQuestion: reading(aaaNamed) }, ["AAA"]), ["AAA"], "a question that names its company is a new one");
+    assert.deepEqual(await lane("How is AAA doing?", { priorSubjects: async () => [aaa], researchScope: keepsYear, readQuestion: reading(aaaNamed) }, ["AAA"]), ["AAA"], "naming its company again continues it, on the engine's path");
     const keepsCashFlow = keeping({ metrics: [proposedMetric("free_cash_flow", null, null)!], inherited: ["metrics"] });
     assert.deepEqual(await lane("And BBB?", { priorSubjects: async () => [aaa], researchScope: keepsCashFlow, readQuestion: reading({ companies: { kind: "compare", add: ["BBB"] } }) }), ["AAA", "BBB"], "a metric the overview does not show");
     const cashFlow = completed((await chatHarness(pool, { model: null, analyst, priorSubjects: async () => [aaa], researchScope: keepsCashFlow, readQuestion: reading({ companies: { kind: "compare", add: ["BBB"] } }) }).run({ ...base, userIntent: "And BBB?" })).events);

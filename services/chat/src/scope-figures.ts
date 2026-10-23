@@ -79,8 +79,8 @@ export function routeTurn(reading: ScopeProposal | null, scope: ResearchScope | 
   }
   if (asks.has("segments")) return { kind: "segments_gap" };
   if (scope === null || !READ_PERIODS.has(reading.period.kind)) return PLANNER;
-  const period = own && reading.period.kind === "none" ? LATEST : readPeriod(scope);
-  const kept = own ? [] : scope.metrics.map((metric) => metric.metric_key);
+  const period = readPeriod(scope);
+  const kept = scope.inherited.includes("metrics") ? scope.metrics.map((metric) => metric.metric_key) : [];
   const keptIncome = kept.every((key) => key === INCOME_STATEMENT);
   const asksNoFigure = READ_PERIODS.has(reading.period.kind) && reading.metrics.length === 0 && reading.income_items.length === 0;
   const overview = asksNoFigure && offMetrics.size === 0 && ![...offFacets].some((facet) => OVERVIEW_SHOWS.has(facet)) && [...asks].every((facet) => OVERVIEW_ASKS.has(facet));
@@ -88,7 +88,7 @@ export function routeTurn(reading: ScopeProposal | null, scope: ResearchScope | 
   const askedTrend = (reading.period.kind === "none" || reading.period.kind === "latest") && asks.has("margin_trend") &&
     [...asks].every((facet) => TREND_ASKS.has(facet)) && offMetrics.size === 0 &&
     reading.metrics.every((metric) => metric.metric_key === INCOME_STATEMENT) && reading.income_items.every((item) => MARGIN_ITEMS.has(item));
-  const keptTrend = (reading.period.kind === "fiscal_year" || reading.period.kind === "fiscal_quarter") && overview && !own && scope.margin_trend && keptIncome;
+  const keptTrend = (reading.period.kind === "fiscal_year" || reading.period.kind === "fiscal_quarter") && overview && scope.margin_trend && keptIncome;
   if (oneCompany && (askedTrend || keptTrend)) return { kind: "trend", period };
   if (overview && keptIncome) return { kind: "overview", period, peers: asks.has("peers") };
   if (asksNoFigure && [...asks].every((facet) => KEPT_ASKS.has(facet)) && !keptIncome) return { kind: "kept_figures", metrics: kept, period };

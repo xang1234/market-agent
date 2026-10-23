@@ -520,3 +520,15 @@ test("a saved scope reads back; anything else starts fresh", () => {
   const { metrics: _metrics, reads: _reads, ...older } = saved;
   assert.deepEqual([parseResearchScope(older)?.metrics, parseResearchScope(older)?.reads], [[], "comparison"]);
 });
+
+test("a question naming only the previous answer's companies continues its scope; one naming another company starts fresh (#398)", () => {
+  const prior = fresh("What is NVDA's free cash flow in fiscal 2025?", proposal({ metrics: ["free_cash_flow"], period: fy(2025), companies: { kind: "as_named", names: ["NVDA"] } }));
+  const again = followUp("How is NVDA doing?", proposal({ companies: { kind: "as_named", names: ["NVDA"] } }), prior, [NVDA]);
+  const other = followUp("How are NVDA and AMD doing?", proposal({ companies: { kind: "as_named", names: ["NVDA", "AMD"] } }), prior, [NVDA, AMD]);
+  const added = followUp("Add AMD", proposal({ companies: { kind: "compare", add: ["AMD"] } }), prior, [NVDA, AMD]);
+  assert.deepEqual([again, other, added].map((scope) => [scope.metrics.map((metric) => metric.metric_key), scope.fiscal_year, scope.inherited]), [
+    [["free_cash_flow"], 2025, ["metrics", "fiscal_year"]],
+    [[], null, []],
+    [["free_cash_flow"], 2025, ["metrics", "fiscal_year"]],
+  ]);
+});

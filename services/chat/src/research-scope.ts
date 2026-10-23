@@ -346,7 +346,11 @@ export function resolveResearchScope(input: {
   // turns nothing off.
   proposal: ScopeProposal | null;
 }): ResearchScope {
-  const { prior } = input;
+  // A question naming a company the previous answer did not cover is a new
+  // one; naming only its companies again continues it.
+  const ownNames = input.proposal?.companies.kind === "as_named" ? input.proposal.companies.names : [];
+  const covered = new Set(input.prior?.companies.map((company) => company.issuer_id));
+  const prior = ownNames.length > 0 && input.companies.some((company) => !covered.has(company.issuer_id)) ? null : input.prior;
   const { metrics: proposed, income_items: namedItems } = input.proposal ?? NO_PROPOSAL;
   const { asks, offFacets, offMetrics } = readingAsks(input.proposal ?? NO_PROPOSAL);
   const off = new Set([...offFacets].flatMap((facet) => CLEARS[facet] ?? []));
