@@ -459,7 +459,7 @@ test("a question about one company that asks for no figure is answered with its 
     const answer = await saved(done.message_id);
     assert.deepEqual([answer.outputs, answer.notes], [
       ["out_a_revenue_latest_q0"],
-      ["Revenue is read as revenue, for the latest fiscal quarter at the cutoff. Name a measure or a period to change it."],
+      ["Revenue is shown for the latest fiscal quarter at the cutoff. Name a measure or a period to change it."],
     ]);
   });
 

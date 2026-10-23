@@ -578,7 +578,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.ok(firstAnswer.results.every(([, , disposition]) => disposition === "verified"), JSON.stringify(firstAnswer.results));
     // "S&P" is not two companies the answer could not find.
     assert.deepEqual(firstAnswer.notes, [
-      "Revenue is read as revenue, for the latest fiscal year and the latest quarter. Name a measure or a period to change it. Profit is read as gross profit, operating income and net income, with their margins, for the latest fiscal year and the latest quarter. Name a measure or a period to change it. Not covered by this answer: a comparison with a benchmark index.",
+      "Revenue is shown for the latest fiscal year and the latest quarter. Name a measure or a period to change it. Profit is read as gross profit, operating income and net income, with their margins, for the latest fiscal year and the latest quarter. Name a measure or a period to change it. Not covered by this answer: a comparison with a benchmark index.",
     ]);
 
     const unchanged = (scope: Saved, companies: string[]) => {

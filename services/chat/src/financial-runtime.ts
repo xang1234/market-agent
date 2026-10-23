@@ -765,7 +765,11 @@ function measureDefaultNote(record: MeasureDefaultRecord): string[] {
     ? "the latest fiscal year and the latest quarter"
     : `${record.requested_period.kind === "latest" ? "the " : ""}${periodPhrase(record.requested_period)}`;
   const label = `${family.label[0]!.toUpperCase()}${family.label.slice(1)}`;
-  return [`${label} is read as ${figures}${family.margins.length > 0 ? ", with their margins" : ""}, for ${period}. Name a measure or a period to change it.`];
+  // A family that is its one figure ("revenue") names only the period it read.
+  const reading = figures === family.label && family.margins.length === 0
+    ? `${label} is shown`
+    : `${label} is read as ${figures}${family.margins.length > 0 ? ", with their margins" : ""},`;
+  return [`${reading} for ${period}. Name a measure or a period to change it.`];
 }
 
 const withoutPeers = (reading: ScopeProposal): ScopeProposal => ({ ...reading, asks: new Set([...reading.asks].filter((facet) => facet !== "peers")) });
