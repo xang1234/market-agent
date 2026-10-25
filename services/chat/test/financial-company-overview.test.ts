@@ -14,7 +14,7 @@ import { enginePacket, figureCompanies } from "../src/evidence-packet.ts";
 import { IDS, seedReportedFact } from "../../financial-engine/test/db-fixtures.ts";
 import { resolveResearchScope, type ResearchScope, type ScopeProposal } from "../src/research-scope.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "../src/subjects.ts";
-import { chatDatabase, chatHarness, completed, METRIC_READING, NO_ASKS, readingOf, resolveMention, revenueModel } from "./financial-fixtures.ts";
+import { chatDatabase, chatHarness, completed, FY2023_REVENUE, METRIC_READING, NO_ASKS, readingOf, resolveMention, revenueModel } from "./financial-fixtures.ts";
 
 const COMPANIES: Readonly<Record<string, string>> = {
   QTRS: "4f000000-0000-4000-8000-0000000000e1",
@@ -264,7 +264,9 @@ test("a question about one company that asks for no figure is answered with its 
       const done = completed((await chatHarness(pool, { model, readQuestion: reading(NO_ASKS), resolveMention: resolve, ...options }).run({ ...base, userIntent })).events);
       return [model.calls, (await results(done.message_id)).map(([outputId]) => outputId)];
     };
-    assert.deepEqual(await planned("Revenue for QTRS", ["QTRS"], { readQuestion: reading(METRIC_READING) }), [1, ["a_out"]], "a metric");
+    assert.deepEqual(await planned("Revenue for QTRS in fiscal 2023", ["QTRS"], { readQuestion: reading(FY2023_REVENUE) }), [1, ["a_out"]], "a line at a named year");
+    // The income statement asked broadly, at no period, is answered by the overview's defaults, not the planner's menu (#517).
+    assert.deepEqual(await planned("Analyze QTRS's profit", ["QTRS"], { readQuestion: reading(METRIC_READING) }), [0, QTRS_OVERVIEW.map(([outputId]) => outputId)], "the income statement");
     assert.deepEqual(await planned("Revenue for QTRS", ["QTRS"], { readQuestion: reading({ ...NO_ASKS, income_items: ["revenue"] }) }), [1, ["a_out"]], "an income item");
     assert.deepEqual(await planned("Revenue for QTRS", ["QTRS"], { readQuestion: reading({ ...NO_ASKS, asks: new Set(["margins"]) }) }), [1, ["a_out"]], "a facet");
     assert.deepEqual(await planned("Revenue for QTRS", ["QTRS"], { readQuestion: reading(null) }), [1, ["a_out"]], "no reading");

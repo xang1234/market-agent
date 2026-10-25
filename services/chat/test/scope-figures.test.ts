@@ -5,7 +5,7 @@ import test from "node:test";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
 import { proposedMetric, resolveResearchScope, type CompanyChange, type ResearchScope, type ScopePeriod, type ScopeProposal } from "../src/research-scope.ts";
 import { SCOPE_METRICS } from "../src/financial-runtime.ts";
-import { ENGINE_READS_BY_CATALOG_METRIC, periodNote, routeTurn, VALUATIONS, type PlanChoice, type ReadPeriod } from "../src/scope-figures.ts";
+import { defaultsNote, ENGINE_READS_BY_CATALOG_METRIC, LATEST, periodNote, routeTurn, VALUATIONS, type PlanChoice, type ReadPeriod } from "../src/scope-figures.ts";
 import { parseProposal, proposalQuestion } from "../src/scope-proposal.ts";
 import { proposal as read } from "./scope-fixtures.ts";
 
@@ -106,7 +106,7 @@ const ROUTES: ReadonlyArray<readonly [string, ScopeProposal | null, ResearchScop
   ["segments with guidance", read({ asks: ["segments", "guidance"] }), FRESH, "segments_gap"],
   ["kept segments, another quarter", read({ period: Q2 }), after({ segments: true }), "segments_gap"],
   ["kept segments, adding a company", read({ companies: adds("AMD") }), after({ segments: true }), "segments_gap"],
-  ["kept segments, a metric of its own", read({ metrics: ["income_statement"], period: Q2 }), after({ segments: true }), "planner"],
+  ["kept segments, a metric of its own", read({ metrics: ["income_statement"], period: Q2 }), after({ segments: true }), "overview at newest Q2"],
   ["kept segments turned off", read({ off: ["segments"], period: Q2 }), after({ segments: true }), "overview at newest Q2"],
   ["kept segments, the evidence", read({ asks: ["evidence"] }), after({ segments: true }), "analyst"],
   ["a declined metric kept, another year", read({ period: FY2024 }), after({ route: "financial_gap", reads: "financial_gap", metrics: [{ ...proposedMetric("ebitda", null, null)! }] }), "gap: undefined_metric"],
@@ -116,7 +116,30 @@ const ROUTES: ReadonlyArray<readonly [string, ScopeProposal | null, ResearchScop
   ["two companies", read({ companies: named("NVDA", "AMD") }), after({ companies: [NVDA, AMD] }), "overview at latest"],
   ["adding a company", read({ companies: adds("AMD") }), after({ companies: [NVDA, AMD] }), "overview at latest"],
   ["a company's peers", read({ asks: ["peers"], companies: named("NVDA") }), FRESH, "overview at latest with peers"],
-  ["a metric", read({ metrics: ["income_statement"], companies: named("NVDA") }), FRESH, "planner"],
+  ["the income statement", read({ metrics: ["income_statement"], companies: named("NVDA") }), FRESH, "overview at latest"],
+  ["the income statement of two companies", read({ metrics: ["income_statement"], companies: named("NVDA", "AMD") }), after({ companies: [NVDA, AMD] }), "overview at latest"],
+  ["the income statement against peers", read({ metrics: ["income_statement"], asks: ["peers"], companies: named("NVDA") }), FRESH, "overview at latest with peers"],
+  ["revenue", read({ metrics: ["income_statement"], items: ["revenue"], companies: named("NVDA") }), FRESH, "overview at latest"],
+  ["revenue and net income, the latest quarter", read({ metrics: ["income_statement"], items: ["revenue", "net_income"], asks: ["latest_quarter"], period: { kind: "latest" }, companies: named("NVDA") }), FRESH, "overview at latest quarter"],
+  ["profitability", read({ metrics: ["income_statement"], asks: ["margins"], companies: named("NVDA") }), FRESH, "overview at latest"],
+  ["the income statement, at a quarter", read({ metrics: ["income_statement"], period: Q2_2025, companies: named("NVDA") }), FRESH, "overview at Q2 FY2025"],
+  ["the income statement, for a fiscal year", read({ metrics: ["income_statement"], period: FY2025, companies: named("NVDA") }), FRESH, "income_statement at FY2025"],
+  ["the income statement, for the latest fiscal year", read({ metrics: ["income_statement"], asks: ["latest_fiscal_year"], period: { kind: "latest" }, companies: named("NVDA") }), FRESH, "income_statement at latest fiscal year"],
+  ["the income statement against peers, for a fiscal year", read({ metrics: ["income_statement"], asks: ["peers"], period: FY2025, companies: named("NVDA") }), FRESH, "overview at FY2025 with peers"],
+  ["operating expenses", read({ metrics: ["income_statement"], items: ["operating_expenses"], companies: named("NVDA") }), FRESH, "planner"],
+  ["the income statement beside another metric", read({ metrics: ["income_statement", "free_cash_flow"], companies: named("NVDA") }), FRESH, "planner"],
+  ["the income statement, with the evidence", read({ metrics: ["income_statement"], asks: ["evidence"], companies: named("NVDA") }), FRESH, "planner"],
+  ["the income statement, another figure turned off", read({ metrics: ["income_statement"], offMetrics: ["eps_diluted"], companies: named("NVDA") }), FRESH, "planner"],
+  ["earnings per share", read({ metrics: ["eps_diluted", "eps_basic"], companies: named("AMD") }), FRESH, "eps_diluted, eps_basic at latest"],
+  ["earnings per share of two companies", read({ metrics: ["eps_diluted"], companies: named("NVDA", "AMD") }), after({ companies: [NVDA, AMD] }), "eps_diluted at latest"],
+  ["earnings per share, for a quarter", read({ metrics: ["eps_diluted"], period: Q2_2025, companies: named("AMD") }), FRESH, "planner"],
+  ["revenue, for a fiscal year", read({ metrics: ["income_statement"], items: ["revenue"], period: FY2025, companies: named("NVDA") }), FRESH, "planner"],
+  ["a market cap", read({ metrics: ["market_cap"], companies: named("NVDA") }), FRESH, "market_cap at latest"],
+  ["a P/E for a fiscal year", read({ metrics: ["pe_ratio"], period: FY2025, companies: named("NVDA") }), FRESH, "planner"],
+  ["earnings per share growth", read({ metrics: [{ metric: "eps_diluted", qualifier: "growth" }], companies: named("AMD") }), FRESH, "planner"],
+  ["earnings per share against peers", read({ metrics: ["eps_diluted"], asks: ["peers"], companies: named("AMD") }), FRESH, "planner"],
+  ["earnings per share and why", read({ metrics: ["eps_diluted"], asks: ["explains"], companies: named("AMD") }), FRESH, "eps_diluted at latest"],
+  ["a metric no definition serves", read({ metrics: ["ebitda"], companies: named("NVDA") }), FRESH, "planner"],
   ["margins turned off", read({ off: ["margins"] }), FRESH, "analyst"],
   ["margins turned off, the income statement kept", read({ off: ["margins"] }), after(keeps("income_statement")), "analyst"],
   ["a metric turned off", read({ offMetrics: ["income_statement"] }), FRESH, "analyst"],
@@ -243,7 +266,7 @@ test("the latest fiscal year asked after the latest quarter's EPS reads the EPS 
   const year = turn(read({ asks: ["latest_fiscal_year"], period: { kind: "latest" } }), quarter.resolved);
   assert.deepEqual(
     [quarter.plan, quarter.resolved.latest_period, year.plan, year.resolved.latest_period],
-    ["planner", "quarter", "eps_diluted at latest fiscal year", "fiscal_year"],
+    ["eps_diluted at latest quarter", "quarter", "eps_diluted at latest fiscal year", "fiscal_year"],
   );
 });
 
@@ -268,6 +291,41 @@ test("an answer whose figures are of another period type than the one its turn r
     null,
     null,
     null,
+  ]);
+});
+
+test("an answer planned with no model names the defaults it chose for what its question left open (#517)", () => {
+  const overview: PlanChoice = { kind: "overview", period: LATEST, peers: false };
+  const eps: PlanChoice = { kind: "kept_figures", metrics: ["eps_diluted"], period: LATEST };
+  const profit = read({ metrics: ["income_statement"], companies: named("NVDA") });
+  assert.deepEqual([
+    defaultsNote(overview, profit, after(), "quarter", 1),
+    defaultsNote(overview, profit, after(), "quarter", 2),
+    defaultsNote(overview, read({ metrics: ["income_statement"], items: ["revenue"] }), after(), "quarter", 1),
+    defaultsNote(eps, read({ metrics: ["eps_diluted"] }), after(), "fiscal_year", 1),
+    defaultsNote({ kind: "kept_figures", metrics: ["income_statement"], period: { kind: "fiscal_year", fiscal_year: 2025 } }, read({ metrics: ["income_statement"], period: FY2025 }), after({ fiscal_year: 2025 }), "fiscal_year", 1),
+    defaultsNote(overview, read({ metrics: ["income_statement"], items: ["revenue"], asks: ["latest_quarter"], period: { kind: "latest" } }), after(), "quarter", 1),
+    defaultsNote(overview, read({ metrics: ["income_statement"], items: ["revenue"] }), after({ fiscal_year: 2025 }), "quarter", 1),
+    defaultsNote(overview, read({ companies: named("NVDA") }), after(), "quarter", 1),
+    defaultsNote({ kind: "trend", period: LATEST }, profit, after(), "quarter", 1),
+    defaultsNote({ kind: "planner" }, profit, after(), "fiscal_year", 1),
+    defaultsNote({ kind: "kept_figures", metrics: ["market_cap"], period: LATEST }, read({ metrics: ["market_cap"] }), after(), "quarter", 1),
+    defaultsNote(overview, read({ metrics: ["income_statement"], items: ["revenue"] }), after({ latest_period: "fiscal_year" }), "quarter", 1),
+    defaultsNote(overview, read({ metrics: ["income_statement"], items: ["revenue"] }), after({ latest_period: "quarter" }), "quarter", 1),
+  ], [
+    ["No period was named, so the latest reported quarter is shown.", "Profit is shown as gross profit, operating income and net income, each with its margin."],
+    ["No period was named, so each company's latest reported quarter is shown.", "Profit is shown as gross profit, operating income and net income, each with its margin."],
+    ["No period was named, so the latest reported quarter is shown."],
+    ["No period was named, so the latest fiscal year is shown."],
+    ["Profit is shown as gross profit, operating income and net income, each with its margin."],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    ["No period was named, so the latest reported quarter is shown."],
   ]);
 });
 

@@ -40,7 +40,7 @@ import { HOLDOUT_CASES, HOLDOUT_VERSION, SYNTHETIC_CASES, SYNTHETIC_FIGURES, typ
 
 // The suite's identity: its version and the digest of every case, pinned so a
 // changed case is a new version, not a quiet edit (#221).
-const HOLDOUT_DIGEST = "sha256:a3cf2f3b20d8d19117aec42c91189f45a0e94aca337f21685fa86a2c0c4761af";
+const HOLDOUT_DIGEST = "sha256:b8ada69fdf5f8951fd426c2fff356bacc5d8fe14c4590aeb78a69b770199a3bb";
 
 test("the held-out suite is a fixed, versioned set of 10-12 cases (#221)", () => {
   assert.ok(HOLDOUT_CASES.length + 1 >= 10 && HOLDOUT_CASES.length + 1 <= 12, "10-12 cases, the synthetic set counted as one");
@@ -181,15 +181,16 @@ function checkExpectations(holdout: HoldoutCase, completed: Record<string, unkno
     assert.equal(block?.kind, "financial_answer", `expected the engine's answer; got [${answer.blocks.map((b) => b.kind).join(", ")}]`);
     const financial = block.financial as {
       labels: Record<string, { text: string }>;
-      results: Array<{ subject_label_id: string; measure_label_id: string; period_label_id: string; disposition: string; presented: { text: string } }>;
+      results: Array<{ subject_label_id: string | null; measure_label_id: string; period_label_id: string; disposition: string; presented: { text: string } }>;
     };
-    const label = (id: string) => financial.labels[id]!.text;
+    // A comparison across companies, such as a lead, is of no one company.
+    const label = (id: string | null) => id === null ? "" : financial.labels[id]!.text;
     assert.deepEqual(
       financial.results.map((result) => [label(result.subject_label_id), label(result.measure_label_id), label(result.period_label_id), result.disposition, result.presented.text]),
       expect.financial,
     );
     const text = notes.map((note) => (note.segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format ?? "").join(""));
-    assert.deepEqual(text, expect.uncovered ? [expect.uncovered] : [], "the note naming what the plan does not cover");
+    assert.deepEqual(text, expect.uncovered === undefined ? [] : [expect.uncovered].flat(), "the notes naming what the plan does not cover, and its defaults");
   }
   if (expect.ytd_range) {
     const chart = answer.blocks.find((block) => block.kind === "perf_comparison");

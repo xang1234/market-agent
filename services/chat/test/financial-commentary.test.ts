@@ -23,7 +23,7 @@ import { plainText } from "../src/render-assertions.ts";
 import { resolveResearchScope, type ScopeProposal } from "../src/research-scope.ts";
 import type { ChatSubjectPreResolution } from "../src/subjects.ts";
 import { loadPriorScope, loadPriorSubjects, loadRecentConversation } from "../src/thread-context.ts";
-import { chatDatabase, chatHarness, completed, METRIC_READING, NO_ASKS, readingOf, revenueModel } from "./financial-fixtures.ts";
+import { chatDatabase, chatHarness, completed, FY2023_REVENUE, NO_ASKS, readingOf, revenueModel } from "./financial-fixtures.ts";
 
 const ALFA = "4f000000-0000-4000-8000-0000000000f1";
 const BRVO = "4f000000-0000-4000-8000-0000000000f2";
@@ -427,7 +427,8 @@ test("a company overview carries analyst commentary on its published results (#3
     assert.deepEqual((await message(answered.message_id)).blocks.map((block) => block.kind), ["financial_answer", "rich_text"]);
 
     await seedReportedFact(db, { metric_key: "revenue", value: "6000", fiscal_year: 2023, subject: ALFA });
-    const metric = completed((await overview(compose, { model: revenueModel(["ALFA"]), readQuestion: reading(METRIC_READING) }).run({ ...base, userIntent: "Revenue for ALFA" })).events);
+    // A line at a named year is the planner's, not the overview's (#517).
+    const metric = completed((await overview(compose, { model: revenueModel(["ALFA"]), readQuestion: reading(FY2023_REVENUE) }).run({ ...base, userIntent: "Revenue for ALFA in fiscal 2023" })).events);
     assert.deepEqual((await message(metric.message_id)).blocks.map((block) => block.kind), ["financial_answer"]);
 
     let analystCalls = 0;
