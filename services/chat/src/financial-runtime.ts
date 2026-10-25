@@ -47,7 +47,7 @@ import { allResolved, overviewOmissions, overviewPeers, planCompanyOverview, pla
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { companyKey, extractSubjectMentions } from "./subject-extraction.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "./subjects.ts";
-import { periodNote, planPeriod, planScopeFigures, routeTurn, type NamedGap, type PlanChoice, type ReadPeriod } from "./scope-figures.ts";
+import { defaultsNote, periodNote, planPeriod, planScopeFigures, routeTurn, type NamedGap, type PlanChoice, type ReadPeriod } from "./scope-figures.ts";
 import {
   BALANCE_SHEET_ITEMS,
   companyWordsIn,
@@ -184,6 +184,8 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       let asked = requested.subjects;
       let planned: PlanningResult | undefined;
       let overviewPeriod: ReadPeriod | null = null;
+      // The choice a plan built with no model answers, for the defaults it names.
+      let deterministic: PlanChoice | null = null;
       const declinedGap = (reason: ChatGap) => {
         // ponytail: a retry that resumes a reserved run does not plan, so its
         // gap names the companies the message resolved, without a pick or peers.
@@ -254,6 +256,9 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
             onOverview: (period) => {
               overviewPeriod = period;
             },
+            onDeterministic: (planned) => {
+              deterministic = planned;
+            },
           });
           return planned;
         },
@@ -263,6 +268,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
           reading,
           evidence: deps.evidence,
           overviewPeriod: () => overviewPeriod,
+          deterministic: () => deterministic,
           carried: requested.carried,
           notFound: requested.notFound,
           labels: requested.labels,
@@ -459,6 +465,7 @@ async function planTurn(
     evidence: FinancialEvidencePort;
     peersOf: PeersOf;
     onOverview: (period: ReadPeriod) => void;
+    onDeterministic: (choice: PlanChoice) => void;
   }>,
 ): Promise<PlanningResult> {
   const planningContext = (subjects: ReadonlyArray<RequestedSubject>): PlanningContext => ({
@@ -506,6 +513,7 @@ async function planTurn(
   };
   const plan = await deterministic();
   if (plan) {
+    turn.onDeterministic(choice);
     if (choice.kind === "trend" || choice.kind === "overview") turn.onOverview(choice.period);
     return plan;
   }
@@ -670,6 +678,7 @@ function persistAssistantMessage(
     reading: ScopeProposal | null;
     evidence: ChatFinancialRuntimeDeps["evidence"];
     overviewPeriod: () => ReadPeriod | null;
+    deterministic: () => PlanChoice | null;
     carried: ReadonlyArray<string>;
     notFound: ReadonlyArray<string>;
     labels: ReadonlyMap<string, string>;
@@ -691,10 +700,13 @@ function persistAssistantMessage(
     const shownPeriod = plan === null ? null : planPeriod(plan);
     const stillShown = reading === null || plan === null ? [] : shownTurnedOff(reading, plan);
     const replaced = scope === null ? null : periodNote(scope, shownPeriod);
+    const chosen = turn.deterministic();
+    const defaults = chosen === null || reading === null || scope === null || plan === null ? [] : defaultsNote(chosen, reading, scope, shownPeriod, plan.subjects.members.length);
     const note = [
       ...(turn.notFound.length === 0 ? [] : [`No company matched ${labelList(turn.notFound)}.`]),
       ...(turn.carried.length === 0 ? [] : [`${labelList(turn.carried)} ${turn.carried.length > 1 ? "are" : "is"} carried from the previous answer.`]),
       ...(replaced === null ? [] : [replaced]),
+      ...defaults,
       ...(reading === null ? [UNCHECKED] : missing.length === 0 ? [] : [`Not covered by this answer: ${missing.join("; ")}.`]),
       ...(stillShown.length === 0 ? [] : [`Still shown as an input to another figure: ${labelList(stillShown)}.`]),
     ].join(" ");

@@ -12,8 +12,9 @@ import { saveCommentary } from "../src/engine-commentary.ts";
 import { resultRefProblem } from "../src/prose-refs.ts";
 import { plainText } from "../src/render-assertions.ts";
 import type { ScopeProposal } from "../src/research-scope.ts";
+import { parseProposal, proposalQuestion } from "../src/scope-proposal.ts";
 import type { ChatSubjectPreResolution } from "../src/subjects.ts";
-import { chatHarness, completed, NO_ASKS, readingOf } from "./financial-fixtures.ts";
+import { chatHarness, completed, METRIC_READING, readingOf } from "./financial-fixtures.ts";
 import { GOLDEN_COMPANIES, seedGoldenDataset } from "./golden/dataset.ts";
 import { GOLDEN_ENV } from "./golden/harness.ts";
 
@@ -37,12 +38,15 @@ test("golden metric questions certify through the chat financial lane on the rec
   const pool = await connectedPool(t, databaseUrl);
   const replay = await createReplayLlmChatClient(join(import.meta.dirname, "golden", "llm-replies.json"));
   const model: PlanningModel = async ({ messages }) => ({ text: (await replay({} as never, { messages })).text, model: "recorded" });
+  // Each question's recorded reading, as the golden conversation reads it.
+  const recordedReading = async (question: string) =>
+    parseProposal((await replay({} as never, { messages: [{ role: "user", content: proposalQuestion(question) }] })).text, question);
   // The analyst prose on an overview, from the recorded replies; no judge is configured, so inferences stay hidden.
   const commentary = (db: Parameters<typeof saveCommentary>[0], input: Parameters<typeof saveCommentary>[2]) =>
     saveCommentary(db, (answer, turn) => answerTurn(answer, turn, { env: GOLDEN_ENV }), input);
 
   const ask = async (userIntent: string, readQuestion?: (question: string) => Promise<ScopeProposal | null>) => {
-    const { events } = await chatHarness(pool, { model, resolveMention: resolveListing, commentary, ...(readQuestion ? { readQuestion } : {}) }).run({ threadId, userId: OWNER, userIntent });
+    const { events } = await chatHarness(pool, { model, resolveMention: resolveListing, commentary, readQuestion: readQuestion ?? recordedReading }).run({ threadId, userId: OWNER, userIntent });
     const done = completed(events);
     const message = (await client.query(`select blocks from chat_messages where message_id = $1`, [done.message_id])).rows[0];
     assert.ok(message, `expected a published answer; got ${JSON.stringify(done)}`);
@@ -53,8 +57,11 @@ test("golden metric questions certify through the chat financial lane on the rec
   // only that block's verified results, each with its exact text and period.
   const commentaryText = async () => {
     const { rows: [{ blocks }] } = await client.query(`select blocks from chat_messages where thread_id = $1 and role = 'assistant' order by created_at desc limit 1`, [threadId]);
-    const [answer, prose] = blocks as Array<Record<string, unknown> & { kind: string; financial: FinancialAnswerContent }>;
-    assert.deepEqual(blocks.map((block: { kind: string; analyst_commentary?: boolean }) => [block.kind, block.analyst_commentary ?? false]), [["financial_answer", false], ["rich_text", true]]);
+    // A note the answer saved (its defaults, #517) sits between the two.
+    const [answer, ...rest] = blocks as Array<Record<string, unknown> & { kind: string; financial: FinancialAnswerContent }>;
+    const prose = rest.at(-1);
+    assert.deepEqual(blocks.map((block: { kind: string; analyst_commentary?: boolean }) => [block.kind, block.analyst_commentary ?? false]),
+      [["financial_answer", false], ...rest.slice(0, -1).map(() => ["rich_text", false]), ["rich_text", true]]);
     const segments = prose!.segments as Parameters<typeof plainText>[0];
     const { results, labels } = answer!.financial;
     assert.deepEqual(segments.flatMap((segment) => segment.type === "ref" ? [segment] : []), segments.flatMap((segment) => {
@@ -63,6 +70,13 @@ test("golden metric questions certify through the chat financial lane on the rec
     }));
     assert.equal(resultRefProblem(prose!, answer!), null);
     return plainText(segments);
+  };
+  // The latest answer's note: what it names besides its figures.
+  const noteText = async () => {
+    const { rows: [{ blocks }] } = await client.query(`select blocks from chat_messages where thread_id = $1 and role = 'assistant' order by created_at desc limit 1`, [threadId]);
+    return (blocks as Array<{ kind: string; analyst_commentary?: boolean; segments?: Array<{ text?: string }> }>)
+      .slice(1).filter((block) => block.kind === "rich_text" && !block.analyst_commentary)
+      .map((block) => block.segments!.map((segment) => segment.text ?? "").join(""));
   };
 
   assert.deepEqual(await ask("Why did AMD's operating margin turn negative in Q2 2025?"), [["out_a_om", "verified", "-1.74%"]]);
@@ -80,13 +94,15 @@ test("golden metric questions certify through the chat financial lane on the rec
     ["out_c_om", "verified", "31.97%"],
     ["out_c_nm", "verified", "26.92%"],
   ]);
+  // A figure asked alone, at no period, is planned with no model at the latest fiscal year (#517).
   assert.deepEqual(await ask("What is AMD's free cash flow?"), [
-    ["a_ocf_input", "missing", null],
-    ["a_capex_input", "missing", null],
-    ["out_a_fcf", "blocked_dependency", null],
+    ["out_operating_cash_flow_latest_fy", "missing", null],
+    ["out_capex_latest_fy", "missing", null],
+    ["out_free_cash_flow_latest_fy", "blocked_dependency", null],
   ]);
-  // Each reading names the company its question writes, with no figure asked: the overview.
-  assert.deepEqual(await ask("Analyze NVDA's profit", readingOf(NO_ASKS)), [
+  // Each reading names the company its question writes and the income
+  // statement, as profit reads: the overview, not a menu of profit measures (#517).
+  assert.deepEqual(await ask("Analyze NVDA's profit", readingOf(METRIC_READING)), [
     ["out_revenue_fy2025_q1", "verified", "USD 26,044,000,000.00"],
     ["out_revenue_fy2025_q2", "verified", "USD 30,040,000,000.00"],
     ["out_revenue_fy2025_q3", "verified", "USD 35,082,000,000.00"],
@@ -112,6 +128,9 @@ test("golden metric questions certify through the chat financial lane on the rec
     ["out_revenue_highest", "verified", "Q4 FY2026 has the highest revenue of the 8 quarters ranked"],
     ["out_revenue_lowest", "verified", "Q1 FY2025 has the lowest revenue of the 8 quarters ranked"],
   ]);
+  assert.deepEqual(await noteText(), [
+    "No period was named, so the latest reported quarter is shown. Profit is shown as gross profit, operating income and net income, each with its margin.",
+  ]);
   assert.equal(await commentaryText(), [
     "NVDA's revenue rose in every period from Q1 FY2025 (USD 26,044,000,000.00) to Q4 FY2026 (USD 62,100,000,000.00).",
     "NVDA's gross margin (gross profit / revenue) was 74.40%, operating margin (operating income / revenue) 64.90% and net margin (net income / revenue) 57.00% in Q4 FY2026.",
@@ -125,14 +144,17 @@ test("golden metric questions certify through the chat financial lane on the rec
   const MARGINS = ["gross_margin", "operating_margin", "net_margin"];
   const LEADS: Record<string, string[]> = { b: ["20.42 pp", "50.82 pp", "43.90 pp"], c: ["27.36 pp", "30.44 pp", "27.71 pp"] };
   const leads = (...slots: string[]) => MARGINS.flatMap((metric, index) => slots.map((slot) => [`out_a_minus_${slot}_${metric}`, "verified", LEADS[slot]![index]]));
-  assert.deepEqual(await ask("Compare NVDA and AMD profit", readingOf(NO_ASKS)), [...latestQuarter("a", "fy2026_q4", NVDA), ...latestQuarter("b", "fy2026_q2", AMD), ...leads("b")],
+  assert.deepEqual(await ask("Compare NVDA and AMD profit", readingOf(METRIC_READING)), [...latestQuarter("a", "fy2026_q4", NVDA), ...latestQuarter("b", "fy2026_q2", AMD), ...leads("b")],
     "NVDA's quarter ends in January and AMD's in June, so the lead takes AMD's quarter ending in December, 29 days before NVDA's");
+  assert.deepEqual(await noteText(), [
+    "No period was named, so each company's latest reported quarter is shown. Profit is shown as gross profit, operating income and net income, each with its margin.",
+  ]);
   assert.equal(await commentaryText(), [
     "Of NVDA and AMD, NVDA's gross margin (gross profit / revenue) was highest: NVDA 74.40% (Q4 FY2026), AMD 54.02% (Q2 FY2026).",
     "Of NVDA and AMD, NVDA's year-over-year percent change in revenue was highest: NVDA 57.89% (Q4 FY2026 vs Q4 FY2025), AMD 45.74% (Q2 FY2026 vs Q2 FY2025).",
     "NVDA's revenue was USD 62,100,000,000.00 in Q4 FY2026; AMD's revenue was USD 11,200,000,000.00 in Q2 FY2026.",
   ].join("\n\n"), "each company is shown at its newest quarter alone, so the recorded gross margin comparison of the two stands");
-  assert.deepEqual(await ask("Compare NVDA, AMD and AAPL profit", readingOf(NO_ASKS)), [
+  assert.deepEqual(await ask("Compare NVDA, AMD and AAPL profit", readingOf(METRIC_READING)), [
     ...latestQuarter("a", "fy2026_q4", NVDA),
     ...latestQuarter("b", "fy2026_q2", AMD),
     ...latestQuarter("c", "fy2026_q3", AAPL),

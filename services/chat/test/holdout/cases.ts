@@ -19,7 +19,7 @@
 
 import type { RejectionCheck } from "../../src/assertions.ts";
 
-export const HOLDOUT_VERSION = 18;
+export const HOLDOUT_VERSION = 19;
 
 type Assertion = Record<string, unknown>;
 
@@ -51,8 +51,8 @@ export type HoldoutCase = {
     // The turn asks instead of answering, binding no company.
     clarification?: boolean;
     financial?: ReadonlyArray<readonly [company: string, measure: string, period: string, disposition: string, text: string]>;
-    // The note naming what the plan does not cover.
-    uncovered?: string;
+    // The notes after the engine's answer: what its plan does not cover, the defaults it chose, its commentary's absence.
+    uncovered?: string | ReadonlyArray<string>;
     // The engine's gap for a request it cannot plan: its reason code.
     financial_gap?: string;
   };
@@ -94,15 +94,6 @@ const draft = (mentions: string[], operations: ReadonlyArray<Record<string, unkn
   outputs: outputs.map((node_id) => ({ output_id: `out_${node_id}`, node_id })),
   thresholds: [],
 });
-const latestMargins = (slot: string) => [
-  reported(slot, `${slot}_rev`, "revenue", latest("annual")),
-  reported(slot, `${slot}_gp`, "gross_profit", latest("annual")),
-  reported(slot, `${slot}_oi`, "operating_income", latest("annual")),
-  reported(slot, `${slot}_ni`, "net_income", latest("annual")),
-  margin("gross_margin", `${slot}_gm`, `${slot}_gp`, `${slot}_rev`),
-  margin("operating_margin", `${slot}_om`, `${slot}_oi`, `${slot}_rev`),
-  margin("net_margin", `${slot}_nm`, `${slot}_ni`, `${slot}_rev`),
-];
 const amdOperatingMargin = (period: Period, suffix: string) => [
   reported("a", `oi_${suffix}`, "operating_income", period),
   reported("a", `rev_${suffix}`, "revenue", period),
@@ -120,31 +111,38 @@ const NET_MARGIN = "Net margin (net income / revenue)";
 const LATEST_YEAR = "latest fiscal year";
 const NOT_PUBLIC = "No eligible input was public before the knowledge cutoff.";
 
+// A company's row of a several-company overview: its quarter's revenue, profit lines and margins, and its revenue growth.
+function overviewQuarter(company: string, quarter: string, prior: string, yearBefore: string, values: ReadonlyArray<string>) {
+  const measures = [REVENUE, "Gross profit", "Operating income", "Net income", GROSS_MARGIN, OPERATING_MARGIN, NET_MARGIN];
+  return [
+    ...measures.map((measure, index) => [company, measure, quarter, "verified", values[index]!] as const),
+    [company, "Quarter-over-quarter percent change in Revenue", `${quarter} vs ${prior}`, "verified", values[7]!] as const,
+    [company, "Year-over-year percent change in Revenue", `${quarter} vs ${yearBefore}`, "verified", values[8]!] as const,
+  ];
+}
+
 export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
   {
     id: "three-company-order",
     trap: "three companies on revenue and margins: a figure credited to the wrong company, or a company dropped",
     turns: ["Compare NVDA, AMD and AAPL on revenue and margins."],
     scopes: [{metrics: [{metric: "income_statement", adjustment: null, qualifier: null}], asks: ["margins"], turns_off: {facets: [], metrics: []}, income_items: ["revenue"], period: {kind: "none"}, companies: {kind: "compare", add: ["NVDA", "AMD", "AAPL"]}}],
-    plan: draft(["NVDA", "AMD", "AAPL"], [...latestMargins("a"), ...latestMargins("b"), ...latestMargins("c")],
-      ["a", "b", "c"].flatMap((slot) => [`${slot}_rev`, `${slot}_gm`, `${slot}_om`, `${slot}_nm`])),
+    // Revenue and margins at no period are the overview's, with its defaults, planned with no model (#517).
     expect: {
       companies: ["NVDA", "AMD", "AAPL"],
       route: "financial_answer",
       financial: [
-        [NVIDIA, REVENUE, LATEST_YEAR, "verified", "USD 209,911,000,000.00"],
-        [NVIDIA, GROSS_MARGIN, LATEST_YEAR, "verified", "70.78%"],
-        [NVIDIA, OPERATING_MARGIN, LATEST_YEAR, "verified", "60.21%"],
-        [NVIDIA, NET_MARGIN, LATEST_YEAR, "verified", "53.60%"],
-        [AMD, REVENUE, LATEST_YEAR, "verified", "USD 34,669,000,000.00"],
-        [AMD, GROSS_MARGIN, LATEST_YEAR, "verified", "49.92%"],
-        [AMD, OPERATING_MARGIN, LATEST_YEAR, "verified", "9.78%"],
-        [AMD, NET_MARGIN, LATEST_YEAR, "verified", "12.04%"],
-        [APPLE, REVENUE, LATEST_YEAR, "verified", "USD 416,161,000,000.00"],
-        [APPLE, GROSS_MARGIN, LATEST_YEAR, "verified", "46.91%"],
-        [APPLE, OPERATING_MARGIN, LATEST_YEAR, "verified", "31.97%"],
-        [APPLE, NET_MARGIN, LATEST_YEAR, "verified", "26.92%"],
+        ...overviewQuarter(NVIDIA, "Q4 FY2026", "Q3 FY2026", "Q4 FY2025", ["USD 62,100,000,000.00", "USD 46,200,000,000.00", "USD 40,300,000,000.00", "USD 35,400,000,000.00", "74.40%", "64.90%", "57.00%", "8.94%", "57.89%"]),
+        ...overviewQuarter(AMD, "Q2 FY2026", "Q1 FY2026", "Q2 FY2025", ["USD 11,200,000,000.00", "USD 6,050,000,000.00", "USD 1,610,000,000.00", "USD 1,480,000,000.00", "54.02%", "14.38%", "13.21%", "4.67%", "45.74%"]),
+        ...overviewQuarter(APPLE, "Q3 FY2026", "Q2 FY2026", "Q3 FY2025", ["USD 97,100,000,000.00", "USD 45,700,000,000.00", "USD 29,800,000,000.00", "USD 24,900,000,000.00", "47.06%", "30.69%", "25.64%", "-1.62%", "3.26%"]),
+        ["", `Difference in ${GROSS_MARGIN}`, `${NVIDIA} Q4 FY2026 minus ${AMD} Q4 FY2025`, "verified", "20.42 pp"],
+        ["", `Difference in ${GROSS_MARGIN}`, `${NVIDIA} Q4 FY2026 minus ${APPLE} Q1 FY2026`, "verified", "27.36 pp"],
+        ["", `Difference in ${OPERATING_MARGIN}`, `${NVIDIA} Q4 FY2026 minus ${AMD} Q4 FY2025`, "verified", "50.82 pp"],
+        ["", `Difference in ${OPERATING_MARGIN}`, `${NVIDIA} Q4 FY2026 minus ${APPLE} Q1 FY2026`, "verified", "30.44 pp"],
+        ["", `Difference in ${NET_MARGIN}`, `${NVIDIA} Q4 FY2026 minus ${AMD} Q4 FY2025`, "verified", "43.90 pp"],
+        ["", `Difference in ${NET_MARGIN}`, `${NVIDIA} Q4 FY2026 minus ${APPLE} Q1 FY2026`, "verified", "27.71 pp"],
       ],
+      uncovered: ["No period was named, so each company's latest reported quarter is shown.", "Commentary is unavailable for this answer."],
     },
     prose: "",
   },
@@ -195,11 +193,7 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
     trap: "free cash flow is not in the data: a declared gap, never a number in its place",
     turns: ["What is AMD's free cash flow?"],
     scopes: [{metrics: [{metric: "free_cash_flow", adjustment: null, qualifier: null}], asks: [], turns_off: {facets: [], metrics: []}, income_items: [], period: {kind: "none"}, companies: {kind: "as_named", names: ["AMD"]}}],
-    plan: draft(["AMD"], [
-      reported("a", "a_ocf", "operating_cash_flow", latest("annual")),
-      reported("a", "a_capex", "capex", latest("annual")),
-      { node_id: "a_fcf", operation: "free_cash_flow", operating_cash_flow: "a_ocf", capex: "a_capex" },
-    ], ["a_fcf"]),
+    // A figure asked alone at no period is planned with no model, at the latest fiscal year (#517).
     expect: {
       companies: ["AMD"],
       route: "financial_answer",
@@ -208,6 +202,7 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
         [AMD, "Capital expenditures (PP&E cash payments)", LATEST_YEAR, "missing", NOT_PUBLIC],
         [AMD, "Free cash flow (OCF less PP&E cash capex)", LATEST_YEAR, "blocked_dependency", "A required input or calculation is unavailable."],
       ],
+      uncovered: "No period was named, so the latest fiscal year is shown.",
       absent_kinds: ["metric_row", "revenue_bars"],
     },
     prose: "",

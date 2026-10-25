@@ -493,7 +493,8 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
         ["Capital expenditures (PP&E cash payments)", "latest fiscal year", "missing", "No eligible input was public before the knowledge cutoff."],
         ["Free cash flow (OCF less PP&E cash capex)", "latest fiscal year", "blocked_dependency", "A required input or calculation is unavailable."],
       ],
-      notes: [],
+      // Planned with no model at the default period, which the note names (#517).
+      notes: ["No period was named, so the latest fiscal year is shown."],
     });
     const { rows } = await client.query<{ research_scope: { route: string } }>(
       `select research_scope from chat_messages where thread_id = $1::uuid and role = 'assistant'`,

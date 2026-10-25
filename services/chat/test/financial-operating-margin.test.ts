@@ -11,7 +11,8 @@ import { IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { createSecBackedStatementRepository } from "../../fundamentals/src/sec-facts-repository.ts";
 import { secCompanyFetcher } from "../../fundamentals/test/fakes.ts";
 import { listChatMessagesForThread } from "../src/messages.ts";
-import { chatDatabase, chatHarness, completed, SEC_ISSUER } from "./financial-fixtures.ts";
+import type { ScopeProposal } from "../src/research-scope.ts";
+import { chatDatabase, chatHarness, completed, METRIC_READING, readingOf, SEC_ISSUER } from "./financial-fixtures.ts";
 
 const ANNUAL = "0000320190-24-000010";
 const QUARTERLY = "0000320190-23-000077";
@@ -33,6 +34,16 @@ function companyFacts() {
 }
 
 /** A planning model that drafts OPM's operating margin for one fiscal period. */
+// As the model reads "What was OPM's operating margin for FY 2023?": the margin, at the period it names.
+function operatingMarginReading(fiscalPeriod: "FY" | "Q2", fiscalYear = 2023): ScopeProposal {
+  return {
+    ...METRIC_READING,
+    asks: new Set(["margins"]),
+    income_items: ["operating_margin"],
+    period: fiscalPeriod === "FY" ? { kind: "fiscal_year", fiscal_year: fiscalYear } : { kind: "fiscal_quarter", fiscal_period: fiscalPeriod, fiscal_year: fiscalYear },
+  };
+}
+
 function operatingMarginModel(fiscalPeriod: "FY" | "Q2", fiscalYear = 2023): PlanningModel {
   const period = { kind: "fiscal_period", fiscal_year: fiscalYear, fiscal_period: fiscalPeriod };
   return (async () => ({
@@ -72,7 +83,7 @@ test("a certified operating margin from SEC-ingested facts", { timeout: 300_000 
     assert.ok(await statements.find({ issuer_id: SEC_ISSUER, family: "income", basis: "as_reported", fiscal_year: 2023, fiscal_period }));
   }
   const ask = (fiscalPeriod: "FY" | "Q2", options: { fiscalYear?: number } = {}) =>
-    chatHarness(pool, { model: operatingMarginModel(fiscalPeriod, options.fiscalYear) })
+    chatHarness(pool, { model: operatingMarginModel(fiscalPeriod, options.fiscalYear), readQuestion: readingOf(operatingMarginReading(fiscalPeriod, options.fiscalYear)) })
       .run({ threadId, userId: IDS.owner, userIntent: `What was OPM's operating margin for ${fiscalPeriod} ${options.fiscalYear ?? 2023}?` });
   const certified = async (messageId: unknown) => {
     const read = await listChatMessagesForThread(pool, { thread_id: threadId, user_id: IDS.owner });

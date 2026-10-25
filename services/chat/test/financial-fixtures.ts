@@ -88,6 +88,8 @@ export function resolveMention(mention: string): Promise<ChatSubjectPreResolutio
 
 export const NO_ASKS: ScopeProposal = { metrics: [], asks: new Set(), turns_off: { facets: new Set(), metrics: new Set() }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named", names: [] } };
 export const METRIC_READING: ScopeProposal = { ...NO_ASKS, metrics: [proposedMetric("income_statement", null, null)!] };
+/** A line at a named year, which the planner answers (#517): "Revenue for AAA in fiscal 2023". */
+export const FY2023_REVENUE: ScopeProposal = { ...METRIC_READING, income_items: ["revenue"], period: { kind: "fiscal_year", fiscal_year: 2023 } };
 /** A recorded reading that, like the model's, names the tickers its question writes when it names no company. */
 export const readingOf = (proposal: ScopeProposal | null) => async (question: string): Promise<ScopeProposal | null> =>
   proposal !== null && proposal.companies.kind === "as_named" && proposal.companies.names.length === 0

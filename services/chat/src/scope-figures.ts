@@ -55,6 +55,10 @@ const FACET_LANE: Readonly<Record<ScopeFacet, "figure" | "analyst" | "neutral">>
   latest_fiscal_year: "neutral",
 };
 const OVERVIEW_ASKS: ReadonlySet<ScopeFacet> = new Set(["latest_quarter", "latest_fiscal_year", "peers", "explains"]);
+// A broad income ask may name the margins the overview shows ("NVDA's profitability").
+const OVERVIEW_ASKS_OF_INCOME: ReadonlySet<ScopeFacet> = new Set([...OVERVIEW_ASKS, "margins"]);
+// The income lines the overview shows each company's latest of.
+const OVERVIEW_ITEMS: ReadonlySet<string> = new Set(["revenue", ...MARGINS.flatMap(({ metric, numerator }) => [metric, numerator])]);
 const OVERVIEW_SHOWS: ReadonlySet<ScopeFacet | (typeof PERIOD_FIELDS)[number]> = new Set(["latest_quarter", "margins", "margin_trend"]);
 const KEPT_ASKS: ReadonlySet<ScopeFacet> = new Set(["explains", "latest_quarter", "latest_fiscal_year"]);
 const TREND_ASKS: ReadonlySet<ScopeFacet> = new Set(["margin_trend", "margins", "explains"]);
@@ -102,14 +106,34 @@ export function routeTurn(reading: ScopeProposal | null, scope: ResearchScope | 
   const kept = scope.inherited.includes("metrics") ? scope.metrics.map((metric) => metric.metric_key) : [];
   const keptIncome = kept.every((key) => key === INCOME_STATEMENT);
   const asksNoFigure = READ_PERIODS.has(reading.period.kind) && reading.metrics.length === 0 && reading.income_items.length === 0;
-  const overview = asksNoFigure && offMetrics.size === 0 && ![...offFacets].some((facet) => OVERVIEW_SHOWS.has(facet)) && [...asks].every((facet) => OVERVIEW_ASKS.has(facet));
+  // A broad ask is answered with defaults, not a menu (#517). The income
+  // statement asked of no other figure ("NVDA's profit") reads as the
+  // overview, or at a fiscal year as the statement's figures for that year;
+  // so do only lines the overview shows ("AAPL's sales") at no named period.
+  const namesPeriod = reading.period.kind === "fiscal_year" || reading.period.kind === "fiscal_quarter";
+  const broadIncome = READ_PERIODS.has(reading.period.kind) && reading.metrics.length > 0 &&
+    reading.metrics.every((metric) => metric.metric_key === INCOME_STATEMENT) &&
+    (reading.income_items.length === 0 || (!namesPeriod && reading.income_items.every((item) => OVERVIEW_ITEMS.has(item))));
+  const overviewAsks = broadIncome ? OVERVIEW_ASKS_OF_INCOME : OVERVIEW_ASKS;
+  const overview = (asksNoFigure || broadIncome) && offMetrics.size === 0 && ![...offFacets].some((facet) => OVERVIEW_SHOWS.has(facet)) &&
+    [...asks].every((facet) => overviewAsks.has(facet));
   const oneCompany = scope.companies.length === 1;
   const askedTrend = (reading.period.kind === "none" || reading.period.kind === "latest") && asks.has("margin_trend") &&
     [...asks].every((facet) => TREND_ASKS.has(facet)) && offMetrics.size === 0 &&
     reading.metrics.every((metric) => metric.metric_key === INCOME_STATEMENT) && reading.income_items.every((item) => MARGIN_ITEMS.has(item));
   const keptTrend = (reading.period.kind === "fiscal_year" || reading.period.kind === "fiscal_quarter") && overview && scope.margin_trend && keptIncome;
   if (oneCompany && (askedTrend || keptTrend)) return { kind: "trend", period };
+  if (overview && keptIncome && broadIncome && !asks.has("peers") && readsYear(period)) return { kind: "kept_figures", metrics: [INCOME_STATEMENT], period };
   if (overview && keptIncome) return { kind: "overview", period, peers: asks.has("peers") };
+  // A figure the engine plans with no model, asked alone with no qualifier
+  // and no period of its own ("AMD's earnings per share"), at the scope's
+  // period: with none, the latest fiscal year (#517).
+  const figures = reading.metrics.map((metric) => metric.metric_key);
+  const plannable = (key: string) => Object.hasOwn(ENGINE_READS_BY_CATALOG_METRIC, key) || (VALUATIONS.has(key) && period.kind === "latest");
+  if (READ_PERIODS.has(reading.period.kind) && !namesPeriod && figures.length > 0 && !figures.includes(INCOME_STATEMENT) && figures.every(plannable) &&
+    reading.income_items.length === 0 && offMetrics.size === 0 && offFacets.size === 0 && keptIncome && [...asks].every((facet) => KEPT_ASKS.has(facet))) {
+    return { kind: "kept_figures", metrics: figures, period };
+  }
   if (asksNoFigure && !keptIncome && [...asks].every((facet) => KEPT_ASKS.has(facet) || facet === "peers")) {
     if (asks.has("peers")) return { kind: "named_gap", reason: "peers" };
     const planned = kept.filter((key) => Object.hasOwn(ENGINE_READS_BY_CATALOG_METRIC, key) || (VALUATIONS.has(key) && period.kind === "latest"));
@@ -131,6 +155,9 @@ function namedCompanies(change: ScopeProposal["companies"]): number {
   }
 }
 
+// Whether a period reads a fiscal year: one named, or the latest of a scope that reads years.
+const readsYear = (period: ReadPeriod) => period.kind === "fiscal_year" || (period.kind === "latest" && period.period === "fiscal_year");
+
 type ScopePeriod = Pick<ResearchScope, "fiscal_year" | "fiscal_quarter" | "latest_period">;
 
 /** The period a resolved scope reads its figures at: its quarter, else its fiscal year, else the latest. */
@@ -147,6 +174,34 @@ export function planPeriod(plan: FinancialPlanV1): PeriodType | null {
     return [annual ? "fiscal_year" : "quarter"];
   }));
   return types.size === 1 ? [...types][0]! : null;
+}
+
+/**
+ * The defaults an overview or a figures plan, planned with no model, chose
+ * for what its question left open, for its note (#517): the period, when the
+ * question asks for a figure, neither it nor its scope names one, and it is
+ * no valuation; and
+ * profit, read as each of its lines with its margin, when it names the income
+ * statement and no line.
+ */
+export function defaultsNote(choice: PlanChoice, reading: ScopeProposal, scope: ScopePeriod, shown: PeriodType | null, companies: number): string[] {
+  const { asks, offMetrics } = readingAsks(reading);
+  const named = reading.metrics.filter((metric) => !offMetrics.has(metric.metric_key));
+  if (named.length === 0 || (choice.kind !== "overview" && choice.kind !== "kept_figures")) return [];
+  const showsProfit = choice.kind === "overview" || choice.metrics.includes(INCOME_STATEMENT);
+  // A valuation is valued at the cutoff, as its label says. A latest of
+  // another type than the scope reads is periodNote's to name.
+  const valued = choice.kind === "kept_figures" && choice.metrics.some((key) => VALUATIONS.has(key));
+  const periodOpen = reading.period.kind === "none" && ![...asks].some((facet) => LATEST_ASKS.has(facet)) && !valued &&
+    scope.fiscal_year === null && scope.fiscal_quarter === null && (scope.latest_period == null || scope.latest_period === shown);
+  const whose = companies > 1 ? "each company's" : "the";
+  const latest = shown === "quarter" ? "latest reported quarter" : shown === "fiscal_year" ? "latest fiscal year" : null;
+  return [
+    ...(periodOpen && latest !== null ? [`No period was named, so ${whose} ${latest} is shown.`] : []),
+    ...(showsProfit && named.some((metric) => metric.metric_key === INCOME_STATEMENT) && reading.income_items.length === 0
+      ? ["Profit is shown as gross profit, operating income and net income, each with its margin."]
+      : []),
+  ];
 }
 
 /** What an answer's note says when its figures are of another period type than the one its turn read; null when they are not. */
