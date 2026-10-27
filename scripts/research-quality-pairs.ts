@@ -8,7 +8,7 @@
 //   node --experimental-strip-types scripts/research-quality-pairs.ts reveal <pairs dir> [key file] [--incomplete]
 import { constants, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash, randomInt } from "node:crypto";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
@@ -120,7 +120,8 @@ function describeRef(segment: RefSegment, block: Block, results: ReadonlyMap<str
 }
 
 // One answer, every turn, with its cited figures numbered [1], [2]... in the order they
-// appear and listed after it with what each points at, and each block's own sources.
+// appear and listed after it with what each points at, and each block's own sources as
+// S1, S2... in the order they appear, since source ids are minted per stack.
 function renderArm(question: EvalQuestion, turns: ReadonlyArray<AnsweredTurn>): string[] {
   const lines = gaveAnswer(turns) ? [] : ["_Not scored: a turn didn't complete, so every cell of this answer is n/a._", ""];
   const results = new Map(turns.flatMap((turn) => turn.blocks).filter((block) => block.kind === "financial_answer").flatMap((block) => {
@@ -132,6 +133,11 @@ function renderArm(question: EvalQuestion, turns: ReadonlyArray<AnsweredTurn>): 
     cited.push(`- [${cited.length + 1}] **${segment.format ?? ""}**: ${describeRef(segment, block, results)}`);
     return `[${cited.length}]`;
   };
+  const sourceAliases = new Map<unknown, string>();
+  const source = (ref: unknown) => {
+    if (!sourceAliases.has(ref)) sourceAliases.set(ref, `S${sourceAliases.size + 1}`);
+    return sourceAliases.get(ref)!;
+  };
   question.turns.forEach((asked, i) => {
     const turn = turns[i];
     lines.push(`**Q:** ${asked.message}${asked.subjectText ? ` (opened from the ${asked.subjectText} page)` : ""}`, "");
@@ -142,7 +148,7 @@ function renderArm(question: EvalQuestion, turns: ReadonlyArray<AnsweredTurn>): 
     for (const block of turn.blocks) {
       lines.push(renderBlock(block, cite), "");
       const sources = Array.isArray(block.source_refs) ? block.source_refs : [];
-      if (sources.length > 0) lines.push(`_Block sources: ${sources.join(", ")}._`, "");
+      if (sources.length > 0) lines.push(`_Block sources: ${sources.map(source).join(", ")}._`, "");
     }
   });
   if (cited.length > 0) lines.push("_Cited:_", "", ...cited, "");
@@ -152,6 +158,9 @@ function renderArm(question: EvalQuestion, turns: ReadonlyArray<AnsweredTurn>): 
 // Refuses two runs that didn't run this runner's question set on one dataset. Questions
 // only one run asked stay out of the packet and are named in it and in the reveal.
 export function buildPair(baseline: RunRecord, candidate: RunRecord, seed: number, pairing: string, files: Record<Arm, string>): { packet: string; scores: PairScores; key: PairKey } {
+  for (const record of [baseline, candidate]) {
+    if (record.blind !== true) throw new Refusal(`can't pair ${record.run}: it wasn't run with --blind, so its report may have been read; rerun it with --blind`);
+  }
   for (const field of ["questionSetDigest", "datasetRevision"] as const) {
     const [b, c] = [baseline.provenance[field], candidate.provenance[field]];
     if (b !== c) throw new Refusal(`can't pair ${baseline.run} with ${candidate.run}: their ${field} differs (${b} vs ${c}); pair two runs of one question set on one dataset`);
@@ -289,7 +298,7 @@ export function reveal(key: PairKey, scores: PairScores, incomplete = false): { 
   ];
   const notes = Object.entries(key.pairs).flatMap(([id, pair]) => {
     const sideLabels = labels.get(id)!;
-    const note = scores.pairs[id]?.notes.trim() ?? "";
+    const note = (scores.pairs[id]?.notes ?? "").split(/\r?\n/u).map((line) => line.trim()).filter(Boolean).join(" ");
     if (note === "" && SIDES.every((side) => sideLabels[side].length === 0)) return [];
     const shown = SIDES.map((side) => `${side} (${pair[side]}): ${sideLabels[side].join(", ") || "none"}`).join("; ");
     return [`- **${id}**: ${shown}.${note ? ` Notes: ${note}` : ""}`];
@@ -390,12 +399,18 @@ export const readRun = (path: string) => readJson(path, "a run record (research-
   typeof run.run === "string" && isObject(run.provenance) && typeof run.provenance.questionSetDigest === "string"
   && typeof run.provenance.datasetRevision === "string" && Array.isArray(run.planned) && typeof run.complete === "boolean" && Array.isArray(run.questions)) as RunRecord;
 
+const isArmRun = (value: unknown) => isObject(value) && typeof value.run === "string" && typeof value.file === "string" && typeof value.complete === "boolean"
+  && isObject(value.provenance) && typeof value.provenance.dirty === "boolean"
+  && (["revision", "runnerRevision", "questionSetDigest", "datasetRevision"] as const).every((field) => typeof (value.provenance as Record<string, unknown>)[field] === "string");
+const isTurnFacts = (value: unknown) => isObject(value) && typeof value.outcome === "string" && (value.answeredBy === null || typeof value.answeredBy === "string");
+const isArrayOf = (value: unknown, valid: (item: unknown) => boolean) => Array.isArray(value) && value.every(valid);
+
 export const readKey = (path: string) => readJson(path, "a pairing key", (key) =>
-  typeof key.pairing === "string" && typeof key.seed === "number" && isObject(key.missing) && isObject(key.pairs)
-  && ARMS.every((arm) => isObject(key[arm]) && typeof (key[arm] as Record<string, unknown>).file === "string")
-  && Object.values(key.pairs).every((pair) => isObject(pair) && isArm(pair.A) && isArm(pair.B) && pair.A !== pair.B
-    && typeof pair.confounded === "boolean" && Array.isArray(pair.notApplicable)
-    && isObject(pair.turns) && ARMS.every((arm) => Array.isArray((pair.turns as Record<string, unknown>)[arm])))) as PairKey;
+  typeof key.pairing === "string" && typeof key.seed === "number" && ARMS.every((arm) => isArmRun(key[arm]))
+  && isObject(key.missing) && Object.values(key.missing).every((arms) => isArrayOf(arms, isArm))
+  && isObject(key.pairs) && Object.values(key.pairs).every((pair) => isObject(pair) && isArm(pair.A) && isArm(pair.B) && pair.A !== pair.B
+    && typeof pair.confounded === "boolean" && isArrayOf(pair.notApplicable, (id) => typeof id === "string")
+    && isObject(pair.turns) && ARMS.every((arm) => isArrayOf((pair.turns as Record<string, unknown>)[arm], isTurnFacts)))) as PairKey;
 
 export const readScores = (path: string) => readJson(path, "a pairs.scores.json", (scores) =>
   typeof scores.pairing === "string" && isObject(scores.pairs)
@@ -403,25 +418,52 @@ export const readScores = (path: string) => readJson(path, "a pairs.scores.json"
     && isObject(pair.labels) && SIDES.every((side) => Array.isArray((pair.labels as Record<string, unknown>)[side])))) as PairScores;
 
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
-const DIGEST_LINE = /^Scores digest: `([0-9a-f]{64})`\.$/mu;
+const DIGEST_LINE = /^Scores digest: `([0-9a-f]{64})`\.$/u;
+
+export function writePairing(dir: string, keyFile: string, pairing: string, { packet, scores, key }: { packet: string; scores: PairScores; key: PairKey }): void {
+  mkdirSync(dir, { recursive: true });
+  mkdirSync(dirname(keyFile), { recursive: true });
+  try {
+    writeFileSync(keyFile, `${JSON.stringify(key, null, 2)}\n`, { flag: "wx" });
+    writeFileSync(join(dir, "pairs.scores.json"), `${JSON.stringify(scores, null, 2)}\n`, { flag: "wx" });
+    writeFileSync(join(dir, "pairs.md"), packet, { flag: "wx" });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    throw new Refusal(`a pairing with id ${pairing} already exists; wait a second and retry`);
+  }
+}
 
 function pair(baselineFile: string, candidateFile: string, seedText: string | undefined): void {
   const seed = parseSeed(seedText);
   const files = { baseline: resolve(baselineFile), candidate: resolve(candidateFile) };
   const pairing = runStamp(new Date());
-  const { packet, scores, key } = buildPair(readRun(files.baseline), readRun(files.candidate), seed, pairing, files);
   const dir = join(RUNS_DIR, "pairs", pairing);
-  mkdirSync(dir, { recursive: true });
-  mkdirSync(KEYS_DIR, { recursive: true });
-  writeFileSync(keyFileFor(pairing), `${JSON.stringify(key, null, 2)}\n`, { flag: "wx" });
-  writeFileSync(join(dir, "pairs.scores.json"), `${JSON.stringify(scores, null, 2)}\n`, { flag: "wx" });
-  writeFileSync(join(dir, "pairs.md"), packet, { flag: "wx" });
+  writePairing(dir, keyFileFor(pairing), pairing, buildPair(readRun(files.baseline), readRun(files.candidate), seed, pairing, files));
   console.log(`packet: ${join(dir, "pairs.md")}\nscore:  ${join(dir, "pairs.scores.json")}\nkey:    ${keyFileFor(pairing)} (don't open it before scoring)`);
 }
 
-// reveal.md is written once. Once it exists the mapping has been seen, so scores changed
-// after it aren't blind: the reveal is refused rather than rewritten, a complete one after
-// an --incomplete one included. Unchanged scores just point at it.
+// Each arm's run.json and report beside the reveal, so the pairing outlives .dev/. A copy
+// already there must match its run; one that's missing is copied again.
+function keepRunCopies(dir: string, key: PairKey): void {
+  const copies = ARMS.flatMap((arm) => [
+    [key[arm].file, join(dir, `${arm}.run.json`)] as const,
+    [key[arm].file.replace(/\.run\.json$/u, ".md"), join(dir, `${arm}.md`)] as const,
+  ]);
+  for (const [from, to] of copies) {
+    if (!existsSync(to) && !existsSync(from)) throw new Refusal(`${from} is gone, so the reveal can't keep a copy of it beside the scores`);
+  }
+  for (const [from, to] of copies) {
+    if (!existsSync(to)) copyFileSync(from, to, constants.COPYFILE_EXCL);
+    else if (existsSync(from) && !readFileSync(from).equals(readFileSync(to))) {
+      throw new Refusal(`${to} differs from ${from}, the run it copies; put the run's copy back`);
+    }
+  }
+}
+
+// reveal.md is written once, after the run copies. Once it exists the mapping has been
+// seen, so scores changed after it aren't blind: the reveal is refused rather than
+// rewritten, a complete one after an --incomplete one included. Unchanged scores point at
+// it and restore any run copy an interrupted reveal didn't make.
 export function revealPair(dir: string, keyFile: string | undefined, incomplete: boolean): string {
   const scoresFile = join(dir, "pairs.scores.json");
   const scores = readScores(scoresFile);
@@ -429,18 +471,17 @@ export function revealPair(dir: string, keyFile: string | undefined, incomplete:
   const digest = sha256(JSON.stringify(scores));
   const out = join(dir, "reveal.md");
   if (existsSync(out)) {
-    const revealed = DIGEST_LINE.exec(readFileSync(out, "utf8"))?.[1];
-    if (revealed === digest) return out;
-    throw new Refusal(`${out} already revealed this pairing, and ${scoresFile} changed since (${revealed ?? "no digest"} then, ${digest} now); scores entered after the reveal aren't blind`);
+    // Only the last line is the reveal's own; a note above it could look like a digest.
+    const revealed = DIGEST_LINE.exec(readFileSync(out, "utf8").trimEnd().split("\n").at(-1) ?? "")?.[1];
+    if (revealed !== digest) {
+      throw new Refusal(`${out} already revealed this pairing, and ${scoresFile} changed since (${revealed ?? "no digest"} then, ${digest} now); scores entered after the reveal aren't blind`);
+    }
+    keepRunCopies(dir, key);
+    return out;
   }
-  const { report, complete } = reveal(key, scores, incomplete);
-  const copies = complete ? ARMS.flatMap((arm) => [
-    [key[arm].file, join(dir, `${arm}.run.json`)],
-    [key[arm].file.replace(/\.run\.json$/u, ".md"), join(dir, `${arm}.md`)],
-  ]) : [];
-  for (const [from] of copies) if (!existsSync(from!)) throw new Refusal(`${from} is gone, so the reveal can't keep a copy of it beside the scores`);
+  const { report } = reveal(key, scores, incomplete);
+  keepRunCopies(dir, key);
   writeFileSync(out, `${report}\nScores digest: \`${digest}\`.\n`, { flag: "wx" });
-  for (const [from, to] of copies) copyFileSync(from!, to!, constants.COPYFILE_EXCL);
   return out;
 }
 

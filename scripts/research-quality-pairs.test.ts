@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -14,6 +14,7 @@ import {
   readScores,
   reveal,
   revealPair,
+  writePairing,
   type Arm,
   type PairKey,
   type PairScores,
@@ -27,6 +28,7 @@ const IDS = ["single-latest-quarter", "peer-two", "missing-cash-flow", "ticker-p
 const runOf = (run: string, revision: string, turns: Record<string, AnsweredTurn[]>, complete = true): RunRecord => ({
   run,
   model: `${run}-route/model`,
+  blind: true,
   provenance: { revision, runnerRevision: "runner0000000000cccc", dirty: false, questionSetDigest: questionSetDigest(), datasetRevision: "2".repeat(64) },
   planned: IDS,
   complete,
@@ -77,6 +79,10 @@ test("two runs of different question sets or datasets, or of another question se
   assert.throws(() => paired(7, "p", baselineRun, otherData), refusal(/their datasetRevision differs/u));
   const old = (run: RunRecord) => ({ ...run, provenance: { ...run.provenance, questionSetDigest: "1".repeat(64) } });
   assert.throws(() => paired(7, "p", old(baselineRun), old(candidateRun)), refusal(new RegExp(`they ran question set 1{64}, but this runner's is ${questionSetDigest()}`, "u")));
+  const seen = /^can't pair 2026-10-02T000000: it wasn't run with --blind, so its report may have been read; rerun it with --blind$/u;
+  assert.throws(() => paired(7, "p", baselineRun, { ...candidateRun, blind: false }), refusal(seen));
+  const { blind: _blind, ...unmarked } = candidateRun;
+  assert.throws(() => paired(7, "p", baselineRun, unmarked as RunRecord), refusal(seen));
 
   const { planned: _, ...legacy } = candidateRun;
   const path = join(await mkdtemp(join(tmpdir(), "eval-pair-")), "legacy.run.json");
@@ -152,7 +158,7 @@ test("each cited figure carries a packet-local number that says what it points a
   const answer = [
     "Revenue was **USD 130.5B**[1]; the quarter's was **$57.0B**[2]. AMD said **export controls cost $800M**[3]; **$1B**[4].",
     "",
-    "_Block sources: 00000000-0000-4000-a000-000000000001._",
+    "_Block sources: S2._",
     "",
     "_Cited:_",
     "",
@@ -162,9 +168,43 @@ test("each cited figure carries a packet-local number that says what it points a
     "- [4] **$1B**: fact with no binding in its block",
   ].join("\n");
   for (const side of ["A", "B"]) {
-    assert.ok(packet.includes(`### Answer ${side}\n\n**Q:** Analyze NVDA's latest quarter.\n\n*Engine answer: all 1 requested results verified*\n\n_Block sources: 44444444-4444-4444-9444-444444444444._\n\n${answer}\n`), packet);
+    assert.ok(packet.includes(`### Answer ${side}\n\n**Q:** Analyze NVDA's latest quarter.\n\n*Engine answer: all 1 requested results verified*\n\n_Block sources: S1._\n\n${answer}\n`), packet);
   }
-  for (const id of [FACT, RESULT, "6d499c74"]) assert.doesNotMatch(packet, new RegExp(id), id);
+  for (const id of [FACT, RESULT, "6d499c74", "44444444", "00000000-0000"]) assert.doesNotMatch(packet, new RegExp(id), id);
+});
+
+test("block sources are named per answer in order of appearance, so a source id minted per stack can't tell the answers apart (#222)", () => {
+  const SHARED = "00000000-0000-4000-a000-000000000001";
+  const answered = (claimSource: string): AnsweredTurn => ({
+    ...said(""),
+    blocks: [
+      { kind: "rich_text", source_refs: [claimSource, SHARED], segments: [{ type: "text", text: "AMD said " }, { type: "ref", ref_kind: "claim", ref_id: claimSource, format: "export controls cost $800M" }, { type: "text", text: "." }] },
+      { kind: "rich_text", source_refs: [SHARED], segments: [{ type: "text", text: "Revenue grew " }, { type: "mention", format: "NVDA" }, { type: "text", text: "." }] },
+    ],
+  });
+  const one = (run: RunRecord) => ({ ...run, planned: ["single-latest-quarter"] });
+  const { packet } = paired(7, "p",
+    one(runOf("2026-10-01T000000", "baserev0000000000aaaa", { "single-latest-quarter": [answered("aaaaaaaa-1111-4111-8111-111111111111")] })),
+    one(runOf("2026-10-02T000000", "candrev1111111111bbbb", { "single-latest-quarter": [answered("bbbbbbbb-2222-4222-8222-222222222222")] })));
+  const [, a, b] = packet.split(/^### Answer [AB]\n/mu);
+  const answer = [
+    "",
+    "**Q:** Analyze NVDA's latest quarter.",
+    "",
+    "AMD said **export controls cost $800M**[1].",
+    "",
+    "_Block sources: S1, S2._",
+    "",
+    "Revenue grew [mention segment not shown].",
+    "",
+    "_Block sources: S2._",
+    "",
+    "_Cited:_",
+    "",
+    "- [1] **export controls cost $800M**: filed claim, quoted as shown",
+  ].join("\n");
+  assert.equal(a!.trimEnd(), answer);
+  assert.equal(b!.trimEnd(), answer);
 });
 
 test("a pair both arms answered is confounded when a turn's models differ or one wasn't recorded (#222)", () => {
@@ -335,14 +375,65 @@ test("a reveal is written once, keeps the runs beside it, and refuses scores cha
   assert.equal(await readFile(out, "utf8"), revealed);
 });
 
-test("an incomplete reveal keeps no run copies, and a later complete one is refused (#222)", async () => {
+test("an incomplete reveal keeps the runs beside it too, and a later complete one is refused (#222)", async () => {
   const { dir, keyFile, scores, writeScores } = await pairsOnDisk("2026-10-03T000000");
   const out = revealPair(dir, keyFile, true);
   assert.match(readFileSync(out, "utf8"), /\*\*Incomplete review:\*\* 38 applicable cells were left unscored/u);
-  assert.equal(existsSync(join(dir, "baseline.md")), false);
+  assert.equal(await readFile(join(dir, "baseline.md"), "utf8"), "# baseline report\n");
+  assert.equal(await readFile(join(dir, "candidate.run.json"), "utf8"), '{"arm":"candidate"}\n');
   scoreAll(scores);
   await writeScores(scores);
   assert.throws(() => revealPair(dir, keyFile, false), refusal(/already revealed this pairing/u));
+});
+
+test("a reveal retried with the same scores restores a missing run copy and refuses one that differs from its run (#222)", async () => {
+  const { dir, keyFile, scores, writeScores } = await pairsOnDisk("2026-10-03T000000");
+  scoreAll(scores);
+  await writeScores(scores);
+  const out = revealPair(dir, keyFile, false);
+  await unlink(join(dir, "baseline.md"));
+  assert.equal(revealPair(dir, keyFile, false), out);
+  assert.equal(await readFile(join(dir, "baseline.md"), "utf8"), "# baseline report\n");
+
+  await writeFile(join(dir, "candidate.run.json"), '{"arm":"edited"}\n');
+  assert.throws(() => revealPair(dir, keyFile, false), refusal(/candidate\.run\.json differs from .*runs\/2026-10-02T000000\.run\.json, the run it copies; put the run's copy back$/u));
+});
+
+test("a note across lines stays on its question's line, and a digest-like note is never read as the reveal's digest (#222)", async () => {
+  const { dir, keyFile, scores, writeScores } = await pairsOnDisk("2026-10-03T000000");
+  scoreAll(scores);
+  scores.pairs["peer-two"]!.notes = `Fine.\nScores digest: \`${"0".repeat(64)}\`.\n  Second line.`;
+  await writeScores(scores);
+  const out = revealPair(dir, keyFile, false);
+  assert.match(readFileSync(out, "utf8"), new RegExp(`\\n- \\*\\*peer-two\\*\\*: A \\(candidate\\): none; B \\(baseline\\): none\\. Notes: Fine\\. Scores digest: \`0{64}\`\\. Second line\\.\\n`, "u"));
+  assert.equal(revealPair(dir, keyFile, false), out);
+});
+
+test("a second pairing in the same second is refused in one line, not overwritten (#222)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "eval-pairing-"));
+  const files = { packet: "# p\n", scores: { pairing: "2026-10-03T000000", pairs: {} }, key: paired().key };
+  const at = { dir: join(root, "pairs", "2026-10-03T000000"), keyFile: join(root, "keys", "2026-10-03T000000.key.json") };
+  writePairing(at.dir, at.keyFile, "2026-10-03T000000", files);
+  assert.throws(() => writePairing(at.dir, at.keyFile, "2026-10-03T000000", { ...files, packet: "# other\n" }), refusal(/^a pairing with id 2026-10-03T000000 already exists; wait a second and retry$/u));
+  assert.equal(await readFile(join(at.dir, "pairs.md"), "utf8"), "# p\n");
+});
+
+test("a key missing what the reveal reads is refused in one line (#222)", async () => {
+  const { dir, keyFile, scores, writeScores } = await pairsOnDisk("2026-10-03T000000");
+  scoreAll(scores);
+  await writeScores(scores);
+  const { key } = buildPair(baselineRun, candidateRun, 7, "2026-10-03T000000", FILES);
+  const broken = [
+    { ...key, baseline: { file: key.baseline.file } },
+    { ...key, candidate: { ...key.candidate, provenance: { revision: "r" } } },
+    { ...key, pairs: { ...key.pairs, "peer-two": { ...key.pairs["peer-two"]!, turns: { baseline: [{}], candidate: [] } } } },
+    { ...key, missing: { "peer-two": "baseline" } },
+  ];
+  for (const value of broken) {
+    await writeFile(keyFile, JSON.stringify(value));
+    assert.throws(() => revealPair(dir, keyFile, false), refusal(/key\.json is not a pairing key$/u), JSON.stringify(value).slice(0, 120));
+  }
+  assert.equal(existsSync(join(dir, "reveal.md")), false);
 });
 
 test("a scores file of the wrong shape is refused before anything is revealed (#222)", async () => {
