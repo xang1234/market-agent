@@ -11,8 +11,6 @@ import {
   RUNS_DIR,
   Refusal,
   blankScores,
-  buildPair,
-  confounded,
   datasetRevision,
   formatChecks,
   questionSetDigest,
@@ -28,18 +26,12 @@ import {
   readRuns,
   renderBlock,
   renderReport,
-  reveal,
   runCli,
   runStamp,
   summarize,
   threadTraces,
   traceDirFor,
-  type AnsweredTurn,
-  type Arm,
-  type PairKey,
-  type PairScores,
   type RunRecord,
-  type Score,
   type ScoresFile,
 } from "./research-quality-eval.ts";
 import { QUESTIONS, RUBRIC } from "./research-quality-questions.ts";
@@ -512,136 +504,4 @@ test("a run record round-trips through run.json, and the report heads with its p
   const done = renderReport(record.run, record.model, "http://app", record.questions, record.provenance, { planned: [first.id], complete: true });
   assert.match(done, /^# Research-quality eval: 2026-10-27T100000\n\nStack revision:/);
   assert.match(renderReport("r", "m", "http://app", []), /Stack revision: unknown\. Runner revision: unknown\. Question set: unknown\. Dataset: unknown\./);
-});
-
-const said = (text: string, answeredBy = "a/m"): AnsweredTurn =>
-  ({ message: "m", outcome: "completed", blocks: [{ kind: "rich_text", segments: [{ type: "text", text }] }], elapsedMs: 1000, answeredBy, checks: null });
-const failed = (outcome: AnsweredTurn["outcome"]): AnsweredTurn => ({ message: "m", outcome, blocks: [], elapsedMs: 180_000, answeredBy: null, checks: null });
-const runOf = (run: string, revision: string, turns: Record<string, AnsweredTurn[]>): RunRecord => ({
-  run,
-  model: `${run}-route/model`,
-  provenance: { revision, dirty: false, questionSetDigest: "1".repeat(64), datasetRevision: "2".repeat(64) },
-  questions: Object.entries(turns).map(([id, t]) => ({ question: QUESTIONS.find((q) => q.id === id)!, threadId: `thread-${run}-${id}`, turns: t })),
-});
-const baselineRun = runOf("2026-10-01T000000", "baserev0000000000aaaa", {
-  "single-latest-quarter": [said("Ottawa on the latest quarter.")],
-  "peer-two": [said("Ottawa on NVDA and AMD.")],
-  "missing-cash-flow": [said("Ottawa: cash flow is not available.")],
-  "ticker-page-compare": [said("Ottawa on AAPL and NVDA.")],
-});
-const candidateRun = runOf("2026-10-02T000000", "candrev1111111111bbbb", {
-  "single-latest-quarter": [said("Lisbon on the latest quarter.")],
-  "peer-two": [said("Lisbon on NVDA and AMD.", "fallback/other")],
-  "missing-cash-flow": [failed("timeout")],
-  "ticker-page-compare": [said("Lisbon on AAPL and NVDA.")],
-});
-const ORDER_7 = ["missing-cash-flow", "peer-two", "ticker-page-compare", "single-latest-quarter"];
-const SIDES_7 = [["missing-cash-flow", "candidate"], ["peer-two", "candidate"], ["ticker-page-compare", "baseline"], ["single-latest-quarter", "baseline"]];
-const ORDER_8 = ["missing-cash-flow", "ticker-page-compare", "peer-two", "single-latest-quarter"];
-const packetOrder = (packet: string) => [...packet.matchAll(/^## \d+\. (\S+)/gmu)].map((match) => match[1]);
-
-test("a seed fixes the packet's question order and A/B sides, and another seed shuffles differently (#222)", () => {
-  const first = buildPair(baselineRun, candidateRun, 7, "s");
-  assert.deepEqual(buildPair(baselineRun, candidateRun, 7, "s"), first);
-  assert.deepEqual(packetOrder(first.packet), ORDER_7);
-  assert.deepEqual(Object.entries(first.key.pairs).map(([id, pair]) => [id, pair.A]), SIDES_7);
-  assert.deepEqual(packetOrder(buildPair(baselineRun, candidateRun, 8, "s").packet), ORDER_8);
-  assert.equal(first.key.seed, 7);
-});
-
-test("two runs of different question sets or datasets are not paired (#222)", () => {
-  const otherQuestions = { ...candidateRun, provenance: { ...candidateRun.provenance, questionSetDigest: "3".repeat(64) } };
-  assert.throws(() => buildPair(baselineRun, otherQuestions, 7, "s"), /can't pair 2026-10-01T000000 with 2026-10-02T000000: their questionSetDigest differs/);
-  const otherData = { ...candidateRun, provenance: { ...candidateRun.provenance, datasetRevision: "3".repeat(64) } };
-  assert.throws(() => buildPair(baselineRun, otherData, 7, "s"), /their datasetRevision differs/);
-  const { provenance: _, ...legacy } = candidateRun;
-  assert.throws(() => buildPair(baselineRun, legacy as RunRecord, 7, "s"), /questionSetDigest differs \(1{64} vs unknown\)/);
-});
-
-test("the packet shows both answers and never which run, revision or model wrote them (#222)", () => {
-  const { packet, scores, key } = buildPair(baselineRun, candidateRun, 7, "s");
-  for (const answer of ["Ottawa on NVDA and AMD.", "Lisbon on NVDA and AMD.", "Ottawa: cash flow is not available."]) assert.match(packet, new RegExp(answer));
-  assert.match(packet, /\*\*Expect:\*\* Side-by-side latest fiscal year/);
-  assert.match(packet, /N\/A: comparable_periods, figures_match_sources, conclusions_justified, counterarguments/);
-  assert.match(packet, /- \*\*no_invented_numbers\*\*: Is missing data stated honestly/);
-  assert.match(packet, /\*\*Q:\*\* Compare with NVDA\. \(opened from the AAPL page\)/);
-  for (const hidden of ["baserev", "candrev", "2026-10-01T000000", "2026-10-02T000000", "route/model", "a/m", "fallback/other", "thread-", "baseline", "candidate"]) {
-    assert.doesNotMatch(packet, new RegExp(hidden, "i"), hidden);
-  }
-
-  // A turn that timed out is no answer, and its cells are not scored.
-  const side = key.pairs["missing-cash-flow"]!.A === "candidate" ? "A" : "B";
-  assert.match(packet, /_Not scored: a turn didn't complete, so every cell of this answer is n\/a\._\n\n\*\*Q:\*\* What is AMD's free cash flow\?\n\n_No answer \(timeout\)\._/);
-  assert.deepEqual(Object.values(scores.pairs["missing-cash-flow"]![side]), ["n/a", "n/a", "n/a", "n/a", "n/a", "n/a"]);
-  assert.deepEqual(scores.pairs["missing-cash-flow"]!.labels[side], ["operational_failure"]);
-  assert.deepEqual(scores.pairs["peer-two"]!.A, { correct_companies: null, comparable_periods: null, figures_match_sources: null, conclusions_justified: null, counterarguments: null, no_invented_numbers: null });
-});
-
-test("a pair is confounded when the arms' answering models differ on a turn both answered (#222)", () => {
-  const { key } = buildPair(baselineRun, candidateRun, 7, "s");
-  assert.deepEqual(Object.fromEntries(Object.entries(key.pairs).map(([id, pair]) => [id, pair.confounded])), {
-    ...Object.fromEntries(ORDER_7.map((id) => [id, false])),
-    "peer-two": true,
-  });
-  assert.equal(confounded([said("x", "a/m")], [said("y", "a/m")]), false);
-  assert.equal(confounded([said("x", "a/m")], [said("y", "b/m")]), true);
-  assert.equal(confounded([said("x", "a/m")], [failed("provider_error")]), false);
-  assert.equal(confounded([{ outcome: "completed" }], [said("y", "a/m")]), true, "an unrecorded model can't be ruled out");
-});
-
-function scoreArm(scores: PairScores, key: PairKey, id: string, arm: Arm, values: number[]): void {
-  const side = key.pairs[id]!.A === arm ? "A" : "B";
-  RUBRIC.forEach((criterion, i) => {
-    if (scores.pairs[id]![side][criterion.id] !== "n/a") scores.pairs[id]![side][criterion.id] = values[i] as Score;
-  });
-}
-
-test("reveal refuses while a cell is unscored, unless the review is named incomplete (#222)", () => {
-  const { scores, key } = buildPair(baselineRun, candidateRun, 7, "s");
-  assert.throws(() => reveal(key, scores), /38 applicable cells are unscored \(.*\); score them, or pass --incomplete/);
-  const partial = reveal(key, scores, true);
-  assert.match(partial, /^# Blinded comparison: baseline 2026-10-01T000000 vs candidate 2026-10-02T000000\n\n\*\*Incomplete review:\*\* 38 applicable cells were left unscored/);
-  assert.match(partial, /## Unscored cells\n\n- [a-z-]+ [AB] correct_companies\n/);
-
-  // A cell of an answer that wasn't given stays n/a.
-  const side = key.pairs["missing-cash-flow"]!.A === "candidate" ? "A" : "B";
-  scores.pairs["missing-cash-flow"]![side].correct_companies = 2;
-  assert.throws(() => reveal(key, scores, true), new RegExp(`missing-cash-flow\\.${side}\\.correct_companies is 2, but this answer was not given`));
-});
-
-test("reveal totals each arm per criterion and attributes deltas only to unconfounded pairs (#222)", () => {
-  const { scores, key } = buildPair(baselineRun, candidateRun, 7, "s");
-  scoreArm(scores, key, "single-latest-quarter", "baseline", [1, 1, 1, 1, 1, 1]);
-  scoreArm(scores, key, "single-latest-quarter", "candidate", [2, 2, 2, 2, 2, 2]);
-  scoreArm(scores, key, "peer-two", "baseline", [2, 2, 2, 2, 2, 2]);
-  scoreArm(scores, key, "peer-two", "candidate", [0, 2, 2, 2, 2, 2]);
-  scoreArm(scores, key, "missing-cash-flow", "baseline", [2, 0, 0, 0, 0, 2]);
-  scoreArm(scores, key, "ticker-page-compare", "baseline", [2, 0, 2, 1, 1, 2]);
-  scoreArm(scores, key, "ticker-page-compare", "candidate", [2, 2, 2, 1, 0, 2]);
-  const peerSide = key.pairs["peer-two"]!.A === "candidate" ? "A" : "B";
-  scores.pairs["peer-two"]!.labels[peerSide] = ["wrong_subject"];
-
-  const report = reveal(key, scores);
-  assert.doesNotMatch(report, /Incomplete/);
-  assert.match(report, /\| baseline \| 2026-10-01T000000 \| `baserev00000` \| `111111111111` \| `222222222222` \|/);
-  assert.ok(report.includes([
-    "| criterion | baseline | candidate | attributed delta | confounded delta |",
-    "|---|---|---|---|---|",
-    "| correct_companies | 7/8 | 4/6 | +1 | -2 |",
-    "| comparable_periods | 3/6 | 6/6 | +3 | 0 |",
-    "| figures_match_sources | 5/6 | 6/6 | +1 | 0 |",
-    "| conclusions_justified | 4/6 | 5/6 | +1 | 0 |",
-    "| counterarguments | 4/6 | 4/6 | 0 | 0 |",
-    "| no_invented_numbers | 7/8 | 6/6 | +1 | 0 |",
-  ].join("\n")), report);
-  assert.match(report, /\| single-latest-quarter \| \+1 \| \+1 \| \+1 \| \+1 \| \+1 \| \+1 \|/);
-  assert.match(report, /\| ticker-page-compare \| 0 \| \+2 \| 0 \| 0 \| -1 \| 0 \|/);
-  assert.match(report, /\| missing-cash-flow \| — \| — \| — \| — \| — \| — \|/);
-  assert.match(report, /## Confounded pairs \(not attributed to the change\)\n\n\| question[^\n]*\n\|---[^\n]*\n\| peer-two \| -2 \| 0 \| 0 \| 0 \| 0 \| 0 \|\n\n/);
-  assert.match(report, /## Not compared\n\n- missing-cash-flow: the candidate gave no answer \(timeout\)\.\n/);
-  assert.match(report, /## Unscored cells\n\nNone\./);
-  assert.match(report, /\| peer-two \| 1 \| completed, `a\/m` \| completed, `fallback\/other` \|/);
-  assert.match(report, /\| missing-cash-flow \| 1 \| completed, `a\/m` \| timeout, none \|/);
-  assert.match(report, /\| wrong_subject \| 0 \| 1 \|\n\| wrong_period \| 0 \| 0 \|\n/);
-  assert.match(report, /\| operational_failure \| 0 \| 1 \|\n$/);
 });

@@ -6,11 +6,9 @@
 //   node --experimental-strip-types scripts/research-quality-eval.ts run [base URL] [--stack-dir <checkout>] [--blind]
 //   (score: fill in <run>.scores.json)
 //   node --experimental-strip-types scripts/research-quality-eval.ts summary
-//   node --experimental-strip-types scripts/research-quality-eval.ts pair <baseline.run.json> <candidate.run.json> [--seed N]
-//   (score: fill in pairs/<stamp>/pairs.scores.json)
-//   node --experimental-strip-types scripts/research-quality-eval.ts reveal <pairs dir> <key file> [--incomplete]
+//   (pair two runs blind: scripts/research-quality-pairs.ts)
 import { execFileSync } from "node:child_process";
-import { createHash, randomInt } from "node:crypto";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -41,7 +39,7 @@ export async function runCli(main: () => void | Promise<void>): Promise<void> {
   }
 }
 
-type Block = Record<string, unknown> & { kind?: string; title?: string };
+export type Block = Record<string, unknown> & { kind?: string; title?: string };
 type Message = { role: string; blocks: Block[]; answered_by?: string | null };
 type AnswerUsage = { input_tokens: number; output_tokens: number; reasoning_tokens?: number };
 export type Score = 0 | 1 | 2 | "n/a" | null;
@@ -204,7 +202,7 @@ type EnginePresentation =
   | { kind: "scalar" | "predicate" | "gap"; result_id: string }
   | { kind: "table"; caption: string; columns: Array<{ measure_label_id: string; period_label_id: string | null }>; rows: Array<{ subject_label_id: string; cells: Array<string | null> }> }
   | { kind: "series"; subject_label_id: string; measure_label_id: string; points: Array<{ period_label_id: string; result_id: string }> };
-type EngineContent = {
+export type EngineContent = {
   presentation_version: string;
   coverage: { state: string; requested: number; verified: number };
   labels: Record<string, { text: string }>;
@@ -252,12 +250,18 @@ function renderEngineAnswer(content: EngineContent): string {
   return lines.join("\n");
 }
 
+// A cited figure in prose (spec/finance_research_block_schema.json RefSegment).
+export type RefSegment = { type: "ref"; ref_kind: string; ref_id: string; format?: string; period?: string };
+
 // ponytail: prose in full, tables as tables, any other block as its title and figures;
-// charts and sources are one click away on the thread link.
-export function renderBlock(block: Block): string {
+// charts and sources are one click away on the thread link. cite, when given, marks each
+// cited figure (a blinded packet's citation alias).
+export function renderBlock(block: Block, cite?: (segment: RefSegment, block: Block) => string): string {
   if (block.kind === "rich_text") {
     const segments = (block.segments ?? []) as Array<{ type: string; text?: string; format?: string }>;
-    const text = segments.map((s) => (s.type === "text" ? s.text ?? "" : s.type === "ref" ? `**${s.format ?? ""}**` : `[${s.type} segment not shown]`)).join("");
+    const text = segments.map((s) => (s.type === "text" ? s.text ?? ""
+      : s.type === "ref" ? `**${s.format ?? ""}**${cite?.(s as RefSegment, block) ?? ""}`
+      : `[${s.type} segment not shown]`)).join("");
     return block.analyst_commentary === true ? `_Analyst commentary:_ ${text}` : text;
   }
   if (block.kind === "financial_answer") return renderEngineAnswer(block.financial as EngineContent);
@@ -348,7 +352,7 @@ function byCheck(rejected: ReadonlyArray<Rejection>): string {
 
 export const formatChecks = ({ accepted, rejected }: AssertionReport) => `${accepted.length} accepted, ${rejected.length} rejected${byCheck(rejected)}`;
 
-const answeredByShown = (turn: AnsweredTurn) =>
+export const answeredByShown = (turn: Pick<AnsweredTurn, "outcome" | "answeredBy">) =>
   turn.outcome !== "completed" ? "none"
   : turn.answeredBy === undefined ? "unknown"
   : turn.answeredBy === null ? "none (no model wrote it)"
@@ -432,16 +436,16 @@ export function blankScores(run: string, model: string): ScoresFile {
 
 // A hand-edited cell, checked: its score, null when unscored, or undefined when it
 // doesn't apply (notApplicable names why). "n/a" belongs exactly where it doesn't apply.
-function readCell(where: string, score: unknown, notApplicable: string | null): 0 | 1 | 2 | null | undefined {
+export function readCell(where: string, score: unknown, notApplicable: string | null): 0 | 1 | 2 | null | undefined {
   if (notApplicable !== null) {
     if (score !== undefined && score !== null && score !== "n/a") {
-      throw new Error(`${where} is ${JSON.stringify(score)}, but ${notApplicable}; leave it "n/a"`);
+      throw new Refusal(`${where} is ${JSON.stringify(score)}, but ${notApplicable}; leave it "n/a"`);
     }
     return undefined;
   }
-  if (score === "n/a") throw new Error(`${where} is "n/a", but it applies to this question; score it 0, 1 or 2`);
+  if (score === "n/a") throw new Refusal(`${where} is "n/a", but it applies to this question; score it 0, 1 or 2`);
   if (score === null || score === undefined) return null;
-  if (score !== 0 && score !== 1 && score !== 2) throw new Error(`${where} is ${JSON.stringify(score)}; use 0, 1, 2 or null`);
+  if (score !== 0 && score !== 1 && score !== 2) throw new Refusal(`${where} is ${JSON.stringify(score)}; use 0, 1, 2 or null`);
   return score;
 }
 
@@ -493,251 +497,6 @@ export function summarize(files: ReadonlyArray<ScoresFile>): string {
     lines.push("", "0 on no_invented_numbers (each needs a regression test):", ...regressions.map((r) => `  ${r}`));
   }
   return lines.join("\n");
-}
-
-// --- blinded pairs (#222) -----------------------------------------------------------
-
-// Two runs of one question set on one frozen dataset, shown to the owner as answers A
-// and B per question, in shuffled order, with which run is which kept in a separate key
-// until every applicable cell is scored.
-export type Arm = "baseline" | "candidate";
-type Side = "A" | "B";
-const SIDES: ReadonlyArray<Side> = ["A", "B"];
-export const FAILURE_LABELS = [
-  "wrong_subject", "wrong_period", "unsupported_figure", "invented_figure",
-  "weak_conclusion", "missing_counterpoint", "unstated_gap", "operational_failure",
-] as const;
-export type FailureLabel = (typeof FAILURE_LABELS)[number];
-type TurnFacts = Pick<AnsweredTurn, "outcome" | "answeredBy">;
-export type PairKey = {
-  seed: number;
-  baseline: { run: string; provenance: RunProvenance };
-  candidate: { run: string; provenance: RunProvenance };
-  // turns: each arm's per-turn outcome and model, for the reveal.
-  pairs: Record<string, { A: Arm; B: Arm; confounded: boolean; notApplicable: CriterionId[]; turns: Record<Arm, TurnFacts[]> }>;
-};
-export type PairScores = {
-  pairs: Record<string, Record<Side, Record<CriterionId, Score>> & { labels: Record<Side, FailureLabel[]>; notes: string }>;
-};
-
-// mulberry32: a seeded PRNG, so a seed always gives the same packet.
-function seeded(seed: number): () => number {
-  let state = seed >>> 0;
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let t = Math.imul(state ^ (state >>> 15), state | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-// Only an arm whose every turn completed gave an answer to score.
-const answered = (turns: ReadonlyArray<TurnFacts>) => turns.length > 0 && turns.every((turn) => turn.outcome === "completed");
-
-// Where both arms answered a turn, a different (or unrecorded) answering model means the
-// pair's delta can't be put down to the change alone.
-export function confounded(baseline: ReadonlyArray<TurnFacts>, candidate: ReadonlyArray<TurnFacts>): boolean {
-  return baseline.some((turn, i) => {
-    const other = candidate[i];
-    return turn.outcome === "completed" && other?.outcome === "completed" && (turn.answeredBy === undefined || turn.answeredBy !== other.answeredBy);
-  });
-}
-
-function renderArm(question: EvalQuestion, turns: ReadonlyArray<AnsweredTurn>): string[] {
-  const lines = answered(turns) ? [] : ["_Not scored: a turn didn't complete, so every cell of this answer is n/a._", ""];
-  question.turns.forEach((asked, i) => {
-    const turn = turns[i];
-    lines.push(`**Q:** ${asked.message}${asked.subjectText ? ` (opened from the ${asked.subjectText} page)` : ""}`, "");
-    if (turn?.outcome === "completed") lines.push(...turn.blocks.flatMap((block) => [renderBlock(block), ""]));
-    else lines.push(`_No answer (${turn?.outcome ?? "not run"})._`, "");
-  });
-  return lines;
-}
-
-export function buildPair(baseline: RunRecord, candidate: RunRecord, seed: number, stamp: string): { packet: string; scores: PairScores; key: PairKey } {
-  for (const field of ["questionSetDigest", "datasetRevision"] as const) {
-    const [b, c] = [baseline.provenance?.[field], candidate.provenance?.[field]];
-    if (!b || !c || b !== c) {
-      throw new Error(`can't pair ${baseline.run} with ${candidate.run}: their ${field} differs (${b ?? "unknown"} vs ${c ?? "unknown"}); pair two runs of one question set on one dataset`);
-    }
-  }
-  const byArm: Record<Arm, Map<string, AnsweredQuestion>> = {
-    baseline: new Map(baseline.questions.map((q) => [q.question.id, q])),
-    candidate: new Map(candidate.questions.map((q) => [q.question.id, q])),
-  };
-  const ids = [...new Set([...byArm.baseline.keys(), ...byArm.candidate.keys()])];
-  const random = seeded(seed);
-  for (let i = ids.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(random() * (i + 1));
-    [ids[i], ids[j]] = [ids[j]!, ids[i]!];
-  }
-  const key: PairKey = {
-    seed,
-    baseline: { run: baseline.run, provenance: baseline.provenance },
-    candidate: { run: candidate.run, provenance: candidate.provenance },
-    pairs: {},
-  };
-  const scores: PairScores = { pairs: {} };
-  const lines = [
-    `# Blinded answer pairs: ${stamp}`,
-    "",
-    "Each question has two answers, A and B, from two runs of the same questions on the same frozen data. Which run",
-    "wrote which is in a key you don't see. Score every applicable cell of both answers 0, 1 or 2 in `pairs.scores.json`,",
-    "add the failure labels that apply, then run `node --experimental-strip-types scripts/research-quality-eval.ts reveal <this",
-    "folder> <key file>`.",
-    "",
-    "## Rubric (0 / 1 / 2)",
-    "",
-    ...RUBRIC.map((c) => `- **${c.id}**: ${c.question} 0 = ${c.anchors[0]}; 1 = ${c.anchors[1]}; 2 = ${c.anchors[2]}.`),
-    "",
-    `Failure labels: ${FAILURE_LABELS.map((label) => `\`${label}\``).join(", ")}.`,
-  ];
-  ids.forEach((id, n) => {
-    const A: Arm = random() < 0.5 ? "baseline" : "candidate";
-    const arms: Record<Side, Arm> = { A, B: A === "baseline" ? "candidate" : "baseline" };
-    const turns = (arm: Arm) => byArm[arm].get(id)?.turns ?? [];
-    const question = (byArm.baseline.get(id) ?? byArm.candidate.get(id))!.question;
-    const notApplicable = [...(question.notApplicable ?? [])];
-    key.pairs[id] = {
-      ...arms,
-      confounded: confounded(turns("baseline"), turns("candidate")),
-      notApplicable,
-      turns: { baseline: turns("baseline").map(({ outcome, answeredBy }) => ({ outcome, answeredBy })), candidate: turns("candidate").map(({ outcome, answeredBy }) => ({ outcome, answeredBy })) },
-    };
-    const blank = (side: Side) => Object.fromEntries(RUBRIC.map((c) => [c.id, notApplicable.includes(c.id) || !answered(turns(arms[side])) ? "n/a" : null])) as Record<CriterionId, Score>;
-    const labels = (side: Side): FailureLabel[] => (answered(turns(arms[side])) ? [] : ["operational_failure"]);
-    scores.pairs[id] = { A: blank("A"), B: blank("B"), labels: { A: labels("A"), B: labels("B") }, notes: "" };
-    lines.push("", `## ${n + 1}. ${id} (${question.kind})`, "", `**Expect:** ${question.expect}`);
-    if (notApplicable.length > 0) lines.push("", `N/A: ${notApplicable.join(", ")}`);
-    for (const side of SIDES) lines.push("", `### Answer ${side}`, "", ...renderArm(question, turns(arms[side])));
-  });
-  return { packet: `${lines.join("\n").replace(/\n{3,}/gu, "\n\n").trimEnd()}\n`, scores, key };
-}
-
-const ARMS: ReadonlyArray<Arm> = ["baseline", "candidate"];
-const signed = (n: number) => (n > 0 ? `+${n}` : String(n));
-type Sum = { sum: number; cells: number };
-const add = (into: Sum, n: number) => {
-  into.sum += n;
-  into.cells += 1;
-};
-const showSum = ({ sum, cells }: Sum) => (cells === 0 ? "—" : signed(sum));
-
-// Refuses while an applicable cell is unscored unless incomplete is set, and then says
-// so at the top. Totals and deltas are per criterion; no cell is folded into one score.
-export function reveal(key: PairKey, scores: PairScores, incomplete = false): string {
-  for (const id of Object.keys(scores.pairs)) {
-    if (!key.pairs[id]) throw new Error(`pairs.scores.json: unknown question '${id}'`);
-  }
-  const unscored: string[] = [];
-  const totals = Object.fromEntries(ARMS.map((arm) => [arm, RUBRIC.map(() => ({ total: 0, max: 0 }))])) as Record<Arm, Array<{ total: number; max: number }>>;
-  const attributed = RUBRIC.map((): Sum => ({ sum: 0, cells: 0 }));
-  const confoundedSums = RUBRIC.map((): Sum => ({ sum: 0, cells: 0 }));
-  const deltas = new Map<string, Array<number | null>>();
-  const labelCounts = Object.fromEntries(ARMS.map((arm) => [arm, new Map(FAILURE_LABELS.map((label) => [label, 0]))])) as Record<Arm, Map<FailureLabel, number>>;
-  for (const [id, pair] of Object.entries(key.pairs)) {
-    const cells = scores.pairs[id];
-    const scored: Record<Arm, Array<0 | 1 | 2 | undefined>> = { baseline: [], candidate: [] };
-    for (const side of SIDES) {
-      const arm = pair[side];
-      for (const label of cells?.labels?.[side] ?? []) {
-        const count = labelCounts[arm].get(label);
-        if (count === undefined) throw new Error(`${id}.labels.${side}: unknown failure label '${label}'; use one of ${FAILURE_LABELS.join(", ")}`);
-        labelCounts[arm].set(label, count + 1);
-      }
-      RUBRIC.forEach((criterion, i) => {
-        const notApplicable = pair.notApplicable.includes(criterion.id) ? "this question declares it N/A" : answered(pair.turns[arm]) ? null : "this answer was not given";
-        const score = readCell(`${id}.${side}.${criterion.id}`, cells?.[side]?.[criterion.id], notApplicable);
-        if (score === null) unscored.push(`${id} ${side} ${criterion.id}`);
-        if (score === null || score === undefined) return;
-        scored[arm][i] = score;
-        totals[arm][i]!.total += score;
-        totals[arm][i]!.max += 2;
-      });
-    }
-    deltas.set(id, RUBRIC.map((_, i) => {
-      const [b, c] = [scored.baseline[i], scored.candidate[i]];
-      if (b === undefined || c === undefined) return null;
-      add((pair.confounded ? confoundedSums : attributed)[i]!, c - b);
-      return c - b;
-    }));
-  }
-  if (unscored.length > 0 && !incomplete) {
-    throw new Error(`${unscored.length} applicable cell${unscored.length === 1 ? " is" : "s are"} unscored (${unscored.slice(0, 3).join("; ")}${unscored.length > 3 ? "; ..." : ""}); score them, or pass --incomplete to reveal an incomplete review`);
-  }
-
-  const short = (digest: string) => `\`${digest.slice(0, 12)}\``;
-  const model = (turn: TurnFacts | undefined) => `${turn?.outcome ?? "not run"}, ${recorded(turn?.answeredBy, (m) => `\`${m}\``)}`;
-  const deltaRows = (confoundedPairs: boolean) => [...deltas]
-    .filter(([id]) => key.pairs[id]!.confounded === confoundedPairs)
-    .map(([id, row]) => `| ${id} | ${row.map((d) => (d === null ? "—" : signed(d))).join(" | ")} |`);
-  const criteriaHeader = [`| question | ${RUBRIC.map((c) => c.id).join(" | ")} |`, `|---|${RUBRIC.map(() => "---").join("|")}|`];
-  const table = (rows: string[]) => (rows.length > 0 ? [...criteriaHeader, ...rows] : ["None."]);
-  const notCompared = Object.entries(key.pairs).flatMap(([id, pair]) => ARMS
-    .filter((arm) => !answered(pair.turns[arm]))
-    .map((arm) => `- ${id}: the ${arm} gave no answer (${pair.turns[arm].map((turn) => turn.outcome).join(", ") || "not run"}).`));
-  const lines = [
-    `# Blinded comparison: baseline ${key.baseline.run} vs candidate ${key.candidate.run}`,
-    ...(unscored.length > 0 ? ["", `**Incomplete review:** ${unscored.length} applicable cell${unscored.length === 1 ? " was" : "s were"} left unscored, so totals and deltas cover the scored cells only.`] : []),
-    "",
-    "## Runs",
-    "",
-    "| arm | run | revision | question set | dataset |",
-    "|---|---|---|---|---|",
-    ...ARMS.map((arm) => {
-      const { run, provenance } = key[arm];
-      return `| ${arm} | ${run} | ${short(provenance.revision)}${provenance.dirty ? " (uncommitted changes)" : ""} | ${short(provenance.questionSetDigest)} | ${short(provenance.datasetRevision)} |`;
-    }),
-    "",
-    `Seed: ${key.seed}.`,
-    "",
-    "## Mapping",
-    "",
-    "| question | A | B | confounded |",
-    "|---|---|---|---|",
-    ...Object.entries(key.pairs).map(([id, pair]) => `| ${id} | ${pair.A} | ${pair.B} | ${pair.confounded ? "yes" : "no"} |`),
-    "",
-    "## Totals by criterion",
-    "",
-    "Deltas are candidate minus baseline over the cells both arms scored: attributed over pairs answered by the same",
-    "models, confounded over pairs whose answering models differ.",
-    "",
-    "| criterion | baseline | candidate | attributed delta | confounded delta |",
-    "|---|---|---|---|---|",
-    ...RUBRIC.map((c, i) => `| ${c.id} | ${totals.baseline[i]!.total}/${totals.baseline[i]!.max} | ${totals.candidate[i]!.total}/${totals.candidate[i]!.max} | ${showSum(attributed[i]!)} | ${showSum(confoundedSums[i]!)} |`),
-    "",
-    "## Per-question deltas (candidate minus baseline)",
-    "",
-    ...table(deltaRows(false)),
-    "",
-    "## Confounded pairs (not attributed to the change)",
-    "",
-    ...table(deltaRows(true)),
-    "",
-    "## Not compared",
-    "",
-    ...(notCompared.length > 0 ? notCompared : ["None: both arms answered every question."]),
-    "",
-    "## Unscored cells",
-    "",
-    ...(unscored.length > 0 ? unscored.map((cell) => `- ${cell}`) : ["None."]),
-    "",
-    "## Turns",
-    "",
-    "| question | turn | baseline | candidate |",
-    "|---|---|---|---|",
-    ...Object.entries(key.pairs).flatMap(([id, pair]) => Array.from(
-      { length: Math.max(pair.turns.baseline.length, pair.turns.candidate.length) },
-      (_, i) => `| ${id} | ${i + 1} | ${model(pair.turns.baseline[i])} | ${model(pair.turns.candidate[i])} |`,
-    )),
-    "",
-    "## Failure labels",
-    "",
-    "| label | baseline | candidate |",
-    "|---|---|---|",
-    ...FAILURE_LABELS.map((label) => `| ${label} | ${labelCounts.baseline.get(label)} | ${labelCounts.candidate.get(label)} |`),
-  ];
-  return `${lines.join("\n")}\n`;
 }
 
 // --- run -------------------------------------------------------------------------
@@ -857,31 +616,6 @@ export function readRuns(dir: string): ScoresFile[] {
     .map((name) => JSON.parse(readFileSync(join(dir, name), "utf8")) as ScoresFile);
 }
 
-// The key stays out of the repo (.dev/ is ignored), so the packet can be committed blind.
-const KEYS_DIR = join(ROOT, ".dev", "eval-keys");
-
-function pair(baselineFile: string, candidateFile: string, seedText: string | undefined): void {
-  const seed = seedText === undefined ? randomInt(2 ** 31) : Number(seedText);
-  if (!Number.isSafeInteger(seed)) throw new Error(`--seed ${seedText} is not an integer`);
-  const stamp = runStamp(new Date());
-  const { packet, scores, key } = buildPair(readRunRecord(baselineFile), readRunRecord(candidateFile), seed, stamp);
-  const dir = join(RUNS_DIR, "pairs", stamp);
-  const keyFile = join(KEYS_DIR, `${stamp}.key.json`);
-  mkdirSync(dir, { recursive: true });
-  mkdirSync(KEYS_DIR, { recursive: true });
-  writeFileSync(keyFile, `${JSON.stringify(key, null, 2)}\n`, { flag: "wx" });
-  writeFileSync(join(dir, "pairs.scores.json"), `${JSON.stringify(scores, null, 2)}\n`, { flag: "wx" });
-  writeFileSync(join(dir, "pairs.md"), packet, { flag: "wx" });
-  console.log(`packet: ${join(dir, "pairs.md")}\nscore:  ${join(dir, "pairs.scores.json")}\nkey:    ${keyFile} (don't open it before scoring)`);
-}
-
-function revealPair(dir: string, keyFile: string, incomplete: boolean): void {
-  const key = JSON.parse(readFileSync(keyFile, "utf8")) as PairKey;
-  const scores = JSON.parse(readFileSync(join(dir, "pairs.scores.json"), "utf8")) as PairScores;
-  writeFileSync(join(dir, "reveal.md"), reveal(key, scores, incomplete));
-  console.log(`reveal: ${join(dir, "reveal.md")}`);
-}
-
 function summary(): void {
   const files = readRuns(RUNS_DIR);
   console.log(files.length > 0 ? summarize(files) : `no scored runs in ${RUNS_DIR}`);
@@ -889,23 +623,16 @@ function summary(): void {
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   await runCli(async () => {
-    const { positionals: [command, first, second], values } = parseArgs({
+    const { positionals: [command, base], values } = parseArgs({
       allowPositionals: true,
-      options: { "stack-dir": { type: "string" }, blind: { type: "boolean", default: false }, seed: { type: "string" }, incomplete: { type: "boolean", default: false } },
+      options: { "stack-dir": { type: "string" }, blind: { type: "boolean", default: false } },
     });
     // The checkout the evaluated stack runs from, which may not be the runner's (#222).
     const stackDir = resolve(values["stack-dir"] ?? process.env.EVAL_STACK_DIR ?? ROOT);
-    if (command === "run") await run(first ?? process.env.EVAL_BASE_URL ?? "http://127.0.0.1:5173", stackDir, values.blind);
+    if (command === "run") await run(base ?? process.env.EVAL_BASE_URL ?? "http://127.0.0.1:5173", stackDir, values.blind);
     else if (command === "summary") summary();
-    else if (command === "pair" && first && second) pair(first, second, values.seed);
-    else if (command === "reveal" && first && second) revealPair(first, second, values.incomplete);
     else {
-      console.error([
-        "usage: research-quality-eval.ts run [base URL] [--stack-dir <checkout>] [--blind]",
-        "       research-quality-eval.ts summary",
-        "       research-quality-eval.ts pair <baseline.run.json> <candidate.run.json> [--seed N]",
-        "       research-quality-eval.ts reveal <pairs dir> <key file> [--incomplete]",
-      ].join("\n"));
+      console.error("usage: research-quality-eval.ts run [base URL] [--stack-dir <checkout>] [--blind] | summary");
       process.exitCode = 2;
     }
   });
