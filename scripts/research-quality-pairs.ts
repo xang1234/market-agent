@@ -406,7 +406,7 @@ export const readRun = (path: string) => readJson(path, "a run record (research-
 const isArmRun = (value: unknown) => isObject(value) && typeof value.run === "string" && typeof value.file === "string" && typeof value.complete === "boolean"
   && isObject(value.provenance) && typeof value.provenance.dirty === "boolean"
   && (["revision", "runnerRevision", "questionSetDigest", "datasetRevision"] as const).every((field) => typeof (value.provenance as Record<string, unknown>)[field] === "string");
-const isTurnFacts = (value: unknown) => isObject(value) && typeof value.outcome === "string" && (value.answeredBy === null || typeof value.answeredBy === "string");
+const isTurnFacts = (value: unknown) => isObject(value) && typeof value.outcome === "string" && (value.answeredBy === undefined || value.answeredBy === null || typeof value.answeredBy === "string");
 const isArrayOf = (value: unknown, valid: (item: unknown) => boolean) => Array.isArray(value) && value.every(valid);
 
 export const readKey = (path: string) => readJson(path, "a pairing key", (key) =>

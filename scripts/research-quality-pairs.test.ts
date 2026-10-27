@@ -10,6 +10,7 @@ import {
   buildPair,
   confounded,
   parseSeed,
+  readKey,
   readRun,
   readScores,
   reveal,
@@ -539,4 +540,16 @@ test("a scores file of the wrong shape is refused before anything is revealed (#
   await writeFile(keyFile, JSON.stringify({ pairing: "2026-10-03T000000", seed: 7 }));
   assert.throws(() => revealPair(dir, keyFile, false), refusal(/key\.json is not a pairing key$/u));
   assert.equal(existsSync(join(dir, "reveal.md")), false);
+});
+
+test("a key whose completed turn has no model field loads, and that pair is confounded (#222)", async () => {
+  const unrecorded: AnsweredTurn = { message: "m", outcome: "completed", blocks: [{ kind: "rich_text", segments: [{ type: "text", text: "Ottawa." }] }], elapsedMs: 1000, assertions: null };
+  const baseline = { ...baselineRun, questions: baselineRun.questions.map((q) => (q.question.id === "peer-two" ? { ...q, turns: [unrecorded] } : q)) };
+  const { key } = buildPair(baseline, candidateRun, 7, "2026-10-03T000000", FILES);
+  const root = await mkdtemp(join(tmpdir(), "eval-key-"));
+  const keyFile = join(root, "key.json");
+  await writeFile(keyFile, JSON.stringify(key));
+  const loaded = readKey(keyFile);
+  assert.equal(loaded.pairs["peer-two"]!.confounded, true);
+  assert.equal("answeredBy" in loaded.pairs["peer-two"]!.turns.baseline[0]!, false);
 });
