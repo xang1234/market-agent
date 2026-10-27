@@ -87,7 +87,8 @@ on the same frozen data, then pair the two run records:
    `unsupported_figure`, `invented_figure`, `weak_conclusion`, `missing_counterpoint`, `unstated_gap`. The reveal adds
    `operational_failure` wherever an arm gave no answer.
 4. `node --experimental-strip-types scripts/research-quality-pairs.ts reveal <pairs dir> [key file] [--incomplete]`. The
-   key defaults to the one named by the pairs folder, and a key from another pairing is refused. It refuses while an
+   key defaults to the one named by the pairs folder, and a key or scores from another pairing, or from another
+   pairing's folder, are refused before anything is written. It refuses while an
    applicable cell is `null`; `--incomplete` reveals anyway and names the review incomplete. It writes `reveal.md`
    once: the mapping, each arm's totals per criterion over its own scored cells, per-criterion deltas as `+N over K
    pairs`, per-question deltas, what wasn't compared, unscored cells, each turn's outcome and model, failure-label
@@ -97,10 +98,13 @@ on the same frozen data, then pair the two run records:
    writing `reveal.md`, every reveal, `--incomplete` included, copies both runs' reports and run.json into the pairs
    folder.
 
-   `reveal.md` ends with a digest of the scores it revealed. Running reveal again with the same scores copies any run
-   file missing from the pairs folder and refuses a copy that differs from its run; with changed scores it refuses,
-   because scores entered after the mapping was seen aren't blind. That includes a complete reveal after an
-   `--incomplete` one, so reveal incomplete only when the review stops there.
+   Those copies already tell the arms apart, so before the first one the reveal writes a digest of the scores to
+   `.reveal-scores-digest` in the pairs folder, and `reveal.md` ends with the same digest. Commit both. Running reveal
+   again with the same scores finishes a reveal that stopped partway, copies any run file missing from the pairs
+   folder, and refuses a copy that differs from its run, before copying anything. With changed scores it refuses,
+   whether or not `reveal.md` was written, because scores entered after the mapping may have been seen aren't blind.
+   That includes a complete reveal after an `--incomplete` one, so reveal incomplete only when the review stops there.
+   A reveal refused for an unscored cell locks nothing.
 
 ## Held-out traps (#221)
 
