@@ -6,7 +6,10 @@ import test from "node:test";
 
 import {
   blankScores,
+  checkCounts,
+  formatChecks,
   modelForRun,
+  turnOutcome,
   answeredBySummary,
   usageSummary,
   assertionSummary,
@@ -114,7 +117,7 @@ test("an engine answer renders its figures with labels and periods, its gaps wit
 test("the report shows every turn, its expectation, and a failed turn as failed", () => {
   const question = QUESTIONS.find((q) => q.id === "ticker-page-compare")!;
   const report = renderReport("2026-10-01T1000", "gpt-x", "http://app", [
-    { question, threadId: "t1", turns: [{ message: question.turns[0]!.message, outcome: "timeout", blocks: [] }] },
+    { question, threadId: "t1", turns: [{ message: question.turns[0]!.message, outcome: "timeout" as const, blocks: [] }] },
   ]);
   assert.match(report, /## ticker-page-compare/);
   assert.match(report, /Thread: http:\/\/app\/chat\/t1/);
@@ -190,13 +193,13 @@ test("a run with fallbacks configured is labelled with them", () => {
 test("the report shows the model that answered each turn, and the mix across the run (#183)", () => {
   const [first, second] = QUESTIONS;
   const report = renderReport("r", "opencode-go/qwen3.8-max (fallbacks: opencode-go/kimi-k2.7-code)", "http://app", [
-    { question: first, threadId: "t1", turns: [{ message: "q1", outcome: "turn.completed", blocks: [], answeredBy: "opencode-go/qwen3.8-max" }] },
-    { question: second, threadId: "t2", turns: [{ message: "q2", outcome: "turn.completed", blocks: [], answeredBy: "opencode-go/kimi-k2.7-code" }] },
+    { question: first, threadId: "t1", turns: [{ message: "q1", outcome: "completed" as const, blocks: [], answeredBy: "opencode-go/qwen3.8-max" }] },
+    { question: second, threadId: "t2", turns: [{ message: "q2", outcome: "completed" as const, blocks: [], answeredBy: "opencode-go/kimi-k2.7-code" }] },
   ]);
   assert.match(report, /Answered by: `opencode-go\/qwen3\.8-max` \(1 turn\), `opencode-go\/kimi-k2\.7-code` \(1 turn\)\./);
-  assert.match(report, /### Q: q2\n\n_Answered by `opencode-go\/kimi-k2\.7-code`\._/);
+  assert.match(report, /### Q: q2\n\n_Outcome: completed; time: unknown; answered by: `opencode-go\/kimi-k2\.7-code`; checks: unknown\._/);
   assert.doesNotMatch(report, /Fallbacks may have answered/);
-  assert.equal(answeredBySummary([{ question: first, threadId: "t", turns: [{ message: "q", outcome: "turn.error", blocks: [], answeredBy: null }] }]), "not recorded (1 turn)");
+  assert.equal(answeredBySummary([{ question: first, threadId: "t", turns: [{ message: "q", outcome: "provider_error" as const, blocks: [], answeredBy: null }] }]), "not recorded (1 turn)");
 });
 
 test("the report links each thread's turn traces, oldest first", async () => {
@@ -221,14 +224,57 @@ test("summary on a fresh checkout reads no runs instead of failing", async () =>
   assert.deepEqual(readRuns(join(dir, "missing")), []);
 });
 
+test("a turn's outcome is one of five, and a completed turn that saved nothing is a missing answer (#220)", () => {
+  assert.deepEqual(
+    [
+      turnOutcome("turn.completed", true),
+      turnOutcome("turn.completed", false),
+      turnOutcome("turn.error", false),
+      turnOutcome("turn.error", true),
+      turnOutcome("timeout", true),
+      turnOutcome("skipped", false),
+    ],
+    ["completed", "missing_answer", "provider_error", "provider_error", "timeout", "skipped"],
+  );
+});
+
+test("a turn's checks count accepted assertions and rejected ones by the check they failed (#220)", () => {
+  const counts = checkCounts({
+    status: "checked",
+    accepted: [{ kind: "observation", text: "a", evidence: ["F1"] }, { kind: "comparison", text: "b", evidence: ["F1", "F2"] }],
+    rejected: [
+      { index: 2, check: "binding", reason: "r" },
+      { index: 3, check: "judge", reason: "r" },
+      { index: 4, check: "binding", reason: "r" },
+    ],
+  });
+  assert.deepEqual(counts, { accepted: 2, rejected: { binding: 2, judge: 1 } });
+  assert.equal(formatChecks(counts!), "2 accepted, 3 rejected (binding 2, judge 1)");
+  assert.equal(checkCounts(null), null);
+});
+
+test("each turn shows its outcome, time, model and checks, and a field a run didn't record renders unknown (#220)", () => {
+  const [first] = QUESTIONS;
+  const report = renderReport("r", "m", "http://app", [{ question: first, threadId: "t1", turns: [
+    { message: "q1", outcome: "completed", blocks: [], elapsedMs: 12_340, answeredBy: "a/m", checks: { accepted: 3, rejected: { binding: 1 } } },
+    { message: "q2", outcome: "timeout", blocks: [], elapsedMs: 180_000, answeredBy: null, checks: null },
+    { message: "q3", outcome: "skipped", blocks: [], elapsedMs: null, answeredBy: null, checks: null },
+    { message: "q4", outcome: "completed", blocks: [] },
+  ] }]);
+  assert.match(report, /### Q: q1\n\n_Outcome: completed; time: 12\.3s; answered by: `a\/m`; checks: 3 accepted, 1 rejected \(binding 1\)\._/);
+  assert.match(report, /\*\*Turn ended with timeout\.\*\*\n\n_Outcome: timeout; time: 180\.0s; answered by: none; checks: none\._/);
+  assert.match(report, /\*\*Not sent: an earlier turn didn't complete\.\*\*\n\n_Outcome: skipped; time: none; answered by: none; checks: none\._/);
+  assert.match(report, /### Q: q4\n\n_Outcome: completed; time: unknown; answered by: unknown; checks: unknown\._/);
+});
+
 test("turns after one that didn't complete are shown as not sent", () => {
   const question = QUESTIONS.find((q) => q.id === "follow-up-memory")!;
   const report = renderReport("r", "m", "http://app", [{
     question,
     threadId: "t",
     turns: [
-      { message: question.turns[0]!.message, outcome: "timeout", blocks: [] },
-      { message: question.turns[1]!.message, outcome: "skipped", blocks: [] },
+      { message: question.turns[0]!.message, outcome: "timeout" as const, blocks: [] },
+      { message: question.turns[1]!.message, outcome: "skipped" as const, blocks: [] },
     ],
   }]);
   assert.match(report, /Turn ended with timeout/);
@@ -238,13 +284,13 @@ test("turns after one that didn't complete are shown as not sent", () => {
 test("the report shows each turn's answer tokens and the run's mean (#181)", () => {
   const [first, second] = QUESTIONS;
   const answered = [
-    { question: first, threadId: "t1", turns: [{ message: "q1", outcome: "turn.completed", blocks: [], answeredBy: "a/m", usage: { input_tokens: 1000, output_tokens: 200, reasoning_tokens: 100 } }] },
-    { question: second, threadId: "t2", turns: [{ message: "q2", outcome: "turn.completed", blocks: [], answeredBy: "a/m", usage: { input_tokens: 2000, output_tokens: 400, reasoning_tokens: 300 } }] },
+    { question: first, threadId: "t1", turns: [{ message: "q1", outcome: "completed" as const, blocks: [], answeredBy: "a/m", usage: { input_tokens: 1000, output_tokens: 200, reasoning_tokens: 100 } }] },
+    { question: second, threadId: "t2", turns: [{ message: "q2", outcome: "completed" as const, blocks: [], answeredBy: "a/m", usage: { input_tokens: 2000, output_tokens: 400, reasoning_tokens: 300 } }] },
   ];
   assert.equal(usageSummary(answered), "mean 1500 input / 300 output per turn (200 reasoning) over 2 turns");
   const report = renderReport("r", "a/m", "http://app", answered);
   assert.match(report, /Answer tokens: mean 1500 input \/ 300 output per turn \(200 reasoning\) over 2 turns\./);
-  assert.match(report, /_Answered by `a\/m`; 1000 input \/ 200 output tokens \(100 reasoning\)\._/);
+  assert.match(report, /answered by: `a\/m`; checks: unknown; 1000 input \/ 200 output tokens \(100 reasoning\)\._/);
   assert.equal(usageSummary([]), "not reported");
 });
 
@@ -252,7 +298,7 @@ test("the report shows each turn's assertion check and the run's totals (#208)",
   const [first, second] = QUESTIONS;
   const answered = [
     { question: first, threadId: "t1", turns: [{
-      message: "q1", outcome: "turn.completed", blocks: [],
+      message: "q1", outcome: "completed" as const, blocks: [],
       assertions: {
         status: "checked" as const,
         accepted: [{ kind: "observation", text: "NVDA's margin was 75.0%.", evidence: ["F1"] }],
@@ -260,9 +306,9 @@ test("the report shows each turn's assertion check and the run's totals (#208)",
       },
     }] },
     { question: second, threadId: "t2", turns: [
-      { message: "q2", outcome: "turn.completed", blocks: [], assertions: { status: "missing" as const, accepted: [], rejected: [] } },
-      { message: "q3", outcome: "turn.completed", blocks: [], assertions: { status: "checked" as const, accepted: [], rejected: [] } },
-      { message: "q4", outcome: "turn.completed", blocks: [], assertions: { status: "checked" as const, accepted: [{ kind: "observation", text: "x", evidence: ["F1"] }], rejected: [], rendered: true } },
+      { message: "q2", outcome: "completed" as const, blocks: [], assertions: { status: "missing" as const, accepted: [], rejected: [] } },
+      { message: "q3", outcome: "completed" as const, blocks: [], assertions: { status: "checked" as const, accepted: [], rejected: [] } },
+      { message: "q4", outcome: "completed" as const, blocks: [], assertions: { status: "checked" as const, accepted: [{ kind: "observation", text: "x", evidence: ["F1"] }], rejected: [], rendered: true } },
     ] },
   ];
   assert.equal(assertionSummary(answered), "2 accepted, 1 rejected (kind 1) over 4 answered turns; 1 missing, 0 malformed, 0 with no figures; 1 rendered");
@@ -278,7 +324,7 @@ test("the report shows each turn's assertion check and the run's totals (#208)",
 
 test("an accepted assertion's text is marked not shown unless it is an inference's, whose words the page shows (#302)", () => {
   const report = renderReport("r", "a/m", "http://app", [{ question: QUESTIONS[0], threadId: "t1", turns: [{
-    message: "q1", outcome: "turn.completed", blocks: [],
+    message: "q1", outcome: "completed" as const, blocks: [],
     assertions: { status: "checked" as const, rendered: true, rejected: [], accepted: [
       { kind: "observation", text: "NVDA's revenue was $99B.", evidence: ["F1"] },
       { kind: "analyst_inference", text: "Scale funds research.", evidence: [] },
@@ -286,7 +332,7 @@ test("an accepted assertion's text is marked not shown unless it is an inference
   }] }]);
   assert.match(report, /- ✓ observation \[F1\] \(text not shown\): NVDA's revenue was \$99B\.\n- ✓ analyst_inference \[\]: Scale funds research\./);
   const fallback = renderReport("r", "a/m", "http://app", [{ question: QUESTIONS[0], threadId: "t1", turns: [{
-    message: "q1", outcome: "turn.completed", blocks: [],
+    message: "q1", outcome: "completed" as const, blocks: [],
     assertions: { status: "checked" as const, rejected: [], accepted: [{ kind: "analyst_inference", text: "Scale funds research.", evidence: [] }] },
   }] }]);
   assert.match(fallback, /- ✓ analyst_inference \[\] \(text not shown\): Scale funds research\./);

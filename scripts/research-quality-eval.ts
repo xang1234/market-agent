@@ -26,18 +26,60 @@ export type ScoresFile = {
   model: string;
   scores: Record<string, Record<CriterionId, Score> & { notes: string }>;
 };
+export type TurnOutcome = "completed" | "timeout" | "provider_error" | "missing_answer" | "skipped";
+
+// runTurn's outcome, or the runner's "skipped" for a turn it didn't send.
+type RawOutcome = Awaited<ReturnType<typeof runTurn>> | "skipped";
+const OUTCOMES: Record<RawOutcome, TurnOutcome> = {
+  "turn.completed": "completed",
+  "turn.error": "provider_error",
+  timeout: "timeout",
+  skipped: "skipped",
+};
+
+// A turn that completed without saving an answer has nothing to score.
+export function turnOutcome(raw: RawOutcome, saved: boolean): TurnOutcome {
+  const outcome = OUTCOMES[raw];
+  return outcome === "completed" && !saved ? "missing_answer" : outcome;
+}
+
+// The assertions accepted, and those rejected by the check they failed (Rejection.check).
+// An accepted assertion passed every check that applied to it, so it has no single check.
+export type CheckCounts = { accepted: number; rejected: Partial<Record<Rejection["check"], number>> };
+
+export function checkCounts(report: AssertionReport | null): CheckCounts | null {
+  if (report === null) return null;
+  const rejected: CheckCounts["rejected"] = {};
+  for (const { check } of report.rejected) rejected[check] = (rejected[check] ?? 0) + 1;
+  return { accepted: report.accepted.length, rejected };
+}
+
+// A field missing from a turn (a run recorded before it existed) renders unknown;
+// null means recorded as none.
+export type AnsweredTurn = {
+  message: string;
+  outcome: TurnOutcome;
+  blocks: Block[];
+  elapsedMs?: number | null;
+  // The deployment that wrote the turn's answer, as chat recorded it (#183); null for a
+  // turn that didn't complete.
+  answeredBy?: string | null;
+  // The answer call's tokens, from turn.completed (#181).
+  usage?: AnswerUsage | null;
+  // The check of the answer's assertion list, which the answer is rendered from (#208).
+  assertions?: AssertionReport | null;
+  checks?: CheckCounts | null;
+};
 export type AnsweredQuestion = {
   question: EvalQuestion;
   threadId: string;
   // The thread's turn traces (services/chat/src/answer-trace.ts), relative to the repo root.
   traces?: string[];
-  // answeredBy: the deployment that wrote the turn's answer, as chat recorded it (#183).
-  // usage: the answer call's tokens, from turn.completed (#181).
-  // assertions: the check of the answer's assertion list, which the answer is rendered from (#208).
-  turns: Array<{ message: string; outcome: string; blocks: Block[]; answeredBy?: string | null; usage?: AnswerUsage | null; assertions?: AssertionReport | null }>;
+  turns: AnsweredTurn[];
 };
 
-// As chat reports it on turn.completed (services/chat/src/assertions.ts).
+// As chat reports it on turn.completed (services/chat/src/assertions.ts), less the
+// judge's verdicts and repair indices, which a run doesn't keep.
 type AssertionReport = {
   status: "missing" | "malformed" | "checked" | "skipped";
   accepted: Array<{ kind: string; text: string; evidence: string[] }>;
@@ -180,14 +222,27 @@ export function renderReport(run: string, model: string, base: string, answered:
       const subject = question.turns[i]?.subjectText;
       lines.push("", `### Q: ${turn.message}${subject ? ` (opened from the ${subject} page)` : ""}`, "");
       if (turn.outcome === "skipped") lines.push("**Not sent: an earlier turn didn't complete.**", "");
-      else if (turn.outcome !== "turn.completed") lines.push(`**Turn ended with ${turn.outcome}.**`, "");
-      const tokens = turn.usage ? `${turn.usage.input_tokens} input / ${turn.usage.output_tokens} output tokens${turn.usage.reasoning_tokens === undefined ? "" : ` (${turn.usage.reasoning_tokens} reasoning)`}` : null;
-      if (turn.answeredBy || tokens) lines.push(`_${[turn.answeredBy ? `Answered by \`${turn.answeredBy}\`` : null, tokens].filter(Boolean).join("; ")}._`, "");
+      else if (turn.outcome !== "completed") lines.push(`**Turn ended with ${turn.outcome}.**`, "");
+      lines.push(`_${turnFacts(turn)}._`, "");
       if (turn.assertions) lines.push(...renderAssertions(turn.assertions), "");
       lines.push(...turn.blocks.flatMap((block) => [renderBlock(block), ""]));
     }
   }
   return `${lines.join("\n").trimEnd()}\n`;
+}
+
+const recorded = <T>(value: T | null | undefined, show: (value: T) => string) =>
+  value === undefined ? "unknown" : value === null ? "none" : show(value);
+
+export const formatChecks = ({ accepted, rejected }: CheckCounts) => {
+  const byCheck = Object.entries(rejected).sort(([a], [b]) => a.localeCompare(b)).map(([check, n]) => `${check} ${n}`);
+  const total = Object.values(rejected).reduce((sum, n) => sum + n, 0);
+  return `${accepted} accepted, ${total} rejected${byCheck.length > 0 ? ` (${byCheck.join(", ")})` : ""}`;
+};
+
+function turnFacts(turn: AnsweredTurn): string {
+  const tokens = turn.usage ? `; ${turn.usage.input_tokens} input / ${turn.usage.output_tokens} output tokens${turn.usage.reasoning_tokens === undefined ? "" : ` (${turn.usage.reasoning_tokens} reasoning)`}` : "";
+  return `Outcome: ${turn.outcome}; time: ${recorded(turn.elapsedMs, (ms) => `${(ms / 1000).toFixed(1)}s`)}; answered by: ${recorded(turn.answeredBy, (model) => `\`${model}\``)}; checks: ${recorded(turn.checks, formatChecks)}${tokens}`;
 }
 
 // A turn's assertion check: each accepted assertion with its evidence, each
@@ -205,7 +260,7 @@ function renderAssertions(report: AssertionReport): string[] {
 // Assertions accepted and rejected over the answered turns, and the turns whose
 // answer listed none or a broken list.
 export function assertionSummary(answered: ReadonlyArray<AnsweredQuestion>): string {
-  const turns = answered.flatMap((question) => question.turns).filter((turn) => turn.outcome === "turn.completed");
+  const turns = answered.flatMap((question) => question.turns).filter((turn) => turn.outcome === "completed");
   const reports = turns.flatMap((turn) => (turn.assertions ? [turn.assertions] : []));
   if (reports.length === 0) return "not reported";
   const count = (status: AssertionReport["status"]) => reports.filter((report) => report.status === status).length;
@@ -364,23 +419,35 @@ async function run(base: string): Promise<void> {
     for (const turn of question.turns) {
       // A turn that timed out may still be running on the server and save its answer
       // during the next one, which would then be read as the next answer; don't send it.
-      if (turns.some((t) => t.outcome !== "turn.completed")) {
-        turns.push({ message: turn.message, outcome: "skipped", blocks: [] });
+      if (turns.some((t) => t.outcome !== "completed")) {
+        turns.push({ message: turn.message, outcome: "skipped", blocks: [], elapsedMs: null, answeredBy: null, usage: null, assertions: null, checks: null });
         continue;
       }
       const startedAt = Date.now();
       let usage: AnswerUsage | null = null;
       let assertions: AssertionReport | null = null;
-      const outcome = await runTurn(base, threadId, turn.message, 180_000, turn.subjectText, (data) => {
+      const raw = await runTurn(base, threadId, turn.message, 180_000, turn.subjectText, (data) => {
         usage = (data.answer_usage as AnswerUsage | undefined) ?? null;
-        assertions = (data.assertion_report as AssertionReport | undefined) ?? null;
+        const report = data.assertion_report as AssertionReport | undefined;
+        assertions = report ? { status: report.status, accepted: report.accepted, rejected: report.rejected, ...(report.rendered === undefined ? {} : { rendered: report.rendered }) } : null;
       });
-      console.log(`${outcome === "turn.completed" ? "done" : outcome}  ${question.id}: ${turn.message}  (${((Date.now() - startedAt) / 1000).toFixed(1)}s)`);
+      const elapsedMs = Date.now() - startedAt;
       const { messages } = await api<{ messages: Message[] }>(base, "GET", `/v1/chat/threads/${threadId}/messages`);
       const answers = messages.filter((m) => m.role === "assistant");
       // A failed turn may have saved no answer: show none rather than the previous one.
       const answer = answers.length > answersSoFar ? answers.at(-1)! : null;
-      turns.push({ message: turn.message, outcome, blocks: answer?.blocks ?? [], answeredBy: answer?.answered_by ?? null, usage, assertions });
+      const outcome = turnOutcome(raw, answer !== null);
+      console.log(`${outcome}  ${question.id}: ${turn.message}  (${(elapsedMs / 1000).toFixed(1)}s)`);
+      turns.push({
+        message: turn.message,
+        outcome,
+        blocks: answer?.blocks ?? [],
+        elapsedMs,
+        answeredBy: outcome === "completed" ? answer?.answered_by ?? null : null,
+        usage,
+        assertions,
+        checks: checkCounts(assertions),
+      });
       answersSoFar = answers.length;
     }
     answered.push({ question, threadId, turns, traces: threadTraces(TRACE_DIR, threadId, ROOT) });
