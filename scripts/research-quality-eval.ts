@@ -63,13 +63,76 @@ function figures(value: unknown, out: string[] = []): string[] {
   return out;
 }
 
+// The engine's certified answer (spec/finance_research_block_schema.json FinancialAnswer).
+// Every string in it is the server's, so it is shown as written, never reformatted.
+type EngineResult = {
+  result_id: string;
+  subject_label_id: string | null;
+  measure_label_id: string;
+  period_label_id: string;
+  presented: { kind: string; text: string; reason_code?: string };
+};
+type EnginePresentation =
+  | { kind: "scalar" | "predicate" | "gap"; result_id: string }
+  | { kind: "table"; caption: string; columns: Array<{ measure_label_id: string; period_label_id: string | null }>; rows: Array<{ subject_label_id: string; cells: Array<string | null> }> }
+  | { kind: "series"; subject_label_id: string; measure_label_id: string; points: Array<{ period_label_id: string; result_id: string }> };
+type EngineContent = {
+  presentation_version: string;
+  coverage: { state: string; requested: number; verified: number };
+  labels: Record<string, { text: string }>;
+  results: EngineResult[];
+  presentations: EnginePresentation[];
+};
+
+const ENGINE_VERSIONS = new Set(["financial-presentation.v1", "financial-presentation.v2"]);
+
+function renderEngineAnswer(content: EngineContent): string {
+  if (!ENGINE_VERSIONS.has(content.presentation_version)) {
+    return `*Engine answer in an unsupported presentation (${content.presentation_version})*`;
+  }
+  const label = (id: string | null) => (id === null ? null : content.labels[id]?.text ?? id);
+  const results = new Map(content.results.map((result) => [result.result_id, result]));
+  const shown = (result: EngineResult | undefined) => {
+    if (!result) return "—";
+    const { kind, text, reason_code } = result.presented;
+    return kind === "gap" ? `gap (${reason_code}): ${text}` : text;
+  };
+  const { state, requested, verified } = content.coverage;
+  const lines = [`*Engine answer: ${state === "complete" ? `all ${requested}` : `${verified} of ${requested}`} requested results verified*`];
+  for (const presentation of content.presentations) {
+    if (presentation.kind === "table") {
+      const header = presentation.columns.map((column) => [label(column.measure_label_id), label(column.period_label_id)].filter(Boolean).join(", "));
+      lines.push("", `*${presentation.caption}*`, "", `| | ${header.join(" | ")} |`, `|---|${header.map(() => "---").join("|")}|`);
+      for (const row of presentation.rows) {
+        // A column with no single period names each cell's own.
+        const cells = row.cells.map((id, i) => {
+          const result = id === null ? undefined : results.get(id);
+          return presentation.columns[i]?.period_label_id === null && result ? `${shown(result)} (${label(result.period_label_id)})` : shown(result);
+        });
+        lines.push(`| ${label(row.subject_label_id)} | ${cells.join(" | ")} |`);
+      }
+    } else if (presentation.kind === "series") {
+      const points = presentation.points.map((point) => `${label(point.period_label_id)} ${shown(results.get(point.result_id))}`);
+      lines.push("", `*${label(presentation.subject_label_id)}, ${label(presentation.measure_label_id)}*: ${points.join("; ")}`);
+    } else {
+      const result = results.get(presentation.result_id);
+      if (!lines.at(-1)!.startsWith("- ")) lines.push("");
+      const where = result ? [result.subject_label_id, result.measure_label_id, result.period_label_id].map(label).filter(Boolean).join(", ") : presentation.result_id;
+      lines.push(`- ${where}: ${shown(result)}`);
+    }
+  }
+  return lines.join("\n");
+}
+
 // ponytail: prose in full, tables as tables, any other block as its title and figures;
 // charts and sources are one click away on the thread link.
 export function renderBlock(block: Block): string {
   if (block.kind === "rich_text") {
     const segments = (block.segments ?? []) as Array<{ type: string; text?: string; format?: string }>;
-    return segments.map((s) => (s.type === "text" ? s.text ?? "" : `**${s.format ?? ""}**`)).join("");
+    const text = segments.map((s) => (s.type === "text" ? s.text ?? "" : `**${s.format ?? ""}**`)).join("");
+    return block.analyst_commentary === true ? `_Analyst commentary:_ ${text}` : text;
   }
+  if (block.kind === "financial_answer") return renderEngineAnswer(block.financial as EngineContent);
   if (block.kind === "disclosure") {
     return ((block.items ?? []) as string[]).map((item) => `> ${item}`).join("\n");
   }

@@ -45,6 +45,72 @@ test("blocks render for scoring: cited figures bold, tables as tables, the rest 
   );
 });
 
+test("an engine answer renders its figures with labels and periods, its gaps with reasons, and its commentary", () => {
+  const value = (text: string) => ({ kind: "value", text, full_text: text, value: "1", unit: { kind: "currency", currency: "USD" }, exact: false });
+  const result = (id: string, subject: string | null, measure: string, period: string, presented: Record<string, unknown>) =>
+    ({ result_id: id, output_id: "o", disposition: "verified", subject_label_id: subject, measure_label_id: measure, period_label_id: period, presented, result_hash: "0".repeat(64) });
+  const block = {
+    kind: "financial_answer",
+    presentation_hash: "0".repeat(64),
+    financial: {
+      presentation_version: "financial-presentation.v2",
+      coverage: { state: "partial", requested: 5, verified: 4 },
+      labels: {
+        "subject:nvda": { kind: "subject", text: "NVDA", slot_id: "nvda" },
+        "subject:amd": { kind: "subject", text: "AMD", slot_id: "amd" },
+        "measure:m1": { kind: "measure", text: "Revenue" },
+        "measure:m2": { kind: "measure", text: "Free cash flow" },
+        "period:p1": { kind: "period", text: "FY2026" },
+        "period:p2": { kind: "period", text: "FY2025" },
+      },
+      results: [
+        result("r1", "subject:nvda", "measure:m1", "period:p1", value("USD 130.5B")),
+        result("r2", "subject:amd", "measure:m1", "period:p2", value("USD 34.6B")),
+        result("r3", "subject:amd", "measure:m2", "period:p2", { kind: "gap", text: "Cash flow is not in the data", reason_code: "no_source" }),
+        result("r4", "subject:nvda", "measure:m1", "period:p2", value("USD 60.9B")),
+        result("r5", null, "measure:m1", "period:p1", { kind: "predicate", text: "NVDA's revenue is above AMD's", outcome: true }),
+      ],
+      presentations: [
+        { kind: "scalar", result_id: "r1" },
+        { kind: "gap", result_id: "r3" },
+        { kind: "predicate", result_id: "r5" },
+        {
+          kind: "table",
+          caption: "Revenue by company",
+          columns: [{ column_id: "c1", measure_label_id: "measure:m1", period_label_id: null }],
+          rows: [{ subject_label_id: "subject:nvda", cells: ["r1"] }, { subject_label_id: "subject:amd", cells: [null] }],
+          ascending: {},
+        },
+        { kind: "series", subject_label_id: "subject:nvda", measure_label_id: "measure:m1", points: [{ period_label_id: "period:p2", result_id: "r4" }, { period_label_id: "period:p1", result_id: "r1" }] },
+      ],
+    },
+  };
+  assert.equal(renderBlock(block), [
+    "*Engine answer: 4 of 5 requested results verified*",
+    "",
+    "- NVDA, Revenue, FY2026: USD 130.5B",
+    "- AMD, Free cash flow, FY2025: gap (no_source): Cash flow is not in the data",
+    "- Revenue, FY2026: NVDA's revenue is above AMD's",
+    "",
+    "*Revenue by company*",
+    "",
+    "| | Revenue |",
+    "|---|---|",
+    "| NVDA | USD 130.5B (FY2026) |",
+    "| AMD | — |",
+    "",
+    "*NVDA, Revenue*: FY2025 USD 60.9B; FY2026 USD 130.5B",
+  ].join("\n"));
+  assert.equal(
+    renderBlock({ kind: "financial_answer", financial: { presentation_version: "financial-presentation.v9" } }),
+    "*Engine answer in an unsupported presentation (financial-presentation.v9)*",
+  );
+  assert.equal(
+    renderBlock({ kind: "rich_text", analyst_commentary: true, segments: [{ type: "text", text: "Scale funds research." }] }),
+    "_Analyst commentary:_ Scale funds research.",
+  );
+});
+
 test("the report shows every turn, its expectation, and a failed turn as failed", () => {
   const question = QUESTIONS.find((q) => q.id === "ticker-page-compare")!;
   const report = renderReport("2026-10-01T1000", "gpt-x", "http://app", [
