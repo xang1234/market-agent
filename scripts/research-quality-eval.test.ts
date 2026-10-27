@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import {
+  BLIND_RUNS_DIR,
+  RUNS_DIR,
+  Refusal,
   blankScores,
-  checkCounts,
   datasetRevision,
   formatChecks,
   questionSetDigest,
@@ -23,9 +25,11 @@ import {
   readRuns,
   renderBlock,
   renderReport,
+  runCli,
   runStamp,
   summarize,
   threadTraces,
+  traceDirFor,
   type RunRecord,
   type ScoresFile,
 } from "./research-quality-eval.ts";
@@ -246,7 +250,7 @@ test("a turn's outcome is one of five, and a completed turn that saved nothing i
 });
 
 test("a turn's checks count accepted assertions and rejected ones by the check they failed (#220)", () => {
-  const counts = checkCounts({
+  assert.equal(formatChecks({
     status: "checked",
     accepted: [{ kind: "observation", text: "a", evidence: ["F1"] }, { kind: "comparison", text: "b", evidence: ["F1", "F2"] }],
     rejected: [
@@ -254,24 +258,29 @@ test("a turn's checks count accepted assertions and rejected ones by the check t
       { index: 3, check: "judge", reason: "r" },
       { index: 4, check: "binding", reason: "r" },
     ],
-  });
-  assert.deepEqual(counts, { accepted: 2, rejected: { binding: 2, judge: 1 } });
-  assert.equal(formatChecks(counts!), "2 accepted, 3 rejected (binding 2, judge 1)");
-  assert.equal(checkCounts(null), null);
+  }), "2 accepted, 3 rejected (binding 2, judge 1)");
+  assert.equal(formatChecks({ status: "checked", accepted: [], rejected: [] }), "0 accepted, 0 rejected");
 });
 
 test("each turn shows its outcome, time, model and checks, and a field a run didn't record renders unknown (#220)", () => {
   const [first] = QUESTIONS;
   const report = renderReport("r", "m", "http://app", [{ question: first, threadId: "t1", turns: [
-    { message: "q1", outcome: "completed", blocks: [], elapsedMs: 12_340, answeredBy: "a/m", checks: { accepted: 3, rejected: { binding: 1 } } },
-    { message: "q2", outcome: "timeout", blocks: [], elapsedMs: 180_000, answeredBy: null, checks: null },
-    { message: "q3", outcome: "skipped", blocks: [], elapsedMs: null, answeredBy: null, checks: null },
+    { message: "q1", outcome: "completed", blocks: [], elapsedMs: 12_340, answeredBy: "a/m", assertions: {
+      status: "checked",
+      accepted: [1, 2, 3].map((n) => ({ kind: "observation", text: `a${n}`, evidence: ["F1"] })),
+      rejected: [{ index: 3, check: "binding", reason: "r" }],
+    } },
+    { message: "q2", outcome: "timeout", blocks: [], elapsedMs: 180_000, answeredBy: null, assertions: null },
+    { message: "q3", outcome: "skipped", blocks: [], elapsedMs: null, answeredBy: null, assertions: null },
     { message: "q4", outcome: "completed", blocks: [] },
+    // Chat omits answered_by when it has none, and the runner records that as null.
+    { message: "q5", outcome: "completed", blocks: [], elapsedMs: 900, answeredBy: null, assertions: null },
   ] }]);
   assert.match(report, /### Q: q1\n\n_Outcome: completed; time: 12\.3s; answered by: `a\/m`; checks: 3 accepted, 1 rejected \(binding 1\)\._/);
   assert.match(report, /\*\*Turn ended with timeout\.\*\*\n\n_Outcome: timeout; time: 180\.0s; answered by: none; checks: none\._/);
   assert.match(report, /\*\*Not sent: an earlier turn didn't complete\.\*\*\n\n_Outcome: skipped; time: none; answered by: none; checks: none\._/);
   assert.match(report, /### Q: q4\n\n_Outcome: completed; time: unknown; answered by: unknown; checks: unknown\._/);
+  assert.match(report, /### Q: q5\n\n_Outcome: completed; time: 0\.9s; answered by: unknown; checks: none\._/);
 });
 
 test("turns after one that didn't complete are shown as not sent", () => {
@@ -348,20 +357,38 @@ test("an accepted assertion's text is marked not shown unless it is an inference
 const git = (dir: string, ...args: string[]) =>
   execFileSync("git", ["-C", dir, "-c", "user.name=eval", "-c", "user.email=eval@example.com", ...args], { encoding: "utf8" }).trim();
 
-test("provenance names the evaluated stack's commit and dataset, not the runner's (#220)", async () => {
+const FROZEN_LINE = (asOf: string) => `// cutoff\nexport const FROZEN_AS_OF = "${asOf}";\nexport const other = 1;\n`;
+
+async function stackCheckout(): Promise<string> {
   const stack = await mkdtemp(join(tmpdir(), "eval-stack-"));
   git(stack, "init", "-q");
-  await mkdir(join(stack, "db", "seed"), { recursive: true });
-  await writeFile(join(stack, "db", "seed", "metrics.sql"), "select 1;\n");
+  const files: Record<string, string> = {
+    "services/chat/test/golden/dataset.ts": "dataset\n",
+    "db/seed/metrics.sql": "select 1;\n",
+    "db/seed/sources.sql": "sources\n",
+    "services/shared/src/golden-issuers.ts": "issuers\n",
+    "services/chat/src/ytd-hydration.ts": FROZEN_LINE("2026-09-01T00:00:00.000Z"),
+  };
+  for (const [path, text] of Object.entries(files)) {
+    await mkdir(join(stack, path, ".."), { recursive: true });
+    await writeFile(join(stack, path), text);
+  }
   git(stack, "add", ".");
   git(stack, "commit", "-q", "-m", "seed");
+  return stack;
+}
+
+test("provenance names the evaluated stack's commit and dataset, and the runner's commit (#220)", async () => {
+  const stack = await stackCheckout();
   const head = git(stack, "rev-parse", "HEAD");
 
   const provenance = runProvenance(stack);
   assert.equal(provenance.revision, head);
-  assert.notEqual(provenance.revision, git(process.cwd(), "rev-parse", "HEAD"));
+  assert.equal(provenance.runnerRevision, git(process.cwd(), "rev-parse", "HEAD"));
+  assert.notEqual(provenance.revision, provenance.runnerRevision);
   assert.equal(provenance.dirty, false);
-  assert.equal(provenance.datasetRevision, "f51f3c9ea0560d1d00244bee96120e3dfd8ae54680d021c9062419ae4e04b53f");
+  // printf 'services/chat/test/golden/dataset.ts\0dataset\n\0db/seed/metrics.sql\0select 1;\n\0db/seed/sources.sql\0sources\n\0services/shared/src/golden-issuers.ts\0issuers\n\0FROZEN_AS_OF\0002026-09-01T00:00:00.000Z' | shasum -a 256
+  assert.equal(provenance.datasetRevision, "f1f39a93d799c00ca3bb9e0d8b521015c2e04c2bf1f0c3b9c68997303c19a81d");
   assert.equal(provenance.questionSetDigest, questionSetDigest());
 
   // An untracked file leaves the tree clean; a changed seed is dirty and a new dataset.
@@ -370,9 +397,61 @@ test("provenance names the evaluated stack's commit and dataset, not the runner'
   await writeFile(join(stack, "db", "seed", "metrics.sql"), "select 2;\n");
   assert.equal(runProvenance(stack).dirty, true);
   assert.notEqual(datasetRevision(stack), provenance.datasetRevision);
+});
 
-  const bare = await mkdtemp(join(tmpdir(), "eval-no-git-"));
-  assert.throws(() => runProvenance(bare), /not a git repository/);
+test("the frozen cutoff moves the dataset revision, and nothing else in its file does (#220)", async () => {
+  const stack = await stackCheckout();
+  const cutoff = join(stack, "services/chat/src/ytd-hydration.ts");
+  await writeFile(cutoff, `${FROZEN_LINE("2026-09-01T00:00:00.000Z")}export const unrelated = 2;\n`);
+  assert.equal(datasetRevision(stack), "f1f39a93d799c00ca3bb9e0d8b521015c2e04c2bf1f0c3b9c68997303c19a81d");
+  await writeFile(cutoff, FROZEN_LINE("2026-09-02T00:00:00.000Z"));
+  assert.equal(datasetRevision(stack), "278983d63194f10f7a74315a90a2da0894258acc067f362c21a4bf71148489ae");
+  await writeFile(cutoff, "export const FROZEN_AS_OF = new Date().toISOString();\n");
+  assert.throws(() => datasetRevision(stack), (error) => error instanceof Refusal && /can't read FROZEN_AS_OF from services\/chat\/src\/ytd-hydration\.ts/.test(error.message));
+});
+
+test("--stack-dir must be the top of a checkout that holds the dataset (#220)", async () => {
+  const stack = await stackCheckout();
+  const refused = (dir: string, pattern: RegExp) =>
+    assert.throws(() => runProvenance(dir), (error) => error instanceof Refusal && pattern.test(error.message));
+  refused(join(stack, "db"), /--stack-dir .*\/db is inside the checkout .*; pass the checkout's top/);
+  refused(await mkdtemp(join(tmpdir(), "eval-no-git-")), /is not a git checkout \(fatal: not a git repository/);
+  refused(join(stack, "nowhere"), /--stack-dir .*nowhere does not exist/);
+  git(stack, "rm", "-q", "db/seed/sources.sql");
+  refused(stack, /has no db\/seed\/sources\.sql, so its frozen dataset can't be named/);
+});
+
+test("turn traces are read from the evaluated stack's checkout (#220)", () => {
+  assert.equal(traceDirFor("/stack", {}), "/stack/.dev/traces");
+  assert.equal(traceDirFor("/stack", { CHAT_TRACE_DIR: " tmp/tr " }), "/stack/tmp/tr");
+  assert.equal(traceDirFor("/stack", { CHAT_TRACE_DIR: "/var/tr" }), "/var/tr");
+});
+
+test("a blind run's files are ignored by git, and a scored run's are not (#222)", () => {
+  const ignored = (path: string) => spawnSync("git", ["check-ignore", "-q", path], { cwd: process.cwd() }).status === 0;
+  assert.equal(ignored(join(BLIND_RUNS_DIR, "2026-10-27T100000.run.json")), true);
+  assert.equal(ignored(join(RUNS_DIR, "2026-10-27T100000.run.json")), false);
+});
+
+test("an expected refusal is one line and exit 1; any other error keeps its stack", async () => {
+  const cli = (...args: string[]) => spawnSync(process.execPath, ["--experimental-strip-types", "scripts/research-quality-eval.ts", ...args], { encoding: "utf8" });
+  const unknownFlag = cli("summary", "--bogus");
+  assert.equal(unknownFlag.status, 1);
+  assert.equal(unknownFlag.stderr.trim().split("\n").length, 1, unknownFlag.stderr);
+  assert.match(unknownFlag.stderr, /Unknown option '--bogus'/);
+  const notACheckout = cli("run", "http://127.0.0.1:1", "--stack-dir", tmpdir());
+  assert.equal(notACheckout.status, 1);
+  assert.match(notACheckout.stderr, /^--stack-dir .* is not a git checkout/);
+
+  const exitCode = process.exitCode;
+  await runCli(() => {
+    throw new Refusal("no");
+  });
+  assert.equal(process.exitCode, 1);
+  process.exitCode = exitCode;
+  await assert.rejects(runCli(() => {
+    throw new TypeError("bug");
+  }), TypeError);
 });
 
 test("the question-set digest is stable and moves when a question or the rubric changes (#220)", () => {
@@ -389,15 +468,23 @@ test("a run record round-trips through run.json, and the report heads with its p
   const record: RunRecord = {
     run: "2026-10-27T100000",
     model: "a/m",
-    provenance: { revision: "0123456789abcdef0123", dirty: true, questionSetDigest: "aaaaaaaaaaaaaaaa", datasetRevision: "bbbbbbbbbbbbbbbb" },
-    questions: [{ question: first, threadId: "t1", turns: [{ message: "q1", outcome: "completed", blocks: [{ kind: "rich_text", segments: [] }], elapsedMs: 1200, answeredBy: "a/m", usage: null, assertions: null, checks: null }] }],
+    provenance: { revision: "0123456789abcdef0123", runnerRevision: "fedcba9876543210fedc", dirty: true, questionSetDigest: "aaaaaaaaaaaaaaaa", datasetRevision: "bbbbbbbbbbbbbbbb" },
+    planned: QUESTIONS.map((q) => q.id),
+    complete: false,
+    questions: [{ question: first, threadId: "t1", turns: [{ message: "q1", outcome: "completed", blocks: [{ kind: "rich_text", segments: [] }], elapsedMs: 1200, answeredBy: "a/m", usage: null, assertions: null }] }],
   };
   const path = join(await mkdtemp(join(tmpdir(), "eval-run-")), "r.run.json");
   await writeFile(path, serializeRun(record));
   assert.deepEqual(readRunRecord(path), record);
-  assert.deepEqual(Object.keys(JSON.parse(serializeRun(record))), ["run", "model", "provenance", "questions"]);
+  assert.deepEqual(Object.keys(JSON.parse(serializeRun(record))), ["run", "model", "provenance", "planned", "complete", "questions"]);
 
-  const report = renderReport(record.run, record.model, "http://app", record.questions, record.provenance);
-  assert.match(report, /^# Research-quality eval: 2026-10-27T100000\n\nStack revision: `0123456789ab` with uncommitted changes\. Question set: `aaaaaaaaaaaa`\. Dataset: `bbbbbbbbbbbb`\./);
-  assert.match(renderReport("r", "m", "http://app", []), /Stack revision: unknown\. Question set: unknown\. Dataset: unknown\./);
+  const report = renderReport(record.run, record.model, "http://app", record.questions, record.provenance, record);
+  assert.match(report, new RegExp([
+    "^# Research-quality eval: 2026-10-27T100000\n\n",
+    `\\*\\*Incomplete run:\\*\\* 1 of ${QUESTIONS.length} planned questions asked; not asked: ${QUESTIONS.slice(1).map((q) => q.id).join(", ")}\\.\n\n`,
+    "Stack revision: `0123456789ab` with uncommitted changes\\. Runner revision: `fedcba987654`\\. Question set: `aaaaaaaaaaaa`\\. Dataset: `bbbbbbbbbbbb`\\.",
+  ].join("")));
+  const done = renderReport(record.run, record.model, "http://app", record.questions, record.provenance, { planned: [first.id], complete: true });
+  assert.match(done, /^# Research-quality eval: 2026-10-27T100000\n\nStack revision:/);
+  assert.match(renderReport("r", "m", "http://app", []), /Stack revision: unknown\. Runner revision: unknown\. Question set: unknown\. Dataset: unknown\./);
 });

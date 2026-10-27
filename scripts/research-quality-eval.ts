@@ -3,12 +3,12 @@
 // data), then writes a dated report for the owner to score and a scores file beside it.
 //
 //   DEV_PROFILE=chat DEV_MODE=analyst ./scripts/dev-shell.sh up
-//   node --experimental-strip-types scripts/research-quality-eval.ts run [base URL] [--stack-dir <checkout>]
+//   node --experimental-strip-types scripts/research-quality-eval.ts run [base URL] [--stack-dir <checkout>] [--blind]
 //   (score: fill in <run>.scores.json)
 //   node --experimental-strip-types scripts/research-quality-eval.ts summary
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
@@ -18,7 +18,25 @@ import { api, runTurn } from "../services/chat/scripts/golden-live-check.ts";
 import { QUESTIONS, RUBRIC, type Criterion, type CriterionId, type EvalQuestion } from "./research-quality-questions.ts";
 
 export const RUNS_DIR = fileURLToPath(new URL("../docs/eval-runs/research-quality/", import.meta.url));
-const ROOT = fileURLToPath(new URL("..", import.meta.url));
+export const ROOT = fileURLToPath(new URL("..", import.meta.url));
+// A run meant for pairing (#222) stays out of the repo (.dev/ is ignored), so its report
+// can't show the scorer which arm wrote which answer.
+export const BLIND_RUNS_DIR = join(ROOT, ".dev", "eval-runs", "research-quality");
+
+// An expected refusal (bad input, a mismatched run): printed as its message, exit 1.
+// Any other error is a bug and keeps its stack.
+export class Refusal extends Error {}
+
+export async function runCli(main: () => void | Promise<void>): Promise<void> {
+  try {
+    await main();
+  } catch (error) {
+    const badArgs = typeof (error as { code?: unknown })?.code === "string" && (error as { code: string }).code.startsWith("ERR_PARSE_ARGS");
+    if (!(error instanceof Refusal) && !badArgs) throw error;
+    console.error((error as Error).message);
+    process.exitCode = 1;
+  }
+}
 
 type Block = Record<string, unknown> & { kind?: string; title?: string };
 type Message = { role: string; blocks: Block[]; answered_by?: string | null };
@@ -46,17 +64,6 @@ export function turnOutcome(raw: RawOutcome, saved: boolean): TurnOutcome {
   return outcome === "completed" && !saved ? "missing_answer" : outcome;
 }
 
-// The assertions accepted, and those rejected by the check they failed (Rejection.check).
-// An accepted assertion passed every check that applied to it, so it has no single check.
-export type CheckCounts = { accepted: number; rejected: Partial<Record<Rejection["check"], number>> };
-
-export function checkCounts(report: AssertionReport | null): CheckCounts | null {
-  if (report === null) return null;
-  const rejected: CheckCounts["rejected"] = {};
-  for (const { check } of report.rejected) rejected[check] = (rejected[check] ?? 0) + 1;
-  return { accepted: report.accepted.length, rejected };
-}
-
 // A field missing from a turn (a run recorded before it existed) renders unknown;
 // null means recorded as none.
 export type AnsweredTurn = {
@@ -64,14 +71,13 @@ export type AnsweredTurn = {
   outcome: TurnOutcome;
   blocks: Block[];
   elapsedMs?: number | null;
-  // The deployment that wrote the turn's answer, as chat recorded it (#183); null for a
-  // turn that didn't complete.
+  // The deployment that wrote the turn's answer, as chat recorded it (#183). Chat omits
+  // it when it has none, so on a completed turn null is unrecorded, not "no model".
   answeredBy?: string | null;
   // The answer call's tokens, from turn.completed (#181).
   usage?: AnswerUsage | null;
   // The check of the answer's assertion list, which the answer is rendered from (#208).
   assertions?: AssertionReport | null;
-  checks?: CheckCounts | null;
 };
 export type AnsweredQuestion = {
   question: EvalQuestion;
@@ -94,12 +100,15 @@ type AssertionReport = {
 // --- provenance ------------------------------------------------------------------
 
 // What a run was measured against: the evaluated stack's checkout (its commit, whether
-// tracked files differ from it, and its frozen dataset) and the runner's question set.
-export type RunProvenance = { revision: string; dirty: boolean; questionSetDigest: string; datasetRevision: string };
+// tracked files differ from it, and its frozen dataset), the runner's commit, and the
+// runner's question set.
+export type RunProvenance = { revision: string; runnerRevision: string; dirty: boolean; questionSetDigest: string; datasetRevision: string };
 
 // The machine-readable run, <run>.run.json: the answers and their per-turn facts. It
-// holds no environment values, headers, prompts or provider payloads.
-export type RunRecord = { run: string; model: string; provenance: RunProvenance; questions: AnsweredQuestion[] };
+// holds no environment values, headers, prompts or provider payloads. planned is every
+// question the run meant to ask; complete is set only once the last one was asked, so a
+// run that stopped early says so.
+export type RunRecord = { run: string; model: string; provenance: RunProvenance; planned: string[]; complete: boolean; questions: AnsweredQuestion[] };
 
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 
@@ -108,8 +117,6 @@ export const questionSetDigest = (questions: ReadonlyArray<EvalQuestion> = QUEST
 
 // What `npm run seed:golden` loads (services/chat/test/golden/dataset.ts seedGoldenDataset):
 // the dataset module, the seed SQL it runs, and the issuer ids it imports.
-// ponytail: FROZEN_AS_OF lives in services/chat/src/ytd-hydration.ts beside unrelated
-// code, so a cutoff change alone doesn't move this; hash that file too if it ever moves.
 export const DATASET_INPUTS = [
   "services/chat/test/golden/dataset.ts",
   "db/seed/metrics.sql",
@@ -117,20 +124,44 @@ export const DATASET_INPUTS = [
   "services/shared/src/golden-issuers.ts",
 ] as const;
 
-export function datasetRevision(stackDir: string): string {
-  return sha256(DATASET_INPUTS.map((path) => {
-    const file = join(stackDir, path);
-    return `${path}\0${existsSync(file) ? readFileSync(file, "utf8") : "(missing)"}`;
-  }).join("\0"));
+// The cutoff the frozen modes answer at lives beside unrelated code, so only its value
+// joins the dataset revision.
+const FROZEN_AS_OF_FILE = "services/chat/src/ytd-hydration.ts";
+
+function frozenAsOf(stackDir: string): string {
+  const file = join(stackDir, FROZEN_AS_OF_FILE);
+  const value = existsSync(file) ? /^export const FROZEN_AS_OF = "([^"\n]+)";$/mu.exec(readFileSync(file, "utf8"))?.[1] : undefined;
+  if (value === undefined) throw new Refusal(`can't read FROZEN_AS_OF from ${FROZEN_AS_OF_FILE} in ${stackDir}`);
+  return value;
 }
 
-// Throws outside a git checkout, so a run that can't name its revision sends nothing.
-export function runProvenance(stackDir: string): RunProvenance {
-  const git = (...args: string[]) => execFileSync("git", ["-C", stackDir, ...args], { encoding: "utf8" }).trim();
+export function datasetRevision(stackDir: string): string {
+  const inputs = DATASET_INPUTS.map((path) => {
+    const file = join(stackDir, path);
+    if (!existsSync(file)) throw new Refusal(`${stackDir} has no ${path}, so its frozen dataset can't be named; is it the evaluated stack's checkout?`);
+    return `${path}\0${readFileSync(file, "utf8")}`;
+  });
+  return sha256([...inputs, `FROZEN_AS_OF\0${frozenAsOf(stackDir)}`].join("\0"));
+}
+
+const git = (dir: string, ...args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+
+// Refuses anything but the top of a git checkout, so a run that can't name what it
+// measured sends nothing.
+export function runProvenance(stackDir: string, runnerDir = ROOT): RunProvenance {
+  if (!existsSync(stackDir)) throw new Refusal(`--stack-dir ${stackDir} does not exist`);
+  let top: string;
+  try {
+    top = git(stackDir, "rev-parse", "--show-toplevel");
+  } catch (error) {
+    throw new Refusal(`--stack-dir ${stackDir} is not a git checkout (${String((error as { stderr?: unknown }).stderr ?? error).trim()})`);
+  }
+  if (realpathSync(top) !== realpathSync(stackDir)) throw new Refusal(`--stack-dir ${stackDir} is inside the checkout ${top}; pass the checkout's top`);
   return {
-    revision: git("rev-parse", "HEAD"),
+    revision: git(stackDir, "rev-parse", "HEAD"),
+    runnerRevision: git(runnerDir, "rev-parse", "HEAD"),
     // Untracked files are left out: build output and caches would mark every checkout dirty.
-    dirty: git("status", "--porcelain", "--untracked-files=no") !== "",
+    dirty: git(stackDir, "status", "--porcelain", "--untracked-files=no") !== "",
     questionSetDigest: questionSetDigest(),
     datasetRevision: datasetRevision(stackDir),
   };
@@ -245,13 +276,26 @@ export function renderBlock(block: Block): string {
   return `*[${block.kind}] ${block.title ?? ""}*${shown.length > 0 ? `: ${shown.join(", ")}` : ""}`;
 }
 
-export function renderReport(run: string, model: string, base: string, answered: ReadonlyArray<AnsweredQuestion>, provenance?: RunProvenance): string {
-  const short = (digest: string | undefined) => (digest === undefined ? "unknown" : `\`${digest.slice(0, 12)}\``);
+export const short = (digest: string | undefined) => (digest === undefined ? "unknown" : `\`${digest.slice(0, 12)}\``);
+
+export const rubricLines = () => RUBRIC.map((c) => `- **${c.id}**: ${c.question} 0 = ${c.anchors[0]}; 1 = ${c.anchors[1]}; 2 = ${c.anchors[2]}.`);
+
+export function renderReport(
+  run: string,
+  model: string,
+  base: string,
+  answered: ReadonlyArray<AnsweredQuestion>,
+  provenance?: RunProvenance,
+  progress?: Pick<RunRecord, "planned" | "complete">,
+): string {
   const tree = provenance?.dirty === undefined ? "" : provenance.dirty ? " with uncommitted changes" : ", clean";
+  const asked = new Set(answered.map(({ question }) => question.id));
+  const notAsked = progress?.planned.filter((id) => !asked.has(id)) ?? [];
   const lines = [
     `# Research-quality eval: ${run}`,
     "",
-    `Stack revision: ${short(provenance?.revision)}${tree}. Question set: ${short(provenance?.questionSetDigest)}. Dataset: ${short(provenance?.datasetRevision)}.`,
+    ...(progress && !progress.complete ? [`**Incomplete run:** ${asked.size} of ${progress.planned.length} planned questions asked${notAsked.length > 0 ? `; not asked: ${notAsked.join(", ")}` : ""}.`, ""] : []),
+    `Stack revision: ${short(provenance?.revision)}${tree}. Runner revision: ${short(provenance?.runnerRevision)}. Question set: ${short(provenance?.questionSetDigest)}. Dataset: ${short(provenance?.datasetRevision)}.`,
     "",
     // Which models actually answered, as chat recorded each turn (#183).
     `Answered by: ${answeredBySummary(answered)}.`,
@@ -266,7 +310,7 @@ export function renderReport(run: string, model: string, base: string, answered:
     "",
     "## Rubric (0 / 1 / 2)",
     "",
-    ...RUBRIC.map((c) => `- **${c.id}**: ${c.question} 0 = ${c.anchors[0]}; 1 = ${c.anchors[1]}; 2 = ${c.anchors[2]}.`),
+    ...rubricLines(),
   ];
   for (const { question, threadId, turns, traces } of answered) {
     lines.push("", `## ${question.id} (${question.kind})`, "", `Thread: ${base}/chat/${threadId}`);
@@ -289,15 +333,24 @@ export function renderReport(run: string, model: string, base: string, answered:
 const recorded = <T>(value: T | null | undefined, show: (value: T) => string) =>
   value === undefined ? "unknown" : value === null ? "none" : show(value);
 
-export const formatChecks = ({ accepted, rejected }: CheckCounts) => {
-  const byCheck = Object.entries(rejected).sort(([a], [b]) => a.localeCompare(b)).map(([check, n]) => `${check} ${n}`);
-  const total = Object.values(rejected).reduce((sum, n) => sum + n, 0);
-  return `${accepted} accepted, ${total} rejected${byCheck.length > 0 ? ` (${byCheck.join(", ")})` : ""}`;
-};
+// Rejections by the check they failed (Rejection.check), so a wrong number or citation
+// (binding) reads apart from a wrong ranking or trend (comparative) (#221). An accepted
+// assertion passed every check that applied to it, so it has no single check.
+function byCheck(rejected: ReadonlyArray<Rejection>): string {
+  const counts = new Map<string, number>();
+  for (const { check } of rejected) counts.set(check, (counts.get(check) ?? 0) + 1);
+  return counts.size > 0 ? ` (${[...counts].sort(([a], [b]) => a.localeCompare(b)).map(([check, n]) => `${check} ${n}`).join(", ")})` : "";
+}
+
+export const formatChecks = ({ accepted, rejected }: AssertionReport) => `${accepted.length} accepted, ${rejected.length} rejected${byCheck(rejected)}`;
+
+// A completed turn's answer always had a model, so none recorded is unknown.
+const answeredByShown = (turn: AnsweredTurn) =>
+  turn.outcome !== "completed" ? "none" : turn.answeredBy ? `\`${turn.answeredBy}\`` : "unknown";
 
 function turnFacts(turn: AnsweredTurn): string {
   const tokens = turn.usage ? `; ${turn.usage.input_tokens} input / ${turn.usage.output_tokens} output tokens${turn.usage.reasoning_tokens === undefined ? "" : ` (${turn.usage.reasoning_tokens} reasoning)`}` : "";
-  return `Outcome: ${turn.outcome}; time: ${recorded(turn.elapsedMs, (ms) => `${(ms / 1000).toFixed(1)}s`)}; answered by: ${recorded(turn.answeredBy, (model) => `\`${model}\``)}; checks: ${recorded(turn.checks, formatChecks)}${tokens}`;
+  return `Outcome: ${turn.outcome}; time: ${recorded(turn.elapsedMs, (ms) => `${(ms / 1000).toFixed(1)}s`)}; answered by: ${answeredByShown(turn)}; checks: ${recorded(turn.assertions, formatChecks)}${tokens}`;
 }
 
 // A turn's assertion check: each accepted assertion with its evidence, each
@@ -322,14 +375,7 @@ export function assertionSummary(answered: ReadonlyArray<AnsweredQuestion>): str
   const accepted = reports.reduce((sum, report) => sum + report.accepted.length, 0);
   const rejected = reports.reduce((sum, report) => sum + report.rejected.length, 0);
   const rendered = reports.filter((report) => report.rendered).length;
-  // Rejections by the check they failed, so a wrong number or citation (binding)
-  // reads apart from a wrong ranking or trend (comparative) (#221).
-  const checks = new Map<string, number>();
-  for (const entry of reports.flatMap((report) => report.rejected)) {
-    checks.set(entry.check, (checks.get(entry.check) ?? 0) + 1);
-  }
-  const byCheck = checks.size > 0 ? ` (${[...checks].sort(([a], [b]) => a.localeCompare(b)).map(([check, n]) => `${check} ${n}`).join(", ")})` : "";
-  return `${accepted} accepted, ${rejected} rejected${byCheck} over ${turns.length} answered turns; ${count("missing")} missing, ${count("malformed")} malformed, ${count("skipped")} with no figures; ${rendered} rendered`;
+  return `${accepted} accepted, ${rejected} rejected${byCheck(reports.flatMap((report) => report.rejected))} over ${turns.length} answered turns; ${count("missing")} missing, ${count("malformed")} malformed, ${count("skipped")} with no figures; ${rendered} rendered`;
 }
 
 // Each answering model with its turn count; turns whose answer recorded none (no model
@@ -387,7 +433,7 @@ export function summarize(files: ReadonlyArray<ScoresFile>): string {
   const known = new Set(QUESTIONS.map((q) => q.id));
   for (const file of files) {
     for (const questionId of Object.keys(file.scores)) {
-      if (!known.has(questionId)) throw new Error(`${file.run}: unknown question '${questionId}'`);
+      if (!known.has(questionId)) throw new Refusal(`${file.run}: unknown question '${questionId}'`);
     }
     let total = 0;
     let max = 0;
@@ -401,17 +447,17 @@ export function summarize(files: ReadonlyArray<ScoresFile>): string {
         const where = `${file.run}: ${questionId}.${criterion.id}`;
         if (question.notApplicable?.includes(criterion.id)) {
           if (score !== undefined && score !== null && score !== "n/a") {
-            throw new Error(`${where} is ${JSON.stringify(score)}, but this question declares it N/A; leave it "n/a"`);
+            throw new Refusal(`${where} is ${JSON.stringify(score)}, but this question declares it N/A; leave it "n/a"`);
           }
           return;
         }
-        if (score === "n/a") throw new Error(`${where} is "n/a", but it applies to this question; score it 0, 1 or 2`);
+        if (score === "n/a") throw new Refusal(`${where} is "n/a", but it applies to this question; score it 0, 1 or 2`);
         if (score === null || score === undefined) {
           unscored += 1;
           return;
         }
         if (score !== 0 && score !== 1 && score !== 2) {
-          throw new Error(`${where} is ${JSON.stringify(score)}; use 0, 1, 2 or null`);
+          throw new Refusal(`${where} is ${JSON.stringify(score)}; use 0, 1, 2 or null`);
         }
         total += score;
         max += 2;
@@ -440,7 +486,7 @@ export function summarize(files: ReadonlyArray<ScoresFile>): string {
 // stops before any (billed) turn; EVAL_MODEL names it when the settings route can't.
 export function modelForRun(primaryModel: string | null | undefined, override: string | undefined, why = "no primary model is set"): string {
   const model = override?.trim() || primaryModel?.trim();
-  if (!model) throw new Error(`can't record which model answers (${why}); set EVAL_MODEL=<channel/model> to name it`);
+  if (!model) throw new Refusal(`can't record which model answers (${why}); set EVAL_MODEL=<channel/model> to name it`);
   return model;
 }
 
@@ -448,7 +494,7 @@ export function modelForRun(primaryModel: string | null | undefined, override: s
 // never overwrite another.
 export const runStamp = (date: Date) => date.toISOString().slice(0, 19).replace(/[:]/gu, "");
 
-async function run(base: string, stackDir: string): Promise<void> {
+async function run(base: string, stackDir: string, blind: boolean): Promise<void> {
   const provenance = runProvenance(stackDir);
   type Settings = { primaryModel?: string | null; fallbackModels?: string[] };
   const settings = await api<{ settings?: Settings }>(base, "GET", "/v1/dev/llm-settings")
@@ -459,19 +505,22 @@ async function run(base: string, stackDir: string): Promise<void> {
   const model = modelLabel(modelForRun(settings.primaryModel, process.env.EVAL_MODEL, settings.why), settings.fallbackModels);
   const stamp = runStamp(new Date());
   const answered: AnsweredQuestion[] = [];
+  const planned = QUESTIONS.map((question) => question.id);
+  const traceDir = traceDirFor(stackDir, process.env);
   // Both files exist from the start, created exclusively (a run never overwrites
   // another); the report is rewritten after each question, so an error late in the run
   // keeps every billed answer before it.
-  mkdirSync(RUNS_DIR, { recursive: true });
-  const report = join(RUNS_DIR, `${stamp}.md`);
-  const scores = join(RUNS_DIR, `${stamp}.scores.json`);
-  const record = join(RUNS_DIR, `${stamp}.run.json`);
-  const save = (flag?: "wx") => {
-    writeFileSync(report, renderReport(stamp, model, base, answered, provenance), { flag });
-    writeFileSync(record, serializeRun({ run: stamp, model, provenance, questions: answered }), { flag });
+  const dir = blind ? BLIND_RUNS_DIR : RUNS_DIR;
+  mkdirSync(dir, { recursive: true });
+  const report = join(dir, `${stamp}.md`);
+  const scores = join(dir, `${stamp}.scores.json`);
+  const record = join(dir, `${stamp}.run.json`);
+  const save = (complete: boolean, flag?: "wx") => {
+    writeFileSync(report, renderReport(stamp, model, base, answered, provenance, { planned, complete }), { flag });
+    writeFileSync(record, serializeRun({ run: stamp, model, provenance, planned, complete, questions: answered }), { flag });
   };
   writeFileSync(scores, `${JSON.stringify(blankScores(stamp, model), null, 2)}\n`, { flag: "wx" });
-  save("wx");
+  save(false, "wx");
   console.log(`report: ${report}\nscore:  ${scores}\nrun:    ${record}\n`);
   for (const question of QUESTIONS) {
     const { thread_id: threadId } = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: `Eval: ${question.id}` });
@@ -481,7 +530,7 @@ async function run(base: string, stackDir: string): Promise<void> {
       // A turn that timed out may still be running on the server and save its answer
       // during the next one, which would then be read as the next answer; don't send it.
       if (turns.some((t) => t.outcome !== "completed")) {
-        turns.push({ message: turn.message, outcome: "skipped", blocks: [], elapsedMs: null, answeredBy: null, usage: null, assertions: null, checks: null });
+        turns.push({ message: turn.message, outcome: "skipped", blocks: [], elapsedMs: null, answeredBy: null, usage: null, assertions: null });
         continue;
       }
       const startedAt = Date.now();
@@ -507,18 +556,18 @@ async function run(base: string, stackDir: string): Promise<void> {
         answeredBy: outcome === "completed" ? answer?.answered_by ?? null : null,
         usage,
         assertions,
-        checks: checkCounts(assertions),
       });
       answersSoFar = answers.length;
     }
-    answered.push({ question, threadId, turns, traces: threadTraces(TRACE_DIR, threadId, ROOT) });
-    save();
+    answered.push({ question, threadId, turns, traces: threadTraces(traceDir, threadId, stackDir) });
+    save(answered.length === planned.length);
   }
   console.log(`\ndone: ${answered.length} questions in ${report}`);
 }
 
-// Where the chat service writes turn traces: dev-shell's default unless overridden.
-const TRACE_DIR = resolve(ROOT, process.env.CHAT_TRACE_DIR?.trim() || ".dev/traces");
+// Where the evaluated stack's chat service writes turn traces: dev-shell's default
+// unless overridden, relative to the stack's checkout.
+export const traceDirFor = (stackDir: string, env: NodeJS.ProcessEnv) => resolve(stackDir, env.CHAT_TRACE_DIR?.trim() || ".dev/traces");
 
 // A thread's trace files, oldest first, relative to root; none when tracing is off.
 export function threadTraces(dir: string, threadId: string, root: string): string[] {
@@ -554,13 +603,18 @@ function summary(): void {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  const { positionals: [command, base], values } = parseArgs({ allowPositionals: true, options: { "stack-dir": { type: "string" } } });
-  // The checkout the evaluated stack runs from, which may not be the runner's (#222).
-  const stackDir = resolve(values["stack-dir"] ?? process.env.EVAL_STACK_DIR ?? ROOT);
-  if (command === "run") await run(base ?? process.env.EVAL_BASE_URL ?? "http://127.0.0.1:5173", stackDir);
-  else if (command === "summary") summary();
-  else {
-    console.error("usage: research-quality-eval.ts run [base URL] [--stack-dir <checkout>] | summary");
-    process.exitCode = 2;
-  }
+  await runCli(async () => {
+    const { positionals: [command, base], values } = parseArgs({
+      allowPositionals: true,
+      options: { "stack-dir": { type: "string" }, blind: { type: "boolean", default: false } },
+    });
+    // The checkout the evaluated stack runs from, which may not be the runner's (#222).
+    const stackDir = resolve(values["stack-dir"] ?? process.env.EVAL_STACK_DIR ?? ROOT);
+    if (command === "run") await run(base ?? process.env.EVAL_BASE_URL ?? "http://127.0.0.1:5173", stackDir, values.blind);
+    else if (command === "summary") summary();
+    else {
+      console.error("usage: research-quality-eval.ts run [base URL] [--stack-dir <checkout>] [--blind] | summary");
+      process.exitCode = 2;
+    }
+  });
 }
