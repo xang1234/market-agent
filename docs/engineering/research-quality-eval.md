@@ -92,9 +92,10 @@ on the same frozen data, then pair the two run records:
    applicable cell is `null`; `--incomplete` reveals anyway and names the review incomplete. It writes `reveal.md`
    once: the mapping, each arm's totals per criterion over its own scored cells, per-criterion deltas as `+N over K
    pairs`, per-question deltas, what wasn't compared, unscored cells, each turn's outcome and model, failure-label
-   counts, and each question's labels and notes. Only pairs both arms answered are compared. A compared pair whose arms
-   were answered by different models, or by a model chat didn't record, is confounded: its deltas are shown apart and
-   left out of the attributed delta. There is no single overall score. Notes show on their question's line. Before
+   counts, and each question's labels and notes. Only pairs both arms answered are compared. A compared pair is
+   confounded when a turn names a different model in each arm, or an arm's record lacks the field: its deltas are shown
+   apart and left out of the attributed delta. A turn no model wrote (chat omits `answered_by` for an engine answer
+   without commentary or a fixed reply) confounds nothing, since a model against no model is the change measured. There is no single overall score. Notes show on their question's line. Before
    writing `reveal.md`, every reveal, `--incomplete` included, copies both runs' reports and run.json into the pairs
    folder.
 

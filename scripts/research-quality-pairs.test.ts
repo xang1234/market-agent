@@ -207,7 +207,7 @@ test("block sources are named per answer in order of appearance, so a source id 
   assert.equal(b!.trimEnd(), answer);
 });
 
-test("a pair both arms answered is confounded when a turn's models differ or one wasn't recorded (#222)", () => {
+test("a pair both arms answered is confounded when a turn names two different models or lacks the field (#222)", () => {
   const { key } = paired();
   assert.deepEqual(Object.fromEntries(Object.entries(key.pairs).map(([id, pair]) => [id, pair.confounded])), {
     "missing-cash-flow": false,
@@ -215,11 +215,14 @@ test("a pair both arms answered is confounded when a turn's models differ or one
     "ticker-page-compare": false,
     "single-latest-quarter": false,
   });
+  const unrecorded: AnsweredTurn = { message: "m", outcome: "completed", blocks: [] };
   assert.equal(confounded([said("x", "a/m")], [said("y", "a/m")]), false);
+  // Chat omits answered_by when no model wrote the answer, and the runner records that as null.
+  assert.equal(confounded([said("x", null)], [said("y", null)]), false);
+  assert.equal(confounded([said("x", null)], [said("y", "a/m")]), false);
   assert.equal(confounded([said("x", "a/m")], [said("y", "b/m")]), true);
-  // The runner records chat's omitted answered_by as null.
-  assert.equal(confounded([said("x", null)], [said("y", null)]), true);
-  assert.equal(confounded([said("x", "a/m")], [said("y", null)]), true);
+  assert.equal(confounded([unrecorded], [said("y", "a/m")]), true);
+  assert.equal(confounded([said("x", "a/m")], [unrecorded]), true);
   // A failed arm is not compared, so it is never confounded.
   assert.equal(confounded([said("x", "a/m")], [failed("provider_error")]), false);
   assert.equal(confounded([said("x", "a/m"), said("x2", "a/m")], [said("y", "b/m"), failed("timeout")]), false);
@@ -299,7 +302,7 @@ test("reveal totals each arm per criterion and compares only pairs both arms ans
   assert.match(report, /## Labels and notes per question\n\n- \*\*missing-cash-flow\*\*: A \(candidate\): unstated_gap, operational_failure; B \(baseline\): none\.\n- \*\*peer-two\*\*: A \(candidate\): wrong_subject; B \(baseline\): none\. Notes: Fallback answered\.\n$/u);
 });
 
-test("an unrecorded answering model on a completed turn is unknown and confounds its pair (#222)", () => {
+test("a completed turn no model wrote leaves its pair attributed, and a turn missing the field confounds it (#222)", () => {
   const candidate = runOf("2026-10-02T000000", "candrev1111111111bbbb", {
     "single-latest-quarter": [said("Lisbon.", null)],
     "peer-two": [said("Lisbon.")],
@@ -307,11 +310,18 @@ test("an unrecorded answering model on a completed turn is unknown and confounds
     "ticker-page-compare": [said("Lisbon.")],
   });
   const { scores, key } = paired(7, "p", baselineRun, candidate);
-  assert.equal(key.pairs["single-latest-quarter"]!.confounded, true);
+  assert.equal(key.pairs["single-latest-quarter"]!.confounded, false);
   scoreAll(scores);
   const { report } = reveal(key, scores);
-  assert.match(report, /\| single-latest-quarter \| 1 \| completed, `a\/m` \| completed, unknown \|/u);
-  assert.match(report, /## Confounded pairs \(not attributed to the change\)\n\n\| question[^\n]*\n\|---[^\n]*\n\| single-latest-quarter \| 0 \| 0 \| 0 \| 0 \| 0 \| 0 \|\n\n/u);
+  assert.match(report, /\| single-latest-quarter \| 1 \| completed, `a\/m` \| completed, none \(no model wrote it\) \|/u);
+  assert.match(report, /## Per-question deltas \(candidate minus baseline\)\n\n\| question[^\n]*\n\|---[^\n]*\n(\|[^\n]*\n)*\| single-latest-quarter \| 0 \| 0 \| 0 \| 0 \| 0 \| 0 \|\n/u);
+  const legacy = runOf("2026-10-02T000000", "candrev1111111111bbbb", {
+    "single-latest-quarter": [{ message: "m", outcome: "completed", blocks: [{ kind: "rich_text", segments: [{ type: "text", text: "Lisbon." }] }] }],
+    "peer-two": [said("Lisbon.")],
+    "missing-cash-flow": [said("Lisbon.")],
+    "ticker-page-compare": [said("Lisbon.")],
+  });
+  assert.equal(paired(7, "p", baselineRun, legacy).key.pairs["single-latest-quarter"]!.confounded, true);
 });
 
 test("two runs that both stopped early pair only the questions both asked, and say what they left out (#222)", () => {

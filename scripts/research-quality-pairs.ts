@@ -85,11 +85,15 @@ export function parseSeed(text: string | undefined): number {
 // Only an arm whose every turn completed gave an answer to score.
 const gaveAnswer = (turns: ReadonlyArray<TurnFacts>) => turns.length > 0 && turns.every((turn) => turn.outcome === "completed");
 
-// A pair both arms answered is confounded when a turn's answering models differ, or one
-// wasn't recorded: its delta can't be put down to the change alone.
+// A pair both arms answered is confounded when a turn names two different models, or an
+// older record lacks the field: its delta can't be put down to the change alone. Null is
+// "no model wrote it" (chat omits answered_by then), so a model against null is the change.
 export function confounded(baseline: ReadonlyArray<TurnFacts>, candidate: ReadonlyArray<TurnFacts>): boolean {
   if (!gaveAnswer(baseline) || !gaveAnswer(candidate)) return false;
-  return baseline.some((turn, i) => !turn.answeredBy || turn.answeredBy !== candidate[i]?.answeredBy);
+  return baseline.some((turn, i) => {
+    const [a, b] = [turn.answeredBy, candidate[i]?.answeredBy];
+    return a === undefined || b === undefined || (a !== null && b !== null && a !== b);
+  });
 }
 
 // --- packet ------------------------------------------------------------------------
@@ -327,8 +331,8 @@ export function reveal(key: PairKey, scores: PairScores, incomplete = false): { 
     "## Totals by criterion",
     "",
     "Each arm's total covers that arm's own scored cells, including questions the other arm didn't answer. Deltas are",
-    "candidate minus baseline over the pairs both arms answered and scored: attributed over pairs answered by the same",
-    "models, confounded over pairs whose answering models differ or weren't recorded.",
+    "candidate minus baseline over the pairs both arms answered and scored: confounded over pairs where a turn names a",
+    "different model in each arm or an arm's model wasn't recorded, attributed over the rest.",
     "",
     "| criterion | baseline (own scored cells) | candidate (own scored cells) | attributed delta | confounded delta |",
     "|---|---|---|---|---|",
