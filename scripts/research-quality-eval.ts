@@ -427,6 +427,21 @@ export function blankScores(run: string, model: string): ScoresFile {
 
 // --- summary ---------------------------------------------------------------------
 
+// A hand-edited cell, checked: its score, null when unscored, or undefined when it
+// doesn't apply (notApplicable names why). "n/a" belongs exactly where it doesn't apply.
+function readCell(where: string, score: unknown, notApplicable: string | null): 0 | 1 | 2 | null | undefined {
+  if (notApplicable !== null) {
+    if (score !== undefined && score !== null && score !== "n/a") {
+      throw new Error(`${where} is ${JSON.stringify(score)}, but ${notApplicable}; leave it "n/a"`);
+    }
+    return undefined;
+  }
+  if (score === "n/a") throw new Error(`${where} is "n/a", but it applies to this question; score it 0, 1 or 2`);
+  if (score === null || score === undefined) return null;
+  if (score !== 0 && score !== 1 && score !== 2) throw new Error(`${where} is ${JSON.stringify(score)}; use 0, 1, 2 or null`);
+  return score;
+}
+
 // One line per run, so trends show run to run. Scores are hand-edited, so the file is
 // checked against the question set before anything is totalled, and every mistake is an
 // error naming where it is: an unknown question, a score other than 0, 1, 2 or null
@@ -450,21 +465,11 @@ export function summarize(files: ReadonlyArray<ScoresFile>): string {
       const questionId = question.id;
       const scores = file.scores[questionId];
       RUBRIC.forEach((criterion, i) => {
-        const score = scores?.[criterion.id];
-        const where = `${file.run}: ${questionId}.${criterion.id}`;
-        if (question.notApplicable?.includes(criterion.id)) {
-          if (score !== undefined && score !== null && score !== "n/a") {
-            throw new Refusal(`${where} is ${JSON.stringify(score)}, but this question declares it N/A; leave it "n/a"`);
-          }
-          return;
-        }
-        if (score === "n/a") throw new Refusal(`${where} is "n/a", but it applies to this question; score it 0, 1 or 2`);
-        if (score === null || score === undefined) {
+        const score = readCell(`${file.run}: ${questionId}.${criterion.id}`, scores?.[criterion.id], question.notApplicable?.includes(criterion.id) ? "this question declares it N/A" : null);
+        if (score === undefined) return;
+        if (score === null) {
           unscored += 1;
           return;
-        }
-        if (score !== 0 && score !== 1 && score !== 2) {
-          throw new Refusal(`${where} is ${JSON.stringify(score)}; use 0, 1, 2 or null`);
         }
         total += score;
         max += 2;
