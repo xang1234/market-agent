@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -42,6 +43,10 @@ test("blocks render for scoring: cited figures bold, tables as tables, the rest 
       segments: [{ type: "text", text: "Revenue was " }, { type: "ref", ref_kind: "fact", format: "$57.0B" }, { type: "text", text: "." }],
     }),
     "Revenue was **$57.0B**.",
+  );
+  assert.equal(
+    renderBlock({ kind: "rich_text", segments: [{ type: "text", text: "Revenue " }, { type: "mention", format: "NVDA" }, { type: "text", text: "." }] }),
+    "Revenue [mention segment not shown].",
   );
   assert.equal(
     renderBlock({
@@ -88,6 +93,7 @@ test("an engine answer renders its figures with labels and periods, its gaps wit
         { kind: "scalar", result_id: "r1" },
         { kind: "gap", result_id: "r3" },
         { kind: "predicate", result_id: "r5" },
+        { kind: "scalar", result_id: "7f1c0d9e-0000-4000-8000-000000000000" },
         {
           kind: "table",
           caption: "Revenue by company",
@@ -105,6 +111,7 @@ test("an engine answer renders its figures with labels and periods, its gaps wit
     "- NVDA, Revenue, FY2026: USD 130.5B",
     "- AMD, Free cash flow, FY2025: gap (no_source): Cash flow is not in the data",
     "- Revenue, FY2026: NVDA's revenue is above AMD's",
+    "- a result not in this answer: —",
     "",
     "*Revenue by company*",
     "",
@@ -414,6 +421,9 @@ test("--stack-dir must be the top of a checkout that holds the dataset (#220)", 
   const stack = await stackCheckout();
   const refused = (dir: string, pattern: RegExp) =>
     assert.throws(() => runProvenance(dir), (error) => error instanceof Refusal && pattern.test(error.message));
+  // A case-insensitive volume (macOS) opens the checkout under another case; it is still the top.
+  const otherCase = stack.replace(/eval-stack-/u, "EVAL-STACK-");
+  if (existsSync(otherCase)) assert.equal(runProvenance(otherCase).revision, git(stack, "rev-parse", "HEAD"));
   refused(join(stack, "db"), /--stack-dir .*\/db is inside the checkout .*; pass the checkout's top/);
   refused(await mkdtemp(join(tmpdir(), "eval-no-git-")), /is not a git checkout \(fatal: not a git repository/);
   refused(join(stack, "nowhere"), /--stack-dir .*nowhere does not exist/);
@@ -468,6 +478,7 @@ test("a run record round-trips through run.json, and the report heads with its p
   const record: RunRecord = {
     run: "2026-10-27T100000",
     model: "a/m",
+    blind: true,
     provenance: { revision: "0123456789abcdef0123", runnerRevision: "fedcba9876543210fedc", dirty: true, questionSetDigest: "aaaaaaaaaaaaaaaa", datasetRevision: "bbbbbbbbbbbbbbbb" },
     planned: QUESTIONS.map((q) => q.id),
     complete: false,
@@ -476,7 +487,7 @@ test("a run record round-trips through run.json, and the report heads with its p
   const path = join(await mkdtemp(join(tmpdir(), "eval-run-")), "r.run.json");
   await writeFile(path, serializeRun(record));
   assert.deepEqual(readRunRecord(path), record);
-  assert.deepEqual(Object.keys(JSON.parse(serializeRun(record))), ["run", "model", "provenance", "planned", "complete", "questions"]);
+  assert.deepEqual(Object.keys(JSON.parse(serializeRun(record))), ["run", "model", "blind", "provenance", "planned", "complete", "questions"]);
 
   const report = renderReport(record.run, record.model, "http://app", record.questions, record.provenance, record);
   assert.match(report, new RegExp([

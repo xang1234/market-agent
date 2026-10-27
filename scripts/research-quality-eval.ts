@@ -107,8 +107,8 @@ export type RunProvenance = { revision: string; runnerRevision: string; dirty: b
 // The machine-readable run, <run>.run.json: the answers and their per-turn facts. It
 // holds no environment values, headers, prompts or provider payloads. planned is every
 // question the run meant to ask; complete is set only once the last one was asked, so a
-// run that stopped early says so.
-export type RunRecord = { run: string; model: string; provenance: RunProvenance; planned: string[]; complete: boolean; questions: AnsweredQuestion[] };
+// run that stopped early says so. blind: written under .dev/ for pairing.
+export type RunRecord = { run: string; model: string; blind: boolean; provenance: RunProvenance; planned: string[]; complete: boolean; questions: AnsweredQuestion[] };
 
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 
@@ -156,7 +156,7 @@ export function runProvenance(stackDir: string, runnerDir = ROOT): RunProvenance
   } catch (error) {
     throw new Refusal(`--stack-dir ${stackDir} is not a git checkout (${String((error as { stderr?: unknown }).stderr ?? error).trim()})`);
   }
-  if (realpathSync(top) !== realpathSync(stackDir)) throw new Refusal(`--stack-dir ${stackDir} is inside the checkout ${top}; pass the checkout's top`);
+  if (realpathSync.native(top) !== realpathSync.native(stackDir)) throw new Refusal(`--stack-dir ${stackDir} is inside the checkout ${top}; pass the checkout's top`);
   return {
     revision: git(stackDir, "rev-parse", "HEAD"),
     runnerRevision: git(runnerDir, "rev-parse", "HEAD"),
@@ -241,7 +241,7 @@ function renderEngineAnswer(content: EngineContent): string {
     } else {
       const result = results.get(presentation.result_id);
       if (!lines.at(-1)!.startsWith("- ")) lines.push("");
-      const where = result ? [result.subject_label_id, result.measure_label_id, result.period_label_id].map(label).filter(Boolean).join(", ") : presentation.result_id;
+      const where = result ? [result.subject_label_id, result.measure_label_id, result.period_label_id].map(label).filter(Boolean).join(", ") : "a result not in this answer";
       lines.push(`- ${where}: ${shown(result)}`);
     }
   }
@@ -253,7 +253,7 @@ function renderEngineAnswer(content: EngineContent): string {
 export function renderBlock(block: Block): string {
   if (block.kind === "rich_text") {
     const segments = (block.segments ?? []) as Array<{ type: string; text?: string; format?: string }>;
-    const text = segments.map((s) => (s.type === "text" ? s.text ?? "" : `**${s.format ?? ""}**`)).join("");
+    const text = segments.map((s) => (s.type === "text" ? s.text ?? "" : s.type === "ref" ? `**${s.format ?? ""}**` : `[${s.type} segment not shown]`)).join("");
     return block.analyst_commentary === true ? `_Analyst commentary:_ ${text}` : text;
   }
   if (block.kind === "financial_answer") return renderEngineAnswer(block.financial as EngineContent);
@@ -517,7 +517,7 @@ async function run(base: string, stackDir: string, blind: boolean): Promise<void
   const record = join(dir, `${stamp}.run.json`);
   const save = (complete: boolean, flag?: "wx") => {
     writeFileSync(report, renderReport(stamp, model, base, answered, provenance, { planned, complete }), { flag });
-    writeFileSync(record, serializeRun({ run: stamp, model, provenance, planned, complete, questions: answered }), { flag });
+    writeFileSync(record, serializeRun({ run: stamp, model, blind, provenance, planned, complete, questions: answered }), { flag });
   };
   writeFileSync(scores, `${JSON.stringify(blankScores(stamp, model), null, 2)}\n`, { flag: "wx" });
   save(false, "wx");
