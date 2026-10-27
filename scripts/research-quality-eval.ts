@@ -71,8 +71,9 @@ export type AnsweredTurn = {
   outcome: TurnOutcome;
   blocks: Block[];
   elapsedMs?: number | null;
-  // The deployment that wrote the turn's answer, as chat recorded it (#183). Chat omits
-  // it when it has none, so on a completed turn null is unrecorded, not "no model".
+  // The deployment that wrote the turn's answer, as chat recorded it (#183). Chat omits it
+  // when no model wrote the answer (an engine answer or a fixed reply), so on a completed
+  // turn null is "no model"; only a field absent from an older record is unknown.
   answeredBy?: string | null;
   // The answer call's tokens, from turn.completed (#181).
   usage?: AnswerUsage | null;
@@ -344,9 +345,11 @@ function byCheck(rejected: ReadonlyArray<Rejection>): string {
 
 export const formatChecks = ({ accepted, rejected }: AssertionReport) => `${accepted.length} accepted, ${rejected.length} rejected${byCheck(rejected)}`;
 
-// A completed turn's answer always had a model, so none recorded is unknown.
 const answeredByShown = (turn: AnsweredTurn) =>
-  turn.outcome !== "completed" ? "none" : turn.answeredBy ? `\`${turn.answeredBy}\`` : "unknown";
+  turn.outcome !== "completed" ? "none"
+  : turn.answeredBy === undefined ? "unknown"
+  : turn.answeredBy === null ? "none (no model wrote it)"
+  : `\`${turn.answeredBy}\``;
 
 function turnFacts(turn: AnsweredTurn): string {
   const tokens = turn.usage ? `; ${turn.usage.input_tokens} input / ${turn.usage.output_tokens} output tokens${turn.usage.reasoning_tokens === undefined ? "" : ` (${turn.usage.reasoning_tokens} reasoning)`}` : "";
@@ -382,14 +385,18 @@ export function assertionSummary(answered: ReadonlyArray<AnsweredQuestion>): str
 // wrote it, or a turn that didn't complete) are counted apart.
 export function answeredBySummary(answered: ReadonlyArray<AnsweredQuestion>): string {
   const counts = new Map<string, number>();
+  let noModel = 0;
   let unrecorded = 0;
   for (const turn of answered.flatMap((question) => question.turns)) {
     if (turn.outcome === "skipped") continue;
     if (turn.answeredBy) counts.set(turn.answeredBy, (counts.get(turn.answeredBy) ?? 0) + 1);
+    else if (turn.outcome === "completed" && turn.answeredBy === null) noModel += 1;
     else unrecorded += 1;
   }
-  const parts = [...counts].map(([model, count]) => `\`${model}\` (${count} turn${count === 1 ? "" : "s"})`);
-  if (unrecorded > 0) parts.push(`not recorded (${unrecorded} turn${unrecorded === 1 ? "" : "s"})`);
+  const turns = (count: number) => `${count} turn${count === 1 ? "" : "s"}`;
+  const parts = [...counts].map(([model, count]) => `\`${model}\` (${turns(count)})`);
+  if (noModel > 0) parts.push(`no model (${turns(noModel)})`);
+  if (unrecorded > 0) parts.push(`not recorded (${turns(unrecorded)})`);
   return parts.length > 0 ? parts.join(", ") : "no turns yet";
 }
 

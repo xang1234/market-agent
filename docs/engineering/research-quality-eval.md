@@ -54,8 +54,10 @@ commit, a digest of the questions and rubric, and a digest of the frozen dataset
 runner: what `npm run seed:golden` loads) and the `FROZEN_AS_OF` cutoff in `services/chat/src/ytd-hydration.ts`. When
 the stack runs from another checkout than the runner, pass `--stack-dir <checkout>` (or `EVAL_STACK_DIR`) so the commit,
 dataset and turn traces (`CHAT_TRACE_DIR`, default `.dev/traces`) are read from there. The run refuses a directory that
-isn't the top of a git checkout or lacks a dataset input. A field an older run didn't record shows `unknown`, and so
-does a completed turn whose answering model chat didn't record.
+isn't the top of a git checkout or lacks a dataset input. A field an older run didn't record shows `unknown`. A
+completed turn with no answering model shows `none (no model wrote it)`: chat records `answered_by` only when a model
+wrote the answer, so an engine answer without commentary or a fixed reply (a clarification, a segment gap) has none
+(`services/chat/src/messages.ts`).
 
 A run meant for a blinded pair (#222) takes `--blind`: its three files go to `.dev/eval-runs/research-quality/`, which
 git ignores, so its report can't show the scorer which arm wrote which answer. Its run record says `"blind": true`.

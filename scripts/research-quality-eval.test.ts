@@ -218,6 +218,12 @@ test("the report shows the model that answered each turn, and the mix across the
   assert.match(report, /### Q: q2\n\n_Outcome: completed; time: unknown; answered by: `opencode-go\/kimi-k2\.7-code`; checks: unknown\._/);
   assert.doesNotMatch(report, /Fallbacks may have answered/);
   assert.equal(answeredBySummary([{ question: first, threadId: "t", turns: [{ message: "q", outcome: "provider_error" as const, blocks: [], answeredBy: null }] }]), "not recorded (1 turn)");
+  assert.equal(answeredBySummary([{ question: first, threadId: "t", turns: [
+    { message: "q1", outcome: "completed" as const, blocks: [], answeredBy: "a/m" },
+    { message: "q2", outcome: "completed" as const, blocks: [], answeredBy: null },
+    { message: "q3", outcome: "completed" as const, blocks: [], answeredBy: null },
+    { message: "q4", outcome: "completed" as const, blocks: [] },
+  ] }]), "`a/m` (1 turn), no model (2 turns), not recorded (1 turn)");
 });
 
 test("the report links each thread's turn traces, oldest first", async () => {
@@ -269,7 +275,7 @@ test("a turn's checks count accepted assertions and rejected ones by the check t
   assert.equal(formatChecks({ status: "checked", accepted: [], rejected: [] }), "0 accepted, 0 rejected");
 });
 
-test("each turn shows its outcome, time, model and checks, and a field a run didn't record renders unknown (#220)", () => {
+test("each turn shows its outcome, time, model and checks; a completed turn no model wrote says so, and a field a run didn't record renders unknown (#220)", () => {
   const [first] = QUESTIONS;
   const report = renderReport("r", "m", "http://app", [{ question: first, threadId: "t1", turns: [
     { message: "q1", outcome: "completed", blocks: [], elapsedMs: 12_340, answeredBy: "a/m", assertions: {
@@ -280,14 +286,14 @@ test("each turn shows its outcome, time, model and checks, and a field a run did
     { message: "q2", outcome: "timeout", blocks: [], elapsedMs: 180_000, answeredBy: null, assertions: null },
     { message: "q3", outcome: "skipped", blocks: [], elapsedMs: null, answeredBy: null, assertions: null },
     { message: "q4", outcome: "completed", blocks: [] },
-    // Chat omits answered_by when it has none, and the runner records that as null.
+    // Chat omits answered_by when no model wrote the answer, and the runner records that as null.
     { message: "q5", outcome: "completed", blocks: [], elapsedMs: 900, answeredBy: null, assertions: null },
   ] }]);
   assert.match(report, /### Q: q1\n\n_Outcome: completed; time: 12\.3s; answered by: `a\/m`; checks: 3 accepted, 1 rejected \(binding 1\)\._/);
   assert.match(report, /\*\*Turn ended with timeout\.\*\*\n\n_Outcome: timeout; time: 180\.0s; answered by: none; checks: none\._/);
   assert.match(report, /\*\*Not sent: an earlier turn didn't complete\.\*\*\n\n_Outcome: skipped; time: none; answered by: none; checks: none\._/);
   assert.match(report, /### Q: q4\n\n_Outcome: completed; time: unknown; answered by: unknown; checks: unknown\._/);
-  assert.match(report, /### Q: q5\n\n_Outcome: completed; time: 0\.9s; answered by: unknown; checks: none\._/);
+  assert.match(report, /### Q: q5\n\n_Outcome: completed; time: 0\.9s; answered by: none \(no model wrote it\); checks: none\._/);
 });
 
 test("turns after one that didn't complete are shown as not sent", () => {
