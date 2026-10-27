@@ -62,6 +62,30 @@ wrote the answer, so an engine answer without commentary or a fixed reply (a cla
 A run meant for a blinded pair (#222) takes `--blind`: its three files go to `.dev/eval-runs/research-quality/`, which
 git ignores, so its report can't show the scorer which arm wrote which answer. Its run record says `"blind": true`.
 
+## Blinded pairs (#222)
+
+To compare a change against a baseline without knowing which answer is which, run the questions against both stacks
+on the same frozen data, then pair the two run records:
+
+1. Start each stack from its own checkout and run `run [base URL] --stack-dir <that checkout>` against it, so each run
+   records the stack's own commit and dataset.
+2. `node --experimental-strip-types scripts/research-quality-eval.ts pair <baseline.run.json> <candidate.run.json> [--seed N]`.
+   It refuses two runs whose question-set digest or dataset revision differ. It writes `pairs.md` and a blank
+   `pairs.scores.json` to `docs/eval-runs/research-quality/pairs/<stamp>/`, and the key to
+   `.dev/eval-keys/<stamp>.key.json`, outside the repo. The packet shuffles question order and A/B per question from
+   the seed (random unless given; the key records it). It shows each question, its expectation and N/A rules, the
+   rubric and both answers, never the run, revision or model. An answer with a turn that didn't complete is shown as
+   no answer; its cells start `"n/a"` and labelled `operational_failure`.
+3. Score both answers per criterion in `pairs.scores.json` and add failure labels: `wrong_subject`, `wrong_period`,
+   `unsupported_figure`, `invented_figure`, `weak_conclusion`, `missing_counterpoint`, `unstated_gap`,
+   `operational_failure`.
+4. `node --experimental-strip-types scripts/research-quality-eval.ts reveal <pairs dir> <key file> [--incomplete]`. It
+   refuses while an applicable cell is `null`; `--incomplete` reveals anyway and names the review incomplete. It
+   writes `reveal.md`: the mapping, totals per criterion for each arm, per-question deltas, what wasn't compared,
+   unscored cells, each turn's outcome and model, and failure-label counts. A pair whose arms were answered by
+   different models is confounded: its deltas are shown apart and left out of the attributed delta. There is no single
+   overall score.
+
 ## Held-out traps (#221)
 
 The owner-scored questions are the usefulness baseline, not a machine check. Beside them,
