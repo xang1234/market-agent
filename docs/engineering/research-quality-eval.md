@@ -34,8 +34,9 @@ the owner scores by hand, so answer quality can be compared from one run to the 
      Each turn shows its outcome (`completed`, `timeout`, `provider_error`, `missing_answer` or `skipped`), elapsed
      time, answering model, and assertions accepted and rejected by check. Open the thread for charts and sources.
    - `<run>.scores.json`, the scores. Every score starts as `null`; not-applicable criteria are already set to `"n/a"`.
-   - `<run>.run.json`, the run record: provenance plus every turn's answer blocks and facts, for pairing two runs
-     (below). It holds no environment values, headers, prompts or provider payloads.
+   - `<run>.run.json`, the run record: provenance, the questions the run planned and whether it asked them all
+     (`complete`), plus every turn's answer blocks and facts, for pairing two runs. It holds no environment values,
+     headers, prompts or provider payloads. A run that stopped early says so at the top of its report.
 3. Score each question 0, 1 or 2 in `<run>.scores.json`, with notes, and commit both files.
 4. Run `node --experimental-strip-types scripts/research-quality-eval.ts summary`. It prints one line per run (total and
    per criterion, leaving out N/A and unscored), so trends show from run to run. It also lists every 0 on
@@ -48,10 +49,16 @@ When fallbacks are configured, or unknown because the settings couldn't be read,
 turn shows the model chat recorded as answering it (#183). The report is saved after each question, so an error late in
 a run keeps the answers before it.
 
-Provenance (#220) is the evaluated stack's commit and whether its tracked files differ from it, a digest of the
-questions and rubric, and a digest of the frozen dataset's inputs (`DATASET_INPUTS` in the runner: what
-`npm run seed:golden` loads). When the stack runs from another checkout than the runner, pass `--stack-dir <checkout>`
-(or `EVAL_STACK_DIR`) so the commit and dataset are read from there. A field an older run didn't record shows `unknown`.
+Provenance (#220) is the evaluated stack's commit and whether its tracked files differ from it, the runner's own
+commit, a digest of the questions and rubric, and a digest of the frozen dataset: its inputs (`DATASET_INPUTS` in the
+runner: what `npm run seed:golden` loads) and the `FROZEN_AS_OF` cutoff in `services/chat/src/ytd-hydration.ts`. When
+the stack runs from another checkout than the runner, pass `--stack-dir <checkout>` (or `EVAL_STACK_DIR`) so the commit,
+dataset and turn traces (`CHAT_TRACE_DIR`, default `.dev/traces`) are read from there. The run refuses a directory that
+isn't the top of a git checkout or lacks a dataset input. A field an older run didn't record shows `unknown`, and so
+does a completed turn whose answering model chat didn't record.
+
+A run meant for a blinded pair (#222) takes `--blind`: its three files go to `.dev/eval-runs/research-quality/`, which
+git ignores, so its report can't show the scorer which arm wrote which answer.
 
 ## Held-out traps (#221)
 
