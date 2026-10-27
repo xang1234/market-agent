@@ -6,7 +6,7 @@
 //   node --experimental-strip-types scripts/research-quality-pairs.ts pair <baseline.run.json> <candidate.run.json> [--seed N]
 //   (score: fill in pairs/<pairing>/pairs.scores.json)
 //   node --experimental-strip-types scripts/research-quality-pairs.ts reveal <pairs dir> [key file] [--incomplete]
-import { constants, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { constants, copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { createHash, randomInt } from "node:crypto";
 import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -407,7 +407,7 @@ const isArrayOf = (value: unknown, valid: (item: unknown) => boolean) => Array.i
 
 export const readKey = (path: string) => readJson(path, "a pairing key", (key) =>
   typeof key.pairing === "string" && typeof key.seed === "number" && ARMS.every((arm) => isArmRun(key[arm]))
-  && isObject(key.missing) && Object.values(key.missing).every((arms) => isArrayOf(arms, isArm))
+  && isObject(key.missing) && Object.values(key.missing).every((arms) => Array.isArray(arms) && arms.length >= 1 && arms.every(isArm) && new Set(arms).size === arms.length)
   && isObject(key.pairs) && Object.values(key.pairs).every((pair) => isObject(pair) && isArm(pair.A) && isArm(pair.B) && pair.A !== pair.B
     && typeof pair.confounded === "boolean" && isArrayOf(pair.notApplicable, (id) => typeof id === "string")
     && isObject(pair.turns) && ARMS.every((arm) => isArrayOf((pair.turns as Record<string, unknown>)[arm], isTurnFacts)))) as PairKey;
@@ -423,11 +423,19 @@ const DIGEST_LINE = /^Scores digest: `([0-9a-f]{64})`\.$/u;
 export function writePairing(dir: string, keyFile: string, pairing: string, { packet, scores, key }: { packet: string; scores: PairScores; key: PairKey }): void {
   mkdirSync(dir, { recursive: true });
   mkdirSync(dirname(keyFile), { recursive: true });
+  // The key goes last and nothing of this pairing stays on a failure, so no key points at another packet.
+  const written: string[] = [];
   try {
-    writeFileSync(keyFile, `${JSON.stringify(key, null, 2)}\n`, { flag: "wx" });
-    writeFileSync(join(dir, "pairs.scores.json"), `${JSON.stringify(scores, null, 2)}\n`, { flag: "wx" });
-    writeFileSync(join(dir, "pairs.md"), packet, { flag: "wx" });
+    for (const [path, text] of [
+      [join(dir, "pairs.md"), packet],
+      [join(dir, "pairs.scores.json"), `${JSON.stringify(scores, null, 2)}\n`],
+      [keyFile, `${JSON.stringify(key, null, 2)}\n`],
+    ] as const) {
+      writeFileSync(path, text, { flag: "wx" });
+      written.push(path);
+    }
   } catch (error) {
+    for (const path of written) unlinkSync(path);
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     throw new Refusal(`a pairing with id ${pairing} already exists; wait a second and retry`);
   }
@@ -451,37 +459,47 @@ function keepRunCopies(dir: string, key: PairKey): void {
   ]);
   for (const [from, to] of copies) {
     if (!existsSync(to) && !existsSync(from)) throw new Refusal(`${from} is gone, so the reveal can't keep a copy of it beside the scores`);
-  }
-  for (const [from, to] of copies) {
-    if (!existsSync(to)) copyFileSync(from, to, constants.COPYFILE_EXCL);
-    else if (existsSync(from) && !readFileSync(from).equals(readFileSync(to))) {
+    if (existsSync(to) && existsSync(from) && !readFileSync(from).equals(readFileSync(to))) {
       throw new Refusal(`${to} differs from ${from}, the run it copies; put the run's copy back`);
     }
   }
+  for (const [from, to] of copies) {
+    if (!existsSync(to)) copyFileSync(from, to, constants.COPYFILE_EXCL);
+  }
 }
 
-// reveal.md is written once, after the run copies. Once it exists the mapping has been
-// seen, so scores changed after it aren't blind: the reveal is refused rather than
-// rewritten, a complete one after an --incomplete one included. Unchanged scores point at
-// it and restore any run copy an interrupted reveal didn't make.
+// A reveal locks its scores in .reveal-scores-digest before it copies an arm's run, since
+// the copies already tell the arms apart; reveal.md, written once, is the last write. Once
+// either exists, scores changed since aren't blind, so the reveal is refused rather than
+// redone, a complete one after an --incomplete one included. Unchanged scores point at
+// reveal.md, or finish the reveal an interruption stopped, restoring any missing run copy.
 export function revealPair(dir: string, keyFile: string | undefined, incomplete: boolean): string {
+  const folder = basename(resolve(dir));
   const scoresFile = join(dir, "pairs.scores.json");
   const scores = readScores(scoresFile);
-  const key = readKey(keyFile ?? keyFileFor(basename(resolve(dir))));
+  const key = readKey(keyFile ?? keyFileFor(folder));
+  if (key.pairing !== scores.pairing || key.pairing !== folder) {
+    throw new Refusal(`this key is pairing ${key.pairing}'s, but ${scoresFile} is pairing ${scores.pairing}'s in folder ${folder}; reveal a packet with its own key`);
+  }
   const digest = sha256(JSON.stringify(scores));
   const out = join(dir, "reveal.md");
-  if (existsSync(out)) {
+  const lock = join(dir, ".reveal-scores-digest");
+  const revealed = existsSync(out);
+  if (revealed) {
     // Only the last line is the reveal's own; a note above it could look like a digest.
-    const revealed = DIGEST_LINE.exec(readFileSync(out, "utf8").trimEnd().split("\n").at(-1) ?? "")?.[1];
-    if (revealed !== digest) {
-      throw new Refusal(`${out} already revealed this pairing, and ${scoresFile} changed since (${revealed ?? "no digest"} then, ${digest} now); scores entered after the reveal aren't blind`);
+    const then = DIGEST_LINE.exec(readFileSync(out, "utf8").trimEnd().split("\n").at(-1) ?? "")?.[1];
+    if (then !== digest) {
+      throw new Refusal(`${out} already revealed this pairing, and ${scoresFile} changed since (${then ?? "no digest"} then, ${digest} now); scores entered after the reveal aren't blind`);
     }
-    keepRunCopies(dir, key);
-    return out;
   }
-  const { report } = reveal(key, scores, incomplete);
+  const locked = existsSync(lock) ? readFileSync(lock, "utf8").trim() : undefined;
+  if (locked !== undefined && locked !== digest) {
+    throw new Refusal(`a reveal of this pairing began with other scores (${lock}: ${locked} then, ${digest} now), so the mapping may have been seen; scores entered after a reveal began aren't blind`);
+  }
+  const report = revealed ? undefined : reveal(key, scores, incomplete).report;
+  if (locked === undefined) writeFileSync(lock, `${digest}\n`, { flag: "wx" });
   keepRunCopies(dir, key);
-  writeFileSync(out, `${report}\nScores digest: \`${digest}\`.\n`, { flag: "wx" });
+  if (report !== undefined) writeFileSync(out, `${report}\nScores digest: \`${digest}\`.\n`, { flag: "wx" });
   return out;
 }
 

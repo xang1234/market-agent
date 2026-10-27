@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -418,6 +418,85 @@ test("a second pairing in the same second is refused in one line, not overwritte
   assert.equal(await readFile(join(at.dir, "pairs.md"), "utf8"), "# p\n");
 });
 
+test("a pairing that collides with a packet or a key already there leaves no file of its own (#222)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "eval-pairing-"));
+  const files = { packet: "# p\n", scores: { pairing: "2026-10-03T000000", pairs: {} }, key: paired().key };
+  const at = { dir: join(root, "pairs", "2026-10-03T000000"), keyFile: join(root, "keys", "2026-10-03T000000.key.json") };
+  await mkdir(at.dir, { recursive: true });
+  await writeFile(join(at.dir, "pairs.md"), "# theirs\n");
+  assert.throws(() => writePairing(at.dir, at.keyFile, "2026-10-03T000000", files), refusal(/^a pairing with id 2026-10-03T000000 already exists/u));
+  assert.deepEqual([existsSync(at.keyFile), existsSync(join(at.dir, "pairs.scores.json"))], [false, false]);
+  assert.equal(await readFile(join(at.dir, "pairs.md"), "utf8"), "# theirs\n");
+
+  await unlink(join(at.dir, "pairs.md"));
+  await writeFile(at.keyFile, "theirs\n");
+  assert.throws(() => writePairing(at.dir, at.keyFile, "2026-10-03T000000", files), refusal(/^a pairing with id 2026-10-03T000000 already exists/u));
+  assert.deepEqual(readdirSync(at.dir), []);
+  assert.equal(await readFile(at.keyFile, "utf8"), "theirs\n");
+});
+
+const filesIn = (dir: string) => Object.fromEntries(readdirSync(dir).sort().map((name) => [name, readFileSync(join(dir, name), "utf8")]));
+
+test("an already-revealed pairing refuses another pairing's key before writing anything (#222)", async () => {
+  const p1 = await pairsOnDisk("2026-10-03T000000");
+  scoreAll(p1.scores);
+  await p1.writeScores(p1.scores);
+  revealPair(p1.dir, p1.keyFile, false);
+  for (const arm of ["baseline", "candidate"]) {
+    await unlink(join(p1.dir, `${arm}.run.json`));
+    await unlink(join(p1.dir, `${arm}.md`));
+  }
+  const before = filesIn(p1.dir);
+  const p2 = await pairsOnDisk("2026-10-04T000000");
+  assert.throws(() => revealPair(p1.dir, p2.keyFile, false), refusal(/^this key is pairing 2026-10-04T000000's, but .*pairs\.scores\.json is pairing 2026-10-03T000000's/u));
+  assert.deepEqual(filesIn(p1.dir), before);
+});
+
+test("a key and scores of one pairing are refused in another pairing's folder (#222)", async () => {
+  const p1 = await pairsOnDisk("2026-10-03T000000");
+  const p2 = await pairsOnDisk("2026-10-04T000000");
+  scoreAll(p2.scores);
+  await p2.writeScores(p2.scores);
+  await writeFile(join(p1.dir, "pairs.scores.json"), JSON.stringify(p2.scores));
+  assert.throws(() => revealPair(p1.dir, p2.keyFile, false), refusal(/in folder 2026-10-03T000000/u));
+  assert.deepEqual(Object.keys(filesIn(p1.dir)), ["pairs.scores.json"]);
+});
+
+test("a reveal that stops after it began locks its scores, so a retry with changed scores is refused (#222)", async () => {
+  const { dir, keyFile, scores, writeScores } = await pairsOnDisk("2026-10-03T000000");
+  scoreAll(scores);
+  await writeScores(scores);
+  await writeFile(join(dir, "candidate.run.json"), '{"arm":"edited"}\n');
+  assert.throws(() => revealPair(dir, keyFile, false), refusal(/candidate\.run\.json differs from/u));
+  assert.equal(existsSync(join(dir, "reveal.md")), false);
+  await unlink(join(dir, "candidate.run.json"));
+
+  scores.pairs["peer-two"]!.A.correct_companies = 0;
+  await writeScores(scores);
+  assert.throws(() => revealPair(dir, keyFile, false), refusal(/^a reveal of this pairing began with other scores \(.*\.reveal-scores-digest: [0-9a-f]{64} then, [0-9a-f]{64} now\)/u));
+  assert.deepEqual(Object.keys(filesIn(dir)), [".reveal-scores-digest", "pairs.scores.json"]);
+});
+
+test("a reveal refused for an unscored cell locks nothing (#222)", async () => {
+  const { dir, keyFile, scores, writeScores } = await pairsOnDisk("2026-10-03T000000");
+  assert.throws(() => revealPair(dir, keyFile, false), refusal(/unscored/u));
+  assert.deepEqual(Object.keys(filesIn(dir)), ["pairs.scores.json"]);
+  scoreAll(scores);
+  await writeScores(scores);
+  assert.equal(revealPair(dir, keyFile, false), join(dir, "reveal.md"));
+});
+
+test("a run copy that differs from its run is refused before any missing copy is made (#222)", async () => {
+  const { dir, keyFile, scores, writeScores } = await pairsOnDisk("2026-10-03T000000");
+  scoreAll(scores);
+  await writeScores(scores);
+  revealPair(dir, keyFile, false);
+  await unlink(join(dir, "baseline.md"));
+  await writeFile(join(dir, "candidate.run.json"), '{"arm":"edited"}\n');
+  assert.throws(() => revealPair(dir, keyFile, false), refusal(/candidate\.run\.json differs from/u));
+  assert.equal(existsSync(join(dir, "baseline.md")), false);
+});
+
 test("a key missing what the reveal reads is refused in one line (#222)", async () => {
   const { dir, keyFile, scores, writeScores } = await pairsOnDisk("2026-10-03T000000");
   scoreAll(scores);
@@ -428,6 +507,8 @@ test("a key missing what the reveal reads is refused in one line (#222)", async 
     { ...key, candidate: { ...key.candidate, provenance: { revision: "r" } } },
     { ...key, pairs: { ...key.pairs, "peer-two": { ...key.pairs["peer-two"]!, turns: { baseline: [{}], candidate: [] } } } },
     { ...key, missing: { "peer-two": "baseline" } },
+    { ...key, missing: { "peer-two": [] } },
+    { ...key, missing: { "peer-two": ["baseline", "baseline"] } },
   ];
   for (const value of broken) {
     await writeFile(keyFile, JSON.stringify(value));
