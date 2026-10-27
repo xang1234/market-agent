@@ -72,14 +72,16 @@ on the same frozen data, then pair the two run records:
    against it, so each run records the stack's own commit and dataset, and its report and run.json go to
    `.dev/eval-runs/research-quality/` (gitignored) where a scorer browsing `docs/` won't see which arm is which.
 2. `node --experimental-strip-types scripts/research-quality-pairs.ts pair <baseline.run.json> <candidate.run.json> [--seed N]`.
-   It refuses two runs whose question-set digest or dataset revision differ, or whose question set isn't the current
-   runner's. The pairing is named by its UTC stamp. It writes `pairs.md` and a blank `pairs.scores.json` to
-   `docs/eval-runs/research-quality/pairs/<pairing>/`, and the key to `.dev/eval-keys/<pairing>.key.json`, gitignored
-   under `.dev/`. The packet shuffles question order and A/B per question from the seed (a whole number below 2^32,
+   It refuses a run not made with `--blind` (its run.json lacks `"blind": true`), and two runs whose question-set
+   digest or dataset revision differ, or whose question set isn't the current runner's. The pairing is named by its
+   UTC stamp, so a second pairing in the same second is refused. It writes `pairs.md` and a blank `pairs.scores.json`
+   to `docs/eval-runs/research-quality/pairs/<pairing>/`, and the key to `.dev/eval-keys/<pairing>.key.json`,
+   gitignored under `.dev/`. The packet shuffles question order and A/B per question from the seed (a whole number below 2^32,
    random unless given; the key records it). It shows each question, its expectation and N/A rules, the rubric and
    both answers, never the run, revision or model. Each cited figure carries a number, and a list after the answer
    says what it points at: the engine result's company, measure, period and value, or the fact's period, unit and
-   cutoff, with each block's source ids. An answer with a turn that didn't complete is shown as no answer and its
+   cutoff. Each block's sources are named S1, S2... per answer in the order they appear, since source ids are minted
+   per stack and would tell the answers apart. An answer with a turn that didn't complete is shown as no answer and its
    cells start `"n/a"`. A question one run never asked (it stopped early) is left out of the packet, which names it.
 3. Score both answers per criterion in `pairs.scores.json` and add failure labels: `wrong_subject`, `wrong_period`,
    `unsupported_figure`, `invented_figure`, `weak_conclusion`, `missing_counterpoint`, `unstated_gap`. The reveal adds
@@ -91,12 +93,14 @@ on the same frozen data, then pair the two run records:
    pairs`, per-question deltas, what wasn't compared, unscored cells, each turn's outcome and model, failure-label
    counts, and each question's labels and notes. Only pairs both arms answered are compared. A compared pair whose arms
    were answered by different models, or by a model chat didn't record, is confounded: its deltas are shown apart and
-   left out of the attributed delta. There is no single overall score. A complete reveal also copies both runs'
-   reports and run.json into the pairs folder.
+   left out of the attributed delta. There is no single overall score. Notes show on their question's line. Before
+   writing `reveal.md`, every reveal, `--incomplete` included, copies both runs' reports and run.json into the pairs
+   folder.
 
-   `reveal.md` ends with a digest of the scores it revealed. Running reveal again with the same scores does nothing;
-   with changed scores it refuses, because scores entered after the mapping was seen aren't blind. That includes a
-   complete reveal after an `--incomplete` one, so reveal incomplete only when the review stops there.
+   `reveal.md` ends with a digest of the scores it revealed. Running reveal again with the same scores copies any run
+   file missing from the pairs folder and refuses a copy that differs from its run; with changed scores it refuses,
+   because scores entered after the mapping was seen aren't blind. That includes a complete reveal after an
+   `--incomplete` one, so reveal incomplete only when the review stops there.
 
 ## Held-out traps (#221)
 
