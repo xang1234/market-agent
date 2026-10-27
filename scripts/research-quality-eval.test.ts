@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,7 +8,12 @@ import test from "node:test";
 import {
   blankScores,
   checkCounts,
+  datasetRevision,
   formatChecks,
+  questionSetDigest,
+  readRunRecord,
+  runProvenance,
+  serializeRun,
   modelForRun,
   turnOutcome,
   answeredBySummary,
@@ -20,6 +26,7 @@ import {
   runStamp,
   summarize,
   threadTraces,
+  type RunRecord,
   type ScoresFile,
 } from "./research-quality-eval.ts";
 import { QUESTIONS, RUBRIC } from "./research-quality-questions.ts";
@@ -336,4 +343,61 @@ test("an accepted assertion's text is marked not shown unless it is an inference
     assertions: { status: "checked" as const, rejected: [], accepted: [{ kind: "analyst_inference", text: "Scale funds research.", evidence: [] }] },
   }] }]);
   assert.match(fallback, /- ✓ analyst_inference \[\] \(text not shown\): Scale funds research\./);
+});
+
+const git = (dir: string, ...args: string[]) =>
+  execFileSync("git", ["-C", dir, "-c", "user.name=eval", "-c", "user.email=eval@example.com", ...args], { encoding: "utf8" }).trim();
+
+test("provenance names the evaluated stack's commit and dataset, not the runner's (#220)", async () => {
+  const stack = await mkdtemp(join(tmpdir(), "eval-stack-"));
+  git(stack, "init", "-q");
+  await mkdir(join(stack, "db", "seed"), { recursive: true });
+  await writeFile(join(stack, "db", "seed", "metrics.sql"), "select 1;\n");
+  git(stack, "add", ".");
+  git(stack, "commit", "-q", "-m", "seed");
+  const head = git(stack, "rev-parse", "HEAD");
+
+  const provenance = runProvenance(stack);
+  assert.equal(provenance.revision, head);
+  assert.notEqual(provenance.revision, git(process.cwd(), "rev-parse", "HEAD"));
+  assert.equal(provenance.dirty, false);
+  assert.equal(provenance.datasetRevision, "f51f3c9ea0560d1d00244bee96120e3dfd8ae54680d021c9062419ae4e04b53f");
+  assert.equal(provenance.questionSetDigest, questionSetDigest());
+
+  // An untracked file leaves the tree clean; a changed seed is dirty and a new dataset.
+  await writeFile(join(stack, "notes.txt"), "");
+  assert.equal(runProvenance(stack).dirty, false);
+  await writeFile(join(stack, "db", "seed", "metrics.sql"), "select 2;\n");
+  assert.equal(runProvenance(stack).dirty, true);
+  assert.notEqual(datasetRevision(stack), provenance.datasetRevision);
+
+  const bare = await mkdtemp(join(tmpdir(), "eval-no-git-"));
+  assert.throws(() => runProvenance(bare), /not a git repository/);
+});
+
+test("the question-set digest is stable and moves when a question or the rubric changes (#220)", () => {
+  const question = { id: "q", kind: "k", turns: [{ message: "m" }], expect: "e" };
+  const criterion = { id: "correct_companies" as const, question: "Q", anchors: ["a", "b", "c"] as const };
+  assert.equal(questionSetDigest([question], [criterion]), "8b995fb4b3fa2fe1a80b86bf593dff847dffbcd1481f9627147cd1cc6f691e42");
+  assert.notEqual(questionSetDigest([{ ...question, expect: "e2" }], [criterion]), "8b995fb4b3fa2fe1a80b86bf593dff847dffbcd1481f9627147cd1cc6f691e42");
+  assert.notEqual(questionSetDigest([question], [{ ...criterion, question: "Q2" }]), "8b995fb4b3fa2fe1a80b86bf593dff847dffbcd1481f9627147cd1cc6f691e42");
+  assert.equal(questionSetDigest(), questionSetDigest(QUESTIONS, RUBRIC));
+});
+
+test("a run record round-trips through run.json, and the report heads with its provenance (#220)", async () => {
+  const [first] = QUESTIONS;
+  const record: RunRecord = {
+    run: "2026-10-27T100000",
+    model: "a/m",
+    provenance: { revision: "0123456789abcdef0123", dirty: true, questionSetDigest: "aaaaaaaaaaaaaaaa", datasetRevision: "bbbbbbbbbbbbbbbb" },
+    questions: [{ question: first, threadId: "t1", turns: [{ message: "q1", outcome: "completed", blocks: [{ kind: "rich_text", segments: [] }], elapsedMs: 1200, answeredBy: "a/m", usage: null, assertions: null, checks: null }] }],
+  };
+  const path = join(await mkdtemp(join(tmpdir(), "eval-run-")), "r.run.json");
+  await writeFile(path, serializeRun(record));
+  assert.deepEqual(readRunRecord(path), record);
+  assert.deepEqual(Object.keys(JSON.parse(serializeRun(record))), ["run", "model", "provenance", "questions"]);
+
+  const report = renderReport(record.run, record.model, "http://app", record.questions, record.provenance);
+  assert.match(report, /^# Research-quality eval: 2026-10-27T100000\n\nStack revision: `0123456789ab` with uncommitted changes\. Question set: `aaaaaaaaaaaa`\. Dataset: `bbbbbbbbbbbb`\./);
+  assert.match(renderReport("r", "m", "http://app", []), /Stack revision: unknown\. Question set: unknown\. Dataset: unknown\./);
 });

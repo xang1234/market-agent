@@ -3,16 +3,19 @@
 // data), then writes a dated report for the owner to score and a scores file beside it.
 //
 //   DEV_PROFILE=chat DEV_MODE=analyst ./scripts/dev-shell.sh up
-//   node --experimental-strip-types scripts/research-quality-eval.ts run [base URL]
+//   node --experimental-strip-types scripts/research-quality-eval.ts run [base URL] [--stack-dir <checkout>]
 //   (score: fill in <run>.scores.json)
 //   node --experimental-strip-types scripts/research-quality-eval.ts summary
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { parseArgs } from "node:util";
 
 import type { Rejection } from "../services/chat/src/assertions.ts";
 import { api, runTurn } from "../services/chat/scripts/golden-live-check.ts";
-import { QUESTIONS, RUBRIC, type CriterionId, type EvalQuestion } from "./research-quality-questions.ts";
+import { QUESTIONS, RUBRIC, type Criterion, type CriterionId, type EvalQuestion } from "./research-quality-questions.ts";
 
 export const RUNS_DIR = fileURLToPath(new URL("../docs/eval-runs/research-quality/", import.meta.url));
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -87,6 +90,54 @@ type AssertionReport = {
   // The answer was written from the accepted assertions; otherwise it is the fallback sentence.
   rendered?: boolean;
 };
+
+// --- provenance ------------------------------------------------------------------
+
+// What a run was measured against: the evaluated stack's checkout (its commit, whether
+// tracked files differ from it, and its frozen dataset) and the runner's question set.
+export type RunProvenance = { revision: string; dirty: boolean; questionSetDigest: string; datasetRevision: string };
+
+// The machine-readable run, <run>.run.json: the answers and their per-turn facts. It
+// holds no environment values, headers, prompts or provider payloads.
+export type RunRecord = { run: string; model: string; provenance: RunProvenance; questions: AnsweredQuestion[] };
+
+const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
+
+export const questionSetDigest = (questions: ReadonlyArray<EvalQuestion> = QUESTIONS, rubric: ReadonlyArray<Criterion> = RUBRIC) =>
+  sha256(JSON.stringify({ questions, rubric }));
+
+// What `npm run seed:golden` loads (services/chat/test/golden/dataset.ts seedGoldenDataset):
+// the dataset module, the seed SQL it runs, and the issuer ids it imports.
+// ponytail: FROZEN_AS_OF lives in services/chat/src/ytd-hydration.ts beside unrelated
+// code, so a cutoff change alone doesn't move this; hash that file too if it ever moves.
+export const DATASET_INPUTS = [
+  "services/chat/test/golden/dataset.ts",
+  "db/seed/metrics.sql",
+  "db/seed/sources.sql",
+  "services/shared/src/golden-issuers.ts",
+] as const;
+
+export function datasetRevision(stackDir: string): string {
+  return sha256(DATASET_INPUTS.map((path) => {
+    const file = join(stackDir, path);
+    return `${path}\0${existsSync(file) ? readFileSync(file, "utf8") : "(missing)"}`;
+  }).join("\0"));
+}
+
+// Throws outside a git checkout, so a run that can't name its revision sends nothing.
+export function runProvenance(stackDir: string): RunProvenance {
+  const git = (...args: string[]) => execFileSync("git", ["-C", stackDir, ...args], { encoding: "utf8" }).trim();
+  return {
+    revision: git("rev-parse", "HEAD"),
+    // Untracked files are left out: build output and caches would mark every checkout dirty.
+    dirty: git("status", "--porcelain", "--untracked-files=no") !== "",
+    questionSetDigest: questionSetDigest(),
+    datasetRevision: datasetRevision(stackDir),
+  };
+}
+
+export const serializeRun = (record: RunRecord) => `${JSON.stringify(record, null, 2)}\n`;
+export const readRunRecord = (path: string) => JSON.parse(readFileSync(path, "utf8")) as RunRecord;
 
 // --- report ----------------------------------------------------------------------
 
@@ -194,9 +245,13 @@ export function renderBlock(block: Block): string {
   return `*[${block.kind}] ${block.title ?? ""}*${shown.length > 0 ? `: ${shown.join(", ")}` : ""}`;
 }
 
-export function renderReport(run: string, model: string, base: string, answered: ReadonlyArray<AnsweredQuestion>): string {
+export function renderReport(run: string, model: string, base: string, answered: ReadonlyArray<AnsweredQuestion>, provenance?: RunProvenance): string {
+  const short = (digest: string | undefined) => (digest === undefined ? "unknown" : `\`${digest.slice(0, 12)}\``);
+  const tree = provenance?.dirty === undefined ? "" : provenance.dirty ? " with uncommitted changes" : ", clean";
   const lines = [
     `# Research-quality eval: ${run}`,
+    "",
+    `Stack revision: ${short(provenance?.revision)}${tree}. Question set: ${short(provenance?.questionSetDigest)}. Dataset: ${short(provenance?.datasetRevision)}.`,
     "",
     // Which models actually answered, as chat recorded each turn (#183).
     `Answered by: ${answeredBySummary(answered)}.`,
@@ -393,7 +448,8 @@ export function modelForRun(primaryModel: string | null | undefined, override: s
 // never overwrite another.
 export const runStamp = (date: Date) => date.toISOString().slice(0, 19).replace(/[:]/gu, "");
 
-async function run(base: string): Promise<void> {
+async function run(base: string, stackDir: string): Promise<void> {
+  const provenance = runProvenance(stackDir);
   type Settings = { primaryModel?: string | null; fallbackModels?: string[] };
   const settings = await api<{ settings?: Settings }>(base, "GET", "/v1/dev/llm-settings")
     .then((read) => ({ primaryModel: read.settings?.primaryModel, fallbackModels: read.settings?.fallbackModels ?? [], why: "no primary model is set" }))
@@ -409,9 +465,14 @@ async function run(base: string): Promise<void> {
   mkdirSync(RUNS_DIR, { recursive: true });
   const report = join(RUNS_DIR, `${stamp}.md`);
   const scores = join(RUNS_DIR, `${stamp}.scores.json`);
+  const record = join(RUNS_DIR, `${stamp}.run.json`);
+  const save = (flag?: "wx") => {
+    writeFileSync(report, renderReport(stamp, model, base, answered, provenance), { flag });
+    writeFileSync(record, serializeRun({ run: stamp, model, provenance, questions: answered }), { flag });
+  };
   writeFileSync(scores, `${JSON.stringify(blankScores(stamp, model), null, 2)}\n`, { flag: "wx" });
-  writeFileSync(report, renderReport(stamp, model, base, answered), { flag: "wx" });
-  console.log(`report: ${report}\nscore:  ${scores}\n`);
+  save("wx");
+  console.log(`report: ${report}\nscore:  ${scores}\nrun:    ${record}\n`);
   for (const question of QUESTIONS) {
     const { thread_id: threadId } = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: `Eval: ${question.id}` });
     const turns: AnsweredQuestion["turns"] = [];
@@ -451,7 +512,7 @@ async function run(base: string): Promise<void> {
       answersSoFar = answers.length;
     }
     answered.push({ question, threadId, turns, traces: threadTraces(TRACE_DIR, threadId, ROOT) });
-    writeFileSync(report, renderReport(stamp, model, base, answered));
+    save();
   }
   console.log(`\ndone: ${answered.length} questions in ${report}`);
 }
@@ -493,11 +554,13 @@ function summary(): void {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  const [command, base] = process.argv.slice(2);
-  if (command === "run") await run(base ?? process.env.EVAL_BASE_URL ?? "http://127.0.0.1:5173");
+  const { positionals: [command, base], values } = parseArgs({ allowPositionals: true, options: { "stack-dir": { type: "string" } } });
+  // The checkout the evaluated stack runs from, which may not be the runner's (#222).
+  const stackDir = resolve(values["stack-dir"] ?? process.env.EVAL_STACK_DIR ?? ROOT);
+  if (command === "run") await run(base ?? process.env.EVAL_BASE_URL ?? "http://127.0.0.1:5173", stackDir);
   else if (command === "summary") summary();
   else {
-    console.error("usage: research-quality-eval.ts run [base URL] | summary");
+    console.error("usage: research-quality-eval.ts run [base URL] [--stack-dir <checkout>] | summary");
     process.exitCode = 2;
   }
 }
