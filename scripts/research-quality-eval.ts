@@ -6,6 +6,7 @@
 //   node --experimental-strip-types scripts/research-quality-eval.ts run [base URL] [--stack-dir <checkout>] [--blind]
 //   (score: fill in <run>.scores.json)
 //   node --experimental-strip-types scripts/research-quality-eval.ts summary
+//   (pair two runs blind: scripts/research-quality-pairs.ts)
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
@@ -38,7 +39,7 @@ export async function runCli(main: () => void | Promise<void>): Promise<void> {
   }
 }
 
-type Block = Record<string, unknown> & { kind?: string; title?: string };
+export type Block = Record<string, unknown> & { kind?: string; title?: string };
 type Message = { role: string; blocks: Block[]; answered_by?: string | null };
 type AnswerUsage = { input_tokens: number; output_tokens: number; reasoning_tokens?: number };
 export type Score = 0 | 1 | 2 | "n/a" | null;
@@ -201,7 +202,7 @@ type EnginePresentation =
   | { kind: "scalar" | "predicate" | "gap"; result_id: string }
   | { kind: "table"; caption: string; columns: Array<{ measure_label_id: string; period_label_id: string | null }>; rows: Array<{ subject_label_id: string; cells: Array<string | null> }> }
   | { kind: "series"; subject_label_id: string; measure_label_id: string; points: Array<{ period_label_id: string; result_id: string }> };
-type EngineContent = {
+export type EngineContent = {
   presentation_version: string;
   coverage: { state: string; requested: number; verified: number };
   labels: Record<string, { text: string }>;
@@ -249,12 +250,18 @@ function renderEngineAnswer(content: EngineContent): string {
   return lines.join("\n");
 }
 
+// A cited figure in prose (spec/finance_research_block_schema.json RefSegment).
+export type RefSegment = { type: "ref"; ref_kind: string; ref_id: string; format?: string; period?: string };
+
 // ponytail: prose in full, tables as tables, any other block as its title and figures;
-// charts and sources are one click away on the thread link.
-export function renderBlock(block: Block): string {
+// charts and sources are one click away on the thread link. cite, when given, marks each
+// cited figure (a blinded packet's citation alias).
+export function renderBlock(block: Block, cite?: (segment: RefSegment, block: Block) => string): string {
   if (block.kind === "rich_text") {
     const segments = (block.segments ?? []) as Array<{ type: string; text?: string; format?: string }>;
-    const text = segments.map((s) => (s.type === "text" ? s.text ?? "" : s.type === "ref" ? `**${s.format ?? ""}**` : `[${s.type} segment not shown]`)).join("");
+    const text = segments.map((s) => (s.type === "text" ? s.text ?? ""
+      : s.type === "ref" ? `**${s.format ?? ""}**${cite?.(s as RefSegment, block) ?? ""}`
+      : `[${s.type} segment not shown]`)).join("");
     return block.analyst_commentary === true ? `_Analyst commentary:_ ${text}` : text;
   }
   if (block.kind === "financial_answer") return renderEngineAnswer(block.financial as EngineContent);
@@ -345,7 +352,7 @@ function byCheck(rejected: ReadonlyArray<Rejection>): string {
 
 export const formatChecks = ({ accepted, rejected }: AssertionReport) => `${accepted.length} accepted, ${rejected.length} rejected${byCheck(rejected)}`;
 
-const answeredByShown = (turn: AnsweredTurn) =>
+export const answeredByShown = (turn: Pick<AnsweredTurn, "outcome" | "answeredBy">) =>
   turn.outcome !== "completed" ? "none"
   : turn.answeredBy === undefined ? "unknown"
   : turn.answeredBy === null ? "none (no model wrote it)"
@@ -427,6 +434,21 @@ export function blankScores(run: string, model: string): ScoresFile {
 
 // --- summary ---------------------------------------------------------------------
 
+// A hand-edited cell, checked: its score, null when unscored, or undefined when it
+// doesn't apply (notApplicable names why). "n/a" belongs exactly where it doesn't apply.
+export function readCell(where: string, score: unknown, notApplicable: string | null): 0 | 1 | 2 | null | undefined {
+  if (notApplicable !== null) {
+    if (score !== undefined && score !== null && score !== "n/a") {
+      throw new Refusal(`${where} is ${JSON.stringify(score)}, but ${notApplicable}; leave it "n/a"`);
+    }
+    return undefined;
+  }
+  if (score === "n/a") throw new Refusal(`${where} is "n/a", but it applies to this question; score it 0, 1 or 2`);
+  if (score === null || score === undefined) return null;
+  if (score !== 0 && score !== 1 && score !== 2) throw new Refusal(`${where} is ${JSON.stringify(score)}; use 0, 1, 2 or null`);
+  return score;
+}
+
 // One line per run, so trends show run to run. Scores are hand-edited, so the file is
 // checked against the question set before anything is totalled, and every mistake is an
 // error naming where it is: an unknown question, a score other than 0, 1, 2 or null
@@ -450,21 +472,11 @@ export function summarize(files: ReadonlyArray<ScoresFile>): string {
       const questionId = question.id;
       const scores = file.scores[questionId];
       RUBRIC.forEach((criterion, i) => {
-        const score = scores?.[criterion.id];
-        const where = `${file.run}: ${questionId}.${criterion.id}`;
-        if (question.notApplicable?.includes(criterion.id)) {
-          if (score !== undefined && score !== null && score !== "n/a") {
-            throw new Refusal(`${where} is ${JSON.stringify(score)}, but this question declares it N/A; leave it "n/a"`);
-          }
-          return;
-        }
-        if (score === "n/a") throw new Refusal(`${where} is "n/a", but it applies to this question; score it 0, 1 or 2`);
-        if (score === null || score === undefined) {
+        const score = readCell(`${file.run}: ${questionId}.${criterion.id}`, scores?.[criterion.id], question.notApplicable?.includes(criterion.id) ? "this question declares it N/A" : null);
+        if (score === undefined) return;
+        if (score === null) {
           unscored += 1;
           return;
-        }
-        if (score !== 0 && score !== 1 && score !== 2) {
-          throw new Refusal(`${where} is ${JSON.stringify(score)}; use 0, 1, 2 or null`);
         }
         total += score;
         max += 2;

@@ -62,6 +62,51 @@ wrote the answer, so an engine answer without commentary or a fixed reply (a cla
 A run meant for a blinded pair (#222) takes `--blind`: its three files go to `.dev/eval-runs/research-quality/`, which
 git ignores, so its report can't show the scorer which arm wrote which answer. Its run record says `"blind": true`.
 
+## Blinded pairs (#222)
+
+To compare a change against a baseline without knowing which answer is which, run the questions against both stacks
+on the same frozen data, then pair the two run records:
+
+1. Start each stack from its own checkout and run
+   `node --experimental-strip-types scripts/research-quality-eval.ts run [base URL] --stack-dir <that checkout> --blind`
+   against it, so each run records the stack's own commit and dataset, and its report and run.json go to
+   `.dev/eval-runs/research-quality/` (gitignored) where a scorer browsing `docs/` won't see which arm is which.
+2. `node --experimental-strip-types scripts/research-quality-pairs.ts pair <baseline.run.json> <candidate.run.json> [--seed N]`.
+   It refuses a run not made with `--blind` (its run.json lacks `"blind": true`), and two runs whose question-set
+   digest or dataset revision differ, or whose question set isn't the current runner's. The pairing is named by its
+   UTC stamp, so a second pairing in the same second is refused. It writes `pairs.md` and a blank `pairs.scores.json`
+   to `docs/eval-runs/research-quality/pairs/<pairing>/`, and the key to `.dev/eval-keys/<pairing>.key.json`,
+   gitignored under `.dev/`. The packet shuffles question order and A/B per question from the seed (a whole number below 2^32,
+   random unless given; the key records it). It shows each question, its expectation and N/A rules, the rubric and
+   both answers, never the run, revision or model. Each cited figure carries a number, and a list after the answer
+   says what it points at: the engine result's company, measure, period and value, or the fact's period, unit and
+   cutoff. Each block's sources are named S1, S2... per answer in the order they appear, since source ids are minted
+   per stack and would tell the answers apart. An answer with a turn that didn't complete is shown as no answer and its
+   cells start `"n/a"`. A question one run never asked (it stopped early) is left out of the packet, which names it.
+3. Score both answers per criterion in `pairs.scores.json` and add failure labels: `wrong_subject`, `wrong_period`,
+   `unsupported_figure`, `invented_figure`, `weak_conclusion`, `missing_counterpoint`, `unstated_gap`. The reveal adds
+   `operational_failure` wherever an arm gave no answer.
+4. `node --experimental-strip-types scripts/research-quality-pairs.ts reveal <pairs dir> [key file] [--incomplete]`. The
+   key defaults to the one named by the pairs folder, and a key or scores from another pairing, or from another
+   pairing's folder, are refused before anything is written. It refuses while an
+   applicable cell is `null`; `--incomplete` reveals anyway and names the review incomplete. It writes `reveal.md`
+   once: the mapping, each arm's totals per criterion over its own scored cells, per-criterion deltas as `+N over K
+   pairs`, per-question deltas, what wasn't compared, unscored cells, each turn's outcome and model, failure-label
+   counts, and each question's labels and notes. Only pairs both arms answered are compared. A compared pair is
+   confounded when a turn names a different model in each arm, or an arm's record lacks the field: its deltas are shown
+   apart and left out of the attributed delta. A turn no model wrote (chat omits `answered_by` for an engine answer
+   without commentary or a fixed reply) confounds nothing, since a model against no model is the change measured. There is no single overall score. Notes show on their question's line. Before
+   writing `reveal.md`, every reveal, `--incomplete` included, copies both runs' reports and run.json into the pairs
+   folder.
+
+   Those copies already tell the arms apart, so before the first one the reveal writes a digest of the scores to
+   `.reveal-scores-digest` in the pairs folder, and `reveal.md` ends with the same digest. Commit both. Running reveal
+   again with the same scores finishes a reveal that stopped partway, copies any run file missing from the pairs
+   folder, and refuses a copy that differs from its run, before copying anything. With changed scores it refuses,
+   whether or not `reveal.md` was written, because scores entered after the mapping may have been seen aren't blind.
+   That includes a complete reveal after an `--incomplete` one, so reveal incomplete only when the review stops there.
+   A reveal refused for an unscored cell locks nothing.
+
 ## Held-out traps (#221)
 
 The owner-scored questions are the usefulness baseline, not a machine check. Beside them,
