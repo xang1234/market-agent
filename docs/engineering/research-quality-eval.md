@@ -26,12 +26,17 @@ the owner scores by hand, so answer quality can be compared from one run to the 
 
 1. Start analyst mode (a live model on the frozen data; every model call is billed to your keys):
    `DEV_PROFILE=chat DEV_MODE=analyst ./scripts/dev-shell.sh up`.
-2. Run the questions: `node --experimental-strip-types scripts/research-quality-eval.ts run [base URL]`. It writes two
+2. Run the questions: `node --experimental-strip-types scripts/research-quality-eval.ts run [base URL]`. It writes three
    files to `docs/eval-runs/research-quality/`, named by the run's UTC time:
-   - `<run>.md`, the report. For each question it shows the expectation, every turn's answer and a link to the thread.
-     Prose is shown in full with cited figures in bold, comparison tables as tables, and other blocks by their title and
-     figures. Open the thread for charts and sources.
+   - `<run>.md`, the report. It opens with the run's provenance. For each question it shows the expectation, every
+     turn's answer and a link to the thread. Prose is shown in full with cited figures in bold, the engine's answer as
+     its labelled results, gaps with their reason, tables and series, and other blocks by their title and figures.
+     Each turn shows its outcome (`completed`, `timeout`, `provider_error`, `missing_answer` or `skipped`), elapsed
+     time, answering model, and assertions accepted and rejected by check. Open the thread for charts and sources.
    - `<run>.scores.json`, the scores. Every score starts as `null`; not-applicable criteria are already set to `"n/a"`.
+   - `<run>.run.json`, the run record: provenance, the questions the run planned and whether it asked them all
+     (`complete`), plus every turn's answer blocks and facts, for pairing two runs. It holds no environment values,
+     headers, prompts or provider payloads. A run that stopped early says so at the top of its report.
 3. Score each question 0, 1 or 2 in `<run>.scores.json`, with notes, and commit both files.
 4. Run `node --experimental-strip-types scripts/research-quality-eval.ts summary`. It prints one line per run (total and
    per criterion, leaving out N/A and unscored), so trends show from run to run. It also lists every 0 on
@@ -40,9 +45,22 @@ the owner scores by hand, so answer quality can be compared from one run to the 
 The first scored run is the baseline. Each run records the primary model from the LLM settings, since a model change
 alone can move scores. If the settings can't be read, the run stops before sending anything; set
 `EVAL_MODEL=<channel/model>` to name the model yourself (it only names the run; the app still falls back as configured).
-When fallbacks are configured, or unknown because the settings couldn't be read, the run is labelled with them and the
-report warns, because chat doesn't yet record which model answered each turn (#183). The report is saved after each
-question, so an error late in a run keeps the answers before it.
+When fallbacks are configured, or unknown because the settings couldn't be read, the run is labelled with them; each
+turn shows the model chat recorded as answering it (#183). The report is saved after each question, so an error late in
+a run keeps the answers before it.
+
+Provenance (#220) is the evaluated stack's commit and whether its tracked files differ from it, the runner's own
+commit, a digest of the questions and rubric, and a digest of the frozen dataset: its inputs (`DATASET_INPUTS` in the
+runner: what `npm run seed:golden` loads) and the `FROZEN_AS_OF` cutoff in `services/chat/src/ytd-hydration.ts`. When
+the stack runs from another checkout than the runner, pass `--stack-dir <checkout>` (or `EVAL_STACK_DIR`) so the commit,
+dataset and turn traces (`CHAT_TRACE_DIR`, default `.dev/traces`) are read from there. The run refuses a directory that
+isn't the top of a git checkout or lacks a dataset input. A field an older run didn't record shows `unknown`. A
+completed turn with no answering model shows `none (no model wrote it)`: chat records `answered_by` only when a model
+wrote the answer, so an engine answer without commentary or a fixed reply (a clarification, a segment gap) has none
+(`services/chat/src/messages.ts`).
+
+A run meant for a blinded pair (#222) takes `--blind`: its three files go to `.dev/eval-runs/research-quality/`, which
+git ignores, so its report can't show the scorer which arm wrote which answer. Its run record says `"blind": true`.
 
 ## Held-out traps (#221)
 
