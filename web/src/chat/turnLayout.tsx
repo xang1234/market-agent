@@ -8,8 +8,8 @@ import { isWideBlock, PROSE_COLUMN_CLASS, BREAKOUT_COLUMN_CLASS } from './blockC
 // keeps the two paths pixel-identical, so the turn doesn't visually jump at the
 // seal moment, and the width/card styling can't drift between them.
 
-// Outer thread column — left-aligned, wide enough to host breakout data blocks.
-export const THREAD_COLUMN_CLASS = 'w-full max-w-[960px]'
+// Outer thread column, centred in the canvas and wide enough to host breakout data blocks.
+export const THREAD_COLUMN_CLASS = 'mx-auto w-full max-w-[960px]'
 
 /** Wraps a block in the column width appropriate for its kind. */
 export function BlockColumn({
