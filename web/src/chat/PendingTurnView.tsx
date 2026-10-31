@@ -31,7 +31,7 @@ export function PendingTurnView({ turn, messages, onRetry, onReconnect, onReload
     case 'persisting':
       return (
         <div data-testid="pending-turn" className="flex flex-col gap-2 py-2">
-          <OptimisticUserBubble text={turn.turn.text} />
+          <OptimisticUserBubble text={turn.turn.text} askedRun={turn.turn.runId} />
           <p className="text-sm text-muted">Starting…</p>
         </div>
       )
@@ -137,9 +137,11 @@ function TurnNotice({ message, action, onAction }: { message: string; action: st
   )
 }
 
-function OptimisticUserBubble({ text }: { text: string }): ReactElement {
+// `askedRun` marks a question being sent now, each send its own run, so the
+// thread can pin it to the top; a question that failed to send has none.
+function OptimisticUserBubble({ text, askedRun }: { text: string; askedRun?: string }): ReactElement {
   return (
-    <div data-role="pending-user" className="flex flex-col items-end">
+    <div data-role="pending-user" data-asked-run={askedRun} className="flex flex-col items-end">
       <div className={USER_BUBBLE_CLASS}>
         <p className="whitespace-pre-wrap text-sm">{text}</p>
       </div>

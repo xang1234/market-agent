@@ -284,3 +284,24 @@ test('a figure clicked while its answer streams asks the inspector for it in the
     restoreGlobals()
   }
 })
+
+const noopAction = () => undefined
+
+test('a question being sent carries its run, so each send can pin it; one that failed to send carries none', () => {
+  const sending = renderToStaticMarkup(
+    <PendingTurnView
+      turn={{ phase: 'persisting', turn: { runId: 'run-2', messageId: 'm', snapshotId: 's', text: 'Analyze NVDA' } }}
+      messages={[]}
+      onRetry={noopAction}
+      onReconnect={noopAction}
+      onReload={noopAction}
+      onAsk={() => true}
+    />,
+  )
+  const failed = renderToStaticMarkup(
+    <PendingTurnView turn={{ phase: 'not_sent', text: 'Analyze NVDA', error: 'boom' }} messages={[]} onRetry={noopAction} onReconnect={noopAction} onReload={noopAction} onAsk={() => true} />,
+  )
+  assert.match(sending, /data-role="pending-user" data-asked-run="run-2"/)
+  assert.match(failed, /data-role="pending-user"/)
+  assert.doesNotMatch(failed, /data-asked-run/)
+})

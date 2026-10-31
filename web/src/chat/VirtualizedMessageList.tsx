@@ -52,7 +52,7 @@ export function VirtualizedMessageList({
   // Room below the newest question, kept from the moment it is pinned until the
   // reader follows the bottom again, so the answer never shifts under them.
   const questionRoomRef = useRef(false)
-  const hadPendingQuestionRef = useRef(false)
+  const pinnedRunRef = useRef<string | null>(null)
   const [scrollTop, setScrollTop] = useState(0)
   const [viewportHeight, setViewportHeight] = useState(0)
   const [measuredHeights, setMeasuredHeights] = useState<ReadonlyMap<string, number>>(
@@ -114,15 +114,15 @@ export function VirtualizedMessageList({
     return () => observer.disconnect()
   }, [holdPin])
 
-  // A question the reader just asked appears in the tail before it is saved;
-  // that moment pins it to the top.
+  // A question the reader sends appears in the tail, marked with its run,
+  // before it is saved; each new run pins its question to the top, a resend too.
   useLayoutEffect(() => {
-    const pending = tailRef.current?.querySelector('[data-role="pending-user"]') ?? null
-    if (pending !== null && !hadPendingQuestionRef.current) {
+    const askedRun = tailRef.current?.querySelector('[data-asked-run]')?.getAttribute('data-asked-run') ?? null
+    if (askedRun !== null && askedRun !== pinnedRunRef.current) {
+      pinnedRunRef.current = askedRun
       pinRef.current = 'question'
       questionRoomRef.current = true
     }
-    hadPendingQuestionRef.current = pending !== null
     holdPin()
   })
 
