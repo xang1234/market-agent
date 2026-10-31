@@ -337,8 +337,8 @@ function presentVerifiedUnit(plan: FinancialPlanV1, records: FinancialUnitRecord
     if (name === undefined) return null;
     subjectNames[member.slot_id] = name;
   }
-  const periods = Object.fromEntries([...bindings].flatMap(([slot, binding]) => binding.status === "bound" && binding.input.schema_version !== BOUND_PRICE_INPUT_SCHEMA_VERSION
-    ? [[slot, { fiscal_year: binding.input.period.fiscal_year, fiscal_period: binding.input.period.fiscal_period, end: binding.input.period.end }]]
+  const periods = new Map([...bindings].flatMap(([slot, binding]) => binding.status === "bound" && binding.input.schema_version !== BOUND_PRICE_INPUT_SCHEMA_VERSION
+    ? [[slot, { fiscal_year: binding.input.period.fiscal_year, fiscal_period: binding.input.period.fiscal_period, end: binding.input.period.end }] as const]
     : []));
   return presentFinancialUnit({ plan, run_id: records.run.run_id, unit_id: unitId, results, subject_names: subjectNames, periods });
 }

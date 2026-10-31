@@ -27,7 +27,7 @@ function comparisonResults(overrides: Partial<Record<string, CommittedResult>> =
 }
 
 function present(plan: FinancialPlanV1 = planFixture(), results = comparisonResults(), names: Record<string, string> = NAMES, periods: Record<string, BoundPeriod> = {}): FinancialAnswerContent {
-  return presentFinancialUnit({ plan, run_id: "run-1", unit_id: "section", results, subject_names: names, periods });
+  return presentFinancialUnit({ plan, run_id: "run-1", unit_id: "section", results, subject_names: names, periods: new Map(Object.entries(periods)) });
 }
 
 function result(content: FinancialAnswerContent, outputId: string) {
@@ -683,7 +683,7 @@ test("a fiscal year asked by name and one asked as the latest are each dated, an
 
 test("every period a value was bound to is dated, so a change never dates one side alone (#540, #541)", () => {
   const plan = overviewComparisonPlan([{ slot: "a", newest: [2026, "Q3"] }, { slot: "b", newest: [2026, "Q2"] }]);
-  const quarter = (fiscal_year: number, fiscal_period: string, end: string): BoundPeriod => ({ fiscal_year, fiscal_period, end });
+  const quarter = (fiscal_year: number, fiscal_period: BoundPeriod["fiscal_period"], end: string): BoundPeriod => ({ fiscal_year, fiscal_period, end });
   const latest = { a: quarter(2026, "Q3", "2026-06-27"), b: quarter(2026, "Q2", "2026-06-27") };
   const periods: Record<string, BoundPeriod> = {
     a_rev_q1: quarter(2026, "Q2", "2026-03-28"), a_rev_q4: quarter(2025, "Q3", "2025-06-28"),

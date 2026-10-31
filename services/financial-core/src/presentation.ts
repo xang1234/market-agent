@@ -101,7 +101,6 @@ export type FinancialAnswerContent = Readonly<{
 
 /** The fiscal period a reported value was bound to; a gap or a share price has none. */
 export type BoundPeriod = Readonly<Pick<BoundFactInputV1["period"], "fiscal_year" | "fiscal_period" | "end">>;
-type BoundPeriods = Readonly<Record<LocalId, BoundPeriod>>;
 
 /** A committed result as persisted; drafts present with their public disposition. */
 export type CommittedResult = Readonly<{
@@ -121,9 +120,10 @@ export function presentFinancialUnit(input: {
   /** Server-resolved display names by subject slot. */
   subject_names: Readonly<Record<LocalId, string>>;
   /** Each bound fact's period, by its reported node. */
-  periods: BoundPeriods;
+  periods: ReadonlyMap<LocalId, BoundPeriod>;
 }): FinancialAnswerContent {
-  const { plan, periods } = input;
+  const { plan } = input;
+  const readsOf = periodReader(plan, input.periods);
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
   const byOutput = new Map(input.results.map((result) => [result.output_id, result]));
   const labels = new LabelTable();
@@ -145,8 +145,8 @@ export function presentFinancialUnit(input: {
       disposition: result.disposition === "computed" ? "verified" : result.disposition,
       subject_label_id: slot === null ? null : subjectLabelId(slot),
       measure_label_id: labels.intern("measure", measureKey(plan, node), measureText(plan, node)),
-      period_label_id: labels.intern("period", periodKey(plan, node, periods), periodText(plan, node, names, periods)),
-      presented: presentPayload(plan, node, result.payload, labels, periods),
+      period_label_id: labels.intern("period", periodKey(plan, node, readsOf), periodText(plan, node, names, readsOf)),
+      presented: presentPayload(plan, node, result.payload, labels, readsOf),
       result_hash: result.result_hash,
     };
   });
@@ -303,7 +303,7 @@ function columnKeyByResult(results: ReadonlyArray<PresentedResult>, lines: Reado
 // ---------------------------------------------------------------------------
 // Payload text.
 
-function presentPayload(plan: FinancialPlanV1, node: OperationNode, payload: unknown, table: LabelTable, periods: BoundPeriods): PresentedPayload {
+function presentPayload(plan: FinancialPlanV1, node: OperationNode, payload: unknown, table: LabelTable, readsOf: ReadsOf): PresentedPayload {
   const record = payload as { kind: string } & Record<string, unknown>;
   const labels = table.entries;
   switch (record.kind) {
@@ -323,11 +323,11 @@ function presentPayload(plan: FinancialPlanV1, node: OperationNode, payload: unk
       return {
         kind: "predicate",
         outcome,
-        text: `${who}${measureText(plan, subjectNode)}, ${periodText(plan, subjectNode, subjectNames(labels), periods)}, ${COMPARISON_TEXT[record.comparison as Comparison]} ${bound}: ${outcome ? "yes" : "no"}`,
+        text: `${who}${measureText(plan, subjectNode)}, ${periodText(plan, subjectNode, subjectNames(labels), readsOf)}, ${COMPARISON_TEXT[record.comparison as Comparison]} ${bound}: ${outcome ? "yes" : "no"}`,
       };
     }
     case "ranking": {
-      if (node.operation === "period_rank") return periodRanking(plan, node, record as unknown as RankingPayload, table, periods);
+      if (node.operation === "period_rank") return periodRanking(plan, node, record as unknown as RankingPayload, table, readsOf);
       const slotOf = (memberNode: LocalId) => subjectSlot(plan, plan.operations.find((entry) => entry.node_id === memberNode)!);
       const order = (record.ranks as Array<{ node_id: LocalId; rank: number }>).map((entry) => ({ subject_label_id: subjectLabelId(slotOf(entry.node_id)!), rank: entry.rank }));
       const extreme = record.extreme as LocalId[] | null;
@@ -342,16 +342,16 @@ function presentPayload(plan: FinancialPlanV1, node: OperationNode, payload: unk
     }
     default: {
       const gap = record as unknown as { reason_code: ReasonCode; explanation: string };
-      const apart = gap.reason_code === "incompatible_period" ? operandPeriods(plan, node, periods, subjectNames(labels)) : "";
+      const apart = gap.reason_code === "incompatible_period" ? operandPeriods(plan, node, readsOf, subjectNames(labels)) : "";
       return { kind: "gap", text: `${gap.explanation}${apart}`, reason_code: gap.reason_code };
     }
   }
 }
 
-function periodRanking(plan: FinancialPlanV1, node: PeriodRankNode, ranking: RankingPayload, labels: LabelTable, bound: BoundPeriods): PresentedPayload {
+function periodRanking(plan: FinancialPlanV1, node: PeriodRankNode, ranking: RankingPayload, labels: LabelTable, readsOf: ReadsOf): PresentedPayload {
   const names = subjectNames(labels.entries);
   const nodeOf = (id: LocalId) => plan.operations.find((entry) => entry.node_id === id)!;
-  const periodOf = (id: LocalId) => labels.intern("period", periodKey(plan, nodeOf(id), bound), periodText(plan, nodeOf(id), names, bound));
+  const periodOf = (id: LocalId) => labels.intern("period", periodKey(plan, nodeOf(id), readsOf), periodText(plan, nodeOf(id), names, readsOf));
   const leaders = (ranking.extreme ?? []).map(periodOf);
   const { requested, evaluated } = ranking.population;
   const [step, ...others] = new Set(node.members.map((id) => periodAnchor(periodSelectors(plan, nodeOf(id))[0]!).step));
@@ -567,18 +567,34 @@ function periodSelectors(plan: FinancialPlanV1, node: OperationNode): PeriodSele
 }
 
 type PeriodRead = Readonly<{ selector: PeriodSelector; bound: BoundPeriod | null }>;
+/** The distinct periods a node reads, in `periodSelectors` order, each with the one its values there were bound to. */
+type ReadsOf = (node: OperationNode) => ReadonlyArray<PeriodRead>;
 
 // A read names the period its values were bound to, by fiscal name and end date, whichever selector asked for it:
-// "latest fiscal year" and "FY2025" both name a period that two calendars end months apart.
-function periodReads(plan: FinancialPlanV1, node: OperationNode, periods: BoundPeriods): PeriodRead[] {
-  return periodSelectors(plan, node).map((selector) => ({ selector, bound: boundPeriod(plan, node, selector, periods) }));
+// "latest fiscal year" and "FY2025" both name a period that two calendars end months apart. A read has none for
+// a gap, a share price, or values bound to different periods. Each node's reads are found once.
+function periodReader(plan: FinancialPlanV1, periods: ReadonlyMap<LocalId, BoundPeriod>): ReadsOf {
+  const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
+  const reads = new Map<LocalId, ReadonlyArray<PeriodRead>>();
+  const readsOf = (node: OperationNode): ReadonlyArray<PeriodRead> => {
+    const leaves = [...dependencyClosure(plan, [node.node_id])].flatMap((id) => {
+      const leaf = nodes.get(id)!;
+      return leaf.operation === "reported_metric" ? [{ selector: JSON.stringify(leaf.period), bound: periods.get(id) ?? null }] : [];
+    });
+    return periodSelectors(plan, node).map((selector) => {
+      const [first, ...others] = leaves.filter((leaf) => leaf.selector === JSON.stringify(selector)).map((leaf) => leaf.bound);
+      const agreed = first && others.every((other) => other !== null && other.end === first.end && fiscalName(other) === fiscalName(first));
+      return { selector, bound: agreed ? first : null };
+    });
+  };
+  return (node) => reads.get(node.node_id) ?? reads.set(node.node_id, readsOf(node)).get(node.node_id)!;
 }
 
 // The operands were bound to different periods: each one's is named.
-function operandPeriods(plan: FinancialPlanV1, node: OperationNode, periods: BoundPeriods, names: (slot: LocalId) => string): string {
+function operandPeriods(plan: FinancialPlanV1, node: OperationNode, readsOf: ReadsOf, names: (slot: LocalId) => string): string {
   const operands = operationDependencies(node).map((id) => plan.operations.find((entry) => entry.node_id === id)!);
   const bound = operands.flatMap((operand) => {
-    const period = boundPeriod(plan, operand, periodSelectors(plan, operand)[0]!, periods);
+    const period = readsOf(operand)[0]!.bound;
     return period ? [{ operand, period }] : [];
   });
   if (new Set(bound.map(({ period }) => `${fiscalName(period)} ${period.end}`)).size < 2) return "";
@@ -590,38 +606,25 @@ function operandPeriods(plan: FinancialPlanV1, node: OperationNode, periods: Bou
   return ` ${new Intl.ListFormat("en").format(bound.map(({ operand, period }) => `${owner(operand)}'s ${fiscalName(period)} ended ${period.end}`))}.`;
 }
 
-/** The period every value the node reads at the selector was bound to; null for a gap, or values bound to different periods. */
-function boundPeriod(plan: FinancialPlanV1, node: OperationNode, selector: PeriodSelector, periods: BoundPeriods): BoundPeriod | null {
-  const [first, ...others] = [...dependencyClosure(plan, [node.node_id])].flatMap((id) => {
-    const entry = plan.operations.find((candidate) => candidate.node_id === id)!;
-    return entry.operation === "reported_metric" && JSON.stringify(entry.period) === JSON.stringify(selector) ? [periods[id] ?? null] : [];
-  });
-  return first && others.every((other) => other?.end === first.end && fiscalName(other) === fiscalName(first)) ? first : null;
-}
-
 // A balance is a point in time: "end of FY2023", never the year's amount.
-function periodText(plan: FinancialPlanV1, node: OperationNode, names: (slot: LocalId) => string, periods: BoundPeriods): string {
-  if (node.operation === "spread") return spreadSides(plan, node, (side) => `${names(side.slot)} ${periodText(plan, side.node, names, periods)}`).join(" minus ");
-  if (node.operation === "period_rank") return windowSpan(plan, node, names, periods);
+function periodText(plan: FinancialPlanV1, node: OperationNode, names: (slot: LocalId) => string, readsOf: ReadsOf): string {
+  if (node.operation === "spread") return spreadSides(plan, node, (side) => `${names(side.slot)} ${periodText(plan, side.node, names, readsOf)}`).join(" minus ");
+  if (node.operation === "period_rank") return windowSpan(plan, node, names, readsOf);
   const instant = measuresInstant(plan, node);
-  return periodReads(plan, node, periods).map((read) => readText(read, instant)).join(" vs ");
+  return readsOf(node).map((read) => readText(read, instant)).join(" vs ");
 }
 
-function periodKey(plan: FinancialPlanV1, node: OperationNode, periods: BoundPeriods): string {
-  if (node.operation === "spread") return spreadPeriodKey(plan, node, periods);
-  if (node.operation === "period_rank") return JSON.stringify(["window", periodReads(plan, node, periods).map((read) => JSON.stringify(read)).sort()]);
-  return JSON.stringify([periodReads(plan, node, periods), measuresInstant(plan, node)]);
+function periodKey(plan: FinancialPlanV1, node: OperationNode, readsOf: ReadsOf): string {
+  if (node.operation === "spread") return JSON.stringify(spreadSides(plan, node, (side) => [side.slot, periodKey(plan, side.node, readsOf)]));
+  if (node.operation === "period_rank") return JSON.stringify(["window", readsOf(node).map((read) => JSON.stringify(read)).sort()]);
+  return JSON.stringify([readsOf(node), measuresInstant(plan, node)]);
 }
 
-function spreadPeriodKey(plan: FinancialPlanV1, node: SpreadNode, periods: BoundPeriods): string {
-  return JSON.stringify(spreadSides(plan, node, (side) => [side.slot, periodKey(plan, side.node, periods)]));
-}
-
-function windowSpan(plan: FinancialPlanV1, node: PeriodRankNode, names: (slot: LocalId) => string, periods: BoundPeriods): string {
+function windowSpan(plan: FinancialPlanV1, node: PeriodRankNode, names: (slot: LocalId) => string, readsOf: ReadsOf): string {
   const members = node.members.map((id) => plan.operations.find((entry) => entry.node_id === id)!);
   const recency = (member: OperationNode) => periodAnchor(periodSelectors(plan, member)[0]!).recency;
   const sorted = members.sort((left, right) => recency(left) - recency(right));
-  return `${periodText(plan, sorted[0]!, names, periods)} to ${periodText(plan, sorted.at(-1)!, names, periods)}`;
+  return `${periodText(plan, sorted[0]!, names, readsOf)} to ${periodText(plan, sorted.at(-1)!, names, readsOf)}`;
 }
 
 function spreadSides<T>(plan: FinancialPlanV1, node: SpreadNode, side: (entry: { slot: LocalId; node: OperationNode }) => T): T[] {
