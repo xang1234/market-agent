@@ -43,12 +43,14 @@ test("a user message carrying another user's answer snapshot_id neither binds it
   assert.deepEqual(ownerView.links, [{ label: "Open source", href: "https://polygon.io/" }]);
 
   const base = await startChatTestServer(t, { threadsDb: pool });
-  const response = await fetch(`${base}/v1/chat/threads/${strangerThreadId}/messages`, {
+  const post = (snapshotId: string) => fetch(`${base}/v1/chat/threads/${strangerThreadId}/messages`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-user-id": strangerId },
-    body: JSON.stringify({ message_id: randomUUID(), snapshot_id: answerSnapshotId, content: "What did they ask?" }),
+    body: JSON.stringify({ message_id: randomUUID(), snapshot_id: snapshotId, content: "What did they ask?" }),
   });
+  const response = await post(answerSnapshotId);
   assert.equal(response.status, 409);
+  assert.deepEqual(await response.json(), { error: "snapshot_id is already in use" });
 
   const bound = await pool.query(
     `select m.message_id, t.latest_snapshot_id
@@ -61,4 +63,9 @@ test("a user message carrying another user's answer snapshot_id neither binds it
     () => loadEvidenceInspection(pool, { user_id: strangerId, snapshot_id: answerSnapshotId, ref }),
     /snapshot is not visible/,
   );
+
+  const ownSnapshotId = randomUUID();
+  const own = await post(ownSnapshotId);
+  assert.equal(own.status, 201);
+  assert.equal(((await own.json()) as { message: { snapshot_id: string } }).message.snapshot_id, ownSnapshotId);
 });

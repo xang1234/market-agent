@@ -331,7 +331,7 @@ test("POST /v1/chat/threads/:id/messages persists a durable user message", async
   const { db, queries } = fakeDb(({ text, values }) => {
     if (text === "begin" || text === "commit" || text === "rollback") return [];
     if (text.includes("from chat_threads")) return [{ owned: true }];
-    if (text.includes("insert into snapshots")) return [];
+    if (text.includes("insert into snapshots")) return [{ snapshot_id: snapshotId }];
     if (text.includes("insert into chat_messages")) {
       return [
         {
@@ -379,7 +379,7 @@ test("POST /v1/chat/threads/:id/messages rolls back and returns 409 for idempote
   const { db, queries } = fakeDb(({ text }) => {
     if (text === "begin" || text === "commit" || text === "rollback") return [];
     if (text.includes("from chat_threads")) return [{ owned: true }];
-    if (text.includes("insert into snapshots")) return [];
+    if (text.includes("insert into snapshots")) return [{ snapshot_id: "77777777-7777-4777-a777-777777777777" }];
     if (text.includes("insert into chat_messages")) return [];
     throw new Error(`unexpected query: ${text}`);
   });

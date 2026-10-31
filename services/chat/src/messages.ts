@@ -483,7 +483,7 @@ export async function persistUserChatMessage(
       return null;
     }
 
-    await client.query(
+    const snapshot = await client.query(
       `insert into snapshots (
          snapshot_id,
          subject_refs,
@@ -522,9 +522,14 @@ export async function persistUserChatMessage(
          'chat-user-message',
          null
        )
-       on conflict (snapshot_id) do nothing`,
+       on conflict (snapshot_id) do nothing
+       returning snapshot_id`,
       [snapshotId, asOf],
     );
+    // The client picks the id, so an existing one may be another user's answer.
+    if (snapshot.rows.length === 0) {
+      throw new ChatMessageIdempotencyConflictError("snapshot_id is already in use");
+    }
 
     const { rows } = await client.query<ChatMessageRow>(
       `insert into chat_messages
