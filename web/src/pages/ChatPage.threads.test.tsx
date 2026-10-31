@@ -594,3 +594,23 @@ test('signing out while a failed DELETE is being checked drops the result', asyn
     await h.cleanup()
   }
 })
+
+test('an unsent question stays with its own thread', async () => {
+  const { h } = await chatsWithTwoThreads('/chat/T1')
+  const composer = () => h.query('textarea') as HTMLTextAreaElement
+  try {
+    await h.type('Half-typed question about chips')
+    await h.navigate('/chat/T2')
+    assert.equal(composer().value, '', 'another thread starts empty')
+
+    await h.navigate('/chat/T1')
+    assert.equal(composer().value, 'Half-typed question about chips', 'the draft comes back with its thread')
+
+    await h.ask('Sent question about chips')
+    await h.navigate('/chat/T2')
+    await h.navigate('/chat/T1')
+    assert.equal(composer().value, '', 'a sent question leaves no draft behind')
+  } finally {
+    await h.cleanup()
+  }
+})

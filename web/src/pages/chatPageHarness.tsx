@@ -241,7 +241,7 @@ export function WithSidebarSlot({ children }: { children: ReactNode }) {
 }
 
 export async function renderChat(initialPath: string, server: FakeServer, options: RenderOptions = {}): Promise<Harness> {
-  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { url: 'http://localhost/' })
   const globals = globalThis as unknown as Record<string, unknown>
   const saved = Object.fromEntries(['IS_REACT_ACT_ENVIRONMENT', 'document', 'window', 'ResizeObserver', 'EventSource', 'fetch']
     .map((key) => [key, globals[key]]))

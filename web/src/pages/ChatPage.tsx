@@ -17,6 +17,7 @@ import { threadDisplayName } from '../chat/threadName.ts'
 import { useChatSession, type ChatSession } from '../chat/useChatSession.ts'
 import { useThreadList, useTitleFollowUp, type ThreadListState } from '../chat/useThreadList.ts'
 import { useSidebarSlot } from '../shell/useSidebarSlot.ts'
+import { moveDraft } from '../chat/composerDrafts.ts'
 
 
 export function ChatLayout() {
@@ -34,7 +35,16 @@ export function ChatLayout() {
   useEffect(() => {
     if (routeThreadId !== null) cancelThreadDelete(routeThreadId)
   }, [routeThreadId])
-  const chat = useChatSession({ userId, threadId: routeThreadId, navigate, onThreadCreated: threads.refresh })
+  const { refresh: refreshThreads } = threads
+  // A question typed while the first one creates its thread belongs to that thread.
+  const onThreadCreated = useCallback(
+    (threadId: string) => {
+      moveDraft(`${userId}:new`, `${userId}:${threadId}`)
+      refreshThreads()
+    },
+    [userId, refreshThreads],
+  )
+  const chat = useChatSession({ userId, threadId: routeThreadId, navigate, onThreadCreated })
   const activeThreadId = chat.view.threadId
   const activeThread = threads.state.kind === 'ready'
     ? threads.state.threads.find((thread) => thread.thread_id === activeThreadId)
@@ -46,6 +56,7 @@ export function ChatLayout() {
     titled: Boolean(activeThread?.title?.trim()),
     refresh: threads.refresh,
   })
+  const draftScope = `${userId}:${routeThreadId ?? 'new'}`
   const sidebar = useSidebarSlot()
   const { setClaimed } = sidebar
   // Before paint, so the watchlist never flashes in the slot on the way in.
@@ -71,7 +82,12 @@ export function ChatLayout() {
       {chat.view.canvas === 'thread'
         ? <ChatThreadView chat={chat} threadName={threadName} />
         : <ChatEmptyState chat={chat} />}
-      <ChatComposer canAsk={chat.view.canAsk} onAsk={chat.ask} />
+      <ChatComposer
+        key={draftScope}
+        draftScope={draftScope}
+        canAsk={chat.view.canAsk}
+        onAsk={chat.ask}
+      />
     </div>
   )
 }

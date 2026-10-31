@@ -143,7 +143,7 @@ type ChatSessionDeps = {
   userId: string
   threadId: string | null
   navigate: (to: string) => void
-  onThreadCreated: () => void
+  onThreadCreated: (threadId: string) => void
 }
 
 export function useChatSession({ userId, threadId, navigate, onThreadCreated }: ChatSessionDeps): ChatSession {
@@ -188,7 +188,7 @@ export function useChatSession({ userId, threadId, navigate, onThreadCreated }: 
           return
         }
         sendThreadId = created.thread_id
-        onThreadCreated()
+        onThreadCreated(sendThreadId)
         if (owns()) {
           store.dispatch({ type: 'thread.created', threadId: sendThreadId })
           navigate(`/chat/${sendThreadId}`)
