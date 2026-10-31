@@ -152,6 +152,9 @@ async function assertSnapshotVisibleToUser(
            join chat_threads t on t.thread_id = m.thread_id
           where m.snapshot_id = $1::uuid
             and t.user_id = $2::uuid
+            -- The server seals an answer's snapshot; a user message's
+            -- snapshot_id came from the client.
+            and m.role = 'assistant'
        )
        or exists (
          select 1
