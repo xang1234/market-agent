@@ -47,3 +47,26 @@ test('a certified series copies one period and raw value per row', () => {
     ['FY2023', '391035000000'],
   ])
 })
+
+test('a column mixing currencies names each row\'s unit instead of one header unit', () => {
+  const content = supportedFinancialContent(financialAnswerFixture)!
+  const usd = content.results.find((result) => result.presented.kind === 'value' && result.presented.value === '391035000000')!
+  if (usd.presented.kind !== 'value') return
+  const eur = { ...usd, result_id: 'eur-revenue', presented: { ...usd.presented, value: '250000000000', unit: { kind: 'currency' as const, currency: 'EUR' } } }
+  const results = new Map(resultsById(content)).set(eur.result_id, eur)
+  const table = {
+    kind: 'table' as const,
+    caption: '',
+    columns: [{ column_id: 'c1', measure_label_id: usd.measure_label_id, period_label_id: usd.period_label_id }],
+    rows: [
+      { subject_label_id: usd.subject_label_id!, cells: [usd.result_id] },
+      { subject_label_id: usd.subject_label_id!, cells: [eur.result_id] },
+    ],
+    ascending: {},
+  }
+  assert.deepEqual(tableCsv(content, table, results), [
+    ['Company', 'Revenue, FY2023', 'Revenue, FY2023 unit'],
+    ['Apple Inc.', '391035000000', 'USD'],
+    ['Apple Inc.', '250000000000', 'EUR'],
+  ])
+})

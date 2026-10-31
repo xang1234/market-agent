@@ -108,16 +108,24 @@ function unitLabel(unit: FinancialUnit): string {
   }
 }
 
-// Raw values paste into a spreadsheet as numbers; the unit rides in the header.
-function csvHeading(heading: string, results: ReadonlyArray<FinancialPresentedResult | undefined>): string {
-  const first = results.find((result) => result?.presented.kind === 'value')
-  const unit = first?.presented.kind === 'value' ? unitLabel(first.presented.unit) : ''
-  return unit === '' ? heading : `${heading} (${unit})`
-}
-
+// Raw values paste into a spreadsheet as numbers. A column whose values share
+// one unit names it in the header; a column that mixes units (USD and EUR
+// revenue, say) gets a unit column beside it instead.
 function csvCell(result: FinancialPresentedResult | undefined): string {
   if (!result) return ''
   return result.presented.kind === 'value' ? result.presented.value : result.presented.text
+}
+
+type CsvColumn = { header: string; cell: (result: FinancialPresentedResult | undefined) => string }
+
+function valueColumns(heading: string, results: ReadonlyArray<FinancialPresentedResult | undefined>): CsvColumn[] {
+  const units = new Set(results.flatMap((result) => (result?.presented.kind === 'value' ? [unitLabel(result.presented.unit)] : [])))
+  const value: CsvColumn = { header: heading, cell: csvCell }
+  if (units.size > 1) {
+    return [value, { header: `${heading} unit`, cell: (result) => (result?.presented.kind === 'value' ? unitLabel(result.presented.unit) : '') }]
+  }
+  const [unit] = units
+  return [{ ...value, header: unit === undefined || unit === '' ? heading : `${heading} (${unit})` }]
 }
 
 export function tableCsv(
@@ -125,27 +133,26 @@ export function tableCsv(
   table: FinancialTablePresentation,
   results: ReadonlyMap<string, FinancialPresentedResult>,
 ): string[][] {
-  const cellsOf = (columnIndex: number) => table.rows.map((row) => {
+  const resultAt = (row: FinancialTablePresentation['rows'][number], columnIndex: number) => {
     const id = row.cells[columnIndex]
     return id == null ? undefined : results.get(id)
-  })
-  const header = ['Company']
-  table.columns.forEach((column, index) => {
+  }
+  const columns = table.columns.map((column, index) => {
     const measure = labelText(content, column.measure_label_id)
     const heading = column.period_label_id === null ? measure : `${measure}, ${labelText(content, column.period_label_id)}`
-    header.push(csvHeading(heading, cellsOf(index)))
-    if (column.period_label_id === null) header.push(`${measure} period`)
+    const csvColumns = valueColumns(heading, table.rows.map((row) => resultAt(row, index)))
+    if (column.period_label_id === null) {
+      csvColumns.push({ header: `${measure} period`, cell: (result) => (result ? labelText(content, result.period_label_id) : '') })
+    }
+    return csvColumns
   })
-  const rows = table.rows.map((row) => {
-    const line = [labelText(content, row.subject_label_id)]
-    row.cells.forEach((id, index) => {
-      const result = id == null ? undefined : results.get(id)
-      line.push(csvCell(result))
-      if (table.columns[index]?.period_label_id === null) line.push(result ? labelText(content, result.period_label_id) : '')
-    })
-    return line
-  })
-  return [header, ...rows]
+  return [
+    ['Company', ...columns.flat().map((column) => column.header)],
+    ...table.rows.map((row) => [
+      labelText(content, row.subject_label_id),
+      ...columns.flatMap((csvColumns, index) => csvColumns.map((column) => column.cell(resultAt(row, index)))),
+    ]),
+  ]
 }
 
 export function seriesCsv(
@@ -155,8 +162,9 @@ export function seriesCsv(
 ): string[][] {
   const points = series.points.map((point) => results.get(point.result_id))
   const heading = `${labelText(content, series.subject_label_id)}: ${labelText(content, series.measure_label_id)}`
+  const columns = valueColumns(heading, points)
   return [
-    ['Period', csvHeading(heading, points)],
-    ...series.points.map((point, index) => [labelText(content, point.period_label_id), csvCell(points[index])]),
+    ['Period', ...columns.map((column) => column.header)],
+    ...series.points.map((point, index) => [labelText(content, point.period_label_id), ...columns.map((column) => column.cell(points[index]))]),
   ]
 }
