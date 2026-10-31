@@ -64,6 +64,9 @@ const PEERS = packet(["NVDA", "AMD", "AAPL"], [
   fig("V3", "Revenue", "FY2025", "$950.0M", { company: "AAPL" }),
   fig("S1", "Cash", "FY2026", "$1.2B", { company: "NVDA" }),
   fig("S2", "Cash", "FY2025", "$950.0M", { company: "AMD" }),
+  // A change in a margin is in percentage points, never a percent level (#539).
+  fig("P1", "Change in operating margin", "Q2 FY2026 vs Q1 FY2026", "2.10 pp", { company: "NVDA" }),
+  fig("P2", "Change in operating margin", "Q2 FY2026 vs Q1 FY2026", "-12.58 pp", { company: "AMD" }),
 ]);
 
 const compare = (p: EvidencePacket, op: string, evidence: string[], result: unknown) =>
@@ -137,6 +140,9 @@ test("ties, rounding, negatives and incompatible units cannot make a false winne
   assert.deepEqual(reasons(PEERS, "highest", ["V1", "V2", "V3"], "V1"), ["comparison: the values are in different units or currencies"]);
   ok(PEERS, "highest", ["S1", "S2"], "S1");
   assert.deepEqual(reasons(PEERS, "highest", ["S1", "S2"], "S2"), ["comparison: S1 ($1.2B) is higher than S2 ($950.0M)"]);
+  assert.deepEqual(reasons(PEERS, "highest", ["P1", "P2"], "P2"), ["comparison: P1 (2.10 pp) is higher than P2 (-12.58 pp)"]);
+  const percentLevel = fig("P3", "Change in operating margin", "Q2 FY2026 vs Q1 FY2026", "1.50%", { company: "AMD" });
+  assert.deepEqual(reasons(packet(["NVDA", "AMD"], [PEERS.figures.find((figure) => figure.id === "P1")!, percentLevel]), "highest", ["P1", "P3"], "P1"), ["comparison: the values are in different units or currencies"]);
 });
 
 test("a comparison's shape: one metric, two or more figures, a trend over one company's periods (#208)", () => {
