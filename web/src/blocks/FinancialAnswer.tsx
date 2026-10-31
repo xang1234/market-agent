@@ -8,7 +8,7 @@ import {
   labelText,
   resultLabel,
   resultsById,
-  seriesBarHeights,
+  seriesBars,
   sortedRowIndexes,
   supportedFinancialContent,
   type SortDirection,
@@ -80,12 +80,14 @@ function PresentationView({ blockId, content, results, presentation }: Presentat
   return <ResultLine content={content} result={result} />
 }
 
+const RESULT_ROW_CLASS = 'flex items-baseline justify-between gap-4 border-t border-line py-1.5 text-sm'
+
 function ResultLine({ content, result }: { content: FinancialAnswerContent; result: FinancialPresentedResult }): ReactElement {
   const { presented } = result
   if (presented.kind === 'value') {
     const label = resultLabel(content, result)
     return (
-      <p className="flex items-baseline justify-between gap-4 border-t border-line py-1.5 text-sm text-fg" data-result-id={result.result_id}>
+      <p className={`${RESULT_ROW_CLASS} text-fg`} data-result-id={result.result_id}>
         <span className="text-muted">{label}: </span>
         <InspectableResult resultId={result.result_id} label={`${label}: ${presented.full_text}`}>
           <span className="num whitespace-nowrap" title={presented.full_text} aria-label={`${label}: ${presented.full_text}`}>
@@ -95,10 +97,17 @@ function ResultLine({ content, result }: { content: FinancialAnswerContent; resu
       </p>
     )
   }
-  const tone = presented.kind === 'gap' ? 'text-muted italic' : 'text-fg'
+  if (presented.kind === 'gap') {
+    return (
+      <p className={`${RESULT_ROW_CLASS} text-muted`} data-result-id={result.result_id} data-result-kind="gap">
+        <span>{resultLabel(content, result)}: </span>
+        <span className="italic">{presented.text}</span>
+      </p>
+    )
+  }
   return (
-    <p className={`text-sm ${tone}`} data-result-id={result.result_id} data-result-kind={presented.kind}>
-      {presented.kind === 'gap' ? `${resultLabel(content, result)}: ${presented.text}` : presented.text}
+    <p className="text-sm text-fg" data-result-id={result.result_id} data-result-kind={presented.kind}>
+      {presented.text}
     </p>
   )
 }
@@ -194,7 +203,7 @@ type SeriesProps = { content: FinancialAnswerContent; results: Results; series: 
 
 function CertifiedSeries({ content, results, series }: SeriesProps): ReactElement {
   const points = series.points.map((point) => results.get(point.result_id))
-  const heights = seriesBarHeights(points)
+  const bars = seriesBars(points)
   const heading = `${labelText(content, series.subject_label_id)}: ${labelText(content, series.measure_label_id)}`
   return (
     <figure className="mt-2">
@@ -202,20 +211,19 @@ function CertifiedSeries({ content, results, series }: SeriesProps): ReactElemen
         <caption className="pb-2 text-left text-xs font-medium text-muted">{heading}</caption>
         <tbody>
           {series.points.map((point, index) => {
-            const result = points[index]
-            const negative = result?.presented.kind === 'value' && Number(result.presented.value) < 0
+            const bar = bars[index]
             return (
               <tr key={point.result_id} className="border-t border-line">
                 <th scope="row" className="whitespace-nowrap py-1.5 pr-4 text-left font-normal text-muted">
                   {labelText(content, point.period_label_id)}
                 </th>
                 <td className="num whitespace-nowrap py-1.5 pr-4 text-right text-fg">
-                  <Cell result={result} />
+                  <Cell result={points[index]} />
                 </td>
                 <td aria-hidden="true" className="w-1/2 py-1.5">
                   <div
-                    className={`h-2 rounded-sm ${negative ? 'bg-negative/70' : 'bg-accent/70'}`}
-                    style={{ width: `${Math.round((heights[index] ?? 0) * 100)}%` }}
+                    className={`h-2 rounded-sm ${bar?.negative ? 'bg-negative/70' : 'bg-accent/70'}`}
+                    style={{ width: `${Math.round((bar?.size ?? 0) * 100)}%` }}
                   />
                 </td>
               </tr>
