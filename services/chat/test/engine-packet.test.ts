@@ -176,6 +176,21 @@ test("a trend orders the engine's quarters by their fiscal labels", () => {
   );
 });
 
+test("a trend orders the engine's dated quarters by their fiscal names (#540, #541)", () => {
+  const ends = ["2024-04-28", "2024-07-28", "2024-10-27", "2025-01-26", "2025-04-27", "2025-07-27", "2025-10-26", "2026-01-25"];
+  const packet = enginePacket(content(
+    REVENUE.map(([, text], i) => value(10 + i, "a", "measure:m0", `period:q${i}`, text)),
+    ["a"],
+    Object.fromEntries(REVENUE.map(([period], i) => [`period:q${i}`, { kind: "period", text: `${period} (ended ${ends[i]})` }])),
+  ), new Map([["a", "NVDA"]]), null);
+  const report = checkAssertions([{ kind: "comparison", text: "x", evidence: packet.figures.map((figure) => figure.id), op: "trend", result: "rose_throughout" }], packet);
+  assert.deepEqual(report.rejected, []);
+  assert.equal(
+    plainText(renderAssertion(report.accepted[0]!, packet, []).segments),
+    "NVDA's revenue rose in every period from Q1 FY2025 (ended Apr 2024) (USD 26,044,000,000.00) to Q4 FY2026 (ended Jan 2026) (USD 62,100,000,000.00).",
+  );
+});
+
 test("a trend over time names the periods its company and metric show as gaps", () => {
   const packet = enginePacket(content(
     [...REVENUE.slice(0, 7).map(([, text], i) => value(10 + i, "a", "measure:m0", `period:q${i}`, text)), gap(17, "a", "measure:m0", "period:q7")],

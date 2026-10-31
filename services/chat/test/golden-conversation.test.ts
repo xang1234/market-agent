@@ -576,7 +576,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     // Each company at its own latest quarter (#398 D4), with no price chart: price history is not an engine figure.
     assert.deepEqual(engineAnswer(answer).results.filter(([measure]) => measure === "Revenue" || measure.startsWith("Year-over-year")), [
       ["Revenue", "Q4 FY2026", "verified", "USD 62,100,000,000.00"],
-      ["Year-over-year percent change in Revenue", "Q4 FY2026 vs Q4 FY2025", "verified", "57.89%"],
+      ["Year-over-year percent change in Revenue", "Q4 FY2026 vs Q4 FY2025 (ended 2025-01-26)", "verified", "57.89%"],
       ["Revenue", "Q2 FY2026", "verified", "USD 11,200,000,000.00"],
       ["Year-over-year percent change in Revenue", "Q2 FY2026 vs Q2 FY2025", "verified", "45.74%"],
     ]);
@@ -631,8 +631,8 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     for (const question of ["How is NVDA doing?", "What about Q2?", "Add AMD"]) completedTurn(await runTurn(base, addedThread.thread_id, question));
     const added = engineAnswer(await latestAssistantMessage(base, addedThread.thread_id)).results;
     assert.deepEqual(added.filter(([measure]) => measure.startsWith("Gross margin")), [
-      ["Gross margin (gross profit / revenue)", "Q2 FY2026", "verified", "72.42%"],
-      ["Gross margin (gross profit / revenue)", "Q2 FY2026", "verified", "54.02%"],
+      ["Gross margin (gross profit / revenue)", "Q2 FY2026 (ended 2025-07-27)", "verified", "72.42%"],
+      ["Gross margin (gross profit / revenue)", "Q2 FY2026 (ended 2026-06-27)", "verified", "54.02%"],
     ], "each company at its newest second quarter");
   });
 
