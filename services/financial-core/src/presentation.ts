@@ -590,8 +590,8 @@ function periodReader(plan: FinancialPlanV1, periods: ReadonlyMap<LocalId, Bound
   return (node) => reads.get(node.node_id) ?? reads.set(node.node_id, readsOf(node)).get(node.node_id)!;
 }
 
-// Operands that each read one period were bound to different ones: each one's is named. A trailing sum reads four
-// quarters, and naming one of them as its period would mislead, so then the engine's words stand alone.
+// Operands that each read one period, bound to different ones, are each named with theirs. A trailing sum reads
+// four quarters, and naming one as its period would mislead, so its gap keeps the engine's words.
 function operandPeriods(plan: FinancialPlanV1, node: OperationNode, readsOf: ReadsOf, names: (slot: LocalId) => string): string {
   const operands = operationDependencies(node).map((id) => plan.operations.find((entry) => entry.node_id === id)!);
   if (operands.some((operand) => readsOf(operand).length !== 1)) return "";
