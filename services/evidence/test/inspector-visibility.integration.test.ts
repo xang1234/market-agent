@@ -30,7 +30,7 @@ test("a user message bound to another user's answer snapshot does not open it; t
     ownerThreadId, ownerId, strangerThreadId, strangerId,
   ]);
   // The stranger's row is what a user message posted with the owner's
-  // snapshot_id left behind before the chat service refused such ids.
+  // snapshot_id left behind before the chat service picked the id itself.
   await db.query(
     `insert into chat_messages (thread_id, role, snapshot_id, blocks, content_hash)
      values ($1::uuid, 'assistant', $3::uuid, '[]'::jsonb, 'h'), ($2::uuid, 'user', $3::uuid, '[]'::jsonb, 'h')`,
