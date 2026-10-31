@@ -33,14 +33,14 @@ test("chat cash resilience", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(await answer("Show AAA's cash resilience"), {
       proof: { evidence: "linked", calculation: "verified", public_by_cutoff: "proven" },
       rows: [
-        ["Operating cash flow", "latest fiscal year", "120"],
-        ["Net income", "latest fiscal year", "100"],
-        ["Total liabilities", "end of latest fiscal year", "300"],
-        ["Total assets", "end of latest fiscal year", "600"],
-        ["Stockholders' equity", "end of latest fiscal year", "200"],
-        ["Cash conversion: operating cash flow / net income (reported period)", "latest fiscal year", "1.2"],
-        ["Total liabilities / total assets (period-end balance sheet)", "end of latest fiscal year", "0.5"],
-        ["Total liabilities / stockholders' equity (period-end balance sheet)", "end of latest fiscal year", "1.5"],
+        ["Operating cash flow", "FY2023 (ended 2023-12-31)", "120"],
+        ["Net income", "FY2023 (ended 2023-12-31)", "100"],
+        ["Total liabilities", "end of FY2023 (2023-12-31)", "300"],
+        ["Total assets", "end of FY2023 (2023-12-31)", "600"],
+        ["Stockholders' equity", "end of FY2023 (2023-12-31)", "200"],
+        ["Cash conversion: operating cash flow / net income (reported period)", "FY2023 (ended 2023-12-31)", "1.2"],
+        ["Total liabilities / total assets (period-end balance sheet)", "end of FY2023 (2023-12-31)", "0.5"],
+        ["Total liabilities / stockholders' equity (period-end balance sheet)", "end of FY2023 (2023-12-31)", "1.5"],
       ],
     });
   });
@@ -70,12 +70,12 @@ test("chat cash resilience", { timeout: 300_000 }, async (t) => {
     await seedCashResilience(db, { total_liabilities: "999" }, { subject: IDS.issuerB, years: { total_liabilities: 2022 } });
     const { rows } = await answer("Show BBB's cash resilience");
     assert.deepEqual(rows, [
-      ["Operating cash flow", "latest fiscal year", "120"],
-      ["Net income", "latest fiscal year", "100"],
+      ["Operating cash flow", "FY2023 (ended 2023-12-31)", "120"],
+      ["Net income", "FY2023 (ended 2023-12-31)", "100"],
       ["Total liabilities", "end of latest fiscal year", "missing"],
-      ["Total assets", "end of latest fiscal year", "600"],
-      ["Stockholders' equity", "end of latest fiscal year", "200"],
-      ["Cash conversion: operating cash flow / net income (reported period)", "latest fiscal year", "1.2"],
+      ["Total assets", "end of FY2023 (2023-12-31)", "600"],
+      ["Stockholders' equity", "end of FY2023 (2023-12-31)", "200"],
+      ["Cash conversion: operating cash flow / net income (reported period)", "FY2023 (ended 2023-12-31)", "1.2"],
       ["Total liabilities / total assets (period-end balance sheet)", "end of latest fiscal year", "blocked_dependency"],
       ["Total liabilities / stockholders' equity (period-end balance sheet)", "end of latest fiscal year", "blocked_dependency"],
     ]);

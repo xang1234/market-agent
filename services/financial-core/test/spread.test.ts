@@ -110,7 +110,7 @@ test("the presentation names each side's company and period, and reads the lead 
     plan,
     run_id: "44444444-4444-4444-8444-444444444444",
     unit_id: "section",
-    subject_names: { a: "NVIDIA", b: "AMD" },
+    subject_names: { a: "NVIDIA", b: "AMD" }, periods: {},
     results: plan.outputs.map((output, index) => ({
       result_id: `55555555-5555-4555-8555-00000000000${index}`,
       output_id: output.output_id,

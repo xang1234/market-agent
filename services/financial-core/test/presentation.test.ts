@@ -27,7 +27,7 @@ function comparisonResults(overrides: Partial<Record<string, CommittedResult>> =
 }
 
 function present(plan: FinancialPlanV1 = planFixture(), results = comparisonResults(), names: Record<string, string> = NAMES): FinancialAnswerContent {
-  return presentFinancialUnit({ plan, run_id: "run-1", unit_id: "section", results, subject_names: names });
+  return presentFinancialUnit({ plan, run_id: "run-1", unit_id: "section", results, subject_names: names, periods: {} });
 }
 
 function result(content: FinancialAnswerContent, outputId: string) {

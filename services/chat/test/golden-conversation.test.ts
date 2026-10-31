@@ -475,9 +475,9 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     completedTurn(await runTurn(base, starterThread.thread_id, "What drives AAPL's margins?"));
     assert.deepEqual(engineAnswer(await latestAssistantMessage(base, starterThread.thread_id)), {
       results: [
-        ["Gross margin (gross profit / revenue)", "latest fiscal year", "verified", "46.91%"],
-        ["Operating margin (operating income / revenue)", "latest fiscal year", "verified", "31.97%"],
-        ["Net margin (net income / revenue)", "latest fiscal year", "verified", "26.92%"],
+        ["Gross margin (gross profit / revenue)", "FY2025 (ended 2025-09-27)", "verified", "46.91%"],
+        ["Operating margin (operating income / revenue)", "FY2025 (ended 2025-09-27)", "verified", "31.97%"],
+        ["Net margin (net income / revenue)", "FY2025 (ended 2025-09-27)", "verified", "26.92%"],
       ],
       notes: ["Not covered by this answer: the cause of these figures."],
     });
