@@ -63,7 +63,7 @@ type RefSegmentSpanProps = {
 
 // A value as the text reads it, with no padding or fill: either would show as a
 // space before the punctuation after it (#303).
-const REF_CLASS = 'rounded text-fg-soft underline decoration-dotted underline-offset-2'
+const REF_CLASS = 'rounded text-left text-fg-soft underline decoration-dotted underline-offset-2'
 
 function RefSegmentSpan({ snapshotId, blockId, index, segment }: RefSegmentSpanProps): ReactElement {
   return (
