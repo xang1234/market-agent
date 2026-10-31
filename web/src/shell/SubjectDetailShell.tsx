@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { analyzeEntryFromSubject } from '../analyze/analyzeEntry'
 import { issuerIdFromSubject } from '../symbol/profile.ts'
@@ -82,6 +82,11 @@ export function SubjectDetailShell() {
   const routeSubject = useMemo(() => subjectFromRouteParam(subjectRef), [subjectRef])
   const currentTab = useMemo(() => tabFromPathname(location.pathname), [location.pathname])
   const baseSubject = subjectFromRouterState(location.state) ?? routeSubject
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  // Each tab opens at its top, as every other page does.
+  useLayoutEffect(() => {
+    if (scrollerRef.current) scrollerRef.current.scrollTop = 0
+  }, [location.pathname])
   const legacyTicker =
     routeSubject.subject_ref.kind === 'legacy_listing_route'
       ? routeSubject.subject_ref.ticker
@@ -252,7 +257,7 @@ export function SubjectDetailShell() {
           </NavLink>
         ))}
       </nav>
-      <div className="flex min-h-0 flex-1 items-start overflow-auto">
+      <div ref={scrollerRef} className="flex min-h-0 flex-1 items-start overflow-auto">
         {legacyTicker !== null ? (
           <LegacyRouteResolutionView
             ticker={legacyTicker}

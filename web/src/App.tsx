@@ -42,6 +42,7 @@ const campaign = page(() => import('./discovery/CampaignPage.tsx'), 'CampaignPag
 const review = page(() => import('./pages/ReviewPage'), 'ReviewPage')
 const settings = page(() => import('./pages/SettingsPage'), 'SettingsPage')
 const subject = page(() => import('./shell/SubjectDetailShell'), 'SubjectDetailShell')
+// One chunk for all five symbol tabs (13 kB gzip), so switching tabs never waits.
 const sections = () => import('./pages/symbol/sections')
 
 // Route scope handles. Declarative metadata (bead fra-6al.2.3) consumed by
