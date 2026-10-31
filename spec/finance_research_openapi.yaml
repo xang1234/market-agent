@@ -836,11 +836,12 @@ paths:
                 message_id:
                   type: string
                   format: uuid
-                  description: Optional client-generated idempotency key for retry-safe message creation.
+                  description: Optional client-generated id for the message. It is not an idempotency key. An id any message already holds returns 409 and saves nothing, and that includes a retry of a request that was saved.
                 snapshot_id:
                   type: string
                   format: uuid
-                  description: Optional client-generated id for the message's new user-input snapshot. An id that already names a snapshot returns 409.
+                  deprecated: true
+                  description: Ignored. The server seals the message's user-input snapshot under a new id, returned as message.snapshot_id.
                 content:
                   type: string
                 attachments:
@@ -865,7 +866,7 @@ paths:
         '404':
           description: Thread not found for the calling user
         '409':
-          description: The message_id was saved with a different payload, or the snapshot_id already names a snapshot
+          description: The message_id is already in use
   /v1/chat/threads/{threadId}/stream:
     get:
       tags: [Chat]
