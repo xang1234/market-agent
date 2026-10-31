@@ -214,7 +214,7 @@ test('ask first under StrictMode creates the thread, posts the question and open
     ])
     assert.equal(writes[0][2], '{"title":null}')
     const posted = JSON.parse(writes[1][2]) as Record<string, string>
-    assert.deepEqual(Object.keys(posted), ['message_id', 'snapshot_id', 'content'])
+    assert.deepEqual(Object.keys(posted), ['message_id', 'content'])
     assert.equal(posted.content, 'Analyze NVDA')
     assert.equal(FakeEventSource.instances.length, 1)
     assert.match(FakeEventSource.instances[0].url, /^\/v1\/chat\/threads\/T1\/stream\?/)
