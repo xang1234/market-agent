@@ -1,20 +1,23 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { provenanceRow, toCsv } from './csv.ts'
-import { resultsById, seriesCsv, supportedFinancialContent, tableCsv } from './financialAnswer.ts'
+import { provenanceRow, toTsv } from './tableCopy.ts'
+import { resultsById, seriesCopyRows, supportedFinancialContent, tableCopyRows } from './financialAnswer.ts'
 import { financialAnswerFixture } from './fixtures.ts'
 
-test('cells are quoted when they hold commas, quotes, line breaks, or edge spaces', () => {
+test('cells are tab-separated, quoted only when they hold a tab, quote, or line break', () => {
   assert.equal(
-    toCsv([['plain', 'a,b', 'say "hi"', 'two\nlines', ' padded']]),
-    'plain,"a,b","say ""hi""","two\nlines"," padded"',
+    toTsv([['plain', 'a,b', 'say "hi"', 'two\nlines', 'tab\there']]),
+    'plain\ta,b\t"say ""hi"""\t"two\nlines"\t"tab\there"',
   )
-  assert.equal(toCsv([['a'], ['b']]), 'a\r\nb')
+  assert.equal(toTsv([['a'], ['b']]), 'a\r\nb')
 })
 
-test('a cell a spreadsheet would run as a formula is neutralised, but a negative number is not', () => {
-  assert.equal(toCsv([['=SUM(A1)', '+1', '@cmd', '-cmd', '-0.05', '-12']]), "'=SUM(A1),'+1,'@cmd,'-cmd,-0.05,-12")
+test('only a plain number may start with a minus; anything a spreadsheet would run is neutralised', () => {
+  assert.equal(
+    toTsv([['=SUM(A1)', '+1', '@cmd', '-cmd', '-1+HYPERLINK("x")', '-0.05', '-12', '391035000000']]),
+    "'=SUM(A1)\t'+1\t'@cmd\t'-cmd\t\"'-1+HYPERLINK(\"\"x\"\")\"\t-0.05\t-12\t391035000000",
+  )
 })
 
 test('a certified table copies raw values with units in the headers and the source last', () => {
@@ -23,12 +26,12 @@ test('a certified table copies raw values with units in the headers and the sour
   assert.equal(table.kind, 'table')
   if (table.kind !== 'table') return
   assert.equal(
-    toCsv([...tableCsv(content, table, resultsById(content)), provenanceRow(financialAnswerFixture)]),
+    toTsv([...tableCopyRows(content, table, resultsById(content)), provenanceRow(financialAnswerFixture)]),
     [
-      'Company,Revenue (USD),Revenue period,"Gross margin (gross profit / revenue), FY2023 (ratio)"',
-      'Apple Inc.,391035000000,FY2023,0.46206',
-      'Microsoft Corp.,,,A required input or calculation is unavailable.',
-      `As of ${financialAnswerFixture.as_of},Snapshot ${financialAnswerFixture.snapshot_id}`,
+      'Company\tRevenue (USD)\tRevenue period\tGross margin (gross profit / revenue), FY2023 (ratio)',
+      'Apple Inc.\t391035000000\tFY2023\t0.46206',
+      'Microsoft Corp.\t\t\tA required input or calculation is unavailable.',
+      `As of ${financialAnswerFixture.as_of}\tSnapshot ${financialAnswerFixture.snapshot_id}`,
     ].join('\r\n'),
   )
 })
@@ -42,7 +45,7 @@ test('a certified series copies one period and raw value per row', () => {
     measure_label_id: revenue.measure_label_id,
     points: [{ period_label_id: revenue.period_label_id, result_id: revenue.result_id }],
   }
-  assert.deepEqual(seriesCsv(content, series, resultsById(content)), [
+  assert.deepEqual(seriesCopyRows(content, series, resultsById(content)), [
     ['Period', 'Apple Inc.: Revenue (USD)'],
     ['FY2023', '391035000000'],
   ])
@@ -64,9 +67,16 @@ test('a column mixing currencies names each row\'s unit instead of one header un
     ],
     ascending: {},
   }
-  assert.deepEqual(tableCsv(content, table, results), [
+  assert.deepEqual(tableCopyRows(content, table, results), [
     ['Company', 'Revenue, FY2023', 'Revenue, FY2023 unit'],
     ['Apple Inc.', '391035000000', 'USD'],
     ['Apple Inc.', '250000000000', 'EUR'],
   ])
+})
+
+test('a sorted table copies in the order it is shown', () => {
+  const content = supportedFinancialContent(financialAnswerFixture)!
+  const table = content.presentations.find((presentation) => presentation.kind === 'table')!
+  if (table.kind !== 'table') return
+  assert.deepEqual(tableCopyRows(content, table, resultsById(content), [1, 0]).map((row) => row[0]), ['Company', 'Microsoft Corp.', 'Apple Inc.'])
 })

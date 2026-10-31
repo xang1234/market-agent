@@ -128,10 +128,12 @@ function valueColumns(heading: string, results: ReadonlyArray<FinancialPresented
   return [{ ...value, header: unit === undefined || unit === '' ? heading : `${heading} (${unit})` }]
 }
 
-export function tableCsv(
+export function tableCopyRows(
   content: FinancialAnswerContent,
   table: FinancialTablePresentation,
   results: ReadonlyMap<string, FinancialPresentedResult>,
+  // The row order on screen, so a sorted table copies as it is shown.
+  order: ReadonlyArray<number> = table.rows.map((_, index) => index),
 ): string[][] {
   const resultAt = (row: FinancialTablePresentation['rows'][number], columnIndex: number) => {
     const id = row.cells[columnIndex]
@@ -148,14 +150,14 @@ export function tableCsv(
   })
   return [
     ['Company', ...columns.flat().map((column) => column.header)],
-    ...table.rows.map((row) => [
+    ...order.map((index) => table.rows[index]!).map((row) => [
       labelText(content, row.subject_label_id),
       ...columns.flatMap((csvColumns, index) => csvColumns.map((column) => column.cell(resultAt(row, index)))),
     ]),
   ]
 }
 
-export function seriesCsv(
+export function seriesCopyRows(
   content: FinancialAnswerContent,
   series: FinancialSeriesPresentation,
   results: ReadonlyMap<string, FinancialPresentedResult>,

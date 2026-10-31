@@ -1,7 +1,7 @@
 import { useContext, useState, type ReactElement } from 'react'
 import { ChartCard } from './ChartCard.tsx'
-import { CopyCsvButton } from './CopyCsvButton.tsx'
-import { provenanceRow } from './csv.ts'
+import { CopyTableButton } from './CopyTableButton.tsx'
+import { provenanceRow } from './tableCopy.ts'
 import { InspectableResult } from '../evidence/InspectableResult.tsx'
 import { BlockProofContext } from './blockProof.ts'
 import { VerificationLabel } from './VerificationLabel.tsx'
@@ -11,8 +11,8 @@ import {
   resultLabel,
   resultsById,
   seriesBars,
-  seriesCsv,
-  tableCsv,
+  seriesCopyRows,
+  tableCopyRows,
   sortedRowIndexes,
   supportedFinancialContent,
   type SortDirection,
@@ -154,7 +154,7 @@ function CertifiedTable({ blockId, provenance, content, results, table }: TableP
   return (
     <div className="relative overflow-x-auto rounded-lg border border-line" data-testid={`block-financial-answer-${blockId}-table`}>
       <div className="absolute right-1.5 top-1.5">
-        <CopyCsvButton what={table.caption || 'this table'} rows={() => [...tableCsv(content, table, results), provenance]} />
+        <CopyTableButton what={table.caption || 'this table'} rows={() => [...tableCopyRows(content, table, results, order), provenance]} />
       </div>
       <table className="w-full border-collapse text-left text-sm">
         <caption className="py-2 pl-3 pr-28 text-left text-xs text-muted">{table.caption}</caption>
@@ -217,7 +217,7 @@ function CertifiedSeries({ provenance, content, results, series }: SeriesProps):
   return (
     <figure className="relative mt-2">
       <div className="absolute right-0 top-0">
-        <CopyCsvButton what={heading} rows={() => [...seriesCsv(content, series, results), provenance]} />
+        <CopyTableButton what={heading} rows={() => [...seriesCopyRows(content, series, results), provenance]} />
       </div>
       <table className="w-full border-collapse text-sm">
         <caption className="pb-2 pr-28 text-left text-xs font-medium text-muted">{heading}</caption>
