@@ -635,6 +635,21 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.deepEqual([events.at(-1)!.type, events.at(-1)!.error_code], ["turn.error", "financial_answer_failed"]);
   });
 
+  await t.test("a turn whose answer's id another thread's message held before it started fails, and leaves that message", async () => {
+    const turn = { ...base, turnId: randomUUID(), userIntent: "Revenue for AAA" };
+    const id = financialMessageId(threadId, turn.turnId);
+    const strangerThreadId = randomUUID();
+    await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [strangerThreadId, IDS.other]);
+    await persistUserChatMessage(pool, { thread_id: strangerThreadId, user_id: IDS.other, content: "What did they ask?", message_id: id });
+    const { events } = await chatHarness(pool, { model: revenueModel(["AAA"]) }).run(turn);
+    const { rows } = await db.query(`select thread_id::text, role, blocks from chat_messages where message_id = $1`, [id]);
+    assert.deepEqual(
+      rows.map((row) => [row.thread_id, row.role, row.blocks.map((block: { kind: string; segments: unknown }) => [block.kind, block.segments])]),
+      [[strangerThreadId, "user", [["rich_text", [{ type: "text", text: "What did they ask?" }]]]]],
+    );
+    assert.deepEqual([events.at(-1)!.type, events.at(-1)!.error_code], ["turn.error", "financial_answer_failed"]);
+  });
+
   await t.test("a turn about a company reaches the engine; one about none, or whose reading asks for no figure but evidence, guidance or market data, the analyst (#398)", async (st) => {
     const carried = async (ticker: string) => ({ ...(await resolveMention(ticker)), handoff: { display_labels: { ticker } } }) as unknown as ChatResolvedSubjectPreResolution;
     const [aaa, bbb] = [await carried("AAA"), await carried("BBB")];
