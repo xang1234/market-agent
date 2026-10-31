@@ -370,7 +370,7 @@ function TitleEditor({ initial, onDone }: { initial: string; onDone: (next: stri
         }
       }}
       onBlur={(event) => finish(event.currentTarget.value)}
-      className="block w-full rounded-md border border-accent bg-surface px-2.5 py-2 text-sm text-fg outline-none"
+      className="block w-full rounded-md border border-accent bg-surface px-2.5 py-2 text-sm text-fg outline-none ring-2 ring-accent-soft"
     />
   )
 }

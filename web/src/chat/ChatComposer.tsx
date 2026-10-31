@@ -29,7 +29,7 @@ export function ChatComposer({ draftScope, canAsk, onAsk }: ChatComposerProps): 
         <label className="sr-only" htmlFor="chat-composer">
           Ask the analyst
         </label>
-        <div className="flex items-end gap-2 rounded-2xl border border-line-strong bg-surface px-3 py-2.5 shadow-md">
+        <div className="flex items-end gap-2 rounded-2xl border border-line-strong bg-surface px-3 py-2.5 shadow-md transition-colors focus-within:border-accent focus-within:ring-2 focus-within:ring-accent-soft">
           <textarea
             id="chat-composer"
             value={prompt}
