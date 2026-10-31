@@ -16,7 +16,7 @@ import { AssistantBlocks } from './MessageItem.tsx'
 import { PendingTurnView } from './PendingTurnView.tsx'
 import { INITIAL_STREAM_STATE, applyChatStreamEvent, type StreamState } from './streamReducer.ts'
 
-const TURN: TurnIds = { runId: 'run-1', messageId: 'u1', snapshotId: 'snap-1', text: 'Analyze NVDA' }
+const TURN: TurnIds = { runId: 'run-1', messageId: 'u1', text: 'Analyze NVDA' }
 const RUN = { runId: 'run-1', turnId: 'u1' }
 const noop = () => undefined
 const handlers = { messages: [], onRetry: noop, onReconnect: noop, onReload: noop, onAsk: () => true }
