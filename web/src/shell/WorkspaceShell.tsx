@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useLayoutEffect, useRef } from 'react'
 import { useLocation, useNavigation } from 'react-router-dom'
 import { EvidenceInspectorDock, EvidenceInspectorProvider } from '../evidence/EvidenceInspectorProvider.tsx'
 import { WatchlistProvider } from '../watchlists/WatchlistProvider'
@@ -49,7 +49,7 @@ export function WorkspaceShell() {
   const { pathname } = useLocation()
   const mainRef = useRef<HTMLElement>(null)
   // A page that does not scroll itself scrolls the canvas, which outlives it.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (mainRef.current) mainRef.current.scrollTop = 0
   }, [pathname])
   return (

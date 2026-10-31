@@ -9,7 +9,8 @@ const RELOAD_WINDOW_MS = 60_000
 // error screen instead of reloading forever.
 export function reloadOnce(destination: string, error: unknown): Promise<never> {
   const href = new URL(destination, window.location.href).href
-  if (!claimReload(href)) return Promise.reject(error)
+  // Offline, a reload would swap the app for the browser's error page.
+  if (!navigator.onLine || !claimReload(href)) return Promise.reject(error)
   // Assigning the current URL with a #fragment would not reload the document.
   if (stripHash(href) === stripHash(window.location.href)) window.location.reload()
   else window.location.assign(href)
