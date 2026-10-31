@@ -209,6 +209,39 @@ test("a balance trend orders the engine's quarters, each dated by the day its va
   );
 });
 
+test("a balance trend names a quarter its value was never bound to as not shown, though only bound quarters are dated (#540)", () => {
+  const cash = [["Q1 FY2025 (as of 2024-04-28)", "USD 31,438,000,000.00"], ["end of Q2 FY2025", null], ["Q3 FY2025 (as of 2024-10-27)", "USD 38,487,000,000.00"]] as const;
+  const packet = enginePacket(content(
+    cash.map(([, text], i) => (text ? value(20 + i, "a", "measure:cash", `period:c${i}`, text) : gap(20 + i, "a", "measure:cash", `period:c${i}`))),
+    ["a"],
+    {
+      "measure:cash": { kind: "measure", text: "Cash and equivalents (excluding restricted cash)" },
+      ...Object.fromEntries(cash.map(([period], i) => [`period:c${i}`, { kind: "period", text: period }])),
+    },
+  ), new Map([["a", "NVDA"]]), null);
+  const report = checkAssertions([{ kind: "comparison", text: "x", evidence: ["F1", "F3"], op: "trend", result: "rose" }], packet);
+  assert.deepEqual(report.rejected, []);
+  assert.equal(
+    plainText(renderAssertion(report.accepted[0]!, packet, []).segments),
+    "NVDA's cash and equivalents (excluding restricted cash) rose from USD 31,438,000,000.00 in Q1 FY2025 (as of Apr 2024) to USD 38,487,000,000.00 in Q3 FY2025 (as of Oct 2024), though not in every period. No cash and equivalents (excluding restricted cash) is shown for end of Q2 FY2025.",
+  );
+});
+
+test("companies on different fiscal calendars, each shown for two years, are compared at the year they share by name (#541)", () => {
+  const years = [["a", "FY2024 (ended 2024-01-28)", "USD 60,922,000,000.00"], ["a", "FY2025 (ended 2025-01-26)", "USD 130,497,000,000.00"], ["b", "FY2024 (ended 2024-12-28)", "USD 25,785,000,000.00"], ["b", "FY2025 (ended 2025-12-27)", "USD 34,639,000,000.00"]] as const;
+  const packet = enginePacket(content(
+    years.map(([slot, , text], i) => value(30 + i, slot, "measure:m0", `period:y${i}`, text)),
+    ["a", "b"],
+    Object.fromEntries(years.map(([, period], i) => [`period:y${i}`, { kind: "period", text: period }])),
+  ), TICKERS, null);
+  const report = checkAssertions([{ kind: "comparison", text: "x", evidence: ["F2", "F4"], op: "highest", result: "F2" }], packet);
+  assert.deepEqual(report.rejected, []);
+  assert.equal(
+    plainText(renderAssertion(report.accepted[0]!, packet, []).segments),
+    "Of NVDA and AMD, NVDA's revenue was highest: NVDA USD 130,497,000,000.00 (FY2025 (ended Jan 2025)), AMD USD 34,639,000,000.00 (FY2025 (ended Dec 2025)).",
+  );
+});
+
 test("a trend over time names the periods its company and metric show as gaps", () => {
   const packet = enginePacket(content(
     [...REVENUE.slice(0, 7).map(([, text], i) => value(10 + i, "a", "measure:m0", `period:q${i}`, text)), gap(17, "a", "measure:m0", "period:q7")],
