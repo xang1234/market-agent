@@ -1,0 +1,329 @@
+{
+  "pairing": "2026-10-27T110325",
+  "pairs": {
+    "single-latest-quarter": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 2,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 2,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2
+      },
+      "labels": {
+        "A": [],
+        "B": []
+      },
+      "notes": "Both are accurate and cite every figure, and both give a specific counterpoint (sequential growth slowed from 21.96% to 8.94%). B is much easier for me to read: $62.1B instead of USD 62,100,000,000.00, the quarter's end date (Jan 2026) stated, and no repeated tables. A is correct but the numbers bury the point."
+    },
+    "missing-segments": {
+      "A": {
+        "correct_companies": 1,
+        "comparable_periods": "n/a",
+        "figures_match_sources": "n/a",
+        "conclusions_justified": "n/a",
+        "counterarguments": "n/a",
+        "no_invented_numbers": 1
+      },
+      "B": {
+        "correct_companies": 1,
+        "comparable_periods": "n/a",
+        "figures_match_sources": "n/a",
+        "conclusions_justified": "n/a",
+        "counterarguments": "n/a",
+        "no_invented_numbers": 1
+      },
+      "labels": {
+        "A": [
+          "unstated_gap"
+        ],
+        "B": [
+          "unstated_gap"
+        ]
+      },
+      "notes": "The two are identical. Neither invents a segment number, but both frame the gap as a calculation they can't do instead of saying plainly that AMD segment data isn't available, and neither names AMD. As an investor I come away not knowing whether the data exists."
+    },
+    "peer-two": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": 1,
+        "figures_match_sources": 0,
+        "conclusions_justified": 1,
+        "counterarguments": 1,
+        "no_invented_numbers": 1
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 1,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2
+      },
+      "labels": {
+        "A": [
+          "unsupported_figure",
+          "wrong_period"
+        ],
+        "B": []
+      },
+      "notes": "B compares full fiscal years with end dates, says the periods don't line up, adds price performance, and offers a concrete counterpoint (AMD's ~$800M export-control charge may depress its margins). A compares unaligned quarters, and its pp-difference lines are labelled against AMD Q4 FY2025, which isn't shown, so they don't match the table (e.g. 74.40-54.02 is 20.38, not 20.42). A also has no price data. B's price window ('Dec 2025 to Aug 2026') is vague, so I can't verify those returns."
+    },
+    "segment-drill-down": {
+      "A": {
+        "correct_companies": 0,
+        "comparable_periods": 0,
+        "figures_match_sources": 0,
+        "conclusions_justified": 0,
+        "counterarguments": 0,
+        "no_invented_numbers": 1
+      },
+      "B": {
+        "correct_companies": 0,
+        "comparable_periods": 0,
+        "figures_match_sources": 0,
+        "conclusions_justified": 0,
+        "counterarguments": 0,
+        "no_invented_numbers": 1
+      },
+      "labels": {
+        "A": [
+          "operational_failure"
+        ],
+        "B": [
+          "operational_failure"
+        ]
+      },
+      "notes": "The two are identical refusals, even though NVDA segment data exists. Nothing in either is usable: no Data Center figure and no note on how concentrated revenue is. Both suggest the request can't be met instead of answering it."
+    },
+    "missing-cash-flow": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": "n/a",
+        "figures_match_sources": "n/a",
+        "conclusions_justified": "n/a",
+        "counterarguments": "n/a",
+        "no_invented_numbers": 2
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": "n/a",
+        "figures_match_sources": "n/a",
+        "conclusions_justified": "n/a",
+        "counterarguments": "n/a",
+        "no_invented_numbers": 2
+      },
+      "labels": {
+        "A": [],
+        "B": []
+      },
+      "notes": "Both state honestly that operating cash flow and capex are missing, so free cash flow can't be computed, and neither passes off net income as FCF. B also says it defaulted to the latest fiscal year, which helps a little. Labels like 'missing_input' and 'blocked_by_dependency' read as system jargon to a retail reader."
+    },
+    "follow-up-memory": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 2,
+        "conclusions_justified": 1,
+        "counterarguments": 2,
+        "no_invented_numbers": 2
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 2,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2
+      },
+      "labels": {
+        "A": [
+          "weak_conclusion"
+        ],
+        "B": []
+      },
+      "notes": "Both keep NVDA, add AMD, and use the correct YTD window (5.81% vs 3.17%). For 'explain the differences and show the evidence', A only repeats the price returns and the AMD quote. B lays out the fundamentals for both with fiscal-year end dates and states the mismatch. It also makes a useful point: the stock-return lead is far narrower than the fundamental lead. B is the one I could act on. A rightly says the 2025 export charge doesn't explain the 2026 return."
+    },
+    "what-changed-gross-margin": {
+      "A": {
+        "correct_companies": 1,
+        "comparable_periods": 1,
+        "figures_match_sources": 0,
+        "conclusions_justified": 0,
+        "counterarguments": 0,
+        "no_invented_numbers": 1
+      },
+      "B": {
+        "correct_companies": 1,
+        "comparable_periods": 1,
+        "figures_match_sources": 0,
+        "conclusions_justified": 0,
+        "counterarguments": 0,
+        "no_invented_numbers": 1
+      },
+      "labels": {
+        "A": [
+          "weak_conclusion",
+          "unstated_gap"
+        ],
+        "B": [
+          "weak_conclusion",
+          "unstated_gap"
+        ]
+      },
+      "notes": "Both answer with a clarifying question that is close to word-for-word the same. The question was clear enough to default to the prior quarter, so I get no margin figures, no mention of the drop to ~60.5%, and no note that the cause isn't in the data."
+    },
+    "ticker-page-compare": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 1,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 2,
+        "conclusions_justified": 1,
+        "counterarguments": 1,
+        "no_invented_numbers": 2
+      },
+      "labels": {
+        "A": [],
+        "B": [
+          "weak_conclusion",
+          "missing_counterpoint"
+        ]
+      },
+      "notes": "A is the one I'd want: full fiscal years with end dates, the 4-month offset stated, price returns, and a grounded counterpoint (the share-price gains were similar despite NVDA's stronger fundamentals). Its price window is vague, though. B is a wall of unaligned quarterly numbers with no price data, and its 'Not covered: Apple Inc.'s lead ... in each margin' line is garbled, since Apple leads on no margin."
+    },
+    "fiscal-year-trap": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": 1,
+        "figures_match_sources": 1,
+        "conclusions_justified": 1,
+        "counterarguments": 1,
+        "no_invented_numbers": 2
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": 1,
+        "figures_match_sources": 1,
+        "conclusions_justified": 1,
+        "counterarguments": 1,
+        "no_invented_numbers": 2
+      },
+      "labels": {
+        "A": [
+          "weak_conclusion"
+        ],
+        "B": [
+          "weak_conclusion"
+        ]
+      },
+      "notes": "The two are identical. Both show both FY2025 revenues and decline to rank them because the periods differ, which is honest. But they put both under one 'FY2025' column and never say the years end 8 months apart (Jan vs Sep). A retail reader wouldn't understand the 'cohort members cover different periods' note."
+    },
+    "margin-trend-loss-quarter": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": 0,
+        "figures_match_sources": 1,
+        "conclusions_justified": 1,
+        "counterarguments": 0,
+        "no_invented_numbers": 1
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": 0,
+        "figures_match_sources": 1,
+        "conclusions_justified": 1,
+        "counterarguments": 0,
+        "no_invented_numbers": 1
+      },
+      "labels": {
+        "A": [
+          "wrong_period",
+          "weak_conclusion",
+          "missing_counterpoint",
+          "unstated_gap"
+        ],
+        "B": [
+          "wrong_period",
+          "weak_conclusion",
+          "missing_counterpoint",
+          "unstated_gap"
+        ]
+      },
+      "notes": "The two are identical bare lists using 'fiscal quarter N before latest' instead of named quarters, so I can't tell which quarter lost money. They don't hide the -1.74% quarter, but there is no trend description and no mention of AMD's filed explanation. Not usable without more work."
+    },
+    "peer-three": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": 1,
+        "figures_match_sources": 0,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 1
+      },
+      "B": {
+        "correct_companies": 1,
+        "comparable_periods": 1,
+        "figures_match_sources": 0,
+        "conclusions_justified": 0,
+        "counterarguments": 0,
+        "no_invented_numbers": 1
+      },
+      "labels": {
+        "A": [
+          "unsupported_figure",
+          "wrong_period"
+        ],
+        "B": [
+          "weak_conclusion",
+          "unstated_gap"
+        ]
+      },
+      "notes": "A covers all three companies with sourced quarterly figures and a clear caveat that the quarters aren't aligned. Its pp-difference lines are labelled against AMD Q4 FY2025 and Apple Q1 FY2026, which aren't shown, and they don't match the table (operating gap to AAPL is listed as 30.44 pp; the table gives 34.21 pp). B only asks which margin I mean, which is a needless clarification since I said 'margins'. Neither notes that Apple is in a different industry."
+    },
+    "cause-in-evidence": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 1,
+        "conclusions_justified": 0,
+        "counterarguments": 0,
+        "no_invented_numbers": 1
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 1,
+        "conclusions_justified": 0,
+        "counterarguments": 0,
+        "no_invented_numbers": 1
+      },
+      "labels": {
+        "A": [
+          "weak_conclusion",
+          "unstated_gap"
+        ],
+        "B": [
+          "weak_conclusion",
+          "unstated_gap"
+        ]
+      },
+      "notes": "Both show the margin swing (10.84% to -1.74%) and then say the cause isn't covered, even though AMD's own export-control explanation (~$800M charges) is in evidence, so neither answers the 'why'. B is slightly better because it adds the -$134M operating loss on $7.685B revenue, which makes the size of the loss concrete. Both label a percentage-point change as '%'."
+    }
+  }
+}
