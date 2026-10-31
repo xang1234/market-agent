@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { FinancialPlanV1, PeriodSelector, ValuePayload } from "../src/contracts.ts";
+import type { BoundFinancialInputV1, FinancialPlanV1, PeriodSelector, ValuePayload } from "../src/contracts.ts";
 import { evaluatePlan } from "../src/coverage.ts";
 import { parseDerivedDecimalText } from "../src/exact-decimal.ts";
+import { operandFromBoundInput } from "../src/operations.ts";
 import { fixed, presentationHash, presentFinancialUnit, type CommittedResult, type FinancialAnswerContent } from "../src/presentation.ts";
 import { change, mutable, overviewComparisonPlan, planFixture, quarterBack, reportedAt } from "./fixtures.ts";
-import { operand } from "./operand-fixtures.ts";
+import { boundInput, operand, priceInput, SLOTS, SPLIT_CUTOFF, splitAdjustment } from "./operand-fixtures.ts";
 
 const HASH = "a".repeat(64);
 const NAMES = { a: "Alpha Corp", b: "Beta Inc" };
@@ -282,6 +283,70 @@ test("a change in a margin reads in percentage points, not percent (#539)", () =
     [labelTexts(content, "o_om_change")[1], resultText(content, "o_om_change"), state.payload.kind === "value" && state.payload.unit],
     ["Quarter-over-quarter change in Operating margin (operating income / revenue)", "-12.58 pp", { kind: "percentage_points" }],
   );
+});
+
+test("the computed unit and the rendered suffix agree for every level and change of a multiple, a margin, and a percent change (#539, #544)", () => {
+  const ratio = (node_id: string, year: number) =>
+    ({ node_id, operation: "ratio" as const, operation_version: "ratio.v1", ratio_key: "liabilities_to_equity", numerator: `tl${year}`, denominator: `eq${year}` });
+  const grossMargin = (node_id: string, year: number) =>
+    ({ node_id, operation: "gross_margin" as const, operation_version: "gross_margin.v1", numerator: `gp${year}`, revenue: `rev${year}` });
+  const plan = singleSubjectPlan(
+    [
+      ...[2021, 2022, 2023].flatMap((year) => [balance(`tl${year}`, "total_liabilities", year), balance(`eq${year}`, "total_equity", year), ratio(`lte${year}`, year)]),
+      change("lte_chg22", "absolute_change", "lte2022", "lte2021"),
+      change("lte_chg23", "absolute_change", "lte2023", "lte2022"),
+      change("lte_chg_chg", "absolute_change", "lte_chg23", "lte_chg22"),
+      reportedAt("px", "a", "share_price", { kind: "at_cutoff" }),
+      reportedAt("eps", "a", "eps_diluted", { kind: "latest", period_type: "annual", offset: 0 }),
+      { node_id: "pe", operation: "pe_ratio", operation_version: "pe_ratio.v1", price: "px", earnings: "eps" },
+      ...[2021, 2022, 2023].map((year) => balance(`rev${year}`, "revenue", year)),
+      ...[2022, 2023].flatMap((year) => [balance(`gp${year}`, "gross_profit", year), grossMargin(`gm${year}`, year)]),
+      change("gm_chg", "absolute_change", "gm2023", "gm2022"),
+      change("g22", "percent_change_positive_base", "rev2022", "rev2021"),
+      change("g23", "percent_change_positive_base", "rev2023", "rev2022"),
+      change("g_chg", "absolute_change", "g23", "g22"),
+    ],
+    ["lte2023", "pe", "lte_chg23", "lte_chg_chg", "gm2023", "gm_chg", "g23", "g_chg"],
+  );
+  plan.time = { ...plan.time, knowledge_cutoff: SPLIT_CUTOFF };
+  const fact = (metric: string, value: string, year: number, kind: "duration" | "instant") =>
+    boundInput({ metric, value, kind, start: `${year}-01-01`, end: `${year}-12-31`, fiscal_year: year });
+  // Liabilities / equity 1.80x, 1.60x, 1.20x; revenue 80, 100, 120; gross profit 40 then 46.2.
+  const INPUTS: Record<string, () => BoundFinancialInputV1> = {
+    ...Object.fromEntries([2021, 2022, 2023].flatMap((year) => [
+      [`tl${year}`, () => fact("total_liabilities", { 2021: "90", 2022: "80", 2023: "60" }[year]!, year, "instant")],
+      [`eq${year}`, () => fact("total_equity", "50", year, "instant")],
+      [`rev${year}`, () => fact("revenue", { 2021: "80", 2022: "100", 2023: "120" }[year]!, year, "duration")],
+    ])),
+    gp2022: () => fact("gross_profit", "40", 2022, "duration"),
+    gp2023: () => fact("gross_profit", "46.2", 2023, "duration"),
+    px: () => priceInput("1200.00", "1200", "2024-06-07"),
+    eps: () => boundInput({
+      metric: "eps_diluted", value: "11.93", unit: { kind: "currency_per_share", currency: "USD" }, start: "2023-01-30", end: "2024-01-28",
+      fiscal_year: 2024, share_basis: "diluted", split_adjustment: splitAdjustment("11.93", "per_share", "2024-02-21"),
+    }),
+  };
+  const evaluation = evaluatePlan(plan, (node) => operandFromBoundInput(INPUTS[node.node_id]!(), node, {
+    slot: SLOTS.a, definition_version: `${node.metric_key}.v1`, knowledge_cutoff: SPLIT_CUTOFF, reporting_basis: "as_reported",
+  }));
+  const results = evaluation.outputs.map(({ output_id, node_id, state }) => {
+    assert.ok(state.status === "computed", `${node_id}: ${state.status === "gap" ? state.reason_code : state.status}`);
+    return committed(output_id, node_id, state.payload);
+  });
+  const content = present(plan, results, { a: "Alpha Corp" });
+  const rows = results.map(({ output_id, node_id, payload }) => [node_id, (payload as ValuePayload).unit.kind, resultText(content, output_id)]);
+  assert.deepEqual(rows, [
+    ["lte2023", "ratio", "1.20x"],
+    ["pe", "ratio", "100.59x"],
+    ["lte_chg23", "ratio", "-0.40x"],
+    ["lte_chg_chg", "ratio", "-0.20x"],
+    ["gm2023", "ratio", "38.50%"],
+    ["gm_chg", "percentage_points", "-1.50 pp"],
+    ["g23", "ratio", "20.00%"],
+    ["g_chg", "percentage_points", "-5.00 pp"],
+  ]);
+  const UNITS_BY_SUFFIX: Record<string, string[]> = { x: ["ratio"], "%": ["ratio", "percent"], pp: ["percentage_points"] };
+  for (const [node_id, unit, text] of rows) assert.ok(UNITS_BY_SUFFIX[text!.match(/(x|%|pp)$/u)![1]!]!.includes(unit!), `${node_id}: ${unit} renders as ${text}`);
 });
 
 const usdValue = (value: string) => valueOf(value, { kind: "currency", currency: "USD" });
