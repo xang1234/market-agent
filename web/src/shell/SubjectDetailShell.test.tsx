@@ -206,6 +206,10 @@ test('SubjectDetailShell hydrates a bare listing route before child sections nee
 
     assert.match(dom.window.document.body.innerHTML, new RegExp(ISSUER_ID))
     assert.ok(calls.includes('/v1/subjects/hydrate'))
+    const header = dom.window.document.querySelector('[data-testid="subject-header"]')!
+    assert.equal(header.querySelector('h1')?.textContent, 'Apple Inc.')
+    assert.equal(header.querySelector('section > p')?.textContent, 'Technology · Consumer Electronics')
+    assert.match(header.textContent ?? '', /AAPLXNAS · USD/, 'the listing stays named while the quote is unavailable')
     await act(async () => root.unmount())
   } finally {
     globalThis.fetch = originalFetch

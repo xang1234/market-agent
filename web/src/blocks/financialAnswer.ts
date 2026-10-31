@@ -61,18 +61,22 @@ export function sortedRowIndexes(
 }
 
 /**
- * Bar heights in [0, 1] for a series, relative to the largest magnitude.
- * Display-only: the canonical decimal is converted with Number() here and
- * nowhere else, and non-finite or non-value points get no bar.
+ * Bar sizes in [0, 1] for a series, relative to the largest magnitude, and
+ * each value's sign. Display-only: the canonical decimal is converted with
+ * Number() here and nowhere else, and non-finite or non-value points get no bar.
  */
-export function seriesBarHeights(points: ReadonlyArray<FinancialPresentedResult | undefined>): ReadonlyArray<number | null> {
-  const magnitudes = points.map((point) => {
+export function seriesBars(
+  points: ReadonlyArray<FinancialPresentedResult | undefined>,
+): ReadonlyArray<{ size: number; negative: boolean } | null> {
+  const values = points.map((point) => {
     if (point?.presented.kind !== 'value') return null
-    const magnitude = Math.abs(Number(point.presented.value))
-    return Number.isFinite(magnitude) ? magnitude : null
+    const value = Number(point.presented.value)
+    return Number.isFinite(value) ? value : null
   })
-  const max = Math.max(0, ...magnitudes.map((magnitude) => magnitude ?? 0))
-  return magnitudes.map((magnitude) => (magnitude === null ? null : max === 0 ? 0 : Math.min(1, Math.max(0, magnitude / max))))
+  const max = Math.max(0, ...values.map((value) => Math.abs(value ?? 0)))
+  return values.map((value) =>
+    value === null ? null : { size: max === 0 ? 0 : Math.min(1, Math.abs(value) / max), negative: value < 0 },
+  )
 }
 
 export function coverageText(content: FinancialAnswerContent): string {

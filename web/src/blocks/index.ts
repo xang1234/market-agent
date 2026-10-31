@@ -80,9 +80,6 @@ export {
 } from './Registry.ts'
 export type { BlockRegistry, BlockRenderer, BlockRendererProps } from './Registry.ts'
 
-export { validateBlock } from './BlockValidator.ts'
-export type { BlockValidationError, BlockValidationResult } from './BlockValidator.ts'
-
 export {
   BlockLayoutHintError,
   RESIDUAL_SECTION_ID,

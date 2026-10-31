@@ -8,7 +8,7 @@ import { EvidenceInspectorContext, type EvidenceInspectorContextValue } from '..
 
 import { validateBlock } from './BlockValidator.ts'
 import { FinancialAnswer } from './FinancialAnswer.tsx'
-import { resultsById, seriesBarHeights, sortedRowIndexes } from './financialAnswer.ts'
+import { resultsById, seriesBars, sortedRowIndexes } from './financialAnswer.ts'
 import { financialAnswerFiscalCalendarsFixture, financialAnswerFixture } from './fixtures.ts'
 import type { FinancialAnswerBlock, FinancialAnswerContent, FinancialPresentedResult, FinancialTablePresentation } from './types.ts'
 
@@ -160,12 +160,21 @@ test('sorting uses the server exact order; descending keeps rows without a value
   assert.deepEqual(sortedRowIndexes({ ...presentation, ascending: { c1: [0, 0, 1] } }, results, 'c1', 'ascending'), [0, 1, 2], 'an invalid permutation falls back to server order')
 })
 
-test('series bar geometry is bounded and ignores gaps and non-finite values', () => {
+test('series bars are bounded, carry their sign, and skip gaps and non-finite values', () => {
   const value = (text: string): FinancialPresentedResult => ({
     result_id: 'x', output_id: 'o', disposition: 'verified', subject_label_id: null, measure_label_id: 'measure:m0', period_label_id: 'period:p0', result_hash: '',
     presented: { kind: 'value', text, full_text: text, value: text, unit: { kind: 'count' }, exact: true },
   })
   const gap = content(financialAnswerFixture).results[2]!
-  assert.deepEqual(seriesBarHeights([value('50'), value('-100'), gap, undefined, value('1e999')]), [0.5, 1, null, null, null])
-  assert.deepEqual(seriesBarHeights([value('0'), value('0')]), [0, 0])
+  assert.deepEqual(seriesBars([value('50'), value('-100'), gap, undefined, value('1e999')]), [
+    { size: 0.5, negative: false },
+    { size: 1, negative: true },
+    null,
+    null,
+    null,
+  ])
+  assert.deepEqual(seriesBars([value('0'), value('0')]), [
+    { size: 0, negative: false },
+    { size: 0, negative: false },
+  ])
 })

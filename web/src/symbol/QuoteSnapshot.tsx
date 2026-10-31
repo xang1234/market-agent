@@ -10,6 +10,7 @@ import {
   type ResolvedSubject,
   type RouteResolvedSubject,
 } from './quote.ts'
+import { isCanonicalResolvedSubject } from './search.ts'
 import type { VisibleFetchState } from '../fetch/resource.ts'
 import { ChangePill } from './ChangePill.tsx'
 import { RefreshFailedNote } from './FetchStateView.tsx'
@@ -25,11 +26,19 @@ type QuoteSnapshotProps = {
 
 export function QuoteSnapshot({ subject, title, quoteState }: QuoteSnapshotProps) {
   const issuerProfile = issuerProfileFromSubject(subject)
+  // The ticker and venue sit beside the heading, so it names the company alone.
+  const heading = issuerProfile?.legal_name ?? title
+  const pendingListing = isCanonicalResolvedSubject(subject) ? subject.context?.listing : undefined
 
   if (quoteState.status !== 'ready') {
     return (
       <section className="min-w-0">
-        <SnapshotTitle title={title} />
+        <div className="flex flex-wrap items-center gap-2">
+          <SnapshotTitle title={heading} />
+          {pendingListing ? (
+            <ListingChips ticker={pendingListing.ticker} mic={pendingListing.mic} currency={pendingListing.trading_currency} />
+          ) : null}
+        </div>
         <div className="mt-3">
           {quoteState.status === 'loading' ? (
             <Skeleton label="Loading quote" className="h-9 w-48" />
@@ -50,13 +59,8 @@ export function QuoteSnapshot({ subject, title, quoteState }: QuoteSnapshotProps
   return (
     <section className="min-w-0">
       <div className="flex flex-wrap items-center gap-2">
-        <SnapshotTitle title={title} />
-        <span className="rounded border border-line px-2 py-0.5 text-xs font-medium text-muted">
-          {quote.listing.ticker}
-        </span>
-        <span className="text-xs text-muted">
-          {quote.listing.mic} · {quote.currency}
-        </span>
+        <SnapshotTitle title={heading} />
+        <ListingChips ticker={quote.listing.ticker} mic={quote.listing.mic} currency={quote.currency} />
       </div>
       <div className="mt-3 flex flex-wrap items-end gap-x-4 gap-y-2">
         <div className="num text-3xl font-semibold text-fg">
@@ -80,6 +84,17 @@ export function QuoteSnapshot({ subject, title, quoteState }: QuoteSnapshotProps
   )
 }
 
+function ListingChips({ ticker, mic, currency }: { ticker: string; mic: string; currency: string }) {
+  return (
+    <>
+      <span className="rounded border border-line px-2 py-0.5 text-xs font-medium text-muted">{ticker}</span>
+      <span className="text-xs text-muted">
+        {mic} · {currency}
+      </span>
+    </>
+  )
+}
+
 function SnapshotTitle({ title }: { title: string | null }) {
   return (
     <h1 className="min-w-0 truncate text-2xl font-semibold text-fg">
@@ -91,16 +106,11 @@ function SnapshotTitle({ title }: { title: string | null }) {
 function IssuerProfileLine({
   profile,
 }: {
-  profile: { legal_name: string; sector?: string; industry?: string } | null
+  profile: { sector?: string; industry?: string } | null
 }) {
-  if (!profile) return null
-  return (
-    <p className="mt-3 max-w-2xl text-sm text-muted">
-      {profile.legal_name}
-      {profile.sector ? ` · ${profile.sector}` : ''}
-      {profile.industry ? ` · ${profile.industry}` : ''}
-    </p>
-  )
+  const parts = [profile?.sector, profile?.industry].filter(Boolean)
+  if (parts.length === 0) return null
+  return <p className="mt-2 max-w-2xl text-sm text-muted">{parts.join(' · ')}</p>
 }
 
 function formatQuoteTime(asOf: string, timeZone?: string): string {

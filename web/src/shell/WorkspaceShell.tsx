@@ -1,3 +1,5 @@
+import { useLayoutEffect, useRef } from 'react'
+import { useLocation, useNavigation } from 'react-router-dom'
 import { EvidenceInspectorDock, EvidenceInspectorProvider } from '../evidence/EvidenceInspectorProvider.tsx'
 import { WatchlistProvider } from '../watchlists/WatchlistProvider'
 import { AuthInterrupt } from './AuthInterrupt'
@@ -43,12 +45,23 @@ export function WorkspaceShell() {
   const userId = session?.userId ?? null
   useSearchHotkey()
   useNavHotkeys()
+  const navigating = useNavigation().state !== 'idle'
+  const { pathname } = useLocation()
+  const mainRef = useRef<HTMLElement>(null)
+  // A page that does not scroll itself scrolls the canvas, which outlives it.
+  useLayoutEffect(() => {
+    if (mainRef.current) mainRef.current.scrollTop = 0
+  }, [pathname])
   return (
     <AuthInterruptProvider>
       <RightRailProvider>
         <WatchlistProvider userId={userId}>
           <EvidenceInspectorProvider>
             <div className="flex h-full w-full bg-bg text-fg">
+              <div
+                aria-hidden="true"
+                className={`pointer-events-none fixed inset-x-0 top-0 z-50 h-0.5 bg-accent transition-opacity ${navigating ? 'opacity-100 delay-150' : 'opacity-0'}`}
+              />
               <a
                 href="#workspace-main"
                 className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:border focus:border-line-strong focus:bg-surface focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-fg focus:shadow-md"
@@ -59,7 +72,7 @@ export function WorkspaceShell() {
               <div className="flex min-w-0 flex-1 flex-col">
                 <TopBar />
                 <div className="flex min-h-0 flex-1">
-                  <main id="workspace-main" tabIndex={-1} className="flex min-w-0 flex-1 flex-col overflow-hidden">
+                  <main ref={mainRef} id="workspace-main" tabIndex={-1} className="flex min-w-0 flex-1 flex-col overflow-auto">
                     <RouteScopeGate />
                   </main>
                   <EvidenceInspectorDock fallback={<RightRailSlot />} />
