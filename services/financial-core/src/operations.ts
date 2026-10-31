@@ -440,11 +440,11 @@ const HUNDRED = rationalFromDecimal({ coefficient: 100n, scale: 0 })!;
 /** Left minus right in their measurement, except that two percentages differ by percentage points. A multiple stays a ratio. */
 function difference(left: FinancialOperand, right: FinancialOperand): { value: ExactRational; measurement: Measurement } | null {
   const unit = left.measurement.unit;
-  const fraction = unit.kind === "ratio" && readsAsPercentage(left);
+  const percentRatio = unit.kind === "ratio" && readsAsPercentage(left);
   const value = subtractRationals(left.value, right.value);
-  const points = value !== null && fraction ? multiplyRationals(value, HUNDRED) : value;
+  const points = value !== null && percentRatio ? multiplyRationals(value, HUNDRED) : value;
   if (points === null) return null;
-  return { value: points, measurement: fraction || unit.kind === "percent" ? { ...left.measurement, unit: { kind: "percentage_points" } } : left.measurement };
+  return { value: points, measurement: percentRatio || unit.kind === "percent" ? { ...left.measurement, unit: { kind: "percentage_points" } } : left.measurement };
 }
 
 function readsAsPercentage(operand: FinancialOperand): boolean {
