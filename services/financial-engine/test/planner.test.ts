@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createRuntimeAuthority, planSemanticHash } from "../../financial-core/src/index.ts";
+import { createRuntimeAuthority, evaluatePlan, planSemanticHash, type ValuePayload } from "../../financial-core/src/index.ts";
+import { operand } from "../../financial-core/test/operand-fixtures.ts";
 import {
   buildDeterministicPlan,
   ClarificationError,
@@ -396,7 +397,42 @@ test("the model is never offered a lead or a window, and a draft that plans one 
 test("the model is told a change in a margin or a percent change, and a threshold on it, is in percentage points (#539)", async () => {
   const model = scripted(revenueProposal([0]));
   await planFinancialRequest(context({ requested_subjects: [resolved(0)] }), "Did Apple's gross margin fall by more than 2 points in FY2023?", model);
-  assert.match(model.calls[0]![0]!, /^An absolute_change of a margin or of a percent_change_positive_base is in percentage points, and so is a threshold on it, with unit \{"kind":"percentage_points"\}\.$/mu);
+  assert.match(model.calls[0]![0]!, /^An absolute_change of a margin or of a percent_change_positive_base is in percentage points, and so is a threshold on it, with unit \{"kind":"percentage_points"\}\. Its value is in points, not a fraction: a 2-point fall is \{"value":"-2","unit":\{"kind":"percentage_points"\}\}, never -0\.02\.$/mu);
+});
+
+test("a margin that fell 1.5 points did not fall by more than 2 points, when the model writes the threshold in points (#539)", async () => {
+  const fiscalYear = (fiscal_year: number) => ({ kind: "fiscal_period", fiscal_year, fiscal_period: "FY" });
+  const reported = (node_id: string, metric_key: string, fiscal_year: number) => ({ node_id, operation: "reported_metric", subject_slot: "a", metric_key, period: fiscalYear(fiscal_year) });
+  const draft = (value: string) => ({
+    outcome: "ready",
+    subjects: [{ slot_id: "a", mention: "Apple" }],
+    operations: [
+      reported("gp23", "gross_profit", 2023), reported("rev23", "revenue", 2023),
+      reported("gp22", "gross_profit", 2022), reported("rev22", "revenue", 2022),
+      { node_id: "gm23", operation: "gross_margin", numerator: "gp23", revenue: "rev23" },
+      { node_id: "gm22", operation: "gross_margin", numerator: "gp22", revenue: "rev22" },
+      { node_id: "gm_change", operation: "absolute_change", current: "gm23", prior: "gm22" },
+      { node_id: "fell", operation: "threshold", subject: "gm_change", threshold_id: "fall", comparison: "lt" },
+    ],
+    outputs: [{ output_id: "out_fell", node_id: "fell" }],
+    thresholds: [{ threshold_id: "fall", value, unit: { kind: "percentage_points" } }],
+  });
+  // Gross margin 40 / 100 = 40% in FY2022 and 38.5 / 100 = 38.5% in FY2023: a 1.5-point fall.
+  const VALUES: Record<string, string> = { gp22: "40", rev22: "100", gp23: "38.5", rev23: "100" };
+  const verdict = async (value: string) => {
+    const result = await planFinancialRequest(context({ requested_subjects: [resolved(0)] }), "Did Apple's gross margin fall by more than 2 points in FY2023?", scripted(draft(value)));
+    assert.equal(result.outcome, "ready", JSON.stringify(result));
+    if (result.outcome !== "ready") return null;
+    const evaluation = evaluatePlan(result.plan, (node) => {
+      const year = node.node_id.endsWith("23") ? 2023 : 2022;
+      const input = operand(node.node_id, { metric: node.metric_key, value: VALUES[node.node_id]!, start: `${year}-01-01`, end: `${year}-12-31` });
+      return { ok: true, operand: input, payload: { kind: "value", value: VALUES[node.node_id]!, unit: input.measurement.unit, exact: true, rounding: null } as ValuePayload };
+    });
+    const state = evaluation.outputs[0]!.state;
+    return state.status === "computed" && state.payload.kind === "predicate" ? state.payload.outcome : state;
+  };
+  assert.equal(await verdict("-2"), false, "-1.5 points is not below -2 points");
+  assert.equal(await verdict("-0.02"), true, "read as a fraction, the same threshold answers yes");
 });
 
 test("a market cap or P/E answer always publishes the price and the count or EPS it reads, before the result (#444)", async () => {
