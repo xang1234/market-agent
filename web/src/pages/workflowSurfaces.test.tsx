@@ -20,6 +20,7 @@ import { AuthContext } from '../shell/authTypes.ts'
 import { ThemeProvider } from '../shell/ThemeProvider.tsx'
 import { WorkspaceShell } from '../shell/WorkspaceShell.tsx'
 import { resetResourcesForTests } from '../fetch/resource.ts'
+import { WithSidebarSlot } from './chatPageHarness.tsx'
 
 afterEach(resetResourcesForTests)
 
@@ -73,29 +74,30 @@ test('Analyze playbooks and inspectable evidence controls are present in workflo
   assert.doesNotMatch(html, /raw provider payload/i)
 })
 
-test('Chat surface renders thread list and composer workflow copy without phase placeholders', () => {
+// The chat list portals into the shell sidebar, which server rendering never attaches;
+// ChatPage.sidebar.test.tsx covers it in a DOM.
+test('Chat surface renders composer workflow copy without phase placeholders', () => {
   const html = renderWithAuth(
-    <MemoryRouter initialEntries={['/chat']}>
+    <WithSidebarSlot><MemoryRouter initialEntries={['/chat']}>
       <Routes>
         <Route path="/chat" element={<ChatLayout />} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter></WithSidebarSlot>,
   )
 
-  assert.match(html, /<nav aria-label="Chats"/)
   assert.match(html, /Start research/)
   assert.doesNotMatch(html, /ships with P2\.1/i)
 })
 
 test('Chat thread route renders message stream and composer workflow copy', () => {
   const html = renderWithAuth(
-    <MemoryRouter initialEntries={['/chat/thread-123']}>
+    <WithSidebarSlot><MemoryRouter initialEntries={['/chat/thread-123']}>
       <Routes>
         <Route path="/chat" element={<ChatLayout />}>
           <Route path=":threadId" />
         </Route>
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter></WithSidebarSlot>,
   )
 
   assert.match(html, /Collapse sidebar/)
@@ -106,7 +108,7 @@ test('Chat thread route renders message stream and composer workflow copy', () =
 test('Chat thread route does not render imported Analyze memo from Router state', () => {
   const html = renderWithAuth(
     <BlockRegistryProvider registry={createDefaultBlockRegistry()}>
-      <MemoryRouter
+      <WithSidebarSlot><MemoryRouter
         initialEntries={[
           {
             pathname: '/chat/thread-123',
@@ -125,7 +127,7 @@ test('Chat thread route does not render imported Analyze memo from Router state'
             <Route path=":threadId" />
           </Route>
         </Routes>
-      </MemoryRouter>
+      </MemoryRouter></WithSidebarSlot>
     </BlockRegistryProvider>,
   )
 
@@ -188,13 +190,13 @@ test('Chat thread route loads persisted user and assistant messages on direct na
     await act(async () => {
       root.render(wrapWithAuth(
         <BlockRegistryProvider registry={createDefaultBlockRegistry()}>
-          <MemoryRouter initialEntries={['/chat/thread-123']}>
+          <WithSidebarSlot><MemoryRouter initialEntries={['/chat/thread-123']}>
             <Routes>
               <Route path="/chat" element={<ChatLayout />}>
                 <Route path=":threadId" />
               </Route>
             </Routes>
-          </MemoryRouter>
+          </MemoryRouter></WithSidebarSlot>
         </BlockRegistryProvider>,
       ))
     })
@@ -226,13 +228,13 @@ test('Chat thread route virtualizes long persisted histories while preserving re
     await act(async () => {
       root.render(wrapWithAuth(
         <BlockRegistryProvider registry={createDefaultBlockRegistry()}>
-          <MemoryRouter initialEntries={['/chat/thread-123']}>
+          <WithSidebarSlot><MemoryRouter initialEntries={['/chat/thread-123']}>
             <Routes>
               <Route path="/chat" element={<ChatLayout />}>
                 <Route path=":threadId" />
               </Route>
             </Routes>
-          </MemoryRouter>
+          </MemoryRouter></WithSidebarSlot>
         </BlockRegistryProvider>,
       ))
     })
@@ -406,11 +408,11 @@ test('Chat stream delivers a server-signaled turn error as an event, closes, and
 
 test('Analyze surface renders template controls, source controls, memo canvas, and Add to chat action', () => {
   const html = renderWithAuth(
-    <MemoryRouter initialEntries={['/analyze']}>
+    <WithSidebarSlot><MemoryRouter initialEntries={['/analyze']}>
       <Routes>
         <Route path="/analyze" element={<AnalyzePage />} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter></WithSidebarSlot>,
   )
 
   assert.match(html, /Playbook/)
@@ -471,7 +473,7 @@ test('Analyze Add-to-chat shares run blocks through the durable artifact endpoin
 })
 
 test('Agents surface renders CRUD controls, run history, and activity status', () => {
-  const html = renderWithAuth(<MemoryRouter><AgentsPage /></MemoryRouter>)
+  const html = renderWithAuth(<WithSidebarSlot><MemoryRouter><AgentsPage /></MemoryRouter></WithSidebarSlot>)
 
   assert.match(html, /Create agent/)
   assert.match(html, /Universe/)
@@ -556,7 +558,7 @@ test('Agents surface loads selected agent findings and activity routes', async (
     }
     const root = createRoot(dom.window.document.getElementById('root')!)
     await act(async () => {
-      root.render(wrapWithAuth(<MemoryRouter><AgentsPage /></MemoryRouter>))
+      root.render(wrapWithAuth(<WithSidebarSlot><MemoryRouter><AgentsPage /></MemoryRouter></WithSidebarSlot>))
     })
     await act(async () => undefined)
     await act(async () => undefined)

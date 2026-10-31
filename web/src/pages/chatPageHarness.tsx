@@ -1,8 +1,10 @@
 /* eslint-disable react-refresh/only-export-components -- test-only module, never hot-reloaded */
+import { SidebarSlotProvider } from '../shell/SidebarSlotProvider.tsx'
+import { useSidebarSlot } from '../shell/useSidebarSlot.ts'
 import assert from 'node:assert/strict'
 
 import { JSDOM } from 'jsdom'
-import { act, Profiler, StrictMode, useEffect, type ReactElement } from 'react'
+import { act, Profiler, StrictMode, useEffect, type ReactElement, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createMemoryRouter, createRoutesFromElements, Outlet, Route, RouterProvider, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom'
 
@@ -217,6 +219,27 @@ type RenderOptions = {
   threadRoute?: Promise<unknown>
 }
 
+// Stands in for the shell's Sidebar: its collapse toggle, and the slot ChatLayout
+// portals its chat list into.
+function SidebarSlotHost() {
+  const { collapsed, setCollapsed, setNode } = useSidebarSlot()
+  return (
+    <>
+      <button type="button" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={() => setCollapsed(!collapsed)} />
+      {collapsed ? null : <aside ref={setNode} />}
+    </>
+  )
+}
+
+export function WithSidebarSlot({ children }: { children: ReactNode }) {
+  return (
+    <SidebarSlotProvider>
+      <SidebarSlotHost />
+      {children}
+    </SidebarSlotProvider>
+  )
+}
+
 export async function renderChat(initialPath: string, server: FakeServer, options: RenderOptions = {}): Promise<Harness> {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
   const globals = globalThis as unknown as Record<string, unknown>
@@ -263,7 +286,9 @@ export async function renderChat(initialPath: string, server: FakeServer, option
     >
       <AuthContext.Provider value={{ session: { userId: USER_ID, displayName: 'Test User' }, signIn: () => undefined, signOut: () => undefined }}>
         <BlockRegistryProvider registry={createDefaultBlockRegistry()}>
-          <RouterProvider router={router} />
+          <WithSidebarSlot>
+            <RouterProvider router={router} />
+          </WithSidebarSlot>
           <Announcer />
         </BlockRegistryProvider>
       </AuthContext.Provider>

@@ -1,4 +1,5 @@
-import { useCallback, useContext, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { createPortal } from 'react-dom'
+import { useCallback, useContext, useEffect, useRef } from 'react'
 import { Link, useMatch, useNavigate } from 'react-router-dom'
 import { Trash2 } from 'lucide-react'
 
@@ -15,6 +16,7 @@ import { StarterQuestionsContext } from '../chat/starterQuestions.ts'
 import { threadDisplayName } from '../chat/threadName.ts'
 import { useChatSession, type ChatSession } from '../chat/useChatSession.ts'
 import { useThreadList, useTitleFollowUp, type ThreadListState } from '../chat/useThreadList.ts'
+import { useSidebarSlot } from '../shell/useSidebarSlot.ts'
 
 
 export function ChatLayout() {
@@ -44,31 +46,26 @@ export function ChatLayout() {
     titled: Boolean(activeThread?.title?.trim()),
     refresh: threads.refresh,
   })
-  const [collapsed, setCollapsed] = useState(false)
+  const sidebar = useSidebarSlot()
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div
-        className={`grid min-h-0 flex-1 overflow-hidden ${collapsed ? 'grid-cols-[0px_minmax(0,1fr)]' : 'grid-cols-[260px_minmax(0,1fr)]'}`}
-      >
-        {collapsed ? null : (
-          <aside className="min-h-0 border-r border-line bg-surface-2/70 p-4">
+    <div className="flex min-h-0 flex-1 flex-col overflow-auto">
+      {sidebar.node && !sidebar.collapsed
+        ? createPortal(
             <ThreadList
               userId={userId}
               state={threads.state}
               activeThreadId={activeThreadId}
               activeName={threadName}
               refresh={threads.refresh}
-            />
-          </aside>
-        )}
-        <div className="flex min-h-0 flex-col overflow-auto">
-          {chat.view.canvas === 'thread'
-            ? <ChatThreadView chat={chat} threadName={threadName} collapsed={collapsed} setCollapsed={setCollapsed} />
-            : <ChatEmptyState chat={chat} />}
-          <ChatComposer canAsk={chat.view.canAsk} onAsk={chat.ask} />
-        </div>
-      </div>
+            />,
+            sidebar.node,
+          )
+        : null}
+      {chat.view.canvas === 'thread'
+        ? <ChatThreadView chat={chat} threadName={threadName} />
+        : <ChatEmptyState chat={chat} />}
+      <ChatComposer canAsk={chat.view.canAsk} onAsk={chat.ask} />
     </div>
   )
 }
@@ -101,27 +98,12 @@ function ChatEmptyState({ chat }: { chat: ChatSession }) {
   )
 }
 
-type ChatThreadViewProps = {
-  chat: ChatSession
-  threadName: string
-  collapsed: boolean
-  setCollapsed: Dispatch<SetStateAction<boolean>>
-}
-
-function ChatThreadView({ chat, threadName, collapsed, setCollapsed }: ChatThreadViewProps) {
+function ChatThreadView({ chat, threadName }: { chat: ChatSession; threadName: string }) {
   const { view } = chat
 
   return (
     <div data-testid="chat-thread" className="flex flex-1 flex-col">
-      <div className="flex items-center gap-3 border-b border-line px-4 py-2">
-        <button
-          type="button"
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          onClick={() => setCollapsed((c) => !c)}
-          className="text-sm text-muted hover:text-fg"
-        >
-          {collapsed ? '☰' : '⟨'}
-        </button>
+      <div className="flex items-center gap-3 border-b border-line px-6 py-2.5">
         <h1 data-testid="thread-name" className="truncate text-sm font-medium text-fg">{threadName}</h1>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
@@ -201,7 +183,7 @@ function ThreadList({
   })
 
   return (
-    <nav aria-label="Chats" className="flex min-h-0 flex-col gap-3">
+    <nav aria-label="Chats" className="flex min-h-0 flex-1 flex-col gap-2">
       <button
         ref={newChatButton}
         type="button"
@@ -211,27 +193,27 @@ function ThreadList({
         + New chat
       </button>
       {deleteError ? <FailureNotice message="Couldn't delete the chat." detail={deleteError.message} announce={false} /> : null}
-      <h2 className="text-sm font-semibold text-fg">Chats</h2>
+      <h2 className="mt-1 px-1.5 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-faint">Chats</h2>
       {state.kind === 'loading' ? (
         <div className="flex flex-col gap-2">
-          <Skeleton label="Loading chats" className="h-14" />
-          <Skeleton className="h-14" />
-          <Skeleton className="h-14" />
+          <Skeleton label="Loading chats" className="h-10" />
+          <Skeleton className="h-10" />
+          <Skeleton className="h-10" />
         </div>
       ) : state.kind === 'error' ? (
         <FailureNotice message="Couldn't load your chats." detail={state.message} onRetry={refresh} />
       ) : rows.length === 0 ? (
-        <p className="rounded-md border border-dashed border-line-strong p-3 text-xs text-muted">
+        <p className="px-1.5 text-xs text-muted">
           No chats yet.
         </p>
       ) : (
-        <ul className="flex min-h-0 flex-col gap-2 overflow-auto">
+        <ul className="-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1">
           {rows.map((thread) => {
             if (thread.thread_id === pending?.threadId) {
               return (
                 <li
                   key={thread.thread_id}
-                  className="flex items-center justify-between rounded-md border border-dashed border-line-strong p-3 text-xs text-muted"
+                  className="flex items-center justify-between rounded-md border border-dashed border-line-strong px-2.5 py-2 text-xs text-muted"
                 >
                   <span aria-hidden="true">Chat deleted.</span>
                   <button
@@ -253,17 +235,17 @@ function ThreadList({
                 <Link
                   to={`/chat/${thread.thread_id}`}
                   aria-current={active ? 'page' : undefined}
-                  className={`block rounded-md border bg-surface p-3 text-sm ${active ? 'border-accent' : 'border-line hover:border-line-strong'}`}
+                  className={`block rounded-md py-2 pl-2.5 pr-8 text-sm transition-colors ${active ? 'bg-accent-soft' : 'hover:bg-surface-hover'}`}
                 >
-                  <span className="block truncate font-medium text-fg">{name}</span>
-                  <span className="mt-1 block text-xs text-muted">
+                  <span className={`block truncate font-medium ${active ? 'text-accent' : 'text-fg'}`}>{name}</span>
+                  <span className="mt-0.5 block text-[11px] text-muted">
                     {new Date(thread.updated_at).toLocaleString()}
                   </span>
                 </Link>
                 <button
                   type="button"
                   aria-label={`Delete ${name}`}
-                  className="absolute right-2 top-2 rounded p-1 text-muted opacity-0 transition hover:text-negative focus-visible:opacity-100 group-hover:opacity-100"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-muted opacity-0 transition hover:text-negative focus-visible:opacity-100 group-hover:opacity-100"
                   onClick={(e) => {
                     e.preventDefault()
                     focusUndo.current = true

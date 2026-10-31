@@ -17,6 +17,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { AuthContext } from '../shell/authTypes.ts'
 import { handleComposerKeyDownEvent } from '../chat/composer.ts'
 import { ChatLayout } from './ChatPage.tsx'
+import { WithSidebarSlot } from './chatPageHarness.tsx'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -179,13 +180,13 @@ test('ChatThreadView: renders hint text below the composer', async () => {
     await act(async () => {
       root.render(
         <AuthContext.Provider value={makeAuthContextValue()}>
-          <MemoryRouter initialEntries={['/chat/THREAD-1']}>
+          <WithSidebarSlot><MemoryRouter initialEntries={['/chat/THREAD-1']}>
             <Routes>
               <Route path="/chat" element={<ChatLayout />}>
                 <Route path=":threadId" />
               </Route>
             </Routes>
-          </MemoryRouter>
+          </MemoryRouter></WithSidebarSlot>
         </AuthContext.Provider>,
       )
     })

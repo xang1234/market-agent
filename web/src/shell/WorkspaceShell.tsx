@@ -8,6 +8,7 @@ import { RightRailProvider } from './RightRailProvider'
 import { RightRailSlot } from './RightRailSlot'
 import { RouteScopeGate } from './RouteScopeGate'
 import { Sidebar } from './Sidebar'
+import { SidebarSlotProvider } from './SidebarSlotProvider'
 import { TopBar } from './TopBar'
 import { useAuth } from './useAuth'
 import { useNavHotkeys } from './useNavHotkeys'
@@ -55,6 +56,7 @@ export function WorkspaceShell() {
   return (
     <AuthInterruptProvider>
       <RightRailProvider>
+        <SidebarSlotProvider>
         <WatchlistProvider userId={userId}>
           <EvidenceInspectorProvider>
             <div className="flex h-full w-full bg-bg text-fg">
@@ -82,6 +84,7 @@ export function WorkspaceShell() {
             <AuthInterrupt />
           </EvidenceInspectorProvider>
         </WatchlistProvider>
+        </SidebarSlotProvider>
       </RightRailProvider>
     </AuthInterruptProvider>
   )
