@@ -276,17 +276,18 @@ type Interval = { kind: string; low: number; high: number; mid: number };
 
 const SCALES: Readonly<Record<string, number>> = { "": 1, K: 1e3, M: 1e6, B: 1e9, T: 1e12 };
 
-// A displayed value ("-$1.7B", "74.4%", "CN¥3.1B", "12.8x", the engine's
-// "USD -1,700,000,000.00") as the interval its rounding covers, with its kind:
-// the currency prefix and whether it is a percent, a multiple or an amount.
+// A displayed value ("-$1.7B", "74.4%", "CN¥3.1B", "12.8x", "-12.58 pp", the
+// engine's "USD -1,700,000,000.00") as the interval its rounding covers, with its
+// kind: the currency prefix and whether it is a percent, a multiple, percentage
+// points or an amount.
 // Undefined when it does not parse.
 function interval(value: string): Interval | undefined {
-  const match = /^([-−+]?)([^\d\-−+]*?)\s*([-−+]?)(\d[\d,]*)(?:\.(\d+))?\s*([KMBT%x]?)$/.exec(value.trim());
+  const match = /^([-−+]?)([^\d\-−+]*?)\s*([-−+]?)(\d[\d,]*)(?:\.(\d+))?\s*(pp|[KMBT%x]?)$/.exec(value.trim());
   if (!match) return undefined;
   const [, leading, prefix, inner, whole, fraction = "", suffix] = match;
   if (leading && inner) return undefined;
   const sign = leading || inner;
-  const unit = suffix === "%" || suffix === "x" ? suffix : "";
+  const unit = suffix === "%" || suffix === "x" || suffix === "pp" ? suffix : "";
   const scale = SCALES[unit ? "" : suffix!]!;
   const mid = (sign === "-" || sign === "−" ? -1 : 1) * Number(`${whole!.replace(/,/g, "")}.${fraction || "0"}`) * scale;
   const half = 0.5 * 10 ** -fraction.length * scale;
