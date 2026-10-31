@@ -785,6 +785,30 @@ test("a ratio's operands read mid-sentence in lower case, each with its own poss
   assert.equal(resultText(content, "o_lta"), "The operands cover different periods. Total liabilities' FY2023 figure is as of 2023-12-30 and total assets' FY2023 figure is as of 2023-12-31.");
 });
 
+test("a change's gap keeps the engine's words, which already say which side is current (#541)", () => {
+  const plan = singleSubjectPlan([
+    balance("ta23", "total_assets"),
+    balance("ta22", "total_assets", 2022),
+    { node_id: "ta_change", operation: "absolute_change", operation_version: "absolute_change.v1", current: "ta23", prior: "ta22" },
+  ], ["ta_change"]);
+  const content = present(plan, [gapOf("o_ta_change", "ta_change", "The prior period must end before the current period.")], { a: "Alpha Corp" }, {
+    ta23: fy2023("2023-12-31"),
+    ta22: { fiscal_year: 2022, fiscal_period: "FY", end: "2024-01-31" },
+  });
+  assert.equal(resultText(content, "o_ta_change"), "The prior period must end before the current period.");
+});
+
+test("a trailing sum's own gap keeps the engine's words, never listing its quarters (#541)", () => {
+  const plan = singleSubjectPlan(trailingRevenue("a", [2025, "Q4"], [0, 1, 2, 3]), ["a_ttm"]);
+  const periods: Record<string, BoundPeriod> = {};
+  ["2025-01-26", "2024-10-27", "2024-07-28", "2024-04-28"].forEach((end, n) => {
+    const { fiscal_year, fiscal_period } = quarterBack(2025, "Q4", n) as Extract<PeriodSelector, { kind: "fiscal_period" }>;
+    periods[`a_rev${n}`] = { fiscal_year, fiscal_period, end };
+  });
+  const content = present(plan, [gapOf("o_a_ttm", "a_ttm", "Quarters must share one fiscal calendar version.")], { a: "Alpha Corp" }, periods);
+  assert.equal(resultText(content, "o_a_ttm"), "Quarters must share one fiscal calendar version.");
+});
+
 test("a cohort of trailing sums over different months keeps the engine's words, never naming one quarter as a sum's period (#541)", () => {
   const plan = comparisonPlan([
     ...trailingRevenue("a", [2025, "Q4"], [0, 1, 2, 3]),
