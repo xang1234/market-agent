@@ -186,14 +186,17 @@ export function VirtualizedMessageList({
         scrollHeight: el.scrollHeight,
         clientHeight: el.clientHeight,
       })
-      // A reader who scrolls back to the end by hand follows it again.
-      if (atBottom && pinRef.current === null && !questionRoomRef.current) {
+      // A reader who scrolls to the end by hand follows it again, from a pinned
+      // question too: its room below goes, and new content stays in view.
+      if (atBottom && pinRef.current === null) {
         pinRef.current = 'bottom'
+        questionRoomRef.current = false
         placedTopRef.current = null
+        holdPin()
       }
       setShowJumpButton(!atBottom)
     })
-  }, [])
+  }, [holdPin])
 
   const handleItemMeasure = useCallback((messageId: string, height: number) => {
     setMeasuredHeights((prev) => {
