@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { FinancialPlanV1, PeriodSelector } from "../src/contracts.ts";
 import { parseDerivedDecimalText } from "../src/exact-decimal.ts";
-import { fixed, presentationHash, presentFinancialUnit, type CommittedResult, type FinancialAnswerContent } from "../src/presentation.ts";
+import { fixed, presentationHash, presentFinancialUnit, type BoundPeriod, type CommittedResult, type FinancialAnswerContent } from "../src/presentation.ts";
 import { change, mutable, overviewComparisonPlan, planFixture, quarterBack, reportedAt } from "./fixtures.ts";
 
 const HASH = "a".repeat(64);
@@ -26,8 +26,8 @@ function comparisonResults(overrides: Partial<Record<string, CommittedResult>> =
   return Object.entries({ ...defaults, ...overrides }).map(([, value]) => value!);
 }
 
-function present(plan: FinancialPlanV1 = planFixture(), results = comparisonResults(), names: Record<string, string> = NAMES): FinancialAnswerContent {
-  return presentFinancialUnit({ plan, run_id: "run-1", unit_id: "section", results, subject_names: names });
+function present(plan: FinancialPlanV1 = planFixture(), results = comparisonResults(), names: Record<string, string> = NAMES, periods: Record<string, BoundPeriod> = {}): FinancialAnswerContent {
+  return presentFinancialUnit({ plan, run_id: "run-1", unit_id: "section", results, subject_names: names, periods: new Map(Object.entries(periods)) });
 }
 
 function result(content: FinancialAnswerContent, outputId: string) {
@@ -616,4 +616,213 @@ test("a ranking that could not be computed stands alone as a gap, never as a col
   const content = present(planFixture(), comparisonResults({ out_rank: committed("out_rank", "gm_rank", UNAVAILABLE, "missing") }));
   assert.deepEqual(readTable(content).columns, [["Revenue", null], ["Gross margin (gross profit / revenue)", "FY2023"]]);
   assert.deepEqual(content.presentations.filter((presentation) => presentation.kind !== "table"), [{ kind: "predicate", result_id: "r-out_check" }, { kind: "gap", result_id: "r-out_rank" }]);
+});
+
+const fy2023 = (end: string): BoundPeriod => ({ fiscal_year: 2023, fiscal_period: "FY", end });
+const BOUND_TOGETHER = { a_rev: fy2023("2023-12-31"), a_gp: fy2023("2023-12-31"), b_rev: fy2023("2023-12-31"), b_gp: fy2023("2023-12-31") };
+// Alpha's fiscal 2023 ends in January and Beta's in September.
+const BOUND_APART = { ...BOUND_TOGETHER, a_rev: fy2023("2023-01-29"), a_gp: fy2023("2023-01-29"), b_rev: fy2023("2023-09-30"), b_gp: fy2023("2023-09-30") };
+const gapOf = (output: string, node: string, explanation: string) =>
+  committed(output, node, { kind: "gap", reason_code: "incompatible_period", explanation }, "incompatible");
+
+test("a fiscal year the companies end on different dates names each cell's end, and the ranking's gap names each company's (#541)", () => {
+  const together = present(planFixture(), comparisonResults(), NAMES, BOUND_TOGETHER);
+  assert.deepEqual(readTable(together).columns, [["Revenue", null], ["Gross margin (gross profit / revenue)", "FY2023 (ended 2023-12-31)"]], "one end date: named once, in the heading");
+  assert.deepEqual(labelTexts(together, "out_rank"), [null, "Gross margin (gross profit / revenue) ranking", "FY2023 (ended 2023-12-31)"]);
+
+  const content = present(planFixture(), comparisonResults({ out_rank: gapOf("out_rank", "gm_rank", "The cohort members cover different periods.") }), NAMES, BOUND_APART);
+  assert.deepEqual(readTable(content), {
+    columns: [["Revenue", null], ["Gross margin (gross profit / revenue)", null]],
+    rows: [
+      ["Alpha Corp", ["out_a_rev", "USD 1,234,567.89", "FY2023 (ended 2023-01-29)"], ["out_a_gm", "41.24%", "FY2023 (ended 2023-01-29)"]],
+      ["Beta Inc", null, ["out_b_gm", "38.00%", "FY2023 (ended 2023-09-30)"]],
+    ],
+  });
+  assert.deepEqual(labelTexts(content, "out_rank"), [null, "Gross margin (gross profit / revenue) ranking", "FY2023"]);
+  assert.equal(resultText(content, "out_rank"), "The cohort members cover different periods. Alpha Corp's FY2023 ended 2023-01-29 and Beta Inc's FY2023 ended 2023-09-30.");
+});
+
+test("a margin whose operands were bound to periods ending on different dates names each operand's (#541)", () => {
+  const content = present(planFixture(), comparisonResults({ out_a_gm: gapOf("out_a_gm", "a_gm", "The operands cover different periods.") }), NAMES, { ...BOUND_TOGETHER, a_gp: fy2023("2023-12-30") });
+  assert.equal(resultText(content, "out_a_gm"), "The operands cover different periods. Gross profit's FY2023 ended 2023-12-30 and revenue's FY2023 ended 2023-12-31.");
+});
+
+const LATEST_YEAR = { kind: "latest" as const, period_type: "annual" as const, offset: 0 };
+
+test("a node named like an object's own property has no bound period: its gap and its margin's still present (#541)", () => {
+  const plan = singleSubjectPlan([
+    reportedAt("gp", "a", "gross_profit", LATEST_YEAR),
+    reportedAt("constructor", "a", "revenue", LATEST_YEAR),
+    { node_id: "gm", operation: "gross_margin", operation_version: "gross_margin.v1", numerator: "gp", revenue: "constructor" },
+  ], ["constructor", "gm"]);
+  const content = present(plan, [committed("o_constructor", "constructor", UNAVAILABLE, "missing"), committed("o_gm", "gm", UNAVAILABLE, "missing")], { a: "Alpha Corp" });
+  assert.deepEqual(content.results.map((entry) => [entry.output_id, content.labels[entry.period_label_id]!.text, entry.presented.text]), [
+    ["o_constructor", "latest fiscal year", "A required input or calculation is unavailable."],
+    ["o_gm", "latest fiscal year", "A required input or calculation is unavailable."],
+  ]);
+});
+
+test("a fiscal year asked by name and one asked as the latest are each dated, and the cohort's gap names both (#541)", () => {
+  const plan = comparisonPlan([
+    reportedAt("a_rev", "a", "revenue", FY(2025)),
+    reportedAt("b_rev", "b", "revenue", LATEST_YEAR),
+    { node_id: "rank", operation: "peer_compare", operation_version: "peer_compare.v1", members: ["a_rev", "b_rev"], direction: "highest" },
+  ], ["a_rev", "b_rev", "rank"]);
+  const fy2025 = (end: string): BoundPeriod => ({ fiscal_year: 2025, fiscal_period: "FY", end });
+  const content = present(plan, [
+    committed("o_a_rev", "a_rev", usdValue("130497")),
+    committed("o_b_rev", "b_rev", usdValue("416161")),
+    committed("o_rank", "rank", { kind: "gap", reason_code: "incompatible_period", explanation: "The cohort members cover different periods." }, "incompatible"),
+  ], { a: "NVIDIA Corp", b: "Apple Inc." }, { a_rev: fy2025("2025-01-26"), b_rev: fy2025("2025-09-27") });
+  assert.deepEqual(readTable(content).rows, [
+    ["NVIDIA Corp", ["o_a_rev", "USD 130,497.00", "FY2025 (ended 2025-01-26)"]],
+    ["Apple Inc.", ["o_b_rev", "USD 416,161.00", "FY2025 (ended 2025-09-27)"]],
+  ]);
+  assert.equal(resultText(content, "o_rank"), "The cohort members cover different periods. NVIDIA Corp's FY2025 ended 2025-01-26 and Apple Inc.'s FY2025 ended 2025-09-27.");
+});
+
+test("every period a value was bound to is dated, so a change never dates one side alone (#540, #541)", () => {
+  const plan = overviewComparisonPlan([{ slot: "a", newest: [2026, "Q3"] }, { slot: "b", newest: [2026, "Q2"] }]);
+  const quarter = (fiscal_year: number, fiscal_period: BoundPeriod["fiscal_period"], end: string): BoundPeriod => ({ fiscal_year, fiscal_period, end });
+  const latest = { a: quarter(2026, "Q3", "2026-06-27"), b: quarter(2026, "Q2", "2026-06-27") };
+  const periods: Record<string, BoundPeriod> = {
+    a_rev_q1: quarter(2026, "Q2", "2026-03-28"), a_rev_q4: quarter(2025, "Q3", "2025-06-28"),
+    b_rev_q1: quarter(2026, "Q1", "2026-03-28"), b_rev_q4: quarter(2025, "Q2", "2025-06-28"),
+  };
+  for (const slot of ["a", "b"] as const) for (const line of ["rev", "gp", "oi", "ni"]) periods[`${slot}_${line}`] = latest[slot];
+  const content = present(plan, [...linesOf("a", NVDA_LINES), ...linesOf("b", AMD_LINES)], { a: "Apple Inc.", b: "Advanced Micro Devices" }, periods);
+  assert.deepEqual(["out_a_rev", "out_a_qoq", "out_b_rev", "out_b_yoy"].map((output) => labelTexts(content, output)[2]), [
+    "Q3 FY2026 (ended 2026-06-27)",
+    "Q3 FY2026 (ended 2026-06-27) vs Q2 FY2026 (ended 2026-03-28)",
+    "Q2 FY2026 (ended 2026-06-27)",
+    "Q2 FY2026 (ended 2026-06-27) vs Q2 FY2025 (ended 2025-06-28)",
+  ]);
+});
+
+test("a window of latest quarters names each by the quarter it was bound to, and a gap by its place before the latest (#540)", () => {
+  const latestQuarter = (offset: number) => ({ kind: "latest" as const, period_type: "quarterly" as const, offset });
+  const plan = singleSubjectPlan([
+    ...[3, 2, 1, 0].map((offset) => reportedAt(`q${offset}`, "a", "revenue", latestQuarter(offset))),
+    { node_id: "window", operation: "period_rank", operation_version: "period_rank.v1", members: ["q3", "q2", "q1", "q0"], direction: "lowest" },
+  ], ["q3", "q2", "q1", "q0", "window"]);
+  const content = present(plan, [
+    committed("o_q3", "q3", usdValue("20")),
+    committed("o_q2", "q2", UNAVAILABLE, "missing"),
+    committed("o_q1", "q1", usdValue("10")),
+    committed("o_q0", "q0", usdValue("30")),
+    committed("o_window", "window", {
+      kind: "ranking", direction: "lowest", population: { requested: 4, evaluated: 3 }, complete: false,
+      ranks: [{ node_id: "q3", rank: 2 }, { node_id: "q1", rank: 1 }, { node_id: "q0", rank: 3 }], extreme: ["q1"],
+    }),
+  ], { a: "Alpha Corp" }, {
+    q3: { fiscal_year: 2025, fiscal_period: "Q3", end: "2025-09-27" },
+    q1: { fiscal_year: 2026, fiscal_period: "Q1", end: "2026-03-28" },
+    q0: { fiscal_year: 2026, fiscal_period: "Q2", end: "2026-06-27" },
+  });
+  assert.deepEqual(["o_q3", "o_q2", "o_q1", "o_q0", "o_window"].map((output) => labelTexts(content, output)[2]), [
+    "Q3 FY2025 (ended 2025-09-27)",
+    "fiscal quarter 2 before latest",
+    "Q1 FY2026 (ended 2026-03-28)",
+    "Q2 FY2026 (ended 2026-06-27)",
+    "Q3 FY2025 (ended 2025-09-27) to Q2 FY2026 (ended 2026-06-27)",
+  ]);
+  assert.equal(resultText(content, "o_window"), "Q1 FY2026 (ended 2026-03-28) has the lowest revenue of the 3 of 4 quarters ranked");
+});
+
+test("an instant names the day its value stands at, never calling it its period's end: a balance and a cover count (#540)", () => {
+  const latestQuarter = { kind: "latest" as const, period_type: "quarterly" as const, offset: 0 };
+  const plan = singleSubjectPlan([
+    reportedAt("cash", "a", "cash_and_equivalents", latestQuarter),
+    reportedAt("shares", "a", "shares_outstanding", latestQuarter),
+    balance("ta23", "total_assets"),
+    balance("ta22", "total_assets", 2022),
+    { node_id: "ta_change", operation: "absolute_change", operation_version: "absolute_change.v1", current: "ta23", prior: "ta22" },
+  ], ["cash", "shares", "ta_change"]);
+  const content = present(plan, [
+    committed("o_cash", "cash", usdValue("100")),
+    committed("o_shares", "shares", valueOf("24640000000", { kind: "shares" })),
+    committed("o_ta_change", "ta_change", usdValue("50")),
+  ], { a: "Alpha Corp" }, {
+    // The quarter ended 2024-04-28; its 10-Q's cover counted the shares on 2024-05-17.
+    cash: { fiscal_year: 2025, fiscal_period: "Q1", end: "2024-04-28" },
+    shares: { fiscal_year: 2025, fiscal_period: "Q1", end: "2024-05-17" },
+    ta23: fy2023("2023-12-31"),
+    ta22: { fiscal_year: 2022, fiscal_period: "FY", end: "2022-12-31" },
+  });
+  assert.deepEqual(["o_cash", "o_shares", "o_ta_change"].map((output) => labelTexts(content, output)[2]), [
+    "Q1 FY2025 (as of 2024-04-28)",
+    "Q1 FY2025 (as of 2024-05-17)",
+    "FY2023 (as of 2023-12-31) vs FY2022 (as of 2022-12-31)",
+  ]);
+});
+
+test("a cohort of cover counts taken on different days names each day, never as its period's end (#540)", () => {
+  const latestQuarter = { kind: "latest" as const, period_type: "quarterly" as const, offset: 0 };
+  const plan = comparisonPlan([
+    reportedAt("a_shares", "a", "shares_outstanding", latestQuarter),
+    reportedAt("b_shares", "b", "shares_outstanding", latestQuarter),
+    { node_id: "rank", operation: "peer_compare", operation_version: "peer_compare.v1", members: ["a_shares", "b_shares"], direction: "highest" },
+  ], ["rank"]);
+  const content = present(plan, [
+    committed("o_rank", "rank", { kind: "gap", reason_code: "incompatible_period", explanation: "The cohort members cover different periods." }, "incompatible"),
+  ], NAMES, {
+    a_shares: { fiscal_year: 2025, fiscal_period: "Q1", end: "2024-05-17" },
+    b_shares: { fiscal_year: 2024, fiscal_period: "Q1", end: "2024-04-26" },
+  });
+  assert.equal(resultText(content, "o_rank"), "The cohort members cover different periods. Alpha Corp's Q1 FY2025 figure is as of 2024-05-17 and Beta Inc's Q1 FY2024 figure is as of 2024-04-26.");
+});
+
+test("a ratio's operands read mid-sentence in lower case, each with its own possessive (#541)", () => {
+  const plan = singleSubjectPlan([
+    balance("tl", "total_liabilities"),
+    balance("ta", "total_assets"),
+    { node_id: "lta", operation: "ratio", operation_version: "ratio.v1", ratio_key: "liabilities_to_assets", numerator: "tl", denominator: "ta" },
+  ], ["lta"]);
+  const content = present(plan, [committed("o_lta", "lta", { kind: "gap", reason_code: "incompatible_period", explanation: "The operands cover different periods." }, "incompatible")], { a: "Alpha Corp" }, {
+    tl: fy2023("2023-12-30"),
+    ta: fy2023("2023-12-31"),
+  });
+  assert.equal(resultText(content, "o_lta"), "The operands cover different periods. Total liabilities' FY2023 figure is as of 2023-12-30 and total assets' FY2023 figure is as of 2023-12-31.");
+});
+
+test("a change's gap keeps the engine's words, which already say which side is current (#541)", () => {
+  const plan = singleSubjectPlan([
+    balance("ta23", "total_assets"),
+    balance("ta22", "total_assets", 2022),
+    { node_id: "ta_change", operation: "absolute_change", operation_version: "absolute_change.v1", current: "ta23", prior: "ta22" },
+  ], ["ta_change"]);
+  const content = present(plan, [gapOf("o_ta_change", "ta_change", "The prior period must end before the current period.")], { a: "Alpha Corp" }, {
+    ta23: fy2023("2023-12-31"),
+    ta22: { fiscal_year: 2022, fiscal_period: "FY", end: "2024-01-31" },
+  });
+  assert.equal(resultText(content, "o_ta_change"), "The prior period must end before the current period.");
+});
+
+test("a trailing sum's own gap keeps the engine's words, never listing its quarters (#541)", () => {
+  const plan = singleSubjectPlan(trailingRevenue("a", [2025, "Q4"], [0, 1, 2, 3]), ["a_ttm"]);
+  const periods: Record<string, BoundPeriod> = {};
+  ["2025-01-26", "2024-10-27", "2024-07-28", "2024-04-28"].forEach((end, n) => {
+    const { fiscal_year, fiscal_period } = quarterBack(2025, "Q4", n) as Extract<PeriodSelector, { kind: "fiscal_period" }>;
+    periods[`a_rev${n}`] = { fiscal_year, fiscal_period, end };
+  });
+  const content = present(plan, [gapOf("o_a_ttm", "a_ttm", "Quarters must share one fiscal calendar version.")], { a: "Alpha Corp" }, periods);
+  assert.equal(resultText(content, "o_a_ttm"), "Quarters must share one fiscal calendar version.");
+});
+
+test("a cohort of trailing sums over different months keeps the engine's words, never naming one quarter as a sum's period (#541)", () => {
+  const plan = comparisonPlan([
+    ...trailingRevenue("a", [2025, "Q4"], [0, 1, 2, 3]),
+    ...trailingRevenue("b", [2025, "Q4"], [0, 1, 2, 3]),
+    { node_id: "rank", operation: "peer_compare", operation_version: "peer_compare.v1", members: ["a_ttm", "b_ttm"], direction: "highest" },
+  ], ["rank"]);
+  const ends = { a: ["2025-01-26", "2024-10-27", "2024-07-28", "2024-04-28"], b: ["2025-09-27", "2025-06-28", "2025-03-29", "2024-12-28"] };
+  const periods: Record<string, BoundPeriod> = {};
+  for (const slot of ["a", "b"] as const) {
+    ends[slot].forEach((end, n) => {
+      const { fiscal_year, fiscal_period } = quarterBack(2025, "Q4", n) as Extract<PeriodSelector, { kind: "fiscal_period" }>;
+      periods[`${slot}_rev${n}`] = { fiscal_year, fiscal_period, end };
+    });
+  }
+  const content = present(plan, [committed("o_rank", "rank", { kind: "gap", reason_code: "incompatible_period", explanation: "The cohort members cover different periods." }, "incompatible")], NAMES, periods);
+  assert.equal(resultText(content, "o_rank"), "The cohort members cover different periods.");
 });

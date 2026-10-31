@@ -45,7 +45,7 @@ function block(content: FinancialAnswerContent) {
 function comparison(): FinancialAnswerContent {
   return presentFinancialUnit({
     plan: planFixture(), run_id: RUN_ID, unit_id: "section",
-    subject_names: { a: "Apple Inc.", b: "Microsoft Corp." },
+    subject_names: { a: "Apple Inc.", b: "Microsoft Corp." }, periods: new Map(),
     results: [
       committed(1, "out_a_rev", "a_rev", usd("391035000000")),
       committed(2, "out_a_gm", "a_gm", ratio("0.46206")),
@@ -72,7 +72,7 @@ function series(): FinancialAnswerContent {
   ];
   plan.thresholds = [];
   return presentFinancialUnit({
-    plan, run_id: RUN_ID, unit_id: "section", subject_names: { a: "Apple Inc." },
+    plan, run_id: RUN_ID, unit_id: "section", subject_names: { a: "Apple Inc." }, periods: new Map(),
     results: [committed(6, "o22", "rev22", usd("100")), committed(7, "o23", "rev23", usd("125")), committed(8, "og", "growth", { kind: "value", value: "25", unit: { kind: "percent" }, exact: true, rounding: null })],
   });
 }
@@ -89,7 +89,7 @@ function nvdaAmdOnTheirOwnCalendars(): FinancialAnswerContent {
   return presentFinancialUnit({
     plan: overviewComparisonPlan([{ slot: "a", newest: [2026, "Q4"] }, { slot: "b", newest: [2026, "Q2"] }]),
     run_id: RUN_ID, unit_id: "section",
-    subject_names: { a: "NVIDIA Corp", b: "Advanced Micro Devices, Inc." },
+    subject_names: { a: "NVIDIA Corp", b: "Advanced Micro Devices, Inc." }, periods: new Map(),
     results: [
       ...lines("a", 1, [usd("68000000000"), usd("51000000000"), usd("44200000000"), usd("37400000000"), ratio("0.75"), ratio("0.65"), ratio("0.55"), percent("19.3"), percent("73.2")]),
       ...lines("b", 10, [usd("7700000000"), usd("3080000000"), usd("770000000"), usd("693000000"), ratio("0.4"), ratio("0.1"), ratio("0.09"), percent("4.8"), missing]),
@@ -103,7 +103,7 @@ function leadAcrossCalendars(): FinancialAnswerContent {
   plan.outputs = [{ output_id: "out_a_gm", node_id: "a_gm", unit_id: "section" }, { output_id: "out_b_gm", node_id: "b_gm", unit_id: "section" }, { output_id: "out_gm_lead", node_id: "gm_lead", unit_id: "section" }];
   return presentFinancialUnit({
     plan, run_id: RUN_ID, unit_id: "section",
-    subject_names: { a: "NVIDIA Corp", b: "Advanced Micro Devices, Inc." },
+    subject_names: { a: "NVIDIA Corp", b: "Advanced Micro Devices, Inc." }, periods: new Map(),
     results: [
       committed(1, "out_a_gm", "a_gm", ratio("0.75")),
       committed(2, "out_b_gm", "b_gm", ratio("0.4")),
@@ -126,7 +126,7 @@ function windowHighAndLow(): FinancialAnswerContent {
   plan.thresholds = [];
   const ranks = (order: number[]) => members.map((node_id, index) => ({ node_id, rank: order[index]! })).filter((entry) => entry.rank > 0);
   return presentFinancialUnit({
-    plan, run_id: RUN_ID, unit_id: "section", subject_names: { a: "NVIDIA Corp" },
+    plan, run_id: RUN_ID, unit_id: "section", subject_names: { a: "NVIDIA Corp" }, periods: new Map(),
     results: [
       committed(1, "out_rev_3", "rev_3", usd("44062000000")),
       committed(2, "out_rev_2", "rev_2", missing, "missing"),

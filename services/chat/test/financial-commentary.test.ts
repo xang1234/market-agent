@@ -43,28 +43,28 @@ const ALFA_REPLY = assertions([
   { kind: "analyst_inference", text: "It keeps most of what it sells.", supports: [0] },
 ]);
 const ALFA_TEXT = [
-  "ALFA's gross margin (gross profit / revenue) was 60.00%, operating margin (operating income / revenue) 25.00% and net margin (net income / revenue) 20.00% in Q4 FY2023.",
-  "ALFA's revenue rose in every period from Q1 FY2022 (USD 800.00) to Q4 FY2023 (USD 2,000.00).",
+  "ALFA's gross margin (gross profit / revenue) was 60.00%, operating margin (operating income / revenue) 25.00% and net margin (net income / revenue) 20.00% in Q4 FY2023 (ended Dec 2023).",
+  "ALFA's revenue rose in every period from Q1 FY2022 (ended Mar 2022) (USD 800.00) to Q4 FY2023 (ended Dec 2023) (USD 2,000.00).",
 ].join("\n\n");
 const JUDGE = "You check the analyst inferences";
 // Every one of ALFA's overview results, as the judge reads them beside an inference.
 const ALFA_FIGURES = [
-  "ALFA's revenue was USD 800.00 in Q1 FY2022",
-  "ALFA's revenue was USD 900.00 in Q2 FY2022",
-  "ALFA's revenue was USD 1,000.00 in Q3 FY2022",
-  "ALFA's revenue was USD 1,100.00 in Q4 FY2022",
-  "ALFA's revenue was USD 1,200.00 in Q1 FY2023",
-  "ALFA's revenue was USD 1,300.00 in Q2 FY2023",
-  "ALFA's revenue was USD 1,500.00 in Q3 FY2023",
-  "ALFA's revenue was USD 2,000.00, gross profit USD 1,200.00, operating income USD 500.00, net income USD 400.00, gross margin (gross profit / revenue) 60.00%, operating margin (operating income / revenue) 25.00% and net margin (net income / revenue) 20.00% in Q4 FY2023",
-  "ALFA's quarter-over-quarter percent change in revenue was 12.50% in Q2 FY2022 vs Q1 FY2022",
-  "ALFA's quarter-over-quarter percent change in revenue was 11.11% in Q3 FY2022 vs Q2 FY2022",
-  "ALFA's quarter-over-quarter percent change in revenue was 10.00% in Q4 FY2022 vs Q3 FY2022",
-  "ALFA's quarter-over-quarter percent change in revenue was 9.09% in Q1 FY2023 vs Q4 FY2022",
-  "ALFA's quarter-over-quarter percent change in revenue was 8.33% in Q2 FY2023 vs Q1 FY2023",
-  "ALFA's quarter-over-quarter percent change in revenue was 15.38% in Q3 FY2023 vs Q2 FY2023",
-  "ALFA's quarter-over-quarter percent change in revenue was 33.33% in Q4 FY2023 vs Q3 FY2023",
-  "ALFA's year-over-year percent change in revenue was 81.82% in Q4 FY2023 vs Q4 FY2022. Q4 FY2023 has the highest revenue of the 8 quarters ranked. Q1 FY2022 has the lowest revenue of the 8 quarters ranked.",
+  "ALFA's revenue was USD 800.00 in Q1 FY2022 (ended Mar 2022)",
+  "ALFA's revenue was USD 900.00 in Q2 FY2022 (ended Jun 2022)",
+  "ALFA's revenue was USD 1,000.00 in Q3 FY2022 (ended Sep 2022)",
+  "ALFA's revenue was USD 1,100.00 in Q4 FY2022 (ended Dec 2022)",
+  "ALFA's revenue was USD 1,200.00 in Q1 FY2023 (ended Mar 2023)",
+  "ALFA's revenue was USD 1,300.00 in Q2 FY2023 (ended Jun 2023)",
+  "ALFA's revenue was USD 1,500.00 in Q3 FY2023 (ended Sep 2023)",
+  "ALFA's revenue was USD 2,000.00, gross profit USD 1,200.00, operating income USD 500.00, net income USD 400.00, gross margin (gross profit / revenue) 60.00%, operating margin (operating income / revenue) 25.00% and net margin (net income / revenue) 20.00% in Q4 FY2023 (ended Dec 2023)",
+  "ALFA's quarter-over-quarter percent change in revenue was 12.50% in Q2 FY2022 (ended Jun 2022) vs Q1 FY2022 (ended Mar 2022)",
+  "ALFA's quarter-over-quarter percent change in revenue was 11.11% in Q3 FY2022 (ended Sep 2022) vs Q2 FY2022 (ended Jun 2022)",
+  "ALFA's quarter-over-quarter percent change in revenue was 10.00% in Q4 FY2022 (ended Dec 2022) vs Q3 FY2022 (ended Sep 2022)",
+  "ALFA's quarter-over-quarter percent change in revenue was 9.09% in Q1 FY2023 (ended Mar 2023) vs Q4 FY2022 (ended Dec 2022)",
+  "ALFA's quarter-over-quarter percent change in revenue was 8.33% in Q2 FY2023 (ended Jun 2023) vs Q1 FY2023 (ended Mar 2023)",
+  "ALFA's quarter-over-quarter percent change in revenue was 15.38% in Q3 FY2023 (ended Sep 2023) vs Q2 FY2023 (ended Jun 2023)",
+  "ALFA's quarter-over-quarter percent change in revenue was 33.33% in Q4 FY2023 (ended Dec 2023) vs Q3 FY2023 (ended Sep 2023)",
+  "ALFA's year-over-year percent change in revenue was 81.82% in Q4 FY2023 (ended Dec 2023) vs Q4 FY2022 (ended Dec 2022). Q4 FY2023 (ended 2023-12-31) has the highest revenue of the 8 quarters ranked. Q1 FY2022 (ended 2022-03-31) has the lowest revenue of the 8 quarters ranked.",
 ].join("; ");
 
 // judge: its reply, or what it does instead of replying; judged: what it was sent.
@@ -208,7 +208,7 @@ test("a company overview carries analyst commentary on its published results (#3
     const [, commentary] = (await message(done.message_id)).blocks;
     assert.equal(
       plainText(segmentsOf(commentary)),
-      "Of ALFA and BRVO, ALFA's gross margin (gross profit / revenue) was highest: ALFA 60.00%, BRVO 45.00% (Q4 FY2023).",
+      "Of ALFA and BRVO, ALFA's gross margin (gross profit / revenue) was highest: ALFA 60.00%, BRVO 45.00% (Q4 FY2023 (ended Dec 2023)).",
     );
   });
 
@@ -221,7 +221,7 @@ test("a company overview carries analyst commentary on its published results (#3
     const done = completed((await overview(compose).run({ ...base, userIntent: "Compare revenue for ALFA and BRVO" })).events);
     const saved = await message(done.message_id);
     const [answer, commentary] = saved.blocks;
-    const lead = "Difference in gross margin (gross profit / revenue) was 15.00 pp in Alfa Corp Q4 FY2023 minus Bravo Corp Q4 FY2023.";
+    const lead = "Difference in gross margin (gross profit / revenue) was 15.00 pp in Alfa Corp Q4 FY2023 (ended Dec 2023) minus Bravo Corp Q4 FY2023 (ended Dec 2023).";
     assert.equal(plainText(segmentsOf(commentary)), `${lead}\n\n> **Analyst inference on ALFA:** It keeps more of each sale than BRVO does.`);
     const { results } = answer!.financial as FinancialAnswerContent;
     assert.deepEqual(segmentsOf(commentary).flatMap((segment) => segment.type === "ref" ? [results.find((result) => result.result_id === segment.ref_id)?.output_id] : []), ["out_a_minus_b_gross_margin"]);
