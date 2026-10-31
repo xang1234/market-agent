@@ -217,6 +217,17 @@ test("absolute_change requires the prior period to end before the current period
   assert.deepEqual(gap(absoluteChange(change("absolute_change"), cur, same)), ["incompatible", "incompatible_period"]);
 });
 
+test("a change in a multiple stays a ratio, not percentage points (#539)", () => {
+  const leverage = (nodeId: string, liabilities: string, end: string) => {
+    const node: RatioNode = { node_id: nodeId, operation: "ratio", operation_version: "ratio.v1", ratio_key: "liabilities_to_equity", numerator: "tl", denominator: "eq" };
+    const result = ratio(node, operand("tl", { metric: "total_liabilities", value: liabilities, kind: "instant", end }), operand("eq", { metric: "total_equity", value: "50", kind: "instant", end }));
+    assert.ok(result.ok);
+    return result.operand;
+  };
+  const outcome = absoluteChange(change("absolute_change"), leverage("cur", "60", "2023-12-31"), leverage("pri", "80", "2022-12-31"));
+  assert.deepEqual(outcome.ok && outcome.payload, { kind: "value", value: "-0.4", unit: { kind: "ratio" }, exact: true, rounding: null });
+});
+
 test("percent_change_positive_base: exact growth, rounded repeating growth, and non-positive bases", () => {
   const cur = operand("cur", { metric: "revenue", value: "125", ...FY2023 });
   const pri = operand("pri", { metric: "revenue", value: "100", ...FY2022 });

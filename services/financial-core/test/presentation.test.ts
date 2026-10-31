@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { FinancialPlanV1, PeriodSelector } from "../src/contracts.ts";
+import type { FinancialPlanV1, PeriodSelector, ValuePayload } from "../src/contracts.ts";
+import { evaluatePlan } from "../src/coverage.ts";
 import { parseDerivedDecimalText } from "../src/exact-decimal.ts";
 import { fixed, presentationHash, presentFinancialUnit, type CommittedResult, type FinancialAnswerContent } from "../src/presentation.ts";
 import { change, mutable, overviewComparisonPlan, planFixture, quarterBack, reportedAt } from "./fixtures.ts";
+import { operand } from "./operand-fixtures.ts";
 
 const HASH = "a".repeat(64);
 const NAMES = { a: "Alpha Corp", b: "Beta Inc" };
@@ -214,6 +216,39 @@ test("a change between two balances names the end of each period", () => {
   );
   const content = present(plan, [committed("o_ta_change", "ta_change", valueOf("50", { kind: "currency", currency: "USD" }))], { a: "Alpha Corp" });
   assert.deepEqual(labelTexts(content, "o_ta_change"), ["Alpha Corp", "Year-over-year change in Total assets", "end of FY2023 vs end of FY2022"]);
+});
+
+test("a change in a margin reads in percentage points, not percent (#539)", () => {
+  const quarter = (fiscal_period: "Q1" | "Q2") => ({ kind: "fiscal_period" as const, fiscal_year: 2025, fiscal_period });
+  const operatingMargin = (node_id: string, at: "Q1" | "Q2") =>
+    ({ node_id, operation: "operating_margin" as const, operation_version: "operating_margin.v1", numerator: `oi_${at}`, revenue: `rev_${at}` });
+  const plan = singleSubjectPlan(
+    [
+      reportedAt("oi_Q1", "a", "operating_income", quarter("Q1")),
+      reportedAt("rev_Q1", "a", "revenue", quarter("Q1")),
+      reportedAt("oi_Q2", "a", "operating_income", quarter("Q2")),
+      reportedAt("rev_Q2", "a", "revenue", quarter("Q2")),
+      operatingMargin("om_Q1", "Q1"),
+      operatingMargin("om_Q2", "Q2"),
+      change("om_change", "absolute_change", "om_Q2", "om_Q1"),
+    ],
+    ["om_change"],
+  );
+  // AMD, USD millions: operating margin 806 / 7,438 = 10.84% in Q1 FY2025, -134 / 7,685 = -1.74% in Q2.
+  const AMD: Record<string, string> = { oi_Q1: "806", rev_Q1: "7438", oi_Q2: "-134", rev_Q2: "7685" };
+  const PERIODS = { Q1: { start: "2024-12-29", end: "2025-03-29" }, Q2: { start: "2025-03-30", end: "2025-06-28" } };
+  const evaluation = evaluatePlan(plan, (node) => {
+    const at = node.node_id.endsWith("Q1") ? "Q1" : "Q2";
+    const input = operand(node.node_id, { metric: node.metric_key, value: AMD[node.node_id]!, fiscal_year: 2025, fiscal_period: at, ...PERIODS[at] });
+    return { ok: true, operand: input, payload: valueOf(AMD[node.node_id]!, input.measurement.unit) as ValuePayload };
+  });
+  const state = evaluation.outputs[0]!.state;
+  assert.ok(state.status === "computed", state.status === "gap" ? state.reason_code : state.status);
+  const content = present(plan, [committed("o_om_change", "om_change", state.payload)], { a: "Advanced Micro Devices" });
+  assert.deepEqual(
+    [labelTexts(content, "o_om_change")[1], resultText(content, "o_om_change"), state.payload.kind === "value" && state.payload.unit],
+    ["Quarter-over-quarter change in Operating margin (operating income / revenue)", "-12.58 pp", { kind: "percentage_points" }],
+  );
 });
 
 const usdValue = (value: string) => valueOf(value, { kind: "currency", currency: "USD" });
