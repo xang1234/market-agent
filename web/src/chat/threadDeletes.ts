@@ -88,10 +88,11 @@ export function beginThreadListRead(): () => void {
 
 function commit(pending: PendingDelete): void {
   clearTimeout(pending.timer)
-  writeDraft(`${pending.userId}:${pending.threadId}`, '')
   const sentIn = generation
   publish({ ...state, pending: null, sent: new Set(state.sent).add(pending.threadId) })
   const settle = () => {
+    // Only a delete that went through takes the chat's unsent draft with it.
+    writeDraft(`${pending.userId}:${pending.threadId}`, '')
     if (sentIn === generation) publish({ ...state, settled: state.settled + 1 })
   }
   void withTimeout((signal) => deleteThread(pending.userId, pending.threadId, signal)).then(settle, async (error: unknown) => {

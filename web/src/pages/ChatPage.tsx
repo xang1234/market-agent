@@ -352,17 +352,19 @@ function ThreadList({
 // Enter saves, Escape cancels, and leaving the field saves. A name left as it
 // opened is a cancel, even if the row's name changed meanwhile. `settled` stops
 // the blur that follows Enter or Escape from finishing a second time.
-function TitleEditor({ initial, onDone }: { initial: string; onDone: (next: string | null, byKey: boolean) => void }) {
+export function TitleEditor({ initial, onDone }: { initial: string; onDone: (next: string | null, byKey: boolean) => void }) {
   const settled = useRef(false)
+  // The field keeps the text it opened with even if the row's name changes.
+  const [opened] = useState(initial)
   const finish = (next: string | null, byKey: boolean) => {
     if (settled.current) return
     settled.current = true
-    onDone(next === null || next.trim() === initial ? null : next, byKey)
+    onDone(next === null || next.trim() === opened ? null : next, byKey)
   }
   return (
     <input
       aria-label="Chat name"
-      defaultValue={initial}
+      defaultValue={opened}
       maxLength={200}
       autoFocus
       onFocus={(event) => event.currentTarget.select()}

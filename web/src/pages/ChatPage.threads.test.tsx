@@ -736,3 +736,19 @@ test('a deleted chat takes its unsent draft with it', async (t) => {
     await h.cleanup()
   }
 })
+
+test('a delete that fails keeps the chat\'s unsent draft', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const { h, server } = await chatsWithTwoThreads('/chat/T2')
+  server.deleteReply = () => ({ status: 500, body: { error: 'boom' } })
+  try {
+    await h.type('Draft that outlives a failed delete')
+    await act(async () => h.button('Delete Rates').click())
+    await tick(h, t, UNDO_MS)
+    await tick(h, t, ANNOUNCE_DELAY_MS)
+
+    assert.equal(h.dom.window.localStorage.getItem(`chat-draft:${USER_ID}:T2`), 'Draft that outlives a failed delete')
+  } finally {
+    await h.cleanup()
+  }
+})
