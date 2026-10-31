@@ -37,16 +37,19 @@ const PRIMARY_WORKSPACES: ReadonlyArray<{ to: string; label: string; icon: Lucid
     : []),
 ]
 
-export function SidebarNav() {
+export function SidebarNav({ compact = false }: { compact?: boolean }) {
   return (
-    <nav aria-label="Primary workspaces" className="flex flex-col gap-0.5">
+    <nav aria-label="Primary workspaces" className={`flex flex-col gap-0.5 ${compact ? 'items-center' : ''}`}>
       {PRIMARY_WORKSPACES.map(({ to, label, icon: Icon }) => (
         <NavLink
           key={to}
           to={to}
+          title={compact ? label : undefined}
           className={({ isActive }) =>
             [
-              'flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors',
+              compact
+                ? 'grid h-9 w-9 place-items-center rounded-md transition-colors'
+                : 'flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors',
               isActive
                 ? 'bg-accent-soft text-accent shadow-[inset_0_0_0_1px_var(--color-accent-border)]'
                 : 'text-muted hover:bg-surface-hover hover:text-fg',
@@ -54,8 +57,8 @@ export function SidebarNav() {
           }
         >
           <Icon aria-hidden="true" className="h-[17px] w-[17px] shrink-0" strokeWidth={1.8} />
-          <span className="flex-1">{label}</span>
-          {HOTKEY_BY_PATH.has(to) ? (
+          <span className={compact ? 'sr-only' : 'flex-1'}>{label}</span>
+          {!compact && HOTKEY_BY_PATH.has(to) ? (
             <kbd
               aria-hidden="true"
               className="num rounded border border-line px-1 text-[10px] uppercase text-faint"

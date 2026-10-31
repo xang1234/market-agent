@@ -17,6 +17,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { AuthContext } from '../shell/authTypes.ts'
 import { createThread, deleteThread } from '../chat/threadActions.ts'
 import { ChatLayout } from './ChatPage.tsx'
+import { WithSidebarSlot } from './chatPageHarness.tsx'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -103,13 +104,13 @@ test('ChatLayout: "+ New chat" goes to the ask-first page without creating a thr
     await act(async () => {
       root.render(
         <AuthContext.Provider value={makeAuthContextValue()}>
-          <MemoryRouter initialEntries={['/chat/thread-001']}>
+          <WithSidebarSlot><MemoryRouter initialEntries={['/chat/thread-001']}>
             <Routes>
               <Route path="/chat" element={<ChatLayout />}>
                 <Route path=":threadId" />
               </Route>
             </Routes>
-          </MemoryRouter>
+          </MemoryRouter></WithSidebarSlot>
         </AuthContext.Provider>,
       )
     })
@@ -151,11 +152,11 @@ test('ChatLayout: renders "+ New chat" button in sidebar', async () => {
     await act(async () => {
       root.render(
         <AuthContext.Provider value={makeAuthContextValue()}>
-          <MemoryRouter initialEntries={['/chat']}>
+          <WithSidebarSlot><MemoryRouter initialEntries={['/chat']}>
             <Routes>
               <Route path="/chat" element={<ChatLayout />} />
             </Routes>
-          </MemoryRouter>
+          </MemoryRouter></WithSidebarSlot>
         </AuthContext.Provider>,
       )
     })
@@ -236,11 +237,11 @@ test('ChatLayout: renders delete button for each thread row', async () => {
     await act(async () => {
       root.render(
         <AuthContext.Provider value={makeAuthContextValue()}>
-          <MemoryRouter initialEntries={['/chat']}>
+          <WithSidebarSlot><MemoryRouter initialEntries={['/chat']}>
             <Routes>
               <Route path="/chat" element={<ChatLayout />} />
             </Routes>
-          </MemoryRouter>
+          </MemoryRouter></WithSidebarSlot>
         </AuthContext.Provider>,
       )
     })
