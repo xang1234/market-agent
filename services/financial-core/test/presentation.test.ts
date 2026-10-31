@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { FinancialPlanV1, PeriodSelector } from "../src/contracts.ts";
 import { parseDerivedDecimalText } from "../src/exact-decimal.ts";
-import { fixed, presentationHash, presentFinancialUnit, type CommittedResult, type FinancialAnswerContent } from "../src/presentation.ts";
+import { fixed, presentationHash, presentFinancialUnit, type BoundPeriod, type CommittedResult, type FinancialAnswerContent } from "../src/presentation.ts";
 import { change, mutable, overviewComparisonPlan, planFixture, quarterBack, reportedAt } from "./fixtures.ts";
 
 const HASH = "a".repeat(64);
@@ -26,8 +26,8 @@ function comparisonResults(overrides: Partial<Record<string, CommittedResult>> =
   return Object.entries({ ...defaults, ...overrides }).map(([, value]) => value!);
 }
 
-function present(plan: FinancialPlanV1 = planFixture(), results = comparisonResults(), names: Record<string, string> = NAMES): FinancialAnswerContent {
-  return presentFinancialUnit({ plan, run_id: "run-1", unit_id: "section", results, subject_names: names, periods: {} });
+function present(plan: FinancialPlanV1 = planFixture(), results = comparisonResults(), names: Record<string, string> = NAMES, periods: Record<string, BoundPeriod> = {}): FinancialAnswerContent {
+  return presentFinancialUnit({ plan, run_id: "run-1", unit_id: "section", results, subject_names: names, periods });
 }
 
 function result(content: FinancialAnswerContent, outputId: string) {
@@ -616,4 +616,32 @@ test("a ranking that could not be computed stands alone as a gap, never as a col
   const content = present(planFixture(), comparisonResults({ out_rank: committed("out_rank", "gm_rank", UNAVAILABLE, "missing") }));
   assert.deepEqual(readTable(content).columns, [["Revenue", null], ["Gross margin (gross profit / revenue)", "FY2023"]]);
   assert.deepEqual(content.presentations.filter((presentation) => presentation.kind !== "table"), [{ kind: "predicate", result_id: "r-out_check" }, { kind: "gap", result_id: "r-out_rank" }]);
+});
+
+const fy2023 = (end: string): BoundPeriod => ({ fiscal_year: 2023, fiscal_period: "FY", end });
+const BOUND_TOGETHER = { a_rev: fy2023("2023-12-31"), a_gp: fy2023("2023-12-31"), b_rev: fy2023("2023-12-31"), b_gp: fy2023("2023-12-31") };
+// Alpha's fiscal 2023 ends in January and Beta's in September.
+const BOUND_APART = { ...BOUND_TOGETHER, a_rev: fy2023("2023-01-29"), a_gp: fy2023("2023-01-29"), b_rev: fy2023("2023-09-30"), b_gp: fy2023("2023-09-30") };
+const gapOf = (output: string, node: string, explanation: string) =>
+  committed(output, node, { kind: "gap", reason_code: "incompatible_period", explanation }, "incompatible");
+
+test("a fiscal year the companies end on different dates names each cell's end, and the ranking's gap names each company's (#541)", () => {
+  const together = present(planFixture(), comparisonResults(), NAMES, BOUND_TOGETHER);
+  assert.deepEqual(readTable(together).columns, [["Revenue", null], ["Gross margin (gross profit / revenue)", "FY2023"]], "one end date: the plain name, once in the heading");
+
+  const content = present(planFixture(), comparisonResults({ out_rank: gapOf("out_rank", "gm_rank", "The cohort members cover different periods.") }), NAMES, BOUND_APART);
+  assert.deepEqual(readTable(content), {
+    columns: [["Revenue", null], ["Gross margin (gross profit / revenue)", null]],
+    rows: [
+      ["Alpha Corp", ["out_a_rev", "USD 1,234,567.89", "FY2023 (ended 2023-01-29)"], ["out_a_gm", "41.24%", "FY2023 (ended 2023-01-29)"]],
+      ["Beta Inc", null, ["out_b_gm", "38.00%", "FY2023 (ended 2023-09-30)"]],
+    ],
+  });
+  assert.deepEqual(labelTexts(content, "out_rank"), [null, "Gross margin (gross profit / revenue) ranking", "FY2023"]);
+  assert.equal(resultText(content, "out_rank"), "The cohort members cover different periods. Alpha Corp's FY2023 ended 2023-01-29 and Beta Inc's FY2023 ended 2023-09-30.");
+});
+
+test("a margin whose operands were bound to periods ending on different dates names each operand's (#541)", () => {
+  const content = present(planFixture(), comparisonResults({ out_a_gm: gapOf("out_a_gm", "a_gm", "The operands cover different periods.") }), NAMES, { ...BOUND_TOGETHER, a_gp: fy2023("2023-12-30") });
+  assert.equal(resultText(content, "out_a_gm"), "The operands cover different periods. Gross profit's FY2023 ended 2023-12-30 and Revenue's FY2023 ended 2023-12-31.");
 });

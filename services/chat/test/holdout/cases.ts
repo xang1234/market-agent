@@ -151,14 +151,19 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
     trap: "the fiscal year asked for, whose calendars end eight months apart; a substituted year",
     turns: ["Compare NVDA's and AAPL's fiscal 2025 revenue."],
     scopes: [{metrics: [{metric: "income_statement", adjustment: null, qualifier: null}], asks: [], turns_off: {facets: [], metrics: []}, income_items: ["revenue"], period: {kind: "fiscal_year", fiscal_year: 2025}, companies: {kind: "as_named", names: ["NVDA", "AAPL"]}}],
-    plan: draft(["NVDA", "AAPL"], [reported("a", "a_rev", "revenue", fiscal(2025, "FY")), reported("b", "b_rev", "revenue", fiscal(2025, "FY"))], ["a_rev", "b_rev"]),
+    plan: draft(["NVDA", "AAPL"], [
+      reported("a", "a_rev", "revenue", fiscal(2025, "FY")),
+      reported("b", "b_rev", "revenue", fiscal(2025, "FY")),
+      { node_id: "rank", operation: "peer_compare", members: ["a_rev", "b_rev"], direction: "highest" },
+    ], ["a_rev", "b_rev", "rank"]),
     expect: {
       companies: ["NVDA", "AAPL"],
       route: "financial_answer",
       fiscal_year: 2025,
       financial: [
-        [NVIDIA, REVENUE, "FY2025", "verified", "USD 130,497,000,000.00"],
-        [APPLE, REVENUE, "FY2025", "verified", "USD 416,161,000,000.00"],
+        [NVIDIA, REVENUE, "FY2025 (ended 2025-01-26)", "verified", "USD 130,497,000,000.00"],
+        [APPLE, REVENUE, "FY2025 (ended 2025-09-27)", "verified", "USD 416,161,000,000.00"],
+        ["", "Revenue ranking", "FY2025", "incompatible", "The cohort members cover different periods. NVIDIA Corporation's FY2025 ended 2025-01-26 and Apple Inc.'s FY2025 ended 2025-09-27."],
       ],
     },
     prose: "",
