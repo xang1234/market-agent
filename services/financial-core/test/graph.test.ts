@@ -27,8 +27,8 @@ test("a valid plan graph has no issues and a deterministic topological order", (
 test("cycles and self-references are rejected before any acquisition", () => {
   const cycle = mutable(planFixture());
   cycle.operations.push(
-    { node_id: "x", operation: "absolute_change", operation_version: "absolute_change.v1", current: "y", prior: "a_rev" },
-    { node_id: "y", operation: "absolute_change", operation_version: "absolute_change.v1", current: "x", prior: "a_rev" },
+    { node_id: "x", operation: "absolute_change", operation_version: "absolute_change.v2", current: "y", prior: "a_rev" },
+    { node_id: "y", operation: "absolute_change", operation_version: "absolute_change.v2", current: "x", prior: "a_rev" },
   );
   assert.ok(codes(cycle).includes("dependency_cycle"));
   assert.ok(!validateFinancialPlan(cycle).ok);
@@ -45,7 +45,7 @@ test("predicate nodes cannot be used as numeric operands", () => {
   assert.deepEqual(codes(plan), ["invalid_operand"]);
 
   const change = mutable(planFixture());
-  change.operations.push({ node_id: "chg", operation: "absolute_change", operation_version: "absolute_change.v1", current: "a_gm_check", prior: "a_gm" });
+  change.operations.push({ node_id: "chg", operation: "absolute_change", operation_version: "absolute_change.v2", current: "a_gm_check", prior: "a_gm" });
   change.outputs.push({ output_id: "out_chg", node_id: "chg", unit_id: "section" });
   assert.deepEqual(codes(change), ["invalid_operand"]);
 });

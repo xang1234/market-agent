@@ -141,7 +141,7 @@ test("a lead is never another operation's operand: it is one company's figure mi
       lead("a", "b"),
       lead("a", "c"),
       lead("c", "a"),
-      { node_id: "change", operation: "absolute_change", operation_version: "absolute_change.v1", current: "a_minus_c", prior: "a_minus_b" },
+      { node_id: "change", operation: "absolute_change", operation_version: "absolute_change.v2", current: "a_minus_c", prior: "a_minus_b" },
       { node_id: "lead_of_leads", operation: "spread", operation_version: "spread.v1", left: "a_minus_b", right: "c_minus_a" },
       { node_id: "cohort", operation: "peer_compare", operation_version: "peer_compare.v1", members: ["a_minus_b", "c_minus_a"], direction: "highest" },
       { node_id: "check", operation: "threshold", operation_version: "threshold.v1", subject: "a_minus_b", threshold_id: "min_gm", comparison: "gte" },
