@@ -127,3 +127,42 @@ test('MessageItem assistant: prose block gets max-w-[820px], wide block gets max
     restoreGlobals()
   }
 })
+
+test('a saved answer copies as text, and a question has no copy button', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restoreGlobals = installDomGlobals(dom.window as unknown as Window)
+  const copied: string[] = []
+  Object.defineProperty(globalThis.navigator, 'clipboard', {
+    value: { writeText: async (text: string) => void copied.push(text) },
+    configurable: true,
+  })
+  const userMessage: ChatMessage = { ...assistantMessage, message_id: 'msg-0', role: 'user', blocks: [richTextBlock] }
+  try {
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(
+        <AuthContext.Provider value={{ session: { userId: USER_ID, displayName: 'Mock User' }, signIn: () => undefined, signOut: () => undefined }}>
+          <EvidenceInspectorProvider>
+            <BlockRegistryProvider registry={createDefaultBlockRegistry()}>
+              <MessageItem message={userMessage} onMeasure={() => undefined} />
+              <MessageItem message={assistantMessage} onMeasure={() => undefined} />
+            </BlockRegistryProvider>
+          </EvidenceInspectorProvider>
+        </AuthContext.Provider>,
+      )
+    })
+    const copyButtons = dom.window.document.querySelectorAll('button[aria-label="Copy this answer as text"]')
+    assert.equal(copyButtons.length, 1, 'only the answer can be copied')
+    assert.ok(dom.window.document.querySelector('[data-role="assistant"]')?.contains(copyButtons[0]!))
+
+    await act(async () => (copyButtons[0] as HTMLButtonElement).click())
+
+    assert.deepEqual(copied, ['Some analysis text.\n\n| Metric | Value |\n| --- | --- |\n| Revenue | 100 |'])
+    assert.equal(copyButtons[0]!.getAttribute('title'), 'Copied')
+    assert.equal(copyButtons[0]!.textContent, '', 'the answer gains no words')
+    await act(async () => root.unmount())
+  } finally {
+    delete (globalThis.navigator as { clipboard?: unknown }).clipboard
+    restoreGlobals()
+  }
+})

@@ -1,6 +1,8 @@
 import { memo, useLayoutEffect, useRef, type ReactElement } from 'react'
 
 import { MemoizedBlockView } from '../blocks/MemoizedBlockView.tsx'
+import { CopyButton } from '../blocks/CopyButton.tsx'
+import { answerText } from '../blocks/answerText.ts'
 import type { BlockProof } from '../blocks/blockProof.ts'
 import type { Block } from '../blocks/types.ts'
 import type { ChatMessage } from './messageTypes.ts'
@@ -43,7 +45,12 @@ function MessageItemInner({ message, onMeasure }: MessageItemProps): ReactElemen
           ))}
         </div>
       ) : (
-        <AssistantBlocks blocks={message.blocks} proofs={message.block_proofs} />
+        <>
+          <AssistantBlocks blocks={message.blocks} proofs={message.block_proofs} />
+          <div className="mt-1 flex gap-1">
+            <CopyButton iconOnly label="Copy answer" what="this answer" purpose="as text" text={() => answerText(message.blocks)} />
+          </div>
+        </>
       )}
     </div>
   )
