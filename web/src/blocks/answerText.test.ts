@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { answerText } from './answerText.ts'
+import { answerCopy, answerText } from './answerText.ts'
 import { disclosureFixture, financialAnswerFixture, lineChartFixture, richTextFixture, tableFixture } from './fixtures.ts'
 import type { FinancialAnswerBlock } from './types.ts'
 
@@ -17,12 +17,12 @@ test('an answer copies as Markdown, and a chart names itself instead of vanishin
   )
 })
 
-test('a certified answer copies the figures it shows, with each cell\'s own period', () => {
+test('a certified answer copies the figures as it shows them, with each cell\'s own period', () => {
   assert.equal(
     answerText([financialAnswerFixture]),
     [
       'Revenue, Gross margin (gross profit / revenue) by company',
-      '| Company | Revenue | Gross margin (gross profit / revenue), FY2023 |\n| --- | --- | --- |\n| Apple Inc. | USD 391035000000 (FY2023) | 46.206% |\n| Microsoft Corp. |  | A required input or calculation is unavailable. |',
+      '| Company | Revenue | Gross margin (gross profit / revenue), FY2023 |\n| --- | --- | --- |\n| Apple Inc. | USD 391,035,000,000.00 (FY2023) | 46.21% |\n| Microsoft Corp. |  | A required input or calculation is unavailable. |',
       'Apple Inc. — Gross margin (gross profit / revenue), FY2023, at or above 40.00%: yes',
       'Ranked 1 of 2 companies; no overall highest can be stated for an incomplete group',
     ].join('\n\n'),
@@ -55,4 +55,13 @@ test('text the app shows literally stays literal, while the answer\'s own Markdo
 test('a table cell keeps its backslashes and pipes inside its column', () => {
   const table = { ...tableFixture, title: undefined, columns: ['Note'], rows: [['a\\|b *c*']] }
   assert.equal(answerText([table]), '| Note |\n| --- |\n| a\\\\\\|b \\*c\\* |')
+})
+
+test('a copied answer ends with the date of its newest data and its snapshot', () => {
+  const older = { ...richTextFixture, as_of: '2026-05-01T00:00:00.000Z' }
+  const newer = { ...disclosureFixture, as_of: '2026-06-01T00:00:00.000Z' }
+  assert.equal(
+    answerCopy({ blocks: [older, newer], snapshot_id: 'snap-1' }).split('\n\n').at(-1),
+    'As of 2026-06-01T00:00:00.000Z · Snapshot snap-1',
+  )
 })

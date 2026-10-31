@@ -157,7 +157,7 @@ test('a saved answer copies as text, and a question has no copy button', async (
 
     await act(async () => (copyButtons[0] as HTMLButtonElement).click())
 
-    assert.deepEqual(copied, ['Some analysis text.\n\n| Metric | Value |\n| --- | --- |\n| Revenue | 100 |'])
+    assert.deepEqual(copied, [`Some analysis text.\n\n| Metric | Value |\n| --- | --- |\n| Revenue | 100 |\n\nAs of 2026-06-02T00:00:00.000Z · Snapshot ${SNAPSHOT_ID}`])
     assert.equal(copyButtons[0]!.getAttribute('title'), 'Copied')
     assert.equal(copyButtons[0]!.textContent, '', 'the answer gains no words')
     await act(async () => root.unmount())

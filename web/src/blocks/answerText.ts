@@ -27,8 +27,7 @@ function markdownTable(header: ReadonlyArray<string>, rows: ReadonlyArray<Readon
 }
 
 function shown(result: FinancialPresentedResult | undefined): string {
-  if (!result) return ''
-  return result.presented.kind === 'value' ? result.presented.full_text : result.presented.text
+  return result ? literal(result.presented.text) : ''
 }
 
 function financialAnswerText(block: FinancialAnswerBlock): string {
@@ -67,32 +66,52 @@ function financialAnswerText(block: FinancialAnswerBlock): string {
     .join('\n\n')
 }
 
-const BLOCK_TEXT: Readonly<Record<string, (block: Block) => string>> = {
-  rich_text: (block) => {
-    const { segments, analyst_commentary } = block as RichTextBlock
+type TextBlocks = {
+  rich_text: RichTextBlock
+  financial_answer: FinancialAnswerBlock
+  table: TableBlock
+  section: SectionBlock
+  finding_card: FindingCardBlock
+  disclosure: DisclosureBlock
+  sources: SourcesBlock
+}
+
+const BLOCK_TEXT: { readonly [K in keyof TextBlocks]: (block: TextBlocks[K]) => string } = {
+  rich_text: ({ segments, analyst_commentary }) => {
     // Plain runs are the answer's Markdown source; refs and toned runs render literally.
     const text = segments.map((segment) => (isRefSegment(segment) ? literal(refSegmentText(segment)) : segment.tone === undefined || segment.tone === 'neutral' ? segment.text : literal(segment.text))).join('')
     return analyst_commentary ? `Analyst commentary\n\n${text}` : text
   },
-  financial_answer: (block) => financialAnswerText(block as FinancialAnswerBlock),
-  table: (block) => {
-    const { title, columns, rows } = block as TableBlock
+  financial_answer: financialAnswerText,
+  table: ({ title, columns, rows }) => {
     const table = markdownTable(columns, rows.map((row) => row.map(formatTableCell)))
     return title ? `${title}\n\n${table}` : table
   },
-  section: (block) => {
-    const { title, children } = block as SectionBlock
-    return [title ? `## ${title}` : '', answerText(children)].filter(Boolean).join('\n\n')
-  },
-  finding_card: (block) => (block as FindingCardBlock).headline,
-  disclosure: (block) => (block as DisclosureBlock).items.map((item) => `- ${item}`).join('\n'),
-  sources: (block) => ['Sources', ...(block as SourcesBlock).items.map((item) => `- ${item.label}${item.url ? ` (${item.url})` : ''}`)].join('\n'),
+  section: ({ title, children }) => [title ? `## ${title}` : '', answerText(children)].filter(Boolean).join('\n\n'),
+  finding_card: ({ headline }) => headline,
+  disclosure: ({ items }) => items.map((item) => `- ${item}`).join('\n'),
+  sources: ({ items }) => ['Sources', ...items.map((item) => `- ${item.label}${item.url ? ` (${item.url})` : ''}`)].join('\n'),
+}
+
+const hasText = (block: Block): block is TextBlocks[keyof TextBlocks] => Object.hasOwn(BLOCK_TEXT, block.kind)
+
+function blockText(block: Block): string {
+  if (!hasText(block)) return `[In the app: ${block.title ?? block.kind.replaceAll('_', ' ')}]`
+  return (BLOCK_TEXT[block.kind as keyof TextBlocks] as (block: TextBlocks[keyof TextBlocks]) => string)(block)
 }
 
 export function answerText(blocks: ReadonlyArray<Block>): string {
   return blocks
-    .map((block) => BLOCK_TEXT[block.kind]?.(block) ?? `[In the app: ${block.title ?? block.kind.replaceAll('_', ' ')}]`)
+    .map(blockText)
     .map((text) => text.trim())
     .filter(Boolean)
     .join('\n\n')
+}
+
+// A copied answer, closed with the date of its data and the snapshot it came
+// from, as a copied table is, so a pasted figure keeps its provenance.
+export function answerCopy(message: { blocks: ReadonlyArray<Block>; snapshot_id: string }): string {
+  const asOf = message.blocks.map((block) => block.as_of).sort().at(-1)
+  const source = [asOf ? `As of ${asOf}` : '', `Snapshot ${message.snapshot_id}`].filter(Boolean).join(' · ')
+  return [answerText(message.blocks), source].filter(Boolean).join('\n\n')
 }
