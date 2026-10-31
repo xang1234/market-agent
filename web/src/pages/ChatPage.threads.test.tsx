@@ -7,7 +7,7 @@ import { act } from 'react'
 
 import { DELETE_REQUEST_TIMEOUT_MS, forgetThreadDeletes } from '../chat/threadDeletes.ts'
 import { ANNOUNCE_CLEAR_MS, ANNOUNCE_DELAY_MS } from '../ui/announcer.ts'
-import { FakeServer, deferred, renderChat, TWO_THREADS, type Harness } from './chatPageHarness.tsx'
+import { FakeServer, deferred, renderChat, TWO_THREADS, USER_ID, type Harness } from './chatPageHarness.tsx'
 
 const announced = (h: Harness, role: 'status' | 'alert') => h.query(`[data-testid="announcer"] [role="${role}"]`)?.textContent
 
@@ -696,6 +696,42 @@ test('a later title from the server replaces a confirmed rename', async () => {
     await editTitle(h, 'Rates outlook', 'Enter')
 
     assert.deepEqual(chatNames(h), ['Renamed elsewhere', 'Rates outlook'])
+  } finally {
+    await h.cleanup()
+  }
+})
+
+test('leaving the name field for the composer saves it and keeps focus in the composer', async () => {
+  const { h, server } = await chatsWithTwoThreads('/chat/T1')
+  try {
+    await act(async () => h.button('Rename Chips').click())
+    const input = h.query('input[aria-label="Chat name"]') as HTMLInputElement
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(h.dom.window.HTMLInputElement.prototype, 'value')!.set!.call(input, 'Chips outlook')
+      input.dispatchEvent(new h.dom.window.Event('input', { bubbles: true }))
+    })
+    const composer = h.query('textarea') as HTMLTextAreaElement
+    await act(async () => composer.focus())
+    await h.flush()
+
+    assert.deepEqual(server.writes().map(([method, , body]) => [method, body]), [['PATCH', '{"title":"Chips outlook"}']])
+    assert.equal(h.dom.window.document.activeElement, composer)
+  } finally {
+    await h.cleanup()
+  }
+})
+
+test('a deleted chat takes its unsent draft with it', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const { h } = await chatsWithTwoThreads('/chat/T2')
+  try {
+    await h.type('Draft for a chat about to go')
+    assert.equal(h.dom.window.localStorage.getItem(`chat-draft:${USER_ID}:T2`), 'Draft for a chat about to go')
+
+    await act(async () => h.button('Delete Rates').click())
+    await tick(h, t, UNDO_MS)
+
+    assert.equal(h.dom.window.localStorage.getItem(`chat-draft:${USER_ID}:T2`), null)
   } finally {
     await h.cleanup()
   }

@@ -192,11 +192,12 @@ function ThreadList({
     list.current?.querySelector<HTMLElement>(`[data-thread-id="${refocusRow.current}"]`)?.focus()
     refocusRow.current = null
   }, [editing])
-  const finishRename = (threadId: string, replaced: string | null, previous: string, next: string | null) => {
-    refocusRow.current = threadId
+  const finishRename = (threadId: string, replaced: string | null, next: string | null, byKey: boolean) => {
+    // Leaving the field by clicking or tabbing elsewhere keeps focus there.
+    if (byKey) refocusRow.current = threadId
     setEditing(null)
     const title = next?.trim() ?? ''
-    if (title === '' || title === previous) return
+    if (title === '') return
     setRenamed((current) => ({ ...current, [threadId]: { title, replaced } }))
     setRenameError(null)
     renameThread(userId, threadId, title).then(refresh, (caught: unknown) => {
@@ -295,7 +296,7 @@ function ThreadList({
             if (editing === thread.thread_id) {
               return (
                 <li key={thread.thread_id}>
-                  <TitleEditor initial={name} onDone={(next) => finishRename(thread.thread_id, thread.title, name, next)} />
+                  <TitleEditor initial={name} onDone={(next, byKey) => finishRename(thread.thread_id, thread.title, next, byKey)} />
                 </li>
               )
             }
@@ -348,14 +349,15 @@ function ThreadList({
   )
 }
 
-// Enter saves, Escape cancels, and leaving the field saves. `settled` stops the
-// blur that follows Enter or Escape from finishing a second time.
-function TitleEditor({ initial, onDone }: { initial: string; onDone: (next: string | null) => void }) {
+// Enter saves, Escape cancels, and leaving the field saves. A name left as it
+// opened is a cancel, even if the row's name changed meanwhile. `settled` stops
+// the blur that follows Enter or Escape from finishing a second time.
+function TitleEditor({ initial, onDone }: { initial: string; onDone: (next: string | null, byKey: boolean) => void }) {
   const settled = useRef(false)
-  const finish = (next: string | null) => {
+  const finish = (next: string | null, byKey: boolean) => {
     if (settled.current) return
     settled.current = true
-    onDone(next)
+    onDone(next === null || next.trim() === initial ? null : next, byKey)
   }
   return (
     <input
@@ -368,13 +370,13 @@ function TitleEditor({ initial, onDone }: { initial: string; onDone: (next: stri
         if (event.nativeEvent.isComposing) return
         if (event.key === 'Enter') {
           event.preventDefault()
-          finish(event.currentTarget.value)
+          finish(event.currentTarget.value, true)
         } else if (event.key === 'Escape') {
           event.preventDefault()
-          finish(null)
+          finish(null, true)
         }
       }}
-      onBlur={(event) => finish(event.currentTarget.value)}
+      onBlur={(event) => finish(event.currentTarget.value, false)}
       className="block w-full rounded-md border border-accent bg-surface px-2.5 py-2 text-sm text-fg outline-none ring-2 ring-accent-soft"
     />
   )
