@@ -47,7 +47,7 @@ test("chat cash resilience", { timeout: 300_000 }, async (t) => {
 
   await t.test("a named fiscal year is planned for that year", async () => {
     const { rows } = await answer("AAA cash resilience for FY2023");
-    assert.deepEqual(rows.map((row: string[]) => row[1]), ["FY2023", "FY2023", "end of FY2023", "end of FY2023", "end of FY2023", "FY2023", "end of FY2023", "end of FY2023"]);
+    assert.deepEqual(rows.map((row: string[]) => row[1]), ["FY2023 (ended 2023-12-31)", "FY2023 (ended 2023-12-31)", "FY2023 (as of 2023-12-31)", "FY2023 (as of 2023-12-31)", "FY2023 (as of 2023-12-31)", "FY2023 (ended 2023-12-31)", "FY2023 (as of 2023-12-31)", "FY2023 (as of 2023-12-31)"]);
     assert.deepEqual(rows.map((row: string[]) => row[2]), ["120", "100", "300", "600", "200", "1.2", "0.5", "1.5"]);
   });
 

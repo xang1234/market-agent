@@ -125,15 +125,15 @@ test("golden metric questions certify through the chat financial lane on the rec
     ["out_revenue_growth_qoq_fy2026_q3", "verified", "21.96%"],
     ["out_revenue_growth_qoq", "verified", "8.94%"],
     ["out_revenue_growth_yoy", "verified", "57.89%"],
-    ["out_revenue_highest", "verified", "Q4 FY2026 has the highest revenue of the 8 quarters ranked"],
-    ["out_revenue_lowest", "verified", "Q1 FY2025 has the lowest revenue of the 8 quarters ranked"],
+    ["out_revenue_highest", "verified", "Q4 FY2026 (ended 2026-01-25) has the highest revenue of the 8 quarters ranked"],
+    ["out_revenue_lowest", "verified", "Q1 FY2025 (ended 2024-04-28) has the lowest revenue of the 8 quarters ranked"],
   ]);
   assert.deepEqual(await noteText(), [
     "No period was named, so the latest reported quarter is shown. Profit is shown as gross profit, operating income and net income, each with its margin.",
   ]);
   assert.equal(await commentaryText(), [
-    "NVDA's revenue rose in every period from Q1 FY2025 (USD 26,044,000,000.00) to Q4 FY2026 (USD 62,100,000,000.00).",
-    "NVDA's gross margin (gross profit / revenue) was 74.40%, operating margin (operating income / revenue) 64.90% and net margin (net income / revenue) 57.00% in Q4 FY2026.",
+    "NVDA's revenue rose in every period from Q1 FY2025 (ended Apr 2024) (USD 26,044,000,000.00) to Q4 FY2026 (ended Jan 2026) (USD 62,100,000,000.00).",
+    "NVDA's gross margin (gross profit / revenue) was 74.40%, operating margin (operating income / revenue) 64.90% and net margin (net income / revenue) 57.00% in Q4 FY2026 (ended Jan 2026).",
   ].join("\n\n"));
   const latestQuarter = (slot: string, quarter: string, values: string[]) =>
     [`revenue_${quarter}`, `gross_profit_${quarter}`, `operating_income_${quarter}`, `net_income_${quarter}`, "gross_margin", "operating_margin", "net_margin", "revenue_growth_qoq", "revenue_growth_yoy"]
@@ -150,9 +150,9 @@ test("golden metric questions certify through the chat financial lane on the rec
     "No period was named, so each company's latest reported quarter is shown. Profit is shown as gross profit, operating income and net income, each with its margin.",
   ]);
   assert.equal(await commentaryText(), [
-    "Of NVDA and AMD, NVDA's gross margin (gross profit / revenue) was highest: NVDA 74.40% (Q4 FY2026), AMD 54.02% (Q2 FY2026).",
-    "Of NVDA and AMD, NVDA's year-over-year percent change in revenue was highest: NVDA 57.89% (Q4 FY2026 vs Q4 FY2025 (ended Jan 2025)), AMD 45.74% (Q2 FY2026 vs Q2 FY2025).",
-    "NVDA's revenue was USD 62,100,000,000.00 in Q4 FY2026; AMD's revenue was USD 11,200,000,000.00 in Q2 FY2026.",
+    "Of NVDA and AMD, NVDA's gross margin (gross profit / revenue) was highest: NVDA 74.40% (Q4 FY2026 (ended Jan 2026)), AMD 54.02% (Q2 FY2026 (ended Jun 2026)).",
+    "Of NVDA and AMD, NVDA's year-over-year percent change in revenue was highest: NVDA 57.89% (Q4 FY2026 (ended Jan 2026) vs Q4 FY2025 (ended Jan 2025)), AMD 45.74% (Q2 FY2026 (ended Jun 2026) vs Q2 FY2025 (ended Jun 2025)).",
+    "NVDA's revenue was USD 62,100,000,000.00 in Q4 FY2026 (ended Jan 2026); AMD's revenue was USD 11,200,000,000.00 in Q2 FY2026 (ended Jun 2026).",
   ].join("\n\n"), "each company is shown at its newest quarter alone, so the recorded gross margin comparison of the two stands");
   assert.deepEqual(await ask("Compare NVDA, AMD and AAPL profit", readingOf(METRIC_READING)), [
     ...latestQuarter("a", "fy2026_q4", NVDA),

@@ -32,34 +32,34 @@ const REVENUE = [
   [2023, 1, "1200"], [2023, 2, "1300"], [2023, 3, "1500"], [2023, 4, "2000"],
 ] as const;
 const QTRS_LATEST = [
-  ["out_revenue_fy2023_q4", "Q4 FY2023", "verified", "USD 2,000.00"],
-  ["out_gross_profit_fy2023_q4", "Q4 FY2023", "verified", "USD 1,200.00"],
-  ["out_operating_income_fy2023_q4", "Q4 FY2023", "verified", "USD 500.00"],
-  ["out_net_income_fy2023_q4", "Q4 FY2023", "verified", "USD 400.00"],
-  ["out_gross_margin", "Q4 FY2023", "verified", "60.00%"],
-  ["out_operating_margin", "Q4 FY2023", "verified", "25.00%"],
-  ["out_net_margin", "Q4 FY2023", "verified", "20.00%"],
-  ["out_revenue_growth_qoq", "Q4 FY2023 vs Q3 FY2023", "verified", "33.33%"],
-  ["out_revenue_growth_yoy", "Q4 FY2023 vs Q4 FY2022", "verified", "81.82%"],
+  ["out_revenue_fy2023_q4", "Q4 FY2023 (ended 2023-12-31)", "verified", "USD 2,000.00"],
+  ["out_gross_profit_fy2023_q4", "Q4 FY2023 (ended 2023-12-31)", "verified", "USD 1,200.00"],
+  ["out_operating_income_fy2023_q4", "Q4 FY2023 (ended 2023-12-31)", "verified", "USD 500.00"],
+  ["out_net_income_fy2023_q4", "Q4 FY2023 (ended 2023-12-31)", "verified", "USD 400.00"],
+  ["out_gross_margin", "Q4 FY2023 (ended 2023-12-31)", "verified", "60.00%"],
+  ["out_operating_margin", "Q4 FY2023 (ended 2023-12-31)", "verified", "25.00%"],
+  ["out_net_margin", "Q4 FY2023 (ended 2023-12-31)", "verified", "20.00%"],
+  ["out_revenue_growth_qoq", "Q4 FY2023 (ended 2023-12-31) vs Q3 FY2023 (ended 2023-09-30)", "verified", "33.33%"],
+  ["out_revenue_growth_yoy", "Q4 FY2023 (ended 2023-12-31) vs Q4 FY2022 (ended 2022-12-31)", "verified", "81.82%"],
 ];
 const QTRS_OVERVIEW = [
-  ["out_revenue_fy2022_q1", "Q1 FY2022", "verified", "USD 800.00"],
-  ["out_revenue_fy2022_q2", "Q2 FY2022", "verified", "USD 900.00"],
-  ["out_revenue_fy2022_q3", "Q3 FY2022", "verified", "USD 1,000.00"],
-  ["out_revenue_fy2022_q4", "Q4 FY2022", "verified", "USD 1,100.00"],
-  ["out_revenue_fy2023_q1", "Q1 FY2023", "verified", "USD 1,200.00"],
-  ["out_revenue_fy2023_q2", "Q2 FY2023", "verified", "USD 1,300.00"],
-  ["out_revenue_fy2023_q3", "Q3 FY2023", "verified", "USD 1,500.00"],
+  ["out_revenue_fy2022_q1", "Q1 FY2022 (ended 2022-03-31)", "verified", "USD 800.00"],
+  ["out_revenue_fy2022_q2", "Q2 FY2022 (ended 2022-06-30)", "verified", "USD 900.00"],
+  ["out_revenue_fy2022_q3", "Q3 FY2022 (ended 2022-09-30)", "verified", "USD 1,000.00"],
+  ["out_revenue_fy2022_q4", "Q4 FY2022 (ended 2022-12-31)", "verified", "USD 1,100.00"],
+  ["out_revenue_fy2023_q1", "Q1 FY2023 (ended 2023-03-31)", "verified", "USD 1,200.00"],
+  ["out_revenue_fy2023_q2", "Q2 FY2023 (ended 2023-06-30)", "verified", "USD 1,300.00"],
+  ["out_revenue_fy2023_q3", "Q3 FY2023 (ended 2023-09-30)", "verified", "USD 1,500.00"],
   ...QTRS_LATEST.slice(0, 7),
-  ["out_revenue_growth_qoq_fy2022_q2", "Q2 FY2022 vs Q1 FY2022", "verified", "12.50%"],
-  ["out_revenue_growth_qoq_fy2022_q3", "Q3 FY2022 vs Q2 FY2022", "verified", "11.11%"],
-  ["out_revenue_growth_qoq_fy2022_q4", "Q4 FY2022 vs Q3 FY2022", "verified", "10.00%"],
-  ["out_revenue_growth_qoq_fy2023_q1", "Q1 FY2023 vs Q4 FY2022", "verified", "9.09%"],
-  ["out_revenue_growth_qoq_fy2023_q2", "Q2 FY2023 vs Q1 FY2023", "verified", "8.33%"],
-  ["out_revenue_growth_qoq_fy2023_q3", "Q3 FY2023 vs Q2 FY2023", "verified", "15.38%"],
+  ["out_revenue_growth_qoq_fy2022_q2", "Q2 FY2022 (ended 2022-06-30) vs Q1 FY2022 (ended 2022-03-31)", "verified", "12.50%"],
+  ["out_revenue_growth_qoq_fy2022_q3", "Q3 FY2022 (ended 2022-09-30) vs Q2 FY2022 (ended 2022-06-30)", "verified", "11.11%"],
+  ["out_revenue_growth_qoq_fy2022_q4", "Q4 FY2022 (ended 2022-12-31) vs Q3 FY2022 (ended 2022-09-30)", "verified", "10.00%"],
+  ["out_revenue_growth_qoq_fy2023_q1", "Q1 FY2023 (ended 2023-03-31) vs Q4 FY2022 (ended 2022-12-31)", "verified", "9.09%"],
+  ["out_revenue_growth_qoq_fy2023_q2", "Q2 FY2023 (ended 2023-06-30) vs Q1 FY2023 (ended 2023-03-31)", "verified", "8.33%"],
+  ["out_revenue_growth_qoq_fy2023_q3", "Q3 FY2023 (ended 2023-09-30) vs Q2 FY2023 (ended 2023-06-30)", "verified", "15.38%"],
   ...QTRS_LATEST.slice(7),
-  ["out_revenue_highest", "Q1 FY2022 to Q4 FY2023", "verified", "Q4 FY2023 has the highest revenue of the 8 quarters ranked"],
-  ["out_revenue_lowest", "Q1 FY2022 to Q4 FY2023", "verified", "Q1 FY2022 has the lowest revenue of the 8 quarters ranked"],
+  ["out_revenue_highest", "Q1 FY2022 (ended 2022-03-31) to Q4 FY2023 (ended 2023-12-31)", "verified", "Q4 FY2023 (ended 2023-12-31) has the highest revenue of the 8 quarters ranked"],
+  ["out_revenue_lowest", "Q1 FY2022 (ended 2022-03-31) to Q4 FY2023 (ended 2023-12-31)", "verified", "Q1 FY2022 (ended 2022-03-31) has the lowest revenue of the 8 quarters ranked"],
 ];
 
 function resolve(mention: string): Promise<ChatSubjectPreResolution> {
@@ -322,7 +322,7 @@ test("a question about one company that asks for no figure is answered with its 
   await t.test("a quarter whose dates do not follow the one before it gets no growth, and the answer's note names it (#479)", async () => {
     const done = completed((await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve }).run({ ...base, userIntent: "Revenue for MOVD" })).events);
     const growth = (await results(done.message_id)).flatMap(([outputId, period]) => outputId!.startsWith("out_revenue_growth") ? [period] : []);
-    assert.deepEqual(growth, ["Q2 FY2022 vs Q1 FY2022", "Q3 FY2022 vs Q2 FY2022", "Q4 FY2022 vs Q3 FY2022", "Q2 FY2023 vs Q1 FY2023", "Q3 FY2023 vs Q2 FY2023", "Q4 FY2023 vs Q3 FY2023"]);
+    assert.deepEqual(growth, ["Q2 FY2022 (ended 2022-06-30) vs Q1 FY2022 (ended 2022-03-31)", "Q3 FY2022 (ended 2022-09-30) vs Q2 FY2022 (ended 2022-06-30)", "Q4 FY2022 (ended 2022-12-31) vs Q3 FY2022 (ended 2022-09-30)", "Q2 FY2023 (ended 2023-07-31) vs Q1 FY2023 (ended 2023-04-30)", "Q3 FY2023 (ended 2023-10-31) vs Q2 FY2023 (ended 2023-07-31)", "Q4 FY2023 (ended 2024-01-31) vs Q3 FY2023 (ended 2023-10-31)"]);
     const { rows: [message] } = await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id]);
     assert.equal(
       message.blocks[1]?.segments?.[0]?.text,
@@ -371,14 +371,14 @@ test("a question about one company that asks for no figure is answered with its 
     const done = completed((await chatHarness(pool, { model: counted, readQuestion: reading(trend), resolveMention: resolve }).run({ ...base, userIntent: "How have MRGN's operating margins trended?" })).events);
     const rows = await results(done.message_id);
     assert.equal(calls, 0);
-    assert.deepEqual(rows.filter(([outputId]) => outputId!.startsWith("out_operating_margin_fy")).map(([, period, , text]) => [period, text]), REVENUE.map(([year, quarter], index) => [`Q${quarter} FY${year}`, index === 7 ? "25.00%" : "10.00%"]));
+    assert.deepEqual(rows.filter(([outputId]) => outputId!.startsWith("out_operating_margin_fy")).map(([, period, , text]) => [period, text]), REVENUE.map(([year, quarter], index) => [`Q${quarter} FY${year} (ended ${year}-${["03-31", "06-30", "09-30", "12-31"][quarter - 1]})`, index === 7 ? "25.00%" : "10.00%"]));
     assert.deepEqual(rows.filter(([outputId]) => /_(highest|lowest)$/u.test(outputId!)).map(([outputId, period, , text]) => [outputId, period, text]), [
-      ["out_gross_margin_highest", "Q1 FY2022 to Q4 FY2023", "Q3 FY2023 and Q4 FY2023 tie for the highest gross margin (gross profit / revenue) of the 8 quarters ranked"],
-      ["out_gross_margin_lowest", "Q1 FY2022 to Q4 FY2023", "Q1 FY2022, Q2 FY2022, Q3 FY2022, Q4 FY2022, Q1 FY2023, and Q2 FY2023 tie for the lowest gross margin (gross profit / revenue) of the 8 quarters ranked"],
-      ["out_operating_margin_highest", "Q1 FY2022 to Q4 FY2023", "Q4 FY2023 has the highest operating margin (operating income / revenue) of the 8 quarters ranked"],
-      ["out_operating_margin_lowest", "Q1 FY2022 to Q4 FY2023", "Q1 FY2022, Q2 FY2022, Q3 FY2022, Q4 FY2022, Q1 FY2023, Q2 FY2023, and Q3 FY2023 tie for the lowest operating margin (operating income / revenue) of the 8 quarters ranked"],
-      ["out_net_margin_highest", "Q1 FY2022 to Q4 FY2023", "Q4 FY2023 has the highest net margin (net income / revenue) of the 8 quarters ranked"],
-      ["out_net_margin_lowest", "Q1 FY2022 to Q4 FY2023", "Q1 FY2022 has the lowest net margin (net income / revenue) of the 8 quarters ranked"],
+      ["out_gross_margin_highest", "Q1 FY2022 (ended 2022-03-31) to Q4 FY2023 (ended 2023-12-31)", "Q3 FY2023 (ended 2023-09-30) and Q4 FY2023 (ended 2023-12-31) tie for the highest gross margin (gross profit / revenue) of the 8 quarters ranked"],
+      ["out_gross_margin_lowest", "Q1 FY2022 (ended 2022-03-31) to Q4 FY2023 (ended 2023-12-31)", "Q1 FY2022 (ended 2022-03-31), Q2 FY2022 (ended 2022-06-30), Q3 FY2022 (ended 2022-09-30), Q4 FY2022 (ended 2022-12-31), Q1 FY2023 (ended 2023-03-31), and Q2 FY2023 (ended 2023-06-30) tie for the lowest gross margin (gross profit / revenue) of the 8 quarters ranked"],
+      ["out_operating_margin_highest", "Q1 FY2022 (ended 2022-03-31) to Q4 FY2023 (ended 2023-12-31)", "Q4 FY2023 (ended 2023-12-31) has the highest operating margin (operating income / revenue) of the 8 quarters ranked"],
+      ["out_operating_margin_lowest", "Q1 FY2022 (ended 2022-03-31) to Q4 FY2023 (ended 2023-12-31)", "Q1 FY2022 (ended 2022-03-31), Q2 FY2022 (ended 2022-06-30), Q3 FY2022 (ended 2022-09-30), Q4 FY2022 (ended 2022-12-31), Q1 FY2023 (ended 2023-03-31), Q2 FY2023 (ended 2023-06-30), and Q3 FY2023 (ended 2023-09-30) tie for the lowest operating margin (operating income / revenue) of the 8 quarters ranked"],
+      ["out_net_margin_highest", "Q1 FY2022 (ended 2022-03-31) to Q4 FY2023 (ended 2023-12-31)", "Q4 FY2023 (ended 2023-12-31) has the highest net margin (net income / revenue) of the 8 quarters ranked"],
+      ["out_net_margin_lowest", "Q1 FY2022 (ended 2022-03-31) to Q4 FY2023 (ended 2023-12-31)", "Q1 FY2022 (ended 2022-03-31) has the lowest net margin (net income / revenue) of the 8 quarters ranked"],
     ]);
     const { rows: [shown] } = await db.query(`select blocks->0->'financial'->'presentations' as presentations, research_scope from chat_messages where message_id = $1`, [done.message_id]);
     assert.deepEqual(shown.presentations.map((presentation: { kind: string; points?: unknown[] }) => `${presentation.kind}${presentation.points ? `(${presentation.points.length})` : ""}`), [
@@ -411,20 +411,20 @@ test("a question about one company that asks for no figure is answered with its 
 
   const slotted = (slot: string, rows: ReadonlyArray<ReadonlyArray<string>>) => rows.map(([outputId, ...rest]) => [outputId!.replace(/^out_/u, `out_${slot}_`), ...rest]);
   const OFFQ_LATEST = [
-    ["out_revenue_fy2024_q2", "Q2 FY2024", "verified", "USD 2,600.00"],
-    ["out_gross_profit_fy2024_q2", "Q2 FY2024", "verified", "USD 1,300.00"],
-    ["out_operating_income_fy2024_q2", "Q2 FY2024", "verified", "USD 650.00"],
-    ["out_net_income_fy2024_q2", "Q2 FY2024", "verified", "USD 520.00"],
-    ["out_gross_margin", "Q2 FY2024", "verified", "50.00%"],
-    ["out_operating_margin", "Q2 FY2024", "verified", "25.00%"],
-    ["out_net_margin", "Q2 FY2024", "verified", "20.00%"],
-    ["out_revenue_growth_qoq", "Q2 FY2024 vs Q1 FY2024", "verified", "23.81%"],
-    ["out_revenue_growth_yoy", "Q2 FY2024 vs Q2 FY2023", "verified", "100.00%"],
+    ["out_revenue_fy2024_q2", "Q2 FY2024 (ended 2024-06-30)", "verified", "USD 2,600.00"],
+    ["out_gross_profit_fy2024_q2", "Q2 FY2024 (ended 2024-06-30)", "verified", "USD 1,300.00"],
+    ["out_operating_income_fy2024_q2", "Q2 FY2024 (ended 2024-06-30)", "verified", "USD 650.00"],
+    ["out_net_income_fy2024_q2", "Q2 FY2024 (ended 2024-06-30)", "verified", "USD 520.00"],
+    ["out_gross_margin", "Q2 FY2024 (ended 2024-06-30)", "verified", "50.00%"],
+    ["out_operating_margin", "Q2 FY2024 (ended 2024-06-30)", "verified", "25.00%"],
+    ["out_net_margin", "Q2 FY2024 (ended 2024-06-30)", "verified", "20.00%"],
+    ["out_revenue_growth_qoq", "Q2 FY2024 (ended 2024-06-30) vs Q1 FY2024 (ended 2024-03-31)", "verified", "23.81%"],
+    ["out_revenue_growth_yoy", "Q2 FY2024 (ended 2024-06-30) vs Q2 FY2023 (ended 2023-06-30)", "verified", "100.00%"],
   ];
   const leads = (period: string, outcomes: ReadonlyArray<ReadonlyArray<string>>) =>
     ["gross_margin", "operating_margin", "net_margin"].map((metric, index) => [`out_a_minus_b_${metric}`, period, ...outcomes[index]!]);
   // OFFQ's newest quarter ends half a year after QTRS's, so each lead takes OFFQ's Q4 FY2023, which ends with QTRS's.
-  const QTRS_OVER_OFFQ = leads("QTRS Corp Q4 FY2023 minus OFFQ Corp Q4 FY2023", Array(3).fill(["verified", "0.00 pp"]));
+  const QTRS_OVER_OFFQ = leads("QTRS Corp Q4 FY2023 (ended 2023-12-31) minus OFFQ Corp Q4 FY2023 (ended 2023-12-31)", Array(3).fill(["verified", "0.00 pp"]));
 
   await t.test("a comparison of named companies is one table, each company's figures from its own latest quarter (#398)", async () => {
     const done = completed((await chatHarness(pool, { model: null, readQuestion: reading(NO_ASKS), resolveMention: resolve }).run({ ...base, userIntent: "Compare revenue for QTRS and OFFQ" })).events);
@@ -450,9 +450,9 @@ test("a question about one company that asks for no figure is answered with its 
     const packet = enginePacket(financial, new Map([["a", "QTRS"], ["b", "OFFQ"]]), planned.plan);
     const margins = MEASURES.slice(4);
     assert.deepEqual(packet.figures.filter((figure) => figure.metric.includes("margin")).map((figure) => [figureCompanies(figure, packet).join(" and "), figure.metric, figure.period]), [
-      ...margins.map((metric) => ["QTRS", metric, "Q4 FY2023"]),
-      ...margins.map((metric) => ["OFFQ", metric, "Q2 FY2024"]),
-      ...margins.map((metric) => ["QTRS and OFFQ", `Difference in ${metric}`, "QTRS Corp Q4 FY2023 minus OFFQ Corp Q4 FY2023"]),
+      ...margins.map((metric) => ["QTRS", metric, "Q4 FY2023 (ended 2023-12-31)"]),
+      ...margins.map((metric) => ["OFFQ", metric, "Q2 FY2024 (ended 2024-06-30)"]),
+      ...margins.map((metric) => ["QTRS and OFFQ", `Difference in ${metric}`, "QTRS Corp Q4 FY2023 (ended 2023-12-31) minus OFFQ Corp Q4 FY2023 (ended 2023-12-31)"]),
     ], "OFFQ's margins are its newest quarter's alone, so no trend of them can be written");
     const lead = financial.results.find((result) => result.output_id === "out_a_minus_b_gross_margin")!;
     const inspected = await inspectCommittedResult(db, IDS.owner, lead.result_id);
@@ -464,7 +464,8 @@ test("a question about one company that asks for no figure is answered with its 
     const nogp = slotted("b", QTRS_LATEST);
     nogp[1] = ["out_b_gross_profit_fy2023_q4", "Q4 FY2023", "missing", "missing_input"];
     nogp[4] = ["out_b_gross_margin", "Q4 FY2023", "blocked_dependency", "blocked_by_dependency"];
-    const tied = leads("QTRS Corp Q4 FY2023 minus NOGP Corp Q4 FY2023", [["blocked_dependency", "blocked_by_dependency"], ["verified", "0.00 pp"], ["verified", "0.00 pp"]]);
+    const tied = leads("QTRS Corp Q4 FY2023 (ended 2023-12-31) minus NOGP Corp Q4 FY2023 (ended 2023-12-31)", [["blocked_dependency", "blocked_by_dependency"], ["verified", "0.00 pp"], ["verified", "0.00 pp"]]);
+    tied[0]![1] = "QTRS Corp Q4 FY2023 (ended 2023-12-31) minus NOGP Corp Q4 FY2023";
     assert.deepEqual(await results(done.message_id), [...slotted("a", QTRS_LATEST), ...nogp, ...tied], "equal margins tie at a real zero; a lead over a gap is blocked, never zero");
   });
 
@@ -528,33 +529,33 @@ test("a question about one company that asks for no figure is answered with its 
       blocked("out_operating_margin", "Q4 FY2023"),
       blocked("out_net_margin", "Q4 FY2023"),
       ...QTRS_OVERVIEW.slice(14, 16),
-      blocked("out_revenue_growth_qoq_fy2022_q4", "Q4 FY2022 vs Q3 FY2022"),
-      blocked("out_revenue_growth_qoq_fy2023_q1", "Q1 FY2023 vs Q4 FY2022"),
+      blocked("out_revenue_growth_qoq_fy2022_q4", "Q4 FY2022 vs Q3 FY2022 (ended 2022-09-30)"),
+      blocked("out_revenue_growth_qoq_fy2023_q1", "Q1 FY2023 (ended 2023-03-31) vs Q4 FY2022"),
       ...QTRS_OVERVIEW.slice(18, 20),
-      blocked("out_revenue_growth_qoq", "Q4 FY2023 vs Q3 FY2023"),
+      blocked("out_revenue_growth_qoq", "Q4 FY2023 vs Q3 FY2023 (ended 2023-09-30)"),
       blocked("out_revenue_growth_yoy", "Q4 FY2023 vs Q4 FY2022"),
-      ...window("Q1 FY2022 to Q4 FY2023", "Q3 FY2023", "Q1 FY2022"),
+      ...window("Q1 FY2022 (ended 2022-03-31) to Q4 FY2023", "Q3 FY2023 (ended 2023-09-30)", "Q1 FY2022 (ended 2022-03-31)"),
     ], "the latest quarter is the derived fourth quarter, not the third before it, and the window ranks the quarters with a value");
     assert.deepEqual(await overview("Revenue for SECQ"), [
       ...QTRS_OVERVIEW.slice(1, 3),
       derived("out_revenue_fy2022_q4", "Q4 FY2022"),
       ...QTRS_OVERVIEW.slice(4, 7),
       derived("out_revenue_fy2023_q4", "Q4 FY2023"),
-      ["out_revenue_fy2024_q1", "Q1 FY2024", "verified", "USD 2,400.00"],
-      ["out_gross_profit_fy2024_q1", "Q1 FY2024", "verified", "USD 1,200.00"],
-      ["out_operating_income_fy2024_q1", "Q1 FY2024", "verified", "USD 600.00"],
-      ["out_net_income_fy2024_q1", "Q1 FY2024", "verified", "USD 480.00"],
-      ["out_gross_margin", "Q1 FY2024", "verified", "50.00%"],
-      ["out_operating_margin", "Q1 FY2024", "verified", "25.00%"],
-      ["out_net_margin", "Q1 FY2024", "verified", "20.00%"],
+      ["out_revenue_fy2024_q1", "Q1 FY2024 (ended 2024-03-31)", "verified", "USD 2,400.00"],
+      ["out_gross_profit_fy2024_q1", "Q1 FY2024 (ended 2024-03-31)", "verified", "USD 1,200.00"],
+      ["out_operating_income_fy2024_q1", "Q1 FY2024 (ended 2024-03-31)", "verified", "USD 600.00"],
+      ["out_net_income_fy2024_q1", "Q1 FY2024 (ended 2024-03-31)", "verified", "USD 480.00"],
+      ["out_gross_margin", "Q1 FY2024 (ended 2024-03-31)", "verified", "50.00%"],
+      ["out_operating_margin", "Q1 FY2024 (ended 2024-03-31)", "verified", "25.00%"],
+      ["out_net_margin", "Q1 FY2024 (ended 2024-03-31)", "verified", "20.00%"],
       QTRS_OVERVIEW[15]!,
-      blocked("out_revenue_growth_qoq_fy2022_q4", "Q4 FY2022 vs Q3 FY2022"),
-      blocked("out_revenue_growth_qoq_fy2023_q1", "Q1 FY2023 vs Q4 FY2022"),
+      blocked("out_revenue_growth_qoq_fy2022_q4", "Q4 FY2022 vs Q3 FY2022 (ended 2022-09-30)"),
+      blocked("out_revenue_growth_qoq_fy2023_q1", "Q1 FY2023 (ended 2023-03-31) vs Q4 FY2022"),
       ...QTRS_OVERVIEW.slice(18, 20),
-      blocked("out_revenue_growth_qoq_fy2023_q4", "Q4 FY2023 vs Q3 FY2023"),
-      blocked("out_revenue_growth_qoq", "Q1 FY2024 vs Q4 FY2023"),
-      ["out_revenue_growth_yoy", "Q1 FY2024 vs Q1 FY2023", "verified", "100.00%"],
-      ...window("Q2 FY2022 to Q1 FY2024", "Q1 FY2024", "Q2 FY2022"),
+      blocked("out_revenue_growth_qoq_fy2023_q4", "Q4 FY2023 vs Q3 FY2023 (ended 2023-09-30)"),
+      blocked("out_revenue_growth_qoq", "Q1 FY2024 (ended 2024-03-31) vs Q4 FY2023"),
+      ["out_revenue_growth_yoy", "Q1 FY2024 (ended 2024-03-31) vs Q1 FY2023 (ended 2023-03-31)", "verified", "100.00%"],
+      ...window("Q2 FY2022 (ended 2022-06-30) to Q1 FY2024 (ended 2024-03-31)", "Q1 FY2024 (ended 2024-03-31)", "Q2 FY2022 (ended 2022-06-30)"),
     ], "growth after a first quarter compares with the fourth quarter before it and the first a year earlier");
   });
 });
