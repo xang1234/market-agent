@@ -408,7 +408,7 @@ function AnalyzeWorkspace({ subject, subjectName }: { subject: ResolvedSubject |
               {subject ? (subjectName ?? <Skeleton className="h-4 w-24" />) : 'No subject selected'} · {[...sources].join(', ') || 'no sources'}
             </p>
           </div>
-          <div className="flex shrink-0 flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => void generateMemo()}
