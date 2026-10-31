@@ -10,10 +10,14 @@ const RELOAD_WINDOW_MS = 60_000
 export function reloadOnce(destination: string, error: unknown): Promise<never> {
   const href = new URL(destination, window.location.href).href
   if (!claimReload(href)) return Promise.reject(error)
-  window.location.assign(href)
+  // Assigning the current URL with a #fragment would not reload the document.
+  if (stripHash(href) === stripHash(window.location.href)) window.location.reload()
+  else window.location.assign(href)
   // Never settles: the current page stays on screen until the new document loads.
   return new Promise<never>(() => {})
 }
+
+const stripHash = (href: string) => href.split('#')[0]
 
 // False when this destination already reloaded within the window, or when
 // storage cannot remember the attempt (a reload could then repeat forever).
@@ -31,13 +35,15 @@ function claimReload(href: string): boolean {
 export function lazyRoute<M extends Record<K, ComponentType>, K extends keyof M & string>(
   load: () => Promise<M>,
   name: K,
-  destination: () => string,
+  destination: () => string | null,
 ) {
   return async () => {
     try {
       return { Component: (await load())[name] }
     } catch (error) {
-      return reloadOnce(destination(), error)
+      const target = destination()
+      if (target === null) throw error
+      return reloadOnce(target, error)
     }
   }
 }

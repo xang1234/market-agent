@@ -20,9 +20,14 @@ import { PageLoadError, ShellFrame } from './shell/RouteFallbacks'
 // Each workspace is its own chunk. The router fetches every matched route's
 // chunk in parallel before it renders the shell, which ShellFrame stands in for,
 // and keeps the current page on screen while the next one downloads.
+// Where a failed page chunk should reload to: the address being opened, or null
+// when the navigation that wanted the chunk has since settled elsewhere.
+// `router` is unassigned while the router is created, so a holder stands in.
+let activeRouter: ReturnType<typeof createBrowserRouter> | null = null
 const destination = () => {
-  const pending = router.state.navigation.location
-  return pending ? router.createHref(pending) : window.location.href
+  if (!activeRouter?.state.initialized) return window.location.href
+  const pending = activeRouter.state.navigation.location
+  return pending ? activeRouter.createHref(pending) : null
 }
 const page = <M extends Record<K, ComponentType>, K extends keyof M & string>(load: () => Promise<M>, name: K) =>
   lazyRoute(load, name, destination)
@@ -95,6 +100,7 @@ const router = createBrowserRouter(
   ),
   { basename: import.meta.env.BASE_URL },
 )
+activeRouter = router
 
 // Module scope: stable registry identity across <App /> re-renders.
 const blockRegistry = createDefaultBlockRegistry()
