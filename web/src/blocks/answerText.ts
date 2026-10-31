@@ -16,8 +16,13 @@ import type {
   TableBlock,
 } from './types.ts'
 
+// Text the app shows literally (a ref's figure, a toned run, a table cell) keeps
+// its characters when pasted into Markdown. Only marks that change inline
+// meaning are escaped, so figures like $85.8B stay readable as plain text.
+const literal = (text: string) => text.replace(/[\\`*_[\]<>]/g, '\\$&')
+
 function markdownTable(header: ReadonlyArray<string>, rows: ReadonlyArray<ReadonlyArray<string>>): string {
-  const line = (cells: ReadonlyArray<string>) => `| ${cells.map((cell) => cell.replaceAll('|', '\\|').replaceAll('\n', ' ')).join(' | ')} |`
+  const line = (cells: ReadonlyArray<string>) => `| ${cells.map((cell) => literal(cell).replaceAll('|', '\\|').replaceAll('\n', ' ')).join(' | ')} |`
   return [line(header), line(header.map(() => '---')), ...rows.map(line)].join('\n')
 }
 
@@ -65,7 +70,8 @@ function financialAnswerText(block: FinancialAnswerBlock): string {
 const BLOCK_TEXT: Readonly<Record<string, (block: Block) => string>> = {
   rich_text: (block) => {
     const { segments, analyst_commentary } = block as RichTextBlock
-    const text = segments.map((segment) => (isRefSegment(segment) ? refSegmentText(segment) : segment.text)).join('')
+    // Plain runs are the answer's Markdown source; refs and toned runs render literally.
+    const text = segments.map((segment) => (isRefSegment(segment) ? literal(refSegmentText(segment)) : segment.tone === undefined || segment.tone === 'neutral' ? segment.text : literal(segment.text))).join('')
     return analyst_commentary ? `Analyst commentary\n\n${text}` : text
   },
   financial_answer: (block) => financialAnswerText(block as FinancialAnswerBlock),

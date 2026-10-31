@@ -38,3 +38,21 @@ test('a pipe in a cell cannot split a Markdown table column', () => {
   const table = { ...tableFixture, title: undefined, columns: ['A|B'], rows: [['x|y']] }
   assert.equal(answerText([table]), '| A\\|B |\n| --- |\n| x\\|y |')
 })
+
+test('text the app shows literally stays literal, while the answer\'s own Markdown passes through', () => {
+  const block = {
+    ...richTextFixture,
+    segments: [
+      { type: 'text' as const, text: '**Margins** held, with ' },
+      { type: 'ref' as const, ref_kind: 'fact' as const, ref_id: 'f1', format: '*Adjusted EPS* [est]' },
+      { type: 'text' as const, text: ' and a toned ', tone: undefined },
+      { type: 'text' as const, text: '_+3%_', tone: 'positive' as const },
+    ],
+  }
+  assert.equal(answerText([block]), '**Margins** held, with \\*Adjusted EPS\\* \\[est\\] and a toned \\_+3%\\_')
+})
+
+test('a table cell keeps its backslashes and pipes inside its column', () => {
+  const table = { ...tableFixture, title: undefined, columns: ['Note'], rows: [['a\\|b *c*']] }
+  assert.equal(answerText([table]), '| Note |\n| --- |\n| a\\\\\\|b \\*c\\* |')
+})
