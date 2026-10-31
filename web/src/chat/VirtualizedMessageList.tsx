@@ -7,6 +7,7 @@ import {
   useState,
   type ReactElement,
   type ReactNode,
+  type RefObject,
 } from 'react'
 
 import { JumpToLatestButton } from './JumpToLatestButton.tsx'
@@ -27,6 +28,17 @@ const QUESTION_SELECTOR = '[data-role="user"], [data-role="pending-user"]'
 // question: the question the reader just asked, at the top, its answer filling in below.
 // null: wherever the reader scrolled; nothing moves on its own.
 type Pin = 'bottom' | 'question' | null
+
+// The view sits somewhere this code did not put it: the reader moved it, by
+// wheel, keys, focus, find in page, or a screen reader, and the pin lets go. A
+// view the browser lowered because the content above shrank is not their doing.
+function letGoIfReaderMoved(el: HTMLElement, pin: RefObject<Pin>, placedTop: RefObject<number | null>): void {
+  const placed = placedTop.current
+  if (pin.current === null || placed === null || Math.abs(el.scrollTop - placed) <= 1) return
+  const lowestTop = el.scrollHeight - el.clientHeight
+  if (placed > lowestTop && Math.abs(el.scrollTop - lowestTop) <= 1) return
+  pin.current = null
+}
 
 export type VirtualizedMessageListProps = {
   messages: ReadonlyArray<ChatMessage>
@@ -86,6 +98,8 @@ export function VirtualizedMessageList({
     const el = containerRef.current
     const spacer = spacerRef.current
     if (el === null || spacer === null) return
+    // A move the reader made before this pass is theirs to keep.
+    letGoIfReaderMoved(el, pinRef, placedTopRef)
     if (!questionRoomRef.current) {
       if (spacer.style.height !== '0px') spacer.style.height = '0px'
     } else {
@@ -113,6 +127,8 @@ export function VirtualizedMessageList({
 
   const followLatest = useCallback(() => {
     pinRef.current = 'bottom'
+    // A new pin starts fresh: where the view sat before is not the reader moving it.
+    placedTopRef.current = null
     questionRoomRef.current = false
     holdPin()
   }, [holdPin])
@@ -141,6 +157,7 @@ export function VirtualizedMessageList({
     if (askedRun !== null && askedRun !== pinnedRunRef.current) {
       pinnedRunRef.current = askedRun
       pinRef.current = 'question'
+      placedTopRef.current = null
       questionRoomRef.current = true
     }
     holdPin()
@@ -155,24 +172,25 @@ export function VirtualizedMessageList({
   }, [])
 
   const handleScroll = useCallback(() => {
+    // Now, not on the next frame: a streaming render in between would put the
+    // view back and erase the reader's move.
+    if (containerRef.current !== null) letGoIfReaderMoved(containerRef.current, pinRef, placedTopRef)
     if (scrollRafRef.current !== null) return
     scrollRafRef.current = requestAnimationFrame(() => {
       scrollRafRef.current = null
       const el = containerRef.current
       if (el === null) return
       setScrollTop(el.scrollTop)
-      // Any move this code did not make, by wheel, keys, focus, find in page, or
-      // a screen reader, lets go of the pin.
-      if (pinRef.current !== null && placedTopRef.current !== null && Math.abs(el.scrollTop - placedTopRef.current) > 1) {
-        pinRef.current = null
-      }
       const atBottom = isAtBottom({
         scrollTop: el.scrollTop,
         scrollHeight: el.scrollHeight,
         clientHeight: el.clientHeight,
       })
       // A reader who scrolls back to the end by hand follows it again.
-      if (atBottom && pinRef.current === null && !questionRoomRef.current) pinRef.current = 'bottom'
+      if (atBottom && pinRef.current === null && !questionRoomRef.current) {
+        pinRef.current = 'bottom'
+        placedTopRef.current = null
+      }
       setShowJumpButton(!atBottom)
     })
   }, [])
