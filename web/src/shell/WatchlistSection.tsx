@@ -1,12 +1,9 @@
 // Watchlist group inside the left sidebar (redesign IA — replaces the prior
 // standalone WatchlistSlot aside). Keeps the default-manual membership list
-// (fra-6al.6.1), the inline add-symbol search, and the save-to-watchlist
-// resume handler (fra-6al.6.3) that completes an action dispatched by the
-// inline auth interrupt from a public subject route.
+// (fra-6al.6.1) and the inline add-symbol search. WatchlistSaveHandler, mounted
+// by the shell, completes save-to-watchlist actions (fra-6al.6.3).
 import { useState } from 'react'
 import { useAuth } from './useAuth'
-import { ProtectedActionType } from './authInterruptState'
-import { useResumedProtectedAction } from './useAuthInterrupt'
 import { SegmentedToggle } from '../symbol/SegmentedToggle'
 import { SymbolSearch } from '../symbol/SymbolSearch'
 import { ManualWatchlist } from '../watchlists/ManualWatchlist'
@@ -25,12 +22,6 @@ export function WatchlistSection() {
     watchlist.members.map((member) => member.subject_ref),
     sparkWindow,
   )
-
-  // addSubject swallows rejections into watchlist.editError, which ManualWatchlist
-  // already renders — no extra error path needed here.
-  useResumedProtectedAction(ProtectedActionType.SaveToWatchlist, (action) => {
-    void watchlist.addSubject(action.payload.subject_ref)
-  })
 
   return (
     <section aria-label="Watchlist" className="flex min-h-0 flex-1 flex-col gap-2">

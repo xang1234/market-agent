@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef } from 'react'
 import { useLocation, useNavigation } from 'react-router-dom'
 import { EvidenceInspectorDock, EvidenceInspectorProvider } from '../evidence/EvidenceInspectorProvider.tsx'
 import { WatchlistProvider } from '../watchlists/WatchlistProvider'
+import { WatchlistSaveHandler } from '../watchlists/WatchlistSaveHandler'
 import { AuthInterrupt } from './AuthInterrupt'
 import { AuthInterruptProvider } from './AuthInterruptProvider'
 import { RightRailProvider } from './RightRailProvider'
@@ -58,6 +59,7 @@ export function WorkspaceShell() {
       <RightRailProvider>
         <SidebarSlotProvider>
         <WatchlistProvider userId={userId}>
+          <WatchlistSaveHandler />
           <EvidenceInspectorProvider>
             <div className="flex h-full w-full bg-bg text-fg">
               <div
