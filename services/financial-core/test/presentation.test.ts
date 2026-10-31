@@ -644,7 +644,7 @@ test("a fiscal year the companies end on different dates names each cell's end, 
 
 test("a margin whose operands were bound to periods ending on different dates names each operand's (#541)", () => {
   const content = present(planFixture(), comparisonResults({ out_a_gm: gapOf("out_a_gm", "a_gm", "The operands cover different periods.") }), NAMES, { ...BOUND_TOGETHER, a_gp: fy2023("2023-12-30") });
-  assert.equal(resultText(content, "out_a_gm"), "The operands cover different periods. Gross profit's FY2023 ended 2023-12-30 and Revenue's FY2023 ended 2023-12-31.");
+  assert.equal(resultText(content, "out_a_gm"), "The operands cover different periods. Gross profit's FY2023 ended 2023-12-30 and revenue's FY2023 ended 2023-12-31.");
 });
 
 const LATEST_YEAR = { kind: "latest" as const, period_type: "annual" as const, offset: 0 };
@@ -770,4 +770,35 @@ test("a cohort of cover counts taken on different days names each day, never as 
     b_shares: { fiscal_year: 2024, fiscal_period: "Q1", end: "2024-04-26" },
   });
   assert.equal(resultText(content, "o_rank"), "The cohort members cover different periods. Alpha Corp's Q1 FY2025 figure is as of 2024-05-17 and Beta Inc's Q1 FY2024 figure is as of 2024-04-26.");
+});
+
+test("a ratio's operands read mid-sentence in lower case, each with its own possessive (#541)", () => {
+  const plan = singleSubjectPlan([
+    balance("tl", "total_liabilities"),
+    balance("ta", "total_assets"),
+    { node_id: "lta", operation: "ratio", operation_version: "ratio.v1", ratio_key: "liabilities_to_assets", numerator: "tl", denominator: "ta" },
+  ], ["lta"]);
+  const content = present(plan, [committed("o_lta", "lta", { kind: "gap", reason_code: "incompatible_period", explanation: "The operands cover different periods." }, "incompatible")], { a: "Alpha Corp" }, {
+    tl: fy2023("2023-12-30"),
+    ta: fy2023("2023-12-31"),
+  });
+  assert.equal(resultText(content, "o_lta"), "The operands cover different periods. Total liabilities' FY2023 figure is as of 2023-12-30 and total assets' FY2023 figure is as of 2023-12-31.");
+});
+
+test("a cohort of trailing sums over different months keeps the engine's words, never naming one quarter as a sum's period (#541)", () => {
+  const plan = comparisonPlan([
+    ...trailingRevenue("a", [2025, "Q4"], [0, 1, 2, 3]),
+    ...trailingRevenue("b", [2025, "Q4"], [0, 1, 2, 3]),
+    { node_id: "rank", operation: "peer_compare", operation_version: "peer_compare.v1", members: ["a_ttm", "b_ttm"], direction: "highest" },
+  ], ["rank"]);
+  const ends = { a: ["2025-01-26", "2024-10-27", "2024-07-28", "2024-04-28"], b: ["2025-09-27", "2025-06-28", "2025-03-29", "2024-12-28"] };
+  const periods: Record<string, BoundPeriod> = {};
+  for (const slot of ["a", "b"] as const) {
+    ends[slot].forEach((end, n) => {
+      const { fiscal_year, fiscal_period } = quarterBack(2025, "Q4", n) as Extract<PeriodSelector, { kind: "fiscal_period" }>;
+      periods[`${slot}_rev${n}`] = { fiscal_year, fiscal_period, end };
+    });
+  }
+  const content = present(plan, [committed("o_rank", "rank", { kind: "gap", reason_code: "incompatible_period", explanation: "The cohort members cover different periods." }, "incompatible")], NAMES, periods);
+  assert.equal(resultText(content, "o_rank"), "The cohort members cover different periods.");
 });
