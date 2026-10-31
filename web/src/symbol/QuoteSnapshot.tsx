@@ -25,11 +25,13 @@ type QuoteSnapshotProps = {
 
 export function QuoteSnapshot({ subject, title, quoteState }: QuoteSnapshotProps) {
   const issuerProfile = issuerProfileFromSubject(subject)
+  // The ticker and venue sit beside the heading, so it names the company alone.
+  const heading = issuerProfile?.legal_name ?? title
 
   if (quoteState.status !== 'ready') {
     return (
       <section className="min-w-0">
-        <SnapshotTitle title={title} />
+        <SnapshotTitle title={heading} />
         <div className="mt-3">
           {quoteState.status === 'loading' ? (
             <Skeleton label="Loading quote" className="h-9 w-48" />
@@ -50,7 +52,7 @@ export function QuoteSnapshot({ subject, title, quoteState }: QuoteSnapshotProps
   return (
     <section className="min-w-0">
       <div className="flex flex-wrap items-center gap-2">
-        <SnapshotTitle title={title} />
+        <SnapshotTitle title={heading} />
         <span className="rounded border border-line px-2 py-0.5 text-xs font-medium text-muted">
           {quote.listing.ticker}
         </span>
@@ -91,16 +93,11 @@ function SnapshotTitle({ title }: { title: string | null }) {
 function IssuerProfileLine({
   profile,
 }: {
-  profile: { legal_name: string; sector?: string; industry?: string } | null
+  profile: { sector?: string; industry?: string } | null
 }) {
-  if (!profile) return null
-  return (
-    <p className="mt-3 max-w-2xl text-sm text-muted">
-      {profile.legal_name}
-      {profile.sector ? ` · ${profile.sector}` : ''}
-      {profile.industry ? ` · ${profile.industry}` : ''}
-    </p>
-  )
+  const parts = [profile?.sector, profile?.industry].filter(Boolean)
+  if (parts.length === 0) return null
+  return <p className="mt-2 max-w-2xl text-sm text-muted">{parts.join(' · ')}</p>
 }
 
 function formatQuoteTime(asOf: string, timeZone?: string): string {
