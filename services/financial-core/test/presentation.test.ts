@@ -728,3 +728,46 @@ test("a window of latest quarters names each by the quarter it was bound to, and
   ]);
   assert.equal(resultText(content, "o_window"), "Q1 FY2026 (ended 2026-03-28) has the lowest revenue of the 3 of 4 quarters ranked");
 });
+
+test("an instant names the day its value stands at, never calling it its period's end: a balance and a cover count (#540)", () => {
+  const latestQuarter = { kind: "latest" as const, period_type: "quarterly" as const, offset: 0 };
+  const plan = singleSubjectPlan([
+    reportedAt("cash", "a", "cash_and_equivalents", latestQuarter),
+    reportedAt("shares", "a", "shares_outstanding", latestQuarter),
+    balance("ta23", "total_assets"),
+    balance("ta22", "total_assets", 2022),
+    { node_id: "ta_change", operation: "absolute_change", operation_version: "absolute_change.v1", current: "ta23", prior: "ta22" },
+  ], ["cash", "shares", "ta_change"]);
+  const content = present(plan, [
+    committed("o_cash", "cash", usdValue("100")),
+    committed("o_shares", "shares", valueOf("24640000000", { kind: "shares" })),
+    committed("o_ta_change", "ta_change", usdValue("50")),
+  ], { a: "Alpha Corp" }, {
+    // The quarter ended 2024-04-28; its 10-Q's cover counted the shares on 2024-05-17.
+    cash: { fiscal_year: 2025, fiscal_period: "Q1", end: "2024-04-28" },
+    shares: { fiscal_year: 2025, fiscal_period: "Q1", end: "2024-05-17" },
+    ta23: fy2023("2023-12-31"),
+    ta22: { fiscal_year: 2022, fiscal_period: "FY", end: "2022-12-31" },
+  });
+  assert.deepEqual(["o_cash", "o_shares", "o_ta_change"].map((output) => labelTexts(content, output)[2]), [
+    "Q1 FY2025 (as of 2024-04-28)",
+    "Q1 FY2025 (as of 2024-05-17)",
+    "FY2023 (as of 2023-12-31) vs FY2022 (as of 2022-12-31)",
+  ]);
+});
+
+test("a cohort of cover counts taken on different days names each day, never as its period's end (#540)", () => {
+  const latestQuarter = { kind: "latest" as const, period_type: "quarterly" as const, offset: 0 };
+  const plan = comparisonPlan([
+    reportedAt("a_shares", "a", "shares_outstanding", latestQuarter),
+    reportedAt("b_shares", "b", "shares_outstanding", latestQuarter),
+    { node_id: "rank", operation: "peer_compare", operation_version: "peer_compare.v1", members: ["a_shares", "b_shares"], direction: "highest" },
+  ], ["rank"]);
+  const content = present(plan, [
+    committed("o_rank", "rank", { kind: "gap", reason_code: "incompatible_period", explanation: "The cohort members cover different periods." }, "incompatible"),
+  ], NAMES, {
+    a_shares: { fiscal_year: 2025, fiscal_period: "Q1", end: "2024-05-17" },
+    b_shares: { fiscal_year: 2024, fiscal_period: "Q1", end: "2024-04-26" },
+  });
+  assert.equal(resultText(content, "o_rank"), "The cohort members cover different periods. Alpha Corp's Q1 FY2025 figure is as of 2024-05-17 and Beta Inc's Q1 FY2024 figure is as of 2024-04-26.");
+});
