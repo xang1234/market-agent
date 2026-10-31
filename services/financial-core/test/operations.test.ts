@@ -21,7 +21,7 @@ import {
 import { boundInput, FY2022, FY2023, KNOWLEDGE_CUTOFF, operand, SLOTS, type InputSpec } from "./operand-fixtures.ts";
 import { divideRational, equalRational, rational } from "./rational-oracle.ts";
 
-const change = (operation: ChangeNode["operation"]): ChangeNode => ({ node_id: "chg", operation, operation_version: `${operation}.v1`, current: "cur", prior: "pri" });
+const change = (operation: ChangeNode["operation"]): ChangeNode => ({ node_id: "chg", operation, operation_version: OPERATION_REGISTRY[operation].operation_version, current: "cur", prior: "pri" });
 const grossMargin: MarginNode = { node_id: "gm", operation: "gross_margin", operation_version: "gross_margin.v1", numerator: "gp", revenue: "rev" };
 const ttm: TrailingSumNode = { node_id: "ttm", operation: "trailing_sum", operation_version: "trailing_sum.v1", quarters: ["q1", "q2", "q3", "q4"] };
 
@@ -51,7 +51,7 @@ test("the catalog registers exactly the approved operations, each versioned", ()
     Object.keys(OPERATION_REGISTRY).sort(),
     ["absolute_change", "free_cash_flow", "gross_margin", "market_cap", "net_margin", "operating_margin", "pe_ratio", "peer_compare", "percent_change_positive_base", "period_rank", "ratio", "reported_metric", "spread", "threshold", "trailing_sum"],
   );
-  for (const [kind, spec] of Object.entries(OPERATION_REGISTRY)) assert.equal(spec.operation_version, `${kind}.v1`);
+  for (const [kind, spec] of Object.entries(OPERATION_REGISTRY)) assert.match(spec.operation_version, new RegExp(`^${kind}\\.v[1-9][0-9]*$`));
 });
 
 // --- reported_metric -------------------------------------------------------

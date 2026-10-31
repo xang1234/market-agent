@@ -143,7 +143,7 @@ test("EPS a year apart, with a split between their filings, changes on one basis
     ...FY2025,
     split_adjustment: restated({ native: "2.94", value_kind: "per_share", as_filed_on: "2025-02-26", reference_date: REFERENCE_DATE }),
   });
-  const change: ChangeNode = { node_id: "chg", operation: "absolute_change", operation_version: "absolute_change.v1", current: "current", prior: "prior" };
+  const change: ChangeNode = { node_id: "chg", operation: "absolute_change", operation_version: "absolute_change.v2", current: "current", prior: "prior" };
   assert.equal(payloadValue(absoluteChange(change, current, prior)), "1.747");
 });
 

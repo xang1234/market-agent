@@ -1,4 +1,5 @@
 import type { FinancialPlanV1, FinancialRuntimeAuthorityV1, PeriodSelector } from "../src/contracts.ts";
+import { OPERATION_REGISTRY } from "../src/operation-registry.ts";
 
 export const ISSUER_A = "11111111-1111-4111-8111-111111111111";
 export const ISSUER_B = "22222222-2222-4222-8222-222222222222";
@@ -100,7 +101,7 @@ export const reportedAt = (node_id: string, subject_slot: string, metric_key: st
   ({ node_id, operation: "reported_metric" as const, operation_version: "reported_metric.v1", subject_slot, metric_key, period });
 
 export const change = (node_id: string, operation: "absolute_change" | "percent_change_positive_base", current: string, prior: string) =>
-  ({ node_id, operation, operation_version: `${operation}.v1`, current, prior });
+  ({ node_id, operation, operation_version: OPERATION_REGISTRY[operation].operation_version, current, prior });
 
 export const OVERVIEW_LINES = ["rev", "gp", "oi", "ni", "gm", "om", "nm", "qoq", "yoy"] as const;
 
