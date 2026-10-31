@@ -645,3 +645,18 @@ test("a margin whose operands were bound to periods ending on different dates na
   const content = present(planFixture(), comparisonResults({ out_a_gm: gapOf("out_a_gm", "a_gm", "The operands cover different periods.") }), NAMES, { ...BOUND_TOGETHER, a_gp: fy2023("2023-12-30") });
   assert.equal(resultText(content, "out_a_gm"), "The operands cover different periods. Gross profit's FY2023 ended 2023-12-30 and Revenue's FY2023 ended 2023-12-31.");
 });
+
+const LATEST_YEAR = { kind: "latest" as const, period_type: "annual" as const, offset: 0 };
+
+test("a node named like an object's own property has no bound period: its gap and its margin's still present (#541)", () => {
+  const plan = singleSubjectPlan([
+    reportedAt("gp", "a", "gross_profit", LATEST_YEAR),
+    reportedAt("constructor", "a", "revenue", LATEST_YEAR),
+    { node_id: "gm", operation: "gross_margin", operation_version: "gross_margin.v1", numerator: "gp", revenue: "constructor" },
+  ], ["constructor", "gm"]);
+  const content = present(plan, [committed("o_constructor", "constructor", UNAVAILABLE, "missing"), committed("o_gm", "gm", UNAVAILABLE, "missing")], { a: "Alpha Corp" });
+  assert.deepEqual(content.results.map((entry) => [entry.output_id, content.labels[entry.period_label_id]!.text, entry.presented.text]), [
+    ["o_constructor", "latest fiscal year", "A required input or calculation is unavailable."],
+    ["o_gm", "latest fiscal year", "A required input or calculation is unavailable."],
+  ]);
+});
