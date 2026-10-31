@@ -173,9 +173,10 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     // holds it by now, so the turn's companies are not picked again. Before
     // the answer is saved the thread is as the first attempt found it. A gap
     // the turn declined with is returned as saved, with nothing planned again.
+    // Another thread's message under the id is no outcome of this turn.
     const { rows: [existing] } = await deps.pool.query<{ kind: string | null }>(
-      `select blocks->0->>'kind' as kind from chat_messages where message_id = $1::uuid`,
-      [messageId],
+      `select blocks->0->>'kind' as kind from chat_messages where message_id = $1::uuid and thread_id = $2::uuid and role = 'assistant'`,
+      [messageId, context.threadId],
     );
     const run = (requested: TurnCompanies, reading: ScopeProposal | null, scope: ResearchScope | null, choice: PlanChoice) => async (): Promise<ChatFinancialTurn> => {
       // What planning settled, for a gap: the companies it was asked about, a
