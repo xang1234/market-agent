@@ -1,5 +1,7 @@
 import { useContext, useState, type ReactElement } from 'react'
 import { ChartCard } from './ChartCard.tsx'
+import { CopyCsvButton } from './CopyCsvButton.tsx'
+import { provenanceRow } from './csv.ts'
 import { InspectableResult } from '../evidence/InspectableResult.tsx'
 import { BlockProofContext } from './blockProof.ts'
 import { VerificationLabel } from './VerificationLabel.tsx'
@@ -9,6 +11,8 @@ import {
   resultLabel,
   resultsById,
   seriesBars,
+  seriesCsv,
+  tableCsv,
   sortedRowIndexes,
   supportedFinancialContent,
   type SortDirection,
@@ -57,7 +61,7 @@ export function FinancialAnswer({ block }: FinancialAnswerProps): ReactElement {
         </p>
       </div>
       {content.presentations.map((presentation, index) => (
-        <PresentationView key={`${block.id}-p${index}`} blockId={block.id} content={content} results={results} presentation={presentation} />
+        <PresentationView key={`${block.id}-p${index}`} blockId={block.id} provenance={provenanceRow(block)} content={content} results={results} presentation={presentation} />
       ))}
     </ChartCard>
   )
@@ -67,14 +71,16 @@ type Results = ReadonlyMap<string, FinancialPresentedResult>
 
 type PresentationViewProps = {
   blockId: string
+  // Ends a copied table, so pasted figures keep their as-of date and snapshot.
+  provenance: ReadonlyArray<string>
   content: FinancialAnswerContent
   results: Results
   presentation: FinancialPresentation
 }
 
-function PresentationView({ blockId, content, results, presentation }: PresentationViewProps): ReactElement | null {
-  if (presentation.kind === 'table') return <CertifiedTable blockId={blockId} content={content} results={results} table={presentation} />
-  if (presentation.kind === 'series') return <CertifiedSeries content={content} results={results} series={presentation} />
+function PresentationView({ blockId, provenance, content, results, presentation }: PresentationViewProps): ReactElement | null {
+  if (presentation.kind === 'table') return <CertifiedTable blockId={blockId} provenance={provenance} content={content} results={results} table={presentation} />
+  if (presentation.kind === 'series') return <CertifiedSeries provenance={provenance} content={content} results={results} series={presentation} />
   const result = results.get(presentation.result_id)
   if (!result) return null
   return <ResultLine content={content} result={result} />
@@ -136,9 +142,9 @@ function Cell({ result, ownPeriod }: { result: FinancialPresentedResult | undefi
   )
 }
 
-type TableProps = { blockId: string; content: FinancialAnswerContent; results: Results; table: FinancialTablePresentation }
+type TableProps = { blockId: string; provenance: ReadonlyArray<string>; content: FinancialAnswerContent; results: Results; table: FinancialTablePresentation }
 
-function CertifiedTable({ blockId, content, results, table }: TableProps): ReactElement {
+function CertifiedTable({ blockId, provenance, content, results, table }: TableProps): ReactElement {
   const [sort, setSort] = useState<{ columnId: string; direction: SortDirection } | null>(null)
   const order = sort ? sortedRowIndexes(table, results, sort.columnId, sort.direction) : table.rows.map((_, index) => index)
   const toggle = (columnId: string) =>
@@ -146,9 +152,12 @@ function CertifiedTable({ blockId, content, results, table }: TableProps): React
       current?.columnId === columnId && current.direction === 'ascending' ? { columnId, direction: 'descending' } : { columnId, direction: 'ascending' },
     )
   return (
-    <div className="overflow-x-auto rounded-lg border border-line" data-testid={`block-financial-answer-${blockId}-table`}>
+    <div className="relative overflow-x-auto rounded-lg border border-line" data-testid={`block-financial-answer-${blockId}-table`}>
+      <div className="absolute right-1.5 top-1.5">
+        <CopyCsvButton what={table.caption || 'this table'} rows={() => [...tableCsv(content, table, results), provenance]} />
+      </div>
       <table className="w-full border-collapse text-left text-sm">
-        <caption className="px-3 py-2 text-left text-xs text-muted">{table.caption}</caption>
+        <caption className="py-2 pl-3 pr-28 text-left text-xs text-muted">{table.caption}</caption>
         <thead className="bg-surface-2">
           <tr>
             <th scope="col" className="border-b border-line px-3 py-2 text-xs font-medium text-muted">
@@ -199,16 +208,19 @@ function CertifiedTable({ blockId, content, results, table }: TableProps): React
   )
 }
 
-type SeriesProps = { content: FinancialAnswerContent; results: Results; series: FinancialSeriesPresentation }
+type SeriesProps = { provenance: ReadonlyArray<string>; content: FinancialAnswerContent; results: Results; series: FinancialSeriesPresentation }
 
-function CertifiedSeries({ content, results, series }: SeriesProps): ReactElement {
+function CertifiedSeries({ provenance, content, results, series }: SeriesProps): ReactElement {
   const points = series.points.map((point) => results.get(point.result_id))
   const bars = seriesBars(points)
   const heading = `${labelText(content, series.subject_label_id)}: ${labelText(content, series.measure_label_id)}`
   return (
-    <figure className="mt-2">
+    <figure className="relative mt-2">
+      <div className="absolute right-0 top-0">
+        <CopyCsvButton what={heading} rows={() => [...seriesCsv(content, series, results), provenance]} />
+      </div>
       <table className="w-full border-collapse text-sm">
-        <caption className="pb-2 text-left text-xs font-medium text-muted">{heading}</caption>
+        <caption className="pb-2 pr-28 text-left text-xs font-medium text-muted">{heading}</caption>
         <tbody>
           {series.points.map((point, index) => {
             const bar = bars[index]

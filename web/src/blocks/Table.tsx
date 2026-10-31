@@ -1,6 +1,8 @@
 import type { ReactElement } from 'react'
 import type { TableBlock } from './types.ts'
 import { formatTableCell } from './table.ts'
+import { CopyCsvButton } from './CopyCsvButton.tsx'
+import { provenanceRow } from './csv.ts'
 
 type TableProps = { block: TableBlock }
 
@@ -11,6 +13,12 @@ export function Table({ block }: TableProps): ReactElement {
       data-block-kind="table"
       className="overflow-x-auto rounded-lg border border-line"
     >
+      <div className="flex justify-end border-b border-line px-1.5 py-1">
+        <CopyCsvButton
+          what={block.title ?? 'this table'}
+          rows={() => [[...block.columns], ...block.rows.map((row) => row.map(formatTableCell)), provenanceRow(block)]}
+        />
+      </div>
       <table className="w-full border-collapse text-left text-sm">
         <thead className="bg-surface-2">
           <tr>

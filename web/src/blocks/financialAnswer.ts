@@ -9,7 +9,9 @@ import {
   type FinancialAnswerBlock,
   type FinancialAnswerContent,
   type FinancialPresentedResult,
+  type FinancialSeriesPresentation,
   type FinancialTablePresentation,
+  type FinancialUnit,
 } from './types.ts'
 
 export function supportedFinancialContent(block: FinancialAnswerBlock): FinancialAnswerContent | null {
@@ -84,4 +86,77 @@ export function coverageText(content: FinancialAnswerContent): string {
   return state === 'complete'
     ? `All ${requested} requested results verified`
     : `${verified} of ${requested} requested results verified`
+}
+
+function unitLabel(unit: FinancialUnit): string {
+  switch (unit.kind) {
+    case 'currency':
+      return unit.currency
+    case 'currency_per_share':
+      return `${unit.currency}/share`
+    case 'percent':
+      return '%'
+    case 'percentage_points':
+      return 'pp'
+    case 'basis_points':
+      return 'bp'
+    case 'ratio':
+    case 'shares':
+      return unit.kind
+    case 'count':
+      return ''
+  }
+}
+
+// Raw values paste into a spreadsheet as numbers; the unit rides in the header.
+function csvHeading(heading: string, results: ReadonlyArray<FinancialPresentedResult | undefined>): string {
+  const first = results.find((result) => result?.presented.kind === 'value')
+  const unit = first?.presented.kind === 'value' ? unitLabel(first.presented.unit) : ''
+  return unit === '' ? heading : `${heading} (${unit})`
+}
+
+function csvCell(result: FinancialPresentedResult | undefined): string {
+  if (!result) return ''
+  return result.presented.kind === 'value' ? result.presented.value : result.presented.text
+}
+
+export function tableCsv(
+  content: FinancialAnswerContent,
+  table: FinancialTablePresentation,
+  results: ReadonlyMap<string, FinancialPresentedResult>,
+): string[][] {
+  const cellsOf = (columnIndex: number) => table.rows.map((row) => {
+    const id = row.cells[columnIndex]
+    return id == null ? undefined : results.get(id)
+  })
+  const header = ['Company']
+  table.columns.forEach((column, index) => {
+    const measure = labelText(content, column.measure_label_id)
+    const heading = column.period_label_id === null ? measure : `${measure}, ${labelText(content, column.period_label_id)}`
+    header.push(csvHeading(heading, cellsOf(index)))
+    if (column.period_label_id === null) header.push(`${measure} period`)
+  })
+  const rows = table.rows.map((row) => {
+    const line = [labelText(content, row.subject_label_id)]
+    row.cells.forEach((id, index) => {
+      const result = id == null ? undefined : results.get(id)
+      line.push(csvCell(result))
+      if (table.columns[index]?.period_label_id === null) line.push(result ? labelText(content, result.period_label_id) : '')
+    })
+    return line
+  })
+  return [header, ...rows]
+}
+
+export function seriesCsv(
+  content: FinancialAnswerContent,
+  series: FinancialSeriesPresentation,
+  results: ReadonlyMap<string, FinancialPresentedResult>,
+): string[][] {
+  const points = series.points.map((point) => results.get(point.result_id))
+  const heading = `${labelText(content, series.subject_label_id)}: ${labelText(content, series.measure_label_id)}`
+  return [
+    ['Period', csvHeading(heading, points)],
+    ...series.points.map((point, index) => [labelText(content, point.period_label_id), csvCell(points[index])]),
+  ]
 }
