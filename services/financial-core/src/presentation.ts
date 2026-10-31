@@ -603,10 +603,10 @@ function operandPeriods(plan: FinancialPlanV1, node: OperationNode, readsOf: Rea
     const slot = across ? subjectSlot(plan, operand) : null;
     return slot === null ? measureText(plan, operand) : names(slot);
   };
-  return ` ${new Intl.ListFormat("en").format(bound.map(({ operand, period }) => `${owner(operand)}'s ${fiscalName(period)} ended ${period.end}`))}.`;
+  return ` ${new Intl.ListFormat("en").format(bound.map(({ operand, period }) => `${owner(operand)}'s ${fiscalName(period)} ${measuresInstant(plan, operand) ? "figure is as of" : "ended"} ${period.end}`))}.`;
 }
 
-// A balance is a point in time: "end of FY2023", never the year's amount.
+// A balance is a point in time: "FY2023 (as of 2023-12-30)", or "end of FY2023" with no bound period, never the year's amount.
 function periodText(plan: FinancialPlanV1, node: OperationNode, names: (slot: LocalId) => string, readsOf: ReadsOf): string {
   if (node.operation === "spread") return spreadSides(plan, node, (side) => `${names(side.slot)} ${periodText(plan, side.node, names, readsOf)}`).join(" minus ");
   if (node.operation === "period_rank") return windowSpan(plan, node, names, readsOf);
@@ -648,8 +648,9 @@ function measuresInstant(plan: FinancialPlanV1, node: OperationNode): boolean {
   return dependencies.length > 0 && dependencies.every((dependency) => measuresInstant(plan, dependency));
 }
 
+// An instant's date is the day its value stands at, which for a 10-Q cover's share count falls after the quarter ends.
 function readText({ selector, bound }: PeriodRead, instant: boolean): string {
-  if (bound) return instant ? `end of ${fiscalName(bound)} (${bound.end})` : `${fiscalName(bound)} (ended ${bound.end})`;
+  if (bound) return `${fiscalName(bound)} (${instant ? "as of" : "ended"} ${bound.end})`;
   return instant ? `end of ${selectorText(selector)}` : selectorText(selector);
 }
 

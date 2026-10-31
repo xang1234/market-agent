@@ -112,7 +112,7 @@ test("certified market cap and P/E in chat", { timeout: 300_000 }, async (t) => 
     const answer = await ask("What is NVDA's market cap?", "market_cap");
     assert.deepEqual(answer.rows, [
       ["Share price", "latest known at the cutoff", "verified", "USD 120 per share"],
-      ["Shares outstanding", "end of Q1 FY2025 (2024-05-17)", "verified", "24640000000 shares"],
+      ["Shares outstanding", "Q1 FY2025 (as of 2024-05-17)", "verified", "24640000000 shares"],
       ["Market capitalization (share price × shares outstanding)", "latest known at the cutoff", "verified", "USD 2956800000000"],
     ]);
     // Friday's 1200.00 close and the 10-Q's 2,464,000,000 shares at 2024-05-17, each restated after Monday's 10-for-1 split.

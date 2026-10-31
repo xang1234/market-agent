@@ -35,12 +35,12 @@ test("chat cash resilience", { timeout: 300_000 }, async (t) => {
       rows: [
         ["Operating cash flow", "FY2023 (ended 2023-12-31)", "120"],
         ["Net income", "FY2023 (ended 2023-12-31)", "100"],
-        ["Total liabilities", "end of FY2023 (2023-12-31)", "300"],
-        ["Total assets", "end of FY2023 (2023-12-31)", "600"],
-        ["Stockholders' equity", "end of FY2023 (2023-12-31)", "200"],
+        ["Total liabilities", "FY2023 (as of 2023-12-31)", "300"],
+        ["Total assets", "FY2023 (as of 2023-12-31)", "600"],
+        ["Stockholders' equity", "FY2023 (as of 2023-12-31)", "200"],
         ["Cash conversion: operating cash flow / net income (reported period)", "FY2023 (ended 2023-12-31)", "1.2"],
-        ["Total liabilities / total assets (period-end balance sheet)", "end of FY2023 (2023-12-31)", "0.5"],
-        ["Total liabilities / stockholders' equity (period-end balance sheet)", "end of FY2023 (2023-12-31)", "1.5"],
+        ["Total liabilities / total assets (period-end balance sheet)", "FY2023 (as of 2023-12-31)", "0.5"],
+        ["Total liabilities / stockholders' equity (period-end balance sheet)", "FY2023 (as of 2023-12-31)", "1.5"],
       ],
     });
   });
@@ -73,8 +73,8 @@ test("chat cash resilience", { timeout: 300_000 }, async (t) => {
       ["Operating cash flow", "FY2023 (ended 2023-12-31)", "120"],
       ["Net income", "FY2023 (ended 2023-12-31)", "100"],
       ["Total liabilities", "end of latest fiscal year", "missing"],
-      ["Total assets", "end of FY2023 (2023-12-31)", "600"],
-      ["Stockholders' equity", "end of FY2023 (2023-12-31)", "200"],
+      ["Total assets", "FY2023 (as of 2023-12-31)", "600"],
+      ["Stockholders' equity", "FY2023 (as of 2023-12-31)", "200"],
       ["Cash conversion: operating cash flow / net income (reported period)", "FY2023 (ended 2023-12-31)", "1.2"],
       ["Total liabilities / total assets (period-end balance sheet)", "end of latest fiscal year", "blocked_dependency"],
       ["Total liabilities / stockholders' equity (period-end balance sheet)", "end of latest fiscal year", "blocked_dependency"],

@@ -79,12 +79,12 @@ test("cash resilience from an SEC 10-K and a later 10-Q", { timeout: 300_000 }, 
   assert.deepEqual(rows, [
     ["Operating cash flow", "FY2024 (ended 2024-12-31)", "120"],
     ["Net income", "FY2024 (ended 2024-12-31)", "100"],
-    ["Total liabilities", "end of FY2024 (2024-12-31)", "300"],
-    ["Total assets", "end of FY2024 (2024-12-31)", "600"],
-    ["Stockholders' equity", "end of FY2024 (2024-12-31)", "200"],
+    ["Total liabilities", "FY2024 (as of 2024-12-31)", "300"],
+    ["Total assets", "FY2024 (as of 2024-12-31)", "600"],
+    ["Stockholders' equity", "FY2024 (as of 2024-12-31)", "200"],
     ["Cash conversion: operating cash flow / net income (reported period)", "FY2024 (ended 2024-12-31)", "1.2"],
-    ["Total liabilities / total assets (period-end balance sheet)", "end of FY2024 (2024-12-31)", "0.5"],
-    ["Total liabilities / stockholders' equity (period-end balance sheet)", "end of FY2024 (2024-12-31)", "1.5"],
+    ["Total liabilities / total assets (period-end balance sheet)", "FY2024 (as of 2024-12-31)", "0.5"],
+    ["Total liabilities / stockholders' equity (period-end balance sheet)", "FY2024 (as of 2024-12-31)", "1.5"],
   ]);
   const bound = (await db.query(
     `select i.input_slot, f.fiscal_year, f.period_end::text as period_end
