@@ -340,6 +340,8 @@ test('a draft typed while the first question is being sent survives the move to 
   try {
     await h.ask('Analyze NVDA')
     await h.type('Follow up')
+    const composer = h.query('textarea') as HTMLTextAreaElement
+    composer.focus()
 
     await act(async () => created.resolve())
     await h.flush()
@@ -347,6 +349,7 @@ test('a draft typed while the first question is being sent survives the move to 
     assert.equal(h.path(), '/chat/T1')
     assert.equal(h.container.querySelectorAll('textarea').length, 1)
     assert.equal((h.query('textarea') as HTMLTextAreaElement).value, 'Follow up')
+    assert.equal(h.dom.window.document.activeElement, composer, 'typing carries on in the same composer')
   } finally {
     await h.cleanup()
   }
@@ -483,6 +486,29 @@ test('a valid golden completion renders every block with no notice', async () =>
       ["NVDA's revenue rose in every period from Q1 FY2025 (USD 26,044,000,000.00) to Q4 FY2026 (USD 62,100,000,000.00).", 'All 24 requested results verified', 'NVIDIA Corporation: Revenue'].map((text) => answer.includes(text)),
       [true, true, true],
     )
+  } finally {
+    await h.cleanup()
+  }
+})
+
+test('a thread created after the reader left keeps its hands off a new chat\'s draft', async () => {
+  const server = new FakeServer()
+  server.threads = [{ thread_id: 'T9', title: 'Rates', updated_at: '2026-05-06T00:00:00.000Z' }]
+  const created = deferred<void>()
+  server.createReply = () => created.promise.then(() => ({ status: 201, body: server.createThread() }))
+  const h = await renderChat('/chat', server)
+  try {
+    await h.ask('Analyze NVDA')
+    await h.navigate('/chat/T9')
+    await h.navigate('/chat')
+    await h.type('A separate new question')
+
+    await act(async () => created.resolve())
+    await h.flush()
+    await h.navigate('/chat/T9')
+    await h.navigate('/chat')
+
+    assert.equal((h.query('textarea') as HTMLTextAreaElement).value, 'A separate new question')
   } finally {
     await h.cleanup()
   }

@@ -1,18 +1,34 @@
-import { useState, type FormEvent, type ReactElement } from 'react'
+import { useImperativeHandle, useState, type FormEvent, type ReactElement, type Ref } from 'react'
 
 import { handleComposerKeyDownEvent } from './composer.ts'
 import { readDraft, writeDraft } from './composerDrafts.ts'
 import { ThreadColumn } from './turnLayout.tsx'
 
+export type ChatComposerHandle = {
+  // The question this composer sent created a thread: the text on screen moves
+  // there with it instead of being swapped for that thread's saved draft.
+  carryInto: (scope: string) => void
+}
+
 type ChatComposerProps = {
   // Which saved draft this composer edits: one per user and thread.
   draftScope: string
+  ref?: Ref<ChatComposerHandle>
   canAsk: boolean
   onAsk: (text: string) => boolean
 }
 
-export function ChatComposer({ draftScope, canAsk, onAsk }: ChatComposerProps): ReactElement {
+export function ChatComposer({ ref, draftScope, canAsk, onAsk }: ChatComposerProps): ReactElement {
   const [prompt, setPromptState] = useState(() => readDraft(draftScope))
+  // Stays mounted across threads, so focus survives; each thread brings its own draft.
+  const [shownScope, setShownScope] = useState(draftScope)
+  const [carryScope, setCarryScope] = useState<string | null>(null)
+  useImperativeHandle(ref, () => ({ carryInto: setCarryScope }), [])
+  if (shownScope !== draftScope) {
+    setShownScope(draftScope)
+    setCarryScope(null)
+    if (draftScope !== carryScope) setPromptState(readDraft(draftScope))
+  }
   const setPrompt = (text: string) => {
     setPromptState(text)
     writeDraft(draftScope, text)

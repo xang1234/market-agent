@@ -5,7 +5,7 @@ import { Pencil, Trash2 } from 'lucide-react'
 
 import { PRIMARY_BUTTON_CLASS } from '../shell/buttonStyles.ts'
 import { VirtualizedMessageList } from '../chat'
-import { ChatComposer } from '../chat/ChatComposer.tsx'
+import { ChatComposer, type ChatComposerHandle } from '../chat/ChatComposer.tsx'
 import { PendingTurnView } from '../chat/PendingTurnView.tsx'
 import { ThreadColumn } from '../chat/turnLayout.tsx'
 import { FailureNotice } from '../ui/FailureNotice.tsx'
@@ -38,10 +38,15 @@ export function ChatLayout() {
     if (routeThreadId !== null) cancelThreadDelete(routeThreadId)
   }, [routeThreadId])
   const { refresh: refreshThreads } = threads
-  // A question typed while the first one creates its thread belongs to that thread.
+  // A question typed while the first one creates its thread belongs to that
+  // thread, unless the reader has since left the screen that sent it.
+  const composer = useRef<ChatComposerHandle>(null)
   const onThreadCreated = useCallback(
-    (threadId: string) => {
-      moveDraft(`${userId}:new`, `${userId}:${threadId}`)
+    (threadId: string, owned: boolean) => {
+      if (owned) {
+        moveDraft(`${userId}:new`, `${userId}:${threadId}`)
+        composer.current?.carryInto(`${userId}:${threadId}`)
+      }
       refreshThreads()
     },
     [userId, refreshThreads],
@@ -85,7 +90,7 @@ export function ChatLayout() {
         ? <ChatThreadView chat={chat} threadName={threadName} />
         : <ChatEmptyState chat={chat} />}
       <ChatComposer
-        key={draftScope}
+        ref={composer}
         draftScope={draftScope}
         canAsk={chat.view.canAsk}
         onAsk={chat.ask}
@@ -177,8 +182,8 @@ function ThreadList({
   const now = useMinuteClock()
   const list = useRef<HTMLUListElement>(null)
   const [editing, setEditing] = useState<string | null>(null)
-  // Shown until the server's list carries the new title.
-  const [renamed, setRenamed] = useState<Record<string, string>>({})
+  // A new name shows until the server's title moves off the one it replaced.
+  const [renamed, setRenamed] = useState<Record<string, { title: string; replaced: string | null }>>({})
   const [renameError, setRenameError] = useState<string | null>(null)
   // The row's link only exists again after the editor closes.
   const refocusRow = useRef<string | null>(null)
@@ -187,12 +192,12 @@ function ThreadList({
     list.current?.querySelector<HTMLElement>(`[data-thread-id="${refocusRow.current}"]`)?.focus()
     refocusRow.current = null
   }, [editing])
-  const finishRename = (threadId: string, previous: string, next: string | null) => {
+  const finishRename = (threadId: string, replaced: string | null, previous: string, next: string | null) => {
     refocusRow.current = threadId
     setEditing(null)
     const title = next?.trim() ?? ''
     if (title === '' || title === previous) return
-    setRenamed((current) => ({ ...current, [threadId]: title }))
+    setRenamed((current) => ({ ...current, [threadId]: { title, replaced } }))
     setRenameError(null)
     renameThread(userId, threadId, title).then(refresh, (caught: unknown) => {
       setRenamed((current) => {
@@ -283,14 +288,14 @@ function ThreadList({
               )
             }
             const active = thread.thread_id === activeThreadId
-            const pendingTitle = renamed[thread.thread_id]
-            const name = pendingTitle !== undefined && thread.title !== pendingTitle
-              ? pendingTitle
+            const override = renamed[thread.thread_id]
+            const name = override !== undefined && thread.title === override.replaced
+              ? override.title
               : active ? activeName : threadDisplayName(thread, null)
             if (editing === thread.thread_id) {
               return (
                 <li key={thread.thread_id}>
-                  <TitleEditor initial={name} onDone={(next) => finishRename(thread.thread_id, name, next)} />
+                  <TitleEditor initial={name} onDone={(next) => finishRename(thread.thread_id, thread.title, name, next)} />
                 </li>
               )
             }

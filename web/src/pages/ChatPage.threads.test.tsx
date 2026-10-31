@@ -684,3 +684,19 @@ test('each chat shows how long ago it changed, with the exact time on hover', as
     await h.cleanup()
   }
 })
+
+test('a later title from the server replaces a confirmed rename', async () => {
+  const { h, server } = await chatsWithTwoThreads()
+  try {
+    await act(async () => h.button('Rename Chips').click())
+    await editTitle(h, 'NVDA margin thesis', 'Enter')
+    server.threads = server.threads.map((thread) => (thread.thread_id === 'T1' ? { ...thread, title: 'Renamed elsewhere' } : thread))
+
+    await act(async () => h.button('Rename Rates').click())
+    await editTitle(h, 'Rates outlook', 'Enter')
+
+    assert.deepEqual(chatNames(h), ['Renamed elsewhere', 'Rates outlook'])
+  } finally {
+    await h.cleanup()
+  }
+})
