@@ -251,8 +251,8 @@ function chronological(figures: ReadonlyArray<PacketFigure>): PacketFigure[] | n
 
 // A fiscal quarter or year as a count of its kind, so consecutive periods differ by one.
 function periodIndex(period: string | undefined): number | undefined {
-  // "Q42026" as stored, "Q4FY2026" as the engine labels it, "Q4FY2026(ended2026-01-25)" as it dates it.
-  const key = periodKey(period).replace(/\((?:ended)?\d{4}-\d{2}-\d{2}\)$/, "");
+  // "Q42026" as stored, "Q4FY2026" as the engine labels it, "Q4FY2026(ended2026-01-25)" or "Q4FY2026(asof2026-01-25)" as it dates it.
+  const key = periodKey(period).replace(/\((?:ended|asof)\d{4}-\d{2}-\d{2}\)$/, "");
   const quarter = /^Q([1-4])(?:FY)?(\d{4})$/.exec(key);
   if (quarter) return Number(quarter[2]) * 4 + Number(quarter[1]) - 1;
   const year = /^(?:FY)?(\d{4})$/.exec(key);
