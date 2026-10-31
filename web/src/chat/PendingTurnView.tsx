@@ -88,7 +88,8 @@ function StreamedTurn({ phase, stream, blocks, messages, children }: { phase: Tu
   const { shown } = stream
   // A sealed answer, shown while the judge reads its inferences: it renders as
   // the saved message it becomes, in MessageItem's own wrapper and with no plan
-  // above it, so the hand-off changes only the lines the judge resolves. Any
+  // above it, so the hand-off changes only the lines the judge resolves and
+  // adds the saved message's copy button below. Any
   // reader of the run may see it: it holds only what the seal verified. An
   // engine answer is saved before its commentary is written, so a load in that
   // window holds it, and history shows it instead.

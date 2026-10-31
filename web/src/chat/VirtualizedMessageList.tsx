@@ -35,6 +35,9 @@ export type VirtualizedMessageListProps = {
   // Rendered after the messages in the same scroller and column, so a pending
   // turn sits exactly where its sealed message will appear.
   tail?: ReactNode
+  // The run of a question the reader is sending now; each new one pins that
+  // question to the top, a resend included.
+  askedRun?: string | null
 }
 
 export function VirtualizedMessageList({
@@ -42,6 +45,7 @@ export function VirtualizedMessageList({
   estimatedItemHeight = DEFAULT_ESTIMATED_ITEM_HEIGHT,
   overscan = DEFAULT_OVERSCAN,
   tail,
+  askedRun = null,
 }: VirtualizedMessageListProps): ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -49,11 +53,18 @@ export function VirtualizedMessageList({
   const spacerRef = useRef<HTMLDivElement>(null)
   const scrollRafRef = useRef<number | null>(null)
   const pinRef = useRef<Pin>('bottom')
+  // Where this code last put the view; any other position is the reader's doing.
+  const placedTopRef = useRef<number | null>(null)
   // Room below the newest question, kept from the moment it is pinned until the
   // reader follows the bottom again, so the answer never shifts under them.
   const questionRoomRef = useRef(false)
   const pinnedRunRef = useRef<string | null>(null)
   const [scrollTop, setScrollTop] = useState(0)
+  // The window's scroll position, readable from holdPin without re-running it.
+  const windowTopRef = useRef(0)
+  useLayoutEffect(() => {
+    windowTopRef.current = scrollTop
+  }, [scrollTop])
   const [viewportHeight, setViewportHeight] = useState(0)
   const [measuredHeights, setMeasuredHeights] = useState<ReadonlyMap<string, number>>(
     () => new Map(),
@@ -75,17 +86,29 @@ export function VirtualizedMessageList({
     const el = containerRef.current
     const spacer = spacerRef.current
     if (el === null || spacer === null) return
-    const questions = el.querySelectorAll<HTMLElement>(QUESTION_SELECTOR)
-    const question = questions[questions.length - 1]
-    if (!questionRoomRef.current || question === undefined) {
-      spacer.style.height = '0px'
+    if (!questionRoomRef.current) {
+      if (spacer.style.height !== '0px') spacer.style.height = '0px'
     } else {
-      const questionTop = question.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop
-      const contentHeight = el.scrollHeight - spacer.offsetHeight
-      spacer.style.height = `${Math.max(0, el.clientHeight - ANCHOR_MARGIN - (contentHeight - questionTop))}px`
-      if (pinRef.current === 'question') el.scrollTop = questionTop - ANCHOR_MARGIN
+      const questions = el.querySelectorAll<HTMLElement>(QUESTION_SELECTOR)
+      const question = questions[questions.length - 1]
+      if (question !== undefined) {
+        const questionTop = question.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop
+        const contentHeight = el.scrollHeight - spacer.offsetHeight
+        spacer.style.height = `${Math.max(0, el.clientHeight - ANCHOR_MARGIN - (contentHeight - questionTop))}px`
+        if (pinRef.current === 'question') el.scrollTop = Math.max(0, questionTop - ANCHOR_MARGIN)
+      }
     }
     if (pinRef.current === 'bottom') el.scrollTop = el.scrollHeight
+    if (pinRef.current !== null) {
+      placedTopRef.current = el.scrollTop
+      // The virtual window follows the view in this same commit, so a moved
+      // view never paints a frame of the window it left.
+      // Only a real change: an update on every layout pass would never settle.
+      if (windowTopRef.current !== el.scrollTop) {
+        windowTopRef.current = el.scrollTop
+        setScrollTop(el.scrollTop)
+      }
+    }
   }, [])
 
   const followLatest = useCallback(() => {
@@ -114,10 +137,7 @@ export function VirtualizedMessageList({
     return () => observer.disconnect()
   }, [holdPin])
 
-  // A question the reader sends appears in the tail, marked with its run,
-  // before it is saved; each new run pins its question to the top, a resend too.
   useLayoutEffect(() => {
-    const askedRun = tailRef.current?.querySelector('[data-asked-run]')?.getAttribute('data-asked-run') ?? null
     if (askedRun !== null && askedRun !== pinnedRunRef.current) {
       pinnedRunRef.current = askedRun
       pinRef.current = 'question'
@@ -125,20 +145,6 @@ export function VirtualizedMessageList({
     }
     holdPin()
   })
-
-  // Scrolling by hand, by wheel, touch, keys, or the scrollbar, lets go of the pin.
-  useEffect(() => {
-    const el = containerRef.current
-    if (el === null) return
-    const release = () => {
-      pinRef.current = null
-    }
-    const events = ['wheel', 'touchmove', 'keydown', 'pointerdown'] as const
-    for (const event of events) el.addEventListener(event, release, { passive: true })
-    return () => {
-      for (const event of events) el.removeEventListener(event, release)
-    }
-  }, [])
 
   useEffect(() => {
     return () => {
@@ -155,6 +161,11 @@ export function VirtualizedMessageList({
       const el = containerRef.current
       if (el === null) return
       setScrollTop(el.scrollTop)
+      // Any move this code did not make, by wheel, keys, focus, find in page, or
+      // a screen reader, lets go of the pin.
+      if (pinRef.current !== null && placedTopRef.current !== null && Math.abs(el.scrollTop - placedTopRef.current) > 1) {
+        pinRef.current = null
+      }
       const atBottom = isAtBottom({
         scrollTop: el.scrollTop,
         scrollHeight: el.scrollHeight,
@@ -183,7 +194,9 @@ export function VirtualizedMessageList({
         ref={containerRef}
         onScroll={handleScroll}
         data-testid="virtualized-message-list"
-        className="flex-1 overflow-auto"
+        // The pin is this list's scroll anchoring; the browser's would move the
+        // view on its own and read as the reader scrolling.
+        className="flex-1 overflow-auto [overflow-anchor:none]"
       >
         <div
           ref={contentRef}

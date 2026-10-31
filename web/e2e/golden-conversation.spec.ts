@@ -46,6 +46,21 @@ async function scrollThreadTo(page: Page, target: Locator) {
   await target.first().scrollIntoViewIfNeeded()
 }
 
+// Scrolling by hand lets go of the pinned question and stays where it was put;
+// Jump to latest returns to the end of the thread.
+async function expectScrollLetsGoAndJumpReturns(page: Page) {
+  const list = page.getByTestId('virtualized-message-list')
+  await list.hover()
+  const before = await list.evaluate((el) => el.scrollTop)
+  await page.mouse.wheel(0, -300)
+  await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBeLessThan(before)
+  const scrolled = await list.evaluate((el) => el.scrollTop)
+  await page.waitForTimeout(500)
+  expect(await list.evaluate((el) => el.scrollTop)).toBe(scrolled)
+  await page.getByRole('button', { name: /latest/i }).click()
+  await expect.poll(() => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThanOrEqual(1)
+}
+
 // A question just asked stays at the top of the thread while its answer fills
 // in below it, instead of the view following the end of a long answer.
 async function expectQuestionAtTop(page: Page, question: string) {
@@ -130,6 +145,7 @@ test('golden conversation renders the verified answer, the year-to-date chart an
   await ask(page, QUESTIONS[1])
   await expect(compareAnswer(page)).toBeVisible()
   await expectQuestionAtTop(page, QUESTIONS[1])
+  await expectScrollLetsGoAndJumpReturns(page)
   await expectYtdChart(compareAnswer(page))
   // End-of-day prices and the split-adjusted, dividend-free basis are disclosed (#191).
   const disclosure = compareAnswer(page).locator('[data-block-kind="disclosure"]')

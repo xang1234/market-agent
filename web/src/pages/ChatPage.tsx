@@ -152,6 +152,7 @@ function ChatThreadView({ chat, threadName }: { chat: ChatSession; threadName: s
         {view.listMounted ? (
           <section className="flex min-h-0 flex-1 flex-col" aria-label="Persisted message history">
             <VirtualizedMessageList
+              askedRun={view.turn.phase === 'persisting' ? view.turn.turn.runId : null}
               key={view.listKey}
               messages={view.messages}
               tail={<PendingTurnView turn={view.turn} messages={view.messages} onRetry={chat.retry} onReconnect={chat.reconnect} onReload={chat.reload} onAsk={chat.ask} />}
