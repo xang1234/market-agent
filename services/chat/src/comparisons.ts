@@ -221,7 +221,7 @@ function cohortPeriod(period: string | undefined): string {
 }
 
 function quarterly(period: string | undefined): boolean {
-  return /^Q/.test(periodName(period));
+  return /^(?:Q|(?:latest)?fiscalquarter)/.test(periodName(period));
 }
 
 export function comparablePeriods(a: PacketFigure, b: PacketFigure): boolean {
