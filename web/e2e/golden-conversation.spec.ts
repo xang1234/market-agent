@@ -218,17 +218,17 @@ async function openEveryEvidencePage(page: Page, message: Locator) {
   }
 }
 
-// The revenue series draws real bars (#187): the tallest fills most of its row, and
-// each bar's height matches its share of the tallest, as its inline percentage says.
+// The revenue series draws real bars (#187): the longest is a sizeable bar, and
+// each bar's width matches its share of the longest, as its inline percentage says.
 // The nearest figure only: the answer's own figure also holds the growth series' bars.
 async function expectProportionalBars(page: Page) {
   const bars = page.getByText(NVDA_REVENUE).locator('xpath=ancestor::figure[1]').locator('[aria-hidden="true"] > div')
   await expect(bars.first()).toBeVisible()
   const measured = await bars.evaluateAll((nodes) =>
-    nodes.map((node) => ({ px: node.getBoundingClientRect().height, pct: parseFloat((node as HTMLElement).style.height) })))
+    nodes.map((node) => ({ px: node.getBoundingClientRect().width, pct: parseFloat((node as HTMLElement).style.width) })))
   expect(measured.length).toBeGreaterThan(1)
-  const tallest = measured.reduce((a, b) => (b.px > a.px ? b : a))
-  expect(tallest.px).toBeGreaterThan(40)
+  const longest = measured.reduce((a, b) => (b.px > a.px ? b : a))
+  expect(longest.px).toBeGreaterThan(40)
   expect(measured.length).toBe(8)
-  for (const bar of measured) expect(bar.px / tallest.px).toBeCloseTo(bar.pct / tallest.pct, 1)
+  for (const bar of measured) expect(bar.px / longest.px).toBeCloseTo(bar.pct / longest.pct, 1)
 }

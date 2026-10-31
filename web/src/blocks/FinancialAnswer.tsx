@@ -85,10 +85,10 @@ function ResultLine({ content, result }: { content: FinancialAnswerContent; resu
   if (presented.kind === 'value') {
     const label = resultLabel(content, result)
     return (
-      <p className="text-sm text-fg" data-result-id={result.result_id}>
+      <p className="flex items-baseline justify-between gap-4 border-t border-line py-1.5 text-sm text-fg" data-result-id={result.result_id}>
         <span className="text-muted">{label}: </span>
         <InspectableResult resultId={result.result_id} label={`${label}: ${presented.full_text}`}>
-          <span className="num" title={presented.full_text} aria-label={`${label}: ${presented.full_text}`}>
+          <span className="num whitespace-nowrap" title={presented.full_text} aria-label={`${label}: ${presented.full_text}`}>
             {presented.text}
           </span>
         </InspectableResult>
@@ -154,9 +154,9 @@ function CertifiedTable({ blockId, content, results, table }: TableProps): React
                   key={column.column_id}
                   scope="col"
                   aria-sort={active ? sort.direction : 'none'}
-                  className="border-b border-line px-3 py-2 text-xs font-medium text-muted"
+                  className="border-b border-line px-3 py-2 text-right text-xs font-medium text-muted"
                 >
-                  <button type="button" className="text-left hover:text-fg" onClick={() => toggle(column.column_id)}>
+                  <button type="button" className="text-right hover:text-fg" onClick={() => toggle(column.column_id)}>
                     {heading}
                   </button>
                 </th>
@@ -176,7 +176,7 @@ function CertifiedTable({ blockId, content, results, table }: TableProps): React
                   const result = cell === null ? undefined : results.get(cell)
                   const ownPeriod = table.columns[cellIndex]?.period_label_id === null && result ? labelText(content, result.period_label_id) : undefined
                   return (
-                    <td key={`${row.subject_label_id}-${cellIndex}`} className="num px-3 py-2 text-fg">
+                    <td key={`${row.subject_label_id}-${cellIndex}`} className="num px-3 py-2 text-right text-fg">
                       <Cell result={result} ownPeriod={ownPeriod} />
                     </td>
                   )
@@ -197,29 +197,30 @@ function CertifiedSeries({ content, results, series }: SeriesProps): ReactElemen
   const heights = seriesBarHeights(points)
   const heading = `${labelText(content, series.subject_label_id)}: ${labelText(content, series.measure_label_id)}`
   return (
-    <figure className="flex flex-col gap-1">
-      <div aria-hidden="true" className="flex h-16 items-end gap-1">
-        {heights.map((height, index) => (
-          <div
-            key={series.points[index]!.result_id}
-            className="w-6 rounded-t bg-accent"
-            style={{ height: `${Math.round((height ?? 0) * 100)}%` }}
-          />
-        ))}
-      </div>
-      <table className="text-left text-sm">
-        <caption className="text-left text-xs text-muted">{heading}</caption>
+    <figure className="mt-2">
+      <table className="w-full border-collapse text-sm">
+        <caption className="pb-2 text-left text-xs font-medium text-muted">{heading}</caption>
         <tbody>
-          {series.points.map((point, index) => (
-            <tr key={point.result_id}>
-              <th scope="row" className="pr-3 font-normal text-muted">
-                {labelText(content, point.period_label_id)}
-              </th>
-              <td className="num text-fg">
-                <Cell result={points[index]} />
-              </td>
-            </tr>
-          ))}
+          {series.points.map((point, index) => {
+            const result = points[index]
+            const negative = result?.presented.kind === 'value' && Number(result.presented.value) < 0
+            return (
+              <tr key={point.result_id} className="border-t border-line">
+                <th scope="row" className="whitespace-nowrap py-1.5 pr-4 text-left font-normal text-muted">
+                  {labelText(content, point.period_label_id)}
+                </th>
+                <td className="num whitespace-nowrap py-1.5 pr-4 text-right text-fg">
+                  <Cell result={result} />
+                </td>
+                <td aria-hidden="true" className="w-1/2 py-1.5">
+                  <div
+                    className={`h-2 rounded-sm ${negative ? 'bg-negative/70' : 'bg-accent/70'}`}
+                    style={{ width: `${Math.round((heights[index] ?? 0) * 100)}%` }}
+                  />
+                </td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </figure>
