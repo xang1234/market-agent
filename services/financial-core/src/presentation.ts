@@ -568,29 +568,20 @@ function periodSelectors(plan: FinancialPlanV1, node: OperationNode): PeriodSele
 
 type PeriodRead = Readonly<{ selector: PeriodSelector; bound: BoundPeriod | null }>;
 
-// A latest-relative selector names no period, so its label names the one its values were bound to. A fiscal
-// one is dated only when the answer reads it at periods ending on different dates, as two calendars' FY2025.
+// A read names the period its values were bound to, by fiscal name and end date, whichever selector asked for it:
+// "latest fiscal year" and "FY2025" both name a period that two calendars end months apart.
 function periodReads(plan: FinancialPlanV1, node: OperationNode, periods: BoundPeriods): PeriodRead[] {
-  return periodSelectors(plan, node).map((selector) => ({
-    selector,
-    bound: selector.kind === "latest" || boundApart(plan, selector, periods) ? boundPeriod(plan, node, selector, periods) : null,
-  }));
+  return periodSelectors(plan, node).map((selector) => ({ selector, bound: boundPeriod(plan, node, selector, periods) }));
 }
 
-function boundApart(plan: FinancialPlanV1, selector: PeriodSelector, periods: BoundPeriods): boolean {
-  const ends = plan.operations.flatMap((entry) => entry.operation === "reported_metric" && JSON.stringify(entry.period) === JSON.stringify(selector) && periods[entry.node_id] ? [periods[entry.node_id]!.end] : []);
-  return new Set(ends).size > 1;
-}
-
-// One period was asked of every operand and they were bound to periods ending on different dates: each one's is named.
+// The operands were bound to different periods: each one's is named.
 function operandPeriods(plan: FinancialPlanV1, node: OperationNode, periods: BoundPeriods, names: (slot: LocalId) => string): string {
   const operands = operationDependencies(node).map((id) => plan.operations.find((entry) => entry.node_id === id)!);
-  const selectors = new Set(operands.map((operand) => JSON.stringify(periodSelectors(plan, operand)[0])));
   const bound = operands.flatMap((operand) => {
     const period = boundPeriod(plan, operand, periodSelectors(plan, operand)[0]!, periods);
     return period ? [{ operand, period }] : [];
   });
-  if (selectors.size !== 1 || new Set(bound.map(({ period }) => period.end)).size < 2) return "";
+  if (new Set(bound.map(({ period }) => `${fiscalName(period)} ${period.end}`)).size < 2) return "";
   const across = subjectSlot(plan, node) === null;
   const owner = (operand: OperationNode) => {
     const slot = across ? subjectSlot(plan, operand) : null;
