@@ -32,6 +32,45 @@ async function ask(page: Page, question: string) {
   await composer.press('Enter')
 }
 
+// The thread renders only the messages near the view, so a check further up
+// scrolls there first, the way a reader would.
+async function scrollThreadTo(page: Page, target: Locator) {
+  const list = page.getByTestId('virtualized-message-list')
+  await expect(list).toBeVisible()
+  await list.hover()
+  await page.mouse.wheel(0, -1_000_000)
+  for (let step = 0; step < 60 && (await target.count()) === 0; step += 1) {
+    await page.mouse.wheel(0, 400)
+    await page.waitForTimeout(50)
+  }
+  await target.first().scrollIntoViewIfNeeded()
+}
+
+// Scrolling by hand lets go of the pinned question and stays where it was put;
+// Jump to latest returns to the end of the thread.
+async function expectScrollLetsGoAndJumpReturns(page: Page) {
+  const list = page.getByTestId('virtualized-message-list')
+  await list.hover()
+  const before = await list.evaluate((el) => el.scrollTop)
+  await page.mouse.wheel(0, -300)
+  await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBeLessThan(before)
+  const scrolled = await list.evaluate((el) => el.scrollTop)
+  await page.waitForTimeout(500)
+  expect(await list.evaluate((el) => el.scrollTop)).toBe(scrolled)
+  await page.getByRole('button', { name: /latest/i }).click()
+  await expect.poll(() => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThanOrEqual(1)
+}
+
+// A question just asked stays at the top of the thread while its answer fills
+// in below it, instead of the view following the end of a long answer.
+async function expectQuestionAtTop(page: Page, question: string) {
+  await expect.poll(() => page.evaluate((text) => {
+    const list = document.querySelector('[data-testid="virtualized-message-list"]')!
+    const asked = [...list.querySelectorAll('[data-role="user"]')].filter((el) => el.textContent?.includes(text)).at(-1)!
+    return Math.round(asked.getBoundingClientRect().top - list.getBoundingClientRect().top)
+  }, question)).toBe(16)
+}
+
 const answer = (page: Page, narrative: string) =>
   page.locator('[data-role="assistant"]', { hasText: narrative })
 const compareAnswer = (page: Page) =>
@@ -105,6 +144,8 @@ test('golden conversation renders the verified answer, the year-to-date chart an
 
   await ask(page, QUESTIONS[1])
   await expect(compareAnswer(page)).toBeVisible()
+  await expectQuestionAtTop(page, QUESTIONS[1])
+  await expectScrollLetsGoAndJumpReturns(page)
   await expectYtdChart(compareAnswer(page))
   // End-of-day prices and the split-adjusted, dividend-free basis are disclosed (#191).
   const disclosure = compareAnswer(page).locator('[data-block-kind="disclosure"]')
@@ -130,11 +171,16 @@ test('golden conversation renders the verified answer, the year-to-date chart an
   const streamsAfterReload = apiRequests(page, 'GET', /\/v1\/chat\/threads\/[^/]+\/stream$/)
   await page.reload()
   for (const question of QUESTIONS) {
-    await expect(page.locator('[data-role="user"]', { hasText: question })).toBeVisible()
+    const asked = page.locator('[data-role="user"]', { hasText: question })
+    await scrollThreadTo(page, asked)
+    await expect(asked).toBeVisible()
   }
+  await scrollThreadTo(page, page.getByText(NVDA_NARRATIVE))
   await expect(page.getByText(NVDA_NARRATIVE)).toBeVisible()
   await expect(page.getByText(NVDA_REVENUE)).toBeVisible()
+  await scrollThreadTo(page, compareAnswer(page))
   await expectYtdChart(compareAnswer(page))
+  await scrollThreadTo(page, answer(page, EXPLAIN_NARRATIVE))
   await expect(answer(page, EXPLAIN_NARRATIVE)).toBeVisible()
   await inspectCitedClaim(page, answer(page, EXPLAIN_NARRATIVE))
   expect(historyReads.length).toBeGreaterThanOrEqual(1)

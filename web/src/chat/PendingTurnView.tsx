@@ -31,7 +31,7 @@ export function PendingTurnView({ turn, messages, onRetry, onReconnect, onReload
     case 'persisting':
       return (
         <div data-testid="pending-turn" className="flex flex-col gap-2 py-2">
-          <OptimisticUserBubble text={turn.turn.text} />
+          <OptimisticUserBubble text={turn.turn.text} askedRun={turn.turn.runId} />
           <p className="text-sm text-muted">Starting…</p>
         </div>
       )
@@ -88,7 +88,8 @@ function StreamedTurn({ phase, stream, blocks, messages, children }: { phase: Tu
   const { shown } = stream
   // A sealed answer, shown while the judge reads its inferences: it renders as
   // the saved message it becomes, in MessageItem's own wrapper and with no plan
-  // above it, so the hand-off changes only the lines the judge resolves. Any
+  // above it, so the hand-off changes only the lines the judge resolves and
+  // adds the saved message's copy button below. Any
   // reader of the run may see it: it holds only what the seal verified. An
   // engine answer is saved before its commentary is written, so a load in that
   // window holds it, and history shows it instead.
@@ -137,9 +138,11 @@ function TurnNotice({ message, action, onAction }: { message: string; action: st
   )
 }
 
-function OptimisticUserBubble({ text }: { text: string }): ReactElement {
+// `askedRun` marks a question being sent now, each send its own run, so the
+// thread can pin it to the top; a question that failed to send has none.
+function OptimisticUserBubble({ text, askedRun }: { text: string; askedRun?: string }): ReactElement {
   return (
-    <div data-role="pending-user" className="flex flex-col items-end">
+    <div data-role="pending-user" data-asked-run={askedRun} className="flex flex-col items-end">
       <div className={USER_BUBBLE_CLASS}>
         <p className="whitespace-pre-wrap text-sm">{text}</p>
       </div>
