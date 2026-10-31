@@ -19,7 +19,7 @@
 
 import type { RejectionCheck } from "../../src/assertions.ts";
 
-export const HOLDOUT_VERSION = 19;
+export const HOLDOUT_VERSION = 20;
 
 type Assertion = Record<string, unknown>;
 
@@ -278,14 +278,14 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
       companies: ["AMD"],
       route: "financial_answer",
       financial: [
-        [AMD, OPERATING_MARGIN, "fiscal quarter 7 before latest", "verified", "10.62%"],
-        [AMD, OPERATING_MARGIN, "fiscal quarter 6 before latest", "verified", "11.37%"],
-        [AMD, OPERATING_MARGIN, "fiscal quarter 5 before latest", "verified", "10.84%"],
-        [AMD, OPERATING_MARGIN, "fiscal quarter 4 before latest", "verified", "-1.74%"],
-        [AMD, OPERATING_MARGIN, "fiscal quarter 3 before latest", "verified", "13.74%"],
-        [AMD, OPERATING_MARGIN, "fiscal quarter 2 before latest", "verified", "14.08%"],
-        [AMD, OPERATING_MARGIN, "fiscal quarter 1 before latest", "verified", "14.21%"],
-        [AMD, OPERATING_MARGIN, "latest fiscal quarter", "verified", "14.38%"],
+        [AMD, OPERATING_MARGIN, "Q3 FY2024 (ended 2024-09-28)", "verified", "10.62%"],
+        [AMD, OPERATING_MARGIN, "Q4 FY2024 (ended 2024-12-28)", "verified", "11.37%"],
+        [AMD, OPERATING_MARGIN, "Q1 FY2025 (ended 2025-03-29)", "verified", "10.84%"],
+        [AMD, OPERATING_MARGIN, "Q2 FY2025 (ended 2025-06-28)", "verified", "-1.74%"],
+        [AMD, OPERATING_MARGIN, "Q3 FY2025 (ended 2025-09-27)", "verified", "13.74%"],
+        [AMD, OPERATING_MARGIN, "Q4 FY2025 (ended 2025-12-27)", "verified", "14.08%"],
+        [AMD, OPERATING_MARGIN, "Q1 FY2026 (ended 2026-03-28)", "verified", "14.21%"],
+        [AMD, OPERATING_MARGIN, "Q2 FY2026 (ended 2026-06-27)", "verified", "14.38%"],
       ],
     },
     prose: "",
