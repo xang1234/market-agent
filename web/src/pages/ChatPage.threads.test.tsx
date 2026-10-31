@@ -752,3 +752,20 @@ test('a delete that fails keeps the chat\'s unsent draft', async (t) => {
     await h.cleanup()
   }
 })
+
+test('a confirmed rename gives way when the server goes back to the old name', async () => {
+  const { h, server } = await chatsWithTwoThreads()
+  try {
+    await act(async () => h.button('Rename Chips').click())
+    await editTitle(h, 'NVDA margin thesis', 'Enter')
+    assert.deepEqual(chatNames(h), ['NVDA margin thesis', 'Rates'])
+    server.threads = server.threads.map((thread) => (thread.thread_id === 'T1' ? { ...thread, title: 'Chips' } : thread))
+
+    await act(async () => h.button('Rename Rates').click())
+    await editTitle(h, 'Rates outlook', 'Enter')
+
+    assert.deepEqual(chatNames(h), ['Chips', 'Rates outlook'])
+  } finally {
+    await h.cleanup()
+  }
+})

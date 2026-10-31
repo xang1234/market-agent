@@ -11,7 +11,7 @@ import { ThreadColumn } from '../chat/turnLayout.tsx'
 import { FailureNotice } from '../ui/FailureNotice.tsx'
 import { Skeleton } from '../ui/Skeleton.tsx'
 import { formatRelativeTime, useMinuteClock } from '../ui/relativeTime.ts'
-import { renameThread } from '../chat/threadActions.ts'
+import { renameThread, type ChatThread } from '../chat/threadActions.ts'
 import { useAuth } from '../shell/useAuth.ts'
 import { cancelThreadDelete, startThreadDelete, useThreadDeletes } from '../chat/threadDeletes.ts'
 import { StarterQuestionsContext } from '../chat/starterQuestions.ts'
@@ -183,7 +183,10 @@ function ThreadList({
   const list = useRef<HTMLUListElement>(null)
   const [editing, setEditing] = useState<string | null>(null)
   // A new name shows until the server's title moves off the one it replaced.
-  const [renamed, setRenamed] = useState<Record<string, { title: string; replaced: string | null }>>({})
+  // Once the server confirms it, it shows only until the next list arrives, so
+  // any later title, even the one it replaced, is the server's to give.
+  type Rename = { title: string; replaced: string | null; confirmedBefore: ReadonlyArray<ChatThread> | null }
+  const [renamed, setRenamed] = useState<Record<string, Rename>>({})
   const [renameError, setRenameError] = useState<string | null>(null)
   // The row's link only exists again after the editor closes.
   const refocusRow = useRef<string | null>(null)
@@ -198,9 +201,16 @@ function ThreadList({
     setEditing(null)
     const title = next?.trim() ?? ''
     if (title === '') return
-    setRenamed((current) => ({ ...current, [threadId]: { title, replaced } }))
+    setRenamed((current) => ({ ...current, [threadId]: { title, replaced, confirmedBefore: null } }))
     setRenameError(null)
-    renameThread(userId, threadId, title).then(refresh, (caught: unknown) => {
+    const listAtRename = rows
+    renameThread(userId, threadId, title).then(() => {
+      setRenamed((current) => {
+        const rename = current[threadId]
+        return rename?.title === title ? { ...current, [threadId]: { ...rename, confirmedBefore: listAtRename } } : current
+      })
+      refresh()
+    }, (caught: unknown) => {
       setRenamed((current) => {
         const rest = { ...current }
         delete rest[threadId]
@@ -290,7 +300,10 @@ function ThreadList({
             }
             const active = thread.thread_id === activeThreadId
             const override = renamed[thread.thread_id]
-            const name = override !== undefined && thread.title === override.replaced
+            const overrideShows = override !== undefined && (override.confirmedBefore === null
+              ? thread.title === override.replaced
+              : rows === override.confirmedBefore)
+            const name = overrideShows
               ? override.title
               : active ? activeName : threadDisplayName(thread, null)
             if (editing === thread.thread_id) {
