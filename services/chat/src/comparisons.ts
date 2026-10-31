@@ -64,7 +64,7 @@ export function checkComparison(
   const segmented = cited[0]!.segment !== undefined;
   if (cited.some((figure) => figure.metric !== metric || (figure.segment !== undefined) !== segmented)) return fail("a comparison is of one metric");
   if (segmented && new Set(cited.map(companyOf)).size > 1) return fail("segments are ranked within one company");
-  if (cited.some((figure) => quarterly(figure) !== quarterly(cited[0]!))) return fail("a comparison does not set an annual figure against a quarterly one");
+  if (cited.some((figure) => quarterly(figure.period) !== quarterly(cited[0]!.period))) return fail("a comparison does not set an annual figure against a quarterly one");
   const companies = new Set(cited.map(memberOf));
   const axis = companies.size === 1 ? "time" : "cohort";
   if (op === "trend" && axis !== "time") return fail("a trend is one company's metric over time");
@@ -204,22 +204,28 @@ function periodKey(period: string | undefined): string {
   return (period ?? "").replace(/\s+/g, "");
 }
 
+// The engine's fiscal name, undated: "end of Q2 FY2025" and "Q2 FY2025 (as of
+// 2024-07-28)" are both "Q2FY2025".
+function periodName(period: string | undefined): string {
+  return periodKey(period).replace(/endof|\((?:ended|asof)\d{4}-\d{2}-\d{2}\)/g, "");
+}
+
 // A change's period ("Q4 FY2026 vs Q4 FY2025") is one across companies by its
 // span, a year here, since each company's quarters are its own fiscal
-// calendar's; any other period by its name.
+// calendar's; any other period by its fiscal name, whatever day each
+// company's ends.
 function cohortPeriod(period: string | undefined): string {
   const [current, prior, ...more] = (period ?? "").split(" vs ");
   const [from, to] = [periodIndex(prior), periodIndex(current)];
-  const sameKind = /^Q/.test(periodKey(current)) === /^Q/.test(periodKey(prior));
-  return more.length === 0 && from !== undefined && to !== undefined && sameKind ? `span:${to - from}` : periodKey(period);
+  return more.length === 0 && from !== undefined && to !== undefined && quarterly(current) === quarterly(prior) ? `span:${to - from}` : periodName(period);
 }
 
-function quarterly(figure: PacketFigure): boolean {
-  return /^Q/.test(periodKey(figure.period));
+function quarterly(period: string | undefined): boolean {
+  return /^Q/.test(periodName(period));
 }
 
 export function comparablePeriods(a: PacketFigure, b: PacketFigure): boolean {
-  return quarterly(a) === quarterly(b);
+  return quarterly(a.period) === quarterly(b.period);
 }
 
 // A stored quarter ("Q42026") as prose writes it ("Q4 2026").
@@ -251,8 +257,8 @@ function chronological(figures: ReadonlyArray<PacketFigure>): PacketFigure[] | n
 
 // A fiscal quarter or year as a count of its kind, so consecutive periods differ by one.
 function periodIndex(period: string | undefined): number | undefined {
-  // "Q42026" as stored, "Q4FY2026" as the engine labels it, "Q4FY2026(ended2026-01-25)" or "Q4FY2026(asof2026-01-25)" as it dates it.
-  const key = periodKey(period).replace(/\((?:ended|asof)\d{4}-\d{2}-\d{2}\)$/, "");
+  // "Q42026" as stored, "Q4FY2026" as the engine names it.
+  const key = periodName(period);
   const quarter = /^Q([1-4])(?:FY)?(\d{4})$/.exec(key);
   if (quarter) return Number(quarter[2]) * 4 + Number(quarter[1]) - 1;
   const year = /^(?:FY)?(\d{4})$/.exec(key);
@@ -264,8 +270,7 @@ function periodIndex(period: string | undefined): number | undefined {
 function missingPeriod(figures: ReadonlyArray<PacketFigure>): string | undefined {
   for (let i = 1; i < figures.length; i++) {
     const [a, b] = [periodIndex(figures[i - 1]!.period), periodIndex(figures[i]!.period)];
-    const sameKind = /^Q/.test(periodKey(figures[i - 1]!.period)) === /^Q/.test(periodKey(figures[i]!.period));
-    if (a === undefined || b === undefined || !sameKind || b - a !== 1) {
+    if (a === undefined || b === undefined || quarterly(figures[i - 1]!.period) !== quarterly(figures[i]!.period) || b - a !== 1) {
       return `${periodText(figures[i - 1]!.period!)} and ${periodText(figures[i]!.period!)}`;
     }
   }
