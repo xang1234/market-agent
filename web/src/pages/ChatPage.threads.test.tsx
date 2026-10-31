@@ -7,7 +7,7 @@ import { act } from 'react'
 
 import { DELETE_REQUEST_TIMEOUT_MS, forgetThreadDeletes } from '../chat/threadDeletes.ts'
 import { ANNOUNCE_CLEAR_MS, ANNOUNCE_DELAY_MS } from '../ui/announcer.ts'
-import { FakeServer, deferred, renderChat, TWO_THREADS, type Harness } from './chatPageHarness.tsx'
+import { FakeServer, deferred, renderChat, TWO_THREADS, USER_ID, type Harness } from './chatPageHarness.tsx'
 
 const announced = (h: Harness, role: 'status' | 'alert') => h.query(`[data-testid="announcer"] [role="${role}"]`)?.textContent
 
@@ -590,6 +590,181 @@ test('signing out while a failed DELETE is being checked drops the result', asyn
     await tick(h, t, ANNOUNCE_DELAY_MS)
     assert.doesNotMatch(sidebar(h).textContent ?? '', /Couldn't delete/)
     assert.equal(announced(h, 'alert'), '')
+  } finally {
+    await h.cleanup()
+  }
+})
+
+test('an unsent question stays with its own thread', async () => {
+  const { h } = await chatsWithTwoThreads('/chat/T1')
+  const composer = () => h.query('textarea') as HTMLTextAreaElement
+  try {
+    await h.type('Half-typed question about chips')
+    await h.navigate('/chat/T2')
+    assert.equal(composer().value, '', 'another thread starts empty')
+
+    await h.navigate('/chat/T1')
+    assert.equal(composer().value, 'Half-typed question about chips', 'the draft comes back with its thread')
+
+    await h.ask('Sent question about chips')
+    await h.navigate('/chat/T2')
+    await h.navigate('/chat/T1')
+    assert.equal(composer().value, '', 'a sent question leaves no draft behind')
+  } finally {
+    await h.cleanup()
+  }
+})
+
+async function editTitle(h: Harness, text: string, key: 'Enter' | 'Escape') {
+  const input = h.query('input[aria-label="Chat name"]') as HTMLInputElement
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(h.dom.window.HTMLInputElement.prototype, 'value')!.set!.call(input, text)
+    input.dispatchEvent(new h.dom.window.Event('input', { bubbles: true }))
+    input.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', { key, bubbles: true }))
+  })
+  await h.flush()
+}
+
+const chatNames = (h: Harness) => [...sidebar(h).querySelectorAll('a span:first-child')].map((span) => span.textContent)
+
+test('renaming a chat saves its new name and returns focus to the row', async () => {
+  const { h, server } = await chatsWithTwoThreads()
+  try {
+    await act(async () => h.button('Rename Chips').click())
+    assert.equal((h.dom.window.document.activeElement as HTMLInputElement).value, 'Chips', 'the editor opens on the current name')
+
+    await editTitle(h, '  NVDA margin thesis  ', 'Enter')
+
+    assert.deepEqual(server.writes().map(([method, , body]) => [method, body]), [['PATCH', '{"title":"NVDA margin thesis"}']])
+    assert.deepEqual(chatNames(h), ['NVDA margin thesis', 'Rates'])
+    assert.equal(h.dom.window.document.activeElement?.textContent?.startsWith('NVDA margin thesis'), true, 'focus is back on the row')
+  } finally {
+    await h.cleanup()
+  }
+})
+
+test('Escape, or an unchanged or empty name, leaves the chat as it was', async () => {
+  const { h, server } = await chatsWithTwoThreads()
+  try {
+    for (const [text, key] of [['Something else', 'Escape'], ['Chips', 'Enter'], ['   ', 'Enter']] as const) {
+      await act(async () => h.button('Rename Chips').click())
+      await editTitle(h, text, key)
+    }
+    assert.deepEqual(server.writes(), [])
+    assert.deepEqual(chatNames(h), ['Chips', 'Rates'])
+  } finally {
+    await h.cleanup()
+  }
+})
+
+test('a failed rename puts the old name back and says so', async () => {
+  const { h, server } = await chatsWithTwoThreads()
+  server.renameReply = () => ({ status: 500, body: { error: 'boom' } })
+  try {
+    await act(async () => h.button('Rename Chips').click())
+    await editTitle(h, 'NVDA margin thesis', 'Enter')
+
+    assert.deepEqual(chatNames(h), ['Chips', 'Rates'])
+    assert.match(sidebar(h).textContent ?? '', /Couldn't rename the chat\./)
+  } finally {
+    await h.cleanup()
+  }
+})
+
+test('each chat shows how long ago it changed, with the exact time on hover', async () => {
+  const { h } = await chatsWithTwoThreads()
+  try {
+    const times = [...sidebar(h).querySelectorAll('time')]
+    assert.equal(times.length, 2)
+    for (const time of times) {
+      assert.match(time.textContent ?? '', /^(just now|\d+(m|h|d|mo|y) ago)$/)
+      assert.equal(time.getAttribute('title'), new Date(time.getAttribute('datetime')!).toLocaleString())
+    }
+  } finally {
+    await h.cleanup()
+  }
+})
+
+test('a later title from the server replaces a confirmed rename', async () => {
+  const { h, server } = await chatsWithTwoThreads()
+  try {
+    await act(async () => h.button('Rename Chips').click())
+    await editTitle(h, 'NVDA margin thesis', 'Enter')
+    server.threads = server.threads.map((thread) => (thread.thread_id === 'T1' ? { ...thread, title: 'Renamed elsewhere' } : thread))
+
+    await act(async () => h.button('Rename Rates').click())
+    await editTitle(h, 'Rates outlook', 'Enter')
+
+    assert.deepEqual(chatNames(h), ['Renamed elsewhere', 'Rates outlook'])
+  } finally {
+    await h.cleanup()
+  }
+})
+
+test('leaving the name field for the composer saves it and keeps focus in the composer', async () => {
+  const { h, server } = await chatsWithTwoThreads('/chat/T1')
+  try {
+    await act(async () => h.button('Rename Chips').click())
+    const input = h.query('input[aria-label="Chat name"]') as HTMLInputElement
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(h.dom.window.HTMLInputElement.prototype, 'value')!.set!.call(input, 'Chips outlook')
+      input.dispatchEvent(new h.dom.window.Event('input', { bubbles: true }))
+    })
+    const composer = h.query('textarea') as HTMLTextAreaElement
+    await act(async () => composer.focus())
+    await h.flush()
+
+    assert.deepEqual(server.writes().map(([method, , body]) => [method, body]), [['PATCH', '{"title":"Chips outlook"}']])
+    assert.equal(h.dom.window.document.activeElement, composer)
+  } finally {
+    await h.cleanup()
+  }
+})
+
+test('a deleted chat takes its unsent draft with it', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const { h } = await chatsWithTwoThreads('/chat/T2')
+  try {
+    await h.type('Draft for a chat about to go')
+    assert.equal(h.dom.window.localStorage.getItem(`chat-draft:${USER_ID}:T2`), 'Draft for a chat about to go')
+
+    await act(async () => h.button('Delete Rates').click())
+    await tick(h, t, UNDO_MS)
+
+    assert.equal(h.dom.window.localStorage.getItem(`chat-draft:${USER_ID}:T2`), null)
+  } finally {
+    await h.cleanup()
+  }
+})
+
+test('a delete that fails keeps the chat\'s unsent draft', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const { h, server } = await chatsWithTwoThreads('/chat/T2')
+  server.deleteReply = () => ({ status: 500, body: { error: 'boom' } })
+  try {
+    await h.type('Draft that outlives a failed delete')
+    await act(async () => h.button('Delete Rates').click())
+    await tick(h, t, UNDO_MS)
+    await tick(h, t, ANNOUNCE_DELAY_MS)
+
+    assert.equal(h.dom.window.localStorage.getItem(`chat-draft:${USER_ID}:T2`), 'Draft that outlives a failed delete')
+  } finally {
+    await h.cleanup()
+  }
+})
+
+test('a confirmed rename gives way when the server goes back to the old name', async () => {
+  const { h, server } = await chatsWithTwoThreads()
+  try {
+    await act(async () => h.button('Rename Chips').click())
+    await editTitle(h, 'NVDA margin thesis', 'Enter')
+    assert.deepEqual(chatNames(h), ['NVDA margin thesis', 'Rates'])
+    server.threads = server.threads.map((thread) => (thread.thread_id === 'T1' ? { ...thread, title: 'Chips' } : thread))
+
+    await act(async () => h.button('Rename Rates').click())
+    await editTitle(h, 'Rates outlook', 'Enter')
+
+    assert.deepEqual(chatNames(h), ['Chips', 'Rates outlook'])
   } finally {
     await h.cleanup()
   }

@@ -413,7 +413,7 @@ function UniverseControls({
                 const next = Array.from(event.target.selectedOptions).map((o) => o.value)
                 onChange(setUniverseSelection(draft, spec.field, next))
               }}
-              className={`${INSET_SURFACE_CLASS} px-2 py-1 text-sm text-fg outline-none focus:border-accent`}
+              className={`${INSET_SURFACE_CLASS} px-2 py-1 text-sm text-fg outline-none focus:border-accent focus:ring-2 focus:ring-accent-soft`}
               size={Math.min(spec.options.length, 4)}
             >
               {spec.options.map((opt) => (

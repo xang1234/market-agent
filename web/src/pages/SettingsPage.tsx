@@ -394,8 +394,8 @@ function errorMessage(error: unknown): string {
 }
 
 const FIELD_LABEL = 'flex flex-col gap-1 text-xs font-medium uppercase tracking-wide text-muted'
-const INPUT_CLASS = 'h-9 border border-line-strong bg-surface px-2 text-sm normal-case tracking-normal text-fg outline-none focus:border-accent'
-const MULTI_SELECT_CLASS = 'min-h-24 border border-line-strong bg-surface px-2 py-1 text-sm normal-case tracking-normal text-fg outline-none focus:border-accent'
+const INPUT_CLASS = 'h-9 border border-line-strong bg-surface px-2 text-sm normal-case tracking-normal text-fg outline-none focus:border-accent focus:ring-2 focus:ring-accent-soft'
+const MULTI_SELECT_CLASS = 'min-h-24 border border-line-strong bg-surface px-2 py-1 text-sm normal-case tracking-normal text-fg outline-none focus:border-accent focus:ring-2 focus:ring-accent-soft'
 const PRIMARY_BUTTON = 'h-9 border border-accent bg-accent px-3 text-sm font-medium text-on-accent'
 const SECONDARY_BUTTON = 'h-9 border border-line-strong bg-surface px-3 text-sm font-medium text-fg hover:bg-surface-2'
 const DANGER_BUTTON = 'h-9 border border-negative bg-surface px-3 text-sm font-medium text-negative hover:bg-negative-soft'

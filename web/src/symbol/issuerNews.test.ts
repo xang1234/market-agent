@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { fetchIssuerNews, formatRelativeTime, isFilingKind, type IssuerNewsItem } from './issuerNews.ts'
+import { fetchIssuerNews, isFilingKind, type IssuerNewsItem } from './issuerNews.ts'
+import { formatRelativeTime } from '../ui/relativeTime.ts'
 
 const ISSUER_ID = '33333333-3333-4333-a333-333333333333'
 

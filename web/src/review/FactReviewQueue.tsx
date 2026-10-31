@@ -177,7 +177,7 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject, onApproveA
                   Candidate
                   <textarea
                     data-role="candidate"
-                    className="min-h-40 resize-y rounded-md border border-line-strong bg-surface p-2 font-mono text-xs text-fg outline-none focus:border-accent"
+                    className="min-h-40 resize-y rounded-md border border-line-strong bg-surface p-2 font-mono text-xs text-fg outline-none focus:border-accent focus:ring-2 focus:ring-accent-soft"
                     defaultValue={draft.candidateJson}
                     ref={(node) => {
                       setDraftCandidateRef(draftRefs.current, item.review_id, node)
@@ -189,7 +189,7 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject, onApproveA
                     Notes
                     <textarea
                       data-role="notes"
-                      className="min-h-24 resize-y rounded-md border border-line-strong bg-surface p-2 text-sm text-fg outline-none focus:border-accent"
+                      className="min-h-24 resize-y rounded-md border border-line-strong bg-surface p-2 text-sm text-fg outline-none focus:border-accent focus:ring-2 focus:ring-accent-soft"
                       defaultValue={draft.notes}
                       ref={(node) => {
                         setDraftNotesRef(draftRefs.current, item.review_id, node)

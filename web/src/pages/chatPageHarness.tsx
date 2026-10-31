@@ -120,6 +120,10 @@ export class FakeServer {
   createReply: () => Reply = () => ({ status: 201, body: this.createThread() })
   listReply: () => Reply = () => ({ body: { threads: this.threads } })
   postReply: (message: ChatMessage) => Reply = (message) => ({ status: 201, body: { message } })
+  renameReply: (threadId: string, title: string | null) => Reply = (threadId, title) => {
+    this.threads = this.threads.map((thread) => (thread.thread_id === threadId ? { ...thread, title } : thread))
+    return { body: { thread: this.threads.find((thread) => thread.thread_id === threadId) } }
+  }
   deleteReply: (threadId: string) => Reply = (threadId) => {
     this.threads = this.threads.filter((thread) => thread.thread_id !== threadId)
     return { body: {} }
@@ -166,6 +170,7 @@ export class FakeServer {
     if (match && method === 'GET') return this.history(match[1])
     const thread = /^\/v1\/chat\/threads\/([^/]+)$/.exec(path)
     if (thread && method === 'DELETE') return this.deleteReply(thread[1])
+    if (thread && method === 'PATCH') return this.renameReply(thread[1], (JSON.parse(body) as { title: string | null }).title)
     throw new Error(`unexpected request ${method} ${path}`)
   }
 }
@@ -241,7 +246,7 @@ export function WithSidebarSlot({ children }: { children: ReactNode }) {
 }
 
 export async function renderChat(initialPath: string, server: FakeServer, options: RenderOptions = {}): Promise<Harness> {
-  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { url: 'http://localhost/' })
   const globals = globalThis as unknown as Record<string, unknown>
   const saved = Object.fromEntries(['IS_REACT_ACT_ENVIRONMENT', 'document', 'window', 'ResizeObserver', 'EventSource', 'fetch']
     .map((key) => [key, globals[key]]))

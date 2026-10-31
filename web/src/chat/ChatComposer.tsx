@@ -1,15 +1,38 @@
-import { useState, type FormEvent, type ReactElement } from 'react'
+import { useImperativeHandle, useState, type FormEvent, type ReactElement, type Ref } from 'react'
 
 import { handleComposerKeyDownEvent } from './composer.ts'
+import { readDraft, writeDraft } from './composerDrafts.ts'
 import { ThreadColumn } from './turnLayout.tsx'
 
+export type ChatComposerHandle = {
+  // The question this composer sent created a thread: the text on screen moves
+  // there with it instead of being swapped for that thread's saved draft.
+  carryInto: (scope: string) => void
+}
+
 type ChatComposerProps = {
+  // Which saved draft this composer edits: one per user and thread.
+  draftScope: string
+  ref?: Ref<ChatComposerHandle>
   canAsk: boolean
   onAsk: (text: string) => boolean
 }
 
-export function ChatComposer({ canAsk, onAsk }: ChatComposerProps): ReactElement {
-  const [prompt, setPrompt] = useState('')
+export function ChatComposer({ ref, draftScope, canAsk, onAsk }: ChatComposerProps): ReactElement {
+  const [prompt, setPromptState] = useState(() => readDraft(draftScope))
+  // Stays mounted across threads, so focus survives; each thread brings its own draft.
+  const [shownScope, setShownScope] = useState(draftScope)
+  const [carryScope, setCarryScope] = useState<string | null>(null)
+  useImperativeHandle(ref, () => ({ carryInto: setCarryScope }), [])
+  if (shownScope !== draftScope) {
+    setShownScope(draftScope)
+    setCarryScope(null)
+    if (draftScope !== carryScope) setPromptState(readDraft(draftScope))
+  }
+  const setPrompt = (text: string) => {
+    setPromptState(text)
+    writeDraft(draftScope, text)
+  }
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -22,14 +45,14 @@ export function ChatComposer({ canAsk, onAsk }: ChatComposerProps): ReactElement
         <label className="sr-only" htmlFor="chat-composer">
           Ask the analyst
         </label>
-        <div className="flex items-end gap-2 rounded-2xl border border-line-strong bg-surface px-3 py-2.5 shadow-md">
+        <div className="flex items-end gap-2 rounded-2xl border border-line-strong bg-surface px-3 py-2.5 shadow-md transition-colors focus-within:border-accent focus-within:ring-2 focus-within:ring-accent-soft">
           <textarea
             id="chat-composer"
             value={prompt}
             onChange={(event) => setPrompt(event.currentTarget.value)}
             onKeyDown={handleComposerKeyDownEvent}
             rows={2}
-            className="min-w-0 flex-1 resize-none border-none bg-transparent text-sm text-fg outline-none placeholder:text-faint"
+            className="field-sizing-content max-h-60 min-h-10 min-w-0 flex-1 resize-none border-none bg-transparent text-sm text-fg outline-none placeholder:text-faint"
             placeholder="Ask about a company, theme, screen, or prior artifact"
           />
           <button

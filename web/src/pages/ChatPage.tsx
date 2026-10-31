@@ -1,15 +1,17 @@
 import { createPortal } from 'react-dom'
-import { useCallback, useContext, useEffect, useLayoutEffect, useRef } from 'react'
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, useMatch, useNavigate } from 'react-router-dom'
-import { Trash2 } from 'lucide-react'
+import { Pencil, Trash2 } from 'lucide-react'
 
 import { PRIMARY_BUTTON_CLASS } from '../shell/buttonStyles.ts'
 import { VirtualizedMessageList } from '../chat'
-import { ChatComposer } from '../chat/ChatComposer.tsx'
+import { ChatComposer, type ChatComposerHandle } from '../chat/ChatComposer.tsx'
 import { PendingTurnView } from '../chat/PendingTurnView.tsx'
 import { ThreadColumn } from '../chat/turnLayout.tsx'
 import { FailureNotice } from '../ui/FailureNotice.tsx'
 import { Skeleton } from '../ui/Skeleton.tsx'
+import { formatRelativeTime, useMinuteClock } from '../ui/relativeTime.ts'
+import { renameThread, type ChatThread } from '../chat/threadActions.ts'
 import { useAuth } from '../shell/useAuth.ts'
 import { cancelThreadDelete, startThreadDelete, useThreadDeletes } from '../chat/threadDeletes.ts'
 import { StarterQuestionsContext } from '../chat/starterQuestions.ts'
@@ -17,6 +19,7 @@ import { threadDisplayName } from '../chat/threadName.ts'
 import { useChatSession, type ChatSession } from '../chat/useChatSession.ts'
 import { useThreadList, useTitleFollowUp, type ThreadListState } from '../chat/useThreadList.ts'
 import { useSidebarSlot } from '../shell/useSidebarSlot.ts'
+import { moveDraft } from '../chat/composerDrafts.ts'
 
 
 export function ChatLayout() {
@@ -34,7 +37,21 @@ export function ChatLayout() {
   useEffect(() => {
     if (routeThreadId !== null) cancelThreadDelete(routeThreadId)
   }, [routeThreadId])
-  const chat = useChatSession({ userId, threadId: routeThreadId, navigate, onThreadCreated: threads.refresh })
+  const { refresh: refreshThreads } = threads
+  // A question typed while the first one creates its thread belongs to that
+  // thread, unless the reader has since left the screen that sent it.
+  const composer = useRef<ChatComposerHandle>(null)
+  const onThreadCreated = useCallback(
+    (threadId: string, owned: boolean) => {
+      if (owned) {
+        moveDraft(`${userId}:new`, `${userId}:${threadId}`)
+        composer.current?.carryInto(`${userId}:${threadId}`)
+      }
+      refreshThreads()
+    },
+    [userId, refreshThreads],
+  )
+  const chat = useChatSession({ userId, threadId: routeThreadId, navigate, onThreadCreated })
   const activeThreadId = chat.view.threadId
   const activeThread = threads.state.kind === 'ready'
     ? threads.state.threads.find((thread) => thread.thread_id === activeThreadId)
@@ -46,6 +63,7 @@ export function ChatLayout() {
     titled: Boolean(activeThread?.title?.trim()),
     refresh: threads.refresh,
   })
+  const draftScope = `${userId}:${routeThreadId ?? 'new'}`
   const sidebar = useSidebarSlot()
   const { setClaimed } = sidebar
   // Before paint, so the watchlist never flashes in the slot on the way in.
@@ -71,7 +89,12 @@ export function ChatLayout() {
       {chat.view.canvas === 'thread'
         ? <ChatThreadView chat={chat} threadName={threadName} />
         : <ChatEmptyState chat={chat} />}
-      <ChatComposer canAsk={chat.view.canAsk} onAsk={chat.ask} />
+      <ChatComposer
+        ref={composer}
+        draftScope={draftScope}
+        canAsk={chat.view.canAsk}
+        onAsk={chat.ask}
+      />
     </div>
   )
 }
@@ -156,6 +179,46 @@ function ThreadList({
   const navigate = useNavigate()
   const { pending, error: deleteError } = useThreadDeletes()
   const rows = state.kind === 'ready' ? state.threads : []
+  const now = useMinuteClock()
+  const list = useRef<HTMLUListElement>(null)
+  const [editing, setEditing] = useState<string | null>(null)
+  // A new name shows until the server's title moves off the one it replaced.
+  // Once the server confirms it, it shows only until the next list arrives, so
+  // any later title, even the one it replaced, is the server's to give.
+  type Rename = { title: string; replaced: string | null; confirmedBefore: ReadonlyArray<ChatThread> | null }
+  const [renamed, setRenamed] = useState<Record<string, Rename>>({})
+  const [renameError, setRenameError] = useState<string | null>(null)
+  // The row's link only exists again after the editor closes.
+  const refocusRow = useRef<string | null>(null)
+  useLayoutEffect(() => {
+    if (editing !== null || refocusRow.current === null) return
+    list.current?.querySelector<HTMLElement>(`[data-thread-id="${refocusRow.current}"]`)?.focus()
+    refocusRow.current = null
+  }, [editing])
+  const finishRename = (threadId: string, replaced: string | null, next: string | null, byKey: boolean) => {
+    // Leaving the field by clicking or tabbing elsewhere keeps focus there.
+    if (byKey) refocusRow.current = threadId
+    setEditing(null)
+    const title = next?.trim() ?? ''
+    if (title === '') return
+    setRenamed((current) => ({ ...current, [threadId]: { title, replaced, confirmedBefore: null } }))
+    setRenameError(null)
+    const listAtRename = rows
+    renameThread(userId, threadId, title).then(() => {
+      setRenamed((current) => {
+        const rename = current[threadId]
+        return rename?.title === title ? { ...current, [threadId]: { ...rename, confirmedBefore: listAtRename } } : current
+      })
+      refresh()
+    }, (caught: unknown) => {
+      setRenamed((current) => {
+        const rest = { ...current }
+        delete rest[threadId]
+        return rest
+      })
+      setRenameError(caught instanceof Error ? caught.message : String(caught))
+    })
+  }
   const undoButton = useRef<HTMLButtonElement>(null)
   // Only the delete click moves focus; coming back to a pending delete doesn't.
   const focusUndo = useRef(false)
@@ -199,6 +262,7 @@ function ThreadList({
         + New chat
       </button>
       {deleteError ? <FailureNotice message="Couldn't delete the chat." detail={deleteError.message} announce={false} /> : null}
+      {renameError ? <FailureNotice message="Couldn't rename the chat." detail={renameError} /> : null}
       <h2 className="mt-1 px-1.5 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-faint">Chats</h2>
       {state.kind === 'loading' ? (
         <div className="flex flex-col gap-2">
@@ -213,7 +277,7 @@ function ThreadList({
           No chats yet.
         </p>
       ) : (
-        <ul className="-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1">
+        <ul ref={list} className="-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1">
           {rows.map((thread) => {
             if (thread.thread_id === pending?.threadId) {
               return (
@@ -235,37 +299,100 @@ function ThreadList({
               )
             }
             const active = thread.thread_id === activeThreadId
-            const name = active ? activeName : threadDisplayName(thread, null)
+            const override = renamed[thread.thread_id]
+            const overrideShows = override !== undefined && (override.confirmedBefore === null
+              ? thread.title === override.replaced
+              : rows === override.confirmedBefore)
+            const name = overrideShows
+              ? override.title
+              : active ? activeName : threadDisplayName(thread, null)
+            if (editing === thread.thread_id) {
+              return (
+                <li key={thread.thread_id}>
+                  <TitleEditor initial={name} onDone={(next, byKey) => finishRename(thread.thread_id, thread.title, next, byKey)} />
+                </li>
+              )
+            }
             return (
               <li key={thread.thread_id} className="group relative">
                 <Link
                   to={`/chat/${thread.thread_id}`}
+                  data-thread-id={thread.thread_id}
                   aria-current={active ? 'page' : undefined}
-                  className={`block rounded-md py-2 pl-2.5 pr-8 text-sm transition-colors ${active ? 'bg-accent-soft' : 'hover:bg-surface-hover'}`}
+                  className={`block rounded-md py-2 pl-2.5 pr-14 text-sm transition-colors ${active ? 'bg-accent-soft' : 'hover:bg-surface-hover'}`}
                 >
                   <span className={`block truncate font-medium ${active ? 'text-accent' : 'text-fg'}`}>{name}</span>
-                  <span className="mt-0.5 block text-[11px] text-muted">
-                    {new Date(thread.updated_at).toLocaleString()}
-                  </span>
+                  <time
+                    dateTime={thread.updated_at}
+                    title={new Date(thread.updated_at).toLocaleString()}
+                    className="mt-0.5 block text-[11px] text-muted"
+                  >
+                    {formatRelativeTime(thread.updated_at, now)}
+                  </time>
                 </Link>
-                <button
-                  type="button"
-                  aria-label={`Delete ${name}`}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-muted opacity-0 transition hover:text-negative focus-visible:opacity-100 group-hover:opacity-100"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    focusUndo.current = true
-                    startThreadDelete(userId, thread.thread_id, name)
-                    if (active) navigate('/chat')
-                  }}
-                >
-                  <Trash2 aria-hidden="true" className="h-4 w-4" strokeWidth={1.8} />
-                </button>
+                <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100">
+                  <button
+                    type="button"
+                    aria-label={`Rename ${name}`}
+                    className="rounded p-1 text-muted hover:text-fg"
+                    onClick={() => setEditing(thread.thread_id)}
+                  >
+                    <Pencil aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={1.8} />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Delete ${name}`}
+                    className="rounded p-1 text-muted hover:text-negative"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      focusUndo.current = true
+                      startThreadDelete(userId, thread.thread_id, name)
+                      if (active) navigate('/chat')
+                    }}
+                  >
+                    <Trash2 aria-hidden="true" className="h-4 w-4" strokeWidth={1.8} />
+                  </button>
+                </div>
               </li>
             )
           })}
         </ul>
       )}
     </nav>
+  )
+}
+
+// Enter saves, Escape cancels, and leaving the field saves. A name left as it
+// opened is a cancel, even if the row's name changed meanwhile. `settled` stops
+// the blur that follows Enter or Escape from finishing a second time.
+export function TitleEditor({ initial, onDone }: { initial: string; onDone: (next: string | null, byKey: boolean) => void }) {
+  const settled = useRef(false)
+  // The field keeps the text it opened with even if the row's name changes.
+  const [opened] = useState(initial)
+  const finish = (next: string | null, byKey: boolean) => {
+    if (settled.current) return
+    settled.current = true
+    onDone(next === null || next.trim() === opened ? null : next, byKey)
+  }
+  return (
+    <input
+      aria-label="Chat name"
+      defaultValue={opened}
+      maxLength={200}
+      autoFocus
+      onFocus={(event) => event.currentTarget.select()}
+      onKeyDown={(event) => {
+        if (event.nativeEvent.isComposing) return
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          finish(event.currentTarget.value, true)
+        } else if (event.key === 'Escape') {
+          event.preventDefault()
+          finish(null, true)
+        }
+      }}
+      onBlur={(event) => finish(event.currentTarget.value, false)}
+      className="block w-full rounded-md border border-accent bg-surface px-2.5 py-2 text-sm text-fg outline-none ring-2 ring-accent-soft"
+    />
   )
 }
