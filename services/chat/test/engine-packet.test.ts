@@ -227,6 +227,26 @@ test("a balance trend names a quarter its value was never bound to as not shown,
   );
 });
 
+for (const missing of ["fiscal quarter 1 before latest", "end of fiscal quarter 1 before latest"]) {
+  test(`a latest window names its unbound quarter "${missing}" as not shown, beside dated quarters (#540)`, () => {
+    const cash = [["Q1 FY2025 (as of 2024-04-28)", "USD 31,438,000,000.00"], [missing, null], ["Q3 FY2025 (as of 2024-10-27)", "USD 38,487,000,000.00"]] as const;
+    const packet = enginePacket(content(
+      cash.map(([, text], i) => (text ? value(20 + i, "a", "measure:cash", `period:c${i}`, text) : gap(20 + i, "a", "measure:cash", `period:c${i}`))),
+      ["a"],
+      {
+        "measure:cash": { kind: "measure", text: "Cash and equivalents (excluding restricted cash)" },
+        ...Object.fromEntries(cash.map(([period], i) => [`period:c${i}`, { kind: "period", text: period }])),
+      },
+    ), new Map([["a", "NVDA"]]), null);
+    const report = checkAssertions([{ kind: "comparison", text: "x", evidence: ["F1", "F3"], op: "trend", result: "rose" }], packet);
+    assert.deepEqual(report.rejected, []);
+    assert.equal(
+      plainText(renderAssertion(report.accepted[0]!, packet, []).segments),
+      `NVDA's cash and equivalents (excluding restricted cash) rose from USD 31,438,000,000.00 in Q1 FY2025 (as of Apr 2024) to USD 38,487,000,000.00 in Q3 FY2025 (as of Oct 2024), though not in every period. No cash and equivalents (excluding restricted cash) is shown for ${missing}.`,
+    );
+  });
+}
+
 test("companies on different fiscal calendars, each shown for two years, are compared at the year they share by name (#541)", () => {
   const years = [["a", "FY2024 (ended 2024-01-28)", "USD 60,922,000,000.00"], ["a", "FY2025 (ended 2025-01-26)", "USD 130,497,000,000.00"], ["b", "FY2024 (ended 2024-12-28)", "USD 25,785,000,000.00"], ["b", "FY2025 (ended 2025-12-27)", "USD 34,639,000,000.00"]] as const;
   const packet = enginePacket(content(
