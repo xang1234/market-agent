@@ -91,7 +91,8 @@ export async function inspectCommittedResult(db: SqlExecutor, ownerUserId: strin
   const inputs = await readClosureInputs(db, ownerUserId, record.run_id, reportedSlots);
   if (inputs.length !== reportedSlots.length || inputs.some((input) => !input.available)) return null;
 
-  const supported = unsupportedPlanVersion(plan) === null
+  // Operation versions are checked only within the result's closure, so a retired operation elsewhere leaves it readable. The catalog and every metric definition are still checked plan-wide.
+  const supported = unsupportedPlanVersion({ ...plan, operations: plan.operations.filter((node) => closure.has(node.node_id)) }) === null
     && supportedPublication({
       certificate_version: record.certificate.schema_version,
       verifier_version: record.certificate.verifier_version,

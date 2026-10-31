@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ChangeNode, ReportedMetricNode, SplitAdjustmentV2 } from "../src/contracts.ts";
+import type { ReportedMetricNode, SplitAdjustmentV2 } from "../src/contracts.ts";
 import { parseFinancialDecimal } from "../src/exact-decimal.ts";
 import { absoluteChange, FinancialIntegrityError, operandFromBoundInput, type OperandOutcome } from "../src/operations.ts";
 import { rationalFromDecimal, type ExactRational } from "../src/rational.ts";
 import { explainedBySplits, restateToReference, splitHistoryCovers, splitReferenceDate, type RecordedSplit } from "../src/split-adjustment.ts";
+import { change } from "./fixtures.ts";
 import { boundInput, operand, REFERENCE_DATE, SLOTS, type InputSpec } from "./operand-fixtures.ts";
 import { validateBoundInput } from "../src/validate.ts";
 
@@ -143,8 +144,7 @@ test("EPS a year apart, with a split between their filings, changes on one basis
     ...FY2025,
     split_adjustment: restated({ native: "2.94", value_kind: "per_share", as_filed_on: "2025-02-26", reference_date: REFERENCE_DATE }),
   });
-  const change: ChangeNode = { node_id: "chg", operation: "absolute_change", operation_version: "absolute_change.v1", current: "current", prior: "prior" };
-  assert.equal(payloadValue(absoluteChange(change, current, prior)), "1.747");
+  assert.equal(payloadValue(absoluteChange(change("chg", "absolute_change", "current", "prior"), current, prior)), "1.747");
 });
 
 test("a later 10-K's figure is the earlier one restated by the splits between their filings, at the finer decimal place", () => {

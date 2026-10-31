@@ -4,7 +4,7 @@ import type { FinancialPlanV1 } from "../src/contracts.ts";
 import { dependencyClosure, effectiveLimits, topologicalOrder, validatePlanGraph } from "../src/graph.ts";
 import { unitClosures, unitsDependingOn } from "../src/publication-units.ts";
 import { validateFinancialPlan } from "../src/validate.ts";
-import { mutable, planFixture } from "./fixtures.ts";
+import { change, mutable, planFixture } from "./fixtures.ts";
 
 function codes(plan: FinancialPlanV1, parent?: Parameters<typeof validatePlanGraph>[1]): string[] {
   return validatePlanGraph(plan, parent).map((issue) => issue.code);
@@ -27,8 +27,8 @@ test("a valid plan graph has no issues and a deterministic topological order", (
 test("cycles and self-references are rejected before any acquisition", () => {
   const cycle = mutable(planFixture());
   cycle.operations.push(
-    { node_id: "x", operation: "absolute_change", operation_version: "absolute_change.v1", current: "y", prior: "a_rev" },
-    { node_id: "y", operation: "absolute_change", operation_version: "absolute_change.v1", current: "x", prior: "a_rev" },
+    change("x", "absolute_change", "y", "a_rev"),
+    change("y", "absolute_change", "x", "a_rev"),
   );
   assert.ok(codes(cycle).includes("dependency_cycle"));
   assert.ok(!validateFinancialPlan(cycle).ok);
@@ -44,10 +44,10 @@ test("predicate nodes cannot be used as numeric operands", () => {
   plan.outputs.push({ output_id: "out_bad", node_id: "bad", unit_id: "section" });
   assert.deepEqual(codes(plan), ["invalid_operand"]);
 
-  const change = mutable(planFixture());
-  change.operations.push({ node_id: "chg", operation: "absolute_change", operation_version: "absolute_change.v1", current: "a_gm_check", prior: "a_gm" });
-  change.outputs.push({ output_id: "out_chg", node_id: "chg", unit_id: "section" });
-  assert.deepEqual(codes(change), ["invalid_operand"]);
+  const changed = mutable(planFixture());
+  changed.operations.push(change("chg", "absolute_change", "a_gm_check", "a_gm"));
+  changed.outputs.push({ output_id: "out_chg", node_id: "chg", unit_id: "section" });
+  assert.deepEqual(codes(changed), ["invalid_operand"]);
 });
 
 test("duplicate cohort members and duplicate trailing-sum quarters are invalid parameters", () => {

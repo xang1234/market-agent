@@ -302,7 +302,7 @@ function presentPayload(plan: FinancialPlanV1, node: OperationNode, payload: unk
   switch (record.kind) {
     case "value": {
       const unit = record.unit as FinancialUnit;
-      const text = formatNodeValue(node, parseValue(record.value as string), unit);
+      const text = formatNodeValue(plan, node, parseValue(record.value as string), unit);
       return { kind: "value", ...text, value: record.value as string, unit, exact: record.exact as boolean };
     }
     case "predicate": {
@@ -310,7 +310,7 @@ function presentPayload(plan: FinancialPlanV1, node: OperationNode, payload: unk
       const threshold = node.operation === "threshold" ? plan.thresholds.find((entry) => entry.threshold_id === node.threshold_id) : undefined;
       const subject = node.operation === "threshold" ? node.subject : node.node_id;
       const subjectNode = plan.operations.find((entry) => entry.node_id === subject)!;
-      const bound = threshold ? formatNodeValue(subjectNode, parseValue(threshold.value), threshold.unit).text : "the threshold";
+      const bound = threshold ? formatNodeValue(plan, subjectNode, parseValue(threshold.value), threshold.unit).text : "the threshold";
       const slot = subjectSlot(plan, subjectNode);
       const who = slot === null ? "" : `${labels[subjectLabelId(slot)]!.text} — `;
       return {
@@ -365,11 +365,17 @@ export function lowercaseUnlessAcronym(label: string): string {
 
 const COMPARISON_TEXT: Readonly<Record<Comparison, string>> = { gt: "above", gte: "at or above", lt: "below", lte: "at or below", eq: "equal to" };
 
-// An approved ratio (leverage, cash conversion) and P/E read as multiples; margins and changes stay percentages.
-function formatNodeValue(node: OperationNode, value: ExactDecimal, unit: FinancialUnit): { text: string; full_text: string } {
-  return (node.operation === "ratio" || node.operation === "pe_ratio") && unit.kind === "ratio"
+function formatNodeValue(plan: FinancialPlanV1, node: OperationNode, value: ExactDecimal, unit: FinancialUnit): { text: string; full_text: string } {
+  return unit.kind === "ratio" && readsAsMultiple(plan, node)
     ? { text: `${fixed(value, 2)}x`, full_text: `${canonicalDecimalString(value)}x` }
     : formatValue(value, unit);
+}
+
+// An approved ratio (leverage, cash conversion) and P/E are multiples, and so is a change in one; margins and percent changes are percentages.
+function readsAsMultiple(plan: FinancialPlanV1, node: OperationNode): boolean {
+  return node.operation === "absolute_change"
+    ? readsAsMultiple(plan, plan.operations.find((entry) => entry.node_id === node.current)!)
+    : node.operation === "ratio" || node.operation === "pe_ratio";
 }
 
 function formatValue(value: ExactDecimal, unit: FinancialUnit): { text: string; full_text: string } {

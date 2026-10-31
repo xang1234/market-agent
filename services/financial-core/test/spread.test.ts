@@ -5,7 +5,7 @@ import { evaluatePlan } from "../src/coverage.ts";
 import { margin, operationGap, spread, type FinancialOperand, type OperandOutcome } from "../src/operations.ts";
 import { presentFinancialUnit } from "../src/presentation.ts";
 import { validateFinancialPlan } from "../src/validate.ts";
-import { planFixture } from "./fixtures.ts";
+import { change, planFixture } from "./fixtures.ts";
 import { FY2023, operand, SLOTS } from "./operand-fixtures.ts";
 
 const SPREAD: SpreadNode = { node_id: "lead", operation: "spread", operation_version: "spread.v1", left: "a_gm", right: "b_gm" };
@@ -141,7 +141,7 @@ test("a lead is never another operation's operand: it is one company's figure mi
       lead("a", "b"),
       lead("a", "c"),
       lead("c", "a"),
-      { node_id: "change", operation: "absolute_change", operation_version: "absolute_change.v1", current: "a_minus_c", prior: "a_minus_b" },
+      change("change", "absolute_change", "a_minus_c", "a_minus_b"),
       { node_id: "lead_of_leads", operation: "spread", operation_version: "spread.v1", left: "a_minus_b", right: "c_minus_a" },
       { node_id: "cohort", operation: "peer_compare", operation_version: "peer_compare.v1", members: ["a_minus_b", "c_minus_a"], direction: "highest" },
       { node_id: "check", operation: "threshold", operation_version: "threshold.v1", subject: "a_minus_b", threshold_id: "min_gm", comparison: "gte" },
