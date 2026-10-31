@@ -73,7 +73,7 @@ export function ChatLayout() {
   }, [setClaimed])
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-auto">
+    <div className="flex min-h-0 flex-1 flex-col">
       {sidebar.node && !sidebar.collapsed
         ? createPortal(
             <ThreadList
@@ -102,7 +102,7 @@ export function ChatLayout() {
 function ChatEmptyState({ chat }: { chat: ChatSession }) {
   const starterQuestions = useContext(StarterQuestionsContext)
   return (
-    <div data-testid="chat-empty" className="flex flex-1 flex-col gap-6 p-8">
+    <div data-testid="chat-empty" className="flex min-h-0 flex-1 flex-col gap-6 overflow-auto p-8">
       <section className="rounded-md border border-line bg-surface p-6">
         <h2 className="text-lg font-semibold text-fg">Start research</h2>
         <p className="mt-2 text-sm text-fg-soft">
@@ -131,7 +131,7 @@ function ChatThreadView({ chat, threadName }: { chat: ChatSession; threadName: s
   const { view } = chat
 
   return (
-    <div data-testid="chat-thread" className="flex flex-1 flex-col">
+    <div data-testid="chat-thread" className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center gap-3 border-b border-line px-6 py-2.5">
         <h1 data-testid="thread-name" className="truncate text-sm font-medium text-fg">{threadName}</h1>
       </div>
@@ -150,7 +150,7 @@ function ChatThreadView({ chat, threadName }: { chat: ChatSession; threadName: s
           </ThreadColumn>
         ) : null}
         {view.listMounted ? (
-          <section className="flex min-h-[24rem] flex-1 flex-col" aria-label="Persisted message history">
+          <section className="flex min-h-0 flex-1 flex-col" aria-label="Persisted message history">
             <VirtualizedMessageList
               key={view.listKey}
               messages={view.messages}

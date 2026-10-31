@@ -40,7 +40,7 @@ export function ChatComposer({ ref, draftScope, canAsk, onAsk }: ChatComposerPro
   }
 
   return (
-    <form onSubmit={submit} className="sticky bottom-0 border-t border-line bg-surface/70 p-4 backdrop-blur">
+    <form onSubmit={submit} className="shrink-0 border-t border-line bg-surface/70 p-4 backdrop-blur">
       <ThreadColumn>
         <label className="sr-only" htmlFor="chat-composer">
           Ask the analyst

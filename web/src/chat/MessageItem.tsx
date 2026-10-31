@@ -20,7 +20,8 @@ function MessageItemInner({ message, onMeasure }: MessageItemProps): ReactElemen
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0]
       if (entry === undefined) return
-      onMeasure(message.message_id, entry.contentRect.height)
+      // The whole box, padding included: the virtual window stacks these heights.
+      onMeasure(message.message_id, entry.borderBoxSize?.[0]?.blockSize ?? el.getBoundingClientRect().height)
     })
     observer.observe(el)
     return () => observer.disconnect()
