@@ -38,6 +38,15 @@ function letGoIfReaderMoved(el: HTMLElement, pin: RefObject<Pin>, placedTop: Ref
   const lowestTop = el.scrollHeight - el.clientHeight
   if (placed > lowestTop && Math.abs(el.scrollTop - lowestTop) <= 1) return
   pin.current = null
+  keepAnchoring(el, null)
+}
+
+// While pinned, the pin is the list's scroll anchoring, and the browser's would
+// move the view by itself and read as the reader scrolling. Unpinned, the
+// browser keeps what the reader is looking at still as messages above them
+// swap estimated heights for measured ones.
+function keepAnchoring(el: HTMLElement, pin: Pin): void {
+  el.style.overflowAnchor = pin === null ? 'auto' : 'none'
 }
 
 export type VirtualizedMessageListProps = {
@@ -106,13 +115,17 @@ export function VirtualizedMessageList({
       const questions = el.querySelectorAll<HTMLElement>(QUESTION_SELECTOR)
       const question = questions[questions.length - 1]
       if (question !== undefined) {
-        const questionTop = question.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop
-        const contentHeight = el.scrollHeight - spacer.offsetHeight
+        const viewTop = el.getBoundingClientRect().top - el.scrollTop
+        const questionTop = question.getBoundingClientRect().top - viewTop
+        // Where the thread really ends: scrollHeight never drops below the
+        // viewport, so it overstates a thread shorter than the view.
+        const contentHeight = spacer.getBoundingClientRect().top - viewTop
         spacer.style.height = `${Math.max(0, el.clientHeight - ANCHOR_MARGIN - (contentHeight - questionTop))}px`
         if (pinRef.current === 'question') el.scrollTop = Math.max(0, questionTop - ANCHOR_MARGIN)
       }
     }
     if (pinRef.current === 'bottom') el.scrollTop = el.scrollHeight
+    keepAnchoring(el, pinRef.current)
     if (pinRef.current !== null) {
       placedTopRef.current = el.scrollTop
       // The virtual window follows the view in this same commit, so a moved
@@ -215,8 +228,6 @@ export function VirtualizedMessageList({
         ref={containerRef}
         onScroll={handleScroll}
         data-testid="virtualized-message-list"
-        // The pin is this list's scroll anchoring; the browser's would move the
-        // view on its own and read as the reader scrolling.
         className="flex-1 overflow-auto [overflow-anchor:none]"
       >
         <div
