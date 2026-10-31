@@ -243,7 +243,7 @@ test("a change between two balances names the end of each period", () => {
     [
       balance("ta23", "total_assets"),
       balance("ta22", "total_assets", 2022),
-      { node_id: "ta_change", operation: "absolute_change", operation_version: "absolute_change.v2", current: "ta23", prior: "ta22" },
+      change("ta_change", "absolute_change", "ta23", "ta22"),
     ],
     ["ta_change"],
   );

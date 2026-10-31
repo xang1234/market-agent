@@ -16,6 +16,7 @@ import {
   percentChangePositiveBase,
   ratio,
   trailingSum,
+  type FinancialOperand,
   type OperandOutcome,
 } from "../src/operations.ts";
 import { boundInput, FY2022, FY2023, KNOWLEDGE_CUTOFF, operand, SLOTS, type InputSpec } from "./operand-fixtures.ts";
@@ -47,11 +48,23 @@ function dec(token: string): ExactDecimal {
 }
 
 test("the catalog registers exactly the approved operations, each versioned", () => {
-  assert.deepEqual(
-    Object.keys(OPERATION_REGISTRY).sort(),
-    ["absolute_change", "free_cash_flow", "gross_margin", "market_cap", "net_margin", "operating_margin", "pe_ratio", "peer_compare", "percent_change_positive_base", "period_rank", "ratio", "reported_metric", "spread", "threshold", "trailing_sum"],
-  );
-  for (const [kind, spec] of Object.entries(OPERATION_REGISTRY)) assert.match(spec.operation_version, new RegExp(`^${kind}\\.v[1-9][0-9]*$`));
+  assert.deepEqual(Object.fromEntries(Object.entries(OPERATION_REGISTRY).map(([kind, spec]) => [kind, spec.operation_version])), {
+    absolute_change: "absolute_change.v2",
+    free_cash_flow: "free_cash_flow.v1",
+    gross_margin: "gross_margin.v1",
+    market_cap: "market_cap.v1",
+    net_margin: "net_margin.v1",
+    operating_margin: "operating_margin.v1",
+    pe_ratio: "pe_ratio.v1",
+    peer_compare: "peer_compare.v1",
+    percent_change_positive_base: "percent_change_positive_base.v1",
+    period_rank: "period_rank.v1",
+    ratio: "ratio.v1",
+    reported_metric: "reported_metric.v1",
+    spread: "spread.v1",
+    threshold: "threshold.v1",
+    trailing_sum: "trailing_sum.v1",
+  });
 });
 
 // --- reported_metric -------------------------------------------------------
@@ -226,6 +239,19 @@ test("a change in a multiple stays a ratio, not percentage points (#539)", () =>
   };
   const outcome = absoluteChange(change("absolute_change"), leverage("cur", "60", "2023-12-31"), leverage("pri", "80", "2022-12-31"));
   assert.deepEqual(outcome.ok && outcome.payload, { kind: "value", value: "-0.4", unit: { kind: "ratio" }, exact: true, rounding: null });
+});
+
+test("a change in a percent change is in percentage points (#539)", () => {
+  const FY2024 = { start: "2024-01-01", end: "2024-12-31", fiscal_year: 2024, fiscal_period: "FY" as const };
+  const revenue = (value: string, period: typeof FY2023 | typeof FY2024) => operand("rev", { metric: "revenue", value, ...period });
+  const growth = (current: FinancialOperand, prior: FinancialOperand) => {
+    const result = percentChangePositiveBase(change("percent_change_positive_base"), current, prior);
+    assert.ok(result.ok);
+    return result.operand;
+  };
+  // Revenue 100 -> 125 -> 150 grows 25% in FY2023 and 20% in FY2024.
+  const outcome = absoluteChange(change("absolute_change"), growth(revenue("150", FY2024), revenue("125", FY2023)), growth(revenue("125", FY2023), revenue("100", FY2022)));
+  assert.deepEqual(outcome.ok && outcome.payload, { kind: "value", value: "-5", unit: { kind: "percentage_points" }, exact: true, rounding: null });
 });
 
 test("percent_change_positive_base: exact growth, rounded repeating growth, and non-positive bases", () => {
