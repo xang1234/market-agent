@@ -590,20 +590,26 @@ function periodReader(plan: FinancialPlanV1, periods: ReadonlyMap<LocalId, Bound
   return (node) => reads.get(node.node_id) ?? reads.set(node.node_id, readsOf(node)).get(node.node_id)!;
 }
 
-// The operands were bound to different periods: each one's is named.
+// Operands that each read one period were bound to different ones: each one's is named. A trailing sum reads four
+// quarters, and naming one of them as its period would mislead, so then the engine's words stand alone.
 function operandPeriods(plan: FinancialPlanV1, node: OperationNode, readsOf: ReadsOf, names: (slot: LocalId) => string): string {
   const operands = operationDependencies(node).map((id) => plan.operations.find((entry) => entry.node_id === id)!);
+  if (operands.some((operand) => readsOf(operand).length !== 1)) return "";
   const bound = operands.flatMap((operand) => {
     const period = readsOf(operand)[0]!.bound;
     return period ? [{ operand, period }] : [];
   });
   if (new Set(bound.map(({ period }) => `${fiscalName(period)} ${period.end}`)).size < 2) return "";
   const across = subjectSlot(plan, node) === null;
-  const owner = (operand: OperationNode) => {
+  const owner = (operand: OperationNode, index: number) => {
     const slot = across ? subjectSlot(plan, operand) : null;
-    return slot === null ? measureText(plan, operand) : names(slot);
+    if (slot !== null) return names(slot);
+    return index === 0 ? measureText(plan, operand) : lowercaseUnlessAcronym(measureText(plan, operand));
   };
-  return ` ${new Intl.ListFormat("en").format(bound.map(({ operand, period }) => `${owner(operand)}'s ${fiscalName(period)} ${measuresInstant(plan, operand) ? "figure is as of" : "ended"} ${period.end}`))}.`;
+  const possessive = (name: string) => (name.endsWith("s") ? `${name}'` : `${name}'s`);
+  const named = bound.map(({ operand, period }, index) =>
+    `${possessive(owner(operand, index))} ${fiscalName(period)} ${measuresInstant(plan, operand) ? "figure is as of" : "ended"} ${period.end}`);
+  return ` ${new Intl.ListFormat("en").format(named)}.`;
 }
 
 // A balance is a point in time: "FY2023 (as of 2023-12-30)", or "end of FY2023" with no bound period, never the year's amount.
