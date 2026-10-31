@@ -26,3 +26,13 @@ export async function deleteThread(userId: string, threadId: string, signal?: Ab
   })
   if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`)
 }
+
+export async function renameThread(userId: string, threadId: string, title: string): Promise<void> {
+  const res = await authenticatedFetch(`/v1/chat/threads/${encodeURIComponent(threadId)}`, {
+    userId,
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ title }),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+}

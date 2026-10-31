@@ -614,3 +614,73 @@ test('an unsent question stays with its own thread', async () => {
     await h.cleanup()
   }
 })
+
+async function editTitle(h: Harness, text: string, key: 'Enter' | 'Escape') {
+  const input = h.query('input[aria-label="Chat name"]') as HTMLInputElement
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(h.dom.window.HTMLInputElement.prototype, 'value')!.set!.call(input, text)
+    input.dispatchEvent(new h.dom.window.Event('input', { bubbles: true }))
+    input.dispatchEvent(new h.dom.window.KeyboardEvent('keydown', { key, bubbles: true }))
+  })
+  await h.flush()
+}
+
+const chatNames = (h: Harness) => [...sidebar(h).querySelectorAll('a span:first-child')].map((span) => span.textContent)
+
+test('renaming a chat saves its new name and returns focus to the row', async () => {
+  const { h, server } = await chatsWithTwoThreads()
+  try {
+    await act(async () => h.button('Rename Chips').click())
+    assert.equal((h.dom.window.document.activeElement as HTMLInputElement).value, 'Chips', 'the editor opens on the current name')
+
+    await editTitle(h, '  NVDA margin thesis  ', 'Enter')
+
+    assert.deepEqual(server.writes().map(([method, , body]) => [method, body]), [['PATCH', '{"title":"NVDA margin thesis"}']])
+    assert.deepEqual(chatNames(h), ['NVDA margin thesis', 'Rates'])
+    assert.equal(h.dom.window.document.activeElement?.textContent?.startsWith('NVDA margin thesis'), true, 'focus is back on the row')
+  } finally {
+    await h.cleanup()
+  }
+})
+
+test('Escape, or an unchanged or empty name, leaves the chat as it was', async () => {
+  const { h, server } = await chatsWithTwoThreads()
+  try {
+    for (const [text, key] of [['Something else', 'Escape'], ['Chips', 'Enter'], ['   ', 'Enter']] as const) {
+      await act(async () => h.button('Rename Chips').click())
+      await editTitle(h, text, key)
+    }
+    assert.deepEqual(server.writes(), [])
+    assert.deepEqual(chatNames(h), ['Chips', 'Rates'])
+  } finally {
+    await h.cleanup()
+  }
+})
+
+test('a failed rename puts the old name back and says so', async () => {
+  const { h, server } = await chatsWithTwoThreads()
+  server.renameReply = () => ({ status: 500, body: { error: 'boom' } })
+  try {
+    await act(async () => h.button('Rename Chips').click())
+    await editTitle(h, 'NVDA margin thesis', 'Enter')
+
+    assert.deepEqual(chatNames(h), ['Chips', 'Rates'])
+    assert.match(sidebar(h).textContent ?? '', /Couldn't rename the chat\./)
+  } finally {
+    await h.cleanup()
+  }
+})
+
+test('each chat shows how long ago it changed, with the exact time on hover', async () => {
+  const { h } = await chatsWithTwoThreads()
+  try {
+    const times = [...sidebar(h).querySelectorAll('time')]
+    assert.equal(times.length, 2)
+    for (const time of times) {
+      assert.match(time.textContent ?? '', /^(just now|\d+(m|h|d|mo|y) ago)$/)
+      assert.equal(time.getAttribute('title'), new Date(time.getAttribute('datetime')!).toLocaleString())
+    }
+  } finally {
+    await h.cleanup()
+  }
+})

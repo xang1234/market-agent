@@ -3,12 +3,12 @@ import type { ReactNode } from 'react'
 import { useResource } from '../fetch/resource.ts'
 import { ISSUER_NOT_LINKED_MESSAGE, RefreshFailedNote } from '../symbol/FetchStateView.tsx'
 import {
-  formatRelativeTime,
   isFilingKind,
   recentIssuerNews,
   type IssuerNewsItem,
 } from '../symbol/issuerNews.ts'
 import { FailureNotice } from '../ui/FailureNotice.tsx'
+import { formatRelativeTime } from '../ui/relativeTime.ts'
 import { Skeleton } from '../ui/Skeleton.tsx'
 
 type SubjectNewsRailProps = {

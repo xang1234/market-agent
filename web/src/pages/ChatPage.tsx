@@ -1,7 +1,7 @@
 import { createPortal } from 'react-dom'
-import { useCallback, useContext, useEffect, useLayoutEffect, useRef } from 'react'
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, useMatch, useNavigate } from 'react-router-dom'
-import { Trash2 } from 'lucide-react'
+import { Pencil, Trash2 } from 'lucide-react'
 
 import { PRIMARY_BUTTON_CLASS } from '../shell/buttonStyles.ts'
 import { VirtualizedMessageList } from '../chat'
@@ -10,6 +10,8 @@ import { PendingTurnView } from '../chat/PendingTurnView.tsx'
 import { ThreadColumn } from '../chat/turnLayout.tsx'
 import { FailureNotice } from '../ui/FailureNotice.tsx'
 import { Skeleton } from '../ui/Skeleton.tsx'
+import { formatRelativeTime, useMinuteClock } from '../ui/relativeTime.ts'
+import { renameThread } from '../chat/threadActions.ts'
 import { useAuth } from '../shell/useAuth.ts'
 import { cancelThreadDelete, startThreadDelete, useThreadDeletes } from '../chat/threadDeletes.ts'
 import { StarterQuestionsContext } from '../chat/starterQuestions.ts'
@@ -172,6 +174,35 @@ function ThreadList({
   const navigate = useNavigate()
   const { pending, error: deleteError } = useThreadDeletes()
   const rows = state.kind === 'ready' ? state.threads : []
+  const now = useMinuteClock()
+  const list = useRef<HTMLUListElement>(null)
+  const [editing, setEditing] = useState<string | null>(null)
+  // Shown until the server's list carries the new title.
+  const [renamed, setRenamed] = useState<Record<string, string>>({})
+  const [renameError, setRenameError] = useState<string | null>(null)
+  // The row's link only exists again after the editor closes.
+  const refocusRow = useRef<string | null>(null)
+  useLayoutEffect(() => {
+    if (editing !== null || refocusRow.current === null) return
+    list.current?.querySelector<HTMLElement>(`[data-thread-id="${refocusRow.current}"]`)?.focus()
+    refocusRow.current = null
+  }, [editing])
+  const finishRename = (threadId: string, previous: string, next: string | null) => {
+    refocusRow.current = threadId
+    setEditing(null)
+    const title = next?.trim() ?? ''
+    if (title === '' || title === previous) return
+    setRenamed((current) => ({ ...current, [threadId]: title }))
+    setRenameError(null)
+    renameThread(userId, threadId, title).then(refresh, (caught: unknown) => {
+      setRenamed((current) => {
+        const rest = { ...current }
+        delete rest[threadId]
+        return rest
+      })
+      setRenameError(caught instanceof Error ? caught.message : String(caught))
+    })
+  }
   const undoButton = useRef<HTMLButtonElement>(null)
   // Only the delete click moves focus; coming back to a pending delete doesn't.
   const focusUndo = useRef(false)
@@ -215,6 +246,7 @@ function ThreadList({
         + New chat
       </button>
       {deleteError ? <FailureNotice message="Couldn't delete the chat." detail={deleteError.message} announce={false} /> : null}
+      {renameError ? <FailureNotice message="Couldn't rename the chat." detail={renameError} /> : null}
       <h2 className="mt-1 px-1.5 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-faint">Chats</h2>
       {state.kind === 'loading' ? (
         <div className="flex flex-col gap-2">
@@ -229,7 +261,7 @@ function ThreadList({
           No chats yet.
         </p>
       ) : (
-        <ul className="-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1">
+        <ul ref={list} className="-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1">
           {rows.map((thread) => {
             if (thread.thread_id === pending?.threadId) {
               return (
@@ -251,37 +283,94 @@ function ThreadList({
               )
             }
             const active = thread.thread_id === activeThreadId
-            const name = active ? activeName : threadDisplayName(thread, null)
+            const pendingTitle = renamed[thread.thread_id]
+            const name = pendingTitle !== undefined && thread.title !== pendingTitle
+              ? pendingTitle
+              : active ? activeName : threadDisplayName(thread, null)
+            if (editing === thread.thread_id) {
+              return (
+                <li key={thread.thread_id}>
+                  <TitleEditor initial={name} onDone={(next) => finishRename(thread.thread_id, name, next)} />
+                </li>
+              )
+            }
             return (
               <li key={thread.thread_id} className="group relative">
                 <Link
                   to={`/chat/${thread.thread_id}`}
+                  data-thread-id={thread.thread_id}
                   aria-current={active ? 'page' : undefined}
-                  className={`block rounded-md py-2 pl-2.5 pr-8 text-sm transition-colors ${active ? 'bg-accent-soft' : 'hover:bg-surface-hover'}`}
+                  className={`block rounded-md py-2 pl-2.5 pr-14 text-sm transition-colors ${active ? 'bg-accent-soft' : 'hover:bg-surface-hover'}`}
                 >
                   <span className={`block truncate font-medium ${active ? 'text-accent' : 'text-fg'}`}>{name}</span>
-                  <span className="mt-0.5 block text-[11px] text-muted">
-                    {new Date(thread.updated_at).toLocaleString()}
-                  </span>
+                  <time
+                    dateTime={thread.updated_at}
+                    title={new Date(thread.updated_at).toLocaleString()}
+                    className="mt-0.5 block text-[11px] text-muted"
+                  >
+                    {formatRelativeTime(thread.updated_at, now)}
+                  </time>
                 </Link>
-                <button
-                  type="button"
-                  aria-label={`Delete ${name}`}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-muted opacity-0 transition hover:text-negative focus-visible:opacity-100 group-hover:opacity-100"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    focusUndo.current = true
-                    startThreadDelete(userId, thread.thread_id, name)
-                    if (active) navigate('/chat')
-                  }}
-                >
-                  <Trash2 aria-hidden="true" className="h-4 w-4" strokeWidth={1.8} />
-                </button>
+                <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100">
+                  <button
+                    type="button"
+                    aria-label={`Rename ${name}`}
+                    className="rounded p-1 text-muted hover:text-fg"
+                    onClick={() => setEditing(thread.thread_id)}
+                  >
+                    <Pencil aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={1.8} />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Delete ${name}`}
+                    className="rounded p-1 text-muted hover:text-negative"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      focusUndo.current = true
+                      startThreadDelete(userId, thread.thread_id, name)
+                      if (active) navigate('/chat')
+                    }}
+                  >
+                    <Trash2 aria-hidden="true" className="h-4 w-4" strokeWidth={1.8} />
+                  </button>
+                </div>
               </li>
             )
           })}
         </ul>
       )}
     </nav>
+  )
+}
+
+// Enter saves, Escape cancels, and leaving the field saves. `settled` stops the
+// blur that follows Enter or Escape from finishing a second time.
+function TitleEditor({ initial, onDone }: { initial: string; onDone: (next: string | null) => void }) {
+  const settled = useRef(false)
+  const finish = (next: string | null) => {
+    if (settled.current) return
+    settled.current = true
+    onDone(next)
+  }
+  return (
+    <input
+      aria-label="Chat name"
+      defaultValue={initial}
+      maxLength={200}
+      autoFocus
+      onFocus={(event) => event.currentTarget.select()}
+      onKeyDown={(event) => {
+        if (event.nativeEvent.isComposing) return
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          finish(event.currentTarget.value)
+        } else if (event.key === 'Escape') {
+          event.preventDefault()
+          finish(null)
+        }
+      }}
+      onBlur={(event) => finish(event.currentTarget.value)}
+      className="block w-full rounded-md border border-accent bg-surface px-2.5 py-2 text-sm text-fg outline-none"
+    />
   )
 }
