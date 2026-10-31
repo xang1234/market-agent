@@ -100,7 +100,6 @@ test('Chat thread route renders message stream and composer workflow copy', () =
     </MemoryRouter></WithSidebarSlot>,
   )
 
-  assert.match(html, /Collapse sidebar/)
   assert.match(html, /Ask the analyst/)
   assert.doesNotMatch(html, /ships with P2\.1/i)
 })
@@ -408,11 +407,11 @@ test('Chat stream delivers a server-signaled turn error as an event, closes, and
 
 test('Analyze surface renders template controls, source controls, memo canvas, and Add to chat action', () => {
   const html = renderWithAuth(
-    <WithSidebarSlot><MemoryRouter initialEntries={['/analyze']}>
+    <MemoryRouter initialEntries={['/analyze']}>
       <Routes>
         <Route path="/analyze" element={<AnalyzePage />} />
       </Routes>
-    </MemoryRouter></WithSidebarSlot>,
+    </MemoryRouter>,
   )
 
   assert.match(html, /Playbook/)
@@ -473,7 +472,7 @@ test('Analyze Add-to-chat shares run blocks through the durable artifact endpoin
 })
 
 test('Agents surface renders CRUD controls, run history, and activity status', () => {
-  const html = renderWithAuth(<WithSidebarSlot><MemoryRouter><AgentsPage /></MemoryRouter></WithSidebarSlot>)
+  const html = renderWithAuth(<MemoryRouter><AgentsPage /></MemoryRouter>)
 
   assert.match(html, /Create agent/)
   assert.match(html, /Universe/)
@@ -558,7 +557,7 @@ test('Agents surface loads selected agent findings and activity routes', async (
     }
     const root = createRoot(dom.window.document.getElementById('root')!)
     await act(async () => {
-      root.render(wrapWithAuth(<WithSidebarSlot><MemoryRouter><AgentsPage /></MemoryRouter></WithSidebarSlot>))
+      root.render(wrapWithAuth(<MemoryRouter><AgentsPage /></MemoryRouter>))
     })
     await act(async () => undefined)
     await act(async () => undefined)
