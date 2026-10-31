@@ -10,6 +10,7 @@ import {
   type ResolvedSubject,
   type RouteResolvedSubject,
 } from './quote.ts'
+import { isCanonicalResolvedSubject } from './search.ts'
 import type { VisibleFetchState } from '../fetch/resource.ts'
 import { ChangePill } from './ChangePill.tsx'
 import { RefreshFailedNote } from './FetchStateView.tsx'
@@ -27,11 +28,17 @@ export function QuoteSnapshot({ subject, title, quoteState }: QuoteSnapshotProps
   const issuerProfile = issuerProfileFromSubject(subject)
   // The ticker and venue sit beside the heading, so it names the company alone.
   const heading = issuerProfile?.legal_name ?? title
+  const pendingListing = isCanonicalResolvedSubject(subject) ? subject.context?.listing : undefined
 
   if (quoteState.status !== 'ready') {
     return (
       <section className="min-w-0">
-        <SnapshotTitle title={heading} />
+        <div className="flex flex-wrap items-center gap-2">
+          <SnapshotTitle title={heading} />
+          {pendingListing ? (
+            <ListingChips ticker={pendingListing.ticker} mic={pendingListing.mic} currency={pendingListing.trading_currency} />
+          ) : null}
+        </div>
         <div className="mt-3">
           {quoteState.status === 'loading' ? (
             <Skeleton label="Loading quote" className="h-9 w-48" />
@@ -53,12 +60,7 @@ export function QuoteSnapshot({ subject, title, quoteState }: QuoteSnapshotProps
     <section className="min-w-0">
       <div className="flex flex-wrap items-center gap-2">
         <SnapshotTitle title={heading} />
-        <span className="rounded border border-line px-2 py-0.5 text-xs font-medium text-muted">
-          {quote.listing.ticker}
-        </span>
-        <span className="text-xs text-muted">
-          {quote.listing.mic} · {quote.currency}
-        </span>
+        <ListingChips ticker={quote.listing.ticker} mic={quote.listing.mic} currency={quote.currency} />
       </div>
       <div className="mt-3 flex flex-wrap items-end gap-x-4 gap-y-2">
         <div className="num text-3xl font-semibold text-fg">
@@ -79,6 +81,17 @@ export function QuoteSnapshot({ subject, title, quoteState }: QuoteSnapshotProps
       {quoteState.refreshError !== null && <RefreshFailedNote noun="quote" error={quoteState.refreshError} />}
       <IssuerProfileLine profile={issuerProfile} />
     </section>
+  )
+}
+
+function ListingChips({ ticker, mic, currency }: { ticker: string; mic: string; currency: string }) {
+  return (
+    <>
+      <span className="rounded border border-line px-2 py-0.5 text-xs font-medium text-muted">{ticker}</span>
+      <span className="text-xs text-muted">
+        {mic} · {currency}
+      </span>
+    </>
   )
 }
 
