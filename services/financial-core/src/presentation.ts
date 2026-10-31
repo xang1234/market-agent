@@ -123,8 +123,8 @@ export function presentFinancialUnit(input: {
   periods: ReadonlyMap<LocalId, BoundPeriod>;
 }): FinancialAnswerContent {
   const { plan } = input;
-  const readsOf = periodReader(plan, input.periods);
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
+  const readsOf = periodReader(plan, nodes, input.periods);
   const byOutput = new Map(input.results.map((result) => [result.output_id, result]));
   const labels = new LabelTable();
   for (const member of plan.subjects.members) {
@@ -573,8 +573,7 @@ type ReadsOf = (node: OperationNode) => ReadonlyArray<PeriodRead>;
 // A read names the period its values were bound to, by fiscal name and end date, whichever selector asked for it:
 // "latest fiscal year" and "FY2025" both name a period that two calendars end months apart. A read has none for
 // a gap, a share price, or values bound to different periods. Each node's reads are found once.
-function periodReader(plan: FinancialPlanV1, periods: ReadonlyMap<LocalId, BoundPeriod>): ReadsOf {
-  const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
+function periodReader(plan: FinancialPlanV1, nodes: ReadonlyMap<LocalId, OperationNode>, periods: ReadonlyMap<LocalId, BoundPeriod>): ReadsOf {
   const reads = new Map<LocalId, ReadonlyArray<PeriodRead>>();
   const readsOf = (node: OperationNode): ReadonlyArray<PeriodRead> => {
     const leaves = [...dependencyClosure(plan, [node.node_id])].flatMap((id) => {
