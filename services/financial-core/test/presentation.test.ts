@@ -205,6 +205,39 @@ test("a threshold on an approved ratio reads as a multiple, like the ratio's val
   assert.equal(resultText(content, "o_lta_check"), "Alpha Corp — Total liabilities / total assets (period-end balance sheet), end of FY2023, above 0.50x: yes");
 });
 
+test("a change in a multiple, and a threshold on it, read as a multiple (#544)", () => {
+  const leverage = (year: number) => [
+    balance(`tl${year}`, "total_liabilities", year),
+    balance(`eq${year}`, "total_equity", year),
+    { node_id: `lte${year}`, operation: "ratio" as const, operation_version: "ratio.v1", ratio_key: "liabilities_to_equity", numerator: `tl${year}`, denominator: `eq${year}` },
+  ];
+  const plan = singleSubjectPlan(
+    [
+      ...leverage(2023),
+      ...leverage(2022),
+      change("lte_change", "absolute_change", "lte2023", "lte2022"),
+      { node_id: "lte_check", operation: "threshold", operation_version: "threshold.v1", subject: "lte_change", threshold_id: "max_rise", comparison: "lt" },
+    ],
+    ["lte_change", "lte_check"],
+    [{ threshold_id: "max_rise", value: "0.25", unit: { kind: "ratio" }, attribution: { kind: "user_request", ref: "chat:turn:1" } }],
+  );
+  // Liabilities / equity: 80 / 50 = 1.60x at the end of FY2022, 60 / 50 = 1.20x at the end of FY2023.
+  const BALANCES: Record<string, string> = { tl2022: "80", eq2022: "50", tl2023: "60", eq2023: "50" };
+  const evaluation = evaluatePlan(plan, (node) => {
+    const input = operand(node.node_id, { metric: node.metric_key, value: BALANCES[node.node_id]!, kind: "instant", end: `${node.node_id.slice(2)}-12-31` });
+    return { ok: true, operand: input, payload: valueOf(BALANCES[node.node_id]!, input.measurement.unit) as ValuePayload };
+  });
+  const results = evaluation.outputs.map(({ output_id, node_id, state }) => {
+    assert.ok(state.status === "computed", state.status === "gap" ? state.reason_code : state.status);
+    return committed(output_id, node_id, state.payload);
+  });
+  const content = present(plan, results, { a: "Alpha Corp" });
+  assert.deepEqual(
+    [resultText(content, "o_lte_change"), resultText(content, "o_lte_check")],
+    ["-0.40x", "Alpha Corp — Year-over-year change in Total liabilities / stockholders' equity (period-end balance sheet), end of FY2023 vs end of FY2022, below 0.25x: yes"],
+  );
+});
+
 test("a change between two balances names the end of each period", () => {
   const plan = singleSubjectPlan(
     [
