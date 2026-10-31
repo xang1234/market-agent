@@ -60,8 +60,8 @@ export function GridsPage(): ReactElement {
   if (!userId) return <div className="p-4 text-sm text-muted">Sign in to build research grids.</div>;
 
   return (
-    <div className="space-y-4 p-4">
-      <h1 className="text-lg font-semibold">Analyst Grid</h1>
+    <div className="space-y-4 p-6">
+      <h1 className="text-2xl font-semibold">Analyst Grid</h1>
       <GridBuilder
         columns={columns}
         universeOptions={universeOptions}
