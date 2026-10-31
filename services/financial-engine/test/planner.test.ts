@@ -393,6 +393,12 @@ test("the model is never offered a lead or a window, and a draft that plans one 
   }
 });
 
+test("the model is told a change in a margin or a percent change, and a threshold on it, is in percentage points (#539)", async () => {
+  const model = scripted(revenueProposal([0]));
+  await planFinancialRequest(context({ requested_subjects: [resolved(0)] }), "Did Apple's gross margin fall by more than 2 points in FY2023?", model);
+  assert.match(model.calls[0]![0]!, /^An absolute_change of a margin or of a percent_change_positive_base is in percentage points, and so is a threshold on it, with unit \{"kind":"percentage_points"\}\.$/mu);
+});
+
 test("a market cap or P/E answer always publishes the price and the count or EPS it reads, before the result (#444)", async () => {
   const draft = valuationDraft();
   const model = scripted({ outcome: "ready", ...draft, outputs: [{ output_id: "out_cap", node_id: "cap" }] });
