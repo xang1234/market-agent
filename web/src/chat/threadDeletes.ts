@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 
 import { announce } from '../ui/announcer.ts'
+import { writeDraft } from './composerDrafts.ts'
 import { authenticatedFetch } from '../http/authFetch.ts'
 import { deleteThread, type ChatThread } from './threadActions.ts'
 
@@ -87,6 +88,7 @@ export function beginThreadListRead(): () => void {
 
 function commit(pending: PendingDelete): void {
   clearTimeout(pending.timer)
+  writeDraft(`${pending.userId}:${pending.threadId}`, '')
   const sentIn = generation
   publish({ ...state, pending: null, sent: new Set(state.sent).add(pending.threadId) })
   const settle = () => {
