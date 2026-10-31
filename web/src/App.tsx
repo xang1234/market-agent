@@ -13,24 +13,23 @@ import type { RouteHandle } from './shell/routeHandle'
 import { ThemeProvider } from './shell/ThemeProvider'
 import { Announcer } from './ui/Announcer.tsx'
 import { WorkspaceShell } from './shell/WorkspaceShell'
-import { HomePage } from './pages/HomePage'
-import { AgentsPage } from './pages/AgentsPage'
-import { ChatLayout } from './pages/ChatPage'
-import { ScreenerPage } from './pages/ScreenerPage'
-import { AnalyzePage } from './pages/AnalyzePage'
-import { GridsPage } from './analyst-grids/GridsPage.tsx'
-import { CampaignList } from './discovery/CampaignList.tsx'
-import { CampaignPage } from './discovery/CampaignPage.tsx'
-import { ReviewPage } from './pages/ReviewPage'
-import { SettingsPage } from './pages/SettingsPage'
-import { SubjectDetailShell } from './shell/SubjectDetailShell'
-import {
-  EarningsSection,
-  FinancialsSection,
-  HoldersSection,
-  OverviewSection,
-  SignalsSection,
-} from './pages/symbol/sections'
+import { lazyRoute } from './shell/lazyRoute'
+
+// Each workspace is its own chunk, so first paint loads the shell and one page.
+// The router fetches every matched route's chunk in parallel before it renders,
+// and keeps the current page on screen while the next one downloads.
+const home = lazyRoute(() => import('./pages/HomePage'), 'HomePage')
+const agents = lazyRoute(() => import('./pages/AgentsPage'), 'AgentsPage')
+const chat = lazyRoute(() => import('./pages/ChatPage'), 'ChatLayout')
+const screener = lazyRoute(() => import('./pages/ScreenerPage'), 'ScreenerPage')
+const analyze = lazyRoute(() => import('./pages/AnalyzePage'), 'AnalyzePage')
+const grids = lazyRoute(() => import('./analyst-grids/GridsPage.tsx'), 'GridsPage')
+const campaignList = lazyRoute(() => import('./discovery/CampaignList.tsx'), 'CampaignList')
+const campaign = lazyRoute(() => import('./discovery/CampaignPage.tsx'), 'CampaignPage')
+const review = lazyRoute(() => import('./pages/ReviewPage'), 'ReviewPage')
+const settings = lazyRoute(() => import('./pages/SettingsPage'), 'SettingsPage')
+const subject = lazyRoute(() => import('./shell/SubjectDetailShell'), 'SubjectDetailShell')
+const sections = () => import('./pages/symbol/sections')
 
 // Route scope handles. Declarative metadata (bead fra-6al.2.3) consumed by
 // RouteScopeGate in WorkspaceShell — no per-route guard wrappers needed.
@@ -60,32 +59,39 @@ const router = createBrowserRouter(
   createRoutesFromElements(
     <Route element={<WorkspaceShell />}>
       <Route index element={<Navigate to={landing} replace />} />
-      <Route path="home" handle={publicHandle} element={<HomePage />} />
-      <Route path="agents" handle={protAgents} element={<AgentsPage />} />
-      <Route path="review" handle={protReview} element={<ReviewPage />} />
-      <Route path="settings" handle={protSettings} element={<SettingsPage />} />
-      <Route path="chat" handle={protChat} element={<ChatLayout />}>
+      <Route path="home" handle={publicHandle} lazy={home} />
+      <Route path="agents" handle={protAgents} lazy={agents} />
+      <Route path="review" handle={protReview} lazy={review} />
+      <Route path="settings" handle={protSettings} lazy={settings} />
+      <Route path="chat" handle={protChat} lazy={chat}>
         <Route path=":threadId" element={null} />
       </Route>
-      <Route path="screener" handle={publicHandle} element={<ScreenerPage />} />
-      <Route path="analyze" handle={publicHandle} element={<AnalyzePage />} />
-      <Route path="analyst-grids" handle={publicHandle} element={<GridsPage />} />
-      <Route path="discovery" handle={protDiscovery} element={<CampaignList />} />
-      <Route path="discovery/:campaignId" handle={protDiscovery} element={<CampaignPage />} />
-      <Route path="discovery/:campaignId/runs/:runId" handle={protDiscovery} element={<CampaignPage />} />
-      <Route path="symbol/:subjectRef" handle={publicHandle} element={<SubjectDetailShell />}>
+      <Route path="screener" handle={publicHandle} lazy={screener} />
+      <Route path="analyze" handle={publicHandle} lazy={analyze} />
+      <Route path="analyst-grids" handle={publicHandle} lazy={grids} />
+      <Route path="discovery" handle={protDiscovery} lazy={campaignList} />
+      <Route path="discovery/:campaignId" handle={protDiscovery} lazy={campaign} />
+      <Route path="discovery/:campaignId/runs/:runId" handle={protDiscovery} lazy={campaign} />
+      <Route path="symbol/:subjectRef" handle={publicHandle} lazy={subject}>
         <Route index element={<Navigate to="overview" replace />} />
-        <Route path="overview" element={<OverviewSection />} />
-        <Route path="financials" element={<FinancialsSection />} />
-        <Route path="earnings" element={<EarningsSection />} />
-        <Route path="holders" element={<HoldersSection />} />
-        <Route path="signals" element={<SignalsSection />} />
+        <Route path="overview" lazy={lazyRoute(sections, 'OverviewSection')} />
+        <Route path="financials" lazy={lazyRoute(sections, 'FinancialsSection')} />
+        <Route path="earnings" lazy={lazyRoute(sections, 'EarningsSection')} />
+        <Route path="holders" lazy={lazyRoute(sections, 'HoldersSection')} />
+        <Route path="signals" lazy={lazyRoute(sections, 'SignalsSection')} />
       </Route>
       <Route path="*" element={<Navigate to={landing} replace />} />
     </Route>,
   ),
   { basename: import.meta.env.BASE_URL },
 )
+
+// A tab left open across a deploy asks for page chunks the new build deleted.
+// Loading the destination fresh fetches the new build and keeps the user's click.
+window.addEventListener('vite:preloadError', () => {
+  const pending = router.state.navigation.location
+  window.location.assign(pending ? router.createHref(pending) : window.location.href)
+})
 
 // Module scope: stable registry identity across <App /> re-renders.
 const blockRegistry = createDefaultBlockRegistry()
