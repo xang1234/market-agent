@@ -840,7 +840,7 @@ paths:
                 snapshot_id:
                   type: string
                   format: uuid
-                  description: Optional client-generated snapshot id for the sealed user-input snapshot.
+                  description: Optional client-generated id for the message's new user-input snapshot. An id that already names a snapshot returns 409.
                 content:
                   type: string
                 attachments:
@@ -864,6 +864,8 @@ paths:
           description: Missing or malformed user credential
         '404':
           description: Thread not found for the calling user
+        '409':
+          description: The message_id was saved with a different payload, or the snapshot_id already names a snapshot
   /v1/chat/threads/{threadId}/stream:
     get:
       tags: [Chat]
