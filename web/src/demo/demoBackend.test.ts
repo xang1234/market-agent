@@ -7,7 +7,8 @@ import { extractInspectableRefs, type InspectableBlockRef } from '../evidence/in
 import { fetchEvidenceInspection } from '../evidence/inspectionClient.ts'
 import { HttpJsonError } from '../http/authFetch.ts'
 import { createReplay, parseReplayFixture } from '../../../services/app/src/replayCore.ts'
-import { eventDelays, installDemoBackend, parseSse, tabStore } from './demoBackend.ts'
+import { persistUserChatTurn } from '../chat/persistUserChatTurn.ts'
+import { DEMO_QUESTIONS, eventDelays, installDemoBackend, parseSse, tabStore } from './demoBackend.ts'
 
 test('parseSse reads events the way a browser does', () => {
   assert.deepEqual(parseSse('id: 1\nevent: a\ndata: {"x":1}\n\n: comment\ndata: one\ndata:two\n\nevent: unfinished'), [
@@ -88,6 +89,21 @@ test('the demo answers a recorded /v1 request in the page', async () => {
   const response = await fetch('http://demo.invalid/v1/chat/threads')
   assert.equal(response.status, 200)
   assert.deepEqual(await response.json(), { threads: [] })
+})
+
+test('the demo answers each recorded question as the chat client posts it', async () => {
+  const demoFetch = globalThis.fetch
+  globalThis.fetch = (input, init) => demoFetch(new URL(String(input), 'http://demo.invalid'), init)
+  try {
+    const thread = fixture.exchanges.find((e) => e.method === 'GET' && e.path.endsWith('/messages'))!.path.split('/').at(-2)!
+    for (const content of DEMO_QUESTIONS) {
+      const messageId = crypto.randomUUID()
+      const message = await persistUserChatTurn({ threadId: thread, userId: '00000000-0000-4000-8000-000000000001', messageId, content })
+      assert.deepEqual([message.message_id, message.thread_id, message.role], [messageId, thread, 'user'])
+    }
+  } finally {
+    globalThis.fetch = demoFetch
+  }
 })
 
 type RecordedMessage = { blocks: Record<string, unknown>[] }

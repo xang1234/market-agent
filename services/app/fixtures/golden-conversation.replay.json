@@ -41,7 +41,7 @@
       "method": "POST",
       "path": "/v1/chat/threads/02dfcc8a-16ed-4c38-8d47-4239dcd0ca19/messages",
       "query": "",
-      "requestBody": "{\"message_id\":\"c9e261bf-b28d-4a23-9229-48023741f838\",\"snapshot_id\":\"bfd1de36-3759-4c92-9615-23fd4537544d\",\"content\":\"Analyze NVDA\"}",
+      "requestBody": "{\"message_id\":\"c9e261bf-b28d-4a23-9229-48023741f838\",\"content\":\"Analyze NVDA\"}",
       "status": 201,
       "contentType": "application/json",
       "body": "{\"message\":{\"message_id\":\"c9e261bf-b28d-4a23-9229-48023741f838\",\"thread_id\":\"02dfcc8a-16ed-4c38-8d47-4239dcd0ca19\",\"role\":\"user\",\"snapshot_id\":\"bfd1de36-3759-4c92-9615-23fd4537544d\",\"blocks\":[{\"id\":\"c9e261bf-b28d-4a23-9229-48023741f838\",\"kind\":\"rich_text\",\"as_of\":\"2026-10-23T12:10:21.908Z\",\"data_ref\":{\"id\":\"c9e261bf-b28d-4a23-9229-48023741f838\",\"kind\":\"chat_turn\"},\"segments\":[{\"text\":\"Analyze NVDA\",\"type\":\"text\"}],\"snapshot_id\":\"bfd1de36-3759-4c92-9615-23fd4537544d\",\"source_refs\":[]}],\"content_hash\":\"sha256:2ae2c57524e5a821d30e6912ea75c92bf749a0f200627b8bb571dac44473cdd3\",\"created_at\":\"2026-10-23 12:10:21.908065+00\"}}"
@@ -131,7 +131,7 @@
       "method": "POST",
       "path": "/v1/chat/threads/02dfcc8a-16ed-4c38-8d47-4239dcd0ca19/messages",
       "query": "",
-      "requestBody": "{\"message_id\":\"3d4d3b98-5ec0-4d47-8c01-6d112e3a9f7b\",\"snapshot_id\":\"3abc0576-3d7c-4264-83c7-9a564c1c9381\",\"content\":\"Compare it with AMD YTD\"}",
+      "requestBody": "{\"message_id\":\"3d4d3b98-5ec0-4d47-8c01-6d112e3a9f7b\",\"content\":\"Compare it with AMD YTD\"}",
       "status": 201,
       "contentType": "application/json",
       "body": "{\"message\":{\"message_id\":\"3d4d3b98-5ec0-4d47-8c01-6d112e3a9f7b\",\"thread_id\":\"02dfcc8a-16ed-4c38-8d47-4239dcd0ca19\",\"role\":\"user\",\"snapshot_id\":\"3abc0576-3d7c-4264-83c7-9a564c1c9381\",\"blocks\":[{\"id\":\"3d4d3b98-5ec0-4d47-8c01-6d112e3a9f7b\",\"kind\":\"rich_text\",\"as_of\":\"2026-10-23T12:10:23.000Z\",\"data_ref\":{\"id\":\"3d4d3b98-5ec0-4d47-8c01-6d112e3a9f7b\",\"kind\":\"chat_turn\"},\"segments\":[{\"text\":\"Compare it with AMD YTD\",\"type\":\"text\"}],\"snapshot_id\":\"3abc0576-3d7c-4264-83c7-9a564c1c9381\",\"source_refs\":[]}],\"content_hash\":\"sha256:36dc2b7ef95f9ef4926eadb5d7c4a9a37dcb02946977a7bc1c6d523523eda507\",\"created_at\":\"2026-10-23 12:10:22.999624+00\"}}"
@@ -212,7 +212,7 @@
       "method": "POST",
       "path": "/v1/chat/threads/02dfcc8a-16ed-4c38-8d47-4239dcd0ca19/messages",
       "query": "",
-      "requestBody": "{\"message_id\":\"fcee0791-1971-4e5f-af1f-a42983b3b293\",\"snapshot_id\":\"15b11471-4f19-426f-b4fc-49e647c105a4\",\"content\":\"Explain the differences and show the evidence\"}",
+      "requestBody": "{\"message_id\":\"fcee0791-1971-4e5f-af1f-a42983b3b293\",\"content\":\"Explain the differences and show the evidence\"}",
       "status": 201,
       "contentType": "application/json",
       "body": "{\"message\":{\"message_id\":\"fcee0791-1971-4e5f-af1f-a42983b3b293\",\"thread_id\":\"02dfcc8a-16ed-4c38-8d47-4239dcd0ca19\",\"role\":\"user\",\"snapshot_id\":\"15b11471-4f19-426f-b4fc-49e647c105a4\",\"blocks\":[{\"id\":\"fcee0791-1971-4e5f-af1f-a42983b3b293\",\"kind\":\"rich_text\",\"as_of\":\"2026-10-23T12:10:24.464Z\",\"data_ref\":{\"id\":\"fcee0791-1971-4e5f-af1f-a42983b3b293\",\"kind\":\"chat_turn\"},\"segments\":[{\"text\":\"Explain the differences and show the evidence\",\"type\":\"text\"}],\"snapshot_id\":\"15b11471-4f19-426f-b4fc-49e647c105a4\",\"source_refs\":[]}],\"content_hash\":\"sha256:a2479402b2b1ddabfebc45383680aeb0603a2945db083cd06b102fc762c6fec4\",\"created_at\":\"2026-10-23 12:10:24.46435+00\"}}"

@@ -5,7 +5,6 @@ export async function persistUserChatTurn(input: {
   threadId: string
   userId: string
   messageId: string
-  snapshotId: string
   content: string
 }): Promise<ChatMessage> {
   const body = await authenticatedJson<{ message?: ChatMessage }>(`/v1/chat/threads/${encodeURIComponent(input.threadId)}/messages`, {
@@ -16,7 +15,6 @@ export async function persistUserChatTurn(input: {
     },
     body: JSON.stringify({
       message_id: input.messageId,
-      snapshot_id: input.snapshotId,
       content: input.content,
     }),
   })

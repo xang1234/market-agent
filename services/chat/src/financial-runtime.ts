@@ -173,9 +173,10 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     // holds it by now, so the turn's companies are not picked again. Before
     // the answer is saved the thread is as the first attempt found it. A gap
     // the turn declined with is returned as saved, with nothing planned again.
+    // Another thread's message under the id is no outcome of this turn.
     const { rows: [existing] } = await deps.pool.query<{ kind: string | null }>(
-      `select blocks->0->>'kind' as kind from chat_messages where message_id = $1::uuid`,
-      [messageId],
+      `select blocks->0->>'kind' as kind from chat_messages where message_id = $1::uuid and thread_id = $2::uuid and role = 'assistant'`,
+      [messageId, context.threadId],
     );
     const run = (requested: TurnCompanies, reading: ScopeProposal | null, scope: ResearchScope | null, choice: PlanChoice) => async (): Promise<ChatFinancialTurn> => {
       // What planning settled, for a gap: the companies it was asked about, a
@@ -725,13 +726,16 @@ function persistAssistantMessage(
       ...(shownPeriod === null ? {} : { latest_period: shownPeriod }),
       ...(reading === null ? { coverage_unchecked: true as const } : {}),
     };
-    // It replaces a gap another attempt of the turn saved under its id.
+    // It replaces a gap another attempt of the turn saved under its id. A
+    // client may post a user message under that id, in any thread.
     const inserted = await tx.client.query(
       `insert into chat_messages (message_id, thread_id, role, snapshot_id, blocks, content_hash, research_scope)
        select $1::uuid, t.thread_id, 'assistant'::chat_role, $3::uuid, $4::jsonb, $5, $7::jsonb
          from chat_threads t where t.thread_id = $2::uuid and t.user_id = $6::uuid
        on conflict (message_id) do update
          set snapshot_id = excluded.snapshot_id, blocks = excluded.blocks, content_hash = excluded.content_hash, research_scope = excluded.research_scope
+        where chat_messages.thread_id = excluded.thread_id
+          and chat_messages.role = 'assistant'
        returning message_id`,
       [
         messageId,
@@ -743,7 +747,7 @@ function persistAssistantMessage(
         saved === null ? null : JSON.stringify(saved),
       ],
     );
-    if (inserted.rows.length === 0) throw new ParentRefusedError("the chat thread no longer belongs to the run's owner");
+    if (inserted.rows.length === 0) throw new ParentRefusedError("the chat thread no longer belongs to the run's owner, or another message holds the answer's id");
     // As any saved message does, so the thread never points at a replaced gap's snapshot.
     await tx.client.query(`update chat_threads set latest_snapshot_id = $2::uuid, updated_at = now() where thread_id = $1::uuid`, [threadId, publication.snapshot_id]);
   };

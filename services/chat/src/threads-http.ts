@@ -119,7 +119,6 @@ export async function tryHandleThreadsRequest(
             user_id: userId,
             content: input.value.content,
             message_id: input.value.message_id,
-            snapshot_id: input.value.snapshot_id,
           });
         } catch (error) {
           if (error instanceof ChatMessageIdempotencyConflictError) {
@@ -309,7 +308,7 @@ function parseCreateInput(body: unknown): CreateThreadInput {
 }
 
 type UserMessageInputParseResult =
-  | { kind: "ok"; value: { content: string; message_id?: string; snapshot_id?: string } }
+  | { kind: "ok"; value: { content: string; message_id?: string } }
   | { kind: "error"; message: string };
 
 function parseUserMessageInput(body: object): UserMessageInputParseResult {
@@ -318,16 +317,7 @@ function parseUserMessageInput(body: object): UserMessageInputParseResult {
   if (content.length === 0) return { kind: "error", message: "'content' is required" };
   const messageId = parseOptionalUuid(candidate.message_id);
   if (messageId.kind === "error") return { kind: "error", message: "'message_id' must be a UUID" };
-  const snapshotId = parseOptionalUuid(candidate.snapshot_id);
-  if (snapshotId.kind === "error") return { kind: "error", message: "'snapshot_id' must be a UUID" };
-  return {
-    kind: "ok",
-    value: {
-      content,
-      message_id: messageId.value,
-      snapshot_id: snapshotId.value,
-    },
-  };
+  return { kind: "ok", value: { content, message_id: messageId.value } };
 }
 
 function parseOptionalUuid(value: unknown): { kind: "ok"; value?: string } | { kind: "error" } {

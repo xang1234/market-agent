@@ -22,7 +22,7 @@ export type ChatMessagePersistenceDb = {
 };
 
 export class ChatMessageIdempotencyConflictError extends Error {
-  constructor(message = "chat message idempotency key conflicts with a different payload") {
+  constructor(message = "message_id is already in use") {
     super(message);
     this.name = "ChatMessageIdempotencyConflictError";
   }
@@ -134,7 +134,6 @@ export type PersistUserChatMessageInput = {
   user_id: string;
   content: string;
   message_id?: string;
-  snapshot_id?: string;
 };
 
 export type ChatMessagePersistenceFactoryInput = {
@@ -452,7 +451,9 @@ export async function persistUserChatMessage(
   let completed = false;
   let releaseError: Error | undefined;
   const messageId = input.message_id ?? randomUUID();
-  const snapshotId = input.snapshot_id ?? randomUUID();
+  // Never the client's: an id it picks could name another user's snapshot,
+  // or one an answer will seal under.
+  const snapshotId = randomUUID();
   const asOf = new Date().toISOString();
   const blocks = [
     {
@@ -521,8 +522,7 @@ export async function persistUserChatMessage(
          '{}'::jsonb,
          'chat-user-message',
          null
-       )
-       on conflict (snapshot_id) do nothing`,
+       )`,
       [snapshotId, asOf],
     );
 
@@ -530,12 +530,7 @@ export async function persistUserChatMessage(
       `insert into chat_messages
          (message_id, thread_id, role, snapshot_id, blocks, content_hash)
        values ($1::uuid, $2::uuid, 'user'::chat_role, $3::uuid, $4::jsonb, $5)
-       on conflict (message_id) do update
-         set content_hash = chat_messages.content_hash
-        where chat_messages.thread_id = excluded.thread_id
-          and chat_messages.snapshot_id = excluded.snapshot_id
-          and chat_messages.content_hash = excluded.content_hash
-          and chat_messages.blocks = excluded.blocks
+       on conflict (message_id) do nothing
        returning
          message_id::text as message_id,
          thread_id::text as thread_id,
