@@ -12,6 +12,7 @@ function readCollapsed(): boolean {
 }
 
 export function SidebarSlotProvider({ children }: { children: ReactNode }) {
+  const [claimed, setClaimed] = useState(false)
   const [node, setNode] = useState<HTMLElement | null>(null)
   const [collapsed, setCollapsed] = useState(readCollapsed)
   useEffect(() => {
@@ -21,6 +22,6 @@ export function SidebarSlotProvider({ children }: { children: ReactNode }) {
       // Unstorable: the choice lasts until reload.
     }
   }, [collapsed])
-  const value = useMemo<SidebarSlot>(() => ({ node, setNode, collapsed, setCollapsed }), [node, collapsed])
+  const value = useMemo<SidebarSlot>(() => ({ claimed, setClaimed, node, setNode, collapsed, setCollapsed }), [claimed, node, collapsed])
   return <SidebarSlotContext.Provider value={value}>{children}</SidebarSlotContext.Provider>
 }

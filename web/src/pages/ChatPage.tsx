@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom'
-import { useCallback, useContext, useEffect, useRef } from 'react'
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef } from 'react'
 import { Link, useMatch, useNavigate } from 'react-router-dom'
 import { Trash2 } from 'lucide-react'
 
@@ -47,6 +47,12 @@ export function ChatLayout() {
     refresh: threads.refresh,
   })
   const sidebar = useSidebarSlot()
+  const { setClaimed } = sidebar
+  // Before paint, so the watchlist never flashes in the slot on the way in.
+  useLayoutEffect(() => {
+    setClaimed(true)
+    return () => setClaimed(false)
+  }, [setClaimed])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-auto">
