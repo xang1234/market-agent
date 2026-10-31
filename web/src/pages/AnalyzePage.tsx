@@ -401,14 +401,14 @@ function AnalyzeWorkspace({ subject, subjectName }: { subject: ResolvedSubject |
         </fieldset>
       </div>
       <div className="flex min-h-[420px] flex-col rounded-md border border-line bg-surface p-5">
-        <div className="flex items-center justify-between gap-3">
-          <div>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
             <h2 className="text-lg font-semibold text-fg">Memo canvas</h2>
             <p className="mt-1 flex flex-wrap items-center gap-1 text-sm text-muted">
               {subject ? (subjectName ?? <Skeleton className="h-4 w-24" />) : 'No subject selected'} · {[...sources].join(', ') || 'no sources'}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex shrink-0 flex-wrap gap-2">
             <button
               type="button"
               onClick={() => void generateMemo()}
