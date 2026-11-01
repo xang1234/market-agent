@@ -53,6 +53,17 @@ async function newThread(db: Client, owner: string): Promise<string> {
   return threadId;
 }
 
+/** A snapshot sealed under `parent`, as an answer's cause is. */
+async function childOf(db: Client, parent: string): Promise<string> {
+  const snapshotId = randomUUID();
+  await db.query(
+    `insert into snapshots (snapshot_id, subject_refs, as_of, basis, normalization, allowed_transforms, parent_snapshot)
+     values ($1, '[]'::jsonb, now(), 'unadjusted', 'none', '{}'::jsonb, $2)`,
+    [snapshotId, parent],
+  );
+  return snapshotId;
+}
+
 /** Every stored trace of a run, by table; all zero once it is erased. */
 async function traces(db: Client, run: { runId: string; planId: string; snapshots: ReadonlyArray<string> }) {
   const count = async (sql: string, value: unknown) => Number((await db.query(sql, [value])).rows[0].n);
@@ -110,6 +121,23 @@ test("financial erasure", { skip: !dockerAvailable(), timeout: 300_000 }, async 
     const probe = await reserveRun(db, { authority: chatAuthority(IDS.other, randomUUID()), request_key: randomUUID(), plan });
     assert.deepEqual(probe, { status: "conflict", reason: "request_hash_mismatch", run_id: null });
     assert.equal(await inspectCommittedResult(db, IDS.other, run.resultIds[0]!), null);
+  });
+
+  await t.test("deleting an answer's thread erases the snapshots sealed under the answer", async () => {
+    const threadId = await newThread(db, IDS.owner);
+    const run = await publishedRun(db, publisher!, IDS.owner, threadId);
+    const child = await childOf(db, run.snapshots[0]!);
+
+    await db.query(`delete from chat_threads where thread_id = $1`, [threadId]);
+    assert.deepEqual(await traces(db, { ...run, snapshots: [...run.snapshots, child] }), ERASED);
+  });
+
+  await t.test("deleting an answer's run erases the snapshots sealed under the answer", async () => {
+    const run = await publishedRun(db, publisher!, IDS.owner, await newThread(db, IDS.owner));
+    const child = await childOf(db, run.snapshots[0]!);
+
+    await db.query(`delete from financial_runs where run_id = $1`, [run.runId]);
+    assert.deepEqual(await traces(db, { ...run, snapshots: [...run.snapshots, child] }), ERASED);
   });
 
   // Last: deletes a seeded fact every margin run binds.
