@@ -104,6 +104,9 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     : [{ kind: "screen" as const, id: context.threadId }];
   // An evidence follow-up shows the cause the answer it re-reads quoted (#542).
   const priorCause = scope.route === "evidence_followup" ? await loadPriorCauseClaims(pool(), { threadId: context.threadId }) : [];
+  // One a read left out is no longer citable (superseded, deleted or revoked
+  // since); a read that failed says nothing about it.
+  let withdrawn = false;
   const registryRuntime = createRegistryBackedAnalystToolRuntime({
     executeTool: async ({ toolName, arguments: args }) => {
       const evidence = await loadEvidenceOrEmpty(pool(), {
@@ -115,6 +118,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
         // Ahead of them, the cause the re-read answer quoted.
         first_claim_ids: priorCause,
       });
+      if (!evidence.unavailable) withdrawn = priorCause.some((claimId) => !evidence.claim_refs.includes(claimId));
       return {
         kind: "local_evidence_tool_result",
         status: "ok",
@@ -142,8 +146,6 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     window ? ytdChart(scope, window, requestedListingsOf(covered), result.snapshot_id, asOf) : Promise.resolve([]),
     loadRecentConversation(pool(), { threadId: context.threadId, limit: CONVERSATION_MESSAGES }),
   ]);
-  // A quoted cause the read left out is no longer citable (superseded, deleted or revoked since).
-  const withdrawn = priorCause.some((claimId) => !claims.some((claim) => claim.claim_id === claimId));
   const factBlocks = [
     ...performance,
     ...scopeGapBlocks(scope, { snapshotId: result.snapshot_id, asOf }, await context.reading?.() ?? null),
