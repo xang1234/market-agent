@@ -813,6 +813,47 @@ test("a stored sentence no prompt holds is not asked about, stays unread, and is
   assert.deepEqual((await findRebindCandidates(client)).map((candidate) => [candidate.documentId, candidate.sentences]), [[seeded.documentId, [AMD_YEAR_TO_DATE]]]);
 });
 
+test("a release none of whose stored sentences a prompt holds is not asked about, stays unread, and leaves the drain incomplete", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-rebind-none-located");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedItem202(client, AMD_Q2);
+  await runReleaseExtractionDrain({ db: client, llm: fakeLlm(amdQ2Reply(null)).llm, secClient: fakeSec(AMD_Q2_SUBMISSION) });
+
+  const { llm, listed } = rebindLlm("2025-06-28", () => "quarter");
+  const changed = amdSubmission(["AMD Reports Second Quarter 2025 Financial Results", AMD_GUIDANCE]);
+  const result = await runRebindDrain({ db: client, llm, secClient: fakeSec(changed) });
+  assert.deepEqual(result, { bound: 0, unbound: 0, unparseable: 0, noop: 0, unasked: 1, failed: 0, unlocated: 2 });
+  assert.equal(drainIncomplete(result), true);
+  assert.equal(listed.length, 0, "no model call");
+  assert.deepEqual((await findRebindCandidates(client)).map((candidate) => [candidate.documentId, candidate.sentences]), [[seeded.documentId, [MI308_EXPLANATION, AMD_YEAR_TO_DATE]]]);
+});
+
+test("a release with no sentence located does not count against --limit, so a later release is still read", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-rebind-limit-unlocated");
+  const client = await connectedClient(t, databaseUrl);
+  // Both filed after the quarter the reply names, so whichever comes first by
+  // document id, the other binds to it.
+  await seedItem202(client, { name: "NVIDIA Corp", cik: NVDA_CIK, accession: ACCESSION, filedOn: AMD_Q2.filedOn });
+  await seedItem202(client, AMD_Q2);
+  await runReleaseExtractionDrain({ db: client, llm: fakeLlm(amdQ2Reply(null)).llm, secClient: fakeSec(AMD_Q2_SUBMISSION) });
+  const candidates = await findRebindCandidates(client);
+  assert.equal(candidates.length, 2);
+  const first = candidates[0]!;
+
+  // The first release's exhibit no longer holds its sentences; the second's does.
+  const changed = fakeSec(amdSubmission(["AMD Reports Second Quarter 2025 Financial Results", AMD_GUIDANCE]));
+  const unchanged = fakeSec(AMD_Q2_SUBMISSION);
+  const secClient = {
+    fetchFiling: (input: { accession_number: string }) => (input.accession_number === first.accession ? changed : unchanged).fetchFiling(input as never),
+  } as unknown as ExtractReleaseDeps["secClient"];
+  const { llm, listed } = rebindLlm("2025-06-28", () => "quarter");
+  const result = await runRebindDrain({ db: client, llm, secClient }, { limit: 1 });
+  assert.deepEqual(result, { bound: 1, unbound: 0, unparseable: 0, noop: 0, unasked: 1, failed: 0, unlocated: 2 });
+  assert.equal(drainIncomplete(result), true);
+  assert.deepEqual(listed, [[MI308_EXPLANATION, AMD_YEAR_TO_DATE]]);
+  assert.deepEqual((await findRebindCandidates(client)).map((candidate) => candidate.documentId), [first.documentId]);
+});
+
 test("a rebind of a release with no EX-99 exhibits fails, asks nothing and marks nothing", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
   const { databaseUrl } = await bootstrapDatabase(t, "release-rebind-no-exhibits");
   const client = await connectedClient(t, databaseUrl);
