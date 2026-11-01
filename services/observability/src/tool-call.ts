@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { serializeJsonValue, type JsonValue, type QueryExecutor } from "./types.ts";
+import { serializeJsonValue, type JsonValue, type QueryExecutor, type RowQueryExecutor } from "./types.ts";
 
 export type ToolCallLogStatus = "ok" | "error" | "skipped" | "partial";
 
@@ -46,7 +46,7 @@ export type RunLoggedToolCallInput<
 // (e.g. "ok"/"error") and `error_code` taxonomy. Arguments are stored as
 // a stable digest so logs can be correlated without retaining raw tool args.
 export async function writeToolCallLog(
-  db: QueryExecutor,
+  db: RowQueryExecutor,
   input: ToolCallLogInput,
 ): Promise<ToolCallLogRow> {
   const result_hash =

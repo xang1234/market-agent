@@ -4,7 +4,7 @@ import { factActiveSql, factKnownAtSql } from "./fact-activity.ts";
 import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
 
 import { sourceDisclosure } from "./source-disclosure.ts";
-import type { QueryExecutor } from "./types.ts";
+import type { QueryExecutor, RowQueryExecutor } from "./types.ts";
 
 export type LocalRuntimeEvidenceInput = {
   subject_refs: ReadonlyArray<SnapshotSubjectRef>;
@@ -318,7 +318,7 @@ export type PeriodClaimLookup = {
 // and an unbound claim explains none. A repeat counts once; claims come by
 // their prefix's tier, then newest first.
 export async function loadPeriodClaimEvidence(
-  db: QueryExecutor,
+  db: RowQueryExecutor,
   input: PeriodClaimLookup,
 ): Promise<LocalRuntimeEvidence> {
   const subjectRefs = normalizeSubjectRefs([{ kind: "issuer", id: input.issuer_id }]);

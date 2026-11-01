@@ -43,6 +43,7 @@ import { publishRequest, type RequestGap } from "../../financial-engine/src/requ
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { comparedAdditions, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId, noteBlock } from "./chat-ids.ts";
+import { asksCause, filedCauses, namedFigures, NOT_ASKED, type FiledCause } from "./filed-cause.ts";
 import { allResolved, overviewOmissions, overviewPeers, planCompanyOverview, planMarginTrend, type PeersOf } from "./company-overview.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { companyKey, extractSubjectMentions } from "./subject-extraction.ts";
@@ -691,10 +692,14 @@ function persistAssistantMessage(
     // A plan member the turn gave no label is a peer the overview selected. The
     // saved plan says so, as a retry that resumes the run does not plan again.
     const answeredPeers = plan?.subjects.members.some((member) => !turn.labels.has(member.subject_ref.id.toLowerCase())) ?? false;
-    // The commentary is written from the answer's figures alone, so it gives no cause: an explanation stays uncovered.
     const names = (slot: string) => publication.block.financial.labels[`subject:${slot}`]?.text ?? slot;
+    // The cause each company filed for the figures shown (#542), by the name the answer gives it, a peer's too.
+    const companyNames = new Map(plan?.subjects.members.map((member) => [member.subject_ref.id.toLowerCase(), turn.labels.get(member.subject_ref.id.toLowerCase()) ?? names(member.slot_id)]));
+    const cause = reading === null || plan === null || !asksCause(reading, scope)
+      ? NOT_ASKED
+      : await filedCauses(tx, { threadId, plan, named: namedFigures(reading), names: companyNames, answer: publication });
     const missing = reading === null || plan === null ? [] : [
-      ...uncoveredAsks(answeredPeers ? withoutPeers(reading) : reading, plan, turn.labels, scope),
+      ...uncoveredAsks(answeredPeers ? withoutPeers(reading) : reading, plan, cause, turn.labels, scope),
       ...await overviewOmissions(plan, request.authority, inSavepoints(tx.client, turn.evidence(tx.client)), names),
     ];
     const shownPeriod = plan === null ? null : planPeriod(plan);
@@ -712,6 +717,7 @@ function persistAssistantMessage(
     ].join(" ");
     const blocks = [
       publication.block,
+      ...(cause.asked && cause.block !== null ? [cause.block] : []),
       ...(note === "" ? [] : [noteBlock({ snapshotId: publication.snapshot_id, asOf: publication.block.as_of }, "uncovered", note)]),
     ];
     // The scope names the companies and figures the published plan answered,
@@ -812,7 +818,6 @@ const NEVER_PLANNED: Partial<Readonly<Record<ScopeFacet, string>>> = {
   price_history: "a stock price return over a window other than year to date",
   benchmark: "a comparison with a benchmark index",
   guidance: "company guidance",
-  explains: "the cause of these figures",
 };
 const CATALOG = new Map(PROPOSABLE_METRICS.map((metric) => [metric.metric_key, metric]));
 
@@ -821,13 +826,15 @@ const CATALOG = new Map(PROPOSABLE_METRICS.map((metric) => [metric.metric_key, m
  * that its plan does not compute, so the answer names it instead of leaving it
  * out. Each company is checked on its own figures: what some companies'
  * figures answer is named for the others, by the label `labels` gives each
- * issuer.
+ * issuer. A cause asked for is named for each company the answer quotes none
+ * for, by the name `cause` gives it.
  */
 export function uncoveredAsks(
   reading: ScopeProposal,
   plan: FinancialPlanV1,
+  cause: FiledCause,
   labels: ReadonlyMap<string, string> = new Map(),
-  scope: Pick<ResearchScope, "metrics" | "inherited" | "segments" | "margin_trend" | "price_window" | "benchmark" | "guidance" | "explains"> | null = null,
+  scope: Pick<ResearchScope, "metrics" | "inherited" | "segments" | "margin_trend" | "price_window" | "benchmark" | "guidance"> | null = null,
 ): string[] {
   const { asks: readAsks, offMetrics } = readingAsks(reading);
   const kept: ScopeFacet[] = scope === null ? [] : [
@@ -836,7 +843,6 @@ export function uncoveredAsks(
     ...(scope.price_window ? ["price_window" as const] : []),
     ...(scope.benchmark ? ["benchmark" as const] : []),
     ...(scope.guidance ? ["guidance" as const] : []),
-    ...(scope.explains ? ["explains" as const] : []),
   ];
   const asks = new Set([...readAsks, ...kept]);
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
@@ -851,6 +857,7 @@ export function uncoveredAsks(
     const own = shown.filter(ofCompany);
     const margins = own.filter((node) => node.operation === "gross_margin" || node.operation === "operating_margin" || node.operation === "net_margin");
     return {
+      issuer: member.subject_ref.id.toLowerCase(),
       label: labels.get(member.subject_ref.id.toLowerCase()),
       shown: own,
       reached: reached.filter(ofCompany),
@@ -892,14 +899,16 @@ export function uncoveredAsks(
       : asks.has("margins") ? [{ text: "a margin", missing: (company: Company) => company.marginPeriods === 0 && !marginItems.some((item) => item.missing(company)) }]
       : []),
   ];
+  const lackingIn = (ask: (typeof asked)[number], label = (company: Company) => company.label) => {
+    const lacking = companies.filter(ask.missing);
+    if (lacking.length === 0) return [];
+    const labelled = lacking.flatMap((company) => label(company) ?? []);
+    return [lacking.length < companies.length && labelled.length === lacking.length ? `${ask.text} for ${labelList(labelled)}` : ask.text];
+  };
   return [
-    ...asked.flatMap((ask) => {
-      const lacking = companies.filter(ask.missing);
-      if (lacking.length === 0) return [];
-      const labelled = lacking.flatMap((company) => company.label ?? []);
-      return [lacking.length < companies.length && labelled.length === lacking.length ? `${ask.text} for ${labelList(labelled)}` : ask.text];
-    }),
+    ...asked.flatMap((ask) => lackingIn(ask)),
     ...Object.entries(NEVER_PLANNED).flatMap(([facet, item]) => asks.has(facet as ScopeFacet) ? [item] : []),
+    ...(cause.asked ? lackingIn({ text: "the cause of these figures", missing: (company) => !cause.quoted.has(company.issuer) }, (company) => cause.names.get(company.issuer)) : []),
   ];
 }
 

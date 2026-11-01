@@ -1,13 +1,32 @@
 // The cause a company filed for the figures an engine answer shows (#542):
 // management's own explanations (management.explanation.*, verbatim from its
-// earnings release) bound to the fiscal period of those figures. What a cause
-// would explain comes from the plan and the periods its inputs bound to, never
-// from the question's words or a date window.
+// earnings release) bound to the fiscal period of those figures, quoted in the
+// attribution template beside them and sealed in a snapshot of its own under
+// the answer's. What a cause would explain comes from the plan and the periods
+// its inputs bound to, never from the question's words or a date window.
 
 import { dependencyClosure, type FinancialPlanV1, type LocalId, type OperationNode } from "../../financial-core/src/index.ts";
 import type { ClaimPeriod } from "../../evidence/src/claim-repo.ts";
+import { loadPeriodClaimEvidence, type LocalRuntimeEvidence } from "../../evidence/src/local-runtime-evidence.ts";
+import type { ParentPublication } from "../../financial-engine/src/finalize.ts";
+import type { FencedTx } from "../../financial-engine/src/lease.ts";
+import { readClosureInputs } from "../../financial-engine/src/read-model.ts";
+import { writeToolCallLog } from "../../observability/src/tool-call.ts";
+import { isRecord } from "../../shared/src/http.ts";
+import { buildClaimBackedSealInput } from "../../snapshot/src/seal-input.ts";
+import { sealSnapshotInTransaction, snapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
+import { stableUuid } from "./chat-ids.ts";
+import { createSealer } from "./prose-refs.ts";
+import { attributionSegments } from "./render-assertions.ts";
 import { INCOME_ITEM_FIGURE, SCOPE_METRICS } from "./scope-figures.ts";
-import { readingAsks, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
+import { FISCAL_PERIODS, readingAsks, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
+
+/** Whether a turn asked for a cause and, when it did, whose its answer quotes, by the name it gives each company. */
+export type FiledCause =
+  | Readonly<{ asked: false }>
+  | Readonly<{ asked: true; quoted: ReadonlySet<string>; names: ReadonlyMap<string, string>; block: Readonly<Record<string, unknown>> | null }>;
+
+export const NOT_ASKED: FiledCause = { asked: false };
 
 /** Per company: the figures a filed cause would explain and the one period they end at, or none. */
 export type Explained = Readonly<{ issuer: string } & ({ kind: "none" } | { kind: "figures"; period: ClaimPeriod; metrics: ReadonlyArray<string> })>;
@@ -44,6 +63,7 @@ type Shown =
   | Readonly<{ kind: "ignored" }>
   | Readonly<{ kind: "opaque"; slots: ReadonlySet<LocalId> }>
   | Readonly<{ kind: "figure"; slot: LocalId; figure: string; period: ClaimPeriod }>;
+const IGNORED: Shown = { kind: "ignored" };
 
 /**
  * What a filed cause explains for each company: the figures it shows at the
@@ -63,9 +83,8 @@ export function explainedFigures(input: Readonly<{
   const { plan, periods } = input;
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
   const reported = (node: OperationNode) =>
-    [...dependencyClosure(plan, [node.node_id])].map((id) => nodes.get(id)!).flatMap((input) => input.operation === "reported_metric" ? [input] : []);
-  const IGNORED: Shown = { kind: "ignored" };
-  const opaque = (node: OperationNode): Shown => ({ kind: "opaque", slots: new Set(reported(node).map((input) => input.subject_slot)) });
+    [...dependencyClosure(plan, [node.node_id])].map((id) => nodes.get(id)!).flatMap((read) => read.operation === "reported_metric" ? [read] : []);
+  const opaque = (node: OperationNode): Shown => ({ kind: "opaque", slots: new Set(reported(node).map((read) => read.subject_slot)) });
   const shown = (node: OperationNode): Shown => {
     if (OPAQUE.has(node.operation)) return opaque(node);
     if (node.operation === "absolute_change" || node.operation === "percent_change_positive_base") {
@@ -76,12 +95,12 @@ export function explainedFigures(input: Readonly<{
     }
     const figure = node.operation === "reported_metric" ? node.metric_key : node.operation;
     if (!Object.hasOwn(OWN_EXPLANATION, figure)) return IGNORED;
-    const inputs = reported(node);
-    const bound = inputs.map((input) => periods.get(input.node_id));
+    const reads = reported(node);
+    const bound = reads.map((read) => periods.get(read.node_id));
     const [first] = bound;
     const onePeriod = first !== undefined && bound.every((period) => period !== undefined && samePeriod(period, first));
-    const slots = new Set(inputs.map((input) => input.subject_slot));
-    return onePeriod && slots.size === 1 ? { kind: "figure", slot: inputs[0]!.subject_slot, figure, period: first } : opaque(node);
+    const slots = new Set(reads.map((read) => read.subject_slot));
+    return onePeriod && slots.size === 1 ? { kind: "figure", slot: reads[0]!.subject_slot, figure, period: first } : opaque(node);
   };
   const outputs = plan.outputs.filter((output) => input.verified.has(output.output_id)).map((output) => shown(nodes.get(output.node_id)!));
   return plan.subjects.members.map((member): Explained => {
@@ -89,7 +108,7 @@ export function explainedFigures(input: Readonly<{
     const none: Explained = { issuer, kind: "none" };
     const own = outputs.filter((output) => output.kind === "opaque" ? output.slots.has(member.slot_id) : output.kind === "figure" && output.slot === member.slot_id);
     const figures = own.flatMap((output) => output.kind === "figure" ? [output] : []);
-    if (figures.length === 0 || figures.length < own.length) return none;
+    if (figures.length === 0 || own.some((output) => output.kind === "opaque")) return none;
     const end = figures.reduce((latest, { period }) => (period.end > latest ? period.end : latest), "");
     const latest = figures.filter(({ period }) => period.end === end);
     const period = latest[0]!.period;
@@ -142,4 +161,134 @@ export function namedFigures(reading: ScopeProposal): (figure: string) => boolea
     .map((metric) => metric.base ?? metric.metric_key));
   if (items.size === 0 && metrics.size === 0) return () => true;
   return (figure) => items.has(figure) || metrics.has(SCOPE_METRICS[figure] ?? "");
+}
+
+// ponytail: each company's first three explanations, by tier then recency;
+// the rest of a long release goes unquoted. Raise it if one falls past them.
+const CLAIMS_PER_COMPANY = 3;
+
+/**
+ * Each company's filed cause for the figures its answer shows, quoted and
+ * sealed under the answer's snapshot, inside the finalization transaction. An
+ * operational fault reading or sealing it rolls back to its savepoint, so the
+ * answer still publishes, its cause named as not covered; any other error
+ * fails the turn.
+ */
+export async function filedCauses(
+  tx: Pick<FencedTx, "client" | "run">,
+  input: Readonly<{
+    threadId: string;
+    plan: FinancialPlanV1;
+    named: (figure: string) => boolean;
+    // By issuer (lowercase), the name the answer gives each company.
+    names: ReadonlyMap<string, string>;
+    answer: Pick<ParentPublication, "run_id" | "snapshot_id" | "block">;
+  }>,
+): Promise<FiledCause> {
+  const { plan, answer } = input;
+  const uncaused: FiledCause = { asked: true, quoted: new Set(), names: input.names, block: null };
+  await tx.client.query("savepoint filed_cause");
+  try {
+    const explained = explainedFigures({
+      plan,
+      verified: new Set(answer.block.financial.results.flatMap((result) => result.disposition === "verified" ? [result.output_id] : [])),
+      periods: await boundPeriods(tx, answer.run_id, plan),
+      named: input.named,
+    });
+    const read = new Map<string, LocalRuntimeEvidence>();
+    for (const company of explained) {
+      if (company.kind === "none") continue;
+      read.set(company.issuer, await loadPeriodClaimEvidence(tx.client, {
+        issuer_id: company.issuer,
+        period: company.period,
+        predicate_prefixes: causeFamilies(company.metrics),
+        user_id: tx.run.user_id,
+        as_of: plan.time.knowledge_cutoff,
+        limit: CLAIMS_PER_COMPANY,
+        // A claim two companies share is quoted once, for the first.
+        exclude_claim_ids: [...read.values()].flatMap((evidence) => evidence.claim_refs),
+      }));
+    }
+    const evidence = [...read.values()];
+    const claims = evidence.flatMap((company) => company.claims);
+    if (claims.length === 0) {
+      await tx.client.query("release savepoint filed_cause");
+      return uncaused;
+    }
+    const snapshotId = stableUuid(`filed-cause:${answer.snapshot_id}`);
+    const sealer = createSealer([]);
+    const segments = attributionSegments(claims.map((claim) => ({
+      text: claim.text_canonical,
+      claim_id: claim.claim_id,
+      source_id: claim.source_id,
+      ...(claim.subject_id && input.names.has(claim.subject_id) ? { company: input.names.get(claim.subject_id)! } : {}),
+      ...(claim.published_at ? { published_at: claim.published_at } : {}),
+      ...(claim.effective_time ? { effective_time: claim.effective_time } : {}),
+    })), sealer.quote);
+    const id = stableUuid(`block:${snapshotId}:cause`);
+    const block = { id, kind: "rich_text", snapshot_id: snapshotId, data_ref: { kind: "rich_text", id }, source_refs: sealer.sealed().source_refs, as_of: answer.block.as_of, segments };
+    // A claim-bearing snapshot is provenanced by the logged read that chose its claims.
+    const log = await writeToolCallLog(tx.client, {
+      thread_id: input.threadId,
+      tool_name: "filed_cause",
+      args: { explained, cutoff: plan.time.knowledge_cutoff },
+      result: { claim_refs: claims.map((claim) => claim.claim_id) },
+      status: "ok",
+    });
+    const sealed = await sealSnapshotInTransaction(snapshotTransactionClient(tx.client), {
+      ...buildClaimBackedSealInput({
+        block,
+        claims: evidence.flatMap((company) => company.verifier_claims),
+        documents: [...new Map(evidence.flatMap((company) => company.verifier_documents).map((document) => [document.document_id, document])).values()],
+        subjectRefs: [...read].flatMap(([issuer, company]) => company.claims.length > 0 ? [{ kind: "issuer" as const, id: issuer }] : []),
+        toolCalls: [{ tool_call_id: log.tool_call_id, result_hash: log.result_hash! }],
+        parentSnapshot: answer.snapshot_id,
+      }),
+      thread_id: input.threadId,
+    });
+    // A refused seal stores nothing, as the engine's own refusal does; the answer goes without the cause.
+    await tx.client.query("release savepoint filed_cause");
+    if (!sealed.ok) {
+      console.warn(`[chat] the filed cause for thread ${input.threadId} failed its seal; the answer names it as not covered`, sealed.verification.failures);
+      return uncaused;
+    }
+    return { ...uncaused, quoted: new Set([...read].flatMap(([issuer, company]) => company.claims.length > 0 ? [issuer] : [])), block };
+  } catch (reason) {
+    if (!isOperational(reason)) throw reason;
+    // A lost connection fails the rollback too: the turn fails with the read's own error.
+    await tx.client.query("rollback to savepoint filed_cause").catch(() => {
+      throw reason;
+    });
+    console.warn(`[chat] the filed cause for thread ${input.threadId} could not be read; the answer names it as not covered`, reason);
+    return uncaused;
+  }
+}
+
+// Each reported node's fiscal period, as its certified input bound it.
+async function boundPeriods(tx: Pick<FencedTx, "client" | "run">, runId: string, plan: FinancialPlanV1): Promise<Map<LocalId, ClaimPeriod>> {
+  const slots = plan.operations.flatMap((node) => node.operation === "reported_metric" ? [node.node_id] : []);
+  const inputs = await readClosureInputs(tx.client, tx.run.user_id, runId, slots);
+  return new Map(inputs.flatMap((input) => {
+    const period = claimPeriod(input.bound_payload);
+    return period === null ? [] : [[input.input_slot, period] as const];
+  }));
+}
+
+// A bound fact's fiscal quarter or year, as a claim keys one; an instant or a
+// price has none.
+function claimPeriod(payload: unknown): ClaimPeriod | null {
+  const period = isRecord(payload) && isRecord(payload.period) ? payload.period : null;
+  if (period?.kind !== "duration" || typeof period.end !== "string") return null;
+  if (period.fiscal_period === "FY") return { kind: "fiscal_y", end: period.end };
+  return QUARTERS.has(period.fiscal_period) ? { kind: "fiscal_q", end: period.end } : null;
+}
+const QUARTERS: ReadonlySet<unknown> = new Set(FISCAL_PERIODS);
+
+// A fault of the database's state, not of the read: a lost connection (class
+// 08, or the driver's), a rolled-back transaction (40), exhausted resources
+// (53), a cancel or timeout (57), a lock not available (55P03). A schema or
+// SQL defect is none of them.
+function isOperational(error: unknown): boolean {
+  const code = isRecord(error) && "code" in error ? String(error.code) : "";
+  return /^(08|40|53|57)[0-9A-Z]{3}$/u.test(code) || code === "55P03" || code.startsWith("ECONN") || code === "ETIMEDOUT" || code === "EPIPE";
 }
