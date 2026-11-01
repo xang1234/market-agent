@@ -262,6 +262,28 @@ test("a route reads its first predicate family before newer claims of the next",
   assert.deepEqual(evidence.claim_refs.slice(1), [INSIDER(6), INSIDER(5), INSIDER(4), INSIDER(3)], "then the guidance, newest first");
 });
 
+test("claims asked to come first come first, in that order, and the limit never cuts one (#542)", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "evidence-selection-first");
+  const db = (await connectedClient(t, databaseUrl)) as unknown as QueryExecutor;
+  await db.query(`insert into issuers (issuer_id, legal_name) values ($1, 'Acme Inc')`, [ISSUER]);
+  await db.query(
+    `insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at)
+     values ($1, 'sec_edgar', 'filing', 'primary', 'public', now())`,
+    [FILINGS],
+  );
+  for (let n = 1; n <= 4; n++) {
+    await claim(db, { id: INSIDER(n), source: FILINGS, predicate: "guidance.revenue", text: `Acme guidance ${n}.`, polarity: "neutral", at: `2026-0${n}-01T00:00:00Z` });
+  }
+  const evidence = await loadLocalRuntimeEvidence(db, {
+    subject_refs: [{ kind: "issuer", id: ISSUER }],
+    limit: 1,
+    selection: { predicate_prefixes: ["guidance."], effective_from: null },
+    first_claim_ids: [INSIDER(2), INSIDER(1)],
+  });
+  assert.deepEqual(evidence.claim_refs, [INSIDER(2), INSIDER(1)]);
+});
+
 // A question about one fiscal year reads that year's explanations, not the
 // newer ones of later releases (the window has an end as well as a start).
 test("a route's window ends where the period it asks about does", async (t) => {
