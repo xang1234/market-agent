@@ -453,6 +453,7 @@ Claim {
   attributed_to_type?: 'issuer_mgmt' | 'journalist' | 'analyst' | 'tweet_author' | 'anonymous'
   attributed_to_id?: string
   effective_time?: timestamp
+  period?: { kind: 'fiscal_q' | 'fiscal_y', end: date }
   confidence: numeric
   status: 'extracted' | 'corroborated' | 'disputed' | 'rejected'
 }

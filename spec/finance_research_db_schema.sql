@@ -480,7 +480,10 @@ create table claims (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   superseded_at timestamptz,
-  enriched_at timestamptz
+  enriched_at timestamptz,
+  period_kind text check (period_kind in ('fiscal_q', 'fiscal_y')),
+  period_end date,
+  constraint claims_period_pair check ((period_kind is null) = (period_end is null))
 );
 create index claims_document_idx on claims(document_id);
 create index claims_predicate_idx on claims(predicate);
