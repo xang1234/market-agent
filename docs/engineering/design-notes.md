@@ -492,22 +492,31 @@ an 8-K Item 2.02 files the press release and CFO commentary as EX-99 exhibits
 - **Engine answers** (#542) quote the cause each company filed for the figures they show when the turn asks why
   (`asksCause`: the scope's `explains`, kept by follow-ups until one turns it off). What the cause explains comes from
   the plan and the periods its inputs bound to, not the question's words (`explainedFigures`,
-  `services/chat/src/filed-cause.ts`). Each verified output is a figure at one fiscal period (a reported figure, a
-  margin or free cash flow whose inputs bound to one period, or the change of one, at its current period), nothing (a
-  balance item, a share count, a valuation, another ratio), or something no one period explains (a trailing sum, a
-  threshold, a peer or period ranking, a spread, inputs of several periods). A company's figures are explained at its
-  period with the latest end, the earlier ones only as their trend. An output no one period explains, a Q4 beside its
-  fiscal year, or an earlier figure not shown at the latest leaves the company none. The reading narrows those figures
-  to the ones it names and never adds one. Each company's explanations are read for exactly that period
-  (`loadPeriodClaimEvidence`: the claim's `period_kind` and `period_end`, no date window; a claim never bound is
-  quoted for none), of the figures and of what they are computed from, nearest first and a margin's revenue last
-  (`causeFamilies`): an operating margin's operating income, then gross margin and operating expenses, then revenue.
-  So AMD's Q2 2025 inventory charge, filed against gross margin, is a cause of its operating margin and none of its
-  revenue. The quote is sealed in a snapshot whose parent is the answer's (migration 0074), inside the finalization
+  `services/chat/src/filed-cause.ts`). Each output is a figure at one fiscal period (a reported figure, a margin or
+  free cash flow whose inputs bound to one period, or the change of one, at its current period), nothing (a balance
+  item, a share count, a valuation, another ratio), or something no one period explains (a trailing sum, a threshold, a
+  peer or period ranking, a spread, inputs of several periods, or a figure shown as a gap, whose input bound no period).
+  A company's figures are explained at its period with the latest end, the earlier ones only as their trend. An output
+  no one period explains, a Q4 beside its fiscal year, or an earlier figure not shown at the latest leaves the company
+  none, so a current quarter not yet on file never moves the cause to the quarter before. The reading narrows those
+  figures to the ones it names and never adds one; asked about margins, the income statement names its margins alone.
+  Each company's explanations are read for exactly that period (`loadPeriodClaimEvidence`: the claim's `period_kind`
+  and `period_end`, no date window; a claim never bound is quoted for none), of the figures and of what they are
+  computed from, nearest first and a margin's revenue last (`causeFamilies`): an operating margin's operating income,
+  then gross margin and operating expenses, then revenue; net income's operating income; earnings per share's net
+  income. So AMD's Q2 2025 inventory charge, filed against gross margin, is a cause of its operating, net and EPS
+  figures and none of its revenue. Before the seal the chosen claims, their documents and sources are share-locked, in
+  that order and by id as a financial publication locks its evidence, and checked again (`lockCitableClaims`), so one
+  revoked or deleted since the read is dropped. The quote names the period it explains ("for Q2 FY2025 (ended
+  2025-06-28)") and is sealed in a snapshot whose parent is the answer's (migration 0074), inside the finalization
   transaction, so it is deleted with the answer and opens only through it. A company quoted none has its cause named
-  as not covered. A read an operational fault ends (a lost connection, a cancel or timeout, a lock not available, a
-  rolled-back transaction, exhausted resources) rolls back to its savepoint and the answer publishes with the gap. Any
-  other failure fails the turn.
+  as not covered. A refused seal rolls back to its savepoint and keeps only the refusal's `verifier_fail_logs` rows, as
+  every refused seal does. A read an operational fault ends rolls back to its savepoint and the answer publishes with
+  the gap: a lost connection, a rolled-back transaction (a deadlock, a serialization failure), exhausted resources, a
+  cancelled statement (`pg_cancel_backend` or a shutdown) or a lock not available. Nothing here sets
+  `statement_timeout` or `lock_timeout`, so a slow read or a lock wait ends only when someone cancels it. Any other
+  failure fails the turn. "Show the evidence" after such an answer reads the claims its cause snapshot sealed
+  (`parent_snapshot`) ahead of its own selection, so it shows the quoted cause first.
 - **Run it** after the 8-K crawl: `npm run extract:earnings-releases` (in `services/evidence`). It is a batch step,
   never the crawl: one model call per release (more for one over 60,000 characters, split between blocks, so its
   tail is read too), at low reasoning; about 46 s on the dev model in a probe (4 minutes at

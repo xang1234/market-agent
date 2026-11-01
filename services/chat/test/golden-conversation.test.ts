@@ -518,7 +518,8 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
 
   await t.test("a cause whose read is cancelled leaves the answer published, its cause named as not covered (#542)", async () => {
     // Another session holds the claims' arguments, so the cause's read of
-    // them waits until it is cancelled, as a statement or lock timeout ends it.
+    // them waits until the test cancels it, as an operator's pg_cancel_backend
+    // does: nothing sets a statement or lock timeout to end it.
     const locker = await connectedClient(t, databaseUrl);
     await locker.query("begin");
     await locker.query("lock table claim_arguments in access exclusive mode");
@@ -592,7 +593,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     }
   });
 
-  await t.test("a cause read a schema defect fails fails the turn: no answer goes out without its cause (#542)", async () => {
+  await t.test("a cause read a schema defect fails the turn: no answer goes out without its cause (#542)", async () => {
     await client.query(`alter table claim_arguments rename to claim_arguments_renamed`);
     try {
       const amdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD margin, claims table renamed" });
