@@ -585,8 +585,9 @@ export async function extractReleaseStatements(
           where c.document_id = $1 and c.predicate = $2 and c.text_canonical = $3 and ${CURRENT_CLAIM_SQL}`,
         [candidate.documentId, statement.predicate, statement.quote],
       );
-      // Stored by an earlier read (a rebind): its period is filled if unbound,
-      // bound now and never backdated, and its id stays, so citations of it do.
+      // Stored by an earlier read of the document (another of its Item 2.02
+      // claims): its period is filled if unbound, bound now and never
+      // backdated, and its id stays, so citations of it do.
       if (existing.length > 0) {
         if (statement.period) {
           await tx.db.query(
