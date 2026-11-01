@@ -19,3 +19,9 @@ test('Vite proxies evidence inspection to dev-api, ahead of the /v1/evidence rev
   assert.ok(keys.indexOf('/v1/evidence/inspect') < keys.indexOf('/v1/evidence'))
   assert.equal(proxy['/v1/evidence/inspect'].target, process.env.DEV_API_ORIGIN ?? 'http://127.0.0.1:4312')
 })
+
+test('Vite proxies verified calculation inspection to dev-api', () => {
+  const proxy = server?.proxy as Record<string, { target: string }>
+  // Unproxied, Vite answers /v1/financial/results/:id with index.html and the inspector fails to load.
+  assert.equal(proxy['/v1/financial']?.target, process.env.DEV_API_ORIGIN ?? 'http://127.0.0.1:4312')
+})
