@@ -742,7 +742,7 @@ test("a rebind asks what each stored explanation is about, and binds them in pla
 
   const { llm, listed } = rebindLlm("2025-06-28", () => "quarter");
   const result = await runRebindDrain({ db: client, llm, secClient: fakeSec(submission) });
-  assert.deepEqual(result, { bound: 1, unbound: 0, unparseable: 0, noop: 0, failed: 0 });
+  assert.deepEqual(result, { bound: 1, unbound: 0, unparseable: 0, noop: 0, failed: 0, unlocated: 0 });
   // The model is shown each stored explanation once, and no guidance.
   assert.deepEqual(listed, [[MI308_EXPLANATION, AMD_Q2_MARGIN]]);
   const after = await releaseClaims(client, seeded.documentId);
@@ -766,11 +766,11 @@ test("a rebind whose reply names no quarter end marks the release read, so a sec
   assert.deepEqual((await findRebindCandidates(client)).map((candidate) => candidate.sentences), [[MI308_EXPLANATION, AMD_YEAR_TO_DATE]]);
 
   const first = rebindLlm(null, () => "quarter");
-  assert.deepEqual(await runRebindDrain({ db: client, llm: first.llm, secClient: fakeSec(AMD_Q2_SUBMISSION) }), { bound: 0, unbound: 1, unparseable: 0, noop: 0, failed: 0 });
+  assert.deepEqual(await runRebindDrain({ db: client, llm: first.llm, secClient: fakeSec(AMD_Q2_SUBMISSION) }), { bound: 0, unbound: 1, unparseable: 0, noop: 0, failed: 0, unlocated: 0 });
   assert.equal(first.listed.length, 1);
   assert.deepEqual((await releaseClaims(client, seeded.documentId)).map((claim) => claim.period_end), [null, null, null]);
   const second = rebindLlm("2025-06-28", () => "quarter");
-  assert.deepEqual(await runRebindDrain({ db: client, llm: second.llm, secClient: fakeSec(AMD_Q2_SUBMISSION) }), { bound: 0, unbound: 0, unparseable: 0, noop: 0, failed: 0 });
+  assert.deepEqual(await runRebindDrain({ db: client, llm: second.llm, secClient: fakeSec(AMD_Q2_SUBMISSION) }), { bound: 0, unbound: 0, unparseable: 0, noop: 0, failed: 0, unlocated: 0 });
   assert.equal(second.listed.length, 0, "no model call");
 
   assert.equal(await clearRebindMarks(client), 2);
@@ -784,9 +784,39 @@ test("a rebind reply of the wrong shape leaves the release unread, and the drain
   await runReleaseExtractionDrain({ db: client, llm: fakeLlm(amdQ2Reply(null)).llm, secClient: fakeSec(AMD_Q2_SUBMISSION) });
 
   const result = await runRebindDrain({ db: client, llm: fakeLlm('{"quarter_end":"June 28, 2025","about":{"1":"quarter","2":"other"}}').llm, secClient: fakeSec(AMD_Q2_SUBMISSION) });
-  assert.deepEqual(result, { bound: 0, unbound: 0, unparseable: 1, noop: 0, failed: 0 });
+  assert.deepEqual(result, { bound: 0, unbound: 0, unparseable: 1, noop: 0, failed: 0, unlocated: 0 });
   assert.equal(drainIncomplete(result), true);
   assert.deepEqual((await findRebindCandidates(client)).map((candidate) => candidate.documentId), [seeded.documentId]);
+});
+
+test("a stored sentence no prompt holds is not asked about, stays unread, and is counted unlocated", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-rebind-unlocated");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedItem202(client, AMD_Q2);
+  await runReleaseExtractionDrain({ db: client, llm: fakeLlm(amdQ2Reply(null)).llm, secClient: fakeSec(AMD_Q2_SUBMISSION) });
+
+  // The exhibit as fetched now no longer holds the year-to-date sentence.
+  const changed = amdSubmission(["AMD Reports Second Quarter 2025 Financial Results", MI308_EXPLANATION, AMD_GUIDANCE]);
+  const { llm, listed } = rebindLlm("2025-06-28", () => "quarter");
+  const result = await runRebindDrain({ db: client, llm, secClient: fakeSec(changed) });
+  assert.deepEqual(result, { bound: 1, unbound: 0, unparseable: 0, noop: 0, failed: 0, unlocated: 1 });
+  assert.deepEqual(listed, [[MI308_EXPLANATION]]);
+  assert.deepEqual((await findRebindCandidates(client)).map((candidate) => [candidate.documentId, candidate.sentences]), [[seeded.documentId, [AMD_YEAR_TO_DATE]]]);
+});
+
+test("a rebind of a release with no EX-99 exhibits fails, asks nothing and marks nothing", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-rebind-no-exhibits");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedItem202(client, AMD_Q2);
+  await runReleaseExtractionDrain({ db: client, llm: fakeLlm(amdQ2Reply(null)).llm, secClient: fakeSec(AMD_Q2_SUBMISSION) });
+
+  const { llm, listed } = rebindLlm("2025-06-28", () => "quarter");
+  const bare = `<SEC-DOCUMENT>${AMD_Q2.accession}.txt\n</SEC-DOCUMENT>`;
+  const result = await runRebindDrain({ db: client, llm, secClient: fakeSec(bare) });
+  assert.deepEqual(result, { bound: 0, unbound: 0, unparseable: 0, noop: 0, failed: 1, unlocated: 0 });
+  assert.equal(drainIncomplete(result), true);
+  assert.equal(listed.length, 0, "no model call");
+  assert.deepEqual((await findRebindCandidates(client)).map((candidate) => [candidate.documentId, candidate.sentences]), [[seeded.documentId, [MI308_EXPLANATION, AMD_YEAR_TO_DATE]]]);
 });
 
 test("a rebind reads at most --limit releases",{ skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
@@ -800,7 +830,7 @@ test("a rebind reads at most --limit releases",{ skip: !dockerAvailable(), timeo
 
   const { llm, listed } = rebindLlm(null, () => "other");
   const limited = await runRebindDrain({ db: client, llm, secClient: fakeSec(AMD_Q2_SUBMISSION) }, { limit: 1 });
-  assert.deepEqual(limited, { bound: 0, unbound: 1, unparseable: 0, noop: 0, failed: 0 });
+  assert.deepEqual(limited, { bound: 0, unbound: 1, unparseable: 0, noop: 0, failed: 0, unlocated: 0 });
   assert.equal(listed.length, 1);
   assert.equal((await findRebindCandidates(client)).length, 1);
 });
