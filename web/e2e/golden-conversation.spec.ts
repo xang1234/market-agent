@@ -11,7 +11,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 const NVDA_NARRATIVE = "NVDA's revenue rose in every period from Q1 FY2025"
 const NVDA_REVENUE = 'NVIDIA Corporation: Revenue'
 const COMPARE_NARRATIVE = "Of NVDA and AMD, NVDA's price return was highest"
-const EXPLAIN_NARRATIVE = 'effective Jun 2025 on AMD'
+const EXPLAIN_NARRATIVE = 'According to a source dated Aug 2025'
 const AMD_RELEASE = 'AMD Reports Second Quarter 2025 Financial Results (Form 8-K, Exhibit 99.1)'
 const QUESTIONS = ['Analyze NVDA', 'Compare it with AMD YTD', 'Explain the differences and show the evidence']
 const YTD_TITLE = 'Price return YTD 2026 (split-adjusted, excluding dividends)'

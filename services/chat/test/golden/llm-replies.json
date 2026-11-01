@@ -9,6 +9,14 @@
       "text": "{\"outcome\":\"ready\",\"subjects\":[{\"slot_id\":\"a\",\"mention\":\"AMD\"}],\"operations\":[{\"node_id\":\"a_oi\",\"operation\":\"reported_metric\",\"subject_slot\":\"a\",\"metric_key\":\"operating_income\",\"period\":{\"kind\":\"fiscal_period\",\"fiscal_year\":2025,\"fiscal_period\":\"Q2\"}},{\"node_id\":\"a_rev\",\"operation\":\"reported_metric\",\"subject_slot\":\"a\",\"metric_key\":\"revenue\",\"period\":{\"kind\":\"fiscal_period\",\"fiscal_year\":2025,\"fiscal_period\":\"Q2\"}},{\"node_id\":\"a_om\",\"operation\":\"operating_margin\",\"numerator\":\"a_oi\",\"revenue\":\"a_rev\"}],\"outputs\":[{\"output_id\":\"out_a_om\",\"node_id\":\"a_om\"}],\"thresholds\":[]}"
     },
     {
+      "match": "Request: Why did AMD's operating margin turn negative last quarter?\nRequested",
+      "text": "{\"outcome\":\"ready\",\"subjects\":[{\"slot_id\":\"amd\",\"mention\":\"AMD\"}],\"operations\":[{\"node_id\":\"oi_q0\",\"operation\":\"reported_metric\",\"subject_slot\":\"amd\",\"metric_key\":\"operating_income\",\"period\":{\"kind\":\"latest\",\"period_type\":\"quarterly\",\"offset\":0}},{\"node_id\":\"rev_q0\",\"operation\":\"reported_metric\",\"subject_slot\":\"amd\",\"metric_key\":\"revenue\",\"period\":{\"kind\":\"latest\",\"period_type\":\"quarterly\",\"offset\":0}},{\"node_id\":\"oi_q1\",\"operation\":\"reported_metric\",\"subject_slot\":\"amd\",\"metric_key\":\"operating_income\",\"period\":{\"kind\":\"latest\",\"period_type\":\"quarterly\",\"offset\":1}},{\"node_id\":\"rev_q1\",\"operation\":\"reported_metric\",\"subject_slot\":\"amd\",\"metric_key\":\"revenue\",\"period\":{\"kind\":\"latest\",\"period_type\":\"quarterly\",\"offset\":1}},{\"node_id\":\"om_q0\",\"operation\":\"operating_margin\",\"numerator\":\"oi_q0\",\"revenue\":\"rev_q0\"},{\"node_id\":\"om_q1\",\"operation\":\"operating_margin\",\"numerator\":\"oi_q1\",\"revenue\":\"rev_q1\"},{\"node_id\":\"om_change\",\"operation\":\"absolute_change\",\"current\":\"om_q0\",\"prior\":\"om_q1\"}],\"outputs\":[{\"output_id\":\"operating_margin_latest_quarter\",\"node_id\":\"om_q0\"},{\"output_id\":\"operating_margin_prior_quarter\",\"node_id\":\"om_q1\"},{\"output_id\":\"operating_margin_change_pp\",\"node_id\":\"om_change\"},{\"output_id\":\"operating_income_latest_quarter\",\"node_id\":\"oi_q0\"},{\"output_id\":\"revenue_latest_quarter\",\"node_id\":\"rev_q0\"},{\"output_id\":\"operating_income_prior_quarter\",\"node_id\":\"oi_q1\"},{\"output_id\":\"revenue_prior_quarter\",\"node_id\":\"rev_q1\"}],\"thresholds\":[]}"
+    },
+    {
+      "match": "Request: And its revenue in Q2 2025?\nRequested",
+      "text": "{\"outcome\":\"ready\",\"subjects\":[{\"slot_id\":\"s1\",\"mention\":\"AMD\"}],\"operations\":[{\"node_id\":\"n1\",\"operation\":\"reported_metric\",\"subject_slot\":\"s1\",\"metric_key\":\"revenue\",\"period\":{\"kind\":\"fiscal_period\",\"fiscal_year\":2025,\"fiscal_period\":\"Q2\"}}],\"outputs\":[{\"output_id\":\"o1\",\"node_id\":\"n1\"}],\"thresholds\":[]}"
+    },
+    {
       "match": "Request: What was AMD's revenue in Q2 2019?\nRequested",
       "text": "{\"outcome\":\"ready\",\"subjects\":[{\"slot_id\":\"a\",\"mention\":\"AMD\"}],\"operations\":[{\"node_id\":\"a_rev\",\"operation\":\"reported_metric\",\"subject_slot\":\"a\",\"metric_key\":\"revenue\",\"period\":{\"kind\":\"fiscal_period\",\"fiscal_year\":2019,\"fiscal_period\":\"Q2\"}}],\"outputs\":[{\"output_id\":\"out_a_rev\",\"node_id\":\"a_rev\"}],\"thresholds\":[]}"
     },
@@ -91,6 +99,14 @@
     {
       "match": "Question: \"Break down NVDA's revenue by segment\"",
       "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"segments\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\"]}}"
+    },
+    {
+      "match": "Question: \"Why did AMD's operating margin turn negative last quarter?\"",
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":\"margin\"}],\"asks\":[\"explains\",\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_margin\"],\"period\":{\"kind\":\"other\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AMD\"]}}"
+    },
+    {
+      "match": "Question: \"And its revenue in Q2 2025?\"",
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"revenue\"],\"period\":{\"kind\":\"fiscal_quarter\",\"fiscal_period\":\"Q2\",\"fiscal_year\":2025},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}"
     },
     {
       "match": "Question: \"Why did AMD's operating margin turn negative in Q2 2025?\"",

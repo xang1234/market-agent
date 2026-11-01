@@ -251,8 +251,11 @@ export const AMD_Q2_2025_RELEASE = {
   title: "AMD Reports Second Quarter 2025 Financial Results (Form 8-K, Exhibit 99.1)",
   // The release's dateline; the hour is not stated, so the date is used.
   published_at: "2025-08-05T00:00:00.000Z",
-  // The quarter the claim is about: AMD's fiscal Q2 2025, ended 2025-06-28.
-  effective_time: "2025-06-28T00:00:00.000Z",
+  // As the release extractor dates it: by the 8-K's filing date
+  // (sec-8k-handler.ts). The quarter it explains is its period.
+  effective_time: "2025-08-05T00:00:00.000Z",
+  // AMD's fiscal Q2 2025, as its facts key it (#542).
+  period: { kind: "fiscal_q", end: "2025-06-28" },
   text: "As previously announced, our second quarter results were impacted by the U.S. Government's export control on our AMD Instinct MI308 data center GPU products. For the quarter, these restrictions led to approximately $800 million in inventory and related charges.",
 } as const;
 
@@ -454,14 +457,17 @@ export async function seedFiledClaims(client: Client): Promise<void> {
   })).document;
   const claim = await createClaim(client, {
     document_id: document.document_id,
-    predicate: "kpi.commentary",
+    // As the release extractor files it (sec-earnings-release-extraction.ts):
+    // an inventory charge lands in cost of sales, so it explains gross margin.
+    predicate: "management.explanation.gross_margin",
     text_canonical: release.text,
-    polarity: "negative",
-    modality: "asserted",
+    polarity: "neutral",
+    modality: "quoted",
     reported_by_source_id: source.source_id,
     effective_time: release.effective_time,
     confidence: 0.95,
     status: "extracted",
+    period: release.period,
   });
   // Known by the golden cutoff, as the seeded facts are: a turn reads only
   // claims ingested by its cutoff.
