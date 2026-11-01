@@ -4,7 +4,9 @@ import { assertUuidV4 } from "./validators.ts";
 /**
  * Product-owned references that make a sealed snapshot durable. Discovery is
  * deliberately included here, rather than in blob GC, so all lifecycle paths
- * use the same shared-reference decision.
+ * use the same shared-reference decision. A child snapshot, such as an
+ * answer's cause, is held by the message holding its parent. A child never
+ * holds its parent, or the cause would keep a deleted answer's snapshot.
  */
 export async function snapshotHasCurrentReachability(db: QueryExecutor, snapshotId: string): Promise<boolean> {
   assertUuidV4(snapshotId, "snapshot_id");
@@ -22,7 +24,8 @@ export async function snapshotHasCurrentReachability(db: QueryExecutor, snapshot
        union all
        select 1 from discovery_candidates where snapshot_id=$1::uuid
        union all
-       select 1 from snapshots where parent_snapshot=$1::uuid
+       select 1 from chat_messages m join snapshots child on child.parent_snapshot=m.snapshot_id
+        where child.snapshot_id=$1::uuid
      ) as reachable`,
     [snapshotId],
   );

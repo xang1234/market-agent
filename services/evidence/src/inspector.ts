@@ -157,6 +157,16 @@ async function assertSnapshotVisibleToUser(
             and m.role = 'assistant'
        )
        or exists (
+         -- A child snapshot, such as an answer's cause, opens where the answer does.
+         select 1
+           from chat_messages m
+           join snapshots child on child.parent_snapshot = m.snapshot_id
+           join chat_threads t on t.thread_id = m.thread_id
+          where child.snapshot_id = $1::uuid
+            and t.user_id = $2::uuid
+            and m.role = 'assistant'
+       )
+       or exists (
          select 1
            from analyze_template_runs r
            join analyze_templates t on t.template_id = r.template_id
