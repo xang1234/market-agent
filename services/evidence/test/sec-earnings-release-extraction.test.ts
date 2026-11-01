@@ -548,3 +548,45 @@ test("a rebind binds an extracted release's claims in place, with no new rows, a
   assert.equal(await reopenUnboundReleases(client), 0);
   assert.deepEqual(await findReleaseCandidates(client), []);
 });
+
+test("an extraction whose sentence matches only a superseded claim stores a current one, and leaves the superseded one as it was", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-superseded-match");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedItem202(client, AMD_Q2);
+  // The MI308 sentence, stored once and since superseded by a correction.
+  const retired = (await client.query<{ id: string }>(
+    `insert into claims (document_id, predicate, text_canonical, polarity, modality, reported_by_source_id,
+                         attributed_to_type, attributed_to_id, confidence, status, superseded_at)
+     select document_id, 'management.explanation.gross_margin', $2, 'neutral', 'quoted', reported_by_source_id,
+            'issuer', attributed_to_id, 0.8, 'extracted', now()
+       from claims where claim_id = $1
+     returning claim_id::text as id`,
+    [seeded.claimId, MI308_EXPLANATION],
+  )).rows[0]!.id;
+  await runReleaseExtractionDrain({ db: client, llm: fakeLlm(amdQ2Reply("2025-06-28")).llm, secClient: fakeSec(AMD_Q2_SUBMISSION) });
+  const stored = (await client.query<{ claim_id: string; period_kind: string | null; period_end: string | null; superseded: boolean }>(
+    `select claim_id::text as claim_id, period_kind, period_end::text as period_end, superseded_at is not null as superseded
+       from claims where text_canonical = $1 order by superseded`,
+    [MI308_EXPLANATION],
+  )).rows;
+  assert.deepEqual(stored.map((claim) => [claim.period_kind, claim.period_end, claim.superseded]), [
+    ["fiscal_q", "2025-06-28", false],
+    [null, null, true],
+  ]);
+  assert.equal(stored[1]!.claim_id, retired);
+  assert.notEqual(stored[0]!.claim_id, retired);
+});
+
+test("a release whose only bound explanation is superseded is reopened for its current unbound one", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-superseded-reopen");
+  const client = await connectedClient(t, databaseUrl);
+  await seedItem202(client, AMD_Q2);
+  await runReleaseExtractionDrain({ db: client, llm: fakeLlm(amdQ2Reply(null)).llm, secClient: fakeSec(AMD_Q2_SUBMISSION) });
+  // The MI308 claim, bound to a calendar quarter's end and then superseded.
+  await client.query(
+    `update claims set period_kind = 'fiscal_q', period_end = '2025-06-30', period_bound_at = now(), superseded_at = now()
+      where text_canonical = $1`,
+    [MI308_EXPLANATION],
+  );
+  assert.equal(await reopenUnboundReleases(client), 1);
+});

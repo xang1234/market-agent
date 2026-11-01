@@ -72,4 +72,11 @@ test("the census flags a bound period its issuer's facts do not hold, in a fisca
     ["fiscal_q", "2025-06-30", "mismatched"],
     ["fiscal_q", "2025-12-27", "uncovered"],
   ]);
+
+  // Corrected: the misread claims superseded, so no reader cites them.
+  await client.query(`update claims set superseded_at = now() where period_end = '2025-06-30' or period_kind = 'fiscal_y'`);
+  assert.deepEqual(await statuses(), [
+    ["fiscal_q", "2025-06-28", "matched"],
+    ["fiscal_q", "2025-12-27", "uncovered"],
+  ]);
 });
