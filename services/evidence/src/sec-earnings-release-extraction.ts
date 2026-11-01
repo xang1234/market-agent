@@ -73,6 +73,8 @@ const MAX_PROMPT_CHARS = 60_000;
 // later end is not yet reported, and an earlier one is a year-ago comparison.
 const MAX_REPORT_LAG_DAYS = 92;
 const ZERO_UUID = "00000000-0000-0000-0000-000000000000";
+// A stored claim c the extractor treats as live: citable, and not superseded.
+const CURRENT_CLAIM_SQL = "c.status in ('extracted', 'corroborated') and c.superseded_at is null";
 
 export type ExtractReleaseLlm = { complete(request: LlmChatRequest): Promise<LlmRouterResult> };
 
@@ -507,7 +509,8 @@ export async function extractReleaseStatements(
     const claimIds: string[] = [];
     for (const statement of verified.values()) {
       const { rows: existing } = await tx.db.query<{ claim_id: string }>(
-        `select claim_id::text as claim_id from claims where document_id = $1 and predicate = $2 and text_canonical = $3`,
+        `select c.claim_id::text as claim_id from claims c
+          where c.document_id = $1 and c.predicate = $2 and c.text_canonical = $3 and ${CURRENT_CLAIM_SQL}`,
         [candidate.documentId, statement.predicate, statement.quote],
       );
       // Stored by an earlier read (a rebind): its period is filled if unbound,
@@ -578,10 +581,12 @@ export async function reopenUnboundReleases(db: QueryExecutor): Promise<number> 
     `update claims r set enriched_at = null
       where r.predicate = 'material_event.guidance_update'
         and r.enriched_at is not null
-        and exists (select 1 from claims c where c.document_id = r.document_id and c.predicate like 'management.explanation.%')
+        and exists (select 1 from claims c
+                     where c.document_id = r.document_id and c.predicate like 'management.explanation.%' and ${CURRENT_CLAIM_SQL})
         and not exists (select 1 from claims c
                          where c.document_id = r.document_id
                            and c.predicate like 'management.explanation.%'
+                           and ${CURRENT_CLAIM_SQL}
                            and c.period_end is not null)`,
   );
   return rowCount ?? 0;

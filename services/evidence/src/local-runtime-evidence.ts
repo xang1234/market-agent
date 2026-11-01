@@ -396,7 +396,7 @@ export async function loadPeriodClaimEvidence(
 // A claim a reader may cite: extracted or corroborated and current, in a live
 // document, from sources the user may see, and under a cutoff, written and
 // published by it. c is the claim, d its document, s its reporting source.
-function citableClaimSql(user: string, cutoff: string): string {
+export function citableClaimSql(user: string, cutoff: string): string {
   return `c.status in ('extracted', 'corroborated')
           and c.superseded_at is null
           and d.deleted_at is null

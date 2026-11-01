@@ -1,5 +1,6 @@
 // A census of the fiscal periods earnings-release explanations are bound to
-// (#542), checked against each issuer's facts. Read-only.
+// (#542), checked against each issuer's facts. Read-only. It counts the
+// explanations a reader may cite: a superseded (corrected) one is not.
 //
 //   DATABASE_URL=... npm run audit:claim-periods
 //
@@ -11,6 +12,7 @@
 import { Pool } from "pg";
 import type { ClaimPeriod } from "./claim-repo.ts";
 import { factActiveSql } from "./fact-activity.ts";
+import { citableClaimSql } from "./local-runtime-evidence.ts";
 import type { QueryExecutor } from "./types.ts";
 
 export type ClaimPeriodAudit = {
@@ -43,9 +45,12 @@ export async function auditClaimPeriods(db: QueryExecutor): Promise<ClaimPeriodA
                        and c.period_end between f.period_start and f.period_end
                        and ${factActiveSql("f")}) as covered
        from claims c
+       join documents d on d.document_id = c.document_id
+       join sources s on s.source_id = c.reported_by_source_id
        join claim_arguments ca on ca.claim_id = c.claim_id and ca.subject_kind = 'issuer' and ca.role = 'subject'
       where c.predicate like 'management.explanation.%'
         and c.period_kind is not null
+        and ${citableClaimSql("null::uuid", "null::timestamptz")}
       order by issuer_id, period_end, period_kind, document_id`,
   );
   return rows.map((row) => ({
