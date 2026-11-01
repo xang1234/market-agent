@@ -163,11 +163,22 @@ test("a rebind reply gives each listed statement's about by its number, and othe
     quarterEnd: "2025-06-28",
     abouts: ["quarter", "year", "other", "other"],
   });
-  assert.deepEqual(parseRebindReply('{"quarter_end":"June 28, 2025","about":{"1":"quarter"}}', 1), { quarterEnd: null, abouts: ["quarter"] });
-  // A list by position is not by number: read by number it would shift every
-  // statement onto its neighbour's period.
-  assert.deepEqual(parseRebindReply('{"quarter_end":"2025-06-28","about":["quarter","year"]}', 2), { quarterEnd: "2025-06-28", abouts: ["other", "other"] });
-  assert.equal(parseRebindReply("I could not find any.", 1), null);
+  assert.deepEqual(parseRebindReply('{"quarter_end":null,"about":{}}', 1), { quarterEnd: null, abouts: ["other"] });
+});
+
+// A rebind marks every sentence it reads, so a reply of the wrong shape must
+// not read as "nothing to bind": it would mark the release read for good.
+test("a rebind reply of the wrong shape is unparseable, not a reply that binds nothing", () => {
+  for (const [label, text] of [
+    ["a quarter end in words", '{"quarter_end":"June 28, 2025","about":{"1":"quarter"}}'],
+    // Read by number, a list would shift every statement onto its neighbour's period.
+    ["abouts as a list", '{"quarter_end":"2025-06-28","about":["quarter","year"]}'],
+    ["a misspelled about", '{"quarter_end":"2025-06-28","abouts":{"1":"quarter"}}'],
+    ["an empty object", "{}"],
+    ["prose", "I could not find any."],
+  ]) {
+    assert.equal(parseRebindReply(text!, 1), null, label);
+  }
 });
 
 test("a release reports the quarter every prompt naming one agrees on, ended before the filing and at most 92 days before it", () => {
@@ -766,7 +777,19 @@ test("a rebind whose reply names no quarter end marks the release read, so a sec
   assert.deepEqual((await findRebindCandidates(client)).map((candidate) => candidate.documentId), [seeded.documentId]);
 });
 
-test("a rebind reads at most --limit releases", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+test("a rebind reply of the wrong shape leaves the release unread, and the drain incomplete", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-rebind-unparseable");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedItem202(client, AMD_Q2);
+  await runReleaseExtractionDrain({ db: client, llm: fakeLlm(amdQ2Reply(null)).llm, secClient: fakeSec(AMD_Q2_SUBMISSION) });
+
+  const result = await runRebindDrain({ db: client, llm: fakeLlm('{"quarter_end":"June 28, 2025","about":{"1":"quarter","2":"other"}}').llm, secClient: fakeSec(AMD_Q2_SUBMISSION) });
+  assert.deepEqual(result, { bound: 0, unbound: 0, unparseable: 1, noop: 0, failed: 0 });
+  assert.equal(drainIncomplete(result), true);
+  assert.deepEqual((await findRebindCandidates(client)).map((candidate) => candidate.documentId), [seeded.documentId]);
+});
+
+test("a rebind reads at most --limit releases",{ skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
   const { databaseUrl } = await bootstrapDatabase(t, "release-rebind-limit");
   const client = await connectedClient(t, databaseUrl);
   await seedItem202(client);
