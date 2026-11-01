@@ -287,7 +287,7 @@ export function reportedQuarterEnd(ends: ReadonlyArray<IsoDate | null>, filedOn:
 // The period an explanation explains: its quarter or, in a fourth-quarter
 // release, its year, both ending at the reported quarter's end. Guidance, and
 // anything about another period, explains none.
-export function explainedPeriod(quarterEnd: IsoDate | null, statement: ReleaseStatement): ClaimPeriod | null {
+export function explainedPeriod(quarterEnd: IsoDate | null, statement: Pick<ReleaseStatement, "kind" | "about">): ClaimPeriod | null {
   const kind = PERIOD_KIND_OF[statement.about];
   return quarterEnd === null || kind === null || statement.kind !== "explanation" ? null : { kind, end: quarterEnd };
 }
@@ -472,16 +472,22 @@ export async function extractReleaseStatements(
   const quarterEnd = reportedQuarterEnd(ends, candidate.effectiveTime?.slice(0, 10) ?? null);
   // A claim is its natural key: the document, predicate and sentence. A
   // sentence picked twice for the same metric is one claim; for two metrics, a
-  // claim for each. Two picks of it that disagree on its period bind neither.
+  // claim for each. Its period is the sentence's: explanation picks of it that
+  // disagree on what it is about bind none of its claims.
+  const found = proposed.flatMap((statement) => verifyStatement(statement, exhibits) ?? []);
+  const abouts = new Map<string, ReleaseStatementAbout | null>();
+  for (const pick of found) {
+    if (pick.kind !== "explanation") continue;
+    const prior = abouts.get(pick.quote);
+    abouts.set(pick.quote, prior === undefined || prior === pick.about ? pick.about : null);
+  }
   const verified = new Map<string, VerifiedStatement & { predicate: string; period: ClaimPeriod | null }>();
-  for (const statement of proposed) {
-    const found = verifyStatement(statement, exhibits);
-    if (!found) continue;
-    const predicate = `${found.kind === "explanation" ? "management.explanation" : "guidance"}.${found.metric}`;
-    const period = explainedPeriod(quarterEnd, found);
-    const key = JSON.stringify([predicate, found.quote]);
-    const prior = verified.get(key);
-    verified.set(key, prior ? { ...prior, period: prior.period?.kind === period?.kind ? period : null } : { ...found, predicate, period });
+  for (const pick of found) {
+    const predicate = `${pick.kind === "explanation" ? "management.explanation" : "guidance"}.${pick.metric}`;
+    const key = JSON.stringify([predicate, pick.quote]);
+    if (verified.has(key)) continue;
+    const period = explainedPeriod(quarterEnd, { kind: pick.kind, about: abouts.get(pick.quote) ?? "other" });
+    verified.set(key, { ...pick, predicate, period });
   }
   // A prompt answered badly, or with no quote that is in the filing, leaves its
   // text unread: nothing is stored or stamped, so the next drain reads the
