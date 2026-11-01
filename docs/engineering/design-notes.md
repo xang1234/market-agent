@@ -483,9 +483,12 @@ an 8-K Item 2.02 files the press release and CFO commentary as EX-99 exhibits
   usable quarter end) and never inserts. It selects releases holding current unbound explanations no rebind has read,
   sends each prompt's text with those of its sentences the text holds as a numbered list, and asks only for
   `quarter_end` and an `about` for each, by number (`rebindRelease`). The same rules decide the periods, and one update
-  fills them in place (`period_bound_at` is the rebind's time, never backdated), so each claim's id stays. Every
-  explanation it read is stamped `enriched_at`, bound or not, so a release is read once even if it can never bind; a
-  reply that is no JSON object leaves it for the next rebind. `--retry` clears the marks on the unbound ones first, and
+  fills them in place (`period_bound_at` is the rebind's time, never backdated), so each claim's id stays. It locks the
+  document first, as the extraction does. Every explanation a prompt listed is stamped `period_read_at` (migration
+  0075; `enriched_at` keeps marking the Item 2.02 claim), bound or not, so a release is read once even if it can never
+  bind. A stored sentence no prompt's text holds is not asked about or marked, and is counted unlocated; a release with
+  no EX-99 exhibits fails. A reply whose `about` is no object, or whose `quarter_end` is neither a date nor null, is
+  unparseable and leaves the release for the next rebind. `--retry` clears the marks on the unbound ones first, and
   `--limit N` reads at most N releases.
 - **Chat** reads `management.explanation.` claims first (not `management.tone`) on every route that reads figures (latest quarter, trends, margins,
   segments, statements, comparisons: `ROUTE_PREDICATES`, `evidence-packet.ts`); other routes take the newest claims.
