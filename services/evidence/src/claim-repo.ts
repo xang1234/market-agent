@@ -1,6 +1,8 @@
+import type { IsoDate } from "../../financial-core/src/contracts.ts";
 import type { QueryExecutor } from "./types.ts";
 import {
   assertIso8601WithOffset,
+  assertIsoDate,
   assertNonEmptyString,
   assertOneOf,
   assertOptionalNonEmptyString,
@@ -29,9 +31,14 @@ export const CLAIM_POLARITIES = Object.freeze([
   "mixed",
 ] as const);
 
+export const CLAIM_PERIOD_KINDS = Object.freeze(["fiscal_q", "fiscal_y"] as const);
+
 export type ClaimModality = (typeof CLAIM_MODALITIES)[number];
 export type ClaimStatus = (typeof CLAIM_STATUSES)[number];
 export type ClaimPolarity = (typeof CLAIM_POLARITIES)[number];
+// The fiscal period a claim explains, keyed as facts are (#542). A fourth
+// quarter and its year end the same day, and differ in kind.
+export type ClaimPeriod = { kind: (typeof CLAIM_PERIOD_KINDS)[number]; end: IsoDate };
 
 export type ClaimInput = {
   document_id: string;
@@ -45,6 +52,7 @@ export type ClaimInput = {
   effective_time?: string | null;
   confidence: number;
   status: ClaimStatus;
+  period?: ClaimPeriod | null;
 };
 
 export type ClaimRow = {
@@ -60,13 +68,16 @@ export type ClaimRow = {
   effective_time: string | null;
   confidence: number;
   status: ClaimStatus;
+  period: ClaimPeriod | null;
   created_at: string;
   updated_at: string;
 };
 
-type ClaimDbRow = Omit<ClaimRow, "effective_time" | "confidence" | "created_at" | "updated_at"> & {
+type ClaimDbRow = Omit<ClaimRow, "effective_time" | "confidence" | "period" | "created_at" | "updated_at"> & {
   effective_time: Date | string | null;
   confidence: number | string;
+  period_kind: ClaimPeriod["kind"] | null;
+  period_end: string | null;
   created_at: Date | string;
   updated_at: Date | string;
 };
@@ -83,6 +94,8 @@ const CLAIM_COLUMNS = `claim_id,
                effective_time,
                confidence,
                status,
+               period_kind,
+               period_end::text as period_end,
                created_at,
                updated_at`;
 
@@ -101,8 +114,10 @@ export async function createClaim(db: QueryExecutor, input: ClaimInput): Promise
         attributed_to_id,
         effective_time,
         confidence,
-        status)
-     values ($1::uuid, $2, $3, $4::polarity, $5::claim_modality, $6::uuid, $7, $8, $9, $10, $11::claim_status)
+        status,
+        period_kind,
+        period_end)
+     values ($1::uuid, $2, $3, $4::polarity, $5::claim_modality, $6::uuid, $7, $8, $9, $10, $11::claim_status, $12, $13::date)
      returning ${CLAIM_COLUMNS}`,
     [
       normalized.document_id,
@@ -116,6 +131,8 @@ export async function createClaim(db: QueryExecutor, input: ClaimInput): Promise
       normalized.effective_time,
       normalized.confidence,
       normalized.status,
+      normalized.period?.kind ?? null,
+      normalized.period?.end ?? null,
     ],
   );
 
@@ -155,6 +172,10 @@ function normalizeClaimInput(input: ClaimInput): Required<ClaimInput> {
   }
   assertConfidence(input.confidence, "confidence");
   assertOneOf(input.status, CLAIM_STATUSES, "status");
+  if (input.period != null) {
+    assertOneOf(input.period.kind, CLAIM_PERIOD_KINDS, "period.kind");
+    assertIsoDate(input.period.end, "period.end");
+  }
 
   return {
     document_id: input.document_id,
@@ -168,6 +189,7 @@ function normalizeClaimInput(input: ClaimInput): Required<ClaimInput> {
     effective_time: input.effective_time ?? null,
     confidence: input.confidence,
     status: input.status,
+    period: input.period ?? null,
   };
 }
 
@@ -195,6 +217,9 @@ function claimRowFromDb(row: ClaimDbRow | undefined): ClaimRow {
     effective_time: nullableIsoString(row.effective_time),
     confidence: Number(row.confidence),
     status: row.status,
+    period: row.period_kind != null && row.period_end != null
+      ? Object.freeze({ kind: row.period_kind, end: row.period_end })
+      : null,
     created_at: isoString(row.created_at),
     updated_at: isoString(row.updated_at),
   });

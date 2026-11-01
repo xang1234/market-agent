@@ -1,4 +1,5 @@
 import type { SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
+import type { ClaimPeriod } from "./claim-repo.ts";
 import { factActiveSql, factKnownAtSql } from "./fact-activity.ts";
 import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
 
@@ -19,12 +20,12 @@ export type LocalRuntimeEvidenceInput = {
   // claim repeated (same company, predicate and text) counts once; and stored
   // contradiction relations among the selected are returned. The prefixes are
   // a priority, in order; a group of them shares one.
-  selection?: {
-    predicate_prefixes: ReadonlyArray<string | ReadonlyArray<string>>;
-    effective_from: string | null;
-    effective_until?: string | null;
-    fiscal_year?: number | null;
-  };
+  selection?: { predicate_prefixes: ReadonlyArray<string | ReadonlyArray<string>> } & (
+    | { effective_from: string | null; effective_until?: string | null; fiscal_year?: number | null; period?: null }
+    // Only the claims the prefixes match that are bound to this period (#542).
+    // No date window: when a claim was filed is not the period it explains.
+    | { period: ClaimPeriod; effective_from?: never; effective_until?: never; fiscal_year?: never }
+  );
 };
 
 export type LocalRuntimeClaimEvidence = {
@@ -180,6 +181,10 @@ export async function loadLocalRuntimeEvidence(
               sr.subject_id::text as subject_id,
               coalesce(c.predicate like any($8::text[]), false)
                 and case
+                  -- Never null for an unbound claim: a repeat's pick sorts
+                  -- "relevant desc", which puts a null first.
+                  when $14::text is not null then
+                    coalesce(c.period_kind = $14::text and c.period_end = $15::date, false)
                   -- The releases about a fiscal year come out from the end of
                   -- its first quarter until a quarter after it ends. Its
                   -- guidance is given during it: the full year's with the last
@@ -293,6 +298,7 @@ export async function loadLocalRuntimeEvidence(
             effective_time,
             subject_id
        from selected
+      where $14::text is null or relevant
       -- Relevant claims first, by their prefix's priority; within each tier,
       -- companies and predicates take turns (each one's newest first), so a
       -- comparison's slots are not all one company's, nor a tier's all one
@@ -321,6 +327,8 @@ export async function loadLocalRuntimeEvidence(
       input.selection?.effective_until ?? null,
       selected ? selected.map(({ tier }) => tier) : null,
       input.selection?.fiscal_year ?? null,
+      input.selection?.period?.kind ?? null,
+      input.selection?.period?.end ?? null,
     ],
   );
   const evidence = evidenceFromClaimRows(subjectRefs, rows.slice(0, limit), input.selection !== undefined);
