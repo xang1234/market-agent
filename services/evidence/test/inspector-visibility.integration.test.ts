@@ -45,3 +45,55 @@ test("a user message bound to another user's answer snapshot does not open it; t
     /snapshot is not visible/,
   );
 });
+
+test("a snapshot sealed under an answer opens for the answer's owner; a user message's snapshot grants nothing", async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "evidence-inspect-children");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+
+  const [ownerId, strangerId, sourceId, ownerThreadId, strangerThreadId] = Array.from({ length: 5 }, () => randomUUID());
+  await db.query(`insert into users (user_id, email) values ($1,$2),($3,$4)`, [
+    ownerId, `${ownerId}@t.dev`, strangerId, `${strangerId}@t.dev`,
+  ]);
+  await db.query(
+    `insert into sources (source_id, provider, kind, canonical_url, trust_tier, license_class, retrieved_at)
+     values ($1,'polygon','market_data','https://polygon.io/','secondary','licensed',now())`,
+    [sourceId],
+  );
+  const snapshot = async (parent: string | null) => {
+    const snapshotId = randomUUID();
+    await db.query(
+      `insert into snapshots (snapshot_id, subject_refs, source_ids, as_of, basis, normalization, allowed_transforms, parent_snapshot)
+       values ($1, '[]'::jsonb, $2::jsonb, now(), 'unadjusted', 'none', '{}'::jsonb, $3)`,
+      [snapshotId, JSON.stringify([sourceId]), parent],
+    );
+    return snapshotId;
+  };
+  const answer = await snapshot(null);
+  const question = await snapshot(null);
+  const cause = await snapshot(answer);
+  const questionChild = await snapshot(question);
+  await db.query(`insert into chat_threads (thread_id, user_id) values ($1,$2),($3,$4)`, [
+    ownerThreadId, ownerId, strangerThreadId, strangerId,
+  ]);
+  // The stranger's user message names the owner's answer snapshot, as one
+  // posted before the chat service picked the id itself could.
+  await db.query(
+    `insert into chat_messages (thread_id, role, snapshot_id, blocks, content_hash)
+     values ($1::uuid, 'assistant', $3::uuid, '[]'::jsonb, 'h'), ($1::uuid, 'user', $4::uuid, '[]'::jsonb, 'h'),
+            ($2::uuid, 'user', $3::uuid, '[]'::jsonb, 'h')`,
+    [ownerThreadId, strangerThreadId, answer, question],
+  );
+
+  const ref: EvidenceInspectionRef = { kind: "source", id: sourceId };
+  const ownerView = await loadEvidenceInspection(db, { user_id: ownerId, snapshot_id: cause, ref });
+  assert.deepEqual(ownerView.links, [{ label: "Open source", href: "https://polygon.io/" }]);
+  await assert.rejects(
+    () => loadEvidenceInspection(db, { user_id: strangerId, snapshot_id: cause, ref }),
+    /snapshot is not visible/,
+  );
+  await assert.rejects(
+    () => loadEvidenceInspection(db, { user_id: ownerId, snapshot_id: questionChild, ref }),
+    /snapshot is not visible/,
+  );
+});
