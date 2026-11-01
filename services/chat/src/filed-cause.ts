@@ -157,16 +157,19 @@ export function asksCause(reading: ScopeProposal, scope: Pick<ResearchScope, "ex
 /**
  * The engine figures this turn's reading names: its income items, which name
  * them more closely than the whole statement, and each other metric's
- * figures. A reading that names none names every figure.
+ * figures. Asked about margins, the whole statement names its margins alone
+ * (the reading keeps no margin qualifier on the statement; another metric's
+ * margin is that metric's). A reading that names none names every figure.
  */
 export function namedFigures(reading: ScopeProposal): (figure: string) => boolean {
-  const { offMetrics } = readingAsks(reading);
+  const { asks, offMetrics } = readingAsks(reading);
+  const margins = asks.has("margins");
   const items = new Set(reading.income_items.map((item) => INCOME_ITEM_FIGURE[item]));
   const metrics = new Set(reading.metrics
-    .filter((metric) => !offMetrics.has(metric.metric_key) && !(metric.metric_key === "income_statement" && reading.income_items.length > 0))
+    .filter((metric) => !offMetrics.has(metric.metric_key) && !(metric.metric_key === "income_statement" && (margins || reading.income_items.length > 0)))
     .map((metric) => metric.base ?? metric.metric_key));
-  if (items.size === 0 && metrics.size === 0) return () => true;
-  return (figure) => items.has(figure) || metrics.has(SCOPE_METRICS[figure] ?? "");
+  if (items.size === 0 && metrics.size === 0 && !margins) return () => true;
+  return (figure) => items.has(figure) || metrics.has(SCOPE_METRICS[figure] ?? "") || (margins && MARGINS.has(figure));
 }
 
 // ponytail: each company's first three explanations, by tier then recency;
