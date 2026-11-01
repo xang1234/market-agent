@@ -87,9 +87,11 @@ export async function loadPriorScope(
   return parseResearchScope(rows[0]?.research_scope ?? null);
 }
 
-// The claims the previous answer (loadPriorScope's) quoted as the filed cause
-// of its figures (#542), as its child snapshot seals them; none when it
-// quoted none.
+// The claims the answer an evidence follow-up re-reads quoted as the filed
+// cause of its figures (#542), as its child snapshot seals them; none when it
+// quoted none. That answer is the latest that saved a scope and is not itself
+// an evidence follow-up, so "Show the evidence" asked twice re-reads the same
+// one.
 export async function loadPriorCauseClaims(
   db: QueryExecutor,
   input: { threadId: string },
@@ -102,6 +104,7 @@ export async function loadPriorCauseClaims(
                 and m.role = 'assistant'
                 and m.snapshot_id is not null
                 and m.research_scope is not null
+                and m.research_scope->>'route' is distinct from 'evidence_followup'
               order by m.created_at desc
               limit 1) answer
        join snapshots cause on cause.parent_snapshot = answer.snapshot_id
