@@ -696,10 +696,11 @@ export type RebindCandidate = {
 // "bound": at least one claim bound. "unbound": read, none bound (no quarter
 // end, or no statement about the quarter or the year). "unparseable": a reply
 // of the wrong shape, so the release is left for the next rebind. "noop": a
-// concurrent rebind already read it. unlocated counts the stored sentences no
-// prompt's text holds (the exhibit changed, or a split cut one), which no
+// concurrent rebind already read it. "unasked": no prompt's text holds any of
+// its stored sentences, so no model call. unlocated counts the stored sentences
+// no prompt's text holds (the exhibit changed, or a split cut one), which no
 // prompt lists and so the rebind leaves unread.
-export type RebindOutcome = "bound" | "unbound" | "unparseable" | "noop";
+export type RebindOutcome = "bound" | "unbound" | "unparseable" | "noop" | "unasked";
 export type RebindResult = { outcome: RebindOutcome; unlocated: number };
 export type RebindDrainResult = Record<RebindOutcome | "failed" | "unlocated", number>;
 
@@ -760,10 +761,11 @@ export async function rebindRelease(deps: ExtractReleaseDeps, candidate: RebindC
   if (exhibits.length === 0) throw new Error(`${candidate.accession}: no EX-99 exhibits to rebind from`);
   const prompts = releasePrompts(exhibits).map((text) => ({ text, listed: candidate.sentences.filter((sentence) => text.includes(sentence)) }));
   // ponytail: an unlocated sentence stays a candidate, so each run fetches its
-  // release and asks again; mark it read if that churn ever shows.
+  // release again, asks nothing of it, and reports the drain incomplete; mark
+  // it read if that churn ever shows.
   const located = candidate.sentences.filter((sentence) => prompts.some((prompt) => prompt.listed.includes(sentence)));
   const unlocated = candidate.sentences.length - located.length;
-  if (located.length === 0) return { outcome: "unbound", unlocated };
+  if (located.length === 0) return { outcome: "unasked", unlocated };
   let model: string | null = null;
   const ends: Array<IsoDate | null> = [];
   const abouts = new Map<string, ReleaseStatementAbout | null>();
@@ -824,25 +826,28 @@ export async function rebindRelease(deps: ExtractReleaseDeps, candidate: RebindC
 }
 
 // Drain the rebind backlog by a document_id keyset, as the extraction drain
-// does, reading at most `limit` releases.
+// does, reading at most `limit` releases. An "unasked" release made no model
+// call, so it is not one of them: it stays a candidate, and every run starts
+// from the first release, so it would otherwise use up each run's limit.
 export async function runRebindDrain(
   deps: ExtractReleaseDeps,
   opts: { limit?: number; pageSize?: number; onRelease?: (candidate: RebindCandidate, result: RebindResult | { error: unknown }) => void } = {},
 ): Promise<RebindDrainResult> {
-  const result: RebindDrainResult = { bound: 0, unbound: 0, unparseable: 0, noop: 0, failed: 0, unlocated: 0 };
+  const result: RebindDrainResult = { bound: 0, unbound: 0, unparseable: 0, noop: 0, unasked: 0, failed: 0, unlocated: 0 };
   let cursor = ZERO_UUID;
   for (let left = opts.limit ?? Infinity; left > 0;) {
     const page = await findRebindCandidates(deps.db, { afterDocumentId: cursor, limit: Math.min(opts.pageSize ?? 100, left) });
     if (page.length === 0) break;
     for (const candidate of page) {
       cursor = candidate.documentId;
-      left -= 1;
       try {
         const read = await rebindRelease(deps, candidate);
+        if (read.outcome !== "unasked") left -= 1;
         result[read.outcome] += 1;
         result.unlocated += read.unlocated;
         opts.onRelease?.(candidate, read);
       } catch (error) {
+        left -= 1;
         result.failed += 1;
         opts.onRelease?.(candidate, { error });
       }

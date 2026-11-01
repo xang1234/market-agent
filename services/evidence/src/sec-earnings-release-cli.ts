@@ -62,7 +62,7 @@ async function main(): Promise<void> {
       });
       console.log(
         `done: ${result.bound} bound, ${result.unbound} unbound, ${result.unparseable} unparseable, ` +
-          `${result.noop} already-done, ${result.failed} failed; ${result.unlocated} sentences unlocated`,
+          `${result.noop} already-done, ${result.unasked} with none located, ${result.failed} failed; ${result.unlocated} sentences unlocated`,
       );
       incomplete = drainIncomplete(result);
     } else {
@@ -82,9 +82,9 @@ async function main(): Promise<void> {
 }
 
 // A filing that failed, or that the model answered badly, is left unread for
-// the next run.
+// the next run, as is a stored sentence a rebind could not locate.
 export function drainIncomplete(result: ExtractReleaseDrainResult | RebindDrainResult): boolean {
-  return result.failed > 0 || result.unparseable > 0;
+  return result.failed > 0 || result.unparseable > 0 || ("unlocated" in result && result.unlocated > 0);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
