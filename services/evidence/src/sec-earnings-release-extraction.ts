@@ -678,9 +678,9 @@ export async function runReleaseExtractionDrain(
 // explanations bound to no period. A rebind reads it again and asks only for
 // the quarter's end and what each of those stored sentences is about, then
 // fills their periods in place: never a new claim, so citations of them stay.
-// Each explanation a rebind reads is stamped enriched_at (unused on these
-// claims otherwise), bound or not, so a release is read once even if it can
-// never bind; clearRebindMarks makes the unbound ones candidates again.
+// Each explanation a rebind reads is stamped period_read_at, bound or not, so
+// a release is read once even if it can never bind; clearRebindMarks makes the
+// unbound ones candidates again.
 export type RebindCandidate = {
   documentId: string;
   accession: string;
@@ -724,7 +724,7 @@ export async function findRebindCandidates(
       where c.predicate like 'management.explanation.%'
         and ${CURRENT_CLAIM_SQL}
         and c.period_end is null
-        and c.enriched_at is null
+        and c.period_read_at is null
         and i.cik is not null
         and c.document_id > $1::uuid
       group by c.document_id, d.provider_doc_id, i.cik
@@ -792,7 +792,7 @@ export async function rebindRelease(deps: ExtractReleaseDeps, candidate: RebindC
   return withTransaction(deps.db, async (tx) => {
     const { rows } = await tx.db.query<{ claim_id: string; bound: boolean }>(
       `update claims c
-          set enriched_at = now(),
+          set period_read_at = now(),
               period_kind = l.kind,
               period_end = l.end_date,
               period_bound_at = case when l.kind is null then null else now() end
@@ -802,7 +802,7 @@ export async function rebindRelease(deps: ExtractReleaseDeps, candidate: RebindC
           and c.predicate like 'management.explanation.%'
           and ${CURRENT_CLAIM_SQL}
           and c.period_end is null
-          and c.enriched_at is null
+          and c.period_read_at is null
       returning c.claim_id::text as claim_id, c.period_end is not null as bound`,
       [candidate.documentId, located, periods.map((period) => period?.kind ?? null), periods.map((period) => period?.end ?? null)],
     );
@@ -851,11 +851,11 @@ export async function runRebindDrain(
 // change. Returns how many.
 export async function clearRebindMarks(db: QueryExecutor): Promise<number> {
   const { rowCount } = await db.query(
-    `update claims c set enriched_at = null
+    `update claims c set period_read_at = null
       where c.predicate like 'management.explanation.%'
         and ${CURRENT_CLAIM_SQL}
         and c.period_end is null
-        and c.enriched_at is not null`,
+        and c.period_read_at is not null`,
   );
   return rowCount ?? 0;
 }
