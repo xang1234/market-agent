@@ -69,8 +69,10 @@ const IGNORED: Shown = { kind: "ignored" };
  * What a filed cause explains for each company: the figures it shows at the
  * period with the latest end, which `named` accepts. Its earlier figures must
  * be the trend of one shown there. A company with an output no one period
- * explains, with two periods ending that day (a Q4 beside its fiscal year), or
- * with an earlier figure not shown at the latest, has none.
+ * explains, with a figure it shows no verified value for (a gap binds no
+ * period, so its own may be the latest), with two periods ending that day (a
+ * Q4 beside its fiscal year), or with an earlier figure not shown at the
+ * latest, has none.
  */
 export function explainedFigures(input: Readonly<{
   plan: FinancialPlanV1;
@@ -102,7 +104,11 @@ export function explainedFigures(input: Readonly<{
     const slots = new Set(reads.map((read) => read.subject_slot));
     return onePeriod && slots.size === 1 ? { kind: "figure", slot: reads[0]!.subject_slot, figure, period: first } : opaque(node);
   };
-  const outputs = plan.outputs.filter((output) => input.verified.has(output.output_id)).map((output) => shown(nodes.get(output.node_id)!));
+  const outputs = plan.outputs.map((output) => {
+    const node = nodes.get(output.node_id)!;
+    const figure = shown(node);
+    return input.verified.has(output.output_id) || figure.kind === "ignored" ? figure : opaque(node);
+  });
   return plan.subjects.members.map((member): Explained => {
     const issuer = member.subject_ref.id.toLowerCase();
     const none: Explained = { issuer, kind: "none" };
