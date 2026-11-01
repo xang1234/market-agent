@@ -662,3 +662,61 @@ test("a reply whose quarter end is written in words, with a statement of no abou
   ]);
   assert.deepEqual(await findReleaseCandidates(client), []);
 });
+
+// AMD's release with a long CFO commentary after it, so it is read in three
+// prompts, and a scripted reply for each call in turn.
+const AMD_Q2_MARGIN = "Second quarter gross margin was 40%, down primarily due to the MI308 inventory charges.";
+const AMD_Q2_LONG_SUBMISSION = amdSubmission(["AMD Reports Second Quarter 2025 Financial Results", MI308_EXPLANATION, AMD_Q2_MARGIN])
+  .replace("</SEC-DOCUMENT>", "<DOCUMENT>\n<TYPE>EX-99.2\n<TEXT>\n<html><body>" +
+    Array.from({ length: 1_500 }, (_, n) => `<p>Paragraph ${n} restates a figure from the quarter.</p>`).join("") +
+    "</body></html>\n</TEXT>\n</DOCUMENT>\n</SEC-DOCUMENT>");
+function scriptedLlm(replies: ReadonlyArray<object>): { llm: ExtractReleaseDeps["llm"]; calls: string[] } {
+  const calls: string[] = [];
+  return {
+    calls,
+    llm: {
+      complete: async (request) => {
+        calls.push(request.messages.map((message) => message.content).join("\n"));
+        return { text: JSON.stringify(replies[calls.length - 1]), deployment: { channel: "test", model: "test-model" } };
+      },
+    },
+  };
+}
+const explains = (metric: string, about: string, quote: string) => ({ kind: "explanation", metric, about, quote });
+
+test("a sentence two prompts say are about different periods stays unbound, for every metric it explains", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-about-disagree");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedItem202(client, AMD_Q2);
+  const { llm, calls } = scriptedLlm([
+    { quarter_end: "2025-06-28", statements: [explains("gross_margin", "quarter", MI308_EXPLANATION), explains("gross_margin", "quarter", AMD_Q2_MARGIN)] },
+    { quarter_end: "2025-06-28", statements: [explains("gross_margin", "year", MI308_EXPLANATION), explains("operating_income", "year", MI308_EXPLANATION)] },
+    { quarter_end: "2025-06-28", statements: [explains("gross_margin", "quarter", MI308_EXPLANATION)] },
+  ]);
+  await runReleaseExtractionDrain({ db: client, llm, secClient: fakeSec(AMD_Q2_LONG_SUBMISSION) });
+  assert.equal(calls.length, 3);
+  assert.deepEqual(periodsOf(await releaseClaims(client, seeded.documentId)), [
+    ["management.explanation.gross_margin", MI308_EXPLANATION, null, null],
+    ["management.explanation.gross_margin", AMD_Q2_MARGIN, "fiscal_q", "2025-06-28"],
+    ["management.explanation.operating_income", MI308_EXPLANATION, null, null],
+  ]);
+});
+
+test("a release whose prompts name different quarter ends binds none of its claims", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-end-disagree");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedItem202(client, AMD_Q2);
+  const statements = [explains("gross_margin", "quarter", MI308_EXPLANATION), explains("gross_margin", "quarter", AMD_Q2_MARGIN)];
+  const { llm, calls } = scriptedLlm([
+    { quarter_end: "2025-06-28", statements },
+    { quarter_end: "2025-03-29", statements },
+    { quarter_end: "2025-06-28", statements },
+  ]);
+  const result = await runReleaseExtractionDrain({ db: client, llm, secClient: fakeSec(AMD_Q2_LONG_SUBMISSION) });
+  assert.equal(calls.length, 3);
+  assert.equal(result.extracted, 1);
+  assert.deepEqual(periodsOf(await releaseClaims(client, seeded.documentId)), [
+    ["management.explanation.gross_margin", MI308_EXPLANATION, null, null],
+    ["management.explanation.gross_margin", AMD_Q2_MARGIN, null, null],
+  ]);
+});
