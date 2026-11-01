@@ -566,6 +566,27 @@ export async function extractReleaseStatements(
   return applied ? outcome : "noop";
 }
 
+// Make Item 2.02 releases already read candidates again when none of their
+// management explanations is bound (read before #542, or by a reply that gave
+// no quarter end), so the next drain binds those claims in place. Returns how
+// many. A release with one bound explanation is not reopened.
+// ponytail: each run re-reads releases whose reply had no end, or whose
+// explanations are all about another period; a per-release rebind mark if
+// that grows costly.
+export async function reopenUnboundReleases(db: QueryExecutor): Promise<number> {
+  const { rowCount } = await db.query(
+    `update claims r set enriched_at = null
+      where r.predicate = 'material_event.guidance_update'
+        and r.enriched_at is not null
+        and exists (select 1 from claims c where c.document_id = r.document_id and c.predicate like 'management.explanation.%')
+        and not exists (select 1 from claims c
+                         where c.document_id = r.document_id
+                           and c.predicate like 'management.explanation.%'
+                           and c.period_end is not null)`,
+  );
+  return rowCount ?? 0;
+}
+
 export type ExtractReleaseDrainResult = Record<ExtractReleaseOutcome | "failed", number>;
 
 // Drain the backlog by a claim_id keyset, advancing past failures so one bad

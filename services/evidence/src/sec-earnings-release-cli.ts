@@ -4,16 +4,18 @@
 //   DATABASE_URL=... SEC_EDGAR_USER_AGENT=... \
 //     LLM_CHANNELS=<provider> LLM_<PROVIDER>_BASE_URL=... LLM_<PROVIDER>_API_KEY=... \
 //     LLM_<PROVIDER>_MODELS=<model> LITELLM_MODEL=<provider>/<model> \
-//     npm run extract:earnings-releases
+//     npm run extract:earnings-releases [-- --rebind]
 //   (or point LLM_SETTINGS_ENV_FILE=<path> at a file with the same vars.)
 //
 // Finds Item 2.02 8-Ks not yet processed, re-fetches each, and stores the
 // verbatim management statements a model picks from its EX-99 exhibits. A batch
 // step, never the atomic crawl (the model call is external and slow).
 // Idempotent: enriched_at marks each Item 2.02 claim processed.
+// --rebind first reopens releases already read whose explanations are all
+// unbound to a fiscal period, so this run binds them in place (#542).
 import { Pool } from "pg";
 import { createLlmRouterFromEnv } from "../../llm/src/settings-loader.ts";
-import { runReleaseExtractionDrain, type ExtractReleaseDrainResult } from "./sec-earnings-release-extraction.ts";
+import { reopenUnboundReleases, runReleaseExtractionDrain, type ExtractReleaseDrainResult } from "./sec-earnings-release-extraction.ts";
 import { SecEdgarClient } from "./sec-edgar.ts";
 
 async function main(): Promise<void> {
@@ -31,6 +33,7 @@ async function main(): Promise<void> {
   const pool = new Pool({ connectionString: databaseUrl });
   let result;
   try {
+    if (process.argv.includes("--rebind")) console.log(`rebind: ${await reopenUnboundReleases(pool)} releases reopened`);
     result = await runReleaseExtractionDrain({ db: pool, llm, secClient }, {
       onClaim: (candidate, outcome) => {
         if (typeof outcome === "object") {
