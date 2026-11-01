@@ -32,7 +32,6 @@ async function serve(t: TestContext, handler: Handler): Promise<string> {
 // Recorded ids (server- and client-generated).
 const THREAD = "11111111-1111-4111-8111-111111111111";
 const USER_MSG = "22222222-2222-4222-8222-222222222222";
-const USER_SNAP = "33333333-3333-4333-8333-333333333333";
 const RUN = "44444444-4444-4444-8444-444444444444";
 const ANSWER = "55555555-5555-4555-8555-555555555555";
 const FACT = "66666666-6666-4666-8666-666666666666";
@@ -52,7 +51,7 @@ const FIXTURE: ReplayFixture = {
     { method: "GET", path: `/v1/chat/threads/${THREAD}/messages`, query: "", requestBody: "", status: 200, contentType: "application/json", body: json({ messages: [] }) },
     {
       method: "POST", path: `/v1/chat/threads/${THREAD}/messages`, query: "",
-      requestBody: json({ message_id: USER_MSG, snapshot_id: USER_SNAP, content: intent }),
+      requestBody: json({ message_id: USER_MSG, content: intent }),
       status: 201, contentType: "application/json", body: json({ message_id: USER_MSG, role: "user" }),
     },
     {
@@ -82,9 +81,8 @@ test("replay serves a recorded turn, with the client's own ids substituted in", 
 
   // The client generates fresh ids for its message and run.
   const myMsg = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-  const mySnap = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
   const myRun = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
-  const saved = await call("POST", `/v1/chat/threads/${THREAD}/messages`, { message_id: myMsg, snapshot_id: mySnap, content: intent });
+  const saved = await call("POST", `/v1/chat/threads/${THREAD}/messages`, { message_id: myMsg, content: intent });
   assert.equal(saved.status, 201);
   assert.equal(JSON.parse(saved.text).message_id, myMsg);
 
@@ -117,7 +115,7 @@ test("replay starts over when the client starts the recorded flow again (a secon
   const runConversation = async (msg: string, run: string) => {
     const thread = JSON.parse(await call("POST", "/v1/chat/threads", { title: "" })).thread_id as string;
     const before = JSON.parse(await call("GET", `/v1/chat/threads/${thread}/messages`)).messages;
-    await call("POST", `/v1/chat/threads/${thread}/messages`, { message_id: msg, snapshot_id: USER_SNAP, content: intent });
+    await call("POST", `/v1/chat/threads/${thread}/messages`, { message_id: msg, content: intent });
     const query = new URLSearchParams({ run_id: run, turn_id: msg, user_intent: intent, user_id: USER }).toString();
     const stream = await call("GET", `/v1/chat/threads/${thread}/stream?${query}`);
     const after = JSON.parse(await call("GET", `/v1/chat/threads/${thread}/messages`)).messages;
@@ -168,7 +166,7 @@ test("replay keeps an evidence lookup from jumping the conversation ahead", asyn
     (await fetch(`${base}${path}`, { method, ...(body ? { body: json(body) } : {}) })).text();
 
   await call("POST", "/v1/chat/threads", { title: "" });
-  await call("POST", `/v1/chat/threads/${THREAD}/messages`, { message_id: USER_MSG, snapshot_id: USER_SNAP, content: intent });
+  await call("POST", `/v1/chat/threads/${THREAD}/messages`, { message_id: USER_MSG, content: intent });
   assert.equal(JSON.parse(await call("GET", `/v1/chat/threads/${THREAD}/messages`)).turns, 1);
   // Inspecting a fact from the first answer, recorded after the second turn...
   assert.equal(JSON.parse(await call("POST", "/v1/evidence/inspect", { ref: { kind: "fact", id: FACT } })).title, "revenue");
@@ -190,7 +188,7 @@ test("replay reaches reads recorded after an evidence lookup (a lookup isn't a w
 
   assert.deepEqual(JSON.parse(await call("GET", "/v1/chat/threads")).threads, []);
   await call("POST", "/v1/chat/threads", { title: "" });
-  await call("POST", `/v1/chat/threads/${THREAD}/messages`, { message_id: USER_MSG, snapshot_id: USER_SNAP, content: intent });
+  await call("POST", `/v1/chat/threads/${THREAD}/messages`, { message_id: USER_MSG, content: intent });
   // The sidebar after the turn lists the new thread, not the empty list from before it.
   assert.deepEqual(JSON.parse(await call("GET", "/v1/chat/threads")).threads, [THREAD]);
 });
@@ -222,7 +220,7 @@ test("replay kept in a store picks up where it left off after a reload", () => {
   // A second new thread gets an id only the replay's session knows.
   const thread = JSON.parse(ask(page, "POST", "/v1/chat/threads", { title: "" })!.body).thread_id as string;
   assert.notEqual(thread, THREAD);
-  ask(page, "POST", `/v1/chat/threads/${thread}/messages`, { message_id: myMsg, snapshot_id: USER_SNAP, content: intent });
+  ask(page, "POST", `/v1/chat/threads/${thread}/messages`, { message_id: myMsg, content: intent });
 
   const reloaded = createReplay(fixture, store);
   assert.deepEqual(JSON.parse(ask(reloaded, "GET", `/v1/chat/threads/${thread}/messages`)!.body), { messages: [myMsg] });
@@ -234,7 +232,7 @@ test("replay kept in a store picks up where it left off after a reload", () => {
 function playTurn(store: ReplayStore) {
   const page = createReplay(FIXTURE, store);
   page({ method: "POST", path: "/v1/chat/threads", query: "", body: json({ title: "" }) });
-  page({ method: "POST", path: `/v1/chat/threads/${THREAD}/messages`, query: "", body: json({ message_id: USER_MSG, snapshot_id: USER_SNAP, content: intent }) });
+  page({ method: "POST", path: `/v1/chat/threads/${THREAD}/messages`, query: "", body: json({ message_id: USER_MSG, content: intent }) });
   page({ method: "GET", path: `/v1/chat/threads/${THREAD}/stream`, query: streamQuery, body: "" });
 }
 
@@ -276,10 +274,10 @@ test("a saved session that doesn't parse, or isn't one this replay saved, counts
 test("a reload between turns of the golden conversation shows the thread as it stood", async () => {
   const fixture = await loadReplayFixture(fileURLToPath(new URL("../fixtures/golden-conversation.replay.json", import.meta.url)));
   const store = memoryStore();
-  // What the web client sends: its own message, snapshot and run ids, then the stream.
+  // What the web client sends: its own message and run ids, then the stream.
   const turn = (replay: Replay, thread: string, content: string) => {
-    const [message_id, snapshot_id, run_id] = [randomUUID(), randomUUID(), randomUUID()];
-    const posted = replay({ method: "POST", path: `/v1/chat/threads/${thread}/messages`, query: "", body: json({ message_id, snapshot_id, content }) });
+    const [message_id, run_id] = [randomUUID(), randomUUID()];
+    const posted = replay({ method: "POST", path: `/v1/chat/threads/${thread}/messages`, query: "", body: json({ message_id, content }) });
     const query = new URLSearchParams({ run_id, turn_id: message_id, user_intent: content, user_id: USER }).toString();
     const stream = replay({ method: "GET", path: `/v1/chat/threads/${thread}/stream`, query, body: "" });
     assert.equal(posted?.status, 201, content);
@@ -311,7 +309,7 @@ test("replay answers an unrecorded request with a clear 404, not a guess", async
   assert.match((await response.json()).error, /UI mode.*no recorded response.*GET \/v1\/market\/quotes/);
   const wrongQuestion = await fetch(`${base}/v1/chat/threads/${THREAD}/messages`, {
     method: "POST",
-    body: json({ message_id: USER_MSG, snapshot_id: USER_SNAP, content: "Something never recorded" }),
+    body: json({ message_id: USER_MSG, content: "Something never recorded" }),
   });
   assert.equal(wrongQuestion.status, 404);
 });

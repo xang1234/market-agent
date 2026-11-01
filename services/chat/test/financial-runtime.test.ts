@@ -6,6 +6,7 @@ import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { databaseUrl, IDS, ORIGINAL_REVENUE } from "../../financial-engine/test/db-fixtures.ts";
 import type { ChatAnalystToolRuntime, ChatAssistantMessagePersistence } from "../src/coordinator.ts";
 import { financialMessageId } from "../src/chat-ids.ts";
+import { persistUserChatMessage } from "../src/messages.ts";
 import { createChatFinancialRuntime, SCOPE_METRICS } from "../src/financial-runtime.ts";
 import { METRIC_CATALOG_V1, OPERATION_REGISTRY } from "../../financial-core/src/index.ts";
 import { proposedMetric, resolveResearchScope, type CompanyChange, type ScopeProposal } from "../src/research-scope.ts";
@@ -603,6 +604,50 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
       [id],
     );
     assert.equal(pointers.thread, pointers.answer);
+  });
+
+  await t.test("a turn's answer is never written into another thread's message that holds its id", async () => {
+    const turn = { ...base, turnId: randomUUID(), userIntent: "Revenue for AAA" };
+    const id = financialMessageId(threadId, turn.turnId);
+    const strangerThreadId = randomUUID();
+    await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [strangerThreadId, IDS.other]);
+    const read = () => db.query(`select thread_id::text, role, blocks from chat_messages where message_id = $1`, [id]);
+    // Another user posts a question under the answer's id just after this turn looked for its outcome.
+    let posted = false;
+    const racing = {
+      query: async (text: string, values?: unknown[]) => {
+        const result = await pool.query(text, values);
+        if (!posted && text.includes("from chat_messages where message_id")) {
+          posted = true;
+          await persistUserChatMessage(pool, { thread_id: strangerThreadId, user_id: IDS.other, content: "What did they ask?", message_id: id });
+        }
+        return result;
+      },
+      connect: () => pool.connect(),
+    };
+    const { events } = await chatHarness(racing as never, { model: revenueModel(["AAA"]) }).run(turn);
+    const { rows } = await read();
+    assert.deepEqual(
+      rows.map((row) => [row.thread_id, row.role, row.blocks.map((block: { kind: string; segments: unknown }) => [block.kind, block.segments])]),
+      [[strangerThreadId, "user", [["rich_text", [{ type: "text", text: "What did they ask?" }]]]]],
+    );
+    // The publish rolled back, so the turn fails as one whose commit failed does.
+    assert.deepEqual([events.at(-1)!.type, events.at(-1)!.error_code], ["turn.error", "financial_answer_failed"]);
+  });
+
+  await t.test("a turn whose answer's id another thread's message held before it started fails, and leaves that message", async () => {
+    const turn = { ...base, turnId: randomUUID(), userIntent: "Revenue for AAA" };
+    const id = financialMessageId(threadId, turn.turnId);
+    const strangerThreadId = randomUUID();
+    await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [strangerThreadId, IDS.other]);
+    await persistUserChatMessage(pool, { thread_id: strangerThreadId, user_id: IDS.other, content: "What did they ask?", message_id: id });
+    const { events } = await chatHarness(pool, { model: revenueModel(["AAA"]) }).run(turn);
+    const { rows } = await db.query(`select thread_id::text, role, blocks from chat_messages where message_id = $1`, [id]);
+    assert.deepEqual(
+      rows.map((row) => [row.thread_id, row.role, row.blocks.map((block: { kind: string; segments: unknown }) => [block.kind, block.segments])]),
+      [[strangerThreadId, "user", [["rich_text", [{ type: "text", text: "What did they ask?" }]]]]],
+    );
+    assert.deepEqual([events.at(-1)!.type, events.at(-1)!.error_code], ["turn.error", "financial_answer_failed"]);
   });
 
   await t.test("a turn about a company reaches the engine; one about none, or whose reading asks for no figure but evidence, guidance or market data, the analyst (#398)", async (st) => {

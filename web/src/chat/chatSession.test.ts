@@ -15,7 +15,7 @@ import type { ChatMessage, RunStatus } from './messageTypes.ts'
 import type { ChatSseEvent } from './sseEventTypes.ts'
 import type { StreamingRichTextBlock } from './streamReducer.ts'
 
-const TURN: TurnIds = { runId: 'run-1', messageId: 'u1', snapshotId: 'snap-1', text: 'Analyze NVDA' }
+const TURN: TurnIds = { runId: 'run-1', messageId: 'u1', text: 'Analyze NVDA' }
 
 function message(id: string, role: ChatMessage['role'], text: string): ChatMessage {
   return {

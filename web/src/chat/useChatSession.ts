@@ -167,7 +167,7 @@ export function useChatSession({ userId, threadId, navigate, onThreadCreated }: 
     const text = raw.trim()
     const before = store.getState()
     if (text === '' || !userId || !selectThreadView(before).canAsk) return false
-    const turn: TurnIds = { runId: makeId(), messageId: makeId(), snapshotId: makeId(), text }
+    const turn: TurnIds = { runId: makeId(), messageId: makeId(), text }
     store.dispatch({ type: 'ask.started', turn })
 
     // A disposed session has no UI left to update or navigate from.
@@ -201,7 +201,6 @@ export function useChatSession({ userId, threadId, navigate, onThreadCreated }: 
           threadId: sendThreadId,
           userId,
           messageId: turn.messageId,
-          snapshotId: turn.snapshotId,
           content: turn.text,
         })
       } catch (caught) {

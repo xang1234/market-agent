@@ -276,7 +276,6 @@ test('Chat user turns are posted to durable thread messages before streaming', a
       threadId: 'thread-123',
       userId: USER_ID,
       messageId: 'message-user',
-      snapshotId: SNAPSHOT_ID,
       content: 'Review margins',
     })
 
@@ -286,7 +285,6 @@ test('Chat user turns are posted to durable thread messages before streaming', a
     assert.equal((calls[0].init?.headers as Record<string, string>)['x-user-id'], USER_ID)
     assert.deepEqual(JSON.parse(String(calls[0].init?.body)), {
       message_id: 'message-user',
-      snapshot_id: SNAPSHOT_ID,
       content: 'Review margins',
     })
   } finally {

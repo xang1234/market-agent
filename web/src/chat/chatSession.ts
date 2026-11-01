@@ -2,7 +2,7 @@ import type { ChatMessage, RunRef, RunStatus } from './messageTypes.ts'
 import type { ChatSseEvent } from './sseEventTypes.ts'
 import { INITIAL_STREAM_STATE, applyChatStreamEvent, type StreamState } from './streamReducer.ts'
 
-export type TurnIds = { runId: string; messageId: string; snapshotId: string; text: string }
+export type TurnIds = { runId: string; messageId: string; text: string }
 
 export type RunInput = Readonly<{ userIntent: string }>
 
