@@ -116,8 +116,10 @@ export async function createClaim(db: QueryExecutor, input: ClaimInput): Promise
         confidence,
         status,
         period_kind,
-        period_end)
-     values ($1::uuid, $2, $3, $4::polarity, $5::claim_modality, $6::uuid, $7, $8, $9, $10, $11::claim_status, $12, $13::date)
+        period_end,
+        period_bound_at)
+     values ($1::uuid, $2, $3, $4::polarity, $5::claim_modality, $6::uuid, $7, $8, $9, $10, $11::claim_status, $12, $13::date,
+             case when $12::text is not null then now() end)
      returning ${CLAIM_COLUMNS}`,
     [
       normalized.document_id,

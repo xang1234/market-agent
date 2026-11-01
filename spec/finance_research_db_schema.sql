@@ -483,7 +483,11 @@ create table claims (
   enriched_at timestamptz,
   period_kind text check (period_kind in ('fiscal_q', 'fiscal_y')),
   period_end date,
-  constraint claims_period_pair check ((period_kind is null) = (period_end is null))
+  -- When the claim was bound to its period. A binding or rebinding sets it to
+  -- that moment, never earlier, so a lookup replayed at an earlier cutoff
+  -- returns what it did then.
+  period_bound_at timestamptz,
+  constraint claims_period_pair check (num_nulls(period_kind, period_end, period_bound_at) in (0, 3))
 );
 create index claims_document_idx on claims(document_id);
 create index claims_predicate_idx on claims(predicate);
