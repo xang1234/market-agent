@@ -739,6 +739,8 @@ create table snapshots (
   allowed_transforms jsonb not null,
   model_version text,
   -- A child, such as an answer's filed cause, is deleted with its parent.
+  -- A child snapshot is never referenced directly; it is reached only through
+  -- its parent, and children are one level deep.
   parent_snapshot uuid references snapshots(snapshot_id) on delete cascade
 );
 create index snapshots_created_idx on snapshots(created_at desc);

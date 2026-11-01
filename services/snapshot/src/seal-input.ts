@@ -185,7 +185,8 @@ export function buildClaimBackedSealInput(input: {
   toolCalls: ReadonlyArray<SealToolCallRef>;
   modelVersion?: string | null;
   // The snapshot this one belongs to and is deleted with, such as the answer
-  // whose cause it seals.
+  // whose cause it seals. A child snapshot is never referenced directly; it is
+  // reached only through its parent, and children are one level deep.
   parentSnapshot?: UUID | null;
 }): SnapshotSealInput {
   if (input.toolCalls.length === 0) {
