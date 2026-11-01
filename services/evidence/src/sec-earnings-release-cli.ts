@@ -55,10 +55,14 @@ async function main(): Promise<void> {
   try {
     if (flags.rebind) {
       if (flags.retry) console.log(`retry: ${await clearRebindMarks(pool)} explanations to read again`);
-      const result = await runRebindDrain({ db: pool, llm, secClient }, { limit, onRelease: (candidate, outcome) => report(candidate.accession, outcome) });
+      const result = await runRebindDrain({ db: pool, llm, secClient }, {
+        limit,
+        onRelease: (candidate, read) =>
+          report(candidate.accession, "error" in read ? read : read.unlocated > 0 ? `${read.outcome}, ${read.unlocated} unlocated` : read.outcome),
+      });
       console.log(
         `done: ${result.bound} bound, ${result.unbound} unbound, ${result.unparseable} unparseable, ` +
-          `${result.noop} already-done, ${result.failed} failed`,
+          `${result.noop} already-done, ${result.failed} failed; ${result.unlocated} sentences unlocated`,
       );
       incomplete = drainIncomplete(result);
     } else {

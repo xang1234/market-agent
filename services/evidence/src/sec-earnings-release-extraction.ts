@@ -693,10 +693,13 @@ export type RebindCandidate = {
 
 // "bound": at least one claim bound. "unbound": read, none bound (no quarter
 // end, or no statement about the quarter or the year). "unparseable": a reply
-// that is no JSON object, so the release is left for the next rebind. "noop": a
-// concurrent rebind already read it.
+// of the wrong shape, so the release is left for the next rebind. "noop": a
+// concurrent rebind already read it. unlocated counts the stored sentences no
+// prompt's text holds (the exhibit changed, or a split cut one), which no
+// prompt lists and so the rebind leaves unread.
 export type RebindOutcome = "bound" | "unbound" | "unparseable" | "noop";
-export type RebindDrainResult = Record<RebindOutcome | "failed", number>;
+export type RebindResult = { outcome: RebindOutcome; unlocated: number };
+export type RebindDrainResult = Record<RebindOutcome | "failed" | "unlocated", number>;
 
 export async function findRebindCandidates(
   db: QueryExecutor,
@@ -745,19 +748,25 @@ export async function findRebindCandidates(
 // Rebind one release. Each prompt lists the stored sentences its text holds,
 // so each is read in context; its quarter's end and the sentences' periods
 // follow the extraction's rules (reportedQuarterEnd, explainedPeriod, and
-// readings of a sentence that disagree bind it to none). Transport errors
-// propagate, so a drain fails-and-retries the release later. The periods and
-// the marks are one update, guarded by the marks: a concurrent rebind makes
-// this one a "noop".
-export async function rebindRelease(deps: ExtractReleaseDeps, candidate: RebindCandidate): Promise<RebindOutcome> {
+// readings of a sentence that disagree bind it to none). Only the sentences
+// a prompt listed are updated. Transport errors, and a release with no EX-99
+// exhibits, propagate, so a drain fails-and-retries the release later. The
+// periods and the marks are one update, guarded by the marks: a concurrent
+// rebind makes this one a "noop".
+export async function rebindRelease(deps: ExtractReleaseDeps, candidate: RebindCandidate): Promise<RebindResult> {
   const exhibits = await fetchReleaseExhibits(deps.secClient, candidate.issuerCik, candidate.accession);
-  const prompts = releasePrompts(exhibits);
+  if (exhibits.length === 0) throw new Error(`${candidate.accession}: no EX-99 exhibits to rebind from`);
+  const prompts = releasePrompts(exhibits).map((text) => ({ text, listed: candidate.sentences.filter((sentence) => text.includes(sentence)) }));
+  // ponytail: an unlocated sentence stays a candidate, so each run fetches its
+  // release and asks again; mark it read if that churn ever shows.
+  const located = candidate.sentences.filter((sentence) => prompts.some((prompt) => prompt.listed.includes(sentence)));
+  const unlocated = candidate.sentences.length - located.length;
+  if (located.length === 0) return { outcome: "unbound", unlocated };
   let model: string | null = null;
   const ends: Array<IsoDate | null> = [];
   const abouts = new Map<string, ReleaseStatementAbout | null>();
   let unparseable = false;
-  for (const [index, prompt] of prompts.entries()) {
-    const listed = candidate.sentences.filter((sentence) => prompt.includes(sentence));
+  for (const [index, { text: prompt, listed }] of prompts.entries()) {
     const completion = await completeLogged(
       deps,
       "rebind_earnings_release.prompt",
@@ -775,11 +784,11 @@ export async function rebindRelease(deps: ExtractReleaseDeps, candidate: RebindC
   }
   const args = { document_id: candidate.documentId, accession: candidate.accession, model };
   if (unparseable) {
-    await writeToolCallLog(deps.db, { tool_name: "rebind_earnings_release", args, result: { outcome: "unparseable" }, status: "partial" });
-    return "unparseable";
+    await writeToolCallLog(deps.db, { tool_name: "rebind_earnings_release", args, result: { outcome: "unparseable", unlocated }, status: "partial" });
+    return { outcome: "unparseable", unlocated };
   }
   const quarterEnd = reportedQuarterEnd(ends, candidate.effectiveTime?.slice(0, 10) ?? null);
-  const periods = candidate.sentences.map((sentence) => explainedPeriod(quarterEnd, { kind: "explanation", about: abouts.get(sentence) ?? "other" }));
+  const periods = located.map((sentence) => explainedPeriod(quarterEnd, { kind: "explanation", about: abouts.get(sentence) ?? "other" }));
   return withTransaction(deps.db, async (tx) => {
     const { rows } = await tx.db.query<{ claim_id: string; bound: boolean }>(
       `update claims c
@@ -795,17 +804,17 @@ export async function rebindRelease(deps: ExtractReleaseDeps, candidate: RebindC
           and c.period_end is null
           and c.enriched_at is null
       returning c.claim_id::text as claim_id, c.period_end is not null as bound`,
-      [candidate.documentId, candidate.sentences, periods.map((period) => period?.kind ?? null), periods.map((period) => period?.end ?? null)],
+      [candidate.documentId, located, periods.map((period) => period?.kind ?? null), periods.map((period) => period?.end ?? null)],
     );
-    if (rows.length === 0) return "noop";
+    if (rows.length === 0) return { outcome: "noop", unlocated };
     const outcome = rows.some((row) => row.bound) ? "bound" : "unbound";
     await writeToolCallLog(tx.db, {
       tool_name: "rebind_earnings_release",
       args,
-      result: { outcome, quarter_end: quarterEnd, claim_ids: rows.map((row) => row.claim_id), bound: rows.filter((row) => row.bound).length },
+      result: { outcome, quarter_end: quarterEnd, claim_ids: rows.map((row) => row.claim_id), bound: rows.filter((row) => row.bound).length, unlocated },
       status: outcome === "bound" ? "ok" : "skipped",
     });
-    return outcome;
+    return { outcome, unlocated };
   });
 }
 
@@ -813,9 +822,9 @@ export async function rebindRelease(deps: ExtractReleaseDeps, candidate: RebindC
 // does, reading at most `limit` releases.
 export async function runRebindDrain(
   deps: ExtractReleaseDeps,
-  opts: { limit?: number; pageSize?: number; onRelease?: (candidate: RebindCandidate, result: RebindOutcome | { error: unknown }) => void } = {},
+  opts: { limit?: number; pageSize?: number; onRelease?: (candidate: RebindCandidate, result: RebindResult | { error: unknown }) => void } = {},
 ): Promise<RebindDrainResult> {
-  const result: RebindDrainResult = { bound: 0, unbound: 0, unparseable: 0, noop: 0, failed: 0 };
+  const result: RebindDrainResult = { bound: 0, unbound: 0, unparseable: 0, noop: 0, failed: 0, unlocated: 0 };
   let cursor = ZERO_UUID;
   for (let left = opts.limit ?? Infinity; left > 0;) {
     const page = await findRebindCandidates(deps.db, { afterDocumentId: cursor, limit: Math.min(opts.pageSize ?? 100, left) });
@@ -824,9 +833,10 @@ export async function runRebindDrain(
       cursor = candidate.documentId;
       left -= 1;
       try {
-        const outcome = await rebindRelease(deps, candidate);
-        result[outcome] += 1;
-        opts.onRelease?.(candidate, outcome);
+        const read = await rebindRelease(deps, candidate);
+        result[read.outcome] += 1;
+        result.unlocated += read.unlocated;
+        opts.onRelease?.(candidate, read);
       } catch (error) {
         result.failed += 1;
         opts.onRelease?.(candidate, { error });
