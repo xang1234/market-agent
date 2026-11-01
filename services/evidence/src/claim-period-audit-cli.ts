@@ -13,8 +13,8 @@
 // day, as before its facts are in. Exits 0 clean, 1 on a flag, 2 on an error.
 import { Pool } from "pg";
 import type { ClaimPeriod } from "./claim-repo.ts";
+import { citableClaimSql } from "./citable-claim.ts";
 import { factActiveSql } from "./fact-activity.ts";
-import { citableClaimSql } from "./local-runtime-evidence.ts";
 import type { QueryExecutor } from "./types.ts";
 
 export type ClaimPeriodAudit = {
