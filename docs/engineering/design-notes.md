@@ -458,8 +458,8 @@ an 8-K Item 2.02 files the press release and CFO commentary as EX-99 exhibits
   is unset. High-severity 8-K enrichment reads other predicates, so the two never share a claim. `enriched_at` marks
   each processed, rowCount-guarded like the enrichment, so a concurrent run is a no-op.
 - **The model picks, the filing decides.** The model gets the EX-99 exhibits as plain text (tags dropped, entities
-  decoded, typographic quotes and dashes made plain) and returns up to 8 `{kind, metric, quote}`: kind explanation or
-  guidance, metric from a closed list. A quote is kept only if it appears verbatim in an exhibit (in that canonical
+  decoded, typographic quotes and dashes made plain) and returns up to 8 `{kind, metric, about, quote}`: kind explanation or
+  guidance, metric from a closed list, and what the statement is about (below). A quote is kept only if it appears verbatim in an exhibit (in that canonical
   form) as whole sentences: it starts at a block edge or after a sentence's end, and ends at a block edge or with its
   own end mark (a full stop counts only before what a sentence starts with, and never an abbreviation's, so neither
   "the U.S. due to" nor "the U.S. Data Center market" is a boundary). So a clause cut from a sentence ("decline due to weaker demand" out of "Revenue did not decline due
@@ -470,6 +470,12 @@ an 8-K Item 2.02 files the press release and CFO commentary as EX-99 exhibits
 - **Claims:** `management.explanation.<metric>` or `guidance.<metric>`, modality `quoted`, attributed to the issuer,
   dated by the filing, confidence 0.8 (the words are verified; reading them as an explanation is the model's). A
   `claim_evidence` row locates each one (exhibit, character span, quote hash).
+- **Periods (#542):** the reply also names `quarter_end`, the end of the quarter the release reports, read from its own
+  dated statements ("three months ended June 28, 2025"). It counts only when every prompt that names one agrees and it
+  is before the filing and at most 92 days before it (`reportedQuarterEnd`); otherwise no claim from the release is
+  bound. An explanation `about` the quarter binds `{fiscal_q, end}`, one about the year (a fourth-quarter release) binds
+  `{fiscal_y, end}`, and guidance or anything else binds none (`explainedPeriod`). A claim is keyed by document,
+  predicate and text, so reading a release again fills an unbound claim's period in place and its id stays.
 - **Chat** reads `management.explanation.` claims first (not `management.tone`) on every route that reads figures (latest quarter, trends, margins,
   segments, statements, comparisons: `ROUTE_PREDICATES`, `evidence-packet.ts`); other routes take the newest claims.
   The explanation of what the question asks about comes before the others (`explainedMetrics`: margins, then each
@@ -492,7 +498,10 @@ an 8-K Item 2.02 files the press release and CFO commentary as EX-99 exhibits
 - **Run it** after the 8-K crawl: `npm run extract:earnings-releases` (in `services/evidence`). It is a batch step,
   never the crawl: one model call per release (more for one over 60,000 characters, split between blocks, so its
   tail is read too), at low reasoning; about 46 s on the dev model in a probe (4 minutes at
-  its default reasoning).
+  its default reasoning). `-- --rebind` first reopens releases already read none of whose explanations is bound, so
+  the run binds them; one with a bound explanation is not reopened. `npm run audit:claim-periods` is a read-only census
+  of bound periods against the issuer's facts: it flags one whose fiscal year holds facts but none of that kind ending
+  that day.
 - **Not yet:** guidance compared with the reported result once it is in, 10-Q/10-K MD&A, and the frozen golden
   dataset has no such claims (the eval's "why" question still answers from figures alone).
 
