@@ -7,7 +7,7 @@
 
 import { dependencyClosure, type FinancialPlanV1, type LocalId, type OperationNode } from "../../financial-core/src/index.ts";
 import type { ClaimPeriod } from "../../evidence/src/claim-repo.ts";
-import { loadPeriodClaimEvidence, type LocalRuntimeEvidence } from "../../evidence/src/local-runtime-evidence.ts";
+import { loadPeriodClaimEvidence, lockCitableClaims, type LocalRuntimeEvidence } from "../../evidence/src/local-runtime-evidence.ts";
 import type { ParentPublication } from "../../financial-engine/src/finalize.ts";
 import type { FencedTx } from "../../financial-engine/src/lease.ts";
 import { readClosureInputs } from "../../financial-engine/src/read-model.ts";
@@ -207,22 +207,30 @@ export async function filedCauses(
       periods: await boundPeriods(tx, answer.run_id, plan),
       named: input.named,
     });
-    const read = new Map<string, LocalRuntimeEvidence>();
+    const read: Array<{ issuer: string; evidence: LocalRuntimeEvidence }> = [];
     for (const company of explained) {
       if (company.kind === "none") continue;
-      read.set(company.issuer, await loadPeriodClaimEvidence(tx.client, {
-        issuer_id: company.issuer,
-        period: company.period,
-        predicate_prefixes: causeFamilies(company.metrics),
-        user_id: tx.run.user_id,
-        as_of: plan.time.knowledge_cutoff,
-        limit: CLAIMS_PER_COMPANY,
-        // A claim two companies share is quoted once, for the first.
-        exclude_claim_ids: [...read.values()].flatMap((evidence) => evidence.claim_refs),
-      }));
+      read.push({
+        issuer: company.issuer,
+        evidence: await loadPeriodClaimEvidence(tx.client, {
+          issuer_id: company.issuer,
+          period: company.period,
+          predicate_prefixes: causeFamilies(company.metrics),
+          user_id: tx.run.user_id,
+          as_of: plan.time.knowledge_cutoff,
+          limit: CLAIMS_PER_COMPANY,
+          // A claim two companies share is quoted once, for the first.
+          exclude_claim_ids: read.flatMap(({ evidence }) => evidence.claim_refs),
+        }),
+      });
     }
-    const evidence = [...read.values()];
-    const claims = evidence.flatMap((company) => company.claims);
+    // A claim read may have been revoked since: each is locked and checked again, and one no longer citable is dropped.
+    const citable = await lockCitableClaims(tx.client, { claim_ids: read.flatMap(({ evidence }) => evidence.claim_refs), user_id: tx.run.user_id, as_of: plan.time.knowledge_cutoff });
+    const quoted = read.flatMap(({ issuer, evidence }) => {
+      const claims = evidence.claims.filter((claim) => citable.has(claim.claim_id));
+      return claims.length === 0 ? [] : [{ issuer, claims, documents: evidence.verifier_documents.filter((document) => claims.some((claim) => claim.document_id === document.document_id)) }];
+    });
+    const claims = quoted.flatMap((company) => company.claims);
     if (claims.length === 0) {
       await tx.client.query("release savepoint filed_cause");
       return uncaused;
@@ -250,9 +258,9 @@ export async function filedCauses(
     const sealed = await sealSnapshotInTransaction(snapshotTransactionClient(tx.client), {
       ...buildClaimBackedSealInput({
         block,
-        claims: evidence.flatMap((company) => company.verifier_claims),
-        documents: [...new Map(evidence.flatMap((company) => company.verifier_documents).map((document) => [document.document_id, document])).values()],
-        subjectRefs: [...read].flatMap(([issuer, company]) => company.claims.length > 0 ? [{ kind: "issuer" as const, id: issuer }] : []),
+        claims: claims.map(({ claim_id, source_id }) => ({ claim_id, source_id })),
+        documents: [...new Map(quoted.flatMap((company) => company.documents).map((document) => [document.document_id, document])).values()],
+        subjectRefs: quoted.map(({ issuer }) => ({ kind: "issuer" as const, id: issuer })),
         toolCalls: [{ tool_call_id: log.tool_call_id, result_hash: log.result_hash! }],
         parentSnapshot: answer.snapshot_id,
       }),
@@ -271,7 +279,7 @@ export async function filedCauses(
       return uncaused;
     }
     await tx.client.query("release savepoint filed_cause");
-    return { ...uncaused, quoted: new Set([...read].flatMap(([issuer, company]) => company.claims.length > 0 ? [issuer] : [])), block };
+    return { ...uncaused, quoted: new Set(quoted.map(({ issuer }) => issuer)), block };
   } catch (reason) {
     if (!isOperational(reason)) throw reason;
     // A lost connection fails the rollback too: the turn fails with the read's own error.

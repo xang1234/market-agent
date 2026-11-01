@@ -393,6 +393,45 @@ export async function loadPeriodClaimEvidence(
   return evidenceFromClaimRows(subjectRefs, rows, true);
 }
 
+// Of these claims, the ones a reader may still cite, locked inside the
+// caller's transaction as a financial publication locks its evidence
+// (financial-access-lock.ts): their sources, documents, then the claims, each
+// in id order, for share. A revocation that committed first is read and
+// drops its claim; one that comes later waits for the caller's commit.
+export async function lockCitableClaims(
+  db: RowQueryExecutor,
+  input: { claim_ids: ReadonlyArray<string>; user_id?: string | null; as_of?: string },
+): Promise<ReadonlySet<string>> {
+  const claimIds = unique(input.claim_ids).sort();
+  if (claimIds.length === 0) return new Set();
+  await db.query(
+    `select s.source_id from sources s
+      where s.source_id in (
+        select c.reported_by_source_id from claims c where c.claim_id = any($1::uuid[])
+        union
+        select d.source_id from claims c join documents d on d.document_id = c.document_id where c.claim_id = any($1::uuid[]))
+      order by s.source_id for share`,
+    [claimIds],
+  );
+  await db.query(
+    `select d.document_id from documents d
+      where d.document_id in (select c.document_id from claims c where c.claim_id = any($1::uuid[]))
+      order by d.document_id for share`,
+    [claimIds],
+  );
+  await db.query(`select c.claim_id from claims c where c.claim_id = any($1::uuid[]) order by c.claim_id for share`, [claimIds]);
+  const { rows } = await db.query<{ claim_id: string }>(
+    `select c.claim_id::text as claim_id
+       from claims c
+       join documents d on d.document_id = c.document_id
+       join sources s on s.source_id = c.reported_by_source_id
+      where c.claim_id = any($1::uuid[])
+        and ${citableClaimSql("$2::uuid", "$3::timestamptz")}`,
+    [claimIds, userIdOrNull(input.user_id), input.as_of ?? null],
+  );
+  return new Set(rows.map((row) => row.claim_id));
+}
+
 // A claim a reader may cite: extracted or corroborated and current, in a live
 // document, from sources the user may see, and under a cutoff, written and
 // published by it. c is the claim, d its document, s its reporting source.
