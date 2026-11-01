@@ -1,4 +1,5 @@
 import type { CampaignEvent } from '../../../services/discovery/src/types.ts'
+import { SECTION_LABEL_CLASS } from '../ui/pageStyles.ts'
 import { learningForEvent } from './learning.ts'
 
 export function ResearchTrail({
@@ -16,7 +17,7 @@ export function ResearchTrail({
   const groups = groupEvents(events)
   return <div className="mt-3 space-y-4">{groups.map((group) => (
     <section key={group.label} aria-label={group.label}>
-      <h3 className="text-xs font-semibold uppercase text-muted">{group.label}</h3>
+      <h3 className={SECTION_LABEL_CLASS}>{group.label}</h3>
       <ol className="mt-2 space-y-2">{group.events.map((event) => {
         const learning = learningForEvent(event)
         return <li key={event.sequence} className="rounded-md bg-surface-2 p-2 text-sm text-muted">

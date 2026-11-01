@@ -2,6 +2,13 @@ import { useEffect, useRef, useState } from "react";
 
 import type { Brief, Criterion, Mechanism, SavedBrief } from "../../../services/discovery/src/types.ts";
 import { HttpJsonError } from "../http/authFetch.ts";
+import { PRIMARY_BUTTON_CLASS, ROW_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from "../shell/buttonStyles.ts";
+import {
+  FIELD_CLASS,
+  FIELD_LABEL_CLASS,
+  PAGE_PANEL_CLASS,
+  PANEL_TITLE_CLASS,
+} from "../ui/pageStyles.ts";
 
 export type BriefSave = { expectedVersion: number; brief: Brief };
 export type BriefDraft = { expectedVersion: number };
@@ -113,17 +120,21 @@ export function BriefEditor({
   }
 
   return (
-    <section aria-labelledby="research-brief-heading" className="space-y-4 rounded-md border border-line bg-surface p-4">
+    <section aria-labelledby="research-brief-heading" className={`flex flex-col gap-4 ${PAGE_PANEL_CLASS}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h2 id="research-brief-heading" className="text-base font-semibold text-fg">Research brief</h2>
-          <p className="text-sm text-muted">Shape what the research should look for before it begins.</p>
+          <h2 id="research-brief-heading" className={PANEL_TITLE_CLASS}>Research brief</h2>
+          <p className="mt-1 text-sm text-muted">Shape what the research should look for before it begins.</p>
         </div>
-        {savedBrief && (base?.version !== savedBrief.version || isDirty) ? <button type="button" onClick={loadSaved} className="rounded-md border border-line px-3 py-1.5 text-sm text-fg hover:bg-surface-2">Load saved brief</button> : null}
+        {savedBrief && (base?.version !== savedBrief.version || isDirty) ? (
+          <button type="button" onClick={loadSaved} className={ROW_BUTTON_CLASS}>
+            Load saved brief
+          </button>
+        ) : null}
       </div>
-      <label className="grid gap-1 text-sm text-fg">
+      <label className={FIELD_LABEL_CLASS}>
         Question
-        <textarea aria-label="Question" value={draft.question} onInput={(event) => update({ ...draft, question: event.currentTarget.value })} rows={3} className="rounded-md border border-line bg-surface-2 px-3 py-2" />
+        <textarea aria-label="Question" value={draft.question} onInput={(event) => update({ ...draft, question: event.currentTarget.value })} rows={3} className={FIELD_CLASS} />
       </label>
       <div className="grid gap-3 sm:grid-cols-2">
         <NumberField label="Horizon (months)" value={draft.horizon_months} onChange={(value) => update({ ...draft, horizon_months: value })} />
@@ -131,19 +142,34 @@ export function BriefEditor({
       </div>
       <Mechanisms value={draft.mechanisms} onChange={(mechanisms) => update({ ...draft, mechanisms, queries: queriesFor(mechanisms, draft.seed_queries) })} />
       <Criteria value={draft.criteria} onChange={(criteria) => update({ ...draft, criteria })} />
-      <label className="grid gap-1 text-sm text-fg">
+      <label className={FIELD_LABEL_CLASS}>
         Seed queries
-        <textarea aria-label="Seed queries" value={draft.seed_queries.join("\n")} onInput={(event) => { const seedQueries = lines(event.currentTarget.value); update({ ...draft, seed_queries: seedQueries, queries: queriesFor(draft.mechanisms, seedQueries) }); }} rows={3} className="rounded-md border border-line bg-surface-2 px-3 py-2" />
-        <span className="text-xs text-muted">One useful starting query per line.</span>
+        <textarea aria-label="Seed queries" value={draft.seed_queries.join("\n")} onInput={(event) => { const seedQueries = lines(event.currentTarget.value); update({ ...draft, seed_queries: seedQueries, queries: queriesFor(draft.mechanisms, seedQueries) }); }} rows={3} className={FIELD_CLASS} />
+        <span className="text-xs font-normal text-muted">One useful starting query per line.</span>
       </label>
       <TextLines label="Exclusions" value={draft.exclusions} onChange={(exclusions) => update({ ...draft, exclusions })} />
       <TextLines label="Preferences" value={draft.preferences} onChange={(preferences) => update({ ...draft, preferences })} />
       {draftDisabledReason ? <p className="text-sm text-muted">{draftDisabledReason}</p> : null}
       {error ? <p role="alert" className="text-sm text-negative">{error}</p> : null}
-      <div className="flex flex-wrap gap-2">
-        {onDraft ? <button type="button" onClick={() => { void generate(); }} disabled={drafting} className="rounded-md border border-line-strong px-3 py-2 text-sm font-medium text-fg disabled:opacity-60">{drafting ? "Generating research brief…" : "Generate research brief"}</button> : null}
-        <button type="button" onClick={() => { void save(); }} disabled={saving || drafting} className="rounded-md border border-line-strong px-3 py-2 text-sm font-medium text-fg disabled:opacity-60">{saving ? "Saving brief…" : "Save research brief"}</button>
-        {onApprove ? <button type="button" onClick={() => { void approve(); }} disabled={saving || drafting || approving} className="rounded-md bg-accent px-3 py-2 text-sm font-semibold text-white disabled:opacity-60">{approving ? "Starting research…" : "Approve brief and start"}</button> : null}
+      <div className="flex flex-wrap justify-end gap-2 border-t border-line pt-4">
+        {onDraft ? (
+          <button type="button" onClick={() => { void generate(); }} disabled={drafting} className={SECONDARY_BUTTON_CLASS}>
+            {drafting ? "Generating research brief…" : "Generate research brief"}
+          </button>
+        ) : null}
+        <button type="button" onClick={() => { void save(); }} disabled={saving || drafting} className={SECONDARY_BUTTON_CLASS}>
+          {saving ? "Saving brief…" : "Save research brief"}
+        </button>
+        {onApprove ? (
+          <button
+            type="button"
+            onClick={() => { void approve(); }}
+            disabled={saving || drafting || approving}
+            className={`${PRIMARY_BUTTON_CLASS} disabled:opacity-60`}
+          >
+            {approving ? "Starting research…" : "Approve brief and start"}
+          </button>
+        ) : null}
       </div>
       <input type="hidden" value={campaignId} aria-label="Campaign" readOnly />
     </section>
@@ -151,18 +177,154 @@ export function BriefEditor({
 }
 
 function NumberField({ label, value, onChange }: { label: string; value: number; onChange(value: number): void }) {
-  return <label className="grid gap-1 text-sm text-fg">{label}<input aria-label={label} type="number" min={1} value={value} onInput={(event) => onChange(Number(event.currentTarget.value))} className="rounded-md border border-line bg-surface-2 px-3 py-2" /></label>;
+  return (
+    <label className={FIELD_LABEL_CLASS}>
+      {label}
+      <input
+        aria-label={label}
+        type="number"
+        min={1}
+        value={value}
+        onInput={(event) => onChange(Number(event.currentTarget.value))}
+        className={FIELD_CLASS}
+      />
+    </label>
+  );
 }
 
+const GROUP_CLASS = "flex min-w-0 flex-col gap-3";
+const GROUP_LEGEND_CLASS = "mb-2 text-sm font-medium text-fg";
+const ITEM_CLASS = "grid gap-3 rounded-lg border border-line p-3";
+const REMOVE_CLASS = "w-fit text-sm text-muted underline hover:text-fg";
+const ADD_CLASS = "w-fit text-sm font-medium text-accent hover:underline";
+
 function Mechanisms({ value, onChange }: { value: Mechanism[]; onChange(value: Mechanism[]): void }) {
-  return <fieldset className="space-y-2"><legend className="text-sm font-medium text-fg">Why this theme could matter</legend>{value.map((mechanism, index) => <div key={mechanism.mechanism_id} className="grid gap-2 rounded-md border border-line p-3"><label className="grid gap-1 text-sm">Mechanism {index + 1} label<input aria-label={`Mechanism ${index + 1} label`} value={mechanism.label} onInput={(event) => onChange(replace(value, index, { ...mechanism, label: event.currentTarget.value }))} className="rounded-md border border-line bg-surface-2 px-3 py-2" /></label><label className="grid gap-1 text-sm">Mechanism {index + 1} chain<textarea aria-label={`Mechanism ${index + 1} chain`} value={mechanism.chain.join("\n")} onInput={(event) => onChange(replace(value, index, { ...mechanism, chain: lines(event.currentTarget.value) }))} rows={2} className="rounded-md border border-line bg-surface-2 px-3 py-2" /></label>{value.length > 2 ? <button type="button" aria-label={`Remove mechanism ${index + 1}`} onClick={() => onChange(value.filter((_, item) => item !== index))} className="w-fit text-sm text-muted underline">Remove</button> : null}</div>)}{value.length < 4 ? <button type="button" onClick={() => onChange([...value, { mechanism_id: newId(), label: "New mechanism", chain: ["Catalyst", "Company demand"] }])} className="text-sm text-accent underline">Add mechanism</button> : null}</fieldset>;
+  return (
+    <fieldset className={GROUP_CLASS}>
+      <legend className={GROUP_LEGEND_CLASS}>Why this theme could matter</legend>
+      {value.map((mechanism, index) => (
+        <div key={mechanism.mechanism_id} className={ITEM_CLASS}>
+          <label className={FIELD_LABEL_CLASS}>
+            Mechanism {index + 1} label
+            <input
+              aria-label={`Mechanism ${index + 1} label`}
+              value={mechanism.label}
+              onInput={(event) => onChange(replace(value, index, { ...mechanism, label: event.currentTarget.value }))}
+              className={FIELD_CLASS}
+            />
+          </label>
+          <label className={FIELD_LABEL_CLASS}>
+            Mechanism {index + 1} chain
+            <textarea
+              aria-label={`Mechanism ${index + 1} chain`}
+              value={mechanism.chain.join("\n")}
+              onInput={(event) => onChange(replace(value, index, { ...mechanism, chain: lines(event.currentTarget.value) }))}
+              rows={2}
+              className={FIELD_CLASS}
+            />
+          </label>
+          {value.length > 2 ? (
+            <button
+              type="button"
+              aria-label={`Remove mechanism ${index + 1}`}
+              onClick={() => onChange(value.filter((_, item) => item !== index))}
+              className={REMOVE_CLASS}
+            >
+              Remove
+            </button>
+          ) : null}
+        </div>
+      ))}
+      {value.length < 4 ? (
+        <button
+          type="button"
+          onClick={() => onChange([...value, { mechanism_id: newId(), label: "New mechanism", chain: ["Catalyst", "Company demand"] }])}
+          className={ADD_CLASS}
+        >
+          Add mechanism
+        </button>
+      ) : null}
+    </fieldset>
+  );
 }
 
 function Criteria({ value, onChange }: { value: Criterion[]; onChange(value: Criterion[]): void }) {
-  return <fieldset className="space-y-2"><legend className="text-sm font-medium text-fg">What a company must show</legend>{value.map((criterion, index) => <div key={criterion.criterion_id} className="grid gap-2 rounded-md border border-line p-3"><label className="grid gap-1 text-sm">Priority<select aria-label={`Criterion ${index + 1} priority`} value={criterion.importance} onChange={(event) => onChange(replace(value, index, { ...criterion, importance: event.target.value as Criterion["importance"] }))} className="rounded-md border border-line bg-surface-2 px-3 py-2"><option value="must">Must have</option><option value="prefer">Preferred</option></select></label><label className="grid gap-1 text-sm">Criterion {index + 1}<textarea aria-label={`Criterion ${index + 1}`} value={criterion.statement} onInput={(event) => onChange(replace(value, index, { ...criterion, statement: event.currentTarget.value }))} rows={2} className="rounded-md border border-line bg-surface-2 px-3 py-2" /></label><label className="grid gap-1 text-sm">What would disprove it<textarea aria-label={`Criterion ${index + 1} falsifier`} value={criterion.falsifier} onInput={(event) => onChange(replace(value, index, { ...criterion, falsifier: event.currentTarget.value }))} rows={2} className="rounded-md border border-line bg-surface-2 px-3 py-2" /></label>{value.length > 1 ? <button type="button" aria-label={`Remove criterion ${index + 1}`} onClick={() => onChange(value.filter((_, item) => item !== index))} className="w-fit text-sm text-muted underline">Remove</button> : null}</div>)}{value.length < 8 ? <button type="button" onClick={() => onChange([...value, { criterion_id: newId(), importance: "prefer", statement: "The company has a clear link to the theme", falsifier: "The link is not supported by evidence" }])} className="text-sm text-accent underline">Add criterion</button> : null}</fieldset>;
+  return (
+    <fieldset className={GROUP_CLASS}>
+      <legend className={GROUP_LEGEND_CLASS}>What a company must show</legend>
+      {value.map((criterion, index) => (
+        <div key={criterion.criterion_id} className={ITEM_CLASS}>
+          <label className={FIELD_LABEL_CLASS}>
+            Priority
+            <select
+              aria-label={`Criterion ${index + 1} priority`}
+              value={criterion.importance}
+              onChange={(event) => onChange(replace(value, index, { ...criterion, importance: event.target.value as Criterion["importance"] }))}
+              className={FIELD_CLASS}
+            >
+              <option value="must">Must have</option>
+              <option value="prefer">Preferred</option>
+            </select>
+          </label>
+          <label className={FIELD_LABEL_CLASS}>
+            Criterion {index + 1}
+            <textarea
+              aria-label={`Criterion ${index + 1}`}
+              value={criterion.statement}
+              onInput={(event) => onChange(replace(value, index, { ...criterion, statement: event.currentTarget.value }))}
+              rows={2}
+              className={FIELD_CLASS}
+            />
+          </label>
+          <label className={FIELD_LABEL_CLASS}>
+            What would disprove it
+            <textarea
+              aria-label={`Criterion ${index + 1} falsifier`}
+              value={criterion.falsifier}
+              onInput={(event) => onChange(replace(value, index, { ...criterion, falsifier: event.currentTarget.value }))}
+              rows={2}
+              className={FIELD_CLASS}
+            />
+          </label>
+          {value.length > 1 ? (
+            <button
+              type="button"
+              aria-label={`Remove criterion ${index + 1}`}
+              onClick={() => onChange(value.filter((_, item) => item !== index))}
+              className={REMOVE_CLASS}
+            >
+              Remove
+            </button>
+          ) : null}
+        </div>
+      ))}
+      {value.length < 8 ? (
+        <button
+          type="button"
+          onClick={() => onChange([...value, { criterion_id: newId(), importance: "prefer", statement: "The company has a clear link to the theme", falsifier: "The link is not supported by evidence" }])}
+          className={ADD_CLASS}
+        >
+          Add criterion
+        </button>
+      ) : null}
+    </fieldset>
+  );
 }
 
-function TextLines({ label, value, onChange }: { label: string; value: string[]; onChange(value: string[]): void }) { return <label className="grid gap-1 text-sm text-fg">{label}<textarea aria-label={label} value={value.join("\n")} onInput={(event) => onChange(lines(event.currentTarget.value))} rows={2} className="rounded-md border border-line bg-surface-2 px-3 py-2" /></label>; }
+function TextLines({ label, value, onChange }: { label: string; value: string[]; onChange(value: string[]): void }) {
+  return (
+    <label className={FIELD_LABEL_CLASS}>
+      {label}
+      <textarea
+        aria-label={label}
+        value={value.join("\n")}
+        onInput={(event) => onChange(lines(event.currentTarget.value))}
+        rows={2}
+        className={FIELD_CLASS}
+      />
+    </label>
+  );
+}
 function lines(value: string): string[] { return value.split("\n").map((item) => item.trim()).filter(Boolean); }
 function replace<T>(items: T[], index: number, value: T): T[] { return items.map((item, itemIndex) => itemIndex === index ? value : item); }
 function queriesFor(mechanisms: Mechanism[], seeds: string[]): Brief["queries"] {

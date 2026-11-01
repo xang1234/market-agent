@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { PRIMARY_BUTTON_CLASS } from '../shell/buttonStyles.ts'
-import { INSET_SURFACE_CLASS, PANEL_CLASS } from '../symbol/surfaceStyles.ts'
+import { DANGER_ROW_BUTTON_CLASS, PRIMARY_BUTTON_CLASS, ROW_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../shell/buttonStyles.ts'
+import { EmptyState } from '../ui/EmptyState.tsx'
+import { PageHeader } from '../ui/PageHeader.tsx'
+import {
+  COMPACT_FIELD_CLASS,
+  FIELD_CLASS,
+  FIELDSET_CLASS,
+  PAGE_CLASS,
+  PAGE_PANEL_CLASS,
+  PANEL_TITLE_CLASS,
+  SECTION_LABEL_CLASS,
+  TOGGLE_CHIP_CLASS,
+} from '../ui/pageStyles.ts'
 import { useNavigate } from 'react-router-dom'
 import {
   ProtectedActionType,
@@ -43,7 +54,7 @@ import {
   setNumericRange,
   setOffset,
   setSort,
-  setUniverseSelection,
+  toggleUniverseValue,
   type QueryDraft,
 } from './queryDraft.ts'
 import {
@@ -276,38 +287,40 @@ export function ScreenerWorkspace() {
   }
 
   return (
-    <div className="flex flex-1 flex-col gap-6 overflow-auto p-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Screener</h1>
-        <p className="mt-1 text-sm text-muted">
-          Build, refine, and view one active screen. Saving requires a session.
-        </p>
-      </header>
+    <div className={PAGE_CLASS}>
+      <PageHeader
+        title="Screener"
+        description="Start from a template or set your own filters, then run and save the screen."
+      />
 
       <QueryTemplates onApply={handleApplyTemplate} />
 
       <form
         onSubmit={handleSubmit}
-        className={`grid gap-4 ${PANEL_CLASS} p-4 lg:grid-cols-3`}
+        className={`grid gap-4 ${PAGE_PANEL_CLASS} lg:grid-cols-3`}
         aria-label="Screener query controls"
       >
         <UniverseControls draft={draft} onChange={setDraft} />
-        <NumericRangeControls
-          legend="Market"
-          dimension="market"
-          fields={MARKET_NUMERIC_FIELDS}
-          draft={draft}
-          onChange={setDraft}
-        />
+        <div className="flex min-w-0 flex-col gap-4">
+          <NumericRangeControls
+            legend="Market"
+            dimension="market"
+            fields={MARKET_NUMERIC_FIELDS}
+            draft={draft}
+            onChange={setDraft}
+          />
+          <SortLimitControls draft={draft} onChange={setDraft} />
+        </div>
         <NumericRangeControls
           legend="Fundamentals"
           dimension="fundamentals"
           fields={FUNDAMENTALS_NUMERIC_FIELDS}
           draft={draft}
           onChange={setDraft}
+          className="lg:col-span-2"
+          fieldsClassName="grid gap-3 sm:grid-cols-2"
         />
-        <SortLimitControls draft={draft} onChange={setDraft} />
-        <div className="lg:col-span-3 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4 lg:col-span-3">
           <RunStatus status={status} errorMessage={errorMessage} savedMessage={savedMessage} />
           <div className="flex items-center gap-2">
             <input
@@ -323,18 +336,14 @@ export function ScreenerWorkspace() {
               placeholder="Name this screen"
               aria-label="Screen name"
               maxLength={SCREEN_NAME_MAX_LENGTH}
-              className={`w-48 ${INSET_SURFACE_CLASS} px-2 py-2 text-sm`}
+              className={`${FIELD_CLASS} w-52`}
             />
-            <button
-              type="button"
-              onClick={handleSaveClick}
-              className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm font-medium text-fg shadow-sm hover:bg-surface-2"
-            >
+            <button type="button" onClick={handleSaveClick} className={SECONDARY_BUTTON_CLASS}>
               Save
             </button>
             <button
               type="submit"
-              className={`${PRIMARY_BUTTON_CLASS} shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50`}
+              className={`${PRIMARY_BUTTON_CLASS} disabled:opacity-50`}
               disabled={status === 'loading'}
             >
               {status === 'loading' ? 'Running…' : 'Run'}
@@ -373,13 +382,13 @@ export function ScreenerWorkspace() {
 
 function QueryTemplates({ onApply }: { onApply: (template: QueryTemplate) => void }) {
   return (
-    <div className="flex flex-wrap gap-2" aria-label="Starter screens">
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" role="group" aria-label="Starter screens">
       {QUERY_TEMPLATES.map((template) => (
         <button
           key={template.name}
           type="button"
           onClick={() => onApply(template)}
-          className={`min-w-[180px] flex-1 rounded-lg border border-line bg-surface p-3 text-left shadow-sm transition-colors hover:border-accent-border hover:bg-surface-hover`}
+          className="rounded-lg border border-line bg-surface p-3 text-left shadow-sm transition-colors hover:border-accent-border hover:bg-surface-hover"
         >
           <span className="block text-sm font-semibold text-fg">{template.name}</span>
           <span className="mt-0.5 block text-xs text-muted">{template.description}</span>
@@ -397,34 +406,34 @@ function UniverseControls({
   onChange: (next: QueryDraft) => void
 }) {
   return (
-    <fieldset className="flex flex-col gap-3 rounded-md border border-line p-3">
-      <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-muted">
-        Universe
-      </legend>
-      {UNIVERSE_ENUM_FIELDS.map((spec) => {
-        const selected = draft.universe[spec.field] ?? []
-        return (
-          <label key={spec.field} className="flex flex-col gap-1 text-xs">
-            <span className="text-fg-soft">{spec.label}</span>
-            <select
-              multiple
-              value={selected}
-              onChange={(event) => {
-                const next = Array.from(event.target.selectedOptions).map((o) => o.value)
-                onChange(setUniverseSelection(draft, spec.field, next))
-              }}
-              className={`${INSET_SURFACE_CLASS} px-2 py-1 text-sm text-fg outline-none focus:border-accent focus:ring-2 focus:ring-accent-soft`}
-              size={Math.min(spec.options.length, 4)}
-            >
-              {spec.options.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        )
-      })}
+    <fieldset className={`${FIELDSET_CLASS} lg:col-span-3`}>
+      <legend className={`px-1 ${SECTION_LABEL_CLASS}`}>Universe</legend>
+      <div className="flex flex-wrap gap-x-8 gap-y-4">
+        {UNIVERSE_ENUM_FIELDS.map((spec) => {
+          const selected = draft.universe[spec.field] ?? []
+          return (
+            <div key={spec.field} role="group" aria-label={spec.label} className="flex min-w-0 flex-col gap-1.5">
+              <span className="text-xs font-medium text-fg-soft">{spec.label}</span>
+              <div className="flex flex-wrap gap-1.5">
+                {spec.options.map((opt) => {
+                  const on = selected.includes(opt.value)
+                  return (
+                    <label key={opt.value} className={TOGGLE_CHIP_CLASS}>
+                      <input
+                        type="checkbox"
+                        className="sr-only"
+                        checked={on}
+                        onChange={() => onChange(toggleUniverseValue(draft, spec, opt.value))}
+                      />
+                      {opt.label}
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+      </div>
     </fieldset>
   )
 }
@@ -435,27 +444,30 @@ function NumericRangeControls({
   fields,
   draft,
   onChange,
+  className = '',
+  fieldsClassName = 'flex flex-col gap-3',
 }: {
   legend: string
   dimension: 'market' | 'fundamentals'
   fields: ReadonlyArray<{ field: string; label: string; hint?: string; step?: string }>
   draft: QueryDraft
   onChange: (next: QueryDraft) => void
+  className?: string
+  fieldsClassName?: string
 }) {
   const bag = dimension === 'market' ? draft.marketNumeric : draft.fundamentalsNumeric
   return (
-    <fieldset className="flex flex-col gap-3 rounded-md border border-line p-3">
-      <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-muted">
-        {legend}
-      </legend>
+    <fieldset className={`${FIELDSET_CLASS} ${className}`}>
+      <legend className={`px-1 ${SECTION_LABEL_CLASS}`}>{legend}</legend>
+      <div className={fieldsClassName}>
       {fields.map((spec) => {
         const range = bag[spec.field] ?? emptyNumericRange()
         return (
-          <div key={spec.field} className="flex flex-col gap-1 text-xs">
-            <span className="text-fg-soft">
+          <div key={spec.field} className="flex min-w-0 flex-col gap-1.5 text-xs">
+            <span className="font-medium text-fg-soft">
               {spec.label}
               {spec.hint ? (
-                <span className="ml-1 text-faint">
+                <span className="ml-1 font-normal text-faint">
                   ({spec.hint})
                 </span>
               ) : null}
@@ -478,13 +490,14 @@ function NumericRangeControls({
                     )
                   }
                   aria-label={`${spec.label} ${bound}`}
-                  className={`min-w-0 flex-1 ${INSET_SURFACE_CLASS} px-2 py-1 text-sm num`}
+                  className={`${COMPACT_FIELD_CLASS} num flex-1`}
                 />
               ))}
             </div>
           </div>
         )
       })}
+      </div>
     </fieldset>
   )
 }
@@ -497,19 +510,17 @@ function SortLimitControls({
   onChange: (next: QueryDraft) => void
 }) {
   return (
-    <fieldset className="flex flex-col gap-3 rounded-md border border-line p-3">
-      <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-muted">
-        Sort &amp; page
-      </legend>
-      <label className="flex flex-col gap-1 text-xs">
-        <span className="text-fg-soft">Sort by</span>
+    <fieldset className={FIELDSET_CLASS}>
+      <legend className={`px-1 ${SECTION_LABEL_CLASS}`}>Sort &amp; page</legend>
+      <label className="flex min-w-0 flex-col gap-1.5 text-xs">
+        <span className="font-medium text-fg-soft">Sort by</span>
         <div className="flex gap-2">
           <select
             value={draft.sort.field}
             onChange={(event) =>
               onChange(setSort(draft, { ...draft.sort, field: event.target.value }))
             }
-            className={`min-w-0 flex-1 ${INSET_SURFACE_CLASS} px-2 py-1 text-sm`}
+            className={`${COMPACT_FIELD_CLASS} flex-1`}
           >
             {SORTABLE_FIELDS.map((spec) => (
               <option key={spec.field} value={spec.field}>
@@ -527,7 +538,7 @@ function SortLimitControls({
                 }),
               )
             }
-            className={`${INSET_SURFACE_CLASS} px-2 py-1 text-sm`}
+            className={COMPACT_FIELD_CLASS}
             aria-label="Sort direction"
           >
             <option value="desc">Descending</option>
@@ -535,8 +546,8 @@ function SortLimitControls({
           </select>
         </div>
       </label>
-      <label className="flex flex-col gap-1 text-xs">
-        <span className="text-fg-soft">Page size</span>
+      <label className="flex min-w-0 flex-col gap-1.5 text-xs">
+        <span className="font-medium text-fg-soft">Page size</span>
         <input
           type="number"
           min={SCREENER_LIMIT_MIN}
@@ -544,7 +555,7 @@ function SortLimitControls({
           step={1}
           value={draft.limit}
           onChange={(event) => onChange(setLimit(draft, Number(event.target.value)))}
-          className={`${INSET_SURFACE_CLASS} px-2 py-1 text-sm num`}
+          className={`${COMPACT_FIELD_CLASS} num`}
         />
       </label>
     </fieldset>
@@ -601,16 +612,14 @@ function SavedScreensPanel({
   return (
     <section
       aria-label="Saved screens"
-      className={`${PANEL_CLASS} p-3`}
+      className={PAGE_PANEL_CLASS}
     >
-      <header className="flex items-center justify-between pb-2 text-xs font-semibold uppercase tracking-wide text-muted">
-        <span>Saved screens</span>
-        <span className="font-normal normal-case">{screens.length}</span>
+      <header className="mb-3 flex items-baseline justify-between">
+        <h2 className={PANEL_TITLE_CLASS}>Saved screens</h2>
+        <span className="num text-xs text-muted">{screens.length}</span>
       </header>
       {screens.length === 0 ? (
-        <p className="px-1 py-2 text-xs text-muted">
-          No saved screens yet. Build one above and click Save.
-        </p>
+        <EmptyState>No saved screens yet. Name the screen above and click Save.</EmptyState>
       ) : (
         <ul className="divide-y divide-line">
           {screens.map((screen) => (
@@ -630,14 +639,14 @@ function SavedScreensPanel({
                 <button
                   type="button"
                   onClick={() => onOpen(screen)}
-                  className="rounded-md border border-line px-2 py-1 text-xs hover:bg-surface-2"
+                  className={ROW_BUTTON_CLASS}
                 >
                   Open
                 </button>
                 <button
                   type="button"
                   onClick={() => onDelete(screen)}
-                  className="rounded-md border border-line px-2 py-1 text-xs text-negative hover:bg-negative-soft"
+                  className={DANGER_ROW_BUTTON_CLASS}
                 >
                   Delete
                 </button>
@@ -678,7 +687,7 @@ function ScreenerResults({
 
   if (!response && status === 'loading') {
     return (
-      <div className={`${PANEL_CLASS} p-6 text-sm text-muted`}>
+      <div className={`${PAGE_PANEL_CLASS} text-sm text-muted`}>
         Running initial screen…
       </div>
     )
@@ -694,7 +703,7 @@ function ScreenerResults({
   const hasPrev = offset > 0
 
   return (
-    <section className={`flex flex-col gap-3 ${PANEL_CLASS} p-3`}>
+    <section aria-label="Results" className={`flex flex-col gap-4 ${PAGE_PANEL_CLASS}`}>
       {response.rows.length > 0 ? <ScreenerSummaryView response={response} /> : null}
       <div className="flex items-center justify-between text-xs text-muted">
         <span>
@@ -710,7 +719,7 @@ function ScreenerResults({
             type="button"
             onClick={onPrev}
             disabled={!hasPrev || status === 'loading'}
-            className="rounded-md border border-line px-2 py-1 disabled:opacity-40"
+            className={ROW_BUTTON_CLASS}
           >
             Prev
           </button>
@@ -718,7 +727,7 @@ function ScreenerResults({
             type="button"
             onClick={onNext}
             disabled={!hasNext || status === 'loading'}
-            className="rounded-md border border-line px-2 py-1 disabled:opacity-40"
+            className={ROW_BUTTON_CLASS}
           >
             Next
           </button>

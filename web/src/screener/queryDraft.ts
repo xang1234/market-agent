@@ -23,6 +23,7 @@ import {
   type ScreenerQuery,
   type SortDirection,
   type SortSpec,
+  type UniverseEnumOption,
 } from './contracts.ts'
 
 export type NumericRangeDraft = {
@@ -72,6 +73,20 @@ export function setUniverseSelection(
     next[field] = values
   }
   return { ...draft, universe: next, offset: 0 }
+}
+
+// Selected values stay in option order, whatever order the chips were clicked in.
+export function toggleUniverseValue(
+  draft: QueryDraft,
+  spec: UniverseEnumOption,
+  value: string,
+): QueryDraft {
+  const selected = draft.universe[spec.field] ?? []
+  const on = selected.includes(value)
+  const next = spec.options
+    .filter((option) => (option.value === value ? !on : selected.includes(option.value)))
+    .map((option) => option.value)
+  return setUniverseSelection(draft, spec.field, next)
 }
 
 export function setNumericRange(

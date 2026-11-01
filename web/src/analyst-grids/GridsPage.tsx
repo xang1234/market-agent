@@ -8,6 +8,9 @@ import { useGridRun } from "./useGridRun.ts";
 import { GridBuilder, type GridBuilderSubmit } from "./GridBuilder.tsx";
 import { GridTable } from "./GridTable.tsx";
 import type { GridColumn, GridRunSummary } from "./gridsTypes.ts";
+import { EmptyState } from "../ui/EmptyState.tsx";
+import { PageHeader } from "../ui/PageHeader.tsx";
+import { PAGE_CLASS, PAGE_PANEL_CLASS } from "../ui/pageStyles.ts";
 
 export function GridsPage(): ReactElement {
   const { session } = useAuth();
@@ -57,11 +60,25 @@ export function GridsPage(): ReactElement {
     }
   }
 
-  if (!userId) return <div className="p-4 text-sm text-muted">Sign in to build research grids.</div>;
+  const header = (
+    <PageHeader
+      title="Analyst grids"
+      description="Pick a set of companies and the columns to compare. The grid fills in one cell at a time."
+    />
+  );
+
+  if (!userId) {
+    return (
+      <div className={PAGE_CLASS}>
+        {header}
+        <EmptyState>Sign in to build research grids.</EmptyState>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-4 p-6">
-      <h1 className="text-2xl font-semibold">Analyst Grid</h1>
+    <div className={PAGE_CLASS}>
+      {header}
       <GridBuilder
         columns={columns}
         universeOptions={universeOptions}
@@ -71,14 +88,14 @@ export function GridsPage(): ReactElement {
           gridsPageMemoryFor(userId).builder = fields;
         }}
       />
-      {error ? <div className="text-sm text-negative">{error}</div> : null}
+      {error ? <p className="text-sm text-negative">{error}</p> : null}
       {detail ? (
-        <div className="space-y-2">
+        <section aria-label="Grid results" className={`flex flex-col gap-3 ${PAGE_PANEL_CLASS}`}>
           <GridRunProgress run={detail.run} />
           <GridTable columns={activeColumns} detail={detail} />
-        </div>
+        </section>
       ) : runId ? (
-        <div className="text-sm text-muted">Running…</div>
+        <p className={`${PAGE_PANEL_CLASS} text-sm text-muted`}>Running…</p>
       ) : null}
     </div>
   );

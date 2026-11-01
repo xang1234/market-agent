@@ -5,6 +5,7 @@ import { renderToString } from 'react-dom/server'
 import { JSDOM } from 'jsdom'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
+import { MemoryRouter } from 'react-router-dom'
 
 import { UserHomeContent, UserHomeView } from './HomePage.tsx'
 import type { HomeSummary } from '../home/summaryClient.ts'
@@ -105,17 +106,17 @@ function installDomGlobals(domWindow: Window): () => void {
 }
 
 test('UserHomeView renders the loading hint when state.kind is loading', () => {
-  const html = renderToString(<UserHomeView state={{ kind: 'loading' }} />)
+  const html = renderToString(<MemoryRouter><UserHomeView state={{ kind: 'loading' }} /></MemoryRouter>)
   assert.match(html, /<span role="status"[^>]*><span class="sr-only">Loading Home<\/span><\/span>/)
 })
 
 test('UserHomeView says Home could not load and keeps the reason behind Details', () => {
-  const doc = new JSDOM(renderToString(<UserHomeView state={{ kind: 'error', message: 'boom', retry: () => {} }} />)).window.document
+  const doc = new JSDOM(renderToString(<MemoryRouter><UserHomeView state={{ kind: 'error', message: 'boom', retry: () => {} }} /></MemoryRouter>)).window.document
   assert.equal(doc.body.textContent, "Couldn't load Home.RetryDetailsboom")
 })
 
 test('UserHomeView renders all five sections when state.kind is ready', () => {
-  const html = renderToString(<UserHomeView state={{ kind: 'ready', summary: EMPTY_SUMMARY }} />)
+  const html = renderToString(<MemoryRouter><UserHomeView state={{ kind: 'ready', summary: EMPTY_SUMMARY }} /></MemoryRouter>)
   assert.match(html, /Findings/)
   assert.match(html, /Market pulse/)
   assert.match(html, /Watchlist movers/)
@@ -167,7 +168,7 @@ test('UserHomeView applies tabular numerals to quote and count metrics', () => {
     },
   }
 
-  const html = renderToString(<UserHomeView state={{ kind: 'ready', summary }} />)
+  const html = renderToString(<MemoryRouter><UserHomeView state={{ kind: 'ready', summary }} /></MemoryRouter>)
 
   assert.match(html, /class="[^"]*\bnum\b[^"]*"[^>]*>\+1\.24%/)
   assert.match(html, /class="[^"]*\bnum\b[^"]*"[^>]*>\$191\.42/)
@@ -183,7 +184,7 @@ test('UserHomeContent fetches the summary on mount and renders ready state', asy
   try {
     const root = createRoot(container)
     await act(async () => {
-      root.render(<UserHomeContent userId={USER_ID_A} fetchImpl={fakeFetchOk(EMPTY_SUMMARY)} />)
+      root.render(<MemoryRouter><UserHomeContent userId={USER_ID_A} fetchImpl={fakeFetchOk(EMPTY_SUMMARY)} /></MemoryRouter>)
     })
     const html = container.innerHTML
     assert.match(html, /Findings/)
@@ -202,7 +203,7 @@ test('UserHomeContent renders the error state when fetch returns non-200', async
   try {
     const root = createRoot(container)
     await act(async () => {
-      root.render(<UserHomeContent userId={USER_ID_A} fetchImpl={fakeFetchFail(500)} />)
+      root.render(<MemoryRouter><UserHomeContent userId={USER_ID_A} fetchImpl={fakeFetchFail(500)} /></MemoryRouter>)
     })
     assert.equal(container.textContent, "Couldn't load Home.RetryDetailsfetch home summary failed with HTTP 500")
     await act(async () => root.unmount())
@@ -223,7 +224,7 @@ test('UserHomeContent Retry shows loading and then the summary', async () => {
   try {
     const root = createRoot(container)
     await act(async () => {
-      root.render(<UserHomeContent userId={USER_ID_A} fetchImpl={fetchImpl} />)
+      root.render(<MemoryRouter><UserHomeContent userId={USER_ID_A} fetchImpl={fetchImpl} /></MemoryRouter>)
     })
     assert.equal(container.textContent, "Couldn't load Home.RetryDetailsfetch home summary failed with HTTP 503")
 
@@ -250,13 +251,13 @@ test('UserHomeContent ignores a stale fetch resolution that lands after an abort
 
     // Mount with userId A; the fetch hangs, leaving the component in `loading`.
     await act(async () => {
-      root.render(<UserHomeContent userId={USER_ID_A} fetchImpl={hanging.fetch} />)
+      root.render(<MemoryRouter><UserHomeContent userId={USER_ID_A} fetchImpl={hanging.fetch} /></MemoryRouter>)
     })
     assert.match(container.textContent ?? '', /Loading Home/)
 
     // Switch to userId B; the previous A-fetch is now aborted.
     await act(async () => {
-      root.render(<UserHomeContent userId={USER_ID_B} fetchImpl={fakeFetchOk(EMPTY_SUMMARY)} />)
+      root.render(<MemoryRouter><UserHomeContent userId={USER_ID_B} fetchImpl={fakeFetchOk(EMPTY_SUMMARY)} /></MemoryRouter>)
     })
     assert.equal(hanging.signal?.aborted, true)
     assert.match(container.innerHTML, /Findings/)

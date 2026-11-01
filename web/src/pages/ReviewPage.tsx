@@ -9,6 +9,8 @@ import {
 } from '../review/factReviewClient.ts'
 import { severityForItem } from '../review/severity.ts'
 import { useAuth } from '../shell/useAuth.ts'
+import { PageHeader } from '../ui/PageHeader.tsx'
+import { PAGE_CLASS, PAGE_PANEL_CLASS, PANEL_TITLE_CLASS } from '../ui/pageStyles.ts'
 
 type ReviewLoadState =
   | { kind: 'loading' }
@@ -127,13 +129,11 @@ export function ReviewPage() {
   // header verbatim. The charts-first summary now lives in the queue itself and
   // the editor takes the full width.
   return (
-    <div className="flex flex-1 flex-col gap-4 overflow-auto p-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Review</h1>
-        <p className="mt-1 text-sm text-muted">
-          Candidate fact queue for human approval, correction, and dismissal.
-        </p>
-      </header>
+    <div className={PAGE_CLASS}>
+      <PageHeader
+        title="Review"
+        description="Approve, correct, or dismiss candidate facts that are waiting for a human decision."
+      />
       {visibleState.kind === 'loading' ? (
         <ReviewStatus title="Loading reviewer queue" message="Fetching candidate facts." />
       ) : visibleState.kind === 'unauthenticated' ? (
@@ -177,8 +177,8 @@ function ReviewStatus({
   const messageClass =
     tone === 'error' ? 'text-negative' : 'text-muted'
   return (
-    <section className="rounded-md border border-line bg-surface p-6">
-      <h2 className="text-sm font-semibold text-fg">{title}</h2>
+    <section className={PAGE_PANEL_CLASS}>
+      <h2 className={PANEL_TITLE_CLASS}>{title}</h2>
       <p className={`mt-2 text-sm ${messageClass}`}>{message}</p>
     </section>
   )

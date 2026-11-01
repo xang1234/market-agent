@@ -2,40 +2,40 @@ import type { ReactElement } from 'react'
 
 import type { SectionProgressRow, SectionProgressState } from './sectionProgress.ts'
 
-const DOT_CLASS: Readonly<Record<SectionProgressState, string>> = {
-  pending: 'border-line-strong bg-surface-2',
-  running: 'animate-pulse border-accent bg-accent',
-  done: 'border-positive bg-positive',
-  skipped: 'border-line bg-surface',
+const MARKER_CLASS: Readonly<Record<SectionProgressState, string>> = {
+  pending: 'bg-surface-2 text-muted',
+  running: 'animate-pulse bg-accent-soft text-accent',
+  done: 'bg-positive-soft text-positive',
+  skipped: 'bg-surface-2 text-faint',
 }
 
-const GLYPH: Readonly<Record<SectionProgressState, string>> = {
-  pending: '',
-  running: '',
-  done: '✓',
-  skipped: '–',
+const TITLE_CLASS: Readonly<Record<SectionProgressState, string>> = {
+  pending: 'text-fg-soft',
+  running: 'text-fg',
+  done: 'text-fg',
+  skipped: 'text-faint line-through',
 }
 
-// Status-aware playbook TOC: pending dots before a run, pulsing while the
-// memo generates, check/dash marks once blocks land.
+// Status-aware playbook outline: numbered steps before a run, pulsing while
+// the memo generates, check/dash marks once blocks land.
 export function SectionProgressList({
   rows,
 }: {
   rows: ReadonlyArray<SectionProgressRow>
 }): ReactElement {
   return (
-    <ul data-testid="analyze-section-progress" className="mt-2 flex flex-col gap-1.5 text-sm">
-      {rows.map((item) => (
-        <li key={item.section_id} data-state={item.state} className="flex items-center gap-2">
+    <ol data-testid="analyze-section-progress" className="flex flex-col gap-1 text-sm">
+      {rows.map((item, index) => (
+        <li key={item.section_id} data-state={item.state} className="flex items-center gap-2.5">
           <span
             aria-hidden="true"
-            className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border text-[9px] leading-none text-white ${DOT_CLASS[item.state]}`}
+            className={`num flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[11px] font-medium ${MARKER_CLASS[item.state]}`}
           >
-            {GLYPH[item.state]}
+            {item.state === 'done' ? '✓' : item.state === 'skipped' ? '–' : index + 1}
           </span>
-          <span className={item.state === 'done' ? 'text-fg' : 'text-fg-soft'}>{item.title}</span>
+          <span className={TITLE_CLASS[item.state]}>{item.title}</span>
         </li>
       ))}
-    </ul>
+    </ol>
   )
 }

@@ -6,6 +6,10 @@ import { useAuth } from "../shell/useAuth.ts";
 import { BriefEditor, type BriefDraft, type BriefSave } from "./BriefEditor.tsx";
 import { cancelRun, discoveryMessage, draftBrief, getCampaign, getRun, listCandidates, listEvents, listRuns, saveBrief, startRun } from "./api.ts";
 import { CampaignResults } from "./CampaignResults.tsx";
+import { EmptyState } from "../ui/EmptyState.tsx";
+import { PageHeader } from "../ui/PageHeader.tsx";
+import { SECONDARY_BUTTON_CLASS } from "../shell/buttonStyles.ts";
+import { FIELD_CLASS, FIELD_LABEL_CLASS, PAGE_CLASS } from "../ui/pageStyles.ts";
 import { Skeleton } from "../ui/Skeleton.tsx";
 import { formatCampaignMarkdown } from "./export.ts";
 import { readAuthorizedResearchView, researchHandoffForCandidate, researchSummaryForCandidate } from "./handoff.ts";
@@ -315,13 +319,129 @@ export function CampaignPage() {
     });
   }
 
-  if (!userId) return <div className="p-4 text-sm text-muted">Sign in to manage research campaigns.</div>;
-  if (!detail && !scopedError) return <div className="p-4"><Skeleton label="Loading campaign" className="h-40 max-w-2xl" /></div>;
-  if (!detail) return <div className="p-4 text-sm text-negative" role="alert">{scopedError}</div>;
+  if (!userId) {
+    return (
+      <div className={PAGE_CLASS}>
+        <PageHeader title="Research campaign" />
+        <EmptyState>Sign in to manage research campaigns.</EmptyState>
+      </div>
+    );
+  }
+  if (!detail && !scopedError) {
+    return (
+      <div className={PAGE_CLASS}>
+        <PageHeader title="Research campaign" />
+        <Skeleton label="Loading campaign" className="h-40 max-w-3xl" />
+      </div>
+    );
+  }
+  if (!detail) {
+    return (
+      <div className={PAGE_CLASS}>
+        <PageHeader title="Research campaign" />
+        <p className="text-sm text-negative" role="alert">{scopedError}</p>
+      </div>
+    );
+  }
   const results = resultState?.userId === userId && resultState.runId === selectedRunId ? resultState : null;
   const exportMarkdown = exportState?.campaignId === campaignId && exportState.runId === selectedRunId && exportState.userId === userId ? exportState.markdown : null;
   const canDraft = !detail.readiness.missing.includes("model");
-  return <div className="space-y-5 p-6"><header><p className="text-sm text-muted">Discovery campaign</p><h1 className="text-2xl font-semibold text-fg">{detail.campaign.name}</h1><p className="mt-1 text-sm text-muted">{detail.campaign.question}</p></header>{!detail.readiness.ready ? <p role="alert" className="rounded-md border border-line p-3 text-sm text-muted">{readinessMessage(detail.readiness.missing)}</p> : null}<BriefEditor key={`${userId}:${campaignId}`} campaignId={campaignId} savedBrief={detail.brief} fallbackQuestion={detail.campaign.question} onSave={onSave} onDraft={canDraft ? onDraft : undefined} draftDisabledReason={canDraft ? undefined : "Research-brief generation needs the model capability."} onApprove={detail.readiness.ready ? onApprove : undefined} />{scopedError ? <p role="alert" className="text-sm text-negative">{scopedError}</p> : null}{pollingError ? <p role="status" className="text-sm text-muted">Progress could not be refreshed. Showing the last available update.</p> : null}{run ? <><RunProgress run={run} onCancel={onCancel} cancelling={cancellingRun?.userId === userId && cancellingRun.runId === selectedRunId} /><CampaignResults run={run} candidates={results?.candidates ?? []} events={results?.events ?? []} comparison={comparison} onCopyExport={() => void onCopyExport()} onOpenInAnalyze={onOpenInAnalyze} onDraftThesis={onDraftThesis} actionStatus={scopedActionStatus} hasMoreEvents={results?.hasMoreEvents} onLoadMoreEvents={onLoadMoreEvents} />{exportMarkdown ? <label className="grid gap-1 text-sm text-fg">Cited research export<textarea aria-label="Cited research export" readOnly value={exportMarkdown} rows={12} className="rounded-md border border-line bg-surface-2 p-3 font-mono text-xs" /></label> : null}{runHistory && (runHistory.runs.length > 1 || runHistory.nextCursor) ? <div className="grid max-w-md gap-3">{runHistory.runs.length > 1 ? <label className="grid gap-1 text-sm text-fg">Compare with another run<select aria-label="Compare with another run" value={comparisonId} onChange={(event) => { setComparisonChoice({ userId, campaignId, runId: event.target.value }); setComparisonState(null); }} className="rounded-md border border-line bg-surface-2 px-3 py-2"><option value="">Choose a run</option>{runHistory.runs.filter((item) => item.run_id !== run.run_id).map((item) => <option key={item.run_id} value={item.run_id}>{runLabel(item)}</option>)}</select></label> : null}{runHistory.nextCursor ? <button type="button" onClick={onLoadOlderRuns} disabled={runHistory.loadingMore} className="w-fit rounded-md border border-line-strong px-3 py-2 text-sm font-medium text-fg disabled:opacity-60">{runHistory.loadingMore ? "Loading older runs…" : "Load older runs"}</button> : null}</div> : null}</> : selectedRunId ? <Skeleton label="Loading research run" className="h-32" /> : null}</div>;
+  return (
+    <div className={PAGE_CLASS}>
+      <PageHeader title={detail.campaign.name} description={detail.campaign.question} />
+      <div className="flex w-full max-w-3xl flex-col gap-6">
+        {!detail.readiness.ready ? (
+          <p role="alert" className="rounded-lg border border-warning bg-warning-soft px-4 py-3 text-sm text-warning">
+            {readinessMessage(detail.readiness.missing)}
+          </p>
+        ) : null}
+        <BriefEditor
+          key={`${userId}:${campaignId}`}
+          campaignId={campaignId}
+          savedBrief={detail.brief}
+          fallbackQuestion={detail.campaign.question}
+          onSave={onSave}
+          onDraft={canDraft ? onDraft : undefined}
+          draftDisabledReason={canDraft ? undefined : "Research-brief generation needs the model capability."}
+          onApprove={detail.readiness.ready ? onApprove : undefined}
+        />
+        {scopedError ? <p role="alert" className="text-sm text-negative">{scopedError}</p> : null}
+        {pollingError ? (
+          <p role="status" className="text-sm text-muted">
+            Progress could not be refreshed. Showing the last available update.
+          </p>
+        ) : null}
+        {run ? (
+          <>
+            <RunProgress
+              run={run}
+              onCancel={onCancel}
+              cancelling={cancellingRun?.userId === userId && cancellingRun.runId === selectedRunId}
+            />
+            <CampaignResults
+              run={run}
+              candidates={results?.candidates ?? []}
+              events={results?.events ?? []}
+              comparison={comparison}
+              onCopyExport={() => void onCopyExport()}
+              onOpenInAnalyze={onOpenInAnalyze}
+              onDraftThesis={onDraftThesis}
+              actionStatus={scopedActionStatus}
+              hasMoreEvents={results?.hasMoreEvents}
+              onLoadMoreEvents={onLoadMoreEvents}
+            />
+            {exportMarkdown ? (
+              <label className={FIELD_LABEL_CLASS}>
+                Cited research export
+                <textarea
+                  aria-label="Cited research export"
+                  readOnly
+                  value={exportMarkdown}
+                  rows={12}
+                  className={`${FIELD_CLASS} font-mono`}
+                />
+              </label>
+            ) : null}
+            {runHistory && (runHistory.runs.length > 1 || runHistory.nextCursor) ? (
+              <div className="grid max-w-md gap-3">
+                {runHistory.runs.length > 1 ? (
+                  <label className={FIELD_LABEL_CLASS}>
+                    Compare with another run
+                    <select
+                      aria-label="Compare with another run"
+                      value={comparisonId}
+                      onChange={(event) => {
+                        setComparisonChoice({ userId, campaignId, runId: event.target.value });
+                        setComparisonState(null);
+                      }}
+                      className={FIELD_CLASS}
+                    >
+                      <option value="">Choose a run</option>
+                      {runHistory.runs
+                        .filter((item) => item.run_id !== run.run_id)
+                        .map((item) => <option key={item.run_id} value={item.run_id}>{runLabel(item)}</option>)}
+                    </select>
+                  </label>
+                ) : null}
+                {runHistory.nextCursor ? (
+                  <button
+                    type="button"
+                    onClick={onLoadOlderRuns}
+                    disabled={runHistory.loadingMore}
+                    className={`w-fit ${SECONDARY_BUTTON_CLASS}`}
+                  >
+                    {runHistory.loadingMore ? "Loading older runs…" : "Load older runs"}
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+          </>
+        ) : selectedRunId ? (
+          <Skeleton label="Loading research run" className="h-32" />
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 function readinessMessage(missing: CampaignDetail["readiness"]["missing"]): string {

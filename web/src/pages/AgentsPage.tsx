@@ -26,6 +26,16 @@ import { readThesisHandoff } from '../analyze/thesisHandoff.ts'
 import type { SubjectKind } from '../subject/subjectRef.ts'
 import { authenticatedFetch } from '../http/authFetch.ts'
 import { useAuth } from '../shell/useAuth.ts'
+import { PageHeader } from '../ui/PageHeader.tsx'
+import {
+  FIELD_CLASS,
+  FIELD_LABEL_CLASS,
+  FIELDSET_CLASS,
+  PAGE_CLASS,
+  PAGE_PANEL_CLASS,
+  PANEL_TITLE_CLASS,
+  SECTION_LABEL_CLASS,
+} from '../ui/pageStyles.ts'
 
 const DEMO_AGENTS: ReadonlyArray<AgentRow> = [
   {
@@ -82,11 +92,15 @@ export function AgentsPage() {
   const [alertSms, setAlertSms] = useState(false)
   const [alertMobilePush, setAlertMobilePush] = useState(false)
   const [alertDigest, setAlertDigest] = useState(false)
-  const [activity, setActivity] = useState(thesisHandoff
-    ? thesisHandoff.kind === 'discovery'
-      ? 'Review this cited discovery research, create the agent, then draft and save its conditions.'
-      : 'Review this Analyze memo, create the agent, then draft and save its conditions.'
-    : 'Idle')
+  const [activity, setActivity] = useState('Idle')
+  const [formMessage, setFormMessage] = useState<{ tone: 'error' | 'info'; text: string } | null>(thesisHandoff
+    ? {
+        tone: 'info',
+        text: thesisHandoff.kind === 'discovery'
+          ? 'Review this cited discovery research, create the agent, then draft and save its conditions.'
+          : 'Review this Analyze memo, create the agent, then draft and save its conditions.',
+      }
+    : null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const preservesUnsupportedUniverse =
     editingAgent?.universe !== undefined && !canRoundTripUniverse(editingAgent.universe)
@@ -192,6 +206,16 @@ export function AgentsPage() {
     setAlertSms(false)
     setAlertMobilePush(false)
     setAlertDigest(false)
+    setFormMessage(null)
+  }
+
+  // Async handlers settle after the roster has moved on, so the selected and
+  // edited agents are checked against the roster here rather than in each one.
+  if (selectedAgentId && !agents.some((agent) => agent.agent_id === selectedAgentId)) {
+    setSelectedAgentId(agents[0]?.agent_id ?? null)
+  }
+  if (editingAgentId && !agents.some((agent) => agent.agent_id === editingAgentId)) {
+    resetForm()
   }
 
   const submitAgent = async (event: FormEvent<HTMLFormElement>) => {
@@ -218,11 +242,11 @@ export function AgentsPage() {
         alertDigest,
       }, editingAgent ?? undefined)
     } catch (caught) {
-      setActivity(caught instanceof AgentPayloadValidationError ? caught.message : String(caught))
+      setFormMessage({ tone: 'error', text: caught instanceof AgentPayloadValidationError ? caught.message : String(caught) })
       return
     }
     if (!input.name || !input.thesis) return
-    setActivity(editingAgentId ? 'Updating agent' : 'Creating agent')
+    setFormMessage({ tone: 'info', text: editingAgentId ? 'Updating agent' : 'Creating agent' })
     const response = await authenticatedFetch(editingAgentId ? `/v1/agents/${encodeURIComponent(editingAgentId)}` : '/v1/agents', {
       userId: session.userId,
       method: editingAgentId ? 'PATCH' : 'POST',
@@ -239,7 +263,7 @@ export function AgentsPage() {
       resetForm()
       setActivity(editingAgentId ? 'Agent updated' : 'Agent created')
     } else {
-      setActivity(`${editingAgentId ? 'Update' : 'Create'} failed: HTTP ${response.status}`)
+      setFormMessage({ tone: 'error', text: `${editingAgentId ? 'Update' : 'Create'} failed: HTTP ${response.status}` })
     }
   }
 
@@ -267,9 +291,12 @@ export function AgentsPage() {
     setAlertSms(channels.includes('sms'))
     setAlertMobilePush(channels.includes('mobile_push'))
     setAlertDigest(channels.includes('digest'))
-    setActivity(structuredAgentIds.has(agent.agent_id)
-      ? 'Edit thesis text and conditions in Thesis conditions. Other agent settings remain editable here.'
-      : 'Editing agent')
+    setFormMessage({
+      tone: 'info',
+      text: structuredAgentIds.has(agent.agent_id)
+        ? 'Edit thesis text and conditions in Thesis conditions. Other agent settings remain editable here.'
+        : 'Editing agent',
+    })
   }
 
   const updateAgent = async (
@@ -304,14 +331,8 @@ export function AgentsPage() {
       method: 'DELETE',
     })
     if (response.ok) {
-      const nextAgentId = agents.find((agent) => agent.agent_id !== agentId)?.agent_id ?? null
       setAgents((current) => current.filter((agent) => agent.agent_id !== agentId))
       setRuns((current) => current.filter((run) => run.agent_id !== agentId))
-      setSelectedAgentId((current) => (current === agentId ? nextAgentId : current))
-      if (selectedAgentId === agentId && nextAgentId === null) {
-        setFindings([])
-        setRunActivities([])
-      }
       setActivity('Agent deleted')
     } else {
       setActivity(`Delete failed: HTTP ${response.status}`)
@@ -356,288 +377,296 @@ export function AgentsPage() {
     setActivity(`Thesis version ${saved.version} saved`)
   }, [editingAgentId])
 
-  return (
-    <div className="flex flex-1 flex-col gap-4 overflow-auto p-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Agents</h1>
-        <p className="mt-1 text-sm text-muted">
-          Session-scoped research monitors with durable configuration, run history, and live activity.
+  const showDetail = session !== null && selectedAgentId !== null
+  const agentForm = (
+    <form
+      onSubmit={submitAgent}
+      className={`flex min-w-0 flex-col gap-4 ${PAGE_PANEL_CLASS} ${showDetail ? 'xl:col-start-1 xl:row-start-2' : 'xl:col-start-2 xl:row-start-1'}`}
+    >
+      <h2 className={PANEL_TITLE_CLASS}>{editingAgentId ? 'Edit agent' : 'Create agent'}</h2>
+      <label className={FIELD_LABEL_CLASS}>
+        Name
+        <input
+          name="agent-name"
+          value={name}
+          onChange={(event) => setName(event.currentTarget.value)}
+          className={FIELD_CLASS}
+        />
+      </label>
+      <label className={FIELD_LABEL_CLASS}>
+        Thesis
+        <textarea
+          name="agent-thesis"
+          value={thesis}
+          onChange={(event) => setThesis(event.currentTarget.value)}
+          disabled={editingStructuredThesis}
+          rows={4}
+          className={FIELD_CLASS}
+        />
+      </label>
+      {discoveryHandoff ? (
+        <section aria-label="Discovery research conditions" className="rounded-md border border-line bg-surface-2 p-3 text-sm text-fg">
+          <h3 className="font-medium">Research starter conditions</h3>
+          <p className="mt-1 text-xs text-muted">{discoveryHandoff.conditions.length} of {discoveryHandoff.conditions.length + discoveryHandoff.trimmedConditions} research conditions are shown. They are not saved until you use the existing thesis actions.</p>
+          {discoveryHandoff.trimmedConditions > 0 ? <p className="mt-1 text-xs text-muted">{discoveryHandoff.trimmedConditions} conditions were trimmed to keep this handoff reviewable.</p> : null}
+          {discoveryHandoff.conditions.length > 0 ? <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">{discoveryHandoff.conditions.map((condition, index) => <li key={`${condition.statement}:${index}`}>{condition.statement} — falsifier: {condition.falsifier} · {condition.horizon}</li>)}</ul> : <p className="mt-2 text-xs text-muted">No research conditions were included in this handoff.</p>}
+        </section>
+      ) : null}
+      {editingStructuredThesis ? (
+        <p className="rounded-md border border-accent/40 bg-accent-soft px-3 py-2 text-xs text-fg-soft">
+          This agent has a versioned thesis. Edit its thesis and conditions in the Thesis conditions panel. Create another agent to monitor a different company.
         </p>
-      </header>
-      <section className="grid items-start gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
-        <AgentRoster
-          agents={agents}
-          runs={runs}
-          selectedAgentId={selectedAgentId}
-          loadError={loadError}
-          onSelect={setSelectedAgentId}
-          onEdit={editAgent}
-          onRun={(id) => void runAgent(id)}
-          onToggleEnabled={(agent) => void updateAgent(agent.agent_id, { enabled: !agent.enabled })}
-          onDelete={(id) => void deleteAgent(id)}
-        />
-        {session && selectedAgentId ? (
-          <ThesisPanel
-            userId={session.userId}
-            agentId={selectedAgentId}
-            initialThesis={agents.find((agent) => agent.agent_id === selectedAgentId)?.thesis ?? ''}
-            refreshKey={thesisRefreshKey}
-            onStructuredChange={handleStructuredChange}
-            onSaved={handleThesisSaved}
-          />
-        ) : (
-          <section className="rounded-md border border-dashed border-line-strong bg-surface p-5">
-            <h2 className="text-lg font-semibold text-fg">Thesis conditions</h2>
-            <p className="mt-2 text-sm text-muted">Select an agent to edit its living thesis.</p>
-          </section>
-        )}
-      </section>
-      <div className="grid gap-4 lg:grid-cols-3">
-        <AgentDetailPanels
-          findings={visibleFindings}
-          detailsError={visibleDetailsError}
-          runs={runs}
-          runActivities={visibleRunActivities}
-        />
-      </div>
-      <form onSubmit={submitAgent} className="flex flex-col gap-4 rounded-md border border-line bg-surface p-5">
-          <h2 className="text-lg font-semibold text-fg">{editingAgentId ? 'Edit agent' : 'Create agent'}</h2>
-          <label className="flex flex-col gap-2 text-sm font-medium text-fg">
-            Name
-            <input
-              name="agent-name"
-              value={name}
-              onChange={(event) => setName(event.currentTarget.value)}
-              className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
-            />
-          </label>
-          <label className="flex flex-col gap-2 text-sm font-medium text-fg">
-            Thesis
+      ) : null}
+      <label className={FIELD_LABEL_CLASS}>
+        Cadence
+        <select
+          name="agent-cadence"
+          value={cadence}
+          onChange={(event) => setCadence(event.currentTarget.value)}
+          className={FIELD_CLASS}
+        >
+          <option value="hourly">hourly</option>
+          <option value="daily">daily</option>
+          <option value="weekly">weekly</option>
+        </select>
+      </label>
+      <fieldset className={FIELDSET_CLASS}>
+        <legend className={`px-1 ${SECTION_LABEL_CLASS}`}>Universe</legend>
+        {preservesUnsupportedUniverse ? (
+          <p className="rounded-md border border-warning bg-warning-soft px-3 py-2 text-xs text-warning">
+            Existing {universeLabel(editingAgent.universe)} universe is preserved by this edit.
+          </p>
+        ) : null}
+        <label className={FIELD_LABEL_CLASS}>
+          Mode
+          <select
+            name="universe-mode"
+            value={universeMode}
+            onChange={(event) => setUniverseMode(event.currentTarget.value as AgentUniverse['mode'])}
+            disabled={universeEditingDisabled}
+            className={FIELD_CLASS}
+          >
+            <option value="static">static subjects</option>
+            <option value="screen">saved screen</option>
+            <option value="theme">theme</option>
+            <option value="portfolio">portfolio</option>
+            <option value="agent">agent-derived</option>
+          </select>
+        </label>
+        {universeMode === 'static' ? (
+          <label className={FIELD_LABEL_CLASS}>
+            Subject refs
             <textarea
-              name="agent-thesis"
-              value={thesis}
-              onChange={(event) => setThesis(event.currentTarget.value)}
-              disabled={editingStructuredThesis}
+              name="static-subject-refs"
+              value={staticSubjectRefsText}
+              onChange={(event) => setStaticSubjectRefsText(event.currentTarget.value)}
+              disabled={universeEditingDisabled}
               rows={4}
-              className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm disabled:opacity-60"
+              placeholder={'issuer:...\nlisting:...'}
+              className={FIELD_CLASS}
             />
           </label>
-          {discoveryHandoff ? (
-            <section aria-label="Discovery research conditions" className="rounded-md border border-line bg-surface-2 p-3 text-sm text-fg">
-              <h3 className="font-medium">Research starter conditions</h3>
-              <p className="mt-1 text-xs text-muted">{discoveryHandoff.conditions.length} of {discoveryHandoff.conditions.length + discoveryHandoff.trimmedConditions} research conditions are shown. They are not saved until you use the existing thesis actions.</p>
-              {discoveryHandoff.trimmedConditions > 0 ? <p className="mt-1 text-xs text-muted">{discoveryHandoff.trimmedConditions} conditions were trimmed to keep this handoff reviewable.</p> : null}
-              {discoveryHandoff.conditions.length > 0 ? <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">{discoveryHandoff.conditions.map((condition, index) => <li key={`${condition.statement}:${index}`}>{condition.statement} — falsifier: {condition.falsifier} · {condition.horizon}</li>)}</ul> : <p className="mt-2 text-xs text-muted">No research conditions were included in this handoff.</p>}
-            </section>
-          ) : null}
-          {editingStructuredThesis ? (
-            <p className="rounded-md border border-accent/40 bg-accent-soft px-3 py-2 text-xs text-fg-soft">
-              This agent has a versioned thesis. Edit its thesis and conditions in the Thesis conditions panel. Create another agent to monitor a different company.
-            </p>
-          ) : null}
-          <label className="flex flex-col gap-2 text-sm font-medium text-fg">
-            Cadence
+        ) : (
+          <label className={FIELD_LABEL_CLASS}>
+            {universeMode} id
+            <input
+              name="dynamic-universe-id"
+              value={dynamicUniverseId}
+              onChange={(event) => setDynamicUniverseId(event.currentTarget.value)}
+              disabled={universeEditingDisabled}
+              className={FIELD_CLASS}
+            />
+          </label>
+        )}
+        <div className="grid gap-3 sm:grid-cols-[9rem_minmax(0,1fr)]">
+          <label className={FIELD_LABEL_CLASS}>
+            Quick kind
             <select
-              name="agent-cadence"
-              value={cadence}
-              onChange={(event) => setCadence(event.currentTarget.value)}
-              className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
+              name="subject-kind"
+              value={subjectKind}
+              onChange={(event) => {
+                const next = event.currentTarget.value
+                if (isAgentSubjectKind(next)) setSubjectKind(next)
+              }}
+              disabled={universeEditingDisabled || universeMode !== 'static'}
+              className={FIELD_CLASS}
             >
-              <option value="hourly">hourly</option>
-              <option value="daily">daily</option>
-              <option value="weekly">weekly</option>
+              <option value="issuer">issuer</option>
+              <option value="instrument">instrument</option>
+              <option value="listing">listing</option>
+              <option value="theme">theme</option>
+              <option value="macro_topic">macro_topic</option>
             </select>
           </label>
-          <fieldset className="rounded-md border border-line p-3">
-            <legend className="px-1 text-sm font-semibold text-fg">Universe</legend>
-            {preservesUnsupportedUniverse ? (
-              <p className="mt-2 rounded-md border border-warning bg-warning-soft px-3 py-2 text-xs text-warning">
-                Existing {universeLabel(editingAgent.universe)} universe is preserved by this edit.
-              </p>
-            ) : null}
-            <label className="mt-3 flex flex-col gap-2 text-sm font-medium text-fg">
-              Mode
-              <select
-                name="universe-mode"
-                value={universeMode}
-                onChange={(event) => setUniverseMode(event.currentTarget.value as AgentUniverse['mode'])}
-                disabled={universeEditingDisabled}
-                className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
-              >
-                <option value="static">static subjects</option>
-                <option value="screen">saved screen</option>
-                <option value="theme">theme</option>
-                <option value="portfolio">portfolio</option>
-                <option value="agent">agent-derived</option>
-              </select>
+          <label className={FIELD_LABEL_CLASS}>
+            Quick subject id
+            <input
+              name="subject-id"
+              value={subjectId}
+              onChange={(event) => setSubjectId(event.currentTarget.value)}
+              disabled={universeEditingDisabled || universeMode !== 'static'}
+              className={FIELD_CLASS}
+            />
+          </label>
+        </div>
+      </fieldset>
+      <fieldset className={FIELDSET_CLASS}>
+        <legend className={`px-1 ${SECTION_LABEL_CLASS}`}>Alert rule</legend>
+        {preservesUnsupportedAlertRules ? (
+          <p className="rounded-md border border-warning bg-warning-soft px-3 py-2 text-xs text-warning">
+            Existing {alertRuleLabel(editingAgent.alert_rules)} alert rules are preserved by this edit.
+          </p>
+        ) : null}
+        <div className="grid gap-3">
+          <label className={FIELD_LABEL_CLASS}>
+            Rule id
+            <input
+              name="alert-rule-id"
+              value={alertRuleId}
+              onChange={(event) => setAlertRuleId(event.currentTarget.value)}
+              disabled={preservesUnsupportedAlertRules}
+              className={FIELD_CLASS}
+            />
+          </label>
+          <label className={FIELD_LABEL_CLASS}>
+            Severity
+            <select
+              name="alert-severity"
+              value={alertSeverity}
+              onChange={(event) => setAlertSeverity(event.currentTarget.value)}
+              disabled={preservesUnsupportedAlertRules}
+              className={FIELD_CLASS}
+            >
+              <option value="low">low</option>
+              <option value="medium">medium</option>
+              <option value="high">high</option>
+              <option value="critical">critical</option>
+            </select>
+          </label>
+          <label className={FIELD_LABEL_CLASS}>
+            Headline contains
+            <input
+              name="alert-headline"
+              value={alertHeadline}
+              onChange={(event) => setAlertHeadline(event.currentTarget.value)}
+              disabled={preservesUnsupportedAlertRules}
+              className={FIELD_CLASS}
+            />
+          </label>
+          <div role="group" aria-label="Delivery channels" className="grid gap-2 sm:grid-cols-3">
+            <label className="inline-flex items-center gap-2 text-sm text-fg">
+              <input
+                name="alert-email"
+                type="checkbox"
+                checked={alertEmail}
+                onChange={(event) => setAlertEmail(event.currentTarget.checked)}
+                disabled={preservesUnsupportedAlertRules}
+                className="size-4 accent-accent"
+              />
+              Email
             </label>
-            {universeMode === 'static' ? (
-              <label className="mt-3 flex flex-col gap-2 text-sm font-medium text-fg">
-                Subject refs
-                <textarea
-                  name="static-subject-refs"
-                  value={staticSubjectRefsText}
-                  onChange={(event) => setStaticSubjectRefsText(event.currentTarget.value)}
-                  disabled={universeEditingDisabled}
-                  rows={4}
-                  placeholder="issuer:...\nlisting:..."
-                  className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
-                />
-              </label>
-            ) : (
-              <label className="mt-3 flex flex-col gap-2 text-sm font-medium text-fg">
-                {universeMode} id
-                <input
-                  name="dynamic-universe-id"
-                  value={dynamicUniverseId}
-                  onChange={(event) => setDynamicUniverseId(event.currentTarget.value)}
-                  disabled={universeEditingDisabled}
-                  className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
-                />
-              </label>
-            )}
-            <div className="mt-3 grid gap-3 sm:grid-cols-[120px_minmax(0,1fr)]">
-              <label className="flex flex-col gap-2 text-sm font-medium text-fg">
-                Quick kind
-                <select
-                  name="subject-kind"
-                  value={subjectKind}
-                  onChange={(event) => {
-                    const next = event.currentTarget.value
-                    if (isAgentSubjectKind(next)) setSubjectKind(next)
-                  }}
-                  disabled={universeEditingDisabled || universeMode !== 'static'}
-                  className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
-                >
-                  <option value="issuer">issuer</option>
-                  <option value="instrument">instrument</option>
-                  <option value="listing">listing</option>
-                  <option value="theme">theme</option>
-                  <option value="macro_topic">macro_topic</option>
-                </select>
-              </label>
-              <label className="flex flex-col gap-2 text-sm font-medium text-fg">
-                Quick subject id
-                <input
-                  name="subject-id"
-                  value={subjectId}
-                  onChange={(event) => setSubjectId(event.currentTarget.value)}
-                  disabled={universeEditingDisabled || universeMode !== 'static'}
-                  className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
-                />
-              </label>
-            </div>
-          </fieldset>
-          <fieldset className="rounded-md border border-line p-3">
-            <legend className="px-1 text-sm font-semibold text-fg">Alert rule</legend>
-            {preservesUnsupportedAlertRules ? (
-              <p className="mt-2 rounded-md border border-warning bg-warning-soft px-3 py-2 text-xs text-warning">
-                Existing {alertRuleLabel(editingAgent.alert_rules)} alert rules are preserved by this edit.
-              </p>
-            ) : null}
-            <div className="mt-3 grid gap-3">
-              <label className="flex flex-col gap-2 text-sm font-medium text-fg">
-                Rule id
-                <input
-                  name="alert-rule-id"
-                  value={alertRuleId}
-                  onChange={(event) => setAlertRuleId(event.currentTarget.value)}
-                  disabled={preservesUnsupportedAlertRules}
-                  className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="flex flex-col gap-2 text-sm font-medium text-fg">
-                Severity
-                <select
-                  name="alert-severity"
-                  value={alertSeverity}
-                  onChange={(event) => setAlertSeverity(event.currentTarget.value)}
-                  disabled={preservesUnsupportedAlertRules}
-                  className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
-                >
-                  <option value="low">low</option>
-                  <option value="medium">medium</option>
-                  <option value="high">high</option>
-                  <option value="critical">critical</option>
-                </select>
-              </label>
-              <label className="flex flex-col gap-2 text-sm font-medium text-fg">
-                Headline contains
-                <input
-                  name="alert-headline"
-                  value={alertHeadline}
-                  onChange={(event) => setAlertHeadline(event.currentTarget.value)}
-                  disabled={preservesUnsupportedAlertRules}
-                  className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="inline-flex items-center gap-2 text-sm font-medium text-fg">
-                <input
-                  name="alert-email"
-                  type="checkbox"
-                  checked={alertEmail}
-                  onChange={(event) => setAlertEmail(event.currentTarget.checked)}
-                  disabled={preservesUnsupportedAlertRules}
-                  className="size-4"
-                />
-                Email
-              </label>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <label className="inline-flex items-center gap-2 text-sm font-medium text-fg">
-                  <input
-                    name="alert-web-push"
-                    type="checkbox"
-                    checked={alertWebPush}
-                    onChange={(event) => setAlertWebPush(event.currentTarget.checked)}
-                    disabled={preservesUnsupportedAlertRules}
-                    className="size-4"
-                  />
-                  Web push
-                </label>
-                <label className="inline-flex items-center gap-2 text-sm font-medium text-fg">
-                  <input
-                    name="alert-sms"
-                    type="checkbox"
-                    checked={alertSms}
-                    onChange={(event) => setAlertSms(event.currentTarget.checked)}
-                    disabled={preservesUnsupportedAlertRules}
-                    className="size-4"
-                  />
-                  SMS
-                </label>
-                <label className="inline-flex items-center gap-2 text-sm font-medium text-fg">
-                  <input
-                    name="alert-mobile-push"
-                    type="checkbox"
-                    checked={alertMobilePush}
-                    onChange={(event) => setAlertMobilePush(event.currentTarget.checked)}
-                    disabled={preservesUnsupportedAlertRules}
-                    className="size-4"
-                  />
-                  Mobile push
-                </label>
-                <label className="inline-flex items-center gap-2 text-sm font-medium text-fg">
-                  <input
-                    name="alert-digest"
-                    type="checkbox"
-                    checked={alertDigest}
-                    onChange={(event) => setAlertDigest(event.currentTarget.checked)}
-                    disabled={preservesUnsupportedAlertRules}
-                    className="size-4"
-                  />
-                  Digest
-                </label>
-              </div>
-            </div>
-          </fieldset>
-          <button type="submit" className={PRIMARY_BUTTON_CLASS}>
-            {editingAgentId ? 'Save agent' : 'Create agent'}
-          </button>
-      </form>
-      <section className="rounded-md border border-line bg-surface p-5">
-        <h2 className="text-lg font-semibold text-fg">Activity</h2>
-        <p className="mt-2 text-sm text-fg-soft">{activity}</p>
-      </section>
+            <label className="inline-flex items-center gap-2 text-sm text-fg">
+              <input
+                name="alert-web-push"
+                type="checkbox"
+                checked={alertWebPush}
+                onChange={(event) => setAlertWebPush(event.currentTarget.checked)}
+                disabled={preservesUnsupportedAlertRules}
+                className="size-4 accent-accent"
+              />
+              Web push
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm text-fg">
+              <input
+                name="alert-sms"
+                type="checkbox"
+                checked={alertSms}
+                onChange={(event) => setAlertSms(event.currentTarget.checked)}
+                disabled={preservesUnsupportedAlertRules}
+                className="size-4 accent-accent"
+              />
+              SMS
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm text-fg">
+              <input
+                name="alert-mobile-push"
+                type="checkbox"
+                checked={alertMobilePush}
+                onChange={(event) => setAlertMobilePush(event.currentTarget.checked)}
+                disabled={preservesUnsupportedAlertRules}
+                className="size-4 accent-accent"
+              />
+              Mobile push
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm text-fg">
+              <input
+                name="alert-digest"
+                type="checkbox"
+                checked={alertDigest}
+                onChange={(event) => setAlertDigest(event.currentTarget.checked)}
+                disabled={preservesUnsupportedAlertRules}
+                className="size-4 accent-accent"
+              />
+              Digest
+            </label>
+          </div>
+        </div>
+      </fieldset>
+      <div className="flex items-center justify-end gap-3 border-t border-line pt-4">
+        {formMessage ? (
+          <p role={formMessage.tone === 'error' ? 'alert' : 'status'} className={`mr-auto text-sm ${formMessage.tone === 'error' ? 'text-negative' : 'text-muted'}`}>
+            {formMessage.text}
+          </p>
+        ) : null}
+        <button type="submit" className={PRIMARY_BUTTON_CLASS}>
+          {editingAgentId ? 'Save agent' : 'Create agent'}
+        </button>
+      </div>
+    </form>
+  )
+  return (
+    <div className={PAGE_CLASS}>
+      <PageHeader
+        title="Agents"
+        description="Research monitors that watch a universe on a schedule and raise findings against your thesis."
+      />
+      {/* The form moves between columns by class, never by parent, so selecting an agent does not remount it and drop focus.
+          auto_1fr keeps the roster row at its own height when the detail column outgrows roster and form. */}
+      <div className={`grid items-start gap-6 xl:grid-cols-[minmax(0,28rem)_minmax(0,1fr)] ${showDetail ? 'xl:grid-rows-[auto_1fr]' : ''}`}>
+        <div className="min-w-0 xl:col-start-1 xl:row-start-1">
+          <AgentRoster
+            agents={agents}
+            runs={runs}
+            selectedAgentId={selectedAgentId}
+            activity={activity}
+            loadError={loadError}
+            onSelect={setSelectedAgentId}
+            onEdit={editAgent}
+            onRun={(id) => void runAgent(id)}
+            onToggleEnabled={(agent) => void updateAgent(agent.agent_id, { enabled: !agent.enabled })}
+            onDelete={(id) => void deleteAgent(id)}
+          />
+        </div>
+        {agentForm}
+        {showDetail ? (
+          <div className="flex min-w-0 flex-col gap-6 xl:col-start-2 xl:row-start-1 xl:row-span-2">
+            <ThesisPanel
+              userId={session.userId}
+              agentId={selectedAgentId}
+              initialThesis={agents.find((agent) => agent.agent_id === selectedAgentId)?.thesis ?? ''}
+              refreshKey={thesisRefreshKey}
+              onStructuredChange={handleStructuredChange}
+              onSaved={handleThesisSaved}
+            />
+            <AgentDetailPanels
+              findings={visibleFindings}
+              detailsError={visibleDetailsError}
+              runs={runs.filter((run) => run.agent_id === selectedAgentId)}
+              runActivities={visibleRunActivities}
+            />
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }

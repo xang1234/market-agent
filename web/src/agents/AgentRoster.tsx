@@ -1,11 +1,15 @@
 import type { AgentRow, AgentRunRow } from './agentRows.ts'
 import { agentRunTicks, latestRunStatus, rosterRunSummary, type RunStatus } from './runStats.ts'
 import { alertRuleLabel, universeLabel } from './agentLabels.ts'
+import { EmptyState } from '../ui/EmptyState.tsx'
+import { DANGER_ROW_BUTTON_CLASS, ROW_BUTTON_CLASS } from '../shell/buttonStyles.ts'
+import { PAGE_PANEL_CLASS, PANEL_TITLE_CLASS } from '../ui/pageStyles.ts'
 
 type AgentRosterProps = {
   agents: ReadonlyArray<AgentRow>
   runs: ReadonlyArray<AgentRunRow>
   selectedAgentId: string | null
+  activity: string
   loadError: string | null
   onSelect: (agentId: string) => void
   onEdit: (agent: AgentRow) => void
@@ -14,8 +18,6 @@ type AgentRosterProps = {
   onDelete: (agentId: string) => void
 }
 
-const ROSTER_ACTION_CLASS = 'rounded-md border border-line-strong px-3 py-1.5 text-xs font-medium'
-
 // The monitor-first hero: agent roster with a status dot + run-tick timeline +
 // fleet summary, plus the per-agent CRUD controls. Extracted from AgentsPage so
 // the page holds orchestration, not presentation.
@@ -23,6 +25,7 @@ export function AgentRoster({
   agents,
   runs,
   selectedAgentId,
+  activity,
   loadError,
   onSelect,
   onEdit,
@@ -31,19 +34,27 @@ export function AgentRoster({
   onDelete,
 }: AgentRosterProps) {
   return (
-    <section className="rounded-md border border-line bg-surface p-5">
-      <h2 className="text-lg font-semibold text-fg">Agents</h2>
+    <section className={PAGE_PANEL_CLASS}>
+      <h2 className={PANEL_TITLE_CLASS}>Agents</h2>
       <FleetSummary fleet={rosterRunSummary(agents, runs)} />
+      <p role="status" className="mt-1 text-xs text-muted">
+        <span className="font-medium text-fg-soft">Activity</span> · {activity}
+      </p>
       {loadError ? <p className="mt-3 text-sm text-negative">Load failed: {loadError}</p> : null}
-      <ul className="mt-4 flex flex-col gap-3">
+      {agents.length === 0 && loadError === null ? (
+        <div className="mt-4">
+          <EmptyState>No agents yet. Create one to start monitoring.</EmptyState>
+        </div>
+      ) : null}
+      <ul className="mt-4 flex flex-col gap-3 empty:hidden">
         {agents.map((agent) => (
           <li
             key={agent.agent_id}
-            className={`rounded-md border p-3 ${
-              selectedAgentId === agent.agent_id ? 'border-accent' : 'border-line'
+            className={`rounded-lg border p-3 ${
+              selectedAgentId === agent.agent_id ? 'border-accent-border bg-accent-soft' : 'border-line'
             }`}
           >
-            <div className="flex items-start justify-between gap-3">
+            <div className="flex flex-col gap-3">
               <div className="min-w-0">
                 <h3 className="flex items-center gap-2 text-sm font-semibold text-fg">
                   <StatusDot status={latestRunStatus(runs, agent.agent_id)} />
@@ -57,23 +68,23 @@ export function AgentRoster({
                 <p className="mt-1 text-xs text-muted">Alert rule: {alertRuleLabel(agent.alert_rules)}</p>
                 <RunTimeline ticks={agentRunTicks(runs, agent.agent_id)} />
               </div>
-              <div className="flex flex-wrap justify-end gap-2">
-                <button type="button" onClick={() => onSelect(agent.agent_id)} className={ROSTER_ACTION_CLASS}>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => onSelect(agent.agent_id)} className={ROW_BUTTON_CLASS}>
                   View
                 </button>
-                <button type="button" onClick={() => onEdit(agent)} className={ROSTER_ACTION_CLASS}>
+                <button type="button" onClick={() => onEdit(agent)} className={ROW_BUTTON_CLASS}>
                   Edit
                 </button>
-                <button type="button" onClick={() => onRun(agent.agent_id)} className={ROSTER_ACTION_CLASS}>
+                <button type="button" onClick={() => onRun(agent.agent_id)} className={ROW_BUTTON_CLASS}>
                   Run
                 </button>
-                <button type="button" onClick={() => onToggleEnabled(agent)} className={ROSTER_ACTION_CLASS}>
+                <button type="button" onClick={() => onToggleEnabled(agent)} className={ROW_BUTTON_CLASS}>
                   {agent.enabled ? 'Disable' : 'Enable'}
                 </button>
                 <button
                   type="button"
                   onClick={() => onDelete(agent.agent_id)}
-                  className="rounded-md border border-negative px-3 py-1.5 text-xs font-medium text-negative"
+                  className={DANGER_ROW_BUTTON_CLASS}
                 >
                   Delete
                 </button>
