@@ -241,8 +241,10 @@ function plainPunctuation(text: string): string {
 }
 
 // The model's reply, or null when it is not the expected shape. A malformed
-// field makes the whole reply unparseable, so the filing is read again rather
-// than marked done without it.
+// statement makes the whole reply unparseable, so the filing is read again
+// rather than marked done without it. A quarter_end that is no date, or an
+// about that is none of the three, only binds nothing: a date-format slip
+// would otherwise cost the release its statements on every drain.
 export function parseReleaseReply(text: string): ReleaseReply | null {
   let reply: unknown;
   try {
@@ -251,21 +253,24 @@ export function parseReleaseReply(text: string): ReleaseReply | null {
     return null;
   }
   const { quarter_end: quarterEnd, statements: items } = (reply ?? {}) as Record<string, unknown>;
-  if (!(quarterEnd === null || isIsoDate(quarterEnd)) || !Array.isArray(items)) return null;
+  if (!Array.isArray(items)) return null;
   const statements: ReleaseStatement[] = [];
   for (const item of items.slice(0, MAX_STATEMENTS)) {
     const { kind, metric, about, quote } = (item ?? {}) as Record<string, unknown>;
     if (
       typeof quote !== "string" ||
       !(RELEASE_STATEMENT_KINDS as ReadonlyArray<unknown>).includes(kind) ||
-      !(RELEASE_METRICS as ReadonlyArray<unknown>).includes(metric) ||
-      !(RELEASE_STATEMENT_ABOUTS as ReadonlyArray<unknown>).includes(about)
+      !(RELEASE_METRICS as ReadonlyArray<unknown>).includes(metric)
     ) {
       return null;
     }
-    statements.push({ kind: kind as ReleaseStatementKind, metric: metric as ReleaseMetric, about: about as ReleaseStatementAbout, quote });
+    statements.push({ kind: kind as ReleaseStatementKind, metric: metric as ReleaseMetric, about: statementAbout(about), quote });
   }
-  return { quarterEnd, statements };
+  return { quarterEnd: isIsoDate(quarterEnd) ? quarterEnd : null, statements };
+}
+
+function statementAbout(about: unknown): ReleaseStatementAbout {
+  return (RELEASE_STATEMENT_ABOUTS as ReadonlyArray<unknown>).includes(about) ? about as ReleaseStatementAbout : "other";
 }
 
 // The end of the quarter a release reports: the one every prompt that names an
