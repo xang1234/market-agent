@@ -40,7 +40,7 @@ import { HOLDOUT_CASES, HOLDOUT_VERSION, SYNTHETIC_CASES, SYNTHETIC_FIGURES, typ
 
 // The suite's identity: its version and the digest of every case, pinned so a
 // changed case is a new version, not a quiet edit (#221).
-const HOLDOUT_DIGEST = "sha256:4fb00d2f09ba139e14f52482e3fc0dd3671ab0cd4aad9e085b6ba1ce439fe71d";
+const HOLDOUT_DIGEST = "sha256:d43553f6b7ecbdbbe6539f7161176689e9a6cae61190a41fe56e190f02367174";
 
 test("the held-out suite is a fixed, versioned set of 10-12 cases (#221)", () => {
   assert.ok(HOLDOUT_CASES.length + 1 >= 10 && HOLDOUT_CASES.length + 1 <= 12, "10-12 cases, the synthetic set counted as one");

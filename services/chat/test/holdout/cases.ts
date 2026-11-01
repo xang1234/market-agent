@@ -19,7 +19,7 @@
 
 import type { RejectionCheck } from "../../src/assertions.ts";
 
-export const HOLDOUT_VERSION = 21;
+export const HOLDOUT_VERSION = 22;
 
 type Assertion = Record<string, unknown>;
 
@@ -337,7 +337,7 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
   },
   {
     id: "filed-cause",
-    trap: "a cause asked for: the margin is calculated, and the answer says the cause is not",
+    trap: "a cause asked for: the margin is calculated, and the charge AMD filed against its gross margin for the quarter, which the operating margin is computed from, is quoted beside it (#542)",
     turns: ["Why did AMD's operating margin turn negative in Q2 2025?"],
     // pinned 2026-10-23: the live reading flips on this question (#511).
     scopes: [{metrics: [{metric: "income_statement", adjustment: null, qualifier: null}], asks: ["explains", "margin_trend"], turns_off: {facets: [], metrics: []}, income_items: ["operating_margin"], period: {kind: "fiscal_quarter", fiscal_period: "Q2", fiscal_year: 2025}, companies: {kind: "as_named", names: ["AMD"]}}],
@@ -346,7 +346,10 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
       companies: ["AMD"],
       route: "financial_answer",
       financial: [[AMD, OPERATING_MARGIN, "Q2 FY2025 (ended 2025-06-28)", "verified", "-1.74%"]],
-      uncovered: "Not covered by this answer: a margin over several periods; the cause of these figures.",
+      uncovered: [
+        "According to a source dated Aug 2025 on AMD: As previously announced, our second quarter results were impacted by the U.S. Government's export control on our AMD Instinct MI308 data center GPU products. For the quarter, these restrictions led to approximately $800 million in inventory and related charges.",
+        "Not covered by this answer: a margin over several periods.",
+      ],
     },
     prose: "",
   },
