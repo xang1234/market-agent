@@ -266,14 +266,18 @@ export function parseReleaseReply(text: string): ReleaseReply | null {
 }
 
 // A rebind reply: the quarter's end, and what each of `count` listed
-// statements is about, by its number; null when the reply is no JSON object.
+// statements is about, by its number. Stricter than parseReleaseReply: a
+// rebind marks every sentence it reads, so a reply whose about is no object
+// (a list, a misspelled key) or whose quarter_end is neither a date nor null
+// is null, and the release is read again. A number it does not give is other.
 export function parseRebindReply(text: string, count: number): { quarterEnd: IsoDate | null; abouts: ReleaseStatementAbout[] } | null {
   const reply = replyObject(text);
-  if (reply === null) return null;
-  const abouts = isObject(reply.about) ? reply.about : {};
+  if (reply === null || !isObject(reply.about)) return null;
+  const { quarter_end: quarterEnd, about } = reply;
+  if (quarterEnd !== undefined && quarterEnd !== null && !isIsoDate(quarterEnd)) return null;
   return {
-    quarterEnd: isIsoDate(reply.quarter_end) ? reply.quarter_end : null,
-    abouts: Array.from({ length: count }, (_, n) => statementAbout(abouts[String(n + 1)])),
+    quarterEnd: quarterEnd ?? null,
+    abouts: Array.from({ length: count }, (_, n) => statementAbout(about[String(n + 1)])),
   };
 }
 
