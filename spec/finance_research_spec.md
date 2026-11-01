@@ -457,7 +457,11 @@ Claim {
   confidence: numeric
   status: 'extracted' | 'corroborated' | 'disputed' | 'rejected'
 }
+```
 
+A claim's `period.bound_at` is the moment it was bound, never earlier, so a lookup replayed at an earlier cutoff returns what it did then. For the same reason a period is set once, from unbound, and never changed or cleared. A correction supersedes the claim with a new one.
+
+```ts
 ClaimArgument {
   claim_argument_id: UUID
   claim_id: UUID

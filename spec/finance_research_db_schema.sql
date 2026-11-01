@@ -483,12 +483,30 @@ create table claims (
   enriched_at timestamptz,
   period_kind text check (period_kind in ('fiscal_q', 'fiscal_y')),
   period_end date,
-  -- When the claim was bound to its period. A binding or rebinding sets it to
-  -- that moment, never earlier, so a lookup replayed at an earlier cutoff
-  -- returns what it did then.
+  -- When the claim was bound to its period. A binding sets it to that moment,
+  -- never earlier, so a lookup replayed at an earlier cutoff returns what it
+  -- did then. For the same reason a period is set once, from null, and never
+  -- changed or cleared (claims_period_bound_once): a correction supersedes the
+  -- claim with a new one.
   period_bound_at timestamptz,
   constraint claims_period_pair check (num_nulls(period_kind, period_end, period_bound_at) in (0, 3))
 );
+create function prevent_claim_period_rebinding() returns trigger
+language plpgsql
+as $$
+begin
+  if old.period_kind is not null
+     and (new.period_kind is distinct from old.period_kind
+          or new.period_end is distinct from old.period_end
+          or new.period_bound_at is distinct from old.period_bound_at) then
+    raise exception 'claims_period_bound_once: claim % is bound to its period; supersede it instead', old.claim_id;
+  end if;
+  return new;
+end;
+$$;
+create trigger claims_period_bound_once
+before update on claims
+for each row execute function prevent_claim_period_rebinding();
 create index claims_document_idx on claims(document_id);
 create index claims_predicate_idx on claims(predicate);
 create index claims_status_idx on claims(status);
