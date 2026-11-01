@@ -5,9 +5,10 @@ import {
   canonicalText,
   extractReleaseStatements,
   findReleaseCandidates,
-  parseReleaseStatements,
+  parseReleaseReply,
   releaseExhibits,
   releasePrompts,
+  reportedQuarterEnd,
   runReleaseExtractionDrain,
   verifyStatement,
   type ExtractReleaseDeps,
@@ -111,22 +112,50 @@ test("a release longer than one prompt is read whole, across prompts split betwe
   for (const sentence of sentences) assert.ok(split.some((prompt) => prompt.includes(sentence)), sentence);
 });
 
-test("the model's statements are read when well formed; a reply with an unknown kind or metric is not", () => {
-  const statements = parseReleaseStatements(
-    '```json\n{"statements":[' +
-      `{"kind":"explanation","metric":"gross_margin","quote":${JSON.stringify(H20_EXPLANATION)}},` +
-      `{"kind":"guidance","metric":"revenue","quote":${JSON.stringify(REVENUE_GUIDANCE)}}` +
+test("the model's reply is read when well formed, with the quarter's end and what each statement is about; a reply missing either is not", () => {
+  const reply = parseReleaseReply(
+    '```json\n{"quarter_end":"2025-04-27","statements":[' +
+      `{"kind":"explanation","metric":"gross_margin","about":"quarter","quote":${JSON.stringify(H20_EXPLANATION)}},` +
+      `{"kind":"guidance","metric":"revenue","about":"other","quote":${JSON.stringify(REVENUE_GUIDANCE)}}` +
       "]}\n```",
   );
-  assert.deepEqual(statements?.map((statement) => [statement.kind, statement.metric]), [["explanation", "gross_margin"], ["guidance", "revenue"]]);
-  // A malformed entry makes the reply unparseable (the filing is read again),
+  assert.deepEqual(reply, {
+    quarterEnd: "2025-04-27",
+    statements: [
+      { kind: "explanation", metric: "gross_margin", about: "quarter", quote: H20_EXPLANATION },
+      { kind: "guidance", metric: "revenue", about: "other", quote: REVENUE_GUIDANCE },
+    ],
+  });
+  assert.deepEqual(parseReleaseReply('{"quarter_end":null,"statements":[]}'), { quarterEnd: null, statements: [] });
+  // A malformed field makes the reply unparseable (the filing is read again),
   // never an empty answer that would mark it done.
-  for (const entry of ['{"kind":"cause","metric":"revenue","quote":"x"}', '{"kind":"guidance","metric":"stock_price","quote":"x"}', '{"kind":"guidance","metric":"revenue"}']) {
-    assert.equal(parseReleaseStatements(`{"statements":[${entry}]}`), null, entry);
+  const entry = (fields: Record<string, unknown>) => JSON.stringify({ kind: "guidance", metric: "revenue", about: "other", quote: "x", ...fields });
+  for (const [label, text] of [
+    ["no quarter_end", `{"statements":[${entry({})}]}`],
+    ["a quarter_end in words", `{"quarter_end":"June 28, 2025","statements":[]}`],
+    ["a quarter_end no calendar has", `{"quarter_end":"2025-02-30","statements":[]}`],
+    ["an unknown about", `{"quarter_end":null,"statements":[${entry({ about: "half" })}]}`],
+    ["no about", `{"quarter_end":null,"statements":[${entry({ about: undefined })}]}`],
+    ["an unknown kind", `{"quarter_end":null,"statements":[${entry({ kind: "cause" })}]}`],
+    ["an unknown metric", `{"quarter_end":null,"statements":[${entry({ metric: "stock_price" })}]}`],
+    ["no quote", `{"quarter_end":null,"statements":[${entry({ quote: undefined })}]}`],
+    ["no statements", '{"quarter_end":null,"quotes":[]}'],
+    ["prose", "I could not find any."],
+  ]) {
+    assert.equal(parseReleaseReply(text!), null, label);
   }
-  assert.equal(parseReleaseStatements("I could not find any."), null);
-  assert.equal(parseReleaseStatements('{"quotes":[]}'), null);
-  assert.deepEqual(parseReleaseStatements('{"statements":[]}'), []);
+});
+
+test("a release reports the quarter every prompt naming one agrees on, ended before the filing and at most 92 days before it", () => {
+  assert.equal(reportedQuarterEnd(["2025-06-28", null, "2025-06-28"], "2025-08-05"), "2025-06-28");
+  assert.equal(reportedQuarterEnd(["2025-06-28", "2025-03-29"], "2025-08-05"), null, "prompts disagree");
+  assert.equal(reportedQuarterEnd([null, null], "2025-08-05"), null, "no prompt names one");
+  assert.equal(reportedQuarterEnd(["2025-08-05"], "2025-08-05"), null, "on the filing date");
+  assert.equal(reportedQuarterEnd(["2025-09-27"], "2025-08-05"), null, "after it");
+  assert.equal(reportedQuarterEnd(["2024-06-29"], "2025-08-05"), null, "a year-ago end");
+  assert.equal(reportedQuarterEnd(["2025-05-05"], "2025-08-05"), "2025-05-05", "92 days before");
+  assert.equal(reportedQuarterEnd(["2025-05-04"], "2025-08-05"), null, "93 days before");
+  assert.equal(reportedQuarterEnd(["2025-06-28"], null), null, "no filing date");
 });
 
 test("a statement is kept only as a verbatim quote of an exhibit, stored in the exhibit's own words", () => {
@@ -242,11 +271,14 @@ function fakeSec(submission: string): ExtractReleaseDeps["secClient"] {
   } as unknown as ExtractReleaseDeps["secClient"];
 }
 
-// An Item 2.02 claim as persist8kFiling writes it.
-async function seedItem202(client: { query: QueryExecutor["query"] }): Promise<{ claimId: string; issuerId: string; documentId: string }> {
+// An Item 2.02 claim as persist8kFiling writes it, dated by the filing.
+async function seedItem202(
+  client: { query: QueryExecutor["query"] },
+  filing: { name: string; cik: number; accession: string; filedOn: string } = { name: "NVIDIA Corp", cik: NVDA_CIK, accession: ACCESSION, filedOn: "2025-05-28" },
+): Promise<{ claimId: string; issuerId: string; documentId: string }> {
   const issuer = await client.query<{ id: string }>(
-    `insert into issuers (legal_name, cik) values ('NVIDIA Corp', $1) returning issuer_id::text as id`,
-    [String(NVDA_CIK).padStart(10, "0")],
+    `insert into issuers (legal_name, cik) values ($1, $2) returning issuer_id::text as id`,
+    [filing.name, String(filing.cik).padStart(10, "0")],
   );
   const issuerId = issuer.rows[0]!.id;
   const source = await client.query<{ id: string }>(
@@ -257,7 +289,7 @@ async function seedItem202(client: { query: QueryExecutor["query"] }): Promise<{
   const document = await client.query<{ id: string }>(
     `insert into documents (source_id, kind, provider_doc_id, content_hash, raw_blob_id)
      values ($1, 'filing', $2, 'h-release', 'sha256:release') returning document_id::text as id`,
-    [sourceId, ACCESSION],
+    [sourceId, filing.accession],
   );
   const documentId = document.rows[0]!.id;
   const claim = await client.query<{ id: string }>(
@@ -265,9 +297,9 @@ async function seedItem202(client: { query: QueryExecutor["query"] }): Promise<{
        (document_id, predicate, text_canonical, polarity, modality, reported_by_source_id,
         attributed_to_type, attributed_to_id, effective_time, confidence, status)
      values ($1, 'material_event.guidance_update', 'Material event reported via 8-K: guidance update (2.02).',
-             'neutral', 'asserted', $2, 'issuer', $3, '2025-05-28T00:00:00Z', 0.9, 'extracted')
+             'neutral', 'asserted', $2, 'issuer', $3, $4::timestamptz, 0.9, 'extracted')
      returning claim_id::text as id`,
-    [documentId, sourceId, issuerId],
+    [documentId, sourceId, issuerId, `${filing.filedOn}T00:00:00Z`],
   );
   const claimId = claim.rows[0]!.id;
   await client.query(
@@ -281,15 +313,15 @@ test("an earnings release's verified quotes become management claims, once", { s
   const { databaseUrl } = await bootstrapDatabase(t, "release-extraction");
   const client = await connectedClient(t, databaseUrl);
   const seeded = await seedItem202(client);
-  const reply = JSON.stringify({ statements: [
-    { kind: "explanation", metric: "gross_margin", quote: H20_EXPLANATION },
-    { kind: "guidance", metric: "revenue", quote: REVENUE_GUIDANCE },
+  const reply = JSON.stringify({ quarter_end: "2025-04-27", statements: [
+    { kind: "explanation", metric: "gross_margin", about: "quarter", quote: H20_EXPLANATION },
+    { kind: "guidance", metric: "revenue", about: "other", quote: REVENUE_GUIDANCE },
     // One sentence explaining two metrics is a claim for each.
-    { kind: "explanation", metric: "operating_income", quote: H20_EXPLANATION },
+    { kind: "explanation", metric: "operating_income", about: "quarter", quote: H20_EXPLANATION },
     // Picked twice for the same metric, it is one.
-    { kind: "explanation", metric: "gross_margin", quote: H20_EXPLANATION },
+    { kind: "explanation", metric: "gross_margin", about: "quarter", quote: H20_EXPLANATION },
     // Invented: not in the filing, so never stored.
-    { kind: "explanation", metric: "revenue", quote: "Revenue grew because every hyperscaler doubled its orders." },
+    { kind: "explanation", metric: "revenue", about: "quarter", quote: "Revenue grew because every hyperscaler doubled its orders." },
   ] });
   const { llm, calls } = fakeLlm(reply);
   const deps: ExtractReleaseDeps = { db: client, llm, secClient: fakeSec(SUBMISSION) };
@@ -302,16 +334,18 @@ test("an earnings release's verified quotes become management claims, once", { s
   assert.match(calls[0]!, /\[EX-99\.1\][\s\S]*\[EX-99\.2\]/);
   assert.doesNotMatch(calls[0]!, /xs:schema/);
 
-  const claims = (await client.query<{ predicate: string; text_canonical: string; modality: string; attributed_to_id: string; effective_time: Date; locator: { exhibit: string; start: number; end: number } }>(
-    `select c.predicate, c.text_canonical, c.modality, c.attributed_to_id, c.effective_time, e.locator
+  const claims = (await client.query<{ predicate: string; text_canonical: string; modality: string; period_kind: string | null; period_end: string | null; attributed_to_id: string; effective_time: Date; locator: { exhibit: string; start: number; end: number } }>(
+    `select c.predicate, c.text_canonical, c.modality, c.period_kind, c.period_end::text as period_end, c.attributed_to_id, c.effective_time, e.locator
        from claims c join claim_evidence e on e.claim_id = c.claim_id
       where c.claim_id <> $1 order by c.predicate`,
     [seeded.claimId],
   )).rows;
-  assert.deepEqual(claims.map((claim) => [claim.predicate, claim.text_canonical, claim.modality]), [
-    ["guidance.revenue", REVENUE_GUIDANCE, "quoted"],
-    ["management.explanation.gross_margin", H20_EXPLANATION, "quoted"],
-    ["management.explanation.operating_income", H20_EXPLANATION, "quoted"],
+  // The H20 charge explains Q1 FY2026, the quarter ended 2025-04-27; the
+  // guidance explains no reported period.
+  assert.deepEqual(claims.map((claim) => [claim.predicate, claim.text_canonical, claim.modality, claim.period_kind, claim.period_end]), [
+    ["guidance.revenue", REVENUE_GUIDANCE, "quoted", null, null],
+    ["management.explanation.gross_margin", H20_EXPLANATION, "quoted", "fiscal_q", "2025-04-27"],
+    ["management.explanation.operating_income", H20_EXPLANATION, "quoted", "fiscal_q", "2025-04-27"],
   ]);
   assert.ok(claims.every((claim) => claim.attributed_to_id === seeded.issuerId));
   assert.equal(claims[1]!.effective_time.toISOString(), "2025-05-28T00:00:00.000Z");
@@ -352,8 +386,8 @@ test("a reply whose every quote fails verification is read again, not marked emp
   const { databaseUrl } = await bootstrapDatabase(t, "release-unverified");
   const client = await connectedClient(t, databaseUrl);
   const seeded = await seedItem202(client);
-  const { llm } = fakeLlm(JSON.stringify({ statements: [
-    { kind: "explanation", metric: "revenue", quote: "Revenue grew because every hyperscaler doubled its orders." },
+  const { llm } = fakeLlm(JSON.stringify({ quarter_end: "2025-04-27", statements: [
+    { kind: "explanation", metric: "revenue", about: "quarter", quote: "Revenue grew because every hyperscaler doubled its orders." },
   ] }));
   const result = await runReleaseExtractionDrain({ db: client, llm, secClient: fakeSec(SUBMISSION) });
   assert.equal(result.unparseable, 1);
@@ -375,7 +409,7 @@ test("a prompt whose every quote fails verification leaves the filing to read ag
       calls += 1;
       // The first prompt's quote is in the filing; the others' are invented.
       const quote = calls === 1 ? H20_EXPLANATION : "Revenue grew because every hyperscaler doubled its orders.";
-      return { text: JSON.stringify({ statements: [{ kind: "explanation", metric: "gross_margin", quote }] }), deployment: { channel: "test", model: "test-model" } };
+      return { text: JSON.stringify({ quarter_end: "2025-04-27", statements: [{ kind: "explanation", metric: "gross_margin", about: "quarter", quote }] }), deployment: { channel: "test", model: "test-model" } };
     },
   };
   const result = await runReleaseExtractionDrain({ db: client, llm, secClient: fakeSec(submission) });
@@ -400,10 +434,85 @@ test("a filing without EX-99 exhibits is marked processed without a model call",
   const { databaseUrl } = await bootstrapDatabase(t, "release-no-exhibits");
   const client = await connectedClient(t, databaseUrl);
   await seedItem202(client);
-  const { llm, calls } = fakeLlm('{"statements":[]}');
+  const { llm, calls } = fakeLlm('{"quarter_end":null,"statements":[]}');
   const bare = SUBMISSION.replace(/<DOCUMENT>\n<TYPE>EX-99[\s\S]*?<\/DOCUMENT>/g, "");
   const result = await runReleaseExtractionDrain({ db: client, llm, secClient: fakeSec(bare) });
   assert.equal(result.no_exhibits, 1);
   assert.equal(calls.length, 0);
   assert.deepEqual(await findReleaseCandidates(client), []);
+});
+
+// AMD's Q2 2025 8-K (Item 2.02), filed 2025-08-05, cut down. The MI308
+// sentences are its EX-99.1's own (as in the chat golden dataset); the other
+// lines are written for this test.
+const AMD_CIK = 2488;
+const AMD_Q2 = { name: "Advanced Micro Devices Inc", cik: AMD_CIK, accession: "0000002488-25-000106", filedOn: "2025-08-05" };
+const MI308_EXPLANATION =
+  "As previously announced, our second quarter results were impacted by the U.S. Government's export control on our AMD Instinct MI308 data center GPU products. For the quarter, these restrictions led to approximately $800 million in inventory and related charges.";
+const AMD_YEAR_TO_DATE = "For the first six months of 2025, gross margin was lower primarily due to the MI308 inventory charges.";
+const AMD_GUIDANCE = "For the third quarter of 2025, AMD expects revenue to be approximately $8.7 billion, plus or minus $300 million.";
+const amdSubmission = (blocks: ReadonlyArray<string>) => [
+  `<SEC-DOCUMENT>${AMD_Q2.accession}.txt`,
+  "<DOCUMENT>\n<TYPE>EX-99.1\n<TEXT>\n<html><body>",
+  ...blocks.map((block) => `<p>${block}</p>`),
+  "</body></html>\n</TEXT>\n</DOCUMENT>",
+  "</SEC-DOCUMENT>",
+].join("\n");
+const AMD_Q2_SUBMISSION = amdSubmission([
+  "AMD Reports Second Quarter 2025 Financial Results",
+  "Financial results for the three months ended June 28, 2025 are in the tables below.",
+  MI308_EXPLANATION,
+  AMD_YEAR_TO_DATE,
+  AMD_GUIDANCE,
+]);
+const amdQ2Reply = (quarterEnd: string | null) => JSON.stringify({ quarter_end: quarterEnd, statements: [
+  { kind: "explanation", metric: "gross_margin", about: "quarter", quote: MI308_EXPLANATION },
+  { kind: "explanation", metric: "gross_margin", about: "other", quote: AMD_YEAR_TO_DATE },
+  // Guidance explains no reported period, whatever the model calls it.
+  { kind: "guidance", metric: "revenue", about: "quarter", quote: AMD_GUIDANCE },
+] });
+
+async function releaseClaims(client: { query: QueryExecutor["query"] }, documentId: string) {
+  return (await client.query<{ claim_id: string; predicate: string; text_canonical: string; period_kind: string | null; period_end: string | null; bound_after_created: boolean | null }>(
+    `select claim_id::text as claim_id, predicate, text_canonical, period_kind, period_end::text as period_end,
+            period_bound_at > created_at as bound_after_created
+       from claims
+      where document_id = $1 and predicate <> 'material_event.guidance_update'
+      order by predicate, text_canonical`,
+    [documentId],
+  )).rows;
+}
+
+const periodsOf = (claims: Awaited<ReturnType<typeof releaseClaims>>) =>
+  claims.map((claim) => [claim.predicate, claim.text_canonical, claim.period_kind, claim.period_end]);
+
+test("AMD's Q2 2025 release binds the MI308 explanation to the quarter ended 2025-06-28, and leaves guidance and year-to-date unbound", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-amd-q2");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedItem202(client, AMD_Q2);
+  const result = await runReleaseExtractionDrain({ db: client, llm: fakeLlm(amdQ2Reply("2025-06-28")).llm, secClient: fakeSec(AMD_Q2_SUBMISSION) });
+  assert.equal(result.extracted, 1);
+  assert.deepEqual(periodsOf(await releaseClaims(client, seeded.documentId)), [
+    ["guidance.revenue", AMD_GUIDANCE, null, null],
+    ["management.explanation.gross_margin", MI308_EXPLANATION, "fiscal_q", "2025-06-28"],
+    ["management.explanation.gross_margin", AMD_YEAR_TO_DATE, null, null],
+  ]);
+});
+
+test("a fourth-quarter release binds its year's explanation to the fiscal year and its quarter's to the quarter, ending the same day", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-q4");
+  const client = await connectedClient(t, databaseUrl);
+  const quarter = "Fourth quarter gross margin increased year-over-year primarily driven by a higher mix of Data Center revenue.";
+  const year = "For 2024, gross margin increased year-over-year primarily driven by strong growth in the Data Center segment.";
+  const seeded = await seedItem202(client, { ...AMD_Q2, accession: "0000002488-25-000012", filedOn: "2025-02-04" });
+  const reply = JSON.stringify({ quarter_end: "2024-12-28", statements: [
+    { kind: "explanation", metric: "gross_margin", about: "quarter", quote: quarter },
+    { kind: "explanation", metric: "gross_margin", about: "year", quote: year },
+  ] });
+  const submission = amdSubmission(["AMD Reports Fourth Quarter and Full Year 2024 Financial Results", quarter, year]);
+  await runReleaseExtractionDrain({ db: client, llm: fakeLlm(reply).llm, secClient: fakeSec(submission) });
+  assert.deepEqual(periodsOf(await releaseClaims(client, seeded.documentId)), [
+    ["management.explanation.gross_margin", year, "fiscal_y", "2024-12-28"],
+    ["management.explanation.gross_margin", quarter, "fiscal_q", "2024-12-28"],
+  ]);
 });
