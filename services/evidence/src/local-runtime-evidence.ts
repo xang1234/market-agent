@@ -216,24 +216,7 @@ export async function loadLocalRuntimeEvidence(
           -- A route reads a company's own claims: one naming it only as a
           -- competitor, customer or other party is another company's claim.
           and (not $10::boolean or ca.role = 'subject')
-          and (
-            (
-              $5::boolean = true
-              and exists (
-                select 1
-                  from ir_document_assets ira
-                 where ira.document_id = d.document_id
-              )
-            )
-            or (
-              $6::boolean = true
-              and not exists (
-                select 1
-                  from ir_document_assets ira
-                 where ira.document_id = d.document_id
-              )
-            )
-          )
+          and (($5::boolean and ${ISSUER_IR_DOCUMENT_SQL}) or ($6::boolean and not ${ISSUER_IR_DOCUMENT_SQL}))
         -- The company the claim is about: its subject role before a competitor
         -- or affected party, the issuer row before a listing, then by id so the
         -- pick is stable.
@@ -387,6 +370,8 @@ export async function loadPeriodClaimEvidence(
           and ($7::timestamptz is null or c.period_bound_at <= $7::timestamptz)
           and not (c.claim_id = any($8::uuid[]))
           and ${citableClaimSql("$9::uuid", "$7::timestamptz")}
+          -- As the default evidence load: an issuer-IR copy is not the filing.
+          and not ${ISSUER_IR_DOCUMENT_SQL}
         order by c.predicate, lower(c.text_canonical), coalesce(d.published_at, c.created_at), c.claim_id
      )
      select *
@@ -427,6 +412,9 @@ function citableClaimSql(user: string, cutoff: string): string {
             and coalesce(d.published_at,d.created_at) <= ${cutoff}
           ))`;
 }
+
+// d, the claim's document, is a copy fetched from the issuer's IR site.
+const ISSUER_IR_DOCUMENT_SQL = `exists (select 1 from ir_document_assets ira where ira.document_id = d.document_id)`;
 
 // Each prefix as a like pattern, with its tier: its position, shared by a
 // group's.
