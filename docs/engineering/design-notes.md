@@ -520,7 +520,7 @@ an 8-K Item 2.02 files the press release and CFO commentary as EX-99 exhibits
   statement (`pg_cancel_backend` or a shutdown) or a lock not available. Nothing here sets `statement_timeout`, so a
   slow read ends only when someone cancels it. Any other failure fails the turn. "Show the evidence" after such an
   answer, asked once or again, reads the claims its cause snapshot sealed (`parent_snapshot`) ahead of its own
-  selection, so it shows the quoted cause first (`loadPriorCauseClaims`: the latest answer that is not itself an
+  selection, none counted as another's repeat, so it shows the quoted cause first (`loadPriorCauseClaims`: the latest answer that is not itself an
   evidence follow-up). One that no longer comes back, superseded, deleted or revoked since, adds the note "The
   explanation quoted earlier is no longer citable."
 - **Run it** after the 8-K crawl: `npm run extract:earnings-releases` (in `services/evidence`). It is a batch step,
