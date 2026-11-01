@@ -32,6 +32,7 @@ import type { AddressInfo } from "node:net";
 const USER_ID = "70000000-0000-4000-8000-000000000001";
 const NVDA = GOLDEN_COMPANIES.find((company) => company.ticker === "NVDA")!;
 const AMD = GOLDEN_COMPANIES.find((company) => company.ticker === "AMD")!;
+const AAPL = GOLDEN_COMPANIES.find((company) => company.ticker === "AAPL")!;
 const BOTH_LISTINGS = [
   { kind: "listing", id: NVDA.listing_id },
   { kind: "listing", id: AMD.listing_id },
@@ -488,6 +489,17 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     causeQuotedOrNamed(answer);
   });
 
+  await t.test("two companies whose quarters end the same day each name their own quarter beside their cause: AAPL's Q3 FY2025 and AMD's Q2 FY2025 (#542)", async (st) => {
+    const text = "Operating income fell on lower iPhone sales.";
+    const claimId = await seedBoundExplanation(st, client, { predicate: "management.explanation.operating_income", text, period: { kind: "fiscal_q", end: "2025-06-28" }, published: "2025-07-31T00:00:00Z", issuer: AAPL.issuer_id });
+    const answer = await askAmd("Why did the operating margins of AAPL and AMD move in their quarters ended in June 2025?");
+    const { results, notes } = engineAnswer(answer);
+    assert.deepEqual(results.map(([, period]) => period), ["Q3 FY2025 (ended 2025-06-28)", "Q2 FY2025 (ended 2025-06-28)"]);
+    assert.deepEqual(notes, [`According to a source dated Jul 2025 on AAPL, for Q3 FY2025 (ended 2025-06-28): ${text} ${MI308}`]);
+    causeQuotedOrNamed(answer);
+    assert.deepEqual(refsOf(answer.blocks[1]!), [["claim", claimId, text], ["claim", await filedClaimId(), AMD_Q2_2025_RELEASE.text]]);
+  });
+
   await t.test("a revenue follow-up to the margin's cause names its cause as not covered: AMD's release explains its gross margin, not its revenue (#542)", async () => {
     const amdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD margin, then revenue" });
     completedTurn(await runTurn(base, amdThread.thread_id, "Why did AMD's operating margin turn negative in Q2 2025?"));
@@ -692,7 +704,6 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
   // company added back, and the benchmark turned off. Each turn keeps what it
   // does not change, read back from the saved answer as a reload would.
   await t.test("a research scope survives a table, an explanation, and companies dropped and added back", async () => {
-    const AAPL = GOLDEN_COMPANIES.find((company) => company.ticker === "AAPL")!;
     const regressionThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Scope regression" });
     type Saved = { route: string; companies: Array<{ issuer_id: string }>; metrics: Array<{ metric_key: string }>; price_window: { cutoff: string } | null; benchmark: boolean; inherited: string[] };
     const saved = async (): Promise<Saved[]> =>
@@ -1047,14 +1058,14 @@ async function waitsOn(client: Client, pid: number, until: Promise<unknown>): Pr
   return false;
 }
 
-// An AMD explanation bound to its period as the release extractor binds one,
-// published under the release's source, and stored now unless known says
-// when. Superseded once the subtest ends, so later turns read AMD's claims as
-// seeded.
+// An explanation bound to its period as the release extractor binds one,
+// published under AMD's release source about AMD unless issuer says whom, and
+// stored now unless known says when. Superseded once the subtest ends, so
+// later turns read the claims as seeded.
 async function seedBoundExplanation(
   t: TestContext,
   client: Client,
-  input: { predicate: string; text: string; period: { kind: string; end: string }; published: string; known?: string },
+  input: { predicate: string; text: string; period: { kind: string; end: string }; published: string; known?: string; issuer?: string },
 ): Promise<string> {
   const { rows: [doc] } = await client.query<{ document_id: string }>(
     `insert into documents (source_id, kind, title, published_at, content_hash, raw_blob_id, parse_status)
@@ -1072,7 +1083,7 @@ async function seedBoundExplanation(
   );
   await client.query(
     `insert into claim_arguments (claim_id, subject_kind, subject_id, role) values ($1::uuid, 'issuer', $2::uuid, 'subject')`,
-    [claim!.claim_id, AMD.issuer_id],
+    [claim!.claim_id, input.issuer ?? AMD.issuer_id],
   );
   t.after(() => client.query(`update claims set superseded_at = now() where claim_id = $1::uuid`, [claim!.claim_id]));
   return claim!.claim_id;
