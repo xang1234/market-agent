@@ -402,8 +402,9 @@ export async function loadPeriodClaimEvidence(
 // Of these claims, the ones a reader may still cite, locked inside the
 // caller's transaction as a financial publication locks its evidence
 // (financial-access-lock.ts): their sources, documents, then the claims, each
-// in id order, for share. A revocation that committed first is read and
-// drops its claim; one that comes later waits for the caller's commit.
+// in id order, for share. A revocation committed before the lock, or in
+// flight when it is taken, is read and drops its claim; one that starts later
+// waits for the caller's commit.
 export async function lockCitableClaims(
   db: RowQueryExecutor,
   input: { claim_ids: ReadonlyArray<string>; user_id?: string | null; as_of?: string },
