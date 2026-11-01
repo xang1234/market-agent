@@ -87,7 +87,10 @@ test("createClaim inserts modality, attribution, effective time, confidence, and
     "2026-05-01T00:00:00Z",
     0.84,
     "extracted",
+    null,
+    null,
   ]);
+  assert.equal(claim.period, null);
 });
 
 test("listClaimsForDocument returns claims ordered by effective time and creation time", async () => {
@@ -136,6 +139,8 @@ test("createClaim rejects invalid claim inputs before querying", async () => {
   await assert.rejects(() => createClaim(db, { ...valid, status: "published" as never }), /status/);
   await assert.rejects(() => createClaim(db, { ...valid, confidence: 1.1 }), /confidence/);
   await assert.rejects(() => createClaim(db, { ...valid, effective_time: "2026-05-01" }), /effective_time/);
+  await assert.rejects(() => createClaim(db, { ...valid, period: { kind: "ttm" as never, end: "2025-06-28" } }), /period\.kind/);
+  await assert.rejects(() => createClaim(db, { ...valid, period: { kind: "fiscal_q", end: "2025-06-31" } }), /period\.end/);
 
   assert.equal(queries.length, 0);
 });

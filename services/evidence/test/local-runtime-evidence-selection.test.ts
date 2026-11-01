@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { createClaim, listClaimsForDocument, type ClaimPeriod } from "../src/claim-repo.ts";
 import { loadLocalRuntimeEvidence } from "../src/local-runtime-evidence.ts";
 import type { QueryExecutor } from "../src/types.ts";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
@@ -25,7 +26,10 @@ const INSIDER = (n: number) => `c5000000-0000-4000-8000-00000000000${n}`;
 let documents = 0;
 async function claim(
   db: QueryExecutor,
-  input: { id: string; source: string; predicate: string; text: string; polarity: string; at: string; hash?: string },
+  input: {
+    id: string; source: string; predicate: string; text: string; polarity: string; at: string; hash?: string;
+    period?: ClaimPeriod; created?: string;
+  },
 ): Promise<void> {
   const document = `c6000000-0000-4000-8000-${String(++documents).padStart(12, "0")}`;
   await db.query(
@@ -35,9 +39,10 @@ async function claim(
   );
   await db.query(
     `insert into claims (claim_id, document_id, predicate, text_canonical, polarity, modality,
-                         reported_by_source_id, effective_time, confidence, status, created_at)
-     values ($1, $2, $3, $4, $5, 'asserted', $6, $7, 0.9, 'extracted', $7)`,
-    [input.id, document, input.predicate, input.text, input.polarity, input.source, input.at],
+                         reported_by_source_id, effective_time, confidence, status, created_at, period_kind, period_end)
+     values ($1, $2, $3, $4, $5, 'asserted', $6, $7, 0.9, 'extracted', $8, $9, $10)`,
+    [input.id, document, input.predicate, input.text, input.polarity, input.source, input.at, input.created ?? input.at,
+     input.period?.kind ?? null, input.period?.end ?? null],
   );
   await db.query(
     `insert into claim_arguments (claim_id, subject_kind, subject_id, role) values ($1, 'issuer', $2, 'subject')`,
@@ -530,4 +535,97 @@ test("a fiscal year's guidance is what was given during it", async (t) => {
     },
   });
   assert.deepEqual(evidence.claim_refs, [FY_GUIDANCE]);
+});
+
+// A period lookup (#542) reads the claims bound to the quarter or year asked,
+// by its kind and end date, and no other claim: not one filed near it, and
+// not one bound to a period that ends the same day. No facts date it.
+test("a period lookup returns only the claims bound to that period (#542)", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "evidence-selection-period");
+  const db = (await connectedClient(t, databaseUrl)) as unknown as QueryExecutor;
+  await db.query(`insert into issuers (issuer_id, legal_name) values ($1, 'Acme Inc')`, [ISSUER]);
+  await db.query(
+    `insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at)
+     values ($1, 'sec_edgar', 'filing', 'primary', 'public', now())`,
+    [FILINGS],
+  );
+  const Q2: ClaimPeriod = { kind: "fiscal_q", end: "2025-06-28" };
+  const Q3: ClaimPeriod = { kind: "fiscal_q", end: "2025-09-27" };
+  const GROSS_MARGIN = "management.explanation.gross_margin";
+  const REVENUE = "management.explanation.revenue";
+  const id = (n: number) => `c9000000-0000-4000-8000-00000000000${n}`;
+  const [Q2_MARGIN, Q2_REVENUE, Q3_MARGIN, UNBOUND, LATE, YEAR, FOURTH] = [1, 2, 3, 4, 5, 6, 7].map(id);
+  const margin = { source: FILINGS, predicate: GROSS_MARGIN, polarity: "negative" };
+  await claim(db, { id: Q2_MARGIN!, ...margin, text: "Gross margin fell on an inventory charge.", at: "2025-08-05T20:00:00Z", period: Q2 });
+  await claim(db, { id: Q2_REVENUE!, source: FILINGS, predicate: REVENUE, polarity: "positive", text: "Revenue grew on data center sales.", at: "2025-08-06T20:00:00Z", period: Q2 });
+  // The next quarter's release, 84 days later.
+  await claim(db, { id: Q3_MARGIN!, ...margin, text: "Gross margin recovered as the charge did not recur.", at: "2025-10-28T20:00:00Z", period: Q3 });
+  // Five weeks after the second quarter ended, bound to no period.
+  await claim(db, { id: UNBOUND!, ...margin, text: "Gross margin was pressured by export controls.", at: "2025-08-02T20:00:00Z" });
+  const subject_refs = [{ kind: "issuer" as const, id: ISSUER }];
+  const lookup = async (period: ClaimPeriod, prefixes: ReadonlyArray<string> = [GROSS_MARGIN], as_of?: string) =>
+    (await loadLocalRuntimeEvidence(db, { subject_refs, as_of, selection: { predicate_prefixes: prefixes, period } })).claim_refs;
+
+  await t.test("a quarter's lookup returns its own claim, not the next quarter's filed 84 days later", async () => {
+    assert.deepEqual(await lookup(Q2), [Q2_MARGIN]);
+    assert.deepEqual(await lookup(Q3), [Q3_MARGIN]);
+  });
+
+  await t.test("within the period, claims rank by their prefix's tier, and one no prefix matches is not read", async () => {
+    assert.deepEqual(await lookup(Q2, [GROSS_MARGIN, REVENUE]), [Q2_MARGIN, Q2_REVENUE]);
+    assert.deepEqual(await lookup(Q2, [REVENUE, GROSS_MARGIN]), [Q2_REVENUE, Q2_MARGIN]);
+  });
+
+  await t.test("an unbound explanation filed five weeks after the quarter ended is not the quarter's", async () => {
+    const windowed = await loadLocalRuntimeEvidence(db, {
+      subject_refs,
+      selection: { predicate_prefixes: [GROSS_MARGIN], effective_from: "2025-07-01T00:00:00Z", effective_until: "2025-09-01T00:00:00Z" },
+    });
+    assert.deepEqual(windowed.claim_refs.slice(0, 2), [Q2_MARGIN, UNBOUND], "a date window reads it");
+    assert.deepEqual(await lookup(Q2), [Q2_MARGIN]);
+  });
+
+  await t.test("at a fiscal year's end, the year and its fourth quarter are two periods", async () => {
+    const year: ClaimPeriod = { kind: "fiscal_y", end: "2025-12-27" };
+    const fourth: ClaimPeriod = { kind: "fiscal_q", end: "2025-12-27" };
+    const revenue = { source: FILINGS, predicate: REVENUE, polarity: "positive", at: "2026-02-03T21:00:00Z" };
+    await claim(db, { id: YEAR!, ...revenue, text: "Full-year revenue grew on data center demand.", period: year });
+    await claim(db, { id: FOURTH!, ...revenue, text: "Fourth-quarter revenue grew on client sales.", period: fourth });
+    assert.deepEqual(await lookup(year, [REVENUE]), [YEAR]);
+    assert.deepEqual(await lookup(fourth, [REVENUE]), [FOURTH]);
+  });
+
+  await t.test("a claim created after the cutoff is not returned", async () => {
+    // Extracted again from the same release, after the cutoff.
+    await claim(db, { id: LATE!, ...margin, text: "Gross margin fell on a charge for excess inventory.", at: "2025-08-05T20:00:00Z", created: "2025-09-15T00:00:00Z", period: Q2 });
+    assert.deepEqual(await lookup(Q2, [GROSS_MARGIN], "2025-09-01T00:00:00Z"), [Q2_MARGIN]);
+    assert.deepEqual([...(await lookup(Q2))].sort(), [Q2_MARGIN, LATE].sort());
+  });
+
+  await t.test("a claim written at a fiscal quarter reads back with it, and the quarter's lookup returns it", async () => {
+    const document = "c6000000-0000-4000-8000-0000000000f1";
+    await db.query(
+      `insert into documents (document_id, source_id, kind, content_hash, raw_blob_id, published_at)
+       values ($1, $2, 'filing', 'hash-written', 'sha256:written', '2025-08-05T20:00:00Z')`,
+      [document, FILINGS],
+    );
+    const written = await createClaim(db, {
+      document_id: document,
+      predicate: "management.explanation.operating_income",
+      text_canonical: "Operating income fell on the inventory charge.",
+      polarity: "negative",
+      modality: "asserted",
+      reported_by_source_id: FILINGS,
+      effective_time: "2025-08-05T20:00:00Z",
+      confidence: 0.9,
+      status: "extracted",
+      period: Q2,
+    });
+    assert.deepEqual(written.period, { kind: "fiscal_q", end: "2025-06-28" });
+    assert.deepEqual((await listClaimsForDocument(db, document)).map((row) => row.period), [{ kind: "fiscal_q", end: "2025-06-28" }]);
+    await db.query(`insert into claim_arguments (claim_id, subject_kind, subject_id, role) values ($1, 'issuer', $2, 'subject')`, [written.claim_id, ISSUER]);
+    assert.deepEqual(await lookup(Q2, ["management.explanation.operating_income"]), [written.claim_id]);
+    assert.deepEqual(await lookup(Q3, ["management.explanation.operating_income"]), []);
+  });
 });
