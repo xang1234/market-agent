@@ -1,11 +1,19 @@
 import { useState, type ReactElement, type FormEvent } from "react";
 import type { GridColumn, ColumnSpecInput } from "./gridsTypes.ts";
 import type { UniverseOptions } from "./universeOptions.ts";
+import { PRIMARY_BUTTON_CLASS } from "../shell/buttonStyles.ts";
+import { FIELD_CLASS, FIELD_LABEL_CLASS, PAGE_PANEL_CLASS, TOGGLE_CHIP_CLASS } from "../ui/pageStyles.ts";
 
 export type GridBuilderSubmit = { universe_spec: unknown; column_specs: ColumnSpecInput[] };
 
 const ID_SOURCES = ["screen", "watchlist", "portfolio", "peers"] as const;
 type IdSource = (typeof ID_SOURCES)[number];
+const SOURCE_LABELS: Readonly<Record<IdSource, string>> = {
+  screen: "Saved screen",
+  watchlist: "Watchlist",
+  portfolio: "Portfolio",
+  peers: "Peers of a company",
+};
 
 function manualSpec(raw: string) {
   const ids = raw.split(/[,\n]/).map((s) => s.trim()).filter((s) => s.length > 0);
@@ -38,6 +46,7 @@ export function GridBuilder({ columns, universeOptions, onSubmit, defaults, onFi
   const initialSource =
     defaults && ["manual", ...ID_SOURCES].includes(defaults.source) ? (defaults.source as "manual" | IdSource) : "manual";
   const [source, setSource] = useState<"manual" | IdSource>(initialSource);
+  const pickableColumns = columns.filter((c) => c.kind !== "reader");
 
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -70,86 +79,114 @@ export function GridBuilder({ columns, universeOptions, onSubmit, defaults, onFi
   }
 
   return (
-    <form data-testid="grid-builder" onSubmit={handleSubmit} className="space-y-3">
-      <label className="block text-sm">
-        Universe source
-        <select
-          className="ml-2 rounded border border-line bg-surface-2 px-2 py-1"
-          value={source}
-          onChange={(e) => setSource(e.target.value as "manual" | IdSource)}
-          data-testid="grid-builder-source"
-        >
-          <option value="manual">Manual tickers</option>
-          {ID_SOURCES.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
-      </label>
-
-      {source === "manual" ? (
-        <textarea
-          name="manual"
-          defaultValue={defaults?.manual}
-          data-testid="grid-builder-manual-input"
-          className="w-full rounded border border-line bg-surface-2 px-2 py-1"
-          placeholder="comma- or newline-separated tickers (e.g. AAPL, MSFT) or issuer ids"
-        />
-      ) : source === "peers" ? (
-        <input
-          name="refId"
-          required
-          defaultValue={defaults?.refId}
-          data-testid="grid-builder-ref-input"
-          className="w-full rounded border border-line bg-surface-2 px-2 py-1"
-          placeholder="ticker or issuer id"
-        />
-      ) : (
-        <>
+    <form data-testid="grid-builder" onSubmit={handleSubmit} className={`flex flex-col gap-5 ${PAGE_PANEL_CLASS}`}>
+      <div className="grid gap-4 md:grid-cols-[14rem_minmax(0,1fr)]">
+        <label className={FIELD_LABEL_CLASS}>
+          Universe source
           <select
-            name="refId"
-            required
-            defaultValue={defaults?.refId ?? ""}
-            data-testid="grid-builder-ref-select"
-            className="w-full rounded border border-line bg-surface-2 px-2 py-1"
+            className={FIELD_CLASS}
+            value={source}
+            onChange={(e) => setSource(e.target.value as "manual" | IdSource)}
+            data-testid="grid-builder-source"
           >
-            <option value="" disabled>
-              Select a {source}…
-            </option>
-            {universeOptions[source].map((option) => (
-              <option key={option.id} value={option.id}>{option.label}</option>
+            <option value="manual">Manual tickers</option>
+            {ID_SOURCES.map((s) => (
+              <option key={s} value={s}>{SOURCE_LABELS[s]}</option>
             ))}
           </select>
-          {universeOptions[source].length === 0 ? (
-            <p className="text-xs text-muted">You have no {source}s yet.</p>
-          ) : null}
-        </>
-      )}
+        </label>
 
-      <fieldset className="space-y-1">
-        <legend className="text-xs uppercase tracking-wide text-muted">Columns</legend>
-        {columns.filter((c) => c.kind !== "reader").map((col) => (
-          <label key={col.column_key} className="flex items-center gap-2 text-sm">
-            <input type="checkbox" name="column" value={col.column_key} data-testid={`grid-builder-col-${col.column_key}`} />
-            {col.label}
+        {source === "manual" ? (
+          <label className={FIELD_LABEL_CLASS}>
+            Tickers or issuer ids
+            <textarea
+              name="manual"
+              rows={2}
+              defaultValue={defaults?.manual}
+              data-testid="grid-builder-manual-input"
+              className={FIELD_CLASS}
+              placeholder="comma- or newline-separated tickers (e.g. AAPL, MSFT) or issuer ids"
+            />
           </label>
-        ))}
+        ) : source === "peers" ? (
+          <label className={FIELD_LABEL_CLASS}>
+            Company
+            <input
+              name="refId"
+              required
+              defaultValue={defaults?.refId}
+              data-testid="grid-builder-ref-input"
+              className={FIELD_CLASS}
+              placeholder="ticker or issuer id"
+            />
+          </label>
+        ) : (
+          <label className={FIELD_LABEL_CLASS}>
+            {SOURCE_LABELS[source]}
+            <select
+              name="refId"
+              required
+              defaultValue={defaults?.refId ?? ""}
+              data-testid="grid-builder-ref-select"
+              className={FIELD_CLASS}
+            >
+              <option value="" disabled>
+                Select a {SOURCE_LABELS[source].toLowerCase()}…
+              </option>
+              {universeOptions[source].map((option) => (
+                <option key={option.id} value={option.id}>{option.label}</option>
+              ))}
+            </select>
+            {universeOptions[source].length === 0 ? (
+              <span className="text-xs font-normal text-muted">You have no {SOURCE_LABELS[source].toLowerCase()}s yet.</span>
+            ) : null}
+          </label>
+        )}
+      </div>
+
+      <fieldset className="flex min-w-0 flex-col gap-2">
+        <legend className="mb-2 text-sm font-medium text-fg">Columns</legend>
+        {pickableColumns.length === 0 ? (
+          <p className="text-sm text-muted">No columns are available yet. Ask a question below instead.</p>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {pickableColumns.map((col) => (
+              <label key={col.column_key} className={TOGGLE_CHIP_CLASS}>
+                <input
+                  type="checkbox"
+                  name="column"
+                  value={col.column_key}
+                  className="sr-only"
+                  data-testid={`grid-builder-col-${col.column_key}`}
+                />
+                {col.label}
+              </label>
+            ))}
+          </div>
+        )}
       </fieldset>
 
-      <label className="block text-sm">
-        Question column <span className="text-muted">(optional — asked per company, answered from documents)</span>
+      <label className={FIELD_LABEL_CLASS}>
+        <span>
+          Question column{" "}
+          <span className="font-normal text-muted">(optional — asked per company, answered from documents)</span>
+        </span>
         <textarea
           name="question"
+          rows={2}
           defaultValue={defaults?.question}
           data-testid="grid-builder-question-input"
-          className="w-full rounded border border-line bg-surface-2 px-2 py-1"
+          className={FIELD_CLASS}
           placeholder='e.g. "Any China exposure flagged in risk factors?"'
           maxLength={300}
         />
       </label>
 
-      <button type="submit" data-testid="grid-builder-submit" className="rounded bg-accent px-3 py-1 text-sm text-bg">
-        Create &amp; Run
-      </button>
+      <div className="flex justify-end border-t border-line pt-4">
+        <button type="submit" data-testid="grid-builder-submit" className={PRIMARY_BUTTON_CLASS}>
+          Create &amp; Run
+        </button>
+      </div>
     </form>
   );
 }
