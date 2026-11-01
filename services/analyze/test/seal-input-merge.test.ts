@@ -110,3 +110,13 @@ test("mergeSealInputs throws on a snapshot_id mismatch", () => {
   const section = seal({ snapshot_id: "22222222-2222-4222-a222-222222222222" });
   assert.throws(() => mergeSealInputs(base, [section]), /snapshot_id/);
 });
+
+test("a section's parent snapshot must match the base's; an unparented fact section merges under any parent", () => {
+  const P = "44444444-4444-4444-a444-444444444444";
+  const Q = "55555555-5555-4555-a555-555555555555";
+  const input = (id: string, parent: string | null) => seal({ blocks: [{ id }] as never, manifest: { parent_snapshot: parent } });
+  assert.throws(() => mergeSealInputs(input("memo", null), [input("peer", P)]), /parent_snapshot differs/);
+  assert.throws(() => mergeSealInputs(input("memo", P), [input("peer", Q)]), /parent_snapshot differs/);
+  assert.equal(mergeSealInputs(input("memo", P), [input("peer", P)]).manifest.parent_snapshot, P);
+  assert.equal(mergeSealInputs(input("memo", P), [input("peer", null)]).manifest.parent_snapshot, P);
+});
