@@ -5,7 +5,7 @@
 // the answer's. What a cause would explain comes from the plan and the periods
 // its inputs bound to, never from the question's words or a date window.
 
-import { dependencyClosure, type FinancialPlanV1, type LocalId, type OperationNode } from "../../financial-core/src/index.ts";
+import { boundPeriodText, dependencyClosure, type BoundPeriod, type FinancialPlanV1, type LocalId, type OperationNode } from "../../financial-core/src/index.ts";
 import type { ClaimPeriod } from "../../evidence/src/claim-repo.ts";
 import { loadPeriodClaimEvidence, lockCitableClaims, type LocalRuntimeEvidence } from "../../evidence/src/local-runtime-evidence.ts";
 import type { ParentPublication } from "../../financial-engine/src/finalize.ts";
@@ -20,7 +20,7 @@ import { stableUuid } from "./chat-ids.ts";
 import { createSealer } from "./prose-refs.ts";
 import { attributionSegments } from "./render-assertions.ts";
 import { INCOME_ITEM_FIGURE, SCOPE_METRICS } from "./scope-figures.ts";
-import { FISCAL_PERIODS, readingAsks, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
+import { FISCAL_PERIODS, isOneOf, readingAsks, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
 
 /** Whether a turn asked for a cause and, when it did, whose its answer quotes, by the name it gives each company. */
 export type FiledCause =
@@ -201,17 +201,21 @@ export async function filedCauses(
   const uncaused: FiledCause = { asked: true, quoted: new Set(), names: input.names, block: null };
   await tx.client.query("savepoint filed_cause");
   try {
+    const periods = await boundPeriods(tx, answer.run_id, plan);
     const explained = explainedFigures({
       plan,
       verified: new Set(answer.block.financial.results.flatMap((result) => result.disposition === "verified" ? [result.output_id] : [])),
-      periods: await boundPeriods(tx, answer.run_id, plan),
+      periods,
       named: input.named,
     });
-    const read: Array<{ issuer: string; evidence: LocalRuntimeEvidence }> = [];
+    // The period a company's cause explains, named as its figures name it.
+    const periodText = (period: ClaimPeriod) => boundPeriodText([...periods.values()].find((bound) => samePeriod(bound, period))!);
+    const read: Array<{ issuer: string; period: string; evidence: LocalRuntimeEvidence }> = [];
     for (const company of explained) {
       if (company.kind === "none") continue;
       read.push({
         issuer: company.issuer,
+        period: periodText(company.period),
         evidence: await loadPeriodClaimEvidence(tx.client, {
           issuer_id: company.issuer,
           period: company.period,
@@ -226,9 +230,9 @@ export async function filedCauses(
     }
     // A claim read may have been revoked since: each is locked and checked again, and one no longer citable is dropped.
     const citable = await lockCitableClaims(tx.client, { claim_ids: read.flatMap(({ evidence }) => evidence.claim_refs), user_id: tx.run.user_id, as_of: plan.time.knowledge_cutoff });
-    const quoted = read.flatMap(({ issuer, evidence }) => {
+    const quoted = read.flatMap(({ issuer, period, evidence }) => {
       const claims = evidence.claims.filter((claim) => citable.has(claim.claim_id));
-      return claims.length === 0 ? [] : [{ issuer, claims, documents: evidence.verifier_documents.filter((document) => claims.some((claim) => claim.document_id === document.document_id)) }];
+      return claims.length === 0 ? [] : [{ issuer, period, claims, documents: evidence.verifier_documents.filter((document) => claims.some((claim) => claim.document_id === document.document_id)) }];
     });
     const claims = quoted.flatMap((company) => company.claims);
     if (claims.length === 0) {
@@ -237,14 +241,15 @@ export async function filedCauses(
     }
     const snapshotId = stableUuid(`filed-cause:${answer.snapshot_id}`);
     const sealer = createSealer([]);
-    const segments = attributionSegments(claims.map((claim) => ({
+    const segments = attributionSegments(quoted.flatMap(({ period, claims: own }) => own.map((claim) => ({
       text: claim.text_canonical,
       claim_id: claim.claim_id,
       source_id: claim.source_id,
       ...(claim.subject_id && input.names.has(claim.subject_id) ? { company: input.names.get(claim.subject_id)! } : {}),
       ...(claim.published_at ? { published_at: claim.published_at } : {}),
       ...(claim.effective_time ? { effective_time: claim.effective_time } : {}),
-    })), sealer.quote);
+      period,
+    }))), sealer.quote);
     const id = stableUuid(`block:${snapshotId}:cause`);
     const block = { id, kind: "rich_text", snapshot_id: snapshotId, data_ref: { kind: "rich_text", id }, source_refs: sealer.sealed().source_refs, as_of: answer.block.as_of, segments };
     // A claim-bearing snapshot is provenanced by the logged read that chose its claims.
@@ -292,7 +297,7 @@ export async function filedCauses(
 }
 
 // Each reported node's fiscal period, as its certified input bound it.
-async function boundPeriods(tx: Pick<FencedTx, "client" | "run">, runId: string, plan: FinancialPlanV1): Promise<Map<LocalId, ClaimPeriod>> {
+async function boundPeriods(tx: Pick<FencedTx, "client" | "run">, runId: string, plan: FinancialPlanV1): Promise<Map<LocalId, ClaimPeriod & BoundPeriod>> {
   const slots = plan.operations.flatMap((node) => node.operation === "reported_metric" ? [node.node_id] : []);
   const inputs = await readClosureInputs(tx.client, tx.run.user_id, runId, slots);
   return new Map(inputs.flatMap((input) => {
@@ -301,15 +306,15 @@ async function boundPeriods(tx: Pick<FencedTx, "client" | "run">, runId: string,
   }));
 }
 
-// A bound fact's fiscal quarter or year, as a claim keys one; an instant or a
-// price has none.
-function claimPeriod(payload: unknown): ClaimPeriod | null {
+// A bound fact's fiscal quarter or year, as a claim keys one, with its fiscal
+// label; an instant or a price has none.
+function claimPeriod(payload: unknown): (ClaimPeriod & BoundPeriod) | null {
   const period = isRecord(payload) && isRecord(payload.period) ? payload.period : null;
-  if (period?.kind !== "duration" || typeof period.end !== "string") return null;
-  if (period.fiscal_period === "FY") return { kind: "fiscal_y", end: period.end };
-  return QUARTERS.has(period.fiscal_period) ? { kind: "fiscal_q", end: period.end } : null;
+  if (period?.kind !== "duration" || typeof period.end !== "string" || typeof period.fiscal_year !== "number") return null;
+  const fiscal = { fiscal_year: period.fiscal_year, end: period.end };
+  if (period.fiscal_period === "FY") return { kind: "fiscal_y", fiscal_period: "FY", ...fiscal };
+  return isOneOf(period.fiscal_period, FISCAL_PERIODS) ? { kind: "fiscal_q", fiscal_period: period.fiscal_period, ...fiscal } : null;
 }
-const QUARTERS: ReadonlySet<unknown> = new Set(FISCAL_PERIODS);
 
 // A fault of the database's state, not of the read: a lost connection (class
 // 08, or the driver's), a rolled-back transaction (40), exhausted resources

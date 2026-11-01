@@ -122,7 +122,10 @@ function templateSegments(
   return segments;
 }
 
-type AttributedClaim = Pick<PacketClaim, "text" | "claim_id" | "source_id" | "company" | "published_at" | "effective_time">;
+type AttributedClaim = Pick<PacketClaim, "text" | "claim_id" | "source_id" | "company" | "published_at" | "effective_time"> & {
+  // The fiscal period the claim explains, as the answer names it, when it is bound to one.
+  period?: string;
+};
 
 /** Management's attribution: each claim quoted, dated by its publication; an effective date that differs is its own. */
 export function attributionSegments(claims: ReadonlyArray<AttributedClaim>, quote: (claim: AttributedClaim) => Segment): Segment[] {
@@ -130,7 +133,7 @@ export function attributionSegments(claims: ReadonlyArray<AttributedClaim>, quot
     const published = claim.published_at ? monthYear(claim.published_at) : undefined;
     const effective = claim.effective_time ? monthYear(claim.effective_time) : undefined;
     const dated = published ? `a source dated ${published}${effective && effective !== published ? `, effective ${effective}` : ""}` : `a source${effective ? `, effective ${effective}` : ""}`;
-    return [{ type: "text", text: `${i === 0 ? "" : " "}According to ${dated}${claim.company ? ` on ${claim.company}` : ""}: ` }, quote(claim)];
+    return [{ type: "text", text: `${i === 0 ? "" : " "}According to ${dated}${claim.company ? ` on ${claim.company}` : ""}${claim.period ? `, for ${claim.period}` : ""}: ` }, quote(claim)];
   });
 }
 

@@ -664,8 +664,13 @@ function measuresInstant(plan: FinancialPlanV1, node: OperationNode): boolean {
 
 // An instant's date is the day its value stands at, which for a 10-Q cover's share count falls after the quarter ends.
 function readText({ selector, bound }: PeriodRead, instant: boolean): string {
-  if (bound) return `${fiscalName(bound)} (${instant ? "as of" : "ended"} ${bound.end})`;
+  if (bound) return boundPeriodText(bound, instant);
   return instant ? `end of ${selectorText(selector)}` : selectorText(selector);
+}
+
+/** A bound period as an answer names it: "Q2 FY2025 (ended 2025-06-28)", or for an instant "as of" its date. */
+export function boundPeriodText(bound: BoundPeriod, instant = false): string {
+  return `${fiscalName(bound)} (${instant ? "as of" : "ended"} ${bound.end})`;
 }
 
 function fiscalName(period: Readonly<{ fiscal_year: number; fiscal_period: string }>): string {
