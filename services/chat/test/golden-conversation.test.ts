@@ -550,6 +550,33 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     }
   });
 
+  await t.test("a cause whose document is deleted between its read and its seal quotes none, and the answer names it as not covered (#542)", async () => {
+    // Another session deletes the release's document and has not committed,
+    // so the turn's read still sees it.
+    const deleter = await connectedClient(t, databaseUrl);
+    const documentId = (await client.query<{ document_id: string }>(`select document_id::text from claims where text_canonical = $1`, [AMD_Q2_2025_RELEASE.text])).rows[0]!.document_id;
+    await deleter.query("begin");
+    await deleter.query(`update documents set deleted_at = now() where document_id = $1::uuid`, [documentId]);
+    const deleterPid = (await deleter.query<{ pid: number }>(`select pg_backend_pid() as pid`)).rows[0]!.pid;
+    try {
+      const amdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD margin, cause document deleted" });
+      const turn = runTurn(base, amdThread.thread_id, "Why did AMD's operating margin turn negative in Q2 2025?");
+      const waited = await waitsOn(client, deleterPid, turn);
+      await deleter.query("commit");
+      completedTurn(await turn);
+      const answer = await latestAssistantMessage(base, amdThread.thread_id);
+      assert.deepEqual(engineAnswer(answer), {
+        results: [OPERATING_MARGIN_Q2],
+        notes: ["Not covered by this answer: a margin over several periods; the cause of these figures."],
+      });
+      causeQuotedOrNamed(answer);
+      assert.equal(waited, true, "the seal waited for the deleting session, then read its delete");
+    } finally {
+      await deleter.query("rollback").catch(() => {});
+      await client.query(`update documents set deleted_at = null where document_id = $1::uuid`, [documentId]);
+    }
+  });
+
   await t.test("a cause read a schema defect fails fails the turn: no answer goes out without its cause (#542)", async () => {
     await client.query(`alter table claim_arguments rename to claim_arguments_renamed`);
     try {
@@ -989,6 +1016,19 @@ async function waitingOnLock(client: Client, text: string): Promise<number> {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error(`no statement containing ${text} waited on a lock`);
+}
+
+// Whether some backend waits on a lock the backend `pid` holds before `until`
+// settles.
+async function waitsOn(client: Client, pid: number, until: Promise<unknown>): Promise<boolean> {
+  let settled = false;
+  until.then(() => (settled = true), () => (settled = true));
+  while (!settled) {
+    const { rows } = await client.query(`select 1 from pg_stat_activity where $1::int = any(pg_blocking_pids(pid))`, [pid]);
+    if (rows.length > 0) return true;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return false;
 }
 
 // An AMD explanation bound to its period as the release extractor binds one,
