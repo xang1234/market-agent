@@ -8,8 +8,10 @@ import {
   parseReleaseReply,
   releaseExhibits,
   releasePrompts,
-  reopenUnboundReleases,
+  clearRebindMarks,
+  findRebindCandidates,
   reportedQuarterEnd,
+  runRebindDrain,
   runReleaseExtractionDrain,
   verifyStatement,
   type ExtractReleaseDeps,
@@ -297,7 +299,7 @@ async function seedItem202(
   const sourceId = source.rows[0]!.id;
   const document = await client.query<{ id: string }>(
     `insert into documents (source_id, kind, provider_doc_id, content_hash, raw_blob_id)
-     values ($1, 'filing', $2, 'h-release', 'sha256:release') returning document_id::text as id`,
+     values ($1, 'filing', $2, 'h-release', $2) returning document_id::text as id`,
     [sourceId, filing.accession],
   );
   const documentId = document.rows[0]!.id;
@@ -526,37 +528,6 @@ test("a fourth-quarter release binds its year's explanation to the fiscal year a
   ]);
 });
 
-test("a rebind binds an extracted release's claims in place, with no new rows, and a second rebind selects nothing", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
-  const { databaseUrl } = await bootstrapDatabase(t, "release-rebind");
-  const client = await connectedClient(t, databaseUrl);
-  const seeded = await seedItem202(client, AMD_Q2);
-  // Read once with no quarter end, as a release read before #542 was.
-  await runReleaseExtractionDrain({ db: client, llm: fakeLlm(amdQ2Reply(null)).llm, secClient: fakeSec(AMD_Q2_SUBMISSION) });
-  const before = await releaseClaims(client, seeded.documentId);
-  assert.deepEqual(before.map((claim) => claim.period_end), [null, null, null]);
-  const rows = async () => (await client.query<{ claims: number; evidence: number; arguments: number }>(
-    `select (select count(*) from claims)::int as claims, (select count(*) from claim_evidence)::int as evidence,
-            (select count(*) from claim_arguments)::int as arguments`,
-  )).rows[0];
-  const counted = await rows();
-
-  assert.equal(await reopenUnboundReleases(client), 1);
-  const result = await runReleaseExtractionDrain({ db: client, llm: fakeLlm(amdQ2Reply("2025-06-28")).llm, secClient: fakeSec(AMD_Q2_SUBMISSION) });
-  assert.equal(result.extracted, 1);
-  const after = await releaseClaims(client, seeded.documentId);
-  assert.deepEqual(after.map((claim) => claim.claim_id), before.map((claim) => claim.claim_id), "the same claims, so citations of them stay");
-  assert.deepEqual(periodsOf(after), [
-    ["guidance.revenue", AMD_GUIDANCE, null, null],
-    ["management.explanation.gross_margin", MI308_EXPLANATION, "fiscal_q", "2025-06-28"],
-    ["management.explanation.gross_margin", AMD_YEAR_TO_DATE, null, null],
-  ]);
-  assert.equal(after[1]!.bound_after_created, true, "bound when rebound, not backdated to the claim's creation");
-  assert.deepEqual(await rows(), counted);
-
-  assert.equal(await reopenUnboundReleases(client), 0);
-  assert.deepEqual(await findReleaseCandidates(client), []);
-});
-
 test("an extraction whose sentence matches only a superseded claim stores a current one, and leaves the superseded one as it was", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
   const { databaseUrl } = await bootstrapDatabase(t, "release-superseded-match");
   const client = await connectedClient(t, databaseUrl);
@@ -583,20 +554,6 @@ test("an extraction whose sentence matches only a superseded claim stores a curr
   ]);
   assert.equal(stored[1]!.claim_id, retired);
   assert.notEqual(stored[0]!.claim_id, retired);
-});
-
-test("a release whose only bound explanation is superseded is reopened for its current unbound one", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
-  const { databaseUrl } = await bootstrapDatabase(t, "release-superseded-reopen");
-  const client = await connectedClient(t, databaseUrl);
-  await seedItem202(client, AMD_Q2);
-  await runReleaseExtractionDrain({ db: client, llm: fakeLlm(amdQ2Reply(null)).llm, secClient: fakeSec(AMD_Q2_SUBMISSION) });
-  // The MI308 claim, bound to a calendar quarter's end and then superseded.
-  await client.query(
-    `update claims set period_kind = 'fiscal_q', period_end = '2025-06-30', period_bound_at = now(), superseded_at = now()
-      where text_canonical = $1`,
-    [MI308_EXPLANATION],
-  );
-  assert.equal(await reopenUnboundReleases(client), 1);
 });
 
 test("two Item 2.02 claims of one release, extracted at once, store each sentence once", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
@@ -719,4 +676,114 @@ test("a release whose prompts name different quarter ends binds none of its clai
     ["management.explanation.gross_margin", MI308_EXPLANATION, null, null],
     ["management.explanation.gross_margin", AMD_Q2_MARGIN, null, null],
   ]);
+});
+
+// A rebind reply naming quarterEnd and, for each statement the prompt lists,
+// what aboutOf says it is about; and the statements each call listed.
+function rebindLlm(quarterEnd: string | null, aboutOf: (statement: string) => string): { llm: ExtractReleaseDeps["llm"]; listed: string[][] } {
+  const listed: string[][] = [];
+  return {
+    listed,
+    llm: {
+      complete: async (request) => {
+        const statements = [...request.messages.at(-1)!.content.matchAll(/^(\d+)\. (.+)$/gm)].map((line) => line[2]!);
+        listed.push(statements);
+        const about = Object.fromEntries(statements.map((statement, n) => [String(n + 1), aboutOf(statement)]));
+        return { text: JSON.stringify({ quarter_end: quarterEnd, about }), deployment: { channel: "test", model: "test-model" } };
+      },
+    },
+  };
+}
+
+const tableCounts = async (client: { query: QueryExecutor["query"] }) => (await client.query<{ claims: number; evidence: number; arguments: number }>(
+  `select (select count(*) from claims)::int as claims, (select count(*) from claim_evidence)::int as evidence,
+          (select count(*) from claim_arguments)::int as arguments`,
+)).rows[0];
+
+test("a rebind asks what each stored explanation is about, and binds them in place: no new rows, the same ids", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-rebind");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedItem202(client, AMD_Q2);
+  const submission = amdSubmission(["AMD Reports Second Quarter 2025 Financial Results", MI308_EXPLANATION, AMD_Q2_MARGIN, AMD_GUIDANCE]);
+  // Read once with no quarter end, as a release read before #542 was.
+  await runReleaseExtractionDrain({ db: client, secClient: fakeSec(submission), llm: scriptedLlm([{ quarter_end: null, statements: [
+    explains("gross_margin", "quarter", MI308_EXPLANATION),
+    explains("operating_income", "quarter", MI308_EXPLANATION),
+    explains("gross_margin", "quarter", AMD_Q2_MARGIN),
+    { kind: "guidance", metric: "revenue", about: "other", quote: AMD_GUIDANCE },
+  ] }]).llm });
+  const before = await releaseClaims(client, seeded.documentId);
+  assert.deepEqual(before.map((claim) => claim.period_end), [null, null, null, null]);
+  const counted = await tableCounts(client);
+
+  const { llm, listed } = rebindLlm("2025-06-28", () => "quarter");
+  const result = await runRebindDrain({ db: client, llm, secClient: fakeSec(submission) });
+  assert.deepEqual(result, { bound: 1, unbound: 0, unparseable: 0, noop: 0, failed: 0 });
+  // The model is shown each stored explanation once, and no guidance.
+  assert.deepEqual(listed, [[MI308_EXPLANATION, AMD_Q2_MARGIN]]);
+  const after = await releaseClaims(client, seeded.documentId);
+  assert.deepEqual(after.map((claim) => claim.claim_id), before.map((claim) => claim.claim_id), "the same claims, so citations of them stay");
+  assert.deepEqual(periodsOf(after), [
+    ["guidance.revenue", AMD_GUIDANCE, null, null],
+    ["management.explanation.gross_margin", MI308_EXPLANATION, "fiscal_q", "2025-06-28"],
+    ["management.explanation.gross_margin", AMD_Q2_MARGIN, "fiscal_q", "2025-06-28"],
+    ["management.explanation.operating_income", MI308_EXPLANATION, "fiscal_q", "2025-06-28"],
+  ]);
+  assert.ok(after.slice(1).every((claim) => claim.bound_after_created), "bound when rebound, not backdated to the claim's creation");
+  assert.deepEqual(await tableCounts(client), counted);
+  assert.deepEqual(await findRebindCandidates(client), []);
+});
+
+test("a rebind whose reply names no quarter end marks the release read, so a second selects nothing until --retry", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-rebind-unbound");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedItem202(client, AMD_Q2);
+  await runReleaseExtractionDrain({ db: client, llm: fakeLlm(amdQ2Reply(null)).llm, secClient: fakeSec(AMD_Q2_SUBMISSION) });
+  assert.deepEqual((await findRebindCandidates(client)).map((candidate) => candidate.sentences), [[MI308_EXPLANATION, AMD_YEAR_TO_DATE]]);
+
+  const first = rebindLlm(null, () => "quarter");
+  assert.deepEqual(await runRebindDrain({ db: client, llm: first.llm, secClient: fakeSec(AMD_Q2_SUBMISSION) }), { bound: 0, unbound: 1, unparseable: 0, noop: 0, failed: 0 });
+  assert.equal(first.listed.length, 1);
+  assert.deepEqual((await releaseClaims(client, seeded.documentId)).map((claim) => claim.period_end), [null, null, null]);
+  const second = rebindLlm("2025-06-28", () => "quarter");
+  assert.deepEqual(await runRebindDrain({ db: client, llm: second.llm, secClient: fakeSec(AMD_Q2_SUBMISSION) }), { bound: 0, unbound: 0, unparseable: 0, noop: 0, failed: 0 });
+  assert.equal(second.listed.length, 0, "no model call");
+
+  assert.equal(await clearRebindMarks(client), 2);
+  assert.deepEqual((await findRebindCandidates(client)).map((candidate) => candidate.documentId), [seeded.documentId]);
+});
+
+test("a rebind reads at most --limit releases", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-rebind-limit");
+  const client = await connectedClient(t, databaseUrl);
+  await seedItem202(client);
+  await seedItem202(client, AMD_Q2);
+  // Each read once with no quarter end.
+  await runReleaseExtractionDrain({ db: client, llm: fakeLlm(amdQ2Reply(null)).llm, secClient: fakeSec(AMD_Q2_SUBMISSION) });
+  assert.equal((await findRebindCandidates(client)).length, 2);
+
+  const { llm, listed } = rebindLlm(null, () => "other");
+  const limited = await runRebindDrain({ db: client, llm, secClient: fakeSec(AMD_Q2_SUBMISSION) }, { limit: 1 });
+  assert.deepEqual(limited, { bound: 0, unbound: 1, unparseable: 0, noop: 0, failed: 0 });
+  assert.equal(listed.length, 1);
+  assert.equal((await findRebindCandidates(client)).length, 1);
+});
+
+test("a release whose only bound explanation is superseded is rebound for its current unbound one, and the superseded one is left as it was", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-rebind-superseded");
+  const client = await connectedClient(t, databaseUrl);
+  await seedItem202(client, AMD_Q2);
+  await runReleaseExtractionDrain({ db: client, llm: fakeLlm(amdQ2Reply(null)).llm, secClient: fakeSec(AMD_Q2_SUBMISSION) });
+  // The MI308 claim, bound to a calendar quarter's end and then superseded.
+  await client.query(
+    `update claims set period_kind = 'fiscal_q', period_end = '2025-06-30', period_bound_at = now(), superseded_at = now()
+      where text_canonical = $1`,
+    [MI308_EXPLANATION],
+  );
+  assert.deepEqual((await findRebindCandidates(client)).map((candidate) => candidate.sentences), [[AMD_YEAR_TO_DATE]]);
+  const { llm, listed } = rebindLlm("2025-06-28", () => "quarter");
+  assert.equal((await runRebindDrain({ db: client, llm, secClient: fakeSec(AMD_Q2_SUBMISSION) })).bound, 1);
+  assert.deepEqual(listed, [[AMD_YEAR_TO_DATE]]);
+  const mi308 = (await client.query<{ period_end: string }>(`select period_end::text as period_end from claims where text_canonical = $1`, [MI308_EXPLANATION])).rows;
+  assert.deepEqual(mi308, [{ period_end: "2025-06-30" }]);
 });
