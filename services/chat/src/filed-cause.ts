@@ -54,6 +54,8 @@ const MARGINS: ReadonlySet<string> = new Set(["gross_margin", "operating_margin"
 // What a release metric is computed from, beyond a margin's revenue.
 const COMPUTED_FROM: Readonly<Record<string, ReadonlyArray<string>>> = {
   operating_income: ["gross_margin", "operating_expenses"],
+  net_income: ["operating_income"],
+  eps: ["net_income"],
   free_cash_flow: ["operating_cash_flow", "capex"],
 };
 // Outputs no one period's explanation covers.
