@@ -413,7 +413,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
   // The release explains its gross margin, which the operating margin is
   // computed from.
   const OPERATING_MARGIN_Q2 = ["Operating margin (operating income / revenue)", "Q2 FY2025 (ended 2025-06-28)", "verified", "-1.74%"];
-  const MI308 = `According to a source dated Aug 2025 on AMD: ${AMD_Q2_2025_RELEASE.text}`;
+  const MI308 = `According to a source dated Aug 2025 on AMD, for Q2 FY2025 (ended 2025-06-28): ${AMD_Q2_2025_RELEASE.text}`;
   const askAmd = async (question: string) => {
     const amdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: question });
     completedTurn(await runTurn(base, amdThread.thread_id, question));
@@ -467,7 +467,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const answer = await askAmd("Why did AMD's operating margin turn negative last quarter?");
     const { results, notes } = engineAnswer(answer);
     assert.deepEqual([...new Set(results.map(([, period]) => period))], ["Q2 FY2026 (ended 2026-06-27)", "Q1 FY2026 (ended 2026-03-28)", "Q2 FY2026 (ended 2026-06-27) vs Q1 FY2026 (ended 2026-03-28)"]);
-    assert.deepEqual(notes, [`According to a source dated Aug 2026 on AMD: ${text}`]);
+    assert.deepEqual(notes, [`According to a source dated Aug 2026 on AMD, for Q2 FY2026 (ended 2026-06-27): ${text}`]);
     causeQuotedOrNamed(answer);
     assert.deepEqual(refsOf(answer.blocks[1]!), [["claim", claimId, text]]);
   });

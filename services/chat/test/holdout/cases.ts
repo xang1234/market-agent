@@ -19,7 +19,7 @@
 
 import type { RejectionCheck } from "../../src/assertions.ts";
 
-export const HOLDOUT_VERSION = 22;
+export const HOLDOUT_VERSION = 23;
 
 type Assertion = Record<string, unknown>;
 
@@ -347,7 +347,7 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
       route: "financial_answer",
       financial: [[AMD, OPERATING_MARGIN, "Q2 FY2025 (ended 2025-06-28)", "verified", "-1.74%"]],
       uncovered: [
-        "According to a source dated Aug 2025 on AMD: As previously announced, our second quarter results were impacted by the U.S. Government's export control on our AMD Instinct MI308 data center GPU products. For the quarter, these restrictions led to approximately $800 million in inventory and related charges.",
+        "According to a source dated Aug 2025 on AMD, for Q2 FY2025 (ended 2025-06-28): As previously announced, our second quarter results were impacted by the U.S. Government's export control on our AMD Instinct MI308 data center GPU products. For the quarter, these restrictions led to approximately $800 million in inventory and related charges.",
         "Not covered by this answer: a margin over several periods.",
       ],
     },
