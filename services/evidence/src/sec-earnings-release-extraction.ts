@@ -478,6 +478,8 @@ function buildRebindMessages(text: string, statements: ReadonlyArray<string>): L
         ...ABOUT_RULE,
       ].join("\n"),
     },
+    // A prompt that lists no statement is still sent: a quarter_end it names
+    // must agree with the others' for the release to bind (reportedQuarterEnd).
     { role: "user", content: `Statements:\n${statements.map((statement, n) => `${n + 1}. ${statement}`).join("\n") || "none"}\n\n${text}` },
   ];
 }
@@ -790,6 +792,9 @@ export async function rebindRelease(deps: ExtractReleaseDeps, candidate: RebindC
   const quarterEnd = reportedQuarterEnd(ends, candidate.effectiveTime?.slice(0, 10) ?? null);
   const periods = located.map((sentence) => explainedPeriod(quarterEnd, { kind: "explanation", about: abouts.get(sentence) ?? "other" }));
   return withTransaction(deps.db, async (tx) => {
+    // The lock an extraction takes before it touches the release's
+    // explanations, so the two never interleave on those rows.
+    await tx.db.query(`select 1 from documents where document_id = $1 for no key update`, [candidate.documentId]);
     const { rows } = await tx.db.query<{ claim_id: string; bound: boolean }>(
       `update claims c
           set period_read_at = now(),
