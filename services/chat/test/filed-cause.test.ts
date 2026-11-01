@@ -154,6 +154,9 @@ test("a figure's cause families are its own explanations, then what it is comput
   assert.deepEqual(families(["gross_margin"]), [["gross_margin"], ["revenue"]]);
   assert.deepEqual(families(["revenue"]), [["revenue"]]);
   assert.deepEqual(families(["free_cash_flow"]), [["free_cash_flow"], ["operating_cash_flow", "capex"]]);
+  // A gross margin charge reaches net income through operating income, and earnings per share through net income.
+  assert.deepEqual(families(["net_margin"]), [["net_income"], ["operating_income"], ["gross_margin", "operating_expenses"], ["revenue"]]);
+  assert.deepEqual(families(["eps_diluted"]), [["eps"], ["net_income"], ["operating_income"], ["gross_margin", "operating_expenses"]]);
   assert.deepEqual(families(["revenue", "operating_margin"]), [["revenue", "operating_income"], ["gross_margin", "operating_expenses"]]);
   assert.deepEqual(causeFamilies(["revenue"]), [["management.explanation.revenue"]]);
 });
