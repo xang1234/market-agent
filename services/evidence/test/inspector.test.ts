@@ -84,7 +84,7 @@ test("loadEvidenceInspection hides snapshots that are not visible through a user
       err.status === 404 &&
       /snapshot is not visible/.test(err.message),
   );
-  assert.equal(calls.some((call) => call.text.includes("from snapshots")), false);
+  assert.equal(calls.length, 1, "only the visibility check ran; the manifest was never loaded");
 });
 
 test("loadEvidenceInspection recognizes discovery candidate ownership as a snapshot visibility branch", async () => {

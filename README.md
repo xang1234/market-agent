@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/media/hero.gif" width="92%" alt="Asking the analyst to compare NVDA and AMD, then opening the evidence behind one figure">
+  <img src="docs/media/hero.gif" width="92%" alt="Asking the analyst to compare NVDA and AMD, then inspecting the verified calculation behind one figure">
 </p>
 
 Ask a general-purpose chatbot for a company's gross margin and you get a confident number with no way to check it. market-agent answers only from facts it has stored: SEC company facts, filing extracts, and Polygon prices. Code, not the model, builds the charts and tables. The model writes the narrative, but its figures come from the evidence the app gathered, and linked figures open to their source. A second model checks each inference before you see it.

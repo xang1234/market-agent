@@ -31,7 +31,7 @@ function block() {
   };
 }
 
-function sealInput() {
+function sealInput(extra: { parentSnapshot?: string } = {}) {
   return buildClaimBackedSealInput({
     block: block(),
     claims: [{ claim_id: CLAIM_ID, source_id: SOURCE_ID }],
@@ -39,8 +39,15 @@ function sealInput() {
     subjectRefs: [{ kind: "issuer", id: SUBJECT_ID }],
     toolCalls: [{ tool_call_id: TOOL_CALL_ID, result_hash: "sha256:" + "a".repeat(64) }],
     modelVersion: "reader:test-model",
+    ...extra,
   });
 }
+
+test("a claim-backed seal names the snapshot it is sealed under, and none by default", () => {
+  const parent = "7a8b9c0d-1e2f-4a7b-8c8d-9e0f1a2b3c4d";
+  assert.equal(sealInput({ parentSnapshot: parent }).manifest.parent_snapshot, parent);
+  assert.equal(sealInput().manifest.parent_snapshot, null);
+});
 
 test("claim-backed seal passes the snapshot verifier", async () => {
   const input = sealInput();

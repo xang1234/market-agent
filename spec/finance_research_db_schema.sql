@@ -768,9 +768,13 @@ create table snapshots (
   coverage_start timestamptz,
   allowed_transforms jsonb not null,
   model_version text,
-  parent_snapshot uuid references snapshots(snapshot_id)
+  -- A child, such as an answer's filed cause, is deleted with its parent.
+  -- A child snapshot is never referenced directly; it is reached only through
+  -- its parent, and children are one level deep.
+  parent_snapshot uuid references snapshots(snapshot_id) on delete cascade
 );
 create index snapshots_created_idx on snapshots(created_at desc);
+create index snapshots_parent_idx on snapshots(parent_snapshot) where parent_snapshot is not null;
 
 create table watchlists (
   watchlist_id uuid primary key default gen_random_uuid(),
@@ -961,6 +965,7 @@ create table chat_messages (
   research_scope jsonb
 );
 create index chat_messages_thread_created_idx on chat_messages(thread_id, created_at);
+create index chat_messages_snapshot_idx on chat_messages(snapshot_id);
 
 create table tool_call_logs (
   tool_call_id uuid primary key default gen_random_uuid(),

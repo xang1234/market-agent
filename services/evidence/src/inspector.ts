@@ -146,17 +146,21 @@ async function assertSnapshotVisibleToUser(
 ): Promise<void> {
   const { rows } = await db.query<{ visible: number }>(
     `select 1 as visible
+       from (select (select parent_snapshot from snapshots where snapshot_id = $1::uuid) as parent) s
        where exists (
+         -- A child snapshot is never referenced directly; it opens only
+         -- through the answer holding its parent.
          select 1
            from chat_messages m
            join chat_threads t on t.thread_id = m.thread_id
-          where m.snapshot_id = $1::uuid
+          where m.snapshot_id = coalesce(s.parent, $1::uuid)
             and t.user_id = $2::uuid
             -- The server seals an answer's snapshot. A user message saved
             -- while the client picked its snapshot_id may name any snapshot.
             and m.role = 'assistant'
        )
-       or exists (
+       or s.parent is null and (
+       exists (
          select 1
            from analyze_template_runs r
            join analyze_templates t on t.template_id = r.template_id
@@ -193,7 +197,7 @@ async function assertSnapshotVisibleToUser(
            join discovery_campaigns campaign on campaign.campaign_id=dr.campaign_id and campaign.user_id=dr.user_id
           where dc.snapshot_id=$1::uuid
             and campaign.user_id=$2::uuid
-       )`,
+       ))`,
     [snapshotId, userId],
   );
   if (!rows[0]) throw new EvidenceInspectionError(404, "snapshot is not visible");
