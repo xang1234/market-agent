@@ -23,7 +23,7 @@ import { closeLocalRuntimePoolForTests } from "../src/local-runtime.ts";
 import { readChatMessage } from "../src/messages.ts";
 import { loadChatServerOptionsFromEnv } from "../src/runtime.ts";
 import { STARTER_QUESTIONS } from "../../../web/src/chat/starterQuestionList.ts";
-import { AMD_Q2_2025_RELEASE, GOLDEN_COMPANIES, seedGoldenDataset } from "./golden/dataset.ts";
+import { AMD_Q2_2025_RELEASE, GOLDEN_AS_OF, GOLDEN_COMPANIES, seedGoldenDataset } from "./golden/dataset.ts";
 import { requireRecordedScopes } from "./golden/harness.ts";
 import type { Client } from "pg";
 import { parseSseEvents, type ParsedSseEvent } from "./sse-helpers.ts";
@@ -499,6 +499,21 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
       notes: ["AMD is carried from the previous answer. Not covered by this answer: a margin over several periods; the cause of these figures."],
     });
     causeQuotedOrNamed(answer);
+  });
+
+  await t.test("'Show the evidence' after the margin's cause shows the claim the answer quoted, though AMD filed a newer explanation since (#542)", async (st) => {
+    const amdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD margin, then its evidence" });
+    completedTurn(await runTurn(base, amdThread.thread_id, "Why did AMD's operating margin turn negative in Q2 2025?"));
+    const claimId = await filedClaimId();
+    assert.deepEqual(refsOf((await latestAssistantMessage(base, amdThread.thread_id)).blocks[1]!), [["claim", claimId, AMD_Q2_2025_RELEASE.text]]);
+    // The next quarter's explanation of the margin's own income, known by the follow-up's cutoff.
+    const text = "Operating income rose in the third quarter on higher data center sales.";
+    await seedBoundExplanation(st, client, { predicate: "management.explanation.operating_income", text, period: { kind: "fiscal_q", end: "2025-09-27" }, published: "2025-11-04T00:00:00Z", known: GOLDEN_AS_OF });
+    completedTurn(await runTurn(base, amdThread.thread_id, "Show the evidence"));
+    const evidence = await latestAssistantMessage(base, amdThread.thread_id);
+    assert.deepEqual(evidence.blocks.flatMap((block) => refsOf(block).filter(([kind]) => kind === "claim")), [["claim", claimId, AMD_Q2_2025_RELEASE.text]]);
+    const { rows: [sealed] } = await client.query<{ claim_refs: string[] }>(`select claim_refs from snapshots where snapshot_id = $1::uuid`, [evidence.snapshot_id]);
+    assert.deepEqual(sealed!.claim_refs, [claimId], "sealed under the follow-up's own snapshot, which opens it");
   });
 
   await t.test("a cause whose read is cancelled leaves the answer published, its cause named as not covered (#542)", async () => {
@@ -1032,12 +1047,13 @@ async function waitsOn(client: Client, pid: number, until: Promise<unknown>): Pr
 }
 
 // An AMD explanation bound to its period as the release extractor binds one,
-// published under the release's source. Superseded once the subtest ends, so
-// later turns read AMD's claims as seeded.
+// published under the release's source, and stored now unless known says
+// when. Superseded once the subtest ends, so later turns read AMD's claims as
+// seeded.
 async function seedBoundExplanation(
   t: TestContext,
   client: Client,
-  input: { predicate: string; text: string; period: { kind: string; end: string }; published: string },
+  input: { predicate: string; text: string; period: { kind: string; end: string }; published: string; known?: string },
 ): Promise<string> {
   const { rows: [doc] } = await client.query<{ document_id: string }>(
     `insert into documents (source_id, kind, title, published_at, content_hash, raw_blob_id, parse_status)
@@ -1047,11 +1063,11 @@ async function seedBoundExplanation(
     [AMD_Q2_2025_RELEASE.url, input.published, input.text],
   );
   const { rows: [claim] } = await client.query<{ claim_id: string }>(
-    `insert into claims (document_id, predicate, text_canonical, polarity, modality, reported_by_source_id, effective_time, confidence, status, period_kind, period_end, period_bound_at)
-     select d.document_id, $2, $3, 'neutral', 'quoted', d.source_id, d.published_at, 0.95, 'extracted', $4, $5::date, now()
+    `insert into claims (document_id, predicate, text_canonical, polarity, modality, reported_by_source_id, effective_time, confidence, status, period_kind, period_end, period_bound_at, created_at)
+     select d.document_id, $2, $3, 'neutral', 'quoted', d.source_id, d.published_at, 0.95, 'extracted', $4, $5::date, now(), coalesce($6::timestamptz, now())
        from documents d where d.document_id = $1::uuid
      returning claim_id::text`,
-    [doc!.document_id, input.predicate, input.text, input.period.kind, input.period.end],
+    [doc!.document_id, input.predicate, input.text, input.period.kind, input.period.end, input.known ?? null],
   );
   await client.query(
     `insert into claim_arguments (claim_id, subject_kind, subject_id, role) values ($1::uuid, 'issuer', $2::uuid, 'subject')`,
