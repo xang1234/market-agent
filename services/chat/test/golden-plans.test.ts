@@ -114,6 +114,14 @@ const EXPECTED: Record<string, ReturnType<typeof summary>> = {
       "AMD revenue Q2 2026",
     ],
   },
+  "Why did the operating margins of AAPL and AMD move in their quarters ended in June 2025?": {
+    outcome: "ready",
+    model_calls: 1,
+    outputs: [
+      "operating_margin(AAPL operating_income Q3 2025, AAPL revenue Q3 2025)",
+      "operating_margin(AMD operating_income Q2 2025, AMD revenue Q2 2025)",
+    ],
+  },
   "And its revenue in Q2 2025?": { outcome: "ready", model_calls: 1, outputs: ["AMD revenue Q2 2025"] },
   "What was AMD's revenue in Q2 2019?": { outcome: "ready", model_calls: 1, outputs: ["AMD revenue Q2 2019"] },
   "Break down AMD's revenue by segment": SEGMENTS,
