@@ -471,11 +471,22 @@ an 8-K Item 2.02 files the press release and CFO commentary as EX-99 exhibits
   dated by the filing, confidence 0.8 (the words are verified; reading them as an explanation is the model's). A
   `claim_evidence` row locates each one (exhibit, character span, quote hash).
 - **Periods (#542):** the reply also names `quarter_end`, the end of the quarter the release reports, read from its own
-  dated statements ("three months ended June 28, 2025"). It counts only when every prompt that names one agrees and it
-  is before the filing and at most 92 days before it (`reportedQuarterEnd`); otherwise no claim from the release is
-  bound. An explanation `about` the quarter binds `{fiscal_q, end}`, one about the year (a fourth-quarter release) binds
-  `{fiscal_y, end}`, and guidance or anything else binds none (`explainedPeriod`). A claim is keyed by document,
-  predicate and text, so reading a release again fills an unbound claim's period in place and its id stays.
+  dated headings or tables ("three months ended June 28, 2025"). It counts only when every prompt that names one agrees
+  and it is before the filing and at most 92 days before it (`reportedQuarterEnd`); otherwise no claim from the release
+  is bound. An explanation `about` the quarter binds `{fiscal_q, end}`, one about the year (a fourth-quarter release)
+  binds `{fiscal_y, end}`, and guidance or anything else binds none (`explainedPeriod`). The period is the sentence's:
+  picks of one sentence that disagree on what it is about bind none of its claims, whatever metric each names. A
+  `quarter_end` that is no date, or a missing `about`, binds nothing rather than leaving the release unread. A claim is
+  keyed by document, predicate and text among current claims (not superseded), and the extraction locks the document
+  row first, so two Item 2.02 claims of one release read at once store each sentence once.
+- **Rebind (#542):** `-- --rebind` binds explanations stored with no period (read before #542, or by a reply with no
+  usable quarter end) and never inserts. It selects releases holding current unbound explanations no rebind has read,
+  sends each prompt's text with those of its sentences the text holds as a numbered list, and asks only for
+  `quarter_end` and an `about` for each, by number (`rebindRelease`). The same rules decide the periods, and one update
+  fills them in place (`period_bound_at` is the rebind's time, never backdated), so each claim's id stays. Every
+  explanation it read is stamped `enriched_at`, bound or not, so a release is read once even if it can never bind; a
+  reply that is no JSON object leaves it for the next rebind. `--retry` clears the marks on the unbound ones first, and
+  `--limit N` reads at most N releases.
 - **Chat** reads `management.explanation.` claims first (not `management.tone`) on every route that reads figures (latest quarter, trends, margins,
   segments, statements, comparisons: `ROUTE_PREDICATES`, `evidence-packet.ts`); other routes take the newest claims.
   The explanation of what the question asks about comes before the others (`explainedMetrics`: margins, then each
@@ -498,10 +509,10 @@ an 8-K Item 2.02 files the press release and CFO commentary as EX-99 exhibits
 - **Run it** after the 8-K crawl: `npm run extract:earnings-releases` (in `services/evidence`). It is a batch step,
   never the crawl: one model call per release (more for one over 60,000 characters, split between blocks, so its
   tail is read too), at low reasoning; about 46 s on the dev model in a probe (4 minutes at
-  its default reasoning). `-- --rebind` first reopens releases already read none of whose explanations is bound, so
-  the run binds them; one with a bound explanation is not reopened. `npm run audit:claim-periods` is a read-only census
-  of bound periods against the issuer's facts: it flags one whose fiscal year holds facts but none of that kind ending
-  that day.
+  its default reasoning). `npm run audit:claim-periods` is a read-only census of the bound periods of explanations a
+  reader may cite, against the issuer's facts. It flags a near miss, a fact of that kind ending within 7 days but not
+  that day (a calendar end read for a 52/53-week quarter's), and a mismatch, a fiscal year that holds facts with none
+  of that kind ending that day. It exits 0 clean, 1 on a flag and 2 on an error.
 - **Not yet:** guidance compared with the reported result once it is in, 10-Q/10-K MD&A, and the frozen golden
   dataset has no such claims (the eval's "why" question still answers from figures alone).
 
