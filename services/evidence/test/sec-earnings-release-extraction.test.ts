@@ -113,7 +113,7 @@ test("a release longer than one prompt is read whole, across prompts split betwe
   for (const sentence of sentences) assert.ok(split.some((prompt) => prompt.includes(sentence)), sentence);
 });
 
-test("the model's reply is read when well formed, with the quarter's end and what each statement is about; a reply missing either is not", () => {
+test("the model's reply is read when well formed, with the quarter's end and what each statement is about", () => {
   const reply = parseReleaseReply(
     '```json\n{"quarter_end":"2025-04-27","statements":[' +
       `{"kind":"explanation","metric":"gross_margin","about":"quarter","quote":${JSON.stringify(H20_EXPLANATION)}},` +
@@ -128,15 +128,23 @@ test("the model's reply is read when well formed, with the quarter's end and wha
     ],
   });
   assert.deepEqual(parseReleaseReply('{"quarter_end":null,"statements":[]}'), { quarterEnd: null, statements: [] });
-  // A malformed field makes the reply unparseable (the filing is read again),
-  // never an empty answer that would mark it done.
   const entry = (fields: Record<string, unknown>) => JSON.stringify({ kind: "guidance", metric: "revenue", about: "other", quote: "x", ...fields });
+  // A quarter_end that is no date, or an about that is none of the three,
+  // leaves a claim unbound, never the release unread.
   for (const [label, text] of [
-    ["no quarter_end", `{"statements":[${entry({})}]}`],
-    ["a quarter_end in words", `{"quarter_end":"June 28, 2025","statements":[]}`],
-    ["a quarter_end no calendar has", `{"quarter_end":"2025-02-30","statements":[]}`],
-    ["an unknown about", `{"quarter_end":null,"statements":[${entry({ about: "half" })}]}`],
-    ["no about", `{"quarter_end":null,"statements":[${entry({ about: undefined })}]}`],
+    ["no quarter_end", '{"statements":[]}'],
+    ["a quarter_end in words", '{"quarter_end":"June 28, 2025","statements":[]}'],
+    ["a quarter_end no calendar has", '{"quarter_end":"2025-02-30","statements":[]}'],
+  ]) {
+    assert.deepEqual(parseReleaseReply(text!), { quarterEnd: null, statements: [] }, label);
+  }
+  assert.deepEqual(
+    parseReleaseReply(`{"quarter_end":"2025-04-27","statements":[${entry({ about: "half" })},${entry({ about: undefined })}]}`)?.statements.map((statement) => statement.about),
+    ["other", "other"],
+  );
+  // A malformed statement makes the reply unparseable (the filing is read
+  // again), never an empty answer that would mark it done.
+  for (const [label, text] of [
     ["an unknown kind", `{"quarter_end":null,"statements":[${entry({ kind: "cause" })}]}`],
     ["an unknown metric", `{"quarter_end":null,"statements":[${entry({ metric: "stock_price" })}]}`],
     ["no quote", `{"quarter_end":null,"statements":[${entry({ quote: undefined })}]}`],
@@ -636,4 +644,21 @@ test("two Item 2.02 claims of one release, extracted at once, store each sentenc
     ["management.explanation.gross_margin", MI308_EXPLANATION, "fiscal_q", "2025-06-28"],
     ["management.explanation.gross_margin", AMD_YEAR_TO_DATE, null, null],
   ]);
+});
+
+test("a reply whose quarter end is written in words, with a statement of no about, is stored unbound and the release marked read", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-tolerant-reply");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedItem202(client, AMD_Q2);
+  const reply = JSON.stringify({ quarter_end: "June 28, 2025", statements: [
+    { kind: "explanation", metric: "gross_margin", about: "quarter", quote: MI308_EXPLANATION },
+    { kind: "explanation", metric: "gross_margin", quote: AMD_YEAR_TO_DATE },
+  ] });
+  const result = await runReleaseExtractionDrain({ db: client, llm: fakeLlm(reply).llm, secClient: fakeSec(AMD_Q2_SUBMISSION) });
+  assert.equal(result.extracted, 1);
+  assert.deepEqual(periodsOf(await releaseClaims(client, seeded.documentId)), [
+    ["management.explanation.gross_margin", MI308_EXPLANATION, null, null],
+    ["management.explanation.gross_margin", AMD_YEAR_TO_DATE, null, null],
+  ]);
+  assert.deepEqual(await findReleaseCandidates(client), []);
 });
