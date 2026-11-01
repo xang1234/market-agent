@@ -71,21 +71,21 @@ test("a plain-text exhibit's headings and paragraphs are blocks, so the sentence
     "and 72.0%, respectively.",
     "</TEXT>\n</DOCUMENT>",
   ].join("\n"));
-  assert.ok(verifyStatement({ kind: "guidance", metric: "revenue", quote: REVENUE_GUIDANCE }, exhibits), "under a heading");
+  assert.ok(verifyStatement({ kind: "guidance", metric: "revenue", about: "other", quote: REVENUE_GUIDANCE }, exhibits), "under a heading");
   // A sentence wrapped across lines is still one sentence.
   const wrapped = "Gross margins are expected to be 71.8% and 72.0%, respectively.";
-  assert.ok(verifyStatement({ kind: "guidance", metric: "gross_margin", quote: wrapped }, exhibits), "wrapped");
-  assert.equal(verifyStatement({ kind: "guidance", metric: "gross_margin", quote: "Gross margins are expected to be 71.8%" }, exhibits), null, "a wrapped line alone");
+  assert.ok(verifyStatement({ kind: "guidance", metric: "gross_margin", about: "other", quote: wrapped }, exhibits), "wrapped");
+  assert.equal(verifyStatement({ kind: "guidance", metric: "gross_margin", about: "other", quote: "Gross margins are expected to be 71.8%" }, exhibits), null, "a wrapped line alone");
   // CRLF line endings, as many plain-text filings have.
   const crlf = releaseExhibits("<DOCUMENT>\r\n<TYPE>EX-99.1\r\n<TEXT>\r\nFirst quarter results\r\n\r\nRevenue is expected to be $45.0 billion, plus or minus 2%.\r\n</TEXT>\r\n</DOCUMENT>");
-  assert.ok(verifyStatement({ kind: "guidance", metric: "revenue", quote: REVENUE_GUIDANCE }, crlf), "after a CRLF blank line");
+  assert.ok(verifyStatement({ kind: "guidance", metric: "revenue", about: "other", quote: REVENUE_GUIDANCE }, crlf), "after a CRLF blank line");
 });
 
 test("an HTML line break with attributes is a block edge", () => {
   const exhibits = releaseExhibits(
     `<DOCUMENT>\n<TYPE>EX-99.1\n<TEXT>\n<html><body><p>Outlook<br style="clear:both">${REVENUE_GUIDANCE}</p></body></html>\n</TEXT>\n</DOCUMENT>`,
   );
-  assert.ok(verifyStatement({ kind: "guidance", metric: "revenue", quote: REVENUE_GUIDANCE }, exhibits));
+  assert.ok(verifyStatement({ kind: "guidance", metric: "revenue", about: "other", quote: REVENUE_GUIDANCE }, exhibits));
 });
 
 test("a release longer than one prompt is read whole, across prompts split between blocks", () => {
@@ -169,13 +169,13 @@ test("a release reports the quarter every prompt naming one agrees on, ended bef
 
 test("a statement is kept only as a verbatim quote of an exhibit, stored in the exhibit's own words", () => {
   const exhibits = releaseExhibits(SUBMISSION);
-  const verified = verifyStatement({ kind: "explanation", metric: "gross_margin", quote: H20_EXPLANATION }, exhibits);
+  const verified = verifyStatement({ kind: "explanation", metric: "gross_margin", about: "other", quote: H20_EXPLANATION }, exhibits);
   assert.equal(verified?.exhibit, "EX-99.2");
   assert.equal(verified?.quote, H20_EXPLANATION);
   assert.equal(exhibits[1]!.text.slice(verified!.start, verified!.end), H20_EXPLANATION);
 
   // A curly apostrophe or extra spaces in the model's copy still match; the stored text is the exhibit's.
-  const curly = verifyStatement({ kind: "explanation", metric: "gross_margin", quote: "NVIDIA’s gross margin  was 60.5%, reflecting the H20 charge." }, exhibits);
+  const curly = verifyStatement({ kind: "explanation", metric: "gross_margin", about: "other", quote: "NVIDIA’s gross margin  was 60.5%, reflecting the H20 charge." }, exhibits);
   assert.equal(curly?.quote, "NVIDIA's gross margin was 60.5%, reflecting the H20 charge.");
 
   // A clause cut from a sentence is not a quote of it: it can drop the words
@@ -184,65 +184,65 @@ test("a statement is kept only as a verbatim quote of an exhibit, stored in the 
     "<DOCUMENT>\n<TYPE>EX-99.1\n<TEXT>\n<div>Gaming results were mixed. Revenue did not decline due to weaker demand in the quarter.</div>" +
       "<div>Data Center</div><div>Revenue was up 73%, driven by demand for our accelerated computing platform.</div>\n</TEXT>\n</DOCUMENT>",
   );
-  assert.equal(verifyStatement({ kind: "explanation", metric: "revenue", quote: "decline due to weaker demand in the quarter." }, negated), null);
-  assert.equal(verifyStatement({ kind: "explanation", metric: "revenue", quote: "Revenue did not decline due to weaker demand" }, negated), null);
-  assert.ok(verifyStatement({ kind: "explanation", metric: "revenue", quote: "Revenue did not decline due to weaker demand in the quarter." }, negated));
+  assert.equal(verifyStatement({ kind: "explanation", metric: "revenue", about: "other", quote: "decline due to weaker demand in the quarter." }, negated), null);
+  assert.equal(verifyStatement({ kind: "explanation", metric: "revenue", about: "other", quote: "Revenue did not decline due to weaker demand" }, negated), null);
+  assert.ok(verifyStatement({ kind: "explanation", metric: "revenue", about: "other", quote: "Revenue did not decline due to weaker demand in the quarter." }, negated));
   // A sentence after a heading block (no punctuation between) is whole.
-  assert.ok(verifyStatement({ kind: "explanation", metric: "revenue", quote: "Revenue was up 73%, driven by demand for our accelerated computing platform." }, negated));
+  assert.ok(verifyStatement({ kind: "explanation", metric: "revenue", about: "other", quote: "Revenue was up 73%, driven by demand for our accelerated computing platform." }, negated));
   // An abbreviation's full stop ends no sentence: neither the clause after it
   // nor the words up to it are one.
   const abbreviated = releaseExhibits(
     "<DOCUMENT>\n<TYPE>EX-99.1\n<TEXT>\n<div>Revenue did not decline in the U.S. due to weaker demand.</div>\n</TEXT>\n</DOCUMENT>",
   );
-  assert.equal(verifyStatement({ kind: "explanation", metric: "revenue", quote: "due to weaker demand." }, abbreviated), null);
-  assert.equal(verifyStatement({ kind: "explanation", metric: "revenue", quote: "Revenue did not decline in the U.S." }, abbreviated), null);
-  assert.ok(verifyStatement({ kind: "explanation", metric: "revenue", quote: "Revenue did not decline in the U.S. due to weaker demand." }, abbreviated));
+  assert.equal(verifyStatement({ kind: "explanation", metric: "revenue", about: "other", quote: "due to weaker demand." }, abbreviated), null);
+  assert.equal(verifyStatement({ kind: "explanation", metric: "revenue", about: "other", quote: "Revenue did not decline in the U.S." }, abbreviated), null);
+  assert.ok(verifyStatement({ kind: "explanation", metric: "revenue", about: "other", quote: "Revenue did not decline in the U.S. due to weaker demand." }, abbreviated));
   // A colon or semicolon ends no sentence: what follows it is part of one.
   const qualified = releaseExhibits(
     "<DOCUMENT>\n<TYPE>EX-99.1\n<TEXT>\n<div>This is not company guidance: Revenue is expected to grow 10%.</div>\n</TEXT>\n</DOCUMENT>",
   );
-  assert.equal(verifyStatement({ kind: "guidance", metric: "revenue", quote: "Revenue is expected to grow 10%." }, qualified), null);
+  assert.equal(verifyStatement({ kind: "guidance", metric: "revenue", about: "other", quote: "Revenue is expected to grow 10%." }, qualified), null);
   // A block ending in a comma (or colon, semicolon, dash) ends no sentence: its
   // qualifier is in the next.
   const qualifiedAfter = releaseExhibits(
     "<DOCUMENT>\n<TYPE>EX-99.1\n<TEXT>\n<div>Revenue increased due to stronger demand,</div><div>partially offset by lower pricing.</div>\n</TEXT>\n</DOCUMENT>",
   );
-  assert.equal(verifyStatement({ kind: "explanation", metric: "revenue", quote: "Revenue increased due to stronger demand," }, qualifiedAfter), null);
-  assert.ok(verifyStatement({ kind: "explanation", metric: "revenue", quote: "Revenue increased due to stronger demand, partially offset by lower pricing." }, qualifiedAfter));
+  assert.equal(verifyStatement({ kind: "explanation", metric: "revenue", about: "other", quote: "Revenue increased due to stronger demand," }, qualifiedAfter), null);
+  assert.ok(verifyStatement({ kind: "explanation", metric: "revenue", about: "other", quote: "Revenue increased due to stronger demand, partially offset by lower pricing." }, qualifiedAfter));
   // Nor a block another runs on into ("but" / "revenue is..."): one that starts
   // lower-case continues the sentence before it, at both ends.
   const runOn = releaseExhibits(
     "<DOCUMENT>\n<TYPE>EX-99.1\n<TEXT>\n<div>This is not company guidance but</div><div>revenue is expected to grow 10% next year.</div>\n</TEXT>\n</DOCUMENT>",
   );
-  assert.equal(verifyStatement({ kind: "guidance", metric: "revenue", quote: "revenue is expected to grow 10% next year." }, runOn), null);
-  assert.equal(verifyStatement({ kind: "guidance", metric: "revenue", quote: "This is not company guidance but" }, runOn), null);
-  assert.ok(verifyStatement({ kind: "guidance", metric: "revenue", quote: "This is not company guidance but revenue is expected to grow 10% next year." }, runOn));
+  assert.equal(verifyStatement({ kind: "guidance", metric: "revenue", about: "other", quote: "revenue is expected to grow 10% next year." }, runOn), null);
+  assert.equal(verifyStatement({ kind: "guidance", metric: "revenue", about: "other", quote: "This is not company guidance but" }, runOn), null);
+  assert.ok(verifyStatement({ kind: "guidance", metric: "revenue", about: "other", quote: "This is not company guidance but revenue is expected to grow 10% next year." }, runOn));
   // A block ending in a joining word ("but", "and", "of") runs on whatever the
   // next starts with.
   const runOnCapital = releaseExhibits(
     "<DOCUMENT>\n<TYPE>EX-99.1\n<TEXT>\n<div>This is not company guidance but</div><div>NVIDIA expects revenue to grow next year.</div>\n</TEXT>\n</DOCUMENT>",
   );
-  assert.equal(verifyStatement({ kind: "guidance", metric: "revenue", quote: "NVIDIA expects revenue to grow next year." }, runOnCapital), null);
+  assert.equal(verifyStatement({ kind: "guidance", metric: "revenue", about: "other", quote: "NVIDIA expects revenue to grow next year." }, runOnCapital), null);
   // Nor when the colon (or a dash or comma) ends the block before it.
   for (const mark of [":", " &mdash;", ","]) {
     const split = releaseExhibits(
       `<DOCUMENT>\n<TYPE>EX-99.1\n<TEXT>\n<div>This is not company guidance${mark}</div><div>Revenue is expected to grow 10%.</div>\n</TEXT>\n</DOCUMENT>`,
     );
-    assert.equal(verifyStatement({ kind: "guidance", metric: "revenue", quote: "Revenue is expected to grow 10%." }, split), null, mark);
+    assert.equal(verifyStatement({ kind: "guidance", metric: "revenue", about: "other", quote: "Revenue is expected to grow 10%." }, split), null, mark);
   }
   // Nor an abbreviated month's ("as of Dec. 31").
   const dated = releaseExhibits(
     "<DOCUMENT>\n<TYPE>EX-99.1\n<TEXT>\n<div>Cash and cash equivalents as of Dec. 31, 2025, were higher because of demand.</div>\n</TEXT>\n</DOCUMENT>",
   );
-  assert.equal(verifyStatement({ kind: "explanation", metric: "other", quote: "31, 2025, were higher because of demand." }, dated), null);
-  assert.equal(verifyStatement({ kind: "explanation", metric: "other", quote: "Cash and cash equivalents as of Dec." }, dated), null);
+  assert.equal(verifyStatement({ kind: "explanation", metric: "other", about: "other", quote: "31, 2025, were higher because of demand." }, dated), null);
+  assert.equal(verifyStatement({ kind: "explanation", metric: "other", about: "other", quote: "Cash and cash equivalents as of Dec." }, dated), null);
   // Nor before a capitalized continuation ("the U.S. Data Center market").
   const continued = releaseExhibits(
     "<DOCUMENT>\n<TYPE>EX-99.1\n<TEXT>\n<div>Revenue did not decline in the U.S. Data Center market due to weaker demand.</div>\n</TEXT>\n</DOCUMENT>",
   );
-  assert.equal(verifyStatement({ kind: "explanation", metric: "revenue", quote: "Data Center market due to weaker demand." }, continued), null);
-  assert.equal(verifyStatement({ kind: "explanation", metric: "revenue", quote: "Revenue did not decline in the U.S." }, continued), null);
-  assert.ok(verifyStatement({ kind: "explanation", metric: "revenue", quote: "Revenue did not decline in the U.S. Data Center market due to weaker demand." }, continued));
+  assert.equal(verifyStatement({ kind: "explanation", metric: "revenue", about: "other", quote: "Data Center market due to weaker demand." }, continued), null);
+  assert.equal(verifyStatement({ kind: "explanation", metric: "revenue", about: "other", quote: "Revenue did not decline in the U.S." }, continued), null);
+  assert.ok(verifyStatement({ kind: "explanation", metric: "revenue", about: "other", quote: "Revenue did not decline in the U.S. Data Center market due to weaker demand." }, continued));
 
   // A paraphrase, an invented cause, or a fragment is not a quote.
   for (const quote of [
@@ -250,7 +250,7 @@ test("a statement is kept only as a verbatim quote of an exhibit, stored in the 
     "Gross margin fell due to a shift toward lower-margin gaming products.",
     "H20 charge.",
   ]) {
-    assert.equal(verifyStatement({ kind: "explanation", metric: "gross_margin", quote }, exhibits), null, quote);
+    assert.equal(verifyStatement({ kind: "explanation", metric: "gross_margin", about: "other", quote }, exhibits), null, quote);
   }
 });
 

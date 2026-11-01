@@ -297,10 +297,7 @@ export function explainedPeriod(quarterEnd: IsoDate | null, statement: Pick<Rele
 // hold, a clause cut from a sentence ("decline due to weaker demand" out of
 // "Revenue did not decline due to weaker demand"), or one too short or long.
 // The stored text is the exhibit's, not the model's.
-export function verifyStatement<S extends { quote: string }>(
-  statement: S,
-  exhibits: ReadonlyArray<ReleaseExhibit>,
-): (S & { exhibit: string; start: number; end: number }) | null {
+export function verifyStatement(statement: ReleaseStatement, exhibits: ReadonlyArray<ReleaseExhibit>): VerifiedStatement | null {
   const quote = canonicalText(statement.quote);
   if (quote.length < MIN_QUOTE_CHARS || quote.length > MAX_QUOTE_CHARS) return null;
   for (const exhibit of exhibits) {
