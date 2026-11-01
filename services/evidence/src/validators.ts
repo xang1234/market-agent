@@ -29,10 +29,14 @@ export function assertIso8601WithOffset(value: unknown, label: string): asserts 
 }
 
 export function assertIsoDate(value: unknown, label: string): asserts value is string {
-  const match = typeof value === "string" ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(value) : null;
-  if (!match || !isValidDate(Number(match[1]), Number(match[2]), Number(match[3]))) {
+  if (!isIsoDate(value)) {
     throw new Error(`${label}: must be an ISO-8601 calendar date`);
   }
+}
+
+export function isIsoDate(value: unknown): value is string {
+  const match = typeof value === "string" ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(value) : null;
+  return match !== null && isValidDate(Number(match[1]), Number(match[2]), Number(match[3]));
 }
 
 export function assertUuidV4(value: unknown, label: string): asserts value is string {

@@ -16,26 +16,37 @@
 //   a closed list;
 // - text the exhibit's own sentence, modality "quoted", attributed to the
 //   issuer, dated by the filing;
+// - the fiscal period an explanation explains (#542), when the release's own
+//   dates give it;
 // - a claim_evidence row locating it (exhibit, character span, quote hash).
 // Chat reads these as management attributions: the only causes an answer may
 // state (llm-runtime.ts).
 
 import { createHash } from "node:crypto";
 
+import type { IsoDate } from "../../financial-core/src/contracts.ts";
 import type { LlmChatMessage, LlmChatRequest, LlmRouterResult } from "../../llm/src/router.ts";
 import { runLoggedToolCall, writeToolCallLog } from "../../observability/src/tool-call.ts";
 import { createClaimArgument } from "./claim-argument-repo.ts";
 import { createClaimEvidence } from "./claim-evidence-repo.ts";
-import { createClaim } from "./claim-repo.ts";
+import { createClaim, type ClaimPeriod } from "./claim-repo.ts";
 import type { SecFilingFetcher } from "./sec-edgar.ts";
 import { withTransaction } from "./transaction.ts";
 import type { QueryExecutor } from "./types.ts";
+import { isIsoDate } from "./validators.ts";
 
 export const RELEASE_STATEMENT_KINDS = ["explanation", "guidance"] as const;
 export type ReleaseStatementKind = (typeof RELEASE_STATEMENT_KINDS)[number];
 
-// What a statement is about. "other" keeps a real explanation whose subject
-// is none of these (a segment, a product line).
+// The period a statement is about, in the release's terms, and the claim period
+// it binds to at the reported quarter's end. Only a fourth-quarter release has
+// a "year" sentence; anything else (year to date, a prior period) binds none.
+const PERIOD_KIND_OF = { quarter: "fiscal_q", year: "fiscal_y", other: null } as const;
+export type ReleaseStatementAbout = keyof typeof PERIOD_KIND_OF;
+const RELEASE_STATEMENT_ABOUTS = Object.keys(PERIOD_KIND_OF) as ReadonlyArray<ReleaseStatementAbout>;
+
+// The metric a statement concerns. "other" keeps a real explanation whose
+// subject is none of these (a segment, a product line).
 export const RELEASE_METRICS = [
   "revenue",
   "gross_margin",
@@ -58,6 +69,9 @@ const MIN_QUOTE_CHARS = 20;
 const MAX_QUOTE_CHARS = 600;
 // The release and the CFO commentary together run to ~40k characters.
 const MAX_PROMPT_CHARS = 60_000;
+// A release reports a quarter ended at most this long before it is filed. A
+// later end is not yet reported, and an earlier one is a year-ago comparison.
+const MAX_REPORT_LAG_DAYS = 92;
 const ZERO_UUID = "00000000-0000-0000-0000-000000000000";
 
 export type ExtractReleaseLlm = { complete(request: LlmChatRequest): Promise<LlmRouterResult> };
@@ -82,8 +96,11 @@ export type ReleaseCandidate = {
 // cells, headings) start and end in it: a heading has no full stop, so a block
 // edge is a sentence edge too.
 export type ReleaseExhibit = { type: string; text: string; edges: ReadonlySet<number> };
-export type ReleaseStatement = { kind: ReleaseStatementKind; metric: ReleaseMetric; quote: string };
+export type ReleaseStatement = { kind: ReleaseStatementKind; metric: ReleaseMetric; about: ReleaseStatementAbout; quote: string };
 export type VerifiedStatement = ReleaseStatement & { exhibit: string; start: number; end: number };
+// One prompt's reply: the end of the quarter the release reports, as its text
+// dates it, and the statements picked from it.
+export type ReleaseReply = { quarterEnd: IsoDate | null; statements: ReleaseStatement[] };
 
 // "extracted": at least one verified statement stored. "noop": a concurrent
 // run already processed the claim.
@@ -221,31 +238,51 @@ function plainPunctuation(text: string): string {
     .replace(/ /g, " ");
 }
 
-// The model's statements, or null when the reply is not the expected shape.
-export function parseReleaseStatements(text: string): ReleaseStatement[] | null {
+// The model's reply, or null when it is not the expected shape. A malformed
+// field makes the whole reply unparseable, so the filing is read again rather
+// than marked done without it.
+export function parseReleaseReply(text: string): ReleaseReply | null {
   let reply: unknown;
   try {
     reply = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
   } catch {
     return null;
   }
-  const items = (reply as { statements?: unknown } | null)?.statements;
-  if (!Array.isArray(items)) return null;
+  const { quarter_end: quarterEnd, statements: items } = (reply ?? {}) as Record<string, unknown>;
+  if (!(quarterEnd === null || isIsoDate(quarterEnd)) || !Array.isArray(items)) return null;
   const statements: ReleaseStatement[] = [];
   for (const item of items.slice(0, MAX_STATEMENTS)) {
-    const { kind, metric, quote } = (item ?? {}) as Record<string, unknown>;
-    // A malformed entry makes the whole reply unparseable, so the filing is
-    // read again rather than marked done without it.
+    const { kind, metric, about, quote } = (item ?? {}) as Record<string, unknown>;
     if (
       typeof quote !== "string" ||
       !(RELEASE_STATEMENT_KINDS as ReadonlyArray<unknown>).includes(kind) ||
-      !(RELEASE_METRICS as ReadonlyArray<unknown>).includes(metric)
+      !(RELEASE_METRICS as ReadonlyArray<unknown>).includes(metric) ||
+      !(RELEASE_STATEMENT_ABOUTS as ReadonlyArray<unknown>).includes(about)
     ) {
       return null;
     }
-    statements.push({ kind: kind as ReleaseStatementKind, metric: metric as ReleaseMetric, quote });
+    statements.push({ kind: kind as ReleaseStatementKind, metric: metric as ReleaseMetric, about: about as ReleaseStatementAbout, quote });
   }
-  return statements;
+  return { quarterEnd, statements };
+}
+
+// The end of the quarter a release reports: the one every prompt that names an
+// end agrees on, before the filing date and at most MAX_REPORT_LAG_DAYS before
+// it. Otherwise null, and no claim from the release is bound. A check on the
+// model's reading, never a lookup: it can only unbind.
+export function reportedQuarterEnd(ends: ReadonlyArray<IsoDate | null>, filedOn: IsoDate | null): IsoDate | null {
+  const [end, ...others] = new Set(ends.filter((named) => named !== null));
+  if (end === undefined || others.length > 0 || filedOn === null) return null;
+  const lagDays = (Date.parse(filedOn) - Date.parse(end)) / 86_400_000;
+  return lagDays > 0 && lagDays <= MAX_REPORT_LAG_DAYS ? end : null;
+}
+
+// The period an explanation explains: its quarter or, in a fourth-quarter
+// release, its year, both ending at the reported quarter's end. Guidance, and
+// anything about another period, explains none.
+export function explainedPeriod(quarterEnd: IsoDate | null, statement: ReleaseStatement): ClaimPeriod | null {
+  const kind = PERIOD_KIND_OF[statement.about];
+  return quarterEnd === null || kind === null || statement.kind !== "explanation" ? null : { kind, end: quarterEnd };
 }
 
 // A statement whose quote is in an exhibit, verbatim (in canonical form) and
@@ -253,7 +290,10 @@ export function parseReleaseStatements(text: string): ReleaseStatement[] | null 
 // hold, a clause cut from a sentence ("decline due to weaker demand" out of
 // "Revenue did not decline due to weaker demand"), or one too short or long.
 // The stored text is the exhibit's, not the model's.
-export function verifyStatement(statement: ReleaseStatement, exhibits: ReadonlyArray<ReleaseExhibit>): VerifiedStatement | null {
+export function verifyStatement<S extends { quote: string }>(
+  statement: S,
+  exhibits: ReadonlyArray<ReleaseExhibit>,
+): (S & { exhibit: string; start: number; end: number }) | null {
   const quote = canonicalText(statement.quote);
   if (quote.length < MIN_QUOTE_CHARS || quote.length > MAX_QUOTE_CHARS) return null;
   for (const exhibit of exhibits) {
@@ -362,13 +402,17 @@ function buildMessages(text: string): LlmChatMessage[] {
       content: [
         "You read a company's earnings release and CFO commentary from an SEC 8-K, and pick the sentences in which",
         "management (1) explains why a reported result changed, or (2) gives guidance for a coming period.",
-        'Reply with minified JSON only: {"statements":[{"kind":"explanation"|"guidance","metric":"<metric>","quote":"<sentence>"}]}',
+        'Reply with minified JSON only: {"quarter_end":"<YYYY-MM-DD>"|null,"statements":[{"kind":"explanation"|"guidance","metric":"<metric>","about":"quarter"|"year"|"other","quote":"<sentence>"}]}',
+        "quarter_end is the last day of the quarter whose results the release reports, as the release's own dated statements give it",
+        '("three months ended June 28, 2025" gives 2025-06-28). It is null when the text gives no such date.',
         `metric is one of: ${RELEASE_METRICS.join(", ")} (other when the subject is none of these).`,
+        'about is the period a statement is about: "quarter" for that quarter\'s result; "year" for the fiscal year that quarter ends,',
+        'which only a fourth-quarter release reports; "other" for anything else, such as year to date or a prior period. Guidance is always "other".',
         "quote is copied EXACTLY from the text, character for character: one or two whole sentences, no paraphrase,",
         "no ellipsis, nothing added. A quote that is not in the text is discarded.",
         "An explanation names a cause (a charge, a product, a mix shift, pricing, a ramp), not just the figure.",
         "Skip boilerplate: forward-looking-statement disclaimers, non-GAAP definitions, table rows.",
-        `At most ${MAX_STATEMENTS} statements, the most informative first. If there are none, reply {"statements":[]}.`,
+        `At most ${MAX_STATEMENTS} statements, the most informative first. If there are none, reply with "statements":[] and quarter_end as above.`,
       ].join("\n"),
     },
     { role: "user", content: text },
@@ -392,6 +436,7 @@ export async function extractReleaseStatements(
   let model: string | null = null;
   // Every prompt is read.
   const proposed: ReleaseStatement[] = [];
+  const ends: Array<IsoDate | null> = [];
   let unparseable = false;
   const prompts = releasePrompts(exhibits);
   for (const [index, prompt] of prompts.entries()) {
@@ -408,20 +453,29 @@ export async function extractReleaseStatements(
       },
     });
     model = completion.model;
-    const statements = parseReleaseStatements(completion.text);
+    const reply = parseReleaseReply(completion.text);
     // A prompt none of whose quotes is in the filing has its text unread, as
     // one answered badly does, whatever the others found.
-    if (statements === null || (statements.length > 0 && !statements.some((statement) => verifyStatement(statement, exhibits)))) {
+    if (reply === null || (reply.statements.length > 0 && !reply.statements.some((statement) => verifyStatement(statement, exhibits)))) {
       unparseable = true;
     }
-    proposed.push(...(statements ?? []));
+    proposed.push(...(reply?.statements ?? []));
+    ends.push(reply?.quarterEnd ?? null);
   }
-  // A sentence picked twice for the same metric is one claim; for two metrics,
-  // a claim for each.
-  const verified = [...new Map(proposed.flatMap((statement) => {
+  const quarterEnd = reportedQuarterEnd(ends, candidate.effectiveTime?.slice(0, 10) ?? null);
+  // A claim is its natural key: the document, predicate and sentence. A
+  // sentence picked twice for the same metric is one claim; for two metrics, a
+  // claim for each. Two picks of it that disagree on its period bind neither.
+  const verified = new Map<string, VerifiedStatement & { predicate: string; period: ClaimPeriod | null }>();
+  for (const statement of proposed) {
     const found = verifyStatement(statement, exhibits);
-    return found ? [[`${found.kind}:${found.metric}:${found.exhibit}:${found.start}`, found] as const] : [];
-  })).values()];
+    if (!found) continue;
+    const predicate = `${found.kind === "explanation" ? "management.explanation" : "guidance"}.${found.metric}`;
+    const period = explainedPeriod(quarterEnd, found);
+    const key = JSON.stringify([predicate, found.quote]);
+    const prior = verified.get(key);
+    verified.set(key, prior ? { ...prior, period: prior.period?.kind === period?.kind ? period : null } : { ...found, predicate, period });
+  }
   // A prompt answered badly, or with no quote that is in the filing, leaves its
   // text unread: nothing is stored or stamped, so the next drain reads the
   // filing again (as after a transport error); the attempt is still recorded
@@ -438,7 +492,7 @@ export async function extractReleaseStatements(
   }
   const outcome: ExtractReleaseOutcome = exhibits.length === 0
     ? "no_exhibits"
-    : verified.length > 0
+    : verified.size > 0
     ? "extracted"
     : "empty";
 
@@ -451,10 +505,27 @@ export async function extractReleaseStatements(
     if ((stamped.rowCount ?? 0) === 0) return;
     applied = true;
     const claimIds: string[] = [];
-    for (const statement of verified) {
+    for (const statement of verified.values()) {
+      const { rows: existing } = await tx.db.query<{ claim_id: string }>(
+        `select claim_id::text as claim_id from claims where document_id = $1 and predicate = $2 and text_canonical = $3`,
+        [candidate.documentId, statement.predicate, statement.quote],
+      );
+      // Stored by an earlier read (a rebind): its period is filled if unbound,
+      // bound now and never backdated, and its id stays, so citations of it do.
+      if (existing.length > 0) {
+        if (statement.period) {
+          await tx.db.query(
+            `update claims set period_kind = $2, period_end = $3::date, period_bound_at = now()
+              where claim_id = any($1::uuid[]) and period_end is null`,
+            [existing.map((row) => row.claim_id), statement.period.kind, statement.period.end],
+          );
+        }
+        claimIds.push(...existing.map((row) => row.claim_id));
+        continue;
+      }
       const claim = await createClaim(tx.db, {
         document_id: candidate.documentId,
-        predicate: `${statement.kind === "explanation" ? "management.explanation" : "guidance"}.${statement.metric}`,
+        predicate: statement.predicate,
         text_canonical: statement.quote,
         polarity: "neutral",
         modality: "quoted",
@@ -464,6 +535,7 @@ export async function extractReleaseStatements(
         effective_time: candidate.effectiveTime,
         confidence: RELEASE_CONFIDENCE,
         status: "extracted",
+        period: statement.period,
       });
       await createClaimArgument(tx.db, { claim_id: claim.claim_id, subject_kind: "issuer", subject_id: candidate.issuerId, role: "subject" });
       await createClaimEvidence(tx.db, {
@@ -484,7 +556,8 @@ export async function extractReleaseStatements(
         outcome,
         exhibits: exhibits.map((exhibit) => exhibit.type),
         proposed: proposed.length,
-        verified: verified.length,
+        verified: verified.size,
+        quarter_end: quarterEnd,
         claim_ids: claimIds,
       },
       status: outcome === "extracted" ? "ok" : "skipped",
