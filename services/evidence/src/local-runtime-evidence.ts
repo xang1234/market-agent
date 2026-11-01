@@ -11,7 +11,8 @@ export type LocalRuntimeEvidenceInput = {
   user_id?: string | null;
   exclude_claim_ids?: ReadonlyArray<string>;
   // Claims that come first, in this order, wherever the selection would rank
-  // them; one no longer citable is left out as any other is.
+  // them, past the limit if need be; one no longer citable is left out as any
+  // other is.
   first_claim_ids?: ReadonlyArray<string>;
   source_categories?: ReadonlyArray<string>;
   limit?: number;
@@ -97,7 +98,8 @@ export async function loadLocalRuntimeEvidence(
 ): Promise<LocalRuntimeEvidence> {
   const subjectRefs = normalizeSubjectRefs(input.subject_refs);
   if (subjectRefs.length === 0) return emptyEvidence(subjectRefs);
-  const limit = input.limit ?? 5;
+  const firstClaimIds = unique(input.first_claim_ids ?? []);
+  const limit = Math.max(input.limit ?? 5, firstClaimIds.length);
 
   const excludedClaimIds = unique(input.exclude_claim_ids ?? []);
   const sourceCategories = input.source_categories ?? null;
@@ -294,7 +296,7 @@ export async function loadLocalRuntimeEvidence(
       input.selection?.effective_until ?? null,
       selected?.tiers ?? null,
       input.selection?.fiscal_year ?? null,
-      unique(input.first_claim_ids ?? []),
+      firstClaimIds,
     ],
   );
   const evidence = evidenceFromClaimRows(subjectRefs, rows.slice(0, limit), input.selection !== undefined);
