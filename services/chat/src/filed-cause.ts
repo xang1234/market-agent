@@ -12,6 +12,7 @@ import type { ParentPublication } from "../../financial-engine/src/finalize.ts";
 import type { FencedTx } from "../../financial-engine/src/lease.ts";
 import { readClosureInputs } from "../../financial-engine/src/read-model.ts";
 import { writeToolCallLog } from "../../observability/src/tool-call.ts";
+import { writeVerifierFailLog } from "../../observability/src/verifier-fail.ts";
 import { isRecord } from "../../shared/src/http.ts";
 import { buildClaimBackedSealInput } from "../../snapshot/src/seal-input.ts";
 import { sealSnapshotInTransaction, snapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
@@ -257,12 +258,19 @@ export async function filedCauses(
       }),
       thread_id: input.threadId,
     });
-    // A refused seal stores nothing, as the engine's own refusal does; the answer goes without the cause.
-    await tx.client.query("release savepoint filed_cause");
     if (!sealed.ok) {
+      // A refused seal keeps only its audit, as the engine's own refusal
+      // does (snapshot-verifier.ts logs every one): not the read that chose
+      // its claims. The answer goes without the cause.
+      await tx.client.query("rollback to savepoint filed_cause");
+      for (const { reason_code, details } of sealed.verification.failures) {
+        await writeVerifierFailLog(tx.client, { thread_id: input.threadId, snapshot_id: snapshotId, reason_code, details });
+      }
+      await tx.client.query("release savepoint filed_cause");
       console.warn(`[chat] the filed cause for thread ${input.threadId} failed its seal; the answer names it as not covered`, sealed.verification.failures);
       return uncaused;
     }
+    await tx.client.query("release savepoint filed_cause");
     return { ...uncaused, quoted: new Set([...read].flatMap(([issuer, company]) => company.claims.length > 0 ? [issuer] : [])), block };
   } catch (reason) {
     if (!isOperational(reason)) throw reason;

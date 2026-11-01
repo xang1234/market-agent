@@ -1,4 +1,4 @@
-import { serializeNullableJsonValue, type JsonValue, type QueryExecutor } from "./types.ts";
+import { serializeNullableJsonValue, type JsonValue, type RowQueryExecutor } from "./types.ts";
 
 export type VerifierFailLogInput = {
   thread_id?: string | null;
@@ -15,7 +15,7 @@ export type VerifierFailLogRow = {
 // Writes a row to verifier_fail_logs. `details` is optional jsonb — omit
 // when the reason_code alone carries the failure context.
 export async function writeVerifierFailLog(
-  db: QueryExecutor,
+  db: RowQueryExecutor,
   input: VerifierFailLogInput,
 ): Promise<VerifierFailLogRow> {
   const { rows } = await db.query<VerifierFailLogRow>(
