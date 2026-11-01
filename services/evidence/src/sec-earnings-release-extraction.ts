@@ -20,13 +20,15 @@
 //   dates give it;
 // - a claim_evidence row locating it (exhibit, character span, quote hash).
 // Chat reads these as management attributions: the only causes an answer may
-// state (llm-runtime.ts).
+// state (llm-runtime.ts). A rebind binds explanations stored with no period
+// (rebindRelease).
 
 import { createHash } from "node:crypto";
 
 import type { IsoDate } from "../../financial-core/src/contracts.ts";
 import type { LlmChatMessage, LlmChatRequest, LlmRouterResult } from "../../llm/src/router.ts";
 import { runLoggedToolCall, writeToolCallLog } from "../../observability/src/tool-call.ts";
+import type { JsonObject } from "../../observability/src/types.ts";
 import { createClaimArgument } from "./claim-argument-repo.ts";
 import { createClaimEvidence } from "./claim-evidence-repo.ts";
 import { createClaim, type ClaimPeriod } from "./claim-repo.ts";
@@ -246,13 +248,7 @@ function plainPunctuation(text: string): string {
 // about that is none of the three, only binds nothing: a date-format slip
 // would otherwise cost the release its statements on every drain.
 export function parseReleaseReply(text: string): ReleaseReply | null {
-  let reply: unknown;
-  try {
-    reply = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
-  } catch {
-    return null;
-  }
-  const { quarter_end: quarterEnd, statements: items } = (reply ?? {}) as Record<string, unknown>;
+  const { quarter_end: quarterEnd, statements: items } = replyObject(text) ?? {};
   if (!Array.isArray(items)) return null;
   const statements: ReleaseStatement[] = [];
   for (const item of items.slice(0, MAX_STATEMENTS)) {
@@ -269,8 +265,41 @@ export function parseReleaseReply(text: string): ReleaseReply | null {
   return { quarterEnd: isIsoDate(quarterEnd) ? quarterEnd : null, statements };
 }
 
+// A rebind reply: the quarter's end, and what each of `count` listed
+// statements is about, by its number; null when the reply is no JSON object.
+export function parseRebindReply(text: string, count: number): { quarterEnd: IsoDate | null; abouts: ReleaseStatementAbout[] } | null {
+  const reply = replyObject(text);
+  if (reply === null) return null;
+  const abouts = isObject(reply.about) ? reply.about : {};
+  return {
+    quarterEnd: isIsoDate(reply.quarter_end) ? reply.quarter_end : null,
+    abouts: Array.from({ length: count }, (_, n) => statementAbout(abouts[String(n + 1)])),
+  };
+}
+
+// The JSON object in a model's reply, which may fence it; null if none.
+function replyObject(text: string): Record<string, unknown> | null {
+  try {
+    const reply: unknown = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
+    return isObject(reply) ? reply : null;
+  } catch {
+    return null;
+  }
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function statementAbout(about: unknown): ReleaseStatementAbout {
   return (RELEASE_STATEMENT_ABOUTS as ReadonlyArray<unknown>).includes(about) ? about as ReleaseStatementAbout : "other";
+}
+
+// Note one reading of what a sentence is about: readings that disagree leave
+// it about none.
+function noteAbout(abouts: Map<string, ReleaseStatementAbout | null>, sentence: string, about: ReleaseStatementAbout): void {
+  const prior = abouts.get(sentence);
+  abouts.set(sentence, prior === undefined || prior === about ? about : null);
 }
 
 // The end of the quarter a release reports: the one every prompt that names an
@@ -399,6 +428,18 @@ export function releasePrompts(exhibits: ReadonlyArray<ReleaseExhibit>): string[
   return prompts;
 }
 
+// How a reply names the release's quarter and what a statement is about, in
+// the extraction prompt and the rebind prompt alike.
+const QUARTER_END_RULE = [
+  "quarter_end is the last day of the quarter whose results the release reports, as the release's own dated headings or tables give it",
+  '("three months ended June 28, 2025" gives 2025-06-28). It is null when the text gives no such date.',
+];
+const ABOUT_RULE = [
+  'about is the period a statement is about: "quarter" for that quarter\'s result; "year" for the fiscal year that quarter ends,',
+  'which only a fourth-quarter release reports; "other" for anything else, such as year to date or a prior period. Guidance is always "other".',
+  'If a statement does not make clear whether it is about the quarter or the year, use "other".',
+];
+
 function buildMessages(text: string): LlmChatMessage[] {
   return [
     {
@@ -407,12 +448,9 @@ function buildMessages(text: string): LlmChatMessage[] {
         "You read a company's earnings release and CFO commentary from an SEC 8-K, and pick the sentences in which",
         "management (1) explains why a reported result changed, or (2) gives guidance for a coming period.",
         'Reply with minified JSON only: {"quarter_end":"<YYYY-MM-DD>"|null,"statements":[{"kind":"explanation"|"guidance","metric":"<metric>","about":"quarter"|"year"|"other","quote":"<sentence>"}]}',
-        "quarter_end is the last day of the quarter whose results the release reports, as the release's own dated headings or tables give it",
-        '("three months ended June 28, 2025" gives 2025-06-28). It is null when the text gives no such date.',
+        ...QUARTER_END_RULE,
         `metric is one of: ${RELEASE_METRICS.join(", ")} (other when the subject is none of these).`,
-        'about is the period a statement is about: "quarter" for that quarter\'s result; "year" for the fiscal year that quarter ends,',
-        'which only a fourth-quarter release reports; "other" for anything else, such as year to date or a prior period. Guidance is always "other".',
-        'If a statement does not make clear whether it is about the quarter or the year, use "other".',
+        ...ABOUT_RULE,
         "quote is copied EXACTLY from the text, character for character: one or two whole sentences, no paraphrase,",
         "no ellipsis, nothing added. A quote that is not in the text is discarded.",
         "An explanation names a cause (a charge, a product, a mix shift, pricing, a ramp), not just the figure.",
@@ -424,6 +462,43 @@ function buildMessages(text: string): LlmChatMessage[] {
   ];
 }
 
+function buildRebindMessages(text: string, statements: ReadonlyArray<string>): LlmChatMessage[] {
+  return [
+    {
+      role: "system",
+      content: [
+        "You read a company's earnings release and CFO commentary from an SEC 8-K, and a numbered list of statements quoted from it",
+        "in which management explains why a reported result changed.",
+        'Reply with minified JSON only: {"quarter_end":"<YYYY-MM-DD>"|null,"about":{"<number>":"quarter"|"year"|"other"}}, with an about for each listed statement.',
+        ...QUARTER_END_RULE,
+        ...ABOUT_RULE,
+      ].join("\n"),
+    },
+    { role: "user", content: `Statements:\n${statements.map((statement, n) => `${n + 1}. ${statement}`).join("\n") || "none"}\n\n${text}` },
+  ];
+}
+
+// A filing's EX-99 exhibits, fetched from EDGAR.
+async function fetchReleaseExhibits(secClient: SecFilingFetcher, cik: number, accession: string): Promise<ReleaseExhibit[]> {
+  const fetched = await secClient.fetchFiling({ cik, accession_number: accession, document: `${accession}.txt` });
+  return releaseExhibits(new TextDecoder("utf-8").decode(fetched.bytes));
+}
+
+// One model call, recorded for audit, a failed one too (as digests: that it
+// ran, not what it said). Low reasoning: it picks sentences, and the quote
+// check does the rest; a large model's default reasoning took 4 minutes on one
+// release in a probe.
+async function completeLogged(deps: ExtractReleaseDeps, toolName: string, args: JsonObject, messages: LlmChatMessage[]): Promise<{ model: string; text: string }> {
+  return runLoggedToolCall(deps.db, {
+    tool_name: toolName,
+    args,
+    invoke: async () => {
+      const reply = await deps.llm.complete({ messages, temperature: 0, maxTokens: 3_000, reasoning: "low" });
+      return { model: reply.deployment.model, text: reply.text };
+    },
+  });
+}
+
 // Extract one candidate's statements and store the verified ones. Transport
 // errors propagate, so a drain fails-and-retries the item later. The stored
 // claims, the enriched_at stamp and the audit row are one transaction, and the
@@ -432,12 +507,7 @@ export async function extractReleaseStatements(
   deps: ExtractReleaseDeps,
   candidate: ReleaseCandidate,
 ): Promise<ExtractReleaseOutcome> {
-  const fetched = await deps.secClient.fetchFiling({
-    cik: candidate.issuerCik,
-    accession_number: candidate.accession,
-    document: `${candidate.accession}.txt`,
-  });
-  const exhibits = releaseExhibits(new TextDecoder("utf-8").decode(fetched.bytes));
+  const exhibits = await fetchReleaseExhibits(deps.secClient, candidate.issuerCik, candidate.accession);
   let model: string | null = null;
   // Every prompt is read.
   const proposed: ReleaseStatement[] = [];
@@ -445,18 +515,12 @@ export async function extractReleaseStatements(
   let unparseable = false;
   const prompts = releasePrompts(exhibits);
   for (const [index, prompt] of prompts.entries()) {
-    // Each call is recorded for audit, a failed one too (as digests: that it
-    // ran, not what it said). Low reasoning: it picks sentences, and the quote
-    // check does the rest; a large model's default reasoning took 4 minutes on
-    // one release in a probe.
-    const completion = await runLoggedToolCall(deps.db, {
-      tool_name: "extract_earnings_release.prompt",
-      args: { claim_id: candidate.claimId, accession: candidate.accession, prompt: index + 1, prompts: prompts.length },
-      invoke: async () => {
-        const reply = await deps.llm.complete({ messages: buildMessages(prompt), temperature: 0, maxTokens: 3_000, reasoning: "low" });
-        return { model: reply.deployment.model, text: reply.text };
-      },
-    });
+    const completion = await completeLogged(
+      deps,
+      "extract_earnings_release.prompt",
+      { claim_id: candidate.claimId, accession: candidate.accession, prompt: index + 1, prompts: prompts.length },
+      buildMessages(prompt),
+    );
     model = completion.model;
     const reply = parseReleaseReply(completion.text);
     // A prompt none of whose quotes is in the filing has its text unread, as
@@ -474,11 +538,7 @@ export async function extractReleaseStatements(
   // disagree on what it is about bind none of its claims.
   const found = proposed.flatMap((statement) => verifyStatement(statement, exhibits) ?? []);
   const abouts = new Map<string, ReleaseStatementAbout | null>();
-  for (const pick of found) {
-    if (pick.kind !== "explanation") continue;
-    const prior = abouts.get(pick.quote);
-    abouts.set(pick.quote, prior === undefined || prior === pick.about ? pick.about : null);
-  }
+  for (const pick of found) if (pick.kind === "explanation") noteAbout(abouts, pick.quote, pick.about);
   const verified = new Map<string, VerifiedStatement & { predicate: string; period: ClaimPeriod | null }>();
   for (const pick of found) {
     const predicate = `${pick.kind === "explanation" ? "management.explanation" : "guidance"}.${pick.metric}`;
@@ -581,29 +641,6 @@ export async function extractReleaseStatements(
   return applied ? outcome : "noop";
 }
 
-// Make Item 2.02 releases already read candidates again when none of their
-// management explanations is bound (read before #542, or by a reply that gave
-// no quarter end), so the next drain binds those claims in place. Returns how
-// many. A release with one bound explanation is not reopened.
-// ponytail: each run re-reads releases whose reply had no end, or whose
-// explanations are all about another period; a per-release rebind mark if
-// that grows costly.
-export async function reopenUnboundReleases(db: QueryExecutor): Promise<number> {
-  const { rowCount } = await db.query(
-    `update claims r set enriched_at = null
-      where r.predicate = 'material_event.guidance_update'
-        and r.enriched_at is not null
-        and exists (select 1 from claims c
-                     where c.document_id = r.document_id and c.predicate like 'management.explanation.%' and ${CURRENT_CLAIM_SQL})
-        and not exists (select 1 from claims c
-                         where c.document_id = r.document_id
-                           and c.predicate like 'management.explanation.%'
-                           and ${CURRENT_CLAIM_SQL}
-                           and c.period_end is not null)`,
-  );
-  return rowCount ?? 0;
-}
-
 export type ExtractReleaseDrainResult = Record<ExtractReleaseOutcome | "failed", number>;
 
 // Drain the backlog by a claim_id keyset, advancing past failures so one bad
@@ -630,4 +667,180 @@ export async function runReleaseExtractionDrain(
     }
   }
   return result;
+}
+
+// A release read before #542, or by a reply with no usable quarter end, holds
+// explanations bound to no period. A rebind reads it again and asks only for
+// the quarter's end and what each of those stored sentences is about, then
+// fills their periods in place: never a new claim, so citations of them stay.
+// Each explanation a rebind reads is stamped enriched_at (unused on these
+// claims otherwise), bound or not, so a release is read once even if it can
+// never bind; clearRebindMarks makes the unbound ones candidates again.
+export type RebindCandidate = {
+  documentId: string;
+  accession: string;
+  issuerCik: number;
+  effectiveTime: string | null;
+  // The release's current explanation sentences, unbound and not yet read by
+  // a rebind.
+  sentences: string[];
+};
+
+// "bound": at least one claim bound. "unbound": read, none bound (no quarter
+// end, or no statement about the quarter or the year). "unparseable": a reply
+// that is no JSON object, so the release is left for the next rebind. "noop": a
+// concurrent rebind already read it.
+export type RebindOutcome = "bound" | "unbound" | "unparseable" | "noop";
+export type RebindDrainResult = Record<RebindOutcome | "failed", number>;
+
+export async function findRebindCandidates(
+  db: QueryExecutor,
+  opts: { afterDocumentId?: string; limit?: number } = {},
+): Promise<RebindCandidate[]> {
+  const { rows } = await db.query<{
+    document_id: string;
+    accession: string;
+    cik: string;
+    effective_time: Date | string | null;
+    sentences: string[];
+  }>(
+    `select c.document_id::text as document_id,
+            d.provider_doc_id as accession,
+            i.cik,
+            min(c.effective_time) as effective_time,
+            array_agg(distinct c.text_canonical order by c.text_canonical) as sentences
+       from claims c
+       join claim_arguments ca on ca.claim_id = c.claim_id and ca.subject_kind = 'issuer'
+       join documents d on d.document_id = c.document_id
+       join issuers i on i.issuer_id = ca.subject_id
+      where c.predicate like 'management.explanation.%'
+        and ${CURRENT_CLAIM_SQL}
+        and c.period_end is null
+        and c.enriched_at is null
+        and i.cik is not null
+        and c.document_id > $1::uuid
+      group by c.document_id, d.provider_doc_id, i.cik
+      order by c.document_id
+      limit $2`,
+    [opts.afterDocumentId ?? ZERO_UUID, opts.limit ?? 100],
+  );
+  return rows.flatMap((row) => {
+    const issuerCik = Number(row.cik);
+    if (!Number.isInteger(issuerCik) || issuerCik <= 0) return [];
+    return [{
+      documentId: row.document_id,
+      accession: row.accession,
+      issuerCik,
+      effectiveTime: row.effective_time == null ? null : new Date(row.effective_time).toISOString(),
+      sentences: row.sentences,
+    }];
+  });
+}
+
+// Rebind one release. Each prompt lists the stored sentences its text holds,
+// so each is read in context; its quarter's end and the sentences' periods
+// follow the extraction's rules (reportedQuarterEnd, explainedPeriod, and
+// readings of a sentence that disagree bind it to none). Transport errors
+// propagate, so a drain fails-and-retries the release later. The periods and
+// the marks are one update, guarded by the marks: a concurrent rebind makes
+// this one a "noop".
+export async function rebindRelease(deps: ExtractReleaseDeps, candidate: RebindCandidate): Promise<RebindOutcome> {
+  const exhibits = await fetchReleaseExhibits(deps.secClient, candidate.issuerCik, candidate.accession);
+  const prompts = releasePrompts(exhibits);
+  let model: string | null = null;
+  const ends: Array<IsoDate | null> = [];
+  const abouts = new Map<string, ReleaseStatementAbout | null>();
+  let unparseable = false;
+  for (const [index, prompt] of prompts.entries()) {
+    const listed = candidate.sentences.filter((sentence) => prompt.includes(sentence));
+    const completion = await completeLogged(
+      deps,
+      "rebind_earnings_release.prompt",
+      { document_id: candidate.documentId, accession: candidate.accession, prompt: index + 1, prompts: prompts.length },
+      buildRebindMessages(prompt, listed),
+    );
+    model = completion.model;
+    const reply = parseRebindReply(completion.text, listed.length);
+    if (reply === null) {
+      unparseable = true;
+      continue;
+    }
+    ends.push(reply.quarterEnd);
+    listed.forEach((sentence, n) => noteAbout(abouts, sentence, reply.abouts[n]!));
+  }
+  const args = { document_id: candidate.documentId, accession: candidate.accession, model };
+  if (unparseable) {
+    await writeToolCallLog(deps.db, { tool_name: "rebind_earnings_release", args, result: { outcome: "unparseable" }, status: "partial" });
+    return "unparseable";
+  }
+  const quarterEnd = reportedQuarterEnd(ends, candidate.effectiveTime?.slice(0, 10) ?? null);
+  const periods = candidate.sentences.map((sentence) => explainedPeriod(quarterEnd, { kind: "explanation", about: abouts.get(sentence) ?? "other" }));
+  return withTransaction(deps.db, async (tx) => {
+    const { rows } = await tx.db.query<{ claim_id: string; bound: boolean }>(
+      `update claims c
+          set enriched_at = now(),
+              period_kind = l.kind,
+              period_end = l.end_date,
+              period_bound_at = case when l.kind is null then null else now() end
+         from unnest($2::text[], $3::text[], $4::date[]) as l(sentence, kind, end_date)
+        where c.document_id = $1
+          and c.text_canonical = l.sentence
+          and c.predicate like 'management.explanation.%'
+          and ${CURRENT_CLAIM_SQL}
+          and c.period_end is null
+          and c.enriched_at is null
+      returning c.claim_id::text as claim_id, c.period_end is not null as bound`,
+      [candidate.documentId, candidate.sentences, periods.map((period) => period?.kind ?? null), periods.map((period) => period?.end ?? null)],
+    );
+    if (rows.length === 0) return "noop";
+    const outcome = rows.some((row) => row.bound) ? "bound" : "unbound";
+    await writeToolCallLog(tx.db, {
+      tool_name: "rebind_earnings_release",
+      args,
+      result: { outcome, quarter_end: quarterEnd, claim_ids: rows.map((row) => row.claim_id), bound: rows.filter((row) => row.bound).length },
+      status: outcome === "bound" ? "ok" : "skipped",
+    });
+    return outcome;
+  });
+}
+
+// Drain the rebind backlog by a document_id keyset, as the extraction drain
+// does, reading at most `limit` releases.
+export async function runRebindDrain(
+  deps: ExtractReleaseDeps,
+  opts: { limit?: number; pageSize?: number; onRelease?: (candidate: RebindCandidate, result: RebindOutcome | { error: unknown }) => void } = {},
+): Promise<RebindDrainResult> {
+  const result: RebindDrainResult = { bound: 0, unbound: 0, unparseable: 0, noop: 0, failed: 0 };
+  let cursor = ZERO_UUID;
+  for (let left = opts.limit ?? Infinity; left > 0;) {
+    const page = await findRebindCandidates(deps.db, { afterDocumentId: cursor, limit: Math.min(opts.pageSize ?? 100, left) });
+    if (page.length === 0) break;
+    for (const candidate of page) {
+      cursor = candidate.documentId;
+      left -= 1;
+      try {
+        const outcome = await rebindRelease(deps, candidate);
+        result[outcome] += 1;
+        opts.onRelease?.(candidate, outcome);
+      } catch (error) {
+        result.failed += 1;
+        opts.onRelease?.(candidate, { error });
+      }
+    }
+  }
+  return result;
+}
+
+// Clear the marks on current explanations a rebind read but could not bind, so
+// the next rebind reads them again (--rebind --retry), as after a prompt
+// change. Returns how many.
+export async function clearRebindMarks(db: QueryExecutor): Promise<number> {
+  const { rowCount } = await db.query(
+    `update claims c set enriched_at = null
+      where c.predicate like 'management.explanation.%'
+        and ${CURRENT_CLAIM_SQL}
+        and c.period_end is null
+        and c.enriched_at is not null`,
+  );
+  return rowCount ?? 0;
 }
