@@ -523,6 +523,33 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     causeQuotedOrNamed(answer);
   });
 
+  await t.test("a cause whose seal is refused stores no snapshot and no read log, only the refusal's audit row, and the answer names it as not covered (#542)", async () => {
+    // The cause's read is logged under no thread, so the seal's audit of its
+    // provenance refuses it.
+    await client.query(`create function filed_cause_unthreaded() returns trigger language plpgsql as $$ begin new.thread_id := null; return new; end $$`);
+    await client.query(`create trigger filed_cause_unthreaded before insert on tool_call_logs for each row when (new.tool_name = 'filed_cause') execute function filed_cause_unthreaded()`);
+    try {
+      const amdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD margin, cause seal refused" });
+      completedTurn(await runTurn(base, amdThread.thread_id, "Why did AMD's operating margin turn negative in Q2 2025?"));
+      const answer = await latestAssistantMessage(base, amdThread.thread_id);
+      assert.deepEqual(engineAnswer(answer), {
+        results: [OPERATING_MARGIN_Q2],
+        notes: ["Not covered by this answer: a margin over several periods; the cause of these figures."],
+      });
+      causeQuotedOrNamed(answer);
+      const { rows: [stored] } = await client.query(
+        `select (select count(*)::int from snapshots where parent_snapshot = $1::uuid) as children,
+                (select count(*)::int from tool_call_logs where tool_name = 'filed_cause' and thread_id is null) as reads,
+                (select coalesce(array_agg(reason_code), '{}') from verifier_fail_logs where thread_id = $2::uuid) as refusals`,
+        [answer.snapshot_id, amdThread.thread_id],
+      );
+      assert.deepEqual(stored, { children: 0, reads: 0, refusals: ["tool_call_log_audit_failed"] });
+    } finally {
+      await client.query(`drop trigger filed_cause_unthreaded on tool_call_logs`);
+      await client.query(`drop function filed_cause_unthreaded()`);
+    }
+  });
+
   await t.test("a cause read a schema defect fails fails the turn: no answer goes out without its cause (#542)", async () => {
     await client.query(`alter table claim_arguments rename to claim_arguments_renamed`);
     try {
