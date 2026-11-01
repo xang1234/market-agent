@@ -80,7 +80,8 @@ test('Agents prefill from Analyze remains editable and does not create an agent 
     assert.equal(harness.document.querySelector<HTMLTextAreaElement>('[name="static-subject-refs"]')?.value, `listing:${RUN_SUBJECT_ID}`)
     assert.equal(harness.document.querySelector<HTMLSelectElement>('[name="subject-kind"]')?.value, 'listing')
     assert.equal(harness.document.querySelector<HTMLInputElement>('[name="subject-id"]')?.value, RUN_SUBJECT_ID)
-    assert.match(harness.document.body.textContent ?? '', /Review this Analyze memo, create the agent, then draft and save its conditions/i)
+    assert.equal(formStatus(harness.document), 'Review this Analyze memo, create the agent, then draft and save its conditions.')
+    assert.equal(rosterStatus(harness.document), 'Activity · Idle')
     assert.equal(calls.some((call) => call.method === 'POST'), false)
   } finally {
     await harness.unmount()
@@ -121,6 +122,8 @@ test('Agents accepts a validated discovery handoff, exposes trimmed conditions, 
     assert.equal(harness.document.querySelector<HTMLTextAreaElement>('[name="agent-thesis"]')?.value, 'A cited discovery draft.')
     assert.match(harness.document.body.textContent ?? '', /5 of 7 research conditions/i)
     assert.match(harness.document.body.textContent ?? '', /2 conditions were trimmed/i)
+    assert.equal(formStatus(harness.document), 'Review this cited discovery research, create the agent, then draft and save its conditions.')
+    assert.equal(rosterStatus(harness.document), 'Activity · Idle')
     assert.equal(calls.some((call) => call.method === 'POST'), false)
   } finally {
     await harness.unmount()
@@ -266,6 +269,16 @@ function installHarness(fetchImpl: typeof fetch) {
       restoreGlobals()
     },
   }
+}
+
+function formStatus(document: Document): string | null {
+  return document.querySelector('[name="agent-name"]')?.closest('form')?.querySelector('[role="status"]')?.textContent ?? null
+}
+
+function rosterStatus(document: Document): string | null {
+  const roster = [...document.querySelectorAll('section')]
+    .find((section) => section.querySelector('h2')?.textContent === 'Agents')
+  return roster?.querySelector('[role="status"]')?.textContent ?? null
 }
 
 function json(body: unknown, status = 200): Response {

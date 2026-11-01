@@ -1,6 +1,7 @@
 import { SeverityBadge } from '../blocks/SeverityBadge.tsx'
 import { FINDING_SEVERITIES, type FindingSeverity } from '../blocks/types.ts'
 import type { AgentActivityRow, AgentFindingRow, AgentRunRow } from './agentRows.ts'
+import { PAGE_PANEL_CLASS, PANEL_TITLE_CLASS } from '../ui/pageStyles.ts'
 
 type AgentDetailPanelsProps = {
   findings: ReadonlyArray<AgentFindingRow>
@@ -15,15 +16,15 @@ type AgentDetailPanelsProps = {
 export function AgentDetailPanels({ findings, detailsError, runs, runActivities }: AgentDetailPanelsProps) {
   return (
     <>
-      <section className="rounded-md border border-line bg-surface p-5">
-        <h2 className="text-lg font-semibold text-fg">Findings</h2>
+      <section className={PAGE_PANEL_CLASS}>
+        <h2 className={PANEL_TITLE_CLASS}>Findings</h2>
         {detailsError ? <p className="mt-3 text-sm text-negative">Details failed: {detailsError}</p> : null}
         {findings.length === 0 ? (
-          <p className="mt-4 text-sm text-muted">No findings for this agent yet.</p>
+          <p className="mt-3 text-sm text-muted">No findings for this agent yet.</p>
         ) : (
-          <ul className="mt-4 flex flex-col gap-3">
+          <ul className="mt-3 flex flex-col gap-2">
             {findings.map((finding) => (
-              <li key={finding.finding_id} className="rounded-md border border-line p-3 text-sm">
+              <li key={finding.finding_id} className="rounded-lg border border-line p-3 text-sm">
                 <div className="flex items-start justify-between gap-3">
                   <span className="font-medium text-fg">{finding.headline}</span>
                   <FindingSeverityBadge severity={finding.severity} />
@@ -34,14 +35,14 @@ export function AgentDetailPanels({ findings, detailsError, runs, runActivities 
           </ul>
         )}
       </section>
-      <section className="rounded-md border border-line bg-surface p-5">
-        <h2 className="text-lg font-semibold text-fg">Run history</h2>
+      <section className={PAGE_PANEL_CLASS}>
+        <h2 className={PANEL_TITLE_CLASS}>Run history</h2>
         {runs.length === 0 ? (
-          <p className="mt-4 text-sm text-muted">No recorded runs yet.</p>
+          <p className="mt-3 text-sm text-muted">No recorded runs yet.</p>
         ) : (
-          <ul className="mt-4 flex flex-col gap-3">
+          <ul className="mt-3 flex flex-col gap-2">
             {runs.map((run) => (
-              <li key={run.agent_run_log_id} className="rounded-md border border-line p-3 text-sm">
+              <li key={run.agent_run_log_id} className="rounded-lg border border-line p-3 text-sm">
                 <span className="font-medium">{run.status}</span>
                 <span className="ml-2 text-muted">{run.started_at}</span>
                 {run.error ? <p className="mt-1 text-negative">{run.error}</p> : null}
@@ -50,14 +51,14 @@ export function AgentDetailPanels({ findings, detailsError, runs, runActivities 
           </ul>
         )}
       </section>
-      <section className="rounded-md border border-line bg-surface p-5">
-        <h2 className="text-lg font-semibold text-fg">Run activity</h2>
+      <section className={PAGE_PANEL_CLASS}>
+        <h2 className={PANEL_TITLE_CLASS}>Run activity</h2>
         {runActivities.length === 0 ? (
-          <p className="mt-4 text-sm text-muted">No activity for this agent yet.</p>
+          <p className="mt-3 text-sm text-muted">No activity for this agent yet.</p>
         ) : (
-          <ul className="mt-4 flex flex-col gap-3">
+          <ul className="mt-3 flex flex-col gap-2">
             {runActivities.map((item) => (
-              <li key={item.run_activity_id} className="rounded-md border border-line p-3 text-sm">
+              <li key={item.run_activity_id} className="rounded-lg border border-line p-3 text-sm">
                 <div className="flex items-start justify-between gap-3">
                   <span className="font-medium capitalize text-fg">{item.stage}</span>
                   <span className="text-xs text-muted">{item.ts}</span>

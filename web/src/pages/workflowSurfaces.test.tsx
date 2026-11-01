@@ -469,7 +469,7 @@ test('Analyze Add-to-chat shares run blocks through the durable artifact endpoin
   }
 })
 
-test('Agents surface renders CRUD controls, run history, and activity status', () => {
+test('Agents surface renders CRUD controls and activity status, and holds the per-agent panels until an agent is selected', () => {
   const html = renderWithAuth(<MemoryRouter><AgentsPage /></MemoryRouter>)
 
   assert.match(html, /Create agent/)
@@ -479,11 +479,253 @@ test('Agents surface renders CRUD controls, run history, and activity status', (
   assert.match(html, /critical\+ headline contains margin/)
   assert.match(html, /Disable/)
   assert.match(html, /Delete/)
-  assert.match(html, /Run history/)
-  assert.match(html, /Findings/)
-  assert.match(html, /Run activity/)
-  assert.match(html, /Activity/)
+  assert.doesNotMatch(html, /Run history/)
+  assert.doesNotMatch(html, /Findings/)
+  assert.doesNotMatch(html, /Run activity/)
+  assert.doesNotMatch(html, /Thesis conditions/)
+  const roster = new JSDOM(html).window.document.querySelector('section')
+  assert.equal(roster?.querySelector('h2')?.textContent, 'Agents')
+  assert.equal(roster?.querySelector('[role="status"]')?.textContent, 'Activity · Idle')
   assert.doesNotMatch(html, /ships with P5\.1/i)
+})
+
+test('Agents form shows its own validation error beside the submit button, not in the roster status', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restore = installDomGlobals(dom.window as unknown as Window)
+  const originalFetch = globalThis.fetch
+  try {
+    globalThis.fetch = async (input) => {
+      if (String(input) === '/v1/agents') {
+        return new Response(JSON.stringify({ agents: [], runs: [] }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      throw new Error(`unexpected fetch: ${String(input)}`)
+    }
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(wrapWithAuth(<MemoryRouter><AgentsPage /></MemoryRouter>))
+    })
+    await act(async () => undefined)
+
+    const document = dom.window.document
+    const refs = document.querySelector<HTMLTextAreaElement>('[name="static-subject-refs"]')!
+    // react-dom loaded before this file's DOM existed, so it listens through its focus/keyup fallback, not `input`.
+    await act(async () => {
+      refs.focus()
+      Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value')!.set!.call(refs, 'not-a-ref')
+      refs.dispatchEvent(new dom.window.Event('keyup', { bubbles: true }))
+    })
+    const form = document.querySelector('form')!
+    await act(async () => {
+      form.requestSubmit()
+    })
+
+    assert.equal(form.querySelector('[role="alert"]')?.textContent, 'Static subject ref line 1 must be kind:uuid')
+    const roster = [...document.querySelectorAll('section')]
+      .find((section) => section.querySelector('h2')?.textContent === 'Agents')
+    assert.equal(roster?.querySelector('[role="status"]')?.textContent, 'Activity · Idle')
+    await act(async () => root.unmount())
+  } finally {
+    globalThis.fetch = originalFetch
+    restore()
+  }
+})
+
+test('Agents form keeps a focused field focused when the loaded roster selects its first agent', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restore = installDomGlobals(dom.window as unknown as Window)
+  const originalFetch = globalThis.fetch
+  const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+  let resolveRoster!: (response: Response) => void
+  try {
+    globalThis.fetch = async (input) => {
+      const url = String(input)
+      if (url === '/v1/agents') return new Promise<Response>((resolve) => { resolveRoster = resolve })
+      if (url.endsWith('/findings')) return json({ findings: [] })
+      if (url.endsWith('/activity')) return json({ activity: [] })
+      if (url.endsWith('/thesis')) return json({ thesis: null, versions: [], assessments: [], metrics: [] })
+      throw new Error(`unexpected fetch: ${url}`)
+    }
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(wrapWithAuth(<MemoryRouter><AgentsPage /></MemoryRouter>))
+    })
+    const document = dom.window.document
+    const nameInput = document.querySelector<HTMLInputElement>('[name="agent-name"]')!
+    nameInput.focus()
+    assert.equal(document.activeElement, nameInput)
+
+    await act(async () => {
+      resolveRoster(json({
+        agents: [{
+          agent_id: '11111111-1111-4111-8111-111111111111',
+          name: 'Loaded monitor',
+          thesis: 'Loaded thesis',
+          cadence: 'daily',
+          enabled: true,
+          universe: { mode: 'static', subject_refs: [] },
+          alert_rules: [],
+          updated_at: '2026-05-06T00:00:00.000Z',
+        }],
+        runs: [],
+      }))
+    })
+    await act(async () => undefined)
+
+    assert.deepEqual(
+      [...document.querySelectorAll('h2')].map((h) => h.textContent),
+      ['Agents', 'Create agent', 'Thesis conditions', 'Findings', 'Run history', 'Run activity'],
+    )
+    assert.equal(document.activeElement, nameInput)
+    await act(async () => root.unmount())
+  } finally {
+    globalThis.fetch = originalFetch
+    restore()
+  }
+})
+
+test('Agents form returns to Create agent when the agent being edited is deleted', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restore = installDomGlobals(dom.window as unknown as Window)
+  const originalFetch = globalThis.fetch
+  const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+  const agent = (agent_id: string, name: string) => ({
+    agent_id,
+    name,
+    thesis: `${name} thesis`,
+    cadence: 'daily',
+    enabled: true,
+    universe: { mode: 'static', subject_refs: [] },
+    alert_rules: [],
+    updated_at: '2026-05-06T00:00:00.000Z',
+  })
+  try {
+    globalThis.fetch = async (input, init) => {
+      const url = String(input)
+      if (url === '/v1/agents') {
+        return json({
+          agents: [
+            agent('11111111-1111-4111-8111-111111111111', 'Edited monitor'),
+            agent('22222222-2222-4222-8222-222222222222', 'Other monitor'),
+          ],
+          runs: [],
+        })
+      }
+      if (url === '/v1/agents/11111111-1111-4111-8111-111111111111' && init?.method === 'DELETE') {
+        return new Response(null, { status: 204 })
+      }
+      if (url.endsWith('/findings')) return json({ findings: [] })
+      if (url.endsWith('/activity')) return json({ activity: [] })
+      if (url.endsWith('/thesis')) return json({ thesis: null, versions: [], assessments: [], metrics: [] })
+      throw new Error(`unexpected fetch: ${url}`)
+    }
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(wrapWithAuth(<MemoryRouter><AgentsPage /></MemoryRouter>))
+    })
+    await act(async () => undefined)
+    await act(async () => undefined)
+
+    const document = dom.window.document
+    const editedRow = [...document.querySelectorAll('li')]
+      .find((item) => item.querySelector('h3')?.textContent === 'Edited monitor')!
+    const rowButton = (label: string) => [...editedRow.querySelectorAll('button')].find((button) => button.textContent === label)!
+    await act(async () => {
+      rowButton('Edit').click()
+    })
+    const agentForm = () => document.querySelector('[name="agent-name"]')!.closest('form')!
+    const formMessage = () => agentForm().querySelector('[role="status"], [role="alert"]')?.textContent ?? null
+    assert.equal(agentForm().querySelector('h2')?.textContent, 'Edit agent')
+    assert.equal(formMessage(), 'Editing agent')
+
+    await act(async () => {
+      rowButton('Delete').click()
+    })
+    await act(async () => undefined)
+
+    assert.equal(agentForm().querySelector('h2')?.textContent, 'Create agent')
+    assert.equal(formMessage(), null)
+    await act(async () => root.unmount())
+  } finally {
+    globalThis.fetch = originalFetch
+    restore()
+  }
+})
+
+test('Agents form follows the agent being edited when a delete response arrives late', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restore = installDomGlobals(dom.window as unknown as Window)
+  const originalFetch = globalThis.fetch
+  const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+  const agent = (agent_id: string, name: string) => ({
+    agent_id,
+    name,
+    thesis: `${name} thesis`,
+    cadence: 'daily',
+    enabled: true,
+    universe: { mode: 'static', subject_refs: [] },
+    alert_rules: [],
+    updated_at: '2026-05-06T00:00:00.000Z',
+  })
+  const pendingDeletes = new Map<string, () => void>()
+  try {
+    globalThis.fetch = async (input, init) => {
+      const url = String(input)
+      if (url === '/v1/agents') {
+        return json({
+          agents: [
+            agent('11111111-1111-4111-8111-111111111111', 'First monitor'),
+            agent('22222222-2222-4222-8222-222222222222', 'Second monitor'),
+            agent('33333333-3333-4333-8333-333333333333', 'Third monitor'),
+          ],
+          runs: [],
+        })
+      }
+      if (init?.method === 'DELETE') {
+        return new Promise<Response>((resolve) => {
+          pendingDeletes.set(url, () => resolve(new Response(null, { status: 204 })))
+        })
+      }
+      if (url.endsWith('/findings')) return json({ findings: [] })
+      if (url.endsWith('/activity')) return json({ activity: [] })
+      if (url.endsWith('/thesis')) return json({ thesis: null, versions: [], assessments: [], metrics: [] })
+      throw new Error(`unexpected fetch: ${url}`)
+    }
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(wrapWithAuth(<MemoryRouter><AgentsPage /></MemoryRouter>))
+    })
+    await act(async () => undefined)
+    await act(async () => undefined)
+
+    const document = dom.window.document
+    const rowButton = (agentName: string, label: string) => {
+      const row = [...document.querySelectorAll('li')].find((item) => item.querySelector('h3')?.textContent === agentName)!
+      return [...row.querySelectorAll('button')].find((button) => button.textContent === label)!
+    }
+    const formHeading = () => document.querySelector('[name="agent-name"]')!.closest('form')!.querySelector('h2')?.textContent
+    const nameValue = () => (document.querySelector('[name="agent-name"]') as HTMLInputElement).value
+    const resolveDelete = async (agentId: string) => {
+      await act(async () => pendingDeletes.get(`/v1/agents/${agentId}`)!())
+      await act(async () => undefined)
+    }
+
+    await act(async () => rowButton('First monitor', 'Edit').click())
+    await act(async () => rowButton('First monitor', 'Delete').click())
+    await act(async () => rowButton('Second monitor', 'Edit').click())
+    await resolveDelete('11111111-1111-4111-8111-111111111111')
+    assert.equal(formHeading(), 'Edit agent')
+    assert.equal(nameValue(), 'Second monitor')
+
+    await act(async () => rowButton('Third monitor', 'Delete').click())
+    await act(async () => rowButton('Third monitor', 'Edit').click())
+    await resolveDelete('33333333-3333-4333-8333-333333333333')
+    assert.equal(formHeading(), 'Create agent')
+    assert.equal(nameValue(), '')
+    await act(async () => root.unmount())
+  } finally {
+    globalThis.fetch = originalFetch
+    restore()
+  }
 })
 
 test('Agents surface loads selected agent findings and activity routes', async () => {
@@ -568,6 +810,73 @@ test('Agents surface loads selected agent findings and activity routes', async (
     ].sort())
     assert.match(dom.window.document.body.innerHTML, /Operating margin quality improved/)
     assert.match(dom.window.document.body.innerHTML, /Created 1 source-backed finding/)
+    assert.deepEqual(
+      [...dom.window.document.querySelectorAll('h2')].map((h) => h.textContent),
+      ['Agents', 'Create agent', 'Thesis conditions', 'Findings', 'Run history', 'Run activity'],
+    )
+    await act(async () => root.unmount())
+  } finally {
+    globalThis.fetch = originalFetch
+    restore()
+  }
+})
+
+test('Agents run history lists only the selected agent runs', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restore = installDomGlobals(dom.window as unknown as Window)
+  const originalFetch = globalThis.fetch
+  const agent = (agent_id: string, name: string) => ({
+    agent_id,
+    name,
+    thesis: `${name} thesis`,
+    cadence: 'daily',
+    enabled: true,
+    universe: { mode: 'static', subject_refs: [] },
+    alert_rules: [],
+    updated_at: '2026-05-06T00:00:00.000Z',
+  })
+  const run = (agent_run_log_id: string, agent_id: string, started_at: string) => ({
+    agent_run_log_id,
+    agent_id,
+    status: 'completed',
+    started_at,
+    ended_at: started_at,
+    error: null,
+  })
+  const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+  try {
+    globalThis.fetch = async (input) => {
+      const url = String(input)
+      if (url === '/v1/agents') {
+        return json({
+          agents: [
+            agent('11111111-1111-4111-8111-111111111111', 'Selected monitor'),
+            agent('22222222-2222-4222-8222-222222222222', 'Other monitor'),
+          ],
+          runs: [
+            run('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', '11111111-1111-4111-8111-111111111111', '2026-05-06T01:00:00.000Z'),
+            run('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', '22222222-2222-4222-8222-222222222222', '2026-05-07T02:00:00.000Z'),
+          ],
+        })
+      }
+      if (url.endsWith('/findings')) return json({ findings: [] })
+      if (url.endsWith('/activity')) return json({ activity: [] })
+      if (url.endsWith('/thesis')) return json({ thesis: null, versions: [], assessments: [], metrics: [] })
+      throw new Error(`unexpected fetch: ${url}`)
+    }
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(wrapWithAuth(<MemoryRouter><AgentsPage /></MemoryRouter>))
+    })
+    await act(async () => undefined)
+    await act(async () => undefined)
+
+    const runHistory = [...dom.window.document.querySelectorAll('section')]
+      .find((section) => section.querySelector('h2')?.textContent === 'Run history')
+    assert.deepEqual(
+      [...(runHistory?.querySelectorAll('li') ?? [])].map((item) => item.textContent),
+      ['completed2026-05-06T01:00:00.000Z'],
+    )
     await act(async () => root.unmount())
   } finally {
     globalThis.fetch = originalFetch

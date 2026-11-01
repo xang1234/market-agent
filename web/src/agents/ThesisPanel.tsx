@@ -6,6 +6,7 @@ import { AssessmentHistory, VersionHistory } from './ThesisHistory.tsx'
 import { FailureNotice } from '../ui/FailureNotice.tsx'
 import { Skeleton } from '../ui/Skeleton.tsx'
 import type { ThesisHistoryResponse, ThesisVersion } from '../../../services/agents/src/thesis-types.ts'
+import { PAGE_PANEL_CLASS, PANEL_TITLE_CLASS } from '../ui/pageStyles.ts'
 
 type ThesisPanelProps = {
   userId: string
@@ -87,8 +88,8 @@ function ThesisPanelContent({ userId, agentId, initialThesis, refreshKey, fetchI
 
 function PanelFrame({ children }: { children: React.ReactNode }) {
   return (
-    <section aria-labelledby="thesis-panel-heading" className="rounded-md border border-line bg-surface p-5">
-      <h2 id="thesis-panel-heading" className="text-lg font-semibold text-fg">Thesis conditions</h2>
+    <section aria-labelledby="thesis-panel-heading" className={PAGE_PANEL_CLASS}>
+      <h2 id="thesis-panel-heading" className={PANEL_TITLE_CLASS}>Thesis conditions</h2>
       <p className="mt-1 text-sm text-muted">
         Turn the investment view into explicit beliefs, disconfirming evidence, and review horizons.
       </p>
