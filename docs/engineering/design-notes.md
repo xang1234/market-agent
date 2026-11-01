@@ -489,12 +489,31 @@ an 8-K Item 2.02 files the press release and CFO commentary as EX-99 exhibits
   about that year first: from the end of its first quarter until a quarter after it ends, by the issuer's own fiscal
   year where its facts date it (calendar bounds from the label otherwise), so later releases don't crowd it out. The
   window is a year, not the quarter asked about.
+- **Engine answers** (#542) quote the cause each company filed for the figures they show when the turn asks why
+  (`asksCause`: the scope's `explains`, kept by follow-ups until one turns it off). What the cause explains comes from
+  the plan and the periods its inputs bound to, not the question's words (`explainedFigures`,
+  `services/chat/src/filed-cause.ts`). Each verified output is a figure at one fiscal period (a reported figure, a
+  margin or free cash flow whose inputs bound to one period, or the change of one, at its current period), nothing (a
+  balance item, a share count, a valuation, another ratio), or something no one period explains (a trailing sum, a
+  threshold, a peer or period ranking, a spread, inputs of several periods). A company's figures are explained at its
+  period with the latest end, the earlier ones only as their trend. An output no one period explains, a Q4 beside its
+  fiscal year, or an earlier figure not shown at the latest leaves the company none. The reading narrows those figures
+  to the ones it names and never adds one. Each company's explanations are read for exactly that period
+  (`loadPeriodClaimEvidence`: the claim's `period_kind` and `period_end`, no date window; a claim never bound is
+  quoted for none), of the figures and of what they are computed from, nearest first and a margin's revenue last
+  (`causeFamilies`): an operating margin's operating income, then gross margin and operating expenses, then revenue.
+  So AMD's Q2 2025 inventory charge, filed against gross margin, is a cause of its operating margin and none of its
+  revenue. The quote is sealed in a snapshot whose parent is the answer's (migration 0074), inside the finalization
+  transaction, so it is deleted with the answer and opens only through it. A company quoted none has its cause named
+  as not covered. A read an operational fault ends (a lost connection, a cancel or timeout, a lock not available, a
+  rolled-back transaction, exhausted resources) rolls back to its savepoint and the answer publishes with the gap. Any
+  other failure fails the turn.
 - **Run it** after the 8-K crawl: `npm run extract:earnings-releases` (in `services/evidence`). It is a batch step,
   never the crawl: one model call per release (more for one over 60,000 characters, split between blocks, so its
   tail is read too), at low reasoning; about 46 s on the dev model in a probe (4 minutes at
   its default reasoning).
-- **Not yet:** guidance compared with the reported result once it is in, 10-Q/10-K MD&A, and the frozen golden
-  dataset has no such claims (the eval's "why" question still answers from figures alone).
+- **Not yet:** guidance compared with the reported result once it is in, and 10-Q/10-K MD&A. The frozen golden
+  dataset holds one such claim: AMD's Q2 2025 MI308 charge, bound to the quarter (#542).
 
 ## What a chat turn asks for
 
