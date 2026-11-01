@@ -81,13 +81,20 @@ function assertSameContext(base: SnapshotSealInput, section: SnapshotSealInput):
       throw new SealInputMergeError(`${field} differs (${String(section.manifest[field])} != ${String(base.manifest[field])})`);
     }
   }
+  // Fact sections carry no parent and merge under the base's; a section sealed
+  // under another snapshot would lose that parent in the spread below.
+  const parent = section.manifest.parent_snapshot ?? null;
+  if (parent !== null && parent !== (base.manifest.parent_snapshot ?? null)) {
+    throw new SealInputMergeError(`parent_snapshot differs (${parent} != ${String(base.manifest.parent_snapshot ?? null)})`);
+  }
 }
 
 // Folds the narrative memo's seal input (base) and the deterministic sections'
 // seal inputs into one. Concats blocks/facts/claims/events/documents and unions
 // the manifest ref arrays and sources. Every input must share the snapshot,
-// thread, cutoff (as_of), basis, normalization, and coverage start; base's
-// remaining scalar fields (model_version, …) are kept. Only uncertified inputs
+// thread, cutoff (as_of), basis, normalization, and coverage start, and a
+// section with a parent must share base's; base's remaining scalar fields
+// (model_version, …) are kept. Only uncertified inputs
 // merge: a verified financial unit is sealed alone under its own certificate,
 // never folded into a memo snapshot. Pure.
 export function mergeSealInputs(
