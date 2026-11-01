@@ -9,8 +9,9 @@ import {
   setOffset,
   setSort,
   setUniverseSelection,
+  toggleUniverseValue,
 } from './queryDraft.ts'
-import { SCREENER_LIMIT_MAX, type ScreenerQuery } from './contracts.ts'
+import { SCREENER_LIMIT_MAX, UNIVERSE_ENUM_FIELDS, type ScreenerQuery } from './contracts.ts'
 
 test('default draft converts to a valid query with non-empty sort and default limit', () => {
   const query = draftToQuery(createDefaultQueryDraft())
@@ -162,4 +163,38 @@ test('queryToDraft drops market enum clauses the workspace cannot render today',
   const draft = queryToDraft(query)
 
   assert.deepEqual(draft.marketNumeric, {})
+})
+
+const SECTOR = UNIVERSE_ENUM_FIELDS.find((spec) => spec.field === 'sector')!
+
+test('toggling universe chips keeps option order, whatever order they were clicked in', () => {
+  let draft = createDefaultQueryDraft()
+  draft = toggleUniverseValue(draft, SECTOR, 'Healthcare')
+  draft = toggleUniverseValue(draft, SECTOR, 'Consumer Cyclical')
+  draft = toggleUniverseValue(draft, SECTOR, 'Technology')
+  assert.deepEqual(draft.universe, { sector: ['Technology', 'Consumer Cyclical', 'Healthcare'] })
+})
+
+test('toggling a selected universe chip deselects it', () => {
+  let draft = setUniverseSelection(createDefaultQueryDraft(), 'sector', ['Technology', 'Healthcare'])
+  draft = toggleUniverseValue(draft, SECTOR, 'Technology')
+  assert.deepEqual(draft.universe, { sector: ['Healthcare'] })
+})
+
+test('deselecting the last universe chip drops the field', () => {
+  let draft = setUniverseSelection(createDefaultQueryDraft(), 'sector', ['Technology'])
+  draft = toggleUniverseValue(draft, SECTOR, 'Technology')
+  assert.deepEqual(draft.universe, {})
+})
+
+test('a template preselection survives toggling another universe chip', () => {
+  const template = queryToDraft({
+    universe: [{ field: 'sector', values: ['Technology'] }],
+    market: [],
+    fundamentals: [],
+    sort: [{ field: 'market_cap', direction: 'desc' }],
+    page: { limit: 50 },
+  })
+  const draft = toggleUniverseValue(template, SECTOR, 'Healthcare')
+  assert.deepEqual(draft.universe, { sector: ['Technology', 'Healthcare'] })
 })
