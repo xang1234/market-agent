@@ -506,6 +506,9 @@ export async function extractReleaseStatements(
     );
     if ((stamped.rowCount ?? 0) === 0) return;
     applied = true;
+    // Another Item 2.02 claim of the same document, read at once, waits here
+    // until this one commits, so its lookups below see the claims stored now.
+    await tx.db.query(`select 1 from documents where document_id = $1 for no key update`, [candidate.documentId]);
     const claimIds: string[] = [];
     for (const statement of verified.values()) {
       const { rows: existing } = await tx.db.query<{ claim_id: string }>(
