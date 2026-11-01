@@ -5,6 +5,7 @@ import {
   canonicalText,
   extractReleaseStatements,
   findReleaseCandidates,
+  parseRebindReply,
   parseReleaseReply,
   releaseExhibits,
   releasePrompts,
@@ -155,6 +156,18 @@ test("the model's reply is read when well formed, with the quarter's end and wha
   ]) {
     assert.equal(parseReleaseReply(text!), null, label);
   }
+});
+
+test("a rebind reply gives each listed statement's about by its number, and other for one it does not give", () => {
+  assert.deepEqual(parseRebindReply('```json\n{"quarter_end":"2025-06-28","about":{"2":"year","1":"quarter","3":"half"}}\n```', 4), {
+    quarterEnd: "2025-06-28",
+    abouts: ["quarter", "year", "other", "other"],
+  });
+  assert.deepEqual(parseRebindReply('{"quarter_end":"June 28, 2025","about":{"1":"quarter"}}', 1), { quarterEnd: null, abouts: ["quarter"] });
+  // A list by position is not by number: read by number it would shift every
+  // statement onto its neighbour's period.
+  assert.deepEqual(parseRebindReply('{"quarter_end":"2025-06-28","about":["quarter","year"]}', 2), { quarterEnd: "2025-06-28", abouts: ["other", "other"] });
+  assert.equal(parseRebindReply("I could not find any.", 1), null);
 });
 
 test("a release reports the quarter every prompt naming one agrees on, ended before the filing and at most 92 days before it", () => {
