@@ -590,3 +590,50 @@ test("a release whose only bound explanation is superseded is reopened for its c
   );
   assert.equal(await reopenUnboundReleases(client), 1);
 });
+
+test("two Item 2.02 claims of one release, extracted at once, store each sentence once", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-concurrent");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedItem202(client, AMD_Q2);
+  const second = (await client.query<{ id: string }>(
+    `insert into claims (document_id, predicate, text_canonical, polarity, modality, reported_by_source_id,
+                         attributed_to_type, attributed_to_id, effective_time, confidence, status)
+     select document_id, predicate, text_canonical, polarity, modality, reported_by_source_id,
+            attributed_to_type, attributed_to_id, effective_time, confidence, status
+       from claims where claim_id = $1
+     returning claim_id::text as id`,
+    [seeded.claimId],
+  )).rows[0]!.id;
+  await client.query(`insert into claim_arguments (claim_id, subject_kind, subject_id, role) values ($1, 'issuer', $2, 'subject')`, [second, seeded.issuerId]);
+  const candidates = await findReleaseCandidates(client);
+  assert.equal(candidates.length, 2);
+
+  // Each extraction on its own connection waits, after its first sentence
+  // lookup, for the other's (or a second), so unserialized both look before
+  // either stores.
+  let looked = 0;
+  let bothLooked!: () => void;
+  const met = new Promise<void>((resolve) => { bothLooked = resolve; });
+  const racing = async (): Promise<QueryExecutor> => {
+    const session = await connectedClient(t, databaseUrl);
+    return {
+      query: async (text, values) => {
+        const result = await session.query(text, values);
+        if (text.includes("text_canonical = $3")) {
+          if (++looked === 2) bothLooked();
+          await Promise.race([met, new Promise((resolve) => setTimeout(resolve, 1_000))]);
+        }
+        return result as never;
+      },
+    };
+  };
+  const { llm } = fakeLlm(amdQ2Reply("2025-06-28"));
+  const sessions = [await racing(), await racing()];
+  const outcomes = await Promise.all(candidates.map((candidate, n) => extractReleaseStatements({ db: sessions[n]!, llm, secClient: fakeSec(AMD_Q2_SUBMISSION) }, candidate)));
+  assert.deepEqual(outcomes, ["extracted", "extracted"]);
+  assert.deepEqual(periodsOf(await releaseClaims(client, seeded.documentId)), [
+    ["guidance.revenue", AMD_GUIDANCE, null, null],
+    ["management.explanation.gross_margin", MI308_EXPLANATION, "fiscal_q", "2025-06-28"],
+    ["management.explanation.gross_margin", AMD_YEAR_TO_DATE, null, null],
+  ]);
+});
