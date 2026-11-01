@@ -8,6 +8,7 @@ import {
   parseReleaseReply,
   releaseExhibits,
   releasePrompts,
+  reopenUnboundReleases,
   reportedQuarterEnd,
   runReleaseExtractionDrain,
   verifyStatement,
@@ -515,4 +516,35 @@ test("a fourth-quarter release binds its year's explanation to the fiscal year a
     ["management.explanation.gross_margin", year, "fiscal_y", "2024-12-28"],
     ["management.explanation.gross_margin", quarter, "fiscal_q", "2024-12-28"],
   ]);
+});
+
+test("a rebind binds an extracted release's claims in place, with no new rows, and a second rebind selects nothing", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "release-rebind");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedItem202(client, AMD_Q2);
+  // Read once with no quarter end, as a release read before #542 was.
+  await runReleaseExtractionDrain({ db: client, llm: fakeLlm(amdQ2Reply(null)).llm, secClient: fakeSec(AMD_Q2_SUBMISSION) });
+  const before = await releaseClaims(client, seeded.documentId);
+  assert.deepEqual(before.map((claim) => claim.period_end), [null, null, null]);
+  const rows = async () => (await client.query<{ claims: number; evidence: number; arguments: number }>(
+    `select (select count(*) from claims)::int as claims, (select count(*) from claim_evidence)::int as evidence,
+            (select count(*) from claim_arguments)::int as arguments`,
+  )).rows[0];
+  const counted = await rows();
+
+  assert.equal(await reopenUnboundReleases(client), 1);
+  const result = await runReleaseExtractionDrain({ db: client, llm: fakeLlm(amdQ2Reply("2025-06-28")).llm, secClient: fakeSec(AMD_Q2_SUBMISSION) });
+  assert.equal(result.extracted, 1);
+  const after = await releaseClaims(client, seeded.documentId);
+  assert.deepEqual(after.map((claim) => claim.claim_id), before.map((claim) => claim.claim_id), "the same claims, so citations of them stay");
+  assert.deepEqual(periodsOf(after), [
+    ["guidance.revenue", AMD_GUIDANCE, null, null],
+    ["management.explanation.gross_margin", MI308_EXPLANATION, "fiscal_q", "2025-06-28"],
+    ["management.explanation.gross_margin", AMD_YEAR_TO_DATE, null, null],
+  ]);
+  assert.equal(after[1]!.bound_after_created, true, "bound when rebound, not backdated to the claim's creation");
+  assert.deepEqual(await rows(), counted);
+
+  assert.equal(await reopenUnboundReleases(client), 0);
+  assert.deepEqual(await findReleaseCandidates(client), []);
 });
