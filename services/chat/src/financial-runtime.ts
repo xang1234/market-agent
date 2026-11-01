@@ -47,14 +47,13 @@ import { allResolved, overviewOmissions, overviewPeers, planCompanyOverview, pla
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
 import { companyKey, extractSubjectMentions } from "./subject-extraction.ts";
 import type { ChatResolvedSubjectPreResolution, ChatSubjectPreResolution } from "./subjects.ts";
-import { defaultsNote, periodNote, planPeriod, planScopeFigures, routeTurn, type NamedGap, type PlanChoice, type ReadPeriod } from "./scope-figures.ts";
+import { defaultsNote, INCOME_ITEM_FIGURE, periodNote, planPeriod, planScopeFigures, routeTurn, SCOPE_METRICS, type NamedGap, type PlanChoice, type ReadPeriod } from "./scope-figures.ts";
 import {
   BALANCE_SHEET_ITEMS,
   companyWordsIn,
   PROPOSABLE_METRICS,
   proposedMetric,
   readingAsks,
-  type IncomeItem,
   type RequestedMetric,
   type ResearchScope,
   type ScopeFacet,
@@ -784,36 +783,6 @@ function answeredCompanies(issuerIds: ReadonlyArray<string>, scope: ResearchScop
   });
 }
 
-// The chat catalog key (research-scope.ts) of each figure the engine names,
-// or null for a figure no chat reader serves: a follow-up reads the others.
-// Every engine metric is listed (#381), so a new one cannot silently drop out.
-export const SCOPE_METRICS: Readonly<Record<string, string | null>> = {
-  revenue: "income_statement",
-  gross_profit: "income_statement",
-  operating_income: "income_statement",
-  net_income: "income_statement",
-  gross_margin: "income_statement",
-  operating_margin: "income_statement",
-  net_margin: "income_statement",
-  free_cash_flow: "free_cash_flow",
-  operating_cash_flow: "operating_cash_flow",
-  capex: "capex",
-  eps_basic: "eps_basic",
-  eps_diluted: "eps_diluted",
-  cash_and_equivalents: "cash_and_equivalents",
-  total_assets: "total_assets",
-  total_liabilities: "total_liabilities",
-  total_equity: "total_equity",
-  // No chat reader serves a share count.
-  weighted_average_basic_shares: null,
-  weighted_average_diluted_shares: null,
-  shares_outstanding: null,
-  // A share price is shown only beside the valuation it prices.
-  share_price: null,
-  market_cap: "market_cap",
-  pe_ratio: "pe_ratio",
-};
-
 const figureKey = (node: OperationNode) => node.operation === "reported_metric" ? node.metric_key : node.operation;
 
 // The figures a node shows: a change, sum, ratio, threshold or ranking is of
@@ -846,15 +815,6 @@ const NEVER_PLANNED: Partial<Readonly<Record<ScopeFacet, string>>> = {
   explains: "the cause of these figures",
 };
 const CATALOG = new Map(PROPOSABLE_METRICS.map((metric) => [metric.metric_key, metric]));
-const INCOME_ITEM_FIGURE: Readonly<Record<IncomeItem, string | null>> = {
-  revenue: "revenue",
-  gross_margin: "gross_margin",
-  operating_expenses: null,
-  operating_income: "operating_income",
-  operating_margin: "operating_margin",
-  net_income: "net_income",
-  net_margin: "net_margin",
-};
 
 /**
  * What a question asks for, as the model read it, or keeps from its scope,
