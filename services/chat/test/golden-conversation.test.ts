@@ -472,6 +472,22 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.deepEqual(refsOf(answer.blocks[1]!), [["claim", claimId, text]]);
   });
 
+  await t.test("the same plan with its current quarter not on file quotes no cause: the one AMD filed for the quarter before explains no figure shown for the gap (#542)", async (st) => {
+    // Right after a release, before its 10-Q: the release's cause is filed,
+    // the quarter's figures are not.
+    await seedBoundExplanation(st, client, { predicate: "management.explanation.operating_income", text: "Operating income fell on lower client segment sales.", period: { kind: "fiscal_q", end: "2026-06-27" }, published: "2026-08-04T00:00:00Z" });
+    const answer = await askAmd("Why did AMD's operating margin turn negative in Q3 2026?");
+    const { results, notes } = engineAnswer(answer);
+    assert.deepEqual([...new Set(results.map(([, period, disposition]) => `${period}: ${disposition}`))], [
+      "Q3 FY2026: blocked_dependency",
+      "Q2 FY2026 (ended 2026-06-27): verified",
+      "Q3 FY2026 vs Q2 FY2026 (ended 2026-06-27): blocked_dependency",
+      "Q3 FY2026: missing",
+    ]);
+    assert.deepEqual(notes, ["Not covered by this answer: the cause of these figures."]);
+    causeQuotedOrNamed(answer);
+  });
+
   await t.test("a revenue follow-up to the margin's cause names its cause as not covered: AMD's release explains its gross margin, not its revenue (#542)", async () => {
     const amdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD margin, then revenue" });
     completedTurn(await runTurn(base, amdThread.thread_id, "Why did AMD's operating margin turn negative in Q2 2025?"));

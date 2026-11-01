@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createRuntimeAuthority, type FinancialPlanV1, type LocalId, type PeriodSelector } from "../../financial-core/src/index.ts";
+import { createRuntimeAuthority, dependencyClosure, type FinancialPlanV1, type LocalId, type PeriodSelector } from "../../financial-core/src/index.ts";
 import type { ClaimPeriod } from "../../evidence/src/claim-repo.ts";
 import { buildDeterministicPlan, type PlanningResult } from "../../financial-engine/src/planner.ts";
 import { asksCause, causeFamilies, explainedFigures, namedFigures } from "../src/filed-cause.ts";
@@ -71,11 +71,14 @@ const reading = (metrics: string[], income_items: string[]) =>
   parseProposal(JSON.stringify({ metrics, asks: ["explains"], turns_off: { facets: [], metrics: [] }, income_items, period: { kind: "none" }, companies: { kind: "as_named", names: [] } }), "")!;
 const EVERY_FIGURE = () => true;
 
-function explained(planned: FinancialPlanV1, options: { latest?: ClaimPeriod; named?: (figure: string) => boolean } = {}) {
+// A gap's reported node binds no period, and no output that reads it is verified.
+function explained(planned: FinancialPlanV1, options: { latest?: ClaimPeriod; named?: (figure: string) => boolean; gaps?: ReadonlyArray<LocalId> } = {}) {
+  const gaps = new Set(options.gaps ?? []);
+  const readsGap = (nodeId: LocalId) => [...dependencyClosure(planned, [nodeId])].some((id) => gaps.has(id));
   return explainedFigures({
     plan: planned,
-    verified: new Set(planned.outputs.map((output) => output.output_id)),
-    periods: bound(planned, options.latest),
+    verified: new Set(planned.outputs.flatMap((output) => readsGap(output.node_id) ? [] : [output.output_id])),
+    periods: new Map([...bound(planned, options.latest)].filter(([id]) => !gaps.has(id))),
     named: options.named ?? EVERY_FIGURE,
   });
 }
@@ -103,6 +106,16 @@ test("a filed cause explains the figures each company shows at its one latest pe
     ["Q4 beside its fiscal year, which end the same day", explained(plan([margin("q4", at(2025, "Q4")), margin("fy", at(2025, "FY"))])), [none()]],
     ["a trailing sum", explained(plan([trailing])), [none()]],
     ["a Q1 margin beside Q2 revenue", explained(plan([margin("q1", at(2025, "Q1")), revenue("q2", at(2025, "Q2"))])), [none()]],
+    [
+      "Q2 a gap beside the Q1 it is compared with: Q1's cause explains no figure shown for Q2",
+      explained(plan([revenue("q2", at(2025, "Q2")), revenue("q1", at(2025, "Q1")), change]), { gaps: ["rev_q2"] }),
+      [none()],
+    ],
+    [
+      "a gap of a figure no cause explains leaves the others explained",
+      explained(plan([revenue("q2", at(2025, "Q2")), [reported("assets", "total_assets", at(2025, "Q2"))]]), { gaps: ["assets"] }),
+      [figures(["revenue"])],
+    ],
     [
       "a latest plan bound to Q2",
       explained(plan([margin("latest", { kind: "latest", period_type: "quarterly", offset: 0 })]), { latest: Q2_2025 }),
