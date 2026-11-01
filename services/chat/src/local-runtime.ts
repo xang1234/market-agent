@@ -35,7 +35,7 @@ import { readingAsks, readsEngine, resolveResearchScope, type ResearchScope, typ
 import { proposeScope } from "./scope-proposal.ts";
 import { frozenDataMode, hydrateYtdBars, marketHydrationOrigin, turnNow } from "./ytd-hydration.ts";
 import { companyListings, listingTimeZones, loadPerfComparisonBlocks, priceListingsForTurn, turnCompanies } from "./perf-block.ts";
-import { loadPriorScope, loadPriorSubjects as loadThreadPriorSubjects, loadRecentConversation } from "./thread-context.ts";
+import { loadPriorCauseClaims, loadPriorScope, loadPriorSubjects as loadThreadPriorSubjects, loadRecentConversation } from "./thread-context.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import { createLlmThreadTitleModel } from "./llm-runtime.ts";
 import { structuredRefsFromHandoff } from "./local-runtime-structured.ts";
@@ -110,6 +110,8 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
         // The route's claims first, none published after the turn's cutoff (#207).
         as_of: asOf,
         selection: claimSelection(scope, asOf),
+        // Ahead of them, an evidence follow-up shows the cause its previous answer quoted (#542).
+        ...(scope.route === "evidence_followup" ? { first_claim_ids: await loadPriorCauseClaims(pool(), { threadId: context.threadId }) } : {}),
       });
       return {
         kind: "local_evidence_tool_result",

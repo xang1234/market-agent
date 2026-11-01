@@ -10,6 +10,9 @@ export type LocalRuntimeEvidenceInput = {
   subject_refs: ReadonlyArray<SnapshotSubjectRef>;
   user_id?: string | null;
   exclude_claim_ids?: ReadonlyArray<string>;
+  // Claims that come first, in this order, wherever the selection would rank
+  // them; one no longer citable is left out as any other is.
+  first_claim_ids?: ReadonlyArray<string>;
   source_categories?: ReadonlyArray<string>;
   limit?: number;
   // Optional date boundary only; current document visibility always applies.
@@ -176,6 +179,7 @@ export async function loadLocalRuntimeEvidence(
               c.effective_time,
               c.created_at as claim_created_at,
               sr.subject_id::text as subject_id,
+              array_position($14::uuid[], c.claim_id) as first_rank,
               coalesce(c.predicate like any($8::text[]), false)
                 and case
                   -- The releases about a fiscal year come out from the end of
@@ -242,7 +246,7 @@ export async function loadLocalRuntimeEvidence(
          from matching_claims
         order by case when $10::boolean then subject_id || '|' || predicate || '|' || lower(text_canonical)
                                       || '|' || date_trunc('quarter', coalesce(effective_time, published_at, claim_created_at))::text else claim_id end,
-                 relevant desc, coalesce(published_at, claim_created_at) asc, claim_id
+                 first_rank asc nulls last, relevant desc, coalesce(published_at, claim_created_at) asc, claim_id
      )
      select claim_id,
             document_id,
@@ -265,7 +269,8 @@ export async function loadLocalRuntimeEvidence(
       -- companies and predicates take turns (each one's newest first), so a
       -- comparison's slots are not all one company's, nor a tier's all one
       -- metric's.
-      order by relevant desc,
+      order by first_rank asc nulls last,
+               relevant desc,
                case when relevant then tier end asc nulls last,
                case when $10::boolean
                  then row_number() over (
@@ -289,6 +294,7 @@ export async function loadLocalRuntimeEvidence(
       input.selection?.effective_until ?? null,
       selected?.tiers ?? null,
       input.selection?.fiscal_year ?? null,
+      unique(input.first_claim_ids ?? []),
     ],
   );
   const evidence = evidenceFromClaimRows(subjectRefs, rows.slice(0, limit), input.selection !== undefined);
