@@ -278,7 +278,7 @@ export function verifyFinancialUnit(records: FinancialUnitRecords, unitId: Local
   if (failures.length > 0) return { ok: false, failures };
 
   // The presentation is generated from the recomputed results, so it can only show what was verified.
-  const content = presentVerifiedUnit(plan, records, unitId, expected.results.map((result) => ({ ...result, result_id: stored.get(result.output_id)!.result_id })));
+  const content = presentVerifiedUnit(plan, records, unitId, expected.results.map((result) => ({ ...result, result_id: stored.get(result.output_id)!.result_id })), bindings.value);
   if (!content) return failed("financial_presentation_unavailable", { run_id: run.run_id, unit_id: unitId, field: "subject_name" });
   const hash = presentationHash(content);
 
@@ -329,7 +329,7 @@ export function verifyFinancialUnit(records: FinancialUnitRecords, unitId: Local
 }
 
 /** The unit's presentation with the subjects' current display names; null when a subject has no name. */
-function presentVerifiedUnit(plan: FinancialPlanV1, records: FinancialUnitRecords, unitId: LocalId, results: ReadonlyArray<CommittedResult>): FinancialAnswerContent | null {
+function presentVerifiedUnit(plan: FinancialPlanV1, records: FinancialUnitRecords, unitId: LocalId, results: ReadonlyArray<CommittedResult>, bindings: ReadonlyMap<LocalId, SlotBinding>): FinancialAnswerContent | null {
   const names = new Map(records.subject_names.map((subject) => [`${subject.kind}:${subject.id.toLowerCase()}`, subject.name]));
   const subjectNames: Record<LocalId, string> = {};
   for (const member of plan.subjects.members) {
@@ -337,7 +337,10 @@ function presentVerifiedUnit(plan: FinancialPlanV1, records: FinancialUnitRecord
     if (name === undefined) return null;
     subjectNames[member.slot_id] = name;
   }
-  return presentFinancialUnit({ plan, run_id: records.run.run_id, unit_id: unitId, results, subject_names: subjectNames });
+  const periods = new Map([...bindings].flatMap(([slot, binding]) => binding.status === "bound" && binding.input.schema_version !== BOUND_PRICE_INPUT_SCHEMA_VERSION
+    ? [[slot, { fiscal_year: binding.input.period.fiscal_year, fiscal_period: binding.input.period.fiscal_period, end: binding.input.period.end }] as const]
+    : []));
+  return presentFinancialUnit({ plan, run_id: records.run.run_id, unit_id: unitId, results, subject_names: subjectNames, periods });
 }
 
 type BindingsOutcome =

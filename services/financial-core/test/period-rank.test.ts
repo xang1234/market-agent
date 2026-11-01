@@ -112,7 +112,7 @@ test("the presentation names the high and low periods, how many it ranked, and e
     plan,
     run_id: "44444444-4444-4444-8444-444444444444",
     unit_id: "section",
-    subject_names: { a: "NVIDIA" },
+    subject_names: { a: "NVIDIA" }, periods: new Map(),
     results: plan.outputs.map((output, index) => ({
       result_id: `55555555-5555-4555-8555-00000000000${index}`,
       output_id: output.output_id,
@@ -157,7 +157,7 @@ test("a window's period is its own label, never a trailing sum's over the same q
     plan: validated.value,
     run_id: "44444444-4444-4444-8444-444444444444",
     unit_id: "section",
-    subject_names: { a: "NVIDIA" },
+    subject_names: { a: "NVIDIA" }, periods: new Map(),
     results: [
       { result_id: "55555555-5555-4555-8555-000000000000", output_id: "out_ttm", node_id: "ttm", disposition: "computed", payload: { kind: "value", value: "90", unit: { kind: "currency", currency: "USD" }, exact: true, rounding: null }, result_hash: "f".repeat(64) },
       { result_id: "55555555-5555-4555-8555-000000000001", output_id: "out_window", node_id: "window", disposition: "computed", payload: ranking(periodRank(rank(["q4", "q3", "q2", "q1"]), [...all].reverse())), result_hash: "f".repeat(64) },

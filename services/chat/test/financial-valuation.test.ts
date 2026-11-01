@@ -112,7 +112,7 @@ test("certified market cap and P/E in chat", { timeout: 300_000 }, async (t) => 
     const answer = await ask("What is NVDA's market cap?", "market_cap");
     assert.deepEqual(answer.rows, [
       ["Share price", "latest known at the cutoff", "verified", "USD 120 per share"],
-      ["Shares outstanding", "end of latest fiscal quarter", "verified", "24640000000 shares"],
+      ["Shares outstanding", "Q1 FY2025 (as of 2024-05-17)", "verified", "24640000000 shares"],
       ["Market capitalization (share price × shares outstanding)", "latest known at the cutoff", "verified", "USD 2956800000000"],
     ]);
     // Friday's 1200.00 close and the 10-Q's 2,464,000,000 shares at 2024-05-17, each restated after Monday's 10-for-1 split.
@@ -123,7 +123,7 @@ test("certified market cap and P/E in chat", { timeout: 300_000 }, async (t) => 
     const answer = await ask("What's NVDA's P/E?", "pe_ratio");
     assert.deepEqual(answer.rows, [
       ["Share price", "latest known at the cutoff", "verified", "USD 120 per share"],
-      ["EPS (diluted)", "latest fiscal year", "verified", "USD 1.193 per share"],
+      ["EPS (diluted)", "FY2024 (ended 2024-01-28)", "verified", "USD 1.193 per share"],
       ["P/E ratio (share price / latest fiscal year diluted EPS)", "latest known at the cutoff", "verified", "100.58675607711651299245599329421626152556580050293x"],
     ]);
     assert.deepEqual(await answer.inputs(), [["eps", "11.93", "2024-01-28", "FY FY2024"], ["px", "1200", "2024-06-07T20:00:00.000Z"]]);

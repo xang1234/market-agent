@@ -100,7 +100,7 @@ test("P/E is the restated price over the restated diluted EPS, 120 / 1.193, roun
 test("the presentation reads market cap in currency and P/E as a multiple, both dated by the price", () => {
   const plan = valuationPlan();
   const results = Object.values(publish()).map((result) => ({ ...result, result_id: `r_${result.output_id}` }));
-  const content = presentFinancialUnit({ plan, run_id: "run", unit_id: "valuation", results, subject_names: { a: "NVIDIA Corporation" } });
+  const content = presentFinancialUnit({ plan, run_id: "run", unit_id: "valuation", results, subject_names: { a: "NVIDIA Corporation" }, periods: new Map() });
   const shown = Object.fromEntries(content.results.map((result) => [result.output_id, [content.labels[result.measure_label_id]!.text, content.labels[result.period_label_id]!.text, result.presented.text]]));
   assert.deepEqual([shown.out_cap, shown.out_pe], [
     ["Market capitalization (share price × shares outstanding)", "latest known at the cutoff", "USD 2,956,800,000,000.00"],

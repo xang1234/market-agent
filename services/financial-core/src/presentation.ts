@@ -13,6 +13,7 @@
 
 import { hashCanonical } from "./canonical.ts";
 import type {
+  BoundFactInputV1,
   ChangeNode,
   Comparison,
   CoverageState,
@@ -98,6 +99,9 @@ export type FinancialAnswerContent = Readonly<{
   presentations: ReadonlyArray<Presentation>;
 }>;
 
+/** The fiscal period a reported value was bound to; a gap or a share price has none. */
+export type BoundPeriod = Readonly<Pick<BoundFactInputV1["period"], "fiscal_year" | "fiscal_period" | "end">>;
+
 /** A committed result as persisted; drafts present with their public disposition. */
 export type CommittedResult = Readonly<{
   result_id: string;
@@ -115,9 +119,12 @@ export function presentFinancialUnit(input: {
   results: ReadonlyArray<CommittedResult>;
   /** Server-resolved display names by subject slot. */
   subject_names: Readonly<Record<LocalId, string>>;
+  /** Each bound fact's period, by its reported node. */
+  periods: ReadonlyMap<LocalId, BoundPeriod>;
 }): FinancialAnswerContent {
   const { plan } = input;
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
+  const readsOf = periodReader(plan, nodes, input.periods);
   const byOutput = new Map(input.results.map((result) => [result.output_id, result]));
   const labels = new LabelTable();
   for (const member of plan.subjects.members) {
@@ -138,8 +145,8 @@ export function presentFinancialUnit(input: {
       disposition: result.disposition === "computed" ? "verified" : result.disposition,
       subject_label_id: slot === null ? null : subjectLabelId(slot),
       measure_label_id: labels.intern("measure", measureKey(plan, node), measureText(plan, node)),
-      period_label_id: labels.intern("period", periodKey(plan, node), periodText(plan, node, names)),
-      presented: presentPayload(plan, node, result.payload, labels),
+      period_label_id: labels.intern("period", periodKey(plan, node, readsOf), periodText(plan, node, names, readsOf)),
+      presented: presentPayload(plan, node, result.payload, labels, readsOf),
       result_hash: result.result_hash,
     };
   });
@@ -296,7 +303,7 @@ function columnKeyByResult(results: ReadonlyArray<PresentedResult>, lines: Reado
 // ---------------------------------------------------------------------------
 // Payload text.
 
-function presentPayload(plan: FinancialPlanV1, node: OperationNode, payload: unknown, table: LabelTable): PresentedPayload {
+function presentPayload(plan: FinancialPlanV1, node: OperationNode, payload: unknown, table: LabelTable, readsOf: ReadsOf): PresentedPayload {
   const record = payload as { kind: string } & Record<string, unknown>;
   const labels = table.entries;
   switch (record.kind) {
@@ -316,11 +323,11 @@ function presentPayload(plan: FinancialPlanV1, node: OperationNode, payload: unk
       return {
         kind: "predicate",
         outcome,
-        text: `${who}${measureText(plan, subjectNode)}, ${periodText(plan, subjectNode, subjectNames(labels))}, ${COMPARISON_TEXT[record.comparison as Comparison]} ${bound}: ${outcome ? "yes" : "no"}`,
+        text: `${who}${measureText(plan, subjectNode)}, ${periodText(plan, subjectNode, subjectNames(labels), readsOf)}, ${COMPARISON_TEXT[record.comparison as Comparison]} ${bound}: ${outcome ? "yes" : "no"}`,
       };
     }
     case "ranking": {
-      if (node.operation === "period_rank") return periodRanking(plan, node, record as unknown as RankingPayload, table);
+      if (node.operation === "period_rank") return periodRanking(plan, node, record as unknown as RankingPayload, table, readsOf);
       const slotOf = (memberNode: LocalId) => subjectSlot(plan, plan.operations.find((entry) => entry.node_id === memberNode)!);
       const order = (record.ranks as Array<{ node_id: LocalId; rank: number }>).map((entry) => ({ subject_label_id: subjectLabelId(slotOf(entry.node_id)!), rank: entry.rank }));
       const extreme = record.extreme as LocalId[] | null;
@@ -335,15 +342,16 @@ function presentPayload(plan: FinancialPlanV1, node: OperationNode, payload: unk
     }
     default: {
       const gap = record as unknown as { reason_code: ReasonCode; explanation: string };
-      return { kind: "gap", text: gap.explanation, reason_code: gap.reason_code };
+      const apart = gap.reason_code === "incompatible_period" ? operandPeriods(plan, node, readsOf, subjectNames(labels)) : "";
+      return { kind: "gap", text: `${gap.explanation}${apart}`, reason_code: gap.reason_code };
     }
   }
 }
 
-function periodRanking(plan: FinancialPlanV1, node: PeriodRankNode, ranking: RankingPayload, labels: LabelTable): PresentedPayload {
+function periodRanking(plan: FinancialPlanV1, node: PeriodRankNode, ranking: RankingPayload, labels: LabelTable, readsOf: ReadsOf): PresentedPayload {
   const names = subjectNames(labels.entries);
   const nodeOf = (id: LocalId) => plan.operations.find((entry) => entry.node_id === id)!;
-  const periodOf = (id: LocalId) => labels.intern("period", periodKey(plan, nodeOf(id)), periodText(plan, nodeOf(id), names));
+  const periodOf = (id: LocalId) => labels.intern("period", periodKey(plan, nodeOf(id), readsOf), periodText(plan, nodeOf(id), names, readsOf));
   const leaders = (ranking.extreme ?? []).map(periodOf);
   const { requested, evaluated } = ranking.population;
   const [step, ...others] = new Set(node.members.map((id) => periodAnchor(periodSelectors(plan, nodeOf(id))[0]!).step));
@@ -558,29 +566,73 @@ function periodSelectors(plan: FinancialPlanV1, node: OperationNode): PeriodSele
   return [...distinct.values()];
 }
 
-// A balance is a point in time: "end of FY2023", never the year's amount.
-function periodText(plan: FinancialPlanV1, node: OperationNode, names: (slot: LocalId) => string): string {
-  if (node.operation === "spread") return spreadSides(plan, node, (side) => `${names(side.slot)} ${periodText(plan, side.node, names)}`).join(" minus ");
-  if (node.operation === "period_rank") return windowSpan(plan, node, names);
+type PeriodRead = Readonly<{ selector: PeriodSelector; bound: BoundPeriod | null }>;
+/** The distinct periods a node reads, in `periodSelectors` order, each with the one its values there were bound to. */
+type ReadsOf = (node: OperationNode) => ReadonlyArray<PeriodRead>;
+
+// A read names the period its values were bound to, by fiscal name and end date, whichever selector asked for it:
+// "latest fiscal year" and "FY2025" both name a period that two calendars end months apart. A read has none for
+// a gap, a share price, or values bound to different periods. Each node's reads are found once.
+function periodReader(plan: FinancialPlanV1, nodes: ReadonlyMap<LocalId, OperationNode>, periods: ReadonlyMap<LocalId, BoundPeriod>): ReadsOf {
+  const reads = new Map<LocalId, ReadonlyArray<PeriodRead>>();
+  const readsOf = (node: OperationNode): ReadonlyArray<PeriodRead> => {
+    const leaves = [...dependencyClosure(plan, [node.node_id])].flatMap((id) => {
+      const leaf = nodes.get(id)!;
+      return leaf.operation === "reported_metric" ? [{ selector: JSON.stringify(leaf.period), bound: periods.get(id) ?? null }] : [];
+    });
+    return periodSelectors(plan, node).map((selector) => {
+      const [first, ...others] = leaves.filter((leaf) => leaf.selector === JSON.stringify(selector)).map((leaf) => leaf.bound);
+      const agreed = first && others.every((other) => other !== null && other.end === first.end && fiscalName(other) === fiscalName(first));
+      return { selector, bound: agreed ? first : null };
+    });
+  };
+  return (node) => reads.get(node.node_id) ?? reads.set(node.node_id, readsOf(node)).get(node.node_id)!;
+}
+
+// Operands that are different measures or companies, each reading one period, bound to different ones, are each
+// named with theirs. One company's measure at several periods keeps the engine's words, which already say which
+// side of a change is current and why a trailing sum's quarters do not sum. A trailing sum operand reads four
+// quarters, and naming one as its period would mislead.
+function operandPeriods(plan: FinancialPlanV1, node: OperationNode, readsOf: ReadsOf, names: (slot: LocalId) => string): string {
+  const operands = operationDependencies(node).map((id) => plan.operations.find((entry) => entry.node_id === id)!);
+  if (new Set(operands.map((operand) => `${subjectSlot(plan, operand)} ${measureKey(plan, operand)}`)).size === 1) return "";
+  if (operands.some((operand) => readsOf(operand).length !== 1)) return "";
+  const bound = operands.flatMap((operand) => {
+    const period = readsOf(operand)[0]!.bound;
+    return period ? [{ operand, period }] : [];
+  });
+  if (new Set(bound.map(({ period }) => `${fiscalName(period)} ${period.end}`)).size < 2) return "";
+  const across = subjectSlot(plan, node) === null;
+  const owner = (operand: OperationNode, index: number) => {
+    const slot = across ? subjectSlot(plan, operand) : null;
+    if (slot !== null) return names(slot);
+    return index === 0 ? measureText(plan, operand) : lowercaseUnlessAcronym(measureText(plan, operand));
+  };
+  const possessive = (name: string) => (name.endsWith("s") ? `${name}'` : `${name}'s`);
+  const named = bound.map(({ operand, period }, index) =>
+    `${possessive(owner(operand, index))} ${fiscalName(period)} ${measuresInstant(plan, operand) ? "figure is as of" : "ended"} ${period.end}`);
+  return ` ${new Intl.ListFormat("en").format(named)}.`;
+}
+
+// A balance is a point in time: "FY2023 (as of 2023-12-30)", or "end of FY2023" with no bound period, never the year's amount.
+function periodText(plan: FinancialPlanV1, node: OperationNode, names: (slot: LocalId) => string, readsOf: ReadsOf): string {
+  if (node.operation === "spread") return spreadSides(plan, node, (side) => `${names(side.slot)} ${periodText(plan, side.node, names, readsOf)}`).join(" minus ");
+  if (node.operation === "period_rank") return windowSpan(plan, node, names, readsOf);
   const instant = measuresInstant(plan, node);
-  return periodSelectors(plan, node).map((selector) => (instant ? `end of ${selectorText(selector)}` : selectorText(selector))).join(" vs ");
+  return readsOf(node).map((read) => readText(read, instant)).join(" vs ");
 }
 
-function periodKey(plan: FinancialPlanV1, node: OperationNode): string {
-  if (node.operation === "spread") return spreadPeriodKey(plan, node);
-  if (node.operation === "period_rank") return JSON.stringify(["window", periodSelectors(plan, node).map((selector) => JSON.stringify(selector)).sort()]);
-  return JSON.stringify([periodSelectors(plan, node), measuresInstant(plan, node)]);
+function periodKey(plan: FinancialPlanV1, node: OperationNode, readsOf: ReadsOf): string {
+  if (node.operation === "spread") return JSON.stringify(spreadSides(plan, node, (side) => [side.slot, periodKey(plan, side.node, readsOf)]));
+  if (node.operation === "period_rank") return JSON.stringify(["window", readsOf(node).map((read) => JSON.stringify(read)).sort()]);
+  return JSON.stringify([readsOf(node), measuresInstant(plan, node)]);
 }
 
-function spreadPeriodKey(plan: FinancialPlanV1, node: SpreadNode): string {
-  return JSON.stringify(spreadSides(plan, node, (side) => [side.slot, periodKey(plan, side.node)]));
-}
-
-function windowSpan(plan: FinancialPlanV1, node: PeriodRankNode, names: (slot: LocalId) => string): string {
+function windowSpan(plan: FinancialPlanV1, node: PeriodRankNode, names: (slot: LocalId) => string, readsOf: ReadsOf): string {
   const members = node.members.map((id) => plan.operations.find((entry) => entry.node_id === id)!);
   const recency = (member: OperationNode) => periodAnchor(periodSelectors(plan, member)[0]!).recency;
   const sorted = members.sort((left, right) => recency(left) - recency(right));
-  return `${periodText(plan, sorted[0]!, names)} to ${periodText(plan, sorted.at(-1)!, names)}`;
+  return `${periodText(plan, sorted[0]!, names, readsOf)} to ${periodText(plan, sorted.at(-1)!, names, readsOf)}`;
 }
 
 function spreadSides<T>(plan: FinancialPlanV1, node: SpreadNode, side: (entry: { slot: LocalId; node: OperationNode }) => T): T[] {
@@ -604,10 +656,18 @@ function measuresInstant(plan: FinancialPlanV1, node: OperationNode): boolean {
   return dependencies.length > 0 && dependencies.every((dependency) => measuresInstant(plan, dependency));
 }
 
+// An instant's date is the day its value stands at, which for a 10-Q cover's share count falls after the quarter ends.
+function readText({ selector, bound }: PeriodRead, instant: boolean): string {
+  if (bound) return `${fiscalName(bound)} (${instant ? "as of" : "ended"} ${bound.end})`;
+  return instant ? `end of ${selectorText(selector)}` : selectorText(selector);
+}
+
+function fiscalName(period: Readonly<{ fiscal_year: number; fiscal_period: string }>): string {
+  return period.fiscal_period === "FY" ? `FY${period.fiscal_year}` : `${period.fiscal_period} FY${period.fiscal_year}`;
+}
+
 function selectorText(selector: PeriodSelector): string {
-  if (selector.kind === "fiscal_period") {
-    return selector.fiscal_period === "FY" ? `FY${selector.fiscal_year}` : `${selector.fiscal_period} FY${selector.fiscal_year}`;
-  }
+  if (selector.kind === "fiscal_period") return fiscalName(selector);
   if (selector.kind === "at_cutoff") return "latest known at the cutoff";
   const unit = selector.period_type === "annual" ? "fiscal year" : "fiscal quarter";
   return selector.offset === 0 ? `latest ${unit}` : `${unit} ${selector.offset} before latest`;

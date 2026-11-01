@@ -217,6 +217,7 @@ test("verification generates the certified block from the records it checked", (
   assert.deepEqual([revenue!.disposition, margin!.disposition], ["verified", "verified"], "only recomputed results are presented, as verified");
   assert.equal(block.financial.labels[margin!.subject_label_id!]!.text, "Fixture Industries Inc.");
   assert.equal(block.financial.labels[margin!.measure_label_id]!.text, "Gross margin (gross profit / revenue)");
+  assert.deepEqual([revenue, margin].map((entry) => block.financial.labels[entry!.period_label_id]!.text), ["FY2023 (ended 2023-12-31)", "FY2023 (ended 2023-12-31)"], "each period is the one its bound facts report");
 });
 
 test("the block uses the subject's current name, and a subject without one cannot be presented", () => {
