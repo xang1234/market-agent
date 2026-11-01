@@ -772,10 +772,19 @@ test("a rebind whose reply names no quarter end marks the release read, so a sec
   const second = rebindLlm("2025-06-28", () => "quarter");
   assert.deepEqual(await runRebindDrain({ db: client, llm: second.llm, secClient: fakeSec(AMD_Q2_SUBMISSION) }), { bound: 0, unbound: 0, unparseable: 0, noop: 0, failed: 0, unlocated: 0 });
   assert.equal(second.listed.length, 0, "no model call");
+  // The mark is period_read_at: enriched_at keeps meaning "a batch step
+  // processed this Item 2.02 claim", and stays unset on explanations.
+  assert.deepEqual(await explanationMarks(client), [{ enriched: false, read: true }, { enriched: false, read: true }]);
 
   assert.equal(await clearRebindMarks(client), 2);
+  assert.deepEqual(await explanationMarks(client), [{ enriched: false, read: false }, { enriched: false, read: false }]);
   assert.deepEqual((await findRebindCandidates(client)).map((candidate) => candidate.documentId), [seeded.documentId]);
 });
+
+const explanationMarks = async (client: { query: QueryExecutor["query"] }) => (await client.query<{ enriched: boolean; read: boolean }>(
+  `select enriched_at is not null as enriched, period_read_at is not null as read
+     from claims where predicate like 'management.explanation.%' order by text_canonical`,
+)).rows;
 
 test("a rebind reply of the wrong shape leaves the release unread, and the drain incomplete", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
   const { databaseUrl } = await bootstrapDatabase(t, "release-rebind-unparseable");
