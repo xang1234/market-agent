@@ -22,15 +22,25 @@ function row(over: Partial<HomeQuoteRow> & { ticker: string }): HomeQuoteRow {
 
 test('moversBars ranks by absolute move and scales bars to the biggest mover', () => {
   const bars = moversBars([
-    row({ ticker: 'A', change_pct: 0.01, change_abs: 1 }),
-    row({ ticker: 'B', change_pct: -0.04, change_abs: -4 }),
-    row({ ticker: 'C', change_pct: 0.02, change_abs: 2 }),
+    row({ ticker: 'A', change_pct: 0.02, change_abs: 2 }),
+    row({ ticker: 'B', change_pct: -0.08, change_abs: -8 }),
+    row({ ticker: 'C', change_pct: 0.04, change_abs: 4 }),
   ])
   assert.deepEqual(bars.map((b) => b.row.ticker), ['B', 'C', 'A'])
-  assert.equal(bars[0].fraction, 1) // |−0.04| is the max
-  assert.equal(bars[1].fraction, 0.5) // 0.02 / 0.04
-  assert.equal(bars[2].fraction, 0.25) // 0.01 / 0.04
+  assert.equal(bars[0].fraction, 1) // |−0.08| is the max
+  assert.equal(bars[1].fraction, 0.5) // 0.04 / 0.08
+  assert.equal(bars[2].fraction, 0.25) // 0.02 / 0.08
   assert.deepEqual(bars.map((b) => b.direction), ['down', 'up', 'up'])
+})
+
+test('moversBars draws small moves short when nothing moved 5% or more', () => {
+  const bars = moversBars([
+    row({ ticker: 'SPY', change_pct: -0.0155, change_abs: -9 }),
+    row({ ticker: 'QQQ', change_pct: 0.0125, change_abs: 6 }),
+  ])
+  assert.deepEqual(bars.map((b) => b.row.ticker), ['SPY', 'QQQ'])
+  assert.equal(bars[0].fraction, 0.31) // 0.0155 / 0.05
+  assert.equal(bars[1].fraction, 0.25) // 0.0125 / 0.05
 })
 
 test('moversBars slices to topN after ranking', () => {

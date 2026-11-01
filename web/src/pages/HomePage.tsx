@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { webDevFlags } from '../devFlags'
-import { PANEL_CLASS } from '../symbol/surfaceStyles.ts'
+import { PAGE_CLASS, PAGE_PANEL_CLASS, PANEL_TITLE_CLASS } from '../ui/pageStyles.ts'
 import { homeCardPath } from '../home/deepLinks.ts'
 import { authenticatedFetch } from '../http/authFetch.ts'
 import {
@@ -28,8 +28,11 @@ import type { FindingSeverity } from '../blocks/types.ts'
 import { severityFillClass } from '../blocks/severityTone.ts'
 import { StackedBar, StackedBarLegend, type StackedSegment } from '../symbol/StackedBar.tsx'
 import { useAuth } from '../shell/useAuth.ts'
+import { EmptyState } from '../ui/EmptyState.tsx'
 import { FailureNotice } from '../ui/FailureNotice.tsx'
+import { PageHeader } from '../ui/PageHeader.tsx'
 import { Skeleton } from '../ui/Skeleton.tsx'
+import { focusTopbarSearch } from '../shell/useSearchHotkey.ts'
 import { useRightRail } from '../shell/useRightRail'
 
 type HomeRunActivityStage = 'reading' | 'investigating' | 'found' | 'dismissed'
@@ -100,13 +103,11 @@ export function HomePage() {
   }, [userId])
 
   return (
-    <div className="flex flex-1 flex-col gap-4 overflow-auto p-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Home</h1>
-        <p className="mt-1 text-sm text-muted">
-          Cross-agent findings, market pulse, watchlist movers, agent summaries, pinned screens.
-        </p>
-      </header>
+    <div className={PAGE_CLASS}>
+      <PageHeader
+        title="Home"
+        description="What your agents found and how the market and your watchlist are moving today."
+      />
       {webDevFlags.showDevBanner ? (
         <div className="rounded-md border border-warning bg-warning-soft px-4 py-3 text-sm text-warning">
           Dev banner flag is enabled. Placeholder services are expected in the local stack.
@@ -171,23 +172,36 @@ function SignInHint() {
   )
 }
 
+// Two columns once the canvas (not the viewport) is wide enough, because the
+// right rail and a collapsed sidebar change the canvas width independently.
+const SUMMARY_GRID_CLASS = 'grid items-start gap-6 @3xl:grid-cols-2'
+const SUMMARY_COLUMN_CLASS = 'flex min-w-0 flex-col gap-6'
+
 function LoadingHint() {
   return (
-    <div className="flex flex-col gap-4">
-      <Skeleton label="Loading Home" className="h-32" />
-      <Skeleton className="h-48" />
+    <div className="@container">
+      <div className={SUMMARY_GRID_CLASS}>
+        <Skeleton label="Loading Home" className="h-48" />
+        <Skeleton className="h-48" />
+      </div>
     </div>
   )
 }
 
 function SummaryView({ summary }: { summary: HomeSummary }) {
   return (
-    <div className="flex flex-col gap-4">
-      <FindingsSection cards={summary.findings.cards} />
-      <MarketPulseSection rows={summary.market_pulse.rows} omittedCount={summary.market_pulse.omitted.length} />
-      <WatchlistMoversSection movers={summary.watchlist_movers} />
-      <AgentSummariesSection rows={summary.agent_summaries.rows} windowHours={summary.agent_summaries.window_hours} />
-      <SavedScreensSection rows={summary.saved_screens.rows} />
+    <div className="@container">
+      <div className={SUMMARY_GRID_CLASS}>
+        <div className={SUMMARY_COLUMN_CLASS}>
+          <FindingsSection cards={summary.findings.cards} />
+          <AgentSummariesSection rows={summary.agent_summaries.rows} windowHours={summary.agent_summaries.window_hours} />
+        </div>
+        <div className={SUMMARY_COLUMN_CLASS}>
+          <MarketPulseSection rows={summary.market_pulse.rows} omittedCount={summary.market_pulse.omitted.length} />
+          <WatchlistMoversSection movers={summary.watchlist_movers} />
+          <SavedScreensSection rows={summary.saved_screens.rows} />
+        </div>
+      </div>
     </div>
   )
 }
@@ -196,13 +210,15 @@ function FindingsSection({ cards }: { cards: ReadonlyArray<HomeFindingCardSummar
   return (
     <Section title="Findings">
       {cards.length === 0 ? (
-        <EmptyHint>No findings yet from your active agents.</EmptyHint>
+        <EmptyState action={<Link to="/agents">Set up an agent</Link>}>
+          No findings yet from your active agents.
+        </EmptyState>
       ) : (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-3">
           <FindingsSeverityBar cards={cards} />
-          <ul className="flex flex-col gap-2">
+          <ul className={ROW_LIST_CLASS}>
             {cards.map((card) => (
-              <li key={card.home_card_id}>
+              <li key={card.home_card_id} className={ROW_CLASS}>
                 <FindingRow card={card} />
               </li>
             ))}
@@ -246,22 +262,23 @@ function FindingsSeverityBar({ cards }: { cards: ReadonlyArray<HomeFindingCardSu
   )
 }
 
-const FINDING_ROW_BASE = `block ${PANEL_CLASS} p-3`
-const FINDING_ROW_LINKED = `${FINDING_ROW_BASE} hover:border-line-strong`
+// Rows inside a section card are divided, not boxed, so a card never nests cards.
+const ROW_LIST_CLASS = 'flex flex-col divide-y divide-line'
+const ROW_CLASS = 'py-2.5 first:pt-0 last:pb-0'
 
 function FindingRow({ card }: { card: HomeFindingCardSummary }) {
   const path = homeCardPath(card.destination)
   const body = (
     <div className="flex flex-col">
       <span className="text-sm font-medium">{card.headline}</span>
-      <span className="text-xs uppercase tracking-wide text-muted">
-        {card.severity} · <span className="num">{card.support_count}</span> sources · {card.created_at}
+      <span className="mt-0.5 text-xs text-muted">
+        <span className="capitalize">{card.severity}</span> · <span className="num">{card.support_count}</span> sources · {card.created_at}
       </span>
     </div>
   )
-  if (path === null) return <div className={FINDING_ROW_BASE}>{body}</div>
+  if (path === null) return body
   return (
-    <Link to={path} className={FINDING_ROW_LINKED}>
+    <Link to={path} className="block hover:text-accent">
       {body}
     </Link>
   )
@@ -277,7 +294,7 @@ function MarketPulseSection({
   return (
     <Section title="Market pulse">
       {rows.length === 0 ? (
-        <EmptyHint>Market pulse is not configured for this environment.</EmptyHint>
+        <EmptyState>Market pulse is not configured for this environment.</EmptyState>
       ) : (
         <MoversBars rows={rows} />
       )}
@@ -297,9 +314,22 @@ function WatchlistMoversSection({ movers }: { movers: HomeWatchlistMovers }) {
 
 function WatchlistMoversBody({ movers }: { movers: HomeWatchlistMovers }) {
   const empty = watchlistMoversEmptyState(movers.reason)
-  if (empty !== null) return <EmptyHint>{empty}</EmptyHint>
-  if (movers.rows.length === 0) return <EmptyHint>No quotable listings in your watchlist.</EmptyHint>
+  if (empty !== null) return <EmptyState action={<SearchSymbolsButton />}>{empty}</EmptyState>
+  if (movers.rows.length === 0) return <EmptyState>No quotable listings in your watchlist.</EmptyState>
   return <MoversBars rows={movers.rows} />
+}
+
+// The top-bar search opens a symbol, which can then be saved to the watchlist.
+function SearchSymbolsButton() {
+  return (
+    <button
+      type="button"
+      onClick={focusTopbarSearch}
+      className="hover:underline"
+    >
+      Search symbols
+    </button>
+  )
 }
 
 // Quote rows as labelled bars ranked by absolute move and coloured by
@@ -315,7 +345,7 @@ function MoversBars({ rows }: { rows: ReadonlyArray<HomeQuoteRow> }) {
           direction === 'up' ? 'bg-positive' : direction === 'down' ? 'bg-negative' : 'bg-muted'
         return (
           <li key={row.listing.id} className="flex items-center gap-3 text-xs">
-            <span className="w-20 shrink-0 truncate font-medium text-fg">
+            <span className="w-24 shrink-0 truncate font-medium text-fg">
               {row.ticker}
               <span className="ml-1 font-normal text-faint">{row.mic}</span>
             </span>
@@ -343,14 +373,14 @@ function AgentSummariesSection({
   return (
     <Section title="Agent summaries" subtitle={`Last ${windowHours}h`}>
       {rows.length === 0 ? (
-        <EmptyHint>No agents enabled for this user.</EmptyHint>
+        <EmptyState action={<Link to="/agents">Create an agent</Link>}>No agents enabled yet.</EmptyState>
       ) : (
-        <ul className="flex flex-col gap-2">
+        <ul className={ROW_LIST_CLASS}>
           {rows.map((row) => (
-            <li key={row.agent_id} className={`${PANEL_CLASS} p-3`}>
+            <li key={row.agent_id} className={ROW_CLASS}>
               <div className="flex items-baseline justify-between gap-2">
                 <span className="text-sm font-medium">{row.name}</span>
-                <span className="text-xs uppercase tracking-wide text-muted">{agentLastRunLabel(row)}</span>
+                <span className="text-xs text-muted">{agentLastRunLabel(row)}</span>
               </div>
               <div className="mt-1 text-sm text-fg">{agentSummaryHeadline(row)}</div>
               <div className="mt-1 text-xs text-muted">
@@ -376,14 +406,11 @@ function SavedScreensSection({ rows }: { rows: ReadonlyArray<HomeSavedScreenRow>
   return (
     <Section title="Pinned screens">
       {rows.length === 0 ? (
-        <EmptyHint>No saved screens yet.</EmptyHint>
+        <EmptyState action={<Link to="/screener">Open the screener</Link>}>No saved screens yet.</EmptyState>
       ) : (
-        <ul className="flex flex-col gap-2">
+        <ul className={ROW_LIST_CLASS}>
           {rows.map((row) => (
-            <li
-              key={row.screen_id}
-              className={`${PANEL_CLASS} p-3`}
-            >
+            <li key={row.screen_id} className={ROW_CLASS}>
               <div className="text-sm font-medium">{row.name}</div>
               <div className="mt-1 text-xs text-muted">{savedScreenSubtitle(row)}</div>
             </li>
@@ -421,23 +448,13 @@ function HomeActivityRail({ activities }: { activities: ReadonlyArray<HomeRunAct
 
 function Section({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
-    <section>
-      <div className="mb-2 flex items-baseline justify-between gap-2">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">{title}</h2>
-        {subtitle !== undefined ? (
-          <span className="text-xs uppercase tracking-wide text-faint">{subtitle}</span>
-        ) : null}
+    <section className={PAGE_PANEL_CLASS}>
+      <div className="mb-3 flex items-baseline justify-between gap-2">
+        <h2 className={PANEL_TITLE_CLASS}>{title}</h2>
+        {subtitle !== undefined ? <span className="text-xs text-faint">{subtitle}</span> : null}
       </div>
       {children}
     </section>
-  )
-}
-
-function EmptyHint({ children }: { children: React.ReactNode }) {
-  return (
-    <div className={`${PANEL_CLASS} p-4 text-sm text-muted`}>
-      {children}
-    </div>
   )
 }
 
