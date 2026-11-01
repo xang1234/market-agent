@@ -1,14 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 import { auditClaimPeriods } from "../src/claim-period-audit-cli.ts";
 import { createClaimArgument } from "../src/claim-argument-repo.ts";
 import { createClaim, type ClaimPeriod } from "../src/claim-repo.ts";
+import type { QueryExecutor } from "../src/types.ts";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
 
-test("the census flags a bound period its issuer's facts do not hold, in a fiscal year they cover", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
-  const { databaseUrl } = await bootstrapDatabase(t, "claim-period-audit");
-  const client = await connectedClient(t, databaseUrl);
+// AMD's fiscal 2025 quarters.
+const AMD_2025 = { Q1: ["2024-12-29", "2025-03-29"], Q2: ["2025-03-30", "2025-06-28"], Q3: ["2025-06-29", "2025-09-27"] } as const;
+
+// AMD with facts for the given quarters, and a way to bind an explanation of
+// a release to a period.
+async function seedIssuer(client: QueryExecutor, quarters: ReadonlyArray<keyof typeof AMD_2025>) {
   const issuerId = (await client.query<{ id: string }>(
     `insert into issuers (legal_name, cik) values ('Advanced Micro Devices Inc', '0000002488') returning issuer_id::text as id`,
   )).rows[0]!.id;
@@ -20,18 +26,17 @@ test("the census flags a bound period its issuer's facts do not hold, in a fisca
     `insert into metrics (metric_key, display_name, unit_class, aggregation, interpretation, canonical_source_class)
      values ('gross_profit', 'Gross Profit', 'currency', 'sum', 'higher_is_better', 'filing') returning metric_id::text as id`,
   )).rows[0]!.id;
-  // AMD's fiscal 2025 quarters through Q3.
-  for (const [period, start, end] of [["Q1", "2024-12-29", "2025-03-29"], ["Q2", "2025-03-30", "2025-06-28"], ["Q3", "2025-06-29", "2025-09-27"]]) {
+  for (const quarter of quarters) {
     await client.query(
       `insert into facts (subject_kind, subject_id, metric_id, period_kind, period_start, period_end, fiscal_year, fiscal_period,
                           value_num, unit, currency, as_of, observed_at, source_id, method, verification_status,
                           freshness_class, coverage_level, confidence)
        values ('issuer', $1, $2, 'fiscal_q', $3, $4, 2025, $5, 1, 'currency', 'USD', now(), now(), $6, 'reported',
                'authoritative', 'filing_time', 'full', 1)`,
-      [issuerId, metricId, start, end, period, sourceId],
+      [issuerId, metricId, ...AMD_2025[quarter], quarter, sourceId],
     );
   }
-  const bind = async (period: ClaimPeriod) => {
+  return async (period: ClaimPeriod) => {
     const documentId = (await client.query<{ id: string }>(
       `insert into documents (source_id, kind, content_hash, raw_blob_id)
        values ($1, 'filing', $2, $2) returning document_id::text as id`,
@@ -52,31 +57,71 @@ test("the census flags a bound period its issuer's facts do not hold, in a fisca
     });
     await createClaimArgument(client, { claim_id: claim.claim_id, subject_kind: "issuer", subject_id: issuerId, role: "subject" });
   };
-  const statuses = async () => (await auditClaimPeriods(client)).map((row) => [row.period.kind, row.period.end, row.status]);
+}
+
+const statuses = async (client: QueryExecutor) => (await auditClaimPeriods(client)).map((row) => [row.period.kind, row.period.end, row.status]);
+
+test("the census flags a bound period its issuer's facts do not hold, in a fiscal year they cover", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "claim-period-audit");
+  const client = await connectedClient(t, databaseUrl);
+  const bind = await seedIssuer(client, ["Q1", "Q2", "Q3"]);
 
   // The quarter the facts hold, and one past them (its facts are not in yet).
   await bind({ kind: "fiscal_q", end: "2025-06-28" });
   await bind({ kind: "fiscal_q", end: "2025-12-27" });
-  assert.deepEqual(await statuses(), [
+  assert.deepEqual(await statuses(client), [
     ["fiscal_q", "2025-06-28", "matched"],
     ["fiscal_q", "2025-12-27", "uncovered"],
   ]);
 
-  // A calendar quarter's end, and the quarter's end read as a year's: fiscal
-  // 2025 has facts, and none ends there in that kind.
+  // A calendar quarter's end, two days past the fiscal quarter's: a near miss.
+  // The quarter's end read as a year's: fiscal 2025 has facts, and none ends
+  // there in that kind.
   await bind({ kind: "fiscal_q", end: "2025-06-30" });
   await bind({ kind: "fiscal_y", end: "2025-06-28" });
-  assert.deepEqual(await statuses(), [
+  assert.deepEqual(await statuses(client), [
     ["fiscal_q", "2025-06-28", "matched"],
     ["fiscal_y", "2025-06-28", "mismatched"],
-    ["fiscal_q", "2025-06-30", "mismatched"],
+    ["fiscal_q", "2025-06-30", "near_miss"],
     ["fiscal_q", "2025-12-27", "uncovered"],
   ]);
 
   // Corrected: the misread claims superseded, so no reader cites them.
   await client.query(`update claims set superseded_at = now() where period_end = '2025-06-30' or period_kind = 'fiscal_y'`);
-  assert.deepEqual(await statuses(), [
+  assert.deepEqual(await statuses(client), [
     ["fiscal_q", "2025-06-28", "matched"],
     ["fiscal_q", "2025-12-27", "uncovered"],
   ]);
+});
+
+test("the census flags a calendar quarter's end days from a fiscal quarter's, and exits 0 clean, 1 flagged, 2 on an error", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "claim-period-near-miss");
+  const client = await connectedClient(t, databaseUrl);
+  // Only Q2 is in, so no fact spans 2025-06-30.
+  const bind = await seedIssuer(client, ["Q2"]);
+  const cli = (env: NodeJS.ProcessEnv) => spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", fileURLToPath(new URL("../src/claim-period-audit-cli.ts", import.meta.url))],
+    { env: { PATH: process.env.PATH, ...env }, encoding: "utf8" },
+  );
+
+  await bind({ kind: "fiscal_q", end: "2025-06-28" });
+  await bind({ kind: "fiscal_q", end: "2025-06-30" });
+  assert.deepEqual(await statuses(client), [
+    ["fiscal_q", "2025-06-28", "matched"],
+    ["fiscal_q", "2025-06-30", "near_miss"],
+  ]);
+  const flagged = cli({ DATABASE_URL: databaseUrl });
+  assert.equal(flagged.status, 1, flagged.stderr);
+  assert.match(flagged.stdout, /^near_miss: document [0-9a-f-]{36}, issuer [0-9a-f-]{36}, fiscal_q ending 2025-06-30$/m);
+  assert.match(flagged.stdout, /^2 bound periods: 1 matched, 1 near misses, 0 mismatched, 0 uncovered$/m);
+
+  await client.query(`update claims set superseded_at = now() where period_end = '2025-06-30'`);
+  const clean = cli({ DATABASE_URL: databaseUrl });
+  assert.equal(clean.status, 0, clean.stderr);
+  assert.match(clean.stdout, /^1 bound periods: 1 matched, 0 near misses, 0 mismatched, 0 uncovered$/m);
+
+  const failed = cli({});
+  assert.equal(failed.status, 2);
+  assert.match(failed.stderr, /DATABASE_URL is required/);
 });
