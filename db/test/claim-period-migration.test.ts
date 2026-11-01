@@ -45,6 +45,31 @@ test("0073 claim periods", { timeout: 300_000 }, async (t) => {
     ]);
   });
 
+  await t.test("a period is set once, from null; a bound claim's period never changes, and the claim can still be superseded", async () => {
+    const LATER = "2025-11-04 21:00:00+00";
+    const { rows: [unbound] } = await db.query(`${claim({ kind: null, end: null, bound: null })} returning claim_id`);
+    const { rows: [bound] } = await db.query(`${claim({ kind: "fiscal_q", end: "2025-06-28", bound: BOUND })} returning claim_id`);
+    const set = (id: string, kind: string | null, end: string | null, at: string | null) =>
+      `update claims set period_kind = ${kind === null ? "null" : `'${kind}'`}, period_end = ${end === null ? "null" : `'${end}'`},
+              period_bound_at = ${at === null ? "null" : `'${at}'`} where claim_id = '${id}'`;
+    await db.query(set(unbound.claim_id, "fiscal_q", "2025-09-27", LATER));
+    await expectRejected(db, set(bound.claim_id, "fiscal_q", "2025-09-27", LATER), /claims_period_bound_once/);
+    await expectRejected(db, set(bound.claim_id, "fiscal_y", "2025-06-28", BOUND), /claims_period_bound_once/);
+    await expectRejected(db, set(bound.claim_id, "fiscal_q", "2025-06-28", LATER), /claims_period_bound_once/);
+    await expectRejected(db, set(bound.claim_id, null, null, null), /claims_period_bound_once/);
+    await db.query(`update claims set superseded_at = now() where claim_id = $1`, [bound.claim_id]);
+    const { rows } = await db.query(
+      `select claim_id, period_kind, period_end::text, period_bound_at::text, superseded_at is not null as superseded
+         from claims where claim_id = any($1::uuid[]) order by period_end`,
+      [[unbound.claim_id, bound.claim_id]],
+    );
+    assert.deepEqual(rows, [
+      { claim_id: bound.claim_id, period_kind: "fiscal_q", period_end: "2025-06-28", period_bound_at: BOUND, superseded: true },
+      { claim_id: unbound.claim_id, period_kind: "fiscal_q", period_end: "2025-09-27", period_bound_at: LATER, superseded: false },
+    ]);
+    await db.query(`delete from claims where claim_id = any($1::uuid[])`, [[unbound.claim_id, bound.claim_id]]);
+  });
+
   await t.test("down drops the period and keeps the claims; up rebuilds what the canonical schema defines, and reruns cleanly", async () => {
     const canonical = await catalogSnapshot(db);
     await applyMigration(db, "0073", "down");
@@ -52,6 +77,11 @@ test("0073 claim periods", { timeout: 300_000 }, async (t) => {
     assert.equal(
       (await db.query(`select count(*)::int as n from information_schema.columns where table_name = 'claims' and column_name like 'period%'`)).rows[0].n,
       0,
+    );
+    assert.deepEqual(
+      (await db.query(`select (select count(*)::int from pg_trigger where tgname = 'claims_period_bound_once') as triggers,
+                              (select count(*)::int from pg_proc where proname = 'prevent_claim_period_rebinding') as functions`)).rows[0],
+      { triggers: 0, functions: 0 },
     );
     await applyMigration(db, "0073", "up");
     await applyMigration(db, "0073", "up");
