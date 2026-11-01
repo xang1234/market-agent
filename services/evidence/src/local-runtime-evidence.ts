@@ -20,12 +20,12 @@ export type LocalRuntimeEvidenceInput = {
   // claim repeated (same company, predicate and text) counts once; and stored
   // contradiction relations among the selected are returned. The prefixes are
   // a priority, in order; a group of them shares one.
-  selection?: { predicate_prefixes: ReadonlyArray<string | ReadonlyArray<string>> } & (
-    | { effective_from: string | null; effective_until?: string | null; fiscal_year?: number | null; period?: null }
-    // Only the claims the prefixes match that are bound to this period (#542).
-    // No date window: when a claim was filed is not the period it explains.
-    | { period: ClaimPeriod; effective_from?: never; effective_until?: never; fiscal_year?: never }
-  );
+  selection?: {
+    predicate_prefixes: ReadonlyArray<string | ReadonlyArray<string>>;
+    effective_from: string | null;
+    effective_until?: string | null;
+    fiscal_year?: number | null;
+  };
 };
 
 export type LocalRuntimeClaimEvidence = {
@@ -100,10 +100,7 @@ export async function loadLocalRuntimeEvidence(
   const sourceCategories = input.source_categories ?? null;
   const includeIssuerIr = (sourceCategories ?? []).includes("issuer_ir");
   const includeNonIr = sourceCategories === null || sourceCategories.some((category) => category !== "issuer_ir");
-  // Each prefix with its tier: its position, shared by a group's.
-  const selected = input.selection?.predicate_prefixes.flatMap((entry, tier) =>
-    (typeof entry === "string" ? [entry] : entry).map((prefix) => ({ prefix, tier }))
-  );
+  const selected = input.selection && prefixPatterns(input.selection.predicate_prefixes);
   const { rows } = await db.query<ClaimEvidenceRow>(
     `with input_refs as (
        select kind::subject_kind as subject_kind,
@@ -181,10 +178,6 @@ export async function loadLocalRuntimeEvidence(
               sr.subject_id::text as subject_id,
               coalesce(c.predicate like any($8::text[]), false)
                 and case
-                  -- Never null for an unbound claim: a repeat's pick sorts
-                  -- "relevant desc", which puts a null first.
-                  when $14::text is not null then
-                    coalesce(c.period_kind = $14::text and c.period_end = $15::date, false)
                   -- The releases about a fiscal year come out from the end of
                   -- its first quarter until a quarter after it ends. Its
                   -- guidance is given during it: the full year's with the last
@@ -218,24 +211,11 @@ export async function loadLocalRuntimeEvidence(
            on d.document_id = c.document_id
          join sources s
            on s.source_id = c.reported_by_source_id
-        where c.status in ('extracted', 'corroborated')
-          and c.superseded_at is null
-          and d.deleted_at is null
-          and d.parse_status <> 'superseded'
-          and exists (select 1 from sources ds where ds.source_id=d.source_id
-            and (ds.user_id is null or ds.user_id=$3::uuid))
-          and ($7::timestamptz is null or (
-            c.created_at <= $7::timestamptz
-            and coalesce(d.published_at,d.created_at) <= $7::timestamptz
-          ))
+        where ${citableClaimSql("$3::uuid", "$7::timestamptz")}
           and not (c.claim_id = any($4::uuid[]))
           -- A route reads a company's own claims: one naming it only as a
           -- competitor, customer or other party is another company's claim.
           and (not $10::boolean or ca.role = 'subject')
-          and (
-            s.user_id is null
-            or ($3::uuid is not null and s.user_id = $3::uuid)
-          )
           and (
             (
               $5::boolean = true
@@ -298,7 +278,6 @@ export async function loadLocalRuntimeEvidence(
             effective_time,
             subject_id
        from selected
-      where $14::text is null or relevant
       -- Relevant claims first, by their prefix's priority; within each tier,
       -- companies and predicates take turns (each one's newest first), so a
       -- comparison's slots are not all one company's, nor a tier's all one
@@ -321,14 +300,12 @@ export async function loadLocalRuntimeEvidence(
       includeIssuerIr,
       includeNonIr,
       input.as_of ?? null,
-      selected ? selected.map(({ prefix }) => `${prefix.replace(/[\\%_]/g, "\\$&")}%`) : null,
+      selected?.patterns ?? null,
       input.selection?.effective_from ?? null,
       input.selection !== undefined,
       input.selection?.effective_until ?? null,
-      selected ? selected.map(({ tier }) => tier) : null,
+      selected?.tiers ?? null,
       input.selection?.fiscal_year ?? null,
-      input.selection?.period?.kind ?? null,
-      input.selection?.period?.end ?? null,
     ],
   );
   const evidence = evidenceFromClaimRows(subjectRefs, rows.slice(0, limit), input.selection !== undefined);
@@ -338,6 +315,127 @@ export async function loadLocalRuntimeEvidence(
     truncated: rows.length > limit,
     contradictions: await loadContradictions(db, evidence.claim_refs),
   });
+}
+
+// One company's claims bound to a fiscal period (#542). Each company has its
+// own period, so a call reads one, and the limit is its own.
+export type PeriodClaimLookup = {
+  issuer_id: string;
+  period: ClaimPeriod;
+  // A priority, in order; a group of them shares one.
+  predicate_prefixes: ReadonlyArray<string | ReadonlyArray<string>>;
+  user_id?: string | null;
+  as_of?: string;
+  exclude_claim_ids?: ReadonlyArray<string>;
+  limit?: number;
+};
+
+// The company's own claims a prefix matches, bound to the period's kind and
+// end. No date window: when a claim was filed is not the period it explains,
+// and an unbound claim explains none. A repeat counts once; claims come by
+// their prefix's tier, then newest first.
+export async function loadPeriodClaimEvidence(
+  db: QueryExecutor,
+  input: PeriodClaimLookup,
+): Promise<LocalRuntimeEvidence> {
+  const subjectRefs = normalizeSubjectRefs([{ kind: "issuer", id: input.issuer_id }]);
+  if (subjectRefs.length === 0) return emptyEvidence(subjectRefs);
+  const { patterns, tiers } = prefixPatterns(input.predicate_prefixes);
+  const { rows } = await db.query<ClaimEvidenceRow>(
+    `with bound as (
+       -- A repeat is the same predicate and text (case-insensitive), however
+       -- many documents carry it or when: it counts once, as its first
+       -- publication.
+       -- ponytail: exact text only; paraphrases are not caught.
+       select distinct on (c.predicate, lower(c.text_canonical))
+              c.claim_id::text as claim_id,
+              c.document_id::text as document_id,
+              d.source_id::text as document_source_id,
+              c.reported_by_source_id::text as source_id,
+              c.text_canonical,
+              c.predicate,
+              c.polarity,
+              s.trust_tier,
+              s.license_class,
+              s.provider,
+              s.canonical_url as source_canonical_url,
+              c.confidence,
+              d.title as document_title,
+              d.published_at,
+              c.effective_time,
+              $1::uuid::text as subject_id,
+              (select min(p.tier) from unnest($3::text[], $4::int[]) as p(pattern, tier) where c.predicate like p.pattern)
+                as tier,
+              coalesce(c.effective_time, d.published_at, c.created_at) as dated
+         from claims c
+         join documents d
+           on d.document_id = c.document_id
+         join sources s
+           on s.source_id = c.reported_by_source_id
+        where c.period_kind = $5::text
+          and c.period_end = $6::date
+          and c.predicate like any($3::text[])
+          and exists (
+            select 1
+              from claim_arguments ca
+             where ca.claim_id = c.claim_id
+               and ca.subject_kind = 'issuer'
+               and ca.subject_id = $1::uuid
+               and ca.role = 'subject'
+          )
+          -- A binding made after the cutoff was not known at it.
+          and ($7::timestamptz is null or c.period_bound_at <= $7::timestamptz)
+          and not (c.claim_id = any($8::uuid[]))
+          and ${citableClaimSql("$9::uuid", "$7::timestamptz")}
+        order by c.predicate, lower(c.text_canonical), coalesce(d.published_at, c.created_at), c.claim_id
+     )
+     select *
+       from bound
+      order by tier, dated desc, claim_id
+      limit $2::int`,
+    [
+      subjectRefs[0]!.id,
+      input.limit ?? 5,
+      patterns,
+      tiers,
+      input.period.kind,
+      input.period.end,
+      input.as_of ?? null,
+      unique(input.exclude_claim_ids ?? []),
+      userIdOrNull(input.user_id),
+    ],
+  );
+  return evidenceFromClaimRows(subjectRefs, rows, true);
+}
+
+// A claim a reader may cite: extracted or corroborated and current, in a live
+// document, from sources the user may see, and under a cutoff, written and
+// published by it. c is the claim, d its document, s its reporting source.
+function citableClaimSql(user: string, cutoff: string): string {
+  return `c.status in ('extracted', 'corroborated')
+          and c.superseded_at is null
+          and d.deleted_at is null
+          and d.parse_status <> 'superseded'
+          and exists (select 1 from sources ds where ds.source_id=d.source_id
+            and (ds.user_id is null or ds.user_id=${user}))
+          and (
+            s.user_id is null
+            or (${user} is not null and s.user_id = ${user})
+          )
+          and (${cutoff} is null or (
+            c.created_at <= ${cutoff}
+            and coalesce(d.published_at,d.created_at) <= ${cutoff}
+          ))`;
+}
+
+// Each prefix as a like pattern, with its tier: its position, shared by a
+// group's.
+function prefixPatterns(prefixes: ReadonlyArray<string | ReadonlyArray<string>>): { patterns: string[]; tiers: number[] } {
+  const selected = prefixes.flatMap((entry, tier) => (typeof entry === "string" ? [entry] : entry).map((prefix) => ({ prefix, tier })));
+  return {
+    patterns: selected.map(({ prefix }) => `${prefix.replace(/[\\%_]/g, "\\$&")}%`),
+    tiers: selected.map(({ tier }) => tier),
+  };
 }
 
 // Selected claims one stored cluster holds on opposite sides (support vs
