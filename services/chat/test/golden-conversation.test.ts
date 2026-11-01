@@ -606,9 +606,9 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     }
   });
 
-  await t.test("a cause whose document is deleted between its read and its seal quotes none, and the answer names it as not covered (#542)", async () => {
+  await t.test("a cause whose document another session is deleting publishes without waiting for it, its cause named as not covered (#542)", async () => {
     // Another session deletes the release's document and has not committed,
-    // so the turn's read still sees it.
+    // so the turn's read still sees it, and its seal cannot lock it.
     const deleter = await connectedClient(t, databaseUrl);
     const documentId = (await client.query<{ document_id: string }>(`select document_id::text from claims where text_canonical = $1`, [AMD_Q2_2025_RELEASE.text])).rows[0]!.document_id;
     await deleter.query("begin");
@@ -617,6 +617,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     try {
       const amdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD margin, cause document deleted" });
       const turn = runTurn(base, amdThread.thread_id, "Why did AMD's operating margin turn negative in Q2 2025?");
+      // Settled before anything waits on the deleter, else the deleter commits and the turn goes on.
       const waited = await waitsOn(client, deleterPid, turn);
       await deleter.query("commit");
       completedTurn(await turn);
@@ -626,7 +627,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
         notes: ["Not covered by this answer: a margin over several periods; the cause of these figures."],
       });
       causeQuotedOrNamed(answer);
-      assert.equal(waited, true, "the seal waited for the deleting session, then read its delete");
+      assert.equal(waited, false, "the seal did not wait for the deleting session");
     } finally {
       await deleter.query("rollback").catch(() => {});
       await client.query(`update documents set deleted_at = null where document_id = $1::uuid`, [documentId]);
