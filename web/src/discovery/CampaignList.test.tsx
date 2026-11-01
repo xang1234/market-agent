@@ -109,6 +109,46 @@ test("hides one account's campaigns immediately when the signed-in account chang
   }
 });
 
+test("a failed campaign load shows the failure in place of the list, not the empty state", async () => {
+  const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>");
+  const restore = installDomGlobals(dom.window as unknown as Window);
+  const previousFetch = globalThis.fetch;
+  (globalThis as { fetch: typeof fetch }).fetch = async () => json({ error: "discovery unavailable" }, 503);
+  const root = createRoot(dom.window.document.getElementById("root")!);
+  try {
+    await act(async () => { root.render(<AuthContext.Provider value={{ session: { userId: "user-1", displayName: "User" }, signIn: () => undefined, signOut: () => undefined }}><MemoryRouter><CampaignList /></MemoryRouter></AuthContext.Provider>); });
+    await act(async () => { await delay(10); });
+    const section = dom.window.document.querySelector('[aria-labelledby="campaign-list-heading"]');
+    const alert = section?.querySelector('[role="alert"]');
+    assert.ok(alert);
+    assert.equal(section?.textContent, `Your campaigns${alert.textContent}`);
+    assert.doesNotMatch(section?.textContent ?? "", /No campaigns yet/);
+  } finally {
+    await act(async () => root.unmount());
+    (globalThis as { fetch: typeof fetch }).fetch = previousFetch;
+    restore();
+  }
+});
+
+test("an account with no campaigns sees the empty state", async () => {
+  const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>");
+  const restore = installDomGlobals(dom.window as unknown as Window);
+  const previousFetch = globalThis.fetch;
+  (globalThis as { fetch: typeof fetch }).fetch = async () => json({ items: [], next_cursor: null });
+  const root = createRoot(dom.window.document.getElementById("root")!);
+  try {
+    await act(async () => { root.render(<AuthContext.Provider value={{ session: { userId: "user-1", displayName: "User" }, signIn: () => undefined, signOut: () => undefined }}><MemoryRouter><CampaignList /></MemoryRouter></AuthContext.Provider>); });
+    await act(async () => { await delay(10); });
+    const section = dom.window.document.querySelector('[aria-labelledby="campaign-list-heading"]');
+    assert.equal(dom.window.document.querySelector('[role="alert"]'), null);
+    assert.equal(section?.textContent, "Your campaignsNo campaigns yet. Create one to begin.");
+  } finally {
+    await act(async () => root.unmount());
+    (globalThis as { fetch: typeof fetch }).fetch = previousFetch;
+    restore();
+  }
+});
+
 function campaign(campaignId: string, name: string) {
   return { campaign_id: campaignId, user_id: "user-1", name, question: "Which US-listed companies benefit from grid modernization?", current_brief_version: 1, created_at: "2026-09-10T00:00:00.000Z", updated_at: "2026-09-10T00:00:00.000Z", archived_at: null };
 }

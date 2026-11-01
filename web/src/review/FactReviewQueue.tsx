@@ -5,6 +5,8 @@ import { confidenceDistribution, type ConfidenceDistribution } from './queueStat
 import { severityFillClass } from '../blocks/severityTone.ts'
 import { StackedBar, StackedBarLegend, type StackedSegment } from '../symbol/StackedBar.tsx'
 import { VerticalBars } from '../symbol/VerticalBars.tsx'
+import { EmptyState } from '../ui/EmptyState.tsx'
+import { PAGE_PANEL_CLASS, PANEL_TITLE_CLASS, SECTION_LABEL_CLASS } from '../ui/pageStyles.ts'
 
 export type FactReviewCandidate = Record<string, unknown>
 
@@ -86,9 +88,9 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject, onApproveA
 
   if (items.length === 0) {
     return (
-      <section className="rounded-md border border-line bg-surface p-6">
-        <h2 className="text-sm font-semibold text-fg">Reviewer queue</h2>
-        <p className="mt-2 text-sm text-muted">No candidate facts need review.</p>
+      <section className={`flex flex-col gap-3 ${PAGE_PANEL_CLASS}`}>
+        <h2 className={PANEL_TITLE_CLASS}>Reviewer queue</h2>
+        <EmptyState>No candidate facts need review.</EmptyState>
       </section>
     )
   }
@@ -107,7 +109,7 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject, onApproveA
           return (
             <li
               key={item.review_id}
-              className="rounded-md border border-line bg-surface p-4"
+              className={PAGE_PANEL_CLASS}
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -228,7 +230,7 @@ function QueueSummary({
   const stale = items.filter(isStaleItem).length
   const total = items.length
   return (
-    <header className="flex flex-col gap-3 rounded-md border border-line bg-surface p-4">
+    <header className={`flex flex-col gap-3 ${PAGE_PANEL_CLASS}`}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="text-sm font-medium text-fg">
           <span className="num">{total}</span> {total === 1 ? 'claim' : 'claims'} awaiting review
@@ -267,7 +269,7 @@ function SeverityBar({ counts }: { counts: Record<ReviewSeverity, number> }) {
   }))
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="text-xs uppercase tracking-wide text-muted">By severity</span>
+      <span className={SECTION_LABEL_CLASS}>By severity</span>
       <StackedBar
         segments={segments}
         ariaLabel={`${counts.high} high, ${counts.medium} medium, ${counts.low} low`}
@@ -291,7 +293,7 @@ function ConfidenceHistogram({ dist }: { dist: ConfidenceDistribution }) {
   }))
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="text-xs uppercase tracking-wide text-muted">Confidence vs threshold</span>
+      <span className={SECTION_LABEL_CLASS}>Confidence vs threshold</span>
       <div className="relative">
         <VerticalBars
           bars={bars}

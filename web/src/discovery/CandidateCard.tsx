@@ -2,6 +2,8 @@ import { useState } from "react";
 
 import type { CandidateView, DimensionName } from "../../../services/discovery/src/types.ts";
 import { VerificationLabel } from "../blocks/VerificationLabel.tsx";
+import { SECONDARY_BUTTON_CLASS } from "../shell/buttonStyles.ts";
+import { PAGE_PANEL_CLASS, SECTION_LABEL_CLASS } from "../ui/pageStyles.ts";
 
 const DIMENSIONS: ReadonlyArray<{ key: DimensionName; label: string }> = [
   { key: "theme_exposure", label: "Theme exposure" },
@@ -22,7 +24,7 @@ export function CandidateCard({
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const identity = candidate.identity;
   return (
-    <article className="space-y-3 rounded-md border border-line bg-surface p-4">
+    <article className={`space-y-3 ${PAGE_PANEL_CLASS}`}>
       <header className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h3 className="font-semibold text-fg">{candidate.name}</h3>
@@ -40,7 +42,7 @@ export function CandidateCard({
       ) : <p className="text-sm text-muted">Assessment has not been completed yet.</p>}
       {candidate.assessment?.criteria.some((criterion) => criterion.certified) ? (
         <section>
-          <h4 className="text-xs font-medium uppercase text-muted">Numerical criteria</h4>
+          <h4 className={SECTION_LABEL_CLASS}>Numerical criteria</h4>
           <ul className="mt-1 flex flex-col gap-1">
             {candidate.assessment.criteria.filter((criterion) => criterion.certified).map((criterion) => (
               <li key={criterion.criterion_id} className="flex flex-wrap items-center gap-2 text-sm text-fg" data-criterion-id={criterion.criterion_id}>
@@ -52,10 +54,10 @@ export function CandidateCard({
           </ul>
         </section>
       ) : null}
-      {candidate.assessment?.counterarguments.length ? <section><h4 className="text-xs font-medium uppercase text-muted">Risk</h4><p className="text-sm text-fg">{candidate.assessment.counterarguments[0]?.text}</p></section> : null}
-      {candidate.assessment?.unresolved_questions.length ? <section><h4 className="text-xs font-medium uppercase text-muted">Next question</h4><p className="text-sm text-fg">{candidate.assessment.unresolved_questions[0]}</p></section> : null}
+      {candidate.assessment?.counterarguments.length ? <section><h4 className={SECTION_LABEL_CLASS}>Risk</h4><p className="text-sm text-fg">{candidate.assessment.counterarguments[0]?.text}</p></section> : null}
+      {candidate.assessment?.unresolved_questions.length ? <section><h4 className={SECTION_LABEL_CLASS}>Next question</h4><p className="text-sm text-fg">{candidate.assessment.unresolved_questions[0]}</p></section> : null}
       {candidate.assessment?.next_action ? <p className="text-sm text-muted">Next step: {candidate.assessment.next_action}</p> : null}
-      {(candidate.identity && (onOpenInAnalyze || (candidate.can_promote && onDraftThesis))) ? <div className="flex flex-wrap gap-2"><>{onOpenInAnalyze ? <button type="button" onClick={() => onOpenInAnalyze(candidate)} className="rounded-md border border-line-strong px-3 py-1.5 text-sm font-medium text-fg">Open in Analyze</button> : null}{candidate.can_promote && onDraftThesis ? <button type="button" onClick={() => onDraftThesis(candidate)} className="rounded-md border border-line-strong px-3 py-1.5 text-sm font-medium text-fg">Draft thesis for Agents</button> : null}</></div> : null}
+      {(candidate.identity && (onOpenInAnalyze || (candidate.can_promote && onDraftThesis))) ? <div className="flex flex-wrap gap-2"><>{onOpenInAnalyze ? <button type="button" onClick={() => onOpenInAnalyze(candidate)} className={SECONDARY_BUTTON_CLASS}>Open in Analyze</button> : null}{candidate.can_promote && onDraftThesis ? <button type="button" onClick={() => onDraftThesis(candidate)} className={SECONDARY_BUTTON_CLASS}>Draft thesis for Agents</button> : null}</></div> : null}
       <div>
         <button type="button" aria-label={`View sources for ${candidate.name}`} aria-expanded={sourcesOpen} onClick={() => setSourcesOpen((open) => !open)} className="text-sm font-medium text-accent underline">{sourcesOpen ? "Hide sources" : "View sources"}</button>
         {sourcesOpen ? <SourceDrawer candidate={candidate} onClose={() => setSourcesOpen(false)} /> : null}
@@ -66,7 +68,7 @@ export function CandidateCard({
 
 function SourceDrawer({ candidate, onClose }: { candidate: CandidateView; onClose(): void }) {
   const sources = candidate.sources.filter((source) => isHttpsSourceUrl(source.url));
-  return <aside aria-label={`Sources for ${candidate.name}`} className="mt-3 rounded-md border border-line bg-surface-2 p-3"><div className="flex items-start justify-between gap-2"><h4 className="text-sm font-semibold text-fg">Sources</h4><button type="button" aria-label={`Close sources for ${candidate.name}`} onClick={onClose} className="text-sm text-muted underline">Close</button></div>{!candidate.evidence_available ? <p className="mt-2 text-sm text-muted">Evidence is no longer available. This result remains visible, but its source details are redacted.</p> : candidate.sources.length === 0 ? <p className="mt-2 text-sm text-muted">No currently available sources were returned for this company.</p> : sources.length === 0 ? <p className="mt-2 text-sm text-muted">Source links are unavailable.</p> : <ul className="mt-2 space-y-2">{sources.map((source) => <li key={`${source.citation.kind}:${source.citation.id}`}><a href={source.url} target="_blank" rel="noopener noreferrer" className="text-sm text-accent underline">{source.title}</a></li>)}</ul>}</aside>;
+  return <aside aria-label={`Sources for ${candidate.name}`} className="mt-3 rounded-lg border border-line bg-surface-2 p-3"><div className="flex items-start justify-between gap-2"><h4 className="text-sm font-semibold text-fg">Sources</h4><button type="button" aria-label={`Close sources for ${candidate.name}`} onClick={onClose} className="text-sm text-muted underline">Close</button></div>{!candidate.evidence_available ? <p className="mt-2 text-sm text-muted">Evidence is no longer available. This result remains visible, but its source details are redacted.</p> : candidate.sources.length === 0 ? <p className="mt-2 text-sm text-muted">No currently available sources were returned for this company.</p> : sources.length === 0 ? <p className="mt-2 text-sm text-muted">Source links are unavailable.</p> : <ul className="mt-2 space-y-2">{sources.map((source) => <li key={`${source.citation.kind}:${source.citation.id}`}><a href={source.url} target="_blank" rel="noopener noreferrer" className="text-sm text-accent underline">{source.title}</a></li>)}</ul>}</aside>;
 }
 
 function isHttpsSourceUrl(value: string): boolean { try { return new URL(value).protocol === "https:"; } catch { return false; } }
