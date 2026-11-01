@@ -35,7 +35,7 @@ async function claim(
   issuer: string,
   input: {
     predicate: string; text: string; at: string; period?: ClaimPeriod;
-    published?: string; created?: string; bound?: string; source?: string; role?: string;
+    published?: string; created?: string; bound?: string; source?: string; role?: string; ir?: boolean;
   },
 ): Promise<string> {
   const n = String(++written).padStart(12, "0");
@@ -57,6 +57,13 @@ async function claim(
     `insert into claim_arguments (claim_id, subject_kind, subject_id, role) values ($1, 'issuer', $2, $3)`,
     [id, issuer, input.role ?? "subject"],
   );
+  if (input.ir) {
+    await db.query(
+      `insert into ir_document_assets (issuer_id, document_id, source_id, asset_kind, canonical_url, discovered_at, fetched_at)
+       values ($1, $2, $3, 'press_release', $4, $5, $5)`,
+      [issuer, document, input.source ?? FILINGS, `https://ir.example.com/${n}`, input.published ?? input.at],
+    );
+  }
   return id;
 }
 
@@ -118,6 +125,14 @@ test("a period lookup returns a company's claims bound to that period (#542)", a
     await claim(db, acme, margin("Gross margin fell on an inventory charge.", "2025-08-01T20:00:00Z"));
     const bound = await claim(db, acme, margin("Gross margin fell on an inventory charge.", "2025-08-05T20:00:00Z", Q2));
     assert.deepEqual(await lookup(acme, Q2, [GROSS_MARGIN]), [bound]);
+  });
+
+  await t.test("an issuer-IR copy of a bound explanation is not read, though published first; the same sentence filed on an 8-K is", async () => {
+    const acme = await company(db);
+    await claim(db, acme, { ...margin("Gross margin fell on an inventory charge.", "2025-08-04T20:00:00Z", Q2), ir: true });
+    await claim(db, acme, { ...margin("Gross margin fell on lower utilization.", "2025-08-04T20:00:00Z", Q2), ir: true });
+    const filed = await claim(db, acme, margin("Gross margin fell on an inventory charge.", "2025-08-05T20:00:00Z", Q2));
+    assert.deepEqual(await lookup(acme, Q2, [GROSS_MARGIN]), [filed]);
   });
 
   await t.test("at a fiscal year's end, the year and its fourth quarter are two periods", async () => {
