@@ -267,9 +267,9 @@ function priceOperand(input: BoundPriceInputV1, node: ReportedMetricNode, defini
 export function absoluteChange(node: ChangeNode, current: FinancialOperand, prior: FinancialOperand): OperandOutcome {
   const incompatible = changeIncompatibility(current, prior);
   if (incompatible) return incompatible;
-  const difference = subtractRationals(current.value, prior.value);
-  if (difference === null) return operationGap("numeric_limit_exceeded", "The change exceeds supported numeric limits.");
-  return success(derived(node, current, difference, current.measurement));
+  const change = difference(current, prior);
+  if (change === null) return operationGap("numeric_limit_exceeded", "The change exceeds supported numeric limits.");
+  return success(derived(node, current, change.value, change.measurement));
 }
 
 export function percentChangePositiveBase(node: ChangeNode, current: FinancialOperand, prior: FinancialOperand): OperandOutcome {
@@ -429,16 +429,23 @@ export function spread(node: SpreadNode, left: FinancialOperand, right: Financia
   if (!coverSameMonths(left.period, right.period)) {
     return operationGap("incompatible_period", "The two periods end more than half a period apart, so they do not cover the same months.");
   }
-  const unit = left.measurement.unit;
-  if (unit.kind === "ratio" && !readsAsPercentage(left)) return operationGap("unsupported_operation", "A spread of multiples is not supported.");
-  const difference = subtractRationals(left.value, right.value);
-  const points = difference !== null && unit.kind === "ratio" ? multiplyRationals(difference, HUNDRED) : difference;
-  if (points === null) return operationGap("numeric_limit_exceeded", "The spread exceeds supported numeric limits.");
-  const percentage = unit.kind === "ratio" || unit.kind === "percent";
-  return success(derived(node, left, points, percentage ? { ...left.measurement, unit: { kind: "percentage_points" } } : left.measurement));
+  if (left.measurement.unit.kind === "ratio" && !readsAsPercentage(left)) return operationGap("unsupported_operation", "A spread of multiples is not supported.");
+  const lead = difference(left, right);
+  if (lead === null) return operationGap("numeric_limit_exceeded", "The spread exceeds supported numeric limits.");
+  return success(derived(node, left, lead.value, lead.measurement));
 }
 
 const HUNDRED = rationalFromDecimal({ coefficient: 100n, scale: 0 })!;
+
+/** Left minus right in their measurement, except that two percentages differ by percentage points. A multiple stays a ratio. */
+function difference(left: FinancialOperand, right: FinancialOperand): { value: ExactRational; measurement: Measurement } | null {
+  const unit = left.measurement.unit;
+  const percentRatio = unit.kind === "ratio" && readsAsPercentage(left);
+  const value = subtractRationals(left.value, right.value);
+  const points = value !== null && percentRatio ? multiplyRationals(value, HUNDRED) : value;
+  if (points === null) return null;
+  return { value: points, measurement: percentRatio || unit.kind === "percent" ? { ...left.measurement, unit: { kind: "percentage_points" } } : left.measurement };
+}
 
 function readsAsPercentage(operand: FinancialOperand): boolean {
   return Object.hasOwn(MARGIN_NUMERATORS, operand.measure.metric_key) || operand.measure.derivations.some((step) => step.operation === "percent_change_positive_base");

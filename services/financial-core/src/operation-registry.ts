@@ -48,8 +48,8 @@ export const OPERATION_REGISTRY: { readonly [K in OperationKind]: OperationSpec<
   },
   absolute_change: {
     ...VALUE_OPERATION,
-    operation_version: "absolute_change.v1",
-    interpretation: "Current minus prior for compatible periods, units, scope, and basis.",
+    operation_version: "absolute_change.v2",
+    interpretation: "Current minus prior for compatible periods, units, scope, and basis; a margin or percentage change is in percentage points.",
     evaluate: (node, operands) => absoluteChange(node, required(node, operands, 0), required(node, operands, 1)),
   },
   percent_change_positive_base: {

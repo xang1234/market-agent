@@ -7,7 +7,7 @@ import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { recordFactPrecisionAttestation } from "../../evidence/src/financial-attestations.ts";
 import Ajv2020 from "../../financial-core/node_modules/ajv/dist/2020.js";
 import { recordFactFinancialContext } from "../../evidence/src/financial-context.ts";
-import { validateFinancialPlan, type DerivationProofV1, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
+import { OPERATION_REGISTRY, validateFinancialPlan, type DerivationProofV1, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
 import { loadFinancialUnitRecords } from "../../snapshot/src/financial-verifier-loader.ts";
 import { verifyFinancialUnit } from "../../snapshot/src/financial-verifier.ts";
 import type { SnapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
@@ -189,6 +189,26 @@ test("committed result inspection", { timeout: 300_000 }, async (t) => {
     const certifiedAs = (version: string) => ({ sql: `update snapshot_financial_runs set certificate = jsonb_set(certificate, '{presentation,version}', to_jsonb($2::text)) where run_id = $1`, params: [runId, version] });
     await whileChanged(db, certifiedAs("financial-presentation.v1"), certifiedAs("financial-presentation.v2"), async () => {
       assert.equal(available(await inspect("out_gm")).result_id, results.out_gm);
+    });
+  });
+
+  await t.test("a retired operation version hides only the results that read it (#539)", async () => {
+    const base = revenuePlan();
+    const validated = validateFinancialPlan({
+      ...base,
+      plan_id: randomUUID(),
+      operations: [...base.operations, { node_id: "a_change", operation: "absolute_change", operation_version: OPERATION_REGISTRY.absolute_change.operation_version, current: "a_rev", prior: "a_prev" }],
+      outputs: [...base.outputs, { output_id: "a_out_change", node_id: "a_change", unit_id: "a_unit" }],
+    });
+    assert.ok(validated.ok, JSON.stringify(!validated.ok && validated.issues));
+    const run = await completedRun(db, client, validated.value);
+    const at = ["operations", String(validated.value.operations.findIndex((node) => node.node_id === "a_change")), "operation_version"];
+    const storedAs = (version: string) => ({ sql: `update financial_plans set plan = jsonb_set(plan, $2::text[], to_jsonb($3::text)) where plan_id = $1`, params: [validated.value.plan_id, at, version] });
+    await whileChanged(db, storedAs("absolute_change.v1"), storedAs(OPERATION_REGISTRY.absolute_change.operation_version), async () => {
+      assert.equal(available(await inspectCommittedResult(db, IDS.owner, run.results.a_out_rev!)).result_id, run.results.a_out_rev, "revenue reads no change");
+      assert.deepEqual(await inspectCommittedResult(db, IDS.owner, run.results.a_out_change!), {
+        schema_version: "financial_result_inspection.v1", availability: "unsupported_version", result_id: run.results.a_out_change, run_id: run.runId, reason_code: "unsupported_version",
+      });
     });
   });
 
