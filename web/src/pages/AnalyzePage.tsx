@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { PRIMARY_BUTTON_CLASS } from '../shell/buttonStyles.ts'
+import { PRIMARY_BUTTON_CLASS, ROW_BUTTON_CLASS, SECONDARY_BUTTON_CLASS } from '../shell/buttonStyles.ts'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   analyzeIntentLabel,
@@ -35,6 +35,18 @@ import { subjectHydration, symbolDetailPathForSubject, type ResolvedSubject } fr
 import { useAuth } from '../shell/useAuth.ts'
 import { FailureNotice } from '../ui/FailureNotice.tsx'
 import { Skeleton } from '../ui/Skeleton.tsx'
+import { sourceCategoryLabel } from '../analyze/sourceLabels.ts'
+import { PageHeader } from '../ui/PageHeader.tsx'
+import {
+  COMPACT_FIELD_CLASS,
+  FIELD_CLASS,
+  FIELD_LABEL_CLASS,
+  PAGE_CLASS,
+  PAGE_PANEL_CLASS,
+  PANEL_TITLE_CLASS,
+  SECTION_LABEL_CLASS,
+  TOGGLE_CHIP_CLASS,
+} from '../ui/pageStyles.ts'
 
 type AnalyzeTemplate = {
   template_id: string
@@ -98,14 +110,11 @@ export function AnalyzePage() {
   const researchSummary = researchSummaryFromAnalyzeEntry(location.state)
 
   return (
-    <div className="flex flex-1 flex-col gap-4 overflow-auto p-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Analyze</h1>
-        <p className="mt-1 text-sm text-muted">
-          Template-driven memo workflow with editable instructions, source controls, and
-          chat handoff.
-        </p>
-      </header>
+    <div className={PAGE_CLASS}>
+      <PageHeader
+        title="Analyze"
+        description="Generate a source-backed research memo from a playbook, then share it to chat."
+      />
       {subject ? (
         <CarriedSubjectContext
           subject={subject}
@@ -122,11 +131,11 @@ export function AnalyzePage() {
 
 function CarriedResearchSummary({ summary }: { summary: ResearchSummary }) {
   return (
-    <section aria-labelledby="analyze-carried-research-heading" className="rounded-md border border-line bg-surface p-4">
+    <section aria-labelledby="analyze-carried-research-heading" className={PAGE_PANEL_CLASS}>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <p className="text-xs uppercase text-muted">Cited discovery context</p>
-          <h2 id="analyze-carried-research-heading" className="text-lg font-semibold text-fg">Research summary</h2>
+          <p className={SECTION_LABEL_CLASS}>Cited discovery context</p>
+          <h2 id="analyze-carried-research-heading" className={`mt-1 ${PANEL_TITLE_CLASS}`}>Research summary</h2>
         </div>
         <span className="font-mono text-xs text-muted">run {summary.runId.slice(0, 8)}</span>
       </div>
@@ -314,10 +323,10 @@ function AnalyzeWorkspace({ subject, subjectName }: { subject: ResolvedSubject |
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <section className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
-        <div className="flex flex-col gap-4 rounded-md border border-line bg-surface p-5">
-          <label className="flex flex-col gap-2 text-sm font-medium text-fg">
+    <div className="flex flex-col gap-6">
+      <section className="grid gap-6 lg:grid-cols-[22rem_minmax(0,1fr)]">
+        <div className={`flex min-w-0 flex-col gap-4 ${PAGE_PANEL_CLASS}`}>
+          <label className={FIELD_LABEL_CLASS}>
             Playbook
             <select
               value={selectedPlaybookId}
@@ -330,7 +339,7 @@ function AnalyzeWorkspace({ subject, subjectName }: { subject: ResolvedSubject |
                 setMemoRun(null)
                 setStatus('Ready')
               }}
-              className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
+              className={FIELD_CLASS}
             >
               {playbooks.map((playbook) => (
                 <option key={playbook.playbook_id} value={playbook.playbook_id}>
@@ -340,8 +349,8 @@ function AnalyzeWorkspace({ subject, subjectName }: { subject: ResolvedSubject |
             </select>
           </label>
           {selectedPlaybook ? (
-            <section className="rounded-md border border-line p-3 text-sm">
-              <h3 className="font-medium text-fg">Sections</h3>
+            <section aria-labelledby="analyze-sections-heading" className="flex flex-col gap-2">
+              <h3 id="analyze-sections-heading" className="text-sm font-medium text-fg">Sections</h3>
               <SectionProgressList
                 rows={
                   isGenerating
@@ -353,7 +362,7 @@ function AnalyzeWorkspace({ subject, subjectName }: { subject: ResolvedSubject |
               />
             </section>
           ) : null}
-          <label className="flex flex-col gap-2 text-sm font-medium text-fg">
+          <label className={FIELD_LABEL_CLASS}>
             Template
             <select
               value={selectedTemplateId}
@@ -364,7 +373,7 @@ function AnalyzeWorkspace({ subject, subjectName }: { subject: ResolvedSubject |
                 setMemoRun(null)
                 setStatus('Ready')
               }}
-              className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
+              className={FIELD_CLASS}
             >
               {templates.map((template) => (
                 <option key={template.template_id} value={template.template_id}>
@@ -373,7 +382,7 @@ function AnalyzeWorkspace({ subject, subjectName }: { subject: ResolvedSubject |
               ))}
             </select>
           </label>
-        <label className="flex flex-col gap-2 text-sm font-medium text-fg">
+        <label className={FIELD_LABEL_CLASS}>
           Instructions
           <textarea
             value={instructions}
@@ -383,59 +392,64 @@ function AnalyzeWorkspace({ subject, subjectName }: { subject: ResolvedSubject |
               setStatus('Ready')
             }}
             rows={6}
-            className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
+            className={FIELD_CLASS}
           />
         </label>
-        <fieldset className="flex flex-col gap-2">
-          <legend className="text-sm font-medium text-fg">Source controls</legend>
-          {availableSourceCategories.map((category) => (
-            <label key={category} className="flex items-center gap-2 text-sm text-fg-soft">
-              <input
-                type="checkbox"
-                checked={sources.has(category)}
-                onChange={() => toggleSource(category)}
-              />
-              {category}
-            </label>
-          ))}
+        <fieldset className="flex min-w-0 flex-col gap-2">
+          <legend className="mb-2 text-sm font-medium text-fg">Source controls</legend>
+          <div className="flex flex-wrap gap-1.5">
+            {availableSourceCategories.map((category) => {
+              const on = sources.has(category)
+              return (
+                <label key={category} className={TOGGLE_CHIP_CLASS}>
+                  <input
+                    type="checkbox"
+                    value={category}
+                    className="sr-only"
+                    checked={on}
+                    onChange={() => toggleSource(category)}
+                  />
+                  {sourceCategoryLabel(category)}
+                </label>
+              )
+            })}
+          </div>
         </fieldset>
       </div>
-      <div className="flex min-h-[420px] flex-col rounded-md border border-line bg-surface p-5">
+      <div className={`flex min-h-[420px] min-w-0 flex-col ${PAGE_PANEL_CLASS}`}>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="text-lg font-semibold text-fg">Memo canvas</h2>
+            <h2 className={PANEL_TITLE_CLASS}>Memo canvas</h2>
             <p className="mt-1 flex flex-wrap items-center gap-1 text-sm text-muted">
-              {subject ? (subjectName ?? <Skeleton className="h-4 w-24" />) : 'No subject selected'} · {[...sources].join(', ') || 'no sources'}
+              {subject ? (subjectName ?? <Skeleton className="h-4 w-24" />) : 'No subject selected'} ·{' '}
+              {[...sources].map(sourceCategoryLabel).join(', ') || 'no sources'}
             </p>
+            {subject ? null : (
+              <p className="mt-1 text-xs text-faint">
+                To analyze a company, open its symbol page and choose Analyze.
+              </p>
+            )}
           </div>
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => void generateMemo()}
-              className="rounded-md border border-line-strong px-4 py-2 text-sm font-medium"
-            >
-              Generate memo
-            </button>
-            <button
-              type="button"
-              onClick={() => void addToChat()}
-              className={PRIMARY_BUTTON_CLASS}
-            >
+            <button type="button" onClick={() => void addToChat()} className={SECONDARY_BUTTON_CLASS}>
               Add to chat
             </button>
             {thesisHandoff ? (
               <button
                 type="button"
                 onClick={() => navigate('/agents', { state: { thesisHandoff } })}
-                className={PRIMARY_BUTTON_CLASS}
+                className={SECONDARY_BUTTON_CLASS}
               >
                 Monitor this thesis
               </button>
             ) : null}
+            <button type="button" onClick={() => void generateMemo()} className={PRIMARY_BUTTON_CLASS}>
+              Generate memo
+            </button>
           </div>
         </div>
         <p className="mt-3 text-xs text-muted">{status}</p>
-        <article className="mt-5 flex flex-1 flex-col gap-3 rounded-md border border-dashed border-line-strong p-4">
+        <article className="mt-4 flex flex-1 flex-col gap-3 rounded-lg border border-dashed border-line-strong p-4">
           {memoRun ? (
             <>
               {memoRun.blocks.map((block) => <BlockView key={blockKey(block)} block={block as Block} />)}
@@ -451,15 +465,15 @@ function AnalyzeWorkspace({ subject, subjectName }: { subject: ResolvedSubject |
       </div>
       </section>
       {runHistory.length > 0 ? (
-        <section className="rounded-md border border-line bg-surface p-5">
+        <section className={PAGE_PANEL_CLASS}>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold text-fg">Run history</h2>
+            <h2 className={PANEL_TITLE_CLASS}>Run history</h2>
             <label className="flex items-center gap-2 text-xs text-fg-soft">
               Compare
               <select
                 value={compareRunId}
                 onChange={(event) => void handleCompareRunChange(event.currentTarget.value)}
-                className="rounded-md border border-line-strong bg-surface px-2 py-1 text-xs"
+                className={COMPACT_FIELD_CLASS}
               >
                 <option value="">None</option>
                 {runHistory.map((run) => (
@@ -472,15 +486,15 @@ function AnalyzeWorkspace({ subject, subjectName }: { subject: ResolvedSubject |
           </div>
           <ul className="mt-3 flex flex-col gap-2">
             {runHistory.map((run) => (
-              <li key={run.run_id} className="flex flex-wrap items-center justify-between gap-3 rounded border border-line p-2 text-sm">
+              <li key={run.run_id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line px-3 py-2 text-sm">
                 <span>{run.display_title} · {run.playbook_version ? `v${run.playbook_version}` : run.template_name} · {run.created_at}</span>
                 <div className="flex gap-2">
-                  <button type="button" className="rounded-md border border-line-strong px-2 py-1 text-xs" onClick={() => void handleOpenRun(run.run_id)}>
+                  <button type="button" className={ROW_BUTTON_CLASS} onClick={() => void handleOpenRun(run.run_id)}>
                     Open
                   </button>
                   <button
                     type="button"
-                    className="rounded-md border border-line-strong px-2 py-1 text-xs disabled:opacity-50"
+                    className={ROW_BUTTON_CLASS}
                     disabled={!isRerunnableRun(run)}
                     title={isRerunnableRun(run) ? 'Rerun' : run.rerun_unavailable_reason ?? 'This run cannot be rerun'}
                     onClick={() => void handleRerun(run.run_id)}
@@ -492,7 +506,7 @@ function AnalyzeWorkspace({ subject, subjectName }: { subject: ResolvedSubject |
             ))}
           </ul>
           {runHistoryCursor ? (
-            <button type="button" className="mt-3 rounded-md border border-line-strong px-3 py-1.5 text-xs" onClick={() => void handleLoadMoreRuns()}>
+            <button type="button" className={`mt-3 ${ROW_BUTTON_CLASS}`} onClick={() => void handleLoadMoreRuns()}>
               Load more
             </button>
           ) : null}
@@ -612,11 +626,11 @@ function CarriedSubjectContext({
     <section
       data-testid="analyze-carried-subject"
       aria-labelledby="analyze-carried-subject-heading"
-      className="flex flex-col gap-3 rounded-md border border-line bg-surface p-5"
+      className={`flex flex-col gap-3 ${PAGE_PANEL_CLASS}`}
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-col gap-1">
-          <span className="text-xs uppercase text-muted">Carried subject</span>
+          <span className={SECTION_LABEL_CLASS}>Carried subject</span>
           <h2 id="analyze-carried-subject-heading" className="text-lg font-semibold text-fg">
             {name ?? <Skeleton label="Loading subject name" className="h-7 w-40" />}
           </h2>
