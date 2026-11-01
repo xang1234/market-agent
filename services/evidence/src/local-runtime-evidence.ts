@@ -242,13 +242,23 @@ export async function loadLocalRuntimeEvidence(
      -- add support. Different sources do not show
      -- independence, so none is inferred.
      -- ponytail: exact text only; paraphrases are not caught.
-     selected as (
-       select distinct on (case when $10::boolean then subject_id || '|' || predicate || '|' || lower(text_canonical)
-                                      || '|' || date_trunc('quarter', coalesce(effective_time, published_at, claim_created_at))::text else claim_id end) *
+     keyed as (
+       select *,
+              case when $10::boolean then subject_id || '|' || predicate || '|' || lower(text_canonical)
+                                      || '|' || date_trunc('quarter', coalesce(effective_time, published_at, claim_created_at))::text else claim_id end
+                as repeat_key
          from matching_claims
-        order by case when $10::boolean then subject_id || '|' || predicate || '|' || lower(text_canonical)
-                                      || '|' || date_trunc('quarter', coalesce(effective_time, published_at, claim_created_at))::text else claim_id end,
-                 first_rank asc nulls last, relevant desc, coalesce(published_at, claim_created_at) asc, claim_id
+     ),
+     -- A claim asked to come first was quoted as itself, so none is another's
+     -- repeat (two companies' causes can share a sentence); a copy nobody
+     -- quoted is still the quoted one's repeat.
+     selected as (
+       select distinct on (case when first_rank is not null then claim_id else repeat_key end) *
+         from keyed k
+        where k.first_rank is not null
+           or not exists (select 1 from keyed q where q.first_rank is not null and q.repeat_key = k.repeat_key)
+        order by case when first_rank is not null then claim_id else repeat_key end,
+                 relevant desc, coalesce(published_at, claim_created_at) asc, claim_id
      )
      select claim_id,
             document_id,
