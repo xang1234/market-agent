@@ -556,6 +556,20 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     }
   });
 
+  await t.test("'Show the evidence' whose claims read fails does not say the quoted cause is no longer citable (#542)", async () => {
+    const amdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD margin, its evidence unreadable" });
+    completedTurn(await runTurn(base, amdThread.thread_id, "Why did AMD's operating margin turn negative in Q2 2025?"));
+    await client.query(`alter table claim_arguments rename to claim_arguments_renamed`);
+    try {
+      completedTurn(await runTurn(base, amdThread.thread_id, "Show the evidence"));
+    } finally {
+      await client.query(`alter table claim_arguments_renamed rename to claim_arguments`);
+    }
+    const evidence = await latestAssistantMessage(base, amdThread.thread_id);
+    assert.deepEqual(evidence.blocks.flatMap((block) => refsOf(block).filter(([kind]) => kind === "claim")), []);
+    assert.ok(!answerText(evidence).includes(PRIOR_CAUSE_WITHDRAWN), JSON.stringify(answerText(evidence)));
+  });
+
   await t.test("a cause whose read is cancelled leaves the answer published, its cause named as not covered (#542)", async () => {
     // Another session holds the claims' arguments, so the cause's read of
     // them waits until the test cancels it, as an operator's pg_cancel_backend
