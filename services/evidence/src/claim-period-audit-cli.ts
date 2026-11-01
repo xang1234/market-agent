@@ -5,10 +5,12 @@
 //   DATABASE_URL=... npm run audit:claim-periods
 //
 // A release's bound period is "matched" when the issuer has an active fact of
-// that kind ending that day. It is "mismatched", and flagged, when it has none
-// but has a fiscal quarter or year spanning that day, so the fiscal year holds
-// facts and none ends there: the model may have misread the end or the kind.
-// It is "uncovered" when no fact spans the day, as before its facts are in.
+// that kind ending that day. Otherwise it is flagged as a "near_miss" when a
+// fact of that kind ends within NEAR_MISS_DAYS of it (a calendar end read for
+// a 52/53-week quarter's), or "mismatched" when a fiscal quarter or year spans
+// that day, so the fiscal year holds facts and none ends there: the model may
+// have misread the end or the kind. It is "uncovered" when no fact spans the
+// day, as before its facts are in. Exits 0 clean, 1 on a flag, 2 on an error.
 import { Pool } from "pg";
 import type { ClaimPeriod } from "./claim-repo.ts";
 import { factActiveSql } from "./fact-activity.ts";
@@ -19,8 +21,10 @@ export type ClaimPeriodAudit = {
   document_id: string;
   issuer_id: string;
   period: ClaimPeriod;
-  status: "matched" | "mismatched" | "uncovered";
+  status: "matched" | "near_miss" | "mismatched" | "uncovered";
 };
+
+const NEAR_MISS_DAYS = 7;
 
 export async function auditClaimPeriods(db: QueryExecutor): Promise<ClaimPeriodAudit[]> {
   const { rows } = await db.query<{
@@ -29,6 +33,7 @@ export async function auditClaimPeriods(db: QueryExecutor): Promise<ClaimPeriodA
     period_kind: ClaimPeriod["kind"];
     period_end: string;
     held: boolean;
+    near: boolean;
     covered: boolean;
   }>(
     `select distinct c.document_id::text as document_id,
@@ -39,6 +44,11 @@ export async function auditClaimPeriods(db: QueryExecutor): Promise<ClaimPeriodA
                      where f.subject_kind = 'issuer' and f.subject_id = ca.subject_id
                        and f.period_kind = c.period_kind and f.period_end = c.period_end
                        and ${factActiveSql("f")}) as held,
+            exists (select 1 from facts f
+                     where f.subject_kind = 'issuer' and f.subject_id = ca.subject_id
+                       and f.period_kind = c.period_kind
+                       and f.period_end between c.period_end - ${NEAR_MISS_DAYS} and c.period_end + ${NEAR_MISS_DAYS}
+                       and ${factActiveSql("f")}) as near,
             exists (select 1 from facts f
                      where f.subject_kind = 'issuer' and f.subject_id = ca.subject_id
                        and f.period_kind in ('fiscal_q', 'fiscal_y')
@@ -57,7 +67,7 @@ export async function auditClaimPeriods(db: QueryExecutor): Promise<ClaimPeriodA
     document_id: row.document_id,
     issuer_id: row.issuer_id,
     period: { kind: row.period_kind, end: row.period_end },
-    status: row.held ? "matched" : row.covered ? "mismatched" : "uncovered",
+    status: row.held ? "matched" : row.near ? "near_miss" : row.covered ? "mismatched" : "uncovered",
   }));
 }
 
@@ -71,18 +81,21 @@ async function main(): Promise<void> {
   } finally {
     await pool.end();
   }
-  const flagged = rows.filter((row) => row.status === "mismatched");
+  const flagged = rows.filter((row) => row.status === "near_miss" || row.status === "mismatched");
   for (const row of flagged) {
-    console.log(`mismatched: document ${row.document_id}, issuer ${row.issuer_id}, ${row.period.kind} ending ${row.period.end}`);
+    console.log(`${row.status}: document ${row.document_id}, issuer ${row.issuer_id}, ${row.period.kind} ending ${row.period.end}`);
   }
-  const matched = rows.filter((row) => row.status === "matched").length;
-  console.log(`${rows.length} bound periods: ${matched} matched, ${flagged.length} mismatched, ${rows.length - matched - flagged.length} uncovered`);
+  const count = (status: ClaimPeriodAudit["status"]) => rows.filter((row) => row.status === status).length;
+  console.log(
+    `${rows.length} bound periods: ${count("matched")} matched, ${count("near_miss")} near misses, ` +
+      `${count("mismatched")} mismatched, ${count("uncovered")} uncovered`,
+  );
   if (flagged.length > 0) process.exitCode = 1;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch((err) => {
     console.error(err);
-    process.exitCode = 1;
+    process.exitCode = 2;
   });
 }
