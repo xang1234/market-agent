@@ -320,8 +320,9 @@ function claimPeriod(payload: unknown): FiscalPeriod | null {
 // A fault of the database's state, not of the read: a lost connection (class
 // 08, or the driver's), a rolled-back transaction (40), exhausted resources
 // (53), an operator's intervention (57: pg_cancel_backend or a shutdown), a
-// lock not available (55P03). Nothing here sets statement_timeout or
-// lock_timeout, so neither raises one. A schema or SQL defect is none of them.
+// lock not available (55P03: lockCitableClaims locks nowait). Nothing here
+// sets statement_timeout, so none raises one. A schema or SQL defect is none of
+// them.
 function isOperational(error: unknown): boolean {
   const code = isRecord(error) && "code" in error ? String(error.code) : "";
   return /^(08|40|53|57)[0-9A-Z]{3}$/u.test(code) || code === "55P03" || code.startsWith("ECONN") || code === "ETIMEDOUT" || code === "EPIPE";
