@@ -2,9 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createRuntimeAuthority, dependencyClosure, type FinancialPlanV1, type LocalId, type PeriodSelector } from "../../financial-core/src/index.ts";
-import type { ClaimPeriod } from "../../evidence/src/claim-repo.ts";
 import { buildDeterministicPlan, type PlanningResult } from "../../financial-engine/src/planner.ts";
-import { asksCause, causeFamilies, explainedFigures, namedFigures } from "../src/filed-cause.ts";
+import { asksCause, causeFamilies, explainedFigures, namedFigures, type FiscalPeriod } from "../src/filed-cause.ts";
 import { parseProposal } from "../src/scope-proposal.ts";
 import { GOLDEN_AS_OF, GOLDEN_COMPANIES } from "./golden/dataset.ts";
 
@@ -57,12 +56,13 @@ function plan(figures: ReadonlyArray<ReadonlyArray<Node>>, slots = ["a"]): Finan
 
 // Each reported node bound as the golden facts date its company's period; a
 // latest selector binds to `latest`.
-function bound(planned: FinancialPlanV1, latest?: ClaimPeriod): Map<LocalId, ClaimPeriod> {
-  const periodOf = (slot: string, selector: PeriodSelector): ClaimPeriod => {
+function bound(planned: FinancialPlanV1, latest?: FiscalPeriod): Map<LocalId, FiscalPeriod> {
+  const periodOf = (slot: string, selector: PeriodSelector): FiscalPeriod => {
     if (selector.kind !== "fiscal_period") return latest!;
     const company = SLOTS[slot]!;
-    if (selector.fiscal_period === "FY") return { kind: "fiscal_y", end: company.years.find(([year]) => year === selector.fiscal_year)![2] };
-    return { kind: "fiscal_q", end: company.quarters.find((quarter) => quarter.fiscal_year === selector.fiscal_year && quarter.fiscal_period === selector.fiscal_period)!.period_end };
+    const { fiscal_year, fiscal_period } = selector;
+    if (fiscal_period === "FY") return { kind: "fiscal_y", fiscal_year, fiscal_period, end: company.years.find(([year]) => year === fiscal_year)![2] };
+    return { kind: "fiscal_q", fiscal_year, fiscal_period, end: company.quarters.find((quarter) => quarter.fiscal_year === fiscal_year && quarter.fiscal_period === fiscal_period)!.period_end };
   };
   return new Map(planned.operations.flatMap((node) => node.operation === "reported_metric" ? [[node.node_id, periodOf(node.subject_slot, node.period)] as const] : []));
 }
@@ -72,7 +72,7 @@ const reading = (metrics: unknown[], income_items: string[], asks = ["explains"]
 const EVERY_FIGURE = () => true;
 
 // A gap's reported node binds no period, and no output that reads it is verified.
-function explained(planned: FinancialPlanV1, options: { latest?: ClaimPeriod; named?: (figure: string) => boolean; gaps?: ReadonlyArray<LocalId> } = {}) {
+function explained(planned: FinancialPlanV1, options: { latest?: FiscalPeriod; named?: (figure: string) => boolean; gaps?: ReadonlyArray<LocalId> } = {}) {
   const gaps = new Set(options.gaps ?? []);
   const readsGap = (nodeId: LocalId) => [...dependencyClosure(planned, [nodeId])].some((id) => gaps.has(id));
   return explainedFigures({
@@ -83,7 +83,7 @@ function explained(planned: FinancialPlanV1, options: { latest?: ClaimPeriod; na
   });
 }
 
-const Q2_2025: ClaimPeriod = { kind: "fiscal_q", end: "2025-06-28" };
+const Q2_2025: FiscalPeriod = { kind: "fiscal_q", fiscal_year: 2025, fiscal_period: "Q2", end: "2025-06-28" };
 const figures = (metrics: string[], period = Q2_2025, issuer = AMD!.issuer_id) => ({ issuer, kind: "figures", period, metrics });
 const none = (issuer = AMD!.issuer_id) => ({ issuer, kind: "none" });
 
@@ -102,7 +102,7 @@ test("a filed cause explains the figures each company shows at its one latest pe
     ["a point", explained(plan([margin("q2", at(2025, "Q2"))])), [figures(["operating_margin"])]],
     ["a change, at its current period", explained(plan([change])), [figures(["revenue"])]],
     ["a trend ending at Q2", explained(plan([margin("q1", at(2025, "Q1")), margin("q2", at(2025, "Q2"))])), [figures(["operating_margin"])]],
-    ["a fiscal year", explained(plan([margin("fy", at(2025, "FY"))])), [figures(["operating_margin"], { kind: "fiscal_y", end: "2025-12-27" })]],
+    ["a fiscal year", explained(plan([margin("fy", at(2025, "FY"))])), [figures(["operating_margin"], { kind: "fiscal_y", fiscal_year: 2025, fiscal_period: "FY", end: "2025-12-27" })]],
     ["Q4 beside its fiscal year, which end the same day", explained(plan([margin("q4", at(2025, "Q4")), margin("fy", at(2025, "FY"))])), [none()]],
     ["a trailing sum", explained(plan([trailing])), [none()]],
     ["a Q1 margin beside Q2 revenue", explained(plan([margin("q1", at(2025, "Q1")), revenue("q2", at(2025, "Q2"))])), [none()]],
@@ -134,7 +134,7 @@ test("a filed cause explains the figures each company shows at its one latest pe
     [
       "each company at its own latest period",
       explained(plan([margin("a", at(2025, "Q2")), margin("b", at(2026, "Q1"), "b")], ["a", "b"])),
-      [figures(["operating_margin"]), figures(["operating_margin"], { kind: "fiscal_q", end: "2025-04-27" }, NVDA!.issuer_id)],
+      [figures(["operating_margin"]), figures(["operating_margin"], { kind: "fiscal_q", fiscal_year: 2026, fiscal_period: "Q1", end: "2025-04-27" }, NVDA!.issuer_id)],
     ],
   ];
   for (const [name, actual, expected] of rows) assert.deepEqual(actual, expected, name);

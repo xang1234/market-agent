@@ -29,8 +29,11 @@ export type FiledCause =
 
 export const NOT_ASKED: FiledCause = { asked: false };
 
+// A fiscal period as a claim keys it, with the label the answer gives it.
+export type FiscalPeriod = ClaimPeriod & BoundPeriod;
+
 /** Per company: the figures a filed cause would explain and the one period they end at, or none. */
-export type Explained = Readonly<{ issuer: string } & ({ kind: "none" } | { kind: "figures"; period: ClaimPeriod; metrics: ReadonlyArray<string> })>;
+export type Explained = Readonly<{ issuer: string } & ({ kind: "none" } | { kind: "figures"; period: FiscalPeriod; metrics: ReadonlyArray<string> })>;
 
 // Each figure a release explains, by the release metric of its own
 // explanations (sec-earnings-release-extraction.ts RELEASE_METRICS). A release
@@ -65,7 +68,7 @@ const OPAQUE: ReadonlySet<OperationNode["operation"]> = new Set(["trailing_sum",
 type Shown =
   | Readonly<{ kind: "ignored" }>
   | Readonly<{ kind: "opaque"; slots: ReadonlySet<LocalId> }>
-  | Readonly<{ kind: "figure"; slot: LocalId; figure: string; period: ClaimPeriod }>;
+  | Readonly<{ kind: "figure"; slot: LocalId; figure: string; period: FiscalPeriod }>;
 const IGNORED: Shown = { kind: "ignored" };
 
 /**
@@ -82,7 +85,7 @@ export function explainedFigures(input: Readonly<{
   // The outputs the answer shows a verified value for.
   verified: ReadonlySet<LocalId>;
   // Each reported node's bound fiscal period; an instant or a price has none.
-  periods: ReadonlyMap<LocalId, ClaimPeriod>;
+  periods: ReadonlyMap<LocalId, FiscalPeriod>;
   named: (figure: string) => boolean;
 }>): Explained[] {
   const { plan, periods } = input;
@@ -201,21 +204,19 @@ export async function filedCauses(
   const uncaused: FiledCause = { asked: true, quoted: new Set(), names: input.names, block: null };
   await tx.client.query("savepoint filed_cause");
   try {
-    const periods = await boundPeriods(tx, answer.run_id, plan);
     const explained = explainedFigures({
       plan,
       verified: new Set(answer.block.financial.results.flatMap((result) => result.disposition === "verified" ? [result.output_id] : [])),
-      periods,
+      periods: await boundPeriods(tx, answer.run_id, plan),
       named: input.named,
     });
-    // The period a company's cause explains, named as its figures name it.
-    const periodText = (period: ClaimPeriod) => boundPeriodText([...periods.values()].find((bound) => samePeriod(bound, period))!);
     const read: Array<{ issuer: string; period: string; evidence: LocalRuntimeEvidence }> = [];
     for (const company of explained) {
       if (company.kind === "none") continue;
       read.push({
         issuer: company.issuer,
-        period: periodText(company.period),
+        // Named as its figures name it.
+        period: boundPeriodText(company.period),
         evidence: await loadPeriodClaimEvidence(tx.client, {
           issuer_id: company.issuer,
           period: company.period,
@@ -297,7 +298,7 @@ export async function filedCauses(
 }
 
 // Each reported node's fiscal period, as its certified input bound it.
-async function boundPeriods(tx: Pick<FencedTx, "client" | "run">, runId: string, plan: FinancialPlanV1): Promise<Map<LocalId, ClaimPeriod & BoundPeriod>> {
+async function boundPeriods(tx: Pick<FencedTx, "client" | "run">, runId: string, plan: FinancialPlanV1): Promise<Map<LocalId, FiscalPeriod>> {
   const slots = plan.operations.flatMap((node) => node.operation === "reported_metric" ? [node.node_id] : []);
   const inputs = await readClosureInputs(tx.client, tx.run.user_id, runId, slots);
   return new Map(inputs.flatMap((input) => {
@@ -308,7 +309,7 @@ async function boundPeriods(tx: Pick<FencedTx, "client" | "run">, runId: string,
 
 // A bound fact's fiscal quarter or year, as a claim keys one, with its fiscal
 // label; an instant or a price has none.
-function claimPeriod(payload: unknown): (ClaimPeriod & BoundPeriod) | null {
+function claimPeriod(payload: unknown): FiscalPeriod | null {
   const period = isRecord(payload) && isRecord(payload.period) ? payload.period : null;
   if (period?.kind !== "duration" || typeof period.end !== "string" || typeof period.fiscal_year !== "number") return null;
   const fiscal = { fiscal_year: period.fiscal_year, end: period.end };
