@@ -17,6 +17,7 @@ const SERVED: Record<string, DevService> = {
   "/v1/analyze": "dev-api",
   "/v1/agents": "dev-api",
   "/v1/dev": "dev-api",
+  "/v1/financial": "dev-api",
   "/v1/themes": "dev-api",
   "/v1/evidence/inspect": "dev-api",
   "/v1/watchlists": "watchlists",

@@ -26,6 +26,7 @@ test("routeFor sends chat-profile prefixes to their service", () => {
   assert.deepEqual(routeFor("/v1/run-activities/stream"), { kind: "service", service: "chat" });
   assert.deepEqual(routeFor("/v1/subjects/search"), { kind: "service", service: "resolver" });
   assert.deepEqual(routeFor("/v1/dev/llm-settings"), { kind: "service", service: "dev-api" });
+  assert.deepEqual(routeFor("/v1/financial/results/r1"), { kind: "service", service: "dev-api" });
   assert.deepEqual(routeFor("/v1/market/quotes"), { kind: "service", service: "market" });
   assert.deepEqual(routeFor("/v1/fundamentals/profile"), { kind: "service", service: "fundamentals" });
   assert.deepEqual(routeFor("/v1/watchlists/default/members"), { kind: "service", service: "watchlists" });
