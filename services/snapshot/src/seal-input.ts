@@ -72,9 +72,9 @@ export type SealableBlock = {
 };
 
 // The manifest skeleton every staged seal shares: empty ref lists, raw basis,
-// no transforms, no parent. Builders spread this and override only the ref
-// lists their content actually populates, so the two builders below can't
-// drift on the fields they have no opinion about.
+// no transforms, no parent. Builders spread this and override only the
+// fields their content actually sets, so the builders below can't drift on
+// the fields they have no opinion about.
 function stagedManifestBase(input: {
   subjectRefs: ReadonlyArray<SnapshotSubjectRef>;
   asOf: string;
@@ -184,6 +184,9 @@ export function buildClaimBackedSealInput(input: {
   subjectRefs: ReadonlyArray<SnapshotSubjectRef>;
   toolCalls: ReadonlyArray<SealToolCallRef>;
   modelVersion?: string | null;
+  // The snapshot this one belongs to and is deleted with, such as the answer
+  // whose cause it seals.
+  parentSnapshot?: UUID | null;
 }): SnapshotSealInput {
   if (input.toolCalls.length === 0) {
     throw new Error("buildClaimBackedSealInput: LLM-derived blocks require at least one tool call ref");
@@ -220,6 +223,7 @@ export function buildClaimBackedSealInput(input: {
       asOf: input.block.as_of,
       modelVersion: input.modelVersion ?? null,
     }),
+    parent_snapshot: input.parentSnapshot ?? null,
     claim_refs: Object.freeze(claimRefs),
     document_refs: Object.freeze(documentRefs),
     source_ids: Object.freeze(sourceIds),
