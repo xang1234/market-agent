@@ -67,8 +67,8 @@ function bound(planned: FinancialPlanV1, latest?: ClaimPeriod): Map<LocalId, Cla
   return new Map(planned.operations.flatMap((node) => node.operation === "reported_metric" ? [[node.node_id, periodOf(node.subject_slot, node.period)] as const] : []));
 }
 
-const reading = (metrics: string[], income_items: string[]) =>
-  parseProposal(JSON.stringify({ metrics, asks: ["explains"], turns_off: { facets: [], metrics: [] }, income_items, period: { kind: "none" }, companies: { kind: "as_named", names: [] } }), "")!;
+const reading = (metrics: unknown[], income_items: string[], asks = ["explains"]) =>
+  parseProposal(JSON.stringify({ metrics, asks, turns_off: { facets: [], metrics: [] }, income_items, period: { kind: "none" }, companies: { kind: "as_named", names: [] } }), "")!;
 const EVERY_FIGURE = () => true;
 
 // A gap's reported node binds no period, and no output that reads it is verified.
@@ -125,6 +125,11 @@ test("a filed cause explains the figures each company shows at its one latest pe
       "an inherited margin trend followed by a revenue question",
       explained(plan([margin("q1", at(2025, "Q1")), margin("q2", at(2025, "Q2")), revenue("q2", at(2025, "Q2"))]), { named: namedFigures(reading(["income_statement"], ["revenue"])) }),
       [figures(["revenue"])],
+    ],
+    [
+      "'Why did AMD's margins fall?', read as asking for margins (the parser keeps no margin qualifier on the statement), beside revenue",
+      explained(plan([margin("q2", at(2025, "Q2")), revenue("q2", at(2025, "Q2"))]), { named: namedFigures(reading([{ metric: "income_statement", adjustment: null, qualifier: "margin" }], [], ["explains", "margins"])) }),
+      [figures(["operating_margin"])],
     ],
     [
       "each company at its own latest period",
