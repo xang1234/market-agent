@@ -1202,15 +1202,12 @@ function secSplitBasis(metricKey: string, token: SecValueLocation) {
 // A fact's no_noncontrolling_interest inference (#342), or null.
 const INFERENCE_SQL = `jsonb_path_query_first(f.quality_flags, '$[*] ? (@.kind == "no_noncontrolling_interest")')`;
 
-// An inferred figure holds only while no filing shows a noncontrolling
-// interest for its period (#342). Any download can be the first to show one,
-// for any period on file, so every filing's transaction checks them all.
 // Records the download's newest filing date for the issuer, and says whether
 // no download stored before it had a newer one. Compared by filing date, so
 // two downloads either side of a filing the same day compare equal.
 async function isNewestDownload(db: FundamentalsQueryExecutor, issuerId: UUID, facts: SecCompanyFacts): Promise<boolean> {
   const filed = Object.values(facts.facts).flatMap((concepts) => Object.values(concepts ?? {}))
-    .flatMap((concept) => Object.values(concept.units ?? {}))
+    .flatMap((concept) => Object.values(concept?.units ?? {}))
     .flatMap((values) => (Array.isArray(values) ? values.map((value) => value.filed) : []));
   const newest = filed.reduce((max, date) => (date > max ? date : max), "0001-01-01");
   const { rows } = await db.query<{ newest_filed: string }>(
@@ -1222,6 +1219,9 @@ async function isNewestDownload(db: FundamentalsQueryExecutor, issuerId: UUID, f
   return rows[0]?.newest_filed === newest;
 }
 
+// An inferred figure holds only while no filing shows a noncontrolling
+// interest for its period (#342). Any download can be the first to show one,
+// for any period on file, so every filing's transaction checks them all.
 async function retireRefutedInferences(db: FundamentalsQueryExecutor, issuerId: UUID, facts: SecCompanyFacts): Promise<void> {
   const usGaap = facts.facts["us-gaap"];
   if (!usGaap) return;
