@@ -230,7 +230,7 @@ export async function filedCauses(
       });
     }
     // A claim read may have been revoked since: each is locked and checked again, and one no longer citable is dropped.
-    const citable = await lockCitableClaims(tx.client, { claim_ids: read.flatMap(({ evidence }) => evidence.claim_refs), user_id: tx.run.user_id, as_of: plan.time.knowledge_cutoff });
+    const { citable } = await lockCitableClaims(tx.client, { claim_ids: read.flatMap(({ evidence }) => evidence.claim_refs), user_id: tx.run.user_id, as_of: plan.time.knowledge_cutoff });
     const quoted = read.flatMap(({ issuer, period, evidence }) => {
       const claims = evidence.claims.filter((claim) => citable.has(claim.claim_id));
       return claims.length === 0 ? [] : [{ issuer, period, claims, documents: evidence.verifier_documents.filter((document) => claims.some((claim) => claim.document_id === document.document_id)) }];

@@ -12,7 +12,7 @@ import type {
   ChatAssistantMessagePersistence,
   ChatAssistantMessagePersistenceInput,
 } from "./coordinator.ts";
-import { isUuid } from "./chat-ids.ts";
+import { contentHashForText, isUuid } from "./chat-ids.ts";
 import { destroyAfterFailedRollback, withPoolClient } from "../../shared/src/pool-client.ts";
 
 export type ChatMessagePersistenceDb = {
@@ -109,6 +109,10 @@ export type ChatThreadMessagesResult = {
   messages: ChatReadMessage[];
 };
 
+// A seal, and the blocks it sealed when they are not those it was given: the
+// answer rendered again without the claims it left out (#557).
+export type ChatSealResult = SnapshotSealResult & { blocks?: ReadonlyArray<Record<string, unknown>> };
+
 export type PersistChatMessageAfterSnapshotSealInput = {
   message_id?: string;
   thread_id: string;
@@ -118,7 +122,7 @@ export type PersistChatMessageAfterSnapshotSealInput = {
   answered_by?: string;
   // The research scope the message answered (research-scope.ts, #206).
   research_scope?: JsonValue;
-  sealSnapshot(): Promise<SnapshotSealResult>;
+  sealSnapshot(): Promise<ChatSealResult>;
 };
 
 export type PersistImportedArtifactMessageInput = {
@@ -139,7 +143,7 @@ export type PersistUserChatMessageInput = {
 
 export type ChatMessagePersistenceFactoryInput = {
   pool: ChatMessageClientPool;
-  sealSnapshot(input: ChatAssistantMessagePersistenceInput): Promise<SnapshotSealResult>;
+  sealSnapshot(input: ChatAssistantMessagePersistenceInput): Promise<ChatSealResult>;
 };
 
 export type PersistChatMessageAfterSnapshotSealResult =
@@ -164,7 +168,7 @@ export async function persistChatMessageAfterSnapshotSeal(
     return Object.freeze({ ok: false, seal });
   }
 
-  return persistSealedChatMessage(db, input, seal);
+  return persistSealedChatMessage(db, sealedBlocks(input, seal), seal);
 }
 
 export async function persistChatMessageAfterSnapshotSealWithPool(
@@ -181,9 +185,16 @@ export async function persistChatMessageAfterSnapshotSealWithPool(
   if (!isVerifiedSeal(seal)) {
     return Object.freeze({ ok: false, seal });
   }
-  const saved = input.reveal ? { ...input, ...(await revealed(pool, input.blocks, seal.snapshot.snapshot_id, input.reveal)) } : input;
+  const sealed = sealedBlocks(input, seal);
+  const saved = input.reveal ? { ...sealed, ...(await revealed(pool, sealed.blocks, seal.snapshot.snapshot_id, input.reveal)) } : sealed;
 
   return withPoolClient(pool, (client) => persistSealedChatMessage(chatMessageTransactionClient(client), saved, seal), destroyAfterFailedRollback);
+}
+
+// The blocks as their seal sealed them.
+function sealedBlocks<T extends { blocks: JsonValue; content_hash: string }>(input: T, seal: ChatSealResult): T {
+  if (seal.blocks === undefined) return input;
+  return { ...input, blocks: seal.blocks as JsonValue, content_hash: contentHashForText(JSON.stringify(seal.blocks)) };
 }
 
 // The blocks a reveal returns, once their proofs are read off the snapshot

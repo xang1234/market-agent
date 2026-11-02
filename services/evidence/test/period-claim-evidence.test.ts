@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createClaim, listClaimsForDocument, type ClaimPeriod } from "../src/claim-repo.ts";
-import { loadPeriodClaimEvidence } from "../src/local-runtime-evidence.ts";
+import { loadPeriodClaimEvidence, lockCitableClaims } from "../src/local-runtime-evidence.ts";
 import type { QueryExecutor } from "../src/types.ts";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
 
@@ -217,5 +217,24 @@ test("a period lookup returns a company's claims bound to that period (#542)", a
     );
     assert.deepEqual(await lookup(acme, Q2, ["management.explanation.operating_income"]), [bound.claim_id]);
     assert.deepEqual(await lookup(acme, Q3, ["management.explanation.operating_income"]), []);
+  });
+
+  await t.test("a lock that skips what another session is changing checks the rest: a claim whose document is being written is unchecked, one deleted is not citable (#557)", async () => {
+    const acme = await company(db);
+    const [kept, written, deleted] = await Promise.all(["Gross margin fell on an inventory charge.", "Gross margin fell on lower utilization.", "Gross margin fell on pricing."]
+      .map((text, i) => claim(db, acme, margin(text, `2025-08-0${i + 1}T20:00:00Z`, Q2))));
+    const documentOf = async (claimId: string) => (await db.query<{ document_id: string }>(`select document_id::text from claims where claim_id = $1`, [claimId])).rows[0]!.document_id;
+    await db.query(`update documents set deleted_at = now() where document_id = $1`, [await documentOf(deleted!)]);
+    const writer = await connectedClient(t, databaseUrl);
+    await writer.query("begin");
+    await writer.query(`select 1 from documents where document_id = $1 for no key update`, [await documentOf(written!)]);
+    await db.query("begin");
+    try {
+      const locked = await lockCitableClaims(db, { claim_ids: [kept!, written!, deleted!], skip_locked: true });
+      assert.deepEqual([[...locked.citable], [...locked.unchecked]], [[kept], [written]]);
+    } finally {
+      await db.query("rollback");
+      await writer.query("rollback");
+    }
   });
 });

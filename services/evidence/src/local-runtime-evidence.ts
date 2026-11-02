@@ -419,40 +419,48 @@ export async function loadPeriodClaimEvidence(
 // updates claims before documents, a known exception that today touches only
 // Form 4 and 13F filings. Each lock is taken nowait, so a row another
 // transaction is changing raises 55P03 (lock not available) at once, not a
-// wait inside the caller's finalization. A revocation committed before the
-// lock drops its claim; one that starts later waits for the caller's commit.
+// wait inside the caller's finalization; skip_locked instead passes over that
+// row, and its claim, citable as last committed but not locked, is unchecked.
+// A revocation committed before the lock drops its claim; one that starts
+// later waits for the caller's commit.
 export async function lockCitableClaims(
   db: RowQueryExecutor,
-  input: { claim_ids: ReadonlyArray<string>; user_id?: string | null; as_of?: string },
-): Promise<ReadonlySet<string>> {
+  input: { claim_ids: ReadonlyArray<string>; user_id?: string | null; as_of?: string; skip_locked?: boolean },
+): Promise<{ citable: ReadonlySet<string>; unchecked: ReadonlySet<string> }> {
   const claimIds = unique(input.claim_ids).sort();
-  if (claimIds.length === 0) return new Set();
-  await db.query(
-    `select s.source_id from sources s
+  if (claimIds.length === 0) return { citable: new Set(), unchecked: new Set() };
+  const wait = input.skip_locked ? "skip locked" : "nowait";
+  const sources = await db.query<{ id: string }>(
+    `select s.source_id::text as id from sources s
       where s.source_id in (
         select c.reported_by_source_id from claims c where c.claim_id = any($1::uuid[])
         union
         select d.source_id from claims c join documents d on d.document_id = c.document_id where c.claim_id = any($1::uuid[]))
-      order by s.source_id for share nowait`,
+      order by s.source_id for share ${wait}`,
     [claimIds],
   );
-  await db.query(
-    `select d.document_id from documents d
+  const documents = await db.query<{ id: string }>(
+    `select d.document_id::text as id from documents d
       where d.document_id in (select c.document_id from claims c where c.claim_id = any($1::uuid[]))
-      order by d.document_id for share nowait`,
+      order by d.document_id for share ${wait}`,
     [claimIds],
   );
-  await db.query(`select c.claim_id from claims c where c.claim_id = any($1::uuid[]) order by c.claim_id for share nowait`, [claimIds]);
-  const { rows } = await db.query<{ claim_id: string }>(
-    `select c.claim_id::text as claim_id
+  const claims = await db.query<{ id: string }>(`select c.claim_id::text as id from claims c where c.claim_id = any($1::uuid[]) order by c.claim_id for share ${wait}`, [claimIds]);
+  const { rows } = await db.query<{ claim_id: string; locked: boolean }>(
+    `select c.claim_id::text as claim_id,
+            c.claim_id = any($4::uuid[]) and d.document_id = any($5::uuid[])
+              and s.source_id = any($6::uuid[]) and d.source_id = any($6::uuid[]) as locked
        from claims c
        join documents d on d.document_id = c.document_id
        join sources s on s.source_id = c.reported_by_source_id
       where c.claim_id = any($1::uuid[])
         and ${citableClaimSql("$2::uuid", "$3::timestamptz")}`,
-    [claimIds, userIdOrNull(input.user_id), input.as_of ?? null],
+    [claimIds, userIdOrNull(input.user_id), input.as_of ?? null, claims.rows.map((row) => row.id), documents.rows.map((row) => row.id), sources.rows.map((row) => row.id)],
   );
-  return new Set(rows.map((row) => row.claim_id));
+  return {
+    citable: new Set(rows.flatMap((row) => (row.locked ? [row.claim_id] : []))),
+    unchecked: new Set(rows.flatMap((row) => (row.locked ? [] : [row.claim_id]))),
+  };
 }
 
 // d, the claim's document, is a copy fetched from the issuer's IR site.

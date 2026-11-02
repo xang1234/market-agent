@@ -1,11 +1,12 @@
-import { Pool } from "pg";
-import { logPoolErrors } from "../../shared/src/pool-client.ts";
+import { Pool, type PoolClient } from "pg";
+import { destroyAfterFailedRollback, logPoolErrors, withPoolClient } from "../../shared/src/pool-client.ts";
 
 import {
   emptyEvidence,
   loadLocalRuntimeEvidence,
   loadVerifierFactsForRefs,
   loadVerifierRowsForRefs,
+  lockCitableClaims,
   type LocalRuntimeClaimEvidence,
   type LocalRuntimeEvidence,
   type LocalRuntimeEvidenceInput,
@@ -15,7 +16,7 @@ import { hashJsonValue, toolCallArgsDigest } from "../../observability/src/tool-
 import { serializeJsonValue, type JsonValue } from "../../observability/src/types.ts";
 import type { SnapshotManifestDraft, SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
 import { STAGED_SNAPSHOT_MANIFEST } from "../../snapshot/src/manifest-staging.ts";
-import { sealSnapshotWithPool } from "../../snapshot/src/snapshot-sealer.ts";
+import { sealSnapshotInTransaction, snapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { planningModelFromRouter } from "../../financial-engine/src/planner.ts";
 import { createLlmRouterFromEnv } from "../../llm/src/index.ts";
@@ -38,11 +39,11 @@ import { frozenDataMode, hydrateYtdBars, marketHydrationOrigin, turnNow } from "
 import { companyListings, listingTimeZones, loadPerfComparisonBlocks, priceListingsForTurn, turnCompanies } from "./perf-block.ts";
 import { loadPriorCauseClaims, loadPriorScope, loadPriorSubjects as loadThreadPriorSubjects, loadRecentConversation } from "./thread-context.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
-import { createLlmThreadTitleModel } from "./llm-runtime.ts";
+import { createLlmThreadTitleModel, type DroppedClaims } from "./llm-runtime.ts";
 import { structuredRefsFromHandoff } from "./local-runtime-structured.ts";
 import { createChatFinancialRuntime, type ChatFinancialRuntime, type ChatFinancialTurnContext } from "./financial-runtime.ts";
 import { saveCommentary } from "./engine-commentary.ts";
-import { createChatMessagePersistence } from "./messages.ts";
+import { ChatSnapshotSealError, createChatMessagePersistence, type ChatSealResult } from "./messages.ts";
 import {
   preResolveChatSubjectWithResolver,
   type ChatResolvedSubjectPreResolution,
@@ -181,7 +182,6 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     },
   });
   const answerUsage = answer.exchange?.usage;
-  const { judging } = answer;
   const normalize = (block: Record<string, unknown>, refs: CitedRefs) =>
     normalizeAssistantBlock(block, {
       snapshotId: result.snapshot_id,
@@ -194,20 +194,24 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     ...llmBlocks.map((block) => normalize(block, citedRefs(block, claims))),
     ...[...factBlocks, ...engineAnswerNote(scope, { snapshotId: result.snapshot_id, asOf })].map((block) => normalize(block, NO_DEFAULT_REFS)),
   ];
-  return {
-    ...result,
-    blocks: turnBlocks(answer.blocks),
-    ...(judging
+  const turnAnswer = (shown: Pick<typeof answer, "blocks" | "judging">) => ({
+    blocks: turnBlocks(shown.blocks),
+    ...(shown.judging
       ? {
         judging: {
-          watch: (listener: (blocks: ReadonlyArray<Record<string, unknown>>) => void) => judging.watch((blocks) => listener(turnBlocks(blocks))),
-          done: judging.done.then(({ blocks, assertions }) => ({
+          watch: (listener: (blocks: ReadonlyArray<Record<string, unknown>>) => void) => shown.judging!.watch((blocks) => listener(turnBlocks(blocks))),
+          done: shown.judging.done.then(({ blocks, assertions }) => ({
             blocks: turnBlocks(blocks),
             ...(assertions ? { assertion_report: assertions } : {}),
           })),
         },
       }
       : {}),
+  });
+  return {
+    ...result,
+    ...turnAnswer(answer),
+    without: (dropped) => turnAnswer(answer.without(dropped)),
     ...(answeredBy ? { answered_by: answeredBy } : {}),
     ...(answerUsage ? { answer_usage: answerUsage } : {}),
     ...(answer.assertions ? { assertion_report: answer.assertions } : {}),
@@ -479,39 +483,72 @@ export const generateThreadTitle: ChatThreadTitleGenerator = async (job) =>
     model: createLlmThreadTitleModel(),
   })(job);
 
-async function sealAssistantMessageSnapshot(input: ChatAssistantMessagePersistenceInput) {
-  const blocks = input.blocks as ReadonlyArray<Record<string, unknown>>;
-  const snapshotId = snapshotIdFromBlocks(blocks);
-  const asOf = maxBlockAsOf(blocks) ?? turnNow(process.env);
+async function sealAssistantMessageSnapshot(input: ChatAssistantMessagePersistenceInput): Promise<ChatSealResult> {
+  const snapshotId = snapshotIdFromBlocks(input.blocks);
+  const asOf = maxBlockAsOf(input.blocks) ?? turnNow(process.env);
   const userId = await threadUserId(input.threadId);
-  const manifest = await manifestFromBlockRefs({
-    subjectRefs: subjectRefsFromBlocks(blocks, input.threadId),
-    asOf,
-    modelVersion: "chat-local-runtime",
-    blocks,
-  });
-  // Independent reads off the built manifest — load the source/doc/claim rows
-  // and the fact rows the verifier needs in parallel.
-  const [verifierRows, facts] = await Promise.all([
-    loadVerifierRowsForRefs(pool(), {
-      source_ids: manifest.source_ids,
-      document_refs: manifest.document_refs,
-      claim_refs: manifest.claim_refs,
-      user_id: userId,
-    }),
-    // As of the snapshot, like the readers that chose these facts (#159).
-    loadVerifierFactsForRefs(pool(), { fact_refs: manifest.fact_refs, cutoff: asOf }),
-  ]);
-  return sealSnapshotWithPool(pool(), {
-    snapshot_id: snapshotId,
-    thread_id: input.threadId,
-    manifest,
-    blocks: blocks as never,
-    facts,
-    sources: verifierRows.sources,
-    documents: verifierRows.documents,
-    claims: verifierRows.claims,
-  });
+  return withPoolClient(pool(), async (client: PoolClient) => {
+    try {
+      await client.query("begin");
+      const dropped = await droppedClaims(client, input.blocks, { user_id: userId, as_of: asOf });
+      if (dropped && !input.without) throw new ChatSnapshotSealError([{ reason_code: "missing_claim_ref", details: dropped }]);
+      const blocks = dropped ? input.without!(dropped) : input.blocks;
+      // On this client alone: one waiting for another while it holds its locks
+      // would stall the pool once every client did.
+      const manifest = await manifestFromBlockRefs(client, {
+        subjectRefs: subjectRefsFromBlocks(blocks, input.threadId),
+        asOf,
+        modelVersion: "chat-local-runtime",
+        blocks,
+      });
+      const verifierRows = await loadVerifierRowsForRefs(client, {
+        source_ids: manifest.source_ids,
+        document_refs: manifest.document_refs,
+        claim_refs: manifest.claim_refs,
+        user_id: userId,
+      });
+      // As of the snapshot, like the readers that chose these facts (#159).
+      const facts = await loadVerifierFactsForRefs(client, { fact_refs: manifest.fact_refs, cutoff: asOf });
+      const seal = await sealSnapshotInTransaction(snapshotTransactionClient(client), {
+        snapshot_id: snapshotId,
+        thread_id: input.threadId,
+        manifest,
+        blocks: blocks as never,
+        facts,
+        sources: verifierRows.sources,
+        documents: verifierRows.documents,
+        claims: verifierRows.claims,
+      });
+      // A refused seal keeps its audit row.
+      await client.query("commit");
+      return dropped ? { ...seal, blocks } : seal;
+    } catch (error) {
+      await client.query("rollback").catch((rollbackError: unknown) => {
+        (error as { rollback_error?: unknown }).rollback_error = rollbackError;
+      });
+      throw error;
+    }
+  }, destroyAfterFailedRollback);
+}
+
+// The claims the answer quotes that its seal leaves out (#557): each is
+// locked and checked again in the seal's transaction, as a filed cause's are
+// (filed-cause.ts). One whose rows another session is changing is passed
+// over, not waited for, and left out as unchecked; the rest are still
+// checked, so such a writer (an earnings release being extracted, a filing
+// superseded) costs the answer only the claims it touches.
+async function droppedClaims(
+  client: PoolClient,
+  blocks: ReadonlyArray<Record<string, unknown>>,
+  input: { user_id: string | null; as_of: string },
+): Promise<DroppedClaims | undefined> {
+  const quoted = uuidRefsFromBlocks(blocks, "claim_refs");
+  const { citable, unchecked } = await lockCitableClaims(client, { claim_ids: quoted, ...input, skip_locked: true });
+  const dropped = {
+    withdrawn: quoted.filter((claimId) => !citable.has(claimId) && !unchecked.has(claimId)),
+    unchecked: quoted.filter((claimId) => unchecked.has(claimId)),
+  };
+  return dropped.withdrawn.length + dropped.unchecked.length === 0 ? undefined : dropped;
 }
 
 async function threadUserId(threadId: string): Promise<string | null> {
@@ -563,14 +600,14 @@ export function citedRefs(
   };
 }
 
-async function manifestFromBlockRefs(input: {
+async function manifestFromBlockRefs(db: PoolClient, input: {
   subjectRefs: ReadonlyArray<SnapshotSubjectRef>;
   asOf: string;
   modelVersion: string;
   blocks: ReadonlyArray<Record<string, unknown>>;
 }): Promise<SnapshotManifestDraft> {
   const toolCallIds = uuidRefsFromBlocks(input.blocks, "tool_call_ids");
-  const toolCallResultHashes = await loadToolCallResultHashes(toolCallIds);
+  const toolCallResultHashes = await loadToolCallResultHashes(db, toolCallIds);
   const seriesSpecs = input.blocks.flatMap((block) =>
     Array.isArray(block.provenance_series_specs) ? block.provenance_series_specs as JsonValue[] : []
   );
@@ -614,10 +651,11 @@ function seriesSemantics(specs: ReadonlyArray<JsonValue>): {
 }
 
 async function loadToolCallResultHashes(
+  db: PoolClient,
   toolCallIds: ReadonlyArray<string>,
 ): Promise<ReadonlyArray<{ tool_call_id: string; result_hash: string }>> {
   if (toolCallIds.length === 0) return Object.freeze([]);
-  const { rows } = await pool().query<{ tool_call_id: string; result_hash: string }>(
+  const { rows } = await db.query<{ tool_call_id: string; result_hash: string }>(
     `select tool_call_id::text as tool_call_id,
             result_hash
        from tool_call_logs

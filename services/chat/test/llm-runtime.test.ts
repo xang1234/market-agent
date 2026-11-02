@@ -11,6 +11,7 @@ import {
   composeAnalystBlocksWithLlm as composeAnswer,
   TITLE_DEADLINES,
   createLlmThreadTitleModel,
+  renderedAnswer,
   turnPacket,
 } from "../src/llm-runtime.ts";
 import { checkAssertions, MAX_ASSERTIONS, type AssertionReport, type Rejection } from "../src/assertions.ts";
@@ -1387,3 +1388,62 @@ test("a rejected comparison never falls back to the model's prose (#286 review)"
   assert.equal(report.rendered, undefined);
 });
 
+// Three guidance claims on A, the third its own attribution.
+const SEALED_CLAIM = (n: number) => `c5570000-0000-4000-8000-00000000000${n}`;
+const SEALED_TOOL_CALL = {
+  tool_call_id: "tc-557",
+  tool_name: "research_lookup",
+  status: "ok",
+  result: { evidence: { claims: [
+    "Management raised its outlook.", "Management expects higher margins.", "Management cut its buyback.",
+  ].map((text, i) => ({ claim_id: SEALED_CLAIM(i + 1), source_id: `s-claim-${i + 1}`, text_canonical: text, predicate: "guidance.change", polarity: "positive", published_at: "2026-02-25T00:00:00.000Z" })) } },
+} as never;
+const SEALED_PACKET = recordedPacket(A_FIGURES, { toolCalls: [SEALED_TOOL_CALL], factBlocks: A_BLOCKS });
+const sealedAnswer = (list: unknown[]) =>
+  renderedAnswer({ blocks: [NARRATIVE_BLOCK], toolCalls: [SEALED_TOOL_CALL], factBlocks: A_BLOCKS }, SEALED_PACKET, checkAssertions(list, SEALED_PACKET)).blocks;
+const plain = (block: Record<string, unknown>) => (block.segments as Array<{ text?: string; format?: string }>).map((segment) => segment.text ?? segment.format).join("");
+
+test("an answer its seal left claims out of is rendered again without them: an inference resting on any of them goes, a claim quoted beside one stays, and the answer says so (#557)", () => {
+  const blocks = sealedAnswer([
+    { kind: "observation", text: "A's revenue was [[F1]].", evidence: ["F1"] },
+    { kind: "management_attribution", text: "Management raised its outlook and expects higher margins.", evidence: ["C1", "C2"] },
+    { kind: "management_attribution", text: "Management cut its buyback.", evidence: ["C3"] },
+    { kind: "analyst_inference", text: "It is returning less cash.", supports: [2] },
+    { kind: "analyst_inference", text: "It expects a better year.", supports: [0, 1] },
+  ]);
+  assert.equal(plain(blocks(ALL_SHOWN)[0]!),
+    "A's revenue was $130.5B in FY2026 (ended Jan 2026).\n\n" +
+    "According to a source dated Feb 2026: Management raised its outlook. According to a source dated Feb 2026: Management expects higher margins.\n\n" +
+    "According to a source dated Feb 2026: Management cut its buyback.\n\n" +
+    "> **Analyst inference:** It is returning less cash.\n\n> **Analyst inference:** It expects a better year.");
+  const [block] = blocks(ALL_SHOWN, { withdrawn: [SEALED_CLAIM(1), SEALED_CLAIM(3)], unchecked: [] });
+  assert.equal(plain(block!),
+    "A's revenue was $130.5B in FY2026 (ended Jan 2026).\n\n" +
+    "According to a source dated Feb 2026: Management expects higher margins.\n\n" +
+    "Claims this answer quoted are no longer citable, so they are left out.");
+  const refs = (block!.segments as Array<{ type: string; ref_id?: string }>).filter((segment) => segment.type === "ref").map((segment) => segment.ref_id);
+  assert.deepEqual([refs, block!.source_refs], [[FACT(1), SEALED_CLAIM(2)], ["s-nvda", "s-amd", "s-claim-2"]], "only what is left is cited");
+});
+
+test("an answer whose every quoted claim its seal left out says which were no longer citable and which could not be checked (#557)", () => {
+  const blocks = sealedAnswer([
+    { kind: "management_attribution", text: "Management raised its outlook.", evidence: ["C1"] },
+    { kind: "management_attribution", text: "Management expects higher margins.", evidence: ["C2"] },
+  ]);
+  assert.equal(plain(blocks(ALL_SHOWN, { withdrawn: [SEALED_CLAIM(1)], unchecked: [SEALED_CLAIM(2)] })[0]!),
+    `${NO_ANSWER} A claim this answer quoted is no longer citable, so it is left out. ` +
+    "A claim this answer quoted was being updated, so it could not be checked and is left out.");
+  assert.equal(plain(blocks(ALL_SHOWN, { withdrawn: [], unchecked: [SEALED_CLAIM(1), SEALED_CLAIM(2)] })[0]!),
+    `${NO_ANSWER} Claims this answer quoted were being updated, so they could not be checked and are left out.`);
+});
+
+test("an inference judged on a claim its seal left out goes, though another of its supports stays (#557)", () => {
+  const blocks = sealedAnswer([
+    { kind: "observation", text: "A's revenue was [[F1]].", evidence: ["F1"] },
+    { kind: "management_attribution", text: "Management raised its outlook.", evidence: ["C1"] },
+    { kind: "analyst_inference", text: "Management expects a better year.", supports: [0, 1] },
+  ]);
+  assert.equal(plain(blocks(ALL_SHOWN, { withdrawn: [SEALED_CLAIM(1)], unchecked: [] })[0]!),
+    "A's revenue was $130.5B in FY2026 (ended Jan 2026).\n\n" +
+    "A claim this answer quoted is no longer citable, so it is left out.");
+});
