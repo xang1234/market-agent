@@ -18,7 +18,7 @@ export type ScreenRepository = {
   save(screen: ScreenSubject): Promise<ScreenSaveResult>;
   find(screen_id: string): Promise<ScreenSubject | null>;
   listForUser(user_id: string): Promise<ReadonlyArray<ScreenSubject>>;
-  delete(screen_id: string): Promise<void>;
+  delete(screen_id: string, user_id: string): Promise<void>;
 };
 
 // `save` is upsert: a save with the same screen_id replaces the prior
@@ -52,7 +52,11 @@ export function createInMemoryScreenRepository(
 
   return {
     async save(screen) {
-      const existed = byId.has(screen.screen_id);
+      const prior = byId.get(screen.screen_id);
+      if (prior && prior.user_id !== screen.user_id) {
+        throw new ScreenNotFoundError(screen.screen_id);
+      }
+      const existed = prior !== undefined;
       byId.set(screen.screen_id, screen);
       return existed
         ? { status: "replaced", screen }
@@ -71,11 +75,12 @@ export function createInMemoryScreenRepository(
           .sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
       );
     },
-    async delete(screen_id) {
+    async delete(screen_id, user_id) {
       assertUuid(screen_id, "delete.screen_id");
-      if (!byId.delete(screen_id)) {
+      if (byId.get(screen_id)?.user_id !== user_id) {
         throw new ScreenNotFoundError(screen_id);
       }
+      byId.delete(screen_id);
     },
   };
 }
@@ -113,8 +118,7 @@ export function createPostgresScreenRepository(
            screen_id, user_id, name, definition, created_at, updated_at
          ) values ($1, $2, $3, $4::jsonb, $5, $6)
          on conflict (screen_id) do update
-            set user_id = excluded.user_id,
-                name = excluded.name,
+            set name = excluded.name,
                 definition = excluded.definition,
                 created_at = excluded.created_at,
                 updated_at = excluded.updated_at
@@ -169,11 +173,11 @@ export function createPostgresScreenRepository(
       );
       return Object.freeze(result.rows.map(screenFromRow));
     },
-    async delete(screen_id) {
+    async delete(screen_id, user_id) {
       assertUuid(screen_id, "delete.screen_id");
       const result = await db.query(
-        `delete from screener_screens where screen_id = $1`,
-        [screen_id],
+        `delete from screener_screens where screen_id = $1 and user_id = $2`,
+        [screen_id, user_id],
       );
       if ((result.rowCount ?? 0) === 0) {
         throw new ScreenNotFoundError(screen_id);
