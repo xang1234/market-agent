@@ -439,12 +439,7 @@ async function storeFiling(
     const stale = input.income === "repair" && income
       ? await staleStatementFacts(client, input.issuerId, input.cik, income)
       : new Map<string, string[]>();
-    if (stale.size > 0) {
-      await client.query(
-        `update facts set invalidated_at = now(), updated_at = now() where fact_id = any($1::uuid[])`,
-        [[...stale.values()].flat()],
-      );
-    }
+    if (stale.size > 0) await invalidateWithDependents(client, input.issuerId, [...stale.values()].flat());
     for (const entry of mapped) {
       const inserted = await persistStatementFacts(client, entry.mapped, clock, {
         cik: input.cik,
@@ -1199,9 +1194,26 @@ async function retireRefutedInferences(db: FundamentalsQueryExecutor, issuerId: 
     [issuerId],
   );
   const refuted = rows.filter((row) => reportsNoncontrollingInterest(usGaap, row.period_start, row.period_end)).map((row) => row.fact_id);
-  if (refuted.length > 0) {
-    await db.query(`update facts set invalidated_at = now(), updated_at = now() where fact_id = any($1::uuid[])`, [refuted]);
-  }
+  if (refuted.length > 0) await invalidateWithDependents(db, issuerId, refuted);
+}
+
+// Invalidates the facts and every active fact of the issuer derived from one
+// (analyze's quality_flags input_fact_ids), at any depth.
+async function invalidateWithDependents(db: FundamentalsQueryExecutor, issuerId: UUID, factIds: ReadonlyArray<string>): Promise<void> {
+  await db.query(
+    `with recursive refuted(fact_id) as (
+       select unnest($2::uuid[])
+       union
+       select d.fact_id
+         from refuted r
+         join facts d on d.subject_kind = 'issuer' and d.subject_id = $1 and d.invalidated_at is null
+                     and d.quality_flags @> jsonb_build_array(jsonb_build_object('input_fact_ids', jsonb_build_array(r.fact_id::text)))
+     )
+     update facts f set invalidated_at = now(), updated_at = now()
+       from refuted r
+      where f.fact_id = r.fact_id and f.invalidated_at is null`,
+    [issuerId, factIds],
+  );
 }
 
 const SEC_CONTEXT_VERSION = "sec_companyfacts_context.v1";
