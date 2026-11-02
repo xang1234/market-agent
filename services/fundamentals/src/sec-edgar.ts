@@ -611,13 +611,42 @@ export function secFiscalYearWindow(facts: SecCompanyFacts, fiscalYear: number):
   return start && end ? { start, end } : null;
 }
 
+// The primary statement concepts that date a fiscal year, in the order that
+// breaks a tie between contexts ending and filed the same day. Kept apart from
+// US_GAAP_TO_METRIC_KEY, whose order is extraction's, so reordering it for
+// extraction moves no fiscal year.
+const ANNUAL_CONTEXT_CONCEPTS = [
+  "RevenueFromContractWithCustomerExcludingAssessedTax",
+  "SalesRevenueNet",
+  "Revenues",
+  "CostOfGoodsAndServicesSold",
+  "CostOfRevenue",
+  "GrossProfit",
+  "OperatingExpenses",
+  "OperatingIncomeLoss",
+  "NetIncomeLoss",
+  "ProfitLoss",
+  "EarningsPerShareBasic",
+  "EarningsPerShareDiluted",
+  "WeightedAverageNumberOfSharesOutstandingBasic",
+  "WeightedAverageNumberOfDilutedSharesOutstanding",
+  "NetCashProvidedByUsedInOperatingActivities",
+  "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations",
+  "PaymentsToAcquirePropertyPlantAndEquipment",
+  "PaymentsToAcquireProductiveAssets",
+  "Assets",
+  "Liabilities",
+  "StockholdersEquity",
+  "CashAndCashEquivalentsAtCarryingValue",
+] as const;
+
 // The fiscal year's own full-year period in its 10-K. Only the primary
-// statement concepts mapped here date it: a 10-K can also carry a footnote's
-// annual context outside the reporting year (a next-year commitment).
+// statement concepts date it: a 10-K can also carry a footnote's annual
+// context outside the reporting year (a next-year commitment).
 function annualPeriod(facts: SecCompanyFacts, fiscalYear: number): SecFiscalWindow | null {
   const usGaap = facts.facts["us-gaap"] ?? {};
   let best: SecConceptValue | undefined;
-  for (const conceptName of Object.keys(US_GAAP_TO_METRIC_KEY)) {
+  for (const conceptName of ANNUAL_CONTEXT_CONCEPTS) {
     for (const values of Object.values(usGaap[conceptName]?.units ?? {})) {
       if (!Array.isArray(values)) continue;
       for (const v of values) {
