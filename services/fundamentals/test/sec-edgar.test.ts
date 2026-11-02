@@ -1078,6 +1078,33 @@ test("every noncontrolling-interest concept SEC filers tag, and equity that diff
   assert.deepEqual(inferredLines(equity(400), 2023), [["net_income", 70, null], ["net_income_consolidated", 70, "NetIncomeLoss"]]);
 });
 
+test("the noncontrolling-interest concepts are pinned, and a redeemable balance or an income share blocks the inference (#342)", () => {
+  assert.deepEqual(SEC_NONCONTROLLING_INTEREST_CONCEPTS, [
+    "NetIncomeLossAttributableToNoncontrollingInterest",
+    "NetIncomeLossAttributableToRedeemableNoncontrollingInterest",
+    "NetIncomeLossAttributableToNonredeemableNoncontrollingInterest",
+    "IncomeLossAttributableToNoncontrollingInterest",
+    "IncomeLossFromContinuingOperationsAttributableToNoncontrollingEntity",
+    "ComprehensiveIncomeNetOfTaxAttributableToNoncontrollingInterest",
+    "OtherComprehensiveIncomeLossNetOfTaxPortionAttributableToNoncontrollingInterest",
+    "MinorityInterest",
+    "MinorityInterestInOperatingPartnerships",
+    "OtherMinorityInterests",
+    "NonredeemableNoncontrollingInterest",
+    "RedeemableNoncontrollingInterestEquityCarryingAmount",
+    "RedeemableNoncontrollingInterestEquityCommonCarryingAmount",
+    "RedeemableNoncontrollingInterestEquityFairValue",
+    "PartnersCapitalAttributableToNoncontrollingInterest",
+  ]);
+  const redeemable = factsOf({
+    Revenues: [annualValue(2023, 500)],
+    NetIncomeLoss: [annualValue(2023, 70)],
+    RedeemableNoncontrollingInterestEquityCarryingAmount: [instantValue("2023-12-31", 12)],
+  });
+  assert.deepEqual(inferredLines(redeemable, 2023), [["net_income", 70, null]]);
+  assert.deepEqual(inferredLines(annualFacts({ NetIncomeLoss: { 2023: 70 }, NetIncomeLossAttributableToNoncontrollingInterest: { 2023: 3 } }), 2023), [["net_income", 70, null]]);
+});
+
 test("a balance counts as noncontrolling interest only at an instant inside the period (#342)", () => {
   const minorityAt = (end: string) => factsOf({ Revenues: [annualValue(2023, 500)], NetIncomeLoss: [annualValue(2023, 70)], MinorityInterest: [instantValue(end, 5)] });
   assert.deepEqual(inferredLines(minorityAt("2022-12-31"), 2023), [["net_income", 70, null], ["net_income_consolidated", 70, "NetIncomeLoss"]]);
