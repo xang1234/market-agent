@@ -412,6 +412,7 @@ test("sealSnapshotWithPool rejects when its connection is lost mid-seal, and the
     () => sealSnapshotWithPool(killedOnFirstQuery, validSealInput()),
     /Connection terminated unexpectedly/,
   );
+  assert.equal(pool.totalCount, 0, "the dead client was discarded, not pooled");
 });
 
 function validSealInput() {
