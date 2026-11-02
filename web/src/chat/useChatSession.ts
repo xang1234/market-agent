@@ -167,7 +167,7 @@ export function useChatSession({ userId, threadId, navigate, onThreadCreated }: 
     const text = raw.trim()
     const before = store.getState()
     if (text === '' || !userId || !selectThreadView(before).canAsk) return false
-    const turn: TurnIds = { runId: makeId(), messageId: makeId(), text }
+    const turn: TurnIds = { runId: makeId(), text }
     store.dispatch({ type: 'ask.started', turn })
 
     // A disposed session has no UI left to update or navigate from.
@@ -200,7 +200,6 @@ export function useChatSession({ userId, threadId, navigate, onThreadCreated }: 
         message = await persistUserChatTurn({
           threadId: sendThreadId,
           userId,
-          messageId: turn.messageId,
           content: turn.text,
         })
       } catch (caught) {
@@ -210,7 +209,7 @@ export function useChatSession({ userId, threadId, navigate, onThreadCreated }: 
       // The store wants the turn's stream from here on. A user who left
       // mid-send still gets the run started.
       if (owns() && store.getState().threadId === sendThreadId) store.dispatch({ type: 'message.persisted', threadId: sendThreadId, message })
-      else streams.start(sendThreadId, { runId: turn.runId, turnId: turn.messageId }, turn.text)
+      else streams.start(sendThreadId, { runId: turn.runId, turnId: message.message_id }, turn.text)
     }
     void send()
     return true

@@ -95,7 +95,7 @@ const issuedThreadId = (e: RecordedExchange) =>
 
 // Serves the recorded exchanges. A request matches a recording with the same method and
 // the same path/query/body once ids are blanked out (so the question text must match).
-// Ids the client generates (message, snapshot, run ids) are learned from each request
+// Ids the client generates (run ids) are learned from each request
 // and substituted into recorded responses; ids the server generated are replayed as-is,
 // so the client sends them back verbatim.
 //   - Reads (non-stream GETs) are state snapshots: one recorded after the last matched
@@ -134,7 +134,7 @@ export function createReplay(fixture: ReplayFixture, store?: ReplayStore): Repla
   const toActual = (text: string) => text.replace(UUID, (id) => recordedToActual.get(id) ?? id);
 
   // Only ids the client generated may differ from the recording: those that first appear
-  // in a request (message, snapshot, run ids). Ids the server issued first appear in a
+  // in a request (run ids). Ids the server issued first appear in a
   // response (a thread id, a fact id in a block); the client sends them back verbatim, so
   // they must match exactly. Without this, a lookup of a fact that wasn't inspected during
   // capture would get another fact's evidence (and alias that fact's id to it).
