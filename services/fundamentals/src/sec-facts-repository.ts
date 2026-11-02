@@ -287,8 +287,11 @@ export async function backfillSecCompanionStatements(
         and f.method = 'reported'
         and f.period_kind in ('fiscal_q', 'fiscal_y')
         and s.provider = 'sec_edgar'
-        and ${factActiveSql("f")}
-        and m.metric_key = any($2::text[])
+        and (${factActiveSql("f")} and m.metric_key = any($2::text[])
+          -- A net income from ProfitLoss that 0076 invalidated may have been its period's only income fact (#342).
+          or m.metric_key = 'net_income' and f.invalidated_at is not null
+             and (f.quality_flags @> '[{"concept": "ProfitLoss"}]'
+               or exists (select 1 from fact_precision_attestations p where p.fact_id = f.fact_id and p.source_locator like '%#ProfitLoss|%')))
       order by f.fiscal_year, f.fiscal_period`,
     [input.issuerId, SEC_INCOME_METRIC_KEYS],
   );
