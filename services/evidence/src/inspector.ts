@@ -4,6 +4,7 @@ import {
   storagePolicyForDocument,
 } from "./source-disclosure.ts";
 import { formatCompactCurrency, formatCurrency, formatPercent } from "../../analyze/src/block-format.ts";
+import { noncontrollingInterestInferenceText } from "../../financial-core/src/contracts.ts";
 import { isRecord } from "../../shared/src/http.ts";
 
 export const EVIDENCE_INSPECTION_REF_KINDS = [
@@ -624,7 +625,7 @@ async function derivationInputs(
 function inferenceRows(qualityFlags: unknown): ReadonlyArray<{ label: string; value: string }> {
   return (Array.isArray(qualityFlags) ? qualityFlags : []).flatMap((flag) =>
     isRecord(flag) && flag.kind === "no_noncontrolling_interest" && typeof flag.concept === "string"
-      ? [{ label: "Inferred", value: `Equal to ${flag.concept}: the filer reports no noncontrolling interest for this period.` }]
+      ? [{ label: "Inferred", value: noncontrollingInterestInferenceText({ concept: flag.concept }) }]
       : []);
 }
 

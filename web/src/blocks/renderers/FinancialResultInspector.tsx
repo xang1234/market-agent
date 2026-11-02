@@ -10,6 +10,7 @@ import {
   type FinancialInspectedInput,
   type FinancialResultInspection,
 } from '../financialInspection.ts'
+import { noncontrollingInterestInferenceText } from '../../../../services/financial-core/src/contracts.ts'
 import { VerificationLabel } from '../VerificationLabel.tsx'
 import { Skeleton } from '../../ui/Skeleton.tsx'
 
@@ -138,7 +139,7 @@ function InputView({ input }: { input: FinancialInspectedInput }): ReactElement 
         </>
       ) : null}
       {input.inference ? (
-        <Row label="Inferred"><span className="break-normal">{`Equal to ${input.inference.concept}: the filer reports no noncontrolling interest for this period.`}</span></Row>
+        <Row label="Inferred"><span className="break-normal">{noncontrollingInterestInferenceText(input.inference)}</span></Row>
       ) : null}
       <Row label="Public by">{`${input.publication.available_no_later_than} (${input.publication.precision})`}</Row>
       <Row label="Source">{`${input.source.source_id} · version ${input.source.source_version_hash}${input.source.locator ? ` · ${input.source.locator}` : ''}`}</Row>

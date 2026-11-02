@@ -466,6 +466,11 @@ export type NoncontrollingInterestInferenceV1 = {
   checked: string[];
 };
 
+/** What every inspector shows for an inferred figure. */
+export function noncontrollingInterestInferenceText(inference: Pick<NoncontrollingInterestInferenceV1, "concept">): string {
+  return `Equal to ${inference.concept}: the filer reports no noncontrolling interest for this period.`;
+}
+
 /** An immutable bound input: a fact, or a share price from a stored price observation. */
 export type BoundFinancialInputV1 = BoundFactInputV1 | BoundPriceInputV1;
 

@@ -48,7 +48,8 @@ export const METRIC_CATALOG_V1: ReadonlyMap<MetricKey, MetricDefinition> = new M
     metric("revenue", "Revenue", "flow", "currency"),
     metric("gross_profit", "Gross profit", "flow", "currency"),
     metric("operating_income", "Operating income", "flow", "currency"),
-    // Attributable to the parent (us-gaap NetIncomeLoss), as EPS is; net margin uses it.
+    // Attributable to the parent, as EPS is: us-gaap NetIncomeLoss, or ProfitLoss
+    // for a period with no noncontrolling interest. Net margin divides it.
     metric("net_income", "Net income", "flow", "currency"),
     // us-gaap ProfitLoss, or NetIncomeLoss for a period with no noncontrolling
     // interest. OCF is consolidated, so cash conversion divides by this.
