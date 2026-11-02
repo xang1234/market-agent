@@ -102,14 +102,14 @@ test("list returns a frozen array (caller cannot mutate)", async () => {
 test("delete removes the record; subsequent delete throws ScreenNotFoundError", async () => {
   const repo = createInMemoryScreenRepository();
   await repo.save(makeScreen(SCREEN_A, "x", "2026-04-22T00:00:00.000Z"));
-  await repo.delete(SCREEN_A);
+  await repo.delete(SCREEN_A, USER_A);
   assert.equal(await repo.find(SCREEN_A), null);
-  await assert.rejects(() => repo.delete(SCREEN_A), ScreenNotFoundError);
+  await assert.rejects(() => repo.delete(SCREEN_A, USER_A), ScreenNotFoundError);
 });
 
 test("delete rejects malformed screen_id", async () => {
   const repo = createInMemoryScreenRepository();
-  await assert.rejects(() => repo.delete("nope"), /must be a UUID v4/);
+  await assert.rejects(() => repo.delete("nope", USER_A), /must be a UUID v4/);
 });
 
 test("createInMemoryScreenRepository accepts seeded initial records", async () => {
@@ -149,6 +149,21 @@ test("listForUser returns only screens owned by the requested user", async () =>
   );
 });
 
+test("in-memory save and delete refuse a screen id another user owns", async () => {
+  const repo = createInMemoryScreenRepository();
+  await repo.save(makeScreen(SCREEN_A, "alice", "2026-04-22T10:00:00.000Z", USER_A));
+
+  await assert.rejects(
+    repo.save(makeScreen(SCREEN_A, "bob", "2026-04-23T10:00:00.000Z", USER_B)),
+    ScreenNotFoundError,
+  );
+  await assert.rejects(repo.delete(SCREEN_A, USER_B), ScreenNotFoundError);
+
+  const found = await repo.find(SCREEN_A);
+  assert.equal(found?.user_id, USER_A);
+  assert.equal(found?.name, "alice");
+});
+
 test("postgres save refuses a screen id another user already owns", { skip: !dockerAvailable(), timeout: 120_000 }, async (t) => {
   const { databaseUrl } = await bootstrapDatabase(t, "screener-screen-owner");
   const db = await connectedPool(t, databaseUrl);
@@ -168,4 +183,19 @@ test("postgres save refuses a screen id another user already owns", { skip: !doc
   assert.equal(found?.user_id, USER_A);
   assert.equal(found?.name, "alice");
   assert.equal(found?.updated_at, "2026-04-22T10:00:00.000Z");
+});
+
+test("postgres delete refuses a screen id another user owns", { skip: !dockerAvailable(), timeout: 120_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "screener-screen-delete-owner");
+  const db = await connectedPool(t, databaseUrl);
+  await db.query(
+    `insert into users (user_id, email) values ($1::uuid, 'a@example.test'), ($2::uuid, 'b@example.test')`,
+    [USER_A, USER_B],
+  );
+  const repo = createPostgresScreenRepository(db);
+  await repo.save(makeScreen(SCREEN_A, "alice", "2026-04-22T10:00:00.000Z", USER_A));
+
+  await assert.rejects(repo.delete(SCREEN_A, USER_B), ScreenNotFoundError);
+
+  assert.equal((await repo.find(SCREEN_A))?.name, "alice");
 });
