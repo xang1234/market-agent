@@ -443,7 +443,10 @@ async function storeFiling(
     // A download older than one already stored may lack the noncontrolling
     // interest the newer one reported, so it leaves every figure it would
     // infer as it is: none stored, none retired.
-    const newest = await isNewestDownload(client, input.issuerId, input.fetched.facts);
+    const newest = await isNewestDownload(client, input.issuerId, input.fetched);
+    if (!newest && (income?.inferences.size ?? 0) > 0) {
+      input.logger?.warn(`sec: a download older than one stored for issuer ${input.issuerId} infers no net income`);
+    }
     // The repair retires stored income facts the filing contradicts, then
     // stores the filing's in their place (the active identity is unique).
     const stale = input.income === "repair" && income
@@ -1205,18 +1208,22 @@ const INFERENCE_SQL = `jsonb_path_query_first(f.quality_flags, '$[*] ? (@.kind =
 // Records the download's newest filing date for the issuer, and says whether
 // no download stored before it had a newer one. Compared by filing date, so
 // two downloads either side of a filing the same day compare equal.
-async function isNewestDownload(db: FundamentalsQueryExecutor, issuerId: UUID, facts: SecCompanyFacts): Promise<boolean> {
-  const filed = Object.values(facts.facts).flatMap((concepts) => Object.values(concepts ?? {}))
+async function isNewestDownload(db: FundamentalsQueryExecutor, issuerId: UUID, fetched: { facts: SecCompanyFacts; evidence: { completed_at: string } }): Promise<boolean> {
+  // A date that is malformed or later than the fetch itself would raise the
+  // stored date past every honest download, so it dates nothing.
+  const fetchedOn = fetched.evidence.completed_at.slice(0, 10);
+  const filed = Object.values(fetched.facts.facts).flatMap((concepts) => Object.values(concepts ?? {}))
     .flatMap((concept) => Object.values(concept?.units ?? {}))
-    .flatMap((values) => (Array.isArray(values) ? values.map((value) => value.filed) : []));
+    .flatMap((values) => (Array.isArray(values) ? values.map((value) => value.filed) : []))
+    .filter((date): date is string => typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date) && date <= fetchedOn);
   const newest = filed.reduce((max, date) => (date > max ? date : max), "0001-01-01");
-  const { rows } = await db.query<{ newest_filed: string }>(
+  const { rows } = await db.query<{ newest: boolean }>(
     `insert into sec_issuer_downloads (issuer_id, newest_filed) values ($1, $2::date)
      on conflict (issuer_id) do update set newest_filed = greatest(sec_issuer_downloads.newest_filed, excluded.newest_filed)
-     returning newest_filed::text as newest_filed`,
+     returning newest_filed = $2::date as newest`,
     [issuerId, newest],
   );
-  return rows[0]?.newest_filed === newest;
+  return rows[0]?.newest === true;
 }
 
 // An inferred figure holds only while no filing shows a noncontrolling

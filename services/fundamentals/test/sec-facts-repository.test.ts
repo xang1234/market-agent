@@ -735,7 +735,7 @@ class FakeFundamentalsDb {
       return rows([]);
     }
     if (sql.includes("pg_advisory_xact_lock")) return rows([]);
-    if (sql.includes("insert into sec_issuer_downloads")) return rows([{ newest_filed: values[1] }]);
+    if (sql.includes("insert into sec_issuer_downloads")) return rows([{ newest: true }]);
     if (sql.includes("from issuers")) {
       return rows([{ issuer_id: ISSUER_ID, cik: "320193" }]);
     }
