@@ -55,6 +55,14 @@ export class ChatMessageUnreadError extends Error {
   }
 }
 
+// Another message, a user's included, holds the id a message is saved under.
+export class ChatMessageIdTakenError extends Error {
+  constructor(messageId: string) {
+    super(`another message holds the id ${messageId}; the message was not saved`);
+    this.name = "ChatMessageIdTakenError";
+  }
+}
+
 export function logUnreadMessage(messageId: string, cause: unknown): void {
   console.error(`[chat] the committed message ${messageId} could not be read back; its turn completes without it`, cause);
 }
@@ -629,6 +637,11 @@ async function persistSealedChatMessage(
         throw new Error("persistChatMessageAfterSnapshotSeal: chat message insert returned no row");
       }
       // A turn re-run after a restart keeps the answer its first attempt saved.
+      const held = await db.query(
+        `select 1 from chat_messages where message_id = $1::uuid and thread_id = $2::uuid and role = $3::chat_role`,
+        [input.message_id, input.thread_id, input.role],
+      );
+      if (held.rows.length === 0) throw new ChatMessageIdTakenError(input.message_id);
       messageId = input.message_id;
     } else {
       messageId = inserted.message_id;
