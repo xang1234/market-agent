@@ -215,7 +215,7 @@ export const COMPUTATION_CASES: ReadonlyArray<ComputationCase> = [
   ] as const).map(([id, category, rule, ocf, capex]): ComputationCase => fcfCase(id, category, rule, ocf, capex, { kind: "value", value: subtractRational(rational(ocf), rational(capex)), exact: true })),
   fcfCase("fcf-negative-capex", "negative_base", "A negative reported capex is a gap: its sign is never flipped or guessed.", "120", "-30", { kind: "gap", reason_code: "incompatible_definition" }),
   ...([
-    ["cash-conversion", "operating_cash_flow_to_net_income", "operating_cash_flow", "net_income", "120", "100", false],
+    ["cash-conversion", "operating_cash_flow_to_net_income", "operating_cash_flow", "net_income_consolidated", "120", "100", false],
     ["liabilities-to-assets", "liabilities_to_assets", "total_liabilities", "total_assets", "300", "600", true],
     ["liabilities-to-equity", "liabilities_to_equity", "total_liabilities", "total_equity", "300", "200", true],
   ] as const).map(([id, ratioKey, numerator, denominator, top, bottom, instant]): ComputationCase => {

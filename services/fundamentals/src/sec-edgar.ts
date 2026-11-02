@@ -239,9 +239,9 @@ export const US_GAAP_TO_METRIC_KEY: Readonly<Record<string, string>> = {
   OperatingExpenses: "operating_expenses",
   OperatingIncomeLoss: "operating_income",
 
-  // Net income
+  // Net income: attributable to the parent, and including noncontrolling interest
   NetIncomeLoss: "net_income",
-  ProfitLoss: "net_income",
+  ProfitLoss: "net_income_consolidated",
 
   // EPS
   EarningsPerShareBasic: "eps_basic",
@@ -446,6 +446,16 @@ export function extractStatementWithTokens(input: ExtractStatementInput): {
       `extractStatement: no us-gaap values for fiscal_year=${input.fiscal_year} fiscal_period="${input.fiscal_period}" ${selectionDescription}`,
     );
   }
+  // A filer with no noncontrolling interest need not tag ProfitLoss: its
+  // NetIncomeLoss is then the consolidated figure too.
+  const parent = lines.find((line) => line.metric_key === "net_income");
+  if (parent && !seenKeys.has("net_income_consolidated") && !reportsNoncontrollingInterest(usGaap, resolvedPeriodStart, resolvedPeriodEnd)) {
+    lines.push({ ...parent, metric_key: "net_income_consolidated" });
+    const token = tokens.get("net_income");
+    if (token) tokens.set("net_income_consolidated", token);
+    const derivation = derivations.get("net_income");
+    if (derivation) derivations.set("net_income_consolidated", derivation);
+  }
   if (observedCurrencies.size > 1) {
     throw new Error(
       `extractStatement: matched values use multiple currencies (${[...observedCurrencies].join(", ")}); single-currency reporting is required`,
@@ -477,6 +487,22 @@ export function extractStatementWithTokens(input: ExtractStatementInput): {
     lines,
   };
   return { statement, tokens, derivations };
+}
+
+// A value of any of these over a span that overlaps the period, from any
+// filing, means some of the filer's income or equity then belonged to
+// noncontrolling interest.
+const NONCONTROLLING_INTEREST_CONCEPTS = [
+  "NetIncomeLossAttributableToNoncontrollingInterest",
+  "NetIncomeLossAttributableToRedeemableNoncontrollingInterest",
+  "NetIncomeLossAttributableToNonredeemableNoncontrollingInterest",
+  "MinorityInterest",
+];
+
+function reportsNoncontrollingInterest(usGaap: Record<string, SecConcept>, start: string | null, end: string): boolean {
+  return NONCONTROLLING_INTEREST_CONCEPTS.some((name) =>
+    Object.values(usGaap[name]?.units ?? {}).some((values) =>
+      values.some((value) => value.end >= (start ?? end) && (value.start ?? value.end) <= end)));
 }
 
 /** A derived line's inputs: each filed value, by its filing (accession) and period. */
@@ -725,6 +751,7 @@ const INCOME_KEYS: ReadonlySet<string> = new Set([
   "operating_expenses",
   "operating_income",
   "net_income",
+  "net_income_consolidated",
   "eps_basic",
   "eps_diluted",
   "weighted_average_basic_shares",

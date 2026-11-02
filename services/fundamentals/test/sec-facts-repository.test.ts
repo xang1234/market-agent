@@ -874,6 +874,7 @@ function metricDefinitions(): MetricDefinition[] {
     ["operating_income", "currency"],
     ["operating_expenses", "currency"],
     ["net_income", "currency"],
+    ["net_income_consolidated", "currency"],
     ["eps_basic", "currency"],
     ["eps_diluted", "currency"],
     ["weighted_average_basic_shares", "count"],

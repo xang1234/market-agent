@@ -113,7 +113,11 @@ npm test         # contract + AAPL FY2024 income statement verification
   statements but gets no context, since that concept adds purchased
   intangibles. Operating cash flow is certified only from the total
   `NetCashProvidedByUsedInOperatingActivities`, the scope capex covers;
-  the continuing-operations line gets no context. A balance is certified
+  the continuing-operations line gets no context. Net income is only
+  `NetIncomeLoss`, attributable to the parent. `ProfitLoss`, which adds
+  noncontrolling interest, is `net_income_consolidated`; for a period
+  with no `ProfitLoss` and no noncontrolling-interest value, that key is
+  `NetIncomeLoss`'s figure (#342). A balance is certified
   only from a 10-K: the statement contract labels every balance `FY` of
   its fiscal year, so a 10-Q balance is stored as `FY` at the quarter's
   end, and it appears in statements but gets no context.

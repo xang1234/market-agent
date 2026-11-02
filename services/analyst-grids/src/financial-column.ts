@@ -58,7 +58,7 @@ const FINANCIAL_COLUMNS: Readonly<Record<string, FinancialColumn>> = {
   latest_total_liabilities: { label: "Total liabilities (latest FY end)", metric_key: "total_liabilities", annual_only: true },
   latest_total_assets: { label: "Total assets (latest FY end)", metric_key: "total_assets", annual_only: true },
   latest_total_equity: { label: "Stockholders' equity (latest FY end)", metric_key: "total_equity", annual_only: true },
-  latest_cash_conversion: { label: "Cash conversion: OCF / net income (latest FY)", ratio_key: "operating_cash_flow_to_net_income", numerator: "operating_cash_flow", denominator: "net_income", annual_only: true },
+  latest_cash_conversion: { label: "Cash conversion: OCF / net income incl. noncontrolling interest (latest FY)", ratio_key: "operating_cash_flow_to_net_income", numerator: "operating_cash_flow", denominator: "net_income_consolidated", annual_only: true },
   latest_liabilities_to_assets: { label: "Liabilities / assets (latest FY end)", ratio_key: "liabilities_to_assets", numerator: "total_liabilities", denominator: "total_assets", annual_only: true },
   latest_liabilities_to_equity: { label: "Liabilities / equity (latest FY end)", ratio_key: "liabilities_to_equity", numerator: "total_liabilities", denominator: "total_equity", annual_only: true },
 };

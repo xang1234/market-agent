@@ -69,6 +69,7 @@ test("SEC company facts reach storage and strict reads without losing digits", {
     {
       eps_diluted: ["1234567.890123456789", TOKENS.eps_diluted, "1234567.890123456789", "source_token_preserved"],
       net_income: [TOKENS.net_income, TOKENS.net_income, TOKENS.net_income, "source_token_preserved"],
+      net_income_consolidated: [TOKENS.net_income, TOKENS.net_income, TOKENS.net_income, "source_token_preserved"],
       revenue: [TOKENS.revenue, TOKENS.revenue, TOKENS.revenue, "source_token_preserved"],
     },
   );
@@ -92,7 +93,7 @@ test("SEC company facts reach storage and strict reads without losing digits", {
   const second = await statements.find(lookup);
   assert.equal(typeof second?.lines.find((line) => line.metric_key === "revenue")?.value_num, "number");
   assert.equal(fetches, 1);
-  assert.equal((await db.query(`select count(*)::int as n from fact_precision_attestations`)).rows[0].n, 3);
+  assert.equal((await db.query(`select count(*)::int as n from fact_precision_attestations`)).rows[0].n, 4);
 
   // A proof that cannot be written takes its facts with it: no fact lands unproven.
   const otherIssuer = "31000000-0000-4000-8000-000000000004";
@@ -107,10 +108,10 @@ test("SEC company facts reach storage and strict reads without losing digits", {
 
   await db.query(`drop trigger refuse_proof on fact_precision_attestations`);
   assert.ok(await statements.find(otherLookup));
-  assert.equal(await factsFor(otherIssuer), 3);
+  assert.equal(await factsFor(otherIssuer), 4);
   const proven = (await db.query(
     `select count(*)::int as n from current_fact_precision_attestations a join facts f on f.fact_id = a.fact_id where f.subject_id = $1`,
     [otherIssuer],
   )).rows[0].n;
-  assert.equal(proven, 3);
+  assert.equal(proven, 4);
 });

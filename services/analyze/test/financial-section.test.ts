@@ -59,7 +59,7 @@ test("hydration reads each issuer's planned metrics and years from the memo's ow
   const reads = (id: string, peers?: string[]) => [...latestReadsByIssuer(context(id, peers))].map(([issuer, metrics]) => [issuer, Object.fromEntries(metrics)]);
   assert.deepEqual(reads("earnings_quality"), [[IDS.issuerA, { revenue: 2 }]], "revenue_trend compares the latest year with the one before");
   assert.deepEqual(reads("investment_memo"), [[IDS.issuerA, {
-    revenue: 2, gross_profit: 1, operating_cash_flow: 1, net_income: 1, total_liabilities: 1, total_assets: 1, total_equity: 1,
+    revenue: 2, gross_profit: 1, operating_cash_flow: 1, net_income_consolidated: 1, total_liabilities: 1, total_assets: 1, total_equity: 1,
   }]]);
   assert.deepEqual(reads("peer_comparison", [IDS.issuerB]), [[IDS.issuerA, { revenue: 1 }], [IDS.issuerB, { revenue: 1 }]], "peer_table reads only the latest year");
 });
@@ -145,7 +145,7 @@ test("a gap inside the optional cash-resilience section stays in that section", 
     return;
   }
   const { db, pool, templateId } = await memoDatabase(t, "analyze-fin-optional");
-  await seedCashResilience(db, { net_income: "-100" });
+  await seedCashResilience(db, { net_income_consolidated: "-100" });
   const memo = await createMemoRun(db, pool, { templateId, playbookId: "investment_memo" });
   const result = await memo.publish();
   const resilience = published(result.sections.find((section) => section.section_id === "cash_resilience"));

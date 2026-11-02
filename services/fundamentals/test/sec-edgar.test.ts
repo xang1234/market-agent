@@ -133,6 +133,7 @@ function secIncomeMetricRegistry() {
     metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaa10000007", "eps_diluted", "EPS (Diluted)", "currency", "derived"),
     metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaa10000008", "weighted_average_basic_shares", "Weighted-average basic shares", "count", "avg"),
     metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaa10000009", "weighted_average_diluted_shares", "Weighted-average diluted shares", "count", "avg"),
+    metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaa1000000a", "net_income_consolidated", "Net income including noncontrolling interest", "currency", "sum"),
   ];
   return createMetricRegistry(defs);
 }

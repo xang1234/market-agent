@@ -15,7 +15,7 @@ test("the catalog offers every numerical column as deterministic and the questio
     { column_key: "latest_total_liabilities", label: "Total liabilities (latest FY end)", kind: "deterministic" },
     { column_key: "latest_total_assets", label: "Total assets (latest FY end)", kind: "deterministic" },
     { column_key: "latest_total_equity", label: "Stockholders' equity (latest FY end)", kind: "deterministic" },
-    { column_key: "latest_cash_conversion", label: "Cash conversion: OCF / net income (latest FY)", kind: "deterministic" },
+    { column_key: "latest_cash_conversion", label: "Cash conversion: OCF / net income incl. noncontrolling interest (latest FY)", kind: "deterministic" },
     { column_key: "latest_liabilities_to_assets", label: "Liabilities / assets (latest FY end)", kind: "deterministic" },
     { column_key: "latest_liabilities_to_equity", label: "Liabilities / equity (latest FY end)", kind: "deterministic" },
     { column_key: "reader_question", label: "Question", kind: "reader" },

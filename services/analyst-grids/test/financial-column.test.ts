@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
-import { IDS, NVDA, seedCashResilience, seedNvda } from "../../financial-engine/test/db-fixtures.ts";
+import { IDS, NVDA, seedCashResilience, seedNvda, seedReportedFact } from "../../financial-engine/test/db-fixtures.ts";
 import { YAHOO_FINANCE_DEV_MARKET_SOURCE_ID } from "../../market/src/provider-sources.ts";
 import { validateColumnSpecs } from "../src/column-catalog.ts";
 import { parseFinancialColumnParams } from "../src/financial-column.ts";
@@ -43,6 +43,8 @@ test("grid financial columns", { timeout: 300_000 }, async (t) => {
   }
   const { db, pool } = await gridDatabase(t, "grid-fin-column");
   await seedCashResilience(db);
+  // Net income attributable to the parent; the consolidated figure (100) includes noncontrolling interest (#342).
+  await seedReportedFact(db, { metric_key: "net_income", value: "70", fiscal_year: 2023 });
 
   await t.test("each cell is its own certified unit; two instances of one column never share a result", async () => {
     const { runId } = await startRun(pool);
@@ -91,7 +93,7 @@ test("grid financial columns", { timeout: 300_000 }, async (t) => {
     const row = (index: number) => CASH_RESILIENCE_COLUMNS.map((_, column) => cells[`${index}:c${column}`]!);
     const presented = (cell: ReturnType<typeof row>[number]) => (cell.financial_block as { financial: { results: Array<{ presented: { value?: string } }> } }).financial.results[0]!.presented.value;
     assert.deepEqual(row(0).map((cell) => [cell.status, cell.display?.value, presented(cell)]), [
-      ["ok", "USD 120.00", "120"], ["ok", "USD 100.00", "100"], ["ok", "USD 300.00", "300"], ["ok", "USD 600.00", "600"], ["ok", "USD 200.00", "200"],
+      ["ok", "USD 120.00", "120"], ["ok", "USD 70.00", "70"], ["ok", "USD 300.00", "300"], ["ok", "USD 600.00", "600"], ["ok", "USD 200.00", "200"],
       ["ok", "1.20x", "1.2"], ["ok", "0.50x", "0.5"], ["ok", "1.50x", "1.5"],
     ]);
     assert.deepEqual(row(1).map((cell) => cell.coverage_flag), [...Array(5).fill("missing_input"), ...Array(3).fill("blocked_by_dependency")]);

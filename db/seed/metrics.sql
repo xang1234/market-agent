@@ -12,6 +12,7 @@ insert into metrics (metric_key, display_name, unit_class, aggregation, interpre
   ('operating_expenses',    'Operating Expenses',         'currency', 'sum',          'lower_is_better',  'gaap',    1, 'Operating expenses excluding cost of revenue.'),
   ('operating_income',      'Operating Income',           'currency', 'sum',          'higher_is_better', 'gaap',    1, 'Income from operations (revenue minus cost of revenue and opex).'),
   ('net_income',            'Net Income',                 'currency', 'sum',          'higher_is_better', 'gaap',    1, 'Net income attributable to common shareholders.'),
+  ('net_income_consolidated', 'Net Income Including Noncontrolling Interest', 'currency', 'sum', 'higher_is_better', 'gaap', 1, 'Consolidated net income (us-gaap ProfitLoss), including the share attributable to noncontrolling interest.'),
   ('ebitda',                'EBITDA',                     'currency', 'derived',      'higher_is_better', 'derived', 1, 'Earnings before interest, taxes, depreciation, and amortization.'),
   ('eps_basic',             'EPS (Basic)',                'currency', 'derived',      'higher_is_better', 'gaap',    1, 'Net income per basic share.'),
   ('eps_diluted',           'EPS (Diluted)',              'currency', 'derived',      'higher_is_better', 'gaap',    1, 'Net income per diluted share.'),

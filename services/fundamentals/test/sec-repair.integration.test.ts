@@ -82,10 +82,11 @@ test("the backfill replaces an income fact the old selector got wrong, keeping h
   assert.deepEqual(await contexts(), [
     { metric_key: "eps_diluted", disclosure_relation: "original", adjustment_basis: "as_filed", as_filed_on: "2024-11-01", share_basis: "diluted" },
     { metric_key: "net_income", disclosure_relation: "original", adjustment_basis: "unadjusted", as_filed_on: null, share_basis: "not_applicable" },
+    { metric_key: "net_income_consolidated", disclosure_relation: "original", adjustment_basis: "unadjusted", as_filed_on: null, share_basis: "not_applicable" },
     { metric_key: "revenue", disclosure_relation: "original", adjustment_basis: "unadjusted", as_filed_on: null, share_basis: "not_applicable" },
   ]);
   await backfill();
-  assert.deepEqual((await contexts()).length, 3, "a second backfill records no context twice");
+  assert.deepEqual((await contexts()).length, 4, "a second backfill records no context twice");
 
   const revenue = await factOf("revenue");
   assert.equal(revenue.length, 2);
