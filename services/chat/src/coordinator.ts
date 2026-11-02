@@ -33,8 +33,10 @@ import {
   ChatSnapshotSealError,
   logUnreadMessage,
   sealedCompletion,
+  withoutClaims,
   type ChatCommittedMessage,
   type ChatReadMessage,
+  type DroppedClaims,
 } from "./messages.ts";
 import { financialAwareRunner } from "./financial-turn.ts";
 import { companyNameIn, type CompanyChange, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
@@ -186,10 +188,11 @@ export type ChatAssistantMessagePersistenceInput = {
   answered_by?: string;
   research_scope?: ResearchScope;
   // Called once, after a verified seal of `blocks` and before the message is
-  // saved, with the sealed snapshot and its blocks' proofs; the blocks it
-  // returns are saved in place of `blocks`. They may differ from them only in
-  // rich_text text segments, which neither the seal nor a proof reads.
-  reveal?: (sealed: { snapshot_id: string; block_proofs: Readonly<Record<string, BlockProof>> }) =>
+  // saved, with the sealed snapshot, its blocks' proofs and the claims the
+  // seal dropped; the blocks it returns, without those claims, are saved in
+  // place of `blocks`. They may differ from them only in rich_text text
+  // segments, which neither the seal nor a proof reads.
+  reveal?: (sealed: { snapshot_id: string; block_proofs: Readonly<Record<string, BlockProof>>; dropped?: DroppedClaims }) =>
     Promise<{ blocks: ReadonlyArray<Record<string, unknown>>; content_hash: string }>;
 };
 
@@ -1459,12 +1462,12 @@ async function toolBackedAnalystTurnRunner(
         ...(result.research_scope ? { research_scope: result.research_scope } : {}),
         ...(judging
           ? {
-            reveal: async ({ snapshot_id, block_proofs }) => {
+            reveal: async ({ snapshot_id, block_proofs, dropped }) => {
               emitSealed(snapshot_id);
               const message_id = answerMessageId(context.threadId, context.runId, turnId);
               // A verdict changes only text, which the seal and its proofs do
               // not read (messages.ts revealed).
-              judging.watch((blocks) => emit("answer.shown", { message_id, snapshot_id, blocks: freeze(blocks), block_proofs }));
+              judging.watch((blocks) => emit("answer.shown", { message_id, snapshot_id, blocks: withoutClaims(freeze(blocks), dropped), block_proofs }));
               revealed = true;
               await judged();
               return { blocks: saved.blocks, content_hash: saved.content_hash };

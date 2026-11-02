@@ -1,4 +1,4 @@
-import { Pool } from "pg";
+import { Pool, type PoolClient } from "pg";
 import { logPoolErrors } from "../../shared/src/pool-client.ts";
 
 import {
@@ -6,6 +6,7 @@ import {
   loadLocalRuntimeEvidence,
   loadVerifierFactsForRefs,
   loadVerifierRowsForRefs,
+  lockCitableClaims,
   type LocalRuntimeClaimEvidence,
   type LocalRuntimeEvidence,
   type LocalRuntimeEvidenceInput,
@@ -15,7 +16,7 @@ import { hashJsonValue, toolCallArgsDigest } from "../../observability/src/tool-
 import { serializeJsonValue, type JsonValue } from "../../observability/src/types.ts";
 import type { SnapshotManifestDraft, SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
 import { STAGED_SNAPSHOT_MANIFEST } from "../../snapshot/src/manifest-staging.ts";
-import { sealSnapshotWithPool } from "../../snapshot/src/snapshot-sealer.ts";
+import { sealSnapshotInTransaction, snapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { planningModelFromRouter } from "../../financial-engine/src/planner.ts";
 import { createLlmRouterFromEnv } from "../../llm/src/index.ts";
@@ -42,7 +43,7 @@ import { createLlmThreadTitleModel } from "./llm-runtime.ts";
 import { structuredRefsFromHandoff } from "./local-runtime-structured.ts";
 import { createChatFinancialRuntime, type ChatFinancialRuntime, type ChatFinancialTurnContext } from "./financial-runtime.ts";
 import { saveCommentary } from "./engine-commentary.ts";
-import { createChatMessagePersistence } from "./messages.ts";
+import { createChatMessagePersistence, withoutClaims, type ChatSealResult, type DroppedClaims } from "./messages.ts";
 import {
   preResolveChatSubjectWithResolver,
   type ChatResolvedSubjectPreResolution,
@@ -479,39 +480,80 @@ export const generateThreadTitle: ChatThreadTitleGenerator = async (job) =>
     model: createLlmThreadTitleModel(),
   })(job);
 
-async function sealAssistantMessageSnapshot(input: ChatAssistantMessagePersistenceInput) {
-  const blocks = input.blocks as ReadonlyArray<Record<string, unknown>>;
-  const snapshotId = snapshotIdFromBlocks(blocks);
-  const asOf = maxBlockAsOf(blocks) ?? turnNow(process.env);
+async function sealAssistantMessageSnapshot(input: ChatAssistantMessagePersistenceInput): Promise<ChatSealResult> {
+  const snapshotId = snapshotIdFromBlocks(input.blocks);
+  const asOf = maxBlockAsOf(input.blocks) ?? turnNow(process.env);
   const userId = await threadUserId(input.threadId);
-  const manifest = await manifestFromBlockRefs({
-    subjectRefs: subjectRefsFromBlocks(blocks, input.threadId),
-    asOf,
-    modelVersion: "chat-local-runtime",
-    blocks,
-  });
-  // Independent reads off the built manifest — load the source/doc/claim rows
-  // and the fact rows the verifier needs in parallel.
-  const [verifierRows, facts] = await Promise.all([
-    loadVerifierRowsForRefs(pool(), {
+  const client = await pool().connect();
+  let releaseError: Error | undefined;
+  try {
+    await client.query("begin");
+    const dropped = await droppedClaims(client, input.blocks, { user_id: userId, as_of: asOf });
+    const blocks = withoutClaims(input.blocks, dropped);
+    const manifest = await manifestFromBlockRefs({
+      subjectRefs: subjectRefsFromBlocks(blocks, input.threadId),
+      asOf,
+      modelVersion: "chat-local-runtime",
+      blocks,
+    });
+    const verifierRows = await loadVerifierRowsForRefs(client, {
       source_ids: manifest.source_ids,
       document_refs: manifest.document_refs,
       claim_refs: manifest.claim_refs,
       user_id: userId,
-    }),
+    });
     // As of the snapshot, like the readers that chose these facts (#159).
-    loadVerifierFactsForRefs(pool(), { fact_refs: manifest.fact_refs, cutoff: asOf }),
-  ]);
-  return sealSnapshotWithPool(pool(), {
-    snapshot_id: snapshotId,
-    thread_id: input.threadId,
-    manifest,
-    blocks: blocks as never,
-    facts,
-    sources: verifierRows.sources,
-    documents: verifierRows.documents,
-    claims: verifierRows.claims,
+    const facts = await loadVerifierFactsForRefs(client, { fact_refs: manifest.fact_refs, cutoff: asOf });
+    const seal = await sealSnapshotInTransaction(snapshotTransactionClient(client), {
+      snapshot_id: snapshotId,
+      thread_id: input.threadId,
+      manifest,
+      blocks: blocks as never,
+      facts,
+      sources: verifierRows.sources,
+      documents: verifierRows.documents,
+      claims: verifierRows.claims,
+    });
+    // A refused seal keeps its audit row.
+    await client.query("commit");
+    return dropped ? { ...seal, dropped } : seal;
+  } catch (error) {
+    await client.query("rollback").catch((rollbackError: Error) => {
+      releaseError = rollbackError;
+    });
+    throw error;
+  } finally {
+    client.release(releaseError);
+  }
+}
+
+// The claims the answer quotes that are no longer citable (#557): each is
+// locked and checked again in the seal's transaction, as a filed cause's are
+// (filed-cause.ts). A row another session is changing raises lock not
+// available (55P03: the locks are nowait) and cannot be checked, so every
+// claim is dropped, as such a cause is not quoted.
+async function droppedClaims(
+  client: PoolClient,
+  blocks: ReadonlyArray<Record<string, unknown>>,
+  input: { user_id: string | null; as_of: string },
+): Promise<DroppedClaims | undefined> {
+  const quoted = uuidRefsFromBlocks(blocks, "claim_refs");
+  if (quoted.length === 0) return undefined;
+  await client.query("savepoint quoted_claims");
+  const citable = await lockCitableClaims(client, { claim_ids: quoted, ...input }).catch(async (error: unknown) => {
+    if ((error as { code?: unknown } | null)?.code !== "55P03") throw error;
+    await client.query("rollback to savepoint quoted_claims");
+    return new Set<string>();
   });
+  const claims = quoted.filter((claimId) => !citable.has(claimId));
+  if (claims.length === 0) return undefined;
+  const stillQuoted = new Set(uuidRefsFromBlocks(withoutClaims(blocks, { claims, documents: [] }), "claim_refs"));
+  const { rows } = await client.query<{ claim_id: string; document_id: string }>(
+    `select claim_id::text as claim_id, document_id::text as document_id from claims where claim_id = any($1::uuid[])`,
+    [quoted],
+  );
+  const cited = new Set(rows.flatMap((row) => stillQuoted.has(row.claim_id) ? [row.document_id] : []));
+  return { claims, documents: [...new Set(rows.map((row) => row.document_id))].filter((documentId) => !cited.has(documentId)) };
 }
 
 async function threadUserId(threadId: string): Promise<string | null> {
