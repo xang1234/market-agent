@@ -1105,6 +1105,13 @@ test("the noncontrolling-interest concepts are pinned, and a redeemable balance 
   assert.deepEqual(inferredLines(annualFacts({ NetIncomeLoss: { 2023: 70 }, NetIncomeLossAttributableToNoncontrollingInterest: { 2023: 3 } }), 2023), [["net_income", 70, null]]);
 });
 
+test("a noncontrolling interest tagged as 0, a dash line, reports none (#342)", () => {
+  const tagged = (concept: string, at: SecConceptValue) => factsOf({ Revenues: [annualValue(2023, 500)], NetIncomeLoss: [annualValue(2023, 70)], [concept]: [at] });
+  const inferred = [["net_income", 70, null], ["net_income_consolidated", 70, "NetIncomeLoss"]];
+  assert.deepEqual(inferredLines(tagged("NetIncomeLossAttributableToNoncontrollingInterest", annualValue(2023, 0)), 2023), inferred);
+  assert.deepEqual(inferredLines(tagged("MinorityInterest", instantValue("2023-12-31", 0)), 2023), inferred);
+});
+
 test("a balance counts as noncontrolling interest only at an instant inside the period (#342)", () => {
   const minorityAt = (end: string) => factsOf({ Revenues: [annualValue(2023, 500)], NetIncomeLoss: [annualValue(2023, 70)], MinorityInterest: [instantValue(end, 5)] });
   assert.deepEqual(inferredLines(minorityAt("2022-12-31"), 2023), [["net_income", 70, null], ["net_income_consolidated", 70, "NetIncomeLoss"]]);
