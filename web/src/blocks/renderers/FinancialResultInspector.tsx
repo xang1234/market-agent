@@ -137,6 +137,9 @@ function InputView({ input }: { input: FinancialInspectedInput }): ReactElement 
           ))}
         </>
       ) : null}
+      {input.inference ? (
+        <Row label="Inferred"><span className="break-normal">{`Equal to ${input.inference.concept}: the filer reports no noncontrolling interest for this period.`}</span></Row>
+      ) : null}
       <Row label="Public by">{`${input.publication.available_no_later_than} (${input.publication.precision})`}</Row>
       <Row label="Source">{`${input.source.source_id} · version ${input.source.source_version_hash}${input.source.locator ? ` · ${input.source.locator}` : ''}`}</Row>
     </dl>

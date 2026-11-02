@@ -336,6 +336,7 @@ function boundBinding(
     observed_at: candidate.observed_at,
     precision_status: precision.precision_class,
     ...(precision.derivation === null ? {} : { derivation: precision.derivation }),
+    ...(candidate.inference ? { inference: candidate.inference } : {}),
     eligibility: {
       selection_policy_version: SELECTION_POLICY_VERSION,
       promotion_status: candidate.method === "extracted" ? "reviewed_extraction" : candidate.verification_status,

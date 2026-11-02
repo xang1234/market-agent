@@ -519,6 +519,8 @@ export type BoundFactInputV1 = {
   precision_status: ProvenPrecisionClass;
   /** Present exactly when precision_status is derived_from_source_tokens; `numeric.raw_token` is then its sum. */
   derivation?: DerivationProofV1;
+  /** Present for a value that stands for a metric its concept does not name. */
+  inference?: NoncontrollingInterestInferenceV1;
   eligibility: {
     selection_policy_version: VersionTag;
     promotion_status: "authoritative" | "corroborated" | "reviewed_extraction";

@@ -94,6 +94,7 @@ function toInputCandidate(row: FinancialInputCandidate): InputCandidate[] {
       superseded_by: row.superseded_by,
       context: row.context,
       precision: row.precision,
+      inference: row.inference,
       publication: row.publication.map((proof) => ({
         attestation_id: proof.attestation_id,
         timing: {

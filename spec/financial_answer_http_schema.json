@@ -293,6 +293,10 @@
                 { "$ref": "./financial_result_schema.json#/$defs/DerivationProofV1" }
               ]
             },
+            "inference": {
+              "description": "Present for a value that stands for a metric its concept does not name: why it may.",
+              "$ref": "./financial_result_schema.json#/$defs/NoncontrollingInterestInferenceV1"
+            },
             "publication": {
               "type": "object",
               "required": [
