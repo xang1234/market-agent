@@ -122,9 +122,10 @@ npm test         # contract + AAPL FY2024 income statement verification
   inference in its `quality_flags` that the inspectors show ("Equal to
   NetIncomeLoss: the filer reports no noncontrolling interest for this
   period."). The concepts checked are `SEC_NONCONTROLLING_INTEREST_CONCEPTS`
-  (`src/sec-edgar.ts`) over spans overlapping the period, and equity
-  including noncontrolling interest that differs from the parent's at
-  an instant inside it. Every ingestion invalidates an inferred fact
+  (`src/sec-edgar.ts`) over spans overlapping the period, a `ProfitLoss`
+  that differs from `NetIncomeLoss` over the same span inside it, and
+  equity including noncontrolling interest that differs from the
+  parent's at an instant inside it. Every ingestion invalidates an inferred fact
   once the download shows a noncontrolling interest for its period. A
   `ProfitLoss` whose period disagrees with the statement's is dropped
   alone. A balance is certified

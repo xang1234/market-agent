@@ -536,18 +536,25 @@ export const SEC_NONCONTROLLING_INTEREST_CONCEPTS = [
   "PartnersCapitalAttributableToNoncontrollingInterest",
 ] as const;
 
-// Equity including noncontrolling interest that differs from the parent's at
-// the same instant shows one too; equal, or tagged alone, it shows none.
+// A total that differs from the parent's figure for the same span shows one
+// too, its noncontrolling interest's line possibly an extension concept
+// companyfacts lacks: ProfitLoss from NetIncomeLoss, or equity including
+// noncontrolling interest from StockholdersEquity. Equal, or tagged alone, it
+// shows none.
 const EQUITY_INCLUDING_NONCONTROLLING_INTEREST = "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest";
-const NONCONTROLLING_INTEREST_CHECKED = [...SEC_NONCONTROLLING_INTEREST_CONCEPTS, EQUITY_INCLUDING_NONCONTROLLING_INTEREST];
+const NONCONTROLLING_INTEREST_CHECKED = [...SEC_NONCONTROLLING_INTEREST_CONCEPTS, EQUITY_INCLUDING_NONCONTROLLING_INTEREST, "ProfitLoss"];
 
 export function reportsNoncontrollingInterest(usGaap: Record<string, SecConcept>, start: string | null, end: string): boolean {
   const within = (name: string) => Object.values(usGaap[name]?.units ?? {})
     .flatMap((values) => (Array.isArray(values) ? values : []))
     .filter((value) => value.end >= (start ?? end) && (value.start ?? value.end) <= end);
-  if (SEC_NONCONTROLLING_INTEREST_CONCEPTS.some((name) => within(name).length > 0)) return true;
-  const parent = within("StockholdersEquity");
-  return within(EQUITY_INCLUDING_NONCONTROLLING_INTEREST).some((total) => parent.some((own) => own.end === total.end && own.val !== total.val));
+  const differs = (total: string, parent: string) => {
+    const own = within(parent);
+    return within(total).some((value) => own.some((other) => other.start === value.start && other.end === value.end && other.val !== value.val));
+  };
+  return SEC_NONCONTROLLING_INTEREST_CONCEPTS.some((name) => within(name).length > 0)
+    || differs("ProfitLoss", "NetIncomeLoss")
+    || differs(EQUITY_INCLUDING_NONCONTROLLING_INTEREST, "StockholdersEquity");
 }
 
 /** A derived line's inputs: each filed value, by its filing (accession) and period. */

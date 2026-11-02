@@ -9,7 +9,7 @@ import { backfillSecCompanionStatements, createSecBackedStatementRepository, hyd
 
 const ISSUER_ID = "34200000-0000-4000-8000-000000000001";
 const FALLBACK_SOURCE_ID = "34200000-0000-4000-8000-000000000003";
-const CHECKED = [...SEC_NONCONTROLLING_INTEREST_CONCEPTS, "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"];
+const CHECKED = [...SEC_NONCONTROLLING_INTEREST_CONCEPTS, "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest", "ProfitLoss"];
 
 type Value = { start?: string; end: string; val: number; accn: string; fy: number; fp: string; form: string; filed: string };
 
