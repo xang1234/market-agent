@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { bootstrapDatabase, connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { loadEvidenceInspection, type EvidenceInspectionRef } from "../../evidence/src/inspector.ts";
-import { answerMessageId, stableUuid } from "../src/chat-ids.ts";
+import { answerMessageId, financialMessageId, stableUuid } from "../src/chat-ids.ts";
 import { createChatCoordinator } from "../src/coordinator.ts";
 import { createChatMessagePersistence } from "../src/messages.ts";
 import { startChatTestServer } from "./sse-helpers.ts";
@@ -155,4 +155,69 @@ test("an answer whose id a user message of its own thread holds fails its turn, 
 
   assert.deepEqual(await outcome(pool), ["turn.error", "ChatMessageIdTakenError"]);
   assert.deepEqual(await outcome(unreadable), ["turn.error", "ChatMessageIdTakenError"]);
+});
+
+test("a message_id a POST carries claims no id, so no one can take a turn's answer id ahead of it (#550)", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for answer id coverage");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "chat-answer-id-preclaim");
+  const pool = await connectedPool(t, databaseUrl);
+  const [ownerId, strangerId, ownerThreadId, strangerThreadId, runId, turnId, snapshotId] = Array.from({ length: 7 }, () => randomUUID());
+  await pool.query(`insert into users (user_id, email) values ($1,$2),($3,$4)`, [ownerId, `${ownerId}@t.dev`, strangerId, `${strangerId}@t.dev`]);
+  await pool.query(`insert into chat_threads (thread_id, user_id) values ($1,$2),($3,$4)`, [ownerThreadId, ownerId, strangerThreadId, strangerId]);
+  await pool.query(
+    `insert into snapshots (snapshot_id, subject_refs, source_ids, as_of, basis, normalization, allowed_transforms)
+     values ($1, '[]'::jsonb, '[]'::jsonb, now(), 'unadjusted', 'none', '{}'::jsonb)`,
+    [snapshotId],
+  );
+  const answerId = answerMessageId(ownerThreadId, runId, turnId);
+  const financialId = financialMessageId(ownerThreadId, turnId);
+
+  const base = await startChatTestServer(t, { threadsDb: pool });
+  const posted = [];
+  for (const [threadId, userId, messageId] of [
+    [strangerThreadId, strangerId, answerId],
+    [ownerThreadId, ownerId, answerId],
+    [strangerThreadId, strangerId, financialId],
+    [ownerThreadId, ownerId, financialId],
+  ]) {
+    const response = await fetch(`${base}/v1/chat/threads/${threadId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": userId! },
+      body: JSON.stringify({ message_id: messageId, content: "What did they ask?" }),
+    });
+    const { message } = (await response.json()) as { message?: { message_id: string } };
+    posted.push([response.status, message?.message_id === messageId]);
+  }
+  assert.deepEqual(posted, [[201, false], [201, false], [201, false], [201, false]]);
+  const held = await pool.query(`select count(*)::int as n from chat_messages where message_id in ($1::uuid, $2::uuid)`, [answerId, financialId]);
+  assert.deepEqual(held.rows, [{ n: 0 }]);
+
+  const turn = createChatCoordinator({
+    analystToolRuntime: async () => ({
+      snapshot_id: snapshotId,
+      verification: { ok: true, failures: [] },
+      tool_calls: [],
+      blocks: [{
+        id: "block-1",
+        kind: "rich_text",
+        snapshot_id: snapshotId,
+        data_ref: { kind: "chat_turn", id: turnId },
+        source_refs: [],
+        as_of: "2026-05-06T00:00:00.000Z",
+        segments: [{ type: "text", text: "Sealed." }],
+      }],
+    }),
+    persistAssistantMessage: createChatMessagePersistence({
+      pool,
+      sealSnapshot: async () => ({ ok: true, verification: { ok: true, failures: [] }, snapshot: { snapshot_id: snapshotId } }) as never,
+    }),
+  }).getOrCreateTurn({ threadId: ownerThreadId, runId, turnId, userIntent: "What is the latest news?" });
+  await turn.completed;
+  const last = turn.events.at(-1) as unknown as { type: string; message_id?: string };
+  assert.deepEqual([last.type, last.message_id], ["turn.completed", answerId]);
+  const { rows: saved } = await pool.query(`select thread_id::text, role from chat_messages where message_id = $1::uuid`, [answerId]);
+  assert.deepEqual(saved, [{ thread_id: ownerThreadId, role: "assistant" }]);
 });
