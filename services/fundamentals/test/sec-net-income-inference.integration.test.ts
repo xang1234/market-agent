@@ -50,7 +50,19 @@ async function setUp(t: test.TestContext, name: string) {
       order by f.fiscal_year, m.metric_key, f.created_at`,
     [ISSUER_ID],
   )).rows;
-  return { db, download, fetcher, options, lookup, backfill, netIncome };
+  // A derived fact as analyze materializes one, naming the fact it was computed from.
+  const deriveFrom = async (inputFactId: string) => (await db.query<{ fact_id: string }>(
+    `insert into facts (subject_kind, subject_id, metric_id, period_kind, period_start, period_end, fiscal_year, fiscal_period, value_num,
+                        unit, scale, as_of, observed_at, source_id, method, verification_status, freshness_class, coverage_level, confidence, quality_flags)
+     select f.subject_kind, f.subject_id, (select metric_id from metrics where metric_key = 'net_margin'), f.period_kind, f.period_start, f.period_end,
+            f.fiscal_year, f.fiscal_period, 0.1, 'ratio', 1, f.as_of, f.observed_at, f.source_id, 'derived', 'authoritative', 'filing_time', 'full', 1,
+            jsonb_build_array(jsonb_build_object('kind', 'derivation', 'metric', 'net_margin', 'input_fact_ids', jsonb_build_array(f.fact_id::text)))
+       from facts f where f.fact_id = $1
+     returning fact_id::text`,
+    [inputFactId],
+  )).rows[0]!.fact_id;
+  const isActive = async (factId: string) => (await db.query<{ active: boolean }>(`select invalidated_at is null as active from facts where fact_id = $1`, [factId])).rows[0]?.active;
+  return { db, download, fetcher, options, lookup, backfill, netIncome, deriveFrom, isActive };
 }
 
 const inferred = (concept: string) => [{ kind: "no_noncontrolling_interest", concept, checked: CHECKED }];
@@ -60,7 +72,7 @@ test("an inferred net income is stored with its basis, and a filing that reports
     t.skip("Docker is required for SEC ingestion coverage");
     return;
   }
-  const { download, lookup, backfill, netIncome } = await setUp(t, "fin-sec-ni-inference");
+  const { download, lookup, backfill, netIncome, deriveFrom, isActive } = await setUp(t, "fin-sec-ni-inference");
   download.text = companyFacts({
     Revenues: [year(2023, 2023, 500), year(2024, 2023, 500), year(2024, 2024, 600)],
     NetIncomeLoss: [year(2023, 2023, 70), year(2024, 2023, 70), year(2024, 2024, 80)],
@@ -74,6 +86,8 @@ test("an inferred net income is stored with its basis, and a filing that reports
     [2024, "net_income", "80", true, [], "source_token_preserved"],
     [2024, "net_income_consolidated", "80", true, inferred("NetIncomeLoss"), "source_token_preserved"],
   ]);
+  const inferred2024 = (await netIncome()).find((row) => row.fiscal_year === 2024 && row.metric_key === "net_income_consolidated")!;
+  const derived = await deriveFrom(inferred2024.fact_id);
 
   // The FY2025 10-K shows a noncontrolling interest in 2024 as well.
   download.text = companyFacts({
@@ -92,6 +106,7 @@ test("an inferred net income is stored with its basis, and a filing that reports
     [2025, "net_income_consolidated", "96", true, [], "source_token_preserved"],
   ];
   assert.deepEqual(await summary(), revised, "a lookup of another year revises the inference");
+  assert.equal(await isActive(derived), false, "a fact derived from the revised one goes with it");
   await backfill();
   await backfill();
   assert.deepEqual(await summary(), revised, "the 2024 10-K states no consolidated figure, so it stays a gap");
@@ -102,7 +117,7 @@ test("a legacy net income stored from ProfitLoss is replaced with its basis, or 
     t.skip("Docker is required for SEC ingestion coverage");
     return;
   }
-  const { db, download, fetcher, options, lookup, backfill, netIncome } = await setUp(t, "fin-sec-ni-legacy");
+  const { db, download, fetcher, options, lookup, backfill, netIncome, deriveFrom, isActive } = await setUp(t, "fin-sec-ni-legacy");
   download.text = companyFacts({
     Revenues: [year(2023, 2023, 500), year(2024, 2024, 600)],
     ProfitLoss: [year(2023, 2023, 90), year(2024, 2024, 95)],
@@ -137,7 +152,9 @@ test("a legacy net income stored from ProfitLoss is replaced with its basis, or 
     "a lookup never proves a legacy row in place of an inferred one",
   );
 
+  const derived = await Promise.all(legacy.map((row) => deriveFrom(row.fact_id)));
   await backfill();
+  assert.deepEqual(await Promise.all(derived.map(isActive)), [false, false], "facts derived from a retired legacy row go with it");
   const repaired = (await netIncome()).filter((row) => row.metric_key === "net_income");
   const replacement = repaired.find((row) => row.active);
   assert.deepEqual(repaired.map(({ fiscal_year, value, active, flags, proof }) => [fiscal_year, value, active, flags, proof]), [
