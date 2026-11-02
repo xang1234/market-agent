@@ -593,18 +593,14 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     // the turn logs its reads, after them and before its seal writes it.
     const hidden = `exists (select 1 from information_schema.columns where table_name = 'snapshots' and column_name = 'parent_snapshot_hidden')`;
     const putBack = `if ${hidden} then alter table snapshots rename column parent_snapshot_hidden to parent_snapshot; end if;`;
-    await client.query(`create function cause_column_hidden() returns trigger language plpgsql as $$ begin alter table snapshots rename column parent_snapshot to parent_snapshot_hidden; return new; end $$`);
-    await client.query(`create trigger cause_column_hidden after insert on chat_messages for each row when (new.role = 'user') execute function cause_column_hidden()`);
-    await client.query(`create function cause_column_back() returns trigger language plpgsql as $$ begin ${putBack} return new; end $$`);
-    await client.query(`create trigger cause_column_back before insert on tool_call_logs for each row when (new.tool_name <> 'resolver.search_to_subject_flow') execute function cause_column_back()`);
     try {
+      await client.query(`create function cause_column_hidden() returns trigger language plpgsql as $$ begin alter table snapshots rename column parent_snapshot to parent_snapshot_hidden; return new; end $$`);
+      await client.query(`create trigger cause_column_hidden after insert on chat_messages for each row when (new.role = 'user') execute function cause_column_hidden()`);
+      await client.query(`create function cause_column_back() returns trigger language plpgsql as $$ begin ${putBack} return new; end $$`);
+      await client.query(`create trigger cause_column_back before insert on tool_call_logs for each row when (new.tool_name <> 'resolver.search_to_subject_flow') execute function cause_column_back()`);
       completedTurn(await runTurn(base, amdThread.thread_id, "Show the evidence"));
     } finally {
-      await client.query(`drop trigger cause_column_hidden on chat_messages`);
-      await client.query(`drop function cause_column_hidden()`);
-      await client.query(`drop trigger cause_column_back on tool_call_logs`);
-      await client.query(`drop function cause_column_back()`);
-      await client.query(`do $$ begin ${putBack} end $$`);
+      await client.query(`drop trigger if exists cause_column_hidden on chat_messages; drop function if exists cause_column_hidden(); drop trigger if exists cause_column_back on tool_call_logs; drop function if exists cause_column_back(); do $$ begin ${putBack} end $$`);
     }
     const evidence = await latestAssistantMessage(base, amdThread.thread_id);
     assert.deepEqual(evidence.blocks.flatMap((block) => refsOf(block).filter(([kind]) => kind === "claim")), []);
