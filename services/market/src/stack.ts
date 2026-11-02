@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import { logPoolErrors } from "../../shared/src/pool-client.ts";
 
 import type { MarketDataAdapter } from "./adapter.ts";
 import { createDevProvidersMarketDataAdapter } from "./adapters/dev-providers.ts";
@@ -38,7 +39,7 @@ export function createMarketStackFromEnv(env: NodeJS.ProcessEnv): MarketStack {
     throw new Error("DATABASE_URL is required for the market service");
   }
   const polygonApiKey = env.POLYGON_API_KEY?.trim();
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
   const listings = createPostgresListingRepository(pool);
   const cache = createPostgresMarketCacheRepository(pool);
   const unofficialDevProvidersEnabled = env.ENABLE_UNOFFICIAL_DEV_PROVIDERS === "true";

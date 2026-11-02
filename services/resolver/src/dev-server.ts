@@ -1,5 +1,6 @@
 import type { Server } from "node:http";
 import { Pool } from "pg";
+import { logPoolErrors } from "../../shared/src/pool-client.ts";
 import { createResolverServer } from "./http.ts";
 import { createPolygonTickerDiscoveryProvider } from "./discovery.ts";
 import {
@@ -19,7 +20,7 @@ export async function buildResolverDevServer(
     throw new Error("DATABASE_URL is required for resolver dev server");
   }
 
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
   const polygonTickerDiscoveryProvider = createPolygonTickerDiscoveryProvider({
     apiKey: env.POLYGON_API_KEY,
     baseUrl: env.RESOLVER_POLYGON_REFERENCE_BASE_URL,

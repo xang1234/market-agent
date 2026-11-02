@@ -11,6 +11,7 @@
 // is kept and gains the proofs it lacks.
 
 import { Pool } from "pg";
+import { logPoolErrors } from "../../shared/src/pool-client.ts";
 
 import { FROZEN_ISSUER_IDS } from "../../shared/src/golden-issuers.ts";
 import { SEC_EDGAR_FILING_SOURCE_ID } from "./provider-sources.ts";
@@ -66,7 +67,7 @@ async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
   const userAgent = process.env.SEC_EDGAR_USER_AGENT;
   if (!databaseUrl || !userAgent) throw new Error("DATABASE_URL and SEC_EDGAR_USER_AGENT are required");
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
   // Paced under SEC's fair-access rate, backing off on a 429.
   // A bulk run downloads the largest companyfacts files, so it waits longer than a request does.
   const fetcher = withSecFairAccess(createSecCompanyFactsHttpFetcher({ userAgent, baseUrl: process.env.SEC_EDGAR_BASE_URL, timeoutMs: 120_000 }));

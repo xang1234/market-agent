@@ -7,6 +7,7 @@
 // unresolved holdings and it gets-or-creates the issuer/instrument and records
 // the cusip, so subsequent 13F resolution hits the fast DB path.
 import { Pool } from "pg";
+import { logPoolErrors } from "../../shared/src/pool-client.ts";
 import { openReferenceProviderConfigFromEnv } from "./provider-sources.ts";
 import { enrichCusip, type EnrichCusipResult } from "./cusip-enrichment.ts";
 
@@ -29,7 +30,7 @@ async function main(): Promise<void> {
   const openfigi = openReferenceProviderConfigFromEnv(process.env).openfigi;
   if (!openfigi.enabled) throw new Error("OPENFIGI_REFERENCE_ENABLED=true is required");
 
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
   const counts: Record<EnrichCusipResult["status"], number> = { already: 0, enriched: 0, unmapped: 0 };
   let hadFailures = false;
   try {

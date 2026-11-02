@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import { logPoolErrors } from "../../shared/src/pool-client.ts";
 
 import type { ListingSubjectRef } from "../../market/src/subject-ref.ts";
 import { createPostgresScreenRepository } from "../../screener/src/screen-repository.ts";
@@ -22,7 +23,7 @@ const pulseTickers = pulseRaw
   .map((s) => s.trim())
   .filter((s) => s.length > 0);
 
-const pool = new Pool({ connectionString: databaseUrl });
+const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
 const pulseSubjects = await loadPulseSubjects(pool, pulseTickers);
 
 // Drops per-ref failures/timeouts silently; Home exposes missing quotes via `omitted`.

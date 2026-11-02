@@ -8,6 +8,7 @@
 // a listing that hits Polygon's rate limit fails and the next run picks it up.
 
 import { Pool } from "pg";
+import { logPoolErrors } from "../../shared/src/pool-client.ts";
 
 import { FROZEN_ISSUER_IDS } from "../../shared/src/golden-issuers.ts";
 import { createPolygonHttpFetcher, type PolygonFetcher } from "./adapters/polygon.ts";
@@ -67,7 +68,7 @@ async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
   const apiKey = process.env.POLYGON_API_KEY?.trim();
   if (!databaseUrl || !apiKey) throw new Error("DATABASE_URL and POLYGON_API_KEY are required");
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
   const fetcher = createPolygonHttpFetcher({ apiKey, baseUrl: process.env.POLYGON_API_BASE_URL });
   try {
     const { failures } = await syncSplits(pool, fetcher, process.argv.slice(2));

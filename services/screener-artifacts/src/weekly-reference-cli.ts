@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import { logPoolErrors } from "../../shared/src/pool-client.ts";
 import { loadArtifactConfig } from "./config.ts";
 import { fetchWeeklyBundle, fetchWeeklyManifest } from "./release-client.ts";
 import { runWeeklyReferenceEtl } from "./etl.ts";
@@ -22,7 +23,7 @@ async function main(): Promise<void> {
   }
   const force = process.argv.includes("--force");
 
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
   try {
     for (const market of config.markets) {
       const label = `weekly-reference ${market}`;
@@ -51,7 +52,7 @@ async function main(): Promise<void> {
 async function printStatus(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL is required");
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
   try {
     const rows = await latestLedgerEntries(pool);
     if (rows.length === 0) console.log("weekly-reference: no import recorded");

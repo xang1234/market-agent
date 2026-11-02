@@ -17,6 +17,7 @@
 // reads at most N releases.
 import { parseArgs } from "node:util";
 import { Pool } from "pg";
+import { logPoolErrors } from "../../shared/src/pool-client.ts";
 import { createLlmRouterFromEnv } from "../../llm/src/settings-loader.ts";
 import {
   clearRebindMarks,
@@ -43,7 +44,7 @@ async function main(): Promise<void> {
     );
   }
   const secClient = SecEdgarClient.fromEnv();
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
   const report = (accession: string, outcome: string | { error: unknown }) => {
     if (typeof outcome === "object") {
       console.error(`${accession}: failed —`, outcome.error instanceof Error ? outcome.error.message : outcome.error);

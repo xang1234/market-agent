@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import { logPoolErrors } from "../../shared/src/pool-client.ts";
 import { createAnalystGridsServer } from "./http.ts";
 import { createUniverseResolverDeps } from "./universe-wiring.ts";
 import { createReaderColumnDepsFromEnv } from "./reader-wiring.ts";
@@ -16,7 +17,7 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error(`ANALYST_GRIDS_PORT must be an integer in [1, 65535], got: ${rawPort}`);
 }
 const host = process.env.HOST ?? "127.0.0.1";
-const pool = new Pool({ connectionString: databaseUrl });
+const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
 const reader = await createReaderColumnDepsFromEnv();
 if (!reader) console.log("analyst-grids: reader columns disabled (LLM or S3 env not configured)");
 await requireFinancialReadiness(pool, ["grid"]);

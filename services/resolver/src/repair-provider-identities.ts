@@ -6,7 +6,7 @@ import {
 } from "./discovery.ts";
 import type { QueryExecutor } from "./lookup.ts";
 import { errorMessage } from "../../shared/src/http.ts";
-import { withPoolClient } from "../../shared/src/pool-client.ts";
+import { logPoolErrors, withPoolClient } from "../../shared/src/pool-client.ts";
 
 type LegacyIdentity = {
   ticker: string;
@@ -73,7 +73,7 @@ const discovery = createPolygonTickerDiscoveryProvider({
   baseUrl: process.env.RESOLVER_POLYGON_REFERENCE_BASE_URL,
 });
 const hasPolygonKey = (process.env.POLYGON_API_KEY ?? "").trim().length > 0;
-const pool = new Pool({ connectionString: databaseUrl });
+const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
 
 try {
   await repairLegacyIdentities(pool);

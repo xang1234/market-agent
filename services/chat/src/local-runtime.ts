@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import { logPoolErrors } from "../../shared/src/pool-client.ts";
 
 import {
   emptyEvidence,
@@ -788,7 +789,7 @@ function pool(): Pool {
   if (!databaseUrl) {
     throw new Error("DATABASE_URL is required for chat local runtime");
   }
-  localPool = new Pool({ connectionString: databaseUrl });
+  localPool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
   return localPool;
 }
 

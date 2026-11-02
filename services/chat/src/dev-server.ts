@@ -1,5 +1,6 @@
 import type { Server } from "node:http";
 import { Pool } from "pg";
+import { logPoolErrors } from "../../shared/src/pool-client.ts";
 import { createChatServer } from "./http.ts";
 import { loadChatServerOptionsFromEnv } from "./runtime.ts";
 import { createThreadTitleGenerationJob } from "./thread-title.ts";
@@ -21,7 +22,7 @@ export async function buildChatDevServer(
   const threadTitleModelModule = env.CHAT_THREAD_TITLE_MODEL_MODULE;
 
   const baseOptions = await loadChatServerOptionsFromEnv(env);
-  const pool = databaseUrl ? new Pool({ connectionString: databaseUrl }) : null;
+  const pool = databaseUrl ? logPoolErrors(new Pool({ connectionString: databaseUrl })) : null;
   if (pool && !baseOptions.generateThreadTitle && threadTitleModelModule) {
     const module = await import(threadTitleModelModule);
     if (typeof module.model !== "function") {

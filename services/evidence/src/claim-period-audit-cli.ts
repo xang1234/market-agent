@@ -12,6 +12,7 @@
 // have misread the end or the kind. It is "uncovered" when no fact spans the
 // day, as before its facts are in. Exits 0 clean, 1 on a flag, 2 on an error.
 import { Pool } from "pg";
+import { logPoolErrors } from "../../shared/src/pool-client.ts";
 import type { ClaimPeriod } from "./claim-repo.ts";
 import { citableClaimSql } from "./citable-claim.ts";
 import { factActiveSql } from "./fact-activity.ts";
@@ -74,7 +75,7 @@ export async function auditClaimPeriods(db: QueryExecutor): Promise<ClaimPeriodA
 async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL is required");
-  const pool = new Pool({ connectionString: databaseUrl, options: "-c default_transaction_read_only=on" });
+  const pool = logPoolErrors(new Pool({ connectionString: databaseUrl, options: "-c default_transaction_read_only=on" }));
   let rows: ClaimPeriodAudit[];
   try {
     rows = await auditClaimPeriods(pool);

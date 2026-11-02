@@ -12,6 +12,7 @@
 
 import { createHash } from "node:crypto";
 import { Pool } from "pg";
+import { logPoolErrors } from "../../shared/src/pool-client.ts";
 
 import { parseFinancialDecimal } from "../../financial-core/src/exact-decimal.ts";
 import { boundedInteger, isSourceNumber, parseFinancialJson } from "../../fundamentals/src/lossless-financial-json.ts";
@@ -153,7 +154,7 @@ async function main(): Promise<void> {
   if (!databaseUrl || !apiKey) throw new Error("DATABASE_URL and POLYGON_API_KEY are required");
   const listingIds = process.argv.slice(2);
   if (listingIds.length === 0) throw new Error("usage: npm run capture:price -- <listing_uuid> ...");
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
   const fetcher = createPolygonCaptureFetcher({ apiKey, baseUrl: process.env.POLYGON_API_BASE_URL });
   try {
     const { failures } = await capturePrices(pool, fetcher, listingIds);

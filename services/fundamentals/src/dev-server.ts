@@ -1,5 +1,6 @@
 import type { Server } from "node:http";
 import { Pool } from "pg";
+import { logPoolErrors } from "../../shared/src/pool-client.ts";
 import {
   createDevProviderRuntime,
   devProvidersBaseUrlFromEnv,
@@ -34,7 +35,7 @@ export async function buildFundamentalsDevServer(
     throw new Error("DATABASE_URL is required for fundamentals dev; fixture-backed dev data is disabled.");
   }
 
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
   const postgresProfiles = createPostgresIssuerProfileRepository(pool);
   const devProvidersBaseUrl = devProvidersBaseUrlFromEnv(env);
   const devProviderRuntime = devProvidersBaseUrl

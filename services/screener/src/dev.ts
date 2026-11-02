@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import { logPoolErrors } from "../../shared/src/pool-client.ts";
 import { createPostgresCandidateRepository } from "./db-candidates.ts";
 import { createVendorScreenerCandidateRepository } from "./db-candidates-vendor.ts";
 import { createScreenerServer } from "./http.ts";
@@ -12,7 +13,7 @@ if (!databaseUrl) {
   throw new Error("DATABASE_URL is required for screener dev; fixture-backed dev data is disabled.");
 }
 
-const pool = new Pool({ connectionString: databaseUrl });
+const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
 // 'vendor' serves the bulk screener-artifacts universe (set-based, quote-optional);
 // 'reported' (default) keeps SEC-reported margins and certified market cap and
 // P/E. Validate up front so

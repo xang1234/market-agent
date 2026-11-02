@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Pool } from "pg";
 
+import { logPoolErrors } from "../../services/shared/src/pool-client.ts";
+
 import { bootstrapDatabase, connectedClient, dockerAvailable, registerLifoCleanup } from "./docker-pg.ts";
 
 test("a pool whose idle client loses its connection keeps the process running and serves the next query", { timeout: 120_000 }, async (t) => {
@@ -10,7 +12,8 @@ test("a pool whose idle client loses its connection keeps the process running an
     return;
   }
   const { databaseUrl } = await bootstrapDatabase(t, "pool-idle-lost");
-  const pool = new Pool({ connectionString: databaseUrl, max: 2 });
+  const pool = logPoolErrors(new Pool({ connectionString: databaseUrl, max: 2 }));
+  const logged = t.mock.method(console, "error", () => {});
   registerLifoCleanup(t, () => pool.end().catch(() => {}));
   const admin = await connectedClient(t, databaseUrl);
 
@@ -25,5 +28,9 @@ test("a pool whose idle client loses its connection keeps the process running an
   }
 
   assert.equal(pool.totalCount, 0, "the dead idle client left the pool");
+  assert.deepEqual(
+    logged.mock.calls.map((call) => call.arguments),
+    [["pg pool: idle client error: terminating connection due to administrator command (code 57P01)"]],
+  );
   assert.deepEqual((await pool.query("select 1 as one")).rows, [{ one: 1 }]);
 });

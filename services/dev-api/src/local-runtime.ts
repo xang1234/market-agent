@@ -6,6 +6,7 @@ import { createThesisAgentLoopStages } from "./thesis-runtime.ts";
 import { randomUUID } from "node:crypto";
 
 import { Pool } from "pg";
+import { logPoolErrors } from "../../shared/src/pool-client.ts";
 
 import {
   addClaimClusterMember,
@@ -676,7 +677,7 @@ function pool(): Pool {
   if (!databaseUrl) {
     throw new Error("DATABASE_URL is required for dev-api local runtime");
   }
-  localPool = new Pool({ connectionString: databaseUrl });
+  localPool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
   return localPool;
 }
 

@@ -36,3 +36,15 @@ export async function withPoolClient<C extends PoolClient, T>(
 export function destroyAfterFailedRollback(error: unknown): Error | undefined {
   return error instanceof Error && (error as { rollback_error?: unknown }).rollback_error !== undefined ? error : undefined;
 }
+
+/**
+ * pg-pool re-emits an idle client's "error" on the pool, and an unheard one
+ * throws out of the process. pg-pool has already dropped that client, so the
+ * pool keeps serving and the error only needs logging.
+ */
+export function logPoolErrors<P extends { on(event: "error", listener: (error: Error) => void): unknown }>(pool: P): P {
+  pool.on("error", (error) => {
+    console.error(`pg pool: idle client error: ${error.message} (code ${(error as { code?: string }).code ?? "none"})`);
+  });
+  return pool;
+}

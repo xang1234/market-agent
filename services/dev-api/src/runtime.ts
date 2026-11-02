@@ -17,6 +17,7 @@ import { requireFinancialReadiness } from "../../financial-engine/src/readiness.
 import type { ParentRecovery } from "../../financial-engine/src/recovery.ts";
 import type { FinancialWorker } from "../../financial-engine/src/worker.ts";
 import { screenerUniverseRecovery } from "./screener-certification.ts";
+import { logPoolErrors } from "../../shared/src/pool-client.ts";
 
 export type DevApiRuntimeEnv = FinancialWorkerEnv & FinancialEnv & {
   MA_DEV_API_FIXTURE_ADAPTER?: string;
@@ -70,7 +71,7 @@ export async function createDevApiRuntimeFromEnv(
   }
 
   const { Pool } = await import("pg");
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
   // Nothing financial starts, the worker included, until its schema and versions are in place.
   await requireFinancialReadiness(pool, activeFinancialSurfaces(financialConfig));
   const worker = financialConfig.worker ? startFinancialWorkerFromEnv(pool, env, recoveryParents(pool)) : null;

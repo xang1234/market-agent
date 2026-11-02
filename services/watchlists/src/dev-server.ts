@@ -1,5 +1,6 @@
 import type { Server } from "node:http";
 import { Pool } from "pg";
+import { logPoolErrors } from "../../shared/src/pool-client.ts";
 import { createWatchlistsServer } from "./http.ts";
 
 // The watchlists dev server, unlistened, so it can run alone (dev.ts) or inside the
@@ -12,6 +13,6 @@ export async function buildWatchlistsDevServer(
     throw new Error("DATABASE_URL is required for watchlists dev server");
   }
 
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
   return { server: createWatchlistsServer(pool), close: () => pool.end() };
 }
