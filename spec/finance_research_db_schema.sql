@@ -489,6 +489,11 @@ create table claims (
   -- changed or cleared (claims_period_bound_once): a correction supersedes the
   -- claim with a new one.
   period_bound_at timestamptz,
+  -- When a rebind (extract:earnings-releases --rebind) read the explanation to
+  -- bind its period, bound or not; null until read, and cleared by --retry on
+  -- the unbound ones. Apart from enriched_at, which marks a deterministic 8-K
+  -- claim processed.
+  period_read_at timestamptz,
   constraint claims_period_pair check (num_nulls(period_kind, period_end, period_bound_at) in (0, 3))
 );
 create function prevent_claim_period_rebinding() returns trigger

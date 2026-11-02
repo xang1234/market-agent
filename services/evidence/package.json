@@ -14,6 +14,7 @@
     "backfill:sec-8k": "node --experimental-strip-types src/sec-8k-backfill-cli.ts",
     "enrich:sec-8k": "node --experimental-strip-types src/sec-8k-enrichment-cli.ts",
     "extract:earnings-releases": "node --experimental-strip-types src/sec-earnings-release-cli.ts",
+    "audit:claim-periods": "node --experimental-strip-types src/claim-period-audit-cli.ts",
     "reprocess:sec-13f": "node --experimental-strip-types src/sec-13f-reprocess-cli.ts",
     "crawl:sec-daily": "node --experimental-strip-types src/sec-daily-crawl-cli.ts",
     "typecheck": "tsc --noEmit"
