@@ -437,6 +437,9 @@ async function storeFiling(
   const cover = coverCount && mapCoverCount(registry, coverCount, target, input.logger);
   if (mapped.length === 0 && !cover) return { statement: income?.statement ?? null, filing: null };
   await withPinnedTransaction(db, async (client) => {
+    // Each ingest of an issuer checks its inferences against what it reads, so
+    // two at once could each re-store a figure the other refutes (#342).
+    await client.query("select pg_advisory_xact_lock(hashtextextended($1::text, 0))", [input.issuerId]);
     // The repair retires stored income facts the filing contradicts, then
     // stores the filing's in their place (the active identity is unique).
     const stale = input.income === "repair" && income

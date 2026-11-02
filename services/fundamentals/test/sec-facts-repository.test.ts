@@ -734,6 +734,7 @@ class FakeFundamentalsDb {
       this.transactions.push(sql);
       return rows([]);
     }
+    if (sql.includes("pg_advisory_xact_lock")) return rows([]);
     if (sql.includes("from issuers")) {
       return rows([{ issuer_id: ISSUER_ID, cik: "320193" }]);
     }
