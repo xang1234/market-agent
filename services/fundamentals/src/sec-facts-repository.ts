@@ -443,7 +443,7 @@ async function storeFiling(
     // The repair retires stored income facts the filing contradicts, then
     // stores the filing's in their place (the active identity is unique).
     const stale = input.income === "repair" && income
-      ? await staleStatementFacts(client, input.issuerId, input.cik, income)
+      ? await staleStatementFacts(client, input.issuerId, input.cik, income, input.fetched.facts)
       : new Map<string, string[]>();
     if (stale.size > 0) await invalidateWithDependents(client, input.issuerId, [...stale.values()].flat());
     for (const entry of mapped) {
@@ -503,15 +503,17 @@ function mapSecStatement(registry: MetricRegistry, statement: NormalizedStatemen
 // contradicts, their ids by metric_key: a metric the statement has, with another value,
 // dates or inference basis; or one of its family the statement lacks, dated for
 // another period (the old selector's comparative, with nothing to replace it),
-// inferred, or an unproven net income (#342: ingestion once stored ProfitLoss
-// as net income, with no proof, and no longer yields it where the filer reports
-// a noncontrolling interest). A value is compared with its token as a precision
+// inferred, or an unproven net income that is the download's ProfitLoss for
+// its period (#342: ingestion once stored ProfitLoss as net income, with no
+// proof, and no longer yields it where the filer reports a noncontrolling
+// interest). A value is compared with its token as a precision
 // proof compares them, since one stored from a JS number may round it.
 async function staleStatementFacts(
   db: FundamentalsQueryExecutor,
   issuerId: UUID,
   cik: number,
   { statement, tokens, derivations, inferences }: Extracted,
+  facts: SecCompanyFacts,
 ): Promise<Map<string, string[]>> {
   const { rows } = await db.query<{
     fact_id: string;
@@ -542,6 +544,10 @@ async function staleStatementFacts(
         and m.metric_key = any($5::text[])`,
     [issuerId, statement.period_kind, statement.fiscal_year, statement.fiscal_period, SEC_METRIC_KEYS_BY_FAMILY[statement.family]],
   );
+  const profitLoss = Object.values(facts.facts["us-gaap"]?.ProfitLoss?.units ?? {}).flatMap((values) => (Array.isArray(values) ? values : []));
+  const isProfitLoss = (row: (typeof rows)[number]) => profitLoss.some((value) =>
+    (value.start ?? null) === row.period_start && value.end === row.period_end
+    && checkTokenAgainstStoredValue(value.val_token ?? String(value.val), row.stored_value).status === "match");
   // A metric can have rows from several filings: every contradicted one goes.
   const stale = new Map<string, string[]>();
   for (const row of rows) {
@@ -553,7 +559,7 @@ async function staleStatementFacts(
       ? checkTokenAgainstStoredValue(exact, row.stored_value).status !== "match"
       : (row.stored_value === null ? null : Number(row.stored_value)) !== line?.value_num;
     const otherBasis = !isDeepStrictEqual(row.inference, inferences.get(row.metric_key) ?? null);
-    const unreproduced = line === undefined && (row.inference !== null || (row.metric_key === "net_income" && !row.proven));
+    const unreproduced = line === undefined && (row.inference !== null || (row.metric_key === "net_income" && !row.proven && isProfitLoss(row)));
     const contradicted = otherDates || (line !== undefined && (otherValue || otherBasis)) || unreproduced;
     if (contradicted) stale.set(row.metric_key, [...(stale.get(row.metric_key) ?? []), row.fact_id]);
   }

@@ -179,7 +179,8 @@ filing's cash flow and balance sheet are extracted from it and stored in the sam
   stored fact whose value or dates differ from the filing (written by the old selector) is invalidated, the filing's
   fact is stored, and the old one is `superseded_by` it, in the filing's transaction. A stored income fact whose metric
   the filing no longer yields for the period is invalidated too when its dates are another period's, when it is
-  inferred, or when it is an unproven net income (#342: ingestion once stored `ProfitLoss` there). A stored fact whose
+  inferred, or when it is an unproven net income equal to the download's `ProfitLoss` for its period (#342: ingestion
+  once stored `ProfitLoss` there). A stored fact whose
   `no_noncontrolling_interest` inference differs from the filing's line is replaced like one with another value, and a
   fact retired either way takes every fact derived from it (`input_fact_ids`) with it. A snapshot cut before the repair
   still reads the old fact (`factActiveSql` judges activity at the cutoff). A rerun keeps a matching fact's value, and
