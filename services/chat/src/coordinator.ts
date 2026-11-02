@@ -33,14 +33,13 @@ import {
   ChatSnapshotSealError,
   logUnreadMessage,
   sealedCompletion,
-  withoutClaims,
   type ChatCommittedMessage,
   type ChatReadMessage,
-  type DroppedClaims,
 } from "./messages.ts";
 import { financialAwareRunner } from "./financial-turn.ts";
 import { companyNameIn, type CompanyChange, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
 import type { AssertionReport } from "./assertions.ts";
+import type { DroppedClaims } from "./llm-runtime.ts";
 import type { BlockProof } from "../../snapshot/src/block-proof.ts";
 
 export type ChatTurnInput = {
@@ -120,6 +119,9 @@ export type ChatAnalystToolRuntimeResult = {
   // The research scope the answer covered (research-scope.ts), saved with it so
   // a follow-up keeps what it does not change (#206).
   research_scope?: ResearchScope;
+  // The answer without claims its seal left out (#557), rendered again from
+  // what is left: its blocks and, while a judge reads it, its judging.
+  without?: (dropped: DroppedClaims) => Pick<ChatAnalystToolRuntimeResult, "blocks" | "judging">;
   // The answer call's token usage, reported on turn.completed so evals can
   // measure it (#181); not saved.
   answer_usage?: { input_tokens: number; output_tokens: number; reasoning_tokens?: number };
@@ -187,12 +189,15 @@ export type ChatAssistantMessagePersistenceInput = {
   content_hash: string;
   answered_by?: string;
   research_scope?: ResearchScope;
+  // The blocks to seal and save in place of `blocks` when the seal leaves out
+  // claims they quote that are no longer citable or cannot be checked (#557).
+  // Without it, the seal checks no quoted claim.
+  without?: (dropped: DroppedClaims) => ReadonlyArray<Record<string, unknown>>;
   // Called once, after a verified seal of `blocks` and before the message is
-  // saved, with the sealed snapshot, its blocks' proofs and the claims the
-  // seal dropped; the blocks it returns, without those claims, are saved in
-  // place of `blocks`. They may differ from them only in rich_text text
-  // segments, which neither the seal nor a proof reads.
-  reveal?: (sealed: { snapshot_id: string; block_proofs: Readonly<Record<string, BlockProof>>; dropped?: DroppedClaims }) =>
+  // saved, with the sealed snapshot and its blocks' proofs; the blocks it
+  // returns are saved in place of `blocks`. They may differ from them only in
+  // rich_text text segments, which neither the seal nor a proof reads.
+  reveal?: (sealed: { snapshot_id: string; block_proofs: Readonly<Record<string, BlockProof>> }) =>
     Promise<{ blocks: ReadonlyArray<Record<string, unknown>>; content_hash: string }>;
 };
 
@@ -1371,8 +1376,10 @@ async function toolBackedAnalystTurnRunner(
     withUnresolvedNote(blocks, context.unresolvedMentions ?? []).map((block) => Object.freeze({ ...block })),
   );
   // What the reader is shown first, and what the turn saves: the same blocks,
-  // unless the judge reads the answer's inferences in between (result.judging).
+  // unless the judge reads the answer's inferences in between (result.judging),
+  // or the seal leaves out claims they quote (result.without).
   const { judging } = result;
+  let answer: Pick<ChatAnalystToolRuntimeResult, "blocks" | "judging"> = result;
   const shown = freeze(result.blocks);
   const saved = {
     blocks: shown,
@@ -1380,10 +1387,10 @@ async function toolBackedAnalystTurnRunner(
     report: result.assertion_report ? { assertion_report: result.assertion_report } : {},
   };
   const judged = async () => {
-    const answer = await judging!.done;
-    saved.blocks = freeze(answer.blocks);
+    const done = await answer.judging!.done;
+    saved.blocks = freeze(done.blocks);
     saved.content_hash = contentHashForText(JSON.stringify(saved.blocks));
-    if (answer.assertion_report) saved.report = { assertion_report: answer.assertion_report };
+    if (done.assertion_report) saved.report = { assertion_report: done.assertion_report };
   };
   // Which model answered, on the completion and the saved message (#183).
   const answeredBy = result.answered_by ? { answered_by: result.answered_by } : {};
@@ -1460,14 +1467,24 @@ async function toolBackedAnalystTurnRunner(
         content_hash: saved.content_hash,
         ...answeredBy,
         ...(result.research_scope ? { research_scope: result.research_scope } : {}),
+        ...(result.without
+          ? {
+            without: (dropped: DroppedClaims) => {
+              answer = result.without!(dropped);
+              saved.blocks = freeze(answer.blocks);
+              saved.content_hash = contentHashForText(JSON.stringify(saved.blocks));
+              return saved.blocks;
+            },
+          }
+          : {}),
         ...(judging
           ? {
-            reveal: async ({ snapshot_id, block_proofs, dropped }) => {
+            reveal: async ({ snapshot_id, block_proofs }) => {
               emitSealed(snapshot_id);
               const message_id = answerMessageId(context.threadId, context.runId, turnId);
               // A verdict changes only text, which the seal and its proofs do
               // not read (messages.ts revealed).
-              judging.watch((blocks) => emit("answer.shown", { message_id, snapshot_id, blocks: withoutClaims(freeze(blocks), dropped), block_proofs }));
+              answer.judging!.watch((blocks) => emit("answer.shown", { message_id, snapshot_id, blocks: freeze(blocks), block_proofs }));
               revealed = true;
               await judged();
               return { blocks: saved.blocks, content_hash: saved.content_hash };

@@ -39,11 +39,11 @@ import { frozenDataMode, hydrateYtdBars, marketHydrationOrigin, turnNow } from "
 import { companyListings, listingTimeZones, loadPerfComparisonBlocks, priceListingsForTurn, turnCompanies } from "./perf-block.ts";
 import { loadPriorCauseClaims, loadPriorScope, loadPriorSubjects as loadThreadPriorSubjects, loadRecentConversation } from "./thread-context.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
-import { createLlmThreadTitleModel } from "./llm-runtime.ts";
+import { createLlmThreadTitleModel, type DroppedClaims } from "./llm-runtime.ts";
 import { structuredRefsFromHandoff } from "./local-runtime-structured.ts";
 import { createChatFinancialRuntime, type ChatFinancialRuntime, type ChatFinancialTurnContext } from "./financial-runtime.ts";
 import { saveCommentary } from "./engine-commentary.ts";
-import { createChatMessagePersistence, withoutClaims, type ChatSealResult, type DroppedClaims } from "./messages.ts";
+import { createChatMessagePersistence, type ChatSealResult } from "./messages.ts";
 import {
   preResolveChatSubjectWithResolver,
   type ChatResolvedSubjectPreResolution,
@@ -182,7 +182,6 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     },
   });
   const answerUsage = answer.exchange?.usage;
-  const { judging } = answer;
   const normalize = (block: Record<string, unknown>, refs: CitedRefs) =>
     normalizeAssistantBlock(block, {
       snapshotId: result.snapshot_id,
@@ -195,20 +194,24 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     ...llmBlocks.map((block) => normalize(block, citedRefs(block, claims))),
     ...[...factBlocks, ...engineAnswerNote(scope, { snapshotId: result.snapshot_id, asOf })].map((block) => normalize(block, NO_DEFAULT_REFS)),
   ];
-  return {
-    ...result,
-    blocks: turnBlocks(answer.blocks),
-    ...(judging
+  const turnAnswer = (shown: Pick<typeof answer, "blocks" | "judging">) => ({
+    blocks: turnBlocks(shown.blocks),
+    ...(shown.judging
       ? {
         judging: {
-          watch: (listener: (blocks: ReadonlyArray<Record<string, unknown>>) => void) => judging.watch((blocks) => listener(turnBlocks(blocks))),
-          done: judging.done.then(({ blocks, assertions }) => ({
+          watch: (listener: (blocks: ReadonlyArray<Record<string, unknown>>) => void) => shown.judging!.watch((blocks) => listener(turnBlocks(blocks))),
+          done: shown.judging.done.then(({ blocks, assertions }) => ({
             blocks: turnBlocks(blocks),
             ...(assertions ? { assertion_report: assertions } : {}),
           })),
         },
       }
       : {}),
+  });
+  return {
+    ...result,
+    ...turnAnswer(answer),
+    without: (dropped) => turnAnswer(answer.without(dropped)),
     ...(answeredBy ? { answered_by: answeredBy } : {}),
     ...(answerUsage ? { answer_usage: answerUsage } : {}),
     ...(answer.assertions ? { assertion_report: answer.assertions } : {}),
@@ -488,9 +491,11 @@ async function sealAssistantMessageSnapshot(input: ChatAssistantMessagePersisten
   let releaseError: Error | undefined;
   try {
     await client.query("begin");
-    const dropped = await droppedClaims(client, input.blocks, { user_id: userId, as_of: asOf });
-    const blocks = withoutClaims(input.blocks, dropped);
-    const manifest = await manifestFromBlockRefs({
+    const dropped = input.without && await droppedClaims(client, input.blocks, { user_id: userId, as_of: asOf });
+    const blocks = dropped ? input.without!(dropped) : input.blocks;
+    // On this client alone: one waiting for another while it holds its locks
+    // would stall the pool once every client did.
+    const manifest = await manifestFromBlockRefs(client, {
       subjectRefs: subjectRefsFromBlocks(blocks, input.threadId),
       asOf,
       modelVersion: "chat-local-runtime",
@@ -516,7 +521,7 @@ async function sealAssistantMessageSnapshot(input: ChatAssistantMessagePersisten
     });
     // A refused seal keeps its audit row.
     await client.query("commit");
-    return dropped ? { ...seal, dropped } : seal;
+    return dropped ? { ...seal, blocks } : seal;
   } catch (error) {
     await client.query("rollback").catch((rollbackError: Error) => {
       releaseError = rollbackError;
@@ -527,33 +532,24 @@ async function sealAssistantMessageSnapshot(input: ChatAssistantMessagePersisten
   }
 }
 
-// The claims the answer quotes that are no longer citable (#557): each is
+// The claims the answer quotes that its seal leaves out (#557): each is
 // locked and checked again in the seal's transaction, as a filed cause's are
-// (filed-cause.ts). A row another session is changing raises lock not
-// available (55P03: the locks are nowait) and cannot be checked, so every
-// claim is dropped, as such a cause is not quoted.
+// (filed-cause.ts). One whose rows another session is changing is passed
+// over, not waited for, and left out as unchecked; the rest are still
+// checked, so such a writer (an earnings release being extracted, a filing
+// superseded) costs the answer only the claims it touches.
 async function droppedClaims(
   client: PoolClient,
   blocks: ReadonlyArray<Record<string, unknown>>,
   input: { user_id: string | null; as_of: string },
 ): Promise<DroppedClaims | undefined> {
   const quoted = uuidRefsFromBlocks(blocks, "claim_refs");
-  if (quoted.length === 0) return undefined;
-  await client.query("savepoint quoted_claims");
-  const citable = await lockCitableClaims(client, { claim_ids: quoted, ...input }).catch(async (error: unknown) => {
-    if ((error as { code?: unknown } | null)?.code !== "55P03") throw error;
-    await client.query("rollback to savepoint quoted_claims");
-    return new Set<string>();
-  });
-  const claims = quoted.filter((claimId) => !citable.has(claimId));
-  if (claims.length === 0) return undefined;
-  const stillQuoted = new Set(uuidRefsFromBlocks(withoutClaims(blocks, { claims, documents: [] }), "claim_refs"));
-  const { rows } = await client.query<{ claim_id: string; document_id: string }>(
-    `select claim_id::text as claim_id, document_id::text as document_id from claims where claim_id = any($1::uuid[])`,
-    [quoted],
-  );
-  const cited = new Set(rows.flatMap((row) => stillQuoted.has(row.claim_id) ? [row.document_id] : []));
-  return { claims, documents: [...new Set(rows.map((row) => row.document_id))].filter((documentId) => !cited.has(documentId)) };
+  const { citable, unchecked } = await lockCitableClaims(client, { claim_ids: quoted, ...input, skip_locked: true });
+  const dropped = {
+    withdrawn: quoted.filter((claimId) => !citable.has(claimId) && !unchecked.has(claimId)),
+    unchecked: quoted.filter((claimId) => unchecked.has(claimId)),
+  };
+  return dropped.withdrawn.length + dropped.unchecked.length === 0 ? undefined : dropped;
 }
 
 async function threadUserId(threadId: string): Promise<string | null> {
@@ -605,14 +601,14 @@ export function citedRefs(
   };
 }
 
-async function manifestFromBlockRefs(input: {
+async function manifestFromBlockRefs(db: PoolClient, input: {
   subjectRefs: ReadonlyArray<SnapshotSubjectRef>;
   asOf: string;
   modelVersion: string;
   blocks: ReadonlyArray<Record<string, unknown>>;
 }): Promise<SnapshotManifestDraft> {
   const toolCallIds = uuidRefsFromBlocks(input.blocks, "tool_call_ids");
-  const toolCallResultHashes = await loadToolCallResultHashes(toolCallIds);
+  const toolCallResultHashes = await loadToolCallResultHashes(db, toolCallIds);
   const seriesSpecs = input.blocks.flatMap((block) =>
     Array.isArray(block.provenance_series_specs) ? block.provenance_series_specs as JsonValue[] : []
   );
@@ -656,10 +652,11 @@ function seriesSemantics(specs: ReadonlyArray<JsonValue>): {
 }
 
 async function loadToolCallResultHashes(
+  db: PoolClient,
   toolCallIds: ReadonlyArray<string>,
 ): Promise<ReadonlyArray<{ tool_call_id: string; result_hash: string }>> {
   if (toolCallIds.length === 0) return Object.freeze([]);
-  const { rows } = await pool().query<{ tool_call_id: string; result_hash: string }>(
+  const { rows } = await db.query<{ tool_call_id: string; result_hash: string }>(
     `select tool_call_id::text as tool_call_id,
             result_hash
        from tool_call_logs

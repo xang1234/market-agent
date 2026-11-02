@@ -109,65 +109,9 @@ export type ChatThreadMessagesResult = {
   messages: ChatReadMessage[];
 };
 
-// The claims an answer quoted that were no longer citable when it was sealed,
-// and the documents no claim it still quotes cites (#557).
-export type DroppedClaims = Readonly<{ claims: ReadonlyArray<string>; documents: ReadonlyArray<string> }>;
-
-// A seal of an answer's blocks without its dropped claims (withoutClaims).
-export type ChatSealResult = SnapshotSealResult & { dropped?: DroppedClaims };
-
-export const QUOTED_CLAIM_WITHDRAWN = "A claim this answer quoted is no longer citable, so it is left out.";
-
-type Segment = { type?: unknown; text?: unknown; ref_kind?: unknown; ref_id?: unknown };
-
-/**
- * The blocks without the dropped claims, as a filed cause leaves out a claim
- * no longer citable: each paragraph quoting one is left out, and its block
- * says so. Paragraphs are as withAnswer (llm-runtime.ts) lays them out, a
- * break opening each after the first; the unresolved note (coordinator.ts)
- * ends in its own.
- */
-export function withoutClaims(blocks: ReadonlyArray<Record<string, unknown>>, dropped: DroppedClaims | undefined): ReadonlyArray<Record<string, unknown>> {
-  if (dropped === undefined) return blocks;
-  const claims = new Set(dropped.claims);
-  const documents = new Set(dropped.documents);
-  const quotes = (segment: Segment) => segment.type === "ref" && segment.ref_kind === "claim" && claims.has(segment.ref_id as string);
-  return blocks.map((block) => {
-    if (!Array.isArray(block.segments) || !block.segments.some(quotes)) return block;
-    const paragraphs: Segment[][] = [[]];
-    for (const segment of block.segments as Segment[]) {
-      const text = segment.type === "text" ? String(segment.text) : "";
-      if (text.startsWith("\n\n")) paragraphs.push([]);
-      paragraphs.at(-1)!.push(segment);
-      if (text.endsWith("\n\n")) paragraphs.push([]);
-    }
-    const kept = paragraphs.filter((paragraph) => !paragraph.some(quotes)).flat();
-    const quoted = new Set(kept.flatMap((segment) => segment.type === "ref" && segment.ref_kind === "claim" ? [segment.ref_id] : []));
-    const refs = (key: string) => (Array.isArray(block[key]) ? block[key] : []) as string[];
-    return {
-      ...block,
-      segments: paragraphBreaks([...kept, { type: "text", text: `\n\n${QUOTED_CLAIM_WITHDRAWN}` }]),
-      claim_refs: refs("claim_refs").filter((id) => quoted.has(id)),
-      document_refs: refs("document_refs").filter((id) => !documents.has(id)),
-    };
-  });
-}
-
-// A text segment seals nothing, so runs of them join: the block opens with no
-// break, and paragraphs part with one.
-function paragraphBreaks(segments: ReadonlyArray<Segment>): Segment[] {
-  const joined: Segment[] = [];
-  for (const segment of segments) {
-    const last = joined.at(-1);
-    if (segment.type === "text" && last?.type === "text") joined[joined.length - 1] = { type: "text", text: `${last.text}${segment.text}` };
-    else joined.push(segment);
-  }
-  return joined.map((segment, i) => {
-    if (segment.type !== "text") return segment;
-    const text = String(segment.text).replace(/\n{3,}/g, "\n\n");
-    return { type: "text", text: i === 0 ? text.replace(/^\n+/, "") : text };
-  });
-}
+// A seal, and the blocks it sealed when they are not those it was given: the
+// answer rendered again without the claims it left out (#557).
+export type ChatSealResult = SnapshotSealResult & { blocks?: ReadonlyArray<Record<string, unknown>> };
 
 export type PersistChatMessageAfterSnapshotSealInput = {
   message_id?: string;
@@ -224,16 +168,16 @@ export async function persistChatMessageAfterSnapshotSeal(
     return Object.freeze({ ok: false, seal });
   }
 
-  return persistSealedChatMessage(db, sealedBlocks(input, seal.dropped), seal);
+  return persistSealedChatMessage(db, sealedBlocks(input, seal), seal);
 }
 
 export async function persistChatMessageAfterSnapshotSealWithPool(
   pool: ChatMessageClientPool,
   input: PersistChatMessageAfterSnapshotSealInput & {
-    // Between the seal and the save: given the sealed snapshot, the proofs of
-    // the blocks it sealed and the claims it dropped, the blocks to save
-    // instead. No connection is held while it runs.
-    reveal?: (sealed: { snapshot_id: string; block_proofs: Readonly<Record<string, BlockProof>>; dropped?: DroppedClaims }) =>
+    // Between the seal and the save: given the sealed snapshot and the proofs
+    // of the blocks it sealed, the blocks to save instead. No connection is
+    // held while it runs.
+    reveal?: (sealed: { snapshot_id: string; block_proofs: Readonly<Record<string, BlockProof>> }) =>
       Promise<{ blocks: JsonValue; content_hash: string }>;
   },
 ): Promise<PersistChatMessageAfterSnapshotSealResult> {
@@ -241,21 +185,16 @@ export async function persistChatMessageAfterSnapshotSealWithPool(
   if (!isVerifiedSeal(seal)) {
     return Object.freeze({ ok: false, seal });
   }
-  const { dropped } = seal;
-  const sealed = sealedBlocks(input, dropped);
-  const { reveal } = input;
-  const saved = reveal
-    ? { ...sealed, ...(await revealed(pool, sealed.blocks, seal.snapshot.snapshot_id, async (proofs) => sealedBlocks(await reveal({ ...proofs, ...(dropped ? { dropped } : {}) }), dropped))) }
-    : sealed;
+  const sealed = sealedBlocks(input, seal);
+  const saved = input.reveal ? { ...sealed, ...(await revealed(pool, sealed.blocks, seal.snapshot.snapshot_id, input.reveal)) } : sealed;
 
   return withPoolClient(pool, (client) => persistSealedChatMessage(chatMessageTransactionClient(client), saved, seal), destroyAfterFailedRollback);
 }
 
-// The blocks as their seal sealed them, without the claims it dropped.
-function sealedBlocks<T extends { blocks: JsonValue; content_hash: string }>(input: T, dropped: DroppedClaims | undefined): T {
-  if (dropped === undefined || !Array.isArray(input.blocks)) return input;
-  const blocks = withoutClaims(input.blocks as ReadonlyArray<Record<string, unknown>>, dropped) as JsonValue;
-  return { ...input, blocks, content_hash: contentHashForText(JSON.stringify(blocks)) };
+// The blocks as their seal sealed them.
+function sealedBlocks<T extends { blocks: JsonValue; content_hash: string }>(input: T, seal: ChatSealResult): T {
+  if (seal.blocks === undefined) return input;
+  return { ...input, blocks: seal.blocks as JsonValue, content_hash: contentHashForText(JSON.stringify(seal.blocks)) };
 }
 
 // The blocks a reveal returns, once their proofs are read off the snapshot

@@ -38,8 +38,13 @@ type Answer =
 // judge reads it; one absent is left out.
 export type InferenceState = Exclude<ShownAs, "hidden"> | "pending";
 export type Inferences = ReadonlyMap<number, InferenceState>;
-// The turn's blocks, its answer showing the given inferences.
-export type AnswerBlocks = (inferences: Inferences) => ReadonlyArray<Record<string, unknown>>;
+// The claims an answer quoted that its seal left out, by claim id (#557):
+// withdrawn, no longer citable; unchecked, being changed by another session,
+// so they could not be checked.
+export type DroppedClaims = Readonly<{ withdrawn: ReadonlyArray<string>; unchecked: ReadonlyArray<string> }>;
+// The turn's blocks, its answer showing the given inferences, and rendered
+// again without any dropped claims.
+export type AnswerBlocks = (inferences: Inferences, dropped?: DroppedClaims) => ReadonlyArray<Record<string, unknown>>;
 
 const PENDING_INFERENCE: Paragraph = {
   segments: [{ type: "text", text: "> _Checking an analyst inference against the figures it rests on…_" }],
@@ -276,6 +281,58 @@ export type AnswerInput = Pick<Parameters<typeof composeAnalystBlocksWithLlm>[0]
 // the report with what rendering left out (#208). An answer repaired after
 // its first check renders here too (inference-repair.ts).
 export function renderedAnswer(input: AnswerInput, packet: EvidencePacket, report: AssertionReport): { report: AssertionReport; blocks: AnswerBlocks } {
+  const { report: rendered, answer } = answerOf(input, packet, report);
+  return {
+    report: rendered,
+    blocks: (inferences, dropped) => {
+      if (dropped === undefined) return withAnswer(input.blocks, answer, inferences);
+      const left = withoutClaims(packet, dropped);
+      return withAnswer(input.blocks, answerOf(input, left, rechecked(report, left), droppedNotes(dropped)).answer, inferences);
+    },
+  };
+}
+
+// The packet without the dropped claims, and any disagreement one of them is in.
+function withoutClaims(packet: EvidencePacket, dropped: DroppedClaims): EvidencePacket {
+  const ids = new Set([...dropped.withdrawn, ...dropped.unchecked]);
+  const claims = packet.claims.filter((claim) => !ids.has(claim.claim_id));
+  const kept = new Set(claims.map((claim) => claim.id));
+  return { ...packet, claims, disagreements: packet.disagreements.filter((entry) => entry.claims.every((id) => kept.has(id))) };
+}
+
+// The accepted assertions checked again against what is left of the packet,
+// each citing only the claims still in it: an attribution with none left,
+// and an inference resting only on such, fail the checks they passed.
+function rechecked(report: AssertionReport, packet: EvidencePacket): AssertionReport {
+  if (report.status !== "checked") return report;
+  const cited = new Set([...packet.figures.map((figure) => figure.id), ...packet.claims.map((claim) => claim.id)]);
+  const list = Array.from({ length: Math.max(-1, ...report.accepted.map((entry) => entry.index)) + 1 }, (_, i) => {
+    const entry = report.accepted.find((assertion) => assertion.index === i);
+    return entry && { ...entry, evidence: entry.evidence.filter((id) => cited.has(id)) };
+  });
+  const checked = checkAssertions(list, packet);
+  const accepted = new Set(report.accepted.map((entry) => entry.index));
+  return {
+    ...report,
+    accepted: checked.accepted,
+    rejected: [...report.rejected, ...checked.rejected.filter((entry) => accepted.has(entry.index))].sort((a, b) => a.index - b.index),
+  };
+}
+
+function droppedNotes(dropped: DroppedClaims): string[] {
+  const one = (ids: ReadonlyArray<string>) => ids.length === 1;
+  return [
+    ...(dropped.withdrawn.length === 0 ? [] : [one(dropped.withdrawn)
+      ? "A claim this answer quoted is no longer citable, so it is left out."
+      : "Claims this answer quoted are no longer citable, so they are left out."]),
+    ...(dropped.unchecked.length === 0 ? [] : [one(dropped.unchecked)
+      ? "A claim this answer quoted was being updated, so it could not be checked and is left out."
+      : "Claims this answer quoted were being updated, so they could not be checked and are left out."]),
+  ];
+}
+
+// notes: said after the rest, rendered or not.
+function answerOf(input: AnswerInput, packet: EvidencePacket, report: AssertionReport, notes: ReadonlyArray<string> = []): { report: AssertionReport; answer: Answer } {
   const factBlocks = input.factBlocks ?? [];
   const renderAccepted = (): Rendering => {
     if (report.status !== "checked" || report.accepted.length === 0) return { answer: null, report };
@@ -336,22 +393,27 @@ export function renderedAnswer(input: AnswerInput, packet: EvidencePacket, repor
         // The claims as selected: more matched than were read, or none could be.
         ...(packet.claims_truncated ? ["More sources matched than are shown here."] : []),
         ...(packet.claims_status === "unavailable" ? ["Research claims could not be read for this answer."] : []),
+        ...notes,
       ],
     };
     return { answer, report: { ...report, rendered: true, ...(repeated.length > 0 ? { repeated } : {}) } };
   };
   const namedGap = input.scope !== undefined && packet.figures.length === 0 && packet.gaps.length > 0;
   const rendering = renderAccepted();
+  // A packet emptied by dropped claims did hold claims: none is missing.
   const answer: Answer = rendering.answer ?? {
     kind: "fallback",
-    text: namedGap
-      ? [
-        `The data here does not answer this question; the ${packet.gaps.length > 1 ? "notes below say" : "note below says"} what is missing.`,
-        ...(packet.claims_status === "unavailable" ? ["Research claims could not be read for this answer."] : []),
-      ].join(" ")
-      : packet.figures.length === 0 && packet.claims.length === 0 ? missingEvidence(packet) : NO_ANSWER_FALLBACK_TEXT,
+    text: [
+      ...(namedGap
+        ? [
+          `The data here does not answer this question; the ${packet.gaps.length > 1 ? "notes below say" : "note below says"} what is missing.`,
+          ...(packet.claims_status === "unavailable" ? ["Research claims could not be read for this answer."] : []),
+        ]
+        : [packet.figures.length === 0 && packet.claims.length === 0 && notes.length === 0 ? missingEvidence(packet) : NO_ANSWER_FALLBACK_TEXT]),
+      ...notes,
+    ].join(" "),
   };
-  return { report: rendering.report, blocks: (inferences) => withAnswer(input.blocks, answer, inferences) };
+  return { report: rendering.report, answer };
 }
 
 export type AnswerUsage = { input_tokens: number; output_tokens: number; reasoning_tokens?: number };

@@ -14,7 +14,7 @@ import { assertionList, checkAssertions, type AssertionReport } from "./assertio
 import { judgeCases, judgeInferences, judgeMessages, verdictsOf, type JudgeCase, type JudgeRecord, type ModelRecord } from "./inference-judge.ts";
 import { repairRequests, repairRound, requestRepair, type RepairRequest, type RepairTrace } from "./inference-repair.ts";
 import { sentToRepair, shownAs, verdictText, type AnswerPath, type InferenceVerdict, type ShownAs } from "./verdicts.ts";
-import { composeAnalystBlocksWithLlm, renderedAnswer, turnPacket, type AnswerBlocks, type AnswerUsage, type InferenceState, type ModelDeadlines } from "./llm-runtime.ts";
+import { composeAnalystBlocksWithLlm, renderedAnswer, turnPacket, type AnswerBlocks, type AnswerUsage, type DroppedClaims, type InferenceState, type Inferences, type ModelDeadlines } from "./llm-runtime.ts";
 
 export type AnswerTraceInput = Omit<
   Parameters<typeof composeAnalystBlocksWithLlm>[0],
@@ -110,10 +110,7 @@ function verdictsFor(cases: ReadonlyArray<JudgeCase>, records: ReadonlyArray<Mod
 
 function withVerdicts(answer: ComposedAnswer, judged: ReadonlyArray<InferenceVerdict>): Pick<TracedAnswer, "exchange" | "assertions" | "blocks"> {
   if (judged.length === 0) return { exchange: answer.exchange, assertions: answer.assertions, blocks: answer.blocks(new Map()) };
-  const shown = new Map(judged.flatMap((verdict) => {
-    const as = shownAs(verdict, answer.path);
-    return as === "hidden" ? [] : [[verdict.index, as] as const];
-  }));
+  const shown = shownStates(judged, answer.path);
   const hidden = judged.filter((verdict) => !shown.has(verdict.index));
   const report = answer.assertions!;
   return {
@@ -133,6 +130,14 @@ function withVerdicts(answer: ComposedAnswer, judged: ReadonlyArray<InferenceVer
     },
     blocks: answer.blocks(shown),
   };
+}
+
+// What the reader is shown of each judged inference, as its verdict shows it.
+function shownStates(judged: ReadonlyArray<InferenceVerdict>, path: AnswerPath): Inferences {
+  return new Map(judged.flatMap((verdict) => {
+    const as = shownAs(verdict, path);
+    return as === "hidden" ? [] : [[verdict.index, as] as const];
+  }));
 }
 
 // The inferences a rendered answer would send to repair once these verdicts
@@ -282,6 +287,9 @@ export type AnsweredTurn = Pick<TracedAnswer, "exchange" | "assertions" | "block
     // with them, and the trace is written. It never rejects.
     done: Promise<Pick<TracedAnswer, "assertions" | "blocks">>;
   };
+  // The same answer without the claims its seal left out (#557): its blocks,
+  // and those its judging brings, rendered again from what is left.
+  without(dropped: DroppedClaims): Pick<AnsweredTurn, "blocks" | "judging">;
 };
 
 // A chat turn's answer, gated by the judge, and its trace.
@@ -297,6 +305,16 @@ export async function answerTurn(
   });
   const recorded_at = new Date().toISOString();
   const { cases, companies } = inferenceCases(input, answer.assertions);
+  // The answer the reader ends with, without dropped claims: rendered again
+  // from its report, each inference as its verdict shows it (withVerdicts).
+  const finalBlocks = (traced: Pick<TracedAnswer, "assertions" | "blocks">, dropped?: DroppedClaims) =>
+    dropped === undefined || traced.assertions === null
+      ? traced.blocks
+      : renderedAnswer(input, input.packet ?? turnPacket(input), traced.assertions).blocks(shownStates(traced.assertions.judged ?? [], answer.path), dropped);
+  const finished = async (traced: Promise<TracedAnswer>): Promise<AnsweredTurn> => {
+    const answered = await traced;
+    return { ...answered, without: (dropped) => ({ blocks: finalBlocks(answered, dropped) }) };
+  };
   const finish = async (traced: TracedAnswer): Promise<TracedAnswer> => {
     const records = traced.judge ?? [];
     if (cases.length > 0) {
@@ -313,14 +331,20 @@ export async function answerTurn(
     await writeTurnTrace(options.traceDir, { version: 2, ...turn, recorded_at, input, ...traced });
     return traced;
   };
-  if (cases.length === 0 && repairsFor(answer, []).length === 0) return finish(judgedAnswer(answer, cases, []));
-  if (!(await judgeConfigured(options.env))) return finish(judgedAnswer(answer, cases, cases.map(() => NO_JUDGE)));
+  if (cases.length === 0 && repairsFor(answer, []).length === 0) return finished(finish(judgedAnswer(answer, cases, [])));
+  if (!(await judgeConfigured(options.env))) return finished(finish(judgedAnswer(answer, cases, cases.map(() => NO_JUDGE))));
   const inferences = new Map<number, InferenceState>(cases.map(({ index }) => [index, "pending"]));
   // The first answer's blocks, then the repaired answer's once it is checked,
   // with each inference whose repair failed back in its first form.
   let stream: RepairStream | null = null;
   const restored: number[] = [];
-  const blocksOf = (states: ReadonlyMap<number, InferenceState>) => (stream ? stream.blocks(restored) : answer.blocks)(states);
+  // The blocks as the verdicts so far leave them, for any dropped claims.
+  type Render = (dropped?: DroppedClaims) => TracedAnswer["blocks"];
+  const current = (): Render => {
+    const states = new Map(inferences);
+    const blocks = stream ? stream.blocks(restored) : answer.blocks;
+    return (dropped) => blocks(states, dropped);
+  };
   // How the first verdict showed each inference sent to repair.
   const firsts = new Map<number, ShownAs>();
   // A failed repair leaves its inference as its first verdict showed it.
@@ -333,7 +357,7 @@ export async function answerTurn(
       restored.push(index);
     }
   };
-  const listeners: Array<(blocks: TracedAnswer["blocks"]) => void> = [];
+  const listeners: Array<{ hear: (blocks: TracedAnswer["blocks"]) => void; dropped?: DroppedClaims }> = [];
   const settle = (inference: JudgeCase, record: ModelRecord, repaired: boolean) => {
     const verdict = verdictsOf([inference], record)[0]!;
     const as = shownAs(verdict, answer.path);
@@ -346,16 +370,16 @@ export async function answerTurn(
     } else {
       inferences.set(inference.index, as);
     }
-    publish(blocksOf(inferences));
+    publish(current());
   };
   // The blocks listeners last heard, and what a later watch hears first.
-  let published: TracedAnswer["blocks"] | null = null;
-  const publish = (blocks: TracedAnswer["blocks"]) => {
-    published = blocks;
+  let published: Render | null = null;
+  const publish = (render: Render) => {
+    published = render;
     // A listener that throws stops hearing verdicts; the answer is still saved.
     for (const listener of [...listeners]) {
       try {
-        listener(blocks);
+        listener.hear(render(listener.dropped));
       } catch (error) {
         console.warn(`[chat] judge ${traceIds(turn)}: a verdict listener failed and was dropped`, error);
         listeners.splice(listeners.indexOf(listener), 1);
@@ -371,25 +395,28 @@ export async function answerTurn(
     .then((settled) => repairedAnswer(input, answer, cases, settled, liveRepairCalls(companies, options, (inference, record) => settle(inference, record, true)), (checked) => {
       stream = checked;
       checked.failed.forEach(keepFirst);
-      if (checked.failed.length > 0) publish(blocksOf(inferences));
+      if (checked.failed.length > 0) publish(current());
     }))
     // A repair reply that failed whole restores no line until here.
     .then((traced) => {
-      if (published !== null && !isDeepStrictEqual(traced.blocks, published)) publish(traced.blocks);
+      if (published !== null && !isDeepStrictEqual(traced.blocks, published())) publish((dropped) => finalBlocks(traced, dropped));
       return traced;
     })
     .then(finish);
+  const judging = (dropped?: DroppedClaims): NonNullable<AnsweredTurn["judging"]> => ({
+    watch: (hear) => {
+      listeners.push({ hear, ...(dropped ? { dropped } : {}) });
+      hear((published ?? current())(dropped));
+    },
+    done: done.then((traced) => ({ assertions: traced.assertions, blocks: finalBlocks(traced, dropped) })),
+  });
+  const first = current();
   return {
     exchange: answer.exchange,
     assertions: answer.assertions,
-    blocks: answer.blocks(inferences),
-    judging: {
-      watch: (listener) => {
-        listeners.push(listener);
-        listener(published ?? blocksOf(inferences));
-      },
-      done: done.then(({ assertions, blocks }) => ({ assertions, blocks })),
-    },
+    blocks: first(),
+    judging: judging(),
+    without: (dropped) => ({ blocks: first(dropped), judging: judging(dropped) }),
   };
 }
 

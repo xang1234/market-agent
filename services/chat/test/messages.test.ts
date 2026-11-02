@@ -11,8 +11,6 @@ import {
   type ChatMessageClientPool,
   type ChatMessagePersistenceDb,
   type ChatMessageTransactionClient,
-  QUOTED_CLAIM_WITHDRAWN,
-  withoutClaims,
 } from "../src/messages.ts";
 import type { SnapshotSealResult } from "../../snapshot/src/snapshot-sealer.ts";
 import { fakeQuery } from "./fake-query.ts";
@@ -831,32 +829,3 @@ function importedMessageDb(
     }),
   };
 }
-
-test("an answer sealed without a claim no longer citable leaves out each paragraph quoting it, keeps the rest, and says so (#557)", () => {
-  const [block] = withoutClaims([{
-    kind: "rich_text",
-    segments: [
-      { type: "text", text: "I could not find ACME, so this answer leaves it out.\n\n" },
-      { type: "text", text: "According to a source dated Aug 2025 on AMD: " },
-      { type: "ref", ref_kind: "claim", ref_id: "claim-gone", format: "A charge held the quarter back." },
-      { type: "text", text: "\n\n" },
-      { type: "text", text: "According to a source dated May 2025 on AMD: " },
-      { type: "ref", ref_kind: "claim", ref_id: "claim-kept", format: "Data center sales rose." },
-      { type: "text", text: "\n\nNo figures are shown for AMD." },
-    ],
-    claim_refs: ["claim-gone", "claim-kept"],
-    document_refs: ["document-gone", "document-kept"],
-    source_refs: ["source"],
-  }], { claims: ["claim-gone"], documents: ["document-gone"] });
-  assert.deepEqual(block, {
-    kind: "rich_text",
-    segments: [
-      { type: "text", text: "I could not find ACME, so this answer leaves it out.\n\nAccording to a source dated May 2025 on AMD: " },
-      { type: "ref", ref_kind: "claim", ref_id: "claim-kept", format: "Data center sales rose." },
-      { type: "text", text: `\n\nNo figures are shown for AMD.\n\n${QUOTED_CLAIM_WITHDRAWN}` },
-    ],
-    claim_refs: ["claim-kept"],
-    document_refs: ["document-kept"],
-    source_refs: ["source"],
-  });
-});
