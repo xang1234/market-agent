@@ -198,3 +198,43 @@ test("a later 10-K's restatement of an inferred figure keeps its basis and is re
   await lookup(2025);
   assert.deepEqual(await consolidated2023(), [["reported", "70", false, "NetIncomeLoss"], ["restated", "72", false, "NetIncomeLoss"]]);
 });
+
+test("the backfill re-certifies a period whose only income fact 0076 invalidated (#342)", { timeout: 180_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for SEC ingestion coverage");
+    return;
+  }
+  const { db, download, lookup, backfill, netIncome, isActive } = await setUp(t, "fin-sec-ni-stranded");
+  download.text = companyFacts({ Revenues: [year(2023, 2023, 500)], ProfitLoss: [year(2023, 2023, 90)] });
+  await lookup(2023);
+  const consolidated = (await netIncome()).find((row) => row.metric_key === "net_income_consolidated")!;
+
+  // What ingestion stored before #342, alone: ProfitLoss as net income, proven, with no basis.
+  await db.query(`update facts set invalidated_at = now() where subject_id = $1`, [ISSUER_ID]);
+  const legacyId = (await db.query<{ fact_id: string }>(
+    `insert into facts (subject_kind, subject_id, metric_id, period_kind, period_start, period_end, fiscal_year, fiscal_period, value_num,
+                        unit, currency, scale, as_of, reported_at, observed_at, source_id, method, definition_version,
+                        verification_status, freshness_class, coverage_level, confidence, quality_flags)
+     select subject_kind, subject_id, (select metric_id from metrics where metric_key = 'net_income'), period_kind, period_start,
+            period_end, fiscal_year, fiscal_period, value_num, unit, currency, scale, as_of, reported_at, observed_at,
+            source_id, method, definition_version, verification_status, freshness_class, coverage_level, confidence, '[]'::jsonb
+       from facts where fact_id = $1
+     returning fact_id::text`,
+    [consolidated.fact_id],
+  )).rows[0]!.fact_id;
+  await db.query(
+    `insert into fact_precision_attestations (fact_id, source_id, precision_class, raw_token, token_proof_hash, value_text, scale_text,
+                                             source_locator, validation_method)
+     select $2, source_id, precision_class, raw_token, token_proof_hash, value_text, scale_text, source_locator, validation_method
+       from fact_precision_attestations where fact_id = $1`,
+    [consolidated.fact_id, legacyId],
+  );
+  await db.query(await readFile(join(workspaceRoot, "db", "migrations", "0076_net_income_profit_loss.up.sql"), "utf8"));
+  assert.equal(await isActive(legacyId), false);
+
+  assert.deepEqual(await backfill(), { periods: 1 });
+  assert.deepEqual((await netIncome()).filter((row) => row.active).map(({ metric_key, value, flags, proof }) => [metric_key, value, flags, proof]), [
+    ["net_income", "90", inferred("ProfitLoss"), "source_token_preserved"],
+    ["net_income_consolidated", "90", [], "source_token_preserved"],
+  ]);
+});
