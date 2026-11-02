@@ -21,6 +21,7 @@ import {
   closeLocalRuntimePoolForTests,
   persistAssistantMessage,
 } from "../src/local-runtime.ts";
+import { ChatSnapshotSealError } from "../src/messages.ts";
 import { createThread } from "../src/threads-repo.ts";
 
 const USER_ID = "10000000-0000-4000-8000-000000000001";
@@ -257,6 +258,62 @@ test("an answer's seal takes no second connection while its transaction holds th
     content_hash: contentHash(JSON.stringify(result.blocks)),
   });
   assert.deepEqual([persisted.message_id, persisted.snapshot_id], ["44444444-4444-4444-a444-444444444557", result.snapshot_id]);
+});
+
+test("a seal that would leave out a claim its blocks quote, with no way to render them without it, is refused (#557)", {
+  skip: !dockerAvailable(),
+  timeout: 120_000,
+}, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "chat-local-runtime-seal-refused");
+  const previousChatUrl = process.env.CHAT_DATABASE_URL;
+  const previousStub = process.env.CHAT_LOCAL_TOOL_EXECUTOR;
+  process.env.CHAT_DATABASE_URL = databaseUrl;
+  delete process.env.CHAT_LOCAL_TOOL_EXECUTOR;
+  registerLifoCleanup(t, async () => {
+    await closeLocalRuntimePoolForTests();
+    restoreEnv("CHAT_DATABASE_URL", previousChatUrl);
+    restoreEnv("CHAT_LOCAL_TOOL_EXECUTOR", previousStub);
+  });
+  const client = await connectedClient(t, databaseUrl);
+  await seedUser(client);
+  const thread = await createThread(client, USER_ID, { title: "Seal refused" });
+  const seeded = await seedExistingEvidence(client, thread.thread_id, { userId: USER_ID, label: "owned" });
+  const result = await analystToolRuntime({
+    threadId: thread.thread_id,
+    runId: RUN_ID,
+    turnId: TURN_ID,
+    userId: USER_ID,
+    bundleId: "single_subject_analysis",
+    userIntent: "Summarize demand",
+    emit: (() => ({}) as never),
+  });
+  const blocks = [{ ...result.blocks[0]!, claim_refs: [seeded.claimId], document_refs: [seeded.documentId], source_refs: [seeded.sourceId] }, ...result.blocks.slice(1)];
+
+  const writer = await connectedClient(t, databaseUrl);
+  await writer.query("begin");
+  await writer.query(`update documents set deleted_at = now() where document_id = $1::uuid`, [seeded.documentId]);
+  try {
+    await assert.rejects(
+      persistAssistantMessage({
+        message_id: "44444444-4444-4444-a444-444444445557",
+        threadId: thread.thread_id,
+        runId: RUN_ID,
+        turnId: TURN_ID,
+        role: "assistant",
+        blocks,
+        content_hash: contentHash(JSON.stringify(blocks)),
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof ChatSnapshotSealError);
+        assert.deepEqual(error.failures, [{ reason_code: "missing_claim_ref", details: { withdrawn: [], unchecked: [seeded.claimId] } }]);
+        return true;
+      },
+    );
+  } finally {
+    await writer.query("rollback");
+  }
+  const { rows } = await client.query(`select 1 from chat_messages where thread_id = $1::uuid and role = 'assistant'`, [thread.thread_id]);
+  assert.equal(rows.length, 0, "no message is saved");
 });
 
 function restoreEnv(key: string, value: string | undefined): void {
