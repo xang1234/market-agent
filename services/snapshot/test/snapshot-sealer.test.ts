@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { bootstrapDatabase, connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
+
 import {
   sealSnapshot,
   sealSnapshotInTransaction,
@@ -384,6 +386,32 @@ test("sealSnapshotWithPool releases the client as broken when rollback fails", a
 
   assert.ok(releaseError);
   assert.match(String((releaseError as { rollback_error?: unknown }).rollback_error), /simulated rollback crash/);
+});
+
+test("sealSnapshotWithPool rejects when its connection is lost mid-seal, and the process keeps running", { timeout: 120_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for the lost-connection coverage");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "snap-lost-client");
+  const pool = await connectedPool(t, databaseUrl);
+  const killedOnFirstQuery = {
+    async connect() {
+      const client = await pool.connect();
+      const query = client.query.bind(client);
+      client.query = (async (text: string, values?: unknown[]) => {
+        client.query = query;
+        await query("select pg_terminate_backend(pg_backend_pid())").catch(() => {});
+        return query(text, values);
+      }) as typeof client.query;
+      return client;
+    },
+  };
+
+  await assert.rejects(
+    () => sealSnapshotWithPool(killedOnFirstQuery, validSealInput()),
+    /Connection terminated unexpectedly/,
+  );
 });
 
 function validSealInput() {
