@@ -30,7 +30,8 @@ export type LocalRuntimeEvidenceInput = {
     effective_from: string | null;
     effective_until?: string | null;
     fiscal_year?: number | null;
-    // A quarter of fiscal_year (#558).
+    // A quarter of fiscal_year (#558): its explanations are the releases in
+    // the quarter after it; its guidance is still the year's.
     fiscal_period?: "Q1" | "Q2" | "Q3" | "Q4" | null;
   };
 };
@@ -138,18 +139,22 @@ export async function loadLocalRuntimeEvidence(
          join instruments ins on ins.instrument_id = ir.subject_id
         where ir.subject_kind = 'instrument'
      ),
-     -- The fiscal year asked about, or its quarter m, as each covered issuer's
-     -- facts known at the cutoff date it. Its end is where any of its figures
-     -- places it: quarter n (discrete or year-to-date) ends 3 * (m - n) months
-     -- before it (m is 4 for the year), so a year in progress ends where it
-     -- will, not with its latest quarter; it started a year (a quarter) before.
+     -- The fiscal year asked about, as each covered issuer's facts known at the
+     -- cutoff date it, and the period asked about: the year, or its quarter m.
+     -- The year's end is where any of its figures places it: quarter n
+     -- (discrete or year-to-date) ends 3 * (4 - n) months before it, so a year
+     -- in progress ends where it will, not with its latest quarter; it started
+     -- a year before. Quarter m ends 3 * (4 - m) months before the year does.
      -- ponytail: a 52/53-week year can be a few days off.
      fiscal_years as (
-       select y.subject_kind, y.subject_id, y.ends - case when $15::text is null then interval '1 year' else interval '3 months' end as starts, y.ends
-         from (
+       select y.subject_kind, y.subject_id, y.ends - interval '1 year' as starts, y.ends,
+              y.ends - make_interval(months => 3 * (4 - q.m))
+                - case when $15::text is null then interval '1 year' else interval '3 months' end as period_starts,
+              y.ends - make_interval(months => 3 * (4 - q.m)) as period_ends
+         from (select coalesce(substring($15::text from '^Q([1-4])$')::int, 4) as m) q,
+         (
            select f.subject_kind, f.subject_id,
-                  max(f.period_end + make_interval(months => 3 * (
-                    coalesce(substring($15::text from '^Q([1-4])$')::int, 4) - coalesce(substring(f.fiscal_period from '^Q([1-4])$')::int, 4))))
+                  max(f.period_end + make_interval(months => 3 * (4 - coalesce(substring(f.fiscal_period from '^Q([1-4])$')::int, 4))))
                     as ends
              from subject_refs sr
              join facts f
@@ -191,15 +196,15 @@ export async function loadLocalRuntimeEvidence(
                   -- The releases about a fiscal year come out from the end of
                   -- its first quarter until a quarter after it ends (a
                   -- quarter's, in the quarter after it). Its guidance is given
-                  -- during it: the full year's with the last year's results,
-                  -- just after it starts; the next year's, after it ends, is
-                  -- not its.
+                  -- during the year, whichever quarter is asked about: the full
+                  -- year's with the last year's results, just after it starts;
+                  -- the next year's, after it ends, is not its.
                   when fy.ends is not null and c.predicate like 'guidance.%' then
                     coalesce(c.effective_time, d.published_at, c.created_at) >= fy.starts
                     and coalesce(c.effective_time, d.published_at, c.created_at) < fy.ends
                   when fy.ends is not null then
-                    coalesce(c.effective_time, d.published_at, c.created_at) >= fy.starts + interval '3 months'
-                    and coalesce(c.effective_time, d.published_at, c.created_at) < fy.ends + interval '3 months'
+                    coalesce(c.effective_time, d.published_at, c.created_at) >= fy.period_starts + interval '3 months'
+                    and coalesce(c.effective_time, d.published_at, c.created_at) < fy.period_ends + interval '3 months'
                   else ($9::timestamptz is null or coalesce(c.effective_time, d.published_at, c.created_at) >= $9::timestamptz)
                     and ($11::timestamptz is null or coalesce(c.effective_time, d.published_at, c.created_at) < $11::timestamptz)
                 end
@@ -352,14 +357,9 @@ export async function loadPeriodClaimEvidence(
   if (subjectRefs.length === 0) return emptyEvidence(subjectRefs);
   const { patterns, tiers } = prefixPatterns(input.predicate_prefixes);
   const firstClaimIds = unique(input.first_claim_ids ?? []);
-  const { rows } = await db.query<ClaimEvidenceRow>(
+  const { rows } = await db.query<ClaimEvidenceRow & { matched: string }>(
     `with bound as (
-       -- A repeat is the same predicate and text (case-insensitive), however
-       -- many documents carry it or when: it counts once, as its first
-       -- publication.
-       -- ponytail: exact text only; paraphrases are not caught.
-       select distinct on (c.predicate, lower(c.text_canonical))
-              c.claim_id::text as claim_id,
+       select c.claim_id::text as claim_id,
               c.document_id::text as document_id,
               d.source_id::text as document_source_id,
               c.reported_by_source_id::text as source_id,
@@ -377,7 +377,10 @@ export async function loadPeriodClaimEvidence(
               $1::uuid::text as subject_id,
               (select min(p.tier) from unnest($3::text[], $4::int[]) as p(pattern, tier) where c.predicate like p.pattern)
                 as tier,
-              coalesce(c.effective_time, d.published_at, c.created_at) as dated
+              coalesce(c.effective_time, d.published_at, c.created_at) as dated,
+              coalesce(d.published_at, c.created_at) as first_published,
+              c.predicate || '|' || lower(c.text_canonical) as repeat_key,
+              array_position($10::uuid[], c.claim_id) as first_rank
          from claims c
          join documents d
            on d.document_id = c.document_id
@@ -400,15 +403,28 @@ export async function loadPeriodClaimEvidence(
           and ${citableClaimSql("$9::uuid", "$7::timestamptz")}
           -- As the default evidence load: an issuer-IR copy is not the filing.
           and not ${ISSUER_IR_DOCUMENT_SQL}
-        order by c.predicate, lower(c.text_canonical), coalesce(d.published_at, c.created_at), c.claim_id
+     ),
+     -- A repeat is the same predicate and text (case-insensitive), however
+     -- many documents carry it or when: it counts once, as its first
+     -- publication. A claim asked to come first was quoted as itself, so none
+     -- is another's repeat; a copy nobody quoted is still the quoted one's.
+     -- ponytail: exact text only; paraphrases are not caught.
+     kept as (
+       select distinct on (case when first_rank is not null then claim_id else repeat_key end) *
+         from bound b
+        where b.first_rank is not null
+           or not exists (select 1 from bound q where q.first_rank is not null and q.repeat_key = b.repeat_key)
+        order by case when first_rank is not null then claim_id else repeat_key end, first_published, claim_id
      )
-     select *
-       from bound
-      order by array_position($10::uuid[], claim_id::uuid) nulls last, tier, dated desc, claim_id
-      limit $2::int`,
+     -- Only the company's own claims asked to come first can take it past
+     -- its limit; matched counts every claim the limit chose from.
+     select *, count(*) over () as matched
+       from kept
+      order by first_rank nulls last, tier, dated desc, claim_id
+      limit greatest($2::int, (select count(*) from kept where first_rank is not null)::int)`,
     [
       subjectRefs[0]!.id,
-      Math.max(input.limit ?? 5, firstClaimIds.length),
+      input.limit ?? 5,
       patterns,
       tiers,
       input.period.kind,
@@ -419,22 +435,29 @@ export async function loadPeriodClaimEvidence(
       firstClaimIds,
     ],
   );
-  return evidenceFromClaimRows(subjectRefs, rows, true);
+  return Object.freeze({ ...evidenceFromClaimRows(subjectRefs, rows, true), truncated: Number(rows[0]?.matched ?? 0) > rows.length });
 }
 
-// Several reads as one, their claims in order, each once.
-export function joinedEvidence(subjectRefs: ReadonlyArray<SnapshotSubjectRef>, parts: ReadonlyArray<LocalRuntimeEvidence>): LocalRuntimeEvidence {
-  const claims = [...new Map(parts.flatMap((part) => part.claims).map((claim) => [claim.claim_id, claim])).values()];
-  const documents = [...new Map(parts.flatMap((part) => part.verifier_documents).map((document) => [document.document_id, document])).values()];
+// Several reads as one: their claims in order, each once, as the first read
+// that returned it; truncated when any read was; and the stored
+// contradictions among all of them, which no one read could see.
+export async function joinedEvidence(
+  db: QueryExecutor,
+  subjectRefs: ReadonlyArray<SnapshotSubjectRef>,
+  parts: ReadonlyArray<LocalRuntimeEvidence>,
+): Promise<LocalRuntimeEvidence> {
+  const firstOf = <T,>(rows: ReadonlyArray<T>, key: (row: T) => string) => rows.filter((row, i) => rows.findIndex((other) => key(other) === key(row)) === i);
+  const claims = firstOf(parts.flatMap((part) => part.claims), (claim) => claim.claim_id);
+  const documents = firstOf(parts.flatMap((part) => part.verifier_documents), (document) => document.document_id);
   const sourceIds = unique([...claims.map((claim) => claim.source_id), ...documents.map((document) => document.source_id)]);
-  const contradictions = parts.flatMap((part) => part.contradictions ?? []);
+  const claimRefs = claims.map((claim) => claim.claim_id);
   return Object.freeze({
     claims: Object.freeze(claims),
-    ...(parts.some((part) => part.truncated) ? { truncated: true } : {}),
-    ...(contradictions.length > 0 ? { contradictions: Object.freeze(contradictions) } : {}),
+    truncated: parts.some((part) => part.truncated === true),
+    contradictions: await loadContradictions(db, claimRefs),
     source_ids: Object.freeze(sourceIds),
     document_refs: Object.freeze(unique(claims.map((claim) => claim.document_id))),
-    claim_refs: Object.freeze(claims.map((claim) => claim.claim_id)),
+    claim_refs: Object.freeze(claimRefs),
     subject_refs: Object.freeze([...subjectRefs]),
     verifier_sources: Object.freeze(sourceIds.map((source_id) => Object.freeze({ source_id }))),
     verifier_documents: Object.freeze(documents),
