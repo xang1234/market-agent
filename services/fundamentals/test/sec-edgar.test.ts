@@ -9,6 +9,7 @@ import {
   fetchCompanyFacts,
   SEC_INCOME_METRIC_KEYS,
   SEC_METRIC_KEYS_BY_FAMILY,
+  reportsNoncontrollingInterest,
   SEC_NONCONTROLLING_INTEREST_CONCEPTS,
   secFiscalYearWindow,
   sourceIdForAccession,
@@ -1115,6 +1116,19 @@ test("a ProfitLoss whose period disagrees costs only consolidated net income, ne
   });
   assert.equal(secFiscalYearWindow(facts, 2024), null);
   assert.deepEqual(inferredLines(facts, 2024, "Q1"), [["net_income", 70, null]]);
+});
+
+test("a ProfitLoss that differs from NetIncomeLoss over the same period shows a noncontrolling interest no tagged concept names (#342)", () => {
+  // The FY2024 10-K's 2023 comparative; its NCI line is an extension concept companyfacts does not carry.
+  const comparative = (val: number): SecConceptValue => ({ ...annualValue(2023, val), fy: 2024, accn: "0000000342-25-000001", filed: "2025-02-01" });
+  const facts = factsOf({
+    Revenues: [annualValue(2023, 500), annualValue(2024, 600)],
+    NetIncomeLoss: [annualValue(2023, 70), comparative(70), annualValue(2024, 80)],
+    ProfitLoss: [comparative(75), annualValue(2024, 86)],
+  });
+  assert.deepEqual(inferredLines(facts, 2023).filter(([, , concept]) => concept !== null), []);
+  assert.equal(reportsNoncontrollingInterest(facts.facts["us-gaap"]!, "2023-01-01", "2023-12-31"), true);
+  assert.equal(reportsNoncontrollingInterest(factsOf({ NetIncomeLoss: [annualValue(2023, 70)], ProfitLoss: [annualValue(2023, 70)] }).facts["us-gaap"]!, "2023-01-01", "2023-12-31"), false);
 });
 
 function factsOf(byConcept: Record<string, SecConceptValue[]>): SecCompanyFacts {

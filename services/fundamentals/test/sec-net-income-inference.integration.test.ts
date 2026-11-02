@@ -238,3 +238,26 @@ test("the backfill re-certifies a period whose only income fact 0076 invalidated
     ["net_income_consolidated", "90", [], "source_token_preserved"],
   ]);
 });
+
+test("a later 10-K whose ProfitLoss differs from NetIncomeLoss for a stored period revises its inferred figure (#342)", { timeout: 180_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for SEC ingestion coverage");
+    return;
+  }
+  const { download, lookup, netIncome } = await setUp(t, "fin-sec-ni-profit-loss-differs");
+  download.text = companyFacts({ Revenues: [year(2023, 2023, 500)], NetIncomeLoss: [year(2023, 2023, 70)] });
+  await lookup(2023);
+  const consolidated2023 = async () => (await netIncome())
+    .filter((row) => row.fiscal_year === 2023 && row.metric_key === "net_income_consolidated")
+    .map(({ value, active, flags }) => [value, active, flags]);
+  assert.deepEqual(await consolidated2023(), [["70", true, inferred("NetIncomeLoss")]]);
+
+  // The FY2024 10-K's 2023 comparative: its NCI line is an extension concept companyfacts does not carry.
+  download.text = companyFacts({
+    Revenues: [year(2023, 2023, 500), year(2024, 2023, 500), year(2024, 2024, 600)],
+    NetIncomeLoss: [year(2023, 2023, 70), year(2024, 2023, 70), year(2024, 2024, 80)],
+    ProfitLoss: [year(2024, 2023, 75), year(2024, 2024, 86)],
+  });
+  await lookup(2024);
+  assert.deepEqual(await consolidated2023(), [["70", false, inferred("NetIncomeLoss")]]);
+});
