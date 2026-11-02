@@ -315,3 +315,24 @@ test("an unproven net income is retired only when it is the download's ProfitLos
     ["net_income_consolidated", "95", true, "source_token_preserved"],
   ]);
 });
+
+test("a stored inference checked against an older concept list stands while its kind and concept match (#342)", { timeout: 180_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for SEC ingestion coverage");
+    return;
+  }
+  const { db, download, lookup, backfill, netIncome } = await setUp(t, "fin-sec-ni-older-checked");
+  download.text = companyFacts({ Revenues: [year(2023, 2023, 500)], NetIncomeLoss: [year(2023, 2023, 70)] });
+  await lookup(2023);
+  const older = [{ kind: "no_noncontrolling_interest", concept: "NetIncomeLoss", checked: ["MinorityInterest"] }];
+  await db.query(
+    `update facts set quality_flags = $2::jsonb
+      where subject_id = $1 and metric_id = (select metric_id from metrics where metric_key = 'net_income_consolidated')`,
+    [ISSUER_ID, JSON.stringify(older)],
+  );
+  await backfill();
+  assert.deepEqual((await netIncome()).map(({ metric_key, active, flags }) => [metric_key, active, flags]), [
+    ["net_income", true, []],
+    ["net_income_consolidated", true, older],
+  ]);
+});
