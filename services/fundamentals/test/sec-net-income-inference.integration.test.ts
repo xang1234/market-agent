@@ -288,3 +288,30 @@ test("an ingest waits for another ingest of the same issuer to commit (#342)", {
     holder.release();
   }
 });
+
+test("an unproven net income is retired only when it is the download's ProfitLoss for its period (#342)", { timeout: 180_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for SEC ingestion coverage");
+    return;
+  }
+  const { db, download, lookup, backfill, netIncome } = await setUp(t, "fin-sec-ni-unproven-kept");
+  download.text = companyFacts({ Revenues: [year(2024, 2024, 600)], ProfitLoss: [year(2024, 2024, 95)], MinorityInterest: [yearEnd(2024, 2024, 5)] });
+  await lookup(2024);
+  // An older ingest's NetIncomeLoss, stored before precision proofs: 95 less the noncontrolling interest's 5.
+  await db.query(
+    `insert into facts (subject_kind, subject_id, metric_id, period_kind, period_start, period_end, fiscal_year, fiscal_period, value_num,
+                        unit, currency, scale, as_of, reported_at, observed_at, source_id, method, definition_version,
+                        verification_status, freshness_class, coverage_level, confidence, quality_flags)
+     select f.subject_kind, f.subject_id, (select metric_id from metrics where metric_key = 'net_income'), f.period_kind, f.period_start,
+            f.period_end, f.fiscal_year, f.fiscal_period, 90, f.unit, f.currency, f.scale, f.as_of, f.reported_at, f.observed_at,
+            f.source_id, f.method, f.definition_version, f.verification_status, f.freshness_class, f.coverage_level, f.confidence, '[]'::jsonb
+       from facts f join metrics m on m.metric_id = f.metric_id
+      where f.subject_id = $1 and m.metric_key = 'net_income_consolidated'`,
+    [ISSUER_ID],
+  );
+  await backfill();
+  assert.deepEqual((await netIncome()).map(({ metric_key, value, active, proof }) => [metric_key, value, active, proof]), [
+    ["net_income", "90", true, null],
+    ["net_income_consolidated", "95", true, "source_token_preserved"],
+  ]);
+});
