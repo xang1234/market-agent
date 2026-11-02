@@ -1,6 +1,8 @@
 // Cash resilience from facts SEC ingestion wrote (#344): an FY2024 10-K and a
 // Q1 FY2025 10-Q. The 10-Q's balance is stored as FY2025 at the quarter's end;
 // it is never certified, so the latest fiscal year is FY2024 for every input.
+// Cash conversion divides OCF, which is consolidated, by net income including
+// noncontrolling interest (#342).
 
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -14,7 +16,7 @@ import { chatDatabase, chatHarness, completed, SEC_ISSUER_D } from "./financial-
 
 const CIK = 320197;
 
-function companyFacts() {
+function companyFacts(netIncome: Readonly<Record<string, readonly [annual: string, quarter: string]>>) {
   const k24 = { accn: "0000320197-25-000010", fy: 2024, fp: "FY", form: "10-K", filed: "2025-02-01" };
   const q1 = { accn: "0000320197-25-000020", fy: 2025, fp: "Q1", form: "10-Q", filed: "2025-05-01" };
   const value = (filing: typeof k24, start: string | null, end: string, token: string) =>
@@ -30,7 +32,7 @@ function companyFacts() {
     facts: {
       "us-gaap": {
         Revenues: flow("500", "130"),
-        NetIncomeLoss: flow("100", "25"),
+        ...Object.fromEntries(Object.entries(netIncome).map(([name, [annual, quarter]]) => [name, flow(annual, quarter)])),
         NetCashProvidedByUsedInOperatingActivities: flow("120", "30"),
         Assets: balance("600", "650"),
         Liabilities: balance("300", "310"),
@@ -40,14 +42,11 @@ function companyFacts() {
   };
 }
 
-test("cash resilience from an SEC 10-K and a later 10-Q", { timeout: 300_000 }, async (t) => {
-  if (!dockerAvailable()) {
-    t.skip("Docker is required for chat financial coverage");
-    return;
-  }
+async function cashResilience(t: Parameters<typeof chatDatabase>[0], netIncome: Parameters<typeof companyFacts>[0]) {
   const { db, pool, threadId } = await chatDatabase(t, "chat-cash-res-sec");
   for (const [metricKey, name, aggregation] of [
     ["net_income", "Net income", "sum"],
+    ["net_income_consolidated", "Net income including noncontrolling interest", "sum"],
     ["operating_cash_flow", "Operating cash flow", "sum"],
     ["total_assets", "Total assets", "point_in_time"],
     ["total_liabilities", "Total liabilities", "point_in_time"],
@@ -61,7 +60,7 @@ test("cash resilience from an SEC 10-K and a later 10-Q", { timeout: 300_000 }, 
   }
   await db.query(`insert into issuers (issuer_id, legal_name, cik) values ($1, 'Quarterly Filer Corp', $2)`, [SEC_ISSUER_D, String(CIK)]);
   const statements = createSecBackedStatementRepository(pool, {
-    fetcher: secCompanyFetcher(companyFacts, { completed_at: "2025-06-01T15:05:00.000Z" }),
+    fetcher: secCompanyFetcher(() => companyFacts(netIncome), { completed_at: "2025-06-01T15:05:00.000Z" }),
     sourceId: randomUUID(),
     logger: { warn: () => {} },
   });
@@ -76,16 +75,6 @@ test("cash resilience from an SEC 10-K and a later 10-Q", { timeout: 300_000 }, 
   const block = (message.blocks as Array<{ id: string; financial: any }>)[0]!;
   const { results, labels } = block.financial;
   const rows = results.map((result: any) => [labels[result.measure_label_id].text, labels[result.period_label_id].text, result.presented.kind === "value" ? result.presented.value : result.disposition]);
-  assert.deepEqual(rows, [
-    ["Operating cash flow", "FY2024 (ended 2024-12-31)", "120"],
-    ["Net income", "FY2024 (ended 2024-12-31)", "100"],
-    ["Total liabilities", "FY2024 (as of 2024-12-31)", "300"],
-    ["Total assets", "FY2024 (as of 2024-12-31)", "600"],
-    ["Stockholders' equity", "FY2024 (as of 2024-12-31)", "200"],
-    ["Cash conversion: operating cash flow / net income (reported period)", "FY2024 (ended 2024-12-31)", "1.2"],
-    ["Total liabilities / total assets (period-end balance sheet)", "FY2024 (as of 2024-12-31)", "0.5"],
-    ["Total liabilities / stockholders' equity (period-end balance sheet)", "FY2024 (as of 2024-12-31)", "1.5"],
-  ]);
   const bound = (await db.query(
     `select i.input_slot, f.fiscal_year, f.period_end::text as period_end
        from financial_run_inputs i join facts f on f.fact_id = i.fact_id
@@ -93,5 +82,37 @@ test("cash resilience from an SEC 10-K and a later 10-Q", { timeout: 300_000 }, 
       order by i.input_slot`,
     [threadId],
   )).rows.map((row) => [row.fiscal_year, row.period_end]);
+  return { rows, bound };
+}
+
+test("cash resilience from an SEC 10-K and a later 10-Q", { timeout: 300_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for chat financial coverage");
+    return;
+  }
+  const { rows, bound } = await cashResilience(t, { NetIncomeLoss: ["100", "25"] });
+  assert.deepEqual(rows, [
+    ["Operating cash flow", "FY2024 (ended 2024-12-31)", "120"],
+    ["Net income including noncontrolling interest", "FY2024 (ended 2024-12-31)", "100"],
+    ["Total liabilities", "FY2024 (as of 2024-12-31)", "300"],
+    ["Total assets", "FY2024 (as of 2024-12-31)", "600"],
+    ["Stockholders' equity", "FY2024 (as of 2024-12-31)", "200"],
+    ["Cash conversion: operating cash flow / net income including noncontrolling interest (reported period)", "FY2024 (ended 2024-12-31)", "1.2"],
+    ["Total liabilities / total assets (period-end balance sheet)", "FY2024 (as of 2024-12-31)", "0.5"],
+    ["Total liabilities / stockholders' equity (period-end balance sheet)", "FY2024 (as of 2024-12-31)", "1.5"],
+  ]);
   assert.deepEqual(bound, Array(5).fill([2024, "2024-12-31"]), "every input binds the FY2024 10-K");
+});
+
+test("cash conversion divides by ProfitLoss, not the parent's NetIncomeLoss, for a filer with noncontrolling interest (#342)", { timeout: 300_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for chat financial coverage");
+    return;
+  }
+  const { rows } = await cashResilience(t, { NetIncomeLoss: ["70", "17"], ProfitLoss: ["100", "25"] });
+  assert.deepEqual([rows[0], rows[1], rows[5]], [
+    ["Operating cash flow", "FY2024 (ended 2024-12-31)", "120"],
+    ["Net income including noncontrolling interest", "FY2024 (ended 2024-12-31)", "100"],
+    ["Cash conversion: operating cash flow / net income including noncontrolling interest (reported period)", "FY2024 (ended 2024-12-31)", "1.2"],
+  ]);
 });

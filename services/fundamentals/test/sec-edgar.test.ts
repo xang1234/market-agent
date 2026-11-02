@@ -1003,6 +1003,39 @@ test("extractStatement collision policy: modern (post-ASC 606) concept name wins
   assert.equal(revenue?.value_num, 391_035_000_000);
 });
 
+// Annual values by concept and fiscal year, each from that year's 10-K.
+function annualFacts(byConcept: Record<string, Record<number, number>>): SecCompanyFacts {
+  const annual = (year: number, val: number) =>
+    value({ val, start: `${year}-01-01`, end: `${year}-12-31`, fy: year, accn: `0000000342-${String(year + 1).slice(2)}-000001`, filed: `${year + 1}-02-01` });
+  return {
+    cik: 342,
+    entityName: "Noncontrolling Interest Corp",
+    facts: {
+      "us-gaap": Object.fromEntries(Object.entries({ Revenues: { 2023: 500, 2024: 500 }, ...byConcept }).map(([concept, years]) => [
+        concept,
+        { label: concept, description: "", units: { USD: Object.entries(years).map(([year, val]) => annual(Number(year), val)) } },
+      ])),
+    },
+  };
+}
+
+function netIncomeLines(facts: SecCompanyFacts, fiscal_year: number) {
+  return extractStatement({ subject: aaplIssuer, facts, family: "income", fiscal_year, fiscal_period: "FY", source_id: SEC_SOURCE_ID, as_of: "2025-02-02T00:00:00.000Z" })
+    .lines.filter((line) => line.metric_key.startsWith("net_income")).map((line) => [line.metric_key, line.value_num]);
+}
+
+test("net income is NetIncomeLoss alone; ProfitLoss, which includes noncontrolling interest, is consolidated net income (#342)", () => {
+  const facts = annualFacts({ NetIncomeLoss: { 2023: 70 }, ProfitLoss: { 2023: 100, 2024: 90 } });
+  assert.deepEqual(netIncomeLines(facts, 2023), [["net_income", 70], ["net_income_consolidated", 100]]);
+  assert.deepEqual(netIncomeLines(facts, 2024), [["net_income_consolidated", 90]]);
+});
+
+test("without ProfitLoss, consolidated net income is NetIncomeLoss only for a year that reports no noncontrolling interest (#342)", () => {
+  const facts = annualFacts({ NetIncomeLoss: { 2023: 70, 2024: 70 }, NetIncomeLossAttributableToNoncontrollingInterest: { 2024: 30 } });
+  assert.deepEqual(netIncomeLines(facts, 2023), [["net_income", 70], ["net_income_consolidated", 70]]);
+  assert.deepEqual(netIncomeLines(facts, 2024), [["net_income", 70]]);
+});
+
 test("extractStatement skips concepts whose `units` field is malformed (defensive)", () => {
   // assertCompanyFacts validates only top-level shape; deeper malformations
   // shouldn't crash extractStatement with a confusing TypeError.
