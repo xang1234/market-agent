@@ -145,18 +145,22 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   // and, when that answer is the engine's, the explanations of the figures it
   // showed at their own periods (#558).
   const followUp = scope.route === "evidence_followup";
-  const priorCause = followUp ? await loadPriorCauseClaims(pool(), { threadId: context.threadId }) : [];
   const issuers = new Map(covered.map((subject) => [subjectKey(subject.subject_ref), structuredRefsFromHandoff(subject.handoff).issuer?.id ?? null]));
+  // A quoted cause one read left out is no longer citable (superseded,
+  // deleted or revoked since); a read that failed says nothing about it.
+  let withdrawn = false;
   // A re-read that fails is a claims read that failed (loadEvidenceOrEmpty).
   const followUpEvidence = async (db: QueryExecutor, input: LocalRuntimeEvidenceInput) => {
+    // Ahead of the route's claims, the cause the re-read answer quoted.
+    const priorCause = await loadPriorCauseClaims(db, { threadId: context.threadId });
+    const read = { ...input, first_claim_ids: priorCause };
     const explained = await reReadExplained(db, context.threadId);
-    return explained === null
-      ? loadLocalRuntimeEvidence(db, input)
-      : explainedEvidence(db, input, explained, (ref) => issuers.get(subjectKey(ref)) ?? null);
+    const evidence = explained === null
+      ? await loadLocalRuntimeEvidence(db, read)
+      : await explainedEvidence(db, read, explained, (ref) => issuers.get(subjectKey(ref)) ?? null);
+    withdrawn = priorCause.some((claimId) => !evidence.claim_refs.includes(claimId));
+    return evidence;
   };
-  // One a read left out is no longer citable (superseded, deleted or revoked
-  // since); a read that failed says nothing about it.
-  let withdrawn = false;
   const registryRuntime = createRegistryBackedAnalystToolRuntime({
     executeTool: async ({ toolName, arguments: args }) => {
       const read = {
@@ -165,11 +169,8 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
         // The route's claims first, none published after the turn's cutoff (#207).
         as_of: asOf,
         selection: claimSelection(scope, asOf),
-        // Ahead of them, the cause the re-read answer quoted.
-        first_claim_ids: priorCause,
       };
       const evidence = await loadEvidenceOrEmpty(pool(), read, followUp ? followUpEvidence : undefined);
-      if (!evidence.unavailable) withdrawn = priorCause.some((claimId) => !evidence.claim_refs.includes(claimId));
       return {
         kind: "local_evidence_tool_result",
         status: "ok",
