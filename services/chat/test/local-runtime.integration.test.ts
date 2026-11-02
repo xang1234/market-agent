@@ -201,6 +201,64 @@ test("default local chat runtime persists a verifier-valid assistant message fro
   assert.match(toolRows[0]?.result_hash ?? "", /^sha256:/);
 });
 
+test("an answer's seal takes no second connection while its transaction holds the first, so a full pool cannot stall it (#557)", {
+  skip: !dockerAvailable(),
+  timeout: 120_000,
+}, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "chat-local-runtime-one-connection");
+  const previousChatUrl = process.env.CHAT_DATABASE_URL;
+  const previousStub = process.env.CHAT_LOCAL_TOOL_EXECUTOR;
+  process.env.CHAT_DATABASE_URL = databaseUrl;
+  delete process.env.CHAT_LOCAL_TOOL_EXECUTOR;
+  registerLifoCleanup(t, async () => {
+    await closeLocalRuntimePoolForTests();
+    restoreEnv("CHAT_DATABASE_URL", previousChatUrl);
+    restoreEnv("CHAT_LOCAL_TOOL_EXECUTOR", previousStub);
+  });
+  const client = await connectedClient(t, databaseUrl);
+  await seedUser(client);
+  const thread = await createThread(client, USER_ID, { title: "One connection" });
+  await seedExistingEvidence(client, thread.thread_id, { userId: USER_ID, label: "owned" });
+  const result = await analystToolRuntime({
+    threadId: thread.thread_id,
+    runId: RUN_ID,
+    turnId: TURN_ID,
+    userId: USER_ID,
+    bundleId: "single_subject_analysis",
+    userIntent: "Summarize demand",
+    emit: (() => ({}) as never),
+  });
+  assert.ok((result.blocks[0]?.tool_call_ids as unknown[]).length > 0, "the seal reads the tool calls' results");
+
+  // The seal's own pool, on a role Postgres lets hold one connection.
+  // Roles are the cluster's, so each run has its own.
+  const role = `chat_one_connection_${process.pid}_${Date.now()}`;
+  await client.query(`create role ${role} login password 'one' connection limit 1`);
+  registerLifoCleanup(t, async () => {
+    await closeLocalRuntimePoolForTests();
+    await client.query(`drop owned by ${role}`);
+    await client.query(`drop role ${role}`);
+  });
+  await client.query(`grant all on all tables in schema public to ${role}`);
+  await client.query(`grant all on all sequences in schema public to ${role}`);
+  const oneConnection = new URL(databaseUrl);
+  oneConnection.username = role;
+  oneConnection.password = "one";
+  await closeLocalRuntimePoolForTests();
+  process.env.CHAT_DATABASE_URL = oneConnection.toString();
+
+  const persisted = await persistAssistantMessage({
+    message_id: "44444444-4444-4444-a444-444444444557",
+    threadId: thread.thread_id,
+    runId: RUN_ID,
+    turnId: TURN_ID,
+    role: "assistant",
+    blocks: result.blocks,
+    content_hash: contentHash(JSON.stringify(result.blocks)),
+  });
+  assert.deepEqual([persisted.message_id, persisted.snapshot_id], ["44444444-4444-4444-a444-444444444557", result.snapshot_id]);
+});
+
 function restoreEnv(key: string, value: string | undefined): void {
   if (value === undefined) {
     delete process.env[key];
