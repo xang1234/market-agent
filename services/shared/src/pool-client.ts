@@ -9,8 +9,9 @@ export type PoolClient = {
  * `destroyAfter` says so for the error `action` threw. pg-pool stops
  * listening for a client's "error" event while the client is lent out, and pg
  * emits one when the connection is lost; an unheard one throws out of the
- * process. pg has already failed every query on that client with the same
- * error, so the caller hears it there and the event needs no handling.
+ * process. pg marks the client unusable before it emits, so a query in flight
+ * or queued rejects with that error, a later one rejects as not queryable,
+ * with neither it surfaces nowhere, and the release below discards the client.
  */
 export async function withPoolClient<C extends PoolClient, T>(
   pool: { connect(): Promise<C> },
