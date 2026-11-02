@@ -336,3 +336,42 @@ test("a stored inference checked against an older concept list stands while its 
     ["net_income_consolidated", true, older],
   ]);
 });
+
+test("an ingest of an older download writes no inference after a newer one refuted it, and a newer download still infers (#342)", { timeout: 180_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for SEC ingestion coverage");
+    return;
+  }
+  const { db, download, options, lookup, netIncome } = await setUp(t, "fin-sec-ni-older-download");
+  const older = { Revenues: [year(2023, 2023, 500)], NetIncomeLoss: [year(2023, 2023, 70)] };
+  download.text = companyFacts(older);
+  await lookup(2023);
+  let reached!: () => void;
+  const atCheckout = new Promise<void>((resolve) => (reached = resolve));
+  let resume!: () => void;
+  const resumed = new Promise<void>((resolve) => (resume = resolve));
+  const paused = { query: db.query.bind(db), connect: async () => (reached(), await resumed, db.connect()) };
+  const olderBackfill = backfillSecCompanionStatements(paused as unknown as typeof db, { issuerId: ISSUER_ID, ...options });
+  await atCheckout;
+  const newer = {
+    Revenues: [...older.Revenues, year(2024, 2023, 500), year(2024, 2024, 600)],
+    NetIncomeLoss: [...older.NetIncomeLoss, year(2024, 2023, 70), year(2024, 2024, 80)],
+    NetIncomeLossAttributableToNoncontrollingInterest: [year(2024, 2023, 5)],
+  };
+  download.text = companyFacts(newer);
+  await lookup(2024);
+  resume();
+  await olderBackfill;
+  const consolidated = async (fiscalYear: number) => (await netIncome())
+    .filter((row) => row.metric_key === "net_income_consolidated" && row.fiscal_year === fiscalYear)
+    .map(({ value, active }) => [value, active]);
+  assert.deepEqual(await consolidated(2023), [["70", false]], "the older download does not restore the refuted inference");
+  assert.deepEqual(await consolidated(2024), [["80", true]]);
+  download.text = companyFacts({
+    ...newer,
+    Revenues: [...newer.Revenues, year(2025, 2025, 700)],
+    NetIncomeLoss: [...newer.NetIncomeLoss, year(2025, 2025, 90)],
+  });
+  await lookup(2025);
+  assert.deepEqual(await consolidated(2025), [["90", true]], "a newer download with no noncontrolling interest still infers");
+});
