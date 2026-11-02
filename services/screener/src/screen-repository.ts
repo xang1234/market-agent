@@ -118,6 +118,7 @@ export function createPostgresScreenRepository(
                 definition = excluded.definition,
                 created_at = excluded.created_at,
                 updated_at = excluded.updated_at
+          where screener_screens.user_id = excluded.user_id
          returning screen_id::text as screen_id,
                    user_id::text as user_id,
                    name,
@@ -133,6 +134,8 @@ export function createPostgresScreenRepository(
           screen.updated_at,
         ],
       );
+      // No row back means another user owns this id: refuse it the way a read of a foreign screen does.
+      if (!result.rows[0]) throw new ScreenNotFoundError(screen.screen_id);
       return { status, screen: screenFromRow(result.rows[0]) };
     },
     async find(screen_id) {
