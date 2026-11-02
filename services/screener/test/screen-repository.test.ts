@@ -1,7 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  bootstrapDatabase,
+  connectedPool,
+  dockerAvailable,
+} from "../../../db/test/docker-pg.ts";
+import {
   createInMemoryScreenRepository,
+  createPostgresScreenRepository,
   ScreenNotFoundError,
 } from "../src/screen-repository.ts";
 import { persistScreen } from "../src/screen-subject.ts";
@@ -141,4 +147,25 @@ test("listForUser returns only screens owned by the requested user", async () =>
     (await repo.listForUser(USER_B)).map((screen) => screen.name),
     ["bob"],
   );
+});
+
+test("postgres save refuses a screen id another user already owns", { skip: !dockerAvailable(), timeout: 120_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "screener-screen-owner");
+  const db = await connectedPool(t, databaseUrl);
+  await db.query(
+    `insert into users (user_id, email) values ($1::uuid, 'a@example.test'), ($2::uuid, 'b@example.test')`,
+    [USER_A, USER_B],
+  );
+  const repo = createPostgresScreenRepository(db);
+  await repo.save(makeScreen(SCREEN_A, "alice", "2026-04-22T10:00:00.000Z", USER_A));
+
+  await assert.rejects(
+    repo.save(makeScreen(SCREEN_A, "bob", "2026-04-23T10:00:00.000Z", USER_B)),
+    ScreenNotFoundError,
+  );
+
+  const found = await repo.find(SCREEN_A);
+  assert.equal(found?.user_id, USER_A);
+  assert.equal(found?.name, "alice");
+  assert.equal(found?.updated_at, "2026-04-22T10:00:00.000Z");
 });

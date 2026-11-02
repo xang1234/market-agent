@@ -838,6 +838,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            db/package-lock.json
+            services/screener/package-lock.json
+
+      # The Postgres screen repository test imports the shared db/test Docker
+      # harness and invokes `npm run apply:schema` inside db/.
+      - name: Install db deps (needed by screener integration harness)
+        working-directory: db
+        run: npm ci
 
       - run: npm ci
 
