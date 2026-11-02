@@ -261,3 +261,30 @@ test("a later 10-K whose ProfitLoss differs from NetIncomeLoss for a stored peri
   await lookup(2024);
   assert.deepEqual(await consolidated2023(), [["70", false, inferred("NetIncomeLoss")]]);
 });
+
+test("an ingest waits for another ingest of the same issuer to commit (#342)", { timeout: 180_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for SEC ingestion coverage");
+    return;
+  }
+  // Each checks inferences against its own snapshot, so one could re-store a figure the other just refuted.
+  const { db, download, lookup, netIncome } = await setUp(t, "fin-sec-ni-serialized");
+  download.text = companyFacts({ Revenues: [year(2023, 2023, 500)], NetIncomeLoss: [year(2023, 2023, 70)] });
+  const holder = await db.connect();
+  try {
+    await holder.query("begin");
+    await holder.query("select pg_advisory_xact_lock(hashtextextended($1::text, 0))", [ISSUER_ID]);
+    let done = false;
+    const ingest = lookup(2023).then(() => {
+      done = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.equal(done, false, "the ingest waited for the issuer's lock");
+    assert.deepEqual(await netIncome(), []);
+    await holder.query("commit");
+    await ingest;
+    assert.equal((await netIncome()).length, 2);
+  } finally {
+    holder.release();
+  }
+});
