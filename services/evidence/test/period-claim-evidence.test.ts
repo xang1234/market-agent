@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createClaim, listClaimsForDocument, type ClaimPeriod } from "../src/claim-repo.ts";
-import { loadPeriodClaimEvidence, lockCitableClaims } from "../src/local-runtime-evidence.ts";
+import { joinedEvidence, loadPeriodClaimEvidence, lockCitableClaims } from "../src/local-runtime-evidence.ts";
 import type { QueryExecutor } from "../src/types.ts";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
 
@@ -82,7 +82,7 @@ test("a period lookup returns a company's claims bound to that period (#542)", a
     issuer: string,
     period: ClaimPeriod,
     predicate_prefixes: ReadonlyArray<string | ReadonlyArray<string>>,
-    options: { as_of?: string; limit?: number; user_id?: string; exclude_claim_ids?: ReadonlyArray<string> } = {},
+    options: { as_of?: string; limit?: number; user_id?: string; exclude_claim_ids?: ReadonlyArray<string>; first_claim_ids?: ReadonlyArray<string> } = {},
   ) => (await loadPeriodClaimEvidence(db, { issuer_id: issuer, period, predicate_prefixes, ...options })).claim_refs;
   const margin = (text: string, at: string, period?: ClaimPeriod) => ({ predicate: GROSS_MARGIN, text, at, period });
 
@@ -236,5 +236,49 @@ test("a period lookup returns a company's claims bound to that period (#542)", a
       await db.query("rollback");
       await writer.query("rollback");
     }
+  });
+
+  await t.test("a claim asked to come first is never another's repeat: its twin filed earlier does not take its place (#558)", async () => {
+    const acme = await company(db);
+    await claim(db, acme, margin("Gross margin fell on a reserve.", "2025-08-01T20:00:00Z", Q2));
+    const quoted = await claim(db, acme, margin("Gross margin fell on a reserve.", "2025-08-05T20:00:00Z", Q2));
+    assert.deepEqual(await lookup(acme, Q2, [GROSS_MARGIN], { first_claim_ids: [quoted] }), [quoted]);
+  });
+
+  await t.test("claims asked to come first that the company did not make raise no limit of its own (#558)", async () => {
+    const [acme, beta] = [await company(db), await company(db)];
+    const newest = await claim(db, acme, margin("Gross margin fell on a reserve.", "2025-08-05T20:00:00Z", Q2));
+    await claim(db, acme, margin("Gross margin fell on lower yields.", "2025-08-04T20:00:00Z", Q2));
+    const others = [
+      await claim(db, beta, margin("Gross margin rose on mix.", "2025-08-03T20:00:00Z", Q2)),
+      await claim(db, beta, margin("Gross margin rose on pricing.", "2025-08-02T20:00:00Z", Q2)),
+    ];
+    assert.deepEqual(await lookup(acme, Q2, [GROSS_MARGIN], { limit: 1, first_claim_ids: others }), [newest]);
+  });
+
+  await t.test("a period read says when more of the company's claims matched than its limit returned (#558)", async () => {
+    const acme = await company(db);
+    await claim(db, acme, margin("Gross margin fell on a reserve.", "2025-08-05T20:00:00Z", Q2));
+    await claim(db, acme, margin("Gross margin fell on lower yields.", "2025-08-04T20:00:00Z", Q2));
+    const read = async (limit: number) => (await loadPeriodClaimEvidence(db, { issuer_id: acme, period: Q2, predicate_prefixes: [GROSS_MARGIN], limit })).truncated;
+    assert.deepEqual([await read(1), await read(2)], [true, false]);
+  });
+
+  await t.test("reads joined as one keep each claim as the first read returned it, and the stored contradictions among all their claims (#558)", async () => {
+    const [acme, beta] = [await company(db), await company(db)];
+    const shared = await claim(db, acme, margin("Gross margin fell on export controls.", "2025-08-05T20:00:00Z", Q2));
+    await db.query(`insert into claim_arguments (claim_id, subject_kind, subject_id, role) values ($1, 'issuer', $2, 'subject')`, [shared, beta]);
+    const disputed = await claim(db, beta, margin("Gross margin was not hurt by export controls.", "2025-08-06T20:00:00Z", Q2));
+    const { rows: [cluster] } = await db.query<{ cluster_id: string }>(
+      `insert into claim_clusters (canonical_signature, first_seen_at, last_seen_at) values ('export controls #558', now(), now()) returning cluster_id::text`,
+    );
+    await db.query(
+      `insert into claim_cluster_members (cluster_id, claim_id, relation) values ($1, $2, 'support'), ($1, $3, 'contradict')`,
+      [cluster!.cluster_id, shared, disputed],
+    );
+    const read = (issuer: string) => loadPeriodClaimEvidence(db, { issuer_id: issuer, period: Q2, predicate_prefixes: [GROSS_MARGIN] });
+    const joined = await joinedEvidence(db, [{ kind: "issuer", id: acme }, { kind: "issuer", id: beta }], [await read(acme), await read(beta)]);
+    assert.deepEqual(joined.claims.map((row) => [row.claim_id, row.subject_id]), [[shared, acme], [disputed, beta]]);
+    assert.deepEqual(joined.contradictions, [[shared, disputed]]);
   });
 });
