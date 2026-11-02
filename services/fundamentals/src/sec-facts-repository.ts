@@ -440,14 +440,20 @@ async function storeFiling(
     // Each ingest of an issuer checks its inferences against what it reads, so
     // two at once could each re-store a figure the other refutes (#342).
     await client.query("select pg_advisory_xact_lock(hashtextextended($1::text, 0))", [input.issuerId]);
+    // A download older than one already stored may lack the noncontrolling
+    // interest the newer one reported, so it leaves every figure it would
+    // infer as it is: none stored, none retired.
+    const newest = await isNewestDownload(client, input.issuerId, input.fetched.facts);
     // The repair retires stored income facts the filing contradicts, then
     // stores the filing's in their place (the active identity is unique).
     const stale = input.income === "repair" && income
       ? await staleStatementFacts(client, input.issuerId, input.cik, income, input.fetched.facts)
       : new Map<string, string[]>();
+    if (!newest) for (const metricKey of income?.inferences.keys() ?? []) stale.delete(metricKey);
     if (stale.size > 0) await invalidateWithDependents(client, input.issuerId, [...stale.values()].flat());
     for (const entry of mapped) {
-      const inserted = await persistStatementFacts(client, entry.mapped, clock, {
+      const statement = newest ? entry.mapped : { ...entry.mapped, lines: entry.mapped.lines.filter((line) => !entry.inferences.has(line.metric_key)) };
+      const inserted = await persistStatementFacts(client, statement, clock, {
         cik: input.cik,
         tokens: entry.tokens,
         derivations: entry.derivations,
@@ -1199,6 +1205,23 @@ const INFERENCE_SQL = `jsonb_path_query_first(f.quality_flags, '$[*] ? (@.kind =
 // An inferred figure holds only while no filing shows a noncontrolling
 // interest for its period (#342). Any download can be the first to show one,
 // for any period on file, so every filing's transaction checks them all.
+// Records the download's newest filing date for the issuer, and says whether
+// no download stored before it had a newer one. Compared by filing date, so
+// two downloads either side of a filing the same day compare equal.
+async function isNewestDownload(db: FundamentalsQueryExecutor, issuerId: UUID, facts: SecCompanyFacts): Promise<boolean> {
+  const filed = Object.values(facts.facts).flatMap((concepts) => Object.values(concepts ?? {}))
+    .flatMap((concept) => Object.values(concept.units ?? {}))
+    .flatMap((values) => (Array.isArray(values) ? values.map((value) => value.filed) : []));
+  const newest = filed.reduce((max, date) => (date > max ? date : max), "0001-01-01");
+  const { rows } = await db.query<{ newest_filed: string }>(
+    `insert into sec_issuer_downloads (issuer_id, newest_filed) values ($1, $2::date)
+     on conflict (issuer_id) do update set newest_filed = greatest(sec_issuer_downloads.newest_filed, excluded.newest_filed)
+     returning newest_filed::text as newest_filed`,
+    [issuerId, newest],
+  );
+  return rows[0]?.newest_filed === newest;
+}
+
 async function retireRefutedInferences(db: FundamentalsQueryExecutor, issuerId: UUID, facts: SecCompanyFacts): Promise<void> {
   const usGaap = facts.facts["us-gaap"];
   if (!usGaap) return;

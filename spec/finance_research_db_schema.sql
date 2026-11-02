@@ -2042,3 +2042,11 @@ create index sec_filing_acceptances_accession_idx on sec_filing_acceptances(acce
 create trigger sec_filing_acceptances_append_only
 before update on sec_filing_acceptances
 for each row execute function prevent_financial_record_update();
+
+-- The newest filing date in any SEC companyfacts download stored for an
+-- issuer: an older download stores no figure inferred from a missing
+-- noncontrolling interest (migration 0077).
+create table sec_issuer_downloads (
+  issuer_id uuid primary key references issuers(issuer_id) on delete cascade,
+  newest_filed date not null
+);
