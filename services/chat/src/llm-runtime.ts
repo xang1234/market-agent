@@ -301,8 +301,9 @@ function withoutClaims(packet: EvidencePacket, dropped: DroppedClaims): Evidence
 }
 
 // The accepted assertions checked again against what is left of the packet,
-// each citing only the claims still in it: an attribution with none left,
-// and an inference resting only on such, fail the checks they passed.
+// each citing only the claims still in it: an attribution with none left
+// fails the checks it passed. An inference that lost any claim it rests on
+// goes too: it was judged, and may be worded, on the claim that is gone.
 function rechecked(report: AssertionReport, packet: EvidencePacket): AssertionReport {
   if (report.status !== "checked") return report;
   const cited = new Set([...packet.figures.map((figure) => figure.id), ...packet.claims.map((claim) => claim.id)]);
@@ -311,11 +312,19 @@ function rechecked(report: AssertionReport, packet: EvidencePacket): AssertionRe
     return entry && { ...entry, evidence: entry.evidence.filter((id) => cited.has(id)) };
   });
   const checked = checkAssertions(list, packet);
-  const accepted = new Set(report.accepted.map((entry) => entry.index));
+  const accepted = new Map(report.accepted.map((entry) => [entry.index, entry]));
+  const lost = new Set(report.accepted.filter((entry) => entry.kind === "analyst_inference" &&
+    [entry, ...(entry.supports ?? []).flatMap((n) => accepted.get(n) ?? [])].some((cites) => cites.evidence.some((id) => !cited.has(id))))
+    .map((entry) => entry.index));
   return {
     ...report,
-    accepted: checked.accepted,
-    rejected: [...report.rejected, ...checked.rejected.filter((entry) => accepted.has(entry.index))].sort((a, b) => a.index - b.index),
+    accepted: checked.accepted.filter((entry) => !lost.has(entry.index)),
+    rejected: [
+      ...report.rejected,
+      ...checked.rejected.filter((entry) => accepted.has(entry.index)),
+      ...checked.accepted.filter((entry) => lost.has(entry.index))
+        .map((entry) => ({ index: entry.index, text: entry.text, check: "support" as const, reason: "rests on a claim its seal left out" })),
+    ].sort((a, b) => a.index - b.index),
   };
 }
 
