@@ -56,7 +56,8 @@ explicit `range` and `interval`; omitted intervals are rejected rather than
 treated as wildcards.
 
 `snapshotTransformBoundaryResponse()` wraps the same legality check in the
-client-facing refresh envelope for transform endpoints. Rejections return
+refresh envelope that the spec documents for `POST
+/v1/snapshots/{snapshotId}/transform`. No server serves that route yet. Rejections return
 `status: 409` with `{ error: "refresh_required", refresh_required: { reason } }`,
 where `reason` is one of `basis`, `normalization`, `peer_set`, `freshness`, or
 `transform`.
