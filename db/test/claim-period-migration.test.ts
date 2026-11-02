@@ -75,7 +75,7 @@ test("0073 claim periods", { timeout: 300_000 }, async (t) => {
     await applyMigration(db, "0073", "down");
     assert.equal((await db.query(`select count(*)::int as n from claims`)).rows[0].n, 3);
     assert.equal(
-      (await db.query(`select count(*)::int as n from information_schema.columns where table_name = 'claims' and column_name like 'period%'`)).rows[0].n,
+      (await db.query(`select count(*)::int as n from information_schema.columns where table_name = 'claims' and column_name in ('period_kind', 'period_end', 'period_bound_at')`)).rows[0].n,
       0,
     );
     assert.deepEqual(

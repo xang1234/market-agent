@@ -1,5 +1,6 @@
 import type { SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
 import type { ClaimPeriod } from "./claim-repo.ts";
+import { citableClaimSql } from "./citable-claim.ts";
 import { factActiveSql, factKnownAtSql } from "./fact-activity.ts";
 import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
 
