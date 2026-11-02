@@ -6,6 +6,7 @@ import {
   type AnalyzeRunMetadataV1,
 } from "./runMetadata.ts";
 import { errorMessage } from "../../shared/src/http.ts";
+import { destroyAfterFailedRollback, withPoolClient } from "../../shared/src/pool-client.ts";
 
 // Mirrors services/chat/src/messages.ts. The persistence layer is
 // snapshot-aware but does NOT itself stage manifests or seal — those are
@@ -194,29 +195,11 @@ export async function persistAnalyzeTemplateRunAfterSnapshotSealWithPool(
     return Object.freeze({ ok: false, seal });
   }
 
-  const client = await pool.connect();
-  let releaseError: Error | undefined;
-  try {
-    return await persistSealedAnalyzeTemplateRun(
-      analyzeTemplateRunTransactionClient(client),
-      input,
-      seal,
-    );
-  } catch (error) {
-    // Mirrors services/chat/src/messages.ts and snapshot-sealer.ts: when
-    // the rollback path attached a rollback_error onto the original error,
-    // hand the connection back to the pool as broken so it gets evicted
-    // instead of returning a poisoned client to the next caller.
-    if (
-      error instanceof Error &&
-      (error as { rollback_error?: unknown }).rollback_error !== undefined
-    ) {
-      releaseError = error;
-    }
-    throw error;
-  } finally {
-    client.release(releaseError);
-  }
+  return withPoolClient(
+    pool,
+    (client) => persistSealedAnalyzeTemplateRun(analyzeTemplateRunTransactionClient(client), input, seal),
+    destroyAfterFailedRollback,
+  );
 }
 
 export function analyzeTemplateRunTransactionClient<T extends AnalyzeTemplateRunPersistenceDb>(

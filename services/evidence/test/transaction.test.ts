@@ -63,7 +63,7 @@ test("withTransaction acquires and releases pool-like executors", async () => {
 
   assert.deepEqual(poolQueries, []);
   assert.deepEqual(txQueries, ["begin", "insert into things", "commit"]);
-  assert.deepEqual(releases, [false]);
+  assert.deepEqual(releases, [undefined]);
 });
 
 test("withTransaction runs registered rollback cleanups in reverse order", async () => {

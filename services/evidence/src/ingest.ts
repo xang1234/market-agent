@@ -12,6 +12,7 @@ import {
   withTransaction,
 } from "./transaction.ts";
 import type { QueryExecutor } from "./types.ts";
+import { withPoolClient } from "../../shared/src/pool-client.ts";
 
 export type IngestDocumentDeps = {
   db: QueryExecutor;
@@ -146,16 +147,7 @@ export async function ingestDocumentWithPool(
   objectStore: ObjectStore,
   input: IngestDocumentInput,
 ): Promise<IngestDocumentResult> {
-  const client = await pool.connect();
-  let destroyClient = false;
-  try {
-    return await ingestDocument({ db: client, objectStore }, input);
-  } catch (error) {
-    destroyClient = true;
-    throw error;
-  } finally {
-    client.release(destroyClient);
-  }
+  return withPoolClient(pool, (client) => ingestDocument({ db: client, objectStore }, input), () => true);
 }
 
 async function ingestStoredDocumentWithBlobLock(

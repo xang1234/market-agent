@@ -7,6 +7,7 @@ import { fetchPolygonSplits, type PolygonFetcher } from "./adapters/polygon.ts";
 import type { ListingQueryExecutor } from "./listings.ts";
 import { POLYGON_MARKET_SOURCE_ID } from "./provider-sources.ts";
 import type { UUID } from "./subject-ref.ts";
+import { withPoolClient } from "../../shared/src/pool-client.ts";
 
 // Each split_from shares before the split became split_to shares after it.
 // NVDA's 10-for-1 on 2024-06-10 is split_from 1, split_to 10.
@@ -31,25 +32,24 @@ export async function syncListingSplits(
 ): Promise<ReadonlyArray<ListingSplit>> {
   const checkedAt = clock().toISOString();
   const splits = await fetchPolygonSplits(fetcher, listing.ticker);
-  const client = await db.connect();
-  try {
-    await client.query("begin");
-    // The replacement below sees only its own snapshot, so two syncs of one
-    // listing at once would both commit and keep the union of their lists.
-    await client.query("select pg_advisory_xact_lock(hashtextextended($1::text, 0))", [listing.listing_id]);
-    // A sync that fetched before the stored one leaves the newer list in place.
-    const { rows } = await client.query(
-      `select 1 from listing_split_coverage where listing_id = $1::uuid and checked_at > $2::timestamptz`,
-      [listing.listing_id, checkedAt],
-    );
-    if (rows.length === 0) await replaceListingSplits(client, listing.listing_id, checkedAt, splits);
-    await client.query("commit");
-  } catch (error) {
-    await client.query("rollback").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
-  }
+  await withPoolClient(db, async (client) => {
+    try {
+      await client.query("begin");
+      // The replacement below sees only its own snapshot, so two syncs of one
+      // listing at once would both commit and keep the union of their lists.
+      await client.query("select pg_advisory_xact_lock(hashtextextended($1::text, 0))", [listing.listing_id]);
+      // A sync that fetched before the stored one leaves the newer list in place.
+      const { rows } = await client.query(
+        `select 1 from listing_split_coverage where listing_id = $1::uuid and checked_at > $2::timestamptz`,
+        [listing.listing_id, checkedAt],
+      );
+      if (rows.length === 0) await replaceListingSplits(client, listing.listing_id, checkedAt, splits);
+      await client.query("commit");
+    } catch (error) {
+      await client.query("rollback").catch(() => {});
+      throw error;
+    }
+  });
   return splits;
 }
 

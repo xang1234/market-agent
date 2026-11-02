@@ -1,4 +1,5 @@
 import type { QueryExecutor } from "./types.ts";
+import { withPoolClient } from "../../shared/src/pool-client.ts";
 
 const TRANSACTION_CONTEXT: unique symbol = Symbol("evidence.transactionContext");
 const TRANSACTION_EXECUTOR: unique symbol = Symbol("evidence.transactionExecutor");
@@ -37,16 +38,7 @@ export async function withTransaction<T>(
   action: (tx: TransactionContext) => Promise<T>,
 ): Promise<T> {
   if (isConnectableQueryExecutor(db)) {
-    const client = await db.connect();
-    let destroyClient = false;
-    try {
-      return await runTransaction(client, action);
-    } catch (error) {
-      destroyClient = true;
-      throw error;
-    } finally {
-      client.release(destroyClient);
-    }
+    return withPoolClient(db, (client) => runTransaction(client, action), () => true);
   }
 
   return runTransaction(db, action);
