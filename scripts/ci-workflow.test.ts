@@ -19,6 +19,7 @@ const DB_HARNESS_SERVICE_DIRS = [
   "services/observability",
   "services/portfolio",
   "services/resolver",
+  "services/screener",
   "services/screener-artifacts",
   "services/themes",
   "services/watchlists",

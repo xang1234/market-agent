@@ -242,7 +242,7 @@ async function handleDeleteScreen(
 ): Promise<void> {
   const screen = await loadScreenForUserOrThrow(req, res, deps, screen_id);
   if (!screen) return;
-  await deps.screens.delete(screen_id);
+  await deps.screens.delete(screen_id, screen.user_id);
   res.statusCode = 204;
   res.end();
 }
