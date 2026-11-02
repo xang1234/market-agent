@@ -607,20 +607,26 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.equal(pointers.thread, pointers.answer);
   });
 
+  // A user message under the answer's id, as one posted before the server chose every user message's id (#550) may be.
+  const strangerMessageUnder = async (id: string, threadId: string) => {
+    const saved = await persistUserChatMessage(pool, { thread_id: threadId, user_id: IDS.other, content: "What did they ask?" });
+    await pool.query(`update chat_messages set message_id = $1 where message_id = $2`, [id, saved!.message_id]);
+  };
+
   await t.test("a turn's answer is never written into another thread's message that holds its id", async () => {
     const turn = { ...base, turnId: randomUUID(), userIntent: "Revenue for AAA" };
     const id = financialMessageId(threadId, turn.turnId);
     const strangerThreadId = randomUUID();
     await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [strangerThreadId, IDS.other]);
     const read = () => db.query(`select thread_id::text, role, blocks from chat_messages where message_id = $1`, [id]);
-    // Another user posts a question under the answer's id just after this turn looked for its outcome.
+    // Another user's question comes to hold the answer's id just after this turn looked for its outcome.
     let posted = false;
     const racing = {
       query: async (text: string, values?: unknown[]) => {
         const result = await pool.query(text, values);
         if (!posted && text.includes("from chat_messages where message_id")) {
           posted = true;
-          await persistUserChatMessage(pool, { thread_id: strangerThreadId, user_id: IDS.other, content: "What did they ask?", message_id: id });
+          await strangerMessageUnder(id, strangerThreadId);
         }
         return result;
       },
@@ -641,7 +647,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     const id = financialMessageId(threadId, turn.turnId);
     const strangerThreadId = randomUUID();
     await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [strangerThreadId, IDS.other]);
-    await persistUserChatMessage(pool, { thread_id: strangerThreadId, user_id: IDS.other, content: "What did they ask?", message_id: id });
+    await strangerMessageUnder(id, strangerThreadId);
     const { events } = await chatHarness(pool, { model: revenueModel(["AAA"]) }).run(turn);
     const { rows } = await db.query(`select thread_id::text, role, blocks from chat_messages where message_id = $1`, [id]);
     assert.deepEqual(

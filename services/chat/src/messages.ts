@@ -22,13 +22,6 @@ export type ChatMessagePersistenceDb = {
   ): Promise<{ rows: R[] }>;
 };
 
-export class ChatMessageIdempotencyConflictError extends Error {
-  constructor(message = "message_id is already in use") {
-    super(message);
-    this.name = "ChatMessageIdempotencyConflictError";
-  }
-}
-
 // The snapshot verifier rejected the answer. Carries the verifier's failures so
 // display_unverified mode can show why; strict mode surfaces it as turn.error.
 export class ChatSnapshotSealError extends Error {
@@ -146,7 +139,6 @@ export type PersistUserChatMessageInput = {
   thread_id: string;
   user_id: string;
   content: string;
-  message_id?: string;
 };
 
 export type ChatMessagePersistenceFactoryInput = {
@@ -453,9 +445,9 @@ export async function persistUserChatMessage(
   const client = await acquireChatMessageClient(db);
   let completed = false;
   let releaseError: Error | undefined;
-  const messageId = input.message_id ?? randomUUID();
-  // Never the client's: an id it picks could name another user's snapshot,
-  // or one an answer will seal under.
+  // Never the client's: an id it picks could name another user's snapshot or
+  // message, or one an answer will be saved under (#550).
+  const messageId = randomUUID();
   const snapshotId = randomUUID();
   const asOf = new Date().toISOString();
   const blocks = [
@@ -533,7 +525,6 @@ export async function persistUserChatMessage(
       `insert into chat_messages
          (message_id, thread_id, role, snapshot_id, blocks, content_hash)
        values ($1::uuid, $2::uuid, 'user'::chat_role, $3::uuid, $4::jsonb, $5)
-       on conflict (message_id) do nothing
        returning
          message_id::text as message_id,
          thread_id::text as thread_id,
@@ -550,10 +541,7 @@ export async function persistUserChatMessage(
         contentHash,
       ],
     );
-    const message = rows[0];
-    if (message === undefined) {
-      throw new ChatMessageIdempotencyConflictError();
-    }
+    const message = rows[0]!;
 
     await client.query(
       `update chat_threads

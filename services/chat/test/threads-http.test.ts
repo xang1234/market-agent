@@ -356,11 +356,7 @@ test("POST /v1/chat/threads/:id/messages persists a durable user message", async
       "content-type": "application/json",
       "x-user-id": USER_ID,
     },
-    body: JSON.stringify({
-      message_id: messageId,
-      snapshot_id: snapshotId,
-      content: "Review margins",
-    }),
+    body: JSON.stringify({ content: "Review margins" }),
   });
   const body = (await response.json()) as {
     message?: { role: string; blocks: Array<{ segments?: Array<{ text?: string }> }> };
@@ -373,60 +369,6 @@ test("POST /v1/chat/threads/:id/messages persists a durable user message", async
   assert.equal(body.message?.blocks[0].segments?.[0].text, "Review margins");
   assert.ok(queries.some((query) => query.text.includes("insert into snapshots")));
   assert.ok(queries.some((query) => query.text.includes("insert into chat_messages")));
-});
-
-test("POST /v1/chat/threads/:id/messages rolls back and returns 409 for a message_id in use", async (t) => {
-  const { db, queries } = fakeDb(({ text }) => {
-    if (text === "begin" || text === "commit" || text === "rollback") return [];
-    if (text.includes("from chat_threads")) return [{ owned: true }];
-    if (text.includes("insert into snapshots")) return [];
-    if (text.includes("insert into chat_messages")) return [];
-    throw new Error(`unexpected query: ${text}`);
-  });
-  const base = await startServer(t, db);
-
-  const response = await fetch(`${base}/v1/chat/threads/${THREAD_ID}/messages`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-user-id": USER_ID,
-    },
-    body: JSON.stringify({
-      message_id: "66666666-6666-4666-a666-666666666666",
-      snapshot_id: "77777777-7777-4777-a777-777777777777",
-      content: "Different prompt",
-    }),
-  });
-  const body = (await response.json()) as { error?: string };
-
-  assert.equal(response.status, 409);
-  assert.equal(body.error, "message_id is already in use");
-  assert.ok(queries.some((query) => query.text === "rollback"));
-});
-
-test("POST /v1/chat/threads/:id/messages rejects malformed optional UUIDs before db writes", async (t) => {
-  const { db, queries } = fakeDb(() => {
-    throw new Error("db should not be queried for malformed ids");
-  });
-  const base = await startServer(t, db);
-
-  const response = await fetch(`${base}/v1/chat/threads/${THREAD_ID}/messages`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-user-id": USER_ID,
-    },
-    body: JSON.stringify({
-      message_id: "not-a-uuid",
-      snapshot_id: "77777777-7777-4777-a777-777777777777",
-      content: "Review margins",
-    }),
-  });
-  const body = (await response.json()) as { error?: string };
-
-  assert.equal(response.status, 400);
-  assert.equal(body.error, "'message_id' must be a UUID");
-  assert.equal(queries.length, 0);
 });
 
 test("GET /v1/chat/threads/:id/messages returns an empty history for owned threads without messages", async (t) => {

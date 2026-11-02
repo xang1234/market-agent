@@ -9,7 +9,7 @@ import { createChatCoordinator } from "../src/coordinator.ts";
 import { createChatMessagePersistence } from "../src/messages.ts";
 import { startChatTestServer } from "./sse-helpers.ts";
 
-test("a user message is saved under a snapshot the server made, whatever snapshot_id it carries; a message_id in use changes nothing", { timeout: 120000 }, async (t) => {
+test("a user message is saved under a snapshot the server made, whatever snapshot_id it carries", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for user message snapshot coverage");
     return;
@@ -35,10 +35,9 @@ test("a user message is saved under a snapshot the server made, whatever snapsho
   await pool.query(`insert into chat_threads (thread_id, user_id) values ($1,$2),($3,$4)`, [
     ownerThreadId, ownerId, strangerThreadId, strangerId,
   ]);
-  const { rows: [answer] } = await pool.query<{ message_id: string }>(
+  await pool.query(
     `insert into chat_messages (thread_id, role, snapshot_id, blocks, content_hash)
-     values ($1::uuid, 'assistant', $2::uuid, '[]'::jsonb, 'h')
-     returning message_id::text as message_id`,
+     values ($1::uuid, 'assistant', $2::uuid, '[]'::jsonb, 'h')`,
     [ownerThreadId, answerSnapshotId],
   );
 
@@ -47,12 +46,12 @@ test("a user message is saved under a snapshot the server made, whatever snapsho
   assert.deepEqual(ownerView.links, [{ label: "Open source", href: "https://polygon.io/" }]);
 
   const base = await startChatTestServer(t, { threadsDb: pool });
-  const post = (body: { message_id: string; snapshot_id: string }) => fetch(`${base}/v1/chat/threads/${strangerThreadId}/messages`, {
+  const post = (body: { snapshot_id: string }) => fetch(`${base}/v1/chat/threads/${strangerThreadId}/messages`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-user-id": strangerId },
     body: JSON.stringify({ ...body, content: "What did they ask?" }),
   });
-  const savedUnder = async (body: { message_id: string; snapshot_id: string }) => {
+  const savedUnder = async (body: { snapshot_id: string }) => {
     const response = await post(body);
     assert.equal(response.status, 201);
     const { message } = (await response.json()) as { message: { snapshot_id: string } };
@@ -64,7 +63,7 @@ test("a user message is saved under a snapshot the server made, whatever snapsho
     return { snapshot_id: message.snapshot_id, ...snapshot };
   };
 
-  const taken = await savedUnder({ message_id: randomUUID(), snapshot_id: answerSnapshotId });
+  const taken = await savedUnder({ snapshot_id: answerSnapshotId });
   assert.deepEqual(
     { basis: taken.basis, model_version: taken.model_version, thread_latest: taken.thread_latest },
     { basis: "user_input", model_version: "chat-user-message", thread_latest: taken.snapshot_id },
@@ -77,20 +76,10 @@ test("a user message is saved under a snapshot the server made, whatever snapsho
   // The owner's next clarification seals under this id, with a plain insert.
   const ownerTurnId = randomUUID();
   const clarificationSnapshotId = stableUuid(`scope-snapshot:${ownerThreadId}:${ownerTurnId}`);
-  const preclaim = await savedUnder({ message_id: randomUUID(), snapshot_id: clarificationSnapshotId });
+  const preclaim = await savedUnder({ snapshot_id: clarificationSnapshotId });
   assert.equal(preclaim.basis, "user_input");
   const claimed = await pool.query(`select count(*)::int as n from snapshots where snapshot_id = $1::uuid`, [clarificationSnapshotId]);
   assert.deepEqual(claimed.rows, [{ n: 0 }]);
-
-  const rowsNow = async () => ({
-    messages: (await pool.query(`select thread_id::text, role, snapshot_id::text, blocks, content_hash from chat_messages order by message_id`)).rows,
-    snapshots: (await pool.query(`select count(*)::int as n from snapshots`)).rows,
-  });
-  const before = await rowsNow();
-  const collided = await post({ message_id: answer!.message_id, snapshot_id: randomUUID() });
-  assert.equal(collided.status, 409);
-  assert.deepEqual(await collided.json(), { error: "message_id is already in use" });
-  assert.deepEqual(await rowsNow(), before);
 });
 
 test("an answer whose id a user message of its own thread holds fails its turn, and leaves that message (#550)", { timeout: 120000 }, async (t) => {

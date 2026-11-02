@@ -1194,13 +1194,8 @@ async function api<T>(base: string, method: string, path: string, body?: unknown
 // connection open for reconnects, so the reader is cancelled once the turn ends.
 async function runTurn(base: string, threadId: string, userIntent: string): Promise<ParsedSseEvent[]> {
   // As the web client does: save the user's message, then stream the turn.
-  const messageId = randomUUID();
-  await api(base, "POST", `/v1/chat/threads/${threadId}/messages`, {
-    message_id: messageId,
-    snapshot_id: randomUUID(),
-    content: userIntent,
-  });
-  const params = new URLSearchParams({ run_id: randomUUID(), turn_id: messageId, user_intent: userIntent, user_id: USER_ID });
+  const { message } = await api<{ message: { message_id: string } }>(base, "POST", `/v1/chat/threads/${threadId}/messages`, { content: userIntent });
+  const params = new URLSearchParams({ run_id: randomUUID(), turn_id: message.message_id, user_intent: userIntent, user_id: USER_ID });
   const response = await fetch(`${base}/v1/chat/threads/${threadId}/stream?${params}`);
   assert.equal(response.status, 200);
   const reader = response.body!.getReader();

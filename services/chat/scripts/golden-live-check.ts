@@ -73,27 +73,22 @@ export async function runTurn(
   // Receives turn.completed's data (answered_by, answer_usage, ...), for the eval (#181).
   onCompleted?: (data: Record<string, unknown>) => void,
 ): Promise<TurnOutcome> {
-  const messageId = randomUUID();
   // One deadline for the whole turn: the message POST, the stream request, and every
   // body read (it rejects a pending read too), so a server that stops answering at any
   // point (crash, half-open connection) ends the turn instead of hanging the check.
   const signal = AbortSignal.timeout(timeoutMs);
-  const params = new URLSearchParams({
-    run_id: randomUUID(),
-    turn_id: messageId,
-    user_intent: question,
-    user_id: USER_ID,
-    ...(subject ? { subject } : {}),
-  });
   const decoder = new TextDecoder();
   let transcript = "";
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   try {
-    await api(base, "POST", `/v1/chat/threads/${threadId}/messages`, {
-      message_id: messageId,
-      snapshot_id: randomUUID(),
-      content: question,
-    }, signal);
+    const { message } = await api<{ message: { message_id: string } }>(base, "POST", `/v1/chat/threads/${threadId}/messages`, { content: question }, signal);
+    const params = new URLSearchParams({
+      run_id: randomUUID(),
+      turn_id: message.message_id,
+      user_intent: question,
+      user_id: USER_ID,
+      ...(subject ? { subject } : {}),
+    });
     const response = await fetch(`${base}/v1/chat/threads/${threadId}/stream?${params}`, {
       headers: { "x-user-id": USER_ID },
       signal,

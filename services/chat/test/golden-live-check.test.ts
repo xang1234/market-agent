@@ -24,7 +24,7 @@ test("runTurn gives up at its deadline when the stream goes silent", async (t) =
   // Accepts the user's message, then opens the turn stream and never writes to it.
   const server = createServer((req, res) => {
     if (req.method === "POST") {
-      res.writeHead(200, { "content-type": "application/json" }).end("{}");
+      res.writeHead(200, { "content-type": "application/json" }).end('{"message":{"message_id":"message-1"}}');
       return;
     }
     res.writeHead(200, { "content-type": "text/event-stream" });
@@ -45,7 +45,7 @@ test("runTurn gives up at its deadline when the stream goes silent", async (t) =
 test("runTurn hands turn.completed's data to its caller, even split across chunks (#181)", async (t) => {
   const server = createServer((req, res) => {
     if (req.method === "POST") {
-      res.writeHead(200, { "content-type": "application/json" }).end("{}");
+      res.writeHead(200, { "content-type": "application/json" }).end('{"message":{"message_id":"message-1"}}');
       return;
     }
     res.writeHead(200, { "content-type": "text/event-stream" });
@@ -71,7 +71,7 @@ test("runTurn ends at its deadline even when the stream ignores the abort (#185)
   const realFetch = globalThis.fetch;
   t.after(() => { globalThis.fetch = realFetch; });
   globalThis.fetch = async (input) => {
-    if (String(input).includes("/messages")) return new Response("{}", { status: 200 });
+    if (String(input).includes("/messages")) return new Response('{"message":{"message_id":"message-1"}}', { status: 200 });
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(new TextEncoder().encode("event: turn.started\ndata: {}\n\n"));
