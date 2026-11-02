@@ -1165,6 +1165,21 @@ test("a ProfitLoss that differs from NetIncomeLoss over the same period shows a 
   assert.equal(reportsNoncontrollingInterest(factsOf({ NetIncomeLoss: [annualValue(2023, 70)], ProfitLoss: [annualValue(2023, 70)] }).facts["us-gaap"]!, "2023-01-01", "2023-12-31"), false);
 });
 
+test("ProfitLoss dates a fiscal year ahead of EPS when their 10-K contexts end and are filed together (#342)", () => {
+  const tenK = { accn: "0000000342-24-000001", fy: 2023, fp: "FY", form: "10-K", filed: "2024-02-01" };
+  const facts = factsOf({
+    ProfitLoss: [{ ...tenK, start: "2023-01-01", end: "2023-12-31", val: 90 }],
+    EarningsPerShareBasic: [{ ...tenK, start: "2022-12-26", end: "2023-12-31", val: 1 }],
+    NetCashProvidedByUsedInOperatingActivities: [{ ...tenK, start: "2022-10-01", end: "2022-12-31", fp: "Q1", form: "10-Q", filed: "2023-05-01", val: 123 }],
+  });
+  assert.deepEqual(secFiscalYearWindow(facts, 2023), { start: "2023-01-01", end: "2023-12-31" });
+  assert.throws(
+    () => extractStatement({ subject: aaplIssuer, facts, family: "cashflow", fiscal_year: 2023, fiscal_period: "Q1", source_id: SEC_SOURCE_ID, as_of: "2026-11-02T00:00:00Z" }),
+    /no us-gaap values for fiscal_year=2023 fiscal_period="Q1"/,
+    "the quarter ending before the fiscal year is not its Q1",
+  );
+});
+
 function factsOf(byConcept: Record<string, SecConceptValue[]>): SecCompanyFacts {
   return {
     cik: 342,
