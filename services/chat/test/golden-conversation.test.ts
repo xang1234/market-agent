@@ -933,6 +933,62 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.deepEqual([sealed!.claim_refs, sealed!.document_refs.length, sealed!.fact_refs], [[claim![1]], 1, []], "the snapshot seals only what the answer quotes");
   });
 
+  await t.test("an analyst answer whose quoted claim's document another session deletes after the claims are read leaves the claim out, and says so (#557)", async () => {
+    // The turn logs its claims read after the read and before its seal: there
+    // it waits on a lock another session holds, which deletes the claim's
+    // document meanwhile.
+    const deleter = await connectedClient(t, databaseUrl);
+    const documentId = (await client.query<{ document_id: string }>(`select document_id::text from claims where text_canonical = $1`, [AMD_Q2_2025_RELEASE.text])).rows[0]!.document_id;
+    await client.query(`create function analyst_read_logged() returns trigger language plpgsql as $$ begin perform pg_advisory_xact_lock(557); return new; end $$`);
+    await client.query(`create trigger analyst_read_logged before insert on tool_call_logs for each row when (new.tool_name <> 'resolver.search_to_subject_flow') execute function analyst_read_logged()`);
+    await deleter.query("select pg_advisory_lock(557)");
+    process.env.JUDGE_LITELLM_MODEL = GOLDEN_ENV.LITELLM_MODEL;
+    try {
+      const guidanceThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD guidance, its document deleted" });
+      const turn = runTurn(base, guidanceThread.thread_id, "What guidance did AMD give?");
+      await waitingOnLock(client, "insert into tool_call_logs");
+      await deleter.query(`update documents set deleted_at = now() where document_id = $1::uuid`, [documentId]);
+      await deleter.query("select pg_advisory_unlock(557)");
+      completedTurn(await turn);
+      await quotesOnlyCitableClaims(await latestAssistantMessage(base, guidanceThread.thread_id));
+    } finally {
+      delete process.env.JUDGE_LITELLM_MODEL;
+      await deleter.query("select pg_advisory_unlock_all()");
+      await client.query(`drop trigger analyst_read_logged on tool_call_logs`);
+      await client.query(`drop function analyst_read_logged()`);
+      await client.query(`update documents set deleted_at = null where document_id = $1::uuid`, [documentId]);
+    }
+  });
+
+  await t.test("an analyst answer whose quoted claim's document another session is deleting leaves the claim out without waiting for it (#557)", async () => {
+    // Another session deletes the claim's document and has not committed, so
+    // the turn's read still sees it, and its seal cannot lock it.
+    const deleter = await connectedClient(t, databaseUrl);
+    const documentId = (await client.query<{ document_id: string }>(`select document_id::text from claims where text_canonical = $1`, [AMD_Q2_2025_RELEASE.text])).rows[0]!.document_id;
+    await deleter.query("begin");
+    await deleter.query(`update documents set deleted_at = now() where document_id = $1::uuid`, [documentId]);
+    try {
+      const guidanceThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD guidance, its document being deleted" });
+      completedTurn(await runTurn(base, guidanceThread.thread_id, "What guidance did AMD give?"));
+      await deleter.query("commit");
+      await quotesOnlyCitableClaims(await latestAssistantMessage(base, guidanceThread.thread_id));
+    } finally {
+      await deleter.query("rollback").catch(() => {});
+      await client.query(`update documents set deleted_at = null where document_id = $1::uuid`, [documentId]);
+    }
+  });
+
+  // Every claim the answer quotes opens in the inspector, under its snapshot; the one it left out is named.
+  async function quotesOnlyCitableClaims(answer: ChatMessage): Promise<void> {
+    for (const [, claimId] of answer.blocks.flatMap((block) => refsOf(block).filter(([kind]) => kind === "claim"))) {
+      await loadEvidenceInspection(client, { user_id: USER_ID, snapshot_id: answer.snapshot_id, ref: { kind: "claim", id: claimId } });
+    }
+    assert.deepEqual(answerText(answer), [`No figures are shown for AMD.\n\n${QUOTED_CLAIM_WITHDRAWN}`]);
+    const { rows: [sealed] } = await client.query<{ claim_refs: string[]; document_refs: string[] }>(
+      `select claim_refs, document_refs from snapshots where snapshot_id = $1::uuid`, [answer.snapshot_id]);
+    assert.deepEqual(sealed, { claim_refs: [], document_refs: [] });
+  }
+
   await t.test("no turn, on the engine's path or the analyst's, follow-ups included, shows a legacy figure block (#398)", async () => {
     const { rows } = await client.query<{ kind: string }>(
       `select distinct block->>'kind' as kind from chat_messages m, jsonb_array_elements(m.blocks) block where m.role = 'assistant' order by 1`,
@@ -980,6 +1036,9 @@ const UNSUPPORTED = "This request asks for a calculation outside the verified fi
 
 // An evidence follow-up's note when the cause its thread quoted is no longer citable (#542).
 const PRIOR_CAUSE_WITHDRAWN = "The explanation quoted earlier is no longer citable.";
+
+// An analyst answer's note when a claim it quoted was no longer citable at its seal (#557).
+const QUOTED_CLAIM_WITHDRAWN = "A claim this answer quoted is no longer citable, so it is left out.";
 
 function answerText(message: ChatMessage): string[] {
   return message.blocks.filter((block) => block.kind === "rich_text")
