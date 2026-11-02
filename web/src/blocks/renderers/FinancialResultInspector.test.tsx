@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import { renderToStaticMarkup } from 'react-dom/server'
 
-import type { FinancialResultInspection } from '../financialInspection.ts'
+import type { FinancialInspectedInput, FinancialResultInspection } from '../financialInspection.ts'
 import { canonicalValue, payloadSummary, SUPPORTED_INSPECTION_SCHEMA_VERSION } from '../financialInspection.ts'
 import { FinancialResultInspector } from './FinancialResultInspector.tsx'
 
@@ -119,6 +119,22 @@ test('a derived quarter shows its derivation, then each term with its value, dat
     assert.ok(cashFlow.includes(expected), `missing ${expected}`)
   }
   assert.ok(!render(inspection()).includes('>Derived<'), 'a value a filing states shows no derivation')
+})
+
+test('a figure standing in for another metric says what it equals and why', () => {
+  const [input] = (inspection() as Extract<FinancialResultInspection, { availability: 'available' }>).inputs
+  const inferred = inspection({
+    definitions: [{ metric_key: 'net_income_consolidated', definition_version: 'net_income_consolidated.v1' }],
+    inputs: [{
+      ...(input as Extract<FinancialInspectedInput, { fact_id: string }>),
+      metric: { metric_key: 'net_income_consolidated', definition_version: 'net_income_consolidated.v1' },
+      inference: { kind: 'no_noncontrolling_interest', concept: 'NetIncomeLoss', checked: ['MinorityInterest'] },
+    }],
+  })
+  const html = renderToStaticMarkup(<FinancialResultInspector load={{ kind: 'ready', inspection: inferred }} />)
+  assert.ok(html.includes('>Inferred<'), html)
+  assert.ok(html.includes('>Equal to NetIncomeLoss: the filer reports no noncontrolling interest for this period.<'), html)
+  assert.ok(!renderToStaticMarkup(<FinancialResultInspector load={{ kind: 'ready', inspection: inspection() }} />).includes('>Inferred<'), 'a figure a filing states shows no inference')
 })
 
 test('tiny decimals and derived results keep their canonical text', () => {

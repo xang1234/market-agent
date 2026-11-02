@@ -98,6 +98,8 @@ test("SEC balances are certified only from a 10-K", { timeout: 300_000 }, async 
     assert.deepEqual(await stored(QUARTERLY_ISSUER), [
       ["net_income", "FY", "2024-12-31", "reported", "40", "original"],
       ["net_income", "Q1", "2025-03-31", "reported", "12", "original"],
+      ["net_income_consolidated", "FY", "2024-12-31", "reported", "40", "original"],
+      ["net_income_consolidated", "Q1", "2025-03-31", "reported", "12", "original"],
       ["operating_cash_flow", "FY", "2024-12-31", "reported", "48", "original"],
       ["operating_cash_flow", "Q1", "2025-03-31", "reported", "14", "original"],
       ["revenue", "FY", "2024-12-31", "reported", "400", "original"],
@@ -125,9 +127,9 @@ test("SEC balances are certified only from a 10-K", { timeout: 300_000 }, async 
       [QUARTERLY_ISSUER],
     );
     const certified = async () => (await db.query(`select count(*)::int as n from fact_financial_contexts`)).rows[0]!.n;
-    assert.equal(await certified(), 9);
+    assert.equal(await certified(), 11);
     await db.query(await readFile(join(workspaceRoot, "db", "migrations", "0061_quarter_balance_contexts.up.sql"), "utf8"));
-    assert.equal(await certified(), 8);
+    assert.equal(await certified(), 10);
     assert.deepEqual((await stored(QUARTERLY_ISSUER)).at(-1), ["total_assets", "FY", "2025-03-31", "reported", "650", null]);
     assert.deepEqual((await stored(FOURTH_QUARTER_ISSUER)).at(-1), ["total_assets", "FY", "2024-12-31", "reported", "600", "original"]);
   });

@@ -247,6 +247,8 @@ export const SCOPE_METRICS: Readonly<Record<string, string | null>> = {
   gross_profit: "income_statement",
   operating_income: "income_statement",
   net_income: "income_statement",
+  // Only cash resilience shows it; no chat reader does.
+  net_income_consolidated: null,
   gross_margin: "income_statement",
   operating_margin: "income_statement",
   net_margin: "income_statement",

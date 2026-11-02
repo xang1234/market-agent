@@ -334,7 +334,7 @@ export async function completedRun(
 }
 
 /** Issuer A's FY2023 cash-resilience inputs (#210), certified like the seeded revenue: flows over the year, balances at its end. */
-export const CASH_RESILIENCE_VALUES = { operating_cash_flow: "120", net_income: "100", total_liabilities: "300", total_assets: "600", total_equity: "200" } as const;
+export const CASH_RESILIENCE_VALUES = { operating_cash_flow: "120", net_income_consolidated: "100", total_liabilities: "300", total_assets: "600", total_equity: "200" } as const;
 
 export type CashResilienceMetric = keyof typeof CASH_RESILIENCE_VALUES;
 

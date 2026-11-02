@@ -420,6 +420,16 @@ test("a fact's title follows its unit, and its period reads in words", async () 
   }
 });
 
+test("a fact standing in for another metric says what it equals and why (#342)", async () => {
+  const fact = (quality_flags: unknown[]) => inspectFactRow(factRow({
+    value: "70000000", unit: "currency", currency: "USD", metric_name: "Net Income Including Noncontrolling Interest",
+    period_kind: "fiscal_y", fiscal_year: 2023, fiscal_period: "FY", quality_flags,
+  }));
+  const inferred = await fact([{ kind: "no_noncontrolling_interest", concept: "NetIncomeLoss", checked: ["MinorityInterest"] }]);
+  assert.deepEqual(inferred.rows.at(-1), { label: "Inferred", value: "Equal to NetIncomeLoss: the filer reports no noncontrolling interest for this period." });
+  assert.ok((await fact([])).rows.every((row) => row.label !== "Inferred"));
+});
+
 test("a derived fact lists the facts it was computed from, as their own inspections word them, before its source", async () => {
   const Q3_REVENUE = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
   const Q2_REVENUE = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";

@@ -249,7 +249,7 @@ test("latest quarterly offsets on SEC-ingested statements", { timeout: 300_000 }
     const refused = { issuer_id: "46900000-0000-4000-8000-000000000003", accession: "0003234567-24-000004", period_start: "2024-10-01", period_end: "2024-12-31", reason: "own_term_not_last_filed" };
     assert.deepEqual(
       issuer.warnings.filter(([message]) => message === UNPROVEN),
-      ["revenue", "net_income", "operating_cash_flow"].map((metric_key) => [UNPROVEN, { ...refused, metric_key }]),
+      ["revenue", "net_income", "net_income_consolidated", "operating_cash_flow"].map((metric_key) => [UNPROVEN, { ...refused, metric_key }]),
     );
   });
 

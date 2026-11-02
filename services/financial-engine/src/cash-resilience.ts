@@ -8,9 +8,9 @@ import type { PeriodSelector } from "../../financial-core/src/index.ts";
 export type CashResiliencePeriod = Extract<PeriodSelector, { kind: "latest" } | { kind: "fiscal_period" }>;
 type Node = Record<string, unknown> & { node_id: string };
 
-const INPUTS = ["operating_cash_flow", "net_income", "total_liabilities", "total_assets", "total_equity"] as const;
+const INPUTS = ["operating_cash_flow", "net_income_consolidated", "total_liabilities", "total_assets", "total_equity"] as const;
 const RATIOS = [
-  ["operating_cash_flow_to_net_income", "operating_cash_flow", "net_income"],
+  ["operating_cash_flow_to_net_income", "operating_cash_flow", "net_income_consolidated"],
   ["liabilities_to_assets", "total_liabilities", "total_assets"],
   ["liabilities_to_equity", "total_liabilities", "total_equity"],
 ] as const;

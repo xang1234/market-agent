@@ -734,6 +734,8 @@ class FakeFundamentalsDb {
       this.transactions.push(sql);
       return rows([]);
     }
+    if (sql.includes("pg_advisory_xact_lock")) return rows([]);
+    if (sql.includes("insert into sec_issuer_downloads")) return rows([{ newest: true }]);
     if (sql.includes("from issuers")) {
       return rows([{ issuer_id: ISSUER_ID, cik: "320193" }]);
     }
@@ -838,7 +840,21 @@ class FakeFundamentalsDb {
           stored_value: fact.value_num === null ? null : String(fact.value_num),
           period_start: fact.period_start,
           period_end: fact.period_end,
+          inference: inferenceOf(fact),
+          // The fake records no precision proofs.
+          proven: false,
         })));
+    }
+    // Inferred facts, which a filing showing noncontrolling interest refutes.
+    if (sql.includes("is not null") && sql.includes("no_noncontrolling_interest")) {
+      return rows(this.facts
+        .filter((fact) => fact.invalidated_at === null && fact.subject_id === values[0] && inferenceOf(fact) !== null)
+        .map(({ fact_id, period_start, period_end }) => ({ fact_id, period_start, period_end })));
+    }
+    // The fake stores no derived facts, so a fact's dependents are none.
+    if (sql.includes("with recursive refuted")) {
+      for (const fact of this.facts) if ((values[1] as string[]).includes(fact.fact_id)) fact.invalidated_at = "now";
+      return rows([]);
     }
     if (sql.includes("update facts") && sql.includes("set invalidated_at")) {
       for (const fact of this.facts) if ((values[0] as string[]).includes(fact.fact_id)) fact.invalidated_at = "now";
@@ -874,6 +890,7 @@ function metricDefinitions(): MetricDefinition[] {
     ["operating_income", "currency"],
     ["operating_expenses", "currency"],
     ["net_income", "currency"],
+    ["net_income_consolidated", "currency"],
     ["eps_basic", "currency"],
     ["eps_diluted", "currency"],
     ["weighted_average_basic_shares", "count"],
@@ -909,6 +926,10 @@ function factRow(metrics: MetricDefinition[], fact: FactRecord) {
     ...fact,
     metric_key: metricKeyFor(metrics, fact.metric_id),
   };
+}
+
+function inferenceOf(fact: FactRecord): unknown {
+  return (fact.quality_flags as Array<{ kind?: unknown }>).find((flag) => flag.kind === "no_noncontrolling_interest") ?? null;
 }
 
 function factFromInsert(values: unknown[]): FactRecord {

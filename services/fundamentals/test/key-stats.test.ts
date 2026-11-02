@@ -344,6 +344,7 @@ function secIncomeMetricRegistry() {
     metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaa10000002", "gross_profit", "Gross Profit", "currency", "sum"),
     metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaa10000003", "operating_income", "Operating Income", "currency", "sum"),
     metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaa10000004", "net_income", "Net Income", "currency", "sum"),
+    metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaa10000006", "net_income_consolidated", "Net Income Including Noncontrolling Interest", "currency", "sum"),
     metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaa10000005", "eps_diluted", "EPS (Diluted)", "currency", "derived"),
   ];
   return createMetricRegistry(defs);

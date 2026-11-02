@@ -421,6 +421,7 @@
         "observed_at": { "$ref": "financial_plan_schema.json#/$defs/IsoDateTime" },
         "precision_status": { "enum": ["source_token_preserved", "revalidated_against_source", "derived_from_source_tokens"] },
         "derivation": { "$ref": "#/$defs/DerivationProofV1" },
+        "inference": { "$ref": "#/$defs/NoncontrollingInterestInferenceV1" },
         "eligibility": {
           "type": "object",
           "additionalProperties": false,
@@ -435,6 +436,17 @@
       "if": { "properties": { "precision_status": { "const": "derived_from_source_tokens" } } },
       "then": { "properties": { "derivation": true }, "required": ["derivation"] },
       "else": { "properties": { "derivation": false } }
+    },
+    "NoncontrollingInterestInferenceV1": {
+      "description": "Why a filed value stands for a metric its concept does not name: the filer reports no noncontrolling interest for the period, so income attributable to the parent and consolidated income are one figure. concept is the one filed; checked lists the concepts that would have shown a noncontrolling interest.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "concept", "checked"],
+      "properties": {
+        "kind": { "const": "no_noncontrolling_interest" },
+        "concept": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "checked": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string", "minLength": 1, "maxLength": 200 } }
+      }
     },
     "DerivationProofV1": {
       "description": "A value no filing states, derived from values filings do state: present exactly when precision_status is derived_from_source_tokens. The value is the exact sum of sign x raw_token over the terms, and numeric.raw_token is that sum.",

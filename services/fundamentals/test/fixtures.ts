@@ -217,6 +217,7 @@ export const AAPL_INCOME_METRIC_DEFINITIONS: ReadonlyArray<MetricDefinition> = [
   metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa000d", "income_before_taxes", "Income before provision for income taxes", "currency", "sum", "higher_is_better"),
   metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa000e", "income_tax_expense", "Provision for income taxes", "currency", "sum", "lower_is_better"),
   metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa000f", "net_income", "Net income", "currency", "sum", "higher_is_better"),
+  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0014", "net_income_consolidated", "Net income including noncontrolling interest", "currency", "sum", "higher_is_better"),
   metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0010", "eps.basic", "Earnings per share — basic", "currency", "derived", "higher_is_better"),
   metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0011", "eps.diluted", "Earnings per share — diluted", "currency", "derived", "higher_is_better"),
   metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0012", "weighted_average_shares.basic", "Weighted-average shares outstanding — basic", "count", "avg", "neutral"),

@@ -108,7 +108,7 @@ test("the SEC fetch boundary parses losslessly before any JSON number conversion
   assert.equal(statement.lines.find((line) => line.metric_key === "revenue")?.value_num, 383285000000.1235);
   assert.deepEqual(
     Object.fromEntries([...tokens].map(([key, token]) => [key, token.token])),
-    { revenue: "383285000000.123456789012345678", net_income: "0.1000000000000000000001", eps_diluted: "1.234567890123456789e+6" },
+    { revenue: "383285000000.123456789012345678", net_income: "0.1000000000000000000001", net_income_consolidated: "0.1000000000000000000001", eps_diluted: "1.234567890123456789e+6" },
   );
   assert.deepEqual(
     { concept: tokens.get("revenue")!.concept, unit: tokens.get("revenue")!.unit, accn: tokens.get("revenue")!.accn },

@@ -48,7 +48,12 @@ export const METRIC_CATALOG_V1: ReadonlyMap<MetricKey, MetricDefinition> = new M
     metric("revenue", "Revenue", "flow", "currency"),
     metric("gross_profit", "Gross profit", "flow", "currency"),
     metric("operating_income", "Operating income", "flow", "currency"),
+    // Attributable to the parent, as EPS is: us-gaap NetIncomeLoss, or ProfitLoss
+    // for a period with no noncontrolling interest. Net margin divides it.
     metric("net_income", "Net income", "flow", "currency"),
+    // us-gaap ProfitLoss, or NetIncomeLoss for a period with no noncontrolling
+    // interest. OCF is consolidated, so cash conversion divides by this.
+    metric("net_income_consolidated", "Net income including noncontrolling interest", "flow", "currency"),
     // Including discontinued operations, like capex (SEC ingestion certifies
     // only NetCashProvidedByUsedInOperatingActivities).
     metric("operating_cash_flow", "Operating cash flow", "flow", "currency"),
@@ -118,10 +123,10 @@ export const RATIO_CATALOG_V1: ReadonlyMap<MetricKey, RatioDefinition> = new Map
     },
     {
       ratio_key: "operating_cash_flow_to_net_income",
-      definition_version: "operating_cash_flow_to_net_income.v1",
-      label: "Cash conversion: operating cash flow / net income (reported period)",
+      definition_version: "operating_cash_flow_to_net_income.v2",
+      label: "Cash conversion: operating cash flow / net income including noncontrolling interest (reported period)",
       numerator: "operating_cash_flow",
-      denominator: "net_income",
+      denominator: "net_income_consolidated",
       denominator_constraint: "positive" as const,
       timing: "same_duration" as const,
     },

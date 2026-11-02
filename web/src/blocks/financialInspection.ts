@@ -37,6 +37,8 @@ export type FinancialInspectedInput =
       period: { kind: string; start: string | null; end: string; fiscal_year: number; fiscal_period: string }
       precision_status: string
       derivation: FinancialDerivation | null
+      /** Present for a value that stands for a metric its concept does not name. */
+      inference?: { kind: 'no_noncontrolling_interest'; concept: string; checked: ReadonlyArray<string> }
       publication: { attestation_id: string; available_no_later_than: string; precision: string }
     }
   | {

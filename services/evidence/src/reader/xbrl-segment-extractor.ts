@@ -119,7 +119,7 @@ const CONCEPT_TO_METRIC_KEY: Readonly<Record<string, string>> = {
   OperatingExpenses: "operating_expenses",
   OperatingIncomeLoss: "operating_income",
   NetIncomeLoss: "net_income",
-  ProfitLoss: "net_income",
+  ProfitLoss: "net_income_consolidated",
 };
 
 export function extractXbrlExtensionSegments(

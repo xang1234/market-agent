@@ -4,6 +4,7 @@ import {
   storagePolicyForDocument,
 } from "./source-disclosure.ts";
 import { formatCompactCurrency, formatCurrency, formatPercent } from "../../analyze/src/block-format.ts";
+import { noncontrollingInterestInferenceText } from "../../financial-core/src/contracts.ts";
 import { isRecord } from "../../shared/src/http.ts";
 
 export const EVIDENCE_INSPECTION_REF_KINDS = [
@@ -518,6 +519,7 @@ async function inspectFact(
       { label: "As of", value: isoString(row.as_of) },
       { label: "Method", value: row.method },
       { label: "Confidence", value: String(row.confidence) },
+      ...inferenceRows(row.quality_flags),
     ]),
     links: sourceLinks(row.canonical_url),
     related_refs: Object.freeze([
@@ -617,6 +619,14 @@ async function derivationInputs(
     const row = rows.get(id);
     return row ? [{ kind: "fact" as const, id, label: [factSubtitle(row), factValueText(row)].filter((part) => part).join(" · ") }] : [];
   });
+}
+
+// A value standing for a metric its concept does not name (#342) never reads as stated.
+function inferenceRows(qualityFlags: unknown): ReadonlyArray<{ label: string; value: string }> {
+  return (Array.isArray(qualityFlags) ? qualityFlags : []).flatMap((flag) =>
+    isRecord(flag) && flag.kind === "no_noncontrolling_interest" && typeof flag.concept === "string"
+      ? [{ label: "Inferred", value: noncontrollingInterestInferenceText({ concept: flag.concept }) }]
+      : []);
 }
 
 function factSubtitle(row: FactRow): string {

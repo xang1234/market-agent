@@ -99,6 +99,7 @@ test("SEC restatements", { timeout: 300_000 }, async (t) => {
     await ingest(2, 2024, "2025-02-01T15:00:00.000Z");
     assert.deepEqual(await fy2023Facts(), [
       { metric_key: "net_income", method: "reported", value: "40", reporting_basis: "as_reported", disclosure_relation: "original", restates: null },
+      { metric_key: "net_income_consolidated", method: "reported", value: "40", reporting_basis: "as_reported", disclosure_relation: "original", restates: null },
       { metric_key: "operating_income", method: "reported", value: "20", reporting_basis: "as_reported", disclosure_relation: "original", restates: null },
       { metric_key: "revenue", method: "reported", value: "100", reporting_basis: "as_reported", disclosure_relation: "original", restates: null },
       { metric_key: "revenue", method: "restated", value: "95", reporting_basis: "as_restated", disclosure_relation: "economic_restatement", restates: "reported" },

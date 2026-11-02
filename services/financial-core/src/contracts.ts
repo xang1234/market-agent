@@ -451,6 +451,26 @@ export type DerivationProofV1 = {
   }>;
 };
 
+/**
+ * Why a filed value stands for a metric its concept does not name (#342).
+ * Income attributable to the parent (NetIncomeLoss) and consolidated income
+ * (ProfitLoss) are one figure when no part of it belongs to a noncontrolling
+ * interest, so a filer that reports none for the period need tag only one.
+ * `concept` is the one it tagged; `checked` lists the concepts that would
+ * have shown a noncontrolling interest. A later filing that shows one
+ * invalidates the fact.
+ */
+export type NoncontrollingInterestInferenceV1 = {
+  kind: "no_noncontrolling_interest";
+  concept: string;
+  checked: string[];
+};
+
+/** What every inspector shows for an inferred figure. */
+export function noncontrollingInterestInferenceText(inference: Pick<NoncontrollingInterestInferenceV1, "concept">): string {
+  return `Equal to ${inference.concept}: the filer reports no noncontrolling interest for this period.`;
+}
+
 /** An immutable bound input: a fact, or a share price from a stored price observation. */
 export type BoundFinancialInputV1 = BoundFactInputV1 | BoundPriceInputV1;
 
@@ -504,6 +524,8 @@ export type BoundFactInputV1 = {
   precision_status: ProvenPrecisionClass;
   /** Present exactly when precision_status is derived_from_source_tokens; `numeric.raw_token` is then its sum. */
   derivation?: DerivationProofV1;
+  /** Present for a value that stands for a metric its concept does not name. */
+  inference?: NoncontrollingInterestInferenceV1;
   eligibility: {
     selection_policy_version: VersionTag;
     promotion_status: "authoritative" | "corroborated" | "reviewed_extraction";

@@ -8,7 +8,7 @@
 // facts are returned — historical selection decides eligibility at a cutoff —
 // and numerics are projected as text; no value passes through Number.
 
-import type { DerivationProofV1 } from "../../financial-core/src/contracts.ts";
+import type { DerivationProofV1, NoncontrollingInterestInferenceV1 } from "../../financial-core/src/contracts.ts";
 import type { PrecisionClass, PublicationTimingPrecision } from "../../financial-core/src/evidence-vocabulary.ts";
 import type { CoverageLevel, FactEntitlementChannel } from "./fact-repo.ts";
 import type { FinancialContextFields } from "./financial-context.ts";
@@ -80,6 +80,8 @@ export type FinancialInputCandidate = Readonly<{
   source_version_hash: string | null;
   context: FinancialContextFields | null;
   precision: PrecisionProof | null;
+  /** Why the value stands for a metric its concept does not name (#342); null for one it does. */
+  inference: NoncontrollingInterestInferenceV1 | null;
   /** Current (non-superseded) proofs for this exact source version only. */
   publication: ReadonlyArray<PublicationProof>;
 }>;
@@ -112,7 +114,8 @@ export async function listFinancialInputCandidates(db: RowQueryExecutor, request
             to_char(f.observed_at at time zone 'UTC', ${ISO_UTC}) as observed_at,
             f.supersedes::text, f.superseded_by::text, f.source_id::text, s.kind::text as source_kind,
             normalized_content_hash(s.content_hash) as source_version_hash,
-            ctx.context, prec.precision, coalesce(pub.publication, '[]'::jsonb) as publication
+            ctx.context, prec.precision, coalesce(pub.publication, '[]'::jsonb) as publication,
+            jsonb_path_query_first(f.quality_flags, '$[*] ? (@.kind == "no_noncontrolling_interest")') as inference
        from facts f
        join metrics m on m.metric_id = f.metric_id
        join sources s on s.source_id = f.source_id
@@ -200,6 +203,7 @@ function toCandidate(row: Record<string, unknown>): FinancialInputCandidate {
     source_version_hash: row.source_version_hash as string | null,
     context: (row.context ?? null) as FinancialInputCandidate["context"],
     precision: (row.precision ?? null) as PrecisionProof | null,
+    inference: (row.inference ?? null) as NoncontrollingInterestInferenceV1 | null,
     publication: row.publication as PublicationProof[],
   };
 }

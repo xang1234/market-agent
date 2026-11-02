@@ -41,7 +41,7 @@ const COMPANY_FACTS = {
 
 // What an investment memo plans for its subject: revenue for two years, the rest for the latest.
 const INVESTMENT_READS = new Map([
-  ["revenue", 2], ["gross_profit", 1], ["operating_cash_flow", 1], ["net_income", 1],
+  ["revenue", 2], ["gross_profit", 1], ["operating_cash_flow", 1], ["net_income_consolidated", 1],
   ["total_assets", 1], ["total_liabilities", 1], ["total_equity", 1],
 ]);
 
