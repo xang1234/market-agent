@@ -5,12 +5,16 @@ import { factActiveSql, factKnownAtSql } from "./fact-activity.ts";
 import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
 
 import { sourceDisclosure } from "./source-disclosure.ts";
-import type { QueryExecutor } from "./types.ts";
+import type { QueryExecutor, RowQueryExecutor } from "./types.ts";
 
 export type LocalRuntimeEvidenceInput = {
   subject_refs: ReadonlyArray<SnapshotSubjectRef>;
   user_id?: string | null;
   exclude_claim_ids?: ReadonlyArray<string>;
+  // Claims that come first, in this order, wherever the selection would rank
+  // them, past the limit if need be; one no longer citable is left out as any
+  // other is.
+  first_claim_ids?: ReadonlyArray<string>;
   source_categories?: ReadonlyArray<string>;
   limit?: number;
   // Optional date boundary only; current document visibility always applies.
@@ -95,7 +99,8 @@ export async function loadLocalRuntimeEvidence(
 ): Promise<LocalRuntimeEvidence> {
   const subjectRefs = normalizeSubjectRefs(input.subject_refs);
   if (subjectRefs.length === 0) return emptyEvidence(subjectRefs);
-  const limit = input.limit ?? 5;
+  const firstClaimIds = unique(input.first_claim_ids ?? []);
+  const limit = Math.max(input.limit ?? 5, firstClaimIds.length);
 
   const excludedClaimIds = unique(input.exclude_claim_ids ?? []);
   const sourceCategories = input.source_categories ?? null;
@@ -177,6 +182,7 @@ export async function loadLocalRuntimeEvidence(
               c.effective_time,
               c.created_at as claim_created_at,
               sr.subject_id::text as subject_id,
+              array_position($14::uuid[], c.claim_id) as first_rank,
               coalesce(c.predicate like any($8::text[]), false)
                 and case
                   -- The releases about a fiscal year come out from the end of
@@ -237,12 +243,22 @@ export async function loadLocalRuntimeEvidence(
      -- add support. Different sources do not show
      -- independence, so none is inferred.
      -- ponytail: exact text only; paraphrases are not caught.
-     selected as (
-       select distinct on (case when $10::boolean then subject_id || '|' || predicate || '|' || lower(text_canonical)
-                                      || '|' || date_trunc('quarter', coalesce(effective_time, published_at, claim_created_at))::text else claim_id end) *
+     keyed as (
+       select *,
+              case when $10::boolean then subject_id || '|' || predicate || '|' || lower(text_canonical)
+                                      || '|' || date_trunc('quarter', coalesce(effective_time, published_at, claim_created_at))::text else claim_id end
+                as repeat_key
          from matching_claims
-        order by case when $10::boolean then subject_id || '|' || predicate || '|' || lower(text_canonical)
-                                      || '|' || date_trunc('quarter', coalesce(effective_time, published_at, claim_created_at))::text else claim_id end,
+     ),
+     -- A claim asked to come first was quoted as itself, so none is another's
+     -- repeat (two companies' causes can share a sentence); a copy nobody
+     -- quoted is still the quoted one's repeat.
+     selected as (
+       select distinct on (case when first_rank is not null then claim_id else repeat_key end) *
+         from keyed k
+        where k.first_rank is not null
+           or not exists (select 1 from keyed q where q.first_rank is not null and q.repeat_key = k.repeat_key)
+        order by case when first_rank is not null then claim_id else repeat_key end,
                  relevant desc, coalesce(published_at, claim_created_at) asc, claim_id
      )
      select claim_id,
@@ -266,7 +282,8 @@ export async function loadLocalRuntimeEvidence(
       -- companies and predicates take turns (each one's newest first), so a
       -- comparison's slots are not all one company's, nor a tier's all one
       -- metric's.
-      order by relevant desc,
+      order by first_rank asc nulls last,
+               relevant desc,
                case when relevant then tier end asc nulls last,
                case when $10::boolean
                  then row_number() over (
@@ -290,6 +307,7 @@ export async function loadLocalRuntimeEvidence(
       input.selection?.effective_until ?? null,
       selected?.tiers ?? null,
       input.selection?.fiscal_year ?? null,
+      firstClaimIds,
     ],
   );
   const evidence = evidenceFromClaimRows(subjectRefs, rows.slice(0, limit), input.selection !== undefined);
@@ -319,7 +337,7 @@ export type PeriodClaimLookup = {
 // and an unbound claim explains none. A repeat counts once; claims come by
 // their prefix's tier, then newest first.
 export async function loadPeriodClaimEvidence(
-  db: QueryExecutor,
+  db: RowQueryExecutor,
   input: PeriodClaimLookup,
 ): Promise<LocalRuntimeEvidence> {
   const subjectRefs = normalizeSubjectRefs([{ kind: "issuer", id: input.issuer_id }]);
@@ -392,6 +410,49 @@ export async function loadPeriodClaimEvidence(
     ],
   );
   return evidenceFromClaimRows(subjectRefs, rows, true);
+}
+
+// Of these claims, the ones a reader may still cite, share-locked inside the
+// caller's transaction and checked again: their sources, documents, then the
+// claims, parents before children and each in id order, as the evidence locks
+// go (financial-access-lock.ts locks sources, then facts). supersede-filing.ts
+// updates claims before documents, a known exception that today touches only
+// Form 4 and 13F filings. Each lock is taken nowait, so a row another
+// transaction is changing raises 55P03 (lock not available) at once, not a
+// wait inside the caller's finalization. A revocation committed before the
+// lock drops its claim; one that starts later waits for the caller's commit.
+export async function lockCitableClaims(
+  db: RowQueryExecutor,
+  input: { claim_ids: ReadonlyArray<string>; user_id?: string | null; as_of?: string },
+): Promise<ReadonlySet<string>> {
+  const claimIds = unique(input.claim_ids).sort();
+  if (claimIds.length === 0) return new Set();
+  await db.query(
+    `select s.source_id from sources s
+      where s.source_id in (
+        select c.reported_by_source_id from claims c where c.claim_id = any($1::uuid[])
+        union
+        select d.source_id from claims c join documents d on d.document_id = c.document_id where c.claim_id = any($1::uuid[]))
+      order by s.source_id for share nowait`,
+    [claimIds],
+  );
+  await db.query(
+    `select d.document_id from documents d
+      where d.document_id in (select c.document_id from claims c where c.claim_id = any($1::uuid[]))
+      order by d.document_id for share nowait`,
+    [claimIds],
+  );
+  await db.query(`select c.claim_id from claims c where c.claim_id = any($1::uuid[]) order by c.claim_id for share nowait`, [claimIds]);
+  const { rows } = await db.query<{ claim_id: string }>(
+    `select c.claim_id::text as claim_id
+       from claims c
+       join documents d on d.document_id = c.document_id
+       join sources s on s.source_id = c.reported_by_source_id
+      where c.claim_id = any($1::uuid[])
+        and ${citableClaimSql("$2::uuid", "$3::timestamptz")}`,
+    [claimIds, userIdOrNull(input.user_id), input.as_of ?? null],
+  );
+  return new Set(rows.map((row) => row.claim_id));
 }
 
 // d, the claim's document, is a copy fetched from the issuer's IR site.

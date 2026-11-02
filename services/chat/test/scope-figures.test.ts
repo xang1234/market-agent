@@ -4,8 +4,7 @@ import test from "node:test";
 
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
 import { proposedMetric, resolveResearchScope, type CompanyChange, type ResearchScope, type ScopePeriod, type ScopeProposal } from "../src/research-scope.ts";
-import { SCOPE_METRICS } from "../src/financial-runtime.ts";
-import { defaultsNote, ENGINE_READS_BY_CATALOG_METRIC, LATEST, periodNote, routeTurn, VALUATIONS, type PlanChoice, type ReadPeriod } from "../src/scope-figures.ts";
+import { defaultsNote, ENGINE_READS_BY_CATALOG_METRIC, LATEST, periodNote, routeTurn, SCOPE_METRICS, VALUATIONS, type PlanChoice, type ReadPeriod } from "../src/scope-figures.ts";
 import { parseProposal, proposalQuestion } from "../src/scope-proposal.ts";
 import { proposal as read } from "./scope-fixtures.ts";
 

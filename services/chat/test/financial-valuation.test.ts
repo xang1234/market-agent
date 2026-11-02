@@ -11,6 +11,7 @@ import { inspectCommittedResult } from "../../financial-engine/src/inspection.ts
 import { buildDeterministicPlan, type PlanningModel } from "../../financial-engine/src/planner.ts";
 import { authorityFor, IDS, NVDA, seedNvda } from "../../financial-engine/test/db-fixtures.ts";
 import { uncoveredAsks } from "../src/financial-runtime.ts";
+import { NOT_ASKED } from "../src/filed-cause.ts";
 import { listChatMessagesForThread } from "../src/messages.ts";
 import { parseProposal } from "../src/scope-proposal.ts";
 import { extractSubjectMentions } from "../src/subject-extraction.ts";
@@ -75,7 +76,7 @@ test("an answer that computes a valuation covers the reading that asks for it, a
   };
   const reading = parseProposal(JSON.stringify({ metrics: ["market_cap", "pe_ratio"], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" }, companies: { kind: "as_named", names: [] } }), "");
   assert.ok(reading);
-  assert.deepEqual([uncoveredAsks(reading, plan("market_cap")), uncoveredAsks(reading, plan("pe_ratio"))], [["P/E ratio"], ["market capitalization"]]);
+  assert.deepEqual([uncoveredAsks(reading, plan("market_cap"), NOT_ASKED), uncoveredAsks(reading, plan("pe_ratio"), NOT_ASKED)], [["P/E ratio"], ["market capitalization"]]);
 });
 
 test("certified market cap and P/E in chat", { timeout: 300_000 }, async (t) => {

@@ -7,7 +7,7 @@ import type { PlanningContext } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort } from "../../financial-engine/src/ports.ts";
 import { valuationOperations, valuationOutputs, type Valuation } from "../../financial-engine/src/valuation-plan.ts";
 import { MARGINS, nodeIdOf, planned, planningQuarters, quarterId, slotOf, type ReadyPlan } from "./company-overview.ts";
-import { BALANCE_SHEET_ITEMS, readingAsks, type FiscalQuarter, type PERIOD_FIELDS, type PeriodType, type ResearchScope, type ScopeFacet, type ScopeProposal } from "./research-scope.ts";
+import { BALANCE_SHEET_ITEMS, readingAsks, type FiscalQuarter, type IncomeItem, type PERIOD_FIELDS, type PeriodType, type ResearchScope, type ScopeFacet, type ScopeProposal } from "./research-scope.ts";
 
 /**
  * The period a turn's figures are read at: the latest, of the type its scope
@@ -237,6 +237,47 @@ export const ENGINE_READS_BY_CATALOG_METRIC: Readonly<Record<string, ReadonlyArr
   total_assets: ["total_assets"],
   total_liabilities: ["total_liabilities"],
   total_equity: ["total_equity"],
+};
+
+// The chat catalog key (research-scope.ts) of each figure the engine names,
+// or null for a figure no chat reader serves: a follow-up reads the others.
+// Every engine metric is listed (#381), so a new one cannot silently drop out.
+export const SCOPE_METRICS: Readonly<Record<string, string | null>> = {
+  revenue: "income_statement",
+  gross_profit: "income_statement",
+  operating_income: "income_statement",
+  net_income: "income_statement",
+  gross_margin: "income_statement",
+  operating_margin: "income_statement",
+  net_margin: "income_statement",
+  free_cash_flow: "free_cash_flow",
+  operating_cash_flow: "operating_cash_flow",
+  capex: "capex",
+  eps_basic: "eps_basic",
+  eps_diluted: "eps_diluted",
+  cash_and_equivalents: "cash_and_equivalents",
+  total_assets: "total_assets",
+  total_liabilities: "total_liabilities",
+  total_equity: "total_equity",
+  // No chat reader serves a share count.
+  weighted_average_basic_shares: null,
+  weighted_average_diluted_shares: null,
+  shares_outstanding: null,
+  // A share price is shown only beside the valuation it prices.
+  share_price: null,
+  market_cap: "market_cap",
+  pe_ratio: "pe_ratio",
+};
+
+// The engine figure each income item names; operating expenses are none.
+export const INCOME_ITEM_FIGURE: Readonly<Record<IncomeItem, string | null>> = {
+  revenue: "revenue",
+  gross_margin: "gross_margin",
+  operating_expenses: null,
+  operating_income: "operating_income",
+  operating_margin: "operating_margin",
+  net_income: "net_income",
+  net_margin: "net_margin",
 };
 
 type Node = Record<string, unknown> & { node_id: string };

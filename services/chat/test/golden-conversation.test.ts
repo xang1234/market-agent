@@ -23,7 +23,7 @@ import { closeLocalRuntimePoolForTests } from "../src/local-runtime.ts";
 import { readChatMessage } from "../src/messages.ts";
 import { loadChatServerOptionsFromEnv } from "../src/runtime.ts";
 import { STARTER_QUESTIONS } from "../../../web/src/chat/starterQuestionList.ts";
-import { AMD_Q2_2025_RELEASE, GOLDEN_COMPANIES, seedGoldenDataset } from "./golden/dataset.ts";
+import { AMD_Q2_2025_RELEASE, GOLDEN_AS_OF, GOLDEN_COMPANIES, seedGoldenDataset } from "./golden/dataset.ts";
 import { requireRecordedScopes } from "./golden/harness.ts";
 import type { Client } from "pg";
 import { parseSseEvents, type ParsedSseEvent } from "./sse-helpers.ts";
@@ -32,6 +32,7 @@ import type { AddressInfo } from "node:net";
 const USER_ID = "70000000-0000-4000-8000-000000000001";
 const NVDA = GOLDEN_COMPANIES.find((company) => company.ticker === "NVDA")!;
 const AMD = GOLDEN_COMPANIES.find((company) => company.ticker === "AMD")!;
+const AAPL = GOLDEN_COMPANIES.find((company) => company.ticker === "AAPL")!;
 const BOTH_LISTINGS = [
   { kind: "listing", id: NVDA.listing_id },
   { kind: "listing", id: AMD.listing_id },
@@ -239,7 +240,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const narrative = answer.blocks[0]!;
     assert.equal(narrativeText(narrative), [
       "Of NVDA and AMD, NVDA's price return was highest: NVDA 5.81%, AMD 3.17% (YTD 2026: Dec 2025 close to Aug 2026 close).",
-      `According to a source dated Aug 2025, effective Jun 2025 on AMD: ${AMD_Q2_2025_RELEASE.text}`,
+      `According to a source dated Aug 2025 on AMD: ${AMD_Q2_2025_RELEASE.text}`,
     ].join("\n\n"));
     const [claim] = refsOf(narrative).filter(([kind]) => kind === "claim");
     const { rows } = await client.query<{ claim_refs: string[] }>(`select claim_refs from snapshots where snapshot_id = $1::uuid`, [answer.snapshot_id]);
@@ -408,18 +409,256 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.deepEqual(answerText(await latestAssistantMessage(base, segmentsThread.thread_id)), [UNSUPPORTED]);
   });
 
-  await t.test("'Why did AMD's operating margin turn negative in Q2 2025?' shows the certified margin and names the cause as not calculated, citing no claim (#282)", async () => {
-    const amd = GOLDEN_COMPANIES.find((company) => company.ticker === "AMD")!;
-    await seedLateClaim(client, amd.issuer_id);
-    const thread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD margin" });
-    completedTurn(await runTurn(base, thread.thread_id, "Why did AMD's operating margin turn negative in Q2 2025?"));
-    const answer = await latestAssistantMessage(base, thread.thread_id);
+  // #542 reverses #282: the cause AMD filed for the quarter is quoted beside
+  // the certified margin, sealed in a snapshot of its own under the answer's.
+  // The release explains its gross margin, which the operating margin is
+  // computed from.
+  const OPERATING_MARGIN_Q2 = ["Operating margin (operating income / revenue)", "Q2 FY2025 (ended 2025-06-28)", "verified", "-1.74%"];
+  const MI308 = `According to a source dated Aug 2025 on AMD, for Q2 FY2025 (ended 2025-06-28): ${AMD_Q2_2025_RELEASE.text}`;
+  const askAmd = async (question: string) => {
+    const amdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: question });
+    completedTurn(await runTurn(base, amdThread.thread_id, question));
+    return latestAssistantMessage(base, amdThread.thread_id);
+  };
+  const filedClaimId = async () =>
+    (await client.query<{ claim_id: string }>(`select claim_id::text as claim_id from claims where text_canonical = $1`, [AMD_Q2_2025_RELEASE.text])).rows[0]!.claim_id;
+
+  await t.test("'Why did AMD's operating margin turn negative in Q2 2025?' quotes the charge AMD filed for the quarter, in a snapshot sealed under the answer's (#542)", async () => {
+    await seedLateClaim(client, AMD.issuer_id);
+    const answer = await askAmd("Why did AMD's operating margin turn negative in Q2 2025?");
+    assert.deepEqual(engineAnswer(answer), { results: [OPERATING_MARGIN_Q2], notes: [MI308, "Not covered by this answer: a margin over several periods."] });
+    causeQuotedOrNamed(answer);
+    const cause = answer.blocks[1]!;
+    const claimId = await filedClaimId();
+    // The release's claim alone: the one published after the turn's cutoff stays out.
+    assert.deepEqual(refsOf(cause), [["claim", claimId, AMD_Q2_2025_RELEASE.text]]);
+    const { rows } = await client.query(
+      `select snapshot_id::text, parent_snapshot::text, claim_refs from snapshots where snapshot_id = any($1::uuid[]) order by parent_snapshot nulls first`,
+      [[answer.snapshot_id, cause.snapshot_id]],
+    );
+    assert.deepEqual(rows, [
+      { snapshot_id: answer.snapshot_id, parent_snapshot: null, claim_refs: [] },
+      { snapshot_id: cause.snapshot_id, parent_snapshot: answer.snapshot_id, claim_refs: [claimId] },
+    ], "the cause seals its claim under the answer's snapshot, which is untouched");
+    assert.deepEqual(answer.block_proofs?.[cause.id!], { evidence: "linked", calculation: "not_verified", public_by_cutoff: "unknown" });
+    // The page inspects a block's refs under the block's own snapshot (web RichText).
+    const inspect = (userId: string) => loadEvidenceInspection(client, { user_id: userId, snapshot_id: String(cause.snapshot_id), ref: { kind: "claim", id: claimId } });
+    assert.equal((await inspect(USER_ID)).related_refs.find((ref) => ref.kind === "document")?.label, AMD_Q2_2025_RELEASE.title);
+    await assert.rejects(() => inspect(randomUUID()), /snapshot is not visible/);
+  });
+
+  await t.test("erasing the answer's financial run erases its cause's snapshot with the answer's (#542)", async () => {
+    const answer = await askAmd("Why did AMD's operating margin turn negative in Q2 2025?");
+    const cause = answer.blocks[1]!;
+    assert.deepEqual(refsOf(cause), [["claim", await filedClaimId(), AMD_Q2_2025_RELEASE.text]]);
+    const sealed = async () => (await client.query<{ snapshot_id: string }>(
+      `select snapshot_id::text from snapshots where snapshot_id = any($1::uuid[]) order by parent_snapshot nulls first`,
+      [[answer.snapshot_id, cause.snapshot_id]],
+    )).rows.map((row) => row.snapshot_id);
+    assert.deepEqual(await sealed(), [answer.snapshot_id, cause.snapshot_id]);
+    await client.query(`delete from financial_runs where run_id in (select run_id from financial_run_units where snapshot_id = $1::uuid)`, [answer.snapshot_id]);
+    assert.deepEqual(await sealed(), []);
+  });
+
+  await t.test("'Why did AMD's operating margin turn negative last quarter?' is planned at AMD's latest quarter and quotes the cause AMD filed for it (#542)", async (st) => {
+    // The live reading leaves "last quarter" to the planner, which plans the
+    // latest quarter beside the one before it (recorded 2026-11-01).
+    const text = "Operating income rose on higher data center GPU sales.";
+    const claimId = await seedBoundExplanation(st, client, { predicate: "management.explanation.operating_income", text, period: { kind: "fiscal_q", end: "2026-06-27" }, published: "2026-08-04T00:00:00Z" });
+    const answer = await askAmd("Why did AMD's operating margin turn negative last quarter?");
+    const { results, notes } = engineAnswer(answer);
+    assert.deepEqual([...new Set(results.map(([, period]) => period))], ["Q2 FY2026 (ended 2026-06-27)", "Q1 FY2026 (ended 2026-03-28)", "Q2 FY2026 (ended 2026-06-27) vs Q1 FY2026 (ended 2026-03-28)"]);
+    assert.deepEqual(notes, [`According to a source dated Aug 2026 on AMD, for Q2 FY2026 (ended 2026-06-27): ${text}`]);
+    causeQuotedOrNamed(answer);
+    assert.deepEqual(refsOf(answer.blocks[1]!), [["claim", claimId, text]]);
+  });
+
+  await t.test("the same plan with its current quarter not on file quotes no cause: the one AMD filed for the quarter before explains no figure shown for the gap (#542)", async (st) => {
+    // Right after a release, before its 10-Q: the release's cause is filed,
+    // the quarter's figures are not.
+    await seedBoundExplanation(st, client, { predicate: "management.explanation.operating_income", text: "Operating income fell on lower client segment sales.", period: { kind: "fiscal_q", end: "2026-06-27" }, published: "2026-08-04T00:00:00Z" });
+    const answer = await askAmd("Why did AMD's operating margin turn negative in Q3 2026?");
+    const { results, notes } = engineAnswer(answer);
+    assert.deepEqual([...new Set(results.map(([, period, disposition]) => `${period}: ${disposition}`))], [
+      "Q3 FY2026: blocked_dependency",
+      "Q2 FY2026 (ended 2026-06-27): verified",
+      "Q3 FY2026 vs Q2 FY2026 (ended 2026-06-27): blocked_dependency",
+      "Q3 FY2026: missing",
+    ]);
+    assert.deepEqual(notes, ["Not covered by this answer: the cause of these figures."]);
+    causeQuotedOrNamed(answer);
+  });
+
+  await t.test("two companies whose quarters end the same day each name their own quarter beside their cause: AAPL's Q3 FY2025 and AMD's Q2 FY2025 (#542)", async (st) => {
+    const text = "Operating income fell on lower iPhone sales.";
+    const claimId = await seedBoundExplanation(st, client, { predicate: "management.explanation.operating_income", text, period: { kind: "fiscal_q", end: "2025-06-28" }, published: "2025-07-31T00:00:00Z", issuer: AAPL.issuer_id });
+    const answer = await askAmd("Why did the operating margins of AAPL and AMD move in their quarters ended in June 2025?");
+    const { results, notes } = engineAnswer(answer);
+    assert.deepEqual(results.map(([, period]) => period), ["Q3 FY2025 (ended 2025-06-28)", "Q2 FY2025 (ended 2025-06-28)"]);
+    assert.deepEqual(notes, [`According to a source dated Jul 2025 on AAPL, for Q3 FY2025 (ended 2025-06-28): ${text} ${MI308}`]);
+    causeQuotedOrNamed(answer);
+    assert.deepEqual(refsOf(answer.blocks[1]!), [["claim", claimId, text], ["claim", await filedClaimId(), AMD_Q2_2025_RELEASE.text]]);
+  });
+
+  await t.test("a revenue follow-up to the margin's cause names its cause as not covered: AMD's release explains its gross margin, not its revenue (#542)", async () => {
+    const amdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD margin, then revenue" });
+    completedTurn(await runTurn(base, amdThread.thread_id, "Why did AMD's operating margin turn negative in Q2 2025?"));
+    assert.deepEqual(refsOf((await latestAssistantMessage(base, amdThread.thread_id)).blocks[1]!), [["claim", await filedClaimId(), AMD_Q2_2025_RELEASE.text]]);
+    completedTurn(await runTurn(base, amdThread.thread_id, "And its revenue in Q2 2025?"));
+    const answer = await latestAssistantMessage(base, amdThread.thread_id);
     assert.deepEqual(engineAnswer(answer), {
-      results: [["Operating margin (operating income / revenue)", "Q2 FY2025 (ended 2025-06-28)", "verified", "-1.74%"]],
+      results: [["Revenue", "Q2 FY2025 (ended 2025-06-28)", "verified", "USD 7,685,000,000.00"]],
+      notes: ["AMD is carried from the previous answer. Not covered by this answer: a margin over several periods; the cause of these figures."],
+    });
+    causeQuotedOrNamed(answer);
+  });
+
+  await t.test("'Show the evidence' after the margin's cause shows the claim the answer quoted, though AMD filed a newer explanation since (#542)", async (st) => {
+    const amdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD margin, then its evidence" });
+    completedTurn(await runTurn(base, amdThread.thread_id, "Why did AMD's operating margin turn negative in Q2 2025?"));
+    const claimId = await filedClaimId();
+    assert.deepEqual(refsOf((await latestAssistantMessage(base, amdThread.thread_id)).blocks[1]!), [["claim", claimId, AMD_Q2_2025_RELEASE.text]]);
+    // The next quarter's explanation of the margin's own income, known by the follow-up's cutoff.
+    const text = "Operating income rose in the third quarter on higher data center sales.";
+    await seedBoundExplanation(st, client, { predicate: "management.explanation.operating_income", text, period: { kind: "fiscal_q", end: "2025-09-27" }, published: "2025-11-04T00:00:00Z", known: GOLDEN_AS_OF });
+    completedTurn(await runTurn(base, amdThread.thread_id, "Show the evidence"));
+    const evidence = await latestAssistantMessage(base, amdThread.thread_id);
+    assert.deepEqual(evidence.blocks.flatMap((block) => refsOf(block).filter(([kind]) => kind === "claim")), [["claim", claimId, AMD_Q2_2025_RELEASE.text]]);
+    const { rows: [sealed] } = await client.query<{ claim_refs: string[] }>(`select claim_refs from snapshots where snapshot_id = $1::uuid`, [evidence.snapshot_id]);
+    assert.deepEqual(sealed!.claim_refs, [claimId], "sealed under the follow-up's own snapshot, which opens it");
+  });
+
+  await t.test("a second 'Show the evidence' still shows the claim the margin's answer quoted first (#542)", async (st) => {
+    const amdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD margin, then its evidence twice" });
+    completedTurn(await runTurn(base, amdThread.thread_id, "Why did AMD's operating margin turn negative in Q2 2025?"));
+    const claimId = await filedClaimId();
+    await seedBoundExplanation(st, client, { predicate: "management.explanation.operating_income", text: "Operating income rose in the third quarter on higher data center GPU demand.", period: { kind: "fiscal_q", end: "2025-09-27" }, published: "2025-11-04T00:00:00Z", known: GOLDEN_AS_OF });
+    completedTurn(await runTurn(base, amdThread.thread_id, "Show the evidence"));
+    completedTurn(await runTurn(base, amdThread.thread_id, "Show the evidence"));
+    const evidence = await latestAssistantMessage(base, amdThread.thread_id);
+    assert.deepEqual(evidence.blocks.flatMap((block) => refsOf(block).filter(([kind]) => kind === "claim")), [["claim", claimId, AMD_Q2_2025_RELEASE.text]]);
+  });
+
+  await t.test("'Show the evidence' after the quoted cause was superseded says it is no longer citable, beside the claim it shows instead (#542)", async (st) => {
+    const amdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD margin, its cause superseded" });
+    completedTurn(await runTurn(base, amdThread.thread_id, "Why did AMD's operating margin turn negative in Q2 2025?"));
+    const claimId = await filedClaimId();
+    const text = "Operating income rose in the third quarter on stronger client segment sales.";
+    const newer = await seedBoundExplanation(st, client, { predicate: "management.explanation.operating_income", text, period: { kind: "fiscal_q", end: "2025-09-27" }, published: "2025-11-04T00:00:00Z", known: GOLDEN_AS_OF });
+    await client.query(`update claims set superseded_at = now() where claim_id = $1::uuid`, [claimId]);
+    try {
+      completedTurn(await runTurn(base, amdThread.thread_id, "Show the evidence"));
+      const evidence = await latestAssistantMessage(base, amdThread.thread_id);
+      assert.deepEqual(evidence.blocks.flatMap((block) => refsOf(block).filter(([kind]) => kind === "claim")), [["claim", newer, text]]);
+      assert.ok(answerText(evidence).includes(PRIOR_CAUSE_WITHDRAWN), JSON.stringify(answerText(evidence)));
+    } finally {
+      await client.query(`update claims set superseded_at = null where claim_id = $1::uuid`, [claimId]);
+    }
+  });
+
+  await t.test("'Show the evidence' whose claims read fails does not say the quoted cause is no longer citable (#542)", async () => {
+    const amdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD margin, its evidence unreadable" });
+    completedTurn(await runTurn(base, amdThread.thread_id, "Why did AMD's operating margin turn negative in Q2 2025?"));
+    await client.query(`alter table claim_arguments rename to claim_arguments_renamed`);
+    try {
+      completedTurn(await runTurn(base, amdThread.thread_id, "Show the evidence"));
+    } finally {
+      await client.query(`alter table claim_arguments_renamed rename to claim_arguments`);
+    }
+    const evidence = await latestAssistantMessage(base, amdThread.thread_id);
+    assert.deepEqual(evidence.blocks.flatMap((block) => refsOf(block).filter(([kind]) => kind === "claim")), []);
+    assert.ok(!answerText(evidence).includes(PRIOR_CAUSE_WITHDRAWN), JSON.stringify(answerText(evidence)));
+  });
+
+  await t.test("a cause whose read is cancelled leaves the answer published, its cause named as not covered (#542)", async () => {
+    // Another session holds the claims' arguments, so the cause's read of
+    // them waits until the test cancels it, as an operator's pg_cancel_backend
+    // does: nothing sets a statement or lock timeout to end it.
+    const locker = await connectedClient(t, databaseUrl);
+    await locker.query("begin");
+    await locker.query("lock table claim_arguments in access exclusive mode");
+    const amdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD margin, cause read cancelled" });
+    const turn = runTurn(base, amdThread.thread_id, "Why did AMD's operating margin turn negative in Q2 2025?");
+    try {
+      await client.query(`select pg_cancel_backend($1)`, [await waitingOnLock(client, "with bound as")]);
+    } finally {
+      await locker.query("commit");
+    }
+    completedTurn(await turn);
+    const answer = await latestAssistantMessage(base, amdThread.thread_id);
+    assert.deepEqual(engineAnswer(answer), {
+      results: [OPERATING_MARGIN_Q2],
       notes: ["Not covered by this answer: a margin over several periods; the cause of these figures."],
     });
-    const { rows } = await client.query<{ claim_refs: string[] }>(`select claim_refs from snapshots where snapshot_id = $1::uuid`, [answer.snapshot_id]);
-    assert.deepEqual(rows[0]?.claim_refs, []);
+    causeQuotedOrNamed(answer);
+  });
+
+  await t.test("a cause whose seal is refused stores no snapshot and no read log, only the refusal's audit row, and the answer names it as not covered (#542)", async () => {
+    // The cause's read is logged under no thread, so the seal's audit of its
+    // provenance refuses it.
+    await client.query(`create function filed_cause_unthreaded() returns trigger language plpgsql as $$ begin new.thread_id := null; return new; end $$`);
+    await client.query(`create trigger filed_cause_unthreaded before insert on tool_call_logs for each row when (new.tool_name = 'filed_cause') execute function filed_cause_unthreaded()`);
+    try {
+      const amdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD margin, cause seal refused" });
+      completedTurn(await runTurn(base, amdThread.thread_id, "Why did AMD's operating margin turn negative in Q2 2025?"));
+      const answer = await latestAssistantMessage(base, amdThread.thread_id);
+      assert.deepEqual(engineAnswer(answer), {
+        results: [OPERATING_MARGIN_Q2],
+        notes: ["Not covered by this answer: a margin over several periods; the cause of these figures."],
+      });
+      causeQuotedOrNamed(answer);
+      const { rows: [stored] } = await client.query(
+        `select (select count(*)::int from snapshots where parent_snapshot = $1::uuid) as children,
+                (select count(*)::int from tool_call_logs where tool_name = 'filed_cause' and thread_id is null) as reads,
+                (select coalesce(array_agg(reason_code), '{}') from verifier_fail_logs where thread_id = $2::uuid) as refusals`,
+        [answer.snapshot_id, amdThread.thread_id],
+      );
+      assert.deepEqual(stored, { children: 0, reads: 0, refusals: ["tool_call_log_audit_failed"] });
+    } finally {
+      await client.query(`drop trigger filed_cause_unthreaded on tool_call_logs`);
+      await client.query(`drop function filed_cause_unthreaded()`);
+    }
+  });
+
+  await t.test("a cause whose document another session is deleting publishes without waiting for it, its cause named as not covered (#542)", async () => {
+    // Another session deletes the release's document and has not committed,
+    // so the turn's read still sees it, and its seal cannot lock it.
+    const deleter = await connectedClient(t, databaseUrl);
+    const documentId = (await client.query<{ document_id: string }>(`select document_id::text from claims where text_canonical = $1`, [AMD_Q2_2025_RELEASE.text])).rows[0]!.document_id;
+    await deleter.query("begin");
+    await deleter.query(`update documents set deleted_at = now() where document_id = $1::uuid`, [documentId]);
+    const deleterPid = (await deleter.query<{ pid: number }>(`select pg_backend_pid() as pid`)).rows[0]!.pid;
+    try {
+      const amdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD margin, cause document deleted" });
+      const turn = runTurn(base, amdThread.thread_id, "Why did AMD's operating margin turn negative in Q2 2025?");
+      // Settled before anything waits on the deleter, else the deleter commits and the turn goes on.
+      const waited = await waitsOn(client, deleterPid, turn);
+      await deleter.query("commit");
+      completedTurn(await turn);
+      const answer = await latestAssistantMessage(base, amdThread.thread_id);
+      assert.deepEqual(engineAnswer(answer), {
+        results: [OPERATING_MARGIN_Q2],
+        notes: ["Not covered by this answer: a margin over several periods; the cause of these figures."],
+      });
+      causeQuotedOrNamed(answer);
+      assert.equal(waited, false, "the seal did not wait for the deleting session");
+    } finally {
+      await deleter.query("rollback").catch(() => {});
+      await client.query(`update documents set deleted_at = null where document_id = $1::uuid`, [documentId]);
+    }
+  });
+
+  await t.test("a cause read a schema defect fails the turn: no answer goes out without its cause (#542)", async () => {
+    await client.query(`alter table claim_arguments rename to claim_arguments_renamed`);
+    try {
+      const amdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD margin, claims table renamed" });
+      const events = await runTurn(base, amdThread.thread_id, "Why did AMD's operating margin turn negative in Q2 2025?");
+      assert.deepEqual(events.flatMap((event) => event.event === "turn.completed" || event.event === "turn.error" ? [event.event] : []), ["turn.error"]);
+      const { messages } = await api<{ messages: ChatMessage[] }>(base, "GET", `/v1/chat/threads/${amdThread.thread_id}/messages`);
+      assert.deepEqual(messages.map((message) => message.role), ["user"]);
+    } finally {
+      await client.query(`alter table claim_arguments_renamed rename to claim_arguments`);
+    }
   });
 
   await t.test("a named past quarter is the quarter calculated; a quarter not on file is a declared gap (#290)", async () => {
@@ -508,7 +747,6 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
   // company added back, and the benchmark turned off. Each turn keeps what it
   // does not change, read back from the saved answer as a reload would.
   await t.test("a research scope survives a table, an explanation, and companies dropped and added back", async () => {
-    const AAPL = GOLDEN_COMPANIES.find((company) => company.ticker === "AAPL")!;
     const regressionThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Scope regression" });
     type Saved = { route: string; companies: Array<{ issuer_id: string }>; metrics: Array<{ metric_key: string }>; price_window: { cutoff: string } | null; benchmark: boolean; inherited: string[] };
     const saved = async (): Promise<Saved[]> =>
@@ -677,7 +915,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const answer = await latestAssistantMessage(base, guidanceThread.thread_id);
     assert.deepEqual(answer.blocks.map((block) => block.kind), ["rich_text"]);
     const [narrative] = answer.blocks;
-    assert.equal(narrativeText(narrative!), `According to a source dated Aug 2025, effective Jun 2025 on AMD: ${AMD_Q2_2025_RELEASE.text}\n\nNo figures are shown for AMD.`);
+    assert.equal(narrativeText(narrative!), `According to a source dated Aug 2025 on AMD: ${AMD_Q2_2025_RELEASE.text}\n\nNo figures are shown for AMD.`);
     const [claim, ...others] = refsOf(narrative!);
     assert.deepEqual([claim![0], claim![2], others], ["claim", AMD_Q2_2025_RELEASE.text, []]);
     const words = (narrative!.segments as Array<{ type: string; text?: string }>).filter((segment) => segment.type === "text").map((segment) => segment.text).join("");
@@ -739,6 +977,9 @@ function streamedBlockIds(events: ParsedSseEvent[]): unknown[] {
 
 // A segment request's gap, worded from the planner's closed reason (#425).
 const UNSUPPORTED = "This request asks for a calculation outside the verified financial definitions I can compute: revenue or results by business segment.";
+
+// An evidence follow-up's note when the cause its thread quoted is no longer citable (#542).
+const PRIOR_CAUSE_WITHDRAWN = "The explanation quoted earlier is no longer citable.";
 
 function answerText(message: ChatMessage): string[] {
   return message.blocks.filter((block) => block.kind === "rich_text")
@@ -828,18 +1069,86 @@ function withEnv(t: TestContext, values: Record<string, string>): void {
   });
 }
 
-// An AMD claim published a month after the golden cutoff (#282).
+// A why answer's cause is quoted in a block of its own, or named as not
+// covered in its note: never both, never neither.
+function causeQuotedOrNamed(answer: ChatMessage): void {
+  const quoted = answer.blocks.filter((block) => block.kind === "rich_text" && block.snapshot_id !== answer.snapshot_id && refsOf(block).some(([kind]) => kind === "claim"));
+  const named = answerText(answer).some((text) => text.includes("the cause of these figures"));
+  assert.equal(quoted.length, named ? 0 : 1, `a cause quoted ${quoted.length} times, ${named ? "" : "not "}named as not covered`);
+}
+
+// The backend whose statement, containing `text` within its first kilobyte
+// (all pg_stat_activity keeps by default), waits on a lock.
+async function waitingOnLock(client: Client, text: string): Promise<number> {
+  for (let attempt = 0; attempt < 600; attempt++) {
+    const { rows: [row] } = await client.query<{ pid: number }>(
+      `select pid from pg_stat_activity where wait_event_type = 'Lock' and position($1 in query) > 0 and pid <> pg_backend_pid()`,
+      [text],
+    );
+    if (row) return row.pid;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`no statement containing ${text} waited on a lock`);
+}
+
+// Whether some backend waits on a lock the backend `pid` holds before `until`
+// settles.
+async function waitsOn(client: Client, pid: number, until: Promise<unknown>): Promise<boolean> {
+  let settled = false;
+  until.then(() => (settled = true), () => (settled = true));
+  while (!settled) {
+    const { rows } = await client.query(`select 1 from pg_stat_activity where $1::int = any(pg_blocking_pids(pid))`, [pid]);
+    if (rows.length > 0) return true;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return false;
+}
+
+// An explanation bound to its period as the release extractor binds one,
+// published under AMD's release source about AMD unless issuer says whom, and
+// stored now unless known says when. Superseded once the subtest ends, so
+// later turns read the claims as seeded.
+async function seedBoundExplanation(
+  t: TestContext,
+  client: Client,
+  input: { predicate: string; text: string; period: { kind: string; end: string }; published: string; known?: string; issuer?: string },
+): Promise<string> {
+  const { rows: [doc] } = await client.query<{ document_id: string }>(
+    `insert into documents (source_id, kind, title, published_at, content_hash, raw_blob_id, parse_status)
+     select source_id, 'press_release', 'An AMD release', $2::timestamptz, 'sha256:' || md5($3) || md5($3), 'ephemeral:' || md5($3), 'parsed'
+       from sources where canonical_url = $1
+     returning document_id::text`,
+    [AMD_Q2_2025_RELEASE.url, input.published, input.text],
+  );
+  const { rows: [claim] } = await client.query<{ claim_id: string }>(
+    `insert into claims (document_id, predicate, text_canonical, polarity, modality, reported_by_source_id, effective_time, confidence, status, period_kind, period_end, period_bound_at, created_at)
+     select d.document_id, $2, $3, 'neutral', 'quoted', d.source_id, d.published_at, 0.95, 'extracted', $4, $5::date, now(), coalesce($6::timestamptz, now())
+       from documents d where d.document_id = $1::uuid
+     returning claim_id::text`,
+    [doc!.document_id, input.predicate, input.text, input.period.kind, input.period.end, input.known ?? null],
+  );
+  await client.query(
+    `insert into claim_arguments (claim_id, subject_kind, subject_id, role) values ($1::uuid, 'issuer', $2::uuid, 'subject')`,
+    [claim!.claim_id, input.issuer ?? AMD.issuer_id],
+  );
+  t.after(() => client.query(`update claims set superseded_at = now() where claim_id = $1::uuid`, [claim!.claim_id]));
+  return claim!.claim_id;
+}
+
+// An AMD explanation of Q2 2025's gross margin, bound to the quarter and
+// published a month from now, so after any turn's cutoff: the engine's (the
+// wall clock) and the frozen analyst's (#282).
 async function seedLateClaim(client: Client, issuerId: string): Promise<string> {
   const { rows: [doc] } = await client.query<{ document_id: string }>(
     `insert into documents (source_id, kind, title, published_at, content_hash, raw_blob_id, parse_status)
-     select source_id, 'press_release', 'A later AMD release', '2026-10-01T00:00:00Z', 'sha256:${"c".repeat(64)}', 'ephemeral:late', 'parsed'
+     select source_id, 'press_release', 'A later AMD release', now() + interval '30 days', 'sha256:${"c".repeat(64)}', 'ephemeral:late', 'parsed'
        from sources where canonical_url = $1
      returning document_id::text`,
     [AMD_Q2_2025_RELEASE.url],
   );
   const { rows: [claim] } = await client.query<{ claim_id: string }>(
-    `insert into claims (document_id, predicate, text_canonical, polarity, modality, reported_by_source_id, effective_time, confidence, status)
-     select $1::uuid, 'kpi.commentary', 'A later explanation published after the cutoff.', 'negative', 'asserted', d.source_id, '2025-06-28T00:00:00Z', 0.95, 'extracted'
+    `insert into claims (document_id, predicate, text_canonical, polarity, modality, reported_by_source_id, effective_time, confidence, status, period_kind, period_end, period_bound_at)
+     select $1::uuid, 'management.explanation.gross_margin', 'A later explanation published after the cutoff.', 'neutral', 'quoted', d.source_id, '2025-08-05T00:00:00Z', 0.95, 'extracted', 'fiscal_q', '2025-06-28', now()
        from documents d where d.document_id = $1::uuid
      returning claim_id::text`,
     [doc!.document_id],

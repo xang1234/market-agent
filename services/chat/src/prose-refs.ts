@@ -17,7 +17,7 @@ export type Sealer = {
   // packets only), otherwise the packet's value as plain text.
   value: (figure: PacketFigure) => Segment;
   // A claim's text: a claim ref when its id is a UUID, otherwise plain text.
-  quote: (claim: PacketClaim) => Segment;
+  quote: (claim: Pick<PacketClaim, "claim_id" | "source_id" | "text">) => Segment;
   // What the segments written so far need to seal.
   sealed: () => { fact_bindings: ReadonlyArray<Record<string, unknown>>; source_refs: ReadonlyArray<string> };
 };

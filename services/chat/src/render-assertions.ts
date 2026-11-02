@@ -12,7 +12,7 @@
 
 import type { Assertion } from "./assertions.ts";
 import { checkComparison, metricLabel, periodText as quarterText, type CheckedComparison, type TrendResult } from "./comparisons.ts";
-import type { EvidencePacket, PacketFigure } from "./evidence-packet.ts";
+import type { EvidencePacket, PacketClaim, PacketFigure } from "./evidence-packet.ts";
 import { createSealer, type Sealer, type Segment } from "./prose-refs.ts";
 
 type Block = Record<string, unknown>;
@@ -99,14 +99,7 @@ function templateSegments(
       break;
     }
     case "management_attribution":
-      claims.forEach((claim, i) => {
-        // Dated by its publication; an effective date that differs is its own.
-        const published = claim.published_at ? monthYear(claim.published_at) : undefined;
-        const effective = claim.effective_time ? monthYear(claim.effective_time) : undefined;
-        const dated = published ? `a source dated ${published}${effective && effective !== published ? `, effective ${effective}` : ""}` : `a source${effective ? `, effective ${effective}` : ""}`;
-        text(`${i === 0 ? "" : " "}According to ${dated}${claim.company ? ` on ${claim.company}` : ""}: `);
-        segments.push(quote(claim));
-      });
+      segments.push(...attributionSegments(claims, quote));
       break;
     case "comparison": {
       const checked = checkComparison(assertion, assertion.evidence, packet);
@@ -127,6 +120,21 @@ function templateSegments(
     }
   }
   return segments;
+}
+
+type AttributedClaim = Pick<PacketClaim, "text" | "claim_id" | "source_id" | "company" | "published_at" | "effective_time"> & {
+  // The fiscal period the claim explains, as the answer names it, when it is bound to one.
+  period?: string;
+};
+
+/** Management's attribution: each claim quoted, dated by its publication; an effective date that differs is its own. */
+export function attributionSegments(claims: ReadonlyArray<AttributedClaim>, quote: (claim: AttributedClaim) => Segment): Segment[] {
+  return claims.flatMap((claim, i): Segment[] => {
+    const published = claim.published_at ? monthYear(claim.published_at) : undefined;
+    const effective = claim.effective_time ? monthYear(claim.effective_time) : undefined;
+    const dated = published ? `a source dated ${published}${effective && effective !== published ? `, effective ${effective}` : ""}` : `a source${effective ? `, effective ${effective}` : ""}`;
+    return [{ type: "text", text: `${i === 0 ? "" : " "}According to ${dated}${claim.company ? ` on ${claim.company}` : ""}${claim.period ? `, for ${claim.period}` : ""}: ` }, quote(claim)];
+  });
 }
 
 // An inference the judge found unsupported, or flagged as stating an amount

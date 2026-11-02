@@ -7,7 +7,8 @@ import { databaseUrl, IDS, ORIGINAL_REVENUE } from "../../financial-engine/test/
 import type { ChatAnalystToolRuntime, ChatAssistantMessagePersistence } from "../src/coordinator.ts";
 import { financialMessageId } from "../src/chat-ids.ts";
 import { persistUserChatMessage } from "../src/messages.ts";
-import { createChatFinancialRuntime, SCOPE_METRICS } from "../src/financial-runtime.ts";
+import { createChatFinancialRuntime } from "../src/financial-runtime.ts";
+import { SCOPE_METRICS } from "../src/scope-figures.ts";
 import { METRIC_CATALOG_V1, OPERATION_REGISTRY } from "../../financial-core/src/index.ts";
 import { proposedMetric, resolveResearchScope, type CompanyChange, type ScopeProposal } from "../src/research-scope.ts";
 import { parseProposal } from "../src/scope-proposal.ts";

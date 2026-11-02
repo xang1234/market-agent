@@ -35,7 +35,7 @@ import { readingAsks, readsEngine, resolveResearchScope, type ResearchScope, typ
 import { proposeScope } from "./scope-proposal.ts";
 import { frozenDataMode, hydrateYtdBars, marketHydrationOrigin, turnNow } from "./ytd-hydration.ts";
 import { companyListings, listingTimeZones, loadPerfComparisonBlocks, priceListingsForTurn, turnCompanies } from "./perf-block.ts";
-import { loadPriorScope, loadPriorSubjects as loadThreadPriorSubjects, loadRecentConversation } from "./thread-context.ts";
+import { loadPriorCauseClaims, loadPriorScope, loadPriorSubjects as loadThreadPriorSubjects, loadRecentConversation } from "./thread-context.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import { createLlmThreadTitleModel } from "./llm-runtime.ts";
 import { structuredRefsFromHandoff } from "./local-runtime-structured.ts";
@@ -102,6 +102,11 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   const subjectRefs = covered.length > 0
     ? covered.map((subject) => subject.subject_ref)
     : [{ kind: "screen" as const, id: context.threadId }];
+  // An evidence follow-up shows the cause the answer it re-reads quoted (#542).
+  const priorCause = scope.route === "evidence_followup" ? await loadPriorCauseClaims(pool(), { threadId: context.threadId }) : [];
+  // One a read left out is no longer citable (superseded, deleted or revoked
+  // since); a read that failed says nothing about it.
+  let withdrawn = false;
   const registryRuntime = createRegistryBackedAnalystToolRuntime({
     executeTool: async ({ toolName, arguments: args }) => {
       const evidence = await loadEvidenceOrEmpty(pool(), {
@@ -110,7 +115,10 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
         // The route's claims first, none published after the turn's cutoff (#207).
         as_of: asOf,
         selection: claimSelection(scope, asOf),
+        // Ahead of them, the cause the re-read answer quoted.
+        first_claim_ids: priorCause,
       });
+      if (!evidence.unavailable) withdrawn = priorCause.some((claimId) => !evidence.claim_refs.includes(claimId));
       return {
         kind: "local_evidence_tool_result",
         status: "ok",
@@ -138,7 +146,11 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     window ? ytdChart(scope, window, requestedListingsOf(covered), result.snapshot_id, asOf) : Promise.resolve([]),
     loadRecentConversation(pool(), { threadId: context.threadId, limit: CONVERSATION_MESSAGES }),
   ]);
-  const factBlocks = [...performance, ...scopeGapBlocks(scope, { snapshotId: result.snapshot_id, asOf }, await context.reading?.() ?? null)];
+  const factBlocks = [
+    ...performance,
+    ...scopeGapBlocks(scope, { snapshotId: result.snapshot_id, asOf }, await context.reading?.() ?? null),
+    ...(withdrawn ? [noteBlock({ snapshotId: result.snapshot_id, asOf }, "gap:prior_cause", "The explanation quoted earlier is no longer citable.")] : []),
+  ];
   let answeredBy: string | undefined;
   const answerInput: AnswerTraceInput = {
     // Only what the answer reads: the turn context also holds callbacks.
