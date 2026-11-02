@@ -838,7 +838,21 @@ class FakeFundamentalsDb {
           stored_value: fact.value_num === null ? null : String(fact.value_num),
           period_start: fact.period_start,
           period_end: fact.period_end,
+          inference: inferenceOf(fact),
+          // The fake records no precision proofs.
+          proven: false,
         })));
+    }
+    // Inferred facts, which a filing showing noncontrolling interest refutes.
+    if (sql.includes("is not null") && sql.includes("no_noncontrolling_interest")) {
+      return rows(this.facts
+        .filter((fact) => fact.invalidated_at === null && fact.subject_id === values[0] && inferenceOf(fact) !== null)
+        .map(({ fact_id, period_start, period_end }) => ({ fact_id, period_start, period_end })));
+    }
+    // The fake stores no derived facts, so a fact's dependents are none.
+    if (sql.includes("with recursive refuted")) {
+      for (const fact of this.facts) if ((values[1] as string[]).includes(fact.fact_id)) fact.invalidated_at = "now";
+      return rows([]);
     }
     if (sql.includes("update facts") && sql.includes("set invalidated_at")) {
       for (const fact of this.facts) if ((values[0] as string[]).includes(fact.fact_id)) fact.invalidated_at = "now";
@@ -910,6 +924,10 @@ function factRow(metrics: MetricDefinition[], fact: FactRecord) {
     ...fact,
     metric_key: metricKeyFor(metrics, fact.metric_id),
   };
+}
+
+function inferenceOf(fact: FactRecord): unknown {
+  return (fact.quality_flags as Array<{ kind?: unknown }>).find((flag) => flag.kind === "no_noncontrolling_interest") ?? null;
 }
 
 function factFromInsert(values: unknown[]): FactRecord {
