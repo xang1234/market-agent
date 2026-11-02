@@ -120,6 +120,7 @@ test("a route reads its predicate families first, from the start of the period i
     effective_from: "2024-09-01T00:00:00.000Z",
     effective_until: null,
     fiscal_year: null,
+    fiscal_period: null,
   });
   assert.deepEqual(claimSelection(scope("Break down NVDA's segments", [NVDA], proposal({ asks: ["segments"] })), CUTOFF).predicate_prefixes, ["management.explanation.", "segment.", "guidance."]);
   // Management's explanation of what the question asks about comes before its
@@ -229,7 +230,8 @@ test("a route reads its predicate families first, from the start of the period i
   // The issuer's own fiscal year bounds it where its facts date that year.
   assert.equal(fiscal.fiscal_year, 2025);
   assert.equal(claimSelection(scope("What changed in NVDA's gross margin in Q1 fiscal 2026?", [NVDA], GROSS_MARGIN_CHANGE), CUTOFF).effective_until, "2027-04-01T00:00:00.000Z");
-  assert.deepEqual(claimSelection(undefined, CUTOFF), { predicate_prefixes: [], effective_from: null, effective_until: null, fiscal_year: null });
+  assert.equal(fiscal.fiscal_period, null);
+  assert.deepEqual(claimSelection(undefined, CUTOFF), { predicate_prefixes: [], effective_from: null, effective_until: null, fiscal_year: null, fiscal_period: null });
 });
 
 test("claims carry short ids, their company and a stance only their stored polarity gives (#207)", () => {
@@ -311,6 +313,7 @@ test("a price window adds its event predicates to the route's, over the route's 
     effective_from: "2024-09-01T00:00:00.000Z",
     effective_until: null,
     fiscal_year: null,
+    fiscal_period: null,
   });
 });
 
@@ -330,6 +333,8 @@ test("an auto-selected peer's claims name it as coverage does, even with no figu
 test("a named quarter's claims are read from the year before it (#290)", () => {
   const named = scope("Why did AMD's operating margin turn negative in Q2 2025?", [AMD], proposal({ asks: ["explains", "margins"], metrics: ["income_statement"], items: ["operating_income"], period: { kind: "fiscal_quarter", fiscal_period: "Q2", fiscal_year: 2025 } }));
   assert.equal(claimSelection(named, CUTOFF).effective_from, "2024-01-01T00:00:00.000Z");
+  // The issuer's own quarter bounds it where its facts date it (#558).
+  assert.deepEqual([claimSelection(named, CUTOFF).fiscal_year, claimSelection(named, CUTOFF).fiscal_period], [2025, "Q2"]);
 });
 
 test("a price return carries its chart line's series and the chart's sources, and the model sees neither (#317)", () => {

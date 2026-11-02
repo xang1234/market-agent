@@ -3,7 +3,9 @@ import { destroyAfterFailedRollback, logPoolErrors, withPoolClient } from "../..
 
 import {
   emptyEvidence,
+  joinedEvidence,
   loadLocalRuntimeEvidence,
+  loadPeriodClaimEvidence,
   loadVerifierFactsForRefs,
   loadVerifierRowsForRefs,
   lockCitableClaims,
@@ -33,6 +35,7 @@ import {
 import { answerTurn, type AnswerTraceInput } from "./answer-trace.ts";
 import { isUuid, noteBlock } from "./chat-ids.ts";
 import { claimSelection } from "./evidence-packet.ts";
+import { causeFamilies, reReadExplained, type Explained } from "./filed-cause.ts";
 import { readingAsks, readsEngine, resolveResearchScope, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
 import { proposeScope } from "./scope-proposal.ts";
 import { frozenDataMode, hydrateYtdBars, marketHydrationOrigin, turnNow } from "./ytd-hydration.ts";
@@ -69,15 +72,41 @@ export function preResolveSubject(
 export async function loadEvidenceOrEmpty(
   db: QueryExecutor,
   input: LocalRuntimeEvidenceInput,
+  load: (db: QueryExecutor, input: LocalRuntimeEvidenceInput) => Promise<LocalRuntimeEvidence> = loadLocalRuntimeEvidence,
 ): Promise<LocalRuntimeEvidence & { unavailable?: true }> {
   try {
-    return await loadLocalRuntimeEvidence(db, input);
+    return await load(db, input);
   } catch (reason) {
     console.warn("[chat] evidence load failed; serving without research claims", reason);
     // Unavailable, not "none on file": the packet says so (#207), and names
     // nothing the failed read might have held.
     return { ...emptyEvidence(input.subject_refs), unavailable: true };
   }
+}
+
+// Each company's explanations of the figures an engine answer showed, bound to
+// their period (#558), the cause it quoted first; a company whose figures have
+// no one period gets the route's claims.
+async function explainedEvidence(
+  db: QueryExecutor,
+  input: LocalRuntimeEvidenceInput,
+  explained: ReadonlyArray<Explained>,
+): Promise<LocalRuntimeEvidence> {
+  const parts = [];
+  for (const company of explained) {
+    if (company.kind === "none") continue;
+    parts.push(await loadPeriodClaimEvidence(db, {
+      issuer_id: company.issuer,
+      period: company.period,
+      predicate_prefixes: causeFamilies(company.metrics),
+      ...(input.user_id ? { user_id: input.user_id } : {}),
+      ...(input.as_of ? { as_of: input.as_of } : {}),
+      first_claim_ids: input.first_claim_ids ?? [],
+    }));
+  }
+  const unexplained = explained.flatMap((company) => company.kind === "none" ? [{ kind: "issuer" as const, id: company.issuer }] : []);
+  if (unexplained.length > 0) parts.push(await loadLocalRuntimeEvidence(db, { ...input, subject_refs: unexplained }));
+  return joinedEvidence(input.subject_refs, parts);
 }
 
 export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
@@ -104,14 +133,18 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   const subjectRefs = covered.length > 0
     ? covered.map((subject) => subject.subject_ref)
     : [{ kind: "screen" as const, id: context.threadId }];
-  // An evidence follow-up shows the cause the answer it re-reads quoted (#542).
-  const priorCause = scope.route === "evidence_followup" ? await loadPriorCauseClaims(pool(), { threadId: context.threadId }) : [];
+  // An evidence follow-up shows the cause the answer it re-reads quoted (#542),
+  // and, when that answer is the engine's, the explanations of the figures it
+  // showed at their own periods (#558).
+  const followUp = scope.route === "evidence_followup";
+  const priorCause = followUp ? await loadPriorCauseClaims(pool(), { threadId: context.threadId }) : [];
+  const explained = followUp ? (await reReadExplained(pool(), context.threadId))?.filter(({ issuer }) => scoped.has(issuer)) ?? null : null;
   // One a read left out is no longer citable (superseded, deleted or revoked
   // since); a read that failed says nothing about it.
   let withdrawn = false;
   const registryRuntime = createRegistryBackedAnalystToolRuntime({
     executeTool: async ({ toolName, arguments: args }) => {
-      const evidence = await loadEvidenceOrEmpty(pool(), {
+      const read = {
         subject_refs: subjectRefs,
         user_id: context.userId ?? null,
         // The route's claims first, none published after the turn's cutoff (#207).
@@ -119,7 +152,8 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
         selection: claimSelection(scope, asOf),
         // Ahead of them, the cause the re-read answer quoted.
         first_claim_ids: priorCause,
-      });
+      };
+      const evidence = await loadEvidenceOrEmpty(pool(), read, explained ? (db, input) => explainedEvidence(db, input, explained) : undefined);
       if (!evidence.unavailable) withdrawn = priorCause.some((claimId) => !evidence.claim_refs.includes(claimId));
       return {
         kind: "local_evidence_tool_result",

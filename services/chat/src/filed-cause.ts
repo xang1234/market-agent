@@ -13,13 +13,14 @@ import type { FencedTx } from "../../financial-engine/src/lease.ts";
 import { readClosureInputs } from "../../financial-engine/src/read-model.ts";
 import { writeToolCallLog } from "../../observability/src/tool-call.ts";
 import { writeVerifierFailLog } from "../../observability/src/verifier-fail.ts";
-import { isRecord } from "../../shared/src/http.ts";
+import { isRecord, type QueryExecutor } from "../../shared/src/http.ts";
 import { buildClaimBackedSealInput } from "../../snapshot/src/seal-input.ts";
 import { sealSnapshotInTransaction, snapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
 import { stableUuid } from "./chat-ids.ts";
 import { createSealer } from "./prose-refs.ts";
 import { attributionSegments } from "./render-assertions.ts";
 import { INCOME_ITEM_FIGURE, SCOPE_METRICS } from "./scope-figures.ts";
+import { RE_READ_ANSWER_SQL } from "./thread-context.ts";
 import { FISCAL_PERIODS, isOneOf, readingAsks, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
 
 /** Whether a turn asked for a cause and, when it did, whose its answer quotes, by the name it gives each company. */
@@ -207,7 +208,7 @@ export async function filedCauses(
     const explained = explainedFigures({
       plan,
       verified: new Set(answer.block.financial.results.flatMap((result) => result.disposition === "verified" ? [result.output_id] : [])),
-      periods: await boundPeriods(tx, answer.run_id, plan),
+      periods: await boundPeriods(tx.client, tx.run.user_id, answer.run_id, plan),
       named: input.named,
     });
     const read: Array<{ issuer: string; period: string; evidence: LocalRuntimeEvidence }> = [];
@@ -297,10 +298,38 @@ export async function filedCauses(
   }
 }
 
+/**
+ * What the engine answer an evidence follow-up re-reads explains (#558),
+ * derived again from its plan, its verified results and the periods its inputs
+ * bound to: every figure it shows, so the follow-up never depends on a reading
+ * of either question. Null when that answer is not the engine's.
+ */
+export async function reReadExplained(db: QueryExecutor, threadId: string): Promise<Explained[] | null> {
+  const { rows: [answer] } = await db.query<{ run_id: string; user_id: string; plan: FinancialPlanV1; blocks: unknown }>(
+    `select r.run_id::text as run_id, r.user_id::text as user_id, p.plan, answer.blocks
+       from (${RE_READ_ANSWER_SQL}) answer
+       join snapshot_financial_runs sfr on sfr.snapshot_id = answer.snapshot_id
+       join financial_runs r on r.run_id = sfr.run_id
+       join financial_plans p on p.plan_id = r.plan_id and p.user_id = r.user_id
+      order by sfr.run_id
+      limit 1`,
+    [threadId],
+  );
+  if (answer === undefined) return null;
+  const block = (Array.isArray(answer.blocks) ? answer.blocks : []).find((candidate) => isRecord(candidate) && candidate.kind === "financial_answer");
+  const results = isRecord(block) && isRecord(block.financial) && Array.isArray(block.financial.results) ? block.financial.results : [];
+  return explainedFigures({
+    plan: answer.plan,
+    verified: new Set(results.flatMap((result) => isRecord(result) && result.disposition === "verified" && typeof result.output_id === "string" ? [result.output_id] : [])),
+    periods: await boundPeriods(db, answer.user_id, answer.run_id, answer.plan),
+    named: () => true,
+  });
+}
+
 // Each reported node's fiscal period, as its certified input bound it.
-async function boundPeriods(tx: Pick<FencedTx, "client" | "run">, runId: string, plan: FinancialPlanV1): Promise<Map<LocalId, FiscalPeriod>> {
+async function boundPeriods(db: QueryExecutor, ownerUserId: string, runId: string, plan: FinancialPlanV1): Promise<Map<LocalId, FiscalPeriod>> {
   const slots = plan.operations.flatMap((node) => node.operation === "reported_metric" ? [node.node_id] : []);
-  const inputs = await readClosureInputs(tx.client, tx.run.user_id, runId, slots);
+  const inputs = await readClosureInputs(db, ownerUserId, runId, slots);
   return new Map(inputs.flatMap((input) => {
     const period = claimPeriod(input.bound_payload);
     return period === null ? [] : [[input.input_slot, period] as const];

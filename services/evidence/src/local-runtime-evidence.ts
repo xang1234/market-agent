@@ -21,7 +21,7 @@ export type LocalRuntimeEvidenceInput = {
   as_of?: string;
   // A chat route's selection (#207): claims whose predicate starts with one of
   // the prefixes, dated from effective_from on (and before effective_until; for a
-  // fiscal year, within the issuer's own where its facts date it), rank ahead of newer others; a
+  // fiscal year or a quarter of one, within the issuer's own where its facts date it), rank ahead of newer others; a
   // claim repeated (same company, predicate and text) counts once; and stored
   // contradiction relations among the selected are returned. The prefixes are
   // a priority, in order; a group of them shares one.
@@ -30,6 +30,8 @@ export type LocalRuntimeEvidenceInput = {
     effective_from: string | null;
     effective_until?: string | null;
     fiscal_year?: number | null;
+    // A quarter of fiscal_year (#558).
+    fiscal_period?: "Q1" | "Q2" | "Q3" | "Q4" | null;
   };
 };
 
@@ -136,17 +138,18 @@ export async function loadLocalRuntimeEvidence(
          join instruments ins on ins.instrument_id = ir.subject_id
         where ir.subject_kind = 'instrument'
      ),
-     -- The fiscal year asked about, as each covered issuer's facts known at the
-     -- cutoff date it. Its end is where any of its figures places it: quarter n
-     -- (discrete or year-to-date) ends 3 * (4 - n) months
-     -- before it, so a year in progress ends where it will, not with its latest
-     -- quarter; it started a year before. ponytail: a 52/53-week year can be a
-     -- few days off.
+     -- The fiscal year asked about, or its quarter m, as each covered issuer's
+     -- facts known at the cutoff date it. Its end is where any of its figures
+     -- places it: quarter n (discrete or year-to-date) ends 3 * (m - n) months
+     -- before it (m is 4 for the year), so a year in progress ends where it
+     -- will, not with its latest quarter; it started a year (a quarter) before.
+     -- ponytail: a 52/53-week year can be a few days off.
      fiscal_years as (
-       select y.subject_kind, y.subject_id, y.ends - interval '1 year' as starts, y.ends
+       select y.subject_kind, y.subject_id, y.ends - case when $15::text is null then interval '1 year' else interval '3 months' end as starts, y.ends
          from (
            select f.subject_kind, f.subject_id,
-                  max(f.period_end + make_interval(months => 3 * (4 - coalesce(substring(f.fiscal_period from '^Q([1-4])$')::int, 4))))
+                  max(f.period_end + make_interval(months => 3 * (
+                    coalesce(substring($15::text from '^Q([1-4])$')::int, 4) - coalesce(substring(f.fiscal_period from '^Q([1-4])$')::int, 4))))
                     as ends
              from subject_refs sr
              join facts f
@@ -186,10 +189,11 @@ export async function loadLocalRuntimeEvidence(
               coalesce(c.predicate like any($8::text[]), false)
                 and case
                   -- The releases about a fiscal year come out from the end of
-                  -- its first quarter until a quarter after it ends. Its
-                  -- guidance is given during it: the full year's with the last
-                  -- year's results, just after it starts; the next year's,
-                  -- after it ends, is not its.
+                  -- its first quarter until a quarter after it ends (a
+                  -- quarter's, in the quarter after it). Its guidance is given
+                  -- during it: the full year's with the last year's results,
+                  -- just after it starts; the next year's, after it ends, is
+                  -- not its.
                   when fy.ends is not null and c.predicate like 'guidance.%' then
                     coalesce(c.effective_time, d.published_at, c.created_at) >= fy.starts
                     and coalesce(c.effective_time, d.published_at, c.created_at) < fy.ends
@@ -308,6 +312,7 @@ export async function loadLocalRuntimeEvidence(
       selected?.tiers ?? null,
       input.selection?.fiscal_year ?? null,
       firstClaimIds,
+      input.selection?.fiscal_year == null ? null : input.selection.fiscal_period ?? null,
     ],
   );
   const evidence = evidenceFromClaimRows(subjectRefs, rows.slice(0, limit), input.selection !== undefined);
@@ -329,6 +334,9 @@ export type PeriodClaimLookup = {
   user_id?: string | null;
   as_of?: string;
   exclude_claim_ids?: ReadonlyArray<string>;
+  // Claims that come first, in this order, past the limit if need be; one the
+  // period does not bind, or no longer citable, is left out as any other is.
+  first_claim_ids?: ReadonlyArray<string>;
   limit?: number;
 };
 
@@ -343,6 +351,7 @@ export async function loadPeriodClaimEvidence(
   const subjectRefs = normalizeSubjectRefs([{ kind: "issuer", id: input.issuer_id }]);
   if (subjectRefs.length === 0) return emptyEvidence(subjectRefs);
   const { patterns, tiers } = prefixPatterns(input.predicate_prefixes);
+  const firstClaimIds = unique(input.first_claim_ids ?? []);
   const { rows } = await db.query<ClaimEvidenceRow>(
     `with bound as (
        -- A repeat is the same predicate and text (case-insensitive), however
@@ -395,11 +404,11 @@ export async function loadPeriodClaimEvidence(
      )
      select *
        from bound
-      order by tier, dated desc, claim_id
+      order by array_position($10::uuid[], claim_id::uuid) nulls last, tier, dated desc, claim_id
       limit $2::int`,
     [
       subjectRefs[0]!.id,
-      input.limit ?? 5,
+      Math.max(input.limit ?? 5, firstClaimIds.length),
       patterns,
       tiers,
       input.period.kind,
@@ -407,9 +416,30 @@ export async function loadPeriodClaimEvidence(
       input.as_of ?? null,
       unique(input.exclude_claim_ids ?? []),
       userIdOrNull(input.user_id),
+      firstClaimIds,
     ],
   );
   return evidenceFromClaimRows(subjectRefs, rows, true);
+}
+
+// Several reads as one, their claims in order, each once.
+export function joinedEvidence(subjectRefs: ReadonlyArray<SnapshotSubjectRef>, parts: ReadonlyArray<LocalRuntimeEvidence>): LocalRuntimeEvidence {
+  const claims = [...new Map(parts.flatMap((part) => part.claims).map((claim) => [claim.claim_id, claim])).values()];
+  const documents = [...new Map(parts.flatMap((part) => part.verifier_documents).map((document) => [document.document_id, document])).values()];
+  const sourceIds = unique([...claims.map((claim) => claim.source_id), ...documents.map((document) => document.source_id)]);
+  const contradictions = parts.flatMap((part) => part.contradictions ?? []);
+  return Object.freeze({
+    claims: Object.freeze(claims),
+    ...(parts.some((part) => part.truncated) ? { truncated: true } : {}),
+    ...(contradictions.length > 0 ? { contradictions: Object.freeze(contradictions) } : {}),
+    source_ids: Object.freeze(sourceIds),
+    document_refs: Object.freeze(unique(claims.map((claim) => claim.document_id))),
+    claim_refs: Object.freeze(claims.map((claim) => claim.claim_id)),
+    subject_refs: Object.freeze([...subjectRefs]),
+    verifier_sources: Object.freeze(sourceIds.map((source_id) => Object.freeze({ source_id }))),
+    verifier_documents: Object.freeze(documents),
+    verifier_claims: Object.freeze(claims.map((claim) => Object.freeze({ claim_id: claim.claim_id, source_id: claim.source_id }))),
+  });
 }
 
 // Of these claims, the ones a reader may still cite, share-locked inside the

@@ -13,7 +13,7 @@
 
 import { dependencyClosure, type FinancialAnswerContent, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
 import { returnLabel } from "../../market/src/perf-points.ts";
-import { QUARTERS_SHOWN, type ResearchScope } from "./research-scope.ts";
+import { QUARTERS_SHOWN, type ResearchScope, type ScopeQuarter } from "./research-scope.ts";
 import { isRecord } from "../../shared/src/http.ts";
 
 type Block = Record<string, unknown>;
@@ -154,7 +154,7 @@ export function claimSelection(
   scope: ResearchScope | undefined,
   cutoff: string,
 ): ClaimSelection {
-  if (!scope) return { predicate_prefixes: [], effective_from: null, effective_until: null, fiscal_year: null };
+  if (!scope) return { predicate_prefixes: [], effective_from: null, effective_until: null, fiscal_year: null, fiscal_period: null };
   const route = ROUTE_PREDICATES[scope.reads] ?? [];
   // Management's explanation of what the question asks about comes before its
   // other explanations: one release can hold more of them than the claim limit.
@@ -192,6 +192,9 @@ export function claimSelection(
     // are the fallback.
     effective_until: scope.fiscal_year !== null ? `${scope.fiscal_year + 1}-04-01T00:00:00.000Z` : null,
     fiscal_year: scope.fiscal_year,
+    // A named quarter of that year is read in the issuer's quarter after it,
+    // so a later quarter's release does not rank with its own (#558).
+    fiscal_period: scope.fiscal_year !== null && scope.fiscal_quarter?.fiscal_year === scope.fiscal_year ? scope.fiscal_quarter.fiscal_period : null,
   };
 }
 
@@ -201,6 +204,7 @@ type ClaimSelection = {
   effective_from: string | null;
   effective_until: string | null;
   fiscal_year: number | null;
+  fiscal_period: ScopeQuarter["fiscal_period"] | null;
 };
 
 // The metrics, in earnings-release terms (sec-earnings-release-extraction.ts),
