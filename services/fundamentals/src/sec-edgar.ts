@@ -240,9 +240,8 @@ export const US_GAAP_TO_METRIC_KEY: Readonly<Record<string, string>> = {
   OperatingExpenses: "operating_expenses",
   OperatingIncomeLoss: "operating_income",
 
-  // Net income: attributable to the parent, and including noncontrolling interest
+  // Net income attributable to the parent
   NetIncomeLoss: "net_income",
-  ProfitLoss: "net_income_consolidated",
 
   // EPS
   EarningsPerShareBasic: "eps_basic",
@@ -268,6 +267,11 @@ export const US_GAAP_TO_METRIC_KEY: Readonly<Record<string, string>> = {
   // ponytail: no total_debt. Filers split debt across LongTermDebt, its current and
   // noncurrent parts, and commercial paper; summing tags is a definition, not a
   // reported figure. Add it with a reviewed debt definition.
+
+  // Net income including noncontrolling interest, last: one whose period
+  // disagrees is dropped alone, so it is never the value the others are
+  // checked against.
+  ProfitLoss: "net_income_consolidated",
 };
 
 const UNIT_TO_LINE_UNIT: Readonly<Record<string, { unit: string; currency?: string }>> = {
@@ -382,11 +386,11 @@ export function extractStatementWithTokens(input: ExtractStatementInput): {
   let resolvedPeriodEnd: string | null = null;
 
   const conceptOf = new Map<string, string>();
-  const dropped = new Set<string>();
+  let consolidatedDropped = false;
   // Walk the MAPPING in declared order (not the response): this fixes the
   // collision policy at code-defined priority. First-mapped concept that
   // has a matching value wins.
-  for (const [conceptName, metricKey] of SELECTION_ORDER) {
+  for (const [conceptName, metricKey] of Object.entries(US_GAAP_TO_METRIC_KEY)) {
     if (!familyKeys.has(metricKey)) continue;
     if (seenKeys.has(metricKey)) continue;
     const concept = usGaap[conceptName];
@@ -409,8 +413,8 @@ export function extractStatementWithTokens(input: ExtractStatementInput): {
         match.end !== resolvedPeriodEnd ||
         (match.start ?? null) !== resolvedPeriodStart
       ) {
-        if (PERIOD_OPTIONAL_KEYS.has(metricKey)) {
-          dropped.add(metricKey);
+        if (metricKey === "net_income_consolidated") {
+          consolidatedDropped = true;
           break;
         }
         throw new Error(
@@ -460,7 +464,7 @@ export function extractStatementWithTokens(input: ExtractStatementInput): {
   const standIns = [["net_income", "net_income_consolidated"], ["net_income_consolidated", "net_income"]] as const;
   for (const [from, to] of standIns) {
     const line = lines.find((candidate) => candidate.metric_key === from);
-    if (!line || seenKeys.has(to) || dropped.has(to) || reportsNoncontrollingInterest(usGaap, resolvedPeriodStart, resolvedPeriodEnd)) continue;
+    if (!line || seenKeys.has(to) || (to === "net_income_consolidated" && consolidatedDropped) || reportsNoncontrollingInterest(usGaap, resolvedPeriodStart, resolvedPeriodEnd)) continue;
     lines.push({ ...line, metric_key: to });
     const token = tokens.get(from);
     if (token) tokens.set(to, token);
@@ -501,13 +505,6 @@ export function extractStatementWithTokens(input: ExtractStatementInput): {
   };
   return { statement, tokens, derivations, inferences };
 }
-
-// Selection walks the mapping in its declared order, except that consolidated
-// net income comes last: a ProfitLoss whose period disagrees is dropped
-// alone, so it must never be the value the others are checked against.
-const PERIOD_OPTIONAL_KEYS: ReadonlySet<string> = new Set(["net_income_consolidated"]);
-const SELECTION_ORDER = Object.entries(US_GAAP_TO_METRIC_KEY)
-  .sort(([, left], [, right]) => Number(PERIOD_OPTIONAL_KEYS.has(left)) - Number(PERIOD_OPTIONAL_KEYS.has(right)));
 
 /**
  * A nonzero value of any of these over a span that overlaps a period, from
