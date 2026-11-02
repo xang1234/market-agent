@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import {
   createMetricRegistry,
   mapStatement,
@@ -11,6 +12,7 @@ import {
   buildSecSource,
   fetchCompanyFacts,
   extractStatementWithTokens,
+  reportsNoncontrollingInterest,
   SecEdgarFetchError,
   SEC_COVER_COUNT_CONCEPT,
   SEC_INCOME_METRIC_KEYS,
@@ -32,6 +34,7 @@ import {
   type SecSourceToken,
   type SecValueLocation,
 } from "./sec-edgar.ts";
+import type { NoncontrollingInterestInferenceV1 } from "../../financial-core/src/contracts.ts";
 import { resolveMetricDefinition } from "../../financial-core/src/definitions.ts";
 import type { ShareBasis } from "../../financial-core/src/evidence-vocabulary.ts";
 import { explainedBySplits, splitHistoryCovers, splitsRestate } from "../../financial-core/src/split-adjustment.ts";
@@ -314,6 +317,7 @@ type Extracted = {
   statement: NormalizedStatement;
   tokens: ReadonlyMap<string, SecSourceToken>;
   derivations: ReadonlyMap<string, SecDerivation>;
+  inferences: ReadonlyMap<string, NoncontrollingInterestInferenceV1>;
 };
 
 type IngestInput = {
@@ -446,6 +450,7 @@ async function storeFiling(
         cik: input.cik,
         tokens: entry.tokens,
         derivations: entry.derivations,
+        inferences: entry.inferences,
         retrievedAt: asOf,
         logger: input.logger,
       });
@@ -466,6 +471,7 @@ async function storeFiling(
         logger: input.logger,
       });
     }
+    await retireRefutedInferences(client, input.issuerId, input.fetched.facts);
     await recordSecRestatements(client, {
       facts: input.fetched.facts,
       cik: input.cik,
@@ -493,16 +499,18 @@ function mapSecStatement(registry: MetricRegistry, statement: NormalizedStatemen
 }
 
 // The stored, active SEC facts for a statement's period that the filing
-// contradicts, their ids by metric_key: a metric the statement has, with another value
-// or dates; or one of its family the statement lacks, dated for another
-// period (the old selector's comparative, with nothing to replace it). A value
-// is compared with its token as a precision proof compares them, since one
-// stored from a JS number may round it.
+// contradicts, their ids by metric_key: a metric the statement has, with another value,
+// dates or inference basis; or one of its family the statement lacks, dated for
+// another period (the old selector's comparative, with nothing to replace it),
+// inferred, or an unproven net income (#342: ingestion once stored ProfitLoss
+// as net income, with no proof, and no longer yields it where the filer reports
+// a noncontrolling interest). A value is compared with its token as a precision
+// proof compares them, since one stored from a JS number may round it.
 async function staleStatementFacts(
   db: FundamentalsQueryExecutor,
   issuerId: UUID,
   cik: number,
-  { statement, tokens, derivations }: Extracted,
+  { statement, tokens, derivations, inferences }: Extracted,
 ): Promise<Map<string, string[]>> {
   const { rows } = await db.query<{
     fact_id: string;
@@ -510,11 +518,15 @@ async function staleStatementFacts(
     stored_value: string | null;
     period_start: string | null;
     period_end: string;
+    inference: NoncontrollingInterestInferenceV1 | null;
+    proven: boolean;
   }>(
     // Dates as text: pg reads a date column as a local-time Date, which can
     // shift a day when written back as ISO.
     `select f.fact_id::text as fact_id, m.metric_key, f.value_num::text as stored_value,
-            f.period_start::text as period_start, f.period_end::text as period_end
+            f.period_start::text as period_start, f.period_end::text as period_end, ${INFERENCE_SQL} as inference,
+            exists (select 1 from current_fact_precision_attestations a
+                     where a.fact_id = f.fact_id and a.precision_class <> 'legacy_unverified') as proven
        from facts f
        join metrics m on m.metric_id = f.metric_id
        join sources s on s.source_id = f.source_id
@@ -539,14 +551,16 @@ async function staleStatementFacts(
     const otherValue = exact
       ? checkTokenAgainstStoredValue(exact, row.stored_value).status !== "match"
       : (row.stored_value === null ? null : Number(row.stored_value)) !== line?.value_num;
-    const contradicted = otherDates || (line !== undefined && otherValue);
+    const otherBasis = !isDeepStrictEqual(row.inference, inferences.get(row.metric_key) ?? null);
+    const unreproduced = line === undefined && (row.inference !== null || (row.metric_key === "net_income" && !row.proven));
+    const contradicted = otherDates || (line !== undefined && (otherValue || otherBasis)) || unreproduced;
     if (contradicted) stale.set(row.metric_key, [...(stale.get(row.metric_key) ?? []), row.fact_id]);
   }
   return stale;
 }
 
 function extracted(result: ReturnType<typeof extractStatementWithTokens>): Extracted {
-  return { statement: normalizedStatement(result.statement), tokens: result.tokens, derivations: result.derivations };
+  return { statement: normalizedStatement(result.statement), tokens: result.tokens, derivations: result.derivations, inferences: result.inferences };
 }
 
 // The statements of these families for the filing being ingested. A filer that
@@ -1007,6 +1021,7 @@ async function persistStatementFacts(
     cik: number;
     tokens: ReadonlyMap<string, SecSourceToken>;
     derivations?: ReadonlyMap<string, SecDerivation>;
+    inferences?: ReadonlyMap<string, NoncontrollingInterestInferenceV1>;
     retrievedAt?: string;
     certify?: boolean;
     logger: Pick<Console, "warn">;
@@ -1043,9 +1058,11 @@ async function persistStatementFacts(
           source_locator: proven.locator,
           validation_method: "sec_companyfacts_period_difference.v1",
         };
-    const qualityFlags = derivation
-      ? [await derivationLineage(db, derivation, provenance.cik, provenance.retrievedAt ?? clock().toISOString())]
-      : [];
+    const inference = provenance.inferences?.get(line.metric_key) ?? null;
+    const qualityFlags = [
+      ...(derivation ? [await derivationLineage(db, derivation, provenance.cik, provenance.retrievedAt ?? clock().toISOString())] : []),
+      ...(inference ? [inference] : []),
+    ];
     const inserted = await db.query<{ fact_id: string }>(
       `insert into facts (
          subject_kind, subject_id, metric_id, period_kind, period_start,
@@ -1085,7 +1102,7 @@ async function persistStatementFacts(
     if (factId) insertedIds.set(line.metric_key, factId);
     const exact = token ? { value: token.token, at: token } : proven && { value: proven.sum, at: proven.at };
     if (!attestation || !exact) continue;
-    const storedId = factId ?? await lockStoredExactFact(db, statement, line, exact.value);
+    const storedId = factId ?? await lockStoredExactFact(db, statement, line, exact.value, inference);
     if (!storedId) continue;
     if (factId || !(await hasProvenPrecision(db, storedId))) {
       await recordFactPrecisionAttestation(db, attestation.precision_class === "source_token_preserved" && !factId
@@ -1104,12 +1121,14 @@ type FactBatch = Pick<
 >;
 
 // The caller reads the fact's proof in a later statement, which sees a proof
-// a concurrent ingestion committed while this lock waited.
+// a concurrent ingestion committed while this lock waited. A stored fact with
+// another inference basis is another claim, never proven by this line.
 async function lockStoredExactFact(
   db: FundamentalsQueryExecutor,
   statement: FactBatch,
   line: MappedStatement["lines"][number],
   value: string,
+  inference: NoncontrollingInterestInferenceV1 | null,
 ): Promise<string | null> {
   const { rows } = await db.query<{ fact_id: string }>(
     `select f.fact_id::text as fact_id
@@ -1118,6 +1137,7 @@ async function lockStoredExactFact(
         and f.fiscal_year = $4 and f.fiscal_period = $5 and f.source_id = $6 and f.method = 'reported'
         and ${factActiveSql("f")}
         and f.period_start is not distinct from $7::date and f.period_end = $8::date and f.value_num = $9::numeric
+        and ${INFERENCE_SQL} is not distinct from $10::jsonb
       for update`,
     [
       statement.subject.id,
@@ -1129,6 +1149,7 @@ async function lockStoredExactFact(
       statement.period_start,
       statement.period_end,
       value,
+      inference === null ? null : JSON.stringify(inference),
     ],
   );
   return rows[0]?.fact_id ?? null;
@@ -1157,6 +1178,30 @@ function secSplitBasis(metricKey: string, token: SecValueLocation) {
     as_filed_on: definition.value_kind === "share_count" ? token.end : token.filed,
     share_basis: definition.share_basis,
   } as const;
+}
+
+// A fact's no_noncontrolling_interest inference (#342), or null.
+const INFERENCE_SQL = `jsonb_path_query_first(f.quality_flags, '$[*] ? (@.kind == "no_noncontrolling_interest")')`;
+
+// An inferred figure holds only while no filing shows a noncontrolling
+// interest for its period (#342). Any download can be the first to show one,
+// for any period on file, so every filing's transaction checks them all.
+async function retireRefutedInferences(db: FundamentalsQueryExecutor, issuerId: UUID, facts: SecCompanyFacts): Promise<void> {
+  const usGaap = facts.facts["us-gaap"];
+  if (!usGaap) return;
+  const { rows } = await db.query<{ fact_id: string; period_start: string | null; period_end: string }>(
+    `select f.fact_id::text as fact_id, f.period_start::text as period_start, f.period_end::text as period_end
+       from facts f
+       join sources s on s.source_id = f.source_id
+      where f.subject_kind = 'issuer' and f.subject_id = $1 and s.provider = 'sec_edgar'
+        and ${factActiveSql("f")}
+        and ${INFERENCE_SQL} is not null`,
+    [issuerId],
+  );
+  const refuted = rows.filter((row) => reportsNoncontrollingInterest(usGaap, row.period_start, row.period_end)).map((row) => row.fact_id);
+  if (refuted.length > 0) {
+    await db.query(`update facts set invalidated_at = now(), updated_at = now() where fact_id = any($1::uuid[])`, [refuted]);
+  }
 }
 
 const SEC_CONTEXT_VERSION = "sec_companyfacts_context.v1";
@@ -1264,7 +1309,7 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
     `select f.fact_id::text as fact_id, f.metric_id::text as metric_id, m.metric_key, f.period_kind::text as period_kind,
             f.period_start::text as period_start, f.period_end::text as period_end, f.fiscal_year,
             f.value_num::text as value, f.unit, f.currency, f.scale::text as scale, c.source_context_ref,
-            c.as_filed_on::text as as_filed_on, c.share_basis
+            c.as_filed_on::text as as_filed_on, c.share_basis, ${INFERENCE_SQL} as inference
        from facts f
        join metrics m on m.metric_id = f.metric_id
        join fact_financial_contexts c on c.fact_id = f.fact_id
@@ -1347,6 +1392,8 @@ type SecOriginal = {
   source_context_ref: string | null;
   as_filed_on: string | null;
   share_basis: ShareBasis;
+  // A later filing's figure stands in on the same basis as the original's.
+  inference: NoncontrollingInterestInferenceV1 | null;
 };
 
 /** A figure as a filing states it, and the filing date whose split basis it is on: null for a value splits do not move. */
@@ -1412,10 +1459,10 @@ async function storeLaterStatement(
     `insert into facts (
        subject_kind, subject_id, metric_id, period_kind, period_start, period_end, fiscal_year, fiscal_period,
        value_num, unit, currency, scale, as_of, reported_at, observed_at, source_id, method, definition_version,
-       verification_status, freshness_class, coverage_level, confidence, supersedes
+       verification_status, freshness_class, coverage_level, confidence, supersedes, quality_flags
      ) values (
        'issuer', $1, $2, $3, $4, $5, $6, 'FY', $7, $8, $9, $10, $11, $15, $12, $13, 'restated', 1,
-       'authoritative', 'filing_time', 'full', 1, $14
+       'authoritative', 'filing_time', 'full', 1, $14, $16::jsonb
      )
      on conflict do nothing
      returning fact_id::text as fact_id`,
@@ -1423,6 +1470,7 @@ async function storeLaterStatement(
       input.issuerId, original.metric_id, original.period_kind, original.period_start, original.period_end, original.fiscal_year,
       token.token, original.unit, original.currency, original.scale, asOf, input.clock().toISOString(), sourceId, original.fact_id,
       later.filed,
+      JSON.stringify(original.inference ? [original.inference] : []),
     ],
   );
   // The restating filing need not be the one this ingest is for; this
