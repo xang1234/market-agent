@@ -937,10 +937,14 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const documentId = await guidanceDocument();
     process.env.JUDGE_LITELLM_MODEL = GOLDEN_ENV.LITELLM_MODEL;
     try {
-      const { answer } = await guidanceTurnChangedBeforeItsSeal("AMD guidance, its document deleted", async (other) => {
+      const { answer, events } = await guidanceTurnChangedBeforeItsSeal("AMD guidance, its document deleted", async (other) => {
         await other.query(`update documents set deleted_at = now() where document_id = $1::uuid`, [documentId]);
       });
       await quotesOnlyCitableClaims(answer, QUOTED_CLAIM_WITHDRAWN);
+      const shown = events.filter((event) => event.event === "answer.shown").map((event) => (event.data as { blocks: Block[] }).blocks);
+      assert.ok(shown.length > 0, "the judge's verdicts are shown as they settle");
+      assert.deepEqual(shown.map((blocks) => blocks.map(narrativeText)), shown.map(() => answer.blocks.map(narrativeText)), "each verdict shows the answer saved, not the claim it left out");
+      assert.deepEqual(shown.flatMap((blocks) => blocks.flatMap(refsOf)), [], "no verdict shown cites the claim left out");
     } finally {
       delete process.env.JUDGE_LITELLM_MODEL;
       await client.query(`update documents set deleted_at = null where document_id = $1::uuid`, [documentId]);
@@ -1023,7 +1027,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
   // A turn on AMD's guidance, `change` committed by another session after
   // the turn reads its claims and before its seal: the turn logs its read in
   // between, and there waits on a lock that session holds.
-  async function guidanceTurnChangedBeforeItsSeal(title: string, change: (other: Client) => Promise<void>): Promise<{ answer: ChatMessage }> {
+  async function guidanceTurnChangedBeforeItsSeal(title: string, change: (other: Client) => Promise<void>): Promise<{ answer: ChatMessage; events: ParsedSseEvent[] }> {
     const other = await connectedClient(t, databaseUrl);
     await client.query(`create function analyst_read_logged() returns trigger language plpgsql as $$ begin perform pg_advisory_xact_lock(557); return new; end $$`);
     await client.query(`create trigger analyst_read_logged before insert on tool_call_logs for each row when (new.tool_name <> 'resolver.search_to_subject_flow') execute function analyst_read_logged()`);
@@ -1034,8 +1038,9 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
       await waitingOnLock(client, "insert into tool_call_logs");
       await change(other);
       await other.query("select pg_advisory_unlock(557)");
-      completedTurn(await turn);
-      return { answer: await latestAssistantMessage(base, guidanceThread.thread_id) };
+      const events = await turn;
+      completedTurn(events);
+      return { answer: await latestAssistantMessage(base, guidanceThread.thread_id), events };
     } finally {
       await other.query("select pg_advisory_unlock_all()");
       await client.query(`drop trigger analyst_read_logged on tool_call_logs`);
