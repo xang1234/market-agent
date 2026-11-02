@@ -406,3 +406,23 @@ test("an ingest of an older download leaves the consolidated figure a newer one 
     [["70", false, inferred("NetIncomeLoss")], ["75", true, []]],
   );
 });
+
+test("a filed date after the download was fetched does not stop later downloads inferring (#342)", { timeout: 180_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for SEC ingestion coverage");
+    return;
+  }
+  const { download, lookup, netIncome } = await setUp(t, "fin-sec-ni-future-filed");
+  const facts = { Revenues: [year(2023, 2023, 500)], NetIncomeLoss: [year(2023, 2023, 70)] };
+  download.text = companyFacts({ ...facts, Assets: [{ ...yearEnd(2023, 2023, 1), filed: "2099-01-01" }] });
+  await lookup(2023);
+  download.text = companyFacts({
+    Revenues: [...facts.Revenues, year(2024, 2024, 600)],
+    NetIncomeLoss: [...facts.NetIncomeLoss, year(2024, 2024, 80)],
+  });
+  await lookup(2024);
+  const consolidated = (await netIncome())
+    .filter((row) => row.metric_key === "net_income_consolidated")
+    .map(({ fiscal_year, value, active }) => [fiscal_year, value, active]);
+  assert.deepEqual(consolidated, [[2023, "70", true], [2024, "80", true]]);
+});
