@@ -178,7 +178,10 @@ filing's cash flow and balance sheet are extracted from it and stored in the sam
   (`backfillSecCompanionStatements`), paced under SEC's fair-access rate. It also **repairs** the income statement: a
   stored fact whose value or dates differ from the filing (written by the old selector) is invalidated, the filing's
   fact is stored, and the old one is `superseded_by` it, in the filing's transaction. A stored income fact whose metric
-  the filing no longer yields for the period is invalidated too when its dates are another period's. A snapshot cut before the repair
+  the filing no longer yields for the period is invalidated too when its dates are another period's, when it is
+  inferred, or when it is an unproven net income (#342: ingestion once stored `ProfitLoss` there). A stored fact whose
+  `no_noncontrolling_interest` inference differs from the filing's line is replaced like one with another value, and a
+  fact retired either way takes every fact derived from it (`input_fact_ids`) with it. A snapshot cut before the repair
   still reads the old fact (`factActiveSql` judges activity at the cutoff). A rerun keeps a matching fact's value, and
   one with no proven precision gains a `revalidated_against_source` proof, or a `derived_from_source_tokens` one for a
   derived quarter whose value equals its derivation (`persistStatementFacts`, `services/fundamentals/src/sec-facts-repository.ts`). The CLI skips the frozen golden dataset's issuers.

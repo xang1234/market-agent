@@ -113,11 +113,21 @@ npm test         # contract + AAPL FY2024 income statement verification
   statements but gets no context, since that concept adds purchased
   intangibles. Operating cash flow is certified only from the total
   `NetCashProvidedByUsedInOperatingActivities`, the scope capex covers;
-  the continuing-operations line gets no context. Net income is only
+  the continuing-operations line gets no context. Net income is
   `NetIncomeLoss`, attributable to the parent. `ProfitLoss`, which adds
-  noncontrolling interest, is `net_income_consolidated`; for a period
-  with no `ProfitLoss` and no noncontrolling-interest value, that key is
-  `NetIncomeLoss`'s figure (#342). A balance is certified
+  noncontrolling interest, is `net_income_consolidated`, the denominator
+  of cash conversion (#342). For a period the filer reports no
+  noncontrolling interest for, the two are one figure, so either one
+  stands in for the other, certified with a `no_noncontrolling_interest`
+  inference in its `quality_flags` that the inspectors show ("Equal to
+  NetIncomeLoss: the filer reports no noncontrolling interest for this
+  period."). The concepts checked are `SEC_NONCONTROLLING_INTEREST_CONCEPTS`
+  (`src/sec-edgar.ts`) over spans overlapping the period, and equity
+  including noncontrolling interest that differs from the parent's at
+  an instant inside it. Every ingestion invalidates an inferred fact
+  once the download shows a noncontrolling interest for its period. A
+  `ProfitLoss` whose period disagrees with the statement's is dropped
+  alone. A balance is certified
   only from a 10-K: the statement contract labels every balance `FY` of
   its fiscal year, so a 10-Q balance is stored as `FY` at the quarter's
   end, and it appears in statements but gets no context.
