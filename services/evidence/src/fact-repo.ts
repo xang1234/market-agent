@@ -8,6 +8,7 @@ import {
   assertUuidV4,
 } from "./validators.ts";
 import { PROMOTION_VERIFICATION_STATUSES, type PromotionVerificationStatus } from "./promotion-rules.ts";
+import { withPoolClient } from "../../shared/src/pool-client.ts";
 
 export const FACT_SUBJECT_KINDS = Object.freeze([
   "issuer",
@@ -476,16 +477,7 @@ export async function supersedeFactWithPool(
   supersededFactId: string,
   input: FactInput,
 ): Promise<SupersedeFactResult> {
-  const client = await pool.connect();
-  let destroyClient = false;
-  try {
-    return await supersedeFact(client, supersededFactId, input);
-  } catch (error) {
-    destroyClient = isConnectionError(error);
-    throw error;
-  } finally {
-    client.release(destroyClient);
-  }
+  return withPoolClient(pool, (client) => supersedeFact(client, supersededFactId, input), isConnectionError);
 }
 
 export async function queueFactReview(
@@ -764,16 +756,7 @@ async function withFactReviewClient<T>(
   pool: FactClientPool,
   action: (client: FactPoolClient) => Promise<T>,
 ): Promise<T> {
-  const client = await pool.connect();
-  let destroyClient = false;
-  try {
-    return await action(client);
-  } catch (error) {
-    destroyClient = isConnectionError(error);
-    throw error;
-  } finally {
-    client.release(destroyClient);
-  }
+  return withPoolClient(pool, action, isConnectionError);
 }
 
 async function lockQueuedFactReview(db: QueryExecutor, reviewId: string): Promise<FactReviewQueueRow> {

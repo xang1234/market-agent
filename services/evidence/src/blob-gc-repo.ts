@@ -4,6 +4,7 @@ import { assertUuidV4 } from "./validators.ts";
 import { deleteSnapshotIfUnreachable } from "./snapshot-reachability.ts";
 import { deleteUnreferencedCampaignExactQuoteClaims } from "./campaign-quote-lifecycle.ts";
 import { errorMessage } from "../../shared/src/http.ts";
+import { withPoolClient } from "../../shared/src/pool-client.ts";
 
 type DiscoveryLifecycleRows = { snapshot_ids: string[]; tool_call_ids: string[]; quote_claim_ids: string[] };
 
@@ -193,16 +194,7 @@ export async function deleteUserAndQueueObjectBlobsWithPool(
   pool: ObjectBlobGcClientPool,
   userId: string,
 ): Promise<DeleteUserBlobQueueResult> {
-  const client = await pool.connect();
-  let destroyClient = false;
-  try {
-    return await deleteUserAndQueueObjectBlobs(objectBlobGcTransactionClient(client), userId);
-  } catch (error) {
-    destroyClient = true;
-    throw error;
-  } finally {
-    client.release(destroyClient);
-  }
+  return withPoolClient(pool, (client) => deleteUserAndQueueObjectBlobs(objectBlobGcTransactionClient(client), userId), () => true);
 }
 
 export async function runObjectBlobGcBatch(
@@ -291,16 +283,7 @@ export async function runObjectBlobGcBatchWithPool(
   objectStore: ObjectStore,
   options: ObjectBlobGcBatchOptions = {},
 ): Promise<ObjectBlobGcBatchResult> {
-  const client = await pool.connect();
-  let destroyClient = false;
-  try {
-    return await runObjectBlobGcBatch(objectBlobGcTransactionClient(client), objectStore, options);
-  } catch (error) {
-    destroyClient = true;
-    throw error;
-  } finally {
-    client.release(destroyClient);
-  }
+  return withPoolClient(pool, (client) => runObjectBlobGcBatch(objectBlobGcTransactionClient(client), objectStore, options), () => true);
 }
 
 export function createObjectBlobGcWorker(config: ObjectBlobGcWorkerConfig): ObjectBlobGcWorker {

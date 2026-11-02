@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import { logPoolErrors } from "../../shared/src/pool-client.ts";
 
 import { createEvidenceReviewServer } from "./review-http.ts";
 
@@ -10,7 +11,7 @@ if (!databaseUrl) {
   throw new Error("DATABASE_URL is required for evidence dev server");
 }
 
-const pool = new Pool({ connectionString: databaseUrl });
+const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
 const server = createEvidenceReviewServer(pool);
 
 server.listen(port, host, () => {

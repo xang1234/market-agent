@@ -11,6 +11,7 @@
 // upserts. No S3 is needed — the reprocess refreshes the read model, it does not
 // re-archive the filing (already stored at first ingest).
 import { Pool } from "pg";
+import { logPoolErrors } from "../../shared/src/pool-client.ts";
 import { SecEdgarClient } from "./sec-edgar.ts";
 import { reprocessFiler13f } from "./sec-13f-reprocess.ts";
 import { SUPERINVESTOR_FILERS } from "./superinvestor-filers.ts";
@@ -42,7 +43,7 @@ async function main(): Promise<void> {
   // Build the pool directly rather than via createEvidenceCliRuntime: that runtime
   // hard-requires S3 env to construct an object store, which this read-model refresh
   // never uses (it reuses the already-archived source, it does not re-ingest blobs).
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
   let hadFailures = false;
   try {
     for (const cik of ciks) {

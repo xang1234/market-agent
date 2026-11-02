@@ -60,6 +60,7 @@ import {
   nonEmptyString,
 } from "./dev-api-shared.ts";
 import { isRecord } from "../../shared/src/http.ts";
+import { withPoolClient } from "../../shared/src/pool-client.ts";
 
 export type DevAnalyzeRunSummary = {
   run_id: string;
@@ -509,50 +510,49 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
           }).then(acceptedShare)]
         : []));
 
-      const client = await deps.db.connect();
-      try {
-        await client.query("begin");
-        const thread = await createThread(client, userId, {
-          title: nonEmptyString(body.title) ?? "Research memo",
-          primary_subject_ref: readOptionalSubjectRef(body.primary_subject_ref) ?? undefined,
-        });
-        const message = await persistImportedArtifactMessage(client, {
-          thread_id: thread.thread_id,
-          user_id: userId,
-          role: "assistant",
-          snapshot_id: snapshotId,
-          blocks: shared.blocks as JsonValue,
-          content_hash: contentHash(shared.blocks as JsonValue),
-        });
-        if (message === null) throw new DevApiHttpError(404, "chat thread not found");
-        for (const section of sectionShares) {
-          await persistImportedArtifactMessage(client, {
+      return withPoolClient(deps.db, async (client) => {
+        try {
+          await client.query("begin");
+          const thread = await createThread(client, userId, {
+            title: nonEmptyString(body.title) ?? "Research memo",
+            primary_subject_ref: readOptionalSubjectRef(body.primary_subject_ref) ?? undefined,
+          });
+          const message = await persistImportedArtifactMessage(client, {
             thread_id: thread.thread_id,
             user_id: userId,
             role: "assistant",
-            snapshot_id: section.origin_snapshot_ids[0]!,
-            blocks: section.blocks as JsonValue,
-            content_hash: contentHash(section.blocks as JsonValue),
+            snapshot_id: snapshotId,
+            blocks: shared.blocks as JsonValue,
+            content_hash: contentHash(shared.blocks as JsonValue),
           });
-        }
-        await client.query("commit");
-        return {
-          thread,
-          message,
-          origin_snapshot_ids: [...shared.origin_snapshot_ids, ...sectionShares.flatMap((section) => section.origin_snapshot_ids)],
-        };
-      } catch (error) {
-        try {
-          await client.query("rollback");
-        } catch (rollbackError) {
-          if (error !== null && typeof error === "object") {
-            (error as { rollback_error?: unknown }).rollback_error = rollbackError;
+          if (message === null) throw new DevApiHttpError(404, "chat thread not found");
+          for (const section of sectionShares) {
+            await persistImportedArtifactMessage(client, {
+              thread_id: thread.thread_id,
+              user_id: userId,
+              role: "assistant",
+              snapshot_id: section.origin_snapshot_ids[0]!,
+              blocks: section.blocks as JsonValue,
+              content_hash: contentHash(section.blocks as JsonValue),
+            });
           }
+          await client.query("commit");
+          return {
+            thread,
+            message,
+            origin_snapshot_ids: [...shared.origin_snapshot_ids, ...sectionShares.flatMap((section) => section.origin_snapshot_ids)],
+          };
+        } catch (error) {
+          try {
+            await client.query("rollback");
+          } catch (rollbackError) {
+            if (error !== null && typeof error === "object") {
+              (error as { rollback_error?: unknown }).rollback_error = rollbackError;
+            }
+          }
+          throw error;
         }
-        throw error;
-      } finally {
-        client.release();
-      }
+      });
     },
   };
 }

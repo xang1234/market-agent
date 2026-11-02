@@ -3,6 +3,7 @@ import {
   type SnapshotManifestDraft,
 } from "./manifest-staging.ts";
 import type { QueryExecutor } from "../../shared/src/http.ts";
+import { destroyAfterFailedRollback, withPoolClient } from "../../shared/src/pool-client.ts";
 import {
   type SnapshotVerificationInput,
   type SnapshotVerificationResult,
@@ -257,18 +258,7 @@ export async function sealSnapshotWithPool(
   pool: SnapshotClientPool,
   input: SnapshotSealInput,
 ): Promise<SnapshotSealResult> {
-  const client = await pool.connect();
-  let releaseError: Error | undefined;
-  try {
-    return await sealSnapshot(snapshotTransactionClient(client), input);
-  } catch (error) {
-    if (error instanceof Error && (error as { rollback_error?: unknown }).rollback_error !== undefined) {
-      releaseError = error;
-    }
-    throw error;
-  } finally {
-    client.release(releaseError);
-  }
+  return withPoolClient(pool, (client) => sealSnapshot(snapshotTransactionClient(client), input), destroyAfterFailedRollback);
 }
 
 function assertSnapshotTransactionClient(db: QueryExecutor): asserts db is SnapshotTransactionClient {

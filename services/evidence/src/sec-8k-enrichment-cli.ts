@@ -12,6 +12,7 @@
 // the atomic crawl (the LLM call is external/slow). Idempotent: enriched_at marks the
 // deterministic claim processed, so a rerun only processes claims added since the last run.
 import { Pool } from "pg";
+import { logPoolErrors } from "../../shared/src/pool-client.ts";
 import { SecEdgarClient } from "./sec-edgar.ts";
 import { runEnrich8kDrain } from "./sec-8k-enrichment.ts";
 import { createLlmRouterFromEnv } from "../../llm/src/settings-loader.ts";
@@ -29,7 +30,7 @@ async function main(): Promise<void> {
   }
 
   const secClient = SecEdgarClient.fromEnv();
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
   let result;
   try {
     result = await runEnrich8kDrain({ db: pool, llm, secClient }, {

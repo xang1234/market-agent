@@ -3,6 +3,7 @@
 // the S3-backed object store, and a Fair-Access SEC client. The caller owns the
 // pool lifecycle — call `await runtime.db.end()` in a finally.
 import { Pool } from "pg";
+import { logPoolErrors } from "../../shared/src/pool-client.ts";
 import { createS3Client, S3ObjectStore } from "./s3-object-store.ts";
 import { SecEdgarClient } from "./sec-edgar.ts";
 
@@ -45,7 +46,7 @@ export function createEvidenceCliRuntime(): EvidenceCliRuntime {
       : {}),
   });
   const objectStore = new S3ObjectStore({ client: s3, bucket: process.env.S3_BUCKET });
-  const db = new Pool({ connectionString: databaseUrl });
+  const db = logPoolErrors(new Pool({ connectionString: databaseUrl }));
 
   return { db, objectStore, secClient };
 }

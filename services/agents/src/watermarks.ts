@@ -1,5 +1,6 @@
 import type { JsonValue } from "../../observability/src/types.ts";
 import { AgentNotFoundError, type QueryExecutor } from "./agent-repo.ts";
+import { destroyAfterFailedRollback, withPoolClient } from "../../shared/src/pool-client.ts";
 
 const AGENT_WATERMARK_TRANSACTION_CLIENT: unique symbol = Symbol("agents.watermarkTransactionClient");
 
@@ -91,21 +92,11 @@ export async function advanceWatermarksWithSideEffectsWithPool(
   pool: AgentWatermarkClientPool,
   input: AdvanceWatermarksInput,
 ): Promise<void> {
-  const client = await pool.connect();
-  let releaseError: Error | undefined;
-  try {
-    return await advanceWatermarksWithSideEffects(
-      advanceWatermarksTransactionClient(client),
-      input,
-    );
-  } catch (error) {
-    if (error instanceof Error && (error as { rollback_error?: unknown }).rollback_error !== undefined) {
-      releaseError = error;
-    }
-    throw error;
-  } finally {
-    client.release(releaseError);
-  }
+  return withPoolClient(
+    pool,
+    (client) => advanceWatermarksWithSideEffects(advanceWatermarksTransactionClient(client), input),
+    destroyAfterFailedRollback,
+  );
 }
 
 function assertAgentWatermarkTransactionClient(

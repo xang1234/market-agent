@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import { logPoolErrors } from "../../shared/src/pool-client.ts";
 import { createPortfolioServer } from "./http.ts";
 
 const host = process.env.PORTFOLIO_HOST ?? "127.0.0.1";
@@ -9,7 +10,7 @@ if (!databaseUrl) {
   throw new Error("DATABASE_URL is required for portfolio dev server");
 }
 
-const pool = new Pool({ connectionString: databaseUrl });
+const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
 const server = createPortfolioServer(pool);
 
 server.listen(port, host, () => {

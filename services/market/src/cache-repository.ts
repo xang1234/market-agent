@@ -9,6 +9,7 @@ import {
 import { POLYGON_MARKET_SOURCE_ID } from "./provider-sources.ts";
 import { normalizedQuote, type NormalizedQuote } from "./quote.ts";
 import type { ListingSubjectRef } from "./subject-ref.ts";
+import { withPoolClient } from "../../shared/src/pool-client.ts";
 
 export type MarketCacheMetadata = {
   provider: string;
@@ -337,18 +338,17 @@ async function withCacheTransaction<T>(
     return fn(db);
   }
 
-  const client = await db.connect();
-  try {
-    await client.query("begin");
-    const result = await fn(client);
-    await client.query("commit");
-    return result;
-  } catch (error) {
-    await client.query("rollback").catch(() => undefined);
-    throw error;
-  } finally {
-    client.release();
-  }
+  return withPoolClient(db, async (client) => {
+    try {
+      await client.query("begin");
+      const result = await fn(client);
+      await client.query("commit");
+      return result;
+    } catch (error) {
+      await client.query("rollback").catch(() => undefined);
+      throw error;
+    }
+  });
 }
 
 function isTransactionalExecutor(

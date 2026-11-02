@@ -7,6 +7,7 @@ import {
   type NotificationQueryExecutor,
   type ProcessPendingNotificationsResult,
 } from "./delivery-processor.ts";
+import { logPoolErrors } from "../../shared/src/pool-client.ts";
 
 export type NotificationWorkerInput = {
   db: NotificationQueryExecutor;
@@ -31,7 +32,7 @@ async function main(): Promise<void> {
   const databaseUrl = process.env.NOTIFICATIONS_DATABASE_URL ?? process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL or NOTIFICATIONS_DATABASE_URL is required");
   const { Pool } = await import("pg");
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
   try {
     const result = await runNotificationWorkerOnce({
       db: pool,

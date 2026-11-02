@@ -15,6 +15,7 @@
 
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
+import { logPoolErrors } from "../../shared/src/pool-client.ts";
 
 import { createRuntimeAuthority, DEFAULT_EXECUTION_LIMITS, type FinancialRuntimeAuthority } from "../../financial-core/src/index.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
@@ -276,7 +277,7 @@ async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL is required");
   const asOf = parseAsOf(process.argv.slice(2), new Date());
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
   try {
     await requireFinancialReadiness(pool, ["screener"]);
     console.log(`certifying the screener universe as of ${asOf}`);

@@ -1,6 +1,7 @@
 import type { QueryExecutor } from "../../observability/src/types.ts";
 import type { SubjectKind, SubjectRef } from "../../shared/src/subject-ref.ts";
 import { addThemeMembership, type ThemeRow } from "./theme-repo.ts";
+import { withPoolClient } from "../../shared/src/pool-client.ts";
 
 // Mirrors the impact_direction enum in spec/finance_research_db_schema.sql:40.
 export const IMPACT_DIRECTIONS = ["positive", "negative", "mixed", "unknown"] as const;
@@ -278,32 +279,31 @@ export async function applyInferredThemeMembershipWithPool(
   theme: ThemeRow,
   options: ApplyInferredMembershipOptions = {},
 ): Promise<ApplyInferredMembershipResult> {
-  const client = await pool.connect();
   let releaseError: Error | undefined;
-  let transactionStarted = false;
-  try {
-    await client.query("begin");
-    transactionStarted = true;
-    const result = await applyInferredThemeMembership(client, theme, options);
-    await client.query("commit");
-    return result;
-  } catch (error) {
-    if (!transactionStarted) {
-      if (error instanceof Error) releaseError = error;
+  return withPoolClient(pool, async (client) => {
+    let transactionStarted = false;
+    try {
+      await client.query("begin");
+      transactionStarted = true;
+      const result = await applyInferredThemeMembership(client, theme, options);
+      await client.query("commit");
+      return result;
+    } catch (error) {
+      if (!transactionStarted) {
+        if (error instanceof Error) releaseError = error;
+        throw error;
+      }
+      try {
+        await client.query("rollback");
+      } catch (rollbackError) {
+        if (error instanceof Error) {
+          (error as { rollback_error?: unknown }).rollback_error = rollbackError;
+          releaseError = error;
+        }
+      }
       throw error;
     }
-    try {
-      await client.query("rollback");
-    } catch (rollbackError) {
-      if (error instanceof Error) {
-        (error as { rollback_error?: unknown }).rollback_error = rollbackError;
-        releaseError = error;
-      }
-    }
-    throw error;
-  } finally {
-    client.release(releaseError);
-  }
+  }, () => releaseError);
 }
 
 type InferredCandidateDbRow = {

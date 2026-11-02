@@ -13,6 +13,7 @@ import type {
   ChatAssistantMessagePersistenceInput,
 } from "./coordinator.ts";
 import { isUuid } from "./chat-ids.ts";
+import { destroyAfterFailedRollback, withPoolClient } from "../../shared/src/pool-client.ts";
 
 export type ChatMessagePersistenceDb = {
   query<R extends Record<string, unknown> = Record<string, unknown>>(
@@ -182,18 +183,7 @@ export async function persistChatMessageAfterSnapshotSealWithPool(
   }
   const saved = input.reveal ? { ...input, ...(await revealed(pool, input.blocks, seal.snapshot.snapshot_id, input.reveal)) } : input;
 
-  const client = await pool.connect();
-  let releaseError: Error | undefined;
-  try {
-    return await persistSealedChatMessage(chatMessageTransactionClient(client), saved, seal);
-  } catch (error) {
-    if (error instanceof Error && (error as { rollback_error?: unknown }).rollback_error !== undefined) {
-      releaseError = error;
-    }
-    throw error;
-  } finally {
-    client.release(releaseError);
-  }
+  return withPoolClient(pool, (client) => persistSealedChatMessage(chatMessageTransactionClient(client), saved, seal), destroyAfterFailedRollback);
 }
 
 // The blocks a reveal returns, once their proofs are read off the snapshot
@@ -207,13 +197,7 @@ async function revealed(
   snapshotId: string,
   reveal: NonNullable<Parameters<typeof persistChatMessageAfterSnapshotSealWithPool>[1]["reveal"]>,
 ): Promise<{ blocks: JsonValue; content_hash: string }> {
-  const client = await pool.connect();
-  let snapshots: Map<string, SealedSnapshotRecord>;
-  try {
-    snapshots = await loadSealedSnapshots(client, [snapshotId, ...blockSnapshotIds(blocks)]);
-  } finally {
-    client.release();
-  }
+  const snapshots = await withPoolClient(pool, (client) => loadSealedSnapshots(client, [snapshotId, ...blockSnapshotIds(blocks)]));
   const shown = await reveal({ snapshot_id: snapshotId, block_proofs: blockProofs({ blocks, snapshot_id: snapshotId }, snapshots) });
   if (!isDeepStrictEqual(sealedView(shown.blocks), sealedView(blocks))) {
     throw new Error("a revealed answer may differ from the sealed one only in its text; it was not saved");

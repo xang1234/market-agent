@@ -6,6 +6,7 @@ import {
 } from "./discovery.ts";
 import type { QueryExecutor } from "./lookup.ts";
 import { errorMessage } from "../../shared/src/http.ts";
+import { logPoolErrors, withPoolClient } from "../../shared/src/pool-client.ts";
 
 type LegacyIdentity = {
   ticker: string;
@@ -72,7 +73,7 @@ const discovery = createPolygonTickerDiscoveryProvider({
   baseUrl: process.env.RESOLVER_POLYGON_REFERENCE_BASE_URL,
 });
 const hasPolygonKey = (process.env.POLYGON_API_KEY ?? "").trim().length > 0;
-const pool = new Pool({ connectionString: databaseUrl });
+const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
 
 try {
   await repairLegacyIdentities(pool);
@@ -139,18 +140,17 @@ async function withTransaction<T>(
   db: TransactionalExecutor,
   fn: (tx: QueryExecutor) => Promise<T>,
 ): Promise<T> {
-  const client = await db.connect();
-  try {
-    await client.query("begin");
-    const result = await fn(client);
-    await client.query("commit");
-    return result;
-  } catch (error) {
-    await client.query("rollback").catch(() => undefined);
-    throw error;
-  } finally {
-    client.release();
-  }
+  return withPoolClient(db, async (client) => {
+    try {
+      await client.query("begin");
+      const result = await fn(client);
+      await client.query("commit");
+      return result;
+    } catch (error) {
+      await client.query("rollback").catch(() => undefined);
+      throw error;
+    }
+  });
 }
 
 async function hydrateConfiguredTickers(db: QueryExecutor): Promise<void> {
