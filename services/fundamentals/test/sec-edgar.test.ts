@@ -5,15 +5,19 @@ import {
   buildSecSource,
   companyFactsPath,
   extractStatement,
+  extractStatementWithTokens,
   fetchCompanyFacts,
   SEC_INCOME_METRIC_KEYS,
   SEC_METRIC_KEYS_BY_FAMILY,
+  SEC_NONCONTROLLING_INTEREST_CONCEPTS,
   secFiscalYearWindow,
+  sourceIdForAccession,
   US_GAAP_TO_METRIC_KEY,
   type SecCompanyFacts,
   type SecConceptValue,
   type SecEdgarFetcher,
 } from "../src/sec-edgar.ts";
+import { secDerivedLine } from "../src/sec-derivation-proof.ts";
 import { normalizedStatement } from "../src/statement.ts";
 import {
   createMetricRegistry,
@@ -1026,7 +1030,7 @@ function netIncomeLines(facts: SecCompanyFacts, fiscal_year: number) {
 }
 
 test("net income is NetIncomeLoss alone; ProfitLoss, which includes noncontrolling interest, is consolidated net income (#342)", () => {
-  const facts = annualFacts({ NetIncomeLoss: { 2023: 70 }, ProfitLoss: { 2023: 100, 2024: 90 } });
+  const facts = annualFacts({ NetIncomeLoss: { 2023: 70 }, ProfitLoss: { 2023: 100, 2024: 90 }, MinorityInterest: { 2024: 5 } });
   assert.deepEqual(netIncomeLines(facts, 2023), [["net_income", 70], ["net_income_consolidated", 100]]);
   assert.deepEqual(netIncomeLines(facts, 2024), [["net_income_consolidated", 90]]);
 });
@@ -1036,6 +1040,111 @@ test("without ProfitLoss, consolidated net income is NetIncomeLoss only for a ye
   assert.deepEqual(netIncomeLines(facts, 2023), [["net_income", 70], ["net_income_consolidated", 70]]);
   assert.deepEqual(netIncomeLines(facts, 2024), [["net_income", 70]]);
 });
+
+function inferredLines(facts: SecCompanyFacts, fiscal_year: number, fiscal_period: "FY" | "Q1" | "Q2" | "Q3" | "Q4" = "FY") {
+  const { statement, inferences } = extractStatementWithTokens({ subject: aaplIssuer, facts, family: "income", fiscal_year, fiscal_period, source_id: SEC_SOURCE_ID, as_of: "2025-02-02T00:00:00.000Z" });
+  return statement.lines.filter((line) => line.metric_key.startsWith("net_income"))
+    .map((line) => [line.metric_key, line.value_num, inferences.get(line.metric_key)?.concept ?? null]);
+}
+
+test("a figure standing in for the other net income records that the filer reports no noncontrolling interest (#342)", () => {
+  const { inferences, tokens } = extractStatementWithTokens({
+    subject: aaplIssuer, facts: annualFacts({ NetIncomeLoss: { 2023: 70 } }), family: "income", fiscal_year: 2023, fiscal_period: "FY",
+    source_id: SEC_SOURCE_ID, as_of: "2025-02-02T00:00:00.000Z",
+  });
+  assert.deepEqual([...inferences], [["net_income_consolidated", { kind: "no_noncontrolling_interest", concept: "NetIncomeLoss", checked: [...SEC_NONCONTROLLING_INTEREST_CONCEPTS] }]]);
+  assert.equal(tokens.get("net_income_consolidated"), tokens.get("net_income"));
+});
+
+test("ProfitLoss alone is net income too for a year that reports no noncontrolling interest, recorded as inferred (#342)", () => {
+  const facts = annualFacts({ ProfitLoss: { 2023: 90, 2024: 90 }, MinorityInterest: { 2024: 5 } });
+  assert.deepEqual(inferredLines(facts, 2023), [["net_income_consolidated", 90, null], ["net_income", 90, "ProfitLoss"]]);
+  assert.deepEqual(inferredLines(facts, 2024), [["net_income_consolidated", 90, null]]);
+  assert.deepEqual(inferredLines(annualFacts({ NetIncomeLoss: { 2023: 70 }, ProfitLoss: { 2023: 70 } }), 2023), [["net_income", 70, null], ["net_income_consolidated", 70, null]]);
+});
+
+test("every noncontrolling-interest concept SEC filers tag, and equity that differs with it, blocks the inference (#342)", () => {
+  for (const concept of SEC_NONCONTROLLING_INTEREST_CONCEPTS) {
+    assert.deepEqual(inferredLines(annualFacts({ NetIncomeLoss: { 2023: 70 }, [concept]: { 2023: 1 } }), 2023), [["net_income", 70, null]], concept);
+  }
+  const equity = (including: number) => factsOf({
+    Revenues: [annualValue(2023, 500)],
+    NetIncomeLoss: [annualValue(2023, 70)],
+    StockholdersEquity: [instantValue("2023-12-31", 400)],
+    StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest: [instantValue("2023-12-31", including)],
+  });
+  assert.deepEqual(inferredLines(equity(450), 2023), [["net_income", 70, null]]);
+  assert.deepEqual(inferredLines(equity(400), 2023), [["net_income", 70, null], ["net_income_consolidated", 70, "NetIncomeLoss"]]);
+});
+
+test("a balance counts as noncontrolling interest only at an instant inside the period (#342)", () => {
+  const minorityAt = (end: string) => factsOf({ Revenues: [annualValue(2023, 500)], NetIncomeLoss: [annualValue(2023, 70)], MinorityInterest: [instantValue(end, 5)] });
+  assert.deepEqual(inferredLines(minorityAt("2022-12-31"), 2023), [["net_income", 70, null], ["net_income_consolidated", 70, "NetIncomeLoss"]]);
+  assert.deepEqual(inferredLines(minorityAt("2023-12-31"), 2023), [["net_income", 70, null]]);
+});
+
+test("a quarter whose noncontrolling interest appears only in a year-to-date value is not inferred (#342)", () => {
+  const facts = factsOf({
+    Revenues: [quarterValue("2024-04-01", "2024-06-30", "Q2", 500)],
+    NetIncomeLoss: [quarterValue("2024-04-01", "2024-06-30", "Q2", 70)],
+    NetIncomeLossAttributableToNoncontrollingInterest: [quarterValue("2024-01-01", "2024-06-30", "Q2", 9)],
+  });
+  assert.deepEqual(inferredLines(facts, 2024, "Q2"), [["net_income", 70, null]]);
+});
+
+test("a derived fourth quarter stands in under the consolidated key with the same, provable derivation (#342)", () => {
+  const facts = factsOf({
+    Revenues: [annualValue(2024, 400), ...quarters(100)],
+    NetIncomeLoss: [annualValue(2024, 80), ...quarters(20)],
+  });
+  const result = extractStatementWithTokens({ subject: aaplIssuer, facts, family: "income", fiscal_year: 2024, fiscal_period: "Q4", source_id: SEC_SOURCE_ID, as_of: "2025-02-02T00:00:00.000Z" });
+  const derivation = result.derivations.get("net_income_consolidated");
+  assert.ok(derivation);
+  assert.equal(derivation, result.derivations.get("net_income"));
+  assert.equal(result.inferences.get("net_income_consolidated")?.concept, "NetIncomeLoss");
+  const sourceId = sourceIdForAccession(derivation.minuend.accn);
+  const fact = { source_id: sourceId, period_start: result.statement.period_start, period_end: result.statement.period_end, fiscal_year: 2024 };
+  assert.deepEqual([secDerivedLine(342, fact, "net_income_consolidated", derivation)?.status, secDerivedLine(342, fact, "net_income_consolidated", derivation)?.sum], ["proven", "20"]);
+});
+
+test("a ProfitLoss whose period disagrees costs only consolidated net income, never the statement (#342)", () => {
+  const facts = factsOf({
+    Revenues: [quarterValue("2024-01-01", "2024-03-31", "Q1", 500)],
+    NetIncomeLoss: [quarterValue("2024-01-01", "2024-03-31", "Q1", 70)],
+    ProfitLoss: [quarterValue("2023-01-01", "2023-03-31", "Q1", 90)],
+  });
+  assert.equal(secFiscalYearWindow(facts, 2024), null);
+  assert.deepEqual(inferredLines(facts, 2024, "Q1"), [["net_income", 70, null]]);
+});
+
+function factsOf(byConcept: Record<string, SecConceptValue[]>): SecCompanyFacts {
+  return {
+    cik: 342,
+    entityName: "Noncontrolling Interest Corp",
+    facts: {
+      "us-gaap": Object.fromEntries(Object.entries(byConcept).map(([concept, values]) => [concept, { label: concept, description: "", units: { USD: values } }])),
+    },
+  };
+}
+
+function annualValue(year: number, val: number): SecConceptValue {
+  return { ...value({ val, start: `${year}-01-01`, end: `${year}-12-31`, fy: year, accn: `0000000342-${String(year + 1).slice(2)}-000001`, filed: `${year + 1}-02-01` }), val_token: String(val) };
+}
+
+function instantValue(end: string, val: number): SecConceptValue {
+  const year = Number(end.slice(0, 4));
+  return { ...value({ val, end, fy: year, accn: `0000000342-${String(year + 1).slice(2)}-000001`, filed: `${year + 1}-02-01` }), val_token: String(val) };
+}
+
+function quarterValue(start: string, end: string, fp: string, val: number): SecConceptValue {
+  const filed = `${end.slice(0, 7)}-28`.replace(/-(03|06|09)-28$/u, (_, month: string) => `-${String(Number(month) + 1).padStart(2, "0")}-28`);
+  return { ...value({ val, start, end, fy: 2024, fp, form: "10-Q", accn: `0000000342-24-0000${fp.slice(1)}${end.slice(5, 7)}`, filed }), val_token: String(val) };
+}
+
+function quarters(val: number): SecConceptValue[] {
+  return [["2024-01-01", "2024-03-31", "Q1"], ["2024-04-01", "2024-06-30", "Q2"], ["2024-07-01", "2024-09-30", "Q3"]]
+    .map(([start, end, fp]) => quarterValue(start!, end!, fp!, val));
+}
 
 test("extractStatement skips concepts whose `units` field is malformed (defensive)", () => {
   // assertCompanyFacts validates only top-level shape; deeper malformations
