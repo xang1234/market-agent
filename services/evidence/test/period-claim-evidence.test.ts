@@ -264,21 +264,22 @@ test("a period lookup returns a company's claims bound to that period (#542)", a
     assert.deepEqual([await read(1), await read(2)], [true, false]);
   });
 
-  await t.test("reads joined as one keep each claim as the first read returned it, and the stored contradictions among all their claims (#558)", async () => {
+  await t.test("reads joined as one keep each claim as the first read returned it, and the stored contradictions among all their claims, across reads too (#558)", async () => {
     const [acme, beta] = [await company(db), await company(db)];
-    const shared = await claim(db, acme, margin("Gross margin fell on export controls.", "2025-08-05T20:00:00Z", Q2));
+    const shared = await claim(db, acme, margin("Gross margin fell on lower yields.", "2025-08-04T20:00:00Z", Q2));
     await db.query(`insert into claim_arguments (claim_id, subject_kind, subject_id, role) values ($1, 'issuer', $2, 'subject')`, [shared, beta]);
+    const acmeOnly = await claim(db, acme, margin("Gross margin fell on export controls.", "2025-08-05T20:00:00Z", Q2));
     const disputed = await claim(db, beta, margin("Gross margin was not hurt by export controls.", "2025-08-06T20:00:00Z", Q2));
     const { rows: [cluster] } = await db.query<{ cluster_id: string }>(
       `insert into claim_clusters (canonical_signature, first_seen_at, last_seen_at) values ('export controls #558', now(), now()) returning cluster_id::text`,
     );
     await db.query(
       `insert into claim_cluster_members (cluster_id, claim_id, relation) values ($1, $2, 'support'), ($1, $3, 'contradict')`,
-      [cluster!.cluster_id, shared, disputed],
+      [cluster!.cluster_id, acmeOnly, disputed],
     );
     const read = (issuer: string) => loadPeriodClaimEvidence(db, { issuer_id: issuer, period: Q2, predicate_prefixes: [GROSS_MARGIN] });
     const joined = await joinedEvidence(db, [{ kind: "issuer", id: acme }, { kind: "issuer", id: beta }], [await read(acme), await read(beta)]);
-    assert.deepEqual(joined.claims.map((row) => [row.claim_id, row.subject_id]), [[shared, acme], [disputed, beta]]);
-    assert.deepEqual(joined.contradictions, [[shared, disputed]]);
+    assert.deepEqual(joined.claims.map((row) => [row.claim_id, row.subject_id]), [[acmeOnly, acme], [shared, acme], [disputed, beta]]);
+    assert.deepEqual(joined.contradictions, [[acmeOnly, disputed]]);
   });
 });
