@@ -110,7 +110,7 @@ test("a legacy net income stored from ProfitLoss is replaced with its basis, or 
   });
   await lookup(2023);
   await lookup(2024);
-  const [, inferredNetIncome] = await netIncome();
+  const inferredNetIncome = (await netIncome()).find((row) => row.metric_key === "net_income");
   assert.deepEqual(inferredNetIncome?.flags, inferred("ProfitLoss"));
 
   // What ingestion stored before #342: ProfitLoss as net income, with no
@@ -149,4 +149,35 @@ test("a legacy net income stored from ProfitLoss is replaced with its basis, or 
   assert.equal(repaired[1]?.superseded_by, replacement?.fact_id, "the legacy 2023 row names its replacement");
   await backfill();
   assert.deepEqual((await netIncome()).filter((row) => row.metric_key === "net_income").map((row) => row.active), [false, false, true, false], "a rerun changes nothing");
+});
+
+test("a later 10-K's restatement of an inferred figure keeps its basis and is revised with it (#342)", { timeout: 180_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for SEC ingestion coverage");
+    return;
+  }
+  const { db, download, lookup } = await setUp(t, "fin-sec-ni-restated");
+  download.text = companyFacts({
+    Revenues: [year(2023, 2023, 500), year(2024, 2023, 500), year(2024, 2024, 600)],
+    NetIncomeLoss: [year(2023, 2023, 70), year(2024, 2023, 72), year(2024, 2024, 80)],
+  });
+  await lookup(2023);
+  await lookup(2024);
+  const consolidated2023 = async () => (await db.query<{ method: string; value: string; active: boolean; concept: string | null }>(
+    `select f.method::text as method, f.value_num::text as value, f.invalidated_at is null as active,
+            jsonb_path_query_first(f.quality_flags, '$[*] ? (@.kind == "no_noncontrolling_interest")') ->> 'concept' as concept
+       from facts f join metrics m on m.metric_id = f.metric_id
+      where f.subject_id = $1 and m.metric_key = 'net_income_consolidated' and f.fiscal_year = 2023
+      order by f.created_at`,
+    [ISSUER_ID],
+  )).rows.map(({ method, value, active, concept }) => [method, value, active, concept]);
+  assert.deepEqual(await consolidated2023(), [["reported", "70", true, "NetIncomeLoss"], ["restated", "72", true, "NetIncomeLoss"]]);
+
+  download.text = companyFacts({
+    Revenues: [year(2023, 2023, 500), year(2024, 2023, 500), year(2024, 2024, 600), year(2025, 2023, 500), year(2025, 2024, 600), year(2025, 2025, 700)],
+    NetIncomeLoss: [year(2023, 2023, 70), year(2024, 2023, 72), year(2024, 2024, 80), year(2025, 2023, 72), year(2025, 2024, 80), year(2025, 2025, 90)],
+    NetIncomeLossAttributableToNoncontrollingInterest: [year(2025, 2023, 2)],
+  });
+  await lookup(2025);
+  assert.deepEqual(await consolidated2023(), [["reported", "70", false, "NetIncomeLoss"], ["restated", "72", false, "NetIncomeLoss"]]);
 });
