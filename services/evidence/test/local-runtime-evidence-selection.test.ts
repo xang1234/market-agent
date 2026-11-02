@@ -582,3 +582,30 @@ test("a fiscal year's guidance is what was given during it", async (t) => {
   });
   assert.deepEqual(evidence.claim_refs, [FY_GUIDANCE]);
 });
+
+// A named quarter is the issuer's own: its release comes out in the quarter
+// after it, so a later quarter's explanation in the same fiscal year is not
+// about it (#558).
+test("a named quarter's window follows the issuer's fiscal calendar, so a later quarter's release does not come first (#558)", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  // NVDA-like: FY2026's Q2 ends 2025-07-27.
+  const db = await fiscalCalendarDb(t, "evidence-selection-fiscal-quarter", {
+    period_kind: "fiscal_q", period_start: "2025-04-28", period_end: "2025-07-27", fiscal_year: 2026, fiscal_period: "Q2", observed_at: "2025-08-28T00:00:00Z",
+  });
+  const Q2 = "c4000000-0000-4000-8000-0000000000eb";
+  const explanation = { source: FILINGS, predicate: "management.explanation.gross_margin", polarity: "neutral" };
+  await claim(db, { id: Q2, ...explanation, text: "Gross margin rose in the second quarter.", at: "2025-08-27T00:00:00Z" });
+  await claim(db, { id: INSIDER(1), ...explanation, text: "Gross margin fell in the third quarter.", at: "2025-11-19T00:00:00Z" });
+  const evidence = await loadLocalRuntimeEvidence(db, {
+    subject_refs: [{ kind: "issuer", id: ISSUER }],
+    limit: 1,
+    selection: {
+      predicate_prefixes: ["management.explanation.gross_margin"],
+      effective_from: "2025-01-01T00:00:00.000Z",
+      effective_until: "2027-04-01T00:00:00.000Z",
+      fiscal_year: 2026,
+      fiscal_period: "Q2",
+    },
+  });
+  assert.deepEqual(evidence.claim_refs, [Q2]);
+});

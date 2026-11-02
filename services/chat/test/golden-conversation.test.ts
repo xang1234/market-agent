@@ -539,17 +539,17 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.deepEqual(evidence.blocks.flatMap((block) => refsOf(block).filter(([kind]) => kind === "claim")), [["claim", claimId, AMD_Q2_2025_RELEASE.text]]);
   });
 
-  await t.test("'Show the evidence' after the quoted cause was superseded says it is no longer citable, beside the claim it shows instead (#542)", async (st) => {
+  await t.test("'Show the evidence' after the quoted cause was superseded says it is no longer citable, and shows no other quarter's explanation in its place (#542, #558)", async (st) => {
     const amdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD margin, its cause superseded" });
     completedTurn(await runTurn(base, amdThread.thread_id, "Why did AMD's operating margin turn negative in Q2 2025?"));
     const claimId = await filedClaimId();
     const text = "Operating income rose in the third quarter on stronger client segment sales.";
-    const newer = await seedBoundExplanation(st, client, { predicate: "management.explanation.operating_income", text, period: { kind: "fiscal_q", end: "2025-09-27" }, published: "2025-11-04T00:00:00Z", known: GOLDEN_AS_OF });
+    await seedBoundExplanation(st, client, { predicate: "management.explanation.operating_income", text, period: { kind: "fiscal_q", end: "2025-09-27" }, published: "2025-11-04T00:00:00Z", known: GOLDEN_AS_OF });
     await client.query(`update claims set superseded_at = now() where claim_id = $1::uuid`, [claimId]);
     try {
       completedTurn(await runTurn(base, amdThread.thread_id, "Show the evidence"));
       const evidence = await latestAssistantMessage(base, amdThread.thread_id);
-      assert.deepEqual(evidence.blocks.flatMap((block) => refsOf(block).filter(([kind]) => kind === "claim")), [["claim", newer, text]]);
+      assert.deepEqual(evidence.blocks.flatMap((block) => refsOf(block).filter(([kind]) => kind === "claim")), []);
       assert.ok(answerText(evidence).includes(PRIOR_CAUSE_WITHDRAWN), JSON.stringify(answerText(evidence)));
     } finally {
       await client.query(`update claims set superseded_at = null where claim_id = $1::uuid`, [claimId]);
