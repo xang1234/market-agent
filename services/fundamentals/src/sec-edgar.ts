@@ -510,9 +510,9 @@ const SELECTION_ORDER = Object.entries(US_GAAP_TO_METRIC_KEY)
   .sort(([, left], [, right]) => Number(PERIOD_OPTIONAL_KEYS.has(left)) - Number(PERIOD_OPTIONAL_KEYS.has(right)));
 
 /**
- * A value of any of these over a span that overlaps a period, from any filing,
- * means some of the filer's income or equity then belonged to a
- * noncontrolling interest. Each is a us-gaap concept SEC filers tag in
+ * A nonzero value of any of these over a span that overlaps a period, from
+ * any filing, means some of the filer's income or equity then belonged to a
+ * noncontrolling interest (a 0 is a dash line). Each is a us-gaap concept SEC filers tag in
  * companyfacts (Berkshire, Blackstone, Comcast, Exxon, KKR, Simon Property,
  * Walmart). IncomeLossFromContinuingOperationsBeforeIncomeTaxes...
  * NoncontrollingInterest is not one: it is income before that share, and
@@ -552,7 +552,7 @@ export function reportsNoncontrollingInterest(usGaap: Record<string, SecConcept>
     const own = within(parent);
     return within(total).some((value) => own.some((other) => other.start === value.start && other.end === value.end && other.val !== value.val));
   };
-  return SEC_NONCONTROLLING_INTEREST_CONCEPTS.some((name) => within(name).length > 0)
+  return SEC_NONCONTROLLING_INTEREST_CONCEPTS.some((name) => within(name).some((value) => value.val !== 0))
     || differs("ProfitLoss", "NetIncomeLoss")
     || differs(EQUITY_INCLUDING_NONCONTROLLING_INTEREST, "StockholdersEquity");
 }
