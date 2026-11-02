@@ -1,5 +1,5 @@
 import { Pool, type PoolClient } from "pg";
-import { logPoolErrors } from "../../shared/src/pool-client.ts";
+import { destroyAfterFailedRollback, logPoolErrors, withPoolClient } from "../../shared/src/pool-client.ts";
 
 import {
   emptyEvidence,
@@ -487,50 +487,48 @@ async function sealAssistantMessageSnapshot(input: ChatAssistantMessagePersisten
   const snapshotId = snapshotIdFromBlocks(input.blocks);
   const asOf = maxBlockAsOf(input.blocks) ?? turnNow(process.env);
   const userId = await threadUserId(input.threadId);
-  const client = await pool().connect();
-  let releaseError: Error | undefined;
-  try {
-    await client.query("begin");
-    const dropped = await droppedClaims(client, input.blocks, { user_id: userId, as_of: asOf });
-    if (dropped && !input.without) throw new ChatSnapshotSealError([{ reason_code: "missing_claim_ref", details: dropped }]);
-    const blocks = dropped ? input.without!(dropped) : input.blocks;
-    // On this client alone: one waiting for another while it holds its locks
-    // would stall the pool once every client did.
-    const manifest = await manifestFromBlockRefs(client, {
-      subjectRefs: subjectRefsFromBlocks(blocks, input.threadId),
-      asOf,
-      modelVersion: "chat-local-runtime",
-      blocks,
-    });
-    const verifierRows = await loadVerifierRowsForRefs(client, {
-      source_ids: manifest.source_ids,
-      document_refs: manifest.document_refs,
-      claim_refs: manifest.claim_refs,
-      user_id: userId,
-    });
-    // As of the snapshot, like the readers that chose these facts (#159).
-    const facts = await loadVerifierFactsForRefs(client, { fact_refs: manifest.fact_refs, cutoff: asOf });
-    const seal = await sealSnapshotInTransaction(snapshotTransactionClient(client), {
-      snapshot_id: snapshotId,
-      thread_id: input.threadId,
-      manifest,
-      blocks: blocks as never,
-      facts,
-      sources: verifierRows.sources,
-      documents: verifierRows.documents,
-      claims: verifierRows.claims,
-    });
-    // A refused seal keeps its audit row.
-    await client.query("commit");
-    return dropped ? { ...seal, blocks } : seal;
-  } catch (error) {
-    await client.query("rollback").catch((rollbackError: Error) => {
-      releaseError = rollbackError;
-    });
-    throw error;
-  } finally {
-    client.release(releaseError);
-  }
+  return withPoolClient(pool(), async (client: PoolClient) => {
+    try {
+      await client.query("begin");
+      const dropped = await droppedClaims(client, input.blocks, { user_id: userId, as_of: asOf });
+      if (dropped && !input.without) throw new ChatSnapshotSealError([{ reason_code: "missing_claim_ref", details: dropped }]);
+      const blocks = dropped ? input.without!(dropped) : input.blocks;
+      // On this client alone: one waiting for another while it holds its locks
+      // would stall the pool once every client did.
+      const manifest = await manifestFromBlockRefs(client, {
+        subjectRefs: subjectRefsFromBlocks(blocks, input.threadId),
+        asOf,
+        modelVersion: "chat-local-runtime",
+        blocks,
+      });
+      const verifierRows = await loadVerifierRowsForRefs(client, {
+        source_ids: manifest.source_ids,
+        document_refs: manifest.document_refs,
+        claim_refs: manifest.claim_refs,
+        user_id: userId,
+      });
+      // As of the snapshot, like the readers that chose these facts (#159).
+      const facts = await loadVerifierFactsForRefs(client, { fact_refs: manifest.fact_refs, cutoff: asOf });
+      const seal = await sealSnapshotInTransaction(snapshotTransactionClient(client), {
+        snapshot_id: snapshotId,
+        thread_id: input.threadId,
+        manifest,
+        blocks: blocks as never,
+        facts,
+        sources: verifierRows.sources,
+        documents: verifierRows.documents,
+        claims: verifierRows.claims,
+      });
+      // A refused seal keeps its audit row.
+      await client.query("commit");
+      return dropped ? { ...seal, blocks } : seal;
+    } catch (error) {
+      await client.query("rollback").catch((rollbackError: unknown) => {
+        (error as { rollback_error?: unknown }).rollback_error = rollbackError;
+      });
+      throw error;
+    }
+  }, destroyAfterFailedRollback);
 }
 
 // The claims the answer quotes that its seal leaves out (#557): each is
