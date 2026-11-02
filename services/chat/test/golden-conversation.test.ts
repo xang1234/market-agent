@@ -539,17 +539,17 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.deepEqual(evidence.blocks.flatMap((block) => refsOf(block).filter(([kind]) => kind === "claim")), [["claim", claimId, AMD_Q2_2025_RELEASE.text]]);
   });
 
-  await t.test("'Show the evidence' after the quoted cause was superseded says it is no longer citable, beside the claim it shows instead (#542)", async (st) => {
+  await t.test("'Show the evidence' after the quoted cause was superseded says it is no longer citable, and shows no other quarter's explanation in its place (#542, #558)", async (st) => {
     const amdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD margin, its cause superseded" });
     completedTurn(await runTurn(base, amdThread.thread_id, "Why did AMD's operating margin turn negative in Q2 2025?"));
     const claimId = await filedClaimId();
     const text = "Operating income rose in the third quarter on stronger client segment sales.";
-    const newer = await seedBoundExplanation(st, client, { predicate: "management.explanation.operating_income", text, period: { kind: "fiscal_q", end: "2025-09-27" }, published: "2025-11-04T00:00:00Z", known: GOLDEN_AS_OF });
+    await seedBoundExplanation(st, client, { predicate: "management.explanation.operating_income", text, period: { kind: "fiscal_q", end: "2025-09-27" }, published: "2025-11-04T00:00:00Z", known: GOLDEN_AS_OF });
     await client.query(`update claims set superseded_at = now() where claim_id = $1::uuid`, [claimId]);
     try {
       completedTurn(await runTurn(base, amdThread.thread_id, "Show the evidence"));
       const evidence = await latestAssistantMessage(base, amdThread.thread_id);
-      assert.deepEqual(evidence.blocks.flatMap((block) => refsOf(block).filter(([kind]) => kind === "claim")), [["claim", newer, text]]);
+      assert.deepEqual(evidence.blocks.flatMap((block) => refsOf(block).filter(([kind]) => kind === "claim")), []);
       assert.ok(answerText(evidence).includes(PRIOR_CAUSE_WITHDRAWN), JSON.stringify(answerText(evidence)));
     } finally {
       await client.query(`update claims set superseded_at = null where claim_id = $1::uuid`, [claimId]);
@@ -567,6 +567,44 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     }
     const evidence = await latestAssistantMessage(base, amdThread.thread_id);
     assert.deepEqual(evidence.blocks.flatMap((block) => refsOf(block).filter(([kind]) => kind === "claim")), []);
+    assert.ok(!answerText(evidence).includes(PRIOR_CAUSE_WITHDRAWN), JSON.stringify(answerText(evidence)));
+  });
+
+  await t.test("'Show the evidence' whose re-read of the engine answer it follows fails still answers, its research claims unavailable (#558)", async () => {
+    const amdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD margin, its answer unreadable" });
+    completedTurn(await runTurn(base, amdThread.thread_id, "Why did AMD's operating margin turn negative in Q2 2025?"));
+    await client.query(`alter table snapshot_financial_runs rename to snapshot_financial_runs_renamed`);
+    try {
+      completedTurn(await runTurn(base, amdThread.thread_id, "Show the evidence"));
+    } finally {
+      await client.query(`alter table snapshot_financial_runs_renamed rename to snapshot_financial_runs`);
+    }
+    const evidence = await latestAssistantMessage(base, amdThread.thread_id);
+    assert.deepEqual(evidence.blocks.flatMap((block) => refsOf(block).filter(([kind]) => kind === "claim")), []);
+    assert.ok(answerText(evidence).some((text) => text.includes("Research claims could not be read")), JSON.stringify(answerText(evidence)));
+    assert.ok(!answerText(evidence).includes(PRIOR_CAUSE_WITHDRAWN), JSON.stringify(answerText(evidence)));
+  });
+
+  await t.test("'Show the evidence' whose read of the cause its answer quoted fails still answers, its research claims unavailable (#558)", async () => {
+    const amdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD margin, its cause unreadable" });
+    completedTurn(await runTurn(base, amdThread.thread_id, "Why did AMD's operating margin turn negative in Q2 2025?"));
+    // The read of the quoted cause finds no parent_snapshot column: it is
+    // hidden once the question is saved with its snapshot, and put back when
+    // the turn logs its reads, after them and before its seal writes it.
+    const hidden = `exists (select 1 from information_schema.columns where table_name = 'snapshots' and column_name = 'parent_snapshot_hidden')`;
+    const putBack = `if ${hidden} then alter table snapshots rename column parent_snapshot_hidden to parent_snapshot; end if;`;
+    try {
+      await client.query(`create function cause_column_hidden() returns trigger language plpgsql as $$ begin alter table snapshots rename column parent_snapshot to parent_snapshot_hidden; return new; end $$`);
+      await client.query(`create trigger cause_column_hidden after insert on chat_messages for each row when (new.role = 'user') execute function cause_column_hidden()`);
+      await client.query(`create function cause_column_back() returns trigger language plpgsql as $$ begin ${putBack} return new; end $$`);
+      await client.query(`create trigger cause_column_back before insert on tool_call_logs for each row when (new.tool_name <> 'resolver.search_to_subject_flow') execute function cause_column_back()`);
+      completedTurn(await runTurn(base, amdThread.thread_id, "Show the evidence"));
+    } finally {
+      await client.query(`drop trigger if exists cause_column_hidden on chat_messages; drop function if exists cause_column_hidden(); drop trigger if exists cause_column_back on tool_call_logs; drop function if exists cause_column_back(); do $$ begin ${putBack} end $$`);
+    }
+    const evidence = await latestAssistantMessage(base, amdThread.thread_id);
+    assert.deepEqual(evidence.blocks.flatMap((block) => refsOf(block).filter(([kind]) => kind === "claim")), []);
+    assert.ok(answerText(evidence).some((text) => text.includes("Research claims could not be read")), JSON.stringify(answerText(evidence)));
     assert.ok(!answerText(evidence).includes(PRIOR_CAUSE_WITHDRAWN), JSON.stringify(answerText(evidence)));
   });
 

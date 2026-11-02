@@ -19,8 +19,10 @@ import { createSource } from "../../evidence/src/source-repo.ts";
 import {
   analystToolRuntime,
   closeLocalRuntimePoolForTests,
+  explainedEvidence,
   persistAssistantMessage,
 } from "../src/local-runtime.ts";
+import type { Explained } from "../src/filed-cause.ts";
 import { ChatSnapshotSealError } from "../src/messages.ts";
 import { createThread } from "../src/threads-repo.ts";
 
@@ -314,6 +316,60 @@ test("a seal that would leave out a claim its blocks quote, with no way to rende
   }
   const { rows } = await client.query(`select 1 from chat_messages where thread_id = $1::uuid and role = 'assistant'`, [thread.thread_id]);
   assert.equal(rows.length, 0, "no message is saved");
+});
+
+test("an evidence follow-up to an engine answer reads each company it explained at that period, and every other company by the route (#558)", {
+  skip: !dockerAvailable(),
+  timeout: 120_000,
+}, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "chat-explained-evidence");
+  const client = await connectedClient(t, databaseUrl);
+  const [acme, beta, gamma] = [1, 2, 3].map((n) => `c1110000-0000-4000-8000-00000000055${n}`);
+  await client.query(`insert into issuers (issuer_id, legal_name) values ($1, 'Acme'), ($2, 'Beta'), ($3, 'Gamma')`, [acme, beta, gamma]);
+  const source = "c2220000-0000-4000-8000-000000000558";
+  await client.query(`insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at) values ($1, 'sec_edgar', 'filing', 'primary', 'public', now())`, [source]);
+  const Q2 = { kind: "fiscal_q", end: "2025-06-28", fiscal_year: 2025, fiscal_period: "Q2" } as const;
+  let written = 0;
+  // An explanation of the issuer's gross margin, in a document of its own, bound to a quarter when one is given.
+  const explanation = async (issuer: string, text: string, at: string, end?: string) => {
+    const n = String(++written).padStart(12, "0");
+    const [claimId, documentId] = [`c9000000-0000-4000-8000-${n}`, `c6000000-0000-4000-8000-${n}`];
+    await client.query(
+      `insert into documents (document_id, source_id, kind, content_hash, raw_blob_id, published_at, created_at) values ($1, $2, 'filing', $3, $4, $5, $5)`,
+      [documentId, source, `hash-${documentId}`, `sha256:${documentId}`, at],
+    );
+    await client.query(
+      `insert into claims (claim_id, document_id, predicate, text_canonical, polarity, modality, reported_by_source_id, effective_time, confidence, status, created_at, period_kind, period_end, period_bound_at)
+       values ($1, $2, 'management.explanation.gross_margin', $3, 'negative', 'asserted', $4, $5, 0.9, 'extracted', $5, $6, $7::date, $8)`,
+      [claimId, documentId, text, source, at, end ? "fiscal_q" : null, end ?? null, end ? at : null],
+    );
+    await client.query(`insert into claim_arguments (claim_id, subject_kind, subject_id, role) values ($1, 'issuer', $2, 'subject')`, [claimId, issuer]);
+    return claimId;
+  };
+  const acmeQ2 = await explanation(acme, "Gross margin fell on a reserve.", "2025-08-05T20:00:00Z", Q2.end);
+  const acmeQ3 = await explanation(acme, "Gross margin rose as the reserve did not recur.", "2025-10-28T20:00:00Z", "2025-09-27");
+  const betaClaim = await explanation(beta, "Gross margin rose on mix.", "2025-08-03T20:00:00Z");
+  await explanation(gamma, "Gross margin was pressured by export controls.", "2025-08-02T20:00:00Z");
+  await explanation(gamma, "Gross margin recovered in the third quarter.", "2025-10-29T20:00:00Z", "2025-09-27");
+  const read = async (issuers: ReadonlyArray<string>, explained: ReadonlyArray<Explained>) => (await explainedEvidence(
+    client,
+    { subject_refs: issuers.map((id) => ({ kind: "issuer" as const, id })), user_id: null },
+    explained,
+    (ref) => (ref.kind === "issuer" ? ref.id : null),
+  )).claim_refs;
+  const figures = (issuer: string): Explained => ({ issuer, kind: "figures", period: Q2, metrics: ["gross_margin"] });
+
+  await t.test("a company the answer explained no figure for, though in scope, reads the route's claims; the one it explained reads its quarter's", async () => {
+    assert.deepEqual(await read([acme, beta], [figures(acme)]), [acmeQ2, betaClaim]);
+  });
+
+  await t.test("an answer that explained no company's figures reads every company by the route, newest first", async () => {
+    assert.deepEqual(await read([acme, beta], []), [acmeQ3, acmeQ2, betaClaim]);
+  });
+
+  await t.test("a company whose explanations are bound to no quarter, or to another, gets none of them in the quarter's place", async () => {
+    assert.deepEqual(await read([gamma], [figures(gamma)]), []);
+  });
 });
 
 function restoreEnv(key: string, value: string | undefined): void {

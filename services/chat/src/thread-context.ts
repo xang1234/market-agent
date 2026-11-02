@@ -87,18 +87,10 @@ export async function loadPriorScope(
   return parseResearchScope(rows[0]?.research_scope ?? null);
 }
 
-// The claims the answer an evidence follow-up re-reads quoted as the filed
-// cause of its figures (#542), as its child snapshot seals them; none when it
-// quoted none. That answer is the latest that saved a scope and is not itself
-// an evidence follow-up, so "Show the evidence" asked twice re-reads the same
-// one.
-export async function loadPriorCauseClaims(
-  db: QueryExecutor,
-  input: { threadId: string },
-): Promise<ReadonlyArray<string>> {
-  const { rows } = await db.query<{ claim_refs: unknown }>(
-    `select cause.claim_refs
-       from (select m.snapshot_id
+// The answer an evidence follow-up in thread $1 re-reads: the latest that
+// saved a scope and is not itself an evidence follow-up, so "Show the
+// evidence" asked twice re-reads the same one.
+export const RE_READ_ANSWER_SQL = `select m.snapshot_id, m.blocks
                from chat_messages m
               where m.thread_id = $1::uuid
                 and m.role = 'assistant'
@@ -106,7 +98,18 @@ export async function loadPriorCauseClaims(
                 and m.research_scope is not null
                 and m.research_scope->>'route' is distinct from 'evidence_followup'
               order by m.created_at desc
-              limit 1) answer
+              limit 1`;
+
+// The claims the answer an evidence follow-up re-reads quoted as the filed
+// cause of its figures (#542), as its child snapshot seals them; none when it
+// quoted none.
+export async function loadPriorCauseClaims(
+  db: QueryExecutor,
+  input: { threadId: string },
+): Promise<ReadonlyArray<string>> {
+  const { rows } = await db.query<{ claim_refs: unknown }>(
+    `select cause.claim_refs
+       from (${RE_READ_ANSWER_SQL}) answer
        join snapshots cause on cause.parent_snapshot = answer.snapshot_id
       order by cause.created_at, cause.snapshot_id`,
     [input.threadId],

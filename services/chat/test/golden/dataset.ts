@@ -467,11 +467,14 @@ export async function seedFiledClaims(client: Client): Promise<void> {
     effective_time: release.effective_time,
     confidence: 0.95,
     status: "extracted",
-    period: release.period,
   });
-  // Known by the golden cutoff, as the seeded facts are: a turn reads only
-  // claims ingested by its cutoff.
-  await client.query(`update claims set created_at = $2, updated_at = $2 where claim_id = $1::uuid`, [claim.claim_id, GOLDEN_AS_OF]);
+  // Known, and bound to its quarter, by the golden cutoff, as the seeded facts
+  // are: a turn reads only claims ingested, and periods bound, by its cutoff.
+  // A claim is bound once, so it is bound here rather than by createClaim at now().
+  await client.query(
+    `update claims set created_at = $2, updated_at = $2, period_kind = $3, period_end = $4::date, period_bound_at = $2 where claim_id = $1::uuid`,
+    [claim.claim_id, GOLDEN_AS_OF, release.period.kind, release.period.end],
+  );
   await createClaimArgument(client, { claim_id: claim.claim_id, subject_kind: "issuer", subject_id: amd.issuer_id, role: "subject" });
   await createClaimEvidence(client, { claim_id: claim.claim_id, document_id: document.document_id, locator: { kind: "paragraph", index: 2 }, confidence: 0.95 });
 }
