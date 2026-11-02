@@ -65,6 +65,16 @@ async function setUp(t: test.TestContext, name: string) {
   return { db, download, fetcher, options, lookup, backfill, netIncome, deriveFrom, isActive };
 }
 
+// A backfill that has fetched its download and waits to check out a connection until resumed.
+function backfillPausedAtCheckout(db: Awaited<ReturnType<typeof connectedPool>>, options: Omit<Parameters<typeof backfillSecCompanionStatements>[1], "issuerId">) {
+  let reached!: () => void;
+  const atCheckout = new Promise<void>((resolve) => (reached = resolve));
+  let resume!: () => void;
+  const resumed = new Promise<void>((resolve) => (resume = resolve));
+  const paused = { query: db.query.bind(db), connect: async () => (reached(), await resumed, db.connect()) };
+  return { atCheckout, resume, olderBackfill: backfillSecCompanionStatements(paused as unknown as typeof db, { issuerId: ISSUER_ID, ...options }) };
+}
+
 const inferred = (concept: string) => [{ kind: "no_noncontrolling_interest", concept, checked: CHECKED }];
 
 test("an inferred net income is stored with its basis, and a filing that reports noncontrolling interest for its period invalidates it (#342)", { timeout: 180_000 }, async (t) => {
@@ -346,12 +356,7 @@ test("an ingest of an older download writes no inference after a newer one refut
   const older = { Revenues: [year(2023, 2023, 500)], NetIncomeLoss: [year(2023, 2023, 70)] };
   download.text = companyFacts(older);
   await lookup(2023);
-  let reached!: () => void;
-  const atCheckout = new Promise<void>((resolve) => (reached = resolve));
-  let resume!: () => void;
-  const resumed = new Promise<void>((resolve) => (resume = resolve));
-  const paused = { query: db.query.bind(db), connect: async () => (reached(), await resumed, db.connect()) };
-  const olderBackfill = backfillSecCompanionStatements(paused as unknown as typeof db, { issuerId: ISSUER_ID, ...options });
+  const { atCheckout, resume, olderBackfill } = backfillPausedAtCheckout(db, options);
   await atCheckout;
   const newer = {
     Revenues: [...older.Revenues, year(2024, 2023, 500), year(2024, 2024, 600)],
@@ -374,4 +379,30 @@ test("an ingest of an older download writes no inference after a newer one refut
   });
   await lookup(2025);
   assert.deepEqual(await consolidated(2025), [["90", true]], "a newer download with no noncontrolling interest still infers");
+});
+
+test("an ingest of an older download leaves the consolidated figure a newer one stored (#342)", { timeout: 180_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for SEC ingestion coverage");
+    return;
+  }
+  const { db, download, options, lookup, backfill, netIncome } = await setUp(t, "fin-sec-ni-older-repair");
+  const older = { Revenues: [year(2023, 2023, 500)], NetIncomeLoss: [year(2023, 2023, 70)] };
+  download.text = companyFacts(older);
+  await lookup(2023);
+  const { atCheckout, resume, olderBackfill } = backfillPausedAtCheckout(db, options);
+  await atCheckout;
+  const refiled = (val: number): Value => ({ ...year(2023, 2023, val), accn: "0000000342-24-000009", filed: "2024-06-01" });
+  download.text = companyFacts({
+    Revenues: [...older.Revenues, refiled(500)],
+    NetIncomeLoss: [...older.NetIncomeLoss, refiled(70)],
+    ProfitLoss: [refiled(75)],
+  });
+  await backfill();
+  resume();
+  await olderBackfill;
+  assert.deepEqual(
+    (await netIncome()).filter((row) => row.metric_key === "net_income_consolidated").map(({ value, active, flags }) => [value, active, flags]),
+    [["70", false, inferred("NetIncomeLoss")], ["75", true, []]],
+  );
 });
