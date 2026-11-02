@@ -181,7 +181,7 @@ filing's cash flow and balance sheet are extracted from it and stored in the sam
   the filing no longer yields for the period is invalidated too when its dates are another period's, when it is
   inferred, or when it is an unproven net income equal to the download's `ProfitLoss` for its period (#342: ingestion
   once stored `ProfitLoss` there). A stored fact whose
-  `no_noncontrolling_interest` inference differs from the filing's line is replaced like one with another value, and a
+  `no_noncontrolling_interest` inference differs from the filing's line in kind or concept (not in the concepts checked) is replaced like one with another value, and a
   fact retired either way takes every fact derived from it (`input_fact_ids`) with it. A snapshot cut before the repair
   still reads the old fact (`factActiveSql` judges activity at the cutoff). A rerun keeps a matching fact's value, and
   one with no proven precision gains a `revalidated_against_source` proof, or a `derived_from_source_tokens` one for a

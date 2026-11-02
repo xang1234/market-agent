@@ -558,12 +558,18 @@ async function staleStatementFacts(
     const otherValue = exact
       ? checkTokenAgainstStoredValue(exact, row.stored_value).status !== "match"
       : (row.stored_value === null ? null : Number(row.stored_value)) !== line?.value_num;
-    const otherBasis = !isDeepStrictEqual(row.inference, inferences.get(row.metric_key) ?? null);
+    const otherBasis = !isDeepStrictEqual(claimOf(row.inference), claimOf(inferences.get(row.metric_key)));
     const unreproduced = line === undefined && (row.inference !== null || (row.metric_key === "net_income" && !row.proven && isProfitLoss(row)));
     const contradicted = otherDates || (line !== undefined && (otherValue || otherBasis)) || unreproduced;
     if (contradicted) stale.set(row.metric_key, [...(stale.get(row.metric_key) ?? []), row.fact_id]);
   }
   return stale;
+}
+
+// An inference's claim, without the concept list it was checked against: a
+// longer list in a later release does not make the stored figure another one.
+function claimOf(inference: NoncontrollingInterestInferenceV1 | null | undefined) {
+  return inference ? { kind: inference.kind, concept: inference.concept } : null;
 }
 
 function extracted(result: ReturnType<typeof extractStatementWithTokens>): Extracted {
@@ -1129,7 +1135,7 @@ type FactBatch = Pick<
 
 // The caller reads the fact's proof in a later statement, which sees a proof
 // a concurrent ingestion committed while this lock waited. A stored fact with
-// another inference basis is another claim, never proven by this line.
+// another inference claim (`claimOf`) is another figure, never proven by this line.
 async function lockStoredExactFact(
   db: FundamentalsQueryExecutor,
   statement: FactBatch,
@@ -1144,7 +1150,7 @@ async function lockStoredExactFact(
         and f.fiscal_year = $4 and f.fiscal_period = $5 and f.source_id = $6 and f.method = 'reported'
         and ${factActiveSql("f")}
         and f.period_start is not distinct from $7::date and f.period_end = $8::date and f.value_num = $9::numeric
-        and ${INFERENCE_SQL} is not distinct from $10::jsonb
+        and (${INFERENCE_SQL} - 'checked') is not distinct from ($10::jsonb - 'checked')
       for update`,
     [
       statement.subject.id,
