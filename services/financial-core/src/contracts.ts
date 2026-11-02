@@ -451,6 +451,21 @@ export type DerivationProofV1 = {
   }>;
 };
 
+/**
+ * Why a filed value stands for a metric its concept does not name (#342).
+ * Income attributable to the parent (NetIncomeLoss) and consolidated income
+ * (ProfitLoss) are one figure when no part of it belongs to a noncontrolling
+ * interest, so a filer that reports none for the period need tag only one.
+ * `concept` is the one it tagged; `checked` lists the concepts that would
+ * have shown a noncontrolling interest. A later filing that shows one
+ * invalidates the fact.
+ */
+export type NoncontrollingInterestInferenceV1 = {
+  kind: "no_noncontrolling_interest";
+  concept: string;
+  checked: string[];
+};
+
 /** An immutable bound input: a fact, or a share price from a stored price observation. */
 export type BoundFinancialInputV1 = BoundFactInputV1 | BoundPriceInputV1;
 

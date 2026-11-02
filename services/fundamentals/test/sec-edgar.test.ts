@@ -1052,7 +1052,7 @@ test("a figure standing in for the other net income records that the filer repor
     subject: aaplIssuer, facts: annualFacts({ NetIncomeLoss: { 2023: 70 } }), family: "income", fiscal_year: 2023, fiscal_period: "FY",
     source_id: SEC_SOURCE_ID, as_of: "2025-02-02T00:00:00.000Z",
   });
-  assert.deepEqual([...inferences], [["net_income_consolidated", { kind: "no_noncontrolling_interest", concept: "NetIncomeLoss", checked: [...SEC_NONCONTROLLING_INTEREST_CONCEPTS] }]]);
+  assert.deepEqual([...inferences], [["net_income_consolidated", { kind: "no_noncontrolling_interest", concept: "NetIncomeLoss", checked: [...SEC_NONCONTROLLING_INTEREST_CONCEPTS, "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"] }]]);
   assert.equal(tokens.get("net_income_consolidated"), tokens.get("net_income"));
 });
 

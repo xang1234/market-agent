@@ -9,6 +9,7 @@
 // hand-seeded registry uses.
 
 import { createHash } from "node:crypto";
+import type { NoncontrollingInterestInferenceV1 } from "../../financial-core/src/contracts.ts";
 import type {
   FiscalPeriod,
   NormalizedStatementInput,
@@ -353,6 +354,8 @@ export function extractStatementWithTokens(input: ExtractStatementInput): {
   // For each derived line, the filed values it was computed from (their
   // filings may differ from the statement's own).
   derivations: ReadonlyMap<string, SecDerivation>;
+  // For each line that stands in for the other net income, why it may.
+  inferences: ReadonlyMap<string, NoncontrollingInterestInferenceV1>;
 } {
   const familyKeys = FAMILY_KEYS[input.family];
   const select = FAMILY_SELECTORS[input.family];
@@ -378,10 +381,12 @@ export function extractStatementWithTokens(input: ExtractStatementInput): {
   let resolvedPeriodStart: string | null = null;
   let resolvedPeriodEnd: string | null = null;
 
+  const conceptOf = new Map<string, string>();
+  const dropped = new Set<string>();
   // Walk the MAPPING in declared order (not the response): this fixes the
   // collision policy at code-defined priority. First-mapped concept that
   // has a matching value wins.
-  for (const [conceptName, metricKey] of Object.entries(US_GAAP_TO_METRIC_KEY)) {
+  for (const [conceptName, metricKey] of SELECTION_ORDER) {
     if (!familyKeys.has(metricKey)) continue;
     if (seenKeys.has(metricKey)) continue;
     const concept = usGaap[conceptName];
@@ -404,6 +409,10 @@ export function extractStatementWithTokens(input: ExtractStatementInput): {
         match.end !== resolvedPeriodEnd ||
         (match.start ?? null) !== resolvedPeriodStart
       ) {
+        if (PERIOD_OPTIONAL_KEYS.has(metricKey)) {
+          dropped.add(metricKey);
+          break;
+        }
         throw new Error(
           `extractStatement: concept "${conceptName}" period (${match.start ?? "—"}..${match.end}) disagrees with prior matches (${resolvedPeriodStart ?? "—"}..${resolvedPeriodEnd})`,
         );
@@ -436,6 +445,7 @@ export function extractStatementWithTokens(input: ExtractStatementInput): {
       if (match.derived_from !== undefined) {
         derivations.set(metricKey, { concept: conceptName, unit: unitCode, ...match.derived_from });
       }
+      conceptOf.set(metricKey, conceptName);
       seenKeys.add(metricKey);
       break; // one unit per concept per period
     }
@@ -446,15 +456,18 @@ export function extractStatementWithTokens(input: ExtractStatementInput): {
       `extractStatement: no us-gaap values for fiscal_year=${input.fiscal_year} fiscal_period="${input.fiscal_period}" ${selectionDescription}`,
     );
   }
-  // A filer with no noncontrolling interest need not tag ProfitLoss: its
-  // NetIncomeLoss is then the consolidated figure too.
-  const parent = lines.find((line) => line.metric_key === "net_income");
-  if (parent && !seenKeys.has("net_income_consolidated") && !reportsNoncontrollingInterest(usGaap, resolvedPeriodStart, resolvedPeriodEnd)) {
-    lines.push({ ...parent, metric_key: "net_income_consolidated" });
-    const token = tokens.get("net_income");
-    if (token) tokens.set("net_income_consolidated", token);
-    const derivation = derivations.get("net_income");
-    if (derivation) derivations.set("net_income_consolidated", derivation);
+  const inferences = new Map<string, NoncontrollingInterestInferenceV1>();
+  const standIns = [["net_income", "net_income_consolidated"], ["net_income_consolidated", "net_income"]] as const;
+  for (const [from, to] of standIns) {
+    const line = lines.find((candidate) => candidate.metric_key === from);
+    if (!line || seenKeys.has(to) || dropped.has(to) || reportsNoncontrollingInterest(usGaap, resolvedPeriodStart, resolvedPeriodEnd)) continue;
+    lines.push({ ...line, metric_key: to });
+    const token = tokens.get(from);
+    if (token) tokens.set(to, token);
+    const derivation = derivations.get(from);
+    if (derivation) derivations.set(to, derivation);
+    inferences.set(to, { kind: "no_noncontrolling_interest", concept: conceptOf.get(from)!, checked: [...NONCONTROLLING_INTEREST_CHECKED] });
+    seenKeys.add(to);
   }
   if (observedCurrencies.size > 1) {
     throw new Error(
@@ -486,23 +499,55 @@ export function extractStatementWithTokens(input: ExtractStatementInput): {
     source_id: input.source_id,
     lines,
   };
-  return { statement, tokens, derivations };
+  return { statement, tokens, derivations, inferences };
 }
 
-// A value of any of these over a span that overlaps the period, from any
-// filing, means some of the filer's income or equity then belonged to
-// noncontrolling interest.
-const NONCONTROLLING_INTEREST_CONCEPTS = [
+// Selection walks the mapping in its declared order, except that consolidated
+// net income comes last: a ProfitLoss whose period disagrees is dropped
+// alone, so it must never be the value the others are checked against.
+const PERIOD_OPTIONAL_KEYS: ReadonlySet<string> = new Set(["net_income_consolidated"]);
+const SELECTION_ORDER = Object.entries(US_GAAP_TO_METRIC_KEY)
+  .sort(([, left], [, right]) => Number(PERIOD_OPTIONAL_KEYS.has(left)) - Number(PERIOD_OPTIONAL_KEYS.has(right)));
+
+/**
+ * A value of any of these over a span that overlaps a period, from any filing,
+ * means some of the filer's income or equity then belonged to a
+ * noncontrolling interest. Each is a us-gaap concept SEC filers tag in
+ * companyfacts (Berkshire, Blackstone, Comcast, Exxon, KKR, Simon Property,
+ * Walmart). IncomeLossFromContinuingOperationsBeforeIncomeTaxes...
+ * NoncontrollingInterest is not one: it is income before that share, and
+ * filers with none (Apple, Microsoft) tag it.
+ */
+export const SEC_NONCONTROLLING_INTEREST_CONCEPTS = [
   "NetIncomeLossAttributableToNoncontrollingInterest",
   "NetIncomeLossAttributableToRedeemableNoncontrollingInterest",
   "NetIncomeLossAttributableToNonredeemableNoncontrollingInterest",
+  "IncomeLossAttributableToNoncontrollingInterest",
+  "IncomeLossFromContinuingOperationsAttributableToNoncontrollingEntity",
+  "ComprehensiveIncomeNetOfTaxAttributableToNoncontrollingInterest",
+  "OtherComprehensiveIncomeLossNetOfTaxPortionAttributableToNoncontrollingInterest",
   "MinorityInterest",
-];
+  "MinorityInterestInOperatingPartnerships",
+  "OtherMinorityInterests",
+  "NonredeemableNoncontrollingInterest",
+  "RedeemableNoncontrollingInterestEquityCarryingAmount",
+  "RedeemableNoncontrollingInterestEquityCommonCarryingAmount",
+  "RedeemableNoncontrollingInterestEquityFairValue",
+  "PartnersCapitalAttributableToNoncontrollingInterest",
+] as const;
 
-function reportsNoncontrollingInterest(usGaap: Record<string, SecConcept>, start: string | null, end: string): boolean {
-  return NONCONTROLLING_INTEREST_CONCEPTS.some((name) =>
-    Object.values(usGaap[name]?.units ?? {}).some((values) =>
-      values.some((value) => value.end >= (start ?? end) && (value.start ?? value.end) <= end)));
+// Equity including noncontrolling interest that differs from the parent's at
+// the same instant shows one too; equal, or tagged alone, it shows none.
+const EQUITY_INCLUDING_NONCONTROLLING_INTEREST = "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest";
+const NONCONTROLLING_INTEREST_CHECKED = [...SEC_NONCONTROLLING_INTEREST_CONCEPTS, EQUITY_INCLUDING_NONCONTROLLING_INTEREST];
+
+export function reportsNoncontrollingInterest(usGaap: Record<string, SecConcept>, start: string | null, end: string): boolean {
+  const within = (name: string) => Object.values(usGaap[name]?.units ?? {})
+    .flatMap((values) => (Array.isArray(values) ? values : []))
+    .filter((value) => value.end >= (start ?? end) && (value.start ?? value.end) <= end);
+  if (SEC_NONCONTROLLING_INTEREST_CONCEPTS.some((name) => within(name).length > 0)) return true;
+  const parent = within("StockholdersEquity");
+  return within(EQUITY_INCLUDING_NONCONTROLLING_INTEREST).some((total) => parent.some((own) => own.end === total.end && own.val !== total.val));
 }
 
 /** A derived line's inputs: each filed value, by its filing (accession) and period. */
