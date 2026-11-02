@@ -60,7 +60,3 @@ client-facing refresh envelope for transform endpoints. Rejections return
 `status: 409` with `{ error: "refresh_required", refresh_required: { reason } }`,
 where `reason` is one of `basis`, `normalization`, `peer_set`, `freshness`, or
 `transform`.
-
-`createSnapshotServer()` wires `POST /v1/snapshots/{snapshotId}/transform` to
-that boundary check with injected manifest loading and transform execution.
-Refresh-required requests are rejected before the executor runs.

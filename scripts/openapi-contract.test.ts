@@ -54,7 +54,6 @@ const FRONTEND_V1_ROUTES = [
   "/v1/screener/screens",
   "/v1/screener/screens/{screenId}",
   "/v1/screener/search",
-  "/v1/snapshots/{snapshotId}/transform",
   "/v1/subjects/resolve",
   "/v1/watchlists",
   "/v1/watchlists/{watchlist_id}",
