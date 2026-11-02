@@ -43,7 +43,7 @@ import { createLlmThreadTitleModel, type DroppedClaims } from "./llm-runtime.ts"
 import { structuredRefsFromHandoff } from "./local-runtime-structured.ts";
 import { createChatFinancialRuntime, type ChatFinancialRuntime, type ChatFinancialTurnContext } from "./financial-runtime.ts";
 import { saveCommentary } from "./engine-commentary.ts";
-import { createChatMessagePersistence, type ChatSealResult } from "./messages.ts";
+import { ChatSnapshotSealError, createChatMessagePersistence, type ChatSealResult } from "./messages.ts";
 import {
   preResolveChatSubjectWithResolver,
   type ChatResolvedSubjectPreResolution,
@@ -491,7 +491,8 @@ async function sealAssistantMessageSnapshot(input: ChatAssistantMessagePersisten
   let releaseError: Error | undefined;
   try {
     await client.query("begin");
-    const dropped = input.without && await droppedClaims(client, input.blocks, { user_id: userId, as_of: asOf });
+    const dropped = await droppedClaims(client, input.blocks, { user_id: userId, as_of: asOf });
+    if (dropped && !input.without) throw new ChatSnapshotSealError([{ reason_code: "missing_claim_ref", details: dropped }]);
     const blocks = dropped ? input.without!(dropped) : input.blocks;
     // On this client alone: one waiting for another while it holds its locks
     // would stall the pool once every client did.

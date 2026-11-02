@@ -191,7 +191,7 @@ export type ChatAssistantMessagePersistenceInput = {
   research_scope?: ResearchScope;
   // The blocks to seal and save in place of `blocks` when the seal leaves out
   // claims they quote that are no longer citable or cannot be checked (#557).
-  // Without it, the seal checks no quoted claim.
+  // Without it, a seal that would leave one out is refused.
   without?: (dropped: DroppedClaims) => ReadonlyArray<Record<string, unknown>>;
   // Called once, after a verified seal of `blocks` and before the message is
   // saved, with the sealed snapshot and its blocks' proofs; the blocks it
