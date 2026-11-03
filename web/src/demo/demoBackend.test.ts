@@ -97,9 +97,8 @@ test('the demo answers each recorded question as the chat client posts it', asyn
   try {
     const thread = fixture.exchanges.find((e) => e.method === 'GET' && e.path.endsWith('/messages'))!.path.split('/').at(-2)!
     for (const content of DEMO_QUESTIONS) {
-      const messageId = crypto.randomUUID()
-      const message = await persistUserChatTurn({ threadId: thread, userId: '00000000-0000-4000-8000-000000000001', messageId, content })
-      assert.deepEqual([message.message_id, message.thread_id, message.role], [messageId, thread, 'user'])
+      const message = await persistUserChatTurn({ threadId: thread, userId: '00000000-0000-4000-8000-000000000001', content })
+      assert.deepEqual([message.thread_id, message.role], [thread, 'user'])
     }
   } finally {
     globalThis.fetch = demoFetch

@@ -4,7 +4,6 @@ import type { ChatMessage } from './messageTypes.ts'
 export async function persistUserChatTurn(input: {
   threadId: string
   userId: string
-  messageId: string
   content: string
 }): Promise<ChatMessage> {
   const body = await authenticatedJson<{ message?: ChatMessage }>(`/v1/chat/threads/${encodeURIComponent(input.threadId)}/messages`, {
@@ -13,10 +12,7 @@ export async function persistUserChatTurn(input: {
     headers: {
       'content-type': 'application/json',
     },
-    body: JSON.stringify({
-      message_id: input.messageId,
-      content: input.content,
-    }),
+    body: JSON.stringify({ content: input.content }),
   })
   if (!body.message) throw new Error('message missing from response')
   return body.message

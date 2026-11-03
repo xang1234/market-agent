@@ -22,13 +22,6 @@ export type ChatMessagePersistenceDb = {
   ): Promise<{ rows: R[] }>;
 };
 
-export class ChatMessageIdempotencyConflictError extends Error {
-  constructor(message = "message_id is already in use") {
-    super(message);
-    this.name = "ChatMessageIdempotencyConflictError";
-  }
-}
-
 // The snapshot verifier rejected the answer. Carries the verifier's failures so
 // display_unverified mode can show why; strict mode surfaces it as turn.error.
 export class ChatSnapshotSealError extends Error {
@@ -52,6 +45,14 @@ export class ChatMessageUnreadError extends Error {
     this.name = "ChatMessageUnreadError";
     this.message_id = messageId;
     this.snapshot_id = snapshotId;
+  }
+}
+
+// Another message, a user's included, holds the id a message is saved under.
+export class ChatMessageIdTakenError extends Error {
+  constructor(messageId: string) {
+    super(`another message holds the id ${messageId}; the message was not saved`);
+    this.name = "ChatMessageIdTakenError";
   }
 }
 
@@ -138,7 +139,6 @@ export type PersistUserChatMessageInput = {
   thread_id: string;
   user_id: string;
   content: string;
-  message_id?: string;
 };
 
 export type ChatMessagePersistenceFactoryInput = {
@@ -445,9 +445,9 @@ export async function persistUserChatMessage(
   const client = await acquireChatMessageClient(db);
   let completed = false;
   let releaseError: Error | undefined;
-  const messageId = input.message_id ?? randomUUID();
-  // Never the client's: an id it picks could name another user's snapshot,
-  // or one an answer will seal under.
+  // Never the client's: an id it picks could name another user's snapshot or
+  // message, or one an answer will be saved under (#550).
+  const messageId = randomUUID();
   const snapshotId = randomUUID();
   const asOf = new Date().toISOString();
   const blocks = [
@@ -525,7 +525,6 @@ export async function persistUserChatMessage(
       `insert into chat_messages
          (message_id, thread_id, role, snapshot_id, blocks, content_hash)
        values ($1::uuid, $2::uuid, 'user'::chat_role, $3::uuid, $4::jsonb, $5)
-       on conflict (message_id) do nothing
        returning
          message_id::text as message_id,
          thread_id::text as thread_id,
@@ -542,10 +541,7 @@ export async function persistUserChatMessage(
         contentHash,
       ],
     );
-    const message = rows[0];
-    if (message === undefined) {
-      throw new ChatMessageIdempotencyConflictError();
-    }
+    const message = rows[0]!;
 
     await client.query(
       `update chat_threads
@@ -629,6 +625,11 @@ async function persistSealedChatMessage(
         throw new Error("persistChatMessageAfterSnapshotSeal: chat message insert returned no row");
       }
       // A turn re-run after a restart keeps the answer its first attempt saved.
+      const held = await db.query(
+        `select 1 from chat_messages where message_id = $1::uuid and thread_id = $2::uuid and role = $3::chat_role`,
+        [input.message_id, input.thread_id, input.role],
+      );
+      if (held.rows.length === 0) throw new ChatMessageIdTakenError(input.message_id);
       messageId = input.message_id;
     } else {
       messageId = inserted.message_id;

@@ -836,7 +836,8 @@ paths:
                 message_id:
                   type: string
                   format: uuid
-                  description: Optional client-generated id for the message. It is not an idempotency key. An id any message already holds returns 409 and saves nothing, and that includes a retry of a request that was saved.
+                  deprecated: true
+                  description: Ignored. The server saves the message under a new id, returned as message.message_id, and a client streams the turn the message asks with that id as turn_id. Each request saves a new message, so a retry of a request that was saved saves another.
                 snapshot_id:
                   type: string
                   format: uuid
@@ -865,8 +866,6 @@ paths:
           description: Missing or malformed user credential
         '404':
           description: Thread not found for the calling user
-        '409':
-          description: The message_id is already in use
   /v1/chat/threads/{threadId}/stream:
     get:
       tags: [Chat]

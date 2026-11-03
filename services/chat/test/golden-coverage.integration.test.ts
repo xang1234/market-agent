@@ -57,8 +57,7 @@ test("golden coverage notes and declined-turn retries (#425)", { skip: !dockerAv
     requireRecordedScopes(st);
     const { thread_id } = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Retried gap" });
     const question = "Break down AMD's revenue by segment";
-    const turnId = randomUUID();
-    await api(base, "POST", `/v1/chat/threads/${thread_id}/messages`, { message_id: turnId, snapshot_id: randomUUID(), content: question });
+    const { message: { message_id: turnId } } = await api<{ message: { message_id: string } }>(base, "POST", `/v1/chat/threads/${thread_id}/messages`, { content: question });
     const first = completedTurn(await streamTurn(base, thread_id, question, turnId));
     const retried = completedTurn(await streamTurn(base, thread_id, question, turnId));
     assert.equal(retried.data.message_id, first.data.message_id);

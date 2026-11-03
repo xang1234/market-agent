@@ -3,7 +3,6 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ChatActiveRun, ChatCoordinator, ChatRunStatus } from "./coordinator.ts";
 
 import {
-  ChatMessageIdempotencyConflictError,
   listChatMessagesForThread,
   persistUserChatMessage,
   type ChatReadMessage,
@@ -24,7 +23,6 @@ import {
   readAuthenticatedUserId,
   type RequestAuthConfig,
 } from "../../shared/src/request-auth.ts";
-import { isUuid } from "./chat-ids.ts";
 import { readBody, RequestBodyTooLargeError, respondJson } from "../../shared/src/http.ts";
 
 const MAX_REQUEST_BODY_BYTES = 16 * 1024;
@@ -112,21 +110,11 @@ export async function tryHandleThreadsRequest(
           respondJson(res, 400, { error: input.message });
           return true;
         }
-        let message;
-        try {
-          message = await persistUserChatMessage(db, {
-            thread_id: route.threadId,
-            user_id: userId,
-            content: input.value.content,
-            message_id: input.value.message_id,
-          });
-        } catch (error) {
-          if (error instanceof ChatMessageIdempotencyConflictError) {
-            respondJson(res, 409, { error: error.message });
-            return true;
-          }
-          throw error;
-        }
+        const message = await persistUserChatMessage(db, {
+          thread_id: route.threadId,
+          user_id: userId,
+          content: input.value.content,
+        });
         if (message === null) {
           respondJson(res, 404, { error: "chat thread not found" });
           return true;
@@ -308,23 +296,12 @@ function parseCreateInput(body: unknown): CreateThreadInput {
 }
 
 type UserMessageInputParseResult =
-  | { kind: "ok"; value: { content: string; message_id?: string } }
+  | { kind: "ok"; value: { content: string } }
   | { kind: "error"; message: string };
 
 function parseUserMessageInput(body: object): UserMessageInputParseResult {
   const candidate = body as Record<string, unknown>;
   const content = typeof candidate.content === "string" ? candidate.content.trim() : "";
   if (content.length === 0) return { kind: "error", message: "'content' is required" };
-  const messageId = parseOptionalUuid(candidate.message_id);
-  if (messageId.kind === "error") return { kind: "error", message: "'message_id' must be a UUID" };
-  return { kind: "ok", value: { content, message_id: messageId.value } };
-}
-
-function parseOptionalUuid(value: unknown): { kind: "ok"; value?: string } | { kind: "error" } {
-  if (value === undefined || value === null) return { kind: "ok" };
-  if (typeof value !== "string") return { kind: "error" };
-  const trimmed = value.trim();
-  if (trimmed === "") return { kind: "ok" };
-  if (!isUuid(trimmed)) return { kind: "error" };
-  return { kind: "ok", value: trimmed };
+  return { kind: "ok", value: { content } };
 }

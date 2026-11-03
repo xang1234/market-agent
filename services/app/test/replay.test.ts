@@ -274,13 +274,13 @@ test("a saved session that doesn't parse, or isn't one this replay saved, counts
 test("a reload between turns of the golden conversation shows the thread as it stood", async () => {
   const fixture = await loadReplayFixture(fileURLToPath(new URL("../fixtures/golden-conversation.replay.json", import.meta.url)));
   const store = memoryStore();
-  // What the web client sends: its own message and run ids, then the stream.
+  // What the web client sends: the question, then the stream of the turn the saved message names, on a run id of its own.
   const turn = (replay: Replay, thread: string, content: string) => {
-    const [message_id, run_id] = [randomUUID(), randomUUID()];
-    const posted = replay({ method: "POST", path: `/v1/chat/threads/${thread}/messages`, query: "", body: json({ message_id, content }) });
-    const query = new URLSearchParams({ run_id, turn_id: message_id, user_intent: content, user_id: USER }).toString();
-    const stream = replay({ method: "GET", path: `/v1/chat/threads/${thread}/stream`, query, body: "" });
+    const posted = replay({ method: "POST", path: `/v1/chat/threads/${thread}/messages`, query: "", body: json({ content }) });
     assert.equal(posted?.status, 201, content);
+    const { message_id } = (JSON.parse(posted!.body) as { message: { message_id: string } }).message;
+    const query = new URLSearchParams({ run_id: randomUUID(), turn_id: message_id, user_intent: content, user_id: USER }).toString();
+    const stream = replay({ method: "GET", path: `/v1/chat/threads/${thread}/stream`, query, body: "" });
     assert.match(stream?.body ?? "", new RegExp(`"turn_id":"${message_id}"[^]*event: turn.completed\\n`), content);
     return message_id;
   };

@@ -162,9 +162,11 @@ export class FakeServer {
     if (path === '/v1/chat/threads' && method === 'POST') return this.createReply()
     const match = /^\/v1\/chat\/threads\/([^/]+)\/messages$/.exec(path)
     if (match && method === 'POST') {
-      const posted = JSON.parse(body) as { message_id: string; content: string }
-      const message = chatMessage(match[1], posted.message_id, 'user', posted.content)
-      this.posted.set(posted.message_id, message)
+      // As the chat service does, it saves the message under an id of its own.
+      const posted = JSON.parse(body) as { content: string }
+      const id = `00000000-0000-4000-8000-${String(this.posted.size + 1).padStart(12, '0')}`
+      const message = chatMessage(match[1], id, 'user', posted.content)
+      this.posted.set(id, message)
       return this.postReply(message)
     }
     if (match && method === 'GET') return this.history(match[1])

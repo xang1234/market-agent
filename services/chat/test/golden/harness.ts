@@ -51,9 +51,8 @@ export async function api<T>(base: string, method: string, path: string, body?: 
 // Saves the user's message, then reads the turn's stream until it completes or
 // errors (the server keeps the connection open for reconnects).
 export async function runTurn(base: string, threadId: string, userIntent: string): Promise<ParsedSseEvent[]> {
-  const messageId = randomUUID();
-  await api(base, "POST", `/v1/chat/threads/${threadId}/messages`, { message_id: messageId, snapshot_id: randomUUID(), content: userIntent });
-  return streamTurn(base, threadId, userIntent, messageId);
+  const { message } = await api<{ message: { message_id: string } }>(base, "POST", `/v1/chat/threads/${threadId}/messages`, { content: userIntent });
+  return streamTurn(base, threadId, userIntent, message.message_id);
 }
 
 // Runs the turn the user's message `turnId` asks for on a new run, as the

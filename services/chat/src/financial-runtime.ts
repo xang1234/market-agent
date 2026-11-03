@@ -732,7 +732,7 @@ function persistAssistantMessage(
       ...(reading === null ? { coverage_unchecked: true as const } : {}),
     };
     // It replaces a gap another attempt of the turn saved under its id. A
-    // client may post a user message under that id, in any thread.
+    // user message a client named before #550 may still hold that id, in any thread.
     const inserted = await tx.client.query(
       `insert into chat_messages (message_id, thread_id, role, snapshot_id, blocks, content_hash, research_scope)
        select $1::uuid, t.thread_id, 'assistant'::chat_role, $3::uuid, $4::jsonb, $5, $7::jsonb
