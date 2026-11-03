@@ -39,8 +39,14 @@ import {
 import { financialAwareRunner } from "./financial-turn.ts";
 import { companyNameIn, type CompanyChange, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
 import type { AssertionReport } from "./assertions.ts";
-import type { DroppedClaims } from "./llm-runtime.ts";
 import type { BlockProof } from "../../snapshot/src/block-proof.ts";
+
+// The claims an answer quoted that its seal left out, by claim id (#557):
+// withdrawn, no longer citable; unchecked, being changed by another session,
+// so they could not be checked.
+// Here, not in llm-runtime.ts: the engine typecheck reaches this file and must not
+// reach services/llm.
+export type DroppedClaims = Readonly<{ withdrawn: ReadonlyArray<string>; unchecked: ReadonlyArray<string> }>;
 
 export type ChatTurnInput = {
   threadId: string;
