@@ -401,15 +401,31 @@ async function fillInstrumentIdentityFields(
 // its CIK issuer (#403), so the listing keeps its instrument unless the entry's
 // cik/lei/isin/figi/cusip names a different issuer or instrument. The update
 // never writes instrument_id, so it cannot undo a concurrent identity move.
+// Providers can disagree on a ticker's MIC (Polygon's ARCX against the bundle's
+// XNYS), so with no listing on the entry's MIC, the ticker's only active listing
+// counts when its issuer has no CIK yet and it trades in the entry's currency.
 async function keepExistingListing(db: QueryExecutor, listing: DiscoveredListing): Promise<string | null> {
   const issuer = issuerIdentityFromListing(listing);
   const instrument = instrumentIdentityFromListing(listing);
   const existing = await db.query<{ listing_id: string; instrument_id: string; issuer_id: string }>(
-    `select listing_id, l.instrument_id, i.issuer_id
+    `with active as (
+       select listing_id from listings
+        where ticker = $2
+          and (active_from is null or active_from <= now())
+          and (active_to is null or active_to > now())
+     )
+     select l.listing_id, l.instrument_id, i.issuer_id
        from listings l
        join instruments i on i.instrument_id = l.instrument_id
        join issuers iss on iss.issuer_id = i.issuer_id
-      where l.mic = $1 and l.ticker = $2 and l.active_from is null
+      where l.ticker = $2
+        and ((l.mic = $1 and l.active_from is null)
+          or (iss.cik is null
+            and l.trading_currency = $8
+            and l.listing_id in (select listing_id from active)
+            and (select count(*) from active) = 1
+            and not exists (
+              select 1 from listings same where same.mic = $1 and same.ticker = $2 and same.active_from is null)))
         and ($3::text is null or (coalesce(iss.cik, $3) = $3 and not exists (
               select 1 from issuers other where other.cik = $3 and other.issuer_id <> iss.issuer_id)))
         and ($4::text is null or (coalesce(upper(iss.lei), $4) = $4 and not exists (
@@ -427,6 +443,7 @@ async function keepExistingListing(db: QueryExecutor, listing: DiscoveredListing
       instrument.isin ?? null,
       instrument.figiComposite ?? null,
       instrument.cusip ?? null,
+      listing.trading_currency,
     ],
   );
   const row = existing.rows[0];
