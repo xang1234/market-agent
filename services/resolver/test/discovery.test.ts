@@ -548,18 +548,73 @@ test("a discovered CIK on another MIC fills the CIK-less issuer that holds the t
   const client = await connectedClient(t, databaseUrl);
   const seeded = await seedListing(client, { legal_name: "SPDR S&P 500 ETF Trust", cik: null }, "SPY", { mic: "XNYS" });
 
-  const subject = await upsertDiscoveredListing(client, {
+  const polygonEntry: DiscoveredListing = {
     ...appleBundleEntry,
     ticker: "SPY",
     legal_name: "SPDR S&P 500 ETF",
     mic: "ARCX",
     cik: "0000884394",
-  });
+  };
+  const first = await upsertDiscoveredListing(client, polygonEntry);
+  const second = await upsertDiscoveredListing(client, polygonEntry);
 
   assert.deepEqual(await activeListings(client, "SPY"), [
     { listing_id: seeded.listing_id, mic: "XNYS", legal_name: "SPDR S&P 500 ETF Trust", cik: "884394" },
   ]);
+  assert.deepEqual(first, { kind: "listing", id: seeded.listing_id });
+  assert.deepEqual(second, { kind: "listing", id: seeded.listing_id });
+});
+
+test("a name-only entry on another MIC keeps the ticker's listing on its CIK issuer", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver discovery coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fix-403-mic-mismatch-name-only");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedListing(client, { legal_name: "SPDR S&P 500 ETF", cik: "884394" }, "SPY", { mic: "ARCX" });
+
+  const subject = await upsertDiscoveredListing(client, {
+    ...appleBundleEntry,
+    ticker: "SPY",
+    legal_name: "SPDR S&P 500 ETF Trust",
+    mic: "XNYS",
+  });
+
   assert.deepEqual(subject, { kind: "listing", id: seeded.listing_id });
+  assert.deepEqual(await activeListings(client, "SPY"), [
+    { listing_id: seeded.listing_id, mic: "ARCX", legal_name: "SPDR S&P 500 ETF", cik: "884394" },
+  ]);
+  const issuers = await client.query<{ count: string }>("select count(*)::text as count from issuers");
+  assert.equal(issuers.rows[0].count, "1");
+});
+
+test("an entry on another MIC keeps the listing's own timezone", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver discovery coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fix-403-mic-mismatch-timezone");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedListing(client, { legal_name: "Shopify Inc.", cik: null }, "SHOP", { mic: "XNYS" });
+
+  const subject = await upsertDiscoveredListing(client, {
+    ...appleBundleEntry,
+    ticker: "SHOP",
+    legal_name: "Shopify Inc.",
+    mic: "XTSE",
+    timezone: "America/Toronto",
+    cik: "0001594805",
+  });
+
+  assert.deepEqual(subject, { kind: "listing", id: seeded.listing_id });
+  const listing = await client.query<{ mic: string; trading_currency: string; timezone: string }>(
+    "select mic, trading_currency, timezone from listings where listing_id = $1",
+    [seeded.listing_id],
+  );
+  assert.deepEqual(listing.rows, [{ mic: "XNYS", trading_currency: "USD", timezone: "America/New_York" }]);
 });
 
 test("a discovered CIK that differs from the listing issuer's CIK moves the listing", { timeout: 120000 }, async (t) => {
