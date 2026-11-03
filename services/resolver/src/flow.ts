@@ -55,6 +55,9 @@ export type SearchToSubjectRequest = {
 export type SearchToSubjectOptions = {
   tickerDiscoveryProvider?: TickerDiscoveryProvider;
   discoveryLogger?: Pick<Console, "warn">;
+  // Tickers whose CIK-less discovery has run. Without it a known ticker never
+  // runs discovery, since resolve runs per keystroke against a rate-limited Polygon.
+  ciklessDiscoveryAttempts?: Set<string>;
 };
 
 export type CandidateSearchResult = {
@@ -319,7 +322,8 @@ async function resolveTickerWithDiscovery(
 ): Promise<ResolverEnvelope> {
   const initial = await resolveByTicker(db, ticker);
   if (!options.tickerDiscoveryProvider) return initial;
-  if (isNotFound(initial) ? initial.reason !== "unknown_ticker" : !(await claimCiklessDiscovery(db, ticker))) {
+  if (isNotFound(initial) && initial.reason !== "unknown_ticker") return initial;
+  if (!isNotFound(initial) && !(await claimCiklessDiscovery(db, ticker, options.ciklessDiscoveryAttempts))) {
     return initial;
   }
 
@@ -331,24 +335,25 @@ async function resolveTickerWithDiscovery(
     if (discovered.length === 0) return initial;
     return await resolveByTicker(db, ticker);
   } catch (error) {
+    options.ciklessDiscoveryAttempts?.delete(normalizedTicker(ticker));
     const logger = options.discoveryLogger ?? console;
     logger.warn("ticker discovery failed", error);
     return initial;
   }
 }
 
-// ponytail: a per-process set, so it resets on restart and a ticker Polygon has
-// no CIK for is retried once per process. Resolve runs per keystroke and Polygon
-// is rate-limited; persist the attempts if restarts ever burn the quota.
-const ciklessDiscoveryAttempts = new Set<string>();
-
 // A locally known ticker whose issuers all lack a CIK has no fundamentals
-// coverage (#403), so it gets one discovery attempt to fill the CIK. The claim
-// is taken before the await so concurrent resolves of one ticker run it once.
-async function claimCiklessDiscovery(db: QueryExecutor, ticker: string): Promise<boolean> {
-  const normalized = ticker.trim().toUpperCase();
-  if (ciklessDiscoveryAttempts.has(normalized)) return false;
-  ciklessDiscoveryAttempts.add(normalized);
+// coverage (#403), so it gets one completed discovery attempt. The claim is
+// taken before the first await so concurrent resolves of one ticker run it once,
+// and a failed attempt releases it so a provider outage doesn't use it up.
+async function claimCiklessDiscovery(
+  db: QueryExecutor,
+  ticker: string,
+  attempts: Set<string> | undefined,
+): Promise<boolean> {
+  const normalized = normalizedTicker(ticker);
+  if (!attempts || attempts.has(normalized)) return false;
+  attempts.add(normalized);
   const result = await db.query<{ has_cik: boolean | null }>(
     `select bool_or(iss.cik is not null) as has_cik
        from listings l
@@ -358,8 +363,15 @@ async function claimCiklessDiscovery(db: QueryExecutor, ticker: string): Promise
         and (l.active_from is null or l.active_from <= now())
         and (l.active_to is null or l.active_to > now())`,
     [normalized],
-  );
+  ).catch((error: unknown) => {
+    attempts.delete(normalized);
+    throw error;
+  });
   return result.rows[0]?.has_cik === false;
+}
+
+function normalizedTicker(ticker: string): string {
+  return ticker.trim().toUpperCase();
 }
 
 async function handoffFromResolved(

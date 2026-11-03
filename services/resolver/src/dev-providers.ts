@@ -75,26 +75,26 @@ export function createFallbackTickerDiscoveryProvider(
   providers: ReadonlyArray<TickerDiscoveryProvider>,
 ): TickerDiscoveryProvider {
   return {
+    // A failure with no listings found rethrows, so the caller can tell an
+    // outage from a ticker no provider knows and retry it (#403).
     async discoverTicker(ticker: string): Promise<DiscoveredListing[]> {
+      let firstError: unknown = null;
       for (const provider of providers) {
-        const discovered = await discoverWithProvider(provider, ticker);
-        if (discovered.length > 0) return discovered;
+        try {
+          const discovered = await provider.discoverTicker(ticker);
+          if (discovered.length > 0) return discovered;
+        } catch (error) {
+          console.warn("ticker discovery provider failed; trying next provider", {
+            ticker,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          firstError ??= error;
+        }
       }
+      if (firstError !== null) throw firstError;
       return [];
     },
   };
-}
-
-async function discoverWithProvider(provider: TickerDiscoveryProvider, ticker: string): Promise<DiscoveredListing[]> {
-  try {
-    return await provider.discoverTicker(ticker);
-  } catch (error) {
-    console.warn("ticker discovery provider failed; trying next provider", {
-      ticker,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return [];
-  }
 }
 
 function discoveredListingFromDevProvider(
