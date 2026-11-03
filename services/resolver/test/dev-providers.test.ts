@@ -157,3 +157,20 @@ test("fallback discovery does not call lower-trust providers after primary disco
   assert.equal((await provider.discoverTicker("AMD")).length, 1);
   assert.equal(fallbackCalls, 0);
 });
+
+test("fallback discovery rethrows when a provider failed and none found the ticker", async () => {
+  const primary: TickerDiscoveryProvider = {
+    async discoverTicker() {
+      throw new Error("polygon reference HTTP 429");
+    },
+  };
+  const fallback: TickerDiscoveryProvider = {
+    async discoverTicker() {
+      return [];
+    },
+  };
+
+  const provider = createFallbackTickerDiscoveryProvider([primary, fallback]);
+
+  await assert.rejects(provider.discoverTicker("AMD"), /polygon reference HTTP 429/);
+});

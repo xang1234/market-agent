@@ -798,6 +798,7 @@ test("handler: a ticker held only by a CIK-less issuer runs discovery once and g
   const listingId = await seedCiklessListing(client, "NVIDIA Corp", "NVDA");
   const seenTickers: string[] = [];
   const options = {
+    ciklessDiscoveryAttempts: new Set<string>(),
     tickerDiscoveryProvider: {
       discoverTicker: async (ticker: string) => {
         seenTickers.push(ticker);
@@ -828,7 +829,7 @@ test("handler: a ticker held only by a CIK-less issuer runs discovery once and g
   assert.deepEqual(issuers.rows, [{ legal_name: "NVIDIA Corp", cik: "1045810" }]);
 });
 
-test("handler: discovery failure for a CIK-less ticker still returns the local listing", { timeout: 120000 }, async (t) => {
+test("handler: a failed discovery for a CIK-less ticker returns the local listing and retries on the next resolve", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for resolver discovery coverage");
     return;
@@ -839,24 +840,63 @@ test("handler: discovery failure for a CIK-less ticker still returns the local l
   const listingId = await seedCiklessListing(client, "Intel Corp", "INTC");
   const warnings: unknown[] = [];
   let calls = 0;
-
-  const response = await handleResolveSubjects(
-    client,
-    { text: "INTC" },
-    {
-      tickerDiscoveryProvider: {
-        discoverTicker: async () => {
-          calls += 1;
-          throw new Error("polygon reference unavailable");
-        },
+  const options = {
+    ciklessDiscoveryAttempts: new Set<string>(),
+    tickerDiscoveryProvider: {
+      discoverTicker: async () => {
+        calls += 1;
+        throw new Error("polygon reference HTTP 429");
       },
-      discoveryLogger: { warn: (...args: unknown[]) => warnings.push(args[0]) },
     },
-  );
+    discoveryLogger: { warn: (...args: unknown[]) => warnings.push(args[0]) },
+  };
+
+  const first = await handleResolveSubjects(client, { text: "INTC" }, options);
+  const second = await handleResolveSubjects(client, { text: "INTC" }, options);
+
+  assert.equal(calls, 2);
+  assert.deepEqual(warnings, ["ticker discovery failed", "ticker discovery failed"]);
+  assert.deepEqual(first.subjects.map((subject) => subject.subject_ref), [{ kind: "listing", id: listingId }]);
+  assert.deepEqual(second.subjects.map((subject) => subject.subject_ref), [{ kind: "listing", id: listingId }]);
+});
+
+test("handler: a completed discovery that finds no CIK is not repeated for the same ticker", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver discovery coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fix-403-cikless-no-cik");
+  const client = await connectedClient(t, databaseUrl);
+  const listingId = await seedCiklessListing(client, "Arm Holdings plc", "ARM");
+  let calls = 0;
+  const options = {
+    ciklessDiscoveryAttempts: new Set<string>(),
+    tickerDiscoveryProvider: {
+      discoverTicker: async () => {
+        calls += 1;
+        return [
+          {
+            ticker: "ARM",
+            legal_name: "Arm Holdings plc",
+            market: "stocks" as const,
+            active: true as const,
+            mic: "XNAS",
+            trading_currency: "USD",
+            timezone: "America/New_York",
+            asset_type: "common_stock" as const,
+          },
+        ];
+      },
+    },
+  };
+
+  const first = await handleResolveSubjects(client, { text: "ARM" }, options);
+  const second = await handleResolveSubjects(client, { text: "ARM" }, options);
 
   assert.equal(calls, 1);
-  assert.deepEqual(warnings, ["ticker discovery failed"]);
-  assert.deepEqual(response.subjects.map((subject) => subject.subject_ref), [{ kind: "listing", id: listingId }]);
+  assert.deepEqual(first.subjects.map((subject) => subject.subject_ref), [{ kind: "listing", id: listingId }]);
+  assert.deepEqual(second.subjects.map((subject) => subject.subject_ref), [{ kind: "listing", id: listingId }]);
 });
 
 test("handler: issuer legal-name text returns an issuer subject", { timeout: 120000 }, async (t) => {
