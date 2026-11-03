@@ -908,6 +908,45 @@ test("a failed full up leaves the containers alone when they were all already ru
   assert.deepEqual(lines("compose:"), ["up -d"]);
 });
 
+const S3_ENV = {
+  S3_ENDPOINT: "http://127.0.0.1:9000",
+  S3_REGION: "us-east-1",
+  S3_BUCKET: "evidence-blobs",
+  S3_ACCESS_KEY_ID: "minioadmin",
+  S3_SECRET_ACCESS_KEY: "minioadmin",
+};
+
+test("a full up creates the evidence bucket, retrying until MinIO answers, and takes an existing one as done", async () => {
+  // curl runs in a command substitution, so the stub counts its calls in the trace file.
+  const { result, lines } = await traceUp(S3_ENV, [
+    "sleep(){ :; }",
+    'curl(){ printf "curl:%s\\n" "$*" >> "$TRACE_FILE"; if [[ "$(grep -c "^curl:" "$TRACE_FILE")" -ge 2 ]]; then printf 409; else printf 000; fi; }',
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(lines("curl:"), [
+    "-s -o /dev/null -w %{http_code} -X PUT --aws-sigv4 aws:amz:us-east-1:s3 --user minioadmin:minioadmin http://127.0.0.1:9000/evidence-blobs",
+    "-s -o /dev/null -w %{http_code} -X PUT --aws-sigv4 aws:amz:us-east-1:s3 --user minioadmin:minioadmin http://127.0.0.1:9000/evidence-blobs",
+  ]);
+  assert.deepEqual(lines("start:"), FULL_SERVICES);
+});
+
+test("a full up rolls back when the evidence bucket cannot be created", async () => {
+  const { result, lines } = await traceUp(S3_ENV, ["sleep(){ :; }", "curl(){ printf 403; }"]);
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /could not create S3 bucket evidence-blobs at http:\/\/127\.0\.0\.1:9000 \(HTTP 403\)/);
+  assert.deepEqual(lines("compose:"), ["up -d", "down"]);
+  assert.deepEqual(lines("start:"), []);
+});
+
+test("DEV_PROFILE=chat parks minio, so up creates no bucket", async () => {
+  const { result, lines } = await traceUp({ ...S3_ENV, DEV_PROFILE: "chat" }, [
+    'curl(){ printf "curl:%s\\n" "$*" >> "$TRACE_FILE"; printf 200; }',
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(lines("curl:"), []);
+  assert.deepEqual(lines("start:"), CHAT_SERVICES);
+});
+
 test("switching chat to full waits for the stopped app to free the shared web port before checking it", async () => {
   const { result, trace } = await traceUp({}, [
     'stop_process(){ printf "stop:%s\\n" "$1" >> "$TRACE_FILE"; kill "$(cat "$PID_DIR/$1.pid")" 2>/dev/null; rm -f "$PID_DIR/$1.pid"; }',
