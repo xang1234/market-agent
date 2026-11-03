@@ -798,7 +798,7 @@ test("handler: a ticker held only by a CIK-less issuer runs discovery once and g
   const listingId = await seedCiklessListing(client, "NVIDIA Corp", "NVDA");
   const seenTickers: string[] = [];
   const options = {
-    ciklessDiscoveryAttempts: new Set<string>(),
+    ciklessDiscoveryAttempts: new Map<string, number>(),
     tickerDiscoveryProvider: {
       discoverTicker: async (ticker: string) => {
         seenTickers.push(ticker);
@@ -829,7 +829,7 @@ test("handler: a ticker held only by a CIK-less issuer runs discovery once and g
   assert.deepEqual(issuers.rows, [{ legal_name: "NVIDIA Corp", cik: "1045810" }]);
 });
 
-test("handler: a failed discovery for a CIK-less ticker returns the local listing and retries on the next resolve", { timeout: 120000 }, async (t) => {
+test("handler: a failed discovery for a CIK-less ticker returns the local listing and waits a minute to retry", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for resolver discovery coverage");
     return;
@@ -840,8 +840,10 @@ test("handler: a failed discovery for a CIK-less ticker returns the local listin
   const listingId = await seedCiklessListing(client, "Intel Corp", "INTC");
   const warnings: unknown[] = [];
   let calls = 0;
+  let clock = 1_000_000;
   const options = {
-    ciklessDiscoveryAttempts: new Set<string>(),
+    ciklessDiscoveryAttempts: new Map<string, number>(),
+    now: () => clock,
     tickerDiscoveryProvider: {
       discoverTicker: async () => {
         calls += 1;
@@ -852,12 +854,18 @@ test("handler: a failed discovery for a CIK-less ticker returns the local listin
   };
 
   const first = await handleResolveSubjects(client, { text: "INTC" }, options);
+  clock += 59_999;
   const second = await handleResolveSubjects(client, { text: "INTC" }, options);
+  assert.equal(calls, 1);
+
+  clock += 1;
+  const third = await handleResolveSubjects(client, { text: "INTC" }, options);
 
   assert.equal(calls, 2);
   assert.deepEqual(warnings, ["ticker discovery failed", "ticker discovery failed"]);
-  assert.deepEqual(first.subjects.map((subject) => subject.subject_ref), [{ kind: "listing", id: listingId }]);
-  assert.deepEqual(second.subjects.map((subject) => subject.subject_ref), [{ kind: "listing", id: listingId }]);
+  for (const response of [first, second, third]) {
+    assert.deepEqual(response.subjects.map((subject) => subject.subject_ref), [{ kind: "listing", id: listingId }]);
+  }
 });
 
 test("handler: a completed discovery that finds no CIK is not repeated for the same ticker", { timeout: 120000 }, async (t) => {
@@ -871,7 +879,7 @@ test("handler: a completed discovery that finds no CIK is not repeated for the s
   const listingId = await seedCiklessListing(client, "Arm Holdings plc", "ARM");
   let calls = 0;
   const options = {
-    ciklessDiscoveryAttempts: new Set<string>(),
+    ciklessDiscoveryAttempts: new Map<string, number>(),
     tickerDiscoveryProvider: {
       discoverTicker: async () => {
         calls += 1;
