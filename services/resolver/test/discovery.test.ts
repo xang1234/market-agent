@@ -538,7 +538,7 @@ async function activeListings(
   return rows.rows;
 }
 
-test("a discovered CIK on another MIC fills the CIK-less issuer that holds the ticker", { timeout: 120000 }, async (t) => {
+test("a discovered CIK on another MIC fills the CIK-less issuer that holds the ticker, and a rerun keeps one listing", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for resolver discovery coverage");
     return;

@@ -403,25 +403,25 @@ async function fillInstrumentIdentityFields(
 // never writes instrument_id, so it cannot undo a concurrent identity move.
 // Providers can disagree on a ticker's MIC (Polygon's ARCX against the bundle's
 // XNYS), so with no listing on the entry's MIC, the ticker's only active listing
-// counts when its issuer has no CIK yet and it trades in the entry's currency.
+// counts when it trades in the entry's currency. That listing keeps its own MIC's
+// timezone.
 async function keepExistingListing(db: QueryExecutor, listing: DiscoveredListing): Promise<string | null> {
   const issuer = issuerIdentityFromListing(listing);
   const instrument = instrumentIdentityFromListing(listing);
-  const existing = await db.query<{ listing_id: string; instrument_id: string; issuer_id: string }>(
+  const existing = await db.query<{ listing_id: string; instrument_id: string; issuer_id: string; mic: string }>(
     `with active as (
        select listing_id from listings
         where ticker = $2
           and (active_from is null or active_from <= now())
           and (active_to is null or active_to > now())
      )
-     select l.listing_id, l.instrument_id, i.issuer_id
+     select l.listing_id, l.instrument_id, i.issuer_id, l.mic
        from listings l
        join instruments i on i.instrument_id = l.instrument_id
        join issuers iss on iss.issuer_id = i.issuer_id
       where l.ticker = $2
         and ((l.mic = $1 and l.active_from is null)
-          or (iss.cik is null
-            and l.trading_currency = $7
+          or (l.trading_currency = $7
             and l.listing_id in (select listing_id from active)
             and (select count(*) from active) = 1
             and not exists (
@@ -451,10 +451,12 @@ async function keepExistingListing(db: QueryExecutor, listing: DiscoveredListing
   if (!row) return null;
   await fillIssuerIdentityFields(db, row.issuer_id, issuer);
   await fillInstrumentIdentityFields(db, row.instrument_id, instrument);
-  await db.query(
-    `update listings set trading_currency = $2, timezone = $3, updated_at = now() where listing_id = $1`,
-    [row.listing_id, listing.trading_currency, listing.timezone],
-  );
+  if (row.mic === listing.mic) {
+    await db.query(
+      `update listings set trading_currency = $2, timezone = $3, updated_at = now() where listing_id = $1`,
+      [row.listing_id, listing.trading_currency, listing.timezone],
+    );
+  }
   return row.listing_id;
 }
 
