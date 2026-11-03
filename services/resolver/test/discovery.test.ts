@@ -420,19 +420,20 @@ async function seedListing(
   client: Awaited<ReturnType<typeof connectedClient>>,
   issuer: { legal_name: string; cik: string | null },
   ticker: string,
+  { mic = "XNAS", figi_composite = null }: { mic?: string; figi_composite?: string | null } = {},
 ): Promise<{ issuer_id: string; listing_id: string }> {
   const iss = await client.query<{ issuer_id: string }>(
     "insert into issuers (legal_name, cik) values ($1, $2) returning issuer_id",
     [issuer.legal_name, issuer.cik],
   );
   const inst = await client.query<{ instrument_id: string }>(
-    "insert into instruments (issuer_id, asset_type) values ($1, 'common_stock') returning instrument_id",
-    [iss.rows[0].issuer_id],
+    "insert into instruments (issuer_id, asset_type, figi_composite) values ($1, 'common_stock', $2) returning instrument_id",
+    [iss.rows[0].issuer_id, figi_composite],
   );
   const lst = await client.query<{ listing_id: string }>(
     `insert into listings (instrument_id, mic, ticker, trading_currency, timezone)
-     values ($1, 'XNAS', $2, 'USD', 'America/New_York') returning listing_id`,
-    [inst.rows[0].instrument_id, ticker],
+     values ($1, $2, $3, 'USD', 'America/New_York') returning listing_id`,
+    [inst.rows[0].instrument_id, mic, ticker],
   );
   return { issuer_id: iss.rows[0].issuer_id, listing_id: lst.rows[0].listing_id };
 }
@@ -519,4 +520,94 @@ test("a discovered CIK held by another issuer moves the listing to that issuer",
 
   assert.deepEqual(subject, { kind: "listing", id: seeded.listing_id });
   assert.deepEqual(await listingOwner(client, "AAPL"), [{ legal_name: "Apple Inc.", cik: "320193" }]);
+});
+
+async function activeListings(
+  client: Awaited<ReturnType<typeof connectedClient>>,
+  ticker: string,
+): Promise<{ listing_id: string; mic: string; legal_name: string; cik: string | null }[]> {
+  const rows = await client.query<{ listing_id: string; mic: string; legal_name: string; cik: string | null }>(
+    `select l.listing_id, l.mic, iss.legal_name, iss.cik
+       from listings l
+       join instruments i on i.instrument_id = l.instrument_id
+       join issuers iss on iss.issuer_id = i.issuer_id
+      where l.ticker = $1 and l.active_to is null
+      order by l.mic`,
+    [ticker],
+  );
+  return rows.rows;
+}
+
+test("a discovered CIK on another MIC fills the CIK-less issuer that holds the ticker", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver discovery coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fix-403-mic-mismatch");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedListing(client, { legal_name: "SPDR S&P 500 ETF Trust", cik: null }, "SPY", { mic: "XNYS" });
+
+  const subject = await upsertDiscoveredListing(client, {
+    ...appleBundleEntry,
+    ticker: "SPY",
+    legal_name: "SPDR S&P 500 ETF",
+    mic: "ARCX",
+    cik: "0000884394",
+  });
+
+  assert.deepEqual(await activeListings(client, "SPY"), [
+    { listing_id: seeded.listing_id, mic: "XNYS", legal_name: "SPDR S&P 500 ETF Trust", cik: "884394" },
+  ]);
+  assert.deepEqual(subject, { kind: "listing", id: seeded.listing_id });
+});
+
+test("a discovered CIK that differs from the listing issuer's CIK moves the listing", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver discovery coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fix-403-conflicting-cik");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedListing(client, { legal_name: "Old Holdings Inc.", cik: "1111111" }, "ZZZ");
+
+  const subject = await upsertDiscoveredListing(client, {
+    ...appleBundleEntry,
+    ticker: "ZZZ",
+    legal_name: "New Holdings Inc.",
+    cik: "2222222",
+  });
+
+  assert.deepEqual(subject, { kind: "listing", id: seeded.listing_id });
+  assert.deepEqual(await listingOwner(client, "ZZZ"), [{ legal_name: "New Holdings Inc.", cik: "2222222" }]);
+});
+
+test("a discovered FIGI that differs from the listing instrument's FIGI moves the listing", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver discovery coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fix-403-conflicting-figi");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedListing(client, { legal_name: "Old Holdings Inc.", cik: null }, "ZZZ", {
+    figi_composite: "BBG000000001",
+  });
+
+  const subject = await upsertDiscoveredListing(client, {
+    ...appleBundleEntry,
+    ticker: "ZZZ",
+    legal_name: "New Holdings Inc.",
+    figi_composite: "BBG000000002",
+  });
+
+  assert.deepEqual(subject, { kind: "listing", id: seeded.listing_id });
+  assert.deepEqual(await listingOwner(client, "ZZZ"), [{ legal_name: "New Holdings Inc.", cik: null }]);
+  const figi = await client.query<{ figi_composite: string }>(
+    `select i.figi_composite from listings l join instruments i on i.instrument_id = l.instrument_id
+      where l.listing_id = $1`,
+    [seeded.listing_id],
+  );
+  assert.deepEqual(figi.rows, [{ figi_composite: "BBG000000002" }]);
 });
