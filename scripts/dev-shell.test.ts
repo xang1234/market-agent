@@ -936,13 +936,27 @@ test("a full up rolls back at once when MinIO refuses the evidence bucket", asyn
     'curl(){ printf "curl:\\n" >> "$TRACE_FILE"; printf 403; }',
   ]);
   assert.notEqual(result.code, 0);
-  assert.match(result.stderr, /could not create S3 bucket evidence-blobs at http:\/\/127\.0\.0\.1:9000 \(HTTP 403\)/);
+  assert.match(
+    result.stderr,
+    /could not create S3 bucket evidence-blobs at http:\/\/127\.0\.0\.1:9000 \(HTTP 403; check S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY\)/,
+  );
   assert.equal(lines("curl:").length, 1);
   assert.deepEqual(lines("compose:"), ["up -d", "down"]);
   assert.deepEqual(lines("start:"), []);
 });
 
-test("a full up creates the evidence bucket when .env.dev sets no S3 region or credentials", async () => {
+test("a full up rolls back at once on any other 4xx from MinIO", async () => {
+  const { result, lines } = await traceUp(S3_ENV, [
+    "sleep(){ :; }",
+    'curl(){ printf "curl:\\n" >> "$TRACE_FILE"; printf 400; }',
+  ]);
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /could not create S3 bucket evidence-blobs at http:\/\/127\.0\.0\.1:9000 \(HTTP 400\)\n/);
+  assert.equal(lines("curl:").length, 1);
+  assert.deepEqual(lines("compose:"), ["up -d", "down"]);
+});
+
+test("the bucket step survives set -u when .env.dev sets no S3 region or keys", async () => {
   const { result, lines } = await traceUp(
     { S3_ENDPOINT: "http://127.0.0.1:9000", S3_BUCKET: "evidence-blobs" },
     ['curl(){ printf "curl:%s\\n" "$*" >> "$TRACE_FILE"; printf 200; }'],
