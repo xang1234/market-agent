@@ -318,7 +318,8 @@ async function resolveTickerWithDiscovery(
   options: SearchToSubjectOptions,
 ): Promise<ResolverEnvelope> {
   const initial = await resolveByTicker(db, ticker);
-  if (!isNotFound(initial) || initial.reason !== "unknown_ticker" || !options.tickerDiscoveryProvider) {
+  if (!options.tickerDiscoveryProvider) return initial;
+  if (isNotFound(initial) ? initial.reason !== "unknown_ticker" : !(await claimCiklessDiscovery(db, ticker))) {
     return initial;
   }
 
@@ -334,6 +335,31 @@ async function resolveTickerWithDiscovery(
     logger.warn("ticker discovery failed", error);
     return initial;
   }
+}
+
+// ponytail: a per-process set, so it resets on restart and a ticker Polygon has
+// no CIK for is retried once per process. Resolve runs per keystroke and Polygon
+// is rate-limited; persist the attempts if restarts ever burn the quota.
+const ciklessDiscoveryAttempts = new Set<string>();
+
+// A locally known ticker whose issuers all lack a CIK has no fundamentals
+// coverage (#403), so it gets one discovery attempt to fill the CIK. The claim
+// is taken before the await so concurrent resolves of one ticker run it once.
+async function claimCiklessDiscovery(db: QueryExecutor, ticker: string): Promise<boolean> {
+  const normalized = ticker.trim().toUpperCase();
+  if (ciklessDiscoveryAttempts.has(normalized)) return false;
+  ciklessDiscoveryAttempts.add(normalized);
+  const result = await db.query<{ has_cik: boolean | null }>(
+    `select bool_or(iss.cik is not null) as has_cik
+       from listings l
+       join instruments i on i.instrument_id = l.instrument_id
+       join issuers iss on iss.issuer_id = i.issuer_id
+      where l.ticker = $1
+        and (l.active_from is null or l.active_from <= now())
+        and (l.active_to is null or l.active_to > now())`,
+    [normalized],
+  );
+  return result.rows[0]?.has_cik === false;
 }
 
 async function handoffFromResolved(
