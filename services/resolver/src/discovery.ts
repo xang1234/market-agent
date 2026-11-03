@@ -399,7 +399,7 @@ async function fillInstrumentIdentityFields(
 
 // A name-only entry (the reference bundle) must not move an active listing off
 // its CIK issuer (#403), so the listing keeps its instrument unless the entry's
-// cik/lei/isin/figi/cusip names a different issuer or instrument. The update
+// cik/lei/isin/figi names a different issuer or instrument. The update
 // never writes instrument_id, so it cannot undo a concurrent identity move.
 // Providers can disagree on a ticker's MIC (Polygon's ARCX against the bundle's
 // XNYS), so with no listing on the entry's MIC, the ticker's only active listing
@@ -421,7 +421,7 @@ async function keepExistingListing(db: QueryExecutor, listing: DiscoveredListing
       where l.ticker = $2
         and ((l.mic = $1 and l.active_from is null)
           or (iss.cik is null
-            and l.trading_currency = $8
+            and l.trading_currency = $7
             and l.listing_id in (select listing_id from active)
             and (select count(*) from active) = 1
             and not exists (
@@ -430,10 +430,12 @@ async function keepExistingListing(db: QueryExecutor, listing: DiscoveredListing
               select 1 from issuers other where other.cik = $3 and other.issuer_id <> iss.issuer_id)))
         and ($4::text is null or (coalesce(upper(iss.lei), $4) = $4 and not exists (
               select 1 from issuers other where upper(other.lei) = $4 and other.issuer_id <> iss.issuer_id)))
+        and ($5::text is null or coalesce(i.isin, $5) = $5)
+        and ($6::text is null or coalesce(i.figi_composite, $6) = $6)
         and not exists (
               select 1 from instruments other
                where other.instrument_id <> l.instrument_id
-                 and (other.isin = $5 or other.figi_composite = $6 or other.cusip = $7))
+                 and (other.isin = $5 or other.figi_composite = $6))
       limit 1`,
     [
       listing.mic,
@@ -442,7 +444,6 @@ async function keepExistingListing(db: QueryExecutor, listing: DiscoveredListing
       issuer.lei ?? null,
       instrument.isin ?? null,
       instrument.figiComposite ?? null,
-      instrument.cusip ?? null,
       listing.trading_currency,
     ],
   );
