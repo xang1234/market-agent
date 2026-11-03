@@ -8,6 +8,7 @@ import {
 import type { ThreadTitleModel } from "../../summary/src/title-generator.ts";
 import type {
   ChatAnalystToolRuntimeToolCall,
+  DroppedClaims,
 } from "./coordinator.ts";
 import { buildEvidencePacket, figureCompanies, packetForModel, type ClaimEvidence, type ClaimRecord, type EvidencePacket } from "./evidence-packet.ts";
 import { assertionList, checkAssertions, MAX_ASSERTIONS, type AssertionReport } from "./assertions.ts";
@@ -38,10 +39,7 @@ type Answer =
 // judge reads it; one absent is left out.
 export type InferenceState = Exclude<ShownAs, "hidden"> | "pending";
 export type Inferences = ReadonlyMap<number, InferenceState>;
-// The claims an answer quoted that its seal left out, by claim id (#557):
-// withdrawn, no longer citable; unchecked, being changed by another session,
-// so they could not be checked.
-export type DroppedClaims = Readonly<{ withdrawn: ReadonlyArray<string>; unchecked: ReadonlyArray<string> }>;
+export type { DroppedClaims };
 // The turn's blocks, its answer showing the given inferences, and rendered
 // again without any dropped claims.
 export type AnswerBlocks = (inferences: Inferences, dropped?: DroppedClaims) => ReadonlyArray<Record<string, unknown>>;
