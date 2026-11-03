@@ -415,3 +415,108 @@ test("upsertDiscoveredListing fills missing identifiers without overwriting exis
     },
   ]);
 });
+
+async function seedListing(
+  client: Awaited<ReturnType<typeof connectedClient>>,
+  issuer: { legal_name: string; cik: string | null },
+  ticker: string,
+): Promise<{ issuer_id: string; listing_id: string }> {
+  const iss = await client.query<{ issuer_id: string }>(
+    "insert into issuers (legal_name, cik) values ($1, $2) returning issuer_id",
+    [issuer.legal_name, issuer.cik],
+  );
+  const inst = await client.query<{ instrument_id: string }>(
+    "insert into instruments (issuer_id, asset_type) values ($1, 'common_stock') returning instrument_id",
+    [iss.rows[0].issuer_id],
+  );
+  const lst = await client.query<{ listing_id: string }>(
+    `insert into listings (instrument_id, mic, ticker, trading_currency, timezone)
+     values ($1, 'XNAS', $2, 'USD', 'America/New_York') returning listing_id`,
+    [inst.rows[0].instrument_id, ticker],
+  );
+  return { issuer_id: iss.rows[0].issuer_id, listing_id: lst.rows[0].listing_id };
+}
+
+async function listingOwner(
+  client: Awaited<ReturnType<typeof connectedClient>>,
+  ticker: string,
+): Promise<{ legal_name: string; cik: string | null }[]> {
+  const rows = await client.query<{ legal_name: string; cik: string | null }>(
+    `select iss.legal_name, iss.cik
+       from listings l
+       join instruments i on i.instrument_id = l.instrument_id
+       join issuers iss on iss.issuer_id = i.issuer_id
+      where l.ticker = $1 and l.mic = 'XNAS'`,
+    [ticker],
+  );
+  return rows.rows;
+}
+
+const appleBundleEntry: DiscoveredListing = {
+  ticker: "AAPL",
+  legal_name: "Apple Inc",
+  market: "stocks",
+  active: true,
+  mic: "XNAS",
+  trading_currency: "USD",
+  timezone: "America/New_York",
+  asset_type: "common_stock",
+};
+
+test("a discovered entry without strong identity keeps an existing listing on its CIK issuer", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver discovery coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fix-403-keep-listing");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedListing(client, { legal_name: "Apple Inc.", cik: "320193" }, "AAPL");
+
+  const subject = await upsertDiscoveredListing(client, appleBundleEntry);
+
+  assert.deepEqual(subject, { kind: "listing", id: seeded.listing_id });
+  assert.deepEqual(await listingOwner(client, "AAPL"), [{ legal_name: "Apple Inc.", cik: "320193" }]);
+  const issuers = await client.query<{ count: string }>("select count(*)::text as count from issuers");
+  assert.equal(issuers.rows[0].count, "1");
+});
+
+test("a discovered CIK fills a CIK-less issuer that already holds the listing", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver discovery coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fix-403-fill-cik");
+  const client = await connectedClient(t, databaseUrl);
+  const seeded = await seedListing(client, { legal_name: "NVIDIA Corp", cik: null }, "NVDA");
+
+  const subject = await upsertDiscoveredListing(client, {
+    ...appleBundleEntry,
+    ticker: "NVDA",
+    legal_name: "NVIDIA Corporation",
+    cik: "0001045810",
+  });
+
+  assert.deepEqual(subject, { kind: "listing", id: seeded.listing_id });
+  assert.deepEqual(await listingOwner(client, "NVDA"), [{ legal_name: "NVIDIA Corp", cik: "1045810" }]);
+  const issuers = await client.query<{ count: string }>("select count(*)::text as count from issuers");
+  assert.equal(issuers.rows[0].count, "1");
+});
+
+test("a discovered CIK held by another issuer moves the listing to that issuer", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver discovery coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fix-403-heal-listing");
+  const client = await connectedClient(t, databaseUrl);
+  await client.query("insert into issuers (legal_name, cik) values ('Apple Inc.', '320193')");
+  const seeded = await seedListing(client, { legal_name: "Apple Inc", cik: null }, "AAPL");
+
+  const subject = await upsertDiscoveredListing(client, { ...appleBundleEntry, legal_name: "Apple Inc.", cik: "320193" });
+
+  assert.deepEqual(subject, { kind: "listing", id: seeded.listing_id });
+  assert.deepEqual(await listingOwner(client, "AAPL"), [{ legal_name: "Apple Inc.", cik: "320193" }]);
+});
