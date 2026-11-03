@@ -336,9 +336,9 @@ wait_for_postgres() {
 
 # Nothing else creates the evidence bucket in the dev MinIO (#404). MinIO answers
 # 409 when the bucket already exists, 000 (no connection) while it starts, and
-# 403 for wrong keys, which no retry fixes. The S3 variables get fallbacks here,
-# not in the defaults block, because the evidence CLIs fail fast on a missing
-# S3_REGION and an exported default would hide that.
+# another 4xx, such as 403 for wrong keys, that no retry fixes. The S3 variables
+# get fallbacks here, not in the defaults block, because the evidence CLIs fail
+# fast on a missing S3_REGION and an exported default would hide that.
 ensure_s3_bucket() {
   [[ -n "${S3_ENDPOINT:-}" && -n "${S3_BUCKET:-}" ]] || return 0
   local attempt code
@@ -349,13 +349,17 @@ ensure_s3_bucket() {
     if [[ "$code" == "200" || "$code" == "409" ]]; then
       return
     fi
-    if [[ "$code" == "403" ]]; then
+    if [[ "$code" == 4?? ]]; then
       break
     fi
     sleep 1
   done
 
-  echo "could not create S3 bucket $S3_BUCKET at $S3_ENDPOINT (HTTP $code)" >&2
+  local hint=""
+  if [[ "$code" == "403" ]]; then
+    hint="; check S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY"
+  fi
+  echo "could not create S3 bucket $S3_BUCKET at $S3_ENDPOINT (HTTP $code$hint)" >&2
   return 1
 }
 
