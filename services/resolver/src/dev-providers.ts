@@ -75,11 +75,12 @@ export function createFallbackTickerDiscoveryProvider(
   providers: ReadonlyArray<TickerDiscoveryProvider>,
 ): TickerDiscoveryProvider {
   return {
-    // A failure with no listings found rethrows, so the caller can tell an
-    // outage from a ticker no provider knows and retry it (#403).
+    // A primary failure with no listings found rethrows, so the caller logs an
+    // outage rather than a ticker no provider knows (#403). A lower-trust
+    // fallback's failure never overrides the primary's answer.
     async discoverTicker(ticker: string): Promise<DiscoveredListing[]> {
-      let firstError: unknown = null;
-      for (const provider of providers) {
+      let primaryError: unknown = null;
+      for (const [index, provider] of providers.entries()) {
         try {
           const discovered = await provider.discoverTicker(ticker);
           if (discovered.length > 0) return discovered;
@@ -88,10 +89,10 @@ export function createFallbackTickerDiscoveryProvider(
             ticker,
             error: error instanceof Error ? error.message : String(error),
           });
-          firstError ??= error;
+          if (index === 0) primaryError = error;
         }
       }
-      if (firstError !== null) throw firstError;
+      if (primaryError !== null) throw primaryError;
       return [];
     },
   };
