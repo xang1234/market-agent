@@ -174,3 +174,20 @@ test("fallback discovery rethrows when a provider failed and none found the tick
 
   await assert.rejects(provider.discoverTicker("AMD"), /polygon reference HTTP 429/);
 });
+
+test("fallback discovery keeps the primary's empty answer when a lower-trust fallback fails", async () => {
+  const primary: TickerDiscoveryProvider = {
+    async discoverTicker() {
+      return [];
+    },
+  };
+  const fallback: TickerDiscoveryProvider = {
+    async discoverTicker() {
+      throw new Error("dev-providers sidecar unreachable");
+    },
+  };
+
+  const provider = createFallbackTickerDiscoveryProvider([primary, fallback]);
+
+  assert.deepEqual(await provider.discoverTicker("ZZZZ"), []);
+});
