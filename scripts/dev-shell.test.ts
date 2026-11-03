@@ -924,18 +924,33 @@ test("a full up creates the evidence bucket, retrying until MinIO answers, and t
   ]);
   assert.equal(result.code, 0, result.stderr);
   assert.deepEqual(lines("curl:"), [
-    "-s -o /dev/null -w %{http_code} -X PUT --aws-sigv4 aws:amz:us-east-1:s3 --user minioadmin:minioadmin http://127.0.0.1:9000/evidence-blobs",
-    "-s -o /dev/null -w %{http_code} -X PUT --aws-sigv4 aws:amz:us-east-1:s3 --user minioadmin:minioadmin http://127.0.0.1:9000/evidence-blobs",
+    "-s --max-time 5 -o /dev/null -w %{http_code} -X PUT --aws-sigv4 aws:amz:us-east-1:s3 --user minioadmin:minioadmin http://127.0.0.1:9000/evidence-blobs",
+    "-s --max-time 5 -o /dev/null -w %{http_code} -X PUT --aws-sigv4 aws:amz:us-east-1:s3 --user minioadmin:minioadmin http://127.0.0.1:9000/evidence-blobs",
   ]);
   assert.deepEqual(lines("start:"), FULL_SERVICES);
 });
 
-test("a full up rolls back when the evidence bucket cannot be created", async () => {
-  const { result, lines } = await traceUp(S3_ENV, ["sleep(){ :; }", "curl(){ printf 403; }"]);
+test("a full up rolls back at once when MinIO refuses the evidence bucket", async () => {
+  const { result, lines } = await traceUp(S3_ENV, [
+    "sleep(){ :; }",
+    'curl(){ printf "curl:\\n" >> "$TRACE_FILE"; printf 403; }',
+  ]);
   assert.notEqual(result.code, 0);
   assert.match(result.stderr, /could not create S3 bucket evidence-blobs at http:\/\/127\.0\.0\.1:9000 \(HTTP 403\)/);
+  assert.equal(lines("curl:").length, 1);
   assert.deepEqual(lines("compose:"), ["up -d", "down"]);
   assert.deepEqual(lines("start:"), []);
+});
+
+test("a full up creates the evidence bucket when .env.dev sets no S3 region or credentials", async () => {
+  const { result, lines } = await traceUp(
+    { S3_ENDPOINT: "http://127.0.0.1:9000", S3_BUCKET: "evidence-blobs" },
+    ['curl(){ printf "curl:%s\\n" "$*" >> "$TRACE_FILE"; printf 200; }'],
+  );
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(lines("curl:"), [
+    "-s --max-time 5 -o /dev/null -w %{http_code} -X PUT --aws-sigv4 aws:amz:us-east-1:s3 --user : http://127.0.0.1:9000/evidence-blobs",
+  ]);
 });
 
 test("DEV_PROFILE=chat parks minio, so up creates no bucket", async () => {
