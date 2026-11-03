@@ -868,7 +868,7 @@ test("handler: a failed discovery for a CIK-less ticker returns the local listin
   }
 });
 
-test("handler: a completed discovery that finds no CIK is not repeated for the same ticker", { timeout: 120000 }, async (t) => {
+test("handler: a discovery that finds no CIK is not repeated within a minute, even by concurrent resolves", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for resolver discovery coverage");
     return;
@@ -899,12 +899,16 @@ test("handler: a completed discovery that finds no CIK is not repeated for the s
     },
   };
 
-  const first = await handleResolveSubjects(client, { text: "ARM" }, options);
-  const second = await handleResolveSubjects(client, { text: "ARM" }, options);
+  const concurrent = await Promise.all([
+    handleResolveSubjects(client, { text: "ARM" }, options),
+    handleResolveSubjects(client, { text: "ARM" }, options),
+  ]);
+  const later = await handleResolveSubjects(client, { text: "ARM" }, options);
 
   assert.equal(calls, 1);
-  assert.deepEqual(first.subjects.map((subject) => subject.subject_ref), [{ kind: "listing", id: listingId }]);
-  assert.deepEqual(second.subjects.map((subject) => subject.subject_ref), [{ kind: "listing", id: listingId }]);
+  for (const response of [...concurrent, later]) {
+    assert.deepEqual(response.subjects.map((subject) => subject.subject_ref), [{ kind: "listing", id: listingId }]);
+  }
 });
 
 test("handler: issuer legal-name text returns an issuer subject", { timeout: 120000 }, async (t) => {
