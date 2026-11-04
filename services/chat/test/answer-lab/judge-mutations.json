@@ -115,13 +115,13 @@
       ],
       "subject": "NVDA",
       "originals": [
-        "It is the stronger business on scale, growth and profitability, though the two fiscal years shown end at different dates and the share price gap is much narrower.",
+        "It is the stronger business on scale, growth and profitability, though the two fiscal years shown end at different dates.",
         "Nvidia is a stronger business than Advanced Micro Devices on scale, growth and profitability."
       ],
       "mutations": [
         {
           "kind": "contradicted_ranking",
-          "text": "It is the weaker business on scale, growth and profitability, though the two fiscal years shown end at different dates and the share price gap is much narrower."
+          "text": "It is the weaker business on scale, growth and profitability, though the two fiscal years shown end at different dates."
         },
         {
           "kind": "contradicted_ranking",
@@ -267,6 +267,47 @@
         {
           "kind": "flipped_direction",
           "text": "The operating loss in that quarter came mainly from a sharp gross margin drop rather than from weak revenue, though revenue has slipped in the quarters since."
+        }
+      ]
+    },
+    {
+      "id": "gap-comparison",
+      "source": "trace",
+      "trace": "traces/peer-two.json",
+      "index": 8,
+      "supports": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "subject": "NVDA",
+      "originals": [],
+      "mutations": [
+        {
+          "kind": "unsupported_claim",
+          "text": "Its growth gap is wider than its gross margin gap, so the lead rests more on momentum than on product economics."
+        },
+        {
+          "kind": "unsupported_claim",
+          "text": "Its growth gap is narrower than its net margin gap, so the profit lead is the more striking one."
+        },
+        {
+          "kind": "unsupported_claim",
+          "text": "The gross margin gap is narrower than the net margin gap, so much of the profit lead arises below the gross line."
+        },
+        {
+          "kind": "unsupported_claim",
+          "text": "The share price gap is narrower than the growth gap, so the market has not fully rewarded the operating lead."
+        },
+        {
+          "kind": "flipped_direction",
+          "text": "Its growth gap is narrower than its gross margin gap, so the lead rests more on product economics than on momentum."
+        },
+        {
+          "kind": "flipped_direction",
+          "text": "The gross margin gap is wider than the net margin gap, so the profit lead arises above the gross line."
         }
       ]
     }

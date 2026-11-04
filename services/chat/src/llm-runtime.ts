@@ -221,6 +221,9 @@ export async function composeAnalystBlocksWithLlm(input: {
           // A wrong comparison in words (#228): "nine times" for 12.8x.
           "ratios, and never state a magnitude in words (\"roughly double\", \"six times\", \"larger than X's whole revenue\"):",
           "say only the direction (\"higher\", \"faster\", \"larger\") without how much.",
+          // Nothing checks a gap against a gap (#288): the judge reads one as unsupported.
+          "Never set one difference against another (\"the growth gap is narrower than the margin gap\", \"the price gap is",
+          "narrow next to the operating gap\"): say what each comparison shows.",
           "When the answer covers more than one company, an analyst_inference's text names no company, not even in the counterpoint:",
           "who leads, trails, rose or fell is shown from the comparisons it rests on, so rest a ranking or direction on its comparison",
           "and say only what it means (\"the margin lead funds more research\", not \"NVDA leads AMD\"); the text refers to its",

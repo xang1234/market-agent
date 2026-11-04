@@ -487,7 +487,8 @@ export async function replayRecorded(
       },
       judge: async (inference, i) => {
         const record = recordedRepair.judge[i] ?? NO_RECORD;
-        repairChanged ||= asked(record, judgeMessages([inference], companies));
+        // An edit to the judge's own prompt is judge_input_changed's to report.
+        repairChanged ||= record.outcome === "replied" && !isDeepStrictEqual(record.exchange.messages.slice(1), judgeMessages([inference], companies).slice(1));
         return record;
       },
     };

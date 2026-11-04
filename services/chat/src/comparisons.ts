@@ -17,6 +17,11 @@
 //
 // A claim citing several metrics is one comparison per metric (claimParts), so
 // checkComparison only ever sees one.
+//
+// No operation sets one difference against another ("the growth gap is narrower
+// than the margin gap", #288): the answer prompt asks for none, and the judge
+// never reads one as backed by the figures. Upgrade path: a gap op over two
+// checked comparisons, comparing intervals, if readers miss them.
 
 import type { EvidencePacket, PacketFigure } from "./evidence-packet.ts";
 

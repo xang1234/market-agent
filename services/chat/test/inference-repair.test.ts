@@ -673,3 +673,18 @@ test("repair_input_changed flags a trace with no repair recorded that today's co
   assert.equal(SEGMENTS.repair, null);
   assert.equal((await replayRecorded(SEGMENTS)).repair_input_changed, false);
 });
+
+test("an edit to the judge's own prompt leaves the repair's input unflagged; a judge asked something else is flagged (#288)", async () => {
+  const trace = repairUnderTodaysPrompt(FISCAL);
+  const withJudgeMessages = (messages: (recorded: ReadonlyArray<{ role: string; content: string }>) => ReadonlyArray<{ role: string; content: string }>) => ({
+    ...trace,
+    repair: {
+      ...trace.repair!,
+      judge: trace.repair!.judge.map((record) => record.outcome === "replied" ? { ...record, exchange: { ...record.exchange, messages: messages(record.exchange.messages) } } : record),
+    },
+  }) as typeof trace;
+  const olderPrompt = await replayRecorded(withJudgeMessages(([, ...rest]) => [{ role: "system", content: "an older judge prompt" }, ...rest]));
+  assert.equal(olderPrompt.repair_input_changed, false);
+  const otherQuestion = await replayRecorded(withJudgeMessages(([system]) => [system!, { role: "user", content: "another inference" }]));
+  assert.equal(otherQuestion.repair_input_changed, true);
+});
