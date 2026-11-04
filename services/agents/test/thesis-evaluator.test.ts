@@ -220,6 +220,53 @@ test("draftThesisConditions rejects responses that do not contain exactly three 
   );
 });
 
+test("draftThesisConditions leaves room for thinking, which counts against the token budget", async () => {
+  // Captured from claude-sonnet-5-5 on 2026-11-04: up to 711 thinking tokens, then about 750 of JSON.
+  const llm: ThesisLlm = {
+    async complete({ maxTokens }) {
+      const answer = JSON.stringify({ conditions: [
+        { statement: "Enterprise demand continues to accelerate.", falsifier: "Enterprise demand growth slows materially.", horizon: "12 months" },
+        { statement: "Operating margins expand with greater scale.", falsifier: "Operating margins contract for two quarters.", horizon: "18 months" },
+        { statement: "Customer retention remains consistently strong.", falsifier: "Net retention falls below prior-year levels.", horizon: "6 months" },
+      ] });
+      return (maxTokens ?? 0) >= 711 + 750 ? { text: answer } : { text: answer.slice(0, 200), truncated: true };
+    },
+  };
+  assert.deepEqual(
+    (await draftThesisConditions(llm, "Demand remains durable while execution improves.")).map((item) => item.horizon),
+    ["12 months", "18 months", "6 months"],
+  );
+});
+
+test("draftThesisConditions tells the model the limits its conditions are validated against", async () => {
+  let system = "";
+  await draftThesisConditions({
+    async complete({ messages }) {
+      system = messages[0].content;
+      return { text: JSON.stringify({ conditions: Array.from({ length: 3 }, () => ({ statement: "Enterprise demand keeps growing.", falsifier: "Enterprise demand stops growing.", horizon: "12 months" })) }) };
+    },
+  }, "Demand remains durable while execution improves.");
+  assert.match(system, /statement and falsifier under 500 characters/);
+  assert.match(system, /horizon .*under 120 characters/);
+});
+
+test("draftThesisConditions names the model and the cause when a reply is unusable", async () => {
+  const deployment = { channel: "anthropic", model: "claude-sonnet-5-5" };
+  const thesis = "Demand remains durable while execution improves.";
+  await assert.rejects(
+    draftThesisConditions({ async complete() { return { text: '```json\n{"conditions":[{"statement":"Cut', truncated: true, deployment }; } }, thesis),
+    new ThesisValidationError("draft response from anthropic/claude-sonnet-5-5 was cut off at the 4096-token limit"),
+  );
+  await assert.rejects(
+    draftThesisConditions({ async complete() { return { text: 'Here are three conditions: {"conditions":[]}', deployment }; } }, thesis),
+    new ThesisValidationError(`draft response from anthropic/claude-sonnet-5-5 must be valid JSON: Unexpected token 'H', "Here are t"... is not valid JSON`),
+  );
+  await assert.rejects(
+    draftThesisConditions({ async complete() { return { text: '{"conditions":[]}', deployment }; } }, thesis),
+    new ThesisValidationError("draft response from anthropic/claude-sonnet-5-5 must contain exactly three conditions, not 0"),
+  );
+});
+
 test('relative narrative horizons retain the saved version date across later assessments', async () => {
   const saved = thesis([condition(BULL_ID,{horizon:'Next quarter'})]);
   const llm:ThesisLlm = {async complete(request) {
