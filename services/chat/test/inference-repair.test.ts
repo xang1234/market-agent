@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -757,3 +758,31 @@ test("an inference on a support that stood whole carries no rejected parts, so w
   assert.equal("rejected_parts" in JSON.parse(judgeMessages([judged!], MARGINS.companies)[1]!.content).inferences[0], false);
   assert.equal("rejected_parts" in repairRequests(list, report, [{ index: 1, verdict: "contradicted", worded_amount: false }])[0]!, false);
 });
+
+test("judge_prompt_changed reports a judge prompt edit from either round's records, and judge_input_changed only what a case asks (#288)", async () => {
+  const hash = (content: string) => createHash("sha256").update(content).digest("hex").slice(0, 12);
+  const today = judgeMessages([], [])[0]!.content;
+  const OLDER = { recorded: hash("an older judge prompt"), today: hash(today) };
+  const FAILED = { outcome: "failed" as const, reason: "judge call failed", latency_ms: 10 };
+  type Round = NonNullable<TurnTrace["repair"]>["judge"];
+  const under = (records: Round, content: string): Round => records.map((record) =>
+    record.outcome === "replied" ? { ...record, exchange: { ...record.exchange, messages: [{ role: "system", content }, ...record.exchange.messages.slice(1)] } } : record
+  );
+  const base = repairUnderTodaysPrompt(FISCAL);
+  const firstRound = base.judge as Round;
+  const repairRound = base.repair!.judge;
+  const replay = async (first: Round, repair: Round) => {
+    const { judge_prompt_changed, judge_input_changed } = await replayRecorded({ ...base, judge: first, repair: { ...base.repair!, judge: repair } });
+    return [judge_prompt_changed, judge_input_changed];
+  };
+  assert.deepEqual(await replay(under(firstRound, today), under(repairRound, today)), [null, false]);
+  assert.deepEqual(await replay(under(firstRound, "an older judge prompt"), under(repairRound, today)), [OLDER, false]);
+  assert.deepEqual(await replay(under(firstRound, today), under(repairRound, "an older judge prompt")), [OLDER, false]);
+  // The first round never replied, so only the repair's judge records the prompt.
+  assert.deepEqual(await replay(firstRound.map(() => FAILED), under(repairRound, "an older judge prompt")), [OLDER, false]);
+  const otherCase = under(firstRound, today).map((record) =>
+    record.outcome === "replied" ? { ...record, exchange: { ...record.exchange, messages: [record.exchange.messages[0]!, { role: "user", content: "another inference" }] } } : record
+  );
+  assert.deepEqual(await replay(otherCase, under(repairRound, today)), [null, true]);
+});
+
