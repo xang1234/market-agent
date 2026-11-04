@@ -1345,39 +1345,47 @@ async function derivationLineage(
 }
 
 // A filing repeats earlier periods beside its own (#321). Every stored original
-// disclosure of the issuer is compared with each later filing in the download
-// that gives the same concept, unit and dates, in filing order: a 10-K or its
-// amendment for a year, and a 10-Q or its amendment too for a quarter (#513). A
-// value that differs from the previous filing's, past a change of rounding, is
-// stored as that period's restatement, on the restating filing's source, naming
-// the original. A companyfacts download lists every filing, so the stored history
-// does not depend on which period was ingested first (#333), and repeating a
-// restated value adds nothing. A filing giving two different values, or a value
-// without its lossless token, is skipped; an original with no recorded concept is
-// left as it is. A filing filed no later than the original is never later, whatever
-// its fiscal tags say (secFiscalYearWindow). A restated fact's method keeps it out
-// of every as-reported reader.
+// disclosure of the issuer is walked through the later filings in the download
+// that give the same concept, unit and dates, in filing order: a 10-K or its
+// amendment for a year, and a 10-Q or its amendment too for a quarter (#513). Each
+// is judged against the figure that stands, the original or the last restatement.
+// A value that differs, past the coarser of the two filings' roundings, is stored
+// as that period's restatement, on the restating filing's source, naming the
+// original, and then stands, so a filing that reverses a restatement is one too. A
+// companyfacts download lists every filing, so the stored history does not depend
+// on which period was ingested first (#333), and repeating a restated value adds
+// nothing. A filing giving two different values, or a value without its lossless
+// token, is skipped; an original with no recorded concept is left as it is. A
+// filing filed no later than the original is never later, whatever its fiscal tags
+// say (secFiscalYearWindow). A restated fact's method keeps it out of every
+// as-reported reader.
+//
+// A filing too short to show its rounding is read exactly, unless its own zeros
+// could hide the difference. That may be no restatement at all, so it is
+// unverified: a gap, never a false restatement or a stale figure.
 //
 // A derived quarter was never stated, so its own filing's line for it counts as a
-// later statement, taken only when the inputs then give that figure within
-// rounding: a 10-K that re-presents one quarter alone would otherwise leave a year
-// whose quarters overstate it (derivedLineRelation). Failing that it is unverified,
-// as it is from the first filing that changes an input and does not state the
-// quarter: the number is not re-derived, so as_restated answers a gap rather than
-// a stale figure.
+// later statement, and the walk carries its inputs as they then stand. Every line
+// is checked against them, one repeating the figure included, and taken only when
+// they give it within rounding: a 10-K that re-presents one quarter alone would
+// otherwise leave a year whose quarters overstate it. Failing that it is
+// unverified, as it is from the first filing that moves an input and does not state
+// the quarter: the number is not re-derived, so as_restated answers a gap rather
+// than a stale figure. Nothing later clears an unverified statement: the period's
+// later filings wait for it.
 //
 // Only us-gaap concepts are compared: a cover count (dei) is a count as of its
 // own date, and a later filing states a later date's count, never that one's.
 //
 // An as-filed EPS or share count is on the split basis of its filing date
-// (#387), so a later filing states it on its own. An equal figure is the same
-// one. When the listing's splits between the two filing dates explain the
-// change, it is the same figure; otherwise it is a restatement, as filed on the
-// later filing's date. Without those splits on file it is stored as an
-// unverified restatement, and the period's later filings wait for it. A later
-// filing's stored statement converges to the verdict under the splits on file,
-// so a rerun after `npm run sync:splits` decides an unverified one and a second
-// rerun changes nothing.
+// (#387), so a later filing states it on its own. When the listing's splits
+// between the two filing dates explain the figure, equal or not, it is the same
+// one; otherwise it is a restatement, as filed on the later filing's date. Without
+// those splits on file an equal figure stays the same one, as most never change,
+// and a different one is stored as an unverified restatement. A later filing's
+// stored statement converges to the verdict under the splits on file, so a rerun
+// after `npm run sync:splits` decides an unverified one and a second rerun changes
+// nothing.
 async function recordSecRestatements(db: FundamentalsQueryExecutor, input: RestatementInput): Promise<void> {
   const { rows: originals } = await db.query<SecOriginal>(
     `select f.fact_id::text as fact_id, f.metric_id::text as metric_id, m.metric_key, f.period_kind::text as period_kind,
@@ -1434,23 +1442,39 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
     };
     const statements = periodStatements(values, original.period_start, original.period_end, original.fiscal_period === "FY");
     const isLater = ({ accession, filed }: PeriodStatement) => filed > originalFiled || (derivation !== null && accession === originalAccession);
-    let previous: StatedFigure = { value: original.value, as_filed_on: original.as_filed_on, rounding: roundings.get(originalAccession!) ?? null };
-    for (const statement of statements) {
-      const later: LaterStatement = { ...statement, concept: concept!, unit: unit! };
-      if (!isLater(statement)) {
-        await record(later, null);
+    let standing: StatedFigure = { value: original.value, as_filed_on: original.as_filed_on, rounding: roundings.get(originalAccession!) ?? null };
+    const inputs: RoundedFigure[] = derivation?.terms.map((term) => ({ value: term.raw_token, rounding: roundings.get(term.source.accession) ?? null })) ?? [];
+    // A derived figure stands on its unmoved inputs, whose rounding a line may fall within.
+    let asDerived = derivation !== null;
+    for (const filing of filingsInOrder(statements, derivation, values)) {
+      let moved: FiledInput | null = null;
+      for (const input of filing.inputs) {
+        const figure: RoundedFigure = { value: input.statement.token, rounding: roundings.get(input.statement.accession) ?? null };
+        if (sameRoundedFigure(inputs[input.term]!, figure) === true) continue;
+        inputs[input.term] = figure;
+        moved ??= input;
+      }
+      if (moved !== null) asDerived = false;
+      const statement = filing.statement !== null && isLater(filing.statement) ? filing.statement : null;
+      if (statement === null) {
+        if (moved !== null) {
+          await record({ ...moved.statement, concept: concept!, unit: unit!, input: derivation!.terms[moved.term]! }, "unverified_restatement");
+          break;
+        }
+        await record({ ...(filing.statement ?? filing.inputs[0]!.statement), concept: concept!, unit: unit! }, null);
         continue;
       }
       const figure: StatedFigure = { value: statement.token, as_filed_on: original.as_filed_on === null ? null : statement.filed, rounding: roundings.get(statement.accession) ?? null };
-      const compared = await laterRelation(original.metric_key, previous, figure, splitsOn);
-      previous = figure;
-      const relation = compared === "economic_restatement" && derivation !== null ? derivedLineRelation(derivation, values, statement, roundings) : compared;
-      await record(later, relation);
+      const relation = derivation !== null && !inputsGive(derivation, inputs, figure)
+        ? "unverified_restatement"
+        : asDerived ? null : await laterRelation(original.metric_key, standing, figure, splitsOn);
+      await record({ ...statement, concept: concept!, unit: unit! }, relation);
       if (relation === "unverified_restatement") break;
+      if (relation !== null) {
+        standing = figure;
+        asDerived = false;
+      }
     }
-    if (derivation === null) continue;
-    const changed = firstChangedInput(derivation, values, roundings, new Set(statements.filter(isLater).map((statement) => statement.accession)));
-    if (changed !== null) await record({ ...changed.statement, concept: concept!, unit: unit!, input: changed.term }, "unverified_restatement");
   }
 }
 
@@ -1483,41 +1507,30 @@ function termStatements(values: ReadonlyArray<SecConceptValue>, term: Derivation
   return periodStatements(values, term.start, term.end, term.span === "fiscal_year").filter(({ filed }) => filed > term.source.filed);
 }
 
-// What a derived quarter's inputs, as filed up to a statement of the quarter,
-// make of it. The derived figure is a sum of rounded terms, so a line within
-// their rounding is the same figure while no input has moved, and follows the
-// one that has. Past their rounding the inputs do not give the line.
-function derivedLineRelation(derivation: DerivationProofV1, values: ReadonlyArray<SecConceptValue>, statement: PeriodStatement, roundings: FilingRoundings): LaterRelation | null {
-  const current = derivation.terms.map((term) => termStatements(values, term).filter(({ filed }) => filed <= statement.filed).at(-1));
-  const terms = derivation.terms.map((term, index) => ({ ...term, raw_token: current[index]?.token ?? term.raw_token }));
-  const termRoundings = derivation.terms.map((term, index) => roundings.get(current[index]?.accession ?? term.source.accession) ?? null);
-  const sum = derivationValue({ ...derivation, terms });
-  if (sum === null || !sumWithinRounding({ value: statement.token, rounding: roundings.get(statement.accession) ?? null }, sum, termRoundings)) return "unverified_restatement";
-  const moved = terms.some((term, index) => sameRoundedFigure(
-    { value: derivation.terms[index]!.raw_token, rounding: roundings.get(derivation.terms[index]!.source.accession) ?? null },
-    { value: term.raw_token, rounding: termRoundings[index]! },
-  ) === false);
-  return moved ? "economic_restatement" : null;
+/** A later filing's statement of one of a derived quarter's inputs, by its place among the terms. */
+type FiledInput = Readonly<{ term: number; statement: PeriodStatement }>;
+
+type WalkedFiling = { filed: string; accession: string; statement: PeriodStatement | null; inputs: FiledInput[] };
+
+/** What each filing states of a period and of a derived quarter's inputs, in filing order. */
+function filingsInOrder(statements: ReadonlyArray<PeriodStatement>, derivation: DerivationProofV1 | null, values: ReadonlyArray<SecConceptValue>): WalkedFiling[] {
+  const filings = new Map<string, WalkedFiling>();
+  const filingOf = ({ accession, filed }: PeriodStatement) => {
+    const filing = filings.get(accession) ?? { filed, accession, statement: null, inputs: [] };
+    filings.set(accession, filing);
+    return filing;
+  };
+  for (const statement of statements) filingOf(statement).statement = statement;
+  for (const [term, derived] of (derivation?.terms ?? []).entries()) {
+    for (const statement of termStatements(values, derived)) filingOf(statement).inputs.push({ term, statement });
+  }
+  return [...filings.values()].sort((left, right) => left.filed.localeCompare(right.filed) || left.accession.localeCompare(right.accession));
 }
 
-/** The first filing that changes one of a derived quarter's inputs and does not itself state the quarter. */
-function firstChangedInput(
-  derivation: DerivationProofV1,
-  values: ReadonlyArray<SecConceptValue>,
-  roundings: FilingRoundings,
-  statingTheQuarter: ReadonlySet<string>,
-): { statement: PeriodStatement; term: DerivationTerm } | null {
-  let first: { statement: PeriodStatement; term: DerivationTerm } | null = null;
-  for (const term of derivation.terms) {
-    let previous = { value: term.raw_token, rounding: roundings.get(term.source.accession) ?? null };
-    for (const statement of termStatements(values, term)) {
-      const figure = { value: statement.token, rounding: roundings.get(statement.accession) ?? null };
-      const changed = sameRoundedFigure(previous, figure) !== true;
-      previous = figure;
-      if (changed && !statingTheQuarter.has(statement.accession) && (first === null || statement.filed < first.statement.filed)) first = { statement, term };
-    }
-  }
-  return first;
+/** Whether a derived quarter's inputs, as they stand, sum to a line for it within their rounding. */
+function inputsGive(derivation: DerivationProofV1, inputs: ReadonlyArray<RoundedFigure>, line: RoundedFigure): boolean {
+  const sum = derivationValue({ ...derivation, terms: derivation.terms.map((term, index) => ({ ...term, raw_token: inputs[index]!.value })) });
+  return sum !== null && sumWithinRounding(line, sum, inputs.map((input) => input.rounding));
 }
 
 /** Each filing's rounding of one concept and unit (filingRounding). */
@@ -1568,27 +1581,26 @@ type StatedFigure = RoundedFigure & Readonly<{ as_filed_on: string | null }>;
 type LaterRelation = "economic_restatement" | "unverified_restatement";
 
 /**
- * How a later filing's figure for a period relates to the previous filing's,
- * null when it is the same figure at the coarser of their filings' roundings. A
- * difference only a filing too short to show its rounding could hide may be no
- * restatement at all, so it is unverified rather than stored as one. An as-filed
- * figure that differs is compared on the listing's splits between the two filing
- * dates; without them on file it is unverified.
+ * How a later filing's figure for a period relates to the one that stands, null
+ * when it is the same figure at the coarser of their filings' roundings. A
+ * difference only a filing too short to show its rounding could hide is unverified.
+ * An as-filed figure is compared on the listing's splits between the two filing
+ * dates, so an equal one across a split has changed. Without those splits on file
+ * an equal figure is the same one and any other is unverified.
  */
 async function laterRelation(
   metricKey: string,
-  previous: StatedFigure,
+  standing: StatedFigure,
   later: StatedFigure,
   splitsOn: (date: string) => Promise<SubjectSplitHistory>,
 ): Promise<LaterRelation | null> {
-  const same = sameRoundedFigure(previous, later);
-  if (same === true) return null;
-  if (previous.as_filed_on === null || later.as_filed_on === null) return same === false ? "economic_restatement" : "unverified_restatement";
+  const same = sameRoundedFigure(standing, later);
+  if (standing.as_filed_on === null || later.as_filed_on === null) return same === true ? null : same === false ? "economic_restatement" : "unverified_restatement";
   const history = await splitsOn(later.as_filed_on);
-  if (history.status !== "ok" || !splitHistoryCovers(history.checked_at, later.as_filed_on, history.timezone)) return "unverified_restatement";
+  if (history.status !== "ok" || !splitHistoryCovers(history.checked_at, later.as_filed_on, history.timezone)) return same === true ? null : "unverified_restatement";
   const definition = resolveMetricDefinition(metricKey);
   const explained = definition === null ? null : explainedBySplits({
-    earlier: { ...previous, as_filed_on: previous.as_filed_on },
+    earlier: { ...standing, as_filed_on: standing.as_filed_on },
     later: { ...later, as_filed_on: later.as_filed_on },
     value_kind: definition.value_kind,
     splits: history.splits,
