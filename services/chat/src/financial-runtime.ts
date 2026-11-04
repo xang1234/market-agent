@@ -768,21 +768,24 @@ function persistAssistantMessage(
 // The reported figures an answer took from a later statement. The superseded
 // number is not named: a plan has one basis, so the engine has not certified it.
 // A derived quarter was never stated, so a filing's line for it restates nothing.
+// A figure equal to the first report is as first reported, however it got there.
 async function laterFigures(client: SqlExecutor, runId: string, names: ReadonlyMap<string, string>): Promise<{ restated: string[]; ownStatements: string[] }> {
-  const { rows } = await client.query<{ bound_payload: BoundFactInputV1; derived: boolean }>(
-    `select i.bound_payload, coalesce(starts_with(c.source_context_ref, $2), false) as derived
+  const { rows } = await client.query<{ bound_payload: BoundFactInputV1; derived: boolean; changed: boolean }>(
+    `select i.bound_payload, coalesce(starts_with(c.source_context_ref, $2), false) as derived,
+            f.value_num is distinct from o.value_num as changed
        from financial_run_inputs i
        join facts f on f.fact_id = i.fact_id
+       left join facts o on o.fact_id = f.supersedes
        left join fact_financial_contexts c on c.fact_id = f.supersedes
       where i.run_id = $1 and f.method = 'restated' order by i.input_slot`,
     [runId, SEC_DERIVATION_LOCATOR],
   );
-  const figures = (derived: boolean) => [...new Set(rows.filter((row) => row.derived === derived).map(({ bound_payload: { subject_ref, metric, period } }) => {
+  const figures = (kept: typeof rows) => [...new Set(kept.map(({ bound_payload: { subject_ref, metric, period } }) => {
     const measure = lowercaseUnlessAcronym(resolveMetricDefinition(metric.metric_key)?.label ?? metric.metric_key);
     const name = names.get(subject_ref.id.toLowerCase());
     return `${name === undefined ? "" : `${name}'s `}${measure} in ${boundPeriodText(period, period.kind === "instant")}`;
   }))];
-  return { restated: figures(false), ownStatements: figures(true) };
+  return { restated: figures(rows.filter((row) => !row.derived && row.changed)), ownStatements: figures(rows.filter((row) => row.derived)) };
 }
 
 // A read a statement error fails rolls back to its savepoint, so the
