@@ -4,6 +4,7 @@ import { normalizeUniverseToIssuers } from '../../analyst-grids/src/subject-norm
 import { getCurrentThesis, loadThesisHistory, saveThesis } from '../../agents/src/thesis-repo.ts';
 import { draftThesisConditions, type ThesisLlm } from '../../agents/src/thesis-evaluator.ts';
 import { parseThesisConditions, parseThesisText, parseThesisExpectedVersion, type ThesisHistoryResponse, type ThesisMetricOption, ThesisConflictError, ThesisNotFoundError, ThesisValidationError } from '../../agents/src/thesis-types.ts';
+import { LlmRouterError } from '../../llm/src/router.ts';
 import { createLlmRouterFromEnv } from '../../llm/src/settings-loader.ts';
 import { DevApiHttpError } from './dev-api-shared.ts';
 export type ThesisAdapter = {
@@ -79,7 +80,7 @@ export function createThesisAdapter(db: QueryExecutor, getModel: () => Promise<T
       catch (error) {
         if (error instanceof DevApiHttpError)
           throw error;
-        console.error(`thesis draft failed for agent ${agentId}:`, error);
+        console.error(`thesis draft failed for agent ${agentId}:`, draftFailureDetail(error));
         throw new DevApiHttpError(503, 'Condition suggestions are unavailable. Try again or write your own conditions.');
       }
     },
@@ -96,6 +97,12 @@ export async function assertLegacyThesisEditAllowed(db: QueryExecutor, agentId: 
     || (body.universe !== undefined && !isDeepStrictEqual(body.universe, agent?.universe))) {
     throw new DevApiHttpError(409, 'Edit this thesis in Thesis conditions. Create another agent to monitor a different company.');
   }
+}
+function draftFailureDetail(error: unknown): unknown {
+  if (!(error instanceof LlmRouterError))
+    return error;
+  const attempts = error.attempts.map(({ deployment, code, message }) => `${deployment.channel}/${deployment.model} ${code}: ${message}`);
+  return `${error.message} (${attempts.join('; ')})`;
 }
 async function translateErrors<T>(action: () => Promise<T>): Promise<T> {
   try {
