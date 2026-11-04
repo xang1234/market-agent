@@ -20,8 +20,9 @@
 //
 // No operation sets one difference against another ("the growth gap is narrower
 // than the margin gap", #288): the answer prompt asks for none, and the judge
-// never reads one as backed by the figures. Upgrade path: a gap op over two
-// checked comparisons, comparing intervals, if readers miss them.
+// is asked not to read one as backed by the figures, which it does not always
+// follow. Upgrade path: a gap op over two checked comparisons, comparing
+// intervals, if readers miss them.
 
 import type { EvidencePacket, PacketFigure } from "./evidence-packet.ts";
 
@@ -55,9 +56,11 @@ type ClaimPart = Claim & { evidence: ReadonlyArray<string> };
 
 // A claim as one part per metric it cites, each claiming the same of that
 // metric's figures: an order its figures as written, a trend the same result,
-// and a high or low the figure standing where the one named does. Figures that
-// each have a metric to themselves ("growth above margin") set metrics against
-// each other, so there is nothing to split and the check refuses them whole.
+// and a high or low the figure standing where the one named does. An id in no
+// part stays in every part's order, so each fails as a lone metric's would.
+// Figures that each have a metric to themselves ("growth above margin") set
+// metrics against each other, and a ranking beside a run over time has no one
+// result both could stand on, so neither is split and the check refuses it whole.
 function claimParts(item: Claim, figureIds: ReadonlyArray<string>, packet: EvidencePacket): ClaimPart[] {
   const figureOf = (id: unknown) => packet.figures.find((figure) => figure.id === id);
   const metrics = new Map<string, string[]>();
@@ -66,17 +69,19 @@ function claimParts(item: Claim, figureIds: ReadonlyArray<string>, packet: Evide
     metrics.set(key, [...(metrics.get(key) ?? []), figure.id]);
   }
   const groups = [...metrics.values()];
-  if (groups.length < 2 || groups.every((ids) => ids.length < 2)) return [{ ...item, evidence: figureIds }];
-  const named = figureIds.includes(item.result as string) ? figureOf(item.result) : undefined;
   const member = (figure: PacketFigure) => figure.segment ?? figure.company ?? packet.companies[0];
+  const acrossMembers = (ids: ReadonlyArray<string>) => new Set(ids.map((id) => member(figureOf(id)!))).size > 1;
+  const axes = new Set(groups.filter((ids) => ids.length > 1).map(acrossMembers));
+  if (groups.length < 2 || axes.size !== 1) return [{ ...item, evidence: figureIds }];
+  const named = figureIds.includes(item.result as string) ? figureOf(item.result) : undefined;
   // Its company's figure across companies; over time, one company's, its period's.
   const standing = (ids: ReadonlyArray<string>) => {
     const ofMember = ids.flatMap((id) => figureOf(id) ?? []).filter((figure) => member(figure) === member(named!));
-    return (ofMember.length === 1 ? ofMember[0] : ofMember.find((figure) => periodKey(figure.period) === periodKey(named!.period)))?.id;
+    return (ofMember.length === 1 ? ofMember[0] : ofMember.find((figure) => periodName(figure.period) === periodName(named!.period)))?.id;
   };
   return groups.map((evidence) => ({
     op: item.op,
-    result: Array.isArray(item.result) ? item.result.filter((id) => evidence.includes(id)) : named ? standing(evidence) : item.result,
+    result: Array.isArray(item.result) ? item.result.filter((id) => evidence.includes(id) || !figureIds.includes(id)) : named ? standing(evidence) : item.result,
     evidence,
   }));
 }
