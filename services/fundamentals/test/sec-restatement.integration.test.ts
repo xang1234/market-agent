@@ -77,6 +77,12 @@ const Q2_2024 = ["2024-04-01", "2024-06-30"] as const;
 const Q3_2024 = ["2024-07-01", "2024-09-30"] as const;
 const Q4_2024 = ["2024-10-01", "2024-12-31"] as const;
 const FY_2024 = ["2024-01-01", "2024-12-31"] as const;
+const FY_2023 = ["2023-01-01", "2023-12-31"] as const;
+const FY_2025 = ["2025-01-01", "2025-12-31"] as const;
+const Q1_2023 = ["2023-01-01", "2023-03-31"] as const;
+const Q2_2023 = ["2023-04-01", "2023-06-30"] as const;
+const Q3_2023 = ["2023-07-01", "2023-09-30"] as const;
+const Q1_2025 = ["2025-01-01", "2025-03-31"] as const;
 
 /**
  * GE's fiscal 2024 revenue as SEC lists it (CIK 40545). Its Q1 10-Q counted GE
@@ -410,6 +416,79 @@ test("SEC restatements", { timeout: 300_000 }, async (t) => {
     const nextK = issuer.filed(2, "10-K", "2026-02-03", 2025, "FY");
     await issuer.ingest({ Revenues: concept("USD", [k(...FY_2024, "16000000000"), nextK(...FY_2024, "15800000000"), nextK("2025-01-01", "2025-12-31", "500")]) }, ["FY"]);
     assert.deepEqual(await issuer.laterStatements(), [["revenue", "FY", "15800000000", "2026-02-03", "economic_restatement"]]);
+  });
+
+  await t.test("a thousands filer's round figure is still in thousands: 16,000,000K then 15,999,800K is a restatement", async () => {
+    const issuer = await quarterIssuer();
+    const k = issuer.filed(1, "10-K", "2025-02-03", 2024, "FY");
+    const nextK = issuer.filed(2, "10-K", "2026-02-03", 2025, "FY");
+    await issuer.ingest({
+      Revenues: concept("USD", [k(...FY_2023, "12345678000"), k(...FY_2024, "16000000000"), nextK(...FY_2024, "15999800000"), nextK(...FY_2025, "17654321000")]),
+    }, ["FY"]);
+    assert.deepEqual(await issuer.laterStatements(), [["revenue", "FY", "15999800000", "2026-02-03", "economic_restatement"]]);
+    assert.equal(await issuer.pick("FY", AFTER, "as_restated"), "15999800000");
+  });
+
+  await t.test("a stated quarter's round figure is in its filing's rounding: 100,000K then 100,450K is a restatement", async () => {
+    const issuer = await quarterIssuer();
+    const q1 = issuer.filed(1, "10-Q", "2024-04-23", 2024, "Q1");
+    const nextQ1 = issuer.filed(2, "10-Q", "2025-04-22", 2025, "Q1");
+    await issuer.ingest({
+      Revenues: concept("USD", [q1(...Q1_2023, "98765000"), q1(...Q1_2024, "100000000"), nextQ1(...Q1_2024, "100450000"), nextQ1(...Q1_2025, "110123000")]),
+    }, ["Q1"]);
+    assert.deepEqual(await issuer.laterStatements(), [["revenue", "Q1", "100450000", "2025-04-22", "economic_restatement"]]);
+    assert.equal(await issuer.pick("Q1", AFTER, "as_restated"), "100450000");
+  });
+
+  await t.test("a filing with one figure cannot show its rounding, so a change its zeros could hide is a gap", async () => {
+    const lone = async (standing: string, later: string) => {
+      const issuer = await quarterIssuer();
+      const q1 = issuer.filed(1, "10-Q", "2024-04-23", 2024, "Q1");
+      const nextQ1 = issuer.filed(2, "10-Q", "2025-04-22", 2025, "Q1");
+      await issuer.ingest({ Revenues: concept("USD", [q1(...Q1_2024, standing), nextQ1(...Q1_2024, later), nextQ1(...Q1_2025, "110123000")]) }, ["Q1"]);
+      return [await issuer.laterStatements(), await issuer.pick("Q1", AFTER, "as_restated")];
+    };
+    assert.deepEqual(await lone("100000000", "100450000"), [[["revenue", "Q1", "100450000", "2025-04-22", "unverified_restatement"]], "restatement_unverified"]);
+    assert.deepEqual(await lone("100000000", "101000000"), [[["revenue", "Q1", "101000000", "2025-04-22", "economic_restatement"]], "101000000"], "past half a million no zeros hide it");
+    assert.deepEqual(await lone("100000000", "100000000"), [[], "100000000"]);
+  });
+
+  /** Fiscal 2024 in thousands, each 10-Q beside its comparative, and a 10-K of the given figures. */
+  const thousandsQuarters = (issuer: Awaited<ReturnType<typeof quarterIssuer>>) => {
+    const q1 = issuer.filed(1, "10-Q", "2024-04-23", 2024, "Q1");
+    const q2 = issuer.filed(2, "10-Q", "2024-07-23", 2024, "Q2");
+    const q3 = issuer.filed(3, "10-Q", "2024-10-22", 2024, "Q3");
+    return [
+      q1(...Q1_2023, "22111000"), q1(...Q1_2024, "23456000"),
+      q2(...Q2_2023, "23222000"), q2(...Q2_2024, "24567000"),
+      q3(...Q3_2023, "25333000"), q3(...Q3_2024, "26789000"),
+    ];
+  };
+
+  await t.test("a round year in thousands widens nothing: a fourth quarter's line past its figures' rounding is a gap", async () => {
+    const issuer = await quarterIssuer();
+    const k = issuer.filed(4, "10-K", "2025-02-03", 2024, "FY");
+    const amended = issuer.filed(5, "10-K/A", "2025-06-02", 2024, "FY");
+    await issuer.ingest({
+      Revenues: concept("USD", [...thousandsQuarters(issuer), k(...FY_2023, "88123000"), k(...FY_2024, "100000000"), amended(...Q4_2024, "27600000")]),
+    }, ["Q1", "Q2", "Q3", "Q4", "FY"], "2025-07-01T15:00:00.000Z");
+    assert.deepEqual(await issuer.laterStatements(), [["revenue", "Q4", "27600000", "2025-06-02", "unverified_restatement"]]);
+    assert.equal(await issuer.pick("Q4", AFTER, "as_restated"), "restatement_unverified");
+    assert.equal(await issuer.pick("Q4", AFTER, "as_reported"), "25188000");
+  });
+
+  await t.test("a sum's rounding is each figure's own half unit: 10-Qs in thousands and a 10-K in millions hide about a million", async () => {
+    const line = async (fourthQuarter: string) => {
+      const issuer = await quarterIssuer();
+      const k = issuer.filed(4, "10-K", "2025-02-03", 2024, "FY");
+      await issuer.ingest({
+        Revenues: concept("USD", [...thousandsQuarters(issuer), k(...FY_2023, "88000000"), k(...FY_2024, "100000000"), k(...Q4_2024, fourthQuarter)]),
+      }, ["Q1", "Q2", "Q3", "Q4", "FY"]);
+      return [await issuer.laterStatements(), await issuer.pick("Q4", AFTER, "as_restated")];
+    };
+    // 100,000K less three quarters is 25,188K. Half a thousand three times and half a million twice is 1,001.5K.
+    assert.deepEqual(await line("26000000"), [[], "25188000"]);
+    assert.deepEqual(await line("27000000"), [[["revenue", "Q4", "27000000", "2025-02-03", "unverified_restatement"]], "restatement_unverified"]);
   });
 
   await t.test("a filing older than the original never restates it, for a quarter or a year", async () => {
