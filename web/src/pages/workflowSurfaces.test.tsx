@@ -516,6 +516,58 @@ test('Agents roster shows only what the server sent, and says when it could not 
   }
 })
 
+test('Agents roster names a static universe, and falls back to the ref when a subject cannot be named', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restore = installDomGlobals(dom.window as unknown as Window)
+  const originalFetch = globalThis.fetch
+  const NAMED = 'c0000000-0000-4000-8000-000000000001'
+  const UNKNOWN = 'c0000000-0000-4000-8000-000000000002'
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+  try {
+    globalThis.fetch = async (input, init) => {
+      const url = String(input)
+      if (url === '/v1/agents') {
+        return json({
+          agents: [{
+            agent_id: '11111111-1111-4111-8111-111111111111',
+            name: 'Margins',
+            thesis: 'Margins expand.',
+            cadence: 'daily',
+            enabled: true,
+            universe: { mode: 'static', subject_refs: [{ kind: 'issuer', id: NAMED }, { kind: 'listing', id: UNKNOWN }] },
+            alert_rules: [{ rule_id: 'margin', severity_at_least: 'critical', headline_contains: 'margin', channels: ['email'] }],
+            updated_at: '2026-05-06T00:00:00.000Z',
+          }],
+          runs: [],
+        })
+      }
+      if (url === '/v1/subjects/hydrate') {
+        const { subject_ref } = JSON.parse(String(init?.body))
+        return subject_ref.id === NAMED ? json({ subject: { subject_ref, display_name: 'Apple Inc.', confidence: 1 } }) : json({ error: 'not found' }, 404)
+      }
+      if (url.endsWith('/findings')) return json({ findings: [] })
+      if (url.endsWith('/activity')) return json({ activity: [] })
+      if (url.endsWith('/thesis')) return json({ thesis: null, versions: [], assessments: [], metrics: [] })
+      throw new Error(`unexpected fetch: ${url}`)
+    }
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(wrapWithAuth(<MemoryRouter><AgentsPage /></MemoryRouter>))
+    })
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+
+    const rows = [...dom.window.document.querySelectorAll('p')].map((p) => p.textContent)
+    assert.ok(rows.includes(`Universe: Apple Inc., listing: ${UNKNOWN}`), rows.join(' | '))
+    assert.ok(rows.includes('Alert rule: critical+ headline contains margin via email'), rows.join(' | '))
+    const buttons = [...dom.window.document.querySelectorAll('button')].map((b) => b.textContent)
+    assert.ok(buttons.includes('Disable') && buttons.includes('Delete'))
+    await act(async () => root.unmount())
+  } finally {
+    globalThis.fetch = originalFetch
+    restore()
+  }
+})
+
 test('Agents form shows its own validation error beside the submit button, not in the roster status', async () => {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
   const restore = installDomGlobals(dom.window as unknown as Window)
