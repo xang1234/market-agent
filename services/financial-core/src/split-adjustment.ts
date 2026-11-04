@@ -23,6 +23,7 @@ import { canonicalDecimalString, compareExactDecimals, parseDerivedDecimalText, 
 import { isKnownTimeZone, localDateOf } from "./public-time.ts";
 import {
   addRationals,
+  compareRationals,
   divideRationals,
   multiplyRationals,
   rationalFromDecimal,
@@ -99,10 +100,11 @@ export function restateToReference(input: {
  * rounded, as NVDA's FY2025 10-K presents FY2024 diluted EPS of 11.93 as 1.19
  * after the 10-for-1 split, so the restated earlier figure must round to the
  * later one at the finer of their decimal places, a whole number to the unit
- * or to the coarser rounding its zeros show. A value half way between rounds
- * either way. The earlier figure may be a stored value's text, which can run
- * longer than a source token may. Null when either figure is not a decimal or
- * splits cannot restate this kind of value.
+ * or to the coarser rounding its zeros show, the splits scaling the earlier
+ * figure's. A value half way between rounds either way. The earlier figure may
+ * be a stored value's text, which can run longer than a source token may. Null
+ * when either figure is not a decimal or splits cannot restate this kind of
+ * value.
  */
 export function explainedBySplits(input: {
   earlier: Readonly<{ value: string; as_filed_on: IsoDate }>;
@@ -116,11 +118,23 @@ export function explainedBySplits(input: {
   if (!earlier.ok || !later.ok || !split.ok) return null;
   const from = rationalFromDecimal(earlier.value);
   const to = rationalFromDecimal(later.value);
-  const rounding = Math.max(roundingExponent(earlier.value), roundingExponent(later.value));
-  const half = rationalFromDecimal({ coefficient: 5n, scale: rounding > 0 ? 1 - rounding : Math.max(0, earlier.value.scale, later.value.scale) + 1 });
+  const rounding = [roundingExponent(earlier.value), roundingExponent(later.value)] as const;
+  const half = rounding[0] + rounding[1] > 0
+    ? halfOfCoarser(split.restate, rounding[0], rounding[1])
+    : rationalFromDecimal({ coefficient: 5n, scale: Math.max(0, earlier.value.scale, later.value.scale) + 1 });
   const restated = from === null ? null : split.restate(from);
   const difference = restated === null || to === null ? null : subtractRationals(restated, to);
   return difference === null || half === null ? null : withinEitherWay(difference, half);
+}
+
+function halfOfCoarser(restate: (value: ExactRational) => ExactRational | null, earlierExponent: number, laterExponent: number): ExactRational | null {
+  const unit = (exponent: number) => rationalFromDecimal({ coefficient: 1n, scale: -exponent });
+  const earlierUnit = unit(earlierExponent);
+  const restatedUnit = earlierUnit === null ? null : restate(earlierUnit);
+  const laterUnit = unit(laterExponent);
+  const half = rationalFromDecimal({ coefficient: 5n, scale: 1 });
+  if (restatedUnit === null || laterUnit === null || half === null) return null;
+  return multiplyRationals(compareRationals(restatedUnit, laterUnit) > 0 ? restatedUnit : laterUnit, half);
 }
 
 // Companyfacts drops a filing's stated rounding, so a whole figure's trailing
