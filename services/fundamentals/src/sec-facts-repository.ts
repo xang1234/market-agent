@@ -1441,7 +1441,8 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
       if (relation !== null) await storeLaterStatement(db, input, memo, original, later, relation);
     };
     const statements = periodStatements(values, original.period_start, original.period_end, original.fiscal_period === "FY");
-    const isLater = ({ accession, filed }: PeriodStatement) => filed > originalFiled || (derivation !== null && accession === originalAccession);
+    const isLater = ({ accession, filed }: PeriodStatement) => filed >= originalFiled && (derivation !== null || accession !== originalAccession);
+    const unordered = unorderedDates([statements, ...(derivation?.terms ?? []).map((term) => termStatements(values, term))], roundings);
     let standing: StatedFigure = { value: original.value, as_filed_on: original.as_filed_on, rounding: roundings.get(originalAccession!) ?? null };
     const inputs: RoundedFigure[] = derivation?.terms.map((term) => ({ value: term.raw_token, rounding: roundings.get(term.source.accession) ?? null })) ?? [];
     // A derived figure stands on its unmoved inputs, whose rounding a line may fall within.
@@ -1465,7 +1466,7 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
         continue;
       }
       const figure: StatedFigure = { value: statement.token, as_filed_on: original.as_filed_on === null ? null : statement.filed, rounding: roundings.get(statement.accession) ?? null };
-      const relation = derivation !== null && !inputsGive(derivation, inputs, figure)
+      const relation = unordered.has(statement.filed) || (derivation !== null && !inputsGive(derivation, inputs, figure))
         ? "unverified_restatement"
         : asDerived ? null : await laterRelation(original.metric_key, standing, figure, splitsOn);
       await record({ ...statement, concept: concept!, unit: unit! }, relation);
@@ -1504,7 +1505,15 @@ function periodStatements(values: ReadonlyArray<SecConceptValue>, start: string 
 type DerivationTerm = DerivationProofV1["terms"][number];
 
 function termStatements(values: ReadonlyArray<SecConceptValue>, term: DerivationTerm): PeriodStatement[] {
-  return periodStatements(values, term.start, term.end, term.span === "fiscal_year").filter(({ filed }) => filed > term.source.filed);
+  return periodStatements(values, term.start, term.end, term.span === "fiscal_year").filter(({ filed }) => filed >= term.source.filed);
+}
+
+/** The dates two filings state one figure differently, beyond rounding. Accession order is not filing order, so nothing tells which stands. */
+function unorderedDates(statementLists: ReadonlyArray<ReadonlyArray<PeriodStatement>>, roundings: FilingRoundings): Set<string> {
+  const figure = ({ accession, token }: PeriodStatement): RoundedFigure => ({ value: token, rounding: roundings.get(accession) ?? null });
+  return new Set(statementLists.flatMap((statements) => statements
+    .filter((one, index) => statements.slice(index + 1).some((other) => other.filed === one.filed && sameRoundedFigure(figure(one), figure(other)) !== true))
+    .map(({ filed }) => filed)));
 }
 
 /** A later filing's statement of one of a derived quarter's inputs, by its place among the terms. */
