@@ -945,6 +945,40 @@ test("a full up rolls back at once when MinIO refuses the evidence bucket", asyn
   assert.deepEqual(lines("start:"), []);
 });
 
+test("a service that binds after a slow start on a loaded machine is not treated as failed", async () => {
+  const fixture = await createShellFixture();
+  const result = await runBash(
+    [
+      "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
+      "sleep(){ :; }",
+      "process_running(){ return 0; }",
+      "checks=0",
+      "service_owns_port(){ checks=$((checks + 1)); [[ $checks -gt 90 ]]; }",
+      "wait_for_service dev-providers 4436",
+      'printf "bound after %s checks" "$checks"',
+    ].join("\n"),
+    fixture.root,
+  );
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.stdout.trim(), "bound after 91 checks");
+});
+
+test("a service that never binds still fails, after a bounded wait", async () => {
+  const fixture = await createShellFixture();
+  const result = await runBash(
+    [
+      "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
+      "sleep(){ :; }",
+      "process_running(){ return 0; }",
+      "service_owns_port(){ return 1; }",
+      "wait_for_service dev-providers 4436",
+    ].join("\n"),
+    fixture.root,
+  );
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /dev-providers did not bind 127\.0\.0\.1:4436 in time/);
+});
+
 test("a full up rolls back at once on any other 4xx from MinIO", async () => {
   const { result, lines } = await traceUp(S3_ENV, [
     "sleep(){ :; }",
