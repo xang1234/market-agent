@@ -69,6 +69,10 @@ test("cross-surface parity", { skip: !dockerAvailable(), timeout: 300_000 }, asy
   await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [threadId, IDS.owner]);
   completed((await chatHarness(pool, { model: revenueModel(["AAA"]) }).run({ threadId, userId: IDS.owner, userIntent: "Revenue for AAA" })).events);
   const chat = await certified(db, await runFor(db, threadId), "a_out");
+  const priorThreadId = randomUUID();
+  await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [priorThreadId, IDS.owner]);
+  completed((await chatHarness(pool, { model: revenueModel(["AAA"], 2022) }).run({ threadId: priorThreadId, userId: IDS.owner, userIntent: "Revenue for AAA in FY2022" })).events);
+  const chatPrior = await certified(db, await runFor(db, priorThreadId), "a_out");
 
   // Analyze: the revenue-trend section's latest annual revenue.
   const templateId = (await db.query(
@@ -121,6 +125,12 @@ test("cross-surface parity", { skip: !dockerAvailable(), timeout: 300_000 }, asy
     assert.deepEqual([chat.basis, chat.coverage, chat.inputs.map((input) => input.fact_id)], ["as_restated", "complete", [IDS.restated]]);
     // Allowed difference: Chat answers at the turn's own time; a saved rule pins its cutoff.
     assert.ok(chat.cutoff > saved.cutoff);
+  });
+
+  await t.test("on a year no filing restated, chat and a memo certify the same value from the same disclosure", async () => {
+    const memoPrior = await certified(db, await runFor(db, memo.runId), "revenue_trend_prior");
+    assert.deepEqual([chatPrior.payload, chatPrior.inputs], [memoPrior.payload, memoPrior.inputs]);
+    assert.deepEqual([chatPrior.basis, memoPrior.basis, chatPrior.inputs.map((input) => input.fact_id)], ["as_restated", "as_reported", [IDS.fy2022]]);
   });
 
   await t.test("the only difference between the two groups is the stated basis: the restated disclosure", async () => {

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
-import { IDS, RESTATED_REVENUE } from "../../financial-engine/test/db-fixtures.ts";
+import { IDS, ORIGINAL_REVENUE, RESTATED_REVENUE } from "../../financial-engine/test/db-fixtures.ts";
 import { createChatCoordinator } from "../src/coordinator.ts";
 import { createChatFinancialRuntime } from "../src/financial-runtime.ts";
 import { listChatMessagesForThread } from "../src/messages.ts";
@@ -59,7 +59,7 @@ test("financial answers over SSE", { timeout: 300_000 }, async (t) => {
     try {
       const { status, transcript, events } = await stream(randomUUID());
       assert.equal(status, 200);
-      for (const leaked of ["987654321", RESTATED_REVENUE, "383,000"]) assert.ok(!transcript.includes(leaked), `the stream carries ${leaked}`);
+      for (const leaked of ["987654321", ORIGINAL_REVENUE, "383,285", RESTATED_REVENUE, "383,000"]) assert.ok(!transcript.includes(leaked), `the stream carries ${leaked}`);
       assert.deepEqual(events.at(-1)!.data.financial_gap, { reason_code: "verification_failed" });
       assert.equal((await db.query(`select count(*)::int as n from chat_messages m where m.thread_id = $1 and m.blocks @> '[{"kind":"financial_answer"}]'`, [threadId])).rows[0].n, 0);
     } finally {

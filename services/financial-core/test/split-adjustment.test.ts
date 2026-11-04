@@ -160,6 +160,17 @@ test("a later 10-K's figure is the earlier one restated by the splits between th
   assert.equal(explained("100", "100", "flow"), null);
 });
 
+test("a share count rounded differently is the same count, at the coarser of the two roundings", () => {
+  const explained = (earlier: string, later: string, laterFiled = "2025-02-26") =>
+    explainedBySplits({ earlier: { value: earlier, as_filed_on: "2024-02-21" }, later: { value: later, as_filed_on: laterFiled }, value_kind: "share_count_average", splits: NVDA_SPLITS });
+  // Thousands, then millions: 249,412,000 x 10 is 2,494,120,000, and 2,494M is that to the million.
+  assert.equal(explained("249412000", "2494000000"), true);
+  assert.equal(explained("1234567000", "1235000000", "2024-05-29"), true, "no split between the filings");
+  assert.equal(explained("1234567000", "1236000000", "2024-05-29"), false);
+  // Exact counts have no rounding to hide a change in.
+  assert.equal(explained("1234567", "1234568", "2024-05-29"), false);
+});
+
 test("an earlier figure as stored is read whole, though its text is longer than a source token may be (#401)", () => {
   const explained = (earlier: string, later: string) =>
     explainedBySplits({ earlier: { value: earlier, as_filed_on: "2024-02-21" }, later: { value: later, as_filed_on: "2025-02-26" }, value_kind: "per_share", splits: NVDA_SPLITS });
