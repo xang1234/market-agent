@@ -226,7 +226,7 @@ split executed on or before that date is already reflected. SEC ingestion certif
   reference date only if the provider lists each split before or on its execution date.
 - **A split recast is no restatement:** a later 10-K states an earlier year's as-filed figure on its own split basis.
   Restatement detection restates the figure that stands by the listing's splits between the two filing dates
-  (`explainedBySplits`). When that rounds to the later figure, at the finer of their decimal places or the coarser of
+  (`explainedBySplits`). When that rounds to the later figure, at the coarser of
   their filings' roundings, the later figure is the same one, and nothing is stored. NVDA's FY2024 diluted EPS of 11.93 is 1.193 after the 10-for-1 split, and the
   FY2025 10-K presents it as 1.19. Otherwise the later figure is an economic restatement as filed on its 10-K's date,
   so binding restates it from there. When the listing's splits are not on file through the later filing's date (no

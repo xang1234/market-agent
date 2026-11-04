@@ -157,7 +157,12 @@ npm test         # contract + AAPL FY2024 income statement verification
   from thousands to millions. A filing stating fewer than two different
   figures cannot show it and is read exactly, unless its own zeros could hide
   the difference. That is stored as an `unverified_restatement`, since it may
-  be no restatement at all.
+  be no restatement at all. A per-share figure's zeros are never rounding: its
+  filing's rounding is its finest stated places, `-2` for cents, and a filing
+  showing no cents cannot show it.
+- Two filings of one date that state a figure differently, beyond rounding,
+  have no order, since accession order is not filing order. Each case is an
+  `unverified_restatement`, for the period or for an input of a derived quarter.
 - A derived quarter also takes its own filing's statement of it, when its
   inputs as they then stand give that figure within the sum of each figure's
   own half unit, even a statement repeating the figure. Otherwise, or from the
