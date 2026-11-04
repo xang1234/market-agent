@@ -16,6 +16,7 @@ import type { PolygonFetcher } from "../../market/src/adapters/polygon.ts";
 import { POLYGON_MARKET_SOURCE_ID } from "../../market/src/provider-sources.ts";
 import { syncListingSplits } from "../../market/src/split-repository.ts";
 import { listChatMessagesForThread } from "../src/messages.ts";
+import { proposedMetric } from "../src/research-scope.ts";
 import { chatDatabase, chatHarness, completed, METRIC_READING, readingOf, SEC_ISSUER, SEC_ISSUER_B } from "./financial-fixtures.ts";
 
 const CIK = 320190;
@@ -94,14 +95,15 @@ test("the note on a figure later filings moved", { timeout: 300_000 }, async (t)
     }
     assert.ok(await statements.find({ issuer_id: issuerId, family: "income", basis: "as_reported", fiscal_year: 2023, fiscal_period: "FY" }));
   }
-  const answer = async (fiscalPeriod: "FY" | "Q1" | "Q4", mention = "OPM", metricKey = "revenue", fiscalYear = 2024) => {
+  const answer = async (fiscalPeriod: "FY" | "Q1" | "Q4", mention = "OPM", metricKey: "revenue" | "net_income" | "eps_diluted" = "revenue", fiscalYear = 2024) => {
+    const reading = metricKey === "eps_diluted" ? { ...METRIC_READING, metrics: [proposedMetric("eps_diluted", null, null)!] } : { ...METRIC_READING, income_items: [metricKey] };
     const threadId = randomUUID();
     await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [threadId, IDS.owner]);
     const done = completed((await chatHarness(pool, {
       model: quarterModel(mention, fiscalPeriod, metricKey, fiscalYear),
       readQuestion: readingOf(fiscalPeriod === "FY"
-        ? { ...METRIC_READING, income_items: [metricKey], period: { kind: "fiscal_year", fiscal_year: fiscalYear } }
-        : { ...METRIC_READING, income_items: [metricKey], period: { kind: "fiscal_quarter", fiscal_period: fiscalPeriod, fiscal_year: fiscalYear } }),
+        ? { ...reading, period: { kind: "fiscal_year", fiscal_year: fiscalYear } }
+        : { ...reading, period: { kind: "fiscal_quarter", fiscal_period: fiscalPeriod, fiscal_year: fiscalYear } }),
     }).run({ threadId, userId: IDS.owner, userIntent: `${mention}'s ${metricKey} in ${fiscalPeriod} FY${fiscalYear}` })).events);
     const read = await listChatMessagesForThread(pool, { thread_id: threadId, user_id: IDS.owner });
     return JSON.stringify(read!.messages.find((message) => message.message_id === done.message_id)!.blocks);
