@@ -6,12 +6,12 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
-import { IDS } from "../../financial-engine/test/db-fixtures.ts";
+import type { QueryExecutor } from "../../agents/src/agent-repo.ts";
+import { saveThesis } from "../../agents/src/thesis-repo.ts";
+import { assess, revenueCondition, thesisDatabase } from "../../agents/test/financial-thesis-fixtures.ts";
 import { createSecBackedStatementRepository } from "../../fundamentals/src/sec-facts-repository.ts";
 import { secCompanyFetcher } from "../../fundamentals/test/fakes.ts";
-import type { QueryExecutor } from "../src/agent-repo.ts";
-import { saveThesis } from "../src/thesis-repo.ts";
-import { assess, revenueCondition, thesisDatabase } from "./financial-thesis-fixtures.ts";
+import { IDS } from "./db-fixtures.ts";
 
 const AS_OF = "2025-03-15T00:00:00.000Z";
 

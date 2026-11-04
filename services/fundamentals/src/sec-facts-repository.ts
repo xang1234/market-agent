@@ -1439,9 +1439,9 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
         continue;
       }
       const figure: StatedFigure = { value: statement.token, as_filed_on: original.as_filed_on === null ? null : statement.filed };
-      const stated = await laterRelation(original.metric_key, previous, figure, splitsOn);
+      const compared = await laterRelation(original.metric_key, previous, figure, splitsOn);
       previous = figure;
-      const relation = stated === "economic_restatement" && derivation !== null ? derivedLineRelation(derivation, values, statement) : stated;
+      const relation = compared === "economic_restatement" && derivation !== null ? derivedLineRelation(derivation, values, statement) : compared;
       await record(later, relation);
       if (relation === "unverified_restatement") break;
     }

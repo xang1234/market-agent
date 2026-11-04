@@ -13,9 +13,14 @@ export type PublicationTimingPrecision = (typeof PUBLICATION_TIMING_PRECISIONS)[
 
 // A later filing's statement of an as-filed figure whose splits since the
 // original could not be checked when it was stored is an unverified
-// restatement: it may be a split recast or a real restatement.
+// restatement: it may be a split recast or a real restatement. So is a derived
+// quarter from a filing that changes one of its inputs, or states a line they
+// do not give.
 export const DISCLOSURE_RELATIONS = ["original", "economic_restatement", "extraction_correction", "unverified_restatement"] as const;
 export type DisclosureRelation = (typeof DISCLOSURE_RELATIONS)[number];
+
+/** How a derived quarter's source_context_ref starts: SEC never stated it, ingest did the arithmetic. */
+export const SEC_DERIVATION_LOCATOR = "sec_edgar:derivation:";
 
 export const PERIOD_TYPES = ["duration", "instant"] as const;
 export type PeriodType = (typeof PERIOD_TYPES)[number];

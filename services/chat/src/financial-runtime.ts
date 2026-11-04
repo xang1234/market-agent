@@ -21,6 +21,7 @@ import {
   lowercaseUnlessAcronym,
   operationDependencies,
   resolveMetricDefinition,
+  SEC_DERIVATION_LOCATOR,
   type BoundFactInputV1,
   type FinancialPlanV1,
   type FinancialRuntimeAuthority,
@@ -44,7 +45,6 @@ import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../fi
 import { requireFinancialReadiness } from "../../financial-engine/src/readiness.ts";
 import { publishRequest, type RequestGap } from "../../financial-engine/src/request.ts";
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
-import { SEC_DERIVATION_LOCATOR } from "../../fundamentals/src/sec-derivation-proof.ts";
 import { comparedAdditions, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId, noteBlock } from "./chat-ids.ts";
 import { asksCause, filedCauses, namedFigures, NOT_ASKED, type FiledCause } from "./filed-cause.ts";
@@ -770,12 +770,12 @@ function persistAssistantMessage(
 // A derived quarter was never stated, so a filing's line for it restates nothing.
 async function laterFigures(client: SqlExecutor, runId: string, names: ReadonlyMap<string, string>): Promise<{ restated: string[]; ownStatements: string[] }> {
   const { rows } = await client.query<{ bound_payload: BoundFactInputV1; derived: boolean }>(
-    `select i.bound_payload, coalesce(c.source_context_ref like $2, false) as derived
+    `select i.bound_payload, coalesce(starts_with(c.source_context_ref, $2), false) as derived
        from financial_run_inputs i
        join facts f on f.fact_id = i.fact_id
        left join fact_financial_contexts c on c.fact_id = f.supersedes
       where i.run_id = $1 and f.method = 'restated' order by i.input_slot`,
-    [runId, `${SEC_DERIVATION_LOCATOR}%`],
+    [runId, SEC_DERIVATION_LOCATOR],
   );
   const figures = (derived: boolean) => [...new Set(rows.filter((row) => row.derived === derived).map(({ bound_payload: { subject_ref, metric, period } }) => {
     const measure = lowercaseUnlessAcronym(resolveMetricDefinition(metric.metric_key)?.label ?? metric.metric_key);

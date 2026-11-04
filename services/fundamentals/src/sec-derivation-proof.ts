@@ -2,6 +2,7 @@ import { hashCanonical } from "../../financial-core/src/canonical.ts";
 import { DERIVATION_PROOF_VERSION, type DerivationProofV1 } from "../../financial-core/src/contracts.ts";
 import { resolveMetricDefinition } from "../../financial-core/src/definitions.ts";
 import { derivationIssue, derivationValue, type DerivationIssue } from "../../financial-core/src/derivation.ts";
+import { SEC_DERIVATION_LOCATOR } from "../../financial-core/src/evidence-vocabulary.ts";
 import { canonicalDecimalString } from "../../financial-core/src/exact-decimal.ts";
 import {
   isDiscreteQuarterDuration,
@@ -13,8 +14,6 @@ import {
   type SecSourceToken,
   type SecValueLocation,
 } from "./sec-edgar.ts";
-
-export const SEC_DERIVATION_LOCATOR = "sec_edgar:derivation:";
 
 export type SecDerivedLine =
   | Readonly<{ status: "unproven"; sum: string; issue: DerivationIssue }>
