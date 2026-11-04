@@ -232,7 +232,8 @@ split executed on or before that date is already reflected. SEC ingestion certif
   so binding restates it from there. When the listing's splits are not on file through the later filing's date (no
   single listing on that date, never synced, or synced before it), the figure is stored as an `unverified_restatement`
   (migration 0067). An `as_restated` plan gaps on it with `restatement_unverified`, and an `as_reported` plan still
-  binds the original.
+  binds the original. A derived quarter is stored the same way from a filing that changes one of its inputs, or states
+  a line its inputs do not give (#513).
 - **Seal:** the snapshot verifier rebuilds the adjustment from the listing's current splits and time zone and withholds
   the seal when either changed (`splits_changed`).
 - **Saved rules:** a thesis condition or Discovery criterion on a per-share value or share count is unresolved
