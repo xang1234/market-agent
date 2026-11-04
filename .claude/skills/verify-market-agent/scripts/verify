@@ -1,0 +1,232 @@
+#!/usr/bin/env bash
+# Drives this checkout's DEV_MODE=data stack. Usage: see SKILL.md, or run with no args.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(git rev-parse --show-toplevel)"
+ENV_FILE="$ROOT/.env.dev"
+EVIDENCE="$ROOT/.dev/verify"
+NODE_APP="$HOME/.nvm/versions/node/v22.18.0/bin" # arm64: runs the stack and web
+NODE_TEST="$HOME/.nvm/versions/node/v22.19.0/bin" # what CI runs
+
+# init-env writes this file, so it runs before the file is read.
+if [[ "${1:-}" == "init-env" ]]; then
+  [[ ! -f "$ENV_FILE" ]] || { echo "$ENV_FILE already exists" >&2; exit 1; }
+  [[ "${2:-}" =~ ^[0-9]+$ ]] || { echo "usage: init-env PORT_OFFSET" >&2; exit 2; }
+  MAIN_CHECKOUT="$(git worktree list --porcelain | sed -n '1s/^worktree //p')"
+  python3 "$HERE/init-env.py" "$ROOT/.env.dev.example" "$MAIN_CHECKOUT/.env.dev" "$2" > "$ENV_FILE.tmp"
+  chmod 600 "$ENV_FILE.tmp"
+  mv "$ENV_FILE.tmp" "$ENV_FILE"
+  echo "wrote $ENV_FILE with ports shifted by $2"
+  exit 0
+fi
+
+# The example's default ports may belong to another checkout's stack.
+[[ -f "$ENV_FILE" ]] || { echo "no $ENV_FILE: run init-env first" >&2; exit 2; }
+
+set -a
+# shellcheck disable=SC1090
+. "$ENV_FILE"
+set +a
+PG_USER="${DEV_POSTGRES_USER:-postgres}"
+PG_PASSWORD="${DEV_POSTGRES_PASSWORD:-postgres}"
+PG_DB="${DEV_POSTGRES_DB:-market_agent}"
+PG_PORT="${DEV_POSTGRES_PORT:-54329}"
+RESOLVER_URL="http://127.0.0.1:${RESOLVER_PORT:-4311}"
+WEB_URL="http://127.0.0.1:${WEB_PORT:-5173}"
+export DATABASE_URL="postgres://$PG_USER:$PG_PASSWORD@127.0.0.1:$PG_PORT/$PG_DB"
+
+dc() { docker compose -f "$ROOT/docker-compose.dev.yml" --env-file "$ENV_FILE" "$@"; }
+sql() { dc exec -T postgres psql -U "$PG_USER" -d "$PG_DB" -At -F ' | ' -c "$1"; }
+stamp() { date +%Y%m%d-%H%M%S; }
+
+# Run one check: prints ok/FAIL and counts failures without stopping.
+FAILED=0
+check() {
+  local label="$1" ok="$2" detail="${3:-}"
+  if [[ "$ok" == "1" ]]; then printf 'ok    %-22s %s\n' "$label" "$detail"
+  else printf 'FAIL  %-22s %s\n' "$label" "$detail"; FAILED=$((FAILED + 1)); fi
+}
+
+cmd_up() {
+  PATH="$NODE_APP:$PATH" DEV_MODE=data caffeinate -ims "$ROOT/scripts/dev-shell.sh" up
+}
+
+# --volumes also deletes this stack's database and blobs. Evidence survives both.
+cmd_down() {
+  PATH="$NODE_APP:$PATH" "$ROOT/scripts/dev-shell.sh" down
+  if [[ "${1:-}" == "--volumes" ]]; then dc down -v 2>&1 | tail -1 || true; fi
+}
+
+cmd_doctor() {
+  echo "checkout  $ROOT @ $(git rev-parse --short HEAD) ($(git rev-parse --abbrev-ref HEAD))"
+  echo "env       $ENV_FILE"
+  # "running" means this checkout's process owns the port, not just that it answers.
+  local status name state pg=0 issuers="" templates="" code
+  status="$(PATH="$NODE_APP:$PATH" "$ROOT/scripts/dev-shell.sh" status)"
+  for name in web resolver dev-api fundamentals evidence; do
+    state="$(printf '%s\n' "$status" | awk -v name="$name" '$1 == name { print $2 }')"
+    [[ "$state" == "running" ]] && check "$name" 1 "running" || check "$name" 0 "${state:-absent}"
+  done
+
+  if issuers="$(sql 'select count(*) || $$ issuers, $$ || count(cik) || $$ with a CIK$$ from issuers' 2>/dev/null)"; then pg=1; fi
+  check postgres "$pg" "$issuers"
+  if [[ "$pg" == "1" ]]; then
+    templates="$(sql 'select count(*) from analyze_templates where deleted_at is null')"
+    [[ "$templates" -ge 2 ]] && check analyze-templates 1 "$templates" || check analyze-templates 0 "$templates (Generate will 404)"
+  fi
+  code="$(curl -s -m 5 -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"text":"AAPL"}' "$RESOLVER_URL/v1/subjects/resolve" || true)"
+  [[ "$code" == "200" ]] && check resolver-http 1 "$RESOLVER_URL" || check resolver-http 0 "$RESOLVER_URL answered $code"
+  if [[ -n "${S3_ENDPOINT:-}" && -n "${S3_BUCKET:-}" ]]; then
+    code="$(curl -s -m 5 -o /dev/null -w '%{http_code}' -I --aws-sigv4 "aws:amz:${S3_REGION:-us-east-1}:s3" \
+      --user "${S3_ACCESS_KEY_ID:-}:${S3_SECRET_ACCESS_KEY:-}" "$S3_ENDPOINT/$S3_BUCKET" || true)"
+    [[ "$code" == "200" ]] && check evidence-bucket 1 "$S3_BUCKET" || check evidence-bucket 0 "$S3_BUCKET answered $code"
+  fi
+  [[ "$FAILED" == "0" ]]
+}
+
+# Tickers reach JSON and SQL below, so only plain ones get through.
+normalize_ticker() {
+  [[ "$1" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "not a ticker: $1" >&2; return 2; }
+  printf '%s' "$1" | tr '[:lower:]' '[:upper:]'
+}
+
+resolver_body() {
+  curl -sf -m 30 -X POST -H 'content-type: application/json' -d "{\"text\":\"$1\"}" "$RESOLVER_URL/v1/subjects/resolve" \
+    || { echo "the resolver failed for $1 at $RESOLVER_URL; run doctor" >&2; return 1; }
+}
+
+# Prints what each ticker resolves to, then its stored listing and issuer.
+cmd_resolve() {
+  [[ $# -gt 0 ]] || { echo "usage: resolve TICKER..." >&2; return 2; }
+  local raw ticker body in_list=""
+  for raw in "$@"; do
+    ticker="$(normalize_ticker "$raw")" || return 2
+    body="$(resolver_body "$ticker")" || return 1
+    printf '%s' "$body" | python3 -c "import json,sys; print(sys.argv[1], '->', [s.get('display_name') for s in json.load(sys.stdin).get('subjects',[])])" "$ticker"
+    in_list="$in_list,'$ticker'"
+  done
+  sql "select l.ticker, l.mic, iss.legal_name, coalesce(iss.cik,'NO CIK') from listings l
+       join instruments i using (instrument_id) join issuers iss using (issuer_id)
+       where l.ticker in (${in_list#,}) order by 1,2"
+}
+
+# The listing the resolver itself returns for a ticker, as a user's search would get.
+resolved_listing() {
+  local ticker body
+  ticker="$(normalize_ticker "$1")" || return 2
+  body="$(resolver_body "$ticker")" || return 1
+  printf '%s' "$body" | python3 -c "
+import json, sys
+refs = [s['subject_ref'] for s in json.load(sys.stdin).get('subjects', [])]
+listings = [r['id'] for r in refs if r.get('kind') == 'listing']
+sys.exit('the resolver returned no listing for ' + sys.argv[1]) if not listings else print(listings[0])" "$ticker"
+}
+
+identity_state() {
+  sql "select 'listing_instrument_hash', md5(string_agg(listing_id::text||instrument_id::text, ',' order by listing_id)) from listings"
+  sql "select 'instrument_issuer_hash', md5(string_agg(instrument_id::text||issuer_id::text, ',' order by instrument_id)) from instruments"
+  sql "select 'issuers', count(*) from issuers"
+  sql "select 'active_duplicate_tickers', count(*) from (select ticker, mic from listings
+         where active_to is null or active_to > now() group by 1,2 having count(*) > 1) d"
+  sql "select 'tickers_on_several_mics', count(*) from (select ticker from listings
+         where active_to is null or active_to > now() group by 1 having count(*) > 1) d"
+  sql "select 'apple_issuers', count(*) from issuers where legal_name ilike 'apple inc%'"
+}
+
+# identity            print the state
+# identity save NAME  store it as evidence
+# identity diff NAME  compare with a stored state; exit 1 when it differs
+cmd_identity() {
+  mkdir -p "$EVIDENCE"
+  case "${1:-}" in
+    "") identity_state ;;
+    save) [[ -n "${2:-}" ]] || { echo "usage: identity save NAME" >&2; return 2; }; identity_state | tee "$EVIDENCE/identity-$2.txt" ;;
+    diff)
+      [[ -f "$EVIDENCE/identity-$2.txt" ]] || { echo "no saved identity named $2" >&2; return 2; }
+      diff "$EVIDENCE/identity-$2.txt" <(identity_state) && echo "identity unchanged since $2"
+      ;;
+    *) echo "usage: identity [save NAME | diff NAME]" >&2; return 2 ;;
+  esac
+}
+
+# Runs the weekly reference import and fails on a skip, since a skipped run exits 0
+# and leaves the upsert path unexercised. Pass --force on a stack that has imported.
+cmd_import() {
+  mkdir -p "$EVIDENCE"
+  local log="$EVIDENCE/import-$(stamp).log" line code=0
+  PATH="$NODE_APP:$PATH" caffeinate -ims "$ROOT/scripts/dev-shell.sh" reference-import "$@" > "$log" 2>&1 || code=$?
+  line="$(grep '^weekly-reference' "$log" | tail -1 || true)"
+  echo "$line"
+  echo "log: $log"
+  if [[ "$code" != "0" ]]; then
+    tail -5 "$log" >&2
+    return "$code"
+  fi
+  if [[ "${1:-}" != "--status" && "$line" == *": skipped "* ]]; then
+    echo "SKIPPED: the ledger already has this bundle, so nothing ran. Rerun with --force." >&2
+    return 3
+  fi
+}
+
+# Resolves a ticker, then backfills 8-Ks for its issuer. Needs a filled CIK.
+cmd_backfill_8k() {
+  local listing issuer
+  listing="$(resolved_listing "${1:?usage: backfill-8k TICKER}")" || return 1
+  issuer="$(sql "select iss.issuer_id from listings l join instruments i using (instrument_id)
+    join issuers iss using (issuer_id) where l.listing_id = '$listing' and iss.cik is not null")"
+  [[ -n "$issuer" ]] || { echo "$1 has no issuer with a CIK" >&2; return 1; }
+  (cd "$ROOT/services/evidence" && PATH="$NODE_TEST:$PATH" caffeinate -ims npm run -s backfill:sec-8k -- "$issuer")
+}
+
+cmd_memo() {
+  local ticker="${1:-AAPL}" listing
+  listing="$(resolved_listing "$ticker")" || return 1
+  mkdir -p "$EVIDENCE"
+  PATH="$NODE_APP:$PATH" ROOT="$ROOT" WEB_URL="$WEB_URL" LISTING_ID="$listing" OUT="$EVIDENCE/memo-$ticker-$(stamp)" \
+    node "$HERE/memo-flow.mjs"
+}
+
+# suite <package dir> [test file...]: one log per test file, so a slow file looks
+# different from a hung one. Each file gets SUITE_FILE_TIMEOUT seconds (default 600).
+cmd_suite() {
+  command -v timeout >/dev/null || { echo "suite needs timeout (brew install coreutils)" >&2; return 1; }
+  local dir="${1:?usage: suite DIR [FILE...]}"; shift
+  local log_dir="$EVIDENCE/suite-$(basename "$dir")-$(stamp)" file name start code elapsed failed=0
+  mkdir -p "$log_dir"
+  cd "$ROOT/$dir"
+  local files=("$@")
+  if [[ ${#files[@]} -eq 0 ]]; then
+    while IFS= read -r file; do files+=("$file"); done < <(find test -name '*.test.ts' | sort)
+  fi
+  [[ ${#files[@]} -gt 0 ]] || { echo "no test files in $dir" >&2; return 1; }
+  echo "logs: $log_dir (${#files[@]} files)"
+  for file in "${files[@]}"; do
+    name="$(echo "$file" | tr '/' '_')"
+    start=$SECONDS
+    code=0
+    PATH="$NODE_TEST:$PATH" REQUIRE_DOCKER=1 caffeinate -ims timeout "${SUITE_FILE_TIMEOUT:-600}" \
+      node --experimental-strip-types --test "$file" > "$log_dir/$name.log" 2>&1 || code=$?
+    elapsed=$((SECONDS - start))
+    printf '%5ss  exit=%-3s %s  %s\n' "$elapsed" "$code" "$file" \
+      "$(grep -E '^# (pass|fail|skipped) ' "$log_dir/$name.log" | tr -d '#' | tr '\n' ' ')" | tee -a "$log_dir/summary.txt"
+    [[ "$code" == "0" ]] || failed=$((failed + 1))
+  done
+  echo "slowest:"; sort -rn "$log_dir/summary.txt" | head -5
+  echo "failed files: $failed (exit 124 means the file timed out)"
+  [[ "$failed" == "0" ]]
+}
+
+case "${1:-}" in
+  up) shift; cmd_up "$@" ;;
+  down) shift; cmd_down "$@" ;;
+  doctor) cmd_doctor ;;
+  sql) sql "${2:?usage: sql QUERY}" ;;
+  resolve) shift; cmd_resolve "$@" ;;
+  identity) shift; cmd_identity "$@" ;;
+  import) shift; cmd_import "$@" ;;
+  backfill-8k) cmd_backfill_8k "${2:-}" ;;
+  memo) shift; cmd_memo "$@" ;;
+  suite) shift; cmd_suite "$@" ;;
+  *) echo "usage: verify <init-env PORT_OFFSET|up|down [--volumes]|doctor|sql QUERY|resolve TICKER...|identity [save|diff NAME]|import [--force]|backfill-8k TICKER|memo [TICKER]|suite DIR [FILE...]>" >&2; exit 2 ;;
+esac
