@@ -13,12 +13,15 @@ import {
 
 export const THESIS_PROMPT_VERSION = "living-thesis-v1";
 
+// Thinking counts against maxTokens, and claude-sonnet-5-5 spends up to 711 tokens on it unasked.
+const DRAFT_MAX_TOKENS = 4_096;
+
 export type ThesisLlm = {
   complete(input: {
     messages: ReadonlyArray<{ role: "system" | "user" | "assistant"; content: string }>;
     temperature?: number;
     maxTokens?: number;
-  }): Promise<{ text: string; deployment?: { channel: string; model: string } }>;
+  }): Promise<{ text: string; truncated?: boolean; deployment?: { channel: string; model: string } }>;
 };
 
 export type ThesisClaim = {
@@ -111,16 +114,24 @@ export async function draftThesisConditions(
         content:
           "Suggest exactly three independent narrative investment-thesis conditions. " +
           "Return JSON as {\"conditions\":[{\"statement\":string,\"falsifier\":string,\"horizon\":string}]}. " +
+          "Keep each statement and falsifier under 500 characters and each horizon a short phrase under 120 characters. " +
           "Do not include IDs or numerical metric conditions.",
       },
       { role: "user", content: normalizedThesis },
     ],
     temperature: 0.2,
-    maxTokens: 1_000,
+    maxTokens: DRAFT_MAX_TOKENS,
   });
-  const parsed = parseJsonObject(response.text, "draft response");
+  const label = response.deployment
+    ? `draft response from ${response.deployment.channel}/${response.deployment.model}`
+    : "draft response";
+  if (response.truncated) {
+    throw new ThesisValidationError(`${label} was cut off at the ${DRAFT_MAX_TOKENS}-token limit`);
+  }
+  const parsed = parseJsonObject(response.text, label);
   if (!Array.isArray(parsed.conditions) || parsed.conditions.length !== 3) {
-    throw new ThesisValidationError("draft response must contain exactly three conditions");
+    const count = Array.isArray(parsed.conditions) ? parsed.conditions.length : "a non-array";
+    throw new ThesisValidationError(`${label} must contain exactly three conditions, not ${count}`);
   }
 
   return parseThesisConditions(parsed.conditions.map((item, index) => {
@@ -208,7 +219,7 @@ function parseJsonObject(text: string, label: string): Record<string, unknown> {
     return requireObject(JSON.parse(normalized), label);
   } catch (error) {
     if (error instanceof ThesisValidationError) throw error;
-    throw new ThesisValidationError(`${label} must be valid JSON`);
+    throw new ThesisValidationError(`${label} must be valid JSON: ${(error as Error).message}`);
   }
 }
 

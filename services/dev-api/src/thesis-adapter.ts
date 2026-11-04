@@ -79,6 +79,7 @@ export function createThesisAdapter(db: QueryExecutor, getModel: () => Promise<T
       catch (error) {
         if (error instanceof DevApiHttpError)
           throw error;
+        console.error(`thesis draft failed for agent ${agentId}:`, error);
         throw new DevApiHttpError(503, 'Condition suggestions are unavailable. Try again or write your own conditions.');
       }
     },
