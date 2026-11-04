@@ -30,6 +30,7 @@ $V import                      # Fresh database only: seeds about 10,000 listing
 | `$V identity save before`, then `$V identity diff before` | Fingerprints which instrument each listing and which issuer each instrument belongs to, plus duplicates. `diff` exits non-zero if anything moved. CIK fills don't count as moves. |
 | `$V import [--force]` | Runs the reference import. **Exits 3 when the run was skipped**, since the import itself exits 0 with `ingested=0`. |
 | `$V backfill-8k AAPL` | Resolves the ticker, then backfills its 8-Ks. |
+| `$V restatements AAPL GE` | After a backfill: each ticker's later-filing rows by relation, how many equal or sit within 0.1% of the figure they replaced, the largest and smallest percent change, and the five smallest changes. Read those five: rounding stored as a restatement is a bug. |
 | `$V memo [AAPL]` | Drives symbol page → Analyze → Generate memo in a real browser. Exits 1 unless the memo generates on that subject and cites 8-K claims, so backfill first. |
 | `$V sql "select ..."` | Read stored state. |
 | `$V suite services/resolver [test/x.test.ts]` | Runs tests on Node 22.19 with `REQUIRE_DOCKER=1`, one log and one timeout per file (`SUITE_FILE_TIMEOUT`, default 600s), then lists the slowest. Check the `skipped` count too, since a file that skips everything still exits 0. Use it instead of piping `npm test` through a filter. |
