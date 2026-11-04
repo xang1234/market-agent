@@ -4,7 +4,7 @@ import type { ReportedMetricNode, SplitAdjustmentV2 } from "../src/contracts.ts"
 import { parseFinancialDecimal } from "../src/exact-decimal.ts";
 import { absoluteChange, FinancialIntegrityError, operandFromBoundInput, type OperandOutcome } from "../src/operations.ts";
 import { rationalFromDecimal, type ExactRational } from "../src/rational.ts";
-import { explainedBySplits, restateToReference, splitHistoryCovers, splitReferenceDate, type RecordedSplit } from "../src/split-adjustment.ts";
+import { explainedBySplits, filingRounding, restateToReference, sameRoundedFigure, splitHistoryCovers, splitReferenceDate, sumWithinRounding, type RecordedSplit } from "../src/split-adjustment.ts";
 import { change } from "./fixtures.ts";
 import { boundInput, operand, REFERENCE_DATE, SLOTS, type InputSpec } from "./operand-fixtures.ts";
 import { validateBoundInput } from "../src/validate.ts";
@@ -148,21 +148,148 @@ test("EPS a year apart, with a split between their filings, changes on one basis
 });
 
 test("a later 10-K's figure is the earlier one restated by the splits between their filings, at the finer decimal place", () => {
-  const explained = (earlier: string, later: string, valueKind: "per_share" | "share_count_average" | "flow" = "per_share", laterFiled = "2025-02-26") =>
-    explainedBySplits({ earlier: { value: earlier, as_filed_on: "2024-02-21" }, later: { value: later, as_filed_on: laterFiled }, value_kind: valueKind, splits: NVDA_SPLITS });
+  const explained = (earlier: string, later: string, valueKind: "per_share" | "flow" = "per_share", laterFiled = "2025-02-26") =>
+    explainedBySplits({ earlier: { value: earlier, as_filed_on: "2024-02-21", rounding: -2 }, later: { value: later, as_filed_on: laterFiled, rounding: -2 }, value_kind: valueKind, splits: NVDA_SPLITS });
   // 11.93 / 10 is 1.193, presented as 1.19. 12.05 / 10 is 1.205, half way, so 1.20 and 1.21 both state it.
   assert.deepEqual([explained("11.93", "1.19"), explained("12.05", "1.21"), explained("12.05", "1.20")], [true, true, true]);
   // 1.2 is read at the finer place, as 1.20.
   assert.deepEqual([explained("11.93", "1.08"), explained("11.93", "1.20"), explained("11.93", "1.2")], [false, false, false]);
-  assert.deepEqual([explained("2494000000", "24940000000", "share_count_average"), explained("2494000000", "24944000000", "share_count_average")], [true, false]);
   // No split falls between the 10-K and a 10-Q filed before 2024-06-10.
   assert.deepEqual([explained("11.93", "11.93", "per_share", "2024-05-29"), explained("11.93", "1.19", "per_share", "2024-05-29")], [true, false]);
   assert.equal(explained("100", "100", "flow"), null);
 });
 
+test("a share count rounded differently is the same count, at the coarser of the two filings' roundings", () => {
+  const explained = (earlier: string, earlierRounding: number | null, later: string, laterRounding: number | null, laterFiled = "2025-02-26") =>
+    explainedBySplits({
+      earlier: { value: earlier, as_filed_on: "2024-02-21", rounding: earlierRounding },
+      later: { value: later, as_filed_on: laterFiled, rounding: laterRounding },
+      value_kind: "share_count_average",
+      splits: NVDA_SPLITS,
+    });
+  // Thousands, then millions: 249,412,000 x 10 is 2,494,120,000, and 2,494M is that to the million.
+  assert.equal(explained("249412000", 3, "2494000000", 6), true);
+  // NVDA's FY2024 Q2 diluted count: 2,499M to the million is within 5M once it is multiplied by 10, and the 10-K's 24,994M is.
+  assert.deepEqual([explained("2499000000", 6, "24994000000", 6), explained("2499000000", 6, "24985000000", 6), explained("2499000000", 6, "24984000000", 6)], [true, true, false]);
+  assert.equal(explained("1234567000", 3, "1235000000", 6, "2024-05-29"), true, "no split between the filings");
+  assert.equal(explained("1234567000", 3, "1236000000", 6, "2024-05-29"), false);
+  // Exact counts have no rounding to hide a change in, nor has a thousands filer's count round by chance.
+  assert.equal(explained("1234567", 0, "1234568", 0, "2024-05-29"), false);
+  assert.equal(explained("2000000000", 3, "20000400000", 3), false, "2,000,000K x 10 is known to the 10K, and 400K is past that");
+  // A filing too short to show its rounding: the later filing's millions decide what is the same, and its own zeros what could be hidden.
+  assert.equal(explained("2494000000", null, "24940000000", 6), true);
+  assert.equal(explained("2494000000", null, "24944000000", 6), null);
+  assert.equal(explained("2494000000", null, "24950000000", 6), false);
+});
+
+test("a reverse split scales a decimal's rounding up, as a split scales a count's", () => {
+  const explained = (earlier: string, later: string) =>
+    explainedBySplits({
+      earlier: { value: earlier, as_filed_on: "2021-04-27", rounding: -2 },
+      later: { value: later, as_filed_on: "2022-04-26", rounding: -2 },
+      value_kind: "per_share",
+      splits: [{ execution_date: "2021-08-02", split_from: "8", split_to: "1" }],
+    });
+  // GE's Q1 2021 basic EPS: -0.33 before its 1-for-8, known to half a cent, is -2.64 known to 4 cents, and its next 10-Q states -2.62.
+  assert.deepEqual([explained("-0.33", "-2.62"), explained("-0.33", "-2.68"), explained("-0.33", "-2.69")], [true, true, false]);
+});
+
+test("a filing's rounding is its finest figure for the concept, from thousands to millions, when it states enough to tell", () => {
+  assert.equal(filingRounding(["16000000000", "12345000000"], "flow"), 6);
+  assert.equal(filingRounding(["16000000000", "12345678000"], "flow"), 3);
+  assert.equal(filingRounding(["16053100000", "16000000000"], "flow"), 5);
+  assert.equal(filingRounding(["16000000000", "12345678"], "flow"), 0);
+  assert.equal(filingRounding(["1000", "100"], "flow"), 0, "a hundred is no rounding");
+  assert.equal(filingRounding(["1.23", "1.5"], "flow"), -2, "a decimal is read at its own places");
+  assert.equal(filingRounding(["700000000000", "800000000000"], "flow"), 6, "never coarser than millions");
+  assert.equal(filingRounding(["16000000000"], "flow"), null);
+  assert.equal(filingRounding(["16000000000", "16000000000", "0"], "flow"), null, "a repeat or a zero shows nothing");
+  assert.equal(filingRounding([], "flow"), null);
+});
+
+test("a per-share figure's rounding is its filing's finest stated places, never its own zeros", () => {
+  assert.equal(filingRounding(["1.37", "0.91", "12.50"], "per_share"), -2);
+  assert.equal(filingRounding(["1.375", "0.91"], "per_share"), -3);
+  assert.equal(filingRounding(["1000", "2000"], "per_share"), null, "whole figures show no places, so nothing tells");
+  assert.equal(filingRounding(["12.50", "7.50"], "per_share"), null, "dropped zeros could hide the cents");
+  assert.equal(filingRounding(["8.36"], "per_share"), null);
+  assert.equal(filingRounding(["1000000", "2000000"], "share_count"), 6, "a share count is still in millions");
+  assert.equal(filingRounding(["1000.5", "2000"], "flow"), -1, "a decimal among whole figures is read at its places");
+
+  const same = (earlier: string, later: string, laterOther: string) =>
+    sameRoundedFigure(
+      { value: earlier, rounding: filingRounding([earlier, "2000"], "per_share") },
+      { value: later, rounding: filingRounding([later, laterOther], "per_share") },
+    );
+  assert.equal(same("1000", "1001.25", "1.37"), false, "1,000 then 1,001.25 is a change");
+  assert.equal(same("1000", "1000", "1.37"), true);
+});
+
+test("across a split, a per-share figure is held to its filing's cents, and a figure too short to show them is a gap", () => {
+  const SPLIT = [{ execution_date: "2024-06-01", split_from: "1", split_to: "2" }];
+  const explained = (earlier: string, earlierOthers: string[], later: string, laterOthers: string[]) =>
+    explainedBySplits({
+      earlier: { value: earlier, rounding: filingRounding([earlier, ...earlierOthers], "per_share"), as_filed_on: "2024-02-01" },
+      later: { value: later, rounding: filingRounding([later, ...laterOthers], "per_share"), as_filed_on: "2025-02-01" },
+      value_kind: "per_share",
+      splits: SPLIT,
+    });
+  const others = ["1.37", "0.91"];
+  assert.equal(explained("25.00", others, "12.00", others), false, "true value 12.50");
+  assert.equal(explained("12.50", others, "6.30", others), false, "true value 6.25");
+  assert.equal(explained("12.50", others, "6.25", others), true);
+  assert.equal(explained("11.93", others, "5.97", others), true, "5.965 is half way");
+  assert.equal(explained("11.93", others, "5.96", others), true);
+  assert.equal(explained("11.93", others, "5.98", others), false);
+  // Nothing shows the cents of either filing: 25 could be 25.00 and 12 could be 12.00.
+  assert.equal(explained("25", [], "12", []), null);
+  assert.equal(explained("12.5", [], "6.3", []), null);
+  assert.equal(explained("12.50", others, "6.3", []), null);
+  assert.equal(explained("12.5", [], "6.25", []), true);
+  assert.equal(explained("11.93", [], "5.97", []), true, "both show cents");
+  assert.equal(explained("11.93", [], "5.98", []), false);
+});
+
+test("two figures are one within half the coarser of their filings' roundings", () => {
+  const same = (earlier: string, earlierRounding: number | null, later: string, laterRounding: number | null) =>
+    sameRoundedFigure({ value: earlier, rounding: earlierRounding }, { value: later, rounding: laterRounding });
+  assert.equal(same("16053123000", 3, "16053000000", 6), true);
+  assert.equal(same("16000000000", 3, "15999800000", 3), false, "a thousands filer's round figure is in thousands");
+  assert.equal(same("100", 0, "100", 0), true);
+  assert.equal(same("100", 0, "95", 0), false);
+  assert.equal(same("1.23", -2, "1.2", -2), false);
+  // A filing too short to tell is exact, unless its own zeros could hide the difference: then nobody can tell.
+  assert.equal(same("16053000000", null, "16053000000", null), true);
+  assert.equal(same("16053123000", 3, "16053000000", null), null);
+  assert.equal(same("16053123000", 3, "16054000000", null), false);
+  assert.equal(same("16053000000", null, "16053123000", 3), null);
+  assert.equal(same("100", null, "90", null), false);
+  assert.equal(same("1000", null, "990", 0), false, "three digits stay above a rounding, and 1,000 has one above the thousands");
+  assert.equal(same("1000000", null, "999000", 0), null, "1,000,000 could be to the ten thousand");
+  assert.equal(same("1000000", null, "980000", 0), false);
+});
+
+test("a sum tolerates no whole-number rounding from a filing that states decimals", () => {
+  const within = (stated: string, sum: bigint, scale: number) => sumWithinRounding({ value: stated, rounding: -2 }, { coefficient: sum, scale }, [-2, -2]);
+  assert.equal(within("1.5", 150n, 2), true);
+  assert.equal(within("1.51", 150n, 2), false);
+});
+
+test("a sum is off by each figure's own half unit, and a filing too short to tell adds nothing", () => {
+  const within = (stated: string, statedRounding: number | null, sum: string, termRoundings: ReadonlyArray<number | null>) =>
+    sumWithinRounding({ value: stated, rounding: statedRounding }, { coefficient: BigInt(sum), scale: 0 }, termRoundings);
+  // 100M in millions and three quarters in thousands: half a million twice and half a thousand three times.
+  assert.equal(within("26189000", 6, "25188000", [6, 3, 3, 3]), true);
+  assert.equal(within("26190000", 6, "25188000", [6, 3, 3, 3]), false);
+  assert.equal(within("27600000", 3, "25188000", [3, 3, 3, 3]), false);
+  assert.equal(within("100", null, "100", [null, null]), true);
+  assert.equal(within("101", null, "100", [null, null]), false);
+  assert.equal(within("101", 0, "100", [0, 0]), false);
+});
+
 test("an earlier figure as stored is read whole, though its text is longer than a source token may be (#401)", () => {
   const explained = (earlier: string, later: string) =>
-    explainedBySplits({ earlier: { value: earlier, as_filed_on: "2024-02-21" }, later: { value: later, as_filed_on: "2025-02-26" }, value_kind: "per_share", splits: NVDA_SPLITS });
+    explainedBySplits({ earlier: { value: earlier, as_filed_on: "2024-02-21", rounding: null }, later: { value: later, as_filed_on: "2025-02-26", rounding: null }, value_kind: "per_share", splits: NVDA_SPLITS });
   // How Postgres prints a numeric stored from the token 1.234567890123456789e-250: 270 characters.
   const stored = `0.${"0".repeat(249)}1234567890123456789`;
   assert.deepEqual([explained(stored, "1.08"), explained(stored, "1.234567890123456789e-251")], [false, true]);

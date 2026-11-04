@@ -99,7 +99,7 @@ export const changing = (companies: CompanyChange) => async (): Promise<ScopePro
 export const comparing = (...add: string[]) => changing({ kind: "compare", add });
 
 /** A planning model that answers every call with a revenue draft for the given slots, and counts calls. */
-export function revenueModel(mentions: ReadonlyArray<string>): PlanningModel & { calls: number } {
+export function revenueModel(mentions: ReadonlyArray<string>, fiscalYear = 2023): PlanningModel & { calls: number } {
   const slots = mentions.map((mention, index) => ({ slot: String.fromCharCode(97 + index), mention }));
   const model = (async () => {
     model.calls += 1;
@@ -108,7 +108,7 @@ export function revenueModel(mentions: ReadonlyArray<string>): PlanningModel & {
       text: JSON.stringify({
         outcome: "ready",
         subjects: slots.map(({ slot, mention }) => ({ slot_id: slot, mention })),
-        operations: slots.map(({ slot }) => ({ node_id: `${slot}_rev`, operation: "reported_metric", subject_slot: slot, metric_key: "revenue", period: { kind: "fiscal_period", fiscal_year: 2023, fiscal_period: "FY" } })),
+        operations: slots.map(({ slot }) => ({ node_id: `${slot}_rev`, operation: "reported_metric", subject_slot: slot, metric_key: "revenue", period: { kind: "fiscal_period", fiscal_year: fiscalYear, fiscal_period: "FY" } })),
         outputs: slots.map(({ slot }) => ({ output_id: `${slot}_out`, node_id: `${slot}_rev` })),
         thresholds: [],
       }),

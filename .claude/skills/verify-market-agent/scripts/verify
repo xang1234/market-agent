@@ -179,6 +179,45 @@ cmd_backfill_8k() {
   (cd "$ROOT/services/evidence" && PATH="$NODE_TEST:$PATH" caffeinate -ims npm run -s backfill:sec-8k -- "$issuer")
 }
 
+# restatements TICKER...: the later filings' figures on file for each ticker, each
+# against the figure it replaced, after a backfill. A small change is the thing to
+# read: rounding stored as a restatement is a bug.
+cmd_restatements() {
+  [[ $# -gt 0 ]] || { echo "usage: restatements TICKER..." >&2; return 2; }
+  local raw ticker in_list=""
+  for raw in "$@"; do
+    ticker="$(normalize_ticker "$raw")" || return 2
+    in_list="$in_list,'$ticker'"
+  done
+  local chain="with issuers_asked as (
+      select distinct l.ticker, i.issuer_id from listings l join instruments i using (instrument_id) where l.ticker in (${in_list#,})
+    ), later as (
+      select a.ticker, c.disclosure_relation as relation, m.metric_key, f.fiscal_year, f.fiscal_period, f.value_num as value, f.reported_at::date as filed,
+             coalesce(lag(f.value_num) over (partition by f.supersedes order by f.reported_at, f.created_at), o.value_num) as replaced,
+             p.validation_method = 'sec_companyfacts_changed_input.v1' as changed_input
+        from facts f join issuers_asked a on a.issuer_id = f.subject_id
+        join facts o on o.fact_id = f.supersedes join metrics m on m.metric_id = f.metric_id
+        join fact_financial_contexts c on c.fact_id = f.fact_id
+        left join current_fact_precision_attestations p on p.fact_id = f.fact_id
+       where f.method = 'restated' and f.invalidated_at is null
+    ), compared as (
+      select *, abs(value - replaced) / nullif(abs(replaced), 0) * 100 as pct from later
+    )"
+  echo "ticker | relation | rows | changed_input | equal | under_0.1pct | largest_pct | smallest_pct"
+  sql "$chain select ticker, relation, count(*), count(*) filter (where changed_input),
+         count(*) filter (where value = replaced and not changed_input),
+         count(*) filter (where value <> replaced and pct < 0.1),
+         coalesce(round(max(pct) filter (where value <> replaced), 3)::text, '-'), coalesce(round(min(pct) filter (where value <> replaced), 3)::text, '-')
+       from compared group by 1, 2
+       union all select ticker, 'no rows', 0, 0, 0, 0, '-', '-' from issuers_asked a where not exists (select 1 from later l where l.ticker = a.ticker)
+       order by 1, 2"
+  echo
+  echo "smallest changes: ticker | relation | metric | period | replaced | value | pct | filed"
+  sql "$chain select ticker, relation, metric_key, fiscal_year || ' ' || fiscal_period, replaced, value, round(pct, 3), filed
+       from (select *, row_number() over (partition by ticker order by pct) as place from compared where value <> replaced) ranked
+       where place <= 5 order by ticker, place"
+}
+
 cmd_memo() {
   local ticker="${1:-AAPL}" listing
   listing="$(resolved_listing "$ticker")" || return 1
@@ -227,7 +266,8 @@ case "${1:-}" in
   identity) shift; cmd_identity "$@" ;;
   import) shift; cmd_import "$@" ;;
   backfill-8k) cmd_backfill_8k "${2:-}" ;;
+  restatements) shift; cmd_restatements "$@" ;;
   memo) shift; cmd_memo "$@" ;;
   suite) shift; cmd_suite "$@" ;;
-  *) echo "usage: verify <init-env PORT_OFFSET|up|down [--volumes]|doctor|sql QUERY|resolve TICKER...|identity [save|diff NAME]|import [--force]|backfill-8k TICKER|memo [TICKER]|suite DIR [FILE...]>" >&2; exit 2 ;;
+  *) echo "usage: verify <init-env PORT_OFFSET|up|down [--volumes]|doctor|sql QUERY|resolve TICKER...|identity [save|diff NAME]|import [--force]|backfill-8k TICKER|restatements TICKER...|memo [TICKER]|suite DIR [FILE...]>" >&2; exit 2 ;;
 esac

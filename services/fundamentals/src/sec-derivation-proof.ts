@@ -2,6 +2,7 @@ import { hashCanonical } from "../../financial-core/src/canonical.ts";
 import { DERIVATION_PROOF_VERSION, type DerivationProofV1 } from "../../financial-core/src/contracts.ts";
 import { resolveMetricDefinition } from "../../financial-core/src/definitions.ts";
 import { derivationIssue, derivationValue, type DerivationIssue } from "../../financial-core/src/derivation.ts";
+import { SEC_DERIVATION_LOCATOR } from "../../financial-core/src/evidence-vocabulary.ts";
 import { canonicalDecimalString } from "../../financial-core/src/exact-decimal.ts";
 import {
   isDiscreteQuarterDuration,
@@ -38,7 +39,7 @@ export function secDerivedLine(
   if (issue !== null) return { status: "unproven", sum, issue };
   const own = proof.terms[0]!.source;
   const at: SecValueLocation = { concept: derivation.concept, unit: derivation.unit, accn: own.accession, form: own.form, filed: own.filed, start: fact.period_start, end: fact.period_end };
-  const locator = `sec_edgar:derivation:CIK${String(cik).padStart(10, "0")}#${at.concept}|${at.unit}|${at.accn}|${at.start ?? ""}..${at.end}`;
+  const locator = `${SEC_DERIVATION_LOCATOR}CIK${String(cik).padStart(10, "0")}#${at.concept}|${at.unit}|${at.accn}|${at.start ?? ""}..${at.end}`;
   return { status: "proven", sum, proof, at, locator };
 }
 

@@ -14,6 +14,8 @@ import type { Client } from "pg";
 
 import { bootstrapDatabase, connectedClient, dockerAvailable, registerLifoCleanup } from "../../../db/test/docker-pg.ts";
 import { createFact } from "../../evidence/src/fact-repo.ts";
+import { recordFactPrecisionAttestation } from "../../evidence/src/financial-attestations.ts";
+import { recordFactFinancialContext } from "../../evidence/src/financial-context.ts";
 import { checkAssertions, type Rejection } from "../src/assertions.ts";
 import type { EvidencePacket } from "../src/evidence-packet.ts";
 import { closeLocalRuntimePoolForTests } from "../src/local-runtime.ts";
@@ -40,7 +42,7 @@ import { HOLDOUT_CASES, HOLDOUT_VERSION, SYNTHETIC_CASES, SYNTHETIC_FIGURES, typ
 
 // The suite's identity: its version and the digest of every case, pinned so a
 // changed case is a new version, not a quiet edit (#221).
-const HOLDOUT_DIGEST = "sha256:ad290fa538a9c15cb5c84bb7376b627280f51271773d0c6a574c589f602665e6";
+const HOLDOUT_DIGEST = "sha256:33c97966745d04c4c971d2ef9c18a465fe4b1870d65548aec0453a1471b4ea24";
 
 test("the held-out suite is a fixed, versioned set of 10-12 cases (#221)", () => {
   assert.ok(HOLDOUT_CASES.length + 1 >= 10 && HOLDOUT_CASES.length + 1 <= 12, "10-12 cases, the synthetic set counted as one");
@@ -205,8 +207,10 @@ function checkExpectations(holdout: HoldoutCase, completed: Record<string, unkno
   }
 }
 
-// AAPL's Q3 FY2026 revenue, restated from $97.1B to $97.4B by the cutoff in a
-// later filing (another source), superseding the original as supersedeFact does.
+// AAPL's Q3 FY2026 revenue, restated from $97.1B to $97.4B by the cutoff, stored
+// as SEC ingest stores a later filing's changed figure: a restated fact naming
+// the original, with its token proof and context. The original stays on file for
+// as-reported readers.
 async function seedRestatement(client: Client): Promise<void> {
   const aapl = GOLDEN_COMPANIES.find((company) => company.ticker === "AAPL")!;
   const { rows: [original] } = await client.query<{ fact_id: string; metric_id: string; period_start: string; period_end: string }>(
@@ -216,7 +220,7 @@ async function seedRestatement(client: Client): Promise<void> {
         and f.fiscal_year = 2026 and f.fiscal_period = 'Q3'`,
     [aapl.issuer_id],
   );
-  await createFact(client, {
+  const restated = await createFact(client, {
     subject_kind: "issuer",
     subject_id: aapl.issuer_id,
     metric_id: original!.metric_id,
@@ -231,19 +235,37 @@ async function seedRestatement(client: Client): Promise<void> {
     as_of: GOLDEN_AS_OF,
     reported_at: GOLDEN_AS_OF,
     observed_at: GOLDEN_AS_OF,
-    source_id: SEC_RELEASE_SOURCE_ID,
-    method: "reported",
+    source_id: GOLDEN_SOURCE_ID,
+    method: "restated",
     verification_status: "authoritative",
     freshness_class: "filing_time",
     coverage_level: "full",
     entitlement_channels: ["app"],
     confidence: 1,
-  }, { supersedes: original!.fact_id }).then((restated) =>
-    client.query(`update facts set superseded_by = $2::uuid where fact_id = $1::uuid`, [original!.fact_id, restated.fact_id]));
+  }, { supersedes: original!.fact_id });
+  const locator = "golden_fixture:holdout#AAPL.2026.Q3.revenue.restated";
+  await recordFactPrecisionAttestation(client, {
+    fact_id: restated.fact_id,
+    precision_class: "source_token_preserved",
+    raw_token: "97400000000",
+    token_proof_hash: createHash("sha256").update(`${locator}=97400000000`).digest("hex"),
+    source_locator: locator,
+    validation_method: "golden_fixture_declared_token.v1",
+  });
+  await recordFactFinancialContext(client, {
+    fact_id: restated.fact_id,
+    context_version: "golden_fixture_context.v1",
+    period_type: "duration",
+    dimension_scope: "consolidated",
+    dimension_members: [],
+    reporting_basis: "as_restated",
+    adjustment_basis: "unadjusted",
+    share_basis: "not_applicable",
+    fiscal_calendar_version: "golden_fixture_fiscal_year.v1",
+    disclosure_relation: "economic_restatement",
+    source_context_ref: locator,
+  });
 }
-
-// The SEC press-release source (db/seed/sources.sql).
-const SEC_RELEASE_SOURCE_ID = "00000000-0000-4000-a000-000000000002";
 
 // An earlier definition of NVDA's Data Center segment, with a different Q4
 // FY2026 revenue; the current definition ($55.2B) is the one shown.

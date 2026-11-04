@@ -19,7 +19,7 @@
 
 import type { RejectionCheck } from "../../src/assertions.ts";
 
-export const HOLDOUT_VERSION = 23;
+export const HOLDOUT_VERSION = 24;
 
 type Assertion = Record<string, unknown>;
 
@@ -134,7 +134,7 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
       financial: [
         ...overviewQuarter(NVIDIA, "Q4 FY2026 (ended 2026-01-25)", "Q3 FY2026 (ended 2025-10-26)", "Q4 FY2025 (ended 2025-01-26)", ["USD 62,100,000,000.00", "USD 46,200,000,000.00", "USD 40,300,000,000.00", "USD 35,400,000,000.00", "74.40%", "64.90%", "57.00%", "8.94%", "57.89%"]),
         ...overviewQuarter(AMD, "Q2 FY2026 (ended 2026-06-27)", "Q1 FY2026 (ended 2026-03-28)", "Q2 FY2025 (ended 2025-06-28)", ["USD 11,200,000,000.00", "USD 6,050,000,000.00", "USD 1,610,000,000.00", "USD 1,480,000,000.00", "54.02%", "14.38%", "13.21%", "4.67%", "45.74%"]),
-        ...overviewQuarter(APPLE, "Q3 FY2026 (ended 2026-06-27)", "Q2 FY2026 (ended 2026-03-28)", "Q3 FY2025 (ended 2025-06-28)", ["USD 97,100,000,000.00", "USD 45,700,000,000.00", "USD 29,800,000,000.00", "USD 24,900,000,000.00", "47.06%", "30.69%", "25.64%", "-1.62%", "3.26%"]),
+        ...overviewQuarter(APPLE, "Q3 FY2026 (ended 2026-06-27)", "Q2 FY2026 (ended 2026-03-28)", "Q3 FY2025 (ended 2025-06-28)", ["USD 97,400,000,000.00", "USD 45,700,000,000.00", "USD 29,800,000,000.00", "USD 24,900,000,000.00", "46.92%", "30.60%", "25.56%", "-1.32%", "3.58%"]),
         ["", `Difference in ${GROSS_MARGIN}`, `${NVIDIA} Q4 FY2026 (ended 2026-01-25) minus ${AMD} Q4 FY2025 (ended 2025-12-27)`, "verified", "20.42 pp"],
         ["", `Difference in ${GROSS_MARGIN}`, `${NVIDIA} Q4 FY2026 (ended 2026-01-25) minus ${APPLE} Q1 FY2026 (ended 2025-12-27)`, "verified", "27.36 pp"],
         ["", `Difference in ${OPERATING_MARGIN}`, `${NVIDIA} Q4 FY2026 (ended 2026-01-25) minus ${AMD} Q4 FY2025 (ended 2025-12-27)`, "verified", "50.82 pp"],
@@ -142,7 +142,7 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
         ["", `Difference in ${NET_MARGIN}`, `${NVIDIA} Q4 FY2026 (ended 2026-01-25) minus ${AMD} Q4 FY2025 (ended 2025-12-27)`, "verified", "43.90 pp"],
         ["", `Difference in ${NET_MARGIN}`, `${NVIDIA} Q4 FY2026 (ended 2026-01-25) minus ${APPLE} Q1 FY2026 (ended 2025-12-27)`, "verified", "27.71 pp"],
       ],
-      uncovered: ["No period was named, so each company's latest reported quarter is shown.", "Commentary is unavailable for this answer."],
+      uncovered: ["No period was named, so each company's latest reported quarter is shown. Restated by a later filing, so not as first reported: AAPL's revenue in Q3 FY2026 (ended 2026-06-27).", "Commentary is unavailable for this answer."],
     },
     prose: "",
   },
@@ -214,8 +214,8 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
   },
   {
     id: "restatement",
-    // Chat plans as reported: docs/engineering/verified-finance-producer-inventory.md
-    trap: "a restated quarter: the engine shows the one value its as-reported basis selects, and the other is never shown",
+    // Chat plans as restated: docs/engineering/verified-finance-producer-inventory.md
+    trap: "a restated quarter: the engine shows the latest disclosure and says it was restated, and the superseded value is never shown",
     turns: ["Analyze AAPL's latest quarter."],
     scopes: [{metrics: [], asks: ["latest_quarter"], turns_off: {facets: [], metrics: []}, income_items: [], period: {kind: "latest"}, companies: {kind: "as_named", names: ["AAPL"]}}],
     expect: {
@@ -229,30 +229,30 @@ export const HOLDOUT_CASES: ReadonlyArray<HoldoutCase> = [
         [APPLE, "Revenue", "Q4 FY2025 (ended 2025-09-27)", "verified", "USD 102,466,000,000.00"],
         [APPLE, "Revenue", "Q1 FY2026 (ended 2025-12-27)", "verified", "USD 128,000,000,000.00"],
         [APPLE, "Revenue", "Q2 FY2026 (ended 2026-03-28)", "verified", "USD 98,700,000,000.00"],
-        [APPLE, "Revenue", "Q3 FY2026 (ended 2026-06-27)", "verified", "USD 97,100,000,000.00"],
+        [APPLE, "Revenue", "Q3 FY2026 (ended 2026-06-27)", "verified", "USD 97,400,000,000.00"],
         [APPLE, "Gross profit", "Q3 FY2026 (ended 2026-06-27)", "verified", "USD 45,700,000,000.00"],
         [APPLE, "Operating income", "Q3 FY2026 (ended 2026-06-27)", "verified", "USD 29,800,000,000.00"],
         [APPLE, "Net income", "Q3 FY2026 (ended 2026-06-27)", "verified", "USD 24,900,000,000.00"],
-        [APPLE, "Gross margin (gross profit / revenue)", "Q3 FY2026 (ended 2026-06-27)", "verified", "47.06%"],
-        [APPLE, OPERATING_MARGIN, "Q3 FY2026 (ended 2026-06-27)", "verified", "30.69%"],
-        [APPLE, "Net margin (net income / revenue)", "Q3 FY2026 (ended 2026-06-27)", "verified", "25.64%"],
+        [APPLE, "Gross margin (gross profit / revenue)", "Q3 FY2026 (ended 2026-06-27)", "verified", "46.92%"],
+        [APPLE, OPERATING_MARGIN, "Q3 FY2026 (ended 2026-06-27)", "verified", "30.60%"],
+        [APPLE, "Net margin (net income / revenue)", "Q3 FY2026 (ended 2026-06-27)", "verified", "25.56%"],
         [APPLE, "Quarter-over-quarter percent change in Revenue", "Q1 FY2025 (ended 2024-12-28) vs Q4 FY2024 (ended 2024-09-28)", "verified", "30.94%"],
         [APPLE, "Quarter-over-quarter percent change in Revenue", "Q2 FY2025 (ended 2025-03-29) vs Q1 FY2025 (ended 2024-12-28)", "verified", "-23.28%"],
         [APPLE, "Quarter-over-quarter percent change in Revenue", "Q3 FY2025 (ended 2025-06-28) vs Q2 FY2025 (ended 2025-03-29)", "verified", "-1.39%"],
         [APPLE, "Quarter-over-quarter percent change in Revenue", "Q4 FY2025 (ended 2025-09-27) vs Q3 FY2025 (ended 2025-06-28)", "verified", "8.96%"],
         [APPLE, "Quarter-over-quarter percent change in Revenue", "Q1 FY2026 (ended 2025-12-27) vs Q4 FY2025 (ended 2025-09-27)", "verified", "24.92%"],
         [APPLE, "Quarter-over-quarter percent change in Revenue", "Q2 FY2026 (ended 2026-03-28) vs Q1 FY2026 (ended 2025-12-27)", "verified", "-22.89%"],
-        [APPLE, "Quarter-over-quarter percent change in Revenue", "Q3 FY2026 (ended 2026-06-27) vs Q2 FY2026 (ended 2026-03-28)", "verified", "-1.62%"],
-        [APPLE, "Year-over-year percent change in Revenue", "Q3 FY2026 (ended 2026-06-27) vs Q3 FY2025 (ended 2025-06-28)", "verified", "3.26%"],
+        [APPLE, "Quarter-over-quarter percent change in Revenue", "Q3 FY2026 (ended 2026-06-27) vs Q2 FY2026 (ended 2026-03-28)", "verified", "-1.32%"],
+        [APPLE, "Year-over-year percent change in Revenue", "Q3 FY2026 (ended 2026-06-27) vs Q3 FY2025 (ended 2025-06-28)", "verified", "3.58%"],
         [APPLE, "Revenue ranked across periods", "Q4 FY2024 (ended 2024-09-28) to Q3 FY2026 (ended 2026-06-27)", "verified", "Q1 FY2026 (ended 2025-12-27) has the highest revenue of the 8 quarters ranked"],
         [APPLE, "Revenue ranked across periods", "Q4 FY2024 (ended 2024-09-28) to Q3 FY2026 (ended 2026-06-27)", "verified", "Q3 FY2025 (ended 2025-06-28) has the lowest revenue of the 8 quarters ranked"],
       ],
-      uncovered: "AAPL's revenue was USD 97,100,000,000.00 in Q3 FY2026 (ended Jun 2026).",
+      uncovered: ["Restated by a later filing, so not as first reported: AAPL's revenue in Q3 FY2026 (ended 2026-06-27).", "AAPL's revenue was USD 97,400,000,000.00 in Q3 FY2026 (ended Jun 2026)."],
     },
     // The engine's commentary, citing its Q3 FY2026 revenue result.
     prose: commentary([obs("AAPL's revenue was [[F8]] in Q3 FY2026.", ["F8"])]),
     mutations: [
-      { name: "the restated value written into the commentary", prose: commentary([obs("AAPL's revenue was $97.4B in Q3 FY2026.", ["F8"])]), never_shown: "97.4" },
+      { name: "the superseded value written into the commentary", prose: commentary([obs("AAPL's revenue was $97.1B in Q3 FY2026.", ["F8"])]), never_shown: "97.1" },
     ],
   },
   {

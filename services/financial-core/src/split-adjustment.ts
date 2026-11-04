@@ -19,10 +19,11 @@ import {
   type UUID,
 } from "./contracts.ts";
 import type { MetricValueKind } from "./definitions.ts";
-import { canonicalDecimalString, parseDerivedDecimalText, parseFinancialDecimal } from "./exact-decimal.ts";
+import { canonicalDecimalString, parseDerivedDecimalText, parseFinancialDecimal, type ExactDecimal } from "./exact-decimal.ts";
 import { isKnownTimeZone, localDateOf } from "./public-time.ts";
 import {
   addRationals,
+  compareRationals,
   divideRationals,
   multiplyRationals,
   rationalFromDecimal,
@@ -94,35 +95,130 @@ export function restateToReference(input: {
 }
 
 /**
+ * A figure as a filing states it, with that filing's rounding of the concept
+ * (filingRounding).
+ */
+export type RoundedFigure = Readonly<{ value: string; rounding: number | null }>;
+
+/** A token drops its zeros, so a per-share figure shows its filing's places only from cents down. */
+const CENTS = -2;
+
+/**
+ * The power of ten a filing rounds a concept to: that of the finest figure it
+ * states for the concept and unit, as companyfacts drops a filing's stated
+ * rounding and one figure's zeros may be chance. Null when the filing states
+ * too few figures to tell, or per-share figures that show no cents. Money and
+ * share counts round whole numbers from thousands to millions, and nothing else
+ * does, so a per-share figure's zeros are never rounding.
+ */
+export function filingRounding(tokens: Iterable<string>, valueKind: MetricValueKind): number | null {
+  const figures = [...new Set(tokens)].flatMap((token) => {
+    const parsed = parseFinancialDecimal(token);
+    return parsed.ok && parsed.value.coefficient !== 0n ? [parsed.value] : [];
+  });
+  if (figures.length < 2) return null;
+  const finest = Math.min(...figures.map((figure) => figureRounding(figure, valueKind)));
+  return statesPlaces(valueKind) && finest > CENTS ? null : finest;
+}
+
+const statesPlaces = (valueKind: MetricValueKind) => valueKind === "per_share" || valueKind === "price";
+
+function figureRounding({ scale }: ExactDecimal, valueKind: MetricValueKind): number {
+  const place = 0 - scale;
+  return place < 3 || statesPlaces(valueKind) ? Math.min(place, 0) : Math.min(place, 6);
+}
+
+// The coarsest rounding one figure could be in when nothing beside it shows its
+// filing's: three digits stay above it, so 1,000 then 990 is plainly a change.
+function loneFigureRounding(figure: ExactDecimal): number {
+  const digits = (figure.coefficient < 0n ? -figure.coefficient : figure.coefficient).toString().length - figure.scale;
+  const rounding = Math.min(figureRounding(figure, "flow"), digits - 3);
+  return rounding < 3 ? 0 : rounding;
+}
+
+/**
  * Whether a later filing's figure is an earlier filing's, restated by the
  * listing's splits between their filing dates. A filing presents a figure
  * rounded, as NVDA's FY2025 10-K presents FY2024 diluted EPS of 11.93 as 1.19
  * after the 10-for-1 split, so the restated earlier figure must round to the
- * later one at the finer of their decimal places, a whole number to the unit.
- * A value half way between rounds either way. The earlier figure may be a
- * stored value's text, which can run longer than a source token may. Null when
- * either figure is not a decimal or splits cannot restate this kind of value.
+ * later one at the coarser of their filings' roundings, the splits scaling the
+ * earlier filing's. A value half way between rounds either way. The earlier
+ * figure may be a stored value's text, which can run longer than a source token
+ * may. Null when either figure is not a decimal, splits cannot restate this kind
+ * of value, or only a filing too short to show its rounding could explain the
+ * difference.
  */
 export function explainedBySplits(input: {
-  earlier: Readonly<{ value: string; as_filed_on: IsoDate }>;
-  later: Readonly<{ value: string; as_filed_on: IsoDate }>;
+  earlier: RoundedFigure & Readonly<{ as_filed_on: IsoDate }>;
+  later: RoundedFigure & Readonly<{ as_filed_on: IsoDate }>;
   value_kind: MetricValueKind;
   splits: ReadonlyArray<RecordedSplit>;
 }): boolean | null {
-  const earlier = parseDerivedDecimalText(input.earlier.value);
-  const later = parseFinancialDecimal(input.later.value);
   const split = splitFactor(input.value_kind, input.earlier.as_filed_on, input.later.as_filed_on, input.splits);
-  if (!earlier.ok || !later.ok || !split.ok) return null;
-  const from = rationalFromDecimal(earlier.value);
-  const to = rationalFromDecimal(later.value);
-  const half = rationalFromDecimal({ coefficient: 5n, scale: Math.max(0, earlier.value.scale, later.value.scale) + 1 });
-  const restated = from === null ? null : split.restate(from);
-  const difference = restated === null || to === null ? null : subtractRationals(restated, to);
-  if (difference === null || half === null) return null;
-  // Within half a unit either way: half - difference and half + difference are both nonnegative.
+  return split.ok ? statesAgain(input.earlier, input.later, split.restate) : null;
+}
+
+/**
+ * Whether a later token states a stored figure again, within half the coarser of
+ * the two filings' roundings: 16053123000 from a filing in thousands, then
+ * 16053000000 from one in millions, is one figure. Null when either is not a
+ * decimal, or only a filing too short to show its rounding could hide the
+ * difference.
+ */
+export function sameRoundedFigure(earlier: RoundedFigure, later: RoundedFigure): boolean | null {
+  return statesAgain(earlier, later, (value) => value);
+}
+
+function statesAgain(earlier: RoundedFigure, later: RoundedFigure, restate: (value: ExactRational) => ExactRational | null): boolean | null {
+  const from = parseDerivedDecimalText(earlier.value);
+  const to = parseFinancialDecimal(later.value);
+  if (!from.ok || !to.ok) return null;
+  const finerPlace = -Math.max(0, from.value.scale, to.value.scale);
+  const start = rationalFromDecimal(from.value);
+  const end = rationalFromDecimal(to.value);
+  const restated = start === null ? null : restate(start);
+  const difference = restated === null || end === null ? null : subtractRationals(restated, end);
+  if (difference === null) return null;
+  // A filing too short to tell is read at cents, or at its figures' places when finer.
+  const exact = Math.min(finerPlace, CENTS);
+  const known = halfOfCoarser(restate, earlier.rounding ?? exact, later.rounding ?? exact);
+  const within = known === null ? null : withinEitherWay(difference, known);
+  if (within !== false) return within;
+  const possible = halfOfCoarser(restate, earlier.rounding ?? (loneFigureRounding(from.value) || finerPlace), later.rounding ?? (loneFigureRounding(to.value) || finerPlace));
+  const hidden = possible === null ? null : withinEitherWay(difference, possible);
+  return hidden === false ? false : null;
+}
+
+function halfOfCoarser(restate: (value: ExactRational) => ExactRational | null, earlierExponent: number, laterExponent: number): ExactRational | null {
+  const unit = (exponent: number) => rationalFromDecimal({ coefficient: 1n, scale: -exponent });
+  const earlierUnit = unit(earlierExponent);
+  const restatedUnit = earlierUnit === null ? null : restate(earlierUnit);
+  const laterUnit = unit(laterExponent);
+  const half = rationalFromDecimal({ coefficient: 5n, scale: 1 });
+  if (restatedUnit === null || laterUnit === null || half === null) return null;
+  return multiplyRationals(compareRationals(restatedUnit, laterUnit) > 0 ? restatedUnit : laterUnit, half);
+}
+
+/** Half - difference and half + difference are both nonnegative; null past the numeric limits. */
+function withinEitherWay(difference: ExactRational, half: ExactRational): boolean | null {
   const under = subtractRationals(half, difference);
   const over = addRationals(half, difference);
   return under === null || over === null ? null : rationalSign(under) >= 0 && rationalSign(over) >= 0;
+}
+
+/**
+ * Whether a stated token is what rounded terms sum to, it and each of them off
+ * by half its own filing's rounding, and by nothing where that filing's rounding
+ * cannot be told.
+ */
+export function sumWithinRounding(stated: RoundedFigure, sum: ExactDecimal, termRoundings: ReadonlyArray<number | null>): boolean {
+  const parsed = parseFinancialDecimal(stated.value);
+  const halves = [stated.rounding, ...termRoundings].reduce<bigint>((total, rounding) => total + (rounding !== null && rounding > 0 ? 5n * 10n ** BigInt(rounding) : 0n), 0n);
+  const tolerance = rationalFromDecimal({ coefficient: halves, scale: 1 });
+  const value = parsed.ok ? rationalFromDecimal(parsed.value) : null;
+  const total = rationalFromDecimal(sum);
+  const difference = value === null || total === null ? null : subtractRationals(value, total);
+  return difference !== null && tolerance !== null && withinEitherWay(difference, tolerance) === true;
 }
 
 /**

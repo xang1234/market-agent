@@ -301,7 +301,7 @@ export type SecSourceToken = Readonly<{
   concept: string;
   unit: string;
   accn: string;
-  /** The filing's form: the value's own, never an amendment (selection takes only 10-K and 10-Q). */
+  /** The filing's form, the value's own: 10-K or 10-Q for an original, which selection takes, and also their amendments for a later statement. */
   form: string;
   /** The filing's date as SEC lists it with the value. */
   filed: string;

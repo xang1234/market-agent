@@ -14,11 +14,15 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  boundPeriodText,
   createRuntimeAuthority,
   dependencyClosure,
   hashCanonical,
   lowercaseUnlessAcronym,
   operationDependencies,
+  resolveMetricDefinition,
+  SEC_DERIVATION_LOCATOR,
+  type BoundFactInputV1,
   type FinancialPlanV1,
   type FinancialRuntimeAuthority,
   type FinancialSubjectRef,
@@ -474,7 +478,7 @@ async function planTurn(
     origin: { kind: "chat_request", ref: `chat:${context.threadId}:${context.turnId ?? context.runId}` },
     knowledge_cutoff: cutoff.toISOString(),
     cutoff_timezone: "UTC",
-    reporting_basis: "as_reported",
+    reporting_basis: "as_restated",
     freshness_max_age_days: null,
     authority,
     parent_limits: {},
@@ -688,7 +692,7 @@ function persistAssistantMessage(
 ): PersistParentArtifact {
   return async (tx, publication) => {
     const { scope, reading } = turn;
-    const plan = scope === null && reading === null ? null : await findPlanForRequest(tx.client, request);
+    const plan = await findPlanForRequest(tx.client, request);
     // A plan member the turn gave no label is a peer the overview selected. The
     // saved plan says so, as a retry that resumes the run does not plan again.
     const answeredPeers = plan?.subjects.members.some((member) => !turn.labels.has(member.subject_ref.id.toLowerCase())) ?? false;
@@ -707,6 +711,7 @@ function persistAssistantMessage(
     const replaced = scope === null ? null : periodNote(scope, shownPeriod);
     const chosen = turn.deterministic();
     const defaults = chosen === null || reading === null || scope === null || plan === null ? [] : defaultsNote(chosen, reading, scope, shownPeriod, plan.subjects.members.length);
+    const later = await laterFigures(tx.client, publication.run_id, companyNames);
     const note = [
       ...(turn.notFound.length === 0 ? [] : [`No company matched ${labelList(turn.notFound)}.`]),
       ...(turn.carried.length === 0 ? [] : [`${labelList(turn.carried)} ${turn.carried.length > 1 ? "are" : "is"} carried from the previous answer.`]),
@@ -714,6 +719,8 @@ function persistAssistantMessage(
       ...defaults,
       ...(reading === null ? [UNCHECKED] : missing.length === 0 ? [] : [`Not covered by this answer: ${missing.join("; ")}.`]),
       ...(stillShown.length === 0 ? [] : [`Still shown as an input to another figure: ${labelList(stillShown)}.`]),
+      ...(later.restated.length === 0 ? [] : [`Restated by a later filing, so not as first reported: ${labelList(later.restated)}.`]),
+      ...(later.ownStatements.length === 0 ? [] : [`Taken from the filing's own statement of the quarter: ${labelList(later.ownStatements)}.`]),
     ].join(" ");
     const blocks = [
       publication.block,
@@ -756,6 +763,29 @@ function persistAssistantMessage(
     // As any saved message does, so the thread never points at a replaced gap's snapshot.
     await tx.client.query(`update chat_threads set latest_snapshot_id = $2::uuid, updated_at = now() where thread_id = $1::uuid`, [threadId, publication.snapshot_id]);
   };
+}
+
+// The reported figures an answer took from a later statement. The superseded
+// number is not named: a plan has one basis, so the engine has not certified it.
+// A derived quarter was never stated, so a filing's line for it restates nothing.
+// A figure equal to the first report is as first reported, however it got there.
+async function laterFigures(client: SqlExecutor, runId: string, names: ReadonlyMap<string, string>): Promise<{ restated: string[]; ownStatements: string[] }> {
+  const { rows } = await client.query<{ bound_payload: BoundFactInputV1; derived: boolean; changed: boolean }>(
+    `select i.bound_payload, coalesce(starts_with(c.source_context_ref, $2), false) as derived,
+            f.value_num is distinct from o.value_num as changed
+       from financial_run_inputs i
+       join facts f on f.fact_id = i.fact_id
+       left join facts o on o.fact_id = f.supersedes
+       left join fact_financial_contexts c on c.fact_id = f.supersedes
+      where i.run_id = $1 and f.method = 'restated' order by i.input_slot`,
+    [runId, SEC_DERIVATION_LOCATOR],
+  );
+  const figures = (kept: typeof rows) => [...new Set(kept.map(({ bound_payload: { subject_ref, metric, period } }) => {
+    const measure = lowercaseUnlessAcronym(resolveMetricDefinition(metric.metric_key)?.label ?? metric.metric_key);
+    const name = names.get(subject_ref.id.toLowerCase());
+    return `${name === undefined ? "" : `${name}'s `}${measure} in ${boundPeriodText(period, period.kind === "instant")}`;
+  }))];
+  return { restated: figures(rows.filter((row) => !row.derived && row.changed)), ownStatements: figures(rows.filter((row) => row.derived)) };
 }
 
 // A read a statement error fails rolls back to its savepoint, so the
@@ -866,9 +896,9 @@ export function uncoveredAsks(
     };
   });
   type Company = (typeof companies)[number];
-  // An engine figure is as reported, so a qualified metric is computed only as
-  // its base's growth (a change whose two inputs are that figure itself, not
-  // a ratio or sum that reads it) or its trend (it over several periods).
+  // An engine figure is as filings state it, so a qualified metric is computed
+  // only as its base's growth (a change whose two inputs are that figure itself,
+  // not a ratio or sum that reads it) or its trend (it over several periods).
   const computes = (metric: RequestedMetric, company: Company) => {
     const ofBase = (node: OperationNode) => SCOPE_METRICS[figureKey(node)] === metric.base;
     if (metric.adjustment !== undefined) return false;

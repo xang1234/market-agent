@@ -4,8 +4,8 @@
 // database. Numbers, predicates, basis, input lineage, and coverage must agree
 // wherever the request is the same. What may differ is stated explicitly:
 // surface ids, layout, and parent semantics; Chat's cutoff (the turn's own
-// time); and the saved rules' basis (as restated), which binds the restated
-// disclosure instead of the original.
+// time); and the basis: Chat and the saved rules are as restated, which binds
+// the restated disclosure instead of the original.
 
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -69,6 +69,10 @@ test("cross-surface parity", { skip: !dockerAvailable(), timeout: 300_000 }, asy
   await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [threadId, IDS.owner]);
   completed((await chatHarness(pool, { model: revenueModel(["AAA"]) }).run({ threadId, userId: IDS.owner, userIntent: "Revenue for AAA" })).events);
   const chat = await certified(db, await runFor(db, threadId), "a_out");
+  const priorThreadId = randomUUID();
+  await db.query(`insert into chat_threads (thread_id, user_id) values ($1, $2)`, [priorThreadId, IDS.owner]);
+  completed((await chatHarness(pool, { model: revenueModel(["AAA"], 2022) }).run({ threadId: priorThreadId, userId: IDS.owner, userIntent: "Revenue for AAA in FY2022" })).events);
+  const chatPrior = await certified(db, await runFor(db, priorThreadId), "a_out");
 
   // Analyze: the revenue-trend section's latest annual revenue.
   const templateId = (await db.query(
@@ -97,16 +101,12 @@ test("cross-surface parity", { skip: !dockerAvailable(), timeout: 300_000 }, asy
   const campaign = await setupFinancialCampaign(db, pool);
   const discoveryRun = (await campaign.evaluate()).get(REVENUE_ID)!.certified!.run_id;
 
-  await t.test("chat, a memo section, and a grid cell certify the same as-reported value from the same disclosure", () => {
-    for (const [surface, result] of Object.entries({ analyze, cell })) {
-      assert.deepEqual(result.payload, chat.payload, `${surface} value`);
-      assert.deepEqual(result.inputs, chat.inputs, `${surface} lineage`);
-      assert.deepEqual([result.basis, result.unit_state, result.coverage, result.disposition], [chat.basis, chat.unit_state, chat.coverage, chat.disposition], surface);
-    }
-    assert.deepEqual([chat.basis, chat.coverage, chat.inputs.map((input) => input.fact_id)], ["as_reported", "complete", [IDS.original]]);
-    // Allowed difference: Chat answers at the turn's own time; memo and grid pin theirs.
+  await t.test("a memo section and a grid cell certify the same as-reported value from the same disclosure", () => {
+    assert.deepEqual(cell.payload, analyze.payload, "value");
+    assert.deepEqual(cell.inputs, analyze.inputs, "lineage");
+    assert.deepEqual([cell.basis, cell.unit_state, cell.coverage, cell.disposition], [analyze.basis, analyze.unit_state, analyze.coverage, analyze.disposition]);
+    assert.deepEqual([analyze.basis, analyze.coverage, analyze.inputs.map((input) => input.fact_id)], ["as_reported", "complete", [IDS.original]]);
     assert.deepEqual([analyze.cutoff, cell.cutoff], [CUTOFF, CUTOFF]);
-    assert.ok(chat.cutoff > CUTOFF);
   });
 
   await t.test("a thesis condition and a Discovery criterion saving the same rule certify the same value and verdict", async () => {
@@ -119,10 +119,24 @@ test("cross-surface parity", { skip: !dockerAvailable(), timeout: 300_000 }, asy
     assert.deepEqual([predicate.basis, predicate.cutoff, (predicate.payload as { outcome: boolean }).outcome], ["as_restated", CUTOFF, true]);
   });
 
+  await t.test("chat certifies the same restated value and disclosure as a saved rule", async () => {
+    const saved = await certified(db, thesisRun, "value");
+    assert.deepEqual([chat.payload, chat.inputs, chat.basis], [saved.payload, saved.inputs, saved.basis]);
+    assert.deepEqual([chat.basis, chat.coverage, chat.inputs.map((input) => input.fact_id)], ["as_restated", "complete", [IDS.restated]]);
+    // Allowed difference: Chat answers at the turn's own time; a saved rule pins its cutoff.
+    assert.ok(chat.cutoff > saved.cutoff);
+  });
+
+  await t.test("on a year no filing restated, chat and a memo certify the same value from the same disclosure", async () => {
+    const memoPrior = await certified(db, await runFor(db, memo.runId), "revenue_trend_prior");
+    assert.deepEqual([chatPrior.payload, chatPrior.inputs], [memoPrior.payload, memoPrior.inputs]);
+    assert.deepEqual([chatPrior.basis, memoPrior.basis, chatPrior.inputs.map((input) => input.fact_id)], ["as_restated", "as_reported", [IDS.fy2022]]);
+  });
+
   await t.test("the only difference between the two groups is the stated basis: the restated disclosure", async () => {
     const saved = await certified(db, thesisRun, "value");
     assert.deepEqual(saved.inputs.map((input) => input.fact_id), [IDS.restated]);
-    assert.deepEqual(saved.inputs.map((input) => input.period), chat.inputs.map((input) => input.period), "the same fiscal period");
-    assert.notDeepEqual(saved.payload, chat.payload, "a restatement changed the reported number");
+    assert.deepEqual(saved.inputs.map((input) => input.period), analyze.inputs.map((input) => input.period), "the same fiscal period");
+    assert.notDeepEqual(saved.payload, analyze.payload, "a restatement changed the reported number");
   });
 });

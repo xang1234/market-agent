@@ -27,6 +27,7 @@ import {
   type ExtractStatementInput,
   type SecCompanyFacts,
   type SecCompanyFactsFetch,
+  type SecConceptValue,
   type SecEdgarFetcher,
   type SecDerivation,
   type SecFetchEvidence,
@@ -34,10 +35,11 @@ import {
   type SecSourceToken,
   type SecValueLocation,
 } from "./sec-edgar.ts";
-import type { NoncontrollingInterestInferenceV1 } from "../../financial-core/src/contracts.ts";
-import { resolveMetricDefinition } from "../../financial-core/src/definitions.ts";
+import type { DerivationProofV1, NoncontrollingInterestInferenceV1 } from "../../financial-core/src/contracts.ts";
+import { resolveMetricDefinition, type MetricValueKind } from "../../financial-core/src/definitions.ts";
+import { derivationValue } from "../../financial-core/src/derivation.ts";
 import type { ShareBasis } from "../../financial-core/src/evidence-vocabulary.ts";
-import { explainedBySplits, splitHistoryCovers, splitsRestate } from "../../financial-core/src/split-adjustment.ts";
+import { explainedBySplits, filingRounding, sameRoundedFigure, splitHistoryCovers, splitsRestate, sumWithinRounding, type RoundedFigure } from "../../financial-core/src/split-adjustment.ts";
 import { loadSubjectSplitHistory, type SubjectSplitHistory } from "../../market/src/split-history.ts";
 import { checkTokenAgainstStoredValue, recordFactPrecisionAttestation } from "../../evidence/src/financial-attestations.ts";
 import { recordFactFinancialContext } from "../../evidence/src/financial-context.ts";
@@ -1342,38 +1344,59 @@ async function derivationLineage(
   };
 }
 
-// A 10-K repeats the two prior years beside its own (#321). Every stored
-// original FY disclosure of the issuer is compared with each later 10-K in the
-// download that gives the same concept, unit and dates, in filing order: a
-// value that differs from the previous filing's is stored as that year's
-// restatement, on the restating filing's source, naming the original. A
-// companyfacts download lists every filing, so the stored history does not
-// depend on which year was ingested first (#333), and repeating a restated
-// value adds nothing. A filing giving two different values, or a value without
-// its lossless token, is skipped; an original with no recorded concept is left
-// as it is. A restated fact's method keeps it out of every as-reported reader.
+// A filing repeats earlier periods beside its own (#321). Every stored original
+// disclosure of the issuer is walked through the later filings in the download
+// that give the same concept, unit and dates, in filing order: a 10-K or its
+// amendment for a year, and a 10-Q or its amendment too for a quarter (#513). Each
+// is judged against the figure that stands, the original or the last restatement.
+// A value that differs, past the coarser of the two filings' roundings, is stored
+// as that period's restatement, on the restating filing's source, naming the
+// original, and then stands, so a filing that reverses a restatement is one too. A
+// companyfacts download lists every filing, so the stored history does not depend
+// on which period was ingested first (#333), and repeating a restated value adds
+// nothing. A filing giving two different values, or a value without its lossless
+// token, is skipped; an original with no recorded concept is left as it is. A
+// filing filed no later than the original is never later, whatever its fiscal tags
+// say (secFiscalYearWindow). A restated fact's method keeps it out of every
+// as-reported reader.
+//
+// A filing too short to show its rounding is read exactly, unless its own zeros
+// could hide the difference. That may be no restatement at all, so it is
+// unverified: a gap, never a false restatement or a stale figure.
+//
+// A derived quarter was never stated, so its own filing's line for it counts as a
+// later statement, and the walk carries its inputs as they then stand. Every line
+// is checked against them, one repeating the figure included, and taken only when
+// they give it within rounding: a 10-K that re-presents one quarter alone would
+// otherwise leave a year whose quarters overstate it. Failing that it is
+// unverified, as it is from the first filing that moves an input and does not state
+// the quarter: the number is not re-derived, so as_restated answers a gap rather
+// than a stale figure. Nothing later clears an unverified statement: the period's
+// later filings wait for it.
+//
 // Only us-gaap concepts are compared: a cover count (dei) is a count as of its
 // own date, and a later filing states a later date's count, never that one's.
 //
 // An as-filed EPS or share count is on the split basis of its filing date
-// (#387), so a later 10-K states it on its own. When the listing's splits
-// between the two filing dates explain the change, it is the same figure;
-// otherwise it is a restatement, as filed on the later 10-K's date. Without
-// those splits on file it is stored as an unverified restatement, and the
-// year's later filings wait for it. A later filing's stored statement
-// converges to the verdict under the splits on file, so a rerun after
-// `npm run sync:splits` decides an unverified one and a second rerun changes
+// (#387), so a later filing states it on its own. When the listing's splits
+// between the two filing dates explain the figure, equal or not, it is the same
+// one; otherwise it is a restatement, as filed on the later filing's date. Without
+// those splits on file an equal figure stays the same one, as most never change,
+// and a different one is stored as an unverified restatement. A later filing's
+// stored statement converges to the verdict under the splits on file, so a rerun
+// after `npm run sync:splits` decides an unverified one and a second rerun changes
 // nothing.
 async function recordSecRestatements(db: FundamentalsQueryExecutor, input: RestatementInput): Promise<void> {
   const { rows: originals } = await db.query<SecOriginal>(
     `select f.fact_id::text as fact_id, f.metric_id::text as metric_id, m.metric_key, f.period_kind::text as period_kind,
-            f.period_start::text as period_start, f.period_end::text as period_end, f.fiscal_year,
+            f.period_start::text as period_start, f.period_end::text as period_end, f.fiscal_year, f.fiscal_period,
             f.value_num::text as value, f.unit, f.currency, f.scale::text as scale, c.source_context_ref,
-            c.as_filed_on::text as as_filed_on, c.share_basis, ${INFERENCE_SQL} as inference
+            c.as_filed_on::text as as_filed_on, c.share_basis, ${INFERENCE_SQL} as inference, a.derivation, a.token_proof_hash
        from facts f
        join metrics m on m.metric_id = f.metric_id
        join fact_financial_contexts c on c.fact_id = f.fact_id
-      where f.subject_kind = 'issuer' and f.subject_id = $1 and f.method = 'reported' and f.fiscal_period = 'FY'
+       left join current_fact_precision_attestations a on a.fact_id = f.fact_id
+      where f.subject_kind = 'issuer' and f.subject_id = $1 and f.method = 'reported'
         and ${factActiveSql("f")}
         and c.context_version = $2 and c.disclosure_relation = 'original'`,
     [input.issuerId, SEC_CONTEXT_VERSION],
@@ -1399,34 +1422,135 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
   };
   const usGaap = input.facts.facts["us-gaap"] ?? {};
   const memo = { sources: new Map<string, UUID>(), published: new Set<string>() };
+  const roundingsByValues = new Map<ReadonlyArray<SecConceptValue>, FilingRoundings>();
   for (const original of originals) {
     const located = /#([^|]+)\|([^|]+)\|([^|]+)\|/u.exec(original.source_context_ref ?? "");
     if (!located) continue;
     const [, concept, unit, originalAccession] = located;
-    const byFiling = new Map<string, { filed: string; tokens: Set<string | null> }>();
-    for (const value of usGaap[concept!]?.units?.[unit!] ?? []) {
-      if (value.accn === originalAccession || value.form !== "10-K" || (value.start ?? null) !== original.period_start || value.end !== original.period_end) continue;
-      const filing = byFiling.get(value.accn) ?? { filed: value.filed, tokens: new Set() };
-      filing.tokens.add(value.val_token ?? null);
-      byFiling.set(value.accn, filing);
-    }
-    const filings = [...byFiling].sort(([leftAccn, left], [rightAccn, right]) => left.filed.localeCompare(right.filed) || leftAccn.localeCompare(rightAccn));
-    let previous: StatedFigure = { value: original.value, as_filed_on: original.as_filed_on };
-    for (const [accessionNumber, { filed, tokens }] of filings) {
-      const [presented, ...others] = tokens;
-      if (others.length > 0 || presented === null || presented === undefined) continue;
-      const later: StatedFigure = { value: presented, as_filed_on: original.as_filed_on === null ? null : filed };
-      const relation = await laterRelation(original.metric_key, previous, later, splitsOn);
-      previous = later;
-      const current = storedLater.get(`${original.fact_id}|${sourceIdForAccession(accessionNumber)}`);
+    const values = usGaap[concept!]?.units?.[unit!] ?? [];
+    const originalFiled = values.find((value) => value.accn === originalAccession)?.filed;
+    if (originalFiled === undefined) continue;
+    const roundings = roundingsByValues.get(values) ?? filingRoundings(values, resolveMetricDefinition(original.metric_key)?.value_kind ?? "per_share");
+    roundingsByValues.set(values, roundings);
+    const { derivation } = original;
+    const record = async (later: LaterStatement, relation: LaterRelation | null) => {
+      const current = storedLater.get(`${original.fact_id}|${sourceIdForAccession(later.accession)}`);
       if (current !== undefined && current.disclosure_relation !== relation) {
         await db.query(`update facts set invalidated_at = now(), updated_at = now() where fact_id = $1`, [current.fact_id]);
       }
-      if (relation === null) continue;
-      await storeLaterStatement(db, input, memo, original, { accession: accessionNumber, filed, token: presented, concept: concept!, unit: unit! }, relation);
+      if (relation !== null) await storeLaterStatement(db, input, memo, original, later, relation);
+    };
+    const statements = periodStatements(values, original.period_start, original.period_end, original.fiscal_period === "FY");
+    const isLater = ({ accession, filed }: PeriodStatement) => filed >= originalFiled && (derivation !== null || accession !== originalAccession);
+    const unordered = unorderedDates([statements, ...(derivation?.terms ?? []).map((term) => termStatements(values, term))], roundings);
+    let standing: StatedFigure = { value: original.value, as_filed_on: original.as_filed_on, rounding: roundings.get(originalAccession!) ?? null };
+    const inputs: RoundedFigure[] = derivation?.terms.map((term) => ({ value: term.raw_token, rounding: roundings.get(term.source.accession) ?? null })) ?? [];
+    // A derived figure stands on its unmoved inputs, whose rounding a line may fall within.
+    let asDerived = derivation !== null;
+    for (const filing of filingsInOrder(statements, derivation, values)) {
+      let moved: FiledInput | null = null;
+      for (const input of filing.inputs) {
+        const figure: RoundedFigure = { value: input.statement.token, rounding: roundings.get(input.statement.accession) ?? null };
+        if (sameRoundedFigure(inputs[input.term]!, figure) === true) continue;
+        inputs[input.term] = figure;
+        moved ??= input;
+      }
+      if (moved !== null) asDerived = false;
+      const statement = filing.statement !== null && isLater(filing.statement) ? filing.statement : null;
+      if (statement === null) {
+        if (moved !== null) {
+          await record({ ...moved.statement, concept: concept!, unit: unit!, input: derivation!.terms[moved.term]! }, "unverified_restatement");
+          break;
+        }
+        await record({ ...(filing.statement ?? filing.inputs[0]!.statement), concept: concept!, unit: unit! }, null);
+        continue;
+      }
+      const figure: StatedFigure = { value: statement.token, as_filed_on: original.as_filed_on === null ? null : statement.filed, rounding: roundings.get(statement.accession) ?? null };
+      const relation = unordered.has(statement.filed) || (derivation !== null && !inputsGive(derivation, inputs, figure))
+        ? "unverified_restatement"
+        : asDerived ? null : await laterRelation(original.metric_key, standing, figure, splitsOn);
+      await record({ ...statement, concept: concept!, unit: unit! }, relation);
       if (relation === "unverified_restatement") break;
+      if (relation !== null) {
+        standing = figure;
+        asDerived = false;
+      }
     }
   }
+}
+
+const FORMS_STATING_A_YEAR = ["10-K", "10-K/A"];
+const FORMS_STATING_A_QUARTER = [...FORMS_STATING_A_YEAR, "10-Q", "10-Q/A"];
+
+/** One filing's statement of a period. */
+type PeriodStatement = Readonly<{ accession: string; filed: string; form: string; token: string }>;
+
+// Each filing's one statement of a period, in filing order. A 10-Q states a
+// year-end balance as a comparative, so a year reads 10-Ks only.
+function periodStatements(values: ReadonlyArray<SecConceptValue>, start: string | null, end: string, annual: boolean): PeriodStatement[] {
+  const forms = annual ? FORMS_STATING_A_YEAR : FORMS_STATING_A_QUARTER;
+  const byFiling = new Map<string, { filed: string; form: string; tokens: Set<string | null> }>();
+  for (const value of values) {
+    if (!forms.includes(value.form) || (value.start ?? null) !== start || value.end !== end) continue;
+    const filing = byFiling.get(value.accn) ?? { filed: value.filed, form: value.form, tokens: new Set() };
+    filing.tokens.add(value.val_token ?? null);
+    byFiling.set(value.accn, filing);
+  }
+  return [...byFiling].flatMap(([accession, { filed, form, tokens }]) => {
+    const [token, ...others] = tokens;
+    return others.length > 0 || token === null || token === undefined ? [] : [{ accession, filed, form, token }];
+  }).sort((left, right) => left.filed.localeCompare(right.filed) || left.accession.localeCompare(right.accession));
+}
+
+type DerivationTerm = DerivationProofV1["terms"][number];
+
+function termStatements(values: ReadonlyArray<SecConceptValue>, term: DerivationTerm): PeriodStatement[] {
+  return periodStatements(values, term.start, term.end, term.span === "fiscal_year").filter(({ filed }) => filed >= term.source.filed);
+}
+
+/** The dates two filings state one figure differently, beyond rounding. Accession order is not filing order, so nothing tells which stands. */
+function unorderedDates(statementLists: ReadonlyArray<ReadonlyArray<PeriodStatement>>, roundings: FilingRoundings): Set<string> {
+  const figure = ({ accession, token }: PeriodStatement): RoundedFigure => ({ value: token, rounding: roundings.get(accession) ?? null });
+  return new Set(statementLists.flatMap((statements) => statements
+    .filter((one, index) => statements.slice(index + 1).some((other) => other.filed === one.filed && sameRoundedFigure(figure(one), figure(other)) !== true))
+    .map(({ filed }) => filed)));
+}
+
+/** A later filing's statement of one of a derived quarter's inputs, by its place among the terms. */
+type FiledInput = Readonly<{ term: number; statement: PeriodStatement }>;
+
+type WalkedFiling = { filed: string; accession: string; statement: PeriodStatement | null; inputs: FiledInput[] };
+
+/** What each filing states of a period and of a derived quarter's inputs, in filing order. */
+function filingsInOrder(statements: ReadonlyArray<PeriodStatement>, derivation: DerivationProofV1 | null, values: ReadonlyArray<SecConceptValue>): WalkedFiling[] {
+  const filings = new Map<string, WalkedFiling>();
+  const filingOf = ({ accession, filed }: PeriodStatement) => {
+    const filing = filings.get(accession) ?? { filed, accession, statement: null, inputs: [] };
+    filings.set(accession, filing);
+    return filing;
+  };
+  for (const statement of statements) filingOf(statement).statement = statement;
+  for (const [term, derived] of (derivation?.terms ?? []).entries()) {
+    for (const statement of termStatements(values, derived)) filingOf(statement).inputs.push({ term, statement });
+  }
+  return [...filings.values()].sort((left, right) => left.filed.localeCompare(right.filed) || left.accession.localeCompare(right.accession));
+}
+
+/** Whether a derived quarter's inputs, as they stand, sum to a line for it within their rounding. */
+function inputsGive(derivation: DerivationProofV1, inputs: ReadonlyArray<RoundedFigure>, line: RoundedFigure): boolean {
+  const sum = derivationValue({ ...derivation, terms: derivation.terms.map((term, index) => ({ ...term, raw_token: inputs[index]!.value })) });
+  return sum !== null && sumWithinRounding(line, sum, inputs.map((input) => input.rounding));
+}
+
+/** Each filing's rounding of one concept and unit (filingRounding). */
+type FilingRoundings = ReadonlyMap<string, number | null>;
+
+function filingRoundings(values: ReadonlyArray<SecConceptValue>, valueKind: MetricValueKind): FilingRoundings {
+  const tokens = new Map<string, string[]>();
+  for (const { accn, val_token } of values) {
+    if (val_token !== undefined) tokens.set(accn, [...(tokens.get(accn) ?? []), val_token]);
+  }
+  return new Map([...tokens].map(([accn, stated]) => [accn, filingRounding(stated, valueKind)]));
 }
 
 type RestatementInput = Readonly<{
@@ -1445,6 +1569,7 @@ type SecOriginal = {
   period_start: string | null;
   period_end: string;
   fiscal_year: number;
+  fiscal_period: FiscalPeriod;
   value: string;
   unit: string;
   currency: string | null;
@@ -1454,33 +1579,38 @@ type SecOriginal = {
   share_basis: ShareBasis;
   // A later filing's figure stands in on the same basis as the original's.
   inference: NoncontrollingInterestInferenceV1 | null;
+  /** A derived quarter's proof over its inputs; null for a stated figure. */
+  derivation: DerivationProofV1 | null;
+  token_proof_hash: string | null;
 };
 
-/** A figure as a filing states it, and the filing date whose split basis it is on: null for a value splits do not move. */
-type StatedFigure = Readonly<{ value: string; as_filed_on: string | null }>;
+/** A figure as a filing states it, that filing's rounding, and the filing date whose split basis it is on: null for a value splits do not move. */
+type StatedFigure = RoundedFigure & Readonly<{ as_filed_on: string | null }>;
 
 type LaterRelation = "economic_restatement" | "unverified_restatement";
 
 /**
- * How a later 10-K's figure for a year relates to the previous filing's, null
- * when it is the same figure. An as-filed figure is compared on the listing's
- * splits between the two filing dates; without them on file it is unverified.
+ * How a later filing's figure for a period relates to the one that stands, null
+ * when it is the same figure at the coarser of their filings' roundings. A
+ * difference only a filing too short to show its rounding could hide is unverified.
+ * An as-filed figure is compared on the listing's splits between the two filing
+ * dates, so an equal one across a split has changed. Without those splits on file
+ * an equal figure is the same one and any other is unverified.
  */
 async function laterRelation(
   metricKey: string,
-  previous: StatedFigure,
+  standing: StatedFigure,
   later: StatedFigure,
   splitsOn: (date: string) => Promise<SubjectSplitHistory>,
 ): Promise<LaterRelation | null> {
-  if (previous.as_filed_on === null || later.as_filed_on === null) {
-    return checkTokenAgainstStoredValue(later.value, previous.value).status === "value_mismatch" ? "economic_restatement" : null;
-  }
+  const same = sameRoundedFigure(standing, later);
+  if (standing.as_filed_on === null || later.as_filed_on === null) return same === true ? null : same === false ? "economic_restatement" : "unverified_restatement";
   const history = await splitsOn(later.as_filed_on);
-  if (history.status !== "ok" || !splitHistoryCovers(history.checked_at, later.as_filed_on, history.timezone)) return "unverified_restatement";
+  if (history.status !== "ok" || !splitHistoryCovers(history.checked_at, later.as_filed_on, history.timezone)) return same === true ? null : "unverified_restatement";
   const definition = resolveMetricDefinition(metricKey);
   const explained = definition === null ? null : explainedBySplits({
-    earlier: { value: previous.value, as_filed_on: previous.as_filed_on },
-    later: { value: later.value, as_filed_on: later.as_filed_on },
+    earlier: { ...standing, as_filed_on: standing.as_filed_on },
+    later: { ...later, as_filed_on: later.as_filed_on },
     value_kind: definition.value_kind,
     splits: history.splits,
   });
@@ -1488,15 +1618,24 @@ async function laterRelation(
 }
 
 /**
- * Stores a later 10-K's statement of an original's year on the restating
- * filing's source, unless that filing's statement is already stored.
+ * A later filing's statement of an original's period, or, for a derived quarter
+ * whose `input` it changes, of that input alone.
+ */
+type LaterStatement = PeriodStatement & Readonly<{ concept: string; unit: string; input?: DerivationTerm }>;
+
+/**
+ * Stores a later filing's statement of an original's period on the restating
+ * filing's source, unless that filing's statement is already stored. A changed
+ * input says nothing of the quarter's own figure, so its row keeps the standing
+ * figure and that figure's proof, and locates the input. Selection never binds
+ * it: it only makes as_restated a gap from that filing on.
  */
 async function storeLaterStatement(
   db: FundamentalsQueryExecutor,
   input: RestatementInput,
   memo: { sources: Map<string, UUID>; published: Set<string> },
   original: SecOriginal,
-  later: Readonly<{ accession: string; filed: string; token: string; concept: string; unit: string }>,
+  later: LaterStatement,
   relation: LaterRelation,
 ): Promise<void> {
   const asOf = input.evidence.completed_at;
@@ -1505,15 +1644,16 @@ async function storeLaterStatement(
     sourceId = await upsertSecFilingSource(db, secFilingSource(input.cik, later.accession, asOf));
     memo.sources.set(later.accession, sourceId);
   }
+  const value = later.input ? original.value : later.token;
   const token: SecSourceToken = {
-    token: later.token,
+    token: value,
     concept: later.concept,
     unit: later.unit,
     accn: later.accession,
-    form: "10-K",
+    form: later.form,
     filed: later.filed,
-    start: original.period_start,
-    end: original.period_end,
+    start: later.input ? later.input.start : original.period_start,
+    end: later.input ? later.input.end : original.period_end,
   };
   const inserted = await db.query<{ fact_id: string }>(
     `insert into facts (
@@ -1521,7 +1661,7 @@ async function storeLaterStatement(
        value_num, unit, currency, scale, as_of, reported_at, observed_at, source_id, method, definition_version,
        verification_status, freshness_class, coverage_level, confidence, supersedes, quality_flags
      ) values (
-       'issuer', $1, $2, $3, $4, $5, $6, 'FY', $7, $8, $9, $10, $11, $15, $12, $13, 'restated', 1,
+       'issuer', $1, $2, $3, $4, $5, $6, $17, $7, $8, $9, $10, $11, $15, $12, $13, 'restated', 1,
        'authoritative', 'filing_time', 'full', 1, $14, $16::jsonb
      )
      on conflict do nothing
@@ -1531,6 +1671,7 @@ async function storeLaterStatement(
       token.token, original.unit, original.currency, original.scale, asOf, input.clock().toISOString(), sourceId, original.fact_id,
       later.filed,
       JSON.stringify(original.inference ? [original.inference] : []),
+      original.fiscal_period,
     ],
   );
   // The restating filing need not be the one this ingest is for; this
@@ -1547,9 +1688,9 @@ async function storeLaterStatement(
     fact_id: factId,
     precision_class: "source_token_preserved",
     raw_token: token.token,
-    token_proof_hash: secTokenProofHash(input.cik, token),
+    token_proof_hash: later.input ? original.token_proof_hash! : secTokenProofHash(input.cik, token),
     source_locator: locator,
-    validation_method: "sec_companyfacts_lossless_json.v1",
+    validation_method: later.input ? "sec_companyfacts_changed_input.v1" : "sec_companyfacts_lossless_json.v1",
   });
   await recordFactFinancialContext(db, {
     fact_id: factId,
