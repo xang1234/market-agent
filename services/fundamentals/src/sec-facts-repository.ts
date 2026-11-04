@@ -39,7 +39,7 @@ import type { DerivationProofV1, NoncontrollingInterestInferenceV1 } from "../..
 import { resolveMetricDefinition } from "../../financial-core/src/definitions.ts";
 import { derivationValue } from "../../financial-core/src/derivation.ts";
 import type { ShareBasis } from "../../financial-core/src/evidence-vocabulary.ts";
-import { explainedBySplits, sameRoundedFigure, splitHistoryCovers, splitsRestate, sumWithinRounding } from "../../financial-core/src/split-adjustment.ts";
+import { explainedBySplits, filingRounding, sameRoundedFigure, splitHistoryCovers, splitsRestate, sumWithinRounding, type RoundedFigure } from "../../financial-core/src/split-adjustment.ts";
 import { loadSubjectSplitHistory, type SubjectSplitHistory } from "../../market/src/split-history.ts";
 import { checkTokenAgainstStoredValue, recordFactPrecisionAttestation } from "../../evidence/src/financial-attestations.ts";
 import { recordFactFinancialContext } from "../../evidence/src/financial-context.ts";
@@ -1414,6 +1414,7 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
   };
   const usGaap = input.facts.facts["us-gaap"] ?? {};
   const memo = { sources: new Map<string, UUID>(), published: new Set<string>() };
+  const roundingsByValues = new Map<ReadonlyArray<SecConceptValue>, FilingRoundings>();
   for (const original of originals) {
     const located = /#([^|]+)\|([^|]+)\|([^|]+)\|/u.exec(original.source_context_ref ?? "");
     if (!located) continue;
@@ -1421,6 +1422,8 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
     const values = usGaap[concept!]?.units?.[unit!] ?? [];
     const originalFiled = values.find((value) => value.accn === originalAccession)?.filed;
     if (originalFiled === undefined) continue;
+    const roundings = roundingsByValues.get(values) ?? filingRoundings(values);
+    roundingsByValues.set(values, roundings);
     const { derivation } = original;
     const record = async (later: LaterStatement, relation: LaterRelation | null) => {
       const current = storedLater.get(`${original.fact_id}|${sourceIdForAccession(later.accession)}`);
@@ -1431,22 +1434,22 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
     };
     const statements = periodStatements(values, original.period_start, original.period_end, original.fiscal_period === "FY");
     const isLater = ({ accession, filed }: PeriodStatement) => filed > originalFiled || (derivation !== null && accession === originalAccession);
-    let previous: StatedFigure = { value: original.value, as_filed_on: original.as_filed_on };
+    let previous: StatedFigure = { value: original.value, as_filed_on: original.as_filed_on, rounding: roundings.get(originalAccession!) ?? null };
     for (const statement of statements) {
       const later: LaterStatement = { ...statement, concept: concept!, unit: unit! };
       if (!isLater(statement)) {
         await record(later, null);
         continue;
       }
-      const figure: StatedFigure = { value: statement.token, as_filed_on: original.as_filed_on === null ? null : statement.filed };
+      const figure: StatedFigure = { value: statement.token, as_filed_on: original.as_filed_on === null ? null : statement.filed, rounding: roundings.get(statement.accession) ?? null };
       const compared = await laterRelation(original.metric_key, previous, figure, splitsOn);
       previous = figure;
-      const relation = compared === "economic_restatement" && derivation !== null ? derivedLineRelation(derivation, values, statement) : compared;
+      const relation = compared === "economic_restatement" && derivation !== null ? derivedLineRelation(derivation, values, statement, roundings) : compared;
       await record(later, relation);
       if (relation === "unverified_restatement") break;
     }
     if (derivation === null) continue;
-    const changed = firstChangedInput(derivation, values, new Set(statements.filter(isLater).map((statement) => statement.accession)));
+    const changed = firstChangedInput(derivation, values, roundings, new Set(statements.filter(isLater).map((statement) => statement.accession)));
     if (changed !== null) await record({ ...changed.statement, concept: concept!, unit: unit!, input: changed.term }, "unverified_restatement");
   }
 }
@@ -1484,32 +1487,48 @@ function termStatements(values: ReadonlyArray<SecConceptValue>, term: Derivation
 // make of it. The derived figure is a sum of rounded terms, so a line within
 // their rounding is the same figure while no input has moved, and follows the
 // one that has. Past their rounding the inputs do not give the line.
-function derivedLineRelation(derivation: DerivationProofV1, values: ReadonlyArray<SecConceptValue>, statement: PeriodStatement): LaterRelation | null {
-  const terms = derivation.terms.map((term) => ({
-    ...term,
-    raw_token: termStatements(values, term).filter(({ filed }) => filed <= statement.filed).at(-1)?.token ?? term.raw_token,
-  }));
+function derivedLineRelation(derivation: DerivationProofV1, values: ReadonlyArray<SecConceptValue>, statement: PeriodStatement, roundings: FilingRoundings): LaterRelation | null {
+  const current = derivation.terms.map((term) => termStatements(values, term).filter(({ filed }) => filed <= statement.filed).at(-1));
+  const terms = derivation.terms.map((term, index) => ({ ...term, raw_token: current[index]?.token ?? term.raw_token }));
+  const termRoundings = derivation.terms.map((term, index) => roundings.get(current[index]?.accession ?? term.source.accession) ?? null);
   const sum = derivationValue({ ...derivation, terms });
-  if (sum === null || !sumWithinRounding(statement.token, sum, terms.map((term) => term.raw_token))) return "unverified_restatement";
-  return terms.some((term, index) => sameRoundedFigure(derivation.terms[index]!.raw_token, term.raw_token) === false) ? "economic_restatement" : null;
+  if (sum === null || !sumWithinRounding({ value: statement.token, rounding: roundings.get(statement.accession) ?? null }, sum, termRoundings)) return "unverified_restatement";
+  const moved = terms.some((term, index) => sameRoundedFigure(
+    { value: derivation.terms[index]!.raw_token, rounding: roundings.get(derivation.terms[index]!.source.accession) ?? null },
+    { value: term.raw_token, rounding: termRoundings[index]! },
+  ) === false);
+  return moved ? "economic_restatement" : null;
 }
 
 /** The first filing that changes one of a derived quarter's inputs and does not itself state the quarter. */
 function firstChangedInput(
   derivation: DerivationProofV1,
   values: ReadonlyArray<SecConceptValue>,
+  roundings: FilingRoundings,
   statingTheQuarter: ReadonlySet<string>,
 ): { statement: PeriodStatement; term: DerivationTerm } | null {
   let first: { statement: PeriodStatement; term: DerivationTerm } | null = null;
   for (const term of derivation.terms) {
-    let previous = term.raw_token;
+    let previous = { value: term.raw_token, rounding: roundings.get(term.source.accession) ?? null };
     for (const statement of termStatements(values, term)) {
-      const changed = sameRoundedFigure(previous, statement.token) === false;
-      previous = statement.token;
+      const figure = { value: statement.token, rounding: roundings.get(statement.accession) ?? null };
+      const changed = sameRoundedFigure(previous, figure) !== true;
+      previous = figure;
       if (changed && !statingTheQuarter.has(statement.accession) && (first === null || statement.filed < first.statement.filed)) first = { statement, term };
     }
   }
   return first;
+}
+
+/** Each filing's rounding of one concept and unit (filingRounding). */
+type FilingRoundings = ReadonlyMap<string, number | null>;
+
+function filingRoundings(values: ReadonlyArray<SecConceptValue>): FilingRoundings {
+  const tokens = new Map<string, string[]>();
+  for (const { accn, val_token } of values) {
+    if (val_token !== undefined) tokens.set(accn, [...(tokens.get(accn) ?? []), val_token]);
+  }
+  return new Map([...tokens].map(([accn, stated]) => [accn, filingRounding(stated)]));
 }
 
 type RestatementInput = Readonly<{
@@ -1543,14 +1562,16 @@ type SecOriginal = {
   token_proof_hash: string | null;
 };
 
-/** A figure as a filing states it, and the filing date whose split basis it is on: null for a value splits do not move. */
-type StatedFigure = Readonly<{ value: string; as_filed_on: string | null }>;
+/** A figure as a filing states it, that filing's rounding, and the filing date whose split basis it is on: null for a value splits do not move. */
+type StatedFigure = RoundedFigure & Readonly<{ as_filed_on: string | null }>;
 
 type LaterRelation = "economic_restatement" | "unverified_restatement";
 
 /**
  * How a later filing's figure for a period relates to the previous filing's,
- * null when it is the same figure at the coarser of their roundings. An as-filed
+ * null when it is the same figure at the coarser of their filings' roundings. A
+ * difference only a filing too short to show its rounding could hide may be no
+ * restatement at all, so it is unverified rather than stored as one. An as-filed
  * figure that differs is compared on the listing's splits between the two filing
  * dates; without them on file it is unverified.
  */
@@ -1560,15 +1581,15 @@ async function laterRelation(
   later: StatedFigure,
   splitsOn: (date: string) => Promise<SubjectSplitHistory>,
 ): Promise<LaterRelation | null> {
-  const same = sameRoundedFigure(previous.value, later.value);
+  const same = sameRoundedFigure(previous, later);
   if (same === true) return null;
-  if (previous.as_filed_on === null || later.as_filed_on === null) return same === false ? "economic_restatement" : null;
+  if (previous.as_filed_on === null || later.as_filed_on === null) return same === false ? "economic_restatement" : "unverified_restatement";
   const history = await splitsOn(later.as_filed_on);
   if (history.status !== "ok" || !splitHistoryCovers(history.checked_at, later.as_filed_on, history.timezone)) return "unverified_restatement";
   const definition = resolveMetricDefinition(metricKey);
   const explained = definition === null ? null : explainedBySplits({
-    earlier: { value: previous.value, as_filed_on: previous.as_filed_on },
-    later: { value: later.value, as_filed_on: later.as_filed_on },
+    earlier: { ...previous, as_filed_on: previous.as_filed_on },
+    later: { ...later, as_filed_on: later.as_filed_on },
     value_kind: definition.value_kind,
     splits: history.splits,
   });
