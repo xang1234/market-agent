@@ -621,6 +621,92 @@ test("SEC restatements", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(await issuer.laterStatements(), stored, "a rerun adds nothing");
   });
 
+  // Accession order is not filing order: each case runs with the accessions either way round.
+  for (const [own, other] of [[1, 2], [2, 1]] as const) {
+    await t.test(`an amendment filed the same day as its 10-Q and differing is a gap, accessions ${own}, ${other}`, async () => {
+      const issuer = await quarterIssuer();
+      const q1 = issuer.filed(own, "10-Q", "2024-04-23", 2024, "Q1");
+      const q1a = issuer.filed(other, "10-Q/A", "2024-04-23", 2024, "Q1");
+      await issuer.ingest({ Revenues: concept("USD", [q1(...Q1_2024, "100"), q1a(...Q1_2024, "90")]) }, ["Q1"]);
+      assert.deepEqual(await issuer.laterStatements(), [["revenue", "Q1", "90", "2024-04-23", "unverified_restatement"]]);
+      assert.equal(await issuer.pick("Q1", AFTER, "as_restated"), "restatement_unverified");
+    });
+
+    await t.test(`an amendment filed the same day repeating the figure adds nothing, accessions ${own}, ${other}`, async () => {
+      const issuer = await quarterIssuer();
+      const q1 = issuer.filed(own, "10-Q", "2024-04-23", 2024, "Q1");
+      const q1a = issuer.filed(other, "10-Q/A", "2024-04-23", 2024, "Q1");
+      await issuer.ingest({ Revenues: concept("USD", [q1(...Q1_2024, "100"), q1a(...Q1_2024, "100")]) }, ["Q1"]);
+      assert.deepEqual(await issuer.laterStatements(), []);
+      assert.equal(await issuer.pick("Q1", AFTER, "as_restated"), "100");
+    });
+
+    await t.test(`two amendments filed one day that differ are a gap, accessions ${own}, ${other}`, async () => {
+      const issuer = await quarterIssuer();
+      const q1 = issuer.filed(5, "10-Q", "2024-04-23", 2024, "Q1");
+      const restating = issuer.filed(own, "10-Q/A", "2024-09-10", 2024, "Q1");
+      const repeating = issuer.filed(other, "10-Q/A", "2024-09-10", 2024, "Q1");
+      await issuer.ingest({ Revenues: concept("USD", [q1(...Q1_2024, "100"), restating(...Q1_2024, "110"), repeating(...Q1_2024, "100")]) }, ["Q1"]);
+      assert.equal(await issuer.pick("Q1", AFTER, "as_restated"), "restatement_unverified");
+      assert.equal((await issuer.laterStatements()).at(-1)![4], "unverified_restatement");
+    });
+
+    await t.test(`a 10-K/A filed with a 10-K, changing the year a fourth quarter is derived from, is a gap, accessions ${own}, ${other}`, async () => {
+      const issuer = await quarterIssuer();
+      const q1 = issuer.filed(5, "10-Q", "2024-04-23", 2024, "Q1");
+      const q2 = issuer.filed(6, "10-Q", "2024-07-23", 2024, "Q2");
+      const q3 = issuer.filed(7, "10-Q", "2024-10-22", 2024, "Q3");
+      const k = issuer.filed(own, "10-K", "2025-02-03", 2024, "FY");
+      const ka = issuer.filed(other, "10-K/A", "2025-02-03", 2024, "FY");
+      await issuer.ingest({ Revenues: concept("USD", [q1(...Q1_2024, "100"), q2(...Q2_2024, "100"), q3(...Q3_2024, "100"), k(...FY_2024, "400"), ka(...FY_2024, "390")]) }, ["Q1", "Q2", "Q3", "Q4", "FY"]);
+      assert.equal(await issuer.pick("Q4", AFTER, "as_restated"), "restatement_unverified");
+      assert.equal(await issuer.pick("FY", AFTER, "as_restated"), "restatement_unverified");
+    });
+
+    await t.test(`a same-day 10-K/A's own fourth-quarter line does not settle the year it changes, accessions ${own}, ${other}`, async () => {
+      const issuer = await quarterIssuer();
+      const q1 = issuer.filed(5, "10-Q", "2024-04-23", 2024, "Q1");
+      const q2 = issuer.filed(6, "10-Q", "2024-07-23", 2024, "Q2");
+      const q3 = issuer.filed(7, "10-Q", "2024-10-22", 2024, "Q3");
+      const earlier = issuer.filed(8, "10-K", "2025-02-03", 2024, "FY");
+      const stating = issuer.filed(own, "10-K/A", "2025-03-10", 2024, "FY");
+      const repeating = issuer.filed(other, "10-K/A", "2025-03-10", 2024, "FY");
+      await issuer.ingest({ Revenues: concept("USD", [
+        q1(...Q1_2024, "100"), q2(...Q2_2024, "100"), q3(...Q3_2024, "100"), earlier(...FY_2024, "400"),
+        stating(...FY_2024, "390"), stating(...Q4_2024, "90"), repeating(...FY_2024, "400"),
+      ]) }, ["Q1", "Q2", "Q3", "Q4", "FY"]);
+      assert.equal(await issuer.pick("Q4", AFTER, "as_restated"), "restatement_unverified");
+    });
+  }
+
+  await t.test("a derived quarter's own 10-K is still its first statement, and a same-day repeat changes nothing", async () => {
+    const issuer = await quarterIssuer();
+    const q1 = issuer.filed(5, "10-Q", "2024-04-23", 2024, "Q1");
+    const q2 = issuer.filed(6, "10-Q", "2024-07-23", 2024, "Q2");
+    const q3 = issuer.filed(7, "10-Q", "2024-10-22", 2024, "Q3");
+    const k = issuer.filed(2, "10-K", "2025-02-03", 2024, "FY");
+    const ka = issuer.filed(1, "10-K/A", "2025-02-03", 2024, "FY");
+    await issuer.ingest({ Revenues: concept("USD", [
+      q1(...Q1_2024, "100"), q2(...Q2_2024, "100"), q3(...Q3_2024, "100"),
+      k(...FY_2024, "400"), k(...Q4_2024, "100"), ka(...FY_2024, "400"), ka(...Q4_2024, "100"),
+    ]) }, ["Q1", "Q2", "Q3", "Q4", "FY"]);
+    assert.deepEqual(await issuer.laterStatements(), []);
+    assert.equal(await issuer.pick("Q4", AFTER, "as_restated"), "100");
+    assert.equal(await issuer.pick("FY", AFTER, "as_restated"), "400");
+  });
+
+  await t.test("two filings one day at different roundings state one figure", async () => {
+    const issuer = await quarterIssuer();
+    const q1 = issuer.filed(1, "10-Q", "2024-04-23", 2024, "Q1");
+    const q1a = issuer.filed(2, "10-Q/A", "2024-04-23", 2024, "Q1");
+    await issuer.ingest({ Revenues: concept("USD", [
+      q1(...Q1_2024, "16053123000"), q1("2023-01-01", "2023-03-31", "14000456000"),
+      q1a(...Q1_2024, "16053000000"), q1a("2023-01-01", "2023-03-31", "14000000000"), q1a("2023-04-01", "2023-06-30", "15123000000"),
+    ]) }, ["Q1"]);
+    assert.deepEqual(await issuer.laterStatements(), []);
+    assert.equal(await issuer.pick("Q1", AFTER, "as_restated"), "16053123000");
+  });
+
   await t.test("a filing older than the original never restates it, for a quarter or a year", async () => {
     const issuer = await quarterIssuer();
     const own = issuer.filed(1, "10-Q", "2024-04-23", 2024, "Q1");
