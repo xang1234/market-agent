@@ -132,32 +132,49 @@ npm test         # contract + AAPL FY2024 income statement verification
   only from a 10-K: the statement contract labels every balance `FY` of
   its fiscal year, so a 10-Q balance is stored as `FY` at the quarter's
   end, and it appears in statements but gets no context.
-- A 10-K's comparative for an earlier year that differs from the
-  previous filing's value for it, in filing-date order, is stored as a
+- A 10-K's comparative for an earlier year that differs from the figure
+  that stands for it, walking filings by filing date, is stored as a
   restatement: `method = 'restated'`, on the later filing's source,
   `reported_at` its filing date, `supersedes` naming the original, with
-  an `as_restated` / `economic_restatement` context. Every ingest checks
-  each stored original against every later 10-K in its companyfacts
-  download, which lists all of the issuer's filings, so the result does
-  not depend on which year was ingested first. An unchanged comparative,
-  two different values in one filing, or an original without a recorded
-  concept adds nothing. A quarter is compared the same way with later
-  10-Qs and 10-Ks, and amendments count as later filings. A change of
-  rounding (`16053123000` then `16053000000`) is the same figure. A derived
-  quarter also takes its own filing's statement of it, when its inputs then
-  give that figure within rounding; otherwise, or from the first later filing
-  that changes an input without stating the quarter, it is stored as an
-  `unverified_restatement`, a gap on the restated basis. Readers of as-reported facts filter `method =
-  'reported'`, or `method <> 'restated'` where they also read vendor and
-  derived facts (analyst grids, thesis evidence), so they never see a
-  restatement; only certified selection
-  with `as_restated` picks it, taking the restatement filed last among
-  those public at the cutoff.
-- An as-filed EPS or share count is compared after restating the previous
-  filing's figure by the listing's splits between the two filing dates. A
+  an `as_restated` / `economic_restatement` context. What stands is the
+  original or the last restatement, so a filing that reverses a restatement
+  is stored too. Every ingest checks each stored original against every
+  later 10-K in its companyfacts download, which lists all of the issuer's
+  filings, so the result does not depend on which year was ingested first.
+  An unchanged comparative, two different values in one filing, or an
+  original without a recorded concept adds nothing. A quarter is compared
+  the same way with later 10-Qs and 10-Ks, and amendments count as later
+  filings. Readers of as-reported facts filter `method = 'reported'`, or
+  `method <> 'restated'` where they also read vendor and derived facts
+  (analyst grids, thesis evidence), so they never see a restatement; only
+  certified selection with `as_restated` picks it, taking the restatement
+  filed last among those public at the cutoff.
+- Two figures are the same within half the coarser of their filings'
+  roundings, so `16053123000` in thousands then `16053000000` in millions
+  is one figure, and `16000000000` then `15999800000` from two filings in
+  thousands is a restatement. Companyfacts drops a filing's rounding, so it
+  is read from the finest figure the filing states for that concept and unit,
+  from thousands to millions. A filing stating fewer than two different
+  figures cannot show it and is read exactly, unless its own zeros could hide
+  the difference. That is stored as an `unverified_restatement`, since it may
+  be no restatement at all.
+- A derived quarter also takes its own filing's statement of it, when its
+  inputs as they then stand give that figure within the sum of each figure's
+  own half unit, even a statement repeating the figure. Otherwise, or from the
+  first later filing that moves an input without stating the quarter, it is
+  stored as an `unverified_restatement`, a gap on the restated basis.
+- A later filing does not clear an `unverified_restatement`. Such a period
+  stays a gap with the final figures on file, even when a later filing states
+  figures that agree again. A gap can only be late, and a stale figure shown
+  as verified would be wrong. Only a rerun that changes the verdict on the
+  filing itself clears it, as a sync of the listing's splits does below.
+- An as-filed EPS or share count is compared after restating the standing
+  figure by the listing's splits between the two filing dates, at the coarser
+  of the filings' roundings with the splits scaling the earlier one. A
   comparative those splits explain adds nothing, and one they do not is a
-  restatement as filed on its 10-K's date. A comparative stored while the
-  listing's splits through its filing date are not on file is an
+  restatement as filed on its 10-K's date, an equal figure across a split
+  included. While the listing's splits through its filing date are not on
+  file, an equal comparative adds nothing and any other is an
   `unverified_restatement`. Selection with `as_restated` reports
   `restatement_unverified` for it until a rerun after
   `npm run sync:splits` decides it.
