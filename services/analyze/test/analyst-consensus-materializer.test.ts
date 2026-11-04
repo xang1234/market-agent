@@ -7,7 +7,7 @@ import type { AnalystConsensusEnvelope } from "../../fundamentals/src/analyst-co
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 
 const ISSUER: IssuerSubjectRef = { kind: "issuer", id: "22222222-2222-4222-a222-222222222222" };
-const SRC = "00000000-0000-4000-a000-00000000000d";
+const SRC = "00000000-0000-4000-a000-000000000014";
 const CLOCK = () => new Date("2026-06-04T12:00:00.000Z");
 
 const METRIC_IDS: Record<string, string> = {

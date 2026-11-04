@@ -5,7 +5,7 @@ import { buildAnalystConsensusBlock } from "../src/analyst-consensus-block-build
 import type { MaterializedConsensus } from "../src/analyst-consensus-materializer.ts";
 
 const SNAP = "11111111-1111-4111-a111-111111111111";
-const SRC = "00000000-0000-4000-a000-00000000000d";
+const SRC = "00000000-0000-4000-a000-000000000014";
 
 const materialized: MaterializedConsensus = {
   analyst_count_ref: "fac00000-0000-4000-8000-000000000001",

@@ -54,4 +54,10 @@ test("earnings_quality vendor sections minted in Postgres pass the seal verifier
       ((block.data_ref?.params?.fact_bindings ?? []) as Array<{ period_end: unknown }>).map((binding) => binding.period_end));
     assert.deepEqual(periodEnds, Array(factCount).fill("2026-10-01"));
   }
+
+  const { rows } = await db.query<{ provider: string; kind: string }>(
+    `select distinct s.provider, s.kind::text from facts f join sources s using (source_id) join metrics m using (metric_id)
+      where m.metric_key in ('analyst_count', 'price_target_mean')`,
+  );
+  assert.deepEqual(rows, [{ provider: "yahoo_finance_dev_fundamentals", kind: "reference_data" }]);
 });

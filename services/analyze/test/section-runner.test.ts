@@ -19,7 +19,7 @@ const ENVELOPE: AnalystConsensusEnvelope = {
   subject: PRIMARY, family: "analyst_consensus", analyst_count: 41, as_of: AS_OF,
   rating_distribution: {
     counts: { strong_buy: 14, buy: 17, hold: 8, sell: 1, strong_sell: 1 },
-    contributor_count: 41, as_of: AS_OF, source_id: "00000000-0000-4000-a000-00000000000d",
+    contributor_count: 41, as_of: AS_OF, source_id: "00000000-0000-4000-a000-000000000014",
   },
   price_target: { currency: "USD", low: 170, mean: 220.5, median: 215, high: 280, contributor_count: 38, as_of: AS_OF, source_id: "00000000-0000-4000-a000-0000000000aa" },
   estimates: [], coverage_warnings: [],
