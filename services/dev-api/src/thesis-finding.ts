@@ -49,7 +49,6 @@ export async function generateThesisFinding(db: QueryExecutor, input: {
       },
       impact,
       thesis_relevance: relevance,
-      confirms_thesis: result.status === 'supported',
     },
   });
 }

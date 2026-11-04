@@ -34,8 +34,6 @@ export type SeverityScoringInput = {
     confidence: number;
   };
   thesis_relevance: number;
-  /** The finding confirms the thesis: worth noting, never an alarm, so it stops at medium. */
-  confirms_thesis?: boolean;
 };
 
 export type SeverityScoreComponents = {
@@ -108,8 +106,7 @@ export function scoreFindingSeverity(input: SeverityScoringInput): SeverityScori
   );
   const thesis_relevance = round2(input.thesis_relevance);
   const score = round2(evidence * 0.34 + impact * 0.38 + thesis_relevance * 0.28);
-  const scored = severityFromScore(score);
-  const severity = input.confirms_thesis && (scored === "high" || scored === "critical") ? "medium" : scored;
+  const severity = severityFromScore(score);
 
   const components = Object.freeze({
     evidence,
