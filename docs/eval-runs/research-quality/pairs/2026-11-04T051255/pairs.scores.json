@@ -1,0 +1,314 @@
+{
+  "pairing": "2026-11-04T051255",
+  "pairs": {
+    "segment-drill-down": {
+      "A": {
+        "correct_companies": 1,
+        "comparable_periods": 0,
+        "figures_match_sources": 0,
+        "conclusions_justified": 0,
+        "counterarguments": 0,
+        "no_invented_numbers": 1
+      },
+      "B": {
+        "correct_companies": 1,
+        "comparable_periods": 0,
+        "figures_match_sources": 0,
+        "conclusions_justified": 0,
+        "counterarguments": 0,
+        "no_invented_numbers": 1
+      },
+      "labels": {
+        "A": [
+          "unstated_gap",
+          "weak_conclusion"
+        ],
+        "B": [
+          "unstated_gap",
+          "weak_conclusion"
+        ]
+      },
+      "notes": "Identical refusal: segment data is seeded and expected, but the answer calls it a capability limit and shows none."
+    },
+    "single-latest-quarter": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 2,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 2,
+        "conclusions_justified": 2,
+        "counterarguments": 1,
+        "no_invented_numbers": 2
+      },
+      "labels": {
+        "A": [],
+        "B": []
+      },
+      "notes": "Same engine block. A closes on a specific counterpoint from the QoQ series; B only has 'uneven' inside its takeaway."
+    },
+    "ticker-page-compare": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 2,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 2,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2
+      },
+      "labels": {
+        "A": [],
+        "B": []
+      },
+      "notes": "Both state the quarters differ, both counter with Apple's larger revenue base."
+    },
+    "peer-two": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 2,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 2,
+        "conclusions_justified": 2,
+        "counterarguments": 1,
+        "no_invented_numbers": 2
+      },
+      "labels": {
+        "A": [],
+        "B": []
+      },
+      "notes": "Same block and comparisons. A's counterpoint is grounded in AMD's growth figure; B's is the period mismatch its takeaway already said, so a caveat."
+    },
+    "fiscal-year-trap": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": 1,
+        "figures_match_sources": 2,
+        "conclusions_justified": 1,
+        "counterarguments": 0,
+        "no_invented_numbers": 2
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": 1,
+        "figures_match_sources": 2,
+        "conclusions_justified": 1,
+        "counterarguments": 0,
+        "no_invented_numbers": 2
+      },
+      "labels": {
+        "A": [
+          "weak_conclusion",
+          "missing_counterpoint"
+        ],
+        "B": [
+          "weak_conclusion",
+          "missing_counterpoint"
+        ]
+      },
+      "notes": "Identical table with no commentary: end dates shown, the eight-month mismatch not stated."
+    },
+    "missing-cash-flow": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": "n/a",
+        "figures_match_sources": "n/a",
+        "conclusions_justified": "n/a",
+        "counterarguments": "n/a",
+        "no_invented_numbers": 2
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": "n/a",
+        "figures_match_sources": "n/a",
+        "conclusions_justified": "n/a",
+        "counterarguments": "n/a",
+        "no_invented_numbers": 2
+      },
+      "labels": {
+        "A": [],
+        "B": []
+      },
+      "notes": "Identical honest gap."
+    },
+    "what-changed-gross-margin": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": 1,
+        "figures_match_sources": 0,
+        "conclusions_justified": 0,
+        "counterarguments": 0,
+        "no_invented_numbers": 1
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": 1,
+        "figures_match_sources": 0,
+        "conclusions_justified": 0,
+        "counterarguments": 0,
+        "no_invented_numbers": 1
+      },
+      "labels": {
+        "A": [
+          "weak_conclusion",
+          "missing_counterpoint"
+        ],
+        "B": [
+          "weak_conclusion",
+          "missing_counterpoint"
+        ]
+      },
+      "notes": "Both ask which comparison instead of answering; equivalent wording."
+    },
+    "peer-three": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": 1,
+        "figures_match_sources": 2,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 2,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2
+      },
+      "labels": {
+        "A": [],
+        "B": []
+      },
+      "notes": "A never says the quarters end at different dates; B does. Each has a specific counterpoint. Neither notes Apple's different industry."
+    },
+    "missing-segments": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": "n/a",
+        "figures_match_sources": "n/a",
+        "conclusions_justified": "n/a",
+        "counterarguments": "n/a",
+        "no_invented_numbers": 1
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": "n/a",
+        "figures_match_sources": "n/a",
+        "conclusions_justified": "n/a",
+        "counterarguments": "n/a",
+        "no_invented_numbers": 1
+      },
+      "labels": {
+        "A": [
+          "unstated_gap"
+        ],
+        "B": [
+          "unstated_gap"
+        ]
+      },
+      "notes": "Identical: no figure invented, but framed as a capability limit rather than AMD's segment data being absent."
+    },
+    "follow-up-memory": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 2,
+        "conclusions_justified": 2,
+        "counterarguments": 2,
+        "no_invented_numbers": 2
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 2,
+        "conclusions_justified": 2,
+        "counterarguments": 1,
+        "no_invented_numbers": 2
+      },
+      "labels": {
+        "A": [],
+        "B": []
+      },
+      "notes": "Scored on the last turn. A adds a specific counterpoint that one price window with no fundamentals does not show business differences; B only separates the charge from the window."
+    },
+    "margin-trend-loss-quarter": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 2,
+        "conclusions_justified": 1,
+        "counterarguments": 0,
+        "no_invented_numbers": 2
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 2,
+        "conclusions_justified": 1,
+        "counterarguments": 0,
+        "no_invented_numbers": 2
+      },
+      "labels": {
+        "A": [
+          "weak_conclusion",
+          "missing_counterpoint"
+        ],
+        "B": [
+          "weak_conclusion",
+          "missing_counterpoint"
+        ]
+      },
+      "notes": "Identical table with no commentary; the loss quarter is visible, no conclusion is drawn."
+    },
+    "cause-in-evidence": {
+      "A": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 2,
+        "conclusions_justified": 2,
+        "counterarguments": 0,
+        "no_invented_numbers": 2
+      },
+      "B": {
+        "correct_companies": 2,
+        "comparable_periods": 2,
+        "figures_match_sources": 2,
+        "conclusions_justified": 1,
+        "counterarguments": 0,
+        "no_invented_numbers": 2
+      },
+      "labels": {
+        "A": [
+          "missing_counterpoint"
+        ],
+        "B": [
+          "weak_conclusion",
+          "missing_counterpoint"
+        ]
+      },
+      "notes": "Both quote AMD's attribution, cited and dated. A's plan also shows the gross margin drop the charge explains; B's does not."
+    }
+  }
+}
