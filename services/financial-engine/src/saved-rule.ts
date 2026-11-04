@@ -233,7 +233,11 @@ async function committedOutcome(db: SqlExecutor, runId: string): Promise<SavedRu
   if (predicate?.disposition !== "verified" || predicate.payload.kind !== "predicate") {
     // A predicate without a value is blocked; the value's own gap says why (e.g. older than the saved maximum age).
     const reasonCode = (value?.disposition !== "verified" ? value?.payload.reason_code : predicate?.payload.reason_code) ?? "no_result";
-    return { ...unresolved(reasonCode), fact_refs: facts, certified };
+    // A trailing sum is blocked by a quarter, and that quarter's binding gap says why.
+    const inputGap = reasonCode === "blocked_by_dependency"
+      ? (await db.query<{ gap_reason: string }>(`select gap_reason from financial_run_inputs where run_id = $1 and binding_status = 'gap' order by input_slot limit 1`, [runId])).rows[0]?.gap_reason
+      : undefined;
+    return { ...unresolved(inputGap ?? reasonCode), fact_refs: facts, certified };
   }
   const met = predicate.payload.outcome === true;
   return {
@@ -252,6 +256,7 @@ const UNRESOLVED_REASONS: Readonly<Record<string, string>> = {
   missing_input: "No eligible value was public at the assessment cutoff.",
   blocked_by_dependency: "No eligible value was public at the assessment cutoff.",
   threshold_has_no_split_basis: "A stock split changes this figure's basis, and the saved threshold names no basis date to compare it on.",
+  restatement_unverified: "A later filing states a different figure, or changes one this is derived from, and the current figure could not be verified.",
 };
 
 function unresolved(reasonCode: string): SavedRuleOutcome {
