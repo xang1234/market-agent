@@ -207,6 +207,49 @@ test("a filing's rounding is its finest figure for the concept, from thousands t
   assert.equal(filingRounding([]), null);
 });
 
+test("a per-share figure's rounding is its filing's finest stated places, never its own zeros", () => {
+  assert.equal(filingRounding(["1.37", "0.91", "12.50"], "per_share"), -2);
+  assert.equal(filingRounding(["1.375", "0.91"], "per_share"), -3);
+  assert.equal(filingRounding(["1000", "2000"], "per_share"), null, "whole figures show no places, so nothing tells");
+  assert.equal(filingRounding(["12.50", "7.50"], "per_share"), null, "dropped zeros could hide the cents");
+  assert.equal(filingRounding(["8.36"], "per_share"), null);
+  assert.equal(filingRounding(["1000000", "2000000"], "share_count"), 6, "a share count is still in millions");
+  assert.equal(filingRounding(["1000.5", "2000"], "flow"), -1, "a decimal among whole figures is read at its places");
+
+  const same = (earlier: string, later: string, laterOther: string) =>
+    sameRoundedFigure(
+      { value: earlier, rounding: filingRounding([earlier, "2000"], "per_share") },
+      { value: later, rounding: filingRounding([later, laterOther], "per_share") },
+    );
+  assert.equal(same("1000", "1001.25", "1.37"), false, "1,000 then 1,001.25 is a change");
+  assert.equal(same("1000", "1000", "1.37"), true);
+});
+
+test("across a split, a per-share figure is held to its filing's cents, and a figure too short to show them is a gap", () => {
+  const SPLIT = [{ execution_date: "2024-06-01", split_from: "1", split_to: "2" }];
+  const explained = (earlier: string, earlierOthers: string[], later: string, laterOthers: string[]) =>
+    explainedBySplits({
+      earlier: { value: earlier, rounding: filingRounding([earlier, ...earlierOthers], "per_share"), as_filed_on: "2024-02-01" },
+      later: { value: later, rounding: filingRounding([later, ...laterOthers], "per_share"), as_filed_on: "2025-02-01" },
+      value_kind: "per_share",
+      splits: SPLIT,
+    });
+  const others = ["1.37", "0.91"];
+  assert.equal(explained("25.00", others, "12.00", others), false, "true value 12.50");
+  assert.equal(explained("12.50", others, "6.30", others), false, "true value 6.25");
+  assert.equal(explained("12.50", others, "6.25", others), true);
+  assert.equal(explained("11.93", others, "5.97", others), true, "5.965 is half way");
+  assert.equal(explained("11.93", others, "5.96", others), true);
+  assert.equal(explained("11.93", others, "5.98", others), false);
+  // Nothing shows the cents of either filing: 25 could be 25.00 and 12 could be 12.00.
+  assert.equal(explained("25", [], "12", []), null);
+  assert.equal(explained("12.5", [], "6.3", []), null);
+  assert.equal(explained("12.50", others, "6.3", []), null);
+  assert.equal(explained("12.5", [], "6.25", []), true);
+  assert.equal(explained("11.93", [], "5.97", []), true, "both show cents");
+  assert.equal(explained("11.93", [], "5.98", []), false);
+});
+
 test("two figures are one within half the coarser of their filings' roundings", () => {
   const same = (earlier: string, earlierRounding: number | null, later: string, laterRounding: number | null) =>
     sameRoundedFigure({ value: earlier, rounding: earlierRounding }, { value: later, rounding: laterRounding });
@@ -224,6 +267,12 @@ test("two figures are one within half the coarser of their filings' roundings", 
   assert.equal(same("1000", null, "990", 0), false, "three digits stay above a rounding, and 1,000 has one above the thousands");
   assert.equal(same("1000000", null, "999000", 0), null, "1,000,000 could be to the ten thousand");
   assert.equal(same("1000000", null, "980000", 0), false);
+});
+
+test("a sum tolerates no whole-number rounding from a filing that states decimals", () => {
+  const within = (stated: string, sum: bigint, scale: number) => sumWithinRounding({ value: stated, rounding: -2 }, { coefficient: sum, scale }, [-2, -2]);
+  assert.equal(within("1.5", 150n, 2), true);
+  assert.equal(within("1.51", 150n, 2), false);
 });
 
 test("a sum is off by each figure's own half unit, and a filing too short to tell adds nothing", () => {

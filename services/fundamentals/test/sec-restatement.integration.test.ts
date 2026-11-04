@@ -440,6 +440,20 @@ test("SEC restatements", { timeout: 300_000 }, async (t) => {
     assert.equal(await issuer.pick("Q1", AFTER, "as_restated"), "100450000");
   });
 
+  await t.test("a per-share figure's zeros are no rounding: EPS of 1,000 then 1,001.25 is a change", async () => {
+    const issuer = await quarterIssuer();
+    const k = issuer.filed(1, "10-K", "2025-02-03", 2024, "FY");
+    const nextK = issuer.filed(2, "10-K", "2026-02-03", 2025, "FY");
+    await issuer.ingest({ EarningsPerShareDiluted: concept("USD/shares", [
+      k(...FY_2024, "1000"),
+      k("2023-01-01", "2023-12-31", "2000"),
+      nextK(...FY_2024, "1001.25"),
+      nextK("2025-01-01", "2025-12-31", "1.37"),
+    ]) }, ["FY"]);
+    assert.deepEqual(await issuer.laterStatements(), [["eps_diluted", "FY", "1001.25", "2026-02-03", "unverified_restatement"]]);
+    assert.equal(await issuer.pick("FY", AFTER, "as_restated", "eps_diluted"), "restatement_unverified");
+  });
+
   await t.test("a filing with one figure cannot show its rounding, so a change its zeros could hide is a gap", async () => {
     const lone = async (standing: string, later: string) => {
       const issuer = await quarterIssuer();
