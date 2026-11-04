@@ -154,7 +154,7 @@ test("a later 10-K's figure is the earlier one restated by the splits between th
   assert.deepEqual([explained("11.93", "1.19"), explained("12.05", "1.21"), explained("12.05", "1.20")], [true, true, true]);
   // 1.2 is read at the finer place, as 1.20.
   assert.deepEqual([explained("11.93", "1.08"), explained("11.93", "1.20"), explained("11.93", "1.2")], [false, false, false]);
-  assert.deepEqual([explained("2494000000", "24940000000", "share_count_average"), explained("2494000000", "24944000000", "share_count_average")], [true, false]);
+  assert.deepEqual([explained("2494000000", "24940000000", "share_count_average"), explained("2494000000", "24946000000", "share_count_average")], [true, false]);
   // No split falls between the 10-K and a 10-Q filed before 2024-06-10.
   assert.deepEqual([explained("11.93", "11.93", "per_share", "2024-05-29"), explained("11.93", "1.19", "per_share", "2024-05-29")], [true, false]);
   assert.equal(explained("100", "100", "flow"), null);
@@ -165,6 +165,8 @@ test("a share count rounded differently is the same count, at the coarser of the
     explainedBySplits({ earlier: { value: earlier, as_filed_on: "2024-02-21" }, later: { value: later, as_filed_on: laterFiled }, value_kind: "share_count_average", splits: NVDA_SPLITS });
   // Thousands, then millions: 249,412,000 x 10 is 2,494,120,000, and 2,494M is that to the million.
   assert.equal(explained("249412000", "2494000000"), true);
+  // NVDA's FY2024 Q2 diluted count: 2,499M to the million is within 5M once it is multiplied by 10, and the 10-K's 24,994M is.
+  assert.deepEqual([explained("2499000000", "24994000000"), explained("2499000000", "24985000000"), explained("2499000000", "24984000000")], [true, true, false]);
   assert.equal(explained("1234567000", "1235000000", "2024-05-29"), true, "no split between the filings");
   assert.equal(explained("1234567000", "1236000000", "2024-05-29"), false);
   // Exact counts have no rounding to hide a change in.
