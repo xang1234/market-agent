@@ -87,8 +87,9 @@ test("a saved quarterly or trailing rule over restated quarters", { timeout: 300
   await t.test("a year the 10-K restated in part leaves the rule unresolved, never a 45,801M trailing sum", async () => {
     const issuerId = await filer(320402, { Q4: "10812000000" });
     const quarterly = await assessed(issuerId, "fiscal_q", "gt", "1");
-    assert.deepEqual([quarterly.status, quarterly.reason], ["unresolved", "The saved rule could not be verified (restatement_unverified)."]);
+    const unverified = "A later filing states a different figure, or changes one this is derived from, and the current figure could not be verified.";
+    assert.deepEqual([quarterly.status, quarterly.reason], ["unresolved", unverified]);
     const trailing = await assessed(issuerId, "ttm", "gt", "1");
-    assert.deepEqual([trailing.status, trailing.reason], ["unresolved", "No eligible value was public at the assessment cutoff."]);
+    assert.deepEqual([trailing.status, trailing.reason], ["unresolved", unverified], "the bound quarter's gap, not that nothing was public");
   });
 });
