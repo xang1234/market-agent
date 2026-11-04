@@ -43,7 +43,7 @@ import { checkTokenAgainstStoredValue, recordFactPrecisionAttestation } from "..
 import { recordFactFinancialContext } from "../../evidence/src/financial-context.ts";
 import { withPinnedTransaction, type TransactionalQueryExecutor } from "./pinned-transaction.ts";
 import { recordSecFetchPublication, secAccessionVersionHash } from "./sec-publication-proof.ts";
-import { secDerivedLine } from "./sec-derivation-proof.ts";
+import { SEC_DERIVATION_LOCATOR, secDerivedLine } from "./sec-derivation-proof.ts";
 import { recordSecFilingAcceptances, type SecFilingRef } from "./sec-acceptance.ts";
 import { factActiveSql, factKnownAtSql } from "../../evidence/src/fact-activity.ts";
 import { FundamentalsDataUnavailableError } from "./availability.ts";
@@ -1352,6 +1352,11 @@ async function derivationLineage(
 // value adds nothing. A filing giving two different values, or a value without
 // its lossless token, is skipped; an original with no recorded concept is left
 // as it is. A restated fact's method keeps it out of every as-reported reader.
+//
+// A quarter is compared the same way with later 10-Qs and 10-Ks (#513). A derived
+// fourth quarter was never stated, so its own 10-K counts as a later statement:
+// its year less three 10-Qs goes wrong when that 10-K re-presents one of them.
+//
 // Only us-gaap concepts are compared: a cover count (dei) is a count as of its
 // own date, and a later filing states a later date's count, never that one's.
 //
@@ -1367,13 +1372,13 @@ async function derivationLineage(
 async function recordSecRestatements(db: FundamentalsQueryExecutor, input: RestatementInput): Promise<void> {
   const { rows: originals } = await db.query<SecOriginal>(
     `select f.fact_id::text as fact_id, f.metric_id::text as metric_id, m.metric_key, f.period_kind::text as period_kind,
-            f.period_start::text as period_start, f.period_end::text as period_end, f.fiscal_year,
+            f.period_start::text as period_start, f.period_end::text as period_end, f.fiscal_year, f.fiscal_period,
             f.value_num::text as value, f.unit, f.currency, f.scale::text as scale, c.source_context_ref,
             c.as_filed_on::text as as_filed_on, c.share_basis, ${INFERENCE_SQL} as inference
        from facts f
        join metrics m on m.metric_id = f.metric_id
        join fact_financial_contexts c on c.fact_id = f.fact_id
-      where f.subject_kind = 'issuer' and f.subject_id = $1 and f.method = 'reported' and f.fiscal_period = 'FY'
+      where f.subject_kind = 'issuer' and f.subject_id = $1 and f.method = 'reported'
         and ${factActiveSql("f")}
         and c.context_version = $2 and c.disclosure_relation = 'original'`,
     [input.issuerId, SEC_CONTEXT_VERSION],
@@ -1403,16 +1408,19 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
     const located = /#([^|]+)\|([^|]+)\|([^|]+)\|/u.exec(original.source_context_ref ?? "");
     if (!located) continue;
     const [, concept, unit, originalAccession] = located;
-    const byFiling = new Map<string, { filed: string; tokens: Set<string | null> }>();
+    const derived = located.input.startsWith(SEC_DERIVATION_LOCATOR);
+    const byFiling = new Map<string, { filed: string; form: string; tokens: Set<string | null> }>();
     for (const value of usGaap[concept!]?.units?.[unit!] ?? []) {
-      if (value.accn === originalAccession || value.form !== "10-K" || (value.start ?? null) !== original.period_start || value.end !== original.period_end) continue;
-      const filing = byFiling.get(value.accn) ?? { filed: value.filed, tokens: new Set() };
+      if (!derived && value.accn === originalAccession) continue;
+      if (value.form !== "10-K" && (value.form !== "10-Q" || original.fiscal_period === "FY")) continue;
+      if ((value.start ?? null) !== original.period_start || value.end !== original.period_end) continue;
+      const filing = byFiling.get(value.accn) ?? { filed: value.filed, form: value.form, tokens: new Set() };
       filing.tokens.add(value.val_token ?? null);
       byFiling.set(value.accn, filing);
     }
     const filings = [...byFiling].sort(([leftAccn, left], [rightAccn, right]) => left.filed.localeCompare(right.filed) || leftAccn.localeCompare(rightAccn));
     let previous: StatedFigure = { value: original.value, as_filed_on: original.as_filed_on };
-    for (const [accessionNumber, { filed, tokens }] of filings) {
+    for (const [accessionNumber, { filed, form, tokens }] of filings) {
       const [presented, ...others] = tokens;
       if (others.length > 0 || presented === null || presented === undefined) continue;
       const later: StatedFigure = { value: presented, as_filed_on: original.as_filed_on === null ? null : filed };
@@ -1423,7 +1431,7 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
         await db.query(`update facts set invalidated_at = now(), updated_at = now() where fact_id = $1`, [current.fact_id]);
       }
       if (relation === null) continue;
-      await storeLaterStatement(db, input, memo, original, { accession: accessionNumber, filed, token: presented, concept: concept!, unit: unit! }, relation);
+      await storeLaterStatement(db, input, memo, original, { accession: accessionNumber, filed, form, token: presented, concept: concept!, unit: unit! }, relation);
       if (relation === "unverified_restatement") break;
     }
   }
@@ -1445,6 +1453,7 @@ type SecOriginal = {
   period_start: string | null;
   period_end: string;
   fiscal_year: number;
+  fiscal_period: FiscalPeriod;
   value: string;
   unit: string;
   currency: string | null;
@@ -1496,7 +1505,7 @@ async function storeLaterStatement(
   input: RestatementInput,
   memo: { sources: Map<string, UUID>; published: Set<string> },
   original: SecOriginal,
-  later: Readonly<{ accession: string; filed: string; token: string; concept: string; unit: string }>,
+  later: Readonly<{ accession: string; filed: string; form: string; token: string; concept: string; unit: string }>,
   relation: LaterRelation,
 ): Promise<void> {
   const asOf = input.evidence.completed_at;
@@ -1510,7 +1519,7 @@ async function storeLaterStatement(
     concept: later.concept,
     unit: later.unit,
     accn: later.accession,
-    form: "10-K",
+    form: later.form,
     filed: later.filed,
     start: original.period_start,
     end: original.period_end,
@@ -1521,7 +1530,7 @@ async function storeLaterStatement(
        value_num, unit, currency, scale, as_of, reported_at, observed_at, source_id, method, definition_version,
        verification_status, freshness_class, coverage_level, confidence, supersedes, quality_flags
      ) values (
-       'issuer', $1, $2, $3, $4, $5, $6, 'FY', $7, $8, $9, $10, $11, $15, $12, $13, 'restated', 1,
+       'issuer', $1, $2, $3, $4, $5, $6, $17, $7, $8, $9, $10, $11, $15, $12, $13, 'restated', 1,
        'authoritative', 'filing_time', 'full', 1, $14, $16::jsonb
      )
      on conflict do nothing
@@ -1531,6 +1540,7 @@ async function storeLaterStatement(
       token.token, original.unit, original.currency, original.scale, asOf, input.clock().toISOString(), sourceId, original.fact_id,
       later.filed,
       JSON.stringify(original.inference ? [original.inference] : []),
+      original.fiscal_period,
     ],
   );
   // The restating filing need not be the one this ingest is for; this

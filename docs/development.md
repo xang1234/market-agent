@@ -113,14 +113,14 @@ cd services/chat && npm run golden:live [base URL]
 
 Chat reads persisted facts only, so the check first warms NVDA and AMD. It resolves each ticker through Polygon, then reads its key stats and eight quarterly income statements from SEC, which persists them. Reruns read the persisted data back. The check stops before any turn if a company cannot be warmed.
 
-SEC facts stored before 2026-10-16 lack the proofs the financial engine checks, and reads never fetch them again. An Analyze memo is the exception: before it freezes its cutoff it fetches the fiscal years its plan reads for each issuer (the latest year, and the one before for a revenue trend), unless they are already stored with their proofs. Run the backfill once per database to re-fetch those filings, prove the facts they still state, replace the income facts they contradict, and add the cash flow and balance sheet for each income period on file. It skips the frozen golden dataset.
+SEC facts stored before 2026-10-16 lack the proofs the financial engine checks, and reads never fetch them again. An Analyze memo is the exception: before it freezes its cutoff it fetches the fiscal years its plan reads for each issuer (the latest year, and the one before for a revenue trend), unless they are already stored with their proofs. Run the backfill once per database to re-fetch those filings, prove the facts they still state, replace the income facts they contradict, record the restatements later filings state (quarters too since #513, so until its rerun an issuer's quarters answer with their first-reported numbers), and add the cash flow and balance sheet for each income period on file. It skips the frozen golden dataset.
 
 ```bash
 cd services/fundamentals
 DATABASE_URL=... SEC_EDGAR_USER_AGENT=... npm run backfill:sec-statements
 ```
 
-The engine binds EPS and weighted-average share counts restated to the analysis's date, from the listing's stock splits. The backfill also certifies those facts when they were stored before #387. Sync the splits on the day of the analyses that read them. An analysis dated after the last sync reports `split_history_stale` instead of a value. A later 10-K's EPS or share count stored before its listing's splits were synced is unverified, and an analysis on restated figures reports `restatement_unverified` for it. Run the backfill again after the sync to decide it.
+The engine binds EPS and weighted-average share counts restated to the analysis's date, from the listing's stock splits. The backfill also certifies those facts when they were stored before #387. Sync the splits on the day of the analyses that read them. An analysis dated after the last sync reports `split_history_stale` instead of a value. A later filing's EPS or share count stored before its listing's splits were synced is unverified, and a chat answer or saved rule, which read restated figures, reports `restatement_unverified` for it. Run the backfill again after the sync to decide it.
 
 ```bash
 cd services/market

@@ -141,7 +141,9 @@ npm test         # contract + AAPL FY2024 income statement verification
   download, which lists all of the issuer's filings, so the result does
   not depend on which year was ingested first. An unchanged comparative,
   two different values in one filing, or an original without a recorded
-  concept adds nothing. Readers of as-reported facts filter `method =
+  concept adds nothing. A quarter is compared the same way with later
+  10-Qs and 10-Ks, and a derived fourth quarter also with its own 10-K's
+  statement of it. Readers of as-reported facts filter `method =
   'reported'`, or `method <> 'restated'` where they also read vendor and
   derived facts (analyst grids, thesis evidence), so they never see a
   restatement; only certified selection

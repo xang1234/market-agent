@@ -14,6 +14,8 @@ import {
   type SecValueLocation,
 } from "./sec-edgar.ts";
 
+export const SEC_DERIVATION_LOCATOR = "sec_edgar:derivation:";
+
 export type SecDerivedLine =
   | Readonly<{ status: "unproven"; sum: string; issue: DerivationIssue }>
   | Readonly<{ status: "proven"; sum: string; proof: DerivationProofV1; at: SecValueLocation; locator: string }>;
@@ -38,7 +40,7 @@ export function secDerivedLine(
   if (issue !== null) return { status: "unproven", sum, issue };
   const own = proof.terms[0]!.source;
   const at: SecValueLocation = { concept: derivation.concept, unit: derivation.unit, accn: own.accession, form: own.form, filed: own.filed, start: fact.period_start, end: fact.period_end };
-  const locator = `sec_edgar:derivation:CIK${String(cik).padStart(10, "0")}#${at.concept}|${at.unit}|${at.accn}|${at.start ?? ""}..${at.end}`;
+  const locator = `${SEC_DERIVATION_LOCATOR}CIK${String(cik).padStart(10, "0")}#${at.concept}|${at.unit}|${at.accn}|${at.start ?? ""}..${at.end}`;
   return { status: "proven", sum, proof, at, locator };
 }
 
