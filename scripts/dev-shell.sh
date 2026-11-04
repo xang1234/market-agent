@@ -284,6 +284,8 @@ start_process() {
   )
 }
 
+# A cold Python sidecar on a loaded machine can take over 30s to bind, and a false
+# timeout stops the whole stack (#403). A crash still fails at once below.
 wait_for_service() {
   local name="$1"
   local port="$2"
@@ -291,7 +293,7 @@ wait_for_service() {
   local log_file="$LOG_DIR/$name.log"
   local attempt
 
-  for attempt in $(seq 1 30); do
+  for attempt in $(seq 1 120); do
     if service_owns_port "$name" "$port"; then
       return
     fi
