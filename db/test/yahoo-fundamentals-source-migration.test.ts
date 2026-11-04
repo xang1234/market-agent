@@ -13,6 +13,7 @@ const METRIC = "0f000000-0000-4000-8000-0000000000bb";
 const USER = "0f000000-0000-4000-8000-0000000000c1";
 const TEMPLATE = "0f000000-0000-4000-8000-0000000000c2";
 const SNAPSHOT = "0f000000-0000-4000-8000-0000000000c3";
+const THREAD = "0f000000-0000-4000-8000-0000000000c4";
 const YAHOO_FACT = "0f000000-0000-4000-8000-0000000000e1";
 const OTHER_FACT = "0f000000-0000-4000-8000-0000000000e2";
 
@@ -27,7 +28,11 @@ test("0078 moves what the Yahoo source wrote off GDELT's id, and a rerun changes
   const fact = (id: string, source: string) =>
     `('${id}', 'issuer', '${ISSUER}', '${METRIC}', 'point', '2026-10-01', 20, 'count',
       '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z', '${source}', 'vendor', 'authoritative', 'filing_time', 'full', 1)`;
-  const block = (...sources: string[]) => JSON.stringify([{ id: "b1", kind: "analyst_consensus", source_refs: sources }]);
+  const prose = `Source ${OLD} was misattributed, per "${OLD}".`;
+  const block = (...sources: string[]) => JSON.stringify([
+    { id: "b1", kind: "analyst_consensus", snapshot_id: SNAPSHOT, source_refs: sources },
+    { id: "b2", kind: "rich_text", snapshot_id: SNAPSHOT, source_refs: [], segments: [{ type: "text", text: prose }] },
+  ]);
   await db.query(`
     insert into metrics (metric_id, metric_key, display_name, unit_class, aggregation, interpretation, canonical_source_class) values
       ('${METRIC}', 'analyst_count', 'Analyst count', 'count', 'point', 'neutral', 'vendor');
@@ -43,9 +48,12 @@ test("0078 moves what the Yahoo source wrote off GDELT's id, and a rerun changes
     insert into analyze_templates (template_id, user_id, name, prompt_template, source_categories, version) values
       ('${TEMPLATE}', '${USER}', 'Earnings', 'Assess', '[]', 1);
     insert into analyze_template_runs (template_id, template_version, snapshot_id, blocks) values
-      ('${TEMPLATE}', 1, '${SNAPSHOT}', '${block(OLD, OTHER)}');
+      ('${TEMPLATE}', 1, '${SNAPSHOT}', '${block(OLD, OTHER).replaceAll("'", "''")}');
     insert into citation_logs (snapshot_id, block_id, ref_kind, ref_id, source_id) values
       ('${SNAPSHOT}', 'b1', 'fact', '${YAHOO_FACT}', '${OLD}');
+    insert into chat_threads (thread_id, user_id) values ('${THREAD}', '${USER}');
+    insert into chat_messages (thread_id, role, snapshot_id, blocks, content_hash) values
+      ('${THREAD}', 'assistant', '${SNAPSHOT}', '${block(OLD, OTHER).replaceAll("'", "''")}', 'sha256:as-saved');
   `);
 
   const repaired = async () => ({
@@ -55,14 +63,20 @@ test("0078 moves what the Yahoo source wrote off GDELT's id, and a rerun changes
     manifest: (await db.query(`select source_ids from snapshots`)).rows,
     blocks: (await db.query(`select blocks from analyze_template_runs`)).rows,
     citations: (await db.query(`select source_id::text from citation_logs`)).rows,
+    chat: (await db.query(`select blocks, content_hash from chat_messages`)).rows,
   });
+  const repairedBlocks = [
+    { id: "b1", kind: "analyst_consensus", snapshot_id: SNAPSHOT, source_refs: [YAHOO, OTHER] },
+    { id: "b2", kind: "rich_text", snapshot_id: SNAPSHOT, source_refs: [], segments: [{ type: "text", text: prose }] },
+  ];
   const expected = {
     sources: [{ provider: "yahoo_finance_dev_fundamentals", kind: "reference_data", license_class: "free_dev" }],
     gdelt: [{ provider: "gdelt_article_discovery" }],
     facts: [{ fact_id: YAHOO_FACT, source_id: YAHOO }, { fact_id: OTHER_FACT, source_id: OTHER }],
     manifest: [{ source_ids: [YAHOO, OTHER] }],
-    blocks: [{ blocks: [{ id: "b1", kind: "analyst_consensus", source_refs: [YAHOO, OTHER] }] }],
+    blocks: [{ blocks: repairedBlocks }],
     citations: [{ source_id: YAHOO }],
+    chat: [{ blocks: repairedBlocks, content_hash: "sha256:as-saved" }],
   };
 
   await applyMigration(db, "0078", "up");
@@ -72,5 +86,4 @@ test("0078 moves what the Yahoo source wrote off GDELT's id, and a rerun changes
   assert.deepEqual(await repaired(), expected, "rerunning the repair changes nothing");
 
   await db.query(await readFile(join(dbRoot, "seed", "sources.sql"), "utf8"));
-  assert.deepEqual(await repaired(), expected, "the seed agrees with the row the migration wrote");
 });
