@@ -125,8 +125,8 @@ test("the judge's mutation set: every original and mutation passes the turn's ow
   const cases = (JSON.parse(readFileSync(MUTATIONS, "utf8")) as { cases: Array<{ id: string; trace: string; index: number }> }).cases;
   assert.deepEqual(cases.filter((entry, i) => cases.findIndex((other) => other.trace === entry.trace && other.index === entry.index) !== i).map(({ id }) => id), []);
   assert.deepEqual(count((variant) => variant.kind), {
-    original: 12,
-    worded_amount: 10,
+    original: 18,
+    worded_amount: 11,
     unsupported_claim: 9,
     contradicted_ranking: 5,
     hedged_valuation: 3,
