@@ -37,32 +37,13 @@ import {
   SECTION_LABEL_CLASS,
 } from '../ui/pageStyles.ts'
 
-const DEMO_AGENTS: ReadonlyArray<AgentRow> = [
-  {
-    agent_id: 'demo-quality',
-    name: 'Quality monitor',
-    thesis: 'Find margin, cash conversion, and guidance changes in covered names.',
-    cadence: 'daily',
-    enabled: true,
-    universe: { mode: 'static', subject_refs: [{ kind: 'issuer', id: '99999999-9999-4999-8999-999999999999' }] },
-    alert_rules: [
-      {
-        rule_id: 'demo-margin',
-        severity_at_least: 'critical',
-        headline_contains: 'margin',
-        channels: ['email'],
-      },
-    ],
-    updated_at: '2026-05-06T00:00:00.000Z',
-  },
-]
-
 export function AgentsPage() {
   const { session } = useAuth()
   const location = useLocation()
   const thesisHandoff = useMemo(() => readThesisHandoff(location.state), [location.state])
   const discoveryHandoff = thesisHandoff?.kind === 'discovery' ? thesisHandoff : null
-  const [agents, setAgents] = useState<ReadonlyArray<AgentRow>>(DEMO_AGENTS)
+  const [agents, setAgents] = useState<ReadonlyArray<AgentRow>>([])
+  const [rosterSettled, setRosterSettled] = useState(false)
   const [runs, setRuns] = useState<ReadonlyArray<AgentRunRow>>([])
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [findings, setFindings] = useState<ReadonlyArray<AgentFindingRow>>([])
@@ -121,23 +102,26 @@ export function AgentsPage() {
       signal: controller.signal,
     })
       .then(async (response) => {
-        if (!response.ok) return null
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
         return (await response.json()) as { agents?: AgentRow[]; runs?: AgentRunRow[] }
       })
       .then((body) => {
         setLoadError(null)
-        if (body?.agents) {
+        if (body.agents) {
           setAgents(body.agents)
           setSelectedAgentId((current) => {
             if (current && body.agents?.some((agent) => agent.agent_id === current)) return current
             return body.agents?.[0]?.agent_id ?? null
           })
         }
-        if (body?.runs) setRuns(body.runs)
+        if (body.runs) setRuns(body.runs)
       })
       .catch((caught) => {
         if (controller.signal.aborted) return
         setLoadError(caught instanceof Error ? caught.message : String(caught))
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setRosterSettled(true)
       })
     return () => controller.abort()
   }, [session])
@@ -639,6 +623,7 @@ export function AgentsPage() {
             runs={runs}
             selectedAgentId={selectedAgentId}
             activity={activity}
+            loading={session !== null && !rosterSettled}
             loadError={loadError}
             onSelect={setSelectedAgentId}
             onEdit={editAgent}

@@ -2,6 +2,7 @@ import type { AgentRow, AgentRunRow } from './agentRows.ts'
 import { agentRunTicks, latestRunStatus, rosterRunSummary, type RunStatus } from './runStats.ts'
 import { alertRuleLabel, universeLabel } from './agentLabels.ts'
 import { EmptyState } from '../ui/EmptyState.tsx'
+import { Skeleton } from '../ui/Skeleton.tsx'
 import { DANGER_ROW_BUTTON_CLASS, ROW_BUTTON_CLASS } from '../shell/buttonStyles.ts'
 import { PAGE_PANEL_CLASS, PANEL_TITLE_CLASS } from '../ui/pageStyles.ts'
 
@@ -10,6 +11,7 @@ type AgentRosterProps = {
   runs: ReadonlyArray<AgentRunRow>
   selectedAgentId: string | null
   activity: string
+  loading: boolean
   loadError: string | null
   onSelect: (agentId: string) => void
   onEdit: (agent: AgentRow) => void
@@ -26,6 +28,7 @@ export function AgentRoster({
   runs,
   selectedAgentId,
   activity,
+  loading,
   loadError,
   onSelect,
   onEdit,
@@ -41,7 +44,8 @@ export function AgentRoster({
         <span className="font-medium text-fg-soft">Activity</span> · {activity}
       </p>
       {loadError ? <p className="mt-3 text-sm text-negative">Load failed: {loadError}</p> : null}
-      {agents.length === 0 && loadError === null ? (
+      {loading ? <Skeleton label="Loading agents" className="mt-4 h-16" /> : null}
+      {agents.length === 0 && loadError === null && !loading ? (
         <div className="mt-4">
           <EmptyState>No agents yet. Create one to start monitoring.</EmptyState>
         </div>
