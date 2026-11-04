@@ -24,9 +24,9 @@ async function severityOf(status: 'supported' | 'challenged', impacts: unknown[]
 
 const STRONGEST = { direction: 'negative', channel: 'balance_sheet', horizon: 'near_term', confidence: 1 };
 
-test('a supported condition stops at medium, however strong its evidence', async () => {
-  assert.equal(await severityOf('supported', []), 'medium');
-  assert.equal(await severityOf('supported', [STRONGEST]), 'medium');
+test('a supported condition is scored by its evidence, so a high+ rule still fires on it', async () => {
+  assert.equal(await severityOf('supported', []), 'high');
+  assert.equal(await severityOf('supported', [STRONGEST]), 'critical');
 });
 
 test('a challenged condition keeps the severity policy', async () => {
