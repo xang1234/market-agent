@@ -24,6 +24,7 @@ import { ThesisPanel } from '../agents/ThesisPanel.tsx'
 import { alertRuleLabel, dynamicUniverseIdFor, universeLabel } from '../agents/agentLabels.ts'
 import { readThesisHandoff } from '../analyze/thesisHandoff.ts'
 import type { SubjectKind } from '../subject/subjectRef.ts'
+import type { ThesisAssessment } from '../../../services/agents/src/thesis-types.ts'
 import { authenticatedFetch } from '../http/authFetch.ts'
 import { useAuth } from '../shell/useAuth.ts'
 import { PageHeader } from '../ui/PageHeader.tsx'
@@ -47,6 +48,7 @@ export function AgentsPage() {
   const [runs, setRuns] = useState<ReadonlyArray<AgentRunRow>>([])
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [findings, setFindings] = useState<ReadonlyArray<AgentFindingRow>>([])
+  const [assessments, setAssessments] = useState<ReadonlyArray<ThesisAssessment>>([])
   const [runActivities, setRunActivities] = useState<ReadonlyArray<AgentActivityRow>>([])
   const [detailsError, setDetailsError] = useState<string | null>(null)
   const [detailsAgentId, setDetailsAgentId] = useState<string | null>(null)
@@ -642,9 +644,11 @@ export function AgentsPage() {
               refreshKey={thesisRefreshKey}
               onStructuredChange={handleStructuredChange}
               onSaved={handleThesisSaved}
+              onAssessments={setAssessments}
             />
             <AgentDetailPanels
               findings={visibleFindings}
+              assessments={assessments}
               detailsError={visibleDetailsError}
               runs={runs.filter((run) => run.agent_id === selectedAgentId)}
               runActivities={visibleRunActivities}

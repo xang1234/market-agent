@@ -10,13 +10,15 @@ export function SeverityBadge({
   severity,
   children,
   testId,
+  toneClass = severityBadgeClass(severity),
 }: {
   severity: FindingSeverity
   children?: ReactNode
   testId?: string
+  toneClass?: string
 }): ReactElement {
   return (
-    <Badge toneClass={`font-semibold uppercase tracking-wide ${severityBadgeClass(severity)}`} testId={testId}>
+    <Badge toneClass={`font-semibold uppercase tracking-wide ${toneClass}`} testId={testId}>
       {children ?? severity[0].toUpperCase() + severity.slice(1)}
     </Badge>
   )
