@@ -164,9 +164,9 @@ function statesAgain(earlier: RoundedFigure, later: RoundedFigure, restate: (val
   const from = parseDerivedDecimalText(earlier.value);
   const to = parseFinancialDecimal(later.value);
   if (!from.ok || !to.ok) return null;
-  const decimalHalf = rationalFromDecimal({ coefficient: 5n, scale: Math.max(0, from.value.scale, to.value.scale) + 1 });
+  const finerPlace = -Math.max(0, from.value.scale, to.value.scale);
   const half = (earlierExponent: number, laterExponent: number) =>
-    earlierExponent + laterExponent > 0 ? halfOfCoarser(restate, earlierExponent, laterExponent) : decimalHalf;
+    earlierExponent + laterExponent > 0 ? halfOfCoarser(restate, earlierExponent, laterExponent) : halfOfCoarser(restate, finerPlace, finerPlace);
   const start = rationalFromDecimal(from.value);
   const end = rationalFromDecimal(to.value);
   const restated = start === null ? null : restate(start);
