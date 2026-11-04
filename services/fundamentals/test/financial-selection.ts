@@ -20,7 +20,7 @@ export async function selectRevenue(
 
 export async function selectFiscalYear(
   db: FundamentalsQueryExecutor,
-  slot: { issuerId: string; metricKey: string; fiscalYear: number },
+  slot: { issuerId: string; metricKey: string; fiscalYear: number; fiscalPeriod?: "FY" | "Q1" | "Q2" | "Q3" | "Q4" },
   cutoff: string,
   basis: "as_reported" | "as_restated" = "as_reported",
 ): Promise<SlotSelection> {
@@ -29,7 +29,7 @@ export async function selectFiscalYear(
     subject: { kind: "issuer", id: slot.issuerId },
     metric_key: slot.metricKey,
     fiscal_year: slot.fiscalYear,
-    fiscal_period: "FY",
+    fiscal_period: slot.fiscalPeriod ?? "FY",
     limit: 100,
   });
   assert.equal(page.status, "ok");
@@ -39,7 +39,7 @@ export async function selectFiscalYear(
     operation_version: "reported_metric.v1",
     subject_slot: "a",
     metric_key: slot.metricKey,
-    period: { kind: "fiscal_period" as const, fiscal_year: slot.fiscalYear, fiscal_period: "FY" as const },
+    period: { kind: "fiscal_period" as const, fiscal_year: slot.fiscalYear, fiscal_period: slot.fiscalPeriod ?? ("FY" as const) },
   };
   return selectInput(node, page.status === "ok" ? page.candidates : [], { knowledge_cutoff: cutoff, reporting_basis: basis, max_age_days: null, allowed_source_classes: ["sec_filing"] });
 }

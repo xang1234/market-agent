@@ -1,5 +1,5 @@
-// SEC restatements (#321): a later 10-K's changed value for an earlier year is
-// stored as that year's restatement, and as-reported readers never see it.
+// SEC restatements (#321): a later filing's changed value for an earlier period
+// is stored as that period's restatement, and as-reported readers never see it.
 
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -8,7 +8,7 @@ import test from "node:test";
 import { bootstrapDatabase, connectedPool, dockerAvailable, workspaceRoot } from "../../../db/test/docker-pg.ts";
 import { createSecBackedStatementRepository } from "../src/sec-facts-repository.ts";
 import { secCompanyFetcher } from "./fakes.ts";
-import { selectRevenue } from "./financial-selection.ts";
+import { selectFiscalYear, selectRevenue } from "./financial-selection.ts";
 
 const ISSUER_ID = "33000000-0000-4000-8000-0000000003a1";
 const FALLBACK_SOURCE_ID = "33000000-0000-4000-8000-0000000003a2";
@@ -69,6 +69,50 @@ function restatingFacts(cik: number, revenue2023: readonly [string, string, stri
   };
 }
 
+/**
+ * GE's fiscal 2024 revenue as SEC lists it (CIK 40545). Its Q1 10-Q counted GE
+ * Vernova, spun off that April; its 10-K and the next Q1 10-Q state the quarter
+ * without it. The 10-K's year less the three 10-Qs leaves Q4 at 3,713M, where
+ * the 10-K itself states 10,812M. Net income's quarters always agree.
+ */
+function geFacts() {
+  const filing = (accn: string, form: string, filed: string, fy: number, fp: string) => (start: string, end: string, token: string): Value =>
+    ({ start, end, val: Number(token), val_token: token, accn, fy, fp, form, filed });
+  const q1 = filing("0000040545-24-000113", "10-Q", "2024-04-23", 2024, "Q1");
+  const q2 = filing("0000040545-24-000176", "10-Q", "2024-07-23", 2024, "Q2");
+  const q3 = filing("0000040545-24-000200", "10-Q", "2024-10-22", 2024, "Q3");
+  const k = filing("0000040545-25-000015", "10-K", "2025-02-03", 2024, "FY");
+  const nextQ1 = filing("0000040545-25-000062", "10-Q", "2025-04-22", 2025, "Q1");
+  return {
+    cik: 40545,
+    entityName: "GE Aerospace",
+    facts: {
+      "us-gaap": {
+        Revenues: { label: "", description: "", units: { USD: [
+          q1("2024-01-01", "2024-03-31", "16053000000"),
+          q2("2024-04-01", "2024-06-30", "9094000000"),
+          q3("2024-07-01", "2024-09-30", "9842000000"),
+          k("2024-01-01", "2024-12-31", "38702000000"),
+          k("2024-01-01", "2024-03-31", "8955000000"),
+          k("2024-10-01", "2024-12-31", "10812000000"),
+          nextQ1("2024-01-01", "2024-03-31", "8955000000"),
+          nextQ1("2025-01-01", "2025-03-31", "9935000000"),
+        ] } },
+        NetIncomeLoss: { label: "", description: "", units: { USD: [
+          q1("2024-01-01", "2024-03-31", "10"),
+          q2("2024-04-01", "2024-06-30", "20"),
+          q3("2024-07-01", "2024-09-30", "30"),
+          k("2024-01-01", "2024-12-31", "100"),
+          k("2024-01-01", "2024-03-31", "10"),
+          k("2024-10-01", "2024-12-31", "40"),
+          nextQ1("2024-01-01", "2024-03-31", "10"),
+          nextQ1("2025-01-01", "2025-03-31", "11"),
+        ] } },
+      },
+    },
+  };
+}
+
 test("SEC restatements", { timeout: 300_000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for restatement coverage");
@@ -122,6 +166,43 @@ test("SEC restatements", { timeout: 300_000 }, async (t) => {
     await ingest(2, 2024, "2025-03-01T15:00:00.000Z");
     await ingest(3, 2025, "2026-02-01T15:00:00.000Z");
     assert.equal((await fy2023Facts()).filter((row) => row.method === "restated").length, 1);
+  });
+
+  await t.test("a later filing's changed figure for a quarter is that quarter's restatement (#513)", async () => {
+    const issuerId = "33000000-0000-4000-8000-0000000005a1";
+    await db.query(`insert into issuers (issuer_id, legal_name, cik) values ($1, 'GE Aerospace', '40545')`, [issuerId]);
+    const ingestQuarter = (fiscalPeriod: "Q1" | "Q2" | "Q3" | "Q4") =>
+      createSecBackedStatementRepository(db, {
+        fetcher: secCompanyFetcher(geFacts, { completed_at: "2025-05-01T15:00:00.000Z" }),
+        sourceId: FALLBACK_SOURCE_ID,
+        logger: { warn: () => {} },
+      }).find({ issuer_id: issuerId, family: "income", basis: "as_reported", fiscal_year: 2024, fiscal_period: fiscalPeriod });
+    for (const quarter of ["Q1", "Q2", "Q3", "Q4"] as const) await ingestQuarter(quarter);
+    const restated = async () => (await db.query(
+      `select m.metric_key, f.fiscal_period, f.value_num::text as value, f.reported_at::date::text as filed, c.disclosure_relation, o.value_num::text as restates
+         from facts f join metrics m on m.metric_id = f.metric_id join fact_financial_contexts c on c.fact_id = f.fact_id join facts o on o.fact_id = f.supersedes
+        where f.subject_id = $1 and f.method = 'restated' order by f.fiscal_period, m.metric_key`,
+      [issuerId],
+    )).rows;
+    const expected = [
+      { metric_key: "revenue", fiscal_period: "Q1", value: "8955000000", filed: "2025-02-03", disclosure_relation: "economic_restatement", restates: "16053000000" },
+      { metric_key: "revenue", fiscal_period: "Q4", value: "10812000000", filed: "2025-02-03", disclosure_relation: "economic_restatement", restates: "3713000000" },
+    ];
+    assert.deepEqual(await restated(), expected);
+
+    const quarter = async (fiscalPeriod: "Q1" | "Q4", cutoff: string, basis: "as_reported" | "as_restated") =>
+      picked(await selectFiscalYear(db, { issuerId, metricKey: "revenue", fiscalYear: 2024, fiscalPeriod }, cutoff, basis));
+    assert.equal(await quarter("Q1", "2025-06-01T00:00:00Z", "as_reported"), "16053000000");
+    assert.equal(await quarter("Q1", "2025-06-01T00:00:00Z", "as_restated"), "8955000000");
+    assert.equal(await quarter("Q4", "2025-06-01T00:00:00Z", "as_reported"), "3713000000");
+    assert.equal(await quarter("Q4", "2025-06-01T00:00:00Z", "as_restated"), "10812000000");
+
+    const statement = await createSecBackedStatementRepository(db, { fetcher: null, sourceId: FALLBACK_SOURCE_ID })
+      .find({ issuer_id: issuerId, family: "income", basis: "as_reported", fiscal_year: 2024, fiscal_period: "Q1" });
+    assert.equal(statement?.lines.find((line) => line.metric_key === "revenue")?.value_num, 16053000000);
+
+    await ingestQuarter("Q1");
+    assert.deepEqual(await restated(), expected, "a rerun adds nothing");
   });
 
   let issuers = 0;
