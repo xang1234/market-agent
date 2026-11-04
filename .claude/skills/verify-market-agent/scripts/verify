@@ -205,7 +205,8 @@ cmd_suite() {
     name="$(echo "$file" | tr '/' '_')"
     start=$SECONDS
     code=0
-    PATH="$NODE_TEST:$PATH" REQUIRE_DOCKER=1 caffeinate -ims timeout "${SUITE_FILE_TIMEOUT:-600}" \
+    # The top of this script exports .env.dev, and with its keys some tests call live models.
+    env -i HOME="$HOME" PATH="$NODE_TEST:$PATH" TMPDIR="${TMPDIR:-/tmp}" REQUIRE_DOCKER=1 caffeinate -ims timeout "${SUITE_FILE_TIMEOUT:-600}" \
       node --experimental-strip-types --test "$file" > "$log_dir/$name.log" 2>&1 || code=$?
     elapsed=$((SECONDS - start))
     printf '%5ss  exit=%-3s %s  %s\n' "$elapsed" "$code" "$file" \
