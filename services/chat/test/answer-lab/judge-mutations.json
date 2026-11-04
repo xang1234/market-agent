@@ -1,5 +1,5 @@
 {
-  "about": "Mutation set for the inference judge (src/inference-judge.ts, #302): inferences on real recorded turns, each case's originals (which the answer backs) paired with mutations the word rules in assertions.ts pass but the judge must catch. A case stands in the place of its trace's assertion at index, resting on the accepted assertions in supports; the judge also reads the answer's other accepted observations and comparisons (rest_of_answer) and every figure its tables and charts show (figures_shown). Each kind must come back at its expected outcome (scripts/answer-lab.ts MUTATION_TIERS): an original entailed, with worded_amount false; worded_amount with the worded_amount flag true, at any verdict, which shows it as an unverified analyst view when entailed or unsupported and hides it when contradicted; unsupported_claim and hedged_valuation unsupported, flag false, shown labelled as an unverified analyst view; flipped_direction and contradicted_ranking contradicted, flag false, which hides it. A mutation shown above its kind's tier counts against the judge: a worded_amount mutation shown with the entailed label, or a flipped_direction or contradicted_ranking one shown or unverified. source: trace (each case's original is its trace's own accepted inference, at its index and on its accepted supports, which the trace's judge entailed; a case's second original says the same naming the companies). Re-curated in #498 on the traces re-recorded under the list-only prompt: each case keeps its id and its mutations' kinds, each mutation rewritten from the new original. Where a trace has one inference fitting two cases, they are one case, so its original is judged once: segment-concentration holds segment-cushion's mutations, and margin-recovery holds revenue-after-loss's. follow-up-memory.turn-2 has no entailed inference now, so its cases moved: fiscal-offset to follow-up-memory.turn-3, peer-fundamentals to peer-three. operating-offset's supports leave out the operating loss, which only the rest of the answer shows (rest_of_answer); its mutation and margin-recovery's second (revenue slipping since) contradict figures their supports do not state and the rest of the answer does. margin-recovery's first mutation contradicts the gross margin recovery, which neither its supports nor the rest of the answer state and only the gross margin chart shows (figures_shown). Some worded_amount mutations also make an unsupported claim (a forecast or cause with an amount in words), and the rest state an amount the page bears out, so only the flag keeps them from the entailed label. Naming a company by ticker, name or alias is no fault in itself (owner, 2026-10-18), so an original may name one when the answer backs what it says; a hedged valuation or market reading the answer does not show is a mutation. Run: node --experimental-strip-types scripts/answer-lab.ts judge-mutations test/answer-lab/judge-mutations.json",
+  "about": "Mutation set for the inference judge (src/inference-judge.ts, #302): inferences on real recorded turns, each case's originals (which the answer backs) paired with mutations the word rules in assertions.ts pass but the judge must catch. A case stands in the place of its trace's assertion at index, resting on the accepted assertions in supports; the judge also reads the answer's other accepted observations and comparisons (rest_of_answer) and every figure its tables and charts show (figures_shown). Each kind must come back at its expected outcome (scripts/answer-lab.ts MUTATION_TIERS): an original entailed, with worded_amount false; worded_amount with the worded_amount flag true, at any verdict, which shows it as an unverified analyst view when entailed or unsupported and hides it when contradicted; unsupported_claim and hedged_valuation unsupported, flag false, shown labelled as an unverified analyst view; flipped_direction and contradicted_ranking contradicted, flag false, which hides it. A mutation shown above its kind's tier counts against the judge: a worded_amount mutation shown with the entailed label, or a flipped_direction or contradicted_ranking one shown or unverified. source: trace (each case's original is its trace's own accepted inference, at its index and on its accepted supports, which the trace's judge entailed; a case's second original says the same naming the companies). Three exceptions: peer-lead's first original is peer-two #0 without its closing clause on the share price gap, since that clause is a gap comparison; gap-comparison's originals are written for the set, a single lead and a single gap that the judge's gap rule must leave entailed; and gap-near-miss-timing's recorded wording, which the trace's judge found unsupported with a worded amount, is a worded_amount entry because an original must come back entailed. Re-curated in #498 on the traces re-recorded under the list-only prompt: each case keeps its id and its mutations' kinds, each mutation rewritten from the new original. Where a trace has one inference fitting two cases, they are one case, so its original is judged once: segment-concentration holds segment-cushion's mutations, and margin-recovery holds revenue-after-loss's. follow-up-memory.turn-2 has no entailed inference now, so its cases moved: fiscal-offset to follow-up-memory.turn-3, peer-fundamentals to peer-three. operating-offset's supports leave out the operating loss, which only the rest of the answer shows (rest_of_answer); its mutation and margin-recovery's second (revenue slipping since) contradict figures their supports do not state and the rest of the answer does. margin-recovery's first mutation contradicts the gross margin recovery, which neither its supports nor the rest of the answer state and only the gross margin chart shows (figures_shown). Some worded_amount mutations also make an unsupported claim (a forecast or cause with an amount in words), and the rest state an amount the page bears out, so only the flag keeps them from the entailed label. Naming a company by ticker, name or alias is no fault in itself (owner, 2026-10-18), so an original may name one when the answer backs what it says; a hedged valuation or market reading the answer does not show is a mutation. gap-comparison sets one gap against another on peer-two's figures (growth 60.9 vs 34.5, a gap of 26.4; gross margin 70.8 vs 49.9, 20.9; net margin 53.6 vs 12.0, 41.6; price return 6.6 vs 3.58, 3.02): a true one is unsupported_claim, a false twin flipped_direction. The gap-near-miss cases hold recorded wordings that read like one and are not, which must keep their recorded verdicts. Run: node --experimental-strip-types scripts/answer-lab.ts judge-mutations test/answer-lab/judge-mutations.json",
   "cases": [
     {
       "id": "segment-concentration",
@@ -115,13 +115,13 @@
       ],
       "subject": "NVDA",
       "originals": [
-        "It is the stronger business on scale, growth and profitability, though the two fiscal years shown end at different dates and the share price gap is much narrower.",
+        "It is the stronger business on scale, growth and profitability, though the two fiscal years shown end at different dates.",
         "Nvidia is a stronger business than Advanced Micro Devices on scale, growth and profitability."
       ],
       "mutations": [
         {
           "kind": "contradicted_ranking",
-          "text": "It is the weaker business on scale, growth and profitability, though the two fiscal years shown end at different dates and the share price gap is much narrower."
+          "text": "It is the weaker business on scale, growth and profitability, though the two fiscal years shown end at different dates."
         },
         {
           "kind": "contradicted_ranking",
@@ -267,6 +267,126 @@
         {
           "kind": "flipped_direction",
           "text": "The operating loss in that quarter came mainly from a sharp gross margin drop rather than from weak revenue, though revenue has slipped in the quarters since."
+        }
+      ]
+    },
+    {
+      "id": "gap-comparison",
+      "source": "trace",
+      "trace": "traces/peer-two.json",
+      "index": 8,
+      "supports": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "subject": "NVDA",
+      "originals": [
+        "Its net margin lead over the other company is large.",
+        "The gap in net margin between the two companies is large."
+      ],
+      "mutations": [
+        {
+          "kind": "unsupported_claim",
+          "text": "Its growth gap is wider than its gross margin gap, so the lead rests more on momentum than on product economics."
+        },
+        {
+          "kind": "unsupported_claim",
+          "text": "Its growth gap is narrower than its net margin gap, so the profit lead is the more striking one."
+        },
+        {
+          "kind": "unsupported_claim",
+          "text": "The gross margin gap is narrower than the net margin gap, so much of the profit lead arises below the gross line."
+        },
+        {
+          "kind": "unsupported_claim",
+          "text": "The share price gap is narrower than the growth gap, so the market has not fully rewarded the operating lead."
+        },
+        {
+          "kind": "flipped_direction",
+          "text": "Its growth gap is narrower than its gross margin gap, so the lead rests more on product economics than on momentum."
+        },
+        {
+          "kind": "flipped_direction",
+          "text": "The gross margin gap is wider than the net margin gap, so the profit lead arises above the gross line."
+        }
+      ]
+    },
+    {
+      "id": "gap-near-miss-step-up",
+      "source": "trace",
+      "trace": "traces/follow-up-memory.turn-1.json",
+      "index": 5,
+      "supports": [
+        1,
+        2
+      ],
+      "subject": "NVDA",
+      "originals": [
+        "Its sequential step-up was larger in the latest quarters than earlier in the series, though the latest quarter's quarter-over-quarter pace was slower than the prior one."
+      ],
+      "mutations": []
+    },
+    {
+      "id": "gap-near-miss-pace",
+      "source": "trace",
+      "trace": "traces/follow-up-memory.turn-1.json",
+      "index": 6,
+      "supports": [
+        2
+      ],
+      "subject": "NVDA",
+      "originals": [
+        "Its quarter-over-quarter growth rate in the latest period is modest next to the year-over-year pace, so the run-rate could be decelerating even as revenue keeps rising."
+      ],
+      "mutations": []
+    },
+    {
+      "id": "gap-near-miss-sequential",
+      "source": "trace",
+      "trace": "traces/single-latest-quarter.json",
+      "index": 6,
+      "supports": [
+        4
+      ],
+      "subject": "NVDA",
+      "originals": [
+        "Its sequential growth was slower in the latest quarter than the prior-quarter step-up, which hints at some moderation in momentum."
+      ],
+      "mutations": []
+    },
+    {
+      "id": "gap-near-miss-close",
+      "source": "trace",
+      "trace": "traces/ticker-page-compare.json",
+      "index": 6,
+      "supports": [
+        4,
+        5
+      ],
+      "subject": "NVDA",
+      "originals": [
+        "Its market performance has been close to the other's despite the large gap in growth and margins."
+      ],
+      "mutations": []
+    },
+    {
+      "id": "gap-near-miss-timing",
+      "source": "trace",
+      "trace": "traces/ticker-page-compare.json",
+      "index": 7,
+      "supports": [
+        1,
+        4
+      ],
+      "subject": "AAPL",
+      "originals": [],
+      "mutations": [
+        {
+          "kind": "worded_amount",
+          "text": "The fiscal years end four months apart, so the side-by-side is not a like-for-like period and the gap in growth may be affected by timing."
         }
       ]
     }

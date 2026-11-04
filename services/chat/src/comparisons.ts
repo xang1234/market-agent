@@ -14,6 +14,15 @@
 // values are ordered only when their intervals do not overlap, so rounding
 // cannot make a false winner; values too close to separate at the precision
 // shown are a tie. Upgrade path: carry each fact's unrounded value in the packet.
+//
+// A claim citing several metrics is one comparison per metric (claimParts), so
+// checkComparison only ever sees one.
+//
+// No operation sets one difference against another ("the growth gap is narrower
+// than the margin gap", #288): the answer prompt asks for none, and the judge
+// is asked not to read one as backed by the figures, which it does not always
+// follow. Upgrade path: a gap op over two checked comparisons, comparing
+// intervals, if readers miss them.
 
 import type { EvidencePacket, PacketFigure } from "./evidence-packet.ts";
 
@@ -40,6 +49,77 @@ export type CheckedComparison = {
 };
 
 type Direction = -1 | 0 | 1;
+
+type Claim = { op?: unknown; result?: unknown };
+// One metric's share of a claim, in the shape a comparison is checked in.
+type ClaimPart = Claim & { evidence: ReadonlyArray<string> };
+// The metric of a claim that split, and its figures, where that part failed.
+export type ClaimFailure = { metric: string; evidence: ReadonlyArray<string> };
+
+// A claim as one part per metric it cites, each claiming the same of that
+// metric's figures: an order its figures as written, a trend the same result,
+// and a high or low the figure standing where the one named does. An id in no
+// part stays in every part's order, so each fails as a lone metric's would.
+// Figures that each have a metric to themselves ("growth above margin") set
+// metrics against each other, and a ranking beside a run over time has no one
+// result both could stand on, so neither is split and the check refuses it whole.
+function claimParts(item: Claim, figureIds: ReadonlyArray<string>, packet: EvidencePacket): ClaimPart[] {
+  const figureOf = (id: unknown) => packet.figures.find((figure) => figure.id === id);
+  const metrics = new Map<string, string[]>();
+  for (const figure of figureIds.flatMap((id) => figureOf(id) ?? [])) {
+    const key = `${figure.metric}|${figure.segment !== undefined}`;
+    metrics.set(key, [...(metrics.get(key) ?? []), figure.id]);
+  }
+  const groups = [...metrics.values()];
+  const member = (figure: PacketFigure) => figure.segment ?? figure.company ?? packet.companies[0];
+  const acrossMembers = (ids: ReadonlyArray<string>) => new Set(ids.map((id) => member(figureOf(id)!))).size > 1;
+  const axes = new Set(groups.filter((ids) => ids.length > 1).map(acrossMembers));
+  if (groups.length < 2 || axes.size !== 1) return [{ ...item, evidence: figureIds }];
+  const named = figureIds.includes(item.result as string) ? figureOf(item.result) : undefined;
+  // Its company's figure across companies; over time, one company's, its period's.
+  const standing = (ids: ReadonlyArray<string>) => {
+    const ofMember = ids.flatMap((id) => figureOf(id) ?? []).filter((figure) => member(figure) === member(named!));
+    return (ofMember.length === 1 ? ofMember[0] : ofMember.find((figure) => periodName(figure.period) === periodName(named!.period)))?.id;
+  };
+  return groups.map((evidence) => ({
+    op: item.op,
+    result: Array.isArray(item.result) ? item.result.filter((id) => evidence.includes(id) || !figureIds.includes(id)) : named ? standing(evidence) : item.result,
+    evidence,
+  }));
+}
+
+// What of a claim stands: why each part that failed did, with its metric and
+// figures when the claim split, and the evidence and result of those that
+// passed, which check as the same parts again.
+export function checkClaim(item: Claim, figureIds: ReadonlyArray<string>, packet: EvidencePacket): {
+  errors: ReadonlyArray<{ reason: string; part?: ClaimFailure }>;
+  standing?: { evidence: ReadonlyArray<string>; result: unknown };
+} {
+  const parts = claimParts(item, figureIds, packet).map((part) => ({ part, checked: checkComparison(part, part.evidence, packet) }));
+  const metricOf = (part: ClaimPart) => metricLabel(packet.figures.find((figure) => figure.id === part.evidence[0])!.metric);
+  const errors = parts.flatMap(({ part, checked }) => {
+    if (!("error" in checked)) return [];
+    if (parts.length === 1) return [{ reason: checked.error }];
+    return [{ reason: `${checked.error} (${metricOf(part)})`, part: { metric: metricOf(part), evidence: part.evidence } }];
+  });
+  const passed = parts.filter(({ checked }) => "comparison" in checked).map(({ part }) => part);
+  if (passed.length === 0) return { errors };
+  return {
+    errors,
+    standing: {
+      evidence: passed.flatMap((part) => part.evidence),
+      result: Array.isArray(item.result) ? passed.flatMap((part) => part.result as unknown[]) : passed[0]!.result,
+    },
+  };
+}
+
+// An accepted comparison's checked parts.
+export function checkedComparisons(item: Claim & { evidence: ReadonlyArray<string> }, packet: EvidencePacket): CheckedComparison[] {
+  return claimParts(item, item.evidence, packet).flatMap((part) => {
+    const checked = checkComparison(part, part.evidence, packet);
+    return "comparison" in checked ? [checked.comparison] : [];
+  });
+}
 
 export function checkComparison(
   item: { op?: unknown; result?: unknown },

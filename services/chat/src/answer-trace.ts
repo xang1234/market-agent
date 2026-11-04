@@ -94,7 +94,7 @@ export async function composeTraced(
 export function inferenceCases(input: AnswerTraceInput, report: AssertionReport | null): { cases: JudgeCase[]; companies: ReadonlyArray<string> } {
   if (report?.rendered !== true) return { cases: [], companies: [] };
   const packet = input.packet ?? turnPacket(input);
-  return { cases: judgeCases(report.accepted, packet, input.factBlocks ?? []), companies: packet.companies };
+  return { cases: judgeCases(report, packet, input.factBlocks ?? []), companies: packet.companies };
 }
 
 // What the reader ends with: each inference as its verdict shows it
@@ -431,11 +431,12 @@ function traceIds(turn: TurnIds): string {
 // repair round run live, and rerun "repair" keeps the recorded verdicts and
 // runs only the repair round live. The recorded answer exchange is kept: its
 // output, latency and tokens are what was recorded. judge_input_changed:
-// today's answer would send the judge, for some inference, something other
+// today's answer would ask the judge, for some inference, about another case
 // than its recorded reply answered; repair_input_changed: the same for the
-// recorded repair round, its call (but for the system prompt) or a repaired
-// inference's judge. system_prompt_changed: the repair call was recorded under
-// another answer system prompt, the two hashed.
+// recorded repair round, its call or a repaired inference's judge, in each case
+// but for the system prompt. system_prompt_changed: the repair call was recorded
+// under another answer system prompt, the two hashed; judge_prompt_changed: a
+// recorded judge call of either round was, under another judge prompt.
 export type LiveReplay = JudgeOptions & { rerun: "judge" | "repair" };
 
 export async function replayRecorded(
@@ -445,6 +446,7 @@ export async function replayRecorded(
   judge_input_changed: boolean;
   repair_input_changed: boolean;
   system_prompt_changed: { recorded: string; today: string } | null;
+  judge_prompt_changed: { recorded: string; today: string } | null;
 }> {
   const { exchange } = trace;
   const answer = await composeTraced(trace.input, {
@@ -467,7 +469,7 @@ export async function replayRecorded(
   const { cases, companies } = inferenceCases(trace.input, answer.assertions);
   const records = live?.rerun === "judge" ? await judgeAnswer(cases, companies, live) : recordedJudge(trace, cases);
   const asked = (record: ModelRecord, messages: ReadonlyArray<LlmChatMessage>) =>
-    record.outcome === "replied" && !isDeepStrictEqual(record.exchange.messages, messages);
+    record.outcome === "replied" && !isDeepStrictEqual(record.exchange.messages.slice(1), messages.slice(1));
   const recordedRepair = repairRecorded(trace.repair);
   let repairChanged = false;
   let systemPrompt: { recorded: string; today: string } | null = null;
@@ -493,6 +495,10 @@ export async function replayRecorded(
     };
   const replayed = await repairedAnswer(trace.input, answer, cases, records, calls);
   const unrecorded = () => repairsFor(answer, judgedAnswer(answer, cases, records).assertions?.judged ?? []).length > 0;
+  const judgePrompt = judgeMessages([], companies)[0]!.content;
+  const olderJudgePrompts = [...records, ...(live ? [] : recordedRepair?.judge ?? [])].flatMap((record) =>
+    record.outcome === "replied" && record.exchange.messages[0]?.content !== judgePrompt ? [record.exchange.messages[0]?.content] : []
+  );
   return {
     ...trace,
     version: 2,
@@ -503,6 +509,7 @@ export async function replayRecorded(
       ? unrecorded()
       : repairChanged || !isDeepStrictEqual(replayed.repair?.requests ?? [], recordedRepair.requests)),
     system_prompt_changed: systemPrompt,
+    judge_prompt_changed: olderJudgePrompts.length > 0 ? { recorded: promptHash(olderJudgePrompts[0]), today: promptHash(judgePrompt) } : null,
   };
 }
 

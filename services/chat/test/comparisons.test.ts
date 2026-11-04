@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { checkAssertions } from "../src/assertions.ts";
 import { checkComparison } from "../src/comparisons.ts";
 import type { EvidencePacket, PacketFigure } from "../src/evidence-packet.ts";
+import { calendarNote, checkedResults, plainText, renderAssertion } from "../src/render-assertions.ts";
 
 const packet = (companies: string[], figures: PacketFigure[]): EvidencePacket => ({
   route: "trend",
@@ -210,3 +211,123 @@ test("a comparison never sets an annual figure against a quarterly one (#302 rev
   assert.deepEqual(reasons(aapl, "trend", ["F3", "F2"], "fell"), ["comparison: revenue rose from $90.0B to $124.3B"]);
 });
 
+
+// Two companies' fiscal years, as the recorded answer that claimed "revenue,
+// gross margin and net margin were all higher" in one comparison cited them.
+const TWO = packet(["NVDA", "AMD"], [
+  fig("F1", "Revenue", "FY2026", "$209.9B", { company: "NVDA", period_end: "2026-01-25" }),
+  fig("F2", "Gross Margin", "FY2026", "70.8%", { company: "NVDA", period_end: "2026-01-25" }),
+  fig("F3", "Net Margin", "FY2026", "53.6%", { company: "NVDA", period_end: "2026-01-25" }),
+  fig("F5", "Revenue", "FY2025", "$34.7B", { company: "AMD", period_end: "2025-12-27" }),
+  fig("F6", "Gross Margin", "FY2025", "49.9%", { company: "AMD", period_end: "2025-12-27" }),
+  fig("F7", "Net Margin", "FY2025", "12.0%", { company: "AMD", period_end: "2025-12-27" }),
+  // AMD ahead, for a claim that is wrong on this metric alone.
+  fig("L1", "Operating Margin", "FY2026", "10.0%", { company: "NVDA", period_end: "2026-01-25" }),
+  fig("L2", "Operating Margin", "FY2025", "20.0%", { company: "AMD", period_end: "2025-12-27" }),
+]);
+const claim = (op: string, evidence: string[], result: unknown) => ({ kind: "comparison", text: "claim", evidence, op, result });
+const inference = { kind: "analyst_inference", text: "The lead is broad.", supports: [0], subject: "NVDA" };
+const rendered = (p: EvidencePacket, report: ReturnType<typeof checkAssertions>) =>
+  plainText(renderAssertion(report.accepted[0]!, p, [], report.accepted).segments);
+
+test("a claim over several metrics stands as one comparison per metric, each from the packet (#288)", () => {
+  const report = checkAssertions([claim("highest", ["F1", "F2", "F3", "F5", "F6", "F7"], "F1"), inference], TWO);
+  assert.deepEqual(report.rejected, []);
+  assert.equal(
+    rendered(TWO, report),
+    "Of NVDA and AMD, NVDA's revenue was highest: NVDA $209.9B (FY2026, ended Jan 2026), AMD $34.7B (FY2025, ended Dec 2025).\n\n" +
+      "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 70.8% (FY2026, ended Jan 2026), AMD 49.9% (FY2025, ended Dec 2025).\n\n" +
+      "Of NVDA and AMD, NVDA's net margin was highest: NVDA 53.6% (FY2026, ended Jan 2026), AMD 12.0% (FY2025, ended Dec 2025).",
+  );
+  // The inference resting on it keeps its support, and its label every metric checked.
+  assert.deepEqual(report.accepted[1]!.supports, [0]);
+  assert.deepEqual(checkedResults(report.accepted[1]!, TWO, report.accepted), ["NVDA highest on revenue, gross margin, and net margin"]);
+  assert.equal(calendarNote(report.accepted, TWO), "The periods compared end at different times, so they do not line up: NVDA's FY2026 ended Jan 2026 and AMD's FY2025 ended Dec 2025.");
+});
+
+test("a metric the claim is wrong on is rejected alone, and the rest stand (#288)", () => {
+  const report = checkAssertions([claim("highest", ["F2", "F6", "L1", "L2"], "F2"), inference], TWO);
+  assert.deepEqual(report.rejected, [{ index: 0, text: "claim", check: "comparative", reason: "comparison: L2 (20.0%) is higher than L1 (10.0%) (operating margin)", part: { metric: "operating margin", evidence: ["L1", "L2"] } }]);
+  assert.deepEqual(report.accepted[0]!.evidence, ["F2", "F6"]);
+  assert.equal(rendered(TWO, report), "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 70.8% (FY2026, ended Jan 2026), AMD 49.9% (FY2025, ended Dec 2025).");
+  assert.deepEqual(checkedResults(report.accepted[1]!, TWO, report.accepted), ["NVDA highest on gross margin"]);
+  // What stands checks again as it stands: a turn rechecks it when a claim drops.
+  assert.deepEqual(checkAssertions([...report.accepted], TWO).accepted, report.accepted);
+});
+
+test("a winner named on the metric that fails still stands for its company on the others (#288)", () => {
+  const report = checkAssertions([claim("highest", ["F2", "F6", "L1", "L2"], "L1")], TWO);
+  assert.deepEqual(report.rejected.map((entry) => entry.reason), ["comparison: L2 (20.0%) is higher than L1 (10.0%) (operating margin)"]);
+  assert.equal(report.accepted[0]!.result, "F2");
+  assert.deepEqual(checkAssertions([...report.accepted], TWO).accepted, report.accepted);
+});
+
+test("a claim wrong on every metric is rejected per metric, and an inference resting on it alone falls with it (#288)", () => {
+  const report = checkAssertions([claim("lowest", ["F1", "F5", "F2", "F6"], "F1"), inference], TWO);
+  assert.deepEqual(report.accepted, []);
+  assert.deepEqual(report.rejected, [
+    { index: 0, text: "claim", check: "comparative", reason: "comparison: F5 ($34.7B) is lower than F1 ($209.9B) (revenue)", part: { metric: "revenue", evidence: ["F1", "F5"] } },
+    { index: 0, text: "claim", check: "comparative", reason: "comparison: F6 (49.9%) is lower than F2 (70.8%) (gross margin)", part: { metric: "gross margin", evidence: ["F2", "F6"] } },
+    { index: 1, text: "The lead is broad.", check: "support", reason: "an inference binds the accepted observations it rests on" },
+  ]);
+});
+
+test("an order over several metrics is each metric's figures in the order written (#288)", () => {
+  ok(TWO, "order", ["F1", "F5", "F2", "F6"], ["F1", "F2", "F5", "F6"]);
+  const report = checkAssertions([claim("order", ["F1", "F5", "F2", "F6"], ["F1", "F5", "F6", "F2"])], TWO);
+  assert.deepEqual(report.rejected.map((entry) => entry.reason), ["comparison: F2 (70.8%) is higher than F6 (49.9%) (gross margin)"]);
+  assert.deepEqual(report.accepted[0]!.result, ["F1", "F5"]);
+  assert.equal(rendered(TWO, report), "By revenue, highest first: NVDA $209.9B (FY2026, ended Jan 2026), AMD $34.7B (FY2025, ended Dec 2025).");
+});
+
+test("a trend over several metrics is each one's own window, and a winner over time is its period's figure on each (#288)", () => {
+  const trend = checkAssertions([claim("trend", ["G1", "G2", "G3", "N1", "N2", "N3"], "rose")], AMD);
+  assert.deepEqual(trend.rejected.map((entry) => entry.reason), ["comparison: net margin fell from 10.0% to 9.0% (net margin)"]);
+  assert.deepEqual(trend.accepted[0]!.evidence, ["G1", "G2", "G3"]);
+  const high = checkAssertions([claim("highest", ["G1", "G2", "G3", "N1", "N2", "N3"], "G2")], AMD);
+  assert.deepEqual(high.rejected.map((entry) => entry.reason), ["comparison: N1 (10.0%) is higher than N2 (7.0%) (net margin)"]);
+  assert.deepEqual(high.accepted[0]!.evidence, ["G1", "G2", "G3"]);
+});
+
+test("a metric cited once has no comparison of its own: it is rejected alone, or the whole when none has two (#288)", () => {
+  const report = checkAssertions([claim("highest", ["F2", "F6", "L1"], "F2")], TWO);
+  assert.deepEqual(report.rejected.map((entry) => entry.reason), ["comparison: a comparison needs two or more distinct figures (operating margin)"]);
+  assert.deepEqual(report.accepted[0]!.evidence, ["F2", "F6"]);
+  // "NVDA's revenue is above AMD's margin" sets two metrics against each other: nothing to split.
+  assert.deepEqual(reasons(TWO, "highest", ["F1", "F6"], "F1"), ["comparison: a comparison is of one metric"]);
+});
+
+test("a high over time stands on a balance sheet metric, whose quarter the engine writes as its end (#288)", () => {
+  const FLOW_AND_STOCK = packet(["AMD"], [
+    fig("R1", "Revenue", "Q1 FY2025", "$5.0B", { period_end: "2024-04-28" }),
+    fig("R2", "Revenue", "Q2 FY2025", "$7.0B", { period_end: "2024-07-28" }),
+    fig("C1", "Cash", "end of Q1 FY2025", "$1.0B", { period_end: "2024-04-28" }),
+    fig("C2", "Cash", "end of Q2 FY2025", "$2.0B", { period_end: "2024-07-28" }),
+  ]);
+  const report = checkAssertions([claim("highest", ["R1", "R2", "C1", "C2"], "R2")], FLOW_AND_STOCK);
+  assert.deepEqual(report.rejected, []);
+  assert.deepEqual(report.accepted[0]!.evidence, ["R1", "R2", "C1", "C2"]);
+  assert.deepEqual(checkAssertions([...report.accepted], FLOW_AND_STOCK).accepted, report.accepted);
+});
+
+test("an order listing an id no metric cites fails on every metric, as it does on one (#288)", () => {
+  assert.deepEqual(reasons(TWO, "order", ["F1", "F5"], ["F1", "ZZ", "F5"]), ["comparison: the order lists each cited figure once"]);
+  const report = checkAssertions([claim("order", ["F1", "F5", "F2", "F6"], ["F1", "F5", "ZZ", "F2", "F6", "F99"])], TWO);
+  assert.deepEqual(report.accepted, []);
+  assert.deepEqual(report.rejected.map((entry) => entry.reason), [
+    "comparison: the order lists each cited figure once (revenue)",
+    "comparison: the order lists each cited figure once (gross margin)",
+  ]);
+});
+
+test("a claim mixing a ranking across companies with a run over time is refused whole: the same result cannot stand for both (#288)", () => {
+  const MIXED = packet(["NVDA", "AMD"], [
+    fig("A1", "Gross Margin", "Q1 2025", "10.0%", { company: "AMD", period_end: "2025-03-29" }),
+    fig("A2", "Gross Margin", "Q2 2025", "12.0%", { company: "AMD", period_end: "2025-06-28" }),
+    fig("N1", "Net Margin", "Q2 2025", "9.0%", { company: "AMD", period_end: "2025-06-28" }),
+    fig("N2", "Net Margin", "Q2 2026", "7.0%", { company: "NVDA", period_end: "2026-07-26" }),
+  ]);
+  const report = checkAssertions([claim("highest", ["N1", "N2", "A1", "A2"], "N1")], MIXED);
+  assert.deepEqual(report.accepted, []);
+  assert.deepEqual(report.rejected.map((entry) => entry.reason), ["comparison: a comparison is of one metric"]);
+});

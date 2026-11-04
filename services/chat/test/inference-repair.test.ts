@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,8 +8,10 @@ import { fileURLToPath } from "node:url";
 
 import type { LlmChatRequest, LlmChatResult } from "../../llm/src/index.ts";
 import { answerMetrics, answerTurn, replayRecorded, type TurnTrace } from "../src/answer-trace.ts";
-import { assertionList } from "../src/assertions.ts";
-import { REPAIR_INSTRUCTIONS } from "../src/inference-repair.ts";
+import { assertionList, checkAssertions } from "../src/assertions.ts";
+import type { EvidencePacket, PacketFigure } from "../src/evidence-packet.ts";
+import { judgeCases, judgeMessages } from "../src/inference-judge.ts";
+import { REPAIR_INSTRUCTIONS, repairMessages, repairRequests } from "../src/inference-repair.ts";
 import { mutationRepairSummary, mutationVariants, repairMutation, type MutationRepair } from "../scripts/answer-lab.ts";
 import { asCommentary, repairUnderTodaysPrompt } from "./answer-lab/trace-views.ts";
 
@@ -673,3 +676,113 @@ test("repair_input_changed flags a trace with no repair recorded that today's co
   assert.equal(SEGMENTS.repair, null);
   assert.equal((await replayRecorded(SEGMENTS)).repair_input_changed, false);
 });
+
+test("an edit to the judge's own prompt leaves the repair's input unflagged; a judge asked something else is flagged (#288)", async () => {
+  const trace = repairUnderTodaysPrompt(FISCAL);
+  const withJudgeMessages = (messages: (recorded: ReadonlyArray<{ role: string; content: string }>) => ReadonlyArray<{ role: string; content: string }>) => ({
+    ...trace,
+    repair: {
+      ...trace.repair!,
+      judge: trace.repair!.judge.map((record) => record.outcome === "replied" ? { ...record, exchange: { ...record.exchange, messages: messages(record.exchange.messages) } } : record),
+    },
+  }) as typeof trace;
+  const olderPrompt = await replayRecorded(withJudgeMessages(([, ...rest]) => [{ role: "system", content: "an older judge prompt" }, ...rest]));
+  assert.equal(olderPrompt.repair_input_changed, false);
+  const otherQuestion = await replayRecorded(withJudgeMessages(([system]) => [system!, { role: "user", content: "another inference" }]));
+  assert.equal(otherQuestion.repair_input_changed, true);
+});
+
+const margin = (id: string, company: string, metric: string, value: string): PacketFigure => ({ id, company, metric, period: "FY2026", value, source_ids: [] });
+const MARGINS: EvidencePacket = {
+  route: "comparison",
+  cutoff: "2026-09-01T00:00:00.000Z",
+  companies: ["NVDA", "AMD"],
+  figures: [
+    margin("F1", "NVDA", "Gross Margin", "70.8%"),
+    margin("F2", "AMD", "Gross Margin", "49.9%"),
+    margin("F3", "NVDA", "Operating Margin", "20.0%"),
+    margin("F4", "AMD", "Operating Margin", "25.0%"),
+    margin("F5", "NVDA", "Net Margin", "12.0%"),
+    margin("F6", "AMD", "Net Margin", "12.0%"),
+  ],
+  coverage: [],
+  gaps: [],
+  query_bounds: {},
+  claims: [],
+  disagreements: [],
+  claims_status: "none",
+  claims_truncated: false,
+};
+const OPERATING = "comparison: F4 (25.0%) is higher than F3 (20.0%) (operating margin)";
+const NET = "comparison: F5 (12.0%) and F6 (12.0%) cannot be told apart at the precision shown (net margin)";
+const partlyRefuted = (text: string, supports = [0]) => [
+  { kind: "comparison", text: "NVDA leads on gross, operating and net margin.", evidence: ["F1", "F2", "F3", "F4", "F5", "F6"], op: "highest", result: "F1" },
+  { kind: "analyst_inference", subject: "NVDA", text, supports },
+];
+
+test("the judge and the repair round hear what the check refused of a support that partly stood, where the inference names the refused metric (#288)", () => {
+  const list = partlyRefuted("Its operating margin lead points to tighter cost control.");
+  const report = checkAssertions(list, MARGINS);
+  const [judged] = judgeCases(report, MARGINS, []);
+  assert.deepEqual(judged!.checked, ["NVDA highest on gross margin"]);
+  assert.deepEqual(JSON.parse(judgeMessages([judged!], MARGINS.companies)[1]!.content).inferences[0].rejected_parts, [
+    { metric: "operating margin", figures: "NVDA's operating margin was 20.0% in FY2026; AMD's operating margin was 25.0% in FY2026.", reason: OPERATING },
+    { metric: "net margin", figures: "NVDA's net margin was 12.0% in FY2026; AMD's net margin was 12.0% in FY2026.", reason: NET },
+  ]);
+  const requests = repairRequests(list, report, [{ index: 1, verdict: "contradicted", worded_amount: false, reason: "AMD leads on operating margin." }]);
+  assert.deepEqual(requests, [{
+    index: 1,
+    text: "Its operating margin lead points to tighter cost control.",
+    rejected_parts: [
+      { support: 0, metric: "operating margin", reason: OPERATING },
+      { support: 0, metric: "net margin", reason: NET },
+    ],
+    check: "judge",
+    verdict: "contradicted",
+    worded_amount: false,
+    reason: "AMD leads on operating margin.",
+  }]);
+  const asked = JSON.parse(repairMessages([{ role: "system", content: "s" }, { role: "user", content: "u" }], list, requests)[1]!.content.split("\n").at(-1)!);
+  assert.deepEqual(asked.rejected[0].rejected_parts, requests[0]!.rejected_parts);
+});
+
+test("an inference on a support that stood whole carries no rejected parts, so what a recorded judge was asked stays as it was (#288)", () => {
+  const list = [
+    { kind: "comparison", text: "x", evidence: ["F1", "F2"], op: "highest", result: "F1" },
+    { kind: "analyst_inference", subject: "NVDA", text: "Its gross margin lead is wide.", supports: [0] },
+    // Rejected whole, and a support of neither inference: nothing here is a part of what they rest on.
+    { kind: "comparison", text: "y", evidence: ["F3", "F4"], op: "highest", result: "F3" },
+  ];
+  const report = checkAssertions(list, MARGINS);
+  const [judged] = judgeCases(report, MARGINS, []);
+  assert.equal("rejected_parts" in JSON.parse(judgeMessages([judged!], MARGINS.companies)[1]!.content).inferences[0], false);
+  assert.equal("rejected_parts" in repairRequests(list, report, [{ index: 1, verdict: "contradicted", worded_amount: false }])[0]!, false);
+});
+
+test("judge_prompt_changed reports a judge prompt edit from either round's records, and judge_input_changed only what a case asks (#288)", async () => {
+  const hash = (content: string) => createHash("sha256").update(content).digest("hex").slice(0, 12);
+  const today = judgeMessages([], [])[0]!.content;
+  const OLDER = { recorded: hash("an older judge prompt"), today: hash(today) };
+  const FAILED = { outcome: "failed" as const, reason: "judge call failed", latency_ms: 10 };
+  type Round = NonNullable<TurnTrace["repair"]>["judge"];
+  const under = (records: Round, content: string): Round => records.map((record) =>
+    record.outcome === "replied" ? { ...record, exchange: { ...record.exchange, messages: [{ role: "system", content }, ...record.exchange.messages.slice(1)] } } : record
+  );
+  const base = repairUnderTodaysPrompt(FISCAL);
+  const firstRound = base.judge as Round;
+  const repairRound = base.repair!.judge;
+  const replay = async (first: Round, repair: Round) => {
+    const { judge_prompt_changed, judge_input_changed } = await replayRecorded({ ...base, judge: first, repair: { ...base.repair!, judge: repair } });
+    return [judge_prompt_changed, judge_input_changed];
+  };
+  assert.deepEqual(await replay(under(firstRound, today), under(repairRound, today)), [null, false]);
+  assert.deepEqual(await replay(under(firstRound, "an older judge prompt"), under(repairRound, today)), [OLDER, false]);
+  assert.deepEqual(await replay(under(firstRound, today), under(repairRound, "an older judge prompt")), [OLDER, false]);
+  // The first round never replied, so only the repair's judge records the prompt.
+  assert.deepEqual(await replay(firstRound.map(() => FAILED), under(repairRound, "an older judge prompt")), [OLDER, false]);
+  const otherCase = under(firstRound, today).map((record) =>
+    record.outcome === "replied" ? { ...record, exchange: { ...record.exchange, messages: [record.exchange.messages[0]!, { role: "user", content: "another inference" }] } } : record
+  );
+  assert.deepEqual(await replay(otherCase, under(repairRound, today)), [null, true]);
+});
+

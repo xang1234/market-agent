@@ -13,7 +13,7 @@
 // The answer is written from the accepted assertions (render-assertions.ts),
 // and the report goes to evals and logs.
 
-import { checkComparison, comparablePeriods, type ComparisonOp } from "./comparisons.ts";
+import { checkClaim, comparablePeriods, type ClaimFailure, type ComparisonOp } from "./comparisons.ts";
 import { figureCompanies, type EvidencePacket } from "./evidence-packet.ts";
 import type { InferenceVerdict } from "./verdicts.ts";
 import { isRecord } from "../../shared/src/http.ts";
@@ -42,6 +42,8 @@ export type AssertionReport = {
   // skipped: no figures or claims, so there was nothing to bind.
   status: "missing" | "malformed" | "checked" | "skipped";
   accepted: ReadonlyArray<Assertion & { index: number }>;
+  // Each failed check, not each assertion: a comparison over several metrics
+  // has one per metric that failed, and is also accepted if another stood.
   rejected: ReadonlyArray<Rejection>;
   // The answer was written from the accepted assertions (controlled rendering).
   rendered?: boolean;
@@ -70,7 +72,8 @@ export const MAX_ASSERTIONS = 12;
 // judge hid (verdicts.ts shownAs).
 export type RejectionCheck =
   | "binding" | "comparative" | "reference" | "kind" | "support" | "limit" | "format" | "rendering" | "judge";
-export type Rejection = { index: number; text?: string; check: RejectionCheck; reason: string };
+// part: the metric it failed on, of a comparison over several (comparisons.ts).
+export type Rejection = { index: number; text?: string; check: RejectionCheck; reason: string; part?: ClaimFailure };
 
 // The list closes the answer in a fenced block, closed or not (a reply cut
 // off inside it). The first block is the one read, so a second (a corrected
@@ -98,8 +101,8 @@ export function checkAssertions(list: unknown[] | null | undefined, packet: Evid
   const claims = new Map(packet.claims.map((claim) => [claim.id, claim]));
   const accepted: Array<Assertion & { index: number }> = [];
   const rejected: Rejection[] = [];
-  const reject = (index: number, item: unknown, check: RejectionCheck, reason: string) =>
-    rejected.push({ index, ...(isRecord(item) && typeof item.text === "string" ? { text: item.text } : {}), check, reason });
+  const reject = (index: number, item: unknown, check: RejectionCheck, reason: string, part?: ClaimFailure) =>
+    rejected.push({ index, ...(isRecord(item) && typeof item.text === "string" ? { text: item.text } : {}), check, reason, ...(part ? { part } : {}) });
 
   // Inferences last, so the observations they rest on are already checked.
   const order = list.map((item, index) => ({ item, index }))
@@ -200,19 +203,18 @@ export function checkAssertions(list: unknown[] | null | undefined, packet: Evid
       continue;
     }
     // A comparison's claimed result is derived from its complete eligible
-    // evidence before it may stand (comparisons.ts).
-    const comparison = kind === "comparison" ? checkComparison(item, figureIds, packet) : undefined;
-    if (comparison && "error" in comparison) {
-      reject(index, item, "comparative", comparison.error);
-      continue;
-    }
+    // evidence before it may stand (comparisons.ts), metric by metric: what a
+    // claim got wrong on one metric leaves the others standing.
+    const comparison = kind === "comparison" ? checkClaim(item, figureIds, packet) : undefined;
+    comparison?.errors.forEach(({ reason, part }) => reject(index, item, "comparative", reason, part));
+    if (comparison && !comparison.standing) continue;
     accepted.push({
       index,
       kind,
       text: item.text,
-      evidence,
+      evidence: comparison?.standing?.evidence ?? evidence,
       ...(kind === "analyst_inference" ? { supports, ...(item.subject !== undefined ? { subject: item.subject as string } : {}) } : {}),
-      ...(kind === "comparison" ? { op: item.op as ComparisonOp, result: item.result as string | string[] } : {}),
+      ...(comparison?.standing ? { op: item.op as ComparisonOp, result: comparison.standing.result as string | string[] } : {}),
     });
   }
   accepted.sort((a, b) => a.index - b.index);
