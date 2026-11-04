@@ -1,4 +1,5 @@
 import { useResource } from '../fetch/resource.ts'
+import { subjectDisplayName } from '../symbol/quote.ts'
 import { subjectHydration, type SubjectRef } from '../symbol/search.ts'
 import type { AgentRow, AgentRunRow } from './agentRows.ts'
 import { agentRunTicks, latestRunStatus, rosterRunSummary, type RunStatus } from './runStats.ts'
@@ -41,7 +42,7 @@ export function AgentRoster({
   return (
     <section className={PAGE_PANEL_CLASS}>
       <h2 className={PANEL_TITLE_CLASS}>Agents</h2>
-      <FleetSummary fleet={rosterRunSummary(agents, runs)} />
+      {!loading && loadError === null ? <FleetSummary fleet={rosterRunSummary(agents, runs)} /> : null}
       <p role="status" className="mt-1 text-xs text-muted">
         <span className="font-medium text-fg-soft">Activity</span> · {activity}
       </p>
@@ -103,20 +104,29 @@ export function AgentRoster({
   )
 }
 
+// Each named subject costs one hydrate request, on every roster row.
+const UNIVERSE_SUBJECTS_SHOWN = 5
+
 function UniverseName({ universe }: { universe: AgentRow['universe'] }) {
   if (universe?.mode !== 'static' || universe.subject_refs.length === 0) return universeLabel(universe)
-  return universe.subject_refs.map((subject, index) => (
-    <span key={`${subject.kind}:${subject.id}`}>
-      {index > 0 ? ', ' : null}
-      <SubjectName subject={subject} />
-    </span>
-  ))
+  const hidden = universe.subject_refs.length - UNIVERSE_SUBJECTS_SHOWN
+  return (
+    <>
+      {universe.subject_refs.slice(0, UNIVERSE_SUBJECTS_SHOWN).map((subject, index) => (
+        <span key={`${subject.kind}:${subject.id}`}>
+          {index > 0 ? ', ' : null}
+          <SubjectName subject={subject} />
+        </span>
+      ))}
+      {hidden > 0 ? ` +${hidden} more` : null}
+    </>
+  )
 }
 
 function SubjectName({ subject }: { subject: SubjectRef }) {
   const hydrated = useResource(subjectHydration, subject)
   if (hydrated.status === 'idle' || hydrated.status === 'loading') return '…'
-  const name = hydrated.status === 'ready' ? hydrated.data.display_name : undefined
+  const name = hydrated.status === 'ready' ? subjectDisplayName(hydrated.data) : null
   return name ?? `${subject.kind}: ${subject.id}`
 }
 
