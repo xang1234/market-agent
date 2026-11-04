@@ -17,11 +17,11 @@ Open `/symbol/listing:<id>/overview`, choose Analyze (`data-testid=analyze-this-
 Preconditions: the baseline. `up` hydrates AAPL, MSFT and GOOGL, so this works before an import.
 
 - **Evidence first.** Run `$V backfill-8k AAPL`. It reports filings ingested or already present.
-- **Generate.** Run `$V memo AAPL`. It exits 0 and prints a report with `generated: true` and `insufficient_evidence: false`.
+- **Generate.** Run `$V memo AAPL`. It exits 0 and prints a report with `subject_matches: true`, `generated: true`, `insufficient_evidence: false` and `sec_8k_mentions` above 0.
 - **Proof.** Open `2-result.png` and `page.txt` in the printed `evidence` folder. Confirm the subject is AAPL and the claims cite 8-Ks.
 
 ## Gotchas
 
-- Without the backfill the memo still generates but reports insufficient evidence, and `$V memo` fails. That is the intended result.
+- Without the backfill the memo has no 8-K claims, so `$V memo` fails. That is the intended result.
 - On this stack the memo comes from dev-api's local runtime (`services/dev-api/src/local-runtime.ts`), with no LLM. A pass proves the subject, templates and evidence reach the memo, not the quality of any model's writing.
 - On a `Generate failed` message, read `page.txt` and `.dev/logs/dev-api.log`.

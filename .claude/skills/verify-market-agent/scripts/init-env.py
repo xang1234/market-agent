@@ -27,12 +27,18 @@ for line in open(example_path).read().splitlines():
         value = str(int(value) + offset)
     lines.append(f"{key}={shift_url_ports(value)}")
 
-# A port or local URL from the main checkout would point this stack at that stack.
+# A port, local URL or project name from the main checkout would point this stack at that
+# stack, and down --volumes would delete its database.
 overrides = {}
 if os.path.exists(main_path):
     for line in open(main_path).read().splitlines():
         match = ASSIGNMENT.match(line)
-        if match and not match.group(1).endswith("_PORT") and not LOCAL_URL_PORT.search(match.group(2)):
+        if (
+            match
+            and not match.group(1).endswith("_PORT")
+            and match.group(1) != "COMPOSE_PROJECT_NAME"
+            and not LOCAL_URL_PORT.search(match.group(2))
+        ):
             overrides[match.group(1)] = match.group(2)
 
 for index, line in enumerate(lines):

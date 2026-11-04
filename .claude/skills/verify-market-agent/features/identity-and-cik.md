@@ -24,4 +24,5 @@ Preconditions: the baseline, and a Polygon key in `.env.dev`. Pick tickers still
 ## Gotchas
 
 - Discovery on a CIK-less ticker runs at most once a minute per resolver process, and a restart resets that. A ticker that stays `NO CIK` right after a failure may just be waiting.
+- `identity diff` moves when a resolve adds a ticker the database didn't hold, as with NVDA on a stack with no import. Run this recipe after an import, on tickers it seeded.
 - Polygon calls aren't logged. Prove call counts with `services/resolver/test/http.test.ts`.
