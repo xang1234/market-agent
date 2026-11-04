@@ -119,6 +119,14 @@ function figureRounding({ scale }: ExactDecimal): number {
   return -scale < 3 ? 0 : Math.min(-scale, 6);
 }
 
+// The coarsest rounding one figure could be in when nothing beside it shows its
+// filing's: three digits stay above it, so 1,000 then 990 is plainly a change.
+function loneFigureRounding(figure: ExactDecimal): number {
+  const digits = (figure.coefficient < 0n ? -figure.coefficient : figure.coefficient).toString().length - figure.scale;
+  const rounding = Math.min(figureRounding(figure), digits - 3);
+  return rounding < 3 ? 0 : rounding;
+}
+
 /**
  * Whether a later filing's figure is an earlier filing's, restated by the
  * listing's splits between their filing dates. A filing presents a figure
@@ -167,7 +175,7 @@ function statesAgain(earlier: RoundedFigure, later: RoundedFigure, restate: (val
   const known = half(earlier.rounding ?? 0, later.rounding ?? 0);
   const within = known === null ? null : withinEitherWay(difference, known);
   if (within !== false) return within;
-  const possible = half(earlier.rounding ?? figureRounding(from.value), later.rounding ?? figureRounding(to.value));
+  const possible = half(earlier.rounding ?? loneFigureRounding(from.value), later.rounding ?? loneFigureRounding(to.value));
   const hidden = possible === null ? null : withinEitherWay(difference, possible);
   return hidden === false ? false : null;
 }

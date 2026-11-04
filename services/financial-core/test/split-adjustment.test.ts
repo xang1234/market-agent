@@ -209,6 +209,9 @@ test("two figures are one within half the coarser of their filings' roundings", 
   assert.equal(same("16053123000", 3, "16054000000", null), false);
   assert.equal(same("16053000000", null, "16053123000", 3), null);
   assert.equal(same("100", null, "90", null), false);
+  assert.equal(same("1000", null, "990", 0), false, "three digits stay above a rounding, and 1,000 has one above the thousands");
+  assert.equal(same("1000000", null, "999000", 0), null, "1,000,000 could be to the ten thousand");
+  assert.equal(same("1000000", null, "980000", 0), false);
 });
 
 test("a sum is off by each figure's own half unit, and a filing too short to tell adds nothing", () => {
