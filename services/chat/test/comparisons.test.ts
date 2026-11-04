@@ -296,3 +296,38 @@ test("a metric cited once has no comparison of its own: it is rejected alone, or
   // "NVDA's revenue is above AMD's margin" sets two metrics against each other: nothing to split.
   assert.deepEqual(reasons(TWO, "highest", ["F1", "F6"], "F1"), ["comparison: a comparison is of one metric"]);
 });
+
+test("a high over time stands on a balance sheet metric, whose quarter the engine writes as its end (#288)", () => {
+  const FLOW_AND_STOCK = packet(["AMD"], [
+    fig("R1", "Revenue", "Q1 FY2025", "$5.0B", { period_end: "2024-04-28" }),
+    fig("R2", "Revenue", "Q2 FY2025", "$7.0B", { period_end: "2024-07-28" }),
+    fig("C1", "Cash", "end of Q1 FY2025", "$1.0B", { period_end: "2024-04-28" }),
+    fig("C2", "Cash", "end of Q2 FY2025", "$2.0B", { period_end: "2024-07-28" }),
+  ]);
+  const report = checkAssertions([claim("highest", ["R1", "R2", "C1", "C2"], "R2")], FLOW_AND_STOCK);
+  assert.deepEqual(report.rejected, []);
+  assert.deepEqual(report.accepted[0]!.evidence, ["R1", "R2", "C1", "C2"]);
+  assert.deepEqual(checkAssertions([...report.accepted], FLOW_AND_STOCK).accepted, report.accepted);
+});
+
+test("an order listing an id no metric cites fails on every metric, as it does on one (#288)", () => {
+  assert.deepEqual(reasons(TWO, "order", ["F1", "F5"], ["F1", "ZZ", "F5"]), ["comparison: the order lists each cited figure once"]);
+  const report = checkAssertions([claim("order", ["F1", "F5", "F2", "F6"], ["F1", "F5", "ZZ", "F2", "F6", "F99"])], TWO);
+  assert.deepEqual(report.accepted, []);
+  assert.deepEqual(report.rejected.map((entry) => entry.reason), [
+    "comparison: the order lists each cited figure once (revenue)",
+    "comparison: the order lists each cited figure once (gross margin)",
+  ]);
+});
+
+test("a claim mixing a ranking across companies with a run over time is refused whole: the same result cannot stand for both (#288)", () => {
+  const MIXED = packet(["NVDA", "AMD"], [
+    fig("A1", "Gross Margin", "Q1 2025", "10.0%", { company: "AMD", period_end: "2025-03-29" }),
+    fig("A2", "Gross Margin", "Q2 2025", "12.0%", { company: "AMD", period_end: "2025-06-28" }),
+    fig("N1", "Net Margin", "Q2 2025", "9.0%", { company: "AMD", period_end: "2025-06-28" }),
+    fig("N2", "Net Margin", "Q2 2026", "7.0%", { company: "NVDA", period_end: "2026-07-26" }),
+  ]);
+  const report = checkAssertions([claim("highest", ["N1", "N2", "A1", "A2"], "N1")], MIXED);
+  assert.deepEqual(report.accepted, []);
+  assert.deepEqual(report.rejected.map((entry) => entry.reason), ["comparison: a comparison is of one metric"]);
+});
