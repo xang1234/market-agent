@@ -491,6 +491,122 @@ test("SEC restatements", { timeout: 300_000 }, async (t) => {
     assert.deepEqual(await line("27000000"), [[["revenue", "Q4", "27000000", "2025-02-03", "unverified_restatement"]], "restatement_unverified"]);
   });
 
+  await t.test("a derived quarter restated and then reversed answers with the latest filing's figure", async () => {
+    const issuer = await quarterIssuer();
+    const q1 = issuer.filed(1, "10-Q", "2024-04-23", 2024, "Q1");
+    const q2 = issuer.filed(2, "10-Q", "2024-07-23", 2024, "Q2");
+    const q3 = issuer.filed(3, "10-Q", "2024-10-22", 2024, "Q3");
+    const k = issuer.filed(4, "10-K", "2025-02-03", 2024, "FY");
+    const firstAmendment = issuer.filed(5, "10-K/A", "2025-06-02", 2024, "FY");
+    const secondAmendment = issuer.filed(6, "10-K/A", "2025-09-02", 2024, "FY");
+    const filed = [q1(...Q1_2024, "300"), q2(...Q2_2024, "300"), q3(...Q3_2024, "300"), k(...FY_2024, "1000")];
+    const restated = [...filed, firstAmendment(...FY_2024, "1010"), firstAmendment(...Q4_2024, "110")];
+    const reversed = [...restated, secondAmendment(...FY_2024, "1000"), secondAmendment(...Q4_2024, "100")];
+    await issuer.ingest({ Revenues: concept("USD", filed) }, ["Q1", "Q2", "Q3", "Q4", "FY"], "2025-03-01T15:00:00.000Z");
+    await issuer.backfill({ Revenues: concept("USD", restated) }, "2025-07-01T15:00:00.000Z");
+    assert.equal(await issuer.pick("Q4", "2025-08-01T00:00:00Z", "as_restated"), "110");
+    await issuer.backfill({ Revenues: concept("USD", reversed) }, "2025-10-01T15:00:00.000Z");
+    const stored = [
+      ["revenue", "FY", "1010", "2025-06-02", "economic_restatement"],
+      ["revenue", "FY", "1000", "2025-09-02", "economic_restatement"],
+      ["revenue", "Q4", "110", "2025-06-02", "economic_restatement"],
+      ["revenue", "Q4", "100", "2025-09-02", "economic_restatement"],
+    ];
+    assert.deepEqual(await issuer.laterStatements(), stored);
+    assert.equal(await issuer.pick("Q4", AFTER, "as_restated"), "100");
+    assert.equal(await issuer.pick("FY", AFTER, "as_restated"), "1000");
+    assert.equal(await issuer.pick("Q4", "2025-08-01T00:00:00Z", "as_restated"), "110", "the reversal was not public yet");
+    await issuer.backfill({ Revenues: concept("USD", reversed) }, "2025-10-02T15:00:00.000Z");
+    assert.deepEqual(await issuer.laterStatements(), stored, "a rerun adds nothing");
+  });
+
+  await t.test("a stated quarter restated and then reversed answers with the latest filing's figure", async () => {
+    const issuer = await quarterIssuer();
+    const q1 = issuer.filed(1, "10-Q", "2024-04-23", 2024, "Q1");
+    const firstAmendment = issuer.filed(2, "10-Q/A", "2024-06-10", 2024, "Q1");
+    const secondAmendment = issuer.filed(3, "10-Q/A", "2024-08-10", 2024, "Q1");
+    await issuer.ingest({ Revenues: concept("USD", [q1(...Q1_2024, "100"), firstAmendment(...Q1_2024, "110"), secondAmendment(...Q1_2024, "100")]) }, ["Q1"]);
+    assert.deepEqual(await issuer.laterStatements(), [
+      ["revenue", "Q1", "110", "2024-06-10", "economic_restatement"],
+      ["revenue", "Q1", "100", "2024-08-10", "economic_restatement"],
+    ]);
+    assert.equal(await issuer.pick("Q1", AFTER, "as_restated"), "100");
+  });
+
+  await t.test("a later filing is judged against the figure that stands, not the last one a coarser filing rounded it to", async () => {
+    const issuer = await quarterIssuer();
+    const q1 = issuer.filed(1, "10-Q", "2024-04-23", 2024, "Q1");
+    const k = issuer.filed(2, "10-K", "2025-02-03", 2024, "FY");
+    const nextQ1 = issuer.filed(3, "10-Q", "2025-04-22", 2025, "Q1");
+    // 100,123K, then 100M in a 10-K in millions, which is the same figure, then 100,400K, which is not.
+    await issuer.ingest({
+      Revenues: concept("USD", [
+        q1(...Q1_2023, "99321000"), q1(...Q1_2024, "100123000"),
+        k(...FY_2023, "390000000"), k(...FY_2024, "410000000"), k(...Q1_2024, "100000000"),
+        nextQ1(...Q1_2024, "100400000"), nextQ1(...Q1_2025, "120123000"),
+      ]),
+    }, ["Q1"]);
+    assert.deepEqual(await issuer.laterStatements(), [["revenue", "Q1", "100400000", "2025-04-22", "economic_restatement"]]);
+    assert.equal(await issuer.pick("Q1", AFTER, "as_restated"), "100400000");
+  });
+
+  await t.test("a derived quarter's line is checked against its current inputs even when it repeats the figure", async () => {
+    const restating = async (year: string) => {
+      const issuer = await quarterIssuer();
+      const q1 = issuer.filed(1, "10-Q", "2024-04-23", 2024, "Q1");
+      const q2 = issuer.filed(2, "10-Q", "2024-07-23", 2024, "Q2");
+      const q3 = issuer.filed(3, "10-Q", "2024-10-22", 2024, "Q3");
+      const k = issuer.filed(4, "10-K", "2025-02-03", 2024, "FY");
+      const nextK = issuer.filed(5, "10-K", "2026-02-03", 2025, "FY");
+      await issuer.ingest({
+        Revenues: concept("USD", [
+          q1(...Q1_2024, "100"), q2(...Q2_2024, "100"), q3(...Q3_2024, "100"), k(...FY_2024, "400"),
+          nextK(...FY_2024, year), nextK(...Q1_2024, "90"), nextK(...Q4_2024, "100"), nextK(...FY_2025, "500"),
+        ]),
+      }, ["Q1", "Q2", "Q3", "Q4", "FY"]);
+      return issuer;
+    };
+    // 90 + 100 + 100 + 100 is 390, against a year of 400.
+    const contradicted = await restating("400");
+    assert.deepEqual(await contradicted.laterStatements(), [
+      ["revenue", "Q1", "90", "2026-02-03", "economic_restatement"],
+      ["revenue", "Q4", "100", "2026-02-03", "unverified_restatement"],
+    ]);
+    assert.equal(await contradicted.pick("Q4", AFTER, "as_restated"), "restatement_unverified");
+    assert.equal(await contradicted.pick("Q4", AFTER, "as_reported"), "100");
+
+    const consistent = await restating("390");
+    assert.deepEqual(await consistent.laterStatements(), [
+      ["revenue", "FY", "390", "2026-02-03", "economic_restatement"],
+      ["revenue", "Q1", "90", "2026-02-03", "economic_restatement"],
+    ], "the line agrees with what its inputs became, so the figure stands");
+    assert.equal(await consistent.pick("Q4", AFTER, "as_restated"), "100");
+  });
+
+  await t.test("a later filing does not clear a derived quarter an earlier one left unverified", async () => {
+    const issuer = await quarterIssuer();
+    const q1 = issuer.filed(1, "10-Q", "2024-04-23", 2024, "Q1");
+    const q2 = issuer.filed(2, "10-Q", "2024-07-23", 2024, "Q2");
+    const q3 = issuer.filed(3, "10-Q", "2024-10-22", 2024, "Q3");
+    const k = issuer.filed(4, "10-K", "2025-02-03", 2024, "FY");
+    const nextQ1 = issuer.filed(5, "10-Q", "2025-04-22", 2025, "Q1");
+    const amended = issuer.filed(6, "10-K/A", "2025-09-02", 2024, "FY");
+    const filed = [q1(...Q1_2024, "300"), q2(...Q2_2024, "300"), q3(...Q3_2024, "300"), k(...FY_2024, "1000")];
+    const moved = [...filed, nextQ1(...Q1_2024, "290"), nextQ1(...Q1_2025, "350")];
+    const settled = [...moved, amended(...FY_2024, "990"), amended(...Q1_2024, "290"), amended(...Q4_2024, "100")];
+    await issuer.ingest({ Revenues: concept("USD", filed) }, ["Q1", "Q2", "Q3", "Q4", "FY"], "2025-03-01T15:00:00.000Z");
+    await issuer.backfill({ Revenues: concept("USD", settled) }, "2025-10-01T15:00:00.000Z");
+    const stored = [
+      ["revenue", "FY", "990", "2025-09-02", "economic_restatement"],
+      ["revenue", "Q1", "290", "2025-04-22", "economic_restatement"],
+      ["revenue", "Q4", "100", "2025-04-22", "unverified_restatement"],
+    ];
+    assert.deepEqual(await issuer.laterStatements(), stored);
+    assert.equal(await issuer.pick("Q4", AFTER, "as_restated"), "restatement_unverified");
+    await issuer.backfill({ Revenues: concept("USD", settled) }, "2025-10-02T15:00:00.000Z");
+    assert.deepEqual(await issuer.laterStatements(), stored, "a rerun adds nothing");
+  });
+
   await t.test("a filing older than the original never restates it, for a quarter or a year", async () => {
     const issuer = await quarterIssuer();
     const own = issuer.filed(1, "10-Q", "2024-04-23", 2024, "Q1");

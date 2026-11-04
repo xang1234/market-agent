@@ -130,6 +130,18 @@ test("a later 10-K's comparative of an as-filed EPS or share count", { timeout: 
   ];
   const retired = (rows: unknown[][]) => rows.map((row) => [...row.slice(0, -1), false]);
 
+  await t.test("an equal figure across a split is a restatement, and with no split history to read it stays the same figure", async () => {
+    const across = await splitCorp("11.93", true);
+    await across.syncSplits("2026-10-02T12:00:00.000Z");
+    await across.ingest();
+    const eps = async (issuerId: string) => (await laterDisclosures(issuerId)).filter((row) => row[0] === "eps_diluted");
+    assert.deepEqual(await eps(across.issuerId), [["eps_diluted", "11.93", "2025-02-26", "economic_restatement", "diluted", true]], "11.93 / 10 is 1.193, so a 10-K after the split stating 11.93 changed it");
+
+    const unlisted = await splitCorp("11.93", false);
+    await unlisted.ingest();
+    assert.deepEqual(await eps(unlisted.issuerId), []);
+  });
+
   await t.test("a comparative the split explains adds nothing; one it does not is a restatement as filed on its 10-K's date", async () => {
     const explained = await splitCorp("1.19", true);
     await explained.syncSplits("2026-10-02T12:00:00.000Z");
