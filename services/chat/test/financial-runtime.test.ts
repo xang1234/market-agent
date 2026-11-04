@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import test, { type TestContext } from "node:test";
 import { connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
-import { databaseUrl, IDS, ORIGINAL_REVENUE } from "../../financial-engine/test/db-fixtures.ts";
+import { databaseUrl, IDS, RESTATED_REVENUE } from "../../financial-engine/test/db-fixtures.ts";
 import type { ChatAnalystToolRuntime, ChatAssistantMessagePersistence } from "../src/coordinator.ts";
 import { financialMessageId } from "../src/chat-ids.ts";
 import { persistUserChatMessage } from "../src/messages.ts";
@@ -463,7 +463,7 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.ok(message, `expected a published answer; got ${JSON.stringify(done)}`);
     assert.deepEqual(
       message.blocks[0].financial.results.map((result: { disposition: string; presented: { value?: string } }) => [result.disposition, result.presented.value]),
-      [["verified", ORIGINAL_REVENUE]],
+      [["verified", RESTATED_REVENUE]],
     );
 
     const sameCompany = await chatHarness(pool, { model: revenueModel(["ALPHA"]), resolveMention: asListing }).run({ ...base, subjectText: "ALPHA", userIntent: "Compare revenue with ALPX" });

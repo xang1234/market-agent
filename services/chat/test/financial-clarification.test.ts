@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
-import { databaseUrl, IDS, ORIGINAL_REVENUE } from "../../financial-engine/test/db-fixtures.ts";
+import { databaseUrl, IDS, RESTATED_REVENUE } from "../../financial-engine/test/db-fixtures.ts";
 import { createChatServer } from "../src/http.ts";
 import { chatDatabase, chatHarness, comparing, completed, INSTRUMENT_A, LISTING_A, revenueModel } from "./financial-fixtures.ts";
 
@@ -96,7 +96,7 @@ test("financial clarifications", { timeout: 300_000 }, async (t) => {
     const [block] = (await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id])).rows[0].blocks;
     assert.deepEqual(
       block.financial.results.map((result: { disposition: string; presented: { value?: string } }) => [result.disposition, result.presented.value]),
-      [["verified", ORIGINAL_REVENUE]],
+      [["verified", RESTATED_REVENUE]],
     );
   });
 
@@ -107,7 +107,7 @@ test("financial clarifications", { timeout: 300_000 }, async (t) => {
     const [block] = (await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id])).rows[0].blocks;
     assert.deepEqual(
       block.financial.results.map((result: { disposition: string; presented: { value?: string } }) => [result.disposition, result.presented.value]),
-      [["verified", ORIGINAL_REVENUE]],
+      [["verified", RESTATED_REVENUE]],
     );
   });
 

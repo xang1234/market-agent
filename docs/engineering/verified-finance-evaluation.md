@@ -61,10 +61,10 @@ database, and compares the ledger records each one certified.
 
 | Group | Surfaces | Must agree on | Allowed differences |
 |---|---|---|---|
-| As reported | Chat (model-planned turn), Analyze `revenue_trend`, grid `latest_revenue` | Value payload, bound fact and period, basis, unit state, coverage | Chat's cutoff is the turn's own time; memo and grid pin theirs. Ids and layout. |
-| Saved rules (as restated) | Thesis condition, Discovery criterion ("annual revenue > 1") | Value and predicate payloads, cutoff, basis, bound facts, coverage | Parent (thesis version vs campaign run) and threshold attribution |
+| As reported | Analyze `revenue_trend`, grid `latest_revenue` | Value payload, bound fact and period, basis, unit state, coverage | Ids and layout. |
+| As restated | Chat (model-planned turn), thesis condition, Discovery criterion ("annual revenue > 1") | Value and predicate payloads, basis, bound facts, coverage | Chat's cutoff is the turn's own time; saved rules pin theirs. Parent (thesis version vs campaign run) and threshold attribution. |
 
-The two groups differ only in basis: the saved rules bind the restated
+The two groups differ only in basis: the as-restated group binds the restated
 disclosure for the same fiscal period, and the test asserts exactly that.
 
 ### 1.4 Plan fidelity on held-out questions

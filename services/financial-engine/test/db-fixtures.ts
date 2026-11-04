@@ -43,6 +43,7 @@ export const IDS = {
 
 export const HASH = { v1: "1".repeat(64), v2: "2".repeat(64), private: "3".repeat(64), proof: "9".repeat(64) } as const;
 export const ORIGINAL_REVENUE = "383285000000.123456789012345678";
+export const RESTATED_REVENUE = "383000000000";
 
 export async function engineDatabase(t: TestContext, prefix: string): Promise<Client> {
   const { databaseUrl } = await bootstrapDatabase(t, prefix);
@@ -96,7 +97,7 @@ async function seedEvidence(db: Client): Promise<void> {
                        value_num, unit, currency, scale, as_of, reported_at, observed_at, source_id, method, verification_status,
                        freshness_class, coverage_level, confidence, supersedes, superseded_by) values
       ${fact(IDS.original, IDS.revenue, IDS.sourceV1, ORIGINAL_REVENUE, 2023, { superseded_by: IDS.restated })},
-      ${fact(IDS.restated, IDS.revenue, IDS.sourceV2, "383000000000", 2023, { supersedes: IDS.original })},
+      ${fact(IDS.restated, IDS.revenue, IDS.sourceV2, RESTATED_REVENUE, 2023, { supersedes: IDS.original })},
       ${fact(IDS.fy2022, IDS.revenue, IDS.sourceV1, "365817000000", 2022)},
       ${fact(IDS.grossProfit2023, IDS.grossProfit, IDS.sourceV1, "169148000000", 2023)},
       ${fact(IDS.privateB, IDS.revenue, IDS.privateSource, "5", 2023)};
@@ -120,7 +121,7 @@ async function seedEvidence(db: Client): Promise<void> {
   await published(IDS.privateSource, HASH.private, "2024-01-05");
   for (const [factId, token, relation] of [
     [IDS.original, ORIGINAL_REVENUE, "original"],
-    [IDS.restated, "383000000000", "economic_restatement"],
+    [IDS.restated, RESTATED_REVENUE, "economic_restatement"],
     [IDS.fy2022, "365817000000", "original"],
     [IDS.grossProfit2023, "169148000000", "original"],
     [IDS.privateB, "5", "original"],

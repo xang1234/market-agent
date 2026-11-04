@@ -14,11 +14,14 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  boundPeriodText,
   createRuntimeAuthority,
   dependencyClosure,
   hashCanonical,
   lowercaseUnlessAcronym,
   operationDependencies,
+  resolveMetricDefinition,
+  type BoundFactInputV1,
   type FinancialPlanV1,
   type FinancialRuntimeAuthority,
   type FinancialSubjectRef,
@@ -474,7 +477,7 @@ async function planTurn(
     origin: { kind: "chat_request", ref: `chat:${context.threadId}:${context.turnId ?? context.runId}` },
     knowledge_cutoff: cutoff.toISOString(),
     cutoff_timezone: "UTC",
-    reporting_basis: "as_reported",
+    reporting_basis: "as_restated",
     freshness_max_age_days: null,
     authority,
     parent_limits: {},
@@ -688,7 +691,7 @@ function persistAssistantMessage(
 ): PersistParentArtifact {
   return async (tx, publication) => {
     const { scope, reading } = turn;
-    const plan = scope === null && reading === null ? null : await findPlanForRequest(tx.client, request);
+    const plan = await findPlanForRequest(tx.client, request);
     // A plan member the turn gave no label is a peer the overview selected. The
     // saved plan says so, as a retry that resumes the run does not plan again.
     const answeredPeers = plan?.subjects.members.some((member) => !turn.labels.has(member.subject_ref.id.toLowerCase())) ?? false;
@@ -707,6 +710,7 @@ function persistAssistantMessage(
     const replaced = scope === null ? null : periodNote(scope, shownPeriod);
     const chosen = turn.deterministic();
     const defaults = chosen === null || reading === null || scope === null || plan === null ? [] : defaultsNote(chosen, reading, scope, shownPeriod, plan.subjects.members.length);
+    const restated = await restatedFigures(tx.client, publication.run_id, companyNames);
     const note = [
       ...(turn.notFound.length === 0 ? [] : [`No company matched ${labelList(turn.notFound)}.`]),
       ...(turn.carried.length === 0 ? [] : [`${labelList(turn.carried)} ${turn.carried.length > 1 ? "are" : "is"} carried from the previous answer.`]),
@@ -714,6 +718,7 @@ function persistAssistantMessage(
       ...defaults,
       ...(reading === null ? [UNCHECKED] : missing.length === 0 ? [] : [`Not covered by this answer: ${missing.join("; ")}.`]),
       ...(stillShown.length === 0 ? [] : [`Still shown as an input to another figure: ${labelList(stillShown)}.`]),
+      ...(restated.length === 0 ? [] : [`Restated by a later filing, so not as first reported: ${labelList(restated)}.`]),
     ].join(" ");
     const blocks = [
       publication.block,
@@ -756,6 +761,20 @@ function persistAssistantMessage(
     // As any saved message does, so the thread never points at a replaced gap's snapshot.
     await tx.client.query(`update chat_threads set latest_snapshot_id = $2::uuid, updated_at = now() where thread_id = $1::uuid`, [threadId, publication.snapshot_id]);
   };
+}
+
+// The reported figures an answer took from a restatement. The superseded number
+// is not named: a plan has one basis, so the engine has not certified it.
+async function restatedFigures(client: SqlExecutor, runId: string, names: ReadonlyMap<string, string>): Promise<string[]> {
+  const { rows } = await client.query<{ bound_payload: BoundFactInputV1 }>(
+    `select i.bound_payload from financial_run_inputs i join facts f on f.fact_id = i.fact_id
+      where i.run_id = $1 and f.method = 'restated' order by i.input_slot`,
+    [runId],
+  );
+  return [...new Set(rows.map(({ bound_payload: { subject_ref, metric, period } }) => {
+    const measure = lowercaseUnlessAcronym(resolveMetricDefinition(metric.metric_key)?.label ?? metric.metric_key);
+    return `${names.get(subject_ref.id.toLowerCase()) ?? subject_ref.id}'s ${measure} in ${boundPeriodText(period, period.kind === "instant")}`;
+  }))];
 }
 
 // A read a statement error fails rolls back to its savepoint, so the
