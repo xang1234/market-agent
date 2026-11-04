@@ -149,7 +149,7 @@ test("EPS a year apart, with a split between their filings, changes on one basis
 
 test("a later 10-K's figure is the earlier one restated by the splits between their filings, at the finer decimal place", () => {
   const explained = (earlier: string, later: string, valueKind: "per_share" | "flow" = "per_share", laterFiled = "2025-02-26") =>
-    explainedBySplits({ earlier: { value: earlier, as_filed_on: "2024-02-21", rounding: 0 }, later: { value: later, as_filed_on: laterFiled, rounding: 0 }, value_kind: valueKind, splits: NVDA_SPLITS });
+    explainedBySplits({ earlier: { value: earlier, as_filed_on: "2024-02-21", rounding: -2 }, later: { value: later, as_filed_on: laterFiled, rounding: -2 }, value_kind: valueKind, splits: NVDA_SPLITS });
   // 11.93 / 10 is 1.193, presented as 1.19. 12.05 / 10 is 1.205, half way, so 1.20 and 1.21 both state it.
   assert.deepEqual([explained("11.93", "1.19"), explained("12.05", "1.21"), explained("12.05", "1.20")], [true, true, true]);
   // 1.2 is read at the finer place, as 1.20.
@@ -185,8 +185,8 @@ test("a share count rounded differently is the same count, at the coarser of the
 test("a reverse split scales a decimal's rounding up, as a split scales a count's", () => {
   const explained = (earlier: string, later: string) =>
     explainedBySplits({
-      earlier: { value: earlier, as_filed_on: "2021-04-27", rounding: 0 },
-      later: { value: later, as_filed_on: "2022-04-26", rounding: 0 },
+      earlier: { value: earlier, as_filed_on: "2021-04-27", rounding: -2 },
+      later: { value: later, as_filed_on: "2022-04-26", rounding: -2 },
       value_kind: "per_share",
       splits: [{ execution_date: "2021-08-02", split_from: "8", split_to: "1" }],
     });
@@ -195,16 +195,16 @@ test("a reverse split scales a decimal's rounding up, as a split scales a count'
 });
 
 test("a filing's rounding is its finest figure for the concept, from thousands to millions, when it states enough to tell", () => {
-  assert.equal(filingRounding(["16000000000", "12345000000"]), 6);
-  assert.equal(filingRounding(["16000000000", "12345678000"]), 3);
-  assert.equal(filingRounding(["16053100000", "16000000000"]), 5);
-  assert.equal(filingRounding(["16000000000", "12345678"]), 0);
-  assert.equal(filingRounding(["1000", "100"]), 0, "a hundred is no rounding");
-  assert.equal(filingRounding(["1.23", "1.5"]), 0, "a decimal is read at its own places");
-  assert.equal(filingRounding(["700000000000", "800000000000"]), 6, "never coarser than millions");
-  assert.equal(filingRounding(["16000000000"]), null);
-  assert.equal(filingRounding(["16000000000", "16000000000", "0"]), null, "a repeat or a zero shows nothing");
-  assert.equal(filingRounding([]), null);
+  assert.equal(filingRounding(["16000000000", "12345000000"], "flow"), 6);
+  assert.equal(filingRounding(["16000000000", "12345678000"], "flow"), 3);
+  assert.equal(filingRounding(["16053100000", "16000000000"], "flow"), 5);
+  assert.equal(filingRounding(["16000000000", "12345678"], "flow"), 0);
+  assert.equal(filingRounding(["1000", "100"], "flow"), 0, "a hundred is no rounding");
+  assert.equal(filingRounding(["1.23", "1.5"], "flow"), -2, "a decimal is read at its own places");
+  assert.equal(filingRounding(["700000000000", "800000000000"], "flow"), 6, "never coarser than millions");
+  assert.equal(filingRounding(["16000000000"], "flow"), null);
+  assert.equal(filingRounding(["16000000000", "16000000000", "0"], "flow"), null, "a repeat or a zero shows nothing");
+  assert.equal(filingRounding([], "flow"), null);
 });
 
 test("a per-share figure's rounding is its filing's finest stated places, never its own zeros", () => {
@@ -257,7 +257,7 @@ test("two figures are one within half the coarser of their filings' roundings", 
   assert.equal(same("16000000000", 3, "15999800000", 3), false, "a thousands filer's round figure is in thousands");
   assert.equal(same("100", 0, "100", 0), true);
   assert.equal(same("100", 0, "95", 0), false);
-  assert.equal(same("1.23", 0, "1.2", 0), false);
+  assert.equal(same("1.23", -2, "1.2", -2), false);
   // A filing too short to tell is exact, unless its own zeros could hide the difference: then nobody can tell.
   assert.equal(same("16053000000", null, "16053000000", null), true);
   assert.equal(same("16053123000", 3, "16053000000", null), null);
@@ -289,7 +289,7 @@ test("a sum is off by each figure's own half unit, and a filing too short to tel
 
 test("an earlier figure as stored is read whole, though its text is longer than a source token may be (#401)", () => {
   const explained = (earlier: string, later: string) =>
-    explainedBySplits({ earlier: { value: earlier, as_filed_on: "2024-02-21", rounding: 0 }, later: { value: later, as_filed_on: "2025-02-26", rounding: 0 }, value_kind: "per_share", splits: NVDA_SPLITS });
+    explainedBySplits({ earlier: { value: earlier, as_filed_on: "2024-02-21", rounding: null }, later: { value: later, as_filed_on: "2025-02-26", rounding: null }, value_kind: "per_share", splits: NVDA_SPLITS });
   // How Postgres prints a numeric stored from the token 1.234567890123456789e-250: 270 characters.
   const stored = `0.${"0".repeat(249)}1234567890123456789`;
   assert.deepEqual([explained(stored, "1.08"), explained(stored, "1.234567890123456789e-251")], [false, true]);

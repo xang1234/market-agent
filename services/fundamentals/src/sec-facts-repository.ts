@@ -36,7 +36,7 @@ import {
   type SecValueLocation,
 } from "./sec-edgar.ts";
 import type { DerivationProofV1, NoncontrollingInterestInferenceV1 } from "../../financial-core/src/contracts.ts";
-import { resolveMetricDefinition } from "../../financial-core/src/definitions.ts";
+import { resolveMetricDefinition, type MetricValueKind } from "../../financial-core/src/definitions.ts";
 import { derivationValue } from "../../financial-core/src/derivation.ts";
 import type { ShareBasis } from "../../financial-core/src/evidence-vocabulary.ts";
 import { explainedBySplits, filingRounding, sameRoundedFigure, splitHistoryCovers, splitsRestate, sumWithinRounding, type RoundedFigure } from "../../financial-core/src/split-adjustment.ts";
@@ -1430,7 +1430,7 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
     const values = usGaap[concept!]?.units?.[unit!] ?? [];
     const originalFiled = values.find((value) => value.accn === originalAccession)?.filed;
     if (originalFiled === undefined) continue;
-    const roundings = roundingsByValues.get(values) ?? filingRoundings(values);
+    const roundings = roundingsByValues.get(values) ?? filingRoundings(values, resolveMetricDefinition(original.metric_key)?.value_kind ?? "per_share");
     roundingsByValues.set(values, roundings);
     const { derivation } = original;
     const record = async (later: LaterStatement, relation: LaterRelation | null) => {
@@ -1536,12 +1536,12 @@ function inputsGive(derivation: DerivationProofV1, inputs: ReadonlyArray<Rounded
 /** Each filing's rounding of one concept and unit (filingRounding). */
 type FilingRoundings = ReadonlyMap<string, number | null>;
 
-function filingRoundings(values: ReadonlyArray<SecConceptValue>): FilingRoundings {
+function filingRoundings(values: ReadonlyArray<SecConceptValue>, valueKind: MetricValueKind): FilingRoundings {
   const tokens = new Map<string, string[]>();
   for (const { accn, val_token } of values) {
     if (val_token !== undefined) tokens.set(accn, [...(tokens.get(accn) ?? []), val_token]);
   }
-  return new Map([...tokens].map(([accn, stated]) => [accn, filingRounding(stated)]));
+  return new Map([...tokens].map(([accn, stated]) => [accn, filingRounding(stated, valueKind)]));
 }
 
 type RestatementInput = Readonly<{

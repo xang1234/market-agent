@@ -100,30 +100,39 @@ export function restateToReference(input: {
  */
 export type RoundedFigure = Readonly<{ value: string; rounding: number | null }>;
 
+/** A token drops its zeros, so a per-share figure shows its filing's places only from cents down. */
+const CENTS = -2;
+
 /**
  * The power of ten a filing rounds a concept to: that of the finest figure it
  * states for the concept and unit, as companyfacts drops a filing's stated
  * rounding and one figure's zeros may be chance. Null when the filing states
- * too few figures to tell. Filers round whole numbers from thousands to
- * millions, so anything finer, a decimal among them, is read exactly.
+ * too few figures to tell, or per-share figures that show no cents. Money and
+ * share counts round whole numbers from thousands to millions, and nothing else
+ * does, so a per-share figure's zeros are never rounding.
  */
-export function filingRounding(tokens: Iterable<string>): number | null {
+export function filingRounding(tokens: Iterable<string>, valueKind: MetricValueKind): number | null {
   const figures = [...new Set(tokens)].flatMap((token) => {
     const parsed = parseFinancialDecimal(token);
     return parsed.ok && parsed.value.coefficient !== 0n ? [parsed.value] : [];
   });
-  return figures.length < 2 ? null : Math.min(...figures.map(figureRounding));
+  if (figures.length < 2) return null;
+  const finest = Math.min(...figures.map((figure) => figureRounding(figure, valueKind)));
+  return statesPlaces(valueKind) && finest > CENTS ? null : finest;
 }
 
-function figureRounding({ scale }: ExactDecimal): number {
-  return -scale < 3 ? 0 : Math.min(-scale, 6);
+const statesPlaces = (valueKind: MetricValueKind) => valueKind === "per_share" || valueKind === "price";
+
+function figureRounding({ scale }: ExactDecimal, valueKind: MetricValueKind): number {
+  const place = 0 - scale;
+  return place < 3 || statesPlaces(valueKind) ? Math.min(place, 0) : Math.min(place, 6);
 }
 
 // The coarsest rounding one figure could be in when nothing beside it shows its
 // filing's: three digits stay above it, so 1,000 then 990 is plainly a change.
 function loneFigureRounding(figure: ExactDecimal): number {
   const digits = (figure.coefficient < 0n ? -figure.coefficient : figure.coefficient).toString().length - figure.scale;
-  const rounding = Math.min(figureRounding(figure), digits - 3);
+  const rounding = Math.min(figureRounding(figure, "flow"), digits - 3);
   return rounding < 3 ? 0 : rounding;
 }
 
@@ -132,12 +141,12 @@ function loneFigureRounding(figure: ExactDecimal): number {
  * listing's splits between their filing dates. A filing presents a figure
  * rounded, as NVDA's FY2025 10-K presents FY2024 diluted EPS of 11.93 as 1.19
  * after the 10-for-1 split, so the restated earlier figure must round to the
- * later one at the finer of their decimal places, or at the coarser of their
- * filings' roundings, the splits scaling the earlier filing's. A value half way
- * between rounds either way. The earlier figure may be a stored value's text,
- * which can run longer than a source token may. Null when either figure is not
- * a decimal, splits cannot restate this kind of value, or only a filing too
- * short to show its rounding could explain the difference.
+ * later one at the coarser of their filings' roundings, the splits scaling the
+ * earlier filing's. A value half way between rounds either way. The earlier
+ * figure may be a stored value's text, which can run longer than a source token
+ * may. Null when either figure is not a decimal, splits cannot restate this kind
+ * of value, or only a filing too short to show its rounding could explain the
+ * difference.
  */
 export function explainedBySplits(input: {
   earlier: RoundedFigure & Readonly<{ as_filed_on: IsoDate }>;
@@ -165,17 +174,17 @@ function statesAgain(earlier: RoundedFigure, later: RoundedFigure, restate: (val
   const to = parseFinancialDecimal(later.value);
   if (!from.ok || !to.ok) return null;
   const finerPlace = -Math.max(0, from.value.scale, to.value.scale);
-  const half = (earlierExponent: number, laterExponent: number) =>
-    earlierExponent + laterExponent > 0 ? halfOfCoarser(restate, earlierExponent, laterExponent) : halfOfCoarser(restate, finerPlace, finerPlace);
   const start = rationalFromDecimal(from.value);
   const end = rationalFromDecimal(to.value);
   const restated = start === null ? null : restate(start);
   const difference = restated === null || end === null ? null : subtractRationals(restated, end);
   if (difference === null) return null;
-  const known = half(earlier.rounding ?? 0, later.rounding ?? 0);
+  // A filing too short to tell is read at cents, or at its figures' places when finer.
+  const exact = Math.min(finerPlace, CENTS);
+  const known = halfOfCoarser(restate, earlier.rounding ?? exact, later.rounding ?? exact);
   const within = known === null ? null : withinEitherWay(difference, known);
   if (within !== false) return within;
-  const possible = half(earlier.rounding ?? loneFigureRounding(from.value), later.rounding ?? loneFigureRounding(to.value));
+  const possible = halfOfCoarser(restate, earlier.rounding ?? (loneFigureRounding(from.value) || finerPlace), later.rounding ?? (loneFigureRounding(to.value) || finerPlace));
   const hidden = possible === null ? null : withinEitherWay(difference, possible);
   return hidden === false ? false : null;
 }
@@ -204,7 +213,7 @@ function withinEitherWay(difference: ExactRational, half: ExactRational): boolea
  */
 export function sumWithinRounding(stated: RoundedFigure, sum: ExactDecimal, termRoundings: ReadonlyArray<number | null>): boolean {
   const parsed = parseFinancialDecimal(stated.value);
-  const halves = [stated.rounding, ...termRoundings].reduce<bigint>((total, rounding) => total + (rounding ? 5n * 10n ** BigInt(rounding) : 0n), 0n);
+  const halves = [stated.rounding, ...termRoundings].reduce<bigint>((total, rounding) => total + (rounding !== null && rounding > 0 ? 5n * 10n ** BigInt(rounding) : 0n), 0n);
   const tolerance = rationalFromDecimal({ coefficient: halves, scale: 1 });
   const value = parsed.ok ? rationalFromDecimal(parsed.value) : null;
   const total = rationalFromDecimal(sum);
