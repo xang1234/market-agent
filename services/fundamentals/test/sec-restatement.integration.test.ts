@@ -371,6 +371,39 @@ test("SEC restatements", { timeout: 300_000 }, async (t) => {
     assert.equal(await issuer.pick("Q1", AFTER, "as_restated"), "9000123000");
   });
 
+  await t.test("a derived quarter's own line within its inputs' rounding is the same figure while no input has moved", async () => {
+    const issuer = await quarterIssuer();
+    const q1 = issuer.filed(1, "10-Q", "2024-04-23", 2024, "Q1");
+    const q2 = issuer.filed(2, "10-Q", "2024-07-23", 2024, "Q2");
+    const q3 = issuer.filed(3, "10-Q", "2024-10-22", 2024, "Q3");
+    const k = issuer.filed(4, "10-K", "2025-02-03", 2024, "FY");
+    // GE's FY2022 Q4: the year less three rounded quarters is 21,785M, and the 10-K's line 21,786M.
+    await issuer.ingest({
+      Revenues: concept("USD", [q1(...Q1_2024, "17040000000"), q2(...Q2_2024, "18646000000"), q3(...Q3_2024, "19084000000"), k(...FY_2024, "76555000000"), k(...Q4_2024, "21786000000")]),
+    }, ["Q1", "Q2", "Q3", "Q4", "FY"]);
+    assert.deepEqual(await issuer.laterStatements(), []);
+    assert.equal(await issuer.pick("Q4", AFTER, "as_restated"), "21785000000");
+  });
+
+  await t.test("a derived quarter's own line is a restatement when an input moved, though by no more than rounding could hide", async () => {
+    const issuer = await quarterIssuer();
+    const q1 = issuer.filed(1, "10-Q", "2024-04-23", 2024, "Q1");
+    const q2 = issuer.filed(2, "10-Q", "2024-07-23", 2024, "Q2");
+    const q3 = issuer.filed(3, "10-Q", "2024-10-22", 2024, "Q3");
+    const k = issuer.filed(4, "10-K", "2025-02-03", 2024, "FY");
+    // GE's FY2024 net income: the 10-K moves Q1 by 2M, and its Q4 line is the year less the moved quarter.
+    await issuer.ingest({
+      NetIncomeLoss: concept("USD", [q1(...Q1_2024, "1537000000"), q2(...Q2_2024, "1200000000"), q3(...Q3_2024, "1300000000"), k(...FY_2024, "5938000000"), k(...Q1_2024, "1539000000"), k(...Q4_2024, "1899000000")]),
+      Revenues: concept("USD", [q1(...Q1_2024, "100"), q2(...Q2_2024, "100"), q3(...Q3_2024, "100"), k(...FY_2024, "400")]),
+    }, ["Q1", "Q2", "Q3", "Q4", "FY"]);
+    const netIncome = await issuer.laterStatements();
+    assert.deepEqual(netIncome.filter((row) => row[0] === "net_income"), [
+      ["net_income", "Q1", "1539000000", "2025-02-03", "economic_restatement"],
+      ["net_income", "Q4", "1899000000", "2025-02-03", "economic_restatement"],
+    ]);
+    assert.equal(await issuer.pick("Q4", AFTER, "as_restated", "net_income"), "1899000000");
+  });
+
   await t.test("a figure's own zeros are no rounding: 16,000M then 15,800M is a restatement", async () => {
     const issuer = await quarterIssuer();
     const k = issuer.filed(1, "10-K", "2025-02-03", 2024, "FY");
