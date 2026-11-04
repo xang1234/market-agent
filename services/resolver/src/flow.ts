@@ -55,6 +55,12 @@ export type SearchToSubjectRequest = {
 export type SearchToSubjectOptions = {
   tickerDiscoveryProvider?: TickerDiscoveryProvider;
   discoveryLogger?: Pick<Console, "warn">;
+  // When each CIK-less known ticker last ran discovery. Without it a known
+  // ticker never runs discovery. Resolve runs per keystroke against a
+  // rate-limited Polygon, so the ceiling is one Polygon call per CIK-less
+  // ticker per minute, whether the call succeeds or fails.
+  ciklessDiscoveryAttempts?: Map<string, number>;
+  now?: () => number;
 };
 
 export type CandidateSearchResult = {
@@ -318,7 +324,9 @@ async function resolveTickerWithDiscovery(
   options: SearchToSubjectOptions,
 ): Promise<ResolverEnvelope> {
   const initial = await resolveByTicker(db, ticker);
-  if (!isNotFound(initial) || initial.reason !== "unknown_ticker" || !options.tickerDiscoveryProvider) {
+  if (!options.tickerDiscoveryProvider) return initial;
+  if (isNotFound(initial) && initial.reason !== "unknown_ticker") return initial;
+  if (!isNotFound(initial) && !(await claimCiklessDiscovery(db, ticker, options))) {
     return initial;
   }
 
@@ -334,6 +342,47 @@ async function resolveTickerWithDiscovery(
     logger.warn("ticker discovery failed", error);
     return initial;
   }
+}
+
+const CIKLESS_DISCOVERY_COOLDOWN_MS = 60_000;
+
+// A locally known ticker whose issuers all lack a CIK has no fundamentals
+// coverage (#403), so it runs discovery once per cooldown. The due check repeats
+// after the CIK query because concurrent resolves of one ticker both pass the
+// first one, and only the synchronous check-and-set lets one of them claim it.
+async function claimCiklessDiscovery(
+  db: QueryExecutor,
+  ticker: string,
+  options: SearchToSubjectOptions,
+): Promise<boolean> {
+  const attempts = options.ciklessDiscoveryAttempts;
+  if (!attempts) return false;
+  const now = options.now ?? Date.now;
+  const normalized = normalizedTicker(ticker);
+  const due = (at: number) => {
+    const last = attempts.get(normalized);
+    return last === undefined || at - last >= CIKLESS_DISCOVERY_COOLDOWN_MS;
+  };
+  if (!due(now())) return false;
+  const result = await db.query<{ has_cik: boolean | null }>(
+    `select bool_or(iss.cik is not null) as has_cik
+       from listings l
+       join instruments i on i.instrument_id = l.instrument_id
+       join issuers iss on iss.issuer_id = i.issuer_id
+      where l.ticker = $1
+        and (l.active_from is null or l.active_from <= now())
+        and (l.active_to is null or l.active_to > now())`,
+    [normalized],
+  );
+  if (result.rows[0]?.has_cik !== false) return false;
+  const at = now();
+  if (!due(at)) return false;
+  attempts.set(normalized, at);
+  return true;
+}
+
+function normalizedTicker(ticker: string): string {
+  return ticker.trim().toUpperCase();
 }
 
 async function handoffFromResolved(

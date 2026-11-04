@@ -284,6 +284,8 @@ start_process() {
   )
 }
 
+# A cold Python sidecar on a loaded machine can take over 30s to bind, and a false
+# timeout stops the whole stack (#403). A crash still fails at once below.
 wait_for_service() {
   local name="$1"
   local port="$2"
@@ -291,7 +293,7 @@ wait_for_service() {
   local log_file="$LOG_DIR/$name.log"
   local attempt
 
-  for attempt in $(seq 1 30); do
+  for attempt in $(seq 1 120); do
     if service_owns_port "$name" "$port"; then
       return
     fi
@@ -331,6 +333,35 @@ wait_for_postgres() {
   done
 
   echo "postgres did not become ready" >&2
+  return 1
+}
+
+# Nothing else creates the evidence bucket in the dev MinIO (#404). MinIO answers
+# 409 when the bucket already exists, 000 (no connection) while it starts, and
+# another 4xx, such as 403 for wrong keys, that no retry fixes. The S3 variables
+# get fallbacks here, not in the defaults block, because the evidence CLIs fail
+# fast on a missing S3_REGION and an exported default would hide that.
+ensure_s3_bucket() {
+  [[ -n "${S3_ENDPOINT:-}" && -n "${S3_BUCKET:-}" ]] || return 0
+  local attempt code
+  for attempt in $(seq 1 30); do
+    code="$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' -X PUT \
+      --aws-sigv4 "aws:amz:${S3_REGION:-us-east-1}:s3" \
+      --user "${S3_ACCESS_KEY_ID:-}:${S3_SECRET_ACCESS_KEY:-}" "$S3_ENDPOINT/$S3_BUCKET" || true)"
+    if [[ "$code" == "200" || "$code" == "409" ]]; then
+      return
+    fi
+    if [[ "$code" == 4?? ]]; then
+      break
+    fi
+    sleep 1
+  done
+
+  local hint=""
+  if [[ "$code" == "403" ]]; then
+    hint="; check S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY"
+  fi
+  echo "could not create S3 bucket $S3_BUCKET at $S3_ENDPOINT (HTTP $code$hint)" >&2
   return 1
 }
 
@@ -703,6 +734,12 @@ up() {
   fi
 
   if ! wait_for_postgres; then
+    cleanup_failed_up
+    return 1
+  fi
+
+  # An empty compose_services starts every container, minio included.
+  if [[ -z "$compose_services" ]] && ! ensure_s3_bucket; then
     cleanup_failed_up
     return 1
   fi

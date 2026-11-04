@@ -908,6 +908,108 @@ test("a failed full up leaves the containers alone when they were all already ru
   assert.deepEqual(lines("compose:"), ["up -d"]);
 });
 
+const S3_ENV = {
+  S3_ENDPOINT: "http://127.0.0.1:9000",
+  S3_REGION: "us-east-1",
+  S3_BUCKET: "evidence-blobs",
+  S3_ACCESS_KEY_ID: "minioadmin",
+  S3_SECRET_ACCESS_KEY: "minioadmin",
+};
+
+test("a full up creates the evidence bucket, retrying until MinIO answers, and takes an existing one as done", async () => {
+  // curl runs in a command substitution, so the stub counts its calls in the trace file.
+  const { result, lines } = await traceUp(S3_ENV, [
+    "sleep(){ :; }",
+    'curl(){ printf "curl:%s\\n" "$*" >> "$TRACE_FILE"; if [[ "$(grep -c "^curl:" "$TRACE_FILE")" -ge 2 ]]; then printf 409; else printf 000; fi; }',
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(lines("curl:"), [
+    "-s --max-time 5 -o /dev/null -w %{http_code} -X PUT --aws-sigv4 aws:amz:us-east-1:s3 --user minioadmin:minioadmin http://127.0.0.1:9000/evidence-blobs",
+    "-s --max-time 5 -o /dev/null -w %{http_code} -X PUT --aws-sigv4 aws:amz:us-east-1:s3 --user minioadmin:minioadmin http://127.0.0.1:9000/evidence-blobs",
+  ]);
+  assert.deepEqual(lines("start:"), FULL_SERVICES);
+});
+
+test("a full up rolls back at once when MinIO refuses the evidence bucket", async () => {
+  const { result, lines } = await traceUp(S3_ENV, [
+    "sleep(){ :; }",
+    'curl(){ printf "curl:\\n" >> "$TRACE_FILE"; printf 403; }',
+  ]);
+  assert.notEqual(result.code, 0);
+  assert.match(
+    result.stderr,
+    /could not create S3 bucket evidence-blobs at http:\/\/127\.0\.0\.1:9000 \(HTTP 403; check S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY\)/,
+  );
+  assert.equal(lines("curl:").length, 1);
+  assert.deepEqual(lines("compose:"), ["up -d", "down"]);
+  assert.deepEqual(lines("start:"), []);
+});
+
+test("a service that binds after a slow start on a loaded machine is not treated as failed", async () => {
+  const fixture = await createShellFixture();
+  const result = await runBash(
+    [
+      "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
+      "sleep(){ :; }",
+      "process_running(){ return 0; }",
+      "checks=0",
+      "service_owns_port(){ checks=$((checks + 1)); [[ $checks -gt 90 ]]; }",
+      "wait_for_service dev-providers 4436",
+      'printf "bound after %s checks" "$checks"',
+    ].join("\n"),
+    fixture.root,
+  );
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.stdout.trim(), "bound after 91 checks");
+});
+
+test("a service that never binds still fails, after a bounded wait", async () => {
+  const fixture = await createShellFixture();
+  const result = await runBash(
+    [
+      "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
+      "sleep(){ :; }",
+      "process_running(){ return 0; }",
+      "service_owns_port(){ return 1; }",
+      "wait_for_service dev-providers 4436",
+    ].join("\n"),
+    fixture.root,
+  );
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /dev-providers did not bind 127\.0\.0\.1:4436 in time/);
+});
+
+test("a full up rolls back at once on any other 4xx from MinIO", async () => {
+  const { result, lines } = await traceUp(S3_ENV, [
+    "sleep(){ :; }",
+    'curl(){ printf "curl:\\n" >> "$TRACE_FILE"; printf 400; }',
+  ]);
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /could not create S3 bucket evidence-blobs at http:\/\/127\.0\.0\.1:9000 \(HTTP 400\)\n/);
+  assert.equal(lines("curl:").length, 1);
+  assert.deepEqual(lines("compose:"), ["up -d", "down"]);
+});
+
+test("the bucket step survives set -u when .env.dev sets no S3 region or keys", async () => {
+  const { result, lines } = await traceUp(
+    { S3_ENDPOINT: "http://127.0.0.1:9000", S3_BUCKET: "evidence-blobs" },
+    ['curl(){ printf "curl:%s\\n" "$*" >> "$TRACE_FILE"; printf 200; }'],
+  );
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(lines("curl:"), [
+    "-s --max-time 5 -o /dev/null -w %{http_code} -X PUT --aws-sigv4 aws:amz:us-east-1:s3 --user : http://127.0.0.1:9000/evidence-blobs",
+  ]);
+});
+
+test("DEV_PROFILE=chat parks minio, so up creates no bucket", async () => {
+  const { result, lines } = await traceUp({ ...S3_ENV, DEV_PROFILE: "chat" }, [
+    'curl(){ printf "curl:%s\\n" "$*" >> "$TRACE_FILE"; printf 200; }',
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(lines("curl:"), []);
+  assert.deepEqual(lines("start:"), CHAT_SERVICES);
+});
+
 test("switching chat to full waits for the stopped app to free the shared web port before checking it", async () => {
   const { result, trace } = await traceUp({}, [
     'stop_process(){ printf "stop:%s\\n" "$1" >> "$TRACE_FILE"; kill "$(cat "$PID_DIR/$1.pid")" 2>/dev/null; rm -f "$PID_DIR/$1.pid"; }',

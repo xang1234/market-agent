@@ -212,6 +212,7 @@ export function createResolverServer(
   db: QueryExecutor,
   options: SearchToSubjectOptions = {},
 ): Server {
+  const serverOptions = { ciklessDiscoveryAttempts: new Map<string, number>(), ...options };
   return createServer(async (req, res) => {
     try {
       const route = req.method === "POST" ? req.url : null;
@@ -237,7 +238,7 @@ export function createResolverServer(
           return;
         }
 
-        const response = await handleResolveSubjects(db, validation.request, options);
+        const response = await handleResolveSubjects(db, validation.request, serverOptions);
         respondJson(res, 200, response);
         return;
       }

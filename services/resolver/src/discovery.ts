@@ -179,6 +179,8 @@ export async function upsertDiscoveredListing(
   db: QueryExecutor,
   listing: DiscoveredListing,
 ): Promise<SubjectRef & { kind: "listing" }> {
+  const kept = await keepExistingListing(db, listing);
+  if (kept) return { kind: "listing", id: kept };
   const { instrument_id } = await upsertDiscoveredInstrument(db, listing);
   const listingId = await upsertListing(db, instrument_id, listing);
   return { kind: "listing", id: listingId };
@@ -393,6 +395,69 @@ async function fillInstrumentIdentityFields(
       where instrument_id = $1`,
     [instrumentId, values.isin ?? null, values.figiComposite ?? null, values.cusip ?? null],
   );
+}
+
+// A name-only entry (the reference bundle) must not move an active listing off
+// its CIK issuer (#403), so the listing keeps its instrument unless the entry's
+// cik/lei/isin/figi names a different issuer or instrument. The update
+// never writes instrument_id, so it cannot undo a concurrent identity move.
+// Providers can disagree on a ticker's MIC (Polygon's ARCX against the bundle's
+// XNYS), so with no listing on the entry's MIC, the ticker's only active listing
+// counts when it trades in the entry's currency. That listing keeps its own MIC's
+// timezone.
+async function keepExistingListing(db: QueryExecutor, listing: DiscoveredListing): Promise<string | null> {
+  const issuer = issuerIdentityFromListing(listing);
+  const instrument = instrumentIdentityFromListing(listing);
+  const existing = await db.query<{ listing_id: string; instrument_id: string; issuer_id: string; mic: string }>(
+    `with active as (
+       select listing_id from listings
+        where ticker = $2
+          and (active_from is null or active_from <= now())
+          and (active_to is null or active_to > now())
+     )
+     select l.listing_id, l.instrument_id, i.issuer_id, l.mic
+       from listings l
+       join instruments i on i.instrument_id = l.instrument_id
+       join issuers iss on iss.issuer_id = i.issuer_id
+      where l.ticker = $2
+        and ((l.mic = $1 and l.active_from is null)
+          or (l.trading_currency = $7
+            and l.listing_id in (select listing_id from active)
+            and (select count(*) from active) = 1
+            and not exists (
+              select 1 from listings same where same.mic = $1 and same.ticker = $2 and same.active_from is null)))
+        and ($3::text is null or (coalesce(iss.cik, $3) = $3 and not exists (
+              select 1 from issuers other where other.cik = $3 and other.issuer_id <> iss.issuer_id)))
+        and ($4::text is null or (coalesce(upper(iss.lei), $4) = $4 and not exists (
+              select 1 from issuers other where upper(other.lei) = $4 and other.issuer_id <> iss.issuer_id)))
+        and ($5::text is null or coalesce(i.isin, $5) = $5)
+        and ($6::text is null or coalesce(i.figi_composite, $6) = $6)
+        and not exists (
+              select 1 from instruments other
+               where other.instrument_id <> l.instrument_id
+                 and (other.isin = $5 or other.figi_composite = $6))
+      limit 1`,
+    [
+      listing.mic,
+      listing.ticker,
+      issuer.cik ?? null,
+      issuer.lei ?? null,
+      instrument.isin ?? null,
+      instrument.figiComposite ?? null,
+      listing.trading_currency,
+    ],
+  );
+  const row = existing.rows[0];
+  if (!row) return null;
+  await fillIssuerIdentityFields(db, row.issuer_id, issuer);
+  await fillInstrumentIdentityFields(db, row.instrument_id, instrument);
+  if (row.mic === listing.mic) {
+    await db.query(
+      `update listings set trading_currency = $2, timezone = $3, updated_at = now() where listing_id = $1`,
+      [row.listing_id, listing.trading_currency, listing.timezone],
+    );
+  }
+  return row.listing_id;
 }
 
 async function upsertListing(

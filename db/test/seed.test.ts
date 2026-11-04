@@ -382,3 +382,33 @@ test("seed does not provision provider-owned ticker identities", { timeout: 1200
   assert.equal(snapshot.devListingCount, "0");
   assert.equal(snapshot.devListingsDigest, "");
 });
+
+test("seed provisions the dev-api fixture analyze templates for the mock user, once", { timeout: 180000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for db seed integration coverage");
+    return;
+  }
+
+  const { containerName, databaseUrl } = await bootstrapDatabase(t, "fix-404-analyze-templates");
+
+  for (const attempt of [1, 2]) {
+    const seedResult = runSeed(databaseUrl);
+    assert.equal(seedResult.status, 0, `seed run ${attempt}: ${seedResult.stderr || seedResult.stdout}`);
+  }
+
+  // Same ids as services/dev-api/src/analyze-fixture.ts, which the web falls back to.
+  assert.equal(
+    queryValue(
+      containerName,
+      `select string_agg(
+                template_id || '|' || user_id || '|' || name || '|' || prompt_template || '|' ||
+                source_categories::text || '|' || version,
+                E'\\n' order by template_id)
+         from analyze_templates`,
+    ),
+    [
+      `11111111-1111-4111-8111-111111111111|${DEV_MOCK_USER_ID}|Earnings template|Assess revenue quality, margins, cash conversion, and management commentary.|["filings", "transcripts", "news"]|1`,
+      `22222222-2222-4222-8222-222222222222|${DEV_MOCK_USER_ID}|Variant view|Compare the market narrative with evidence-backed counterpoints.|["filings", "news", "transcripts"]|1`,
+    ].join("\n"),
+  );
+});
