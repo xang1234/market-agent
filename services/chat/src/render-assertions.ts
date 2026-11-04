@@ -11,7 +11,7 @@
 // inference resting on comparisons carries their checked results in its label.
 
 import type { Assertion } from "./assertions.ts";
-import { checkComparison, metricLabel, periodText as quarterText, type CheckedComparison, type TrendResult } from "./comparisons.ts";
+import { checkedComparisons, metricLabel, periodText as quarterText, type CheckedComparison, type TrendResult } from "./comparisons.ts";
 import type { EvidencePacket, PacketClaim, PacketFigure } from "./evidence-packet.ts";
 import { createSealer, type Sealer, type Segment } from "./prose-refs.ts";
 
@@ -101,12 +101,14 @@ function templateSegments(
     case "management_attribution":
       segments.push(...attributionSegments(claims, quote));
       break;
-    case "comparison": {
-      const checked = checkComparison(assertion, assertion.evidence, packet);
+    case "comparison":
       // Accepted assertions passed this check; a failure here renders nothing.
-      if ("comparison" in checked) comparisonSegments(checked.comparison, { text, value, owner, push: (segment) => segments.push(segment) });
+      // A claim over several metrics reads as the comparisons it stands for.
+      checkedComparisons(assertion, packet).forEach((comparison, i) => {
+        if (i > 0) text("\n\n");
+        comparisonSegments(comparison, { text, value, owner, push: (segment) => segments.push(segment) });
+      });
       break;
-    }
     case "unknown_cause": {
       const changed = [...new Set(figures.map((figure) => `${owner(figure)}${metricLabel(figure.metric)}`))];
       text(`The figures do not show why ${changed.join(" and ")} changed.`);
@@ -167,10 +169,10 @@ export function checkedResults(
   const clauses = new Map<string, string[]>();
   for (const n of assertion.supports ?? []) {
     const entry = accepted.find((candidate) => candidate.index === n && candidate.kind === "comparison");
-    const result = entry && checkComparison(entry, entry.evidence, packet);
-    if (!result || !("comparison" in result)) continue;
-    const [clause, metric] = resultClause(result.comparison, (figure) => ownerOf(figure, packet));
-    clauses.set(clause, [...(clauses.get(clause) ?? []), ...(metric ? [metric] : [])]);
+    for (const comparison of entry ? checkedComparisons(entry, packet) : []) {
+      const [clause, metric] = resultClause(comparison, (figure) => ownerOf(figure, packet));
+      clauses.set(clause, [...(clauses.get(clause) ?? []), ...(metric ? [metric] : [])]);
+    }
   }
   return [...clauses].map(([clause, metrics]) => (metrics.length > 0 ? `${clause} ${new Intl.ListFormat("en").format(metrics)}` : clause));
 }
@@ -305,8 +307,7 @@ export function calendarNote(assertions: ReadonlyArray<Assertion>, packet: Evide
   const shown = assertions.flatMap((assertion) => packet.figures.filter((figure) => assertion.evidence.includes(figure.id)));
   const compared = assertions.flatMap((assertion) => {
     if (assertion.kind !== "comparison") return [];
-    const checked = checkComparison(assertion, assertion.evidence, packet);
-    return "comparison" in checked && checked.comparison.axis === "cohort" ? [checked.comparison.figures] : [];
+    return checkedComparisons(assertion, packet).flatMap((comparison) => (comparison.axis === "cohort" ? [comparison.figures] : []));
   });
   const apart = (a: PacketFigure, b: PacketFigure) =>
     a.company !== undefined && b.company !== undefined && a.company !== b.company &&

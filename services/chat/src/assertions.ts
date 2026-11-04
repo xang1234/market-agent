@@ -13,7 +13,7 @@
 // The answer is written from the accepted assertions (render-assertions.ts),
 // and the report goes to evals and logs.
 
-import { checkComparison, comparablePeriods, type ComparisonOp } from "./comparisons.ts";
+import { checkClaim, comparablePeriods, type ComparisonOp } from "./comparisons.ts";
 import { figureCompanies, type EvidencePacket } from "./evidence-packet.ts";
 import type { InferenceVerdict } from "./verdicts.ts";
 import { isRecord } from "../../shared/src/http.ts";
@@ -200,19 +200,18 @@ export function checkAssertions(list: unknown[] | null | undefined, packet: Evid
       continue;
     }
     // A comparison's claimed result is derived from its complete eligible
-    // evidence before it may stand (comparisons.ts).
-    const comparison = kind === "comparison" ? checkComparison(item, figureIds, packet) : undefined;
-    if (comparison && "error" in comparison) {
-      reject(index, item, "comparative", comparison.error);
-      continue;
-    }
+    // evidence before it may stand (comparisons.ts), metric by metric: what a
+    // claim got wrong on one metric leaves the others standing.
+    const comparison = kind === "comparison" ? checkClaim(item, figureIds, packet) : undefined;
+    comparison?.errors.forEach((error) => reject(index, item, "comparative", error));
+    if (comparison && !comparison.standing) continue;
     accepted.push({
       index,
       kind,
       text: item.text,
-      evidence,
+      evidence: comparison?.standing?.evidence ?? evidence,
       ...(kind === "analyst_inference" ? { supports, ...(item.subject !== undefined ? { subject: item.subject as string } : {}) } : {}),
-      ...(kind === "comparison" ? { op: item.op as ComparisonOp, result: item.result as string | string[] } : {}),
+      ...(comparison?.standing ? { op: item.op as ComparisonOp, result: comparison.standing.result as string | string[] } : {}),
     });
   }
   accepted.sort((a, b) => a.index - b.index);
