@@ -182,6 +182,18 @@ test("a share count rounded differently is the same count, at the coarser of the
   assert.equal(explained("2494000000", null, "24950000000", 6), false);
 });
 
+test("a reverse split scales a decimal's rounding up, as a split scales a count's", () => {
+  const explained = (earlier: string, later: string) =>
+    explainedBySplits({
+      earlier: { value: earlier, as_filed_on: "2021-04-27", rounding: 0 },
+      later: { value: later, as_filed_on: "2022-04-26", rounding: 0 },
+      value_kind: "per_share",
+      splits: [{ execution_date: "2021-08-02", split_from: "8", split_to: "1" }],
+    });
+  // GE's Q1 2021 basic EPS: -0.33 before its 1-for-8, known to half a cent, is -2.64 known to 4 cents, and its next 10-Q states -2.62.
+  assert.deepEqual([explained("-0.33", "-2.62"), explained("-0.33", "-2.68"), explained("-0.33", "-2.69")], [true, true, false]);
+});
+
 test("a filing's rounding is its finest figure for the concept, from thousands to millions, when it states enough to tell", () => {
   assert.equal(filingRounding(["16000000000", "12345000000"]), 6);
   assert.equal(filingRounding(["16000000000", "12345678000"]), 3);
