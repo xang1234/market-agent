@@ -815,7 +815,7 @@ test('Agents surface loads selected agent findings and activity routes', async (
   try {
     globalThis.fetch = async (input, init) => {
       calls.push(String(input))
-      assert.equal((init?.headers as Record<string, string>)['x-user-id'], USER_ID)
+      if (String(input).startsWith('/v1/agents')) assert.equal((init?.headers as Record<string, string>)['x-user-id'], USER_ID)
       if (String(input) === '/v1/agents') {
         return new Response(JSON.stringify({
           agents: [
@@ -886,6 +886,7 @@ test('Agents surface loads selected agent findings and activity routes', async (
       '/v1/agents/11111111-1111-4111-8111-111111111111/findings',
       '/v1/agents/11111111-1111-4111-8111-111111111111/activity',
       '/v1/agents/11111111-1111-4111-8111-111111111111/thesis',
+      '/v1/subjects/hydrate',
     ].sort())
     assert.match(dom.window.document.body.innerHTML, /Operating margin quality improved/)
     assert.match(dom.window.document.body.innerHTML, /Created 1 source-backed finding/)

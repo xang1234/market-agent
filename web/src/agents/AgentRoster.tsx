@@ -1,3 +1,5 @@
+import { useResource } from '../fetch/resource.ts'
+import { subjectHydration, type SubjectRef } from '../symbol/search.ts'
 import type { AgentRow, AgentRunRow } from './agentRows.ts'
 import { agentRunTicks, latestRunStatus, rosterRunSummary, type RunStatus } from './runStats.ts'
 import { alertRuleLabel, universeLabel } from './agentLabels.ts'
@@ -68,7 +70,7 @@ export function AgentRoster({
                 <p className="mt-2 text-xs text-muted">
                   {agent.enabled ? 'enabled' : 'disabled'} · {agent.cadence}
                 </p>
-                <p className="mt-2 text-xs text-muted">Universe: {universeLabel(agent.universe)}</p>
+                <p className="mt-2 text-xs text-muted">Universe: <UniverseName universe={agent.universe} /></p>
                 <p className="mt-1 text-xs text-muted">Alert rule: {alertRuleLabel(agent.alert_rules)}</p>
                 <RunTimeline ticks={agentRunTicks(runs, agent.agent_id)} />
               </div>
@@ -99,6 +101,23 @@ export function AgentRoster({
       </ul>
     </section>
   )
+}
+
+function UniverseName({ universe }: { universe: AgentRow['universe'] }) {
+  if (universe?.mode !== 'static' || universe.subject_refs.length === 0) return universeLabel(universe)
+  return universe.subject_refs.map((subject, index) => (
+    <span key={`${subject.kind}:${subject.id}`}>
+      {index > 0 ? ', ' : null}
+      <SubjectName subject={subject} />
+    </span>
+  ))
+}
+
+function SubjectName({ subject }: { subject: SubjectRef }) {
+  const hydrated = useResource(subjectHydration, subject)
+  if (hydrated.status === 'idle' || hydrated.status === 'loading') return '…'
+  const name = hydrated.status === 'ready' ? hydrated.data.display_name : undefined
+  return name ?? `${subject.kind}: ${subject.id}`
 }
 
 // Fleet health one-liner under the roster heading — the monitor-first read
