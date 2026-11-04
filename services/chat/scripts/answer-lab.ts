@@ -160,18 +160,19 @@ function delta(before: Row, after: Row): string {
 // ones. rerun: the live judge and repair round (judge), or the repair round
 // alone (repair), read each replay instead, and --update records their
 // replies. judge_input_changed, repair_input_changed: today's answer asks the
-// recorded judge or repair round something else. A live round --update would
+// recorded judge or repair round something else, its prompt aside (see
+// system_prompt_changed, judge_prompt_changed). A live round --update would
 // record is held to rerecord's guard (degradedRound); skipped: why it was not.
 export async function recorded(
   traces: ReadonlyArray<LabeledTrace>,
   update = false,
   rerun?: "judge" | "repair",
   live: Omit<LiveReplay, "rerun"> = { env: liveEnv() },
-): Promise<Array<{ key: string; label: string; metrics: SampleMetrics; differs: boolean; judge_input_changed: boolean; repair_input_changed: boolean; system_prompt_changed: { recorded: string; today: string } | null; judge?: JudgeView; skipped?: string }>> {
+): Promise<Array<{ key: string; label: string; metrics: SampleMetrics; differs: boolean; judge_input_changed: boolean; repair_input_changed: boolean; system_prompt_changed: { recorded: string; today: string } | null; judge_prompt_changed: { recorded: string; today: string } | null; judge?: JudgeView; skipped?: string }>> {
   const primary = update && rerun ? await primaryDeployment(live.env) : undefined;
   const results = [];
   for (const { key, label, file, trace } of traces) {
-    const { judge_input_changed, repair_input_changed, system_prompt_changed, ...replayed } = await replayRecorded(trace, rerun ? { ...live, rerun } : undefined);
+    const { judge_input_changed, repair_input_changed, system_prompt_changed, judge_prompt_changed, ...replayed } = await replayRecorded(trace, rerun ? { ...live, rerun } : undefined);
     const why = update && rerun ? degradedRound(replayed, primary) : undefined;
     if (why !== undefined) console.log(`skip ${label}: ${why}`);
     else if (update) writeFileSync(file, `${JSON.stringify(replayed, null, 2)}\n`);
@@ -184,6 +185,7 @@ export async function recorded(
       judge_input_changed,
       repair_input_changed,
       system_prompt_changed,
+      judge_prompt_changed,
       ...(view ? { judge: view } : {}),
       ...(why === undefined ? {} : { skipped: why }),
     });
@@ -839,6 +841,11 @@ async function main(argv: string[]): Promise<number> {
     for (const [pair, changed] of prompts) {
       const { recorded: was, today } = JSON.parse(pair) as { recorded: string; today: string };
       console.log(`system prompt changed: ${changed.length} repair rounds were recorded under ${was}, today's is ${today} (${changed.map((result) => result.label).join(", ")})`);
+    }
+    const judgePrompts = Map.groupBy(results.filter((result) => result.judge_prompt_changed), (result) => JSON.stringify(result.judge_prompt_changed));
+    for (const [pair, changed] of judgePrompts) {
+      const { recorded: was, today } = JSON.parse(pair) as { recorded: string; today: string };
+      console.log(`judge prompt changed: ${changed.length} traces hold a judge call recorded under ${was}, today's is ${today} (${changed.map((result) => result.label).join(", ")})`);
     }
     const run: LiveRun = {
       run: new Date().toISOString().slice(0, 19).replace(/:/g, ""),
