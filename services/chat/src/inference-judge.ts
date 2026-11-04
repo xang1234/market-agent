@@ -12,7 +12,7 @@
 import { createLlmRouterFromEnv, type LlmChatClient, type LlmChatMessage, type LlmChatRequest, type LlmPurpose, type LlmSettingsLoaderEnv } from "../../llm/src/index.ts";
 import { isRecord } from "../../shared/src/http.ts";
 import type { ModelExchange } from "./answer-trace.ts";
-import type { Assertion } from "./assertions.ts";
+import type { AssertionReport } from "./assertions.ts";
 import type { EvidencePacket } from "./evidence-packet.ts";
 import { withDeadlines, type ModelDeadlines } from "./llm-runtime.ts";
 import { checkedResults, plainText, renderAssertion } from "./render-assertions.ts";
@@ -28,6 +28,10 @@ export type JudgeCase = {
   checked: ReadonlyArray<string>;
   // Each support's rendered text, its figures the packet's values.
   supports: ReadonlyArray<string>;
+  // What the check refused of a comparison among them that stood on other
+  // metrics: the metric, its figures as the page writes them, and why. Absent
+  // when none was, so a case with none asks what it always did.
+  rejected_parts?: ReadonlyArray<{ metric: string; figures: string; reason: string }>;
   // The answer's other accepted observations and comparisons, rendered the
   // same way; the page may show an observation only inside a comparison.
   context: ReadonlyArray<string>;
@@ -58,10 +62,9 @@ export type JudgeRecord = ModelRecord;
 // ceil(16000 / 15000) - 1 = 1 attempt.
 export const JUDGE_DEADLINES: ModelDeadlines = { attemptMs: 15_000, totalMs: 16_000 };
 
-type Accepted = Assertion & { index: number };
-
-export function judgeCases(accepted: ReadonlyArray<Accepted>, packet: EvidencePacket, factBlocks: ReadonlyArray<Record<string, unknown>>): JudgeCase[] {
-  const rendered = (entry: Accepted) => plainText(renderAssertion(entry, packet, factBlocks, accepted).segments);
+export function judgeCases(report: Pick<AssertionReport, "accepted" | "rejected">, packet: EvidencePacket, factBlocks: ReadonlyArray<Record<string, unknown>>): JudgeCase[] {
+  const { accepted } = report;
+  const rendered = (entry: AssertionReport["accepted"][number]) => plainText(renderAssertion(entry, packet, factBlocks, accepted).segments);
   const tables = new Map<string | undefined, string[]>();
   for (const figure of packet.figures) tables.set(figure.shown_in, [...(tables.get(figure.shown_in) ?? []), figure.id]);
   const figures = [...tables].map(([title, ids]) => {
@@ -71,6 +74,9 @@ export function judgeCases(accepted: ReadonlyArray<Accepted>, packet: EvidencePa
   return accepted.filter((assertion) => assertion.kind === "analyst_inference").map((inference) => {
     const subject = inference.subject ?? (packet.companies.length === 1 ? packet.companies[0] : undefined);
     const supports = inference.supports ?? [];
+    const rejected_parts = report.rejected.flatMap(({ index, reason, part }) => (
+      part && supports.includes(index) ? [{ metric: part.metric, figures: rendered({ index: -1, kind: "observation", text: "", evidence: part.evidence }), reason }] : []
+    ));
     return {
       index: inference.index,
       ...(subject ? { subject } : {}),
@@ -80,6 +86,7 @@ export function judgeCases(accepted: ReadonlyArray<Accepted>, packet: EvidencePa
         const support = accepted.find((entry) => entry.index === n);
         return support ? [rendered(support)] : [];
       }),
+      ...(rejected_parts.length > 0 ? { rejected_parts } : {}),
       context: accepted
         .filter((entry) => (entry.kind === "observation" || entry.kind === "comparison") && !supports.includes(entry.index))
         .map(rendered),
@@ -156,12 +163,13 @@ export function judgeMessages(cases: ReadonlyArray<JudgeCase>, companies: Readon
       role: "user",
       content: JSON.stringify({
         companies,
-        inferences: cases.map(({ index, subject, text, checked, supports, context, figures }) => ({
+        inferences: cases.map(({ index, subject, text, checked, supports, rejected_parts, context, figures }) => ({
           id: index,
           subject: subject ?? null,
           text,
           checked_results: checked,
           supports,
+          ...(rejected_parts ? { rejected_parts } : {}),
           rest_of_answer: context,
           figures_shown: figures,
         })),
@@ -216,7 +224,9 @@ const JUDGE_INSTRUCTIONS = [
   "written the same way; the page may show one of them inside a comparison that states its figures.",
   "figures_shown holds the figures the page's tables and charts show, a line per table, headed by its title when it",
   "has one. companies lists every company the answer covers; rest_of_answer and figures_shown cover every one of",
-  "them, and an inference may rest on another company's figures when it compares them. Judge each inference",
+  "them, and an inference may rest on another company's figures when it compares them. rejected_parts, when",
+  "present, lists what a comparison among its supports claimed on a metric and the check refused, with that",
+  "metric's figures and why; only that comparison's other metrics stood. Judge each inference",
   "against its subject, checked results, supports, rest_of_answer and figures_shown; no outside knowledge, and",
   "nothing from another inference. A company may be named by ticker, name or alias, in any case (\"nvda\",",
   "\"Nvidia\", \"Advanced Micro Devices\"): naming one is fine, but what the inference says about it must be backed",
@@ -237,7 +247,8 @@ const JUDGE_INSTRUCTIONS = [
   "  the figures: no check measures a gap against a gap. If the figures make it false, it is contradicted.",
   "- contradicted: something it says disagrees with the figures or checked results shown: who leads, trails, is",
   "  highest or lowest, or the order it states; a direction it states (rising, falling, expanding, recovering)",
-  "  against a checked trend or the figures; or any other statement the figures shown make false.",
+  "  against a checked trend or the figures; a claim that still holds on a rejected part, by name or by a word",
+  "  that covers it (\"every level\", \"across the board\"); or any other statement the figures shown make false.",
   "",
   "worded_amount, whatever its verdict: true when the inference's own words state any amount, fraction, multiple",
   "or span of time, even when the figures bear it out: money, a percentage, a growth rate, a multiple or fraction",

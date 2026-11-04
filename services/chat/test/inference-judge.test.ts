@@ -40,7 +40,8 @@ const ACCEPTED: ReadonlyArray<Assertion & { index: number }> = [
   { index: 3, kind: "analyst_inference", text: "Its peer trails on margin.", evidence: [], supports: [1], subject: "NVDA" },
 ];
 
-const CASES = judgeCases(ACCEPTED, PACKET, []);
+const judgeCasesOf = (accepted: ReadonlyArray<Assertion & { index: number }>, packet: EvidencePacket) => judgeCases({ accepted, rejected: [] }, packet, []);
+const CASES = judgeCasesOf(ACCEPTED, PACKET);
 
 test("a case is the inference beside its supports as the reader sees them, figures as the packet's values, its checked results, and the answer's other observations and comparisons", () => {
   assert.deepEqual(CASES, [
@@ -67,7 +68,7 @@ test("a case is the inference beside its supports as the reader sees them, figur
     },
   ]);
   // A one-company answer's inference is about that company.
-  const single = judgeCases([ACCEPTED[0]!, { index: 1, kind: "analyst_inference", text: "Margins are high.", evidence: [], supports: [0] }], { ...PACKET, companies: ["NVDA"] }, []);
+  const single = judgeCasesOf([ACCEPTED[0]!, { index: 1, kind: "analyst_inference", text: "Margins are high.", evidence: [], supports: [0] }], { ...PACKET, companies: ["NVDA"] });
   assert.deepEqual(single.map(({ subject, checked }) => [subject, checked]), [["NVDA", []]]);
 });
 
@@ -86,7 +87,7 @@ test("an inference resting on a management attribution reaches the judge with th
     { kind: "management_attribution", text: "AMD management said [[C1]]", evidence: ["C1"] },
     { kind: "analyst_inference", text: "The charge weighs on its margin.", supports: [0, 1] },
   ], packet);
-  assert.deepEqual(judgeCases(accepted, packet, []).map(({ text, supports }) => [text, supports]), [[
+  assert.deepEqual(judgeCasesOf(accepted, packet).map(({ text, supports }) => [text, supports]), [[
     "The charge weighs on its margin.",
     [
       "AMD's gross margin was 49.2% in FY2025.",
@@ -116,7 +117,7 @@ test("the rest of the answer a case carries is its other observations and compar
     { kind: "analyst_inference", text: "The charge weighs on its margin.", supports: [2] },
     { kind: "analyst_inference", text: "Its margin is lower than it was.", supports: [1] },
   ], packet);
-  assert.deepEqual(judgeCases(accepted, packet, []).map(({ index, context }) => [index, context]), [
+  assert.deepEqual(judgeCasesOf(accepted, packet).map(({ index, context }) => [index, context]), [
     [4, ["AMD's gross margin was 49.2% in FY2025.", "AMD's gross margin fell from 53.1% in FY2024 to 49.2% in FY2025."]],
     [5, ["AMD's gross margin was 49.2% in FY2025."]],
   ]);
@@ -141,7 +142,7 @@ test("every case carries the figures the page's tables and charts show, a line p
     "Revenue: NVDA's revenue was $130.5B in FY2026.",
     "AMD's revenue was $25.8B in FY2025.",
   ];
-  assert.deepEqual(judgeCases(accepted, packet, []).map((judged) => judged.figures), [figures, figures]);
+  assert.deepEqual(judgeCasesOf(accepted, packet).map((judged) => judged.figures), [figures, figures]);
 });
 
 test("one judge call per answer, on JUDGE_LITELLM_MODEL, carries every inference with its supports' text; its reply is kept raw and read per inference", async () => {

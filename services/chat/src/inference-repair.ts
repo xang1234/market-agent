@@ -18,7 +18,9 @@ import { sentToRepair, type InferenceVerdict, type Verdict } from "./verdicts.ts
 // failed, or the judge's verdict. limit and rendering are not the inference's
 // words, so no rewrite passes them. rejected_supports: the supports it listed that
 // the check did not accept as one, so the rewrite does not cite them again.
-export type RepairRequest = { index: number; text: string; rejected_supports?: number[] } & (
+// rejected_parts: what the check refused of a support that stood on other metrics,
+// which your_assertions still lists as written.
+export type RepairRequest = { index: number; text: string; rejected_supports?: number[]; rejected_parts?: Array<{ support: number; metric: string; reason: string }> } & (
   | { check: Exclude<RejectionCheck, "limit" | "rendering" | "judge">; reason: string }
   | { check: "judge"; verdict: Verdict; worded_amount: boolean; reason?: string }
 );
@@ -46,7 +48,15 @@ export function repairRequests(list: ReadonlyArray<unknown>, report: Pick<Assert
     const rejected = supports.filter((n): n is number =>
       typeof n === "number" && !report.accepted.some((entry) => entry.index === n && SUPPORT_KINDS.has(entry.kind))
     );
-    return { index, text: isRecord(item) && typeof item.text === "string" ? item.text : "", ...(rejected.length > 0 ? { rejected_supports: rejected } : {}) };
+    const rejected_parts = report.rejected.flatMap((entry) =>
+      entry.part && supports.includes(entry.index) && !rejected.includes(entry.index) ? [{ support: entry.index, metric: entry.part.metric, reason: entry.reason }] : []
+    );
+    return {
+      index,
+      text: isRecord(item) && typeof item.text === "string" ? item.text : "",
+      ...(rejected.length > 0 ? { rejected_supports: rejected } : {}),
+      ...(rejected_parts.length > 0 ? { rejected_parts } : {}),
+    };
   };
   const isInference = (index: number) => isRecord(list[index]) && list[index].kind === "analyst_inference";
   const checks = report.rejected.flatMap((rejection): RepairRequest[] =>
@@ -136,6 +146,6 @@ export async function repairRound(input: {
   const report = checkAssertions(list, input.packet);
   if (repaired.length === 0) return { record, list, repaired, report, cases: [], records: [] };
   input.checked?.({ list, repaired, report });
-  const cases = judgeCases(report.accepted, input.packet, input.factBlocks).filter((inference) => repaired.includes(inference.index));
+  const cases = judgeCases(report, input.packet, input.factBlocks).filter((inference) => repaired.includes(inference.index));
   return { record, list, repaired, report, cases, records: await Promise.all(cases.map(input.judge)) };
 }

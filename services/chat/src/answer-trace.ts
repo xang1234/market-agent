@@ -94,7 +94,7 @@ export async function composeTraced(
 export function inferenceCases(input: AnswerTraceInput, report: AssertionReport | null): { cases: JudgeCase[]; companies: ReadonlyArray<string> } {
   if (report?.rendered !== true) return { cases: [], companies: [] };
   const packet = input.packet ?? turnPacket(input);
-  return { cases: judgeCases(report.accepted, packet, input.factBlocks ?? []), companies: packet.companies };
+  return { cases: judgeCases(report, packet, input.factBlocks ?? []), companies: packet.companies };
 }
 
 // What the reader ends with: each inference as its verdict shows it

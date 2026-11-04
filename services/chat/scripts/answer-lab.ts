@@ -624,7 +624,7 @@ export function mutationVariants(file: string): MutationVariant[] {
       return {
         id: entry.id,
         kind,
-        judged: judgeCases(report.accepted, packet, factBlocks).find((judged) => judged.index === entry.index)!,
+        judged: judgeCases(report, packet, factBlocks).find((judged) => judged.index === entry.index)!,
         companies: packet.companies,
         turn: { messages: trace.exchange?.messages ?? [], list: turnList, packet, factBlocks },
       };

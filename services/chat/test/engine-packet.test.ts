@@ -427,11 +427,10 @@ test("commentary cites a lead and a ranking by their results, and the judge read
   assert.equal(plainText(states.segments), "NVDA's revenue was USD 62,100,000,000.00 in Q4 FY2026. Q4 FY2026 has the highest revenue of the 8 quarters ranked.");
   assert.equal(resultRefProblem(prose(...states.segments), block(HIGH)), null);
 
-  const accepted = checkAssertions([
+  const [judged] = judgeCases(checkAssertions([
     { kind: "observation", text: "x", evidence: ["F3"] },
     { kind: "analyst_inference", subject: "NVDA", text: "Its pricing holds better.", supports: [0] },
-  ], lead).accepted;
-  const [judged] = judgeCases(accepted, lead, []);
+  ], lead), lead, []);
   const trailing = checkAssertions([
     { kind: "observation", text: "x", evidence: ["F3"] },
     { kind: "analyst_inference", subject: "AMD", text: "Its pricing trails.", supports: [0] },
@@ -441,7 +440,7 @@ test("commentary cites a lead and a ranking by their results, and the judge read
   const [window] = judgeCases(checkAssertions([
     { kind: "observation", text: "x", evidence: ["F9"] },
     { kind: "analyst_inference", text: "Its growth has not stalled.", supports: [0] },
-  ], high).accepted, high, []);
+  ], high), high, []);
   assert.deepEqual(window!.supports, ["Q4 FY2026 has the highest revenue of the 8 quarters ranked."]);
   assert.deepEqual(renderAssertion({ index: 0, kind: "observation", text: "x", evidence: ["F9"] }, high, []).segments, [
     { type: "ref", ref_kind: "result", ref_id: RESULT(18), format: "Q4 FY2026 has the highest revenue of the 8 quarters ranked", period: "Q1 FY2025 to Q4 FY2026" },

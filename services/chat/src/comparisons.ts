@@ -53,6 +53,8 @@ type Direction = -1 | 0 | 1;
 type Claim = { op?: unknown; result?: unknown };
 // One metric's share of a claim, in the shape a comparison is checked in.
 type ClaimPart = Claim & { evidence: ReadonlyArray<string> };
+// The metric of a claim that split, and its figures, where that part failed.
+export type ClaimFailure = { metric: string; evidence: ReadonlyArray<string> };
 
 // A claim as one part per metric it cites, each claiming the same of that
 // metric's figures: an order its figures as written, a trend the same result,
@@ -86,17 +88,20 @@ function claimParts(item: Claim, figureIds: ReadonlyArray<string>, packet: Evide
   }));
 }
 
-// What of a claim stands: why each part that failed did, and the evidence and
-// result of those that passed, which check as the same parts again.
+// What of a claim stands: why each part that failed did, with its metric and
+// figures when the claim split, and the evidence and result of those that
+// passed, which check as the same parts again.
 export function checkClaim(item: Claim, figureIds: ReadonlyArray<string>, packet: EvidencePacket): {
-  errors: ReadonlyArray<string>;
+  errors: ReadonlyArray<{ reason: string; part?: ClaimFailure }>;
   standing?: { evidence: ReadonlyArray<string>; result: unknown };
 } {
   const parts = claimParts(item, figureIds, packet).map((part) => ({ part, checked: checkComparison(part, part.evidence, packet) }));
   const metricOf = (part: ClaimPart) => metricLabel(packet.figures.find((figure) => figure.id === part.evidence[0])!.metric);
-  const errors = parts.flatMap(({ part, checked }) =>
-    "error" in checked ? [parts.length > 1 ? `${checked.error} (${metricOf(part)})` : checked.error] : []
-  );
+  const errors = parts.flatMap(({ part, checked }) => {
+    if (!("error" in checked)) return [];
+    if (parts.length === 1) return [{ reason: checked.error }];
+    return [{ reason: `${checked.error} (${metricOf(part)})`, part: { metric: metricOf(part), evidence: part.evidence } }];
+  });
   const passed = parts.filter(({ checked }) => "comparison" in checked).map(({ part }) => part);
   if (passed.length === 0) return { errors };
   return {

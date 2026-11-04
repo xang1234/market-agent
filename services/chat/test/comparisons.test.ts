@@ -247,7 +247,7 @@ test("a claim over several metrics stands as one comparison per metric, each fro
 
 test("a metric the claim is wrong on is rejected alone, and the rest stand (#288)", () => {
   const report = checkAssertions([claim("highest", ["F2", "F6", "L1", "L2"], "F2"), inference], TWO);
-  assert.deepEqual(report.rejected, [{ index: 0, text: "claim", check: "comparative", reason: "comparison: L2 (20.0%) is higher than L1 (10.0%) (operating margin)" }]);
+  assert.deepEqual(report.rejected, [{ index: 0, text: "claim", check: "comparative", reason: "comparison: L2 (20.0%) is higher than L1 (10.0%) (operating margin)", part: { metric: "operating margin", evidence: ["L1", "L2"] } }]);
   assert.deepEqual(report.accepted[0]!.evidence, ["F2", "F6"]);
   assert.equal(rendered(TWO, report), "Of NVDA and AMD, NVDA's gross margin was highest: NVDA 70.8% (FY2026, ended Jan 2026), AMD 49.9% (FY2025, ended Dec 2025).");
   assert.deepEqual(checkedResults(report.accepted[1]!, TWO, report.accepted), ["NVDA highest on gross margin"]);
@@ -266,8 +266,8 @@ test("a claim wrong on every metric is rejected per metric, and an inference res
   const report = checkAssertions([claim("lowest", ["F1", "F5", "F2", "F6"], "F1"), inference], TWO);
   assert.deepEqual(report.accepted, []);
   assert.deepEqual(report.rejected, [
-    { index: 0, text: "claim", check: "comparative", reason: "comparison: F5 ($34.7B) is lower than F1 ($209.9B) (revenue)" },
-    { index: 0, text: "claim", check: "comparative", reason: "comparison: F6 (49.9%) is lower than F2 (70.8%) (gross margin)" },
+    { index: 0, text: "claim", check: "comparative", reason: "comparison: F5 ($34.7B) is lower than F1 ($209.9B) (revenue)", part: { metric: "revenue", evidence: ["F1", "F5"] } },
+    { index: 0, text: "claim", check: "comparative", reason: "comparison: F6 (49.9%) is lower than F2 (70.8%) (gross margin)", part: { metric: "gross margin", evidence: ["F2", "F6"] } },
     { index: 1, text: "The lead is broad.", check: "support", reason: "an inference binds the accepted observations it rests on" },
   ]);
 });
