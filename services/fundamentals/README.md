@@ -142,8 +142,12 @@ npm test         # contract + AAPL FY2024 income statement verification
   not depend on which year was ingested first. An unchanged comparative,
   two different values in one filing, or an original without a recorded
   concept adds nothing. A quarter is compared the same way with later
-  10-Qs and 10-Ks, and a derived fourth quarter also with its own 10-K's
-  statement of it. Readers of as-reported facts filter `method =
+  10-Qs and 10-Ks, and amendments count as later filings. A change of
+  rounding (`16053123000` then `16053000000`) is the same figure. A derived
+  quarter also takes its own filing's statement of it, when its inputs then
+  give that figure within rounding; otherwise, or from the first later filing
+  that changes an input without stating the quarter, it is stored as an
+  `unverified_restatement`, a gap on the restated basis. Readers of as-reported facts filter `method =
   'reported'`, or `method <> 'restated'` where they also read vendor and
   derived facts (analyst grids, thesis evidence), so they never see a
   restatement; only certified selection

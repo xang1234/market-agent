@@ -44,6 +44,7 @@ import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../fi
 import { requireFinancialReadiness } from "../../financial-engine/src/readiness.ts";
 import { publishRequest, type RequestGap } from "../../financial-engine/src/request.ts";
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
+import { SEC_DERIVATION_LOCATOR } from "../../fundamentals/src/sec-derivation-proof.ts";
 import { comparedAdditions, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId, noteBlock } from "./chat-ids.ts";
 import { asksCause, filedCauses, namedFigures, NOT_ASKED, type FiledCause } from "./filed-cause.ts";
@@ -710,7 +711,7 @@ function persistAssistantMessage(
     const replaced = scope === null ? null : periodNote(scope, shownPeriod);
     const chosen = turn.deterministic();
     const defaults = chosen === null || reading === null || scope === null || plan === null ? [] : defaultsNote(chosen, reading, scope, shownPeriod, plan.subjects.members.length);
-    const restated = await restatedFigures(tx.client, publication.run_id, companyNames);
+    const later = await laterFigures(tx.client, publication.run_id, companyNames);
     const note = [
       ...(turn.notFound.length === 0 ? [] : [`No company matched ${labelList(turn.notFound)}.`]),
       ...(turn.carried.length === 0 ? [] : [`${labelList(turn.carried)} ${turn.carried.length > 1 ? "are" : "is"} carried from the previous answer.`]),
@@ -718,7 +719,8 @@ function persistAssistantMessage(
       ...defaults,
       ...(reading === null ? [UNCHECKED] : missing.length === 0 ? [] : [`Not covered by this answer: ${missing.join("; ")}.`]),
       ...(stillShown.length === 0 ? [] : [`Still shown as an input to another figure: ${labelList(stillShown)}.`]),
-      ...(restated.length === 0 ? [] : [`Restated by a later filing, so not as first reported: ${labelList(restated)}.`]),
+      ...(later.restated.length === 0 ? [] : [`Restated by a later filing, so not as first reported: ${labelList(later.restated)}.`]),
+      ...(later.ownStatements.length === 0 ? [] : [`Taken from the filing's own statement of the quarter: ${labelList(later.ownStatements)}.`]),
     ].join(" ");
     const blocks = [
       publication.block,
@@ -763,18 +765,24 @@ function persistAssistantMessage(
   };
 }
 
-// The reported figures an answer took from a restatement. The superseded number
-// is not named: a plan has one basis, so the engine has not certified it.
-async function restatedFigures(client: SqlExecutor, runId: string, names: ReadonlyMap<string, string>): Promise<string[]> {
-  const { rows } = await client.query<{ bound_payload: BoundFactInputV1 }>(
-    `select i.bound_payload from financial_run_inputs i join facts f on f.fact_id = i.fact_id
+// The reported figures an answer took from a later statement. The superseded
+// number is not named: a plan has one basis, so the engine has not certified it.
+// A derived quarter was never stated, so a filing's line for it restates nothing.
+async function laterFigures(client: SqlExecutor, runId: string, names: ReadonlyMap<string, string>): Promise<{ restated: string[]; ownStatements: string[] }> {
+  const { rows } = await client.query<{ bound_payload: BoundFactInputV1; derived: boolean }>(
+    `select i.bound_payload, coalesce(c.source_context_ref like $2, false) as derived
+       from financial_run_inputs i
+       join facts f on f.fact_id = i.fact_id
+       left join fact_financial_contexts c on c.fact_id = f.supersedes
       where i.run_id = $1 and f.method = 'restated' order by i.input_slot`,
-    [runId],
+    [runId, `${SEC_DERIVATION_LOCATOR}%`],
   );
-  return [...new Set(rows.map(({ bound_payload: { subject_ref, metric, period } }) => {
+  const figures = (derived: boolean) => [...new Set(rows.filter((row) => row.derived === derived).map(({ bound_payload: { subject_ref, metric, period } }) => {
     const measure = lowercaseUnlessAcronym(resolveMetricDefinition(metric.metric_key)?.label ?? metric.metric_key);
-    return `${names.get(subject_ref.id.toLowerCase()) ?? subject_ref.id}'s ${measure} in ${boundPeriodText(period, period.kind === "instant")}`;
+    const name = names.get(subject_ref.id.toLowerCase());
+    return `${name === undefined ? "" : `${name}'s `}${measure} in ${boundPeriodText(period, period.kind === "instant")}`;
   }))];
+  return { restated: figures(false), ownStatements: figures(true) };
 }
 
 // A read a statement error fails rolls back to its savepoint, so the
@@ -885,9 +893,9 @@ export function uncoveredAsks(
     };
   });
   type Company = (typeof companies)[number];
-  // An engine figure is as reported, so a qualified metric is computed only as
-  // its base's growth (a change whose two inputs are that figure itself, not
-  // a ratio or sum that reads it) or its trend (it over several periods).
+  // An engine figure is as filings state it, so a qualified metric is computed
+  // only as its base's growth (a change whose two inputs are that figure itself,
+  // not a ratio or sum that reads it) or its trend (it over several periods).
   const computes = (metric: RequestedMetric, company: Company) => {
     const ofBase = (node: OperationNode) => SCOPE_METRICS[figureKey(node)] === metric.base;
     if (metric.adjustment !== undefined) return false;
