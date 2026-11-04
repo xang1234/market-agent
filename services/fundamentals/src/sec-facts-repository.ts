@@ -1361,9 +1361,10 @@ async function derivationLineage(
 // A derived quarter was never stated, so its own filing's line for it counts as a
 // later statement, taken only when the inputs then give that figure within
 // rounding: a 10-K that re-presents one quarter alone would otherwise leave a year
-// whose quarters overstate it. Failing that it is unverified, as it is from the
-// first filing that changes an input and does not state the quarter: the number
-// is not re-derived, so as_restated answers a gap rather than a stale figure.
+// whose quarters overstate it (derivedLineRelation). Failing that it is unverified,
+// as it is from the first filing that changes an input and does not state the
+// quarter: the number is not re-derived, so as_restated answers a gap rather than
+// a stale figure.
 //
 // Only us-gaap concepts are compared: a cover count (dei) is a count as of its
 // own date, and a later filing states a later date's count, never that one's.
@@ -1440,7 +1441,7 @@ async function recordSecRestatements(db: FundamentalsQueryExecutor, input: Resta
       const figure: StatedFigure = { value: statement.token, as_filed_on: original.as_filed_on === null ? null : statement.filed };
       const stated = await laterRelation(original.metric_key, previous, figure, splitsOn);
       previous = figure;
-      const relation = stated === "economic_restatement" && derivation !== null && !inputsGive(derivation, values, statement) ? "unverified_restatement" : stated;
+      const relation = stated === "economic_restatement" && derivation !== null ? derivedLineRelation(derivation, values, statement) : stated;
       await record(later, relation);
       if (relation === "unverified_restatement") break;
     }
@@ -1479,16 +1480,18 @@ function termStatements(values: ReadonlyArray<SecConceptValue>, term: Derivation
   return periodStatements(values, term.start, term.end, term.span === "fiscal_year").filter(({ filed }) => filed > term.source.filed);
 }
 
-// Whether a derived quarter's inputs, as filed up to a statement of the quarter,
-// give what it states: the year less the year's other quarters, each off by
-// its rounding at most.
-function inputsGive(derivation: DerivationProofV1, values: ReadonlyArray<SecConceptValue>, statement: PeriodStatement): boolean {
+// What a derived quarter's inputs, as filed up to a statement of the quarter,
+// make of it. The derived figure is a sum of rounded terms, so a line within
+// their rounding is the same figure while no input has moved, and follows the
+// one that has. Past their rounding the inputs do not give the line.
+function derivedLineRelation(derivation: DerivationProofV1, values: ReadonlyArray<SecConceptValue>, statement: PeriodStatement): LaterRelation | null {
   const terms = derivation.terms.map((term) => ({
     ...term,
     raw_token: termStatements(values, term).filter(({ filed }) => filed <= statement.filed).at(-1)?.token ?? term.raw_token,
   }));
   const sum = derivationValue({ ...derivation, terms });
-  return sum !== null && sumWithinRounding(statement.token, sum, terms.map((term) => term.raw_token));
+  if (sum === null || !sumWithinRounding(statement.token, sum, terms.map((term) => term.raw_token))) return "unverified_restatement";
+  return terms.some((term, index) => sameRoundedFigure(derivation.terms[index]!.raw_token, term.raw_token) === false) ? "economic_restatement" : null;
 }
 
 /** The first filing that changes one of a derived quarter's inputs and does not itself state the quarter. */
