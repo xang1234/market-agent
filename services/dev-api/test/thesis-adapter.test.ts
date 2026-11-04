@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { LlmRouterError } from '../../llm/src/router.ts';
 import { createThesisAdapter } from '../src/thesis-adapter.ts';
 
 const AGENT = '20000000-0000-4000-8000-000000000001';
@@ -21,6 +22,20 @@ test('a failed draft logs its cause and keeps it out of the response', async t =
     return true;
   });
   assert.deepEqual(logged.mock.calls.map(call => call.arguments), [[`thesis draft failed for agent ${AGENT}:`, cause]]);
+});
+
+test('a failed draft logs which deployments failed and why, as text', async t => {
+  const logged = t.mock.method(console, 'error', () => {});
+  const cause = new LlmRouterError('all_deployments_failed', 'all LLM deployments failed', [
+    { deployment: { channel: 'anthropic', model: 'claude-sonnet-5-5' }, code: 'auth_failed', message: 'invalid x-api-key' },
+    { deployment: { channel: 'opencode', model: 'glm-5' }, code: 'unknown', message: 'socket hang up' },
+  ]);
+  const adapter = createThesisAdapter(db, async () => ({ async complete() { throw cause; } }));
+  await assert.rejects(adapter.draft({ userId: USER, agentId: AGENT, body }), { status: 503 });
+  assert.deepEqual(logged.mock.calls.map(call => call.arguments), [[
+    `thesis draft failed for agent ${AGENT}:`,
+    'all LLM deployments failed (anthropic/claude-sonnet-5-5 auth_failed: invalid x-api-key; opencode/glm-5 unknown: socket hang up)',
+  ]]);
 });
 
 test('an unconfigured model is a setup message, not a logged failure', async t => {
