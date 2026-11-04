@@ -259,11 +259,53 @@ test("draftThesisConditions names the model and the cause when a reply is unusab
   );
   await assert.rejects(
     draftThesisConditions({ async complete() { return { text: 'Here are three conditions: {"conditions":[]}', deployment }; } }, thesis),
-    new ThesisValidationError(`draft response from anthropic/claude-sonnet-5-5 must be valid JSON: Unexpected token 'H', "Here are t"... is not valid JSON`),
+    { name: "ThesisValidationError", message: /^draft response from anthropic\/claude-sonnet-5-5 must be valid JSON: / },
   );
   await assert.rejects(
     draftThesisConditions({ async complete() { return { text: '{"conditions":[]}', deployment }; } }, thesis),
     new ThesisValidationError("draft response from anthropic/claude-sonnet-5-5 must contain exactly three conditions, not 0"),
+  );
+});
+
+test("evaluateThesis leaves room for five reasons at the limit plus thinking", async () => {
+  const conditions = Array.from({ length: 5 }, (_, index) => condition(`4000000${index}-0000-4000-8000-000000000001`));
+  const answer = JSON.stringify({ results: conditions.map(({ condition_id }) => ({ condition_id, status: "challenged", reason: "x".repeat(2000), claim_refs: [CLAIM_ID] })) });
+  const llm: ThesisLlm = {
+    async complete({ maxTokens }) {
+      return (maxTokens ?? 0) >= 711 + answer.length / 3 ? { text: answer } : { text: answer.slice(0, 200), truncated: true };
+    },
+  };
+  const { results } = await evaluateThesis({ thesis: thesis(conditions), claims: [{ claim_id: CLAIM_ID, text_canonical: "Demand slowed." }], metric_results: [], as_of: AS_OF, llm });
+  assert.deepEqual(results.map(({ reason }) => reason.length), [2000, 2000, 2000, 2000, 2000]);
+});
+
+test("evaluateThesis tells the model the reason limit it validates against", async () => {
+  let system = "";
+  await evaluateThesis({
+    thesis: thesis([condition(BULL_ID)]),
+    claims: [{ claim_id: CLAIM_ID, text_canonical: "Demand slowed." }],
+    metric_results: [],
+    as_of: AS_OF,
+    llm: {
+      async complete({ messages }) {
+        system = messages[0].content;
+        return { text: JSON.stringify({ results: [{ condition_id: BULL_ID, status: "unresolved", reason: "Mixed evidence.", claim_refs: [] }] }) };
+      },
+    },
+  });
+  assert.match(system, /each reason under 2000 characters/);
+});
+
+test("evaluateThesis names the model and the cause when a reply is unusable", async () => {
+  const deployment = { channel: "anthropic", model: "claude-sonnet-5-5" };
+  const input = { thesis: thesis([condition(BULL_ID)]), claims: [{ claim_id: CLAIM_ID, text_canonical: "Demand slowed." }], metric_results: [], as_of: AS_OF };
+  await assert.rejects(
+    evaluateThesis({ ...input, llm: { async complete() { return { text: '{"results":[{"condition_id":"', truncated: true, deployment }; } } }),
+    new ThesisValidationError("assessment response from anthropic/claude-sonnet-5-5 was cut off at the 6000-token limit"),
+  );
+  await assert.rejects(
+    evaluateThesis({ ...input, llm: { async complete() { return { text: "Here is my assessment.", deployment }; } } }),
+    { name: "ThesisValidationError", message: /^assessment response from anthropic\/claude-sonnet-5-5 must be valid JSON: / },
   );
 });
 
