@@ -471,10 +471,8 @@ test('Agents surface renders CRUD controls and activity status, and holds the pe
   assert.match(html, /Create agent/)
   assert.match(html, /Universe/)
   assert.match(html, /Alert rule/)
-  assert.match(html, /issuer: 99999999-9999-4999-8999-999999999999/)
-  assert.match(html, /critical\+ headline contains margin/)
-  assert.match(html, /Disable/)
-  assert.match(html, /Delete/)
+  assert.doesNotMatch(html, /Quality monitor/)
+  assert.doesNotMatch(html, /No agents yet/)
   assert.doesNotMatch(html, /Run history/)
   assert.doesNotMatch(html, /Findings/)
   assert.doesNotMatch(html, /Run activity/)
@@ -483,6 +481,39 @@ test('Agents surface renders CRUD controls and activity status, and holds the pe
   assert.equal(roster?.querySelector('h2')?.textContent, 'Agents')
   assert.equal(roster?.querySelector('[role="status"]')?.textContent, 'Activity · Idle')
   assert.doesNotMatch(html, /ships with P5\.1/i)
+})
+
+test('Agents roster shows only what the server sent, and says when it could not load', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restore = installDomGlobals(dom.window as unknown as Window)
+  const originalFetch = globalThis.fetch
+  const requested: string[] = []
+  try {
+    let answerRoster: (response: Response) => void = () => {}
+    globalThis.fetch = async (input) => {
+      requested.push(String(input))
+      if (String(input) === '/v1/agents') return new Promise<Response>((resolve) => { answerRoster = resolve })
+      throw new Error(`unexpected fetch: ${String(input)}`)
+    }
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(wrapWithAuth(<MemoryRouter><AgentsPage /></MemoryRouter>))
+    })
+    const rosterText = () => [...dom.window.document.querySelectorAll('section')]
+      .find((section) => section.querySelector('h2')?.textContent === 'Agents')?.textContent ?? ''
+
+    assert.equal(rosterText(), 'Agents0 monitors · 0 enabledActivity · IdleLoading agents')
+    await act(async () => {
+      answerRoster(new Response('{"error":"down"}', { status: 503 }))
+    })
+    await act(async () => undefined)
+    assert.equal(rosterText(), 'Agents0 monitors · 0 enabledActivity · IdleLoad failed: HTTP 503')
+    assert.deepEqual(requested, ['/v1/agents'])
+    await act(async () => root.unmount())
+  } finally {
+    globalThis.fetch = originalFetch
+    restore()
+  }
 })
 
 test('Agents form shows its own validation error beside the submit button, not in the roster status', async () => {
