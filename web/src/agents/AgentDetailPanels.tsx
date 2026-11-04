@@ -2,9 +2,11 @@ import { SeverityBadge } from '../blocks/SeverityBadge.tsx'
 import { FINDING_SEVERITIES, type FindingSeverity } from '../blocks/types.ts'
 import type { AgentActivityRow, AgentFindingRow, AgentRunRow } from './agentRows.ts'
 import { PAGE_PANEL_CLASS, PANEL_TITLE_CLASS } from '../ui/pageStyles.ts'
+import type { ThesisAssessment } from '../../../services/agents/src/thesis-types.ts'
 
 type AgentDetailPanelsProps = {
   findings: ReadonlyArray<AgentFindingRow>
+  assessments: ReadonlyArray<ThesisAssessment>
   detailsError: string | null
   runs: ReadonlyArray<AgentRunRow>
   runActivities: ReadonlyArray<AgentActivityRow>
@@ -13,7 +15,8 @@ type AgentDetailPanelsProps = {
 // Read-only detail panels for the selected agent: findings, run history, and
 // run activity. Extracted from AgentsPage alongside the roster so the page is
 // orchestration + form, not a wall of list-rendering.
-export function AgentDetailPanels({ findings, detailsError, runs, runActivities }: AgentDetailPanelsProps) {
+export function AgentDetailPanels({ findings, assessments, detailsError, runs, runActivities }: AgentDetailPanelsProps) {
+  const supportedSnapshots = snapshotsWithoutChallenge(assessments)
   return (
     <>
       <section className={PAGE_PANEL_CLASS}>
@@ -27,7 +30,7 @@ export function AgentDetailPanels({ findings, detailsError, runs, runActivities 
               <li key={finding.finding_id} className="rounded-lg border border-line p-3 text-sm">
                 <div className="flex items-start justify-between gap-3">
                   <span className="font-medium text-fg">{finding.headline}</span>
-                  <FindingSeverityBadge severity={finding.severity} />
+                  <FindingSeverityBadge severity={finding.severity} supported={supportedSnapshots.has(finding.snapshot_id)} />
                 </div>
                 <p className="mt-2 text-xs text-muted">{finding.created_at}</p>
               </li>
@@ -73,11 +76,28 @@ export function AgentDetailPanels({ findings, detailsError, runs, runActivities 
   )
 }
 
+// A thesis run writes findings only for supported and challenged results, so a
+// run that challenged nothing wrote only supported ones. A finding carries no
+// status of its own, so the supported findings of a mixed run keep the severity tone.
+function snapshotsWithoutChallenge(assessments: ReadonlyArray<ThesisAssessment>): ReadonlySet<string> {
+  return new Set(
+    assessments
+      .filter((assessment) => !assessment.results.some((result) => result.status === 'challenged'))
+      .map((assessment) => assessment.snapshot_id),
+  )
+}
+
 // Reuse the canonical severity tone map for known severities; an unrecognized
-// value (the field is a free string on the wire) falls back to a muted pill.
-function FindingSeverityBadge({ severity }: { severity: string }) {
+// value (the field is a free string on the wire) falls back to a muted pill. A
+// supported finding keeps its severity word but is good news, so it is never red.
+function FindingSeverityBadge({ severity, supported }: { severity: string; supported: boolean }) {
   if ((FINDING_SEVERITIES as readonly string[]).includes(severity)) {
-    return <SeverityBadge severity={severity as FindingSeverity} />
+    return (
+      <SeverityBadge
+        severity={severity as FindingSeverity}
+        toneClass={supported ? 'bg-positive-soft text-positive' : undefined}
+      />
+    )
   }
   return <span className="rounded border border-line-strong px-2 py-0.5 text-xs text-muted">{severity}</span>
 }

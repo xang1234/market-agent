@@ -220,6 +220,95 @@ test("draftThesisConditions rejects responses that do not contain exactly three 
   );
 });
 
+test("draftThesisConditions leaves room for thinking, which counts against the token budget", async () => {
+  // Captured from claude-sonnet-5-5 on 2026-11-04: up to 711 thinking tokens, then about 750 of JSON.
+  const llm: ThesisLlm = {
+    async complete({ maxTokens }) {
+      const answer = JSON.stringify({ conditions: [
+        { statement: "Enterprise demand continues to accelerate.", falsifier: "Enterprise demand growth slows materially.", horizon: "12 months" },
+        { statement: "Operating margins expand with greater scale.", falsifier: "Operating margins contract for two quarters.", horizon: "18 months" },
+        { statement: "Customer retention remains consistently strong.", falsifier: "Net retention falls below prior-year levels.", horizon: "6 months" },
+      ] });
+      return (maxTokens ?? 0) >= 711 + 750 ? { text: answer } : { text: answer.slice(0, 200), truncated: true };
+    },
+  };
+  assert.deepEqual(
+    (await draftThesisConditions(llm, "Demand remains durable while execution improves.")).map((item) => item.horizon),
+    ["12 months", "18 months", "6 months"],
+  );
+});
+
+test("draftThesisConditions tells the model the limits its conditions are validated against", async () => {
+  let system = "";
+  await draftThesisConditions({
+    async complete({ messages }) {
+      system = messages[0].content;
+      return { text: JSON.stringify({ conditions: Array.from({ length: 3 }, () => ({ statement: "Enterprise demand keeps growing.", falsifier: "Enterprise demand stops growing.", horizon: "12 months" })) }) };
+    },
+  }, "Demand remains durable while execution improves.");
+  assert.match(system, /statement and falsifier under 500 characters/);
+  assert.match(system, /horizon .*under 120 characters/);
+});
+
+test("draftThesisConditions names the model and the cause when a reply is unusable", async () => {
+  const deployment = { channel: "anthropic", model: "claude-sonnet-5-5" };
+  const thesis = "Demand remains durable while execution improves.";
+  await assert.rejects(
+    draftThesisConditions({ async complete() { return { text: '```json\n{"conditions":[{"statement":"Cut', truncated: true, deployment }; } }, thesis),
+    new ThesisValidationError("draft response from anthropic/claude-sonnet-5-5 was cut off at the 4096-token limit"),
+  );
+  await assert.rejects(
+    draftThesisConditions({ async complete() { return { text: 'Here are three conditions: {"conditions":[]}', deployment }; } }, thesis),
+    { name: "ThesisValidationError", message: /^draft response from anthropic\/claude-sonnet-5-5 must be valid JSON: / },
+  );
+  await assert.rejects(
+    draftThesisConditions({ async complete() { return { text: '{"conditions":[]}', deployment }; } }, thesis),
+    new ThesisValidationError("draft response from anthropic/claude-sonnet-5-5 must contain exactly three conditions, not 0"),
+  );
+});
+
+test("evaluateThesis leaves room for five reasons at the limit plus thinking", async () => {
+  const conditions = Array.from({ length: 5 }, (_, index) => condition(`4000000${index}-0000-4000-8000-000000000001`));
+  const answer = JSON.stringify({ results: conditions.map(({ condition_id }) => ({ condition_id, status: "challenged", reason: "x".repeat(2000), claim_refs: [CLAIM_ID] })) });
+  const llm: ThesisLlm = {
+    async complete({ maxTokens }) {
+      return (maxTokens ?? 0) >= 711 + answer.length / 3 ? { text: answer } : { text: answer.slice(0, 200), truncated: true };
+    },
+  };
+  const { results } = await evaluateThesis({ thesis: thesis(conditions), claims: [{ claim_id: CLAIM_ID, text_canonical: "Demand slowed." }], metric_results: [], as_of: AS_OF, llm });
+  assert.deepEqual(results.map(({ reason }) => reason.length), [2000, 2000, 2000, 2000, 2000]);
+});
+
+test("evaluateThesis tells the model the reason limit it validates against", async () => {
+  let system = "";
+  await evaluateThesis({
+    thesis: thesis([condition(BULL_ID)]),
+    claims: [{ claim_id: CLAIM_ID, text_canonical: "Demand slowed." }],
+    metric_results: [],
+    as_of: AS_OF,
+    llm: {
+      async complete({ messages }) {
+        system = messages[0].content;
+        return { text: JSON.stringify({ results: [{ condition_id: BULL_ID, status: "unresolved", reason: "Mixed evidence.", claim_refs: [] }] }) };
+      },
+    },
+  });
+  assert.match(system, /each reason under 2000 characters/);
+});
+
+test("evaluateThesis names the model and the cause when a reply is unusable", async () => {
+  const deployment = { channel: "anthropic", model: "claude-sonnet-5-5" };
+  const input = { thesis: thesis([condition(BULL_ID)]), claims: [{ claim_id: CLAIM_ID, text_canonical: "Demand slowed." }], metric_results: [], as_of: AS_OF };
+  await assert.rejects(
+    evaluateThesis({ ...input, llm: { async complete() { return { text: '{"results":[{"condition_id":"', truncated: true, deployment }; } } }),
+    new ThesisValidationError("assessment response from anthropic/claude-sonnet-5-5 was cut off at the 6000-token limit"),
+  );
+  await assert.rejects(
+    evaluateThesis({ ...input, llm: { async complete() { return { text: "Here is my assessment.", deployment }; } } }),
+    { name: "ThesisValidationError", message: /^assessment response from anthropic\/claude-sonnet-5-5 must be valid JSON: / },
+  );
+});
+
 test('relative narrative horizons retain the saved version date across later assessments', async () => {
   const saved = thesis([condition(BULL_ID,{horizon:'Next quarter'})]);
   const llm:ThesisLlm = {async complete(request) {

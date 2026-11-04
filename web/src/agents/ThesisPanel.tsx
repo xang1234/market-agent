@@ -5,7 +5,7 @@ import { ThesisEditor } from './ThesisEditor.tsx'
 import { AssessmentHistory, VersionHistory } from './ThesisHistory.tsx'
 import { FailureNotice } from '../ui/FailureNotice.tsx'
 import { Skeleton } from '../ui/Skeleton.tsx'
-import type { ThesisHistoryResponse, ThesisVersion } from '../../../services/agents/src/thesis-types.ts'
+import type { ThesisAssessment, ThesisHistoryResponse, ThesisVersion } from '../../../services/agents/src/thesis-types.ts'
 import { PAGE_PANEL_CLASS, PANEL_TITLE_CLASS } from '../ui/pageStyles.ts'
 
 type ThesisPanelProps = {
@@ -16,13 +16,14 @@ type ThesisPanelProps = {
   fetchImpl?: FetchImpl
   onSaved(thesis: ThesisVersion): void
   onStructuredChange?: (agentId: string, hasStructuredThesis: boolean) => void
+  onAssessments?: (assessments: ReadonlyArray<ThesisAssessment>) => void
 }
 
 export function ThesisPanel(props: ThesisPanelProps) {
   return <ThesisPanelContent key={`${props.userId}:${props.agentId}`} {...props} />
 }
 
-function ThesisPanelContent({ userId, agentId, initialThesis, refreshKey, fetchImpl, onSaved, onStructuredChange }: ThesisPanelProps) {
+function ThesisPanelContent({ userId, agentId, initialThesis, refreshKey, fetchImpl, onSaved, onStructuredChange, onAssessments }: ThesisPanelProps) {
   const [history, setHistory] = useState<ThesisHistoryResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
@@ -52,6 +53,10 @@ function ThesisPanelContent({ userId, agentId, initialThesis, refreshKey, fetchI
   useEffect(() => {
     if (hasStructuredThesis !== null) onStructuredChange?.(agentId, hasStructuredThesis)
   }, [agentId, hasStructuredThesis, onStructuredChange])
+
+  useEffect(() => {
+    if (history !== null) onAssessments?.(history.assessments)
+  }, [history, onAssessments])
 
   function recordSaved(saved: ThesisVersion) {
     // A GET started before this save cannot replace the newly saved resource.

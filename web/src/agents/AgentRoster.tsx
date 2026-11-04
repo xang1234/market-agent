@@ -1,7 +1,11 @@
+import { useResource } from '../fetch/resource.ts'
+import { subjectDisplayName } from '../symbol/quote.ts'
+import { subjectHydration, type SubjectRef } from '../symbol/search.ts'
 import type { AgentRow, AgentRunRow } from './agentRows.ts'
 import { agentRunTicks, latestRunStatus, rosterRunSummary, type RunStatus } from './runStats.ts'
 import { alertRuleLabel, universeLabel } from './agentLabels.ts'
 import { EmptyState } from '../ui/EmptyState.tsx'
+import { Skeleton } from '../ui/Skeleton.tsx'
 import { DANGER_ROW_BUTTON_CLASS, ROW_BUTTON_CLASS } from '../shell/buttonStyles.ts'
 import { PAGE_PANEL_CLASS, PANEL_TITLE_CLASS } from '../ui/pageStyles.ts'
 
@@ -10,6 +14,7 @@ type AgentRosterProps = {
   runs: ReadonlyArray<AgentRunRow>
   selectedAgentId: string | null
   activity: string
+  loading: boolean
   loadError: string | null
   onSelect: (agentId: string) => void
   onEdit: (agent: AgentRow) => void
@@ -26,6 +31,7 @@ export function AgentRoster({
   runs,
   selectedAgentId,
   activity,
+  loading,
   loadError,
   onSelect,
   onEdit,
@@ -36,12 +42,13 @@ export function AgentRoster({
   return (
     <section className={PAGE_PANEL_CLASS}>
       <h2 className={PANEL_TITLE_CLASS}>Agents</h2>
-      <FleetSummary fleet={rosterRunSummary(agents, runs)} />
+      {!loading && loadError === null ? <FleetSummary fleet={rosterRunSummary(agents, runs)} /> : null}
       <p role="status" className="mt-1 text-xs text-muted">
         <span className="font-medium text-fg-soft">Activity</span> · {activity}
       </p>
       {loadError ? <p className="mt-3 text-sm text-negative">Load failed: {loadError}</p> : null}
-      {agents.length === 0 && loadError === null ? (
+      {loading ? <Skeleton label="Loading agents" className="mt-4 h-16" /> : null}
+      {agents.length === 0 && loadError === null && !loading ? (
         <div className="mt-4">
           <EmptyState>No agents yet. Create one to start monitoring.</EmptyState>
         </div>
@@ -64,7 +71,7 @@ export function AgentRoster({
                 <p className="mt-2 text-xs text-muted">
                   {agent.enabled ? 'enabled' : 'disabled'} · {agent.cadence}
                 </p>
-                <p className="mt-2 text-xs text-muted">Universe: {universeLabel(agent.universe)}</p>
+                <p className="mt-2 text-xs text-muted">Universe: <UniverseName universe={agent.universe} /></p>
                 <p className="mt-1 text-xs text-muted">Alert rule: {alertRuleLabel(agent.alert_rules)}</p>
                 <RunTimeline ticks={agentRunTicks(runs, agent.agent_id)} />
               </div>
@@ -95,6 +102,32 @@ export function AgentRoster({
       </ul>
     </section>
   )
+}
+
+// Each named subject costs one hydrate request, on every roster row.
+const UNIVERSE_SUBJECTS_SHOWN = 5
+
+function UniverseName({ universe }: { universe: AgentRow['universe'] }) {
+  if (universe?.mode !== 'static' || universe.subject_refs.length === 0) return universeLabel(universe)
+  const hidden = universe.subject_refs.length - UNIVERSE_SUBJECTS_SHOWN
+  return (
+    <>
+      {universe.subject_refs.slice(0, UNIVERSE_SUBJECTS_SHOWN).map((subject, index) => (
+        <span key={`${subject.kind}:${subject.id}`}>
+          {index > 0 ? ', ' : null}
+          <SubjectName subject={subject} />
+        </span>
+      ))}
+      {hidden > 0 ? ` +${hidden} more` : null}
+    </>
+  )
+}
+
+function SubjectName({ subject }: { subject: SubjectRef }) {
+  const hydrated = useResource(subjectHydration, subject)
+  if (hydrated.status === 'idle' || hydrated.status === 'loading') return '…'
+  const name = hydrated.status === 'ready' ? subjectDisplayName(hydrated.data) : null
+  return name ?? `${subject.kind}: ${subject.id}`
 }
 
 // Fleet health one-liner under the roster heading — the monitor-first read
