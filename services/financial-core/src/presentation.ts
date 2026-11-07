@@ -11,7 +11,7 @@
 // (half-even to display precision); the full canonical value is always
 // carried alongside for tooltips and accessible text.
 
-import { hashCanonical } from "./canonical.ts";
+import { assumptionHash, hashCanonical } from "./canonical.ts";
 import type {
   BoundFactInputV1,
   ChangeNode,
@@ -28,11 +28,12 @@ import type {
   PlanAssumption,
   RankingPayload,
   ReasonCode,
+  Scenario,
   ScenarioEpsMultipleNode,
   Sha256Hex,
   SpreadNode,
 } from "./contracts.ts";
-import { FISCAL_PERIODS, operationDependencies } from "./contracts.ts";
+import { FISCAL_PERIODS, operationDependencies, SCENARIOS } from "./contracts.ts";
 import { coverageState } from "./coverage.ts";
 import { resolveMetricDefinition, resolveRatioDefinition } from "./definitions.ts";
 import { canonicalDecimalString, compareExactDecimals, parseDerivedDecimalText, type ExactDecimal } from "./exact-decimal.ts";
@@ -42,6 +43,20 @@ import { OPERATION_REGISTRY } from "./operation-registry.ts";
 export const FINANCIAL_PRESENTATION_VERSION = "financial-presentation.v2";
 /** Answers certified before v2 keep this version: still accepted and rendered, never generated. */
 export const FINANCIAL_PRESENTATION_V1 = "financial-presentation.v1";
+/** Content with a `scenarios` presentation (#201). All other content stays v2, so no v1 plan's presentation hash moves. */
+export const FINANCIAL_PRESENTATION_V3 = "financial-presentation.v3";
+
+export const SCENARIO_DISCLOSURE = "A mechanical scenario: reported diluted EPS × a P/E you supplied. Not a price target, forecast, or recommendation.";
+
+export type ScenarioRow = Readonly<{
+  scenario: Scenario;
+  assumption_id: LocalId;
+  /** The multiple exactly as supplied, never rounded: "20x", "17.5x". */
+  multiple_text: string;
+  attribution_text: string;
+  assumption_hash: Sha256Hex;
+  result_id: string;
+}>;
 
 export type PresentationLabel = Readonly<
   | { kind: "subject"; text: string; slot_id: LocalId }
@@ -87,6 +102,14 @@ export type Presentation = Readonly<
       ascending: Readonly<Record<string, ReadonlyArray<number>>>;
     }
   | { kind: "series"; subject_label_id: string; measure_label_id: string; points: ReadonlyArray<Readonly<{ period_label_id: string; result_id: string }>> }
+  | {
+      kind: "scenarios";
+      /** The EPS every row multiplies, when the unit publishes it. */
+      earnings_result_id: string | null;
+      /** In bear, base, bull order. */
+      rows: ReadonlyArray<ScenarioRow>;
+      disclosure: typeof SCENARIO_DISCLOSURE;
+    }
 >;
 
 export type FinancialAnswerContent = Readonly<{
@@ -154,8 +177,9 @@ export function presentFinancialUnit(input: {
   });
 
   const verified = results.filter((result) => result.disposition === "verified").length;
+  const presentations = layout(plan, nodes, results, labels.entries);
   return {
-    presentation_version: FINANCIAL_PRESENTATION_VERSION,
+    presentation_version: presentations.some((presentation) => presentation.kind === "scenarios") ? FINANCIAL_PRESENTATION_V3 : FINANCIAL_PRESENTATION_VERSION,
     template_version: plan.presentation_template_version,
     run_id: input.run_id,
     unit_id: input.unit_id,
@@ -163,7 +187,7 @@ export function presentFinancialUnit(input: {
     coverage: { state: coverageState(verified, results.length), requested: results.length, verified },
     labels: labels.entries,
     results,
-    presentations: layout(plan, nodes, results, labels.entries),
+    presentations,
   };
 }
 
@@ -198,10 +222,11 @@ class LabelTable {
 }
 
 // ---------------------------------------------------------------------------
-// Layout: several subjects -> one table; one subject with a line (a measure
-// at one period step and shape) over several periods of one calendar -> a
-// series; everything else -> scalars. Predicates, rankings, and gaps outside a table or series
-// stand alone.
+// Layout: scenarios over one EPS -> one scenarios table with that EPS; then
+// several subjects -> one table; one subject with a line (a measure at one
+// period step and shape) over several periods of one calendar -> a series;
+// everything else -> scalars. Predicates, rankings, and gaps outside a table or
+// series stand alone.
 
 function layout(plan: FinancialPlan, nodes: ReadonlyMap<LocalId, OperationNode>, results: ReadonlyArray<PresentedResult>, labels: Readonly<Record<string, PresentationLabel>>): Presentation[] {
   const nodeOf = new Map(plan.outputs.map((output) => [output.output_id, nodes.get(output.node_id)!]));
@@ -209,10 +234,11 @@ function layout(plan: FinancialPlan, nodes: ReadonlyMap<LocalId, OperationNode>,
     const node = nodeOf.get(result.output_id)!;
     return OPERATION_REGISTRY[node.operation].produces === "value" ? [[result.result_id, lineOf(plan, node, result.measure_label_id)] as const] : [];
   }));
-  const values = results.filter((result) => lines.has(result.result_id));
+  const presentations: Presentation[] = scenarioTables(plan, nodeOf, results);
+  const placed = new Set(presentations.flatMap((presentation) =>
+    presentation.kind === "scenarios" ? [...presentation.rows.map((row) => row.result_id), ...(presentation.earnings_result_id ? [presentation.earnings_result_id] : [])] : []));
+  const values = results.filter((result) => lines.has(result.result_id) && !placed.has(result.result_id));
   const subjects = new Set(values.flatMap((result) => (result.subject_label_id === null ? [] : [result.subject_label_id])));
-  const placed = new Set<string>();
-  const presentations: Presentation[] = [];
 
   if (subjects.size >= 2) {
     const tabled = values.filter((result) => result.subject_label_id !== null);
@@ -271,6 +297,35 @@ function layout(plan: FinancialPlan, nodes: ReadonlyMap<LocalId, OperationNode>,
     presentations.push({ kind, result_id: result.result_id });
   }
   return presentations;
+}
+
+// A gap row stays a row: its result carries the gap's text.
+function scenarioTables(plan: FinancialPlan, nodeOf: ReadonlyMap<LocalId, OperationNode>, results: ReadonlyArray<PresentedResult>): Presentation[] {
+  const groups = new Map<LocalId, ScenarioRow[]>();
+  for (const result of results) {
+    const node = nodeOf.get(result.output_id)!;
+    if (node.operation !== "scenario_eps_multiple") continue;
+    const assumption = scenarioAssumption(plan, node);
+    const stated = assumption.attribution.ref === plan.origin.ref ? "in this request" : "in an earlier request";
+    groups.set(node.earnings, [...(groups.get(node.earnings) ?? []), {
+      scenario: assumption.scenario,
+      assumption_id: assumption.assumption_id,
+      multiple_text: `${assumption.value}x`,
+      attribution_text: `Your assumption ${stated} (${utcMinute(assumption.attribution.captured_at)})`,
+      assumption_hash: assumptionHash(assumption),
+      result_id: result.result_id,
+    }]);
+  }
+  return [...groups].map(([earnings, rows]) => ({
+    kind: "scenarios",
+    earnings_result_id: results.find((result) => nodeOf.get(result.output_id)!.node_id === earnings)?.result_id ?? null,
+    rows: rows.sort((left, right) => SCENARIOS.indexOf(left.scenario) - SCENARIOS.indexOf(right.scenario)),
+    disclosure: SCENARIO_DISCLOSURE,
+  }));
+}
+
+function utcMinute(timestamp: string): string {
+  return `${new Date(timestamp).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
 type Line = Readonly<{ key: string; anchor: PeriodAnchor }>;
