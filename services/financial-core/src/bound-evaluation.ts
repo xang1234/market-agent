@@ -7,7 +7,7 @@
 // checkpoints independently from database records at the publication boundary.
 // Pure: no database, clock, randomness, or engine imports.
 
-import { canonicalJson, hashCanonical } from "./canonical.ts";
+import { assumptionHash, canonicalJson, hashCanonical } from "./canonical.ts";
 import type {
   BoundFinancialInputV1,
   CoverageState,
@@ -15,6 +15,7 @@ import type {
   GapDisposition,
   GapPayload,
   LocalId,
+  OperationNode,
   ReasonCode,
   Sha256Hex,
   SuccessPayload,
@@ -44,6 +45,9 @@ export type SlotBinding =
   | Readonly<{ status: "bound"; input: BoundFinancialInputV1; payload_hash: Sha256Hex; candidate_set_digest: Sha256Hex }>
   | Readonly<{ status: "gap"; reason_code: ReasonCode; candidate_set_digest: Sha256Hex }>;
 
+/** An operand by its lineage hash, or the plan assumption a scenario reads. */
+export type InputRef = Readonly<{ node_id: LocalId; hash: Sha256Hex }> | Readonly<{ assumption_id: LocalId; hash: Sha256Hex }>;
+
 /** A derived node's computation, as persisted in `computations`. */
 export type ComputationRecord = Readonly<{
   node_id: LocalId;
@@ -51,7 +55,8 @@ export type ComputationRecord = Readonly<{
   operation_version: string;
   numeric_policy_version: string;
   definition_versions: Readonly<Record<string, string>>;
-  input_refs: ReadonlyArray<Readonly<{ node_id: LocalId; hash: Sha256Hex }>>;
+  /** The node's operands in declared order, then the assumption it reads, if any. */
+  input_refs: ReadonlyArray<InputRef>;
   output_hash: Sha256Hex;
 }>;
 
@@ -119,7 +124,7 @@ export function nodeLineageHashes(
       operation: node.operation,
       operation_version: node.operation_version,
       binding: binding ? { status: binding.status, candidate_set_digest: binding.candidate_set_digest } : null,
-      inputs: operationDependencies(node).map((dependency) => ({ node_id: dependency, hash: hashes.get(dependency)! })),
+      inputs: inputRefs(plan, node, hashes),
       outcome: stateDigest(state),
     }));
   }
@@ -149,7 +154,7 @@ export function unitPublication(
       operation_version: OPERATION_REGISTRY[node.operation].operation_version,
       numeric_policy_version: NUMERIC_POLICY.version,
       definition_versions: definitionVersions(plan, nodeId),
-      input_refs: operationDependencies(node).map((dependency) => ({ node_id: dependency, hash: hashes.get(dependency)! })),
+      input_refs: inputRefs(plan, node, hashes),
       output_hash: hashes.get(nodeId)!,
     }];
   });
@@ -178,6 +183,19 @@ export function unitPublication(
 
   const coverage = coverageState(results.filter((result) => result.disposition === "computed").length, results.length);
   return { unit_id: unitId, rejected, coverage, computations, results };
+}
+
+/**
+ * What a node's lineage hash and its computation's input_refs both name. A
+ * scenario's assumption follows its operands; every other node reads none, so
+ * its refs, and every v1 hash, are what they were before assumptions existed.
+ */
+function inputRefs(plan: FinancialPlan, node: OperationNode, hashes: ReadonlyMap<LocalId, Sha256Hex>): InputRef[] {
+  const operands = operationDependencies(node).map((dependency) => ({ node_id: dependency, hash: hashes.get(dependency)! }));
+  if (node.operation !== "scenario_eps_multiple") return operands;
+  const assumption = plan.assumptions?.find((entry) => entry.assumption_id === node.assumption_id);
+  if (!assumption) throw new ExecutionIntegrityError(`node ${node.node_id} reads an undeclared assumption`);
+  return [...operands, { assumption_id: assumption.assumption_id, hash: assumptionHash(assumption) }];
 }
 
 /** Whether two JSON-shaped values are canonically identical. */
