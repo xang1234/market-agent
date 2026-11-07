@@ -15,11 +15,11 @@ test("a removed mode flag that is still set gets one warning naming it", () => {
   assert.deepEqual(removedModeFlagWarnings({}, ["CHAT_FINANCIAL_MODE", "ANALYZE_FINANCIAL_MODE", "GRID_FINANCIAL_MODE", "THESIS_FINANCIAL_MODE"]), []);
 });
 
-test("a publication presented as v1 or v2 is supported, and a presentation version never shipped is not", () => {
+test("a publication presented as v1, v2, or v3 (#201) is supported, and a presentation version never shipped is not", () => {
   const supported = (presentation_version: string) => supportedPublication({
     certificate_version: FINANCIAL_PUBLICATION_SCHEMA_VERSION, verifier_version: FINANCIAL_VERIFIER_VERSION, presentation_version, operation_version: null, numeric_policy_version: null,
   });
-  assert.deepEqual(["financial-presentation.v1", "financial-presentation.v2", "financial-presentation.v3"].map(supported), [true, true, false]);
+  assert.deepEqual(["financial-presentation.v1", "financial-presentation.v2", "financial-presentation.v3", "financial-presentation.v4"].map(supported), [true, true, true, false]);
 });
 
 test("financial readiness", { skip: !dockerAvailable(), timeout: 300_000 }, async (t) => {

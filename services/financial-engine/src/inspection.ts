@@ -8,12 +8,14 @@
 // does not support is reported as unavailable, never reinterpreted.
 
 import {
+  assumptionHash,
   BOUND_PRICE_INPUT_SCHEMA_VERSION,
   dependencyClosure,
   type BoundFinancialInputV1,
   type DerivationProofV1,
   type LocalId,
   type NoncontrollingInterestInferenceV1,
+  type PlanAssumption,
   type PriceObservationKind,
   type SplitAdjustmentV2,
 } from "../../financial-core/src/index.ts";
@@ -22,6 +24,10 @@ import { readClosureInputs, readCommittedResult } from "./read-model.ts";
 import { supportedPublication, unsupportedPlanVersion } from "./version-registry.ts";
 
 export const INSPECTION_SCHEMA_VERSION = "financial_result_inspection.v1";
+/** v1 plus the P/E assumptions a scenario result reads (#201); every other result stays v1. */
+export const INSPECTION_V2_SCHEMA_VERSION = "financial_result_inspection.v2";
+
+export type InspectedAssumption = Readonly<PlanAssumption & { assumption_hash: string }>;
 
 export type InspectedInput = Readonly<
   | {
@@ -57,8 +63,7 @@ export type InspectedInput = Readonly<
 >;
 
 export type ResultInspection =
-  | Readonly<{
-      schema_version: typeof INSPECTION_SCHEMA_VERSION;
+  | (Readonly<{
       availability: "available";
       result_id: string;
       run_id: string;
@@ -74,7 +79,10 @@ export type ResultInspection =
       formula: Readonly<{ operation: string; operation_version: string; numeric_policy_version: string }> | null;
       definitions: ReadonlyArray<Readonly<{ metric_key: string; definition_version: string }>>;
       inputs: ReadonlyArray<InspectedInput>;
-    }>
+    }> & (
+      | Readonly<{ schema_version: typeof INSPECTION_SCHEMA_VERSION }>
+      | Readonly<{ schema_version: typeof INSPECTION_V2_SCHEMA_VERSION; assumptions: ReadonlyArray<InspectedAssumption> }>
+    ))
   | Readonly<{
       schema_version: typeof INSPECTION_SCHEMA_VERSION;
       availability: "unsupported_version";
@@ -106,8 +114,12 @@ export async function inspectCommittedResult(db: SqlExecutor, ownerUserId: strin
     return { schema_version: INSPECTION_SCHEMA_VERSION, availability: "unsupported_version", result_id: record.result_id, run_id: record.run_id, reason_code: "unsupported_version" };
   }
   const metricKeys = new Set(inputs.flatMap((input) => (input.binding_status === "bound" ? [(input.bound_payload as BoundFinancialInputV1).metric.metric_key] : [])));
+  const assumptions = (plan.assumptions ?? []).filter((assumption) =>
+    plan.operations.some((node) => node.operation === "scenario_eps_multiple" && node.assumption_id === assumption.assumption_id && closure.has(node.node_id)));
   return {
-    schema_version: INSPECTION_SCHEMA_VERSION,
+    ...(assumptions.length === 0
+      ? { schema_version: INSPECTION_SCHEMA_VERSION }
+      : { schema_version: INSPECTION_V2_SCHEMA_VERSION, assumptions: assumptions.map((assumption) => ({ ...assumption, assumption_hash: assumptionHash(assumption) })) }),
     availability: "available",
     result_id: record.result_id,
     run_id: record.run_id,

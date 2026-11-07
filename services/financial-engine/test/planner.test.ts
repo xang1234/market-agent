@@ -445,3 +445,55 @@ test("a market cap or P/E answer always publishes the price and the count or EPS
     [["px_input", "px", "answer"], ["shares_input", "shares", "answer"], ["out_cap", "cap", "answer"]],
   );
 });
+
+const SCENARIO_ATTRIBUTION = { kind: "user_request", ref: "chat:turn:9", captured_at: "2024-03-01T15:00:00.000Z" };
+function scenarioDraft(extra: Record<string, unknown> = {}) {
+  const scenario = (name: string) => ({ node_id: name, operation: "scenario_eps_multiple", earnings: "eps", assumption_id: `pe_${name}` });
+  return {
+    subjects: [{ slot_id: "a", mention: NAMES[0] }],
+    operations: [
+      { node_id: "eps", operation: "reported_metric", subject_slot: "a", metric_key: "eps_diluted", period: { kind: "fiscal_period", fiscal_year: 2023, fiscal_period: "FY" } },
+      scenario("bear"), scenario("base"), scenario("bull"),
+    ],
+    outputs: ["bear", "base", "bull"].map((node) => ({ output_id: `out_${node}`, node_id: node })),
+    thresholds: [],
+    assumptions: [["bear", "20"], ["base", "25"], ["bull", "30"]].map(([scenario, value]) => ({ assumption_id: `pe_${scenario}`, scenario, value, attribution: SCENARIO_ATTRIBUTION })),
+    ...extra,
+  };
+}
+
+test("a server-built scenario draft is a v2 plan that publishes its EPS and states the user's multiples (#201)", () => {
+  const result = buildDeterministicPlan(context({ requested_subjects: [resolved(0)] }), scenarioDraft());
+  assert.ok(result.outcome === "ready", JSON.stringify(result));
+  const { plan } = result;
+  assert.equal(plan.schema_version, "financial_plan.v2");
+  assert.deepEqual(plan.assumptions?.map((assumption) => [assumption.scenario, assumption.value, assumption.attribution.ref]), [["bear", "20", "chat:turn:9"], ["base", "25", "chat:turn:9"], ["bull", "30", "chat:turn:9"]]);
+  assert.deepEqual(plan.outputs.map((output) => [output.output_id, output.node_id]), [["eps_input", "eps"], ["out_bear", "bear"], ["out_base", "base"], ["out_bull", "bull"]]);
+  assert.deepEqual(plan.operations.map((node) => node.operation_version), ["reported_metric.v1", "scenario_eps_multiple.v1", "scenario_eps_multiple.v1", "scenario_eps_multiple.v1"]);
+  assert.match(plan.interpretation!.text, / Calculations: P\/E scenario value per share \(diluted EPS × a user-supplied P\/E\)\. Assumptions \(user-supplied, not reported data\): bear P\/E 20, base P\/E 25, bull P\/E 30\.$/u);
+});
+
+test("a scenario draft with a missing or malformed multiple is refused, never defaulted (#201)", () => {
+  const two = scenarioDraft();
+  two.assumptions = two.assumptions.slice(0, 2);
+  const zero = scenarioDraft();
+  zero.assumptions[1] = { ...zero.assumptions[1]!, value: "0" };
+  for (const draft of [two, zero, scenarioDraft({ assumptions: [] })]) {
+    const result = buildDeterministicPlan(context({ requested_subjects: [resolved(0)] }), draft);
+    assert.equal(result.outcome, "unsupported", JSON.stringify(draft.assumptions));
+  }
+  const { assumptions: _assumptions, ...unstated } = scenarioDraft();
+  const result = buildDeterministicPlan(context({ requested_subjects: [resolved(0)] }), unstated);
+  assert.ok(result.outcome === "unsupported");
+  assert.match(result.reason, /schema_oneOf$/u, "a v1 plan has no scenario node");
+});
+
+test("the model can neither declare an assumption nor plan a scenario (#201)", async () => {
+  const declared = scripted({ outcome: "ready", ...scenarioDraft() }, { outcome: "ready", ...scenarioDraft() });
+  const withAssumptions = await planFinancialRequest(context({ requested_subjects: [resolved(0)] }), "Apple at 20x, 25x, 30x", declared);
+  assert.deepEqual(withAssumptions.outcome === "unsupported" && withAssumptions.issues.map((issue) => [issue.code, issue.message]), [["unknown_field", "fields not allowed in a plan draft: assumptions"]]);
+  const { assumptions: _assumptions, ...nodesOnly } = scenarioDraft();
+  const planned = scripted({ outcome: "ready", ...nodesOnly }, { outcome: "ready", ...nodesOnly });
+  const scenario = await planFinancialRequest(context({ requested_subjects: [resolved(0)] }), "Apple at 20x, 25x, 30x", planned);
+  assert.deepEqual(scenario.outcome === "unsupported" && [...new Set(scenario.issues.map((issue) => issue.code))], ["deterministic_operation"]);
+});

@@ -45,6 +45,8 @@ export function interpretPlan(plan: FinancialPlan, labels: ReadonlyMap<string, s
   ];
   if (derived.length > 0) lines.push(`Calculations: ${derived.join(", ")}.`);
   if (thresholds.length > 0) lines.push(`Thresholds: ${thresholds.join("; ")}.`);
+  const assumptions = (plan.assumptions ?? []).map((assumption) => `${assumption.scenario} P/E ${assumption.value}`);
+  if (assumptions.length > 0) lines.push(`Assumptions (user-supplied, not reported data): ${assumptions.join(", ")}.`);
   return { generator_version: INTERPRETATION_GENERATOR_VERSION, text: lines.join(" ") };
 }
 

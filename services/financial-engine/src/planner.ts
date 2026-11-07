@@ -186,7 +186,7 @@ export function buildDeterministicPlan(context: PlanningContext, draft: unknown,
   if (unresolvedSubjectClarification(context)) {
     return { outcome: "configuration_needed", reason: "a configured subject does not resolve to one canonical identity", model_calls: 0 };
   }
-  const parsed = checkDraft(draft);
+  const parsed = checkDraft(draft, DETERMINISTIC_KEYS);
   const attempt = parsed.ok ? assemblePlan(context, parsed.value, { kind: "deterministic", adapter_version: DETERMINISTIC_ADAPTER_VERSION, model: null, prompt_version: null }, units) : parsed;
   if (attempt.ok) return finish(attempt.value, 0);
   if (attempt.kind === "clarify") return { outcome: "configuration_needed", reason: attempt.clarification.question, model_calls: 0 };
@@ -201,6 +201,8 @@ type Draft = {
   operations: Array<Record<string, unknown>>;
   outputs: Array<{ output_id: string; node_id: string }>;
   thresholds: Array<Record<string, unknown>>;
+  /** Only a server-built draft declares them, attributed by its builder: a carried multiple keeps the request that stated it. */
+  assumptions: unknown[] | undefined;
 };
 
 type Rejection =
@@ -211,6 +213,7 @@ type Rejection =
 type Attempt<T> = { ok: true; value: T } | ({ ok: false } & Rejection);
 
 const READY_KEYS = ["outcome", "subjects", "operations", "outputs", "thresholds"];
+const DETERMINISTIC_KEYS = [...READY_KEYS, "assumptions"];
 
 function parseDraft(text: string): Attempt<Draft> {
   const body = text.trim().replace(/^```(?:json)?\s*/u, "").replace(/\s*```$/u, "");
@@ -229,18 +232,19 @@ function parseDraft(text: string): Attempt<Draft> {
     const choices = Array.isArray(value.choices) ? value.choices.filter((choice): choice is string => typeof choice === "string").slice(0, 10) : [];
     return { ok: false, kind: "clarify", clarification: clarification("request", question, choices.map((label, index) => ({ choice_id: `option_${index + 1}`, label }))) };
   }
-  return checkDraft(value);
+  return checkDraft(value, READY_KEYS);
 }
 
-function checkDraft(value: unknown): Attempt<Draft> {
+function checkDraft(value: unknown, keys: ReadonlyArray<string>): Attempt<Draft> {
   if (!isRecord(value)) return invalid("$", "invalid_draft", "the draft must be an object");
-  const unknownKeys = Object.keys(value).filter((key) => !READY_KEYS.includes(key));
+  const unknownKeys = Object.keys(value).filter((key) => !keys.includes(key));
   if (unknownKeys.length > 0) return invalid("$", "unknown_field", `fields not allowed in a plan draft: ${unknownKeys.join(", ")}`);
   if (value.outcome !== undefined && value.outcome !== "ready") return invalid("$.outcome", "invalid_outcome", "outcome must be ready, needs_clarification, or unsupported");
   for (const key of ["subjects", "operations", "outputs"] as const) {
     if (!Array.isArray(value[key])) return invalid(`$.${key}`, "invalid_draft", `${key} must be an array`);
   }
   if (value.thresholds !== undefined && !Array.isArray(value.thresholds)) return invalid("$.thresholds", "invalid_draft", "thresholds must be an array");
+  if (value.assumptions !== undefined && !Array.isArray(value.assumptions)) return invalid("$.assumptions", "invalid_draft", "assumptions must be an array");
   for (const subject of value.subjects as unknown[]) {
     if (!isRecord(subject) || typeof subject.slot_id !== "string" || typeof subject.mention !== "string" || Object.keys(subject).length !== 2) {
       return invalid("$.subjects", "invalid_draft", "each subject is {slot_id, mention}");
@@ -261,6 +265,7 @@ function checkDraft(value: unknown): Attempt<Draft> {
       operations: value.operations as Draft["operations"],
       outputs: value.outputs as Draft["outputs"],
       thresholds: (value.thresholds ?? []) as Draft["thresholds"],
+      assumptions: value.assumptions as Draft["assumptions"],
     },
   };
 }
@@ -335,7 +340,7 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
   if (issues.length > 0) return { ok: false, kind: "invalid", issues };
 
   const plan = {
-    schema_version: "financial_plan.v1",
+    ...(draft.assumptions === undefined ? { schema_version: "financial_plan.v1" } : { schema_version: "financial_plan.v2", assumptions: draft.assumptions }),
     plan_id: context.plan_id,
     origin: context.origin,
     planner,
@@ -378,8 +383,8 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
 
 /**
  * The reported operands an answer resting on a figure always shows beside it:
- * free cash flow's OCF and capex (#324), and a valuation's price and the share
- * count or EPS it reads (#444).
+ * free cash flow's OCF and capex (#324), a valuation's price and the share
+ * count or EPS it reads (#444), and the EPS a P/E scenario multiplies (#201).
  */
 function shownOperands(node: OperationNode): LocalId[] {
   switch (node.operation) {
@@ -389,6 +394,8 @@ function shownOperands(node: OperationNode): LocalId[] {
       return [node.price, node.shares];
     case "pe_ratio":
       return [node.price, node.earnings];
+    case "scenario_eps_multiple":
+      return [node.earnings];
     default:
       return [];
   }

@@ -459,7 +459,7 @@
       ]
     },
     "FinancialResultInspection": {
-      "description": "A committed result with its full lineage, re-authorized over its transitive input closure on every read. An unsupported certificate or operation version carries no values.",
+      "description": "A committed result with its full lineage, re-authorized over its transitive input closure on every read. A result that reads P/E assumptions is v2, which adds them; every other result is v1. An unsupported certificate or operation version carries no values.",
       "oneOf": [
         {
           "type": "object",
@@ -639,6 +639,217 @@
               "type": "array",
               "items": {
                 "$ref": "#/$defs/FinancialInspectedInput"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "schema_version",
+            "availability",
+            "result_id",
+            "run_id",
+            "unit_id",
+            "output_id",
+            "disposition",
+            "payload",
+            "result_hash",
+            "interpretation",
+            "coverage_state",
+            "time",
+            "publication",
+            "formula",
+            "definitions",
+            "inputs",
+            "assumptions"
+          ],
+          "properties": {
+            "schema_version": {
+              "const": "financial_result_inspection.v2"
+            },
+            "availability": {
+              "const": "available"
+            },
+            "result_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "run_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "unit_id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]{0,63}$"
+            },
+            "output_id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]{0,63}$"
+            },
+            "disposition": {
+              "enum": [
+                "verified",
+                "missing",
+                "unsupported",
+                "not_applicable",
+                "undefined",
+                "incompatible",
+                "blocked_dependency",
+                "execution_error"
+              ]
+            },
+            "payload": {
+              "oneOf": [
+                {
+                  "$ref": "./financial_result_schema.json#/$defs/SuccessPayload"
+                },
+                {
+                  "$ref": "./financial_result_schema.json#/$defs/GapPayload"
+                }
+              ]
+            },
+            "result_hash": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "interpretation": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "coverage_state": {
+              "enum": [
+                "complete",
+                "partial",
+                "none",
+                null
+              ]
+            },
+            "time": {
+              "type": "object",
+              "required": [
+                "knowledge_cutoff",
+                "time_mode",
+                "finalized_at"
+              ],
+              "properties": {
+                "knowledge_cutoff": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "time_mode": {
+                  "enum": [
+                    "public_information",
+                    "historical_as_reported"
+                  ]
+                },
+                "finalized_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "additionalProperties": false
+            },
+            "publication": {
+              "type": "object",
+              "required": [
+                "snapshot_id",
+                "certificate_digest"
+              ],
+              "properties": {
+                "snapshot_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "certificate_digest": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "additionalProperties": false
+            },
+            "formula": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "operation",
+                    "operation_version",
+                    "numeric_policy_version"
+                  ],
+                  "properties": {
+                    "operation": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+                    },
+                    "operation_version": {
+                      "type": "string"
+                    },
+                    "numeric_policy_version": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "definitions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "metric_key",
+                  "definition_version"
+                ],
+                "properties": {
+                  "metric_key": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]{0,63}$"
+                  },
+                  "definition_version": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "inputs": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/FinancialInspectedInput"
+              }
+            },
+            "assumptions": {
+              "description": "The user-supplied P/E assumptions the result's scenarios read: plan configuration, not reported data.",
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 3,
+              "items": {
+                "type": "object",
+                "required": ["assumption_id", "scenario", "value", "attribution", "assumption_hash"],
+                "properties": {
+                  "assumption_id": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+                  "scenario": { "enum": ["bear", "base", "bull"] },
+                  "value": { "type": "string" },
+                  "attribution": {
+                    "type": "object",
+                    "required": ["kind", "ref", "captured_at"],
+                    "properties": {
+                      "kind": { "const": "user_request" },
+                      "ref": { "type": "string" },
+                      "captured_at": { "type": "string", "format": "date-time" }
+                    },
+                    "additionalProperties": false
+                  },
+                  "assumption_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+                },
+                "additionalProperties": false
               }
             }
           },
