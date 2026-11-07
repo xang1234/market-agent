@@ -38,7 +38,7 @@ import {
   type BoundPriceInputV1,
   type CommittedResult,
   type FinancialAnswerContent,
-  type FinancialPlanV1,
+  type FinancialPlan,
   type LocalId,
   type ReasonCode,
   type Sha256Hex,
@@ -329,7 +329,7 @@ export function verifyFinancialUnit(records: FinancialUnitRecords, unitId: Local
 }
 
 /** The unit's presentation with the subjects' current display names; null when a subject has no name. */
-function presentVerifiedUnit(plan: FinancialPlanV1, records: FinancialUnitRecords, unitId: LocalId, results: ReadonlyArray<CommittedResult>, bindings: ReadonlyMap<LocalId, SlotBinding>): FinancialAnswerContent | null {
+function presentVerifiedUnit(plan: FinancialPlan, records: FinancialUnitRecords, unitId: LocalId, results: ReadonlyArray<CommittedResult>, bindings: ReadonlyMap<LocalId, SlotBinding>): FinancialAnswerContent | null {
   const names = new Map(records.subject_names.map((subject) => [`${subject.kind}:${subject.id.toLowerCase()}`, subject.name]));
   const subjectNames: Record<LocalId, string> = {};
   for (const member of plan.subjects.members) {
@@ -348,7 +348,7 @@ type BindingsOutcome =
   | { ok: false; input_slot: string; field: string };
 
 /** Every reported node's persisted binding, validated against its hash and the plan. */
-function bindingsFor(plan: FinancialPlanV1, records: FinancialUnitRecords): BindingsOutcome {
+function bindingsFor(plan: FinancialPlan, records: FinancialUnitRecords): BindingsOutcome {
   const rows = new Map(records.bindings.map((row) => [row.input_slot, row]));
   const slots = new Map(plan.subjects.members.map((member) => [member.slot_id, member]));
   const value = new Map<LocalId, SlotBinding>();
@@ -396,7 +396,7 @@ function ineligibility(
   input: BoundFactInputV1,
   evidence: LoadedEvidence | undefined,
   splitHistories: ReadonlyMap<string, SubjectSplitHistory>,
-  plan: FinancialPlanV1,
+  plan: FinancialPlan,
   grant: ReadonlyArray<string>,
 ): string | null {
   if (!evidence) return "fact_unavailable";
@@ -435,7 +435,7 @@ function priceIneligibility(
   input: BoundPriceInputV1,
   observation: LoadedPriceObservation | undefined,
   splitHistories: ReadonlyMap<string, SubjectSplitHistory>,
-  plan: FinancialPlanV1,
+  plan: FinancialPlan,
   grant: ReadonlyArray<string>,
 ): string | null {
   if (!observation) return "price_observation_unavailable";
@@ -466,7 +466,7 @@ function splitBasisChange(
   native: string,
   adjustment: SplitAdjustmentV2,
   splitHistories: ReadonlyMap<string, SubjectSplitHistory>,
-  plan: FinancialPlanV1,
+  plan: FinancialPlan,
 ): "listing_changed" | "splits_changed" | null {
   const history = splitHistories.get(subject);
   if (history?.status === "gap" && history.reason_code === "split_history_missing") return "splits_changed";

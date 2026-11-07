@@ -5,7 +5,7 @@
 // it beside the answer, in the same message. The seal admits no prose and no
 // model may run inside finalization, so it is appended after the commit.
 
-import type { FinancialPlanV1 } from "../../financial-core/src/index.ts";
+import type { FinancialPlan } from "../../financial-core/src/index.ts";
 import type { SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { LlmProviderError, LlmRouterError } from "../../llm/src/index.ts";
@@ -59,7 +59,7 @@ async function commentary(
   compose: CommentaryComposer,
   message: ChatReadMessage,
   tickers: ReadonlyMap<string, string>,
-  plan: FinancialPlanV1 | null,
+  plan: FinancialPlan | null,
   turn: Pick<TurnTrace, "thread_id" | "run_id" | "turn_id" | "question">,
 ): Promise<Commentary> {
   const [answer] = message.blocks as unknown as [FinancialAnswerBlock];

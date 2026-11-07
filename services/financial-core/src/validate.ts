@@ -9,12 +9,13 @@ import planSchema from "../../../spec/financial_plan_schema.json" with { type: "
 import resultSchema from "../../../spec/financial_result_schema.json" with { type: "json" };
 import { validatePlanGraph } from "./graph.ts";
 import {
+  FINANCIAL_PLAN_V2_SCHEMA_VERSION,
   operationDependencies,
   type BoundFinancialInputV1,
   type DerivationProofV1,
   type DraftFinancialResultV1,
   type FinalizedFinancialResultV1,
-  type FinancialPlanV1,
+  type FinancialPlan,
   type FinancialRuntimeAuthority,
   type FinancialRuntimeAuthorityV1,
   type ValidationIssue,
@@ -45,6 +46,7 @@ function compiled(schemaId: string, def: string): ValidateFunction {
 
 const validators = {
   plan: compiled(planSchema.$id, "FinancialPlanV1"),
+  planV2: compiled(planSchema.$id, "FinancialPlanV2"),
   authority: compiled(planSchema.$id, "FinancialRuntimeAuthorityV1"),
   boundInput: compiled(resultSchema.$id, "BoundFinancialInputV1"),
   derivation: compiled(resultSchema.$id, "DerivationProofV1"),
@@ -57,10 +59,12 @@ const validators = {
  * plan's own limits. Parent limits are applied again by the engine via
  * validatePlanGraph(plan, parentLimits) once server authority is known.
  */
-export function validateFinancialPlan(input: unknown): ValidationResult<FinancialPlanV1> {
-  const structural = structuralIssues(validators.plan, input);
+export function validateFinancialPlan(input: unknown): ValidationResult<FinancialPlan> {
+  // Any other version falls to the v1 validator, whose const rejects it.
+  const v2 = typeof input === "object" && input !== null && (input as { schema_version?: unknown }).schema_version === FINANCIAL_PLAN_V2_SCHEMA_VERSION;
+  const structural = structuralIssues(v2 ? validators.planV2 : validators.plan, input);
   if (structural.length > 0) return { ok: false, issues: structural };
-  const plan = input as FinancialPlanV1;
+  const plan = input as FinancialPlan;
   const issues = planSemanticIssues(plan);
   if (issues.length > 0) return { ok: false, issues };
   const graphIssues = validatePlanGraph(plan);
@@ -119,7 +123,7 @@ function issueFromAjv(error: ErrorObject): ValidationIssue {
   return { path, code: `schema_${error.keyword}`, message: error.message ?? "is invalid" };
 }
 
-function planSemanticIssues(plan: FinancialPlanV1): ValidationIssue[] {
+function planSemanticIssues(plan: FinancialPlan): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const add = (path: string, code: string, message: string) => issues.push({ path, code, message });
 
@@ -148,6 +152,18 @@ function planSemanticIssues(plan: FinancialPlanV1): ValidationIssue[] {
     add("$.time.cutoff_timezone", "invalid_timezone", "is not a recognized IANA time zone");
   }
 
+  const assumptions = plan.assumptions ?? [];
+  const assumptionIds = uniqueIds(assumptions.map((assumption) => assumption.assumption_id), "$.assumptions", "assumption_id", add);
+  assumptions.forEach((assumption, index) => {
+    const capturedAt = assumption.attribution.captured_at;
+    if (Number.isNaN(Date.parse(capturedAt)) || !isCalendarValid(capturedAt)) {
+      add(`$.assumptions[${index}].attribution.captured_at`, "invalid_captured_at", "is not a valid timestamp");
+    }
+    // A scenario node per assumption: an assumption nothing reads would ride in the plan inert.
+    const readers = plan.operations.filter((node) => node.operation === "scenario_eps_multiple" && node.assumption_id === assumption.assumption_id).length;
+    if (readers !== 1) add(`$.assumptions[${index}]`, readers === 0 ? "unused_assumption" : "shared_assumption", `is read by ${readers} scenario nodes, not exactly one`);
+  });
+
   const metrics = uniqueIds(plan.metric_definitions.map((definition) => definition.metric_key), "$.metric_definitions", "metric_key", add);
   const thresholds = uniqueIds(plan.thresholds.map((threshold) => threshold.threshold_id), "$.thresholds", "threshold_id", add);
   const nodes = uniqueIds(plan.operations.map((node) => node.node_id), "$.operations", "node_id", add);
@@ -162,6 +178,9 @@ function planSemanticIssues(plan: FinancialPlanV1): ValidationIssue[] {
     }
     if (node.operation === "threshold" && !thresholds.has(node.threshold_id)) {
       add(`${path}.threshold_id`, "unknown_threshold", `references undeclared threshold ${node.threshold_id}`);
+    }
+    if (node.operation === "scenario_eps_multiple" && !assumptionIds.has(node.assumption_id)) {
+      add(`${path}.assumption_id`, "unknown_assumption", `references undeclared assumption ${node.assumption_id}`);
     }
     for (const dependency of operationDependencies(node)) {
       if (!nodes.has(dependency)) add(path, "unknown_node", `depends on undeclared node ${dependency}`);

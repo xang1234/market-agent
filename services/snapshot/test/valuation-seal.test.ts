@@ -18,7 +18,7 @@ import {
   validateBoundInput,
   validateFinancialPlan,
   type BoundFinancialInputV1,
-  type FinancialPlanV1,
+  type FinancialPlan,
   type MetricValueKind,
   type SlotBinding,
   type SplitAdjustmentV2,
@@ -44,7 +44,7 @@ const CUTOFF = "2024-06-10T14:00:00.000Z";
 const SPLIT = { execution_date: "2024-06-10", split_from: "1", split_to: "10" };
 const CONTEXT: FinancialSealContext = { snapshot_id: F.snapshot, manifest: { fact_refs: [EPS_FACT, SHARES_FACT], source_ids: [TEN_K, TEN_Q, POLYGON], as_of: CUTOFF } };
 
-function valuationPlan(): FinancialPlanV1 {
+function valuationPlan(): FinancialPlan {
   const reported = (node_id: string, metric_key: string, period: Record<string, unknown>) =>
     ({ node_id, operation: "reported_metric", operation_version: "reported_metric.v1", subject_slot: "a", metric_key, period });
   const validated = validateFinancialPlan({

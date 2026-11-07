@@ -8,7 +8,7 @@
 // numbers, bigint, Dates, Maps, or class instances.
 
 import { createHash } from "node:crypto";
-import type { FinancialPlanV1, FinancialRuntimeAuthorityV1, Sha256Hex } from "./contracts.ts";
+import type { FinancialPlan, FinancialRuntimeAuthorityV1, PlanAssumption, Sha256Hex } from "./contracts.ts";
 
 export const CANONICAL_JSON_VERSION = "canonical_json.v1";
 const MAX_CANONICAL_DEPTH = 64;
@@ -26,6 +26,7 @@ export const HASH_DOMAINS = Object.freeze({
   presentation: "market-agent/financial/presentation/v1",
   publication: "market-agent/financial/publication/v1",
   derivation: "market-agent/financial/derivation/v1",
+  assumption: "market-agent/financial/assumption/v1",
 } as const);
 export type HashDomain = keyof typeof HASH_DOMAINS;
 
@@ -54,9 +55,10 @@ export function hashCanonical(domain: HashDomain, value: unknown): Sha256Hex {
  * Semantic identity of a validated plan: what is being computed. Excludes the
  * random plan_id, provenance (origin, planner), derived interpretation text, and
  * threshold attribution references, which are storage/provenance identities.
- * Subject order, cutoff, thresholds, and definitions all participate.
+ * Subject order, cutoff, thresholds, definitions, and assumptions with their
+ * attribution all participate.
  */
-export function planSemanticHash(plan: FinancialPlanV1): Sha256Hex {
+export function planSemanticHash(plan: FinancialPlan): Sha256Hex {
   const { plan_id: _planId, origin: _origin, planner: _planner, interpretation: _interpretation, ...semantic } = plan;
   return hashCanonical("plan_semantic", {
     ...semantic,
@@ -68,12 +70,17 @@ export function planSemanticHash(plan: FinancialPlanV1): Sha256Hex {
  * Record-binding identity: the full plan including persistence IDs, bound to
  * its owner and parent. Two owners with equal semantic hashes never share one.
  */
-export function planBindingHash(plan: FinancialPlanV1, authority: FinancialRuntimeAuthorityV1): Sha256Hex {
+export function planBindingHash(plan: FinancialPlan, authority: FinancialRuntimeAuthorityV1): Sha256Hex {
   return hashCanonical("plan_binding", {
     plan,
     owner_user_id: authority.owner_user_id,
     parent: authority.parent,
   });
+}
+
+/** Identity of one assumption: its id, scenario, exact value, and attribution. */
+export function assumptionHash(assumption: PlanAssumption): Sha256Hex {
+  return hashCanonical("assumption", assumption);
 }
 
 /** Owner-scoped idempotency identity: unique by owner, parent kind/id, and request key. */

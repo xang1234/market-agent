@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { FinancialPlanV1, PeriodRankNode } from "../src/contracts.ts";
+import type { FinancialPlan, PeriodRankNode } from "../src/contracts.ts";
 import { evaluatePlan } from "../src/coverage.ts";
 import { operationGap, type FinancialOperand, type PredicateOutcome } from "../src/operations.ts";
 import { periodRank } from "../src/predicates.ts";
@@ -78,8 +78,8 @@ test("a window with fewer than two periods valued is a gap, never a high of one 
   assert.deepEqual(gap(periodRank(rank(["q2"]), [all[1]!])), ["missing", "missing_input"], "a window of one period");
 });
 
-function windowPlan(): FinancialPlanV1 {
-  const plan = mutable(planFixture()) as FinancialPlanV1;
+function windowPlan(): FinancialPlan {
+  const plan = mutable(planFixture()) as FinancialPlan;
   plan.subjects = { ...plan.subjects, requested_count: 1, resolved_count: 1, members: [plan.subjects.members[0]!] };
   plan.metric_definitions = [{ metric_key: "revenue", definition_version: "revenue.v1" }];
   plan.operations = [
@@ -144,7 +144,7 @@ test("the presentation names the high and low periods, how many it ranked, and e
 });
 
 test("a window's period is its own label, never a trailing sum's over the same quarters", () => {
-  const plan = mutable(windowPlan()) as FinancialPlanV1;
+  const plan = mutable(windowPlan()) as FinancialPlan;
   plan.operations = [
     ...plan.operations.filter((node) => node.operation === "reported_metric"),
     { node_id: "ttm", operation: "trailing_sum", operation_version: "trailing_sum.v1", quarters: ["q1", "q2", "q3", "q4"] },

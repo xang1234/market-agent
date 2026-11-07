@@ -11,7 +11,7 @@
 // cutoff): repeats already counted once, each placed by its stored polarity,
 // with any stored contradiction between them named.
 
-import { dependencyClosure, type FinancialAnswerContent, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
+import { dependencyClosure, type FinancialAnswerContent, type FinancialPlan } from "../../financial-core/src/index.ts";
 import { returnLabel } from "../../market/src/perf-points.ts";
 import { QUARTERS_SHOWN, type ResearchScope, type ScopeQuarter } from "./research-scope.ts";
 import { isRecord } from "../../shared/src/http.ts";
@@ -347,7 +347,7 @@ export function buildEvidencePacket(input: {
  * is in the packet. Only an answer about several companies names each
  * figure's, by the ticker the turn gave its slot, else the engine's label for it.
  */
-export function enginePacket(content: FinancialAnswerContent, tickers: ReadonlyMap<string, string>, plan: FinancialPlanV1 | null): EvidencePacket {
+export function enginePacket(content: FinancialAnswerContent, tickers: ReadonlyMap<string, string>, plan: FinancialPlan | null): EvidencePacket {
   const subjects = Object.values(content.labels).flatMap((label) => label.kind === "subject" ? [label] : []);
   const companyOf = new Map(subjects.map((label) => [`subject:${label.slot_id}`, tickers.get(label.slot_id) ?? label.text]));
   const companies = [...companyOf.values()];
@@ -388,7 +388,7 @@ export function enginePacket(content: FinancialAnswerContent, tickers: ReadonlyM
 }
 
 // Each lead's companies, by its output: the one company each side's inputs are reported for.
-function leadCompanies(plan: FinancialPlanV1 | null, unitId: string, companyOf: ReadonlyMap<string, string>): ReadonlyMap<string, readonly [string, string]> {
+function leadCompanies(plan: FinancialPlan | null, unitId: string, companyOf: ReadonlyMap<string, string>): ReadonlyMap<string, readonly [string, string]> {
   if (plan === null) return new Map();
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
   const companyOfSide = (nodeId: string) => {

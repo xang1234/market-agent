@@ -15,7 +15,7 @@ import {
   validateBoundInput,
   type BoundFactInputV1,
   type BoundPriceInputV1,
-  type FinancialPlanV1,
+  type FinancialPlan,
   type FinancialRuntimeAuthority,
   type LocalId,
   type ReasonCode,
@@ -63,7 +63,7 @@ type SlotRead =
 export async function bindPlanInputs(input: {
   client: SqlExecutor;
   lease: RunLease;
-  plan: FinancialPlanV1;
+  plan: FinancialPlan;
   authority: FinancialRuntimeAuthority;
   evidence: (executor: SqlExecutor) => FinancialEvidencePort;
 }): Promise<BindingResult> {
@@ -130,7 +130,7 @@ export async function bindPlanInputs(input: {
 async function readSlot(
   { client }: FencedTx,
   node: ReportedMetricNode,
-  context: { plan: FinancialPlanV1; authority: FinancialRuntimeAuthority; evidence: FinancialEvidencePort; candidate_budget: number },
+  context: { plan: FinancialPlan; authority: FinancialRuntimeAuthority; evidence: FinancialEvidencePort; candidate_budget: number },
 ): Promise<SlotRead> {
   if (context.candidate_budget <= 0) return { node, status: "gap", reason_code: "scope_limit_exceeded" };
   const slot = subjectSlot(context.plan, node);
@@ -160,7 +160,7 @@ async function readSlot(
  */
 async function readSplitHistories(
   { client }: FencedTx,
-  plan: FinancialPlanV1,
+  plan: FinancialPlan,
   reads: ReadonlyArray<SlotRead>,
   priceNodes: ReadonlyArray<ReportedMetricNode>,
   evidence: FinancialEvidencePort,
@@ -182,7 +182,7 @@ async function readSplitHistories(
   return histories;
 }
 
-function selectSlot(read: SlotRead, plan: FinancialPlanV1, policy: SelectionPolicy, latestPeriod: LatestPeriod, history: SplitHistory | undefined): SlotOutcome {
+function selectSlot(read: SlotRead, plan: FinancialPlan, policy: SelectionPolicy, latestPeriod: LatestPeriod, history: SplitHistory | undefined): SlotOutcome {
   const { node } = read;
   if (read.status === "gap") {
     return {
@@ -211,7 +211,7 @@ function selectSlot(read: SlotRead, plan: FinancialPlanV1, policy: SelectionPoli
 async function bindPriceSlot(
   { client }: FencedTx,
   node: ReportedMetricNode,
-  plan: FinancialPlanV1,
+  plan: FinancialPlan,
   policy: SelectionPolicy,
   history: SplitHistory | undefined,
   evidence: FinancialEvidencePort,
@@ -245,7 +245,7 @@ function priceCandidateSetDigest(slot: LocalId, observations: ReadonlyArray<Pric
 function boundPriceBinding(
   node: ReportedMetricNode,
   slot: SubjectSlot,
-  plan: FinancialPlanV1,
+  plan: FinancialPlan,
   selection: Extract<PriceSelection, { status: "selected" }>,
   digest: Sha256Hex,
 ): InputBinding {
@@ -273,7 +273,7 @@ function boundPriceBinding(
   return { slot: node.node_id, status: "bound", input: validated.value, payload_hash: hashCanonical("bound_input", validated.value), candidate_set_digest: digest };
 }
 
-function subjectSlot(plan: FinancialPlanV1, node: ReportedMetricNode): SubjectSlot {
+function subjectSlot(plan: FinancialPlan, node: ReportedMetricNode): SubjectSlot {
   return plan.subjects.members.find((member) => member.slot_id === node.subject_slot)!;
 }
 
@@ -295,7 +295,7 @@ export function candidateSetDigest(slot: LocalId, candidates: ReadonlyArray<Inpu
 function boundBinding(
   node: ReportedMetricNode,
   slot: SubjectSlot,
-  plan: FinancialPlanV1,
+  plan: FinancialPlan,
   selected: SelectedInput,
   basis: Exclude<BoundBasis, { status: "gap" }>,
   digest: Sha256Hex,

@@ -355,7 +355,7 @@ test("schema enums agree with TypeScript discriminated unions", () => {
   const plan = planSchema as { $defs: Record<string, any> };
   const result = resultSchema as { $defs: Record<string, any> };
 
-  const operations = plan.$defs.OperationNode.oneOf.flatMap((ref: { $ref: string }) => {
+  const operations = [...plan.$defs.OperationNode.oneOf, plan.$defs.OperationNodeV2.oneOf[1]].flatMap((ref: { $ref: string }) => {
     const def = ref.$ref.replace("#/$defs/", "");
     return enumAt(plan, def, "properties", "operation");
   });

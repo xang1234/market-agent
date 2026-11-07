@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { hashCanonical } from "../src/canonical.ts";
-import type { BoundFinancialInputV1, FinancialPlanV1, FinancialUnit, LocalId, PeriodSelector, ReasonCode } from "../src/contracts.ts";
+import type { BoundFinancialInputV1, FinancialPlan, FinancialUnit, LocalId, PeriodSelector, ReasonCode } from "../src/contracts.ts";
 import { evaluateBoundPlan, nodeLineageHashes, unitPublication, type ExpectedResult, type SlotBinding } from "../src/bound-evaluation.ts";
 import { presentFinancialUnit } from "../src/presentation.ts";
 import { validateFinancialPlan } from "../src/validate.ts";
@@ -19,7 +19,7 @@ const LATEST_YEAR: PeriodSelector = { kind: "latest", period_type: "annual", off
 const PER_SHARE_USD: FinancialUnit = { kind: "currency_per_share", currency: "USD" };
 const DIGEST = "c".repeat(64);
 
-function valuationPlan(earnings: { metric_key: string; period: PeriodSelector } = { metric_key: "eps_diluted", period: LATEST_YEAR }): FinancialPlanV1 {
+function valuationPlan(earnings: { metric_key: string; period: PeriodSelector } = { metric_key: "eps_diluted", period: LATEST_YEAR }): FinancialPlan {
   const reported = (node_id: string, metric_key: string, period: PeriodSelector) =>
     ({ node_id, operation: "reported_metric", operation_version: "reported_metric.v1", subject_slot: "a", metric_key, period });
   const validated = validateFinancialPlan({

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
-import { createRuntimeAuthority, operationDependencies, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
+import { createRuntimeAuthority, operationDependencies, type FinancialPlan } from "../../financial-core/src/index.ts";
 import { buildDeterministicPlan, planFinancialRequest, type PlanningContext, type PlanningModel, type PlanningResult } from "../../financial-engine/src/planner.ts";
 import type { CandidatePage, CandidateRequest, FinancialEvidencePort, InputCandidate, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { createReplayLlmChatClient } from "../../llm/src/replay-client.ts";
@@ -49,7 +49,7 @@ function planningContext(question: string): PlanningContext {
   };
 }
 
-function outputLabels(plan: FinancialPlanV1): string[] {
+function outputLabels(plan: FinancialPlan): string[] {
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
   const ticker = (slot: string) => {
     const member = plan.subjects.members.find((candidate) => candidate.slot_id === slot)!;
@@ -191,7 +191,7 @@ const goldenQuarters = (ticker: string, publicBy?: string) => GOLDEN_COMPANIES.f
 const candidatePage = (...candidates: InputCandidate[]): CandidatePage => ({ status: "ok", candidates, truncated: false });
 const changeOf = (ticker: string, current: string, prior: string) => `percent_change_positive_base(${ticker} revenue ${current}, ${ticker} revenue ${prior})`;
 
-const omissions = (plan: FinancialPlanV1, evidence: FinancialEvidencePort) => overviewOmissions(plan, authority, evidence, (slot) => {
+const omissions = (plan: FinancialPlan, evidence: FinancialEvidencePort) => overviewOmissions(plan, authority, evidence, (slot) => {
   const member = plan.subjects.members.find((candidate) => candidate.slot_id === slot)!;
   return GOLDEN_COMPANIES.find((company) => company.issuer_id === member.subject_ref.id)!.legal_name;
 });
@@ -537,7 +537,7 @@ test("an engine answer names what the reading of its question asks for and the p
     reported(`rev_${suffix}`, "revenue", period),
     { node_id: `om_${suffix}`, operation: "operating_margin", numerator: `oi_${suffix}`, revenue: `rev_${suffix}` },
   ];
-  const plan = (operations: object[], shown: string[] = operations.map((operation) => (operation as { node_id: string }).node_id)): FinancialPlanV1 => {
+  const plan = (operations: object[], shown: string[] = operations.map((operation) => (operation as { node_id: string }).node_id)): FinancialPlan => {
     const outputs = shown.map((node_id) => ({ output_id: `out_${node_id}`, node_id }));
     const planned = buildDeterministicPlan(planningContext("NVDA"), { subjects: [{ slot_id: "a", mention: "NVDA" }], operations, outputs, thresholds: [] });
     assert.equal(planned.outcome, "ready", JSON.stringify(planned));
@@ -682,7 +682,7 @@ test("a company's peers fill the turn's company cap, named by their legal names;
 test("an engine answer checks a qualified metric against what its plan computes (#425)", () => {
   const year = (fiscal_year: number) => ({ kind: "fiscal_period", fiscal_year, fiscal_period: "FY" });
   const eps = (node_id: string, fiscal_year: number) => ({ node_id, operation: "reported_metric", subject_slot: "a", metric_key: "eps_diluted", period: year(fiscal_year) });
-  const plan = (operations: object[], shown: string[]): FinancialPlanV1 => {
+  const plan = (operations: object[], shown: string[]): FinancialPlan => {
     const planned = buildDeterministicPlan(planningContext("NVDA"), { subjects: [{ slot_id: "a", mention: "NVDA" }], operations, outputs: shown.map((node_id) => ({ output_id: `out_${node_id}`, node_id })), thresholds: [] });
     assert.equal(planned.outcome, "ready", JSON.stringify(planned));
     return (planned as Extract<PlanningResult, { outcome: "ready" }>).plan;

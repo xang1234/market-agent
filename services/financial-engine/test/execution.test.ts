@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import type { Client } from "pg";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
-import type { FinancialPlanV1 } from "../../financial-core/src/index.ts";
+import type { FinancialPlan } from "../../financial-core/src/index.ts";
 import { bindPlanInputs } from "../src/bind-inputs.ts";
 import { buildUnitCheckpoint, checkpointUnit } from "../src/checkpoints.ts";
 import { listRunEvents } from "../src/events-repo.ts";
@@ -19,7 +19,7 @@ import { authorityFor, engineDatabase, IDS, leasedRun, marginPlan, ORIGINAL_REVE
 
 const authority = authorityFor();
 
-function run(db: Client, plan: FinancialPlanV1, lease: Parameters<typeof executeRun>[0]["lease"], evidence = createEvidenceFinancialPort) {
+function run(db: Client, plan: FinancialPlan, lease: Parameters<typeof executeRun>[0]["lease"], evidence = createEvidenceFinancialPort) {
   return executeRun({ client: db, lease, plan, authority, evidence, parent_limits: {} });
 }
 

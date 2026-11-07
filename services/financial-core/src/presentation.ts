@@ -18,15 +18,17 @@ import type {
   Comparison,
   CoverageState,
   DecimalString,
-  FinancialPlanV1,
+  FinancialPlan,
   FinancialUnit,
   GapDisposition,
   LocalId,
   OperationNode,
   PeriodRankNode,
   PeriodSelector,
+  PlanAssumption,
   RankingPayload,
   ReasonCode,
+  ScenarioEpsMultipleNode,
   Sha256Hex,
   SpreadNode,
 } from "./contracts.ts";
@@ -113,7 +115,7 @@ export type CommittedResult = Readonly<{
 }>;
 
 export function presentFinancialUnit(input: {
-  plan: FinancialPlanV1;
+  plan: FinancialPlan;
   run_id: string;
   unit_id: LocalId;
   results: ReadonlyArray<CommittedResult>;
@@ -201,7 +203,7 @@ class LabelTable {
 // series; everything else -> scalars. Predicates, rankings, and gaps outside a table or series
 // stand alone.
 
-function layout(plan: FinancialPlanV1, nodes: ReadonlyMap<LocalId, OperationNode>, results: ReadonlyArray<PresentedResult>, labels: Readonly<Record<string, PresentationLabel>>): Presentation[] {
+function layout(plan: FinancialPlan, nodes: ReadonlyMap<LocalId, OperationNode>, results: ReadonlyArray<PresentedResult>, labels: Readonly<Record<string, PresentationLabel>>): Presentation[] {
   const nodeOf = new Map(plan.outputs.map((output) => [output.output_id, nodes.get(output.node_id)!]));
   const lines = new Map(results.flatMap((result) => {
     const node = nodeOf.get(result.output_id)!;
@@ -273,7 +275,7 @@ function layout(plan: FinancialPlanV1, nodes: ReadonlyMap<LocalId, OperationNode
 
 type Line = Readonly<{ key: string; anchor: PeriodAnchor }>;
 
-function lineOf(plan: FinancialPlanV1, node: OperationNode, measureLabelId: string): Line {
+function lineOf(plan: FinancialPlan, node: OperationNode, measureLabelId: string): Line {
   const selectors = periodSelectors(plan, node);
   const anchor = periodAnchor(selectors[0]!);
   const shape = selectors.map((selector) => {
@@ -303,7 +305,7 @@ function columnKeyByResult(results: ReadonlyArray<PresentedResult>, lines: Reado
 // ---------------------------------------------------------------------------
 // Payload text.
 
-function presentPayload(plan: FinancialPlanV1, node: OperationNode, payload: unknown, table: LabelTable, readsOf: ReadsOf): PresentedPayload {
+function presentPayload(plan: FinancialPlan, node: OperationNode, payload: unknown, table: LabelTable, readsOf: ReadsOf): PresentedPayload {
   const record = payload as { kind: string } & Record<string, unknown>;
   const labels = table.entries;
   switch (record.kind) {
@@ -348,7 +350,7 @@ function presentPayload(plan: FinancialPlanV1, node: OperationNode, payload: unk
   }
 }
 
-function periodRanking(plan: FinancialPlanV1, node: PeriodRankNode, ranking: RankingPayload, labels: LabelTable, readsOf: ReadsOf): PresentedPayload {
+function periodRanking(plan: FinancialPlan, node: PeriodRankNode, ranking: RankingPayload, labels: LabelTable, readsOf: ReadsOf): PresentedPayload {
   const names = subjectNames(labels.entries);
   const nodeOf = (id: LocalId) => plan.operations.find((entry) => entry.node_id === id)!;
   const periodOf = (id: LocalId) => labels.intern("period", periodKey(plan, nodeOf(id), readsOf), periodText(plan, nodeOf(id), names, readsOf));
@@ -373,14 +375,14 @@ export function lowercaseUnlessAcronym(label: string): string {
 
 const COMPARISON_TEXT: Readonly<Record<Comparison, string>> = { gt: "above", gte: "at or above", lt: "below", lte: "at or below", eq: "equal to" };
 
-function formatNodeValue(plan: FinancialPlanV1, node: OperationNode, value: ExactDecimal, unit: FinancialUnit): { text: string; full_text: string } {
+function formatNodeValue(plan: FinancialPlan, node: OperationNode, value: ExactDecimal, unit: FinancialUnit): { text: string; full_text: string } {
   return unit.kind === "ratio" && readsAsMultiple(plan, node)
     ? { text: `${fixed(value, 2)}x`, full_text: `${canonicalDecimalString(value)}x` }
     : formatValue(value, unit);
 }
 
 // An approved ratio (leverage, cash conversion) and P/E are multiples, and so is a change in one; margins and percent changes are percentages.
-function readsAsMultiple(plan: FinancialPlanV1, node: OperationNode): boolean {
+function readsAsMultiple(plan: FinancialPlan, node: OperationNode): boolean {
   return node.operation === "absolute_change"
     ? readsAsMultiple(plan, plan.operations.find((entry) => entry.node_id === node.current)!)
     : node.operation === "ratio" || node.operation === "pe_ratio";
@@ -444,7 +446,7 @@ function exactValue(result: PresentedResult | undefined): ExactDecimal | null {
 // ---------------------------------------------------------------------------
 // Labels from structure.
 
-function subjectSlot(plan: FinancialPlanV1, node: OperationNode): LocalId | null {
+function subjectSlot(plan: FinancialPlan, node: OperationNode): LocalId | null {
   if (node.operation === "reported_metric") return node.subject_slot;
   if (node.operation === "peer_compare") return null;
   const reported = [...dependencyClosure(plan, [node.node_id])]
@@ -454,7 +456,7 @@ function subjectSlot(plan: FinancialPlanV1, node: OperationNode): LocalId | null
   return slots.size === 1 ? [...slots][0]! : null;
 }
 
-function measureText(plan: FinancialPlanV1, node: OperationNode): string {
+function measureText(plan: FinancialPlan, node: OperationNode): string {
   const of = (id: LocalId) => measureText(plan, plan.operations.find((entry) => entry.node_id === id)!);
   switch (node.operation) {
     case "reported_metric":
@@ -486,11 +488,15 @@ function measureText(plan: FinancialPlanV1, node: OperationNode): string {
       return `Difference in ${of(node.left)}`;
     case "period_rank":
       return `${of(node.members[0]!)} ranked across periods`;
+    case "scenario_eps_multiple": {
+      const assumption = scenarioAssumption(plan, node);
+      return `${assumption.scenario[0]!.toUpperCase()}${assumption.scenario.slice(1)} scenario: diluted EPS × your ${assumption.value}x P/E`;
+    }
   }
 }
 
 /** The structural identity of a measure: equal keys always render the same text. */
-function measureKey(plan: FinancialPlanV1, node: OperationNode): string {
+function measureKey(plan: FinancialPlan, node: OperationNode): string {
   const of = (id: LocalId) => measureKey(plan, plan.operations.find((entry) => entry.node_id === id)!);
   switch (node.operation) {
     case "reported_metric":
@@ -517,10 +523,18 @@ function measureKey(plan: FinancialPlanV1, node: OperationNode): string {
       return `spread(${of(node.left)})`;
     case "period_rank":
       return `period_rank(${of(node.members[0]!)})`;
+    case "scenario_eps_multiple":
+      return `scenario_eps_multiple(${node.assumption_id})`;
   }
 }
 
-function changeText(plan: FinancialPlanV1, node: ChangeNode, measure: string): string {
+function scenarioAssumption(plan: FinancialPlan, node: ScenarioEpsMultipleNode): PlanAssumption {
+  const assumption = plan.assumptions?.find((entry) => entry.assumption_id === node.assumption_id);
+  if (!assumption) throw new RangeError(`node ${node.node_id} references an undeclared assumption`);
+  return assumption;
+}
+
+function changeText(plan: FinancialPlan, node: ChangeNode, measure: string): string {
   const change = `${node.operation === "absolute_change" ? "change" : "percent change"} in ${measure}`;
   const horizon = changeHorizon(plan, node);
   const quarters = horizon && (horizon.step === "quarter" ? horizon.n : horizon.n * 4);
@@ -530,13 +544,13 @@ function changeText(plan: FinancialPlanV1, node: ChangeNode, measure: string): s
   return horizon ? `${text} over ${horizon.n} ${horizon.step === "quarter" ? "quarters" : "fiscal years"}` : text;
 }
 
-function changeHorizon(plan: FinancialPlanV1, node: ChangeNode): Readonly<{ step: "quarter" | "year"; n: number }> | null {
+function changeHorizon(plan: FinancialPlan, node: ChangeNode): Readonly<{ step: "quarter" | "year"; n: number }> | null {
   const [current, prior] = changeEnds(plan, node).map(periodAnchor);
   const n = current.recency - prior.recency;
   return current.step !== "cutoff" && current.step === prior.step && current.calendar === prior.calendar && n > 0 ? { step: current.step, n } : null;
 }
 
-function changeEnds(plan: FinancialPlanV1, node: ChangeNode): PeriodSelector[] {
+function changeEnds(plan: FinancialPlan, node: ChangeNode): PeriodSelector[] {
   return [node.current, node.prior].map((id) => periodSelectors(plan, plan.operations.find((entry) => entry.node_id === id)!)[0]!);
 }
 
@@ -561,7 +575,7 @@ function periodAnchor(selector: PeriodSelector): PeriodAnchor {
  * sum's quarters newest first; the first one dates the node.
  * A valuation is dated by its price: its other operand is restated to the same reference date.
  */
-function periodSelectors(plan: FinancialPlanV1, node: OperationNode): PeriodSelector[] {
+function periodSelectors(plan: FinancialPlan, node: OperationNode): PeriodSelector[] {
   const of = (id: LocalId) => plan.operations.find((candidate) => candidate.node_id === id)!;
   const all = (entry: OperationNode): PeriodSelector[] => entry.operation === "reported_metric" ? [entry.period]
     : entry.operation === "market_cap" || entry.operation === "pe_ratio" ? all(of(entry.price))
@@ -579,7 +593,7 @@ type ReadsOf = (node: OperationNode) => ReadonlyArray<PeriodRead>;
 // A read names the period its values were bound to, by fiscal name and end date, whichever selector asked for it:
 // "latest fiscal year" and "FY2025" both name a period that two calendars end months apart. A read has none for
 // a gap, a share price, or values bound to different periods. Each node's reads are found once.
-function periodReader(plan: FinancialPlanV1, nodes: ReadonlyMap<LocalId, OperationNode>, periods: ReadonlyMap<LocalId, BoundPeriod>): ReadsOf {
+function periodReader(plan: FinancialPlan, nodes: ReadonlyMap<LocalId, OperationNode>, periods: ReadonlyMap<LocalId, BoundPeriod>): ReadsOf {
   const reads = new Map<LocalId, ReadonlyArray<PeriodRead>>();
   const readsOf = (node: OperationNode): ReadonlyArray<PeriodRead> => {
     const leaves = [...dependencyClosure(plan, [node.node_id])].flatMap((id) => {
@@ -599,7 +613,7 @@ function periodReader(plan: FinancialPlanV1, nodes: ReadonlyMap<LocalId, Operati
 // named with theirs. One company's measure at several periods keeps the engine's words, which already say which
 // side of a change is current and why a trailing sum's quarters do not sum. A trailing sum operand reads four
 // quarters, and naming one as its period would mislead.
-function operandPeriods(plan: FinancialPlanV1, node: OperationNode, readsOf: ReadsOf, names: (slot: LocalId) => string): string {
+function operandPeriods(plan: FinancialPlan, node: OperationNode, readsOf: ReadsOf, names: (slot: LocalId) => string): string {
   const operands = operationDependencies(node).map((id) => plan.operations.find((entry) => entry.node_id === id)!);
   if (new Set(operands.map((operand) => `${subjectSlot(plan, operand)} ${measureKey(plan, operand)}`)).size === 1) return "";
   if (operands.some((operand) => readsOf(operand).length !== 1)) return "";
@@ -621,27 +635,27 @@ function operandPeriods(plan: FinancialPlanV1, node: OperationNode, readsOf: Rea
 }
 
 // A balance is a point in time: "FY2023 (as of 2023-12-30)", or "end of FY2023" with no bound period, never the year's amount.
-function periodText(plan: FinancialPlanV1, node: OperationNode, names: (slot: LocalId) => string, readsOf: ReadsOf): string {
+function periodText(plan: FinancialPlan, node: OperationNode, names: (slot: LocalId) => string, readsOf: ReadsOf): string {
   if (node.operation === "spread") return spreadSides(plan, node, (side) => `${names(side.slot)} ${periodText(plan, side.node, names, readsOf)}`).join(" minus ");
   if (node.operation === "period_rank") return windowSpan(plan, node, names, readsOf);
   const instant = measuresInstant(plan, node);
   return readsOf(node).map((read) => readText(read, instant)).join(" vs ");
 }
 
-function periodKey(plan: FinancialPlanV1, node: OperationNode, readsOf: ReadsOf): string {
+function periodKey(plan: FinancialPlan, node: OperationNode, readsOf: ReadsOf): string {
   if (node.operation === "spread") return JSON.stringify(spreadSides(plan, node, (side) => [side.slot, periodKey(plan, side.node, readsOf)]));
   if (node.operation === "period_rank") return JSON.stringify(["window", readsOf(node).map((read) => JSON.stringify(read)).sort()]);
   return JSON.stringify([readsOf(node), measuresInstant(plan, node)]);
 }
 
-function windowSpan(plan: FinancialPlanV1, node: PeriodRankNode, names: (slot: LocalId) => string, readsOf: ReadsOf): string {
+function windowSpan(plan: FinancialPlan, node: PeriodRankNode, names: (slot: LocalId) => string, readsOf: ReadsOf): string {
   const members = node.members.map((id) => plan.operations.find((entry) => entry.node_id === id)!);
   const recency = (member: OperationNode) => periodAnchor(periodSelectors(plan, member)[0]!).recency;
   const sorted = members.sort((left, right) => recency(left) - recency(right));
   return `${periodText(plan, sorted[0]!, names, readsOf)} to ${periodText(plan, sorted.at(-1)!, names, readsOf)}`;
 }
 
-function spreadSides<T>(plan: FinancialPlanV1, node: SpreadNode, side: (entry: { slot: LocalId; node: OperationNode }) => T): T[] {
+function spreadSides<T>(plan: FinancialPlan, node: SpreadNode, side: (entry: { slot: LocalId; node: OperationNode }) => T): T[] {
   return [node.left, node.right].map((id) => {
     const operand = plan.operations.find((entry) => entry.node_id === id)!;
     return side({ slot: subjectSlot(plan, operand) ?? "", node: operand });
@@ -653,7 +667,7 @@ function subjectNames(labels: Readonly<Record<string, PresentationLabel>>): (slo
 }
 
 /** Whether every reported value under the node is a point-in-time measure. */
-function measuresInstant(plan: FinancialPlanV1, node: OperationNode): boolean {
+function measuresInstant(plan: FinancialPlan, node: OperationNode): boolean {
   if (node.operation === "reported_metric") {
     const kind = resolveMetricDefinition(node.metric_key)?.value_kind;
     return kind === "balance" || kind === "share_count";

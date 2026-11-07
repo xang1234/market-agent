@@ -14,7 +14,7 @@
 import {
   hashCanonical,
   validateFinancialPlan,
-  type FinancialPlanV1,
+  type FinancialPlan,
   type GraphEvaluation,
   type LocalId,
   type ReportedMetricNode,
@@ -74,7 +74,7 @@ export type ComputationCase = Readonly<{
   id: string;
   category: GoldenCategory;
   rule: string;
-  plan: FinancialPlanV1;
+  plan: FinancialPlan;
   bindings: ReadonlyMap<LocalId, SlotBinding>;
   expected: Readonly<Record<string, GoldenExpectation>>;
 }>;
@@ -87,7 +87,7 @@ const reported = (nodeId: string, slot: string, metric: string, fiscalYear = 202
   period: { kind: "fiscal_period", fiscal_year: fiscalYear, fiscal_period: fiscalPeriod },
 });
 
-function plan(operations: Node[], outputs: string[], thresholds: ReadonlyArray<{ id: string; value: string; unit: unknown }> = [], slots = ["a", "b"]): FinancialPlanV1 {
+function plan(operations: Node[], outputs: string[], thresholds: ReadonlyArray<{ id: string; value: string; unit: unknown }> = [], slots = ["a", "b"]): FinancialPlan {
   const base = planFixture();
   const members = [
     ...base.subjects.members,
@@ -354,7 +354,7 @@ export const SELECTION_CASES: ReadonlyArray<SelectionCase> = [
 
 /** The production functions under test; a harness self-test swaps in broken ones. */
 export type EngineUnderTest = Readonly<{
-  evaluate(plan: FinancialPlanV1, bindings: ReadonlyMap<LocalId, SlotBinding>): GraphEvaluation;
+  evaluate(plan: FinancialPlan, bindings: ReadonlyMap<LocalId, SlotBinding>): GraphEvaluation;
   select(node: ReportedMetricNode, candidates: ReadonlyArray<InputCandidate>, policy: SelectionPolicy): SlotSelection;
 }>;
 

@@ -7,7 +7,7 @@ import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { recordFactPrecisionAttestation } from "../../evidence/src/financial-attestations.ts";
 import Ajv2020 from "../../financial-core/node_modules/ajv/dist/2020.js";
 import { recordFactFinancialContext } from "../../evidence/src/financial-context.ts";
-import { OPERATION_REGISTRY, validateFinancialPlan, type DerivationProofV1, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
+import { OPERATION_REGISTRY, validateFinancialPlan, type DerivationProofV1, type FinancialPlan } from "../../financial-core/src/index.ts";
 import { loadFinancialUnitRecords } from "../../snapshot/src/financial-verifier-loader.ts";
 import { verifyFinancialUnit } from "../../snapshot/src/financial-verifier.ts";
 import type { SnapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
@@ -100,7 +100,7 @@ async function seedDerivedQuarter(db: Client): Promise<DerivationProofV1> {
   return derivation;
 }
 
-function fourthQuarterPlan(): FinancialPlanV1 {
+function fourthQuarterPlan(): FinancialPlan {
   const validated = validateFinancialPlan({
     ...revenuePlan(),
     plan_id: randomUUID(),

@@ -1,4 +1,4 @@
-// Translates a complete request into a bounded, validated FinancialPlanV1.
+// Translates a complete request into a bounded, validated FinancialPlan.
 //
 // Authority stays with the server: the subject set comes from server-side
 // resolution; definition versions from the approved catalog; cutoff, basis,
@@ -20,7 +20,7 @@ import {
   resolveMetricDefinition,
   validateFinancialPlan,
   type ExecutionLimits,
-  type FinancialPlanV1,
+  type FinancialPlan,
   type FinancialRuntimeAuthority,
   type FinancialSubjectRef,
   type LocalId,
@@ -108,7 +108,7 @@ export type Clarification = Readonly<{
 }>;
 
 export type PlanningResult =
-  | { outcome: "ready"; plan: FinancialPlanV1; model_calls: number }
+  | { outcome: "ready"; plan: FinancialPlan; model_calls: number }
   | { outcome: "needs_clarification"; clarification: Clarification; model_calls: number }
   | { outcome: "configuration_needed"; reason: string; model_calls: 0 }
   | { outcome: "unsupported"; reason: string; issues: ValidationIssue[]; model_calls: number };
@@ -265,7 +265,7 @@ function checkDraft(value: unknown): Attempt<Draft> {
   };
 }
 
-function assemblePlan(context: PlanningContext, draft: Draft, planner: FinancialPlanV1["planner"], units: DeterministicUnits = [{ unit_id: "answer", output_ids: draft.outputs.map((output) => output.output_id) }]): Attempt<FinancialPlanV1> {
+function assemblePlan(context: PlanningContext, draft: Draft, planner: FinancialPlan["planner"], units: DeterministicUnits = [{ unit_id: "answer", output_ids: draft.outputs.map((output) => output.output_id) }]): Attempt<FinancialPlan> {
   const resolved = context.requested_subjects.flatMap((subject) =>
     subject.resolution.status === "resolved" ? [{ mention: subject.mention, ref: subject.resolution.subject_ref, label: subject.resolution.label }] : [],
   );
@@ -395,7 +395,7 @@ function shownOperands(node: OperationNode): LocalId[] {
 }
 
 /** The plan's outputs, each preceded by the shown operands of every figure it depends on that its unit does not already publish. */
-function withShownOperands(plan: FinancialPlanV1): RequestedOutput[] {
+function withShownOperands(plan: FinancialPlan): RequestedOutput[] {
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
   const published = new Set(plan.outputs.map((output) => `${output.unit_id}/${output.node_id}`));
   const ids = new Set(plan.outputs.map((output) => output.output_id));
@@ -423,7 +423,7 @@ function inputOutputId(input: string, taken: ReadonlySet<string>): string {
   }
 }
 
-function finish(plan: FinancialPlanV1, calls: number): PlanningResult {
+function finish(plan: FinancialPlan, calls: number): PlanningResult {
   return { outcome: "ready", plan, model_calls: calls };
 }
 
@@ -457,7 +457,7 @@ function isApprovedOperation(kind: unknown): kind is OperationKind {
 
 const VALUATIONS: ReadonlySet<string> = new Set<OperationKind>(["market_cap", "pe_ratio"]);
 // The model planner was never evaluated on these, so only server-built plans ask for them (#398).
-const DETERMINISTIC_OPERATIONS: ReadonlySet<string> = new Set<OperationKind>(["spread", "period_rank"]);
+const DETERMINISTIC_OPERATIONS: ReadonlySet<string> = new Set<OperationKind>(["spread", "period_rank", "scenario_eps_multiple"]);
 
 function systemPrompt(): string {
   const metrics = PLANNABLE_METRICS.map((definition) => definition.metric_key).join(", ");

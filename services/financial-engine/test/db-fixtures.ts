@@ -11,7 +11,7 @@ import { recordFactFinancialContext } from "../../evidence/src/financial-context
 import {
   createRuntimeAuthority,
   validateFinancialPlan,
-  type FinancialPlanV1,
+  type FinancialPlan,
   type FinancialRuntimeAuthority,
   type SourceClass,
 } from "../../financial-core/src/index.ts";
@@ -159,7 +159,7 @@ export type PlanOptions = {
 };
 
 /** Revenue FY2023 and FY2022 per subject, plus A's gross margin with a threshold. */
-export function revenuePlan(options: PlanOptions = {}): FinancialPlanV1 {
+export function revenuePlan(options: PlanOptions = {}): FinancialPlan {
   const subjects = options.subjects ?? ["a"];
   const issuer = { a: IDS.issuerA, b: IDS.issuerB };
   const reported = (slot: string, nodeId: string, metric: string, year: number) => ({
@@ -214,7 +214,7 @@ export function revenuePlan(options: PlanOptions = {}): FinancialPlanV1 {
  * years (FY2022 has no gross profit), and a margin screen whose threshold no
  * value meets — a complete, empty screen.
  */
-export function marginPlan(options: Pick<PlanOptions, "cutoff"> = {}): FinancialPlanV1 {
+export function marginPlan(options: Pick<PlanOptions, "cutoff"> = {}): FinancialPlan {
   const base = revenuePlan(options);
   const reported = (nodeId: string, metric: string, year: number) => ({
     node_id: nodeId,
@@ -278,7 +278,7 @@ export function authorityFor(
 /** A new pending run for the plan, leased to `workerId`. */
 export async function leasedRun(
   db: Client,
-  plan: FinancialPlanV1,
+  plan: FinancialPlan,
   authority: FinancialRuntimeAuthority = authorityFor(),
   workerId = "worker-1",
 ): Promise<{ runId: string; lease: RunLease }> {
@@ -293,7 +293,7 @@ export async function leasedRun(
 /** A run of `plan` executed to ready_to_seal, still leased to `workerId`. */
 export async function readyRun(
   db: Client,
-  plan: FinancialPlanV1,
+  plan: FinancialPlan,
   authority: FinancialRuntimeAuthority = authorityFor(),
   workerId = "worker-1",
 ): Promise<{ runId: string; lease: RunLease }> {
@@ -322,7 +322,7 @@ export async function pinnedClients(t: TestContext, db: Client, count: number): 
 export async function completedRun(
   db: Client,
   client: SnapshotTransactionClient,
-  plan: FinancialPlanV1 = marginPlan(),
+  plan: FinancialPlan = marginPlan(),
   authority: FinancialRuntimeAuthority = authorityFor(),
 ): Promise<{ runId: string; results: Readonly<Record<string, string>> }> {
   const { runId, lease } = await readyRun(db, plan, authority);

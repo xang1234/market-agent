@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
-import type { FinancialPlanV1 } from "../../financial-core/src/index.ts";
+import type { FinancialPlan } from "../../financial-core/src/index.ts";
 import { inspectCommittedResult } from "../../financial-engine/src/inspection.ts";
 import { buildDeterministicPlan, type PlanningModel } from "../../financial-engine/src/planner.ts";
 import { authorityFor, IDS, NVDA, seedNvda } from "../../financial-engine/test/db-fixtures.ts";
@@ -57,7 +57,7 @@ test("a question about market cap or P/E names its company, which takes it to th
 });
 
 test("an answer that computes a valuation covers the reading that asks for it, and names one it does not compute (#444)", () => {
-  const plan = (valuation: Valuation): FinancialPlanV1 => {
+  const plan = (valuation: Valuation): FinancialPlan => {
     const planned = buildDeterministicPlan({
       plan_id: "4f000000-0000-4000-8000-0000000007a1",
       origin: { kind: "chat_request", ref: "chat:valuation" },

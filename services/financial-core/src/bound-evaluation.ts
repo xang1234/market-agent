@@ -11,7 +11,7 @@ import { canonicalJson, hashCanonical } from "./canonical.ts";
 import type {
   BoundFinancialInputV1,
   CoverageState,
-  FinancialPlanV1,
+  FinancialPlan,
   GapDisposition,
   GapPayload,
   LocalId,
@@ -77,7 +77,7 @@ export type UnitPublication = Readonly<{
 const REJECTED_EXPLANATION = "An input to this section failed integrity checks, so the section was withheld.";
 
 /** Evaluates the plan over its bindings. Every reported node must have a binding. */
-export function evaluateBoundPlan(plan: FinancialPlanV1, bindings: ReadonlyMap<LocalId, SlotBinding>): GraphEvaluation {
+export function evaluateBoundPlan(plan: FinancialPlan, bindings: ReadonlyMap<LocalId, SlotBinding>): GraphEvaluation {
   const definitions = new Map(plan.metric_definitions.map((entry) => [entry.metric_key, entry.definition_version]));
   const slots = new Map(plan.subjects.members.map((member) => [member.slot_id, member]));
   return evaluatePlan(plan, (node) => {
@@ -99,7 +99,7 @@ export function evaluateBoundPlan(plan: FinancialPlanV1, bindings: ReadonlyMap<L
  * its operation, its inputs' hashes, and its outcome.
  */
 export function nodeLineageHashes(
-  plan: FinancialPlanV1,
+  plan: FinancialPlan,
   evaluation: GraphEvaluation,
   bindings: ReadonlyMap<LocalId, SlotBinding>,
 ): Map<LocalId, Sha256Hex> {
@@ -128,7 +128,7 @@ export function nodeLineageHashes(
 
 /** Everything a publication unit derives from the evaluation. */
 export function unitPublication(
-  plan: FinancialPlanV1,
+  plan: FinancialPlan,
   evaluation: GraphEvaluation,
   hashes: ReadonlyMap<LocalId, Sha256Hex>,
   unitId: LocalId,
@@ -200,7 +200,7 @@ function stateDigest(state: NodeState): unknown {
 }
 
 /** Metric definition versions of the reported inputs a node depends on. */
-function definitionVersions(plan: FinancialPlanV1, nodeId: LocalId): Record<string, string> {
+function definitionVersions(plan: FinancialPlan, nodeId: LocalId): Record<string, string> {
   const closure = dependencyClosure(plan, [nodeId]);
   const versions = new Map(plan.metric_definitions.map((entry) => [entry.metric_key, entry.definition_version]));
   const used: Record<string, string> = {};

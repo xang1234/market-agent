@@ -4,7 +4,7 @@
 // frozen, so membership cannot be revised after a failure to make a
 // certificate pass.
 
-import type { FinancialPlanV1, LocalId } from "./contracts.ts";
+import type { FinancialPlan, LocalId } from "./contracts.ts";
 import { dependencyClosure, topologicalOrder } from "./graph.ts";
 
 export type UnitClosure = Readonly<{
@@ -14,7 +14,7 @@ export type UnitClosure = Readonly<{
   node_ids: ReadonlyArray<LocalId>;
 }>;
 
-export function unitClosures(plan: FinancialPlanV1): ReadonlyMap<LocalId, UnitClosure> {
+export function unitClosures(plan: FinancialPlan): ReadonlyMap<LocalId, UnitClosure> {
   const order = topologicalOrder(plan);
   const closures = new Map<LocalId, UnitClosure>();
   for (const unit of plan.publication_units) {
@@ -33,6 +33,6 @@ export function unitClosures(plan: FinancialPlanV1): ReadonlyMap<LocalId, UnitCl
 }
 
 /** Units whose closure contains the node, in declaration order: its blast radius. */
-export function unitsDependingOn(plan: FinancialPlanV1, nodeId: LocalId): LocalId[] {
+export function unitsDependingOn(plan: FinancialPlan, nodeId: LocalId): LocalId[] {
   return [...unitClosures(plan).values()].filter((closure) => closure.node_ids.includes(nodeId)).map((closure) => closure.unit_id);
 }

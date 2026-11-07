@@ -9,7 +9,7 @@ import test from "node:test";
 import type { Client } from "pg";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import Ajv2020 from "../../financial-core/node_modules/ajv/dist/2020.js";
-import { validateFinancialPlan, type FinancialPlanV1, type PeriodSelector } from "../../financial-core/src/index.ts";
+import { validateFinancialPlan, type FinancialPlan, type PeriodSelector } from "../../financial-core/src/index.ts";
 import { bindPlanInputs } from "../src/bind-inputs.ts";
 import { createEvidenceFinancialPort } from "../src/evidence-adapter.ts";
 import { finalizeUnit } from "../src/finalize.ts";
@@ -79,7 +79,7 @@ async function seedPrices(db: Client): Promise<string> {
 }
 
 /** The issuer's share price at the cutoff, alone in one unit. */
-function pricePlan(issuer: string, cutoff: string, period: PeriodSelector = { kind: "at_cutoff" }): FinancialPlanV1 {
+function pricePlan(issuer: string, cutoff: string, period: PeriodSelector = { kind: "at_cutoff" }): FinancialPlan {
   const base = revenuePlan();
   const validated = validateFinancialPlan({
     ...base,
@@ -152,7 +152,7 @@ test("share price binding", { timeout: 300_000 }, async (t) => {
   });
 
   await t.test("a price the subject's listing, its splits, or the cutoff cannot ground is a named gap", async () => {
-    const gapOf = async (plan: FinancialPlanV1) => {
+    const gapOf = async (plan: FinancialPlan) => {
       const { lease } = await leasedRun(db, plan, authority);
       const binding = (await bindPlanInputs({ client: db, lease, plan, authority, evidence: createEvidenceFinancialPort })).bindings.get("px");
       return binding?.status === "gap" ? binding.reason_code : binding?.status;

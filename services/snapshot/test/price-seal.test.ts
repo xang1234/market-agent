@@ -16,7 +16,7 @@ import {
   validateBoundInput,
   validateFinancialPlan,
   type BoundPriceInputV1,
-  type FinancialPlanV1,
+  type FinancialPlan,
   type SlotBinding,
 } from "../../financial-core/src/index.ts";
 import type { FinancialUnitRecords } from "../src/financial-verifier-loader.ts";
@@ -31,7 +31,7 @@ const CUTOFF = "2024-06-10T14:00:00.000Z";
 const SPLIT = { execution_date: "2024-06-10", split_from: "1", split_to: "10" };
 const CONTEXT: FinancialSealContext = { snapshot_id: F.snapshot, manifest: { fact_refs: [], source_ids: [POLYGON], as_of: CUTOFF } };
 
-function pricePlan(): FinancialPlanV1 {
+function pricePlan(): FinancialPlan {
   const validated = validateFinancialPlan({
     schema_version: "financial_plan.v1",
     plan_id: F.plan,

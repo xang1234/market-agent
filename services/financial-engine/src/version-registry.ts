@@ -14,7 +14,7 @@ import {
   METRIC_CATALOG_V1,
   NUMERIC_POLICY,
   OPERATION_REGISTRY,
-  type FinancialPlanV1,
+  type FinancialPlan,
 } from "../../financial-core/src/index.ts";
 import { FINANCIAL_PUBLICATION_SCHEMA_VERSION, FINANCIAL_VERIFIER_VERSION } from "../../snapshot/src/financial-verifier.ts";
 
@@ -39,7 +39,7 @@ export const FINANCIAL_VERSION_REGISTRY: FinancialVersionRegistry = Object.freez
 });
 
 /** The first version a plan needs that this build does not ship, or null. */
-export function unsupportedPlanVersion(plan: FinancialPlanV1, registry: FinancialVersionRegistry = FINANCIAL_VERSION_REGISTRY): string | null {
+export function unsupportedPlanVersion(plan: FinancialPlan, registry: FinancialVersionRegistry = FINANCIAL_VERSION_REGISTRY): string | null {
   if (!registry.catalog_versions.has(plan.catalog_version)) return plan.catalog_version;
   for (const node of plan.operations) if (!registry.operation_versions.has(node.operation_version)) return node.operation_version;
   for (const definition of plan.metric_definitions) if (!registry.definition_versions.has(definition.definition_version)) return definition.definition_version;

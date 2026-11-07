@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { randomUUID } from "node:crypto";
-import { hashCanonical, validateBoundInput, validateFinancialPlan, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
+import { hashCanonical, validateBoundInput, validateFinancialPlan, type FinancialPlan } from "../../financial-core/src/index.ts";
 import { bindPlanInputs, type InputBinding } from "../src/bind-inputs.ts";
 import { ExecutionIntegrityError } from "../../financial-core/src/index.ts";
 import { StaleLeaseError } from "../src/lease.ts";
@@ -15,7 +15,7 @@ function bound(binding: InputBinding | undefined) {
 }
 
 /** Total assets and total liabilities per subject, both "latest fiscal year" at `offset`. */
-function latestBalancePlan(subjects: Array<"a" | "b">, offset: number): FinancialPlanV1 {
+function latestBalancePlan(subjects: Array<"a" | "b">, offset: number): FinancialPlan {
   const base = revenuePlan({ subjects });
   const period = { kind: "latest" as const, period_type: "annual" as const, offset };
   const node = (slot: string, nodeId: string, metric: string) =>

@@ -2,7 +2,7 @@
 // and resolved scope make, and the figures a follow-up keeps, at the period it
 // reads.
 
-import type { FinancialPlanV1, PeriodSelector } from "../../financial-core/src/index.ts";
+import type { FinancialPlan, PeriodSelector } from "../../financial-core/src/index.ts";
 import type { PlanningContext } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort } from "../../financial-engine/src/ports.ts";
 import { valuationOperations, valuationOutputs, type Valuation } from "../../financial-engine/src/valuation-plan.ts";
@@ -167,7 +167,7 @@ export function readPeriod(scope: ScopePeriod): ReadPeriod {
 }
 
 /** A plan's period type: the one every reported figure in it is of, or null. */
-export function planPeriod(plan: FinancialPlanV1): PeriodType | null {
+export function planPeriod(plan: FinancialPlan): PeriodType | null {
   const types = new Set(plan.operations.flatMap((node): PeriodType[] => {
     if (node.operation !== "reported_metric" || node.period.kind === "at_cutoff") return [];
     const annual = node.period.kind === "latest" ? node.period.period_type === "annual" : node.period.fiscal_period === "FY";
@@ -269,6 +269,8 @@ export const SCOPE_METRICS: Readonly<Record<string, string | null>> = {
   share_price: null,
   market_cap: "market_cap",
   pe_ratio: "pe_ratio",
+  // A scenario rests on the user's multiples, which no saved scope carries (#201).
+  scenario_eps_multiple: null,
 };
 
 // The engine figure each income item names; operating expenses are none.

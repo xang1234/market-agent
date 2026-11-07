@@ -19,7 +19,7 @@ import {
   FINANCIAL_CATALOG_VERSION,
   FINANCIAL_PRESENTATION_VERSION,
   NUMERIC_POLICY,
-  type FinancialPlanV1,
+  type FinancialPlan,
 } from "../services/financial-core/src/index.ts";
 import { planFinancialRequest, type PlanningContext, type PlanningModel } from "../services/financial-engine/src/planner.ts";
 import { selectInput } from "../services/financial-engine/src/select-inputs.ts";
@@ -190,7 +190,7 @@ function planningContext(question: HeldOutQuestion): PlanningContext {
 }
 
 /** Where the validated plan differs from the question's stated intent: companies, metrics, periods, operations. */
-export function compareIntent(question: HeldOutQuestion, plan: FinancialPlanV1): string[] {
+export function compareIntent(question: HeldOutQuestion, plan: FinancialPlan): string[] {
   const mentions = new Map(question.subjects.map((subject) => [subject.id, subject.mention]));
   const reported = plan.operations.filter((node) => node.operation === "reported_metric");
   const actual: IntendedPlan = {

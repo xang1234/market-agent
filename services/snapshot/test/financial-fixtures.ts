@@ -13,7 +13,7 @@ import {
   validateBoundInput,
   validateFinancialPlan,
   type BoundFactInputV1,
-  type FinancialPlanV1,
+  type FinancialPlan,
   type SlotBinding,
 } from "../../financial-core/src/index.ts";
 import type { FinancialUnitRecords, LoadedEvidence } from "../src/financial-verifier-loader.ts";
@@ -51,7 +51,7 @@ export const FREE_CASH_FLOW: FixtureCalculation = {
   node: { operation: "free_cash_flow", operation_version: "free_cash_flow.v1", operating_cash_flow: "a_rev", capex: "a_gp" },
 };
 
-export function marginPlan(calculation: FixtureCalculation = GROSS_MARGIN): FinancialPlanV1 {
+export function marginPlan(calculation: FixtureCalculation = GROSS_MARGIN): FinancialPlan {
   const reported = (nodeId: string, metric: string) => ({
     node_id: nodeId,
     operation: "reported_metric" as const,

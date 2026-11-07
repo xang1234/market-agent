@@ -10,7 +10,7 @@ import test from "node:test";
 import type { Client } from "pg";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import Ajv2020 from "../../financial-core/node_modules/ajv/dist/2020.js";
-import type { FinancialPlanV1, FinancialRuntimeAuthority } from "../../financial-core/src/index.ts";
+import type { FinancialPlan, FinancialRuntimeAuthority } from "../../financial-core/src/index.ts";
 import { createEvidenceFinancialPort } from "../src/evidence-adapter.ts";
 import { executeRun } from "../src/execute.ts";
 import { finalizeUnit } from "../src/finalize.ts";
@@ -21,7 +21,7 @@ import { buildDeterministicPlan } from "../src/planner.ts";
 import { authorityFor, engineDatabase, IDS as FIXTURE_IDS, NVDA, pinnedClients, readyRun, seedNvda } from "./db-fixtures.ts";
 
 /** The deterministic plan a surface builds for NVDA's market cap and P/E, publishing their inputs beside them. */
-function valuationPlan(authority: FinancialRuntimeAuthority): FinancialPlanV1 {
+function valuationPlan(authority: FinancialRuntimeAuthority): FinancialPlan {
   const reported = (node_id: string, metric_key: string, period: Record<string, unknown>) => ({ node_id, operation: "reported_metric", subject_slot: "a", metric_key, period });
   const planned = buildDeterministicPlan({
     plan_id: randomUUID(),

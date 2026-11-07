@@ -2,8 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.com/schemas/financial_plan_schema.json",
   "title": "Financial Plan Schema",
-  "description": "FinancialPlanV1: a bounded, typed financial calculation plan. Authority (owner, channel, parent, lease, feature mode) is never part of a plan; the server injects it separately as FinancialRuntimeAuthorityV1.",
-  "$ref": "#/$defs/FinancialPlanV1",
+  "description": "FinancialPlanV1, or FinancialPlanV2 with P/E assumptions (#201): a bounded, typed financial calculation plan. Authority (owner, channel, parent, lease, feature mode) is never part of a plan; the server injects it separately as FinancialRuntimeAuthorityV1.",
+  "oneOf": [{ "$ref": "#/$defs/FinancialPlanV1" }, { "$ref": "#/$defs/FinancialPlanV2" }],
   "$defs": {
     "UUID": {
       "type": "string",
@@ -514,6 +514,126 @@
         },
         "limits": { "$ref": "#/$defs/ExecutionLimits" },
         "presentation_template_version": { "$ref": "#/$defs/VersionTag" }
+      }
+    },
+    "PositiveDecimalString": {
+      "description": "A canonical decimal greater than zero.",
+      "type": "string",
+      "maxLength": 32,
+      "pattern": "^(?!0$)(?:0|[1-9][0-9]*)(?:\\.[0-9]*[1-9])?$"
+    },
+    "Assumption": {
+      "description": "A P/E the user supplied: plan configuration, never evidence.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["assumption_id", "scenario", "value", "attribution"],
+      "properties": {
+        "assumption_id": { "$ref": "#/$defs/LocalId" },
+        "scenario": { "enum": ["bear", "base", "bull"] },
+        "value": { "$ref": "#/$defs/PositiveDecimalString" },
+        "attribution": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "ref", "captured_at"],
+          "properties": {
+            "kind": { "const": "user_request" },
+            "ref": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[A-Za-z0-9:_./-]+$" },
+            "captured_at": { "$ref": "#/$defs/IsoDateTime" }
+          }
+        }
+      }
+    },
+    "ScenarioAssumptions": {
+      "description": "Exactly bear, base, and bull, in that order.",
+      "type": "array",
+      "minItems": 3,
+      "prefixItems": [
+        { "allOf": [{ "$ref": "#/$defs/Assumption" }, { "type": "object", "properties": { "scenario": { "const": "bear" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/Assumption" }, { "type": "object", "properties": { "scenario": { "const": "base" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/Assumption" }, { "type": "object", "properties": { "scenario": { "const": "bull" } } }] }
+      ],
+      "items": false
+    },
+    "ScenarioEpsMultipleNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_id", "operation", "operation_version", "earnings", "assumption_id"],
+      "properties": {
+        "node_id": { "$ref": "#/$defs/LocalId" },
+        "operation": { "const": "scenario_eps_multiple" },
+        "operation_version": { "$ref": "#/$defs/VersionTag" },
+        "earnings": { "$ref": "#/$defs/LocalId" },
+        "assumption_id": { "$ref": "#/$defs/LocalId" }
+      }
+    },
+    "OperationNodeV2": {
+      "oneOf": [{ "$ref": "#/$defs/OperationNode" }, { "$ref": "#/$defs/ScenarioEpsMultipleNode" }]
+    },
+    "FinancialPlanV2": {
+      "description": "FinancialPlanV1 plus bear, base, and bull P/E assumptions, read by scenario_eps_multiple nodes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "plan_id",
+        "origin",
+        "planner",
+        "catalog_version",
+        "interpretation",
+        "subjects",
+        "time",
+        "policies",
+        "metric_definitions",
+        "operations",
+        "outputs",
+        "publication_units",
+        "thresholds",
+        "limits",
+        "presentation_template_version",
+        "assumptions"
+      ],
+      "properties": {
+        "schema_version": { "const": "financial_plan.v2" },
+        "plan_id": { "$ref": "#/$defs/UUID" },
+        "origin": { "$ref": "#/$defs/Origin" },
+        "planner": { "$ref": "#/$defs/Planner" },
+        "catalog_version": { "$ref": "#/$defs/VersionTag" },
+        "interpretation": { "oneOf": [{ "$ref": "#/$defs/Interpretation" }, { "type": "null" }] },
+        "subjects": { "$ref": "#/$defs/SubjectSet" },
+        "time": { "$ref": "#/$defs/TimeContext" },
+        "policies": { "$ref": "#/$defs/Policies" },
+        "metric_definitions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/MetricDefinitionRef" }
+        },
+        "operations": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 512,
+          "items": { "$ref": "#/$defs/OperationNodeV2" }
+        },
+        "outputs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2000,
+          "items": { "$ref": "#/$defs/RequestedOutput" }
+        },
+        "publication_units": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2000,
+          "items": { "$ref": "#/$defs/PublicationUnit" }
+        },
+        "thresholds": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/Threshold" }
+        },
+        "limits": { "$ref": "#/$defs/ExecutionLimits" },
+        "presentation_template_version": { "$ref": "#/$defs/VersionTag" },
+        "assumptions": { "$ref": "#/$defs/ScenarioAssumptions" }
       }
     },
     "Surface": {
