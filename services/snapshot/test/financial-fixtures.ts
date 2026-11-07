@@ -16,6 +16,7 @@ import {
   type FinancialPlan,
   type SlotBinding,
 } from "../../financial-core/src/index.ts";
+import { scenarioPlanFixture, type Multiples } from "../../financial-core/test/fixtures.ts";
 import type { FinancialUnitRecords, LoadedEvidence } from "../src/financial-verifier-loader.ts";
 import type { FinancialSealContext } from "../src/financial-verifier.ts";
 
@@ -28,9 +29,11 @@ export const F = {
   source: "5f000000-0000-4000-8000-0000000000c1",
   revenueFact: "5f000000-0000-4000-8000-0000000000d1",
   grossProfitFact: "5f000000-0000-4000-8000-0000000000d2",
+  epsFact: "5f000000-0000-4000-8000-0000000000d3",
   pubAttestation: "5f000000-0000-4000-8000-0000000000e1",
   precRevenue: "5f000000-0000-4000-8000-0000000000e2",
   precGrossProfit: "5f000000-0000-4000-8000-0000000000e3",
+  precEps: "5f000000-0000-4000-8000-0000000000e4",
   snapshot: "5f000000-0000-4000-8000-0000000000f1",
   cutoff: "2024-01-16T04:59:59.999Z",
   sourceVersion: "1".repeat(64),
@@ -98,7 +101,10 @@ export function marginPlan(calculation: FixtureCalculation = GROSS_MARGIN): Fina
   return validated.value;
 }
 
-function boundInput(slot: string, factId: string, metric: string, value: string): BoundFactInputV1 {
+type Basis = "not_applicable" | "diluted";
+const unitOf = (basis: Basis) => (basis === "diluted" ? { kind: "currency_per_share", currency: "USD" } : { kind: "currency", currency: "USD" });
+
+function boundInput(slot: string, factId: string, metric: string, value: string, basis: Basis = "not_applicable"): BoundFactInputV1 {
   const validated = validateBoundInput({
     schema_version: "financial_bound_input.v1",
     input_slot: slot,
@@ -107,10 +113,10 @@ function boundInput(slot: string, factId: string, metric: string, value: string)
     metric: { metric_key: metric, definition_version: `${metric}.v1` },
     source: { source_id: F.source, document_id: null, source_version_hash: F.sourceVersion, locator: `locator:${factId}` },
     numeric: { raw_token: value, token_proof_hash: F.proof, value, scale: "1", native_value: value },
-    unit: { kind: "currency", currency: "USD" },
+    unit: unitOf(basis),
     period: { kind: "duration", start: "2023-01-01", end: "2023-12-31", fiscal_year: 2023, fiscal_period: "FY", calendar_version: "fiscal-calendar.v1" },
     dimensions: { scope: "consolidated", members: [] },
-    basis: { reporting: "as_reported", adjustment: "unadjusted", share_basis: "not_applicable" },
+    basis: { reporting: "as_reported", adjustment: "unadjusted", share_basis: basis },
     publication: { attestation_id: F.pubAttestation, available_no_later_than: "2024-01-11T04:59:59.999Z", precision: "date", source_timezone: "America/New_York" },
     observed_at: "2024-02-01T00:00:00.000Z",
     precision_status: "source_token_preserved",
@@ -121,7 +127,7 @@ function boundInput(slot: string, factId: string, metric: string, value: string)
   return validated.value;
 }
 
-function evidence(factId: string): LoadedEvidence {
+function evidence(factId: string, basis: Basis = "not_applicable"): LoadedEvidence {
   return {
     fact_id: factId,
     source_id: F.source,
@@ -138,7 +144,7 @@ function evidence(factId: string): LoadedEvidence {
       source_timezone: "America/New_York",
     },
     precision_current: true,
-    context: { period_type: "duration", dimension_scope: "consolidated", adjustment_basis: "unadjusted", as_filed_on: null, share_basis: "not_applicable", fiscal_calendar_version: "fiscal-calendar.v1" },
+    context: { period_type: "duration", dimension_scope: "consolidated", adjustment_basis: "unadjusted", as_filed_on: null, share_basis: basis, fiscal_calendar_version: "fiscal-calendar.v1" },
   };
 }
 
@@ -147,11 +153,34 @@ export function validRecords(
   calculation: FixtureCalculation = GROSS_MARGIN,
   values: Readonly<{ a_rev: string; a_gp: string }> = { a_rev: "383285000000.123456789012345678", a_gp: "169148000000" },
 ): FinancialUnitRecords {
-  const plan = marginPlan(calculation);
   const inputs = [
     boundInput("a_rev", F.revenueFact, calculation.metrics.a_rev, values.a_rev),
     boundInput("a_gp", F.grossProfitFact, calculation.metrics.a_gp, values.a_gp),
   ];
+  return sealedRecords(marginPlan(calculation), inputs, [evidence(F.revenueFact), evidence(F.grossProfitFact)]);
+}
+
+/** FY2023 diluted EPS of `eps` times bear, base, and bull P/E assumptions (#201), as a correct run would persist them. */
+export function scenarioRecords(multiples?: Multiples, eps = "4"): FinancialUnitRecords {
+  const fixture = scenarioPlanFixture(multiples);
+  const validated = validateFinancialPlan({
+    ...fixture,
+    plan_id: F.plan,
+    subjects: { ...fixture.subjects, members: [{ ...fixture.subjects.members[0]!, subject_ref: { kind: "issuer", id: F.issuer } }] },
+    time: { ...fixture.time, knowledge_cutoff: F.cutoff },
+  });
+  assert.ok(validated.ok, JSON.stringify(!validated.ok && validated.issues));
+  return sealedRecords(validated.value, [boundInput("eps", F.epsFact, "eps_diluted", eps, "diluted")], [evidence(F.epsFact, "diluted")]);
+}
+
+export const SCENARIO_SEAL_CONTEXT: FinancialSealContext = {
+  snapshot_id: F.snapshot,
+  manifest: { fact_refs: [F.epsFact], source_ids: [F.source], as_of: F.cutoff },
+};
+
+const PRECISION_ATTESTATIONS: Readonly<Record<string, string>> = { a_rev: F.precRevenue, a_gp: F.precGrossProfit, eps: F.precEps };
+
+function sealedRecords(plan: FinancialPlan, inputs: BoundFactInputV1[], evidenceRows: LoadedEvidence[]): FinancialUnitRecords {
   const bindings = new Map<string, SlotBinding>(inputs.map((input) => [input.input_slot, {
     status: "bound",
     input,
@@ -188,14 +217,14 @@ export function validRecords(
       binding_status: "bound",
       fact_id: input.fact_id,
       publication_attestation_id: F.pubAttestation,
-      precision_attestation_id: input.input_slot === "a_rev" ? F.precRevenue : F.precGrossProfit,
+      precision_attestation_id: PRECISION_ATTESTATIONS[input.input_slot]!,
       price_observation_id: null,
       bound_payload: JSON.parse(JSON.stringify(input)),
       payload_hash: hashCanonical("bound_input", input),
       gap_reason: null,
       candidate_set_digest: F.digest,
     })),
-    evidence: [evidence(F.revenueFact), evidence(F.grossProfitFact)],
+    evidence: evidenceRows,
     price_observations: [],
     split_histories: [],
     computations: publication.computations.map((computation) => ({

@@ -14,7 +14,6 @@ import {
   canonicallyEqual,
   ExecutionIntegrityError,
   evaluateBoundPlan,
-  FINANCIAL_PRESENTATION_VERSION,
   hashCanonical,
   nodeLineageHashes,
   NUMERIC_POLICY,
@@ -307,7 +306,7 @@ export function verifyFinancialUnit(records: FinancialUnitRecords, unitId: Local
       const row = stored.get(result.output_id)!;
       return { result_id: row.result_id, output_id: result.output_id, disposition: result.disposition, result_hash: result.result_hash };
     }),
-    presentation: { version: FINANCIAL_PRESENTATION_VERSION, hash },
+    presentation: { version: content.presentation_version, hash },
     numeric_policy_version: NUMERIC_POLICY.version,
   };
   return {

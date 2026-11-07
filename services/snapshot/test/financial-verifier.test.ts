@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { hashCanonical, planSemanticHash, presentationHash } from "../../financial-core/src/index.ts";
 import { verifyFinancialSnapshot, verifyFinancialUnit, type FinancialVerification } from "../src/financial-verifier.ts";
-import { F, FREE_CASH_FLOW, mutable, OPERATING_MARGIN, SEAL_CONTEXT, validRecords } from "./financial-fixtures.ts";
+import { deriveBlockProof } from "../src/block-proof.ts";
+import { F, FREE_CASH_FLOW, mutable, OPERATING_MARGIN, SCENARIO_SEAL_CONTEXT, scenarioRecords, SEAL_CONTEXT, validRecords } from "./financial-fixtures.ts";
 
 function reasons(outcome: FinancialVerification): string[] {
   return outcome.ok ? [] : outcome.failures.map((failure) => `${failure.reason_code}:${String(failure.details.field ?? failure.details.reason ?? failure.details.state ?? "")}`);
@@ -234,4 +235,82 @@ test("a financial seal carries no caller content and needs a transaction", async
   const claim = { owner_user_id: F.owner, run_id: F.run, unit_id: "section" };
   assert.deepEqual(reasons(await verifyFinancialSnapshot(undefined, claim, { ...SEAL_CONTEXT, block_kinds: ["rich_text"] })), ["financial_seal_blocks:"]);
   assert.deepEqual(reasons(await verifyFinancialSnapshot(undefined, claim, { ...SEAL_CONTEXT, block_kinds: ["disclosure"] })), ["financial_verification_unavailable:no_transaction_client"]);
+});
+
+// --- P/E scenarios (#201) ----------------------------------------------------
+
+const scenarioReasons = (records: ReturnType<typeof mutable>) => reasons(verifyFinancialUnit(records, "section", SCENARIO_SEAL_CONTEXT));
+const scenarioResult = (records: ReturnType<typeof mutable>, outputId: string) => records.results.find((row: { output_id: string }) => row.output_id === outputId);
+
+test("EPS of 4 at 20x, 25x, and 30x verifies, and its certificate names the v3 presentation it hashed", () => {
+  const outcome = verifyFinancialUnit(scenarioRecords(), "section", SCENARIO_SEAL_CONTEXT);
+  assert.ok(outcome.ok, JSON.stringify(!outcome.ok && outcome.failures));
+  assert.deepEqual(outcome.certificate.results.map((result) => [result.output_id, result.disposition]), [["out_eps", "computed"], ["out_bear", "computed"], ["out_base", "computed"], ["out_bull", "computed"]]);
+  assert.deepEqual(outcome.block.financial.results.map((result) => result.presented.text), ["USD 4.00 per share", "USD 80.00 per share", "USD 100.00 per share", "USD 120.00 per share"]);
+  assert.deepEqual(outcome.certificate.inputs.map((input) => [input.input_slot, input.fact_id]), [["eps", F.epsFact]], "an assumption is never an input");
+  assert.deepEqual(outcome.certificate.presentation, { version: "financial-presentation.v3", hash: outcome.block.presentation_hash });
+  assert.equal(outcome.block.financial.presentation_version, "financial-presentation.v3");
+});
+
+test("every digit of every scenario result is checked", () => {
+  for (const outputId of ["out_eps", "out_bear", "out_base", "out_bull"]) {
+    const value: string = scenarioResult(mutable(scenarioRecords()), outputId).payload.value;
+    for (let index = 0; index < value.length; index++) {
+      const records = mutable(scenarioRecords());
+      scenarioResult(records, outputId).payload.value = `${value.slice(0, index)}${(Number(value[index]) + 1) % 10}${value.slice(index + 1)}`;
+      assert.deepEqual(scenarioReasons(records), ["financial_recompute_mismatch:payload"], `${outputId} digit ${index}`);
+    }
+  }
+});
+
+test("a scenario's EPS binding, source version, and publication attestation are rechecked", () => {
+  const rebound = mutable(scenarioRecords());
+  rehashBinding(rebound, "eps", (payload) => { payload.numeric = { ...payload.numeric, raw_token: "5", value: "5", native_value: "5" }; });
+  assert.deepEqual(scenarioReasons(rebound), ["financial_recompute_mismatch:payload", "financial_recompute_mismatch:payload", "financial_recompute_mismatch:payload", "financial_recompute_mismatch:payload"]);
+  const unhashed = mutable(scenarioRecords());
+  unhashed.bindings[0].bound_payload.numeric.value = "5";
+  assert.deepEqual(scenarioReasons(unhashed), ["financial_binding_mismatch:payload_hash"]);
+  const source = mutable(scenarioRecords());
+  source.evidence[0].source_version_hash = "c".repeat(64);
+  assert.deepEqual(scenarioReasons(source), ["financial_input_ineligible:source_version_changed"]);
+  const attestation = mutable(scenarioRecords());
+  attestation.bindings[0].publication_attestation_id = "5f000000-0000-4000-8000-0000000000e9";
+  assert.deepEqual(scenarioReasons(attestation), ["financial_binding_mismatch:publication_attestation_id"]);
+  const superseded = mutable(scenarioRecords());
+  superseded.evidence[0].publication = null;
+  assert.deepEqual(scenarioReasons(superseded), ["financial_input_ineligible:publication_proof_unavailable"]);
+});
+
+test("a tampered assumption fails: its value or attribution in the plan, or its hash in input_refs", () => {
+  const value = mutable(scenarioRecords());
+  value.plan.plan.assumptions[1].value = "26";
+  assert.deepEqual(scenarioReasons(value), ["financial_plan_mismatch:semantic_hash"]);
+  const attribution = mutable(scenarioRecords());
+  attribution.plan.plan.assumptions[2].attribution.captured_at = "2024-01-15T15:00:01.000Z";
+  assert.deepEqual(scenarioReasons(attribution), ["financial_plan_mismatch:semantic_hash"]);
+  const rehashedPlan = mutable(scenarioRecords());
+  rehashedPlan.plan.plan.assumptions[1].value = "26";
+  rehashedPlan.plan.semantic_hash = planSemanticHash(rehashedPlan.plan.plan);
+  rehashedPlan.run.request_hash = rehashedPlan.plan.semantic_hash;
+  assert.deepEqual(scenarioReasons(rehashedPlan), ["financial_recompute_mismatch:payload"]);
+  const lineage = mutable(scenarioRecords());
+  lineage.computations.find((row: { node_id: string }) => row.node_id === "base").input_refs[1].hash = "0".repeat(64);
+  assert.deepEqual(scenarioReasons(lineage), ["financial_lineage_mismatch:input_refs"]);
+  const dropped = mutable(scenarioRecords());
+  dropped.computations.find((row: { node_id: string }) => row.node_id === "bull").input_refs.pop();
+  assert.deepEqual(scenarioReasons(dropped), ["financial_lineage_mismatch:input_refs"]);
+});
+
+test("a scenario seal must cite its EPS fact, and a presentation altered after sealing is no longer the certified one", () => {
+  const withoutFact = { ...SCENARIO_SEAL_CONTEXT, manifest: { ...SCENARIO_SEAL_CONTEXT.manifest, fact_refs: [] } };
+  assert.deepEqual(reasons(verifyFinancialUnit(scenarioRecords(), "section", withoutFact)), ["financial_manifest_mismatch:fact_refs"]);
+  const outcome = verifyFinancialUnit(scenarioRecords(), "section", SCENARIO_SEAL_CONTEXT);
+  assert.ok(outcome.ok);
+  const snapshot = { fact_refs: [F.epsFact], claim_refs: [], event_refs: [], document_refs: [], source_ids: [F.source], series_refs: [], checked_series_refs: [], certificates: [{ run_id: F.run, unit_id: "section", presentation_hash: outcome.certificate.presentation.hash }] };
+  assert.equal(deriveBlockProof(outcome.block, snapshot).calculation, "verified");
+  const altered = JSON.parse(JSON.stringify(outcome.block));
+  altered.financial.presentations[0].rows[1].multiple_text = "22x";
+  altered.presentation_hash = presentationHash(altered.financial);
+  assert.notEqual(altered.presentation_hash, outcome.certificate.presentation.hash);
+  assert.equal(deriveBlockProof(altered, snapshot).calculation, "not_verified");
 });
