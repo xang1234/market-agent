@@ -4,7 +4,6 @@ import test from "node:test";
 import { evaluateBoundPlan, type GraphEvaluation } from "../services/financial-core/src/index.ts";
 import { selectInput } from "../services/financial-engine/src/select-inputs.ts";
 import { verifyFinancialUnit } from "../services/snapshot/src/financial-verifier.ts";
-import { SEAL_CONTEXT } from "../services/snapshot/test/financial-fixtures.ts";
 import {
   COMPUTATION_CASES,
   MUTANTS,
@@ -17,14 +16,14 @@ import {
 } from "./verified-finance-fixtures.ts";
 
 const PRODUCTION: EngineUnderTest = { evaluate: evaluateBoundPlan, select: selectInput };
-const productionVerifier = (records: Parameters<typeof verifyFinancialUnit>[0]) => verifyFinancialUnit(records, "section", SEAL_CONTEXT).ok;
+const productionVerifier = (records: Parameters<typeof verifyFinancialUnit>[0], context: Parameters<typeof verifyFinancialUnit>[2]) => verifyFinancialUnit(records, "section", context).ok;
 
 const failed = (engine: EngineUnderTest) => runGoldenCases(engine).filter((result) => !result.passed).map((result) => result.id);
 
 test("the golden cases cover every reviewed rule the release gate names", () => {
   const categories = new Set<GoldenCategory>([...COMPUTATION_CASES, ...SELECTION_CASES].map((golden) => golden.category));
   assert.deepEqual([...categories].sort(), [
-    "calendar_53_week", "date_only_uncertainty", "exact_source_token", "negative_base", "partial_cohort",
+    "calendar_53_week", "date_only_uncertainty", "eps_scenarios", "exact_source_token", "negative_base", "partial_cohort",
     "precision_limit", "public_versus_ingestion", "restatement", "zero_denominator",
   ]);
 });
@@ -82,9 +81,19 @@ test("a rounding, restatement, or timing defect is caught", () => {
   assert.deepEqual(failed(eagerDates), ["date-only-same-day"]);
 });
 
+test("an engine that applies one scenario's multiple to another is caught", () => {
+  const swapped: EngineUnderTest = {
+    ...PRODUCTION,
+    evaluate: (plan, bindings) => evaluateBoundPlan(plan.assumptions
+      ? { ...plan, assumptions: [{ ...plan.assumptions[0], value: plan.assumptions[2].value }, plan.assumptions[1], { ...plan.assumptions[2], value: plan.assumptions[0].value }] }
+      : plan, bindings),
+  };
+  assert.deepEqual(failed(swapped), ["scenario-eps-4", "scenario-fractional"]);
+});
+
 test("the verifier rejects every mutant, and the mutants cover every tampering the gate names", () => {
   assert.deepEqual([...new Set(MUTANTS.map((mutant) => mutant.kind))].sort(), [
-    "cutoff", "definition", "numeric_result", "peer_count", "period", "unit", "word_only_claim",
+    "assumption", "cutoff", "definition", "numeric_result", "peer_count", "period", "unit", "word_only_claim",
   ] satisfies MutantKind[]);
   const report = runMutationSuite(productionVerifier);
   assert.equal(report.baseline_verified, true);
