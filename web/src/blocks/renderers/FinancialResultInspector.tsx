@@ -89,6 +89,24 @@ export function FinancialResultInspector({ load, onCopy }: { load: FinancialInsp
           ))}
         </ol>
       </section>
+      {details.assumptions && details.assumptions.length > 0 ? (
+        <section className="flex flex-col gap-2" data-testid="financial-inspector-assumptions">
+          <h4 className="text-xs font-semibold uppercase text-muted">Assumptions (user-supplied, not reported data)</h4>
+          <ol className="flex flex-col gap-2">
+            {details.assumptions.map((assumption) => (
+              <li key={assumption.assumption_id} className="rounded border border-line p-2">
+                <dl className="grid gap-1 text-xs">
+                  <Row label={`${assumption.scenario[0]!.toUpperCase()}${assumption.scenario.slice(1)} P/E`}>
+                    <span className="num break-all text-sm text-fg">{assumption.value}</span> <VerificationLabel kind="user_supplied" />
+                  </Row>
+                  <Row label="Stated">{`${assumption.attribution.ref} at ${assumption.attribution.captured_at}`}</Row>
+                  <Row label="Hash">{assumption.assumption_hash}</Row>
+                </dl>
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
       <Rows
         title="Certificate"
         rows={[

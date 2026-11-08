@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -130,6 +130,16 @@ test("an engine answer renders its figures with labels and periods, its gaps wit
     renderBlock({ kind: "rich_text", analyst_commentary: true, segments: [{ type: "text", text: "Scale funds research." }] }),
     "_Analyst commentary:_ Scale funds research.",
   );
+});
+
+test("an engine answer's P/E scenarios render each multiple beside its value and the disclosure", () => {
+  const block = JSON.parse(readFileSync(new URL("../web/src/blocks/financialAnswer.scenarios.fixture.json", import.meta.url), "utf8"));
+  assert.equal(renderBlock(block), [
+    "*Engine answer: all 4 requested results verified*",
+    "",
+    "*P/E scenarios on diluted EPS USD 4.00 per share*: bear 20x P/E USD 80.00 per share; base 25x P/E USD 100.00 per share; bull 30x P/E USD 120.00 per share",
+    "_A mechanical scenario: reported diluted EPS × a P/E you supplied. Not a price target, forecast, or recommendation._",
+  ].join("\n"));
 });
 
 test("the report shows every turn, its expectation, and a failed turn as failed", () => {

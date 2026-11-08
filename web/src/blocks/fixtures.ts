@@ -24,6 +24,7 @@ import type {
 
 import financialAnswerFixtureJson from './financialAnswer.fixture.json' with { type: 'json' }
 import financialAnswerFiscalCalendarsFixtureJson from './financialAnswer.fiscalCalendars.fixture.json' with { type: 'json' }
+import financialAnswerScenariosFixtureJson from './financialAnswer.scenarios.fixture.json' with { type: 'json' }
 import financialAnswerV1FixtureJson from './financialAnswer.v1.fixture.json' with { type: 'json' }
 
 const FIXTURE_SNAPSHOT_ID = '11111111-1111-4111-9111-111111111111'
@@ -502,9 +503,10 @@ export const disclosureFixture: DisclosureBlock = {
   ],
 }
 
-// services/financial-core/test/presentation-contract.test.ts writes the v2 fixtures from the real generator and fails if they drift; the v1 fixture is a stored answer, never regenerated.
+// services/financial-core/test/presentation-contract.test.ts writes the v2 and v3 fixtures from the real generator and fails if they drift; the v1 fixture is a stored answer, never regenerated.
 export const financialAnswerFixture = financialAnswerFixtureJson as FinancialAnswerBlock
 export const financialAnswerFiscalCalendarsFixture = financialAnswerFiscalCalendarsFixtureJson as FinancialAnswerBlock
+export const financialAnswerScenariosFixture = financialAnswerScenariosFixtureJson as FinancialAnswerBlock
 export const financialAnswerV1Fixture = financialAnswerV1FixtureJson as FinancialAnswerBlock
 
 export const ALL_BLOCK_FIXTURES = [

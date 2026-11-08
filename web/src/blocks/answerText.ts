@@ -56,6 +56,15 @@ function financialAnswerText(block: FinancialAnswerBlock): string {
         const rows = presentation.points.map((point) => [labelText(content, point.period_label_id), shown(results.get(point.result_id))])
         return `${heading}\n\n${markdownTable(['Period', 'Value'], rows)}`
       }
+      if (presentation.kind === 'scenarios') {
+        const earnings = presentation.earnings_result_id === null ? undefined : results.get(presentation.earnings_result_id)
+        const rows = presentation.rows.map((row) => [`${row.scenario[0]!.toUpperCase()}${row.scenario.slice(1)}`, `${row.multiple_text} (${row.attribution_text})`, shown(results.get(row.result_id))])
+        return [
+          earnings ? `${resultLabel(content, earnings)}: ${shown(earnings)}` : '',
+          markdownTable(['Scenario', 'P/E (your assumption)', 'Value per share'], rows),
+          presentation.disclosure,
+        ].filter(Boolean).join('\n\n')
+      }
       const result = results.get(presentation.result_id)
       if (!result) return ''
       return result.presented.kind === 'value' || result.presented.kind === 'gap'

@@ -3,7 +3,7 @@ import { memo, useLayoutEffect, useRef, type ReactElement } from 'react'
 import { MemoizedBlockView } from '../blocks/MemoizedBlockView.tsx'
 import { CopyButton } from '../blocks/CopyButton.tsx'
 import { answerCopy } from '../blocks/answerText.ts'
-import type { BlockProof } from '../blocks/blockProof.ts'
+import { UNPROVEN, type BlockProof } from '../blocks/blockProof.ts'
 import type { Block } from '../blocks/types.ts'
 import type { ChatMessage } from './messageTypes.ts'
 import { AssistantTurn, BlockColumn, USER_BUBBLE_CLASS } from './turnLayout.tsx'
@@ -78,8 +78,6 @@ function proofFor(proofs: Readonly<Record<string, BlockProof>> | undefined, bloc
   if (proofs === undefined) return undefined
   return Object.hasOwn(proofs, blockId) ? proofs[blockId] : UNPROVEN
 }
-
-const UNPROVEN: BlockProof = { evidence: 'unknown', calculation: 'not_verified', public_by_cutoff: 'unknown' }
 
 export const MessageItem = memo(
   MessageItemInner,

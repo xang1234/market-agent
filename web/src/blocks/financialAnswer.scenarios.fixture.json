@@ -1,0 +1,168 @@
+{
+  "id": "financial-answer-section",
+  "kind": "financial_answer",
+  "snapshot_id": "11111111-1111-4111-9111-111111111111",
+  "data_ref": {
+    "kind": "financial_answer",
+    "id": "99999999-9999-4999-9999-999999999999:section"
+  },
+  "source_refs": [
+    "44444444-4444-4444-9444-444444444444"
+  ],
+  "as_of": "2024-01-16T04:59:59.999Z",
+  "presentation_hash": "0801c8f025d0b95baa537dd1ed8369626c3f9081ebc15ac32fd25cbce0df8623",
+  "financial": {
+    "presentation_version": "financial-presentation.v3",
+    "template_version": "financial-answer.v1",
+    "run_id": "99999999-9999-4999-9999-999999999999",
+    "unit_id": "section",
+    "knowledge_cutoff": "2024-01-15T23:59:59.999-05:00",
+    "coverage": {
+      "state": "complete",
+      "requested": 4,
+      "verified": 4
+    },
+    "labels": {
+      "subject:a": {
+        "kind": "subject",
+        "text": "Apple Inc.",
+        "slot_id": "a"
+      },
+      "measure:m0": {
+        "kind": "measure",
+        "text": "EPS (diluted)"
+      },
+      "period:p0": {
+        "kind": "period",
+        "text": "FY2023 (ended 2023-09-30)"
+      },
+      "measure:m1": {
+        "kind": "measure",
+        "text": "Bear scenario: diluted EPS × your 20x P/E"
+      },
+      "measure:m2": {
+        "kind": "measure",
+        "text": "Base scenario: diluted EPS × your 25x P/E"
+      },
+      "measure:m3": {
+        "kind": "measure",
+        "text": "Bull scenario: diluted EPS × your 30x P/E"
+      }
+    },
+    "results": [
+      {
+        "result_id": "91111111-1111-4111-9111-111111111111",
+        "output_id": "out_eps",
+        "disposition": "verified",
+        "subject_label_id": "subject:a",
+        "measure_label_id": "measure:m0",
+        "period_label_id": "period:p0",
+        "presented": {
+          "kind": "value",
+          "text": "USD 4.00 per share",
+          "full_text": "USD 4 per share",
+          "value": "4",
+          "unit": {
+            "kind": "currency_per_share",
+            "currency": "USD"
+          },
+          "exact": true
+        },
+        "result_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "result_id": "92222222-2222-4222-9222-222222222222",
+        "output_id": "out_bear",
+        "disposition": "verified",
+        "subject_label_id": "subject:a",
+        "measure_label_id": "measure:m1",
+        "period_label_id": "period:p0",
+        "presented": {
+          "kind": "value",
+          "text": "USD 80.00 per share",
+          "full_text": "USD 80 per share",
+          "value": "80",
+          "unit": {
+            "kind": "currency_per_share",
+            "currency": "USD"
+          },
+          "exact": true
+        },
+        "result_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "result_id": "93333333-3333-4333-9333-333333333333",
+        "output_id": "out_base",
+        "disposition": "verified",
+        "subject_label_id": "subject:a",
+        "measure_label_id": "measure:m2",
+        "period_label_id": "period:p0",
+        "presented": {
+          "kind": "value",
+          "text": "USD 100.00 per share",
+          "full_text": "USD 100 per share",
+          "value": "100",
+          "unit": {
+            "kind": "currency_per_share",
+            "currency": "USD"
+          },
+          "exact": true
+        },
+        "result_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "result_id": "94444444-4444-4444-9444-444444444444",
+        "output_id": "out_bull",
+        "disposition": "verified",
+        "subject_label_id": "subject:a",
+        "measure_label_id": "measure:m3",
+        "period_label_id": "period:p0",
+        "presented": {
+          "kind": "value",
+          "text": "USD 120.00 per share",
+          "full_text": "USD 120 per share",
+          "value": "120",
+          "unit": {
+            "kind": "currency_per_share",
+            "currency": "USD"
+          },
+          "exact": true
+        },
+        "result_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "presentations": [
+      {
+        "kind": "scenarios",
+        "earnings_result_id": "91111111-1111-4111-9111-111111111111",
+        "rows": [
+          {
+            "scenario": "bear",
+            "assumption_id": "pe_bear",
+            "multiple_text": "20x",
+            "attribution_text": "Your assumption in this request (2024-01-15 15:00 UTC)",
+            "assumption_hash": "0db55fc76ef5eee8a2fd34dd4c9887a4ea8411e6fa08dd47c3a5435624072610",
+            "result_id": "92222222-2222-4222-9222-222222222222"
+          },
+          {
+            "scenario": "base",
+            "assumption_id": "pe_base",
+            "multiple_text": "25x",
+            "attribution_text": "Your assumption in this request (2024-01-15 15:00 UTC)",
+            "assumption_hash": "c5dbf86d7a8af06ad8d5878fe6533cbfdc26567d4cf5604a30ab947a60633d03",
+            "result_id": "93333333-3333-4333-9333-333333333333"
+          },
+          {
+            "scenario": "bull",
+            "assumption_id": "pe_bull",
+            "multiple_text": "30x",
+            "attribution_text": "Your assumption in this request (2024-01-15 15:00 UTC)",
+            "assumption_hash": "50b17dc3cce9c8c82a758d175a4e404bafa3d79f0cd778161b7fdbbf2fc8ac6c",
+            "result_id": "94444444-4444-4444-9444-444444444444"
+          }
+        ],
+        "disclosure": "A mechanical scenario: reported diluted EPS × a P/E you supplied. Not a price target, forecast, or recommendation."
+      }
+    ]
+  }
+}

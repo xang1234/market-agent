@@ -7,6 +7,7 @@ import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { installDomGlobals } from '../analyst-grids/testDom.ts'
+import { financialAnswerScenariosFixture } from '../blocks/fixtures.ts'
 import { BlockRegistryProvider, createDefaultBlockRegistry } from '../blocks/index.ts'
 import { EvidenceInspectorProvider } from '../evidence/EvidenceInspectorProvider.tsx'
 import { AuthContext } from '../shell/authTypes.ts'
@@ -110,6 +111,24 @@ test('PendingTurnView shows an unverified turn with a per-block label and collap
   assert.match(html, /<details[^>]*data-testid="unverified-reasons"/)
   assert.match(html, /Why unverified/)
   assert.match(html, /missing_fact_ref/)
+})
+
+test('an unverified scenarios answer claims neither a verified result nor a source-linked EPS', () => {
+  const state: StreamState = {
+    turn_status: 'unverified',
+    blocks_by_id: new Map(),
+    block_order: [],
+    plan_steps: [],
+    snapshot_id: null,
+    error: null,
+    unverified: { failures: [{ reason_code: 'missing_fact_ref' }], blocks: [financialAnswerScenariosFixture] },
+  }
+  const html = renderToStaticMarkup(
+    <BlockRegistryProvider registry={createDefaultBlockRegistry()}>
+      <PendingTurnView turn={{ phase: 'unverified', run: RUN, stream: state }} {...handlers} />
+    </BlockRegistryProvider>,
+  )
+  assert.deepEqual([...html.matchAll(/data-verification="([^"]+)"/g)].map((match) => match[1]), ['unverified', 'not_verified', 'user_supplied'])
 })
 
 const STREAMED: StreamState = {

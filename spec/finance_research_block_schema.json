@@ -1867,6 +1867,224 @@
       },
       "additionalProperties": false
     },
+    "FinancialScenariosPresentationV3": {
+      "description": "P/E scenarios over one reported diluted EPS (#201): each row is that EPS times a P/E the user supplied. A mechanical scenario, not a price target.",
+      "type": "object",
+      "required": [
+        "kind",
+        "earnings_result_id",
+        "rows",
+        "disclosure"
+      ],
+      "properties": {
+        "kind": {
+          "const": "scenarios"
+        },
+        "earnings_result_id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/UUID"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rows": {
+          "description": "Exactly bear, base, and bull, in that order.",
+          "type": "array",
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/FinancialScenarioRowV3"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "scenario": {
+                      "const": "bear"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/FinancialScenarioRowV3"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "scenario": {
+                      "const": "base"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/FinancialScenarioRowV3"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "scenario": {
+                      "const": "bull"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "items": false
+        },
+        "disclosure": {
+          "const": "A mechanical scenario: reported diluted EPS × a P/E you supplied. Not a price target, forecast, or recommendation."
+        }
+      },
+      "additionalProperties": false
+    },
+    "FinancialScenarioRowV3": {
+      "type": "object",
+      "required": [
+        "scenario",
+        "assumption_id",
+        "multiple_text",
+        "attribution_text",
+        "assumption_hash",
+        "result_id"
+      ],
+      "properties": {
+        "scenario": {
+          "enum": [
+            "bear",
+            "base",
+            "bull"
+          ]
+        },
+        "assumption_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "multiple_text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "attribution_text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "assumption_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "result_id": {
+          "$ref": "#/$defs/UUID"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FinancialPresentationV3": {
+      "description": "v2's presentation shapes, or P/E scenarios.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FinancialPresentationV2"
+        },
+        {
+          "$ref": "#/$defs/FinancialScenariosPresentationV3"
+        }
+      ]
+    },
+    "FinancialAnswerContentV3": {
+      "description": "v2 content whose presentations may include P/E scenarios (#201). Every other content stays v2.",
+      "type": "object",
+      "required": [
+        "presentation_version",
+        "template_version",
+        "run_id",
+        "unit_id",
+        "knowledge_cutoff",
+        "coverage",
+        "labels",
+        "results",
+        "presentations"
+      ],
+      "properties": {
+        "presentation_version": {
+          "const": "financial-presentation.v3"
+        },
+        "template_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "run_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "unit_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "knowledge_cutoff": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "coverage": {
+          "type": "object",
+          "required": [
+            "state",
+            "requested",
+            "verified"
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "complete",
+                "partial",
+                "none"
+              ]
+            },
+            "requested": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "verified": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "labels": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^(subject:[a-z][a-z0-9_]{0,63}|measure:m[0-9]+|period:p[0-9]+)$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/FinancialPresentationLabel"
+          }
+        },
+        "results": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/FinancialPresentedResult"
+          }
+        },
+        "presentations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/FinancialPresentationV3"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "FinancialAnswer": {
       "description": "A certified quantitative answer. Every string is server-generated from committed results; there is no title or prose field, so a model cannot add unverified numerical or comparative claims.",
       "allOf": [
@@ -1918,6 +2136,18 @@
                   },
                   "then": {
                     "$ref": "#/$defs/FinancialAnswerContentV2"
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "presentation_version": {
+                        "const": "financial-presentation.v3"
+                      }
+                    }
+                  },
+                  "then": {
+                    "$ref": "#/$defs/FinancialAnswerContentV3"
                   }
                 }
               ]

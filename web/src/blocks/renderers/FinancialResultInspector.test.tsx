@@ -4,7 +4,7 @@ import test from 'node:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import type { FinancialInspectedInput, FinancialResultInspection } from '../financialInspection.ts'
-import { canonicalValue, payloadSummary, SUPPORTED_INSPECTION_SCHEMA_VERSION } from '../financialInspection.ts'
+import { canonicalValue, INSPECTION_V2_SCHEMA_VERSION, payloadSummary, SUPPORTED_INSPECTION_SCHEMA_VERSION } from '../financialInspection.ts'
 import { FinancialResultInspector } from './FinancialResultInspector.tsx'
 
 const LARGE = '383285000000.123456789012345678'
@@ -171,4 +171,15 @@ test('loading and error states are announced', () => {
   assert.match(renderToStaticMarkup(<FinancialResultInspector load={{ kind: 'loading', resultId: 'r' }} />), /role="status"/u)
   const error = renderToStaticMarkup(<FinancialResultInspector load={{ kind: 'error', resultId: 'r', message: 'This calculation is not available to inspect.' }} />)
   assert.match(error, /role="alert"[^>]*>This calculation is not available to inspect\./u)
+})
+
+test('a scenario result lists the P/E it read as the user\'s assumption, apart from the reported inputs', () => {
+  const assumption = { assumption_id: 'pe_base', scenario: 'base', value: '25', attribution: { kind: 'user_request', ref: 'chat:thread:turn', captured_at: '2024-06-10T14:00:00.000Z' }, assumption_hash: 'd'.repeat(64) } as const
+  const html = renderToStaticMarkup(<FinancialResultInspector load={{ kind: 'ready', inspection: inspection({ schema_version: INSPECTION_V2_SCHEMA_VERSION, assumptions: [assumption] }) }} />)
+  const section = html.slice(html.indexOf('data-testid="financial-inspector-assumptions"'))
+  for (const expected of ['Assumptions (user-supplied, not reported data)', 'Base P/E', '>25<', 'Your assumption', 'chat:thread:turn at 2024-06-10T14:00:00.000Z', 'd'.repeat(64)]) {
+    assert.ok(section.includes(expected), `missing ${expected}`)
+  }
+  assert.ok(html.indexOf('Inputs') < html.indexOf('Assumptions (user-supplied'), 'assumptions follow the reported inputs')
+  assert.ok(!renderToStaticMarkup(<FinancialResultInspector load={{ kind: 'ready', inspection: inspection() }} />).includes('Assumptions'), 'a v1 inspection has none')
 })

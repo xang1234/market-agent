@@ -1,6 +1,7 @@
 import type { ReactElement, ReactNode } from 'react'
 
 import { BlockView } from '../blocks/BlockView.tsx'
+import { UNPROVEN } from '../blocks/blockProof.ts'
 import { AgentPlanPanel } from './AgentPlanPanel.tsx'
 import { AssistantBlocks } from './MessageItem.tsx'
 import type { StreamLink, TurnState } from './chatSession.ts'
@@ -171,7 +172,7 @@ function UnverifiedTurnView({ state, unverified }: { state: StreamState; unverif
       <AssistantTurn className="w-full">
         {unverified.blocks.map((block) => (
           <BlockColumn key={block.id} kind={block.kind}>
-            <BlockView block={block} verification="unverified" />
+            <BlockView block={block} verification="unverified" proof={UNPROVEN} />
           </BlockColumn>
         ))}
       </AssistantTurn>
