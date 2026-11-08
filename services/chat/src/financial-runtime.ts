@@ -47,6 +47,7 @@ import { publishRequest, type RequestGap } from "../../financial-engine/src/requ
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { comparedAdditions, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId, noteBlock } from "./chat-ids.ts";
+import { planEpsScenarios, priorScenario, SCENARIO_DECLINE, SCENARIO_GAP, SCENARIO_INPUTS, scenarioAnswer, turnScenarioAsk, type ScenarioAsk } from "./eps-scenarios.ts";
 import { asksCause, filedCauses, namedFigures, NOT_ASKED, type FiledCause } from "./filed-cause.ts";
 import { allResolved, overviewOmissions, overviewPeers, planCompanyOverview, planMarginTrend, type PeersOf } from "./company-overview.ts";
 import { logUnreadMessage, readChatMessage, type ChatReadMessage } from "./messages.ts";
@@ -252,12 +253,14 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
         authority,
         request_key: turnId,
         plan: async (db) => {
-          planned = await planTurn(deps.planningModel, context, text, requested.subjects, authority, deps.clock?.() ?? new Date(), (subjects) => {
+          const received = deps.clock?.() ?? new Date();
+          planned = await planTurn(deps.planningModel, context, text, requested.subjects, authority, received, (subjects) => {
             asked = subjects;
           }, {
             choice,
             evidence: deps.evidence(db),
             peersOf: (issuer) => overviewPeers(db, issuer),
+            planScenario: async (planning, ask) => planEpsScenarios(planning, ask, await priorScenario(db, context.threadId, context.userId!), received.toISOString()),
             onOverview: (period) => {
               overviewPeriod = period;
             },
@@ -303,7 +306,10 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     const requested = await requestedSubjects(deps, context, text);
     const { clarify } = requested;
     if (clarify && !reserved) return async () => ({ kind: "clarification", clarification: companyQuestion(clarify) });
-    if (requested.subjects.length === 0 && !reserved) return null;
+    const ask = turnScenarioAsk(text, requested.subjects);
+    // A scenario asked of no company is declined here: the analyst path never values multiples.
+    const declined = ask ? async (): Promise<ChatFinancialTurn> => gap("unsupported", SCENARIO_GAP) : null;
+    if (requested.subjects.length === 0 && !reserved) return declined;
     const reading = await context.reading?.() ?? null;
     // The scope gets the companies the message resolved, as this lane runs
     // before the analyst path resolves them; the answer saves the ones it
@@ -316,11 +322,11 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       console.warn("[chat] research scope unavailable; saving the financial answer without it", reason);
       return null;
     });
-    const choice = routeTurn(reading, scope);
+    const choice: PlanChoice = ask ? { kind: "scenario", ask } : routeTurn(reading, scope);
     if (reserved) return run(requested, reading, scope, choice);
     if (choice.kind === "analyst") return null;
     const kept = withinScope(requested, scope);
-    return kept.subjects.length === 0 ? null : run(kept, reading, scope, choice);
+    return kept.subjects.length === 0 ? declined : run(kept, reading, scope, choice);
   };
   const assertReady = () => requireFinancialReadiness(deps.pool, ["chat"]);
   return Object.freeze({ take, assertReady });
@@ -469,6 +475,7 @@ async function planTurn(
     choice: PlanChoice;
     evidence: FinancialEvidencePort;
     peersOf: PeersOf;
+    planScenario: (context: PlanningContext, ask: ScenarioAsk) => Promise<PlanningResult>;
     onOverview: (period: ReadPeriod) => void;
     onDeterministic: (choice: PlanChoice) => void;
   }>,
@@ -494,8 +501,9 @@ async function planTurn(
     subjects = distinctBy(await applyAnswer(subjects, context.clarificationAnswer, planningContext, text), requestedKey);
   }
   onSubjects(subjects);
-  if (CASH_RESILIENCE.test(text)) return planCashResilience(planningContext(subjects), text);
   const { choice } = turn;
+  if (choice.kind === "scenario") return turn.planScenario(planningContext(subjects), choice.ask);
+  if (CASH_RESILIENCE.test(text)) return planCashResilience(planningContext(subjects), text);
   if (choice.kind === "segments_gap" || choice.kind === "named_gap") {
     return { outcome: "unsupported", reason: choice.kind === "segments_gap" ? "segments" : choice.reason, issues: [], model_calls: 0 };
   }
@@ -702,8 +710,9 @@ function persistAssistantMessage(
     const cause = reading === null || plan === null || !asksCause(reading, scope)
       ? NOT_ASKED
       : await filedCauses(tx, { threadId, plan, named: namedFigures(reading), names: companyNames, answer: publication });
-    const missing = reading === null || plan === null ? [] : [
-      ...uncoveredAsks(answeredPeers ? withoutPeers(reading) : reading, plan, cause, turn.labels, scope),
+    const { reading: asked, notes: scenarioNotes } = scenarioAnswer(plan, reading);
+    const missing = asked === null || plan === null ? [] : [
+      ...uncoveredAsks(answeredPeers ? withoutPeers(asked) : asked, plan, cause, turn.labels, scope),
       ...await overviewOmissions(plan, request.authority, inSavepoints(tx.client, turn.evidence(tx.client)), names),
     ];
     const shownPeriod = plan === null ? null : planPeriod(plan);
@@ -717,6 +726,7 @@ function persistAssistantMessage(
       ...(turn.carried.length === 0 ? [] : [`${labelList(turn.carried)} ${turn.carried.length > 1 ? "are" : "is"} carried from the previous answer.`]),
       ...(replaced === null ? [] : [replaced]),
       ...defaults,
+      ...scenarioNotes,
       ...(reading === null ? [UNCHECKED] : missing.length === 0 ? [] : [`Not covered by this answer: ${missing.join("; ")}.`]),
       ...(stillShown.length === 0 ? [] : [`Still shown as an input to another figure: ${labelList(stillShown)}.`]),
       ...(later.restated.length === 0 ? [] : [`Restated by a later filing, so not as first reported: ${labelList(later.restated)}.`]),
@@ -986,8 +996,8 @@ const REASON_TEXT: Readonly<Record<Exclude<UnsupportedReason, "other"> | typeof 
 };
 
 function gap(reason_code: ChatGap, planned?: PlanningResult): Extract<ChatFinancialTurn, { kind: "gap" }> {
-  const reason = reason_code === "unsupported" && planned?.outcome === "unsupported" && Object.hasOwn(REASON_TEXT, planned.reason)
-    ? REASON_TEXT[planned.reason as keyof typeof REASON_TEXT]
-    : null;
+  const asked = reason_code === "unsupported" && planned?.outcome === "unsupported" ? planned.reason : null;
+  if (asked === SCENARIO_INPUTS) return { kind: "gap", reason_code, text: SCENARIO_DECLINE };
+  const reason = asked !== null && Object.hasOwn(REASON_TEXT, asked) ? REASON_TEXT[asked as keyof typeof REASON_TEXT] : null;
   return { kind: "gap", reason_code, text: reason === null ? GAP_TEXT[reason_code] : `${UNSUPPORTED}: ${reason}.` };
 }
