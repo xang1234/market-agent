@@ -18,6 +18,7 @@ import {
   type FinancialPlan,
   type FinancialRuntimeAuthority,
   type FinancialRuntimeAuthorityV1,
+  type OperationNode,
   type ValidationIssue,
 } from "./contracts.ts";
 
@@ -123,6 +124,13 @@ function issueFromAjv(error: ErrorObject): ValidationIssue {
   return { path, code: `schema_${error.keyword}`, message: error.message ?? "is invalid" };
 }
 
+// A P/E scenario multiplies one fiscal year's reported diluted EPS (#201).
+function oneYearOfDilutedEps(node: OperationNode | undefined): boolean {
+  if (node?.operation !== "reported_metric" || node.metric_key !== "eps_diluted") return false;
+  const { period } = node;
+  return period.kind === "fiscal_period" ? period.fiscal_period === "FY" : period.kind === "latest" && period.period_type === "annual" && period.offset === 0;
+}
+
 function planSemanticIssues(plan: FinancialPlan): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const add = (path: string, code: string, message: string) => issues.push({ path, code, message });
@@ -182,10 +190,21 @@ function planSemanticIssues(plan: FinancialPlan): ValidationIssue[] {
     if (node.operation === "scenario_eps_multiple" && !assumptionIds.has(node.assumption_id)) {
       add(`${path}.assumption_id`, "unknown_assumption", `references undeclared assumption ${node.assumption_id}`);
     }
+    if (node.operation === "scenario_eps_multiple" && !oneYearOfDilutedEps(plan.operations.find((entry) => entry.node_id === node.earnings))) {
+      add(`${path}.earnings`, "invalid_scenario_earnings", "must be reported diluted EPS of one fiscal year (FY, or the latest annual period)");
+    }
     for (const dependency of operationDependencies(node)) {
       if (!nodes.has(dependency)) add(path, "unknown_node", `depends on undeclared node ${dependency}`);
     }
   });
+
+  // One scenarios table of bear, base and bull: one EPS read, each scenario published once, in one unit.
+  const scenarios = plan.operations.flatMap((node) => node.operation === "scenario_eps_multiple" ? [node] : []);
+  const published = plan.outputs.filter((output) => scenarios.some((node) => node.node_id === output.node_id));
+  if (scenarios.length > 0 && (new Set(scenarios.map((node) => node.earnings)).size !== 1 || published.length !== scenarios.length
+    || new Set(published.map((output) => output.node_id)).size !== scenarios.length || new Set(published.map((output) => output.unit_id)).size !== 1)) {
+    add("$.operations", "split_scenarios", "bear, base and bull must read one earnings node and each be one output of one publication unit");
+  }
 
   const unitsWithOutputs = new Set<string>();
   plan.outputs.forEach((output, index) => {

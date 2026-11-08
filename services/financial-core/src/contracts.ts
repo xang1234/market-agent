@@ -594,6 +594,25 @@ export type BoundPriceInputV1 = {
   eligibility: { selection_policy_version: VersionTag; candidate_set_digest: Sha256Hex };
 };
 
+/**
+ * A persisted, contradictory, or incomplete execution record: a missing
+ * binding, a unit the plan does not declare, a re-execution that diverges
+ * from its checkpoint. Never reinterpreted as missing data.
+ */
+export class ExecutionIntegrityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ExecutionIntegrityError";
+  }
+}
+
+/** The assumption a scenario node reads, which a valid plan declares. */
+export function scenarioAssumption(plan: FinancialPlan, node: ScenarioEpsMultipleNode): PlanAssumption {
+  const assumption = plan.assumptions?.find((entry) => entry.assumption_id === node.assumption_id);
+  if (!assumption) throw new ExecutionIntegrityError(`node ${node.node_id} reads an undeclared assumption`);
+  return assumption;
+}
+
 /** Explicit dependency edges of an operation node, in declared order. */
 export function operationDependencies(node: OperationNode): LocalId[] {
   switch (node.operation) {

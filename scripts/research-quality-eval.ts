@@ -201,7 +201,8 @@ type EngineResult = {
 type EnginePresentation =
   | { kind: "scalar" | "predicate" | "gap"; result_id: string }
   | { kind: "table"; caption: string; columns: Array<{ measure_label_id: string; period_label_id: string | null }>; rows: Array<{ subject_label_id: string; cells: Array<string | null> }> }
-  | { kind: "series"; subject_label_id: string; measure_label_id: string; points: Array<{ period_label_id: string; result_id: string }> };
+  | { kind: "series"; subject_label_id: string; measure_label_id: string; points: Array<{ period_label_id: string; result_id: string }> }
+  | { kind: "scenarios"; earnings_result_id: string | null; rows: Array<{ scenario: string; multiple_text: string; result_id: string }>; disclosure: string };
 export type EngineContent = {
   presentation_version: string;
   coverage: { state: string; requested: number; verified: number };
@@ -210,7 +211,7 @@ export type EngineContent = {
   presentations: EnginePresentation[];
 };
 
-const ENGINE_VERSIONS = new Set(["financial-presentation.v1", "financial-presentation.v2"]);
+const ENGINE_VERSIONS = new Set(["financial-presentation.v1", "financial-presentation.v2", "financial-presentation.v3"]);
 
 function renderEngineAnswer(content: EngineContent): string {
   if (!ENGINE_VERSIONS.has(content.presentation_version)) {
@@ -240,6 +241,10 @@ function renderEngineAnswer(content: EngineContent): string {
     } else if (presentation.kind === "series") {
       const points = presentation.points.map((point) => `${label(point.period_label_id)} ${shown(results.get(point.result_id))}`);
       lines.push("", `*${label(presentation.subject_label_id)}, ${label(presentation.measure_label_id)}*: ${points.join("; ")}`);
+    } else if (presentation.kind === "scenarios") {
+      const earnings = presentation.earnings_result_id === null ? undefined : results.get(presentation.earnings_result_id);
+      const rows = presentation.rows.map((row) => `${row.scenario} ${row.multiple_text} P/E ${shown(results.get(row.result_id))}`);
+      lines.push("", `*P/E scenarios on diluted EPS ${shown(earnings)}*: ${rows.join("; ")}`, `_${presentation.disclosure}_`);
     } else {
       const result = results.get(presentation.result_id);
       if (!lines.at(-1)!.startsWith("- ")) lines.push("");

@@ -33,7 +33,7 @@ import type {
   Sha256Hex,
   SpreadNode,
 } from "./contracts.ts";
-import { FISCAL_PERIODS, operationDependencies, SCENARIOS } from "./contracts.ts";
+import { FISCAL_PERIODS, operationDependencies, scenarioAssumption, SCENARIOS } from "./contracts.ts";
 import { coverageState } from "./coverage.ts";
 import { resolveMetricDefinition, resolveRatioDefinition } from "./definitions.ts";
 import { canonicalDecimalString, compareExactDecimals, parseDerivedDecimalText, type ExactDecimal } from "./exact-decimal.ts";
@@ -581,12 +581,6 @@ function measureKey(plan: FinancialPlan, node: OperationNode): string {
     case "scenario_eps_multiple":
       return `scenario_eps_multiple(${node.assumption_id})`;
   }
-}
-
-function scenarioAssumption(plan: FinancialPlan, node: ScenarioEpsMultipleNode): PlanAssumption {
-  const assumption = plan.assumptions?.find((entry) => entry.assumption_id === node.assumption_id);
-  if (!assumption) throw new RangeError(`node ${node.node_id} references an undeclared assumption`);
-  return assumption;
 }
 
 function changeText(plan: FinancialPlan, node: ChangeNode, measure: string): string {

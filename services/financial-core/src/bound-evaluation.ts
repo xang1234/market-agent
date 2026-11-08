@@ -20,25 +20,13 @@ import type {
   Sha256Hex,
   SuccessPayload,
 } from "./contracts.ts";
-import { operationDependencies } from "./contracts.ts";
+import { ExecutionIntegrityError, operationDependencies, scenarioAssumption } from "./contracts.ts";
 import { coverageState, evaluatePlan, type GraphEvaluation, type NodeState } from "./coverage.ts";
 import { dependencyClosure, topologicalOrder } from "./graph.ts";
 import { NUMERIC_POLICY } from "./numeric-policy.ts";
 import { OPERATION_REGISTRY } from "./operation-registry.ts";
 import { operandFromBoundInput, operationGap } from "./operations.ts";
 import { unitClosures } from "./publication-units.ts";
-
-/**
- * A persisted, contradictory, or incomplete execution record: a missing
- * binding, a unit the plan does not declare, a re-execution that diverges
- * from its checkpoint. Never reinterpreted as missing data.
- */
-export class ExecutionIntegrityError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ExecutionIntegrityError";
-  }
-}
 
 /** One reported-metric slot as bound: an immutable input, or an explicit gap. */
 export type SlotBinding =
@@ -193,8 +181,7 @@ export function unitPublication(
 function inputRefs(plan: FinancialPlan, node: OperationNode, hashes: ReadonlyMap<LocalId, Sha256Hex>): InputRef[] {
   const operands = operationDependencies(node).map((dependency) => ({ node_id: dependency, hash: hashes.get(dependency)! }));
   if (node.operation !== "scenario_eps_multiple") return operands;
-  const assumption = plan.assumptions?.find((entry) => entry.assumption_id === node.assumption_id);
-  if (!assumption) throw new ExecutionIntegrityError(`node ${node.node_id} reads an undeclared assumption`);
+  const assumption = scenarioAssumption(plan, node);
   return [...operands, { assumption_id: assumption.assumption_id, hash: assumptionHash(assumption) }];
 }
 

@@ -16,6 +16,7 @@ import {
   type LocalId,
   type NoncontrollingInterestInferenceV1,
   type PlanAssumption,
+  scenarioAssumption,
   type PriceObservationKind,
   type SplitAdjustmentV2,
 } from "../../financial-core/src/index.ts";
@@ -114,8 +115,7 @@ export async function inspectCommittedResult(db: SqlExecutor, ownerUserId: strin
     return { schema_version: INSPECTION_SCHEMA_VERSION, availability: "unsupported_version", result_id: record.result_id, run_id: record.run_id, reason_code: "unsupported_version" };
   }
   const metricKeys = new Set(inputs.flatMap((input) => (input.binding_status === "bound" ? [(input.bound_payload as BoundFinancialInputV1).metric.metric_key] : [])));
-  const assumptions = (plan.assumptions ?? []).filter((assumption) =>
-    plan.operations.some((node) => node.operation === "scenario_eps_multiple" && node.assumption_id === assumption.assumption_id && closure.has(node.node_id)));
+  const assumptions = plan.operations.flatMap((node) => node.operation === "scenario_eps_multiple" && closure.has(node.node_id) ? [scenarioAssumption(plan, node)] : []);
   return {
     ...(assumptions.length === 0
       ? { schema_version: INSPECTION_SCHEMA_VERSION }

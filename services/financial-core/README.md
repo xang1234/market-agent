@@ -30,9 +30,13 @@ scenario value in the EPS currency per share, not a price target.
   scenario node reads each. A v1 plan can carry neither.
 - An assumption is plan configuration, never a fact, a binding, or a run
   input, so it can never fill a missing reported input.
-- Zero or negative EPS is `non_positive_base`. Basic EPS is
-  `incompatible_definition`. A quarter or a year before the latest is
-  `unsupported_period`.
+- A plan is invalid unless all three scenario nodes read one `reported_metric`
+  of `eps_diluted` at `FY` or the latest annual period
+  (`invalid_scenario_earnings`), and each is one output of one publication
+  unit (`split_scenarios`). Each scenarios table therefore has bear, base, and
+  bull in that order.
+- Zero or negative EPS is `non_positive_base`. An EPS bound to a period that
+  is not one fiscal year is `unsupported_period`.
 - The scenario node's lineage hash and its computation's `input_refs` both name
   `{assumption_id, hash}` after the EPS ref. The `assumption` hash covers the
   id, scenario, value, and attribution, and `planSemanticHash` keeps the

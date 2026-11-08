@@ -424,12 +424,10 @@ export function peRatio(node: PeRatioNode, price: FinancialOperand, earnings: Fi
  * a mechanical scenario value in the EPS currency per share, on the split basis
  * EPS was bound to. It never reads a price.
  */
-export function scenarioEpsMultiple(node: ScenarioEpsMultipleNode, earnings: FinancialOperand, earningsPeriod: PeriodSelector | null, multiple: DecimalString): OperandOutcome {
+// The plan's earnings node is one fiscal year's diluted EPS (validate.ts); the bound period must be one too.
+export function scenarioEpsMultiple(node: ScenarioEpsMultipleNode, earnings: FinancialOperand, multiple: DecimalString): OperandOutcome {
   if (!isReported(earnings, "eps_diluted", "per_share")) return operationGap("incompatible_definition", "A P/E scenario multiplies reported diluted EPS.");
-  const oneYear = earningsPeriod?.kind === "fiscal_period"
-    ? earningsPeriod.fiscal_period === "FY"
-    : earningsPeriod?.kind === "latest" && earningsPeriod.period_type === "annual" && earningsPeriod.offset === 0;
-  if (!oneYear || earnings.period.fiscal_period !== "FY" || classifyDuration(earnings.period) !== "annual") {
+  if (earnings.period.fiscal_period !== "FY" || classifyDuration(earnings.period) !== "annual") {
     return operationGap("unsupported_period", "A P/E scenario uses one fiscal year's diluted EPS.");
   }
   if (earnings.measurement.unit.kind !== "currency_per_share") return operationGap("incompatible_unit", "A P/E scenario multiplies EPS in a currency per share.");

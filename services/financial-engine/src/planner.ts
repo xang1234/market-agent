@@ -434,7 +434,7 @@ function finish(plan: FinancialPlan, calls: number): PlanningResult {
   return { outcome: "ready", plan, model_calls: calls };
 }
 
-function unresolvedSubjectClarification(context: PlanningContext): Clarification | null {
+export function unresolvedSubjectClarification(context: PlanningContext): Clarification | null {
   for (const subject of context.requested_subjects) {
     if (subject.resolution.status === "ambiguous") {
       return clarification(

@@ -3,7 +3,7 @@
 // validation, plan evaluation, and future verifiers all read this table, so
 // adding an operation is one entry here plus its implementation.
 
-import type { FinancialPlan, OperationKind, OperationNode, ReportedMetricNode, VersionTag } from "./contracts.ts";
+import { scenarioAssumption, type FinancialPlan, type OperationKind, type OperationNode, type ReportedMetricNode, type VersionTag } from "./contracts.ts";
 import {
   absoluteChange,
   freeCashFlow,
@@ -145,12 +145,7 @@ export const OPERATION_REGISTRY: { readonly [K in OperationKind]: OperationSpec<
     ...VALUE_OPERATION,
     operation_version: "scenario_eps_multiple.v1",
     interpretation: "Reported diluted EPS of one fiscal year × a user-supplied P/E, in the EPS currency per share; EPS must be positive. A mechanical scenario, not a price target.",
-    evaluate: (node, operands, context) => {
-      const assumption = context.plan.assumptions?.find((entry) => entry.assumption_id === node.assumption_id);
-      if (!assumption) throw new Error(`node ${node.node_id} references an undeclared assumption`);
-      const earnings = context.plan.operations.find((entry) => entry.node_id === node.earnings);
-      return scenarioEpsMultiple(node, required(node, operands, 0), earnings?.operation === "reported_metric" ? earnings.period : null, assumption.value);
-    },
+    evaluate: (node, operands, context) => scenarioEpsMultiple(node, required(node, operands, 0), scenarioAssumption(context.plan, node).value),
   },
 });
 

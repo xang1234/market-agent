@@ -14,14 +14,24 @@ import { boundInput, operand } from "./operand-fixtures.ts";
 const DIGEST = "c".repeat(64);
 const FY2023 = { start: "2023-01-01", end: "2023-12-31", fiscal_year: 2023, fiscal_period: "FY" as const };
 
-function scenarioPlan(multiples?: Multiples, period?: PeriodSelector, metric = "eps_diluted"): FinancialPlan {
+function draftPlan(multiples?: Multiples, period?: PeriodSelector, metric = "eps_diluted") {
   const plan = mutable(scenarioPlanFixture(multiples, period));
   plan.metric_definitions = [{ metric_key: metric, definition_version: `${metric}.v1` }];
   plan.operations[0].metric_key = metric;
-  const validated = validateFinancialPlan(plan);
+  return plan;
+}
+
+function scenarioPlan(multiples?: Multiples, period?: PeriodSelector): FinancialPlan {
+  const validated = validateFinancialPlan(draftPlan(multiples, period));
   assert.ok(validated.ok, JSON.stringify(!validated.ok && validated.issues));
   return validated.value;
 }
+
+const issues = (plan: unknown) => {
+  const validated = validateFinancialPlan(plan);
+  return validated.ok ? [] : validated.issues.map((issue) => `${issue.code} ${issue.path}`);
+};
+const EARNINGS_ISSUES = ["invalid_scenario_earnings $.operations[1].earnings", "invalid_scenario_earnings $.operations[2].earnings", "invalid_scenario_earnings $.operations[3].earnings"];
 
 const eps = (value: string, overrides: { metric?: string; fiscal_period?: "FY" | "Q4"; start?: string } = {}): BoundFinancialInputV1 => boundInput({
   metric: overrides.metric ?? "eps_diluted", value, unit: { kind: "currency_per_share", currency: "USD" }, ...FY2023,
@@ -66,17 +76,18 @@ test("zero or negative EPS is not applicable to a P/E scenario", () => {
   assert.ok(negative.kind === "gap" && /zero or negative/u.test(negative.explanation));
 });
 
-test("basic EPS never stands in for diluted", () => {
-  assert.deepEqual(shown(publish(eps("4", { metric: "eps_basic" }), scenarioPlan(undefined, undefined, "eps_basic"))).slice(1), Array(3).fill(["incompatible", "incompatible_definition"]));
+test("a plan whose scenario reads basic EPS, a quarter, or a year before the latest is invalid", () => {
+  assert.deepEqual(issues(draftPlan(undefined, undefined, "eps_basic")), EARNINGS_ISSUES);
+  assert.deepEqual(issues(draftPlan(undefined, { kind: "fiscal_period", fiscal_year: 2023, fiscal_period: "Q4" })), EARNINGS_ISSUES);
+  assert.deepEqual(issues(draftPlan(undefined, { kind: "latest", period_type: "annual", offset: 1 })), EARNINGS_ISSUES);
+  assert.deepEqual(issues(draftPlan(undefined, { kind: "latest", period_type: "quarterly", offset: 0 })), EARNINGS_ISSUES);
+  assert.deepEqual(issues(draftPlan(undefined, { kind: "latest", period_type: "annual", offset: 0 })), []);
 });
 
-test("only one fiscal year's EPS: a quarter, or a year before the latest, is unsupported", () => {
-  const quarter = scenarioPlan(undefined, { kind: "fiscal_period", fiscal_year: 2023, fiscal_period: "Q4" });
-  assert.deepEqual(shown(publish(eps("1", { fiscal_period: "Q4", start: "2023-10-01" }), quarter)).slice(1), Array(3).fill(["unsupported", "unsupported_period"]));
-  const earlier = scenarioPlan(undefined, { kind: "latest", period_type: "annual", offset: 1 });
-  assert.deepEqual(shown(publish(eps("4"), earlier)).slice(1), Array(3).fill(["unsupported", "unsupported_period"]));
+test("a latest fiscal year bound to a quarter is no scenario value", () => {
   const latest = scenarioPlan(undefined, { kind: "latest", period_type: "annual", offset: 0 });
   assert.deepEqual(shown(publish(eps("4"), latest)).slice(1), [["computed", "80"], ["computed", "100"], ["computed", "120"]]);
+  assert.deepEqual(shown(publish(eps("1", { fiscal_period: "Q4", start: "2023-10-01" }), latest)).slice(1), Array(3).fill(["unsupported", "unsupported_period"]));
 });
 
 test("a missing EPS yields a named gap and no scenario value", () => {
@@ -86,16 +97,29 @@ test("a missing EPS yields a named gap and no scenario value", () => {
 test("a product beyond the numeric limits is a gap, never a rounded value", () => {
   const huge = operand("eps", { metric: "eps_diluted", value: "1", scale: `1${"0".repeat(980)}`, native: `1${"0".repeat(980)}`, unit: { kind: "currency_per_share", currency: "USD" }, ...FY2023, share_basis: "diluted" });
   const node = { node_id: "bull", operation: "scenario_eps_multiple" as const, operation_version: "scenario_eps_multiple.v1", earnings: "eps", assumption_id: "pe_bull" };
-  const outcome = scenarioEpsMultiple(node, huge, { kind: "fiscal_period", fiscal_year: 2023, fiscal_period: "FY" }, "1".padEnd(30, "0"));
+  const outcome = scenarioEpsMultiple(node, huge, "1".padEnd(30, "0"));
   assert.deepEqual(outcome.ok ? outcome.payload : [outcome.disposition, outcome.reason_code], ["unsupported", "numeric_limit_exceeded"]);
-  const within = scenarioEpsMultiple(node, huge, { kind: "fiscal_period", fiscal_year: 2023, fiscal_period: "FY" }, "10");
+  const within = scenarioEpsMultiple(node, huge, "10");
   assert.ok(within.ok && within.payload.kind === "value" && within.payload.value === `1${"0".repeat(981)}`);
+});
+
+test("bear, base and bull read one EPS and are each published once, in one unit", () => {
+  const twoYears = mutable(scenarioPlanFixture());
+  twoYears.operations.push({ ...twoYears.operations[0], node_id: "eps_2022", period: { kind: "fiscal_period", fiscal_year: 2022, fiscal_period: "FY" } });
+  twoYears.operations[2].earnings = "eps_2022";
+  const twoUnits = mutable(scenarioPlanFixture());
+  twoUnits.publication_units.push({ ...twoUnits.publication_units[0], unit_id: "later" });
+  twoUnits.outputs[3].unit_id = "later";
+  const twice = mutable(scenarioPlanFixture());
+  twice.outputs.push({ ...twice.outputs[3], output_id: "out_bull_again" });
+  const unpublished = mutable(scenarioPlanFixture());
+  unpublished.outputs.pop();
+  const SPLIT = ["split_scenarios $.operations"];
+  assert.deepEqual([issues(twoYears), issues(twoUnits), issues(twice), issues(unpublished)], [SPLIT, SPLIT, SPLIT, SPLIT]);
 });
 
 test("a scenario value is never read as EPS", () => {
   const chained = mutable(scenarioPlanFixture());
   chained.operations[3].earnings = "bear";
-  const validated = validateFinancialPlan(chained);
-  assert.ok(validated.ok, JSON.stringify(!validated.ok && validated.issues));
-  assert.deepEqual(shown(publish(eps("4"), validated.value)), [["computed", "4"], ["computed", "80"], ["computed", "100"], ["incompatible", "incompatible_definition"]]);
+  assert.deepEqual(issues(chained), ["invalid_scenario_earnings $.operations[3].earnings", "split_scenarios $.operations"]);
 });
