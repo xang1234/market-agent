@@ -198,6 +198,22 @@ test("P/E scenarios in chat", { timeout: 300_000 }, async (t) => {
     assert.ok(missing.financial.results.every((result) => result.presented.value === undefined), "no value is shown");
   });
 
+  await t.test("answering which company an ambiguous mention means plans the multiples asked with it", async () => {
+    const thread = await newThread();
+    const run = (clarificationAnswer?: { clarification_id: string; choice_id: string }) =>
+      chatHarness(pool, { model: null, resolveMention: resolveScenarios, readQuestion: peReading(["AMB"]), clock: () => new Date(NVDA.cutoff) })
+        .run({ threadId: thread, userId: IDS.owner, userIntent: "AMB bear 20x, base 25x, bull 30x", ...(clarificationAnswer ? { clarificationAnswer } : {}) });
+    const asked = completed((await run()).events).financial_clarification as { clarification_id: string; choices: Array<{ choice_id: string; label: string }> };
+    const alpha = asked.choices.find((choice) => choice.label === "Alpha Industries Inc.")!;
+    const done = completed((await run({ clarification_id: asked.clarification_id, choice_id: alpha.choice_id })).events);
+    assert.ok(done.message_id && !done.financial_gap, JSON.stringify(done));
+    const plan = (await db.query<{ plan: FinancialPlan }>(
+      `select p.plan from chat_messages m join financial_runs r on r.run_id = (m.blocks->0->'financial'->>'run_id')::uuid join financial_plans p on p.plan_id = r.plan_id where m.message_id = $1`,
+      [done.message_id],
+    )).rows[0]!.plan as unknown as { assumptions: Array<{ value: string }> };
+    assert.deepEqual(plan.assumptions.map((assumption) => assumption.value), ["20", "25", "30"]);
+  });
+
   await t.test("a scenario that asks for the latest fiscal year is not noted as naming none", async () => {
     const latest = await answer("SCEN latest EPS: bear 20x, base 25x, bull 30x", { thread: await newThread() });
     assert.deepEqual(latest.rows.map((row) => row[3]), ["4", "80", "100", "120"]);

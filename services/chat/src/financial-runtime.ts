@@ -502,7 +502,8 @@ async function planTurn(
   }
   onSubjects(subjects);
   const { choice } = turn;
-  if (choice.kind === "scenario") return turn.planScenario(planningContext(subjects), choice.ask);
+  // A company a clarification resolved now reads as the company, not an unknown word.
+  if (choice.kind === "scenario") return turn.planScenario(planningContext(subjects), turnScenarioAsk(text, subjects) ?? choice.ask);
   if (CASH_RESILIENCE.test(text)) return planCashResilience(planningContext(subjects), text);
   if (choice.kind === "segments_gap" || choice.kind === "named_gap") {
     return { outcome: "unsupported", reason: choice.kind === "segments_gap" ? "segments" : choice.reason, issues: [], model_calls: 0 };
