@@ -10,6 +10,32 @@ import type { QueryExecutor } from "../../shared/src/http.ts";
 
 type Hydrate = (db: QueryExecutor, ref: SubjectRef) => Promise<HydratedSubjectHandoff>;
 
+export type PreviousAnswer = Readonly<{ snapshot_id: string; scenarios: boolean }>;
+
+/**
+ * The thread's previous financial answer, for its owner: the latest assistant
+ * message, looking past this thread's own price comparison declines and
+ * refusals (#224), which their block marks (comparison_gap), so the ask a
+ * decline suggests works next. A price comparison stands for the scenario
+ * answer it compared: a follow-up to it, a comparison or "make bull 35",
+ * follows that answer. `scenarios` says whether the answer presented P/E
+ * scenarios. Null when the message is neither.
+ */
+export async function previousAnswer(db: QueryExecutor, threadId: string, userId: string): Promise<PreviousAnswer | null> {
+  const { rows } = await db.query<PreviousAnswer>(
+    `select case when m.blocks->0->>'kind' = 'financial_answer' then m.snapshot_id::text
+                 else m.blocks->0->'comparison'->'scenario'->>'snapshot_id' end as snapshot_id,
+            m.blocks->0->>'kind' = 'scenario_price_comparison' or m.blocks->0->'financial'->'presentations' @> '[{"kind": "scenarios"}]'::jsonb as scenarios
+       from (select snapshot_id, blocks from chat_messages
+              where thread_id = $1::uuid and role = 'assistant' and blocks->0->'comparison_gap' is null
+              order by created_at desc, message_id desc limit 1) m
+       join chat_threads t on t.thread_id = $1::uuid and t.user_id = $2::uuid
+      where m.blocks->0->>'kind' in ('financial_answer', 'scenario_price_comparison')`,
+    [threadId, userId],
+  );
+  return rows[0]?.snapshot_id ? rows[0] : null;
+}
+
 // Only companies carry forward; a screen or theme fallback does not.
 const COMPANY_KINDS = new Set(["issuer", "instrument", "listing"]);
 
@@ -27,6 +53,9 @@ export async function loadPriorSubjects(
         -- An answer about no company (a clarification, a notice, or a gap
         -- that names none) leaves the earlier companies in place, as it
         -- leaves the scope (loadPriorScope).
+        -- A price comparison (#224) names the listing its close is of; the
+        -- company a follow-up continues is the scenario answer's it compared.
+        and m.blocks->0->>'kind' is distinct from 'scenario_price_comparison'
         and exists (
           select 1 from jsonb_array_elements(s.subject_refs) ref
            where ref->>'kind' in ('issuer', 'instrument', 'listing')

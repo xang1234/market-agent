@@ -21,6 +21,7 @@ import { buildDeterministicPlan, unresolvedSubjectClarification, type PlanningCo
 import type { SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { labelList } from "./coordinator.ts";
 import type { ScopeProposal } from "./research-scope.ts";
+import { previousAnswer } from "./thread-context.ts";
 
 export const SCENARIO_INPUTS = "scenario_inputs";
 /** What the SCENARIO_INPUTS decline says: the ask that works, as the declined message may ask for something other than P/E. */
@@ -213,15 +214,17 @@ export type PriorScenario = Readonly<{
  * nothing.
  */
 export async function priorScenario(db: SqlExecutor, threadId: string, userId: string): Promise<PriorScenario | null> {
+  const previous = await previousAnswer(db, threadId, userId);
+  if (previous === null) return null;
   const { rows } = await db.query<{ plan: FinancialPlan; input_slot: string | null; fiscal_year: number | null }>(
     `select p.plan, i.input_slot, (i.bound_payload->'period'->>'fiscal_year')::int as fiscal_year
-       from (select blocks from chat_messages where thread_id = $1::uuid and role = 'assistant' order by created_at desc, message_id desc limit 1) m
+       from chat_messages m
        join financial_runs r on r.run_id::text = m.blocks->0->'financial'->>'run_id'
         and r.user_id = $2::uuid and r.parent_kind = 'chat_thread' and r.parent_id = $1::uuid
        join financial_plans p on p.plan_id = r.plan_id and p.user_id = r.user_id
        left join financial_run_inputs i on i.run_id = r.run_id and i.binding_status = 'bound'
-      where m.blocks->0->>'kind' = 'financial_answer'`,
-    [threadId, userId],
+      where m.thread_id = $1::uuid and m.role = 'assistant' and m.snapshot_id::text = $3 and m.blocks->0->>'kind' = 'financial_answer'`,
+    [threadId, userId, previous.snapshot_id],
   );
   const plan = rows[0]?.plan;
   if (plan?.schema_version !== "financial_plan.v2" || plan.subjects.members.length !== 1) return null;

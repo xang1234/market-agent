@@ -17,6 +17,7 @@ import type {
   SectionBlock,
   SegmentDonutBlock,
   SegmentTrajectoryBlock,
+  ScenarioPriceComparisonBlock,
   SentimentTrendBlock,
   SourcesBlock,
   TableBlock,
@@ -26,6 +27,7 @@ import financialAnswerFixtureJson from './financialAnswer.fixture.json' with { t
 import financialAnswerFiscalCalendarsFixtureJson from './financialAnswer.fiscalCalendars.fixture.json' with { type: 'json' }
 import financialAnswerScenariosFixtureJson from './financialAnswer.scenarios.fixture.json' with { type: 'json' }
 import financialAnswerV1FixtureJson from './financialAnswer.v1.fixture.json' with { type: 'json' }
+import scenarioPriceComparisonFixtureJson from './scenarioPriceComparison.fixture.json' with { type: 'json' }
 
 const FIXTURE_SNAPSHOT_ID = '11111111-1111-4111-9111-111111111111'
 const FIXTURE_AS_OF = '2026-04-22T16:00:00.000Z'
@@ -507,6 +509,9 @@ export const disclosureFixture: DisclosureBlock = {
 export const financialAnswerFixture = financialAnswerFixtureJson as FinancialAnswerBlock
 export const financialAnswerFiscalCalendarsFixture = financialAnswerFiscalCalendarsFixtureJson as FinancialAnswerBlock
 export const financialAnswerScenariosFixture = financialAnswerScenariosFixtureJson as FinancialAnswerBlock
+
+// The server's own output (services/financial-core/test/scenario-price-comparison-contract.test.ts).
+export const scenarioPriceComparisonFixture = scenarioPriceComparisonFixtureJson[0] as ScenarioPriceComparisonBlock
 export const financialAnswerV1Fixture = financialAnswerV1FixtureJson as FinancialAnswerBlock
 
 export const ALL_BLOCK_FIXTURES = [
@@ -531,4 +536,5 @@ export const ALL_BLOCK_FIXTURES = [
   sourcesFixture,
   disclosureFixture,
   financialAnswerFixture,
+  scenarioPriceComparisonFixture,
 ] as const

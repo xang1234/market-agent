@@ -23,6 +23,7 @@ export const SKELETON_HEIGHT_BY_KIND: Record<string, string> = {
   disclosure: 'h-12',
   section: 'h-24',
   financial_answer: 'h-40',
+  scenario_price_comparison: 'h-56',
 }
 
 export const DEFAULT_SKELETON_HEIGHT = 'h-12'

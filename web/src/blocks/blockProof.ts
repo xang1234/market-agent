@@ -9,14 +9,18 @@ export type BlockProof = {
   evidence: 'linked' | 'unknown'
   calculation: 'verified' | 'not_verified'
   public_by_cutoff: 'proven' | 'unknown'
+  // A scenario price comparison's alone (#224): whether the scenario answer it
+  // compares still holds its certificate, which its link back names.
+  scenario_calculation?: 'verified' | 'not_verified'
 }
 
 // A block the server holds no proof for, or that failed verification, claims nothing.
 export const UNPROVEN: BlockProof = { evidence: 'unknown', calculation: 'not_verified', public_by_cutoff: 'unknown' }
 
 // Kinds that make no claim about values (notices, source lists, containers) or
-// that label themselves (certified financial answers): no outer proof label.
-const NO_CLAIM_KINDS: ReadonlySet<string> = new Set(['disclosure', 'sources', 'section', 'financial_answer'])
+// that label themselves (certified financial answers, scenario price
+// comparisons): no outer proof label.
+const NO_CLAIM_KINDS: ReadonlySet<string> = new Set(['disclosure', 'sources', 'section', 'financial_answer', 'scenario_price_comparison'])
 
 // The labels a block's proof earns. Arithmetic and public-time claims come only
 // with a certified result; source linkage alone is labelled as just that.

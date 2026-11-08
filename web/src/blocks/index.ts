@@ -3,7 +3,7 @@ export type {
   AnalystDistributionBucket,
   BaseBlock,
   Block,
-  CertifiedFinancialBlockKind,
+  FinancialLaneBlockKind,
   ChartComparisonBlock,
   ChartComparisonBlockKind,
   DataRef,
@@ -58,7 +58,7 @@ export type {
   XAxisType,
 } from './types.ts'
 export {
-  CERTIFIED_FINANCIAL_BLOCK_KINDS,
+  FINANCIAL_LANE_BLOCK_KINDS,
   CHART_COMPARISON_BLOCK_KINDS,
   DISCLOSURE_TIERS,
   FINDING_SEVERITIES,
