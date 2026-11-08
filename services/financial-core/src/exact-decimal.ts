@@ -65,6 +65,18 @@ export function multiplyExactDecimals(left: ExactDecimal, right: ExactDecimal): 
   return Object.freeze({ coefficient: normalizedCoefficient, scale: normalizedScale });
 }
 
+/** left − right, exact: aligned to the finer scale, then stripped of trailing zeros. */
+export function subtractExactDecimals(left: ExactDecimal, right: ExactDecimal): ExactDecimal {
+  const scale = Math.max(left.scale, right.scale);
+  let coefficient = left.coefficient * powerOfTen(scale - left.scale) - right.coefficient * powerOfTen(scale - right.scale);
+  let normalizedScale = scale;
+  while (normalizedScale > 0 && coefficient % 10n === 0n) {
+    coefficient /= 10n;
+    normalizedScale -= 1;
+  }
+  return Object.freeze({ coefficient, scale: coefficient === 0n ? 0 : normalizedScale });
+}
+
 export function compareExactDecimals(left: ExactDecimal, right: ExactDecimal): -1 | 0 | 1 {
   if (left.scale === right.scale) return compareBigInts(left.coefficient, right.coefficient);
   if (left.scale > right.scale) return compareBigInts(left.coefficient, right.coefficient * powerOfTen(left.scale - right.scale));

@@ -53,11 +53,14 @@ export type LatestPriceObservations = Readonly<{
   unknown_publication: boolean;
 }>;
 
-const ISO_UTC = `'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'`;
-const ROW = `o.observation_id::text, o.listing_id::text, o.source_id::text, o.kind, o.price_text, o.currency,
-             to_char(o.observed_at at time zone 'UTC', ${ISO_UTC}) as observed_at,
-             to_char(o.known_at at time zone 'UTC', ${ISO_UTC}) as known_at,
-             to_char(o.fetched_at at time zone 'UTC', ${ISO_UTC}) as fetched_at, o.body_sha256, s.kind::text as source_kind`;
+const columns = (fraction: "MS" | "US") => {
+  const iso = `'YYYY-MM-DD"T"HH24:MI:SS.${fraction}"Z"'`;
+  return `o.observation_id::text, o.listing_id::text, o.source_id::text, o.kind, o.price_text, o.currency,
+          to_char(o.observed_at at time zone 'UTC', ${iso}) as observed_at,
+          to_char(o.known_at at time zone 'UTC', ${iso}) as known_at,
+          to_char(o.fetched_at at time zone 'UTC', ${iso}) as fetched_at, o.body_sha256, s.kind::text as source_kind`;
+};
+const ROW = columns("MS");
 // Public information only: a source a user uploaded never grounds a certified figure.
 const PUBLIC = `price_observations o join sources s on s.source_id = o.source_id and s.user_id is null`;
 
@@ -78,4 +81,45 @@ export async function loadLatestPriceObservations(db: ListingQueryExecutor, list
     [listingId, asOf],
   );
   return { latest_by_source: rows, unknown_publication: unknown.rows[0]!.unknown };
+}
+
+export type ScenarioCloseCandidates = Readonly<{
+  /** Each public source's newest session close known by the cutoff, with its stored adjustment basis and the source's `sources.kind` and stored name. */
+  candidates: ReadonlyArray<PriceObservation & Readonly<{ known_at: string; adjustment_basis: string; source_kind: string; source_name: string }>>;
+  /** Whether a session close traded by the cutoff was not known by it, or has no known time. */
+  unknown_publication: boolean;
+}>;
+
+/**
+ * The session closes a scenario comparison may use (#224, scenario-close-selection.v1).
+ * The kind and the known-by bound apply inside each source's newest-row pick,
+ * so a later trade, or a close first known after the cutoff, never hides an
+ * eligible close. `inclusive` is false for a date's next local midnight.
+ * Times keep the database's microseconds, which the session-close check and
+ * the seal compare exactly.
+ */
+export async function loadScenarioCloseCandidates(
+  db: ListingQueryExecutor,
+  listingId: UUID,
+  cutoff: Readonly<{ at: string; inclusive: boolean }>,
+): Promise<ScenarioCloseCandidates> {
+  const by = cutoff.inclusive ? "<=" : "<";
+  const { rows } = await db.query<PriceObservation & { known_at: string; adjustment_basis: string; source_kind: string; source_name: string }>(
+    `select ${columns("US")}, o.adjustment_basis, s.provider as source_name from ${PUBLIC}
+      where o.listing_id = $1::uuid and o.kind = 'session_close' and o.known_at ${by} $2::timestamptz
+        and (o.observed_at, o.known_at) = (
+          select newest.observed_at, newest.known_at from price_observations newest
+           where newest.listing_id = o.listing_id and newest.source_id = o.source_id
+             and newest.kind = 'session_close' and newest.known_at ${by} $2::timestamptz
+           order by newest.observed_at desc, newest.known_at desc limit 1)
+      order by o.observation_id`,
+    [listingId, cutoff.at],
+  );
+  const unknown = await db.query<{ unknown: boolean }>(
+    `select exists (select 1 from ${PUBLIC}
+       where o.listing_id = $1::uuid and o.kind = 'session_close' and o.observed_at ${by} $2::timestamptz
+         and (o.known_at is null or not o.known_at ${by} $2::timestamptz)) as unknown`,
+    [listingId, cutoff.at],
+  );
+  return { candidates: rows, unknown_publication: unknown.rows[0]!.unknown };
 }
