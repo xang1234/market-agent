@@ -91,6 +91,16 @@ export function windowClosedAt(endDate: string, timeZones: ReadonlyArray<string>
   return new Date(Math.max(...closes)).toISOString();
 }
 
+// The zones whose listings this module's 16:00 close is right for.
+const REGULAR_CLOSE_ZONES: ReadonlySet<string> = new Set(["America/New_York"]);
+
+// When a stored session close of `date` must be stamped (#224): the regular
+// close capture stamps it at (price-capture-cli.ts sessionCloses). Null for a
+// zone whose exchange this convention does not describe.
+export function regularSessionCloseAt(date: string, timeZone: string): string | null {
+  return REGULAR_CLOSE_ZONES.has(timeZone) ? windowClosedAt(date, [timeZone]) : null;
+}
+
 // The year a YTD window covers: the cutoff's year on the exchange's calendar.
 export function ytdYear(cutoff: string, timeZone: string): number {
   return Number(localParts(cutoff, timeZone).date.slice(0, 4));

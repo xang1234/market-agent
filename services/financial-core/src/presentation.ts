@@ -299,18 +299,24 @@ function layout(plan: FinancialPlan, nodes: ReadonlyMap<LocalId, OperationNode>,
   return presentations;
 }
 
+/** The assumption a scenario node reads and its P/E as every surface shows it (#201, #224). */
+export function scenarioMultiple(plan: FinancialPlan, node: ScenarioEpsMultipleNode): Readonly<{ assumption: PlanAssumption; multiple_text: string }> {
+  const assumption = scenarioAssumption(plan, node);
+  return { assumption, multiple_text: `${assumption.value}x` };
+}
+
 // A gap row stays a row: its result carries the gap's text.
 function scenarioTables(plan: FinancialPlan, nodeOf: ReadonlyMap<LocalId, OperationNode>, results: ReadonlyArray<PresentedResult>): Presentation[] {
   const groups = new Map<LocalId, ScenarioRow[]>();
   for (const result of results) {
     const node = nodeOf.get(result.output_id)!;
     if (node.operation !== "scenario_eps_multiple") continue;
-    const assumption = scenarioAssumption(plan, node);
+    const { assumption, multiple_text } = scenarioMultiple(plan, node);
     const stated = assumption.attribution.ref === plan.origin.ref ? "in this request" : "in an earlier request";
     groups.set(node.earnings, [...(groups.get(node.earnings) ?? []), {
       scenario: assumption.scenario,
       assumption_id: assumption.assumption_id,
-      multiple_text: `${assumption.value}x`,
+      multiple_text,
       attribution_text: `Your assumption ${stated} (${utcMinute(assumption.attribution.captured_at)})`,
       assumption_hash: assumptionHash(assumption),
       result_id: result.result_id,

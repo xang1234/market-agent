@@ -61,6 +61,17 @@ export function compareRationals(left: ExactRational, right: ExactRational): -1 
   return difference < 0n ? -1 : difference > 0n ? 1 : 0;
 }
 
+/** `value` rounded half-even to `places` decimal places from its exact fraction, for display. */
+export function roundRational(value: ExactRational, places: number): ExactDecimal {
+  const [numerator, denominator] = fraction(value);
+  const scaled = numerator * 10n ** BigInt(places);
+  const magnitude = scaled < 0n ? -scaled : scaled;
+  let quotient = magnitude / denominator;
+  const twice = 2n * (magnitude % denominator);
+  if (twice > denominator || (twice === denominator && quotient % 2n === 1n)) quotient += 1n;
+  return { coefficient: scaled < 0n ? -quotient : quotient, scale: places };
+}
+
 /** Published representation: exact when the fraction terminates within policy digits. */
 export function rationalToValue(value: ExactRational): RationalValue | null {
   const [, denominator] = fraction(value);

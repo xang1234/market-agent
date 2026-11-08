@@ -21,7 +21,16 @@ const MINUTE_MS = 60_000;
 /** The last millisecond of `date` in `timeZone`, as a UTC ISO timestamp. */
 export function endOfLocalDay(date: IsoDate, timeZone: string): IsoDateTime {
   const [year, month, day] = date.split("-").map(Number);
-  const wallClock = Date.UTC(year!, month! - 1, day!, 23, 59, 59, 999);
+  return localWallClock(Date.UTC(year!, month! - 1, day!, 23, 59, 59, 999), timeZone);
+}
+
+/** The first instant of `date` in `timeZone` (its local midnight), as a UTC ISO timestamp. */
+export function startOfLocalDay(date: IsoDate, timeZone: string): IsoDateTime {
+  const [year, month, day] = date.split("-").map(Number);
+  return localWallClock(Date.UTC(year!, month! - 1, day!), timeZone);
+}
+
+function localWallClock(wallClock: number, timeZone: string): IsoDateTime {
   // The zone offset at the answer may differ from the offset at the guess
   // across a DST transition; one correction step settles it.
   let instant = wallClock - offsetMs(wallClock, timeZone);

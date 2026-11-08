@@ -27,6 +27,7 @@ export const HASH_DOMAINS = Object.freeze({
   publication: "market-agent/financial/publication/v1",
   derivation: "market-agent/financial/derivation/v1",
   assumption: "market-agent/financial/assumption/v1",
+  scenario_price_comparison: "market-agent/financial/scenario-price-comparison/v1",
 } as const);
 export type HashDomain = keyof typeof HASH_DOMAINS;
 
