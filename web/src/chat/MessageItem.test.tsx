@@ -121,6 +121,7 @@ test('MessageItem assistant: prose block gets max-w-[820px], wide block gets max
       html.includes('max-w-[960px]'),
       `Expected max-w-[960px] for wide block, got: ${html.slice(0, 400)}`,
     )
+    assert.equal(dom.window.document.querySelector('[data-message-id="msg-1"]')?.getAttribute('id'), null, 'a message carries no anchor id')
 
     await act(async () => root.unmount())
   } finally {

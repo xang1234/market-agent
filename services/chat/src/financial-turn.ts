@@ -101,6 +101,7 @@ async function emitFinancialTurn(
     // A gap names the companies it was asked about, and saves its scope, so a
     // follow-up continues them (thread-context.ts).
     ...(turn.kind === "gap" && turn.subject_refs?.length ? { subject_refs: turn.subject_refs } : {}),
+    ...(turn.kind === "gap" && turn.comparison_gap ? { comparison_gap: turn.comparison_gap } : {}),
   }];
   const contentHash = contentHashForText(JSON.stringify(blocks));
   const persisted = persistAssistantMessage

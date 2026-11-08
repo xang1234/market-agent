@@ -25,10 +25,11 @@ export type SealedChatMessage = ChatMessage & {
   block_proofs: Readonly<Record<string, BlockProof>>
 }
 
-const PROOF_VALUES: { readonly [K in keyof BlockProof]: ReadonlyArray<BlockProof[K]> } = {
+const PROOF_VALUES: { readonly [K in keyof BlockProof]-?: ReadonlyArray<BlockProof[K]> } = {
   evidence: ['linked', 'unknown'],
   calculation: ['verified', 'not_verified'],
   public_by_cutoff: ['proven', 'unknown'],
+  scenario_calculation: [undefined, 'verified', 'not_verified'],
 }
 
 // Checks the envelope at the stream boundary: the ids the event names, the

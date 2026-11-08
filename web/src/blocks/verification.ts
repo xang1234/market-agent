@@ -6,6 +6,8 @@
 // 'source_linked', 'public_by_cutoff' and 'not_verified' come from the
 // server-derived block proof (blockProof.ts). 'user_supplied' marks an input
 // the user typed, such as a scenario's P/E (#201): never reported data.
+// 'conditional_comparison' marks a scenario value set against a price (#224):
+// conditional on that P/E, never an expected return.
 export type VerificationKind =
   | 'verified'
   | 'public_by_cutoff'
@@ -16,6 +18,7 @@ export type VerificationKind =
   | 'not_verified'
   | 'unverified'
   | 'user_supplied'
+  | 'conditional_comparison'
 
 export const VERIFICATION_TEXT: Readonly<Record<VerificationKind, string>> = {
   verified: 'Verified calculation',
@@ -27,4 +30,5 @@ export const VERIFICATION_TEXT: Readonly<Record<VerificationKind, string>> = {
   not_verified: 'Not verified',
   unverified: 'Unverified',
   user_supplied: 'Your assumption',
+  conditional_comparison: 'Conditional scenario comparison',
 }

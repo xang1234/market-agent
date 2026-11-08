@@ -1,0 +1,3 @@
+drop trigger snapshot_financial_runs_erase_price_comparisons on snapshot_financial_runs;
+drop function erase_scenario_price_comparisons();
+drop table scenario_price_comparisons;

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { deriveBlockProof, UNPROVEN, type SealedSnapshotRecord } from "../src/block-proof.ts";
+import { comparisonProofKey, deriveBlockProof, UNPROVEN, type SealedSnapshotRecord } from "../src/block-proof.ts";
 
 const SNAPSHOT: SealedSnapshotRecord = {
   fact_refs: ["00000000-0000-4000-8000-0000000000f1", "00000000-0000-4000-8000-0000000000f2"],
@@ -119,4 +119,36 @@ test("a forged status cannot upgrade a block", () => {
 test("a block without a sealed snapshot (legacy) claims nothing", () => {
   assert.deepEqual(deriveBlockProof(certified, null), UNPROVEN);
   assert.deepEqual(deriveBlockProof(table, null), UNPROVEN);
+});
+
+test("a scenario price comparison is source-linked, never a verified calculation, and only as its seal bound it while its certificate and sources stand; its link back follows the certificate alone (#224)", () => {
+  const [PRICE_SOURCE] = SNAPSHOT.source_ids;
+  const EPS_SOURCE = "00000000-0000-4000-8000-0000000000a2";
+  const comparison = {
+    scenario: { snapshot_id: "00000000-0000-4000-8000-0000000000d1", run_id: "run-1", unit_id: "unit-1", presentation_hash: "a".repeat(64) },
+    outcome: { kind: "comparison", price: { observation_id: "00000000-0000-4000-8000-0000000000b1", source_id: PRICE_SOURCE } },
+  };
+  const block = (change: Record<string, unknown> = {}) =>
+    ({ kind: "scenario_price_comparison", snapshot_id: "00000000-0000-4000-8000-0000000000e1", source_refs: [EPS_SOURCE, PRICE_SOURCE], comparison, ...change });
+  const key = comparisonProofKey(block())!;
+  const sealed = { ...SNAPSHOT, source_ids: [PRICE_SOURCE!, EPS_SOURCE], live_comparisons: [{ key, sources_public: true }] };
+  const UNPROVEN_COMPARISON = { ...UNPROVEN, scenario_calculation: "not_verified" };
+  const CERTIFIED_ONLY = { ...UNPROVEN, scenario_calculation: "verified" };
+  assert.deepEqual(deriveBlockProof(block(), sealed), { evidence: "linked", calculation: "not_verified", public_by_cutoff: "unknown", scenario_calculation: "verified" });
+  // The snapshot's certificate is the scenario's own run and unit, and still awards this block nothing verified.
+  assert.equal(deriveBlockProof(block({ presentation_hash: "a".repeat(64), financial: { run_id: "run-1", unit_id: "unit-1" } }), sealed).calculation, "not_verified");
+  assert.deepEqual(deriveBlockProof(block(), { ...sealed, live_comparisons: [] }), UNPROVEN_COMPARISON, "the certificate erased, or no seal bound it");
+  assert.deepEqual(deriveBlockProof(block(), { ...sealed, live_comparisons: [{ key, sources_public: false }] }), CERTIFIED_ONLY, "a source no longer public");
+  assert.deepEqual(deriveBlockProof(block(), { ...sealed, live_comparisons: undefined }), UNPROVEN_COMPARISON, "a view that did not check");
+  const uncited = block({ source_refs: [EPS_SOURCE] });
+  assert.deepEqual(deriveBlockProof(uncited, { ...sealed, live_comparisons: [{ key: comparisonProofKey(uncited)!, sources_public: true }] }), CERTIFIED_ONLY, "the price's source not cited");
+  assert.deepEqual(deriveBlockProof(uncited, sealed), UNPROVEN_COMPARISON, "cited sources other than its seal bound");
+  assert.deepEqual(deriveBlockProof(block({ as_of: "2024-06-10T13:00:00.000Z" }), sealed), UNPROVEN_COMPARISON, "any field of the block other than its seal bound");
+  assert.deepEqual(deriveBlockProof(block(), { ...sealed, source_ids: [EPS_SOURCE] }), CERTIFIED_ONLY, "the price's source not sealed");
+  assert.deepEqual(deriveBlockProof(block({ comparison: { ...comparison, outcome: { kind: "gap", reason: "price_coverage_missing" } } }), sealed), UNPROVEN_COMPARISON, "a gap shows no value");
+  assert.deepEqual(deriveBlockProof(block(), null), UNPROVEN);
+  const changed = { ...comparison, scenario: { ...comparison.scenario, presentation_hash: "b".repeat(64) } };
+  assert.deepEqual(deriveBlockProof(block({ comparison: changed }), sealed), UNPROVEN_COMPARISON, "content other than what its seal bound");
+  assert.deepEqual(deriveBlockProof(block({ snapshot_id: "00000000-0000-4000-8000-0000000000e2" }), sealed), UNPROVEN_COMPARISON, "another snapshot's binding");
+  assert.equal(comparisonProofKey(block({ comparison: { ...comparison, scenario: { ...comparison.scenario, run_id: 1.5 } } })), null, "content that is no canonical JSON");
 });

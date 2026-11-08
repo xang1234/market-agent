@@ -29,8 +29,10 @@ export type ResearchEvidenceBlockKind = (typeof RESEARCH_EVIDENCE_BLOCK_KINDS)[n
 export const TRUST_PROVENANCE_BLOCK_KINDS = ['sources', 'disclosure'] as const
 export type TrustProvenanceBlockKind = (typeof TRUST_PROVENANCE_BLOCK_KINDS)[number]
 
-export const CERTIFIED_FINANCIAL_BLOCK_KINDS = ['financial_answer'] as const
-export type CertifiedFinancialBlockKind = (typeof CERTIFIED_FINANCIAL_BLOCK_KINDS)[number]
+// The financial lane's server-generated blocks. Only financial_answer carries a
+// certificate; a scenario price comparison is source-linked (#224).
+export const FINANCIAL_LANE_BLOCK_KINDS = ['financial_answer', 'scenario_price_comparison'] as const
+export type FinancialLaneBlockKind = (typeof FINANCIAL_LANE_BLOCK_KINDS)[number]
 
 export const FINDING_SEVERITIES = ['low', 'medium', 'high', 'critical'] as const
 export type FindingSeverity = (typeof FINDING_SEVERITIES)[number]
@@ -437,6 +439,59 @@ export type FinancialAnswerBlock = Omit<BaseBlock, 'title'> & {
   financial: FinancialAnswerContent | { presentation_version: string }
 }
 
+export type ScenarioComparisonValue = { value: string; text: string; full_text: string }
+
+/** A sealed P/E scenario set against one stored close (#224): server-written strings, source-linked, never a verified calculation. */
+export type ScenarioPriceComparisonContent = {
+  version: 'scenario-price-comparison.v1'
+  selection_policy_version: string
+  numeric_policy_version: string
+  scenario: { snapshot_id: string; run_id: string; unit_id: string; presentation_hash: string }
+  requested: { kind: 'latest' } | { kind: 'instant'; at: string } | { kind: 'session_date'; date: string }
+  received_at: string
+  cutoff: { at: string; inclusive: boolean; text: string } | null
+  note: string
+  outcome:
+    | { kind: 'gap'; reason: string; text: string }
+    | {
+        kind: 'comparison'
+        price: {
+          observation_id: string
+          kind: 'session_close'
+          listing_id: string
+          ticker: string
+          currency: string
+          session_date: string
+          observed_at: string
+          known_at: string
+          fetched_at: string
+          source_id: string
+          source_name: string
+          body_sha256: string
+          adjustment_basis: 'unadjusted'
+          heading: string
+          price: ScenarioComparisonValue
+        }
+        basis: { eps_reference_date: string; price_session_date: string; split_history_checked_at: string; split_factor: '1'; text: string }
+        rows: ReadonlyArray<{
+          scenario: 'bear' | 'base' | 'bull'
+          result_id: string
+          multiple_text: string
+          scenario_value: ScenarioComparisonValue
+          difference: ScenarioComparisonValue
+          percent: ScenarioComparisonValue & { exact: boolean }
+        }>
+      }
+}
+
+export type ScenarioPriceComparisonBlock = Omit<BaseBlock, 'title'> & {
+  kind: 'scenario_price_comparison'
+  title?: never
+  subject_refs?: ReadonlyArray<SubjectRef>
+  // An unknown version is carried only so it can be shown as unsupported.
+  comparison: ScenarioPriceComparisonContent | { version: string }
+}
+
 // Open variant lets Section.children carry kinds whose typed shape
 // ships later. Narrow this once the full catalog is unioned.
 export type Block =
@@ -445,4 +500,5 @@ export type Block =
   | ResearchEvidenceBlock
   | TrustProvenanceBlock
   | FinancialAnswerBlock
+  | ScenarioPriceComparisonBlock
   | (BaseBlock & { kind: string })

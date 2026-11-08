@@ -47,6 +47,7 @@ import { publishRequest, type RequestGap } from "../../financial-engine/src/requ
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { comparedAdditions, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId, noteBlock } from "./chat-ids.ts";
+import { priceComparisonTurn } from "./scenario-price-comparison.ts";
 import { planEpsScenarios, priorScenario, SCENARIO_DECLINE, SCENARIO_GAP, SCENARIO_INPUTS, scenarioAnswer, turnScenarioAsk, type ScenarioAsk } from "./eps-scenarios.ts";
 import { asksCause, filedCauses, namedFigures, NOT_ASKED, type FiledCause } from "./filed-cause.ts";
 import { allResolved, overviewOmissions, overviewPeers, planCompanyOverview, planMarginTrend, type PeersOf } from "./company-overview.ts";
@@ -79,6 +80,8 @@ export type ChatFinancialTurn =
     kind: "gap";
     reason_code: string;
     text: string;
+    // A price comparison's decline or refusal (#224), marked in the saved block.
+    comparison_gap?: "declined" | "refused";
     message_id?: string;
     subject_refs?: ReadonlyArray<FinancialSubjectRef>;
     research_scope?: ResearchScope;
@@ -301,6 +304,10 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       }
     };
     if (existing) return existing.kind === "financial_answer" ? run(NO_COMPANIES, null, null, PLANNER) : () => savedGap(deps.pool, context.threadId, messageId);
+    const comparison = await priceComparisonTurn(deps.pool, {
+      text, thread_id: context.threadId, user_id: context.userId, message_id: messageId, now: () => deps.clock?.() ?? new Date(),
+    }, () => savedGap(deps.pool, context.threadId, messageId));
+    if (comparison) return comparison;
     // A retry of a turn whose run is reserved resumes it, whatever this attempt's reading says.
     const reserved = await findPlanForRequest(deps.pool, { authority, request_key: turnId }) !== null;
     const requested = await requestedSubjects(deps, context, text);

@@ -312,3 +312,26 @@ export function buildFinancialSealInput(input: {
     financial: input.claim,
   };
 }
+
+// The seal of a scenario price comparison (#224). It cites the scenario's EPS
+// source and the price's, under the price's listing; the verifier generates
+// the block again from the ledger and the stored close before it seals
+// (scenario-price-comparison.ts). Deterministic content, so no tool call
+// provenances it, and its as_of is the comparison's cutoff.
+export function buildScenarioPriceComparisonSealInput(input: {
+  block: SealableBlock & { kind: string; source_refs: ReadonlyArray<UUID>; subject_refs: ReadonlyArray<SnapshotSubjectRef> };
+  thread_id: UUID;
+}): SnapshotSealInput {
+  const sourceIds = distinct(input.block.source_refs);
+  return {
+    snapshot_id: input.block.snapshot_id,
+    thread_id: input.thread_id,
+    manifest: Object.freeze({
+      ...stagedManifestBase({ subjectRefs: input.block.subject_refs, asOf: input.block.as_of, modelVersion: null }),
+      [DETERMINISTIC_SNAPSHOT_MANIFEST]: true as const,
+      source_ids: Object.freeze(sourceIds),
+    }),
+    blocks: [input.block as unknown as VerifierBlock],
+    sources: sourceIds,
+  };
+}

@@ -7,6 +7,7 @@ import {
   type JsonValue,
 } from "../../observability/src/types.ts";
 import { deriveBlockProof, UNPROVEN, type BlockProof, type SealedSnapshotRecord } from "../../snapshot/src/block-proof.ts";
+import { liveScenarioComparisons } from "../../snapshot/src/scenario-price-comparison.ts";
 import type { SnapshotSealResult } from "../../snapshot/src/snapshot-sealer.ts";
 import type {
   ChatAssistantMessagePersistence,
@@ -208,7 +209,7 @@ async function revealed(
   snapshotId: string,
   reveal: NonNullable<Parameters<typeof persistChatMessageAfterSnapshotSealWithPool>[1]["reveal"]>,
 ): Promise<{ blocks: JsonValue; content_hash: string }> {
-  const snapshots = await withPoolClient(pool, (client) => loadSealedSnapshots(client, [snapshotId, ...blockSnapshotIds(blocks)]));
+  const snapshots = await withPoolClient(pool, (client) => loadSealedSnapshots(client, [snapshotId, ...blockSnapshotIds(blocks)], Array.isArray(blocks) ? blocks : []));
   const shown = await reveal({ snapshot_id: snapshotId, block_proofs: blockProofs({ blocks, snapshot_id: snapshotId }, snapshots) });
   if (!isDeepStrictEqual(sealedView(shown.blocks), sealedView(blocks))) {
     throw new Error("a revealed answer may differ from the sealed one only in its text; it was not saved");
@@ -305,7 +306,7 @@ async function readMessages(db: ChatMessagePersistenceDb, where: string, values:
   );
   // Every snapshot a message or any of its blocks names: an imported block keeps
   // the snapshot it came from.
-  const snapshots = await loadSealedSnapshots(db, rows.flatMap((row) => [row.snapshot_id, ...blockSnapshotIds(row.blocks)]));
+  const snapshots = await loadSealedSnapshots(db, rows.flatMap((row) => [row.snapshot_id, ...blockSnapshotIds(row.blocks)]), rows.flatMap((row) => Array.isArray(row.blocks) ? row.blocks : []));
   return rows.map((row) => Object.freeze({ ...row, block_proofs: blockProofs(row, snapshots) }));
 }
 
@@ -323,7 +324,9 @@ function blockSnapshotIds(blocks: JsonValue): string[] {
   );
 }
 
-// Each block is judged against its own snapshot (the message's when it names none).
+// Each block is judged against its own snapshot (the message's when it names
+// none). A scenario price comparison is judged only in the message its seal
+// saved it in: a copy under another message's snapshot claims nothing.
 function blockProofs(row: Pick<ChatMessageRow, "blocks" | "snapshot_id">, snapshots: ReadonlyMap<string, SealedSnapshotRecord>): Record<string, BlockProof> {
   // No prototype: any string is a valid block id, "__proto__" included.
   const proofs: Record<string, BlockProof> = Object.create(null);
@@ -334,9 +337,8 @@ function blockProofs(row: Pick<ChatMessageRow, "blocks" | "snapshot_id">, snapsh
     // Proofs are keyed by block id: an id used twice cannot say which block a
     // claim belongs to, so it claims nothing rather than lend one block's
     // proof to its namesake.
-    const snapshotId = typeof (block as { snapshot_id?: unknown }).snapshot_id === "string"
-      ? (block as { snapshot_id: string }).snapshot_id
-      : row.snapshot_id;
+    const named = (block as { snapshot_id?: unknown }).snapshot_id;
+    const snapshotId = (block as { kind?: unknown }).kind === "scenario_price_comparison" || typeof named !== "string" ? row.snapshot_id : named;
     const snapshot = (snapshotId && snapshots.get(snapshotId)) || null;
     proofs[id] = seen.has(id) ? UNPROVEN : deriveBlockProof(block, snapshot);
     seen.add(id);
@@ -344,16 +346,18 @@ function blockProofs(row: Pick<ChatMessageRow, "blocks" | "snapshot_id">, snapsh
   return proofs;
 }
 
-// Each sealed snapshot's manifest and the financial certificates recorded for it.
+// Each sealed snapshot's manifest, the financial certificates recorded for it,
+// and which of the read's scenario price comparisons still stand.
 async function loadSealedSnapshots(
   db: ChatMessagePersistenceDb,
   snapshotIds: ReadonlyArray<string | null>,
+  blocks: ReadonlyArray<unknown>,
 ): Promise<Map<string, SealedSnapshotRecord>> {
   // Only well-formed ids reach the uuid[] cast: a malformed one in a stored
   // block has no sealed snapshot, and must not fail the whole read.
   const ids = [...new Set(snapshotIds.filter((id): id is string => typeof id === "string" && isUuid(id)))];
   if (ids.length === 0) return new Map();
-  const [manifests, certificates] = await Promise.all([
+  const [manifests, certificates, live_comparisons] = await Promise.all([
     db.query<{
       snapshot_id: string;
       fact_refs: string[];
@@ -374,6 +378,7 @@ async function loadSealedSnapshots(
         where snapshot_id = any($1::uuid[])`,
       [ids],
     ),
+    liveScenarioComparisons(db, blocks),
   ]);
   const certificatesBySnapshot = new Map<string, Array<{ run_id: string; unit_id: string; presentation_hash: string }>>();
   for (const certificate of certificates.rows) {
@@ -392,6 +397,7 @@ async function loadSealedSnapshots(
       typeof spec?.series_ref === "string" && spec.points === PERF_POINTS ? [spec.series_ref] : []
     ),
     certificates: certificatesBySnapshot.get(row.snapshot_id) ?? [],
+    live_comparisons: live_comparisons.filter((entry) => entry.snapshot_id === row.snapshot_id),
   }]));
 }
 
