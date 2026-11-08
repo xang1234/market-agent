@@ -7,9 +7,11 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { EvidenceInspectorContext, type EvidenceInspectorContextValue } from '../evidence/evidenceInspectorContext.ts'
 
 import { validateBlock } from './BlockValidator.ts'
+import { BlockProofContext, type BlockProof } from './blockProof.ts'
 import { FinancialAnswer } from './FinancialAnswer.tsx'
 import { resultsById, seriesBars, sortedRowIndexes } from './financialAnswer.ts'
-import { financialAnswerFiscalCalendarsFixture, financialAnswerFixture } from './fixtures.ts'
+import { readFileSync } from 'node:fs'
+import { financialAnswerFiscalCalendarsFixture, financialAnswerFixture, financialAnswerScenariosFixture } from './fixtures.ts'
 import type { FinancialAnswerBlock, FinancialAnswerContent, FinancialPresentedResult, FinancialTablePresentation } from './types.ts'
 
 function clone(): FinancialAnswerBlock & { financial: FinancialAnswerContent } {
@@ -177,4 +179,78 @@ test('series bars are bounded, carry their sign, and skip gaps and non-finite va
     { size: 0, negative: false },
     { size: 0, negative: false },
   ])
+})
+
+const quietInspector: EvidenceInspectorContextValue = { openInspection() {}, openBlockInspection() {}, openFinancialResult() {}, closeInspection() {} }
+
+test('P/E scenarios label the EPS as source-linked and each P/E as the user\'s, with the disclosure and no other badge', () => {
+  assert.ok(validateBlock(financialAnswerScenariosFixture).valid, 'the v3 fixture passes the canonical block schema')
+  const html = renderToStaticMarkup(
+    <EvidenceInspectorContext.Provider value={quietInspector}>
+      <FinancialAnswer block={financialAnswerScenariosFixture} />
+    </EvidenceInspectorContext.Provider>,
+  )
+  const document = new JSDOM(html).window.document
+  assert.deepEqual([...document.querySelectorAll('[data-verification]')].map((label) => [label.getAttribute('data-verification'), label.textContent]), [
+    ['verified', 'Verified calculation'],
+    ['source_linked', 'Source-linked'],
+    ['user_supplied', 'Your assumption'],
+  ])
+  const eps = document.querySelector('[data-testid$="-scenarios"] > p')!
+  assert.deepEqual([eps.querySelector('[data-verification]')?.getAttribute('data-verification'), eps.querySelector('.num')?.textContent], ['source_linked', 'USD 4.00 per share'])
+  const table = document.querySelector('[data-testid$="-scenarios"] table')!
+  assert.deepEqual([...table.querySelectorAll('thead th')].map((heading) => heading.textContent), ['Scenario', 'P/E Your assumption', 'Value per share'])
+  assert.deepEqual([...table.querySelectorAll('tbody tr')].map((row) => [...row.children].map((cell) => cell.textContent)), [
+    ['Bear', '20xYour assumption in this request (2024-01-15 15:00 UTC)', 'USD 80.00 per share'],
+    ['Base', '25xYour assumption in this request (2024-01-15 15:00 UTC)', 'USD 100.00 per share'],
+    ['Bull', '30xYour assumption in this request (2024-01-15 15:00 UTC)', 'USD 120.00 per share'],
+  ])
+  assert.equal(document.querySelector('[role="note"]')?.textContent, 'A mechanical scenario: reported diluted EPS × a P/E you supplied. Not a price target, forecast, or recommendation.')
+  assert.equal(document.querySelectorAll('[data-inspect-result]').length, 4, 'the EPS and each scenario value open the inspector')
+})
+
+test('the EPS is labelled source-linked only when it is a value whose block proof links its evidence', () => {
+  const labels = (block: FinancialAnswerBlock, proof: BlockProof | null) => {
+    const html = renderToStaticMarkup(
+      <BlockProofContext.Provider value={proof}>
+        <EvidenceInspectorContext.Provider value={quietInspector}>
+          <FinancialAnswer block={block} />
+        </EvidenceInspectorContext.Provider>
+      </BlockProofContext.Provider>,
+    )
+    const eps = new JSDOM(html).window.document.querySelector('[data-testid$="-scenarios"] > p')!
+    return [eps.getAttribute('data-result-kind'), [...eps.querySelectorAll('[data-verification]')].map((label) => label.getAttribute('data-verification'))]
+  }
+  const linked: BlockProof = { evidence: 'linked', calculation: 'verified', public_by_cutoff: 'proven' }
+  const unverified: BlockProof = { evidence: 'unknown', calculation: 'not_verified', public_by_cutoff: 'unknown' }
+  const scenarios = content(financialAnswerScenariosFixture)
+  const missingEps: FinancialAnswerBlock = {
+    ...financialAnswerScenariosFixture,
+    financial: {
+      ...scenarios,
+      results: scenarios.results.map((result, index) => index === 0
+        ? { ...result, disposition: 'missing', presented: { kind: 'gap', text: 'A required input or calculation is unavailable.', reason_code: 'missing_input' } }
+        : result),
+    },
+  } as FinancialAnswerBlock
+  assert.deepEqual([
+    labels(financialAnswerScenariosFixture, linked),
+    labels(financialAnswerScenariosFixture, null),
+    labels(financialAnswerScenariosFixture, unverified),
+    labels(missingEps, linked),
+  ], [
+    [null, ['source_linked']],
+    [null, ['source_linked']],
+    [null, []],
+    ['gap', []],
+  ])
+})
+
+test('a v2 answer renders byte for byte as it did before scenarios', () => {
+  const html = renderToStaticMarkup(
+    <EvidenceInspectorContext.Provider value={quietInspector}>
+      <FinancialAnswer block={financialAnswerFixture} />
+    </EvidenceInspectorContext.Provider>,
+  )
+  assert.equal(html, readFileSync(new URL('./financialAnswer.v2.golden.html', import.meta.url), 'utf8'), 'captured before the renderer changed')
 })

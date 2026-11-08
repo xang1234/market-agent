@@ -11,6 +11,9 @@ export type BlockProof = {
   public_by_cutoff: 'proven' | 'unknown'
 }
 
+// A block the server holds no proof for, or that failed verification, claims nothing.
+export const UNPROVEN: BlockProof = { evidence: 'unknown', calculation: 'not_verified', public_by_cutoff: 'unknown' }
+
 // Kinds that make no claim about values (notices, source lists, containers) or
 // that label themselves (certified financial answers): no outer proof label.
 const NO_CLAIM_KINDS: ReadonlySet<string> = new Set(['disclosure', 'sources', 'section', 'financial_answer'])

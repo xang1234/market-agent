@@ -345,6 +345,8 @@ export type TrustProvenanceBlock = SourcesBlock | DisclosureBlock
 // checks the generator's output against the block schema.
 export const SUPPORTED_FINANCIAL_PRESENTATION_VERSION = 'financial-presentation.v2'
 export const FINANCIAL_PRESENTATION_V1 = 'financial-presentation.v1'
+/** Content with P/E scenarios (#201); all other content stays v2. */
+export const FINANCIAL_PRESENTATION_V3 = 'financial-presentation.v3'
 
 export type FinancialUnit =
   | { kind: 'currency' | 'currency_per_share'; currency: string }
@@ -393,13 +395,29 @@ export type FinancialSeriesPresentation = {
   points: ReadonlyArray<{ period_label_id: string; result_id: string }>
 }
 
+/** Reported diluted EPS times each P/E the user supplied: a mechanical scenario, not a price target. */
+export type FinancialScenariosPresentation = {
+  kind: 'scenarios'
+  earnings_result_id: string | null
+  rows: ReadonlyArray<{
+    scenario: 'bear' | 'base' | 'bull'
+    assumption_id: string
+    multiple_text: string
+    attribution_text: string
+    assumption_hash: string
+    result_id: string
+  }>
+  disclosure: string
+}
+
 export type FinancialPresentation =
   | { kind: 'scalar' | 'predicate' | 'gap'; result_id: string }
   | FinancialTablePresentation
   | FinancialSeriesPresentation
+  | FinancialScenariosPresentation
 
 export type FinancialAnswerContent = {
-  presentation_version: typeof SUPPORTED_FINANCIAL_PRESENTATION_VERSION | typeof FINANCIAL_PRESENTATION_V1
+  presentation_version: typeof SUPPORTED_FINANCIAL_PRESENTATION_VERSION | typeof FINANCIAL_PRESENTATION_V1 | typeof FINANCIAL_PRESENTATION_V3
   template_version: string
   run_id: string
   unit_id: string

@@ -6,6 +6,7 @@ import type { FinancialPlan, PeriodSelector } from "../../financial-core/src/ind
 import type { PlanningContext } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort } from "../../financial-engine/src/ports.ts";
 import { valuationOperations, valuationOutputs, type Valuation } from "../../financial-engine/src/valuation-plan.ts";
+import type { ScenarioAsk } from "./eps-scenarios.ts";
 import { MARGINS, nodeIdOf, planned, planningQuarters, quarterId, slotOf, type ReadyPlan } from "./company-overview.ts";
 import { BALANCE_SHEET_ITEMS, readingAsks, type FiscalQuarter, type IncomeItem, type PERIOD_FIELDS, type PeriodType, type ResearchScope, type ScopeFacet, type ScopeProposal } from "./research-scope.ts";
 
@@ -32,6 +33,8 @@ export type PlanChoice =
   | Readonly<{ kind: "trend"; period: ReadPeriod }>
   | Readonly<{ kind: "overview"; period: ReadPeriod; peers: boolean }>
   | Readonly<{ kind: "kept_figures"; metrics: ReadonlyArray<string>; period: ReadPeriod }>
+  // P/E multiples the message states (eps-scenarios.ts): it outranks every route, P/E at the current price included.
+  | Readonly<{ kind: "scenario"; ask: ScenarioAsk }>
   | Readonly<{ kind: "planner" }>;
 
 const PLANNER: PlanChoice = { kind: "planner" };

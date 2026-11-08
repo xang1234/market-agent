@@ -5,6 +5,7 @@
 
 import {
   FINANCIAL_PRESENTATION_V1,
+  FINANCIAL_PRESENTATION_V3,
   SUPPORTED_FINANCIAL_PRESENTATION_VERSION,
   type FinancialAnswerBlock,
   type FinancialAnswerContent,
@@ -16,7 +17,7 @@ import {
 
 export function supportedFinancialContent(block: FinancialAnswerBlock): FinancialAnswerContent | null {
   const version = block.financial.presentation_version
-  return version === SUPPORTED_FINANCIAL_PRESENTATION_VERSION || version === FINANCIAL_PRESENTATION_V1
+  return version === SUPPORTED_FINANCIAL_PRESENTATION_VERSION || version === FINANCIAL_PRESENTATION_V1 || version === FINANCIAL_PRESENTATION_V3
     ? (block.financial as FinancialAnswerContent)
     : null
 }

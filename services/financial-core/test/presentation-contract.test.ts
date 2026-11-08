@@ -1,5 +1,5 @@
 // The presentation contract: everything presentFinancialUnit can produce must
-// satisfy the canonical block schema, and the web's v2 financial_answer fixtures
+// satisfy the canonical block schema, and the web's v2 and v3 financial_answer fixtures
 // are this generator's output, not hand-maintained copies. Regenerate the fixtures
 // with `UPDATE_FIXTURES=1 node --experimental-strip-types --test
 // test/presentation-contract.test.ts` after an intentional change.
@@ -10,12 +10,13 @@ import test from "node:test";
 import Ajv2020 from "ajv/dist/2020.js";
 import type { FinancialPlanV1 } from "../src/contracts.ts";
 import { presentationHash, presentFinancialUnit, type CommittedResult, type FinancialAnswerContent } from "../src/presentation.ts";
-import { mutable, OVERVIEW_LINES, overviewComparisonPlan, planFixture, quarterBack, reportedAt } from "./fixtures.ts";
+import { mutable, OVERVIEW_LINES, overviewComparisonPlan, planFixture, quarterBack, reportedAt, scenarioPlanFixture } from "./fixtures.ts";
 
 const SCHEMA = JSON.parse(readFileSync(new URL("../../../spec/finance_research_block_schema.json", import.meta.url), "utf8"));
 const WEB_FIXTURE = new URL("../../../web/src/blocks/financialAnswer.fixture.json", import.meta.url);
 const WEB_FISCAL_CALENDARS_FIXTURE = new URL("../../../web/src/blocks/financialAnswer.fiscalCalendars.fixture.json", import.meta.url);
 const WEB_V1_FIXTURE = new URL("../../../web/src/blocks/financialAnswer.v1.fixture.json", import.meta.url);
+const WEB_SCENARIOS_FIXTURE = new URL("../../../web/src/blocks/financialAnswer.scenarios.fixture.json", import.meta.url);
 const HASH = "a".repeat(64);
 const RUN_ID = "99999999-9999-4999-9999-999999999999";
 const SNAPSHOT_ID = "11111111-1111-4111-9111-111111111111";
@@ -25,6 +26,7 @@ const committed = (n: number, output_id: string, node_id: string, payload: unkno
   ({ result_id: uuid(n), output_id, node_id, disposition, payload, result_hash: HASH });
 const ratio = (value: string) => ({ kind: "value", value, unit: { kind: "ratio" }, exact: true, rounding: null });
 const usd = (value: string) => ({ kind: "value", value, unit: { kind: "currency", currency: "USD" }, exact: true, rounding: null });
+const perShare = (value: string) => ({ kind: "value", value, unit: { kind: "currency_per_share", currency: "USD" }, exact: true, rounding: null });
 const percent = (value: string) => ({ kind: "value", value, unit: { kind: "percent" }, exact: true, rounding: null });
 const missing = { kind: "gap", reason_code: "missing_input", explanation: "A required input or calculation is unavailable." };
 
@@ -138,6 +140,20 @@ function windowHighAndLow(): FinancialAnswerContent {
   });
 }
 
+/** EPS of 4 at 20x, 25x, and 30x: the web's scenarios fixture. */
+function scenarios(): FinancialAnswerContent {
+  return presentFinancialUnit({
+    plan: scenarioPlanFixture(), run_id: RUN_ID, unit_id: "section", subject_names: { a: "Apple Inc." },
+    periods: new Map([["eps", { fiscal_year: 2023, fiscal_period: "FY", end: "2023-09-30" }]]),
+    results: [
+      committed(1, "out_eps", "eps", perShare("4")),
+      committed(2, "out_bear", "bear", perShare("80")),
+      committed(3, "out_base", "base", perShare("100")),
+      committed(4, "out_bull", "bull", perShare("120")),
+    ],
+  });
+}
+
 function validator() {
   const ajv = new Ajv2020({ allErrors: true, strict: false, validateFormats: false });
   ajv.addSchema(SCHEMA);
@@ -152,6 +168,7 @@ test("every presentation shape the generator produces satisfies the canonical bl
   valid(block(nvdaAmdOnTheirOwnCalendars()), "a table across fiscal calendars, columns without a period");
   valid(block(leadAcrossCalendars()), "a lead in percentage points between two companies' own quarters");
   valid(block(windowHighAndLow()), "a window's high and low, with a quarter missing");
+  valid(block(scenarios()), "P/E scenarios over one EPS, under v3");
   valid(JSON.parse(readFileSync(WEB_V1_FIXTURE, "utf8")), "a stored v1 answer");
 });
 
@@ -168,10 +185,26 @@ test("each version's table is checked against its own shape: only v2 columns may
   assert.equal(withColumnPeriod("financial-presentation.v1", null), false, "v1 validation does not loosen");
   assert.equal(withColumnPeriod("financial-presentation.v2", null), true);
   assert.equal(withColumnPeriod("financial-presentation.v2", "FY2023"), false, "v2 content is validated, not merely accepted");
+  const scenariosAs = (version: string) => validate({ ...block(scenarios()), financial: { ...scenarios(), presentation_version: version } });
+  assert.equal(scenariosAs("financial-presentation.v2"), false, "only v3 content may hold scenarios");
+  assert.equal(validate({ ...block(scenarios()), financial: { ...scenarios(), presentations: [{ ...scenarios().presentations[0], disclosure: "A price target." }] } }), false, "the disclosure is fixed");
+  const withRows = (pick: (rows: ReadonlyArray<unknown>) => unknown[]) => {
+    const presentation = scenarios().presentations[0] as { rows: ReadonlyArray<unknown> };
+    return validate({ ...block(scenarios()), financial: { ...scenarios(), presentations: [{ ...presentation, rows: pick(presentation.rows) }] } });
+  };
+  assert.deepEqual([withRows((rows) => [...rows]), withRows((rows) => rows.slice(0, 2)), withRows(([bear, base, bull]) => [base, bear, bull]), withRows((rows) => [...rows, rows[2]])], [true, false, false, false], "bear, base and bull, each once, in order");
+});
+
+test("v3 content is v2 content with its own version and presentations", () => {
+  const { FinancialAnswerContentV2: v2, FinancialAnswerContentV3: v3, FinancialPresentationV3: presentation } = SCHEMA.$defs;
+  const strip = (content: any) => ({ ...content, description: undefined, properties: { ...content.properties, presentation_version: undefined, presentations: { ...content.properties.presentations, items: undefined } } });
+  assert.deepEqual(strip(v3), strip(v2));
+  assert.deepEqual([v3.properties.presentation_version, v3.properties.presentations.items], [{ const: "financial-presentation.v3" }, { $ref: "#/$defs/FinancialPresentationV3" }]);
+  assert.deepEqual(presentation.anyOf, [{ $ref: "#/$defs/FinancialPresentationV2" }, { $ref: "#/$defs/FinancialScenariosPresentationV3" }]);
 });
 
 test("the web financial_answer fixtures are the generator's output", () => {
-  for (const [fixture, content] of [[WEB_FIXTURE, comparison()], [WEB_FISCAL_CALENDARS_FIXTURE, nvdaAmdOnTheirOwnCalendars()]] as const) {
+  for (const [fixture, content] of [[WEB_FIXTURE, comparison()], [WEB_FISCAL_CALENDARS_FIXTURE, nvdaAmdOnTheirOwnCalendars()], [WEB_SCENARIOS_FIXTURE, scenarios()]] as const) {
     const expected = `${JSON.stringify(block(content), null, 2)}\n`;
     if (process.env.UPDATE_FIXTURES === "1") writeFileSync(fixture, expected);
     assert.equal(readFileSync(fixture, "utf8"), expected, "regenerate with UPDATE_FIXTURES=1");

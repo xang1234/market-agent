@@ -1,4 +1,4 @@
-import { useContext, useState, type ReactElement } from 'react'
+import { useContext, useState, type ReactElement, type ReactNode } from 'react'
 import { ChartCard } from './ChartCard.tsx'
 import { CopyButton } from './CopyButton.tsx'
 import { provenanceRow, toTsv } from './tableCopy.ts'
@@ -22,6 +22,7 @@ import type {
   FinancialAnswerContent,
   FinancialPresentation,
   FinancialPresentedResult,
+  FinancialScenariosPresentation,
   FinancialSeriesPresentation,
   FinancialTablePresentation,
 } from './types.ts'
@@ -81,6 +82,7 @@ type PresentationViewProps = {
 function PresentationView({ blockId, provenance, content, results, presentation }: PresentationViewProps): ReactElement | null {
   if (presentation.kind === 'table') return <CertifiedTable blockId={blockId} provenance={provenance} content={content} results={results} table={presentation} />
   if (presentation.kind === 'series') return <CertifiedSeries provenance={provenance} content={content} results={results} series={presentation} />
+  if (presentation.kind === 'scenarios') return <CertifiedScenarios blockId={blockId} content={content} results={results} scenarios={presentation} />
   const result = results.get(presentation.result_id)
   if (!result) return null
   return <ResultLine content={content} result={result} />
@@ -88,13 +90,13 @@ function PresentationView({ blockId, provenance, content, results, presentation 
 
 const RESULT_ROW_CLASS = 'flex items-baseline justify-between gap-4 border-t border-line py-1.5 text-sm'
 
-function ResultLine({ content, result }: { content: FinancialAnswerContent; result: FinancialPresentedResult }): ReactElement {
+function ResultLine({ content, result, badge }: { content: FinancialAnswerContent; result: FinancialPresentedResult; badge?: ReactNode }): ReactElement {
   const { presented } = result
   if (presented.kind === 'value') {
     const label = resultLabel(content, result)
     return (
       <p className={`${RESULT_ROW_CLASS} text-fg`} data-result-id={result.result_id}>
-        <span className="text-muted">{label}: </span>
+        <span className="text-muted">{label}: {badge}</span>
         <InspectableResult resultId={result.result_id} label={`${label}: ${presented.full_text}`}>
           <span className="num whitespace-nowrap" title={presented.full_text} aria-label={`${label}: ${presented.full_text}`}>
             {presented.text}
@@ -106,7 +108,7 @@ function ResultLine({ content, result }: { content: FinancialAnswerContent; resu
   if (presented.kind === 'gap') {
     return (
       <p className={`${RESULT_ROW_CLASS} text-muted`} data-result-id={result.result_id} data-result-kind="gap">
-        <span>{resultLabel(content, result)}: </span>
+        <span>{resultLabel(content, result)}: {badge}</span>
         <span className="italic">{presented.text}</span>
       </p>
     )
@@ -243,6 +245,51 @@ function CertifiedSeries({ provenance, content, results, series }: SeriesProps):
           })}
         </tbody>
       </table>
+    </figure>
+  )
+}
+
+type ScenariosProps = { blockId: string; content: FinancialAnswerContent; results: Results; scenarios: FinancialScenariosPresentation }
+
+const SCENARIO_NAME: Readonly<Record<FinancialScenariosPresentation['rows'][number]['scenario'], string>> = { bear: 'Bear', base: 'Base', bull: 'Bull' }
+
+// The EPS is reported data and each P/E is the user's, so each carries its own
+// label; the values are the block's verified arithmetic, under its one badge.
+// The EPS is source-linked only as a value whose block proof links its
+// evidence, as proofLabels decides for a block.
+function CertifiedScenarios({ blockId, content, results, scenarios }: ScenariosProps): ReactElement {
+  const proof = useContext(BlockProofContext)
+  const earnings = scenarios.earnings_result_id === null ? undefined : results.get(scenarios.earnings_result_id)
+  const linked = earnings?.presented.kind === 'value' && (proof === null || proof.evidence === 'linked')
+  return (
+    <figure className="mt-2 flex flex-col gap-2" data-testid={`block-financial-answer-${blockId}-scenarios`}>
+      {earnings ? <ResultLine content={content} result={earnings} badge={linked ? <VerificationLabel kind="source_linked" /> : null} /> : null}
+      <table className="w-full border-collapse text-left text-sm">
+        <thead className="bg-surface-2">
+          <tr>
+            <th scope="col" className="border-b border-line px-3 py-2 text-xs font-medium text-muted">Scenario</th>
+            <th scope="col" className="border-b border-line px-3 py-2 text-xs font-medium text-muted">
+              P/E <VerificationLabel kind="user_supplied" />
+            </th>
+            <th scope="col" className="border-b border-line px-3 py-2 text-right text-xs font-medium text-muted">Value per share</th>
+          </tr>
+        </thead>
+        <tbody>
+          {scenarios.rows.map((row) => (
+            <tr key={row.assumption_id} className="border-t border-line" data-scenario={row.scenario}>
+              <th scope="row" className="px-3 py-2 font-normal text-fg">{SCENARIO_NAME[row.scenario]}</th>
+              <td className="num px-3 py-2 text-fg">
+                {row.multiple_text}
+                <span className="block text-xs text-muted">{row.attribution_text}</span>
+              </td>
+              <td className="num px-3 py-2 text-right text-fg">
+                <Cell result={results.get(row.result_id)} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p role="note" className="text-xs text-muted">{scenarios.disclosure}</p>
     </figure>
   )
 }

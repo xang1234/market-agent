@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { answerCopy, answerText } from './answerText.ts'
-import { disclosureFixture, financialAnswerFixture, lineChartFixture, richTextFixture, tableFixture } from './fixtures.ts'
+import { disclosureFixture, financialAnswerFixture, financialAnswerScenariosFixture, lineChartFixture, richTextFixture, tableFixture } from './fixtures.ts'
 import type { FinancialAnswerBlock } from './types.ts'
 
 test('an answer copies as Markdown, and a chart names itself instead of vanishing', () => {
@@ -25,6 +25,18 @@ test('a certified answer copies the figures as it shows them, with each cell\'s 
       '| Company | Revenue | Gross margin (gross profit / revenue), FY2023 |\n| --- | --- | --- |\n| Apple Inc. | USD 391,035,000,000.00 (FY2023) | 46.21% |\n| Microsoft Corp. |  | A required input or calculation is unavailable. |',
       'Apple Inc. — Gross margin (gross profit / revenue), FY2023, at or above 40.00%: yes',
       'Ranked 1 of 2 companies; no overall highest can be stated for an incomplete group',
+    ].join('\n\n'),
+  )
+})
+
+test('P/E scenarios copy with the EPS, each multiple as the user\'s, and the disclosure', () => {
+  const stated = 'Your assumption in this request (2024-01-15 15:00 UTC)'
+  assert.equal(
+    answerText([financialAnswerScenariosFixture]),
+    [
+      'Apple Inc., EPS (diluted), FY2023 (ended 2023-09-30): USD 4.00 per share',
+      `| Scenario | P/E (your assumption) | Value per share |\n| --- | --- | --- |\n| Bear | 20x (${stated}) | USD 80.00 per share |\n| Base | 25x (${stated}) | USD 100.00 per share |\n| Bull | 30x (${stated}) | USD 120.00 per share |`,
+      'A mechanical scenario: reported diluted EPS × a P/E you supplied. Not a price target, forecast, or recommendation.',
     ].join('\n\n'),
   )
 })

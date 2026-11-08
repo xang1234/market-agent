@@ -7,6 +7,17 @@
 import { authenticatedJson, type FetchImpl } from '../http/authFetch.ts'
 
 export const SUPPORTED_INSPECTION_SCHEMA_VERSION = 'financial_result_inspection.v1'
+/** v1 plus the P/E assumptions a scenario result reads (#201). */
+export const INSPECTION_V2_SCHEMA_VERSION = 'financial_result_inspection.v2'
+
+/** A P/E the user supplied: plan configuration, never reported data. */
+export type FinancialInspectedAssumption = {
+  assumption_id: string
+  scenario: 'bear' | 'base' | 'bull'
+  value: string
+  attribution: { kind: 'user_request'; ref: string; captured_at: string }
+  assumption_hash: string
+}
 
 export type FinancialDerivation = {
   version: string
@@ -73,6 +84,8 @@ export type FinancialResultInspection =
       formula: { operation: string; operation_version: string; numeric_policy_version: string } | null
       definitions: ReadonlyArray<{ metric_key: string; definition_version: string }>
       inputs: ReadonlyArray<FinancialInspectedInput>
+      /** v2 only. */
+      assumptions?: ReadonlyArray<FinancialInspectedAssumption>
     }
   | { schema_version: string; availability: 'unsupported_version'; result_id: string; run_id: string; reason_code: string }
 
@@ -89,7 +102,10 @@ export async function fetchFinancialResultInspection(input: { userId: string; re
  * replay; anything else is shown as legacy output, never as verified.
  */
 export function inspectableDetails(inspection: FinancialResultInspection): Extract<FinancialResultInspection, { availability: 'available' }> | null {
-  return inspection.availability === 'available' && inspection.schema_version === SUPPORTED_INSPECTION_SCHEMA_VERSION ? inspection : null
+  return inspection.availability === 'available' &&
+    (inspection.schema_version === SUPPORTED_INSPECTION_SCHEMA_VERSION || inspection.schema_version === INSPECTION_V2_SCHEMA_VERSION)
+    ? inspection
+    : null
 }
 
 /** The certified canonical value, exactly as stored, for display and copying; null for gaps, predicates, and rankings. */

@@ -4,7 +4,8 @@
 // 'unverified' appears only in development (CHAT_VERIFICATION_MODE=display_unverified):
 // the block failed verification and was shown anyway, unsaved.
 // 'source_linked', 'public_by_cutoff' and 'not_verified' come from the
-// server-derived block proof (blockProof.ts).
+// server-derived block proof (blockProof.ts). 'user_supplied' marks an input
+// the user typed, such as a scenario's P/E (#201): never reported data.
 export type VerificationKind =
   | 'verified'
   | 'public_by_cutoff'
@@ -14,6 +15,7 @@ export type VerificationKind =
   | 'legacy'
   | 'not_verified'
   | 'unverified'
+  | 'user_supplied'
 
 export const VERIFICATION_TEXT: Readonly<Record<VerificationKind, string>> = {
   verified: 'Verified calculation',
@@ -24,4 +26,5 @@ export const VERIFICATION_TEXT: Readonly<Record<VerificationKind, string>> = {
   legacy: 'Legacy output',
   not_verified: 'Not verified',
   unverified: 'Unverified',
+  user_supplied: 'Your assumption',
 }
