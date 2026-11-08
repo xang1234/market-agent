@@ -20,12 +20,18 @@
 
 import { dataRefSeriesRefs, extractBlockRefs, type VerifierBlock } from "./snapshot-verifier.ts";
 import type { JsonObject } from "./manifest-staging.ts";
+import { CanonicalJsonError, hashCanonical } from "../../financial-core/src/canonical.ts";
 import { isRecord } from "../../shared/src/http.ts";
 
 export type BlockProof = {
   evidence: "linked" | "unknown";
   calculation: "verified" | "not_verified";
   public_by_cutoff: "proven" | "unknown";
+  // A scenario price comparison's alone (#224): whether the scenario answer it
+  // compares still holds its certificate, which its link back to that answer
+  // names. Its own evidence may be unknown meanwhile, as when a source it
+  // cites is no longer public.
+  scenario_calculation?: "verified" | "not_verified";
 };
 
 export type SealedSnapshotRecord = {
@@ -39,6 +45,10 @@ export type SealedSnapshotRecord = {
   // a chart sealed before that check is not linked.
   checked_series_refs: ReadonlyArray<string>;
   certificates: ReadonlyArray<{ run_id: string; unit_id: string; presentation_hash: string }>;
+  // The scenario price comparisons whose seal bound their content as stored
+  // and whose scenario certificate stands at this read, by proof key
+  // (comparisonProofKey), and whether every source each cites is still public.
+  live_comparisons?: ReadonlyArray<Readonly<{ key: string; sources_public: boolean }>>;
 };
 
 // Linkage means the values shown are the evidence cited, not merely that the
@@ -62,6 +72,7 @@ export const UNPROVEN: BlockProof = Object.freeze({ evidence: "unknown", calcula
 // unsealed message): nothing about it is claimed.
 export function deriveBlockProof(block: unknown, snapshot: SealedSnapshotRecord | null): BlockProof {
   if (snapshot === null || !isRecord(block)) return UNPROVEN;
+  if (block.kind === "scenario_price_comparison") return comparisonProof(block, snapshot);
   if (isCertified(block, snapshot)) {
     return Object.freeze({ evidence: "linked", calculation: "verified", public_by_cutoff: "proven" });
   }
@@ -74,6 +85,47 @@ function isCertified(block: Record<string, unknown>, snapshot: SealedSnapshotRec
   return snapshot.certificates.some((certificate) =>
     certificate.run_id === run_id && certificate.unit_id === unit_id && certificate.presentation_hash === block.presentation_hash
   );
+}
+
+// A scenario price comparison (#224) is source-linked, never a verified
+// calculation: its seal generated it again from the stored close and the
+// scenario's certificate and bound its snapshot to the hash of that block
+// (scenario-price-comparison.ts), and this read finds the binding, the
+// certificate, and the EPS's and the price's sources still public. Its cited
+// sources must all be sealed. A named gap shows no value, so it claims nothing.
+function comparisonProof(block: Record<string, unknown>, snapshot: SealedSnapshotRecord): BlockProof {
+  const key = comparisonProofKey(block);
+  const live = key === null ? undefined : snapshot.live_comparisons?.find((entry) => entry.key === key);
+  if (live === undefined) return UNPROVEN_COMPARISON;
+  const sources = new Set(snapshot.source_ids);
+  const price = (block.comparison as { outcome: { price: { source_id: string } } }).outcome.price.source_id;
+  const linked = live.sources_public && Array.isArray(block.source_refs) && block.source_refs.includes(price) &&
+    block.source_refs.every((id) => typeof id === "string" && sources.has(id));
+  return Object.freeze({ ...UNPROVEN, evidence: linked ? "linked" : "unknown", scenario_calculation: "verified" });
+}
+
+const UNPROVEN_COMPARISON: BlockProof = Object.freeze({ ...UNPROVEN, scenario_calculation: "not_verified" });
+
+/**
+ * The hash a comparison's seal binds its whole block by (0079). Canonical, so
+ * the block read back from jsonb hashes the same; null for a block no seal
+ * could have bound.
+ */
+export function comparisonBlockHash(block: unknown): string | null {
+  try {
+    return hashCanonical("scenario_price_comparison", block);
+  } catch (error) {
+    if (error instanceof CanonicalJsonError) return null;
+    throw error;
+  }
+}
+
+/** What identifies a shown comparison: its snapshot and the hash of its block. Null for one that shows no price. */
+export function comparisonProofKey(block: Record<string, unknown>): string | null {
+  const { snapshot_id: snapshotId, comparison } = block;
+  if (typeof snapshotId !== "string" || !isRecord(comparison) || !isRecord(comparison.outcome) || comparison.outcome.kind !== "comparison") return null;
+  const hash = comparisonBlockHash(block);
+  return hash === null ? null : `${snapshotId.toLowerCase()}:${hash}`;
 }
 
 // At least one cited value, and every one in the manifest. A block whose refs
