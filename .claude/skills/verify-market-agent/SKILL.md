@@ -32,6 +32,7 @@ $V import                      # Fresh database only: seeds about 10,000 listing
 | `$V backfill-8k AAPL` | Resolves the ticker, then backfills its 8-Ks. |
 | `$V restatements AAPL GE` | After a backfill: each ticker's later-filing rows by relation, how many equal or sit within 0.1% of the figure they replaced, the largest and smallest percent change, and the five smallest changes. Read those five: rounding stored as a restatement is a bug. |
 | `$V memo [AAPL]` | Drives symbol page → Analyze → Generate memo in a real browser. Exits 1 unless the memo generates on that subject and cites 8-K claims, so backfill first. |
+| `$V chat "AAPL bear 20x, base 25x, bull 30x" "what if base were 22x?"` | Asks each question in one new thread in a real browser. Exits 1 unless every turn saves an assistant message within 240s. Saves a screenshot per turn, `page.txt`, and `messages.json` with every saved block; `report.json` names each turn's first block kind. |
 | `$V sql "select ..."` | Read stored state. |
 | `$V suite services/resolver [test/x.test.ts]` | Runs tests on Node 22.19 with `REQUIRE_DOCKER=1`, one log and one timeout per file (`SUITE_FILE_TIMEOUT`, default 600s), then lists the slowest. Check the `skipped` count too, since a file that skips everything still exits 0. Use it instead of piping `npm test` through a filter. |
 

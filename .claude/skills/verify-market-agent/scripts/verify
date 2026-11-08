@@ -226,6 +226,15 @@ cmd_memo() {
     node "$HERE/memo-flow.mjs"
 }
 
+# chat QUESTION...: asks each in one new thread in a real browser, then saves each
+# turn's screenshot and every saved message's blocks.
+cmd_chat() {
+  [[ $# -gt 0 ]] || { echo "usage: chat QUESTION..." >&2; return 2; }
+  mkdir -p "$EVIDENCE"
+  PATH="$NODE_APP:$PATH" ROOT="$ROOT" WEB_URL="$WEB_URL" OUT="$EVIDENCE/chat-$(stamp)" \
+    QUESTIONS="$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "$@")" node "$HERE/chat-flow.mjs"
+}
+
 # suite <package dir> [test file...]: one log per test file, so a slow file looks
 # different from a hung one. Each file gets SUITE_FILE_TIMEOUT seconds (default 600).
 cmd_suite() {
@@ -268,6 +277,7 @@ case "${1:-}" in
   backfill-8k) cmd_backfill_8k "${2:-}" ;;
   restatements) shift; cmd_restatements "$@" ;;
   memo) shift; cmd_memo "$@" ;;
+  chat) shift; cmd_chat "$@" ;;
   suite) shift; cmd_suite "$@" ;;
-  *) echo "usage: verify <init-env PORT_OFFSET|up|down [--volumes]|doctor|sql QUERY|resolve TICKER...|identity [save|diff NAME]|import [--force]|backfill-8k TICKER|restatements TICKER...|memo [TICKER]|suite DIR [FILE...]>" >&2; exit 2 ;;
+  *) echo "usage: verify <init-env PORT_OFFSET|up|down [--volumes]|doctor|sql QUERY|resolve TICKER...|identity [save|diff NAME]|import [--force]|backfill-8k TICKER|restatements TICKER...|memo [TICKER]|chat QUESTION...|suite DIR [FILE...]>" >&2; exit 2 ;;
 esac
