@@ -48,6 +48,8 @@ type Token =
   | Readonly<{ kind: "number"; digits: string; times: boolean }>
   | Readonly<{ kind: "year"; year: number | "latest" }>
   | Readonly<{ kind: "pe" | "times" | "slash" | "filler" | "unknown" }>
+  /** "EPS", "earnings", "per share": what the multiple applies to, never the multiple. */
+  | Readonly<{ kind: "eps" }>
   /** A number written so it is no multiple: "2e1x", "NaN", "-20x", "$150". */
   | Readonly<{ kind: "malformed" }>;
 
@@ -56,6 +58,7 @@ const PE: Token = { kind: "pe" };
 const TIMES: Token = { kind: "times" };
 const FILLER: Token = { kind: "filler" };
 const UNKNOWN: Token = { kind: "unknown" };
+const EPS: Token = { kind: "eps" };
 const MALFORMED: Token = { kind: "malformed" };
 const PE_WORDING = String.raw`p\s*\/\s*e|pe|price[- ]to[- ]earnings`;
 // A P/E phrase or a fiscal year as one token, then a word (a ticker like
@@ -69,9 +72,10 @@ const WORDS: Readonly<Record<string, Token>> = {
   x: TIMES,
   times: TIMES,
   latest: { kind: "year", year: "latest" },
+  ...Object.fromEntries(["earnings", "eps", "per", "share"].map((word) => [word, EPS])),
   ...Object.fromEntries(
-    ("case scenario scenarios diluted reported annual earnings eps of at on for and with use using what if were was is be make set change to now " +
-      "the a an my i assume assuming give show me please about how would it look value values per share").split(" ").map((word) => [word, FILLER]),
+    ("case scenario scenarios diluted reported annual of at on for and with use using what if were was is be make set change to now " +
+      "the a an my i assume assuming give show me please about how would it look value values").split(" ").map((word) => [word, FILLER]),
   ),
 };
 const PUNCTUATION = new Set(",:;=?!.()\"'“”‘’-–—");
@@ -143,6 +147,7 @@ function labelledAsk(tokens: ReadonlyArray<Token>): StatedAsk | typeof INVALID {
   const years = new Set<number | "latest">();
   const waiting: Scenario[] = [];
   let pe = false;
+  let eps = false;
   for (const [index, token] of tokens.entries()) {
     switch (token.kind) {
       case "unknown":
@@ -160,6 +165,11 @@ function labelledAsk(tokens: ReadonlyArray<Token>): StatedAsk | typeof INVALID {
         pe ||= token.times;
         break;
       }
+      case "eps":
+        // "bull EPS 6" states an EPS, not a multiple.
+        if (waiting.length > 0) return INVALID;
+        eps = true;
+        break;
       case "year":
         years.add(token.year);
         break;
@@ -170,8 +180,8 @@ function labelledAsk(tokens: ReadonlyArray<Token>): StatedAsk | typeof INVALID {
     }
   }
   const [year = null, ...others] = years;
-  // "bear 20 base 25 bull 30" with no P/E wording could be price targets.
-  if (waiting.length > 0 || others.length > 0 || (!pe && Object.keys(stated).length > 1)) return INVALID;
+  // "bear 20 base 25 bull 30" with no P/E wording could be price targets, and "make bull 6 per share" an EPS.
+  if (waiting.length > 0 || others.length > 0 || (!pe && (eps || Object.keys(stated).length > 1))) return INVALID;
   return { invalid: false, stated, fiscal_year: year };
 }
 

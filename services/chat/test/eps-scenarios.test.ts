@@ -60,6 +60,12 @@ test("a message's P/E scenarios, as readScenarioAsk reads them", () => {
     ["AAPL bear 2e1x, base 25x, bull 30x", invalid(3)],
     ["AAPL bear 2e1x, base 2.5e1x, bull 3e1x", invalid(3)],
     ["make bull 2e1x", invalid(1)],
+    // An EPS amount, not a multiple.
+    ["make bull EPS 6", invalid(1)],
+    ["bull earnings 6", invalid(1)],
+    ["make bull 6 per share", invalid(1)],
+    ["make bull EPS 6x", invalid(1)],
+    ["AAPL bear EPS 6x, base EPS 7x, bull EPS 8x", invalid(3)],
     ["AAPL bear - 20x, base 25x, bull 30x", invalid(3)],
     ["AAPL bear – 20x, base 25x, bull 30x", invalid(3)],
     ["AAPL earnings bear 6, base 7, bull 8", invalid(3)],
