@@ -8,7 +8,7 @@ import {
   hashCanonical,
   unitClosures,
   type CoverageState,
-  type FinancialPlanV1,
+  type FinancialPlan,
   type LocalId,
 } from "../../financial-core/src/index.ts";
 import { appendRunEvent } from "./events-repo.ts";
@@ -28,7 +28,7 @@ export type UnitRecord = Readonly<{
 }>;
 
 /** Declares every publication unit of the plan; repeat declarations must match exactly. */
-export async function declareUnits({ client, lease }: FencedTx, plan: FinancialPlanV1): Promise<void> {
+export async function declareUnits({ client, lease }: FencedTx, plan: FinancialPlan): Promise<void> {
   const kinds = new Map(plan.publication_units.map((unit) => [unit.unit_id, unit.kind]));
   for (const closure of unitClosures(plan).values()) {
     const closureHash = hashCanonical("unit_closure", { unit_id: closure.unit_id, output_ids: closure.output_ids, node_ids: closure.node_ids });

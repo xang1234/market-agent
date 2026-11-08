@@ -5,7 +5,7 @@
 // the answer's. What a cause would explain comes from the plan and the periods
 // its inputs bound to, never from the question's words or a date window.
 
-import { boundPeriodText, dependencyClosure, type BoundPeriod, type FinancialPlanV1, type LocalId, type OperationNode } from "../../financial-core/src/index.ts";
+import { boundPeriodText, dependencyClosure, type BoundPeriod, type FinancialPlan, type LocalId, type OperationNode } from "../../financial-core/src/index.ts";
 import type { ClaimPeriod } from "../../evidence/src/claim-repo.ts";
 import { loadPeriodClaimEvidence, lockCitableClaims, type LocalRuntimeEvidence } from "../../evidence/src/local-runtime-evidence.ts";
 import type { ParentPublication } from "../../financial-engine/src/finalize.ts";
@@ -82,7 +82,7 @@ const IGNORED: Shown = { kind: "ignored" };
  * latest, has none.
  */
 export function explainedFigures(input: Readonly<{
-  plan: FinancialPlanV1;
+  plan: FinancialPlan;
   // The outputs the answer shows a verified value for.
   verified: ReadonlySet<LocalId>;
   // Each reported node's bound fiscal period; an instant or a price has none.
@@ -194,7 +194,7 @@ export async function filedCauses(
   tx: Pick<FencedTx, "client" | "run">,
   input: Readonly<{
     threadId: string;
-    plan: FinancialPlanV1;
+    plan: FinancialPlan;
     named: (figure: string) => boolean;
     // By issuer (lowercase), the name the answer gives each company.
     names: ReadonlyMap<string, string>;
@@ -305,7 +305,7 @@ export async function filedCauses(
  * of either question. Null when that answer is not the engine's.
  */
 export async function reReadExplained(db: QueryExecutor, threadId: string): Promise<Explained[] | null> {
-  const { rows: [answer] } = await db.query<{ run_id: string; user_id: string; plan: FinancialPlanV1; blocks: unknown }>(
+  const { rows: [answer] } = await db.query<{ run_id: string; user_id: string; plan: FinancialPlan; blocks: unknown }>(
     `select r.run_id::text as run_id, r.user_id::text as user_id, p.plan, answer.blocks
        from (${RE_READ_ANSWER_SQL}) answer
        join snapshot_financial_runs sfr on sfr.snapshot_id = answer.snapshot_id
@@ -327,7 +327,7 @@ export async function reReadExplained(db: QueryExecutor, threadId: string): Prom
 }
 
 // Each reported node's fiscal period, as its certified input bound it.
-async function boundPeriods(db: QueryExecutor, ownerUserId: string, runId: string, plan: FinancialPlanV1): Promise<Map<LocalId, FiscalPeriod>> {
+async function boundPeriods(db: QueryExecutor, ownerUserId: string, runId: string, plan: FinancialPlan): Promise<Map<LocalId, FiscalPeriod>> {
   const slots = plan.operations.flatMap((node) => node.operation === "reported_metric" ? [node.node_id] : []);
   const inputs = await readClosureInputs(db, ownerUserId, runId, slots);
   return new Map(inputs.flatMap((input) => {

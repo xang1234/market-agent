@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateFinancialPlan, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
+import { validateFinancialPlan, type FinancialPlan } from "../../financial-core/src/index.ts";
 import { interpretPlan } from "../src/plan-interpretation.ts";
 import { revenuePlan } from "./db-fixtures.ts";
 
 const LABELS = new Map([["a", "Apple Inc."], ["b", "Microsoft Corp."]]);
 
-function mutate(plan: FinancialPlanV1, change: (draft: any) => void): FinancialPlanV1 {
+function mutate(plan: FinancialPlan, change: (draft: any) => void): FinancialPlan {
   const draft = JSON.parse(JSON.stringify(plan));
   change(draft);
   const validated = validateFinancialPlan(draft);

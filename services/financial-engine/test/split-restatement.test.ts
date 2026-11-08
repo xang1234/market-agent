@@ -10,7 +10,7 @@ import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { recordFactPrecisionAttestation, recordSourcePublicationAttestation } from "../../evidence/src/financial-attestations.ts";
 import { recordFactFinancialContext } from "../../evidence/src/financial-context.ts";
 import Ajv2020 from "../../financial-core/node_modules/ajv/dist/2020.js";
-import { validateFinancialPlan, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
+import { validateFinancialPlan, type FinancialPlan } from "../../financial-core/src/index.ts";
 import { bindPlanInputs } from "../src/bind-inputs.ts";
 import { createEvidenceFinancialPort } from "../src/evidence-adapter.ts";
 import { finalizeUnit } from "../src/finalize.ts";
@@ -78,7 +78,7 @@ async function seedAsFiled(db: Client, issuer: string, metricKey: string, value:
 }
 
 /** Diluted EPS and weighted-average diluted shares for FY2024, at a UTC cutoff. */
-function sharePlan(issuer: string, cutoff: string): FinancialPlanV1 {
+function sharePlan(issuer: string, cutoff: string): FinancialPlan {
   const base = revenuePlan();
   const node = (nodeId: string, metricKey: string) => ({
     node_id: nodeId, operation: "reported_metric" as const, operation_version: "reported_metric.v1", subject_slot: "a", metric_key: metricKey,

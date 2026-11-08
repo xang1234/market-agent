@@ -23,7 +23,7 @@ import {
   resolveMetricDefinition,
   SEC_DERIVATION_LOCATOR,
   type BoundFactInputV1,
-  type FinancialPlanV1,
+  type FinancialPlan,
   type FinancialRuntimeAuthority,
   type FinancialSubjectRef,
   type OperationNode,
@@ -829,14 +829,14 @@ function figuresOf(nodes: ReadonlyMap<string, OperationNode>): (node: OperationN
   return figures;
 }
 
-function shownFigures(plan: FinancialPlanV1): OperationNode[] {
+function shownFigures(plan: FinancialPlan): OperationNode[] {
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
   const figures = figuresOf(nodes);
   return plan.outputs.flatMap((output) => figures(nodes.get(output.node_id)!));
 }
 
 // The figures a plan shows, as the chat scope names them.
-function planMetrics(plan: FinancialPlanV1): RequestedMetric[] {
+function planMetrics(plan: FinancialPlan): RequestedMetric[] {
   const keys = new Set(shownFigures(plan).flatMap((node) => SCOPE_METRICS[figureKey(node)] ?? []));
   return [...keys].map((key) => proposedMetric(key, null, null)!);
 }
@@ -861,7 +861,7 @@ const CATALOG = new Map(PROPOSABLE_METRICS.map((metric) => [metric.metric_key, m
  */
 export function uncoveredAsks(
   reading: ScopeProposal,
-  plan: FinancialPlanV1,
+  plan: FinancialPlan,
   cause: FiledCause,
   labels: ReadonlyMap<string, string> = new Map(),
   scope: Pick<ResearchScope, "metrics" | "inherited" | "segments" | "margin_trend" | "price_window" | "benchmark" | "guidance"> | null = null,
@@ -943,7 +943,7 @@ export function uncoveredAsks(
 }
 
 /** The metrics a question turned off that its answer still shows, as inputs the engine shows beside a figure (#324). */
-export function shownTurnedOff(reading: ScopeProposal, plan: FinancialPlanV1): string[] {
+export function shownTurnedOff(reading: ScopeProposal, plan: FinancialPlan): string[] {
   const { offMetrics } = readingAsks(reading);
   return planMetrics(plan).filter((metric) => offMetrics.has(metric.metric_key)).map((metric) => lowercaseUnlessAcronym(metric.label));
 }

@@ -2,7 +2,7 @@
 // only. No model text is used, so the explanation cannot describe a different
 // plan than the one that runs.
 
-import type { FinancialPlanV1, OperationNode, PeriodSelector } from "../../financial-core/src/index.ts";
+import type { FinancialPlan, OperationNode, PeriodSelector } from "../../financial-core/src/index.ts";
 
 export const INTERPRETATION_GENERATOR_VERSION = "plan-interpretation.v1";
 
@@ -21,10 +21,11 @@ const OPERATION_PHRASES: Record<Exclude<OperationNode["operation"], "reported_me
   pe_ratio: "P/E ratio (share price / latest fiscal year diluted EPS)",
   spread: "difference between two companies, each in its own fiscal period",
   period_rank: "ranking across one company's periods",
+  scenario_eps_multiple: "P/E scenario value per share (diluted EPS × a user-supplied P/E)",
 };
 
 /** `labels` maps subject slot ids to display names resolved by the server. */
-export function interpretPlan(plan: FinancialPlanV1, labels: ReadonlyMap<string, string>): { generator_version: string; text: string } {
+export function interpretPlan(plan: FinancialPlan, labels: ReadonlyMap<string, string>): { generator_version: string; text: string } {
   const subjects = plan.subjects.members
     .map((member) => `${labels.get(member.slot_id) ?? member.subject_ref.id} (${member.subject_ref.kind}:${member.subject_ref.id})`)
     .join(", ");
@@ -44,6 +45,8 @@ export function interpretPlan(plan: FinancialPlanV1, labels: ReadonlyMap<string,
   ];
   if (derived.length > 0) lines.push(`Calculations: ${derived.join(", ")}.`);
   if (thresholds.length > 0) lines.push(`Thresholds: ${thresholds.join("; ")}.`);
+  const assumptions = (plan.assumptions ?? []).map((assumption) => `${assumption.scenario} P/E ${assumption.value}`);
+  if (assumptions.length > 0) lines.push(`Assumptions (user-supplied, not reported data): ${assumptions.join(", ")}.`);
   return { generator_version: INTERPRETATION_GENERATOR_VERSION, text: lines.join(" ") };
 }
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createRuntimeAuthority, dependencyClosure, type FinancialPlanV1, type LocalId, type PeriodSelector } from "../../financial-core/src/index.ts";
+import { createRuntimeAuthority, dependencyClosure, type FinancialPlan, type LocalId, type PeriodSelector } from "../../financial-core/src/index.ts";
 import { buildDeterministicPlan, type PlanningResult } from "../../financial-engine/src/planner.ts";
 import { asksCause, causeFamilies, explainedFigures, namedFigures, type FiscalPeriod } from "../src/filed-cause.ts";
 import { parseProposal } from "../src/scope-proposal.ts";
@@ -22,7 +22,7 @@ const revenue = (name: string, period: object, slot = "a"): Node[] => [reported(
 
 // A plan of these figures, each the output of its last node, as the
 // deterministic planner assembles it for the companies its slots name.
-function plan(figures: ReadonlyArray<ReadonlyArray<Node>>, slots = ["a"]): FinancialPlanV1 {
+function plan(figures: ReadonlyArray<ReadonlyArray<Node>>, slots = ["a"]): FinancialPlan {
   const authority = createRuntimeAuthority({
     owner_user_id: "10000000-0000-4000-8000-000000000001",
     egress_channel: "chat",
@@ -56,7 +56,7 @@ function plan(figures: ReadonlyArray<ReadonlyArray<Node>>, slots = ["a"]): Finan
 
 // Each reported node bound as the golden facts date its company's period; a
 // latest selector binds to `latest`.
-function bound(planned: FinancialPlanV1, latest?: FiscalPeriod): Map<LocalId, FiscalPeriod> {
+function bound(planned: FinancialPlan, latest?: FiscalPeriod): Map<LocalId, FiscalPeriod> {
   const periodOf = (slot: string, selector: PeriodSelector): FiscalPeriod => {
     if (selector.kind !== "fiscal_period") return latest!;
     const company = SLOTS[slot]!;
@@ -72,7 +72,7 @@ const reading = (metrics: unknown[], income_items: string[], asks = ["explains"]
 const EVERY_FIGURE = () => true;
 
 // A gap's reported node binds no period, and no output that reads it is verified.
-function explained(planned: FinancialPlanV1, options: { latest?: FiscalPeriod; named?: (figure: string) => boolean; gaps?: ReadonlyArray<LocalId> } = {}) {
+function explained(planned: FinancialPlan, options: { latest?: FiscalPeriod; named?: (figure: string) => boolean; gaps?: ReadonlyArray<LocalId> } = {}) {
   const gaps = new Set(options.gaps ?? []);
   const readsGap = (nodeId: LocalId) => [...dependencyClosure(planned, [nodeId])].some((id) => gaps.has(id));
   return explainedFigures({

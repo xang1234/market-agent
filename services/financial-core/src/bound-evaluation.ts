@@ -7,19 +7,20 @@
 // checkpoints independently from database records at the publication boundary.
 // Pure: no database, clock, randomness, or engine imports.
 
-import { canonicalJson, hashCanonical } from "./canonical.ts";
+import { assumptionHash, canonicalJson, hashCanonical } from "./canonical.ts";
 import type {
   BoundFinancialInputV1,
   CoverageState,
-  FinancialPlanV1,
+  FinancialPlan,
   GapDisposition,
   GapPayload,
   LocalId,
+  OperationNode,
   ReasonCode,
   Sha256Hex,
   SuccessPayload,
 } from "./contracts.ts";
-import { operationDependencies } from "./contracts.ts";
+import { ExecutionIntegrityError, operationDependencies, scenarioAssumption } from "./contracts.ts";
 import { coverageState, evaluatePlan, type GraphEvaluation, type NodeState } from "./coverage.ts";
 import { dependencyClosure, topologicalOrder } from "./graph.ts";
 import { NUMERIC_POLICY } from "./numeric-policy.ts";
@@ -27,22 +28,13 @@ import { OPERATION_REGISTRY } from "./operation-registry.ts";
 import { operandFromBoundInput, operationGap } from "./operations.ts";
 import { unitClosures } from "./publication-units.ts";
 
-/**
- * A persisted, contradictory, or incomplete execution record: a missing
- * binding, a unit the plan does not declare, a re-execution that diverges
- * from its checkpoint. Never reinterpreted as missing data.
- */
-export class ExecutionIntegrityError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ExecutionIntegrityError";
-  }
-}
-
 /** One reported-metric slot as bound: an immutable input, or an explicit gap. */
 export type SlotBinding =
   | Readonly<{ status: "bound"; input: BoundFinancialInputV1; payload_hash: Sha256Hex; candidate_set_digest: Sha256Hex }>
   | Readonly<{ status: "gap"; reason_code: ReasonCode; candidate_set_digest: Sha256Hex }>;
+
+/** An operand by its lineage hash, or the plan assumption a scenario reads. */
+export type InputRef = Readonly<{ node_id: LocalId; hash: Sha256Hex }> | Readonly<{ assumption_id: LocalId; hash: Sha256Hex }>;
 
 /** A derived node's computation, as persisted in `computations`. */
 export type ComputationRecord = Readonly<{
@@ -51,7 +43,8 @@ export type ComputationRecord = Readonly<{
   operation_version: string;
   numeric_policy_version: string;
   definition_versions: Readonly<Record<string, string>>;
-  input_refs: ReadonlyArray<Readonly<{ node_id: LocalId; hash: Sha256Hex }>>;
+  /** The node's operands in declared order, then the assumption it reads, if any. */
+  input_refs: ReadonlyArray<InputRef>;
   output_hash: Sha256Hex;
 }>;
 
@@ -77,7 +70,7 @@ export type UnitPublication = Readonly<{
 const REJECTED_EXPLANATION = "An input to this section failed integrity checks, so the section was withheld.";
 
 /** Evaluates the plan over its bindings. Every reported node must have a binding. */
-export function evaluateBoundPlan(plan: FinancialPlanV1, bindings: ReadonlyMap<LocalId, SlotBinding>): GraphEvaluation {
+export function evaluateBoundPlan(plan: FinancialPlan, bindings: ReadonlyMap<LocalId, SlotBinding>): GraphEvaluation {
   const definitions = new Map(plan.metric_definitions.map((entry) => [entry.metric_key, entry.definition_version]));
   const slots = new Map(plan.subjects.members.map((member) => [member.slot_id, member]));
   return evaluatePlan(plan, (node) => {
@@ -99,7 +92,7 @@ export function evaluateBoundPlan(plan: FinancialPlanV1, bindings: ReadonlyMap<L
  * its operation, its inputs' hashes, and its outcome.
  */
 export function nodeLineageHashes(
-  plan: FinancialPlanV1,
+  plan: FinancialPlan,
   evaluation: GraphEvaluation,
   bindings: ReadonlyMap<LocalId, SlotBinding>,
 ): Map<LocalId, Sha256Hex> {
@@ -119,7 +112,7 @@ export function nodeLineageHashes(
       operation: node.operation,
       operation_version: node.operation_version,
       binding: binding ? { status: binding.status, candidate_set_digest: binding.candidate_set_digest } : null,
-      inputs: operationDependencies(node).map((dependency) => ({ node_id: dependency, hash: hashes.get(dependency)! })),
+      inputs: inputRefs(plan, node, hashes),
       outcome: stateDigest(state),
     }));
   }
@@ -128,7 +121,7 @@ export function nodeLineageHashes(
 
 /** Everything a publication unit derives from the evaluation. */
 export function unitPublication(
-  plan: FinancialPlanV1,
+  plan: FinancialPlan,
   evaluation: GraphEvaluation,
   hashes: ReadonlyMap<LocalId, Sha256Hex>,
   unitId: LocalId,
@@ -149,7 +142,7 @@ export function unitPublication(
       operation_version: OPERATION_REGISTRY[node.operation].operation_version,
       numeric_policy_version: NUMERIC_POLICY.version,
       definition_versions: definitionVersions(plan, nodeId),
-      input_refs: operationDependencies(node).map((dependency) => ({ node_id: dependency, hash: hashes.get(dependency)! })),
+      input_refs: inputRefs(plan, node, hashes),
       output_hash: hashes.get(nodeId)!,
     }];
   });
@@ -180,6 +173,18 @@ export function unitPublication(
   return { unit_id: unitId, rejected, coverage, computations, results };
 }
 
+/**
+ * What a node's lineage hash and its computation's input_refs both name. A
+ * scenario's assumption follows its operands; every other node reads none, so
+ * its refs, and every v1 hash, are what they were before assumptions existed.
+ */
+function inputRefs(plan: FinancialPlan, node: OperationNode, hashes: ReadonlyMap<LocalId, Sha256Hex>): InputRef[] {
+  const operands = operationDependencies(node).map((dependency) => ({ node_id: dependency, hash: hashes.get(dependency)! }));
+  if (node.operation !== "scenario_eps_multiple") return operands;
+  const assumption = scenarioAssumption(plan, node);
+  return [...operands, { assumption_id: assumption.assumption_id, hash: assumptionHash(assumption) }];
+}
+
 /** Whether two JSON-shaped values are canonically identical. */
 export function canonicallyEqual(left: unknown, right: unknown): boolean {
   return canonicalJson(left) === canonicalJson(right);
@@ -200,7 +205,7 @@ function stateDigest(state: NodeState): unknown {
 }
 
 /** Metric definition versions of the reported inputs a node depends on. */
-function definitionVersions(plan: FinancialPlanV1, nodeId: LocalId): Record<string, string> {
+function definitionVersions(plan: FinancialPlan, nodeId: LocalId): Record<string, string> {
   const closure = dependencyClosure(plan, [nodeId]);
   const versions = new Map(plan.metric_definitions.map((entry) => [entry.metric_key, entry.definition_version]));
   const used: Record<string, string> = {};

@@ -5,7 +5,7 @@
 
 import { randomUUID } from "node:crypto";
 
-import type { ExecutionLimits, FinancialPlanV1, FinancialRuntimeAuthority, LocalId } from "../../financial-core/src/index.ts";
+import type { ExecutionLimits, FinancialPlan, FinancialRuntimeAuthority, LocalId } from "../../financial-core/src/index.ts";
 import type { SnapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
 import { executeRun, type ExecutionReport } from "./execute.ts";
 import { finalizeUnit, ParentRefusedError, type FinalizationResult, type PersistParentArtifact } from "./finalize.ts";
@@ -48,7 +48,7 @@ export async function driveLeasedRun(
 ): Promise<DriveReport> {
   let execution: DriveReport["execution"] = "skipped";
   if (run.execution_state !== "ready_to_seal") {
-    const plan = (await client.query<{ plan: FinancialPlanV1 }>(`select plan from financial_plans where plan_id = $1 and user_id = $2`, [run.plan_id, run.user_id])).rows[0]!.plan;
+    const plan = (await client.query<{ plan: FinancialPlan }>(`select plan from financial_plans where plan_id = $1 and user_id = $2`, [run.plan_id, run.user_id])).rows[0]!.plan;
     const report = await executeRun({ client, lease, plan, authority: deps.authority, evidence: deps.evidence, parent_limits: deps.parent_limits });
     execution = report.outcome;
     if (report.outcome !== "ready_to_seal") return { run_id: run.run_id, execution, finalized: [], existing: 0 };

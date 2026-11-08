@@ -18,7 +18,7 @@ import {
   ExecutionIntegrityError,
   nodeLineageHashes,
   unitPublication,
-  type FinancialPlanV1,
+  type FinancialPlan,
 } from "../../financial-core/src/index.ts";
 import { loadBindings } from "./bind-inputs.ts";
 import { fencedTransaction, type LeaseClaimant, type RunLease } from "./lease.ts";
@@ -51,7 +51,7 @@ export async function executeReplay(input: {
   const original = replay?.replay_of_run_id ? await getRun(client, lease.owner_user_id, replay.replay_of_run_id) : null;
   if (!replay || !original || original.execution_state !== "completed") return finish(client, lease, "replay_source_unavailable");
 
-  const plan = (await client.query<{ plan: FinancialPlanV1 }>(
+  const plan = (await client.query<{ plan: FinancialPlan }>(
     `select plan from financial_plans where plan_id = $1 and user_id = $2`,
     [original.plan_id, original.user_id],
   )).rows[0]!.plan;

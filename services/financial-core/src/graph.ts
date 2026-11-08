@@ -8,7 +8,7 @@ import {
   DEFAULT_EXECUTION_LIMITS,
   operationDependencies,
   type ExecutionLimits,
-  type FinancialPlanV1,
+  type FinancialPlan,
   type LocalId,
   type OperationNode,
   type ValidationIssue,
@@ -25,7 +25,7 @@ export function effectiveLimits(planLimits: ExecutionLimits, parent: Partial<Exe
   return result;
 }
 
-export function validatePlanGraph(plan: FinancialPlanV1, parent: Partial<ExecutionLimits> = {}): ValidationIssue[] {
+export function validatePlanGraph(plan: FinancialPlan, parent: Partial<ExecutionLimits> = {}): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const add = (path: string, code: string, message: string) => issues.push({ path, code, message });
   const nodes = nodeIndex(plan);
@@ -67,14 +67,14 @@ export function validatePlanGraph(plan: FinancialPlanV1, parent: Partial<Executi
 }
 
 /** Deterministic Kahn order: among ready nodes, the earliest declared goes first. */
-export function topologicalOrder(plan: FinancialPlanV1): LocalId[] {
+export function topologicalOrder(plan: FinancialPlan): LocalId[] {
   const order = topologicalOrderOrNull(plan);
   if (order === null) throw new RangeError("the operation graph contains a cycle");
   return order;
 }
 
 /** The given nodes plus every transitive dependency. */
-export function dependencyClosure(plan: FinancialPlanV1, nodeIds: ReadonlyArray<LocalId>): ReadonlySet<LocalId> {
+export function dependencyClosure(plan: FinancialPlan, nodeIds: ReadonlyArray<LocalId>): ReadonlySet<LocalId> {
   const nodes = nodeIndex(plan);
   const closure = new Set<LocalId>();
   const pending = [...nodeIds];
@@ -88,7 +88,7 @@ export function dependencyClosure(plan: FinancialPlanV1, nodeIds: ReadonlyArray<
   return closure;
 }
 
-function topologicalOrderOrNull(plan: FinancialPlanV1): LocalId[] | null {
+function topologicalOrderOrNull(plan: FinancialPlan): LocalId[] | null {
   const declared = new Map(plan.operations.map((node, index) => [node.node_id, index]));
   const indegree = new Map<LocalId, number>();
   const dependents = new Map<LocalId, LocalId[]>();
@@ -112,6 +112,6 @@ function topologicalOrderOrNull(plan: FinancialPlanV1): LocalId[] | null {
   return order.length === plan.operations.length ? order : null;
 }
 
-function nodeIndex(plan: FinancialPlanV1): Map<LocalId, OperationNode> {
+function nodeIndex(plan: FinancialPlan): Map<LocalId, OperationNode> {
   return new Map(plan.operations.map((node) => [node.node_id, node]));
 }

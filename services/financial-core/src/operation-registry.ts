@@ -3,7 +3,7 @@
 // validation, plan evaluation, and future verifiers all read this table, so
 // adding an operation is one entry here plus its implementation.
 
-import type { FinancialPlanV1, OperationKind, OperationNode, ReportedMetricNode, VersionTag } from "./contracts.ts";
+import { scenarioAssumption, type FinancialPlan, type OperationKind, type OperationNode, type ReportedMetricNode, type VersionTag } from "./contracts.ts";
 import {
   absoluteChange,
   freeCashFlow,
@@ -13,6 +13,7 @@ import {
   peRatio,
   percentChangePositiveBase,
   ratio,
+  scenarioEpsMultiple,
   spread,
   trailingSum,
   type FinancialOperand,
@@ -23,7 +24,7 @@ import { peerCompare, periodRank, thresholdPredicate } from "./predicates.ts";
 
 /** Supplies reported inputs; the engine binds evidence, the core never does. */
 export type ReportedMetricEvaluator = (node: ReportedMetricNode) => OperandOutcome;
-export type EvaluationContext = { plan: FinancialPlanV1; reported: ReportedMetricEvaluator };
+export type EvaluationContext = { plan: FinancialPlan; reported: ReportedMetricEvaluator };
 
 type NodeOf<K extends OperationKind> = Extract<OperationNode, { operation: K }>;
 type Operands = ReadonlyArray<FinancialOperand | null>;
@@ -139,6 +140,12 @@ export const OPERATION_REGISTRY: { readonly [K in OperationKind]: OperationSpec<
     produces: "predicate",
     tolerates_missing_operands: true,
     evaluate: (node, operands) => periodRank(node, operands),
+  },
+  scenario_eps_multiple: {
+    ...VALUE_OPERATION,
+    operation_version: "scenario_eps_multiple.v1",
+    interpretation: "Reported diluted EPS of one fiscal year × a user-supplied P/E, in the EPS currency per share; EPS must be positive. A mechanical scenario, not a price target.",
+    evaluate: (node, operands, context) => scenarioEpsMultiple(node, required(node, operands, 0), scenarioAssumption(context.plan, node).value),
   },
 });
 

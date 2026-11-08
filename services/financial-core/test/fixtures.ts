@@ -1,4 +1,4 @@
-import type { FinancialPlanV1, FinancialRuntimeAuthorityV1, PeriodSelector } from "../src/contracts.ts";
+import type { FinancialPlanV1, FinancialPlanV2, FinancialRuntimeAuthorityV1, PeriodSelector, Scenario } from "../src/contracts.ts";
 import { OPERATION_REGISTRY } from "../src/operation-registry.ts";
 
 export const ISSUER_A = "11111111-1111-4111-8111-111111111111";
@@ -130,6 +130,25 @@ export function overviewComparisonPlan(companies: ReadonlyArray<{ slot: "a" | "b
     plan.outputs.push(...(reversed ? outputs.reverse() : outputs));
   }
   return plan;
+}
+
+export type Multiples = Readonly<Record<Scenario, string>>;
+
+/** One company's FY2023 diluted EPS times a bear, base, and bull P/E the user stated in turn 1 (#201). */
+export function scenarioPlanFixture(multiples: Multiples = { bear: "20", base: "25", bull: "30" }, period: PeriodSelector = { kind: "fiscal_period", fiscal_year: 2023, fiscal_period: "FY" }): FinancialPlanV2 {
+  const { schema_version: _version, ...base } = planFixture();
+  const scenario = (name: Scenario) => ({ node_id: name, operation: "scenario_eps_multiple" as const, operation_version: "scenario_eps_multiple.v1", earnings: "eps", assumption_id: `pe_${name}` });
+  const assumption = <S extends Scenario>(name: S) => ({ assumption_id: `pe_${name}`, scenario: name, value: multiples[name], attribution: { kind: "user_request" as const, ref: "chat:turn:1", captured_at: "2024-01-15T15:00:00.000Z" } });
+  return {
+    ...base,
+    schema_version: "financial_plan.v2",
+    subjects: { membership: "explicit", requested_count: 1, resolved_count: 1, omitted_count: 0, members: [base.subjects.members[0]!] },
+    metric_definitions: [{ metric_key: "eps_diluted", definition_version: "eps_diluted.v1" }],
+    operations: [reportedAt("eps", "a", "eps_diluted", period), scenario("bear"), scenario("base"), scenario("bull")],
+    outputs: ["eps", "bear", "base", "bull"].map((node_id) => ({ output_id: `out_${node_id}`, node_id, unit_id: "section" })),
+    thresholds: [],
+    assumptions: [assumption("bear"), assumption("base"), assumption("bull")],
+  };
 }
 
 export function authorityFixture(owner = OWNER_A): FinancialRuntimeAuthorityV1 {

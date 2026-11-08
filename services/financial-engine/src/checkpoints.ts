@@ -13,7 +13,7 @@ import {
   type ComputationRecord,
   type CoverageState,
   type DraftFinancialResultV1,
-  type FinancialPlanV1,
+  type FinancialPlan,
   type GraphEvaluation,
   type LocalId,
   type Sha256Hex,
@@ -33,7 +33,7 @@ export type UnitCheckpoint = Readonly<{
 
 /** The unit's publication with a fresh result identity per requested output. */
 export function buildUnitCheckpoint(
-  plan: FinancialPlanV1,
+  plan: FinancialPlan,
   evaluation: GraphEvaluation,
   hashes: ReadonlyMap<LocalId, Sha256Hex>,
   unitId: LocalId,

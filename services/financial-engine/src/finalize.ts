@@ -22,7 +22,7 @@
 
 import {
   ExecutionIntegrityError,
-  type FinancialPlanV1,
+  type FinancialPlan,
   type FinancialRuntimeAuthority,
   type LocalId,
 } from "../../financial-core/src/index.ts";
@@ -102,7 +102,7 @@ export async function finalizeUnit(input: {
     });
     if (locked.missing_source_ids.length > 0 || locked.missing_fact_ids.length > 0) return rejected("evidence_unavailable");
 
-    const plan = (await tx.client.query<{ plan: FinancialPlanV1 }>(`select plan from financial_plans where plan_id = $1`, [run.plan_id])).rows[0]!.plan;
+    const plan = (await tx.client.query<{ plan: FinancialPlan }>(`select plan from financial_plans where plan_id = $1`, [run.plan_id])).rows[0]!.plan;
     const sealed = await sealSnapshotInTransaction(client, buildFinancialSealInput({
       snapshot_id: input.snapshot_id,
       claim: { owner_user_id: run.user_id, run_id: run.run_id, unit_id: unitId },

@@ -11,6 +11,7 @@ import {
   type BoundFinancialInputV1,
   type BoundPriceInputV1,
   type ChangeNode,
+  type DecimalString,
   type FinancialUnit,
   type FreeCashFlowNode,
   type GapDisposition,
@@ -28,6 +29,7 @@ import {
   type ReasonCode,
   type ReportedMetricNode,
   type ReportingBasis,
+  type ScenarioEpsMultipleNode,
   type SpreadNode,
   type SubjectSlot,
   type TrailingSumNode,
@@ -417,6 +419,26 @@ export function peRatio(node: PeRatioNode, price: FinancialOperand, earnings: Fi
   return success(valuation(node, price, value, { kind: "ratio" }));
 }
 
+/**
+ * Reported diluted EPS of one fiscal year times a P/E the user supplied (#201):
+ * a mechanical scenario value in the EPS currency per share, on the split basis
+ * EPS was bound to. It never reads a price.
+ */
+// The plan's earnings node is one fiscal year's diluted EPS (validate.ts); the bound period must be one too.
+export function scenarioEpsMultiple(node: ScenarioEpsMultipleNode, earnings: FinancialOperand, multiple: DecimalString): OperandOutcome {
+  if (!isReported(earnings, "eps_diluted", "per_share")) return operationGap("incompatible_definition", "A P/E scenario multiplies reported diluted EPS.");
+  if (earnings.period.fiscal_period !== "FY" || classifyDuration(earnings.period) !== "annual") {
+    return operationGap("unsupported_period", "A P/E scenario uses one fiscal year's diluted EPS.");
+  }
+  if (earnings.measurement.unit.kind !== "currency_per_share") return operationGap("incompatible_unit", "A P/E scenario multiplies EPS in a currency per share.");
+  if (rationalSign(earnings.value) <= 0) {
+    return operationGap("non_positive_base", "Diluted EPS is zero or negative, so a P/E scenario does not apply: this model takes only positive earnings.");
+  }
+  const value = multiplyRationals(earnings.value, boundRational(multiple, "assumption"));
+  if (value === null) return operationGap("numeric_limit_exceeded", "The scenario value exceeds supported numeric limits.");
+  return success(derived(node, earnings, value, earnings.measurement));
+}
+
 /** One subject's value minus another's on one measure and measurement, each in its own fiscal period. A margin or percentage lead is in percentage points; the result is the left subject's. */
 export function spread(node: SpreadNode, left: FinancialOperand, right: FinancialOperand): OperandOutcome {
   if (left.subject_slot === right.subject_slot) return operationGap("incompatible_scope", "A spread is between two different subjects.");
@@ -555,7 +577,7 @@ function quotient(nodeId: LocalId, measure: MeasureIdentity, numerator: Financia
 
 /** Result of applying `node` to `source`'s measure: the approved operation is appended to its lineage. */
 function derived(
-  node: ChangeNode | TrailingSumNode | SpreadNode,
+  node: ChangeNode | TrailingSumNode | SpreadNode | ScenarioEpsMultipleNode,
   source: FinancialOperand,
   value: ExactRational,
   measurement: Measurement,

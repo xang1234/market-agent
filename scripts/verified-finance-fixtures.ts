@@ -7,26 +7,27 @@
 // it exercises.
 //
 // Mutants: a correct sealed unit tampered one way at a time — a changed
-// result, unit, period, cutoff, definition, peer count, or a number written as
-// words — always with valid source and fact ids. The verifier must reject every
+// result, unit, period, cutoff, definition, peer count, P/E assumption, or a
+// number written as words — always with valid source and fact ids. The verifier must reject every
 // one; a verifier that rejects everything fails the valid baseline instead.
 
 import {
   hashCanonical,
   validateFinancialPlan,
-  type FinancialPlanV1,
+  type FinancialPlan,
   type GraphEvaluation,
   type LocalId,
   type ReportedMetricNode,
   type SlotBinding,
 } from "../services/financial-core/src/index.ts";
-import { planFixture } from "../services/financial-core/test/fixtures.ts";
+import { mutable as mutablePlan, planFixture, scenarioPlanFixture } from "../services/financial-core/test/fixtures.ts";
 import { boundInput, type InputSpec } from "../services/financial-core/test/operand-fixtures.ts";
-import { addRational, compareRational, divideRational, rational, reduce, type Rational } from "../services/financial-core/test/rational-oracle.ts";
+import { addRational, compareRational, divideRational, multiplyRational, rational, reduce, type Rational } from "../services/financial-core/test/rational-oracle.ts";
 import type { InputCandidate } from "../services/financial-engine/src/ports.ts";
 import type { SelectionPolicy, SlotSelection } from "../services/financial-engine/src/select-inputs.ts";
 import type { FinancialUnitRecords } from "../services/snapshot/src/financial-verifier-loader.ts";
-import { mutable, validRecords } from "../services/snapshot/test/financial-fixtures.ts";
+import type { FinancialSealContext } from "../services/snapshot/src/financial-verifier.ts";
+import { mutable, SCENARIO_SEAL_CONTEXT, scenarioRecords, SEAL_CONTEXT, validRecords } from "../services/snapshot/test/financial-fixtures.ts";
 
 // --- independent oracle extensions -----------------------------------------
 
@@ -62,7 +63,7 @@ function policyQuotient(numerator: string, denominator: string): { value: Ration
 
 export type GoldenCategory =
   | "exact_source_token" | "calendar_53_week" | "restatement" | "public_versus_ingestion" | "date_only_uncertainty"
-  | "negative_base" | "zero_denominator" | "precision_limit" | "partial_cohort";
+  | "negative_base" | "zero_denominator" | "precision_limit" | "partial_cohort" | "eps_scenarios";
 
 export type GoldenExpectation =
   | Readonly<{ kind: "value"; value: Rational; exact: boolean }>
@@ -74,7 +75,7 @@ export type ComputationCase = Readonly<{
   id: string;
   category: GoldenCategory;
   rule: string;
-  plan: FinancialPlanV1;
+  plan: FinancialPlan;
   bindings: ReadonlyMap<LocalId, SlotBinding>;
   expected: Readonly<Record<string, GoldenExpectation>>;
 }>;
@@ -87,7 +88,7 @@ const reported = (nodeId: string, slot: string, metric: string, fiscalYear = 202
   period: { kind: "fiscal_period", fiscal_year: fiscalYear, fiscal_period: fiscalPeriod },
 });
 
-function plan(operations: Node[], outputs: string[], thresholds: ReadonlyArray<{ id: string; value: string; unit: unknown }> = [], slots = ["a", "b"]): FinancialPlanV1 {
+function plan(operations: Node[], outputs: string[], thresholds: ReadonlyArray<{ id: string; value: string; unit: unknown }> = [], slots = ["a", "b"]): FinancialPlan {
   const base = planFixture();
   const members = [
     ...base.subjects.members,
@@ -145,7 +146,26 @@ function trailingSumCase(id: string, rule: string, quarters: typeof QUARTERS_53_
   };
 }
 
+/** FY2023 diluted EPS times a bear, base, and bull P/E the user supplied (#201). */
+function scenarioCase(id: string, rule: string, eps: string, multiples: Readonly<{ bear: string; base: string; bull: string }>, expected: (multiple: string) => GoldenExpectation): ComputationCase {
+  const draft = mutablePlan(scenarioPlanFixture(multiples));
+  const validated = validateFinancialPlan(draft);
+  if (!validated.ok) throw new Error(`golden plan is invalid: ${JSON.stringify(validated.issues)}`);
+  return {
+    id, category: "eps_scenarios", rule,
+    plan: validated.value,
+    bindings: new Map([bound("eps", { metric: "eps_diluted", value: eps, unit: { kind: "currency_per_share", currency: "USD" }, share_basis: "diluted", ...FY(2023) })]),
+    expected: { out_bear: expected(multiples.bear), out_base: expected(multiples.base), out_bull: expected(multiples.bull) },
+  };
+}
+
+const product = (eps: string) => (multiple: string): GoldenExpectation => ({ kind: "value", value: multiplyRational(rational(eps), rational(multiple)), exact: true });
+
 export const COMPUTATION_CASES: ReadonlyArray<ComputationCase> = [
+  scenarioCase("scenario-eps-4", "Diluted EPS of 4 at 20x, 25x, and 30x is 80, 100, and 120 per share, exactly.", "4", { bear: "20", base: "25", bull: "30" }, product("4")),
+  scenarioCase("scenario-fractional", "A fractional EPS and multiple multiply exactly: 1.23 × 17.5 is 21.525.", "1.23", { bear: "17.5", base: "0.5", bull: "333.333333333333333333333333" }, product("1.23")),
+  scenarioCase("scenario-zero-eps", "Zero EPS is not applicable to a P/E scenario, never a zero value.", "0", { bear: "20", base: "25", bull: "30" }, () => ({ kind: "gap", reason_code: "non_positive_base" })),
+  scenarioCase("scenario-negative-eps", "A loss per share is not applicable to a P/E scenario, never a negative value.", "-1.25", { bear: "20", base: "25", bull: "30" }, () => ({ kind: "gap", reason_code: "non_positive_base" })),
   {
     id: "reported-token-exact", category: "exact_source_token",
     rule: "A reported value is the source token exactly, with no float conversion or trimming.",
@@ -354,7 +374,7 @@ export const SELECTION_CASES: ReadonlyArray<SelectionCase> = [
 
 /** The production functions under test; a harness self-test swaps in broken ones. */
 export type EngineUnderTest = Readonly<{
-  evaluate(plan: FinancialPlanV1, bindings: ReadonlyMap<LocalId, SlotBinding>): GraphEvaluation;
+  evaluate(plan: FinancialPlan, bindings: ReadonlyMap<LocalId, SlotBinding>): GraphEvaluation;
   select(node: ReportedMetricNode, candidates: ReadonlyArray<InputCandidate>, policy: SelectionPolicy): SlotSelection;
 }>;
 
@@ -419,8 +439,13 @@ function describe(state: { status: string; reason_code?: string }): string {
 
 // --- mutants of a correct sealed unit ----------------------------------------
 
-export type MutantKind = "numeric_result" | "unit" | "period" | "cutoff" | "definition" | "peer_count" | "word_only_claim";
-export type Mutant = Readonly<{ id: string; kind: MutantKind; mutate(records: ReturnType<typeof mutable>): void }>;
+export type MutantKind = "numeric_result" | "unit" | "period" | "cutoff" | "definition" | "peer_count" | "word_only_claim" | "assumption";
+/** A correct sealed unit and the context it seals under. */
+type Baseline = Readonly<{ records: () => FinancialUnitRecords; context: FinancialSealContext }>;
+export type Mutant = Readonly<{ id: string; kind: MutantKind; baseline?: Baseline; mutate(records: ReturnType<typeof mutable>): void }>;
+
+const MARGIN: Baseline = { records: () => validRecords(), context: SEAL_CONTEXT };
+const SCENARIO: Baseline = { records: () => scenarioRecords(), context: SCENARIO_SEAL_CONTEXT };
 
 /** Replaces a bound input's payload and re-hashes it, as a tamperer who knows the hashing scheme would. */
 function rebind(records: ReturnType<typeof mutable>, slot: string, edit: (payload: any) => void): void {
@@ -447,6 +472,15 @@ export const MUTANTS: ReadonlyArray<Mutant> = [
     records.plan.plan.subjects.omitted_count = 1;
   } },
   { id: "value-in-words", kind: "word_only_claim", mutate: (records) => { resultRow(records, "out_rev").payload.value = "three hundred eighty-three billion"; } },
+  { id: "scenario-value", kind: "numeric_result", baseline: SCENARIO, mutate: (records) => { resultRow(records, "out_base").payload.value = "101"; } },
+  { id: "scenario-eps", kind: "numeric_result", baseline: SCENARIO, mutate: (records) => rebind(records, "eps", (payload) => {
+    payload.numeric = { ...payload.numeric, raw_token: "4.4", value: "4.4", native_value: "4.4" };
+  }) },
+  { id: "assumption-value", kind: "assumption", baseline: SCENARIO, mutate: (records) => { records.plan.plan.assumptions[1].value = "22"; } },
+  { id: "assumption-attribution", kind: "assumption", baseline: SCENARIO, mutate: (records) => { records.plan.plan.assumptions[1].attribution.ref = "chat:turn:2"; } },
+  { id: "assumption-hash", kind: "assumption", baseline: SCENARIO, mutate: (records) => {
+    records.computations.find((row: { node_id: string }) => row.node_id === "base").input_refs[1].hash = "0".repeat(64);
+  } },
 ];
 
 export type MutationReport = Readonly<{
@@ -455,20 +489,21 @@ export type MutationReport = Readonly<{
   passed: boolean;
 }>;
 
-/** Runs the valid baseline and every mutant through `verify`; passes only if the baseline verifies and every mutant is rejected. */
-export function runMutationSuite(verify: (records: FinancialUnitRecords) => boolean): MutationReport {
-  const verifies = (records: FinancialUnitRecords) => {
+/** Runs each valid baseline and every mutant through `verify`; passes only if every baseline verifies and every mutant is rejected. */
+export function runMutationSuite(verify: (records: FinancialUnitRecords, context: FinancialSealContext) => boolean): MutationReport {
+  const verifies = (records: FinancialUnitRecords, context: FinancialSealContext) => {
     try {
-      return verify(records);
+      return verify(records, context);
     } catch {
       return false;
     }
   };
-  const baseline = verifies(validRecords());
+  const baseline = [MARGIN, SCENARIO].every((base) => verifies(base.records(), base.context));
   const mutants = MUTANTS.map((mutant) => {
-    const records = mutable(validRecords());
+    const base = mutant.baseline ?? MARGIN;
+    const records = mutable(base.records());
     mutant.mutate(records);
-    return { id: mutant.id, kind: mutant.kind, rejected: !verifies(records) };
+    return { id: mutant.id, kind: mutant.kind, rejected: !verifies(records, base.context) };
   });
   return { baseline_verified: baseline, mutants, passed: baseline && mutants.every((mutant) => mutant.rejected) };
 }

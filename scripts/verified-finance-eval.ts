@@ -19,12 +19,11 @@ import {
   FINANCIAL_CATALOG_VERSION,
   FINANCIAL_PRESENTATION_VERSION,
   NUMERIC_POLICY,
-  type FinancialPlanV1,
+  type FinancialPlan,
 } from "../services/financial-core/src/index.ts";
 import { planFinancialRequest, type PlanningContext, type PlanningModel } from "../services/financial-engine/src/planner.ts";
 import { selectInput } from "../services/financial-engine/src/select-inputs.ts";
 import { FINANCIAL_PUBLICATION_SCHEMA_VERSION, FINANCIAL_VERIFIER_VERSION, verifyFinancialUnit } from "../services/snapshot/src/financial-verifier.ts";
-import { SEAL_CONTEXT } from "../services/snapshot/test/financial-fixtures.ts";
 import {
   COMPUTATION_CASES,
   HELD_OUT_QUESTIONS,
@@ -75,7 +74,7 @@ export async function buildReport(options: { model?: PlanningModel; mode?: "reco
     entry.total += 1;
     if (result.passed) entry.passed += 1;
   }
-  const mutation = runMutationSuite((records) => verifyFinancialUnit(records, "section", SEAL_CONTEXT).ok);
+  const mutation = runMutationSuite((records, context) => verifyFinancialUnit(records, "section", context).ok);
   const fidelity = options.model
     ? await planFidelity(options.model, options.mode ?? "recorded")
     : { mode: "not_measured" as const, reason: "no planning model was provided" };
@@ -190,7 +189,7 @@ function planningContext(question: HeldOutQuestion): PlanningContext {
 }
 
 /** Where the validated plan differs from the question's stated intent: companies, metrics, periods, operations. */
-export function compareIntent(question: HeldOutQuestion, plan: FinancialPlanV1): string[] {
+export function compareIntent(question: HeldOutQuestion, plan: FinancialPlan): string[] {
   const mentions = new Map(question.subjects.map((subject) => [subject.id, subject.mention]));
   const reported = plan.operations.filter((node) => node.operation === "reported_metric");
   const actual: IntendedPlan = {

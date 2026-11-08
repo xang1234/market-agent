@@ -6,7 +6,7 @@ configuration, or feature-service imports — `test/boundaries.test.ts` enforces
 
 | Module | Responsibility |
 |---|---|
-| `contracts.ts` | `FinancialPlanV1`, bound-input, draft/finalized result types, server-only runtime authority. Mirrors `spec/financial_plan_schema.json` and `spec/financial_result_schema.json`. |
+| `contracts.ts` | `FinancialPlanV1` and `FinancialPlanV2` (P/E scenarios), bound-input, draft/finalized result types, server-only runtime authority. Mirrors `spec/financial_plan_schema.json` and `spec/financial_result_schema.json`. |
 | `validate.ts` | Strict Ajv validation (`additionalProperties: false` everywhere), identity/reference checks, graph checks; returns deep-frozen copies. |
 | `canonical.ts` | `canonical_json.v1` serialization and domain-separated SHA-256 (semantic vs. owner-bound binding hashes). |
 | `exact-decimal.ts` | Legacy threshold contract (moved from `services/agents`, which keeps a facade) plus lossless source-token parsing and canonical rendering. No financial arithmetic. Dependency-free: the web build type-checks it. |
@@ -17,6 +17,32 @@ configuration, or feature-service imports — `test/boundaries.test.ts` enforces
 | `periods.ts`, `dimensions.ts` | Exact period identity (52/53-week aware), unit/scope/basis compatibility, typed dimensionless conversions. |
 | `operations.ts`, `predicates.ts` | The approved operations and exact threshold/peer predicates; each composes its own compatibility checks; incompatibilities are named gaps. |
 | `graph.ts`, `publication-units.ts`, `coverage.ts` | DAG validation and limits, frozen unit closures, dependency propagation, integrity isolation, and coverage. |
+
+## P/E scenarios (#201)
+
+A `scenario_eps_multiple` node multiplies one company's reported diluted EPS
+for one fiscal year by a P/E the user supplied. The result is a mechanical
+scenario value in the EPS currency per share, not a price target.
+
+- A plan with scenarios is a `financial_plan.v2`: a v1 plan plus exactly three
+  `assumptions`, bear, base, and bull in that order. Each is an exact, positive,
+  canonical decimal attributed to the request that stated it, and exactly one
+  scenario node reads each. A v1 plan can carry neither.
+- An assumption is plan configuration, never a fact, a binding, or a run
+  input, so it can never fill a missing reported input.
+- A plan is invalid unless all three scenario nodes read one `reported_metric`
+  of `eps_diluted` at `FY` or the latest annual period
+  (`invalid_scenario_earnings`), and each is one output of one publication
+  unit (`split_scenarios`). Each scenarios table therefore has bear, base, and
+  bull in that order.
+- Zero or negative EPS is `non_positive_base`. An EPS bound to a period that
+  is not one fiscal year is `unsupported_period`.
+- The scenario node's lineage hash and its computation's `input_refs` both name
+  `{assumption_id, hash}` after the EPS ref. The `assumption` hash covers the
+  id, scenario, value, and attribution, and `planSemanticHash` keeps the
+  attribution. Every other node reads no assumption, so v1 hashes are unchanged.
+- Content with a `scenarios` presentation is `financial-presentation.v3`. All
+  other content stays v2.
 
 ## Numeric limits (numeric-policy.v1)
 

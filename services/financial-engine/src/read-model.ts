@@ -5,7 +5,7 @@
 // readable only once finalized. Another owner's run or result is
 // indistinguishable from a missing one.
 
-import type { FinancialPlanV1, LocalId } from "../../financial-core/src/index.ts";
+import type { FinancialPlan, LocalId } from "../../financial-core/src/index.ts";
 import type { SqlExecutor } from "./ports.ts";
 import type { ExecutionState } from "./run-record.ts";
 
@@ -79,7 +79,7 @@ export type CommittedResultRecord = Readonly<{
   payload: unknown;
   result_hash: string;
   finalized_at: string;
-  plan: FinancialPlanV1;
+  plan: FinancialPlan;
   interpretation: string | null;
   knowledge_cutoff: string;
   unit_coverage: "complete" | "partial" | "none" | null;

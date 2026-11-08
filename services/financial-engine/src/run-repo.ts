@@ -12,7 +12,7 @@ import {
   planBindingHash,
   planSemanticHash,
   type CoverageState,
-  type FinancialPlanV1,
+  type FinancialPlan,
   type FinancialRuntimeAuthority,
 } from "../../financial-core/src/index.ts";
 import { appendRunEvent } from "./events-repo.ts";
@@ -40,7 +40,7 @@ export function grantsRecordedClasses(authority: FinancialRuntimeAuthority, run:
  */
 export async function reserveRun(
   client: SqlExecutor,
-  input: { authority: FinancialRuntimeAuthority; request_key: string; plan: FinancialPlanV1; replay_of_run_id?: string | null },
+  input: { authority: FinancialRuntimeAuthority; request_key: string; plan: FinancialPlan; replay_of_run_id?: string | null },
 ): Promise<ReserveRunResult> {
   const { authority, plan } = input;
   const requestHash = planSemanticHash(plan);
@@ -146,8 +146,8 @@ export async function reserveReplayRun(
 export async function findPlanForRequest(
   client: SqlExecutor,
   input: { authority: FinancialRuntimeAuthority; request_key: string },
-): Promise<FinancialPlanV1 | null> {
-  const row = (await client.query<{ plan: FinancialPlanV1 }>(
+): Promise<FinancialPlan | null> {
+  const row = (await client.query<{ plan: FinancialPlan }>(
     `select p.plan from financial_runs r join financial_plans p on p.plan_id = r.plan_id and p.user_id = r.user_id
       where r.user_id = $1 and r.parent_kind = $2 and r.parent_id = $3 and r.request_key = $4`,
     [input.authority.owner_user_id, input.authority.parent.kind, input.authority.parent.id, input.request_key],

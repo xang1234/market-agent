@@ -1,4 +1,4 @@
-// Translates a complete request into a bounded, validated FinancialPlanV1.
+// Translates a complete request into a bounded, validated FinancialPlan.
 //
 // Authority stays with the server: the subject set comes from server-side
 // resolution; definition versions from the approved catalog; cutoff, basis,
@@ -20,7 +20,7 @@ import {
   resolveMetricDefinition,
   validateFinancialPlan,
   type ExecutionLimits,
-  type FinancialPlanV1,
+  type FinancialPlan,
   type FinancialRuntimeAuthority,
   type FinancialSubjectRef,
   type LocalId,
@@ -108,7 +108,7 @@ export type Clarification = Readonly<{
 }>;
 
 export type PlanningResult =
-  | { outcome: "ready"; plan: FinancialPlanV1; model_calls: number }
+  | { outcome: "ready"; plan: FinancialPlan; model_calls: number }
   | { outcome: "needs_clarification"; clarification: Clarification; model_calls: number }
   | { outcome: "configuration_needed"; reason: string; model_calls: 0 }
   | { outcome: "unsupported"; reason: string; issues: ValidationIssue[]; model_calls: number };
@@ -186,7 +186,7 @@ export function buildDeterministicPlan(context: PlanningContext, draft: unknown,
   if (unresolvedSubjectClarification(context)) {
     return { outcome: "configuration_needed", reason: "a configured subject does not resolve to one canonical identity", model_calls: 0 };
   }
-  const parsed = checkDraft(draft);
+  const parsed = checkDraft(draft, DETERMINISTIC_KEYS);
   const attempt = parsed.ok ? assemblePlan(context, parsed.value, { kind: "deterministic", adapter_version: DETERMINISTIC_ADAPTER_VERSION, model: null, prompt_version: null }, units) : parsed;
   if (attempt.ok) return finish(attempt.value, 0);
   if (attempt.kind === "clarify") return { outcome: "configuration_needed", reason: attempt.clarification.question, model_calls: 0 };
@@ -201,6 +201,8 @@ type Draft = {
   operations: Array<Record<string, unknown>>;
   outputs: Array<{ output_id: string; node_id: string }>;
   thresholds: Array<Record<string, unknown>>;
+  /** Only a server-built draft declares them, attributed by its builder: a carried multiple keeps the request that stated it. */
+  assumptions: unknown[] | undefined;
 };
 
 type Rejection =
@@ -211,6 +213,7 @@ type Rejection =
 type Attempt<T> = { ok: true; value: T } | ({ ok: false } & Rejection);
 
 const READY_KEYS = ["outcome", "subjects", "operations", "outputs", "thresholds"];
+const DETERMINISTIC_KEYS = [...READY_KEYS, "assumptions"];
 
 function parseDraft(text: string): Attempt<Draft> {
   const body = text.trim().replace(/^```(?:json)?\s*/u, "").replace(/\s*```$/u, "");
@@ -229,18 +232,19 @@ function parseDraft(text: string): Attempt<Draft> {
     const choices = Array.isArray(value.choices) ? value.choices.filter((choice): choice is string => typeof choice === "string").slice(0, 10) : [];
     return { ok: false, kind: "clarify", clarification: clarification("request", question, choices.map((label, index) => ({ choice_id: `option_${index + 1}`, label }))) };
   }
-  return checkDraft(value);
+  return checkDraft(value, READY_KEYS);
 }
 
-function checkDraft(value: unknown): Attempt<Draft> {
+function checkDraft(value: unknown, keys: ReadonlyArray<string>): Attempt<Draft> {
   if (!isRecord(value)) return invalid("$", "invalid_draft", "the draft must be an object");
-  const unknownKeys = Object.keys(value).filter((key) => !READY_KEYS.includes(key));
+  const unknownKeys = Object.keys(value).filter((key) => !keys.includes(key));
   if (unknownKeys.length > 0) return invalid("$", "unknown_field", `fields not allowed in a plan draft: ${unknownKeys.join(", ")}`);
   if (value.outcome !== undefined && value.outcome !== "ready") return invalid("$.outcome", "invalid_outcome", "outcome must be ready, needs_clarification, or unsupported");
   for (const key of ["subjects", "operations", "outputs"] as const) {
     if (!Array.isArray(value[key])) return invalid(`$.${key}`, "invalid_draft", `${key} must be an array`);
   }
   if (value.thresholds !== undefined && !Array.isArray(value.thresholds)) return invalid("$.thresholds", "invalid_draft", "thresholds must be an array");
+  if (value.assumptions !== undefined && !Array.isArray(value.assumptions)) return invalid("$.assumptions", "invalid_draft", "assumptions must be an array");
   for (const subject of value.subjects as unknown[]) {
     if (!isRecord(subject) || typeof subject.slot_id !== "string" || typeof subject.mention !== "string" || Object.keys(subject).length !== 2) {
       return invalid("$.subjects", "invalid_draft", "each subject is {slot_id, mention}");
@@ -261,11 +265,12 @@ function checkDraft(value: unknown): Attempt<Draft> {
       operations: value.operations as Draft["operations"],
       outputs: value.outputs as Draft["outputs"],
       thresholds: (value.thresholds ?? []) as Draft["thresholds"],
+      assumptions: value.assumptions as Draft["assumptions"],
     },
   };
 }
 
-function assemblePlan(context: PlanningContext, draft: Draft, planner: FinancialPlanV1["planner"], units: DeterministicUnits = [{ unit_id: "answer", output_ids: draft.outputs.map((output) => output.output_id) }]): Attempt<FinancialPlanV1> {
+function assemblePlan(context: PlanningContext, draft: Draft, planner: FinancialPlan["planner"], units: DeterministicUnits = [{ unit_id: "answer", output_ids: draft.outputs.map((output) => output.output_id) }]): Attempt<FinancialPlan> {
   const resolved = context.requested_subjects.flatMap((subject) =>
     subject.resolution.status === "resolved" ? [{ mention: subject.mention, ref: subject.resolution.subject_ref, label: subject.resolution.label }] : [],
   );
@@ -335,7 +340,7 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
   if (issues.length > 0) return { ok: false, kind: "invalid", issues };
 
   const plan = {
-    schema_version: "financial_plan.v1",
+    ...(draft.assumptions === undefined ? { schema_version: "financial_plan.v1" } : { schema_version: "financial_plan.v2", assumptions: draft.assumptions }),
     plan_id: context.plan_id,
     origin: context.origin,
     planner,
@@ -378,8 +383,8 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
 
 /**
  * The reported operands an answer resting on a figure always shows beside it:
- * free cash flow's OCF and capex (#324), and a valuation's price and the share
- * count or EPS it reads (#444).
+ * free cash flow's OCF and capex (#324), a valuation's price and the share
+ * count or EPS it reads (#444), and the EPS a P/E scenario multiplies (#201).
  */
 function shownOperands(node: OperationNode): LocalId[] {
   switch (node.operation) {
@@ -389,13 +394,15 @@ function shownOperands(node: OperationNode): LocalId[] {
       return [node.price, node.shares];
     case "pe_ratio":
       return [node.price, node.earnings];
+    case "scenario_eps_multiple":
+      return [node.earnings];
     default:
       return [];
   }
 }
 
 /** The plan's outputs, each preceded by the shown operands of every figure it depends on that its unit does not already publish. */
-function withShownOperands(plan: FinancialPlanV1): RequestedOutput[] {
+function withShownOperands(plan: FinancialPlan): RequestedOutput[] {
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
   const published = new Set(plan.outputs.map((output) => `${output.unit_id}/${output.node_id}`));
   const ids = new Set(plan.outputs.map((output) => output.output_id));
@@ -423,11 +430,11 @@ function inputOutputId(input: string, taken: ReadonlySet<string>): string {
   }
 }
 
-function finish(plan: FinancialPlanV1, calls: number): PlanningResult {
+function finish(plan: FinancialPlan, calls: number): PlanningResult {
   return { outcome: "ready", plan, model_calls: calls };
 }
 
-function unresolvedSubjectClarification(context: PlanningContext): Clarification | null {
+export function unresolvedSubjectClarification(context: PlanningContext): Clarification | null {
   for (const subject of context.requested_subjects) {
     if (subject.resolution.status === "ambiguous") {
       return clarification(
@@ -457,7 +464,7 @@ function isApprovedOperation(kind: unknown): kind is OperationKind {
 
 const VALUATIONS: ReadonlySet<string> = new Set<OperationKind>(["market_cap", "pe_ratio"]);
 // The model planner was never evaluated on these, so only server-built plans ask for them (#398).
-const DETERMINISTIC_OPERATIONS: ReadonlySet<string> = new Set<OperationKind>(["spread", "period_rank"]);
+const DETERMINISTIC_OPERATIONS: ReadonlySet<string> = new Set<OperationKind>(["spread", "period_rank", "scenario_eps_multiple"]);
 
 function systemPrompt(): string {
   const metrics = PLANNABLE_METRICS.map((definition) => definition.metric_key).join(", ");

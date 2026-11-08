@@ -61,6 +61,7 @@ test("the catalog registers exactly the approved operations, each versioned", ()
     period_rank: "period_rank.v1",
     ratio: "ratio.v1",
     reported_metric: "reported_metric.v1",
+    scenario_eps_multiple: "scenario_eps_multiple.v1",
     spread: "spread.v1",
     threshold: "threshold.v1",
     trailing_sum: "trailing_sum.v1",

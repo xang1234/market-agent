@@ -1,4 +1,4 @@
-import { coverSameMonths, DEFAULT_EXECUTION_LIMITS, dayNumber, type FinancialPlanV1, type FinancialRuntimeAuthority, type FinancialSubjectRef } from "../../financial-core/src/index.ts";
+import { coverSameMonths, DEFAULT_EXECUTION_LIMITS, dayNumber, type FinancialPlan, type FinancialRuntimeAuthority, type FinancialSubjectRef } from "../../financial-core/src/index.ts";
 import { isDatabaseError } from "../../financial-engine/src/evidence-adapter.ts";
 import { buildDeterministicPlan, type PlanningContext, type PlanningResult, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort, InputCandidate, SqlExecutor } from "../../financial-engine/src/ports.ts";
@@ -86,7 +86,7 @@ export async function planMarginTrend(context: PlanningContext, evidence: Financ
  * notes what its first attempt planned. None for any other plan.
  */
 export async function overviewOmissions(
-  plan: FinancialPlanV1,
+  plan: FinancialPlan,
   authority: FinancialRuntimeAuthority,
   evidence: FinancialEvidencePort,
   name: (slot: string) => string,
@@ -105,7 +105,7 @@ export async function overviewOmissions(
 }
 
 // Each company at the quarter its saved margins are of; null when one's is not a quarter.
-function savedAnchors(plan: FinancialPlanV1, ids: ReadonlyArray<(name: string) => string>, companies: ReadonlyArray<RevenueQuarters>): Anchored[] | null {
+function savedAnchors(plan: FinancialPlan, ids: ReadonlyArray<(name: string) => string>, companies: ReadonlyArray<RevenueQuarters>): Anchored[] | null {
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
   const anchored = companies.flatMap((company, index) => {
     const margin = nodes.get(ids[index]!(MARGINS[0].metric));

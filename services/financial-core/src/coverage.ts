@@ -16,7 +16,7 @@ import {
   GAP_DISPOSITIONS,
   operationDependencies,
   type CoverageState,
-  type FinancialPlanV1,
+  type FinancialPlan,
   type GapDisposition,
   type LocalId,
   type OperationNode,
@@ -66,7 +66,7 @@ export type CoverageSummary = {
   by_disposition: Record<GapDisposition, number>;
 };
 
-export function evaluatePlan(plan: FinancialPlanV1, reported: ReportedMetricEvaluator): GraphEvaluation {
+export function evaluatePlan(plan: FinancialPlan, reported: ReportedMetricEvaluator): GraphEvaluation {
   const needed = dependencyClosure(plan, plan.outputs.map((output) => output.node_id));
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
   const states = new Map<LocalId, NodeState>();

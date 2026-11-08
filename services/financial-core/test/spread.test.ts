@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { FinancialPlanV1, MarginNode, SpreadNode } from "../src/contracts.ts";
+import type { FinancialPlan, MarginNode, SpreadNode } from "../src/contracts.ts";
 import { evaluatePlan } from "../src/coverage.ts";
 import { margin, operationGap, spread, type FinancialOperand, type OperandOutcome } from "../src/operations.ts";
 import { presentFinancialUnit } from "../src/presentation.ts";
@@ -73,7 +73,7 @@ test("a spread of multiples has no percentage points", () => {
   assert.deepEqual(gap(spread(SPREAD, ratio("a_pe", "a"), ratio("b_pe", "b"))), ["unsupported", "unsupported_operation"]);
 });
 
-function leadPlan(): FinancialPlanV1 {
+function leadPlan(): FinancialPlan {
   const fixture = planFixture();
   const validated = validateFinancialPlan({
     ...fixture,

@@ -7,7 +7,7 @@
 // finalization transaction; they read back their own committed records
 // afterwards.
 
-import type { FinancialPlanV1, FinancialRuntimeAuthority } from "../../financial-core/src/index.ts";
+import type { FinancialPlan, FinancialRuntimeAuthority } from "../../financial-core/src/index.ts";
 import type { PersistParentArtifact } from "./finalize.ts";
 import { acquireLease, releaseLease, type AcquireLeaseResult } from "./lease.ts";
 import { PlanningModelError, type Clarification, type PlanningResult } from "./planner.ts";
@@ -80,7 +80,7 @@ export async function publishRequest(pool: FinancialPool, request: FinancialRequ
  * commit the caller never heard about lands on a completed run or on existing
  * units, never on a second publication.
  */
-async function reserveAndDrive(client: SnapshotTransactionClient, request: FinancialRequest, plan: FinancialPlanV1): Promise<RequestOutcome> {
+async function reserveAndDrive(client: SnapshotTransactionClient, request: FinancialRequest, plan: FinancialPlan): Promise<RequestOutcome> {
   const reserved = await reserveRun(client, { authority: request.authority, request_key: request.request_key, plan });
   if (reserved.status === "conflict") return { status: "gap", reason: "request_conflict" };
   const { run } = reserved;
@@ -112,7 +112,7 @@ const UNAVAILABLE: Readonly<Record<Exclude<AcquireLeaseResult["status"], "acquir
   terminal: "run_failed",
 };
 
-async function planOrGap(db: SqlExecutor, request: FinancialRequest): Promise<RequestOutcome | Readonly<{ status: "planned"; plan: FinancialPlanV1 }>> {
+async function planOrGap(db: SqlExecutor, request: FinancialRequest): Promise<RequestOutcome | Readonly<{ status: "planned"; plan: FinancialPlan }>> {
   let result: PlanningResult;
   try {
     result = await request.plan(db);

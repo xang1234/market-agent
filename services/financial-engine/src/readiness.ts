@@ -7,6 +7,7 @@
 
 import {
   FINANCIAL_CATALOG_VERSION,
+  FINANCIAL_PRESENTATION_V3,
   FINANCIAL_PRESENTATION_VERSION,
   METRIC_CATALOG_V1,
   NUMERIC_POLICY,
@@ -57,6 +58,7 @@ export async function checkFinancialReadiness(db: SqlExecutor, registry: Financi
     ["certificate_versions", FINANCIAL_PUBLICATION_SCHEMA_VERSION],
     ["verifier_versions", FINANCIAL_VERIFIER_VERSION],
     ["presentation_versions", FINANCIAL_PRESENTATION_VERSION],
+    ["presentation_versions", FINANCIAL_PRESENTATION_V3],
     ...Object.values(OPERATION_REGISTRY).map((spec) => ["operation_versions", spec.operation_version] as const),
     ...[...METRIC_CATALOG_V1.values()].map((definition) => ["definition_versions", definition.definition_version] as const),
   ];

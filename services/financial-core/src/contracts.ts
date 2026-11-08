@@ -26,6 +26,7 @@ export type IsoDateTime = string;
 export type ValidationIssue = { path: string; code: string; message: string };
 
 export const FINANCIAL_PLAN_SCHEMA_VERSION = "financial_plan.v1";
+export const FINANCIAL_PLAN_V2_SCHEMA_VERSION = "financial_plan.v2";
 export const FINANCIAL_RESULT_SCHEMA_VERSION = "financial_result.v1";
 export const BOUND_INPUT_SCHEMA_VERSION = "financial_bound_input.v1";
 export const BOUND_PRICE_INPUT_SCHEMA_VERSION = "financial_bound_price_input.v1";
@@ -46,6 +47,7 @@ export const OPERATION_KINDS = [
   "pe_ratio",
   "spread",
   "period_rank",
+  "scenario_eps_multiple",
 ] as const;
 export type OperationKind = (typeof OPERATION_KINDS)[number];
 
@@ -245,6 +247,9 @@ export type PeriodRankNode = NodeBase & {
   direction: "highest" | "lowest";
 };
 
+/** Reported annual diluted EPS times one of the plan's P/E assumptions (#201). */
+export type ScenarioEpsMultipleNode = NodeBase & { operation: "scenario_eps_multiple"; earnings: LocalId; assumption_id: LocalId };
+
 export type OperationNode =
   | ReportedMetricNode
   | ChangeNode
@@ -257,7 +262,8 @@ export type OperationNode =
   | MarketCapNode
   | PeRatioNode
   | SpreadNode
-  | PeriodRankNode;
+  | PeriodRankNode
+  | ScenarioEpsMultipleNode;
 
 export type RequestedOutput = { output_id: LocalId; node_id: LocalId; unit_id: LocalId };
 export type PublicationUnit = { unit_id: LocalId; kind: PublicationUnitKind };
@@ -272,6 +278,23 @@ export type PlanThreshold = {
   unit: FinancialUnit;
   attribution: ThresholdAttribution;
 };
+
+export const SCENARIOS = ["bear", "base", "bull"] as const;
+export type Scenario = (typeof SCENARIOS)[number];
+
+/**
+ * A P/E the user supplied: plan configuration, never evidence, and never a
+ * fact or a binding. `value` is a canonical positive decimal. Unlike a
+ * threshold's, the attribution is part of the plan's semantic identity,
+ * because the answer shows it.
+ */
+export type PlanAssumption<S extends Scenario = Scenario> = {
+  assumption_id: LocalId;
+  scenario: S;
+  value: DecimalString;
+  attribution: { kind: "user_request"; ref: string; captured_at: IsoDateTime };
+};
+export type ScenarioAssumptions = readonly [PlanAssumption<"bear">, PlanAssumption<"base">, PlanAssumption<"bull">];
 
 export type ExecutionLimits = {
   max_subjects: number;
@@ -322,7 +345,18 @@ export type FinancialPlanV1 = {
   thresholds: PlanThreshold[];
   limits: ExecutionLimits;
   presentation_template_version: VersionTag;
+  /** Lets `plan.assumptions` read either version without narrowing. */
+  assumptions?: never;
 };
+
+/** v1 plus bear, base, and bull P/E assumptions. Scenario nodes exist only here (schema: OperationNodeV2). */
+export type FinancialPlanV2 = Omit<FinancialPlanV1, "schema_version" | "assumptions"> & {
+  schema_version: typeof FINANCIAL_PLAN_V2_SCHEMA_VERSION;
+  assumptions: ScenarioAssumptions;
+};
+
+/** A stored or arbitrary plan. Builders of v1 plans keep FinancialPlanV1. */
+export type FinancialPlan = FinancialPlanV1 | FinancialPlanV2;
 
 // ---------------------------------------------------------------------------
 // Server-only runtime authority. Never part of a plan and never model-supplied.
@@ -560,6 +594,25 @@ export type BoundPriceInputV1 = {
   eligibility: { selection_policy_version: VersionTag; candidate_set_digest: Sha256Hex };
 };
 
+/**
+ * A persisted, contradictory, or incomplete execution record: a missing
+ * binding, a unit the plan does not declare, a re-execution that diverges
+ * from its checkpoint. Never reinterpreted as missing data.
+ */
+export class ExecutionIntegrityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ExecutionIntegrityError";
+  }
+}
+
+/** The assumption a scenario node reads, which a valid plan declares. */
+export function scenarioAssumption(plan: FinancialPlan, node: ScenarioEpsMultipleNode): PlanAssumption {
+  const assumption = plan.assumptions?.find((entry) => entry.assumption_id === node.assumption_id);
+  if (!assumption) throw new ExecutionIntegrityError(`node ${node.node_id} reads an undeclared assumption`);
+  return assumption;
+}
+
 /** Explicit dependency edges of an operation node, in declared order. */
 export function operationDependencies(node: OperationNode): LocalId[] {
   switch (node.operation) {
@@ -589,5 +642,7 @@ export function operationDependencies(node: OperationNode): LocalId[] {
       return [node.price, node.earnings];
     case "spread":
       return [node.left, node.right];
+    case "scenario_eps_multiple":
+      return [node.earnings];
   }
 }

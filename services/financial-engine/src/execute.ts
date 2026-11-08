@@ -18,7 +18,7 @@ import {
   summarizeCoverage,
   type CoverageSummary,
   type ExecutionLimits,
-  type FinancialPlanV1,
+  type FinancialPlan,
   type FinancialRuntimeAuthority,
 } from "../../financial-core/src/index.ts";
 import { bindPlanInputs } from "./bind-inputs.ts";
@@ -38,7 +38,7 @@ export type ExecutionReport =
 export type ExecuteRunInput = {
   client: SqlExecutor;
   lease: RunLease;
-  plan: FinancialPlanV1;
+  plan: FinancialPlan;
   authority: FinancialRuntimeAuthority;
   evidence: (executor: SqlExecutor) => FinancialEvidencePort;
   parent_limits: Partial<ExecutionLimits>;
