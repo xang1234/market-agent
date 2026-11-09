@@ -10,6 +10,7 @@
     "dev": "node --experimental-strip-types src/dev.ts",
     "test": "node --experimental-strip-types --test \"test/**/*.test.ts\"",
     "backfill:sec-statements": "node --experimental-strip-types src/sec-statements-backfill-cli.ts",
+    "capture:consensus": "node --experimental-strip-types src/consensus-capture-cli.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

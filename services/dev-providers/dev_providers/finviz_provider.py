@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .finviz_consensus import consensus_cells
+
 
 US_EQUITY_MICS = {"ARCX", "BATS", "IEXG", "XASE", "XNAS", "XNYS"}
 
@@ -25,6 +27,9 @@ class FinvizProvider:
         symbol = finviz_symbol_for_listing(ticker, mic)
         fundamentals = self._ticker_fundamentals(symbol)
         return normalize_profile(fundamentals)
+
+    def consensus(self, *, ticker: str, mic: str) -> list[dict[str, Any]]:
+        return consensus_cells(self._ticker_fundamentals(finviz_symbol_for_listing(ticker, mic)))
 
     def _ticker_fundamentals(self, symbol: str) -> dict[str, Any]:
         from finvizfinance.quote import finvizfinance

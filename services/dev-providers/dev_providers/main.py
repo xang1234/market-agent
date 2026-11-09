@@ -9,12 +9,16 @@ from typing import Any
 
 from fastapi import FastAPI, Request
 
+from .finviz_consensus import finviz_failure
 from .finviz_provider import FinvizProvider
 from .yfinance_provider import YFinanceProvider
 
 
 PROVIDER_TIMEOUT_SECONDS = 4
 NEGATIVE_TTL_SECONDS = 60
+# finvizfinance retries a Cloudflare wall, a 429 and 5xx itself (4 attempts, backoff
+# capped at 8s), so a consensus read waits past that before it calls Finviz down.
+FINVIZ_CONSENSUS_TIMEOUT_SECONDS = 75
 
 
 app = FastAPI(title="market-agent dev providers")
@@ -176,6 +180,30 @@ async def reference_profile(request: Request) -> dict[str, Any]:
     return _available(profile)
 
 
+@app.post("/fundamentals/finviz-consensus")
+async def fundamentals_finviz_consensus(request: Request) -> dict[str, Any]:
+    body = await request.json()
+    ticker = str(body.get("ticker", "")).strip().upper()
+    mic = str(body.get("mic", "")).strip().upper()
+    key = f"finviz-consensus:{ticker}:{mic}"
+    cached = _negative_cache_get(key)
+    if cached:
+        return cached
+
+    try:
+        cells = await _bounded_call(
+            "finviz",
+            lambda: _finviz_provider.consensus(ticker=ticker, mic=mic),
+            FINVIZ_CONSENSUS_TIMEOUT_SECONDS,
+        )
+    except ProviderUnavailable as exc:
+        return _cache_unavailable(key, exc)
+    except Exception as exc:
+        return _cache_unavailable(key, ProviderUnavailable(*finviz_failure(exc)))
+
+    return _available({"cells": cells})
+
+
 @app.post("/fundamentals/earnings")
 async def fundamentals_earnings(request: Request) -> dict[str, Any]:
     body = await request.json()
@@ -273,11 +301,11 @@ async def fundamentals_holders(request: Request) -> dict[str, Any]:
     return _available(holders)
 
 
-async def _bounded_call(provider_name: str, fn: Callable[[], Any]) -> Any:
+async def _bounded_call(provider_name: str, fn: Callable[[], Any], timeout: float = PROVIDER_TIMEOUT_SECONDS) -> Any:
     executor = _provider_executors[provider_name]
     loop = asyncio.get_running_loop()
     try:
-        return await asyncio.wait_for(loop.run_in_executor(executor, fn), PROVIDER_TIMEOUT_SECONDS)
+        return await asyncio.wait_for(loop.run_in_executor(executor, fn), timeout)
     except TimeoutError as exc:
         raise ProviderUnavailable("provider_error", True, f"{provider_name}: timeout") from exc
 
