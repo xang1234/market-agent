@@ -240,6 +240,16 @@ export const US_GAAP_TO_METRIC_KEY: Readonly<Record<string, string>> = {
   OperatingExpenses: "operating_expenses",
   OperatingIncomeLoss: "operating_income",
 
+  // Income before income taxes, including equity-method income. A filer that
+  // reports its affiliates' profit after tax (CAT) tags only the figure before
+  // that profit, a different figure, so it keeps its own key.
+  IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest: "pretax_income",
+  IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments: "pretax_income_before_equity_method",
+  IncomeTaxExpenseBenefit: "income_tax_expense",
+  // The expense recognized, which can differ from the cash flow add-back
+  // (stock_based_compensation): ADBE, NVDA.
+  AllocatedShareBasedCompensationExpense: "stock_based_compensation_expense",
+
   // Net income attributable to the parent
   NetIncomeLoss: "net_income",
 
@@ -258,15 +268,28 @@ export const US_GAAP_TO_METRIC_KEY: Readonly<Record<string, string>> = {
   // broader productive-assets line, which adds purchased intangibles.
   PaymentsToAcquirePropertyPlantAndEquipment: "capex",
   PaymentsToAcquireProductiveAssets: "capex",
+  ShareBasedCompensation: "stock_based_compensation",
 
   // Balance sheet (instants at the period end)
   Assets: "total_assets",
   Liabilities: "total_liabilities",
   StockholdersEquity: "total_equity",
   CashAndCashEquivalentsAtCarryingValue: "cash_and_equivalents",
+  // Each investment concept is its own figure: marketable securities may hold
+  // equities, debt securities hold none, and short-term investments may hold
+  // time deposits that are not securities.
+  MarketableSecuritiesCurrent: "marketable_securities_current",
+  MarketableSecuritiesNoncurrent: "marketable_securities_noncurrent",
+  DebtSecuritiesCurrent: "debt_securities_current",
+  ShortTermInvestments: "short_term_investments",
+  LongTermDebtCurrent: "long_term_debt_current",
+  LongTermDebtNoncurrent: "long_term_debt_noncurrent",
+  CommercialPaper: "commercial_paper",
+  ShortTermBorrowings: "short_term_borrowings",
+  RevenueRemainingPerformanceObligation: "remaining_performance_obligations",
   // ponytail: no total_debt. Filers split debt across LongTermDebt, its current and
   // noncurrent parts, and commercial paper; summing tags is a definition, not a
-  // reported figure. Add it with a reviewed debt definition.
+  // reported figure. Add it with a reviewed debt definition (#226).
 
   // Net income including noncontrolling interest, last: one whose period
   // disagrees is dropped alone, so it is never the value the others are
@@ -834,18 +857,31 @@ const INCOME_KEYS: ReadonlySet<string> = new Set([
   "eps_diluted",
   "weighted_average_basic_shares",
   "weighted_average_diluted_shares",
+  "pretax_income",
+  "pretax_income_before_equity_method",
+  "income_tax_expense",
+  "stock_based_compensation_expense",
 ]);
 
 export const SEC_INCOME_METRIC_KEYS: ReadonlyArray<string> = Object.freeze(
   Array.from(INCOME_KEYS),
 );
 
-const CASHFLOW_KEYS: ReadonlySet<string> = new Set(["operating_cash_flow", "capex"]);
+const CASHFLOW_KEYS: ReadonlySet<string> = new Set(["operating_cash_flow", "capex", "stock_based_compensation"]);
 const BALANCE_KEYS: ReadonlySet<string> = new Set([
   "total_assets",
   "total_liabilities",
   "total_equity",
   "cash_and_equivalents",
+  "marketable_securities_current",
+  "marketable_securities_noncurrent",
+  "debt_securities_current",
+  "short_term_investments",
+  "long_term_debt_current",
+  "long_term_debt_noncurrent",
+  "commercial_paper",
+  "short_term_borrowings",
+  "remaining_performance_obligations",
 ]);
 
 const FAMILY_KEYS: Readonly<Record<StatementFamily, ReadonlySet<string>>> = {
