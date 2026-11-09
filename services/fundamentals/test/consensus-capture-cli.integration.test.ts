@@ -113,6 +113,19 @@ test("capture:consensus writes one dated row per field, appends nothing on a sam
   assert.deepEqual([...new Set((await rows()).map((row) => row.ticker))], ["AAPL"], "rows written before the block stay");
 
   await db.query(`delete from consensus_captures`);
+  let clock = new Date("2026-11-10T23:59:59Z");
+  const acrossMidnight: ConsensusSidecar = async (requested) => {
+    if (requested.ticker === "CAL") clock = new Date("2026-11-11T00:00:01Z");
+    return sidecar("2.90")(requested);
+  };
+  await captureConsensus(db, acrossMidnight, { ...options, now: () => clock, tickers: ["AAPL", "CAL"] });
+  assert.deepEqual(
+    Object.fromEntries((await rows()).map((row) => [row.ticker, row.captured_on])),
+    { AAPL: "2026-11-10", CAL: "2026-11-11" },
+    "a run crossing UTC midnight dates each ticker by its own retrieval",
+  );
+
+  await db.query(`delete from consensus_captures`);
   const listing = async (issuer: string, n: number, ticker: string, mic: string) => {
     await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1, $2, 'common_stock')`, [`36000000-0000-4000-8000-00000000030${n}`, issuer]);
     await db.query(

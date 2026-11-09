@@ -51,7 +51,6 @@ export async function captureConsensus(
   },
 ): Promise<CaptureOutcome> {
   const { log } = options;
-  const capturedOn = options.now().toISOString().slice(0, 10);
   const all = await usListings(db);
   const outcome: CaptureOutcome = { inserted: 0, failures: 0, blocked: false };
   for (const ticker of options.tickers ?? []) {
@@ -90,7 +89,9 @@ export async function captureConsensus(
       continue;
     }
     try {
-      const inserted = await writeCells(db, listing, parseCells(envelope.data), capturedOn, options.now());
+      const retrievedAt = options.now();
+      const capturedOn = retrievedAt.toISOString().slice(0, 10);
+      const inserted = await writeCells(db, listing, parseCells(envelope.data), capturedOn, retrievedAt);
       outcome.inserted += inserted;
       log.log(`${listing.ticker}: ${inserted} new field(s) for ${capturedOn}`);
     } catch (error) {
