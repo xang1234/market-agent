@@ -995,5 +995,34 @@
     "companies": ["NVDA", "AMD"],
     "prior": {"route":"comparison","reads":"comparison","companies":[{"issuer_id":"60000000-0000-4000-8000-000000000001","label":"NVDA"},{"issuer_id":"60000000-0000-4000-8000-000000000002","label":"AMD"}],"peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":[],"fiscal_year":null,"fiscal_quarter":null,"price_window":{"kind":"ytd","cutoff":"2026-08-31T00:00:00.000Z"},"benchmark":false,"inherited":[]},
     "expected": {"route":"comparison","price_window":null}
+  },
+  {
+    "id": 131,
+    "question": "What is AAPL's long-term debt?",
+    "companies": ["AAPL"],
+    "prior": null,
+    "expected": {"route":"statements","reads":"statements","peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":["long_term_debt"],"guidance":false,"explains":false,"income_items":[],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"period":"none"}
+  },
+  {
+    "id": 132,
+    "question": "What is AAPL's total debt?",
+    "companies": ["AAPL"],
+    "prior": null,
+    "expected": {"route":"unavailable_metric","reads":"unavailable_metric","peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":["total_debt"],"guidance":false,"explains":false,"income_items":[],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"period":"none"},
+    "note": "Total debt sums tags, which no reviewed definition does yet (#226): it is never answered with long-term debt."
+  },
+  {
+    "id": 133,
+    "question": "How much stock-based compensation did AMD have?",
+    "companies": ["AMD"],
+    "prior": null,
+    "expected": {"route":"statements","reads":"statements","peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":["stock_based_compensation"],"guidance":false,"explains":false,"income_items":[],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"period":"none"}
+  },
+  {
+    "id": 134,
+    "question": "What are NVDA's remaining performance obligations?",
+    "companies": ["NVDA"],
+    "prior": null,
+    "expected": {"route":"statements","reads":"statements","peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":["remaining_performance_obligations"],"guidance":false,"explains":false,"income_items":[],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"period":"none"}
   }
 ]

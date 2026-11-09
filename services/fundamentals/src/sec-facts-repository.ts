@@ -1273,10 +1273,25 @@ const SEC_CONTEXT_VERSION = "sec_companyfacts_context.v1";
 // (which some filers tag instead) adds purchased intangibles. OCF is the total,
 // matching capex's scope; the continuing-operations line leaves out
 // discontinued operations. Facts from the other concepts stay readable in
-// statements but get no context.
+// statements but get no context. A Call's inputs (#594) are each one reviewed
+// concept, so an alias mapped beside one later is never certified unreviewed.
 const SEC_CERTIFIED_CONCEPTS: Readonly<Record<string, string>> = {
   capex: "PaymentsToAcquirePropertyPlantAndEquipment",
   operating_cash_flow: "NetCashProvidedByUsedInOperatingActivities",
+  pretax_income: "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+  pretax_income_before_equity_method: "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
+  income_tax_expense: "IncomeTaxExpenseBenefit",
+  stock_based_compensation_expense: "AllocatedShareBasedCompensationExpense",
+  stock_based_compensation: "ShareBasedCompensation",
+  long_term_debt_current: "LongTermDebtCurrent",
+  long_term_debt_noncurrent: "LongTermDebtNoncurrent",
+  commercial_paper: "CommercialPaper",
+  short_term_borrowings: "ShortTermBorrowings",
+  marketable_securities_current: "MarketableSecuritiesCurrent",
+  marketable_securities_noncurrent: "MarketableSecuritiesNoncurrent",
+  debt_securities_current: "DebtSecuritiesCurrent",
+  short_term_investments: "ShortTermInvestments",
+  remaining_performance_obligations: "RevenueRemainingPerformanceObligation",
 };
 
 // Selection takes every token from the filing whose own period it is, never

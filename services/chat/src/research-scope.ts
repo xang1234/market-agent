@@ -225,6 +225,15 @@ export const PROPOSABLE_METRICS: ReadonlyArray<RequestedMetric> = Object.freeze(
   { metric_key: "total_assets", label: "Total assets", available: true },
   { metric_key: "total_liabilities", label: "Total liabilities", available: true },
   { metric_key: "total_equity", label: "Stockholders' equity", available: true },
+  // A Call's inputs (ADR 0005), each family the reported figures it is filed
+  // as (scope-figures.ts), none summed: debt as a whole stays a gap (#226).
+  { metric_key: "pretax_income", label: "Pretax income (income before income taxes)", available: true },
+  { metric_key: "income_tax_expense", label: "Income tax expense", available: true },
+  { metric_key: "stock_based_compensation", label: "Stock-based compensation", available: true },
+  { metric_key: "long_term_debt", label: "Long-term debt", available: true },
+  { metric_key: "short_term_debt", label: "Commercial paper and short-term borrowings", available: true },
+  { metric_key: "marketable_securities", label: "Marketable securities and short-term investments", available: true },
+  { metric_key: "remaining_performance_obligations", label: "Remaining performance obligations (contracted backlog)", available: true },
   // Basic EPS is its own figure, never answered with diluted EPS.
   { metric_key: "eps_basic", label: "Basic earnings per share", available: true },
   { metric_key: "eps_diluted", label: "Earnings per share", available: true },
@@ -254,6 +263,13 @@ const STATEMENT_METRICS: ReadonlySet<string> = new Set([
   "total_equity",
   "eps_diluted",
   "eps_basic",
+  "pretax_income",
+  "income_tax_expense",
+  "stock_based_compensation",
+  "long_term_debt",
+  "short_term_debt",
+  "marketable_securities",
+  "remaining_performance_obligations",
 ]);
 
 export const BALANCE_SHEET_ITEMS = ["cash_and_equivalents", "total_assets", "total_liabilities", "total_equity"];

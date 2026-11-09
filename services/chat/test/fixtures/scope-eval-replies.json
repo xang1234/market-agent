@@ -514,6 +514,22 @@
     {
       "match": "Question: \"How about over the past year?\"",
       "text": "{\"metrics\":[],\"asks\":[\"price_history\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"range\"},\"companies\":{\"kind\":\"as_named\",\"names\":[]}}"
+    },
+    {
+      "match": "Question: \"What is AAPL's long-term debt?\"",
+      "text": "{\"metrics\":[{\"metric\":\"long_term_debt\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AAPL\"]}}"
+    },
+    {
+      "match": "Question: \"What is AAPL's total debt?\"",
+      "text": "{\"metrics\":[{\"metric\":\"total_debt\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AAPL\"]}}"
+    },
+    {
+      "match": "Question: \"How much stock-based compensation did AMD have?\"",
+      "text": "{\"metrics\":[{\"metric\":\"stock_based_compensation\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AMD\"]}}"
+    },
+    {
+      "match": "Question: \"What are NVDA's remaining performance obligations?\"",
+      "text": "{\"metrics\":[{\"metric\":\"remaining_performance_obligations\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\"]}}"
     }
   ]
 }

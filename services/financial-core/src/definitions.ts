@@ -60,11 +60,32 @@ export const METRIC_CATALOG_V1: ReadonlyMap<MetricKey, MetricDefinition> = new M
     // Cash paid for PP&E, reported as a nonnegative outflow (SEC ingestion
     // certifies only PaymentsToAcquirePropertyPlantAndEquipment).
     metric("capex", "Capital expenditures (PP&E cash payments)", "flow", "currency"),
+    // A Call's inputs (ADR 0005), each one reported us-gaap concept (#594):
+    // never a sum of tags, so no total or net debt (#226). Income from
+    // continuing operations before income taxes, including equity-method income.
+    metric("pretax_income", "Pretax income (including equity-method income)", "flow", "currency"),
+    // The figure a filer that reports affiliates' profit after tax (CAT) tags instead.
+    metric("pretax_income_before_equity_method", "Pretax income before equity-method income", "flow", "currency"),
+    metric("income_tax_expense", "Income tax expense (benefit)", "flow", "currency"),
+    // The expense recognized; it can differ from the cash flow add-back.
+    metric("stock_based_compensation_expense", "Stock-based compensation expense", "flow", "currency"),
+    metric("stock_based_compensation", "Stock-based compensation (cash flow add-back)", "flow", "currency"),
     metric("eps_basic", "EPS (basic)", "per_share", "currency_per_share", "basic"),
     metric("eps_diluted", "EPS (diluted)", "per_share", "currency_per_share", "diluted"),
     metric("weighted_average_basic_shares", "Weighted-average basic shares", "share_count_average", "shares", "basic"),
     metric("weighted_average_diluted_shares", "Weighted-average diluted shares", "share_count_average", "shares", "diluted"),
     metric("cash_and_equivalents", "Cash and equivalents (excluding restricted cash)", "balance", "currency"),
+    // Each investment concept is its own figure: marketable securities may hold
+    // equities, debt securities hold none, short-term investments may hold time deposits.
+    metric("marketable_securities_current", "Marketable securities (current)", "balance", "currency"),
+    metric("marketable_securities_noncurrent", "Marketable securities (noncurrent)", "balance", "currency"),
+    metric("debt_securities_current", "Debt securities (current)", "balance", "currency"),
+    metric("short_term_investments", "Short-term investments", "balance", "currency"),
+    metric("long_term_debt_current", "Long-term debt (current portion)", "balance", "currency"),
+    metric("long_term_debt_noncurrent", "Long-term debt (noncurrent)", "balance", "currency"),
+    metric("commercial_paper", "Commercial paper", "balance", "currency"),
+    metric("short_term_borrowings", "Short-term borrowings", "balance", "currency"),
+    metric("remaining_performance_obligations", "Remaining performance obligations", "balance", "currency"),
     metric("total_assets", "Total assets", "balance", "currency"),
     metric("total_liabilities", "Total liabilities", "balance", "currency"),
     // Keyed as stored: SEC ingestion maps us-gaap StockholdersEquity (parent
