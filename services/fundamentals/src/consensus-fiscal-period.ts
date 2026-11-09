@@ -4,7 +4,9 @@
 // then no later period can have ended and gone unreported, so Finviz cannot
 // have rolled past it. The windows are the shortest a fiscal year (52 weeks)
 // and a fiscal quarter (12 weeks, as Costco's) can last. Outside them the
-// label stays unnamed rather than guessed.
+// label stays unnamed rather than guessed. The years also stay unnamed when a
+// quarter on file after the latest annual period belongs to a later fiscal year
+// than the one after it, as after a shortened transition year.
 
 import type { FiscalPeriod } from "./statement.ts";
 
@@ -28,11 +30,12 @@ export function consensusFiscalPeriod(
   reported: ReportedPeriods,
   capturedOn: string,
 ): ConsensusFiscalPeriod | null {
-  return period === "next_q" ? nextQuarter(reported, capturedOn) : fiscalYear(period, reported.annual, capturedOn);
+  return period === "next_q" ? nextQuarter(reported, capturedOn) : fiscalYear(period, reported, capturedOn);
 }
 
-function fiscalYear(period: "this_y" | "next_y", annual: ReportedPeriod | null, capturedOn: string): ConsensusFiscalPeriod | null {
+function fiscalYear(period: "this_y" | "next_y", { annual, quarter }: ReportedPeriods, capturedOn: string): ConsensusFiscalPeriod | null {
   if (!annual) return null;
+  if (quarter && quarter.period_end > annual.period_end && quarter.fiscal_year !== annual.fiscal_year + 1) return null;
   const days = daysBetween(annual.period_end, capturedOn);
   if (days <= 0 || days > SHORTEST_YEAR_DAYS) return null;
   const year = annual.fiscal_year + (period === "this_y" ? 1 : 2);

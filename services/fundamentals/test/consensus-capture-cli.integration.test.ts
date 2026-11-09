@@ -111,4 +111,31 @@ test("capture:consensus writes one dated row per field, appends nothing on a sam
   assert.equal(captureExitCode(blocked), 2);
   assert.deepEqual(fetched, ["AAPL:XNAS", "CAL:XNYS"], "nothing is requested after the block");
   assert.deepEqual([...new Set((await rows()).map((row) => row.ticker))], ["AAPL"], "rows written before the block stay");
+
+  await db.query(`delete from consensus_captures`);
+  const listing = async (issuer: string, n: number, ticker: string, mic: string) => {
+    await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1, $2, 'common_stock')`, [`36000000-0000-4000-8000-00000000030${n}`, issuer]);
+    await db.query(
+      `insert into listings (listing_id, instrument_id, mic, ticker, trading_currency, timezone, active_from) values ($1, $2, $3, $4, 'USD', 'America/New_York', '2020-01-01')`,
+      [`36000000-0000-4000-8000-00000000040${n}`, `36000000-0000-4000-8000-00000000030${n}`, mic, ticker],
+    );
+  };
+  await db.query(`insert into issuers (issuer_id, legal_name) values ('36000000-0000-4000-8000-000000000006', 'Other NEW Corp'), ('36000000-0000-4000-8000-000000000007', 'Two Class Corp')`);
+  await listing("36000000-0000-4000-8000-000000000006", 1, "NEW", "XNAS");
+  await listing("36000000-0000-4000-8000-000000000007", 2, "TWOA", "XNYS");
+  await listing("36000000-0000-4000-8000-000000000007", 3, "TWOB", "XNYS");
+  const errors: string[] = [];
+  const logged = { ...quiet, error: (message: string) => errors.push(message) };
+  for (const tickers of [null, ["NEW", "TWOB"]]) {
+    fetched.length = 0;
+    errors.length = 0;
+    const ambiguous = await captureConsensus(db, sidecar("2.90"), { ...options, log: logged, tickers });
+    assert.deepEqual(fetched, tickers ? [] : ["AAPL:XNAS", "CAL:XNYS"], "an ambiguous ticker or issuer is never fetched");
+    assert.deepEqual(ambiguous, { inserted: tickers ? 0 : 14, failures: 2, blocked: false });
+    assert.deepEqual(errors, [
+      "NEW: active US listings belong to more than one issuer (36000000-0000-4000-8000-000000000003, 36000000-0000-4000-8000-000000000006); captured for none",
+      "TWOA, TWOB: issuer 36000000-0000-4000-8000-000000000007 has more than one active US listing; captured for none",
+    ]);
+    assert.deepEqual([...new Set((await rows()).map((row) => row.ticker))], ["AAPL", "CAL"], "the unambiguous issuers are captured");
+  }
 });

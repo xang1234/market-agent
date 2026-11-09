@@ -152,7 +152,8 @@ Analyst consensus has no history in the app, so a dev job records Finviz's figur
 It covers EPS next quarter and next year, EPS growth this year, next year and over five years, the mean target price,
 and the mean recommendation. It reads Finviz through the dev-providers sidecar, so the stack must run with
 `ENABLE_UNOFFICIAL_DEV_PROVIDERS=true`. With no `--tickers` it captures every issuer with an active US common stock or
-ADR listing, one request every half second or slower. A rerun the same UTC day inserts nothing. A row names the fiscal
+ADR listing, one request every half second or slower. It skips, and counts as failed, a ticker that more than one
+issuer lists and an issuer with more than one active US listing, since a day holds one capture per issuer. A rerun the same UTC day inserts nothing. A row names the fiscal
 period it covers only when the issuer's reported SEC periods on file settle it, and its `fiscal_period_basis` says how.
 The job exits 2 and stops when Finviz refuses a request (403 or 429), keeping the rows it wrote, and exits 1 when any
 ticker failed otherwise.

@@ -63,3 +63,14 @@ test("once a period on file could have been followed by another unreported one, 
   assert.equal(consensusFiscalPeriod("next_q", CALENDAR, "2026-12-24"), null);
   assert.equal(consensusFiscalPeriod("this_y", CALENDAR, "2025-12-31"), null);
 });
+
+test("a quarter on file past the year after the latest annual leaves the years unnamed", () => {
+  // A shortened transition year: FY2026 was never filed as an annual period, FY2027 Q1 was.
+  const transition: ReportedPeriods = {
+    annual: { fiscal_year: 2025, fiscal_period: "FY", period_end: "2025-12-31" },
+    quarter: { fiscal_year: 2027, fiscal_period: "Q1", period_end: "2026-09-30" },
+  };
+  assert.equal(consensusFiscalPeriod("this_y", transition, "2026-11-09"), null);
+  assert.equal(consensusFiscalPeriod("next_y", transition, "2026-11-09"), null);
+  assert.equal(consensusFiscalPeriod("next_q", transition, "2026-11-09")?.fiscal_period, "FY2027 Q2");
+});

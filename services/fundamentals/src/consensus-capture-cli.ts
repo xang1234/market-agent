@@ -5,8 +5,9 @@
 //     npm run capture:consensus [-- --tickers AAPL,MSFT,COST]
 //
 // With no tickers, captures every issuer with an active US common stock or ADR
-// listing. One Finviz request per issuer, in turn, at least FINVIZ_PACE_MS
-// apart. A rerun the same UTC day inserts nothing. Exits 2 when Finviz refuses
+// listing. A ticker that two issuers list, or an issuer with more than one active
+// US listing, is a failure and is never fetched. One Finviz request per issuer,
+// in turn, at least FINVIZ_PACE_MS apart. A rerun the same UTC day inserts nothing. Exits 2 when Finviz refuses
 // a request (403 or 429) and stops there, keeping what it wrote; exits 1 when
 // any ticker failed otherwise.
 
@@ -51,12 +52,18 @@ export async function captureConsensus(
 ): Promise<CaptureOutcome> {
   const { log } = options;
   const capturedOn = options.now().toISOString().slice(0, 10);
-  const listings = await usListings(db, options.tickers);
+  const all = await usListings(db);
   const outcome: CaptureOutcome = { inserted: 0, failures: 0, blocked: false };
   for (const ticker of options.tickers ?? []) {
-    if (listings.some((listing) => listing.ticker === ticker)) continue;
+    if (all.some((listing) => listing.ticker === ticker)) continue;
     outcome.failures += 1;
     log.error(`${ticker}: no active US common stock or ADR listing on file`);
+  }
+  const requested = options.tickers ? all.filter((listing) => options.tickers!.includes(listing.ticker)) : all;
+  const { listings, ambiguous } = unambiguousListings(all, requested);
+  for (const message of ambiguous) {
+    outcome.failures += 1;
+    log.error(message);
   }
 
   for (const [index, listing] of listings.entries()) {
@@ -99,17 +106,34 @@ export function captureExitCode(outcome: CaptureOutcome): number {
   return outcome.failures > 0 ? 1 : 0;
 }
 
-async function usListings(db: QueryExecutor, tickers: ReadonlyArray<string> | null): Promise<Listing[]> {
-  // One listing per issuer: the table keys a day's capture by issuer.
+async function usListings(db: QueryExecutor): Promise<Listing[]> {
   const { rows } = await db.query<Listing>(
-    `select distinct on (ins.issuer_id) ins.issuer_id::text as issuer_id, l.listing_id::text as listing_id, l.ticker, l.mic
+    `select ins.issuer_id::text as issuer_id, l.listing_id::text as listing_id, l.ticker, l.mic
        from listings l join instruments ins on ins.instrument_id = l.instrument_id
       where l.mic = any($1::text[]) and l.active_to is null and ins.asset_type in ('common_stock', 'adr')
-        and ($2::text[] is null or l.ticker = any($2::text[]))
-      order by ins.issuer_id, l.ticker`,
-    [US_EQUITY_MICS, tickers],
+      order by l.ticker, ins.issuer_id`,
+    [US_EQUITY_MICS],
   );
-  return rows.sort((a, b) => a.ticker.localeCompare(b.ticker));
+  return rows;
+}
+
+// Finviz keys its page by ticker alone and the table keys a day's capture by
+// issuer, so a ticker two issuers list would write one page under both, and an
+// issuer with two listings (share classes with different per-share figures)
+// would record whichever one the run asked for that day.
+function unambiguousListings(all: ReadonlyArray<Listing>, requested: ReadonlyArray<Listing>): { listings: Listing[]; ambiguous: string[] } {
+  const byTicker = Map.groupBy(all, (listing) => listing.ticker);
+  const byIssuer = Map.groupBy(all, (listing) => listing.issuer_id);
+  const listings: Listing[] = [];
+  const ambiguous = new Set<string>();
+  for (const listing of requested) {
+    const issuers = [...new Set(byTicker.get(listing.ticker)!.map((other) => other.issuer_id))].sort();
+    const tickers = [...new Set(byIssuer.get(listing.issuer_id)!.map((other) => other.ticker))].sort();
+    if (issuers.length > 1) ambiguous.add(`${listing.ticker}: active US listings belong to more than one issuer (${issuers.join(", ")}); captured for none`);
+    else if (byIssuer.get(listing.issuer_id)!.length > 1) ambiguous.add(`${tickers.join(", ")}: issuer ${listing.issuer_id} has more than one active US listing; captured for none`);
+    else listings.push(listing);
+  }
+  return { listings, ambiguous: [...ambiguous] };
 }
 
 async function writeCells(db: QueryExecutor, listing: Listing, cells: ReadonlyArray<Cell>, capturedOn: string, retrievedAt: Date): Promise<number> {
