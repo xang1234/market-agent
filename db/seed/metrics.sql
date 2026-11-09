@@ -13,6 +13,9 @@ insert into metrics (metric_key, display_name, unit_class, aggregation, interpre
   ('operating_income',      'Operating Income',           'currency', 'sum',          'higher_is_better', 'gaap',    1, 'Income from operations (revenue minus cost of revenue and opex).'),
   ('net_income',            'Net Income',                 'currency', 'sum',          'higher_is_better', 'gaap',    1, 'Net income attributable to common shareholders.'),
   ('net_income_consolidated', 'Net Income Including Noncontrolling Interest', 'currency', 'sum', 'higher_is_better', 'gaap', 1, 'Consolidated net income (us-gaap ProfitLoss), including the share attributable to noncontrolling interest.'),
+  ('pretax_income',         'Pretax Income',              'currency', 'sum',          'higher_is_better', 'gaap',    1, 'Income from continuing operations before income taxes, as the filer reports it.'),
+  ('income_tax_expense',    'Income Tax Expense',         'currency', 'sum',          'neutral',          'gaap',    1, 'Income tax expense (benefit) for the period.'),
+  ('stock_based_compensation_expense', 'Stock-Based Compensation Expense', 'currency', 'sum', 'neutral', 'gaap', 1, 'Share-based compensation expense recognized (us-gaap AllocatedShareBasedCompensationExpense); can differ from the cash flow add-back.'),
   ('ebitda',                'EBITDA',                     'currency', 'derived',      'higher_is_better', 'derived', 1, 'Earnings before interest, taxes, depreciation, and amortization.'),
   ('eps_basic',             'EPS (Basic)',                'currency', 'derived',      'higher_is_better', 'gaap',    1, 'Net income per basic share.'),
   ('eps_diluted',           'EPS (Diluted)',              'currency', 'derived',      'higher_is_better', 'gaap',    1, 'Net income per diluted share.'),
@@ -29,11 +32,21 @@ insert into metrics (metric_key, display_name, unit_class, aggregation, interpre
   ('total_liabilities',     'Total Liabilities',          'currency', 'point_in_time', 'lower_is_better', 'gaap',    1, 'Total liabilities at period end.'),
   ('total_equity',          'Stockholders'' Equity',       'currency', 'point_in_time', 'higher_is_better','gaap',    1, 'Total stockholders equity (parent) at period end.'),
   ('cash_and_equivalents',  'Cash and Equivalents',       'currency', 'point_in_time', 'higher_is_better','gaap',    1, 'Cash and cash equivalents at period end, excluding short-term investments.'),
+  ('marketable_securities_current',    'Marketable Securities (Current)',    'currency', 'point_in_time', 'higher_is_better', 'gaap', 1, 'Marketable securities classified as current at period end.'),
+  ('marketable_securities_noncurrent', 'Marketable Securities (Noncurrent)', 'currency', 'point_in_time', 'higher_is_better', 'gaap', 1, 'Marketable securities classified as noncurrent at period end.'),
+  ('debt_securities_current',          'Debt Securities (Current)',          'currency', 'point_in_time', 'higher_is_better', 'gaap', 1, 'Investments in debt securities classified as current at period end.'),
+  ('short_term_investments',           'Short-Term Investments',             'currency', 'point_in_time', 'higher_is_better', 'gaap', 1, 'Short-term investments at period end; may include time deposits.'),
+  ('long_term_debt_current',           'Long-Term Debt (Current)',           'currency', 'point_in_time', 'lower_is_better',  'gaap', 1, 'Current portion of long-term debt at period end.'),
+  ('long_term_debt_noncurrent',        'Long-Term Debt (Noncurrent)',        'currency', 'point_in_time', 'lower_is_better',  'gaap', 1, 'Long-term debt, excluding its current portion, at period end.'),
+  ('commercial_paper',                 'Commercial Paper',                   'currency', 'point_in_time', 'lower_is_better',  'gaap', 1, 'Commercial paper outstanding at period end.'),
+  ('short_term_borrowings',            'Short-Term Borrowings',              'currency', 'point_in_time', 'lower_is_better',  'gaap', 1, 'Short-term borrowings at period end.'),
+  ('remaining_performance_obligations', 'Remaining Performance Obligations', 'currency', 'point_in_time', 'higher_is_better', 'gaap', 1, 'Contracted revenue not yet recognized at period end.'),
   ('total_debt',            'Total Debt',                 'currency', 'point_in_time', 'lower_is_better', 'gaap',    1, 'Short-term plus long-term interest-bearing debt.'),
 
   -- Cash flow
   ('operating_cash_flow',   'Operating Cash Flow',        'currency', 'sum',          'higher_is_better', 'gaap',    1, 'Net cash from operating activities.'),
   ('capex',                 'Capital Expenditures',       'currency', 'sum',          'neutral',          'gaap',    1, 'Investments in property, plant, and equipment.'),
+  ('stock_based_compensation', 'Stock-Based Compensation',  'currency', 'sum',          'neutral',          'gaap',    1, 'Share-based compensation added back in operating cash flow (us-gaap ShareBasedCompensation).'),
   ('free_cash_flow',        'Free Cash Flow',             'currency', 'derived',      'higher_is_better', 'derived', 1, 'Operating cash flow less capex.'),
 
   -- Margins
