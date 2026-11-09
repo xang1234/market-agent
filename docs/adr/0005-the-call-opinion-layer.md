@@ -25,7 +25,7 @@ Five Calls written by hand on 2026-11-09 (AAPL, NVDA, COST, CAT, ADBE) measured 
 
 ### Two layers, dependencies point one way
 
-The **fact layer** is everything that exists today: facts, consensus captures, stored price observations and certified arithmetic. The **Call layer** refers to fact-layer items by identity and adds its own labelled assumptions and judgment.
+The **fact layer** is facts, stored price observations, certified arithmetic and, once #592 merges, consensus captures. The **Call layer** refers to fact-layer items by identity and adds its own labelled assumptions and judgment.
 
 - The fact layer never reads a Call.
 - A Call is never written to `facts`, never cited as a source, and never carries a verified badge.
@@ -78,7 +78,7 @@ The rules apply in this order, and the first that matches decides.
 
 1. **Declined: unanchored deciding input.** The exit multiple or the bear case has no anchor. One example is less than a full cycle of the company's own multiple history.
 2. **Declined: no positive hurdle price.** `V` or `B` is zero or negative.
-3. **Declined: unstable.** The stance below changes under a one-point move in growth, share change or required return, or a 1x move in the exit multiple.
+3. **Declined: unstable.** The stance from rules 4 to 6 changes under a one-point move up or down in growth, share change or required return, or a 1x move up or down in the exit multiple. A move that would leave a setting's valid range, or make the exit multiple zero or negative, is not tested in that direction, and the Call lists it as untested.
 4. **Clears your hurdle.** `P <= H`.
 5. **Near your hurdle.** `H < P <= H x (1 + near_band)`.
 6. **Falls short of your hurdle.** `P > H x (1 + near_band)`.
@@ -100,7 +100,7 @@ A stated Call reads in this order:
 5. What would change it: thresholds checkable against the next filings.
 6. Stability: what flips the stance, and by how much.
 
-A declined Call shows rows 1 to 3, then the decline rule that matched and the evidence that is missing or the move that flips it. It shows no stance, hurdle price, scenario differences or falsifiers.
+A declined Call shows rows 1 to 3, then the decline rule that matched and the evidence that is missing or the move that flips it. When what the price requires can't be computed (a missing input, or no solution in the solver's domain), row 3 names that outcome instead. #226 defines the solver's domain and outcomes. It shows no stance, hurdle price, scenario differences or falsifiers.
 
 Each Call is stored unchanged with its date, the owner settings it used and a fingerprint of its inputs.
 
@@ -119,7 +119,7 @@ The research-quality rubric keeps scoring factual answers and keeps forbidding a
 
 ## Consequences
 
-- **Prerequisites for a stated stance.** Two anchors don't exist yet. The exit multiple needs about ten years of daily prices (the current Polygon key returns two). The bear case needs debt, cash and securities, pretax income, income tax, stock compensation and remaining performance obligations in the metric map (`services/fundamentals/src/sec-edgar.ts`). Until then every Call declines its stance, and shows only what the price requires.
+- **Prerequisites for a stated stance.** Two anchors don't exist yet. The exit multiple needs about ten years of daily prices (the current Polygon key returns two). The bear case needs debt, cash and securities, pretax income, income tax, stock compensation and remaining performance obligations in the metric map (`services/fundamentals/src/sec-edgar.ts`). Until then every Call declines its stance and uses the declined layout above.
 - **Attributed consensus depends on #592.** Once merged, `consensus_captures` records Finviz consensus each time its capture runs, so a Call can cite consensus as of a day and later Calls can be compared with what consensus did. Running it daily is a separate step: #592 documents a crontab line and schedules nothing.
 - **Single user.** The app has one user, the owner. Opinions about specific stocks shown to anyone else would need a separate review. This ADR covers only the owner's own use.
 - **No change to existing answers.** Factual answers, scenarios (#201) and scenario price comparisons (#224) keep their wording rules.
