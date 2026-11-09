@@ -103,7 +103,7 @@ on the same frozen data, then pair the two run records:
    once: the mapping, each arm's totals per criterion over its own scored cells, per-criterion deltas as `+N over K
    pairs`, per-question deltas, what wasn't compared, unscored cells, each turn's outcome and model, failure-label
    counts, and each question's labels and notes. A pairing made before a criterion joined the rubric (its key records
-   an older question-set digest, and no cell has the criterion) reveals with it `not scored` and says so above the
+   the question set every committed pairing ran, `4593f805…`, and no cell has the criterion) reveals with it `not scored` and says so above the
    totals. Only a criterion marked `addedLater` in `RUBRIC` can read that way; any other missing cell is unscored. Only pairs both arms answered are compared. A compared pair is
    confounded when a turn names a different model in each arm, or an arm's record lacks the field: its deltas are shown
    apart and left out of the attributed delta. A turn no model wrote (chat omits `answered_by` for an engine answer

@@ -239,6 +239,9 @@ const showSum = ({ sum, pairs }: Sum) => (pairs === 0 ? "— (no pairs)" : `${si
 // Refuses another pairing's key, and while an applicable cell is unscored unless
 // incomplete is set, and then says so at the top. Totals and deltas are per criterion;
 // no cell is folded into one score. complete: every applicable cell was scored.
+// The question set every committed pairing ran (docs/eval-runs/research-quality/pairs/*/baseline.run.json).
+const QUESTION_SET_BEFORE_DECISION_USEFUL = "4593f805836ee05182184cd0e10b7afaa622714670cc6bafc92e08362ee8d98f";
+
 export function reveal(key: PairKey, scores: PairScores, incomplete = false): { report: string; complete: boolean } {
   if (key.pairing !== scores.pairing) {
     throw new Refusal(`this key is pairing ${key.pairing}'s, but the scores are pairing ${scores.pairing}'s; reveal a packet with its own key`);
@@ -248,9 +251,9 @@ export function reveal(key: PairKey, scores: PairScores, incomplete = false): { 
   }
   const compared = (id: string) => ARMS.every((arm) => gaveAnswer(key.pairs[id]!.turns[arm]));
   const unscored: string[] = [];
-  // A pairing made before a criterion joined RUBRIC never showed it to the scorer. Its key
-  // records the question set it ran, so one made with this rubric is held to all of it.
-  const scoredOn = criteriaIn(Object.values(scores.pairs).flatMap((pair) => [pair.A, pair.B]), key.baseline.provenance.questionSetDigest !== questionSetDigest());
+  // A pairing made before decision_useful joined RUBRIC never showed it to the scorer. Its key
+  // records the question set it ran; any other set, older or newer, is held to all of RUBRIC.
+  const scoredOn = criteriaIn(Object.values(scores.pairs).flatMap((pair) => [pair.A, pair.B]), key.baseline.provenance.questionSetDigest === QUESTION_SET_BEFORE_DECISION_USEFUL);
   const notScored = RUBRIC.filter((c) => !scoredOn.has(c.id)).map((c) => c.id);
   const totals = Object.fromEntries(ARMS.map((arm) => [arm, RUBRIC.map(() => ({ total: 0, max: 0 }))])) as Record<Arm, Array<{ total: number; max: number }>>;
   const attributed = RUBRIC.map((): Sum => ({ sum: 0, pairs: 0 }));

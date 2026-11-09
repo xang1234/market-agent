@@ -570,7 +570,7 @@ test("a pairing made with this rubric whose cells all lack decision_useful refus
 test("a pairing made before decision_useful reveals without it, saying so, and counts none of its cells", async () => {
   const { dir, keyFile, scores, writeScores } = await pairsOnDisk("2026-10-03T000000");
   const key = JSON.parse(readFileSync(keyFile, "utf8")) as PairKey;
-  for (const arm of ["baseline", "candidate"] as const) key[arm].provenance.questionSetDigest = "1".repeat(64);
+  for (const arm of ["baseline", "candidate"] as const) key[arm].provenance.questionSetDigest = "4593f805836ee05182184cd0e10b7afaa622714670cc6bafc92e08362ee8d98f";
   await writeFile(keyFile, JSON.stringify(key));
   withoutDecisionUseful(scores);
   await writeScores(scores);
@@ -585,4 +585,14 @@ test("a pairing made before decision_useful reveals without it, saying so, and c
   assert.match(report, /\| no_invented_numbers \| 8\/8 \| 6\/6 \| 0 over 2 pairs \| 0 over 1 pair \|\n\| decision_useful \| not scored \| not scored \| — \| — \|\n/u);
   assert.match(report, /\| single-latest-quarter \| 0 \| 0 \| 0 \| 0 \| 0 \| 0 \| — \|\n/u);
   assert.match(report, /## Unscored cells\n\nNone\./u);
+});
+
+test("a pairing from any other question set lacking decision_useful refuses, those cells unscored", async () => {
+  const { dir, keyFile, scores, writeScores } = await pairsOnDisk("2026-10-03T000000");
+  const key = JSON.parse(readFileSync(keyFile, "utf8")) as PairKey;
+  for (const arm of ["baseline", "candidate"] as const) key[arm].provenance.questionSetDigest = "1".repeat(64);
+  await writeFile(keyFile, JSON.stringify(key));
+  withoutDecisionUseful(scores);
+  await writeScores(scores);
+  assert.throws(() => revealPair(dir, keyFile, false), refusal(/^6 applicable cells are unscored \([a-z-]+ [AB] decision_useful; /u));
 });
