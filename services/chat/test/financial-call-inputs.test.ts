@@ -15,7 +15,7 @@ import { parseFinancialJson } from "../../fundamentals/src/lossless-financial-js
 import { createSecBackedStatementRepository } from "../../fundamentals/src/sec-facts-repository.ts";
 import { secCompanyFetcher } from "../../fundamentals/test/fakes.ts";
 import { listChatMessagesForThread } from "../src/messages.ts";
-import { proposedMetric } from "../src/research-scope.ts";
+import { proposedMetric, resolveResearchScope, type ScopeProposal } from "../src/research-scope.ts";
 import type { ChatSubjectPreResolution } from "../src/subjects.ts";
 import { chatDatabase, chatHarness, completed, NO_ASKS } from "./financial-fixtures.ts";
 
@@ -23,6 +23,7 @@ const FIXTURE = parseFinancialJson(
   readFileSync(new URL("../../fundamentals/test/sec-call-inputs.companyfacts.json", import.meta.url), "utf8"),
 ) as Record<string, unknown>;
 const RETRIEVED = "2026-11-09T15:00:00.000Z";
+const AS_OF = "2026-11-10T12:00:00.000Z";
 const ISSUERS = {
   AAPL: { issuerId: randomUUID(), cik: 320193, filings: [[2026, "FY"]] },
   CAT: { issuerId: randomUUID(), cik: 18230, filings: [[2025, "FY"], [2026, "Q3"]] },
@@ -58,8 +59,11 @@ test("a Call input question answers from the certified filing figure", { timeout
   const ask = async (ticker: Ticker, metric: string) => {
     const reading = { ...NO_ASKS, metrics: [proposedMetric(metric, null, null)!], companies: { kind: "as_named" as const, names: [ticker] } };
     assert.ok(reading.metrics[0], `${metric} is a catalog metric`);
-    const harness = chatHarness(pool, { model: null, resolveMention, readQuestion: async () => reading, clock: () => new Date("2026-11-10T12:00:00.000Z") });
-    const done = completed((await harness.run({ threadId, userId: IDS.owner, userIntent: `${ticker}'s ${metric.replaceAll("_", " ")}` })).events);
+    return answer(reading, `${ticker}'s ${metric.replaceAll("_", " ")}`);
+  };
+  const answer = async (reading: ScopeProposal, userIntent: string, extra: Partial<Parameters<typeof chatHarness>[1]> = {}) => {
+    const harness = chatHarness(pool, { model: null, resolveMention, readQuestion: async () => reading, clock: () => new Date(AS_OF), ...extra });
+    const done = completed((await harness.run({ threadId, userId: IDS.owner, userIntent })).events);
     const read = await listChatMessagesForThread(pool, { thread_id: threadId, user_id: IDS.owner });
     const message = read!.messages.find((candidate) => candidate.message_id === done.message_id)!;
     const block = (message.blocks as Array<{ kind: string; financial: any }>)[0]!;
@@ -111,5 +115,21 @@ test("a Call input question answers from the certified filing figure", { timeout
 
   await t.test("remaining performance obligations, from the 10-K", async () => {
     assert.deepEqual(await ask("CAT", "remaining_performance_obligations"), [["Remaining performance obligations", "verified", "USD 30100000000"]]);
+  });
+
+  // A balance is certified only from a 10-K (sec-facts-repository.ts), so a
+  // quarter has none: neither the FY2026 Q3 10-Q's USD 49,400M nor the
+  // FY2025 10-K's USD 30,100M stands in for it.
+  await t.test("a balance asked for a quarter is a gap, never the 10-Q figure", async () => {
+    const cat = await resolveMention("CAT");
+    const companies = [{ issuer_id: ISSUERS.CAT.issuerId, label: "CAT" }];
+    const first = { ...NO_ASKS, metrics: [proposedMetric("remaining_performance_obligations", null, null)!], companies: { kind: "as_named" as const, names: ["CAT"] } };
+    const prior = resolveResearchScope({ companies, prior: null, asOf: AS_OF, proposal: first });
+    const quarter = { ...NO_ASKS, period: { kind: "fiscal_quarter" as const, fiscal_year: 2026, fiscal_period: "Q3" as const }, companies: { kind: "as_named" as const, names: [] } };
+    const followUp = {
+      priorSubjects: async () => [cat],
+      researchScope: async (_context: unknown, read: Promise<ScopeProposal | null>) => resolveResearchScope({ companies, prior, asOf: AS_OF, proposal: await read }),
+    } as never;
+    assert.deepEqual(await answer(quarter, "And for Q3 2026?", followUp), [["Remaining performance obligations", "missing", null]]);
   });
 });
