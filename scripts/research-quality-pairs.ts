@@ -248,8 +248,9 @@ export function reveal(key: PairKey, scores: PairScores, incomplete = false): { 
   }
   const compared = (id: string) => ARMS.every((arm) => gaveAnswer(key.pairs[id]!.turns[arm]));
   const unscored: string[] = [];
-  // A pairing made before a criterion joined RUBRIC never showed it to the scorer.
-  const scoredOn = criteriaIn(Object.values(scores.pairs).flatMap((pair) => [pair.A, pair.B]));
+  // A pairing made before a criterion joined RUBRIC never showed it to the scorer. Its key
+  // records the question set it ran, so one made with this rubric is held to all of it.
+  const scoredOn = criteriaIn(Object.values(scores.pairs).flatMap((pair) => [pair.A, pair.B]), key.baseline.provenance.questionSetDigest !== questionSetDigest());
   const notScored = RUBRIC.filter((c) => !scoredOn.has(c.id)).map((c) => c.id);
   const totals = Object.fromEntries(ARMS.map((arm) => [arm, RUBRIC.map(() => ({ total: 0, max: 0 }))])) as Record<Arm, Array<{ total: number; max: number }>>;
   const attributed = RUBRIC.map((): Sum => ({ sum: 0, pairs: 0 }));

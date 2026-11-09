@@ -26,6 +26,8 @@ export type Criterion = Readonly<{
   question: string;
   // What 0, 1 and 2 mean, so scores are comparable run to run.
   anchors: readonly [string, string, string];
+  // Joined RUBRIC after runs were scored, so a scores file may predate it.
+  addedLater?: true;
 }>;
 
 /**
@@ -72,6 +74,7 @@ export const RUBRIC: ReadonlyArray<Criterion> = [
   },
   {
     id: "decision_useful",
+    addedLater: true,
     question: "Could a portfolio manager act on this, and does it say what would change the answer?",
     // Never scores a buy/sell/hold call, price target or advice wording: the product
     // forbids them (#201, #224), so a 2 names what to watch, not what to do.

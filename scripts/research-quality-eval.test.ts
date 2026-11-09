@@ -230,6 +230,18 @@ test("a run scored before decision_useful shows it not scored, totals the rest, 
   assert.doesNotMatch(summarize([gap]), /not scored/);
 });
 
+test("a criterion the rubric started with is never not scored: left out of every question, its cells are unscored", () => {
+  const file = blankScores("2026-11-09T000000", "m");
+  for (const cells of Object.values(file.scores)) {
+    delete (cells as Partial<typeof cells>).no_invented_numbers;
+    for (const [id, score] of Object.entries(cells)) if (score === null) (cells as Record<string, unknown>)[id] = 2;
+  }
+  assert.equal(summarize([file]), [
+    "run | model | total | correct_companies | comparable_periods | figures_match_sources | conclusions_justified | counterarguments | no_invented_numbers | decision_useful | unscored",
+    "2026-11-09T000000 | m | 124/124 | 24/24 | 20/20 | 20/20 | 20/20 | 20/20 | 0/0 | 20/20 | 12",
+  ].join("\n"));
+});
+
 test("a run names its model or doesn't start, and its files are stamped to the second", () => {
   assert.equal(modelForRun("opencode-go/qwen3.8-max", undefined), "opencode-go/qwen3.8-max");
   assert.equal(modelForRun(undefined, "openai/o3"), "openai/o3", "EVAL_MODEL names it when settings can't");

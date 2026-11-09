@@ -454,12 +454,14 @@ export function readCell(where: string, score: unknown, notApplicable: string | 
   return score;
 }
 
-// The criteria a scores file was written with. One added to RUBRIC later is in none of
-// the file's cells, so it reads as not scored there, never as unscored or 0. A file with
-// no cells at all is held to the whole rubric, so it can't look complete.
-export function criteriaIn(cells: ReadonlyArray<object | undefined>): Set<CriterionId> {
+// The criteria a scores file was written with. Only a criterion marked addedLater may be
+// missing from a file that predates it: in none of its cells, it reads as not scored there,
+// never as unscored or 0. Any other missing cell is unscored. A file known to postdate the
+// rubric, or with no cells at all, is held to the whole rubric, so it can't look complete.
+export function criteriaIn(cells: ReadonlyArray<object | undefined>, mayPredate = true): Set<CriterionId> {
   const present = cells.filter((cell) => cell !== undefined);
-  return new Set(RUBRIC.map((c) => c.id).filter((id) => present.length === 0 || present.some((cell) => id in cell)));
+  const scored = (c: Criterion) => !c.addedLater || !mayPredate || present.length === 0 || present.some((cell) => c.id in cell);
+  return new Set(RUBRIC.filter(scored).map((c) => c.id));
 }
 
 // One line per run, so trends show run to run. Scores are hand-edited, so the file is

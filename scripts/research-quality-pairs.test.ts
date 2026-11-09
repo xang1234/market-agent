@@ -555,10 +555,24 @@ test("a key whose completed turn has no model field loads, and that pair is conf
   assert.equal("answeredBy" in loaded.pairs["peer-two"]!.turns.baseline[0]!, false);
 });
 
-test("a pairing scored before decision_useful reveals without it, saying so, and counts none of its cells", async () => {
-  const { dir, keyFile, scores, writeScores } = await pairsOnDisk("2026-10-03T000000");
+const withoutDecisionUseful = (scores: PairScores) => {
   scoreAll(scores);
   for (const pair of Object.values(scores.pairs)) for (const side of ["A", "B"] as const) delete (pair[side] as Partial<typeof pair.A>).decision_useful;
+};
+
+test("a pairing made with this rubric whose cells all lack decision_useful refuses, those cells unscored", async () => {
+  const { dir, keyFile, scores, writeScores } = await pairsOnDisk("2026-10-03T000000");
+  withoutDecisionUseful(scores);
+  await writeScores(scores);
+  assert.throws(() => revealPair(dir, keyFile, false), refusal(/^6 applicable cells are unscored \([a-z-]+ [AB] decision_useful; [a-z-]+ [AB] decision_useful; [a-z-]+ [AB] decision_useful; \.\.\.\); score them, or pass --incomplete/u));
+});
+
+test("a pairing made before decision_useful reveals without it, saying so, and counts none of its cells", async () => {
+  const { dir, keyFile, scores, writeScores } = await pairsOnDisk("2026-10-03T000000");
+  const key = JSON.parse(readFileSync(keyFile, "utf8")) as PairKey;
+  for (const arm of ["baseline", "candidate"] as const) key[arm].provenance.questionSetDigest = "1".repeat(64);
+  await writeFile(keyFile, JSON.stringify(key));
+  withoutDecisionUseful(scores);
   await writeScores(scores);
   const report = readFileSync(revealPair(dir, keyFile, false), "utf8");
   assert.ok(report.includes([

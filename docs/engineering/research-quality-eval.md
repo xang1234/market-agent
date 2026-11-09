@@ -47,7 +47,8 @@ the owner scores by hand, so answer quality can be compared from one run to the 
 4. Run `node --experimental-strip-types scripts/research-quality-eval.ts summary`. It prints one line per run (total and
    per criterion, leaving out N/A and unscored), so trends show from run to run. It also lists every 0 on
    `no_invented_numbers`, and each of those becomes a regression test. A run scored before a criterion joined the
-   rubric (every run before `decision_useful`) shows it `not scored`, and its total leaves it out; the summary names
+   rubric (every run before `decision_useful`) shows it `not scored`, and its total leaves it out (only a criterion marked `addedLater` in `RUBRIC`; any
+   other criterion missing from a file is unscored); the summary names
    those runs, since their totals cover fewer criteria and don't compare with later ones.
 
 The first scored run is the baseline. Each run records the primary model from the LLM settings, since a model change
@@ -101,8 +102,9 @@ on the same frozen data, then pair the two run records:
    applicable cell is `null`; `--incomplete` reveals anyway and names the review incomplete. It writes `reveal.md`
    once: the mapping, each arm's totals per criterion over its own scored cells, per-criterion deltas as `+N over K
    pairs`, per-question deltas, what wasn't compared, unscored cells, each turn's outcome and model, failure-label
-   counts, and each question's labels and notes. A pairing whose scores predate a criterion reveals with it `not
-   scored` and says so above the totals. Only pairs both arms answered are compared. A compared pair is
+   counts, and each question's labels and notes. A pairing made before a criterion joined the rubric (its key records
+   an older question-set digest, and no cell has the criterion) reveals with it `not scored` and says so above the
+   totals. Only a criterion marked `addedLater` in `RUBRIC` can read that way; any other missing cell is unscored. Only pairs both arms answered are compared. A compared pair is
    confounded when a turn names a different model in each arm, or an arm's record lacks the field: its deltas are shown
    apart and left out of the attributed delta. A turn no model wrote (chat omits `answered_by` for an engine answer
    without commentary or a fixed reply) confounds nothing, since a model against no model is the change measured. There is no single overall score. Notes show on their question's line. Before
