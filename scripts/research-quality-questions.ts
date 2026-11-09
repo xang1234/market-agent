@@ -18,7 +18,8 @@ export type CriterionId =
   | "figures_match_sources"
   | "conclusions_justified"
   | "counterarguments"
-  | "no_invented_numbers";
+  | "no_invented_numbers"
+  | "decision_useful";
 
 export type Criterion = Readonly<{
   id: CriterionId;
@@ -69,6 +70,17 @@ export const RUBRIC: ReadonlyArray<Criterion> = [
       "Gaps stated plainly; every number is from the data",
     ],
   },
+  {
+    id: "decision_useful",
+    question: "Could a portfolio manager act on this, and does it say what would change the answer?",
+    // Never scores a buy/sell/hold call, price target or advice wording: the product
+    // forbids them (#201, #224), so a 2 names what to watch, not what to do.
+    anchors: [
+      "Figures only; the reader must work out why they matter",
+      "Says why it matters, but generically (e.g. \"worth watching\")",
+      "Names the figure, threshold or event in the data that would change a view of the stock",
+    ],
+  },
 ];
 
 export type EvalQuestion = Readonly<{
@@ -84,12 +96,13 @@ export type EvalQuestion = Readonly<{
 }>;
 
 // A correct missing-data answer is a plain "not available": judge only whether
-// it names the right company and invents nothing.
+// it names the right company and invents nothing. It has nothing to act on.
 const MISSING_DATA_NA: ReadonlyArray<CriterionId> = [
   "comparable_periods",
   "figures_match_sources",
   "conclusions_justified",
   "counterarguments",
+  "decision_useful",
 ];
 
 export const QUESTIONS: ReadonlyArray<EvalQuestion> = [

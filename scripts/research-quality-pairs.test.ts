@@ -79,7 +79,7 @@ test("two runs of different question sets or datasets, or of another question se
   const otherData = { ...candidateRun, provenance: { ...candidateRun.provenance, datasetRevision: "3".repeat(64) } };
   assert.throws(() => paired(7, "p", baselineRun, otherData), refusal(/their datasetRevision differs/u));
   const old = (run: RunRecord) => ({ ...run, provenance: { ...run.provenance, questionSetDigest: "1".repeat(64) } });
-  assert.throws(() => paired(7, "p", old(baselineRun), old(candidateRun)), refusal(new RegExp(`they ran question set 1{64}, but this runner's is ${questionSetDigest()}`, "u")));
+  assert.throws(() => paired(7, "p", old(baselineRun), old(candidateRun)), refusal(new RegExp(`they ran question set 1{64}, but this runner's is ${questionSetDigest()} \\(its questions or rubric changed since\\); pair them from the runner revision that ran them$`, "u")));
   const seen = /^can't pair 2026-10-02T000000: it wasn't run with --blind, so its report may have been read; rerun it with --blind$/u;
   assert.throws(() => paired(7, "p", baselineRun, { ...candidateRun, blind: false }), refusal(seen));
   const { blind: _blind, ...unmarked } = candidateRun;
@@ -98,7 +98,7 @@ test("the packet shows both answers and never which run, revision or model wrote
   for (const answer of ["Ottawa on NVDA and AMD.", "Lisbon on NVDA and AMD.", "Ottawa: cash flow is not available."]) assert.match(packet, new RegExp(answer));
   assert.match(packet, /^# Blinded answer pairs: 2026-10-03T000000\n/u);
   assert.match(packet, /\*\*Expect:\*\* Side-by-side latest fiscal year/);
-  assert.match(packet, /N\/A: comparable_periods, figures_match_sources, conclusions_justified, counterarguments/);
+  assert.match(packet, /N\/A: comparable_periods, figures_match_sources, conclusions_justified, counterarguments, decision_useful\n/);
   assert.match(packet, /- \*\*no_invented_numbers\*\*: Is missing data stated honestly/);
   assert.match(packet, /\*\*Q:\*\* Compare with NVDA\. \(opened from the AAPL page\)/);
   assert.doesNotMatch(packet, /Incomplete runs|Not in this packet/u);
@@ -109,11 +109,11 @@ test("the packet shows both answers and never which run, revision or model wrote
   // A turn that timed out is no answer, and its cells are not scored.
   const side = sideOf(key, "missing-cash-flow", "candidate");
   assert.match(packet, /_Not scored: a turn didn't complete, so every cell of this answer is n\/a\._\n\n\*\*Q:\*\* What is AMD's free cash flow\?\n\n_No answer \(timeout\)\._/);
-  assert.deepEqual(Object.values(scores.pairs["missing-cash-flow"]![side]), ["n/a", "n/a", "n/a", "n/a", "n/a", "n/a"]);
+  assert.deepEqual(Object.values(scores.pairs["missing-cash-flow"]![side]), ["n/a", "n/a", "n/a", "n/a", "n/a", "n/a", "n/a"]);
   assert.deepEqual(scores.pairs["missing-cash-flow"]!.labels, { A: [], B: [] });
   assert.equal(scores.pairing, "2026-10-03T000000");
   assert.equal(key.pairing, "2026-10-03T000000");
-  assert.deepEqual(scores.pairs["peer-two"]!.A, { correct_companies: null, comparable_periods: null, figures_match_sources: null, conclusions_justified: null, counterarguments: null, no_invented_numbers: null });
+  assert.deepEqual(scores.pairs["peer-two"]!.A, { correct_companies: null, comparable_periods: null, figures_match_sources: null, conclusions_justified: null, counterarguments: null, no_invented_numbers: null, decision_useful: null });
 });
 
 test("each cited figure carries a packet-local number that says what it points at, with each block's sources (#222)", () => {
@@ -244,10 +244,10 @@ const scoreAll = (scores: PairScores) => {
 
 test("reveal refuses while a cell is unscored, unless the review is named incomplete (#222)", () => {
   const { scores, key } = paired();
-  assert.throws(() => reveal(key, scores), refusal(/^38 applicable cells are unscored \(.*\); score them, or pass --incomplete/u));
+  assert.throws(() => reveal(key, scores), refusal(/^44 applicable cells are unscored \(.*\); score them, or pass --incomplete/u));
   const partial = reveal(key, scores, true);
   assert.equal(partial.complete, false);
-  assert.match(partial.report, /^# Blinded comparison 2026-10-03T000000: baseline 2026-10-01T000000 vs candidate 2026-10-02T000000\n\n\*\*Incomplete review:\*\* 38 applicable cells were left unscored/u);
+  assert.match(partial.report, /^# Blinded comparison 2026-10-03T000000: baseline 2026-10-01T000000 vs candidate 2026-10-02T000000\n\n\*\*Incomplete review:\*\* 44 applicable cells were left unscored/u);
   assert.match(partial.report, /## Unscored cells\n\n- [a-z-]+ [AB] correct_companies\n/u);
 
   // A cell of an answer that wasn't given stays n/a.
@@ -266,13 +266,13 @@ test("reveal refuses another pairing's key (#222)", () => {
 
 test("reveal totals each arm per criterion and compares only pairs both arms answered (#222)", () => {
   const { scores, key } = paired();
-  scoreArm(scores, key, "single-latest-quarter", "baseline", [1, 1, 1, 1, 1, 1]);
-  scoreArm(scores, key, "single-latest-quarter", "candidate", [2, 2, 2, 2, 2, 2]);
-  scoreArm(scores, key, "peer-two", "baseline", [2, 2, 2, 2, 2, 2]);
-  scoreArm(scores, key, "peer-two", "candidate", [0, 2, 2, 2, 2, 2]);
-  scoreArm(scores, key, "missing-cash-flow", "baseline", [2, 0, 0, 0, 0, 2]);
-  scoreArm(scores, key, "ticker-page-compare", "baseline", [2, 0, 2, 1, 1, 2]);
-  scoreArm(scores, key, "ticker-page-compare", "candidate", [2, 2, 2, 1, 0, 2]);
+  scoreArm(scores, key, "single-latest-quarter", "baseline", [1, 1, 1, 1, 1, 1, 0]);
+  scoreArm(scores, key, "single-latest-quarter", "candidate", [2, 2, 2, 2, 2, 2, 2]);
+  scoreArm(scores, key, "peer-two", "baseline", [2, 2, 2, 2, 2, 2, 1]);
+  scoreArm(scores, key, "peer-two", "candidate", [0, 2, 2, 2, 2, 2, 1]);
+  scoreArm(scores, key, "missing-cash-flow", "baseline", [2, 0, 0, 0, 0, 2, 0]);
+  scoreArm(scores, key, "ticker-page-compare", "baseline", [2, 0, 2, 1, 1, 2, 1]);
+  scoreArm(scores, key, "ticker-page-compare", "candidate", [2, 2, 2, 1, 0, 2, 2]);
   scores.pairs["peer-two"]!.labels[sideOf(key, "peer-two", "candidate")] = ["wrong_subject"];
   scores.pairs["peer-two"]!.notes = "Fallback answered.";
   scores.pairs["missing-cash-flow"]!.labels[sideOf(key, "missing-cash-flow", "candidate")] = ["unstated_gap", "operational_failure", "unstated_gap"];
@@ -290,9 +290,10 @@ test("reveal totals each arm per criterion and compares only pairs both arms ans
     "| conclusions_justified | 4/6 | 5/6 | +1 over 2 pairs | 0 over 1 pair |",
     "| counterarguments | 4/6 | 4/6 | 0 over 2 pairs | 0 over 1 pair |",
     "| no_invented_numbers | 7/8 | 6/6 | +1 over 2 pairs | 0 over 1 pair |",
+    "| decision_useful | 2/6 | 5/6 | +3 over 2 pairs | 0 over 1 pair |",
   ].join("\n")), report);
-  assert.match(report, /## Per-question deltas \(candidate minus baseline\)\n\n\| question[^\n]*\n\|---[^\n]*\n\| ticker-page-compare \| 0 \| \+2 \| 0 \| 0 \| -1 \| 0 \|\n\| single-latest-quarter \| \+1 \| \+1 \| \+1 \| \+1 \| \+1 \| \+1 \|\n\n/u);
-  assert.match(report, /## Confounded pairs \(not attributed to the change\)\n\n\| question[^\n]*\n\|---[^\n]*\n\| peer-two \| -2 \| 0 \| 0 \| 0 \| 0 \| 0 \|\n\n/u);
+  assert.match(report, /## Per-question deltas \(candidate minus baseline\)\n\n\| question[^\n]*\n\|---[^\n]*\n\| ticker-page-compare \| 0 \| \+2 \| 0 \| 0 \| -1 \| 0 \| \+1 \|\n\| single-latest-quarter \| \+1 \| \+1 \| \+1 \| \+1 \| \+1 \| \+1 \| \+2 \|\n\n/u);
+  assert.match(report, /## Confounded pairs \(not attributed to the change\)\n\n\| question[^\n]*\n\|---[^\n]*\n\| peer-two \| -2 \| 0 \| 0 \| 0 \| 0 \| 0 \| 0 \|\n\n/u);
   assert.match(report, /\| missing-cash-flow \| candidate \| baseline \| not compared \|/u);
   assert.match(report, /## Not compared\n\n- missing-cash-flow: the candidate gave no answer \(timeout\)\.\n\n/u);
   assert.match(report, /## Unscored cells\n\nNone\./);
@@ -315,7 +316,7 @@ test("a completed turn no model wrote leaves its pair attributed, and a turn mis
   scoreAll(scores);
   const { report } = reveal(key, scores);
   assert.match(report, /\| single-latest-quarter \| 1 \| completed, `a\/m` \| completed, none \(no model wrote it\) \|/u);
-  assert.match(report, /## Per-question deltas \(candidate minus baseline\)\n\n\| question[^\n]*\n\|---[^\n]*\n(\|[^\n]*\n)*\| single-latest-quarter \| 0 \| 0 \| 0 \| 0 \| 0 \| 0 \|\n/u);
+  assert.match(report, /## Per-question deltas \(candidate minus baseline\)\n\n\| question[^\n]*\n\|---[^\n]*\n(\|[^\n]*\n)*\| single-latest-quarter \| 0 \| 0 \| 0 \| 0 \| 0 \| 0 \| 0 \|\n/u);
   const legacy = runOf("2026-10-02T000000", "candrev1111111111bbbb", {
     "single-latest-quarter": [{ message: "m", outcome: "completed", blocks: [{ kind: "rich_text", segments: [{ type: "text", text: "Lisbon." }] }] }],
     "peer-two": [said("Lisbon.")],
@@ -389,7 +390,7 @@ test("a reveal is written once, keeps the runs beside it, and refuses scores cha
 test("an incomplete reveal keeps the runs beside it too, and a later complete one is refused (#222)", async () => {
   const { dir, keyFile, scores, writeScores } = await pairsOnDisk("2026-10-03T000000");
   const out = revealPair(dir, keyFile, true);
-  assert.match(readFileSync(out, "utf8"), /\*\*Incomplete review:\*\* 38 applicable cells were left unscored/u);
+  assert.match(readFileSync(out, "utf8"), /\*\*Incomplete review:\*\* 44 applicable cells were left unscored/u);
   assert.equal(await readFile(join(dir, "baseline.md"), "utf8"), "# baseline report\n");
   assert.equal(await readFile(join(dir, "candidate.run.json"), "utf8"), '{"arm":"candidate"}\n');
   scoreAll(scores);
@@ -552,4 +553,22 @@ test("a key whose completed turn has no model field loads, and that pair is conf
   const loaded = readKey(keyFile);
   assert.equal(loaded.pairs["peer-two"]!.confounded, true);
   assert.equal("answeredBy" in loaded.pairs["peer-two"]!.turns.baseline[0]!, false);
+});
+
+test("a pairing scored before decision_useful reveals without it, saying so, and counts none of its cells", async () => {
+  const { dir, keyFile, scores, writeScores } = await pairsOnDisk("2026-10-03T000000");
+  scoreAll(scores);
+  for (const pair of Object.values(scores.pairs)) for (const side of ["A", "B"] as const) delete (pair[side] as Partial<typeof pair.A>).decision_useful;
+  await writeScores(scores);
+  const report = readFileSync(revealPair(dir, keyFile, false), "utf8");
+  assert.ok(report.includes([
+    "Not scored, because this pairing's packet predates it: decision_useful.",
+    "",
+    "| criterion | baseline (own scored cells) | candidate (own scored cells) | attributed delta | confounded delta |",
+    "|---|---|---|---|---|",
+    "| correct_companies | 8/8 | 6/6 | 0 over 2 pairs | 0 over 1 pair |",
+  ].join("\n")), report);
+  assert.match(report, /\| no_invented_numbers \| 8\/8 \| 6\/6 \| 0 over 2 pairs \| 0 over 1 pair \|\n\| decision_useful \| not scored \| not scored \| — \| — \|\n/u);
+  assert.match(report, /\| single-latest-quarter \| 0 \| 0 \| 0 \| 0 \| 0 \| 0 \| — \|\n/u);
+  assert.match(report, /## Unscored cells\n\nNone\./u);
 });

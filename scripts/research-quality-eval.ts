@@ -454,6 +454,14 @@ export function readCell(where: string, score: unknown, notApplicable: string | 
   return score;
 }
 
+// The criteria a scores file was written with. One added to RUBRIC later is in none of
+// the file's cells, so it reads as not scored there, never as unscored or 0. A file with
+// no cells at all is held to the whole rubric, so it can't look complete.
+export function criteriaIn(cells: ReadonlyArray<object | undefined>): Set<CriterionId> {
+  const present = cells.filter((cell) => cell !== undefined);
+  return new Set(RUBRIC.map((c) => c.id).filter((id) => present.length === 0 || present.some((cell) => id in cell)));
+}
+
 // One line per run, so trends show run to run. Scores are hand-edited, so the file is
 // checked against the question set before anything is totalled, and every mistake is an
 // error naming where it is: an unknown question, a score other than 0, 1, 2 or null
@@ -464,6 +472,7 @@ export function readCell(where: string, score: unknown, notApplicable: string | 
 export function summarize(files: ReadonlyArray<ScoresFile>): string {
   const lines = [`run | model | total | ${RUBRIC.map((c) => c.id).join(" | ")} | unscored`];
   const regressions: string[] = [];
+  const notScored = new Map(RUBRIC.map((c) => [c.id, [] as string[]]));
   const known = new Set(QUESTIONS.map((q) => q.id));
   for (const file of files) {
     for (const questionId of Object.keys(file.scores)) {
@@ -473,10 +482,15 @@ export function summarize(files: ReadonlyArray<ScoresFile>): string {
     let max = 0;
     let unscored = 0;
     const perCriterion = RUBRIC.map(() => ({ total: 0, max: 0 }));
+    const scoredOn = criteriaIn(Object.values(file.scores));
+    RUBRIC.forEach((criterion) => {
+      if (!scoredOn.has(criterion.id)) notScored.get(criterion.id)!.push(file.run);
+    });
     for (const question of QUESTIONS) {
       const questionId = question.id;
       const scores = file.scores[questionId];
       RUBRIC.forEach((criterion, i) => {
+        if (!scoredOn.has(criterion.id)) return;
         const score = readCell(`${file.run}: ${questionId}.${criterion.id}`, scores?.[criterion.id], question.notApplicable?.includes(criterion.id) ? "this question declares it N/A" : null);
         if (score === undefined) return;
         if (score === null) {
@@ -494,9 +508,13 @@ export function summarize(files: ReadonlyArray<ScoresFile>): string {
       file.run,
       file.model,
       `${total}/${max}`,
-      ...perCriterion.map((c) => `${c.total}/${c.max}`),
+      ...perCriterion.map((c, i) => (scoredOn.has(RUBRIC[i]!.id) ? `${c.total}/${c.max}` : "not scored")),
       String(unscored),
     ].join(" | "));
+  }
+  for (const [id, runs] of notScored) {
+    if (runs.length === 0) continue;
+    lines.push("", `${id} is not scored in ${runs.length} run${runs.length === 1 ? "" : "s"} (${runs[0]}${runs.length > 1 ? ` to ${runs.at(-1)}` : ""}), scored before it was in the rubric. Their totals leave it out, so compare totals only between runs scored on the same criteria.`);
   }
   if (regressions.length > 0) {
     lines.push("", "0 on no_invented_numbers (each needs a regression test):", ...regressions.map((r) => `  ${r}`));
