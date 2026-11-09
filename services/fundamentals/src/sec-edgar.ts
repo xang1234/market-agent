@@ -240,10 +240,11 @@ export const US_GAAP_TO_METRIC_KEY: Readonly<Record<string, string>> = {
   OperatingExpenses: "operating_expenses",
   OperatingIncomeLoss: "operating_income",
 
-  // Income before income taxes. A filer that reports its affiliates' profit
-  // after tax (CAT) tags the legacy concept for the same line.
+  // Income before income taxes, including equity-method income. A filer that
+  // reports its affiliates' profit after tax (CAT) tags only the figure before
+  // that profit, a different figure, so it keeps its own key.
   IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest: "pretax_income",
-  IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments: "pretax_income",
+  IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments: "pretax_income_before_equity_method",
   IncomeTaxExpenseBenefit: "income_tax_expense",
   // The expense recognized, which can differ from the cash flow add-back
   // (stock_based_compensation): ADBE, NVDA.
@@ -857,6 +858,7 @@ const INCOME_KEYS: ReadonlySet<string> = new Set([
   "weighted_average_basic_shares",
   "weighted_average_diluted_shares",
   "pretax_income",
+  "pretax_income_before_equity_method",
   "income_tax_expense",
   "stock_based_compensation_expense",
 ]);

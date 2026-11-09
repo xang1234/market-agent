@@ -133,7 +133,9 @@ npm test         # contract + AAPL FY2024 income statement verification
   its fiscal year, so a 10-Q balance is stored as `FY` at the quarter's
   end, and it appears in statements but gets no context.
 - A Call's inputs (`docs/adr/0005-the-call-opinion-layer.md`) are each one
-  reported figure: `pretax_income`, `income_tax_expense`,
+  reported figure: `pretax_income` beside
+  `pretax_income_before_equity_method` (what a filer that reports its
+  affiliates' profit after tax, such as CAT, tags), `income_tax_expense`,
   `stock_based_compensation` (the cash flow add-back) beside
   `stock_based_compensation_expense` (the expense recognized, which can
   differ), current and noncurrent long-term debt, `commercial_paper`,

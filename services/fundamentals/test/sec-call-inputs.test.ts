@@ -38,6 +38,7 @@ async function extract(ticker: Ticker, family: StatementFamily, fiscal_year: num
 
 const CALL_INPUT_KEYS = [
   "pretax_income",
+  "pretax_income_before_equity_method",
   "income_tax_expense",
   "stock_based_compensation_expense",
   "stock_based_compensation",
@@ -106,8 +107,8 @@ const CASES: ReadonlyArray<{ ticker: Ticker; family: StatementFamily; fy: number
     remaining_performance_obligations: [49_400_000_000, "RevenueRemainingPerformanceObligation"],
   } },
   { ticker: "CAT", family: "income", fy: 2026, fp: "Q3", accn: "0000018230-26-000057", start: "2026-07-01", end: "2026-09-30", lines: {
-    // CAT reports its affiliates' profit after tax, so it tags the legacy concept.
-    pretax_income: [4_220_000_000, "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments"],
+    // CAT reports its affiliates' profit after tax, so it tags pretax income before it.
+    pretax_income_before_equity_method: [4_220_000_000, "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments"],
     income_tax_expense: [968_000_000, "IncomeTaxExpenseBenefit"],
     stock_based_compensation_expense: [81_000_000, "AllocatedShareBasedCompensationExpense"],
   } },
@@ -131,6 +132,7 @@ for (const c of CASES) {
     const { statement, tokens, derivations } = await extract(c.ticker, c.family, c.fy, c.fp, c.accn);
     assert.equal(statement.period_start, c.start);
     assert.equal(statement.period_end, c.end);
+    if (c.ticker === "CAT" && c.family === "income") assert.equal(statement.lines.some((line) => line.metric_key === "pretax_income"), false);
     for (const [key, [value, concept, earlier]] of Object.entries(c.lines)) {
       assert.equal(statement.lines.find((line) => line.metric_key === key)?.value_num, value, key);
       if (earlier === undefined) {
@@ -147,18 +149,17 @@ for (const c of CASES) {
   });
 }
 
-test("pretax income takes the modern concept when a filing tags both, never their sum", async () => {
-  // ADBE's FY2020 10-K tags both pretax concepts at 4,176M.
+test("pretax income before and after equity-method income keep their own keys when a filing tags both", async () => {
+  // ADBE's FY2020 10-K tags both pretax concepts at 4,176M; the legacy one is set apart so a mix-up shows.
   const accn = "0000796343-21-000004";
   const facts = await companyFacts("ADBE");
-  const both = await extract("ADBE", "income", 2020, "FY", accn, facts);
-  assert.equal(both.statement.lines.find((line) => line.metric_key === "pretax_income")?.value_num, 4_176_000_000);
-  assert.equal(both.tokens.get("pretax_income")?.concept, "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest");
-
   const legacy = facts.facts["us-gaap"]!.IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments!;
   legacy.units.USD = legacy.units.USD!.map((value) => ({ ...value, val: 1, val_token: "1" }));
-  const differing = await extract("ADBE", "income", 2020, "FY", accn, facts);
-  assert.equal(differing.statement.lines.find((line) => line.metric_key === "pretax_income")?.value_num, 4_176_000_000);
+  const { statement, tokens } = await extract("ADBE", "income", 2020, "FY", accn, facts);
+  assert.equal(statement.lines.find((line) => line.metric_key === "pretax_income")?.value_num, 4_176_000_000);
+  assert.equal(tokens.get("pretax_income")?.concept, "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest");
+  assert.equal(statement.lines.find((line) => line.metric_key === "pretax_income_before_equity_method")?.value_num, 1);
+  assert.equal(tokens.get("pretax_income_before_equity_method")?.concept, "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments");
 });
 
 test("a Call input is one tagged figure: debt and securities parts are never summed into another key", async () => {
@@ -169,8 +170,42 @@ test("a Call input is one tagged figure: debt and securities parts are never sum
     assert.equal(US_GAAP_TO_METRIC_KEY[token!.concept], line.metric_key);
     assert.equal(String(line.value_num), token!.token);
   }
-  const keys = new Set(Object.values(US_GAAP_TO_METRIC_KEY));
-  for (const definition of ["total_debt", "net_debt", "cash_and_securities"]) assert.equal(keys.has(definition), false, definition);
+});
+
+test("every metric key SEC ingestion maps to is listed here, so a new key is added deliberately", () => {
+  assert.deepEqual(new Set(Object.values(US_GAAP_TO_METRIC_KEY)), new Set([
+    "revenue",
+    "cost_of_revenue",
+    "gross_profit",
+    "operating_expenses",
+    "operating_income",
+    "pretax_income",
+    "pretax_income_before_equity_method",
+    "income_tax_expense",
+    "stock_based_compensation_expense",
+    "net_income",
+    "eps_basic",
+    "eps_diluted",
+    "weighted_average_basic_shares",
+    "weighted_average_diluted_shares",
+    "operating_cash_flow",
+    "capex",
+    "stock_based_compensation",
+    "total_assets",
+    "total_liabilities",
+    "total_equity",
+    "cash_and_equivalents",
+    "marketable_securities_current",
+    "marketable_securities_noncurrent",
+    "debt_securities_current",
+    "short_term_investments",
+    "long_term_debt_current",
+    "long_term_debt_noncurrent",
+    "commercial_paper",
+    "short_term_borrowings",
+    "remaining_performance_obligations",
+    "net_income_consolidated",
+  ]));
 });
 
 test("figures that are not the same economic figure keep their own keys", () => {
