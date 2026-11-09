@@ -18,6 +18,7 @@ import {
   Refusal,
   answeredByShown,
   questionSetDigest,
+  criteriaIn,
   readCell,
   renderBlock,
   rubricLines,
@@ -171,7 +172,7 @@ export function buildPair(baseline: RunRecord, candidate: RunRecord, seed: numbe
   }
   const current = questionSetDigest();
   if (baseline.provenance.questionSetDigest !== current) {
-    throw new Refusal(`can't pair ${baseline.run} with ${candidate.run}: they ran question set ${baseline.provenance.questionSetDigest}, but this runner's is ${current}; pair them from the runner revision that ran them`);
+    throw new Refusal(`can't pair ${baseline.run} with ${candidate.run}: they ran question set ${baseline.provenance.questionSetDigest}, but this runner's is ${current} (its questions or rubric changed since); pair them from the runner revision that ran them`);
   }
   const byArm: Record<Arm, Map<string, AnsweredQuestion>> = {
     baseline: new Map(baseline.questions.map((q) => [q.question.id, q])),
@@ -238,6 +239,9 @@ const showSum = ({ sum, pairs }: Sum) => (pairs === 0 ? "— (no pairs)" : `${si
 // Refuses another pairing's key, and while an applicable cell is unscored unless
 // incomplete is set, and then says so at the top. Totals and deltas are per criterion;
 // no cell is folded into one score. complete: every applicable cell was scored.
+// The question set every committed pairing ran (docs/eval-runs/research-quality/pairs/*/baseline.run.json).
+const QUESTION_SET_BEFORE_DECISION_USEFUL = "4593f805836ee05182184cd0e10b7afaa622714670cc6bafc92e08362ee8d98f";
+
 export function reveal(key: PairKey, scores: PairScores, incomplete = false): { report: string; complete: boolean } {
   if (key.pairing !== scores.pairing) {
     throw new Refusal(`this key is pairing ${key.pairing}'s, but the scores are pairing ${scores.pairing}'s; reveal a packet with its own key`);
@@ -247,6 +251,10 @@ export function reveal(key: PairKey, scores: PairScores, incomplete = false): { 
   }
   const compared = (id: string) => ARMS.every((arm) => gaveAnswer(key.pairs[id]!.turns[arm]));
   const unscored: string[] = [];
+  // A pairing made before decision_useful joined RUBRIC never showed it to the scorer. Its key
+  // records the question set it ran; any other set, older or newer, is held to all of RUBRIC.
+  const scoredOn = criteriaIn(Object.values(scores.pairs).flatMap((pair) => [pair.A, pair.B]), key.baseline.provenance.questionSetDigest === QUESTION_SET_BEFORE_DECISION_USEFUL);
+  const notScored = RUBRIC.filter((c) => !scoredOn.has(c.id)).map((c) => c.id);
   const totals = Object.fromEntries(ARMS.map((arm) => [arm, RUBRIC.map(() => ({ total: 0, max: 0 }))])) as Record<Arm, Array<{ total: number; max: number }>>;
   const attributed = RUBRIC.map((): Sum => ({ sum: 0, pairs: 0 }));
   const confoundedSums = RUBRIC.map((): Sum => ({ sum: 0, pairs: 0 }));
@@ -264,6 +272,7 @@ export function reveal(key: PairKey, scores: PairScores, incomplete = false): { 
       const derived: FailureLabel[] = gaveAnswer(pair.turns[arm]) ? [] : ["operational_failure"];
       sideLabels[side] = FAILURE_LABELS.filter((label) => derived.includes(label) || (cells?.labels[side] ?? []).includes(label));
       RUBRIC.forEach((criterion, i) => {
+        if (!scoredOn.has(criterion.id)) return;
         const notApplicable = pair.notApplicable.includes(criterion.id) ? "this question declares it N/A" : gaveAnswer(pair.turns[arm]) ? null : "this answer was not given";
         const score = readCell(`${id}.${side}.${criterion.id}`, cells?.[side]?.[criterion.id], notApplicable);
         if (score === null) unscored.push(`${id} ${side} ${criterion.id}`);
@@ -334,9 +343,10 @@ export function reveal(key: PairKey, scores: PairScores, incomplete = false): { 
     "candidate minus baseline over the pairs both arms answered and scored: confounded over pairs where a turn names a",
     "different model in each arm or an arm's model wasn't recorded, attributed over the rest.",
     "",
+    ...(notScored.length > 0 ? [`Not scored, because this pairing's packet predates ${notScored.length === 1 ? "it" : "them"}: ${notScored.join(", ")}.`, ""] : []),
     "| criterion | baseline (own scored cells) | candidate (own scored cells) | attributed delta | confounded delta |",
     "|---|---|---|---|---|",
-    ...RUBRIC.map((c, i) => `| ${c.id} | ${totals.baseline[i]!.total}/${totals.baseline[i]!.max} | ${totals.candidate[i]!.total}/${totals.candidate[i]!.max} | ${showSum(attributed[i]!)} | ${showSum(confoundedSums[i]!)} |`),
+    ...RUBRIC.map((c, i) => !scoredOn.has(c.id) ? `| ${c.id} | not scored | not scored | — | — |` : `| ${c.id} | ${totals.baseline[i]!.total}/${totals.baseline[i]!.max} | ${totals.candidate[i]!.total}/${totals.candidate[i]!.max} | ${showSum(attributed[i]!)} | ${showSum(confoundedSums[i]!)} |`),
     "",
     "## Per-question deltas (candidate minus baseline)",
     "",

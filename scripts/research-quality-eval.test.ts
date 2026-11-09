@@ -168,8 +168,8 @@ test("summary totals each run, leaves out n/a and unscored, and flags invented n
   scored.scores["missing-cash-flow"] = { ...scored.scores["missing-cash-flow"]!, correct_companies: 2, no_invented_numbers: 0 };
   const lines = summarize([scored]).split("\n");
   // 2+1+2+0 of four scored criteria; four n/a left out; the rest unscored.
-  const [run, model, total, companies, , , , , invented, unscored] = lines[1]!.split(" | ");
-  assert.deepEqual([run, model, total, companies, invented], ["2026-10-01T1000", "gpt-x", "5/8", "4/4", "1/4"]);
+  const [run, model, total, companies, , , , , invented, useful, unscored] = lines[1]!.split(" | ");
+  assert.deepEqual([run, model, total, companies, invented, useful], ["2026-10-01T1000", "gpt-x", "5/8", "4/4", "1/4", "0/0"]);
   const naCount = QUESTIONS.reduce((n, q) => n + (q.notApplicable?.length ?? 0), 0);
   assert.equal(Number(unscored), QUESTIONS.length * RUBRIC.length - naCount - 4);
   assert.match(lines.join("\n"), /0 on no_invented_numbers[^\n]*\n {2}2026-10-01T1000 missing-cash-flow/);
@@ -199,6 +199,47 @@ test("summary checks a hand-edited file against the question set before totallin
   const overwritten = blankScores("r", "m");
   overwritten.scores["missing-cash-flow"]!.counterarguments = 2;
   assert.throws(() => summarize([overwritten]), /missing-cash-flow\.counterarguments is 2, but this question declares it N\/A/);
+});
+
+test("a run scored before decision_useful shows it not scored, totals the rest, and says the totals don't compare", () => {
+  const sixCriteria = (run: string): ScoresFile => {
+    const file = blankScores(run, "m");
+    for (const cells of Object.values(file.scores)) {
+      delete (cells as Partial<typeof cells>).decision_useful;
+      for (const [id, score] of Object.entries(cells)) if (score === null) (cells as Record<string, unknown>)[id] = 2;
+    }
+    return file;
+  };
+  const current = blankScores("2026-11-09T000000", "m");
+  for (const cells of Object.values(current.scores)) {
+    for (const [id, score] of Object.entries(cells)) if (score === null) (cells as Record<string, unknown>)[id] = id === "decision_useful" ? 1 : 2;
+  }
+  assert.equal(summarize([sixCriteria("2026-10-01T000000"), sixCriteria("2026-10-02T000000"), current]), [
+    "run | model | total | correct_companies | comparable_periods | figures_match_sources | conclusions_justified | counterarguments | no_invented_numbers | decision_useful | unscored",
+    "2026-10-01T000000 | m | 128/128 | 24/24 | 20/20 | 20/20 | 20/20 | 20/20 | 24/24 | not scored | 0",
+    "2026-10-02T000000 | m | 128/128 | 24/24 | 20/20 | 20/20 | 20/20 | 20/20 | 24/24 | not scored | 0",
+    "2026-11-09T000000 | m | 138/148 | 24/24 | 20/20 | 20/20 | 20/20 | 20/20 | 24/24 | 10/20 | 0",
+    "",
+    "decision_useful is not scored in 2 runs (2026-10-01T000000 to 2026-10-02T000000), scored before it was in the rubric. Their totals leave it out, so compare totals only between runs scored on the same criteria.",
+  ].join("\n"));
+
+  // Left out of one question only, it is unscored there, not dropped.
+  const gap = blankScores("r", "m");
+  delete (gap.scores["peer-two"] as Partial<ScoresFile["scores"][string]>).decision_useful;
+  assert.equal(summarize([gap]).split("\n")[1]!.split(" | ")[9], "0/0");
+  assert.doesNotMatch(summarize([gap]), /not scored/);
+});
+
+test("a criterion the rubric started with is never not scored: left out of every question, its cells are unscored", () => {
+  const file = blankScores("2026-11-09T000000", "m");
+  for (const cells of Object.values(file.scores)) {
+    delete (cells as Partial<typeof cells>).no_invented_numbers;
+    for (const [id, score] of Object.entries(cells)) if (score === null) (cells as Record<string, unknown>)[id] = 2;
+  }
+  assert.equal(summarize([file]), [
+    "run | model | total | correct_companies | comparable_periods | figures_match_sources | conclusions_justified | counterarguments | no_invented_numbers | decision_useful | unscored",
+    "2026-11-09T000000 | m | 124/124 | 24/24 | 20/20 | 20/20 | 20/20 | 20/20 | 0/0 | 20/20 | 12",
+  ].join("\n"));
 });
 
 test("a run names its model or doesn't start, and its files are stamped to the second", () => {

@@ -8,13 +8,19 @@ the owner scores by hand, so answer quality can be compared from one run to the 
   business-segment revenue for its latest quarter, and one filed claim: AMD's explanation of its Q2 2025 margin drop,
   quoted from its earnings release (8-K exhibit 99.1, #282). Nothing else is seeded, so the missing-data questions have
   one honest answer: "not available", and only AMD's Q2 2025 has a cause in evidence.
-- **Rubric:** six criteria, each scored 0–2, with fixed meanings for 0, 1 and 2:
+- **Rubric:** seven criteria, each scored 0–2, with fixed meanings for 0, 1 and 2:
   1. correct companies;
   2. comparable periods;
   3. figures match sources;
   4. conclusions justified;
   5. counterarguments;
-  6. no invented numbers.
+  6. no invented numbers;
+  7. decision useful: could a portfolio manager act on it, and does it name the figure, threshold or event in the data
+     that would change a view of the stock?
+  The first six check accuracy and reasoning; the seventh checks whether the answer helps someone decide. It differs
+  from counterarguments, which asks what cuts the other way, by asking what to watch. It never rewards a buy, sell or
+  hold call, a price target or advice wording, since the product forbids them (#201, #224). The missing-data questions
+  mark it N/A: an honest "not available" has nothing to act on.
   Each question carries an `expect` note (what a good answer does, and the trap), so the scorer doesn't have to work it
   out from the data. A question can mark criteria `notApplicable`. Those are scored N/A and left out of totals, so an
   honest "not available" answer isn't penalized for having no figures to judge.
@@ -40,7 +46,10 @@ the owner scores by hand, so answer quality can be compared from one run to the 
 3. Score each question 0, 1 or 2 in `<run>.scores.json`, with notes, and commit both files.
 4. Run `node --experimental-strip-types scripts/research-quality-eval.ts summary`. It prints one line per run (total and
    per criterion, leaving out N/A and unscored), so trends show from run to run. It also lists every 0 on
-   `no_invented_numbers`, and each of those becomes a regression test.
+   `no_invented_numbers`, and each of those becomes a regression test. A run scored before a criterion joined the
+   rubric (every run before `decision_useful`) shows it `not scored`, and its total leaves it out (only a criterion marked `addedLater` in `RUBRIC`; any
+   other criterion missing from a file is unscored); the summary names
+   those runs, since their totals cover fewer criteria and don't compare with later ones.
 
 The first scored run is the baseline. Each run records the primary model from the LLM settings, since a model change
 alone can move scores. If the settings can't be read, the run stops before sending anything; set
@@ -73,7 +82,8 @@ on the same frozen data, then pair the two run records:
    `.dev/eval-runs/research-quality/` (gitignored) where a scorer browsing `docs/` won't see which arm is which.
 2. `node --experimental-strip-types scripts/research-quality-pairs.ts pair <baseline.run.json> <candidate.run.json> [--seed N]`.
    It refuses a run not made with `--blind` (its run.json lacks `"blind": true`), and two runs whose question-set
-   digest or dataset revision differ, or whose question set isn't the current runner's. The pairing is named by its
+   digest or dataset revision differ, or whose question set isn't the current runner's. The digest covers the rubric,
+   so runs made before `decision_useful` pair only from the runner revision that ran them. The pairing is named by its
    UTC stamp, so a second pairing in the same second is refused. It writes `pairs.md` and a blank `pairs.scores.json`
    to `docs/eval-runs/research-quality/pairs/<pairing>/`, and the key to `.dev/eval-keys/<pairing>.key.json`,
    gitignored under `.dev/`. The packet shuffles question order and A/B per question from the seed (a whole number below 2^32,
@@ -92,7 +102,9 @@ on the same frozen data, then pair the two run records:
    applicable cell is `null`; `--incomplete` reveals anyway and names the review incomplete. It writes `reveal.md`
    once: the mapping, each arm's totals per criterion over its own scored cells, per-criterion deltas as `+N over K
    pairs`, per-question deltas, what wasn't compared, unscored cells, each turn's outcome and model, failure-label
-   counts, and each question's labels and notes. Only pairs both arms answered are compared. A compared pair is
+   counts, and each question's labels and notes. A pairing made before a criterion joined the rubric (its key records
+   the question set every committed pairing ran, `4593f805…`, and no cell has the criterion) reveals with it `not scored` and says so above the
+   totals. Only a criterion marked `addedLater` in `RUBRIC` can read that way; any other missing cell is unscored. Only pairs both arms answered are compared. A compared pair is
    confounded when a turn names a different model in each arm, or an arm's record lacks the field: its deltas are shown
    apart and left out of the attributed delta. A turn no model wrote (chat omits `answered_by` for an engine answer
    without commentary or a fixed reply) confounds nothing, since a model against no model is the change measured. There is no single overall score. Notes show on their question's line. Before
