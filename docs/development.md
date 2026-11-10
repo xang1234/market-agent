@@ -169,6 +169,23 @@ To run it daily, add a crontab line like this one (`crontab -e`), with the stack
 30 22 * * 1-5 cd /path/to/market-agent/services/fundamentals && DATABASE_URL=postgresql://... DEV_PROVIDERS_BASE_URL=http://127.0.0.1:4336 PATH=$HOME/.nvm/versions/node/v22.18.0/bin:/usr/bin:/bin npm run capture:consensus >> /tmp/capture-consensus.log 2>&1
 ```
 
+A Call anchors its exit multiple against the company's own price history, which the Polygon key holds for about two
+years. A dev job records about ten years of yfinance's split-adjusted daily closes into `daily_close_captures`, one
+request per listing, at least half a second apart. It reads yfinance through the dev-providers sidecar, so the stack must
+run with `ENABLE_UNOFFICIAL_DEV_PROVIDERS=true`. With no `--tickers` it captures every active US common stock or ADR
+listing except the frozen golden issuers'. It skips, and counts as failed, a ticker that more than one active US
+listing carries. A split restates every earlier close, so each run stores a whole set of about 2,500 rows per ticker,
+dated by the UTC day of its request, and a reader takes the latest `captured_on` per listing. Run it occasionally,
+such as monthly or after a split, not daily. A rerun the same UTC day inserts nothing. The stored currency is the
+listing's, which the sidecar echoes back without reading it from yfinance, so a non-USD listing's currency is not
+verified. The job exits 2 and stops when the sidecar cannot be reached or reports a block, keeping the rows it wrote,
+and exits 1 when any ticker failed otherwise, a timed-out request included.
+
+```bash
+cd services/market
+DATABASE_URL=... DEV_PROVIDERS_BASE_URL=http://127.0.0.1:4336 npm run capture:closes [-- --tickers AAPL,COST,CAT]
+```
+
 ### Keep frozen and live data apart
 
 Frozen modes need a database without provider-hydrated NVDA, AMD, or AAPL. Data mode refuses a database that a frozen mode seeded, because the frozen facts would let a live check pass without touching Polygon or SEC. Reset with `docker compose -f docker-compose.dev.yml --env-file .env.dev down -v` when you switch.
