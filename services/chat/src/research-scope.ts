@@ -226,7 +226,8 @@ export const PROPOSABLE_METRICS: ReadonlyArray<RequestedMetric> = Object.freeze(
   { metric_key: "total_liabilities", label: "Total liabilities", available: true },
   { metric_key: "total_equity", label: "Stockholders' equity", available: true },
   // A Call's inputs (ADR 0005), each family the reported figures it is filed
-  // as (scope-figures.ts), none summed: debt as a whole stays a gap (#226).
+  // as (scope-figures.ts), none summed. Net cash and total debt are the
+  // reviewed sums of them (ADR 0006), each answered beside its balances.
   { metric_key: "pretax_income", label: "Pretax income (income before income taxes)", available: true },
   { metric_key: "income_tax_expense", label: "Income tax expense", available: true },
   { metric_key: "stock_based_compensation", label: "Stock-based compensation", available: true },
@@ -234,13 +235,14 @@ export const PROPOSABLE_METRICS: ReadonlyArray<RequestedMetric> = Object.freeze(
   { metric_key: "short_term_debt", label: "Commercial paper and short-term borrowings", available: true },
   { metric_key: "marketable_securities", label: "Marketable securities and short-term investments", available: true },
   { metric_key: "remaining_performance_obligations", label: "Remaining performance obligations (contracted backlog)", available: true },
+  { metric_key: "net_cash", label: "Net cash or net debt (cash and securities less debt)", available: true },
+  { metric_key: "total_debt", label: "Total debt", available: true },
   // Basic EPS is its own figure, never answered with diluted EPS.
   { metric_key: "eps_basic", label: "Basic earnings per share", available: true },
   { metric_key: "eps_diluted", label: "Earnings per share", available: true },
   { metric_key: "ebitda", label: "EBITDA", available: false },
   // An adjusted income figure is not the reported one.
   { metric_key: "non_gaap_income", label: "Non-GAAP earnings", available: false },
-  { metric_key: "total_debt", label: "Debt", available: false },
   { metric_key: "dividends", label: "Dividends", available: false },
   // Share counts the financial engine reports; no reader here does.
   { metric_key: "weighted_average_basic_shares", label: "Weighted-average basic shares", available: false },
@@ -270,6 +272,8 @@ const STATEMENT_METRICS: ReadonlySet<string> = new Set([
   "short_term_debt",
   "marketable_securities",
   "remaining_performance_obligations",
+  "net_cash",
+  "total_debt",
 ]);
 
 export const BALANCE_SHEET_ITEMS = ["cash_and_equivalents", "total_assets", "total_liabilities", "total_equity"];
