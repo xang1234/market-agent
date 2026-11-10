@@ -60,9 +60,9 @@ export const METRIC_CATALOG_V1: ReadonlyMap<MetricKey, MetricDefinition> = new M
     // Cash paid for PP&E, reported as a nonnegative outflow (SEC ingestion
     // certifies only PaymentsToAcquirePropertyPlantAndEquipment).
     metric("capex", "Capital expenditures (PP&E cash payments)", "flow", "currency"),
-    // A Call's inputs (ADR 0005), each one reported us-gaap concept (#594):
-    // never a sum of tags, so no total or net debt (#226). Income from
-    // continuing operations before income taxes, including equity-method income.
+    // A Call's inputs (ADR 0005), each one reported us-gaap concept (#594),
+    // never a sum of tags: net cash and total debt sum them (BALANCE_COMPONENTS).
+    // Income from continuing operations before income taxes, including equity-method income.
     metric("pretax_income", "Pretax income (including equity-method income)", "flow", "currency"),
     // The figure a filer that reports affiliates' profit after tax (CAT) tags instead.
     metric("pretax_income_before_equity_method", "Pretax income before equity-method income", "flow", "currency"),
