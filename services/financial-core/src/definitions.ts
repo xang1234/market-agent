@@ -60,9 +60,9 @@ export const METRIC_CATALOG_V1: ReadonlyMap<MetricKey, MetricDefinition> = new M
     // Cash paid for PP&E, reported as a nonnegative outflow (SEC ingestion
     // certifies only PaymentsToAcquirePropertyPlantAndEquipment).
     metric("capex", "Capital expenditures (PP&E cash payments)", "flow", "currency"),
-    // A Call's inputs (ADR 0005), each one reported us-gaap concept (#594):
-    // never a sum of tags, so no total or net debt (#226). Income from
-    // continuing operations before income taxes, including equity-method income.
+    // A Call's inputs (ADR 0005), each one reported us-gaap concept (#594),
+    // never a sum of tags: net cash and total debt sum them (BALANCE_COMPONENTS).
+    // Income from continuing operations before income taxes, including equity-method income.
     metric("pretax_income", "Pretax income (including equity-method income)", "flow", "currency"),
     // The figure a filer that reports affiliates' profit after tax (CAT) tags instead.
     metric("pretax_income_before_equity_method", "Pretax income before equity-method income", "flow", "currency"),
@@ -153,6 +153,41 @@ export const RATIO_CATALOG_V1: ReadonlyMap<MetricKey, RatioDefinition> = new Map
     },
   ].map((definition) => [definition.ratio_key, Object.freeze(definition)]),
 );
+
+export type BalanceSide = "cash" | "debt";
+
+/**
+ * A balance net cash and total debt read (ADR 0006): its side, whether the
+ * definition needs it, and the keys that would count one balance-sheet line
+ * twice beside it on one date. Leases, equity investments, restricted cash,
+ * pensions and finance-arm receivables are not components.
+ */
+export type BalanceComponent = Readonly<{ metric_key: MetricKey; side: BalanceSide; required: boolean; excludes?: ReadonlyArray<MetricKey> }>;
+
+export const BALANCE_COMPONENTS = [
+  { metric_key: "cash_and_equivalents", side: "cash", required: true },
+  { metric_key: "marketable_securities_current", side: "cash", required: false },
+  { metric_key: "marketable_securities_noncurrent", side: "cash", required: false },
+  { metric_key: "short_term_investments", side: "cash", required: false, excludes: ["marketable_securities_current"] },
+  { metric_key: "debt_securities_current", side: "cash", required: false, excludes: ["marketable_securities_current"] },
+  { metric_key: "long_term_debt_current", side: "debt", required: false },
+  { metric_key: "long_term_debt_noncurrent", side: "debt", required: false },
+  { metric_key: "commercial_paper", side: "debt", required: false },
+  { metric_key: "short_term_borrowings", side: "debt", required: false },
+] as const satisfies ReadonlyArray<BalanceComponent>;
+
+export type BalanceSumKind = "net_cash" | "total_debt";
+
+/** How each side's balances enter the figure. Every side needs at least one balance reported. */
+export const BALANCE_SUM_SIDES: Readonly<Record<BalanceSumKind, Readonly<Partial<Record<BalanceSide, "add" | "subtract">>>>> = Object.freeze({
+  net_cash: { cash: "add", debt: "subtract" },
+  total_debt: { debt: "add" },
+});
+
+/** A balance sum's components, in table order: its plan node's dependency order. */
+export function balanceComponents(kind: BalanceSumKind): ReadonlyArray<BalanceComponent> {
+  return BALANCE_COMPONENTS.filter((component) => Object.hasOwn(BALANCE_SUM_SIDES[kind], component.side));
+}
 
 export function resolveMetricDefinition(metricKey: MetricKey): MetricDefinition | null {
   return METRIC_CATALOG_V1.get(metricKey) ?? null;

@@ -13,6 +13,8 @@ const OPERATION_PHRASES: Record<Exclude<OperationNode["operation"], "reported_me
   operating_margin: "operating margin",
   net_margin: "net margin",
   free_cash_flow: "free cash flow (operating cash flow less PP&E cash capex)",
+  net_cash: "net cash (cash and securities less debt, from one 10-K balance sheet)",
+  total_debt: "total debt (long-term debt, commercial paper and short-term borrowings, from one 10-K balance sheet)",
   ratio: "approved ratio",
   trailing_sum: "trailing four-quarter sum",
   threshold: "threshold check",

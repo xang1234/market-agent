@@ -10,6 +10,7 @@ import {
   type BoundFactInputV1,
   type BoundFinancialInputV1,
   type BoundPriceInputV1,
+  type BalanceSumNode,
   type ChangeNode,
   type DecimalString,
   type FinancialUnit,
@@ -37,7 +38,15 @@ import {
   type ValuePayload,
   type VersionTag,
 } from "./contracts.ts";
-import { MARGIN_NUMERATORS, resolveMetricDefinition, resolveRatioDefinition, type MetricDefinition, type MetricValueKind } from "./definitions.ts";
+import {
+  BALANCE_SUM_SIDES,
+  balanceComponents,
+  MARGIN_NUMERATORS,
+  resolveMetricDefinition,
+  resolveRatioDefinition,
+  type MetricDefinition,
+  type MetricValueKind,
+} from "./definitions.ts";
 import { derivationIssue } from "./derivation.ts";
 import { measurementIncompatibility, unitIncompatibility, type Measurement, type MeasurementReason } from "./dimensions.ts";
 import { canonicalDecimalString, parseDerivedDecimalText, parseFinancialDecimal } from "./exact-decimal.ts";
@@ -77,6 +86,8 @@ export type FinancialOperand = {
   measurement: Measurement;
   /** The listing and reference date a reported value was restated to; null when it was not restated, and for every derived value. */
   restated_to: Readonly<{ listing_id: UUID; reference_date: IsoDate }> | null;
+  /** The source a reported fact was read from (one per SEC accession); null for a price and every derived value. */
+  source_id: UUID | null;
 };
 
 export type OperationGap = { ok: false; disposition: GapDisposition; reason_code: ReasonCode; explanation: string };
@@ -95,6 +106,7 @@ export class FinancialIntegrityError extends Error {
 
 const REASON_DISPOSITIONS: Readonly<Record<ReasonCode, GapDisposition>> = {
   missing_input: "missing",
+  ineligible_input: "missing",
   stale_input: "missing",
   publication_time_unknown: "missing",
   precision_unverified: "missing",
@@ -224,6 +236,7 @@ function factOperand(input: BoundFactInputV1, node: ReportedMetricNode, definiti
       basis: { ...input.basis },
     },
     restated_to: adjustment === undefined ? null : { listing_id: adjustment.listing_id, reference_date: adjustment.reference_date },
+    source_id: input.source.source_id,
   });
 }
 
@@ -263,6 +276,7 @@ function priceOperand(input: BoundPriceInputV1, node: ReportedMetricNode, defini
       basis: { reporting: expected.reporting_basis, adjustment: "split_adjusted", share_basis: "not_applicable" },
     },
     restated_to: { listing_id: adjustment.listing_id, reference_date: adjustment.reference_date },
+    source_id: null,
   });
 }
 
@@ -319,6 +333,63 @@ export function freeCashFlow(node: FreeCashFlowNode, operatingCashFlow: Financia
     period: operatingCashFlow.period,
     measurement: operatingCashFlow.measurement,
     restated_to: null,
+    source_id: null,
+  });
+}
+
+/**
+ * Net cash or total debt (ADR 0006): each side's balances, all from one 10-K
+ * at one fiscal year-end, added or subtracted as the definition says. A
+ * component the filing does not report arrives as null and is left out, never
+ * read as zero; without a required one, or any balance on a side, there is no
+ * figure.
+ */
+export function balanceSum(node: BalanceSumNode, operands: ReadonlyArray<FinancialOperand | null>): OperandOutcome {
+  const sides = BALANCE_SUM_SIDES[node.operation];
+  const components = balanceComponents(node.operation);
+  const present = components.flatMap((component, index) => {
+    const operand = operands[index];
+    return operand ? [{ component, operand }] : [];
+  });
+  if (present.some(({ component, operand }) => !isReported(operand, component.metric_key, "balance"))) {
+    return operationGap("incompatible_definition", "Each component is its own reported balance.");
+  }
+  const reported = new Set(present.map(({ component }) => component.metric_key));
+  const unmet = components.some((component) => component.required && !reported.has(component.metric_key)) ||
+    Object.keys(sides).some((side) => !present.some(({ component }) => component.side === side));
+  const [first] = present;
+  if (unmet || first === undefined) {
+    return operationGap("missing_input", "The 10-K reports no cash and equivalents, or none of the four mapped debt lines; a line it does not report is never read as zero.");
+  }
+  for (const { operand } of present.slice(1)) {
+    const incompatible = subjectMismatch(first.operand, operand) ?? measurementMismatch(first.operand, operand) ?? periodMismatch(first.operand, operand) ??
+      (operand.source_id === first.operand.source_id ? null : operationGap("incompatible_period", "The balances come from different filings."));
+    if (incompatible) return incompatible;
+  }
+  if (first.operand.period.kind !== "instant" || first.operand.period.fiscal_period !== "FY") {
+    return operationGap("unsupported_period", "Net cash and total debt v1 read a fiscal year-end balance sheet only.");
+  }
+  if (present.some(({ component }) => component.excludes?.some((key) => reported.has(key)))) {
+    return operationGap("conflicting_evidence", "Two reported keys may be one balance-sheet line, so adding both could count it twice.");
+  }
+  if (present.some(({ operand }) => rationalSign(operand.value) < 0)) {
+    return operationGap("incompatible_definition", "A cash, securities or debt balance is never negative; a negative reported value is not one.");
+  }
+  const total = present.reduce<ExactRational | null>((sum, { component, operand }) => {
+    if (sum === null) return null;
+    return sides[component.side] === "add" ? addRationals(sum, operand.value) : subtractRationals(sum, operand.value);
+  }, ZERO);
+  if (total === null) return operationGap("numeric_limit_exceeded", "The sum exceeds supported numeric limits.");
+  return success({
+    node_id: node.node_id,
+    value: total,
+    subject_slot: first.operand.subject_slot,
+    measure: { metric_key: node.operation, definition_version: node.operation_version, derivations: [] },
+    value_kind: "derived",
+    period: first.operand.period,
+    measurement: first.operand.measurement,
+    restated_to: null,
+    source_id: null,
   });
 }
 
@@ -458,6 +529,7 @@ export function spread(node: SpreadNode, left: FinancialOperand, right: Financia
 }
 
 const HUNDRED = rationalFromDecimal({ coefficient: 100n, scale: 0 })!;
+const ZERO = rationalFromDecimal({ coefficient: 0n, scale: 0 })!;
 
 /** Left minus right in their measurement, except that two percentages differ by percentage points. A multiple stays a ratio. */
 function difference(left: FinancialOperand, right: FinancialOperand): { value: ExactRational; measurement: Measurement } | null {
@@ -508,6 +580,7 @@ function valuation(node: MarketCapNode | PeRatioNode, price: FinancialOperand, v
     period: price.period,
     measurement: { ...price.measurement, unit },
     restated_to: null,
+    source_id: null,
   };
 }
 
@@ -572,6 +645,7 @@ function quotient(nodeId: LocalId, measure: MeasureIdentity, numerator: Financia
     period: numerator.period,
     measurement: { ...numerator.measurement, unit: { kind: "ratio" } },
     restated_to: null,
+    source_id: null,
   });
 }
 
@@ -594,6 +668,7 @@ function derived(
     period: source.period,
     measurement,
     restated_to: null,
+    source_id: null,
   };
 }
 

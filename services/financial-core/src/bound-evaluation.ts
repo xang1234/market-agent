@@ -234,6 +234,8 @@ function bindingGapExplanation(reason: ReasonCode): string {
       return "A later filing states a different figure, or changes one this is derived from, and the current figure could not be verified.";
     case "source_class_not_allowed":
       return "This figure comes only from a kind of source this request may not use.";
+    case "ineligible_input":
+      return "A filing reports this figure, but none of its reports is usable here: none was public before the knowledge cutoff, or it is only a restatement and the original was asked for.";
     default:
       return "No eligible input was public before the knowledge cutoff.";
   }

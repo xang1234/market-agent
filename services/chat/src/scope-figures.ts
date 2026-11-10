@@ -2,7 +2,7 @@
 // and resolved scope make, and the figures a follow-up keeps, at the period it
 // reads.
 
-import type { FinancialPlan, PeriodSelector } from "../../financial-core/src/index.ts";
+import { balanceComponents, type BalanceSumKind, type FinancialPlan, type PeriodSelector } from "../../financial-core/src/index.ts";
 import type { PlanningContext } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort } from "../../financial-engine/src/ports.ts";
 import { valuationOperations, valuationOutputs, type Valuation } from "../../financial-engine/src/valuation-plan.ts";
@@ -223,6 +223,12 @@ export function periodNote(scope: ScopePeriod, shown: PeriodType | null): string
 
 type Computed = Readonly<{ operation: string; inputs: Readonly<Record<string, string>> }>;
 
+// Every balance the sum reads, then the sum: each node field is named for its balance.
+function balanceSum(kind: BalanceSumKind): ReadonlyArray<string | Computed> {
+  const keys = balanceComponents(kind).map((component) => component.metric_key);
+  return [...keys, { operation: kind, inputs: Object.fromEntries(keys.map((key) => [key, key])) }];
+}
+
 // A valuation is the one at the cutoff (valuation-plan.ts), so only the latest has one.
 export const ENGINE_READS_BY_CATALOG_METRIC: Readonly<Record<string, ReadonlyArray<string | Computed>>> = {
   income_statement: [
@@ -248,6 +254,8 @@ export const ENGINE_READS_BY_CATALOG_METRIC: Readonly<Record<string, ReadonlyArr
   short_term_debt: ["commercial_paper", "short_term_borrowings"],
   marketable_securities: ["marketable_securities_current", "marketable_securities_noncurrent", "debt_securities_current", "short_term_investments"],
   remaining_performance_obligations: ["remaining_performance_obligations"],
+  net_cash: balanceSum("net_cash"),
+  total_debt: balanceSum("total_debt"),
 };
 
 // The chat catalog key (research-scope.ts) of each figure the engine names,
@@ -278,6 +286,8 @@ export const SCOPE_METRICS: Readonly<Record<string, string | null>> = {
   operating_margin: "income_statement",
   net_margin: "income_statement",
   free_cash_flow: "free_cash_flow",
+  net_cash: "net_cash",
+  total_debt: "total_debt",
   operating_cash_flow: "operating_cash_flow",
   capex: "capex",
   eps_basic: "eps_basic",

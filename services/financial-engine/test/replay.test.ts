@@ -69,13 +69,13 @@ test("pinned verification replay", { timeout: 300_000 }, async (t) => {
     assert.deepEqual((await worker().tick()).filter((candidate) => candidate.run_id === replayId), [], "a finished replay is not picked up again");
   });
 
-  await t.test("a run bound under selection v5 still passes the seal and replays as verified after selection moved to v6 (#481)", async () => {
+  await t.test("a run bound under selection v5 still passes the seal and replays as verified after selection moved on (#481)", async () => {
     const plan = marginPlan();
     const authority = authorityFor();
     const { runId, lease } = await leasedRun(db, plan, authority);
     await bindPlanInputs({ client: db, lease, plan, authority, evidence: createEvidenceFinancialPort });
     const policies = async () => (await db.query(`select distinct selection_policy_version from financial_run_inputs where run_id = $1`, [runId])).rows;
-    assert.deepEqual(await policies(), [{ selection_policy_version: "public-information-selection.v6" }]);
+    assert.deepEqual(await policies(), [{ selection_policy_version: "public-information-selection.v7" }]);
     const rows = (await db.query<{ input_slot: string; bound_payload: { eligibility: { selection_policy_version: string } } | null }>(
       `select input_slot, bound_payload from financial_run_inputs where run_id = $1`, [runId])).rows;
     for (const row of rows) {

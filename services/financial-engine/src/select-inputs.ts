@@ -42,6 +42,12 @@
 // 10. A split near an instant share count's date leaves its basis unknown,
 //    so it is a gap: one within SHARE_COUNT_SPLIT_WINDOW_DAYS of that date,
 //    or after it and on or before the filing date.
+// 11. A statement fact's slot is missing_input only when it has no candidate
+//    for the metric and period; share counts keep rules 9 and 10. A
+//    candidate no rule above admits and no other reason names, one not yet
+//    public at the cutoff or reported only as a restatement under
+//    as_reported, is ineligible_input, so net cash and total debt never
+//    leave out a balance a filing did report (#602).
 //
 // A selection is a proven input: the chosen candidate with its proofs and
 // context narrowed to non-null, and its numerics parsed exactly once.
@@ -81,7 +87,7 @@ import {
 } from "../../financial-core/src/index.ts";
 import type { InputCandidate, SplitHistory } from "./ports.ts";
 
-export const SELECTION_POLICY_VERSION = "public-information-selection.v6";
+export const SELECTION_POLICY_VERSION = "public-information-selection.v7";
 
 /** A large accelerated filer's filings are due about 112 days apart at most, so an older count is likely superseded. */
 export const SHARE_COUNT_MAX_AGE_DAYS = 130;
@@ -231,7 +237,7 @@ export function selectInput(
 
   const eligible = eligibleAmong(inPeriod, policy);
   if (typeof eligible === "string") return gap(eligible);
-  if (node.period.kind === "latest" && period === null) return gap("missing_input");
+  if (node.period.kind === "latest" && period === null) return gap("ineligible_input");
   return chooseAmong(eligible, requested, policy);
 }
 
@@ -260,7 +266,7 @@ function selectShareCount(node: ReportedMetricNode, candidates: ReadonlyArray<In
   return selection;
 }
 
-/** The candidates eligible at the cutoff, or, when none is, the reason closest to eligibility. */
+/** The candidates eligible at the cutoff, or, when none is, the reason closest to eligibility (rule 11). */
 function eligibleAmong(candidates: ReadonlyArray<InputCandidate>, policy: EligibilityPolicy): Eligible[] | ReasonCode {
   const eligible: Eligible[] = [];
   const exclusions = new Set<ReasonCode>();
@@ -269,7 +275,8 @@ function eligibleAmong(candidates: ReadonlyArray<InputCandidate>, policy: Eligib
     if ("eligible" in verdict) eligible.push(verdict.eligible);
     else if (verdict.reason !== null) exclusions.add(verdict.reason);
   }
-  return eligible.length > 0 ? eligible : EXCLUSION_PRIORITY.find((reason) => exclusions.has(reason)) ?? "missing_input";
+  if (eligible.length > 0) return eligible;
+  return EXCLUSION_PRIORITY.find((reason) => exclusions.has(reason)) ?? (candidates.length > 0 ? "ineligible_input" : "missing_input");
 }
 
 /** Rules 4 to 7 over a slot's eligible candidates; `requested` resolves what a correction corrects. */
@@ -279,7 +286,7 @@ function chooseAmong(eligible: ReadonlyArray<Eligible>, requested: ReadonlyArray
     return gap("restatement_unverified");
   }
   const disclosures = chooseDisclosure(current, requested, policy.reporting_basis);
-  if (disclosures.length === 0) return gap("missing_input");
+  if (disclosures.length === 0) return gap("ineligible_input");
 
   const parsed = disclosures.flatMap(({ numeric, ...rest }) => (numeric === null ? [] : [{ ...rest, numeric }]));
   if (parsed.length !== disclosures.length) return gap("precision_unverified");

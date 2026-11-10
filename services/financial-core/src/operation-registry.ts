@@ -6,6 +6,7 @@
 import { scenarioAssumption, type FinancialPlan, type OperationKind, type OperationNode, type ReportedMetricNode, type VersionTag } from "./contracts.ts";
 import {
   absoluteChange,
+  balanceSum,
   freeCashFlow,
   operationGap,
   margin,
@@ -33,8 +34,13 @@ export type OperationSpec<K extends OperationKind> = Readonly<{
   operation_version: VersionTag;
   interpretation: string;
   produces: "value" | "predicate";
-  /** Only the rankings: they evaluate the available members and report how many they ranked. */
-  tolerates_missing_operands: boolean;
+  /**
+   * Which operand gaps reach `evaluate` as null instead of blocking it: none;
+   * any evidence gap, for the rankings, which evaluate the members they have
+   * and report how many they ranked; or only an input no filing reported, for
+   * the balance sums, which leave an absent line out but never an unusable one.
+   */
+  tolerates_missing_operands: false | "evidence_gaps" | "absent_inputs";
   evaluate: (node: NodeOf<K>, operands: Operands, context: EvaluationContext) => OperationOutcome;
 }>;
 
@@ -83,6 +89,20 @@ export const OPERATION_REGISTRY: { readonly [K in OperationKind]: OperationSpec<
     interpretation: "Annual operating cash flow less PP&E cash capex for the identical fiscal year, scope, and basis; capex must be nonnegative.",
     evaluate: (node, operands) => freeCashFlow(node, required(node, operands, 0), required(node, operands, 1)),
   },
+  net_cash: {
+    ...VALUE_OPERATION,
+    tolerates_missing_operands: "absent_inputs",
+    operation_version: "net_cash.v1",
+    interpretation: "Cash and equivalents plus marketable securities, short-term investments and current debt securities, less long-term debt, commercial paper and short-term borrowings, all from one 10-K at one fiscal year-end. Debt is only those four mapped lines, so debt a filer tags under another concept, such as DebtCurrent or a lease liability, is not included; a mapped line the 10-K does not report is left out, never zero.",
+    evaluate: balanceSum,
+  },
+  total_debt: {
+    ...VALUE_OPERATION,
+    tolerates_missing_operands: "absent_inputs",
+    operation_version: "total_debt.v1",
+    interpretation: "Long-term debt, current and noncurrent, plus commercial paper and short-term borrowings, all from one 10-K at one fiscal year-end. Only those four mapped lines are summed, so debt a filer tags under another concept, such as DebtCurrent or a lease liability, is not included; a mapped line the 10-K does not report is left out, never zero.",
+    evaluate: balanceSum,
+  },
   ratio: {
     ...VALUE_OPERATION,
     operation_version: "ratio.v1",
@@ -110,7 +130,7 @@ export const OPERATION_REGISTRY: { readonly [K in OperationKind]: OperationSpec<
     operation_version: "peer_compare.v1",
     interpretation: "Ranking of a frozen cohort on identical definitions and periods; ties explicit.",
     produces: "predicate",
-    tolerates_missing_operands: true,
+    tolerates_missing_operands: "evidence_gaps",
     evaluate: (node, operands) => peerCompare(node, operands),
   },
   market_cap: {
@@ -138,7 +158,7 @@ export const OPERATION_REGISTRY: { readonly [K in OperationKind]: OperationSpec<
     operation_version: "period_rank.v1",
     interpretation: "Ranking of one subject's measure across two or more of its own distinct, non-overlapping quarters, or years; ties explicit, and a period without a value left out and counted.",
     produces: "predicate",
-    tolerates_missing_operands: true,
+    tolerates_missing_operands: "evidence_gaps",
     evaluate: (node, operands) => periodRank(node, operands),
   },
   scenario_eps_multiple: {

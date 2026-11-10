@@ -143,7 +143,8 @@ npm test         # contract + AAPL FY2024 income statement verification
   `debt_securities_current`, `short_term_investments`, and
   `remaining_performance_obligations`. Concepts that are not the same
   figure keep their own keys, and no key sums tags: total and net debt
-  wait for a reviewed definition (#226).
+  are engine definitions over these keys (`total_debt.v1`, `net_cash.v1`,
+  ADR 0006), never stored figures.
 - A 10-K's comparative for an earlier year that differs from the figure
   that stands for it, walking filings by filing date, is stored as a
   restatement: `method = 'restated'`, on the later filing's source,

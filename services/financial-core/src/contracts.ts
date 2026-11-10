@@ -2,6 +2,7 @@
 // and spec/financial_result_schema.json are the serialized-boundary authority;
 // these types mirror them (test/contracts.test.ts keeps the enums in sync).
 
+import { balanceComponents, type BALANCE_COMPONENTS, type BalanceSide } from "./definitions.ts";
 import type {
   BoundAdjustmentBasis,
   DimensionScope,
@@ -39,6 +40,8 @@ export const OPERATION_KINDS = [
   "operating_margin",
   "net_margin",
   "free_cash_flow",
+  "net_cash",
+  "total_debt",
   "ratio",
   "trailing_sum",
   "threshold",
@@ -103,6 +106,7 @@ export type CoverageState = (typeof COVERAGE_STATES)[number];
 
 export const REASON_CODES = [
   "missing_input",
+  "ineligible_input",
   "stale_input",
   "publication_time_unknown",
   "precision_unverified",
@@ -216,6 +220,12 @@ export type FreeCashFlowNode = NodeBase & {
   operating_cash_flow: LocalId;
   capex: LocalId;
 };
+type BalanceFields<S extends BalanceSide> = { [K in Extract<(typeof BALANCE_COMPONENTS)[number], { side: S }>["metric_key"]]: LocalId };
+/** Cash and securities less debt from one 10-K's balance sheet (ADR 0006): each field is the node reading that balance. */
+export type NetCashNode = NodeBase & { operation: "net_cash" } & BalanceFields<"cash" | "debt">;
+/** The debt side of net cash on its own. */
+export type TotalDebtNode = NodeBase & { operation: "total_debt" } & BalanceFields<"debt">;
+export type BalanceSumNode = NetCashNode | TotalDebtNode;
 export type RatioNode = NodeBase & {
   operation: "ratio";
   ratio_key: MetricKey;
@@ -255,6 +265,8 @@ export type OperationNode =
   | ChangeNode
   | MarginNode
   | FreeCashFlowNode
+  | NetCashNode
+  | TotalDebtNode
   | RatioNode
   | TrailingSumNode
   | ThresholdNode
@@ -627,6 +639,9 @@ export function operationDependencies(node: OperationNode): LocalId[] {
       return [node.numerator, node.revenue];
     case "free_cash_flow":
       return [node.operating_cash_flow, node.capex];
+    case "net_cash":
+    case "total_debt":
+      return balanceComponentNodes(node);
     case "ratio":
       return [node.numerator, node.denominator];
     case "trailing_sum":
@@ -645,4 +660,10 @@ export function operationDependencies(node: OperationNode): LocalId[] {
     case "scenario_eps_multiple":
       return [node.earnings];
   }
+}
+
+/** The nodes a balance sum reads, in its definition's component order. */
+export function balanceComponentNodes(node: BalanceSumNode): LocalId[] {
+  const fields: Readonly<Record<string, LocalId>> = node;
+  return balanceComponents(node.operation).map((component) => fields[component.metric_key]!);
 }

@@ -314,6 +314,28 @@ test("OCF published in another unit is still published beside free cash flow in 
   ]);
 });
 
+test("net cash and total debt always publish every balance they read, each once, before the results (#602)", () => {
+  const period = { kind: "latest", period_type: "annual", offset: 0 };
+  const cash = ["cash_and_equivalents", "marketable_securities_current", "marketable_securities_noncurrent", "short_term_investments", "debt_securities_current"];
+  const debt = ["long_term_debt_current", "long_term_debt_noncurrent", "commercial_paper", "short_term_borrowings"];
+  const wired = (keys: string[]) => Object.fromEntries(keys.map((key) => [key, key]));
+  const draft = {
+    subjects: [{ slot_id: "a", mention: "Apple" }],
+    operations: [
+      ...[...cash, ...debt].map((key) => ({ node_id: key, operation: "reported_metric", subject_slot: "a", metric_key: key, period })),
+      { node_id: "net_cash", operation: "net_cash", ...wired([...cash, ...debt]) },
+      { node_id: "total_debt", operation: "total_debt", ...wired(debt) },
+    ],
+    outputs: [{ output_id: "out_net_cash", node_id: "net_cash" }, { output_id: "out_total_debt", node_id: "total_debt" }],
+    thresholds: [],
+  };
+  assert.deepEqual(outputRows(buildDeterministicPlan(context({ requested_subjects: [resolved(0)] }), draft)), [
+    ...[...cash, ...debt].map((key) => [`${key}_input`, key, "answer"]),
+    ["out_net_cash", "net_cash", "answer"],
+    ["out_total_debt", "total_debt", "answer"],
+  ]);
+});
+
 /** One company's market cap and P/E: its price at the cutoff, its latest cover count, and its latest fiscal year's diluted EPS. */
 function valuationDraft(operations = 5, extraOutputs: Array<{ output_id: string; node_id: string }> = []) {
   const reported = (node_id: string, metric_key: string, period: Record<string, unknown>) => ({ node_id, operation: "reported_metric", subject_slot: "a", metric_key, period });
@@ -390,7 +412,7 @@ test("the model is never offered a lead or a window, and a draft that plans one 
     assert.deepEqual(result.outcome === "unsupported" && result.issues.map((issue) => [issue.code, issue.message]), [
       ["deterministic_operation", `x is a ${operation.operation}, which only a deterministic plan asks for`],
     ], operation.operation);
-    assert.match(model.calls[0]![0]!, /^Approved metric keys: .*\. Approved operations: reported_metric, absolute_change, percent_change_positive_base, gross_margin, operating_margin, net_margin, free_cash_flow, ratio, trailing_sum, threshold, peer_compare, market_cap, pe_ratio\.$/mu);
+    assert.match(model.calls[0]![0]!, /^Approved metric keys: .*\. Approved operations: reported_metric, absolute_change, percent_change_positive_base, gross_margin, operating_margin, net_margin, free_cash_flow, net_cash, total_debt, ratio, trailing_sum, threshold, peer_compare, market_cap, pe_ratio\.$/mu);
   }
 });
 

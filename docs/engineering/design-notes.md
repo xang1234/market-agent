@@ -171,7 +171,8 @@ filing's cash flow and balance sheet are extracted from it and stored in the sam
 - A family that cannot be extracted or mapped is logged and left out; only a database failure fails the ingestion.
 - **Mapped:** operating cash flow, capex (`PaymentsToAcquirePropertyPlantAndEquipment`, else NVDA-style
   `PaymentsToAcquireProductiveAssets`), cash and equivalents, total assets, liabilities and equity. **Not mapped:**
-  total debt (filers split it across tags, so it needs a reviewed definition), EBITDA, dividends.
+  total debt as one tag (filers split it across tags; the engine's `total_debt.v1` sums the debt lines, ADR 0006),
+  EBITDA, dividends.
 - **Backfill:** a period whose income facts were stored earlier is read from facts without a download, so a lookup
   never adds its other families. `npm run backfill:sec-statements [-- <issuer_uuid> ...]` (in `services/fundamentals`)
   stores them for every SEC income period on file, one companyfacts download per issuer

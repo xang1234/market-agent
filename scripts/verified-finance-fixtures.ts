@@ -128,6 +128,41 @@ function fcfCase(id: string, category: GoldenCategory, rule: string, ocf: string
   };
 }
 
+const CASH_SIDE = ["cash_and_equivalents", "marketable_securities_current", "marketable_securities_noncurrent", "short_term_investments", "debt_securities_current"];
+const DEBT_SIDE = ["long_term_debt_current", "long_term_debt_noncurrent", "commercial_paper", "short_term_borrowings"];
+const AAPL_FY2026_BALANCES: Readonly<Record<string, string>> = {
+  cash_and_equivalents: "36305000000", marketable_securities_current: "20417000000", marketable_securities_noncurrent: "80213000000",
+  commercial_paper: "1997000000", long_term_debt_current: "9906000000", long_term_debt_noncurrent: "68208000000",
+};
+
+const AAPL_WITHOUT_NONCURRENT = Object.fromEntries(Object.entries(AAPL_FY2026_BALANCES).filter(([key]) => key !== "marketable_securities_noncurrent"));
+
+/** Cash and securities less debt (ADR 0006), from the balances reported; a key not given is unreported. */
+function oracleNetCash(balances: Readonly<Record<string, string>>): { net_cash: Rational; total_debt: Rational } {
+  const sum = (keys: string[]) => keys.filter((key) => key in balances).reduce((total, key) => addRational(total, rational(balances[key]!)), rational("0"));
+  return { net_cash: subtractRational(sum(CASH_SIDE), sum(DEBT_SIDE)), total_debt: sum(DEBT_SIDE) };
+}
+
+function balanceSumCase(id: string, category: GoldenCategory, rule: string, balances: Readonly<Record<string, string>>, expected: Readonly<Record<"out_net_cash" | "out_total_debt", GoldenExpectation>>): ComputationCase {
+  const wired = (keys: string[]) => Object.fromEntries(keys.map((key) => [key, key]));
+  const yearEnd = { kind: "instant" as const, end: "2023-12-31", fiscal_year: 2023, fiscal_period: "FY" as const };
+  return {
+    id, category, rule,
+    plan: plan([
+      ...[...CASH_SIDE, ...DEBT_SIDE].map((key) => reported(key, "a", key)),
+      { node_id: "net_cash", operation: "net_cash", ...wired([...CASH_SIDE, ...DEBT_SIDE]) },
+      { node_id: "total_debt", operation: "total_debt", ...wired(DEBT_SIDE) },
+    ], ["net_cash", "total_debt"], [], ["a"]),
+    bindings: new Map([...CASH_SIDE, ...DEBT_SIDE].map((key) => key in balances ? bound(key, { metric: key, value: balances[key]!, ...yearEnd }) : gapBinding(key, "missing_input"))),
+    expected,
+  };
+}
+
+const balanceValues = (balances: Readonly<Record<string, string>>) => {
+  const oracle = oracleNetCash(balances);
+  return { out_net_cash: { kind: "value", value: oracle.net_cash, exact: true }, out_total_debt: { kind: "value", value: oracle.total_debt, exact: true } } as const;
+};
+
 // A 52/53-week fiscal year: Q4 runs 14 weeks (98 days) and is still one quarter.
 const QUARTERS_53_WEEK = [
   { fiscal_period: "Q1" as const, start: "2023-01-01", end: "2023-04-01", value: "90753000000.25" },
@@ -234,6 +269,19 @@ export const COMPUTATION_CASES: ReadonlyArray<ComputationCase> = [
     ["fcf-large-decimal", "exact_source_token", "Large-decimal tokens subtract exactly, digit for digit.", "118254000000.123456789012345678", "9447000000.000000000000000001"],
   ] as const).map(([id, category, rule, ocf, capex]): ComputationCase => fcfCase(id, category, rule, ocf, capex, { kind: "value", value: subtractRational(rational(ocf), rational(capex)), exact: true })),
   fcfCase("fcf-negative-capex", "negative_base", "A negative reported capex is a gap: its sign is never flipped or guessed.", "120", "-30", { kind: "gap", reason_code: "incompatible_definition" }),
+  balanceSumCase("net-cash-exact", "exact_source_token", "Net cash is cash and securities less debt from one balance sheet: AAPL FY2026 is 56,824,000,000; its total debt 80,111,000,000.", AAPL_FY2026_BALANCES, balanceValues(AAPL_FY2026_BALANCES)),
+  balanceSumCase("net-cash-unreported-line", "exact_source_token", "A line the filing does not report is left out of the sum, never read as a number.", AAPL_WITHOUT_NONCURRENT, balanceValues(AAPL_WITHOUT_NONCURRENT)),
+  balanceSumCase("net-cash-net-debt", "negative_base", "More debt than cash and securities is a negative net cash, never a flipped sign.", { cash_and_equivalents: "10", long_term_debt_noncurrent: "30" }, balanceValues({ cash_and_equivalents: "10", long_term_debt_noncurrent: "30" })),
+  balanceSumCase("net-cash-large-decimal", "exact_source_token", "Large-decimal balances add and subtract exactly, digit for digit.",
+    { cash_and_equivalents: "29943000000.123456789012345678", short_term_investments: "0.000000000000000001", commercial_paper: "1997000000.5" },
+    balanceValues({ cash_and_equivalents: "29943000000.123456789012345678", short_term_investments: "0.000000000000000001", commercial_paper: "1997000000.5" })),
+  balanceSumCase("net-cash-no-cash", "exact_source_token", "Without cash and equivalents net cash is a gap; total debt still forms.", { long_term_debt_noncurrent: "30" },
+    { out_net_cash: { kind: "gap", reason_code: "missing_input" }, out_total_debt: value("30") }),
+  balanceSumCase("net-cash-no-debt", "exact_source_token", "Without any debt line both are gaps: no debt line is never zero debt.", { cash_and_equivalents: "100" },
+    { out_net_cash: { kind: "gap", reason_code: "missing_input" }, out_total_debt: { kind: "gap", reason_code: "missing_input" } }),
+  balanceSumCase("net-cash-overlap", "exact_source_token", "Short-term investments beside current marketable securities may be one line, so net cash is conflicting evidence, not a sum.",
+    { cash_and_equivalents: "100", marketable_securities_current: "20", short_term_investments: "20", commercial_paper: "5" },
+    { out_net_cash: { kind: "gap", reason_code: "conflicting_evidence" }, out_total_debt: value("5") }),
   ...([
     ["cash-conversion", "operating_cash_flow_to_net_income", "operating_cash_flow", "net_income_consolidated", "120", "100", false],
     ["liabilities-to-assets", "liabilities_to_assets", "total_liabilities", "total_assets", "300", "600", true],
@@ -360,7 +408,7 @@ export const SELECTION_CASES: ReadonlyArray<SelectionCase> = [
     id: "date-only-same-day", category: "date_only_uncertainty",
     rule: "A date-only proof on the cutoff's own day counts as public only at the end of that local day.",
     node: FY2023_NODE, candidates: [disclosure(ORIGINAL, { value: "100", published: "2024-01-15T00:00:00-05:00" })], policy: policy("2024-01-15T10:00:00-05:00"),
-    expected: { gap: "missing_input" },
+    expected: { gap: "ineligible_input" },
   },
   {
     id: "instant-same-day", category: "date_only_uncertainty",

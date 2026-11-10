@@ -233,6 +233,8 @@ const PROPOSAL_INSTRUCTIONS = [
   "- Cash from, provided by or used in operating activities is operating_cash_flow; the same for investing",
   "  or financing activities is investing_cash_flow or financing_cash_flow.",
   "- The whole balance sheet is balance_sheet; a single balance item is its own key.",
+  "- Net debt, net cash or a net cash position is net_cash; debt as a whole (total debt, total borrowings) is",
+  "  total_debt. A debt line the question names alone (long-term debt, commercial paper) is its own key.",
   "- A stock or price return, even year to date, is not a metric here.",
   '- A margin of another metric ("free cash flow margin", "EBITDA margin") is that metric\'s qualifier, not margins;',
   '  an income margin ("gross margin", "operating margin", "profitability") asks margins, and margin_trend too',

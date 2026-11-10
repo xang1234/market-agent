@@ -1,7 +1,8 @@
 // A question for a Call input (ADR 0005) is answered from the certified SEC
 // fact, with no planning model: each family's reported figures for the latest
-// fiscal year, from real companyfacts (#594), and a figure the filer does not
-// tag is a named gap, never another figure in its place.
+// fiscal year, from companyfacts trimmed to the Call-input tags (#594), and a
+// figure the fixture does not hold is a named gap, never another figure in its
+// place.
 
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";

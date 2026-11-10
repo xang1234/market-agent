@@ -53,6 +53,7 @@ test("the catalog registers exactly the approved operations, each versioned", ()
     free_cash_flow: "free_cash_flow.v1",
     gross_margin: "gross_margin.v1",
     market_cap: "market_cap.v1",
+    net_cash: "net_cash.v1",
     net_margin: "net_margin.v1",
     operating_margin: "operating_margin.v1",
     pe_ratio: "pe_ratio.v1",
@@ -64,6 +65,7 @@ test("the catalog registers exactly the approved operations, each versioned", ()
     scenario_eps_multiple: "scenario_eps_multiple.v1",
     spread: "spread.v1",
     threshold: "threshold.v1",
+    total_debt: "total_debt.v1",
     trailing_sum: "trailing_sum.v1",
   });
 });

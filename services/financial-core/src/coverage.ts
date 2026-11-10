@@ -2,8 +2,9 @@
 //
 // * Every requested output receives a state; missing rows never vanish.
 // * Ordinary gaps block downstream nodes (blocked_dependency). The rankings
-//   (peer_compare, period_rank) alone tolerate members missing for evidence
-//   reasons and report how many they ranked; execution failures are never
+//   (peer_compare, period_rank) tolerate members missing for evidence
+//   reasons and report how many they ranked; net cash and total debt tolerate
+//   only a balance no filing reported. Execution failures are never
 //   tolerated as "missing".
 // * A FinancialIntegrityError rejects every predeclared unit whose closure
 //   contains the failing node; unaffected units continue.
@@ -161,9 +162,11 @@ function evaluateNode(
       return { status: "integrity_failure", code: state.code, explanation: "Depends on an input that failed integrity checks." };
     }
   }
-  const tolerant = OPERATION_REGISTRY[node.operation].tolerates_missing_operands;
+  const tolerance = OPERATION_REGISTRY[node.operation].tolerates_missing_operands;
   for (const state of dependencies) {
-    if (state.status === "gap" && (!tolerant || state.cause === "execution")) {
+    const tolerated = state.status === "gap" && state.cause === "evidence" &&
+      (tolerance === "evidence_gaps" || (tolerance === "absent_inputs" && state.reason_code === "missing_input"));
+    if (state.status === "gap" && !tolerated) {
       return {
         status: "gap",
         disposition: "blocked_dependency",

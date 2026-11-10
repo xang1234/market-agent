@@ -254,6 +254,7 @@ async function committedOutcome(db: SqlExecutor, runId: string): Promise<SavedRu
 const UNRESOLVED_REASONS: Readonly<Record<string, string>> = {
   stale_input: "The latest eligible value is older than the saved maximum age at the assessment cutoff.",
   missing_input: "No eligible value was public at the assessment cutoff.",
+  ineligible_input: "No eligible value was public at the assessment cutoff.",
   blocked_by_dependency: "No eligible value was public at the assessment cutoff.",
   threshold_has_no_split_basis: "A stock split changes this figure's basis, and the saved threshold names no basis date to compare it on.",
   restatement_unverified: "A later filing states a different figure, or changes one this is derived from, and the current figure could not be verified.",

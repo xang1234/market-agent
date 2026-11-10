@@ -7,10 +7,14 @@ import Ajv2020 from "ajv/dist/2020.js";
 import type { ErrorObject, ValidateFunction } from "ajv";
 import planSchema from "../../../spec/financial_plan_schema.json" with { type: "json" };
 import resultSchema from "../../../spec/financial_result_schema.json" with { type: "json" };
+import { canonicalJson } from "./canonical.ts";
+import { balanceComponents } from "./definitions.ts";
 import { validatePlanGraph } from "./graph.ts";
 import {
+  balanceComponentNodes,
   FINANCIAL_PLAN_V2_SCHEMA_VERSION,
   operationDependencies,
+  type BalanceSumNode,
   type BoundFinancialInputV1,
   type DerivationProofV1,
   type DraftFinancialResultV1,
@@ -131,6 +135,21 @@ function oneYearOfDilutedEps(node: OperationNode | undefined): boolean {
   return period.kind === "fiscal_period" ? period.fiscal_period === "FY" : period.kind === "latest" && period.period_type === "annual" && period.offset === 0;
 }
 
+// Net cash and total debt read one subject's balance sheet at one fiscal
+// year-end (ADR 0006): each field the reported node of that balance, so an
+// absent component is that company's line for that year, and nothing else.
+function oneBalanceSheet(operations: ReadonlyArray<OperationNode>, node: BalanceSumNode): boolean {
+  const ids = balanceComponentNodes(node);
+  const reads = balanceComponents(node.operation).map((component, index) => {
+    const read = operations.find((entry) => entry.node_id === ids[index]);
+    return read?.operation === "reported_metric" && read.metric_key === component.metric_key ? read : null;
+  });
+  const [first] = reads;
+  if (!first || reads.includes(null)) return false;
+  const annual = first.period.kind === "fiscal_period" ? first.period.fiscal_period === "FY" : first.period.kind === "latest" && first.period.period_type === "annual";
+  return annual && reads.every((read) => read!.subject_slot === first.subject_slot && canonicalJson(read!.period) === canonicalJson(first.period));
+}
+
 function planSemanticIssues(plan: FinancialPlan): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const add = (path: string, code: string, message: string) => issues.push({ path, code, message });
@@ -192,6 +211,9 @@ function planSemanticIssues(plan: FinancialPlan): ValidationIssue[] {
     }
     if (node.operation === "scenario_eps_multiple" && !oneYearOfDilutedEps(plan.operations.find((entry) => entry.node_id === node.earnings))) {
       add(`${path}.earnings`, "invalid_scenario_earnings", "must be reported diluted EPS of one fiscal year (FY, or the latest annual period)");
+    }
+    if ((node.operation === "net_cash" || node.operation === "total_debt") && !oneBalanceSheet(plan.operations, node)) {
+      add(path, "invalid_balance_component", "must name, for each component, the reported node of that balance, for one subject and one fiscal year (FY, or the latest annual period)");
     }
     for (const dependency of operationDependencies(node)) {
       if (!nodes.has(dependency)) add(path, "unknown_node", `depends on undeclared node ${dependency}`);

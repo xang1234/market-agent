@@ -11,6 +11,7 @@
 // Nothing here acquires evidence.
 
 import {
+  balanceComponentNodes,
   DEFAULT_EXECUTION_LIMITS,
   dependencyClosure,
   hashCanonical,
@@ -383,13 +384,17 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
 
 /**
  * The reported operands an answer resting on a figure always shows beside it:
- * free cash flow's OCF and capex (#324), a valuation's price and the share
- * count or EPS it reads (#444), and the EPS a P/E scenario multiplies (#201).
+ * free cash flow's OCF and capex (#324), every balance net cash or total debt
+ * reads, reported or not (#602), a valuation's price and the share count or
+ * EPS it reads (#444), and the EPS a P/E scenario multiplies (#201).
  */
 function shownOperands(node: OperationNode): LocalId[] {
   switch (node.operation) {
     case "free_cash_flow":
       return [node.operating_cash_flow, node.capex];
+    case "net_cash":
+    case "total_debt":
+      return balanceComponentNodes(node);
     case "market_cap":
       return [node.price, node.shares];
     case "pe_ratio":
@@ -473,7 +478,7 @@ function systemPrompt(): string {
     "You translate a financial research request into a JSON plan draft. Reply with one JSON object only.",
     `Approved metric keys: ${metrics}. Approved operations: ${operations}.`,
     'Ready drafts: {"outcome":"ready","subjects":[{"slot_id","mention"}],"operations":[...],"outputs":[{"output_id","node_id"}],"thresholds":[{"threshold_id","value","unit"}]}.',
-    'Operations: reported_metric {node_id, operation, subject_slot, metric_key, period:{kind:"fiscal_period",fiscal_year,fiscal_period} or {kind:"latest",period_type,offset}}; absolute_change/percent_change_positive_base {current, prior}; gross_margin/operating_margin/net_margin {numerator, revenue}; free_cash_flow {operating_cash_flow, capex} (annual only); ratio {ratio_key, numerator, denominator}; trailing_sum {quarters:[4 node ids]}; threshold {subject, threshold_id, comparison}; peer_compare {members, direction}; market_cap {price, shares}; pe_ratio {price, earnings}.',
+    'Operations: reported_metric {node_id, operation, subject_slot, metric_key, period:{kind:"fiscal_period",fiscal_year,fiscal_period} or {kind:"latest",period_type,offset}}; absolute_change/percent_change_positive_base {current, prior}; gross_margin/operating_margin/net_margin {numerator, revenue}; free_cash_flow {operating_cash_flow, capex} (annual only); net_cash {cash_and_equivalents, marketable_securities_current, marketable_securities_noncurrent, short_term_investments, debt_securities_current, long_term_debt_current, long_term_debt_noncurrent, commercial_paper, short_term_borrowings} and total_debt {long_term_debt_current, long_term_debt_noncurrent, commercial_paper, short_term_borrowings}, each field the node id of a reported_metric of that key, all for one company and one fiscal year (annual only); ratio {ratio_key, numerator, denominator}; trailing_sum {quarters:[4 node ids]}; threshold {subject, threshold_id, comparison}; peer_compare {members, direction}; market_cap {price, shares}; pe_ratio {price, earnings}.',
     'A valuation\'s price is a reported_metric of share_price with period {kind:"at_cutoff"}, planned only as the price of market_cap or pe_ratio. market_cap\'s shares are shares_outstanding with period {kind:"latest",period_type:"quarterly",offset:0}. pe_ratio\'s earnings are eps_diluted with period {kind:"latest",period_type:"annual",offset:0}: P/E uses the latest fiscal year\'s diluted EPS.',
     'An absolute_change of a margin or of a percent_change_positive_base is in percentage points, and so is a threshold on it, with unit {"kind":"percentage_points"}. Its value is in points, not a fraction: a 2-point fall is {"value":"-2","unit":{"kind":"percentage_points"}}, never -0.02.',
     "Plan every requested company. Threshold values are decimal strings. Never invent metric definitions, identifiers, owners, budgets, modes, or verification fields.",
