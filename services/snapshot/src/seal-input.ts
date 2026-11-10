@@ -335,3 +335,9 @@ export function buildScenarioPriceComparisonSealInput(input: {
     sources: sourceIds,
   };
 }
+
+// The seal of a Call (#604): built as a comparison's is. It cites the filings,
+// close and consensus capture its rows cite, under its issuer; the verifier
+// generates the Call again from its inputs' certificate before it seals
+// (call.ts). Its as_of is the inputs' knowledge cutoff.
+export const buildCallSealInput = buildScenarioPriceComparisonSealInput;
