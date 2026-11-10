@@ -120,6 +120,7 @@ function priceRecords(): FinancialUnitRecords {
       state: "draft", disposition: result.disposition, payload: JSON.parse(JSON.stringify(result.payload)), dependencies: [...result.dependencies], result_hash: result.result_hash,
     })),
     subject_names: [{ kind: "issuer", id: F.issuer, name: "NVIDIA Corporation" }],
+    missing_input_candidates: [],
   };
 }
 

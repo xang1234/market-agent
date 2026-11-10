@@ -7,9 +7,13 @@
 // every bound price observation as stored now, and the listing each restated
 // input's subject resolves to now, with its splits and zone. Each bound
 // input's source comes with its kind, and the run with the source classes it
-// was granted, so the seal re-checks each input's class.
-// Snapshot reads these tables directly; it never imports the engine.
+// was granted, so the seal re-checks each input's class. Each missing_input
+// gap's slot is reread through the engine's own authorized candidate read,
+// since a sum may leave that input out. Everything else snapshot reads from
+// these tables directly.
 
+import { validateFinancialPlan } from "../../financial-core/src/index.ts";
+import { readInputCandidates, type CandidateRead } from "../../financial-engine/src/evidence-adapter.ts";
 import { loadSubjectSplitHistory, type SubjectSplitHistory } from "../../market/src/split-history.ts";
 import type { QueryExecutor } from "../../shared/src/http.ts";
 import { toSealFactRow, type FactRow } from "./seal-input.ts";
@@ -125,6 +129,9 @@ export type LoadedResult = Readonly<{
 /** A subject's current display name: an issuer's legal name, or a listing's ticker and venue. */
 export type LoadedSubjectName = Readonly<{ kind: "issuer" | "listing"; id: string; name: string }>;
 
+/** A missing_input gap's slot, reread now as binding read it. */
+export type LoadedGapCandidates = Readonly<{ input_slot: string; read: CandidateRead }>;
+
 export type FinancialUnitRecords = Readonly<{
   run: LoadedRun;
   plan: Readonly<{ plan: unknown; semantic_hash: string }>;
@@ -136,6 +143,7 @@ export type FinancialUnitRecords = Readonly<{
   computations: ReadonlyArray<LoadedComputation>;
   results: ReadonlyArray<LoadedResult>;
   subject_names: ReadonlyArray<LoadedSubjectName>;
+  missing_input_candidates: ReadonlyArray<LoadedGapCandidates>;
 }>;
 
 const ISO_UTC = `'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'`;
@@ -234,8 +242,34 @@ export async function loadFinancialUnitRecords(db: QueryExecutor, claim: Financi
   )).rows;
 
   const subject_names = await loadSubjectNames(db, planSubjectRefs(plan));
+  const missing_input_candidates = await rereadMissingInputs(db, plan, bindings, claim.owner_user_id);
 
-  return { run: runRow, plan: { plan, semantic_hash }, unit, bindings, evidence, price_observations, split_histories, computations, results, subject_names };
+  return { run: runRow, plan: { plan, semantic_hash }, unit, bindings, evidence, price_observations, split_histories, computations, results, subject_names, missing_input_candidates };
+}
+
+/** Each missing_input gap's slot, reread as binding read it. An invalid plan rereads nothing: the verifier rejects it. */
+async function rereadMissingInputs(db: QueryExecutor, plan: unknown, bindings: ReadonlyArray<LoadedBinding>, owner: string): Promise<LoadedGapCandidates[]> {
+  const validated = validateFinancialPlan(plan);
+  if (!validated.ok) return [];
+  const { operations, subjects, limits } = validated.value;
+  const missing = new Set(bindings.flatMap((row) => row.binding_status === "gap" && row.gap_reason === "missing_input" ? [row.input_slot] : []));
+  const reads: LoadedGapCandidates[] = [];
+  for (const node of operations) {
+    if (node.operation !== "reported_metric" || !missing.has(node.node_id)) continue;
+    const period = node.period.kind === "fiscal_period" ? node.period : null;
+    reads.push({
+      input_slot: node.node_id,
+      read: await readInputCandidates(db, {
+        owner_user_id: owner,
+        subject: subjects.members.find((member) => member.slot_id === node.subject_slot)!.subject_ref,
+        metric_key: node.metric_key,
+        fiscal_year: period?.fiscal_year ?? null,
+        fiscal_period: period?.fiscal_period ?? null,
+        limit: limits.max_input_candidates,
+      }),
+    });
+  }
+  return reads;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
