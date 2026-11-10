@@ -42,11 +42,12 @@
 // 10. A split near an instant share count's date leaves its basis unknown,
 //    so it is a gap: one within SHARE_COUNT_SPLIT_WINDOW_DAYS of that date,
 //    or after it and on or before the filing date.
-// 11. A fact's slot is missing_input only when it has no candidate for the
-//    metric and period. A candidate no rule above admits and no other
-//    reason names, one not yet public at the cutoff or reported only as a
-//    restatement under as_reported, is ineligible_input, so net cash and
-//    total debt never leave out a balance a filing did report (#602).
+// 11. A statement fact's slot is missing_input only when it has no candidate
+//    for the metric and period; share counts keep rules 9 and 10. A
+//    candidate no rule above admits and no other reason names, one not yet
+//    public at the cutoff or reported only as a restatement under
+//    as_reported, is ineligible_input, so net cash and total debt never
+//    leave out a balance a filing did report (#602).
 //
 // A selection is a proven input: the chosen candidate with its proofs and
 // context narrowed to non-null, and its numerics parsed exactly once.
