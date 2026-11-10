@@ -124,7 +124,7 @@
     },
     {
       "match": "Question: \"Why was NVDA's gross margin above the high end of its outlook?\"",
-      "text": "{\"metrics\":[],\"asks\":[\"explains\",\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"gross_margin\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\"]}}"
+      "text": "{\"metrics\":[],\"asks\":[\"explains\",\"margins\",\"guidance\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"gross_margin\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\"]}}"
     },
     {
       "match": "Question: \"Why did NVDA's revenue fall, without using guidance?\"",
@@ -228,7 +228,7 @@
     },
     {
       "match": "Question: \"Why did AMD's operating margin turn negative in Q2 2025?\"",
-      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"explains\",\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_margin\"],\"period\":{\"kind\":\"fiscal_quarter\",\"fiscal_period\":\"Q2\",\"fiscal_year\":2025},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AMD\"]}}"
+      "text": "{\"metrics\":[{\"metric\":\"income_statement\",\"adjustment\":null,\"qualifier\":null}],\"asks\":[\"explains\",\"margin_trend\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"operating_margin\"],\"period\":{\"kind\":\"fiscal_quarter\",\"fiscal_period\":\"Q2\",\"fiscal_year\":2025},\"companies\":{\"kind\":\"as_named\",\"names\":[\"AMD\"]}}"
     },
     {
       "match": "Question: \"Compare AMD and NVDA revenue in Q2 2025\"",
