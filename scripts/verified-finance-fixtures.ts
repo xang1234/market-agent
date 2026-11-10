@@ -408,7 +408,7 @@ export const SELECTION_CASES: ReadonlyArray<SelectionCase> = [
     id: "date-only-same-day", category: "date_only_uncertainty",
     rule: "A date-only proof on the cutoff's own day counts as public only at the end of that local day.",
     node: FY2023_NODE, candidates: [disclosure(ORIGINAL, { value: "100", published: "2024-01-15T00:00:00-05:00" })], policy: policy("2024-01-15T10:00:00-05:00"),
-    expected: { gap: "missing_input" },
+    expected: { gap: "ineligible_input" },
   },
   {
     id: "instant-same-day", category: "date_only_uncertainty",

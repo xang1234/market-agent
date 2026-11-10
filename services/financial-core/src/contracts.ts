@@ -106,6 +106,7 @@ export type CoverageState = (typeof COVERAGE_STATES)[number];
 
 export const REASON_CODES = [
   "missing_input",
+  "ineligible_input",
   "stale_input",
   "publication_time_unknown",
   "precision_unverified",

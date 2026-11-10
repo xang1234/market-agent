@@ -106,6 +106,7 @@ export class FinancialIntegrityError extends Error {
 
 const REASON_DISPOSITIONS: Readonly<Record<ReasonCode, GapDisposition>> = {
   missing_input: "missing",
+  ineligible_input: "missing",
   stale_input: "missing",
   publication_time_unknown: "missing",
   precision_unverified: "missing",

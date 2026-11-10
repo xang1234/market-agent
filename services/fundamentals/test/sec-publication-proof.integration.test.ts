@@ -197,7 +197,7 @@ test("SEC ingestion binds source versions and their publication proofs", { timeo
       "2024-01-10T16:30:05.000Z",
       "an acceptance weeks before the cutoff, in any zone, is on file",
     );
-    assert.deepEqual(await selectRevenue(db, SELECT_ISSUER, "2024-02-01T10:00:00-05:00"), { status: "gap", reason_code: "missing_input" });
+    assert.deepEqual(await selectRevenue(db, SELECT_ISSUER, "2024-02-01T10:00:00-05:00"), { status: "gap", reason_code: "ineligible_input" });
     assert.deepEqual(chosen(await selectRevenue(db, SELECT_ISSUER, "2024-02-01T10:05:00-05:00")), { fact_id: factId, attestation_id: fetchProof, public_by: FETCHED_AT });
   });
 
@@ -205,7 +205,7 @@ test("SEC ingestion binds source versions and their publication proofs", { timeo
     const factId = await factOn(ORIGINAL);
     const storedAtJan15 = () => createSecBackedStatementRepository(db, { fetcher: null, sourceId: FALLBACK_SOURCE_ID, cutoff: "2024-01-15T23:59:59.999-05:00" })
       .find({ ...FY2023, issuer_id: SELECT_ISSUER });
-    assert.deepEqual(await selectRevenue(db, SELECT_ISSUER, "2024-01-15T23:59:59.999-05:00"), { status: "gap", reason_code: "missing_input" }, "the later fetch proves nothing about Jan 15");
+    assert.deepEqual(await selectRevenue(db, SELECT_ISSUER, "2024-01-15T23:59:59.999-05:00"), { status: "gap", reason_code: "ineligible_input" }, "the later fetch proves nothing about Jan 15");
     assert.equal(await storedAtJan15(), null);
 
     const archive = await recordSourcePublicationAttestation(db, {
@@ -224,7 +224,7 @@ test("SEC ingestion binds source versions and their publication proofs", { timeo
     assert.deepEqual(chosen(await selectRevenue(db, SELECT_ISSUER, "2024-01-15T23:59:59.999-05:00")), { fact_id: factId, attestation_id: archive.attestation_id, public_by: "2024-01-11T04:59:59.999Z" });
     assert.equal(await storedAtJan15(), null, "public by Jan 15 is not stored by Jan 15");
     // A date proof covers its whole New York day, never midnight.
-    assert.deepEqual(await selectRevenue(db, SELECT_ISSUER, "2024-01-10T12:00:00-05:00"), { status: "gap", reason_code: "missing_input" });
+    assert.deepEqual(await selectRevenue(db, SELECT_ISSUER, "2024-01-10T12:00:00-05:00"), { status: "gap", reason_code: "ineligible_input" });
     assert.deepEqual(chosen(await selectRevenue(db, SELECT_ISSUER, "2024-01-10T23:59:59.999-05:00")), { fact_id: factId, attestation_id: archive.attestation_id, public_by: "2024-01-11T04:59:59.999Z" });
   });
 

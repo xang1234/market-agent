@@ -143,7 +143,7 @@ test("the latest filing's count that cannot bind is a gap, never an older filing
   assert.equal(bound(cutoff, [...counts, cover(Q2, { coverage_level: "partial", context: null })]), "incompatible_scope");
   // Filed by the cutoff, but proven public only by a fetch after it.
   const fetchedLater = cover(Q2, { publication: [{ attestation_id: "a-3", timing: { available_not_before: null, available_no_later_than: "2026-10-01T15:00:00.000Z", timing_precision: "instant", source_timezone: "UTC" } }] });
-  assert.equal(bound(cutoff, [...counts, fetchedLater]), "missing_input");
+  assert.equal(bound(cutoff, [...counts, fetchedLater]), "ineligible_input");
   // From a source the authority does not allow (#444).
   assert.equal(bound(cutoff, [...counts, cover(Q2, { source_class: null })]), "source_class_not_allowed");
 });

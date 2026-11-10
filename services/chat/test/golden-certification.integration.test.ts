@@ -60,7 +60,7 @@ test("golden facts certify at the golden cutoff and an undeclared fact does not"
   assert.equal(atCutoff.input.publication.available_no_later_than, GOLDEN_AS_OF);
 
   const justBefore = new Date(Date.parse(GOLDEN_AS_OF) - 1).toISOString();
-  assert.deepEqual(await select(2026, justBefore), { status: "gap", reason_code: "missing_input" }, "not yet public a millisecond before the cutoff");
+  assert.deepEqual(await select(2026, justBefore), { status: "gap", reason_code: "ineligible_input" }, "not yet public a millisecond before the cutoff");
 
   const { rows: [{ metric_id: revenueMetricId }] } = await client.query<{ metric_id: string }>(
     `select metric_id::text as metric_id from metrics where metric_key = 'revenue'`,

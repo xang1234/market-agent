@@ -1,91 +1,10 @@
 // Net cash and total debt (ADR 0006, #602): cash and securities less debt, and
-// the debt alone, over one 10-K's balance sheet. AAPL's FY2026 10-K
-// (accession 0000320193-26-000026, 2026-09-26) reports cash 36.305B,
-// marketable securities 20.417B current and 80.213B noncurrent, commercial
-// paper 1.997B and long-term debt 9.906B current and 68.208B noncurrent.
+// the debt alone, over one 10-K's balance sheet.
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { hashCanonical } from "../src/canonical.ts";
-import type { BoundFinancialInputV1, FinancialPlan, LocalId, PeriodSelector, ReasonCode } from "../src/contracts.ts";
-import { evaluateBoundPlan, nodeLineageHashes, unitPublication, type ExpectedResult, type SlotBinding } from "../src/bound-evaluation.ts";
 import { presentFinancialUnit } from "../src/presentation.ts";
-import { validateFinancialPlan } from "../src/validate.ts";
-import { planFixture } from "./fixtures.ts";
-import { boundInput, SLOTS, type InputSpec } from "./operand-fixtures.ts";
-
-const CASH = ["cash_and_equivalents", "marketable_securities_current", "marketable_securities_noncurrent", "short_term_investments", "debt_securities_current"];
-const DEBT = ["long_term_debt_current", "long_term_debt_noncurrent", "commercial_paper", "short_term_borrowings"];
-const FY2026: PeriodSelector = { kind: "fiscal_period", fiscal_year: 2026, fiscal_period: "FY" };
-const USD = { kind: "currency", currency: "USD" };
-const DIGEST = "c".repeat(64);
-
-type Node = Record<string, unknown> & { node_id: string };
-
-function balancePlan(edit: (operations: Node[]) => Node[] = (operations) => operations) {
-  const reported = (key: string): Node => ({ node_id: key, operation: "reported_metric", operation_version: "reported_metric.v1", subject_slot: "a", metric_key: key, period: FY2026 });
-  const wired = (keys: string[]) => Object.fromEntries(keys.map((key) => [key, key]));
-  const operations = edit([
-    ...[...CASH, ...DEBT].map(reported),
-    { node_id: "net_cash", operation: "net_cash", operation_version: "net_cash.v1", ...wired([...CASH, ...DEBT]) },
-    { node_id: "total_debt", operation: "total_debt", operation_version: "total_debt.v1", ...wired(DEBT) },
-  ]);
-  return validateFinancialPlan({
-    ...planFixture(),
-    subjects: { membership: "explicit", requested_count: 1, resolved_count: 1, omitted_count: 0, members: [SLOTS.a] },
-    time: { knowledge_cutoff: "2026-11-09T23:59:59.999-05:00", cutoff_timezone: "America/New_York", time_mode: "public_information" },
-    metric_definitions: [...new Set(operations.flatMap((node) => typeof node.metric_key === "string" ? [node.metric_key] : []))].map((key) => ({ metric_key: key, definition_version: `${key}.v1` })),
-    operations,
-    outputs: ["net_cash", "total_debt"].map((node) => ({ output_id: node, node_id: node, unit_id: "balance" })),
-    publication_units: [{ unit_id: "balance", kind: "chat_section" }],
-    thresholds: [],
-  });
-}
-
-function plan(): FinancialPlan {
-  const validated = balancePlan();
-  assert.ok(validated.ok, JSON.stringify(!validated.ok && validated.issues));
-  return validated.value;
-}
-
-const balance = (metric: string, value: string, extra: Partial<InputSpec> = {}) =>
-  boundInput({ metric, value, kind: "instant", end: "2026-09-26", fiscal_year: 2026, fiscal_period: "FY", ...extra });
-
-const AAPL: Record<string, string> = {
-  cash_and_equivalents: "36305000000",
-  marketable_securities_current: "20417000000",
-  marketable_securities_noncurrent: "80213000000",
-  commercial_paper: "1997000000",
-  long_term_debt_current: "9906000000",
-  long_term_debt_noncurrent: "68208000000",
-};
-
-type Inputs = Record<string, BoundFinancialInputV1 | ReasonCode>;
-
-/** Each component's binding: the given input or gap, else AAPL's figure, else no figure at all. */
-function aapl(inputs: Inputs = {}, values: Record<string, string> = AAPL): Inputs {
-  return Object.fromEntries([...CASH, ...DEBT].map((key) => [key, inputs[key] ?? (values[key] === undefined ? "missing_input" : balance(key, values[key]!))]));
-}
-
-function publish(inputs: Inputs = aapl()): Record<string, ExpectedResult> {
-  const bindings = new Map<LocalId, SlotBinding>(Object.entries(inputs).map(([slot, input]) => [slot, typeof input === "string"
-    ? { status: "gap", reason_code: input, candidate_set_digest: DIGEST }
-    : { status: "bound", input, payload_hash: hashCanonical("bound_input", input), candidate_set_digest: DIGEST }]));
-  const built = plan();
-  const evaluation = evaluateBoundPlan(built, bindings);
-  const publication = unitPublication(built, evaluation, nodeLineageHashes(built, evaluation, bindings), "balance");
-  return Object.fromEntries(publication.results.map((result) => [result.output_id, result]));
-}
-
-function valueOf(result: ExpectedResult | undefined): string {
-  assert.ok(result?.payload.kind === "value", JSON.stringify(result));
-  return result.payload.value;
-}
-
-function gapOf(result: ExpectedResult | undefined): [string, string] {
-  assert.ok(result?.payload.kind === "gap", JSON.stringify(result));
-  return [result.disposition, result.payload.reason_code];
-}
+import { aapl, AAPL, balance, balancePlan, gapOf, plan, publish, USD, valueOf, type Node } from "./balance-fixtures.ts";
 
 test("AAPL FY2026: net cash is 56,824,000,000 and total debt 80,111,000,000, exactly", () => {
   const results = publish();
@@ -100,7 +19,7 @@ test("a component the 10-K does not report is left out of the sum, never read as
 });
 
 test("a component that is reported but unusable, or unread, blocks the figure instead of being left out", () => {
-  for (const reason of ["context_unverified", "restatement_unverified", "conflicting_evidence", "database_error"] as const) {
+  for (const reason of ["ineligible_input", "context_unverified", "restatement_unverified", "conflicting_evidence", "database_error"] as const) {
     const results = publish(aapl({ marketable_securities_noncurrent: reason, long_term_debt_current: reason }));
     assert.deepEqual([gapOf(results.net_cash), gapOf(results.total_debt)], [["blocked_dependency", "blocked_by_dependency"], ["blocked_dependency", "blocked_by_dependency"]], reason);
   }

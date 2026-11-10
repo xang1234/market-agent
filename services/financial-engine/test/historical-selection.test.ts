@@ -138,7 +138,7 @@ test("a corrected restatement ranks by the filing it corrects, not by when the c
 
 test("a date-only publication is not assumed available earlier on the same day", () => {
   const onJan10 = candidate({ publishedLocalDate: "2024-01-10" });
-  assert.equal(gapReason(selectInput(FY2023, [onJan10], policy({ knowledge_cutoff: "2024-01-10T12:00:00-05:00" }))), "missing_input");
+  assert.equal(gapReason(selectInput(FY2023, [onJan10], policy({ knowledge_cutoff: "2024-01-10T12:00:00-05:00" }))), "ineligible_input");
   assert.equal(selectedId(selectInput(FY2023, [onJan10], policy({ knowledge_cutoff: "2024-01-10T23:59:59.999-05:00" }))), onJan10.fact_id);
 });
 
