@@ -264,7 +264,9 @@ async function hydrateSecPeriods(
 // the income statement. Those periods are otherwise read from facts and never
 // fetched again, so this is how they gain the families ingested since, and how
 // facts the old period selector got wrong (a 10-K's oldest comparative, a
-// framed prior-year quarter) are replaced.
+// framed prior-year quarter) are replaced. With annualHistoryYears (dev only,
+// #610), it also stores the download's newest that many 10-K fiscal years,
+// whether or not any income is on file for them.
 export async function backfillSecCompanionStatements(
   db: FundamentalsTransactionalQueryExecutor,
   input: {
@@ -273,6 +275,7 @@ export async function backfillSecCompanionStatements(
     sourceId: UUID;
     clock?: () => Date;
     logger?: Pick<Console, "warn">;
+    annualHistoryYears?: number;
   },
 ): Promise<{ periods: number }> {
   if (FROZEN_ISSUER_IDS.has(input.issuerId)) return { periods: 0 };
@@ -297,10 +300,13 @@ export async function backfillSecCompanionStatements(
       order by f.fiscal_year, f.fiscal_period`,
     [input.issuerId, SEC_INCOME_METRIC_KEYS],
   );
-  if (rows.length === 0) return { periods: 0 };
+  const history = input.annualHistoryYears ?? 0;
+  if (rows.length === 0 && history === 0) return { periods: 0 };
   const fetched = await fetchCompanyFacts(input.fetcher, cik);
+  const periods = new Map(rows.map((row) => [`${row.fiscal_year}|${row.fiscal_period}`, row]));
+  for (const fiscal_year of tenKFiscalYears(fetched.facts, history)) periods.set(`${fiscal_year}|FY`, { fiscal_year, fiscal_period: "FY" });
   const filings: SecFilingRef[] = [];
-  for (const period of rows) {
+  for (const period of periods.values()) {
     const extracted = extractFiling({
       fetched,
       cik,
@@ -315,7 +321,18 @@ export async function backfillSecCompanionStatements(
     if (filing) filings.push(filing);
   }
   await recordSecFilingAcceptances(db, input.fetcher, { cik, filings, logger: input.logger ?? console });
-  return { periods: rows.length };
+  return { periods: periods.size };
+}
+
+/** The newest `count` fiscal years an original 10-K in the download reports, by its fiscal-year label. */
+function tenKFiscalYears(facts: SecCompanyFacts, count: number): number[] {
+  const years = new Set<number>();
+  for (const concept of Object.values(facts.facts["us-gaap"] ?? {})) {
+    for (const values of Object.values(concept.units)) {
+      for (const value of values) if (value.form === "10-K" && value.fp === "FY" && Number.isInteger(value.fy)) years.add(value.fy);
+    }
+  }
+  return [...years].sort((left, right) => right - left).slice(0, count);
 }
 
 type Extracted = {
