@@ -9,9 +9,12 @@
 // the frozen golden issuers'. A ticker with more than one active US listing is a
 // failure and is never fetched. One request per listing, in turn, at least
 // YFINANCE_PACE_MS apart, covering the ten calendar years before the request's
-// UTC day. A rerun the same UTC day inserts nothing. Exits 2 when the sidecar
-// cannot be reached or reports a block, and stops there, keeping what it wrote;
-// exits 1 when any ticker failed otherwise.
+// UTC day, which also dates the set. A rerun the same UTC day inserts nothing.
+// The currency stored is the listing's: the sidecar echoes it back rather than
+// reading it from yfinance, so a non-USD listing's currency is unverified.
+// Exits 2 when the sidecar cannot be reached or reports a block, and stops
+// there, keeping what it wrote; exits 1 when any ticker failed otherwise,
+// a timed-out request included.
 
 import { parseArgs } from "node:util";
 import { Pool } from "pg";
@@ -76,9 +79,11 @@ export async function captureCloses(
 
   for (const [index, listing] of listings.entries()) {
     if (index > 0) await options.sleep(YFINANCE_PACE_MS);
+    const requestedAt = options.now();
+    const capturedOn = requestedAt.toISOString().slice(0, 10);
     let data: Record<string, unknown>;
     try {
-      data = await fetchBars(sidecar, listing, options.now());
+      data = await fetchBars(sidecar, listing, requestedAt);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (error instanceof SidecarBlocked) {
@@ -91,7 +96,6 @@ export async function captureCloses(
     }
     try {
       const retrievedAt = options.now();
-      const capturedOn = retrievedAt.toISOString().slice(0, 10);
       const inserted = await writeCloses(db, listing, parseCloses(listing, data), capturedOn, retrievedAt);
       outcome.inserted += inserted;
       log.log(`${listing.ticker}: ${inserted} new close(s) for ${capturedOn}`);
@@ -146,6 +150,8 @@ async function fetchBars(sidecar: CloseSidecar, listing: Listing, now: Date): Pr
       signal: AbortSignal.timeout(60_000),
     });
   } catch (error) {
+    // A slow answer is this ticker's failure; a refused connection means the sidecar is gone.
+    if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) throw new Error("dev providers sidecar request timed out");
     throw new SidecarBlocked(`dev providers sidecar unreachable: ${error instanceof Error ? error.message : String(error)}`);
   }
   if (response.status === 429) throw new SidecarBlocked("dev providers sidecar HTTP 429");
@@ -207,12 +213,19 @@ function record(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+export function parseTickers(value: string | undefined): string[] | null {
+  if (value === undefined) return null;
+  const tickers = value.split(",").map((ticker) => ticker.trim().toUpperCase()).filter(Boolean);
+  if (tickers.length === 0) throw new Error("usage: --tickers needs at least one ticker, e.g. --tickers AAPL,COST");
+  return tickers;
+}
+
 async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
   const baseUrl = process.env.DEV_PROVIDERS_BASE_URL;
   if (!databaseUrl || !baseUrl) throw new Error("DATABASE_URL and DEV_PROVIDERS_BASE_URL are required");
   const { values } = parseArgs({ options: { tickers: { type: "string" } } });
-  const tickers = values.tickers?.split(",").map((ticker) => ticker.trim().toUpperCase()).filter(Boolean) ?? null;
+  const tickers = parseTickers(values.tickers);
   const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
   try {
     const outcome = await captureCloses(pool, { baseUrl, fetchImpl: fetch }, {

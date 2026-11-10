@@ -174,10 +174,12 @@ years. A dev job records about ten years of yfinance's split-adjusted daily clos
 request per listing, at least half a second apart. It reads yfinance through the dev-providers sidecar, so the stack must
 run with `ENABLE_UNOFFICIAL_DEV_PROVIDERS=true`. With no `--tickers` it captures every active US common stock or ADR
 listing except the frozen golden issuers'. It skips, and counts as failed, a ticker that more than one active US
-listing carries. A split restates every earlier close, so each run stores a whole set dated by the UTC day of its
-response, and a reader takes the latest `captured_on` per listing. A rerun the same UTC day inserts nothing. The job
-exits 2 and stops when the sidecar cannot be reached or reports a block, keeping the rows it wrote, and exits 1 when
-any ticker failed otherwise.
+listing carries. A split restates every earlier close, so each run stores a whole set of about 2,500 rows per ticker,
+dated by the UTC day of its request, and a reader takes the latest `captured_on` per listing. Run it occasionally,
+such as monthly or after a split, not daily. A rerun the same UTC day inserts nothing. The stored currency is the
+listing's, which the sidecar echoes back without reading it from yfinance, so a non-USD listing's currency is not
+verified. The job exits 2 and stops when the sidecar cannot be reached or reports a block, keeping the rows it wrote,
+and exits 1 when any ticker failed otherwise, a timed-out request included.
 
 ```bash
 cd services/market

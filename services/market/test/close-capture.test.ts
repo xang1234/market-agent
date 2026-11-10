@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { bootstrapDatabase, connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { GOLDEN_ISSUER_IDS } from "../../shared/src/golden-issuers.ts";
-import { captureCloses, captureExitCode } from "../src/close-capture-cli.ts";
+import { captureCloses, captureExitCode, parseTickers } from "../src/close-capture-cli.ts";
 
 const quiet = { log: () => {}, warn: () => {}, error: () => {} };
 const BASE_URL = "http://sidecar.test";
@@ -148,4 +148,38 @@ test("capture:closes stores each ticker's split-adjusted closes as a dated set a
     assert.deepEqual(requests.map((request) => request.ticker), ["AAPL", "TWOA"], "nothing is requested after the sidecar is gone or blocked");
     assert.deepEqual([...new Set((await rows()).map((row) => row.ticker))], ["AAPL"], "closes written before the stop stay");
   }
+
+  requests.length = 0;
+  errors.length = 0;
+  await db.query(`delete from daily_close_captures`);
+  answer = (ticker) => (ticker === "TWOA" ? Promise.reject(new DOMException("The operation was aborted due to timeout", "TimeoutError")) : new Response(barsBody([{ day: "2026-11-09", close: "10" }])));
+  const timedOut = await run("2026-11-10T06:00:00Z", ["AAPL", "TWOA", "TWOB"], logged);
+  assert.deepEqual(timedOut, { inserted: 2, failures: 1, blocked: false });
+  assert.equal(captureExitCode(timedOut), 1);
+  assert.deepEqual(requests.map((request) => request.ticker), ["AAPL", "TWOA", "TWOB"], "one slow ticker fails alone and the run goes on");
+  assert.deepEqual(errors, ["TWOA: dev providers sidecar request timed out"]);
+
+  requests.length = 0;
+  await db.query(`delete from daily_close_captures`);
+  let clock = new Date("2026-11-10T23:59:59Z");
+  answer = (ticker) => {
+    if (ticker === "TWOA") clock = new Date("2026-11-11T00:00:01Z");
+    return new Response(barsBody([{ day: "2026-11-10", close: "10" }]));
+  };
+  await captureCloses(db, { baseUrl: BASE_URL, fetchImpl }, { tickers: ["AAPL", "TWOA"], now: () => clock, sleep: async () => {}, log: quiet });
+  assert.deepEqual(requests.map((request) => (request.range as { end: string }).end), ["2026-11-11T00:00:00.000Z", "2026-11-11T00:00:00.000Z"]);
+  assert.deepEqual(
+    (await db.query(`select l.ticker, c.captured_on::text, c.retrieved_at from daily_close_captures c join listings l using (listing_id) order by l.ticker`)).rows,
+    [
+      { ticker: "AAPL", captured_on: "2026-11-10", retrieved_at: new Date("2026-11-10T23:59:59Z") },
+      { ticker: "TWOA", captured_on: "2026-11-10", retrieved_at: new Date("2026-11-11T00:00:01Z") },
+    ],
+    "a set is dated by the day its range was asked for, even when the answer lands after UTC midnight",
+  );
+});
+
+test("an empty --tickers list is a usage error", () => {
+  assert.equal(parseTickers(undefined), null);
+  assert.deepEqual(parseTickers(" aapl, ,cost "), ["AAPL", "COST"]);
+  for (const empty of ["", ",", " , "]) assert.throws(() => parseTickers(empty), /usage: --tickers needs at least one ticker/);
 });
