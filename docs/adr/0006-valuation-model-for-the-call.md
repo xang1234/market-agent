@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed on 2026-11-10 for #226. The owner has not yet decided. This ADR authorizes no code. Once the owner approves the definitions below, implementation issues are filed under #205 before #226 closes.
+Accepted by the owner on 2026-11-10 for #226, every definition below as written. Implementation is tracked under #205 in #602 (`total_debt.v1` and `net_cash.v1`), #603 (the model and solver), #604 (the Call block) and #605 (the exit-multiple anchor).
 
 ## Context
 
@@ -187,21 +187,21 @@ These figures were computed with a 20-line script during drafting (not committed
 
 ## Consequences
 
-- **Owner decision needed on**:
+- **Approved by the owner on 2026-11-10**:
   - the model and its conventions;
   - `net_cash.v1` and `total_debt.v1`, with their exclusions and overlap rule;
   - the 15-month, 5-trading-day and 7-day staleness limits;
   - the solver domain;
   - rule 0, which adds an input-outcome decline ahead of ADR 0005's stance rules;
   - excluding filers with no reported debt line from v1.
-- **After approval**, implementation issues:
-  1. `total_debt.v1` and `net_cash.v1` as engine definitions (closes the net-debt half of #598).
-  2. The model and solver as financial-core operations, with exact arithmetic and the outcomes above. This lifts the engine's `forecast` refusal only for a Call, never for a factual answer.
-  3. The Call block (ADR 0005) wired to them.
-  4. Ten years of prices and FY free cash flow to anchor an exit multiple.
+- **Implementation issues**:
+  1. #602: `total_debt.v1` and `net_cash.v1` as engine definitions (closes the net-debt half of #598).
+  2. #603: the model and solver as financial-core operations, with exact arithmetic and the outcomes above. This lifts the engine's `forecast` refusal only for a Call, never for a factual answer.
+  3. #604: the Call block (ADR 0005) wired to them.
+  4. #605: an exit-multiple anchor from the ten years of closes #601 captures and FY free cash flow.
 - **Until item 4 ships**, every Call shows required growth at today's multiple and declines its stance under ADR 0005 rule 1.
 - **NVDA-style capex tagging** keeps those issuers out until the owner reviews `PaymentsToAcquireProductiveAssets` as capex.
 
 ## Owner decision
 
-Pending.
+Approved on 2026-11-10: the model and its conventions, `net_cash.v1` and `total_debt.v1`, the staleness limits, the solver domain, rule 0, and excluding filers with no reported debt line from v1.
