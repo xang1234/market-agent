@@ -27,7 +27,7 @@ import {
 export const CALL_VERSION = "call.v1";
 
 /** Advice and valuation words: a price comparison ask with one is declined (#224), and neither a comparison nor a Call says one. */
-export const ADVICE_WORDS = /\b(?:upside|downside|targets?|expected|returns?|undervalued|overvalued|fair|worth|buy|sell|forecasts?|recommend\w*|cheap|expensive|potential)\b/iu;
+export const ADVICE_WORDS = /\b(?:upside|downside|targets?|hold|expected|returns?|undervalued|overvalued|fair|worth|buy|sell|forecasts?|recommend\w*|cheap|expensive|potential)\b/iu;
 
 /** ADR 0005's stance wording. A stated Call alone may say it; a factual answer never does. */
 export const STANCE_WORDS = /\b(?:clears your hurdle|near your hurdle|falls short of your hurdle)\b/iu;
@@ -285,7 +285,9 @@ function modelFigures(evidence: CallEvidence, causes: Cause[]): Readonly<{ multi
       required_return: rational(evidence.settings.required_return),
     };
     const today = todaysMultiple(inputs);
-    const about = today.kind === "outcome" ? INPUT_OUTCOME_ROWS[today.outcome] : undefined;
+    const about = today.kind === "outcome" && today.outcome === "incompatible_currency" && currency("free_cash_flow") !== "USD"
+      ? "free_cash_flow"
+      : today.kind === "outcome" ? INPUT_OUTCOME_ROWS[today.outcome] : undefined;
     if (about !== undefined) causes.push({ cites: about, label: FACTS.find((fact) => fact.id === about)!.label, figure: outcomeFigure(today as ValuationOutcomeResult) });
     const cap = evidence.figures.market_cap;
     if (causes.length === 0 && cap.kind === "gap") causes.push({ cites: "share_change", label: "Market cap", figure: gapFigure(cap) });
@@ -293,6 +295,10 @@ function modelFigures(evidence: CallEvidence, causes: Cause[]): Readonly<{ multi
       const d = divideRationals(value("stock_based_compensation"), rational(cap.value));
       const shareChange: CallFigure = d === null ? outcomeFigure(VALUATION_RESULT("numeric_limit_exceeded")) : { kind: "value", text: `${percent(d, 3)}% a year` };
       if (today.kind === "outcome") return { multiple: outcomeFigure(today), shareChange, growth: outcomeFigure(today) };
+      if (d !== null && compareRationals(d, MINUS_ONE) <= 0) {
+        causes.push({ cites: "share_change", label: "Annual share change (d)", figure: outcomeFigure(VALUATION_RESULT("share_change_out_of_range")) });
+        return { multiple: { kind: "value", text: today.text }, shareChange: causes[0]!.figure, growth: { ...causes[0]!.figure, text: `Not computed. ${reason(causes[0]!).text}` } };
+      }
       return { multiple: { kind: "value", text: today.text }, shareChange, growth: d === null ? shareChange : solved(requiredGrowth(inputs, { share_change: d, exit_multiple: today.value })) };
     }
   }
@@ -360,6 +366,7 @@ function rational(text: DecimalString): ExactRational {
   return rationalFromDecimal(decimal(text)!)!;
 }
 
+const MINUS_ONE = rationalFromDecimal({ coefficient: -1n, scale: 0 })!;
 const HUNDRED = rationalFromDecimal({ coefficient: 100n, scale: 0 })!;
 
 function percent(value: ExactRational, places: number): string {

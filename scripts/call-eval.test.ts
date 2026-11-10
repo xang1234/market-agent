@@ -32,6 +32,7 @@ test("the rubric fails a Call that breaks each check", () => {
   assert.deepEqual(broken({ stance: { ...call.stance, rule: 0 } }), ["declines_when_required"]);
   assert.deepEqual(broken({ stance: { ...call.stance, text: "Clears your hurdle." } }), ["no_advice_wording"]);
   assert.deepEqual(broken({ stance: { ...call.stance, text: "Upside to the price." } }), ["no_advice_wording"]);
+  assert.deepEqual(broken({ stance: { ...call.stance, text: "Hold this position." } }), ["no_advice_wording"]);
 });
 
 test("stance wording in a factual answer fails the eval", () => {

@@ -130,3 +130,13 @@ test("owner settings save only inside ADR 0005's ranges, as canonical decimals",
   for (const change of outside) assert.equal(parseCallSettings({ ...DEFAULT_CALL_SETTINGS, ...change }), null, JSON.stringify(change));
   assert.equal(parseCallSettings({ required_return: "0.1" }), null, "every setting is required");
 });
+
+test("a non-USD filer declines under rule 0 citing free cash flow, not the USD price", () => {
+  const call = assembleCall({ ...AAPL, figures: { ...AAPL.figures, free_cash_flow: { kind: "value", value: "136056000000", currency: "EUR" } } });
+  assert.deepEqual([call.stance.rule, call.stance.reasons.map((r) => r.cites)], [0, ["free_cash_flow"]]);
+});
+
+test("a share change at or below -100% declines under rule 0 citing the share change", () => {
+  const call = assembleCall({ ...AAPL, figures: { ...AAPL.figures, stock_based_compensation: { kind: "value", value: "-6000000000000", currency: "USD" } } });
+  assert.deepEqual([call.stance.rule, call.stance.reasons.map((r) => r.cites)], [0, ["share_change"]]);
+});
