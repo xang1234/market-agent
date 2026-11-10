@@ -1,6 +1,9 @@
-// Net cash and total debt (ADR 0006, #602) from real companyfacts, as SEC
-// ingestion stores them: each balance of one 10-K at its fiscal year-end, an
-// unreported line left out, and a balance only a 10-Q reports never read.
+// Net cash and total debt (ADR 0006, #602) from companyfacts trimmed to the
+// Call-input tags, as SEC ingestion stores them: each balance of one 10-K at
+// its fiscal year-end, a line the fixture does not hold left out, and a
+// balance only a 10-Q reports never read. The fixture holds no cash and
+// equivalents for any filer, though CAT's and COST's 10-Ks report it, so
+// AAPL's comes from the hand audit (sec-call-inputs-fixture.ts).
 
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -101,9 +104,11 @@ test("net cash and total debt from each filer's latest 10-K balance sheet", { ti
     assert.deepEqual(await outcome("aapl_total_debt"), ["verified", "80111000000"]);
   });
 
-  await t.test("CAT and COST tag no cash and equivalents: net cash is a missing input, and total debt still forms", async () => {
+  await t.test("the fixture holds no cash and equivalents for CAT or COST: net cash is a missing input, and total debt still forms", async () => {
     assert.deepEqual(await outcome("cat_net_cash"), ["missing", "missing_input"]);
-    // Long-term debt 30.696B (noncurrent only) and short-term borrowings 5.514B at 2025-12-31.
+    // Only the debt lines the fixture holds for CAT, long-term debt 30.696B
+    // noncurrent and short-term borrowings 5.514B at 2025-12-31: its current
+    // debt lines are not in the fixture, so this is not CAT's total debt.
     assert.deepEqual(await outcome("cat_total_debt"), ["verified", "36210000000"]);
     assert.deepEqual(await outcome("cost_net_cash"), ["missing", "missing_input"]);
     // Long-term debt 2.248B current and 3.914B noncurrent at 2026-08-30.

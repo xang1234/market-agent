@@ -1,7 +1,9 @@
 // A net debt or total debt question is answered with the certified figure
 // (ADR 0006, #602), every balance it reads shown beside it, from real
-// companyfacts and with no planning model. A line the 10-K does not report
-// is its own gap and is left out of the sum.
+// companyfacts trimmed to the Call-input tags, with no planning model. A
+// line the fixture does not hold is its own gap and is left out of the sum.
+// The fixture holds no cash and equivalents, though both 10-Ks report it, so
+// AAPL's comes from the hand audit (sec-call-inputs-fixture.ts).
 
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -95,9 +97,10 @@ test("net debt and total debt questions answer with the certified figure and its
     ]);
   });
 
-  await t.test("CAT tags no cash and equivalents, so its net cash is a named gap, and its total debt still answers", async () => {
+  await t.test("the fixture holds no cash and equivalents for CAT, so its net cash is a named gap, and its total debt still answers", async () => {
     const netCash = (await ask("CAT", "net_cash", "What is CAT's net debt?")).rows;
     assert.deepEqual([netCash[0], netCash.at(-1)], [["Cash and equivalents (excluding restricted cash)", "missing", null], ["Net cash (cash and securities less debt)", "missing", null]]);
+    // Only the debt lines the fixture holds for CAT: its current debt lines are not in it.
     assert.deepEqual((await ask("CAT", "total_debt", "What is CAT's total debt?")).rows, [
       ["Long-term debt (current portion)", "missing", null],
       ["Long-term debt (noncurrent)", "verified", "USD 30696000000"],
