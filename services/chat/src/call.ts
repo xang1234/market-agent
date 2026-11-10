@@ -89,7 +89,9 @@ export async function callTurn(deps: CallTurnDeps, request: CallTurnRequest, sav
     // The inputs' certificate is a fact-layer record the Call refers to; no message shows it.
     persistParent: async () => {},
   });
-  if (outcome.status !== "driven") return { kind: "gap", reason_code: "run_failed", text: CALL_INPUTS_FAILED };
+  // A commit that failed is an error of this turn, not an answer; the retry publishes it.
+  if (outcome.status === "gap" && outcome.reason === "publication_failed") throw new Error("the Call's inputs could not be committed");
+  if (outcome.status !== "driven") return { kind: "gap", reason_code: outcome.status === "gap" ? outcome.reason : "configuration_needed", text: CALL_INPUTS_FAILED };
   const { rows: [unit] } = await deps.pool.query<{ snapshot_id: string }>(
     `select snapshot_id::text as snapshot_id from financial_run_units where run_id = $1::uuid and state = 'sealed'`,
     [outcome.run_id],
