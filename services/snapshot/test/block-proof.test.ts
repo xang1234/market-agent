@@ -152,3 +152,10 @@ test("a scenario price comparison is source-linked, never a verified calculation
   assert.deepEqual(deriveBlockProof(block({ snapshot_id: "00000000-0000-4000-8000-0000000000e2" }), sealed), UNPROVEN_COMPARISON, "another snapshot's binding");
   assert.equal(comparisonProofKey(block({ comparison: { ...comparison, scenario: { ...comparison.scenario, run_id: 1.5 } } })), null, "content that is no canonical JSON");
 });
+
+test("a Call claims nothing on read, however its snapshot is sealed (#604)", () => {
+  // It cites only what its snapshot sealed, which would link any other block.
+  const call = { kind: "call", data_ref: { kind: "call", id: "c", params: { fact_bindings: [{ fact_id: SNAPSHOT.fact_refs[0] }] } }, source_refs: SNAPSHOT.source_ids, call: { version: "call.v1" } };
+  assert.equal(deriveBlockProof({ ...call, kind: "metrics_comparison" }, SNAPSHOT).evidence, "linked");
+  assert.deepEqual(deriveBlockProof(call, SNAPSHOT), UNPROVEN);
+});

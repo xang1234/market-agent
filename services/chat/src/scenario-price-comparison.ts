@@ -7,7 +7,7 @@
 
 import { randomUUID } from "node:crypto";
 
-import type { ComparisonTime } from "../../financial-core/src/index.ts";
+import { ADVICE_WORDS, type ComparisonTime } from "../../financial-core/src/index.ts";
 import type { FinancialPool, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { isTransientDatabaseError } from "../../financial-engine/src/transaction.ts";
 import { generateScenarioPriceComparison, recordScenarioPriceComparison, scenarioPriceComparisonBlock } from "../../snapshot/src/scenario-price-comparison.ts";
@@ -48,8 +48,6 @@ const DATE = /^(\d{4})-(\d{2})-(\d{2})$/u;
 // At most milliseconds: a finer time could not be asked for exactly.
 const INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(?:Z|[+-](\d{2}):(\d{2}))$/iu;
 const PRICE = /\bprices?\b/iu;
-/** Advice and valuation words: an ask with one is declined for advice, and no comparison text says one. */
-export const ADVICE_WORDS = /\b(?:upside|downside|targets?|expected|returns?|undervalued|overvalued|fair|worth|buy|sell|forecasts?|recommend\w*|cheap|expensive|potential)\b/iu;
 // The time part of an ask outside the sentence, up to the next clause.
 const TIME_PART = /\b(?:as of|on) (?<when>[^,;?!]+)/iu;
 // ponytail: a closed list of common codes, names and symbols; any other currency word reads as a form it cannot read.

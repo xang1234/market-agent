@@ -4,7 +4,8 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ADVICE_WORDS, COMPARISON_DECLINES, readPriceComparisonAsk } from "../src/scenario-price-comparison.ts";
+import { ADVICE_WORDS } from "../../financial-core/src/index.ts";
+import { COMPARISON_DECLINES, readPriceComparisonAsk } from "../src/scenario-price-comparison.ts";
 
 test("the closed sentence asks for the latest close, a date, or an instant with its offset", () => {
   const asks: Array<[string, unknown]> = [

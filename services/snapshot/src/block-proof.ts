@@ -73,6 +73,8 @@ export const UNPROVEN: BlockProof = Object.freeze({ evidence: "unknown", calcula
 export function deriveBlockProof(block: unknown, snapshot: SealedSnapshotRecord | null): BlockProof {
   if (snapshot === null || !isRecord(block)) return UNPROVEN;
   if (block.kind === "scenario_price_comparison") return comparisonProof(block, snapshot);
+  // A Call (#604) is the agent's opinion: its seal stores it unchanged, but it claims nothing.
+  if (block.kind === "call") return UNPROVEN;
   if (isCertified(block, snapshot)) {
     return Object.freeze({ evidence: "linked", calculation: "verified", public_by_cutoff: "proven" });
   }

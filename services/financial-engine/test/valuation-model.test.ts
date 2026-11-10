@@ -2,9 +2,8 @@
 // them: free cash flow and net cash from one FY2026 10-K. The trimmed
 // companyfacts fixture holds neither AAPL's operating cash flow nor its capex,
 // so both come from the hand audit's read of that 10-K (accession
-// 0000320193-26-000026), injected as its cash is (sec-call-inputs-fixture.ts).
-// The fixture holds no cover share count either, so S0 is the hand audit's
-// 14,532,182,000 at 2026-10-23. P, d and r are the ADR's literals.
+// 0000320193-26-000026), injected as its cash is (aaplCallInputs). S0 is the
+// hand audit's 14,532,182,000 at 2026-10-23. P, d and r are the ADR's literals.
 
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -22,32 +21,14 @@ import {
 } from "../../financial-core/src/index.ts";
 import { createSecBackedStatementRepository } from "../../fundamentals/src/sec-facts-repository.ts";
 import { secCompanyFetcher } from "../../fundamentals/test/fakes.ts";
-import { aaplWithCash } from "../../fundamentals/test/sec-call-inputs-fixture.ts";
+import { aaplCallInputs } from "../../fundamentals/test/sec-call-inputs-fixture.ts";
 import { inspectCommittedResult } from "../src/inspection.ts";
 import { completedRun, databaseUrl, engineDatabase, IDS, pinnedClients, revenuePlan } from "./db-fixtures.ts";
 
 const RETRIEVED = "2026-11-09T15:00:00.000Z";
-const AAPL_10K = { accn: "0000320193-26-000026", fy: 2026, fp: "FY", form: "10-K", filed: "2026-11-03" };
 const CASH = ["cash_and_equivalents", "marketable_securities_current", "marketable_securities_noncurrent", "short_term_investments", "debt_securities_current"];
 const DEBT = ["long_term_debt_current", "long_term_debt_noncurrent", "commercial_paper", "short_term_borrowings"];
 const YEAR = { kind: "fiscal_period", fiscal_year: 2026, fiscal_period: "FY" };
-
-const fy2026 = (val: string) => ({ label: "", description: "", units: { USD: [{ start: "2025-09-28", end: "2026-09-26", val: Number(val), val_token: val, ...AAPL_10K, frame: "CY2026" }] } });
-
-function aaplCallFacts(): unknown {
-  const aapl = aaplWithCash() as { facts: { "us-gaap": Record<string, unknown> } };
-  return {
-    ...aapl,
-    facts: {
-      ...aapl.facts,
-      "us-gaap": {
-        ...aapl.facts["us-gaap"],
-        NetCashProvidedByUsedInOperatingActivities: fy2026("145097000000"),
-        PaymentsToAcquirePropertyPlantAndEquipment: fy2026("9041000000"),
-      },
-    },
-  };
-}
 
 function modelInputsPlan(issuerId: string) {
   const read = (metric: string, period: object) => ({ node_id: metric, operation: "reported_metric", operation_version: "reported_metric.v1", subject_slot: "aapl", metric_key: metric, period });
@@ -86,7 +67,7 @@ test("AAPL FY2026: today's multiple is 36.15x and the price requires 7.3% a year
   const issuerId = randomUUID();
   await db.query(`insert into issuers (issuer_id, legal_name, cik) values ($1, 'AAPL', '320193')`, [issuerId]);
   const statements = createSecBackedStatementRepository(pool, {
-    fetcher: secCompanyFetcher(aaplCallFacts, { completed_at: RETRIEVED }),
+    fetcher: secCompanyFetcher(() => aaplCallInputs(), { completed_at: RETRIEVED }),
     sourceId: randomUUID(),
     logger: { warn: () => {} },
   });
