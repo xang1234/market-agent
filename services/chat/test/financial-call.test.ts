@@ -11,7 +11,7 @@ import { join } from "node:path";
 import test from "node:test";
 import type { Client } from "pg";
 import { dockerAvailable, workspaceRoot } from "../../../db/test/docker-pg.ts";
-import { STANCE_WORDS, type CallContent } from "../../financial-core/src/index.ts";
+import { ADVICE_WORDS, STANCE_WORDS, type CallContent } from "../../financial-core/src/index.ts";
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import type { FinancialPool } from "../../financial-engine/src/ports.ts";
 import { IDS } from "../../financial-engine/test/db-fixtures.ts";
@@ -22,7 +22,6 @@ import { POLYGON_MARKET_SOURCE_ID } from "../../market/src/provider-sources.ts";
 import { callBlockHash, verifyCalls, type CallBlock } from "../../snapshot/src/call.ts";
 import { listChatMessagesForThread } from "../src/messages.ts";
 import type { ChatSubjectPreResolution } from "../src/subjects.ts";
-import { ADVICE_WORDS } from "../src/scenario-price-comparison.ts";
 import { chatDatabase, chatHarness, completed, resolveMention } from "./financial-fixtures.ts";
 
 // Monday 10:00 in New York: Friday 2026-11-06's close is the latest.

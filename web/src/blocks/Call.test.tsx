@@ -12,7 +12,7 @@ import type { CallBlock } from './types.ts'
 
 // The server's own output (services/financial-core/test/call-contract.test.ts).
 const [RULE_ONE, RULE_ZERO] = JSON.parse(readFileSync(new URL('./call.fixture.json', import.meta.url), 'utf8')) as CallBlock[]
-// The words ADVICE_WORDS forbids (services/chat/src/scenario-price-comparison.ts) and "hold", which ADR 0005 also forbids; "required return", the owner setting it names, is set aside.
+// The words ADVICE_WORDS forbids (services/financial-core/src/call.ts) and "hold", which ADR 0005 also forbids; "required return", the owner setting it names, is set aside.
 const ADVICE = /\b(?:upside|downside|targets?|expected|returns?|undervalued|overvalued|fair|worth|buy|sell|hold|forecasts?|recommend\w*|cheap|expensive|potential)\b/iu
 
 function render(block: CallBlock): Document {

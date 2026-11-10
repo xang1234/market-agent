@@ -26,6 +26,9 @@ import {
 
 export const CALL_VERSION = "call.v1";
 
+/** Advice and valuation words: a price comparison ask with one is declined (#224), and neither a comparison nor a Call says one. */
+export const ADVICE_WORDS = /\b(?:upside|downside|targets?|expected|returns?|undervalued|overvalued|fair|worth|buy|sell|forecasts?|recommend\w*|cheap|expensive|potential)\b/iu;
+
 /** ADR 0005's stance wording. A stated Call alone may say it; a factual answer never does. */
 export const STANCE_WORDS = /\b(?:clears your hurdle|near your hurdle|falls short of your hurdle)\b/iu;
 
