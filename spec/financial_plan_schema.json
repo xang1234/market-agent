@@ -222,6 +222,8 @@
         { "$ref": "#/$defs/ChangeNode" },
         { "$ref": "#/$defs/MarginNode" },
         { "$ref": "#/$defs/FreeCashFlowNode" },
+        { "$ref": "#/$defs/NetCashNode" },
+        { "$ref": "#/$defs/TotalDebtNode" },
         { "$ref": "#/$defs/RatioNode" },
         { "$ref": "#/$defs/TrailingSumNode" },
         { "$ref": "#/$defs/ThresholdNode" },
@@ -279,6 +281,41 @@
         "operation_version": { "$ref": "#/$defs/VersionTag" },
         "operating_cash_flow": { "$ref": "#/$defs/LocalId" },
         "capex": { "$ref": "#/$defs/LocalId" }
+      }
+    },
+    "NetCashNode": {
+      "description": "Cash and securities less debt from one 10-K balance sheet; each field names the reported_metric node of that balance.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_id", "operation", "operation_version", "cash_and_equivalents", "marketable_securities_current", "marketable_securities_noncurrent", "short_term_investments", "debt_securities_current", "long_term_debt_current", "long_term_debt_noncurrent", "commercial_paper", "short_term_borrowings"],
+      "properties": {
+        "node_id": { "$ref": "#/$defs/LocalId" },
+        "operation": { "const": "net_cash" },
+        "operation_version": { "$ref": "#/$defs/VersionTag" },
+        "cash_and_equivalents": { "$ref": "#/$defs/LocalId" },
+        "marketable_securities_current": { "$ref": "#/$defs/LocalId" },
+        "marketable_securities_noncurrent": { "$ref": "#/$defs/LocalId" },
+        "short_term_investments": { "$ref": "#/$defs/LocalId" },
+        "debt_securities_current": { "$ref": "#/$defs/LocalId" },
+        "long_term_debt_current": { "$ref": "#/$defs/LocalId" },
+        "long_term_debt_noncurrent": { "$ref": "#/$defs/LocalId" },
+        "commercial_paper": { "$ref": "#/$defs/LocalId" },
+        "short_term_borrowings": { "$ref": "#/$defs/LocalId" }
+      }
+    },
+    "TotalDebtNode": {
+      "description": "The debt side of net_cash on its own.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_id", "operation", "operation_version", "long_term_debt_current", "long_term_debt_noncurrent", "commercial_paper", "short_term_borrowings"],
+      "properties": {
+        "node_id": { "$ref": "#/$defs/LocalId" },
+        "operation": { "const": "total_debt" },
+        "operation_version": { "$ref": "#/$defs/VersionTag" },
+        "long_term_debt_current": { "$ref": "#/$defs/LocalId" },
+        "long_term_debt_noncurrent": { "$ref": "#/$defs/LocalId" },
+        "commercial_paper": { "$ref": "#/$defs/LocalId" },
+        "short_term_borrowings": { "$ref": "#/$defs/LocalId" }
       }
     },
     "RatioNode": {

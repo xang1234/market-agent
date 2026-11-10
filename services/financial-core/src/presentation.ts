@@ -530,6 +530,10 @@ function measureText(plan: FinancialPlan, node: OperationNode): string {
       return "Net margin (net income / revenue)";
     case "free_cash_flow":
       return "Free cash flow (OCF less PP&E cash capex)";
+    case "net_cash":
+      return "Net cash (cash and securities less debt)";
+    case "total_debt":
+      return "Total debt (long-term debt, commercial paper and short-term borrowings)";
     case "ratio":
       return resolveRatioDefinition(node.ratio_key)?.label ?? node.ratio_key;
     case "absolute_change":
@@ -568,6 +572,8 @@ function measureKey(plan: FinancialPlan, node: OperationNode): string {
     case "operating_margin":
     case "net_margin":
     case "free_cash_flow":
+    case "net_cash":
+    case "total_debt":
     case "market_cap":
     case "pe_ratio":
       return node.operation;

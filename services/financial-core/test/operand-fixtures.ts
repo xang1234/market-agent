@@ -38,6 +38,7 @@ export type InputSpec = {
   share_basis?: "basic" | "diluted" | "not_applicable";
   calendar_version?: string;
   definition_version?: string;
+  source_id?: string;
 };
 
 const USD: FinancialUnit = { kind: "currency", currency: "USD" };
@@ -52,7 +53,7 @@ export function boundInput(spec: InputSpec): BoundFactInputV1 {
     fact_id: `dddddddd-dddd-4ddd-8ddd-${suffix}`,
     subject_ref: slot.subject_ref,
     metric: { metric_key: spec.metric, definition_version: spec.definition_version ?? `${spec.metric}.v1` },
-    source: { source_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", document_id: null, source_version_hash: HASH, locator: null },
+    source: { source_id: spec.source_id ?? "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", document_id: null, source_version_hash: HASH, locator: null },
     numeric: {
       raw_token: spec.value,
       token_proof_hash: HASH,
