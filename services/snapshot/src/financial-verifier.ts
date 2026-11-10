@@ -25,6 +25,7 @@ import {
   presentFinancialUnit,
   publicAtCutoff,
   rationalFromDecimal,
+  REASON_CODES,
   resolveMetricDefinition,
   restateToReference,
   sourceClassOf,
@@ -366,6 +367,7 @@ function bindingsFor(plan: FinancialPlan, records: FinancialUnitRecords): Bindin
     const row = rows.get(node.node_id);
     if (!row) return { ok: false, input_slot: node.node_id, field: "missing" };
     if (row.binding_status === "gap") {
+      if (!(REASON_CODES as ReadonlyArray<string | null>).includes(row.gap_reason)) return { ok: false, input_slot: node.node_id, field: "gap_reason" };
       value.set(node.node_id, { status: "gap", reason_code: row.gap_reason as ReasonCode, candidate_set_digest: row.candidate_set_digest });
       continue;
     }
