@@ -8,12 +8,13 @@
 // input's subject resolves to now, with its splits and zone. Each bound
 // input's source comes with its kind, and the run with the source classes it
 // was granted, so the seal re-checks each input's class. Each missing_input
-// gap's slot is reread through the engine's own authorized candidate read,
-// since a sum may leave that input out. Everything else snapshot reads from
-// these tables directly.
+// gap's slot is reread through the evidence repository's authorized candidate
+// read, the one binding uses, since a sum may leave that input out.
+// Snapshot reads everything else from these tables directly; it never
+// imports the engine.
 
+import { listFinancialInputCandidates } from "../../evidence/src/financial-input-repo.ts";
 import { validateFinancialPlan } from "../../financial-core/src/index.ts";
-import { readInputCandidates, type CandidateRead } from "../../financial-engine/src/evidence-adapter.ts";
 import { loadSubjectSplitHistory, type SubjectSplitHistory } from "../../market/src/split-history.ts";
 import type { QueryExecutor } from "../../shared/src/http.ts";
 import { toSealFactRow, type FactRow } from "./seal-input.ts";
@@ -129,8 +130,12 @@ export type LoadedResult = Readonly<{
 /** A subject's current display name: an issuer's legal name, or a listing's ticker and venue. */
 export type LoadedSubjectName = Readonly<{ kind: "issuer" | "listing"; id: string; name: string }>;
 
-/** A missing_input gap's slot, reread now as binding read it. */
-export type LoadedGapCandidates = Readonly<{ input_slot: string; read: CandidateRead }>;
+/** A missing_input gap's slot, reread now as binding read it: the period of each authorized candidate. */
+export type LoadedGapCandidates = Readonly<{
+  input_slot: string;
+  candidates: ReadonlyArray<Readonly<{ fiscal_year: number | null; fiscal_period: string | null; period_end: string | null }>>;
+  truncated: boolean;
+}>;
 
 export type FinancialUnitRecords = Readonly<{
   run: LoadedRun;
@@ -257,16 +262,20 @@ async function rereadMissingInputs(db: QueryExecutor, plan: unknown, bindings: R
   for (const node of operations) {
     if (node.operation !== "reported_metric" || !missing.has(node.node_id)) continue;
     const period = node.period.kind === "fiscal_period" ? node.period : null;
+    const page = await listFinancialInputCandidates(db, {
+      user_id: owner,
+      channel: "app",
+      scope: "public_information",
+      subject: subjects.members.find((member) => member.slot_id === node.subject_slot)!.subject_ref,
+      metric_key: node.metric_key,
+      fiscal_year: period?.fiscal_year ?? null,
+      fiscal_period: period?.fiscal_period ?? null,
+      limit: limits.max_input_candidates,
+    });
     reads.push({
       input_slot: node.node_id,
-      read: await readInputCandidates(db, {
-        owner_user_id: owner,
-        subject: subjects.members.find((member) => member.slot_id === node.subject_slot)!.subject_ref,
-        metric_key: node.metric_key,
-        fiscal_year: period?.fiscal_year ?? null,
-        fiscal_period: period?.fiscal_period ?? null,
-        limit: limits.max_input_candidates,
-      }),
+      candidates: page.candidates.map(({ fiscal_year, fiscal_period, period_end }) => ({ fiscal_year, fiscal_period, period_end })),
+      truncated: page.truncated,
     });
   }
   return reads;

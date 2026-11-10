@@ -21,26 +21,26 @@ import type {
   SqlExecutor,
 } from "./ports.ts";
 
-export type CandidateRead = Readonly<{ candidates: ReadonlyArray<InputCandidate>; truncated: boolean }>;
-
-/** One owner's authorized candidates for a slot, as binding reads them. The snapshot verifier rereads a gap's slot with it. */
-export async function readInputCandidates(
-  db: SqlExecutor,
-  { owner_user_id, ...request }: Omit<CandidateRequest, "authority"> & { owner_user_id: string },
-): Promise<CandidateRead> {
-  const page = await listFinancialInputCandidates(db, { ...request, user_id: owner_user_id, channel: "app", scope: "public_information" });
-  return { candidates: page.candidates.flatMap(toInputCandidate), truncated: page.truncated };
-}
-
 export function createEvidenceFinancialPort(db: SqlExecutor): FinancialEvidencePort {
   return {
-    async listInputCandidates({ authority, ...request }: CandidateRequest): Promise<CandidatePage> {
+    async listInputCandidates(request: CandidateRequest): Promise<CandidatePage> {
+      let page;
       try {
-        return { status: "ok", ...(await readInputCandidates(db, { ...request, owner_user_id: authority.owner_user_id })) };
+        page = await listFinancialInputCandidates(db, {
+          user_id: request.authority.owner_user_id,
+          channel: "app",
+          scope: "public_information",
+          subject: request.subject,
+          metric_key: request.metric_key,
+          fiscal_year: request.fiscal_year,
+          fiscal_period: request.fiscal_period,
+          limit: request.limit,
+        });
       } catch (error) {
         if (isDatabaseError(error)) return { status: "error", reason_code: "database_error" };
         throw error;
       }
+      return { status: "ok", candidates: page.candidates.flatMap(toInputCandidate), truncated: page.truncated };
     },
 
     async readSplitHistory({ subject, as_of }: SplitHistoryRequest): Promise<SplitHistory> {

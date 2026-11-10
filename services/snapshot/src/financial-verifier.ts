@@ -58,7 +58,6 @@ import {
   type LoadedEvidence,
   type LoadedPriceObservation,
 } from "./financial-verifier-loader.ts";
-import { selectInput, type SelectionPolicy } from "../../financial-engine/src/select-inputs.ts";
 import type { SubjectSplitHistory } from "../../market/src/split-history.ts";
 import type { JsonObject } from "./manifest-staging.ts";
 import type { QueryExecutor } from "../../shared/src/http.ts";
@@ -206,7 +205,7 @@ export function verifyFinancialUnit(records: FinancialUnitRecords, unitId: Local
   }
   if (failures.length > 0) return { ok: false, failures };
 
-  for (const slot of unprovenAbsences(plan, closureNodes, bindings.value, records.missing_input_candidates, run.allowed_source_classes)) {
+  for (const slot of unprovenAbsences(plan, closureNodes, bindings.value, records.missing_input_candidates)) {
     failures.push(failure("financial_binding_mismatch", { run_id: run.run_id, input_slot: slot, field: "gap_reason" }));
   }
   if (failures.length > 0) return { ok: false, failures };
@@ -391,44 +390,39 @@ function bindingsFor(plan: FinancialPlan, records: FinancialUnitRecords): Bindin
 
 /**
  * The missing_input gaps a sum in the closure leaves out (net cash, total
- * debt) that the store disproves. Each is selected again by the engine's own
- * rules from the candidates its slot holds now, and must still be
- * missing_input. A latest node selects in the period its sum's bound
- * components resolved to: the plan gives every component one period
- * selector, and a latest period is shared. With no component bound, the sum
- * is missing itself and certifies no value, so nothing is proven.
+ * debt) that the store disproves. Binding's rule 11 (select-inputs.ts): a
+ * slot is missing_input only when no authorized candidate reports its metric
+ * for the period, so any candidate there, or a reread too long to see whole,
+ * leaves the gap unproven. Every component of a sum has one period selector;
+ * a latest one resolved to the period of the sum's bound components. With
+ * none bound, the sum is missing itself and certifies no value.
  */
 function unprovenAbsences(
   plan: FinancialPlan,
   closureNodes: ReadonlySet<LocalId>,
   bindings: ReadonlyMap<LocalId, SlotBinding>,
   rereads: ReadonlyArray<LoadedGapCandidates>,
-  grant: ReadonlyArray<string>,
 ): LocalId[] {
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
-  const candidates = new Map(rereads.map((entry) => [entry.input_slot, entry.read]));
-  const policy: SelectionPolicy = {
-    knowledge_cutoff: plan.time.knowledge_cutoff,
-    reporting_basis: plan.policies.reporting_basis,
-    max_age_days: plan.policies.freshness.max_age_days,
-    allowed_source_classes: grant as SelectionPolicy["allowed_source_classes"],
-  };
+  const reads = new Map(rereads.map((read) => [read.input_slot, read]));
   const unproven = new Set<LocalId>();
   for (const node of plan.operations) {
     if (!closureNodes.has(node.node_id) || OPERATION_REGISTRY[node.operation].tolerates_missing_operands !== "absent_inputs") continue;
     const components = operationDependencies(node);
-    const [bound] = components.flatMap((id) => {
+    const selector = (nodes.get(components[0]!) as ReportedMetricNode).period;
+    const [period] = selector.kind === "fiscal_period" ? [selector] : components.flatMap((id) => {
       const binding = bindings.get(id);
       return binding?.status === "bound" && binding.input.schema_version !== BOUND_PRICE_INPUT_SCHEMA_VERSION ? [binding.input.period] : [];
     });
-    if (bound === undefined) continue;
-    const period = { kind: "fiscal_period" as const, fiscal_year: bound.fiscal_year, fiscal_period: bound.fiscal_period };
+    if (period === undefined) continue;
     for (const id of components) {
       const binding = bindings.get(id);
       if (binding?.status !== "gap" || binding.reason_code !== "missing_input") continue;
-      const read = candidates.get(id);
-      const selection = read && selectInput(nodes.get(id) as ReportedMetricNode, read.candidates, policy, { truncated: read.truncated }, period);
-      if (selection?.status !== "gap" || selection.reason_code !== "missing_input") unproven.add(id);
+      const read = reads.get(id);
+      if (!read || read.truncated || read.candidates.some((candidate) =>
+        candidate.period_end !== null && candidate.fiscal_year === period.fiscal_year && candidate.fiscal_period === period.fiscal_period)) {
+        unproven.add(id);
+      }
     }
   }
   return [...unproven].sort();
