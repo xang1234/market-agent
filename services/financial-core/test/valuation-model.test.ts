@@ -200,3 +200,21 @@ test("consensus is the newest capture on or before the Call date, at most 7 days
   assert.deepEqual(text(consensusRow([{ captured_on: "2026-11-09", eps_growth_next_5y: null }], "2026-11-10")), ["outcome", "no consensus within 7 days"]);
   assert.deepEqual(text(consensusRow(captures.slice(2), "2026-11-10")), ["outcome", "no consensus within 7 days"]);
 });
+
+test("growth at or below -100% declines V instead of valuing a negative cash flow", () => {
+  assert.deepEqual(
+    ["-1", "-2"].map((g) => {
+      const result = valuePerShare(SYNTHETIC, ASSUMED, q(g));
+      return [result.kind, "outcome" in result ? result.outcome : null, result.text];
+    }),
+    [
+      ["outcome", "growth_out_of_range", "Annual growth must be above -100%."],
+      ["outcome", "growth_out_of_range", "Annual growth must be above -100%."],
+    ],
+  );
+});
+
+test("when several inputs fail, the first in ADR 0006's table is the one shown", () => {
+  const result = valuePerShare(at({ shares: q("0"), free_cash_flow: q("0"), currency: { reporting: "EUR", price: "USD" } }), ASSUMED, q("0.1"));
+  assert.deepEqual([result.kind, "outcome" in result ? result.outcome : null], ["outcome", "non_positive_free_cash_flow"]);
+});

@@ -22,6 +22,7 @@ export const VALUATION_OUTCOMES = {
   required_return_out_of_range: { reason_code: null, text: "The required return must be above 0." },
   exit_multiple_out_of_range: { reason_code: null, text: "The exit multiple must be above 0." },
   share_change_out_of_range: { reason_code: null, text: "The annual share change must be above -100%." },
+  growth_out_of_range: { reason_code: null, text: "Annual growth must be above -100%." },
   no_multiple_today: { reason_code: "non_positive_base", text: "Net cash is at least the market cap, so there is no positive multiple today and required growth at today's multiple is not computed." },
   below_domain: { reason_code: null, text: "The price requires free cash flow per share to shrink faster than 50% a year." },
   above_domain: { reason_code: null, text: "The price requires free cash flow per share to grow faster than 100% a year." },
@@ -95,6 +96,7 @@ const ASSUMPTION_RULES: ReadonlyArray<readonly [ValuationOutcome, (assumptions: 
 export function valuePerShare(inputs: ValuationInputs, assumptions: ValuationAssumptions, g: ExactRational): ValuationValue | ValuationOutcomeResult {
   const declined = check(inputs, assumptions);
   if (declined !== null) return declined;
+  if (compareRationals(g, MINUS_ONE) <= 0) return outcome("growth_out_of_range");
   const value = model(inputs, assumptions, g);
   return value === null ? outcome("numeric_limit_exceeded") : { kind: "value", value, text: fixed(roundRational(value, 2), 2) };
 }
