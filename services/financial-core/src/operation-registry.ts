@@ -93,14 +93,14 @@ export const OPERATION_REGISTRY: { readonly [K in OperationKind]: OperationSpec<
     ...VALUE_OPERATION,
     tolerates_missing_operands: "absent_inputs",
     operation_version: "net_cash.v1",
-    interpretation: "Cash and equivalents plus marketable securities, short-term investments and current debt securities, less long-term debt, commercial paper and short-term borrowings, all from one 10-K at one fiscal year-end; an unreported line is left out, never zero.",
+    interpretation: "Cash and equivalents plus marketable securities, short-term investments and current debt securities, less long-term debt, commercial paper and short-term borrowings, all from one 10-K at one fiscal year-end. Debt is only those four mapped lines, so debt a filer tags under another concept, such as DebtCurrent or a lease liability, is not included; a mapped line the 10-K does not report is left out, never zero.",
     evaluate: balanceSum,
   },
   total_debt: {
     ...VALUE_OPERATION,
     tolerates_missing_operands: "absent_inputs",
     operation_version: "total_debt.v1",
-    interpretation: "Long-term debt, current and noncurrent, plus commercial paper and short-term borrowings, all from one 10-K at one fiscal year-end; an unreported line is left out, never zero.",
+    interpretation: "Long-term debt, current and noncurrent, plus commercial paper and short-term borrowings, all from one 10-K at one fiscal year-end. Only those four mapped lines are summed, so debt a filer tags under another concept, such as DebtCurrent or a lease liability, is not included; a mapped line the 10-K does not report is left out, never zero.",
     evaluate: balanceSum,
   },
   ratio: {

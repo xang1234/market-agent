@@ -359,7 +359,7 @@ export function balanceSum(node: BalanceSumNode, operands: ReadonlyArray<Financi
     Object.keys(sides).some((side) => !present.some(({ component }) => component.side === side));
   const [first] = present;
   if (unmet || first === undefined) {
-    return operationGap("missing_input", "The 10-K reports no cash and equivalents, or no debt line; a line it does not report is never read as zero.");
+    return operationGap("missing_input", "The 10-K reports no cash and equivalents, or none of the four mapped debt lines; a line it does not report is never read as zero.");
   }
   for (const { operand } of present.slice(1)) {
     const incompatible = subjectMismatch(first.operand, operand) ?? measurementMismatch(first.operand, operand) ?? periodMismatch(first.operand, operand) ??
