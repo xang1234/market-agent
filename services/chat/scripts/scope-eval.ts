@@ -10,6 +10,12 @@
 //
 //   npm run scope:eval
 //
+// To measure instead, without rewriting the replies, ask a subset (or all) of
+// the cases N times each and print each case's misses out of N:
+//
+//   npm run scope:eval -- --cases=31,57 --runs=10
+//   npm run scope:eval -- --runs=3
+//
 // Models come from LLM_SETTINGS_ENV_FILE, by default the repo's .env.dev (a
 // worktree has none: point it at the main checkout's).
 import { readFileSync, writeFileSync } from "node:fs";
@@ -109,18 +115,7 @@ async function recordLiveReplies(): Promise<number> {
   const models = new Set<string>();
   const replies: ScopeEvalReplies["replies"] = [];
   for (const question of new Set(cases.map((evalCase) => evalCase.question))) {
-    let text = "";
-    await proposeScope({
-      question,
-      env,
-      createClient: () => async (deployment, request, options) => {
-        const result = await live(deployment, request, options);
-        models.add(`${deployment.channel}/${deployment.model}`);
-        text = result.text;
-        return result;
-      },
-    });
-    replies.push({ match: proposalQuestion(question), text });
+    replies.push({ match: proposalQuestion(question), text: await liveReply(question, env, live, models) });
     process.stderr.write(`${replies.length} ${question}\n`);
   }
   const recorded: ScopeEvalReplies = { model: [...models].join(", "), recorded: new Date().toISOString().slice(0, 10), replies };
@@ -132,6 +127,57 @@ async function recordLiveReplies(): Promise<number> {
   return failing.length === 0 ? 0 : 1;
 }
 
+async function liveReply(question: string, env: Record<string, string | undefined>, live: Awaited<ReturnType<typeof createDefaultPiLlmChatClient>>, models: Set<string>): Promise<string> {
+  let text = "";
+  await proposeScope({
+    question,
+    env,
+    createClient: () => async (deployment, request, options) => {
+      const result = await live(deployment, request, options);
+      models.add(`${deployment.channel}/${deployment.model}`);
+      text = result.text;
+      return result;
+    },
+  });
+  return text;
+}
+
+// Each case's misses out of `runs` live replies; a call that fails (no text) is
+// counted apart, not as a miss.
+async function measure(ids: number[] | null, runs: number): Promise<number> {
+  const all = JSON.parse(readFileSync(CASES_FILE, "utf8")) as ScopeEvalCase[];
+  const cases = ids === null ? all : all.filter((evalCase) => ids.includes(evalCase.id));
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    LLM_SETTINGS_ENV_FILE: process.env.LLM_SETTINGS_ENV_FILE ?? join(ROOT, ".env.dev"),
+    LLM_REPLAY_FILE: undefined,
+    CHAT_SCOPE_PROPOSAL: undefined,
+  };
+  const live = await createDefaultPiLlmChatClient();
+  const models = new Set<string>();
+  const started = Date.now();
+  const repliesByQuestion = new Map<string, string[]>();
+  for (const question of new Set(cases.map((evalCase) => evalCase.question))) {
+    repliesByQuestion.set(question, await Promise.all(Array.from({ length: runs }, () => liveReply(question, env, live, models))));
+    process.stderr.write(`${repliesByQuestion.size} ${question}\n`);
+  }
+  for (const evalCase of cases) {
+    const texts = repliesByQuestion.get(evalCase.question)!;
+    const answered = texts.filter((text) => text !== "");
+    const failures = answered.map((text) => caseFailures(evalCase, text));
+    const misses = failures.filter((each) => each.length > 0).length;
+    console.log(`#${evalCase.id}\tmiss ${misses}/${answered.length}\terrors ${texts.length - answered.length}\t${evalCase.question}`);
+    for (const failure of new Set(failures.flat())) console.log(`\t${failure}`);
+  }
+  console.log(`${[...models].join(", ")}: ${cases.length} cases x ${runs} runs in ${Math.round((Date.now() - started) / 1000)} s`);
+  return 0;
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  process.exitCode = await recordLiveReplies();
+  const flag = (name: string) => process.argv.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
+  const cases = flag("cases");
+  const runs = flag("runs");
+  process.exitCode = cases === undefined && runs === undefined
+    ? await recordLiveReplies()
+    : await measure(cases === undefined ? null : cases.split(",").map(Number), Number(runs ?? 1));
 }
