@@ -2,13 +2,14 @@
 // years of a made-up filer's 10-Ks and ten years of split-adjusted closes.
 
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { bootstrapDatabase, connectedClient, connectedPool, dockerAvailable, workspaceRoot } from "../../../db/test/docker-pg.ts";
 import { endOfLocalDay } from "../../financial-core/src/index.ts";
 import { POLYGON_MARKET_SOURCE_ID, YAHOO_FINANCE_DEV_MARKET_SOURCE_ID } from "../../market/src/provider-sources.ts";
-import { inputsAsOf, renderBacktest, runBacktest, type AsOfInputs } from "../src/fcf-backtest.ts";
+import { attachCiks, inputsAsOf, renderBacktest, runBacktest, type AsOfInputs } from "../src/fcf-backtest.ts";
 import { backfillSecStatements } from "../src/sec-statements-backfill-cli.ts";
 import { secCompanyFetcher } from "./fakes.ts";
 import { annualHistoryCompanyFacts, HISTORY_CIK, HISTORY_SPLIT } from "./sec-annual-history-fixture.ts";
@@ -110,4 +111,31 @@ test("no input published after an as-of date is used for that date", { timeout: 
     "2017-12-31",
   ]);
   assert.deepEqual(after.bound.map((input) => input.public_by).sort().at(-1), endOfLocalDay("2018-02-15", "America/New_York"));
+});
+
+test("a ticker takes its CIK unless another issuer holds it (#597)", { timeout: 120_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for backtest coverage");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "fin-fcf-backtest-ciks");
+  const db = await connectedPool(t, databaseUrl);
+  const issuer = (n: number) => `38000000-0000-4000-8000-00000000063${n}`;
+  await db.query(`insert into issuers (issuer_id, legal_name, cik) values ($1, 'Held Inc. (SEC)', '0000990611'), ($2, 'Held Inc', null), ($3, 'Fresh Inc', null)`, [issuer(0), issuer(1), issuer(2)]);
+  for (const [n, ticker] of [[1, "HELD"], [2, "FRSH"]] as const) {
+    await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1, $2, 'common_stock')`, [issuer(n + 4), issuer(n)]);
+    await db.query(`insert into listings (instrument_id, mic, ticker, trading_currency, timezone) values ($1, 'XNAS', $2, 'USD', 'America/New_York')`, [issuer(n + 4), ticker]);
+  }
+  const file = join(await mkdtemp(join(tmpdir(), "fcf-ciks-")), "company_tickers.json");
+  await writeFile(file, JSON.stringify({ 0: { cik_str: 990611, ticker: "HELD", title: "Held" }, 1: { cik_str: 990612, ticker: "FRSH", title: "Fresh" } }));
+  const logged: string[] = [];
+  t.mock.method(console, "error", (line: string) => logged.push(line));
+  await attachCiks(db, ["HELD", "FRSH"], file);
+  const ciks = await db.query(`select legal_name, cik from issuers order by legal_name`);
+  assert.deepEqual(ciks.rows, [
+    { legal_name: "Fresh Inc", cik: "990612" },
+    { legal_name: "Held Inc", cik: null },
+    { legal_name: "Held Inc. (SEC)", cik: "0000990611" },
+  ]);
+  assert.deepEqual(logged, [`HELD: CIK 990611 belongs to issuer ${issuer(0)}; not attached (#597)`, "FRSH: CIK 990612"]);
 });

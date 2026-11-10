@@ -65,6 +65,7 @@ import { selectPlanInputs } from "../../financial-engine/src/bind-inputs.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { buildDeterministicPlan } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort, FinancialPool, InputCandidate, SplitHistory, SqlExecutor } from "../../financial-engine/src/ports.ts";
+import { normalizeCik } from "../../shared/src/identifiers.ts";
 import { logPoolErrors, withPoolClient } from "../../shared/src/pool-client.ts";
 
 export const BACKTEST_YEARS = { first: 2016, last: 2021 } as const;
@@ -475,7 +476,7 @@ export function renderBacktest(run: BacktestRun, ranOn: IsoDate): string {
 }
 
 // Each sample ticker's issuer takes its CIK from SEC's company_tickers.json (#597), unless it has one.
-async function attachCiks(db: SqlExecutor, tickers: ReadonlyArray<string>, file: string): Promise<void> {
+export async function attachCiks(db: SqlExecutor, tickers: ReadonlyArray<string>, file: string): Promise<void> {
   const entries = Object.values(JSON.parse(readFileSync(file, "utf8")) as Record<string, { cik_str: number; ticker: string }>);
   const { subjects, unresolved } = await resolveTickers(db, tickers);
   for (const issuer of unresolved) console.error(`${issuer.ticker}: ${issuer.text}`);
@@ -485,9 +486,19 @@ async function attachCiks(db: SqlExecutor, tickers: ReadonlyArray<string>, file:
       console.error(`${subject.ticker}: not in company_tickers.json`);
       continue;
     }
+    const cik = normalizeCik(String(entry.cik_str));
+    // Another issuer with this CIK is #597's split: its SEC facts stay there, and this ticker has none until the two merge.
+    const { rows: [holder] } = await db.query<{ issuer_id: string }>(
+      `select issuer_id::text as issuer_id from issuers where ltrim(cik, '0') = $1 and issuer_id <> $2::uuid limit 1`,
+      [cik, subject.issuer_id],
+    );
+    if (holder !== undefined) {
+      console.error(`${subject.ticker}: CIK ${cik} belongs to issuer ${holder.issuer_id}; not attached (#597)`);
+      continue;
+    }
     const { rows } = await db.query<{ cik: string }>(
       `update issuers set cik = coalesce(cik, $2), updated_at = now() where issuer_id = $1::uuid returning cik`,
-      [subject.issuer_id, String(entry.cik_str).padStart(10, "0")],
+      [subject.issuer_id, cik],
     );
     console.error(`${subject.ticker}: CIK ${rows[0]?.cik}`);
   }
