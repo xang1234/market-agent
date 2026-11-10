@@ -19,8 +19,8 @@ export const UNPROVEN: BlockProof = { evidence: 'unknown', calculation: 'not_ver
 
 // Kinds that make no claim about values (notices, source lists, containers) or
 // that label themselves (certified financial answers, scenario price
-// comparisons): no outer proof label.
-const NO_CLAIM_KINDS: ReadonlySet<string> = new Set(['disclosure', 'sources', 'section', 'financial_answer', 'scenario_price_comparison'])
+// comparisons), and a Call, the agent's opinion (#604): no outer proof label.
+const NO_CLAIM_KINDS: ReadonlySet<string> = new Set(['disclosure', 'sources', 'section', 'financial_answer', 'scenario_price_comparison', 'call'])
 
 // The labels a block's proof earns. Arithmetic and public-time claims come only
 // with a certified result; source linkage alone is labelled as just that.

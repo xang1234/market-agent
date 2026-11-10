@@ -24,6 +24,7 @@ export const SKELETON_HEIGHT_BY_KIND: Record<string, string> = {
   section: 'h-24',
   financial_answer: 'h-40',
   scenario_price_comparison: 'h-56',
+  call: 'h-56',
 }
 
 export const DEFAULT_SKELETON_HEIGHT = 'h-12'

@@ -30,8 +30,9 @@ export const TRUST_PROVENANCE_BLOCK_KINDS = ['sources', 'disclosure'] as const
 export type TrustProvenanceBlockKind = (typeof TRUST_PROVENANCE_BLOCK_KINDS)[number]
 
 // The financial lane's server-generated blocks. Only financial_answer carries a
-// certificate; a scenario price comparison is source-linked (#224).
-export const FINANCIAL_LANE_BLOCK_KINDS = ['financial_answer', 'scenario_price_comparison'] as const
+// certificate; a scenario price comparison is source-linked (#224); a Call is
+// the agent's opinion and claims nothing (#604).
+export const FINANCIAL_LANE_BLOCK_KINDS = ['financial_answer', 'scenario_price_comparison', 'call'] as const
 export type FinancialLaneBlockKind = (typeof FINANCIAL_LANE_BLOCK_KINDS)[number]
 
 export const FINDING_SEVERITIES = ['low', 'medium', 'high', 'critical'] as const
@@ -492,6 +493,51 @@ export type ScenarioPriceComparisonBlock = Omit<BaseBlock, 'title'> & {
   comparison: ScenarioPriceComparisonContent | { version: string }
 }
 
+export type CallRowId =
+  | 'free_cash_flow'
+  | 'net_cash'
+  | 'stock_based_compensation'
+  | 'shares_outstanding'
+  | 'share_price'
+  | 'required_return'
+  | 'exit_multiple'
+  | 'share_change'
+  | 'required_growth'
+  | 'consensus'
+
+export type CallInputKind = 'reported_fact' | 'attributed_consensus' | 'market_observation' | 'owner_policy' | 'agent_assumption' | 'deterministic_result'
+
+export type CallRow = {
+  id: CallRowId
+  label: string
+  kind: CallInputKind
+  basis: string
+  figure: { kind: 'value'; text: string } | { kind: 'outcome'; outcome: string; reason_code: string | null; text: string }
+  citations: ReadonlyArray<{ source_id: string; accession: string | null; period_end: string | null; date: string; text: string }>
+  from: ReadonlyArray<CallRowId>
+}
+
+/** The agent's opinion on one company (ADR 0005, #604): server-written strings, stored unchanged, never evidence. */
+export type CallContent = {
+  version: 'call.v1'
+  call_date: string
+  subject: { issuer_id: string; label: string }
+  settings: { required_return: string; margin_of_safety: string; bear_loss_limit: string; near_band: string }
+  inputs: { snapshot_id: string; run_id: string; unit_id: string; fingerprint: string }
+  facts: ReadonlyArray<CallRow>
+  assumptions: ReadonlyArray<CallRow>
+  requires: ReadonlyArray<CallRow>
+  stance: { kind: 'declined'; rule: 0 | 1; text: string; reasons: ReadonlyArray<{ cites: CallRowId; text: string }> }
+}
+
+export type CallBlock = Omit<BaseBlock, 'title'> & {
+  kind: 'call'
+  title?: never
+  subject_refs?: ReadonlyArray<SubjectRef>
+  // An unknown version is carried only so it can be shown as unsupported.
+  call: CallContent | { version: string }
+}
+
 // Open variant lets Section.children carry kinds whose typed shape
 // ships later. Narrow this once the full catalog is unioned.
 export type Block =
@@ -501,4 +547,5 @@ export type Block =
   | TrustProvenanceBlock
   | FinancialAnswerBlock
   | ScenarioPriceComparisonBlock
+  | CallBlock
   | (BaseBlock & { kind: string })

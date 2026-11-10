@@ -18,6 +18,7 @@ import type {
   SegmentDonutBlock,
   SegmentTrajectoryBlock,
   ScenarioPriceComparisonBlock,
+  CallBlock,
   SentimentTrendBlock,
   SourcesBlock,
   TableBlock,
@@ -28,6 +29,7 @@ import financialAnswerFiscalCalendarsFixtureJson from './financialAnswer.fiscalC
 import financialAnswerScenariosFixtureJson from './financialAnswer.scenarios.fixture.json' with { type: 'json' }
 import financialAnswerV1FixtureJson from './financialAnswer.v1.fixture.json' with { type: 'json' }
 import scenarioPriceComparisonFixtureJson from './scenarioPriceComparison.fixture.json' with { type: 'json' }
+import callFixtureJson from './call.fixture.json' with { type: 'json' }
 
 const FIXTURE_SNAPSHOT_ID = '11111111-1111-4111-9111-111111111111'
 const FIXTURE_AS_OF = '2026-04-22T16:00:00.000Z'
@@ -512,6 +514,8 @@ export const financialAnswerScenariosFixture = financialAnswerScenariosFixtureJs
 
 // The server's own output (services/financial-core/test/scenario-price-comparison-contract.test.ts).
 export const scenarioPriceComparisonFixture = scenarioPriceComparisonFixtureJson[0] as ScenarioPriceComparisonBlock
+// The server's own output (services/financial-core/test/call-contract.test.ts).
+export const callFixture = callFixtureJson[0] as CallBlock
 export const financialAnswerV1Fixture = financialAnswerV1FixtureJson as FinancialAnswerBlock
 
 export const ALL_BLOCK_FIXTURES = [
@@ -537,4 +541,5 @@ export const ALL_BLOCK_FIXTURES = [
   disclosureFixture,
   financialAnswerFixture,
   scenarioPriceComparisonFixture,
+  callFixture,
 ] as const
