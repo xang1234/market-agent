@@ -48,6 +48,7 @@ import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
 import { comparedAdditions, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId, noteBlock } from "./chat-ids.ts";
 import { priceComparisonTurn } from "./scenario-price-comparison.ts";
+import { callTurn, readCallAsk } from "./call.ts";
 import { planEpsScenarios, priorScenario, SCENARIO_DECLINE, SCENARIO_GAP, SCENARIO_INPUTS, scenarioAnswer, turnScenarioAsk, type ScenarioAsk } from "./eps-scenarios.ts";
 import { asksCause, filedCauses, namedFigures, NOT_ASKED, type FiledCause } from "./filed-cause.ts";
 import { allResolved, overviewOmissions, overviewPeers, planCompanyOverview, planMarginTrend, type PeersOf } from "./company-overview.ts";
@@ -308,6 +309,21 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       text, thread_id: context.threadId, user_id: context.userId, message_id: messageId, now: () => deps.clock?.() ?? new Date(),
     }, () => savedGap(deps.pool, context.threadId, messageId));
     if (comparison) return comparison;
+    // A Call is made only on this ask (ADR 0005), before any scope is read.
+    const callAsk = readCallAsk(text);
+    if (callAsk) {
+      return () => callTurn({
+        pool: deps.pool,
+        evidence: deps.evidence,
+        resolveSubject: async (mention) => {
+          const resolution = await deps.resolveMention(mention);
+          return requestedResolution(resolution, await issuersOf(deps.pool, [resolution]));
+        },
+      }, {
+        subject: callAsk.subject, thread_id: context.threadId, user_id: context.userId!, message_id: messageId, request_key: turnId, authority,
+        now: () => deps.clock?.() ?? new Date(),
+      }, () => savedGap(deps.pool, context.threadId, messageId));
+    }
     // A retry of a turn whose run is reserved resumes it, whatever this attempt's reading says.
     const reserved = await findPlanForRequest(deps.pool, { authority, request_key: turnId }) !== null;
     const requested = await requestedSubjects(deps, context, text);
