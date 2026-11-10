@@ -1024,5 +1024,21 @@
     "companies": ["NVDA"],
     "prior": null,
     "expected": {"route":"statements","reads":"statements","peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":["remaining_performance_obligations"],"guidance":false,"explains":false,"income_items":[],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"period":"none"}
+  },
+  {
+    "id": 135,
+    "question": "What is AAPL's net debt?",
+    "companies": ["AAPL"],
+    "prior": null,
+    "expected": {"route":"statements","reads":"statements","peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":["net_cash"],"guidance":false,"explains":false,"income_items":[],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"period":"none"},
+    "note": "Net debt is net cash (net_cash.v1, ADR 0006) read with its sign, never total debt and cash as separate figures (#598)."
+  },
+  {
+    "id": 136,
+    "question": "How much net cash does AAPL have?",
+    "companies": ["AAPL"],
+    "prior": null,
+    "expected": {"route":"statements","reads":"statements","peers":false,"segments":false,"margin_trend":false,"margins":false,"metrics":["net_cash"],"guidance":false,"explains":false,"income_items":[],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"period":"none"},
+    "note": "Net cash is its own reviewed figure (net_cash.v1, ADR 0006)."
   }
 ]
