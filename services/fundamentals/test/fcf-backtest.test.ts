@@ -80,6 +80,18 @@ test("realized growth is total free cash flow, as required growth is, and buybac
   ]);
 });
 
+test("a missing later 10-K is named once, as FY+5's, for both realized figures", () => {
+  const row = backtestRow({
+    ticker: "HIST", fiscal_year: 2017, filed: "2018-02-15", label_offset: 0,
+    base: inputs("2018-02-16", "2017-12-31", "1100000000", "100000000"),
+    later: { kind: "outcome", outcome: "no_fy_facts", text: "No SEC facts labeled FY2022 on file." },
+    closes, splits: split,
+  });
+  const text = renderBacktest({ rows: [row], issuers: [] }, { ranOn: "2026-11-11", command: "c", notes: "" });
+  assert.match(text, /\| 0\.7% \| n\/a \| 0\.43% \| n\/a \| 12\.00%, at or above \| FY\+5: \*\*no_fy_facts\*\* \(No SEC facts labeled FY2022 on file\.\) \|$/mu);
+  assert.match(text, /^ {2}- 1 realized growth, FY\+5 no_fy_facts$/mu);
+});
+
 test("an as-of day with no trading takes the next close, never the filing day's", () => {
   // 2018-02-15 is a Thursday filing, so the as-of day is Friday 2018-02-16; filed Friday, it is Saturday 2018-02-17.
   const series = (dates: Array<[string, string]>): CloseSeries => ({ ...closes, closes: dates.map(([trade_date, close_text]) => ({ trade_date, close_text })) });

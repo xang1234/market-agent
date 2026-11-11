@@ -359,7 +359,7 @@ function solve(base: AsOfInputs, price: Restated | Figure, closes: CloseSeries |
 function realizedGrowth(base: AsOfInputs, later: AsOfInputs | Absent, splits: SplitHistory): Readonly<{ fcf: Figure; shares: Figure }> {
   const annual = (from: number, to: number) => percent((to / from) ** (1 / HORIZON_YEARS) - 1);
   const missing = (id: InputId): Figure | null => {
-    if ("kind" in later) return later;
+    if ("kind" in later) return named(`FY+${HORIZON_YEARS}`, later);
     for (const [label, inputs] of [["base", base], ["later", later]] as const) {
       if (inputs.figures[id].kind === "outcome") return named(`${label === "later" ? `FY+${HORIZON_YEARS} ` : ""}${id}`, inputs.figures[id]);
     }
