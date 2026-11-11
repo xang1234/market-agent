@@ -258,9 +258,11 @@ export async function loadFinancialUnitRecords(db: QueryExecutor, claim: Financi
  * Each missing_input gap a sum in the unit's closure leaves out, reread as
  * binding read it, or the database error that stopped the rereads. An invalid
  * plan rereads nothing: verifyFinancialUnit rejects it (financial_plan_mismatch)
- * before it reads these rereads. The savepoint keeps the finalization
- * transaction usable after a failed reread, so the seal can still log why it
- * is unavailable.
+ * before it reads these rereads. In a transaction, the savepoint keeps it
+ * usable after a failed reread, so the seal can still log why it is
+ * unavailable. Outside one a failed read poisons nothing, so the savepoint's
+ * 25P01 means read without it. A rollback that fails rethrows the reread's
+ * error with the rollback's as its cause.
  */
 async function rereadMissingInputs(
   db: QueryExecutor,
@@ -278,17 +280,26 @@ async function rereadMissingInputs(
   const missing = new Set(bindings.flatMap((row) =>
     row.binding_status === "gap" && row.gap_reason === "missing_input" && components.has(row.input_slot) ? [row.input_slot] : []));
   if (missing.size === 0) return [];
-  await db.query("savepoint gap_reread");
+  const savepoint = await db.query("savepoint gap_reread").then(() => true, (error: unknown) => {
+    if ((error as { code?: unknown } | null)?.code === NO_ACTIVE_SQL_TRANSACTION) return false;
+    throw error;
+  });
   try {
     const reads = await readGapCandidates(db, validated.value, missing, owner);
-    await db.query("release savepoint gap_reread");
+    if (savepoint) await db.query("release savepoint gap_reread");
     return reads;
   } catch (error) {
     if (!isDatabaseError(error)) throw error;
-    await db.query("rollback to savepoint gap_reread");
-    return { error: error instanceof Error ? error.message : String(error) };
+    if (savepoint) {
+      await db.query("rollback to savepoint gap_reread").catch((rollbackError: unknown) => {
+        throw Object.assign(error as Error, { cause: rollbackError });
+      });
+    }
+    return { error: (error as Error).message };
   }
 }
+
+const NO_ACTIVE_SQL_TRANSACTION = "25P01";
 
 async function readGapCandidates(db: QueryExecutor, plan: FinancialPlan, missing: ReadonlySet<string>, owner: string): Promise<LoadedGapCandidates[]> {
   const { operations, subjects, limits } = plan;

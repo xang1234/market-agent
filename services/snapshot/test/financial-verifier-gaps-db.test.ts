@@ -241,6 +241,27 @@ test("a missing_input gap a sum leaves out is proven at the seal", { timeout: 30
     assert.deepEqual(outcome.logged, [{ reason_code: "financial_verification_unavailable", reason: "gap_reread_failed" }]);
   });
 
+  await t.test("a rollback that fails after a failed reread rethrows the reread's error, the rollback's as its cause", async () => {
+    const lost = new Error("Connection terminated unexpectedly");
+    const rollbackFails: QueryExecutor = {
+      query: (text: string, values?: unknown[]) =>
+        /order by f\.period_end nulls first/u.test(text) ? Promise.reject(lost)
+          : text === "rollback to savepoint gap_reread" ? Promise.reject(new Error("Client was closed and is not queryable"))
+          : db.query(text, values),
+    } as QueryExecutor;
+    await assert.rejects(seal(createEvidenceFinancialPort, aaplBalancePlan(), rollbackFails), (error) => {
+      assert.equal(error, lost);
+      assert.equal((error as Error).cause instanceof Error && (error.cause as Error).message, "Client was closed and is not queryable");
+      return true;
+    });
+  });
+
+  await t.test("outside a transaction the gaps are reread without a savepoint", async () => {
+    const { gaps, outcome } = await seal(createEvidenceFinancialPort, aaplBalancePlan(), pool as unknown as QueryExecutor);
+    assert.deepEqual(gaps, TOLERATED);
+    assert.ok(outcome.ok, JSON.stringify(!outcome.ok && outcome.failures));
+  });
+
   await t.test("a reread that hits a programming error throws, not an unavailable seal", async () => {
     const broken = rereadFails(() => Promise.reject(new TypeError("rows is not iterable")));
     await assert.rejects(seal(createEvidenceFinancialPort, aaplBalancePlan(), broken), { name: "TypeError", message: "rows is not iterable" });
