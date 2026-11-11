@@ -14,7 +14,7 @@
 // imports the engine.
 
 import { listFinancialInputCandidates } from "../../evidence/src/financial-input-repo.ts";
-import { OPERATION_REGISTRY, operationDependencies, unitClosures, validateFinancialPlan } from "../../financial-core/src/index.ts";
+import { OPERATION_REGISTRY, operationDependencies, unitClosures, validateFinancialPlan, type FinancialPlan } from "../../financial-core/src/index.ts";
 import { loadSubjectSplitHistory, type SubjectSplitHistory } from "../../market/src/split-history.ts";
 import { isDatabaseError } from "../../shared/src/database-error.ts";
 import type { QueryExecutor } from "../../shared/src/http.ts";
@@ -249,36 +249,49 @@ export async function loadFinancialUnitRecords(db: QueryExecutor, claim: Financi
   )).rows;
 
   const subject_names = await loadSubjectNames(db, planSubjectRefs(plan));
-  // The savepoint keeps the finalization transaction usable after a failed
-  // reread, so the seal can still log why it is unavailable.
-  await db.query("savepoint gap_reread");
-  let missing_input_candidates: FinancialUnitRecords["missing_input_candidates"];
-  try {
-    missing_input_candidates = await rereadMissingInputs(db, plan, claim.unit_id, bindings, claim.owner_user_id);
-  } catch (error) {
-    if (!isDatabaseError(error)) throw error;
-    await db.query("rollback to savepoint gap_reread");
-    missing_input_candidates = { error: error instanceof Error ? error.message : String(error) };
-  }
-  await db.query("release savepoint gap_reread");
+  const missing_input_candidates = await rereadMissingInputs(db, plan, claim.unit_id, bindings, claim.owner_user_id);
 
   return { run: runRow, plan: { plan, semantic_hash }, unit, bindings, evidence, price_observations, split_histories, computations, results, subject_names, missing_input_candidates };
 }
 
 /**
  * Each missing_input gap a sum in the unit's closure leaves out, reread as
- * binding read it. An invalid plan rereads nothing: verifyFinancialUnit
- * rejects it (financial_plan_mismatch) before it reads these rereads.
+ * binding read it, or the database error that stopped the rereads. An invalid
+ * plan rereads nothing: verifyFinancialUnit rejects it (financial_plan_mismatch)
+ * before it reads these rereads. The savepoint keeps the finalization
+ * transaction usable after a failed reread, so the seal can still log why it
+ * is unavailable.
  */
-async function rereadMissingInputs(db: QueryExecutor, plan: unknown, unitId: string, bindings: ReadonlyArray<LoadedBinding>, owner: string): Promise<LoadedGapCandidates[]> {
+async function rereadMissingInputs(
+  db: QueryExecutor,
+  plan: unknown,
+  unitId: string,
+  bindings: ReadonlyArray<LoadedBinding>,
+  owner: string,
+): Promise<FinancialUnitRecords["missing_input_candidates"]> {
   const validated = validateFinancialPlan(plan);
   if (!validated.ok) return [];
-  const { operations, subjects, limits } = validated.value;
+  const { operations } = validated.value;
   const closure = new Set(unitClosures(validated.value).get(unitId)?.node_ids);
   const components = new Set(operations.flatMap((node) =>
     closure.has(node.node_id) && OPERATION_REGISTRY[node.operation].tolerates_missing_operands === "absent_inputs" ? operationDependencies(node) : []));
   const missing = new Set(bindings.flatMap((row) =>
     row.binding_status === "gap" && row.gap_reason === "missing_input" && components.has(row.input_slot) ? [row.input_slot] : []));
+  if (missing.size === 0) return [];
+  await db.query("savepoint gap_reread");
+  try {
+    const reads = await readGapCandidates(db, validated.value, missing, owner);
+    await db.query("release savepoint gap_reread");
+    return reads;
+  } catch (error) {
+    if (!isDatabaseError(error)) throw error;
+    await db.query("rollback to savepoint gap_reread");
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+async function readGapCandidates(db: QueryExecutor, plan: FinancialPlan, missing: ReadonlySet<string>, owner: string): Promise<LoadedGapCandidates[]> {
+  const { operations, subjects, limits } = plan;
   const reads: LoadedGapCandidates[] = [];
   for (const node of operations) {
     if (node.operation !== "reported_metric" || !missing.has(node.node_id)) continue;
