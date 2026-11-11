@@ -682,7 +682,10 @@ function addDays(date: IsoDate, days: number): IsoDate {
 const dayAfter = (date: IsoDate): IsoDate => addDays(date, 1);
 
 function yearsAfter(date: IsoDate, years: number): IsoDate {
-  return `${Number(date.slice(0, 4)) + years}${date.slice(4)}`;
+  const [year, month, day] = date.split("-").map(Number);
+  // Day 0 of the next month is this month's last, so 29 February clamps to the 28th in a year without one.
+  const last = new Date(Date.UTC(year + years, month, 0)).getUTCDate();
+  return new Date(Date.UTC(year + years, month - 1, Math.min(day, last))).toISOString().slice(0, 10);
 }
 
 function daysBetween(from: IsoDate, to: IsoDate): number {
