@@ -12,12 +12,25 @@ import { POLYGON_MARKET_SOURCE_ID, YAHOO_FINANCE_DEV_MARKET_SOURCE_ID } from "..
 import { attachCiks, closeSeries, inputsAsOf, renderBacktest, runBacktest, subjectIds, type AsOfInputs } from "../src/fcf-backtest.ts";
 import { backfillSecStatements } from "../src/sec-statements-backfill-cli.ts";
 import { secCompanyFetcher } from "./fakes.ts";
-import { annualHistoryCompanyFacts, HISTORY_CIK, HISTORY_SPLIT } from "./sec-annual-history-fixture.ts";
+import { annualHistoryCompanyFacts, HISTORY_CIK, HISTORY_SPLIT, HISTORY_YEARS, tenK } from "./sec-annual-history-fixture.ts";
 
 const ISSUER = "38000000-0000-4000-8000-000000000620";
 const INSTRUMENT = "38000000-0000-4000-8000-000000000621";
 const LISTING = "38000000-0000-4000-8000-000000000622";
 const quiet = { log: () => {}, warn: () => {}, error: () => {} };
+
+// Each fixture 10-K's SEC filing date, by accession: a bound input's public-by is the end of that day in New York, never a date the backtest made up.
+const FILED_BY_ACCESSION = new Map(Array.from({ length: HISTORY_YEARS.last - HISTORY_YEARS.first + 1 }, (_, i) => tenK(HISTORY_YEARS.first + i)).map((filing) => [filing.accn, filing.filed]));
+
+function assertPublicByFilingDate(inputs: AsOfInputs): void {
+  assert.ok(inputs.bound.length > 0, `${inputs.as_of}: no bound inputs`);
+  for (const input of inputs.bound) {
+    const accession = input.locator?.split("|")[2];
+    const filed = accession === undefined ? undefined : FILED_BY_ACCESSION.get(accession);
+    assert.ok(filed !== undefined, `${inputs.as_of}: ${input.slot} locator ${input.locator} names no fixture 10-K`);
+    assert.equal(input.public_by, endOfLocalDay(filed, "America/New_York"), `${inputs.as_of}: ${input.slot} from ${accession}`);
+  }
+}
 
 async function seeded(t: test.TestContext) {
   const { databaseUrl } = await bootstrapDatabase(t, "fin-fcf-backtest");
@@ -82,10 +95,7 @@ test("each FY 10-K's required growth, realized growth and price return, as of it
     renderBacktest(run, { ranOn: "2026-11-11", command: "npm run backtest:fcf -- --tickers HIST,NONE", notes: "" }),
     /^\| HIST \| 2017 \| 2018-02-15 \| 2018-02-16 \| 1100000000 \| 200000000 \| 50000000 \| 100000000 \| 115\.449 \(2018-02-16, dev close, never certified\) \| 10\.31x \| 0\.7% \| 7\.78% \| 0\.43% \| 0\.00% \| 12\.00%, at or above \| {2}\|$/mu,
   );
-  for (const row of run.rows) {
-    if (row.kind === "unread") continue;
-    for (const input of row.inputs.bound) assert.ok(input.public_by <= endOfLocalDay(row.inputs.as_of, "America/New_York"), `FY${row.fiscal_year}: ${input.slot} public by ${input.public_by}`);
-  }
+  for (const row of run.rows) if (row.kind === "read") assertPublicByFilingDate(row.inputs);
 });
 
 test("no input published after an as-of date is used for that date", { timeout: 300_000 }, async (t) => {
@@ -97,6 +107,7 @@ test("no input published after an as-of date is used for that date", { timeout: 
   const client = await connectedClient(t, databaseUrl);
   const read = async (asOf: string) => {
     const inputs = await inputsAsOf(client, ISSUER, asOf);
+    if (inputs.bound.length > 0) assertPublicByFilingDate(inputs);
     for (const input of inputs.bound) assert.ok(input.public_by <= endOfLocalDay(asOf, "America/New_York"), `${asOf}: ${input.slot} public by ${input.public_by}`);
     return inputs;
   };
