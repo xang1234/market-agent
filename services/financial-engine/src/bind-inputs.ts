@@ -24,7 +24,7 @@ import {
   type SubjectSlot,
 } from "../../financial-core/src/index.ts";
 import { appendRunEvent } from "./events-repo.ts";
-import { fencedTransaction, type FencedTx, type RunLease } from "./lease.ts";
+import { fencedTransaction, type RunLease } from "./lease.ts";
 import type { FinancialEvidencePort, InputCandidate, PriceObservation, SplitHistory, SqlExecutor } from "./ports.ts";
 import {
   boundBasis,
@@ -53,7 +53,7 @@ export type InputBinding =
 
 export type BindingResult = { run_id: string; reused: boolean; bindings: ReadonlyMap<LocalId, InputBinding> };
 
-type SlotOutcome = { binding: InputBinding; candidate_count: number; truncated: boolean; selection_policy_version: string };
+export type SlotOutcome = { binding: InputBinding; candidate_count: number; truncated: boolean; selection_policy_version: string };
 
 /** One slot's candidate page, or the gap its read already is. */
 type SlotRead =
@@ -78,42 +78,17 @@ export async function bindPlanInputs(input: {
     const existing = await loadBindings(tx.client, runId);
     if (existing.size > 0) return { run_id: runId, reused: true, bindings: existing };
 
-    const evidence = input.evidence(tx.client);
-    // Every page is read before any slot is selected: "latest" is one period per
-    // subject across the plan's latest nodes, so no node can resolve alone.
-    const reads: SlotRead[] = [];
-    const priceNodes: ReportedMetricNode[] = [];
-    let candidateBudget = plan.limits.max_input_candidates;
-    for (const node of plan.operations) {
-      if (node.operation !== "reported_metric") continue;
-      if (resolveMetricDefinition(node.metric_key)?.value_kind === "price") {
-        priceNodes.push(node);
-        continue;
-      }
-      const read = await readSlot(tx, node, { authority, evidence, plan, candidate_budget: candidateBudget });
-      if (read.status === "read") candidateBudget -= read.candidates.length;
-      reads.push(read);
-    }
-    const policy: SelectionPolicy = {
-      knowledge_cutoff: plan.time.knowledge_cutoff,
-      reporting_basis: plan.policies.reporting_basis,
-      max_age_days: plan.policies.freshness.max_age_days,
+    const outcomes = await selectPlanInputs({
+      client: tx.client,
+      plan,
+      authority,
+      evidence: input.evidence(tx.client),
       allowed_source_classes: tx.run.allowed_source_classes,
-    };
-    const latest = sharedLatestPeriods(reads.map((read) => read.status === "gap"
-      ? { node: read.node, candidates: [], incomplete: read.reason_code }
-      : { node: read.node, candidates: read.candidates, ...(read.truncated ? { incomplete: "scope_limit_exceeded" as const } : {}) }), policy);
-    const histories = await readSplitHistories(tx, plan, reads, priceNodes, evidence);
+    });
     const bindings = new Map<LocalId, InputBinding>();
-    for (const read of reads) {
-      const outcome = selectSlot(read, plan, policy, latest.get(read.node.node_id) ?? null, histories.get(read.node.subject_slot));
+    for (const outcome of outcomes) {
       await persistBinding(tx.client, runId, outcome);
-      bindings.set(read.node.node_id, outcome.binding);
-    }
-    for (const node of priceNodes) {
-      const outcome = await bindPriceSlot(tx, node, plan, policy, histories.get(node.subject_slot), evidence);
-      await persistBinding(tx.client, runId, outcome);
-      bindings.set(node.node_id, outcome.binding);
+      bindings.set(outcome.binding.slot, outcome.binding);
     }
     await tx.client.query(`update financial_runs set bound_at = now(), updated_at = now() where run_id = $1`, [runId]);
     const boundCount = [...bindings.values()].filter((binding) => binding.status === "bound").length;
@@ -123,12 +98,56 @@ export async function bindPlanInputs(input: {
 }
 
 /**
+ * Reads and selects every reported-metric slot of a plan at its knowledge
+ * cutoff, writing nothing: binding persists what this returns, and an offline
+ * backtest reads it without a run. Call it inside a transaction, since each
+ * read runs under a savepoint.
+ */
+export async function selectPlanInputs(input: {
+  client: SqlExecutor;
+  plan: FinancialPlan;
+  authority: FinancialRuntimeAuthority;
+  evidence: FinancialEvidencePort;
+  allowed_source_classes: SelectionPolicy["allowed_source_classes"];
+}): Promise<SlotOutcome[]> {
+  const { client, plan, authority, evidence } = input;
+  // Every page is read before any slot is selected: "latest" is one period per
+  // subject across the plan's latest nodes, so no node can resolve alone.
+  const reads: SlotRead[] = [];
+  const priceNodes: ReportedMetricNode[] = [];
+  let candidateBudget = plan.limits.max_input_candidates;
+  for (const node of plan.operations) {
+    if (node.operation !== "reported_metric") continue;
+    if (resolveMetricDefinition(node.metric_key)?.value_kind === "price") {
+      priceNodes.push(node);
+      continue;
+    }
+    const read = await readSlot(client, node, { authority, evidence, plan, candidate_budget: candidateBudget });
+    if (read.status === "read") candidateBudget -= read.candidates.length;
+    reads.push(read);
+  }
+  const policy: SelectionPolicy = {
+    knowledge_cutoff: plan.time.knowledge_cutoff,
+    reporting_basis: plan.policies.reporting_basis,
+    max_age_days: plan.policies.freshness.max_age_days,
+    allowed_source_classes: input.allowed_source_classes,
+  };
+  const latest = sharedLatestPeriods(reads.map((read) => read.status === "gap"
+    ? { node: read.node, candidates: [], incomplete: read.reason_code }
+    : { node: read.node, candidates: read.candidates, ...(read.truncated ? { incomplete: "scope_limit_exceeded" as const } : {}) }), policy);
+  const histories = await readSplitHistories(client, plan, reads, priceNodes, evidence);
+  const outcomes = reads.map((read) => selectSlot(read, plan, policy, latest.get(read.node.node_id) ?? null, histories.get(read.node.subject_slot)));
+  for (const node of priceNodes) outcomes.push(await bindPriceSlot(client, node, plan, policy, histories.get(node.subject_slot), evidence));
+  return outcomes;
+}
+
+/**
  * Reads one slot's evidence. A failed read is an execution-error gap for this
  * slot, never absent evidence; the savepoint keeps the binding transaction
  * usable after a database error.
  */
 async function readSlot(
-  { client }: FencedTx,
+  client: SqlExecutor,
   node: ReportedMetricNode,
   context: { plan: FinancialPlan; authority: FinancialRuntimeAuthority; evidence: FinancialEvidencePort; candidate_budget: number },
 ): Promise<SlotRead> {
@@ -159,7 +178,7 @@ async function readSlot(
  * execution-error gap.
  */
 async function readSplitHistories(
-  { client }: FencedTx,
+  client: SqlExecutor,
   plan: FinancialPlan,
   reads: ReadonlyArray<SlotRead>,
   priceNodes: ReadonlyArray<ReportedMetricNode>,
@@ -209,7 +228,7 @@ function selectSlot(read: SlotRead, plan: FinancialPlan, policy: SelectionPolicy
  * execution-error gap, like a candidate read.
  */
 async function bindPriceSlot(
-  { client }: FencedTx,
+  client: SqlExecutor,
   node: ReportedMetricNode,
   plan: FinancialPlan,
   policy: SelectionPolicy,

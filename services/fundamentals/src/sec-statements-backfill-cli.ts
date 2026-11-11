@@ -2,15 +2,21 @@
 // on file (backfillSecCompanionStatements).
 //
 //   DATABASE_URL=... SEC_EDGAR_USER_AGENT=... \
-//     npm run backfill:sec-statements [-- <issuer_uuid> ...]
+//     npm run backfill:sec-statements [-- [--annual-history-years N] <issuer_uuid> ...]
 //
-// With no arguments, backfills every issuer that has SEC income facts. Either
-// way it skips the frozen golden dataset's issuers. One companyfacts download
+// With no issuers, backfills every issuer that has SEC income facts. Either
+// way it skips the frozen golden dataset's issuers. --annual-history-years is
+// for a dev DB only (#610), so it refuses a DATABASE_URL that is not on this
+// machine: it also stores each issuer's newest N fiscal years of 10-K
+// statements and cover counts from the same download, with or without income
+// on file, so an offline backtest has history to read. One companyfacts download
 // per issuer, paced under SEC's fair-access rate with a backoff on HTTP 429
 // (withSecFairAccess). A rerun is safe: a stored fact the filing still states
 // is kept and gains the proofs it lacks.
 
+import { parseArgs } from "node:util";
 import { Pool } from "pg";
+import { parse as parseConnectionString } from "pg-connection-string";
 import { logPoolErrors } from "../../shared/src/pool-client.ts";
 
 import { FROZEN_ISSUER_IDS } from "../../shared/src/golden-issuers.ts";
@@ -25,6 +31,7 @@ export async function backfillSecStatements(
   fetcher: SecEdgarFetcher,
   requestedIds: ReadonlyArray<string>,
   log: Pick<Console, "log" | "warn" | "error"> = console,
+  annualHistoryYears = 0,
 ): Promise<{ failures: number }> {
   const issuers = requestedIds.length
     ? await db.query<{ issuer_id: string; legal_name: string }>(
@@ -53,6 +60,7 @@ export async function backfillSecStatements(
         fetcher,
         sourceId: SEC_EDGAR_FILING_SOURCE_ID,
         logger: log,
+        annualHistoryYears,
       });
       log.log(`${issuer.legal_name}: cash flow and balance sheet checked for ${periods} period(s)`);
     } catch (error) {
@@ -63,16 +71,38 @@ export async function backfillSecStatements(
   return { failures };
 }
 
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+
+// The host pg connects to: a ?host= overrides the URL's host, and with neither
+// pg falls back to PGHOST, then localhost. A path is a unix socket.
+function databaseHost(databaseUrl: string): string | undefined {
+  try {
+    return parseConnectionString(databaseUrl).host || process.env.PGHOST || "localhost";
+  } catch {
+    // The parse error is dropped so the URL and its password stay out of the log.
+    return undefined;
+  }
+}
+
 async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
   const userAgent = process.env.SEC_EDGAR_USER_AGENT;
   if (!databaseUrl || !userAgent) throw new Error("DATABASE_URL and SEC_EDGAR_USER_AGENT are required");
+  const { values, positionals } = parseArgs({ allowPositionals: true, options: { "annual-history-years": { type: "string" } } });
+  const years = Number(values["annual-history-years"] ?? 0);
+  if (!Number.isInteger(years) || years < 0) throw new Error("--annual-history-years needs a whole number of years, e.g. 10");
+  if (years > 0) {
+    const host = databaseHost(databaseUrl);
+    if (host === undefined || !(host.startsWith("/") || LOCAL_HOSTS.has(host.toLowerCase()))) {
+      throw new Error(`--annual-history-years is for a dev DB only: DATABASE_URL must point at this machine, not ${host ?? "an unreadable URL"}`);
+    }
+  }
   const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
   // Paced under SEC's fair-access rate, backing off on a 429.
   // A bulk run downloads the largest companyfacts files, so it waits longer than a request does.
   const fetcher = withSecFairAccess(createSecCompanyFactsHttpFetcher({ userAgent, baseUrl: process.env.SEC_EDGAR_BASE_URL, timeoutMs: 120_000 }));
   try {
-    const { failures } = await backfillSecStatements(pool, fetcher, process.argv.slice(2));
+    const { failures } = await backfillSecStatements(pool, fetcher, positionals, console, years);
     if (failures > 0) process.exitCode = 1;
   } finally {
     await pool.end();
