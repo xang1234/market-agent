@@ -108,21 +108,21 @@ test("a missing_input gap a sum leaves out is proven at the seal", { timeout: 30
   /** Runs `body` with short-term borrowings, which AAPL's 10-K leaves out, stored for each period: a copy of its commercial paper fact. */
   const withBorrowings = async <T>(periods: ReadonlyArray<readonly [fiscalYear: number, fiscalPeriod: string, periodEnd: string]>, body: () => Promise<T>) => {
     const ids: string[] = [];
-    for (const [fiscalYear, fiscalPeriod, periodEnd] of periods) {
-      ids.push((await db.query<{ fact_id: string }>(
-        `insert into facts (subject_kind, subject_id, metric_id, period_kind, period_start, period_end, fiscal_year, fiscal_period,
-                            value_num, value_text, unit, currency, scale, as_of, reported_at, observed_at, source_id, method,
-                            adjustment_basis, definition_version, verification_status, freshness_class, coverage_level,
-                            quality_flags, entitlement_channels, confidence)
-         select f.subject_kind, f.subject_id, (select metric_id from metrics where metric_key = 'short_term_borrowings'), f.period_kind,
-                f.period_start, $1::date, $2, $3, f.value_num, f.value_text, f.unit, f.currency, f.scale, f.as_of, f.reported_at,
-                f.observed_at, f.source_id, f.method, f.adjustment_basis, f.definition_version, f.verification_status,
-                f.freshness_class, f.coverage_level, f.quality_flags, f.entitlement_channels, f.confidence
-           from facts f join metrics m on m.metric_id = f.metric_id
-          where m.metric_key = 'commercial_paper' and f.subject_id = $4
-         returning fact_id::text`, [periodEnd, fiscalYear, fiscalPeriod, AAPL])).rows[0]!.fact_id);
-    }
     try {
+      for (const [fiscalYear, fiscalPeriod, periodEnd] of periods) {
+        ids.push((await db.query<{ fact_id: string }>(
+          `insert into facts (subject_kind, subject_id, metric_id, period_kind, period_start, period_end, fiscal_year, fiscal_period,
+                              value_num, value_text, unit, currency, scale, as_of, reported_at, observed_at, source_id, method,
+                              adjustment_basis, definition_version, verification_status, freshness_class, coverage_level,
+                              quality_flags, entitlement_channels, confidence)
+           select f.subject_kind, f.subject_id, (select metric_id from metrics where metric_key = 'short_term_borrowings'), f.period_kind,
+                  ($1::date - interval '1 year' + interval '1 day')::date, $1::date, $2, $3, f.value_num, f.value_text, f.unit, f.currency, f.scale, f.as_of, f.reported_at,
+                  f.observed_at, f.source_id, f.method, f.adjustment_basis, f.definition_version, f.verification_status,
+                  f.freshness_class, f.coverage_level, f.quality_flags, f.entitlement_channels, f.confidence
+             from facts f join metrics m on m.metric_id = f.metric_id
+            where m.metric_key = 'commercial_paper' and f.subject_id = $4
+           returning fact_id::text`, [periodEnd, fiscalYear, fiscalPeriod, AAPL])).rows[0]!.fact_id);
+      }
       return await body();
     } finally {
       await db.query(`delete from facts where fact_id = any($1::uuid[])`, [ids]);
@@ -189,8 +189,8 @@ test("a missing_input gap a sum leaves out is proven at the seal", { timeout: 30
     } as QueryExecutor;
     const { gaps, outcome } = await seal(createEvidenceFinancialPort, aaplBalancePlan(), failing);
     assert.deepEqual(gaps, TOLERATED);
-    assert.deepEqual(!outcome.ok && outcome.failures.map((failure) => [failure.reason_code, failure.details.reason]), [
-      ["financial_verification_unavailable", "gap_reread_failed"],
+    assert.deepEqual(!outcome.ok && outcome.failures.map((failure) => [failure.reason_code, failure.details.reason, failure.details.error]), [
+      ["financial_verification_unavailable", "gap_reread_failed", "connection reset"],
     ]);
   });
 });
