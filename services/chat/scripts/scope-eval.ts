@@ -16,6 +16,9 @@
 //   npm run scope:eval -- --cases=31,57 --runs=10
 //   npm run scope:eval -- --runs=3
 //
+// That makes runs x (unique questions) live calls in all; --runs caps only
+// how many one question asks at once.
+//
 // Models come from LLM_SETTINGS_ENV_FILE, by default the repo's .env.dev (a
 // worktree has none: point it at the main checkout's).
 import { readFileSync, writeFileSync } from "node:fs";
@@ -173,7 +176,7 @@ export function parseArgs(argv: string[]): EvalArgs {
   const ids = cases === undefined ? null : cases.split(",").map((id) => count(id, "--cases ids"));
   if (ids !== null && new Set(ids).size !== ids.length) throw new Error(`--cases repeats an id: ${cases}`);
   const runs = count(flags.get("runs") ?? "1", "--runs");
-  if (runs > MAX_RUNS) throw new Error(`--runs must be at most ${MAX_RUNS}, got "${runs}"`);
+  if (runs > MAX_RUNS) throw new Error(`--runs must be at most ${MAX_RUNS}, got "${flags.get("runs")}"`);
   return { mode: "measure", ids, runs };
 }
 
@@ -186,7 +189,8 @@ export function selectCases(all: ScopeEvalCase[], ids: number[] | null): ScopeEv
 
 // Each case's misses out of `runs` replies, all asked at once. A reply with no
 // proposal is counted apart as an error, not as a miss, and any error exits 1.
-// Cases that share a question share its replies, so errors are counted per reply.
+// Cases that share a question share its replies, so their rows repeat its
+// errors (marked "shared"); the summary counts errors once per reply.
 export async function measure(cases: ScopeEvalCase[], runs: number, ask: (question: string) => Promise<LiveReply>): Promise<number> {
   const started = Date.now();
   const repliesByQuestion = new Map<string, LiveReply[]>();
@@ -199,7 +203,8 @@ export async function measure(cases: ScopeEvalCase[], runs: number, ask: (questi
     const answered = asked.filter((reply) => reply.proposal !== null);
     const failures = answered.map((reply) => caseFailures(evalCase, reply.text));
     const misses = failures.filter((each) => each.length > 0).length;
-    console.log(`#${evalCase.id}\tmiss ${misses}/${answered.length}\terrors ${asked.length - answered.length}\t${evalCase.question}`);
+    const shared = cases.some((other) => other !== evalCase && other.question === evalCase.question) ? " shared" : "";
+    console.log(`#${evalCase.id}\tmiss ${misses}/${answered.length}\terrors ${asked.length - answered.length}${shared}\t${evalCase.question}`);
     for (const failure of new Set(failures.flat())) console.log(`\t${failure}`);
   }
   const replies = [...repliesByQuestion.values()].flat();
@@ -225,5 +230,7 @@ async function main(argv: string[]): Promise<number> {
   return code;
 }
 
-// exitCode, not process.exit, so stderr drains to a pipe before the process ends.
+// exitCode, not process.exit, so a long stderr can drain to a pipe before the
+// process ends. scope-eval.test.ts pins only the exit code: its short stderr
+// drains either way.
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) process.exitCode = await main(process.argv.slice(2));

@@ -43,6 +43,7 @@ test("scope:eval re-records only with no arguments, and measures only with well-
     ["--runs=0"], ["--runs=51"], ["--runs=-1"], ["--runs=abc"], ["--runs=1.5"], ["--runs="],
     ["--cases="], ["--cases=#31"], ["--cases=31,"], ["--cases=57,57"],
   ]) assert.throws(() => parseArgs(argv), Error, argv.join(" "));
+  assert.throws(() => parseArgs(["--runs=99999999999999999999"]), /got "99999999999999999999"$/);
 });
 
 test("measuring a case id the eval does not have names it", () => {
@@ -80,10 +81,11 @@ test("a question two cases share is asked once per run, and its errors count onc
   let calls = 0;
   assert.equal(await measure(shared, 2, async () => (calls++, { text: "", proposal: null })), 1);
   assert.equal(calls, 2);
+  assert.match(lines[0]!, /\terrors 2 shared\t/);
   assert.match(lines.at(-1)!, /; 2 of 2 replies errored$/);
 });
 
-test("scope:eval exits 2 on a malformed flag before it builds a model client", () => {
+test("scope:eval exits 2 on a malformed flag before it builds a model client (pins the exit code, not stderr draining)", () => {
   const run = spawnSync(process.execPath, ["--experimental-strip-types", join(import.meta.dirname, "../scripts/scope-eval.ts"), "--runs=51"], {
     encoding: "utf8",
     env: { PATH: process.env.PATH, LLM_SETTINGS_ENV_FILE: "/nonexistent/.env" },
