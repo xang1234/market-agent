@@ -16,6 +16,7 @@
 import { listFinancialInputCandidates } from "../../evidence/src/financial-input-repo.ts";
 import { validateFinancialPlan } from "../../financial-core/src/index.ts";
 import { loadSubjectSplitHistory, type SubjectSplitHistory } from "../../market/src/split-history.ts";
+import { isDatabaseError } from "../../shared/src/database-error.ts";
 import type { QueryExecutor } from "../../shared/src/http.ts";
 import { toSealFactRow, type FactRow } from "./seal-input.ts";
 
@@ -249,7 +250,18 @@ export async function loadFinancialUnitRecords(db: QueryExecutor, claim: Financi
   )).rows;
 
   const subject_names = await loadSubjectNames(db, planSubjectRefs(plan));
-  const missing_input_candidates = await rereadMissingInputs(db, plan, bindings, claim.owner_user_id).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }));
+  // The savepoint keeps the finalization transaction usable after a failed
+  // reread, so the seal can still log why it is unavailable.
+  await db.query("savepoint gap_reread");
+  let missing_input_candidates: FinancialUnitRecords["missing_input_candidates"];
+  try {
+    missing_input_candidates = await rereadMissingInputs(db, plan, bindings, claim.owner_user_id);
+  } catch (error) {
+    if (!isDatabaseError(error)) throw error;
+    await db.query("rollback to savepoint gap_reread");
+    missing_input_candidates = { error: error instanceof Error ? error.message : String(error) };
+  }
+  await db.query("release savepoint gap_reread");
 
   return { run: runRow, plan: { plan, semantic_hash }, unit, bindings, evidence, price_observations, split_histories, computations, results, subject_names, missing_input_candidates };
 }

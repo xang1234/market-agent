@@ -16,8 +16,10 @@ import { authorityFor, engineDatabase, databaseUrl, IDS, leasedRun, revenuePlan 
 import { createSecBackedStatementRepository } from "../../fundamentals/src/sec-facts-repository.ts";
 import { secCompanyFetcher } from "../../fundamentals/test/fakes.ts";
 import { aaplWithCash } from "../../fundamentals/test/sec-call-inputs-fixture.ts";
-import { loadUnitBoundFacts } from "../src/financial-verifier-loader.ts";
-import { verifyFinancialSeal } from "../src/financial-verifier.ts";
+import { loadUnitBoundFacts, type FinancialSealClaim } from "../src/financial-verifier-loader.ts";
+import { verifyFinancialSeal, type FinancialSealContext } from "../src/financial-verifier.ts";
+import { buildFinancialSealInput } from "../src/seal-input.ts";
+import { verifySnapshotSeal } from "../src/snapshot-verifier.ts";
 import type { QueryExecutor } from "../../shared/src/http.ts";
 
 const SNAPSHOT = "6f000000-0000-4000-8000-0000000000f2";
@@ -82,10 +84,11 @@ test("a missing_input gap a sum leaves out is proven at the seal", { timeout: 30
   });
   assert.ok(await statements.find({ issuer_id: AAPL, family: "income", basis: "as_reported", fiscal_year: 2026, fiscal_period: "FY" }));
 
-  const seal = async (
+  const seal = async <T = Awaited<ReturnType<typeof verifyFinancialSeal>>>(
     evidence: (executor: SqlExecutor) => FinancialEvidencePort,
     plan = aaplBalancePlan(),
     sealDb: QueryExecutor = db,
+    verify: (sealDb: QueryExecutor, claim: FinancialSealClaim, context: FinancialSealContext) => Promise<T> = verifyFinancialSeal as never,
   ) => {
     const { runId, lease } = await leasedRun(db, plan);
     const report = await executeRun({ client: db, lease, plan, authority: authorityFor(), evidence, parent_limits: {} });
@@ -95,7 +98,7 @@ test("a missing_input gap a sum leaves out is proven at the seal", { timeout: 30
     const facts = await loadUnitBoundFacts(db, runId, "aapl");
     await db.query("begin");
     try {
-      const outcome = await verifyFinancialSeal(sealDb, { owner_user_id: IDS.owner, run_id: runId, unit_id: "aapl" }, {
+      const outcome = await verify(sealDb, { owner_user_id: IDS.owner, run_id: runId, unit_id: "aapl" }, {
         snapshot_id: SNAPSHOT,
         manifest: { fact_refs: facts.map((fact) => fact.fact_id), source_ids: [...new Set(facts.map((fact) => fact.source_id))], as_of: new Date(plan.time.knowledge_cutoff).toISOString() },
       });
@@ -183,14 +186,35 @@ test("a missing_input gap a sum leaves out is proven at the seal", { timeout: 30
     ]);
   });
 
-  await t.test("a reread the database fails leaves the seal unavailable", async () => {
-    const failing: QueryExecutor = {
-      query: (text, values) => /order by f\.period_end nulls first/u.test(text) ? Promise.reject(new Error("connection reset")) : db.query(text, values),
-    } as QueryExecutor;
-    const { gaps, outcome } = await seal(createEvidenceFinancialPort, aaplBalancePlan(), failing);
+  /** `db`, with the gap reread's candidate query replaced by `replacement`. */
+  const rereadFails = (replacement: () => Promise<never>): QueryExecutor => ({
+    query: (text: string, values?: unknown[]) => /order by f\.period_end nulls first/u.test(text) ? replacement() : db.query(text, values),
+  }) as QueryExecutor;
+
+  await t.test("a reread the database fails leaves the seal unavailable, and its failure is logged", async () => {
+    const divideByZero = rereadFails(() => db.query("select 1/0") as Promise<never>);
+    const { gaps, outcome } = await seal(createEvidenceFinancialPort, aaplBalancePlan(), divideByZero, async (sealDb, claim, context) => {
+      const verification = await verifySnapshotSeal(buildFinancialSealInput({
+        snapshot_id: SNAPSHOT,
+        claim,
+        knowledgeCutoff: context.manifest.as_of,
+        subjectRefs: [{ kind: "issuer", id: AAPL }],
+        boundFacts: await loadUnitBoundFacts(db, claim.run_id, claim.unit_id),
+        citedSources: [],
+      }), sealDb);
+      const logged = (await db.query<{ reason_code: string; reason: string }>(
+        `select reason_code, details->>'reason' as reason from verifier_fail_logs where snapshot_id = $1`, [SNAPSHOT])).rows;
+      return { verification, logged };
+    });
     assert.deepEqual(gaps, TOLERATED);
-    assert.deepEqual(!outcome.ok && outcome.failures.map((failure) => [failure.reason_code, failure.details.reason, failure.details.error]), [
-      ["financial_verification_unavailable", "gap_reread_failed", "connection reset"],
+    assert.deepEqual(outcome.verification.failures.map((failure) => [failure.reason_code, failure.details.reason, failure.details.error]), [
+      ["financial_verification_unavailable", "gap_reread_failed", "division by zero"],
     ]);
+    assert.deepEqual(outcome.logged, [{ reason_code: "financial_verification_unavailable", reason: "gap_reread_failed" }]);
+  });
+
+  await t.test("a reread that hits a programming error throws, not an unavailable seal", async () => {
+    const broken = rereadFails(() => Promise.reject(new TypeError("rows is not iterable")));
+    await assert.rejects(seal(createEvidenceFinancialPort, aaplBalancePlan(), broken), { name: "TypeError", message: "rows is not iterable" });
   });
 });
