@@ -50,9 +50,10 @@ export async function loadPriorSubjects(
        join snapshots s on s.snapshot_id = m.snapshot_id
       where m.thread_id = $1::uuid
         and m.role = 'assistant'
-        -- An answer about no company (a clarification, a notice, or a gap
+        -- An answer about no company (a notice, or a gap or clarification
         -- that names none) leaves the earlier companies in place, as it
-        -- leaves the scope (loadPriorScope).
+        -- leaves the scope (loadPriorScope). A financial clarification names
+        -- the companies it asked about, so a typed reply continues them (#623).
         -- A price comparison (#224) names the listing its close is of; the
         -- company a follow-up continues is the scenario answer's it compared.
         and m.blocks->0->>'kind' is distinct from 'scenario_price_comparison'
