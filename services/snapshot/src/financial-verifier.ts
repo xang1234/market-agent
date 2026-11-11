@@ -17,12 +17,15 @@ import {
   hashCanonical,
   nodeLineageHashes,
   NUMERIC_POLICY,
+  OPERATION_REGISTRY,
+  operationDependencies,
   parseDerivedDecimalText,
   planSemanticHash,
   presentationHash,
   presentFinancialUnit,
   publicAtCutoff,
   rationalFromDecimal,
+  REASON_CODES,
   resolveMetricDefinition,
   restateToReference,
   sourceClassOf,
@@ -39,6 +42,7 @@ import {
   type FinancialAnswerContent,
   type FinancialPlan,
   type LocalId,
+  type ReportedMetricNode,
   type ReasonCode,
   type Sha256Hex,
   type SlotBinding,
@@ -50,6 +54,7 @@ import {
   type FinancialSealClaim,
   type FinancialUnitRecords,
   type LoadedBinding,
+  type LoadedGapCandidates,
   type LoadedEvidence,
   type LoadedPriceObservation,
 } from "./financial-verifier-loader.ts";
@@ -197,6 +202,14 @@ export function verifyFinancialUnit(records: FinancialUnitRecords, unitId: Local
       ? priceIneligibility(input, observations.get(input.observation_id), splitHistories, plan, run.allowed_source_classes)
       : ineligibility(input, evidence.get(input.fact_id), splitHistories, plan, run.allowed_source_classes);
     if (problem) failures.push(failure("financial_input_ineligible", { run_id: run.run_id, input_slot: slot, reason: problem }));
+  }
+  if (failures.length > 0) return { ok: false, failures };
+
+  if (!Array.isArray(records.missing_input_candidates)) {
+    return failed("financial_verification_unavailable", { run_id: run.run_id, reason: "gap_reread_failed", error: (records.missing_input_candidates as Readonly<{ error: string }>).error });
+  }
+  for (const slot of unprovenAbsences(plan, closureNodes, bindings.value, records.missing_input_candidates)) {
+    failures.push(failure("financial_binding_mismatch", { run_id: run.run_id, input_slot: slot, field: "gap_reason" }));
   }
   if (failures.length > 0) return { ok: false, failures };
 
@@ -356,6 +369,7 @@ function bindingsFor(plan: FinancialPlan, records: FinancialUnitRecords): Bindin
     const row = rows.get(node.node_id);
     if (!row) return { ok: false, input_slot: node.node_id, field: "missing" };
     if (row.binding_status === "gap") {
+      if (!(REASON_CODES as ReadonlyArray<string | null>).includes(row.gap_reason)) return { ok: false, input_slot: node.node_id, field: "gap_reason" };
       value.set(node.node_id, { status: "gap", reason_code: row.gap_reason as ReasonCode, candidate_set_digest: row.candidate_set_digest });
       continue;
     }
@@ -375,6 +389,49 @@ function bindingsFor(plan: FinancialPlan, records: FinancialUnitRecords): Bindin
     value.set(node.node_id, { status: "bound", input, payload_hash: row.payload_hash!, candidate_set_digest: row.candidate_set_digest });
   }
   return { ok: true, value };
+}
+
+/**
+ * The missing_input gaps a sum in the closure leaves out (net cash, total
+ * debt) that the store disproves. Binding's rule 11 (select-inputs.ts): a
+ * slot is missing_input only when no authorized candidate reports its metric
+ * for the period, so any candidate there, or a reread too long to see whole,
+ * leaves the gap unproven. Every component of a sum has one period selector;
+ * a latest one resolved to the period of the sum's bound components. With
+ * none bound, the sum is missing itself and certifies no value. A gap true
+ * at bind time fails here once the store holds its fact (a 10-K ingested
+ * before the seal): the run stays unsealed, and a later turn makes a new run
+ * that binds it.
+ */
+function unprovenAbsences(
+  plan: FinancialPlan,
+  closureNodes: ReadonlySet<LocalId>,
+  bindings: ReadonlyMap<LocalId, SlotBinding>,
+  rereads: ReadonlyArray<LoadedGapCandidates>,
+): LocalId[] {
+  const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
+  const reads = new Map(rereads.map((read) => [read.input_slot, read]));
+  const unproven = new Set<LocalId>();
+  for (const node of plan.operations) {
+    if (!closureNodes.has(node.node_id) || OPERATION_REGISTRY[node.operation].tolerates_missing_operands !== "absent_inputs") continue;
+    const components = operationDependencies(node);
+    const selector = (nodes.get(components[0]!) as ReportedMetricNode).period;
+    const [period] = selector.kind === "fiscal_period" ? [selector] : components.flatMap((id) => {
+      const binding = bindings.get(id);
+      return binding?.status === "bound" && binding.input.schema_version !== BOUND_PRICE_INPUT_SCHEMA_VERSION ? [binding.input.period] : [];
+    });
+    if (period === undefined) continue;
+    for (const id of components) {
+      const binding = bindings.get(id);
+      if (binding?.status !== "gap" || binding.reason_code !== "missing_input") continue;
+      const read = reads.get(id);
+      if (!read || read.truncated || read.candidates.some((candidate) =>
+        candidate.period_end !== null && candidate.fiscal_year === period.fiscal_year && candidate.fiscal_period === period.fiscal_period)) {
+        unproven.add(id);
+      }
+    }
+  }
+  return [...unproven].sort();
 }
 
 /** The ledger column that names other evidence than the bound payload does, if any. */

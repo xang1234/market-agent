@@ -7,10 +7,16 @@
 // every bound price observation as stored now, and the listing each restated
 // input's subject resolves to now, with its splits and zone. Each bound
 // input's source comes with its kind, and the run with the source classes it
-// was granted, so the seal re-checks each input's class.
-// Snapshot reads these tables directly; it never imports the engine.
+// was granted, so the seal re-checks each input's class. Each missing_input
+// gap a sum in the unit leaves out is reread through the evidence
+// repository's authorized candidate read, the one binding uses.
+// Snapshot reads everything else from these tables directly; it never
+// imports the engine.
 
+import { listFinancialInputCandidates } from "../../evidence/src/financial-input-repo.ts";
+import { OPERATION_REGISTRY, operationDependencies, unitClosures, validateFinancialPlan, type FinancialPlan } from "../../financial-core/src/index.ts";
 import { loadSubjectSplitHistory, type SubjectSplitHistory } from "../../market/src/split-history.ts";
+import { isDatabaseError } from "../../shared/src/database-error.ts";
 import type { QueryExecutor } from "../../shared/src/http.ts";
 import { toSealFactRow, type FactRow } from "./seal-input.ts";
 
@@ -125,6 +131,13 @@ export type LoadedResult = Readonly<{
 /** A subject's current display name: an issuer's legal name, or a listing's ticker and venue. */
 export type LoadedSubjectName = Readonly<{ kind: "issuer" | "listing"; id: string; name: string }>;
 
+/** A missing_input gap's slot that a sum leaves out, reread now as binding read it: the period of each authorized candidate. */
+export type LoadedGapCandidates = Readonly<{
+  input_slot: string;
+  candidates: ReadonlyArray<Readonly<{ fiscal_year: number | null; fiscal_period: string | null; period_end: string | null }>>;
+  truncated: boolean;
+}>;
+
 export type FinancialUnitRecords = Readonly<{
   run: LoadedRun;
   plan: Readonly<{ plan: unknown; semantic_hash: string }>;
@@ -136,6 +149,8 @@ export type FinancialUnitRecords = Readonly<{
   computations: ReadonlyArray<LoadedComputation>;
   results: ReadonlyArray<LoadedResult>;
   subject_names: ReadonlyArray<LoadedSubjectName>;
+  /** The rereads, or the error that stopped them. */
+  missing_input_candidates: ReadonlyArray<LoadedGapCandidates> | Readonly<{ error: string }>;
 }>;
 
 const ISO_UTC = `'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'`;
@@ -234,8 +249,81 @@ export async function loadFinancialUnitRecords(db: QueryExecutor, claim: Financi
   )).rows;
 
   const subject_names = await loadSubjectNames(db, planSubjectRefs(plan));
+  const missing_input_candidates = await rereadMissingInputs(db, plan, claim.unit_id, bindings, claim.owner_user_id);
 
-  return { run: runRow, plan: { plan, semantic_hash }, unit, bindings, evidence, price_observations, split_histories, computations, results, subject_names };
+  return { run: runRow, plan: { plan, semantic_hash }, unit, bindings, evidence, price_observations, split_histories, computations, results, subject_names, missing_input_candidates };
+}
+
+/**
+ * Each missing_input gap a sum in the unit's closure leaves out, reread as
+ * binding read it, or the database error that stopped the rereads. An invalid
+ * plan rereads nothing: verifyFinancialUnit rejects it (financial_plan_mismatch)
+ * before it reads these rereads. In a transaction, the savepoint keeps it
+ * usable after a failed reread, so the seal can still log why it is
+ * unavailable. Outside one a failed read poisons nothing, so the savepoint's
+ * 25P01 means read without it. A rollback that fails rethrows the reread's
+ * error with the rollback's as its cause.
+ */
+async function rereadMissingInputs(
+  db: QueryExecutor,
+  plan: unknown,
+  unitId: string,
+  bindings: ReadonlyArray<LoadedBinding>,
+  owner: string,
+): Promise<FinancialUnitRecords["missing_input_candidates"]> {
+  const validated = validateFinancialPlan(plan);
+  if (!validated.ok) return [];
+  const { operations } = validated.value;
+  const closure = new Set(unitClosures(validated.value).get(unitId)?.node_ids);
+  const components = new Set(operations.flatMap((node) =>
+    closure.has(node.node_id) && OPERATION_REGISTRY[node.operation].tolerates_missing_operands === "absent_inputs" ? operationDependencies(node) : []));
+  const missing = new Set(bindings.flatMap((row) =>
+    row.binding_status === "gap" && row.gap_reason === "missing_input" && components.has(row.input_slot) ? [row.input_slot] : []));
+  if (missing.size === 0) return [];
+  const savepoint = await db.query("savepoint gap_reread").then(() => true, (error: unknown) => {
+    if ((error as { code?: unknown } | null)?.code === NO_ACTIVE_SQL_TRANSACTION) return false;
+    throw error;
+  });
+  try {
+    const reads = await readGapCandidates(db, validated.value, missing, owner);
+    if (savepoint) await db.query("release savepoint gap_reread");
+    return reads;
+  } catch (error) {
+    if (!isDatabaseError(error)) throw error;
+    if (savepoint) {
+      await db.query("rollback to savepoint gap_reread").catch((rollbackError: unknown) => {
+        throw Object.assign(error as Error, { cause: rollbackError });
+      });
+    }
+    return { error: (error as Error).message };
+  }
+}
+
+const NO_ACTIVE_SQL_TRANSACTION = "25P01";
+
+async function readGapCandidates(db: QueryExecutor, plan: FinancialPlan, missing: ReadonlySet<string>, owner: string): Promise<LoadedGapCandidates[]> {
+  const { operations, subjects, limits } = plan;
+  const reads: LoadedGapCandidates[] = [];
+  for (const node of operations) {
+    if (node.operation !== "reported_metric" || !missing.has(node.node_id)) continue;
+    const period = node.period.kind === "fiscal_period" ? node.period : null;
+    const page = await listFinancialInputCandidates(db, {
+      user_id: owner,
+      channel: "app",
+      scope: "public_information",
+      subject: subjects.members.find((member) => member.slot_id === node.subject_slot)!.subject_ref,
+      metric_key: node.metric_key,
+      fiscal_year: period?.fiscal_year ?? null,
+      fiscal_period: period?.fiscal_period ?? null,
+      limit: limits.max_input_candidates,
+    });
+    reads.push({
+      input_slot: node.node_id,
+      candidates: page.candidates.map(({ fiscal_year, fiscal_period, period_end }) => ({ fiscal_year, fiscal_period, period_end })),
+      truncated: page.truncated,
+    });
+  }
+  return reads;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;

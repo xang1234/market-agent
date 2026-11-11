@@ -471,6 +471,12 @@ jobs:
         working-directory: services/financial-core
         run: npm ci
 
+      # The gap-row seal test loads AAPL's SEC fixture through fundamentals,
+      # which resolves lossless-json and pg from its own node_modules.
+      - name: Install fundamentals deps (imported by the gap-row seal test)
+        working-directory: services/fundamentals
+        run: npm ci
+
       - run: npm ci
 
       - run: npm run typecheck

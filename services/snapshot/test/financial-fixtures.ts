@@ -250,6 +250,7 @@ function sealedRecords(plan: FinancialPlan, inputs: BoundFactInputV1[], evidence
       result_hash: result.result_hash,
     })),
     subject_names: [{ kind: "issuer", id: F.issuer, name: "Fixture Industries Inc." }],
+    missing_input_candidates: [],
   };
 }
 

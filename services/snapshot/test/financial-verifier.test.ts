@@ -117,6 +117,16 @@ test("a binding edited without rehashing, or bound to another fact, is a binding
   assert.deepEqual(reasons(verifyFinancialUnit(swapped, "section", SEAL_CONTEXT)), ["financial_binding_mismatch:fact_id"]);
 });
 
+test("a gap row must name a known reason", () => {
+  const gapped = (reason: string) => {
+    const records = mutable(validRecords());
+    Object.assign(records.bindings[0], { binding_status: "gap", fact_id: null, publication_attestation_id: null, precision_attestation_id: null, bound_payload: null, payload_hash: null, gap_reason: reason });
+    return reasons(verifyFinancialUnit(records, "section", SEAL_CONTEXT));
+  };
+  assert.deepEqual(gapped("not_a_reason"), ["financial_binding_mismatch:gap_reason"]);
+  assert.deepEqual(gapped("missing_input"), ["financial_recompute_mismatch:coverage"]);
+});
+
 test("a changed cutoff or cohort changes the plan identity", () => {
   const cutoff = mutable(validRecords());
   cutoff.run.knowledge_cutoff = "2024-06-30T00:00:00.000Z";

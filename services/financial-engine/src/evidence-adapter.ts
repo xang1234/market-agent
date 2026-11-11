@@ -9,6 +9,7 @@ import { FISCAL_PERIODS, sourceClassOf } from "../../financial-core/src/index.ts
 import { listFinancialInputCandidates, type FinancialInputCandidate } from "../../evidence/src/financial-input-repo.ts";
 import { loadLatestPriceObservations } from "../../market/src/price-observations.ts";
 import { loadSubjectSplitHistory } from "../../market/src/split-history.ts";
+import { isDatabaseError } from "../../shared/src/database-error.ts";
 import type {
   CandidatePage,
   CandidateRequest,
@@ -118,11 +119,4 @@ function financialUnit(unit: string, currency: string | null): FinancialUnit | n
 
 function isFiscalPeriod(value: string | null): value is FiscalPeriod {
   return value !== null && (FISCAL_PERIODS as ReadonlyArray<string>).includes(value);
-}
-
-/** Postgres/driver failures carry a SQLSTATE code or a connection error code. */
-export function isDatabaseError(error: unknown): boolean {
-  if (typeof error !== "object" || error === null || !("code" in error)) return false;
-  const code = String((error as { code: unknown }).code);
-  return /^[0-9A-Z]{5}$/u.test(code) || code.startsWith("ECONN") || code === "ETIMEDOUT";
 }
