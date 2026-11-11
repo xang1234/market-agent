@@ -2,7 +2,9 @@
 // resolves to the scope its question expects. `npm run scope:eval` asks the
 // live model again after a prompt change (scripts/scope-eval.ts).
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
 
 import { CASES_FILE, caseFailures, measure, parseArgs, REPLIES_FILE, replyTo, selectCases, type ScopeEvalCase, type ScopeEvalReplies } from "../scripts/scope-eval.ts";
@@ -79,4 +81,15 @@ test("a question two cases share is asked once per run, and its errors count onc
   assert.equal(await measure(shared, 2, async () => (calls++, { text: "", proposal: null })), 1);
   assert.equal(calls, 2);
   assert.match(lines.at(-1)!, /; 2 of 2 replies errored$/);
+});
+
+test("scope:eval exits 2 on a malformed flag before it builds a model client", () => {
+  const run = spawnSync(process.execPath, ["--experimental-strip-types", join(import.meta.dirname, "../scripts/scope-eval.ts"), "--runs=51"], {
+    encoding: "utf8",
+    env: { PATH: process.env.PATH, LLM_SETTINGS_ENV_FILE: "/nonexistent/.env" },
+    timeout: 30_000,
+  });
+  assert.equal(run.status, 2);
+  assert.equal(run.stdout, "");
+  assert.match(run.stderr, /^scope:eval: --runs must be at most 50, got "51"\n/m);
 });

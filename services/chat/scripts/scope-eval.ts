@@ -208,20 +208,22 @@ export async function measure(cases: ScopeEvalCase[], runs: number, ask: (questi
   return errors === 0 ? 0 : 1;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+async function main(argv: string[]): Promise<number> {
   let args: EvalArgs;
   let cases: ScopeEvalCase[] = [];
   try {
-    args = parseArgs(process.argv.slice(2));
+    args = parseArgs(argv);
     if (args.mode === "measure") cases = selectCases(JSON.parse(readFileSync(CASES_FILE, "utf8")) as ScopeEvalCase[], args.ids);
   } catch (error) {
     console.error(`scope:eval: ${(error as Error).message}`);
-    process.exit(2);
+    return 2;
   }
-  if (args.mode === "record") process.exitCode = await recordLiveReplies();
-  else {
-    const ask = await liveAsker();
-    process.exitCode = await measure(cases, args.runs, ask);
-    console.log([...ask.models].join(", "));
-  }
+  if (args.mode === "record") return recordLiveReplies();
+  const ask = await liveAsker();
+  const code = await measure(cases, args.runs, ask);
+  console.log([...ask.models].join(", "));
+  return code;
 }
+
+// exitCode, not process.exit, so stderr drains to a pipe before the process ends.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) process.exitCode = await main(process.argv.slice(2));
