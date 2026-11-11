@@ -6,9 +6,10 @@
 //
 // With no issuers, backfills every issuer that has SEC income facts. Either
 // way it skips the frozen golden dataset's issuers. --annual-history-years is
-// for a dev DB only (#610): it also stores each issuer's newest N fiscal
-// years of 10-K statements and cover counts from the same download, with or
-// without income on file, so an offline backtest has history to read. One companyfacts download
+// for a dev DB only (#610), so it refuses a DATABASE_URL that is not on this
+// machine: it also stores each issuer's newest N fiscal years of 10-K
+// statements and cover counts from the same download, with or without income
+// on file, so an offline backtest has history to read. One companyfacts download
 // per issuer, paced under SEC's fair-access rate with a backoff on HTTP 429
 // (withSecFairAccess). A rerun is safe: a stored fact the filing still states
 // is kept and gains the proofs it lacks.
@@ -76,6 +77,10 @@ async function main(): Promise<void> {
   const { values, positionals } = parseArgs({ allowPositionals: true, options: { "annual-history-years": { type: "string" } } });
   const years = Number(values["annual-history-years"] ?? 0);
   if (!Number.isInteger(years) || years < 0) throw new Error("--annual-history-years needs a whole number of years, e.g. 10");
+  const host = new URL(databaseUrl).hostname;
+  if (years > 0 && host !== "localhost" && host !== "127.0.0.1") {
+    throw new Error(`--annual-history-years is for a dev DB only: DATABASE_URL must point at localhost or 127.0.0.1, not ${host}`);
+  }
   const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
   // Paced under SEC's fair-access rate, backing off on a 429.
   // A bulk run downloads the largest companyfacts files, so it waits longer than a request does.
