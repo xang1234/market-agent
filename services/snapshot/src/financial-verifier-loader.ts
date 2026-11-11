@@ -149,7 +149,6 @@ export type FinancialUnitRecords = Readonly<{
   computations: ReadonlyArray<LoadedComputation>;
   results: ReadonlyArray<LoadedResult>;
   subject_names: ReadonlyArray<LoadedSubjectName>;
-  /** Null when the reread failed: the seal cannot prove a gap, so it is unavailable. */
   /** The rereads, or the error that stopped them. */
   missing_input_candidates: ReadonlyArray<LoadedGapCandidates> | Readonly<{ error: string }>;
 }>;
