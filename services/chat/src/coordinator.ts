@@ -1048,11 +1048,12 @@ export async function resolveTurnSubjects(
   loadPriorSubjects: ChatPriorSubjectsLoader | undefined,
 ): Promise<TurnSubjects> {
   const text = nonEmptySubjectText(context.userIntent);
+  const loadingPrior = loadPriorSubjects
+    ? loadPriorSubjects({ threadId: context.threadId, ...(context.userId ? { userId: context.userId } : {}) }).then(distinctCompanies)
+    : Promise.resolve([]);
   const [mentioned, prior] = await Promise.all([
-    text ? resolveNamedSubjects(text, preResolve) : namesOf([]),
-    loadPriorSubjects
-      ? loadPriorSubjects({ threadId: context.threadId, ...(context.userId ? { userId: context.userId } : {}) }).then(distinctCompanies)
-      : [],
+    text ? resolveNamedSubjects(text, preResolve, loadingPrior) : namesOf([]),
+    loadingPrior,
   ]);
   const readingDecides = prior.length > 0 || mentioned.ambiguous.length > 0 || mentioned.notFound.length > 0;
   const change = readingDecides ? (await context.reading?.())?.companies : undefined;
@@ -1185,12 +1186,20 @@ export function labelList(labels: ReadonlyArray<string>): string {
   return labels.length < 2 ? labels.join("") : `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
 }
 
-async function resolveNamedSubjects(text: string, preResolve: ChatSubjectPreResolver): Promise<Names> {
+async function resolveNamedSubjects(
+  text: string,
+  preResolve: ChatSubjectPreResolver,
+  prior: Promise<ReadonlyArray<ChatResolvedSubjectPreResolution>>,
+): Promise<Names> {
   // The whole message first, so a bare ticker, a company name, or a theme
   // resolves exactly as before; otherwise every ticker it mentions, in order,
   // but one written only inside a metric's or facet's name ("FREE CASH FLOW").
-  const whole = await preResolve({ text });
-  if (whole.status === "resolved") return namesOf([whole]);
+  // The resolver reads any one word as a ticker, so a lowercase one ("aapl")
+  // names a company only as the thread's first: after one, "all" or "it" is
+  // a reply to it (#623).
+  const reply = !/\s/u.test(text) && text === text.toLowerCase() && (await prior).length > 0;
+  const whole = reply ? null : await preResolve({ text });
+  if (whole?.status === "resolved") return namesOf([whole]);
   const named = companyNameIn(text);
   return namesOf(await Promise.all(extractSubjectMentions(text).filter((mention) => named(mention)).map((mention) => preResolve({ text: mention }))));
 }
