@@ -105,20 +105,13 @@ export function caseFailures(evalCase: ScopeEvalCase, reply: string | undefined)
 
 async function recordLiveReplies(): Promise<number> {
   const cases = JSON.parse(readFileSync(CASES_FILE, "utf8")) as ScopeEvalCase[];
-  const env: Record<string, string | undefined> = {
-    ...process.env,
-    LLM_SETTINGS_ENV_FILE: process.env.LLM_SETTINGS_ENV_FILE ?? join(ROOT, ".env.dev"),
-    LLM_REPLAY_FILE: undefined,
-    CHAT_SCOPE_PROPOSAL: undefined,
-  };
-  const live = await createDefaultPiLlmChatClient();
-  const models = new Set<string>();
+  const ask = await liveAsker();
   const replies: ScopeEvalReplies["replies"] = [];
   for (const question of new Set(cases.map((evalCase) => evalCase.question))) {
-    replies.push({ match: proposalQuestion(question), text: await liveReply(question, env, live, models) });
+    replies.push({ match: proposalQuestion(question), text: (await ask(question)).text });
     process.stderr.write(`${replies.length} ${question}\n`);
   }
-  const recorded: ScopeEvalReplies = { model: [...models].join(", "), recorded: new Date().toISOString().slice(0, 10), replies };
+  const recorded: ScopeEvalReplies = { model: [...ask.models].join(", "), recorded: new Date().toISOString().slice(0, 10), replies };
   writeFileSync(REPLIES_FILE, `${JSON.stringify(recorded, null, 2)}\n`);
   const failing = cases.map((evalCase) => caseFailures(evalCase, replyTo(recorded, evalCase.question))).filter((failures) => failures.length > 0);
   for (const failure of failing.flat()) console.log(failure);
@@ -127,26 +120,11 @@ async function recordLiveReplies(): Promise<number> {
   return failing.length === 0 ? 0 : 1;
 }
 
-async function liveReply(question: string, env: Record<string, string | undefined>, live: Awaited<ReturnType<typeof createDefaultPiLlmChatClient>>, models: Set<string>): Promise<string> {
-  let text = "";
-  await proposeScope({
-    question,
-    env,
-    createClient: () => async (deployment, request, options) => {
-      const result = await live(deployment, request, options);
-      models.add(`${deployment.channel}/${deployment.model}`);
-      text = result.text;
-      return result;
-    },
-  });
-  return text;
-}
+// A live reply's text, and the proposal proposeScope made of it: null when the
+// call failed, the reply was cut off or parseProposal rejected it.
+export type LiveReply = { text: string; proposal: ScopeProposal | null };
 
-// Each case's misses out of `runs` live replies; a call that fails (no text) is
-// counted apart, not as a miss.
-async function measure(ids: number[] | null, runs: number): Promise<number> {
-  const all = JSON.parse(readFileSync(CASES_FILE, "utf8")) as ScopeEvalCase[];
-  const cases = ids === null ? all : all.filter((evalCase) => ids.includes(evalCase.id));
+async function liveAsker() {
   const env: Record<string, string | undefined> = {
     ...process.env,
     LLM_SETTINGS_ENV_FILE: process.env.LLM_SETTINGS_ENV_FILE ?? join(ROOT, ".env.dev"),
@@ -155,29 +133,89 @@ async function measure(ids: number[] | null, runs: number): Promise<number> {
   };
   const live = await createDefaultPiLlmChatClient();
   const models = new Set<string>();
+  const ask = async (question: string): Promise<LiveReply> => {
+    let text = "";
+    const proposal = await proposeScope({
+      question,
+      env,
+      createClient: () => async (deployment, request, options) => {
+        const result = await live(deployment, request, options);
+        models.add(`${deployment.channel}/${deployment.model}`);
+        text = result.text;
+        return result;
+      },
+    });
+    return { text, proposal };
+  };
+  return Object.assign(ask, { models });
+}
+
+export type EvalArgs = { mode: "record" } | { mode: "measure"; ids: number[] | null; runs: number };
+
+// Anything but no arguments or well-formed --cases= and --runs= throws, so a
+// typo never falls through to re-recording every reply.
+export function parseArgs(argv: string[]): EvalArgs {
+  if (argv.length === 0) return { mode: "record" };
+  const flags = new Map<string, string>();
+  for (const arg of argv) {
+    const match = /^--(cases|runs)=(.*)$/.exec(arg);
+    if (match === null || flags.has(match[1]!)) throw new Error(`unexpected argument ${arg}; use --cases=<id,...> and --runs=<n>`);
+    flags.set(match[1]!, match[2]!);
+  }
+  const count = (value: string, what: string) => {
+    if (!/^[1-9]\d*$/.test(value)) throw new Error(`${what} must be an integer of at least 1, got "${value}"`);
+    return Number(value);
+  };
+  const cases = flags.get("cases");
+  const ids = cases === undefined ? null : cases.split(",").map((id) => count(id, "--cases ids"));
+  if (ids !== null && new Set(ids).size !== ids.length) throw new Error(`--cases repeats an id: ${cases}`);
+  return { mode: "measure", ids, runs: count(flags.get("runs") ?? "1", "--runs") };
+}
+
+export function selectCases(all: ScopeEvalCase[], ids: number[] | null): ScopeEvalCase[] {
+  if (ids === null) return all;
+  const unmatched = ids.filter((id) => !all.some((evalCase) => evalCase.id === id));
+  if (unmatched.length > 0) throw new Error(`no case ${unmatched.join(", ")}`);
+  return all.filter((evalCase) => ids.includes(evalCase.id));
+}
+
+// Each case's misses out of `runs` replies, all asked at once. A reply with no
+// proposal is counted apart as an error, not as a miss, and any error exits 1.
+export async function measure(cases: ScopeEvalCase[], runs: number, ask: (question: string) => Promise<LiveReply>): Promise<number> {
   const started = Date.now();
-  const repliesByQuestion = new Map<string, string[]>();
+  const repliesByQuestion = new Map<string, LiveReply[]>();
   for (const question of new Set(cases.map((evalCase) => evalCase.question))) {
-    repliesByQuestion.set(question, await Promise.all(Array.from({ length: runs }, () => liveReply(question, env, live, models))));
+    repliesByQuestion.set(question, await Promise.all(Array.from({ length: runs }, () => ask(question))));
     process.stderr.write(`${repliesByQuestion.size} ${question}\n`);
   }
+  let errors = 0;
   for (const evalCase of cases) {
-    const texts = repliesByQuestion.get(evalCase.question)!;
-    const answered = texts.filter((text) => text !== "");
-    const failures = answered.map((text) => caseFailures(evalCase, text));
+    const asked = repliesByQuestion.get(evalCase.question)!;
+    const answered = asked.filter((reply) => reply.proposal !== null);
+    errors += asked.length - answered.length;
+    const failures = answered.map((reply) => caseFailures(evalCase, reply.text));
     const misses = failures.filter((each) => each.length > 0).length;
-    console.log(`#${evalCase.id}\tmiss ${misses}/${answered.length}\terrors ${texts.length - answered.length}\t${evalCase.question}`);
+    console.log(`#${evalCase.id}\tmiss ${misses}/${answered.length}\terrors ${asked.length - answered.length}\t${evalCase.question}`);
     for (const failure of new Set(failures.flat())) console.log(`\t${failure}`);
   }
-  console.log(`${[...models].join(", ")}: ${cases.length} cases x ${runs} runs in ${Math.round((Date.now() - started) / 1000)} s`);
-  return 0;
+  console.log(`${cases.length} cases x ${runs} runs, asked concurrently, in ${Math.round((Date.now() - started) / 1000)} s`);
+  return errors === 0 ? 0 : 1;
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  const flag = (name: string) => process.argv.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
-  const cases = flag("cases");
-  const runs = flag("runs");
-  process.exitCode = cases === undefined && runs === undefined
-    ? await recordLiveReplies()
-    : await measure(cases === undefined ? null : cases.split(",").map(Number), Number(runs ?? 1));
+  let args: EvalArgs;
+  let cases: ScopeEvalCase[] = [];
+  try {
+    args = parseArgs(process.argv.slice(2));
+    if (args.mode === "measure") cases = selectCases(JSON.parse(readFileSync(CASES_FILE, "utf8")) as ScopeEvalCase[], args.ids);
+  } catch (error) {
+    console.error(`scope:eval: ${(error as Error).message}`);
+    process.exit(2);
+  }
+  if (args.mode === "record") process.exitCode = await recordLiveReplies();
+  else {
+    const ask = await liveAsker();
+    process.exitCode = await measure(cases, args.runs, ask);
+    console.log([...ask.models].join(", "));
+  }
 }
