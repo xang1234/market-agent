@@ -553,3 +553,29 @@ test("a reading slower than its deadline is no reading: one model call, and the 
   assert.deepEqual([seen?.tickers, seen?.reading, calls], [["NVDA", "AMD"], null, 1]);
   assert.ok(seen!.at < 300, `the turn went on at the deadline, not the reply: ${seen!.at} ms`);
 });
+
+// The resolver reads any one word as a ticker, upper-casing it: "all" is ALL
+// (Allstate), "it" is IT (Gartner) (#623).
+const asTheResolverReads = {
+  preResolveSubject: async ({ text }: { text: string }) => {
+    const read = /\s/u.test(text) ? text : text.toUpperCase();
+    return read === "ALL" || read === "IT" ? { ...resolved("NOW"), input_text: read } : preResolveSubject({ text: read });
+  },
+};
+
+test("a lowercase word after a company is a reply, not a ticker: the company carries over (#623)", async () => {
+  for (const reply of ["all", "it"]) {
+    assert.deepEqual((await subjectsForTurn(reply, { ...asTheResolverReads, loadPriorSubjects: priorOf("AAPL") })).tickers, ["AAPL"], reply);
+  }
+});
+
+test("a lowercase ticker as a thread's first message is that company (#623)", async () => {
+  assert.deepEqual((await subjectsForTurn("aapl", { ...asTheResolverReads, loadPriorSubjects: priorOf() })).tickers, ["AAPL"]);
+});
+
+test("a capitalized ticker after a company is still asked about (#623)", async () => {
+  const aapl = { ...asTheResolverReads, loadPriorSubjects: priorOf("AAPL") };
+  for (const question of ["and MSFT?", "MSFT"]) {
+    assert.match(await askedFor(question, aapl), /Add MSFT to AAPL, or look at MSFT alone\?/u, question);
+  }
+});

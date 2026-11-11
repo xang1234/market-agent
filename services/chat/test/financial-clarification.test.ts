@@ -4,8 +4,11 @@ import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { databaseUrl, IDS, RESTATED_REVENUE } from "../../financial-engine/test/db-fixtures.ts";
+import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { createChatServer } from "../src/http.ts";
-import { chatDatabase, chatHarness, comparing, completed, INSTRUMENT_A, LISTING_A, revenueModel } from "./financial-fixtures.ts";
+import { loadPriorSubjects } from "../src/thread-context.ts";
+import { chatDatabase, chatHarness, comparing, completed, INSTRUMENT_A, LISTING_A, resolveMention, revenueModel } from "./financial-fixtures.ts";
+import { readMessage } from "./read-message-fixture.ts";
 
 type Offered = { clarification_id: string; question: string; choices: Array<{ choice_id: string; label: string }> };
 
@@ -142,4 +145,59 @@ test("a clarification answer must name both the clarification and the choice", a
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+test("a typed reply to a metric clarification continues its company, not a ticker the reply spells (#623)", { timeout: 300_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for chat clarification coverage");
+    return;
+  }
+  const { db, pool, threadId } = await chatDatabase(t, "chat-clarify-reply");
+  // The resolver reads any one word as a ticker: "all" is ALL, here issuer B.
+  const resolver = (mention: string) => {
+    const read = /\s/u.test(mention) ? mention : mention.toUpperCase();
+    return resolveMention(read === "ALL" ? "BBB" : read);
+  };
+  // The planner asks which margin first, then plans whatever companies it is given.
+  const asked: string[] = [];
+  const model = (async (request: { messages: ReadonlyArray<{ content: string }> }) => {
+    asked.push(request.messages.map((message) => message.content).join("\n"));
+    return asked.length === 1
+      ? { model: "stub-model", text: JSON.stringify({ outcome: "needs_clarification", question: "Which margin would you like?", choices: ["Gross margin", "Operating margin", "Net margin", "EBITDA margin"] }) }
+      : revenueModel(["AAA"])({ messages: [] });
+  }) as unknown as PlanningModel;
+  const hydrate = async (_db: unknown, ref: { kind: string; id: string }) =>
+    ({ subject_ref: ref, display_label: ref.id === IDS.issuerA ? "Alpha Industries Inc." : "Beta Holdings Corp.", display_labels: { ticker: ref.id === IDS.issuerA ? "AAA" : "BBB" }, context: {}, normalized_input: ref.id, identity_level: "issuer", resolution_path: "test", confidence: 1 }) as never;
+  const harness = chatHarness(pool, {
+    model,
+    resolveMention: resolver,
+    priorSubjects: (thread) => loadPriorSubjects(pool, { threadId: thread }, hydrate),
+    // A clarification is a message of the thread, sealed over its blocks' subjects as a deployment seals it.
+    persistAssistantMessage: async (message) => {
+      const messageId = message.message_id ?? randomUUID();
+      const [block] = message.blocks as Array<{ snapshot_id: string; subject_refs?: unknown[] }>;
+      await pool.query(
+        `insert into snapshots (snapshot_id, subject_refs, as_of, basis, normalization, allowed_transforms) values ($1, $2::jsonb, now(), 'unadjusted', 'raw', '{}')`,
+        [block!.snapshot_id, JSON.stringify(block!.subject_refs ?? [])],
+      );
+      await pool.query(
+        `insert into chat_messages (message_id, thread_id, role, snapshot_id, blocks, content_hash) values ($1, $2, 'assistant', $3, $4::jsonb, $5)`,
+        [messageId, message.threadId, block!.snapshot_id, JSON.stringify(message.blocks), message.content_hash],
+      );
+      return readMessage({ snapshot_id: block!.snapshot_id, message_id: messageId, thread_id: message.threadId });
+    },
+  });
+
+  const question = completed((await harness.run({ threadId, userId: IDS.owner, userIntent: "What drives AAA's margins?" })).events);
+  assert.equal(question.clarification, true, JSON.stringify(question));
+  const [block] = harness.persisted.at(-1)!.blocks as Array<{ subject_refs?: unknown }>;
+  assert.deepEqual(block!.subject_refs, [{ kind: "issuer", id: IDS.issuerA }], "the clarification names the company it asked about");
+
+  const reply = completed((await harness.run({ threadId, userId: IDS.owner, userIntent: "all" })).events);
+  assert.ok(reply.message_id && !reply.clarification && !reply.financial_gap, JSON.stringify(reply));
+  const [answer] = (await db.query(`select blocks from chat_messages where message_id = $1`, [reply.message_id])).rows[0].blocks;
+  assert.deepEqual(
+    Object.values(answer.financial.labels as Record<string, { kind: string; text: string }>).filter((label) => label.kind === "subject").map((label) => label.text),
+    ["Alpha Industries Inc."],
+  );
 });
