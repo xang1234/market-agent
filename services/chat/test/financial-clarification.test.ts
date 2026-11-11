@@ -201,3 +201,20 @@ test("a typed reply to a metric clarification continues its company, not a ticke
     ["Alpha Industries Inc."],
   );
 });
+
+test("a company-choice clarification names no company, so replaying the pick reaches the choice (#623)", { timeout: 300_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for chat clarification coverage");
+    return;
+  }
+  const { pool, threadId } = await chatDatabase(t, "chat-clarify-choice");
+  // AAA resolves and AMB is offered as choices. Saving AAA as the thread's
+  // company would make the replayed pick read AMB as a new company and ask
+  // "Add AMB…?" before the choice applies.
+  const harness = chatHarness(pool, { model: revenueModel(["AAA", "AMB"]) });
+  const asked = completed((await harness.run({ threadId, userId: IDS.owner, userIntent: "Compare revenue for AAA and AMB" })).events);
+  assert.equal(asked.clarification, true, JSON.stringify(asked));
+  assert.match((asked.financial_clarification as Offered).question, /Which company did you mean by "AMB"\?/u);
+  const [block] = harness.persisted.at(-1)!.blocks as Array<{ subject_refs?: unknown }>;
+  assert.equal(block!.subject_refs, undefined);
+});

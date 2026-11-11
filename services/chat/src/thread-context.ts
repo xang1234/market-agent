@@ -52,7 +52,7 @@ export async function loadPriorSubjects(
         and m.role = 'assistant'
         -- An answer about no company (a notice, or a gap or clarification
         -- that names none) leaves the earlier companies in place, as it
-        -- leaves the scope (loadPriorScope). A financial clarification names
+        -- leaves the scope (loadPriorScope). A metric or request clarification names
         -- the companies it asked about, so a typed reply continues them (#623).
         -- A price comparison (#224) names the listing its close is of; the
         -- company a follow-up continues is the scenario answer's it compared.

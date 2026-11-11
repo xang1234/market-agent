@@ -72,8 +72,8 @@ import {
 export type ChatClarificationAnswer = Readonly<{ clarification_id: string; choice_id: string }>;
 
 export type ChatFinancialTurn =
-  // A clarification names the companies it asked about, so a typed reply
-  // ("all") continues them (#623).
+  // A metric or request clarification names the companies it asked about, so
+  // a typed reply ("all") continues them (#623).
   | Readonly<{ kind: "clarification"; clarification: Clarification; subject_refs?: ReadonlyArray<FinancialSubjectRef> }>
   // A gap the turn declined with names the companies it was asked about and
   // saves its scope, so a follow-up continues them (#425). It is saved under
@@ -291,7 +291,11 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       });
       switch (outcome.status) {
         case "clarification": {
-          const refs = askedRefs();
+          // A company choice is answered by replaying the question with the
+          // pick; naming its resolved companies would make the replay read
+          // the still-ambiguous mention as a new company before the pick
+          // applies. Only a metric or request question is answered by typing.
+          const refs = outcome.clarification.kind === "subject" ? [] : askedRefs();
           return { kind: "clarification", clarification: outcome.clarification, ...(refs.length > 0 ? { subject_refs: refs } : {}) };
         }
         case "gap":
