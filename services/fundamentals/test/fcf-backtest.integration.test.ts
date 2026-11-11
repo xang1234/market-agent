@@ -54,7 +54,7 @@ test("each FY 10-K's required growth, realized growth and price return, as of it
   const summary = run.rows.flatMap((row) => row.kind === "unread" ? [] : [[
     row.fiscal_year, row.filed, row.inputs.as_of,
     row.inputs.figures.free_cash_flow.text, row.inputs.figures.shares_outstanding.text,
-    text(row.price), text(row.required_growth), text(row.realized_fcf_per_share_cagr), text(row.price_return),
+    text(row.price), text(row.required_growth), text(row.realized_fcf_cagr), text(row.share_change), text(row.realized_share_change), text(row.price_return),
   ]]);
   assert.deepEqual(summary.find((row) => row[0] === 2017), [
     2017, "2018-02-15", "2018-02-16", "1100000000", "100000000",
@@ -62,18 +62,22 @@ test("each FY 10-K's required growth, realized growth and price return, as of it
     "115.449 (2018-02-16, dev close, never certified)",
     // A separate float bisection of ADR 0006's V(g) at today's 10.31x and d = 0.433% gives 0.711%.
     "0.7%",
-    // FY2017 11.00 a share, 5.50 on the post-split basis, to FY2022's 1,600M over 200M shares: (8 / 5.5)^(1/5) - 1.
+    // FY2017's 1,100M to FY2022's 1,600M: (16 / 11)^(1/5) - 1.
     "7.78%",
+    // 50M SBC over the 11,544.9M market cap.
+    "0.43%",
+    // 100M shares, 200M on the post-split basis, to FY2022's 200M.
+    "0.00%",
     "12.00%, at or above",
   ]);
   assert.deepEqual(summary.map((row) => row[0]), [2016, 2017, 2018, 2019, 2020, 2021]);
   // FY2021's 10-K was filed 2022-02-15; five years on is past the last capture.
-  assert.equal(summary.at(-1)![8], "stale_price: 5 years on: The latest captured close on or before 2027-02-16 is 2026-11-09.");
+  assert.equal(summary.at(-1)![10], "stale_price: 5 years on: The latest captured close on or before 2027-02-16 is 2026-11-09.");
   assert.deepEqual(run.rows.map((row) => row.kind === "read" && row.period), [null, null, null, null, null, null]);
   assert.deepEqual(run.issuers, [{ ticker: "NONE", outcome: "subject_unresolved", text: "0 active US common-stock listings" }]);
   assert.match(
     renderBacktest(run, { ranOn: "2026-11-11", command: "npm run backtest:fcf -- --tickers HIST,NONE", notes: "" }),
-    /^\| HIST \| 2017 \| 2018-02-15 \| 2018-02-16 \| 1100000000 \| 200000000 \| 50000000 \| 100000000 \| 115\.449 \(2018-02-16, dev close, never certified\) \| 10\.31x \| 0\.7% \| 7\.78% \| 12\.00%, at or above \| {2}\|$/mu,
+    /^\| HIST \| 2017 \| 2018-02-15 \| 2018-02-16 \| 1100000000 \| 200000000 \| 50000000 \| 100000000 \| 115\.449 \(2018-02-16, dev close, never certified\) \| 10\.31x \| 0\.7% \| 7\.78% \| 0\.43% \| 0\.00% \| 12\.00%, at or above \| {2}\|$/mu,
   );
   for (const row of run.rows) {
     if (row.kind === "unread") continue;

@@ -41,11 +41,15 @@ test("a split restates the close to its own day and the earlier share count to t
   });
   assert.equal(row.kind, "read");
   if (row.kind !== "read") return;
-  assert.deepEqual([row.price.text, row.required_growth.text, row.realized_fcf_per_share_cagr.text, row.period], [
+  assert.deepEqual([row.price.text, row.required_growth.text, row.realized_fcf_cagr.text, row.share_change.text, row.realized_share_change.text, row.period], [
     "115.449 (2018-02-16, dev close, never certified)",
     "0.7%",
-    // 11.00 a share is 5.50 after the split; (8 / 5.5)^(1/5) - 1.
+    // (1,600M / 1,100M)^(1/5) - 1.
     "7.78%",
+    // 50M SBC over 115.449 x 100M.
+    "0.43%",
+    // 100M shares are 200M after the split, and FY2022 has 200M.
+    "0.00%",
     null,
   ]);
   const unsplit = backtestRow({
@@ -54,9 +58,25 @@ test("a split restates the close to its own day and the earlier share count to t
     later: inputs("2023-02-16", "2022-12-31", "1600000000", "200000000"),
     closes, splits: { ...split, splits: [] },
   });
-  assert.deepEqual([unsplit.kind === "read" && unsplit.price.text, unsplit.kind === "read" && unsplit.realized_fcf_per_share_cagr.text], [
+  assert.deepEqual([unsplit.price.text, unsplit.realized_fcf_cagr.text, unsplit.realized_share_change.text], [
     "57.7245 (2018-02-16, dev close, never certified)",
-    "-6.17%",
+    "7.78%",
+    "14.87%",
+  ]);
+});
+
+test("realized growth is total free cash flow, as required growth is, and buybacks show as the realized share change beside d", () => {
+  const row = backtestRow({
+    ticker: "BUYB", fiscal_year: 2017, filed: "2018-02-15", label_offset: 0,
+    base: inputs("2018-02-16", "2017-12-31", "1100000000", "100000000"),
+    later: inputs("2023-02-16", "2022-12-31", "1600000000", "80000000"),
+    closes, splits: { ...split, splits: [] },
+  });
+  assert.deepEqual([row.realized_fcf_cagr.text, row.share_change.text, row.realized_share_change.text], [
+    // Per share it would be (20 / 11)^(1/5) - 1 = 12.70%: the buyback is not growth the model priced.
+    "7.78%",
+    "0.87%",
+    "-4.36%",
   ]);
 });
 
@@ -74,7 +94,7 @@ test("a row whose statements are another fiscal year's is a period_mismatch", ()
   assert.deepEqual([row(2016, "2017-01-01", 0, "2022-01-02"), row(2016, "2017-01-29", -1, "2022-01-30")].map((r) => r.kind === "read" && r.period), [null, null]);
   // The later 10-K's statements are checked too: FY2021's realized growth must end at FY2026, not FY2025.
   const late = row(2021, "2021-12-31", 0, "2025-12-31");
-  assert.deepEqual(late.kind === "read" && [late.period, late.realized_fcf_per_share_cagr.kind === "outcome" && late.realized_fcf_per_share_cagr.outcome], [null, "period_mismatch"]);
+  assert.deepEqual(late.kind === "read" && [late.period, late.realized_fcf_cagr.kind === "outcome" && late.realized_fcf_cagr.outcome], [null, "period_mismatch"]);
 });
 
 test("a filer's fiscal year label is the year its period ends in, a week early, plus the offset most of its years show", () => {
@@ -91,7 +111,7 @@ const read = (fy: number, required: number | Figure, realized: number, priceRetu
     kind: "read", ticker: "T", fiscal_year: fy, filed: "2020-01-31", inputs: base, period,
     price: { kind: "value", value: 10, text: "10" }, todays_multiple: { kind: "value", value: 20, text: "20.00x" },
     required_growth: typeof required === "number" ? percent(required) : required,
-    realized_fcf_per_share_cagr: percent(realized), price_return: percent(priceReturn),
+    share_change: percent(0.01), realized_fcf_cagr: percent(realized), realized_share_change: percent(-0.02), price_return: percent(priceReturn),
   };
 };
 

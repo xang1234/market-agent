@@ -2,8 +2,14 @@
 // each issuer and each FY 10-K from 2016 to 2021 it reads the Call's inputs as
 // of the filing date + 1 day, solves the growth the close that day required at
 // that day's multiple, and sets beside it what followed: the FY free cash flow
-// per share five 10-Ks later, and the price five years later against the
-// owner's 10% hurdle. Offline and dev only: nothing here is written.
+// five 10-Ks later, the share count's change over those years, and the price
+// five years later against the owner's 10% hurdle. Offline and dev only: nothing here is written.
+//
+// Required growth g is the growth of total free cash flow, net of the share
+// change d that stock-based compensation implies (ADR 0006: buybacks are paid
+// out of the free cash flow already valued). So realized growth is total free
+// cash flow too, and the realized share change, buybacks included, is its own
+// figure beside d.
 //
 // The engine selects the inputs at each cutoff (selectPlanInputs), with one
 // substitution. A fetch proves a filing public only from the fetch itself
@@ -122,8 +128,11 @@ export type ReadRow = Readonly<{
   period: Absent | null;
   price: Figure;
   todays_multiple: Figure;
+  /** d: last FY's stock-based compensation over the market cap at the close. */
+  share_change: Figure;
   required_growth: Figure;
-  realized_fcf_per_share_cagr: Figure;
+  realized_fcf_cagr: Figure;
+  realized_share_change: Figure;
   price_return: Figure;
 }>;
 
@@ -267,8 +276,9 @@ export async function inputsAsOf(client: SqlExecutor, issuerId: string, asOf: Is
 
 /**
  * One issuer-year: the growth the as-of close required at that day's
- * multiple, the FY free cash flow per share CAGR to the 10-K five fiscal years
- * later, and the annualized price return over five years.
+ * multiple, the FY free cash flow CAGR and the annual share change to the
+ * 10-K five fiscal years later, and the annualized price return over five
+ * years.
  */
 export function backtestRow(input: Readonly<{
   ticker: string;
@@ -286,7 +296,10 @@ export function backtestRow(input: Readonly<{
   const laterPeriod = "kind" in input.later ? null : periodCheck(input.later, laterYear, input.label_offset);
   const close = closes.kind === "outcome" ? closes : closeOnOrBefore(closes, base.as_of);
   const price = close.kind === "outcome" || closes.kind === "outcome" ? close : splitBasis(close, closes, splits);
-  const { multiple, growth } = solve(base, price, closes);
+  const { multiple, share_change, growth } = solve(base, price, closes);
+  const realized = laterPeriod !== null
+    ? { fcf: named(`FY+${HORIZON_YEARS}`, laterPeriod), shares: named(`FY+${HORIZON_YEARS}`, laterPeriod) }
+    : realizedGrowth(base, input.later, splits);
   return {
     kind: "read",
     ticker: input.ticker,
@@ -296,18 +309,20 @@ export function backtestRow(input: Readonly<{
     period: periodCheck(base, input.fiscal_year, input.label_offset),
     price: price.kind === "outcome" ? price : "trade_date" in price ? { kind: "value", value: Number(price.text), text: `${price.text} (${price.trade_date}, dev close, never certified)` } : price,
     todays_multiple: multiple,
+    share_change,
     required_growth: growth,
-    realized_fcf_per_share_cagr: laterPeriod !== null ? named(`FY+${HORIZON_YEARS}`, laterPeriod) : realizedCagr(base, input.later, splits),
+    realized_fcf_cagr: realized.fcf,
+    realized_share_change: realized.shares,
     price_return: priceReturn(base.as_of, closes),
   };
 }
 
 type Restated = Readonly<{ kind: "value"; value: ExactRational; text: string; trade_date: IsoDate }>;
 
-function solve(base: AsOfInputs, price: Restated | Figure, closes: CloseSeries | Absent): Readonly<{ multiple: Figure; growth: Figure }> {
+function solve(base: AsOfInputs, price: Restated | Figure, closes: CloseSeries | Absent): Readonly<{ multiple: Figure; share_change: Figure; growth: Figure }> {
   const missing = (Object.keys(INPUT_NODES) as InputId[]).find((id) => base.figures[id].kind === "outcome");
   const cause = missing !== undefined ? named(missing, base.figures[missing]) : price.kind === "outcome" ? named("price", price as Figure) : null;
-  if (cause !== null) return { multiple: cause, growth: cause };
+  if (cause !== null) return { multiple: cause, share_change: cause, growth: cause };
   const { free_cash_flow, net_cash, stock_based_compensation, shares_outstanding } = base.exact as Required<AsOfInputs["exact"]>;
   const close = price as Restated;
   const inputs: ValuationInputs = {
@@ -322,30 +337,44 @@ function solve(base: AsOfInputs, price: Restated | Figure, closes: CloseSeries |
     required_return: rationalFromDecimal(decimal(DEFAULT_CALL_SETTINGS.required_return))!,
   };
   const today = todaysMultiple(inputs);
-  if (today.kind === "outcome") return { multiple: modelOutcome(today), growth: modelOutcome(today) };
+  if (today.kind === "outcome") return { multiple: modelOutcome(today), share_change: modelOutcome(today), growth: modelOutcome(today) };
+  const multiple: Figure = { kind: "value", value: toNumber(today.value), text: today.text };
   // d, ADR 0006's default: last fiscal year's stock-based compensation over the market cap at the as-of date.
   const shareChange = divideRationals(stock_based_compensation, multiplyRationals(close.value, shares_outstanding)!);
-  if (shareChange === null) return { multiple: { kind: "value", value: toNumber(today.value), text: today.text }, growth: outcome("numeric_limit_exceeded", "share change") };
+  if (shareChange === null) {
+    const limit = outcome("numeric_limit_exceeded", "share change");
+    return { multiple, share_change: limit, growth: limit };
+  }
   const solved = requiredGrowth(inputs, { share_change: shareChange, exit_multiple: today.value });
   return {
-    multiple: { kind: "value", value: toNumber(today.value), text: today.text },
+    multiple,
+    share_change: percent(toNumber(shareChange)),
     growth: solved.kind === "value" ? { kind: "value", value: toNumber(solved.growth), text: solved.text } : modelOutcome(solved),
   };
 }
 
-function realizedCagr(base: AsOfInputs, later: AsOfInputs | Absent, splits: SplitHistory): Figure {
-  if ("kind" in later) return later;
-  for (const [label, inputs] of [["base", base], ["later", later]] as const) {
-    for (const id of ["free_cash_flow", "shares_outstanding"] as const) {
+// The annual growth of total free cash flow and the annual change in the share count, from the base 10-K to the one five years later.
+function realizedGrowth(base: AsOfInputs, later: AsOfInputs | Absent, splits: SplitHistory): Readonly<{ fcf: Figure; shares: Figure }> {
+  const annual = (from: number, to: number) => percent((to / from) ** (1 / HORIZON_YEARS) - 1);
+  const missing = (id: InputId): Figure | null => {
+    if ("kind" in later) return later;
+    for (const [label, inputs] of [["base", base], ["later", later]] as const) {
       if (inputs.figures[id].kind === "outcome") return named(`${label === "later" ? `FY+${HORIZON_YEARS} ` : ""}${id}`, inputs.figures[id]);
     }
-  }
-  const [f0, s0, f5, s5] = [base.figures.free_cash_flow, base.figures.shares_outstanding, later.figures.free_cash_flow, later.figures.shares_outstanding].map((figure) => (figure as Extract<Figure, { kind: "value" }>).value) as [number, number, number, number];
-  if (f0 <= 0 || f5 <= 0) return outcome("non_positive_base", "Free cash flow at one end is zero or negative, so it has no growth rate.");
-  if (splits.status === "gap") return outcome(splits.reason_code, "No split history to put both share counts on one basis.");
-  // The engine states each count on its own as-of day's basis; the splits between them restate the earlier one.
-  const restatedS0 = s0 * toNumber(splitFactor(splits, base.as_of, later.as_of));
-  return percent(((f5 / s5) / (f0 / restatedS0)) ** (1 / HORIZON_YEARS) - 1);
+    return null;
+  };
+  const amount = (inputs: AsOfInputs, id: InputId) => (inputs.figures[id] as Extract<Figure, { kind: "value" }>).value;
+  const fcf = (): Figure => {
+    const [f0, f5] = [amount(base, "free_cash_flow"), amount(later as AsOfInputs, "free_cash_flow")];
+    return f0 <= 0 || f5 <= 0 ? outcome("non_positive_base", "Free cash flow at one end is zero or negative, so it has no growth rate.") : annual(f0, f5);
+  };
+  const shares = (): Figure => {
+    if (splits.status === "gap") return outcome(splits.reason_code, "No split history to put both share counts on one basis.");
+    // The engine states each count on its own as-of day's basis; the splits between them restate the earlier one.
+    const restatedS0 = amount(base, "shares_outstanding") * toNumber(splitFactor(splits, base.as_of, (later as AsOfInputs).as_of));
+    return annual(restatedS0, amount(later as AsOfInputs, "shares_outstanding"));
+  };
+  return { fcf: missing("free_cash_flow") ?? fcf(), shares: missing("shares_outstanding") ?? shares() };
 }
 
 function priceReturn(asOf: IsoDate, closes: CloseSeries | Absent): Figure {
@@ -507,7 +536,7 @@ const value = (figure: Figure): number | null => figure.kind === "value" ? figur
 function rowOutcome(row: BacktestRow): string {
   if (row.kind === "unread") return row.outcome.outcome;
   if (row.period !== null) return row.period.outcome;
-  for (const [label, figure] of [["required growth", row.required_growth], ["realized growth", row.realized_fcf_per_share_cagr]] as const) {
+  for (const [label, figure] of [["required growth", row.required_growth], ["realized growth", row.realized_fcf_cagr]] as const) {
     if (figure.kind === "outcome") return `${label}, ${figure.input === undefined ? "" : `${figure.input} `}${figure.outcome}`;
   }
   return "both";
@@ -523,7 +552,7 @@ function summary(rows: ReadonlyArray<BacktestRow>): string[] {
   const counts = new Map<string, number>();
   for (const row of rows) counts.set(rowOutcome(row), (counts.get(rowOutcome(row)) ?? 0) + 1);
   const both = rows.filter((row): row is ReadRow => rowOutcome(row) === "both");
-  const gap = (row: ReadRow) => value(row.realized_fcf_per_share_cagr)! - value(row.required_growth)!;
+  const gap = (row: ReadRow) => value(row.realized_fcf_cagr)! - value(row.required_growth)!;
   const delivered = both.filter((row) => gap(row) >= 0);
   const hurdle = (group: ReadonlyArray<ReadRow>) => {
     const returns = group.flatMap((row) => value(row.price_return) ?? []);
@@ -542,13 +571,13 @@ function summary(rows: ReadonlyArray<BacktestRow>): string[] {
   ];
 }
 
-const COLUMNS = ["free_cash_flow", "net_cash", "stock_based_compensation", "shares_outstanding", "price", "multiple", "required_growth", "realized_growth", "price_return"] as const;
+const COLUMNS = ["free_cash_flow", "net_cash", "stock_based_compensation", "shares_outstanding", "price", "multiple", "required_growth", "realized_growth", "share_change", "realized_share_change", "price_return"] as const;
 
 function tableRow(row: BacktestRow): string {
   const escape = (text: string) => text.replaceAll("|", "\\|");
   if (row.kind === "unread") return `| ${[row.ticker, row.fiscal_year, "n/a", "n/a", ...COLUMNS.map(() => "n/a"), `**${row.outcome.outcome}** (${escape(row.outcome.text)})`].join(" | ")} |`;
   const { free_cash_flow, net_cash, stock_based_compensation, shares_outstanding } = row.inputs.figures;
-  const figures = [free_cash_flow, net_cash, stock_based_compensation, shares_outstanding, row.price, row.todays_multiple, row.required_growth, row.realized_fcf_per_share_cagr, row.price_return];
+  const figures = [free_cash_flow, net_cash, stock_based_compensation, shares_outstanding, row.price, row.todays_multiple, row.required_growth, row.realized_fcf_cagr, row.share_change, row.realized_share_change, row.price_return];
   // A figure blocked by an input repeats that input's outcome, so each is named once, under the input.
   const seen = new Set<string>();
   const named = figures.flatMap((figure, index) => {
@@ -568,7 +597,7 @@ export function renderBacktest(run: BacktestRun, doc: Readonly<{ ranOn: IsoDate;
   const lines = [
     `# FCF required-growth backtest, ${doc.ranOn}`,
     "",
-    `Generated by \`${doc.command}\`. Offline and dev only (#610). Inputs are the engine's selection as of the 10-K filing date + 1 day, with each SEC fact taken as public by the end of its filing date in New York. Prices are yfinance split-adjusted closes, never certified. Required growth is solved at that day's multiple with ADR 0006's model and the 10% required return. Realized growth is FY free cash flow per share to the 10-K five fiscal years later. The price return is annualized over five years, price only, with no dividends.`,
+    `Generated by \`${doc.command}\`. Offline and dev only (#610). Inputs are the engine's selection as of the 10-K filing date + 1 day, with each SEC fact taken as public by the end of its filing date in New York. Prices are yfinance split-adjusted closes, never certified. Required growth is the growth of total free cash flow that day's close requires at that day's multiple, with ADR 0006's model, the 10% required return and d, the share change stock-based compensation implies. Realized growth is the same total free cash flow's growth to the 10-K five fiscal years later; the realized share change over those years, buybacks included, sits beside d. The price return is annualized over five years, price only, with no dividends.`,
     "",
     "## Summary",
     "",
@@ -577,8 +606,8 @@ export function renderBacktest(run: BacktestRun, doc: Readonly<{ ranOn: IsoDate;
     ...(doc.notes.trim() === "" ? [] : [doc.notes.trim(), ""]),
     "## Rows",
     "",
-    "| Issuer | FY | Filed | As of | Free cash flow | Net cash | SBC | Shares | Close | Multiple | Required growth | Realized FCF/share CAGR, 5y | 5-year price return vs 10% hurdle | Named outcomes |",
-    "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+    "| Issuer | FY | Filed | As of | Free cash flow | Net cash | SBC | Shares | Close | Multiple | Required growth | Realized FCF CAGR, 5y | d, SBC share change | Realized share change, 5y | 5-year price return vs 10% hurdle | Named outcomes |",
+    "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ...run.rows.map(tableRow),
   ];
   if (run.issuers.length > 0) lines.push("", "## Issuers with no rows", "", ...run.issuers.map((issuer) => `- ${issuer.ticker}: **${issuer.outcome}** (${issuer.text})`));
