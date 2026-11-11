@@ -556,21 +556,40 @@ test("a reading slower than its deadline is no reading: one model call, and the 
 
 // The resolver reads any one word as a ticker, upper-casing it: "all" is ALL
 // (Allstate), "it" is IT (Gartner) (#623).
+// A ticker match carries the ticker in its labels; "nvidia" matches NVDA by
+// name.
+const byTicker = (ticker: string, read: string): ChatResolvedSubjectPreResolution => {
+  const base = resolved(ticker);
+  return { ...base, input_text: read, handoff: { ...base.handoff, display_labels: { primary: read, ticker: read } } };
+};
 const asTheResolverReads = {
   preResolveSubject: async ({ text }: { text: string }) => {
+    if (text.toLowerCase() === "nvidia") return { ...resolved("NVDA"), input_text: text };
     const read = /\s/u.test(text) ? text : text.toUpperCase();
-    return read === "ALL" || read === "IT" ? { ...resolved("NOW"), input_text: read } : preResolveSubject({ text: read });
+    if (read === "ALL" || read === "IT") return byTicker("NOW", read);
+    const found = await preResolveSubject({ text: read });
+    return found.status === "resolved" ? byTicker(read, read) : found;
   },
 };
 
-test("a word not in capitals after a company is a reply, not a ticker: the company carries over (#623)", async () => {
-  for (const reply of ["all", "it", "All"]) {
+test("a lowercase word that matches only as a ticker after a company is a reply: the company carries over (#623)", async () => {
+  for (const reply of ["all", "it"]) {
     assert.deepEqual((await subjectsForTurn(reply, { ...asTheResolverReads, loadPriorSubjects: priorOf("AAPL") })).tickers, ["AAPL"], reply);
   }
 });
 
 test("a lowercase ticker as a thread's first message is that company (#623)", async () => {
-  assert.deepEqual((await subjectsForTurn("aapl", { ...asTheResolverReads, loadPriorSubjects: priorOf() })).tickers, ["AAPL"]);
+  for (const first of ["aapl", "Aapl"]) {
+    assert.deepEqual((await subjectsForTurn(first, { ...asTheResolverReads, loadPriorSubjects: priorOf() })).tickers, ["AAPL"], first);
+  }
+});
+
+test("a company named by name, or a word in capitals, after a company is still asked about (#623)", async () => {
+  const aapl = { ...asTheResolverReads, loadPriorSubjects: priorOf("AAPL") };
+  for (const name of ["nvidia", "Nvidia"]) {
+    assert.match(await askedFor(name, aapl), /Add NVDA to AAPL, or look at NVDA alone\?/u, name);
+  }
+  assert.match(await askedFor("All", aapl), /Add ALL to AAPL, or look at ALL alone\?/u, "All");
 });
 
 test("a capitalized ticker after a company is still asked about (#623)", async () => {

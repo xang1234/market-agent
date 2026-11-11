@@ -1186,6 +1186,19 @@ export function labelList(labels: ReadonlyArray<string>): string {
   return labels.length < 2 ? labels.join("") : `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
 }
 
+// The resolver upper-cases any one word into a ticker, so a lowercase word
+// that matched only as a ticker ("all" is ALL, "it" is IT) names a company
+// only as the thread's first: after one, it is a reply to it (#623). A name
+// match ("nvidia") or a word typed in capitals ("MSFT", "All") still names a
+// company, and adding it to the thread's is asked as before.
+async function isReplyAfterCompany(
+  text: string,
+  whole: ChatResolvedSubjectPreResolution,
+  prior: Promise<ReadonlyArray<ChatResolvedSubjectPreResolution>>,
+): Promise<boolean> {
+  return text === text.toLowerCase() && whole.handoff.display_labels.ticker === text.toUpperCase() && (await prior).length > 0;
+}
+
 async function resolveNamedSubjects(
   text: string,
   preResolve: ChatSubjectPreResolver,
@@ -1194,12 +1207,8 @@ async function resolveNamedSubjects(
   // The whole message first, so a bare ticker, a company name, or a theme
   // resolves exactly as before; otherwise every ticker it mentions, in order,
   // but one written only inside a metric's or facet's name ("FREE CASH FLOW").
-  // The resolver reads any one word as a ticker, so one not in capitals
-  // ("aapl") names a company only as the thread's first: after one, "all",
-  // "All" or "it" is a reply to it (#623).
-  const reply = !/\s/u.test(text) && text !== text.toUpperCase() && (await prior).length > 0;
-  const whole = reply ? null : await preResolve({ text });
-  if (whole?.status === "resolved") return namesOf([whole]);
+  const whole = await preResolve({ text });
+  if (whole.status === "resolved" && !(await isReplyAfterCompany(text, whole, prior))) return namesOf([whole]);
   const named = companyNameIn(text);
   return namesOf(await Promise.all(extractSubjectMentions(text).filter((mention) => named(mention)).map((mention) => preResolve({ text: mention }))));
 }
