@@ -35,9 +35,10 @@ test("scope:eval re-records only with no arguments, and measures only with well-
   assert.deepEqual(parseArgs(["--cases=31,57", "--runs=10"]), { mode: "measure", ids: [31, 57], runs: 10 });
   assert.deepEqual(parseArgs(["--runs=3"]), { mode: "measure", ids: null, runs: 3 });
   assert.deepEqual(parseArgs(["--cases=31"]), { mode: "measure", ids: [31], runs: 1 });
+  assert.deepEqual(parseArgs(["--runs=50"]), { mode: "measure", ids: null, runs: 50 });
   for (const argv of [
     ["--runs", "10"], ["10"], ["--case=31"], ["--verbose"], ["--runs=1", "--runs=2"],
-    ["--runs=0"], ["--runs=-1"], ["--runs=abc"], ["--runs=1.5"], ["--runs="],
+    ["--runs=0"], ["--runs=51"], ["--runs=-1"], ["--runs=abc"], ["--runs=1.5"], ["--runs="],
     ["--cases="], ["--cases=#31"], ["--cases=31,"], ["--cases=57,57"],
   ]) assert.throws(() => parseArgs(argv), Error, argv.join(" "));
 });

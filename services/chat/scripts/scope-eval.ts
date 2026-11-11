@@ -150,10 +150,13 @@ async function liveAsker() {
   return Object.assign(ask, { models });
 }
 
+const MAX_RUNS = 50;
+
 export type EvalArgs = { mode: "record" } | { mode: "measure"; ids: number[] | null; runs: number };
 
 // Anything but no arguments or well-formed --cases= and --runs= throws, so a
-// typo never falls through to re-recording every reply.
+// typo never falls through to re-recording every reply. measure asks a
+// question's runs all at once, so --runs is capped at MAX_RUNS concurrent calls.
 export function parseArgs(argv: string[]): EvalArgs {
   if (argv.length === 0) return { mode: "record" };
   const flags = new Map<string, string>();
@@ -169,7 +172,9 @@ export function parseArgs(argv: string[]): EvalArgs {
   const cases = flags.get("cases");
   const ids = cases === undefined ? null : cases.split(",").map((id) => count(id, "--cases ids"));
   if (ids !== null && new Set(ids).size !== ids.length) throw new Error(`--cases repeats an id: ${cases}`);
-  return { mode: "measure", ids, runs: count(flags.get("runs") ?? "1", "--runs") };
+  const runs = count(flags.get("runs") ?? "1", "--runs");
+  if (runs > MAX_RUNS) throw new Error(`--runs must be at most ${MAX_RUNS}, got "${runs}"`);
+  return { mode: "measure", ids, runs };
 }
 
 export function selectCases(all: ScopeEvalCase[], ids: number[] | null): ScopeEvalCase[] {
