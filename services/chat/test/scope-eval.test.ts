@@ -68,3 +68,14 @@ test("a measured reply that fails, is cut off or is rejected is an error, not a 
   assert.match(lines[0]!, /^#15\tmiss 0\/1\terrors 2\t/);
   assert.match(lines.at(-1)!, /1 cases x 3 runs, asked concurrently/);
 });
+
+test("a question two cases share is asked once per run, and its errors count once", async (t) => {
+  const shared = cases.filter((evalCase) => evalCase.id === 52 || evalCase.id === 115);
+  assert.equal(shared[0]!.question, shared[1]!.question);
+  const lines: string[] = [];
+  t.mock.method(console, "log", (line: string) => lines.push(line));
+  let calls = 0;
+  assert.equal(await measure(shared, 2, async () => (calls++, { text: "", proposal: null })), 1);
+  assert.equal(calls, 2);
+  assert.match(lines.at(-1)!, /; 2 of 2 replies errored$/);
+});

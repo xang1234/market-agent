@@ -181,6 +181,7 @@ export function selectCases(all: ScopeEvalCase[], ids: number[] | null): ScopeEv
 
 // Each case's misses out of `runs` replies, all asked at once. A reply with no
 // proposal is counted apart as an error, not as a miss, and any error exits 1.
+// Cases that share a question share its replies, so errors are counted per reply.
 export async function measure(cases: ScopeEvalCase[], runs: number, ask: (question: string) => Promise<LiveReply>): Promise<number> {
   const started = Date.now();
   const repliesByQuestion = new Map<string, LiveReply[]>();
@@ -188,17 +189,17 @@ export async function measure(cases: ScopeEvalCase[], runs: number, ask: (questi
     repliesByQuestion.set(question, await Promise.all(Array.from({ length: runs }, () => ask(question))));
     process.stderr.write(`${repliesByQuestion.size} ${question}\n`);
   }
-  let errors = 0;
   for (const evalCase of cases) {
     const asked = repliesByQuestion.get(evalCase.question)!;
     const answered = asked.filter((reply) => reply.proposal !== null);
-    errors += asked.length - answered.length;
     const failures = answered.map((reply) => caseFailures(evalCase, reply.text));
     const misses = failures.filter((each) => each.length > 0).length;
     console.log(`#${evalCase.id}\tmiss ${misses}/${answered.length}\terrors ${asked.length - answered.length}\t${evalCase.question}`);
     for (const failure of new Set(failures.flat())) console.log(`\t${failure}`);
   }
-  console.log(`${cases.length} cases x ${runs} runs, asked concurrently, in ${Math.round((Date.now() - started) / 1000)} s`);
+  const replies = [...repliesByQuestion.values()].flat();
+  const errors = replies.filter((reply) => reply.proposal === null).length;
+  console.log(`${cases.length} cases x ${runs} runs, asked concurrently, in ${Math.round((Date.now() - started) / 1000)} s; ${errors} of ${replies.length} replies errored`);
   return errors === 0 ? 0 : 1;
 }
 
