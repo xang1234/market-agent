@@ -77,9 +77,12 @@ async function main(): Promise<void> {
   const { values, positionals } = parseArgs({ allowPositionals: true, options: { "annual-history-years": { type: "string" } } });
   const years = Number(values["annual-history-years"] ?? 0);
   if (!Number.isInteger(years) || years < 0) throw new Error("--annual-history-years needs a whole number of years, e.g. 10");
-  const host = new URL(databaseUrl).hostname;
-  if (years > 0 && host !== "localhost" && host !== "127.0.0.1") {
-    throw new Error(`--annual-history-years is for a dev DB only: DATABASE_URL must point at localhost or 127.0.0.1, not ${host}`);
+  if (years > 0) {
+    // URL.parse, unlike new URL, has no error to carry the URL and its password into the log.
+    const host = URL.parse(databaseUrl)?.hostname;
+    if (host !== "localhost" && host !== "127.0.0.1") {
+      throw new Error(`--annual-history-years is for a dev DB only: DATABASE_URL must point at localhost or 127.0.0.1, not ${host || "an unreadable URL"}`);
+    }
   }
   const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
   // Paced under SEC's fair-access rate, backing off on a 429.

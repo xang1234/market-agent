@@ -34,3 +34,10 @@ test("--annual-history-years passes the guard for a database on this machine", (
     assert.match(stderr, /ECONNREFUSED/u);
   }
 });
+
+test("--annual-history-years refuses a DATABASE_URL it cannot read without printing it", () => {
+  const { status, stderr } = run("postgresql://u:hunter2@[bad/market_agent", ["--annual-history-years", "11"]);
+  assert.equal(status, 1);
+  assert.match(stderr, /--annual-history-years is for a dev DB only: DATABASE_URL must point at localhost or 127\.0\.0\.1, not an unreadable URL/u);
+  assert.doesNotMatch(stderr, /hunter2/u);
+});
