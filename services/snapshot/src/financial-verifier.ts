@@ -205,6 +205,7 @@ export function verifyFinancialUnit(records: FinancialUnitRecords, unitId: Local
   }
   if (failures.length > 0) return { ok: false, failures };
 
+  if (records.missing_input_candidates === null) return failed("financial_verification_unavailable", { run_id: run.run_id, reason: "gap_reread_failed" });
   for (const slot of unprovenAbsences(plan, closureNodes, bindings.value, records.missing_input_candidates)) {
     failures.push(failure("financial_binding_mismatch", { run_id: run.run_id, input_slot: slot, field: "gap_reason" }));
   }

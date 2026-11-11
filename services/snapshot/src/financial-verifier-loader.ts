@@ -148,7 +148,8 @@ export type FinancialUnitRecords = Readonly<{
   computations: ReadonlyArray<LoadedComputation>;
   results: ReadonlyArray<LoadedResult>;
   subject_names: ReadonlyArray<LoadedSubjectName>;
-  missing_input_candidates: ReadonlyArray<LoadedGapCandidates>;
+  /** Null when the reread failed: the seal cannot prove a gap, so it is unavailable. */
+  missing_input_candidates: ReadonlyArray<LoadedGapCandidates> | null;
 }>;
 
 const ISO_UTC = `'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'`;
@@ -247,7 +248,7 @@ export async function loadFinancialUnitRecords(db: QueryExecutor, claim: Financi
   )).rows;
 
   const subject_names = await loadSubjectNames(db, planSubjectRefs(plan));
-  const missing_input_candidates = await rereadMissingInputs(db, plan, bindings, claim.owner_user_id);
+  const missing_input_candidates = await rereadMissingInputs(db, plan, bindings, claim.owner_user_id).catch(() => null);
 
   return { run: runRow, plan: { plan, semantic_hash }, unit, bindings, evidence, price_observations, split_histories, computations, results, subject_names, missing_input_candidates };
 }

@@ -18,6 +18,7 @@ import { secCompanyFetcher } from "../../fundamentals/test/fakes.ts";
 import { aaplWithCash } from "../../fundamentals/test/sec-call-inputs-fixture.ts";
 import { loadUnitBoundFacts } from "../src/financial-verifier-loader.ts";
 import { verifyFinancialSeal } from "../src/financial-verifier.ts";
+import type { QueryExecutor } from "../../shared/src/http.ts";
 
 const SNAPSHOT = "6f000000-0000-4000-8000-0000000000f2";
 const AAPL = randomUUID();
@@ -84,6 +85,7 @@ test("a missing_input gap a sum leaves out is proven at the seal", { timeout: 30
   const seal = async (
     evidence: (executor: SqlExecutor) => FinancialEvidencePort,
     plan = aaplBalancePlan(),
+    sealDb: QueryExecutor = db,
   ) => {
     const { runId, lease } = await leasedRun(db, plan);
     const report = await executeRun({ client: db, lease, plan, authority: authorityFor(), evidence, parent_limits: {} });
@@ -93,7 +95,7 @@ test("a missing_input gap a sum leaves out is proven at the seal", { timeout: 30
     const facts = await loadUnitBoundFacts(db, runId, "aapl");
     await db.query("begin");
     try {
-      const outcome = await verifyFinancialSeal(db, { owner_user_id: IDS.owner, run_id: runId, unit_id: "aapl" }, {
+      const outcome = await verifyFinancialSeal(sealDb, { owner_user_id: IDS.owner, run_id: runId, unit_id: "aapl" }, {
         snapshot_id: SNAPSHOT,
         manifest: { fact_refs: facts.map((fact) => fact.fact_id), source_ids: [...new Set(facts.map((fact) => fact.source_id))], as_of: new Date(plan.time.knowledge_cutoff).toISOString() },
       });
@@ -181,4 +183,14 @@ test("a missing_input gap a sum leaves out is proven at the seal", { timeout: 30
     ]);
   });
 
+  await t.test("a reread the database fails leaves the seal unavailable", async () => {
+    const failing: QueryExecutor = {
+      query: (text, values) => /order by f\.period_end nulls first/u.test(text) ? Promise.reject(new Error("connection reset")) : db.query(text, values),
+    } as QueryExecutor;
+    const { gaps, outcome } = await seal(createEvidenceFinancialPort, aaplBalancePlan(), failing);
+    assert.deepEqual(gaps, TOLERATED);
+    assert.deepEqual(!outcome.ok && outcome.failures.map((failure) => [failure.reason_code, failure.details.reason]), [
+      ["financial_verification_unavailable", "gap_reread_failed"],
+    ]);
+  });
 });
