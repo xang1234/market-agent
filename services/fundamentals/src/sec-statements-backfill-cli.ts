@@ -16,6 +16,7 @@
 
 import { parseArgs } from "node:util";
 import { Pool } from "pg";
+import { parse as parseConnectionString } from "pg-connection-string";
 import { logPoolErrors } from "../../shared/src/pool-client.ts";
 
 import { FROZEN_ISSUER_IDS } from "../../shared/src/golden-issuers.ts";
@@ -70,6 +71,19 @@ export async function backfillSecStatements(
   return { failures };
 }
 
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+
+// The host pg connects to: a ?host= overrides the URL's host, and with neither
+// pg falls back to PGHOST, then localhost. A path is a unix socket.
+function databaseHost(databaseUrl: string): string | undefined {
+  try {
+    return parseConnectionString(databaseUrl).host || process.env.PGHOST || "localhost";
+  } catch {
+    // The parse error is dropped so the URL and its password stay out of the log.
+    return undefined;
+  }
+}
+
 async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
   const userAgent = process.env.SEC_EDGAR_USER_AGENT;
@@ -78,10 +92,9 @@ async function main(): Promise<void> {
   const years = Number(values["annual-history-years"] ?? 0);
   if (!Number.isInteger(years) || years < 0) throw new Error("--annual-history-years needs a whole number of years, e.g. 10");
   if (years > 0) {
-    // URL.parse, unlike new URL, has no error to carry the URL and its password into the log.
-    const host = URL.parse(databaseUrl)?.hostname;
-    if (host !== "localhost" && host !== "127.0.0.1") {
-      throw new Error(`--annual-history-years is for a dev DB only: DATABASE_URL must point at localhost or 127.0.0.1, not ${host || "an unreadable URL"}`);
+    const host = databaseHost(databaseUrl);
+    if (host === undefined || !(host.startsWith("/") || LOCAL_HOSTS.has(host.toLowerCase()))) {
+      throw new Error(`--annual-history-years is for a dev DB only: DATABASE_URL must point at this machine, not ${host ?? "an unreadable URL"}`);
     }
   }
   const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
