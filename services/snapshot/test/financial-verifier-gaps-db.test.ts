@@ -186,6 +186,28 @@ test("a missing_input gap a sum leaves out is proven at the seal", { timeout: 30
     ]);
   });
 
+  await t.test("the seal rereads only the gaps a sum in its unit leaves out", async () => {
+    const base = aaplBalancePlan();
+    const validated = validateFinancialPlan({
+      ...base,
+      operations: [...base.operations, { node_id: "borrowings_alone", operation: "reported_metric", operation_version: "reported_metric.v1", subject_slot: "aapl", metric_key: "short_term_borrowings", period: LATEST }],
+      outputs: [...base.outputs, { output_id: "borrowings_alone", node_id: "borrowings_alone", unit_id: "other" }],
+      publication_units: [...base.publication_units, { unit_id: "other", kind: "chat_section" }],
+    });
+    assert.ok(validated.ok, JSON.stringify(!validated.ok && validated.issues));
+    let rereads = 0;
+    const counting = {
+      query: (text: string, values?: unknown[]) => {
+        if (/order by f\.period_end nulls first/u.test(text)) rereads += 1;
+        return db.query(text, values);
+      },
+    } as QueryExecutor;
+    const { gaps, outcome } = await seal(createEvidenceFinancialPort, validated.value, counting);
+    assert.deepEqual(gaps, ["borrowings_alone:missing_input", ...TOLERATED]);
+    assert.ok(outcome.ok, JSON.stringify(!outcome.ok && outcome.failures));
+    assert.equal(rereads, 3, "only net cash's and total debt's three gaps are reread");
+  });
+
   /** `db`, with the gap reread's candidate query replaced by `replacement`. */
   const rereadFails = (replacement: () => Promise<never>): QueryExecutor => ({
     query: (text: string, values?: unknown[]) => /order by f\.period_end nulls first/u.test(text) ? replacement() : db.query(text, values),

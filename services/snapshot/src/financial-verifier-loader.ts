@@ -8,13 +8,13 @@
 // input's subject resolves to now, with its splits and zone. Each bound
 // input's source comes with its kind, and the run with the source classes it
 // was granted, so the seal re-checks each input's class. Each missing_input
-// gap's slot is reread through the evidence repository's authorized candidate
-// read, the one binding uses, since a sum may leave that input out.
+// gap a sum in the unit leaves out is reread through the evidence
+// repository's authorized candidate read, the one binding uses.
 // Snapshot reads everything else from these tables directly; it never
 // imports the engine.
 
 import { listFinancialInputCandidates } from "../../evidence/src/financial-input-repo.ts";
-import { validateFinancialPlan } from "../../financial-core/src/index.ts";
+import { OPERATION_REGISTRY, operationDependencies, unitClosures, validateFinancialPlan } from "../../financial-core/src/index.ts";
 import { loadSubjectSplitHistory, type SubjectSplitHistory } from "../../market/src/split-history.ts";
 import { isDatabaseError } from "../../shared/src/database-error.ts";
 import type { QueryExecutor } from "../../shared/src/http.ts";
@@ -131,7 +131,7 @@ export type LoadedResult = Readonly<{
 /** A subject's current display name: an issuer's legal name, or a listing's ticker and venue. */
 export type LoadedSubjectName = Readonly<{ kind: "issuer" | "listing"; id: string; name: string }>;
 
-/** A missing_input gap's slot, reread now as binding read it: the period of each authorized candidate. */
+/** A missing_input gap's slot that a sum leaves out, reread now as binding read it: the period of each authorized candidate. */
 export type LoadedGapCandidates = Readonly<{
   input_slot: string;
   candidates: ReadonlyArray<Readonly<{ fiscal_year: number | null; fiscal_period: string | null; period_end: string | null }>>;
@@ -255,7 +255,7 @@ export async function loadFinancialUnitRecords(db: QueryExecutor, claim: Financi
   await db.query("savepoint gap_reread");
   let missing_input_candidates: FinancialUnitRecords["missing_input_candidates"];
   try {
-    missing_input_candidates = await rereadMissingInputs(db, plan, bindings, claim.owner_user_id);
+    missing_input_candidates = await rereadMissingInputs(db, plan, claim.unit_id, bindings, claim.owner_user_id);
   } catch (error) {
     if (!isDatabaseError(error)) throw error;
     await db.query("rollback to savepoint gap_reread");
@@ -267,15 +267,19 @@ export async function loadFinancialUnitRecords(db: QueryExecutor, claim: Financi
 }
 
 /**
- * Each missing_input gap's slot, reread as binding read it. An invalid plan
- * rereads nothing: verifyFinancialUnit rejects it (financial_plan_mismatch)
- * before it reads these rereads.
+ * Each missing_input gap a sum in the unit's closure leaves out, reread as
+ * binding read it. An invalid plan rereads nothing: verifyFinancialUnit
+ * rejects it (financial_plan_mismatch) before it reads these rereads.
  */
-async function rereadMissingInputs(db: QueryExecutor, plan: unknown, bindings: ReadonlyArray<LoadedBinding>, owner: string): Promise<LoadedGapCandidates[]> {
+async function rereadMissingInputs(db: QueryExecutor, plan: unknown, unitId: string, bindings: ReadonlyArray<LoadedBinding>, owner: string): Promise<LoadedGapCandidates[]> {
   const validated = validateFinancialPlan(plan);
   if (!validated.ok) return [];
   const { operations, subjects, limits } = validated.value;
-  const missing = new Set(bindings.flatMap((row) => row.binding_status === "gap" && row.gap_reason === "missing_input" ? [row.input_slot] : []));
+  const closure = new Set(unitClosures(validated.value).get(unitId)?.node_ids);
+  const components = new Set(operations.flatMap((node) =>
+    closure.has(node.node_id) && OPERATION_REGISTRY[node.operation].tolerates_missing_operands === "absent_inputs" ? operationDependencies(node) : []));
+  const missing = new Set(bindings.flatMap((row) =>
+    row.binding_status === "gap" && row.gap_reason === "missing_input" && components.has(row.input_slot) ? [row.input_slot] : []));
   const reads: LoadedGapCandidates[] = [];
   for (const node of operations) {
     if (node.operation !== "reported_metric" || !missing.has(node.node_id)) continue;
