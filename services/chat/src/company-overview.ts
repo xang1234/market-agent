@@ -1,10 +1,10 @@
 import { coverSameMonths, DEFAULT_EXECUTION_LIMITS, dayNumber, type FinancialPlan, type FinancialRuntimeAuthority, type FinancialSubjectRef } from "../../financial-core/src/index.ts";
-import { isDatabaseError } from "../../financial-engine/src/evidence-adapter.ts";
 import { buildDeterministicPlan, type PlanningContext, type PlanningResult, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort, InputCandidate, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import { issuerLabels } from "../../financial-engine/src/request.ts";
 import { reportedBy } from "../../financial-engine/src/select-inputs.ts";
 import { createSqlPeerSetResolver } from "../../fundamentals/src/peer-set-resolver.ts";
+import { isDatabaseError } from "../../shared/src/database-error.ts";
 import { MAX_TURN_SUBJECTS } from "./coordinator.ts";
 import { FISCAL_PERIODS, QUARTERS_SHOWN, type FiscalQuarter } from "./research-scope.ts";
 import type { ReadPeriod } from "./scope-figures.ts";
