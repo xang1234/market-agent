@@ -124,7 +124,7 @@
     },
     {
       "match": "Question: \"Why was NVDA's gross margin above the high end of its outlook?\"",
-      "text": "{\"metrics\":[],\"asks\":[\"explains\",\"margins\",\"guidance\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"gross_margin\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\"]}}"
+      "text": "{\"metrics\":[],\"asks\":[\"explains\",\"margins\"],\"turns_off\":{\"facets\":[],\"metrics\":[]},\"income_items\":[\"gross_margin\"],\"period\":{\"kind\":\"none\"},\"companies\":{\"kind\":\"as_named\",\"names\":[\"NVDA\"]}}"
     },
     {
       "match": "Question: \"Why did NVDA's revenue fall, without using guidance?\"",

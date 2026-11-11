@@ -10,6 +10,15 @@
 //
 //   npm run scope:eval
 //
+// To measure instead, without rewriting the replies, ask a subset (or all) of
+// the cases N times each and print each case's misses out of N:
+//
+//   npm run scope:eval -- --cases=31,57 --runs=10
+//   npm run scope:eval -- --runs=3
+//
+// That makes runs x (unique questions) live calls in all; --runs caps only
+// how many one question asks at once.
+//
 // Models come from LLM_SETTINGS_ENV_FILE, by default the repo's .env.dev (a
 // worktree has none: point it at the main checkout's).
 import { readFileSync, writeFileSync } from "node:fs";
@@ -99,6 +108,26 @@ export function caseFailures(evalCase: ScopeEvalCase, reply: string | undefined)
 
 async function recordLiveReplies(): Promise<number> {
   const cases = JSON.parse(readFileSync(CASES_FILE, "utf8")) as ScopeEvalCase[];
+  const ask = await liveAsker();
+  const replies: ScopeEvalReplies["replies"] = [];
+  for (const question of new Set(cases.map((evalCase) => evalCase.question))) {
+    replies.push({ match: proposalQuestion(question), text: (await ask(question)).text });
+    process.stderr.write(`${replies.length} ${question}\n`);
+  }
+  const recorded: ScopeEvalReplies = { model: [...ask.models].join(", "), recorded: new Date().toISOString().slice(0, 10), replies };
+  writeFileSync(REPLIES_FILE, `${JSON.stringify(recorded, null, 2)}\n`);
+  const failing = cases.map((evalCase) => caseFailures(evalCase, replyTo(recorded, evalCase.question))).filter((failures) => failures.length > 0);
+  for (const failure of failing.flat()) console.log(failure);
+  const rejected = [...new Set(cases.map((evalCase) => evalCase.question))].filter((question) => parseProposal(replyTo(recorded, question)!, question) === null).length;
+  console.log(`${recorded.model}: ${cases.length - failing.length} of ${cases.length} cases as expected; ${rejected} of ${replies.length} replies rejected`);
+  return failing.length === 0 ? 0 : 1;
+}
+
+// A live reply's text, and the proposal proposeScope made of it: null when the
+// call failed, the reply was cut off or parseProposal rejected it.
+export type LiveReply = { text: string; proposal: ScopeProposal | null };
+
+async function liveAsker() {
   const env: Record<string, string | undefined> = {
     ...process.env,
     LLM_SETTINGS_ENV_FILE: process.env.LLM_SETTINGS_ENV_FILE ?? join(ROOT, ".env.dev"),
@@ -107,10 +136,9 @@ async function recordLiveReplies(): Promise<number> {
   };
   const live = await createDefaultPiLlmChatClient();
   const models = new Set<string>();
-  const replies: ScopeEvalReplies["replies"] = [];
-  for (const question of new Set(cases.map((evalCase) => evalCase.question))) {
+  const ask = async (question: string): Promise<LiveReply> => {
     let text = "";
-    await proposeScope({
+    const proposal = await proposeScope({
       question,
       env,
       createClient: () => async (deployment, request, options) => {
@@ -120,18 +148,89 @@ async function recordLiveReplies(): Promise<number> {
         return result;
       },
     });
-    replies.push({ match: proposalQuestion(question), text });
-    process.stderr.write(`${replies.length} ${question}\n`);
-  }
-  const recorded: ScopeEvalReplies = { model: [...models].join(", "), recorded: new Date().toISOString().slice(0, 10), replies };
-  writeFileSync(REPLIES_FILE, `${JSON.stringify(recorded, null, 2)}\n`);
-  const failing = cases.map((evalCase) => caseFailures(evalCase, replyTo(recorded, evalCase.question))).filter((failures) => failures.length > 0);
-  for (const failure of failing.flat()) console.log(failure);
-  const rejected = [...new Set(cases.map((evalCase) => evalCase.question))].filter((question) => parseProposal(replyTo(recorded, question)!, question) === null).length;
-  console.log(`${recorded.model}: ${cases.length - failing.length} of ${cases.length} cases as expected; ${rejected} of ${replies.length} replies rejected`);
-  return failing.length === 0 ? 0 : 1;
+    return { text, proposal };
+  };
+  return Object.assign(ask, { models });
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  process.exitCode = await recordLiveReplies();
+const MAX_RUNS = 50;
+
+export type EvalArgs = { mode: "record" } | { mode: "measure"; ids: number[] | null; runs: number };
+
+// Anything but no arguments or well-formed --cases= and --runs= throws, so a
+// typo never falls through to re-recording every reply. measure asks a
+// question's runs all at once, so --runs is capped at MAX_RUNS concurrent calls.
+export function parseArgs(argv: string[]): EvalArgs {
+  if (argv.length === 0) return { mode: "record" };
+  const flags = new Map<string, string>();
+  for (const arg of argv) {
+    const match = /^--(cases|runs)=(.*)$/.exec(arg);
+    if (match === null || flags.has(match[1]!)) throw new Error(`unexpected argument ${arg}; use --cases=<id,...> and --runs=<n>`);
+    flags.set(match[1]!, match[2]!);
+  }
+  const count = (value: string, what: string) => {
+    if (!/^[1-9]\d*$/.test(value)) throw new Error(`${what} must be an integer of at least 1, got "${value}"`);
+    return Number(value);
+  };
+  const cases = flags.get("cases");
+  const ids = cases === undefined ? null : cases.split(",").map((id) => count(id, "--cases ids"));
+  if (ids !== null && new Set(ids).size !== ids.length) throw new Error(`--cases repeats an id: ${cases}`);
+  const runs = count(flags.get("runs") ?? "1", "--runs");
+  if (runs > MAX_RUNS) throw new Error(`--runs must be at most ${MAX_RUNS}, got "${flags.get("runs")}"`);
+  return { mode: "measure", ids, runs };
 }
+
+export function selectCases(all: ScopeEvalCase[], ids: number[] | null): ScopeEvalCase[] {
+  if (ids === null) return all;
+  const unmatched = ids.filter((id) => !all.some((evalCase) => evalCase.id === id));
+  if (unmatched.length > 0) throw new Error(`no case ${unmatched.join(", ")}`);
+  return all.filter((evalCase) => ids.includes(evalCase.id));
+}
+
+// Each case's misses out of `runs` replies, all asked at once. A reply with no
+// proposal is counted apart as an error, not as a miss, and any error exits 1.
+// Cases that share a question share its replies, so their rows repeat its
+// errors (marked "shared"); the summary counts errors once per reply.
+export async function measure(cases: ScopeEvalCase[], runs: number, ask: (question: string) => Promise<LiveReply>): Promise<number> {
+  const started = Date.now();
+  const repliesByQuestion = new Map<string, LiveReply[]>();
+  for (const question of new Set(cases.map((evalCase) => evalCase.question))) {
+    repliesByQuestion.set(question, await Promise.all(Array.from({ length: runs }, () => ask(question))));
+    process.stderr.write(`${repliesByQuestion.size} ${question}\n`);
+  }
+  for (const evalCase of cases) {
+    const asked = repliesByQuestion.get(evalCase.question)!;
+    const answered = asked.filter((reply) => reply.proposal !== null);
+    const failures = answered.map((reply) => caseFailures(evalCase, reply.text));
+    const misses = failures.filter((each) => each.length > 0).length;
+    const shared = cases.some((other) => other !== evalCase && other.question === evalCase.question) ? " shared" : "";
+    console.log(`#${evalCase.id}\tmiss ${misses}/${answered.length}\terrors ${asked.length - answered.length}${shared}\t${evalCase.question}`);
+    for (const failure of new Set(failures.flat())) console.log(`\t${failure}`);
+  }
+  const replies = [...repliesByQuestion.values()].flat();
+  const errors = replies.filter((reply) => reply.proposal === null).length;
+  console.log(`${cases.length} cases x ${runs} runs, asked concurrently, in ${Math.round((Date.now() - started) / 1000)} s; ${errors} of ${replies.length} replies errored`);
+  return errors === 0 ? 0 : 1;
+}
+
+async function main(argv: string[]): Promise<number> {
+  let args: EvalArgs;
+  let cases: ScopeEvalCase[] = [];
+  try {
+    args = parseArgs(argv);
+    if (args.mode === "measure") cases = selectCases(JSON.parse(readFileSync(CASES_FILE, "utf8")) as ScopeEvalCase[], args.ids);
+  } catch (error) {
+    console.error(`scope:eval: ${(error as Error).message}`);
+    return 2;
+  }
+  if (args.mode === "record") return recordLiveReplies();
+  const ask = await liveAsker();
+  const code = await measure(cases, args.runs, ask);
+  console.log([...ask.models].join(", "));
+  return code;
+}
+
+// exitCode, not process.exit, so a long stderr can drain to a pipe before the
+// process ends. scope-eval.test.ts pins only the exit code: its short stderr
+// drains either way.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) process.exitCode = await main(process.argv.slice(2));
