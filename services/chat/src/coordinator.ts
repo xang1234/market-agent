@@ -1194,10 +1194,10 @@ async function resolveNamedSubjects(
   // The whole message first, so a bare ticker, a company name, or a theme
   // resolves exactly as before; otherwise every ticker it mentions, in order,
   // but one written only inside a metric's or facet's name ("FREE CASH FLOW").
-  // The resolver reads any one word as a ticker, so a lowercase one ("aapl")
-  // names a company only as the thread's first: after one, "all" or "it" is
-  // a reply to it (#623).
-  const reply = !/\s/u.test(text) && text === text.toLowerCase() && (await prior).length > 0;
+  // The resolver reads any one word as a ticker, so one not in capitals
+  // ("aapl") names a company only as the thread's first: after one, "all",
+  // "All" or "it" is a reply to it (#623).
+  const reply = !/\s/u.test(text) && text !== text.toUpperCase() && (await prior).length > 0;
   const whole = reply ? null : await preResolve({ text });
   if (whole?.status === "resolved") return namesOf([whole]);
   const named = companyNameIn(text);

@@ -563,8 +563,8 @@ const asTheResolverReads = {
   },
 };
 
-test("a lowercase word after a company is a reply, not a ticker: the company carries over (#623)", async () => {
-  for (const reply of ["all", "it"]) {
+test("a word not in capitals after a company is a reply, not a ticker: the company carries over (#623)", async () => {
+  for (const reply of ["all", "it", "All"]) {
     assert.deepEqual((await subjectsForTurn(reply, { ...asTheResolverReads, loadPriorSubjects: priorOf("AAPL") })).tickers, ["AAPL"], reply);
   }
 });
