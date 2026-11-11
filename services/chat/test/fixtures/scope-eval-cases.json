@@ -218,7 +218,8 @@
     "question": "Why was NVDA's gross margin above the high end of its outlook?",
     "companies": ["NVDA"],
     "prior": null,
-    "expected": {"route":"derived_margin","reads":"derived_margin","peers":false,"segments":false,"margin_trend":false,"margins":true,"metrics":["income_statement"],"guidance":true,"explains":true,"income_items":["gross_margin"],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"period":"none"}
+    "expected": {"route":"derived_margin","reads":"derived_margin","peers":false,"segments":false,"margin_trend":false,"margins":true,"metrics":["income_statement"],"guidance":false,"explains":true,"income_items":["gross_margin"],"fiscal_year":null,"fiscal_quarter":null,"price_window":null,"benchmark":false,"period":"none"},
+    "note": "A why-question about beating the outlook asks for the cause, not for the guidance itself, as #29 and #30 read it (owner decision, #608)."
   },
   {
     "id": 32,
@@ -404,7 +405,8 @@
     "question": "Why did AMD's operating margin turn negative in Q2 2025?",
     "companies": ["AMD"],
     "prior": null,
-    "expected": {"route":"trend","reads":"trend","peers":false,"segments":false,"margin_trend":true,"margins":true,"metrics":["income_statement"],"guidance":false,"explains":true,"income_items":["operating_margin"],"fiscal_year":2025,"fiscal_quarter":"Q2 2025","price_window":null,"benchmark":false,"period":"fiscal_quarter"}
+    "expected": {"route":"trend","reads":"trend","peers":false,"segments":false,"margin_trend":true,"margins":true,"metrics":["income_statement"],"guidance":false,"explains":true,"income_items":["operating_margin"],"fiscal_year":2025,"fiscal_quarter":"Q2 2025","price_window":null,"benchmark":false,"period":"fiscal_quarter"},
+    "note": "Route trend is a pin: live samples split three ways, so #504 (edceaf63) pinned margin_trend until #511 settles it. The live model reads derived_margin (#608)."
   },
   {
     "id": 58,
