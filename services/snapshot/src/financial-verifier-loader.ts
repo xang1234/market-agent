@@ -253,7 +253,11 @@ export async function loadFinancialUnitRecords(db: QueryExecutor, claim: Financi
   return { run: runRow, plan: { plan, semantic_hash }, unit, bindings, evidence, price_observations, split_histories, computations, results, subject_names, missing_input_candidates };
 }
 
-/** Each missing_input gap's slot, reread as binding read it. An invalid plan rereads nothing: the verifier rejects it. */
+/**
+ * Each missing_input gap's slot, reread as binding read it. An invalid plan
+ * rereads nothing: verifyFinancialUnit rejects it (financial_plan_mismatch)
+ * before it reads these rereads.
+ */
 async function rereadMissingInputs(db: QueryExecutor, plan: unknown, bindings: ReadonlyArray<LoadedBinding>, owner: string): Promise<LoadedGapCandidates[]> {
   const validated = validateFinancialPlan(plan);
   if (!validated.ok) return [];

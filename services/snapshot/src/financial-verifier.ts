@@ -396,7 +396,10 @@ function bindingsFor(plan: FinancialPlan, records: FinancialUnitRecords): Bindin
  * for the period, so any candidate there, or a reread too long to see whole,
  * leaves the gap unproven. Every component of a sum has one period selector;
  * a latest one resolved to the period of the sum's bound components. With
- * none bound, the sum is missing itself and certifies no value.
+ * none bound, the sum is missing itself and certifies no value. A gap true
+ * at bind time fails here once the store holds its fact (a 10-K ingested
+ * before the seal): the run stays unsealed, and a later turn makes a new run
+ * that binds it.
  */
 function unprovenAbsences(
   plan: FinancialPlan,
