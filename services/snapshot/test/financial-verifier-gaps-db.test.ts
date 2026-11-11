@@ -188,10 +188,16 @@ test("a missing_input gap a sum leaves out is proven at the seal", { timeout: 30
 
   await t.test("the seal rereads only the gaps a sum in its unit leaves out", async () => {
     const base = aaplBalancePlan();
+    const borrowings = (nodeId: string) =>
+      ({ node_id: nodeId, operation: "reported_metric", operation_version: "reported_metric.v1", subject_slot: "aapl", metric_key: "short_term_borrowings", period: LATEST });
     const validated = validateFinancialPlan({
       ...base,
-      operations: [...base.operations, { node_id: "borrowings_alone", operation: "reported_metric", operation_version: "reported_metric.v1", subject_slot: "aapl", metric_key: "short_term_borrowings", period: LATEST }],
-      outputs: [...base.outputs, { output_id: "borrowings_alone", node_id: "borrowings_alone", unit_id: "other" }],
+      operations: [...base.operations, borrowings("borrowings_alone"), borrowings("borrowings_in_unit")],
+      outputs: [
+        ...base.outputs,
+        { output_id: "borrowings_alone", node_id: "borrowings_alone", unit_id: "other" },
+        { output_id: "borrowings_in_unit", node_id: "borrowings_in_unit", unit_id: "aapl" },
+      ],
       publication_units: [...base.publication_units, { unit_id: "other", kind: "chat_section" }],
     });
     assert.ok(validated.ok, JSON.stringify(!validated.ok && validated.issues));
@@ -203,9 +209,9 @@ test("a missing_input gap a sum leaves out is proven at the seal", { timeout: 30
       },
     } as QueryExecutor;
     const { gaps, outcome } = await seal(createEvidenceFinancialPort, validated.value, counting);
-    assert.deepEqual(gaps, ["borrowings_alone:missing_input", ...TOLERATED]);
+    assert.deepEqual(gaps, ["borrowings_alone:missing_input", "borrowings_in_unit:missing_input", ...TOLERATED]);
     assert.ok(outcome.ok, JSON.stringify(!outcome.ok && outcome.failures));
-    assert.equal(rereads, 3, "only net cash's and total debt's three gaps are reread");
+    assert.equal(rereads, 3, "only net cash's and total debt's three gaps are reread, not a gap under no sum in this unit or another");
   });
 
   /** `db`, with the gap reread's candidate query replaced by `replacement`. */
