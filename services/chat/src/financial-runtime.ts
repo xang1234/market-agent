@@ -72,7 +72,9 @@ import {
 export type ChatClarificationAnswer = Readonly<{ clarification_id: string; choice_id: string }>;
 
 export type ChatFinancialTurn =
-  | Readonly<{ kind: "clarification"; clarification: Clarification }>
+  // A metric or request clarification names the companies it asked about, so
+  // a typed reply ("all") continues them (#623).
+  | Readonly<{ kind: "clarification"; clarification: Clarification; subject_refs?: ReadonlyArray<FinancialSubjectRef> }>
   // A gap the turn declined with names the companies it was asked about and
   // saves its scope, so a follow-up continues them (#425). It is saved under
   // the id the turn's answer takes (message_id): an answer saved first keeps
@@ -196,10 +198,11 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       let overviewPeriod: ReadPeriod | null = null;
       // The choice a plan built with no model answers, for the defaults it names.
       let deterministic: PlanChoice | null = null;
+      // ponytail: a retry that resumes a reserved run does not plan, so it
+      // names the companies the message resolved, without a pick or peers.
+      const askedRefs = () => asked.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref] : []);
       const declinedGap = (reason: ChatGap) => {
-        // ponytail: a retry that resumes a reserved run does not plan, so its
-        // gap names the companies the message resolved, without a pick or peers.
-        const refs = asked.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref] : []);
+        const refs = askedRefs();
         // One about no company leaves the previous answer's companies and scope.
         if (refs.length === 0) return gap(reason, planned);
         return {
@@ -287,8 +290,14 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
         }, { authority, request_key: turnId }),
       });
       switch (outcome.status) {
-        case "clarification":
-          return { kind: "clarification", clarification: outcome.clarification };
+        case "clarification": {
+          // A company choice is answered by replaying the question with the
+          // pick; naming its resolved companies would make the replay read
+          // the still-ambiguous mention as a new company before the pick
+          // applies. Only a metric or request question is answered by typing.
+          const refs = outcome.clarification.kind === "subject" ? [] : askedRefs();
+          return { kind: "clarification", clarification: outcome.clarification, ...(refs.length > 0 ? { subject_refs: refs } : {}) };
+        }
         case "gap":
           // A commit that failed is an error of this turn, not an answer; the retry publishes it.
           if (outcome.reason === "publication_failed") throw new Error("the financial answer could not be committed");
