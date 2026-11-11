@@ -86,7 +86,9 @@ import { logPoolErrors, withPoolClient } from "../../shared/src/pool-client.ts";
 export const BACKTEST_YEARS = { first: 2016, last: 2021 } as const;
 const HORIZON_YEARS = 5;
 const ZONE = "America/New_York";
-const MAX_CLOSE_AGE_DAYS = 7;
+// A Saturday as-of day before a Monday holiday reaches Tuesday's close in 3 days; 4 leaves room for a rare second closed day.
+// A longer wait is a gap in the captures, so the row is stale_price rather than priced a week late.
+const MAX_CLOSE_AGE_DAYS = 4;
 const HURDLE = Number(DEFAULT_CALL_SETTINGS.required_return);
 // The backtest's own reader: public SEC facts carry no user, so this id only satisfies the candidate query's signature.
 const READER = "00000000-0000-4000-8000-000000000610";
