@@ -80,6 +80,28 @@ test("realized growth is total free cash flow, as required growth is, and buybac
   ]);
 });
 
+test("an as-of day with no trading takes the next close, never the filing day's", () => {
+  // 2018-02-15 is a Thursday filing, so the as-of day is Friday 2018-02-16; filed Friday, it is Saturday 2018-02-17.
+  const series = (dates: Array<[string, string]>): CloseSeries => ({ ...closes, closes: dates.map(([trade_date, close_text]) => ({ trade_date, close_text })) });
+  const row = (asOf: string, captured: CloseSeries) => backtestRow({
+    ticker: "HIST", fiscal_year: 2017, filed: "2018-02-16", label_offset: 0,
+    base: inputs(asOf, "2017-12-31", "1100000000", "100000000"),
+    later: inputs("2023-02-21", "2022-12-31", "1600000000", "200000000"),
+    closes: captured, splits: split,
+  });
+  const weekend = row("2018-02-17", series([["2018-02-16", "57.7245"], ["2018-02-19", "60"], ["2023-02-17", "90"], ["2023-02-21", "100"]]));
+  assert.deepEqual([weekend.price.text, weekend.required_growth.kind, weekend.price_return.text], [
+    "120 (2018-02-19, dev close, never certified)",
+    "value",
+    // From Monday's 60 to the first close on or after Sunday 2023-02-19: (100 / 60)^(1/5) - 1.
+    "10.76%, at or above",
+  ]);
+  const late = row("2018-02-17", series([["2018-02-16", "57.7245"], ["2018-02-26", "60"]]));
+  assert.deepEqual([late.price.kind === "outcome" && late.price.outcome, late.price.text], ["stale_price", "The first captured close on or after 2018-02-17 is 2018-02-26."]);
+  const after = row("2018-02-17", series([["2018-02-16", "57.7245"]]));
+  assert.deepEqual([after.price.kind === "outcome" && after.price.outcome, after.price.text], ["price_missing", "No captured close on or after 2018-02-17; captures end 2018-02-16."]);
+});
+
 test("a row whose statements are another fiscal year's is a period_mismatch", () => {
   const row = (fiscalYear: number, periodEnd: string, offset: number, laterEnd = "2026-12-31") => backtestRow({
     ticker: "HON", fiscal_year: fiscalYear, filed: "2022-02-11", label_offset: offset,

@@ -70,9 +70,12 @@ test("each FY 10-K's required growth, realized growth and price return, as of it
     "0.00%",
     "12.00%, at or above",
   ]);
+  // FY2018's 10-K was filed Friday 2019-02-15, so the as-of day is a Saturday and the close is Monday's.
+  const fy2018 = summary.find((row) => row[0] === 2018)!;
+  assert.deepEqual([fy2018[1], fy2018[2], String(fy2018[5]).match(/\((\d{4}-\d{2}-\d{2}),/u)?.[1]], ["2019-02-15", "2019-02-16", "2019-02-18"]);
   assert.deepEqual(summary.map((row) => row[0]), [2016, 2017, 2018, 2019, 2020, 2021]);
   // FY2021's 10-K was filed 2022-02-15; five years on is past the last capture.
-  assert.equal(summary.at(-1)![10], "stale_price: 5 years on: The latest captured close on or before 2027-02-16 is 2026-11-09.");
+  assert.equal(summary.at(-1)![10], "price_missing: 5 years on: No captured close on or after 2027-02-16; captures end 2026-11-09.");
   assert.deepEqual(run.rows.map((row) => row.kind === "read" && row.period), [null, null, null, null, null, null]);
   assert.deepEqual(run.issuers, [{ ticker: "NONE", outcome: "subject_unresolved", text: "0 active US common-stock listings" }]);
   assert.match(

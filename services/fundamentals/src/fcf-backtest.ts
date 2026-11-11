@@ -1,9 +1,10 @@
 // A point-in-time backtest of the Call's required growth (ADR 0006, #610). For
 // each issuer and each FY 10-K from 2016 to 2021 it reads the Call's inputs as
-// of the filing date + 1 day, solves the growth the close that day required at
-// that day's multiple, and sets beside it what followed: the FY free cash flow
-// five 10-Ks later, the share count's change over those years, and the price
-// five years later against the owner's 10% hurdle. Offline and dev only: nothing here is written.
+// of the filing date + 1 day, solves the growth the first close on or after
+// that day required at that close's multiple, and sets beside it what
+// followed: the FY free cash flow five 10-Ks later, the share count's change
+// over those years, and the price five years later against the owner's 10%
+// hurdle. Offline and dev only: nothing here is written.
 //
 // Required growth g is the growth of total free cash flow, net of the share
 // change d that stock-based compensation implies (ADR 0006: buybacks are paid
@@ -275,10 +276,10 @@ export async function inputsAsOf(client: SqlExecutor, issuerId: string, asOf: Is
 }
 
 /**
- * One issuer-year: the growth the as-of close required at that day's
- * multiple, the FY free cash flow CAGR and the annual share change to the
- * 10-K five fiscal years later, and the annualized price return over five
- * years.
+ * One issuer-year: the growth the first close on or after the as-of day
+ * required at that close's multiple, the FY free cash flow CAGR and the
+ * annual share change to the 10-K five fiscal years later, and the
+ * annualized price return over five years from that close.
  */
 export function backtestRow(input: Readonly<{
   ticker: string;
@@ -294,7 +295,7 @@ export function backtestRow(input: Readonly<{
   const { base, closes, splits } = input;
   const laterYear = input.fiscal_year + HORIZON_YEARS;
   const laterPeriod = "kind" in input.later ? null : periodCheck(input.later, laterYear, input.label_offset);
-  const close = closes.kind === "outcome" ? closes : closeOnOrBefore(closes, base.as_of);
+  const close = closes.kind === "outcome" ? closes : closeOnOrAfter(closes, base.as_of);
   const price = close.kind === "outcome" || closes.kind === "outcome" ? close : splitBasis(close, closes, splits);
   const { multiple, share_change, growth } = solve(base, price, closes);
   const realized = laterPeriod !== null
@@ -313,7 +314,7 @@ export function backtestRow(input: Readonly<{
     required_growth: growth,
     realized_fcf_cagr: realized.fcf,
     realized_share_change: realized.shares,
-    price_return: priceReturn(base.as_of, closes),
+    price_return: priceReturn(close, closes),
   };
 }
 
@@ -326,7 +327,8 @@ function solve(base: AsOfInputs, price: Restated | Figure, closes: CloseSeries |
   const { free_cash_flow, net_cash, stock_based_compensation, shares_outstanding } = base.exact as Required<AsOfInputs["exact"]>;
   const close = price as Restated;
   const inputs: ValuationInputs = {
-    call_date: base.as_of,
+    // The Call is made at the close it prices, which is on or after the as-of day the inputs are read at.
+    call_date: close.trade_date,
     free_cash_flow,
     period_end: base.fiscal_year_end!,
     shares: shares_outstanding,
@@ -339,7 +341,7 @@ function solve(base: AsOfInputs, price: Restated | Figure, closes: CloseSeries |
   const today = todaysMultiple(inputs);
   if (today.kind === "outcome") return { multiple: modelOutcome(today), share_change: modelOutcome(today), growth: modelOutcome(today) };
   const multiple: Figure = { kind: "value", value: toNumber(today.value), text: today.text };
-  // d, ADR 0006's default: last fiscal year's stock-based compensation over the market cap at the as-of date.
+  // d, ADR 0006's default: last fiscal year's stock-based compensation over the market cap at the close.
   const shareChange = divideRationals(stock_based_compensation, multiplyRationals(close.value, shares_outstanding)!);
   if (shareChange === null) {
     const limit = outcome("numeric_limit_exceeded", "share change");
@@ -377,11 +379,11 @@ function realizedGrowth(base: AsOfInputs, later: AsOfInputs | Absent, splits: Sp
   return { fcf: missing("free_cash_flow") ?? fcf(), shares: missing("shares_outstanding") ?? shares() };
 }
 
-function priceReturn(asOf: IsoDate, closes: CloseSeries | Absent): Figure {
+// From the close the Call priced to the first close on or after five years after it.
+function priceReturn(start: Restated | Absent, closes: CloseSeries | Absent): Figure {
   if (closes.kind === "outcome") return named("price", closes);
-  const start = closeOnOrBefore(closes, asOf);
-  const end = closeOnOrBefore(closes, yearsAfter(asOf, HORIZON_YEARS));
   if (start.kind === "outcome") return named("price", start);
+  const end = closeOnOrAfter(closes, yearsAfter(start.trade_date, HORIZON_YEARS));
   if (end.kind === "outcome") return outcome(end.outcome, `${HORIZON_YEARS} years on: ${end.text}`);
   const annual = (toNumber(end.value) / toNumber(start.value)) ** (1 / HORIZON_YEARS) - 1;
   const verdict = annual >= HURDLE ? "at or above" : "below";
@@ -412,12 +414,16 @@ function periodCheck(inputs: AsOfInputs, fiscalYear: number, offset: number): Ab
 const named = (input: string, figure: Figure): Figure => figure.kind === "outcome" ? { ...figure, input: figure.input ?? input } : figure;
 const modelOutcome = (result: ValuationOutcomeResult): Figure => outcome(result.outcome, result.text);
 
-/** The adjusted close on or before `date`, at most MAX_CLOSE_AGE_DAYS older. */
-function closeOnOrBefore(series: CloseSeries, date: IsoDate): Restated | Absent {
-  const close = series.closes.findLast((entry) => entry.trade_date <= date);
-  if (close === undefined) return { kind: "outcome", outcome: "price_missing", text: `No captured close on or before ${date}; captures start ${series.closes[0]?.trade_date ?? "nowhere"}.` };
-  if (daysBetween(close.trade_date, date) > MAX_CLOSE_AGE_DAYS) {
-    return { kind: "outcome", outcome: "stale_price", text: `The latest captured close on or before ${date} is ${close.trade_date}.` };
+/**
+ * The first adjusted close on or after `date`, at most MAX_CLOSE_AGE_DAYS
+ * later. Never an earlier one: the close of a filing day can precede the
+ * filing, and a weekend or holiday as-of day has no close of its own.
+ */
+function closeOnOrAfter(series: CloseSeries, date: IsoDate): Restated | Absent {
+  const close = series.closes.find((entry) => entry.trade_date >= date);
+  if (close === undefined) return { kind: "outcome", outcome: "price_missing", text: `No captured close on or after ${date}; captures end ${series.closes.at(-1)?.trade_date ?? "nowhere"}.` };
+  if (daysBetween(date, close.trade_date) > MAX_CLOSE_AGE_DAYS) {
+    return { kind: "outcome", outcome: "stale_price", text: `The first captured close on or after ${date} is ${close.trade_date}.` };
   }
   return { kind: "value", value: rationalFromDecimal(decimal(close.close_text))!, text: close.close_text, trade_date: close.trade_date };
 }
@@ -597,7 +603,7 @@ export function renderBacktest(run: BacktestRun, doc: Readonly<{ ranOn: IsoDate;
   const lines = [
     `# FCF required-growth backtest, ${doc.ranOn}`,
     "",
-    `Generated by \`${doc.command}\`. Offline and dev only (#610). Inputs are the engine's selection as of the 10-K filing date + 1 day, with each SEC fact taken as public by the end of its filing date in New York. Prices are yfinance split-adjusted closes, never certified. Required growth is the growth of total free cash flow that day's close requires at that day's multiple, with ADR 0006's model, the 10% required return and d, the share change stock-based compensation implies. Realized growth is the same total free cash flow's growth to the 10-K five fiscal years later; the realized share change over those years, buybacks included, sits beside d. The price return is annualized over five years, price only, with no dividends.`,
+    `Generated by \`${doc.command}\`. Offline and dev only (#610). Inputs are the engine's selection as of the 10-K filing date + 1 day, with each SEC fact taken as public by the end of its filing date in New York. The price is the first close on or after that day, a yfinance split-adjusted close, never certified. Required growth is the growth of total free cash flow that price requires at its multiple, with ADR 0006's model, the 10% required return and d, the share change stock-based compensation implies. Realized growth is the same total free cash flow's growth to the 10-K five fiscal years later; the realized share change over those years, buybacks included, sits beside d. The price return is annualized over five years from that close, price only, with no dividends.`,
     "",
     "## Summary",
     "",
