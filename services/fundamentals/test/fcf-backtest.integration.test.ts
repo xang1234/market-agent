@@ -9,7 +9,7 @@ import test from "node:test";
 import { bootstrapDatabase, connectedClient, connectedPool, dockerAvailable, workspaceRoot } from "../../../db/test/docker-pg.ts";
 import { endOfLocalDay } from "../../financial-core/src/index.ts";
 import { POLYGON_MARKET_SOURCE_ID, YAHOO_FINANCE_DEV_MARKET_SOURCE_ID } from "../../market/src/provider-sources.ts";
-import { attachCiks, inputsAsOf, renderBacktest, runBacktest, type AsOfInputs } from "../src/fcf-backtest.ts";
+import { attachCiks, closeSeries, inputsAsOf, renderBacktest, runBacktest, subjectIds, type AsOfInputs } from "../src/fcf-backtest.ts";
 import { backfillSecStatements } from "../src/sec-statements-backfill-cli.ts";
 import { secCompanyFetcher } from "./fakes.ts";
 import { annualHistoryCompanyFacts, HISTORY_CIK, HISTORY_SPLIT } from "./sec-annual-history-fixture.ts";
@@ -51,11 +51,11 @@ test("each FY 10-K's required growth, realized growth and price return, as of it
   const { db } = await seeded(t);
   const run = await runBacktest(db, ["HIST", "NONE"]);
   const text = (figure: { kind: string; text: string; outcome?: string }) => figure.kind === "value" ? figure.text : `${figure.outcome}: ${figure.text}`;
-  const summary = run.rows.map((row) => [
+  const summary = run.rows.flatMap((row) => row.kind === "unread" ? [] : [[
     row.fiscal_year, row.filed, row.inputs.as_of,
     row.inputs.figures.free_cash_flow.text, row.inputs.figures.shares_outstanding.text,
     text(row.price), text(row.required_growth), text(row.realized_fcf_per_share_cagr), text(row.price_return),
-  ]);
+  ]]);
   assert.deepEqual(summary.find((row) => row[0] === 2017), [
     2017, "2018-02-15", "2018-02-16", "1100000000", "100000000",
     // Before the 2-for-1 split the close traded at twice its adjusted 57.7245.
@@ -63,15 +63,20 @@ test("each FY 10-K's required growth, realized growth and price return, as of it
     // A separate float bisection of ADR 0006's V(g) at today's 10.31x and d = 0.433% gives 0.711%.
     "0.7%",
     // FY2017 11.00 a share, 5.50 on the post-split basis, to FY2022's 1,600M over 200M shares: (8 / 5.5)^(1/5) - 1.
-    "7.8%",
-    "12.0% a year, at or above the 10% hurdle (price only, no dividends)",
+    "7.78%",
+    "12.00%, at or above",
   ]);
   assert.deepEqual(summary.map((row) => row[0]), [2016, 2017, 2018, 2019, 2020, 2021]);
   // FY2021's 10-K was filed 2022-02-15; five years on is past the last capture.
   assert.equal(summary.at(-1)![8], "stale_price: 5 years on: The latest captured close on or before 2027-02-16 is 2026-11-09.");
+  assert.deepEqual(run.rows.map((row) => row.kind === "read" && row.period), [null, null, null, null, null, null]);
   assert.deepEqual(run.issuers, [{ ticker: "NONE", outcome: "subject_unresolved", text: "0 active US common-stock listings" }]);
-  assert.match(renderBacktest(run, "2026-11-11"), /^\| HIST \| 2017 \| 2018-02-15 \| 1100000000 \| 200000000 \| 50000000 \| 100000000 \| 115\.449 /mu);
+  assert.match(
+    renderBacktest(run, { ranOn: "2026-11-11", command: "npm run backtest:fcf -- --tickers HIST,NONE", notes: "" }),
+    /^\| HIST \| 2017 \| 2018-02-15 \| 2018-02-16 \| 1100000000 \| 200000000 \| 50000000 \| 100000000 \| 115\.449 \(2018-02-16, dev close, never certified\) \| 10\.31x \| 0\.7% \| 7\.78% \| 12\.00%, at or above \| {2}\|$/mu,
+  );
   for (const row of run.rows) {
+    if (row.kind === "unread") continue;
     for (const input of row.inputs.bound) assert.ok(input.public_by <= endOfLocalDay(row.inputs.as_of, "America/New_York"), `FY${row.fiscal_year}: ${input.slot} public by ${input.public_by}`);
   }
 });
@@ -138,4 +143,51 @@ test("a ticker takes its CIK unless another issuer holds it (#597)", { timeout: 
     { legal_name: "Held Inc. (SEC)", cik: "0000990611" },
   ]);
   assert.deepEqual(logged, [`HELD: CIK 990611 belongs to issuer ${issuer(0)}; not attached (#597)`, "FRSH: CIK 990612"]);
+});
+
+test("a FY with no FY-labeled facts or no filing date is a named row, not a dropped one", { timeout: 300_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for backtest coverage");
+    return;
+  }
+  const { db } = await seeded(t);
+  const outcomes = async () => (await runBacktest(db, ["HIST"])).rows.map((row) => [row.fiscal_year, row.kind === "unread" ? row.outcome.outcome : "read"]);
+  // As COST tagged its FY2019 10-K fp Q4.
+  await db.query(`update facts set fiscal_period = 'Q4' where subject_id = $1 and fiscal_year = 2019 and period_kind = 'fiscal_y'`, [ISSUER]);
+  assert.deepEqual(await outcomes(), [[2016, "read"], [2017, "read"], [2018, "read"], [2019, "no_fy_facts"], [2020, "read"], [2021, "read"]]);
+  // As NKE, whose filings state no cover count and so no filing date.
+  await db.query(`update facts set reported_at = null where subject_id = $1`, [ISSUER]);
+  assert.deepEqual(await outcomes(), [[2016, "no_filing_date"], [2017, "no_filing_date"], [2018, "no_filing_date"], [2019, "no_fy_facts"], [2020, "no_filing_date"], [2021, "no_filing_date"]]);
+});
+
+test("the closes are one capture's: the newest, whichever source took it", { timeout: 300_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for backtest coverage");
+    return;
+  }
+  const { db } = await seeded(t);
+  const capture = (capturedOn: string, closes: Array<[string, string]>) => db.query(
+    `insert into daily_close_captures (listing_id, source_id, captured_on, retrieved_at, trade_date, close_text, currency, adjustment_basis)
+     select $1, $2, $3::date, $3::date + time '01:00', d, c, 'USD', 'split_adjusted' from unnest($4::date[], $5::text[]) as t(d, c)`,
+    [LISTING, POLYGON_MARKET_SOURCE_ID, capturedOn, closes.map(([d]) => d), closes.map(([, c]) => c)],
+  );
+  await capture("2026-11-01", [["2018-02-16", "999"]]);
+  const yahoo = await closeSeries(db, ISSUER);
+  assert.deepEqual(yahoo.kind === "closes" && [yahoo.captured_on, yahoo.closes.find((close) => close.trade_date === "2018-02-16"), yahoo.closes.length, new Set(yahoo.closes.map((close) => close.trade_date)).size],
+    ["2026-11-10", { trade_date: "2018-02-16", close_text: "57.7245" }, 2608, 2608]);
+  await capture("2026-11-12", [["2018-02-16", "58"], ["2026-11-11", "120"]]);
+  assert.deepEqual(await closeSeries(db, ISSUER), { kind: "closes", captured_on: "2026-11-12", currency: "USD", closes: [{ trade_date: "2018-02-16", close_text: "58" }, { trade_date: "2026-11-11", close_text: "120" }] });
+});
+
+test("ids print only when every ticker resolves: an empty list would backfill every SEC issuer", { timeout: 300_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for backtest coverage");
+    return;
+  }
+  const { db } = await seeded(t);
+  assert.deepEqual(await subjectIds(db, ["HIST"], "issuer_id"), [ISSUER]);
+  assert.deepEqual(await subjectIds(db, ["HIST"], "listing_id"), [LISTING]);
+  for (const id of ["issuer_id", "listing_id"] as const) {
+    await assert.rejects(subjectIds(db, ["HIST", "NONE", "GONE"], id), { message: "unresolved tickers, no ids printed: NONE (0 active US common-stock listings), GONE (0 active US common-stock listings)" });
+  }
 });

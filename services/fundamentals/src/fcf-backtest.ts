@@ -29,9 +29,17 @@
 //   TICKERS=$(tr '\n' , < <ticker list> | sed 's/,$//')
 //   curl -s -A "$SEC_EDGAR_USER_AGENT" https://www.sec.gov/files/company_tickers.json > ../../.dev/company_tickers.json
 //   node --experimental-strip-types src/fcf-backtest.ts --tickers "$TICKERS" --attach-ciks ../../.dev/company_tickers.json
-//   (cd ../market && POLYGON_API_KEY=... npm run sync:splits -- $(node --experimental-strip-types ../fundamentals/src/fcf-backtest.ts --tickers "$TICKERS" --listing-ids))
-//   npm run backfill:sec-statements -- --annual-history-years 11 $(node --experimental-strip-types src/fcf-backtest.ts --tickers "$TICKERS" --issuer-ids)
-//   npm run backtest:fcf -- --tickers "$TICKERS" > ../../docs/eval-runs/fcf-backtest/$(date -u +%F).md
+//   LISTINGS=$(node --experimental-strip-types src/fcf-backtest.ts --tickers "$TICKERS" --listing-ids) &&
+//     (cd ../market && POLYGON_API_KEY=... npm run sync:splits -- $LISTINGS)
+//   ISSUERS=$(node --experimental-strip-types src/fcf-backtest.ts --tickers "$TICKERS" --issuer-ids) &&
+//     npm run backfill:sec-statements -- --annual-history-years 11 $ISSUERS
+//   npm run --silent backtest:fcf -- --tickers "$TICKERS" --notes <notes.md> > ../../docs/eval-runs/fcf-backtest/$(date -u +%F).md
+//
+// --issuer-ids and --listing-ids exit nonzero, naming them, when any ticker
+// does not resolve: an empty id list backfills every issuer with SEC facts.
+// A failed $(...) inside a command still runs it, so the ids are assigned first.
+// --notes is the run's hand-written how-it-ran and caveats, set in the doc
+// after the summary; everything else in the doc is this script's output.
 //
 // The closes are captured already (npm run capture:closes in services/market).
 
@@ -83,7 +91,7 @@ export type InputId = keyof typeof INPUT_NODES;
 
 export type Figure =
   | Readonly<{ kind: "value"; value: number; text: string }>
-  | Readonly<{ kind: "outcome"; outcome: string; text: string }>;
+  | Readonly<{ kind: "outcome"; outcome: string; text: string; input?: string }>;
 
 /** Why a figure has no value. */
 export type Absent = Extract<Figure, { kind: "outcome" }>;
@@ -104,11 +112,14 @@ export type AsOfInputs = Readonly<{
 export type Close = Readonly<{ trade_date: IsoDate; close_text: string }>;
 export type CloseSeries = Readonly<{ kind: "closes"; captured_on: IsoDate; currency: string; closes: ReadonlyArray<Close> }>;
 
-export type BacktestRow = Readonly<{
+export type ReadRow = Readonly<{
+  kind: "read";
   ticker: string;
   fiscal_year: number;
   filed: IsoDate;
   inputs: AsOfInputs;
+  /** period_mismatch when the bound statements are another fiscal year's; such a row is left out of the summary statistics. */
+  period: Absent | null;
   price: Figure;
   todays_multiple: Figure;
   required_growth: Figure;
@@ -116,13 +127,22 @@ export type BacktestRow = Readonly<{
   price_return: Figure;
 }>;
 
+/** A fiscal year with no as-of date to read it at. */
+export type UnreadRow = Readonly<{ kind: "unread"; ticker: string; fiscal_year: number; outcome: Absent }>;
+
+export type BacktestRow = ReadRow | UnreadRow;
+
+/** One FY's statements on file: the end of its period and the date of the earliest filing that states it, if any does. */
+export type AnnualFiling = Readonly<{ fiscal_year: number; period_end: IsoDate; filed: IsoDate | null }>;
+
 /** An issuer with no row to show, and why. */
 export type IssuerOutcome = Readonly<{ ticker: string; outcome: string; text: string }>;
 
 export type BacktestRun = Readonly<{ rows: ReadonlyArray<BacktestRow>; issuers: ReadonlyArray<IssuerOutcome> }>;
 
 const outcome = (name: string, text: string): Absent => ({ kind: "outcome", outcome: name, text });
-const percent = (value: number): Figure => ({ kind: "value", value, text: `${(value * 100).toFixed(1)}%` });
+const percentText = (value: number): string => `${(value * 100).toFixed(2)}%`;
+const percent = (value: number): Figure => ({ kind: "value", value, text: percentText(value) });
 
 /**
  * The evidence port with each SEC fact also public by the end of its filing's
@@ -254,24 +274,30 @@ export function backtestRow(input: Readonly<{
   ticker: string;
   fiscal_year: number;
   filed: IsoDate;
+  /** The issuer's fiscal year label less its period's end year (labelOffset). */
+  label_offset: number;
   base: AsOfInputs;
   later: AsOfInputs | Absent;
   closes: CloseSeries | Absent;
   splits: SplitHistory;
-}>): BacktestRow {
+}>): ReadRow {
   const { base, closes, splits } = input;
+  const laterYear = input.fiscal_year + HORIZON_YEARS;
+  const laterPeriod = "kind" in input.later ? null : periodCheck(input.later, laterYear, input.label_offset);
   const close = closes.kind === "outcome" ? closes : closeOnOrBefore(closes, base.as_of);
   const price = close.kind === "outcome" || closes.kind === "outcome" ? close : splitBasis(close, closes, splits);
   const { multiple, growth } = solve(base, price, closes);
   return {
+    kind: "read",
     ticker: input.ticker,
     fiscal_year: input.fiscal_year,
     filed: input.filed,
     inputs: base,
+    period: periodCheck(base, input.fiscal_year, input.label_offset),
     price: price.kind === "outcome" ? price : "trade_date" in price ? { kind: "value", value: Number(price.text), text: `${price.text} (${price.trade_date}, dev close, never certified)` } : price,
     todays_multiple: multiple,
     required_growth: growth,
-    realized_fcf_per_share_cagr: realizedCagr(base, input.later, splits),
+    realized_fcf_per_share_cagr: laterPeriod !== null ? named(`FY+${HORIZON_YEARS}`, laterPeriod) : realizedCagr(base, input.later, splits),
     price_return: priceReturn(base.as_of, closes),
   };
 }
@@ -323,17 +349,38 @@ function realizedCagr(base: AsOfInputs, later: AsOfInputs | Absent, splits: Spli
 }
 
 function priceReturn(asOf: IsoDate, closes: CloseSeries | Absent): Figure {
-  if (closes.kind === "outcome") return closes;
+  if (closes.kind === "outcome") return named("price", closes);
   const start = closeOnOrBefore(closes, asOf);
   const end = closeOnOrBefore(closes, yearsAfter(asOf, HORIZON_YEARS));
-  if (start.kind === "outcome") return start;
+  if (start.kind === "outcome") return named("price", start);
   if (end.kind === "outcome") return outcome(end.outcome, `${HORIZON_YEARS} years on: ${end.text}`);
   const annual = (toNumber(end.value) / toNumber(start.value)) ** (1 / HORIZON_YEARS) - 1;
   const verdict = annual >= HURDLE ? "at or above" : "below";
-  return { kind: "value", value: annual, text: `${(annual * 100).toFixed(1)}% a year, ${verdict} the ${(HURDLE * 100).toFixed(0)}% hurdle (price only, no dividends)` };
+  return { kind: "value", value: annual, text: `${percentText(annual)}, ${verdict}` };
 }
 
-const named = (input: string, figure: Figure): Figure => figure.kind === "outcome" ? outcome(figure.outcome, `${input}: ${figure.text}`) : figure;
+// The year a period ends in, a week early, so a 52/53-week year that ends in January's first days counts as the year before.
+const endYear = (end: IsoDate): number => Number(addDays(end, -7).slice(0, 4));
+
+/** The offset most of an issuer's FY labels show from their period's end year: 0 for most filers, -1 for a retailer whose year ends in late January. */
+export function labelOffset(filings: ReadonlyArray<AnnualFiling>): number {
+  const counts = new Map<number, number>();
+  for (const filing of filings) {
+    const offset = filing.fiscal_year - endYear(filing.period_end);
+    counts.set(offset, (counts.get(offset) ?? 0) + 1);
+  }
+  return [...counts].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0] ?? 0;
+}
+
+// A filer's companyfacts `fy` can mislabel a 10-K (HON tagged its FY2021 10-K fiscal 2020), so the label alone can't vouch for the statements bound.
+function periodCheck(inputs: AsOfInputs, fiscalYear: number, offset: number): Absent | null {
+  const end = inputs.bound.filter((input) => input.slot !== INPUT_NODES.shares_outstanding).map((input) => input.period_end).sort().at(-1);
+  if (end === undefined) return null;
+  const year = endYear(end) + offset;
+  return year === fiscalYear ? null : outcome("period_mismatch", `The bound base period ends ${end}, which is FY${year}, not FY${fiscalYear}.`);
+}
+
+const named = (input: string, figure: Figure): Figure => figure.kind === "outcome" ? { ...figure, input: figure.input ?? input } : figure;
 const modelOutcome = (result: ValuationOutcomeResult): Figure => outcome(result.outcome, result.text);
 
 /** The adjusted close on or before `date`, at most MAX_CLOSE_AGE_DAYS older. */
@@ -359,15 +406,18 @@ function splitFactor(splits: Extract<SplitHistory, { status: "ok" }>, after: Iso
     .reduce((factor, split) => multiplyRationals(factor, divideRationals(rational(split.split_to), rational(split.split_from))!)!, rational("1"));
 }
 
-/** The latest capture's closes of the issuer's one common-stock listing. */
+/** The closes of the issuer's one common-stock listing from its newest capture, whichever source took it: one split basis, one close a day. */
 export async function closeSeries(db: SqlExecutor, issuerId: string): Promise<CloseSeries | Absent> {
   const { rows } = await db.query<{ listing_id: string; captured_on: string; currency: string; trade_date: string; close_text: string }>(
-    `select d.listing_id::text as listing_id, d.captured_on::text as captured_on, d.currency, d.trade_date::text as trade_date, d.close_text
-       from daily_close_captures d
-       join listings l on l.listing_id = d.listing_id
-       join instruments i on i.instrument_id = l.instrument_id
-      where i.issuer_id = $1::uuid and i.asset_type = 'common_stock'
-        and d.captured_on = (select max(c.captured_on) from daily_close_captures c where c.listing_id = d.listing_id and c.source_id = d.source_id)
+    `with newest as (
+       select distinct on (d.listing_id) d.listing_id, d.source_id, d.captured_on
+         from daily_close_captures d
+         join listings l on l.listing_id = d.listing_id
+         join instruments i on i.instrument_id = l.instrument_id
+        where i.issuer_id = $1::uuid and i.asset_type = 'common_stock'
+        order by d.listing_id, d.captured_on desc, d.retrieved_at desc, d.source_id)
+     select d.listing_id::text as listing_id, d.captured_on::text as captured_on, d.currency, d.trade_date::text as trade_date, d.close_text
+       from daily_close_captures d join newest using (listing_id, source_id, captured_on)
       order by d.trade_date`,
     [issuerId],
   );
@@ -377,19 +427,19 @@ export async function closeSeries(db: SqlExecutor, issuerId: string): Promise<Cl
   return { kind: "closes", captured_on: rows[0]!.captured_on, currency: rows[0]!.currency, closes: rows.map(({ trade_date, close_text }) => ({ trade_date, close_text })) };
 }
 
-/** Each FY with SEC facts on file, and the date of the earliest filing that states it: the original 10-K's. */
-export async function annualFilings(db: SqlExecutor, issuerId: string, first: number, last: number): Promise<Map<number, IsoDate>> {
-  const { rows } = await db.query<{ fiscal_year: number; filed: string }>(
-    `select f.fiscal_year, min(filings.filed)::text as filed
-       from facts f join (${FILED_BY_SOURCE}) filings on filings.source_id = f.source_id
+/** Each FY with SEC facts on file, its period's end, and the date of the earliest filing that states it (the original 10-K's), if any does. */
+export async function annualFilings(db: SqlExecutor, issuerId: string, first: number, last: number): Promise<AnnualFiling[]> {
+  const { rows } = await db.query<AnnualFiling>(
+    `select f.fiscal_year, max(f.period_end)::text as period_end, min(filings.filed)::text as filed
+       from facts f left join (${FILED_BY_SOURCE}) filings on filings.source_id = f.source_id
       where f.subject_kind = 'issuer' and f.subject_id = $1::uuid
-        and f.period_kind = 'fiscal_y' and f.fiscal_period = 'FY'
+        and f.period_kind = 'fiscal_y' and f.fiscal_period = 'FY' and f.period_end is not null
         and f.fiscal_year between $2 and $3
       group by f.fiscal_year
       order by f.fiscal_year`,
     [issuerId, first, last],
   );
-  return new Map(rows.map((row) => [row.fiscal_year, row.filed]));
+  return rows;
 }
 
 type Subject = Readonly<{ ticker: string; issuer_id: string; listing_id: string }>;
@@ -425,54 +475,125 @@ async function backtestOn(db: SqlExecutor, tickers: ReadonlyArray<string>, years
   const port = createEvidenceFinancialPort(db);
   for (const subject of subjects) {
     const filings = await annualFilings(db, subject.issuer_id, years.first, years.last + HORIZON_YEARS);
-    const sample = [...filings].filter(([year]) => year <= years.last);
-    if (sample.length === 0) {
-      issuers.push({ ticker: subject.ticker, outcome: "missing_input", text: `No SEC FY facts on file for fiscal ${years.first} to ${years.last}.` });
-      continue;
-    }
+    const byYear = new Map(filings.map((filing) => [filing.fiscal_year, filing]));
+    const offset = labelOffset(filings);
     const closes = await closeSeries(db, subject.issuer_id);
     const splits = await port.readSplitHistory({ subject: { kind: "issuer", id: subject.issuer_id }, as_of: new Date().toISOString() });
-    for (const [fiscalYear, filed] of sample) {
+    for (let fiscalYear = years.first; fiscalYear <= years.last; fiscalYear += 1) {
+      const filed = byYear.get(fiscalYear)?.filed;
+      if (filed == null) {
+        rows.push({ kind: "unread", ticker: subject.ticker, fiscal_year: fiscalYear, outcome: filingOutcome(byYear, fiscalYear)! });
+        continue;
+      }
       const base = await inputsAsOf(db, subject.issuer_id, dayAfter(filed));
-      const laterFiled = filings.get(fiscalYear + HORIZON_YEARS);
-      const later = laterFiled === undefined
-        ? outcome("missing_input", `No FY${fiscalYear + HORIZON_YEARS} SEC facts on file.`)
-        : await inputsAsOf(db, subject.issuer_id, dayAfter(laterFiled));
-      rows.push(backtestRow({ ticker: subject.ticker, fiscal_year: fiscalYear, filed, base, later, closes, splits }));
+      const laterFiled = byYear.get(fiscalYear + HORIZON_YEARS)?.filed;
+      const later = laterFiled == null ? filingOutcome(byYear, fiscalYear + HORIZON_YEARS)! : await inputsAsOf(db, subject.issuer_id, dayAfter(laterFiled));
+      rows.push(backtestRow({ ticker: subject.ticker, fiscal_year: fiscalYear, filed, label_offset: offset, base, later, closes, splits }));
     }
   }
   return { rows, issuers };
 }
 
-/** The run as Markdown: one row per issuer-year, then each issuer with no rows. */
-export function renderBacktest(run: BacktestRun, ranOn: IsoDate): string {
-  const cell = (figure: Figure) => (figure.kind === "value" ? figure.text : `**${figure.outcome}**: ${figure.text}`).replaceAll("|", "\\|");
-  const lines = [
-    `# FCF required-growth backtest, ${ranOn}`,
-    "",
-    "Offline and dev only (#610). Inputs are the engine's selection as of the 10-K filing date + 1 day, with each SEC fact taken as public by the end of its filing date in New York; prices are yfinance split-adjusted closes, never certified. Required growth is solved at that day's multiple with ADR 0006's model and the 10% required return. Realized growth is FY free cash flow per share to the 10-K five fiscal years later; the price return is annualized over five years, price only.",
-    "",
-    "| Ticker | FY | Filed | Free cash flow | Net cash | SBC | Shares | Close | Multiple | Required growth | Realized FCF/share CAGR | 5-year price return |",
-    "|---|---|---|---|---|---|---|---|---|---|---|---|",
-    ...run.rows.map((row) => `| ${[
-      row.ticker, row.fiscal_year, row.filed,
-      cell(row.inputs.figures.free_cash_flow), cell(row.inputs.figures.net_cash), cell(row.inputs.figures.stock_based_compensation), cell(row.inputs.figures.shares_outstanding),
-      cell(row.price), cell(row.todays_multiple), cell(row.required_growth), cell(row.realized_fcf_per_share_cagr), cell(row.price_return),
-    ].join(" | ")} |`),
+// Why a FY has no filing date to read it at, or null when it has one.
+function filingOutcome(byYear: ReadonlyMap<number, AnnualFiling>, fiscalYear: number): Absent | null {
+  const filing = byYear.get(fiscalYear);
+  if (filing === undefined) return outcome("no_fy_facts", `No SEC facts labeled FY${fiscalYear} on file.`);
+  return filing.filed === null ? outcome("no_filing_date", `FY${fiscalYear} facts are on file, but no filing that states them carries a filing date.`) : null;
+}
+
+const value = (figure: Figure): number | null => figure.kind === "value" ? figure.value : null;
+
+// The first outcome that keeps a row from both growth figures, or "both".
+function rowOutcome(row: BacktestRow): string {
+  if (row.kind === "unread") return row.outcome.outcome;
+  if (row.period !== null) return row.period.outcome;
+  for (const [label, figure] of [["required growth", row.required_growth], ["realized growth", row.realized_fcf_per_share_cagr]] as const) {
+    if (figure.kind === "outcome") return `${label}, ${figure.input === undefined ? "" : `${figure.input} `}${figure.outcome}`;
+  }
+  return "both";
+}
+
+function median(values: ReadonlyArray<number>): number | null {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = sorted.length >> 1;
+  return sorted.length === 0 ? null : sorted.length % 2 === 1 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
+}
+
+function summary(rows: ReadonlyArray<BacktestRow>): string[] {
+  const counts = new Map<string, number>();
+  for (const row of rows) counts.set(rowOutcome(row), (counts.get(rowOutcome(row)) ?? 0) + 1);
+  const both = rows.filter((row): row is ReadRow => rowOutcome(row) === "both");
+  const gap = (row: ReadRow) => value(row.realized_fcf_per_share_cagr)! - value(row.required_growth)!;
+  const delivered = both.filter((row) => gap(row) >= 0);
+  const hurdle = (group: ReadonlyArray<ReadRow>) => {
+    const returns = group.flatMap((row) => value(row.price_return) ?? []);
+    const middle = median(returns);
+    return `${returns.length} ${returns.length === 1 ? "has" : "have"} a ${HORIZON_YEARS}-year price return, ${returns.filter((annual) => annual >= HURDLE).length} at or above ${(HURDLE * 100).toFixed(0)}% a year, median ${middle === null ? "n/a" : percentText(middle)}`;
+  };
+  const gapMedian = median(both.map(gap));
+  // requiredGrowth bisects to a bracket under 0.0001 and returns its midpoint (valuation-model.ts), so it is within 0.005 points.
+  const unsettled = both.filter((row) => Math.abs(gap(row)) < 0.00005).map((row) => `${row.ticker} FY${row.fiscal_year}`);
+  return [
+    `- **Rows.** ${rows.length} issuer-years.`,
+    "- **Outcomes.** Each row's first outcome that keeps it from both growth figures.",
+    ...[...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([name, count]) => `  - ${count} ${name}`),
+    `- **Realized against required.** ${both.length} rows have both. In ${delivered.length}, realized growth was at or above the required growth, compared unrounded. ${unsettled.length} of the ${both.length}${unsettled.length === 0 ? "" : ` (${unsettled.join(", ")})`} ${unsettled.length === 1 ? "differs" : "differ"} by less than 0.005 points, the required-growth solver's precision, so ${unsettled.length === 1 ? "its" : "their"} side is not settled. The median gap, realized minus required, is ${gapMedian === null ? "n/a" : (gapMedian * 100).toFixed(2)} points.`,
+    `- **Against the hurdle.** Of the ${delivered.length} at or above required growth, ${hurdle(delivered)}. Of the ${both.length - delivered.length} below, ${hurdle(both.filter((row) => gap(row) < 0))}.`,
   ];
-  if (run.issuers.length > 0) lines.push("", "## Issuers with no rows", "", ...run.issuers.map((issuer) => `- ${issuer.ticker}: **${issuer.outcome}**: ${issuer.text}`));
-  const solved = run.rows.filter((row) => row.required_growth.kind === "value" && row.realized_fcf_per_share_cagr.kind === "value");
-  const delivered = solved.filter((row) => (row.realized_fcf_per_share_cagr as { value: number }).value >= (row.required_growth as { value: number }).value);
-  const priced = run.rows.filter((row) => row.price_return.kind === "value");
-  const cleared = priced.filter((row) => (row.price_return as { value: number }).value >= HURDLE);
-  lines.push(
+}
+
+const COLUMNS = ["free_cash_flow", "net_cash", "stock_based_compensation", "shares_outstanding", "price", "multiple", "required_growth", "realized_growth", "price_return"] as const;
+
+function tableRow(row: BacktestRow): string {
+  const escape = (text: string) => text.replaceAll("|", "\\|");
+  if (row.kind === "unread") return `| ${[row.ticker, row.fiscal_year, "n/a", "n/a", ...COLUMNS.map(() => "n/a"), `**${row.outcome.outcome}** (${escape(row.outcome.text)})`].join(" | ")} |`;
+  const { free_cash_flow, net_cash, stock_based_compensation, shares_outstanding } = row.inputs.figures;
+  const figures = [free_cash_flow, net_cash, stock_based_compensation, shares_outstanding, row.price, row.todays_multiple, row.required_growth, row.realized_fcf_per_share_cagr, row.price_return];
+  // A figure blocked by an input repeats that input's outcome, so each is named once, under the input.
+  const seen = new Set<string>();
+  const named = figures.flatMap((figure, index) => {
+    if (figure.kind === "value") return [];
+    const label = figure.input ?? COLUMNS[index]!;
+    const key = `${label}|${figure.outcome}|${figure.text}`;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [`${label}: **${figure.outcome}** (${escape(figure.text)})`];
+  });
+  const outcomes = [...(row.period === null ? [] : [`**${row.period.outcome}** (${escape(row.period.text)})`]), ...named];
+  return `| ${[row.ticker, row.fiscal_year, row.filed, row.inputs.as_of, ...figures.map((figure) => figure.kind === "value" ? escape(figure.text) : "n/a"), outcomes.join("; ")].join(" | ")} |`;
+}
+
+/** The run's doc: the command that made it, the summary, the run's own notes, then one row per issuer-year and each issuer with no rows. */
+export function renderBacktest(run: BacktestRun, doc: Readonly<{ ranOn: IsoDate; command: string; notes: string }>): string {
+  const lines = [
+    `# FCF required-growth backtest, ${doc.ranOn}`,
+    "",
+    `Generated by \`${doc.command}\`. Offline and dev only (#610). Inputs are the engine's selection as of the 10-K filing date + 1 day, with each SEC fact taken as public by the end of its filing date in New York. Prices are yfinance split-adjusted closes, never certified. Required growth is solved at that day's multiple with ADR 0006's model and the 10% required return. Realized growth is FY free cash flow per share to the 10-K five fiscal years later. The price return is annualized over five years, price only, with no dividends.`,
     "",
     "## Summary",
     "",
-    `- Issuer-years: ${run.rows.length}. With both required and realized growth: ${solved.length}; realized at or above required: ${delivered.length}.`,
-    `- With a 5-year price return: ${priced.length}; at or above the hurdle: ${cleared.length}.`,
-  );
+    ...summary(run.rows),
+    "",
+    ...(doc.notes.trim() === "" ? [] : [doc.notes.trim(), ""]),
+    "## Rows",
+    "",
+    "| Issuer | FY | Filed | As of | Free cash flow | Net cash | SBC | Shares | Close | Multiple | Required growth | Realized FCF/share CAGR, 5y | 5-year price return vs 10% hurdle | Named outcomes |",
+    "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+    ...run.rows.map(tableRow),
+  ];
+  if (run.issuers.length > 0) lines.push("", "## Issuers with no rows", "", ...run.issuers.map((issuer) => `- ${issuer.ticker}: **${issuer.outcome}** (${issuer.text})`));
   return `${lines.join("\n")}\n`;
+}
+
+/**
+ * The tickers' issuer or listing ids. Throws, naming them, when any ticker
+ * has no single listing: an empty id list makes the SEC backfill take every
+ * issuer with SEC facts.
+ */
+export async function subjectIds(db: SqlExecutor, tickers: ReadonlyArray<string>, id: "issuer_id" | "listing_id"): Promise<string[]> {
+  const { subjects, unresolved } = await resolveTickers(db, tickers);
+  if (unresolved.length > 0) throw new Error(`unresolved tickers, no ids printed: ${unresolved.map((issuer) => `${issuer.ticker} (${issuer.text})`).join(", ")}`);
+  return subjects.map((subject) => subject[id]);
 }
 
 // Each sample ticker's issuer takes its CIK from SEC's company_tickers.json (#597), unless it has one.
@@ -517,9 +638,11 @@ function decimalText(value: ExactRational): string {
   return canonicalDecimalString(roundRational(value, 6));
 }
 
-function dayAfter(date: IsoDate): IsoDate {
-  return new Date(Date.parse(`${date}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+function addDays(date: IsoDate, days: number): IsoDate {
+  return new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 }
+
+const dayAfter = (date: IsoDate): IsoDate => addDays(date, 1);
 
 function yearsAfter(date: IsoDate, years: number): IsoDate {
   return `${Number(date.slice(0, 4)) + years}${date.slice(4)}`;
@@ -532,18 +655,19 @@ function daysBetween(from: IsoDate, to: IsoDate): number {
 async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL is required");
-  const { values } = parseArgs({ options: { tickers: { type: "string" }, "attach-ciks": { type: "string" }, "issuer-ids": { type: "boolean" }, "listing-ids": { type: "boolean" } } });
+  const { values } = parseArgs({ options: { tickers: { type: "string" }, "attach-ciks": { type: "string" }, "issuer-ids": { type: "boolean" }, "listing-ids": { type: "boolean" }, notes: { type: "string" } } });
   const tickers = (values.tickers ?? "").split(",").map((ticker) => ticker.trim().toUpperCase()).filter(Boolean);
-  if (tickers.length === 0) throw new Error("usage: --tickers AAPL,MSFT [--attach-ciks company_tickers.json | --issuer-ids | --listing-ids]");
+  if (tickers.length === 0) throw new Error("usage: --tickers AAPL,MSFT [--attach-ciks company_tickers.json | --issuer-ids | --listing-ids | --notes notes.md]");
   const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
   try {
     if (values["attach-ciks"] !== undefined) return await attachCiks(pool, tickers, values["attach-ciks"]);
     if (values["issuer-ids"] || values["listing-ids"]) {
-      const { subjects } = await resolveTickers(pool, tickers);
-      console.log(subjects.map((subject) => values["issuer-ids"] ? subject.issuer_id : subject.listing_id).join(" "));
+      console.log((await subjectIds(pool, tickers, values["issuer-ids"] ? "issuer_id" : "listing_id")).join(" "));
       return;
     }
-    process.stdout.write(renderBacktest(await runBacktest(pool, tickers), new Date().toISOString().slice(0, 10)));
+    const notes = values.notes === undefined ? "" : readFileSync(values.notes, "utf8");
+    const command = `npm run --silent backtest:fcf -- --tickers ${tickers.join(",")}${values.notes === undefined ? "" : ` --notes ${values.notes}`}`;
+    process.stdout.write(renderBacktest(await runBacktest(pool, tickers), { ranOn: new Date().toISOString().slice(0, 10), command, notes }));
   } finally {
     await pool.end();
   }
