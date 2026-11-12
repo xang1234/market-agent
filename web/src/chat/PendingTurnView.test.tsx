@@ -303,3 +303,23 @@ test('a figure clicked while its answer streams asks the inspector for it in the
     restoreGlobals()
   }
 })
+
+test("a retry's new run starts its own clock, not the failed attempt's", async (t) => {
+  const dom = new JSDOM('<!doctype html><div id="root"></div>')
+  const undo = installDomGlobals(dom.window as unknown as Window)
+  t.after(undo)
+  t.mock.timers.enable({ apis: ['setInterval', 'Date'], now: 0 })
+  const container = dom.window.document.getElementById('root')!
+  const root = createRoot(container)
+  const stream: StreamState = { ...INITIAL_STREAM_STATE, turn_status: 'started', plan_steps: [{ step_id: 'planner', label: 'Planner', detail: 'Planning.', status: 'running' }] }
+  const heading = () => container.querySelector('[data-testid="agent-plan-panel"] h3')?.textContent
+
+  await act(async () => root.render(<PendingTurnView turn={{ phase: 'streaming', run: RUN, origin: OWN, stream, link: LINK }} {...handlers} />))
+  await act(async () => t.mock.timers.tick(60_000))
+  assert.equal(heading(), 'Working · 1m 0s')
+
+  await act(async () => root.render(<PendingTurnView turn={{ phase: 'streaming', run: { runId: 'run-2', turnId: 'u1' }, origin: OWN, stream, link: LINK }} {...handlers} />))
+  assert.equal(heading(), 'Working · 0s')
+
+  await act(async () => root.unmount())
+})

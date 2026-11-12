@@ -53,13 +53,13 @@ export function PendingTurnView({ turn, messages, onRetry, onReconnect, onReload
       return turn.stream.unverified ? <UnverifiedTurnView state={turn.stream} unverified={turn.stream.unverified} /> : null
     case 'streaming':
       return (
-        <StreamedTurn phase={turn.phase} stream={turn.stream} blocks={turn.origin.kind === 'own'} messages={messages}>
+        <StreamedTurn phase={turn.phase} runId={turn.run.runId} stream={turn.stream} blocks={turn.origin.kind === 'own'} messages={messages}>
           <LinkNotice link={turn.link} onReconnect={onReconnect} />
         </StreamedTurn>
       )
     case 'failed':
       return (
-        <StreamedTurn phase={turn.phase} stream={turn.stream} blocks={turn.origin.kind === 'own'} messages={messages}>
+        <StreamedTurn phase={turn.phase} runId={turn.run.runId} stream={turn.stream} blocks={turn.origin.kind === 'own'} messages={messages}>
           {turn.recovery === 'none'
             ? <p className="text-sm text-negative">{turn.error}</p>
             : (
@@ -86,7 +86,7 @@ function LinkNotice({ link, onReconnect }: { link: StreamLink; onReconnect: () =
   }
 }
 
-function StreamedTurn({ phase, stream, blocks, messages, children }: { phase: TurnState['phase']; stream: StreamState; blocks: boolean; messages: ReadonlyArray<ChatMessage>; children?: ReactNode }): ReactElement {
+function StreamedTurn({ phase, runId, stream, blocks, messages, children }: { phase: TurnState['phase']; runId: string; stream: StreamState; blocks: boolean; messages: ReadonlyArray<ChatMessage>; children?: ReactNode }): ReactElement {
   const { shown } = stream
   // A sealed answer, shown while the judge reads its inferences: it renders as
   // the saved message it becomes, in MessageItem's own wrapper and with no plan
@@ -110,7 +110,8 @@ function StreamedTurn({ phase, stream, blocks, messages, children }: { phase: Tu
       aria-live="polite"
       className="flex w-full flex-col gap-3 py-2"
     >
-      <AgentPlanPanel steps={stream.plan_steps} active={phase === 'streaming'} />
+      {/* Keyed by run: a retry is a new run with its own clock. */}
+      <AgentPlanPanel key={runId} steps={stream.plan_steps} active={phase === 'streaming'} />
       {/* The server may read the question before it starts the turn (#398). */}
       {phase === 'streaming' && stream.turn_status === 'idle' ? <StartingLine /> : null}
       <AssistantTurn className="w-full">
