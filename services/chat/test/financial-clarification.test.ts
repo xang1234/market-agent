@@ -7,7 +7,8 @@ import { databaseUrl, IDS, RESTATED_REVENUE } from "../../financial-engine/test/
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { createChatServer } from "../src/http.ts";
 import { loadPriorSubjects } from "../src/thread-context.ts";
-import { chatDatabase, chatHarness, comparing, completed, INSTRUMENT_A, LISTING_A, resolveMention, revenueModel } from "./financial-fixtures.ts";
+import { extractSubjectMentions } from "../src/subject-extraction.ts";
+import { chatDatabase, chatHarness, comparing, completed, INSTRUMENT_A, LISTING_A, METRIC_READING, NO_ASKS, resolveMention, revenueModel } from "./financial-fixtures.ts";
 import { readMessage } from "./read-message-fixture.ts";
 
 type Offered = { clarification_id: string; question: string; choices: Array<{ choice_id: string; label: string }> };
@@ -158,11 +159,11 @@ test("a typed reply to a metric clarification continues its company, not a ticke
     const read = /\s/u.test(mention) ? mention : mention.toUpperCase();
     return resolveMention(read === "ALL" ? "BBB" : read);
   };
-  // The planner asks which margin first, then plans whatever companies it is given.
+  // The planner asks which margin the question means, then plans whatever companies it is given.
   const asked: string[] = [];
   const model = (async (request: { messages: ReadonlyArray<{ content: string }> }) => {
     asked.push(request.messages.map((message) => message.content).join("\n"));
-    return asked.length === 1
+    return asked.at(-1)!.includes("What drives")
       ? { model: "stub-model", text: JSON.stringify({ outcome: "needs_clarification", question: "Which margin would you like?", choices: ["Gross margin", "Operating margin", "Net margin", "EBITDA margin"] }) }
       : revenueModel(["AAA"])({ messages: [] });
   }) as unknown as PlanningModel;
@@ -171,6 +172,8 @@ test("a typed reply to a metric clarification continues its company, not a ticke
   const harness = chatHarness(pool, {
     model,
     resolveMention: resolver,
+    // As the model reads them, "all" asks for no figure, and the margins the clarification offered do (#626).
+    readQuestion: async (question) => ({ ...(/margin/iu.test(question) ? METRIC_READING : NO_ASKS), companies: { kind: "as_named", names: extractSubjectMentions(question) } }),
     priorSubjects: (thread) => loadPriorSubjects(pool, { threadId: thread }, hydrate),
     // A clarification is a message of the thread, sealed over its blocks' subjects as a deployment seals it.
     persistAssistantMessage: async (message) => {
@@ -188,18 +191,23 @@ test("a typed reply to a metric clarification continues its company, not a ticke
     },
   });
 
-  const question = completed((await harness.run({ threadId, userId: IDS.owner, userIntent: "What drives AAA's margins?" })).events);
-  assert.equal(question.clarification, true, JSON.stringify(question));
-  const [block] = harness.persisted.at(-1)!.blocks as Array<{ subject_refs?: unknown }>;
-  assert.deepEqual(block!.subject_refs, [{ kind: "issuer", id: IDS.issuerA }], "the clarification names the company it asked about");
+  for (const typed of ["all", "All of the above"]) {
+    const question = completed((await harness.run({ threadId, userId: IDS.owner, userIntent: "What drives AAA's margins?" })).events);
+    assert.equal(question.clarification, true, JSON.stringify(question));
+    const [block] = harness.persisted.at(-1)!.blocks as Array<{ subject_refs?: unknown }>;
+    assert.deepEqual(block!.subject_refs, [{ kind: "issuer", id: IDS.issuerA }], "the clarification names the company it asked about");
 
-  const reply = completed((await harness.run({ threadId, userId: IDS.owner, userIntent: "all" })).events);
-  assert.ok(reply.message_id && !reply.clarification && !reply.financial_gap, JSON.stringify(reply));
-  const [answer] = (await db.query(`select blocks from chat_messages where message_id = $1`, [reply.message_id])).rows[0].blocks;
-  assert.deepEqual(
-    Object.values(answer.financial.labels as Record<string, { kind: string; text: string }>).filter((label) => label.kind === "subject").map((label) => label.text),
-    ["Alpha Industries Inc."],
-  );
+    const reply = completed((await harness.run({ threadId, userId: IDS.owner, userIntent: typed })).events);
+    assert.ok(reply.message_id && !reply.clarification && !reply.financial_gap, `${typed}: ${JSON.stringify(reply)}`);
+    const [answer] = (await db.query(`select blocks from chat_messages where message_id = $1`, [reply.message_id])).rows[0].blocks;
+    assert.deepEqual(
+      Object.values(answer.financial.labels as Record<string, { kind: string; text: string }>).filter((label) => label.kind === "subject").map((label) => label.text),
+      ["Alpha Industries Inc."],
+      typed,
+    );
+    // The reply is planned as every option the clarification offered, typed out (#626).
+    assert.match(asked.at(-1)!, /Gross margin; Operating margin; Net margin; EBITDA margin/u, typed);
+  }
 });
 
 test("a company-choice clarification names no company, so replaying the pick reaches the choice (#623)", { timeout: 300_000 }, async (t) => {
