@@ -56,7 +56,7 @@ test('an own stream that fails before the server has the run reopens with the sa
     await streamAnswer(h, reopened)
     await complete(h, reopened)
     assert.equal(occurrences(h.text(), ANSWER), 1)
-    assert.equal(h.query('[data-role="assistant"]')?.textContent, SEALED_TEXT)
+    assert.equal(h.said('assistant'), SEALED_TEXT)
     assert.equal(h.sendable(), true)
   } finally {
     await h.cleanup()
@@ -167,8 +167,8 @@ test('returning to a thread whose question is still being saved follows its run 
     await streamAnswer(h, followed)
     await complete(h, followed)
     assert.equal(occurrences(h.text(), ANSWER), 1)
-    assert.equal(h.query('[data-role="assistant"]')?.textContent, SEALED_TEXT)
-    assert.equal(h.query('[data-role="user"]')?.textContent, 'Analyze NVDA')
+    assert.equal(h.said('assistant'), SEALED_TEXT)
+    assert.equal(h.said('user'), 'Analyze NVDA')
     assert.equal(h.sendable(), true)
     assert.equal(server.writes().length, 1)
   } finally {
@@ -293,7 +293,7 @@ test('a fresh mount on a thread with an active run shows it in progress, Send di
     await complete(h, attached)
 
     assert.deepEqual(consecutive(h.frames.map((frame) => occurrences(frame, ANSWER))), [0, 1])
-    assert.equal(h.query('[data-role="assistant"]')?.textContent, SEALED_TEXT)
+    assert.equal(h.said('assistant'), SEALED_TEXT)
     assert.equal(h.query('[data-testid="streaming-turn"]'), null)
     assert.equal(h.sendable(), true)
     assert.equal(server.gets(HISTORY_T1), 1)

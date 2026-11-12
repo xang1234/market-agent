@@ -24,6 +24,7 @@ import {
   TWO_THREADS,
   T2_QUESTION,
   openThread,
+  messageWords,
   type Harness,
 } from './chatPageHarness.tsx'
 
@@ -47,7 +48,7 @@ test('the completion hands off to the sealed answer it carries: no history GET, 
     )
     assert.deepEqual(h.statusFrames.filter((labels) => labels.includes('Loading message history')), [])
     assert.equal(h.query('[data-testid="virtualized-message-list"]'), listBefore)
-    assert.equal(h.query('[data-role="assistant"]')?.textContent, SEALED_TEXT)
+    assert.equal(h.said('assistant'), SEALED_TEXT)
     assert.equal(h.container.querySelectorAll('[data-testid="streaming-turn"]').length, 0)
     assert.equal(h.sendable(), true)
 
@@ -80,7 +81,7 @@ async function secondTurn(h: Harness, source: FakeEventSource) {
 }
 
 const roles = (h: Harness) =>
-  [...h.container.querySelectorAll('[data-role]')].map((node) => [node.getAttribute('data-role'), node.textContent])
+  [...h.container.querySelectorAll('[data-role]')].map((node) => [node.getAttribute('data-role'), messageWords(node)])
 
 test('on an open thread the completion adds no history GET to the one that opened it', async () => {
   const server = new FakeServer()
@@ -94,7 +95,7 @@ test('on an open thread the completion adds no history GET to the one that opene
 
     assert.equal(server.gets(HISTORY_T1), 1)
     assert.deepEqual(
-      [...h.container.querySelectorAll('[data-role]')].map((node) => [node.getAttribute('data-role'), node.textContent]),
+      [...h.container.querySelectorAll('[data-role]')].map((node) => [node.getAttribute('data-role'), messageWords(node)]),
       [['user', 'Analyze NVDA'], ['assistant', SEALED_TEXT]],
     )
   } finally {
@@ -120,7 +121,7 @@ test('ask first keeps the answer on screen through the hand-off while the thread
       h.frames.slice(first).map((frame) => occurrences(frame, ANSWER)).filter((count) => count !== 1),
       [],
     )
-    assert.equal(h.query('[data-role="assistant"]')?.textContent, SEALED_TEXT)
+    assert.equal(h.said('assistant'), SEALED_TEXT)
     assert.notEqual(list, null)
     assert.equal(h.query('[data-testid="virtualized-message-list"]'), list)
 
@@ -158,7 +159,7 @@ test('a completion whose sealed message is malformed loads the thread itself, ne
     await h.flush()
 
     assert.equal(h.query('[data-testid="streaming-turn"]'), null)
-    assert.equal(h.query('[data-role="assistant"]')?.textContent, SEALED_TEXT)
+    assert.equal(h.said('assistant'), SEALED_TEXT)
     const first = h.frames.findIndex((frame) => frame.includes(ANSWER))
     assert.deepEqual(
       h.frames.slice(first).map((frame) => occurrences(frame, ANSWER)).filter((count) => count !== 1),
@@ -190,7 +191,7 @@ test('a failed reload keeps the streamed answer and Reload thread, and a later r
     await h.flush()
     assert.equal(server.gets(HISTORY_T1), 2)
     assert.equal(h.query('[data-testid="streaming-turn"]'), null)
-    assert.equal(h.query('[data-role="assistant"]')?.textContent, SEALED_TEXT)
+    assert.equal(h.said('assistant'), SEALED_TEXT)
     const first = h.frames.findIndex((frame) => frame.includes(ANSWER))
     assert.deepEqual(
       h.frames.slice(first).map((frame) => occurrences(frame, ANSWER)).filter((count) => count !== 1),
@@ -221,7 +222,7 @@ test('ask first under StrictMode creates the thread, posts the question and open
     assert.deepEqual([...FakeEventSource.instances[0].params.keys()], ['run_id', 'turn_id', 'user_intent', 'user_id'])
     assert.equal(h.path(), '/chat/T1')
     assert.equal(h.query('[data-testid="thread-name"]')?.textContent, 'Analyze NVDA')
-    assert.equal(h.query('[data-role="user"]')?.textContent, 'Analyze NVDA')
+    assert.equal(h.said('user'), 'Analyze NVDA')
     assert.equal(h.sendable(), false)
   } finally {
     await h.cleanup()
@@ -301,7 +302,7 @@ test('switching threads mid-stream closes the connected stream and shows nothing
 
     assert.equal(h.path(), '/chat/T2')
     assert.equal(source.closed, true)
-    assert.equal(h.query('[data-role="user"]')?.textContent, 'What did the Fed do?')
+    assert.equal(h.said('user'), 'What did the Fed do?')
     assert.equal(occurrences(h.text(), ANSWER), 0)
     assert.equal(server.gets(HISTORY_T1), 1)
     assert.equal(FakeEventSource.instances.length, 1)
@@ -322,7 +323,7 @@ test('a completion without message_id loads the thread itself, and that load set
 
     assert.equal(server.gets(HISTORY_T1), 2)
     assert.equal(h.query('[data-testid="streaming-turn"]'), null)
-    assert.equal(h.query('[data-role="assistant"]')?.textContent, SEALED_TEXT)
+    assert.equal(h.said('assistant'), SEALED_TEXT)
     assert.equal(occurrences(h.text(), ANSWER), 1)
     assert.equal(h.sendable(), true)
   } finally {
@@ -439,7 +440,7 @@ test('a golden completion whose rich_text lost its segments shows a notice in th
 
     assert.equal(server.gets(`/v1/chat/threads/${GOLDEN_THREAD}/messages`), 0)
     assert.deepEqual(notices(h), [[GOLDEN_RICH_TEXT, 'rich_text', NOTICE]])
-    const answer = h.query('[data-role="assistant"]')?.textContent ?? ''
+    const answer = h.said('assistant') ?? ''
     assert.deepEqual(
       ['All 24 requested results verified', 'NVIDIA Corporation: Revenue', NOTICE].map((text) => answer.includes(text)),
       [true, true, true],
@@ -479,7 +480,7 @@ test('a valid golden completion renders every block with no notice', async () =>
     await completeGolden(h, goldenCompletion().message)
 
     assert.deepEqual(notices(h), [])
-    const answer = h.query('[data-role="assistant"]')?.textContent ?? ''
+    const answer = h.said('assistant') ?? ''
     assert.deepEqual(
       ["NVDA's revenue rose in every period from Q1 FY2025 (USD 26,044,000,000.00) to Q4 FY2026 (USD 62,100,000,000.00).", 'All 24 requested results verified', 'NVIDIA Corporation: Revenue'].map((text) => answer.includes(text)),
       [true, true, true],

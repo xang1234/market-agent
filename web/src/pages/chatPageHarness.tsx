@@ -213,6 +213,8 @@ export type Harness = {
   back: () => Promise<void>
   text: () => string
   query: (selector: string) => Element | null
+  // The first message of a role, as words (messageWords).
+  said: (role: 'user' | 'assistant') => string | undefined
   button: (name: string) => HTMLButtonElement
   // A question can be sent now: Send is shown (not Stop) and enabled.
   sendable: () => boolean
@@ -339,6 +341,10 @@ export async function renderChat(initialPath: string, server: FakeServer, option
       const send = [...container.querySelectorAll('button')].find((button) => button.getAttribute('aria-label') === 'Send')
       return send !== undefined && !send.disabled
     },
+    said: (role) => {
+      const message = container.querySelector(`[data-role="${role}"]`)
+      return message === null ? undefined : messageWords(message)
+    },
     button: (name) => {
       const found = [...container.querySelectorAll('button')].find(
         (button) => button.getAttribute('aria-label') === name || button.textContent === name,
@@ -432,3 +438,10 @@ export const answerMessage = (threadId: string, id: string, text: string): ChatM
   chatMessage(threadId, id, 'assistant', text, {
     block_proofs: { [`${id}-block`]: { evidence: 'linked', calculation: 'not_verified', public_by_cutoff: 'unknown' } },
   })
+
+// A message's words, the time it was saved left out.
+export function messageWords(message: Element): string {
+  const copy = message.cloneNode(true) as Element
+  copy.querySelectorAll('time').forEach((time) => time.remove())
+  return copy.textContent ?? ''
+}

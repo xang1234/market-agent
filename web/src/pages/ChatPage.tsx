@@ -7,7 +7,8 @@ import { PRIMARY_BUTTON_CLASS } from '../shell/buttonStyles.ts'
 import { VirtualizedMessageList } from '../chat'
 import { ChatComposer, type ChatComposerHandle } from '../chat/ChatComposer.tsx'
 import { ChoiceBar } from '../chat/ChoiceBar.tsx'
-import { offeredChoices } from '../chat/offeredChoices.ts'
+import { openClarification } from '../chat/offeredChoices.ts'
+import { OpenClarificationContext } from '../blocks/openClarification.ts'
 import { PendingTurnView } from '../chat/PendingTurnView.tsx'
 import { ThreadColumn } from '../chat/turnLayout.tsx'
 import { FailureNotice } from '../ui/FailureNotice.tsx'
@@ -133,6 +134,8 @@ function ChatEmptyState({ chat }: { chat: ChatSession }) {
 
 function ChatThreadView({ chat, threadName }: { chat: ChatSession; threadName: string }) {
   const { view } = chat
+  // While a reply can be sent, the open clarification's options are buttons; otherwise they list in place.
+  const open = view.canAsk && view.turn.phase === 'idle' ? openClarification(view.messages) : null
 
   return (
     <div data-testid="chat-thread" className="flex min-h-0 flex-1 flex-col">
@@ -155,17 +158,19 @@ function ChatThreadView({ chat, threadName }: { chat: ChatSession; threadName: s
         ) : null}
         {view.listMounted ? (
           <section className="flex min-h-0 flex-1 flex-col" aria-label="Persisted message history">
-            <VirtualizedMessageList
-              askedRun={view.turn.phase === 'persisting' ? view.turn.turn.runId : null}
-              key={view.listKey}
-              messages={view.messages}
-              tail={(
-                <>
-                  <PendingTurnView turn={view.turn} messages={view.messages} onRetry={chat.retry} onReconnect={chat.reconnect} onReload={chat.reload} onAsk={chat.ask} />
-                  {view.canAsk && view.turn.phase === 'idle' ? <ChoiceBar choices={offeredChoices(view.messages)} onAsk={chat.ask} /> : null}
-                </>
-              )}
-            />
+            <OpenClarificationContext.Provider value={open?.id ?? null}>
+              <VirtualizedMessageList
+                askedRun={view.turn.phase === 'persisting' ? view.turn.turn.runId : null}
+                key={view.listKey}
+                messages={view.messages}
+                tail={(
+                  <>
+                    <PendingTurnView turn={view.turn} messages={view.messages} onRetry={chat.retry} onReconnect={chat.reconnect} onReload={chat.reload} onAsk={chat.ask} />
+                    {open?.clarification_choices ? <ChoiceBar choices={open.clarification_choices} onAsk={chat.ask} /> : null}
+                  </>
+                )}
+              />
+            </OpenClarificationContext.Provider>
           </section>
         ) : null}
       </div>

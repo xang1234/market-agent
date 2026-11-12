@@ -160,3 +160,15 @@ test("recent conversation is the last messages' text, oldest first", async () =>
     { role: "assistant", text: "NVIDIA revenue rose." },
   ]);
 });
+
+test("a clarification saved as its question reads with the options it offered, from its saved choices", async () => {
+  const clarification = [{
+    kind: "rich_text",
+    segments: [{ type: "text", text: "Which margin would you like?" }],
+    clarification_choices: ["Gross margin", "Operating margin"],
+  }];
+  const db = { query: fakeQuery(() => ({ rows: [{ role: "assistant", blocks: clarification }] })) };
+  assert.deepEqual(await loadRecentConversation(db, { threadId: THREAD_ID, limit: 6 }), [
+    { role: "assistant", text: "Which margin would you like? Gross margin; Operating margin" },
+  ]);
+});
