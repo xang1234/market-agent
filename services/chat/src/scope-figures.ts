@@ -126,7 +126,9 @@ export function routeTurn(reading: ScopeProposal | null, scope: ResearchScope | 
     reading.metrics.every((metric) => metric.metric_key === INCOME_STATEMENT) && reading.income_items.every((item) => MARGIN_ITEMS.has(item));
   const keptTrend = (reading.period.kind === "fiscal_year" || reading.period.kind === "fiscal_quarter") && overview && scope.margin_trend && keptIncome;
   if (oneCompany && (askedTrend || keptTrend)) return { kind: "trend", period };
-  if (overview && keptIncome && broadIncome && !asks.has("peers") && readsYear(period)) return { kind: "kept_figures", metrics: [INCOME_STATEMENT], period };
+  // A follow-up keeping an annual answer's income figures ("what about NVDA?",
+  // "add MSFT") asks that question again, at its year, not a quarterly overview (#627).
+  if (overview && keptIncome && (broadIncome || kept.length > 0) && !asks.has("peers") && readsYear(period)) return { kind: "kept_figures", metrics: [INCOME_STATEMENT], period };
   if (overview && keptIncome) return { kind: "overview", period, peers: asks.has("peers") };
   // A figure the engine plans with no model, asked alone with no qualifier
   // and no period of its own ("AMD's earnings per share"), at the scope's
