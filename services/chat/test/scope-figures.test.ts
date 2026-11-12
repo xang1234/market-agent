@@ -183,6 +183,7 @@ const ROUTES: ReadonlyArray<readonly [string, ScopeProposal | null, ResearchScop
   ["kept figures after an annual answer, the most recent results", read({ period: { kind: "latest" } }), after({ latest_period: "fiscal_year", ...keeps("eps_diluted") }), "eps_diluted at latest quarter"],
   ["the income statement after an annual answer, adding a company", read({ companies: adds("AMD") }), after({ companies: [NVDA, AMD], latest_period: "fiscal_year", ...keeps("income_statement") }), "income_statement at latest fiscal year"],
   ["the income statement after an annual answer, another company", read({ companies: { kind: "unclear", names: ["AMD"] } }), after({ latest_period: "fiscal_year", ...keeps("income_statement") }), "income_statement at latest fiscal year"],
+  ["the income statement after an annual answer, another year", read({ period: FY2024 }), after({ latest_period: "fiscal_year", ...keeps("income_statement") }), "overview at FY2024"],
   ["the income statement after a quarterly answer, another company", read({ companies: { kind: "unclear", names: ["AMD"] } }), after({ latest_period: "quarter", ...keeps("income_statement") }), "overview at latest quarter"],
   ["kept income statement, another quarter", read({ period: Q2 }), after(keeps("income_statement")), "overview at newest Q2"],
   ["kept figures, a margin asked for", read({ asks: ["margins"] }), after(keeps("free_cash_flow")), "planner"],
