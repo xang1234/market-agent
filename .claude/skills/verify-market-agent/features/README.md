@@ -1,6 +1,6 @@
 # market-agent verification map
 
-The maintained source for proving user-facing behavior on the `DEV_MODE=data` stack. Read this index, then use the matching file as the recipe.
+The maintained source for proving user-facing behavior on the dev stack (`DEV_MODE=data`, or `analyst` for the chat scorecard). Read this index, then use the matching file as the recipe.
 
 ## Baseline
 
@@ -15,6 +15,7 @@ The maintained source for proving user-facing behavior on the `DEV_MODE=data` st
 | Issuer identity and CIK discovery | [identity-and-cik.md](identity-and-cik.md) |
 | Weekly reference import | [reference-import.md](reference-import.md) |
 | Analyze memo with SEC evidence | [analyze-memo.md](analyze-memo.md) |
+| Chat conversations: subjects, tools, timing, lag, usage | [chat-scorecard.md](chat-scorecard.md) |
 
 ## Reporting
 

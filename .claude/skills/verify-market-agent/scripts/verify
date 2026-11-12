@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Drives this checkout's DEV_MODE=data stack. Usage: see SKILL.md, or run with no args.
+# Drives this checkout's dev stack. Usage: see SKILL.md, or run with no args.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,8 +48,9 @@ check() {
   else printf 'FAIL  %-22s %s\n' "$label" "$detail"; FAILED=$((FAILED + 1)); fi
 }
 
+# up [MODE]: DEV_MODE, data by default. The chat scorecard wants analyst.
 cmd_up() {
-  PATH="$NODE_APP:$PATH" DEV_MODE=data caffeinate -ims "$ROOT/scripts/dev-shell.sh" up
+  PATH="$NODE_APP:$PATH" DEV_MODE="${1:-data}" caffeinate -ims "$ROOT/scripts/dev-shell.sh" up
 }
 
 # --volumes also deletes this stack's database and blobs. Evidence survives both.
@@ -226,13 +227,38 @@ cmd_memo() {
     node "$HERE/memo-flow.mjs"
 }
 
-# chat QUESTION...: asks each in one new thread in a real browser, then saves each
-# turn's screenshot and every saved message's blocks.
+# run_scorecard OUT CASES_FILE ONLY RUNS. Traces and [llm] usage lines exist only
+# in DEV_MODE=analyst; dev-shell.sh resolves CHAT_TRACE_DIR the same way.
+run_scorecard() {
+  local traces="${CHAT_TRACE_DIR:-.dev/traces}"
+  [[ "$traces" == /* ]] || traces="$ROOT/$traces"
+  PATH="$NODE_APP:$PATH" ROOT="$ROOT" WEB_URL="$WEB_URL" OUT="$1" CASES_FILE="$2" ONLY="$3" RUNS="$4" \
+    TRACE_DIR="$traces" CHAT_LOG="$ROOT/.dev/logs/chat.log" COMMIT="$(git rev-parse --short HEAD)" \
+    caffeinate -ims node "$HERE/scorecard.mjs"
+}
+
+# scorecard [--cases=ID,ID] [--runs=N] [--file=PATH]: each case in a new thread per run.
+cmd_scorecard() {
+  local file="$(dirname "$HERE")/features/chat-cases.json" only="" runs=1 arg
+  for arg in "$@"; do
+    case "$arg" in
+      --cases=*) only="${arg#*=}" ;;
+      --runs=*) runs="${arg#*=}" ;;
+      --file=*) file="${arg#*=}" ;;
+      *) echo "usage: scorecard [--cases=ID,ID] [--runs=N] [--file=PATH]" >&2; return 2 ;;
+    esac
+  done
+  [[ "$runs" =~ ^[1-5]$ ]] || { echo "--runs takes 1 to 5: every turn calls live models" >&2; return 2; }
+  run_scorecard "$EVIDENCE/scorecard-$(stamp)" "$file" "$only" "$runs"
+}
+
+# chat QUESTION...: one ad-hoc scorecard case with no expectations, asked in one thread.
 cmd_chat() {
   [[ $# -gt 0 ]] || { echo "usage: chat QUESTION..." >&2; return 2; }
-  mkdir -p "$EVIDENCE"
-  PATH="$NODE_APP:$PATH" ROOT="$ROOT" WEB_URL="$WEB_URL" OUT="$EVIDENCE/chat-$(stamp)" \
-    QUESTIONS="$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "$@")" node "$HERE/chat-flow.mjs"
+  local out="$EVIDENCE/chat-$(stamp)"
+  mkdir -p "$out"
+  python3 -c 'import json, sys; print(json.dumps([{"id": "chat", "turns": [{"ask": q} for q in sys.argv[1:]]}]))' "$@" > "$out/cases.json"
+  run_scorecard "$out" "$out/cases.json" "" 1
 }
 
 # suite <package dir> [test file...]: one log per test file, so a slow file looks
@@ -278,6 +304,7 @@ case "${1:-}" in
   restatements) shift; cmd_restatements "$@" ;;
   memo) shift; cmd_memo "$@" ;;
   chat) shift; cmd_chat "$@" ;;
+  scorecard) shift; cmd_scorecard "$@" ;;
   suite) shift; cmd_suite "$@" ;;
-  *) echo "usage: verify <init-env PORT_OFFSET|up|down [--volumes]|doctor|sql QUERY|resolve TICKER...|identity [save|diff NAME]|import [--force]|backfill-8k TICKER|restatements TICKER...|memo [TICKER]|chat QUESTION...|suite DIR [FILE...]>" >&2; exit 2 ;;
+  *) echo "usage: verify <init-env PORT_OFFSET|up [MODE]|down [--volumes]|doctor|sql QUERY|resolve TICKER...|identity [save|diff NAME]|import [--force]|backfill-8k TICKER|restatements TICKER...|memo [TICKER]|chat QUESTION...|scorecard [--cases=ID,ID] [--runs=N] [--file=PATH]|suite DIR [FILE...]>" >&2; exit 2 ;;
 esac
