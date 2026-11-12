@@ -845,7 +845,8 @@ class MutableChatTurnHandle implements ChatTurnHandle {
     if (this.#terminal !== null) return this.#terminal.type === "turn.stopped" ? "stopped" : "ended";
     if (this.#stop.stop() === "saving") return "saving";
     this.#emit("turn.stopped");
-    this.#stopped.resolve();
+    // The thread's next turn starts once the stopped work's calculation is released: asked again, it finds the run free.
+    void this.#stop.released.then(() => this.#stopped.resolve());
     return "stopped";
   }
 
@@ -857,7 +858,7 @@ class MutableChatTurnHandle implements ChatTurnHandle {
         // outermost wrapper, see createChatCoordinator) overwrites it on
         // every path before invoking the inner runner.
         const work = Promise.resolve(this.#stop.run(() => this.#runner({ ...this.input, emit: this.#emit, bundleId: DEFAULT_BUNDLE_ID })));
-        // A stopped turn's work ends at its next model call or save; the thread's next turn need not wait for it.
+        // A stopped turn's work ends at its next model call, save or fenced write; the thread's next turn waits only for the stop's releases.
         work.catch((error: unknown) => {
           if (this.#stop.state === "stopped" && !(error instanceof ChatTurnStoppedError)) console.error("[chat] a stopped turn's work failed", error);
         });
