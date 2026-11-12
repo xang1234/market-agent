@@ -171,3 +171,42 @@ test("an engine answer to an evidence question after a gap saves that it showed 
   const saved = (await db.query(`select research_scope from chat_messages where message_id = $1`, [answer.message_id])).rows[0]?.research_scope;
   assert.deepEqual([saved?.route, saved?.reads], ["evidence_followup", "financial_answer"]);
 });
+
+test("a follow-up naming only another company asks the previous question about it; a fresh question does not (#627)", { timeout: 300_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for the financial follow-up");
+    return;
+  }
+  const { db, threadId } = await chatDatabase(t, "chat-fin-follow-up-other-company");
+  Object.assign(process.env, { CHAT_DATABASE_URL: databaseUrl(db) });
+  registerLifoCleanup(t, () => closeLocalRuntimePoolForTests());
+  const { rows: [snapshot] } = await db.query<{ snapshot_id: string }>(
+    `insert into snapshots (subject_refs, as_of, basis, normalization, allowed_transforms)
+     values (jsonb_build_array(jsonb_build_object('kind', 'issuer', 'id', $1::text)), now(), 'unadjusted', 'raw', '{}')
+     returning snapshot_id::text as snapshot_id`,
+    [IDS.issuerA],
+  );
+  const grossMargin = {
+    route: "derived_margin", reads: "derived_margin", companies: [{ issuer_id: IDS.issuerA, label: "AAA" }],
+    peers: false, segments: false, margin_trend: false, margins: true,
+    metrics: [{ metric_key: "income_statement", label: "Revenue, profit and margins", available: true }],
+    fiscal_year: null, fiscal_quarter: null, latest_period: "fiscal_year", price_window: null, benchmark: false, income_items: ["gross_margin"], inherited: [],
+  };
+  await db.query(
+    `insert into chat_messages (thread_id, role, snapshot_id, blocks, content_hash, research_scope)
+     values ($1::uuid, 'assistant', $2::uuid, '[]'::jsonb, 'answer', $3::jsonb)`,
+    [threadId, snapshot!.snapshot_id, JSON.stringify(grossMargin)],
+  );
+  const bbb = await withHandoff("BBB") as ChatResolvedSubjectPreResolution;
+  const turn = async (question: string, companies: object) => {
+    const reading = parseProposal(JSON.stringify({ metrics: [], asks: [], turns_off: { facets: [], metrics: [] }, income_items: [], period: { kind: "none" }, companies }), question);
+    const scope = (await analystTurnScope(threadId, question, [bbb], Promise.resolve(reading)))("2026-09-01T00:00:00.000Z");
+    return { companies: scope.companies, metrics: scope.metrics.map((metric) => metric.metric_key), income_items: scope.income_items, latest_period: scope.latest_period };
+  };
+  assert.deepEqual(await turn("what about BBB?", { kind: "unclear", names: ["BBB"] }), {
+    companies: [{ issuer_id: IDS.issuerB, label: "BBB" }], metrics: ["income_statement"], income_items: ["gross_margin"], latest_period: "fiscal_year",
+  });
+  assert.deepEqual(await turn("Tell me about BBB", { kind: "as_named", names: ["BBB"] }), {
+    companies: [{ issuer_id: IDS.issuerB, label: "BBB" }], metrics: [], income_items: undefined, latest_period: undefined,
+  });
+});
