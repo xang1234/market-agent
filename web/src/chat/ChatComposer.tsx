@@ -16,9 +16,12 @@ type ChatComposerProps = {
   ref?: Ref<ChatComposerHandle>
   canAsk: boolean
   onAsk: (text: string) => boolean
+  // While a run is followed the send button is a Stop button; it stays typable.
+  stop: 'none' | 'ready' | 'stopping'
+  onStop: () => void
 }
 
-export function ChatComposer({ ref, draftScope, canAsk, onAsk }: ChatComposerProps): ReactElement {
+export function ChatComposer({ ref, draftScope, canAsk, onAsk, stop, onStop }: ChatComposerProps): ReactElement {
   const [prompt, setPromptState] = useState(() => readDraft(draftScope))
   // Stays mounted across threads, so focus survives; each thread brings its own draft.
   const [shownScope, setShownScope] = useState(draftScope)
@@ -55,14 +58,29 @@ export function ChatComposer({ ref, draftScope, canAsk, onAsk }: ChatComposerPro
             className="field-sizing-content max-h-60 min-h-10 min-w-0 flex-1 resize-none border-none bg-transparent text-sm text-fg outline-none placeholder:text-faint"
             placeholder="Ask about a company, theme, screen, or prior artifact"
           />
-          <button
-            type="submit"
-            disabled={!canAsk}
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-linear-to-br from-accent to-accent-strong text-base font-bold text-on-accent disabled:opacity-50"
-            aria-label="Send"
-          >
-            ↑
-          </button>
+          {stop === 'none' ? (
+            <button
+              type="submit"
+              disabled={!canAsk}
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-linear-to-br from-accent to-accent-strong text-base font-bold text-on-accent disabled:opacity-50"
+              aria-label="Send"
+            >
+              ↑
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onStop}
+              disabled={stop === 'stopping'}
+              title={stop === 'stopping' ? 'Stopping' : 'Stop generation'}
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-negative text-white shadow-sm transition-colors hover:opacity-90 disabled:cursor-default disabled:opacity-60"
+              aria-label={stop === 'stopping' ? 'Stopping' : 'Stop generation'}
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+                <rect x="2" y="2" width="8" height="8" rx="1.5" />
+              </svg>
+            </button>
+          )}
         </div>
         <p className="mt-1.5 text-[11px] text-faint">Press <span className="font-medium text-muted">Enter</span> to send · <span className="font-medium text-muted">Shift+Enter</span> for a newline</p>
       </ThreadColumn>

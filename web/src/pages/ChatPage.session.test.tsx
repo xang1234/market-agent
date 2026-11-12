@@ -49,7 +49,7 @@ test('the completion hands off to the sealed answer it carries: no history GET, 
     assert.equal(h.query('[data-testid="virtualized-message-list"]'), listBefore)
     assert.equal(h.query('[data-role="assistant"]')?.textContent, SEALED_TEXT)
     assert.equal(h.container.querySelectorAll('[data-testid="streaming-turn"]').length, 0)
-    assert.equal(h.button('Send').disabled, false)
+    assert.equal(h.sendable(), true)
 
     await h.ask('Compare with AMD')
     await secondTurn(h, FakeEventSource.instances[1])
@@ -222,7 +222,7 @@ test('ask first under StrictMode creates the thread, posts the question and open
     assert.equal(h.path(), '/chat/T1')
     assert.equal(h.query('[data-testid="thread-name"]')?.textContent, 'Analyze NVDA')
     assert.equal(h.query('[data-role="user"]')?.textContent, 'Analyze NVDA')
-    assert.equal(h.button('Send').disabled, true)
+    assert.equal(h.sendable(), false)
   } finally {
     await h.cleanup()
   }
@@ -324,7 +324,7 @@ test('a completion without message_id loads the thread itself, and that load set
     assert.equal(h.query('[data-testid="streaming-turn"]'), null)
     assert.equal(h.query('[data-role="assistant"]')?.textContent, SEALED_TEXT)
     assert.equal(occurrences(h.text(), ANSWER), 1)
-    assert.equal(h.button('Send').disabled, false)
+    assert.equal(h.sendable(), true)
   } finally {
     await h.cleanup()
   }
@@ -445,7 +445,7 @@ test('a golden completion whose rich_text lost its segments shows a notice in th
       [true, true, true],
     )
     assert.equal(errors.calls(), 1)
-    assert.equal(h.button('Send').disabled, false)
+    assert.equal(h.sendable(), true)
   } finally {
     errors.restore()
     await h.cleanup()

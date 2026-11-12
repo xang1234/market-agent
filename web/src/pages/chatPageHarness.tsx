@@ -120,6 +120,7 @@ export class FakeServer {
   createReply: () => Reply = () => ({ status: 201, body: this.createThread() })
   listReply: () => Reply = () => ({ body: { threads: this.threads } })
   postReply: (message: ChatMessage) => Reply = (message) => ({ status: 201, body: { message } })
+  stopReply: () => Reply = () => ({ body: { status: 'stopped' } })
   renameReply: (threadId: string, title: string | null) => Reply = (threadId, title) => {
     this.threads = this.threads.map((thread) => (thread.thread_id === threadId ? { ...thread, title } : thread))
     return { body: { thread: this.threads.find((thread) => thread.thread_id === threadId) } }
@@ -170,6 +171,7 @@ export class FakeServer {
       return this.postReply(message)
     }
     if (match && method === 'GET') return this.history(match[1])
+    if (method === 'POST' && /^\/v1\/chat\/threads\/[^/]+\/runs\/[^/]+\/stop\?/.test(path)) return this.stopReply()
     const thread = /^\/v1\/chat\/threads\/([^/]+)$/.exec(path)
     if (thread && method === 'DELETE') return this.deleteReply(thread[1])
     if (thread && method === 'PATCH') return this.renameReply(thread[1], (JSON.parse(body) as { title: string | null }).title)
@@ -212,6 +214,8 @@ export type Harness = {
   text: () => string
   query: (selector: string) => Element | null
   button: (name: string) => HTMLButtonElement
+  // A question can be sent now: Send is shown (not Stop) and enabled.
+  sendable: () => boolean
   flush: () => Promise<void>
   type: (text: string) => Promise<void>
   ask: (text: string, presses?: number) => Promise<void>
@@ -331,6 +335,10 @@ export async function renderChat(initialPath: string, server: FakeServer, option
     },
     text: () => container.textContent ?? '',
     query: (selector) => container.querySelector(selector),
+    sendable: () => {
+      const send = [...container.querySelectorAll('button')].find((button) => button.getAttribute('aria-label') === 'Send')
+      return send !== undefined && !send.disabled
+    },
     button: (name) => {
       const found = [...container.querySelectorAll('button')].find(
         (button) => button.getAttribute('aria-label') === name || button.textContent === name,

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore } from 'react'
 
-import { authenticatedJson } from '../http/authFetch.ts'
+import { authenticatedFetch, authenticatedJson } from '../http/authFetch.ts'
 import {
   INITIAL_CHAT_SESSION,
   MAX_REOPENS,
@@ -19,6 +19,8 @@ import { persistUserChatTurn } from './persistUserChatTurn.ts'
 import { createThread } from './threadActions.ts'
 
 const HISTORY_TIMEOUT_MS = 10_000
+// A stop the stream hasn't confirmed by then gives the Stop button back.
+const STOP_TIMEOUT_MS = 10_000
 
 export type ChatSession = {
   view: ThreadView
@@ -26,6 +28,8 @@ export type ChatSession = {
   // (a turn is in flight), and the caller keeps its draft.
   ask(text: string): boolean
   retry(): void
+  // Asks the server to stop the run the session follows.
+  stop(): void
   reconnect(): void
   reload(): void
 }
@@ -218,6 +222,29 @@ export function useChatSession({ userId, threadId, navigate, onThreadCreated }: 
   const retry = useCallback(() => store.dispatch({ type: 'turn.retried', runId: makeId() }), [store])
   const reconnect = useCallback(() => store.dispatch({ type: 'link.reconnected' }), [store])
 
+  const stop = useCallback(() => {
+    const { threadId, turn } = store.getState()
+    if (threadId === null || turn.phase !== 'streaming' || turn.stop === 'requested' || !userId) return
+    const { runId, turnId } = turn.run
+    store.dispatch({ type: 'stop.requested', runId })
+    const lapse = () => store.dispatch({ type: 'stop.lapsed', runId })
+    // 200 and 409 both leave the outcome to the stream: turn.stopped, or the
+    // answer the run was already saving.
+    authenticatedFetch(
+      `/v1/chat/threads/${encodeURIComponent(threadId)}/runs/${encodeURIComponent(runId)}/stop?${new URLSearchParams({ turn_id: turnId })}`,
+      { userId, method: 'POST' },
+    ).then((response) => {
+      if (!response.ok && response.status !== 409) lapse()
+    }, lapse)
+  }, [store, userId])
+
+  const stoppingRun = view.turn.phase === 'streaming' && view.stop === 'stopping' ? view.turn.run.runId : null
+  useEffect(() => {
+    if (stoppingRun === null) return
+    const timer = setTimeout(() => store.dispatch({ type: 'stop.lapsed', runId: stoppingRun }), STOP_TIMEOUT_MS)
+    return () => clearTimeout(timer)
+  }, [store, stoppingRun])
+
   const reload = useCallback(() => store.dispatch({ type: 'history.requested' }), [store])
 
   const loadThreadId = view.needsLoad?.threadId ?? null
@@ -238,7 +265,7 @@ export function useChatSession({ userId, threadId, navigate, onThreadCreated }: 
     return () => controller.abort()
   }, [store, userId, loadThreadId, loadGen])
 
-  return useMemo(() => ({ view, ask, retry, reconnect, reload }), [view, ask, retry, reconnect, reload])
+  return useMemo(() => ({ view, ask, retry, stop, reconnect, reload }), [view, ask, retry, stop, reconnect, reload])
 }
 
 function errorText(caught: unknown): string {

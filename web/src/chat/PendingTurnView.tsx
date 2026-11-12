@@ -49,6 +49,15 @@ export function PendingTurnView({ turn, messages, onRetry, onReconnect, onReload
           </div>
         </div>
       )
+    case 'stopped':
+      return (
+        <div data-testid="stopped-turn" className="flex items-center gap-3 py-2 text-sm text-muted">
+          <p>Stopped</p>
+          {turn.origin.kind === 'own'
+            ? <button type="button" onClick={onRetry} className="rounded-md border border-line-strong px-3 py-1.5 text-xs font-medium text-fg">Ask again</button>
+            : null}
+        </div>
+      )
     case 'unverified':
       return turn.stream.unverified ? <UnverifiedTurnView state={turn.stream} unverified={turn.stream.unverified} /> : null
     case 'streaming':

@@ -51,13 +51,13 @@ test('an own stream that fails before the server has the run reopens with the sa
     assert.deepEqual(streamParams(reopened), streamParams(own))
     assert.equal(reopened.params.get('attach'), null)
     assert.equal(server.gets(HISTORY_T1), 1)
-    assert.equal(h.button('Send').disabled, true)
+    assert.equal(h.sendable(), false)
 
     await streamAnswer(h, reopened)
     await complete(h, reopened)
     assert.equal(occurrences(h.text(), ANSWER), 1)
     assert.equal(h.query('[data-role="assistant"]')?.textContent, SEALED_TEXT)
-    assert.equal(h.button('Send').disabled, false)
+    assert.equal(h.sendable(), true)
   } finally {
     await h.cleanup()
   }
@@ -76,7 +76,7 @@ test('an own stream that never reaches the server goes offline after its reopens
     assert.deepEqual(FakeEventSource.instances.map((source) => streamParams(source)), Array(4).fill(streamParams(own)))
     assert.equal(server.gets(HISTORY_T1), 1)
     assert.match(h.text(), /Lost the connection to the analyst\./)
-    assert.equal(h.button('Send').disabled, true)
+    assert.equal(h.sendable(), false)
 
     await act(async () => h.button('Reconnect').click())
     await h.flush()
@@ -84,7 +84,7 @@ test('an own stream that never reaches the server goes offline after its reopens
     assert.deepEqual(streamParams(FakeEventSource.instances.at(-1)!), streamParams(own))
     assert.equal(server.gets(HISTORY_T1), 1)
     assert.notEqual(h.query('[data-testid="streaming-turn"]'), null)
-    assert.equal(h.button('Send').disabled, true)
+    assert.equal(h.sendable(), false)
   } finally {
     await h.cleanup()
   }
@@ -162,14 +162,14 @@ test('returning to a thread whose question is still being saved follows its run 
     assert.equal(followed.params.get('user_intent'), 'Analyze NVDA')
     assert.equal(followed.params.get('attach'), null)
     assert.equal(server.gets(HISTORY_T1), 3)
-    assert.equal(h.button('Send').disabled, true)
+    assert.equal(h.sendable(), false)
 
     await streamAnswer(h, followed)
     await complete(h, followed)
     assert.equal(occurrences(h.text(), ANSWER), 1)
     assert.equal(h.query('[data-role="assistant"]')?.textContent, SEALED_TEXT)
     assert.equal(h.query('[data-role="user"]')?.textContent, 'Analyze NVDA')
-    assert.equal(h.button('Send').disabled, false)
+    assert.equal(h.sendable(), true)
     assert.equal(server.writes().length, 1)
   } finally {
     await h.cleanup()
@@ -200,7 +200,7 @@ test('a released stream that has not reached the server is sent again by the thr
     assert.equal(FakeEventSource.instances.length, 2)
     const resent = FakeEventSource.instances[1]
     assert.deepEqual(streamParams(resent), streamParams(own))
-    assert.equal(h.button('Send').disabled, true)
+    assert.equal(h.sendable(), false)
 
     state.started = true
     await act(async () => own.open())
@@ -210,7 +210,7 @@ test('a released stream that has not reached the server is sent again by the thr
     await streamAnswer(h, resent)
     await complete(h, resent)
     assert.equal(occurrences(h.text(), ANSWER), 1)
-    assert.equal(h.button('Send').disabled, false)
+    assert.equal(h.sendable(), true)
   } finally {
     await h.cleanup()
   }
@@ -228,7 +228,7 @@ test('a released run whose every start fails, on the thread on screen, ends offl
 
     assert.equal(FakeEventSource.instances.every((source) => source.params.get('attach') === null), true)
     assert.equal(h.button('Reconnect').disabled, false)
-    assert.equal(h.button('Send').disabled, true)
+    assert.equal(h.sendable(), false)
   } finally {
     await h.cleanup()
   }
@@ -255,7 +255,7 @@ test('switching away and back mid-run reattaches with attach=1 and shows the sea
     assert.equal(FakeEventSource.instances.length, 2)
     const attached = FakeEventSource.instances[1]
     assert.deepEqual(streamParams(attached), { run_id: own.params.get('run_id'), turn_id: own.params.get('turn_id'), user_id: USER_ID, attach: '1' })
-    assert.equal(h.button('Send').disabled, true)
+    assert.equal(h.sendable(), false)
     assert.match(h.text(), STILL_ANSWERING)
     assert.equal(h.query('[data-testid="streaming-turn"]')?.getAttribute('data-turn-status'), 'streaming')
 
@@ -265,7 +265,7 @@ test('switching away and back mid-run reattaches with attach=1 and shows the sea
     assert.deepEqual(consecutive(h.frames.slice(returned).map((frame) => occurrences(frame, ANSWER))), [0, 1])
     assert.equal(FakeEventSource.instances.length, 2)
     assert.doesNotMatch(h.text(), STILL_ANSWERING)
-    assert.equal(h.button('Send').disabled, false)
+    assert.equal(h.sendable(), true)
   } finally {
     await h.cleanup()
   }
@@ -281,21 +281,21 @@ test('a fresh mount on a thread with an active run shows it in progress, Send di
     assert.deepEqual(streamParams(attached), { run_id: 'r1', turn_id: 'u1', user_id: USER_ID, attach: '1' })
     assert.equal(h.query('[data-testid="streaming-turn"]')?.getAttribute('data-turn-status'), 'streaming')
     assert.match(h.text(), STILL_ANSWERING)
-    assert.equal(h.button('Send').disabled, true)
+    assert.equal(h.sendable(), false)
 
     await act(async () => {
       attached.emit('turn.started', 1)
       attached.emit('tool.started', 2, { tool_call_id: 't1', tool_name: 'get_quote' })
     })
     await h.flush()
-    assert.equal(h.button('Send').disabled, true)
+    assert.equal(h.sendable(), false)
     await streamAnswer(h, attached)
     await complete(h, attached)
 
     assert.deepEqual(consecutive(h.frames.map((frame) => occurrences(frame, ANSWER))), [0, 1])
     assert.equal(h.query('[data-role="assistant"]')?.textContent, SEALED_TEXT)
     assert.equal(h.query('[data-testid="streaming-turn"]'), null)
-    assert.equal(h.button('Send').disabled, false)
+    assert.equal(h.sendable(), true)
     assert.equal(server.gets(HISTORY_T1), 1)
     assert.equal(FakeEventSource.instances.length, 1)
   } finally {
@@ -322,7 +322,7 @@ test('an unsealed completion of an adopted run whose answer the load holds hands
     assert.deepEqual(answerOnceFromFirst(h), [])
     assert.equal(h.query('[data-testid="streaming-turn"]'), null)
     assert.equal(server.gets(HISTORY_T1), 1)
-    assert.equal(h.button('Send').disabled, false)
+    assert.equal(h.sendable(), true)
   } finally {
     await h.cleanup()
   }
@@ -365,7 +365,7 @@ test('an attached stream that drops while the run continues reattaches through a
 
     assert.equal(server.gets(HISTORY_T1), 2)
     assert.doesNotMatch(h.text(), /disconnected/)
-    assert.equal(h.button('Send').disabled, true)
+    assert.equal(h.sendable(), false)
     assert.equal(FakeEventSource.instances.length, 2)
     const second = FakeEventSource.instances[1]
     assert.deepEqual(streamParams(second), { run_id: 'r1', turn_id: 'u1', user_id: USER_ID, attach: '1' })
@@ -373,7 +373,7 @@ test('an attached stream that drops while the run continues reattaches through a
     await streamAnswer(h, second)
     await complete(h, second)
     assert.deepEqual(consecutive(h.frames.map((frame) => occurrences(frame, ANSWER))), [0, 1])
-    assert.equal(h.button('Send').disabled, false)
+    assert.equal(h.sendable(), true)
   } finally {
     await h.cleanup()
   }
@@ -414,7 +414,7 @@ test('three failed reattaches show Reconnect with Send disabled, and Reconnect a
     assert.equal(server.gets(HISTORY_T1), 4)
     assert.equal(FakeEventSource.instances.every((source) => source.closed), true)
     assert.match(h.text(), /Lost the connection to the analyst\./)
-    assert.equal(h.button('Send').disabled, true)
+    assert.equal(h.sendable(), false)
 
     await act(async () => h.button('Reconnect').click())
     await h.flush()
@@ -422,7 +422,7 @@ test('three failed reattaches show Reconnect with Send disabled, and Reconnect a
     assert.equal(FakeEventSource.instances.length, 5)
     assert.equal(FakeEventSource.instances[4].params.get('attach'), '1')
     assert.doesNotMatch(h.text(), /Lost the connection/)
-    assert.equal(h.button('Send').disabled, true)
+    assert.equal(h.sendable(), false)
   } finally {
     await h.cleanup()
   }
