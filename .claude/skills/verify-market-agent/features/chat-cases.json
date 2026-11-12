@@ -1,0 +1,87 @@
+[
+  {
+    "id": "margins-clarify-all",
+    "note": "#623, #626: replying \"all\" to the margin clarification keeps AAPL and answers the margins it offered",
+    "budget_ms": { "first_text": 15000, "saved": 15000 },
+    "turns": [
+      { "ask": "What drives AAPL's margins?", "expect": { "not_subjects": ["ALL"] } },
+      { "ask": "all", "expect": { "subjects": ["AAPL"], "not_subjects": ["ALL"], "not_text": ["No research claims"] } }
+    ]
+  },
+  {
+    "id": "aapl-gross-margin",
+    "budget_ms": { "first_text": 15000, "saved": 15000 },
+    "turns": [{ "ask": "What was AAPL's gross margin last fiscal year?", "expect": { "subjects": ["AAPL"], "text": ["Apple Inc.", "Gross margin"] } }]
+  },
+  {
+    "id": "followup-keeps-metric",
+    "note": "#627: a short follow-up asks the previous question about another company",
+    "budget_ms": { "first_text": 15000, "saved": 15000 },
+    "turns": [
+      { "ask": "What was AAPL's gross margin last fiscal year?", "expect": { "subjects": ["AAPL"] } },
+      { "ask": "what about NVDA?", "expect": { "subjects": ["NVDA"], "not_subjects": ["AAPL"], "text": ["Gross margin"] } }
+    ]
+  },
+  {
+    "id": "peer-followup-asks-add-or-alone",
+    "budget_ms": { "first_text": 15000, "saved": 15000 },
+    "turns": [
+      { "ask": "Compare KO and PEP gross margins", "expect": { "subjects": ["KO", "PEP"], "text": ["Coca-Cola", "PepsiCo"] } },
+      { "ask": "what about MSFT?", "expect": { "text": ["MSFT", "KO", "PEP"] } }
+    ]
+  },
+  {
+    "id": "ticker-it-is-gartner",
+    "budget_ms": { "first_text": 15000, "saved": 15000 },
+    "turns": [{ "ask": "What was IT's revenue last quarter?", "expect": { "subjects": ["IT"], "text": ["Gartner"] } }]
+  },
+  {
+    "id": "ticker-on-clarify-all-three",
+    "budget_ms": { "first_text": 15000, "saved": 15000 },
+    "turns": [
+      { "ask": "How are ON's margins trending?", "expect": { "text": ["ON"] } },
+      { "ask": "All three margins", "expect": { "subjects": ["ON"], "text": ["ON Semiconductor", "Gross margin", "Operating margin", "Net margin"] } }
+    ]
+  },
+  {
+    "id": "ko-revenue-growth",
+    "budget_ms": { "first_text": 15000, "saved": 15000 },
+    "turns": [{ "ask": "What was KO's revenue growth last fiscal year?", "expect": { "subjects": ["KO"], "text": ["Coca-Cola", "Revenue"] } }]
+  },
+  {
+    "id": "qcom-txn-operating-margin",
+    "budget_ms": { "first_text": 15000, "saved": 15000 },
+    "turns": [
+      { "ask": "Compare QCOM and TXN operating margins last fiscal year", "expect": { "subjects": ["QCOM", "TXN"], "text": ["Qualcomm", "Texas Instruments", "Operating margin"] } }
+    ]
+  },
+  {
+    "id": "call-aapl-scenarios",
+    "budget_ms": { "first_text": 15000, "saved": 15000 },
+    "turns": [{ "ask": "AAPL bear 20x, base 25x, bull 30x", "expect": { "subjects": ["AAPL"], "text": ["Bear", "20x", "Base", "25x", "Bull", "30x"] } }]
+  },
+  {
+    "id": "msft-pe",
+    "budget_ms": { "first_text": 15000, "saved": 15000 },
+    "turns": [{ "ask": "What is MSFT's P/E ratio?", "expect": { "subjects": ["MSFT"], "text": ["Microsoft", "P/E ratio"] } }]
+  },
+  {
+    "id": "csco-net-income",
+    "budget_ms": { "first_text": 15000, "saved": 15000 },
+    "turns": [{ "ask": "What was CSCO's net income last quarter?", "expect": { "subjects": ["CSCO"], "text": ["Cisco", "Net income"] } }]
+  },
+  {
+    "id": "hd-trend-offered-period",
+    "note": "#628: an option the clarification offers is answered, not refused",
+    "budget_ms": { "first_text": 15000, "saved": 15000 },
+    "turns": [
+      { "ask": "Show HD's operating margin trend", "expect": { "text": ["HD", "Last 3 fiscal years"] } },
+      { "ask": "Last 3 fiscal years (annual)", "expect": { "subjects": ["HD"], "not_text": ["outside the verified financial definitions"] } }
+    ]
+  },
+  {
+    "id": "nvda-amd-ytd",
+    "budget_ms": { "first_text": 15000, "saved": 15000 },
+    "turns": [{ "ask": "Compare NVDA with AMD year to date", "expect": { "subjects": ["NVDA", "AMD"], "tools": ["get_quote"] } }]
+  }
+]
