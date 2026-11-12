@@ -55,8 +55,8 @@ test("sequencer produces strictly monotonically increasing seq across event kind
   for (const kind of CHAT_SSE_EVENT_TYPES) {
     seqs.push(sequencer.next(kind, PAYLOAD_FOR_KIND[kind]).seq);
   }
-  assert.deepEqual(seqs, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
-  assert.equal(sequencer.currentSeq(), 11);
+  assert.deepEqual(seqs, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+  assert.equal(sequencer.currentSeq(), 12);
 });
 
 test("payload fields are merged into the event, with universal fields winning on collision", () => {
