@@ -236,7 +236,7 @@ export function useChatSession({ userId, threadId, navigate, onThreadCreated }: 
 
   const sendQueued = useCallback(() => {
     const { threadId, queued } = store.getState()
-    const turn = threadId === null ? undefined : queued[threadId]
+    const turn = threadId === null ? undefined : queued[threadId]?.turn
     if (turn && userId) store.dispatch({ type: 'ask.started', turn })
   }, [store, userId])
   const removeQueued = useCallback(() => store.dispatch({ type: 'queue.removed' }), [store])

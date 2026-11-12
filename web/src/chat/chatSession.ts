@@ -4,6 +4,10 @@ import { INITIAL_STREAM_STATE, applyChatStreamEvent, type StreamState } from './
 
 export type TurnIds = { runId: string; text: string }
 
+// A question asked while a run streamed: it waits on that run, by id, and is
+// sent once the thread knows the run saved its answer, however it learns so.
+export type QueuedQuestion = Readonly<{ turn: TurnIds; after: string; saved: boolean }>
+
 export type RunInput = Readonly<{ userIntent: string }>
 
 // Who started the run the session follows. It holds for the run's life, and
@@ -89,9 +93,8 @@ export type ChatSessionState = {
   inFlight: ReadonlyArray<RunRef>
   // Across threads: survives thread.opened.
   released: ReadonlyArray<ReleasedRun>
-  // A question per thread, asked while a run was followed there: it is sent
-  // when a turn there hands off its saved answer. Survives thread.opened.
-  queued: Readonly<Record<string, TurnIds>>
+  // A question per thread, asked while a run was followed there. Survives thread.opened.
+  queued: Readonly<Record<string, QueuedQuestion>>
   // Bumped by every thread.opened that changes the thread, but not by
   // thread.created, so ask-first keeps one message list into its new thread.
   opens: number
@@ -201,18 +204,37 @@ function following(run: RunRef, origin: RunOrigin, link: StreamLink): TurnState 
   return { phase: 'streaming', run, origin, stream: INITIAL_STREAM_STATE, link, stop: 'none' }
 }
 
-// A turn that handed off its saved answer sends the question queued behind it
-// in the same state. A failed, stopped, or unverified turn leaves it queued.
+// The queued question is sent once its run saved an answer and the thread is
+// idle. Behind a run that failed, stopped, or was never reported, it stays queued.
 export function reduceChatSession(s: ChatSessionState, a: ChatSessionAction): ChatSessionState {
   const next = reduceTurn(s, a)
-  if (next.threadId === null || next.threadId !== s.threadId || next.sealedTurns <= s.sealedTurns) return next
-  const queued = next.queued[next.threadId]
-  return queued && next.turn.phase === 'idle' && askable(next) ? asked(next, queued) : next
+  const queued = queuedHere(next)
+  return queued?.saved && next.turn.phase === 'idle' && askable(next) ? asked(next, queued.turn) : next
 }
 
+const queuedHere = (s: ChatSessionState) => (s.threadId === null ? undefined : s.queued[s.threadId])
+
 function asked(s: ChatSessionState, turn: TurnIds): ChatSessionState {
-  const queued = s.threadId === null ? undefined : s.queued[s.threadId]
-  return { ...s, turn: { phase: 'persisting', turn }, queued: queued?.runId === turn.runId ? unqueued(s) : s.queued }
+  return { ...s, turn: { phase: 'persisting', turn }, queued: queuedHere(s)?.turn.runId === turn.runId ? unqueued(s) : s.queued }
+}
+
+function savedQueue(s: ChatSessionState, runId: string): ChatSessionState['queued'] {
+  const queued = queuedHere(s)
+  if (s.threadId === null || queued?.after !== runId || queued.saved) return s.queued
+  return { ...s.queued, [s.threadId]: { ...queued, saved: true } }
+}
+
+// A load can show a run's saved answer that no hand-off reported: one ended
+// while the reader was on another thread. A read that predates the answer's
+// commit asks once for another load, as a released run's does.
+function savedByLoad(s: ChatSessionState, read: Read): ChatSessionState {
+  const queued = queuedHere(s)
+  if (!queued) return s
+  const status = read.runs.find((entry) => entry.run.runId === queued.after)
+  if (status?.status !== 'completed' || status.messageId === null) return s
+  if (read.ids.has(status.messageId)) return { ...s, queued: savedQueue(s, queued.after) }
+  if (s.turn.phase !== 'idle' || loadPending(s) || s.endedRuns.includes(queued.after)) return s
+  return { ...s, history: requestHistory(s.history), endedRuns: withEnded(s, status.run) }
 }
 
 function unqueued(s: ChatSessionState): ChatSessionState['queued'] {
@@ -229,7 +251,7 @@ function reduceTurn(s: ChatSessionState, a: ChatSessionAction): ChatSessionState
 
     case 'question.queued':
       if (s.threadId === null || s.turn.phase !== 'streaming') return s
-      return { ...s, queued: { ...s.queued, [s.threadId]: a.turn } }
+      return { ...s, queued: { ...s.queued, [s.threadId]: { turn: a.turn, after: s.turn.run.runId, saved: false } } }
 
     case 'queue.removed':
       if (s.threadId === null || !(s.threadId in s.queued)) return s
@@ -345,7 +367,7 @@ function reduceTurn(s: ChatSessionState, a: ChatSessionAction): ChatSessionState
       const read: Read = { ids: loadedIds, runs: a.runs }
       const inFlight = a.runs.flatMap((entry) => (entry.status === 'in_flight' ? [entry.run] : []))
       // active_run may name a run the session already saw end; followUp moves on to the next one.
-      return followUp(adopt(reconcileReleased(settled({ ...s, history, inFlight }, read), read), a.activeRun))
+      return savedByLoad(followUp(adopt(reconcileReleased(settled({ ...s, history, inFlight }, read), read), a.activeRun)), read)
     }
 
     case 'history.failed': {
@@ -458,8 +480,8 @@ function reconcileReleased(s: ChatSessionState, read: Read): ChatSessionState {
   return { ...next, released: kept }
 }
 
-function handOff(s: ChatSessionState, run: RunRef): Pick<ChatSessionState, 'turn' | 'sealedTurns' | 'endedRuns'> {
-  return { turn: IDLE, sealedTurns: s.sealedTurns + 1, endedRuns: withEnded(s, run) }
+function handOff(s: ChatSessionState, run: RunRef): Pick<ChatSessionState, 'turn' | 'sealedTurns' | 'endedRuns' | 'queued'> {
+  return { turn: IDLE, sealedTurns: s.sealedTurns + 1, endedRuns: withEnded(s, run), queued: savedQueue(s, run.runId) }
 }
 
 function withEnded(s: ChatSessionState, run: RunRef): ReadonlyArray<string> {
@@ -608,7 +630,7 @@ export function selectThreadView(s: ChatSessionState): ThreadView {
     turn,
     canAsk: askable(s),
     stop: turn.phase !== 'streaming' ? 'none' : turn.stop === 'requested' ? 'stopping' : 'ready',
-    queued: (s.threadId !== null && s.queued[s.threadId]?.text) || null,
+    queued: queuedHere(s)?.turn.text ?? null,
     firstQuestion: (firstUser ? messageText(firstUser) : null) || pendingText,
     sealedTurns: s.sealedTurns,
     needsLoad: s.threadId !== null && history.requested > history.settled
