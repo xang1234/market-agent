@@ -577,16 +577,16 @@ async function planTurn(
     switch (choice.kind) {
       // A trend is the company's reported quarters to a period its scope
       // holds. With none to chart, it is the income statement of the fiscal
-      // year named, or the latest, and a gap when the company reported no such
-      // year: a model would offer periods no scope carries back, so a typed
-      // choice of one is refused (#628).
+      // year named, or of a named quarter's year, or the latest, and a gap when
+      // the company reported no such year: a model would offer periods no scope
+      // carries back, so a typed choice of one is refused (#628).
       case "trend": {
         if (subjects.length !== 1) return null;
         const planning = planningContext(subjects);
-        const named = choice.period.kind === "fiscal_year" ? choice.period : null;
+        const year = choice.period.kind === "latest" ? null : choice.period.fiscal_year;
         return (await planMarginTrend(planning, turn.evidence, choice.period))
-          ?? (await reportsFiscalYear(planning, turn.evidence, named?.fiscal_year ?? null)
-            ? await planScopeFigures(planning, turn.evidence, ["income_statement"], named ?? LATEST_FISCAL_YEAR_READ)
+          ?? (await reportsFiscalYear(planning, turn.evidence, year)
+            ? await planScopeFigures(planning, turn.evidence, ["income_statement"], year === null ? LATEST_FISCAL_YEAR_READ : { kind: "fiscal_year", fiscal_year: year })
             : null)
           ?? UNQUARTERED_TREND;
       }

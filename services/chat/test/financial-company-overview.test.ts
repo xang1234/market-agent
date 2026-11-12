@@ -435,6 +435,35 @@ test("a question about one company that asks for no figure is answered with its 
     assert.deepEqual(notes, ["A margin trend is charted over reported quarters, and none could be read for ANNL, so its margins are shown for a fiscal year."]);
   });
 
+  await t.test("a margin trend follow-up naming a quarter of a company that reports only fiscal years shows that quarter's fiscal year, or a gap when it has none (#639 review)", async () => {
+    const trend = { ...NO_ASKS, asks: new Set(["margins", "margin_trend"] as const) };
+    const first = completed((await chatHarness(pool, { model: null, readQuestion: reading(trend), resolveMention: resolve }).run({ ...base, userIntent: "How are ANNL's margins trending?" })).events);
+    const prior: ResearchScope = (await db.query(`select research_scope from chat_messages where message_id = $1`, [first.message_id])).rows[0].research_scope;
+    const annl = (await resolve("ANNL")) as ChatResolvedSubjectPreResolution;
+    const followUp = async (fiscal_year: number) => {
+      const quarter = { ...NO_ASKS, period: { kind: "fiscal_quarter" as const, fiscal_period: "Q1" as const, fiscal_year } };
+      const researchScope = (async (_context: unknown, read: Promise<ScopeProposal | null>) =>
+        resolveResearchScope({ companies: prior.companies, prior, asOf: "2026-10-22T00:00:00.000Z", served: true, proposal: await read })) as never;
+      const harness = chatHarness(pool, { model: null, readQuestion: async () => quarter, resolveMention: resolve, priorSubjects: async () => [annl], researchScope });
+      return { harness, done: completed((await harness.run({ ...base, userIntent: `Now Q1 FY${fiscal_year}` })).events) };
+    };
+    const { done } = await followUp(2022);
+    assert.deepEqual((await results(done.message_id)).filter(([outputId]) => outputId!.includes("_margin")), [
+      ["out_gross_margin_fy2022_fy", "FY2022 (ended 2022-12-31)", "verified", "40.00%"],
+      ["out_operating_margin_fy2022_fy", "FY2022 (ended 2022-12-31)", "verified", "20.00%"],
+      ["out_net_margin_fy2022_fy", "FY2022 (ended 2022-12-31)", "verified", "10.00%"],
+    ]);
+    const { rows: [saved] } = await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id]);
+    const notes = (saved.blocks as Array<{ segments?: Array<{ text: string }> }>).slice(1).flatMap((block) => block.segments?.map((segment) => segment.text) ?? []);
+    assert.deepEqual(notes, ["ANNL is carried from the previous answer. A margin trend is charted over reported quarters, and none could be read for ANNL, so its margins are shown for a fiscal year. These figures are for a fiscal year, not Q1 FY2022."]);
+    const missing = await followUp(2021);
+    const [block] = (missing.harness.persisted.at(-1)?.blocks ?? []) as ReadonlyArray<{ segments: Array<{ text: string }> }>;
+    assert.deepEqual([missing.done.financial_gap, block?.segments[0]?.text], [
+      { reason_code: "unsupported" },
+      "This request asks for a calculation outside the verified financial definitions I can compute: a margin trend, which is charted over reported quarters, and none could be read for this company.",
+    ]);
+  });
+
   await t.test("a margin trend's answer is saved without reading its revenue again, as only an overview's note names growth it leaves out (#479 review)", async () => {
     const reads: string[] = [];
     const counted: typeof createEvidenceFinancialPort = (executor) => {
