@@ -19,12 +19,12 @@ function MessageItemInner({ message, onMeasure }: MessageItemProps): ReactElemen
   useLayoutEffect(() => {
     const el = ref.current
     if (el === null) return
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0]
-      if (entry === undefined) return
-      // The whole box, padding included: the virtual window stacks these heights.
-      onMeasure(message.message_id, entry.borderBoxSize?.[0]?.blockSize ?? el.getBoundingClientRect().height)
-    })
+    // The whole box, padding included: the virtual window stacks these heights.
+    const measure = () => onMeasure(message.message_id, el.getBoundingClientRect().height)
+    // Now, in the commit that mounts it: a list that windows on its estimate
+    // instead can move the view, unmount it unmeasured, and never settle.
+    measure()
+    const observer = new ResizeObserver(measure)
     observer.observe(el)
     return () => observer.disconnect()
   }, [message.message_id, onMeasure])
