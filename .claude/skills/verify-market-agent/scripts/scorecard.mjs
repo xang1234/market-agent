@@ -81,17 +81,14 @@ const takeLag = (page) =>
     return taken
   })
 
-// An answer's text in the streaming turn (not its plan, "Starting…", or a link notice),
-// or a new saved assistant message with text.
+// Rendered answer blocks in the streaming turn: streamed rich text, or a sealed answer's
+// blocks. A pending block's skeleton is in neither, so its "Loading … block" label never counts.
+// Or a new saved assistant message with text.
 function answerTextShown(knownIds) {
-  const streaming = document.querySelector('[data-testid="streaming-turn"]')
-  if (streaming) {
-    const text = [...streaming.children]
-      .filter((child) => child.tagName !== 'P' && child.dataset.testid !== 'agent-plan-panel')
-      .map((child) => child.innerText)
-      .join('')
-    if (text.trim() !== '') return true
-  }
+  const blocks = document.querySelectorAll(
+    '[data-testid="streaming-turn"] [data-testid^="streaming-block-"], [data-testid="streaming-turn"] [data-testid^="block-shell-"]',
+  )
+  if ([...blocks].some((block) => block.innerText.trim() !== '')) return true
   return [...document.querySelectorAll('[data-role="assistant"]')].some(
     (message) => !knownIds.includes(message.dataset.messageId) && message.innerText.trim() !== '',
   )
