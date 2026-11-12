@@ -82,3 +82,41 @@ test("a downloaded company_tickers.json is cached for a day, then downloaded aga
   assert.deepEqual(await loadCompanyTickerCiks(file, download, Date.now() + 86_460_000), downloaded, "a day and a minute later");
   assert.equal(downloads, 2);
 });
+
+test("a ticker SEC knows fills only an issuer listed on a US exchange", { timeout: 120_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for CIK fill coverage");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "fin-cik-fill-us");
+  const db = await connectedPool(t, databaseUrl);
+  const id = (n: number) => `39000000-0000-4000-8000-0000000007${String(n).padStart(2, "0")}`;
+  // Ordered so the London issuer is read first and would claim the CIK before the US one.
+  const listed: ReadonlyArray<readonly [number, string, string, string, string]> = [
+    [1, "Anglo American plc", "XLON", "AAL", "GBP"],
+    [2, "American Airlines Group Inc", "XNAS", "AAL", "USD"],
+    [3, "London Only plc", "XLON", "ONLY", "GBP"],
+  ];
+  for (const [n, name, mic, ticker, currency] of listed) {
+    await db.query(`insert into issuers (issuer_id, legal_name) values ($1, $2)`, [id(n), name]);
+    await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1, $1, 'common_stock')`, [id(n)]);
+    await db.query(
+      `insert into listings (instrument_id, mic, ticker, trading_currency, timezone) values ($1, $2, $3, $4, 'Europe/London')`,
+      [id(n), mic, ticker, currency],
+    );
+  }
+  const ciks = new Map([["AAL", "6201"], ["ONLY", "990616"]]);
+
+  assert.deepEqual(await fillMissingCiks(db, ciks, { error: (line: string) => assert.fail(line) }), {
+    filled: 1,
+    already_set: 0,
+    skipped_duplicate: 0,
+    unmatched: 0,
+  });
+  const stored = await db.query(`select legal_name, cik from issuers order by legal_name`);
+  assert.deepEqual(stored.rows, [
+    { legal_name: "American Airlines Group Inc", cik: "6201" },
+    { legal_name: "Anglo American plc", cik: null },
+    { legal_name: "London Only plc", cik: null },
+  ]);
+});

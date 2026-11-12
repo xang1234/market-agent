@@ -79,6 +79,7 @@ import { selectPlanInputs } from "../../financial-engine/src/bind-inputs.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { buildDeterministicPlan } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort, FinancialPool, InputCandidate, SplitHistory, SqlExecutor } from "../../financial-engine/src/ports.ts";
+import { US_EQUITY_MICS } from "../../shared/src/identifiers.ts";
 import { logPoolErrors, withPoolClient } from "../../shared/src/pool-client.ts";
 
 export const BACKTEST_YEARS = { first: 2016, last: 2021 } as const;
@@ -485,8 +486,8 @@ export async function resolveTickers(db: SqlExecutor, tickers: ReadonlyArray<str
     `select l.ticker, i.issuer_id::text as issuer_id, l.listing_id::text as listing_id
        from listings l join instruments i on i.instrument_id = l.instrument_id
       where l.ticker = any($1::text[]) and l.active_to is null and i.asset_type = 'common_stock'
-        and l.mic = any(array['ARCX', 'BATS', 'IEXG', 'XASE', 'XNAS', 'XNYS'])`,
-    [[...tickers]],
+        and l.mic = any($2::text[])`,
+    [[...tickers], US_EQUITY_MICS],
   );
   const subjects: Subject[] = [];
   const unresolved: IssuerOutcome[] = [];

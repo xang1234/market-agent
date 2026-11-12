@@ -1,5 +1,5 @@
 // Fills the CIK of every issuer that lacks one from SEC's company_tickers.json,
-// matched by the tickers of the issuer's active listings. The weekly reference
+// matched by the tickers of the issuer's active US listings. The weekly reference
 // import carries names but no CIK, and fundamentals reads SEC facts only for an
 // issuer with one, so it runs after each import (scripts/dev-shell.sh
 // reference-import).
@@ -14,7 +14,7 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { Pool } from "pg";
-import { normalizeCik } from "../../shared/src/identifiers.ts";
+import { normalizeCik, US_EQUITY_MICS } from "../../shared/src/identifiers.ts";
 import { logPoolErrors } from "../../shared/src/pool-client.ts";
 import type { FundamentalsQueryExecutor } from "./sec-facts-repository.ts";
 import { isSourceNumber, parseFinancialJson } from "./lossless-financial-json.ts";
@@ -37,8 +37,10 @@ export function companyTickerCiks(json: unknown): Map<string, string> {
 }
 
 /**
- * Each issuer with an active listing, by outcome. An issuer takes the CIK of
- * its first listed ticker SEC knows, unless another issuer already holds that
+ * Each issuer with an active US listing, by outcome. A same-symbol listing
+ * abroad, such as Anglo American's XLON AAL, is another company and never
+ * matches. An issuer takes the CIK of its first US ticker SEC knows, unless
+ * another issuer already holds that
  * CIK: that is #597's split, where the SEC facts stay on the other issuer, and
  * this one has none until the two merge.
  */
@@ -53,9 +55,10 @@ export async function fillMissingCiks(
        from issuers iss
        join instruments i on i.issuer_id = iss.issuer_id
        join listings l on l.instrument_id = i.instrument_id
-      where l.active_to is null
+      where l.active_to is null and l.mic = any($1::text[])
       group by iss.issuer_id, iss.cik
       order by iss.issuer_id`,
+    [US_EQUITY_MICS],
   );
   for (const issuer of issuers) {
     if (issuer.cik !== null) {
