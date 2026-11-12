@@ -1,3 +1,4 @@
+import { LoaderCircle } from 'lucide-react'
 import type { ReactElement, ReactNode } from 'react'
 
 import { BlockView } from '../blocks/BlockView.tsx'
@@ -33,7 +34,7 @@ export function PendingTurnView({ turn, messages, onRetry, onReconnect, onReload
       return (
         <div data-testid="pending-turn" className="flex flex-col gap-2 py-2">
           <OptimisticUserBubble text={turn.turn.text} askedRun={turn.turn.runId} />
-          <p className="text-sm text-muted">Starting…</p>
+          <StartingLine />
         </div>
       )
     case 'not_sent':
@@ -52,13 +53,13 @@ export function PendingTurnView({ turn, messages, onRetry, onReconnect, onReload
       return turn.stream.unverified ? <UnverifiedTurnView state={turn.stream} unverified={turn.stream.unverified} /> : null
     case 'streaming':
       return (
-        <StreamedTurn phase={turn.phase} stream={turn.stream} blocks={turn.origin.kind === 'own'} messages={messages}>
+        <StreamedTurn phase={turn.phase} runId={turn.run.runId} stream={turn.stream} blocks={turn.origin.kind === 'own'} messages={messages}>
           <LinkNotice link={turn.link} onReconnect={onReconnect} />
         </StreamedTurn>
       )
     case 'failed':
       return (
-        <StreamedTurn phase={turn.phase} stream={turn.stream} blocks={turn.origin.kind === 'own'} messages={messages}>
+        <StreamedTurn phase={turn.phase} runId={turn.run.runId} stream={turn.stream} blocks={turn.origin.kind === 'own'} messages={messages}>
           {turn.recovery === 'none'
             ? <p className="text-sm text-negative">{turn.error}</p>
             : (
@@ -85,7 +86,7 @@ function LinkNotice({ link, onReconnect }: { link: StreamLink; onReconnect: () =
   }
 }
 
-function StreamedTurn({ phase, stream, blocks, messages, children }: { phase: TurnState['phase']; stream: StreamState; blocks: boolean; messages: ReadonlyArray<ChatMessage>; children?: ReactNode }): ReactElement {
+function StreamedTurn({ phase, runId, stream, blocks, messages, children }: { phase: TurnState['phase']; runId: string; stream: StreamState; blocks: boolean; messages: ReadonlyArray<ChatMessage>; children?: ReactNode }): ReactElement {
   const { shown } = stream
   // A sealed answer, shown while the judge reads its inferences: it renders as
   // the saved message it becomes, in MessageItem's own wrapper and with no plan
@@ -109,9 +110,10 @@ function StreamedTurn({ phase, stream, blocks, messages, children }: { phase: Tu
       aria-live="polite"
       className="flex w-full flex-col gap-3 py-2"
     >
-      <AgentPlanPanel steps={stream.plan_steps} />
+      {/* Keyed by run: a retry is a new run with its own clock. */}
+      <AgentPlanPanel key={runId} steps={stream.plan_steps} active={phase === 'streaming'} />
       {/* The server may read the question before it starts the turn (#398). */}
-      {phase === 'streaming' && stream.turn_status === 'idle' ? <p className="text-sm text-muted">Starting…</p> : null}
+      {phase === 'streaming' && stream.turn_status === 'idle' ? <StartingLine /> : null}
       <AssistantTurn className="w-full">
         {blocks && stream.block_order.map((block_id) => {
           const block = stream.blocks_by_id.get(block_id)
@@ -125,6 +127,15 @@ function StreamedTurn({ phase, stream, blocks, messages, children }: { phase: Tu
       </AssistantTurn>
       {children}
     </div>
+  )
+}
+
+function StartingLine(): ReactElement {
+  return (
+    <p className="flex items-center gap-2 text-sm text-muted">
+      <LoaderCircle aria-hidden="true" className="size-4 shrink-0 text-accent motion-safe:animate-spin" />
+      <span className="live-shine">Starting…</span>
+    </p>
   )
 }
 
@@ -154,7 +165,7 @@ function OptimisticUserBubble({ text, askedRun }: { text: string; askedRun?: str
 function UnverifiedTurnView({ state, unverified }: { state: StreamState; unverified: UnverifiedTurn }): ReactElement {
   return (
     <div data-testid="streaming-turn" data-turn-status="unverified" className="flex w-full flex-col gap-3">
-      <AgentPlanPanel steps={state.plan_steps} />
+      <AgentPlanPanel steps={state.plan_steps} active={false} />
       <div className="rounded border border-negative/40 bg-negative-soft px-3 py-2 text-sm text-negative">
         <p>This answer failed verification and was not saved. It is shown because development mode displays unverified answers.</p>
         <details data-testid="unverified-reasons" className="mt-1">
