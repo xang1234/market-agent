@@ -20,6 +20,22 @@ import type { ChatFinancialRuntime, ChatFinancialTurn, ChatFinancialTurnContext 
 
 export const FINANCIAL_BUNDLE_ID = "financial_answer";
 
+/**
+ * A reply that takes every option the lane's latest clarification offered is
+ * the turn those options typed out would be, read and routed as that text
+ * (#626). Every other turn goes to `runner` unchanged.
+ */
+export function offeredChoicesRunner(runner: ChatTurnRunner, financialRuntime: ChatFinancialRuntime | undefined): ChatTurnRunner {
+  if (!financialRuntime) return runner;
+  return async (context) => {
+    const typed = await financialRuntime.everyOfferedChoice(context).catch((reason) => {
+      console.warn("[chat] could not read the options the last clarification offered; the reply is taken as written", reason);
+      return null;
+    });
+    return runner(typed === null ? context : { ...context, userIntent: typed });
+  };
+}
+
 /** Routes a turn the financial lane takes to it; every other turn goes to `runner` unchanged. */
 export function financialAwareRunner(
   runner: ChatTurnRunner,
@@ -102,6 +118,12 @@ async function emitFinancialTurn(
     // gap saves its scope, so a follow-up continues them (thread-context.ts).
     ...(turn.subject_refs?.length ? { subject_refs: turn.subject_refs } : {}),
     ...(turn.kind === "gap" && turn.comparison_gap ? { comparison_gap: turn.comparison_gap } : {}),
+    // A metric or request clarification saves the options it offered, so a
+    // reply that takes them all reads as them (#626). A company choice is
+    // answered by its pick.
+    ...(turn.kind === "clarification" && turn.clarification.kind !== "subject" && turn.clarification.choices.length > 0
+      ? { clarification_choices: turn.clarification.choices.map((choice) => choice.label) }
+      : {}),
   }];
   const contentHash = contentHashForText(JSON.stringify(blocks));
   const persisted = persistAssistantMessage

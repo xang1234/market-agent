@@ -214,6 +214,7 @@ test("a financial turn's in-progress notice is not saved under the id its publis
     financialRuntime: {
       take: async () => async () => ({ kind: "gap", reason_code: "run_in_progress", text: "This calculation is already running." }),
       assertReady: async () => {},
+      everyOfferedChoice: async () => null,
     },
     persistAssistantMessage: async (input) => {
       saved.push(input.message_id);

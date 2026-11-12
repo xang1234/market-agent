@@ -113,6 +113,12 @@ export type ChatFinancialRuntime = Readonly<{
    * It reads the question first, so it may wait on a model.
    */
   take(context: ChatFinancialTurnContext): Promise<(() => Promise<ChatFinancialTurn>) | null>;
+  /**
+   * For a reply that takes every option the thread's latest message, a
+   * clarification of this lane, offered ("all", "all of the above"): those
+   * options as the user would type them. Null for any other message.
+   */
+  everyOfferedChoice(context: ChatTurnRunContext): Promise<string | null>;
   /** Throws unless verified finance is ready; the server awaits it before serving any turn. */
   assertReady(): Promise<void>;
 }>;
@@ -360,9 +366,31 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     const kept = withinScope(requested, scope);
     return kept.subjects.length === 0 ? declined : run(kept, reading, scope, choice);
   };
+  const everyOfferedChoice = async (context: ChatTurnRunContext): Promise<string | null> => {
+    if (!context.userId || !UUID.test(context.threadId) || !TAKES_EVERY_CHOICE.has(replyWords(context.userIntent ?? ""))) return null;
+    const { rows: [latest] } = await deps.pool.query<{ choices: unknown }>(
+      `select m.blocks->0->'clarification_choices' as choices
+         from chat_messages m
+         join chat_threads t on t.thread_id = m.thread_id and t.user_id = $2::uuid
+        where m.thread_id = $1::uuid and m.role = 'assistant'
+        order by m.created_at desc, m.message_id desc
+        limit 1`,
+      [context.threadId, context.userId],
+    );
+    const choices = Array.isArray(latest?.choices) ? latest.choices.filter((choice): choice is string => typeof choice === "string") : [];
+    return choices.length === 0 ? null : choices.join("; ");
+  };
   const assertReady = () => requireFinancialReadiness(deps.pool, ["chat"]);
-  return Object.freeze({ take, assertReady });
+  return Object.freeze({ take, everyOfferedChoice, assertReady });
 }
+
+// The replies that take every option a clarification offered, compared as
+// lowercase words. One that names an option or adds a word ("All three
+// margins") is read as written.
+const TAKES_EVERY_CHOICE: ReadonlySet<string> = new Set([
+  "all", "all of them", "all of the above", "all the above", "all of those", "all of these", "all options", "all of the options", "everything", "both",
+]);
+const replyWords = (text: string) => text.toLowerCase().split(/[^a-z]+/u).filter(Boolean).join(" ");
 
 // The mentions a turn's plan requests: an explicit subject (a thread opened
 // from a ticker page) first; like the analyst path, the companies a

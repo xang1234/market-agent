@@ -254,6 +254,15 @@
                 "declined",
                 "refused"
               ]
+            },
+            "clarification_choices": {
+              "description": "The options a financial clarification offered, so a reply that takes them all reads as them (#626).",
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           },
           "required": [
