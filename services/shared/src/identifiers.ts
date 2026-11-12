@@ -6,3 +6,7 @@ export function normalizeCik(value: string): string {
   const stripped = value.replace(/^0+/, "");
   return stripped.length === 0 ? "0" : stripped;
 }
+
+// The US exchanges SEC filers list on. A ticker SEC assigns a CIK names a
+// listing on one of these, never a same-symbol listing abroad.
+export const US_EQUITY_MICS: readonly string[] = Object.freeze(["ARCX", "BATS", "IEXG", "XASE", "XNAS", "XNYS"]);

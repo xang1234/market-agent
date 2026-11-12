@@ -159,6 +159,7 @@ cmd_import() {
   PATH="$NODE_APP:$PATH" caffeinate -ims "$ROOT/scripts/dev-shell.sh" reference-import "$@" > "$log" 2>&1 || code=$?
   line="$(grep '^weekly-reference' "$log" | tail -1 || true)"
   echo "$line"
+  grep '^fill-ciks' "$log" || true
   echo "log: $log"
   if [[ "$code" != "0" ]]; then
     tail -5 "$log" >&2
@@ -168,6 +169,16 @@ cmd_import() {
     echo "SKIPPED: the ledger already has this bundle, so nothing ran. Rerun with --force." >&2
     return 3
   fi
+}
+
+# The CIK fill the import ends with, on its own: for a stack imported before it
+# existed. Shares the import's one-day cache of company_tickers.json.
+cmd_fill_ciks() {
+  mkdir -p "$EVIDENCE"
+  local log="$EVIDENCE/fill-ciks-$(stamp).log"
+  (cd "$ROOT/services/fundamentals" && PATH="$NODE_APP:$PATH" caffeinate -ims npm run -s fill:ciks -- --file "$ROOT/.dev/company_tickers.json") > "$log" 2>&1 || { tail -5 "$log" >&2; return 1; }
+  grep '^fill-ciks' "$log"
+  echo "log: $log"
 }
 
 # Resolves a ticker, then backfills 8-Ks for its issuer. Needs a filled CIK.
@@ -310,6 +321,7 @@ case "${1:-}" in
   resolve) shift; cmd_resolve "$@" ;;
   identity) shift; cmd_identity "$@" ;;
   import) shift; cmd_import "$@" ;;
+  fill-ciks) cmd_fill_ciks ;;
   backfill-8k) cmd_backfill_8k "${2:-}" ;;
   restatements) shift; cmd_restatements "$@" ;;
   memo) shift; cmd_memo "$@" ;;
@@ -317,5 +329,5 @@ case "${1:-}" in
   scroll) shift; cmd_scroll "$@" ;;
   scorecard) shift; cmd_scorecard "$@" ;;
   suite) shift; cmd_suite "$@" ;;
-  *) echo "usage: verify <init-env PORT_OFFSET|up [MODE]|down [--volumes]|doctor|sql QUERY|resolve TICKER...|identity [save|diff NAME]|import [--force]|backfill-8k TICKER|restatements TICKER...|memo [TICKER]|chat QUESTION...|scroll THREAD_ID [MESSAGES_JSON]|scorecard [--cases=ID,ID] [--runs=N] [--file=PATH]|suite DIR [FILE...]>" >&2; exit 2 ;;
+  *) echo "usage: verify <init-env PORT_OFFSET|up [MODE]|down [--volumes]|doctor|sql QUERY|resolve TICKER...|identity [save|diff NAME]|import [--force]|fill-ciks|backfill-8k TICKER|restatements TICKER...|memo [TICKER]|chat QUESTION...|scroll THREAD_ID [MESSAGES_JSON]|scorecard [--cases=ID,ID] [--runs=N] [--file=PATH]|suite DIR [FILE...]>" >&2; exit 2 ;;
 esac

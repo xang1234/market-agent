@@ -2,6 +2,7 @@ import type { QueryResult } from "pg";
 import type { SubjectRef } from "./subject-ref.ts";
 import type { UUID } from "./subject-ref.ts";
 import { normalizeCik } from "./normalize.ts";
+import { US_EQUITY_MICS } from "../../shared/src/identifiers.ts";
 
 export type DiscoveryAssetType = "common_stock" | "adr" | "etf";
 
@@ -404,7 +405,8 @@ async function fillInstrumentIdentityFields(
 // Providers can disagree on a ticker's MIC (Polygon's ARCX against the bundle's
 // XNYS), so with no listing on the entry's MIC, the ticker's only active listing
 // counts when it trades in the entry's currency. That listing keeps its own MIC's
-// timezone.
+// timezone. An entry with a CIK names a US filer, so it counts only a US listing.
+// A same-symbol listing abroad is another company.
 async function keepExistingListing(db: QueryExecutor, listing: DiscoveredListing): Promise<string | null> {
   const issuer = issuerIdentityFromListing(listing);
   const instrument = instrumentIdentityFromListing(listing);
@@ -422,6 +424,7 @@ async function keepExistingListing(db: QueryExecutor, listing: DiscoveredListing
       where l.ticker = $2
         and ((l.mic = $1 and l.active_from is null)
           or (l.trading_currency = $7
+            and ($3::text is null or l.mic = any($8::text[]))
             and l.listing_id in (select listing_id from active)
             and (select count(*) from active) = 1
             and not exists (
@@ -445,6 +448,7 @@ async function keepExistingListing(db: QueryExecutor, listing: DiscoveredListing
       instrument.isin ?? null,
       instrument.figiComposite ?? null,
       listing.trading_currency,
+      US_EQUITY_MICS,
     ],
   );
   const row = existing.rows[0];

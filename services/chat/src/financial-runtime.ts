@@ -46,6 +46,7 @@ import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../fi
 import { requireFinancialReadiness } from "../../financial-engine/src/readiness.ts";
 import { publishRequest, type RequestGap } from "../../financial-engine/src/request.ts";
 import { findPlanForRequest } from "../../financial-engine/src/run-repo.ts";
+import { PUBLIC_SOURCE_SQL } from "../../evidence/src/financial-input-repo.ts";
 import { comparedAdditions, labelList, MAX_TURN_SUBJECTS, resolveTurnSubjects, type ChatTurnRunContext, type TurnSubjects } from "./coordinator.ts";
 import { contentHashForText, financialMessageId, noteBlock } from "./chat-ids.ts";
 import { priceComparisonTurn } from "./scenario-price-comparison.ts";
@@ -281,6 +282,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
           choice,
           carried: requested.carried,
           notFound: requested.notFound,
+          noFilings: requested.noFilings ?? [],
           labels: requested.labels,
         }, { authority, request_key: turnId }),
       });
@@ -355,7 +357,22 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     if (reserved) return run(requested, reading, scope, choice);
     if (choice.kind === "analyst") return null;
     const kept = withinScope(requested, scope);
-    return kept.subjects.length === 0 ? declined : run(kept, reading, scope, choice);
+    if (kept.subjects.length === 0) return declined;
+    const filed = await withSecFilings(deps.pool, kept);
+    if (filed.subjects.length > 0) return run(filed, reading, scope, choice);
+    // Every company has none, so the answer is that line alone, saved with
+    // the companies so a follow-up asks about them again.
+    const refs = kept.subjects.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref] : []);
+    return async () => ({
+      kind: "gap",
+      reason_code: "no_sec_filings",
+      text: noFilingsLine(filed.noFilings!),
+      message_id: messageId,
+      subject_refs: refs,
+      ...(scope === null ? {} : {
+        research_scope: { ...scope, route: "financial_gap" as const, reads: "financial_gap" as const, companies: answeredCompanies(refs.map((ref) => ref.id), scope, kept.labels) },
+      }),
+    });
   };
   const everyOfferedChoice = async (context: ChatTurnRunContext): Promise<string | null> => {
     const words = replyWords(context.userIntent ?? "");
@@ -410,6 +427,8 @@ type TurnCompanies = Readonly<{
   carried: ReadonlyArray<string>;
   // Names a comparison gave that match no company.
   notFound: ReadonlyArray<string>;
+  // Labels of the companies left out for having no fiscal-period facts on file (withSecFilings).
+  noFilings?: ReadonlyArray<string>;
   // By issuer, the label each company the turn may answer for takes in its saved scope.
   labels: ReadonlyMap<string, string>;
   // A change to the compared companies too unclear to plan: the question to ask.
@@ -511,6 +530,33 @@ function withinScope(requested: TurnCompanies, scope: ResearchScope | null): Tur
     carried: requested.carried.filter((name) => !dropped.has(name)),
   };
 }
+
+// A company with no fiscal-period fact on file (no CIK yet, or a filer with
+// no 10-K facts, such as an ETF) would show every figure as a gap with no
+// eligible input: the engine binds only public facts with a fiscal period
+// (evidence-adapter.ts), and the reference import's are points in time. It is
+// left out of the plan, and the answer names it in one line. Only public
+// sources count, so another user's upload neither changes nor reveals this.
+async function withSecFilings(db: SqlExecutor, requested: TurnCompanies): Promise<TurnCompanies> {
+  const issuers = requested.subjects.flatMap((subject) => subject.resolution.status === "resolved" ? [subject.resolution.subject_ref.id] : []);
+  const { rows } = issuers.length === 0 ? { rows: [] } : await db.query<{ issuer_id: string }>(
+    `select issuer.id::text as issuer_id
+       from unnest($1::uuid[]) as issuer(id)
+      where exists (select 1 from facts f join sources s on s.source_id = f.source_id
+                     where f.subject_kind = 'issuer' and f.subject_id = issuer.id and f.fiscal_year is not null and ${PUBLIC_SOURCE_SQL})`,
+    [issuers],
+  );
+  const filed = new Set(rows.map((row) => row.issuer_id.toLowerCase()));
+  const without = requested.subjects.filter((subject) => subject.resolution.status === "resolved" && !filed.has(subject.resolution.subject_ref.id.toLowerCase()));
+  if (without.length === 0) return requested;
+  return {
+    ...requested,
+    subjects: requested.subjects.filter((subject) => !without.includes(subject)),
+    noFilings: without.map((subject) => subject.resolution.status === "resolved" ? requested.labels.get(subject.resolution.subject_ref.id.toLowerCase()) ?? subject.mention : subject.mention),
+  };
+}
+
+const noFilingsLine = (labels: ReadonlyArray<string>): string => `No SEC filings are on file for ${labelList(labels)} yet.`;
 
 const NO_COMPANIES: TurnCompanies = { subjects: [], resolved: [], carried: [], notFound: [], labels: new Map() };
 const PLANNER: PlanChoice = { kind: "planner" };
@@ -767,6 +813,7 @@ function persistAssistantMessage(
     choice: PlanChoice;
     carried: ReadonlyArray<string>;
     notFound: ReadonlyArray<string>;
+    noFilings: ReadonlyArray<string>;
     labels: ReadonlyMap<string, string>;
   }>,
   request: { authority: FinancialRuntimeAuthority; request_key: string },
@@ -805,6 +852,7 @@ function persistAssistantMessage(
     const later = await laterFigures(tx.client, publication.run_id, companyNames);
     const note = [
       ...(turn.notFound.length === 0 ? [] : [`No company matched ${labelList(turn.notFound)}.`]),
+      ...(turn.noFilings.length === 0 ? [] : [noFilingsLine(turn.noFilings)]),
       ...(turn.carried.length === 0 ? [] : [`${labelList(turn.carried)} ${turn.carried.length > 1 ? "are" : "is"} carried from the previous answer.`]),
       ...(unquartered ? [`A margin trend is charted over reported quarters, and none could be read for ${labelList([...companyNames.values()])}, so its margins are shown for a fiscal year.`] : []),
       ...(replaced === null ? [] : [replaced]),

@@ -94,6 +94,8 @@ The bundle publishes on Saturdays around 08:10 ET. To schedule the import, add a
 30 10 * * 6 cd /path/to/market-agent && ./scripts/dev-shell.sh reference-import >> .dev/logs/reference-import.log 2>&1
 ```
 
+After the import, the same command fills the CIK of every issuer still missing one from SEC's [`company_tickers.json`](https://www.sec.gov/files/company_tickers.json), matched by ticker, because the bundle carries none and fundamentals reads SEC facts only for an issuer with a CIK. It needs `SEC_EDGAR_USER_AGENT`, keeps the download in `.dev/company_tickers.json` for a day, and prints `fill-ciks: filled=… already_set=… skipped_duplicate=… unmatched=…`. An issuer whose CIK another issuer already holds is skipped, and an ETF is usually unmatched, since SEC's list holds few funds. To run only the fill: `(cd services/fundamentals && npm run fill:ciks -- --file ../../.dev/company_tickers.json)`.
+
 The command exits non-zero with a clear message when Postgres is not running. Every run that reaches the bundle records a row in `artifact_ingestion_ledger`, keyed by the bundle's sha256, with status `succeeded`, `partial`, or `failed`. A download or connection failure shows only in the log and the exit code.
 
 ## Free fallback data sources

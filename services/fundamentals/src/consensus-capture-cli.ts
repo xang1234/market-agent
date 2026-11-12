@@ -14,6 +14,7 @@
 import { parseArgs } from "node:util";
 import { Pool } from "pg";
 import type { QueryExecutor } from "../../shared/src/http.ts";
+import { US_EQUITY_MICS } from "../../shared/src/identifiers.ts";
 import { logPoolErrors } from "../../shared/src/pool-client.ts";
 import { FundamentalsDataUnavailableError } from "./availability.ts";
 import { consensusFiscalPeriod, type ConsensusPeriod, type ReportedPeriods } from "./consensus-fiscal-period.ts";
@@ -22,7 +23,6 @@ import { FINVIZ_DEV_CONSENSUS_SOURCE_ID } from "./provider-sources.ts";
 import type { FiscalPeriod } from "./statement.ts";
 
 export const FINVIZ_PACE_MS = 500;
-const US_EQUITY_MICS = ["ARCX", "BATS", "IEXG", "XASE", "XNAS", "XNYS"];
 const PERIODS: ReadonlyArray<ConsensusPeriod> = ["next_q", "this_y", "next_y"];
 
 export type ConsensusSidecar = (listing: { ticker: string; mic: string }) => Promise<SidecarEnvelope>;

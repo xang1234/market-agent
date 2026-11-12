@@ -34,8 +34,7 @@
 //   export DATABASE_URL=postgresql://postgres:<password>@127.0.0.1:54329/market_agent
 //   export SEC_EDGAR_USER_AGENT="<name> <email>"
 //   TICKERS=$(tr '\n' , < <ticker list> | sed 's/,$//')
-//   curl -s -A "$SEC_EDGAR_USER_AGENT" https://www.sec.gov/files/company_tickers.json > ../../.dev/company_tickers.json
-//   node --experimental-strip-types src/fcf-backtest.ts --tickers "$TICKERS" --attach-ciks ../../.dev/company_tickers.json
+//   npm run fill:ciks -- --file ../../.dev/company_tickers.json
 //   LISTINGS=$(node --experimental-strip-types src/fcf-backtest.ts --tickers "$TICKERS" --listing-ids) &&
 //     (cd ../market && POLYGON_API_KEY=... npm run sync:splits -- $LISTINGS)
 //   ISSUERS=$(node --experimental-strip-types src/fcf-backtest.ts --tickers "$TICKERS" --issuer-ids) &&
@@ -80,7 +79,7 @@ import { selectPlanInputs } from "../../financial-engine/src/bind-inputs.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { buildDeterministicPlan } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort, FinancialPool, InputCandidate, SplitHistory, SqlExecutor } from "../../financial-engine/src/ports.ts";
-import { normalizeCik } from "../../shared/src/identifiers.ts";
+import { US_EQUITY_MICS } from "../../shared/src/identifiers.ts";
 import { logPoolErrors, withPoolClient } from "../../shared/src/pool-client.ts";
 
 export const BACKTEST_YEARS = { first: 2016, last: 2021 } as const;
@@ -487,8 +486,8 @@ export async function resolveTickers(db: SqlExecutor, tickers: ReadonlyArray<str
     `select l.ticker, i.issuer_id::text as issuer_id, l.listing_id::text as listing_id
        from listings l join instruments i on i.instrument_id = l.instrument_id
       where l.ticker = any($1::text[]) and l.active_to is null and i.asset_type = 'common_stock'
-        and l.mic = any(array['ARCX', 'BATS', 'IEXG', 'XASE', 'XNAS', 'XNYS'])`,
-    [[...tickers]],
+        and l.mic = any($2::text[])`,
+    [[...tickers], US_EQUITY_MICS],
   );
   const subjects: Subject[] = [];
   const unresolved: IssuerOutcome[] = [];
@@ -633,35 +632,6 @@ export async function subjectIds(db: SqlExecutor, tickers: ReadonlyArray<string>
   return subjects.map((subject) => subject[id]);
 }
 
-// Each sample ticker's issuer takes its CIK from SEC's company_tickers.json (#597), unless it has one.
-export async function attachCiks(db: SqlExecutor, tickers: ReadonlyArray<string>, file: string): Promise<void> {
-  const entries = Object.values(JSON.parse(readFileSync(file, "utf8")) as Record<string, { cik_str: number; ticker: string }>);
-  const { subjects, unresolved } = await resolveTickers(db, tickers);
-  for (const issuer of unresolved) console.error(`${issuer.ticker}: ${issuer.text}`);
-  for (const subject of subjects) {
-    const entry = entries.find((candidate) => candidate.ticker === subject.ticker);
-    if (entry === undefined) {
-      console.error(`${subject.ticker}: not in company_tickers.json`);
-      continue;
-    }
-    const cik = normalizeCik(String(entry.cik_str));
-    // Another issuer with this CIK is #597's split: its SEC facts stay there, and this ticker has none until the two merge.
-    const { rows: [holder] } = await db.query<{ issuer_id: string }>(
-      `select issuer_id::text as issuer_id from issuers where ltrim(cik, '0') = $1 and issuer_id <> $2::uuid limit 1`,
-      [cik, subject.issuer_id],
-    );
-    if (holder !== undefined) {
-      console.error(`${subject.ticker}: CIK ${cik} belongs to issuer ${holder.issuer_id}; not attached (#597)`);
-      continue;
-    }
-    const { rows } = await db.query<{ cik: string }>(
-      `update issuers set cik = coalesce(cik, $2), updated_at = now() where issuer_id = $1::uuid returning cik`,
-      [subject.issuer_id, cik],
-    );
-    console.error(`${subject.ticker}: CIK ${rows[0]?.cik}`);
-  }
-}
-
 function decimal(text: string) {
   const parsed = parseFinancialDecimal(text);
   if (!parsed.ok) throw new Error(`not a decimal: ${text}`);
@@ -695,12 +665,11 @@ function daysBetween(from: IsoDate, to: IsoDate): number {
 async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL is required");
-  const { values } = parseArgs({ options: { tickers: { type: "string" }, "attach-ciks": { type: "string" }, "issuer-ids": { type: "boolean" }, "listing-ids": { type: "boolean" }, notes: { type: "string" } } });
+  const { values } = parseArgs({ options: { tickers: { type: "string" }, "issuer-ids": { type: "boolean" }, "listing-ids": { type: "boolean" }, notes: { type: "string" } } });
   const tickers = (values.tickers ?? "").split(",").map((ticker) => ticker.trim().toUpperCase()).filter(Boolean);
-  if (tickers.length === 0) throw new Error("usage: --tickers AAPL,MSFT [--attach-ciks company_tickers.json | --issuer-ids | --listing-ids | --notes notes.md]");
+  if (tickers.length === 0) throw new Error("usage: --tickers AAPL,MSFT [--issuer-ids | --listing-ids | --notes notes.md]");
   const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
   try {
-    if (values["attach-ciks"] !== undefined) return await attachCiks(pool, tickers, values["attach-ciks"]);
     if (values["issuer-ids"] || values["listing-ids"]) {
       console.log((await subjectIds(pool, tickers, values["issuer-ids"] ? "issuer_id" : "listing_id")).join(" "));
       return;

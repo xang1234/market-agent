@@ -565,7 +565,31 @@ test("a discovered CIK on another MIC fills the CIK-less issuer that holds the t
   assert.deepEqual(second, { kind: "listing", id: seeded.listing_id });
 });
 
-test("a name-only entry on another MIC keeps the ticker's listing on its CIK issuer", { timeout: 120000 }, async (t) => {
+test("a discovered US CIK leaves a non-US listing of the same ticker and currency alone", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver discovery coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fix-641-non-us-listing");
+  const client = await connectedClient(t, databaseUrl);
+  const london = await seedListing(client, { legal_name: "Anglo American plc", cik: null }, "AAL", { mic: "XLON" });
+
+  const subject = await upsertDiscoveredListing(client, {
+    ...appleBundleEntry,
+    ticker: "AAL",
+    legal_name: "American Airlines Group Inc",
+    cik: "0000006201",
+  });
+
+  assert.notDeepEqual(subject, { kind: "listing", id: london.listing_id });
+  assert.deepEqual((await activeListings(client, "AAL")).map(({ mic, legal_name, cik }) => ({ mic, legal_name, cik })), [
+    { mic: "XLON", legal_name: "Anglo American plc", cik: null },
+    { mic: "XNAS", legal_name: "American Airlines Group Inc", cik: "6201" },
+  ]);
+});
+
+test("a name-only entry on another MIC keeps the ticker's listing on its CIK issuer",{ timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for resolver discovery coverage");
     return;

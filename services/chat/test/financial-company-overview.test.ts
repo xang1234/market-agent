@@ -112,7 +112,15 @@ test("a question about one company that asks for no figure is answered with its 
     await quarterly(issuer, "operating_income", 2023, 4, "500", derived);
     await quarterly(issuer, "net_income", 2023, 4, "400", derived);
   }
-  await db.query(`delete from facts where subject_id = $1`, [COMPANIES.NOQS]);
+  // A year on file and no quarter: a company with filings whose trend has nothing to chart.
+  await db.query(
+    `delete from facts where subject_id = $1 and fact_id <> (select f.fact_id from facts f join metrics m on m.metric_id = f.metric_id where f.subject_id = $1 and m.metric_key = 'net_income')`,
+    [COMPANIES.NOQS],
+  );
+  await db.query(
+    `update facts set period_kind = 'fiscal_y', fiscal_period = 'FY', period_start = make_date(fiscal_year, 1, 1), period_end = make_date(fiscal_year, 12, 31) where subject_id = $1`,
+    [COMPANIES.NOQS],
+  );
   await db.query(`delete from facts where subject_id = $1`, [COMPANIES.ANNL]);
   for (const [year, revenue, gross, operating, net] of [[2022, "1600", "640", "320", "160"], [2023, "2000", "1000", "500", "400"]] as const) {
     for (const [metric_key, value] of [["revenue", revenue], ["gross_profit", gross], ["operating_income", operating], ["net_income", net]] as const) {
