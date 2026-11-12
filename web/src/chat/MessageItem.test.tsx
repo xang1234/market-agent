@@ -168,6 +168,44 @@ test('a saved answer copies as text, and a question has no copy button', async (
   }
 })
 
+test('each saved message shows when it was saved: the question under its bubble, the answer beside its copy button', async (t) => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restoreGlobals = installDomGlobals(dom.window as unknown as Window)
+  const previousTz = process.env.TZ
+  process.env.TZ = 'UTC'
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-06-02T18:00:00.000Z') })
+  const question: ChatMessage = { ...assistantMessage, message_id: 'msg-0', role: 'user', blocks: [richTextBlock], created_at: '2026-06-02T14:32:00.000Z' }
+  const answer: ChatMessage = { ...assistantMessage, created_at: '2026-05-30T09:05:00.000Z' }
+  try {
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(
+        <AuthContext.Provider value={{ session: { userId: USER_ID, displayName: 'Mock User' }, signIn: () => undefined, signOut: () => undefined }}>
+          <EvidenceInspectorProvider>
+            <BlockRegistryProvider registry={createDefaultBlockRegistry()}>
+              <MessageItem message={question} onMeasure={() => undefined} />
+              <MessageItem message={answer} onMeasure={() => undefined} />
+            </BlockRegistryProvider>
+          </EvidenceInspectorProvider>
+        </AuthContext.Provider>,
+      )
+    })
+    const time = (role: string) => dom.window.document.querySelector(`[data-role="${role}"] time`)!
+    assert.deepEqual(
+      [time('user').textContent, time('user').getAttribute('title'), time('user').getAttribute('datetime')],
+      ['14:32', 'Tuesday, June 2, 2026 at 2:32 PM', '2026-06-02T14:32:00.000Z'],
+    )
+    assert.equal(time('user').previousElementSibling?.querySelector('p')?.textContent, 'Some analysis text.', 'under the bubble')
+    assert.deepEqual([time('assistant').textContent, time('assistant').getAttribute('title')], ['May 30, 09:05', 'Saturday, May 30, 2026 at 9:05 AM'])
+    assert.ok(time('assistant').parentElement?.querySelector('button[aria-label="Copy this answer as text"]'), 'beside the copy button')
+    await act(async () => root.unmount())
+  } finally {
+    if (previousTz === undefined) delete process.env.TZ
+    else process.env.TZ = previousTz
+    restoreGlobals()
+  }
+})
+
 // The list windows on these heights in the same commit that mounts a message, so a
 // height that waits for a ResizeObserver callback is an estimate the list acts on.
 test('a message reports its height when it mounts, before any resize callback', async () => {

@@ -1,4 +1,4 @@
-import { memo, useLayoutEffect, useRef, type ReactElement } from 'react'
+import { memo, useLayoutEffect, useRef, useState, type ReactElement } from 'react'
 
 import { MemoizedBlockView } from '../blocks/MemoizedBlockView.tsx'
 import { CopyButton } from '../blocks/CopyButton.tsx'
@@ -6,6 +6,7 @@ import { answerCopy } from '../blocks/answerText.ts'
 import { UNPROVEN, type BlockProof } from '../blocks/blockProof.ts'
 import type { Block } from '../blocks/types.ts'
 import type { ChatMessage } from './messageTypes.ts'
+import { messageTime } from './messageTime.ts'
 import { AssistantTurn, BlockColumn, USER_BUBBLE_CLASS } from './turnLayout.tsx'
 
 type MessageItemProps = {
@@ -39,20 +40,35 @@ function MessageItemInner({ message, onMeasure }: MessageItemProps): ReactElemen
       className={`flex flex-col py-2 ${isUser ? 'items-end' : 'items-start'}`}
     >
       {isUser ? (
-        <div className={USER_BUBBLE_CLASS}>
-          {message.blocks.map((block) => (
-            <MemoizedBlockView key={block.id} block={block} />
-          ))}
-        </div>
+        <>
+          <div className={USER_BUBBLE_CLASS}>
+            {message.blocks.map((block) => (
+              <MemoizedBlockView key={block.id} block={block} />
+            ))}
+          </div>
+          <MessageTime createdAt={message.created_at} className="mt-1" />
+        </>
       ) : (
         <>
           <AssistantBlocks blocks={message.blocks} proofs={message.block_proofs} />
-          <div className="mt-1 flex gap-1">
+          <div className="mt-1 flex items-center gap-1">
             <CopyButton iconOnly label="Copy answer" what="this answer" purpose="as text" text={() => answerCopy(message)} />
+            <MessageTime createdAt={message.created_at} />
           </div>
         </>
       )}
     </div>
+  )
+}
+
+function MessageTime({ createdAt, className = '' }: { createdAt: string; className?: string }): ReactElement | null {
+  const [now] = useState(() => new Date())
+  const time = messageTime(createdAt, now)
+  if (time === null) return null
+  return (
+    <time dateTime={createdAt} title={time.full} className={`px-1 text-xs text-faint tabular-nums ${className}`}>
+      {time.short}
+    </time>
   )
 }
 

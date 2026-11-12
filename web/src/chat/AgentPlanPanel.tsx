@@ -1,5 +1,5 @@
 import { Circle, CircleCheck, CircleX, LoaderCircle, type LucideIcon } from 'lucide-react'
-import { useCallback, useState, type ReactElement } from 'react'
+import { useCallback, useRef, useState, type ReactElement } from 'react'
 
 import type { StreamPlanStep, StreamPlanStepStatus } from './streamPlan.ts'
 
@@ -22,6 +22,8 @@ const STATUS_VIEW: Readonly<Record<StreamPlanStepStatus, StatusView>> = {
 export function AgentPlanPanel({ steps: streamed, active }: AgentPlanPanelProps): ReactElement | null {
   // ponytail: the stream events carry no timestamps, so the clock starts when the turn's view mounts.
   const [startedAt] = useState(() => Date.now())
+  // Each step's clock, by step_id: from the first render that shows it running to the first that shows it ended.
+  const stepTimes = useRef(new Map<string, StepTime>())
   const steps = active ? streamed : streamed.map((step) => step.status === 'running' ? { ...step, status: 'error' as const } : step)
   const working = active && !steps.some((step) => step.status === 'error') && !steps.every((step) => step.status === 'done')
   const tick = useCallback((node: HTMLElement | null) => {
@@ -54,6 +56,11 @@ export function AgentPlanPanel({ steps: streamed, active }: AgentPlanPanelProps)
               <view.Icon aria-hidden="true" className={`mt-0.5 size-4 shrink-0 ${view.icon}`} />
               <div className="min-w-0">
                 <strong className={`font-semibold ${view.label}`}>{step.label}</strong>
+                <span
+                  data-testid="step-time"
+                  className="ml-2 text-xs text-muted tabular-nums"
+                  ref={(node) => { if (node !== null) node.textContent = stepTime(stepTimes.current, step, Date.now()) }}
+                />
                 <span className="sr-only"> {step.status}</span>
                 <p className="mt-0.5">{step.detail}</p>
               </div>
@@ -63,6 +70,16 @@ export function AgentPlanPanel({ steps: streamed, active }: AgentPlanPanelProps)
       </ol>
     </section>
   )
+}
+
+type StepTime = { start?: number; end?: number }
+
+function stepTime(times: Map<string, StepTime>, step: StreamPlanStep, now: number): string {
+  const time = times.get(step.step_id) ?? {}
+  times.set(step.step_id, time)
+  if (step.status === 'running') time.start ??= now
+  else if (step.status !== 'waiting' && time.start !== undefined) time.end ??= now
+  return time.start === undefined || time.end === undefined ? '' : formatElapsed(time.end - time.start)
 }
 
 function formatElapsed(ms: number): string {
