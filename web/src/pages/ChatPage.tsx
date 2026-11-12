@@ -6,6 +6,7 @@ import { Pencil, Trash2 } from 'lucide-react'
 import { PRIMARY_BUTTON_CLASS } from '../shell/buttonStyles.ts'
 import { VirtualizedMessageList } from '../chat'
 import { ChatComposer, type ChatComposerHandle } from '../chat/ChatComposer.tsx'
+import { ChoiceBar, offeredChoices } from '../chat/ChoiceBar.tsx'
 import { PendingTurnView } from '../chat/PendingTurnView.tsx'
 import { ThreadColumn } from '../chat/turnLayout.tsx'
 import { FailureNotice } from '../ui/FailureNotice.tsx'
@@ -155,7 +156,12 @@ function ChatThreadView({ chat, threadName }: { chat: ChatSession; threadName: s
               askedRun={view.turn.phase === 'persisting' ? view.turn.turn.runId : null}
               key={view.listKey}
               messages={view.messages}
-              tail={<PendingTurnView turn={view.turn} messages={view.messages} onRetry={chat.retry} onReconnect={chat.reconnect} onReload={chat.reload} onAsk={chat.ask} />}
+              tail={(
+                <>
+                  <PendingTurnView turn={view.turn} messages={view.messages} onRetry={chat.retry} onReconnect={chat.reconnect} onReload={chat.reload} onAsk={chat.ask} />
+                  {view.canAsk && view.turn.phase === 'idle' ? <ChoiceBar choices={offeredChoices(view.messages)} onAsk={chat.ask} /> : null}
+                </>
+              )}
             />
           </section>
         ) : null}

@@ -98,6 +98,8 @@ export type RichTextBlock = BaseBlock & {
   segments: ReadonlyArray<RichTextSegment>
   // Commentary written on a financial answer's results, shown apart from it.
   analyst_commentary?: true
+  // The options a financial clarification offered (#626).
+  clarification_choices?: ReadonlyArray<string>
 }
 
 export type SectionBlock = BaseBlock & {
