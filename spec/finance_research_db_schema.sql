@@ -962,7 +962,8 @@ create table chat_messages (
   content_hash text not null,
   created_at timestamptz not null default now(),
   answered_by text,
-  research_scope jsonb
+  research_scope jsonb,
+  work_summary jsonb
 );
 create index chat_messages_thread_created_idx on chat_messages(thread_id, created_at);
 create index chat_messages_snapshot_idx on chat_messages(snapshot_id);

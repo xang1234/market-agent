@@ -232,3 +232,59 @@ test('a message reports its height when it mounts, before any resize callback', 
     restoreGlobals()
   }
 })
+
+test('a saved answer keeps a collapsed "Worked for" line that opens to its timed steps; an answer saved without one shows none', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restoreGlobals = installDomGlobals(dom.window as unknown as Window)
+  const worked: ChatMessage = {
+    ...assistantMessage,
+    message_id: 'msg-worked',
+    work_summary: {
+      elapsed_ms: 34_200,
+      events: [
+        { type: 'turn.started', at_ms: 0, bundle_id: 'single_subject_analysis' },
+        { type: 'tool.started', at_ms: 2_500, tool_call_id: 'tool-1', tool_name: 'get_quote' },
+        { type: 'tool.completed', at_ms: 4_100, tool_call_id: 'tool-1', tool_name: 'get_quote', status: 'ok' },
+        { type: 'snapshot.staged', at_ms: 4_100, snapshot_id: SNAPSHOT_ID, status: 'staged' },
+        { type: 'snapshot.sealed', at_ms: 4_600, snapshot_id: SNAPSHOT_ID, status: 'sealed' },
+        { type: 'block.began', at_ms: 4_600, block_id: 'block-rich-text-1', kind: 'rich_text' },
+        { type: 'block.completed', at_ms: 9_000, block_id: 'block-rich-text-1' },
+      ],
+    },
+  }
+  try {
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(
+        <AuthContext.Provider value={{ session: { userId: USER_ID, displayName: 'Mock User' }, signIn: () => undefined, signOut: () => undefined }}>
+          <EvidenceInspectorProvider>
+            <BlockRegistryProvider registry={createDefaultBlockRegistry()}>
+              <MessageItem message={worked} onMeasure={() => undefined} />
+              <MessageItem message={assistantMessage} onMeasure={() => undefined} />
+            </BlockRegistryProvider>
+          </EvidenceInspectorProvider>
+        </AuthContext.Provider>,
+      )
+    })
+    const doc = dom.window.document
+    const line = doc.querySelector<HTMLButtonElement>('[data-message-id="msg-worked"] button[aria-expanded]')!
+    const list = () => doc.getElementById(line.getAttribute('aria-controls')!)!
+    const steps = () => [...list().querySelectorAll('li')].map((li) => li.textContent)
+
+    assert.equal(line.textContent, 'Worked for 34s · 4 steps')
+    assert.equal(line.getAttribute('aria-expanded'), 'false')
+    assert.equal(list().hidden, true)
+
+    await act(async () => line.click())
+    assert.equal(line.getAttribute('aria-expanded'), 'true')
+    assert.equal(list().hidden, false)
+    assert.deepEqual(steps(), ['Planner4s', 'Composer4s', 'Fundamentals1s', 'Snapshot0s'])
+
+    assert.equal(doc.querySelector('[data-message-id="msg-1"] button[aria-expanded]'), null)
+    assert.ok(!doc.querySelector('[data-message-id="msg-1"]')!.textContent!.includes('Worked for'))
+
+    await act(async () => root.unmount())
+  } finally {
+    restoreGlobals()
+  }
+})

@@ -89,6 +89,9 @@ export type ChatMessageRow = {
   created_at: string;
   // The model deployment that wrote an assistant message (#183); null otherwise.
   answered_by?: string | null;
+  // How the answer's turn worked (work-summary.ts); absent on other messages
+  // and on answers saved before it was recorded.
+  work_summary?: JsonValue;
 };
 
 // A read message: each block's evidence, calculation, and public-time claims,
@@ -298,7 +301,8 @@ async function readMessages(db: ChatMessagePersistenceDb, where: string, values:
             m.blocks,
             m.content_hash,
             m.created_at::text as created_at,
-            m.answered_by
+            m.answered_by,
+            m.work_summary
        from chat_messages m
       where ${where}
       order by m.created_at asc, m.message_id asc`,
@@ -307,7 +311,24 @@ async function readMessages(db: ChatMessagePersistenceDb, where: string, values:
   // Every snapshot a message or any of its blocks names: an imported block keeps
   // the snapshot it came from.
   const snapshots = await loadSealedSnapshots(db, rows.flatMap((row) => [row.snapshot_id, ...blockSnapshotIds(row.blocks)]), rows.flatMap((row) => Array.isArray(row.blocks) ? row.blocks : []));
-  return rows.map((row) => Object.freeze({ ...row, block_proofs: blockProofs(row, snapshots) }));
+  return rows.map(({ work_summary, ...row }) => Object.freeze({
+    ...row,
+    ...(work_summary == null ? {} : { work_summary }),
+    block_proofs: blockProofs(row, snapshots),
+  }));
+}
+
+// Records how an assistant answer's turn worked, once the turn completed.
+export async function saveChatMessageWorkSummary(
+  db: ChatMessagePersistenceDb,
+  input: { thread_id: string; message_id: string; work_summary: JsonValue },
+): Promise<void> {
+  await db.query(
+    `update chat_messages
+        set work_summary = $3::jsonb
+      where message_id = $1::uuid and thread_id = $2::uuid and role = 'assistant'`,
+    [input.message_id, input.thread_id, serializeJsonValue(input.work_summary)],
+  );
 }
 
 export function blockHeads(message: Pick<ChatMessageRow, "blocks">): Array<{ id: string; kind: string }> {

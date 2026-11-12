@@ -25,6 +25,7 @@ export async function loadChatServerOptionsFromEnv(
   return {
     ...options,
     persistAssistantMessage: runtime.persistAssistantMessage,
+    saveWorkSummary: runtime.saveWorkSummary,
     preResolveSubject: runtime.preResolveSubject,
     loadPriorSubjects: runtime.loadPriorSubjects,
     readQuestion: runtime.readQuestion,

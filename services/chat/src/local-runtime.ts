@@ -46,7 +46,8 @@ import { createLlmThreadTitleModel, type DroppedClaims } from "./llm-runtime.ts"
 import { structuredRefsFromHandoff } from "./local-runtime-structured.ts";
 import { createChatFinancialRuntime, type ChatFinancialRuntime, type ChatFinancialTurnContext } from "./financial-runtime.ts";
 import { saveCommentary } from "./engine-commentary.ts";
-import { ChatSnapshotSealError, createChatMessagePersistence, type ChatSealResult } from "./messages.ts";
+import { ChatSnapshotSealError, createChatMessagePersistence, saveChatMessageWorkSummary, type ChatSealResult } from "./messages.ts";
+import type { ChatWorkSummarySave } from "./work-summary.ts";
 import {
   preResolveChatSubjectWithResolver,
   type ChatResolvedSubjectPreResolution,
@@ -529,6 +530,8 @@ export const persistAssistantMessage: ChatAssistantMessagePersistence = async (m
     pool: pool(),
     sealSnapshot: sealAssistantMessageSnapshot,
   })(message);
+
+export const saveWorkSummary: ChatWorkSummarySave = (input) => saveChatMessageWorkSummary(pool(), input);
 
 export const generateThreadTitle: ChatThreadTitleGenerator = async (job) =>
   createThreadTitleGenerationJob({

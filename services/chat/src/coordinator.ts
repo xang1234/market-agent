@@ -37,6 +37,7 @@ import {
   type ChatReadMessage,
 } from "./messages.ts";
 import { financialAwareRunner, offeredChoicesRunner } from "./financial-turn.ts";
+import { workSummaryRunner, type ChatWorkSummarySave } from "./work-summary.ts";
 import { companyNameIn, type CompanyChange, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
 import type { AssertionReport } from "./assertions.ts";
 import type { BlockProof } from "../../snapshot/src/block-proof.ts";
@@ -324,6 +325,8 @@ export type ChatCoordinatorOptions = {
   financialRuntime?: ChatFinancialRuntime;
   analystToolRuntime?: ChatAnalystToolRuntime;
   persistAssistantMessage?: ChatAssistantMessagePersistence;
+  // Records how a saved answer's turn worked; absent, no answer keeps a "Worked for" line.
+  saveWorkSummary?: ChatWorkSummarySave;
   preResolveSubject?: ChatSubjectPreResolver;
   renderSubjectClarification?: ChatSubjectClarificationRenderer;
   runActivity?: ChatRunActivityReporter;
@@ -393,7 +396,7 @@ export function createChatCoordinator(
       verificationMode: options.verificationMode ?? "strict",
     }))
     : missingAnalystToolRuntimeRunner);
-  const runner = threadTitleGenerationRunner(runActivityReportingRunner(offeredChoicesRunner(readingRunner(financialAwareRunner(subjectAwareRunner(baseRunner, {
+  const runner = workSummaryRunner(threadTitleGenerationRunner(runActivityReportingRunner(offeredChoicesRunner(readingRunner(financialAwareRunner(subjectAwareRunner(baseRunner, {
     persistAssistantMessage,
     preResolveSubject,
     loadPriorSubjects: options.loadPriorSubjects,
@@ -401,7 +404,7 @@ export function createChatCoordinator(
   }), { financialRuntime: options.financialRuntime, persistAssistantMessage }), options.readQuestion), options.financialRuntime), options.runActivity), {
     generateThreadTitle: options.generateThreadTitle,
     onThreadTitleGenerationError: options.onThreadTitleGenerationError,
-  });
+  }), { save: options.saveWorkSummary, now: options.now ?? Date.now });
   const completedTurnRetentionMs = nonNegativeFiniteNumber(
     options.completedTurnRetentionMs ?? DEFAULT_COMPLETED_TURN_RETENTION_MS,
     "completedTurnRetentionMs",
