@@ -99,6 +99,9 @@ export function ChatLayout() {
         onAsk={chat.ask}
         stop={chat.view.stop}
         onStop={chat.stop}
+        queued={chat.view.queued}
+        onSendQueued={chat.sendQueued}
+        onRemoveQueued={chat.removeQueued}
       />
     </div>
   )

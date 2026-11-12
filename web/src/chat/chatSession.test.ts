@@ -697,3 +697,60 @@ test('a load that reports the run stopped ends a reconnecting run, or a released
     assert.deepEqual([state.turn, state.endedRuns, state.released, selectThreadView(state).canAsk, wantedStream(state)], [{ phase: 'stopped', run: R1, origin: OWN }, ['run-1'], [], true, null])
   }
 })
+
+const NEXT: TurnIds = { runId: 'run-2', text: 'Compare NVDA with AMD year to date' }
+const queuedT1 = () => reduceChatSession(streamingT1(), { type: 'question.queued', turn: NEXT })
+const queueOf = (state: ChatSessionState) => [state.turn.phase, selectThreadView(state).queued, state.queued]
+
+test('a question queued while the answer streams is sent by the hand-off that ends the turn', () => {
+  assert.deepEqual(queueOf(queuedT1()), ['streaming', 'Compare NVDA with AMD year to date', { T1: NEXT }])
+  const sent = reduceChatSession(queuedT1(), streamEvent(sse('turn.completed', 5, { message_id: 'a1', message: A1_SEALED })))
+  assert.deepEqual(queueOf(sent), ['persisting', null, {}])
+  assert.deepEqual(sent.turn, { phase: 'persisting', turn: NEXT })
+  assert.deepEqual([ids(sent), sent.sealedTurns], [['u1', 'a1'], 1])
+})
+
+test('a hand-off by a load that holds the answer sends the queued question', () => {
+  const reloading = run(queuedT1(), [streamEvent(sse('turn.completed', 5, { message_id: 'a1' }))])
+  assert.equal(reloading.turn.phase, 'failed')
+  assert.deepEqual(reduceChatSession(reloading, loaded(2, [U1, A1_SEALED])).turn, { phase: 'persisting', turn: NEXT })
+})
+
+test('a failed, stopped, or unverified turn keeps the queued question unsent', () => {
+  const ended = [
+    streamEvent(sse('turn.error', 5, { error: 'boom' })),
+    streamEvent(sse('turn.stopped', 5)),
+    streamEvent(sse('turn.completed', 5, { unverified: { persisted: false, failures: [], blocks: [] } })),
+  ].map((event) => reduceChatSession(queuedT1(), event))
+  assert.deepEqual(ended.map(queueOf), [
+    ['failed', 'Compare NVDA with AMD year to date', { T1: NEXT }],
+    ['stopped', 'Compare NVDA with AMD year to date', { T1: NEXT }],
+    ['unverified', 'Compare NVDA with AMD year to date', { T1: NEXT }],
+  ])
+})
+
+test('the reader sends a kept question with its own ids, which clears it; another question leaves it queued', () => {
+  const stopped = reduceChatSession(queuedT1(), streamEvent(sse('turn.stopped', 5)))
+  assert.deepEqual(queueOf(reduceChatSession(stopped, { type: 'ask.started', turn: NEXT })), ['persisting', null, {}])
+  const other = reduceChatSession(stopped, { type: 'ask.started', turn: { runId: 'run-3', text: 'Analyse MU' } })
+  assert.deepEqual(queueOf(other), ['persisting', 'Compare NVDA with AMD year to date', { T1: NEXT }])
+})
+
+test('queueing again replaces the question; removing it leaves the thread with none', () => {
+  const replaced = reduceChatSession(queuedT1(), { type: 'question.queued', turn: { runId: 'run-3', text: 'Analyse MU' } })
+  assert.deepEqual(queueOf(replaced), ['streaming', 'Analyse MU', { T1: { runId: 'run-3', text: 'Analyse MU' } }])
+  assert.deepEqual(queueOf(reduceChatSession(replaced, { type: 'queue.removed' })), ['streaming', null, {}])
+})
+
+test('a question is queued only while a run streams', () => {
+  const idle = completedT1()
+  assert.equal(reduceChatSession(idle, { type: 'question.queued', turn: NEXT }), idle)
+})
+
+test('each thread keeps its own queued question across thread switches', () => {
+  const onT2 = reduceChatSession(queuedT1(), { type: 'thread.opened', threadId: 'T2' })
+  assert.deepEqual(queueOf(onT2), ['idle', null, { T1: NEXT }])
+  assert.equal(reduceChatSession(onT2, { type: 'queue.removed' }), onT2)
+  const back = reduceChatSession(onT2, { type: 'thread.opened', threadId: 'T1' })
+  assert.deepEqual(selectThreadView(back).queued, 'Compare NVDA with AMD year to date')
+})

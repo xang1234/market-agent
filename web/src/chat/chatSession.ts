@@ -89,6 +89,9 @@ export type ChatSessionState = {
   inFlight: ReadonlyArray<RunRef>
   // Across threads: survives thread.opened.
   released: ReadonlyArray<ReleasedRun>
+  // A question per thread, asked while a run was followed there: it is sent
+  // when a turn there hands off its saved answer. Survives thread.opened.
+  queued: Readonly<Record<string, TurnIds>>
   // Bumped by every thread.opened that changes the thread, but not by
   // thread.created, so ask-first keeps one message list into its new thread.
   opens: number
@@ -97,6 +100,9 @@ export type ChatSessionState = {
 export type ChatSessionAction =
   | { type: 'thread.opened'; threadId: string | null }
   | { type: 'ask.started'; turn: TurnIds }
+  // Replaces the question queued on this thread.
+  | { type: 'question.queued'; turn: TurnIds }
+  | { type: 'queue.removed' }
   | { type: 'thread.created'; threadId: string }
   | { type: 'message.persisted'; threadId: string; message: ChatMessage }
   | { type: 'ask.failed'; error: string }
@@ -137,11 +143,12 @@ export const INITIAL_CHAT_SESSION: ChatSessionState = {
   endedRuns: [],
   inFlight: [],
   released: [],
+  queued: {},
   opens: 0,
 }
 
-function openedSession(threadId: string | null, opens: number, released: ReadonlyArray<ReleasedRun>): ChatSessionState {
-  if (threadId === null) return { ...INITIAL_CHAT_SESSION, released, opens }
+function openedSession(threadId: string | null, opens: number, released: ReadonlyArray<ReleasedRun>, queued: ChatSessionState['queued']): ChatSessionState {
+  if (threadId === null) return { ...INITIAL_CHAT_SESSION, released, queued, opens }
   return {
     threadId,
     history: { requested: 1, settled: 0, loaded: { kind: 'loading' }, local: [] },
@@ -150,6 +157,7 @@ function openedSession(threadId: string | null, opens: number, released: Readonl
     endedRuns: [],
     inFlight: [],
     released,
+    queued,
     opens,
   }
 }
@@ -193,14 +201,39 @@ function following(run: RunRef, origin: RunOrigin, link: StreamLink): TurnState 
   return { phase: 'streaming', run, origin, stream: INITIAL_STREAM_STATE, link, stop: 'none' }
 }
 
+// A turn that handed off its saved answer sends the question queued behind it
+// in the same state. A failed, stopped, or unverified turn leaves it queued.
 export function reduceChatSession(s: ChatSessionState, a: ChatSessionAction): ChatSessionState {
+  const next = reduceTurn(s, a)
+  if (next.threadId === null || next.threadId !== s.threadId || next.sealedTurns <= s.sealedTurns) return next
+  const queued = next.queued[next.threadId]
+  return queued && next.turn.phase === 'idle' && askable(next) ? asked(next, queued) : next
+}
+
+function asked(s: ChatSessionState, turn: TurnIds): ChatSessionState {
+  const queued = s.threadId === null ? undefined : s.queued[s.threadId]
+  return { ...s, turn: { phase: 'persisting', turn }, queued: queued?.runId === turn.runId ? unqueued(s) : s.queued }
+}
+
+function unqueued(s: ChatSessionState): ChatSessionState['queued'] {
+  return Object.fromEntries(Object.entries(s.queued).filter(([threadId]) => threadId !== s.threadId))
+}
+
+function reduceTurn(s: ChatSessionState, a: ChatSessionAction): ChatSessionState {
   switch (a.type) {
     case 'thread.opened':
-      return a.threadId === s.threadId ? s : openedSession(a.threadId, s.opens + 1, releasedOnLeave(s))
+      return a.threadId === s.threadId ? s : openedSession(a.threadId, s.opens + 1, releasedOnLeave(s), s.queued)
 
     case 'ask.started':
-      if (!askable(s)) return s
-      return { ...s, turn: { phase: 'persisting', turn: a.turn } }
+      return askable(s) ? asked(s, a.turn) : s
+
+    case 'question.queued':
+      if (s.threadId === null || s.turn.phase !== 'streaming') return s
+      return { ...s, queued: { ...s.queued, [s.threadId]: a.turn } }
+
+    case 'queue.removed':
+      if (s.threadId === null || !(s.threadId in s.queued)) return s
+      return { ...s, queued: unqueued(s) }
 
     case 'thread.created':
       if (s.threadId !== null || s.turn.phase !== 'persisting') return s
@@ -538,6 +571,8 @@ export type ThreadView = {
   canAsk: boolean
   // The composer's stop control: none while no run is followed, else whether a stop is on its way.
   stop: 'none' | 'ready' | 'stopping'
+  // The question queued on this thread.
+  queued: string | null
   firstQuestion: string | null
   sealedTurns: number
   needsLoad: { threadId: string; gen: number } | null
@@ -573,6 +608,7 @@ export function selectThreadView(s: ChatSessionState): ThreadView {
     turn,
     canAsk: askable(s),
     stop: turn.phase !== 'streaming' ? 'none' : turn.stop === 'requested' ? 'stopping' : 'ready',
+    queued: (s.threadId !== null && s.queued[s.threadId]?.text) || null,
     firstQuestion: (firstUser ? messageText(firstUser) : null) || pendingText,
     sealedTurns: s.sealedTurns,
     needsLoad: s.threadId !== null && history.requested > history.settled
