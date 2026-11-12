@@ -28,6 +28,8 @@ const COMPANIES: Readonly<Record<string, string>> = {
   MRGN: "4f000000-0000-4000-8000-0000000000e8",
   // Its facts are deleted once seeded: it reports nothing.
   NOQS: "4f000000-0000-4000-8000-0000000000e9",
+  // Its quarters are deleted once seeded: it reports fiscal years only.
+  ANNL: "4f000000-0000-4000-8000-0000000000ea",
 };
 const REVENUE = [
   [2022, 1, "800"], [2022, 2, "900"], [2022, 3, "1000"], [2022, 4, "1100"],
@@ -111,6 +113,12 @@ test("a question about one company that asks for no figure is answered with its 
     await quarterly(issuer, "net_income", 2023, 4, "400", derived);
   }
   await db.query(`delete from facts where subject_id = $1`, [COMPANIES.NOQS]);
+  await db.query(`delete from facts where subject_id = $1`, [COMPANIES.ANNL]);
+  for (const [year, revenue, gross, operating, net] of [[2022, "1600", "640", "320", "160"], [2023, "2000", "1000", "500", "400"]] as const) {
+    for (const [metric_key, value] of [["revenue", revenue], ["gross_profit", gross], ["operating_income", operating], ["net_income", net]] as const) {
+      await seedReportedFact(db, { metric_key, value, fiscal_year: year, subject: COMPANIES.ANNL! });
+    }
+  }
   for (const [metric, value] of [["revenue", "2400"], ["gross_profit", "1200"], ["operating_income", "600"], ["net_income", "480"]] as const) {
     await quarterly(COMPANIES.SECQ!, metric, 2024, 1, value);
   }
@@ -405,6 +413,26 @@ test("a question about one company that asks for no figure is answered with its 
       { reason_code: "unsupported" },
       "This request asks for a calculation outside the verified financial definitions I can compute: a margin trend, which is charted over reported quarters, and none could be read for this company.",
     ]);
+  });
+
+  await t.test("a margin trend of a company that reports only fiscal years shows its latest fiscal year's margins and says why there is no trend", async () => {
+    let calls = 0;
+    const counted: PlanningModel = async () => {
+      calls += 1;
+      throw new Error("the planner should not be asked");
+    };
+    const trend = { ...NO_ASKS, asks: new Set(["margins", "margin_trend"] as const) };
+    const harness = chatHarness(pool, { model: counted, readQuestion: reading(trend), resolveMention: resolve });
+    const done = completed((await harness.run({ ...base, userIntent: "How are ANNL's margins trending?" })).events);
+    assert.equal(calls, 0);
+    assert.deepEqual((await results(done.message_id)).filter(([outputId]) => outputId!.endsWith("_margin_latest_fy")), [
+      ["out_gross_margin_latest_fy", "FY2023 (ended 2023-12-31)", "verified", "50.00%"],
+      ["out_operating_margin_latest_fy", "FY2023 (ended 2023-12-31)", "verified", "25.00%"],
+      ["out_net_margin_latest_fy", "FY2023 (ended 2023-12-31)", "verified", "20.00%"],
+    ]);
+    const { rows: [saved] } = await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id]);
+    const notes = (saved.blocks as Array<{ kind: string; segments?: Array<{ text: string }> }>).slice(1).flatMap((block) => block.segments?.map((segment) => segment.text) ?? []);
+    assert.deepEqual(notes, ["A margin trend is charted over reported quarters, and none could be read for ANNL Corp, so its margins are shown for a fiscal year."]);
   });
 
   await t.test("a margin trend's answer is saved without reading its revenue again, as only an overview's note names growth it leaves out (#479 review)", async () => {
