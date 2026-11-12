@@ -2,7 +2,7 @@ import type { Server } from "node:http";
 import { Pool } from "pg";
 import { logPoolErrors } from "../../shared/src/pool-client.ts";
 import { createResolverServer } from "./http.ts";
-import { createPolygonTickerDiscoveryProvider } from "./discovery.ts";
+import { createPolygonTickerDiscoveryProvider, type TickerDiscoveryProvider } from "./discovery.ts";
 import {
   createDevProvidersTickerDiscoveryProvider,
   createFallbackTickerDiscoveryProvider,
@@ -21,25 +21,27 @@ export async function buildResolverDevServer(
   }
 
   const pool = logPoolErrors(new Pool({ connectionString: databaseUrl }));
-  const polygonTickerDiscoveryProvider = createPolygonTickerDiscoveryProvider({
-    apiKey: env.POLYGON_API_KEY,
-    baseUrl: env.RESOLVER_POLYGON_REFERENCE_BASE_URL,
-  });
-  const openReferenceConfig = openReferenceProviderConfigFromEnv(env);
-  const openReferenceEnabled = openReferenceConfig.nasdaqTrader.enabled;
-  const unofficialDevProvidersEnabled = env.ENABLE_UNOFFICIAL_DEV_PROVIDERS === "true";
-  const devProvidersBaseUrl = env.DEV_PROVIDERS_BASE_URL ?? env.DEV_PROVIDERS_ORIGIN;
-  const tickerDiscoveryProviders = [
-    polygonTickerDiscoveryProvider,
-    ...(openReferenceEnabled
-      ? [createOpenReferenceTickerDiscoveryProvider(openReferenceConfig)]
-      : []),
-    ...(unofficialDevProvidersEnabled && devProvidersBaseUrl
-      ? [createDevProvidersTickerDiscoveryProvider({ baseUrl: devProvidersBaseUrl })]
-      : []),
-  ];
-  const tickerDiscoveryProvider = createFallbackTickerDiscoveryProvider(tickerDiscoveryProviders);
+  const tickerDiscoveryProvider = tickerDiscoveryProviderFromEnv(env);
   const server = createResolverServer(pool, { tickerDiscoveryProvider });
 
   return { server, close: () => pool.end() };
+}
+
+// Polygon first, then the open reference and unofficial dev providers the env
+// turns on. Chat resolves in-process with the same chain (chat/src/local-runtime.ts).
+export function tickerDiscoveryProviderFromEnv(env: NodeJS.ProcessEnv): TickerDiscoveryProvider {
+  const openReferenceConfig = openReferenceProviderConfigFromEnv(env);
+  const devProvidersBaseUrl = env.DEV_PROVIDERS_BASE_URL ?? env.DEV_PROVIDERS_ORIGIN;
+  return createFallbackTickerDiscoveryProvider([
+    createPolygonTickerDiscoveryProvider({
+      apiKey: env.POLYGON_API_KEY,
+      baseUrl: env.RESOLVER_POLYGON_REFERENCE_BASE_URL,
+    }),
+    ...(openReferenceConfig.nasdaqTrader.enabled
+      ? [createOpenReferenceTickerDiscoveryProvider(openReferenceConfig)]
+      : []),
+    ...(env.ENABLE_UNOFFICIAL_DEV_PROVIDERS === "true" && devProvidersBaseUrl
+      ? [createDevProvidersTickerDiscoveryProvider({ baseUrl: devProvidersBaseUrl })]
+      : []),
+  ]);
 }

@@ -48,20 +48,16 @@ import { createChatFinancialRuntime, type ChatFinancialRuntime, type ChatFinanci
 import { saveCommentary } from "./engine-commentary.ts";
 import { ChatSnapshotSealError, createChatMessagePersistence, type ChatSealResult } from "./messages.ts";
 import {
-  preResolveChatSubjectWithResolver,
+  createChatSubjectPreResolver,
   type ChatResolvedSubjectPreResolution,
   type ChatSubjectPreResolution,
-  type ChatSubjectPreResolveRequest,
 } from "./subjects.ts";
+import { tickerDiscoveryProviderFromEnv } from "../../resolver/src/dev-server.ts";
 import { createThreadTitleGenerationJob } from "./thread-title.ts";
 
 let localPool: Pool | null = null;
 
-export function preResolveSubject(
-  request: ChatSubjectPreResolveRequest,
-): Promise<ChatSubjectPreResolution> {
-  return preResolveChatSubjectWithResolver(pool(), request);
-}
+export const preResolveSubject = createChatSubjectPreResolver(pool, tickerDiscoveryProviderFromEnv(process.env));
 
 // Chat tolerates a missing research-claims read: a freshly-covered subject (or a
 // transient DB hiccup) should still answer from price + fundamentals rather than

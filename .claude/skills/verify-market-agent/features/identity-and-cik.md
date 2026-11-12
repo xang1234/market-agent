@@ -14,7 +14,7 @@ Type a ticker in the search box. The web calls `POST /v1/subjects/resolve` per k
 
 ## Driving it with scripts/verify
 
-Preconditions: the baseline, and a Polygon key in `.env.dev`. Pick tickers still marked `NO CIK` with `$V resolve`, because a fill only happens once per database.
+Preconditions: the baseline, and a Polygon key in `.env.dev`. Pick tickers still marked `NO CIK` with `$V resolve`, because a fill only happens once per database. Since the import fills CIKs from SEC's list (`$V import`, `$V fill-ciks`), most common stocks have one; check `$V sql "select l.ticker from listings l join instruments i using (instrument_id) join issuers iss using (issuer_id) where iss.cik is null limit 20"` for ones that don't. Chat runs the same discovery as the resolver for such a ticker (`services/chat/src/subjects.ts`).
 
 - **Identity held.** Run `$V identity save before`, then `$V resolve AMD`, then `$V identity diff before`. The diff shows no `apple_issuers` or duplicate-ticker change.
 - **CIK filled.** The `resolve` output shows AMD on its original issuer name with a number, not `NO CIK`.

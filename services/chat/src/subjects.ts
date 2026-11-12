@@ -9,6 +9,7 @@ import type {
   NotFoundReason,
   ResolverCandidate,
 } from "../../resolver/src/envelope.ts";
+import type { TickerDiscoveryProvider } from "../../resolver/src/discovery.ts";
 import type { QueryExecutor } from "../../resolver/src/lookup.ts";
 import type { SubjectKind, SubjectRef } from "../../shared/src/subject-ref.ts";
 
@@ -73,13 +74,20 @@ export async function preResolveChatSubject(
   return chatSubjectPreResolutionFromFlow(input.text, flow);
 }
 
-export async function preResolveChatSubjectWithResolver(
-  db: QueryExecutor,
-  request: ChatSubjectPreResolveRequest,
-): Promise<ChatSubjectPreResolution> {
-  return preResolveChatSubject({
+/**
+ * Chat's subject resolver: the resolver's flow, in-process. A ticker held only
+ * by issuers without a CIK runs `discovery`, at most once a minute per ticker
+ * (flow.ts claimCiklessDiscovery), so a first question about a company the
+ * weekly import left without one can fill it.
+ */
+export function createChatSubjectPreResolver(
+  db: () => QueryExecutor,
+  discovery: TickerDiscoveryProvider,
+): ChatSubjectPreResolver {
+  const options = { tickerDiscoveryProvider: discovery, ciklessDiscoveryAttempts: new Map<string, number>() };
+  return (request) => preResolveChatSubject({
     ...request,
-    resolveSubject: (resolverRequest) => runSearchToSubjectFlow(db, resolverRequest),
+    resolveSubject: (resolverRequest) => runSearchToSubjectFlow(db(), resolverRequest, options),
   });
 }
 
