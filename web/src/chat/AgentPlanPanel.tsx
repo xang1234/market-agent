@@ -5,6 +5,9 @@ import type { StreamPlanStep, StreamPlanStepStatus } from './streamPlan.ts'
 
 type AgentPlanPanelProps = {
   steps: ReadonlyArray<StreamPlanStep>
+  // False once the turn has ended (failed, or shown unverified): a step still
+  // marked running never finished, so it reads as an error and the clock stops.
+  active: boolean
 }
 
 type StatusView = { Icon: LucideIcon; icon: string; row: string; label: string }
@@ -16,10 +19,11 @@ const STATUS_VIEW: Readonly<Record<StreamPlanStepStatus, StatusView>> = {
   error: { Icon: CircleX, icon: 'text-negative', row: 'text-negative', label: 'text-fg' },
 }
 
-export function AgentPlanPanel({ steps }: AgentPlanPanelProps): ReactElement | null {
+export function AgentPlanPanel({ steps: streamed, active }: AgentPlanPanelProps): ReactElement | null {
   // ponytail: the stream events carry no timestamps, so the clock starts when the turn's view mounts.
   const [startedAt] = useState(() => Date.now())
-  const working = !steps.some((step) => step.status === 'error') && !steps.every((step) => step.status === 'done')
+  const steps = active ? streamed : streamed.map((step) => step.status === 'running' ? { ...step, status: 'error' as const } : step)
+  const working = active && !steps.some((step) => step.status === 'error') && !steps.every((step) => step.status === 'done')
   const tick = useCallback((node: HTMLElement | null) => {
     if (node === null) return
     const write = () => { node.textContent = formatElapsed(Date.now() - startedAt) }
@@ -39,7 +43,8 @@ export function AgentPlanPanel({ steps }: AgentPlanPanelProps): ReactElement | n
     >
       <h3 className="text-xs font-semibold text-muted tabular-nums">
         {working ? 'Working · ' : 'Worked for '}
-        <span ref={tick} />
+        {/* Inside the turn's live region: a ticking second is not news. */}
+        <span ref={tick} aria-hidden="true" />
       </h3>
       <ol className="mt-3 flex flex-col gap-2">
         {steps.map((step) => {

@@ -20,7 +20,7 @@ test('the plan panel reads "Working" with a ticking clock until every step is do
   const root = createRoot(container)
   const heading = () => container.querySelector('h3')?.textContent
 
-  await act(async () => root.render(<AgentPlanPanel steps={[step('Planner', 'done'), step('Fundamentals', 'running'), step('Composer', 'waiting')]} />))
+  await act(async () => root.render(<AgentPlanPanel steps={[step('Planner', 'done'), step('Fundamentals', 'running'), step('Composer', 'waiting')]} active />))
   assert.equal(heading(), 'Working · 0s')
   assert.deepEqual(
     [...container.querySelectorAll('li .sr-only')].map((node) => node.textContent),
@@ -30,9 +30,29 @@ test('the plan panel reads "Working" with a ticking clock until every step is do
   await act(async () => t.mock.timers.tick(65_000))
   assert.equal(heading(), 'Working · 1m 5s')
 
-  await act(async () => root.render(<AgentPlanPanel steps={[step('Planner', 'done'), step('Fundamentals', 'done'), step('Composer', 'done')]} />))
+  await act(async () => root.render(<AgentPlanPanel steps={[step('Planner', 'done'), step('Fundamentals', 'done'), step('Composer', 'done')]} active />))
   await act(async () => t.mock.timers.tick(5_000))
   assert.equal(heading(), 'Worked for 1m 5s')
+
+  await act(async () => root.unmount())
+})
+
+test('a turn that ended stops the clock and the spinner, and the clock stays out of live announcements', async (t) => {
+  const dom = new JSDOM('<!doctype html><div id="root"></div>')
+  const restore = installDomGlobals(dom.window as unknown as Window)
+  t.after(restore)
+  t.mock.timers.enable({ apis: ['setInterval', 'Date'], now: 0 })
+  const container = dom.window.document.getElementById('root')!
+  const root = createRoot(container)
+  const steps = [step('Planner', 'done'), step('Fundamentals', 'running')]
+
+  await act(async () => root.render(<AgentPlanPanel steps={steps} active />))
+  assert.equal(container.querySelector('h3 [aria-hidden="true"]')?.textContent, '0s')
+
+  await act(async () => root.render(<AgentPlanPanel steps={steps} active={false} />))
+  await act(async () => t.mock.timers.tick(5_000))
+  assert.equal(container.querySelector('h3')?.textContent, 'Worked for 0s')
+  assert.deepEqual([...container.querySelectorAll('li .sr-only')].map((node) => node.textContent), [' done', ' error'])
 
   await act(async () => root.unmount())
 })
