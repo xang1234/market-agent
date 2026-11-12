@@ -221,7 +221,17 @@ test("a financial turn stopped mid-calculation and asked again at once answers, 
   const reached = deferred<void>();
   const hold = deferred<void>();
   let held = false;
-  const { coordinator } = chatHarness(pool, {
+  // The stop's release, the one lease write made on the pool, is slow, as on a busy pool: the re-ask must still wait for it.
+  const slowRelease = new Proxy(pool, {
+    get(target, key) {
+      if (key !== "query") return Reflect.get(target, key, target);
+      return async (text: string, values?: unknown[]) => {
+        if (text.includes("set lease_expires_at = now()")) await new Promise((resolve) => setTimeout(resolve, 500));
+        return target.query(text, values);
+      };
+    },
+  });
+  const { coordinator } = chatHarness(slowRelease, {
     model: revenueModel(["AAA"]),
     // The first evidence read under the run's lease waits on `hold`: the calculation the stop lands in.
     evidence: (executor) => {

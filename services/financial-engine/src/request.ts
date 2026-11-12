@@ -7,6 +7,8 @@
 // finalization transaction; they read back their own committed records
 // afterwards.
 
+import { AsyncLocalStorage } from "node:async_hooks";
+
 import type { FinancialPlan, FinancialRuntimeAuthority } from "../../financial-core/src/index.ts";
 import type { PersistParentArtifact } from "./finalize.ts";
 import { acquireLease, releaseLease, type AcquireLeaseResult } from "./lease.ts";
@@ -52,7 +54,22 @@ export type FinancialRequest = Readonly<{
   beforeDrive?: () => Promise<unknown>;
 }>;
 
+/** A caller's stop of the requests it makes: one stopped takes no lease, and gives up the one it holds when the stop comes. */
+export type RequestStop = Readonly<{
+  stopped: boolean;
+  /** Registers `release` to run when the caller stops, which awaits it; returns a function that unregisters it. */
+  onStop(release: () => Promise<void>): () => void;
+}>;
+
+const callerStop = new AsyncLocalStorage<RequestStop>();
+
+/** Runs `fn` with every request it publishes, including from async work it starts, answering to `stop`. */
+export function withRequestStop<T>(stop: RequestStop, fn: () => T): T {
+  return callerStop.run(stop, fn);
+}
+
 export async function publishRequest(pool: FinancialPool, request: FinancialRequest): Promise<RequestOutcome> {
+  const stop = callerStop.getStore();
   return withPinnedClient(pool, async (client, lost) => {
     let plan = await findPlanForRequest(client, request);
     if (!plan) {
@@ -61,8 +78,10 @@ export async function publishRequest(pool: FinancialPool, request: FinancialRequ
       plan = planned.plan;
     }
     try {
-      return await reserveAndDrive(client, request, plan);
+      return await reserveAndDrive(pool, client, request, plan, stop);
     } catch (error) {
+      // A stopped request's fence refusing its writes, or its parent refusing the save, is the stop working.
+      if (stop?.stopped && isRoutinePublicationFailure(error, lost())) return { status: "gap", reason: "run_cancelled" };
       // A finalization that rolled back leaves units computed and the run checkpointed: a retry or recovery finishes it.
       if (isRoutinePublicationFailure(error, lost())) {
         console.warn(`[financial-engine] publication stopped for ${requestName(request)}`, lost() ?? error);
@@ -80,27 +99,49 @@ export async function publishRequest(pool: FinancialPool, request: FinancialRequ
  * commit the caller never heard about lands on a completed run or on existing
  * units, never on a second publication.
  */
-async function reserveAndDrive(client: SnapshotTransactionClient, request: FinancialRequest, plan: FinancialPlan): Promise<RequestOutcome> {
+async function reserveAndDrive(
+  pool: FinancialPool,
+  client: SnapshotTransactionClient,
+  request: FinancialRequest,
+  plan: FinancialPlan,
+  stop: RequestStop | undefined,
+): Promise<RequestOutcome> {
   const reserved = await reserveRun(client, { authority: request.authority, request_key: request.request_key, plan });
   if (reserved.status === "conflict") return { status: "gap", reason: "request_conflict" };
   const { run } = reserved;
   if (run.execution_state === "completed") return { status: "driven", run_id: run.run_id, report: null };
   if (run.execution_state === "failed") return { status: "gap", reason: "run_failed" };
-  if (run.execution_state === "cancelled") return { status: "gap", reason: "run_cancelled" };
-  const acquired = await acquireLease(client, {
+  if (run.execution_state === "cancelled" || stop?.stopped) return { status: "gap", reason: "run_cancelled" };
+  const acquiring = acquireLease(client, {
     authority: request.authority,
     run_id: run.run_id,
     worker_id: `${request.authority.feature.surface}-${process.pid}`,
     ttl_ms: LEASE_TTL_MS,
   });
-  if (acquired.status !== "acquired") return { status: "gap", reason: UNAVAILABLE[acquired.status] };
+  // A stop gives the lease up at once, on its own connection since the drive's
+  // may be mid-transaction: the drive's next write then fails its fence, and the
+  // run is free for the next attempt. Releasing is fenced by epoch, so it never
+  // touches a lease a later attempt took.
+  const unwatch = stop?.onStop(async () => {
+    const acquired = await acquiring.catch(() => null);
+    if (acquired?.status !== "acquired") return;
+    await releaseLease(pool, acquired.lease).catch((error: unknown) => {
+      console.warn(`[financial-engine] a stopped ${requestName(request)} keeps its lease until it lapses`, error);
+    });
+  });
   try {
-    await request.beforeDrive?.();
-    const report = await driveLeasedRun(client, acquired.lease, acquired.run, { ...request, parent_limits: {} });
-    return { status: "driven", run_id: run.run_id, report };
+    const acquired = await acquiring;
+    if (acquired.status !== "acquired") return { status: "gap", reason: UNAVAILABLE[acquired.status] };
+    try {
+      await request.beforeDrive?.();
+      const report = await driveLeasedRun(client, acquired.lease, acquired.run, { ...request, parent_limits: {} });
+      return { status: "driven", run_id: run.run_id, report };
+    } finally {
+      // Whatever stopped this drive short (a failure, a rejected unit), the next attempt need not wait out the lease.
+      await releaseLease(client, acquired.lease);
+    }
   } finally {
-    // Whatever stopped this drive short (a failure, a rejected unit), the next attempt need not wait out the lease.
-    await releaseLease(client, acquired.lease);
+    unwatch?.();
   }
 }
 
