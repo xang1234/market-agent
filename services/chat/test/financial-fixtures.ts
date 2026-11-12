@@ -175,7 +175,7 @@ export function chatHarness(
     await handle.completed;
     return { turnId, events: handle.events };
   };
-  return { run, persisted };
+  return { run, persisted, coordinator };
 }
 
 export async function chatDatabase(t: Parameters<typeof engineDatabase>[0], prefix: string): Promise<{ db: Client; pool: Pool; threadId: string }> {

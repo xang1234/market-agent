@@ -35,6 +35,8 @@ export type PlanChoice =
   | Readonly<{ kind: "kept_figures"; metrics: ReadonlyArray<string>; period: ReadPeriod }>
   // P/E multiples the message states (eps-scenarios.ts): it outranks every route, P/E at the current price included.
   | Readonly<{ kind: "scenario"; ask: ScenarioAsk }>
+  // The fixed annual cash-resilience view (financial-runtime.ts planCashResilience).
+  | Readonly<{ kind: "cash_resilience" }>
   | Readonly<{ kind: "planner" }>;
 
 const PLANNER: PlanChoice = { kind: "planner" };

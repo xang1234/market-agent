@@ -80,6 +80,27 @@ export async function planMarginTrend(context: PlanningContext, evidence: Financ
   return companies && planned(context, marginTrendDraft(companies[0]!), TREND_UNPLANNED);
 }
 
+/** Whether the context's one company reported revenue for the fiscal year, or for any with none named, by the cutoff; false when it cannot be read. */
+export async function reportsFiscalYear(context: PlanningContext, evidence: FinancialEvidencePort, fiscal_year: number | null): Promise<boolean> {
+  const [subject] = context.requested_subjects;
+  if (subject?.resolution.status !== "resolved") return false;
+  const { authority, knowledge_cutoff } = context;
+  const page = await evidence.listInputCandidates({
+    authority,
+    subject: subject.resolution.subject_ref,
+    metric_key: "revenue",
+    fiscal_year,
+    fiscal_period: "FY",
+    limit: DEFAULT_EXECUTION_LIMITS.max_input_candidates,
+  });
+  if (page.status === "error") {
+    console.warn(TREND_UNPLANNED, page.reason_code);
+    return false;
+  }
+  const policy = { knowledge_cutoff, allowed_source_classes: authority.allowed_source_classes };
+  return page.candidates.some((candidate) => candidate.period.fiscal_period === "FY" && reportedBy(candidate, policy));
+}
+
 /**
  * What a saved overview plan leaves out, for its answer's note: read again
  * from the evidence by the plan's cutoff, so a run resumed without planning

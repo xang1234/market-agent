@@ -2,6 +2,7 @@ import { Circle, CircleCheck, CircleX, LoaderCircle, type LucideIcon } from 'luc
 import { useCallback, useRef, useState, type ReactElement } from 'react'
 
 import type { StreamPlanStep, StreamPlanStepStatus } from './streamPlan.ts'
+import { formatElapsed } from './workSummary.ts'
 
 type AgentPlanPanelProps = {
   steps: ReadonlyArray<StreamPlanStep>
@@ -80,9 +81,4 @@ function stepTime(times: Map<string, StepTime>, step: StreamPlanStep, now: numbe
   if (step.status === 'running') time.start ??= now
   else if (step.status !== 'waiting' && time.start !== undefined) time.end ??= now
   return time.start === undefined || time.end === undefined ? '' : formatElapsed(time.end - time.start)
-}
-
-function formatElapsed(ms: number): string {
-  const seconds = Math.floor(ms / 1000)
-  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`
 }

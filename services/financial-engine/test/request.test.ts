@@ -7,7 +7,7 @@ import { createEvidenceFinancialPort } from "../src/evidence-adapter.ts";
 import { ParentRefusedError, type PersistParentArtifact } from "../src/finalize.ts";
 import { planFinancialRequest, type PlanningContext, type PlanningResult } from "../src/planner.ts";
 import type { FinancialPool, SqlExecutor } from "../src/ports.ts";
-import { issuerLabels, publishRequest, type FinancialRequest, type RequestOutcome } from "../src/request.ts";
+import { issuerLabels, publishRequest, withRequestStop, type FinancialRequest, type RequestOutcome, type RequestStop } from "../src/request.ts";
 import { createFinancialWorker } from "../src/worker.ts";
 import { authorityFor, databaseUrl, engineDatabase, IDS, revenuePlan } from "./db-fixtures.ts";
 
@@ -299,5 +299,64 @@ test("publication failures", { skip: !dockerAvailable(), timeout: 300_000 }, asy
     assert.deepEqual((await worker.tick()).filter((entry) => entry.run_id === runId).map((entry) => entry.status), ["error"]);
     const about = (calls: typeof logged.error.mock.calls) => calls.filter((call) => String(call.arguments[0]).includes(runId)).map((call) => call.arguments[0]);
     assert.deepEqual({ error: about(logged.error.mock.calls), warn: about(logged.warn.mock.calls) }, { error: [], warn: [`[financial-engine] recovery stopped for chat_thread run ${runId}`] });
+  });
+});
+
+/** A caller's stop the test fires: it runs every registered release, as a stopped chat turn does. */
+function testStop() {
+  const releases = new Set<() => Promise<void>>();
+  const stop = {
+    stopped: false,
+    onStop(release: () => Promise<void>) {
+      releases.add(release);
+      return () => releases.delete(release);
+    },
+    async fire() {
+      stop.stopped = true;
+      await Promise.all([...releases].map((release) => release()));
+    },
+  };
+  return stop satisfies RequestStop;
+}
+
+test("a stopped request", { skip: !dockerAvailable(), timeout: 300_000 }, async (t) => {
+  const db = await engineDatabase(t, "fin-request-stop");
+  const pool = await connectedPool(t, databaseUrl(db), { max: 4 });
+  const leases = async (key: string) => (await db.query(
+    `select count(*)::int as n from financial_run_events e join financial_runs r using (run_id) where r.request_key = $1 and e.event_kind = 'lease_acquired'`,
+    [key],
+  )).rows[0].n;
+
+  await t.test("gives its lease up when stopped: the next attempt publishes while it still drives, and it writes nothing after", async () => {
+    const key = randomUUID();
+    const leased = Promise.withResolvers<void>();
+    const hold = Promise.withResolvers<void>();
+    const stop = testStop();
+    let wrote = false;
+    const stopped = withRequestStop(stop, () => publishRequest(pool, request({
+      request_key: key,
+      beforeDrive: async () => {
+        leased.resolve();
+        await hold.promise;
+      },
+      persistParent: async () => { wrote = true; },
+    })));
+    await leased.promise;
+
+    await stop.fire();
+    assert.equal(published(await publishRequest(pool, request({ request_key: key }))), "published");
+    hold.resolve();
+    assert.deepEqual(await stopped, { status: "gap", reason: "run_cancelled" });
+    assert.equal(wrote, false);
+    assert.equal(await leases(key), 2);
+  });
+
+  await t.test("takes no lease once stopped, and the next attempt publishes", async () => {
+    const key = randomUUID();
+    const stop = testStop();
+    await stop.fire();
+    assert.deepEqual(await withRequestStop(stop, () => publishRequest(pool, request({ request_key: key }))), { status: "gap", reason: "run_cancelled" });
+    assert.equal(await leases(key), 0);
+    assert.equal(published(await publishRequest(pool, request({ request_key: key }))), "published");
   });
 });

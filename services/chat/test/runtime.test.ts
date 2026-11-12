@@ -31,6 +31,7 @@ test("with a database set, the server takes each piece of the in-repo runtime on
   let ready: () => Promise<void> = async () => {};
   const runtime = {
     persistAssistantMessage: piece("persistAssistantMessage"),
+    saveWorkSummary: piece("saveWorkSummary"),
     preResolveSubject: piece("preResolveSubject"),
     loadPriorSubjects: piece("loadPriorSubjects"),
     readQuestion: piece("readQuestion"),
@@ -42,6 +43,7 @@ test("with a database set, the server takes each piece of the in-repo runtime on
   const load = async () => runtime as never;
   assert.deepEqual(await loadChatServerOptionsFromEnv({ DATABASE_URL: "postgres://golden.invalid/market_agent" }, load), {
     persistAssistantMessage: runtime.persistAssistantMessage,
+    saveWorkSummary: runtime.saveWorkSummary,
     preResolveSubject: runtime.preResolveSubject,
     loadPriorSubjects: runtime.loadPriorSubjects,
     readQuestion: runtime.readQuestion,

@@ -1,4 +1,5 @@
-import { memo, useLayoutEffect, useRef, useState, type ReactElement } from 'react'
+import { ChevronRight } from 'lucide-react'
+import { memo, useId, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 
 import { MemoizedBlockView } from '../blocks/MemoizedBlockView.tsx'
 import { CopyButton } from '../blocks/CopyButton.tsx'
@@ -8,6 +9,7 @@ import type { Block } from '../blocks/types.ts'
 import type { ChatMessage } from './messageTypes.ts'
 import { messageTime } from './messageTime.ts'
 import { AssistantTurn, BlockColumn, USER_BUBBLE_CLASS } from './turnLayout.tsx'
+import { formatElapsed, parseWorkSummary, workSteps } from './workSummary.ts'
 
 type MessageItemProps = {
   message: ChatMessage
@@ -50,6 +52,7 @@ function MessageItemInner({ message, onMeasure }: MessageItemProps): ReactElemen
         </>
       ) : (
         <>
+          <WorkedFor summary={message.work_summary} />
           <AssistantBlocks blocks={message.blocks} proofs={message.block_proofs} />
           <div className="mt-1 flex items-center gap-1">
             <CopyButton iconOnly label="Copy answer" what="this answer" purpose="as text" text={() => answerCopy(message)} />
@@ -57,6 +60,42 @@ function MessageItemInner({ message, onMeasure }: MessageItemProps): ReactElemen
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+// How long the answer's turn worked, collapsed to one line that opens to its
+// steps. An answer saved before this was recorded has none and shows nothing.
+function WorkedFor({ summary: saved }: { summary: unknown }): ReactElement | null {
+  const [open, setOpen] = useState(false)
+  const listId = useId()
+  const summary = useMemo(() => {
+    const parsed = parseWorkSummary(saved)
+    return parsed === null ? null : { elapsed_ms: parsed.elapsed_ms, steps: workSteps(parsed) }
+  }, [saved])
+  if (summary === null) return null
+  const { steps } = summary
+  return (
+    <div className="mb-1 text-xs text-muted">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={listId}
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 rounded px-1 py-0.5 tabular-nums hover:text-fg"
+      >
+        <ChevronRight aria-hidden="true" className={`size-3.5 motion-safe:transition-transform ${open ? 'rotate-90' : ''}`} />
+        Worked for {formatElapsed(summary.elapsed_ms)} · {steps.length} {steps.length === 1 ? 'step' : 'steps'}
+      </button>
+      <ol id={listId} hidden={!open} className="mt-1 ml-5 flex flex-col gap-0.5">
+        {steps.map((step) => (
+          <li key={step.step_id} className={step.status === 'error' ? 'text-negative' : undefined}>
+            {step.label}
+            <span className="ml-2 tabular-nums">{formatElapsed(step.elapsed_ms)}</span>
+            {step.status === 'error' ? <span className="sr-only"> failed</span> : null}
+          </li>
+        ))}
+      </ol>
     </div>
   )
 }

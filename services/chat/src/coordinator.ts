@@ -37,6 +37,7 @@ import {
   type ChatReadMessage,
 } from "./messages.ts";
 import { financialAwareRunner, offeredChoicesRunner } from "./financial-turn.ts";
+import { workSummaryRunner, type ChatWorkSummarySave } from "./work-summary.ts";
 import { companyNameIn, type CompanyChange, type ResearchScope, type ScopeProposal } from "./research-scope.ts";
 import type { AssertionReport } from "./assertions.ts";
 import type { BlockProof } from "../../snapshot/src/block-proof.ts";
@@ -324,6 +325,8 @@ export type ChatCoordinatorOptions = {
   financialRuntime?: ChatFinancialRuntime;
   analystToolRuntime?: ChatAnalystToolRuntime;
   persistAssistantMessage?: ChatAssistantMessagePersistence;
+  // Records how a saved answer's turn worked; absent, no answer keeps a "Worked for" line.
+  saveWorkSummary?: ChatWorkSummarySave;
   preResolveSubject?: ChatSubjectPreResolver;
   renderSubjectClarification?: ChatSubjectClarificationRenderer;
   runActivity?: ChatRunActivityReporter;
@@ -393,7 +396,7 @@ export function createChatCoordinator(
       verificationMode: options.verificationMode ?? "strict",
     }))
     : missingAnalystToolRuntimeRunner);
-  const runner = threadTitleGenerationRunner(runActivityReportingRunner(offeredChoicesRunner(readingRunner(financialAwareRunner(subjectAwareRunner(baseRunner, {
+  const runner = workSummaryRunner(threadTitleGenerationRunner(runActivityReportingRunner(offeredChoicesRunner(readingRunner(financialAwareRunner(subjectAwareRunner(baseRunner, {
     persistAssistantMessage,
     preResolveSubject,
     loadPriorSubjects: options.loadPriorSubjects,
@@ -401,7 +404,7 @@ export function createChatCoordinator(
   }), { financialRuntime: options.financialRuntime, persistAssistantMessage }), options.readQuestion), options.financialRuntime), options.runActivity), {
     generateThreadTitle: options.generateThreadTitle,
     onThreadTitleGenerationError: options.onThreadTitleGenerationError,
-  });
+  }), { save: options.saveWorkSummary, now: options.now ?? Date.now });
   const completedTurnRetentionMs = nonNegativeFiniteNumber(
     options.completedTurnRetentionMs ?? DEFAULT_COMPLETED_TURN_RETENTION_MS,
     "completedTurnRetentionMs",
@@ -845,7 +848,8 @@ class MutableChatTurnHandle implements ChatTurnHandle {
     if (this.#terminal !== null) return this.#terminal.type === "turn.stopped" ? "stopped" : "ended";
     if (this.#stop.stop() === "saving") return "saving";
     this.#emit("turn.stopped");
-    this.#stopped.resolve();
+    // The thread's next turn starts once the stopped work's calculation is released: asked again, it finds the run free.
+    void this.#stop.released.then(() => this.#stopped.resolve());
     return "stopped";
   }
 
@@ -857,7 +861,7 @@ class MutableChatTurnHandle implements ChatTurnHandle {
         // outermost wrapper, see createChatCoordinator) overwrites it on
         // every path before invoking the inner runner.
         const work = Promise.resolve(this.#stop.run(() => this.#runner({ ...this.input, emit: this.#emit, bundleId: DEFAULT_BUNDLE_ID })));
-        // A stopped turn's work ends at its next model call or save; the thread's next turn need not wait for it.
+        // A stopped turn's work ends at its next model call, save or fenced write; the thread's next turn waits only for the stop's releases.
         work.catch((error: unknown) => {
           if (this.#stop.state === "stopped" && !(error instanceof ChatTurnStoppedError)) console.error("[chat] a stopped turn's work failed", error);
         });

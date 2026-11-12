@@ -73,6 +73,7 @@ const INVALID_STREAM_ROUTE = Symbol("INVALID_STREAM_ROUTE");
 export type ChatServerOptions = {
   coordinator?: ChatCoordinator;
   persistAssistantMessage?: ChatAssistantMessagePersistence;
+  saveWorkSummary?: ChatCoordinatorOptions["saveWorkSummary"];
   preResolveSubject?: ChatSubjectPreResolver;
   loadPriorSubjects?: ChatPriorSubjectsLoader;
   readQuestion?: ChatCoordinatorOptions["readQuestion"];
@@ -92,6 +93,7 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
   const runActivityHub = options.runActivityHub ?? createRunActivityHub();
   const coordinator = options.coordinator ?? createChatCoordinator({
     persistAssistantMessage: options.persistAssistantMessage,
+    saveWorkSummary: options.saveWorkSummary,
     preResolveSubject: options.preResolveSubject,
     loadPriorSubjects: options.loadPriorSubjects,
     readQuestion: options.readQuestion,

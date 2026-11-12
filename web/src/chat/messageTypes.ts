@@ -18,6 +18,9 @@ export type ChatMessage = {
   // Each block's evidence, calculation, and public-time claims, derived by the
   // server on read (#193). Absent on messages that were not read back.
   block_proofs?: Readonly<Record<string, BlockProof>>
+  // How an assistant answer's turn worked (workSummary.ts), unparsed; absent
+  // on other messages and on answers saved before it was recorded.
+  work_summary?: unknown
 }
 
 export type SealedChatMessage = ChatMessage & {
