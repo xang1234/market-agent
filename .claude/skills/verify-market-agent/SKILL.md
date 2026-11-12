@@ -29,7 +29,8 @@ $V import                      # Fresh database only: seeds about 10,000 listing
 |---|---|
 | `$V resolve NVDA SPY` | Resolves through the resolver HTTP API, then prints the stored listing, issuer, and CIK. |
 | `$V identity save before`, then `$V identity diff before` | Fingerprints which instrument each listing and which issuer each instrument belongs to, plus duplicates. `diff` exits non-zero if anything moved. CIK fills don't count as moves. |
-| `$V import [--force]` | Runs the reference import. **Exits 3 when the run was skipped**, since the import itself exits 0 with `ingested=0`. |
+| `$V import [--force]` | Runs the reference import, then the CIK fill, and prints both lines. **Exits 3 when the import was skipped**, since the import itself exits 0 with `ingested=0`. |
+| `$V fill-ciks` | Only the CIK fill, for a stack imported before the import ran it. Downloads SEC's company_tickers.json at most once a day (`.dev/company_tickers.json`). |
 | `$V backfill-8k AAPL` | Resolves the ticker, then backfills its 8-Ks. |
 | `$V restatements AAPL GE` | After a backfill: each ticker's later-filing rows by relation, how many equal or sit within 0.1% of the figure they replaced, the largest and smallest percent change, and the five smallest changes. Read those five: rounding stored as a restatement is a bug. |
 | `$V memo [AAPL]` | Drives symbol page → Analyze → Generate memo in a real browser. Exits 1 unless the memo generates on that subject and cites 8-K claims, so backfill first. |
